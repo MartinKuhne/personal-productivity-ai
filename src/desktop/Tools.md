@@ -1,6 +1,6 @@
 # FastMD Agent Tools Reference
 
-The following table summarizes all 25 tools available to the LLM agent, categorized by functionality:
+The following table summarizes all 28 tools available to the LLM agent, categorized by functionality:
 
 | Category | Tool Name | Description | Configuration Required |
 | --- | --- | --- | --- |
@@ -8,15 +8,17 @@ The following table summarizes all 25 tools available to the LLM agent, categori
 | **Core Workspace** | `read_tags` | List all unique tags from markdown front-matter. | None |
 | **Core Workspace** | `list_files_by_tag` | List markdown files containing a specific tag. | None |
 | **Core Workspace** | `list_files` | List all markdown files in the workspace. | None |
-| **Core Workspace** | `read_file` | Read the entire text contents of a file. | None |
+| **Core Workspace** | `read_file` | Read the entire text contents of a file at the specified path. | None |
 | **Core Workspace** | `read_file_lines` | Read specific lines from a file (1-indexed). | None |
 | **Core Workspace** | `create_file` | Create a new file with specified content. | None |
 | **Core Workspace** | `insert_lines` | Insert lines at a specific 1-indexed position. | None |
 | **Core Workspace** | `delete_lines` | Delete specific lines from a file. | None |
+| **Core Workspace** | `replace_text` | Replace exact occurrences of old_string with new_string in a file. | None |
 | **Core Workspace** | `read_yaml_header` | Parse a YAML header from a markdown file and return its content representation. | None |
 | **Core Workspace** | `write_yaml_header` | Write or update data in a YAML header to a markdown file. | None |
 | **Web Integration** | `web_fetch` | Fetch a URL and convert its HTML body to markdown. | None |
 | **Web Integration** | `web_search` | Search the web using SearXNG. | `searxng_url` |
+| **Web Integration** | `web_delegate` | Delegate complex web research to a sub-agent with web_search/web_fetch tools. | None |
 | **JMAP Productivity**| `search_calendar` | Search calendar events by keyword. | `jmap_url`, `jmap_token` |
 | **JMAP Productivity**| `get_calendar` | Retrieve calendar events by ISO date range. | `jmap_url`, `jmap_token` |
 | **JMAP Productivity**| `get_calendar_item`| Retrieve a specific calendar event by ID. | `jmap_url`, `jmap_token` |
@@ -25,6 +27,7 @@ The following table summarizes all 25 tools available to the LLM agent, categori
 | **JMAP Productivity**| `delete_calendar_item`| Delete a calendar event by ID. | `jmap_url`, `jmap_token` |
 | **JMAP Productivity**| `search_email` | Search emails by keyword. | `jmap_url`, `jmap_token` |
 | **JMAP Productivity**| `get_email` | Retrieve email details including body and metadata. | `jmap_url`, `jmap_token` |
+| **JMAP Productivity**| `get_email_by_id` | Get email by ID (full content). | `jmap_url`, `jmap_token` |
 | **JMAP Productivity**| `send_email` | Send an email to a recipient. | `jmap_url`, `jmap_token` |
 | **JMAP Productivity**| `search_contact` | Search contacts by keyword. | `jmap_url`, `jmap_token` |
 | **JMAP Productivity**| `get_contact` | Retrieve a specific contact's details by ID. | `jmap_url`, `jmap_token` |
@@ -90,6 +93,13 @@ Here is the exact schema and argument breakdown for each tool as declared in the
   * `start_line` (integer, **required**): The start line (1-indexed).
   * `end_line` (integer, **required**): The end line (1-indexed).
 
+##### `replace_text`
+* **Description:** Replace exact occurrences of old_string with new_string in a file.
+* **Arguments:**
+  * `path` (string, **required**): The path to the file.
+  * `old_string` (string, **required**): The exact string to replace.
+  * `new_string` (string, **required**): The replacement string.
+
 ##### `read_yaml_header`
 * **Description:** Parse a YAML header from a markdown file and return its content representation.
 * **Arguments:**
@@ -118,9 +128,14 @@ Here is the exact schema and argument breakdown for each tool as declared in the
 * **Arguments:**
   * `query` (string, **required**): The search query.
 
+##### `web_delegate`
+* **Description:** Delegate complex web research to a sub-agent with web_search and web_fetch tools. Returns a summarized answer.
+* **Arguments:**
+  * `instruction` (string, **required**): The research task instructions for the sub-agent.
+
 ---
 
-#### 3. JMAP Productivity Tools (Requires `jmap_url` and `jmap_token`)
+#### 3. JMAP Productivity Tools
 
 ##### `search_calendar`
 * **Description:** Search the JMAP calendar by keyword.
