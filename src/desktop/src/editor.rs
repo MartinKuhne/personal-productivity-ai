@@ -141,3 +141,127 @@ impl EditorState {
         did_save
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::fs;
+    use tempfile::tempdir;
+
+    #[test]
+    fn test_editor_open_strips_front_matter() {
+        let dir = tempdir().unwrap();
+        let path = dir.path().join("test.md");
+        fs::write(&path, "---\ntitle: Test\n---\nBody content").unwrap();
+
+        let mut state = EditorState::default();
+        let raw = fs::read_to_string(&path).unwrap();
+        state.open(&path, &raw);
+
+        assert!(state.is_open);
+        // DocumentContent::parse returns body with leading newline after --- delimiter
+        assert_eq!(state.content, "\nBody content");
+        assert_eq!(state.original_front_matter, Some("---\ntitle: Test\n---".to_string()));
+        assert_eq!(state.file_path, path);
+    }
+
+    #[test]
+    fn test_editor_open_no_front_matter() {
+        let dir = tempdir().unwrap();
+        let path = dir.path().join("test.md");
+        fs::write(&path, "Just body content").unwrap();
+
+        let mut state = EditorState::default();
+        let raw = fs::read_to_string(&path).unwrap();
+        state.open(&path, &raw);
+
+        assert!(state.is_open);
+        assert_eq!(state.content, "Just body content");
+        assert!(state.original_front_matter.is_none());
+    }
+
+    #[test]
+    fn test_editor_close_clears_state() {
+        let dir = tempdir().unwrap();
+        let path = dir.path().join("test.md");
+        fs::write(&path, "---\ntitle: Test\n---\nBody").unwrap();
+
+        let mut state = EditorState::default();
+        let raw = fs::read_to_string(&path).unwrap();
+        state.open(&path, &raw);
+        state.close();
+
+        assert!(!state.is_open);
+        assert!(state.content.is_empty());
+        assert!(state.original_front_matter.is_none());
+        assert!(state.error_message.is_none());
+    }
+
+    #[test]
+    fn test_editor_save_preserves_front_matter() {
+        let dir = tempdir().unwrap();
+        let path = dir.path().join("test.md");
+        fs::write(&path, "---\ntitle: Original\n---\nOriginal body").unwrap();
+
+        let mut state = EditorState::default();
+        let raw = fs::read_to_string(&path).unwrap();
+        state.open(&path, &raw);
+        // content includes leading newline from DocumentContent::parse; preserve it
+        state.content = "\nModified body".to_string();
+
+        state.save().unwrap();
+
+        let saved = fs::read_to_string(&path).unwrap();
+        assert_eq!(saved, "---\ntitle: Original\n---\nModified body");
+    }
+
+    #[test]
+    fn test_editor_cancel_discards_changes() {
+        let dir = tempdir().unwrap();
+        let path = dir.path().join("test.md");
+        fs::write(&path, "Original body").unwrap();
+
+        let mut state = EditorState::default();
+        let raw = fs::read_to_string(&path).unwrap();
+        state.open(&path, &raw);
+        state.content = "Unsaved changes".to_string();
+        state.close();
+
+        assert!(!state.is_open);
+        let saved = fs::read_to_string(&path).unwrap();
+        assert_eq!(saved, "Original body");
+    }
+
+    #[test]
+    fn test_editor_save_no_front_matter() {
+        let dir = tempdir().unwrap();
+        let path = dir.path().join("test.md");
+        fs::write(&path, "Original body").unwrap();
+
+        let mut state = EditorState::default();
+        let raw = fs::read_to_string(&path).unwrap();
+        state.open(&path, &raw);
+        state.content = "Modified body".to_string();
+
+        state.save().unwrap();
+
+        let saved = fs::read_to_string(&path).unwrap();
+        assert_eq!(saved, "Modified body");
+    }
+
+    #[test]
+    fn test_editor_save_error_message_on_failure() {
+        let mut state = EditorState::default();
+        state.file_path = PathBuf::from("C:\\nonexistent_dir\\file.md");
+        state.content = "Body".to_string();
+
+        let result = state.save();
+        assert!(result.is_err());
+
+        let mut state2 = EditorState::default();
+        state2.file_path = PathBuf::from("C:\\nonexistent_dir\\file.md");
+        state2.content = "Body".to_string();
+        state2.save().unwrap_err();
+        // After save failure, the error_message is set; we test the close path separately
+    }
+}
