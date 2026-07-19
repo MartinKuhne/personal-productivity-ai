@@ -9,14 +9,18 @@ pub fn show_bottom_panel(app: &mut FastMdApp, ctx: &egui::Context) {
         .show(ctx, |ui| {
             ui.horizontal(|ui| {
                 let prompt_prefix = if let Some(dir) = &app.selected_dir {
-                    let rel = dir
-                        .strip_prefix(&app.root_path)
-                        .unwrap_or(dir)
-                        .to_string_lossy();
-                    if rel.is_empty() {
+                    let mut rel_str = dir.to_string_lossy().to_string();
+                    for lib in &app.content_libraries {
+                        if let Ok(rel) = dir.strip_prefix(std::path::Path::new(&lib.root_folder)) {
+                            let lib_path = std::path::Path::new(&lib.name).join(rel);
+                            rel_str = lib_path.to_string_lossy().to_string();
+                            break;
+                        }
+                    }
+                    if rel_str.is_empty() {
                         ">".to_string()
                     } else {
-                        format!("{} >", rel)
+                        format!("{} >", rel_str)
                     }
                 } else {
                     ">".to_string()
@@ -117,7 +121,6 @@ pub fn show_bottom_panel(app: &mut FastMdApp, ctx: &egui::Context) {
                             std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
                         app.agent_cancel_flag = Some(cancel_flag.clone());
                         let tx_gui_agent = app.tx.clone();
-                        let root_path_agent = app.root_path.clone();
                         let active_file_agent = app.selected_file.clone();
                         let active_dir_agent = app.selected_dir.clone();
                         let history = app.agent_history.clone();
@@ -125,7 +128,6 @@ pub fn show_bottom_panel(app: &mut FastMdApp, ctx: &egui::Context) {
 
                         crate::agent::run_agent(
                             tx_gui_agent,
-                            root_path_agent,
                             active_file_agent,
                             active_dir_agent,
                             prompt,

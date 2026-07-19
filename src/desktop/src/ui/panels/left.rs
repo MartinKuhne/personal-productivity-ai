@@ -20,12 +20,35 @@ pub fn show_left_panel(app: &mut FastMdApp, ctx: &egui::Context) {
         })
         .collect();
 
-    let mut root_node = TreeNode::new("Root".to_string(), app.root_path.clone(), true);
+    let mut root_node = TreeNode::new("Workspace".to_string(), std::path::PathBuf::new(), true);
+
+    for lib in &app.content_libraries {
+        let lib_node_name = lib.name.clone();
+        let lib_root_path = std::path::PathBuf::from(&lib.root_folder);
+        root_node
+            .children
+            .entry(lib_node_name.clone())
+            .or_insert_with(|| TreeNode::new(lib_node_name.clone(), lib_root_path, true));
+    }
 
     for path in filtered_files {
-        if let Ok(rel_path) = path.strip_prefix(&app.root_path) {
-            let mut current_node = &mut root_node;
-            let mut current_path = app.root_path.clone();
+        let mut target_lib = None;
+        let mut rel_path_res = None;
+        
+        for lib in &app.content_libraries {
+            let lib_root = std::path::Path::new(&lib.root_folder);
+            if let Ok(rel_path) = path.strip_prefix(lib_root) {
+                target_lib = Some(lib);
+                rel_path_res = Some(rel_path);
+                break;
+            }
+        }
+        
+        if let (Some(lib), Some(rel_path)) = (target_lib, rel_path_res) {
+            let lib_node_name = lib.name.clone();
+            let mut current_node = root_node.children.get_mut(&lib_node_name).unwrap();
+            let mut current_path = std::path::PathBuf::from(&lib.root_folder);
+            
             let components: Vec<_> = rel_path.components().collect();
             for (i, comp) in components.iter().enumerate() {
                 let name = comp.as_os_str().to_string_lossy().into_owned();

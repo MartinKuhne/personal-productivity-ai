@@ -42,7 +42,6 @@ pub fn get_base_system_prompt(config: &crate::config::AppConfig) -> String {
 
 pub fn run_agent(
     tx_gui_agent: Sender<BackgroundMessage>,
-    root_path_agent: PathBuf,
     active_file: Option<PathBuf>,
     active_dir: Option<PathBuf>,
     prompt: String,
@@ -78,27 +77,40 @@ pub fn run_agent(
         }
 
         let mut system_prompt = get_base_system_prompt(&config);
+        
+        let to_virtual = |path: &PathBuf| -> String {
+            for lib in &config.content_libraries {
+                if let Ok(rel) = path.strip_prefix(std::path::Path::new(&lib.root_folder)) {
+                    return std::path::Path::new(&lib.name).join(rel).to_string_lossy().to_string();
+                }
+            }
+            path.to_string_lossy().to_string()
+        };
+
         if let Some(active) = active_file {
-            let rel = active.strip_prefix(&root_path_agent).unwrap_or(&active);
+            let rel = to_virtual(&active);
             system_prompt.push_str(&format!(
                 " The user is currently viewing the file: {}",
-                rel.display()
+                rel
             ));
         } else if let Some(dir) = active_dir {
-            let rel = dir.strip_prefix(&root_path_agent).unwrap_or(&dir);
+            let rel = to_virtual(&dir);
             system_prompt.push_str(&format!(
                 " The user has selected the directory context: {}",
-                rel.display()
+                rel
             ));
         }
 
-        let user_md_path = root_path_agent.join("USER.md");
-        if user_md_path.exists() {
-            if let Ok(content) = std::fs::read_to_string(&user_md_path) {
-                system_prompt.push_str(&format!(
-                    "\n\nUser Context:\n{}",
-                    content
-                ));
+        for lib in &config.content_libraries {
+            let user_md_path = std::path::Path::new(&lib.root_folder).join("USER.md");
+            if user_md_path.exists() {
+                if let Ok(content) = std::fs::read_to_string(&user_md_path) {
+                    system_prompt.push_str(&format!(
+                        "\n\nUser Context (from {}):\n{}",
+                        lib.name,
+                        content
+                    ));
+                }
             }
         }
 
@@ -248,7 +260,7 @@ pub fn run_agent(
 
                 let rt = tokio::runtime::Builder::new_multi_thread().enable_all().build().unwrap();
                 let config_arc = std::sync::Arc::new(config.clone());
-                let root_path_arc = std::sync::Arc::new(root_path_agent.clone());
+                let root_path_arc = std::sync::Arc::new(PathBuf::new());
 
                 let mut completed_results = Vec::new();
 
@@ -279,7 +291,7 @@ pub fn run_agent(
                     let func_name = tool_call.get("function").and_then(|f| f.get("name")).and_then(|n| n.as_str()).unwrap_or("").to_string();
                     let func_args_str = tool_call.get("function").and_then(|f| f.get("arguments")).and_then(|a| a.as_str()).unwrap_or("{}").to_string();
                     
-                    let result = execute_tool(&config, &root_path_agent, &func_name, &func_args_str);
+                    let result = execute_tool(&config, &PathBuf::new(), &func_name, &func_args_str);
                     completed_results.push((tool_call.clone(), call_id, func_name, func_args_str, result));
                 }
 

@@ -35,7 +35,7 @@ pub struct ToCEntry {
 }
 
 pub struct FastMdApp {
-    pub root_path: PathBuf,
+    pub content_libraries: Vec<crate::config::ContentLibrary>,
     pub rx: Receiver<BackgroundMessage>,
     pub tx: std::sync::mpsc::Sender<BackgroundMessage>,
     pub all_files: Vec<PathBuf>,
@@ -95,7 +95,7 @@ impl FastMdApp {
         }
     }
 
-    pub fn new(cc: &eframe::CreationContext<'_>) -> Self {
+    pub fn new(cc: &eframe::CreationContext<'_>, mut config: crate::config::AppConfig) -> Self {
         let mut visuals = egui::Visuals::dark();
         visuals.window_rounding = 8.0.into();
         visuals.widgets.noninteractive.rounding = 4.0.into();
@@ -103,7 +103,6 @@ impl FastMdApp {
         visuals.widgets.hovered.rounding = 4.0.into();
         visuals.widgets.active.rounding = 4.0.into();
         
-        // Increase standard text brightness (default is ~140 for dark mode)
         let bright_text = egui::Color32::from_gray(210);
         visuals.widgets.noninteractive.fg_stroke.color = bright_text;
         visuals.widgets.inactive.fg_stroke.color = bright_text;
@@ -112,30 +111,52 @@ impl FastMdApp {
         cc.egui_ctx.set_visuals(visuals);
 
         let args: Vec<String> = std::env::args().collect();
-        let mut root_path = if args.len() > 1 {
+        if args.len() > 1 {
             let path = PathBuf::from(&args[1]);
             if path.exists() && path.is_dir() {
-                path
-            } else {
-                std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."))
+                let mut path_str = path.canonicalize().unwrap_or(path).to_string_lossy().to_string();
+                if path_str.starts_with(r"\\?\") {
+                    path_str = path_str[4..].to_string();
+                }
+                let mut found = false;
+                for lib in &config.content_libraries {
+                    if lib.root_folder == path_str {
+                        found = true;
+                        break;
+                    }
+                }
+                if !found {
+                    config.content_libraries.push(crate::config::ContentLibrary {
+                        root_folder: path_str,
+                        name: "Workspace".to_string(),
+                        kind: "text".to_string(),
+                        readonly: false,
+                    });
+                }
             }
-        } else {
-            std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."))
-        };
-
-        if let Ok(canon) = std::fs::canonicalize(&root_path) {
-            root_path = canon;
         }
-        let mut path_str = root_path.to_string_lossy().to_string();
-        if path_str.starts_with(r"\\?\") {
-            path_str = path_str[4..].to_string();
-        }
-        let root_path = PathBuf::from(path_str);
 
-        let background_task = BackgroundTask::new(root_path.clone());
+        if config.content_libraries.is_empty() {
+            let mut current_dir = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
+            if let Ok(canon) = std::fs::canonicalize(&current_dir) {
+                current_dir = canon;
+            }
+            let mut path_str = current_dir.to_string_lossy().to_string();
+            if path_str.starts_with(r"\\?\") {
+                path_str = path_str[4..].to_string();
+            }
+            config.content_libraries.push(crate::config::ContentLibrary {
+                root_folder: path_str,
+                name: "Workspace".to_string(),
+                kind: "text".to_string(),
+                readonly: false,
+            });
+        }
+
+        let background_task = BackgroundTask::new(config.content_libraries.clone());
 
         Self {
-            root_path,
+            content_libraries: config.content_libraries,
             rx: background_task.rx,
             tx: background_task.tx,
             all_files: Vec::new(),

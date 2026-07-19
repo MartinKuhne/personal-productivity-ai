@@ -50,6 +50,15 @@ The `config.yaml` file supports the following options:
 
 Example `config.yaml` with models and clients configured:
 ```yaml
+content_libraries:
+  - name: "Workspace"
+    root_folder: "C:\\path\\to\\your\\workspace"
+    kind: "text"
+    readonly: false
+  - name: "Reference"
+    root_folder: "C:\\path\\to\\reference\\docs"
+    kind: "text"
+    readonly: true
 models:
   gpt4:
     model: "openai/gpt-4"

@@ -13,7 +13,9 @@ pub fn show_move_modal(app: &mut FastMdApp, ctx: &egui::Context) {
                 ui.label("Select destination folder:");
 
                 let mut folders = BTreeSet::new();
-                folders.insert(app.root_path.clone());
+                for lib in &app.content_libraries {
+                    folders.insert(std::path::PathBuf::from(&lib.root_folder));
+                }
                 for dir in &app.all_dirs {
                     folders.insert(dir.clone());
                 }
@@ -28,16 +30,14 @@ pub fn show_move_modal(app: &mut FastMdApp, ctx: &egui::Context) {
                     .max_height(200.0)
                     .show(ui, |ui| {
                         for folder in folders {
-                            let label = folder
-                                .strip_prefix(&app.root_path)
-                                .unwrap_or(&folder)
-                                .to_string_lossy()
-                                .into_owned();
-                            let display = if label.is_empty() {
-                                "Root".to_string()
-                            } else {
-                                label
-                            };
+                            let mut label = folder.to_string_lossy().into_owned();
+                            for lib in &app.content_libraries {
+                                if let Ok(rel) = folder.strip_prefix(std::path::Path::new(&lib.root_folder)) {
+                                    label = std::path::Path::new(&lib.name).join(rel).to_string_lossy().into_owned();
+                                    break;
+                                }
+                            }
+                            let display = label;
                             if ui
                                 .selectable_label(
                                     app.selected_move_folder.as_ref() == Some(&folder),

@@ -36,6 +36,19 @@ impl LlmConfig {
 }
 
 #[derive(serde::Serialize, serde::Deserialize, Clone, Debug)]
+pub struct ContentLibrary {
+    pub root_folder: String,
+    pub name: String,
+    pub kind: String,
+    #[serde(default = "default_readonly")]
+    pub readonly: bool,
+}
+
+fn default_readonly() -> bool {
+    true
+}
+
+#[derive(serde::Serialize, serde::Deserialize, Clone, Debug)]
 #[serde(default)]
 pub struct AppConfig {
     pub api_url: String,
@@ -59,6 +72,8 @@ pub struct AppConfig {
     pub jmap_clients: HashMap<String, JmapClient>,
     #[serde(default)]
     pub caldav_clients: HashMap<String, CalDavClient>,
+    #[serde(default)]
+    pub content_libraries: Vec<ContentLibrary>,
 }
 
 impl Default for AppConfig {
@@ -76,6 +91,7 @@ impl Default for AppConfig {
             searxng_url: Some("http://localhost:8090".to_string()),
             jmap_clients: HashMap::new(),
             caldav_clients: HashMap::new(),
+            content_libraries: Vec::new(),
         }
     }
 }
