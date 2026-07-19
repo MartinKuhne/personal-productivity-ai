@@ -1,9 +1,7 @@
 use fastmd::background::pdf_converter::PdfConversionJob;
-use std::path::PathBuf;
 use std::fs::File;
 use tempfile::tempdir;
 use std::sync::mpsc;
-use fastmd::messages::BackgroundMessage;
 
 #[test]
 fn test_pdf_conversion_should_convert() {
@@ -34,7 +32,7 @@ async fn test_pdf_conversion_execute_no_command() {
     File::create(&pdf_path).unwrap();
     let job = PdfConversionJob::new(pdf_path);
     
-    let (tx, rx) = mpsc::channel();
+    let (tx, _rx) = mpsc::channel();
     let result = job.execute(None, tx).await;
     assert!(result.is_err());
     assert!(result.unwrap_err().contains("No pdf_converter_command configured"));

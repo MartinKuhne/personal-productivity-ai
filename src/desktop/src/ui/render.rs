@@ -76,11 +76,19 @@ fn flush_inline(ui: &mut egui::Ui, elems: &mut Vec<InlineElem>, needs_bullet: &m
 
 fn render_code_block(ui: &mut egui::Ui, content: &str, _idx: &mut usize) {
     egui::Frame::none()
-        .fill(egui::Color32::from_gray(30))
+        .fill(egui::Color32::from_rgb(20, 20, 22))
+        .stroke(egui::Stroke::new(1.0_f32, egui::Color32::from_gray(40)))
         .inner_margin(8.0)
         .rounding(4.0)
         .show(ui, |ui| {
-            ui.add(egui::Label::new(RichText::new(content).monospace()).wrap(true));
+            ui.horizontal_top(|ui| {
+                ui.add(egui::Label::new(RichText::new(content).monospace()).wrap(true));
+                ui.with_layout(egui::Layout::right_to_left(egui::Align::TOP), |ui| {
+                    if ui.button("📋").on_hover_text("Copy code").clicked() {
+                        ui.output_mut(|o| o.copied_text = content.to_string());
+                    }
+                });
+            });
         });
 }
 
@@ -94,12 +102,13 @@ fn render_heading(ui: &mut egui::Ui, title: &str, level: u32, scroll_to_id: &mut
                 *scroll_to_id = None;
             }
             let size = match level {
-                1 => 24.0,
-                2 => 20.0,
-                3 => 16.0,
+                1 => 32.0,
+                2 => 24.0,
+                3 => 18.0,
                 _ => 14.0,
             };
             ui.heading(RichText::new(trimmed).size(size).strong());
+            ui.add_space(4.0);
         }
     }
 }
@@ -107,7 +116,8 @@ fn render_heading(ui: &mut egui::Ui, title: &str, level: u32, scroll_to_id: &mut
 pub fn render_yaml_table(ui: &mut egui::Ui, yaml: &serde_yaml::Value) {
     if let Some(mapping) = yaml.as_mapping() {
         egui::Frame::none()
-            .fill(egui::Color32::from_rgb(15, 25, 65)) // Dark blue background
+            .fill(egui::Color32::from_rgb(24, 24, 27)) // Dark surface background
+            .stroke(egui::Stroke::new(1.0_f32, egui::Color32::from_gray(40)))
             .inner_margin(8.0)
             .rounding(4.0)
             .show(ui, |ui| {

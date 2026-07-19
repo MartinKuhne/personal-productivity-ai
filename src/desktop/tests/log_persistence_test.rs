@@ -1,5 +1,5 @@
 use fastmd::background::models::{BackgroundLogEntry, LogCategory};
-use fastmd::background::manager::{BackgroundProcessManager, MAX_LOG_ENTRIES};
+use fastmd::background::manager::BackgroundProcessManager;
 use tempfile::tempdir;
 
 #[test]

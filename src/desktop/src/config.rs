@@ -290,7 +290,9 @@ mod tests {
         let config_path = dir.path().join("fastmd").join("config.yaml");
         
         // Temporarily override the config path
-        std::env::set_var("APPDATA", dir.path());
+        unsafe {
+            std::env::set_var("APPDATA", dir.path());
+        }
         
         let config = load_config();
         assert_eq!(config.api_url, "https://openrouter.ai/api/v1");
