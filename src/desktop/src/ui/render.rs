@@ -74,11 +74,14 @@ fn flush_inline(ui: &mut egui::Ui, elems: &mut Vec<InlineElem>, needs_bullet: &m
     }
 }
 
-fn render_code_block(ui: &mut egui::Ui, content: &str, idx: &mut usize) {
-    egui::ScrollArea::horizontal().id_source(*idx).show(ui, |ui| {
-        ui.add(egui::Label::new(RichText::new(content).monospace()).wrap(false));
-    });
-    *idx += 1;
+fn render_code_block(ui: &mut egui::Ui, content: &str, _idx: &mut usize) {
+    egui::Frame::none()
+        .fill(egui::Color32::from_gray(30))
+        .inner_margin(8.0)
+        .rounding(4.0)
+        .show(ui, |ui| {
+            ui.add(egui::Label::new(RichText::new(content).monospace()).wrap(true));
+        });
 }
 
 fn render_heading(ui: &mut egui::Ui, title: &str, level: u32, scroll_to_id: &mut Option<egui::Id>) {
@@ -169,7 +172,9 @@ pub fn render_markdown(ui: &mut egui::Ui, markdown_text: &str, scroll_to_id: &mu
     for event in parser {
         match event {
             Event::Start(Tag::CodeBlock(_info)) => {
-                flush_inline(ui, &mut buffered_inline, &mut needs_bullet, &mut task_checked, list_depth, true);
+                if !buffered_inline.is_empty() {
+                    flush_inline(ui, &mut buffered_inline, &mut needs_bullet, &mut task_checked, list_depth, true);
+                }
                 in_code_block = true;
                 code_block_content.clear();
             }
@@ -178,7 +183,9 @@ pub fn render_markdown(ui: &mut egui::Ui, markdown_text: &str, scroll_to_id: &mu
                 render_code_block(ui, &code_block_content, &mut code_block_idx);
             }
             Event::Start(Tag::Heading { level, .. }) => {
-                flush_inline(ui, &mut buffered_inline, &mut needs_bullet, &mut task_checked, list_depth, true);
+                if !buffered_inline.is_empty() {
+                    flush_inline(ui, &mut buffered_inline, &mut needs_bullet, &mut task_checked, list_depth, true);
+                }
                 in_heading = true;
                 heading_level = match level {
                     HeadingLevel::H1 => 1,
@@ -195,7 +202,9 @@ pub fn render_markdown(ui: &mut egui::Ui, markdown_text: &str, scroll_to_id: &mu
             }
             Event::Start(Tag::Paragraph) => {
                 if !in_table_cell {
-                    flush_inline(ui, &mut buffered_inline, &mut needs_bullet, &mut task_checked, list_depth, true);
+                    if !buffered_inline.is_empty() {
+                        flush_inline(ui, &mut buffered_inline, &mut needs_bullet, &mut task_checked, list_depth, true);
+                    }
                 }
             }
             Event::End(TagEnd::Paragraph) => {
@@ -205,7 +214,9 @@ pub fn render_markdown(ui: &mut egui::Ui, markdown_text: &str, scroll_to_id: &mu
                 }
             }
             Event::Start(Tag::List(_)) => {
-                flush_inline(ui, &mut buffered_inline, &mut needs_bullet, &mut task_checked, list_depth, true);
+                if !buffered_inline.is_empty() {
+                    flush_inline(ui, &mut buffered_inline, &mut needs_bullet, &mut task_checked, list_depth, true);
+                }
                 list_depth += 1;
             }
             Event::End(TagEnd::List(_)) => {
@@ -215,20 +226,26 @@ pub fn render_markdown(ui: &mut egui::Ui, markdown_text: &str, scroll_to_id: &mu
                 }
             }
             Event::Start(Tag::Item) => {
-                flush_inline(ui, &mut buffered_inline, &mut needs_bullet, &mut task_checked, list_depth, true);
+                if !buffered_inline.is_empty() {
+                    flush_inline(ui, &mut buffered_inline, &mut needs_bullet, &mut task_checked, list_depth, true);
+                }
                 needs_bullet = true;
             }
             Event::End(TagEnd::Item) => {
                 flush_inline(ui, &mut buffered_inline, &mut needs_bullet, &mut task_checked, list_depth, true);
             }
             Event::Start(Tag::BlockQuote) => {
-                flush_inline(ui, &mut buffered_inline, &mut needs_bullet, &mut task_checked, list_depth, true);
+                if !buffered_inline.is_empty() {
+                    flush_inline(ui, &mut buffered_inline, &mut needs_bullet, &mut task_checked, list_depth, true);
+                }
             }
             Event::End(TagEnd::BlockQuote) => {
                 flush_inline(ui, &mut buffered_inline, &mut needs_bullet, &mut task_checked, list_depth, true);
             }
             Event::Start(Tag::Table(_)) => {
-                flush_inline(ui, &mut buffered_inline, &mut needs_bullet, &mut task_checked, list_depth, true);
+                if !buffered_inline.is_empty() {
+                    flush_inline(ui, &mut buffered_inline, &mut needs_bullet, &mut task_checked, list_depth, true);
+                }
                 table_cells.clear();
             }
             Event::End(TagEnd::Table) => {
@@ -343,7 +360,9 @@ pub fn render_markdown(ui: &mut egui::Ui, markdown_text: &str, scroll_to_id: &mu
                 buffered_inline.push(InlineElem::Text(text, s));
             }
             Event::Start(Tag::FootnoteDefinition(name)) => {
-                flush_inline(ui, &mut buffered_inline, &mut needs_bullet, &mut task_checked, list_depth, true);
+                if !buffered_inline.is_empty() {
+                    flush_inline(ui, &mut buffered_inline, &mut needs_bullet, &mut task_checked, list_depth, true);
+                }
                 ui.separator();
                 let text = format!("[^{}]: ", name);
                 let mut s = current_style.clone();
@@ -354,7 +373,9 @@ pub fn render_markdown(ui: &mut egui::Ui, markdown_text: &str, scroll_to_id: &mu
                 flush_inline(ui, &mut buffered_inline, &mut needs_bullet, &mut task_checked, list_depth, true);
             }
             Event::Start(Tag::HtmlBlock) => {
-                flush_inline(ui, &mut buffered_inline, &mut needs_bullet, &mut task_checked, list_depth, true);
+                if !buffered_inline.is_empty() {
+                    flush_inline(ui, &mut buffered_inline, &mut needs_bullet, &mut task_checked, list_depth, true);
+                }
             }
             Event::End(TagEnd::HtmlBlock) => {
                 flush_inline(ui, &mut buffered_inline, &mut needs_bullet, &mut task_checked, list_depth, true);

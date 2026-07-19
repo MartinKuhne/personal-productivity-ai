@@ -48,6 +48,7 @@ pub struct FastMdApp {
     pub left_panel_width: Option<f32>,
 
     pub selected_file: Option<PathBuf>,
+    pub selected_files: HashSet<PathBuf>,
     pub selected_dir: Option<PathBuf>,
     pub expanded_dirs: HashSet<PathBuf>,
 
@@ -83,6 +84,7 @@ pub struct FastMdApp {
     pub agent_cancel_flag: Option<std::sync::Arc<std::sync::atomic::AtomicBool>>,
     pub agent_history: Option<Vec<serde_json::Value>>,
     pub left_panel_reset_count: u32,
+    pub submit_prompt: Option<String>,
 }
 
 impl FastMdApp {
@@ -131,6 +133,7 @@ impl FastMdApp {
                         name: "Workspace".to_string(),
                         kind: "text".to_string(),
                         readonly: false,
+                        priority: 0,
                     });
                 }
             }
@@ -150,6 +153,7 @@ impl FastMdApp {
                 name: "Workspace".to_string(),
                 kind: "text".to_string(),
                 readonly: false,
+                priority: 0,
             });
         }
 
@@ -168,6 +172,7 @@ impl FastMdApp {
             indexing_finished_handled: false,
             left_panel_width: None,
             selected_file: None,
+            selected_files: HashSet::new(),
             selected_dir: None,
             expanded_dirs: HashSet::new(),
             loaded_path: None,
@@ -196,6 +201,7 @@ impl FastMdApp {
             agent_cancel_flag: None,
             agent_history: None,
             left_panel_reset_count: 0,
+            submit_prompt: None,
         }
     }
 }
@@ -248,6 +254,7 @@ impl eframe::App for FastMdApp {
                         self.current_markdown = String::new();
                         self.toc.clear();
                     }
+                    self.selected_files.remove(&path);
                     if self.loaded_path.as_ref() == Some(&path) {
                         self.loaded_path = None;
                     }
@@ -314,5 +321,36 @@ impl eframe::App for FastMdApp {
 
         // Center panel (Markdown content or Agent)
         show_center_panel(self, ctx);
+
+        // Handle programmatic prompt submission
+        if let Some(prompt) = self.submit_prompt.take() {
+            self.command_input = prompt;
+            // The prompt will be submitted next frame, or we can trigger it immediately.
+            // But we actually need to replicate the agent trigger logic here.
+            self.agent_status = "Initializing agent...".to_string();
+            self.agent_thinking.clear();
+            if self.agent_history.is_none() || !self.show_agent_results {
+                self.agent_response.clear();
+                self.agent_history = None;
+            } else {
+                self.agent_response.push_str(&format!("> **User:** {}\n\n", self.command_input));
+            }
+            self.show_agent_results = true;
+            self.agent_running = true;
+
+            let cancel_flag = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+            self.agent_cancel_flag = Some(cancel_flag.clone());
+            
+            crate::agent::run_agent(
+                self.tx.clone(),
+                self.selected_file.clone(),
+                self.selected_dir.clone(),
+                self.command_input.clone(),
+                cancel_flag,
+                self.agent_history.clone(),
+                self.agent_response.clone(),
+            );
+            self.command_input.clear();
+        }
     }
 }

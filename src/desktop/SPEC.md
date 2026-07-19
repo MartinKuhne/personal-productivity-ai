@@ -54,25 +54,24 @@ The requirements below have been formatted using the **Easy Approach to Requirem
 * [REQ-149] When the user clicks on a file, it opens as a new tab in the file viewer area
 * [REQ-150] When the user double-clicks on a file, it opens in the system default editor
 * [REQ-151] When the user right-clicks on file or folder, the context menu appears
-* [REQ-152] When the user selects 'Edit' from the context menu, and the object under the mouse cursor is a file, it opens in the system default editor
-* [REQ-153] When the user selects 'Delete' from the context menu, the file or folder gets moved to the recycle bin
-* [REQ-154] When the user selects 'Show in File Explorer' from the context menu, the system opens the system file exporer with the directory that contains the file
-* [REQ-155] When the user selects 'Move' from the context menu, the system shows a modal dialog containing all the known folders as well as 'Ok' and 'Cancel' buttons. When the user selects a folder and then 'Ok' the system moves the file to that folder, then closes the dialog. When the user selects 'Cancel' the dialog closes and the file is not moved or changed.
-* [REQ-156] When the user selects 'Create Directory ...' from the context menu, the system opens a modal dialog for the user to enter a directory name, as well as 'Ok' and 'Cancel' buttons. When the user enters a valid folder name and then clicks 'Ok' the system creates the directory, then closes the dialog. When the user selects 'Cancel' the dialog closes and no side effects occur
-* [REQ-157] When the user selects 'Rename' from the context menu, the system shows a modal dialog containing the current file name as well as 'Ok' and 'Cancel' buttons. When the user makes changes to the file name and then clicks 'Ok' or presses the enter key, the system renames the file or folder, then closes the dialog. When the user selects 'Cancel' the dialog closes and the file is not moved or changed.
-* [REQ-158] When the user selects 'Copy path' from the context menu, the system copies the fully qualified file or directory name to the clipboard
-* [REQ-159] When the user selects 'Print' from the context menu, and the item under the mouse cursor is a file, the system prints the page using the windows system print dialog
-* [REQ-160] When the user selects 'New document' from the context menu, and the item under the mouse cursor is a directory, the system creates a document containing the yaml markdown header and the name 'New document.md'. If a file with that name exist, add the current date and time do the document name until a unique file name is generated.
+* [REQ-152] When the user selects [Edit] from the context menu, and the object under the mouse cursor is a file, it opens in the system default editor
+* [REQ-153] When the user selects [Delete] from the context menu, the file or folder gets moved to the recycle bin
+* [REQ-154] When the user selects [Show in File Explorer] from the context menu, the system opens the system file exporer with the directory that contains the file
+* [REQ-155] When the user selects [Move] from the context menu, the system shows a modal dialog containing all the known folders as well as 'Ok' and 'Cancel' buttons. When the user selects a folder and then 'Ok' the system moves the file to that folder, then closes the dialog. When the user selects 'Cancel' the dialog closes and the file is not moved or changed.
+* [REQ-156] When the user selects [Create Directory ...] from the context menu, the system opens a modal dialog for the user to enter a directory name, as well as 'Ok' and 'Cancel' buttons. When the user enters a valid folder name and then clicks 'Ok' the system creates the directory, then closes the dialog. When the user selects 'Cancel' the dialog closes and no side effects occur
+* [REQ-157] When the user selects [Rename] from the context menu, the system shows a modal dialog containing the current file name as well as 'Ok' and 'Cancel' buttons. When the user makes changes to the file name and then clicks 'Ok' or presses the enter key, the system renames the file or folder, then closes the dialog. When the user selects 'Cancel' the dialog closes and the file is not moved or changed.
+* [REQ-158] When the user selects [Copy path] from the context menu, the system copies the fully qualified file or directory name to the clipboard
+* [REQ-159] When the user selects [Print] from the context menu, and the item under the mouse cursor is a file, the system prints the page using the windows system print dialog
+* [REQ-160] When the user selects [New document] from the context menu, and the item under the mouse cursor is a directory, the system creates a document containing the yaml markdown header and the name 'New document.md'. If a file with that name exist, add the current date and time do the document name until a unique file name is generated.
 * [REQ-170] The left column shall increase in size to display any one item without line breaks, to use up to 20% of the available width
 * [REQ-171] On every level of the directory tree, directories appear before files
 * [REQ-172] The directory tree should not display folders that contain no markdown files
+* [REQ-173] When the user selects [Format Markdown] from the context menu, the system executes the Format Markdown quick task as described elsewhere
 
 * [REQ-180] When the user holds the shift key, the system shall allow the user to select multiple documents
 * [REQ-181] When the user has selected multiple documents, and they right click on one of the selected documents, the [multi select context menu] is shown
 * [REQ-182] When the user selects [Merge] from the [multi select context menu], the system shall run a new LLM prompt instructing the LLM to merge the content into a new document. 
-
-
-
+* [REQ-183] When the user selects [Delete] from the [multi select context menu], the system shall move all the selected files to the recycle bin
 
 ### Middle column / File viewer area
 

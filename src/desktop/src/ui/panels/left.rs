@@ -121,10 +121,12 @@ pub fn show_left_panel(app: &mut FastMdApp, ctx: &egui::Context) {
                     children.sort_by(|a, b| {
                         b.is_dir.cmp(&a.is_dir).then_with(|| a.name.cmp(&b.name))
                     });
+                    let modifiers = ui.input(|i| i.modifiers);
                     for child in children {
                         let mut ctx = TreeNodeContext {
                             expanded_dirs: &mut app.expanded_dirs,
                             selected_file: &mut app.selected_file,
+                            selected_files: &mut app.selected_files,
                             tabs: &mut app.tabs,
                             file_to_move: &mut app.file_to_move,
                             move_dialog_open: &mut app.move_dialog_open,
@@ -135,6 +137,9 @@ pub fn show_left_panel(app: &mut FastMdApp, ctx: &egui::Context) {
                             rename_dialog_open: &mut app.rename_dialog_open,
                             file_to_rename: &mut app.file_to_rename,
                             rename_new_name: &mut app.rename_new_name,
+                            modifiers,
+                            submit_prompt: &mut app.submit_prompt,
+                            content_libraries: &app.content_libraries,
                         };
                         crate::ui::tree::draw_tree_node(ui, child, &mut ctx);
                     }
