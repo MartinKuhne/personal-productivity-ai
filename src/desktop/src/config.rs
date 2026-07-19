@@ -59,6 +59,10 @@ impl LlmConfig {
     pub fn has_use_case(&self, use_case: &str) -> bool {
         self.use_case.iter().any(|u| u == use_case)
     }
+
+    pub fn has_vision(&self) -> bool {
+        self.has_use_case("vision")
+    }
 }
 
 #[derive(serde::Serialize, serde::Deserialize, Clone, Debug)]
