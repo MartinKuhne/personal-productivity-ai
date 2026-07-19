@@ -45,6 +45,9 @@ pub fn show_center_panel(app: &mut FastMdApp, ctx: &egui::Context) {
                     ui.heading("Response");
                     ui.separator();
                     render_markdown(ui, &app.agent_response, &mut app.agent_scroll_to_id);
+                    if app.agent_running {
+                        ui.scroll_to_cursor(Some(egui::Align::BOTTOM));
+                    }
                 }
             });
         } else if !app.tabs.is_empty() {

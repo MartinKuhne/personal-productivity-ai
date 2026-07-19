@@ -105,6 +105,9 @@ impl FastMdApp {
 
     pub fn new(cc: &eframe::CreationContext<'_>, mut config: crate::config::AppConfig) -> Self {
         let mut visuals = egui::Visuals::dark();
+        visuals.window_fill = egui::Color32::from_rgb(9, 9, 11);
+        visuals.panel_fill = egui::Color32::from_rgb(9, 9, 11);
+        visuals.selection.bg_fill = egui::Color32::from_rgb(99, 102, 241);
         visuals.window_rounding = 8.0.into();
         visuals.widgets.noninteractive.rounding = 4.0.into();
         visuals.widgets.inactive.rounding = 4.0.into();
@@ -213,7 +216,7 @@ impl FastMdApp {
             editor_state: crate::editor::EditorState::default(),
             inline_editor_enabled,
             background_manager,
-            show_background_logs: true,
+            show_background_logs: false,
         }
     }
 }
