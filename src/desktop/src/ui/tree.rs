@@ -6,6 +6,7 @@ use std::path::PathBuf;
 pub struct TreeNodeContext<'a> {
     pub expanded_dirs: &'a mut HashSet<PathBuf>,
     pub selected_file: &'a mut Option<PathBuf>,
+    pub selected_files: &'a mut HashSet<PathBuf>,
     pub tabs: &'a mut Vec<PathBuf>,
     pub file_to_move: &'a mut Option<PathBuf>,
     pub move_dialog_open: &'a mut bool,
@@ -16,6 +17,9 @@ pub struct TreeNodeContext<'a> {
     pub rename_dialog_open: &'a mut bool,
     pub file_to_rename: &'a mut Option<PathBuf>,
     pub rename_new_name: &'a mut String,
+    pub modifiers: egui::Modifiers,
+    pub submit_prompt: &'a mut Option<String>,
+    pub content_libraries: &'a [crate::config::ContentLibrary],
 }
 
 pub fn draw_tree_node(ui: &mut egui::Ui, node: &TreeNode, ctx: &mut TreeNodeContext<'_>) {
@@ -23,15 +27,16 @@ pub fn draw_tree_node(ui: &mut egui::Ui, node: &TreeNode, ctx: &mut TreeNodeCont
         let is_expanded = ctx.expanded_dirs.contains(&node.path);
         let icon = if is_expanded { "📂 " } else { "📁 " };
         let label = format!("{}{}", icon, node.name);
-
-        let is_selected = ctx.selected_dir.as_ref() == Some(&node.path);
-        let response = ui.selectable_label(is_selected || is_expanded, label);
+        
+        let response = ui.selectable_label(false, label);
         if response.clicked() {
             if is_expanded {
                 ctx.expanded_dirs.remove(&node.path);
             } else {
                 ctx.expanded_dirs.insert(node.path.clone());
             }
+            *ctx.selected_file = None;
+            ctx.selected_files.clear();
             *ctx.selected_dir = Some(node.path.clone());
         }
         if response.double_clicked() {
@@ -96,15 +101,31 @@ pub fn draw_tree_node(ui: &mut egui::Ui, node: &TreeNode, ctx: &mut TreeNodeCont
             });
         }
     } else {
-        let is_selected = ctx.selected_file.as_ref() == Some(&node.path);
+        let is_selected = ctx.selected_files.contains(&node.path) || ctx.selected_file.as_ref() == Some(&node.path);
         let label = format!("📄 {}", node.name);
         let response = ui.selectable_label(is_selected, label);
+        
         if response.clicked() {
-            *ctx.selected_file = Some(node.path.clone());
-            if !ctx.tabs.contains(&node.path) {
-                ctx.tabs.push(node.path.clone());
+            if ctx.modifiers.shift || ctx.modifiers.ctrl || ctx.modifiers.command {
+                if ctx.selected_files.contains(&node.path) {
+                    ctx.selected_files.remove(&node.path);
+                    if ctx.selected_file.as_ref() == Some(&node.path) {
+                        *ctx.selected_file = None;
+                    }
+                } else {
+                    ctx.selected_files.insert(node.path.clone());
+                    *ctx.selected_file = Some(node.path.clone());
+                }
+            } else {
+                ctx.selected_files.clear();
+                ctx.selected_files.insert(node.path.clone());
+                *ctx.selected_file = Some(node.path.clone());
+                if !ctx.tabs.contains(&node.path) {
+                    ctx.tabs.push(node.path.clone());
+                }
             }
         }
+        
         if response.double_clicked() {
             let _ = std::process::Command::new("cmd")
                 .args(["/c", "start", "", &node.path.to_string_lossy()])
@@ -112,43 +133,88 @@ pub fn draw_tree_node(ui: &mut egui::Ui, node: &TreeNode, ctx: &mut TreeNodeCont
         }
 
         response.context_menu(|ui| {
-            if ui.button("Show in File Explorer").clicked() {
-                let _ = std::process::Command::new("explorer")
-                    .arg(format!("/select,{}", node.path.to_string_lossy()))
-                    .spawn();
-                ui.close_menu();
-            }
-            if ui.button("Copy path").clicked() {
-                ui.output_mut(|o| o.copied_text = node.path.to_string_lossy().to_string());
-                ui.close_menu();
-            }
-            if ui.button("Print").clicked() {
-                let path_to_print = node.path.clone();
-                std::thread::spawn(move || {
-                    if let Ok(_content) = std::fs::read_to_string(&path_to_print) {
-                        // Print functionality would go here
-                        // crate::deploy::print_markdown(&path_to_print, &content);
-                        eprintln!("Print requested for: {:?}", path_to_print);
+            if ctx.selected_files.len() > 1 && ctx.selected_files.contains(&node.path) {
+                // Multi-select context menu
+                if ui.button("Merge").clicked() {
+                    let mut prompt = "Please merge the following documents into a new document:\n".to_string();
+                    for file in ctx.selected_files.iter() {
+                        let mut rel_str = file.to_string_lossy().to_string();
+                        for lib in ctx.content_libraries {
+                            if let Ok(rel) = file.strip_prefix(std::path::Path::new(&lib.root_folder)) {
+                                let lib_path = std::path::Path::new(&lib.name).join(rel);
+                                rel_str = lib_path.to_string_lossy().to_string();
+                                break;
+                            }
+                        }
+                        prompt.push_str(&format!("- {}\n", rel_str));
                     }
-                });
-                ui.close_menu();
-            }
-            if ui.button("Rename").clicked() {
-                *ctx.file_to_rename = Some(node.path.clone());
-                *ctx.rename_new_name = node.name.clone();
-                *ctx.rename_dialog_open = true;
-                ui.close_menu();
-            }
-            if ui.button("Move").clicked() {
-                *ctx.file_to_move = Some(node.path.clone());
-                *ctx.move_dialog_open = true;
-                ui.close_menu();
-            }
-            if ui.button("Delete").clicked() {
-                if let Err(e) = trash::delete(&node.path) {
-                    eprintln!("Failed to delete: {}", e);
+                    *ctx.submit_prompt = Some(prompt);
+                    ui.close_menu();
                 }
-                ui.close_menu();
+                if ui.button("Delete").clicked() {
+                    for file in ctx.selected_files.iter() {
+                        if let Err(e) = trash::delete(file) {
+                            eprintln!("Failed to delete: {}", e);
+                        }
+                    }
+                    ctx.selected_files.clear();
+                    ui.close_menu();
+                }
+            } else {
+                // Single-select context menu
+                if ui.button("Show in File Explorer").clicked() {
+                    #[cfg(target_os = "windows")]
+                    {
+                        use std::os::windows::process::CommandExt;
+                        let _ = std::process::Command::new("explorer")
+                            .raw_arg(format!("/select,\"{}\"", node.path.to_string_lossy()))
+                            .spawn();
+                    }
+                    #[cfg(not(target_os = "windows"))]
+                    {
+                        let _ = std::process::Command::new("explorer")
+                            .arg(&node.path)
+                            .spawn();
+                    }
+                    ui.close_menu();
+                }
+                if ui.button("Copy path").clicked() {
+                    ui.output_mut(|o| o.copied_text = node.path.to_string_lossy().to_string());
+                    ui.close_menu();
+                }
+                if ui.button("Format Markdown").clicked() {
+                    let now = chrono::Local::now();
+                    let date_str = now.to_rfc3339();
+                    let prompt = format!("Format the current document into correct markdown and use this template for the yaml front matter. Focus ONLY on the currently active file, and DO NOT use list_files or search for other files.\n```yaml\n---\ntitle: A brief title\nsummary: A three sentence summary of the contents\ntags: [\"tag1\",\"tag2\"]\nheader-date: {}\n---\n```", date_str);
+                    *ctx.submit_prompt = Some(prompt);
+                    ui.close_menu();
+                }
+                if ui.button("Print").clicked() {
+                    let path_to_print = node.path.clone();
+                    std::thread::spawn(move || {
+                        if let Ok(_content) = std::fs::read_to_string(&path_to_print) {
+                            eprintln!("Print requested for: {:?}", path_to_print);
+                        }
+                    });
+                    ui.close_menu();
+                }
+                if ui.button("Rename").clicked() {
+                    *ctx.file_to_rename = Some(node.path.clone());
+                    *ctx.rename_new_name = node.name.clone();
+                    *ctx.rename_dialog_open = true;
+                    ui.close_menu();
+                }
+                if ui.button("Move").clicked() {
+                    *ctx.file_to_move = Some(node.path.clone());
+                    *ctx.move_dialog_open = true;
+                    ui.close_menu();
+                }
+                if ui.button("Delete").clicked() {
+                    if let Err(e) = trash::delete(&node.path) {
+                        eprintln!("Failed to delete: {}", e);
+                    }
+                    ui.close_menu();
+                }
             }
         });
     }
