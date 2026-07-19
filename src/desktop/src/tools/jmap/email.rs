@@ -132,7 +132,7 @@ fn simplify_jmap_emails(res: serde_json::Value, max_lines: Option<usize>) -> ser
     serde_json::Value::Array(simplified_emails)
 }
 
-pub fn tool_search_email(config: &AppConfig, keyword: &str) -> String {
+pub fn tool_search_email(config: &AppConfig, keyword: &str) -> Result<crate::tools::dtos::SearchEmailResponse, String> {
     let mut all_results = Vec::new();
     for (name, client) in &config.jmap_clients {
         let (api_url, token, accs) = match get_jmap_session(client) { 
@@ -169,10 +169,14 @@ pub fn tool_search_email(config: &AppConfig, keyword: &str) -> String {
             Err(e) => all_results.push(format!("Error querying email for {}: {}", name, e)),
         }
     }
-    if all_results.is_empty() { "No JMAP clients configured.".to_string() } else { all_results.join("\n\n") }
+    if all_results.is_empty() {
+        Err("No JMAP clients configured.".to_string())
+    } else {
+        Ok(crate::tools::dtos::SearchEmailResponse { results: all_results.join("\n\n") })
+    }
 }
 
-pub fn tool_get_email_by_id(config: &AppConfig, id: &str) -> String {
+pub fn tool_get_email_by_id(config: &AppConfig, id: &str) -> Result<crate::tools::dtos::GetEmailByIdResponse, String> {
     for (name, client) in &config.jmap_clients {
         let (api_url, token, accs) = match get_jmap_session(client) { 
             Ok(s) => s, 
@@ -186,19 +190,19 @@ pub fn tool_get_email_by_id(config: &AppConfig, id: &str) -> String {
                     for resp in method_responses {
                         if let Some(resp_arr) = resp.as_array() {
                             if resp_arr.get(0).and_then(|s| s.as_str()) == Some("error") {
-                                return format!("Error from JMAP server for {}: {}", name, serde_json::to_string_pretty(resp_arr).unwrap_or_default());
+                                return Err(format!("Error from JMAP server for {}: {}", name, serde_json::to_string_pretty(resp_arr).unwrap_or_default()));
                             }
                         }
                     }
                 }
                 let clean_res = convert_html_in_jmap(res);
                 let simplified = simplify_jmap_emails(clean_res, None);
-                return serde_json::to_string_pretty(&simplified).unwrap_or_default();
+                return Ok(crate::tools::dtos::GetEmailByIdResponse { result: serde_json::to_string_pretty(&simplified).unwrap_or_default() });
             }
             Err(_) => continue,
         }
     }
-    "Email not found in any client or no clients configured.".to_string()
+    Err("Email not found in any client or no clients configured.".to_string())
 }
 
 pub fn tool_get_email(
@@ -209,7 +213,7 @@ pub fn tool_get_email(
     recipient: Option<&str>,
     is_unread: Option<bool>,
     is_flagged: Option<bool>,
-) -> String {
+) -> Result<crate::tools::dtos::GetEmailResponse, String> {
     let mut all_results = Vec::new();
 
     let format_jmap_date = |d: &str, is_end: bool| -> String {
@@ -284,17 +288,21 @@ pub fn tool_get_email(
             Err(e) => all_results.push(format!("Error querying emails for {}: {}", name, e)),
         }
     }
-    if all_results.is_empty() { "No JMAP clients configured.".to_string() } else { all_results.join("\n\n") }
+    if all_results.is_empty() {
+        Err("No JMAP clients configured.".to_string())
+    } else {
+        Ok(crate::tools::dtos::GetEmailResponse { results: all_results.join("\n\n") })
+    }
 }
 
-pub fn tool_send_email(config: &AppConfig, to: &str, subject: &str, body: &str) -> String {
+pub fn tool_send_email(config: &AppConfig, to: &str, subject: &str, body: &str) -> Result<crate::tools::dtos::SendEmailResponse, String> {
     let mut all_results = Vec::new();
     if let Some((name, client)) = config.jmap_clients.iter().next() {
         let (api_url, token, accs) = match get_jmap_session(client) { 
             Ok(s) => s, 
             Err(e) => {
                 all_results.push(format!("Error fetching JMAP session for {}: {}", name, e));
-                return all_results.join("\n\n");
+                return Err(all_results.join("\n\n"));
             }
         };
         let account_id = get_account_id(&accs, "urn:ietf:params:jmap:mail");
@@ -314,5 +322,9 @@ pub fn tool_send_email(config: &AppConfig, to: &str, subject: &str, body: &str) 
             Err(e) => all_results.push(format!("Error sending email via {}: {}", name, e)),
         }
     }
-    if all_results.is_empty() { "No JMAP clients configured.".to_string() } else { all_results.join("\n\n") }
+    if all_results.is_empty() {
+        Err("No JMAP clients configured.".to_string())
+    } else {
+        Ok(crate::tools::dtos::SendEmailResponse { result: all_results.join("\n\n") })
+    }
 }

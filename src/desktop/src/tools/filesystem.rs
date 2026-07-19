@@ -3,7 +3,7 @@ use crate::utils::tags::extract_tags_from_file;
 use std::path::Path;
 use walkdir::WalkDir;
 
-pub fn tool_grep(root_path: &Path, query: &str) -> String {
+pub fn tool_grep(root_path: &Path, query: &str) -> Result<crate::tools::dtos::GrepResponse, String> {
     let mut results = Vec::new();
     let query_lower = query.to_lowercase();
     for entry in WalkDir::new(root_path)
@@ -30,13 +30,13 @@ pub fn tool_grep(root_path: &Path, query: &str) -> String {
         }
     }
     if results.is_empty() {
-        "No matches found.".to_string()
+        Ok(crate::tools::dtos::GrepResponse { matches: "No matches found.".to_string() })
     } else {
-        results.join("\n")
+        Ok(crate::tools::dtos::GrepResponse { matches: results.join("\n") })
     }
 }
 
-pub fn tool_read_tags(root_path: &Path) -> String {
+pub fn tool_read_tags(root_path: &Path) -> Result<crate::tools::dtos::ReadTagsResponse, String> {
     let mut all_tags = std::collections::BTreeSet::new();
     for entry in WalkDir::new(root_path)
         .into_iter()
@@ -54,10 +54,10 @@ pub fn tool_read_tags(root_path: &Path) -> String {
         }
     }
     let count = all_tags.len();
-    format!("Tags found: {}", count)
+    Ok(crate::tools::dtos::ReadTagsResponse { tags_found: format!("Tags found: {}", count) })
 }
 
-pub fn tool_list_files_by_tag(root_path: &Path, tag: &str) -> String {
+pub fn tool_list_files_by_tag(root_path: &Path, tag: &str) -> Result<crate::tools::dtos::ListFilesByTagResponse, String> {
     let mut matching_files = Vec::new();
     for entry in WalkDir::new(root_path)
         .into_iter()
@@ -75,13 +75,13 @@ pub fn tool_list_files_by_tag(root_path: &Path, tag: &str) -> String {
         }
     }
     if matching_files.is_empty() {
-        "No matching files found.".to_string()
+        Ok(crate::tools::dtos::ListFilesByTagResponse { files: "No matching files found.".to_string() })
     } else {
-        matching_files.join("\n")
+        Ok(crate::tools::dtos::ListFilesByTagResponse { files: matching_files.join("\n") })
     }
 }
 
-pub fn tool_list_files(target_dir: &Path) -> String {
+pub fn tool_list_files(target_dir: &Path) -> Result<crate::tools::dtos::ListFilesResponse, String> {
     let mut files = Vec::new();
     if let Ok(entries) = std::fs::read_dir(target_dir) {
         for entry in entries.filter_map(|e| e.ok()) {
@@ -98,47 +98,47 @@ pub fn tool_list_files(target_dir: &Path) -> String {
         }
     }
     if files.is_empty() {
-        "No markdown files found.".to_string()
+        Ok(crate::tools::dtos::ListFilesResponse { files: "No markdown files found.".to_string() })
     } else {
-        files.join("\n")
+        Ok(crate::tools::dtos::ListFilesResponse { files: files.join("\n") })
     }
 }
 
-pub fn tool_read_file(path_str: &str) -> String {
+pub fn tool_read_file(path_str: &str) -> Result<crate::tools::dtos::ReadFileResponse, String> {
     match std::fs::read_to_string(path_str) {
-        Ok(content) => content,
-        Err(e) => format!("Error reading file: {}", e),
+        Ok(content) => Ok(crate::tools::dtos::ReadFileResponse { content }),
+        Err(e) => Err(format!("Failed to read file: {}", e)),
     }
 }
 
-pub fn tool_read_file_lines(path_str: &str, start_line: usize, end_line: usize) -> String {
+pub fn tool_read_file_lines(path_str: &str, start_line: usize, end_line: usize) -> Result<crate::tools::dtos::ReadFileLinesResponse, String> {
     match std::fs::read_to_string(path_str) {
         Ok(content) => {
             let lines: Vec<&str> = content.lines().collect();
             if lines.is_empty() && start_line == 1 {
-                return "".to_string();
+                return Ok(crate::tools::dtos::ReadFileLinesResponse { content: "".to_string() });
             }
             if start_line == 0 || start_line > lines.len() {
-                return "Error: Start line out of range.".to_string();
+                return Err("Start line out of range.".to_string());
             }
             let end = std::cmp::min(end_line, lines.len());
             if start_line > end {
-                return "Error: Start line greater than end line.".to_string();
+                return Err("Start line greater than end line.".to_string());
             }
             let selected_lines = &lines[start_line - 1..end];
-            selected_lines.join("\n")
+            Ok(crate::tools::dtos::ReadFileLinesResponse { content: selected_lines.join("\n") })
         }
-        Err(e) => format!("Error reading file: {}", e),
+        Err(e) => Err(format!("Failed to read file: {}", e)),
     }
 }
 
-pub fn tool_create_file(path_str: &str, content: &str) -> String {
+pub fn tool_create_file(path_str: &str, content: &str) -> Result<crate::tools::dtos::CreateFileResponse, String> {
     if !path_str.to_lowercase().ends_with(".md") {
-        return "Error: Only markdown files (.md) are allowed.".to_string();
+        return Err("Only markdown files (.md) are allowed.".to_string());
     }
 
     if content.starts_with("---\n") && parse_front_matter(content).is_none() {
-        return "Error: Invalid YAML front-matter in markdown.".to_string();
+        return Err("Invalid YAML front-matter in markdown.".to_string());
     }
 
     // Validate the markdown by ensuring it parses successfully
@@ -148,21 +148,21 @@ pub fn tool_create_file(path_str: &str, content: &str) -> String {
     let path = Path::new(path_str);
     if let Some(parent) = path.parent() {
         if let Err(e) = std::fs::create_dir_all(parent) {
-            return format!("Error creating parent directories: {}", e);
+            return Err(format!("Failed to create parent directories: {}", e));
         }
     }
     match std::fs::write(path, content) {
-        Ok(_) => "File created successfully.".to_string(),
-        Err(e) => format!("Error writing file: {}", e),
+        Ok(_) => Ok(crate::tools::dtos::CreateFileResponse { result: "File created successfully.".to_string() }),
+        Err(e) => Err(format!("Failed to write file: {}", e)),
     }
 }
 
-pub fn tool_insert_lines(path_str: &str, line_index: usize, lines_to_insert: &[String]) -> String {
+pub fn tool_insert_lines(path_str: &str, line_index: usize, lines_to_insert: &[String]) -> Result<crate::tools::dtos::InsertLinesResponse, String> {
     match std::fs::read_to_string(path_str) {
         Ok(content) => {
             let mut lines: Vec<String> = content.lines().map(|s| s.to_string()).collect();
             if line_index == 0 || line_index > lines.len() + 1 {
-                return "Error: Line index out of range.".to_string();
+                return Err("Line index out of range.".to_string());
             }
             let idx = line_index - 1;
             for (offset, line) in lines_to_insert.iter().enumerate() {
@@ -170,38 +170,80 @@ pub fn tool_insert_lines(path_str: &str, line_index: usize, lines_to_insert: &[S
             }
             let new_content = lines.join("\n");
             match std::fs::write(path_str, new_content) {
-                Ok(_) => "Lines inserted successfully.".to_string(),
-                Err(e) => format!("Error writing file: {}", e),
+                Ok(_) => Ok(crate::tools::dtos::InsertLinesResponse { result: "Lines inserted successfully.".to_string() }),
+                Err(e) => Err(format!("Failed to write file: {}", e)),
             }
         }
-        Err(e) => format!("Error reading file: {}", e),
+        Err(e) => Err(format!("Failed to read file: {}", e)),
     }
 }
 
-pub fn tool_delete_lines(path_str: &str, start_line: usize, end_line: usize) -> String {
+pub fn tool_delete_lines(path_str: &str, start_line: usize, end_line: usize) -> Result<crate::tools::dtos::DeleteLinesResponse, String> {
     match std::fs::read_to_string(path_str) {
         Ok(content) => {
             let mut lines: Vec<String> = content.lines().map(|s| s.to_string()).collect();
             if start_line == 0 || start_line > lines.len() {
-                return "Error: Start line out of range.".to_string();
+                return Err("Start line out of range.".to_string());
             }
             let end = std::cmp::min(end_line, lines.len());
             if start_line > end {
-                return "Error: Start line greater than end line.".to_string();
+                return Err("Start line greater than end line.".to_string());
             }
             lines.drain((start_line - 1)..end);
             let new_content = lines.join("\n");
             match std::fs::write(path_str, new_content) {
-                Ok(_) => "Lines deleted successfully.".to_string(),
-                Err(e) => format!("Error writing file: {}", e),
+                Ok(_) => Ok(crate::tools::dtos::DeleteLinesResponse { result: "Lines deleted successfully.".to_string() }),
+                Err(e) => Err(format!("Failed to write file: {}", e)),
             }
         }
-        Err(e) => format!("Error reading file: {}", e),
+        Err(e) => Err(format!("Failed to read file: {}", e)),
+    }
+}
+
+
+pub fn tool_replace_text(path_str: &str, old_string: &str, new_string: &str) -> Result<crate::tools::dtos::ReplaceTextResponse, String> {
+    match std::fs::read_to_string(path_str) {
+        Ok(content) => {
+            if !content.contains(old_string) {
+                return Err("The specified old_string was not found in the file.".to_string());
+            }
+            let count = content.matches(old_string).count();
+            let new_content = content.replace(old_string, new_string);
+            match std::fs::write(path_str, new_content) {
+                Ok(_) => Ok(crate::tools::dtos::ReplaceTextResponse { result: format!("Successfully replaced {} occurrence(s).", count) }),
+                Err(e) => Err(format!("Failed to write file: {}", e)),
+            }
+        }
+        Err(e) => Err(format!("Failed to read file: {}", e)),
     }
 }
 
 #[cfg(test)]
 mod tests {
+
+    #[test]
+    fn test_tool_replace_text() {
+        let dir = tempdir().unwrap();
+        let file_path = dir.path().join("test.md");
+        std::fs::write(&file_path, "Line 1\nOld Text\nLine 3").unwrap();
+        
+        let result = tool_replace_text(file_path.to_str().unwrap(), "Old Text", "New Text").unwrap().result;
+        assert_eq!(result, "Successfully replaced 1 occurrence(s).");
+        
+        let content = std::fs::read_to_string(&file_path).unwrap();
+        assert_eq!(content, "Line 1\nNew Text\nLine 3");
+    }
+
+    #[test]
+    fn test_tool_replace_text_not_found() {
+        let dir = tempdir().unwrap();
+        let file_path = dir.path().join("test.md");
+        std::fs::write(&file_path, "Line 1\nOld Text\nLine 3").unwrap();
+        
+        let result = tool_replace_text(file_path.to_str().unwrap(), "Missing Text", "New Text");
+        assert_eq!(result.unwrap_err(), "The specified old_string was not found in the file.");
+    }
+
     use super::*;
     use std::fs;
     use tempfile::tempdir;
@@ -212,7 +254,7 @@ mod tests {
         let file_path = dir.path().join("test.md");
         fs::write(&file_path, "# Hello\nWorld content\nAnother line").unwrap();
         
-        let result = tool_grep(dir.path(), "World");
+        let result = tool_grep(dir.path(), "World").unwrap().matches;
         assert!(result.contains("World content"));
         assert!(result.contains("test.md"));
     }
@@ -225,7 +267,7 @@ mod tests {
         fs::create_dir(dir.path().join("sub")).unwrap();
         fs::write(dir.path().join("sub").join("c.md"), "content").unwrap();
         
-        let result = tool_list_files(dir.path());
+        let result = tool_list_files(dir.path()).unwrap().files;
         assert!(result.contains("a.md"));
         assert!(!result.contains("c.md")); // Non-recursive, should not find c.md
         assert!(!result.contains("b.txt"));
@@ -237,14 +279,15 @@ mod tests {
         let file_path = dir.path().join("test.md");
         fs::write(&file_path, "Hello World").unwrap();
         
-        let result = tool_read_file(file_path.to_str().unwrap());
+        let result = tool_read_file(file_path.to_str().unwrap()).unwrap().content;
         assert_eq!(result, "Hello World");
     }
 
     #[test]
     fn test_tool_read_file_not_found() {
         let result = tool_read_file("/nonexistent/path.md");
-        assert!(result.starts_with("Error reading file"));
+        assert!(result.is_err());
+        assert!(result.unwrap_err().contains("Failed to read file"));
     }
 
     #[test]
@@ -253,7 +296,7 @@ mod tests {
         let file_path = dir.path().join("test.md");
         fs::write(&file_path, "Line 1\nLine 2\nLine 3\nLine 4").unwrap();
         
-        let result = tool_read_file_lines(file_path.to_str().unwrap(), 2, 3);
+        let result = tool_read_file_lines(file_path.to_str().unwrap(), 2, 3).unwrap().content;
         assert_eq!(result, "Line 2\nLine 3");
     }
 
@@ -263,7 +306,7 @@ mod tests {
         let file_path = dir.path().join("empty.md");
         fs::write(&file_path, "").unwrap();
         
-        let result = tool_read_file_lines(file_path.to_str().unwrap(), 1, 50);
+        let result = tool_read_file_lines(file_path.to_str().unwrap(), 1, 50).unwrap().content;
         assert_eq!(result, "");
     }
 
@@ -272,7 +315,7 @@ mod tests {
         let dir = tempdir().unwrap();
         let file_path = dir.path().join("new.md");
         
-        let result = tool_create_file(file_path.to_str().unwrap(), "---\ntitle: Test\n---\n# Hello");
+        let result = tool_create_file(file_path.to_str().unwrap(), "---\ntitle: Test\n---\n# Hello").unwrap().result;
         assert_eq!(result, "File created successfully.");
         assert!(file_path.exists());
         
@@ -287,7 +330,7 @@ mod tests {
         let file_path = dir.path().join("new.txt");
         
         let result = tool_create_file(file_path.to_str().unwrap(), "content");
-        assert_eq!(result, "Error: Only markdown files (.md) are allowed.");
+        assert_eq!(result.unwrap_err(), "Only markdown files (.md) are allowed.");
     }
 
     #[test]
@@ -296,7 +339,7 @@ mod tests {
         let file_path = dir.path().join("new.md");
         
         let result = tool_create_file(file_path.to_str().unwrap(), "---\ninvalid: [unclosed\n---\nContent");
-        assert_eq!(result, "Error: Invalid YAML front-matter in markdown.");
+        assert_eq!(result.unwrap_err(), "Invalid YAML front-matter in markdown.");
     }
 
     #[test]
@@ -305,7 +348,7 @@ mod tests {
         let file_path = dir.path().join("test.md");
         fs::write(&file_path, "Line 1\nLine 2\nLine 3").unwrap();
         
-        let result = tool_insert_lines(file_path.to_str().unwrap(), 2, &["New Line".to_string()]);
+        let result = tool_insert_lines(file_path.to_str().unwrap(), 2, &["New Line".to_string()]).unwrap().result;
         assert_eq!(result, "Lines inserted successfully.");
         
         let content = fs::read_to_string(&file_path).unwrap();
@@ -319,7 +362,7 @@ mod tests {
         fs::write(&file_path, "Line 1\nLine 2").unwrap();
         
         let result = tool_insert_lines(file_path.to_str().unwrap(), 5, &["New".to_string()]);
-        assert_eq!(result, "Error: Line index out of range.");
+        assert_eq!(result.unwrap_err(), "Line index out of range.");
     }
 
     #[test]
@@ -328,7 +371,7 @@ mod tests {
         let file_path = dir.path().join("test.md");
         fs::write(&file_path, "Line 1\nLine 2\nLine 3\nLine 4").unwrap();
         
-        let result = tool_delete_lines(file_path.to_str().unwrap(), 2, 3);
+        let result = tool_delete_lines(file_path.to_str().unwrap(), 2, 3).unwrap().result;
         assert_eq!(result, "Lines deleted successfully.");
         
         let content = fs::read_to_string(&file_path).unwrap();
@@ -342,7 +385,7 @@ mod tests {
         fs::write(&file_path, "Line 1\nLine 2").unwrap();
         
         let result = tool_delete_lines(file_path.to_str().unwrap(), 5, 6);
-        assert_eq!(result, "Error: Start line out of range.");
+        assert_eq!(result.unwrap_err(), "Start line out of range.");
     }
 
     #[test]
@@ -351,7 +394,7 @@ mod tests {
         let file_path = dir.path().join("test.md");
         fs::write(&file_path, "---\ntags: [tag1, tag2]\n---\n# Hello").unwrap();
         
-        let result = tool_read_tags(dir.path());
+        let result = tool_read_tags(dir.path()).unwrap().tags_found;
         assert_eq!(result, "Tags found: 2");
     }
 }
