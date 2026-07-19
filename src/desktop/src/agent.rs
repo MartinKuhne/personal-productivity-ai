@@ -145,8 +145,9 @@ pub fn run_agent(
             ));
 
             let agent = ureq::AgentBuilder::new()
-                .timeout_connect(std::time::Duration::from_secs(30))
-                .timeout_read(std::time::Duration::from_secs(120))
+                .timeout_connect(std::time::Duration::from_secs(60))
+                .timeout_read(std::time::Duration::from_secs(1800))
+                .timeout(std::time::Duration::from_secs(1800))
                 .build();
 
             let request_body = serde_json::json!({
@@ -328,8 +329,6 @@ pub fn run_agent(
                     full_response.push_str("\n\n");
                     let _ = tx_gui_agent.send(BackgroundMessage::AgentResponse(full_response.clone()));
 
-                    println!("--- Tool {} returned ---\n{}", func_name, result);
-
                     let mut is_error = false;
                     let mut error_msg = String::new();
                     let mut result_data = serde_json::Value::Null;
@@ -344,6 +343,13 @@ pub fn run_agent(
                                 }
                             }
                         }
+                    }
+
+                    if func_name == "read_file" && !is_error {
+                        let content = result_data.get("content").and_then(|c| c.as_str()).unwrap_or("");
+                        println!("--- Tool {} returned {} lines ---", func_name, content.lines().count());
+                    } else {
+                        println!("--- Tool {} returned ---\n{}", func_name, result);
                     }
 
                     let result_msg = if is_error {

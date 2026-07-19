@@ -42,6 +42,8 @@ pub struct ContentLibrary {
     pub kind: String,
     #[serde(default = "default_readonly")]
     pub readonly: bool,
+    #[serde(default)]
+    pub priority: i32,
 }
 
 fn default_readonly() -> bool {

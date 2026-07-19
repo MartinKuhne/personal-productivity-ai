@@ -140,7 +140,9 @@ define_tools! {
         enabled: |_| true,
         execute: |config, _root_path, input, _resolve_path| {
             let mut all_results = Vec::new();
-            for lib in &config.content_libraries {
+            let mut libs: Vec<_> = config.content_libraries.iter().collect();
+            libs.sort_by(|a, b| b.priority.cmp(&a.priority)); // Highest priority first
+            for lib in libs {
                 if let Ok(res) = crate::tools::filesystem::tool_grep(Path::new(&lib.root_folder), &lib.name, &input.query) {
                     if res.matches != "No matches found." {
                         all_results.push(res.matches);
@@ -211,7 +213,7 @@ define_tools! {
     },
     {
         name: "read_file",
-        description: "Read the entire text contents of a file at the specified path.",
+        description: "Read the entire text contents of a file at the specified path. Prefer using the read_yaml_header tool if just a document summary is needed.",
         input: crate::tools::dtos::ReadFileInput,
         enabled: |_| true,
         execute: |_config, _root_path, input, resolve_path| {
@@ -405,6 +407,7 @@ mod tests {
             root_folder: "C:\\TestRoot".to_string(),
             kind: "text".to_string(),
             readonly: false,
+            priority: 0,
         });
         let root = Path::new("C:\\TestRoot");
         
