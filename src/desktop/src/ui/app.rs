@@ -1,4 +1,4 @@
-use crate::background_task::BackgroundTask;
+use crate::background_task::Task;
 use crate::messages::BackgroundMessage;
 use crate::ui::panels::{show_bottom_panel, show_center_panel, show_left_panel, show_right_panel, show_top_panel};
 use crate::ui::modals::{show_create_dir_modal, show_move_modal, show_rename_modal};
@@ -163,7 +163,7 @@ impl FastMdApp {
             });
         }
 
-        let background_task = BackgroundTask::new(config.clone());
+        let background_task = Task::new(config.clone());
         let inline_editor_enabled = config.inline_editor_enabled;
         let background_manager = Arc::new(Mutex::new(BackgroundProcessManager::new()));
 

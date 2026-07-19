@@ -2,20 +2,39 @@ use std::path::PathBuf;
 
 use std::collections::HashMap;
 
-#[derive(serde::Serialize, serde::Deserialize, Clone, Debug)]
+#[derive(serde::Serialize, serde::Deserialize, Clone)]
 pub struct JmapClient {
     pub url: String,
     pub token: String,
 }
 
-#[derive(serde::Serialize, serde::Deserialize, Clone, Debug)]
+impl std::fmt::Debug for JmapClient {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("JmapClient")
+            .field("url", &self.url)
+            .field("token", &"[REDACTED]")
+            .finish()
+    }
+}
+
+#[derive(serde::Serialize, serde::Deserialize, Clone)]
 pub struct CalDavClient {
     pub url: String,
     pub username: String,
     pub password: String,
 }
 
-#[derive(serde::Serialize, serde::Deserialize, Clone, Debug)]
+impl std::fmt::Debug for CalDavClient {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("CalDavClient")
+            .field("url", &self.url)
+            .field("username", &self.username)
+            .field("password", &"[REDACTED]")
+            .finish()
+    }
+}
+
+#[derive(serde::Serialize, serde::Deserialize, Clone)]
 pub struct LlmConfig {
     /// The literal model ID to pass to the API (e.g. `google/gemini-2.5-flash:free`).
     pub model: String,
@@ -28,6 +47,18 @@ pub struct LlmConfig {
     /// Use cases for this model (e.g. "chat", "vision", "embeddings").
     #[serde(default = "default_use_case", alias = "capabilities", deserialize_with = "deserialize_use_case_or_capabilities")]
     pub use_case: Vec<String>,
+}
+
+impl std::fmt::Debug for LlmConfig {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("LlmConfig")
+            .field("model", &self.model)
+            .field("api_url", &self.api_url)
+            .field("api_key", &"[REDACTED]")
+            .field("cost", &self.cost)
+            .field("use_case", &self.use_case)
+            .finish()
+    }
 }
 
 fn deserialize_use_case_or_capabilities<'de, D>(deserializer: D) -> Result<Vec<String>, D::Error>
@@ -56,8 +87,9 @@ impl LlmConfig {
     pub fn get_cost(&self) -> i32 {
         self.cost.unwrap_or(0)
     }
-    pub fn has_use_case(&self, use_case: &str) -> bool {
-        self.use_case.iter().any(|u| u == use_case)
+    pub fn has_use_case(&self, use_case: impl AsRef<str>) -> bool {
+        let uc_ref = use_case.as_ref();
+        self.use_case.iter().any(|u| u == uc_ref)
     }
 
     pub fn has_vision(&self) -> bool {
@@ -80,7 +112,7 @@ fn default_readonly() -> bool {
     true
 }
 
-#[derive(serde::Serialize, serde::Deserialize, Clone, Debug)]
+#[derive(serde::Serialize, serde::Deserialize, Clone)]
 #[serde(default)]
 pub struct AppConfig {
     pub api_url: String,
@@ -114,6 +146,28 @@ pub struct AppConfig {
     pub inline_editor_enabled: bool,
 }
 
+impl std::fmt::Debug for AppConfig {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("AppConfig")
+            .field("api_url", &self.api_url)
+            .field("model", &self.model)
+            .field("api_key", &"[REDACTED]")
+            .field("user_name", &self.user_name)
+            .field("user_address", &self.user_address)
+            .field("user_age", &self.user_age)
+            .field("user_gender", &self.user_gender)
+            .field("system_prompt_extension", &self.system_prompt_extension)
+            .field("models", &self.models)
+            .field("searxng_url", &self.searxng_url)
+            .field("jmap_clients", &self.jmap_clients)
+            .field("caldav_clients", &self.caldav_clients)
+            .field("content_libraries", &self.content_libraries)
+            .field("pdf_converter_command", &self.pdf_converter_command)
+            .field("inline_editor_enabled", &self.inline_editor_enabled)
+            .finish()
+    }
+}
+
 impl Default for AppConfig {
     fn default() -> Self {
         Self {
@@ -138,9 +192,10 @@ impl Default for AppConfig {
 
 impl AppConfig {
     /// Find the best model for a given use_case (lowest cost among matches).
-    pub fn model_for_use_case(&self, use_case: &str) -> Option<(&String, &LlmConfig)> {
+    pub fn model_for_use_case(&self, use_case: impl AsRef<str>) -> Option<(&String, &LlmConfig)> {
+        let uc_ref = use_case.as_ref();
         self.models.iter()
-            .filter(|(_, cfg)| cfg.has_use_case(use_case))
+            .filter(|(_, cfg)| cfg.has_use_case(uc_ref))
             .min_by_key(|(_, cfg)| cfg.get_cost())
     }
 
@@ -197,10 +252,10 @@ pub fn load_config() -> AppConfig {
             if let Ok(config) = serde_yaml::from_str::<AppConfig>(&content) {
                 return config;
             } else {
-                eprintln!("Failed to parse config file: {}, using defaults.", config_path.display());
+                tracing::error!(name = "config.parse.failed", "Failed to parse config file: {}, using defaults.", config_path.display());
             }
         } else {
-            eprintln!("Failed to read config file: {}, using defaults.", config_path.display());
+            tracing::error!(name = "config.read.failed", "Failed to read config file: {}, using defaults.", config_path.display());
         }
     } else {
         if let Some(parent) = config_path.parent() {

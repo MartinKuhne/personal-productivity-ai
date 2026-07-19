@@ -3,13 +3,13 @@ use notify::Watcher;
 use std::path::PathBuf;
 use std::sync::mpsc::{channel, Receiver, Sender};
 
-pub struct BackgroundTask {
+pub struct Task {
     pub rx: Receiver<BackgroundMessage>,
     pub tx: Sender<BackgroundMessage>,
     pub _watcher: Option<notify::RecommendedWatcher>,
 }
 
-impl BackgroundTask {
+impl Task {
     pub fn new(config: crate::config::AppConfig) -> Self {
         let (tx, rx) = channel();
         let tx_clone = tx.clone();
@@ -46,6 +46,7 @@ impl BackgroundTask {
 
                     let tags = crate::utils::tags::extract_tags_from_file(&path);
                     let _ = tx_gui_clone.send(BackgroundMessage::FileParsed { path, tags });
+                    std::thread::yield_now();
                 }
             });
             workers.push(handle);
@@ -113,6 +114,9 @@ impl BackgroundTask {
                         format!("Scanned {} files, queued {} PDFs, queued {} images", files_scanned, pdfs_queued, images_queued)
                     )));
                     last_log_time = std::time::Instant::now();
+                }
+                if files_scanned % 50 == 0 {
+                    std::thread::yield_now();
                 }
             }
         }

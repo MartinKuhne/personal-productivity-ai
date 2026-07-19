@@ -3,7 +3,15 @@
 use fastmd::ui::FastMdApp;
 use eframe::egui;
 
+use mimalloc::MiMalloc;
+
+#[global_allocator]
+static GLOBAL: MiMalloc = MiMalloc;
+
 fn main() -> eframe::Result<()> {
+    // Initialize tracing
+    tracing_subscriber::fmt::init();
+
     // Install rustls crypto provider
     rustls::crypto::ring::default_provider().install_default().ok();
 
@@ -44,7 +52,11 @@ fn main() -> eframe::Result<()> {
     }
 
     let prompt = fastmd::agent::get_base_system_prompt(&config);
-    println!("--- System Prompt (Startup) ---\n{}\n-------------------------------", prompt);
+    tracing::info!(
+        name = "app.startup",
+        "--- System Prompt (Startup) ---\n{}\n-------------------------------",
+        prompt
+    );
 
     eframe::run_native(
         "fastmd",

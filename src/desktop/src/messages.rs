@@ -2,6 +2,7 @@ use std::path::PathBuf;
 use notify::RecommendedWatcher;
 use serde_json::Value;
 
+#[derive(Debug)]
 pub enum BackgroundMessage {
     FileParsed { path: PathBuf, tags: Vec<String> },
     DirParsed { path: PathBuf },
