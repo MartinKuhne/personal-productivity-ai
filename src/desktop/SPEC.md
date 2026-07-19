@@ -159,18 +159,21 @@ The requirements below have been formatted using the **Easy Approach to Requirem
 * [REQ-471] Image Visibility: Image files shall NOT be displayed in the directory tree, tab bar, or exposed to LLM file tools (grep, list_files, read_file, etc.). They remain hidden from the standard file UI.
 * [REQ-472] Corresponding Markdown Check: For each discovered image file, the system shall check if a Markdown file with the same name (same stem, `.md` extension) exists in the same directory.
 * [REQ-473] Vision Analysis Trigger: If the corresponding Markdown file does not exist, OR if the Markdown file's last-modified timestamp is older than the image's last-modified timestamp, the system shall queue the image for vision analysis.
-* [REQ-474] Vision Model Configuration: The system shall support a `models` configuration section in `config.yaml` defining multiple models with `use_case` tags: `chat` (default), `embeddings`, `vision`. Example:
+* [REQ-474] Vision Model Configuration: The system shall support a `models` configuration section in `config.yaml` defining multiple models with `use_case` tags: `chat` (default), `embeddings`, `vision`, and an optional `cost` field (integer, default 0, lower = cheaper) used for auto-model selection (REQ-613). Example:
 ```yaml
 models:
-  - name: "gpt-4o-mini"
-    endpoint: "https://api.openai.com/v1"
+  - model: "gpt-4o-mini"
+    api_url: "https://api.openai.com/v1"
     use_case: ["chat", "vision"]
-  - name: "text-embedding-3-small"
-    endpoint: "https://api.openai.com/v1"
+    cost: 5
+  - model: "text-embedding-3-small"
+    api_url: "https://api.openai.com/v1"
     use_case: ["embeddings"]
-  - name: "google/gemini-2.5-flash:free"
-    endpoint: "https://openrouter.ai/api/v1"
+    cost: 1
+  - model: "google/gemini-2.5-flash:free"
+    api_url: "https://openrouter.ai/api/v1"
     use_case: ["chat"]
+    cost: 0
 ```
 * [REQ-475] Vision Analysis Execution: The system shall invoke the model tagged with `vision` use_case, sending the image as base64-encoded data URL in the message content. The prompt shall request a detailed Markdown description of the image contents (text, objects, scenes, charts, diagrams, UI elements, etc.).
 * [REQ-476] Vision Result Handling: On success, the generated Markdown description shall be written to the corresponding `.md` file (creating or overwriting). The file watcher (REQ-403) shall pick it up and index it. On failure, the error shall be logged to the Background Process Log (REQ-460).
@@ -188,7 +191,7 @@ models:
 * [REQ-602] Default Settings: The FastMD Viewer shall default to the OpenRouter endpoint using the free model `google/gemini-2.5-flash:free`.
 * [REQ-603] Configuration File: The FastMD Viewer shall parse a YAML configuration file (`config.yaml`) from the standard user configuration path to retrieve the API key, model, endpoint URL, and multi-use model configuration.
     * [REQ-604]: If the configuration file does not exist, then the FastMD Viewer shall create a default template configuration file.
-    * [REQ-604a] Multi-Use Model Configuration: The configuration shall support a `models` list where each entry defines `name`, `endpoint`, `api_key` (optional, inherits global), and `use_case` (array: `chat`, `embeddings`, `vision`). The system shall route requests to the appropriate model based on use_case. The legacy single `model`/`endpoint` fields are deprecated but supported for backward compatibility.
+    * [REQ-604a] Multi-Use Model Configuration: The configuration shall support a `models` list where each entry defines `model`, `api_url`, `api_key` (optional, inherits global), `use_case` (array: `chat`, `embeddings`, `vision`), and `cost` (optional integer, default 0, lower = cheaper). The system shall route requests to the appropriate model based on use_case. When multiple models match a use_case, the system shall prefer the model with the lowest `cost`.
     * [REQ-604b] PDF Converter Configuration: The configuration shall support `pdf_converter_command` as an array of command and arguments with `{input}` and `{output}` placeholders.
 * [REQ-605] Monospace Command Prompt: When the bottom panel command entry field is submitted, the FastMD Viewer shall execute the command through the Local LLM completions thread.
 * [REQ-606] LLM Tools Library: The LLM Agent shall utilize functional tools as per the [LLM Tools] section below.
@@ -203,11 +206,11 @@ models:
 
 ### Agent Behavior & UI
 
-* [REQ-613] Auto-Model Selection: On application startup, if multiple models are configured, the system shall automatically select the lowest-cost model and persist the selection to the configuration file.
+* [REQ-613] Auto-Model Selection: On application startup, if multiple models are configured with the `chat` use_case, the system shall automatically select the model with the lowest `cost` value and persist the selection to the configuration file.
 * [REQ-614] USER.md Context Injection: For each configured content library, if a USER.md file exists at the library root, its contents shall be appended to the system prompt as user context.
 * [REQ-615] Agent Conversation History: The agent shall maintain conversation history across prompts within a session. History is reset when the user clicks "Back to Document" or starts a new session.
 * [REQ-616] Thinking Delimiter: Model reasoning/thinking content wrapped in `🤔...🤔` delimiters shall be extracted and displayed in a collapsible "Thinking Process" section separate from the main response.
-* [REQ-617] Model Management Commands: The command prompt shall support `/models` to list available models with costs, and `/model <name>` to switch the active model and persist to config.
+* [REQ-617] Model Management Commands: The command prompt shall support `/models` to list available models with their cost and use_cases, and `/model <name>` to switch the active model and persist to config.
 * [REQ-618] Quick Tasks Menu: The bottom panel shall provide a "Quick Tasks" menu with predefined prompts (e.g., "Format Markdown") that inject a structured prompt with YAML front-matter template.
 * [REQ-619] Tabbed Document Interface: The center panel shall support multiple open documents as tabs. Clicking a file opens it in a new tab; middle-click or close button closes tabs.
 
