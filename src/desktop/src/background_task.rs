@@ -14,8 +14,9 @@ impl BackgroundTask {
         let (tx, rx) = channel();
         let tx_clone = tx.clone();
         
+        let config_clone = config.clone();
         std::thread::spawn(move || {
-            Self::run_indexing(config.content_libraries, config.pdf_converter_command, tx_clone);
+            Self::run_indexing(config_clone, tx_clone);
         });
 
         Self {
@@ -25,7 +26,7 @@ impl BackgroundTask {
         }
     }
 
-    fn run_indexing(libraries: Vec<crate::config::ContentLibrary>, pdf_command: Option<Vec<String>>, tx: Sender<BackgroundMessage>) {
+    fn run_indexing(config: crate::config::AppConfig, tx: Sender<BackgroundMessage>) {
         let (tx_work, rx_work) = channel::<PathBuf>();
         let rx_work = std::sync::Arc::new(std::sync::Mutex::new(rx_work));
 
@@ -52,9 +53,10 @@ impl BackgroundTask {
 
         let mut files_scanned = 0;
         let mut pdfs_queued = 0;
+        let mut images_queued = 0;
         let mut last_log_time = std::time::Instant::now();
 
-        for lib in &libraries {
+        for lib in &config.content_libraries {
             let root_path = PathBuf::from(&lib.root_folder);
             let walker = walkdir::WalkDir::new(&root_path)
                 .into_iter()
@@ -72,12 +74,26 @@ impl BackgroundTask {
                             let job = crate::background::PdfConversionJob::new(path.to_path_buf());
                             if job.should_convert() {
                                 pdfs_queued += 1;
-                                let cmd = pdf_command.clone();
+                                let cmd = config.pdf_converter_command.clone();
                                 let tx_clone = tx.clone();
                                 std::thread::spawn(move || {
                                     if let Ok(rt) = tokio::runtime::Runtime::new() {
                                         rt.block_on(async {
                                             let _ = job.execute(cmd, tx_clone).await;
+                                        });
+                                    }
+                                });
+                            }
+                        } else if matches!(ext_str.as_str(), "jpg" | "jpeg" | "png" | "gif" | "webp" | "bmp" | "tiff" | "avif") {
+                            let job = crate::background::models::ImageJob::new(path.to_path_buf());
+                            if job.should_process() {
+                                images_queued += 1;
+                                let tx_clone = tx.clone();
+                                let config_c = config.clone();
+                                std::thread::spawn(move || {
+                                    if let Ok(rt) = tokio::runtime::Runtime::new() {
+                                        rt.block_on(async {
+                                            let _ = crate::background::vision_processor::process_image(job, config_c, tx_clone).await;
                                         });
                                     }
                                 });
@@ -91,7 +107,7 @@ impl BackgroundTask {
                 if files_scanned % 500 == 0 || last_log_time.elapsed().as_secs() >= 5 {
                     let _ = tx.send(BackgroundMessage::LogEntry(crate::background::BackgroundLogEntry::new(
                         crate::background::LogCategory::Indexer,
-                        format!("Scanned {} files, queued {} PDFs", files_scanned, pdfs_queued)
+                        format!("Scanned {} files, queued {} PDFs, queued {} images", files_scanned, pdfs_queued, images_queued)
                     )));
                     last_log_time = std::time::Instant::now();
                 }
@@ -100,7 +116,7 @@ impl BackgroundTask {
         
         let _ = tx.send(BackgroundMessage::LogEntry(crate::background::BackgroundLogEntry::new(
             crate::background::LogCategory::Indexer,
-            format!("Initial indexing complete. Scanned {} files, queued {} PDFs.", files_scanned, pdfs_queued)
+            format!("Initial indexing complete. Scanned {} files, queued {} PDFs, queued {} images.", files_scanned, pdfs_queued, images_queued)
         )));
 
         drop(tx_work);
@@ -110,7 +126,7 @@ impl BackgroundTask {
         }
 
         let tx_notify = tx.clone();
-        let pdf_command_watcher = pdf_command.clone();
+        let config_watcher = config.clone();
         let watcher_result = notify::recommended_watcher(move |res: Result<notify::Event, notify::Error>| {
             if let Ok(event) = res {
                 for path in event.paths {
@@ -127,16 +143,19 @@ impl BackgroundTask {
                     
                     let mut is_md = false;
                     let mut is_pdf = false;
+                    let mut is_img = false;
                     if let Some(ext) = path.extension() {
                         let ext_str = ext.to_string_lossy().to_lowercase();
                         if ext_str == "md" || ext_str == "markdown" || ext_str == "txt" {
                             is_md = true;
                         } else if ext_str == "pdf" {
                             is_pdf = true;
+                        } else if matches!(ext_str.as_str(), "jpg" | "jpeg" | "png" | "gif" | "webp" | "bmp" | "tiff" | "avif") {
+                            is_img = true;
                         }
                     }
 
-                    if is_md || is_pdf {
+                    if is_md || is_pdf || is_img {
                         let _ = tx_notify.send(BackgroundMessage::LogEntry(crate::background::BackgroundLogEntry::new(
                             crate::background::LogCategory::Watcher,
                             format!("File {} {:?}", event_type, path.file_name().unwrap_or_default())
@@ -169,12 +188,30 @@ impl BackgroundTask {
                             notify::EventKind::Create(_) | notify::EventKind::Modify(_) => {
                                 let job = crate::background::PdfConversionJob::new(path.clone());
                                 if job.should_convert() {
-                                    let cmd = pdf_command_watcher.clone();
+                                    let cmd = config_watcher.pdf_converter_command.clone();
                                     let tx_c = tx_notify.clone();
                                     std::thread::spawn(move || {
                                         if let Ok(rt) = tokio::runtime::Runtime::new() {
                                             rt.block_on(async {
                                                 let _ = job.execute(cmd, tx_c).await;
+                                            });
+                                        }
+                                    });
+                                }
+                            }
+                            _ => {}
+                        }
+                    } else if is_img {
+                        match event.kind {
+                            notify::EventKind::Create(_) | notify::EventKind::Modify(_) => {
+                                let job = crate::background::models::ImageJob::new(path.clone());
+                                if job.should_process() {
+                                    let tx_c = tx_notify.clone();
+                                    let config_c = config_watcher.clone();
+                                    std::thread::spawn(move || {
+                                        if let Ok(rt) = tokio::runtime::Runtime::new() {
+                                            rt.block_on(async {
+                                                let _ = crate::background::vision_processor::process_image(job, config_c, tx_c).await;
                                             });
                                         }
                                     });
@@ -191,7 +228,7 @@ impl BackgroundTask {
         });
 
         if let Ok(mut watcher) = watcher_result {
-            for lib in &libraries {
+            for lib in &config.content_libraries {
                 let root_path = PathBuf::from(&lib.root_folder);
                 let _ = watcher.watch(&root_path, notify::RecursiveMode::Recursive);
             }
