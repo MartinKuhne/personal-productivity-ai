@@ -1,0 +1,43 @@
+[package]
+name = "fastmd"
+version = "0.1.0"
+edition = "2021"
+description = "Fast Markdown viewer with AI agent capabilities"
+license = "MIT"
+repository = "https://github.com/user/fastmd"
+categories = ["command-line-utilities", "text-editors", "development-tools"]
+keywords = ["markdown", "viewer", "ai", "agent"]
+
+[dependencies]
+anyhow = "1.0.104"
+chrono = "0.4.45"
+eframe = "0.27"
+fast-dav-rs = "0.4.3"
+fast_h2m = "*"
+imap = "2.4.1"
+jmap-calendars-client = "0.1.2"
+jmap-client = "0.4.2"
+notify = "6.0"
+playwright-rs = "0.14.1"
+pulldown-cmark = { version = "0.10", features = ["html"] }
+rustls = { version = "0.23", features = ["ring"] }
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+serde_yaml = "0.9"
+tokio = { version = "1.53.0", features = ["rt-multi-thread", "macros"] }
+trash = "5.2.6"
+ureq = { version = "2.9", features = ["json"] }
+walkdir = "2.4"
+
+[dev-dependencies]
+tempfile = "3.8"
+tokio = { version = "1.53.0", features = ["rt", "rt-multi-thread", "macros"] }
+
+[[bin]]
+name = "fastmd"
+path = "src/main.rs"
+
+[[bin]]
+name = "deploy"
+path = "src/bin/deploy.rs"
+
