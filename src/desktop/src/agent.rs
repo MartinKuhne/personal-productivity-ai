@@ -168,7 +168,7 @@ pub fn run_agent(
                 Ok(resp) => resp,
                 Err(ureq::Error::Status(code, resp)) => {
                     let body = resp.into_string().unwrap_or_else(|_| "[Could not read body]".to_string());
-                    eprintln!("AI API Error: Status {} - Body: {}", code, body);
+                    tracing::error!(name = "agent.api.failed", "AI API Error: Status {} - Body: {}", code, body);
                     let _ = tx_gui_agent.send(BackgroundMessage::AgentFailed(format!(
                         "HTTP Request failed with status {}: {}",
                         code, body
@@ -347,9 +347,9 @@ pub fn run_agent(
 
                     if func_name == "read_file" && !is_error {
                         let content = result_data.get("content").and_then(|c| c.as_str()).unwrap_or("");
-                        println!("--- Tool {} returned {} lines ---", func_name, content.lines().count());
+                        tracing::info!(name = "agent.tool.result", "--- Tool {} returned {} lines ---", func_name, content.lines().count());
                     } else {
-                        println!("--- Tool {} returned ---\n{}", func_name, result);
+                        tracing::info!(name = "agent.tool.result", "--- Tool {} returned ---\n{}", func_name, result);
                     }
 
                     let result_msg = if is_error {

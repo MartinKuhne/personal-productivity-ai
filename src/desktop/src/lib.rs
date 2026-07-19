@@ -11,7 +11,7 @@ pub mod messages;
 pub mod background;
 
 
-pub use background_task::BackgroundTask;
+pub use background_task::Task;
 pub use config::{AppConfig, load_config, get_config_path};
 pub use utils::{parse_front_matter, extract_tags_from_file};
 pub use agent::run_agent;
