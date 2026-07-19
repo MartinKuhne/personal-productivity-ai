@@ -3,7 +3,7 @@ use crate::utils::tags::extract_tags_from_file;
 use std::path::Path;
 use walkdir::WalkDir;
 
-pub fn tool_grep(root_path: &Path, query: &str) -> Result<crate::tools::dtos::GrepResponse, String> {
+pub fn tool_grep(root_path: &Path, virtual_prefix: &str, query: &str) -> Result<crate::tools::dtos::GrepResponse, String> {
     let mut results = Vec::new();
     let query_lower = query.to_lowercase();
     for entry in WalkDir::new(root_path)
@@ -16,9 +16,11 @@ pub fn tool_grep(root_path: &Path, query: &str) -> Result<crate::tools::dtos::Gr
                     if let Ok(content) = std::fs::read_to_string(entry.path()) {
                         for (idx, line) in content.lines().enumerate() {
                             if line.to_lowercase().contains(&query_lower) {
+                                let rel_path = entry.path().strip_prefix(root_path).unwrap_or(entry.path());
+                                let virtual_path = Path::new(virtual_prefix).join(rel_path);
                                 results.push(format!(
                                     "{}:{} - {}",
-                                    entry.path().display(),
+                                    virtual_path.display(),
                                     idx + 1,
                                     line
                                 ));
@@ -57,7 +59,7 @@ pub fn tool_read_tags(root_path: &Path) -> Result<crate::tools::dtos::ReadTagsRe
     Ok(crate::tools::dtos::ReadTagsResponse { tags_found: format!("Tags found: {}", count) })
 }
 
-pub fn tool_list_files_by_tag(root_path: &Path, tag: &str) -> Result<crate::tools::dtos::ListFilesByTagResponse, String> {
+pub fn tool_list_files_by_tag(root_path: &Path, virtual_prefix: &str, tag: &str) -> Result<crate::tools::dtos::ListFilesByTagResponse, String> {
     let mut matching_files = Vec::new();
     for entry in WalkDir::new(root_path)
         .into_iter()
@@ -68,7 +70,9 @@ pub fn tool_list_files_by_tag(root_path: &Path, tag: &str) -> Result<crate::tool
                 if ext == "md" || ext == "markdown" {
                     let tags = extract_tags_from_file(entry.path());
                     if tags.contains(&tag.to_string()) {
-                        matching_files.push(entry.path().to_string_lossy().into_owned());
+                        let rel_path = entry.path().strip_prefix(root_path).unwrap_or(entry.path());
+                        let virtual_path = Path::new(virtual_prefix).join(rel_path);
+                        matching_files.push(virtual_path.to_string_lossy().into_owned());
                     }
                 }
             }
@@ -81,7 +85,7 @@ pub fn tool_list_files_by_tag(root_path: &Path, tag: &str) -> Result<crate::tool
     }
 }
 
-pub fn tool_list_files(target_dir: &Path) -> Result<crate::tools::dtos::ListFilesResponse, String> {
+pub fn tool_list_files(target_dir: &Path, virtual_prefix: &str) -> Result<crate::tools::dtos::ListFilesResponse, String> {
     let mut files = Vec::new();
     if let Ok(entries) = std::fs::read_dir(target_dir) {
         for entry in entries.filter_map(|e| e.ok()) {
@@ -90,7 +94,10 @@ pub fn tool_list_files(target_dir: &Path) -> Result<crate::tools::dtos::ListFile
                     let path = entry.path();
                     if let Some(ext) = path.extension() {
                         if ext == "md" || ext == "markdown" {
-                            files.push(path.to_string_lossy().into_owned());
+                            if let Some(name) = path.file_name() {
+                                let virtual_path = Path::new(virtual_prefix).join(name);
+                                files.push(virtual_path.to_string_lossy().into_owned());
+                            }
                         }
                     }
                 }
@@ -254,8 +261,9 @@ mod tests {
         let file_path = dir.path().join("test.md");
         fs::write(&file_path, "# Hello\nWorld content\nAnother line").unwrap();
         
-        let result = tool_grep(dir.path(), "World").unwrap().matches;
+        let result = tool_grep(dir.path(), "Workspace", "World").unwrap().matches;
         assert!(result.contains("World content"));
+        assert!(result.contains("Workspace"));
         assert!(result.contains("test.md"));
     }
 
@@ -267,7 +275,8 @@ mod tests {
         fs::create_dir(dir.path().join("sub")).unwrap();
         fs::write(dir.path().join("sub").join("c.md"), "content").unwrap();
         
-        let result = tool_list_files(dir.path()).unwrap().files;
+        let result = tool_list_files(dir.path(), "Workspace").unwrap().files;
+        assert!(result.contains("Workspace"));
         assert!(result.contains("a.md"));
         assert!(!result.contains("c.md")); // Non-recursive, should not find c.md
         assert!(!result.contains("b.txt"));

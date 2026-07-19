@@ -46,6 +46,6 @@ fn main() -> eframe::Result<()> {
     eframe::run_native(
         "fastmd",
         options,
-        Box::new(|cc| Box::new(FastMdApp::new(cc))),
+        Box::new(move |cc| Box::new(FastMdApp::new(cc, config))),
     )
 }
