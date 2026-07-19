@@ -7,6 +7,8 @@ use eframe::egui;
 use std::collections::{BTreeMap, BTreeSet, HashSet};
 use std::path::PathBuf;
 use std::sync::mpsc::Receiver;
+use crate::background::{BackgroundProcessManager, SharedProcessManager};
+use std::sync::{Arc, Mutex};
 
 #[derive(Clone)]
 pub struct TreeNode {
@@ -87,6 +89,8 @@ pub struct FastMdApp {
     pub submit_prompt: Option<String>,
     pub editor_state: crate::editor::EditorState,
     pub inline_editor_enabled: bool,
+    pub background_manager: SharedProcessManager,
+    pub show_background_logs: bool,
 }
 
 impl FastMdApp {
@@ -159,8 +163,9 @@ impl FastMdApp {
             });
         }
 
-        let background_task = BackgroundTask::new(config.content_libraries.clone());
+        let background_task = BackgroundTask::new(config.clone());
         let inline_editor_enabled = config.inline_editor_enabled;
+        let background_manager = Arc::new(Mutex::new(BackgroundProcessManager::new()));
 
         Self {
             content_libraries: config.content_libraries,
@@ -207,11 +212,20 @@ impl FastMdApp {
             submit_prompt: None,
             editor_state: crate::editor::EditorState::default(),
             inline_editor_enabled,
+            background_manager,
+            show_background_logs: true,
         }
     }
 }
 
 impl eframe::App for FastMdApp {
+    fn on_exit(&mut self, _gl: Option<&eframe::glow::Context>) {
+        if let Ok(mgr) = self.background_manager.lock() {
+            let log_path = crate::config::get_config_path().parent().unwrap().join("logs/background-process.log");
+            let _ = mgr.save_logs(&log_path);
+        }
+    }
+
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
         // Handle background messages
         while let Ok(msg) = self.rx.try_recv() {
@@ -281,6 +295,11 @@ impl eframe::App for FastMdApp {
                     self.agent_status = format!("Error: {}", err);
                     self.agent_running = false;
                 }
+                BackgroundMessage::LogEntry(entry) => {
+                    if let Ok(mut mgr) = self.background_manager.lock() {
+                        mgr.push_log(entry);
+                    }
+                }
             }
         }
 
@@ -317,6 +336,7 @@ impl eframe::App for FastMdApp {
         show_move_modal(self, ctx);
         show_create_dir_modal(self, ctx);
         show_rename_modal(self, ctx);
+        crate::ui::background_logs::show_background_logs_window(self, ctx);
 
         // Top panel
         show_top_panel(self, ctx);
