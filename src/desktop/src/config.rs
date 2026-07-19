@@ -17,21 +17,47 @@ pub struct CalDavClient {
 
 #[derive(serde::Serialize, serde::Deserialize, Clone, Debug)]
 pub struct LlmConfig {
+    /// The literal model ID to pass to the API (e.g. `google/gemini-2.5-flash:free`).
     pub model: String,
+    /// API endpoint URL.
     pub api_url: String,
     pub api_key: String,
+    /// Cost for auto-model selection (lower = preferred). Default 0.
     #[serde(default)]
     pub cost: Option<i32>,
-    #[serde(default)]
-    pub capabilities: Option<String>,
+    /// Use cases for this model (e.g. "chat", "vision", "embeddings").
+    #[serde(default = "default_use_case", alias = "capabilities", deserialize_with = "deserialize_use_case_or_capabilities")]
+    pub use_case: Vec<String>,
+}
+
+fn deserialize_use_case_or_capabilities<'de, D>(deserializer: D) -> Result<Vec<String>, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    use serde::Deserialize;
+    #[derive(Deserialize)]
+    #[serde(untagged)]
+    enum StringOrVec {
+        String(String),
+        Vec(Vec<String>),
+    }
+
+    match StringOrVec::deserialize(deserializer)? {
+        StringOrVec::String(s) => Ok(vec![s]),
+        StringOrVec::Vec(v) => Ok(v),
+    }
+}
+
+fn default_use_case() -> Vec<String> {
+    vec!["chat".to_string()]
 }
 
 impl LlmConfig {
     pub fn get_cost(&self) -> i32 {
-        self.cost.unwrap_or(1)
+        self.cost.unwrap_or(0)
     }
-    pub fn get_capabilities(&self) -> String {
-        self.capabilities.clone().unwrap_or_else(|| "chat".to_string())
+    pub fn has_use_case(&self, use_case: &str) -> bool {
+        self.use_case.iter().any(|u| u == use_case)
     }
 }
 
@@ -76,6 +102,12 @@ pub struct AppConfig {
     pub caldav_clients: HashMap<String, CalDavClient>,
     #[serde(default)]
     pub content_libraries: Vec<ContentLibrary>,
+    /// PDF converter command template (REQ-604b).
+    #[serde(default)]
+    pub pdf_converter_command: Option<Vec<String>>,
+    /// Enable built-in inline text editor (REQ-250). Default: false.
+    #[serde(default)]
+    pub inline_editor_enabled: bool,
 }
 
 impl Default for AppConfig {
@@ -94,7 +126,53 @@ impl Default for AppConfig {
             jmap_clients: HashMap::new(),
             caldav_clients: HashMap::new(),
             content_libraries: Vec::new(),
+            pdf_converter_command: None,
+            inline_editor_enabled: false,
         }
+    }
+}
+
+impl AppConfig {
+    /// Find the best model for a given use_case (lowest cost among matches).
+    pub fn model_for_use_case(&self, use_case: &str) -> Option<(&String, &LlmConfig)> {
+        self.models.iter()
+            .filter(|(_, cfg)| cfg.has_use_case(use_case))
+            .min_by_key(|(_, cfg)| cfg.get_cost())
+    }
+
+    /// Validate configuration, returning a list of warnings.
+    pub fn validate(&self) -> Vec<String> {
+        let mut warnings = Vec::new();
+
+        // Check that the active model references an existing key
+        if !self.model.is_empty() && !self.models.is_empty()
+            && !self.models.contains_key(&self.model)
+        {
+            warnings.push(format!(
+                "Active model '{}' not found in models map", self.model
+            ));
+        }
+
+        // Check models have valid use_case values
+        let valid_use_cases = ["chat", "embeddings", "vision"];
+        for (key, cfg) in &self.models {
+            for uc in &cfg.use_case {
+                if !valid_use_cases.contains(&uc.as_str()) {
+                    warnings.push(format!(
+                        "Model '{}' has unknown use_case: '{}'", key, uc
+                    ));
+                }
+            }
+        }
+
+        // Check at least one chat model exists when models are configured
+        if !self.models.is_empty()
+            && !self.models.values().any(|m| m.has_use_case("chat"))
+        {
+            warnings.push("No model configured with 'chat' use_case".to_string());
+        }
+
+        warnings
     }
 }
 
@@ -143,6 +221,8 @@ mod tests {
         assert_eq!(config.api_url, "https://openrouter.ai/api/v1");
         assert_eq!(config.model, "google/gemini-2.5-flash:free");
         assert_eq!(config.api_key, "your-api-key-here");
+        assert!(config.pdf_converter_command.is_none());
+        assert!(!config.inline_editor_enabled);
     }
 
     #[test]
@@ -158,5 +238,198 @@ mod tests {
         
         // Config file should have been created
         assert!(config_path.exists());
+    }
+
+    #[test]
+    fn test_llm_config_defaults() {
+        let cfg = LlmConfig {
+            model: "test".to_string(),
+            api_url: "http://localhost".to_string(),
+            api_key: "key".to_string(),
+            cost: None,
+            use_case: default_use_case(),
+        };
+        assert_eq!(cfg.get_cost(), 0);
+        assert!(cfg.has_use_case("chat"));
+        assert!(!cfg.has_use_case("vision"));
+    }
+
+    #[test]
+    fn test_llm_config_has_use_case() {
+        let cfg = LlmConfig {
+            model: "multi".to_string(),
+            api_url: "http://localhost".to_string(),
+            api_key: "key".to_string(),
+            cost: Some(5),
+            use_case: vec!["chat".to_string(), "vision".to_string()],
+        };
+        assert!(cfg.has_use_case("chat"));
+        assert!(cfg.has_use_case("vision"));
+        assert!(!cfg.has_use_case("embeddings"));
+        assert_eq!(cfg.get_cost(), 5);
+    }
+
+    #[test]
+    fn test_model_for_use_case_returns_lowest_cost() {
+        let mut config = AppConfig::default();
+        config.models.insert("expensive".to_string(), LlmConfig {
+            model: "expensive-model".to_string(),
+            api_url: "http://a".to_string(),
+            api_key: "k".to_string(),
+            cost: Some(10),
+            use_case: vec!["chat".to_string()],
+        });
+        config.models.insert("cheap".to_string(), LlmConfig {
+            model: "cheap-model".to_string(),
+            api_url: "http://b".to_string(),
+            api_key: "k".to_string(),
+            cost: Some(1),
+            use_case: vec!["chat".to_string()],
+        });
+        let (key, _cfg) = config.model_for_use_case("chat").unwrap();
+        assert_eq!(key, "cheap");
+    }
+
+    #[test]
+    fn test_model_for_use_case_none_when_no_match() {
+        let mut config = AppConfig::default();
+        config.models.insert("chat_only".to_string(), LlmConfig {
+            model: "chat-model".to_string(),
+            api_url: "http://a".to_string(),
+            api_key: "k".to_string(),
+            cost: None,
+            use_case: vec!["chat".to_string()],
+        });
+        assert!(config.model_for_use_case("vision").is_none());
+    }
+
+    #[test]
+    fn test_model_for_use_case_vision() {
+        let mut config = AppConfig::default();
+        config.models.insert("vision_model".to_string(), LlmConfig {
+            model: "gpt-4o".to_string(),
+            api_url: "http://a".to_string(),
+            api_key: "k".to_string(),
+            cost: Some(5),
+            use_case: vec!["chat".to_string(), "vision".to_string()],
+        });
+        let (key, _cfg) = config.model_for_use_case("vision").unwrap();
+        assert_eq!(key, "vision_model");
+    }
+
+    #[test]
+    fn test_validate_valid_config() {
+        let config = AppConfig::default();
+        assert!(config.validate().is_empty());
+    }
+
+    #[test]
+    fn test_validate_unknown_use_case() {
+        let mut config = AppConfig::default();
+        config.models.insert("bad".to_string(), LlmConfig {
+            model: "bad".to_string(),
+            api_url: "http://a".to_string(),
+            api_key: "k".to_string(),
+            cost: None,
+            use_case: vec!["chat".to_string(), "invalid".to_string()],
+        });
+        let warnings = config.validate();
+        assert!(warnings.iter().any(|w| w.contains("unknown use_case")));
+    }
+
+    #[test]
+    fn test_validate_no_chat_model() {
+        let mut config = AppConfig::default();
+        config.models.insert("embed".to_string(), LlmConfig {
+            model: "embed".to_string(),
+            api_url: "http://a".to_string(),
+            api_key: "k".to_string(),
+            cost: None,
+            use_case: vec!["embeddings".to_string()],
+        });
+        let warnings = config.validate();
+        assert!(warnings.iter().any(|w| w.contains("No model configured with 'chat'")));
+    }
+
+    #[test]
+    fn test_validate_missing_active_model() {
+        let mut config = AppConfig::default();
+        config.model = "nonexistent".to_string();
+        config.models.insert("real".to_string(), LlmConfig {
+            model: "real".to_string(),
+            api_url: "http://a".to_string(),
+            api_key: "k".to_string(),
+            cost: None,
+            use_case: vec!["chat".to_string()],
+        });
+        let warnings = config.validate();
+        assert!(warnings.iter().any(|w| w.contains("not found in models map")));
+    }
+
+    #[test]
+    fn test_backward_compat_old_field_names() {
+        let yaml = r#"
+api_url: "https://openrouter.ai/api/v1"
+model: "test"
+api_key: "key"
+models:
+  legacy_model:
+    model: "old-model-name"
+    api_url: "http://old-endpoint"
+    api_key: "old-key"
+    capabilities: "chat"
+"#;
+        let config: AppConfig = serde_yaml::from_str(yaml).unwrap();
+        let m = config.models.get("legacy_model").unwrap();
+        // Old field names should deserialize without issues
+        assert_eq!(m.model, "old-model-name");
+        assert_eq!(m.api_url, "http://old-endpoint");
+    }
+
+    #[test]
+    fn test_new_field_names() {
+        let yaml = r#"
+api_url: "https://openrouter.ai/api/v1"
+model: "test"
+api_key: "key"
+models:
+  new_model:
+    model: "new-model-name"
+    api_url: "http://new-endpoint"
+    api_key: "new-key"
+    cost: 3
+    use_case:
+      - chat
+      - vision
+"#;
+        let config: AppConfig = serde_yaml::from_str(yaml).unwrap();
+        let m = config.models.get("new_model").unwrap();
+        assert_eq!(m.model, "new-model-name");
+        assert_eq!(m.api_url, "http://new-endpoint");
+        assert_eq!(m.get_cost(), 3);
+        assert!(m.has_use_case("chat"));
+        assert!(m.has_use_case("vision"));
+    }
+
+    #[test]
+    fn test_config_with_pdf_converter() {
+        let yaml = r#"
+api_url: "https://openrouter.ai/api/v1"
+model: "test"
+api_key: "key"
+pdf_converter_command:
+  - pandoc
+  - "-f"
+  - pdf
+  - "-o"
+  - "{output}"
+  - "{input}"
+inline_editor_enabled: true
+"#;
+        let config: AppConfig = serde_yaml::from_str(yaml).unwrap();
+        assert!(config.pdf_converter_command.is_some());
+        let cmd = config.pdf_converter_command.unwrap();
+        assert_eq!(cmd[0], "pandoc");
+        assert!(config.inline_editor_enabled);
     }
 }

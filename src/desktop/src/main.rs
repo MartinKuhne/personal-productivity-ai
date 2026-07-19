@@ -20,6 +20,9 @@ fn main() -> eframe::Result<()> {
         let mut lowest_cost = i32::MAX;
         let mut best_model_key = None;
         for (key, cfg) in &config.models {
+            if !cfg.has_use_case("chat") {
+                continue;
+            }
             let cost = cfg.get_cost();
             if cost < lowest_cost {
                 lowest_cost = cost;
