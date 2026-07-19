@@ -67,6 +67,13 @@ The requirements below have been formatted using the **Easy Approach to Requirem
 * [REQ-171] On every level of the directory tree, directories appear before files
 * [REQ-172] The directory tree should not display folders that contain no markdown files
 
+* [REQ-180] When the user holds the shift key, the system shall allow the user to select multiple documents
+* [REQ-181] When the user has selected multiple documents, and they right click on one of the selected documents, the [multi select context menu] is shown
+* [REQ-182] When the user selects [Merge] from the [multi select context menu], the system shall run a new LLM prompt instructing the LLM to merge the content into a new document. 
+
+
+
+
 ### Middle column / File viewer area
 
 ### 2. Markdown Parser & Rendering Engine
@@ -122,6 +129,16 @@ The requirements below have been formatted using the **Easy Approach to Requirem
 * [REQ-620] When displaying tool call arguments, format the JSON
 
 * [REQ-699] Cancel AI Prompt: While an AI prompt is being executed, the system shall display a stop button. When the user clicks the stop button, the system shall abort the prompt processing.
+
+### Libraries
+
+* [REQ-700] The system shall support multiple content libraries. The libraries have [root_folder, name, kind, readonly (optional, default true)] attributes
+* [REQ-701] The system shall support a content library 'text'. The behaviours throughout this document apply to this type. The tools are markdown focused.
+* [REQ-702] The system shall support a virtual file system. The virtual paths are composed of the library name, then the files and directrories present at the configured root_folder.
+* [REQ-703] The Directory tree pane shall display the content library name for each library as the top level node
+* [REQ-704] The file based tools shall take virtual paths as arguments, and shall resolve these paths to fully qualified file names for the underlying operating system.
+* [REQ-705] The [grep] tool shall search all libraries, and return a concatendated result
+* [REQ-706] When the [list_files] tool is invoked with the '/' or '.' argument alone, it shall enumerate the list of libraries, enabling the LLM to continue the folder search for the virtual library subfolders
 
 ### LLM tools
 

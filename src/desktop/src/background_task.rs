@@ -10,13 +10,12 @@ pub struct BackgroundTask {
 }
 
 impl BackgroundTask {
-    pub fn new(root_path: PathBuf) -> Self {
+    pub fn new(libraries: Vec<crate::config::ContentLibrary>) -> Self {
         let (tx, rx) = channel();
         let tx_clone = tx.clone();
-        let thread_root = root_path.clone();
-
+        
         std::thread::spawn(move || {
-            Self::run_indexing(thread_root, tx_clone);
+            Self::run_indexing(libraries, tx_clone);
         });
 
         Self {
@@ -26,7 +25,7 @@ impl BackgroundTask {
         }
     }
 
-    fn run_indexing(root_path: PathBuf, tx: Sender<BackgroundMessage>) {
+    fn run_indexing(libraries: Vec<crate::config::ContentLibrary>, tx: Sender<BackgroundMessage>) {
         let (tx_work, rx_work) = channel::<PathBuf>();
         let rx_work = std::sync::Arc::new(std::sync::Mutex::new(rx_work));
 
@@ -51,20 +50,23 @@ impl BackgroundTask {
             workers.push(handle);
         }
 
-        let walker = walkdir::WalkDir::new(&root_path)
-            .into_iter()
-            .filter_entry(|e| e.file_name() != ".git");
+        for lib in &libraries {
+            let root_path = PathBuf::from(&lib.root_folder);
+            let walker = walkdir::WalkDir::new(&root_path)
+                .into_iter()
+                .filter_entry(|e| e.file_name() != ".git");
 
-        for entry in walker.filter_map(|e| e.ok()) {
-            let path = entry.path();
-            if path.is_file() {
-                if let Some(ext) = path.extension() {
-                    if ext == "md" || ext == "markdown" || ext == "txt" {
-                        let _ = tx_work.send(path.to_path_buf());
+            for entry in walker.filter_map(|e| e.ok()) {
+                let path = entry.path();
+                if path.is_file() {
+                    if let Some(ext) = path.extension() {
+                        if ext == "md" || ext == "markdown" || ext == "txt" {
+                            let _ = tx_work.send(path.to_path_buf());
+                        }
                     }
+                } else if path.is_dir() {
+                    let _ = tx.send(BackgroundMessage::DirParsed { path: path.to_path_buf() });
                 }
-            } else if path.is_dir() {
-                let _ = tx.send(BackgroundMessage::DirParsed { path: path.to_path_buf() });
             }
         }
 
@@ -118,7 +120,10 @@ impl BackgroundTask {
         });
 
         if let Ok(mut watcher) = watcher_result {
-            let _ = watcher.watch(&root_path, notify::RecursiveMode::Recursive);
+            for lib in &libraries {
+                let root_path = PathBuf::from(&lib.root_folder);
+                let _ = watcher.watch(&root_path, notify::RecursiveMode::Recursive);
+            }
             let _ = tx.send(BackgroundMessage::Finished(watcher));
         } else {
             let _ = tx.send(BackgroundMessage::FinishedWithoutWatcher);

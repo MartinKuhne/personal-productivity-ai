@@ -9,7 +9,7 @@ macro_rules! define_tools {
                 description: $desc:expr,
                 input: $input_type:ty,
                 enabled: $enabled:expr,
-                execute: |$config:ident, $root_path:ident, $input:ident, $is_safe:ident| $exec:expr
+                execute: |$config:ident, $root_path:ident, $input:ident, $resolve_path:ident| $exec:expr
             }
         ),* $(,)?
     ) => {
@@ -38,12 +38,35 @@ macro_rules! define_tools {
             println!("Tool call: {}({})", name, args_compact);
             let start_time = std::time::Instant::now();
 
-            let is_safe_path = |p: &str| -> bool {
-                if Path::new(p).components().any(|c| c == Component::ParentDir) { return false; }
-                let full_path = root_path.join(p).to_string_lossy().to_lowercase();
-                let mut root_str = root_path.to_string_lossy().to_lowercase();
-                if !root_str.ends_with('/') && !root_str.ends_with('\\') { root_str.push(std::path::MAIN_SEPARATOR); }
-                full_path.starts_with(&root_str) || full_path == root_path.to_string_lossy().to_lowercase()
+            let resolve_and_check_path = |p: &str| -> Result<Option<std::path::PathBuf>, String> {
+                if Path::new(p).components().any(|c| c == Component::ParentDir) { return Err("Path traversal not allowed".to_string()); }
+                let path = Path::new(p);
+                let mut components = path.components().peekable();
+                
+                while let Some(c) = components.peek() {
+                    match c {
+                        Component::RootDir | Component::CurDir => { components.next(); },
+                        _ => break,
+                    }
+                }
+
+                if components.peek().is_none() {
+                    return Ok(None);
+                }
+
+                if let Some(std::path::Component::Normal(first)) = components.next() {
+                    let first_str = first.to_string_lossy();
+                    for lib in &config.content_libraries {
+                        if lib.name == first_str {
+                            let rest: std::path::PathBuf = components.collect();
+                            return Ok(Some(Path::new(&lib.root_folder).join(rest)));
+                        }
+                    }
+                    
+                    Err(format!("Content library '{}' not found in virtual path '{}'", first_str, p))
+                } else {
+                    Err(format!("Invalid virtual path: '{}'", p))
+                }
             };
 
             let result_raw: Result<serde_json::Value, String> = match std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
@@ -56,7 +79,7 @@ macro_rules! define_tools {
                                     let $input = parsed_input;
                                     let $config = config;
                                     let $root_path = root_path;
-                                    let $is_safe = &is_safe_path;
+                                    let $resolve_path = &resolve_and_check_path;
                                     let res = $exec;
                                     res.map(|r| serde_json::to_value(r).unwrap())
                                 },
@@ -106,39 +129,84 @@ define_tools! {
         description: "Replace exact occurrences of old_string with new_string in a file.",
         input: crate::tools::dtos::ReplaceTextInput,
         enabled: |_| true,
-        execute: |_config, root_path, input, is_safe| {
-            if !is_safe(&input.path) { return Err("Invalid path".to_string()); }
-            crate::tools::filesystem::tool_replace_text(&root_path.join(input.path).to_string_lossy(), &input.old_string, &input.new_string)
+        execute: |_config, _root_path, input, resolve_path| {
+            let path = resolve_path(&input.path)?.ok_or_else(|| "Cannot perform this operation on the virtual root".to_string())?;
+            crate::tools::filesystem::tool_replace_text(&path.to_string_lossy(), &input.old_string, &input.new_string)
         }
     },    {
         name: "grep",
         description: "Search for a query string case-insensitively across all Markdown files in the workspace.",
         input: crate::tools::dtos::GrepInput,
         enabled: |_| true,
-        execute: |_config, root_path, input, _is_safe| crate::tools::filesystem::tool_grep(root_path, &input.query)
+        execute: |config, _root_path, input, _resolve_path| {
+            let mut all_results = Vec::new();
+            for lib in &config.content_libraries {
+                if let Ok(res) = crate::tools::filesystem::tool_grep(Path::new(&lib.root_folder), &lib.name, &input.query) {
+                    if res.matches != "No matches found." {
+                        all_results.push(res.matches);
+                    }
+                }
+            }
+            if all_results.is_empty() {
+                Ok(crate::tools::dtos::GrepResponse { matches: "No matches found.".to_string() })
+            } else {
+                Ok(crate::tools::dtos::GrepResponse { matches: all_results.join("\n") })
+            }
+        }
     },
     {
         name: "read_tags",
         description: "Get all unique tags defined in front-matter headers of all Markdown files in the workspace.",
         input: crate::tools::dtos::ReadTagsInput,
         enabled: |_| true,
-        execute: |_config, root_path, _input, _is_safe| crate::tools::filesystem::tool_read_tags(root_path)
+        execute: |config, _root_path, _input, _resolve_path| {
+            let mut count = 0;
+            for lib in &config.content_libraries {
+                if let Ok(res) = crate::tools::filesystem::tool_read_tags(Path::new(&lib.root_folder)) {
+                    if let Some(c) = res.tags_found.strip_prefix("Tags found: ") {
+                        if let Ok(num) = c.parse::<usize>() {
+                            count += num;
+                        }
+                    }
+                }
+            }
+            Ok(crate::tools::dtos::ReadTagsResponse { tags_found: format!("Tags found: {}", count) })
+        }
     },
     {
         name: "list_files_by_tag",
         description: "List all Markdown files that contain a specific tag in their front-matter.",
         input: crate::tools::dtos::ListFilesByTagInput,
         enabled: |_| true,
-        execute: |_config, root_path, input, _is_safe| crate::tools::filesystem::tool_list_files_by_tag(root_path, &input.tag)
+        execute: |config, _root_path, input, _resolve_path| {
+            let mut all_results = Vec::new();
+            for lib in &config.content_libraries {
+                if let Ok(res) = crate::tools::filesystem::tool_list_files_by_tag(Path::new(&lib.root_folder), &lib.name, &input.tag) {
+                    if res.files != "No matching files found." {
+                        all_results.push(res.files);
+                    }
+                }
+            }
+            if all_results.is_empty() {
+                Ok(crate::tools::dtos::ListFilesByTagResponse { files: "No matching files found.".to_string() })
+            } else {
+                Ok(crate::tools::dtos::ListFilesByTagResponse { files: all_results.join("\n") })
+            }
+        }
     },
     {
         name: "list_files",
         description: "List all Markdown files in a directory (not recursive).",
         input: crate::tools::dtos::ListFilesInput,
         enabled: |_| true,
-        execute: |_config, root_path, input, is_safe| {
-            if !is_safe(&input.path) { return Err("Invalid path".to_string()); }
-            crate::tools::filesystem::tool_list_files(&root_path.join(input.path))
+        execute: |config, _root_path, input, resolve_path| {
+            match resolve_path(&input.path)? {
+                Some(path) => crate::tools::filesystem::tool_list_files(&path, &input.path),
+                None => {
+                    let libs: Vec<String> = config.content_libraries.iter().map(|lib| lib.name.clone()).collect();
+                    Ok(crate::tools::dtos::ListFilesResponse { files: libs.join("\n") })
+                }
+            }
         }
     },
     {
@@ -146,9 +214,9 @@ define_tools! {
         description: "Read the entire text contents of a file at the specified path.",
         input: crate::tools::dtos::ReadFileInput,
         enabled: |_| true,
-        execute: |_config, root_path, input, is_safe| {
-            if !is_safe(&input.path) { return Err("Invalid path".to_string()); }
-            crate::tools::filesystem::tool_read_file(&root_path.join(input.path).to_string_lossy())
+        execute: |_config, _root_path, input, resolve_path| {
+            let path = resolve_path(&input.path)?.ok_or_else(|| "Cannot perform this operation on the virtual root".to_string())?;
+            crate::tools::filesystem::tool_read_file(&path.to_string_lossy())
         }
     },
     {
@@ -156,9 +224,9 @@ define_tools! {
         description: "Read specific lines from a file (1-indexed).",
         input: crate::tools::dtos::ReadFileLinesInput,
         enabled: |_| true,
-        execute: |_config, root_path, input, is_safe| {
-            if !is_safe(&input.path) { return Err("Invalid path".to_string()); }
-            crate::tools::filesystem::tool_read_file_lines(&root_path.join(input.path).to_string_lossy(), input.start_line, input.end_line)
+        execute: |_config, _root_path, input, resolve_path| {
+            let path = resolve_path(&input.path)?.ok_or_else(|| "Cannot perform this operation on the virtual root".to_string())?;
+            crate::tools::filesystem::tool_read_file_lines(&path.to_string_lossy(), input.start_line, input.end_line)
         }
     },
     {
@@ -166,9 +234,9 @@ define_tools! {
         description: "Create a new file at the specified path with the provided content.",
         input: crate::tools::dtos::CreateFileInput,
         enabled: |_| true,
-        execute: |_config, root_path, input, is_safe| {
-            if !is_safe(&input.path) { return Err("Invalid path".to_string()); }
-            crate::tools::filesystem::tool_create_file(&root_path.join(input.path).to_string_lossy(), &input.content)
+        execute: |_config, _root_path, input, resolve_path| {
+            let path = resolve_path(&input.path)?.ok_or_else(|| "Cannot perform this operation on the virtual root".to_string())?;
+            crate::tools::filesystem::tool_create_file(&path.to_string_lossy(), &input.content)
         }
     },
     {
@@ -176,9 +244,9 @@ define_tools! {
         description: "Insert lines into a file at a specific 1-indexed line index.",
         input: crate::tools::dtos::InsertLinesInput,
         enabled: |_| true,
-        execute: |_config, root_path, input, is_safe| {
-            if !is_safe(&input.path) { return Err("Invalid path".to_string()); }
-            crate::tools::filesystem::tool_insert_lines(&root_path.join(input.path).to_string_lossy(), input.line_index, &input.lines)
+        execute: |_config, _root_path, input, resolve_path| {
+            let path = resolve_path(&input.path)?.ok_or_else(|| "Cannot perform this operation on the virtual root".to_string())?;
+            crate::tools::filesystem::tool_insert_lines(&path.to_string_lossy(), input.line_index, &input.lines)
         }
     },
     {
@@ -186,9 +254,9 @@ define_tools! {
         description: "Delete specific lines from a file (1-indexed, inclusive).",
         input: crate::tools::dtos::DeleteLinesInput,
         enabled: |_| true,
-        execute: |_config, root_path, input, is_safe| {
-            if !is_safe(&input.path) { return Err("Invalid path".to_string()); }
-            crate::tools::filesystem::tool_delete_lines(&root_path.join(input.path).to_string_lossy(), input.start_line, input.end_line)
+        execute: |_config, _root_path, input, resolve_path| {
+            let path = resolve_path(&input.path)?.ok_or_else(|| "Cannot perform this operation on the virtual root".to_string())?;
+            crate::tools::filesystem::tool_delete_lines(&path.to_string_lossy(), input.start_line, input.end_line)
         }
     },
     {
@@ -203,9 +271,9 @@ define_tools! {
         description: "Parse a YAML header from a markdown file and return its content representation. Tip: Use this to read a document's summary before reading the full file if you are not sure the full contents are needed, to protect context.",
         input: crate::tools::dtos::ReadYamlHeaderInput,
         enabled: |_| true,
-        execute: |_config, root_path, input, is_safe| {
-            if !is_safe(&input.path) { return Err("Invalid path".to_string()); }
-            crate::tools::yaml_header::tool_read_yaml_header(&root_path.join(input.path).to_string_lossy())
+        execute: |_config, _root_path, input, resolve_path| {
+            let path = resolve_path(&input.path)?.ok_or_else(|| "Cannot perform this operation on the virtual root".to_string())?;
+            crate::tools::yaml_header::tool_read_yaml_header(&path.to_string_lossy())
         }
     },
     {
@@ -213,9 +281,9 @@ define_tools! {
         description: "Write or update data in a YAML header to a markdown file.",
         input: crate::tools::dtos::WriteYamlHeaderInput,
         enabled: |_| true,
-        execute: |_config, root_path, input, is_safe| {
-            if !is_safe(&input.path) { return Err("Invalid path".to_string()); }
-            crate::tools::yaml_header::tool_write_yaml_header(&root_path.join(input.path).to_string_lossy(), input.title.as_deref(), input.summary.as_deref(), input.tags, input.header_date.as_deref())
+        execute: |_config, _root_path, input, resolve_path| {
+            let path = resolve_path(&input.path)?.ok_or_else(|| "Cannot perform this operation on the virtual root".to_string())?;
+            crate::tools::yaml_header::tool_write_yaml_header(&path.to_string_lossy(), input.title.as_deref(), input.summary.as_deref(), input.tags, input.header_date.as_deref())
         }
     },
     {
@@ -330,20 +398,36 @@ mod tests {
     use std::path::Path;
 
     #[test]
-    fn test_is_safe_path() {
-        let config = AppConfig::default();
+    fn test_resolve_virtual_path() {
+        let mut config = AppConfig::default();
+        config.content_libraries.push(crate::config::ContentLibrary {
+            name: "TestLib".to_string(),
+            root_folder: "C:\\TestRoot".to_string(),
+            kind: "text".to_string(),
+            readonly: false,
+        });
         let root = Path::new("C:\\TestRoot");
         
-        let res1 = execute_tool(&config, root, "read_file", r#"{"path": "C:\\TestRoot\\sub\\file.md"}"#);
-        assert!(!res1.contains("Invalid path"));
+        // This will succeed in resolving to C:\TestRoot\sub\file.md
+        let res1 = execute_tool(&config, root, "read_file", r#"{"path": "TestLib\\sub\\file.md"}"#);
+        assert!(!res1.contains("Invalid virtual path"));
 
-        let res2 = execute_tool(&config, root, "read_file", r#"{"path": "c:\\testroot\\sub\\file.md"}"#);
-        assert!(!res2.contains("Invalid path"));
-
-        let res3 = execute_tool(&config, root, "read_file", r#"{"path": "C:\\TestRoot\\..\\Windows\\System32\\cmd.exe"}"#);
-        assert!(res3.contains("Invalid path"));
+        // Path traversal is blocked
+        let res3 = execute_tool(&config, root, "read_file", r#"{"path": "TestLib\\..\\Windows\\System32\\cmd.exe"}"#);
+        assert!(res3.contains("Path traversal not allowed"));
         
-        let res4 = execute_tool(&config, root, "read_file", r#"{"path": "C:\\Windows\\System32\\cmd.exe"}"#);
-        assert!(res4.contains("Invalid path"));
+        // Unknown library
+        let res4 = execute_tool(&config, root, "read_file", r#"{"path": "UnknownLib\\file.md"}"#);
+        assert!(res4.contains("Content library 'UnknownLib' not found"));
+
+        // Resolving root dir / and .
+        let res5 = execute_tool(&config, root, "list_files", r#"{"path": "."}"#);
+        assert!(!res5.contains("Invalid virtual path") && !res5.contains("error"));
+        // Since it's list_files on root, it should return TestLib
+        assert!(res5.contains("TestLib"));
+
+        let res6 = execute_tool(&config, root, "list_files", r#"{"path": "/"}"#);
+        assert!(!res6.contains("Invalid virtual path") && !res6.contains("error"));
+        assert!(res6.contains("TestLib"));
     }
 }
