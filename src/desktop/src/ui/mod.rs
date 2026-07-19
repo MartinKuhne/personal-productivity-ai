@@ -1,9 +1,9 @@
-mod app;
 mod panels;
 mod modals;
-
 mod tree;
-mod render;
+pub mod render;
+pub mod app;
+pub mod background_logs;
 
 pub use app::{FastMdApp, TreeNode, ToCEntry};
 pub use tree::{draw_tree_node, TreeNodeContext};
