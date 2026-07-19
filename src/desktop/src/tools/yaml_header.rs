@@ -2,16 +2,16 @@ use crate::utils::markdown::parse_front_matter;
 use serde_yaml::{Mapping, Value};
 use std::path::Path;
 
-pub fn tool_read_yaml_header(path_str: &str) -> String {
+pub fn tool_read_yaml_header(path_str: &str) -> Result<crate::tools::dtos::ReadYamlHeaderResponse, String> {
     match std::fs::read_to_string(path_str) {
         Ok(content) => {
             if let Some((yaml_val, _)) = parse_front_matter(&content) {
-                format!("{:#?}", yaml_val)
+                Ok(crate::tools::dtos::ReadYamlHeaderResponse { content: format!("{:#?}", yaml_val) })
             } else {
-                "No YAML header found in this file.".to_string()
+                Err("No YAML header found in this file.".to_string())
             }
         }
-        Err(e) => format!("Error reading file: {}", e),
+        Err(e) => Err(format!("Failed to read file: {}", e)),
     }
 }
 
@@ -21,7 +21,7 @@ pub fn tool_write_yaml_header(
     summary: Option<&str>,
     tags: Option<Vec<String>>,
     header_date: Option<&str>,
-) -> String {
+) -> Result<crate::tools::dtos::WriteYamlHeaderResponse, String> {
     let current_content = std::fs::read_to_string(path_str).unwrap_or_else(|_| "".to_string());
 
     let markdown_body = if let Some((_, md)) = parse_front_matter(&current_content) {
@@ -59,11 +59,11 @@ pub fn tool_write_yaml_header(
                 let _ = std::fs::create_dir_all(parent);
             }
             match std::fs::write(path_str, new_content) {
-                Ok(_) => "YAML header written successfully.".to_string(),
-                Err(e) => format!("Error writing file: {}", e),
+                Ok(_) => Ok(crate::tools::dtos::WriteYamlHeaderResponse { result: "YAML header written successfully.".to_string() }),
+                Err(e) => Err(format!("Failed to write file: {}", e)),
             }
         }
-        Err(e) => format!("Error serializing value to YAML: {}", e),
+        Err(e) => Err(format!("Failed to serialize value to YAML: {}", e)),
     }
 }
 
@@ -79,7 +79,7 @@ mod tests {
         let file_path = dir.path().join("test.md");
         fs::write(&file_path, "---\ntitle: Test\ntags: [tag1]\n---\nContent").unwrap();
         
-        let result = tool_read_yaml_header(file_path.to_str().unwrap());
+        let result = tool_read_yaml_header(file_path.to_str().unwrap()).unwrap().content;
         assert!(result.contains("title"));
         assert!(result.contains("Test"));
     }
@@ -91,7 +91,7 @@ mod tests {
         fs::write(&file_path, "No header here").unwrap();
         
         let result = tool_read_yaml_header(file_path.to_str().unwrap());
-        assert_eq!(result, "No YAML header found in this file.");
+        assert_eq!(result.unwrap_err(), "No YAML header found in this file.");
     }
 
     #[test]
@@ -105,7 +105,7 @@ mod tests {
             Some("Test summary"),
             Some(vec!["tag1".to_string(), "tag2".to_string()]),
             Some("2024-01-01T00:00:00Z"),
-        );
+        ).unwrap().result;
         
         assert_eq!(result, "YAML header written successfully.");
         
@@ -130,7 +130,7 @@ mod tests {
             None,
             None,
             None,
-        );
+        ).unwrap().result;
         
         assert_eq!(result, "YAML header written successfully.");
         
@@ -151,7 +151,7 @@ mod tests {
             None,
             None,
             None,
-        );
+        ).unwrap().result;
         
         assert_eq!(result, "YAML header written successfully.");
         assert!(file_path.exists());

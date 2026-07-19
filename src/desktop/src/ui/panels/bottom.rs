@@ -71,7 +71,7 @@ pub fn show_bottom_panel(app: &mut FastMdApp, ctx: &egui::Context) {
                         let config = crate::config::load_config();
                         let mut output = "Available Models:\n".to_string();
                         for (name, model_cfg) in &config.models {
-                            output.push_str(&format!("- {}: {}\n", name, model_cfg.model));
+                            output.push_str(&format!("- {} (Cost: {}): {}\n", name, model_cfg.get_cost(), model_cfg.model));
                         }
                         if config.models.is_empty() {
                             output.push_str("No additional models configured.\n");

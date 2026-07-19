@@ -103,29 +103,35 @@ fn render_heading(ui: &mut egui::Ui, title: &str, level: u32, scroll_to_id: &mut
 
 pub fn render_yaml_table(ui: &mut egui::Ui, yaml: &serde_yaml::Value) {
     if let Some(mapping) = yaml.as_mapping() {
-        egui::ScrollArea::horizontal().id_source("yaml_scroll").show(ui, |ui| {
-            egui::Grid::new("yaml_grid")
-                .num_columns(2)
-                .striped(true)
-                .spacing([10.0, 4.0])
-                .show(ui, |ui| {
-                    for (key, value) in mapping {
-                        if let Some(key_str) = key.as_str() {
-                            ui.label(RichText::new(key_str).strong().monospace());
-                            let val_str = match value {
-                                serde_yaml::Value::String(s) => s.clone(),
-                                serde_yaml::Value::Sequence(seq) => {
-                                    let items: Vec<String> = seq.iter().map(|v| v.as_str().unwrap_or("").to_string()).collect();
-                                    items.join(", ")
+        egui::Frame::none()
+            .fill(egui::Color32::from_rgb(15, 25, 65)) // Dark blue background
+            .inner_margin(8.0)
+            .rounding(4.0)
+            .show(ui, |ui| {
+                egui::ScrollArea::horizontal().id_source("yaml_scroll").show(ui, |ui| {
+                    egui::Grid::new("yaml_grid")
+                        .num_columns(2)
+                        .striped(true)
+                        .spacing([10.0, 4.0])
+                        .show(ui, |ui| {
+                            for (key, value) in mapping {
+                                if let Some(key_str) = key.as_str() {
+                                    ui.label(RichText::new(key_str).strong().monospace().color(egui::Color32::WHITE));
+                                    let val_str = match value {
+                                        serde_yaml::Value::String(s) => s.clone(),
+                                        serde_yaml::Value::Sequence(seq) => {
+                                            let items: Vec<String> = seq.iter().map(|v| v.as_str().unwrap_or("").to_string()).collect();
+                                            items.join(", ")
+                                        }
+                                        _ => serde_yaml::to_string(value).unwrap_or_default(),
+                                    };
+                                    ui.label(RichText::new(val_str).monospace().color(egui::Color32::WHITE));
+                                    ui.end_row();
                                 }
-                                _ => serde_yaml::to_string(value).unwrap_or_default(),
-                            };
-                            ui.label(RichText::new(val_str).monospace());
-                            ui.end_row();
-                        }
-                    }
+                            }
+                        });
                 });
-        });
+            });
         ui.add_space(8.0);
     }
 }

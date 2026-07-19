@@ -20,6 +20,19 @@ pub struct LlmConfig {
     pub model: String,
     pub api_url: String,
     pub api_key: String,
+    #[serde(default)]
+    pub cost: Option<i32>,
+    #[serde(default)]
+    pub capabilities: Option<String>,
+}
+
+impl LlmConfig {
+    pub fn get_cost(&self) -> i32 {
+        self.cost.unwrap_or(1)
+    }
+    pub fn get_capabilities(&self) -> String {
+        self.capabilities.clone().unwrap_or_else(|| "chat".to_string())
+    }
 }
 
 #[derive(serde::Serialize, serde::Deserialize, Clone, Debug)]
@@ -28,6 +41,16 @@ pub struct AppConfig {
     pub api_url: String,
     pub model: String,
     pub api_key: String,
+    #[serde(default)]
+    pub user_name: Option<String>,
+    #[serde(default)]
+    pub user_address: Option<String>,
+    #[serde(default)]
+    pub user_age: Option<u32>,
+    #[serde(default)]
+    pub user_gender: Option<String>,
+    #[serde(default)]
+    pub system_prompt_extension: Option<String>,
     #[serde(default)]
     pub models: HashMap<String, LlmConfig>,
     #[serde(default)]
@@ -44,6 +67,11 @@ impl Default for AppConfig {
             api_url: "https://openrouter.ai/api/v1".to_string(),
             model: "google/gemini-2.5-flash:free".to_string(),
             api_key: "your-api-key-here".to_string(),
+            user_name: None,
+            user_address: None,
+            user_age: None,
+            user_gender: None,
+            system_prompt_extension: None,
             models: HashMap::new(),
             searxng_url: Some("http://localhost:8090".to_string()),
             jmap_clients: HashMap::new(),
