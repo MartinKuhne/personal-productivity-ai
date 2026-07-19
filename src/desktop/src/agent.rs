@@ -18,6 +18,28 @@ fn split_thinking_and_content(text: &str) -> (String, String) {
     ("".to_string(), text.to_string())
 }
 
+pub fn get_base_system_prompt(config: &crate::config::AppConfig) -> String {
+    let date_str = chrono::Local::now().format("%Y-%m-%d %H:%M:%S").to_string();
+    let mut system_prompt = format!("You are FastMD Agent, an autonomous assistant helper for managing the Markdown workspace. You can read, create, search, and edit files, fetch web pages, and manage tags using your tools. Help the user achieve their goal by using tools step by step. Respond to the user using Markdown format.\n\nToday's date and time is: {}", date_str);
+
+    if let Some(name) = &config.user_name {
+        system_prompt.push_str(&format!("\nUser's Name: {}", name));
+    }
+    if let Some(address) = &config.user_address {
+        system_prompt.push_str(&format!("\nUser's Address: {}", address));
+    }
+    if let Some(age) = config.user_age {
+        system_prompt.push_str(&format!("\nUser's Age: {}", age));
+    }
+    if let Some(gender) = &config.user_gender {
+        system_prompt.push_str(&format!("\nUser's Gender: {}", gender));
+    }
+    if let Some(ext) = &config.system_prompt_extension {
+        system_prompt.push_str(&format!("\n{}", ext));
+    }
+    system_prompt
+}
+
 pub fn run_agent(
     tx_gui_agent: Sender<BackgroundMessage>,
     root_path_agent: PathBuf,
@@ -55,8 +77,7 @@ pub fn run_agent(
             return;
         }
 
-        let date_str = chrono::Local::now().format("%Y-%m-%d %H:%M:%S").to_string();
-        let mut system_prompt = format!("You are FastMD Agent, an autonomous assistant helper for managing the Markdown workspace. You can read, create, search, and edit files, fetch web pages, and manage tags using your tools. Help the user achieve their goal by using tools step by step. Respond to the user using Markdown format.\n\nToday's date and time is: {}", date_str);
+        let mut system_prompt = get_base_system_prompt(&config);
         if let Some(active) = active_file {
             let rel = active.strip_prefix(&root_path_agent).unwrap_or(&active);
             system_prompt.push_str(&format!(
@@ -132,6 +153,15 @@ pub fn run_agent(
             .send_json(request_body)
             {
                 Ok(resp) => resp,
+                Err(ureq::Error::Status(code, resp)) => {
+                    let body = resp.into_string().unwrap_or_else(|_| "[Could not read body]".to_string());
+                    eprintln!("AI API Error: Status {} - Body: {}", code, body);
+                    let _ = tx_gui_agent.send(BackgroundMessage::AgentFailed(format!(
+                        "HTTP Request failed with status {}: {}",
+                        code, body
+                    )));
+                    return;
+                }
                 Err(e) => {
                     let _ = tx_gui_agent.send(BackgroundMessage::AgentFailed(format!(
                         "HTTP Request failed: {}",
@@ -203,20 +233,58 @@ pub fn run_agent(
 
                 messages.push(message.clone());
 
-                for tool_call in tool_calls {
-                    let call_id = tool_call.get("id").and_then(|id| id.as_str()).unwrap_or("");
-                    let func_name = tool_call
-                        .get("function")
-                        .and_then(|f| f.get("name"))
-                        .and_then(|n| n.as_str())
-                        .unwrap_or("");
-                    let func_args_str = tool_call
-                        .get("function")
-                        .and_then(|f| f.get("arguments"))
-                        .and_then(|a| a.as_str())
-                        .unwrap_or("{}");
+                let mut safe_calls = Vec::new();
+                let mut unsafe_calls = Vec::new();
 
-                    let (formatted_args, _is_empty_args) = match serde_json::from_str::<serde_json::Value>(func_args_str) {
+                for tool_call in tool_calls {
+                    let func_name = tool_call.get("function").and_then(|f| f.get("name")).and_then(|n| n.as_str()).unwrap_or("");
+                    let is_safe = matches!(func_name, "grep" | "read_tags" | "list_files_by_tag" | "list_files" | "read_file" | "read_file_lines" | "web_fetch" | "read_yaml_header" | "web_search" | "search_calendar" | "get_calendar" | "get_calendar_item" | "search_email" | "get_email_by_id" | "get_email" | "search_contact" | "get_contact");
+                    if is_safe {
+                        safe_calls.push(tool_call.clone());
+                    } else {
+                        unsafe_calls.push(tool_call.clone());
+                    }
+                }
+
+                let rt = tokio::runtime::Builder::new_multi_thread().enable_all().build().unwrap();
+                let config_arc = std::sync::Arc::new(config.clone());
+                let root_path_arc = std::sync::Arc::new(root_path_agent.clone());
+
+                let mut completed_results = Vec::new();
+
+                rt.block_on(async {
+                    let mut join_set = tokio::task::JoinSet::new();
+                    for tool_call in safe_calls {
+                        let call_id = tool_call.get("id").and_then(|id| id.as_str()).unwrap_or("").to_string();
+                        let func_name = tool_call.get("function").and_then(|f| f.get("name")).and_then(|n| n.as_str()).unwrap_or("").to_string();
+                        let func_args_str = tool_call.get("function").and_then(|f| f.get("arguments")).and_then(|a| a.as_str()).unwrap_or("{}").to_string();
+                        let cfg = config_arc.clone();
+                        let rp = root_path_arc.clone();
+                        let tool_call_clone = tool_call.clone();
+                        
+                        join_set.spawn_blocking(move || {
+                            let result = execute_tool(&cfg, &rp, &func_name, &func_args_str);
+                            (tool_call_clone, call_id, func_name, func_args_str, result)
+                        });
+                    }
+                    while let Some(res) = join_set.join_next().await {
+                        if let Ok(data) = res {
+                            completed_results.push(data);
+                        }
+                    }
+                });
+
+                for tool_call in unsafe_calls {
+                    let call_id = tool_call.get("id").and_then(|id| id.as_str()).unwrap_or("").to_string();
+                    let func_name = tool_call.get("function").and_then(|f| f.get("name")).and_then(|n| n.as_str()).unwrap_or("").to_string();
+                    let func_args_str = tool_call.get("function").and_then(|f| f.get("arguments")).and_then(|a| a.as_str()).unwrap_or("{}").to_string();
+                    
+                    let result = execute_tool(&config, &root_path_agent, &func_name, &func_args_str);
+                    completed_results.push((tool_call.clone(), call_id, func_name, func_args_str, result));
+                }
+
+                for (_tool_call, call_id, func_name, func_args_str, result) in completed_results {
+                    let (formatted_args, _is_empty_args) = match serde_json::from_str::<serde_json::Value>(&func_args_str) {
                         Ok(val) => {
                             let empty = match &val {
                                 serde_json::Value::Object(o) => o.is_empty(),
@@ -236,7 +304,7 @@ pub fn run_agent(
 
                     let tool_msg = if func_name == "create_file" {
                         let mut msg = format!("> **Executing tool `{}`**\n", func_name);
-                        if let Ok(args_val) = serde_json::from_str::<serde_json::Value>(func_args_str) {
+                        if let Ok(args_val) = serde_json::from_str::<serde_json::Value>(&func_args_str) {
                             let path = args_val.get("path").and_then(|p| p.as_str()).unwrap_or("unknown");
                             msg.push_str(&format!("> Path: `{}`\n", path));
                         }
@@ -248,32 +316,47 @@ pub fn run_agent(
                     full_response.push_str("\n\n");
                     let _ = tx_gui_agent.send(BackgroundMessage::AgentResponse(full_response.clone()));
 
-                    println!("--- Calling tool {} with arguments ---\n{}", func_name, formatted_args);
-                    let result = execute_tool(&config, &root_path_agent, func_name, func_args_str);
                     println!("--- Tool {} returned ---\n{}", func_name, result);
 
-                    let result_msg = if result.starts_with("Error") {
-                        format!("> **Result:** {}\n\n", result)
-                    } else if func_name == "list_files" {
-                        let count = result.lines().count();
-                        format!("> **Result:** {} files returned.\n\n", count)
-                    } else if func_name == "web_fetch" {
-                        let count = result.lines().count();
-                        format!("> **Result:** {} markdown lines returned.\n\n", count)
-                    } else if func_name == "web_search" {
-                        let count = result.split("\n\n").filter(|s| !s.trim().is_empty()).count();
-                        format!("> **Result:** {} search results returned.\n\n", count)
-                    } else if func_name == "get_email_by_id" {
-                        let mut subject = String::new();
-                        let mut date = String::new();
-                        if let Ok(val) = serde_json::from_str::<serde_json::Value>(&result) {
-                            if let Some(list) = val.as_array() {
-                                if let Some(email) = list.first().and_then(|e| e.as_object()) {
-                                    subject = email.get("subject").and_then(|s| s.as_str()).unwrap_or("").to_string();
-                                    date = email.get("date").and_then(|d| d.as_str()).unwrap_or("").to_string();
+                    let mut is_error = false;
+                    let mut error_msg = String::new();
+                    let mut result_data = serde_json::Value::Null;
+                    if let Ok(parsed) = serde_json::from_str::<serde_json::Value>(&result) {
+                        if let Some(status) = parsed.get("status").and_then(|s| s.as_str()) {
+                            if status == "error" {
+                                is_error = true;
+                                error_msg = parsed.get("message").and_then(|m| m.as_str()).unwrap_or("Unknown error").to_string();
+                            } else if status == "success" {
+                                if let Some(data) = parsed.get("data") {
+                                    result_data = data.clone();
                                 }
                             }
                         }
+                    }
+
+                    let result_msg = if is_error {
+                        format!("> **Result Error:** {}\n\n", error_msg)
+                    } else if func_name == "list_files" {
+                        let content = result_data.get("files").and_then(|f| f.as_str()).unwrap_or("");
+                        let count = content.lines().count();
+                        format!("> **Result:** {} files returned.\n\n", count)
+                    } else if func_name == "web_fetch" {
+                        let content = result_data.get("content").and_then(|f| f.as_str()).unwrap_or("");
+                        let count = content.lines().count();
+                        format!("> **Result:** {} markdown lines returned.\n\n", count)
+                    } else if func_name == "web_search" {
+                        let content = result_data.get("results").and_then(|f| f.as_str()).unwrap_or("");
+                        let count = content.split("\n\n").filter(|s| !s.trim().is_empty()).count();
+                        format!("> **Result:** {} search results returned.\n\n", count)
+                    } else if func_name == "get_email_by_id" {
+                        let subject = result_data.get("result").and_then(|v| v.as_str()).and_then(|s| serde_json::from_str::<serde_json::Value>(s).ok())
+                            .and_then(|val| val.as_array().and_then(|a| a.first().cloned()))
+                            .and_then(|obj| obj.get("subject").and_then(|s| s.as_str()).map(|s| s.to_string()))
+                            .unwrap_or_default();
+                        let date = result_data.get("result").and_then(|v| v.as_str()).and_then(|s| serde_json::from_str::<serde_json::Value>(s).ok())
+                            .and_then(|val| val.as_array().and_then(|a| a.first().cloned()))
+                            .and_then(|obj| obj.get("date").and_then(|s| s.as_str()).map(|s| s.to_string()))
+                            .unwrap_or_default();
                         if !subject.is_empty() || !date.is_empty() {
                             format!("> **Result:** {} - {}\n\n", date, subject)
                         } else {
@@ -281,22 +364,10 @@ pub fn run_agent(
                         }
                     } else if func_name.starts_with("search_") {
                         let mut count = 0;
-                        if let Ok(val) = serde_json::from_str::<serde_json::Value>(&result) {
-                            if let Some(arr) = val.get("results").and_then(|r| r.as_array()) {
-                                count = arr.len();
-                            } else if let Some(arr) = val.as_array() {
-                                count = arr.len();
-                            }
-                        } else {
-                            for block in result.split("--- Client:") {
-                                if let Some(idx) = block.find('\n') {
-                                    if let Ok(val) = serde_json::from_str::<serde_json::Value>(block[idx..].trim()) {
-                                        if let Some(arr) = val.as_array() {
-                                            count += arr.len();
-                                        }
-                                    }
-                                }
-                            }
+                        if let Some(arr) = result_data.get("results").and_then(|r| r.as_str()).and_then(|s| serde_json::from_str::<serde_json::Value>(s).ok()).and_then(|v| v.as_array().cloned()) {
+                            count = arr.len();
+                        } else if let Some(arr) = result_data.as_array() {
+                            count = arr.len();
                         }
                         format!("> **Result:** {} item(s) found\n\n", count)
                     } else if result.len() < 100 && result.lines().count() <= 1 {

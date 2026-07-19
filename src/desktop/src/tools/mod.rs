@@ -4,6 +4,8 @@ pub mod web;
 pub mod yaml_header;
 pub mod jmap;
 pub mod registry;
+pub mod dtos;
+pub mod weather;
 
 pub use filesystem::{tool_grep, tool_list_files, tool_list_files_by_tag, tool_read_file, tool_read_file_lines, tool_create_file, tool_insert_lines, tool_delete_lines, tool_read_tags};
 pub use web::{tool_web_fetch, tool_web_search};
