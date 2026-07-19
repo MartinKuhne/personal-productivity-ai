@@ -8,6 +8,8 @@ pub mod agent;
 pub mod tools;
 pub mod ui;
 pub mod messages;
+pub mod background;
+
 
 pub use background_task::BackgroundTask;
 pub use config::{AppConfig, load_config, get_config_path};

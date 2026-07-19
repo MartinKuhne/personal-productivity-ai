@@ -11,6 +11,8 @@ pub fn show_top_panel(app: &mut FastMdApp, ctx: &egui::Context) {
                     .color(egui::Color32::from_rgb(100, 200, 255)),
             );
             ui.separator();
+            ui.checkbox(&mut app.show_background_logs, "Background Logs");
+            ui.separator();
 
             if !app.indexing_finished {
                 ui.spinner();
