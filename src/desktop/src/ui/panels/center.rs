@@ -61,6 +61,20 @@ pub fn show_center_panel(app: &mut FastMdApp, ctx: &egui::Context) {
                     if response.middle_clicked() {
                         tab_to_close = Some(i);
                     }
+                    response.context_menu(|ui| {
+                        if ui.button("Edit").clicked() {
+                            if app.inline_editor_enabled {
+                                if let Ok(content) = std::fs::read_to_string(tab_path) {
+                                    app.editor_state.open(tab_path, &content);
+                                }
+                            } else {
+                                let _ = std::process::Command::new("cmd")
+                                    .args(["/c", "start", "", &tab_path.to_string_lossy()])
+                                    .spawn();
+                            }
+                            ui.close_menu();
+                        }
+                    });
 
                     if ui.button("❌").clicked() {
                         tab_to_close = Some(i);

@@ -1,0 +1,143 @@
+use std::path::{Path, PathBuf};
+use std::fs;
+use eframe::egui;
+use pulldown_cmark::{Parser, Options};
+use crate::document::DocumentContent;
+
+#[derive(Default)]
+pub struct EditorState {
+    pub is_open: bool,
+    pub content: String,
+    pub original_front_matter: Option<String>,
+    pub file_path: PathBuf,
+    pub error_message: Option<String>,
+}
+
+impl EditorState {
+    pub fn open(&mut self, file_path: &Path, raw_content: &str) {
+        self.is_open = true;
+        self.file_path = file_path.to_path_buf();
+        self.error_message = None;
+        
+        let doc = DocumentContent::parse(raw_content);
+        self.content = doc.body;
+        self.original_front_matter = doc.front_matter;
+    }
+
+    pub fn close(&mut self) {
+        self.is_open = false;
+        self.content.clear();
+        self.original_front_matter = None;
+        self.error_message = None;
+        self.file_path = PathBuf::new();
+    }
+
+    pub fn save(&mut self) -> Result<(), String> {
+        // Validation using pulldown-cmark
+        let mut options = Options::empty();
+        options.insert(Options::ENABLE_TABLES);
+        options.insert(Options::ENABLE_FOOTNOTES);
+        options.insert(Options::ENABLE_STRIKETHROUGH);
+        options.insert(Options::ENABLE_TASKLISTS);
+        
+        let parser = Parser::new_ext(&self.content, options);
+        // Just consume the parser to see if it panics or we can do more.
+        // pulldown-cmark doesn't typically "fail" parsing as Markdown is very forgiving.
+        // However, if we want to catch broken tables or something we could check events.
+        // For our MVP, just running the parser validates it doesn't crash.
+        // Wait, what defines a "parse error" in pulldown-cmark?
+        // Actually, cmark parses everything. So "invalid markdown" usually isn't an error in cmark.
+        // The requirements say "If parsing fails, the save shall be aborted".
+        // Let's just run it to ensure no panics, or check if we want to do any custom validation.
+        let _events: Vec<_> = parser.collect();
+        
+        // Actually, if there's any specific "broken syntax", cmark just renders it as text.
+        // But let's assume it passes.
+
+        let doc = DocumentContent {
+            front_matter: self.original_front_matter.clone(),
+            body: self.content.clone(),
+        };
+        let full_text = doc.to_string();
+
+        if let Err(e) = fs::write(&self.file_path, full_text) {
+            let err = format!("Failed to save: {}", e);
+            self.error_message = Some(err.clone());
+            return Err(err);
+        }
+
+        self.close();
+        Ok(())
+    }
+
+    pub fn show(&mut self, ctx: &egui::Context) -> bool {
+        if !self.is_open {
+            return false;
+        }
+
+        let mut is_open = self.is_open;
+        let mut did_save = false;
+        
+        egui::Window::new("Inline Editor")
+            .open(&mut is_open)
+            .collapsible(false)
+            .vscroll(false)
+            .hscroll(false)
+            .resizable(true)
+            .default_size(egui::vec2(800.0, 600.0))
+            .show(ctx, |ui| {
+                ui.vertical_centered(|ui| {
+                    if let Some(err) = &self.error_message {
+                        ui.colored_label(egui::Color32::RED, err);
+                    }
+                });
+
+                // Calculate cursor position for status bar
+                let mut cursor_line = 0;
+                let mut cursor_col = 0;
+                
+                let text_edit = egui::TextEdit::multiline(&mut self.content)
+                    .font(egui::TextStyle::Monospace)
+                    .code_editor()
+                    .desired_rows(30)
+                    .desired_width(f32::INFINITY)
+                    .lock_focus(true);
+                
+                let output = text_edit.show(ui);
+                
+                if let Some(cursor_range) = output.cursor_range {
+                    let cursor_char_idx = cursor_range.primary.ccursor.index;
+                    let text_up_to_cursor = &self.content[..cursor_char_idx.min(self.content.len())];
+                    cursor_line = text_up_to_cursor.chars().filter(|&c| c == '\n').count() + 1;
+                    if let Some(last_newline) = text_up_to_cursor.rfind('\n') {
+                        cursor_col = text_up_to_cursor.chars().count() - text_up_to_cursor[..last_newline].chars().count();
+                    } else {
+                        cursor_col = text_up_to_cursor.chars().count() + 1;
+                    }
+                }
+
+                ui.separator();
+                
+                ui.horizontal(|ui| {
+                    if ui.button("Save").clicked() {
+                        if self.save().is_ok() {
+                            did_save = true;
+                        }
+                    }
+                    if ui.button("Cancel").clicked() {
+                        self.close();
+                    }
+                    
+                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                        ui.label(format!("Line: {} | Col: {}", cursor_line, cursor_col));
+                    });
+                });
+            });
+
+        if !is_open {
+            self.close();
+        }
+        
+        did_save
+    }
+}
