@@ -410,3 +410,86 @@ pub fn run_agent(
         let _ = tx_gui_agent.send(BackgroundMessage::AgentFinished(messages));
     });
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_split_thinking_no_delimiter() {
+        let text = "Hello world";
+        let (thinking, content) = split_thinking_and_content(text);
+        assert!(thinking.is_empty());
+        assert_eq!(content, "Hello world");
+    }
+
+    #[test]
+    fn test_split_thinking_with_delimiter() {
+        let text = "Before🤔thinking content🤔After";
+        let (thinking, content) = split_thinking_and_content(text);
+        assert_eq!(thinking, "thinking content");
+        assert_eq!(content, "BeforeAfter");
+    }
+
+    #[test]
+    fn test_split_thinking_only_opening() {
+        let text = "Before🤔no closing delimiter";
+        let (thinking, content) = split_thinking_and_content(text);
+        assert!(thinking.is_empty());
+        assert_eq!(content, text);
+    }
+
+    #[test]
+    fn test_split_thinking_empty_thinking() {
+        let text = "Before🤔🤔After";
+        let (thinking, content) = split_thinking_and_content(text);
+        assert!(thinking.is_empty());
+        assert_eq!(content, "BeforeAfter");
+    }
+
+    #[test]
+    fn test_split_thinking_adjacent() {
+        let text = "🤔think🤔";
+        let (thinking, content) = split_thinking_and_content(text);
+        assert_eq!(thinking, "think");
+        assert!(content.is_empty());
+    }
+
+    #[test]
+    fn test_split_thinking_no_surrounding_content() {
+        let text = "🤔";
+        let (thinking, content) = split_thinking_and_content(text);
+        assert!(thinking.is_empty());
+        assert_eq!(content, "🤔");
+    }
+
+    #[test]
+    fn test_get_base_system_prompt_includes_date() {
+        let config = crate::config::AppConfig::default();
+        let prompt = get_base_system_prompt(&config);
+        assert!(prompt.contains("FastMD Agent"));
+        assert!(prompt.contains("Today's date and time is"));
+    }
+
+    #[test]
+    fn test_get_base_system_prompt_with_user_info() {
+        let mut config = crate::config::AppConfig::default();
+        config.user_name = Some("Alice".to_string());
+        config.user_address = Some("123 Main St".to_string());
+        config.user_age = Some(30);
+        config.user_gender = Some("female".to_string());
+        let prompt = get_base_system_prompt(&config);
+        assert!(prompt.contains("Alice"));
+        assert!(prompt.contains("123 Main St"));
+        assert!(prompt.contains("30"));
+        assert!(prompt.contains("female"));
+    }
+
+    #[test]
+    fn test_get_base_system_prompt_with_extension() {
+        let mut config = crate::config::AppConfig::default();
+        config.system_prompt_extension = Some("Custom instructions.".to_string());
+        let prompt = get_base_system_prompt(&config);
+        assert!(prompt.contains("Custom instructions."));
+    }
+}

@@ -41,3 +41,77 @@ impl DocumentContent {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_parse_with_front_matter() {
+        let raw = "---\ntitle: Test\n---\nBody text";
+        let doc = DocumentContent::parse(raw);
+        assert_eq!(doc.front_matter, Some("---\ntitle: Test\n---".to_string()));
+        assert_eq!(doc.body, "\nBody text");
+    }
+
+    #[test]
+    fn test_parse_without_front_matter() {
+        let raw = "Just body\ncontent";
+        let doc = DocumentContent::parse(raw);
+        assert!(doc.front_matter.is_none());
+        assert_eq!(doc.body, "Just body\ncontent");
+    }
+
+    #[test]
+    fn test_parse_bom_stripped() {
+        let raw = "\u{feff}---\ntitle: Test\n---\nBody";
+        let doc = DocumentContent::parse(raw);
+        assert!(doc.front_matter.is_some());
+        assert_eq!(doc.body, "\nBody");
+    }
+
+    #[test]
+    fn test_to_string_with_front_matter() {
+        let doc = DocumentContent {
+            front_matter: Some("---\ntitle: Test\n---".to_string()),
+            body: "\nBody".to_string(),
+        };
+        let result = doc.to_string();
+        assert_eq!(result, "---\ntitle: Test\n---\nBody");
+    }
+
+    #[test]
+    fn test_to_string_without_front_matter() {
+        let doc = DocumentContent {
+            front_matter: None,
+            body: "Just body".to_string(),
+        };
+        assert_eq!(doc.to_string(), "Just body");
+    }
+
+    #[test]
+    fn test_parse_incomplete_front_matter() {
+        // Only one --- delimiter, no front matter
+        let raw = "---\nincomplete";
+        let doc = DocumentContent::parse(raw);
+        assert!(doc.front_matter.is_none());
+        assert_eq!(doc.body, "---\nincomplete");
+    }
+
+    #[test]
+    fn test_parse_front_matter_with_body_containing_dashes() {
+        let raw = "---\ntitle: Test\n---\nBody with --- inside";
+        let doc = DocumentContent::parse(raw);
+        assert_eq!(doc.front_matter, Some("---\ntitle: Test\n---".to_string()));
+        assert_eq!(doc.body, "\nBody with --- inside");
+    }
+
+    #[test]
+    fn test_to_string_empty_body() {
+        let doc = DocumentContent {
+            front_matter: Some("---\ntitle: Test\n---".to_string()),
+            body: String::new(),
+        };
+        assert_eq!(doc.to_string(), "---\ntitle: Test\n---");
+    }
+}

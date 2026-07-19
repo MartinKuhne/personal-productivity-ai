@@ -489,3 +489,130 @@ pub fn json_to_ical(json_str: &str, uid_override: Option<&str>) -> String {
     ical.push_str("END:VCALENDAR\r\n");
     ical
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    // --- parse_ical_data tests ---
+
+    #[test]
+    fn test_parse_ical_data_summary() {
+        let data = "BEGIN:VEVENT\r\nSUMMARY:Test Event\r\nDTSTART:20240101T120000\r\nDTEND:20240101T130000\r\nEND:VEVENT";
+        let ev = parse_ical_data("client1", "/cal/item.ics", data);
+        assert_eq!(ev.client, "client1");
+        assert_eq!(ev.href, "/cal/item.ics");
+        assert_eq!(ev.summary, Some("Test Event".to_string()));
+    }
+
+    #[test]
+    fn test_parse_ical_data_dates() {
+        let data = "BEGIN:VEVENT\r\nSUMMARY:Test\r\nDTSTART:20240101T120000\r\nDTEND:20240101T130000\r\nEND:VEVENT";
+        let ev = parse_ical_data("c", "/h", data);
+        assert_eq!(ev.start, Some("2024-01-01T12:00:00".to_string()));
+        assert_eq!(ev.end, Some("2024-01-01T13:00:00".to_string()));
+    }
+
+    #[test]
+    fn test_parse_ical_data_date_only() {
+        let data = "BEGIN:VEVENT\r\nSUMMARY:All Day\r\nDTSTART;VALUE=DATE:20240101\r\nDTEND;VALUE=DATE:20240102\r\nEND:VEVENT";
+        let ev = parse_ical_data("c", "/h", data);
+        assert_eq!(ev.start, Some("2024-01-01".to_string()));
+        assert_eq!(ev.end, Some("2024-01-02".to_string()));
+    }
+
+    #[test]
+    fn test_parse_ical_data_description_location() {
+        let data = "BEGIN:VEVENT\r\nSUMMARY:Mtg\r\nDESCRIPTION:Discuss project\r\nLOCATION:Room 42\r\nORGANIZER:mailto:alice@test.com\r\nEND:VEVENT";
+        let ev = parse_ical_data("c", "/h", data);
+        assert_eq!(ev.description, Some("Discuss project".to_string()));
+        assert_eq!(ev.location, Some("Room 42".to_string()));
+        assert_eq!(ev.organizer, Some("mailto:alice@test.com".to_string()));
+    }
+
+    #[test]
+    fn test_parse_ical_data_unfolds_lines() {
+        let data = "BEGIN:VEVENT\r\nSUMMARY:Very long\r\n summary line\r\nDTSTART:20240101T120000\r\nEND:VEVENT";
+        let ev = parse_ical_data("c", "/h", data);
+        // The code unfolds by removing the leading space and concatenating without adding a separator
+        assert_eq!(ev.summary, Some("Very longsummary line".to_string()));
+    }
+
+    // --- json_to_ical tests ---
+
+    #[test]
+    fn test_json_to_ical_basic() {
+        let input = r#"{"summary":"Test","start":"2024-01-01T12:00:00","end":"2024-01-01T13:00:00","description":"desc","location":"loc"}"#;
+        let ical = json_to_ical(input, None);
+        assert!(ical.starts_with("BEGIN:VCALENDAR"));
+        assert!(ical.contains("BEGIN:VEVENT"));
+        assert!(ical.contains("END:VEVENT"));
+        assert!(ical.contains("END:VCALENDAR"));
+        assert!(ical.contains("SUMMARY:Test"));
+        assert!(ical.contains("DESCRIPTION:desc"));
+        assert!(ical.contains("LOCATION:loc"));
+    }
+
+    #[test]
+    fn test_json_to_ical_minimal() {
+        // Even an empty JSON should produce a valid structure
+        let input = "{}";
+        let ical = json_to_ical(input, None);
+        assert!(ical.starts_with("BEGIN:VCALENDAR"));
+        assert!(ical.contains("BEGIN:VEVENT"));
+        assert!(ical.contains("END:VEVENT"));
+        assert!(ical.contains("END:VCALENDAR"));
+        // Should have a default summary
+        assert!(ical.contains("SUMMARY:New Event"));
+    }
+
+    #[test]
+    fn test_json_to_ical_with_uid() {
+        let input = r#"{"summary":"Test"}"#;
+        let ical = json_to_ical(input, Some("custom-uid-123"));
+        assert!(ical.contains("UID:custom-uid-123"));
+    }
+
+    #[test]
+    fn test_json_to_ical_escapes_special_chars() {
+        let input = r#"{"summary":"Hello;World,Line1\nLine2"}"#;
+        let ical = json_to_ical(input, None);
+        assert!(ical.contains("Hello\\;World\\,Line1\\nLine2"));
+    }
+
+    // --- update_ical_string tests ---
+
+    #[test]
+    fn test_update_ical_string_replaces_summary() {
+        let original = "BEGIN:VCALENDAR\r\nBEGIN:VEVENT\r\nSUMMARY:Old\r\nDTSTART:20240101T120000\r\nEND:VEVENT\r\nEND:VCALENDAR";
+        let updates = serde_json::json!({"summary": "New"});
+        let result = update_ical_string(original, &updates);
+        assert!(result.contains("SUMMARY:New"));
+        assert!(!result.contains("SUMMARY:Old"));
+    }
+
+    #[test]
+    fn test_update_ical_string_adds_missing_field() {
+        // Test that a missing SUMMARY gets added at the end of VEVENT
+        let original = "BEGIN:VCALENDAR\r\nBEGIN:VEVENT\r\nDTSTART:20240101T120000\r\nEND:VEVENT\r\nEND:VCALENDAR";
+        let updates = serde_json::json!({"summary": "Added Summary"});
+        let result = update_ical_string(original, &updates);
+        assert!(result.contains("SUMMARY:Added Summary"));
+    }
+
+    #[test]
+    fn test_update_ical_string_replaces_dtstart() {
+        let original = "BEGIN:VCALENDAR\r\nBEGIN:VEVENT\r\nSUMMARY:Test\r\nDTSTART:20240101\r\nEND:VEVENT\r\nEND:VCALENDAR";
+        let updates = serde_json::json!({"start": "20250101"});
+        let result = update_ical_string(original, &updates);
+        assert!(result.contains("DTSTART;VALUE=DATE:20250101") || result.contains("DTSTART:20250101"));
+    }
+
+    #[test]
+    fn test_update_ical_string_no_updates_preserves() {
+        let original = "BEGIN:VCALENDAR\r\nBEGIN:VEVENT\r\nSUMMARY:Keep\r\nDTSTART:20240101T120000\r\nEND:VEVENT\r\nEND:VCALENDAR";
+        let updates = serde_json::json!({});
+        let result = update_ical_string(original, &updates);
+        assert!(result.contains("SUMMARY:Keep"));
+    }
+}

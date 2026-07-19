@@ -57,6 +57,7 @@ impl BackgroundTask {
         let mut last_log_time = std::time::Instant::now();
 
         for lib in &config.content_libraries {
+            let is_image_lib = lib.kind == "image";
             let root_path = PathBuf::from(&lib.root_folder);
             let walker = walkdir::WalkDir::new(&root_path)
                 .into_iter()
@@ -85,18 +86,20 @@ impl BackgroundTask {
                                 });
                             }
                         } else if matches!(ext_str.as_str(), "jpg" | "jpeg" | "png" | "gif" | "webp" | "bmp" | "tiff" | "avif") {
-                            let job = crate::background::models::ImageJob::new(path.to_path_buf());
-                            if job.should_process() {
-                                images_queued += 1;
-                                let tx_clone = tx.clone();
-                                let config_c = config.clone();
-                                std::thread::spawn(move || {
-                                    if let Ok(rt) = tokio::runtime::Runtime::new() {
-                                        rt.block_on(async {
-                                            let _ = crate::background::vision_processor::process_image(job, config_c, tx_clone).await;
-                                        });
-                                    }
-                                });
+                            if is_image_lib {
+                                let job = crate::background::models::ImageJob::new(path.to_path_buf());
+                                if job.should_process() {
+                                    images_queued += 1;
+                                    let tx_clone = tx.clone();
+                                    let config_c = config.clone();
+                                    std::thread::spawn(move || {
+                                        if let Ok(rt) = tokio::runtime::Runtime::new() {
+                                            rt.block_on(async {
+                                                let _ = crate::background::vision_processor::process_image(job, config_c, tx_clone).await;
+                                            });
+                                        }
+                                    });
+                                }
                             }
                         }
                     }
@@ -141,6 +144,15 @@ impl BackgroundTask {
                         _ => "changed",
                     };
                     
+                    let mut is_image_lib = false;
+                    for lib in &config_watcher.content_libraries {
+                        let lib_path = std::path::PathBuf::from(&lib.root_folder);
+                        if lib.kind == "image" && path.starts_with(&lib_path) {
+                            is_image_lib = true;
+                            break;
+                        }
+                    }
+                    
                     let mut is_md = false;
                     let mut is_pdf = false;
                     let mut is_img = false;
@@ -151,7 +163,9 @@ impl BackgroundTask {
                         } else if ext_str == "pdf" {
                             is_pdf = true;
                         } else if matches!(ext_str.as_str(), "jpg" | "jpeg" | "png" | "gif" | "webp" | "bmp" | "tiff" | "avif") {
-                            is_img = true;
+                            if is_image_lib {
+                                is_img = true;
+                            }
                         }
                     }
 

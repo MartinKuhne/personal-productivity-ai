@@ -433,4 +433,72 @@ mod tests {
         assert!(!res6.contains("Invalid virtual path") && !res6.contains("error"));
         assert!(res6.contains("TestLib"));
     }
+
+    #[test]
+    fn test_grep_priority_ordering() {
+        let mut config = AppConfig::default();
+        config.content_libraries.push(crate::config::ContentLibrary {
+            name: "Low".to_string(),
+            root_folder: "C:\\LowRoot".to_string(),
+            kind: "text".to_string(),
+            readonly: false,
+            priority: 0,
+        });
+        config.content_libraries.push(crate::config::ContentLibrary {
+            name: "High".to_string(),
+            root_folder: "C:\\HighRoot".to_string(),
+            kind: "text".to_string(),
+            readonly: false,
+            priority: 100,
+        });
+        let mut libs: Vec<_> = config.content_libraries.iter().collect();
+        libs.sort_by(|a, b| b.priority.cmp(&a.priority));
+        assert_eq!(libs[0].name, "High");
+        assert_eq!(libs[1].name, "Low");
+    }
+
+    #[test]
+    fn test_path_traversal_dotdot_rejected() {
+        let mut config = AppConfig::default();
+        config.content_libraries.push(crate::config::ContentLibrary {
+            name: "Lib".to_string(),
+            root_folder: "C:\\Root".to_string(),
+            kind: "text".to_string(),
+            readonly: false,
+            priority: 0,
+        });
+        let root = Path::new("C:\\Root");
+        
+        // Multiple traversals
+        let res = execute_tool(&config, root, "read_file", r#"{"path": "Lib/../../etc/passwd"}"#);
+        assert!(res.contains("Path traversal not allowed"));
+
+        // Single parent dir
+        let res2 = execute_tool(&config, root, "read_file", r#"{"path": "Lib/.."}"#);
+        assert!(res2.contains("Path traversal not allowed"));
+    }
+
+    #[test]
+    fn test_resolve_path_with_library_missing() {
+        let config = AppConfig::default();
+        let root = Path::new("C:\\");
+        let res = execute_tool(&config, root, "list_files", r#"{"path": "NonExistentLib"}"#);
+        assert!(res.contains("Content library 'NonExistentLib' not found"));
+    }
+
+    #[test]
+    fn test_unknown_tool_returns_error() {
+        let config = AppConfig::default();
+        let root = Path::new("C:\\");
+        let res = execute_tool(&config, root, "nonexistent_tool", "{}");
+        assert!(res.contains("Tool nonexistent_tool not found"));
+    }
+
+    #[test]
+    fn test_tool_invalid_args_returns_error() {
+        let config = AppConfig::default();
+        let root = Path::new("C:\\");
+        let res = execute_tool(&config, root, "list_files", "not valid json");
+        assert!(res.contains("Invalid args") || res.contains("error"));
+    }
 }

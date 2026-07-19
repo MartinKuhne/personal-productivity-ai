@@ -1430,6 +1430,7 @@ dependencies = [
  "eframe",
  "fast-dav-rs",
  "fast_h2m",
+ "filetime",
  "imap",
  "jmap-calendars-client",
  "jmap-client",
