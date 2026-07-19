@@ -15,4 +15,6 @@ pub enum BackgroundMessage {
     AgentResponse(String),
     AgentFinished(Vec<Value>),
     AgentFailed(String),
+    
+    LogEntry(crate::background::BackgroundLogEntry),
 }
