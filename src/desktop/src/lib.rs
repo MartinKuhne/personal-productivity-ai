@@ -1,4 +1,6 @@
 pub mod background_task;
+pub mod document;
+pub mod editor;
 pub mod browser;
 pub mod config;
 pub mod utils;

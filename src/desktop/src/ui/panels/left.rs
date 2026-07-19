@@ -110,6 +110,7 @@ pub fn show_left_panel(app: &mut FastMdApp, ctx: &egui::Context) {
             ui.add_space(4.0);
 
             egui::ScrollArea::vertical().id_source("left_file_tree_scroll").show(ui, |ui| {
+                let mut open_editor = None;
                 if root_node.children.is_empty() {
                     ui.label(
                         RichText::new("No markdown files found.")
@@ -140,8 +141,16 @@ pub fn show_left_panel(app: &mut FastMdApp, ctx: &egui::Context) {
                             modifiers,
                             submit_prompt: &mut app.submit_prompt,
                             content_libraries: &app.content_libraries,
+                            open_editor: &mut open_editor,
+                            inline_editor_enabled: app.inline_editor_enabled,
                         };
                         crate::ui::tree::draw_tree_node(ui, child, &mut ctx);
+                    }
+                }
+                
+                if let Some(path) = open_editor {
+                    if let Ok(content) = std::fs::read_to_string(&path) {
+                        app.editor_state.open(&path, &content);
                     }
                 }
             });

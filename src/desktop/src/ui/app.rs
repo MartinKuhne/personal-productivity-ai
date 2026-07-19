@@ -85,6 +85,8 @@ pub struct FastMdApp {
     pub agent_history: Option<Vec<serde_json::Value>>,
     pub left_panel_reset_count: u32,
     pub submit_prompt: Option<String>,
+    pub editor_state: crate::editor::EditorState,
+    pub inline_editor_enabled: bool,
 }
 
 impl FastMdApp {
@@ -158,6 +160,7 @@ impl FastMdApp {
         }
 
         let background_task = BackgroundTask::new(config.content_libraries.clone());
+        let inline_editor_enabled = config.inline_editor_enabled;
 
         Self {
             content_libraries: config.content_libraries,
@@ -202,6 +205,8 @@ impl FastMdApp {
             agent_history: None,
             left_panel_reset_count: 0,
             submit_prompt: None,
+            editor_state: crate::editor::EditorState::default(),
+            inline_editor_enabled,
         }
     }
 }
@@ -300,6 +305,12 @@ impl eframe::App for FastMdApp {
                     self.scroll_to_header_id = None;
                 }
             }
+        }
+
+        // Show inline editor overlay
+        if self.editor_state.show(ctx) {
+            // Force reload if we edited the active document
+            self.loaded_path = None;
         }
 
         // Show modals

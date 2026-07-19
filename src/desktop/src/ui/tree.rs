@@ -20,6 +20,8 @@ pub struct TreeNodeContext<'a> {
     pub modifiers: egui::Modifiers,
     pub submit_prompt: &'a mut Option<String>,
     pub content_libraries: &'a [crate::config::ContentLibrary],
+    pub open_editor: &'a mut Option<PathBuf>,
+    pub inline_editor_enabled: bool,
 }
 
 pub fn draw_tree_node(ui: &mut egui::Ui, node: &TreeNode, ctx: &mut TreeNodeContext<'_>) {
@@ -162,6 +164,16 @@ pub fn draw_tree_node(ui: &mut egui::Ui, node: &TreeNode, ctx: &mut TreeNodeCont
                 }
             } else {
                 // Single-select context menu
+                if ui.button("Edit").clicked() {
+                    if ctx.inline_editor_enabled {
+                        *ctx.open_editor = Some(node.path.clone());
+                    } else {
+                        let _ = std::process::Command::new("cmd")
+                            .args(["/c", "start", "", &node.path.to_string_lossy()])
+                            .spawn();
+                    }
+                    ui.close_menu();
+                }
                 if ui.button("Show in File Explorer").clicked() {
                     #[cfg(target_os = "windows")]
                     {
