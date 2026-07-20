@@ -1,5 +1,5 @@
 use crate::document::DocumentContent;
-use eframe::egui;
+use eframe::egui::{self, Key};
 use pulldown_cmark::{Options, Parser};
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -169,10 +169,21 @@ impl EditorState {
                 // of the app.
                 let extreme_bg = colors.background;
 
+                let mut page_scroll = 0.0;
+                if ui.input_mut(|i| i.consume_key(egui::Modifiers::NONE, Key::PageUp)) {
+                    page_scroll = -(avail - button_bar) * 0.9;
+                }
+                if ui.input_mut(|i| i.consume_key(egui::Modifiers::NONE, Key::PageDown)) {
+                    page_scroll = (avail - button_bar) * 0.9;
+                }
                 egui::ScrollArea::vertical()
                     .id_source("inline_editor_scroll")
                     .max_height(avail - button_bar)
                     .show(ui, |ui| {
+                        if page_scroll != 0.0 {
+                            ui.scroll_with_delta(egui::vec2(0.0, page_scroll));
+                        }
+
                         // Apply the inverted background to every widget
                         // state inside the scroll area (the TextEdit and
                         // its selection rectangles all read from
