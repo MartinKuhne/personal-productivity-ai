@@ -13,7 +13,7 @@ macro_rules! define_tools {
             }
         ),* $(,)?
     ) => {
-        pub fn get_tools_schema(config: &AppConfig) -> serde_json::Value {
+        pub fn get_tools_schema(config: &AppConfig, prompt: &str) -> serde_json::Value {
             let mut tools = Vec::new();
             $(
                 let is_enabled: bool = $enabled(config);
@@ -28,6 +28,7 @@ macro_rules! define_tools {
                     }));
                 }
             )*
+            tools.extend(crate::tools::csv_db::get_csv_tools(config, prompt));
             serde_json::Value::Array(tools)
         }
 
@@ -70,6 +71,9 @@ macro_rules! define_tools {
             };
 
             let result_raw: Result<serde_json::Value, String> = match std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                if let Some(res) = crate::tools::csv_db::execute_csv_tool(config, name, args_str) {
+                    return res;
+                }
                 match name {
                     $(
                         $name => {
