@@ -2,8 +2,37 @@ use crate::ui::FastMdApp;
 use eframe::egui;
 use egui::RichText;
 
+/// Determines if the right panel should be shown based on application state.
+/// Precondition: None.
+/// Postcondition: Returns true if there is a non-empty TOC and a selected file.
+/// Purity: Pure function.
+pub fn should_show_panel(has_toc: bool, has_selected_file: bool) -> bool {
+    has_toc && has_selected_file
+}
+
+/// Calculates the indentation in points for a given TOC heading level.
+/// Precondition: `level` should be the heading level (usually 1-6).
+/// Postcondition: Returns the horizontal space to indent the TOC entry.
+/// Purity: Pure function.
+pub fn calculate_indent(level: usize) -> f32 {
+    match level {
+        1 => 0.0,
+        2 => 10.0,
+        3 => 20.0,
+        _ => 0.0,
+    }
+}
+
+/// Calculates the font size for a given TOC heading level.
+/// Precondition: `level` is the heading level (usually 1-6).
+/// Postcondition: Returns a font size scaled appropriately for the heading level.
+/// Purity: Pure function.
+pub fn calculate_font_size(level: usize) -> f32 {
+    13.0 - (level as f32 * 0.5)
+}
+
 pub fn show_right_panel(app: &mut FastMdApp, ctx: &egui::Context) {
-    if !app.toc.is_empty() && app.selected_file.is_some() {
+    if should_show_panel(!app.toc.is_empty(), app.selected_file.is_some()) {
         egui::SidePanel::right("toc_panel")
             .width_range(150.0..=250.0)
             .resizable(true)
@@ -19,22 +48,52 @@ pub fn show_right_panel(app: &mut FastMdApp, ctx: &egui::Context) {
 
                 egui::ScrollArea::vertical().id_source("right_toc_scroll").show(ui, |ui| {
                     for entry in &app.toc {
-                        let indent = match entry.level {
-                            1 => 0.0,
-                            2 => 10.0,
-                            3 => 20.0,
-                            _ => 0.0,
-                        };
+                        let indent = calculate_indent(entry.level as usize);
                         ui.horizontal(|ui| {
                             ui.add_space(indent);
                             let label = egui::RichText::new(&entry.title)
-                                .size(13.0 - (entry.level as f32 * 0.5));
+                                .size(calculate_font_size(entry.level as usize));
                             if ui.selectable_label(false, label).clicked() {
-                                app.scroll_to_header_id = Some(entry.id);
+                                app.scroll_to_header_id = Some(entry.id.clone());
                             }
                         });
                     }
                 });
             });
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_should_show_panel() {
+        assert_eq!(should_show_panel(true, true), true);
+        assert_eq!(should_show_panel(false, true), false);
+        assert_eq!(should_show_panel(true, false), false);
+        assert_eq!(should_show_panel(false, false), false);
+    }
+
+    #[test]
+    fn test_calculate_indent() {
+        assert_eq!(calculate_indent(1), 0.0);
+        assert_eq!(calculate_indent(2), 10.0);
+        assert_eq!(calculate_indent(3), 20.0);
+        assert_eq!(calculate_indent(4), 0.0); // Fallback
+        assert_eq!(calculate_indent(99), 0.0); // Edge case
+    }
+
+    #[test]
+    fn test_calculate_font_size() {
+        assert_eq!(calculate_font_size(1), 12.5);
+        assert_eq!(calculate_font_size(2), 12.0);
+        assert_eq!(calculate_font_size(3), 11.5);
+        
+        // Property-based check equivalent for boundaries (1 to 6)
+        for level in 1..=6 {
+            let expected = 13.0 - (level as f32 * 0.5);
+            assert_eq!(calculate_font_size(level), expected);
+        }
     }
 }

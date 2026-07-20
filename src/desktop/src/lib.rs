@@ -9,6 +9,7 @@ pub mod tools;
 pub mod ui;
 pub mod messages;
 pub mod background;
+pub mod print;
 
 
 pub use background_task::Task;
@@ -18,3 +19,4 @@ pub use agent::run_agent;
 pub use tools::{execute_tool, get_tools_schema};
 pub use ui::FastMdApp;
 pub use messages::BackgroundMessage;
+pub use print::{PrintJob, execute_print_blocking};

@@ -7,6 +7,7 @@ pub enum LogCategory {
     PdfConverter,
     ImageVision,
     LlmTools,
+    Print,
 }
 
 #[cfg(test)]
@@ -82,6 +83,7 @@ impl std::fmt::Display for LogCategory {
             LogCategory::PdfConverter => "PDF Converter",
             LogCategory::ImageVision => "Image Vision",
             LogCategory::LlmTools => "LLM Tools",
+            LogCategory::Print => "Print",
         };
         write!(f, "{}", s)
     }
@@ -114,14 +116,20 @@ impl ImageJob {
     pub fn new(image_path: std::path::PathBuf) -> Self {
         let mut md_path = image_path.clone();
         md_path.set_extension("md");
-        Self { image_path, md_path }
+        Self {
+            image_path,
+            md_path,
+        }
     }
 
     pub fn should_process(&self) -> bool {
         if !self.md_path.exists() {
             return true;
         }
-        if let (Ok(img_meta), Ok(md_meta)) = (std::fs::metadata(&self.image_path), std::fs::metadata(&self.md_path)) {
+        if let (Ok(img_meta), Ok(md_meta)) = (
+            std::fs::metadata(&self.image_path),
+            std::fs::metadata(&self.md_path),
+        ) {
             if let (Ok(img_time), Ok(md_time)) = (img_meta.modified(), md_meta.modified()) {
                 return img_time > md_time;
             }
@@ -129,4 +137,3 @@ impl ImageJob {
         false
     }
 }
-
