@@ -489,9 +489,16 @@ pub fn run_agent(
                             let size = result_data.get("size_bytes").and_then(|s| s.as_u64()).unwrap_or(0);
                             format!("> **Result:** File created ({} B).\n\n", size)
                         } else if func_name == "list_files" {
-                            let content = result_data.get("files").and_then(|f| f.as_str()).unwrap_or("");
-                            let count = content.lines().count();
-                            format!("> **Result:** {} files returned.\n\n", count)
+                            let count = result_data.get("files").and_then(|f| f.as_array()).map(|a| a.len()).unwrap_or(0);
+                            let total = result_data.get("total").and_then(|t| t.as_u64()).unwrap_or(count as u64);
+                            format!("> **Result:** {} files returned (total: {}).\n\n", count, total)
+                        } else if func_name == "list_files_by_tag" {
+                            let count = result_data.get("files").and_then(|f| f.as_array()).map(|a| a.len()).unwrap_or(0);
+                            let total = result_data.get("total").and_then(|t| t.as_u64()).unwrap_or(count as u64);
+                            format!("> **Result:** {} files returned (total: {}).\n\n", count, total)
+                        } else if func_name == "read_tags" {
+                            let count = result_data.get("tags").and_then(|t| t.as_array()).map(|a| a.len()).unwrap_or(0);
+                            format!("> **Result:** {} tag(s) found.\n\n", count)
                         } else if func_name == "read_file" || func_name == "read_file_lines" {
                             let content = result_data.get("content").and_then(|f| f.as_str()).unwrap_or("");
                             let count = content.lines().count();
