@@ -8,10 +8,14 @@ pub fn tool_read_yaml_header(path_str: &str) -> Result<crate::tools::dtos::ReadY
             if let Some((yaml_val, _)) = parse_front_matter(&content) {
                 Ok(crate::tools::dtos::ReadYamlHeaderResponse { content: format!("{:#?}", yaml_val) })
             } else {
+                tracing::warn!(name = "tool.yaml.read_no_header", path = %path_str, "No YAML header found in this file. Operator should check if the file is expected to have one.");
                 Err("No YAML header found in this file.".to_string())
             }
         }
-        Err(e) => Err(format!("Failed to read file: {}", e)),
+        Err(e) => {
+            tracing::error!(name = "tool.yaml.read_failed", error = %e, path = %path_str, "Failed to read file for YAML header processing. Likely cause: file missing or permission denied.");
+            Err(format!("Failed to read file: {}", e))
+        }
     }
 }
 
@@ -60,10 +64,16 @@ pub fn tool_write_yaml_header(
             }
             match std::fs::write(path_str, new_content) {
                 Ok(_) => Ok(crate::tools::dtos::WriteYamlHeaderResponse { result: "YAML header written successfully.".to_string() }),
-                Err(e) => Err(format!("Failed to write file: {}", e)),
+                Err(e) => {
+                    tracing::error!(name = "tool.yaml.write_failed", error = %e, path = %path_str, "Failed to write file after YAML header update. Likely cause: disk full or permission denied.");
+                    Err(format!("Failed to write file: {}", e))
+                }
             }
         }
-        Err(e) => Err(format!("Failed to serialize value to YAML: {}", e)),
+        Err(e) => {
+            tracing::error!(name = "tool.yaml.serialize_failed", error = %e, path = %path_str, "Failed to serialize value to YAML. Operator should check the provided YAML parameters.");
+            Err(format!("Failed to serialize value to YAML: {}", e))
+        }
     }
 }
 

@@ -81,13 +81,23 @@ pub fn draw_tree_node(ui: &mut egui::Ui, node: &TreeNode, ctx: &mut TreeNodeCont
                 }
                 let yaml_header = "---\ntitle: New document\n---\n\n";
                 if let Err(e) = std::fs::write(&new_path, yaml_header) {
-                    eprintln!("Failed to create new document: {}", e);
+                    tracing::error!(
+                        name = "ui.file.create_failed",
+                        path = %new_path.display(),
+                        error = %e,
+                        "Failed to create new document. Likely cause: permission denied or disk full. Operator should verify directory permissions."
+                    );
                 }
                 ui.close_menu();
             }
             if ui.button("Delete").clicked() {
                 if let Err(e) = trash::delete(&node.path) {
-                    eprintln!("Failed to delete: {}", e);
+                    tracing::error!(
+                        name = "ui.directory.delete_failed",
+                        path = %node.path.display(),
+                        error = %e,
+                        "Failed to delete directory to trash. Likely cause: directory in use or permission denied. Operator should check file locks."
+                    );
                 }
                 ui.close_menu();
             }
@@ -160,7 +170,12 @@ pub fn draw_tree_node(ui: &mut egui::Ui, node: &TreeNode, ctx: &mut TreeNodeCont
                 if ui.button("Delete").clicked() {
                     for file in ctx.selected_files.iter() {
                         if let Err(e) = trash::delete(file) {
-                            eprintln!("Failed to delete: {}", e);
+                            tracing::error!(
+                                name = "ui.file.multi_delete_failed",
+                                path = %file.display(),
+                                error = %e,
+                                "Failed to delete file to trash during multi-selection. Likely cause: file in use or permission denied. Operator should check file locks."
+                            );
                         }
                     }
                     ctx.selected_files.clear();
@@ -205,11 +220,27 @@ pub fn draw_tree_node(ui: &mut egui::Ui, node: &TreeNode, ctx: &mut TreeNodeCont
                     *ctx.submit_prompt = Some(prompt);
                     ui.close_menu();
                 }
+                if ui.button("Run as prompt").clicked() {
+                    if let Ok(content) = std::fs::read_to_string(&node.path) {
+                        *ctx.submit_prompt = Some(content);
+                    } else {
+                        tracing::error!(
+                            name = "ui.file.run_as_prompt_failed",
+                            path = %node.path.display(),
+                            "Failed to read file content to run as prompt."
+                        );
+                    }
+                    ui.close_menu();
+                }
                 if ui.button("Print").clicked() {
                     let path_to_print = node.path.clone();
                     std::thread::spawn(move || {
                         if let Ok(_content) = std::fs::read_to_string(&path_to_print) {
-                            eprintln!("Print requested for: {:?}", path_to_print);
+                            tracing::info!(
+                                name = "ui.file.print_requested",
+                                path = %path_to_print.display(),
+                                "Print requested for file. Currently a stub implementation. Operator should expect no actual printing."
+                            );
                         }
                     });
                     ui.close_menu();
@@ -227,7 +258,12 @@ pub fn draw_tree_node(ui: &mut egui::Ui, node: &TreeNode, ctx: &mut TreeNodeCont
                 }
                 if ui.button("Delete").clicked() {
                     if let Err(e) = trash::delete(&node.path) {
-                        eprintln!("Failed to delete: {}", e);
+                        tracing::error!(
+                            name = "ui.file.delete_failed",
+                            path = %node.path.display(),
+                            error = %e,
+                            "Failed to delete file to trash. Likely cause: file in use or permission denied. Operator should check file locks."
+                        );
                     }
                     ui.close_menu();
                 }

@@ -72,7 +72,14 @@ impl Task {
                         let rx = rx_work_clone.lock().unwrap();
                         match rx.recv() {
                             Ok(p) => p,
-                            Err(_) => break,
+                            Err(e) => {
+                                tracing::info!(
+                                    name = "background_task.worker_shutdown",
+                                    error = %e,
+                                    "Worker channel closed. Shutting down worker thread."
+                                );
+                                break;
+                            }
                         }
                     };
 
@@ -250,10 +257,22 @@ impl Task {
         if let Ok(mut watcher) = watcher_result {
             for lib in &config.content_libraries {
                 let root_path = PathBuf::from(&lib.root_folder);
-                let _ = watcher.watch(&root_path, notify::RecursiveMode::Recursive);
+                if let Err(e) = watcher.watch(&root_path, notify::RecursiveMode::Recursive) {
+                    tracing::error!(
+                        name = "background_task.watch_dir_failed",
+                        path = %root_path.display(),
+                        error = %e,
+                        "Failed to watch directory. File changes in this directory will not be detected. Likely cause: permissions or missing directory. Operator should check directory permissions."
+                    );
+                }
             }
             let _ = tx.send(BackgroundMessage::Finished(watcher));
-        } else {
+        } else if let Err(e) = watcher_result {
+            tracing::error!(
+                name = "background_task.watcher_init_failed",
+                error = %e,
+                "Failed to initialize file system watcher. Changes will not be detected. Likely cause: OS limits on open files or permissions."
+            );
             let _ = tx.send(BackgroundMessage::FinishedWithoutWatcher);
         }
     }

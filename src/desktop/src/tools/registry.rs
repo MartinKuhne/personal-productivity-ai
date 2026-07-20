@@ -35,7 +35,7 @@ macro_rules! define_tools {
             rustls::crypto::ring::default_provider().install_default().ok();
 
             let args_compact = args_str.to_string();
-            println!("Tool call: {}({})", name, args_compact);
+            tracing::info!(name = "tool.registry.call", tool_name = %name, args = %args_compact, "Executing tool call");
             let start_time = std::time::Instant::now();
 
             let resolve_and_check_path = |p: &str| -> Result<Option<(std::path::PathBuf, bool)>, String> {
@@ -100,12 +100,11 @@ macro_rules! define_tools {
             let elapsed = start_time.elapsed();
             let response_dto = match result_raw {
                 Ok(data) => {
-                    println!("Tool '{}' succeeded in {:.2?}.", name, elapsed);
+                    tracing::info!(name = "tool.registry.success", tool_name = %name, elapsed = ?elapsed, "Tool execution succeeded");
                     crate::tools::dtos::ToolResponse::Success { data }
                 },
                 Err(err) => {
-                    println!("Tool '{}' failed in {:.2?}.", name, elapsed);
-                    eprintln!("Tool '{}' error details: {}", name, err);
+                    tracing::error!(name = "tool.registry.failed", tool_name = %name, elapsed = ?elapsed, error = %err, "Tool execution failed. Operator should verify tool inputs.");
                     crate::tools::dtos::ToolResponse::Error { message: err }
                 }
             };

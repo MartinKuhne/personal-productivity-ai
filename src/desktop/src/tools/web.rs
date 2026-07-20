@@ -10,11 +10,20 @@ pub fn tool_web_fetch(url: &str) -> Result<crate::tools::dtos::WebFetchResponse,
         Ok(response) => match response.into_string() {
             Ok(body) => match convert(&body, None) {
                 Ok(res) => Ok(crate::tools::dtos::WebFetchResponse { content: res.content.unwrap_or_default() }),
-                Err(e) => Err(format!("Failed to convert HTML to Markdown: {}", e)),
+                Err(e) => {
+                    tracing::error!(name = "tool.web.html2md_failed", error = %e, url = %url, "Failed to convert fetched HTML to Markdown. Operator should verify if the URL returns valid HTML.");
+                    Err(format!("Failed to convert HTML to Markdown: {}", e))
+                }
             },
-            Err(e) => Err(format!("Failed to read web response body: {}", e)),
+            Err(e) => {
+                tracing::error!(name = "tool.web.read_body_failed", error = %e, url = %url, "Failed to read response body from web fetch. Operator should check network connectivity or URL validity.");
+                Err(format!("Failed to read web response body: {}", e))
+            }
         },
-        Err(e) => Err(format!("Failed to fetch URL: {}", e)),
+        Err(e) => {
+            tracing::error!(name = "tool.web.fetch_failed", error = %e, url = %url, "Failed to fetch URL. Likely cause: network error or invalid URL. Operator should verify network connectivity.");
+            Err(format!("Failed to fetch URL: {}", e))
+        }
     }
 }
 
@@ -54,15 +63,23 @@ pub fn tool_web_search(url: &str, query: &str) -> Result<crate::tools::dtos::Web
                             Ok(crate::tools::dtos::WebSearchResponse { results: output })
                         }
                     } else {
+                        tracing::error!(name = "tool.web_search.parse_results_failed", url = %endpoint, "Search API returned JSON without a 'results' array. Operator should verify search provider compatibility.");
                         Err("Failed to parse results array.".to_string())
                     }
                 } else {
+                    tracing::error!(name = "tool.web_search.invalid_json", url = %endpoint, "Search API returned invalid JSON. Operator should verify the search provider endpoint.");
                     Err("Failed to parse JSON.".to_string())
                 }
             }
-            Err(e) => Err(format!("Failed to read body: {}", e)),
+            Err(e) => {
+                tracing::error!(name = "tool.web_search.read_body_failed", error = %e, url = %endpoint, "Failed to read response body from search provider. Operator should verify search provider status.");
+                Err(format!("Failed to read body: {}", e))
+            }
         },
-        Err(e) => Err(format!("Failed to fetch URL: {}", e)),
+        Err(e) => {
+            tracing::error!(name = "tool.web_search.fetch_failed", error = %e, url = %endpoint, "Failed to fetch from search provider. Likely cause: network error or provider downtime. Operator should check search configuration.");
+            Err(format!("Failed to fetch URL: {}", e))
+        }
     }
 }
 
@@ -85,6 +102,7 @@ pub fn tool_web_delegate(config: &AppConfig, instruction: &str) -> Result<crate:
     }
 
     if api_key == "your-api-key-here" || api_key.is_empty() {
+        tracing::warn!(name = "tool.web_delegate.missing_api_key", "API key not set. Cannot use web_delegate. Operator should configure a valid API key in settings.");
         return Err("API key not set. Cannot use web_delegate.".to_string());
     }
 
@@ -145,20 +163,32 @@ pub fn tool_web_delegate(config: &AppConfig, instruction: &str) -> Result<crate:
             .send_json(request_body)
         {
             Ok(resp) => resp,
-            Err(e) => return Err(format!("Delegate HTTP Request failed: {}", e)),
+            Err(e) => {
+                tracing::error!(name = "tool.web_delegate.api_request_failed", error = %e, "Delegate API request failed completely. Operator should check network connectivity.");
+                return Err(format!("Delegate HTTP Request failed: {}", e));
+            }
         };
 
         let resp_val: serde_json::Value = match response.into_json() {
             Ok(v) => v,
-            Err(e) => return Err(format!("Failed to parse delegate JSON: {}", e)),
+            Err(e) => {
+                tracing::error!(name = "tool.web_delegate.invalid_json", error = %e, "Delegate API returned invalid JSON. Operator should verify API provider.");
+                return Err(format!("Failed to parse delegate JSON: {}", e));
+            }
         };
         let choice = match resp_val.get("choices").and_then(|c| c.get(0)) {
             Some(c) => c,
-            None => return Err("No choices in delegate response".to_string()),
+            None => {
+                tracing::error!(name = "tool.web_delegate.invalid_schema", response = ?resp_val, "Delegate API response missing 'choices' array. Operator should verify model configuration.");
+                return Err("No choices in delegate response".to_string());
+            }
         };
         let message = match choice.get("message") {
             Some(m) => m.clone(),
-            None => return Err("No message in delegate choice".to_string()),
+            None => {
+                tracing::error!(name = "tool.web_delegate.missing_message", choice = ?choice, "Delegate API response missing 'message' field. Operator should verify model configuration.");
+                return Err("No message in delegate choice".to_string());
+            }
         };
         
         let content_str = message.get("content").and_then(|c| c.as_str()).unwrap_or("");

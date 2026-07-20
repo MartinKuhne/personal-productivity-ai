@@ -20,20 +20,35 @@ fn geocode(location: &str) -> Result<(f64, f64), String> {
     
     let req = match ureq::get(&url).set("User-Agent", "FastMD Weather Tool/1.0").call() {
         Ok(r) => r,
-        Err(e) => return Err(format!("Nominatim API error: {}", e)),
+        Err(e) => {
+            tracing::error!(name = "tool.weather.geocode.api_failed", error = %e, url = %url, "Nominatim geocoding API request failed. Operator should verify network or API limits.");
+            return Err(format!("Nominatim API error: {}", e));
+        }
     };
     
     let json: Value = match req.into_json() {
         Ok(j) => j,
-        Err(e) => return Err(format!("Nominatim JSON error: {}", e)),
+        Err(e) => {
+            tracing::error!(name = "tool.weather.geocode.json_failed", error = %e, "Nominatim geocoding API returned invalid JSON. Operator should verify API response.");
+            return Err(format!("Nominatim JSON error: {}", e));
+        }
     };
     
     let first = json.as_array()
         .and_then(|a| a.first())
-        .ok_or_else(|| "Location not found".to_string())?;
+        .ok_or_else(|| {
+            tracing::error!(name = "tool.weather.geocode.not_found", location = %location, "Nominatim geocoding API returned no results. Operator should verify location name.");
+            "Location not found".to_string()
+        })?;
         
-    let lat = first.get("lat").and_then(|v| v.as_str()).and_then(|s| s.parse::<f64>().ok()).ok_or_else(|| "Missing lat".to_string())?;
-    let lon = first.get("lon").and_then(|v| v.as_str()).and_then(|s| s.parse::<f64>().ok()).ok_or_else(|| "Missing lon".to_string())?;
+    let lat = first.get("lat").and_then(|v| v.as_str()).and_then(|s| s.parse::<f64>().ok()).ok_or_else(|| {
+        tracing::error!(name = "tool.weather.geocode.missing_lat", location = %location, "Nominatim geocoding API response missing latitude.");
+        "Missing lat".to_string()
+    })?;
+    let lon = first.get("lon").and_then(|v| v.as_str()).and_then(|s| s.parse::<f64>().ok()).ok_or_else(|| {
+        tracing::error!(name = "tool.weather.geocode.missing_lon", location = %location, "Nominatim geocoding API response missing longitude.");
+        "Missing lon".to_string()
+    })?;
     
     Ok((lat, lon))
 }
@@ -49,12 +64,18 @@ pub fn tool_get_weather(location: &str, date_range: Option<&str>) -> Result<crat
     let points_url = format!("https://api.weather.gov/points/{},{}", lat, lon);
     let req = match ureq::get(&points_url).set("User-Agent", "FastMD Weather Tool/1.0").call() {
         Ok(r) => r,
-        Err(e) => return Err(format!("NWS Points API error: {}", e)),
+        Err(e) => {
+            tracing::error!(name = "tool.weather.nws.points_api_failed", error = %e, url = %points_url, "NWS Points API request failed. Operator should verify network connectivity.");
+            return Err(format!("NWS Points API error: {}", e));
+        }
     };
     
     let json: Value = match req.into_json() {
         Ok(j) => j,
-        Err(e) => return Err(format!("NWS Points JSON error: {}", e)),
+        Err(e) => {
+            tracing::error!(name = "tool.weather.nws.points_json_failed", error = %e, "NWS Points API returned invalid JSON. Operator should verify API status.");
+            return Err(format!("NWS Points JSON error: {}", e));
+        }
     };
     
     let forecast_url = match json.get("properties").and_then(|p| p.get("forecast")).and_then(|f| f.as_str()) {
@@ -64,12 +85,18 @@ pub fn tool_get_weather(location: &str, date_range: Option<&str>) -> Result<crat
     
     let req = match ureq::get(forecast_url).set("User-Agent", "FastMD Weather Tool/1.0").call() {
         Ok(r) => r,
-        Err(e) => return Err(format!("NWS Forecast API error: {}", e)),
+        Err(e) => {
+            tracing::error!(name = "tool.weather.nws.forecast_api_failed", error = %e, url = %forecast_url, "NWS Forecast API request failed. Operator should verify network connectivity.");
+            return Err(format!("NWS Forecast API error: {}", e));
+        }
     };
     
     let forecast_json: Value = match req.into_json() {
         Ok(j) => j,
-        Err(e) => return Err(format!("NWS Forecast JSON error: {}", e)),
+        Err(e) => {
+            tracing::error!(name = "tool.weather.nws.forecast_json_failed", error = %e, "NWS Forecast API returned invalid JSON. Operator should verify API status.");
+            return Err(format!("NWS Forecast JSON error: {}", e));
+        }
     };
     
     let periods = match forecast_json.get("properties").and_then(|p| p.get("periods")).and_then(|p| p.as_array()) {
@@ -108,6 +135,7 @@ pub fn tool_get_weather(location: &str, date_range: Option<&str>) -> Result<crat
         } else {
             "No forecast periods found.".to_string()
         };
+        tracing::warn!(name = "tool.weather.no_results", location = %location, "No weather data found for the given location and date range. Operator should verify location query.");
         return Err(err_msg);
     }
     

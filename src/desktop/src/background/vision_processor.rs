@@ -10,13 +10,19 @@ pub async fn process_image(job: ImageJob, config: AppConfig, tx: Sender<Backgrou
     let vision_model = config.models.values().find(|m| m.has_vision());
     let model_cfg = match vision_model {
         Some(m) => m,
-        None => return Err("No vision model configured".to_string()),
+        None => {
+            tracing::warn!(name = "vision.model.missing", "No vision model configured. Image processing skipped. Operator should configure a model with the 'vision' use case.");
+            return Err("No vision model configured".to_string());
+        }
     };
     
     // Read and encode image
     let img_data = match std::fs::read(&job.image_path) {
         Ok(data) => data,
-        Err(e) => return Err(format!("Failed to read image: {}", e)),
+        Err(e) => {
+            tracing::error!(name = "vision.image.read_failed", path = %job.image_path.display(), error = %e, "Failed to read image file from disk. Likely cause: missing file or permission denied. Operator should verify file permissions.");
+            return Err(format!("Failed to read image: {}", e));
+        }
     };
     let b64_encoded = b64.encode(&img_data);
     
@@ -68,13 +74,20 @@ pub async fn process_image(job: ImageJob, config: AppConfig, tx: Sender<Backgrou
             .set("Authorization", &format!("Bearer {}", api_key))
             .set("Content-Type", "application/json")
             .send_json(payload)
-    }).await.map_err(|e| format!("Spawn blocking error: {}", e))?;
+    }).await.map_err(|e| {
+        tracing::error!(name = "vision.api.spawn_failed", error = %e, "Failed to spawn blocking task for vision API request. Operator should check system resources.");
+        format!("Spawn blocking error: {}", e)
+    })?;
     
     match response {
         Ok(resp) => {
-            let json: serde_json::Value = resp.into_json().map_err(|e| format!("Invalid JSON response: {}", e))?;
+            let json: serde_json::Value = resp.into_json().map_err(|e| {
+                tracing::error!(name = "vision.api.invalid_json", error = %e, image = %img_name, "Failed to parse JSON response from vision API. Operator should check model provider.");
+                format!("Invalid JSON response: {}", e)
+            })?;
             if let Some(content) = json["choices"][0]["message"]["content"].as_str() {
                 if let Err(e) = std::fs::write(&job.md_path, content) {
+                    tracing::error!(name = "vision.output.write_failed", path = %job.md_path.display(), error = %e, "Failed to write markdown output from vision analysis. Operator should verify disk space and write permissions.");
                     let msg = format!("Failed to write markdown for {:?}: {}", img_name, e);
                     let _ = tx.send(BackgroundMessage::LogEntry(BackgroundLogEntry::new(LogCategory::ImageVision, msg.clone())));
                     return Err(msg);
@@ -86,6 +99,7 @@ pub async fn process_image(job: ImageJob, config: AppConfig, tx: Sender<Backgrou
                 )));
                 Ok(())
             } else {
+                tracing::error!(name = "vision.api.no_content", image = %img_name, response = ?json, "Vision API returned no content in choices. Operator should check model compatibility.");
                 let msg = format!("No content in response for {:?}", img_name);
                 let _ = tx.send(BackgroundMessage::LogEntry(BackgroundLogEntry::new(LogCategory::ImageVision, msg.clone())));
                 Err(msg)
@@ -93,10 +107,12 @@ pub async fn process_image(job: ImageJob, config: AppConfig, tx: Sender<Backgrou
         },
         Err(e) => {
             let mut err_msg = format!("API request failed for {:?}: {}", img_name, e);
-            if let ureq::Error::Status(_, r) = e {
-                if let Ok(text) = r.into_string() {
-                    err_msg = format!("{} - {}", err_msg, text);
-                }
+            if let ureq::Error::Status(code, r) = e {
+                let text = r.into_string().unwrap_or_default();
+                err_msg = format!("{} - {}", err_msg, text);
+                tracing::error!(name = "vision.api.request_failed", image = %img_name, status = code, response = %text, "Vision API request failed with HTTP error. Operator should verify API key and model limits.");
+            } else {
+                tracing::error!(name = "vision.api.network_error", image = %img_name, error = %e, "Vision API request failed completely. Operator should check network connectivity.");
             }
             let _ = tx.send(BackgroundMessage::LogEntry(BackgroundLogEntry::new(LogCategory::ImageVision, err_msg.clone())));
             Err(err_msg)

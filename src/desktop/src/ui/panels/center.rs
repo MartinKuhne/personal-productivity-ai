@@ -17,6 +17,11 @@ pub fn show_center_panel(app: &mut FastMdApp, ctx: &egui::Context) {
                 if ui.button("Back to Document").clicked() {
                     app.show_agent_results = false;
                     app.agent_history = None;
+                    app.agent_response.clear();
+                    app.agent_thinking.clear();
+                    if let Some(flag) = &app.agent_cancel_flag {
+                        flag.store(true, std::sync::atomic::Ordering::SeqCst);
+                    }
                 }
             });
             ui.separator();

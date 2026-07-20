@@ -110,12 +110,14 @@ pub fn show_bottom_panel(app: &mut FastMdApp, ctx: &egui::Context) {
                         let active_dir_agent = app.selected_dir.clone();
                         let history = app.agent_history.clone();
                         let current_response = app.agent_response.clone();
+                        let selected_files_agent = app.selected_files.clone();
 
                         crate::agent::run_agent(
                             app.config.clone(),
                             tx_gui_agent,
                             active_file_agent,
                             active_dir_agent,
+                            selected_files_agent,
                             prompt,
                             cancel_flag,
                             history,
