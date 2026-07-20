@@ -6,8 +6,8 @@ The following table summarizes all 27 tools available to the LLM agent, categori
 | --- | --- | --- | --- |
 | **Core Workspace** | `grep` | Search term case-insensitively across markdown files. | None |
 | **Core Workspace** | `read_tags` | List all unique tags from markdown front-matter. | None |
-| **Core Workspace** | `list_files_by_tag` | List markdown files containing a specific tag. | None |
-| **Core Workspace** | `list_files` | List all markdown files in the workspace. | None |
+| **Core Workspace** | `list_files_by_tag` | List markdown files containing a specific tag (paginated; default page size 20; returns a JSON array; every response includes total). | None |
+| **Core Workspace** | `list_files` | List all markdown files in a directory (paginated; default page size 20; returns a JSON array; every response includes total). | None |
 | **Core Workspace** | `read_file` | Read the entire text contents of a file at the specified path. | None |
 | **Core Workspace** | `read_file_lines` | Read specific lines from a file (1-indexed). | None |
 | **Core Workspace** | `create_file` | Create a new file with specified content. | None |
@@ -73,26 +73,40 @@ All tool responses follow the same envelope:
   ```
 
 ##### `list_files_by_tag`
-* **Description:** List all Markdown files that contain a specific tag in their front-matter.
+* **Description:** List Markdown files that contain a specific tag in their front-matter. Results are returned as a JSON array, paginated across all configured libraries (default page size 20). Every response includes the total number of matching files so the caller can drive follow-up page requests.
 * **Request:**
   ```json
-  { "tag": "meeting" }
+  { "tag": "meeting", "page": 1, "page_size": 20 }
   ```
+  * `page` — 1-indexed page number. Defaults to `1` if omitted. Values `< 1` are normalised to `1`.
+  * `page_size` — files per page. Defaults to `20` if omitted. Values `< 1` are normalised to `1`.
 * **Response (`data`):**
   ```json
-  { "files": "work/2026-07-20-meeting.md\npersonal/notes.md" }
+  { "files": ["work/file_000.md", "work/file_001.md", "..."], "total": 50 }
   ```
+  * `files` — JSON array of virtual paths for the requested page. Empty array when the tag has no matches or when the requested `page` is past the end (in which case `hint` is also set).
+  * `total` — total number of files matching the tag across all libraries. Returned on every response (including the "no matches" and "past end" cases).
+  * `hint` *(optional)* — present only when the result is empty for a structural reason. Two forms:
+    * `No matching tagged files found.` — when no file in any library carries the tag.
+    * `No tagged files on page N (showing 0 of M total, page_size: S).` — when the requested page is past the end.
 
 ##### `list_files`
-* **Description:** List all Markdown files in a directory (non-recursive). With `"/"` or `"."` returns library names.
+* **Description:** List Markdown files in a directory (non-recursive). Results are returned as a JSON array, paginated (default page size 20). Every response includes the total number of files in the directory so the caller can drive follow-up page requests. With `path` set to `"/"` or `"."` returns the configured content libraries.
 * **Request:**
   ```json
-  { "path": "MyLib" }
+  { "path": "MyLib", "page": 1, "page_size": 20 }
   ```
+  * `page` — 1-indexed page number. Defaults to `1` if omitted. Values `< 1` are normalised to `1`.
+  * `page_size` — files per page. Defaults to `20` if omitted. Values `< 1` are normalised to `1`.
 * **Response (`data`):**
   ```json
-  { "files": "notes.md\ndiary.md" }
+  { "files": ["MyLib/notes.md", "MyLib/diary.md"], "total": 2 }
   ```
+  * `files` — JSON array of virtual paths for the requested page. Empty array when the directory has no Markdown files or when the requested `page` is past the end (in which case `hint` is also set).
+  * `total` — total number of Markdown files in the directory (across all pages). Returned on every response.
+  * `hint` *(optional)* — present only when the result is empty for a structural reason. Forms use `"file"` / `"files"` for a normal directory, or `"library"` / `"libraries"` for the root listing:
+    * `No matching files found.` (or `No matching libraries found.` for the root).
+    * `No files on page N (showing 0 of M total, page_size: S).` (or the same with `"libraries"`).
 
 ##### `read_file`
 * **Description:** Read the entire text contents of a file at the specified path.
