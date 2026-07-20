@@ -64,7 +64,11 @@ pub fn draw_tree_node(ui: &mut egui::Ui, node: &TreeNode, ctx: &mut TreeNodeCont
             }
             if ui.button("Rename").clicked() {
                 *ctx.file_to_rename = Some(node.path.clone());
-                *ctx.rename_new_name = node.name.clone();
+                // Only offer to rename the file name, not the extension
+                *ctx.rename_new_name = node.path.file_stem()
+                    .and_then(|s| s.to_str())
+                    .unwrap_or(&node.name)
+                    .to_string();
                 *ctx.rename_dialog_open = true;
                 ui.close_menu();
             }

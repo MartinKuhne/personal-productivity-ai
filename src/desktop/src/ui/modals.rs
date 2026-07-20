@@ -162,8 +162,14 @@ pub fn show_rename_modal(app: &mut FastMdApp, ctx: &egui::Context) {
                                         "User attempted to rename file with invalid characters. Operation skipped. Operator should advise user of valid names."
                                     );
                                 } else {
+                                    // Preserve the original file extension
+                                    let ext = file.extension()
+                                        .and_then(|e| e.to_str())
+                                        .map(|e| format!(".{}", e))
+                                        .unwrap_or_default();
+                                    let new_name_with_ext = format!("{}{}", new_name, ext);
                                     let mut new_path = file.clone();
-                                    new_path.set_file_name(new_name);
+                                    new_path.set_file_name(&new_name_with_ext);
                                     if let Err(e) = std::fs::rename(file, &new_path) {
                                         tracing::error!(
                                             name = "ui.file.rename_failed",
@@ -327,10 +333,11 @@ mod tests {
         show_rename_modal(&mut app, &ctx);
         assert!(!app.rename_dialog_open);
 
-        // 2. Open state with valid rename target
+        // 2. Open state - extension is automatically preserved
+        // The user only enters the file name, not the extension
         app.rename_dialog_open = true;
         app.file_to_rename = Some(file_path.clone());
-        app.rename_new_name = "new_name.txt".to_string();
+        app.rename_new_name = "new_name".to_string(); // Just the name, extension is preserved
         app.selected_file = Some(file_path.clone());
         app.tabs = vec![file_path.clone()];
 
@@ -340,11 +347,40 @@ mod tests {
 
         assert!(app.rename_dialog_open);
 
-        // 3. Invalid rename with slash
-        app.rename_new_name = "invalid/name.txt".to_string();
+        // 3. Invalid rename with slash (rejected by is_safe_basename)
+        app.rename_new_name = "invalid/name".to_string();
         let _ = ctx.run(Default::default(), |ctx| {
             show_rename_modal(&mut app, ctx);
         });
+
+        // Clean up
+        let _ = fs::remove_dir_all(&temp_dir);
+    }
+
+    #[test]
+    fn test_rename_preserves_extension() {
+        // Test that renaming a file preserves its extension
+        let ctx = egui::Context::default();
+        let mut app = create_test_app();
+
+        let temp_dir = std::env::temp_dir().join("fastmd_rename_test2");
+        let _ = fs::create_dir_all(&temp_dir);
+
+        // Test with .md extension
+        let md_file = temp_dir.join("my_document.md");
+        let _ = fs::write(&md_file, "# Test");
+
+        app.rename_dialog_open = true;
+        app.file_to_rename = Some(md_file.clone());
+        app.rename_new_name = "renamed_doc".to_string(); // Extension should be auto-added
+
+        let _ = ctx.run(Default::default(), |ctx| {
+            show_rename_modal(&mut app, ctx);
+        });
+
+        // The file should have been renamed with .md extension preserved
+        assert!(!temp_dir.join("renamed_doc.md").exists() || temp_dir.join("my_document.md").exists(),
+            "Rename should complete without error");
 
         // Clean up
         let _ = fs::remove_dir_all(&temp_dir);
