@@ -1,11 +1,17 @@
 use crate::config::AppConfig;
+use crate::file_events::FileEventProducer;
 use crate::messages::BackgroundMessage;
 use crate::background::models::{BackgroundLogEntry, LogCategory, ImageJob};
 use std::sync::mpsc::Sender;
 use base64::{Engine as _, engine::general_purpose::STANDARD as b64};
 use serde_json::json;
 
-pub async fn process_image(job: ImageJob, config: AppConfig, tx: Sender<BackgroundMessage>) -> Result<(), String> {
+pub async fn process_image<'a>(
+    job: ImageJob,
+    config: AppConfig,
+    tx: Sender<BackgroundMessage>,
+    producer: &FileEventProducer<'a>,
+) -> Result<(), String> {
     // Find vision model
     let vision_model = config.models.values().find(|m| m.has_vision());
     let model_cfg = match vision_model {
@@ -92,7 +98,13 @@ pub async fn process_image(job: ImageJob, config: AppConfig, tx: Sender<Backgrou
                     let _ = tx.send(BackgroundMessage::LogEntry(BackgroundLogEntry::new(LogCategory::ImageVision, msg.clone())));
                     return Err(msg);
                 }
-                
+
+                // Tell the rest of the app the new `.md` exists so the
+                // directory tree, tag manager, and render tab pick it
+                // up without waiting for the notify watcher to fire.
+                // Same pattern as `tool_create_file` and `editor.save`.
+                producer.publish_discovered(&job.md_path);
+
                 let _ = tx.send(BackgroundMessage::LogEntry(BackgroundLogEntry::new(
                     LogCategory::ImageVision,
                     format!("Successfully analyzed {:?}", img_name)
@@ -124,9 +136,19 @@ pub async fn process_image(job: ImageJob, config: AppConfig, tx: Sender<Backgrou
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::file_events::{Bus, FileEvent};
     use std::path::PathBuf;
     use crate::config::{AppConfig, LlmConfig};
     use std::sync::mpsc;
+
+    /// Build a `FileEventProducer` backed by a leaked (and therefore
+    /// `'static`) no-op bus. Useful for tests that exercise
+    /// `process_image` without caring about what (if anything) is
+    /// published.
+    fn noop_producer() -> FileEventProducer<'static> {
+        let bus: &'static Bus<FileEvent> = Box::leak(Box::new(Bus::new()));
+        FileEventProducer::new(bus)
+    }
 
     #[tokio::test]
     async fn test_process_image_no_model() {
@@ -136,7 +158,7 @@ mod tests {
         };
         let config = AppConfig::default();
         let (tx, _rx) = mpsc::channel();
-        let result = process_image(job, config, tx).await;
+        let result = process_image(job, config, tx, &noop_producer()).await;
         assert!(result.is_err());
         assert_eq!(result.unwrap_err(), "No vision model configured");
     }
@@ -156,7 +178,7 @@ mod tests {
             use_case: vec!["vision".to_string()],
         });
         let (tx, _rx) = mpsc::channel();
-        let result = process_image(job, config, tx).await;
+        let result = process_image(job, config, tx, &noop_producer()).await;
         assert!(result.is_err());
         assert!(result.unwrap_err().contains("Failed to read image"));
     }
@@ -206,12 +228,28 @@ mod tests {
             use_case: vec!["vision".to_string()],
         });
 
+        // Wire up a real (leaked) bus + reader so we can verify
+        // that `process_image` publishes a Discovered event for
+        // the produced `.md` once the file is on disk.
+        let bus: &'static Bus<FileEvent> = Box::leak(Box::new(Bus::new()));
+        let reader = bus.subscribe();
+        let producer = FileEventProducer::new(bus);
+
         let (tx, _rx) = mpsc::channel();
-        let result = process_image(job, config, tx).await;
-        
+        let result = process_image(job, config, tx, &producer).await;
+
         assert!(result.is_ok());
         let md_content = std::fs::read_to_string(&md_path).unwrap();
         assert_eq!(md_content, "Mock description");
+
+        // The bus must have received a Discovered event for the
+        // output `.md`. This is what the directory tree and
+        // render tab rely on to pick up the new file.
+        let event = reader
+            .recv_timeout(std::time::Duration::from_millis(200))
+            .expect("process_image should publish a Discovered event for the output .md");
+        assert_eq!(event.kind, crate::file_events::FileEventKind::Discovered);
+        assert_eq!(event.path, md_path);
     }
 
     #[tokio::test]
@@ -260,12 +298,12 @@ mod tests {
         });
 
         let (tx, _rx) = mpsc::channel();
-        let result = process_image(job, config, tx).await;
-        
+        let result = process_image(job, config, tx, &noop_producer()).await;
+
         assert!(result.is_err());
         assert!(result.unwrap_err().contains("API request failed"));
     }
-    
+
     #[tokio::test]
     async fn test_process_image_no_content() {
         let _ = rustls::crypto::ring::default_provider().install_default();
@@ -312,8 +350,8 @@ mod tests {
         });
 
         let (tx, _rx) = mpsc::channel();
-        let result = process_image(job, config, tx).await;
-        
+        let result = process_image(job, config, tx, &noop_producer()).await;
+
         assert!(result.is_err());
         assert!(result.unwrap_err().contains("No content in response"));
     }

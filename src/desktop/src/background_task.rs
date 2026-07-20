@@ -49,13 +49,24 @@ impl Task {
         let (tx_pdf, rx_pdf) = channel::<PathBuf>();
         let cmd_template = config.pdf_converter_command.clone();
         let tx_gui_pdf = tx.clone();
+        let bus_pdf = file_event_bus.clone();
         std::thread::spawn(move || {
             if let Ok(rt) = tokio::runtime::Runtime::new() {
                 rt.block_on(async {
                     while let Ok(path) = rx_pdf.recv() {
                         let job = crate::background::PdfConversionJob::new(path);
                         if job.should_convert() {
-                            let _ = job.execute(cmd_template.clone(), tx_gui_pdf.clone()).await;
+                            // Capture the output path before execute()
+                            // consumes the job. After a successful
+                            // conversion the produced `.md` is on
+                            // disk; publish a Discovered event so the
+                            // directory tree, tag manager, and render
+                            // tab see it without waiting for the
+                            // notify watcher to fire.
+                            let output_md = job.output_md.clone();
+                            if job.execute(cmd_template.clone(), tx_gui_pdf.clone()).await.is_ok() {
+                                bus_pdf.publish(FileEvent::discovered(output_md));
+                            }
                         }
                     }
                 });
@@ -65,13 +76,27 @@ impl Task {
         let (tx_img, rx_img) = channel::<PathBuf>();
         let tx_gui_img = tx.clone();
         let config_img = config.clone();
+        let bus_img = file_event_bus.clone();
         std::thread::spawn(move || {
             if let Ok(rt) = tokio::runtime::Runtime::new() {
                 rt.block_on(async {
                     while let Ok(path) = rx_img.recv() {
                         let job = crate::background::models::ImageJob::new(path);
                         if job.should_process() {
-                            let _ = crate::background::vision_processor::process_image(job, config_img.clone(), tx_gui_img.clone()).await;
+                            // The vision processor writes a `.md`
+                            // derived from the image. It takes a
+                            // `FileEventProducer` so it can publish a
+                            // Discovered event on success — same
+                            // pattern as the PDF worker above.
+                            let producer =
+                                crate::file_events::FileEventProducer::new(&bus_img);
+                            let _ = crate::background::vision_processor::process_image(
+                                job,
+                                config_img.clone(),
+                                tx_gui_img.clone(),
+                                &producer,
+                            )
+                            .await;
                         }
                     }
                 });
@@ -372,6 +397,59 @@ impl Task {
                 }
             }
         });
+
+        // ----------------------------------------------------------------
+        // Bus-driven image-vision trigger.
+        //
+        // Mirror of the PDF bus subscriber above. The image-vision
+        // worker consumes from `tx_img`. The initial scan and the
+        // notify watcher both push directly to `tx_img` for low
+        // latency; this subscriber is the safety net for any other
+        // code path that drops a supported image into a content
+        // library (e.g. a future tool, or a UI handler).
+        //
+        // The vision worker calls `should_process()` before invoking
+        // the model, so duplicate triggers are de-duplicated.
+        // ----------------------------------------------------------------
+        let bus_reader_img = file_event_bus.clone();
+        let tx_img_bus = tx_img.clone();
+        std::thread::spawn(move || {
+            let reader = bus_reader_img.subscribe();
+            loop {
+                let event = match reader.recv() {
+                    Ok(e) => e,
+                    Err(_) => break, // bus was dropped
+                };
+                use crate::file_events::FileEventKind;
+                if !matches!(event.kind, FileEventKind::Discovered | FileEventKind::Updated) {
+                    continue;
+                }
+                // Only consider image files. Keep the extension list
+                // in sync with the initial-scan branch above.
+                let is_img = event
+                    .path
+                    .extension()
+                    .and_then(|e| e.to_str())
+                    .map(|e| {
+                        matches!(
+                            e.to_lowercase().as_str(),
+                            "jpg" | "jpeg" | "png" | "gif" | "webp" | "bmp" | "tiff" | "avif"
+                        )
+                    })
+                    .unwrap_or(false);
+                if !is_img {
+                    continue;
+                }
+                if let Err(e) = tx_img_bus.send(event.path) {
+                    tracing::warn!(
+                        name = "background_task.img_bus.tx_closed",
+                        error = %e,
+                        "Image bus subscriber could not deliver to tx_img. Channel is closed."
+                    );
+                    break;
+                }
+            }
+        });
     }
 }
 
@@ -647,16 +725,6 @@ mod tests {
             }
         }
 
-        // Create a PDF on disk and publish a Discovered event for it.
-        // (This simulates a code path that bypasses the initial
-        // scan and the notify watcher — for example, a future tool
-        // that drops a PDF into a content library.)
-        let pdf_path = dir.path().join("dropped.pdf");
-        std::fs::write(&pdf_path, b"dummy").unwrap();
-        task
-            .file_event_bus
-            .publish(crate::file_events::FileEvent::discovered(pdf_path.clone()));
-
         // The bus subscriber forwards the path to `tx_pdf`. The
         // PDF-converter worker dequeues it, calls `should_convert()`
         // (returns true), then calls `execute()`. We expect a
@@ -668,6 +736,18 @@ mod tests {
         // `Finished` arrives, a short sleep ensures the
         // subscriber is alive before we publish.
         std::thread::sleep(std::time::Duration::from_millis(200));
+
+        // Create a PDF on disk and publish a Discovered event for it.
+        // (This simulates a code path that bypasses the initial
+        // scan and the notify watcher — for example, a future tool
+        // that drops a PDF into a content library.) The publish
+        // MUST happen AFTER the subscriber is up, otherwise the
+        // event is delivered to zero consumers and lost.
+        let pdf_path = dir.path().join("dropped.pdf");
+        std::fs::write(&pdf_path, b"dummy").unwrap();
+        task
+            .file_event_bus
+            .publish(crate::file_events::FileEvent::discovered(pdf_path.clone()));
 
         let mut saw_success = false;
         let start = std::time::Instant::now();
@@ -696,6 +776,194 @@ mod tests {
         assert!(
             saw_success,
             "Bus-published PDF Discovered event should reach the PDF converter worker"
+        );
+    }
+
+    #[test]
+    fn test_pdf_worker_publishes_discovered_for_output_md() {
+        // After the PDF worker successfully converts a PDF, it must
+        // publish a `Discovered` event for the produced `.md` on the
+        // bus so the directory tree, tag manager, and render tab see
+        // the new file without waiting for the notify watcher to
+        // fire. We use `cmd /C echo done` (or `true` on non-Windows)
+        // as the converter command so `execute()` returns Ok
+        // regardless of whether the external tool actually produces
+        // a file. The publish logic runs on Ok, so the test only
+        // cares that the bus receives the event.
+        let mut config = AppConfig::default();
+        let dir = tempdir().unwrap();
+
+        #[cfg(windows)]
+        let cmd_template = Some(vec![
+            "cmd".to_string(),
+            "/C".to_string(),
+            "echo done".to_string(),
+        ]);
+        #[cfg(not(windows))]
+        let cmd_template = Some(vec!["true".to_string()]);
+        config.pdf_converter_command = cmd_template;
+
+        config.content_libraries.push(ContentLibrary {
+            name: "test".to_string(),
+            kind: "text".to_string(),
+            root_folder: dir.path().to_string_lossy().to_string(),
+            readonly: true,
+            priority: 0,
+        });
+
+        let task = Task::new(config);
+
+        // Wait for the initial scan to finish.
+        let start = std::time::Instant::now();
+        while start.elapsed().as_secs() < 5 {
+            if let Ok(msg) = task.rx.recv_timeout(std::time::Duration::from_millis(100)) {
+                if let BackgroundMessage::Finished(_) | BackgroundMessage::FinishedWithoutWatcher = msg {
+                    break;
+                }
+            }
+        }
+
+        // Subscribe a reader to the bus BEFORE we trigger the
+        // conversion so we don't miss the Discovered event the
+        // worker publishes on success.
+        let bus_reader = task.file_event_bus.subscribe();
+
+        // Give the PDF bus subscriber a moment to spin up — it's
+        // attached near the end of `run_indexing`, after `Finished`.
+        std::thread::sleep(std::time::Duration::from_millis(200));
+
+        // Drop a PDF and publish a Discovered event for it. The
+        // bus subscriber will forward the path to `tx_pdf`, the
+        // PDF worker will call `should_convert()` (true because
+        // no `.md` exists yet), then call `execute()` (which
+        // returns Ok), then publish Discovered for the output
+        // `.md`.
+        let pdf_path = dir.path().join("dropped.pdf");
+        std::fs::write(&pdf_path, b"dummy").unwrap();
+        task
+            .file_event_bus
+            .publish(crate::file_events::FileEvent::discovered(pdf_path.clone()));
+
+        // The corresponding `.md` path (input path with extension swapped).
+        let expected_md = {
+            let mut p = pdf_path.clone();
+            p.set_extension("md");
+            p
+        };
+
+        // Drain the bus until we see a Discovered event for the
+        // expected output path, or we time out.
+        let start = std::time::Instant::now();
+        let mut saw_discovered = false;
+        while start.elapsed().as_secs() < 5 {
+            match bus_reader.recv_timeout(std::time::Duration::from_millis(100)) {
+                Ok(event) => {
+                    if event.kind == crate::file_events::FileEventKind::Discovered
+                        && event.path == expected_md
+                    {
+                        saw_discovered = true;
+                        break;
+                    }
+                    // ignore other events (the initial scan also publishes)
+                }
+                Err(_) => continue,
+            }
+        }
+        assert!(
+            saw_discovered,
+            "PDF worker should publish a Discovered event for the output .md after a successful conversion"
+        );
+    }
+
+    #[test]
+    fn test_bus_published_image_triggers_vision_via_subscriber() {
+        // Mirror of `test_bus_published_pdf_triggers_conversion_via_subscriber`
+        // for the image bus subscriber. A PNG published directly to
+        // the bus (bypassing the initial scan and the notify
+        // watcher) must be picked up by the image-vision worker via
+        // the bus subscriber.
+        //
+        // The "Analyzing image" log entry fires BEFORE the API call
+        // inside `process_image`, so the test only needs to wait for
+        // that log to know the worker received the path. We
+        // intentionally configure a dummy vision-model URL — the API
+        // call will fail, but that's fine; the test only cares that
+        // the bus subscriber delivered the path.
+        use crate::background::LogCategory;
+        use crate::config::LlmConfig;
+
+        let mut config = AppConfig::default();
+        let dir = tempdir().unwrap();
+
+        // Dummy vision model pointing at an unroutable address.
+        config.models.insert(
+            "test-vision".to_string(),
+            LlmConfig {
+                model: "test-vision".to_string(),
+                api_key: "dummy".to_string(),
+                api_url: "http://127.0.0.1:1".to_string(),
+                cost: None,
+                use_case: vec!["vision".to_string()],
+            },
+        );
+
+        // Image content library so the initial scan + subscriber
+        // know to handle image files.
+        config.content_libraries.push(ContentLibrary {
+            name: "test".to_string(),
+            kind: "image".to_string(),
+            root_folder: dir.path().to_string_lossy().to_string(),
+            readonly: true,
+            priority: 0,
+        });
+
+        let task = Task::new(config);
+
+        // Wait for Finished.
+        let start = std::time::Instant::now();
+        while start.elapsed().as_secs() < 5 {
+            if let Ok(msg) = task.rx.recv_timeout(std::time::Duration::from_millis(100)) {
+                if let BackgroundMessage::Finished(_) | BackgroundMessage::FinishedWithoutWatcher = msg {
+                    break;
+                }
+            }
+        }
+
+        // Give the image bus subscriber a moment to start.
+        std::thread::sleep(std::time::Duration::from_millis(200));
+
+        // Drop an image and publish a Discovered event for it.
+        let img_path = dir.path().join("dropped.png");
+        std::fs::write(&img_path, b"dummy image data").unwrap();
+        task
+            .file_event_bus
+            .publish(crate::file_events::FileEvent::discovered(img_path.clone()));
+
+        // The bus subscriber should forward the path to the
+        // image-vision worker, which sends an "Analyzing image"
+        // log entry before invoking the model.
+        let start = std::time::Instant::now();
+        let mut all_messages: Vec<String> = Vec::new();
+        let mut saw_analyzing = false;
+        while start.elapsed().as_secs() < 10 {
+            if let Ok(msg) = task.rx.recv_timeout(std::time::Duration::from_millis(100)) {
+                if let BackgroundMessage::LogEntry(entry) = msg {
+                    all_messages.push(format!("{:?}: {}", entry.category, entry.message));
+                    if entry.category == LogCategory::ImageVision
+                        && entry.message.contains("Analyzing image")
+                    {
+                        saw_analyzing = true;
+                        break;
+                    }
+                }
+            }
+        }
+        if !saw_analyzing {
+            eprintln!("Test saw messages: {:?}", all_messages);
+        }
+        assert!(
+            saw_analyzing,
+            "Bus-published image Discovered event should reach the image-vision worker"
         );
     }
 }
