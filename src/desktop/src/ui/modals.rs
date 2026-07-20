@@ -187,6 +187,37 @@ pub fn show_rename_modal(app: &mut FastMdApp, ctx: &egui::Context) {
                                                 app.tabs[i] = new_path.clone();
                                             }
                                         }
+                                        // Update directory tree immediately (not waiting
+                                        // for the filesystem watcher).
+                                        app.all_files.retain(|p| p != file);
+                                        if app.all_dirs.contains(file) {
+                                            app.all_dirs.retain(|p| p != file);
+                                            if !app.all_dirs.contains(&new_path) {
+                                                app.all_dirs.push(new_path.clone());
+                                            }
+                                        }
+                                        let ext = new_path
+                                            .extension()
+                                            .and_then(|e| e.to_str())
+                                            .unwrap_or("");
+                                        if ext == "md" || ext == "markdown" {
+                                            if !app.all_files.contains(&new_path) {
+                                                app.all_files.push(new_path.clone());
+                                            }
+                                        }
+                                        app.file_tags.remove(file);
+                                        let tags =
+                                            crate::utils::tags::extract_tags_from_file(&new_path);
+                                        app.file_tags.insert(new_path.clone(), tags);
+                                        if app.expanded_dirs.remove(file) {
+                                            app.expanded_dirs.insert(new_path.clone());
+                                        }
+                                        app.all_tags.clear();
+                                        for tags in app.file_tags.values() {
+                                            for tag in tags {
+                                                app.all_tags.insert(tag.clone());
+                                            }
+                                        }
                                     }
                                 }
                             }
