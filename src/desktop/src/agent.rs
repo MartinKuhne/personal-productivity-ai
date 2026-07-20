@@ -430,6 +430,14 @@ pub fn run_agent(
                                 result = %result,
                                 "Tool execution returned an error status. The agent may attempt to recover or try another tool."
                             );
+                        } else if func_name == "create_file" {
+                            let size = result_data.get("size_bytes").and_then(|s| s.as_u64()).unwrap_or(0);
+                            tracing::info!(
+                                name = "agent.tool.success",
+                                tool = %func_name,
+                                size_bytes = size,
+                                "File created successfully. Normal operation."
+                            );
                         } else {
                             tracing::info!(
                                 name = "agent.tool.success",
@@ -441,6 +449,9 @@ pub fn run_agent(
 
                         let result_msg = if is_error {
                             format!("> **Result Error:** {}\n\n", error_msg)
+                        } else if func_name == "create_file" {
+                            let size = result_data.get("size_bytes").and_then(|s| s.as_u64()).unwrap_or(0);
+                            format!("> **Result:** File created ({} B).\n\n", size)
                         } else if func_name == "list_files" {
                             let content = result_data.get("files").and_then(|f| f.as_str()).unwrap_or("");
                             let count = content.lines().count();

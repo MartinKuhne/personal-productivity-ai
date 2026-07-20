@@ -22,7 +22,7 @@ pub struct GrepResponse {
 pub struct ReadTagsInput {}
 #[derive(Serialize, Debug, JsonSchema)]
 pub struct ReadTagsResponse {
-    pub tags_found: String,
+    pub tags: Vec<String>,
 }
 
 #[derive(Deserialize, Debug, JsonSchema)]
@@ -71,6 +71,7 @@ pub struct CreateFileInput {
 #[derive(Serialize, Debug, JsonSchema)]
 pub struct CreateFileResponse {
     pub result: String,
+    pub size_bytes: u64,
 }
 
 #[derive(Deserialize, Debug, JsonSchema)]

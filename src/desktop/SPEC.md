@@ -63,14 +63,15 @@ The requirements below have been formatted using the **Easy Approach to Requirem
 * [REQ-158] When the user selects [Copy path] from the context menu, the system copies the fully qualified file or directory name to the clipboard
 * [REQ-159] When the user selects [Print] from the context menu, and the item under the mouse cursor is a file, the system prints the page using the windows system print dialog (implemented via ShellExecute "print" verb).
 * [REQ-160] When the user selects [New document] from the context menu, and the item under the mouse cursor is a directory, the system creates a document containing the yaml markdown header and the name 'New document.md'. If a file with that name exist, add the current date and time do the document name until a unique file name is generated.
-* [REQ-170] The left column shall increase in size to display any one item without line breaks, to use up to 20% of the available width
+* [REQ-170] The left column shall increase in size to display any one item without line breaks, to use up to 20% of the available width. The system shall re-evaluate the width needed when the user navigates to a new directory.
 * [REQ-171] On every level of the directory tree, directories appear before files
 * [REQ-172] The directory tree should not display folders that contain no markdown files
 * [REQ-173] When the user selects [Format Markdown] from the context menu, the system executes the Format Markdown quick task as described elsewhere
+* [REQ-174] When the user selects [Run as prompt] from the context menu, and the object under the mouse cursor is a file, the system shall execute the content of th file as an agent prompt
 
-* [REQ-180] When the user holds the shift, ctrl, or command (meta) key, the system shall allow the user to select multiple documents
+* [REQ-180] When the user holds the shift, the system shall allow the user to select multiple documents
 * [REQ-181] When the user has selected multiple documents, and they right click on one of the selected documents, the [multi select context menu] is shown
-* [REQ-182] When the user selects [Merge] from the [multi select context menu], the system shall run a new LLM prompt instructing the LLM to merge the content into a new document. 
+* [REQ-182] When the user selects [Merge] from the [multi select context menu], the system shall run a new LLM prompt instructing the LLM to merge the content into a new document and consolidate the content. 
 * [REQ-183] When the user selects [Delete] from the [multi select context menu], the system shall move all the selected files to the recycle bin
 
 ### Middle column / File viewer area
@@ -98,6 +99,9 @@ The requirements below have been formatted using the **Easy Approach to Requirem
 * [REQ-258] Markdown Validation: Before saving, the system shall validate the edited Markdown by parsing it with the same GFM parser used for rendering (pulldown-cmark with ENABLE_TABLES, ENABLE_FOOTNOTES, ENABLE_STRIKETHROUGH, ENABLE_TASKLISTS). If parsing fails, the save shall be aborted and an error message displayed with the parse error location.
 * [REQ-259] Save Behavior: On successful validation, the editor shall write the new Markdown body combined with the original YAML front-matter back to the file, then close the editor. The file watcher (REQ-403) shall detect the change and hot-reload the view.
 * [REQ-260] Cancel Behavior: Selecting [Cancel] shall discard all unsaved changes and close the editor without modifying the file.
+* [REQ-261] The inline text editor shall have an inverted, black text on white background color scheme, to help it stand out from other content.
+
+### Markdown
 
 * [REQ-201] GFM Parsing: The Markdown parser shall support the GitHub Flavored Markdown (GFM) tables extension. The parser shall enable the `ENABLE_TABLES`, `ENABLE_FOOTNOTES`, `ENABLE_STRIKETHROUGH`, and `ENABLE_TASKLISTS` options. The `ENABLE_HARD_BREAKS` option is NOT enabled by default.
 * [REQ-202] Heading Sizing: The FastMD Viewer shall render H1, H2, and H3 headings at 24px, 20px, and 16px respectively.
@@ -252,7 +256,7 @@ models:
 | `add_calendar_item` | Add a new calendar item. Requires CalDAV config. |
 | `update_calendar_item` | Update a calendar item. Requires CalDAV config. |
 | `delete_calendar_item` | Delete a calendar item. Requires CalDAV config. |
-| `search_email` | Search email by keyword, optionally within a specific folder. Requires JMAP config. |
+| `search_email` | Search email by keyword. Requires JMAP config. |
 | `get_email_by_id` | Get email by id. Requires JMAP config. |
 | `get_email` | Get email by date range, sender, recipient, unread, or flagged status. Requires JMAP config. |
 | `send_email` | Send an email. Requires JMAP config. |
@@ -270,7 +274,7 @@ models:
 * [REQ-650] Tool Availability: The CSV database tools (`add_rows`, `delete_rows`, `create_csv`, `list_csv`, `query`) shall only be offered to the LLM if the user's query contains any of the tool names, "table", "csv", or "database".
 * [REQ-651] Query Evaluation: The `query` tool shall use the `evalexpr` crate to parse and execute query predicates as dynamic expressions against CSV rows.
 * [REQ-652] Aggregate Functions: The query system shall allow `sum` and `average` as aggregate functions over a specified column.
-* [REQ-653] The system shall store all csv databases in %APPDATA%\fastmd\db\
+* [REQ-653] The system shall store all csv databases in a user specified location. Default to %APPDATA%\fastmd\db\ if not configured.
 
 
 ### YAML frontmatter template

@@ -166,17 +166,15 @@ define_tools! {
         input: crate::tools::dtos::ReadTagsInput,
         enabled: |_| true,
         execute: |config, _root_path, _input, _resolve_path| {
-            let mut count = 0;
+            let mut all_tags = std::collections::BTreeSet::new();
             for lib in &config.content_libraries {
                 if let Ok(res) = crate::tools::filesystem::tool_read_tags(Path::new(&lib.root_folder)) {
-                    if let Some(c) = res.tags_found.strip_prefix("Tags found: ") {
-                        if let Ok(num) = c.parse::<usize>() {
-                            count += num;
-                        }
+                    for tag in res.tags {
+                        all_tags.insert(tag);
                     }
                 }
             }
-            Ok(crate::tools::dtos::ReadTagsResponse { tags_found: format!("Tags found: {}", count) })
+            Ok(crate::tools::dtos::ReadTagsResponse { tags: all_tags.into_iter().collect() })
         }
     },
     {
