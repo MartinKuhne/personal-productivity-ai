@@ -131,6 +131,17 @@ impl FastMdApp {
         };
         let mut changed = false;
         let mut loaded_dirty = false;
+        // Track whether any `Removed` event fired during this
+        // drain. `Discovered` / `Updated` events do NOT need a
+        // `rebuild_tags` because the tag-manager worker pushes
+        // `FileParsed` messages that update `all_tags`
+        // incrementally; calling `rebuild_tags` on every event
+        // makes the UI thread do O(n) work per event during the
+        // initial scan, which is the main source of "unresponsive
+        // on startup". `Removed` events DO need `rebuild_tags`
+        // because the file's tags must be evicted from
+        // `all_tags`.
+        let mut had_removal = false;
         loop {
             match reader.try_recv() {
                 Ok(event) => {
@@ -183,6 +194,7 @@ impl FastMdApp {
                             }
                         }
                         FileEventKind::Removed => {
+                            had_removal = true;
                             // `all_files` only ever holds workspace
                             // files, so a `Removed` event for a
                             // PDF is a no-op against it. The
@@ -215,10 +227,22 @@ impl FastMdApp {
                 Err(std::sync::mpsc::TryRecvError::Disconnected) => break,
             }
         }
-        if changed {
+        // Only refresh the tag set when a file actually left —
+        // for adds, the `FileParsed` handler keeps `all_tags`
+        // up to date incrementally.
+        if had_removal {
             self.rebuild_tags();
-            self.left_panel_dirty = true;
         }
+        // `left_panel_dirty` is intentionally NOT set here. It is
+        // a UI-side flag for "the tree structure changed enough
+        // that the panel should be re-laid out" — and tying it to
+        // every bus event made `calc_max_width` (a recursive
+        // O(n) text-layout pass) run once per event during the
+        // initial scan, which was the root cause of the
+        // unresponsive-on-startup bug. The initial width is
+        // computed once, when indexing finishes
+        // (see `show_left_panel`).
+        //
         // `loaded_dirty` is informational — egui's update loop is
         // already continuous, and the next frame will see
         // `loaded_path == None` and reload from disk via
@@ -370,7 +394,15 @@ impl FastMdApp {
             indexing_finished: false,
             indexing_finished_handled: false,
             left_panel_width: None,
-            left_panel_dirty: true,
+            // `left_panel_dirty` is the user-interaction flag set
+            // by the tree (e.g. when a directory is selected via
+            // a click). It must start `false` so that the
+            // `show_left_panel` block doesn't run on the first
+            // frame with empty data and prematurely set
+            // `indexing_finished_handled = true` — that would
+            // prevent the real width calculation from running
+            // when the initial scan finishes.
+            left_panel_dirty: false,
             selected_file: None,
             selected_files: HashSet::new(),
             selected_dir: None,
@@ -1053,5 +1085,97 @@ mod tests {
         assert!(!FastMdApp::is_workspace_file(&PathBuf::from("/a/b/photo.png")));
         assert!(!FastMdApp::is_workspace_file(&PathBuf::from("/a/b/photo.jpg")));
         assert!(!FastMdApp::is_workspace_file(&PathBuf::from("/a/b/no_extension")));
+    }
+
+    // -- process_file_events: performance invariants (regression) --
+
+    #[test]
+    fn test_process_file_events_does_not_set_left_panel_dirty() {
+        // Regression: `process_file_events` used to set
+        // `left_panel_dirty = true` on every event, which made
+        // `show_left_panel` run `calc_max_width` (a recursive
+        // O(n) text-layout pass) once per event during the
+        // initial scan. With many files this saturated the UI
+        // thread and the app felt unresponsive on startup. The
+        // fix: the bus consumer no longer touches
+        // `left_panel_dirty`. The width is calculated once,
+        // when indexing finishes, in `show_left_panel`.
+        let mut app = create_test_app();
+        assert!(!app.left_panel_dirty);
+
+        app.file_event_reader = Some(app.file_event_bus.subscribe());
+        let publisher = app.file_event_bus.clone();
+        publisher.publish(crate::file_events::FileEvent::discovered(
+            PathBuf::from("/lib/notes.md"),
+        ));
+        publisher.publish(crate::file_events::FileEvent::discovered(
+            PathBuf::from("/lib/extra.md"),
+        ));
+        publisher.publish(crate::file_events::FileEvent::updated(
+            PathBuf::from("/lib/notes.md"),
+        ));
+
+        let _ = app.process_file_events();
+        assert!(
+            !app.left_panel_dirty,
+            "process_file_events must not set left_panel_dirty — the width is \
+             calculated once when indexing finishes, not per bus event"
+        );
+    }
+
+    #[test]
+    fn test_process_file_events_rebuild_tags_only_on_removal() {
+        // `rebuild_tags` is O(n) in `file_tags.size()`. Calling
+        // it on every bus event (Discovered or Updated) made
+        // the UI thread do unnecessary work during the initial
+        // scan. The `FileParsed` handler keeps `all_tags` up
+        // to date incrementally, so `rebuild_tags` is only
+        // needed when a file actually leaves (`Removed`).
+        //
+        // We can't directly observe the rebuild from outside
+        // (it has no return value), so we observe a side
+        // effect: for `Removed`, the removed file's tags must
+        // be evicted from `all_tags`. For `Discovered`, a
+        // manually-pre-populated tag must remain (the
+        // `FileParsed` path, not `process_file_events`, is
+        // responsible for adding it).
+        let mut app = create_test_app();
+
+        // Pre-populate `all_tags` with a tag the file would
+        // have. After a `Removed`, `rebuild_tags` must drop it.
+        app.file_tags.insert(
+            PathBuf::from("/lib/notes.md"),
+            vec!["work".to_string()],
+        );
+        app.all_tags.insert("work".to_string());
+        app.all_files.push(PathBuf::from("/lib/notes.md"));
+
+        // A `Removed` event must trigger `rebuild_tags`, which
+        // evicts the file's tags from `all_tags`.
+        app.file_event_reader = Some(app.file_event_bus.subscribe());
+        app.file_event_bus.publish(crate::file_events::FileEvent::removed(
+            PathBuf::from("/lib/notes.md"),
+        ));
+        let _ = app.process_file_events();
+        assert!(
+            !app.all_tags.contains("work"),
+            "Removed events must trigger rebuild_tags so stale tags are evicted"
+        );
+
+        // A `Discovered` event must NOT call `rebuild_tags`
+        // (which would clear `all_tags` and lose the tag we
+        // just added). We verify this by adding a tag, then
+        // publishing a Discovered, and asserting the tag is
+        // still there.
+        app.all_tags.insert("keep".to_string());
+        app.file_event_bus.publish(crate::file_events::FileEvent::discovered(
+            PathBuf::from("/lib/other.md"),
+        ));
+        let _ = app.process_file_events();
+        assert!(
+            app.all_tags.contains("keep"),
+            "Discovered events must NOT call rebuild_tags — the FileParsed path \
+             updates all_tags incrementally"
+        );
     }
 }
