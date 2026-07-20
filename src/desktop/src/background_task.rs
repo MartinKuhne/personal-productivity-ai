@@ -134,6 +134,13 @@ impl Task {
                                 .publish(FileEvent::discovered(path.to_path_buf()));
                             let _ = tx_work.send(path.to_path_buf());
                         } else if ext_str == "pdf" {
+                            // Producer: publish the PDF to the bus so the
+                            // PDF-converter consumer (subscribed below)
+                            // can convert it. We still push to `tx_pdf`
+                            // directly as a fast path — the converter
+                            // worker deduplicates via `should_convert()`.
+                            file_event_bus
+                                .publish(FileEvent::discovered(path.to_path_buf()));
                             let job = crate::background::PdfConversionJob::new(path.to_path_buf());
                             if job.should_convert() {
                                 pdfs_queued += 1;
@@ -262,6 +269,13 @@ impl Task {
                     } else if is_pdf {
                         match event.kind {
                             notify::EventKind::Create(_) | notify::EventKind::Modify(_) => {
+                                // Producer: publish to the bus so the
+                                // PDF-converter consumer (subscribed
+                                // below) can convert it. The direct
+                                // `tx_pdf_watcher.send` remains as a
+                                // fast path.
+                                bus_watcher
+                                    .publish(FileEvent::updated(path.clone()));
                                 let job = crate::background::PdfConversionJob::new(path.clone());
                                 if job.should_convert() {
                                     let _ = tx_pdf_watcher.send(path.clone());
@@ -311,6 +325,53 @@ impl Task {
             );
             let _ = tx.send(BackgroundMessage::FinishedWithoutWatcher);
         }
+
+        // ----------------------------------------------------------------
+        // Bus-driven PDF-conversion trigger.
+        //
+        // In addition to the initial scan and the notify watcher (which
+        // both push directly to `tx_pdf` for low latency), we also
+        // subscribe to the bus so that PDFs created through any other
+        // path — e.g. a future tool that creates a PDF, or a UI handler
+        // that drops a PDF into a content library — are also converted.
+        //
+        // The conversion worker calls `should_convert()` before
+        // invoking the external tool, so duplicate triggers are
+        // de-duplicated for free.
+        // ----------------------------------------------------------------
+        let bus_reader_pdf = file_event_bus.clone();
+        let tx_pdf_bus = tx_pdf.clone();
+        std::thread::spawn(move || {
+            let reader = bus_reader_pdf.subscribe();
+            loop {
+                let event = match reader.recv() {
+                    Ok(e) => e,
+                    Err(_) => break, // bus was dropped
+                };
+                use crate::file_events::FileEventKind;
+                if !matches!(event.kind, FileEventKind::Discovered | FileEventKind::Updated) {
+                    continue;
+                }
+                // Only consider PDF files.
+                let is_pdf = event
+                    .path
+                    .extension()
+                    .and_then(|e| e.to_str())
+                    .map(|e| e.eq_ignore_ascii_case("pdf"))
+                    .unwrap_or(false);
+                if !is_pdf {
+                    continue;
+                }
+                if let Err(e) = tx_pdf_bus.send(event.path) {
+                    tracing::warn!(
+                        name = "background_task.pdf_bus.tx_closed",
+                        error = %e,
+                        "PDF bus subscriber could not deliver to tx_pdf. Channel is closed."
+                    );
+                    break;
+                }
+            }
+        });
     }
 }
 
@@ -485,6 +546,156 @@ mod tests {
         assert_eq!(
             tag_events[0].kind,
             crate::file_events::FileEventKind::Discovered
+        );
+    }
+
+    #[test]
+    fn test_initial_scan_publishes_pdf_discovered_to_bus() {
+        // The PDF converter worker consumes from `tx_pdf`. To make
+        // sure every path that creates a PDF can route through the
+        // bus (not just the notify watcher), the initial scan must
+        // publish `Discovered` events for PDFs as well.
+        let mut config = AppConfig::default();
+        let dir = tempdir().unwrap();
+        std::fs::write(dir.path().join("report.pdf"), b"dummy pdf").unwrap();
+
+        config.content_libraries.push(ContentLibrary {
+            name: "test".to_string(),
+            kind: "text".to_string(),
+            root_folder: dir.path().to_string_lossy().to_string(),
+            readonly: true,
+            priority: 0,
+        });
+
+        let task = Task::new(config);
+        let reader = task.file_event_bus.subscribe();
+
+        // Wait for the initial scan to finish.
+        let start = std::time::Instant::now();
+        while start.elapsed().as_secs() < 5 {
+            if let Ok(msg) = task.rx.recv_timeout(std::time::Duration::from_millis(100)) {
+                if let BackgroundMessage::Finished(_) | BackgroundMessage::FinishedWithoutWatcher = msg {
+                    break;
+                }
+            }
+        }
+
+        // Drain events.
+        let mut events = Vec::new();
+        while let Ok(ev) = reader.recv_timeout(std::time::Duration::from_millis(100)) {
+            events.push(ev);
+        }
+
+        // There must be a Discovered event for the PDF.
+        let pdf_discovered = events
+            .iter()
+            .find(|e| {
+                e.kind == crate::file_events::FileEventKind::Discovered
+                    && e.path.extension().and_then(|x| x.to_str()) == Some("pdf")
+            })
+            .expect("initial scan should publish Discovered for PDFs");
+        assert_eq!(pdf_discovered.path, dir.path().join("report.pdf"));
+    }
+
+    #[test]
+    fn test_bus_published_pdf_triggers_conversion_via_subscriber() {
+        // Regression test: a PDF published directly to the bus
+        // (without going through the initial scan or the notify
+        // watcher) must still be picked up by the PDF-converter
+        // worker via the bus subscriber we added.
+        //
+        // We configure a working pdf_converter_command (the system
+        // `echo`/`true`) so that `execute()` actually runs to
+        // completion and emits a `Successfully converted` log
+        // entry on the `rx` channel. If the bus subscriber did
+        // NOT forward the event, the PDF worker would never see
+        // the path and no log entry would arrive.
+        use crate::background::LogCategory;
+
+        let mut config = AppConfig::default();
+        let dir = tempdir().unwrap();
+
+        // Use a real, available shell command so the PDF worker
+        // actually executes and sends a success LogEntry.
+        #[cfg(windows)]
+        let cmd_template = Some(vec![
+            "cmd".to_string(),
+            "/C".to_string(),
+            "echo done".to_string(),
+        ]);
+        #[cfg(not(windows))]
+        let cmd_template = Some(vec!["true".to_string()]);
+        config.pdf_converter_command = cmd_template;
+
+        config.content_libraries.push(ContentLibrary {
+            name: "test".to_string(),
+            kind: "text".to_string(),
+            root_folder: dir.path().to_string_lossy().to_string(),
+            readonly: true,
+            priority: 0,
+        });
+
+        let task = Task::new(config);
+
+        // Wait for Finished.
+        let start = std::time::Instant::now();
+        while start.elapsed().as_secs() < 5 {
+            if let Ok(msg) = task.rx.recv_timeout(std::time::Duration::from_millis(100)) {
+                if let BackgroundMessage::Finished(_) | BackgroundMessage::FinishedWithoutWatcher = msg {
+                    break;
+                }
+            }
+        }
+
+        // Create a PDF on disk and publish a Discovered event for it.
+        // (This simulates a code path that bypasses the initial
+        // scan and the notify watcher — for example, a future tool
+        // that drops a PDF into a content library.)
+        let pdf_path = dir.path().join("dropped.pdf");
+        std::fs::write(&pdf_path, b"dummy").unwrap();
+        task
+            .file_event_bus
+            .publish(crate::file_events::FileEvent::discovered(pdf_path.clone()));
+
+        // The bus subscriber forwards the path to `tx_pdf`. The
+        // PDF-converter worker dequeues it, calls `should_convert()`
+        // (returns true), then calls `execute()`. We expect a
+        // `Successfully converted` log entry on the rx channel.
+        //
+        // Give the subscriber a moment to spin up — `Task::new`
+        // spawns the indexing thread and the bus subscriber is
+        // only attached near the end of `run_indexing`. After
+        // `Finished` arrives, a short sleep ensures the
+        // subscriber is alive before we publish.
+        std::thread::sleep(std::time::Duration::from_millis(200));
+
+        let mut saw_success = false;
+        let start = std::time::Instant::now();
+        let mut all_messages: Vec<String> = Vec::new();
+        while start.elapsed().as_secs() < 5 {
+            if let Ok(msg) = task.rx.recv_timeout(std::time::Duration::from_millis(100)) {
+                match msg {
+                    BackgroundMessage::LogEntry(entry) => {
+                        all_messages.push(format!("{:?}: {}", entry.category, entry.message));
+                        if entry.category == LogCategory::PdfConverter
+                            && entry.message.contains("Successfully converted")
+                        {
+                            saw_success = true;
+                            break;
+                        }
+                    }
+                    other => {
+                        all_messages.push(format!("other: {:?}", std::mem::discriminant(&other)));
+                    }
+                }
+            }
+        }
+        if !saw_success {
+            eprintln!("Test saw messages: {:?}", all_messages);
+        }
+        assert!(
+            saw_success,
+            "Bus-published PDF Discovered event should reach the PDF converter worker"
         );
     }
 }

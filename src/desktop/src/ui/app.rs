@@ -130,6 +130,7 @@ impl FastMdApp {
             return false;
         };
         let mut changed = false;
+        let mut loaded_dirty = false;
         loop {
             match reader.try_recv() {
                 Ok(event) => {
@@ -147,6 +148,25 @@ impl FastMdApp {
                                     self.all_dirs.push(parent.to_path_buf());
                                     changed = true;
                                 }
+                            }
+                            // If the open tab's file was updated
+                            // (e.g. by the PDF converter writing a
+                            // fresh `.md` next to the `.pdf`, or by
+                            // the user editing it through the inline
+                            // editor), the tab must reload on the
+                            // next frame. Clearing `loaded_path`
+                            // forces `load_selected_file` to re-read
+                            // from disk.
+                            //
+                            // Skip the reload if the inline editor
+                            // is currently open on this file — the
+                            // user has unsaved changes in memory and
+                            // we must not clobber them.
+                            if self.loaded_path.as_ref() == Some(&event.path)
+                                && !self.editor_state.is_open
+                            {
+                                self.loaded_path = None;
+                                loaded_dirty = true;
                             }
                         }
                         FileEventKind::Removed => {
@@ -176,7 +196,11 @@ impl FastMdApp {
             self.rebuild_tags();
             self.left_panel_dirty = true;
         }
-        changed
+        // `loaded_dirty` is informational — egui's update loop is
+        // already continuous, and the next frame will see
+        // `loaded_path == None` and reload from disk via
+        // `load_selected_file`.
+        changed || loaded_dirty
     }
 
     fn rebuild_tags(&mut self) {
@@ -420,7 +444,12 @@ impl FastMdApp {
         // tree's "consumer" of the file-event bus — the
         // tag manager/indexer has its own consumers in
         // `background_task.rs`.
-        self.process_file_events();
+        if self.process_file_events() {
+            // At least one tab needs to reload because its file
+            // changed on disk. Force a repaint so the change
+            // shows up immediately.
+            ctx.request_repaint();
+        }
 
         // Handle background messages
         while let Ok(msg) = self.rx.try_recv() {
@@ -825,5 +854,89 @@ mod tests {
         assert_eq!(app.agent_total_usage.completion_tokens, 60);
         assert_eq!(app.agent_total_usage.cached_tokens, Some(50));
         assert_eq!(app.agent_total_usage.reasoning_tokens, Some(5));
+    }
+
+    // -- process_file_events: tab reload on file Updated --
+
+    #[test]
+    fn test_process_file_events_updated_resets_loaded_path() {
+        // When the bus reports a Discovered/Updated event for a
+        // file that is currently loaded into the renderer, the
+        // next frame must reload it from disk. We model "currently
+        // loaded" by setting `loaded_path = Some(path)` while
+        // leaving `selected_file` alone — `load_selected_file`
+        // (the actual reload driver) only fires when
+        // `selected_file.is_some() && loaded_path != selected_file`.
+        let mut app = create_test_app();
+        let path = PathBuf::from("/tmp/active_doc.md");
+
+        app.selected_file = Some(path.clone());
+        app.loaded_path = Some(path.clone());
+        app.all_files.push(path.clone());
+
+        // Subscribe a reader to the bus so we can publish into it
+        // and have process_file_events pick up the event.
+        app.file_event_reader = Some(app.file_event_bus.subscribe());
+
+        // Use a separate clone of the bus to publish; both clones
+        // share the same subscriber list.
+        let publisher = app.file_event_bus.clone();
+        publisher.publish(crate::file_events::FileEvent::updated(path.clone()));
+
+        let changed = app.process_file_events();
+        assert!(changed, "process_file_events should report a change");
+        assert!(
+            app.loaded_path.is_none(),
+            "loaded_path must be cleared so the renderer reloads on the next frame"
+        );
+        // selected_file must be preserved so the renderer knows
+        // what to render.
+        assert_eq!(app.selected_file.as_ref(), Some(&path));
+    }
+
+    #[test]
+    fn test_process_file_events_updated_preserves_loaded_when_editor_open() {
+        // If the inline editor is open on the file, the user's
+        // unsaved changes must not be clobbered by an external
+        // update. The reload should be skipped.
+        let mut app = create_test_app();
+        let path = PathBuf::from("/tmp/being_edited.md");
+
+        app.selected_file = Some(path.clone());
+        app.loaded_path = Some(path.clone());
+        app.all_files.push(path.clone());
+        app.editor_state.open(&path, "old content");
+        assert!(app.editor_state.is_open);
+
+        app.file_event_reader = Some(app.file_event_bus.subscribe());
+        let publisher = app.file_event_bus.clone();
+        publisher.publish(crate::file_events::FileEvent::updated(path.clone()));
+
+        let _ = app.process_file_events();
+        assert!(
+            app.loaded_path.is_some(),
+            "loaded_path must NOT be cleared while the inline editor is open"
+        );
+    }
+
+    #[test]
+    fn test_process_file_events_removed_clears_loaded_path() {
+        // Sanity check: a Removed event still clears `loaded_path`
+        // regardless of whether the editor is open. (We accept
+        // losing unsaved edits in the editor if the file was
+        // deleted out from under us — that's the user's action.)
+        let mut app = create_test_app();
+        let path = PathBuf::from("/tmp/gone.md");
+
+        app.selected_file = Some(path.clone());
+        app.loaded_path = Some(path.clone());
+        app.all_files.push(path.clone());
+
+        app.file_event_reader = Some(app.file_event_bus.subscribe());
+        let publisher = app.file_event_bus.clone();
+        publisher.publish(crate::file_events::FileEvent::removed(path.clone()));
+
+        let _ = app.process_file_events();
+        assert!(app.loaded_path.is_none());
     }
 }
