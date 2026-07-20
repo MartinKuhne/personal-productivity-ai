@@ -187,4 +187,125 @@ mod tests {
         });
         assert_eq!(get_account_id(&accs, "urn:ietf:params:jmap:mail"), "");
     }
+
+    use super::jmap_check_errors;
+
+    #[test]
+    fn test_jmap_check_errors_no_errors() {
+        let res = json!({
+            "methodResponses": [
+                ["Email/get", { "list": [] }, "0"]
+            ]
+        });
+        assert_eq!(jmap_check_errors(&res), None);
+    }
+
+    #[test]
+    fn test_jmap_check_errors_with_description() {
+        let res = json!({
+            "methodResponses": [
+                ["error", { "type": "unknownMethod", "description": "The method is unknown" }, "call-1"]
+            ]
+        });
+        assert_eq!(jmap_check_errors(&res), Some("type: unknownMethod: The method is unknown (callId: call-1)".to_string()));
+    }
+
+    #[test]
+    fn test_jmap_check_errors_without_description() {
+        let res = json!({
+            "methodResponses": [
+                ["error", { "type": "invalidArguments" }, "call-2"]
+            ]
+        });
+        assert_eq!(jmap_check_errors(&res), Some("type: invalidArguments (callId: call-2)".to_string()));
+    }
+
+    #[test]
+    fn test_jmap_check_errors_missing_method_responses() {
+        let res = json!({ "session": "something" });
+        assert_eq!(jmap_check_errors(&res), None);
+    }
+
+    #[test]
+    fn test_jmap_check_errors_multiple_responses_one_error() {
+        let res = json!({
+            "methodResponses": [
+                ["Email/get", { "list": [] }, "0"],
+                ["error", { "type": "accountNotFound" }, "1"]
+            ]
+        });
+        assert_eq!(jmap_check_errors(&res), Some("type: accountNotFound (callId: 1)".to_string()));
+    }
+
+    use std::net::TcpListener;
+    use std::thread;
+    use std::io::{Read, Write};
+    use crate::config::JmapClient;
+    use super::{get_jmap_session, jmap_call};
+
+    fn spawn_mock_server(response: impl Into<String>) -> String {
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let port = listener.local_addr().unwrap().port();
+        let response_str = response.into();
+        thread::spawn(move || {
+            if let Ok((mut stream, _)) = listener.accept() {
+                let mut buf = [0; 4096];
+                let _ = stream.read(&mut buf);
+                let _ = stream.write_all(response_str.as_bytes());
+                std::thread::sleep(std::time::Duration::from_millis(200));
+            }
+        });
+        format!("http://127.0.0.1:{}", port)
+    }
+
+    #[test]
+    fn test_get_jmap_session_success() {
+        rustls::crypto::ring::default_provider().install_default().ok();
+        let response = "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\n\r\n{\"apiUrl\": \"/api\", \"primaryAccounts\": {\"core\": \"acc1\"}}";
+        let url = spawn_mock_server(response);
+        let client = JmapClient {
+            url: url.clone(),
+            token: "tok".to_string(),
+        };
+        let res = get_jmap_session(&client);
+        assert!(res.is_ok());
+        let (api_url, token, accs) = res.unwrap();
+        assert_eq!(api_url, "/api");
+        assert_eq!(token, "tok");
+        assert_eq!(accs["core"], "acc1");
+    }
+
+    #[test]
+    fn test_get_jmap_session_error_status() {
+        rustls::crypto::ring::default_provider().install_default().ok();
+        let response = "HTTP/1.1 401 Unauthorized\r\nContent-Length: 5\r\n\r\nerror";
+        let url = spawn_mock_server(response);
+        let client = JmapClient {
+            url: url.clone(),
+            token: "tok".to_string(),
+        };
+        let res = get_jmap_session(&client);
+        assert!(res.is_err());
+        assert!(res.unwrap_err().contains("JMAP Error 401"));
+    }
+
+    #[test]
+    fn test_jmap_call_success() {
+        rustls::crypto::ring::default_provider().install_default().ok();
+        let body = "{\"methodResponses\": []}";
+        let response = format!("HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\n\r\n{}", body.len(), body);
+        let url = spawn_mock_server(response);
+        let res = jmap_call(&url, "token", &["cap1"], json!([]));
+        assert!(res.is_ok(), "Error: {}", res.unwrap_err());
+    }
+
+    #[test]
+    fn test_jmap_call_error_status() {
+        rustls::crypto::ring::default_provider().install_default().ok();
+        let response = "HTTP/1.1 500 Internal Server Error\r\nContent-Length: 4\r\n\r\nfail";
+        let url = spawn_mock_server(response);
+        let res = jmap_call(&url, "token", &[], json!([]));
+        assert!(res.is_err());
+        assert!(res.unwrap_err().contains("JMAP Error 500"));
+    }
 }

@@ -606,4 +606,248 @@ mod tests {
         let prompt = get_base_system_prompt(&config);
         assert!(prompt.contains("Custom instructions."));
     }
+
+    #[test]
+    fn test_run_agent_missing_api_key() {
+        let mut config = crate::config::AppConfig::default();
+        config.models.insert("test".to_string(), crate::config::LlmConfig {
+            model: "test".to_string(),
+            api_url: "http://localhost".to_string(),
+            api_key: "".to_string(),
+            cost: None,
+            use_case: vec!["chat".to_string()],
+        });
+        
+        let (tx, rx) = std::sync::mpsc::channel();
+        let cancel_flag = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+        
+        run_agent(
+            config,
+            tx,
+            None,
+            None,
+            std::collections::HashSet::new(),
+            "Hello".to_string(),
+            cancel_flag,
+            None,
+            "".to_string(),
+        );
+        
+        let msg = rx.recv().unwrap();
+        match msg {
+            BackgroundMessage::AgentFailed(err) => {
+                assert!(err.contains("API key not set"));
+            }
+            _ => panic!("Expected AgentFailed"),
+        }
+    }
+
+    #[test]
+    fn test_run_agent_network_error() {
+        let mut config = crate::config::AppConfig::default();
+        config.models.insert("test".to_string(), crate::config::LlmConfig {
+            model: "test".to_string(),
+            api_url: "http://127.0.0.1:0".to_string(),
+            api_key: "valid-key".to_string(),
+            cost: None,
+            use_case: vec!["chat".to_string()],
+        });
+        
+        let (tx, rx) = std::sync::mpsc::channel();
+        let cancel_flag = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+        
+        run_agent(
+            config,
+            tx,
+            None,
+            None,
+            std::collections::HashSet::new(),
+            "Hello".to_string(),
+            cancel_flag,
+            None,
+            "".to_string(),
+        );
+        
+        let mut got_failed = false;
+        while let Ok(msg) = rx.recv() {
+            match msg {
+                BackgroundMessage::AgentFailed(err) => {
+                    assert!(err.contains("HTTP Request failed"));
+                    got_failed = true;
+                    break;
+                }
+                _ => {}
+            }
+        }
+        assert!(got_failed);
+    }
+
+    #[test]
+    fn test_run_agent_invalid_json_response() {
+        use std::net::TcpListener;
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let port = listener.local_addr().unwrap().port();
+        
+        std::thread::spawn(move || {
+            if let Ok((mut stream, _)) = listener.accept() {
+                use std::io::{Read, Write};
+                let mut buf = [0; 2048];
+                let _ = stream.read(&mut buf);
+                let response = "HTTP/1.1 200 OK\r\nContent-Length: 1\r\n\r\n{";
+                let _ = stream.write_all(response.as_bytes());
+                std::thread::sleep(std::time::Duration::from_millis(200));
+            }
+        });
+
+        let mut config = crate::config::AppConfig::default();
+        config.models.insert("test".to_string(), crate::config::LlmConfig {
+            model: "test".to_string(),
+            api_url: format!("http://127.0.0.1:{}", port),
+            api_key: "valid-key".to_string(),
+            cost: None,
+            use_case: vec!["chat".to_string()],
+        });
+        
+        let (tx, rx) = std::sync::mpsc::channel();
+        let cancel_flag = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+        
+        let mut selected = std::collections::HashSet::new();
+        selected.insert(PathBuf::from("other.md"));
+
+        run_agent(
+            config,
+            tx,
+            Some(PathBuf::from("test.md")), // Cover active_file
+            None,
+            selected, // Cover selected_files
+            "Hello".to_string(),
+            cancel_flag,
+            None,
+            "".to_string(),
+        );
+        
+        let mut got_failed = false;
+        while let Ok(msg) = rx.recv() {
+            match msg {
+                BackgroundMessage::AgentFailed(err) => {
+                    assert!(err.contains("Failed to parse JSON response"), "Expected 'Failed to parse JSON response', got '{}'", err);
+                    got_failed = true;
+                    break;
+                }
+                _ => {}
+            }
+        }
+        assert!(got_failed);
+    }
+
+    #[test]
+    fn test_run_agent_http_status_error() {
+        use std::net::TcpListener;
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let port = listener.local_addr().unwrap().port();
+        
+        std::thread::spawn(move || {
+            if let Ok((mut stream, _)) = listener.accept() {
+                use std::io::{Read, Write};
+                let mut buf = [0; 2048];
+                let _ = stream.read(&mut buf);
+                let response = "HTTP/1.1 400 Bad Request\r\nContent-Length: 11\r\n\r\nbad request";
+                let _ = stream.write_all(response.as_bytes());
+                std::thread::sleep(std::time::Duration::from_millis(200));
+            }
+        });
+
+        let mut config = crate::config::AppConfig::default();
+        config.models.insert("test".to_string(), crate::config::LlmConfig {
+            model: "test".to_string(),
+            api_url: format!("http://127.0.0.1:{}", port),
+            api_key: "valid-key".to_string(),
+            cost: None,
+            use_case: vec!["chat".to_string()],
+        });
+        
+        let (tx, rx) = std::sync::mpsc::channel();
+        let cancel_flag = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+        
+        run_agent(
+            config,
+            tx,
+            None,
+            Some(PathBuf::from("dir")), // cover active_dir
+            std::collections::HashSet::new(),
+            "Hello".to_string(),
+            cancel_flag,
+            Some(vec![]), // cover history
+            "".to_string(),
+        );
+        
+        let mut got_failed = false;
+        while let Ok(msg) = rx.recv() {
+            match msg {
+                BackgroundMessage::AgentFailed(err) => {
+                    assert!(err.contains("HTTP Request failed with status 400"), "Expected 'HTTP Request failed with status 400', got '{}'", err);
+                    got_failed = true;
+                    break;
+                }
+                _ => {}
+            }
+        }
+        assert!(got_failed);
+    }
+
+    #[test]
+    fn test_run_agent_missing_choices() {
+        use std::net::TcpListener;
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let port = listener.local_addr().unwrap().port();
+        
+        std::thread::spawn(move || {
+            if let Ok((mut stream, _)) = listener.accept() {
+                use std::io::{Read, Write};
+                let mut buf = [0; 2048];
+                let _ = stream.read(&mut buf);
+                let body = "{}";
+                let response = format!("HTTP/1.1 200 OK\r\nContent-Length: {}\r\n\r\n{}", body.len(), body);
+                let _ = stream.write_all(response.as_bytes());
+                std::thread::sleep(std::time::Duration::from_millis(200));
+            }
+        });
+
+        let mut config = crate::config::AppConfig::default();
+        config.models.insert("test".to_string(), crate::config::LlmConfig {
+            model: "test".to_string(),
+            api_url: format!("http://127.0.0.1:{}", port),
+            api_key: "valid-key".to_string(),
+            cost: None,
+            use_case: vec!["chat".to_string()],
+        });
+        
+        let (tx, rx) = std::sync::mpsc::channel();
+        let cancel_flag = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+        
+        run_agent(
+            config,
+            tx,
+            None,
+            None,
+            std::collections::HashSet::new(),
+            "Hello".to_string(),
+            cancel_flag,
+            None,
+            "".to_string(),
+        );
+        
+        let mut got_failed = false;
+        while let Ok(msg) = rx.recv() {
+            match msg {
+                BackgroundMessage::AgentFailed(err) => {
+                    assert!(err.contains("Invalid response schema"), "Expected 'Invalid response schema', got '{}'", err);
+                    got_failed = true;
+                    break;
+                }
+                _ => {}
+            }
+        }
+        assert!(got_failed);
+    }
 }

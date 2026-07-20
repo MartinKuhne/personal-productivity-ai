@@ -277,3 +277,63 @@ impl Task {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::config::{AppConfig, ContentLibrary};
+    use tempfile::tempdir;
+
+    #[test]
+    fn test_background_task_new_no_libraries() {
+        let config = AppConfig::default();
+        let task = Task::new(config);
+
+        let mut got_finished = false;
+        let start = std::time::Instant::now();
+        while start.elapsed().as_secs() < 5 {
+            if let Ok(msg) = task.rx.recv_timeout(std::time::Duration::from_millis(100)) {
+                if let BackgroundMessage::Finished(_) | BackgroundMessage::FinishedWithoutWatcher = msg {
+                    got_finished = true;
+                    break;
+                }
+            }
+        }
+        assert!(got_finished, "Should complete initialization");
+    }
+
+    #[test]
+    fn test_background_task_indexing() {
+        let mut config = AppConfig::default();
+        let dir = tempdir().unwrap();
+        let md = dir.path().join("test.md");
+        std::fs::write(&md, "test").unwrap();
+        let pdf = dir.path().join("test.pdf");
+        std::fs::write(&pdf, "pdf").unwrap();
+
+        config.content_libraries.push(ContentLibrary {
+            name: "test".to_string(),
+            kind: "text".to_string(),
+            root_folder: dir.path().to_string_lossy().to_string(),
+            readonly: true,
+            priority: 0,
+        });
+
+        let task = Task::new(config);
+
+        let mut got_finished = false;
+        let start = std::time::Instant::now();
+        while start.elapsed().as_secs() < 5 {
+            if let Ok(msg) = task.rx.recv_timeout(std::time::Duration::from_millis(100)) {
+                match msg {
+                    BackgroundMessage::Finished(_) | BackgroundMessage::FinishedWithoutWatcher => {
+                        got_finished = true;
+                        break;
+                    }
+                    _ => {}
+                }
+            }
+        }
+        assert!(got_finished, "Should complete indexing");
+    }
+}

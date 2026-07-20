@@ -130,3 +130,114 @@ pub fn tool_add_contact(
         })
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::config::{AppConfig, JmapClient};
+    use std::collections::HashMap;
+
+    fn spawn_mock_server(body: impl Into<String>) -> String {
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let port = listener.local_addr().unwrap().port();
+        let api_url = format!("http://127.0.0.1:{}", port);
+        let body_str = body.into().replace("{API_URL}", &api_url);
+        let response_str = format!("HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nConnection: close\r\nContent-Length: {}\r\n\r\n{}", body_str.len(), body_str);
+        std::thread::spawn(move || {
+            for stream in listener.incoming() {
+                if let Ok(mut stream) = stream {
+                    use std::io::{Read, Write};
+                    let mut buf = [0; 4096];
+                    let _ = stream.read(&mut buf);
+                    let _ = stream.write_all(response_str.as_bytes());
+                    std::thread::sleep(std::time::Duration::from_millis(200));
+                }
+            }
+        });
+        format!("http://127.0.0.1:{}", port)
+    }
+
+    fn mock_config(api_url: &str) -> AppConfig {
+        let mut clients = HashMap::new();
+        clients.insert("test_jmap".to_string(), JmapClient {
+            url: api_url.to_string(),
+            token: "test_token".to_string(),
+        });
+        AppConfig {
+            jmap_clients: clients,
+            ..AppConfig::default()
+        }
+    }
+
+    #[test]
+    fn test_contact_operations_success() {
+        rustls::crypto::ring::default_provider().install_default().ok();
+        let json_resp = serde_json::json!({
+            "apiUrl": "{API_URL}",
+            "primaryAccounts": {
+                "urn:ietf:params:jmap:contacts": "acc-1"
+            },
+            "methodResponses": [
+                ["Contact/get", { "list": [{"id": "c-1", "firstName": "Alice"}] }, "1"],
+                ["Contact/set", { "created": {"new_contact_1": {"id": "new-id"}} }, "0"]
+            ]
+        });
+        let url = spawn_mock_server(serde_json::to_string(&json_resp).unwrap());
+        let config = mock_config(&url);
+
+        let res_search = tool_search_contact(&config, "alice");
+        assert!(res_search.is_ok());
+
+        let res_item = tool_get_contact(&config, "c-1");
+        assert!(res_item.is_ok());
+
+        let res_add = tool_add_contact(&config, r#"{"firstName": "New"}"#);
+        assert!(res_add.is_ok());
+    }
+
+    #[test]
+    fn test_contact_operations_errors() {
+        rustls::crypto::ring::default_provider().install_default().ok();
+        let json_resp = serde_json::json!({
+            "apiUrl": "{API_URL}",
+            "primaryAccounts": {
+                "urn:ietf:params:jmap:contacts": "acc-1"
+            },
+            "methodResponses": [
+                ["error", { "type": "serverError", "description": "mock error" }, "0"]
+            ]
+        });
+        let url = spawn_mock_server(serde_json::to_string(&json_resp).unwrap());
+        let config = mock_config(&url);
+
+        let res_search = tool_search_contact(&config, "alice");
+        assert!(res_search.is_ok());
+        assert!(res_search.unwrap().results.contains("Error from JMAP server"));
+
+        let res_add_err = tool_add_contact(&config, "{invalid json}");
+        assert!(res_add_err.is_err());
+        assert!(res_add_err.unwrap_err().contains("Invalid JSON"));
+    }
+
+    #[test]
+    fn test_contact_operations_no_clients() {
+        let config = AppConfig::default();
+        assert!(tool_search_contact(&config, "alice").is_err());
+        assert!(tool_get_contact(&config, "id").is_err());
+        assert!(tool_add_contact(&config, "{}").is_err());
+    }
+
+    #[test]
+    fn test_contact_operations_session_error() {
+        rustls::crypto::ring::default_provider().install_default().ok();
+        let url = spawn_mock_server("HTTP/1.1 401 Unauthorized\r\nContent-Length: 5\r\n\r\nerror");
+        let config = mock_config(&url);
+        
+        let res_search = tool_search_contact(&config, "alice");
+        assert!(res_search.unwrap().results.contains("Error fetching JMAP session"));
+
+        let res_add = tool_add_contact(&config, "{}");
+        assert!(res_add.is_err());
+        assert!(res_add.unwrap_err().contains("Error fetching JMAP session"));
+    }
+}
