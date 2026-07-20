@@ -91,6 +91,7 @@ pub struct FastMdApp {
     pub inline_editor_enabled: bool,
     pub background_manager: SharedProcessManager,
     pub show_background_logs: bool,
+    pub config: crate::config::AppConfig,
 }
 
 impl FastMdApp {
@@ -171,7 +172,7 @@ impl FastMdApp {
         let background_manager = Arc::new(Mutex::new(BackgroundProcessManager::new()));
 
         Self {
-            content_libraries: config.content_libraries,
+            content_libraries: config.content_libraries.clone(),
             rx: background_task.rx,
             tx: background_task.tx,
             all_files: Vec::new(),
@@ -217,6 +218,7 @@ impl FastMdApp {
             inline_editor_enabled,
             background_manager,
             show_background_logs: false,
+            config,
         }
     }
 }
@@ -376,6 +378,7 @@ impl eframe::App for FastMdApp {
             self.agent_cancel_flag = Some(cancel_flag.clone());
             
             crate::agent::run_agent(
+                self.config.clone(),
                 self.tx.clone(),
                 self.selected_file.clone(),
                 self.selected_dir.clone(),

@@ -129,9 +129,13 @@ pub fn draw_tree_node(ui: &mut egui::Ui, node: &TreeNode, ctx: &mut TreeNodeCont
         }
         
         if response.double_clicked() {
-            let _ = std::process::Command::new("cmd")
-                .args(["/c", "start", "", &node.path.to_string_lossy()])
-                .spawn();
+            if ctx.inline_editor_enabled {
+                *ctx.open_editor = Some(node.path.clone());
+            } else {
+                let _ = std::process::Command::new("cmd")
+                    .args(["/c", "start", "", &node.path.to_string_lossy()])
+                    .spawn();
+            }
         }
 
         response.context_menu(|ui| {

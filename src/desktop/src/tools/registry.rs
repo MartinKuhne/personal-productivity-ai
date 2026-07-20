@@ -38,7 +38,7 @@ macro_rules! define_tools {
             println!("Tool call: {}({})", name, args_compact);
             let start_time = std::time::Instant::now();
 
-            let resolve_and_check_path = |p: &str| -> Result<Option<std::path::PathBuf>, String> {
+            let resolve_and_check_path = |p: &str| -> Result<Option<(std::path::PathBuf, bool)>, String> {
                 if Path::new(p).components().any(|c| c == Component::ParentDir) { return Err("Path traversal not allowed".to_string()); }
                 let path = Path::new(p);
                 let mut components = path.components().peekable();
@@ -59,7 +59,7 @@ macro_rules! define_tools {
                     for lib in &config.content_libraries {
                         if lib.name == first_str {
                             let rest: std::path::PathBuf = components.collect();
-                            return Ok(Some(Path::new(&lib.root_folder).join(rest)));
+                            return Ok(Some((Path::new(&lib.root_folder).join(rest), lib.readonly)));
                         }
                     }
                     
@@ -130,7 +130,8 @@ define_tools! {
         input: crate::tools::dtos::ReplaceTextInput,
         enabled: |_| true,
         execute: |_config, _root_path, input, resolve_path| {
-            let path = resolve_path(&input.path)?.ok_or_else(|| "Cannot perform this operation on the virtual root".to_string())?;
+            let (path, readonly) = resolve_path(&input.path)?.ok_or_else(|| "Cannot perform this operation on the virtual root".to_string())?;
+            if readonly { return Err("Cannot perform this operation on a read-only library".to_string()); }
             crate::tools::filesystem::tool_replace_text(&path.to_string_lossy(), &input.old_string, &input.new_string)
         }
     },    {
@@ -203,7 +204,7 @@ define_tools! {
         enabled: |_| true,
         execute: |config, _root_path, input, resolve_path| {
             match resolve_path(&input.path)? {
-                Some(path) => crate::tools::filesystem::tool_list_files(&path, &input.path),
+                Some((path, _)) => crate::tools::filesystem::tool_list_files(&path, &input.path),
                 None => {
                     let libs: Vec<String> = config.content_libraries.iter().map(|lib| lib.name.clone()).collect();
                     Ok(crate::tools::dtos::ListFilesResponse { files: libs.join("\n") })
@@ -217,7 +218,7 @@ define_tools! {
         input: crate::tools::dtos::ReadFileInput,
         enabled: |_| true,
         execute: |_config, _root_path, input, resolve_path| {
-            let path = resolve_path(&input.path)?.ok_or_else(|| "Cannot perform this operation on the virtual root".to_string())?;
+            let (path, _) = resolve_path(&input.path)?.ok_or_else(|| "Cannot perform this operation on the virtual root".to_string())?;
             crate::tools::filesystem::tool_read_file(&path.to_string_lossy())
         }
     },
@@ -227,7 +228,7 @@ define_tools! {
         input: crate::tools::dtos::ReadFileLinesInput,
         enabled: |_| true,
         execute: |_config, _root_path, input, resolve_path| {
-            let path = resolve_path(&input.path)?.ok_or_else(|| "Cannot perform this operation on the virtual root".to_string())?;
+            let (path, _) = resolve_path(&input.path)?.ok_or_else(|| "Cannot perform this operation on the virtual root".to_string())?;
             crate::tools::filesystem::tool_read_file_lines(&path.to_string_lossy(), input.start_line, input.end_line)
         }
     },
@@ -237,7 +238,8 @@ define_tools! {
         input: crate::tools::dtos::CreateFileInput,
         enabled: |_| true,
         execute: |_config, _root_path, input, resolve_path| {
-            let path = resolve_path(&input.path)?.ok_or_else(|| "Cannot perform this operation on the virtual root".to_string())?;
+            let (path, readonly) = resolve_path(&input.path)?.ok_or_else(|| "Cannot perform this operation on the virtual root".to_string())?;
+            if readonly { return Err("Cannot perform this operation on a read-only library".to_string()); }
             crate::tools::filesystem::tool_create_file(&path.to_string_lossy(), &input.content)
         }
     },
@@ -247,7 +249,8 @@ define_tools! {
         input: crate::tools::dtos::InsertLinesInput,
         enabled: |_| true,
         execute: |_config, _root_path, input, resolve_path| {
-            let path = resolve_path(&input.path)?.ok_or_else(|| "Cannot perform this operation on the virtual root".to_string())?;
+            let (path, readonly) = resolve_path(&input.path)?.ok_or_else(|| "Cannot perform this operation on the virtual root".to_string())?;
+            if readonly { return Err("Cannot perform this operation on a read-only library".to_string()); }
             crate::tools::filesystem::tool_insert_lines(&path.to_string_lossy(), input.line_index, &input.lines)
         }
     },
@@ -257,7 +260,8 @@ define_tools! {
         input: crate::tools::dtos::DeleteLinesInput,
         enabled: |_| true,
         execute: |_config, _root_path, input, resolve_path| {
-            let path = resolve_path(&input.path)?.ok_or_else(|| "Cannot perform this operation on the virtual root".to_string())?;
+            let (path, readonly) = resolve_path(&input.path)?.ok_or_else(|| "Cannot perform this operation on the virtual root".to_string())?;
+            if readonly { return Err("Cannot perform this operation on a read-only library".to_string()); }
             crate::tools::filesystem::tool_delete_lines(&path.to_string_lossy(), input.start_line, input.end_line)
         }
     },
@@ -274,7 +278,7 @@ define_tools! {
         input: crate::tools::dtos::ReadYamlHeaderInput,
         enabled: |_| true,
         execute: |_config, _root_path, input, resolve_path| {
-            let path = resolve_path(&input.path)?.ok_or_else(|| "Cannot perform this operation on the virtual root".to_string())?;
+            let (path, _) = resolve_path(&input.path)?.ok_or_else(|| "Cannot perform this operation on the virtual root".to_string())?;
             crate::tools::yaml_header::tool_read_yaml_header(&path.to_string_lossy())
         }
     },
@@ -284,7 +288,8 @@ define_tools! {
         input: crate::tools::dtos::WriteYamlHeaderInput,
         enabled: |_| true,
         execute: |_config, _root_path, input, resolve_path| {
-            let path = resolve_path(&input.path)?.ok_or_else(|| "Cannot perform this operation on the virtual root".to_string())?;
+            let (path, readonly) = resolve_path(&input.path)?.ok_or_else(|| "Cannot perform this operation on the virtual root".to_string())?;
+            if readonly { return Err("Cannot perform this operation on a read-only library".to_string()); }
             crate::tools::yaml_header::tool_write_yaml_header(&path.to_string_lossy(), input.title.as_deref(), input.summary.as_deref(), input.tags, input.header_date.as_deref())
         }
     },

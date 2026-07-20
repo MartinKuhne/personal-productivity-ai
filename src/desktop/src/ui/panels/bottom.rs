@@ -72,43 +72,23 @@ pub fn show_bottom_panel(app: &mut FastMdApp, ctx: &egui::Context) {
                     app.command_input.clear();
                     
                     if prompt.starts_with("/models") {
-                        let config = crate::config::load_config();
                         let mut output = "Available Models:\n".to_string();
-                        for (name, model_cfg) in &config.models {
-                            let active = if *name == config.model { " (active)" } else { "" };
+                        for (name, model_cfg) in &app.config.models {
                             let use_cases = model_cfg.use_case.join(", ");
                             output.push_str(&format!(
-                                "- {} [cost: {}, use_case: {}]{}\n",
-                                name, model_cfg.get_cost(), use_cases, active
+                                "- {} [cost: {}, use_case: {}]\n",
+                                name, model_cfg.get_cost(), use_cases
                             ));
                         }
-                        if config.models.is_empty() {
+                        if app.config.models.is_empty() {
                             output.push_str("No additional models configured.\n");
                         }
                         app.agent_status = "Done".to_string();
                         app.agent_response = output;
                         app.show_agent_results = true;
                     } else if prompt.starts_with("/model ") {
-                        let model_name = prompt.trim_start_matches("/model ").trim();
-                        let mut config = crate::config::load_config();
-                        if let Some(model_cfg) = config.models.get(model_name) {
-                            config.model = model_cfg.model.clone();
-                            config.api_url = model_cfg.api_url.clone();
-                            config.api_key = model_cfg.api_key.clone();
-                            
-                            let config_path = crate::config::get_config_path();
-                            if let Ok(yaml_str) = serde_yaml::to_string(&config) {
-                                let _ = std::fs::write(&config_path, yaml_str);
-                                app.agent_status = "Done".to_string();
-                                app.agent_response = format!("Switched to model: {}", model_name);
-                            } else {
-                                app.agent_status = "Error".to_string();
-                                app.agent_response = "Failed to save configuration.".to_string();
-                            }
-                        } else {
-                            app.agent_status = "Error".to_string();
-                            app.agent_response = format!("Model '{}' not found in configuration.", model_name);
-                        }
+                        app.agent_status = "Error".to_string();
+                        app.agent_response = "The /model command is deprecated. Models are now automatically selected based on use case and cost.".to_string();
                         app.show_agent_results = true;
                     } else if !prompt.trim().is_empty() {
                         app.agent_status = "Initializing agent...".to_string();
@@ -132,6 +112,7 @@ pub fn show_bottom_panel(app: &mut FastMdApp, ctx: &egui::Context) {
                         let current_response = app.agent_response.clone();
 
                         crate::agent::run_agent(
+                            app.config.clone(),
                             tx_gui_agent,
                             active_file_agent,
                             active_dir_agent,
