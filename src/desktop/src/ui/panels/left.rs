@@ -148,6 +148,9 @@ pub fn show_left_panel(app: &mut FastMdApp, ctx: &egui::Context) {
                                 open_editor: &mut open_editor,
                                 inline_editor_enabled: app.inline_editor_enabled,
                                 bg_tx: &Some(app.tx.clone()),
+                                file_event_producer: Some(
+                                    crate::file_events::FileEventProducer::new(&app.file_event_bus),
+                                ),
                             };
                             crate::ui::tree::draw_tree_node(ui, child, &mut ctx);
                         }

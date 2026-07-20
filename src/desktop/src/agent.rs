@@ -1,4 +1,5 @@
 use crate::config::get_config_path;
+use crate::file_events::{Bus, FileEvent};
 use crate::messages::{BackgroundMessage, TokenUsageInfo};
 use crate::tools::{execute_tool, get_tools_schema};
 use std::path::{Path, PathBuf};
@@ -109,7 +110,7 @@ pub fn get_base_system_prompt(config: &crate::config::AppConfig) -> String {
                 age_str = Some(num.to_string());
             }
         }
-        
+
         if let Some(a) = age_str {
             system_prompt.push_str(&format!("\nUser's Age: {}", a));
         } else {
@@ -135,9 +136,10 @@ pub fn run_agent(
     cancel_flag: std::sync::Arc<std::sync::atomic::AtomicBool>,
     history: Option<Vec<serde_json::Value>>,
     current_response: String,
+    file_event_bus: Bus<FileEvent>,
 ) {
     std::thread::spawn(move || {
-        
+
         let mut api_key = String::new();
         let mut api_url = String::new();
         let mut model_name = String::new();
@@ -167,7 +169,7 @@ pub fn run_agent(
         }
 
         let mut system_prompt = get_base_system_prompt(&config);
-        
+
         let to_virtual = |path: &PathBuf| -> String {
             crate::config::library_display_label(&config.content_libraries, path)
                 .unwrap_or_else(|| path.to_string_lossy().to_string())
@@ -411,9 +413,10 @@ pub fn run_agent(
                         let cfg = config_arc.clone();
                         let rp = root_path_arc.clone();
                         let tool_call_clone = tool_call.clone();
-                        
+                        let bus = file_event_bus.clone();
+
                         join_set.spawn_blocking(move || {
-                            let result = execute_tool(&cfg, &rp, &func_name, &func_args_str);
+                            let result = execute_tool(&cfg, &rp, &func_name, &func_args_str, &bus);
                             (tool_call_clone, call_id, func_name, func_args_str, result)
                         });
                     }
@@ -428,8 +431,8 @@ pub fn run_agent(
                     let call_id = tool_call.get("id").and_then(|id| id.as_str()).unwrap_or("").to_string();
                     let func_name = tool_call.get("function").and_then(|f| f.get("name")).and_then(|n| n.as_str()).unwrap_or("").to_string();
                     let func_args_str = tool_call.get("function").and_then(|f| f.get("arguments")).and_then(|a| a.as_str()).unwrap_or("{}").to_string();
-                    
-                    let result = execute_tool(&config, &PathBuf::new(), &func_name, &func_args_str);
+
+                    let result = execute_tool(&config, &PathBuf::new(), &func_name, &func_args_str, &file_event_bus);
                     completed_results.push((tool_call.clone(), call_id, func_name, func_args_str, result));
                 }
 
@@ -750,10 +753,10 @@ mod tests {
             cost: None,
             use_case: vec!["chat".to_string()],
         });
-        
+
         let (tx, rx) = std::sync::mpsc::channel();
         let cancel_flag = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
-        
+
         run_agent(
             config,
             tx,
@@ -764,8 +767,9 @@ mod tests {
             cancel_flag,
             None,
             "".to_string(),
+            crate::file_events::Bus::new(),
         );
-        
+
         let msg = rx.recv().unwrap();
         match msg {
             BackgroundMessage::AgentFailed(err) => {
@@ -785,10 +789,10 @@ mod tests {
             cost: None,
             use_case: vec!["chat".to_string()],
         });
-        
+
         let (tx, rx) = std::sync::mpsc::channel();
         let cancel_flag = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
-        
+
         run_agent(
             config,
             tx,
@@ -799,8 +803,9 @@ mod tests {
             cancel_flag,
             None,
             "".to_string(),
+            crate::file_events::Bus::new(),
         );
-        
+
         let mut got_failed = false;
         while let Ok(msg) = rx.recv() {
             match msg {
@@ -820,7 +825,7 @@ mod tests {
         use std::net::TcpListener;
         let listener = TcpListener::bind("127.0.0.1:0").unwrap();
         let port = listener.local_addr().unwrap().port();
-        
+
         std::thread::spawn(move || {
             if let Ok((mut stream, _)) = listener.accept() {
                 use std::io::{Read, Write};
@@ -840,10 +845,10 @@ mod tests {
             cost: None,
             use_case: vec!["chat".to_string()],
         });
-        
+
         let (tx, rx) = std::sync::mpsc::channel();
         let cancel_flag = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
-        
+
         let mut selected = std::collections::HashSet::new();
         selected.insert(PathBuf::from("other.md"));
 
@@ -857,8 +862,9 @@ mod tests {
             cancel_flag,
             None,
             "".to_string(),
+            crate::file_events::Bus::new(),
         );
-        
+
         let mut got_failed = false;
         while let Ok(msg) = rx.recv() {
             match msg {
@@ -878,7 +884,7 @@ mod tests {
         use std::net::TcpListener;
         let listener = TcpListener::bind("127.0.0.1:0").unwrap();
         let port = listener.local_addr().unwrap().port();
-        
+
         std::thread::spawn(move || {
             if let Ok((mut stream, _)) = listener.accept() {
                 use std::io::{Read, Write};
@@ -898,10 +904,10 @@ mod tests {
             cost: None,
             use_case: vec!["chat".to_string()],
         });
-        
+
         let (tx, rx) = std::sync::mpsc::channel();
         let cancel_flag = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
-        
+
         run_agent(
             config,
             tx,
@@ -912,8 +918,9 @@ mod tests {
             cancel_flag,
             Some(vec![]), // cover history
             "".to_string(),
+            crate::file_events::Bus::new(),
         );
-        
+
         let mut got_failed = false;
         while let Ok(msg) = rx.recv() {
             match msg {
@@ -985,7 +992,7 @@ mod tests {
         use std::net::TcpListener;
         let listener = TcpListener::bind("127.0.0.1:0").unwrap();
         let port = listener.local_addr().unwrap().port();
-        
+
         std::thread::spawn(move || {
             if let Ok((mut stream, _)) = listener.accept() {
                 use std::io::{Read, Write};
@@ -1006,10 +1013,10 @@ mod tests {
             cost: None,
             use_case: vec!["chat".to_string()],
         });
-        
+
         let (tx, rx) = std::sync::mpsc::channel();
         let cancel_flag = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
-        
+
         run_agent(
             config,
             tx,
@@ -1020,8 +1027,9 @@ mod tests {
             cancel_flag,
             None,
             "".to_string(),
+            crate::file_events::Bus::new(),
         );
-        
+
         let mut got_failed = false;
         while let Ok(msg) = rx.recv() {
             match msg {

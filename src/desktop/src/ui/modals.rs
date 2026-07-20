@@ -57,6 +57,12 @@ pub fn show_move_modal(app: &mut FastMdApp, ctx: &egui::Context) {
                                         error = %e,
                                         "Failed to move file to new destination. Likely cause: permission denied or file in use. Operator should check file locks."
                                     );
+                                } else {
+                                    // A move is a rename. Publish both
+                                    // events so consumers can update
+                                    // any state keyed on either path.
+                                    let producer = crate::file_events::FileEventProducer::new(&app.file_event_bus);
+                                    producer.publish_rename(file, &new_path);
                                 }
                             }
                         }
@@ -179,6 +185,13 @@ pub fn show_rename_modal(app: &mut FastMdApp, ctx: &egui::Context) {
                                             "Failed to rename file. Likely cause: permission denied or file in use. Operator should check file locks."
                                         );
                                     } else {
+                                        // Publish the rename so any
+                                        // consumer keyed on either path
+                                        // (cache, tag manager, file
+                                        // table) refreshes
+                                        // immediately.
+                                        let producer = crate::file_events::FileEventProducer::new(&app.file_event_bus);
+                                        producer.publish_rename(file, &new_path);
                                         if app.loaded_path.as_ref() == Some(file) {
                                             app.loaded_path = Some(new_path.clone());
                                         }
