@@ -81,8 +81,8 @@ impl EditorState {
         egui::Window::new("Inline Editor")
             .open(&mut is_open)
             .collapsible(false)
-            .vscroll(false)
-            .hscroll(false)
+            .vscroll(true)
+            .hscroll(true)
             .resizable(true)
             .default_size(egui::vec2(800.0, 600.0))
             .show(ctx, |ui| {

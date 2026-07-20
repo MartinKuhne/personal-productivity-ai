@@ -62,7 +62,8 @@ pub fn show_background_logs_window(app: &mut FastMdApp, ctx: &egui::Context) {
 
             let row_height = ui.text_style_height(&egui::TextStyle::Body);
             
-            egui::ScrollArea::vertical()
+            egui::ScrollArea::both()
+                .auto_shrink([false, false])
                 .stick_to_bottom(mgr.auto_scroll)
                 .show_rows(ui, row_height, logs.len(), |ui, row_range| {
                     for i in row_range {
