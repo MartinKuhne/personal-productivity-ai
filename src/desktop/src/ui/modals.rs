@@ -1,7 +1,6 @@
 use crate::ui::FastMdApp;
 use eframe::egui;
 use std::collections::BTreeSet;
-use std::path::Path;
 
 pub fn show_move_modal(app: &mut FastMdApp, ctx: &egui::Context) {
     let mut close_modal = false;
@@ -30,14 +29,8 @@ pub fn show_move_modal(app: &mut FastMdApp, ctx: &egui::Context) {
                     .max_height(200.0)
                     .show(ui, |ui| {
                         for folder in folders {
-                            let mut label = folder.to_string_lossy().into_owned();
-                            for lib in &app.content_libraries {
-                                if let Ok(rel) = folder.strip_prefix(std::path::Path::new(&lib.root_folder)) {
-                                    label = std::path::Path::new(&lib.name).join(rel).to_string_lossy().into_owned();
-                                    break;
-                                }
-                            }
-                            let display = label;
+                            let display = crate::config::library_display_label(&app.content_libraries, &folder)
+                                .unwrap_or_else(|| folder.to_string_lossy().into_owned());
                             if ui
                                 .selectable_label(
                                     app.selected_move_folder.as_ref() == Some(&folder),
@@ -103,7 +96,7 @@ pub fn show_create_dir_modal(app: &mut FastMdApp, ctx: &egui::Context) {
                         if let Some(parent) = &app.create_dir_parent {
                             if !app.create_dir_name.trim().is_empty() {
                                 let dir_name = app.create_dir_name.trim();
-                                if Path::new(dir_name).components().any(|c| c == std::path::Component::ParentDir) || dir_name.contains('/') || dir_name.contains('\\') {
+                                if !crate::utils::path::is_safe_basename(dir_name) {
                                     tracing::warn!(
                                         name = "ui.directory.invalid_name",
                                         name_input = %dir_name,
@@ -167,7 +160,7 @@ pub fn show_rename_modal(app: &mut FastMdApp, ctx: &egui::Context) {
                         if let Some(file) = &app.file_to_rename {
                             if !app.rename_new_name.trim().is_empty() {
                                 let new_name = app.rename_new_name.trim();
-                                if Path::new(new_name).components().any(|c| c == std::path::Component::ParentDir) || new_name.contains('/') || new_name.contains('\\') {
+                                if !crate::utils::path::is_safe_basename(new_name) {
                                     tracing::warn!(
                                         name = "ui.file.invalid_rename",
                                         name_input = %new_name,
@@ -223,59 +216,9 @@ pub fn show_rename_modal(app: &mut FastMdApp, ctx: &egui::Context) {
 mod tests {
     use super::*;
     use std::fs;
-    use std::sync::Arc;
 
     fn create_test_app() -> FastMdApp {
-        let (tx, rx) = std::sync::mpsc::channel();
-        FastMdApp {
-            content_libraries: vec![],
-            rx,
-            tx,
-            all_files: vec![],
-            all_dirs: vec![],
-            file_tags: std::collections::BTreeMap::new(),
-            all_tags: std::collections::BTreeSet::new(),
-            selected_tag: None,
-            indexing_finished: true,
-            indexing_finished_handled: true,
-            left_panel_width: None,
-            selected_file: None,
-            selected_files: std::collections::HashSet::new(),
-            selected_dir: None,
-            expanded_dirs: std::collections::HashSet::new(),
-            loaded_path: None,
-            current_yaml: None,
-            current_markdown: String::new(),
-            tabs: vec![],
-            move_dialog_open: false,
-            file_to_move: None,
-            selected_move_folder: None,
-            create_dir_dialog_open: false,
-            create_dir_parent: None,
-            create_dir_name: String::new(),
-            rename_dialog_open: false,
-            file_to_rename: None,
-            rename_new_name: String::new(),
-            command_input: String::new(),
-            toc: vec![],
-            scroll_to_header_id: None,
-            _watcher: None,
-            show_agent_results: false,
-            agent_running: false,
-            agent_status: String::new(),
-            agent_thinking: String::new(),
-            agent_response: String::new(),
-            agent_scroll_to_id: None,
-            agent_cancel_flag: None,
-            agent_history: None,
-            left_panel_reset_count: 0,
-            submit_prompt: None,
-            editor_state: crate::editor::EditorState::default(),
-            inline_editor_enabled: true,
-            background_manager: Arc::new(std::sync::Mutex::new(crate::background::BackgroundProcessManager::new())),
-            show_background_logs: false,
-            config: crate::config::AppConfig::default(),
-        }
+        FastMdApp::empty_state()
     }
 
     #[test]

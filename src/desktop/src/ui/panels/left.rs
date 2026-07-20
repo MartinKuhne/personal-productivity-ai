@@ -165,59 +165,9 @@ pub fn show_left_panel(app: &mut FastMdApp, ctx: &egui::Context) {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::sync::Arc;
 
     fn create_test_app() -> FastMdApp {
-        let (tx, rx) = std::sync::mpsc::channel();
-        FastMdApp {
-            content_libraries: vec![],
-            rx,
-            tx,
-            all_files: vec![],
-            all_dirs: vec![],
-            file_tags: std::collections::BTreeMap::new(),
-            all_tags: std::collections::BTreeSet::new(),
-            selected_tag: None,
-            indexing_finished: false,
-            indexing_finished_handled: false,
-            left_panel_width: None,
-            selected_file: None,
-            selected_files: std::collections::HashSet::new(),
-            selected_dir: None,
-            expanded_dirs: std::collections::HashSet::new(),
-            loaded_path: None,
-            current_yaml: None,
-            current_markdown: String::new(),
-            tabs: vec![],
-            move_dialog_open: false,
-            file_to_move: None,
-            selected_move_folder: None,
-            create_dir_dialog_open: false,
-            create_dir_parent: None,
-            create_dir_name: String::new(),
-            rename_dialog_open: false,
-            file_to_rename: None,
-            rename_new_name: String::new(),
-            command_input: String::new(),
-            toc: vec![],
-            scroll_to_header_id: None,
-            _watcher: None,
-            show_agent_results: false,
-            agent_running: false,
-            agent_status: String::new(),
-            agent_thinking: String::new(),
-            agent_response: String::new(),
-            agent_scroll_to_id: None,
-            agent_cancel_flag: None,
-            agent_history: None,
-            left_panel_reset_count: 0,
-            submit_prompt: None,
-            editor_state: crate::editor::EditorState::default(),
-            inline_editor_enabled: true,
-            background_manager: Arc::new(std::sync::Mutex::new(crate::background::BackgroundProcessManager::new())),
-            show_background_logs: false,
-            config: crate::config::AppConfig::default(),
-        }
+        FastMdApp::empty_state()
     }
 
     #[test]
@@ -249,8 +199,10 @@ mod tests {
         let file1 = lib_dir.join("notes.md");
         let file2 = lib_dir.join("archived.md");
         app.all_files = vec![file1.clone(), file2.clone()];
-        app.file_tags.insert(file1.clone(), vec!["work".to_string()]);
-        app.file_tags.insert(file2.clone(), vec!["archive".to_string()]);
+        app.file_tags
+            .insert(file1.clone(), vec!["work".to_string()]);
+        app.file_tags
+            .insert(file2.clone(), vec!["archive".to_string()]);
 
         // 1. Without tag filter
         let _ = ctx.run(Default::default(), |ctx| {
@@ -275,4 +227,3 @@ mod tests {
         assert_eq!(app.left_panel_reset_count, 1);
     }
 }
-

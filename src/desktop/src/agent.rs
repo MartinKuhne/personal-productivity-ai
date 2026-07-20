@@ -112,12 +112,8 @@ pub fn run_agent(
         let mut system_prompt = get_base_system_prompt(&config);
         
         let to_virtual = |path: &PathBuf| -> String {
-            for lib in &config.content_libraries {
-                if let Ok(rel) = path.strip_prefix(std::path::Path::new(&lib.root_folder)) {
-                    return std::path::Path::new(&lib.name).join(rel).to_string_lossy().to_string();
-                }
-            }
-            path.to_string_lossy().to_string()
+            crate::config::library_display_label(&config.content_libraries, path)
+                .unwrap_or_else(|| path.to_string_lossy().to_string())
         };
 
         if let Some(active) = active_file {

@@ -1,4 +1,5 @@
 pub mod markdown;
+pub mod path;
 pub mod tags;
 
 pub use markdown::parse_front_matter;

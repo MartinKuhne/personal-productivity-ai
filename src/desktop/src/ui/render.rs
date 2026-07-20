@@ -28,7 +28,10 @@ pub enum RenderEvent {
         wrap: bool,
     },
     CodeBlock(String),
-    Heading { level: u32, text: String },
+    Heading {
+        level: u32,
+        text: String,
+    },
     Table(Vec<Vec<Vec<InlineElem>>>),
     Space(f32),
     Separator,
@@ -38,14 +41,21 @@ pub enum RenderEvent {
 /// Inputs: `ui` (mut), `elems`, `needs_bullet`, `task_checked`, `indent`, `wrap`
 /// Outputs: None
 /// Purity: Impure (modifies UI state). Thin adapter for rendering text.
-fn render_inline(ui: &mut egui::Ui, elems: &[InlineElem], needs_bullet: bool, task_checked: Option<bool>, indent: usize, wrap: bool) {
+fn render_inline(
+    ui: &mut egui::Ui,
+    elems: &[InlineElem],
+    needs_bullet: bool,
+    task_checked: Option<bool>,
+    indent: usize,
+    wrap: bool,
+) {
     if elems.is_empty() && !needs_bullet && task_checked.is_none() {
         return;
     }
-    
+
     let add_content = |ui: &mut egui::Ui| {
         ui.spacing_mut().item_spacing.x = 0.0;
-        
+
         if indent > 0 {
             ui.add_space(indent as f32 * 20.0);
         }
@@ -58,17 +68,25 @@ fn render_inline(ui: &mut egui::Ui, elems: &[InlineElem], needs_bullet: bool, ta
             ui.checkbox(&mut c, "");
             ui.add_space(4.0);
         }
-        
+
         for elem in elems {
             match elem {
                 InlineElem::Text(t, style) => {
                     let mut rt = RichText::new(t);
-                    if style.bold { rt = rt.strong(); }
-                    if style.italic { rt = rt.italics(); }
-                    if style.code { 
-                        rt = rt.monospace().background_color(egui::Color32::from_gray(40)); 
+                    if style.bold {
+                        rt = rt.strong();
                     }
-                    if style.strikethrough { rt = rt.strikethrough(); }
+                    if style.italic {
+                        rt = rt.italics();
+                    }
+                    if style.code {
+                        rt = rt
+                            .monospace()
+                            .background_color(egui::Color32::from_gray(40));
+                    }
+                    if style.strikethrough {
+                        rt = rt.strikethrough();
+                    }
                     ui.label(rt);
                 }
                 InlineElem::Link(url, text) => {
@@ -146,19 +164,21 @@ fn render_heading(ui: &mut egui::Ui, title: &str, level: u32, scroll_to_id: &mut
 /// Outputs: None
 /// Purity: Impure (modifies UI state). Thin adapter.
 fn render_table(ui: &mut egui::Ui, table_cells: &[Vec<Vec<InlineElem>>]) {
-    egui::ScrollArea::horizontal().id_source(ui.next_auto_id()).show(ui, |ui| {
-        egui::Grid::new(ui.next_auto_id())
-            .striped(true)
-            .spacing([10.0, 4.0])
-            .show(ui, |ui| {
-                for row in table_cells {
-                    for cell in row {
-                        render_inline(ui, cell, false, None, 0, false);
+    egui::ScrollArea::horizontal()
+        .id_source(ui.next_auto_id())
+        .show(ui, |ui| {
+            egui::Grid::new(ui.next_auto_id())
+                .striped(true)
+                .spacing([10.0, 4.0])
+                .show(ui, |ui| {
+                    for row in table_cells {
+                        for cell in row {
+                            render_inline(ui, cell, false, None, 0, false);
+                        }
+                        ui.end_row();
                     }
-                    ui.end_row();
-                }
-            });
-    });
+                });
+        });
 }
 
 /// Purpose: Parses a YAML mapping into a list of key-value string pairs.
@@ -173,10 +193,16 @@ pub fn parse_yaml_to_pairs(yaml: &serde_yaml::Value) -> Option<Vec<(String, Stri
             let val_str = match value {
                 serde_yaml::Value::String(s) => s.clone(),
                 serde_yaml::Value::Sequence(seq) => {
-                    let items: Vec<String> = seq.iter().map(|v| v.as_str().unwrap_or("").to_string()).collect();
+                    let items: Vec<String> = seq
+                        .iter()
+                        .map(|v| v.as_str().unwrap_or("").to_string())
+                        .collect();
                     items.join(", ")
                 }
-                _ => serde_yaml::to_string(value).unwrap_or_default().trim().to_string(),
+                _ => serde_yaml::to_string(value)
+                    .unwrap_or_default()
+                    .trim()
+                    .to_string(),
             };
             pairs.push((key_str.to_string(), val_str));
         }
@@ -196,23 +222,25 @@ pub fn render_yaml_table(ui: &mut egui::Ui, yaml: &serde_yaml::Value) {
             .inner_margin(8.0)
             .rounding(4.0)
             .show(ui, |ui| {
-                egui::ScrollArea::horizontal().id_source("yaml_scroll").show(ui, |ui| {
-                    egui::Grid::new("yaml_grid")
-                        .num_columns(2)
-                        .striped(true)
-                        .spacing([12.0, 4.0])
-                        .show(ui, |ui| {
-                            for (k, v) in pairs {
-                                ui.label(
-                                    RichText::new(k)
-                                        .strong()
-                                        .color(egui::Color32::from_rgb(150, 200, 255)),
-                                );
-                                ui.label(RichText::new(v).color(egui::Color32::from_gray(220)));
-                                ui.end_row();
-                            }
-                        });
-                });
+                egui::ScrollArea::horizontal()
+                    .id_source("yaml_scroll")
+                    .show(ui, |ui| {
+                        egui::Grid::new("yaml_grid")
+                            .num_columns(2)
+                            .striped(true)
+                            .spacing([12.0, 4.0])
+                            .show(ui, |ui| {
+                                for (k, v) in pairs {
+                                    ui.label(
+                                        RichText::new(k)
+                                            .strong()
+                                            .color(egui::Color32::from_rgb(150, 200, 255)),
+                                    );
+                                    ui.label(RichText::new(v).color(egui::Color32::from_gray(220)));
+                                    ui.end_row();
+                                }
+                            });
+                    });
             });
         ui.add_space(8.0);
     }
@@ -230,7 +258,7 @@ pub fn parse_markdown_to_events(markdown_text: &str) -> Vec<RenderEvent> {
     options.insert(Options::ENABLE_FOOTNOTES);
     options.insert(Options::ENABLE_STRIKETHROUGH);
     options.insert(Options::ENABLE_TASKLISTS);
-    
+
     let parser = Parser::new_ext(markdown_text, options);
     let mut events = Vec::new();
 
@@ -252,7 +280,12 @@ pub fn parse_markdown_to_events(markdown_text: &str) -> Vec<RenderEvent> {
     let mut table_cells: Vec<Vec<Vec<InlineElem>>> = Vec::new();
     let mut current_row: Vec<Vec<InlineElem>> = Vec::new();
 
-    let push_inline = |events: &mut Vec<RenderEvent>, elems: &mut Vec<InlineElem>, bullet: &mut bool, task: &mut Option<bool>, indent: usize, wrap: bool| {
+    let push_inline = |events: &mut Vec<RenderEvent>,
+                       elems: &mut Vec<InlineElem>,
+                       bullet: &mut bool,
+                       task: &mut Option<bool>,
+                       indent: usize,
+                       wrap: bool| {
         if elems.is_empty() && !*bullet && task.is_none() {
             return;
         }
@@ -272,7 +305,14 @@ pub fn parse_markdown_to_events(markdown_text: &str) -> Vec<RenderEvent> {
         match event {
             Event::Start(Tag::CodeBlock(_info)) => {
                 if !buffered_inline.is_empty() {
-                    push_inline(&mut events, &mut buffered_inline, &mut needs_bullet, &mut task_checked, list_depth, true);
+                    push_inline(
+                        &mut events,
+                        &mut buffered_inline,
+                        &mut needs_bullet,
+                        &mut task_checked,
+                        list_depth,
+                        true,
+                    );
                 }
                 in_code_block = true;
                 code_block_content.clear();
@@ -283,7 +323,14 @@ pub fn parse_markdown_to_events(markdown_text: &str) -> Vec<RenderEvent> {
             }
             Event::Start(Tag::Heading { level, .. }) => {
                 if !buffered_inline.is_empty() {
-                    push_inline(&mut events, &mut buffered_inline, &mut needs_bullet, &mut task_checked, list_depth, true);
+                    push_inline(
+                        &mut events,
+                        &mut buffered_inline,
+                        &mut needs_bullet,
+                        &mut task_checked,
+                        list_depth,
+                        true,
+                    );
                 }
                 in_heading = true;
                 heading_level = match level {
@@ -295,55 +342,121 @@ pub fn parse_markdown_to_events(markdown_text: &str) -> Vec<RenderEvent> {
                 heading_text.clear();
             }
             Event::End(TagEnd::Heading(_)) => {
-                events.push(RenderEvent::Heading { level: heading_level, text: heading_text.clone() });
+                events.push(RenderEvent::Heading {
+                    level: heading_level,
+                    text: heading_text.clone(),
+                });
                 in_heading = false;
                 heading_level = 0;
             }
             Event::Start(Tag::Paragraph) => {
                 if !in_table_cell {
                     if !buffered_inline.is_empty() {
-                        push_inline(&mut events, &mut buffered_inline, &mut needs_bullet, &mut task_checked, list_depth, true);
+                        push_inline(
+                            &mut events,
+                            &mut buffered_inline,
+                            &mut needs_bullet,
+                            &mut task_checked,
+                            list_depth,
+                            true,
+                        );
                     }
                 }
             }
             Event::End(TagEnd::Paragraph) => {
                 if !in_table_cell {
-                    push_inline(&mut events, &mut buffered_inline, &mut needs_bullet, &mut task_checked, list_depth, true);
+                    push_inline(
+                        &mut events,
+                        &mut buffered_inline,
+                        &mut needs_bullet,
+                        &mut task_checked,
+                        list_depth,
+                        true,
+                    );
                     events.push(RenderEvent::Space(4.0));
                 }
             }
             Event::Start(Tag::List(_)) => {
                 if !buffered_inline.is_empty() {
-                    push_inline(&mut events, &mut buffered_inline, &mut needs_bullet, &mut task_checked, list_depth, true);
+                    push_inline(
+                        &mut events,
+                        &mut buffered_inline,
+                        &mut needs_bullet,
+                        &mut task_checked,
+                        list_depth,
+                        true,
+                    );
                 }
                 list_depth += 1;
             }
             Event::End(TagEnd::List(_)) => {
-                push_inline(&mut events, &mut buffered_inline, &mut needs_bullet, &mut task_checked, list_depth, true);
+                push_inline(
+                    &mut events,
+                    &mut buffered_inline,
+                    &mut needs_bullet,
+                    &mut task_checked,
+                    list_depth,
+                    true,
+                );
                 if list_depth > 0 {
                     list_depth -= 1;
                 }
             }
             Event::Start(Tag::Item) => {
                 if !buffered_inline.is_empty() {
-                    push_inline(&mut events, &mut buffered_inline, &mut needs_bullet, &mut task_checked, list_depth, true);
+                    push_inline(
+                        &mut events,
+                        &mut buffered_inline,
+                        &mut needs_bullet,
+                        &mut task_checked,
+                        list_depth,
+                        true,
+                    );
                 }
                 needs_bullet = true;
             }
             Event::End(TagEnd::Item) => {
-                push_inline(&mut events, &mut buffered_inline, &mut needs_bullet, &mut task_checked, list_depth, true);
+                push_inline(
+                    &mut events,
+                    &mut buffered_inline,
+                    &mut needs_bullet,
+                    &mut task_checked,
+                    list_depth,
+                    true,
+                );
             }
             Event::Start(Tag::BlockQuote) => {
                 if !buffered_inline.is_empty() {
-                    push_inline(&mut events, &mut buffered_inline, &mut needs_bullet, &mut task_checked, list_depth, true);
+                    push_inline(
+                        &mut events,
+                        &mut buffered_inline,
+                        &mut needs_bullet,
+                        &mut task_checked,
+                        list_depth,
+                        true,
+                    );
                 }
             }
             Event::End(TagEnd::BlockQuote) => {
-                push_inline(&mut events, &mut buffered_inline, &mut needs_bullet, &mut task_checked, list_depth, true);
+                push_inline(
+                    &mut events,
+                    &mut buffered_inline,
+                    &mut needs_bullet,
+                    &mut task_checked,
+                    list_depth,
+                    true,
+                );
             }
             Event::Start(Tag::Table(_)) => {
                 if !buffered_inline.is_empty() {
-                    push_inline(&mut events, &mut buffered_inline, &mut needs_bullet, &mut task_checked, list_depth, true);
+                    push_inline(
+                        &mut events,
+                        &mut buffered_inline,
+                        &mut needs_bullet,
+                        &mut task_checked,
+                        list_depth,
+                        true,
+                    );
                 }
                 table_cells.clear();
             }
@@ -424,14 +537,28 @@ pub fn parse_markdown_to_events(markdown_text: &str) -> Vec<RenderEvent> {
             Event::HardBreak => {
                 if !in_code_block && !in_heading {
                     if !in_table_cell {
-                        push_inline(&mut events, &mut buffered_inline, &mut needs_bullet, &mut task_checked, list_depth, true);
+                        push_inline(
+                            &mut events,
+                            &mut buffered_inline,
+                            &mut needs_bullet,
+                            &mut task_checked,
+                            list_depth,
+                            true,
+                        );
                     } else {
                         buffered_inline.push(InlineElem::SoftBreak);
                     }
                 }
             }
             Event::Rule => {
-                push_inline(&mut events, &mut buffered_inline, &mut needs_bullet, &mut task_checked, list_depth, true);
+                push_inline(
+                    &mut events,
+                    &mut buffered_inline,
+                    &mut needs_bullet,
+                    &mut task_checked,
+                    list_depth,
+                    true,
+                );
                 events.push(RenderEvent::Separator);
             }
             Event::TaskListMarker(checked) => {
@@ -452,7 +579,14 @@ pub fn parse_markdown_to_events(markdown_text: &str) -> Vec<RenderEvent> {
             }
             Event::Start(Tag::FootnoteDefinition(name)) => {
                 if !buffered_inline.is_empty() {
-                    push_inline(&mut events, &mut buffered_inline, &mut needs_bullet, &mut task_checked, list_depth, true);
+                    push_inline(
+                        &mut events,
+                        &mut buffered_inline,
+                        &mut needs_bullet,
+                        &mut task_checked,
+                        list_depth,
+                        true,
+                    );
                 }
                 events.push(RenderEvent::Separator);
                 let text = format!("[^{}]: ", name);
@@ -461,21 +595,49 @@ pub fn parse_markdown_to_events(markdown_text: &str) -> Vec<RenderEvent> {
                 buffered_inline.push(InlineElem::Text(text, s));
             }
             Event::End(TagEnd::FootnoteDefinition) => {
-                push_inline(&mut events, &mut buffered_inline, &mut needs_bullet, &mut task_checked, list_depth, true);
+                push_inline(
+                    &mut events,
+                    &mut buffered_inline,
+                    &mut needs_bullet,
+                    &mut task_checked,
+                    list_depth,
+                    true,
+                );
             }
             Event::Start(Tag::HtmlBlock) => {
                 if !buffered_inline.is_empty() {
-                    push_inline(&mut events, &mut buffered_inline, &mut needs_bullet, &mut task_checked, list_depth, true);
+                    push_inline(
+                        &mut events,
+                        &mut buffered_inline,
+                        &mut needs_bullet,
+                        &mut task_checked,
+                        list_depth,
+                        true,
+                    );
                 }
             }
             Event::End(TagEnd::HtmlBlock) => {
-                push_inline(&mut events, &mut buffered_inline, &mut needs_bullet, &mut task_checked, list_depth, true);
+                push_inline(
+                    &mut events,
+                    &mut buffered_inline,
+                    &mut needs_bullet,
+                    &mut task_checked,
+                    list_depth,
+                    true,
+                );
             }
             _ => {}
         }
     }
-    push_inline(&mut events, &mut buffered_inline, &mut needs_bullet, &mut task_checked, list_depth, true);
-    
+    push_inline(
+        &mut events,
+        &mut buffered_inline,
+        &mut needs_bullet,
+        &mut task_checked,
+        list_depth,
+        true,
+    );
+
     events
 }
 
@@ -483,13 +645,23 @@ pub fn parse_markdown_to_events(markdown_text: &str) -> Vec<RenderEvent> {
 /// Inputs: `ui` (mut), `markdown_text`, `scroll_to_id` (mut)
 /// Outputs: None
 /// Purity: Impure (modifies UI state). Coordinates parsing and rendering.
-pub fn render_markdown(ui: &mut egui::Ui, markdown_text: &str, scroll_to_id: &mut Option<egui::Id>) {
+pub fn render_markdown(
+    ui: &mut egui::Ui,
+    markdown_text: &str,
+    scroll_to_id: &mut Option<egui::Id>,
+) {
     let events = parse_markdown_to_events(markdown_text);
     let mut code_block_idx = 0;
-    
+
     for event in events {
         match event {
-            RenderEvent::FlushInline { elems, needs_bullet, task_checked, indent, wrap } => {
+            RenderEvent::FlushInline {
+                elems,
+                needs_bullet,
+                task_checked,
+                indent,
+                wrap,
+            } => {
                 render_inline(ui, &elems, needs_bullet, task_checked, indent, wrap);
             }
             RenderEvent::CodeBlock(content) => {
@@ -589,7 +761,8 @@ mod tests {
         let string_val = serde_yaml::Value::String("just string".to_string());
         assert_eq!(parse_yaml_to_pairs(&string_val), None);
 
-        let seq_val = serde_yaml::Value::Sequence(vec![serde_yaml::Value::String("item".to_string())]);
+        let seq_val =
+            serde_yaml::Value::Sequence(vec![serde_yaml::Value::String("item".to_string())]);
         assert_eq!(parse_yaml_to_pairs(&seq_val), None);
 
         let null_val = serde_yaml::Value::Null;
@@ -600,9 +773,15 @@ mod tests {
     fn test_parse_markdown_to_events() {
         let md = "# Heading 1\nSome *text*\n- List item";
         let events = parse_markdown_to_events(md);
-        
-        assert_eq!(events[0], RenderEvent::Heading { level: 1, text: "Heading 1".to_string() });
-        
+
+        assert_eq!(
+            events[0],
+            RenderEvent::Heading {
+                level: 1,
+                text: "Heading 1".to_string()
+            }
+        );
+
         // Next is the paragraph "Some text"
         match &events[1] {
             RenderEvent::FlushInline { elems, .. } => {
@@ -621,16 +800,21 @@ mod tests {
                     }
                     _ => panic!("Expected italic text"),
                 }
-            },
+            }
             _ => panic!("Expected FlushInline"),
         }
-        
+
         // Then paragraph space
         assert_eq!(events[2], RenderEvent::Space(4.0));
-        
+
         // Then list item
         match &events[3] {
-            RenderEvent::FlushInline { elems, needs_bullet, indent, .. } => {
+            RenderEvent::FlushInline {
+                elems,
+                needs_bullet,
+                indent,
+                ..
+            } => {
                 assert!(*needs_bullet);
                 assert_eq!(*indent, 1);
                 assert_eq!(elems.len(), 1);
@@ -638,7 +822,7 @@ mod tests {
                     InlineElem::Text(t, _) => assert_eq!(t, "List item"),
                     _ => panic!("Expected text"),
                 }
-            },
+            }
             _ => panic!("Expected FlushInline"),
         }
     }
@@ -647,10 +831,34 @@ mod tests {
     fn test_parse_markdown_heading_levels() {
         let md = "# H1\n## H2\n### H3\n#### H4";
         let events = parse_markdown_to_events(md);
-        assert_eq!(events[0], RenderEvent::Heading { level: 1, text: "H1".to_string() });
-        assert_eq!(events[1], RenderEvent::Heading { level: 2, text: "H2".to_string() });
-        assert_eq!(events[2], RenderEvent::Heading { level: 3, text: "H3".to_string() });
-        assert_eq!(events[3], RenderEvent::Heading { level: 0, text: "H4".to_string() });
+        assert_eq!(
+            events[0],
+            RenderEvent::Heading {
+                level: 1,
+                text: "H1".to_string()
+            }
+        );
+        assert_eq!(
+            events[1],
+            RenderEvent::Heading {
+                level: 2,
+                text: "H2".to_string()
+            }
+        );
+        assert_eq!(
+            events[2],
+            RenderEvent::Heading {
+                level: 3,
+                text: "H3".to_string()
+            }
+        );
+        assert_eq!(
+            events[3],
+            RenderEvent::Heading {
+                level: 0,
+                text: "H4".to_string()
+            }
+        );
     }
 
     #[test]
@@ -683,16 +891,28 @@ mod tests {
                 for elem in elems {
                     match elem {
                         InlineElem::Text(t, style) => {
-                            if t == "bold" && style.bold { has_bold = true; }
-                            if t == "italic" && style.italic { has_italic = true; }
-                            if t == "strikethrough" && style.strikethrough { has_strikethrough = true; }
-                            if t == "code" && style.code { has_code = true; }
+                            if t == "bold" && style.bold {
+                                has_bold = true;
+                            }
+                            if t == "italic" && style.italic {
+                                has_italic = true;
+                            }
+                            if t == "strikethrough" && style.strikethrough {
+                                has_strikethrough = true;
+                            }
+                            if t == "code" && style.code {
+                                has_code = true;
+                            }
                         }
                         InlineElem::Link(url, text) => {
-                            if url == "https://example.com" && text == "link" { has_link = true; }
+                            if url == "https://example.com" && text == "link" {
+                                has_link = true;
+                            }
                         }
                         InlineElem::Image(url) => {
-                            if url == "https://example.com/a.jpg" { has_image = true; }
+                            if url == "https://example.com/a.jpg" {
+                                has_image = true;
+                            }
                         }
                         _ => {}
                     }
@@ -712,19 +932,30 @@ mod tests {
     fn test_parse_markdown_task_list() {
         let md = "- [ ] Task 1\n- [x] Task 2";
         let events = parse_markdown_to_events(md);
-        
+
         let mut found_unchecked = false;
         let mut found_checked = false;
 
         for ev in &events {
-            if let RenderEvent::FlushInline { task_checked, elems, .. } = ev {
+            if let RenderEvent::FlushInline {
+                task_checked,
+                elems,
+                ..
+            } = ev
+            {
                 if let Some(false) = task_checked {
-                    if elems.iter().any(|e| match e { InlineElem::Text(t, _) => t == "Task 1", _ => false }) {
+                    if elems.iter().any(|e| match e {
+                        InlineElem::Text(t, _) => t == "Task 1",
+                        _ => false,
+                    }) {
                         found_unchecked = true;
                     }
                 }
                 if let Some(true) = task_checked {
-                    if elems.iter().any(|e| match e { InlineElem::Text(t, _) => t == "Task 2", _ => false }) {
+                    if elems.iter().any(|e| match e {
+                        InlineElem::Text(t, _) => t == "Task 2",
+                        _ => false,
+                    }) {
                         found_checked = true;
                     }
                 }
@@ -738,7 +969,7 @@ mod tests {
     fn test_parse_markdown_table() {
         let md = "| Col A | Col B |\n|---|---|\n| Val A | Val B |";
         let events = parse_markdown_to_events(md);
-        
+
         let mut found_table = false;
         for ev in events {
             if let RenderEvent::Table(rows) = ev {
@@ -755,7 +986,7 @@ mod tests {
     fn test_parse_markdown_rule_and_blockquote() {
         let md = "---\n\n> Quote text";
         let events = parse_markdown_to_events(md);
-        
+
         let has_rule = events.iter().any(|e| matches!(e, RenderEvent::Separator));
         assert!(has_rule, "Expected Separator event");
 
@@ -773,9 +1004,11 @@ mod tests {
     fn test_parse_markdown_html_and_footnotes() {
         let md = "<span>Inline HTML</span>\n\nFootnote[^1]\n\n[^1]: Footnote details";
         let events = parse_markdown_to_events(md);
-        
+
         let has_html = events.iter().any(|e| match e {
-            RenderEvent::FlushInline { elems, .. } => elems.iter().any(|elem| matches!(elem, InlineElem::Html(_))),
+            RenderEvent::FlushInline { elems, .. } => {
+                elems.iter().any(|elem| matches!(elem, InlineElem::Html(_)))
+            }
             _ => false,
         });
         assert!(has_html, "Expected Html inline element");
@@ -800,7 +1033,7 @@ mod tests {
         assert_eq!(toc[1].title, "Subtitle");
         assert_eq!(toc[1].level, 2);
     }
-    
+
     #[test]
     fn test_parse_markdown_fuzz_property() {
         let random_markdowns = [
@@ -828,8 +1061,12 @@ mod e2e_tests {
         let _ = ctx.run(egui::RawInput::default(), |ctx| {
             egui::CentralPanel::default().show(ctx, |ui| {
                 let mut scroll_id = None;
-                render_markdown(ui, "# Test\n\n- [ ] Task\n\n```rust\nlet x = 1;\n```", &mut scroll_id);
-                
+                render_markdown(
+                    ui,
+                    "# Test\n\n- [ ] Task\n\n```rust\nlet x = 1;\n```",
+                    &mut scroll_id,
+                );
+
                 let yaml_str = "a: 1\nb: 2";
                 let val: serde_yaml::Value = serde_yaml::from_str(yaml_str).unwrap();
                 render_yaml_table(ui, &val);
@@ -886,7 +1123,10 @@ def foo():
                 let mut scroll_id = Some(target_id);
 
                 render_heading(ui, "Target Heading", 1, &mut scroll_id);
-                assert_eq!(scroll_id, None, "scroll_to_id should be cleared after scroll");
+                assert_eq!(
+                    scroll_id, None,
+                    "scroll_to_id should be cleared after scroll"
+                );
 
                 // Heading level 0 or empty title should not trigger scroll
                 let mut dummy_scroll = Some(target_id);
@@ -896,4 +1136,3 @@ def foo():
         });
     }
 }
-

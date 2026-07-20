@@ -1,5 +1,5 @@
-use crate::ui::FastMdApp;
 use crate::ui::render::{render_markdown, render_yaml_table};
+use crate::ui::{generate_format_prompt, open_in_system_editor, show_in_file_explorer, FastMdApp};
 use eframe::egui;
 use egui::RichText;
 use std::path::PathBuf;
@@ -28,23 +28,17 @@ pub fn clear_agent_session_state(app: &mut FastMdApp) {
     }
 }
 
-/// Purpose: Generates the markdown formatting prompt with a dynamic date.
-/// Inputs: `date_str` - The current date string in RFC3339 format.
-/// Outputs: A String containing the complete formatting prompt.
-/// Purity: Pure.
-/// Preconditions: None.
-/// Postconditions: Returns a valid prompt string containing the provided date.
-pub fn generate_format_prompt(date_str: &str) -> String {
-    format!("Format the current document into correct markdown and use this template for the yaml front matter. Focus ONLY on the currently active file, and DO NOT use list_files or search for other files.\n```yaml\n---\ntitle: A brief title\nsummary: A three sentence summary of the contents\ntags: [\"tag1\",\"tag2\"]\nheader-date: {}\n---\n```", date_str)
-}
-
 /// Purpose: Modifies the list of open tabs and the currently selected file based on a tab action.
 /// Inputs: `tabs` - Mutable list of tab paths, `selected_file` - Mutable selected file option, `action` - The tab action to perform.
 /// Outputs: None.
 /// Purity: Impure (mutates arguments).
 /// Preconditions: `tabs` must not be empty if `CloseOthers` or `Close` is called with an index.
 /// Postconditions: `tabs` is updated according to the action. `selected_file` falls back to the last tab if the currently selected file was closed.
-pub fn apply_tab_action(tabs: &mut Vec<PathBuf>, selected_file: &mut Option<PathBuf>, action: TabAction) {
+pub fn apply_tab_action(
+    tabs: &mut Vec<PathBuf>,
+    selected_file: &mut Option<PathBuf>,
+    action: TabAction,
+) {
     match action {
         TabAction::Close(i) => {
             if i < tabs.len() {
@@ -71,40 +65,6 @@ pub fn apply_tab_action(tabs: &mut Vec<PathBuf>, selected_file: &mut Option<Path
         *selected_file = tabs.last().cloned();
     } else {
         *selected_file = None;
-    }
-}
-
-/// Purpose: Helper to open a file in the system default editor.
-/// Inputs: `path` - The file path to open.
-/// Outputs: None.
-/// Purity: Impure (interacts with OS shell).
-/// Preconditions: The file path must exist.
-/// Postconditions: The default application for the file type is launched.
-pub fn open_in_system_editor(path: &std::path::Path) {
-    let _ = std::process::Command::new("cmd")
-        .args(["/c", "start", "", &path.to_string_lossy()])
-        .spawn();
-}
-
-/// Purpose: Helper to show a file in the system file explorer.
-/// Inputs: `path` - The file path to show.
-/// Outputs: None.
-/// Purity: Impure (interacts with OS shell).
-/// Preconditions: The file path must exist.
-/// Postconditions: The file explorer is opened with the file selected (on Windows) or opened at the directory (other OS).
-pub fn show_in_file_explorer(path: &std::path::Path) {
-    #[cfg(target_os = "windows")]
-    {
-        use std::os::windows::process::CommandExt;
-        let _ = std::process::Command::new("explorer")
-            .raw_arg(format!("/select,\"{}\"", path.to_string_lossy()))
-            .spawn();
-    }
-    #[cfg(not(target_os = "windows"))]
-    {
-        let _ = std::process::Command::new("explorer")
-            .arg(path.as_os_str())
-            .spawn();
     }
 }
 
@@ -137,27 +97,30 @@ fn render_agent_session(ui: &mut egui::Ui, app: &mut FastMdApp) {
     });
     ui.add_space(8.0);
 
-    egui::ScrollArea::vertical().id_source("agent_thinking_scroll").stick_to_bottom(true).show(ui, |ui| {
-        if !app.agent_thinking.is_empty() {
-            ui.collapsing("Thinking Process", |ui| {
-                ui.label(
-                    egui::RichText::new(&app.agent_thinking)
-                        .italics()
-                        .color(egui::Color32::from_rgb(160, 160, 160)),
-                );
-            });
-            ui.add_space(8.0);
-        }
-
-        if !app.agent_response.is_empty() {
-            ui.heading("Response");
-            ui.separator();
-            render_markdown(ui, &app.agent_response, &mut app.agent_scroll_to_id);
-            if app.agent_running {
-                ui.scroll_to_cursor(Some(egui::Align::BOTTOM));
+    egui::ScrollArea::vertical()
+        .id_source("agent_thinking_scroll")
+        .stick_to_bottom(true)
+        .show(ui, |ui| {
+            if !app.agent_thinking.is_empty() {
+                ui.collapsing("Thinking Process", |ui| {
+                    ui.label(
+                        egui::RichText::new(&app.agent_thinking)
+                            .italics()
+                            .color(egui::Color32::from_rgb(160, 160, 160)),
+                    );
+                });
+                ui.add_space(8.0);
             }
-        }
-    });
+
+            if !app.agent_response.is_empty() {
+                ui.heading("Response");
+                ui.separator();
+                render_markdown(ui, &app.agent_response, &mut app.agent_scroll_to_id);
+                if app.agent_running {
+                    ui.scroll_to_cursor(Some(egui::Align::BOTTOM));
+                }
+            }
+        });
 }
 
 /// Purpose: Renders the file tabs and the selected file content in the center panel.
@@ -260,12 +223,14 @@ fn render_tabs_and_content(ui: &mut egui::Ui, app: &mut FastMdApp) {
         });
         ui.separator();
 
-        egui::ScrollArea::vertical().id_source("main_markdown_scroll").show(ui, |ui| {
-            if let Some(yaml) = &app.current_yaml {
-                render_yaml_table(ui, yaml);
-            }
-            render_markdown(ui, &app.current_markdown, &mut app.scroll_to_header_id);
-        });
+        egui::ScrollArea::vertical()
+            .id_source("main_markdown_scroll")
+            .show(ui, |ui| {
+                if let Some(yaml) = &app.current_yaml {
+                    render_yaml_table(ui, yaml);
+                }
+                render_markdown(ui, &app.current_markdown, &mut app.scroll_to_header_id);
+            });
     }
 }
 
@@ -278,12 +243,10 @@ fn render_tabs_and_content(ui: &mut egui::Ui, app: &mut FastMdApp) {
 fn render_empty_state(ui: &mut egui::Ui) {
     ui.centered_and_justified(|ui| {
         ui.label(
-            RichText::new(
-                "Select a markdown file from the left pane to view its content",
-            )
-            .size(15.0)
-            .italics()
-            .color(egui::Color32::GRAY),
+            RichText::new("Select a markdown file from the left pane to view its content")
+                .size(15.0)
+                .italics()
+                .color(egui::Color32::GRAY),
         );
     });
 }
@@ -309,61 +272,13 @@ pub fn show_center_panel(app: &mut FastMdApp, ctx: &egui::Context) {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::ui::generate_format_prompt;
     use std::path::PathBuf;
     use std::sync::atomic::{AtomicBool, Ordering};
     use std::sync::Arc;
 
     fn create_test_app() -> FastMdApp {
-        let (tx, rx) = std::sync::mpsc::channel();
-        FastMdApp {
-            content_libraries: vec![],
-            rx,
-            tx,
-            all_files: vec![],
-            all_dirs: vec![],
-            file_tags: std::collections::BTreeMap::new(),
-            all_tags: std::collections::BTreeSet::new(),
-            selected_tag: None,
-            indexing_finished: true,
-            indexing_finished_handled: true,
-            left_panel_width: None,
-            selected_file: None,
-            selected_files: std::collections::HashSet::new(),
-            selected_dir: None,
-            expanded_dirs: std::collections::HashSet::new(),
-            loaded_path: None,
-            current_yaml: None,
-            current_markdown: String::new(),
-            tabs: vec![],
-            move_dialog_open: false,
-            file_to_move: None,
-            selected_move_folder: None,
-            create_dir_dialog_open: false,
-            create_dir_parent: None,
-            create_dir_name: String::new(),
-            rename_dialog_open: false,
-            file_to_rename: None,
-            rename_new_name: String::new(),
-            command_input: String::new(),
-            toc: vec![],
-            scroll_to_header_id: None,
-            _watcher: None,
-            show_agent_results: false,
-            agent_running: false,
-            agent_status: String::new(),
-            agent_thinking: String::new(),
-            agent_response: String::new(),
-            agent_scroll_to_id: None,
-            agent_cancel_flag: None,
-            agent_history: None,
-            left_panel_reset_count: 0,
-            submit_prompt: None,
-            editor_state: crate::editor::EditorState::default(),
-            inline_editor_enabled: true,
-            background_manager: Arc::new(std::sync::Mutex::new(crate::background::BackgroundProcessManager::new())),
-            show_background_logs: false,
-            config: crate::config::AppConfig::default(),
-        }
+        FastMdApp::empty_state()
     }
 
     #[test]
@@ -377,9 +292,13 @@ mod tests {
 
     #[test]
     fn test_apply_tab_action_close() {
-        let mut tabs = vec![PathBuf::from("a.md"), PathBuf::from("b.md"), PathBuf::from("c.md")];
+        let mut tabs = vec![
+            PathBuf::from("a.md"),
+            PathBuf::from("b.md"),
+            PathBuf::from("c.md"),
+        ];
         let mut selected = Some(PathBuf::from("a.md"));
-        
+
         apply_tab_action(&mut tabs, &mut selected, TabAction::Close(0));
         assert_eq!(tabs, vec![PathBuf::from("b.md"), PathBuf::from("c.md")]);
         // selected was a.md, so it falls back to the last tab (c.md)
@@ -388,9 +307,13 @@ mod tests {
 
     #[test]
     fn test_apply_tab_action_close_others() {
-        let mut tabs = vec![PathBuf::from("a.md"), PathBuf::from("b.md"), PathBuf::from("c.md")];
+        let mut tabs = vec![
+            PathBuf::from("a.md"),
+            PathBuf::from("b.md"),
+            PathBuf::from("c.md"),
+        ];
         let mut selected = Some(PathBuf::from("a.md"));
-        
+
         apply_tab_action(&mut tabs, &mut selected, TabAction::CloseOthers(1));
         assert_eq!(tabs, vec![PathBuf::from("b.md")]);
         assert_eq!(selected, Some(PathBuf::from("b.md")));
@@ -400,17 +323,17 @@ mod tests {
     fn test_apply_tab_action_close_all() {
         let mut tabs = vec![PathBuf::from("a.md"), PathBuf::from("b.md")];
         let mut selected = Some(PathBuf::from("b.md"));
-        
+
         apply_tab_action(&mut tabs, &mut selected, TabAction::CloseAll);
         assert!(tabs.is_empty());
         assert_eq!(selected, None);
     }
-    
+
     #[test]
     fn test_apply_tab_action_out_of_bounds() {
         let mut tabs = vec![PathBuf::from("a.md")];
         let mut selected = Some(PathBuf::from("a.md"));
-        
+
         // Invalid index should do nothing
         apply_tab_action(&mut tabs, &mut selected, TabAction::Close(5));
         assert_eq!(tabs.len(), 1);
@@ -421,13 +344,15 @@ mod tests {
     fn prop_apply_tab_action_preserves_invariants_fuzz() {
         for tab_count in 0..20 {
             for close_idx in 0..30 {
-                let mut tabs: Vec<PathBuf> = (0..tab_count).map(|i| PathBuf::from(format!("{}.md", i))).collect();
+                let mut tabs: Vec<PathBuf> = (0..tab_count)
+                    .map(|i| PathBuf::from(format!("{}.md", i)))
+                    .collect();
                 let mut selected = tabs.last().cloned();
-                
+
                 let initial_len = tabs.len();
-                
+
                 apply_tab_action(&mut tabs, &mut selected, TabAction::Close(close_idx));
-                
+
                 if initial_len == 0 {
                     assert!(tabs.is_empty() && selected.is_none());
                 } else if close_idx < initial_len {
@@ -465,6 +390,7 @@ mod tests {
     }
 
     #[test]
+    #[ignore = "spawns OS shell which pops a 'file not found' dialog on Windows when path is missing"]
     fn test_os_launchers_non_crashing() {
         let path = std::path::Path::new("dummy_test_file.txt");
         open_in_system_editor(path);
@@ -502,4 +428,4 @@ mod tests {
             show_center_panel(&mut app, ctx);
         });
     }
-}
+}

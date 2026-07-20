@@ -1,8 +1,8 @@
 use crate::ui::FastMdApp;
 use eframe::egui;
 use egui::RichText;
-use std::path::PathBuf;
 use std::collections::BTreeMap;
+use std::path::PathBuf;
 
 /// Purpose: Generates the indexing status rich text based on whether indexing is finished.
 /// Inputs: indexing_finished (boolean), file_count (usize)
@@ -15,8 +15,11 @@ pub fn build_indexing_status_text(indexing_finished: bool, file_count: usize) ->
         RichText::new(format!("Indexing finished ({} files)", file_count))
             .color(egui::Color32::from_rgb(100, 255, 100))
     } else {
-        RichText::new(format!("Indexing workspace (found {} files)...", file_count))
-            .italics()
+        RichText::new(format!(
+            "Indexing workspace (found {} files)...",
+            file_count
+        ))
+        .italics()
     }
 }
 
@@ -27,7 +30,9 @@ pub fn build_indexing_status_text(indexing_finished: bool, file_count: usize) ->
 /// Preconditions: None.
 /// Postconditions: Returns the tag name if one is selected, otherwise "Filter by Tag: All".
 pub fn get_tag_filter_text(selected_tag: Option<&String>) -> &str {
-    selected_tag.map(|s| s.as_str()).unwrap_or("Filter by Tag: All")
+    selected_tag
+        .map(|s| s.as_str())
+        .unwrap_or("Filter by Tag: All")
 }
 
 /// Purpose: Determines the next selected file after the active tag filter changes.
@@ -70,7 +75,10 @@ pub fn show_top_panel(app: &mut FastMdApp, ctx: &egui::Context) {
                 ui.spinner();
             }
 
-            ui.label(build_indexing_status_text(app.indexing_finished, app.all_files.len()));
+            ui.label(build_indexing_status_text(
+                app.indexing_finished,
+                app.all_files.len(),
+            ));
 
             if app.indexing_finished {
                 ui.separator();
@@ -82,11 +90,7 @@ pub fn show_top_panel(app: &mut FastMdApp, ctx: &egui::Context) {
                             .changed();
                         for tag in &app.all_tags {
                             changed |= ui
-                                .selectable_value(
-                                    &mut app.selected_tag,
-                                    Some(tag.clone()),
-                                    tag,
-                                )
+                                .selectable_value(&mut app.selected_tag, Some(tag.clone()), tag)
                                 .changed();
                         }
                         if changed {
@@ -136,7 +140,7 @@ mod tests {
         let mut file_tags = BTreeMap::new();
         let path = PathBuf::from("test.md");
         file_tags.insert(path.clone(), vec!["Rust".to_string()]);
-        
+
         assert_eq!(
             compute_next_selected_file(Some(&path), None, &file_tags),
             Some(path)
@@ -149,7 +153,7 @@ mod tests {
         let path = PathBuf::from("test.md");
         file_tags.insert(path.clone(), vec!["Rust".to_string()]);
         let tag = "Rust".to_string();
-        
+
         assert_eq!(
             compute_next_selected_file(Some(&path), Some(&tag), &file_tags),
             Some(path)
@@ -162,7 +166,7 @@ mod tests {
         let path = PathBuf::from("test.md");
         file_tags.insert(path.clone(), vec!["Rust".to_string()]);
         let tag = "Go".to_string();
-        
+
         assert_eq!(
             compute_next_selected_file(Some(&path), Some(&tag), &file_tags),
             None
@@ -174,7 +178,7 @@ mod tests {
         let file_tags = BTreeMap::new();
         let path = PathBuf::from("test.md");
         let tag = "Rust".to_string();
-        
+
         assert_eq!(
             compute_next_selected_file(Some(&path), Some(&tag), &file_tags),
             None
@@ -185,62 +189,9 @@ mod tests {
 #[cfg(test)]
 mod ui_tests {
     use super::*;
-    use std::collections::{BTreeMap, BTreeSet, HashSet};
-    use std::sync::{Arc, Mutex};
-    use crate::background::BackgroundProcessManager;
 
     fn create_test_app() -> FastMdApp {
-        let (tx, rx) = std::sync::mpsc::channel();
-        let config = crate::config::AppConfig::default();
-        FastMdApp {
-            content_libraries: vec![],
-            rx,
-            tx,
-            all_files: vec![],
-            all_dirs: vec![],
-            file_tags: BTreeMap::new(),
-            all_tags: BTreeSet::new(),
-            selected_tag: None,
-            indexing_finished: false,
-            indexing_finished_handled: false,
-            left_panel_width: None,
-            selected_file: None,
-            selected_files: HashSet::new(),
-            selected_dir: None,
-            expanded_dirs: HashSet::new(),
-            loaded_path: None,
-            current_yaml: None,
-            current_markdown: String::new(),
-            tabs: vec![],
-            move_dialog_open: false,
-            file_to_move: None,
-            selected_move_folder: None,
-            create_dir_dialog_open: false,
-            create_dir_parent: None,
-            create_dir_name: String::new(),
-            rename_dialog_open: false,
-            file_to_rename: None,
-            rename_new_name: String::new(),
-            command_input: String::new(),
-            toc: vec![],
-            scroll_to_header_id: None,
-            _watcher: None,
-            show_agent_results: false,
-            agent_running: false,
-            agent_status: String::new(),
-            agent_thinking: String::new(),
-            agent_response: String::new(),
-            agent_scroll_to_id: None,
-            agent_cancel_flag: None,
-            agent_history: None,
-            left_panel_reset_count: 0,
-            submit_prompt: None,
-            editor_state: crate::editor::EditorState::default(),
-            inline_editor_enabled: true,
-            background_manager: Arc::new(Mutex::new(BackgroundProcessManager::new())),
-            show_background_logs: false,
-            config,
-        }
+        FastMdApp::empty_state()
     }
 
     #[test]
@@ -261,10 +212,10 @@ mod ui_tests {
         app.indexing_finished = true;
         app.all_tags.insert("Rust".to_string());
         app.all_tags.insert("Docs".to_string());
-        
+
         let _ = ctx.run(egui::RawInput::default(), |ctx| {
             show_top_panel(&mut app, ctx);
         });
         assert!(app.indexing_finished);
     }
-}
+}

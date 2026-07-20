@@ -1,8 +1,7 @@
-
 #[cfg(test)]
 mod tests {
     use super::super::render::build_toc;
-    use pulldown_cmark::{Parser, Options, Event};
+    use pulldown_cmark::{Event, Options, Parser};
 
     #[test]
     fn test_build_toc_empty() {
@@ -46,7 +45,8 @@ mod tests {
 
     #[test]
     fn test_build_toc_ignores_non_heading_content() {
-        let toc = build_toc("# Real Title\n\nSome text\n\n## Another\n\n- list item\n\n> blockquote");
+        let toc =
+            build_toc("# Real Title\n\nSome text\n\n## Another\n\n- list item\n\n> blockquote");
         assert_eq!(toc.len(), 2);
         assert_eq!(toc[0].title, "Real Title");
         assert_eq!(toc[1].title, "Another");
@@ -80,7 +80,10 @@ mod tests {
                 found_hard_break = true;
             }
         }
-        assert!(!found_hard_break, "Hard breaks should not be enabled by default");
+        assert!(
+            !found_hard_break,
+            "Hard breaks should not be enabled by default"
+        );
     }
 
     #[test]

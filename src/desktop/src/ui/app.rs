@@ -1,13 +1,15 @@
+use crate::background::{BackgroundProcessManager, SharedProcessManager};
 use crate::background_task::Task;
 use crate::messages::BackgroundMessage;
-use crate::ui::panels::{show_bottom_panel, show_center_panel, show_left_panel, show_right_panel, show_top_panel};
 use crate::ui::modals::{show_create_dir_modal, show_move_modal, show_rename_modal};
+use crate::ui::panels::{
+    show_bottom_panel, show_center_panel, show_left_panel, show_right_panel, show_top_panel,
+};
 use crate::utils::parse_front_matter;
 use eframe::egui;
 use std::collections::{BTreeMap, BTreeSet, HashSet};
 use std::path::PathBuf;
 use std::sync::mpsc::Receiver;
-use crate::background::{BackgroundProcessManager, SharedProcessManager};
 use std::sync::{Arc, Mutex};
 
 #[derive(Clone)]
@@ -114,7 +116,7 @@ impl FastMdApp {
         visuals.widgets.inactive.rounding = 4.0.into();
         visuals.widgets.hovered.rounding = 4.0.into();
         visuals.widgets.active.rounding = 4.0.into();
-        
+
         let bright_text = egui::Color32::from_gray(210);
         visuals.widgets.noninteractive.fg_stroke.color = bright_text;
         visuals.widgets.inactive.fg_stroke.color = bright_text;
@@ -126,7 +128,11 @@ impl FastMdApp {
         if args.len() > 1 {
             let path = PathBuf::from(&args[1]);
             if path.exists() && path.is_dir() {
-                let mut path_str = path.canonicalize().unwrap_or(path).to_string_lossy().to_string();
+                let mut path_str = path
+                    .canonicalize()
+                    .unwrap_or(path)
+                    .to_string_lossy()
+                    .to_string();
                 if path_str.starts_with(r"\\?\") {
                     path_str = path_str[4..].to_string();
                 }
@@ -138,13 +144,15 @@ impl FastMdApp {
                     }
                 }
                 if !found {
-                    config.content_libraries.push(crate::config::ContentLibrary {
-                        root_folder: path_str,
-                        name: "Workspace".to_string(),
-                        kind: "text".to_string(),
-                        readonly: false,
-                        priority: 0,
-                    });
+                    config
+                        .content_libraries
+                        .push(crate::config::ContentLibrary {
+                            root_folder: path_str,
+                            name: "Workspace".to_string(),
+                            kind: "text".to_string(),
+                            readonly: false,
+                            priority: 0,
+                        });
                 }
             }
         }
@@ -158,13 +166,15 @@ impl FastMdApp {
             if path_str.starts_with(r"\\?\") {
                 path_str = path_str[4..].to_string();
             }
-            config.content_libraries.push(crate::config::ContentLibrary {
-                root_folder: path_str,
-                name: "Workspace".to_string(),
-                kind: "text".to_string(),
-                readonly: false,
-                priority: 0,
-            });
+            config
+                .content_libraries
+                .push(crate::config::ContentLibrary {
+                    root_folder: path_str,
+                    name: "Workspace".to_string(),
+                    kind: "text".to_string(),
+                    readonly: false,
+                    priority: 0,
+                });
         }
 
         let background_task = Task::new(config.clone());
@@ -175,6 +185,26 @@ impl FastMdApp {
             content_libraries: config.content_libraries.clone(),
             rx: background_task.rx,
             tx: background_task.tx,
+            inline_editor_enabled,
+            background_manager,
+            show_background_logs: false,
+            config,
+            ..Self::empty_state()
+        }
+    }
+
+    /// Purpose: Build a `FastMdApp` with all UI state cleared and no background channels.
+    /// Inputs: None.
+    /// Outputs: `FastMdApp` with every collection empty and every optional set to `None`.
+    /// Purity: Constructs a new value; no side effects.
+    /// Preconditions: None.
+    /// Postconditions: Caller still owns a usable `Sender<BackgroundMessage>` paired with `rx`.
+    pub fn empty_state() -> Self {
+        let (tx, rx) = std::sync::mpsc::channel();
+        Self {
+            content_libraries: Vec::new(),
+            rx,
+            tx,
             all_files: Vec::new(),
             all_dirs: Vec::new(),
             file_tags: BTreeMap::new(),
@@ -215,18 +245,68 @@ impl FastMdApp {
             left_panel_reset_count: 0,
             submit_prompt: None,
             editor_state: crate::editor::EditorState::default(),
-            inline_editor_enabled,
-            background_manager,
+            inline_editor_enabled: true,
+            background_manager: Arc::new(Mutex::new(BackgroundProcessManager::new())),
             show_background_logs: false,
-            config,
+            config: crate::config::AppConfig::default(),
         }
     }
+
+    /// Purpose: Submits a prompt to the agent and starts a new session, taking ownership of all relevant state.
+    /// Inputs: `prompt` - the prompt text to send to the agent.
+    /// Outputs: None.
+    /// Purity: Impure (mutates self, spawns the agent thread).
+    /// Preconditions: `prompt` should be non-empty.
+    /// Postconditions: `command_input` is cleared, `agent_running` is set, `agent_cancel_flag` holds a fresh flag, and the agent thread is launched.
+    pub fn start_agent_session(&mut self, prompt: String) {
+        self.command_input = prompt;
+        self.agent_status = "Initializing agent...".to_string();
+        self.agent_thinking.clear();
+        if self.agent_history.is_none() || !self.show_agent_results {
+            self.agent_response.clear();
+            self.agent_history = None;
+        } else {
+            self.agent_response
+                .push_str(&format!("> **User:** {}\n\n", self.command_input));
+        }
+        self.show_agent_results = true;
+        self.agent_running = true;
+
+        let cancel_flag = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+        self.agent_cancel_flag = Some(cancel_flag.clone());
+
+        crate::agent::run_agent(
+            self.config.clone(),
+            self.tx.clone(),
+            self.selected_file.clone(),
+            self.selected_dir.clone(),
+            self.selected_files.clone(),
+            self.command_input.clone(),
+            cancel_flag,
+            self.agent_history.clone(),
+            self.agent_response.clone(),
+        );
+        self.command_input.clear();
+    }
+}
+
+/// Purpose: Generates the markdown formatting prompt with a dynamic date.
+/// Inputs: `date_str` - The current date string in RFC3339 format.
+/// Outputs: A String containing the complete formatting prompt.
+/// Purity: Pure.
+/// Preconditions: None.
+/// Postconditions: Returns a valid prompt string containing the provided date.
+pub fn generate_format_prompt(date_str: &str) -> String {
+    format!("Format the current document into correct markdown and use this template for the yaml front matter. Focus ONLY on the currently active file, and DO NOT use list_files or search for other files.\n```yaml\n---\ntitle: A brief title\nsummary: A three sentence summary of the contents\ntags: [\"tag1\",\"tag2\"]\nheader-date: {}\n---\n```", date_str)
 }
 
 impl eframe::App for FastMdApp {
     fn on_exit(&mut self, _gl: Option<&eframe::glow::Context>) {
         if let Ok(mgr) = self.background_manager.lock() {
-            let log_path = crate::config::get_config_path().parent().unwrap().join("logs/background-process.log");
+            let log_path = crate::config::get_config_path()
+                .parent()
+                .unwrap()
+                .join("logs/background-process.log");
             let _ = mgr.save_logs(&log_path);
         }
     }
@@ -366,35 +446,7 @@ impl FastMdApp {
 
         // Handle programmatic prompt submission
         if let Some(prompt) = self.submit_prompt.take() {
-            self.command_input = prompt;
-            // The prompt will be submitted next frame, or we can trigger it immediately.
-            // But we actually need to replicate the agent trigger logic here.
-            self.agent_status = "Initializing agent...".to_string();
-            self.agent_thinking.clear();
-            if self.agent_history.is_none() || !self.show_agent_results {
-                self.agent_response.clear();
-                self.agent_history = None;
-            } else {
-                self.agent_response.push_str(&format!("> **User:** {}\n\n", self.command_input));
-            }
-            self.show_agent_results = true;
-            self.agent_running = true;
-
-            let cancel_flag = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
-            self.agent_cancel_flag = Some(cancel_flag.clone());
-            
-            crate::agent::run_agent(
-                self.config.clone(),
-                self.tx.clone(),
-                self.selected_file.clone(),
-                self.selected_dir.clone(),
-                self.selected_files.clone(),
-                self.command_input.clone(),
-                cancel_flag,
-                self.agent_history.clone(),
-                self.agent_response.clone(),
-            );
-            self.command_input.clear();
+            self.start_agent_session(prompt);
         }
     }
 }
@@ -402,61 +454,10 @@ impl FastMdApp {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::collections::{BTreeMap, BTreeSet, HashSet};
     use std::path::PathBuf;
-    use std::sync::Arc;
 
     fn create_test_app() -> FastMdApp {
-        let (tx, rx) = std::sync::mpsc::channel();
-        FastMdApp {
-            content_libraries: vec![],
-            rx,
-            tx,
-            all_files: vec![],
-            all_dirs: vec![],
-            file_tags: BTreeMap::new(),
-            all_tags: BTreeSet::new(),
-            selected_tag: None,
-            indexing_finished: false,
-            indexing_finished_handled: false,
-            left_panel_width: None,
-            selected_file: None,
-            selected_files: HashSet::new(),
-            selected_dir: None,
-            expanded_dirs: HashSet::new(),
-            loaded_path: None,
-            current_yaml: None,
-            current_markdown: String::new(),
-            tabs: vec![],
-            move_dialog_open: false,
-            file_to_move: None,
-            selected_move_folder: None,
-            create_dir_dialog_open: false,
-            create_dir_parent: None,
-            create_dir_name: String::new(),
-            rename_dialog_open: false,
-            file_to_rename: None,
-            rename_new_name: String::new(),
-            command_input: String::new(),
-            toc: vec![],
-            scroll_to_header_id: None,
-            _watcher: None,
-            show_agent_results: false,
-            agent_running: false,
-            agent_status: String::new(),
-            agent_thinking: String::new(),
-            agent_response: String::new(),
-            agent_scroll_to_id: None,
-            agent_cancel_flag: None,
-            agent_history: None,
-            left_panel_reset_count: 0,
-            submit_prompt: None,
-            editor_state: crate::editor::EditorState::default(),
-            inline_editor_enabled: true,
-            background_manager: Arc::new(std::sync::Mutex::new(crate::background::BackgroundProcessManager::new())),
-            show_background_logs: false,
-            config: crate::config::AppConfig::default(),
-        }
+        FastMdApp::empty_state()
     }
 
     #[test]
@@ -471,8 +472,14 @@ mod tests {
     #[test]
     fn test_rebuild_tags() {
         let mut app = create_test_app();
-        app.file_tags.insert(PathBuf::from("file1.md"), vec!["rust".to_string(), "ui".to_string()]);
-        app.file_tags.insert(PathBuf::from("file2.md"), vec!["rust".to_string(), "testing".to_string()]);
+        app.file_tags.insert(
+            PathBuf::from("file1.md"),
+            vec!["rust".to_string(), "ui".to_string()],
+        );
+        app.file_tags.insert(
+            PathBuf::from("file2.md"),
+            vec!["rust".to_string(), "testing".to_string()],
+        );
 
         app.rebuild_tags();
 
@@ -490,23 +497,37 @@ mod tests {
         let test_dir = PathBuf::from("test_dir");
 
         // 1. FileParsed
-        app.tx.send(BackgroundMessage::FileParsed {
-            path: test_file.clone(),
-            tags: vec!["tag1".to_string()],
-        }).unwrap();
+        app.tx
+            .send(BackgroundMessage::FileParsed {
+                path: test_file.clone(),
+                tags: vec!["tag1".to_string()],
+            })
+            .unwrap();
 
         // 2. DirParsed
-        app.tx.send(BackgroundMessage::DirParsed {
-            path: test_dir.clone(),
-        }).unwrap();
+        app.tx
+            .send(BackgroundMessage::DirParsed {
+                path: test_dir.clone(),
+            })
+            .unwrap();
 
         // 3. FinishedWithoutWatcher
-        app.tx.send(BackgroundMessage::FinishedWithoutWatcher).unwrap();
+        app.tx
+            .send(BackgroundMessage::FinishedWithoutWatcher)
+            .unwrap();
 
         // 4. Agent Status & Response
-        app.tx.send(BackgroundMessage::AgentStatus("Processing...".to_string())).unwrap();
-        app.tx.send(BackgroundMessage::AgentThinking("Thinking step".to_string())).unwrap();
-        app.tx.send(BackgroundMessage::AgentResponse("Done result".to_string())).unwrap();
+        app.tx
+            .send(BackgroundMessage::AgentStatus("Processing...".to_string()))
+            .unwrap();
+        app.tx
+            .send(BackgroundMessage::AgentThinking(
+                "Thinking step".to_string(),
+            ))
+            .unwrap();
+        app.tx
+            .send(BackgroundMessage::AgentResponse("Done result".to_string()))
+            .unwrap();
 
         let _ = ctx.run(Default::default(), |ctx| {
             app.update_ui(ctx);
@@ -532,10 +553,12 @@ mod tests {
         app.loaded_path = Some(file_path.clone());
 
         // File modified message
-        app.tx.send(BackgroundMessage::FileModified {
-            path: file_path.clone(),
-            tags: vec!["updated".to_string()],
-        }).unwrap();
+        app.tx
+            .send(BackgroundMessage::FileModified {
+                path: file_path.clone(),
+                tags: vec!["updated".to_string()],
+            })
+            .unwrap();
 
         let _ = ctx.run(Default::default(), |ctx| {
             app.update_ui(ctx);
@@ -544,9 +567,11 @@ mod tests {
         assert!(app.loaded_path.is_none()); // Trigger reload
 
         // File deleted message
-        app.tx.send(BackgroundMessage::FileDeleted {
-            path: file_path.clone(),
-        }).unwrap();
+        app.tx
+            .send(BackgroundMessage::FileDeleted {
+                path: file_path.clone(),
+            })
+            .unwrap();
 
         let _ = ctx.run(Default::default(), |ctx| {
             app.update_ui(ctx);
@@ -562,7 +587,11 @@ mod tests {
         let ctx = egui::Context::default();
         let mut app = create_test_app();
 
-        app.tx.send(BackgroundMessage::AgentFailed("Network timeout".to_string())).unwrap();
+        app.tx
+            .send(BackgroundMessage::AgentFailed(
+                "Network timeout".to_string(),
+            ))
+            .unwrap();
 
         let _ = ctx.run(Default::default(), |ctx| {
             app.update_ui(ctx);
@@ -571,7 +600,11 @@ mod tests {
         assert_eq!(app.agent_status, "Error: Network timeout");
         assert!(!app.agent_running);
 
-        app.tx.send(BackgroundMessage::AgentFinished(vec![serde_json::json!({"ok": true})])).unwrap();
+        app.tx
+            .send(BackgroundMessage::AgentFinished(vec![
+                serde_json::json!({"ok": true}),
+            ]))
+            .unwrap();
 
         let _ = ctx.run(Default::default(), |ctx| {
             app.update_ui(ctx);
@@ -581,4 +614,3 @@ mod tests {
         assert!(app.agent_history.is_some());
     }
 }
-

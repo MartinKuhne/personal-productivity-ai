@@ -147,9 +147,7 @@ pub fn draw_tree_node(ui: &mut egui::Ui, node: &TreeNode, ctx: &mut TreeNodeCont
             if ctx.inline_editor_enabled {
                 *ctx.open_editor = Some(node.path.clone());
             } else {
-                let _ = std::process::Command::new("cmd")
-                    .args(["/c", "start", "", &node.path.to_string_lossy()])
-                    .spawn();
+                crate::ui::open_in_system_editor(&node.path);
             }
         }
 
@@ -159,14 +157,8 @@ pub fn draw_tree_node(ui: &mut egui::Ui, node: &TreeNode, ctx: &mut TreeNodeCont
                 if ui.button("Merge").clicked() {
                     let mut prompt = "Please merge the following documents into a new document:\n".to_string();
                     for file in ctx.selected_files.iter() {
-                        let mut rel_str = file.to_string_lossy().to_string();
-                        for lib in ctx.content_libraries {
-                            if let Ok(rel) = file.strip_prefix(std::path::Path::new(&lib.root_folder)) {
-                                let lib_path = std::path::Path::new(&lib.name).join(rel);
-                                rel_str = lib_path.to_string_lossy().to_string();
-                                break;
-                            }
-                        }
+                        let rel_str = crate::config::library_display_label(ctx.content_libraries, file)
+                            .unwrap_or_else(|| file.to_string_lossy().to_string());
                         prompt.push_str(&format!("- {}\n", rel_str));
                     }
                     *ctx.submit_prompt = Some(prompt);
@@ -192,26 +184,12 @@ pub fn draw_tree_node(ui: &mut egui::Ui, node: &TreeNode, ctx: &mut TreeNodeCont
                     if ctx.inline_editor_enabled {
                         *ctx.open_editor = Some(node.path.clone());
                     } else {
-                        let _ = std::process::Command::new("cmd")
-                            .args(["/c", "start", "", &node.path.to_string_lossy()])
-                            .spawn();
+                        crate::ui::open_in_system_editor(&node.path);
                     }
                     ui.close_menu();
                 }
                 if ui.button("Show in File Explorer").clicked() {
-                    #[cfg(target_os = "windows")]
-                    {
-                        use std::os::windows::process::CommandExt;
-                        let _ = std::process::Command::new("explorer")
-                            .raw_arg(format!("/select,\"{}\"", node.path.to_string_lossy()))
-                            .spawn();
-                    }
-                    #[cfg(not(target_os = "windows"))]
-                    {
-                        let _ = std::process::Command::new("explorer")
-                            .arg(&node.path)
-                            .spawn();
-                    }
+                    crate::ui::show_in_file_explorer(&node.path);
                     ui.close_menu();
                 }
                 if ui.button("Copy path").clicked() {
@@ -221,8 +199,7 @@ pub fn draw_tree_node(ui: &mut egui::Ui, node: &TreeNode, ctx: &mut TreeNodeCont
                 if ui.button("Format Markdown").clicked() {
                     let now = chrono::Local::now();
                     let date_str = now.to_rfc3339();
-                    let prompt = format!("Format the current document into correct markdown and use this template for the yaml front matter. Focus ONLY on the currently active file, and DO NOT use list_files or search for other files.\n```yaml\n---\ntitle: A brief title\nsummary: A three sentence summary of the contents\ntags: [\"tag1\",\"tag2\"]\nheader-date: {}\n---\n```", date_str);
-                    *ctx.submit_prompt = Some(prompt);
+                    *ctx.submit_prompt = Some(crate::ui::generate_format_prompt(&date_str));
                     ui.close_menu();
                 }
                 if ui.button("Run as prompt").clicked() {
@@ -289,8 +266,13 @@ mod tests {
         let ctx_egui = egui::Context::default();
 
         let mut root = TreeNode::new("RootFolder".to_string(), PathBuf::from("/test/root"), true);
-        let child_file = TreeNode::new("document.md".to_string(), PathBuf::from("/test/root/document.md"), false);
-        root.children.insert("document.md".to_string(), child_file.clone());
+        let child_file = TreeNode::new(
+            "document.md".to_string(),
+            PathBuf::from("/test/root/document.md"),
+            false,
+        );
+        root.children
+            .insert("document.md".to_string(), child_file.clone());
 
         let mut expanded_dirs = HashSet::new();
         let mut selected_file = None;
@@ -350,8 +332,16 @@ mod tests {
     #[test]
     fn test_tree_node_selection_state_modifiers() {
         let ctx_egui = egui::Context::default();
-        let file1 = TreeNode::new("file1.md".to_string(), PathBuf::from("/test/file1.md"), false);
-        let file2 = TreeNode::new("file2.md".to_string(), PathBuf::from("/test/file2.md"), false);
+        let file1 = TreeNode::new(
+            "file1.md".to_string(),
+            PathBuf::from("/test/file1.md"),
+            false,
+        );
+        let file2 = TreeNode::new(
+            "file2.md".to_string(),
+            PathBuf::from("/test/file2.md"),
+            false,
+        );
 
         let mut expanded_dirs = HashSet::new();
         let mut selected_file = None;
@@ -386,7 +376,10 @@ mod tests {
                     rename_dialog_open: &mut rename_dialog_open,
                     file_to_rename: &mut file_to_rename,
                     rename_new_name: &mut rename_new_name,
-                    modifiers: egui::Modifiers { ctrl: true, ..Default::default() },
+                    modifiers: egui::Modifiers {
+                        ctrl: true,
+                        ..Default::default()
+                    },
                     submit_prompt: &mut submit_prompt,
                     content_libraries: &[],
                     open_editor: &mut open_editor,
@@ -400,4 +393,3 @@ mod tests {
         });
     }
 }
-
