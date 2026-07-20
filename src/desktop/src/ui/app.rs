@@ -42,6 +42,11 @@ pub struct FastMdApp {
     pub content_libraries: Vec<crate::config::ContentLibrary>,
     pub rx: Receiver<BackgroundMessage>,
     pub tx: std::sync::mpsc::Sender<BackgroundMessage>,
+    /// Subscriber end of the file-event bus. Receives `Discovered`,
+    /// `Updated`, and `Removed` events from the initial scan and the
+    /// file system watcher. Owned by the app so the directory tree can
+    /// react to new / changed / deleted files.
+    pub file_event_reader: Option<crate::file_events::BusReader<crate::file_events::FileEvent>>,
     pub all_files: Vec<PathBuf>,
     pub all_dirs: Vec<PathBuf>,
     pub file_tags: BTreeMap<PathBuf, Vec<String>>,
@@ -106,6 +111,70 @@ pub struct FastMdApp {
 }
 
 impl FastMdApp {
+    /// Drain pending `FileEvent`s from the bus and update the
+    /// directory tree's `all_files` and `all_dirs` collections.
+    ///
+    /// This is the directory tree's "consumer" of the file-event
+    /// bus. The tag manager/indexer has its own consumer in
+    /// `background_task.rs` (the worker threads that extract tags).
+    /// Both run in parallel and never block each other.
+    ///
+    /// Returns `true` if any event was processed, so callers can
+    /// schedule a follow-up UI repaint.
+    fn process_file_events(&mut self) -> bool {
+        let Some(reader) = self.file_event_reader.as_ref() else {
+            return false;
+        };
+        let mut changed = false;
+        loop {
+            match reader.try_recv() {
+                Ok(event) => {
+                    use crate::file_events::FileEventKind;
+                    match event.kind {
+                        FileEventKind::Discovered | FileEventKind::Updated => {
+                            if !self.all_files.contains(&event.path) {
+                                self.all_files.push(event.path.clone());
+                                changed = true;
+                            }
+                            // Add parent directories so the tree
+                            // can render them.
+                            if let Some(parent) = event.path.parent() {
+                                if !self.all_dirs.contains(&parent.to_path_buf()) {
+                                    self.all_dirs.push(parent.to_path_buf());
+                                    changed = true;
+                                }
+                            }
+                        }
+                        FileEventKind::Removed => {
+                            self.all_files.retain(|p| p != &event.path);
+                            self.file_tags.remove(&event.path);
+                            // Clear selection / loaded state if the
+                            // removed file was selected.
+                            if self.selected_file.as_ref() == Some(&event.path) {
+                                self.selected_file = None;
+                                self.current_yaml = None;
+                                self.current_markdown.clear();
+                                self.toc.clear();
+                            }
+                            self.selected_files.remove(&event.path);
+                            if self.loaded_path.as_ref() == Some(&event.path) {
+                                self.loaded_path = None;
+                            }
+                            changed = true;
+                        }
+                    }
+                }
+                Err(std::sync::mpsc::TryRecvError::Empty) => break,
+                Err(std::sync::mpsc::TryRecvError::Disconnected) => break,
+            }
+        }
+        if changed {
+            self.rebuild_tags();
+            self.left_panel_dirty = true;
+        }
+        changed
+    }
+
     fn rebuild_tags(&mut self) {
         self.all_tags.clear();
         for tags in self.file_tags.values() {
@@ -187,6 +256,12 @@ impl FastMdApp {
         }
 
         let background_task = Task::new(config.clone());
+        // Subscribe to the file-event bus so the directory tree can
+        // react to Discovered/Updated/Removed events. Subscribing
+        // before the task starts means we'll receive the full initial
+        // scan output (the bus retains a reference to our channel
+        // until the task's initial scan finishes).
+        let file_event_reader = background_task.file_event_bus.subscribe();
         let inline_editor_enabled = config.inline_editor_enabled;
         let background_manager = Arc::new(Mutex::new(BackgroundProcessManager::new()));
 
@@ -194,6 +269,7 @@ impl FastMdApp {
             content_libraries: config.content_libraries.clone(),
             rx: background_task.rx,
             tx: background_task.tx,
+            file_event_reader: Some(file_event_reader),
             inline_editor_enabled,
             background_manager,
             show_background_logs: false,
@@ -214,6 +290,7 @@ impl FastMdApp {
             content_libraries: Vec::new(),
             rx,
             tx,
+            file_event_reader: None,
             all_files: Vec::new(),
             all_dirs: Vec::new(),
             file_tags: BTreeMap::new(),
@@ -332,6 +409,12 @@ impl eframe::App for FastMdApp {
 
 impl FastMdApp {
     pub fn update_ui(&mut self, ctx: &egui::Context) {
+        // Process file events from the bus. This is the directory
+        // tree's "consumer" of the file-event bus — the
+        // tag manager/indexer has its own consumers in
+        // `background_task.rs`.
+        self.process_file_events();
+
         // Handle background messages
         while let Ok(msg) = self.rx.try_recv() {
             match msg {

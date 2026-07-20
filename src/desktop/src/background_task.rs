@@ -1,11 +1,20 @@
+use crate::file_events::{Bus, FileEvent};
 use crate::messages::BackgroundMessage;
 use notify::Watcher;
 use std::path::PathBuf;
 use std::sync::mpsc::{channel, Receiver, Sender};
 
+/// Handle to the background indexing task.
+///
+/// The task is split into two producer roles (initial scan, file system
+/// watcher) that publish [`FileEvent`]s to a shared [`Bus<FileEvent>`]
+/// which the rest of the application (tag manager, directory tree) can
+/// subscribe to. The bus is exposed here so callers can wire up
+/// consumers before the task is spawned.
 pub struct Task {
     pub rx: Receiver<BackgroundMessage>,
     pub tx: Sender<BackgroundMessage>,
+    pub file_event_bus: Bus<FileEvent>,
     pub _watcher: Option<notify::RecommendedWatcher>,
 }
 
@@ -13,20 +22,27 @@ impl Task {
     pub fn new(config: crate::config::AppConfig) -> Self {
         let (tx, rx) = channel();
         let tx_clone = tx.clone();
-        
+        let file_event_bus = Bus::new();
+
         let config_clone = config.clone();
+        let bus_clone = file_event_bus.clone();
         std::thread::spawn(move || {
-            Self::run_indexing(config_clone, tx_clone);
+            Self::run_indexing(config_clone, tx_clone, bus_clone);
         });
 
         Self {
             rx,
             tx,
+            file_event_bus,
             _watcher: None,
         }
     }
 
-    fn run_indexing(config: crate::config::AppConfig, tx: Sender<BackgroundMessage>) {
+    fn run_indexing(
+        config: crate::config::AppConfig,
+        tx: Sender<BackgroundMessage>,
+        file_event_bus: Bus<FileEvent>,
+    ) {
         let (tx_work, rx_work) = channel::<PathBuf>();
         let rx_work = std::sync::Arc::new(std::sync::Mutex::new(rx_work));
 
@@ -96,6 +112,9 @@ impl Task {
         let mut images_queued = 0;
         let mut last_log_time = std::time::Instant::now();
 
+        // ----------------------------------------------------------------
+        // Initial scan — produces FileEvent::Discovered to the bus.
+        // ----------------------------------------------------------------
         for lib in &config.content_libraries {
             let is_image_lib = lib.kind == "image";
             let root_path = PathBuf::from(&lib.root_folder);
@@ -110,6 +129,9 @@ impl Task {
                     if let Some(ext) = path.extension() {
                         let ext_str = ext.to_string_lossy().to_lowercase();
                         if ext_str == "md" || ext_str == "markdown" || ext_str == "txt" {
+                            // Producer: emit a Discovered event to the bus.
+                            file_event_bus
+                                .publish(FileEvent::discovered(path.to_path_buf()));
                             let _ = tx_work.send(path.to_path_buf());
                         } else if ext_str == "pdf" {
                             let job = crate::background::PdfConversionJob::new(path.to_path_buf());
@@ -130,7 +152,7 @@ impl Task {
                 } else if path.is_dir() {
                     let _ = tx.send(BackgroundMessage::DirParsed { path: path.to_path_buf() });
                 }
-                
+
                 if files_scanned % 500 == 0 || last_log_time.elapsed().as_secs() >= 5 {
                     let _ = tx.send(BackgroundMessage::LogEntry(crate::background::BackgroundLogEntry::new(
                         crate::background::LogCategory::Indexer,
@@ -143,7 +165,7 @@ impl Task {
                 }
             }
         }
-        
+
         let _ = tx.send(BackgroundMessage::LogEntry(crate::background::BackgroundLogEntry::new(
             crate::background::LogCategory::Indexer,
             format!("Initial indexing complete. Scanned {} files, queued {} PDFs, queued {} images.", files_scanned, pdfs_queued, images_queued)
@@ -155,24 +177,29 @@ impl Task {
             let _ = worker.join();
         }
 
+        // ----------------------------------------------------------------
+        // File system watcher — produces FileEvent::Updated and
+        // FileEvent::Removed to the bus.
+        // ----------------------------------------------------------------
         let tx_notify = tx.clone();
         let config_watcher = config.clone();
         let tx_pdf_watcher = tx_pdf.clone();
         let tx_img_watcher = tx_img.clone();
+        let bus_watcher = file_event_bus.clone();
         let watcher_result = notify::recommended_watcher(move |res: Result<notify::Event, notify::Error>| {
             if let Ok(event) = res {
                 for path in event.paths {
                     if path.components().any(|c| c.as_os_str() == ".git") {
                         continue;
                     }
-                    
+
                     let event_type = match event.kind {
                         notify::EventKind::Create(_) => "created",
                         notify::EventKind::Modify(_) => "modified",
                         notify::EventKind::Remove(_) => "deleted",
                         _ => "changed",
                     };
-                    
+
                     let mut is_image_lib = false;
                     for lib in &config_watcher.content_libraries {
                         let lib_path = std::path::PathBuf::from(&lib.root_folder);
@@ -181,7 +208,7 @@ impl Task {
                             break;
                         }
                     }
-                    
+
                     let mut is_md = false;
                     let mut is_pdf = false;
                     let mut is_img = false;
@@ -216,6 +243,9 @@ impl Task {
                                             tags,
                                         },
                                     );
+                                    // Producer: emit an Updated event to the bus.
+                                    bus_watcher
+                                        .publish(FileEvent::updated(path.clone()));
                                 }
                             }
                             notify::EventKind::Remove(_) => {
@@ -223,6 +253,9 @@ impl Task {
                                     tx_notify.send(BackgroundMessage::FileDeleted {
                                         path: path.clone(),
                                     });
+                                // Producer: emit a Removed event to the bus.
+                                bus_watcher
+                                    .publish(FileEvent::removed(path.clone()));
                             }
                             _ => {}
                         }
@@ -249,6 +282,9 @@ impl Task {
                     } else if !path.exists() {
                         let _ = tx_notify
                             .send(BackgroundMessage::FileDeleted { path: path.clone() });
+                        // Producer: emit a Removed event to the bus.
+                        bus_watcher
+                            .publish(FileEvent::removed(path.clone()));
                     }
                 }
             }
@@ -335,5 +371,120 @@ mod tests {
             }
         }
         assert!(got_finished, "Should complete indexing");
+    }
+
+    #[test]
+    fn test_initial_scan_publishes_discovered_events() {
+        // The initial scan must publish FileEvent::Discovered for every
+        // markdown file in the configured library.
+        let mut config = AppConfig::default();
+        let dir = tempdir().unwrap();
+        std::fs::write(dir.path().join("a.md"), "test").unwrap();
+        std::fs::write(dir.path().join("b.md"), "test").unwrap();
+        std::fs::write(dir.path().join("c.txt"), "test").unwrap();
+
+        config.content_libraries.push(ContentLibrary {
+            name: "test".to_string(),
+            kind: "text".to_string(),
+            root_folder: dir.path().to_string_lossy().to_string(),
+            readonly: true,
+            priority: 0,
+        });
+
+        let task = Task::new(config);
+
+        // Subscribe to the bus BEFORE the initial scan finishes so we
+        // don't miss the Discovered events. The scan publishes them on
+        // a worker thread, so we need to wait for the scan to complete
+        // before checking the reader.
+        let reader = task.file_event_bus.subscribe();
+
+        // Wait for the initial scan + workers to finish.
+        let mut got_finished = false;
+        let start = std::time::Instant::now();
+        while start.elapsed().as_secs() < 5 {
+            if let Ok(msg) = task.rx.recv_timeout(std::time::Duration::from_millis(100)) {
+                if let BackgroundMessage::Finished(_) | BackgroundMessage::FinishedWithoutWatcher = msg {
+                    got_finished = true;
+                    break;
+                }
+            }
+        }
+        assert!(got_finished, "Should complete initialization");
+
+        // Drain the bus and collect events.
+        let mut events = Vec::new();
+        while let Ok(ev) = reader.recv_timeout(std::time::Duration::from_millis(100)) {
+            events.push(ev);
+        }
+
+        // The indexer queues .md, .markdown, and .txt files for tag
+        // extraction, so all three are reported on the bus as
+        // Discovered. Consumers that only care about Markdown (the
+        // directory tree) can filter on extension.
+        let discovered: Vec<_> = events
+            .iter()
+            .filter(|e| e.kind == crate::file_events::FileEventKind::Discovered)
+            .collect();
+        assert_eq!(discovered.len(), 3);
+        let mut names: Vec<String> = discovered
+            .iter()
+            .map(|e| e.path.file_name().unwrap().to_string_lossy().to_string())
+            .collect();
+        names.sort();
+        assert_eq!(names, vec!["a.md", "b.md", "c.txt"]);
+    }
+
+    #[test]
+    fn test_bus_subscribers_see_discovered_events() {
+        // The directory tree and the tag manager are both consumers
+        // of the bus. Make sure both subscribers receive the same
+        // events from the initial scan.
+        let mut config = AppConfig::default();
+        let dir = tempdir().unwrap();
+        std::fs::write(dir.path().join("a.md"), "test").unwrap();
+
+        config.content_libraries.push(ContentLibrary {
+            name: "test".to_string(),
+            kind: "text".to_string(),
+            root_folder: dir.path().to_string_lossy().to_string(),
+            readonly: true,
+            priority: 0,
+        });
+
+        let task = Task::new(config);
+
+        // Two consumers: tag manager and directory tree.
+        let tag_reader = task.file_event_bus.subscribe();
+        let tree_reader = task.file_event_bus.subscribe();
+
+        // Drain initial events on both consumers.
+        let start = std::time::Instant::now();
+        while start.elapsed().as_secs() < 5 {
+            if let Ok(msg) = task.rx.recv_timeout(std::time::Duration::from_millis(100)) {
+                if let BackgroundMessage::Finished(_) | BackgroundMessage::FinishedWithoutWatcher = msg {
+                    break;
+                }
+            }
+        }
+
+        // Both consumers should have received at least one Discovered
+        // event for `a.md`.
+        let mut tag_events = Vec::new();
+        while let Ok(ev) = tag_reader.recv_timeout(std::time::Duration::from_millis(100)) {
+            tag_events.push(ev);
+        }
+        let mut tree_events = Vec::new();
+        while let Ok(ev) = tree_reader.recv_timeout(std::time::Duration::from_millis(100)) {
+            tree_events.push(ev);
+        }
+
+        assert_eq!(tag_events.len(), 1);
+        assert_eq!(tree_events.len(), 1);
+        assert_eq!(tag_events[0].path, tree_events[0].path);
+        assert_eq!(
+            tag_events[0].kind,
+            crate::file_events::FileEventKind::Discovered
+        );
     }
 }
