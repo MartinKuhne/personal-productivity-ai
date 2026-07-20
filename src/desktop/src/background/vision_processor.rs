@@ -187,10 +187,10 @@ mod tests {
             format!("http://127.0.0.1:{}", port)
         };
 
-        // create dummy image file
-        let image_path = PathBuf::from("test_image.png");
+        let temp_dir = tempfile::tempdir().unwrap();
+        let image_path = temp_dir.path().join("test_image.png");
         std::fs::write(&image_path, b"fake image data").unwrap();
-        let md_path = PathBuf::from("test_output.md");
+        let md_path = temp_dir.path().join("test_output.md");
 
         let job = ImageJob {
             image_path: image_path.clone(),
@@ -212,9 +212,6 @@ mod tests {
         assert!(result.is_ok());
         let md_content = std::fs::read_to_string(&md_path).unwrap();
         assert_eq!(md_content, "Mock description");
-
-        std::fs::remove_file(image_path).unwrap();
-        std::fs::remove_file(md_path).unwrap();
     }
 
     #[tokio::test]
@@ -243,9 +240,10 @@ mod tests {
             format!("http://127.0.0.1:{}", port)
         };
 
-        let image_path = PathBuf::from("test_image2.png");
+        let temp_dir = tempfile::tempdir().unwrap();
+        let image_path = temp_dir.path().join("test_image2.png");
         std::fs::write(&image_path, b"fake image data").unwrap();
-        let md_path = PathBuf::from("test_output2.md");
+        let md_path = temp_dir.path().join("test_output2.md");
 
         let job = ImageJob {
             image_path: image_path.clone(),
@@ -266,9 +264,6 @@ mod tests {
         
         assert!(result.is_err());
         assert!(result.unwrap_err().contains("API request failed"));
-
-        std::fs::remove_file(image_path).unwrap();
-        let _ = std::fs::remove_file(md_path);
     }
     
     #[tokio::test]
@@ -297,9 +292,10 @@ mod tests {
             format!("http://127.0.0.1:{}", port)
         };
 
-        let image_path = PathBuf::from("test_image3.png");
+        let temp_dir = tempfile::tempdir().unwrap();
+        let image_path = temp_dir.path().join("test_image3.png");
         std::fs::write(&image_path, b"fake image data").unwrap();
-        let md_path = PathBuf::from("test_output3.md");
+        let md_path = temp_dir.path().join("test_output3.md");
 
         let job = ImageJob {
             image_path: image_path.clone(),
@@ -320,8 +316,5 @@ mod tests {
         
         assert!(result.is_err());
         assert!(result.unwrap_err().contains("No content in response"));
-
-        std::fs::remove_file(image_path).unwrap();
-        let _ = std::fs::remove_file(md_path);
     }
 }

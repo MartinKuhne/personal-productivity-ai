@@ -248,7 +248,6 @@ pub fn tool_get_calendar_item(config: &AppConfig, id: &str) -> Result<crate::too
 pub fn update_ical_string(original: &str, updates: &serde_json::Value) -> String {
     let mut out = String::new();
     let mut in_vevent = false;
-    let mut skip_next = false;
     
     let mut has_summary = false;
     let mut has_start = false;
@@ -268,16 +267,6 @@ pub fn update_ical_string(original: &str, updates: &serde_json::Value) -> String
 
     let mut lines = original.lines().peekable();
     while let Some(line) = lines.next() {
-        if skip_next {
-            if let Some(next) = lines.peek() {
-                if next.starts_with(' ') || next.starts_with('\t') {
-                    continue;
-                }
-            }
-            skip_next = false;
-            continue;
-        }
-
         if line.starts_with("BEGIN:VEVENT") {
             in_vevent = true;
             out.push_str(&format!("{}\r\n", line));
@@ -324,7 +313,6 @@ pub fn update_ical_string(original: &str, updates: &serde_json::Value) -> String
                         break;
                     }
                 }
-                skip_next = true;
                 continue;
             }
         }
@@ -514,6 +502,17 @@ mod tests {
     }
 
     #[test]
+    fn test_parse_ical_data_utc_and_escapes() {
+        let data = "BEGIN:VEVENT\r\nSUMMARY:Test UTC\r\nDTSTART:20240101T120000Z\r\nDTEND:invalid\r\nDESCRIPTION:Line 1\\nLine 2\\NLine 3\\,Comma\\;Semicolon\r\nLOCATION:Room 1\\, Building A\\; Fl 2\r\nORGANIZER;CN=Alice:mailto:alice@test.com\r\nEND:VEVENT";
+        let ev = parse_ical_data("c", "/h", data);
+        assert_eq!(ev.start, Some("2024-01-01T12:00:00Z".to_string()));
+        assert_eq!(ev.end, Some("invalid".to_string()));
+        assert_eq!(ev.description, Some("Line 1\nLine 2\nLine 3,Comma;Semicolon".to_string()));
+        assert_eq!(ev.location, Some("Room 1, Building A; Fl 2".to_string()));
+        assert_eq!(ev.organizer, Some("mailto:alice@test.com".to_string()));
+    }
+
+    #[test]
     fn test_parse_ical_data_date_only() {
         let data = "BEGIN:VEVENT\r\nSUMMARY:All Day\r\nDTSTART;VALUE=DATE:20240101\r\nDTEND;VALUE=DATE:20240102\r\nEND:VEVENT";
         let ev = parse_ical_data("c", "/h", data);
@@ -551,6 +550,18 @@ mod tests {
         assert!(ical.contains("SUMMARY:Test"));
         assert!(ical.contains("DESCRIPTION:desc"));
         assert!(ical.contains("LOCATION:loc"));
+    }
+
+    #[test]
+    fn test_json_to_ical_date_only_and_invalid_json() {
+        let input = r#"{"summary":"Date Only","start":"2024-01-01","end":"2024-01-02"}"#;
+        let ical = json_to_ical(input, None);
+        assert!(ical.contains("DTSTART;VALUE=DATE:20240101"));
+        assert!(ical.contains("DTEND;VALUE=DATE:20240102"));
+
+        let invalid = "not json at all";
+        let ical_invalid = json_to_ical(invalid, None);
+        assert!(ical_invalid.contains("SUMMARY:New Event"));
     }
 
     #[test]
@@ -595,9 +606,38 @@ mod tests {
     fn test_update_ical_string_adds_missing_field() {
         // Test that a missing SUMMARY gets added at the end of VEVENT
         let original = "BEGIN:VCALENDAR\r\nBEGIN:VEVENT\r\nDTSTART:20240101T120000\r\nEND:VEVENT\r\nEND:VCALENDAR";
-        let updates = serde_json::json!({"summary": "Added Summary"});
+        let updates = serde_json::json!({
+            "summary": "Added Summary",
+            "start": "2024-05-01",
+            "end": "2024-05-02",
+            "description": "Added Desc",
+            "location": "Added Loc"
+        });
         let result = update_ical_string(original, &updates);
         assert!(result.contains("SUMMARY:Added Summary"));
+        assert!(result.contains("DTSTART;VALUE=DATE:20240501"));
+        assert!(result.contains("DTEND;VALUE=DATE:20240502"));
+        assert!(result.contains("DESCRIPTION:Added Desc"));
+        assert!(result.contains("LOCATION:Added Loc"));
+    }
+
+    #[test]
+    fn test_update_ical_string_all_fields_with_folding() {
+        let original = "BEGIN:VCALENDAR\r\nBEGIN:VEVENT\r\nSUMMARY:Old Summary\r\n folded line\r\nDTSTART:20240101T120000\r\nDTEND:20240101T130000\r\nDESCRIPTION:Old Desc\r\n LOCATION:Old Loc\r\nEND:VEVENT\r\nEND:VCALENDAR";
+        let updates = serde_json::json!({
+            "summary": "New Summary",
+            "start": "2024-02-01T10:00:00",
+            "end": "2024-02-01T11:00:00",
+            "description": "New Desc with; special, chars\nline2",
+            "location": "New Loc"
+        });
+        let result = update_ical_string(original, &updates);
+        assert!(result.contains("SUMMARY:New Summary"));
+        assert!(result.contains("DTSTART:20240201T100000"));
+        assert!(result.contains("DTEND:20240201T110000"));
+        assert!(result.contains("DESCRIPTION:New Desc with\\; special\\, chars\\nline2"));
+        assert!(result.contains("LOCATION:New Loc"));
+        assert!(!result.contains("folded line"));
     }
 
     #[test]
@@ -615,4 +655,180 @@ mod tests {
         let result = update_ical_string(original, &updates);
         assert!(result.contains("SUMMARY:Keep"));
     }
+
+    // --- CalDAV Tool Config & Client Tests ---
+
+    #[test]
+    fn test_caldav_tools_empty_config() {
+        let config = AppConfig::default();
+
+        assert_eq!(tool_add_calendar_item(&config, "{}").unwrap_err(), "No CalDAV clients configured.");
+        assert_eq!(tool_update_calendar_item(&config, "/item.ics", "{}").unwrap_err(), "No CalDAV clients configured.");
+        assert_eq!(tool_delete_calendar_item(&config, "/item.ics").unwrap_err(), "No CalDAV clients configured.");
+
+        let search_res = tool_search_calendar(&config, "test").unwrap();
+        assert_eq!(search_res.results, serde_json::to_string_pretty(&CalDavResponse { results: vec![], errors: vec![] }).unwrap());
+
+        let get_res = tool_get_calendar(&config, "2024-01-01", "2024-01-02").unwrap();
+        assert_eq!(get_res.results, serde_json::to_string_pretty(&CalDavResponse { results: vec![], errors: vec![] }).unwrap());
+
+        let item_res = tool_get_calendar_item(&config, "/item.ics").unwrap();
+        assert_eq!(item_res.result, serde_json::to_string_pretty(&CalDavResponse { results: vec![], errors: vec![] }).unwrap());
+    }
+
+    #[test]
+    fn test_caldav_tools_unreachable_client() {
+        let _ = rustls::crypto::ring::default_provider().install_default();
+        let mut config = AppConfig::default();
+        config.caldav_clients.insert("test_client".to_string(), crate::config::CalDavClient {
+            url: "http://127.0.0.1:1".to_string(),
+            username: "user".to_string(),
+            password: "password".to_string(),
+        });
+
+        let search_res = tool_search_calendar(&config, "test").unwrap();
+        assert!(search_res.results.contains("Error on client test_client"));
+
+        let get_res = tool_get_calendar(&config, "2024-01-01", "2024-01-02").unwrap();
+        assert!(get_res.results.contains("Error on client test_client"));
+
+        let item_res = tool_get_calendar_item(&config, "/item.ics").unwrap();
+        assert!(item_res.result.contains("Error on client test_client"));
+
+        let add_res = tool_add_calendar_item(&config, "{}").unwrap();
+        assert!(add_res.result.contains("Error on client test_client"));
+
+        let update_res = tool_update_calendar_item(&config, "/item.ics", "{}").unwrap();
+        assert!(update_res.result.contains("Error on client test_client"));
+
+        let delete_res = tool_delete_calendar_item(&config, "/item.ics").unwrap();
+        assert!(delete_res.result.contains("Error on client test_client"));
+    }
+
+    fn spawn_mock_caldav_server() -> String {
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let addr = listener.local_addr().unwrap();
+        listener.set_nonblocking(true).unwrap();
+
+        std::thread::spawn(move || {
+            let rt = tokio::runtime::Builder::new_current_thread()
+                .enable_all()
+                .build()
+                .unwrap();
+            rt.block_on(async {
+                let listener = tokio::net::TcpListener::from_std(listener).unwrap();
+                while let Ok((mut socket, _)) = listener.accept().await {
+                    tokio::spawn(async move {
+                        use tokio::io::{AsyncReadExt, AsyncWriteExt};
+                        let mut buf = [0u8; 4096];
+                        let n = socket.read(&mut buf).await.unwrap_or(0);
+                        let req = String::from_utf8_lossy(&buf[..n]);
+
+                        let response = if req.starts_with("GET /item1.ics") {
+                            "HTTP/1.1 200 OK\r\nContent-Type: text/calendar\r\nContent-Length: 104\r\n\r\nBEGIN:VCALENDAR\r\nBEGIN:VEVENT\r\nSUMMARY:Existing Item\r\nDTSTART:20240101T100000Z\r\nEND:VEVENT\r\nEND:VCALENDAR".to_string()
+                        } else if req.starts_with("GET /notfound") {
+                            "HTTP/1.1 404 Not Found\r\nContent-Length: 9\r\n\r\nNot Found".to_string()
+                        } else if req.starts_with("PUT") {
+                            "HTTP/1.1 201 Created\r\nContent-Length: 0\r\n\r\n".to_string()
+                        } else if req.starts_with("DELETE /item1.ics") {
+                            "HTTP/1.1 204 No Content\r\nContent-Length: 0\r\n\r\n".to_string()
+                        } else if req.starts_with("DELETE /fail") {
+                            "HTTP/1.1 500 Internal Server Error\r\nContent-Length: 5\r\n\r\nError".to_string()
+                        } else if req.starts_with("PROPFIND") {
+                            let xml_body = r#"<?xml version="1.0" encoding="utf-8"?>
+<d:multistatus xmlns:d="DAV:" xmlns:c="urn:ietf:params:xml:ns:caldav">
+ <d:response>
+  <d:href>/calendars/primary/</d:href>
+  <d:propstat>
+   <d:prop>
+    <d:resourcetype><d:collection/><c:calendar/></d:resourcetype>
+   </d:prop>
+   <d:status>HTTP/1.1 200 OK</d:status>
+  </d:propstat>
+ </d:response>
+</d:multistatus>"#;
+                            format!("HTTP/1.1 207 Multi-Status\r\nContent-Type: application/xml\r\nContent-Length: {}\r\n\r\n{}", xml_body.len(), xml_body)
+                        } else if req.starts_with("REPORT") {
+                            let xml_body = r#"<?xml version="1.0" encoding="utf-8"?>
+<d:multistatus xmlns:d="DAV:" xmlns:c="urn:ietf:params:xml:ns:caldav">
+ <d:response>
+  <d:href>/calendars/primary/event1.ics</d:href>
+  <d:propstat>
+   <d:prop>
+    <c:calendar-data>BEGIN:VCALENDAR
+VERSION:2.0
+BEGIN:VEVENT
+SUMMARY:Meeting with Bob
+DTSTART:20240101T100000Z
+DTEND:20240101T110000Z
+END:VEVENT
+END:VCALENDAR</c:calendar-data>
+   </d:prop>
+   <d:status>HTTP/1.1 200 OK</d:status>
+  </d:propstat>
+ </d:response>
+</d:multistatus>"#;
+                            format!("HTTP/1.1 207 Multi-Status\r\nContent-Type: application/xml\r\nContent-Length: {}\r\n\r\n{}", xml_body.len(), xml_body)
+                        } else {
+                            "HTTP/1.1 400 Bad Request\r\nContent-Length: 0\r\n\r\n".to_string()
+                        };
+
+                        let _ = socket.write_all(response.as_bytes()).await;
+                    });
+                }
+            });
+        });
+
+        format!("http://{}", addr)
+    }
+
+    #[test]
+    fn test_caldav_tools_mock_server() {
+        let _ = rustls::crypto::ring::default_provider().install_default();
+        let server_url = spawn_mock_caldav_server();
+
+        let mut config = AppConfig::default();
+        config.caldav_clients.insert("mock_client".to_string(), crate::config::CalDavClient {
+            url: server_url,
+            username: "user".to_string(),
+            password: "password".to_string(),
+        });
+
+        // 1. Search calendar
+        let search_res = tool_search_calendar(&config, "Bob").unwrap();
+        assert!(search_res.results.contains("Meeting with Bob"));
+
+        // 2. Get calendar (date range)
+        let get_res = tool_get_calendar(&config, "2024-01-01", "2024-01-02").unwrap();
+        assert!(get_res.results.contains("Meeting with Bob"));
+
+        // 3. Get calendar item success
+        let item_res = tool_get_calendar_item(&config, "/item1.ics").unwrap();
+        assert!(item_res.result.contains("Existing Item"));
+
+        // 4. Get calendar item 404
+        let item_res_404 = tool_get_calendar_item(&config, "/notfound").unwrap();
+        assert!(item_res_404.result.contains("Not found by href"));
+
+        // 5. Add calendar item
+        let add_res = tool_add_calendar_item(&config, r#"{"summary":"New Mtg"}"#).unwrap();
+        assert!(add_res.result.contains("Created at /calendars/primary/"));
+
+        // 6. Update calendar item success
+        let update_res = tool_update_calendar_item(&config, "/item1.ics", r#"{"summary":"Updated Mtg"}"#).unwrap();
+        assert!(update_res.result.contains("Updated successfully"));
+
+        // 7. Update calendar item 404
+        let update_res_404 = tool_update_calendar_item(&config, "/notfound", r#"{"summary":"Updated Mtg"}"#).unwrap();
+        assert!(update_res_404.result.contains("Failed to fetch event for update"));
+
+        // 8. Delete calendar item success
+        let delete_res = tool_delete_calendar_item(&config, "/item1.ics").unwrap();
+        assert!(delete_res.result.contains("Deleted successfully"));
+
+        // 9. Delete calendar item 500 error
+        let delete_res_err = tool_delete_calendar_item(&config, "/fail").unwrap();
+        assert!(delete_res_err.result.contains("Failed to DELETE event"));
+    }
 }
+

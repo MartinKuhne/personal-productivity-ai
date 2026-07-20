@@ -176,7 +176,7 @@ pub fn parse_yaml_to_pairs(yaml: &serde_yaml::Value) -> Option<Vec<(String, Stri
                     let items: Vec<String> = seq.iter().map(|v| v.as_str().unwrap_or("").to_string()).collect();
                     items.join(", ")
                 }
-                _ => serde_yaml::to_string(value).unwrap_or_default(),
+                _ => serde_yaml::to_string(value).unwrap_or_default().trim().to_string(),
             };
             pairs.push((key_str.to_string(), val_str));
         }
@@ -200,11 +200,15 @@ pub fn render_yaml_table(ui: &mut egui::Ui, yaml: &serde_yaml::Value) {
                     egui::Grid::new("yaml_grid")
                         .num_columns(2)
                         .striped(true)
-                        .spacing([10.0, 4.0])
+                        .spacing([12.0, 4.0])
                         .show(ui, |ui| {
-                            for (key, val) in pairs {
-                                ui.label(RichText::new(key).strong().monospace().color(egui::Color32::WHITE));
-                                ui.label(RichText::new(val).monospace().color(egui::Color32::WHITE));
+                            for (k, v) in pairs {
+                                ui.label(
+                                    RichText::new(k)
+                                        .strong()
+                                        .color(egui::Color32::from_rgb(150, 200, 255)),
+                                );
+                                ui.label(RichText::new(v).color(egui::Color32::from_gray(220)));
                                 ui.end_row();
                             }
                         });
@@ -248,7 +252,7 @@ pub fn parse_markdown_to_events(markdown_text: &str) -> Vec<RenderEvent> {
     let mut table_cells: Vec<Vec<Vec<InlineElem>>> = Vec::new();
     let mut current_row: Vec<Vec<InlineElem>> = Vec::new();
 
-    let mut push_inline = |events: &mut Vec<RenderEvent>, elems: &mut Vec<InlineElem>, bullet: &mut bool, task: &mut Option<bool>, indent: usize, wrap: bool| {
+    let push_inline = |events: &mut Vec<RenderEvent>, elems: &mut Vec<InlineElem>, bullet: &mut bool, task: &mut Option<bool>, indent: usize, wrap: bool| {
         if elems.is_empty() && !*bullet && task.is_none() {
             return;
         }
@@ -348,8 +352,15 @@ pub fn parse_markdown_to_events(markdown_text: &str) -> Vec<RenderEvent> {
                 table_cells.clear();
                 events.push(RenderEvent::Space(4.0));
             }
-            Event::Start(Tag::TableHead) => {}
-            Event::End(TagEnd::TableHead) => {}
+            Event::Start(Tag::TableHead) => {
+                current_row.clear();
+            }
+            Event::End(TagEnd::TableHead) => {
+                if !current_row.is_empty() {
+                    table_cells.push(current_row.clone());
+                    current_row.clear();
+                }
+            }
             Event::Start(Tag::TableRow) => {
                 current_row.clear();
             }
@@ -564,11 +575,25 @@ mod tests {
 
     #[test]
     fn test_parse_yaml_to_pairs() {
-        let yaml_str = "key1: value1\nkey2: [item1, item2]";
+        let yaml_str = "key1: value1\nkey2: [item1, item2]\nkey3: 100\nkey4: true";
         let val: serde_yaml::Value = serde_yaml::from_str(yaml_str).unwrap();
         let pairs = parse_yaml_to_pairs(&val).unwrap();
         assert_eq!(pairs[0], ("key1".to_string(), "value1".to_string()));
         assert_eq!(pairs[1], ("key2".to_string(), "item1, item2".to_string()));
+        assert_eq!(pairs[2], ("key3".to_string(), "100".to_string()));
+        assert_eq!(pairs[3], ("key4".to_string(), "true".to_string()));
+    }
+
+    #[test]
+    fn test_parse_yaml_to_pairs_non_mapping() {
+        let string_val = serde_yaml::Value::String("just string".to_string());
+        assert_eq!(parse_yaml_to_pairs(&string_val), None);
+
+        let seq_val = serde_yaml::Value::Sequence(vec![serde_yaml::Value::String("item".to_string())]);
+        assert_eq!(parse_yaml_to_pairs(&seq_val), None);
+
+        let null_val = serde_yaml::Value::Null;
+        assert_eq!(parse_yaml_to_pairs(&null_val), None);
     }
 
     #[test]
@@ -619,6 +644,153 @@ mod tests {
     }
 
     #[test]
+    fn test_parse_markdown_heading_levels() {
+        let md = "# H1\n## H2\n### H3\n#### H4";
+        let events = parse_markdown_to_events(md);
+        assert_eq!(events[0], RenderEvent::Heading { level: 1, text: "H1".to_string() });
+        assert_eq!(events[1], RenderEvent::Heading { level: 2, text: "H2".to_string() });
+        assert_eq!(events[2], RenderEvent::Heading { level: 3, text: "H3".to_string() });
+        assert_eq!(events[3], RenderEvent::Heading { level: 0, text: "H4".to_string() });
+    }
+
+    #[test]
+    fn test_parse_markdown_code_block() {
+        let md = "```rust\nfn main() {\n    println!(\"Hello\");\n}\n```";
+        let events = parse_markdown_to_events(md);
+        assert_eq!(events.len(), 1);
+        match &events[0] {
+            RenderEvent::CodeBlock(content) => {
+                assert!(content.contains("fn main()"));
+            }
+            _ => panic!("Expected CodeBlock event"),
+        }
+    }
+
+    #[test]
+    fn test_parse_markdown_inline_elements() {
+        let md = "**bold** *italic* ~~strikethrough~~ `code` [link](https://example.com) ![img](https://example.com/a.jpg)";
+        let events = parse_markdown_to_events(md);
+        assert!(!events.is_empty());
+        match &events[0] {
+            RenderEvent::FlushInline { elems, .. } => {
+                let mut has_bold = false;
+                let mut has_italic = false;
+                let mut has_strikethrough = false;
+                let mut has_code = false;
+                let mut has_link = false;
+                let mut has_image = false;
+
+                for elem in elems {
+                    match elem {
+                        InlineElem::Text(t, style) => {
+                            if t == "bold" && style.bold { has_bold = true; }
+                            if t == "italic" && style.italic { has_italic = true; }
+                            if t == "strikethrough" && style.strikethrough { has_strikethrough = true; }
+                            if t == "code" && style.code { has_code = true; }
+                        }
+                        InlineElem::Link(url, text) => {
+                            if url == "https://example.com" && text == "link" { has_link = true; }
+                        }
+                        InlineElem::Image(url) => {
+                            if url == "https://example.com/a.jpg" { has_image = true; }
+                        }
+                        _ => {}
+                    }
+                }
+                assert!(has_bold, "Missing bold element");
+                assert!(has_italic, "Missing italic element");
+                assert!(has_strikethrough, "Missing strikethrough element");
+                assert!(has_code, "Missing code element");
+                assert!(has_link, "Missing link element");
+                assert!(has_image, "Missing image element");
+            }
+            _ => panic!("Expected FlushInline"),
+        }
+    }
+
+    #[test]
+    fn test_parse_markdown_task_list() {
+        let md = "- [ ] Task 1\n- [x] Task 2";
+        let events = parse_markdown_to_events(md);
+        
+        let mut found_unchecked = false;
+        let mut found_checked = false;
+
+        for ev in &events {
+            if let RenderEvent::FlushInline { task_checked, elems, .. } = ev {
+                if let Some(false) = task_checked {
+                    if elems.iter().any(|e| match e { InlineElem::Text(t, _) => t == "Task 1", _ => false }) {
+                        found_unchecked = true;
+                    }
+                }
+                if let Some(true) = task_checked {
+                    if elems.iter().any(|e| match e { InlineElem::Text(t, _) => t == "Task 2", _ => false }) {
+                        found_checked = true;
+                    }
+                }
+            }
+        }
+        assert!(found_unchecked, "Missing unchecked task");
+        assert!(found_checked, "Missing checked task");
+    }
+
+    #[test]
+    fn test_parse_markdown_table() {
+        let md = "| Col A | Col B |\n|---|---|\n| Val A | Val B |";
+        let events = parse_markdown_to_events(md);
+        
+        let mut found_table = false;
+        for ev in events {
+            if let RenderEvent::Table(rows) = ev {
+                found_table = true;
+                assert_eq!(rows.len(), 2); // Header row + 1 data row
+                assert_eq!(rows[0].len(), 2);
+                assert_eq!(rows[1].len(), 2);
+            }
+        }
+        assert!(found_table, "Expected Table event");
+    }
+
+    #[test]
+    fn test_parse_markdown_rule_and_blockquote() {
+        let md = "---\n\n> Quote text";
+        let events = parse_markdown_to_events(md);
+        
+        let has_rule = events.iter().any(|e| matches!(e, RenderEvent::Separator));
+        assert!(has_rule, "Expected Separator event");
+
+        let has_quote = events.iter().any(|e| match e {
+            RenderEvent::FlushInline { elems, .. } => elems.iter().any(|elem| match elem {
+                InlineElem::Text(t, _) => t.contains("Quote text"),
+                _ => false,
+            }),
+            _ => false,
+        });
+        assert!(has_quote, "Expected blockquote text");
+    }
+
+    #[test]
+    fn test_parse_markdown_html_and_footnotes() {
+        let md = "<span>Inline HTML</span>\n\nFootnote[^1]\n\n[^1]: Footnote details";
+        let events = parse_markdown_to_events(md);
+        
+        let has_html = events.iter().any(|e| match e {
+            RenderEvent::FlushInline { elems, .. } => elems.iter().any(|elem| matches!(elem, InlineElem::Html(_))),
+            _ => false,
+        });
+        assert!(has_html, "Expected Html inline element");
+
+        let has_fn_ref = events.iter().any(|e| match e {
+            RenderEvent::FlushInline { elems, .. } => elems.iter().any(|elem| match elem {
+                InlineElem::Text(t, _) => t.contains("[^1]"),
+                _ => false,
+            }),
+            _ => false,
+        });
+        assert!(has_fn_ref, "Expected footnote reference");
+    }
+
+    #[test]
     fn test_build_toc() {
         let md = "# Title\nSome text\n## Subtitle";
         let toc = build_toc(md);
@@ -629,7 +801,6 @@ mod tests {
         assert_eq!(toc[1].level, 2);
     }
     
-    // Quick fuzz-style property test for parser (no panic on arbitrary markdown strings)
     #[test]
     fn test_parse_markdown_fuzz_property() {
         let random_markdowns = [
@@ -665,4 +836,64 @@ mod e2e_tests {
             });
         });
     }
+
+    #[test]
+    fn test_render_markdown_all_elements_e2e() {
+        let ctx = egui::Context::default();
+        let md = r#"# Heading 1
+## Heading 2
+### Heading 3
+
+Paragraph with **bold**, *italic*, ~~strikethrough~~, `inline code`, [link](https://example.com), and ![img](https://example.com/img.png).
+
+- [ ] Unchecked Task
+- [x] Checked Task
+- Regular list item
+
+| Header 1 | Header 2 |
+| --- | --- |
+| Cell 1 | Cell 2 |
+
+---
+
+> Blockquote text
+
+```python
+def foo():
+    return 42
+```
+
+<div>Html block</div>
+"#;
+        let _ = ctx.run(egui::RawInput::default(), |ctx| {
+            egui::CentralPanel::default().show(ctx, |ui| {
+                let mut scroll_id = None;
+                render_markdown(ui, md, &mut scroll_id);
+
+                // Render non-mapping YAML table
+                let non_map = serde_yaml::Value::String("test".to_string());
+                render_yaml_table(ui, &non_map);
+            });
+        });
+    }
+
+    #[test]
+    fn test_render_heading_scroll_to_id() {
+        let ctx = egui::Context::default();
+        let _ = ctx.run(egui::RawInput::default(), |ctx| {
+            egui::CentralPanel::default().show(ctx, |ui| {
+                let target_id = egui::Id::new("Target Heading");
+                let mut scroll_id = Some(target_id);
+
+                render_heading(ui, "Target Heading", 1, &mut scroll_id);
+                assert_eq!(scroll_id, None, "scroll_to_id should be cleared after scroll");
+
+                // Heading level 0 or empty title should not trigger scroll
+                let mut dummy_scroll = Some(target_id);
+                render_heading(ui, "", 1, &mut dummy_scroll);
+                assert_eq!(dummy_scroll, Some(target_id));
+            });
+        });
+    }
 }
+

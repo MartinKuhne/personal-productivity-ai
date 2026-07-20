@@ -310,6 +310,61 @@ pub fn show_center_panel(app: &mut FastMdApp, ctx: &egui::Context) {
 mod tests {
     use super::*;
     use std::path::PathBuf;
+    use std::sync::atomic::{AtomicBool, Ordering};
+    use std::sync::Arc;
+
+    fn create_test_app() -> FastMdApp {
+        let (tx, rx) = std::sync::mpsc::channel();
+        FastMdApp {
+            content_libraries: vec![],
+            rx,
+            tx,
+            all_files: vec![],
+            all_dirs: vec![],
+            file_tags: std::collections::BTreeMap::new(),
+            all_tags: std::collections::BTreeSet::new(),
+            selected_tag: None,
+            indexing_finished: true,
+            indexing_finished_handled: true,
+            left_panel_width: None,
+            selected_file: None,
+            selected_files: std::collections::HashSet::new(),
+            selected_dir: None,
+            expanded_dirs: std::collections::HashSet::new(),
+            loaded_path: None,
+            current_yaml: None,
+            current_markdown: String::new(),
+            tabs: vec![],
+            move_dialog_open: false,
+            file_to_move: None,
+            selected_move_folder: None,
+            create_dir_dialog_open: false,
+            create_dir_parent: None,
+            create_dir_name: String::new(),
+            rename_dialog_open: false,
+            file_to_rename: None,
+            rename_new_name: String::new(),
+            command_input: String::new(),
+            toc: vec![],
+            scroll_to_header_id: None,
+            _watcher: None,
+            show_agent_results: false,
+            agent_running: false,
+            agent_status: String::new(),
+            agent_thinking: String::new(),
+            agent_response: String::new(),
+            agent_scroll_to_id: None,
+            agent_cancel_flag: None,
+            agent_history: None,
+            left_panel_reset_count: 0,
+            submit_prompt: None,
+            editor_state: crate::editor::EditorState::default(),
+            inline_editor_enabled: true,
+            background_manager: Arc::new(std::sync::Mutex::new(crate::background::BackgroundProcessManager::new())),
+            show_background_logs: false,
+            config: crate::config::AppConfig::default(),
+        }
+    }
 
     #[test]
     fn test_generate_format_prompt() {
@@ -388,4 +443,63 @@ mod tests {
             }
         }
     }
-}
+
+    #[test]
+    fn test_clear_agent_session_state() {
+        let mut app = create_test_app();
+        let cancel_flag = Arc::new(AtomicBool::new(false));
+
+        app.show_agent_results = true;
+        app.agent_history = Some(vec![serde_json::json!({"role": "user", "content": "hi"})]);
+        app.agent_response = "response text".to_string();
+        app.agent_thinking = "thinking process".to_string();
+        app.agent_cancel_flag = Some(cancel_flag.clone());
+
+        clear_agent_session_state(&mut app);
+
+        assert!(!app.show_agent_results);
+        assert!(app.agent_history.is_none());
+        assert!(app.agent_response.is_empty());
+        assert!(app.agent_thinking.is_empty());
+        assert!(cancel_flag.load(Ordering::SeqCst));
+    }
+
+    #[test]
+    fn test_os_launchers_non_crashing() {
+        let path = std::path::Path::new("dummy_test_file.txt");
+        open_in_system_editor(path);
+        show_in_file_explorer(path);
+    }
+
+    #[test]
+    fn test_show_center_panel_render_modes() {
+        let ctx = egui::Context::default();
+        let mut app = create_test_app();
+
+        // Mode 1: Empty state
+        let _ = ctx.run(Default::default(), |ctx| {
+            show_center_panel(&mut app, ctx);
+        });
+
+        // Mode 2: Tabs and content state
+        app.tabs = vec![PathBuf::from("doc1.md"), PathBuf::from("doc2.md")];
+        app.selected_file = Some(PathBuf::from("doc1.md"));
+        app.current_markdown = "# Document 1 Header".to_string();
+        app.current_yaml = Some(serde_yaml::from_str("title: Doc 1").unwrap());
+
+        let _ = ctx.run(Default::default(), |ctx| {
+            show_center_panel(&mut app, ctx);
+        });
+
+        // Mode 3: Agent results state
+        app.show_agent_results = true;
+        app.agent_running = true;
+        app.agent_status = "Thinking...".to_string();
+        app.agent_thinking = "Reasoning step 1".to_string();
+        app.agent_response = "Final agent summary answer".to_string();
+
+        let _ = ctx.run(Default::default(), |ctx| {
+            show_center_panel(&mut app, ctx);
+        });
+    }
+}

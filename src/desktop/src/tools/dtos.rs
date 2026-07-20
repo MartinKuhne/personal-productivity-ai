@@ -169,7 +169,7 @@ pub struct GetCalendarItemResponse {
 pub struct AddCalendarItemInput {
     pub item_json: String,
 }
-#[derive(Serialize, Debug, JsonSchema)]
+#[derive(Serialize, Debug, JsonSchema, PartialEq)]
 pub struct AddCalendarItemResponse {
     pub result: String,
 }
@@ -179,7 +179,7 @@ pub struct UpdateCalendarItemInput {
     pub id: String,
     pub update_json: String,
 }
-#[derive(Serialize, Debug, JsonSchema)]
+#[derive(Serialize, Debug, JsonSchema, PartialEq)]
 pub struct UpdateCalendarItemResponse {
     pub result: String,
 }
@@ -188,7 +188,7 @@ pub struct UpdateCalendarItemResponse {
 pub struct DeleteCalendarItemInput {
     pub id: String,
 }
-#[derive(Serialize, Debug, JsonSchema)]
+#[derive(Serialize, Debug, JsonSchema, PartialEq)]
 pub struct DeleteCalendarItemResponse {
     pub result: String,
 }
