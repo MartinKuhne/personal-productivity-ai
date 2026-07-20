@@ -657,6 +657,20 @@ pub fn run_agent(
             }
         }
 
+        // If the user did not cancel, the loop exited because the LLM
+        // produced a final answer (no more tool calls). The last status the
+        // UI saw was "Waiting for LLM completions..." from the most recent
+        // iteration, so clear it now — otherwise the status line is stuck
+        // after the agent has actually finished. We skip this on cancel
+        // because the bottom panel already set "Aborted by user."
+        // synchronously when the user clicked Stop, and we don't want to
+        // clobber that.
+        if !cancel_flag.load(std::sync::atomic::Ordering::SeqCst) {
+            let _ = tx_gui_agent.send(BackgroundMessage::AgentStatus(
+                "Done".to_string(),
+            ));
+        }
+
         let _ = tx_gui_agent.send(BackgroundMessage::AgentFinished(messages));
     });
 }
@@ -1042,5 +1056,215 @@ mod tests {
             }
         }
         assert!(got_failed);
+    }
+
+    /// Regression test: when the LLM returns a final answer (no tool calls),
+    /// the agent must emit an `AgentStatus("Done")` before `AgentFinished`
+    /// so the UI's status line is not stuck on "Waiting for LLM
+    /// completions..." after the agent has actually completed.
+    #[test]
+    fn test_run_agent_emits_done_status_on_natural_completion() {
+        use std::io::{Read, Write};
+        use std::net::TcpListener;
+
+        // Body is a valid OpenAI-compatible chat completion with no
+        // tool_calls, which causes the agent loop to break and reach the
+        // final AgentFinished message.
+        let body = serde_json::json!({
+            "id": "chatcmpl-test",
+            "object": "chat.completion",
+            "created": 0,
+            "model": "test",
+            "choices": [{
+                "index": 0,
+                "message": {
+                    "role": "assistant",
+                    "content": "All done."
+                },
+                "finish_reason": "stop"
+            }]
+        })
+        .to_string();
+
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let port = listener.local_addr().unwrap().port();
+
+        std::thread::spawn(move || {
+            // Serve one request and exit; the agent only needs one turn
+            // because the response has no tool_calls.
+            if let Ok((mut stream, _)) = listener.accept() {
+                let mut buf = [0; 8192];
+                let _ = stream.read(&mut buf);
+                let response = format!(
+                    "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
+                    body.len(),
+                    body
+                );
+                let _ = stream.write_all(response.as_bytes());
+                let _ = stream.flush();
+                std::thread::sleep(std::time::Duration::from_millis(200));
+            }
+        });
+
+        let mut config = crate::config::AppConfig::default();
+        config.models.insert(
+            "test".to_string(),
+            crate::config::LlmConfig {
+                model: "test".to_string(),
+                api_url: format!("http://127.0.0.1:{}", port),
+                api_key: "valid-key".to_string(),
+                cost: None,
+                use_case: vec!["chat".to_string()],
+            },
+        );
+
+        let (tx, rx) = std::sync::mpsc::channel();
+        let cancel_flag = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+
+        run_agent(
+            config,
+            tx,
+            None,
+            None,
+            std::collections::HashSet::new(),
+            "Hello".to_string(),
+            cancel_flag,
+            None,
+            "".to_string(),
+            crate::file_events::Bus::new(),
+        );
+
+        // Collect all messages until the agent signals finished.
+        let mut statuses = Vec::new();
+        let mut saw_finished = false;
+        while let Ok(msg) = rx.recv() {
+            match msg {
+                BackgroundMessage::AgentStatus(s) => statuses.push(s),
+                BackgroundMessage::AgentFinished(_) => {
+                    saw_finished = true;
+                    // Keep draining in case more messages were queued,
+                    // but stop after a short while.
+                    break;
+                }
+                BackgroundMessage::AgentFailed(err) => {
+                    panic!("agent failed unexpectedly: {}", err);
+                }
+                _ => {}
+            }
+        }
+        assert!(saw_finished, "expected AgentFinished to be sent");
+        assert!(
+            statuses.iter().any(|s| s == "Waiting for LLM completions..."),
+            "expected the per-iteration 'Waiting for LLM completions...' status, got {:?}",
+            statuses
+        );
+        assert!(
+            statuses.iter().any(|s| s == "Done"),
+            "expected a terminal 'Done' status to clear the waiting state, got {:?}",
+            statuses
+        );
+        // The 'Done' status must come AFTER the waiting status, so the UI
+        // sees the transition in the right order.
+        let waiting_idx = statuses
+            .iter()
+            .position(|s| s == "Waiting for LLM completions...")
+            .unwrap();
+        let done_idx = statuses.iter().position(|s| s == "Done").unwrap();
+        assert!(
+            done_idx > waiting_idx,
+            "'Done' ({}) must come after 'Waiting' ({})",
+            done_idx,
+            waiting_idx
+        );
+    }
+
+    /// Regression test: when the user cancels, the agent must NOT emit a
+    /// terminal "Done" status — the bottom panel already set "Aborted by
+    /// user." synchronously and the agent should leave that status alone.
+    #[test]
+    fn test_run_agent_skips_done_status_when_cancelled() {
+        use std::io::{Read, Write};
+        use std::net::TcpListener;
+
+        // Same body as the natural-completion test: a clean final answer.
+        let body = serde_json::json!({
+            "id": "chatcmpl-test",
+            "object": "chat.completion",
+            "created": 0,
+            "model": "test",
+            "choices": [{
+                "index": 0,
+                "message": {
+                    "role": "assistant",
+                    "content": "All done."
+                },
+                "finish_reason": "stop"
+            }]
+        })
+        .to_string();
+
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let port = listener.local_addr().unwrap().port();
+
+        std::thread::spawn(move || {
+            if let Ok((mut stream, _)) = listener.accept() {
+                let mut buf = [0; 8192];
+                let _ = stream.read(&mut buf);
+                let response = format!(
+                    "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
+                    body.len(),
+                    body
+                );
+                let _ = stream.write_all(response.as_bytes());
+                let _ = stream.flush();
+                std::thread::sleep(std::time::Duration::from_millis(200));
+            }
+        });
+
+        let mut config = crate::config::AppConfig::default();
+        config.models.insert(
+            "test".to_string(),
+            crate::config::LlmConfig {
+                model: "test".to_string(),
+                api_url: format!("http://127.0.0.1:{}", port),
+                api_key: "valid-key".to_string(),
+                cost: None,
+                use_case: vec!["chat".to_string()],
+            },
+        );
+
+        let (tx, rx) = std::sync::mpsc::channel();
+        // Pre-set the cancel flag so the agent loop's first guard trips
+        // and we go straight to the post-loop code path.
+        let cancel_flag = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(true));
+
+        run_agent(
+            config,
+            tx,
+            None,
+            None,
+            std::collections::HashSet::new(),
+            "Hello".to_string(),
+            cancel_flag,
+            None,
+            "".to_string(),
+            crate::file_events::Bus::new(),
+        );
+
+        let mut saw_done = false;
+        let mut saw_finished = false;
+        while let Ok(msg) = rx.recv() {
+            match msg {
+                BackgroundMessage::AgentStatus(s) if s == "Done" => saw_done = true,
+                BackgroundMessage::AgentFinished(_) => saw_finished = true,
+                _ => {}
+            }
+        }
+        assert!(saw_finished, "expected AgentFinished to be sent");
+        assert!(
+            !saw_done,
+            "agent must not emit 'Done' status when cancelled — \
+             the UI's 'Aborted by user.' would be clobbered"
+        );
     }
 }
