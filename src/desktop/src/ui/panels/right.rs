@@ -46,19 +46,21 @@ pub fn show_right_panel(app: &mut FastMdApp, ctx: &egui::Context) {
                 );
                 ui.add_space(4.0);
 
-                egui::ScrollArea::vertical().id_source("right_toc_scroll").show(ui, |ui| {
-                    for entry in &app.toc {
-                        let indent = calculate_indent(entry.level as usize);
-                        ui.horizontal(|ui| {
-                            ui.add_space(indent);
-                            let label = egui::RichText::new(&entry.title)
-                                .size(calculate_font_size(entry.level as usize));
-                            if ui.selectable_label(false, label).clicked() {
-                                app.scroll_to_header_id = Some(entry.id.clone());
-                            }
-                        });
-                    }
-                });
+                egui::ScrollArea::vertical()
+                    .id_source("right_toc_scroll")
+                    .show(ui, |ui| {
+                        for entry in &app.toc {
+                            let indent = calculate_indent(entry.level as usize);
+                            ui.horizontal(|ui| {
+                                ui.add_space(indent);
+                                let label = egui::RichText::new(&entry.title)
+                                    .size(calculate_font_size(entry.level as usize));
+                                if ui.selectable_label(false, label).clicked() {
+                                    app.scroll_to_header_id = Some(entry.id.clone());
+                                }
+                            });
+                        }
+                    });
             });
     }
 }
@@ -89,7 +91,7 @@ mod tests {
         assert_eq!(calculate_font_size(1), 12.5);
         assert_eq!(calculate_font_size(2), 12.0);
         assert_eq!(calculate_font_size(3), 11.5);
-        
+
         // Property-based check equivalent for boundaries (1 to 6)
         for level in 1..=6 {
             let expected = 13.0 - (level as f32 * 0.5);
@@ -101,64 +103,11 @@ mod tests {
 #[cfg(test)]
 mod ui_tests {
     use super::*;
-    use std::collections::{BTreeMap, BTreeSet, HashSet};
-    use std::sync::{Arc, Mutex};
-    use crate::background::BackgroundProcessManager;
     use crate::ui::ToCEntry;
     use std::path::PathBuf;
 
     fn create_test_app() -> FastMdApp {
-        let (tx, rx) = std::sync::mpsc::channel();
-        let config = crate::config::AppConfig::default();
-        FastMdApp {
-            content_libraries: vec![],
-            rx,
-            tx,
-            all_files: vec![],
-            all_dirs: vec![],
-            file_tags: BTreeMap::new(),
-            all_tags: BTreeSet::new(),
-            selected_tag: None,
-            indexing_finished: false,
-            indexing_finished_handled: false,
-            left_panel_width: None,
-            selected_file: None,
-            selected_files: HashSet::new(),
-            selected_dir: None,
-            expanded_dirs: HashSet::new(),
-            loaded_path: None,
-            current_yaml: None,
-            current_markdown: String::new(),
-            tabs: vec![],
-            move_dialog_open: false,
-            file_to_move: None,
-            selected_move_folder: None,
-            create_dir_dialog_open: false,
-            create_dir_parent: None,
-            create_dir_name: String::new(),
-            rename_dialog_open: false,
-            file_to_rename: None,
-            rename_new_name: String::new(),
-            command_input: String::new(),
-            toc: vec![],
-            scroll_to_header_id: None,
-            _watcher: None,
-            show_agent_results: false,
-            agent_running: false,
-            agent_status: String::new(),
-            agent_thinking: String::new(),
-            agent_response: String::new(),
-            agent_scroll_to_id: None,
-            agent_cancel_flag: None,
-            agent_history: None,
-            left_panel_reset_count: 0,
-            submit_prompt: None,
-            editor_state: crate::editor::EditorState::default(),
-            inline_editor_enabled: true,
-            background_manager: Arc::new(Mutex::new(BackgroundProcessManager::new())),
-            show_background_logs: false,
-            config,
-        }
+        FastMdApp::empty_state()
     }
 
     #[test]
@@ -197,4 +146,4 @@ mod ui_tests {
             show_right_panel(&mut app, ctx);
         });
     }
-}
+}

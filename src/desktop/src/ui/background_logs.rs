@@ -1,6 +1,6 @@
-use eframe::egui;
+use crate::background::{BackgroundLogEntry, LogCategory};
 use crate::ui::FastMdApp;
-use crate::background::{LogCategory, BackgroundLogEntry};
+use eframe::egui;
 
 /// Determines if a log entry matches the given category and search text.
 /// Inputs: `log` (the log entry), `category` (optional filter category), `search_lower` (lowercase search string).
@@ -49,7 +49,7 @@ pub fn show_background_logs_window(app: &mut FastMdApp, ctx: &egui::Context) {
     }
 
     let mut open = app.show_background_logs;
-    
+
     egui::Window::new("Background Processes")
         .open(&mut open)
         .resizable(true)
@@ -61,7 +61,7 @@ pub fn show_background_logs_window(app: &mut FastMdApp, ctx: &egui::Context) {
             ui.horizontal(|ui| {
                 ui.label("Search:");
                 ui.text_edit_singleline(&mut mgr.search_text);
-                
+
                 ui.label("Category:");
                 egui::ComboBox::from_id_source("category_filter")
                     .selected_text(match mgr.filter_category {
@@ -70,15 +70,35 @@ pub fn show_background_logs_window(app: &mut FastMdApp, ctx: &egui::Context) {
                     })
                     .show_ui(ui, |ui| {
                         ui.selectable_value(&mut mgr.filter_category, None, "All");
-                        ui.selectable_value(&mut mgr.filter_category, Some(LogCategory::Indexer), "Indexer");
-                        ui.selectable_value(&mut mgr.filter_category, Some(LogCategory::Watcher), "Watcher");
-                        ui.selectable_value(&mut mgr.filter_category, Some(LogCategory::PdfConverter), "PDF Converter");
-                        ui.selectable_value(&mut mgr.filter_category, Some(LogCategory::ImageVision), "Image Vision");
-                        ui.selectable_value(&mut mgr.filter_category, Some(LogCategory::LlmTools), "LLM Tools");
+                        ui.selectable_value(
+                            &mut mgr.filter_category,
+                            Some(LogCategory::Indexer),
+                            "Indexer",
+                        );
+                        ui.selectable_value(
+                            &mut mgr.filter_category,
+                            Some(LogCategory::Watcher),
+                            "Watcher",
+                        );
+                        ui.selectable_value(
+                            &mut mgr.filter_category,
+                            Some(LogCategory::PdfConverter),
+                            "PDF Converter",
+                        );
+                        ui.selectable_value(
+                            &mut mgr.filter_category,
+                            Some(LogCategory::ImageVision),
+                            "Image Vision",
+                        );
+                        ui.selectable_value(
+                            &mut mgr.filter_category,
+                            Some(LogCategory::LlmTools),
+                            "LLM Tools",
+                        );
                     });
 
                 ui.checkbox(&mut mgr.auto_scroll, "Auto-scroll");
-                
+
                 if ui.button("Clear").clicked() {
                     mgr.clear_logs();
                 }
@@ -86,14 +106,10 @@ pub fn show_background_logs_window(app: &mut FastMdApp, ctx: &egui::Context) {
 
             ui.separator();
 
-            let logs = filter_logs(
-                mgr.get_logs().iter(),
-                mgr.filter_category,
-                &mgr.search_text,
-            );
+            let logs = filter_logs(mgr.get_logs().iter(), mgr.filter_category, &mgr.search_text);
 
             let row_height = ui.text_style_height(&egui::TextStyle::Body);
-            
+
             egui::ScrollArea::both()
                 .auto_shrink([false, false])
                 .stick_to_bottom(mgr.auto_scroll)
@@ -102,12 +118,14 @@ pub fn show_background_logs_window(app: &mut FastMdApp, ctx: &egui::Context) {
                         let log = &logs[i];
                         ui.horizontal(|ui| {
                             ui.label(
-                                egui::RichText::new(log.timestamp.format("%H:%M:%S%.3f").to_string())
-                                    .color(egui::Color32::DARK_GRAY)
+                                egui::RichText::new(
+                                    log.timestamp.format("%H:%M:%S%.3f").to_string(),
+                                )
+                                .color(egui::Color32::DARK_GRAY),
                             );
                             ui.label(
                                 egui::RichText::new(format!("[{}]", log.category))
-                                    .color(egui::Color32::LIGHT_BLUE)
+                                    .color(egui::Color32::LIGHT_BLUE),
                             );
                             ui.label(&log.message);
                         });
@@ -160,7 +178,11 @@ mod tests {
     fn test_is_log_visible_combined_filters() {
         let log = make_log(LogCategory::ImageVision, "Processing image.jpg");
         // Matches both
-        assert!(is_log_visible(&log, Some(LogCategory::ImageVision), "image"));
+        assert!(is_log_visible(
+            &log,
+            Some(LogCategory::ImageVision),
+            "image"
+        ));
         // Matches search but not category
         assert!(!is_log_visible(&log, Some(LogCategory::Watcher), "image"));
         // Matches category but not search
@@ -188,62 +210,9 @@ mod tests {
 #[cfg(test)]
 mod ui_tests {
     use super::*;
-    use std::collections::{BTreeMap, BTreeSet, HashSet};
-    use std::sync::{Arc, Mutex};
-    use crate::background::BackgroundProcessManager;
 
     fn create_test_app() -> FastMdApp {
-        let (tx, rx) = std::sync::mpsc::channel();
-        let config = crate::config::AppConfig::default();
-        FastMdApp {
-            content_libraries: vec![],
-            rx,
-            tx,
-            all_files: vec![],
-            all_dirs: vec![],
-            file_tags: BTreeMap::new(),
-            all_tags: BTreeSet::new(),
-            selected_tag: None,
-            indexing_finished: false,
-            indexing_finished_handled: false,
-            left_panel_width: None,
-            selected_file: None,
-            selected_files: HashSet::new(),
-            selected_dir: None,
-            expanded_dirs: HashSet::new(),
-            loaded_path: None,
-            current_yaml: None,
-            current_markdown: String::new(),
-            tabs: vec![],
-            move_dialog_open: false,
-            file_to_move: None,
-            selected_move_folder: None,
-            create_dir_dialog_open: false,
-            create_dir_parent: None,
-            create_dir_name: String::new(),
-            rename_dialog_open: false,
-            file_to_rename: None,
-            rename_new_name: String::new(),
-            command_input: String::new(),
-            toc: vec![],
-            scroll_to_header_id: None,
-            _watcher: None,
-            show_agent_results: false,
-            agent_running: false,
-            agent_status: String::new(),
-            agent_thinking: String::new(),
-            agent_response: String::new(),
-            agent_scroll_to_id: None,
-            agent_cancel_flag: None,
-            agent_history: None,
-            left_panel_reset_count: 0,
-            submit_prompt: None,
-            editor_state: crate::editor::EditorState::default(),
-            inline_editor_enabled: true,
-            background_manager: Arc::new(Mutex::new(BackgroundProcessManager::new())),
-            show_background_logs: false,
-            config,
-        }
+        FastMdApp::empty_state()
     }
 
     #[test]
@@ -266,8 +235,14 @@ mod ui_tests {
 
         {
             let mut mgr = app.background_manager.lock().unwrap();
-            mgr.push_log(crate::background::BackgroundLogEntry::new(LogCategory::Indexer, "Indexing workspace...".to_string()));
-            mgr.push_log(crate::background::BackgroundLogEntry::new(LogCategory::Watcher, "File modified".to_string()));
+            mgr.push_log(crate::background::BackgroundLogEntry::new(
+                LogCategory::Indexer,
+                "Indexing workspace...".to_string(),
+            ));
+            mgr.push_log(crate::background::BackgroundLogEntry::new(
+                LogCategory::Watcher,
+                "File modified".to_string(),
+            ));
         }
 
         let _ = ctx.run(egui::RawInput::default(), |ctx| {
@@ -276,5 +251,3 @@ mod ui_tests {
         assert!(app.show_background_logs);
     }
 }
-
-

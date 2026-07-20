@@ -1,4 +1,4 @@
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 use std::collections::HashMap;
 
@@ -45,7 +45,11 @@ pub struct LlmConfig {
     #[serde(default)]
     pub cost: Option<i32>,
     /// Use cases for this model (e.g. "chat", "vision", "embeddings").
-    #[serde(default = "default_use_case", alias = "capabilities", deserialize_with = "deserialize_use_case_or_capabilities")]
+    #[serde(
+        default = "default_use_case",
+        alias = "capabilities",
+        deserialize_with = "deserialize_use_case_or_capabilities"
+    )]
     pub use_case: Vec<String>,
 }
 
@@ -106,6 +110,35 @@ pub struct ContentLibrary {
     pub readonly: bool,
     #[serde(default)]
     pub priority: i32,
+}
+
+impl ContentLibrary {
+    /// Purpose: Compute the user-facing display label for an absolute path under this library.
+    /// Inputs: `path` (the absolute path to localize).
+    /// Outputs: `Some(label)` when `path` lives inside `self.root_folder`, otherwise `None`.
+    /// Purity: Pure function.
+    /// Preconditions: `self.root_folder` should be an absolute path.
+    /// Postconditions: The returned label uses `/` separators and `self.name` as the root segment; trailing separators from `Path::join` are trimmed.
+    pub fn display_label_for(&self, path: &Path) -> Option<String> {
+        let root = Path::new(&self.root_folder);
+        let rel = path.strip_prefix(root).ok()?;
+        let joined = Path::new(&self.name).join(rel);
+        let mut label = joined.to_string_lossy().into_owned();
+        if label.ends_with('\\') || label.ends_with('/') {
+            label.pop();
+        }
+        Some(label)
+    }
+}
+
+/// Purpose: Find the first library that contains the given absolute path and return its display label.
+/// Inputs: `libraries` (slice of registered content libraries), `path` (the absolute path to localize).
+/// Outputs: `Some(label)` if any library contains `path`, otherwise `None`.
+/// Purity: Pure function.
+/// Preconditions: Each library's `root_folder` should be an absolute path.
+/// Postconditions: Returns `None` if no library matches.
+pub fn library_display_label(libraries: &[ContentLibrary], path: &Path) -> Option<String> {
+    libraries.iter().find_map(|lib| lib.display_label_for(path))
 }
 
 fn default_readonly() -> bool {
@@ -189,7 +222,8 @@ impl AppConfig {
     /// Find the best model for a given use_case (lowest cost among matches).
     pub fn model_for_use_case(&self, use_case: impl AsRef<str>) -> Option<(&String, &LlmConfig)> {
         let uc_ref = use_case.as_ref();
-        self.models.iter()
+        self.models
+            .iter()
             .filter(|(_, cfg)| cfg.has_use_case(uc_ref))
             .min_by_key(|(_, cfg)| cfg.get_cost())
     }
@@ -203,17 +237,13 @@ impl AppConfig {
         for (key, cfg) in &self.models {
             for uc in &cfg.use_case {
                 if !valid_use_cases.contains(&uc.as_str()) {
-                    warnings.push(format!(
-                        "Model '{}' has unknown use_case: '{}'", key, uc
-                    ));
+                    warnings.push(format!("Model '{}' has unknown use_case: '{}'", key, uc));
                 }
             }
         }
 
         // Check at least one chat model exists when models are configured
-        if !self.models.is_empty()
-            && !self.models.values().any(|m| m.has_use_case("chat"))
-        {
+        if !self.models.is_empty() && !self.models.values().any(|m| m.has_use_case("chat")) {
             warnings.push("No model configured with 'chat' use_case".to_string());
         }
 
@@ -279,14 +309,14 @@ mod tests {
     fn test_load_config_creates_default_when_missing() {
         let dir = tempdir().unwrap();
         let config_path = dir.path().join("fastmd").join("config.yaml");
-        
+
         // Temporarily override the config path
         unsafe {
             std::env::set_var("APPDATA", dir.path());
         }
-        
+
         let _config = load_config();
-        
+
         // Config file should have been created
         assert!(config_path.exists());
     }
@@ -323,20 +353,26 @@ mod tests {
     #[test]
     fn test_model_for_use_case_returns_lowest_cost() {
         let mut config = AppConfig::default();
-        config.models.insert("expensive".to_string(), LlmConfig {
-            model: "expensive-model".to_string(),
-            api_url: "http://a".to_string(),
-            api_key: "k".to_string(),
-            cost: Some(10),
-            use_case: vec!["chat".to_string()],
-        });
-        config.models.insert("cheap".to_string(), LlmConfig {
-            model: "cheap-model".to_string(),
-            api_url: "http://b".to_string(),
-            api_key: "k".to_string(),
-            cost: Some(1),
-            use_case: vec!["chat".to_string()],
-        });
+        config.models.insert(
+            "expensive".to_string(),
+            LlmConfig {
+                model: "expensive-model".to_string(),
+                api_url: "http://a".to_string(),
+                api_key: "k".to_string(),
+                cost: Some(10),
+                use_case: vec!["chat".to_string()],
+            },
+        );
+        config.models.insert(
+            "cheap".to_string(),
+            LlmConfig {
+                model: "cheap-model".to_string(),
+                api_url: "http://b".to_string(),
+                api_key: "k".to_string(),
+                cost: Some(1),
+                use_case: vec!["chat".to_string()],
+            },
+        );
         let (key, _cfg) = config.model_for_use_case("chat").unwrap();
         assert_eq!(key, "cheap");
     }
@@ -344,26 +380,32 @@ mod tests {
     #[test]
     fn test_model_for_use_case_none_when_no_match() {
         let mut config = AppConfig::default();
-        config.models.insert("chat_only".to_string(), LlmConfig {
-            model: "chat-model".to_string(),
-            api_url: "http://a".to_string(),
-            api_key: "k".to_string(),
-            cost: None,
-            use_case: vec!["chat".to_string()],
-        });
+        config.models.insert(
+            "chat_only".to_string(),
+            LlmConfig {
+                model: "chat-model".to_string(),
+                api_url: "http://a".to_string(),
+                api_key: "k".to_string(),
+                cost: None,
+                use_case: vec!["chat".to_string()],
+            },
+        );
         assert!(config.model_for_use_case("vision").is_none());
     }
 
     #[test]
     fn test_model_for_use_case_vision() {
         let mut config = AppConfig::default();
-        config.models.insert("vision_model".to_string(), LlmConfig {
-            model: "gpt-4o".to_string(),
-            api_url: "http://a".to_string(),
-            api_key: "k".to_string(),
-            cost: Some(5),
-            use_case: vec!["chat".to_string(), "vision".to_string()],
-        });
+        config.models.insert(
+            "vision_model".to_string(),
+            LlmConfig {
+                model: "gpt-4o".to_string(),
+                api_url: "http://a".to_string(),
+                api_key: "k".to_string(),
+                cost: Some(5),
+                use_case: vec!["chat".to_string(), "vision".to_string()],
+            },
+        );
         let (key, _cfg) = config.model_for_use_case("vision").unwrap();
         assert_eq!(key, "vision_model");
     }
@@ -377,13 +419,16 @@ mod tests {
     #[test]
     fn test_validate_unknown_use_case() {
         let mut config = AppConfig::default();
-        config.models.insert("bad".to_string(), LlmConfig {
-            model: "bad".to_string(),
-            api_url: "http://a".to_string(),
-            api_key: "k".to_string(),
-            cost: None,
-            use_case: vec!["chat".to_string(), "invalid".to_string()],
-        });
+        config.models.insert(
+            "bad".to_string(),
+            LlmConfig {
+                model: "bad".to_string(),
+                api_url: "http://a".to_string(),
+                api_key: "k".to_string(),
+                cost: None,
+                use_case: vec!["chat".to_string(), "invalid".to_string()],
+            },
+        );
         let warnings = config.validate();
         assert!(warnings.iter().any(|w| w.contains("unknown use_case")));
     }
@@ -391,15 +436,20 @@ mod tests {
     #[test]
     fn test_validate_no_chat_model() {
         let mut config = AppConfig::default();
-        config.models.insert("embed".to_string(), LlmConfig {
-            model: "embed".to_string(),
-            api_url: "http://a".to_string(),
-            api_key: "k".to_string(),
-            cost: None,
-            use_case: vec!["embeddings".to_string()],
-        });
+        config.models.insert(
+            "embed".to_string(),
+            LlmConfig {
+                model: "embed".to_string(),
+                api_url: "http://a".to_string(),
+                api_key: "k".to_string(),
+                cost: None,
+                use_case: vec!["embeddings".to_string()],
+            },
+        );
         let warnings = config.validate();
-        assert!(warnings.iter().any(|w| w.contains("No model configured with 'chat'")));
+        assert!(warnings
+            .iter()
+            .any(|w| w.contains("No model configured with 'chat'")));
     }
 
     #[test]
@@ -477,13 +527,61 @@ inline_editor_enabled: true
 user_name: "TestUser"
 "#;
         std::fs::write(&config_path, yaml).unwrap();
-        
+
         unsafe {
             std::env::set_var("APPDATA", dir.path());
         }
-        
+
         let config = load_config();
         assert_eq!(config.user_name, Some("TestUser".to_string()));
+    }
+
+    #[test]
+    fn test_content_library_display_label_for_member() {
+        let lib = ContentLibrary {
+            root_folder: "C:/my/test/dir".to_string(),
+            name: "TestLib".to_string(),
+            kind: "text".to_string(),
+            readonly: true,
+            priority: 0,
+        };
+        let expected = PathBuf::from("TestLib").join("sub/file.md");
+        let actual = lib
+            .display_label_for(Path::new("C:/my/test/dir/sub/file.md"))
+            .expect("path is inside library");
+        assert_eq!(actual, expected.to_string_lossy());
+        assert_eq!(
+            lib.display_label_for(Path::new("C:/my/test/dir")),
+            Some("TestLib".to_string())
+        );
+        assert!(lib
+            .display_label_for(Path::new("C:/other/path.md"))
+            .is_none());
+    }
+
+    #[test]
+    fn test_library_display_label_finds_first_match() {
+        let libs = vec![
+            ContentLibrary {
+                root_folder: "C:/lib/one".to_string(),
+                name: "One".to_string(),
+                kind: "text".to_string(),
+                readonly: true,
+                priority: 0,
+            },
+            ContentLibrary {
+                root_folder: "C:/lib/two".to_string(),
+                name: "Two".to_string(),
+                kind: "text".to_string(),
+                readonly: true,
+                priority: 0,
+            },
+        ];
+        let expected = PathBuf::from("Two").join("note.md");
+        let actual = library_display_label(&libs, Path::new("C:/lib/two/note.md"))
+            .expect("path is inside a library");
+        assert_eq!(actual, expected.to_string_lossy());
+        assert!(library_display_label(&libs, Path::new("C:/other/note.md")).is_none());
     }
 
     #[test]
@@ -492,11 +590,11 @@ user_name: "TestUser"
         let config_path = dir.path().join("fastmd").join("config.yaml");
         std::fs::create_dir_all(config_path.parent().unwrap()).unwrap();
         std::fs::write(&config_path, "invalid: yaml: [").unwrap();
-        
+
         unsafe {
             std::env::set_var("APPDATA", dir.path());
         }
-        
+
         let config = load_config();
         // Should return default
         assert!(config.user_name.is_none());
@@ -504,15 +602,28 @@ user_name: "TestUser"
 
     #[test]
     fn test_debug_impls() {
-        let j = JmapClient { url: "a".into(), token: "b".into() };
+        let j = JmapClient {
+            url: "a".into(),
+            token: "b".into(),
+        };
         let s = format!("{:?}", j);
         assert!(s.contains("[REDACTED]"));
-        
-        let c = CalDavClient { url: "a".into(), username: "u".into(), password: "p".into() };
+
+        let c = CalDavClient {
+            url: "a".into(),
+            username: "u".into(),
+            password: "p".into(),
+        };
         let s = format!("{:?}", c);
         assert!(s.contains("[REDACTED]"));
-        
-        let l = LlmConfig { model: "m".into(), api_url: "a".into(), api_key: "k".into(), cost: None, use_case: vec![] };
+
+        let l = LlmConfig {
+            model: "m".into(),
+            api_url: "a".into(),
+            api_key: "k".into(),
+            cost: None,
+            use_case: vec![],
+        };
         let s = format!("{:?}", l);
         assert!(s.contains("[REDACTED]"));
 

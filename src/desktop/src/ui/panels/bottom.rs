@@ -41,14 +41,8 @@ pub fn compute_prompt_prefix(
     content_libraries: &[crate::config::ContentLibrary],
 ) -> String {
     if let Some(dir) = selected_dir {
-        let mut rel_str = dir.to_string_lossy().to_string();
-        for lib in content_libraries {
-            if let Ok(rel) = dir.strip_prefix(std::path::Path::new(&lib.root_folder)) {
-                let lib_path = std::path::Path::new(&lib.name).join(rel);
-                rel_str = lib_path.to_string_lossy().to_string();
-                break;
-            }
-        }
+        let rel_str = crate::config::library_display_label(content_libraries, dir)
+            .unwrap_or_else(|| dir.to_string_lossy().to_string());
         if rel_str.is_empty() {
             ">".to_string()
         } else {
@@ -65,9 +59,6 @@ pub fn compute_prompt_prefix(
 /// Purity: Pure.
 /// Preconditions: `current_date` must be a valid string.
 /// Postconditions: Returns a formatted string containing the YAML template.
-pub fn generate_format_markdown_prompt(current_date: &str) -> String {
-    format!("Format the current document into correct markdown and use this template for the yaml front matter. Focus ONLY on the currently active file, and DO NOT use list_files or search for other files.\n```yaml\n---\ntitle: A brief title\nsummary: A three sentence summary of the contents\ntags: [\"tag1\",\"tag2\"]\nheader-date: {}\n---\n```", current_date)
-}
 
 /// Formats the available models into a human-readable string.
 /// Inputs: `models` (hash map of available models).
@@ -128,7 +119,7 @@ pub fn show_bottom_panel(app: &mut FastMdApp, ctx: &egui::Context) {
                         if ui.button("Format Markdown").clicked() {
                             let now = chrono::Local::now();
                             let date_str = now.to_rfc3339();
-                            app.command_input = generate_format_markdown_prompt(&date_str);
+                            app.command_input = crate::ui::generate_format_prompt(&date_str);
                             submit = true;
                             ui.close_menu();
                         }
@@ -248,14 +239,13 @@ mod tests {
             priority: 0,
         }];
         let prefix = compute_prompt_prefix(Some(&dir), &libs);
-        let expected = PathBuf::from("TestLib").join("");
-        assert_eq!(prefix, format!("{} >", expected.to_string_lossy()));
+        assert_eq!(prefix, "TestLib >");
     }
 
     #[test]
     fn test_generate_format_markdown_prompt() {
         let date = "2026-07-19T22:31:41-07:00";
-        let prompt = generate_format_markdown_prompt(date);
+        let prompt = crate::ui::generate_format_prompt(date);
         assert!(prompt.contains(date));
         assert!(prompt.contains("title: A brief title"));
     }
@@ -326,62 +316,10 @@ mod tests {
 #[cfg(test)]
 mod ui_tests {
     use super::*;
-    use std::collections::{BTreeMap, BTreeSet, HashSet};
-    use std::sync::{Arc, Mutex};
-    use crate::background::BackgroundProcessManager;
+    use std::sync::Arc;
 
     fn create_test_app() -> FastMdApp {
-        let (tx, rx) = std::sync::mpsc::channel();
-        let config = crate::config::AppConfig::default();
-        FastMdApp {
-            content_libraries: vec![],
-            rx,
-            tx,
-            all_files: vec![],
-            all_dirs: vec![],
-            file_tags: BTreeMap::new(),
-            all_tags: BTreeSet::new(),
-            selected_tag: None,
-            indexing_finished: false,
-            indexing_finished_handled: false,
-            left_panel_width: None,
-            selected_file: None,
-            selected_files: HashSet::new(),
-            selected_dir: None,
-            expanded_dirs: HashSet::new(),
-            loaded_path: None,
-            current_yaml: None,
-            current_markdown: String::new(),
-            tabs: vec![],
-            move_dialog_open: false,
-            file_to_move: None,
-            selected_move_folder: None,
-            create_dir_dialog_open: false,
-            create_dir_parent: None,
-            create_dir_name: String::new(),
-            rename_dialog_open: false,
-            file_to_rename: None,
-            rename_new_name: String::new(),
-            command_input: String::new(),
-            toc: vec![],
-            scroll_to_header_id: None,
-            _watcher: None,
-            show_agent_results: false,
-            agent_running: false,
-            agent_status: String::new(),
-            agent_thinking: String::new(),
-            agent_response: String::new(),
-            agent_scroll_to_id: None,
-            agent_cancel_flag: None,
-            agent_history: None,
-            left_panel_reset_count: 0,
-            submit_prompt: None,
-            editor_state: crate::editor::EditorState::default(),
-            inline_editor_enabled: true,
-            background_manager: Arc::new(Mutex::new(BackgroundProcessManager::new())),
-            show_background_logs: false,
-            config,
-        }
+        FastMdApp::empty_state()
     }
 
     #[test]
@@ -409,4 +347,3 @@ mod ui_tests {
         assert!(app.agent_running);
     }
 }
-
