@@ -15,10 +15,7 @@ fn paginate_in_range(
     plural: &str,
 ) -> (Vec<String>, Option<String>) {
     if total == 0 {
-        return (
-            Vec::new(),
-            Some(format!("No matching {plural} found.")),
-        );
+        return (Vec::new(), Some(format!("No matching {plural} found.")));
     }
     let start = (page - 1).saturating_mul(page_size);
     if start >= total {
@@ -154,7 +151,7 @@ define_tools! {
 
     {
         name: "web_delegate",
-        description: "Delegate complex web research to a sub-agent. This protects your context window. Give clear instructions and it will return summarized information using web search and fetch tools.",
+        description: "Delegate web searches and web fetches to a sub-agent. This protects your context window. Give clear instructions and it will return summarized information.",
         input: crate::tools::dtos::WebDelegateInput,
         enabled: |_| true,
         execute: |config, _root_path, input, _is_safe| crate::tools::web::tool_web_delegate(config, &input.instruction)
@@ -691,13 +688,7 @@ mod tests {
                 readonly: false,
                 priority: 0,
             });
-        (
-            config,
-            LibFixture {
-                _a: dir,
-                _b: None,
-            },
-        )
+        (config, LibFixture { _a: dir, _b: None })
     }
 
     /// Two-library variant: `n` tagged files in each library.
@@ -728,13 +719,7 @@ mod tests {
                 readonly: false,
                 priority: 0,
             });
-        (
-            config,
-            LibFixture {
-                _a: a,
-                _b: Some(b),
-            },
-        )
+        (config, LibFixture { _a: a, _b: Some(b) })
     }
 
     /// Execute `list_files_by_tag` via the public `execute_tool`
@@ -827,7 +812,9 @@ mod tests {
         let data = &envelope["data"];
         assert_eq!(data["total"], 5);
         assert!(files_array(data).is_empty());
-        let hint = data["hint"].as_str().expect("hint should be set on past-end");
+        let hint = data["hint"]
+            .as_str()
+            .expect("hint should be set on past-end");
         assert!(hint.starts_with("No tagged files on page 99"));
         assert!(hint.contains("5 total"));
     }
@@ -878,7 +865,9 @@ mod tests {
         let data = &envelope["data"];
         assert_eq!(data["total"], 0);
         assert!(files_array(data).is_empty());
-        let hint = data["hint"].as_str().expect("hint should be set on no-match");
+        let hint = data["hint"]
+            .as_str()
+            .expect("hint should be set on no-match");
         assert_eq!(hint, "No matching tagged files found.");
     }
 
@@ -931,13 +920,7 @@ mod tests {
                 readonly: false,
                 priority: 0,
             });
-        (
-            config,
-            LibFixture {
-                _a: dir,
-                _b: None,
-            },
-        )
+        (config, LibFixture { _a: dir, _b: None })
     }
 
     #[test]
@@ -951,7 +934,9 @@ mod tests {
         // Each path is the virtual one (Lib/<file>) — the
         // separator is platform-specific so we just check the
         // library prefix and the leaf.
-        assert!(files.iter().all(|p| p.starts_with("Lib") && p.contains("note_")));
+        assert!(files
+            .iter()
+            .all(|p| p.starts_with("Lib") && p.contains("note_")));
     }
 
     #[test]
@@ -985,7 +970,9 @@ mod tests {
         let data = &envelope["data"];
         assert_eq!(data["total"], 5);
         assert!(files_array(data).is_empty());
-        let hint = data["hint"].as_str().expect("hint should be set on past-end");
+        let hint = data["hint"]
+            .as_str()
+            .expect("hint should be set on past-end");
         assert!(hint.contains("page 99"));
         assert!(hint.contains("5 total"));
     }
@@ -1013,20 +1000,24 @@ mod tests {
             fs::write(dir_b.path().join(format!("b_{:03}.md", i)), "x").unwrap();
         }
         let mut config = AppConfig::default();
-        config.content_libraries.push(crate::config::ContentLibrary {
-            name: "LibA".to_string(),
-            root_folder: dir_a.path().to_string_lossy().into_owned(),
-            kind: "text".to_string(),
-            readonly: false,
-            priority: 0,
-        });
-        config.content_libraries.push(crate::config::ContentLibrary {
-            name: "LibB".to_string(),
-            root_folder: dir_b.path().to_string_lossy().into_owned(),
-            kind: "text".to_string(),
-            readonly: false,
-            priority: 0,
-        });
+        config
+            .content_libraries
+            .push(crate::config::ContentLibrary {
+                name: "LibA".to_string(),
+                root_folder: dir_a.path().to_string_lossy().into_owned(),
+                kind: "text".to_string(),
+                readonly: false,
+                priority: 0,
+            });
+        config
+            .content_libraries
+            .push(crate::config::ContentLibrary {
+                name: "LibB".to_string(),
+                root_folder: dir_b.path().to_string_lossy().into_owned(),
+                kind: "text".to_string(),
+                readonly: false,
+                priority: 0,
+            });
         let _fix = LibFixture {
             _a: dir_a,
             _b: Some(dir_b),
