@@ -170,9 +170,14 @@ Here is the exact schema and argument breakdown for each tool as declared in the
   * `id` (string, **required**): The calendar item ID.
 
 ##### `search_email`
-* **Description:** Search email by keyword.
+* **Description:** Search email by keyword, optionally within a specific folder, date range, or by sender/recipient.
 * **Arguments:**
-  * `keyword` (string, **required**): The search keyword.
+  * `keyword` (string, *optional*): The search keyword. At least one filter field must be provided.
+  * `folder` (string, *optional*): Folder/mailbox name to search within (e.g., "Inbox", "Sent"). Resolved to a JMAP mailbox ID automatically.
+  * `start_date` (string, *optional*): Only return emails received on or after this date (e.g., "2026-01-01" or ISO 8601).
+  * `end_date` (string, *optional*): Only return emails received before or on this date (e.g., "2026-12-31" or ISO 8601).
+  * `from` (string, *optional*): Filter by sender name or email address.
+  * `to` (string, *optional*): Filter by recipient name or email address.
 
 ##### `get_email`
 * **Description:** Get email details by id.

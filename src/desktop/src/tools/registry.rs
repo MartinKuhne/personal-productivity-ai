@@ -43,7 +43,7 @@ macro_rules! define_tools {
                 if Path::new(p).components().any(|c| c == Component::ParentDir) { return Err("Path traversal not allowed".to_string()); }
                 let path = Path::new(p);
                 let mut components = path.components().peekable();
-                
+
                 while let Some(c) = components.peek() {
                     match c {
                         Component::RootDir | Component::CurDir => { components.next(); },
@@ -63,7 +63,7 @@ macro_rules! define_tools {
                             return Ok(Some((Path::new(&lib.root_folder).join(rest), lib.readonly)));
                         }
                     }
-                    
+
                     Err(format!("Content library '{}' not found in virtual path '{}'", first_str, p))
                 } else {
                     Err(format!("Invalid virtual path: '{}'", p))
@@ -100,7 +100,7 @@ macro_rules! define_tools {
                     Err(format!("Tool {} panicked: {}", name, msg))
                 }
             };
-            
+
             let elapsed = start_time.elapsed();
             let response_dto = match result_raw {
                 Ok(data) => {
@@ -112,7 +112,7 @@ macro_rules! define_tools {
                     crate::tools::dtos::ToolResponse::Error { message: err }
                 }
             };
-            
+
             serde_json::to_string(&response_dto).unwrap_or_else(|_| r#"{"status":"error","message":"Failed to serialize tool response"}"#.to_string())
         }
     };
@@ -356,7 +356,7 @@ define_tools! {
         description: "Search email by keyword.",
         input: crate::tools::dtos::SearchEmailInput,
         enabled: |config: &AppConfig| !config.jmap_clients.is_empty(),
-        execute: |config, _root_path, input, _is_safe| crate::tools::jmap::tool_search_email(config, &input.keyword)
+        execute: |config, _root_path, input, _is_safe| crate::tools::jmap::tool_search_email(config, input.keyword.as_deref(), input.folder.as_deref(), input.start_date.as_deref(), input.end_date.as_deref(), input.from.as_deref(), input.to.as_deref())
     },
     {
         name: "get_email_by_id",
@@ -410,25 +410,42 @@ mod tests {
     #[test]
     fn test_resolve_virtual_path() {
         let mut config = AppConfig::default();
-        config.content_libraries.push(crate::config::ContentLibrary {
-            name: "TestLib".to_string(),
-            root_folder: "C:\\TestRoot".to_string(),
-            kind: "text".to_string(),
-            readonly: false,
-            priority: 0,
-        });
+        config
+            .content_libraries
+            .push(crate::config::ContentLibrary {
+                name: "TestLib".to_string(),
+                root_folder: "C:\\TestRoot".to_string(),
+                kind: "text".to_string(),
+                readonly: false,
+                priority: 0,
+            });
         let root = Path::new("C:\\TestRoot");
-        
+
         // This will succeed in resolving to C:\TestRoot\sub\file.md
-        let res1 = execute_tool(&config, root, "read_file", r#"{"path": "TestLib\\sub\\file.md"}"#);
+        let res1 = execute_tool(
+            &config,
+            root,
+            "read_file",
+            r#"{"path": "TestLib\\sub\\file.md"}"#,
+        );
         assert!(!res1.contains("Invalid virtual path"));
 
         // Path traversal is blocked
-        let res3 = execute_tool(&config, root, "read_file", r#"{"path": "TestLib\\..\\Windows\\System32\\cmd.exe"}"#);
+        let res3 = execute_tool(
+            &config,
+            root,
+            "read_file",
+            r#"{"path": "TestLib\\..\\Windows\\System32\\cmd.exe"}"#,
+        );
         assert!(res3.contains("Path traversal not allowed"));
-        
+
         // Unknown library
-        let res4 = execute_tool(&config, root, "read_file", r#"{"path": "UnknownLib\\file.md"}"#);
+        let res4 = execute_tool(
+            &config,
+            root,
+            "read_file",
+            r#"{"path": "UnknownLib\\file.md"}"#,
+        );
         assert!(res4.contains("Content library 'UnknownLib' not found"));
 
         // Resolving root dir / and .
@@ -445,20 +462,24 @@ mod tests {
     #[test]
     fn test_grep_priority_ordering() {
         let mut config = AppConfig::default();
-        config.content_libraries.push(crate::config::ContentLibrary {
-            name: "Low".to_string(),
-            root_folder: "C:\\LowRoot".to_string(),
-            kind: "text".to_string(),
-            readonly: false,
-            priority: 0,
-        });
-        config.content_libraries.push(crate::config::ContentLibrary {
-            name: "High".to_string(),
-            root_folder: "C:\\HighRoot".to_string(),
-            kind: "text".to_string(),
-            readonly: false,
-            priority: 100,
-        });
+        config
+            .content_libraries
+            .push(crate::config::ContentLibrary {
+                name: "Low".to_string(),
+                root_folder: "C:\\LowRoot".to_string(),
+                kind: "text".to_string(),
+                readonly: false,
+                priority: 0,
+            });
+        config
+            .content_libraries
+            .push(crate::config::ContentLibrary {
+                name: "High".to_string(),
+                root_folder: "C:\\HighRoot".to_string(),
+                kind: "text".to_string(),
+                readonly: false,
+                priority: 100,
+            });
         let mut libs: Vec<_> = config.content_libraries.iter().collect();
         libs.sort_by(|a, b| b.priority.cmp(&a.priority));
         assert_eq!(libs[0].name, "High");
@@ -468,17 +489,24 @@ mod tests {
     #[test]
     fn test_path_traversal_dotdot_rejected() {
         let mut config = AppConfig::default();
-        config.content_libraries.push(crate::config::ContentLibrary {
-            name: "Lib".to_string(),
-            root_folder: "C:\\Root".to_string(),
-            kind: "text".to_string(),
-            readonly: false,
-            priority: 0,
-        });
+        config
+            .content_libraries
+            .push(crate::config::ContentLibrary {
+                name: "Lib".to_string(),
+                root_folder: "C:\\Root".to_string(),
+                kind: "text".to_string(),
+                readonly: false,
+                priority: 0,
+            });
         let root = Path::new("C:\\Root");
-        
+
         // Multiple traversals
-        let res = execute_tool(&config, root, "read_file", r#"{"path": "Lib/../../etc/passwd"}"#);
+        let res = execute_tool(
+            &config,
+            root,
+            "read_file",
+            r#"{"path": "Lib/../../etc/passwd"}"#,
+        );
         assert!(res.contains("Path traversal not allowed"));
 
         // Single parent dir

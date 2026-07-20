@@ -194,10 +194,64 @@ fn simplify_jmap_emails(res: serde_json::Value, max_lines: Option<usize>) -> ser
     serde_json::Value::Array(simplified_emails)
 }
 
+/// Look up a mailbox ID by folder name (case-insensitive) via Mailbox/get.
+fn lookup_mailbox_id(
+    api_url: &str,
+    token: &str,
+    account_id: &str,
+    folder_name: &str,
+) -> Result<String, String> {
+    let calls = serde_json::json!([
+        ["Mailbox/get", { "accountId": account_id, "ids": null }, "0"]
+    ]);
+    let res = jmap_call(api_url, token, &["urn:ietf:params:jmap:mail"], calls)?;
+    if let Some(method_responses) = res.get("methodResponses").and_then(|mr| mr.as_array()) {
+        for resp in method_responses {
+            if let Some(resp_arr) = resp.as_array() {
+                if resp_arr.get(0).and_then(|n| n.as_str()) == Some("Mailbox/get") {
+                    if let Some(args) = resp_arr.get(1).and_then(|a| a.as_object()) {
+                        if let Some(list) = args.get("list").and_then(|l| l.as_array()) {
+                            let lower_name = folder_name.to_lowercase();
+                            for mailbox in list {
+                                if let Some(name) = mailbox.get("name").and_then(|n| n.as_str()) {
+                                    if name.to_lowercase() == lower_name {
+                                        if let Some(id) = mailbox.get("id").and_then(|i| i.as_str())
+                                        {
+                                            return Ok(id.to_string());
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+    Err(format!("Mailbox not found with name: {}", folder_name))
+}
+
 pub fn tool_search_email(
     config: &AppConfig,
-    keyword: &str,
+    keyword: Option<&str>,
+    folder: Option<&str>,
+    start_date: Option<&str>,
+    end_date: Option<&str>,
+    sender: Option<&str>,
+    recipient: Option<&str>,
 ) -> Result<crate::tools::dtos::SearchEmailResponse, String> {
+    let format_jmap_date = |d: &str, is_end: bool| -> String {
+        if d.len() == 10 && d.chars().nth(4) == Some('-') && d.chars().nth(7) == Some('-') {
+            if is_end {
+                format!("{}T23:59:59Z", d)
+            } else {
+                format!("{}T00:00:00Z", d)
+            }
+        } else {
+            d.to_string()
+        }
+    };
+
     let mut all_results = Vec::new();
     for (name, client) in &config.jmap_clients {
         let (api_url, token, accs) = match get_jmap_session(client) {
@@ -209,8 +263,49 @@ pub fn tool_search_email(
             }
         };
         let account_id = get_account_id(&accs, "urn:ietf:params:jmap:mail");
+        let mailbox_id = match folder {
+            Some(f) => match lookup_mailbox_id(&api_url, &token, &account_id, f) {
+                Ok(id) => Some(id),
+                Err(e) => {
+                    all_results.push(format!("Error for {}: {}", name, e));
+                    continue;
+                }
+            },
+            None => None,
+        };
+        let mut filter = match keyword {
+            Some(k) if !k.is_empty() => serde_json::json!({ "text": k }),
+            _ => serde_json::json!({}),
+        };
+        if let Some(ref mbox_id) = mailbox_id {
+            filter["inMailbox"] = serde_json::Value::String(mbox_id.clone());
+        }
+        if let Some(s) = start_date {
+            if !s.is_empty() {
+                filter["after"] = serde_json::Value::String(format_jmap_date(s, false));
+            }
+        }
+        if let Some(e) = end_date {
+            if !e.is_empty() {
+                filter["before"] = serde_json::Value::String(format_jmap_date(e, true));
+            }
+        }
+        if let Some(s) = sender {
+            if !s.is_empty() {
+                filter["from"] = serde_json::Value::String(s.to_string());
+            }
+        }
+        if let Some(r) = recipient {
+            if !r.is_empty() {
+                filter["to"] = serde_json::Value::String(r.to_string());
+            }
+        }
+        if filter.as_object().map_or(true, |o| o.is_empty()) {
+            all_results.push(format!("Error for {}: At least one filter field must be provided (keyword, folder, start_date, end_date, from, to)", name));
+            continue;
+        }
         let calls = serde_json::json!([
-            ["Email/query", { "accountId": account_id, "filter": { "text": keyword } }, "0"],
+            ["Email/query", { "accountId": account_id, "filter": filter }, "0"],
             ["Email/get", { "accountId": account_id, "#ids": { "resultOf": "0", "name": "Email/query", "path": "/ids" }, "properties": ["id", "subject", "from", "receivedAt", "bodyValues", "textBody", "htmlBody"], "fetchTextBodyValues": true, "fetchHTMLBodyValues": true, "maxBodyValueBytes": 1000 }, "1"]
         ]);
         match jmap_call(&api_url, &token, &["urn:ietf:params:jmap:mail"], calls) {
