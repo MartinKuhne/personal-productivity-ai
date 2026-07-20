@@ -50,6 +50,7 @@ pub struct FastMdApp {
     pub indexing_finished: bool,
     pub indexing_finished_handled: bool,
     pub left_panel_width: Option<f32>,
+    pub left_panel_dirty: bool,
 
     pub selected_file: Option<PathBuf>,
     pub selected_files: HashSet<PathBuf>,
@@ -213,6 +214,7 @@ impl FastMdApp {
             indexing_finished: false,
             indexing_finished_handled: false,
             left_panel_width: None,
+            left_panel_dirty: true,
             selected_file: None,
             selected_files: HashSet::new(),
             selected_dir: None,
