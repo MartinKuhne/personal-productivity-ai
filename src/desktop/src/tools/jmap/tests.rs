@@ -196,7 +196,7 @@ fn test_check_response_with_extra_fields_in_error_obj() {
 // -- Email inline error pattern tests --
 
 /// Helper that simulates the inline error check pattern used in
-/// tool_search_email, tool_get_email, and tool_get_email_by_id.
+/// tool_search_email and tool_get_email_by_id.
 fn email_inline_check(res: &serde_json::Value, name: &str) -> Option<String> {
     if let Some(method_responses) = res.get("methodResponses").and_then(|mr| mr.as_array()) {
         for resp in method_responses {

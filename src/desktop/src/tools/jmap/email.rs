@@ -237,8 +237,10 @@ pub fn tool_search_email(
     folder: Option<&str>,
     start_date: Option<&str>,
     end_date: Option<&str>,
-    sender: Option<&str>,
-    recipient: Option<&str>,
+    from: Option<&str>,
+    to: Option<&str>,
+    is_unread: Option<bool>,
+    is_flagged: Option<bool>,
 ) -> Result<crate::tools::dtos::SearchEmailResponse, String> {
     let format_jmap_date = |d: &str, is_end: bool| -> String {
         if d.len() == 10 && d.chars().nth(4) == Some('-') && d.chars().nth(7) == Some('-') {
@@ -252,6 +254,58 @@ pub fn tool_search_email(
         }
     };
 
+    // Pre-flight: collect the non-folder filter conditions so we can
+    // reject "no filters" early without having to round-trip to the
+    // JMAP server.
+    let mut conditions: Vec<serde_json::Value> = Vec::new();
+    if let Some(k) = keyword {
+        if !k.is_empty() {
+            conditions.push(serde_json::json!({ "text": k }));
+        }
+    }
+    if let Some(s) = start_date {
+        if !s.is_empty() {
+            conditions.push(serde_json::json!({ "after": format_jmap_date(s, false) }));
+        }
+    }
+    if let Some(e) = end_date {
+        if !e.is_empty() {
+            conditions.push(serde_json::json!({ "before": format_jmap_date(e, true) }));
+        }
+    }
+    if let Some(s) = from {
+        if !s.is_empty() {
+            conditions.push(serde_json::json!({ "from": s }));
+        }
+    }
+    if let Some(r) = to {
+        if !r.is_empty() {
+            conditions.push(serde_json::json!({ "to": r }));
+        }
+    }
+    if let Some(u) = is_unread {
+        if u {
+            conditions.push(serde_json::json!({ "notKeyword": "$seen" }));
+        } else {
+            conditions.push(serde_json::json!({ "hasKeyword": "$seen" }));
+        }
+    }
+    if let Some(f) = is_flagged {
+        if f {
+            conditions.push(serde_json::json!({ "hasKeyword": "$flagged" }));
+        } else {
+            conditions.push(serde_json::json!({ "notKeyword": "$flagged" }));
+        }
+    }
+
+    if conditions.is_empty() && folder.is_none() {
+        return Err(
+            "At least one filter field must be provided \
+             (keyword, folder, start_date, end_date, from, to, is_unread, is_flagged)"
+                .to_string(),
+        );
+    }
+
     let mut all_results = Vec::new();
     for (name, client) in &config.jmap_clients {
         let (api_url, token, accs) = match get_jmap_session(client) {
@@ -263,47 +317,37 @@ pub fn tool_search_email(
             }
         };
         let account_id = get_account_id(&accs, "urn:ietf:params:jmap:mail");
-        let mailbox_id = match folder {
+
+        // Resolve the folder name to a JMAP mailbox id; append to the
+        // condition list so the per-client filter can be built below.
+        let mut client_conditions = conditions.clone();
+        match folder {
             Some(f) => match lookup_mailbox_id(&api_url, &token, &account_id, f) {
-                Ok(id) => Some(id),
+                Ok(mailbox_id) => {
+                    client_conditions.push(serde_json::json!({ "inMailbox": mailbox_id }));
+                }
                 Err(e) => {
                     all_results.push(format!("Error for {}: {}", name, e));
                     continue;
                 }
             },
-            None => None,
-        };
-        let mut filter = match keyword {
-            Some(k) if !k.is_empty() => serde_json::json!({ "text": k }),
-            _ => serde_json::json!({}),
-        };
-        if let Some(ref mbox_id) = mailbox_id {
-            filter["inMailbox"] = serde_json::Value::String(mbox_id.clone());
+            None => {}
         }
-        if let Some(s) = start_date {
-            if !s.is_empty() {
-                filter["after"] = serde_json::Value::String(format_jmap_date(s, false));
-            }
-        }
-        if let Some(e) = end_date {
-            if !e.is_empty() {
-                filter["before"] = serde_json::Value::String(format_jmap_date(e, true));
-            }
-        }
-        if let Some(s) = sender {
-            if !s.is_empty() {
-                filter["from"] = serde_json::Value::String(s.to_string());
-            }
-        }
-        if let Some(r) = recipient {
-            if !r.is_empty() {
-                filter["to"] = serde_json::Value::String(r.to_string());
-            }
-        }
-        if filter.as_object().map_or(true, |o| o.is_empty()) {
-            all_results.push(format!("Error for {}: At least one filter field must be provided (keyword, folder, start_date, end_date, from, to)", name));
+
+        if client_conditions.is_empty() {
+            all_results.push(format!("Error for {}: At least one filter field must be provided (keyword, folder, start_date, end_date, from, to, is_unread, is_flagged)", name));
             continue;
         }
+
+        let filter = if client_conditions.len() == 1 {
+            client_conditions.remove(0)
+        } else {
+            serde_json::json!({
+                "operator": "AND",
+                "conditions": client_conditions
+            })
+        };
+
         let calls = serde_json::json!([
             ["Email/query", { "accountId": account_id, "filter": filter }, "0"],
             ["Email/get", { "accountId": account_id, "#ids": { "resultOf": "0", "name": "Email/query", "path": "/ids" }, "properties": ["id", "subject", "from", "receivedAt", "bodyValues", "textBody", "htmlBody"], "fetchTextBodyValues": true, "fetchHTMLBodyValues": true, "maxBodyValueBytes": 1000 }, "1"]
@@ -399,135 +443,6 @@ pub fn tool_get_email_by_id(
     }
     tracing::warn!(name = "tool.email.get_by_id.not_found", id = %id, "Email not found in any client or no clients configured. Operator should verify the email ID.");
     Err("Email not found in any client or no clients configured.".to_string())
-}
-
-pub fn tool_get_email(
-    config: &AppConfig,
-    start_date: Option<&str>,
-    end_date: Option<&str>,
-    sender: Option<&str>,
-    recipient: Option<&str>,
-    is_unread: Option<bool>,
-    is_flagged: Option<bool>,
-) -> Result<crate::tools::dtos::GetEmailResponse, String> {
-    let mut all_results = Vec::new();
-
-    let format_jmap_date = |d: &str, is_end: bool| -> String {
-        if d.len() == 10 && d.chars().nth(4) == Some('-') && d.chars().nth(7) == Some('-') {
-            if is_end {
-                format!("{}T23:59:59Z", d)
-            } else {
-                format!("{}T00:00:00Z", d)
-            }
-        } else {
-            d.to_string()
-        }
-    };
-
-    let mut conditions = Vec::new();
-    if let Some(s) = start_date {
-        if !s.is_empty() {
-            conditions.push(serde_json::json!({ "after": format_jmap_date(s, false) }));
-        }
-    }
-    if let Some(e) = end_date {
-        if !e.is_empty() {
-            conditions.push(serde_json::json!({ "before": format_jmap_date(e, true) }));
-        }
-    }
-    if let Some(s) = sender {
-        if !s.is_empty() {
-            conditions.push(serde_json::json!({ "from": s }));
-        }
-    }
-    if let Some(r) = recipient {
-        if !r.is_empty() {
-            conditions.push(serde_json::json!({ "to": r }));
-        }
-    }
-    if let Some(u) = is_unread {
-        if u {
-            conditions.push(serde_json::json!({ "notKeyword": "$seen" }));
-        } else {
-            conditions.push(serde_json::json!({ "hasKeyword": "$seen" }));
-        }
-    }
-    if let Some(f) = is_flagged {
-        if f {
-            conditions.push(serde_json::json!({ "hasKeyword": "$flagged" }));
-        } else {
-            conditions.push(serde_json::json!({ "notKeyword": "$flagged" }));
-        }
-    }
-
-    let filter_obj = if conditions.is_empty() {
-        serde_json::json!({})
-    } else if conditions.len() == 1 {
-        conditions[0].clone()
-    } else {
-        serde_json::json!({
-            "operator": "AND",
-            "conditions": conditions
-        })
-    };
-
-    for (name, client) in &config.jmap_clients {
-        let (api_url, token, accs) = match get_jmap_session(client) {
-            Ok(s) => s,
-            Err(e) => {
-                tracing::error!(name = "tool.email.get.session_failed", client = %name, error = %e, "Failed to fetch JMAP session. Operator should check email account credentials.");
-                all_results.push(format!("Error fetching JMAP session for {}: {}", name, e));
-                continue;
-            }
-        };
-        let account_id = get_account_id(&accs, "urn:ietf:params:jmap:mail");
-        let calls = serde_json::json!([
-            ["Email/query", { "accountId": account_id, "filter": filter_obj }, "0"],
-            ["Email/get", { "accountId": account_id, "#ids": { "resultOf": "0", "name": "Email/query", "path": "/ids" }, "properties": ["id", "subject", "from", "receivedAt", "bodyValues", "textBody", "htmlBody"], "fetchTextBodyValues": true, "fetchHTMLBodyValues": true, "maxBodyValueBytes": 1000 }, "1"]
-        ]);
-        match jmap_call(&api_url, &token, &["urn:ietf:params:jmap:mail"], calls) {
-            Ok(res) => {
-                let mut is_error = false;
-                if let Some(method_responses) =
-                    res.get("methodResponses").and_then(|mr| mr.as_array())
-                {
-                    for resp in method_responses {
-                        if let Some(resp_arr) = resp.as_array() {
-                            if resp_arr.get(0).and_then(|s| s.as_str()) == Some("error") {
-                                all_results.push(format!(
-                                    "Error from JMAP server for {}: {}",
-                                    name,
-                                    serde_json::to_string_pretty(resp_arr).unwrap_or_default()
-                                ));
-                                is_error = true;
-                            }
-                        }
-                    }
-                }
-                if !is_error {
-                    let clean_res = convert_html_in_jmap(res);
-                    let simplified = simplify_jmap_emails(clean_res, Some(10));
-                    all_results.push(format!(
-                        "--- Client: {} ---\n{}",
-                        name,
-                        serde_json::to_string_pretty(&simplified).unwrap_or_default()
-                    ))
-                }
-            }
-            Err(e) => {
-                tracing::error!(name = "tool.email.get.api_failed", client = %name, error = %e, "Failed to query emails via JMAP. Operator should verify JMAP server status.");
-                all_results.push(format!("Error querying emails for {}: {}", name, e));
-            }
-        }
-    }
-    if all_results.is_empty() {
-        tracing::warn!(name = "tool.email.get.no_clients", "No JMAP clients configured. Operator should configure at least one email account in settings.");
-        Err("No JMAP clients configured.".to_string())
-    } else {
-        Ok(crate::tools::dtos::GetEmailResponse {
-            results: all_results.join("\n\n"),
-        })
-    }
 }
 
 pub fn tool_send_email(
@@ -1042,7 +957,7 @@ mod tests {
     use std::thread;
     use std::io::{Read, Write};
     use crate::config::{AppConfig, JmapClient};
-    use super::{tool_search_email, tool_get_email_by_id, tool_get_email, tool_send_email};
+    use super::{tool_search_email, tool_get_email_by_id, tool_send_email};
 
     fn spawn_mock_server(body: impl Into<String>) -> String {
         let listener = TcpListener::bind("127.0.0.1:0").unwrap();
@@ -1066,7 +981,17 @@ mod tests {
     #[test]
     fn test_tool_search_email_no_clients() {
         let config = AppConfig::default();
-        let res = tool_search_email(&config, Some("test"), None, None, None, None, None);
+        let res = tool_search_email(
+            &config,
+            Some("test"),
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+        );
         assert!(res.is_err());
     }
 
@@ -1084,7 +1009,17 @@ mod tests {
         let url = spawn_mock_server(body);
         let mut config = AppConfig::default();
         config.jmap_clients.insert("test".to_string(), JmapClient { url, token: "tok".to_string() });
-        let res = tool_search_email(&config, Some("test"), None, None, None, None, None);
+        let res = tool_search_email(
+            &config,
+            Some("test"),
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+        );
         assert!(res.is_ok());
     }
 
@@ -1105,21 +1040,34 @@ mod tests {
         assert!(res.is_ok(), "Error: {}", res.unwrap_err());
     }
 
+    // The `get_email` tool was merged into `search_email`; this test
+    // exercises the new status filters (`is_unread` / `is_flagged`) on
+    // the merged `search_email` entry point.
     #[test]
-    fn test_tool_get_email_success() {
+    fn test_tool_search_email_with_status_filters_success() {
         rustls::crypto::ring::default_provider().install_default().ok();
         let body = "{\
             \"apiUrl\": \"{API_URL}\",\
             \"primaryAccounts\": {\"urn:ietf:params:jmap:mail\": \"acc1\"},\
             \"methodResponses\": [\
                 [\"Email/query\", {\"ids\": [\"e1\"]}, \"0\"],\
-                [\"Email/get\", {\"list\": [{\"id\": \"e1\", \"subject\": \"Test\"}]}, \"1\"]\
+                [\"Email/get\", {\"list\": [{\"id\": \"e1\", \"subject\": \"Unread\"}]}, \"1\"]\
             ]\
         }";
         let url = spawn_mock_server(body);
         let mut config = AppConfig::default();
         config.jmap_clients.insert("test".to_string(), JmapClient { url, token: "tok".to_string() });
-        let res = tool_get_email(&config, Some("2026-07-01"), Some("2026-07-10"), Some("s@test.com"), Some("r@test.com"), Some(true), Some(false));
+        let res = tool_search_email(
+            &config,
+            None,
+            None,
+            Some("2026-07-01"),
+            Some("2026-07-10"),
+            Some("s@test.com"),
+            Some("r@test.com"),
+            Some(true),
+            Some(false),
+        );
         assert!(res.is_ok());
     }
 
@@ -1142,15 +1090,51 @@ mod tests {
     }
 
     #[test]
-    fn test_tool_search_email_empty_filters() {
+    fn test_tool_search_email_empty_filters_errors() {
+        // Pre-flight check: with no clients configured, the function
+        // must still return Err and never silently swallow the empty
+        // filter case.
+        let config = AppConfig::default();
+        let res = tool_search_email(
+            &config,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+        );
+        assert!(res.is_err());
+        let msg = res.unwrap_err();
+        assert!(msg.contains("At least one filter field must be provided"));
+    }
+
+    #[test]
+    fn test_tool_search_email_empty_filters_with_client_errors() {
+        // Even with a client configured, the pre-flight check rejects
+        // "no filters" without round-tripping to the JMAP server. The
+        // error message is returned synchronously.
         rustls::crypto::ring::default_provider().install_default().ok();
         let mut config = AppConfig::default();
         let body = "{\"apiUrl\": \"{API_URL}\", \"primaryAccounts\": {\"urn:ietf:params:jmap:mail\": \"acc1\"}}";
         let url = spawn_mock_server(body);
         config.jmap_clients.insert("test".to_string(), JmapClient { url, token: "tok".to_string() });
-        let res = tool_search_email(&config, None, None, None, None, None, None);
-        // Returns Ok but with an error message in results
-        let unwrapped = res.unwrap();
-        assert!(unwrapped.results.contains("At least one filter field must be provided"));
+        let res = tool_search_email(
+            &config,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+        );
+        assert!(res.is_err());
+        assert!(res
+            .unwrap_err()
+            .contains("At least one filter field must be provided"));
     }
 }

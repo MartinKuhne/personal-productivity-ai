@@ -351,10 +351,10 @@ define_tools! {
     },
     {
         name: "search_email",
-        description: "Search email by keyword.",
+        description: "Search email by any combination of keyword, folder (mailbox), date range, sender, recipient, unread status, or flagged status. All filters are combined with AND. At least one filter must be provided.",
         input: crate::tools::dtos::SearchEmailInput,
         enabled: |config: &AppConfig| !config.jmap_clients.is_empty(),
-        execute: |config, _root_path, input, _is_safe| crate::tools::jmap::tool_search_email(config, input.keyword.as_deref(), input.folder.as_deref(), input.start_date.as_deref(), input.end_date.as_deref(), input.from.as_deref(), input.to.as_deref())
+        execute: |config, _root_path, input, _is_safe| crate::tools::jmap::tool_search_email(config, input.keyword.as_deref(), input.folder.as_deref(), input.start_date.as_deref(), input.end_date.as_deref(), input.from.as_deref(), input.to.as_deref(), input.is_unread, input.is_flagged)
     },
     {
         name: "get_email_by_id",
@@ -362,13 +362,6 @@ define_tools! {
         input: crate::tools::dtos::GetEmailByIdInput,
         enabled: |config: &AppConfig| !config.jmap_clients.is_empty(),
         execute: |config, _root_path, input, _is_safe| crate::tools::jmap::tool_get_email_by_id(config, &input.id)
-    },
-    {
-        name: "get_email",
-        description: "Get email by date range, sender, recipient, unread status, or flagged status.",
-        input: crate::tools::dtos::GetEmailInput,
-        enabled: |config: &AppConfig| !config.jmap_clients.is_empty(),
-        execute: |config, _root_path, input, _is_safe| crate::tools::jmap::tool_get_email(config, input.start_date.as_deref(), input.end_date.as_deref(), input.sender.as_deref(), input.recipient.as_deref(), input.is_unread, input.is_flagged)
     },
     {
         name: "send_email",
