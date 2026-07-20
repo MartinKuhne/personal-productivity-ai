@@ -28,19 +28,49 @@ pub struct ReadTagsResponse {
 #[derive(Deserialize, Debug, JsonSchema)]
 pub struct ListFilesByTagInput {
     pub tag: String,
+    /// 1-indexed page number. Defaults to `1` if omitted.
+    pub page: Option<usize>,
+    /// Number of files to return per page. Defaults to `20` if omitted.
+    pub page_size: Option<usize>,
 }
 #[derive(Serialize, Debug, JsonSchema)]
 pub struct ListFilesByTagResponse {
-    pub files: String,
+    /// JSON array of virtual file paths for the requested page (no
+    /// library prefix is applied when the result is empty).
+    #[serde(default)]
+    pub files: Vec<String>,
+    /// Total number of files matching the tag, across all pages. This
+    /// is returned on every response so the caller can size follow-up
+    /// page requests without having to read the whole library.
+    pub total: usize,
+    /// When the requested `page` is past the end, this field is set
+    /// to a human-readable hint explaining why `files` is empty. When
+    /// the page is in range, the field is `None`.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub hint: Option<String>,
 }
 
 #[derive(Deserialize, Debug, JsonSchema)]
 pub struct ListFilesInput {
     pub path: String,
+    /// 1-indexed page number. Defaults to `1` if omitted.
+    pub page: Option<usize>,
+    /// Number of files to return per page. Defaults to `20` if omitted.
+    pub page_size: Option<usize>,
 }
 #[derive(Serialize, Debug, JsonSchema)]
 pub struct ListFilesResponse {
-    pub files: String,
+    /// JSON array of virtual file paths for the requested page.
+    #[serde(default)]
+    pub files: Vec<String>,
+    /// Total number of files in the requested directory (non-recursive),
+    /// across all pages. Returned on every response so the caller can
+    /// size follow-up page requests.
+    pub total: usize,
+    /// When the requested `page` is past the end, this field is set
+    /// to a human-readable hint. `None` when the page is in range.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub hint: Option<String>,
 }
 
 #[derive(Deserialize, Debug, JsonSchema)]

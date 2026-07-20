@@ -63,11 +63,25 @@ pub fn tool_read_tags(root_path: &Path) -> Result<crate::tools::dtos::ReadTagsRe
     })
 }
 
+/// Default page size for the paginated `list_files` family of tools
+/// (`list_files`, `list_files_by_tag`). Kept here (rather than
+/// inlined in the call site) so the constant has one canonical home
+/// and tests can reference it.
+pub const DEFAULT_LIST_FILES_BY_TAG_PAGE_SIZE: usize = 20;
+
+/// Scan a single content library and return every Markdown file whose
+/// front-matter contains the given tag, as a sorted list of virtual
+/// paths.
+///
+/// Paging is intentionally **not** applied here — the call site
+/// (`registry.rs`) is responsible for slicing the combined
+/// cross-library result, so the page and total fields stay consistent
+/// regardless of how many libraries the user has configured.
 pub fn tool_list_files_by_tag(
     root_path: &Path,
     virtual_prefix: &str,
     tag: &str,
-) -> Result<crate::tools::dtos::ListFilesByTagResponse, String> {
+) -> Result<Vec<String>, String> {
     let mut matching_files = Vec::new();
     for entry in WalkDir::new(root_path).into_iter().filter_map(|e| e.ok()) {
         if entry.path().is_file() {
@@ -83,21 +97,22 @@ pub fn tool_list_files_by_tag(
             }
         }
     }
-    if matching_files.is_empty() {
-        Ok(crate::tools::dtos::ListFilesByTagResponse {
-            files: "No matching files found.".to_string(),
-        })
-    } else {
-        Ok(crate::tools::dtos::ListFilesByTagResponse {
-            files: matching_files.join("\n"),
-        })
-    }
+    // Sort for deterministic paging at the call site — without a
+    // stable order the same page could return different files on each
+    // call.
+    matching_files.sort();
+    Ok(matching_files)
 }
 
+/// Scan a single directory (non-recursive) and return every Markdown
+/// file's virtual path, sorted. Paging is intentionally **not**
+/// applied here — the call site (`registry.rs`) is responsible for
+/// slicing the result so the page and total fields stay consistent
+/// regardless of how the call is dispatched.
 pub fn tool_list_files(
     target_dir: &Path,
     virtual_prefix: &str,
-) -> Result<crate::tools::dtos::ListFilesResponse, String> {
+) -> Result<Vec<String>, String> {
     let mut files = Vec::new();
     if let Ok(entries) = std::fs::read_dir(target_dir) {
         for entry in entries.filter_map(|e| e.ok()) {
@@ -116,15 +131,9 @@ pub fn tool_list_files(
             }
         }
     }
-    if files.is_empty() {
-        Ok(crate::tools::dtos::ListFilesResponse {
-            files: "No markdown files found.".to_string(),
-        })
-    } else {
-        Ok(crate::tools::dtos::ListFilesResponse {
-            files: files.join("\n"),
-        })
-    }
+    // Sort for deterministic paging at the call site.
+    files.sort();
+    Ok(files)
 }
 
 pub fn tool_read_file(path_str: &str) -> Result<crate::tools::dtos::ReadFileResponse, String> {
@@ -330,11 +339,13 @@ mod tests {
         fs::create_dir(dir.path().join("sub")).unwrap();
         fs::write(dir.path().join("sub").join("c.md"), "content").unwrap();
 
-        let result = tool_list_files(dir.path(), "Workspace").unwrap().files;
-        assert!(result.contains("Workspace"));
-        assert!(result.contains("a.md"));
-        assert!(!result.contains("c.md")); // Non-recursive, should not find c.md
-        assert!(!result.contains("b.txt"));
+        // The low-level tool now returns a `Vec<String>` of every
+        // match (no paging, no newline joining). Paging is applied at
+        // the registry call site.
+        let result = tool_list_files(dir.path(), "Workspace").unwrap();
+        assert_eq!(result.len(), 1, "non-recursive scan must return just a.md");
+        assert!(result[0].ends_with("a.md"));
+        assert!(result[0].starts_with("Workspace"));
     }
 
     #[test]
@@ -482,5 +493,72 @@ mod tests {
 
         let result = tool_read_tags(dir.path()).unwrap().tags;
         assert_eq!(result, vec!["tag1", "tag2"]);
+    }
+
+    // -- list_files_by_tag (paging support) -------------------------------
+
+    /// Helper: build a temp library with `n` Markdown files whose
+    /// front-matter all carry the given tag.
+    fn build_tagged_library(n: usize, tag: &str) -> tempfile::TempDir {
+        let dir = tempdir().unwrap();
+        for i in 0..n {
+            // Zero-pad so the lexicographic order matches numeric
+            // order — paging tests need a stable, predictable order.
+            let name = format!("file_{:03}.md", i);
+            let body = format!("---\ntags: [{}]\n---\n# Doc {}\n", tag, i);
+            fs::write(dir.path().join(name), body).unwrap();
+        }
+        dir
+    }
+
+    #[test]
+    fn test_list_files_by_tag_default_page_size_constant_is_20() {
+        // The documented default. A regression here would silently
+        // change the page size the LLM sees by default.
+        assert_eq!(DEFAULT_LIST_FILES_BY_TAG_PAGE_SIZE, 20);
+    }
+
+    #[test]
+    fn test_list_files_by_tag_returns_all_sorted_when_no_paging_in_tool() {
+        // The low-level tool returns every match (sorted) without
+        // slicing — paging lives at the call site so it can be
+        // applied to the cross-library result.
+        let dir = build_tagged_library(5, "meeting");
+        let res = tool_list_files_by_tag(dir.path(), "Workspace", "meeting").unwrap();
+        assert_eq!(res.len(), 5);
+        // Use ends_with because Path::join uses the platform
+        // separator (backslash on Windows, forward slash elsewhere).
+        assert!(res[0].ends_with("file_000.md"));
+        assert!(res[0].starts_with("Workspace"));
+        assert!(res[4].ends_with("file_004.md"));
+    }
+
+    #[test]
+    fn test_list_files_by_tag_no_matches_returns_empty() {
+        let dir = tempdir().unwrap();
+        fs::write(
+            dir.path().join("solo.md"),
+            "---\ntags: [other]\n---\n# x\n",
+        )
+        .unwrap();
+        let res = tool_list_files_by_tag(dir.path(), "Workspace", "meeting").unwrap();
+        assert!(res.is_empty());
+    }
+
+    #[test]
+    fn test_list_files_by_tag_ignores_non_markdown_files() {
+        // A .txt with the same tag in its body must not be matched —
+        // only .md / .markdown files are scanned.
+        let dir = tempdir().unwrap();
+        fs::write(
+            dir.path().join("note.md"),
+            "---\ntags: [meeting]\n---\n# md\n",
+        )
+        .unwrap();
+        fs::write(dir.path().join("note.txt"), "tags: [meeting]").unwrap();
+        let res = tool_list_files_by_tag(dir.path(), "Workspace", "meeting").unwrap();
+        assert_eq!(res.len(), 1);
+        assert!(res[0].ends_with("note.md"));
+        assert!(res[0].starts_with("Workspace"));
     }
 }
