@@ -137,16 +137,29 @@ impl FastMdApp {
                     use crate::file_events::FileEventKind;
                     match event.kind {
                         FileEventKind::Discovered | FileEventKind::Updated => {
-                            if !self.all_files.contains(&event.path) {
-                                self.all_files.push(event.path.clone());
-                                changed = true;
-                            }
-                            // Add parent directories so the tree
-                            // can render them.
-                            if let Some(parent) = event.path.parent() {
-                                if !self.all_dirs.contains(&parent.to_path_buf()) {
-                                    self.all_dirs.push(parent.to_path_buf());
+                            // The workspace tree only shows files
+                            // the user can edit — markdown (and the
+                            // plain-text companions we currently
+                            // treat as the same). PDFs and images
+                            // are inputs to the converters; they
+                            // still flow through the bus (so the
+                            // PDF-converter and image-vision
+                            // workers see them) but they must NOT
+                            // appear in the directory tree, and a
+                            // directory that contains only PDFs /
+                            // images must not appear either.
+                            if Self::is_workspace_file(&event.path) {
+                                if !self.all_files.contains(&event.path) {
+                                    self.all_files.push(event.path.clone());
                                     changed = true;
+                                }
+                                // Add parent directories so the
+                                // tree can render them.
+                                if let Some(parent) = event.path.parent() {
+                                    if !self.all_dirs.contains(&parent.to_path_buf()) {
+                                        self.all_dirs.push(parent.to_path_buf());
+                                        changed = true;
+                                    }
                                 }
                             }
                             // If the open tab's file was updated
@@ -170,7 +183,17 @@ impl FastMdApp {
                             }
                         }
                         FileEventKind::Removed => {
-                            self.all_files.retain(|p| p != &event.path);
+                            // `all_files` only ever holds workspace
+                            // files, so a `Removed` event for a
+                            // PDF is a no-op against it. The
+                            // `file_tags` map is keyed the same
+                            // way. We still process the event so
+                            // selection / loaded-state cleanup runs
+                            // if the removed file was the open
+                            // one.
+                            if Self::is_workspace_file(&event.path) {
+                                self.all_files.retain(|p| p != &event.path);
+                            }
                             self.file_tags.remove(&event.path);
                             // Clear selection / loaded state if the
                             // removed file was selected.
@@ -201,6 +224,24 @@ impl FastMdApp {
         // `loaded_path == None` and reload from disk via
         // `load_selected_file`.
         changed || loaded_dirty
+    }
+
+    /// Returns `true` if `path` is a user-editable workspace file
+    /// (i.e. one that should appear in the directory tree).
+    ///
+    /// The current rule is: markdown (`.md` / `.markdown`) and
+    /// plain-text (`.txt`). PDFs and images are inputs to the
+    /// PDF-converter and image-vision workers and stay out of the
+    /// tree. If we ever want to surface other text types
+    /// (e.g. `.org`, `.adoc`), add them here.
+    fn is_workspace_file(path: &std::path::Path) -> bool {
+        path.extension()
+            .and_then(|e| e.to_str())
+            .map(|e| {
+                let lower = e.to_lowercase();
+                lower == "md" || lower == "markdown" || lower == "txt"
+            })
+            .unwrap_or(false)
     }
 
     fn rebuild_tags(&mut self) {
@@ -938,5 +979,79 @@ mod tests {
 
         let _ = app.process_file_events();
         assert!(app.loaded_path.is_none());
+    }
+
+    #[test]
+    fn test_process_file_events_filters_out_non_workspace_files() {
+        // PDFs and images are inputs to the PDF-converter and
+        // image-vision workers. They still flow through the bus
+        // (so the workers see them) but they must NOT be added
+        // to `all_files` or `all_dirs`, which feed the directory
+        // tree. A directory that contains only PDFs / images
+        // must not appear in the tree either.
+        let mut app = create_test_app();
+
+        let pdf = PathBuf::from("/tmp/lib/doc.pdf");
+        let img = PathBuf::from("/tmp/lib/photo.png");
+        let md = PathBuf::from("/tmp/lib/notes.md");
+        let pdf_only_dir = PathBuf::from("/tmp/pdf_only");
+        let pdf_in_pdf_only_dir = PathBuf::from("/tmp/pdf_only/thing.pdf");
+
+        app.file_event_reader = Some(app.file_event_bus.subscribe());
+        let publisher = app.file_event_bus.clone();
+        publisher.publish(crate::file_events::FileEvent::discovered(pdf.clone()));
+        publisher.publish(crate::file_events::FileEvent::discovered(img.clone()));
+        publisher.publish(crate::file_events::FileEvent::discovered(md.clone()));
+        publisher.publish(crate::file_events::FileEvent::discovered(
+            pdf_in_pdf_only_dir.clone(),
+        ));
+
+        let _ = app.process_file_events();
+
+        // The markdown file should be in the tree and its
+        // parent should be in `all_dirs`.
+        assert!(
+            app.all_files.contains(&md),
+            "markdown files must appear in the workspace tree"
+        );
+        assert!(
+            app.all_dirs.contains(&PathBuf::from("/tmp/lib")),
+            "directories containing workspace files must appear in the tree"
+        );
+
+        // The PDF and image must NOT be in the tree, even though
+        // they were published to the bus (the converters need
+        // them).
+        assert!(
+            !app.all_files.contains(&pdf),
+            "PDFs must not appear in the workspace tree"
+        );
+        assert!(
+            !app.all_files.contains(&img),
+            "images must not appear in the workspace tree"
+        );
+
+        // A directory that contains only a PDF must not be added
+        // to `all_dirs`.
+        assert!(
+            !app.all_dirs.contains(&pdf_only_dir),
+            "directories that contain only non-workspace files must not appear in the tree"
+        );
+    }
+
+    #[test]
+    fn test_is_workspace_file_predicate() {
+        // Direct unit test for the predicate that drives the
+        // filter. Markdown (case-insensitive) and plain text
+        // are workspace files; everything else (PDFs, images,
+        // no extension) is not.
+        assert!(FastMdApp::is_workspace_file(&PathBuf::from("/a/b/note.md")));
+        assert!(FastMdApp::is_workspace_file(&PathBuf::from("/a/b/note.MD")));
+        assert!(FastMdApp::is_workspace_file(&PathBuf::from("/a/b/note.markdown")));
+        assert!(FastMdApp::is_workspace_file(&PathBuf::from("/a/b/note.txt")));
+        assert!(!FastMdApp::is_workspace_file(&PathBuf::from("/a/b/doc.pdf")));
+        assert!(!FastMdApp::is_workspace_file(&PathBuf::from("/a/b/photo.png")));
+        assert!(!FastMdApp::is_workspace_file(&PathBuf::from("/a/b/photo.jpg")));
+        assert!(!FastMdApp::is_workspace_file(&PathBuf::from("/a/b/no_extension")));
     }
 }
