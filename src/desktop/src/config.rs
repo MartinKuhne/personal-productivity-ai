@@ -467,4 +467,57 @@ inline_editor_enabled: true
         assert_eq!(cmd[0], "pandoc");
         assert!(config.inline_editor_enabled);
     }
+
+    #[test]
+    fn test_load_config_valid_file() {
+        let dir = tempdir().unwrap();
+        let config_path = dir.path().join("fastmd").join("config.yaml");
+        std::fs::create_dir_all(config_path.parent().unwrap()).unwrap();
+        let yaml = r#"
+user_name: "TestUser"
+"#;
+        std::fs::write(&config_path, yaml).unwrap();
+        
+        unsafe {
+            std::env::set_var("APPDATA", dir.path());
+        }
+        
+        let config = load_config();
+        assert_eq!(config.user_name, Some("TestUser".to_string()));
+    }
+
+    #[test]
+    fn test_load_config_invalid_file() {
+        let dir = tempdir().unwrap();
+        let config_path = dir.path().join("fastmd").join("config.yaml");
+        std::fs::create_dir_all(config_path.parent().unwrap()).unwrap();
+        std::fs::write(&config_path, "invalid: yaml: [").unwrap();
+        
+        unsafe {
+            std::env::set_var("APPDATA", dir.path());
+        }
+        
+        let config = load_config();
+        // Should return default
+        assert!(config.user_name.is_none());
+    }
+
+    #[test]
+    fn test_debug_impls() {
+        let j = JmapClient { url: "a".into(), token: "b".into() };
+        let s = format!("{:?}", j);
+        assert!(s.contains("[REDACTED]"));
+        
+        let c = CalDavClient { url: "a".into(), username: "u".into(), password: "p".into() };
+        let s = format!("{:?}", c);
+        assert!(s.contains("[REDACTED]"));
+        
+        let l = LlmConfig { model: "m".into(), api_url: "a".into(), api_key: "k".into(), cost: None, use_case: vec![] };
+        let s = format!("{:?}", l);
+        assert!(s.contains("[REDACTED]"));
+
+        let cfg = AppConfig::default();
+        let s2 = format!("{:?}", cfg);
+        assert!(s2.contains("AppConfig"));
+    }
 }

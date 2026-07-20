@@ -16,7 +16,12 @@ fn geocode(location: &str) -> Result<(f64, f64), String> {
     // We must manually URL encode the query. But since we don't have url-encoding crate imported by default, 
     // let's do a basic replace for spaces.
     let query_encoded = query.replace(" ", "%20");
-    let url = format!("https://nominatim.openstreetmap.org/search?q={}&format=json&limit=1", query_encoded);
+    let mut url = format!("https://nominatim.openstreetmap.org/search?q={}&format=json&limit=1", query_encoded);
+    
+    #[cfg(test)]
+    if let Ok(mock_url) = std::env::var("MOCK_NOMINATIM_URL") {
+        url = mock_url;
+    }
     
     let req = match ureq::get(&url).set("User-Agent", "FastMD Weather Tool/1.0").call() {
         Ok(r) => r,
@@ -61,7 +66,12 @@ pub fn tool_get_weather(location: &str, date_range: Option<&str>) -> Result<crat
         Err(e) => return Err(e),
     };
     
-    let points_url = format!("https://api.weather.gov/points/{},{}", lat, lon);
+    let mut points_url = format!("https://api.weather.gov/points/{},{}", lat, lon);
+    #[cfg(test)]
+    if let Ok(mock_url) = std::env::var("MOCK_NWS_POINTS_URL") {
+        points_url = mock_url;
+    }
+    
     let req = match ureq::get(&points_url).set("User-Agent", "FastMD Weather Tool/1.0").call() {
         Ok(r) => r,
         Err(e) => {
@@ -78,12 +88,18 @@ pub fn tool_get_weather(location: &str, date_range: Option<&str>) -> Result<crat
         }
     };
     
-    let forecast_url = match json.get("properties").and_then(|p| p.get("forecast")).and_then(|f| f.as_str()) {
+    let forecast_url_str = match json.get("properties").and_then(|p| p.get("forecast")).and_then(|f| f.as_str()) {
         Some(url) => url,
         None => return Err("Could not find forecast URL in NWS response".to_string()),
     };
     
-    let req = match ureq::get(forecast_url).set("User-Agent", "FastMD Weather Tool/1.0").call() {
+    let mut forecast_url = forecast_url_str.to_string();
+    #[cfg(test)]
+    if let Ok(mock_url) = std::env::var("MOCK_NWS_FORECAST_URL") {
+        forecast_url = mock_url;
+    }
+    
+    let req = match ureq::get(&forecast_url).set("User-Agent", "FastMD Weather Tool/1.0").call() {
         Ok(r) => r,
         Err(e) => {
             tracing::error!(name = "tool.weather.nws.forecast_api_failed", error = %e, url = %forecast_url, "NWS Forecast API request failed. Operator should verify network connectivity.");
@@ -143,3 +159,107 @@ pub fn tool_get_weather(location: &str, date_range: Option<&str>) -> Result<crat
         result: serde_json::to_string(&results).unwrap_or_default()
     })
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn spawn_mock_server(body: impl Into<String>) -> String {
+        unsafe { std::env::set_var("NO_PROXY", "127.0.0.1"); }
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let port = listener.local_addr().unwrap().port();
+        let body_str = body.into();
+        let response_str = format!("HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nConnection: close\r\nContent-Length: {}\r\n\r\n{}", body_str.len(), body_str);
+        std::thread::spawn(move || {
+            for stream in listener.incoming() {
+                if let Ok(mut stream) = stream {
+                    use std::io::{Read, Write};
+                    let mut buf = [0; 4096];
+                    let _ = stream.read(&mut buf);
+                    let _ = stream.write_all(response_str.as_bytes());
+                    std::thread::sleep(std::time::Duration::from_millis(200));
+                }
+            }
+        });
+        format!("http://127.0.0.1:{}", port)
+    }
+
+    #[test]
+    fn test_weather_module_all() {
+        rustls::crypto::ring::default_provider().install_default().ok();
+
+        // test_geocode_direct_coords
+        let (lat, lon) = geocode("47.6, -122.3").unwrap();
+        assert_eq!(lat, 47.6);
+        assert_eq!(lon, -122.3);
+
+        // test_geocode_success
+        let mock_resp_success = serde_json::json!([{"lat": "47.6062", "lon": "-122.3321"}]);
+        let url_success = spawn_mock_server(mock_resp_success.to_string());
+        unsafe { std::env::set_var("MOCK_NOMINATIM_URL", &url_success); }
+        let (lat, lon) = geocode("Seattle, WA").unwrap();
+        assert_eq!(lat, 47.6062);
+        assert_eq!(lon, -122.3321);
+
+        // test_geocode_empty_results
+        let mock_resp_empty = serde_json::json!([]);
+        let url_empty = spawn_mock_server(mock_resp_empty.to_string());
+        unsafe { std::env::set_var("MOCK_NOMINATIM_URL", &url_empty); }
+        let result_empty = geocode("UnknownPlace");
+        assert!(result_empty.is_err());
+        assert_eq!(result_empty.unwrap_err(), "Location not found");
+
+        // test_geocode_invalid_json
+        let url_invalid = spawn_mock_server("invalid json");
+        unsafe { std::env::set_var("MOCK_NOMINATIM_URL", &url_invalid); }
+        let result_invalid = geocode("Seattle, WA");
+        assert!(result_invalid.is_err());
+        assert!(result_invalid.unwrap_err().starts_with("Nominatim JSON error"));
+
+        // test_tool_get_weather_success
+        let nom_resp = serde_json::json!([{"lat": "47.6062", "lon": "-122.3321"}]);
+        let nom_url = spawn_mock_server(nom_resp.to_string());
+        unsafe { std::env::set_var("MOCK_NOMINATIM_URL", &nom_url); }
+        
+        let pts_resp = serde_json::json!({
+            "properties": {
+                "forecast": "http://example.com/forecast"
+            }
+        });
+        let pts_url = spawn_mock_server(pts_resp.to_string());
+        unsafe { std::env::set_var("MOCK_NWS_POINTS_URL", &pts_url); }
+        
+        let fc_resp = serde_json::json!({
+            "properties": {
+                "periods": [
+                    {
+                        "startTime": "2026-07-19T10:00:00Z",
+                        "name": "Today",
+                        "temperature": 75,
+                        "temperatureUnit": "F",
+                        "detailedForecast": "Sunny"
+                    }
+                ]
+            }
+        });
+        let fc_url = spawn_mock_server(fc_resp.to_string());
+        unsafe { std::env::set_var("MOCK_NWS_FORECAST_URL", &fc_url); }
+        
+        let result = tool_get_weather("Seattle, WA", None).unwrap();
+        assert!(result.result.contains("Today"));
+        assert!(result.result.contains("75 F"));
+        assert!(result.result.contains("Sunny"));
+        
+        let result2 = tool_get_weather("Seattle, WA", Some("2026-07-19")).unwrap();
+        assert!(result2.result.contains("Today"));
+        
+        let result3 = tool_get_weather("Seattle, WA", Some("2026-07-20"));
+        assert!(result3.is_err());
+        assert!(result3.unwrap_err().contains("No weather data found"));
+        
+        unsafe { std::env::remove_var("MOCK_NOMINATIM_URL"); }
+        unsafe { std::env::remove_var("MOCK_NWS_POINTS_URL"); }
+        unsafe { std::env::remove_var("MOCK_NWS_FORECAST_URL"); }
+    }
+}
+

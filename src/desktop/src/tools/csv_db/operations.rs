@@ -124,9 +124,13 @@ mod tests {
             db_name: "test_db".to_string(),
             headers: vec!["id".to_string(), "name".to_string(), "age".to_string()],
         };
-        let db = create_csv(&config, create_input).unwrap();
+        let db = create_csv(&config, create_input.clone()).unwrap();
         assert_eq!(db.name, "test_db");
         assert_eq!(db.headers.len(), 3);
+
+        // Test creating again should fail
+        let err_create = create_csv(&config, create_input).unwrap_err();
+        assert!(err_create.contains("already exists"));
 
         let list = list_csv(&config, ListCsvInput {}).unwrap();
         assert_eq!(list.len(), 1);
@@ -149,6 +153,7 @@ mod tests {
         let add_res = add_rows(&config, add_input).unwrap();
         assert!(add_res.contains("Added 2 rows"));
 
+        // Test invalid header
         let mut bad_row = HashMap::new();
         bad_row.insert("invalid_header".to_string(), "1".to_string());
         let bad_input = AddRowsInput {
@@ -157,5 +162,23 @@ mod tests {
         };
         let err = add_rows(&config, bad_input).unwrap_err();
         assert!(err.contains("invalid header"));
+
+        // Test missing required header
+        let mut missing_row = HashMap::new();
+        missing_row.insert("id".to_string(), "3".to_string());
+        missing_row.insert("name".to_string(), "Charlie".to_string());
+        let missing_input = AddRowsInput {
+            db_name: "test_db".to_string(),
+            rows: vec![missing_row],
+        };
+        let err_missing = add_rows(&config, missing_input).unwrap_err();
+        assert!(err_missing.contains("missing required header"));
+
+        // Test add to non-existent db
+        let err_not_exist = add_rows(&config, AddRowsInput {
+            db_name: "missing_db".to_string(),
+            rows: vec![],
+        }).unwrap_err();
+        assert!(err_not_exist.contains("does not exist"));
     }
 }

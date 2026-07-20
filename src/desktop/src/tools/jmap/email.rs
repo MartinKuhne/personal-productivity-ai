@@ -391,6 +391,7 @@ pub fn tool_get_email_by_id(
                 });
             }
             Err(e) => {
+                println!("jmap_call error: {}", e);
                 tracing::error!(name = "tool.email.get_by_id.api_failed", client = %name, error = %e, "Failed to query email by ID via JMAP. Operator should verify JMAP server status.");
                 continue;
             }
@@ -1035,5 +1036,121 @@ mod tests {
         let result = simplify_jmap_emails(res, None);
         assert_eq!(result[0]["cc"][0]["email"], "cc@t.com");
         assert_eq!(result[0]["bcc"][0]["email"], "bcc@t.com");
+    }
+
+    use std::net::TcpListener;
+    use std::thread;
+    use std::io::{Read, Write};
+    use crate::config::{AppConfig, JmapClient};
+    use super::{tool_search_email, tool_get_email_by_id, tool_get_email, tool_send_email};
+
+    fn spawn_mock_server(body: impl Into<String>) -> String {
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let port = listener.local_addr().unwrap().port();
+        let api_url = format!("http://127.0.0.1:{}", port);
+        let body_str = body.into().replace("{API_URL}", &api_url);
+        let response_str = format!("HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nConnection: close\r\nContent-Length: {}\r\n\r\n{}", body_str.len(), body_str);
+        thread::spawn(move || {
+            for stream in listener.incoming() {
+                if let Ok(mut stream) = stream {
+                    let mut buf = [0; 4096];
+                    let _ = stream.read(&mut buf);
+                    let _ = stream.write_all(response_str.as_bytes());
+                    std::thread::sleep(std::time::Duration::from_millis(200));
+                }
+            }
+        });
+        format!("http://127.0.0.1:{}", port)
+    }
+
+    #[test]
+    fn test_tool_search_email_no_clients() {
+        let config = AppConfig::default();
+        let res = tool_search_email(&config, Some("test"), None, None, None, None, None);
+        assert!(res.is_err());
+    }
+
+    #[test]
+    fn test_tool_search_email_success() {
+        rustls::crypto::ring::default_provider().install_default().ok();
+        let body = "{\
+            \"apiUrl\": \"{API_URL}\",\
+            \"primaryAccounts\": {\"urn:ietf:params:jmap:mail\": \"acc1\"},\
+            \"methodResponses\": [\
+                [\"Email/query\", {\"ids\": [\"e1\"]}, \"0\"],\
+                [\"Email/get\", {\"list\": [{\"id\": \"e1\", \"subject\": \"Test\"}]}, \"1\"]\
+            ]\
+        }";
+        let url = spawn_mock_server(body);
+        let mut config = AppConfig::default();
+        config.jmap_clients.insert("test".to_string(), JmapClient { url, token: "tok".to_string() });
+        let res = tool_search_email(&config, Some("test"), None, None, None, None, None);
+        assert!(res.is_ok());
+    }
+
+    #[test]
+    fn test_tool_get_email_by_id_success() {
+        rustls::crypto::ring::default_provider().install_default().ok();
+        let body = "{\
+            \"apiUrl\": \"{API_URL}\",\
+            \"primaryAccounts\": {\"urn:ietf:params:jmap:mail\": \"acc1\"},\
+            \"methodResponses\": [\
+                [\"Email/get\", {\"list\": [{\"id\": \"e1\", \"subject\": \"Test\"}]}, \"0\"]\
+            ]\
+        }";
+        let url = spawn_mock_server(body);
+        let mut config = AppConfig::default();
+        config.jmap_clients.insert("test".to_string(), JmapClient { url, token: "tok".to_string() });
+        let res = tool_get_email_by_id(&config, "e1");
+        assert!(res.is_ok(), "Error: {}", res.unwrap_err());
+    }
+
+    #[test]
+    fn test_tool_get_email_success() {
+        rustls::crypto::ring::default_provider().install_default().ok();
+        let body = "{\
+            \"apiUrl\": \"{API_URL}\",\
+            \"primaryAccounts\": {\"urn:ietf:params:jmap:mail\": \"acc1\"},\
+            \"methodResponses\": [\
+                [\"Email/query\", {\"ids\": [\"e1\"]}, \"0\"],\
+                [\"Email/get\", {\"list\": [{\"id\": \"e1\", \"subject\": \"Test\"}]}, \"1\"]\
+            ]\
+        }";
+        let url = spawn_mock_server(body);
+        let mut config = AppConfig::default();
+        config.jmap_clients.insert("test".to_string(), JmapClient { url, token: "tok".to_string() });
+        let res = tool_get_email(&config, Some("2026-07-01"), Some("2026-07-10"), Some("s@test.com"), Some("r@test.com"), Some(true), Some(false));
+        assert!(res.is_ok());
+    }
+
+    #[test]
+    fn test_tool_send_email_success() {
+        rustls::crypto::ring::default_provider().install_default().ok();
+        let body = "{\
+            \"apiUrl\": \"{API_URL}\",\
+            \"primaryAccounts\": {\"urn:ietf:params:jmap:mail\": \"acc1\", \"urn:ietf:params:jmap:submission\": \"sub1\"},\
+            \"methodResponses\": [\
+                [\"Email/set\", {\"created\": {\"draft_1\": {\"id\": \"d1\"}}}, \"0\"],\
+                [\"EmailSubmission/set\", {\"created\": {\"sub_1\": {\"id\": \"s1\"}}}, \"1\"]\
+            ]\
+        }";
+        let url = spawn_mock_server(body);
+        let mut config = AppConfig::default();
+        config.jmap_clients.insert("test".to_string(), JmapClient { url, token: "tok".to_string() });
+        let res = tool_send_email(&config, "to@test.com", "Subject", "Body");
+        assert!(res.is_ok());
+    }
+
+    #[test]
+    fn test_tool_search_email_empty_filters() {
+        rustls::crypto::ring::default_provider().install_default().ok();
+        let mut config = AppConfig::default();
+        let body = "{\"apiUrl\": \"{API_URL}\", \"primaryAccounts\": {\"urn:ietf:params:jmap:mail\": \"acc1\"}}";
+        let url = spawn_mock_server(body);
+        config.jmap_clients.insert("test".to_string(), JmapClient { url, token: "tok".to_string() });
+        let res = tool_search_email(&config, None, None, None, None, None, None);
+        // Returns Ok but with an error message in results
+        let unwrapped = res.unwrap();
+        assert!(unwrapped.results.contains("At least one filter field must be provided"));
     }
 }

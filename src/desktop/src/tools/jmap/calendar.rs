@@ -251,3 +251,131 @@ pub fn tool_delete_calendar_item(
         })
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::config::{AppConfig, JmapClient};
+    use std::collections::HashMap;
+
+    fn spawn_mock_server(body: impl Into<String>) -> String {
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let port = listener.local_addr().unwrap().port();
+        let api_url = format!("http://127.0.0.1:{}", port);
+        let body_str = body.into().replace("{API_URL}", &api_url);
+        let response_str = format!("HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nConnection: close\r\nContent-Length: {}\r\n\r\n{}", body_str.len(), body_str);
+        std::thread::spawn(move || {
+            for stream in listener.incoming() {
+                if let Ok(mut stream) = stream {
+                    use std::io::{Read, Write};
+                    let mut buf = [0; 4096];
+                    let _ = stream.read(&mut buf);
+                    let _ = stream.write_all(response_str.as_bytes());
+                    std::thread::sleep(std::time::Duration::from_millis(200));
+                }
+            }
+        });
+        format!("http://127.0.0.1:{}", port)
+    }
+
+    fn mock_config(api_url: &str) -> AppConfig {
+        let mut clients = HashMap::new();
+        clients.insert("test_jmap".to_string(), JmapClient {
+            url: api_url.to_string(),
+            token: "test_token".to_string(),
+        });
+        AppConfig {
+            jmap_clients: clients,
+            ..AppConfig::default()
+        }
+    }
+
+    #[test]
+    fn test_calendar_operations_success() {
+        rustls::crypto::ring::default_provider().install_default().ok();
+        let json_resp = serde_json::json!({
+            "apiUrl": "{API_URL}",
+            "primaryAccounts": {
+                "urn:ietf:params:jmap:calendars": "acc-1"
+            },
+            "methodResponses": [
+                ["CalendarEvent/get", { "list": [{"id": "ev-1", "title": "Meeting"}] }, "1"],
+                ["CalendarEvent/set", { "created": {"new_event_1": {"id": "new-id"}}, "updated": {"ev-1": null}, "destroyed": ["ev-2"] }, "0"]
+            ]
+        });
+        let url = spawn_mock_server(serde_json::to_string(&json_resp).unwrap());
+        let config = mock_config(&url);
+
+        let res_search = tool_search_calendar(&config, "meet");
+        assert!(res_search.is_ok());
+
+        let res_get = tool_get_calendar(&config, "2023-01-01T00:00:00Z", "2023-12-31T23:59:59Z");
+        assert!(res_get.is_ok());
+
+        let res_item = tool_get_calendar_item(&config, "ev-1");
+        assert!(res_item.is_ok());
+
+        let res_add = tool_add_calendar_item(&config, r#"{"title": "New"}"#);
+        assert!(res_add.is_ok());
+
+        let res_upd = tool_update_calendar_item(&config, "ev-1", r#"{"title": "Updated"}"#);
+        assert!(res_upd.is_ok());
+
+        let res_del = tool_delete_calendar_item(&config, "ev-2");
+        assert!(res_del.is_ok());
+    }
+
+    #[test]
+    fn test_calendar_operations_errors() {
+        rustls::crypto::ring::default_provider().install_default().ok();
+        let json_resp = serde_json::json!({
+            "apiUrl": "{API_URL}",
+            "primaryAccounts": {
+                "urn:ietf:params:jmap:calendars": "acc-1"
+            },
+            "methodResponses": [
+                ["error", { "type": "serverError", "description": "mock error" }, "0"]
+            ]
+        });
+        let url = spawn_mock_server(serde_json::to_string(&json_resp).unwrap());
+        let config = mock_config(&url);
+
+        let res_search = tool_search_calendar(&config, "meet");
+        assert!(res_search.is_ok());
+        assert!(res_search.unwrap().results.contains("Error from JMAP server"));
+
+        let res_add_err = tool_add_calendar_item(&config, "{invalid json}");
+        assert!(res_add_err.is_err());
+        assert!(res_add_err.unwrap_err().contains("Invalid JSON"));
+
+        let res_upd_err = tool_update_calendar_item(&config, "ev-1", "{invalid json}");
+        assert!(res_upd_err.is_err());
+        assert!(res_upd_err.unwrap_err().contains("Invalid JSON"));
+    }
+
+    #[test]
+    fn test_calendar_operations_no_clients() {
+        let config = AppConfig::default();
+        assert!(tool_search_calendar(&config, "meet").is_err());
+        assert!(tool_get_calendar(&config, "start", "end").is_err());
+        assert!(tool_get_calendar_item(&config, "id").is_err());
+        assert!(tool_add_calendar_item(&config, "{}").is_err());
+        assert!(tool_update_calendar_item(&config, "id", "{}").is_err());
+        assert!(tool_delete_calendar_item(&config, "id").is_err());
+    }
+
+    #[test]
+    fn test_calendar_operations_session_error() {
+        rustls::crypto::ring::default_provider().install_default().ok();
+        // Respond with 401 Unauthorized for session
+        let url = spawn_mock_server("HTTP/1.1 401 Unauthorized\r\nContent-Length: 5\r\n\r\nerror");
+        let config = mock_config(&url);
+        
+        let res_search = tool_search_calendar(&config, "meet");
+        // tool_search_calendar skips failed sessions and continues, but if all fail it returns an error
+        assert!(res_search.unwrap().results.contains("Error fetching JMAP session"));
+
+        let res_add = tool_add_calendar_item(&config, "{}");
+        assert!(res_add.unwrap().result.contains("Error fetching JMAP session"));
+    }
+}

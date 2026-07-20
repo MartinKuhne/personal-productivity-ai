@@ -162,6 +162,7 @@ mod tests {
         assert_eq!(q_res.rows.len(), 1);
         assert_eq!(q_res.rows[0].get("item").unwrap(), "banana");
 
+        // Test aggregate sum
         let q_res2 = query_csv(&config, QueryRequest {
             db_name: "sales".to_string(),
             predicate: None,
@@ -170,6 +171,34 @@ mod tests {
         }).unwrap();
         assert_eq!(q_res2.aggregate_result, Some(30.0));
 
+        // Test aggregate average
+        let q_res_avg = query_csv(&config, QueryRequest {
+            db_name: "sales".to_string(),
+            predicate: None,
+            aggregate_col: Some("price".to_string()),
+            aggregate_func: Some("avg".to_string()),
+        }).unwrap();
+        assert_eq!(q_res_avg.aggregate_result, Some(1.0));
+
+        // Test unsupported aggregate
+        let err_agg = query_csv(&config, QueryRequest {
+            db_name: "sales".to_string(),
+            predicate: None,
+            aggregate_col: Some("qty".to_string()),
+            aggregate_func: Some("max".to_string()),
+        }).unwrap_err();
+        assert!(err_agg.contains("Unsupported aggregate function"));
+
+        // Test query invalid database
+        let err_not_exist = query_csv(&config, QueryRequest {
+            db_name: "missing".to_string(),
+            predicate: None,
+            aggregate_col: None,
+            aggregate_func: None,
+        }).unwrap_err();
+        assert!(err_not_exist.contains("does not exist"));
+
+        // Test delete
         let d_res = delete_rows(&config, DeleteRowsInput {
             db_name: "sales".to_string(),
             predicate: "item == \"apple\"".to_string(),
@@ -184,5 +213,12 @@ mod tests {
         }).unwrap();
         assert_eq!(q_res3.rows.len(), 1);
         assert_eq!(q_res3.rows[0].get("item").unwrap(), "banana");
+
+        // Test delete invalid predicate
+        let err_pred = delete_rows(&config, DeleteRowsInput {
+            db_name: "sales".to_string(),
+            predicate: "invalid syntax ++".to_string(),
+        }).unwrap_err();
+        assert!(err_pred.contains("Invalid predicate") || err_pred.contains("Evaluation error"), "Actual error: {}", err_pred);
     }
 }

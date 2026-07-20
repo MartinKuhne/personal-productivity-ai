@@ -99,6 +99,7 @@ pub async fn process_image(job: ImageJob, config: AppConfig, tx: Sender<Backgrou
                 )));
                 Ok(())
             } else {
+
                 tracing::error!(name = "vision.api.no_content", image = %img_name, response = ?json, "Vision API returned no content in choices. Operator should check model compatibility.");
                 let msg = format!("No content in response for {:?}", img_name);
                 let _ = tx.send(BackgroundMessage::LogEntry(BackgroundLogEntry::new(LogCategory::ImageVision, msg.clone())));
@@ -117,5 +118,210 @@ pub async fn process_image(job: ImageJob, config: AppConfig, tx: Sender<Backgrou
             let _ = tx.send(BackgroundMessage::LogEntry(BackgroundLogEntry::new(LogCategory::ImageVision, err_msg.clone())));
             Err(err_msg)
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::path::PathBuf;
+    use crate::config::{AppConfig, LlmConfig};
+    use std::sync::mpsc;
+
+    #[tokio::test]
+    async fn test_process_image_no_model() {
+        let job = ImageJob {
+            image_path: PathBuf::from("test.jpg"),
+            md_path: PathBuf::from("test.md"),
+        };
+        let config = AppConfig::default();
+        let (tx, _rx) = mpsc::channel();
+        let result = process_image(job, config, tx).await;
+        assert!(result.is_err());
+        assert_eq!(result.unwrap_err(), "No vision model configured");
+    }
+
+    #[tokio::test]
+    async fn test_process_image_missing_file() {
+        let job = ImageJob {
+            image_path: PathBuf::from("nonexistent.jpg"),
+            md_path: PathBuf::from("test.md"),
+        };
+        let mut config = AppConfig::default();
+        config.models.insert("test".to_string(), LlmConfig {
+            model: "test-vision".to_string(),
+            api_key: "dummy".to_string(),
+            api_url: "dummy".to_string(),
+            cost: None,
+            use_case: vec!["vision".to_string()],
+        });
+        let (tx, _rx) = mpsc::channel();
+        let result = process_image(job, config, tx).await;
+        assert!(result.is_err());
+        assert!(result.unwrap_err().contains("Failed to read image"));
+    }
+
+    #[tokio::test]
+    async fn test_process_image_success() {
+        let _ = rustls::crypto::ring::default_provider().install_default();
+        let mock_server = {
+            let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+            let port = listener.local_addr().unwrap().port();
+            let body = r#"{"choices": [{"message": {"content": "Mock description"}}]}"#;
+            let response = format!(
+                "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nConnection: close\r\nContent-Length: {}\r\n\r\n{}",
+                body.len(), body
+            );
+            std::thread::spawn(move || {
+                for stream in listener.incoming() {
+                    if let Ok(mut stream) = stream {
+                        use std::io::{Read, Write};
+                        let mut buf = [0; 4096];
+                        let _ = stream.read(&mut buf);
+                        let _ = stream.write_all(response.as_bytes());
+                        std::thread::sleep(std::time::Duration::from_millis(200));
+                        break;
+                    }
+                }
+            });
+            format!("http://127.0.0.1:{}", port)
+        };
+
+        // create dummy image file
+        let image_path = PathBuf::from("test_image.png");
+        std::fs::write(&image_path, b"fake image data").unwrap();
+        let md_path = PathBuf::from("test_output.md");
+
+        let job = ImageJob {
+            image_path: image_path.clone(),
+            md_path: md_path.clone(),
+        };
+
+        let mut config = AppConfig::default();
+        config.models.insert("test".to_string(), LlmConfig {
+            model: "test-vision".to_string(),
+            api_key: "dummy".to_string(),
+            api_url: mock_server,
+            cost: None,
+            use_case: vec!["vision".to_string()],
+        });
+
+        let (tx, _rx) = mpsc::channel();
+        let result = process_image(job, config, tx).await;
+        
+        assert!(result.is_ok());
+        let md_content = std::fs::read_to_string(&md_path).unwrap();
+        assert_eq!(md_content, "Mock description");
+
+        std::fs::remove_file(image_path).unwrap();
+        std::fs::remove_file(md_path).unwrap();
+    }
+
+    #[tokio::test]
+    async fn test_process_image_api_error() {
+        let _ = rustls::crypto::ring::default_provider().install_default();
+        let mock_server = {
+            let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+            let port = listener.local_addr().unwrap().port();
+            let body = r#"{"error": "bad request"}"#;
+            let response = format!(
+                "HTTP/1.1 400 Bad Request\r\nContent-Type: application/json\r\nConnection: close\r\nContent-Length: {}\r\n\r\n{}",
+                body.len(), body
+            );
+            std::thread::spawn(move || {
+                for stream in listener.incoming() {
+                    if let Ok(mut stream) = stream {
+                        use std::io::{Read, Write};
+                        let mut buf = [0; 4096];
+                        let _ = stream.read(&mut buf);
+                        let _ = stream.write_all(response.as_bytes());
+                        std::thread::sleep(std::time::Duration::from_millis(200));
+                        break;
+                    }
+                }
+            });
+            format!("http://127.0.0.1:{}", port)
+        };
+
+        let image_path = PathBuf::from("test_image2.png");
+        std::fs::write(&image_path, b"fake image data").unwrap();
+        let md_path = PathBuf::from("test_output2.md");
+
+        let job = ImageJob {
+            image_path: image_path.clone(),
+            md_path: md_path.clone(),
+        };
+
+        let mut config = AppConfig::default();
+        config.models.insert("test".to_string(), LlmConfig {
+            model: "test-vision".to_string(),
+            api_key: "dummy".to_string(),
+            api_url: mock_server,
+            cost: None,
+            use_case: vec!["vision".to_string()],
+        });
+
+        let (tx, _rx) = mpsc::channel();
+        let result = process_image(job, config, tx).await;
+        
+        assert!(result.is_err());
+        assert!(result.unwrap_err().contains("API request failed"));
+
+        std::fs::remove_file(image_path).unwrap();
+        let _ = std::fs::remove_file(md_path);
+    }
+    
+    #[tokio::test]
+    async fn test_process_image_no_content() {
+        let _ = rustls::crypto::ring::default_provider().install_default();
+        let mock_server = {
+            let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+            let port = listener.local_addr().unwrap().port();
+            let body = r#"{"choices": [{"message": {}}]}"#;
+            let response = format!(
+                "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nConnection: close\r\nContent-Length: {}\r\n\r\n{}",
+                body.len(), body
+            );
+            std::thread::spawn(move || {
+                for stream in listener.incoming() {
+                    if let Ok(mut stream) = stream {
+                        use std::io::{Read, Write};
+                        let mut buf = [0; 4096];
+                        let _ = stream.read(&mut buf);
+                        let _ = stream.write_all(response.as_bytes());
+                        std::thread::sleep(std::time::Duration::from_millis(200));
+                        break;
+                    }
+                }
+            });
+            format!("http://127.0.0.1:{}", port)
+        };
+
+        let image_path = PathBuf::from("test_image3.png");
+        std::fs::write(&image_path, b"fake image data").unwrap();
+        let md_path = PathBuf::from("test_output3.md");
+
+        let job = ImageJob {
+            image_path: image_path.clone(),
+            md_path: md_path.clone(),
+        };
+
+        let mut config = AppConfig::default();
+        config.models.insert("test".to_string(), LlmConfig {
+            model: "test-vision".to_string(),
+            api_key: "dummy".to_string(),
+            api_url: mock_server,
+            cost: None,
+            use_case: vec!["vision".to_string()],
+        });
+
+        let (tx, _rx) = mpsc::channel();
+        let result = process_image(job, config, tx).await;
+        
+        assert!(result.is_err());
+        assert!(result.unwrap_err().contains("No content in response"));
+
+        std::fs::remove_file(image_path).unwrap();
+        let _ = std::fs::remove_file(md_path);
     }
 }

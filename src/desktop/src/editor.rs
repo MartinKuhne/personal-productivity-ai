@@ -271,4 +271,12 @@ mod tests {
         state2.save().unwrap_err();
         // After save failure, the error_message is set; we test the close path separately
     }
+
+    #[test]
+    fn test_editor_show_not_open() {
+        let mut state = EditorState::default();
+        let ctx = egui::Context::default();
+        // Should return false and do nothing when not open
+        assert!(!state.show(&ctx));
+    }
 }
