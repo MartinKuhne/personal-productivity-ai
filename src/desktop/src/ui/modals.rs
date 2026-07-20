@@ -43,8 +43,9 @@ pub fn show_move_modal(app: &mut FastMdApp, ctx: &egui::Context) {
                         }
                     });
 
+                let submit = ctx.input_mut(|i| i.consume_key(egui::Modifiers::NONE, egui::Key::Enter));
                 ui.horizontal(|ui| {
-                    if ui.button("Ok").clicked() {
+                    if ui.button("Ok").clicked() || (submit && app.selected_move_folder.is_some()) {
                         if let (Some(file), Some(folder)) = (&app.file_to_move, &app.selected_move_folder) {
                             if let Some(name) = file.file_name() {
                                 let new_path = folder.join(name);
@@ -86,10 +87,7 @@ pub fn show_create_dir_modal(app: &mut FastMdApp, ctx: &egui::Context) {
                 let response = ui.text_edit_singleline(&mut app.create_dir_name);
                 response.request_focus();
 
-                let mut submit = false;
-                if response.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter)) {
-                    submit = true;
-                }
+                let submit = ctx.input_mut(|i| i.consume_key(egui::Modifiers::NONE, egui::Key::Enter));
 
                 ui.horizontal(|ui| {
                     if ui.button("Ok").clicked() || submit {
@@ -150,10 +148,7 @@ pub fn show_rename_modal(app: &mut FastMdApp, ctx: &egui::Context) {
                 let response = ui.text_edit_singleline(&mut app.rename_new_name);
                 response.request_focus();
 
-                let mut submit = false;
-                if response.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter)) {
-                    submit = true;
-                }
+                let submit = ctx.input_mut(|i| i.consume_key(egui::Modifiers::NONE, egui::Key::Enter));
 
                 ui.horizontal(|ui| {
                     if ui.button("Ok").clicked() || submit {
