@@ -35,84 +35,159 @@ The following table summarizes all 28 tools available to the LLM agent, categori
 
 ### Detailed Tool Schema and Arguments
 
-Here is the exact schema and argument breakdown for each tool as declared in the codebase:
+Here is the exact schema and argument breakdown for each tool as declared in the codebase.
+
+All tool responses follow the same envelope:
+
+```json
+// Success
+{ "status": "success", "data": { <response fields> } }
+
+// Error
+{ "status": "error", "message": "Description of what went wrong." }
+```
+
+---
 
 #### 1. Core Workspace Tools
 
 ##### `grep`
 * **Description:** Search for a query string case-insensitively across all Markdown files in the workspace.
-* **Arguments:**
-  * `query` (string, **required**): The search term.
+* **Request:**
+  ```json
+  { "query": "search term" }
+  ```
+* **Response (`data`):**
+  ```json
+  { "matches": "lib/file.md:42 - line content\nlib/other.md:10 - another line" }
+  ```
 
 ##### `read_tags`
 * **Description:** Get all unique tags defined in front-matter headers of all Markdown files in the workspace.
-* **Arguments:**
-  * None.
+* **Request:**
+  ```json
+  {}
+  ```
+* **Response (`data`):**
+  ```json
+  { "tags": ["meeting", "notes", "todo"] }
+  ```
 
 ##### `list_files_by_tag`
 * **Description:** List all Markdown files that contain a specific tag in their front-matter.
-* **Arguments:**
-  * `tag` (string, **required**): The tag to filter by.
+* **Request:**
+  ```json
+  { "tag": "meeting" }
+  ```
+* **Response (`data`):**
+  ```json
+  { "files": "work/2026-07-20-meeting.md\npersonal/notes.md" }
+  ```
 
 ##### `list_files`
-* **Description:** List all Markdown files in the workspace.
-* **Arguments:**
-  * None.
+* **Description:** List all Markdown files in a directory (non-recursive). With `"/"` or `"."` returns library names.
+* **Request:**
+  ```json
+  { "path": "MyLib" }
+  ```
+* **Response (`data`):**
+  ```json
+  { "files": "notes.md\ndiary.md" }
+  ```
 
 ##### `read_file`
 * **Description:** Read the entire text contents of a file at the specified path.
-* **Arguments:**
-  * `path` (string, **required**): The path to the file.
-* **Implementation:** `tool_read_file` in `src/llm.rs`
+* **Request:**
+  ```json
+  { "path": "MyLib/doc.md" }
+  ```
+* **Response (`data`):**
+  ```json
+  { "content": "# Title\n\nFull file content..." }
+  ```
 
 ##### `read_file_lines`
 * **Description:** Read specific lines from a file (1-indexed).
-* **Arguments:**
-  * `path` (string, **required**): The path to the file.
-  * `start_line` (integer, **required**): The start line index (inclusive, 1-indexed).
-  * `end_line` (integer, **required**): The end line index (inclusive, 1-indexed).
-* **Implementation:** `tool_read_file_lines` in `src/llm.rs`
+* **Request:**
+  ```json
+  { "path": "MyLib/doc.md", "start_line": 5, "end_line": 10 }
+  ```
+* **Response (`data`):**
+  ```json
+  { "content": "line 5\nline 6\nline 7\nline 8\nline 9\nline 10" }
+  ```
 
 ##### `create_file`
 * **Description:** Create a new file at the specified path with the provided content.
-* **Arguments:**
-  * `path` (string, **required**): The path of the file to create.
-  * `content` (string, **required**): The content to write to the file.
+* **Request:**
+  ```json
+  { "path": "MyLib/new.md", "content": "---\ntitle: New Doc\n---\n# Hello" }
+  ```
+* **Response (`data`):**
+  ```json
+  { "result": "File created successfully.", "size_bytes": 52 }
+  ```
 
 ##### `insert_lines`
-* **Description:** Insert lines into a file at a specific 1-indexed line index.
-* **Arguments:**
-  * `path` (string, **required**): The path to the file.
-  * `line_index` (integer, **required**): The 1-indexed position to insert lines at (the lines will be inserted right before this line).
-  * `lines` (array of strings, **required**): The lines of text to insert.
+* **Description:** Insert lines into a file at a specific 1-indexed line index (lines are inserted before the given line).
+* **Request:**
+  ```json
+  { "path": "MyLib/doc.md", "line_index": 3, "lines": ["new line A", "new line B"] }
+  ```
+* **Response (`data`):**
+  ```json
+  { "result": "Lines inserted successfully." }
+  ```
 
 ##### `delete_lines`
 * **Description:** Delete specific lines from a file (1-indexed, inclusive).
-* **Arguments:**
-  * `path` (string, **required**): The path to the file.
-  * `start_line` (integer, **required**): The start line (1-indexed).
-  * `end_line` (integer, **required**): The end line (1-indexed).
+* **Request:**
+  ```json
+  { "path": "MyLib/doc.md", "start_line": 5, "end_line": 7 }
+  ```
+* **Response (`data`):**
+  ```json
+  { "result": "Lines deleted successfully." }
+  ```
 
 ##### `replace_text`
-* **Description:** Replace exact occurrences of old_string with new_string in a file.
-* **Arguments:**
-  * `path` (string, **required**): The path to the file.
-  * `old_string` (string, **required**): The exact string to replace.
-  * `new_string` (string, **required**): The replacement string.
+* **Description:** Replace exact occurrences of `old_string` with `new_string` in a file.
+* **Request:**
+  ```json
+  { "path": "MyLib/doc.md", "old_string": "foo", "new_string": "bar" }
+  ```
+* **Response (`data`):**
+  ```json
+  { "result": "Text replaced successfully." }
+  ```
 
 ##### `read_yaml_header`
 * **Description:** Parse a YAML header from a markdown file and return its content representation.
-* **Arguments:**
-  * `path` (string, **required**): The path to the markdown file.
+* **Request:**
+  ```json
+  { "path": "MyLib/doc.md" }
+  ```
+* **Response (`data`):**
+  ```json
+  { "content": "title: My Document\nsummary: A brief description\ntags:\n  - meeting\n  - notes\nheader-date: 2026-07-20T12:00:00Z\n" }
+  ```
 
 ##### `write_yaml_header`
 * **Description:** Write or update data in a YAML header to a markdown file.
-* **Arguments:**
-  * `path` (string, **required**): The path to the file.
-  * `title` (string, **optional**): A brief title.
-  * `summary` (string, **optional**): A three sentence summary of the contents.
-  * `tags` (array of strings, **optional**): Array of tags.
-  * `header-date` (string, **optional**): RFC 3339 timestamp.
+* **Request:**
+  ```json
+  {
+    "path": "MyLib/doc.md",
+    "title": "Updated Title",
+    "summary": "New summary.",
+    "tags": ["meeting", "notes"],
+    "header-date": "2026-07-20T12:00:00Z"
+  }
+  ```
+* **Response (`data`):**
+  ```json
+  { "result": "YAML header written successfully." }
+  ```
 
 ---
 
@@ -120,89 +195,257 @@ Here is the exact schema and argument breakdown for each tool as declared in the
 
 ##### `web_fetch`
 * **Description:** Fetch content from a URL and convert it to Markdown.
-* **Arguments:**
-  * `url` (string, **required**): The URL to fetch.
+* **Request:**
+  ```json
+  { "url": "https://example.com/page" }
+  ```
+* **Response (`data`):**
+  ```json
+  { "content": "# Page Title\n\nConverted markdown content..." }
+  ```
 
 ##### `web_search`
 * **Description:** Search the web using SearXNG (enabled only if `searxng_url` is configured in `config.yaml`).
-* **Arguments:**
-  * `query` (string, **required**): The search query.
+* **Request:**
+  ```json
+  { "query": "latest AI news" }
+  ```
+* **Response (`data`):**
+  ```json
+  { "results": "## Result 1\nURL: https://...\nSnippet: ...\n\n## Result 2\n..." }
+  ```
 
 ##### `web_delegate`
-* **Description:** Delegate complex web research to a sub-agent with web_search and web_fetch tools. Returns a summarized answer.
-* **Arguments:**
-  * `instruction` (string, **required**): The research task instructions for the sub-agent.
+* **Description:** Delegate complex web research to a sub-agent with `web_search` and `web_fetch` tools. Returns a summarized answer.
+* **Request:**
+  ```json
+  { "instruction": "Research the latest developments in Rust async programming" }
+  ```
+* **Response (`data`):**
+  ```json
+  { "result": "Summarized research findings..." }
+  ```
 
 ---
 
 #### 3. JMAP Productivity Tools
 
 ##### `search_calendar`
-* **Description:** Search the JMAP calendar by keyword.
-* **Arguments:**
-  * `keyword` (string, **required**): The search keyword.
+* **Description:** Search the calendar by keyword.
+* **Request:**
+  ```json
+  { "keyword": "meeting" }
+  ```
+* **Response (`data`):**
+  ```json
+  { "results": "[{\"title\":\"Team Standup\",\"start\":\"2026-07-20T09:00:00Z\",...}]" }
+  ```
 
 ##### `get_calendar`
 * **Description:** Get calendar items by date range.
-* **Arguments:**
-  * `start_date` (string, **required**): Start date in ISO format.
-  * `end_date` (string, **required**): End date in ISO format.
+* **Request:**
+  ```json
+  { "start_date": "2026-07-20", "end_date": "2026-07-26" }
+  ```
+* **Response (`data`):**
+  ```json
+  { "results": "[{\"title\":\"Sprint Review\",\"start\":\"2026-07-21T14:00:00Z\",...}]" }
+  ```
 
 ##### `get_calendar_item`
-* **Description:** Get a specific calendar item by id.
-* **Arguments:**
-  * `id` (string, **required**): The calendar item ID.
+* **Description:** Get a specific calendar item by its full href (the exact `href` returned by `search_calendar` or `get_calendar`).
+* **Request:**
+  ```json
+  { "href": "/dav/calendars/user/martin/default/item-abc123.ics" }
+  ```
+* **Response (`data`):**
+  ```json
+  { "result": "{\"title\":\"Team Standup\",\"start\":\"2026-07-20T09:00:00Z\",\"href\":\"/dav/calendars/...\"}" }
+  ```
 
 ##### `add_calendar_item`
 * **Description:** Add a new calendar item.
-* **Arguments:**
-  * `item_json` (string, **required**): JSON representation of the calendar item.
+* **Request:**
+  ```json
+  { "item_json": "{\"summary\":\"New Event\",\"dtstart\":\"2026-07-21T10:00:00Z\",\"dtend\":\"2026-07-21T11:00:00Z\"}" }
+  ```
+* **Response (`data`):**
+  ```json
+  { "result": "Calendar item created." }
+  ```
 
 ##### `update_calendar_item`
-* **Description:** Update a calendar item.
-* **Arguments:**
-  * `id` (string, **required**): The calendar item ID.
-  * `update_json` (string, **required**): JSON patch object.
+* **Description:** Update a calendar item using a JSON patch.
+* **Request:**
+  ```json
+  { "id": "/dav/calendars/user/martin/default/item-abc.ics", "update_json": "{\"summary\":\"Updated Summary\"}" }
+  ```
+* **Response (`data`):**
+  ```json
+  { "result": "Calendar item updated." }
+  ```
 
 ##### `delete_calendar_item`
-* **Description:** Delete a calendar item.
-* **Arguments:**
-  * `id` (string, **required**): The calendar item ID.
+* **Description:** Delete a calendar item by ID.
+* **Request:**
+  ```json
+  { "id": "/dav/calendars/user/martin/default/item-abc.ics" }
+  ```
+* **Response (`data`):**
+  ```json
+  { "result": "Calendar item deleted." }
+  ```
 
 ##### `search_email`
-* **Description:** Search email by keyword, optionally within a specific folder, date range, or by sender/recipient.
-* **Arguments:**
-  * `keyword` (string, *optional*): The search keyword. At least one filter field must be provided.
-  * `folder` (string, *optional*): Folder/mailbox name to search within (e.g., "Inbox", "Sent"). Resolved to a JMAP mailbox ID automatically.
-  * `start_date` (string, *optional*): Only return emails received on or after this date (e.g., "2026-01-01" or ISO 8601).
-  * `end_date` (string, *optional*): Only return emails received before or on this date (e.g., "2026-12-31" or ISO 8601).
-  * `from` (string, *optional*): Filter by sender name or email address.
-  * `to` (string, *optional*): Filter by recipient name or email address.
+* **Description:** Search email by keyword, optionally within a specific folder, date range, or by sender/recipient. At least one filter field must be provided.
+* **Request:**
+  ```json
+  { "keyword": "invoice", "folder": "Inbox", "from": "vendor@example.com" }
+  ```
+* **Response (`data`):**
+  ```json
+  { "results": "[{\"id\":\"abc123\",\"subject\":\"Invoice\",\"from\":\"vendor@example.com\",...}]" }
+  ```
+
+##### `get_email_by_id`
+* **Description:** Get email by ID (full content including body).
+* **Request:**
+  ```json
+  { "id": "abc123" }
+  ```
+* **Response (`data`):**
+  ```json
+  { "result": "{\"id\":\"abc123\",\"subject\":\"Invoice\",\"from\":...,\"body\":\"...\"}" }
+  ```
 
 ##### `get_email`
-* **Description:** Get email details by id.
-* **Arguments:**
-  * `id` (string, **required**): The email ID.
+* **Description:** Get email by date range, sender, recipient, unread status, or flagged status.
+* **Request:**
+  ```json
+  { "start_date": "2026-07-01", "end_date": "2026-07-20", "is_unread": true }
+  ```
+* **Response (`data`):**
+  ```json
+  { "results": "[{\"id\":\"def456\",\"subject\":\"Hello\",\"from\":...}]" }
+  ```
 
 ##### `send_email`
-* **Description:** Send an email.
-* **Arguments:**
-  * `to` (string, **required**): Recipient email address.
-  * `subject` (string, **required**): Email subject line.
-  * `body` (string, **required**): Email content body.
+* **Description:** Send an email to a recipient.
+* **Request:**
+  ```json
+  { "to": "recipient@example.com", "subject": "Hello", "body": "Email body text." }
+  ```
+* **Response (`data`):**
+  ```json
+  { "result": "Email sent successfully." }
+  ```
 
 ##### `search_contact`
 * **Description:** Search contacts by keyword.
-* **Arguments:**
-  * `keyword` (string, **required**): The search keyword.
+* **Request:**
+  ```json
+  { "keyword": "John" }
+  ```
+* **Response (`data`):**
+  ```json
+  { "results": "[{\"id\":\"contact1\",\"displayName\":\"John Doe\",\"email\":\"john@example.com\"}]" }
+  ```
 
 ##### `get_contact`
-* **Description:** Get contact details by id.
-* **Arguments:**
-  * `id` (string, **required**): The contact ID.
+* **Description:** Get contact details by ID.
+* **Request:**
+  ```json
+  { "id": "contact1" }
+  ```
+* **Response (`data`):**
+  ```json
+  { "result": "{\"id\":\"contact1\",\"displayName\":\"John Doe\",\"email\":\"john@example.com\"}" }
+  ```
 
 ##### `add_contact`
 * **Description:** Add a new contact.
-* **Arguments:**
-  * `contact_json` (string, **required**): JSON representation of the contact.
+* **Request:**
+  ```json
+  { "contact_json": "{\"displayName\":\"Jane Doe\",\"email\":\"jane@example.com\"}" }
+  ```
+* **Response (`data`):**
+  ```json
+  { "result": "Contact created." }
+  ```
+
+---
+
+#### 4. CSV Database Tools
+
+*Conditionally available — only offered to the LLM when the user prompt contains "table", "csv", "database", or a CSV tool name.*
+
+##### `create_csv`
+* **Description:** Create a new CSV file database with specified headers.
+* **Request:**
+  ```json
+  { "db_name": "users", "headers": ["id", "name", "age"] }
+  ```
+* **Response (`data`):**
+  ```json
+  { "name": "users", "path": "C:\\Users\\...\\db\\users.csv", "headers": ["id", "name", "age"] }
+  ```
+
+##### `list_csv`
+* **Description:** List all CSV file databases.
+* **Request:**
+  ```json
+  {}
+  ```
+* **Response (`data`):**
+  ```json
+  [
+    { "name": "users", "path": "...", "headers": ["id", "name", "age"] },
+    { "name": "products", "path": "...", "headers": ["sku", "price"] }
+  ]
+  ```
+
+##### `add_rows`
+* **Description:** Add rows to a CSV file database.
+* **Request:**
+  ```json
+  {
+    "db_name": "users",
+    "rows": [
+      { "id": "1", "name": "Alice", "age": "30" },
+      { "id": "2", "name": "Bob", "age": "25" }
+    ]
+  }
+  ```
+* **Response (`data`):**
+  ```json
+  { "result": "Added 2 rows" }
+  ```
+
+##### `delete_rows`
+* **Description:** Delete rows from a CSV file database based on a predicate.
+* **Request:**
+  ```json
+  { "db_name": "users", "predicate": "name == \"Bob\"" }
+  ```
+* **Response (`data`):**
+  ```json
+  { "result": "Deleted 1 rows" }
+  ```
+
+##### `query`
+* **Description:** Query a CSV file database using an evalexpr predicate, supporting sum and average aggregates.
+* **Request:**
+  ```json
+  { "db_name": "users", "predicate": "age > 20" }
+  ```
+* **Response (`data`):**
+  ```json
+  {
+    "rows": [
+      { "id": "1", "name": "Alice", "age": "30" },
+      { "id": "2", "name": "Bob", "age": "25" }
+    ],
+    "aggregate_result": null
+  }
+  ```
 
