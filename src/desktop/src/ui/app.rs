@@ -42,6 +42,10 @@ pub struct FastMdApp {
     pub content_libraries: Vec<crate::config::ContentLibrary>,
     pub rx: Receiver<BackgroundMessage>,
     pub tx: std::sync::mpsc::Sender<BackgroundMessage>,
+    /// Shared bus for `FileEvent`s. The app keeps a clone so it can
+    /// publish events from UI handlers (e.g. editor save, rename
+    /// modal) and pass the bus to the agent and the tool registry.
+    pub file_event_bus: crate::file_events::Bus<crate::file_events::FileEvent>,
     /// Subscriber end of the file-event bus. Receives `Discovered`,
     /// `Updated`, and `Removed` events from the initial scan and the
     /// file system watcher. Owned by the app so the directory tree can
@@ -269,6 +273,7 @@ impl FastMdApp {
             content_libraries: config.content_libraries.clone(),
             rx: background_task.rx,
             tx: background_task.tx,
+            file_event_bus: background_task.file_event_bus,
             file_event_reader: Some(file_event_reader),
             inline_editor_enabled,
             background_manager,
@@ -290,6 +295,7 @@ impl FastMdApp {
             content_libraries: Vec::new(),
             rx,
             tx,
+            file_event_bus: crate::file_events::Bus::new(),
             file_event_reader: None,
             all_files: Vec::new(),
             all_dirs: Vec::new(),
@@ -376,6 +382,7 @@ impl FastMdApp {
             cancel_flag,
             self.agent_history.clone(),
             self.agent_response.clone(),
+            self.file_event_bus.clone(),
         );
         self.command_input.clear();
     }
@@ -544,7 +551,8 @@ impl FastMdApp {
         }
 
         // Show inline editor overlay
-        if self.editor_state.show(ctx) {
+        let producer = crate::file_events::FileEventProducer::new(&self.file_event_bus);
+        if self.editor_state.show(ctx, &producer) {
             // Force reload if we edited the active document
             self.loaded_path = None;
         }

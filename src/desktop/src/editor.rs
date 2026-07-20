@@ -1,4 +1,5 @@
 use crate::document::DocumentContent;
+use crate::file_events::FileEventProducer;
 use eframe::egui::{self, Key};
 use pulldown_cmark::{Options, Parser};
 use std::fs;
@@ -69,7 +70,7 @@ impl EditorState {
         self.file_path = PathBuf::new();
     }
 
-    pub fn save(&mut self) -> Result<(), String> {
+    pub fn save(&mut self, producer: &FileEventProducer) -> Result<(), String> {
         // Validation using pulldown-cmark
         let mut options = Options::empty();
         options.insert(Options::ENABLE_TABLES);
@@ -109,12 +110,17 @@ impl EditorState {
             return Err(err);
         }
 
+        // Tell the rest of the app this file changed so the
+        // directory tree and tag manager refresh immediately,
+        // without waiting for the next OS-level notify event.
+        producer.publish_updated(&self.file_path);
+
         self.close();
         Ok(())
     }
 
-    pub fn show(&mut self, ctx: &egui::Context) -> bool {
-        self.show_with_colors(ctx, EditorColors::inverted())
+    pub fn show(&mut self, ctx: &egui::Context, producer: &FileEventProducer) -> bool {
+        self.show_with_colors(ctx, EditorColors::inverted(), producer)
     }
 
     /// Render the editor with an explicit colour palette.
@@ -123,7 +129,7 @@ impl EditorState {
     /// palette, and so the REQ-261 requirement ("inverted, black text on
     /// white background") is expressed as data rather than scattered
     /// `Color32::*` constants in the rendering code.
-    pub fn show_with_colors(&mut self, ctx: &egui::Context, colors: EditorColors) -> bool {
+    pub fn show_with_colors(&mut self, ctx: &egui::Context, colors: EditorColors, producer: &FileEventProducer) -> bool {
         if !self.is_open {
             return false;
         }
@@ -230,7 +236,7 @@ impl EditorState {
 
                 ui.horizontal(|ui| {
                     if ui.button("Save").clicked() {
-                        if self.save().is_ok() {
+                        if self.save(producer).is_ok() {
                             did_save = true;
                         }
                     }
@@ -258,8 +264,18 @@ impl EditorState {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::file_events::Bus;
     use std::fs;
     use tempfile::tempdir;
+
+    /// A producer that publishes to a throwaway bus. Editor tests
+    /// don't need to consume the events — they only care about the
+    /// file I/O outcome.
+    fn noop_producer() -> FileEventProducer<'static> {
+        let bus: &'static Bus<crate::file_events::FileEvent> =
+            Box::leak(Box::new(Bus::new()));
+        FileEventProducer::new(bus)
+    }
 
     #[test]
     fn test_editor_open_strips_front_matter() {
@@ -325,7 +341,7 @@ mod tests {
         // content includes leading newline from DocumentContent::parse; preserve it
         state.content = "\nModified body".to_string();
 
-        state.save().unwrap();
+        state.save(&noop_producer()).unwrap();
 
         let saved = fs::read_to_string(&path).unwrap();
         assert_eq!(saved, "---\ntitle: Original\n---\nModified body");
@@ -359,7 +375,7 @@ mod tests {
         state.open(&path, &raw);
         state.content = "Modified body".to_string();
 
-        state.save().unwrap();
+        state.save(&noop_producer()).unwrap();
 
         let saved = fs::read_to_string(&path).unwrap();
         assert_eq!(saved, "Modified body");
@@ -371,13 +387,15 @@ mod tests {
         state.file_path = PathBuf::from("C:\\nonexistent_dir\\file.md");
         state.content = "Body".to_string();
 
-        let result = state.save();
+        let producer = noop_producer();
+        let result = state.save(&producer);
         assert!(result.is_err());
 
         let mut state2 = EditorState::default();
         state2.file_path = PathBuf::from("C:\\nonexistent_dir\\file.md");
         state2.content = "Body".to_string();
-        state2.save().unwrap_err();
+        let producer2 = noop_producer();
+        state2.save(&producer2).unwrap_err();
         // After save failure, the error_message is set; we test the close path separately
     }
 
@@ -386,7 +404,8 @@ mod tests {
         let mut state = EditorState::default();
         let ctx = egui::Context::default();
         // Should return false and do nothing when not open
-        assert!(!state.show(&ctx));
+        let producer = noop_producer();
+        assert!(!state.show(&ctx, &producer));
     }
 
     // --- REQ-261: inverted (black text on white) colour scheme -----------
@@ -436,7 +455,8 @@ mod tests {
         // just like the legacy `show` method does.
         let mut state = EditorState::default();
         let ctx = egui::Context::default();
-        assert!(!state.show_with_colors(&ctx, EditorColors::inverted()));
+        let producer = noop_producer();
+        assert!(!state.show_with_colors(&ctx, EditorColors::inverted(), &producer));
     }
 
     #[test]

@@ -1,3 +1,4 @@
+use crate::file_events::FileEventProducer;
 use crate::utils::markdown::parse_front_matter;
 use crate::utils::tags::extract_tags_from_file;
 use std::path::Path;
@@ -175,6 +176,7 @@ pub fn tool_read_file_lines(
 pub fn tool_create_file(
     path_str: &str,
     content: &str,
+    producer: &FileEventProducer,
 ) -> Result<crate::tools::dtos::CreateFileResponse, String> {
     if !path_str.to_lowercase().ends_with(".md") {
         return Err("Only markdown files (.md) are allowed.".to_string());
@@ -197,6 +199,10 @@ pub fn tool_create_file(
     match std::fs::write(path, content) {
         Ok(_) => {
             let size_bytes = std::fs::metadata(path).map(|m| m.len()).unwrap_or(0);
+            // Tell the rest of the app this file now exists so the
+            // directory tree, tag manager, etc. can pick it up without
+            // waiting for an OS-level notify event.
+            producer.publish_discovered(path);
             Ok(crate::tools::dtos::CreateFileResponse {
                 result: "File created successfully.".to_string(),
                 size_bytes,
@@ -210,6 +216,7 @@ pub fn tool_insert_lines(
     path_str: &str,
     line_index: usize,
     lines_to_insert: &[String],
+    producer: &FileEventProducer,
 ) -> Result<crate::tools::dtos::InsertLinesResponse, String> {
     match std::fs::read_to_string(path_str) {
         Ok(content) => {
@@ -223,9 +230,12 @@ pub fn tool_insert_lines(
             }
             let new_content = lines.join("\n");
             match std::fs::write(path_str, new_content) {
-                Ok(_) => Ok(crate::tools::dtos::InsertLinesResponse {
-                    result: "Lines inserted successfully.".to_string(),
-                }),
+                Ok(_) => {
+                    producer.publish_updated(Path::new(path_str));
+                    Ok(crate::tools::dtos::InsertLinesResponse {
+                        result: "Lines inserted successfully.".to_string(),
+                    })
+                }
                 Err(e) => Err(format!("Failed to write file: {}", e)),
             }
         }
@@ -237,6 +247,7 @@ pub fn tool_delete_lines(
     path_str: &str,
     start_line: usize,
     end_line: usize,
+    producer: &FileEventProducer,
 ) -> Result<crate::tools::dtos::DeleteLinesResponse, String> {
     match std::fs::read_to_string(path_str) {
         Ok(content) => {
@@ -251,9 +262,12 @@ pub fn tool_delete_lines(
             lines.drain((start_line - 1)..end);
             let new_content = lines.join("\n");
             match std::fs::write(path_str, new_content) {
-                Ok(_) => Ok(crate::tools::dtos::DeleteLinesResponse {
-                    result: "Lines deleted successfully.".to_string(),
-                }),
+                Ok(_) => {
+                    producer.publish_updated(Path::new(path_str));
+                    Ok(crate::tools::dtos::DeleteLinesResponse {
+                        result: "Lines deleted successfully.".to_string(),
+                    })
+                }
                 Err(e) => Err(format!("Failed to write file: {}", e)),
             }
         }
@@ -265,6 +279,7 @@ pub fn tool_replace_text(
     path_str: &str,
     old_string: &str,
     new_string: &str,
+    producer: &FileEventProducer,
 ) -> Result<crate::tools::dtos::ReplaceTextResponse, String> {
     match std::fs::read_to_string(path_str) {
         Ok(content) => {
@@ -274,9 +289,12 @@ pub fn tool_replace_text(
             let count = content.matches(old_string).count();
             let new_content = content.replace(old_string, new_string);
             match std::fs::write(path_str, new_content) {
-                Ok(_) => Ok(crate::tools::dtos::ReplaceTextResponse {
-                    result: format!("Successfully replaced {} occurrence(s).", count),
-                }),
+                Ok(_) => {
+                    producer.publish_updated(Path::new(path_str));
+                    Ok(crate::tools::dtos::ReplaceTextResponse {
+                        result: format!("Successfully replaced {} occurrence(s).", count),
+                    })
+                }
                 Err(e) => Err(format!("Failed to write file: {}", e)),
             }
         }
@@ -286,6 +304,20 @@ pub fn tool_replace_text(
 
 #[cfg(test)]
 mod tests {
+    use super::*;
+    use crate::file_events::Bus;
+
+    /// A producer that publishes to a throwaway bus. Tests don't
+    /// need to consume the events — they only care about the
+    /// success/failure of the underlying file operation.
+    fn noop_producer() -> FileEventProducer<'static> {
+        // We can't return a reference tied to a local bus, so
+        // instead use a leaked one. Tests run in a single thread
+        // here so leaking is fine for the test lifetime.
+        let bus: &'static Bus<crate::file_events::FileEvent> =
+            Box::leak(Box::new(Bus::new()));
+        FileEventProducer::new(bus)
+    }
 
     #[test]
     fn test_tool_replace_text() {
@@ -293,7 +325,8 @@ mod tests {
         let file_path = dir.path().join("test.md");
         std::fs::write(&file_path, "Line 1\nOld Text\nLine 3").unwrap();
 
-        let result = tool_replace_text(file_path.to_str().unwrap(), "Old Text", "New Text")
+        let producer = noop_producer();
+        let result = tool_replace_text(file_path.to_str().unwrap(), "Old Text", "New Text", &producer)
             .unwrap()
             .result;
         assert_eq!(result, "Successfully replaced 1 occurrence(s).");
@@ -308,14 +341,14 @@ mod tests {
         let file_path = dir.path().join("test.md");
         std::fs::write(&file_path, "Line 1\nOld Text\nLine 3").unwrap();
 
-        let result = tool_replace_text(file_path.to_str().unwrap(), "Missing Text", "New Text");
+        let producer = noop_producer();
+        let result = tool_replace_text(file_path.to_str().unwrap(), "Missing Text", "New Text", &producer);
         assert_eq!(
             result.unwrap_err(),
             "The specified old_string was not found in the file."
         );
     }
 
-    use super::*;
     use std::fs;
     use tempfile::tempdir;
 
@@ -394,9 +427,11 @@ mod tests {
         let dir = tempdir().unwrap();
         let file_path = dir.path().join("new.md");
 
+        let producer = noop_producer();
         let result = tool_create_file(
             file_path.to_str().unwrap(),
             "---\ntitle: Test\n---\n# Hello",
+            &producer,
         )
         .unwrap()
         .result;
@@ -413,7 +448,8 @@ mod tests {
         let dir = tempdir().unwrap();
         let file_path = dir.path().join("new.txt");
 
-        let result = tool_create_file(file_path.to_str().unwrap(), "content");
+        let producer = noop_producer();
+        let result = tool_create_file(file_path.to_str().unwrap(), "content", &producer);
         assert_eq!(
             result.unwrap_err(),
             "Only markdown files (.md) are allowed."
@@ -425,9 +461,11 @@ mod tests {
         let dir = tempdir().unwrap();
         let file_path = dir.path().join("new.md");
 
+        let producer = noop_producer();
         let result = tool_create_file(
             file_path.to_str().unwrap(),
             "---\ninvalid: [unclosed\n---\nContent",
+            &producer,
         );
         assert_eq!(
             result.unwrap_err(),
@@ -441,7 +479,8 @@ mod tests {
         let file_path = dir.path().join("test.md");
         fs::write(&file_path, "Line 1\nLine 2\nLine 3").unwrap();
 
-        let result = tool_insert_lines(file_path.to_str().unwrap(), 2, &["New Line".to_string()])
+        let producer = noop_producer();
+        let result = tool_insert_lines(file_path.to_str().unwrap(), 2, &["New Line".to_string()], &producer)
             .unwrap()
             .result;
         assert_eq!(result, "Lines inserted successfully.");
@@ -456,7 +495,8 @@ mod tests {
         let file_path = dir.path().join("test.md");
         fs::write(&file_path, "Line 1\nLine 2").unwrap();
 
-        let result = tool_insert_lines(file_path.to_str().unwrap(), 5, &["New".to_string()]);
+        let producer = noop_producer();
+        let result = tool_insert_lines(file_path.to_str().unwrap(), 5, &["New".to_string()], &producer);
         assert_eq!(result.unwrap_err(), "Line index out of range.");
     }
 
@@ -466,7 +506,8 @@ mod tests {
         let file_path = dir.path().join("test.md");
         fs::write(&file_path, "Line 1\nLine 2\nLine 3\nLine 4").unwrap();
 
-        let result = tool_delete_lines(file_path.to_str().unwrap(), 2, 3)
+        let producer = noop_producer();
+        let result = tool_delete_lines(file_path.to_str().unwrap(), 2, 3, &producer)
             .unwrap()
             .result;
         assert_eq!(result, "Lines deleted successfully.");
@@ -481,7 +522,8 @@ mod tests {
         let file_path = dir.path().join("test.md");
         fs::write(&file_path, "Line 1\nLine 2").unwrap();
 
-        let result = tool_delete_lines(file_path.to_str().unwrap(), 5, 6);
+        let producer = noop_producer();
+        let result = tool_delete_lines(file_path.to_str().unwrap(), 5, 6, &producer);
         assert_eq!(result.unwrap_err(), "Start line out of range.");
     }
 
@@ -683,9 +725,11 @@ mod tests {
         let dir = tempdir().unwrap();
         let file_path = dir.path().join("new.markdown");
 
+        let producer = noop_producer();
         let result = tool_create_file(
             file_path.to_str().unwrap(),
             "# Hello",
+            &producer,
         );
         // Should reject .markdown extension
         assert_eq!(
@@ -702,7 +746,8 @@ mod tests {
         let file_path = dir.path().join("test.md");
         fs::write(&file_path, "Line 1\nLine 2\nLine 3").unwrap();
 
-        let result = tool_delete_lines(file_path.to_str().unwrap(), 2, 2)
+        let producer = noop_producer();
+        let result = tool_delete_lines(file_path.to_str().unwrap(), 2, 2, &producer)
             .unwrap()
             .result;
         assert_eq!(result, "Lines deleted successfully.");
@@ -718,7 +763,8 @@ mod tests {
         let file_path = dir.path().join("test.md");
         fs::write(&file_path, "Line 1\nLine 2").unwrap();
 
-        let result = tool_delete_lines(file_path.to_str().unwrap(), 5, 10);
+        let producer = noop_producer();
+        let result = tool_delete_lines(file_path.to_str().unwrap(), 5, 10, &producer);
         assert_eq!(result.unwrap_err(), "Start line out of range.");
     }
 

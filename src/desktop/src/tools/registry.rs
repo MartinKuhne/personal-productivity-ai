@@ -1,4 +1,5 @@
 use crate::config::AppConfig;
+use crate::file_events::{Bus, FileEvent, FileEventProducer};
 use std::path::{Component, Path};
 
 /// Slice `items` into a paginated window of size `page_size` for
@@ -38,7 +39,7 @@ macro_rules! define_tools {
                 description: $desc:expr,
                 input: $input_type:ty,
                 enabled: $enabled:expr,
-                execute: |$config:ident, $root_path:ident, $input:ident, $resolve_path:ident| $exec:expr
+                execute: |$config:ident, $root_path:ident, $input:ident, $resolve_path:ident, $producer:ident| $exec:expr
             }
         ),* $(,)?
     ) => {
@@ -61,7 +62,7 @@ macro_rules! define_tools {
             serde_json::Value::Array(tools)
         }
 
-        pub fn execute_tool(config: &AppConfig, root_path: &Path, name: &str, args_str: &str) -> String {
+        pub fn execute_tool(config: &AppConfig, root_path: &Path, name: &str, args_str: &str, file_event_bus: &Bus<FileEvent>) -> String {
             rustls::crypto::ring::default_provider().install_default().ok();
 
             let debug_mode = config
@@ -73,6 +74,11 @@ macro_rules! define_tools {
             let args_compact = args_str.to_string();
             tracing::info!(name = "tool.registry.call", tool_name = %name, args = %args_compact, "Executing tool call");
             let start_time = std::time::Instant::now();
+
+            // A producer handle for any tool that mutates the
+            // filesystem. The lifetime is tied to `file_event_bus`,
+            // which lives for the duration of this call.
+            let producer = FileEventProducer::new(file_event_bus);
 
             let resolve_and_check_path = |p: &str| -> Result<Option<(std::path::PathBuf, bool)>, String> {
                 if Path::new(p).components().any(|c| c == Component::ParentDir) { return Err("Path traversal not allowed".to_string()); }
@@ -119,6 +125,7 @@ macro_rules! define_tools {
                                     let $config = config;
                                     let $root_path = root_path;
                                     let $resolve_path = &resolve_and_check_path;
+                                    let $producer = &producer;
                                     let res = $exec;
                                     res.map(|r| serde_json::to_value(r).unwrap())
                                 },
@@ -165,24 +172,24 @@ define_tools! {
         description: "Delegate web searches and web fetches to a sub-agent. This protects your context window. Give clear instructions and it will return summarized information.",
         input: crate::tools::dtos::WebDelegateInput,
         enabled: |_| true,
-        execute: |config, _root_path, input, _is_safe| crate::tools::web::tool_web_delegate(config, &input.instruction)
+        execute: |config, _root_path, input, _is_safe, _producer| crate::tools::web::tool_web_delegate(config, &input.instruction)
     },
     {
         name: "replace_text",
         description: "Replace exact occurrences of old_string with new_string in a file.",
         input: crate::tools::dtos::ReplaceTextInput,
         enabled: |_| true,
-        execute: |_config, _root_path, input, resolve_path| {
+        execute: |_config, _root_path, input, resolve_path, producer| {
             let (path, readonly) = resolve_path(&input.path)?.ok_or_else(|| "Cannot perform this operation on the virtual root".to_string())?;
             if readonly { return Err("Cannot perform this operation on a read-only library".to_string()); }
-            crate::tools::filesystem::tool_replace_text(&path.to_string_lossy(), &input.old_string, &input.new_string)
+            crate::tools::filesystem::tool_replace_text(&path.to_string_lossy(), &input.old_string, &input.new_string, producer)
         }
     },    {
         name: "grep",
         description: "Search for a query string case-insensitively across all Markdown files in the workspace.",
         input: crate::tools::dtos::GrepInput,
         enabled: |_| true,
-        execute: |config, _root_path, input, _resolve_path| {
+        execute: |config, _root_path, input, _resolve_path, _producer| {
             let mut all_results = Vec::new();
             let mut libs: Vec<_> = config.content_libraries.iter().collect();
             libs.sort_by(|a, b| b.priority.cmp(&a.priority)); // Highest priority first
@@ -205,7 +212,7 @@ define_tools! {
         description: "Get all unique tags defined in front-matter headers of all Markdown files in the workspace.",
         input: crate::tools::dtos::ReadTagsInput,
         enabled: |_| true,
-        execute: |config, _root_path, _input, _resolve_path| {
+        execute: |config, _root_path, _input, _resolve_path, _producer| {
             let mut all_tags = std::collections::BTreeSet::new();
             for lib in &config.content_libraries {
                 if let Ok(res) = crate::tools::filesystem::tool_read_tags(Path::new(&lib.root_folder)) {
@@ -222,7 +229,7 @@ define_tools! {
         description: "List Markdown files that contain a specific tag in their front-matter. Results are returned as a JSON array, paginated across all configured libraries (default page size 20); every response includes the total number of matching files so the caller can drive follow-up page requests.",
         input: crate::tools::dtos::ListFilesByTagInput,
         enabled: |_| true,
-        execute: |config, _root_path, input, _resolve_path| {
+        execute: |config, _root_path, input, _resolve_path, _producer| {
             // Resolve pagination defaults up-front so a single set of
             // values applies to the *combined* result.
             let page = input.page.unwrap_or(1).max(1);
@@ -269,7 +276,7 @@ define_tools! {
         description: "List Markdown files in a directory (not recursive). Results are returned as a JSON array, paginated (default page size 20); every response includes the total number of files in the directory so the caller can drive follow-up page requests. With `path` set to \"/\" or \".\" returns the configured content libraries.",
         input: crate::tools::dtos::ListFilesInput,
         enabled: |_| true,
-        execute: |config, _root_path, input, resolve_path| {
+        execute: |config, _root_path, input, resolve_path, _producer| {
             // Resolve pagination defaults up-front.
             let page = input.page.unwrap_or(1).max(1);
             let page_size = input
@@ -318,7 +325,7 @@ define_tools! {
         description: "Read the entire text contents of a file at the specified path. Prefer using the read_yaml_header tool if just a document summary is needed.",
         input: crate::tools::dtos::ReadFileInput,
         enabled: |_| true,
-        execute: |_config, _root_path, input, resolve_path| {
+        execute: |_config, _root_path, input, resolve_path, _producer| {
             let (path, _) = resolve_path(&input.path)?.ok_or_else(|| "Cannot perform this operation on the virtual root".to_string())?;
             crate::tools::filesystem::tool_read_file(&path.to_string_lossy())
         }
@@ -328,7 +335,7 @@ define_tools! {
         description: "Read specific lines from a file (1-indexed).",
         input: crate::tools::dtos::ReadFileLinesInput,
         enabled: |_| true,
-        execute: |_config, _root_path, input, resolve_path| {
+        execute: |_config, _root_path, input, resolve_path, _producer| {
             let (path, _) = resolve_path(&input.path)?.ok_or_else(|| "Cannot perform this operation on the virtual root".to_string())?;
             crate::tools::filesystem::tool_read_file_lines(&path.to_string_lossy(), input.start_line, input.end_line)
         }
@@ -338,10 +345,10 @@ define_tools! {
         description: "Create a new file at the specified path with the provided content.",
         input: crate::tools::dtos::CreateFileInput,
         enabled: |_| true,
-        execute: |_config, _root_path, input, resolve_path| {
+        execute: |_config, _root_path, input, resolve_path, producer| {
             let (path, readonly) = resolve_path(&input.path)?.ok_or_else(|| "Cannot perform this operation on the virtual root".to_string())?;
             if readonly { return Err("Cannot perform this operation on a read-only library".to_string()); }
-            crate::tools::filesystem::tool_create_file(&path.to_string_lossy(), &input.content)
+            crate::tools::filesystem::tool_create_file(&path.to_string_lossy(), &input.content, producer)
         }
     },
     {
@@ -349,10 +356,10 @@ define_tools! {
         description: "Insert lines into a file at a specific 1-indexed line index.",
         input: crate::tools::dtos::InsertLinesInput,
         enabled: |_| true,
-        execute: |_config, _root_path, input, resolve_path| {
+        execute: |_config, _root_path, input, resolve_path, producer| {
             let (path, readonly) = resolve_path(&input.path)?.ok_or_else(|| "Cannot perform this operation on the virtual root".to_string())?;
             if readonly { return Err("Cannot perform this operation on a read-only library".to_string()); }
-            crate::tools::filesystem::tool_insert_lines(&path.to_string_lossy(), input.line_index, &input.lines)
+            crate::tools::filesystem::tool_insert_lines(&path.to_string_lossy(), input.line_index, &input.lines, producer)
         }
     },
     {
@@ -360,10 +367,10 @@ define_tools! {
         description: "Delete specific lines from a file (1-indexed, inclusive).",
         input: crate::tools::dtos::DeleteLinesInput,
         enabled: |_| true,
-        execute: |_config, _root_path, input, resolve_path| {
+        execute: |_config, _root_path, input, resolve_path, producer| {
             let (path, readonly) = resolve_path(&input.path)?.ok_or_else(|| "Cannot perform this operation on the virtual root".to_string())?;
             if readonly { return Err("Cannot perform this operation on a read-only library".to_string()); }
-            crate::tools::filesystem::tool_delete_lines(&path.to_string_lossy(), input.start_line, input.end_line)
+            crate::tools::filesystem::tool_delete_lines(&path.to_string_lossy(), input.start_line, input.end_line, producer)
         }
     },
     {
@@ -371,14 +378,14 @@ define_tools! {
         description: "Fetch content from a URL.",
         input: crate::tools::dtos::WebFetchInput,
         enabled: |_| true,
-        execute: |_config, _root_path, input, _is_safe| crate::tools::web::tool_web_fetch(&input.url)
+        execute: |_config, _root_path, input, _is_safe, _producer| crate::tools::web::tool_web_fetch(&input.url)
     },
     {
         name: "read_yaml_header",
         description: "Parse a YAML header from a markdown file and return its content representation. Tip: Use this to read a document's summary before reading the full file if you are not sure the full contents are needed, to protect context.",
         input: crate::tools::dtos::ReadYamlHeaderInput,
         enabled: |_| true,
-        execute: |_config, _root_path, input, resolve_path| {
+        execute: |_config, _root_path, input, resolve_path, _producer| {
             let (path, _) = resolve_path(&input.path)?.ok_or_else(|| "Cannot perform this operation on the virtual root".to_string())?;
             crate::tools::yaml_header::tool_read_yaml_header(&path.to_string_lossy())
         }
@@ -388,10 +395,10 @@ define_tools! {
         description: "Write or update data in a YAML header to a markdown file.",
         input: crate::tools::dtos::WriteYamlHeaderInput,
         enabled: |_| true,
-        execute: |_config, _root_path, input, resolve_path| {
+        execute: |_config, _root_path, input, resolve_path, producer| {
             let (path, readonly) = resolve_path(&input.path)?.ok_or_else(|| "Cannot perform this operation on the virtual root".to_string())?;
             if readonly { return Err("Cannot perform this operation on a read-only library".to_string()); }
-            crate::tools::yaml_header::tool_write_yaml_header(&path.to_string_lossy(), input.title.as_deref(), input.summary.as_deref(), input.tags, input.header_date.as_deref())
+            crate::tools::yaml_header::tool_write_yaml_header(&path.to_string_lossy(), input.title.as_deref(), input.summary.as_deref(), input.tags, input.header_date.as_deref(), producer)
         }
     },
     {
@@ -399,7 +406,7 @@ define_tools! {
         description: "Search the web using SearXNG.",
         input: crate::tools::dtos::WebSearchInput,
         enabled: |config: &AppConfig| config.searxng_url.is_some(),
-        execute: |config, _root_path, input, _is_safe| {
+        execute: |config, _root_path, input, _is_safe, _producer| {
             if let Some(url) = &config.searxng_url {
                 crate::tools::web::tool_web_search(url, &input.query)
             } else {
@@ -412,49 +419,49 @@ define_tools! {
         description: "Search the calendar by keyword.",
         input: crate::tools::dtos::SearchCalendarInput,
         enabled: |config: &AppConfig| !config.caldav_clients.is_empty(),
-        execute: |config, _root_path, input, _is_safe| crate::tools::caldav::tool_search_calendar(config, &input.keyword)
+        execute: |config, _root_path, input, _is_safe, _producer| crate::tools::caldav::tool_search_calendar(config, &input.keyword)
     },
     {
         name: "get_calendar",
         description: "Get calendar items by date range.",
         input: crate::tools::dtos::GetCalendarInput,
         enabled: |config: &AppConfig| !config.caldav_clients.is_empty(),
-        execute: |config, _root_path, input, _is_safe| crate::tools::caldav::tool_get_calendar(config, &input.start_date, &input.end_date)
+        execute: |config, _root_path, input, _is_safe, _producer| crate::tools::caldav::tool_get_calendar(config, &input.start_date, &input.end_date)
     },
     {
         name: "get_calendar_item",
         description: "Get a specific calendar item by its full href. IMPORTANT: Use the exact, full 'href' value returned by search or get tools (e.g., '/dav/calendars/user/.../item.ics'). Do not use just the UUID.",
         input: crate::tools::dtos::GetCalendarItemInput,
         enabled: |config: &AppConfig| !config.caldav_clients.is_empty(),
-        execute: |config, _root_path, input, _is_safe| crate::tools::caldav::tool_get_calendar_item(config, &input.href)
+        execute: |config, _root_path, input, _is_safe, _producer| crate::tools::caldav::tool_get_calendar_item(config, &input.href)
     },
     {
         name: "add_calendar_item",
         description: "Add a new calendar item.",
         input: crate::tools::dtos::AddCalendarItemInput,
         enabled: |config: &AppConfig| !config.caldav_clients.is_empty(),
-        execute: |config, _root_path, input, _is_safe| crate::tools::caldav::tool_add_calendar_item(config, &input.item_json)
+        execute: |config, _root_path, input, _is_safe, _producer| crate::tools::caldav::tool_add_calendar_item(config, &input.item_json)
     },
     {
         name: "update_calendar_item",
         description: "Update a calendar item.",
         input: crate::tools::dtos::UpdateCalendarItemInput,
         enabled: |config: &AppConfig| !config.caldav_clients.is_empty(),
-        execute: |config, _root_path, input, _is_safe| crate::tools::caldav::tool_update_calendar_item(config, &input.id, &input.update_json)
+        execute: |config, _root_path, input, _is_safe, _producer| crate::tools::caldav::tool_update_calendar_item(config, &input.id, &input.update_json)
     },
     {
         name: "delete_calendar_item",
         description: "Delete a calendar item.",
         input: crate::tools::dtos::DeleteCalendarItemInput,
         enabled: |config: &AppConfig| !config.caldav_clients.is_empty(),
-        execute: |config, _root_path, input, _is_safe| crate::tools::caldav::tool_delete_calendar_item(config, &input.id)
+        execute: |config, _root_path, input, _is_safe, _producer| crate::tools::caldav::tool_delete_calendar_item(config, &input.id)
     },
     {
         name: "search_email",
         description: "Search email by any combination of keyword, folder (mailbox), date range, sender, recipient, unread status, or flagged status. All filters are combined with AND. At least one filter must be provided. Results are paginated (default page size 10); every response includes the total number of matching emails so the caller can drive follow-up page requests.",
         input: crate::tools::dtos::SearchEmailInput,
         enabled: |config: &AppConfig| !config.jmap_clients.is_empty(),
-        execute: |config, _root_path, input, _is_safe| {
+        execute: |config, _root_path, input, _is_safe, _producer| {
             let page = input.page.unwrap_or(1).max(1);
             let page_size = input.page_size.unwrap_or(10).max(1);
             crate::tools::jmap::tool_search_email(config, input.keyword.as_deref(), input.folder.as_deref(), input.start_date.as_deref(), input.end_date.as_deref(), input.from.as_deref(), input.to.as_deref(), input.is_unread, input.is_flagged, page, page_size)
@@ -465,14 +472,14 @@ define_tools! {
         description: "Get email by id.",
         input: crate::tools::dtos::GetEmailByIdInput,
         enabled: |config: &AppConfig| !config.jmap_clients.is_empty(),
-        execute: |config, _root_path, input, _is_safe| crate::tools::jmap::tool_get_email_by_id(config, &input.id)
+        execute: |config, _root_path, input, _is_safe, _producer| crate::tools::jmap::tool_get_email_by_id(config, &input.id)
     },
     {
         name: "send_email",
         description: "Send an email.",
         input: crate::tools::dtos::SendEmailInput,
         enabled: |config: &AppConfig| !config.jmap_clients.is_empty(),
-        execute: |config, _root_path, input, _is_safe| crate::tools::jmap::tool_send_email(config, &input.to, &input.subject, &input.body)
+        execute: |config, _root_path, input, _is_safe, _producer| crate::tools::jmap::tool_send_email(config, &input.to, &input.subject, &input.body)
     },
     {
         name: "search_contact",
@@ -485,7 +492,7 @@ define_tools! {
                 !config.jmap_clients.is_empty()
             }
         },
-        execute: |config, _root_path, input, _is_safe| {
+        execute: |config, _root_path, input, _is_safe, _producer| {
             if config.feature_flags.get("useDAVForContacts").copied().unwrap_or(false) {
                 crate::tools::carddav::tool_search_contact(config, &input.keyword)
             } else {
@@ -504,7 +511,7 @@ define_tools! {
                 !config.jmap_clients.is_empty()
             }
         },
-        execute: |config, _root_path, input, _is_safe| {
+        execute: |config, _root_path, input, _is_safe, _producer| {
             if config.feature_flags.get("useDAVForContacts").copied().unwrap_or(false) {
                 crate::tools::carddav::tool_add_contact(config, &input.contact_json)
             } else {
@@ -523,7 +530,7 @@ define_tools! {
                 !config.jmap_clients.is_empty()
             }
         },
-        execute: |config, _root_path, input, _is_safe| {
+        execute: |config, _root_path, input, _is_safe, _producer| {
             if config.feature_flags.get("useDAVForContacts").copied().unwrap_or(false) {
                 crate::tools::carddav::tool_get_contact(config, &input.id)
             } else {
@@ -536,7 +543,16 @@ define_tools! {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::file_events::Bus;
     use std::path::Path;
+
+    /// A throwaway bus for tests. Tests don't subscribe to the bus
+    /// — they only care about the return value of `execute_tool`.
+    /// The bus is leaked so the `&Bus<FileEvent>` reference is
+    /// valid for the lifetime of the test.
+    fn test_bus() -> &'static Bus<crate::file_events::FileEvent> {
+        Box::leak(Box::new(Bus::new()))
+    }
 
     #[test]
     fn test_resolve_virtual_path() {
@@ -551,6 +567,7 @@ mod tests {
                 priority: 0,
             });
         let root = Path::new("C:\\TestRoot");
+        let bus = test_bus();
 
         // This will succeed in resolving to C:\TestRoot\sub\file.md
         let res1 = execute_tool(
@@ -558,6 +575,7 @@ mod tests {
             root,
             "read_file",
             r#"{"path": "TestLib\\sub\\file.md"}"#,
+            bus,
         );
         assert!(!res1.contains("Invalid virtual path"));
 
@@ -567,6 +585,7 @@ mod tests {
             root,
             "read_file",
             r#"{"path": "TestLib\\..\\Windows\\System32\\cmd.exe"}"#,
+            bus,
         );
         assert!(res3.contains("Path traversal not allowed"));
 
@@ -576,16 +595,17 @@ mod tests {
             root,
             "read_file",
             r#"{"path": "UnknownLib\\file.md"}"#,
+            bus,
         );
         assert!(res4.contains("Content library 'UnknownLib' not found"));
 
         // Resolving root dir / and .
-        let res5 = execute_tool(&config, root, "list_files", r#"{"path": "."}"#);
+        let res5 = execute_tool(&config, root, "list_files", r#"{"path": "."}"#, bus);
         assert!(!res5.contains("Invalid virtual path") && !res5.contains("error"));
         // Since it's list_files on root, it should return TestLib
         assert!(res5.contains("TestLib"));
 
-        let res6 = execute_tool(&config, root, "list_files", r#"{"path": "/"}"#);
+        let res6 = execute_tool(&config, root, "list_files", r#"{"path": "/"}"#, bus);
         assert!(!res6.contains("Invalid virtual path") && !res6.contains("error"));
         assert!(res6.contains("TestLib"));
     }
@@ -630,6 +650,7 @@ mod tests {
                 priority: 0,
             });
         let root = Path::new("C:\\Root");
+        let bus = test_bus();
 
         // Multiple traversals
         let res = execute_tool(
@@ -637,11 +658,12 @@ mod tests {
             root,
             "read_file",
             r#"{"path": "Lib/../../etc/passwd"}"#,
+            bus,
         );
         assert!(res.contains("Path traversal not allowed"));
 
         // Single parent dir
-        let res2 = execute_tool(&config, root, "read_file", r#"{"path": "Lib/.."}"#);
+        let res2 = execute_tool(&config, root, "read_file", r#"{"path": "Lib/.."}"#, bus);
         assert!(res2.contains("Path traversal not allowed"));
     }
 
@@ -649,7 +671,8 @@ mod tests {
     fn test_resolve_path_with_library_missing() {
         let config = AppConfig::default();
         let root = Path::new("C:\\");
-        let res = execute_tool(&config, root, "list_files", r#"{"path": "NonExistentLib"}"#);
+        let bus = test_bus();
+        let res = execute_tool(&config, root, "list_files", r#"{"path": "NonExistentLib"}"#, bus);
         assert!(res.contains("Content library 'NonExistentLib' not found"));
     }
 
@@ -657,7 +680,8 @@ mod tests {
     fn test_unknown_tool_returns_error() {
         let config = AppConfig::default();
         let root = Path::new("C:\\");
-        let res = execute_tool(&config, root, "nonexistent_tool", "{}");
+        let bus = test_bus();
+        let res = execute_tool(&config, root, "nonexistent_tool", "{}", bus);
         assert!(res.contains("Tool nonexistent_tool not found"));
     }
 
@@ -665,7 +689,8 @@ mod tests {
     fn test_tool_invalid_args_returns_error() {
         let config = AppConfig::default();
         let root = Path::new("C:\\");
-        let res = execute_tool(&config, root, "list_files", "not valid json");
+        let bus = test_bus();
+        let res = execute_tool(&config, root, "list_files", "not valid json", bus);
         assert!(res.contains("Invalid args") || res.contains("error"));
     }
 
@@ -693,7 +718,8 @@ mod tests {
         // Test that execute_tool uses the flag (we can't easily test log output,
         // but we verify the flag is accessible from config)
         let root = Path::new("C:\\");
-        let res = execute_tool(&config, root, "unknown_tool", "{}");
+        let bus = test_bus();
+        let res = execute_tool(&config, root, "unknown_tool", "{}", bus);
         // Should still work the same way, just with different logging behavior
         assert!(res.contains("not found") || res.contains("error"));
     }
@@ -770,7 +796,8 @@ mod tests {
     /// entry point and return the parsed JSON envelope.
     fn run_list_by_tag(config: &AppConfig, args: &str) -> Value {
         let root = Path::new("");
-        let raw = execute_tool(config, root, "list_files_by_tag", args);
+        let bus = test_bus();
+        let raw = execute_tool(config, root, "list_files_by_tag", args, bus);
         serde_json::from_str(&raw).unwrap_or_else(|e| {
             panic!("could not parse tool response `{}`: {}", raw, e);
         })
@@ -938,7 +965,8 @@ mod tests {
     /// library with the matching name.
     fn run_list_files(config: &AppConfig, args: &str) -> Value {
         let root = Path::new("");
-        let raw = execute_tool(config, root, "list_files", args);
+        let bus = test_bus();
+        let raw = execute_tool(config, root, "list_files", args, bus);
         serde_json::from_str(&raw).unwrap_or_else(|e| {
             panic!("could not parse tool response `{}`: {}", raw, e);
         })
@@ -1080,7 +1108,7 @@ mod tests {
         // the user asked for.
         let (config, _fix) = single_lib_with_n_md_files(3);
         let envelope = run_list_files(&config, r#"{"path":"Lib"}"#);
-        let raw = execute_tool(&config, Path::new(""), "list_files", r#"{"path":"Lib"}"#);
+        let raw = execute_tool(&config, Path::new(""), "list_files", r#"{"path":"Lib"}"#, test_bus());
         let parsed: Value = serde_json::from_str(&raw).unwrap();
         assert!(parsed["data"]["files"].is_array());
         // And on the parsed envelope, same shape.

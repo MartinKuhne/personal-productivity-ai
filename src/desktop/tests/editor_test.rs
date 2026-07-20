@@ -1,5 +1,13 @@
 use fastmd::editor::{EditorColors, EditorState};
+use fastmd::file_events::{Bus, FileEvent, FileEventProducer};
 use std::path::Path;
+
+/// A producer that publishes to a throwaway bus. Tests don't
+/// need to consume the events.
+fn noop_producer() -> FileEventProducer<'static> {
+    let bus: &'static Bus<FileEvent> = Box::leak(Box::new(Bus::new()));
+    FileEventProducer::new(bus)
+}
 
 #[test]
 fn test_editor_open_close() {
@@ -37,7 +45,7 @@ fn test_editor_save() {
     editor.content = "\n# Modified".to_string();
     
     // save
-    let result = editor.save();
+    let result = editor.save(&noop_producer());
     assert!(result.is_ok());
     assert!(!editor.is_open);
     

@@ -320,4 +320,119 @@ mod tests {
         let e3 = reader.recv_timeout(Duration::from_millis(100)).unwrap();
         assert_eq!(e3.kind, FileEventKind::Removed);
     }
+
+    // -- FileEventProducer tests --
+
+    #[test]
+    fn test_producer_publishes_discovered_for_new_file() {
+        let bus: Bus<FileEvent> = Bus::new();
+        let reader = bus.subscribe();
+        let producer = FileEventProducer::new(&bus);
+        let path = PathBuf::from("/tmp/new.md");
+
+        // Simulate creating a new file. The producer publishes Discovered
+        // on success.
+        producer.publish_discovered(&path);
+
+        let event = reader.recv_timeout(Duration::from_millis(100)).unwrap();
+        assert_eq!(event.kind, FileEventKind::Discovered);
+        assert_eq!(event.path, path);
+    }
+
+    #[test]
+    fn test_producer_publishes_updated_for_existing_file() {
+        let bus: Bus<FileEvent> = Bus::new();
+        let reader = bus.subscribe();
+        let producer = FileEventProducer::new(&bus);
+        let path = PathBuf::from("/tmp/existing.md");
+
+        producer.publish_updated(&path);
+
+        let event = reader.recv_timeout(Duration::from_millis(100)).unwrap();
+        assert_eq!(event.kind, FileEventKind::Updated);
+        assert_eq!(event.path, path);
+    }
+
+    #[test]
+    fn test_producer_publishes_removed() {
+        let bus: Bus<FileEvent> = Bus::new();
+        let reader = bus.subscribe();
+        let producer = FileEventProducer::new(&bus);
+        let path = PathBuf::from("/tmp/gone.md");
+
+        producer.publish_removed(&path);
+
+        let event = reader.recv_timeout(Duration::from_millis(100)).unwrap();
+        assert_eq!(event.kind, FileEventKind::Removed);
+        assert_eq!(event.path, path);
+    }
+
+    #[test]
+    fn test_producer_publishes_rename_as_removed_plus_discovered() {
+        // A rename is logically "old is gone, new exists" — publish both
+        // events so consumers can update any state keyed on either path.
+        let bus: Bus<FileEvent> = Bus::new();
+        let reader = bus.subscribe();
+        let producer = FileEventProducer::new(&bus);
+        let old = PathBuf::from("/tmp/old.md");
+        let new = PathBuf::from("/tmp/new.md");
+
+        producer.publish_rename(&old, &new);
+
+        let e1 = reader.recv_timeout(Duration::from_millis(100)).unwrap();
+        assert_eq!(e1.kind, FileEventKind::Removed);
+        assert_eq!(e1.path, old);
+        let e2 = reader.recv_timeout(Duration::from_millis(100)).unwrap();
+        assert_eq!(e2.kind, FileEventKind::Discovered);
+        assert_eq!(e2.path, new);
+    }
+}
+
+// =====================================================================
+// FileEventProducer
+// =====================================================================
+
+/// A thin handle for publishing [`FileEvent`]s from code that mutates
+/// the filesystem (UI handlers, tool implementations, the agent, etc.).
+///
+/// Centralising the publish calls in a producer (rather than calling
+/// `bus.publish` from every write site) gives us:
+/// 1. **One place to add new event semantics** — e.g. if we ever want
+///    a rename to publish a single `Renamed` event instead of two
+///    events, the change lives here.
+/// 2. **A non-`Clone` borrow surface** — every consumer of the bus
+///    can take a `&FileEventProducer` instead of cloning the bus,
+///    which makes ownership clearer in threaded code.
+pub struct FileEventProducer<'a> {
+    bus: &'a Bus<FileEvent>,
+}
+
+impl<'a> FileEventProducer<'a> {
+    pub fn new(bus: &'a Bus<FileEvent>) -> Self {
+        Self { bus }
+    }
+
+    /// Publish a `Discovered` event for a newly created file.
+    pub fn publish_discovered(&self, path: &std::path::Path) {
+        self.bus.publish(FileEvent::discovered(path.to_path_buf()));
+    }
+
+    /// Publish an `Updated` event for a modified file.
+    pub fn publish_updated(&self, path: &std::path::Path) {
+        self.bus.publish(FileEvent::updated(path.to_path_buf()));
+    }
+
+    /// Publish a `Removed` event for a deleted file.
+    pub fn publish_removed(&self, path: &std::path::Path) {
+        self.bus.publish(FileEvent::removed(path.to_path_buf()));
+    }
+
+    /// Publish a rename as a `Removed` event for the old path and a
+    /// `Discovered` event for the new path. The two events are sent
+    /// in order so consumers that drain synchronously see the
+    /// removal before the discovery.
+    pub fn publish_rename(&self, old: &std::path::Path, new: &std::path::Path) {
+        self.bus.publish(FileEvent::removed(old.to_path_buf()));
+        self.bus.publish(FileEvent::discovered(new.to_path_buf()));
+    }
 }

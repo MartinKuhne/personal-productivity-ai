@@ -174,6 +174,7 @@ pub fn show_bottom_panel(app: &mut FastMdApp, ctx: &egui::Context) {
                             let history = app.agent_history.clone();
                             let current_response = app.agent_response.clone();
                             let selected_files_agent = app.selected_files.clone();
+                            let file_event_bus = app.file_event_bus.clone();
 
                             crate::agent::run_agent(
                                 app.config.clone(),
@@ -185,6 +186,7 @@ pub fn show_bottom_panel(app: &mut FastMdApp, ctx: &egui::Context) {
                                 cancel_flag,
                                 history,
                                 current_response,
+                                file_event_bus,
                             );
                         }
                         CommandIntent::Empty => {}

@@ -27,6 +27,11 @@ pub struct TreeNodeContext<'a> {
     pub open_editor: &'a mut Option<PathBuf>,
     pub inline_editor_enabled: bool,
     pub bg_tx: &'a Option<Sender<BackgroundMessage>>,
+    /// Optional file-event producer. When set, mutations done via
+    /// the tree (new document, delete) publish a `Discovered` /
+    /// `Removed` event so the rest of the app refreshes
+    /// immediately without waiting for the OS-level notify event.
+    pub file_event_producer: Option<crate::file_events::FileEventProducer<'a>>,
 }
 
 pub fn draw_tree_node(ui: &mut egui::Ui, node: &TreeNode, ctx: &mut TreeNodeContext<'_>) {
@@ -97,14 +102,20 @@ pub fn draw_tree_node(ui: &mut egui::Ui, node: &TreeNode, ctx: &mut TreeNodeCont
                         error = %e,
                         "Failed to create new document. Likely cause: permission denied or disk full. Operator should verify directory permissions."
                     );
+                } else if let Some(producer) = ctx.file_event_producer.as_ref() {
+                    // Tell the rest of the app this file now exists
+                    // so the directory tree and tag manager refresh
+                    // immediately.
+                    producer.publish_discovered(&new_path);
                 }
                 ui.close_menu();
             }
             if ui.button("Delete").clicked() {
-                if let Err(e) = trash::delete(&node.path) {
+                let path = node.path.clone();
+                if let Err(e) = trash::delete(&path) {
                     tracing::error!(
                         name = "ui.directory.delete_failed",
-                        path = %node.path.display(),
+                        path = %path.display(),
                         error = %e,
                         "Failed to delete directory to trash. Likely cause: directory in use or permission denied. Operator should check file locks."
                     );
@@ -173,6 +184,8 @@ pub fn draw_tree_node(ui: &mut egui::Ui, node: &TreeNode, ctx: &mut TreeNodeCont
                                 error = %e,
                                 "Failed to delete file to trash during multi-selection. Likely cause: file in use or permission denied. Operator should check file locks."
                             );
+                        } else if let Some(producer) = ctx.file_event_producer.as_ref() {
+                            producer.publish_removed(file);
                         }
                     }
                     ctx.selected_files.clear();
@@ -240,13 +253,16 @@ pub fn draw_tree_node(ui: &mut egui::Ui, node: &TreeNode, ctx: &mut TreeNodeCont
                     ui.close_menu();
                 }
                 if ui.button("Delete").clicked() {
-                    if let Err(e) = trash::delete(&node.path) {
+                    let path = node.path.clone();
+                    if let Err(e) = trash::delete(&path) {
                         tracing::error!(
                             name = "ui.file.delete_failed",
-                            path = %node.path.display(),
+                            path = %path.display(),
                             error = %e,
                             "Failed to delete file to trash. Likely cause: file in use or permission denied. Operator should check file locks."
                         );
+                    } else if let Some(producer) = ctx.file_event_producer.as_ref() {
+                        producer.publish_removed(&path);
                     }
                     ui.close_menu();
                 }
@@ -327,6 +343,7 @@ mod tests {
                     open_editor: &mut open_editor,
                     inline_editor_enabled: true,
                     bg_tx: &None,
+                    file_event_producer: None,
                 };
 
                 // Render collapsed directory
@@ -402,6 +419,7 @@ mod tests {
                     open_editor: &mut open_editor,
                     inline_editor_enabled: true,
                     bg_tx: &None,
+                    file_event_producer: None,
                 };
 
                 draw_tree_node(ui, &file1, &mut tree_ctx);
