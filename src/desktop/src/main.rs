@@ -1,7 +1,7 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
-use fastmd::ui::FastMdApp;
 use eframe::egui;
+use fastmd::ui::FastMdApp;
 
 use mimalloc::MiMalloc;
 
@@ -9,11 +9,31 @@ use mimalloc::MiMalloc;
 static GLOBAL: MiMalloc = MiMalloc;
 
 fn main() -> eframe::Result<()> {
+    std::panic::set_hook(Box::new(|panic_info| {
+        let location = panic_info.location().map(|l| l.to_string());
+        let payload = panic_info.payload();
+        let msg = payload
+            .downcast_ref::<&str>()
+            .copied()
+            .or_else(|| payload.downcast_ref::<String>().map(|s| s.as_str()))
+            .unwrap_or("<no message>");
+        let backtrace = std::backtrace::Backtrace::force_capture();
+        tracing::error!(
+            name = "panic",
+            location = ?location,
+            message = %msg,
+            backtrace = %backtrace,
+            "Fatal panic"
+        );
+    }));
+
     // Initialize tracing
     tracing_subscriber::fmt::init();
 
     // Install rustls crypto provider
-    rustls::crypto::ring::default_provider().install_default().ok();
+    rustls::crypto::ring::default_provider()
+        .install_default()
+        .ok();
 
     let options = eframe::NativeOptions {
         viewport: egui::ViewportBuilder::default()
