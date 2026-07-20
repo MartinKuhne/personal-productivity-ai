@@ -1,6 +1,6 @@
 # FastMD Agent Tools Reference
 
-The following table summarizes all 28 tools available to the LLM agent, categorized by functionality:
+The following table summarizes all 27 tools available to the LLM agent, categorized by functionality:
 
 | Category | Tool Name | Description | Configuration Required |
 | --- | --- | --- | --- |
@@ -25,8 +25,7 @@ The following table summarizes all 28 tools available to the LLM agent, categori
 | **JMAP Productivity**| `add_calendar_item`| Create a new calendar event using a JSON object. | `jmap_url`, `jmap_token` |
 | **JMAP Productivity**| `update_calendar_item`| Update a calendar event using a JSON patch object. | `jmap_url`, `jmap_token` |
 | **JMAP Productivity**| `delete_calendar_item`| Delete a calendar event by ID. | `jmap_url`, `jmap_token` |
-| **JMAP Productivity**| `search_email` | Search emails by keyword. | `jmap_url`, `jmap_token` |
-| **JMAP Productivity**| `get_email` | Retrieve email details including body and metadata. | `jmap_url`, `jmap_token` |
+| **JMAP Productivity**| `search_email` | Search emails by any combination of keyword, folder, date range, sender, recipient, unread, or flagged status. All filters are combined with AND. | `jmap_url`, `jmap_token` |
 | **JMAP Productivity**| `get_email_by_id` | Get email by ID (full content). | `jmap_url`, `jmap_token` |
 | **JMAP Productivity**| `send_email` | Send an email to a recipient. | `jmap_url`, `jmap_token` |
 | **JMAP Productivity**| `search_contact` | Search contacts by keyword. | `jmap_url`, `jmap_token` |
@@ -297,10 +296,10 @@ All tool responses follow the same envelope:
   ```
 
 ##### `search_email`
-* **Description:** Search email by keyword, optionally within a specific folder, date range, or by sender/recipient. At least one filter field must be provided.
+* **Description:** Search email by any combination of `keyword`, `folder` (mailbox name), `start_date` / `end_date` (ISO `YYYY-MM-DD` or full RFC 3339), `from`, `to`, `is_unread`, and `is_flagged`. All provided filters are combined with AND. At least one filter field must be supplied.
 * **Request:**
   ```json
-  { "keyword": "invoice", "folder": "Inbox", "from": "vendor@example.com" }
+  { "keyword": "invoice", "folder": "Inbox", "from": "vendor@example.com", "is_unread": true }
   ```
 * **Response (`data`):**
   ```json
@@ -316,17 +315,6 @@ All tool responses follow the same envelope:
 * **Response (`data`):**
   ```json
   { "result": "{\"id\":\"abc123\",\"subject\":\"Invoice\",\"from\":...,\"body\":\"...\"}" }
-  ```
-
-##### `get_email`
-* **Description:** Get email by date range, sender, recipient, unread status, or flagged status.
-* **Request:**
-  ```json
-  { "start_date": "2026-07-01", "end_date": "2026-07-20", "is_unread": true }
-  ```
-* **Response (`data`):**
-  ```json
-  { "results": "[{\"id\":\"def456\",\"subject\":\"Hello\",\"from\":...}]" }
   ```
 
 ##### `send_email`

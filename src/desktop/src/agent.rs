@@ -313,7 +313,7 @@ pub fn run_agent(
 
                 for tool_call in tool_calls {
                     let func_name = tool_call.get("function").and_then(|f| f.get("name")).and_then(|n| n.as_str()).unwrap_or("");
-                    let is_safe = matches!(func_name, "grep" | "read_tags" | "list_files_by_tag" | "list_files" | "read_file" | "read_file_lines" | "web_fetch" | "read_yaml_header" | "web_search" | "search_calendar" | "get_calendar" | "get_calendar_item" | "search_email" | "get_email_by_id" | "get_email" | "search_contact" | "get_contact");
+                    let is_safe = matches!(func_name, "grep" | "read_tags" | "list_files_by_tag" | "list_files" | "read_file" | "read_file_lines" | "web_fetch" | "read_yaml_header" | "web_search" | "search_calendar" | "get_calendar" | "get_calendar_item" | "search_email" | "get_email_by_id" | "search_contact" | "get_contact");
                     if is_safe {
                         safe_calls.push(tool_call.clone());
                     } else {

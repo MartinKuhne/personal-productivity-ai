@@ -196,12 +196,28 @@ pub struct DeleteCalendarItemResponse {
 
 #[derive(Deserialize, Debug, JsonSchema)]
 pub struct SearchEmailInput {
+    /// Full-text search keyword. Matches against subject, body, and
+    /// common headers (From, To, Cc, etc.) per JMAP `text` filter rules.
     pub keyword: Option<String>,
+    /// Optional mailbox/folder name (e.g. "Inbox", "Sent"). Looked up
+    /// case-insensitively against the server's mailbox list.
     pub folder: Option<String>,
+    /// Inclusive lower bound on `receivedAt` (ISO `YYYY-MM-DD` or full
+    /// RFC 3339 timestamp).
     pub start_date: Option<String>,
+    /// Inclusive upper bound on `receivedAt` (ISO `YYYY-MM-DD` or full
+    /// RFC 3339 timestamp).
     pub end_date: Option<String>,
+    /// Filter by the `From` header (substring match per JMAP).
     pub from: Option<String>,
+    /// Filter by the `To` header (substring match per JMAP).
     pub to: Option<String>,
+    /// If `Some(true)`, only return unread email. If `Some(false)`, only
+    /// return email that has been read.
+    pub is_unread: Option<bool>,
+    /// If `Some(true)`, only return flagged/starred email. If
+    /// `Some(false)`, only return email that is not flagged.
+    pub is_flagged: Option<bool>,
 }
 #[derive(Serialize, Debug, JsonSchema)]
 pub struct SearchEmailResponse {
@@ -215,20 +231,6 @@ pub struct GetEmailByIdInput {
 #[derive(Serialize, Debug, JsonSchema)]
 pub struct GetEmailByIdResponse {
     pub result: String,
-}
-
-#[derive(Deserialize, Debug, JsonSchema)]
-pub struct GetEmailInput {
-    pub start_date: Option<String>,
-    pub end_date: Option<String>,
-    pub sender: Option<String>,
-    pub recipient: Option<String>,
-    pub is_unread: Option<bool>,
-    pub is_flagged: Option<bool>,
-}
-#[derive(Serialize, Debug, JsonSchema)]
-pub struct GetEmailResponse {
-    pub results: String,
 }
 
 #[derive(Deserialize, Debug, JsonSchema)]
