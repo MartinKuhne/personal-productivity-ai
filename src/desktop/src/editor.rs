@@ -107,7 +107,8 @@ impl EditorState {
                 
                 if let Some(cursor_range) = output.cursor_range {
                     let cursor_char_idx = cursor_range.primary.ccursor.index;
-                    let text_up_to_cursor = &self.content[..cursor_char_idx.min(self.content.len())];
+                    let byte_idx = self.content.char_indices().nth(cursor_char_idx).map(|(i, _)| i).unwrap_or(self.content.len());
+                    let text_up_to_cursor = &self.content[..byte_idx];
                     cursor_line = text_up_to_cursor.chars().filter(|&c| c == '\n').count() + 1;
                     if let Some(last_newline) = text_up_to_cursor.rfind('\n') {
                         cursor_col = text_up_to_cursor.chars().count() - text_up_to_cursor[..last_newline].chars().count();

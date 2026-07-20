@@ -40,13 +40,25 @@ The `config.yaml` file supports the following options:
 
 | Option | Type | Default Value | Description |
 |--------|------|---------------|-------------|
-| `api_url` | String | `https://openrouter.ai/api/v1` | The base URL for the LLM API endpoint. |
-| `model` | String | `google/gemini-2.5-flash:free` | The specific LLM model ID to use for the AI agent. |
-| `api_key` | String | `your-api-key-here` | The API key for authenticating with the LLM provider. |
+| `user_name` | String (Optional) | `null` | The name of the user. |
+| `user_address` | String (Optional) | `null` | The address of the user. |
+| `user_birthdate` | String (Optional) | `null` | The birthdate of the user. |
+| `user_gender` | String (Optional) | `null` | The gender of the user. |
+| `system_prompt_extension` | String (Optional) | `null` | Additional text to append to the AI system prompt. |
 | `models` | HashMap (Optional) | `{}` | A mapping of model aliases to specific LLM configurations (`model`, `api_url`, `api_key`). Use `/models` to list and `/model <alias>` to switch models. |
 | `searxng_url` | String (Optional) | `http://localhost:8090` | The URL for a SearXNG instance to enable the `web_search` tool. Leave null to disable. |
 | `jmap_clients` | HashMap (Optional) | `{}` | A mapping of account names to JMAP configuration objects (`url`, `token`) for email/contact tools. |
 | `caldav_clients` | HashMap (Optional) | `{}` | A mapping of account names to CalDAV configuration objects (`url`, `username`, `password`) for calendar tools. |
+| `content_libraries` | Array (Optional) | `[]` | List of content library configurations (`name`, `root_folder`, `kind`, `readonly`, `priority`). |
+| `pdf_converter_command` | Array (Optional) | `null` | Command template for PDF conversion (e.g. `["pandoc", "-f", "pdf", "-o", "{output}", "{input}"]`). |
+| `inline_editor_enabled` | Boolean | `false` | Enable the built-in inline text editor. |
+
+> [!NOTE]
+> **Using Marker for PDF Conversion**
+> The [Marker](https://github.com/datalab-to/marker) library provides state-of-the-art PDF to markdown conversion. The standard command for a single file is:
+> `marker_single "{input}" --output_dir "<directory>" --output_format markdown`
+> 
+> Because FastMD's `pdf_converter_command` substitutes `{output}` with the exact destination file path (e.g. `document.md`), it cannot be passed directly to `--output_dir`. To use Marker, create a wrapper script (e.g., `marker_wrapper.bat`) that accepts `{input}` and `{output}`, extracts the directory from `{output}`, executes `marker_single`, and then renames/moves the resulting file to the exact `{output}` path. Then configure FastMD to call your script: `["marker_wrapper.bat", "{input}", "{output}"]`.
 
 Example `config.yaml` with models and clients configured:
 ```yaml

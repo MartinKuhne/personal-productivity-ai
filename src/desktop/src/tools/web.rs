@@ -68,15 +68,15 @@ pub fn tool_web_search(url: &str, query: &str) -> Result<crate::tools::dtos::Web
 
 
 pub fn tool_web_delegate(config: &AppConfig, instruction: &str) -> Result<crate::tools::dtos::WebDelegateResponse, String> {
-    let mut api_key = config.api_key.clone();
-    let mut api_url = config.api_url.clone();
-    let mut model_name = config.model.clone();
+    let mut api_key = String::new();
+    let mut api_url = String::new();
+    let mut model_name = String::new();
 
-    if let Some(model_cfg) = config.models.get(&config.model) {
+    if let Some((_key, model_cfg)) = config.model_for_use_case("chat") {
         api_key = model_cfg.api_key.clone();
         api_url = model_cfg.api_url.clone();
         model_name = model_cfg.model.clone();
-    } else if (api_key == "your-api-key-here" || api_key.is_empty()) && !config.models.is_empty() {
+    } else if !config.models.is_empty() {
         if let Some(model_cfg) = config.models.values().next() {
             api_key = model_cfg.api_key.clone();
             api_url = model_cfg.api_url.clone();

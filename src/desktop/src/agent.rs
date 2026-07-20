@@ -1,4 +1,4 @@
-use crate::config::{get_config_path, load_config};
+use crate::config::get_config_path;
 use crate::tools::{execute_tool, get_tools_schema};
 use crate::messages::BackgroundMessage;
 use std::path::PathBuf;
@@ -28,8 +28,16 @@ pub fn get_base_system_prompt(config: &crate::config::AppConfig) -> String {
     if let Some(address) = &config.user_address {
         system_prompt.push_str(&format!("\nUser's Address: {}", address));
     }
-    if let Some(age) = config.user_age {
-        system_prompt.push_str(&format!("\nUser's Age: {}", age));
+    if let Some(birthdate) = &config.user_birthdate {
+        use chrono::Datelike;
+        if let Ok(parsed_date) = chrono::NaiveDate::parse_from_str(birthdate, "%Y-%m-%d") {
+            let today = chrono::Local::now().naive_local().date();
+            let mut age = today.year() - parsed_date.year();
+            if today.month() < parsed_date.month() || (today.month() == parsed_date.month() && today.day() < parsed_date.day()) {
+                age -= 1;
+            }
+            system_prompt.push_str(&format!("\nUser's Age: {}", age));
+        }
     }
     if let Some(gender) = &config.user_gender {
         system_prompt.push_str(&format!("\nUser's Gender: {}", gender));
@@ -41,6 +49,7 @@ pub fn get_base_system_prompt(config: &crate::config::AppConfig) -> String {
 }
 
 pub fn run_agent(
+    config: crate::config::AppConfig,
     tx_gui_agent: Sender<BackgroundMessage>,
     active_file: Option<PathBuf>,
     active_dir: Option<PathBuf>,
@@ -50,17 +59,16 @@ pub fn run_agent(
     current_response: String,
 ) {
     std::thread::spawn(move || {
-        let config = load_config();
         
-        let mut api_key = config.api_key.clone();
-        let mut api_url = config.api_url.clone();
-        let mut model_name = config.model.clone();
+        let mut api_key = String::new();
+        let mut api_url = String::new();
+        let mut model_name = String::new();
 
-        if let Some(model_cfg) = config.models.get(&config.model) {
+        if let Some((_key, model_cfg)) = config.model_for_use_case("chat") {
             api_key = model_cfg.api_key.clone();
             api_url = model_cfg.api_url.clone();
             model_name = model_cfg.model.clone();
-        } else if (api_key == "your-api-key-here" || api_key.is_empty()) && !config.models.is_empty() {
+        } else if !config.models.is_empty() {
             if let Some(model_cfg) = config.models.values().next() {
                 api_key = model_cfg.api_key.clone();
                 api_url = model_cfg.api_url.clone();
@@ -239,12 +247,12 @@ pub fn run_agent(
                 let _ = tx_gui_agent.send(BackgroundMessage::AgentResponse(full_response.clone()));
             }
 
+            messages.push(message.clone());
+
             if let Some(tool_calls) = message.get("tool_calls").and_then(|t| t.as_array()) {
                 if tool_calls.is_empty() {
                     break;
                 }
-
-                messages.push(message.clone());
 
                 let mut safe_calls = Vec::new();
                 let mut unsafe_calls = Vec::new();
@@ -296,111 +304,119 @@ pub fn run_agent(
                     completed_results.push((tool_call.clone(), call_id, func_name, func_args_str, result));
                 }
 
-                for (_tool_call, call_id, func_name, func_args_str, result) in completed_results {
-                    let (formatted_args, _is_empty_args) = match serde_json::from_str::<serde_json::Value>(&func_args_str) {
-                        Ok(val) => {
-                            let empty = match &val {
-                                serde_json::Value::Object(o) => o.is_empty(),
-                                serde_json::Value::Array(a) => a.is_empty(),
-                                _ => false,
-                            };
-                            (serde_json::to_string_pretty(&val).unwrap_or_else(|_| func_args_str.to_string()), empty)
-                        },
-                        Err(_) => (func_args_str.to_string(), func_args_str.trim() == "{}"),
-                    };
+                let mut results_map = std::collections::HashMap::new();
+                for (tool_call, call_id, func_name, func_args_str, result) in completed_results {
+                    results_map.insert(call_id, (tool_call, func_name, func_args_str, result));
+                }
 
-                    let formatted_args_quoted = formatted_args
-                        .lines()
-                        .map(|line| format!("> {}", line))
-                        .collect::<Vec<_>>()
-                        .join("\n");
+                for tool_call in tool_calls {
+                    let call_id = tool_call.get("id").and_then(|id| id.as_str()).unwrap_or("").to_string();
+                    if let Some((_tc, func_name, func_args_str, result)) = results_map.remove(&call_id) {
+                        let (formatted_args, _is_empty_args) = match serde_json::from_str::<serde_json::Value>(&func_args_str) {
+                            Ok(val) => {
+                                let empty = match &val {
+                                    serde_json::Value::Object(o) => o.is_empty(),
+                                    serde_json::Value::Array(a) => a.is_empty(),
+                                    _ => false,
+                                };
+                                (serde_json::to_string_pretty(&val).unwrap_or_else(|_| func_args_str.to_string()), empty)
+                            },
+                            Err(_) => (func_args_str.to_string(), func_args_str.trim() == "{}"),
+                        };
 
-                    let tool_msg = if func_name == "create_file" {
-                        let mut msg = format!("> **Executing tool `{}`**\n", func_name);
-                        if let Ok(args_val) = serde_json::from_str::<serde_json::Value>(&func_args_str) {
-                            let path = args_val.get("path").and_then(|p| p.as_str()).unwrap_or("unknown");
-                            msg.push_str(&format!("> Path: `{}`\n", path));
-                        }
-                        msg
-                    } else {
-                        format!("> **Executing tool `{}`**\n{}", func_name, formatted_args_quoted)
-                    };
-                    full_response.push_str(&tool_msg);
-                    full_response.push_str("\n\n");
-                    let _ = tx_gui_agent.send(BackgroundMessage::AgentResponse(full_response.clone()));
+                        let formatted_args_quoted = formatted_args
+                            .lines()
+                            .map(|line| format!("> {}", line))
+                            .collect::<Vec<_>>()
+                            .join("\n");
 
-                    let mut is_error = false;
-                    let mut error_msg = String::new();
-                    let mut result_data = serde_json::Value::Null;
-                    if let Ok(parsed) = serde_json::from_str::<serde_json::Value>(&result) {
-                        if let Some(status) = parsed.get("status").and_then(|s| s.as_str()) {
-                            if status == "error" {
-                                is_error = true;
-                                error_msg = parsed.get("message").and_then(|m| m.as_str()).unwrap_or("Unknown error").to_string();
-                            } else if status == "success" {
-                                if let Some(data) = parsed.get("data") {
-                                    result_data = data.clone();
+                        let tool_msg = if func_name == "create_file" {
+                            let mut msg = format!("> **Executing tool `{}`**\n", func_name);
+                            if let Ok(args_val) = serde_json::from_str::<serde_json::Value>(&func_args_str) {
+                                let path = args_val.get("path").and_then(|p| p.as_str()).unwrap_or("unknown");
+                                msg.push_str(&format!("> Path: `{}`\n", path));
+                            }
+                            msg
+                        } else {
+                            format!("> **Executing tool `{}`**\n{}", func_name, formatted_args_quoted)
+                        };
+                        full_response.push_str(&tool_msg);
+                        full_response.push_str("\n\n");
+                        let _ = tx_gui_agent.send(BackgroundMessage::AgentResponse(full_response.clone()));
+
+                        let mut is_error = false;
+                        let mut error_msg = String::new();
+                        let mut result_data = serde_json::Value::Null;
+                        if let Ok(parsed) = serde_json::from_str::<serde_json::Value>(&result) {
+                            if let Some(status) = parsed.get("status").and_then(|s| s.as_str()) {
+                                if status == "error" {
+                                    is_error = true;
+                                    error_msg = parsed.get("message").and_then(|m| m.as_str()).unwrap_or("Unknown error").to_string();
+                                } else if status == "success" {
+                                    if let Some(data) = parsed.get("data") {
+                                        result_data = data.clone();
+                                    }
                                 }
                             }
                         }
-                    }
 
-                    if func_name == "read_file" && !is_error {
-                        let content = result_data.get("content").and_then(|c| c.as_str()).unwrap_or("");
-                        tracing::info!(name = "agent.tool.result", "--- Tool {} returned {} lines ---", func_name, content.lines().count());
-                    } else {
-                        tracing::info!(name = "agent.tool.result", "--- Tool {} returned ---\n{}", func_name, result);
-                    }
+                        if func_name == "read_file" && !is_error {
+                            let content = result_data.get("content").and_then(|c| c.as_str()).unwrap_or("");
+                            tracing::info!(name = "agent.tool.result", "--- Tool {} returned {} lines ---", func_name, content.lines().count());
+                        } else {
+                            tracing::info!(name = "agent.tool.result", "--- Tool {} returned ---\n{}", func_name, result);
+                        }
 
-                    let result_msg = if is_error {
-                        format!("> **Result Error:** {}\n\n", error_msg)
-                    } else if func_name == "list_files" {
-                        let content = result_data.get("files").and_then(|f| f.as_str()).unwrap_or("");
-                        let count = content.lines().count();
-                        format!("> **Result:** {} files returned.\n\n", count)
-                    } else if func_name == "web_fetch" {
-                        let content = result_data.get("content").and_then(|f| f.as_str()).unwrap_or("");
-                        let count = content.lines().count();
-                        format!("> **Result:** {} markdown lines returned.\n\n", count)
-                    } else if func_name == "web_search" {
-                        let content = result_data.get("results").and_then(|f| f.as_str()).unwrap_or("");
-                        let count = content.split("\n\n").filter(|s| !s.trim().is_empty()).count();
-                        format!("> **Result:** {} search results returned.\n\n", count)
-                    } else if func_name == "get_email_by_id" {
-                        let subject = result_data.get("result").and_then(|v| v.as_str()).and_then(|s| serde_json::from_str::<serde_json::Value>(s).ok())
-                            .and_then(|val| val.as_array().and_then(|a| a.first().cloned()))
-                            .and_then(|obj| obj.get("subject").and_then(|s| s.as_str()).map(|s| s.to_string()))
-                            .unwrap_or_default();
-                        let date = result_data.get("result").and_then(|v| v.as_str()).and_then(|s| serde_json::from_str::<serde_json::Value>(s).ok())
-                            .and_then(|val| val.as_array().and_then(|a| a.first().cloned()))
-                            .and_then(|obj| obj.get("date").and_then(|s| s.as_str()).map(|s| s.to_string()))
-                            .unwrap_or_default();
-                        if !subject.is_empty() || !date.is_empty() {
-                            format!("> **Result:** {} - {}\n\n", date, subject)
+                        let result_msg = if is_error {
+                            format!("> **Result Error:** {}\n\n", error_msg)
+                        } else if func_name == "list_files" {
+                            let content = result_data.get("files").and_then(|f| f.as_str()).unwrap_or("");
+                            let count = content.lines().count();
+                            format!("> **Result:** {} files returned.\n\n", count)
+                        } else if func_name == "web_fetch" {
+                            let content = result_data.get("content").and_then(|f| f.as_str()).unwrap_or("");
+                            let count = content.lines().count();
+                            format!("> **Result:** {} markdown lines returned.\n\n", count)
+                        } else if func_name == "web_search" {
+                            let content = result_data.get("results").and_then(|f| f.as_str()).unwrap_or("");
+                            let count = content.split("\n\n").filter(|s| !s.trim().is_empty()).count();
+                            format!("> **Result:** {} search results returned.\n\n", count)
+                        } else if func_name == "get_email_by_id" {
+                            let subject = result_data.get("result").and_then(|v| v.as_str()).and_then(|s| serde_json::from_str::<serde_json::Value>(s).ok())
+                                .and_then(|val| val.as_array().and_then(|a| a.first().cloned()))
+                                .and_then(|obj| obj.get("subject").and_then(|s| s.as_str()).map(|s| s.to_string()))
+                                .unwrap_or_default();
+                            let date = result_data.get("result").and_then(|v| v.as_str()).and_then(|s| serde_json::from_str::<serde_json::Value>(s).ok())
+                                .and_then(|val| val.as_array().and_then(|a| a.first().cloned()))
+                                .and_then(|obj| obj.get("date").and_then(|s| s.as_str()).map(|s| s.to_string()))
+                                .unwrap_or_default();
+                            if !subject.is_empty() || !date.is_empty() {
+                                format!("> **Result:** {} - {}\n\n", date, subject)
+                            } else {
+                                format!("> **Result:** Completed.\n\n")
+                            }
+                        } else if func_name.starts_with("search_") {
+                            let mut count = 0;
+                            if let Some(arr) = result_data.get("results").and_then(|r| r.as_str()).and_then(|s| serde_json::from_str::<serde_json::Value>(s).ok()).and_then(|v| v.as_array().cloned()) {
+                                count = arr.len();
+                            } else if let Some(arr) = result_data.as_array() {
+                                count = arr.len();
+                            }
+                            format!("> **Result:** {} item(s) found\n\n", count)
+                        } else if result.len() < 100 && result.lines().count() <= 1 {
+                            format!("> **Result:** {}\n\n", result)
                         } else {
                             format!("> **Result:** Completed.\n\n")
-                        }
-                    } else if func_name.starts_with("search_") {
-                        let mut count = 0;
-                        if let Some(arr) = result_data.get("results").and_then(|r| r.as_str()).and_then(|s| serde_json::from_str::<serde_json::Value>(s).ok()).and_then(|v| v.as_array().cloned()) {
-                            count = arr.len();
-                        } else if let Some(arr) = result_data.as_array() {
-                            count = arr.len();
-                        }
-                        format!("> **Result:** {} item(s) found\n\n", count)
-                    } else if result.len() < 100 && result.lines().count() <= 1 {
-                        format!("> **Result:** {}\n\n", result)
-                    } else {
-                        format!("> **Result:** Completed.\n\n")
-                    };
-                    full_response.push_str(&result_msg);
-                    let _ = tx_gui_agent.send(BackgroundMessage::AgentResponse(full_response.clone()));
+                        };
+                        full_response.push_str(&result_msg);
+                        let _ = tx_gui_agent.send(BackgroundMessage::AgentResponse(full_response.clone()));
 
-                    messages.push(serde_json::json!({
-                        "role": "tool",
-                        "tool_call_id": call_id,
-                        "content": result
-                    }));
+                        messages.push(serde_json::json!({
+                            "role": "tool",
+                            "tool_call_id": call_id,
+                            "content": result
+                        }));
+                    }
                 }
             } else {
                 break;
@@ -476,12 +492,12 @@ mod tests {
         let mut config = crate::config::AppConfig::default();
         config.user_name = Some("Alice".to_string());
         config.user_address = Some("123 Main St".to_string());
-        config.user_age = Some(30);
+        config.user_birthdate = Some("1990-01-01".to_string());
         config.user_gender = Some("female".to_string());
         let prompt = get_base_system_prompt(&config);
         assert!(prompt.contains("Alice"));
         assert!(prompt.contains("123 Main St"));
-        assert!(prompt.contains("30"));
+        assert!(prompt.contains("36"));
         assert!(prompt.contains("female"));
     }
 

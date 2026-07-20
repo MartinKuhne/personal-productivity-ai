@@ -30,6 +30,38 @@ impl Task {
         let (tx_work, rx_work) = channel::<PathBuf>();
         let rx_work = std::sync::Arc::new(std::sync::Mutex::new(rx_work));
 
+        let (tx_pdf, rx_pdf) = channel::<PathBuf>();
+        let cmd_template = config.pdf_converter_command.clone();
+        let tx_gui_pdf = tx.clone();
+        std::thread::spawn(move || {
+            if let Ok(rt) = tokio::runtime::Runtime::new() {
+                rt.block_on(async {
+                    while let Ok(path) = rx_pdf.recv() {
+                        let job = crate::background::PdfConversionJob::new(path);
+                        if job.should_convert() {
+                            let _ = job.execute(cmd_template.clone(), tx_gui_pdf.clone()).await;
+                        }
+                    }
+                });
+            }
+        });
+
+        let (tx_img, rx_img) = channel::<PathBuf>();
+        let tx_gui_img = tx.clone();
+        let config_img = config.clone();
+        std::thread::spawn(move || {
+            if let Ok(rt) = tokio::runtime::Runtime::new() {
+                rt.block_on(async {
+                    while let Ok(path) = rx_img.recv() {
+                        let job = crate::background::models::ImageJob::new(path);
+                        if job.should_process() {
+                            let _ = crate::background::vision_processor::process_image(job, config_img.clone(), tx_gui_img.clone()).await;
+                        }
+                    }
+                });
+            }
+        });
+
         let mut workers = Vec::new();
         for _ in 0..4 {
             let rx_work_clone = rx_work.clone();
@@ -76,30 +108,14 @@ impl Task {
                             let job = crate::background::PdfConversionJob::new(path.to_path_buf());
                             if job.should_convert() {
                                 pdfs_queued += 1;
-                                let cmd = config.pdf_converter_command.clone();
-                                let tx_clone = tx.clone();
-                                std::thread::spawn(move || {
-                                    if let Ok(rt) = tokio::runtime::Runtime::new() {
-                                        rt.block_on(async {
-                                            let _ = job.execute(cmd, tx_clone).await;
-                                        });
-                                    }
-                                });
+                                let _ = tx_pdf.send(path.to_path_buf());
                             }
                         } else if matches!(ext_str.as_str(), "jpg" | "jpeg" | "png" | "gif" | "webp" | "bmp" | "tiff" | "avif") {
                             if is_image_lib {
                                 let job = crate::background::models::ImageJob::new(path.to_path_buf());
                                 if job.should_process() {
                                     images_queued += 1;
-                                    let tx_clone = tx.clone();
-                                    let config_c = config.clone();
-                                    std::thread::spawn(move || {
-                                        if let Ok(rt) = tokio::runtime::Runtime::new() {
-                                            rt.block_on(async {
-                                                let _ = crate::background::vision_processor::process_image(job, config_c, tx_clone).await;
-                                            });
-                                        }
-                                    });
+                                    let _ = tx_img.send(path.to_path_buf());
                                 }
                             }
                         }
@@ -134,6 +150,8 @@ impl Task {
 
         let tx_notify = tx.clone();
         let config_watcher = config.clone();
+        let tx_pdf_watcher = tx_pdf.clone();
+        let tx_img_watcher = tx_img.clone();
         let watcher_result = notify::recommended_watcher(move |res: Result<notify::Event, notify::Error>| {
             if let Ok(event) = res {
                 for path in event.paths {
@@ -206,15 +224,7 @@ impl Task {
                             notify::EventKind::Create(_) | notify::EventKind::Modify(_) => {
                                 let job = crate::background::PdfConversionJob::new(path.clone());
                                 if job.should_convert() {
-                                    let cmd = config_watcher.pdf_converter_command.clone();
-                                    let tx_c = tx_notify.clone();
-                                    std::thread::spawn(move || {
-                                        if let Ok(rt) = tokio::runtime::Runtime::new() {
-                                            rt.block_on(async {
-                                                let _ = job.execute(cmd, tx_c).await;
-                                            });
-                                        }
-                                    });
+                                    let _ = tx_pdf_watcher.send(path.clone());
                                 }
                             }
                             _ => {}
@@ -224,15 +234,7 @@ impl Task {
                             notify::EventKind::Create(_) | notify::EventKind::Modify(_) => {
                                 let job = crate::background::models::ImageJob::new(path.clone());
                                 if job.should_process() {
-                                    let tx_c = tx_notify.clone();
-                                    let config_c = config_watcher.clone();
-                                    std::thread::spawn(move || {
-                                        if let Ok(rt) = tokio::runtime::Runtime::new() {
-                                            rt.block_on(async {
-                                                let _ = crate::background::vision_processor::process_image(job, config_c, tx_c).await;
-                                            });
-                                        }
-                                    });
+                                    let _ = tx_img_watcher.send(path.clone());
                                 }
                             }
                             _ => {}

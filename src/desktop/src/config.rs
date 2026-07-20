@@ -115,15 +115,12 @@ fn default_readonly() -> bool {
 #[derive(serde::Serialize, serde::Deserialize, Clone)]
 #[serde(default)]
 pub struct AppConfig {
-    pub api_url: String,
-    pub model: String,
-    pub api_key: String,
     #[serde(default)]
     pub user_name: Option<String>,
     #[serde(default)]
     pub user_address: Option<String>,
     #[serde(default)]
-    pub user_age: Option<u32>,
+    pub user_birthdate: Option<String>,
     #[serde(default)]
     pub user_gender: Option<String>,
     #[serde(default)]
@@ -149,12 +146,9 @@ pub struct AppConfig {
 impl std::fmt::Debug for AppConfig {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("AppConfig")
-            .field("api_url", &self.api_url)
-            .field("model", &self.model)
-            .field("api_key", &"[REDACTED]")
             .field("user_name", &self.user_name)
             .field("user_address", &self.user_address)
-            .field("user_age", &self.user_age)
+            .field("user_birthdate", &self.user_birthdate)
             .field("user_gender", &self.user_gender)
             .field("system_prompt_extension", &self.system_prompt_extension)
             .field("models", &self.models)
@@ -171,12 +165,9 @@ impl std::fmt::Debug for AppConfig {
 impl Default for AppConfig {
     fn default() -> Self {
         Self {
-            api_url: "https://openrouter.ai/api/v1".to_string(),
-            model: "google/gemini-2.5-flash:free".to_string(),
-            api_key: "your-api-key-here".to_string(),
             user_name: None,
             user_address: None,
-            user_age: None,
+            user_birthdate: None,
             user_gender: None,
             system_prompt_extension: None,
             models: HashMap::new(),
@@ -202,15 +193,6 @@ impl AppConfig {
     /// Validate configuration, returning a list of warnings.
     pub fn validate(&self) -> Vec<String> {
         let mut warnings = Vec::new();
-
-        // Check that the active model references an existing key
-        if !self.model.is_empty() && !self.models.is_empty()
-            && !self.models.contains_key(&self.model)
-        {
-            warnings.push(format!(
-                "Active model '{}' not found in models map", self.model
-            ));
-        }
 
         // Check models have valid use_case values
         let valid_use_cases = ["chat", "embeddings", "vision"];
@@ -277,9 +259,6 @@ mod tests {
     #[test]
     fn test_default_config() {
         let config = AppConfig::default();
-        assert_eq!(config.api_url, "https://openrouter.ai/api/v1");
-        assert_eq!(config.model, "google/gemini-2.5-flash:free");
-        assert_eq!(config.api_key, "your-api-key-here");
         assert!(config.pdf_converter_command.is_none());
         assert!(!config.inline_editor_enabled);
     }
@@ -294,8 +273,7 @@ mod tests {
             std::env::set_var("APPDATA", dir.path());
         }
         
-        let config = load_config();
-        assert_eq!(config.api_url, "https://openrouter.ai/api/v1");
+        let _config = load_config();
         
         // Config file should have been created
         assert!(config_path.exists());
@@ -414,25 +392,13 @@ mod tests {
 
     #[test]
     fn test_validate_missing_active_model() {
-        let mut config = AppConfig::default();
-        config.model = "nonexistent".to_string();
-        config.models.insert("real".to_string(), LlmConfig {
-            model: "real".to_string(),
-            api_url: "http://a".to_string(),
-            api_key: "k".to_string(),
-            cost: None,
-            use_case: vec!["chat".to_string()],
-        });
-        let warnings = config.validate();
-        assert!(warnings.iter().any(|w| w.contains("not found in models map")));
+        // Test removed as active model is now deprecated.
     }
 
     #[test]
     fn test_backward_compat_old_field_names() {
         let yaml = r#"
-api_url: "https://openrouter.ai/api/v1"
 model: "test"
-api_key: "key"
 models:
   legacy_model:
     model: "old-model-name"
@@ -450,9 +416,7 @@ models:
     #[test]
     fn test_new_field_names() {
         let yaml = r#"
-api_url: "https://openrouter.ai/api/v1"
 model: "test"
-api_key: "key"
 models:
   new_model:
     model: "new-model-name"
@@ -475,9 +439,7 @@ models:
     #[test]
     fn test_config_with_pdf_converter() {
         let yaml = r#"
-api_url: "https://openrouter.ai/api/v1"
 model: "test"
-api_key: "key"
 pdf_converter_command:
   - pandoc
   - "-f"
