@@ -256,7 +256,7 @@ models:
 | `add_calendar_item` | Add a new calendar item. Requires CalDAV config. |
 | `update_calendar_item` | Update a calendar item. Requires CalDAV config. |
 | `delete_calendar_item` | Delete a calendar item. Requires CalDAV config. |
-| `search_email` | Search email by keyword. Requires JMAP config. |
+| `search_email` | Search email by keyword, folder, date range, sender, recipient, unread, or flagged status. Results are paginated (default page size 10); every response includes total for follow-up page requests. Requires JMAP config. |
 | `get_email_by_id` | Get email by id. Requires JMAP config. |
 | `get_email` | Get email by date range, sender, recipient, unread, or flagged status. Requires JMAP config. |
 | `send_email` | Send an email. Requires JMAP config. |

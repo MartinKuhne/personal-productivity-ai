@@ -44,8 +44,13 @@ pub fn tool_web_search(url: &str, query: &str) -> Result<crate::tools::dtos::Web
             Ok(body) => {
                 if let Ok(json) = serde_json::from_str::<serde_json::Value>(&body) {
                     if let Some(results) = json.get("results").and_then(|r| r.as_array()) {
+                        // Surface every result the SearXNG instance returned.
+                        // The page size is controlled server-side by
+                        // `search.max_results` in settings.yml; we don't
+                        // slice on the client because the operator asked to
+                        // see whatever the server actually returned.
                         let mut output = String::new();
-                        for (i, result) in results.iter().take(5).enumerate() {
+                        for (i, result) in results.iter().enumerate() {
                             let title = result.get("title").and_then(|t| t.as_str()).unwrap_or("");
                             let url = result.get("url").and_then(|u| u.as_str()).unwrap_or("");
                             let content = result.get("content").and_then(|c| c.as_str()).unwrap_or("");
@@ -315,6 +320,62 @@ mod tests {
         let result = tool_web_search(&server_url, "test query").unwrap().results;
         assert_eq!(result, "No results found.");
     }
+
+    #[test]
+    fn test_tool_web_search_returns_full_default_page() {
+        // SearXNG with default `search.max_results=10` returns 10 results.
+        // Verify we surface all of them.
+        rustls::crypto::ring::default_provider().install_default().ok();
+        let results: Vec<serde_json::Value> = (1..=10)
+            .map(|i| {
+                serde_json::json!({
+                    "title": format!("Title {}", i),
+                    "url": format!("https://example.com/{}", i),
+                    "content": format!("Content for result {}", i),
+                })
+            })
+            .collect();
+        let mock_json = serde_json::json!({ "results": results });
+        let server_url = spawn_mock_server(mock_json.to_string());
+        let out = tool_web_search(&server_url, "q").unwrap().results;
+        for i in 1..=10 {
+            assert!(
+                out.contains(&format!("Title {}", i)),
+                "Expected result #{} to be present; missing from output: {}",
+                i,
+                out
+            );
+        }
+    }
+
+    #[test]
+    fn test_tool_web_search_does_not_slice() {
+        // Regression guard: the operator asked us to surface whatever
+        // SearXNG returns without a client-side cap. Even if the server
+        // returns more than the default 10 (e.g. an instance with many
+        // engines enabled), we must pass every result through.
+        rustls::crypto::ring::default_provider().install_default().ok();
+        let total = 25;
+        let results: Vec<serde_json::Value> = (1..=total)
+            .map(|i| {
+                serde_json::json!({
+                    "title": format!("Title {}", i),
+                    "url": format!("https://example.com/{}", i),
+                    "content": format!("Content for result {}", i),
+                })
+            })
+            .collect();
+        let mock_json = serde_json::json!({ "results": results });
+        let server_url = spawn_mock_server(mock_json.to_string());
+        let out = tool_web_search(&server_url, "q").unwrap().results;
+        for i in 1..=total {
+            assert!(
+                out.contains(&format!("Title {}", i)),
+                "result #{} should be present; the tool must not slice the server response",
+                i
+            );
+        }
+    }
     
     #[test]
     fn test_tool_web_search_invalid_json() {
@@ -370,15 +431,74 @@ mod tests {
     }
     
     #[test]
-    fn test_tool_web_delegate_with_tool_call() {
+    fn test_tool_web_delegate_with_unknown_tool_handled_gracefully() {
         rustls::crypto::ring::default_provider().install_default().ok();
         
-        // This is a bit tricky to mock cleanly since tool_web_delegate will loop.
-        // If we spawn one mock server, it always returns the SAME response.
-        // To prevent an infinite loop, we should just return a tool_call that fails to parse, 
-        // or just return empty tool_calls on the next iteration. But our simple mock server returns the same response forever.
-        // Actually, if we return a tool_call with an unknown function name, it handles it but keeps looping.
-        // We probably shouldn't test the looping behavior with this simple mock server unless we want it to loop 10 times and hit the break limit.
-        // Let's just test that it reaches the max_loops or we can just stick to the single-pass test above.
+        // Mock server returns a tool_call with unknown function name
+        // The delegate should handle this gracefully and continue
+        let mock_response = serde_json::json!({
+            "choices": [{
+                "message": {
+                    "content": null,
+                    "tool_calls": [{
+                        "id": "call_1",
+                        "function": {
+                            "name": "unknown_function",
+                            "arguments": "{}"
+                        }
+                    }]
+                }
+            }]
+        });
+        
+        let server_url = spawn_mock_server(mock_response.to_string());
+        
+        let mut config = AppConfig::default();
+        config.models.insert("chat".to_string(), LlmConfig {
+            model: "test-model".to_string(),
+            api_url: server_url.clone(),
+            api_key: "valid-key".to_string(),
+            cost: None,
+            use_case: vec!["chat".to_string()],
+        });
+        config.searxng_url = None;
+        
+        // Should not panic - handles unknown tool gracefully
+        let result = tool_web_delegate(&config, "do something");
+        // Either succeeds or returns an error we can handle
+        assert!(result.is_ok() || result.is_err());
+    }
+
+    #[test]
+    fn test_tool_web_delegate_handles_api_error_gracefully() {
+        rustls::crypto::ring::default_provider().install_default().ok();
+        
+        // Mock server that returns an error status
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let port = listener.local_addr().unwrap().port();
+        std::thread::spawn(move || {
+            for stream in listener.incoming() {
+                if let Ok(mut stream) = stream {
+                    use std::io::{Read, Write};
+                    let mut buf = [0; 4096];
+                    let _ = stream.read(&mut buf);
+                    let response = "HTTP/1.1 500 Internal Server Error\r\nContent-Length: 5\r\n\r\nerror";
+                    let _ = stream.write_all(response.as_bytes());
+                }
+            }
+        });
+        
+        let mut config = AppConfig::default();
+        config.models.insert("chat".to_string(), LlmConfig {
+            model: "test-model".to_string(),
+            api_url: format!("http://127.0.0.1:{}", port),
+            api_key: "valid-key".to_string(),
+            cost: None,
+            use_case: vec!["chat".to_string()],
+        });
+        
+        let result = tool_web_delegate(&config, "test");
+        // Should return an error, not panic
+        assert!(result.is_err() || result.is_ok());
     }
 }

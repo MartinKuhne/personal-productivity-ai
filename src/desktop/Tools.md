@@ -25,7 +25,7 @@ The following table summarizes all 27 tools available to the LLM agent, categori
 | **JMAP Productivity**| `add_calendar_item`| Create a new calendar event using a JSON object. | `jmap_url`, `jmap_token` |
 | **JMAP Productivity**| `update_calendar_item`| Update a calendar event using a JSON patch object. | `jmap_url`, `jmap_token` |
 | **JMAP Productivity**| `delete_calendar_item`| Delete a calendar event by ID. | `jmap_url`, `jmap_token` |
-| **JMAP Productivity**| `search_email` | Search emails by any combination of keyword, folder, date range, sender, recipient, unread, or flagged status. All filters are combined with AND. | `jmap_url`, `jmap_token` |
+| **JMAP Productivity**| `search_email` | Search emails by any combination of keyword, folder, date range, sender, recipient, unread, or flagged status. All filters are combined with AND. Results are paginated (default page size 10); every response includes total so the caller can drive follow-up page requests. | `jmap_url`, `jmap_token` |
 | **JMAP Productivity**| `get_email_by_id` | Get email by ID (full content). | `jmap_url`, `jmap_token` |
 | **JMAP Productivity**| `send_email` | Send an email to a recipient. | `jmap_url`, `jmap_token` |
 | **JMAP Productivity**| `search_contact` | Search contacts by keyword. | `jmap_url`, `jmap_token` |
@@ -310,14 +310,14 @@ All tool responses follow the same envelope:
   ```
 
 ##### `search_email`
-* **Description:** Search email by any combination of `keyword`, `folder` (mailbox name), `start_date` / `end_date` (ISO `YYYY-MM-DD` or full RFC 3339), `from`, `to`, `is_unread`, and `is_flagged`. All provided filters are combined with AND. At least one filter field must be supplied.
+* **Description:** Search email by any combination of `keyword`, `folder` (mailbox name), `start_date` / `end_date` (ISO `YYYY-MM-DD` or full RFC 3339), `from`, `to`, `is_unread`, and `is_flagged`. All provided filters are combined with AND. At least one filter field must be supplied. Results are paginated (default page size 10); every response includes `total` so the caller can request additional pages via `page` / `page_size`.
 * **Request:**
   ```json
-  { "keyword": "invoice", "folder": "Inbox", "from": "vendor@example.com", "is_unread": true }
+  { "keyword": "invoice", "folder": "Inbox", "from": "vendor@example.com", "is_unread": true, "page": 1, "page_size": 10 }
   ```
 * **Response (`data`):**
   ```json
-  { "results": "[{\"id\":\"abc123\",\"subject\":\"Invoice\",\"from\":\"vendor@example.com\",...}]" }
+  { "results": "[{\"id\":\"abc123\",...}]", "total": 42 }
   ```
 
 ##### `get_email_by_id`

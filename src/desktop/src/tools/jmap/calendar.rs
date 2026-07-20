@@ -378,4 +378,71 @@ mod tests {
         let res_add = tool_add_calendar_item(&config, "{}");
         assert!(res_add.unwrap().result.contains("Error fetching JMAP session"));
     }
+
+    #[test]
+    fn test_calendar_search_returns_empty_list() {
+        // POSITIVE: Empty results should be handled gracefully
+        rustls::crypto::ring::default_provider().install_default().ok();
+        let json_resp = serde_json::json!({
+            "apiUrl": "{API_URL}",
+            "primaryAccounts": {
+                "urn:ietf:params:jmap:calendars": "acc-1"
+            },
+            "methodResponses": [
+                ["CalendarEvent/query", { "ids": [] }, "0"],
+                ["CalendarEvent/get", { "list": [] }, "1"]
+            ]
+        });
+        let url = spawn_mock_server(serde_json::to_string(&json_resp).unwrap());
+        let config = mock_config(&url);
+
+        let res = tool_search_calendar(&config, "nonexistent");
+        assert!(res.is_ok());
+        // Should contain client marker but no errors
+        assert!(res.unwrap().results.contains("--- Client:"));
+    }
+
+    #[test]
+    fn test_calendar_get_with_empty_list() {
+        // POSITIVE: Get calendar with no events in date range
+        rustls::crypto::ring::default_provider().install_default().ok();
+        let json_resp = serde_json::json!({
+            "apiUrl": "{API_URL}",
+            "primaryAccounts": {
+                "urn:ietf:params:jmap:calendars": "acc-1"
+            },
+            "methodResponses": [
+                ["CalendarEvent/query", { "ids": [] }, "0"],
+                ["CalendarEvent/get", { "list": [] }, "1"]
+            ]
+        });
+        let url = spawn_mock_server(serde_json::to_string(&json_resp).unwrap());
+        let config = mock_config(&url);
+
+        let res = tool_get_calendar(&config, "2099-01-01", "2099-12-31");
+        assert!(res.is_ok());
+        assert!(res.unwrap().results.contains("--- Client:"));
+    }
+
+    #[test]
+    fn test_calendar_delete_nonexistent_item() {
+        // BOUNDARY: Deleting an item that doesn't exist should still return success
+        // (the server may report success or notFound - both are acceptable)
+        rustls::crypto::ring::default_provider().install_default().ok();
+        let json_resp = serde_json::json!({
+            "apiUrl": "{API_URL}",
+            "primaryAccounts": {
+                "urn:ietf:params:jmap:calendars": "acc-1"
+            },
+            "methodResponses": [
+                ["CalendarEvent/set", { "destroyed": ["nonexistent-id"] }, "0"]
+            ]
+        });
+        let url = spawn_mock_server(serde_json::to_string(&json_resp).unwrap());
+        let config = mock_config(&url);
+
+        let res = tool_delete_calendar_item(&config, "nonexistent-id");
+        assert!(res.is_ok());
+        assert!(res.unwrap().result.contains("--- Client:"));
+    }
 }

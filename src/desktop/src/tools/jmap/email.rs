@@ -241,6 +241,8 @@ pub fn tool_search_email(
     to: Option<&str>,
     is_unread: Option<bool>,
     is_flagged: Option<bool>,
+    page: usize,
+    page_size: usize,
 ) -> Result<crate::tools::dtos::SearchEmailResponse, String> {
     let format_jmap_date = |d: &str, is_end: bool| -> String {
         if d.len() == 10 && d.chars().nth(4) == Some('-') && d.chars().nth(7) == Some('-') {
@@ -304,13 +306,17 @@ pub fn tool_search_email(
             .to_string());
     }
 
-    let mut all_results = Vec::new();
+    // Collect raw (client_name, simplified_email) pairs and error
+    // messages separately so we can paginate across all clients.
+    let mut all_items: Vec<(String, serde_json::Value)> = Vec::new();
+    let mut error_messages: Vec<String> = Vec::new();
+
     for (name, client) in &config.jmap_clients {
         let (api_url, token, accs) = match get_jmap_session(client) {
             Ok(s) => s,
             Err(e) => {
                 tracing::error!(name = "tool.email.search.session_failed", client = %name, error = %e, "Failed to fetch JMAP session. Operator should check email account credentials.");
-                all_results.push(format!("Error fetching JMAP session for {}: {}", name, e));
+                error_messages.push(format!("Error fetching JMAP session for {}: {}", name, e));
                 continue;
             }
         };
@@ -325,7 +331,7 @@ pub fn tool_search_email(
                     client_conditions.push(serde_json::json!({ "inMailbox": mailbox_id }));
                 }
                 Err(e) => {
-                    all_results.push(format!("Error for {}: {}", name, e));
+                    error_messages.push(format!("Error for {}: {}", name, e));
                     continue;
                 }
             },
@@ -333,7 +339,7 @@ pub fn tool_search_email(
         }
 
         if client_conditions.is_empty() {
-            all_results.push(format!("Error for {}: At least one filter field must be provided (keyword, folder, start_date, end_date, from, to, is_unread, is_flagged)", name));
+            error_messages.push(format!("Error for {}: At least one filter field must be provided (keyword, folder, start_date, end_date, from, to, is_unread, is_flagged)", name));
             continue;
         }
 
@@ -359,7 +365,7 @@ pub fn tool_search_email(
                     for resp in method_responses {
                         if let Some(resp_arr) = resp.as_array() {
                             if resp_arr.get(0).and_then(|s| s.as_str()) == Some("error") {
-                                all_results.push(format!(
+                                error_messages.push(format!(
                                     "Error from JMAP server for {}: {}",
                                     name,
                                     serde_json::to_string_pretty(resp_arr).unwrap_or_default()
@@ -372,25 +378,71 @@ pub fn tool_search_email(
                 if !is_error {
                     let clean_res = convert_html_in_jmap(res);
                     let simplified = simplify_jmap_emails(clean_res, Some(10));
-                    all_results.push(format!(
-                        "--- Client: {} ---\n{}",
-                        name,
-                        serde_json::to_string_pretty(&simplified).unwrap_or_default()
-                    ))
+                    if let Some(arr) = simplified.as_array() {
+                        for item in arr {
+                            all_items.push((name.clone(), item.clone()));
+                        }
+                    }
                 }
             }
             Err(e) => {
                 tracing::error!(name = "tool.email.search.api_failed", client = %name, error = %e, "Failed to query emails via JMAP. Operator should verify JMAP server status.");
-                all_results.push(format!("Error querying email for {}: {}", name, e));
+                error_messages.push(format!("Error querying email for {}: {}", name, e));
             }
         }
     }
-    if all_results.is_empty() {
+
+    let total = all_items.len();
+
+    // Paginate the flat item list, then group by client for output.
+    let (page_items, hint) = if total == 0 {
+        let hint = if error_messages.is_empty() {
+            Some("No matching emails found.".to_string())
+        } else {
+            None
+        };
+        (Vec::new(), hint)
+    } else {
+        let start = page.saturating_sub(1).saturating_mul(page_size);
+        if start >= total {
+            (
+                Vec::new(),
+                Some(format!(
+                    "No emails on page {page} (showing 0 of {total} total, page_size: {page_size})."
+                )),
+            )
+        } else {
+            let end = (start + page_size).min(total);
+            (all_items[start..end].to_vec(), None)
+        }
+    };
+
+    // Group paginated items by client (BTreeMap for deterministic order).
+    use std::collections::BTreeMap;
+    let mut client_items: BTreeMap<&str, Vec<&serde_json::Value>> = BTreeMap::new();
+    for (client, item) in &page_items {
+        client_items.entry(client.as_str()).or_default().push(item);
+    }
+
+    let mut result_parts: Vec<String> = Vec::new();
+    for (client, items) in &client_items {
+        result_parts.push(format!(
+            "--- Client: {} ---\n{}",
+            client,
+            serde_json::to_string_pretty(items).unwrap_or_default()
+        ));
+    }
+    // Append any error messages so they are still visible.
+    result_parts.extend(error_messages);
+
+    if config.jmap_clients.is_empty() {
         tracing::warn!(name = "tool.email.search.no_clients", "No JMAP clients configured. Operator should configure at least one email account in settings.");
         Err("No JMAP clients configured.".to_string())
     } else {
         Ok(crate::tools::dtos::SearchEmailResponse {
-            results: all_results.join("\n\n"),
+            results: result_parts.join("\n\n"),
+            total,
+            hint,
         })
     }
 }
@@ -988,6 +1040,8 @@ mod tests {
             None,
             None,
             None,
+            1,
+            10,
         );
         assert!(res.is_err());
     }
@@ -1024,6 +1078,8 @@ mod tests {
             None,
             None,
             None,
+            1,
+            10,
         );
         assert!(res.is_ok());
     }
@@ -1088,6 +1144,8 @@ mod tests {
             Some("r@test.com"),
             Some(true),
             Some(false),
+            1,
+            10,
         );
         assert!(res.is_ok());
     }
@@ -1124,7 +1182,9 @@ mod tests {
         // must still return Err and never silently swallow the empty
         // filter case.
         let config = AppConfig::default();
-        let res = tool_search_email(&config, None, None, None, None, None, None, None, None);
+        let res = tool_search_email(
+            &config, None, None, None, None, None, None, None, None, 1, 10,
+        );
         assert!(res.is_err());
         let msg = res.unwrap_err();
         assert!(msg.contains("At least one filter field must be provided"));
@@ -1148,10 +1208,272 @@ mod tests {
                 token: "tok".to_string(),
             },
         );
-        let res = tool_search_email(&config, None, None, None, None, None, None, None, None);
+        let res = tool_search_email(
+            &config, None, None, None, None, None, None, None, None, 1, 10,
+        );
         assert!(res.is_err());
         assert!(res
             .unwrap_err()
             .contains("At least one filter field must be provided"));
+    }
+
+    // -- Pagination tests ------------------------------------------------
+
+    #[test]
+    fn test_tool_search_email_pagination_default_page_size_is_10() {
+        rustls::crypto::ring::default_provider()
+            .install_default()
+            .ok();
+        // Build a response with 3 emails — all should fit on page 1 of size 10.
+        let body = format!(
+            r#"{{
+                "apiUrl": "{{API_URL}}",
+                "primaryAccounts": {{"urn:ietf:params:jmap:mail": "acc1"}},
+                "methodResponses": [
+                    ["Email/query", {{"ids": ["e1","e2","e3"]}}, "0"],
+                    ["Email/get", {{
+                        "list": [
+                            {{"id": "e1", "subject": "First", "receivedAt": "2026-07-19T10:00:00Z", "from": [{{"email":"a@t.com"}}], "to": [{{"email":"b@t.com"}}], "htmlBody": [{{"partId":"p1"}}], "bodyValues": {{"p1": {{"value":"Body 1","isTruncated":false}}}}}},
+                            {{"id": "e2", "subject": "Second", "receivedAt": "2026-07-19T11:00:00Z", "from": [{{"email":"c@t.com"}}], "to": [{{"email":"d@t.com"}}], "htmlBody": [{{"partId":"p2"}}], "bodyValues": {{"p2": {{"value":"Body 2","isTruncated":false}}}}}},
+                            {{"id": "e3", "subject": "Third", "receivedAt": "2026-07-19T12:00:00Z", "from": [{{"email":"e@t.com"}}], "to": [{{"email":"f@t.com"}}], "htmlBody": [{{"partId":"p3"}}], "bodyValues": {{"p3": {{"value":"Body 3","isTruncated":false}}}}}}
+                        ],
+                        "notFound": []
+                    }}, "1"]
+                ]
+            }}"#
+        );
+        let url = spawn_mock_server(body);
+        let mut config = AppConfig::default();
+        config.jmap_clients.insert(
+            "test".to_string(),
+            JmapClient {
+                url,
+                token: "tok".to_string(),
+            },
+        );
+        let res = tool_search_email(
+            &config,
+            Some("test"),
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            1,
+            10,
+        );
+        assert!(res.is_ok());
+        let response = res.unwrap();
+        assert_eq!(response.total, 3);
+        assert!(response.hint.is_none());
+        assert!(!response.results.is_empty());
+    }
+
+    #[test]
+    fn test_tool_search_email_pagination_second_page() {
+        rustls::crypto::ring::default_provider()
+            .install_default()
+            .ok();
+        // Build a response with 5 emails; page 2 with page_size 2 should
+        // return items at indices 2..=3.
+        let body = format!(
+            r#"{{
+                "apiUrl": "{{API_URL}}",
+                "primaryAccounts": {{"urn:ietf:params:jmap:mail": "acc1"}},
+                "methodResponses": [
+                    ["Email/query", {{"ids": ["e1","e2","e3","e4","e5"]}}, "0"],
+                    ["Email/get", {{
+                        "list": [
+                            {{"id": "e1", "subject": "S1", "receivedAt": "2026-07-19T10:00:00Z", "from": [{{"email":"a@t.com"}}], "to": [{{"email":"b@t.com"}}], "htmlBody": [{{"partId":"p1"}}], "bodyValues": {{"p1": {{"value":"B1","isTruncated":false}}}}}},
+                            {{"id": "e2", "subject": "S2", "receivedAt": "2026-07-19T11:00:00Z", "from": [{{"email":"c@t.com"}}], "to": [{{"email":"d@t.com"}}], "htmlBody": [{{"partId":"p2"}}], "bodyValues": {{"p2": {{"value":"B2","isTruncated":false}}}}}},
+                            {{"id": "e3", "subject": "S3", "receivedAt": "2026-07-19T12:00:00Z", "from": [{{"email":"e@t.com"}}], "to": [{{"email":"f@t.com"}}], "htmlBody": [{{"partId":"p3"}}], "bodyValues": {{"p3": {{"value":"B3","isTruncated":false}}}}}},
+                            {{"id": "e4", "subject": "S4", "receivedAt": "2026-07-19T13:00:00Z", "from": [{{"email":"g@t.com"}}], "to": [{{"email":"h@t.com"}}], "htmlBody": [{{"partId":"p4"}}], "bodyValues": {{"p4": {{"value":"B4","isTruncated":false}}}}}},
+                            {{"id": "e5", "subject": "S5", "receivedAt": "2026-07-19T14:00:00Z", "from": [{{"email":"i@t.com"}}], "to": [{{"email":"j@t.com"}}], "htmlBody": [{{"partId":"p5"}}], "bodyValues": {{"p5": {{"value":"B5","isTruncated":false}}}}}}
+                        ],
+                        "notFound": []
+                    }}, "1"]
+                ]
+            }}"#
+        );
+        let url = spawn_mock_server(body);
+        let mut config = AppConfig::default();
+        config.jmap_clients.insert(
+            "test".to_string(),
+            JmapClient {
+                url,
+                token: "tok".to_string(),
+            },
+        );
+        let res = tool_search_email(
+            &config,
+            Some("test"),
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            2, // page
+            2, // page_size
+        );
+        assert!(res.is_ok());
+        let response = res.unwrap();
+        assert_eq!(response.total, 5);
+        assert!(response.hint.is_none());
+        // Page 2 with size 2 → items at indices 2..4 (S3, S4)
+        assert!(response.results.contains("S3"));
+        assert!(response.results.contains("S4"));
+        assert!(!response.results.contains("S1"));
+        assert!(!response.results.contains("S5"));
+    }
+
+    #[test]
+    fn test_tool_search_email_page_past_end_returns_hint() {
+        rustls::crypto::ring::default_provider()
+            .install_default()
+            .ok();
+        let body = format!(
+            r#"{{
+                "apiUrl": "{{API_URL}}",
+                "primaryAccounts": {{"urn:ietf:params:jmap:mail": "acc1"}},
+                "methodResponses": [
+                    ["Email/query", {{"ids": ["e1"]}}, "0"],
+                    ["Email/get", {{
+                        "list": [
+                            {{"id": "e1", "subject": "Only", "receivedAt": "2026-07-19T10:00:00Z", "from": [{{"email":"a@t.com"}}], "to": [{{"email":"b@t.com"}}], "htmlBody": [{{"partId":"p1"}}], "bodyValues": {{"p1": {{"value":"Body","isTruncated":false}}}}}}
+                        ],
+                        "notFound": []
+                    }}, "1"]
+                ]
+            }}"#
+        );
+        let url = spawn_mock_server(body);
+        let mut config = AppConfig::default();
+        config.jmap_clients.insert(
+            "test".to_string(),
+            JmapClient {
+                url,
+                token: "tok".to_string(),
+            },
+        );
+        let res = tool_search_email(
+            &config,
+            Some("test"),
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            99, // page
+            10, // page_size
+        );
+        assert!(res.is_ok());
+        let response = res.unwrap();
+        assert_eq!(response.total, 1);
+        let hint = response.hint.expect("hint should be set on past-end");
+        assert!(hint.starts_with("No emails on page 99"));
+        assert!(hint.contains("1 total"));
+        assert!(response.results.is_empty());
+    }
+
+    #[test]
+    fn test_tool_search_email_page_zero_is_normalised_to_page_one() {
+        // page=0 is meaningless for 1-indexed paging; the registry normalises
+        // it to 1 via `.max(1)` before calling the function. This test verifies
+        // the function still works correctly when page=0 is passed directly.
+        rustls::crypto::ring::default_provider()
+            .install_default()
+            .ok();
+        let body = format!(
+            r#"{{
+                "apiUrl": "{{API_URL}}",
+                "primaryAccounts": {{"urn:ietf:params:jmap:mail": "acc1"}},
+                "methodResponses": [
+                    ["Email/query", {{"ids": ["e1"]}}, "0"],
+                    ["Email/get", {{
+                        "list": [
+                            {{"id": "e1", "subject": "Only", "receivedAt": "2026-07-19T10:00:00Z", "from": [{{"email":"a@t.com"}}], "to": [{{"email":"b@t.com"}}], "htmlBody": [{{"partId":"p1"}}], "bodyValues": {{"p1": {{"value":"Body","isTruncated":false}}}}}}
+                        ],
+                        "notFound": []
+                    }}, "1"]
+                ]
+            }}"#
+        );
+        let url = spawn_mock_server(body);
+        let mut config = AppConfig::default();
+        config.jmap_clients.insert(
+            "test".to_string(),
+            JmapClient {
+                url,
+                token: "tok".to_string(),
+            },
+        );
+        let res = tool_search_email(
+            &config,
+            Some("test"),
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            0, // page → treated as page 1 by registry
+            10,
+        );
+        assert!(res.is_ok());
+        let response = res.unwrap();
+        assert_eq!(response.total, 1);
+        assert!(response.results.contains("Only"));
+    }
+
+    #[test]
+    fn test_tool_search_email_no_items_returns_total_zero() {
+        rustls::crypto::ring::default_provider()
+            .install_default()
+            .ok();
+        // Email/query returns zero IDs → no items, but still a valid response.
+        let body = format!(
+            r#"{{
+                "apiUrl": "{{API_URL}}",
+                "primaryAccounts": {{"urn:ietf:params:jmap:mail": "acc1"}},
+                "methodResponses": [
+                    ["Email/query", {{"ids": []}}, "0"],
+                    ["Email/get", {{"list": [], "notFound": []}}, "1"]
+                ]
+            }}"#
+        );
+        let url = spawn_mock_server(body);
+        let mut config = AppConfig::default();
+        config.jmap_clients.insert(
+            "test".to_string(),
+            JmapClient {
+                url,
+                token: "tok".to_string(),
+            },
+        );
+        let res = tool_search_email(
+            &config,
+            Some("test"),
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            1,
+            10,
+        );
+        assert!(res.is_ok());
+        let response = res.unwrap();
+        assert_eq!(response.total, 0);
+        let hint = response.hint.expect("hint should be set for zero items");
+        assert_eq!(hint, "No matching emails found.");
     }
 }

@@ -248,10 +248,24 @@ pub struct SearchEmailInput {
     /// If `Some(true)`, only return flagged/starred email. If
     /// `Some(false)`, only return email that is not flagged.
     pub is_flagged: Option<bool>,
+    /// 1-indexed page number. Defaults to `1` if omitted.
+    pub page: Option<usize>,
+    /// Number of results per page. Defaults to `10` if omitted. The
+    /// total number of matching emails across all pages is returned
+    /// in the `total` field.
+    pub page_size: Option<usize>,
 }
 #[derive(Serialize, Debug, JsonSchema)]
 pub struct SearchEmailResponse {
     pub results: String,
+    /// Total number of matching emails across all pages. Use this
+    /// together with `page` / `page_size` to drive follow-up page
+    /// requests.
+    pub total: usize,
+    /// When the requested page is past the end, this field is set
+    /// to a human-readable hint. `None` when the page is in range.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub hint: Option<String>,
 }
 
 #[derive(Deserialize, Debug, JsonSchema)]
