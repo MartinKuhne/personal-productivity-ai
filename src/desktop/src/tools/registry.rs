@@ -2,18 +2,18 @@ use crate::config::AppConfig;
 use std::path::{Component, Path};
 
 /// Slice `items` into a paginated window of size `page_size` for
-/// `page` (1-indexed). Returns the page as a `Vec<String>` and an
+/// `page` (1-indexed). Returns the page as a `Vec<T>` and an
 /// optional human-readable hint when the requested page is past the
 /// end. `plural` is the noun form used in the hint (e.g. `"files"`,
 /// `"libraries"`, `"tagged files"`) so the LLM agent gets context
 /// about which tool produced the empty result.
-fn paginate_in_range(
-    items: &[String],
+pub(crate) fn paginate_in_range<T: Clone>(
+    items: &[T],
     page: usize,
     page_size: usize,
     total: usize,
     plural: &str,
-) -> (Vec<String>, Option<String>) {
+) -> (Vec<T>, Option<String>) {
     if total == 0 {
         return (Vec::new(), Some(format!("No matching {plural} found.")));
     }
@@ -440,10 +440,14 @@ define_tools! {
     },
     {
         name: "search_email",
-        description: "Search email by any combination of keyword, folder (mailbox), date range, sender, recipient, unread status, or flagged status. All filters are combined with AND. At least one filter must be provided.",
+        description: "Search email by any combination of keyword, folder (mailbox), date range, sender, recipient, unread status, or flagged status. All filters are combined with AND. At least one filter must be provided. Results are paginated (default page size 10); every response includes the total number of matching emails so the caller can drive follow-up page requests.",
         input: crate::tools::dtos::SearchEmailInput,
         enabled: |config: &AppConfig| !config.jmap_clients.is_empty(),
-        execute: |config, _root_path, input, _is_safe| crate::tools::jmap::tool_search_email(config, input.keyword.as_deref(), input.folder.as_deref(), input.start_date.as_deref(), input.end_date.as_deref(), input.from.as_deref(), input.to.as_deref(), input.is_unread, input.is_flagged)
+        execute: |config, _root_path, input, _is_safe| {
+            let page = input.page.unwrap_or(1).max(1);
+            let page_size = input.page_size.unwrap_or(10).max(1);
+            crate::tools::jmap::tool_search_email(config, input.keyword.as_deref(), input.folder.as_deref(), input.start_date.as_deref(), input.end_date.as_deref(), input.from.as_deref(), input.to.as_deref(), input.is_unread, input.is_flagged, page, page_size)
+        }
     },
     {
         name: "get_email_by_id",

@@ -1,9 +1,66 @@
 use crate::config::get_config_path;
+use crate::messages::{BackgroundMessage, TokenUsageInfo};
 use crate::tools::{execute_tool, get_tools_schema};
-use crate::messages::BackgroundMessage;
 use std::path::{Path, PathBuf};
 use std::sync::mpsc::Sender;
 use ureq;
+
+/// Best-effort parser for the `usage` block returned by an OpenAI-compatible
+/// chat-completions endpoint.
+///
+/// OpenAI and most local OpenAI-compatible servers (LM Studio, vLLM, llama.cpp
+/// server, etc.) emit:
+/// ```json
+/// "usage": {
+///   "prompt_tokens": 123,
+///   "completion_tokens": 45,
+///   "total_tokens": 168,
+///   "prompt_tokens_details":     { "cached_tokens": 0 },
+///   "completion_tokens_details": { "reasoning_tokens": 0 }
+/// }
+/// ```
+///
+/// Anthropic's Messages API uses `input_tokens` / `output_tokens` instead; this
+/// function maps those onto `prompt_tokens` / `completion_tokens` so downstream
+/// code can stay provider-agnostic.
+///
+/// Returns `None` if no recognizable token field is present, so callers can
+/// cheaply skip responses from providers that don't report usage (e.g. some
+/// streaming-only endpoints).
+pub fn parse_usage_block(usage: &serde_json::Value) -> Option<TokenUsageInfo> {
+    let prompt_tokens = usage
+        .get("prompt_tokens")
+        .and_then(|v| v.as_u64())
+        .or_else(|| usage.get("input_tokens").and_then(|v| v.as_u64()));
+    let completion_tokens = usage
+        .get("completion_tokens")
+        .and_then(|v| v.as_u64())
+        .or_else(|| usage.get("output_tokens").and_then(|v| v.as_u64()));
+    let total_tokens = usage.get("total_tokens").and_then(|v| v.as_u64());
+
+    if prompt_tokens.is_none() && completion_tokens.is_none() && total_tokens.is_none() {
+        return None;
+    }
+
+    let cached_tokens = usage
+        .get("prompt_tokens_details")
+        .and_then(|d| d.get("cached_tokens"))
+        .and_then(|v| v.as_u64());
+    let reasoning_tokens = usage
+        .get("completion_tokens_details")
+        .and_then(|d| d.get("reasoning_tokens"))
+        .and_then(|v| v.as_u64());
+
+    Some(TokenUsageInfo {
+        prompt_tokens: prompt_tokens.unwrap_or(0),
+        completion_tokens: completion_tokens.unwrap_or(0),
+        total_tokens: total_tokens.unwrap_or_else(|| {
+            prompt_tokens.unwrap_or(0).saturating_add(completion_tokens.unwrap_or(0))
+        }),
+        cached_tokens,
+        reasoning_tokens,
+    })
+}
 
 fn split_thinking_and_content(text: &str) -> (String, String) {
     let delim = "🤔";
@@ -250,6 +307,24 @@ pub fn run_agent(
                     return;
                 }
             };
+
+            // Parse and surface the usage block (if the provider returned one).
+            // This runs before the schema checks so we still capture token data
+            // when the response is otherwise usable.
+            if let Some(usage) = resp_val.get("usage") {
+                if let Some(info) = parse_usage_block(usage) {
+                    tracing::info!(
+                        name = "agent.usage",
+                        prompt_tokens = info.prompt_tokens,
+                        completion_tokens = info.completion_tokens,
+                        total_tokens = info.total_tokens,
+                        cached_tokens = info.cached_tokens.unwrap_or(0),
+                        reasoning_tokens = info.reasoning_tokens.unwrap_or(0),
+                        "LLM usage for this turn. `prompt_tokens` is the full context sent; the operator can divide it by the model's context window to gauge headroom."
+                    );
+                    let _ = tx_gui_agent.send(BackgroundMessage::AgentTokenUsage(info));
+                }
+            }
 
             let choice = match resp_val.get("choices").and_then(|c| c.get(0)) {
                 Some(c) => c,
@@ -541,6 +616,14 @@ pub fn run_agent(
                                 format!("> **Result:** {} - {}\n\n", date, subject)
                             } else {
                                 format!("> **Result:** Email content retrieved.\n\n")
+                            }
+                        } else if func_name == "search_email" {
+                            let total = result_data.get("total").and_then(|t| t.as_u64()).unwrap_or(0);
+                            let hint = result_data.get("hint").and_then(|h| h.as_str()).unwrap_or("");
+                            if !hint.is_empty() {
+                                format!("> **Result:** {} item(s) found. {}\n\n", total, hint)
+                            } else {
+                                format!("> **Result:** {} item(s) found\n\n", total)
                             }
                         } else if func_name.starts_with("search_") {
                             let mut count = 0;
@@ -843,6 +926,58 @@ mod tests {
             }
         }
         assert!(got_failed);
+    }
+
+    #[test]
+    fn test_parse_usage_block_openai_shape() {
+        let usage = serde_json::json!({
+            "prompt_tokens": 123,
+            "completion_tokens": 45,
+            "total_tokens": 168,
+            "prompt_tokens_details":     { "cached_tokens": 10 },
+            "completion_tokens_details": { "reasoning_tokens": 7 }
+        });
+        let info = parse_usage_block(&usage).expect("expected usage to be parsed");
+        assert_eq!(info.prompt_tokens, 123);
+        assert_eq!(info.completion_tokens, 45);
+        assert_eq!(info.total_tokens, 168);
+        assert_eq!(info.cached_tokens, Some(10));
+        assert_eq!(info.reasoning_tokens, Some(7));
+    }
+
+    #[test]
+    fn test_parse_usage_block_anthropic_shape() {
+        // Anthropic Messages API style: input_tokens / output_tokens.
+        let usage = serde_json::json!({
+            "input_tokens": 200,
+            "output_tokens": 50
+        });
+        let info = parse_usage_block(&usage).expect("expected usage to be parsed");
+        assert_eq!(info.prompt_tokens, 200);
+        assert_eq!(info.completion_tokens, 50);
+        // total_tokens is synthesized when missing.
+        assert_eq!(info.total_tokens, 250);
+        assert_eq!(info.cached_tokens, None);
+        assert_eq!(info.reasoning_tokens, None);
+    }
+
+    #[test]
+    fn test_parse_usage_block_missing_returns_none() {
+        let usage = serde_json::json!({});
+        assert!(parse_usage_block(&usage).is_none());
+    }
+
+    #[test]
+    fn test_parse_usage_block_partial_openai() {
+        // Some providers only report prompt + completion.
+        let usage = serde_json::json!({
+            "prompt_tokens": 1,
+            "completion_tokens": 2
+        });
+        let info = parse_usage_block(&usage).expect("expected usage to be parsed");
+        assert_eq!(info.prompt_tokens, 1);
+        assert_eq!(info.completion_tokens, 2);
+        assert_eq!(info.total_tokens, 3);
     }
 
     #[test]

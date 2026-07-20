@@ -561,4 +561,194 @@ mod tests {
         assert!(res[0].ends_with("note.md"));
         assert!(res[0].starts_with("Workspace"));
     }
+
+    // =====================================================================
+    // Additional edge case tests
+    // =====================================================================
+
+    #[test]
+    fn test_tool_grep_ignores_non_markdown_files() {
+        // NEGATIVE ASSERTION: Files without .md or .markdown extension
+        // must NOT be searched, even if they contain matching text.
+        let dir = tempdir().unwrap();
+        let md_file = dir.path().join("test.md");
+        let txt_file = dir.path().join("secret.txt");
+        let pdf_file = dir.path().join("notes.pdf");
+        
+        fs::write(&md_file, "# Project\nContains search term here").unwrap();
+        fs::write(&txt_file, "This also contains search term").unwrap();
+        fs::write(&pdf_file, "Search term in PDF").unwrap();
+
+        let result = tool_grep(dir.path(), "Workspace", "search term").unwrap();
+        // Only the .md file should be found
+        assert!(result.matches.contains("test.md"));
+        assert!(result.matches.contains("Contains search term"));
+        // txt and pdf must NOT appear in results
+        assert!(!result.matches.contains("secret.txt"));
+        assert!(!result.matches.contains("notes.pdf"));
+    }
+
+    #[test]
+    fn test_tool_grep_multiple_matches_same_file() {
+        // ORDERING ASSERTION: When a query matches multiple lines in the
+        // same file, they should appear in line number order.
+        let dir = tempdir().unwrap();
+        let file_path = dir.path().join("test.md");
+        fs::write(&file_path, "Line 1: foo\nLine 2: bar\nLine 3: foo\nLine 4: baz\nLine 5: foo").unwrap();
+
+        let result = tool_grep(dir.path(), "Workspace", "foo").unwrap();
+        let matches_text = result.matches;
+        let lines: Vec<&str> = matches_text.lines().collect();
+        
+        // Should find 3 matches at lines 1, 3, 5
+        assert_eq!(lines.len(), 3, "Expected 3 matches, got: {}", matches_text);
+        
+        // Verify line numbers are in ascending order by extracting from the format "path:line - content"
+        // The format is: "path:line_number - content"
+        let line_nums: Vec<usize> = lines.iter()
+            .filter_map(|l| {
+                // Find the first colon that's followed by digits (the line number)
+                let colon_pos = l.find(':')?;
+                let after_colon = &l[colon_pos + 1..];
+                // Line number is before the next ' - '
+                if let Some(dash_pos) = after_colon.find(" - ") {
+                    after_colon[..dash_pos].trim().parse().ok()
+                } else {
+                    None
+                }
+            })
+            .collect();
+        assert_eq!(line_nums, vec![1, 3, 5], "Line numbers should be in order");
+        
+        // Verify the matches are in the correct positions
+        assert!(lines[0].contains("Line 1"));
+        assert!(lines[1].contains("Line 3"));
+        assert!(lines[2].contains("Line 5"));
+    }
+
+    #[test]
+    fn test_tool_grep_case_insensitive() {
+        // Grep is documented as case-insensitive
+        let dir = tempdir().unwrap();
+        let file_path = dir.path().join("test.md");
+        fs::write(&file_path, "Hello WORLD hello World HELLO").unwrap();
+
+        let result = tool_grep(dir.path(), "Workspace", "hello").unwrap();
+        assert!(result.matches.contains("Hello"));
+        assert!(result.matches.contains("WORLD"));
+        assert!(result.matches.contains("hello"));
+        assert!(result.matches.contains("World"));
+        assert!(result.matches.contains("HELLO"));
+    }
+
+    #[test]
+    fn test_tool_read_file_lines_start_greater_than_end() {
+        // BOUNDARY: start_line > end_line should error
+        let dir = tempdir().unwrap();
+        let file_path = dir.path().join("test.md");
+        fs::write(&file_path, "Line 1\nLine 2\nLine 3").unwrap();
+
+        let result = tool_read_file_lines(file_path.to_str().unwrap(), 3, 1);
+        assert_eq!(result.unwrap_err(), "Start line greater than end line.");
+    }
+
+    #[test]
+    fn test_tool_read_file_lines_boundary_zero() {
+        // BOUNDARY: start_line=0 should error (1-indexed)
+        let dir = tempdir().unwrap();
+        let file_path = dir.path().join("test.md");
+        fs::write(&file_path, "Line 1\nLine 2").unwrap();
+
+        let result = tool_read_file_lines(file_path.to_str().unwrap(), 0, 2);
+        assert_eq!(result.unwrap_err(), "Start line out of range.");
+    }
+
+    #[test]
+    fn test_tool_read_file_lines_end_beyond_file() {
+        // BOUNDARY: end_line beyond file length should return available content
+        let dir = tempdir().unwrap();
+        let file_path = dir.path().join("test.md");
+        fs::write(&file_path, "Line 1\nLine 2\nLine 3").unwrap();
+
+        let result = tool_read_file_lines(file_path.to_str().unwrap(), 1, 100);
+        // Should return all lines up to end of file
+        let content = result.unwrap().content;
+        assert!(content.contains("Line 1"));
+        assert!(content.contains("Line 3"));
+    }
+
+    #[test]
+    fn test_tool_create_file_rejects_markdown_extension() {
+        // NEGATIVE: Only .md extension is allowed, not .markdown
+        let dir = tempdir().unwrap();
+        let file_path = dir.path().join("new.markdown");
+
+        let result = tool_create_file(
+            file_path.to_str().unwrap(),
+            "# Hello",
+        );
+        // Should reject .markdown extension
+        assert_eq!(
+            result.unwrap_err(),
+            "Only markdown files (.md) are allowed."
+        );
+        assert!(!file_path.exists());
+    }
+
+    #[test]
+    fn test_tool_delete_lines_boundary_start_equals_end() {
+        // BOUNDARY: deleting single line (start == end) should work
+        let dir = tempdir().unwrap();
+        let file_path = dir.path().join("test.md");
+        fs::write(&file_path, "Line 1\nLine 2\nLine 3").unwrap();
+
+        let result = tool_delete_lines(file_path.to_str().unwrap(), 2, 2)
+            .unwrap()
+            .result;
+        assert_eq!(result, "Lines deleted successfully.");
+
+        let content = fs::read_to_string(&file_path).unwrap();
+        assert_eq!(content, "Line 1\nLine 3");
+    }
+
+    #[test]
+    fn test_tool_delete_lines_start_beyond_content() {
+        // BOUNDARY: start_line beyond content should error
+        let dir = tempdir().unwrap();
+        let file_path = dir.path().join("test.md");
+        fs::write(&file_path, "Line 1\nLine 2").unwrap();
+
+        let result = tool_delete_lines(file_path.to_str().unwrap(), 5, 10);
+        assert_eq!(result.unwrap_err(), "Start line out of range.");
+    }
+
+    #[test]
+    fn test_tool_list_files_excludes_subdirectories() {
+        // POSITIVE: tool_list_files is documented as non-recursive
+        let dir = tempdir().unwrap();
+        fs::write(dir.path().join("root.md"), "content").unwrap();
+        fs::create_dir(dir.path().join("subdir")).unwrap();
+        fs::write(dir.path().join("subdir").join("nested.md"), "content").unwrap();
+
+        let result = tool_list_files(dir.path(), "Workspace").unwrap();
+        assert_eq!(result.len(), 1);
+        assert!(result[0].ends_with("root.md"));
+        // Nested files should NOT be included
+        assert!(!result.iter().any(|p| p.contains("nested.md")));
+    }
+
+    #[test]
+    fn test_tool_list_files_by_tag_with_markdown_extension() {
+        // POSITIVE: files with .markdown extension should also be found
+        let dir = tempdir().unwrap();
+        fs::write(
+            dir.path().join("doc.markdown"),
+            "---\ntags: [test-tag]\n---\n# Doc\n",
+        )
+        .unwrap();
+
+        let res = tool_list_files_by_tag(dir.path(), "Workspace", "test-tag").unwrap();
+        assert_eq!(res.len(), 1);
+        assert!(res[0].ends_with("doc.markdown"));
+    }
 }

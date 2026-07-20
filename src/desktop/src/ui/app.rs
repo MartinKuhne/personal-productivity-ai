@@ -1,6 +1,6 @@
 use crate::background::{BackgroundProcessManager, SharedProcessManager};
 use crate::background_task::Task;
-use crate::messages::BackgroundMessage;
+use crate::messages::{BackgroundMessage, TokenUsageInfo};
 use crate::ui::modals::{show_create_dir_modal, show_move_modal, show_rename_modal};
 use crate::ui::panels::{
     show_bottom_panel, show_center_panel, show_left_panel, show_right_panel, show_top_panel,
@@ -88,6 +88,14 @@ pub struct FastMdApp {
     pub agent_scroll_to_id: Option<egui::Id>,
     pub agent_cancel_flag: Option<std::sync::Arc<std::sync::atomic::AtomicBool>>,
     pub agent_history: Option<Vec<serde_json::Value>>,
+    /// Token usage from the most recent LLM turn. `prompt_tokens` here is
+    /// the size of the full conversation context the model just saw, so
+    /// it is what you'd compare against the model's context window.
+    pub agent_token_usage: Option<TokenUsageInfo>,
+    /// Cumulative token usage across every LLM turn in the current session.
+    /// `prompt_tokens` is the peak seen; `completion_tokens` and the
+    /// optional detail fields are summed.
+    pub agent_total_usage: TokenUsageInfo,
     pub left_panel_reset_count: u32,
     pub submit_prompt: Option<String>,
     pub editor_state: crate::editor::EditorState,
@@ -244,6 +252,8 @@ impl FastMdApp {
             agent_scroll_to_id: None,
             agent_cancel_flag: None,
             agent_history: None,
+            agent_token_usage: None,
+            agent_total_usage: TokenUsageInfo::default(),
             left_panel_reset_count: 0,
             submit_prompt: None,
             editor_state: crate::editor::EditorState::default(),
@@ -267,6 +277,8 @@ impl FastMdApp {
         if self.agent_history.is_none() || !self.show_agent_results {
             self.agent_response.clear();
             self.agent_history = None;
+            self.agent_token_usage = None;
+            self.agent_total_usage = TokenUsageInfo::default();
         } else {
             self.agent_response
                 .push_str(&format!("> **User:** {}\n\n", self.command_input));
@@ -387,6 +399,35 @@ impl FastMdApp {
                 BackgroundMessage::AgentFailed(err) => {
                     self.agent_status = format!("Error: {}", err);
                     self.agent_running = false;
+                }
+                BackgroundMessage::AgentTokenUsage(info) => {
+                    // Track the peak prompt size across the session so the
+                    // operator can see how close the conversation is to the
+                    // model's context window.
+                    if info.prompt_tokens > self.agent_total_usage.prompt_tokens {
+                        self.agent_total_usage.prompt_tokens = info.prompt_tokens;
+                    }
+                    self.agent_total_usage.completion_tokens = self
+                        .agent_total_usage
+                        .completion_tokens
+                        .saturating_add(info.completion_tokens);
+                    self.agent_total_usage.total_tokens = self
+                        .agent_total_usage
+                        .total_tokens
+                        .saturating_add(info.total_tokens);
+                    self.agent_total_usage.cached_tokens = Some(
+                        self.agent_total_usage
+                            .cached_tokens
+                            .unwrap_or(0)
+                            .saturating_add(info.cached_tokens.unwrap_or(0)),
+                    );
+                    self.agent_total_usage.reasoning_tokens = Some(
+                        self.agent_total_usage
+                            .reasoning_tokens
+                            .unwrap_or(0)
+                            .saturating_add(info.reasoning_tokens.unwrap_or(0)),
+                    );
+                    self.agent_token_usage = Some(info);
                 }
                 BackgroundMessage::LogEntry(entry) => {
                     if let Ok(mut mgr) = self.background_manager.lock() {
@@ -614,5 +655,84 @@ mod tests {
 
         assert!(!app.agent_running);
         assert!(app.agent_history.is_some());
+    }
+
+    #[test]
+    fn test_agent_token_usage_message_accumulates() {
+        let ctx = egui::Context::default();
+        let mut app = create_test_app();
+
+        // First turn: small context, no cached or reasoning tokens.
+        app.tx
+            .send(BackgroundMessage::AgentTokenUsage(TokenUsageInfo {
+                prompt_tokens: 100,
+                completion_tokens: 20,
+                total_tokens: 120,
+                cached_tokens: None,
+                reasoning_tokens: None,
+            }))
+            .unwrap();
+
+        let _ = ctx.run(Default::default(), |ctx| {
+            app.update_ui(ctx);
+        });
+
+        assert_eq!(app.agent_token_usage.as_ref().unwrap().prompt_tokens, 100);
+        assert_eq!(
+            app.agent_total_usage.prompt_tokens, 100,
+            "prompt_tokens should track the peak seen so far"
+        );
+        assert_eq!(app.agent_total_usage.completion_tokens, 20);
+        assert_eq!(app.agent_total_usage.total_tokens, 120);
+        assert_eq!(app.agent_total_usage.cached_tokens, Some(0));
+        assert_eq!(app.agent_total_usage.reasoning_tokens, Some(0));
+
+        // Second turn: context grew, completion + reasoning added.
+        app.tx
+            .send(BackgroundMessage::AgentTokenUsage(TokenUsageInfo {
+                prompt_tokens: 250, // larger than first turn
+                completion_tokens: 30,
+                total_tokens: 280,
+                cached_tokens: Some(50),
+                reasoning_tokens: Some(5),
+            }))
+            .unwrap();
+
+        let _ = ctx.run(Default::default(), |ctx| {
+            app.update_ui(ctx);
+        });
+
+        assert_eq!(app.agent_token_usage.as_ref().unwrap().prompt_tokens, 250);
+        assert_eq!(
+            app.agent_total_usage.prompt_tokens, 250,
+            "peak should rise with the larger turn"
+        );
+        assert_eq!(app.agent_total_usage.completion_tokens, 50);
+        assert_eq!(app.agent_total_usage.total_tokens, 400);
+        assert_eq!(app.agent_total_usage.cached_tokens, Some(50));
+        assert_eq!(app.agent_total_usage.reasoning_tokens, Some(5));
+
+        // Third turn: smaller context — peak should NOT shrink.
+        app.tx
+            .send(BackgroundMessage::AgentTokenUsage(TokenUsageInfo {
+                prompt_tokens: 80,
+                completion_tokens: 10,
+                total_tokens: 90,
+                cached_tokens: None,
+                reasoning_tokens: None,
+            }))
+            .unwrap();
+
+        let _ = ctx.run(Default::default(), |ctx| {
+            app.update_ui(ctx);
+        });
+
+        assert_eq!(
+            app.agent_total_usage.prompt_tokens, 250,
+            "peak prompt size must not regress"
+        );
+        assert_eq!(app.agent_total_usage.completion_tokens, 60);
+        assert_eq!(app.agent_total_usage.cached_tokens, Some(50));
+        assert_eq!(app.agent_total_usage.reasoning_tokens, Some(5));
     }
 }

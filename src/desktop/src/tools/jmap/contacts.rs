@@ -9,6 +9,29 @@ use serde_json::Value;
 
 use super::client::{get_account_id, get_jmap_session, jmap_call, jmap_check_errors};
 
+/// Returns `true` if the JMAP error indicates the server doesn't recognize
+/// the contact data type. This is the case for providers like Fastmail that
+/// expose email/calendar over JMAP but require CardDAV for address books.
+///
+/// The error string we look for is the one the user has been seeing in
+/// the logs:
+/// `type: unknownMethod: Unknown object 'JMAPApp::DataType::Contact' (callId: 0)`.
+fn is_contact_unknown_method(jmap_err: &str) -> bool {
+    jmap_err.contains("unknownMethod") && jmap_err.contains("Contact")
+}
+
+/// Returns `true` if a DAV fallback is worth attempting: at least one CardDAV
+/// client is configured AND the user hasn't explicitly opted out of the
+/// `useDAVForContacts` flag (which is on by default).
+fn dav_fallback_available(config: &AppConfig) -> bool {
+    !config.caldav_clients.is_empty()
+        && config
+            .feature_flags
+            .get("useDAVForContacts")
+            .copied()
+            .unwrap_or(true)
+}
+
 pub fn tool_search_contact(
     config: &AppConfig,
     keyword: &str,
@@ -30,7 +53,31 @@ pub fn tool_search_contact(
         match jmap_call(&api_url, &token, &["urn:ietf:params:jmap:contacts"], calls) {
             Ok(res) => {
                 if let Some(err) = jmap_check_errors(&res) {
-                    all_results.push(format!("Error from JMAP server for {}: {}", name, err));
+                    // The server explicitly told us it doesn't speak the
+                    // Contact JMAP type (e.g. Fastmail). Try CardDAV so the
+                    // operator doesn't have to flip a feature flag to unblock
+                    // contact lookups.
+                    if is_contact_unknown_method(&err) && dav_fallback_available(config) {
+                        tracing::warn!(
+                            name = "jmap.contacts.fallback",
+                            client = %name,
+                            "JMAP server does not implement the Contact type; falling back to CardDAV."
+                        );
+                        match crate::tools::carddav::tool_search_contact(config, keyword) {
+                            Ok(dav_resp) => {
+                                all_results.push(format!(
+                                    "--- Client: {} (via CardDAV fallback) ---\n{}",
+                                    name, dav_resp.results
+                                ));
+                            }
+                            Err(dav_err) => all_results.push(format!(
+                                "Error from JMAP server for {}: {} (CardDAV fallback also failed: {})",
+                                name, err, dav_err
+                            )),
+                        }
+                    } else {
+                        all_results.push(format!("Error from JMAP server for {}: {}", name, err));
+                    }
                 } else {
                     all_results.push(format!(
                         "--- Client: {} ---\n{}",
@@ -67,7 +114,27 @@ pub fn tool_get_contact(
         match jmap_call(&api_url, &token, &["urn:ietf:params:jmap:contacts"], calls) {
             Ok(res) => {
                 if let Some(err) = jmap_check_errors(&res) {
-                    all_results.push(format!("Error from JMAP server for {}: {}", name, err));
+                    if is_contact_unknown_method(&err) && dav_fallback_available(config) {
+                        tracing::warn!(
+                            name = "jmap.contacts.fallback",
+                            client = %name,
+                            "JMAP server does not implement the Contact type; falling back to CardDAV."
+                        );
+                        match crate::tools::carddav::tool_get_contact(config, id) {
+                            Ok(dav_resp) => {
+                                all_results.push(format!(
+                                    "--- Client: {} (via CardDAV fallback) ---\n{}",
+                                    name, dav_resp.result
+                                ));
+                            }
+                            Err(dav_err) => all_results.push(format!(
+                                "Error from JMAP server for {}: {} (CardDAV fallback also failed: {})",
+                                name, err, dav_err
+                            )),
+                        }
+                    } else {
+                        all_results.push(format!("Error from JMAP server for {}: {}", name, err));
+                    }
                 } else {
                     all_results.push(format!(
                         "--- Client: {} ---\n{}",
@@ -232,12 +299,136 @@ mod tests {
         rustls::crypto::ring::default_provider().install_default().ok();
         let url = spawn_mock_server("HTTP/1.1 401 Unauthorized\r\nContent-Length: 5\r\n\r\nerror");
         let config = mock_config(&url);
-        
+
         let res_search = tool_search_contact(&config, "alice");
         assert!(res_search.unwrap().results.contains("Error fetching JMAP session"));
 
         let res_add = tool_add_contact(&config, "{}");
         assert!(res_add.is_err());
         assert!(res_add.unwrap_err().contains("Error fetching JMAP session"));
+    }
+
+    #[test]
+    fn test_is_contact_unknown_method_detects_fastmail_error() {
+        // The exact error string seen in the wild on Fastmail.
+        let s = "type: unknownMethod: Unknown object 'JMAPApp::DataType::Contact' (callId: 0)";
+        assert!(is_contact_unknown_method(s));
+    }
+
+    #[test]
+    fn test_is_contact_unknown_method_ignores_other_errors() {
+        // Server errors, transport errors, and other unknownMethod targets
+        // (e.g. for Mail or Calendar) must NOT trigger the fallback.
+        assert!(!is_contact_unknown_method("type: serverError: boom (callId: 0)"));
+        assert!(!is_contact_unknown_method(
+            "type: unknownMethod: Unknown object 'JMAPApp::DataType::Email' (callId: 0)"
+        ));
+        assert!(!is_contact_unknown_method(""));
+    }
+
+    #[test]
+    fn test_dav_fallback_available_default() {
+        // No CardDAV clients -> no fallback.
+        let cfg = AppConfig::default();
+        assert!(!dav_fallback_available(&cfg));
+
+        // CardDAV client present + default feature flag (true) -> fallback.
+        let mut cfg = AppConfig::default();
+        cfg.caldav_clients.insert(
+            "fastmail".to_string(),
+            crate::config::CalDavClient {
+                url: "https://caldav.example/".to_string(),
+                username: "u".to_string(),
+                password: "p".to_string(),
+            },
+        );
+        assert!(
+            dav_fallback_available(&cfg),
+            "DAV fallback should be available by default when a CardDAV client is configured"
+        );
+
+        // Operator explicitly opted out -> no fallback.
+        cfg.feature_flags
+            .insert("useDAVForContacts".to_string(), false);
+        assert!(!dav_fallback_available(&cfg));
+    }
+
+    #[test]
+    fn test_contact_unknown_method_falls_back_to_dav() {
+        rustls::crypto::ring::default_provider().install_default().ok();
+        // JMAP mock returns the exact Fastmail-style "Unknown object Contact"
+        // error so the tool attempts a CardDAV fallback.
+        let json_resp = serde_json::json!({
+            "apiUrl": "{API_URL}",
+            "primaryAccounts": {
+                "urn:ietf:params:jmap:contacts": "acc-1"
+            },
+            "methodResponses": [
+                ["error", {
+                    "type": "unknownMethod",
+                    "description": "Unknown object 'JMAPApp::DataType::Contact'"
+                }, "0"]
+            ]
+        });
+        let url = spawn_mock_server(serde_json::to_string(&json_resp).unwrap());
+        let mut config = mock_config(&url);
+        // Point CardDAV at a bogus endpoint. The fallback should still fire
+        // (proving we bypass the broken JMAP path) — whether the DAV call
+        // itself succeeds is irrelevant here.
+        config.caldav_clients.insert(
+            "bogus".to_string(),
+            crate::config::CalDavClient {
+                url: "http://127.0.0.1:1/".to_string(),
+                username: "u".to_string(),
+                password: "p".to_string(),
+            },
+        );
+        // Make sure the feature flag is the new default.
+        config
+            .feature_flags
+            .insert("useDAVForContacts".to_string(), true);
+
+        let res = tool_search_contact(&config, "alice").expect("tool should not error");
+        // The critical invariant: the JMAP error path was bypassed and the
+        // CardDAV fallback was attempted. We assert on the "via CardDAV
+        // fallback" tag, which is the marker we emit ONLY when the fallback
+        // fires — meaning the original JMAP `unknownMethod` error is no
+        // longer the only thing the user sees.
+        assert!(
+            res.results.contains("via CardDAV fallback"),
+            "Expected the JMAP `unknownMethod` error to trigger a CardDAV fallback; got: {}",
+            res.results
+        );
+    }
+
+    #[test]
+    fn test_contact_unknown_method_no_dav_client_does_not_fallback() {
+        rustls::crypto::ring::default_provider().install_default().ok();
+        let json_resp = serde_json::json!({
+            "apiUrl": "{API_URL}",
+            "primaryAccounts": {
+                "urn:ietf:params:jmap:contacts": "acc-1"
+            },
+            "methodResponses": [
+                ["error", {
+                    "type": "unknownMethod",
+                    "description": "Unknown object 'JMAPApp::DataType::Contact'"
+                }, "0"]
+            ]
+        });
+        let url = spawn_mock_server(serde_json::to_string(&json_resp).unwrap());
+        let mut config = mock_config(&url);
+        // No CardDAV clients -> fallback must NOT fire; the original JMAP
+        // error is the only thing reported.
+        config
+            .feature_flags
+            .insert("useDAVForContacts".to_string(), true);
+
+        let res = tool_search_contact(&config, "alice").expect("tool should not error");
+        assert!(res.results.contains("Error from JMAP server"));
+        assert!(
+            !res.results.contains("CardDAV fallback"),
+            "Fallback should not run when no DAV client is configured"
+        );
     }
 }
