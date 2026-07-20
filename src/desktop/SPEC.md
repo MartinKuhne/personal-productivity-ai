@@ -197,7 +197,7 @@ models:
 * [REQ-606] LLM Tools Library: The LLM Agent shall utilize functional tools as per the [LLM Tools] section below.
 * [REQ-607] Real-time Stream Output: The FastMD Viewer shall display the LLM's active thinking sequence and render the final Markdown response in real-time inside the Central Panel.
 * [REQ-608] Tool Invocation Logging: The system shall print tool call invocations with their significant parameters to the response window. Tool arguments shall be formatted as pretty-printed JSON.
-* [REQ-609] Agent Loop: The agent shall execute a tool-use loop: (1) call LLM with tools, (2) execute safe tools in parallel, (3) execute unsafe tools sequentially, (4) append results to conversation, (5) repeat until LLM returns no tool calls or max 10 iterations. Safe tools: grep, read_tags, list_files_by_tag, list_files, read_file, read_file_lines, web_fetch, web_search, read_yaml_header, search_calendar, get_calendar, get_calendar_item, search_email, get_email_by_id, get_email, search_contact, get_contact. Unsafe tools: create_file, insert_lines, delete_lines, replace_text, write_yaml_header, add_calendar_item, update_calendar_item, delete_calendar_item, send_email, add_contact, web_delegate.
+* [REQ-609] Agent Loop: The agent shall execute a tool-use loop: (1) call LLM with tools, (2) execute safe tools in parallel, (3) execute unsafe tools sequentially, (4) append results to conversation, (5) repeat until LLM returns no tool calls or max 10 iterations. Safe tools: grep, read_tags, list_files_by_tag, list_files, read_file, read_file_lines, web_fetch, web_search, read_yaml_header, search_calendar, get_calendar, get_calendar_item, search_email, get_email_by_id, get_email, search_contact, get_contact, list_csv, query. Unsafe tools: create_file, insert_lines, delete_lines, replace_text, write_yaml_header, add_calendar_item, update_calendar_item, delete_calendar_item, send_email, add_contact, web_delegate, add_rows, delete_rows, create_csv.
 * [REQ-610] Active File Context: When the user sends an AI prompt and there is a file being displayed in the middle pane, the system shall send the full virtual path of that file with the system prompt.
 * [REQ-611] Active Directory Context: When the user selects a directory from the left pane, it becomes the directory context for the AI prompt. When the user sends an AI prompt and there is NO file being displayed in the middle pane, the system shall send the full virtual path of the directory context with the system prompt.
 * [REQ-612] Active Directory Context Display: The AI prompt shall display the directory context, relative to the base directory, with the prompt. Example: 'Users\Martin >'
@@ -259,6 +259,19 @@ models:
 | `search_contact` | Search contacts by keyword. Requires JMAP config. |
 | `get_contact` | Get contact by id. Requires JMAP config. |
 | `add_contact` | Add a new contact. Requires JMAP config. |
+| `add_rows` | Add rows to a CSV file database. |
+| `delete_rows` | Delete rows from a CSV file database based on a predicate. |
+| `create_csv` | Create a new CSV file database with specified headers. |
+| `list_csv` | List all CSV file databases. |
+| `query` | Query a CSV file database using an evalexpr predicate, supporting sum and average aggregates. |
+
+### CSV Database Tools
+
+* [REQ-650] Tool Availability: The CSV database tools (`add_rows`, `delete_rows`, `create_csv`, `list_csv`, `query`) shall only be offered to the LLM if the user's query contains any of the tool names, "table", "csv", or "database".
+* [REQ-651] Query Evaluation: The `query` tool shall use the `evalexpr` crate to parse and execute query predicates as dynamic expressions against CSV rows.
+* [REQ-652] Aggregate Functions: The query system shall allow `sum` and `average` as aggregate functions over a specified column.
+* [REQ-653] The system shall store all csv databases in %APPDATA%\fastmd\db\
+
 
 ### YAML frontmatter template
 

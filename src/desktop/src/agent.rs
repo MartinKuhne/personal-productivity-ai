@@ -174,7 +174,7 @@ pub fn run_agent(
             ]
         };
 
-        let tools_json = get_tools_schema(&config);
+        let tools_json = get_tools_schema(&config, &prompt);
         let mut full_response = current_response;
 
         'agent_loop: loop {

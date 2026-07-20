@@ -141,6 +141,9 @@ pub struct AppConfig {
     /// Enable built-in inline text editor (REQ-250). Default: false.
     #[serde(default)]
     pub inline_editor_enabled: bool,
+    /// Override default storage location for CSV databases.
+    #[serde(default)]
+    pub csv_db_path: Option<String>,
 }
 
 impl std::fmt::Debug for AppConfig {
@@ -177,6 +180,7 @@ impl Default for AppConfig {
             content_libraries: Vec::new(),
             pdf_converter_command: None,
             inline_editor_enabled: false,
+            csv_db_path: None,
         }
     }
 }
