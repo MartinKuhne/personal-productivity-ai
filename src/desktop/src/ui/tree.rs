@@ -17,6 +17,7 @@ pub struct TreeNodeContext<'a> {
     pub create_dir_dialog_open: &'a mut bool,
     pub create_dir_parent: &'a mut Option<PathBuf>,
     pub left_panel_reset_count: &'a mut u32,
+    pub left_panel_dirty: &'a mut bool,
     pub rename_dialog_open: &'a mut bool,
     pub file_to_rename: &'a mut Option<PathBuf>,
     pub rename_new_name: &'a mut String,
@@ -44,6 +45,7 @@ pub fn draw_tree_node(ui: &mut egui::Ui, node: &TreeNode, ctx: &mut TreeNodeCont
             *ctx.selected_file = None;
             ctx.selected_files.clear();
             *ctx.selected_dir = Some(node.path.clone());
+            *ctx.left_panel_dirty = true;
         }
         if response.double_clicked() {
             *ctx.left_panel_reset_count += 1;
@@ -155,13 +157,7 @@ pub fn draw_tree_node(ui: &mut egui::Ui, node: &TreeNode, ctx: &mut TreeNodeCont
             if ctx.selected_files.len() > 1 && ctx.selected_files.contains(&node.path) {
                 // Multi-select context menu
                 if ui.button("Merge").clicked() {
-                    let mut prompt = "Please merge the following documents into a new document:\n".to_string();
-                    for file in ctx.selected_files.iter() {
-                        let rel_str = crate::config::library_display_label(ctx.content_libraries, file)
-                            .unwrap_or_else(|| file.to_string_lossy().to_string());
-                        prompt.push_str(&format!("- {}\n", rel_str));
-                    }
-                    *ctx.submit_prompt = Some(prompt);
+                    *ctx.submit_prompt = Some(build_merge_prompt(ctx.content_libraries, &ctx.selected_files));
                     ui.close_menu();
                 }
                 if ui.button("Delete").clicked() {
@@ -255,6 +251,19 @@ pub fn draw_tree_node(ui: &mut egui::Ui, node: &TreeNode, ctx: &mut TreeNodeCont
     }
 }
 
+pub fn build_merge_prompt(
+    content_libraries: &[crate::config::ContentLibrary],
+    selected_files: &HashSet<PathBuf>,
+) -> String {
+    let mut prompt = "Please read each of the following documents using the read_file tool and merge their content into a new document. Consolidate overlapping content, deduplicate repeated information, and produce a single unified document that combines all of the source material:\n".to_string();
+    for file in selected_files.iter() {
+        let rel_str = crate::config::library_display_label(content_libraries, file)
+            .unwrap_or_else(|| file.to_string_lossy().to_string());
+        prompt.push_str(&format!("- {}\n", rel_str));
+    }
+    prompt
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -284,6 +293,7 @@ mod tests {
         let mut create_dir_dialog_open = false;
         let mut create_dir_parent = None;
         let mut left_panel_reset_count = 0;
+        let mut left_panel_dirty = false;
         let mut rename_dialog_open = false;
         let mut file_to_rename = None;
         let mut rename_new_name = String::new();
@@ -303,6 +313,7 @@ mod tests {
                     create_dir_dialog_open: &mut create_dir_dialog_open,
                     create_dir_parent: &mut create_dir_parent,
                     left_panel_reset_count: &mut left_panel_reset_count,
+                    left_panel_dirty: &mut left_panel_dirty,
                     rename_dialog_open: &mut rename_dialog_open,
                     file_to_rename: &mut file_to_rename,
                     rename_new_name: &mut rename_new_name,
@@ -353,6 +364,7 @@ mod tests {
         let mut create_dir_dialog_open = false;
         let mut create_dir_parent = None;
         let mut left_panel_reset_count = 0;
+        let mut left_panel_dirty = false;
         let mut rename_dialog_open = false;
         let mut file_to_rename = None;
         let mut rename_new_name = String::new();
@@ -373,6 +385,7 @@ mod tests {
                     create_dir_dialog_open: &mut create_dir_dialog_open,
                     create_dir_parent: &mut create_dir_parent,
                     left_panel_reset_count: &mut left_panel_reset_count,
+                    left_panel_dirty: &mut left_panel_dirty,
                     rename_dialog_open: &mut rename_dialog_open,
                     file_to_rename: &mut file_to_rename,
                     rename_new_name: &mut rename_new_name,
@@ -391,5 +404,37 @@ mod tests {
                 draw_tree_node(ui, &file2, &mut tree_ctx);
             });
         });
+    }
+
+    #[test]
+    fn test_merge_prompt_includes_consolidate_instruction_and_files() {
+        let libs = vec![crate::config::ContentLibrary {
+            root_folder: "C:/notes".to_string(),
+            name: "Notes".to_string(),
+            kind: "text".to_string(),
+            readonly: false,
+            priority: 0,
+        }];
+        let file1 = PathBuf::from("C:/notes/alpha.md");
+        let file2 = PathBuf::from("C:/notes/beta.md");
+
+        let mut selected_files = HashSet::new();
+        selected_files.insert(file1.clone());
+        selected_files.insert(file2.clone());
+
+        let prompt = build_merge_prompt(&libs, &selected_files);
+
+        assert!(
+            prompt.to_lowercase().contains("merge"),
+            "prompt should instruct merge: {}",
+            prompt
+        );
+        assert!(
+            prompt.to_lowercase().contains("consolidate"),
+            "prompt should instruct consolidate: {}",
+            prompt
+        );
+        assert!(prompt.contains("alpha.md"), "prompt should list alpha.md");
+        assert!(prompt.contains("beta.md"), "prompt should list beta.md");
     }
 }

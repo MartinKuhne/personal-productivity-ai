@@ -1,4 +1,4 @@
-use fastmd::editor::EditorState;
+use fastmd::editor::{EditorColors, EditorState};
 use std::path::Path;
 
 #[test]
@@ -57,5 +57,41 @@ fn test_editor_save_cancel() {
     
     assert!(!editor.is_open);
     assert!(editor.content.is_empty());
+}
+
+// --- REQ-261: inverted (black text on white) colour scheme -------------
+
+#[test]
+fn test_req261_editor_uses_inverted_palette() {
+    // REQ-261: the inline editor shall have an inverted, black text on
+    // white background colour scheme.
+    let colors = EditorColors::inverted();
+    assert_eq!(colors.background, eframe::egui::Color32::WHITE);
+    assert_eq!(colors.text, eframe::egui::Color32::BLACK);
+    // The border must also be dark so the inverted surface stands out
+    // against the rest of the dark-themed application.
+    assert_eq!(colors.border, eframe::egui::Color32::BLACK);
+}
+
+#[test]
+fn test_req261_editor_default_palette_is_inverted() {
+    // Callers that don't pass a palette must still get the inverted one
+    // — the default satisfies REQ-261 transparently.
+    assert_eq!(EditorColors::default(), EditorColors::inverted());
+}
+
+#[test]
+fn test_req261_editor_palette_is_copy_and_comparable() {
+    // The palette needs to be passed by value into the render path and
+    // also be comparable for tests. A regression that turned it into a
+    // non-Copy type would force callers to clone it and would break
+    // these tests; that's a useful tripwire.
+    let a = EditorColors::inverted();
+    let b = a; // Copy
+    assert_eq!(a, b);
+
+    let mut palette = EditorColors::inverted();
+    palette.background = eframe::egui::Color32::BLACK;
+    assert_ne!(palette, EditorColors::inverted());
 }
 
