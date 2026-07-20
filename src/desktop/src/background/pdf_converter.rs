@@ -32,6 +32,7 @@ impl PdfConversionJob {
     pub async fn execute(self, cmd_template: Option<Vec<String>>, tx: Sender<BackgroundMessage>) -> Result<(), String> {
         if let Some(template) = cmd_template {
             if template.is_empty() {
+                tracing::warn!(name = "pdf_converter.config.empty_template", "PDF converter command template is empty. Skipping conversion. Operator should verify pdf_converter_command in configuration.");
                 return Err("Command template is empty".to_string());
             }
             let mut args = Vec::new();
@@ -75,7 +76,10 @@ impl PdfConversionJob {
                 .args(&args)
                 .output()
                 .await
-                .map_err(|e| format!("Failed to spawn process: {}", e))?;
+                .map_err(|e| {
+                    tracing::error!(name = "pdf_converter.process.spawn_failed", path = %self.input_pdf.display(), exe = %exe, error = %e, "Failed to spawn PDF converter process. Likely cause: executable not found in PATH or insufficient permissions. Operator should verify pdf_converter_command in configuration and ensure the tool is installed.");
+                    format!("Failed to spawn process: {}", e)
+                })?;
 
             if output.status.success() {
                 if let Some(temp) = actual_output_dir {
@@ -120,6 +124,7 @@ impl PdfConversionJob {
             } else {
                 let err_msg = String::from_utf8_lossy(&output.stderr).to_string();
                 let msg = format!("Conversion failed for {:?}: {}", self.input_pdf.file_name().unwrap_or_default(), err_msg);
+                tracing::error!(name = "pdf_converter.process.failed", path = %self.input_pdf.display(), exit_code = ?output.status.code(), stderr = %err_msg, "PDF conversion process returned a non-zero exit status. Operator should check the stderr output for details.");
                 let _ = tx.send(BackgroundMessage::LogEntry(BackgroundLogEntry::new(
                     LogCategory::PdfConverter,
                     msg.clone()
@@ -127,6 +132,7 @@ impl PdfConversionJob {
                 Err(msg)
             }
         } else {
+            tracing::warn!(name = "pdf_converter.config.not_configured", "No pdf_converter_command configured. Skipping PDF conversion. Operator should provide a command template in configuration if PDF conversion is desired.");
             Err("No pdf_converter_command configured".to_string())
         }
     }

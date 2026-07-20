@@ -234,10 +234,18 @@ pub fn load_config() -> AppConfig {
             if let Ok(config) = serde_yaml::from_str::<AppConfig>(&content) {
                 return config;
             } else {
-                tracing::error!(name = "config.parse.failed", "Failed to parse config file: {}, using defaults.", config_path.display());
+                tracing::error!(
+                    name = "config.parse.failed",
+                    path = %config_path.display(),
+                    "Failed to parse config file. Using default configuration. Likely cause: invalid YAML syntax or missing required fields. Operator should check the config file for errors."
+                );
             }
         } else {
-            tracing::error!(name = "config.read.failed", "Failed to read config file: {}, using defaults.", config_path.display());
+            tracing::error!(
+                name = "config.read.failed",
+                path = %config_path.display(),
+                "Failed to read config file from disk. Using default configuration. Likely cause: missing file, incorrect permissions, or disk error. Operator should ensure the file exists and is readable."
+            );
         }
     } else {
         if let Some(parent) = config_path.parent() {

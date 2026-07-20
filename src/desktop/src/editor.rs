@@ -62,6 +62,12 @@ impl EditorState {
 
         if let Err(e) = fs::write(&self.file_path, full_text) {
             let err = format!("Failed to save: {}", e);
+            tracing::error!(
+                name = "editor.file.save_failed",
+                path = %self.file_path.display(),
+                error = %e,
+                "Failed to save file from inline editor. Likely cause: disk full or permission denied. Operator should verify disk space and write permissions."
+            );
             self.error_message = Some(err.clone());
             return Err(err);
         }

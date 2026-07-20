@@ -382,6 +382,7 @@ impl eframe::App for FastMdApp {
                 self.tx.clone(),
                 self.selected_file.clone(),
                 self.selected_dir.clone(),
+                self.selected_files.clone(),
                 self.command_input.clone(),
                 cancel_flag,
                 self.agent_history.clone(),

@@ -20,7 +20,7 @@ fn split_thinking_and_content(text: &str) -> (String, String) {
 
 pub fn get_base_system_prompt(config: &crate::config::AppConfig) -> String {
     let date_str = chrono::Local::now().format("%Y-%m-%d %H:%M:%S").to_string();
-    let mut system_prompt = format!("You are FastMD Agent, an autonomous assistant helper for managing the Markdown workspace. You can read, create, search, and edit files, fetch web pages, and manage tags using your tools. Help the user achieve their goal by using tools step by step. Respond to the user using Markdown format.\n\nToday's date and time is: {}", date_str);
+    let mut system_prompt = format!("You are FastMD Agent, an autonomous assistant helper for managing the Markdown workspace. You can read, create, search, and edit files, fetch web pages, and manage tags using your tools. Help the user achieve their goal by using tools step by step. Respond to the user using Markdown format.\n\nCRITICAL: Avoid context bloat! Do NOT use the `read_file` tool on multiple files in a single step. Always prefer `read_yaml_header` to survey documents, or `grep` to extract specific information without reading entire files.\n\nToday's date and time is: {}", date_str);
 
     if let Some(name) = &config.user_name {
         system_prompt.push_str(&format!("\nUser's Name: {}", name));
@@ -30,13 +30,33 @@ pub fn get_base_system_prompt(config: &crate::config::AppConfig) -> String {
     }
     if let Some(birthdate) = &config.user_birthdate {
         use chrono::Datelike;
-        if let Ok(parsed_date) = chrono::NaiveDate::parse_from_str(birthdate, "%Y-%m-%d") {
+        let mut age_str = None;
+        if let Ok(parsed_date) = chrono::NaiveDate::parse_from_str(birthdate, "%Y-%m-%d")
+            .or_else(|_| chrono::NaiveDate::parse_from_str(birthdate, "%m/%d/%Y"))
+            .or_else(|_| chrono::NaiveDate::parse_from_str(birthdate, "%d/%m/%Y"))
+            .or_else(|_| chrono::NaiveDate::parse_from_str(birthdate, "%d-%m-%Y"))
+            .or_else(|_| chrono::NaiveDate::parse_from_str(birthdate, "%B %d, %Y"))
+        {
             let today = chrono::Local::now().naive_local().date();
             let mut age = today.year() - parsed_date.year();
             if today.month() < parsed_date.month() || (today.month() == parsed_date.month() && today.day() < parsed_date.day()) {
                 age -= 1;
             }
-            system_prompt.push_str(&format!("\nUser's Age: {}", age));
+            age_str = Some(age.to_string());
+        } else if let Ok(num) = birthdate.trim().parse::<i32>() {
+            let current_year = chrono::Local::now().year();
+            if num > 1900 && num <= current_year {
+                let age = current_year - num;
+                age_str = Some(format!("~{}", age));
+            } else if num > 0 && num < 150 {
+                age_str = Some(num.to_string());
+            }
+        }
+        
+        if let Some(a) = age_str {
+            system_prompt.push_str(&format!("\nUser's Age: {}", a));
+        } else {
+            system_prompt.push_str(&format!("\nUser's Birthdate/Age info: {}", birthdate));
         }
     }
     if let Some(gender) = &config.user_gender {
@@ -53,6 +73,7 @@ pub fn run_agent(
     tx_gui_agent: Sender<BackgroundMessage>,
     active_file: Option<PathBuf>,
     active_dir: Option<PathBuf>,
+    selected_files: std::collections::HashSet<PathBuf>,
     prompt: String,
     cancel_flag: std::sync::Arc<std::sync::atomic::AtomicBool>,
     history: Option<Vec<serde_json::Value>>,
@@ -77,6 +98,10 @@ pub fn run_agent(
         }
 
         if api_key == "your-api-key-here" || api_key.is_empty() {
+            tracing::warn!(
+                name = "agent.api_key.missing",
+                "Agent run skipped because API key is missing or default. Operator should configure a valid API key in settings."
+            );
             let _ = tx_gui_agent.send(BackgroundMessage::AgentFailed(format!(
                 "API key not set. Please either configure your API key in {}, or use `/models` to view and switch to a configured model.",
                 get_config_path().display()
@@ -107,6 +132,14 @@ pub fn run_agent(
                 " The user has selected the directory context: {}",
                 rel
             ));
+        }
+
+        if !selected_files.is_empty() {
+            system_prompt.push_str(" The user has also selected the following files:");
+            for f in &selected_files {
+                system_prompt.push_str(&format!(" {}", to_virtual(f)));
+            }
+            system_prompt.push_str(".");
         }
 
         for lib in &config.content_libraries {
@@ -176,7 +209,12 @@ pub fn run_agent(
                 Ok(resp) => resp,
                 Err(ureq::Error::Status(code, resp)) => {
                     let body = resp.into_string().unwrap_or_else(|_| "[Could not read body]".to_string());
-                    tracing::error!(name = "agent.api.failed", "AI API Error: Status {} - Body: {}", code, body);
+                    tracing::error!(
+                        name = "agent.api.failed",
+                        status = code,
+                        response = %body,
+                        "Failed to get chat completion from AI API. This may cause the agent to stop responding. Likely cause: invalid API key, rate limiting, or API downtime. Operator should check the configured API key and API provider status."
+                    );
                     let _ = tx_gui_agent.send(BackgroundMessage::AgentFailed(format!(
                         "HTTP Request failed with status {}: {}",
                         code, body
@@ -184,6 +222,11 @@ pub fn run_agent(
                     return;
                 }
                 Err(e) => {
+                    tracing::error!(
+                        name = "agent.api.network_error",
+                        error = %e,
+                        "Network request to AI API failed completely. Agent cannot proceed. Likely cause: no internet connection or DNS failure. Operator should check network connectivity."
+                    );
                     let _ = tx_gui_agent.send(BackgroundMessage::AgentFailed(format!(
                         "HTTP Request failed: {}",
                         e
@@ -199,6 +242,11 @@ pub fn run_agent(
             let resp_val: serde_json::Value = match response.into_json() {
                 Ok(val) => val,
                 Err(e) => {
+                    tracing::error!(
+                        name = "agent.api.invalid_json",
+                        error = %e,
+                        "Failed to parse JSON response from AI API. Agent cannot proceed. Likely cause: API returned malformed response or non-JSON payload (e.g. 502 Bad Gateway HTML). Operator should check the API provider."
+                    );
                     let _ = tx_gui_agent.send(BackgroundMessage::AgentFailed(format!(
                         "Failed to parse JSON response: {}",
                         e
@@ -210,6 +258,11 @@ pub fn run_agent(
             let choice = match resp_val.get("choices").and_then(|c| c.get(0)) {
                 Some(c) => c,
                 None => {
+                    tracing::error!(
+                        name = "agent.api.invalid_schema",
+                        response = ?resp_val,
+                        "AI API response did not contain expected 'choices' array. Agent cannot proceed. Likely cause: using an incompatible API endpoint or model. Operator should verify model configuration."
+                    );
                     let _ = tx_gui_agent.send(BackgroundMessage::AgentFailed(format!(
                         "Invalid response schema from endpoint: {:?}",
                         resp_val
@@ -221,6 +274,11 @@ pub fn run_agent(
             let message = match choice.get("message") {
                 Some(m) => m.clone(),
                 None => {
+                    tracing::error!(
+                        name = "agent.api.missing_message",
+                        choice = ?choice,
+                        "AI API choice did not contain a 'message' field. Agent cannot proceed. Likely cause: incompatible API format. Operator should verify model compatibility."
+                    );
                     let _ = tx_gui_agent.send(BackgroundMessage::AgentFailed(
                         "No message returned in choices.".to_string(),
                     ));
@@ -362,9 +420,27 @@ pub fn run_agent(
 
                         if func_name == "read_file" && !is_error {
                             let content = result_data.get("content").and_then(|c| c.as_str()).unwrap_or("");
-                            tracing::info!(name = "agent.tool.result", "--- Tool {} returned {} lines ---", func_name, content.lines().count());
+                            tracing::info!(
+                                name = "agent.tool.success",
+                                tool = %func_name,
+                                lines = content.lines().count(),
+                                "Tool executed successfully and returned lines. Normal operation."
+                            );
+                        } else if is_error {
+                            tracing::warn!(
+                                name = "agent.tool.error",
+                                tool = %func_name,
+                                error = %error_msg,
+                                result = %result,
+                                "Tool execution returned an error status. The agent may attempt to recover or try another tool."
+                            );
                         } else {
-                            tracing::info!(name = "agent.tool.result", "--- Tool {} returned ---\n{}", func_name, result);
+                            tracing::info!(
+                                name = "agent.tool.success",
+                                tool = %func_name,
+                                result = %result,
+                                "Tool executed successfully. Normal operation."
+                            );
                         }
 
                         let result_msg = if is_error {
@@ -373,6 +449,10 @@ pub fn run_agent(
                             let content = result_data.get("files").and_then(|f| f.as_str()).unwrap_or("");
                             let count = content.lines().count();
                             format!("> **Result:** {} files returned.\n\n", count)
+                        } else if func_name == "read_file" || func_name == "read_file_lines" {
+                            let content = result_data.get("content").and_then(|f| f.as_str()).unwrap_or("");
+                            let count = content.lines().count();
+                            format!("> **Result:** {} line(s) read.\n\n", count)
                         } else if func_name == "web_fetch" {
                             let content = result_data.get("content").and_then(|f| f.as_str()).unwrap_or("");
                             let count = content.lines().count();
@@ -381,6 +461,23 @@ pub fn run_agent(
                             let content = result_data.get("results").and_then(|f| f.as_str()).unwrap_or("");
                             let count = content.split("\n\n").filter(|s| !s.trim().is_empty()).count();
                             format!("> **Result:** {} search results returned.\n\n", count)
+                        } else if func_name == "grep" {
+                            let content = result_data.get("matches").and_then(|f| f.as_str()).unwrap_or("");
+                            if content == "No matches found." || content.is_empty() {
+                                format!("> **Result:** 0 file(s) match\n\n")
+                            } else {
+                                let mut files = std::collections::HashSet::new();
+                                for line in content.lines() {
+                                    if let Some(colon_idx) = line.rfind(".md:") {
+                                        files.insert(&line[..colon_idx + 3]);
+                                    } else if let Some(colon_idx) = line.rfind(".markdown:") {
+                                        files.insert(&line[..colon_idx + 9]);
+                                    } else if let Some(colon_idx) = line.find(':') {
+                                        files.insert(&line[..colon_idx]);
+                                    }
+                                }
+                                format!("> **Result:** {} file(s) match\n\n", files.len())
+                            }
                         } else if func_name == "get_email_by_id" {
                             let subject = result_data.get("result").and_then(|v| v.as_str()).and_then(|s| serde_json::from_str::<serde_json::Value>(s).ok())
                                 .and_then(|val| val.as_array().and_then(|a| a.first().cloned()))
@@ -393,7 +490,7 @@ pub fn run_agent(
                             if !subject.is_empty() || !date.is_empty() {
                                 format!("> **Result:** {} - {}\n\n", date, subject)
                             } else {
-                                format!("> **Result:** Completed.\n\n")
+                                format!("> **Result:** Email content retrieved.\n\n")
                             }
                         } else if func_name.starts_with("search_") {
                             let mut count = 0;
@@ -406,7 +503,8 @@ pub fn run_agent(
                         } else if result.len() < 100 && result.lines().count() <= 1 {
                             format!("> **Result:** {}\n\n", result)
                         } else {
-                            format!("> **Result:** Completed.\n\n")
+                            let action = func_name.replace("_", " ");
+                            format!("> **Result:** Tool '{}' completed successfully.\n\n", action)
                         };
                         full_response.push_str(&result_msg);
                         let _ = tx_gui_agent.send(BackgroundMessage::AgentResponse(full_response.clone()));

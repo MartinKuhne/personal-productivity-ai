@@ -27,8 +27,8 @@ fn main() -> eframe::Result<()> {
     let prompt = fastmd::agent::get_base_system_prompt(&config);
     tracing::info!(
         name = "app.startup",
-        "--- System Prompt (Startup) ---\n{}\n-------------------------------",
-        prompt
+        system_prompt = %prompt,
+        "Application started successfully. Emitted system prompt for diagnostics."
     );
 
     eframe::run_native(

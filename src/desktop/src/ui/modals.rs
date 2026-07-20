@@ -56,7 +56,13 @@ pub fn show_move_modal(app: &mut FastMdApp, ctx: &egui::Context) {
                             if let Some(name) = file.file_name() {
                                 let new_path = folder.join(name);
                                 if let Err(e) = std::fs::rename(file, &new_path) {
-                                    eprintln!("Failed to move: {}", e);
+                                    tracing::error!(
+                                        name = "ui.file.move_failed",
+                                        source = %file.display(),
+                                        destination = %new_path.display(),
+                                        error = %e,
+                                        "Failed to move file to new destination. Likely cause: permission denied or file in use. Operator should check file locks."
+                                    );
                                 }
                             }
                         }
@@ -98,11 +104,20 @@ pub fn show_create_dir_modal(app: &mut FastMdApp, ctx: &egui::Context) {
                             if !app.create_dir_name.trim().is_empty() {
                                 let dir_name = app.create_dir_name.trim();
                                 if Path::new(dir_name).components().any(|c| c == std::path::Component::ParentDir) || dir_name.contains('/') || dir_name.contains('\\') {
-                                    eprintln!("Invalid directory name");
+                                    tracing::warn!(
+                                        name = "ui.directory.invalid_name",
+                                        name_input = %dir_name,
+                                        "User attempted to create directory with invalid characters. Operation skipped. Operator should advise user of valid names."
+                                    );
                                 } else {
                                     let new_dir_path = parent.join(dir_name);
                                     if let Err(e) = std::fs::create_dir_all(&new_dir_path) {
-                                        eprintln!("Failed to create directory: {}", e);
+                                        tracing::error!(
+                                            name = "ui.directory.create_failed",
+                                            path = %new_dir_path.display(),
+                                            error = %e,
+                                            "Failed to create new directory. Likely cause: permission denied or invalid path. Operator should verify permissions on parent directory."
+                                        );
                                     } else {
                                         if !app.all_dirs.contains(&new_dir_path) {
                                             app.all_dirs.push(new_dir_path.clone());
@@ -153,12 +168,22 @@ pub fn show_rename_modal(app: &mut FastMdApp, ctx: &egui::Context) {
                             if !app.rename_new_name.trim().is_empty() {
                                 let new_name = app.rename_new_name.trim();
                                 if Path::new(new_name).components().any(|c| c == std::path::Component::ParentDir) || new_name.contains('/') || new_name.contains('\\') {
-                                    eprintln!("Invalid file name");
+                                    tracing::warn!(
+                                        name = "ui.file.invalid_rename",
+                                        name_input = %new_name,
+                                        "User attempted to rename file with invalid characters. Operation skipped. Operator should advise user of valid names."
+                                    );
                                 } else {
                                     let mut new_path = file.clone();
                                     new_path.set_file_name(new_name);
                                     if let Err(e) = std::fs::rename(file, &new_path) {
-                                        eprintln!("Failed to rename: {}", e);
+                                        tracing::error!(
+                                            name = "ui.file.rename_failed",
+                                            source = %file.display(),
+                                            destination = %new_path.display(),
+                                            error = %e,
+                                            "Failed to rename file. Likely cause: permission denied or file in use. Operator should check file locks."
+                                        );
                                     } else {
                                         if app.loaded_path.as_ref() == Some(file) {
                                             app.loaded_path = Some(new_path.clone());

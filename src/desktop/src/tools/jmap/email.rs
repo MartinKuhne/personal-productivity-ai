@@ -138,6 +138,7 @@ pub fn tool_search_email(config: &AppConfig, keyword: &str) -> Result<crate::too
         let (api_url, token, accs) = match get_jmap_session(client) { 
             Ok(s) => s, 
             Err(e) => {
+                tracing::error!(name = "tool.email.search.session_failed", client = %name, error = %e, "Failed to fetch JMAP session. Operator should check email account credentials.");
                 all_results.push(format!("Error fetching JMAP session for {}: {}", name, e));
                 continue;
             }
@@ -166,10 +167,14 @@ pub fn tool_search_email(config: &AppConfig, keyword: &str) -> Result<crate::too
                     all_results.push(format!("--- Client: {} ---\n{}", name, serde_json::to_string_pretty(&simplified).unwrap_or_default()))
                 }
             }
-            Err(e) => all_results.push(format!("Error querying email for {}: {}", name, e)),
+            Err(e) => {
+                tracing::error!(name = "tool.email.search.api_failed", client = %name, error = %e, "Failed to query emails via JMAP. Operator should verify JMAP server status.");
+                all_results.push(format!("Error querying email for {}: {}", name, e));
+            }
         }
     }
     if all_results.is_empty() {
+        tracing::warn!(name = "tool.email.search.no_clients", "No JMAP clients configured. Operator should configure at least one email account in settings.");
         Err("No JMAP clients configured.".to_string())
     } else {
         Ok(crate::tools::dtos::SearchEmailResponse { results: all_results.join("\n\n") })
@@ -180,7 +185,10 @@ pub fn tool_get_email_by_id(config: &AppConfig, id: &str) -> Result<crate::tools
     for (name, client) in &config.jmap_clients {
         let (api_url, token, accs) = match get_jmap_session(client) { 
             Ok(s) => s, 
-            Err(_) => continue
+            Err(e) => {
+                tracing::error!(name = "tool.email.get_by_id.session_failed", client = %name, error = %e, "Failed to fetch JMAP session. Operator should check email account credentials.");
+                continue;
+            }
         };
         let account_id = get_account_id(&accs, "urn:ietf:params:jmap:mail");
         let calls = serde_json::json!([["Email/get", { "accountId": account_id, "ids": [id], "properties": ["mailboxIds", "subject", "from", "to", "cc", "bcc", "receivedAt", "bodyValues", "textBody", "htmlBody"], "fetchTextBodyValues": true, "fetchHTMLBodyValues": true }, "0"]]);
@@ -199,9 +207,13 @@ pub fn tool_get_email_by_id(config: &AppConfig, id: &str) -> Result<crate::tools
                 let simplified = simplify_jmap_emails(clean_res, None);
                 return Ok(crate::tools::dtos::GetEmailByIdResponse { result: serde_json::to_string_pretty(&simplified).unwrap_or_default() });
             }
-            Err(_) => continue,
+            Err(e) => {
+                tracing::error!(name = "tool.email.get_by_id.api_failed", client = %name, error = %e, "Failed to query email by ID via JMAP. Operator should verify JMAP server status.");
+                continue;
+            }
         }
     }
+    tracing::warn!(name = "tool.email.get_by_id.not_found", id = %id, "Email not found in any client or no clients configured. Operator should verify the email ID.");
     Err("Email not found in any client or no clients configured.".to_string())
 }
 
@@ -257,6 +269,7 @@ pub fn tool_get_email(
         let (api_url, token, accs) = match get_jmap_session(client) { 
             Ok(s) => s, 
             Err(e) => {
+                tracing::error!(name = "tool.email.get.session_failed", client = %name, error = %e, "Failed to fetch JMAP session. Operator should check email account credentials.");
                 all_results.push(format!("Error fetching JMAP session for {}: {}", name, e));
                 continue;
             }
@@ -285,10 +298,14 @@ pub fn tool_get_email(
                     all_results.push(format!("--- Client: {} ---\n{}", name, serde_json::to_string_pretty(&simplified).unwrap_or_default()))
                 }
             }
-            Err(e) => all_results.push(format!("Error querying emails for {}: {}", name, e)),
+            Err(e) => {
+                tracing::error!(name = "tool.email.get.api_failed", client = %name, error = %e, "Failed to query emails via JMAP. Operator should verify JMAP server status.");
+                all_results.push(format!("Error querying emails for {}: {}", name, e));
+            }
         }
     }
     if all_results.is_empty() {
+        tracing::warn!(name = "tool.email.get.no_clients", "No JMAP clients configured. Operator should configure at least one email account in settings.");
         Err("No JMAP clients configured.".to_string())
     } else {
         Ok(crate::tools::dtos::GetEmailResponse { results: all_results.join("\n\n") })
@@ -301,6 +318,7 @@ pub fn tool_send_email(config: &AppConfig, to: &str, subject: &str, body: &str) 
         let (api_url, token, accs) = match get_jmap_session(client) { 
             Ok(s) => s, 
             Err(e) => {
+                tracing::error!(name = "tool.email.send.session_failed", client = %name, error = %e, "Failed to fetch JMAP session. Operator should check email account credentials.");
                 all_results.push(format!("Error fetching JMAP session for {}: {}", name, e));
                 return Err(all_results.join("\n\n"));
             }
@@ -319,10 +337,14 @@ pub fn tool_send_email(config: &AppConfig, to: &str, subject: &str, body: &str) 
         ]);
         match jmap_call(&api_url, &token, &["urn:ietf:params:jmap:mail", "urn:ietf:params:jmap:submission"], calls) {
             Ok(res) => all_results.push(format!("--- Client: {} ---\n{}", name, serde_json::to_string_pretty(&res).unwrap_or_default())),
-            Err(e) => all_results.push(format!("Error sending email via {}: {}", name, e)),
+            Err(e) => {
+                tracing::error!(name = "tool.email.send.api_failed", client = %name, error = %e, "Failed to send email via JMAP. Operator should verify JMAP server status.");
+                all_results.push(format!("Error sending email via {}: {}", name, e));
+            }
         }
     }
     if all_results.is_empty() {
+        tracing::warn!(name = "tool.email.send.no_clients", "No JMAP clients configured. Operator should configure at least one email account in settings.");
         Err("No JMAP clients configured.".to_string())
     } else {
         Ok(crate::tools::dtos::SendEmailResponse { result: all_results.join("\n\n") })
