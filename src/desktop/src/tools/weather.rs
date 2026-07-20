@@ -16,12 +16,10 @@ fn geocode(location: &str) -> Result<(f64, f64), String> {
     // We must manually URL encode the query. But since we don't have url-encoding crate imported by default, 
     // let's do a basic replace for spaces.
     let query_encoded = query.replace(" ", "%20");
-    let mut url = format!("https://nominatim.openstreetmap.org/search?q={}&format=json&limit=1", query_encoded);
+    let url = format!("https://nominatim.openstreetmap.org/search?q={}&format=json&limit=1", query_encoded);
     
     #[cfg(test)]
-    if let Ok(mock_url) = std::env::var("MOCK_NOMINATIM_URL") {
-        url = mock_url;
-    }
+    let url = std::env::var("MOCK_NOMINATIM_URL").unwrap_or(url);
     
     let req = match ureq::get(&url).set("User-Agent", "FastMD Weather Tool/1.0").call() {
         Ok(r) => r,
@@ -66,11 +64,9 @@ pub fn tool_get_weather(location: &str, date_range: Option<&str>) -> Result<crat
         Err(e) => return Err(e),
     };
     
-    let mut points_url = format!("https://api.weather.gov/points/{},{}", lat, lon);
+    let points_url = format!("https://api.weather.gov/points/{},{}", lat, lon);
     #[cfg(test)]
-    if let Ok(mock_url) = std::env::var("MOCK_NWS_POINTS_URL") {
-        points_url = mock_url;
-    }
+    let points_url = std::env::var("MOCK_NWS_POINTS_URL").unwrap_or(points_url);
     
     let req = match ureq::get(&points_url).set("User-Agent", "FastMD Weather Tool/1.0").call() {
         Ok(r) => r,
@@ -93,11 +89,9 @@ pub fn tool_get_weather(location: &str, date_range: Option<&str>) -> Result<crat
         None => return Err("Could not find forecast URL in NWS response".to_string()),
     };
     
-    let mut forecast_url = forecast_url_str.to_string();
+    let forecast_url = forecast_url_str.to_string();
     #[cfg(test)]
-    if let Ok(mock_url) = std::env::var("MOCK_NWS_FORECAST_URL") {
-        forecast_url = mock_url;
-    }
+    let forecast_url = std::env::var("MOCK_NWS_FORECAST_URL").unwrap_or(forecast_url);
     
     let req = match ureq::get(&forecast_url).set("User-Agent", "FastMD Weather Tool/1.0").call() {
         Ok(r) => r,

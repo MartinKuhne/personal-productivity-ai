@@ -232,6 +232,12 @@ impl eframe::App for FastMdApp {
     }
 
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
+        self.update_ui(ctx);
+    }
+}
+
+impl FastMdApp {
+    pub fn update_ui(&mut self, ctx: &egui::Context) {
         // Handle background messages
         while let Ok(msg) = self.rx.try_recv() {
             match msg {
@@ -392,3 +398,187 @@ impl eframe::App for FastMdApp {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::collections::{BTreeMap, BTreeSet, HashSet};
+    use std::path::PathBuf;
+    use std::sync::Arc;
+
+    fn create_test_app() -> FastMdApp {
+        let (tx, rx) = std::sync::mpsc::channel();
+        FastMdApp {
+            content_libraries: vec![],
+            rx,
+            tx,
+            all_files: vec![],
+            all_dirs: vec![],
+            file_tags: BTreeMap::new(),
+            all_tags: BTreeSet::new(),
+            selected_tag: None,
+            indexing_finished: false,
+            indexing_finished_handled: false,
+            left_panel_width: None,
+            selected_file: None,
+            selected_files: HashSet::new(),
+            selected_dir: None,
+            expanded_dirs: HashSet::new(),
+            loaded_path: None,
+            current_yaml: None,
+            current_markdown: String::new(),
+            tabs: vec![],
+            move_dialog_open: false,
+            file_to_move: None,
+            selected_move_folder: None,
+            create_dir_dialog_open: false,
+            create_dir_parent: None,
+            create_dir_name: String::new(),
+            rename_dialog_open: false,
+            file_to_rename: None,
+            rename_new_name: String::new(),
+            command_input: String::new(),
+            toc: vec![],
+            scroll_to_header_id: None,
+            _watcher: None,
+            show_agent_results: false,
+            agent_running: false,
+            agent_status: String::new(),
+            agent_thinking: String::new(),
+            agent_response: String::new(),
+            agent_scroll_to_id: None,
+            agent_cancel_flag: None,
+            agent_history: None,
+            left_panel_reset_count: 0,
+            submit_prompt: None,
+            editor_state: crate::editor::EditorState::default(),
+            inline_editor_enabled: true,
+            background_manager: Arc::new(std::sync::Mutex::new(crate::background::BackgroundProcessManager::new())),
+            show_background_logs: false,
+            config: crate::config::AppConfig::default(),
+        }
+    }
+
+    #[test]
+    fn test_treenode_new() {
+        let node = TreeNode::new("Docs".to_string(), PathBuf::from("/docs"), true);
+        assert_eq!(node.name, "Docs");
+        assert_eq!(node.path, PathBuf::from("/docs"));
+        assert!(node.is_dir);
+        assert!(node.children.is_empty());
+    }
+
+    #[test]
+    fn test_rebuild_tags() {
+        let mut app = create_test_app();
+        app.file_tags.insert(PathBuf::from("file1.md"), vec!["rust".to_string(), "ui".to_string()]);
+        app.file_tags.insert(PathBuf::from("file2.md"), vec!["rust".to_string(), "testing".to_string()]);
+
+        app.rebuild_tags();
+
+        assert_eq!(app.all_tags.len(), 3);
+        assert!(app.all_tags.contains("rust"));
+        assert!(app.all_tags.contains("ui"));
+        assert!(app.all_tags.contains("testing"));
+    }
+
+    #[test]
+    fn test_background_messages_handling() {
+        let ctx = egui::Context::default();
+        let mut app = create_test_app();
+        let test_file = PathBuf::from("test_doc.md");
+        let test_dir = PathBuf::from("test_dir");
+
+        // 1. FileParsed
+        app.tx.send(BackgroundMessage::FileParsed {
+            path: test_file.clone(),
+            tags: vec!["tag1".to_string()],
+        }).unwrap();
+
+        // 2. DirParsed
+        app.tx.send(BackgroundMessage::DirParsed {
+            path: test_dir.clone(),
+        }).unwrap();
+
+        // 3. FinishedWithoutWatcher
+        app.tx.send(BackgroundMessage::FinishedWithoutWatcher).unwrap();
+
+        // 4. Agent Status & Response
+        app.tx.send(BackgroundMessage::AgentStatus("Processing...".to_string())).unwrap();
+        app.tx.send(BackgroundMessage::AgentThinking("Thinking step".to_string())).unwrap();
+        app.tx.send(BackgroundMessage::AgentResponse("Done result".to_string())).unwrap();
+
+        let _ = ctx.run(Default::default(), |ctx| {
+            app.update_ui(ctx);
+        });
+
+        assert!(app.all_files.contains(&test_file));
+        assert!(app.all_dirs.contains(&test_dir));
+        assert!(app.indexing_finished);
+        assert_eq!(app.agent_status, "Processing...");
+        assert_eq!(app.agent_thinking, "Thinking step");
+        assert_eq!(app.agent_response, "Done result");
+    }
+
+    #[test]
+    fn test_background_message_file_modified_and_deleted() {
+        let ctx = egui::Context::default();
+        let mut app = create_test_app();
+        let file_path = PathBuf::from("modified_file.md");
+
+        app.all_files.push(file_path.clone());
+        app.selected_file = Some(file_path.clone());
+        app.selected_files.insert(file_path.clone());
+        app.loaded_path = Some(file_path.clone());
+
+        // File modified message
+        app.tx.send(BackgroundMessage::FileModified {
+            path: file_path.clone(),
+            tags: vec!["updated".to_string()],
+        }).unwrap();
+
+        let _ = ctx.run(Default::default(), |ctx| {
+            app.update_ui(ctx);
+        });
+
+        assert!(app.loaded_path.is_none()); // Trigger reload
+
+        // File deleted message
+        app.tx.send(BackgroundMessage::FileDeleted {
+            path: file_path.clone(),
+        }).unwrap();
+
+        let _ = ctx.run(Default::default(), |ctx| {
+            app.update_ui(ctx);
+        });
+
+        assert!(!app.all_files.contains(&file_path));
+        assert!(app.selected_file.is_none());
+        assert!(!app.selected_files.contains(&file_path));
+    }
+
+    #[test]
+    fn test_agent_failure_and_finish_messages() {
+        let ctx = egui::Context::default();
+        let mut app = create_test_app();
+
+        app.tx.send(BackgroundMessage::AgentFailed("Network timeout".to_string())).unwrap();
+
+        let _ = ctx.run(Default::default(), |ctx| {
+            app.update_ui(ctx);
+        });
+
+        assert_eq!(app.agent_status, "Error: Network timeout");
+        assert!(!app.agent_running);
+
+        app.tx.send(BackgroundMessage::AgentFinished(vec![serde_json::json!({"ok": true})])).unwrap();
+
+        let _ = ctx.run(Default::default(), |ctx| {
+            app.update_ui(ctx);
+        });
+
+        assert!(!app.agent_running);
+        assert!(app.agent_history.is_some());
+    }
+}
+

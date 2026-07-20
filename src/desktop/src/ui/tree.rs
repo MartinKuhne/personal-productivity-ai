@@ -277,3 +277,127 @@ pub fn draw_tree_node(ui: &mut egui::Ui, node: &TreeNode, ctx: &mut TreeNodeCont
         });
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::collections::HashSet;
+    use std::path::PathBuf;
+
+    #[test]
+    fn test_draw_tree_node_directory_and_file() {
+        let ctx_egui = egui::Context::default();
+
+        let mut root = TreeNode::new("RootFolder".to_string(), PathBuf::from("/test/root"), true);
+        let child_file = TreeNode::new("document.md".to_string(), PathBuf::from("/test/root/document.md"), false);
+        root.children.insert("document.md".to_string(), child_file.clone());
+
+        let mut expanded_dirs = HashSet::new();
+        let mut selected_file = None;
+        let mut selected_files = HashSet::new();
+        let mut tabs = Vec::new();
+        let mut file_to_move = None;
+        let mut move_dialog_open = false;
+        let mut selected_dir = None;
+        let mut create_dir_dialog_open = false;
+        let mut create_dir_parent = None;
+        let mut left_panel_reset_count = 0;
+        let mut rename_dialog_open = false;
+        let mut file_to_rename = None;
+        let mut rename_new_name = String::new();
+        let mut submit_prompt = None;
+        let mut open_editor = None;
+
+        let _ = ctx_egui.run(Default::default(), |ctx| {
+            egui::CentralPanel::default().show(ctx, |ui| {
+                let mut tree_ctx = TreeNodeContext {
+                    expanded_dirs: &mut expanded_dirs,
+                    selected_file: &mut selected_file,
+                    selected_files: &mut selected_files,
+                    tabs: &mut tabs,
+                    file_to_move: &mut file_to_move,
+                    move_dialog_open: &mut move_dialog_open,
+                    selected_dir: &mut selected_dir,
+                    create_dir_dialog_open: &mut create_dir_dialog_open,
+                    create_dir_parent: &mut create_dir_parent,
+                    left_panel_reset_count: &mut left_panel_reset_count,
+                    rename_dialog_open: &mut rename_dialog_open,
+                    file_to_rename: &mut file_to_rename,
+                    rename_new_name: &mut rename_new_name,
+                    modifiers: egui::Modifiers::default(),
+                    submit_prompt: &mut submit_prompt,
+                    content_libraries: &[],
+                    open_editor: &mut open_editor,
+                    inline_editor_enabled: true,
+                    bg_tx: &None,
+                };
+
+                // Render collapsed directory
+                draw_tree_node(ui, &root, &mut tree_ctx);
+
+                // Render expanded directory with child file
+                tree_ctx.expanded_dirs.insert(root.path.clone());
+                draw_tree_node(ui, &root, &mut tree_ctx);
+
+                // Render standalone file node
+                draw_tree_node(ui, &child_file, &mut tree_ctx);
+            });
+        });
+
+        assert!(expanded_dirs.contains(&root.path));
+    }
+
+    #[test]
+    fn test_tree_node_selection_state_modifiers() {
+        let ctx_egui = egui::Context::default();
+        let file1 = TreeNode::new("file1.md".to_string(), PathBuf::from("/test/file1.md"), false);
+        let file2 = TreeNode::new("file2.md".to_string(), PathBuf::from("/test/file2.md"), false);
+
+        let mut expanded_dirs = HashSet::new();
+        let mut selected_file = None;
+        let mut selected_files = HashSet::new();
+        let mut tabs = Vec::new();
+        let mut file_to_move = None;
+        let mut move_dialog_open = false;
+        let mut selected_dir = None;
+        let mut create_dir_dialog_open = false;
+        let mut create_dir_parent = None;
+        let mut left_panel_reset_count = 0;
+        let mut rename_dialog_open = false;
+        let mut file_to_rename = None;
+        let mut rename_new_name = String::new();
+        let mut submit_prompt = None;
+        let mut open_editor = None;
+
+        let _ = ctx_egui.run(Default::default(), |ctx| {
+            egui::CentralPanel::default().show(ctx, |ui| {
+                // Test ctrl multi-select simulation
+                let mut tree_ctx = TreeNodeContext {
+                    expanded_dirs: &mut expanded_dirs,
+                    selected_file: &mut selected_file,
+                    selected_files: &mut selected_files,
+                    tabs: &mut tabs,
+                    file_to_move: &mut file_to_move,
+                    move_dialog_open: &mut move_dialog_open,
+                    selected_dir: &mut selected_dir,
+                    create_dir_dialog_open: &mut create_dir_dialog_open,
+                    create_dir_parent: &mut create_dir_parent,
+                    left_panel_reset_count: &mut left_panel_reset_count,
+                    rename_dialog_open: &mut rename_dialog_open,
+                    file_to_rename: &mut file_to_rename,
+                    rename_new_name: &mut rename_new_name,
+                    modifiers: egui::Modifiers { ctrl: true, ..Default::default() },
+                    submit_prompt: &mut submit_prompt,
+                    content_libraries: &[],
+                    open_editor: &mut open_editor,
+                    inline_editor_enabled: true,
+                    bg_tx: &None,
+                };
+
+                draw_tree_node(ui, &file1, &mut tree_ctx);
+                draw_tree_node(ui, &file2, &mut tree_ctx);
+            });
+        });
+    }
+}
+
