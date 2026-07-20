@@ -1,7 +1,7 @@
 use crate::config::get_config_path;
 use crate::tools::{execute_tool, get_tools_schema};
 use crate::messages::BackgroundMessage;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::mpsc::Sender;
 use ureq;
 
@@ -356,6 +356,42 @@ pub fn run_agent(
                     
                     let result = execute_tool(&config, &PathBuf::new(), &func_name, &func_args_str);
                     completed_results.push((tool_call.clone(), call_id, func_name, func_args_str, result));
+                }
+
+                // Notify the UI about files created via tool calls so the
+                // directory tree is refreshed without waiting for the file
+                // watcher.
+                for (_tool_call, _call_id, func_name, func_args_str, result) in &completed_results {
+                    if func_name == "create_file" {
+                        if let Ok(parsed) = serde_json::from_str::<serde_json::Value>(result) {
+                            if parsed.get("status").and_then(|s| s.as_str()) == Some("success") {
+                                if let Ok(args_val) = serde_json::from_str::<serde_json::Value>(func_args_str) {
+                                    if let Some(path_str) = args_val.get("path").and_then(|p| p.as_str()) {
+                                        let vpath = Path::new(path_str);
+                                        let mut comps = vpath.components().peekable();
+                                        while let Some(c) = comps.peek() {
+                                            match c {
+                                                std::path::Component::RootDir | std::path::Component::CurDir => { comps.next(); },
+                                                _ => break,
+                                            }
+                                        }
+                                        if let Some(std::path::Component::Normal(first)) = comps.next() {
+                                            let lib_name = first.to_string_lossy();
+                                            for lib in &config.content_libraries {
+                                                if lib.name == lib_name {
+                                                    let rest: PathBuf = comps.collect();
+                                                    let abs_path = Path::new(&lib.root_folder).join(rest);
+                                                    let tags = crate::utils::tags::extract_tags_from_file(&abs_path);
+                                                    let _ = tx_gui_agent.send(BackgroundMessage::FileModified { path: abs_path, tags });
+                                                    break;
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
                 }
 
                 let mut results_map = std::collections::HashMap::new();
