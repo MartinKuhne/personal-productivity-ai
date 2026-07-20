@@ -37,9 +37,32 @@ impl PdfConversionJob {
             let mut args = Vec::new();
             let exe = template[0].clone();
             
+            let exe_lower = exe.to_lowercase();
+            let is_marker = exe_lower.ends_with("marker") 
+                         || exe_lower.ends_with("marker.exe")
+                         || exe_lower.ends_with("marker_single")
+                         || exe_lower.ends_with("marker_single.exe")
+                         || exe_lower.ends_with("marker_pdf")
+                         || exe_lower.ends_with("marker_pdf.exe");
+            
+            let mut actual_output_dir = None;
+
+            if is_marker {
+                let temp_name = format!("marker_{}", std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos());
+                let temp = std::env::temp_dir().join(temp_name);
+                let _ = std::fs::create_dir_all(&temp);
+                actual_output_dir = Some(temp);
+            }
+
             for arg in template.iter().skip(1) {
+                let replacement_out = if let Some(ref temp) = actual_output_dir {
+                    temp.to_string_lossy().to_string()
+                } else {
+                    self.output_md.to_string_lossy().to_string()
+                };
+
                 let arg = arg.replace("{input}", &self.input_pdf.to_string_lossy())
-                             .replace("{output}", &self.output_md.to_string_lossy());
+                             .replace("{output}", &replacement_out);
                 args.push(arg);
             }
             
@@ -55,6 +78,40 @@ impl PdfConversionJob {
                 .map_err(|e| format!("Failed to spawn process: {}", e))?;
 
             if output.status.success() {
+                if let Some(temp) = actual_output_dir {
+                    let mut md_found = false;
+                    for entry in walkdir::WalkDir::new(&temp)
+                        .into_iter()
+                        .filter_map(Result::ok)
+                        .filter(|e| e.path().extension().map_or(false, |ext| ext == "md"))
+                    {
+                        if let Ok(_) = std::fs::copy(entry.path(), &self.output_md) {
+                            md_found = true;
+                            if let Some(parent_dir) = entry.path().parent() {
+                                if let Ok(siblings) = std::fs::read_dir(parent_dir) {
+                                    for sibling in siblings.flatten() {
+                                        if sibling.path() != entry.path() {
+                                            if let Some(out_parent) = self.output_md.parent() {
+                                                let target = out_parent.join(sibling.file_name());
+                                                let _ = std::fs::rename(sibling.path(), target);
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                            break;
+                        }
+                    }
+                    let _ = std::fs::remove_dir_all(&temp);
+                    
+                    if !md_found {
+                        let _ = tx.send(BackgroundMessage::LogEntry(BackgroundLogEntry::new(
+                            LogCategory::PdfConverter,
+                            format!("Warning: Could not find output markdown from marker for {:?}", self.input_pdf.file_name().unwrap_or_default())
+                        )));
+                    }
+                }
+
                 let _ = tx.send(BackgroundMessage::LogEntry(BackgroundLogEntry::new(
                     LogCategory::PdfConverter,
                     format!("Successfully converted {:?}", self.input_pdf.file_name().unwrap_or_default())
