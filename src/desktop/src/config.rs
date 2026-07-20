@@ -145,6 +145,12 @@ fn default_readonly() -> bool {
     true
 }
 
+fn default_feature_flags() -> HashMap<String, bool> {
+    let mut m = HashMap::new();
+    m.insert("useDAVForContacts".to_string(), false);
+    m
+}
+
 #[derive(serde::Serialize, serde::Deserialize, Clone)]
 #[serde(default)]
 pub struct AppConfig {
@@ -177,6 +183,9 @@ pub struct AppConfig {
     /// Override default storage location for CSV databases.
     #[serde(default)]
     pub csv_db_path: Option<String>,
+    /// Runtime feature flags. Map of feature name to enabled/disabled.
+    #[serde(default = "default_feature_flags")]
+    pub feature_flags: HashMap<String, bool>,
 }
 
 impl std::fmt::Debug for AppConfig {
@@ -194,6 +203,8 @@ impl std::fmt::Debug for AppConfig {
             .field("content_libraries", &self.content_libraries)
             .field("pdf_converter_command", &self.pdf_converter_command)
             .field("inline_editor_enabled", &self.inline_editor_enabled)
+            .field("csv_db_path", &self.csv_db_path)
+            .field("feature_flags", &self.feature_flags)
             .finish()
     }
 }
@@ -214,6 +225,7 @@ impl Default for AppConfig {
             pdf_converter_command: None,
             inline_editor_enabled: false,
             csv_db_path: None,
+            feature_flags: default_feature_flags(),
         }
     }
 }

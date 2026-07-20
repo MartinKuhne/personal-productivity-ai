@@ -1,4 +1,5 @@
 pub mod caldav;
+pub mod carddav;
 pub mod filesystem;
 pub mod web;
 pub mod yaml_header;
