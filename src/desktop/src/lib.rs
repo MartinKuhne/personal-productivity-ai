@@ -10,6 +10,7 @@ pub mod ui;
 pub mod messages;
 pub mod background;
 pub mod print;
+pub mod file_events;
 
 
 pub use background_task::Task;

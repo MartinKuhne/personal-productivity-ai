@@ -540,10 +540,9 @@ mod tests {
         // Result may be Ok with empty response or Err depending on implementation
         assert!(res.is_ok() || res.is_err());
         if let Ok(response) = res {
-            // If Ok, verify results is a valid string (empty or with content)
-            let results = &response.results;
-            // Just verify it's a valid string, not empty panic
-            assert!(results.len() >= 0 || results.is_empty());
+            // If Ok, verify results is a valid string (we just access the
+            // field; a panic here would mean a bug in the producer).
+            let _ = &response.results;
         }
     }
 }
