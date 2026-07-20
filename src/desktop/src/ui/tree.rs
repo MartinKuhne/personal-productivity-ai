@@ -1,7 +1,10 @@
+use crate::messages::BackgroundMessage;
+use crate::print::{execute_print_blocking, PrintJob};
 use crate::ui::TreeNode;
 use eframe::egui;
 use std::collections::HashSet;
 use std::path::PathBuf;
+use std::sync::mpsc::Sender;
 
 pub struct TreeNodeContext<'a> {
     pub expanded_dirs: &'a mut HashSet<PathBuf>,
@@ -22,6 +25,7 @@ pub struct TreeNodeContext<'a> {
     pub content_libraries: &'a [crate::config::ContentLibrary],
     pub open_editor: &'a mut Option<PathBuf>,
     pub inline_editor_enabled: bool,
+    pub bg_tx: &'a Option<Sender<BackgroundMessage>>,
 }
 
 pub fn draw_tree_node(ui: &mut egui::Ui, node: &TreeNode, ctx: &mut TreeNodeContext<'_>) {
@@ -29,7 +33,7 @@ pub fn draw_tree_node(ui: &mut egui::Ui, node: &TreeNode, ctx: &mut TreeNodeCont
         let is_expanded = ctx.expanded_dirs.contains(&node.path);
         let icon = if is_expanded { "📂 " } else { "📁 " };
         let label = format!("{}{}", icon, node.name);
-        
+
         let response = ui.selectable_label(false, label);
         if response.clicked() {
             if is_expanded {
@@ -113,10 +117,11 @@ pub fn draw_tree_node(ui: &mut egui::Ui, node: &TreeNode, ctx: &mut TreeNodeCont
             });
         }
     } else {
-        let is_selected = ctx.selected_files.contains(&node.path) || ctx.selected_file.as_ref() == Some(&node.path);
+        let is_selected = ctx.selected_files.contains(&node.path)
+            || ctx.selected_file.as_ref() == Some(&node.path);
         let label = format!("📄 {}", node.name);
         let response = ui.selectable_label(is_selected, label);
-        
+
         if response.clicked() {
             if ctx.modifiers.shift || ctx.modifiers.ctrl || ctx.modifiers.command {
                 if ctx.selected_files.contains(&node.path) {
@@ -137,7 +142,7 @@ pub fn draw_tree_node(ui: &mut egui::Ui, node: &TreeNode, ctx: &mut TreeNodeCont
                 }
             }
         }
-        
+
         if response.double_clicked() {
             if ctx.inline_editor_enabled {
                 *ctx.open_editor = Some(node.path.clone());
@@ -234,15 +239,16 @@ pub fn draw_tree_node(ui: &mut egui::Ui, node: &TreeNode, ctx: &mut TreeNodeCont
                 }
                 if ui.button("Print").clicked() {
                     let path_to_print = node.path.clone();
-                    std::thread::spawn(move || {
-                        if let Ok(_content) = std::fs::read_to_string(&path_to_print) {
-                            tracing::info!(
-                                name = "ui.file.print_requested",
-                                path = %path_to_print.display(),
-                                "Print requested for file. Currently a stub implementation. Operator should expect no actual printing."
-                            );
-                        }
-                    });
+                    if let Some(tx) = ctx.bg_tx.clone() {
+                        let job = PrintJob::new(path_to_print.clone());
+                        let _ = execute_print_blocking(job, Some(tx));
+                    } else {
+                        tracing::warn!(
+                            name = "ui.file.print_no_channel",
+                            path = %path_to_print.display(),
+                            "Print requested but no background channel available"
+                        );
+                    }
                     ui.close_menu();
                 }
                 if ui.button("Rename").clicked() {

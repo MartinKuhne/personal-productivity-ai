@@ -1,8 +1,8 @@
 use eframe::egui;
 use egui::RichText;
 
-#[derive(Clone)]
-enum InlineElem {
+#[derive(Clone, Debug, PartialEq)]
+pub enum InlineElem {
     Text(String, TextStyle),
     Link(String, String),
     Image(String),
@@ -10,16 +10,36 @@ enum InlineElem {
     SoftBreak,
 }
 
-#[derive(Clone, Default)]
-struct TextStyle {
-    bold: bool,
-    italic: bool,
-    code: bool,
-    strikethrough: bool,
+#[derive(Clone, Default, Debug, PartialEq)]
+pub struct TextStyle {
+    pub bold: bool,
+    pub italic: bool,
+    pub code: bool,
+    pub strikethrough: bool,
 }
 
-fn flush_inline(ui: &mut egui::Ui, elems: &mut Vec<InlineElem>, needs_bullet: &mut bool, task_checked: &mut Option<bool>, indent: usize, wrap: bool) {
-    if elems.is_empty() && !*needs_bullet && task_checked.is_none() {
+#[derive(Clone, Debug, PartialEq)]
+pub enum RenderEvent {
+    FlushInline {
+        elems: Vec<InlineElem>,
+        needs_bullet: bool,
+        task_checked: Option<bool>,
+        indent: usize,
+        wrap: bool,
+    },
+    CodeBlock(String),
+    Heading { level: u32, text: String },
+    Table(Vec<Vec<Vec<InlineElem>>>),
+    Space(f32),
+    Separator,
+}
+
+/// Purpose: Renders inline markdown elements.
+/// Inputs: `ui` (mut), `elems`, `needs_bullet`, `task_checked`, `indent`, `wrap`
+/// Outputs: None
+/// Purity: Impure (modifies UI state). Thin adapter for rendering text.
+fn render_inline(ui: &mut egui::Ui, elems: &[InlineElem], needs_bullet: bool, task_checked: Option<bool>, indent: usize, wrap: bool) {
+    if elems.is_empty() && !needs_bullet && task_checked.is_none() {
         return;
     }
     
@@ -29,17 +49,17 @@ fn flush_inline(ui: &mut egui::Ui, elems: &mut Vec<InlineElem>, needs_bullet: &m
         if indent > 0 {
             ui.add_space(indent as f32 * 20.0);
         }
-        if *needs_bullet {
+        if needs_bullet {
             ui.label(RichText::new("• ").size(14.0));
-            *needs_bullet = false;
         }
-        if let Some(checked) = task_checked.take() {
+        if let Some(checked) = task_checked {
             ui.add_space(4.0);
-            ui.checkbox(&mut checked.clone(), "");
+            let mut c = checked;
+            ui.checkbox(&mut c, "");
             ui.add_space(4.0);
         }
         
-        for elem in elems.drain(..) {
+        for elem in elems {
             match elem {
                 InlineElem::Text(t, style) => {
                     let mut rt = RichText::new(t);
@@ -74,6 +94,10 @@ fn flush_inline(ui: &mut egui::Ui, elems: &mut Vec<InlineElem>, needs_bullet: &m
     }
 }
 
+/// Purpose: Renders a code block.
+/// Inputs: `ui` (mut), `content`, `_idx` (mut)
+/// Outputs: None
+/// Purity: Impure (modifies UI state). Thin adapter.
 fn render_code_block(ui: &mut egui::Ui, content: &str, _idx: &mut usize) {
     egui::Frame::none()
         .fill(egui::Color32::from_rgb(20, 20, 22))
@@ -92,6 +116,10 @@ fn render_code_block(ui: &mut egui::Ui, content: &str, _idx: &mut usize) {
         });
 }
 
+/// Purpose: Renders a heading.
+/// Inputs: `ui` (mut), `title`, `level`, `scroll_to_id` (mut)
+/// Outputs: None
+/// Purity: Impure (modifies UI state). Thin adapter.
 fn render_heading(ui: &mut egui::Ui, title: &str, level: u32, scroll_to_id: &mut Option<egui::Id>) {
     if level > 0 {
         let trimmed = title.trim().to_string();
@@ -113,10 +141,57 @@ fn render_heading(ui: &mut egui::Ui, title: &str, level: u32, scroll_to_id: &mut
     }
 }
 
+/// Purpose: Renders a table.
+/// Inputs: `ui` (mut), `table_cells`
+/// Outputs: None
+/// Purity: Impure (modifies UI state). Thin adapter.
+fn render_table(ui: &mut egui::Ui, table_cells: &[Vec<Vec<InlineElem>>]) {
+    egui::ScrollArea::horizontal().id_source(ui.next_auto_id()).show(ui, |ui| {
+        egui::Grid::new(ui.next_auto_id())
+            .striped(true)
+            .spacing([10.0, 4.0])
+            .show(ui, |ui| {
+                for row in table_cells {
+                    for cell in row {
+                        render_inline(ui, cell, false, None, 0, false);
+                    }
+                    ui.end_row();
+                }
+            });
+    });
+}
+
+/// Purpose: Parses a YAML mapping into a list of key-value string pairs.
+/// Inputs: `yaml`
+/// Outputs: List of (String, String) if valid mapping, else None.
+/// Purity: Pure function.
+pub fn parse_yaml_to_pairs(yaml: &serde_yaml::Value) -> Option<Vec<(String, String)>> {
+    let mapping = yaml.as_mapping()?;
+    let mut pairs = Vec::new();
+    for (key, value) in mapping {
+        if let Some(key_str) = key.as_str() {
+            let val_str = match value {
+                serde_yaml::Value::String(s) => s.clone(),
+                serde_yaml::Value::Sequence(seq) => {
+                    let items: Vec<String> = seq.iter().map(|v| v.as_str().unwrap_or("").to_string()).collect();
+                    items.join(", ")
+                }
+                _ => serde_yaml::to_string(value).unwrap_or_default(),
+            };
+            pairs.push((key_str.to_string(), val_str));
+        }
+    }
+    Some(pairs)
+}
+
+/// Purpose: Renders a YAML table UI from a parsed mapping.
+/// Inputs: `ui` (mut), `yaml`
+/// Outputs: None
+/// Purity: Impure (modifies UI state). Coordinates parsing and rendering.
 pub fn render_yaml_table(ui: &mut egui::Ui, yaml: &serde_yaml::Value) {
-    if let Some(mapping) = yaml.as_mapping() {
+    if let Some(pairs) = parse_yaml_to_pairs(yaml) {
         egui::Frame::none()
-            .fill(egui::Color32::from_rgb(24, 24, 27)) // Dark surface background
+            .fill(egui::Color32::from_rgb(24, 24, 27))
             .stroke(egui::Stroke::new(1.0_f32, egui::Color32::from_gray(40)))
             .inner_margin(8.0)
             .rounding(4.0)
@@ -127,20 +202,10 @@ pub fn render_yaml_table(ui: &mut egui::Ui, yaml: &serde_yaml::Value) {
                         .striped(true)
                         .spacing([10.0, 4.0])
                         .show(ui, |ui| {
-                            for (key, value) in mapping {
-                                if let Some(key_str) = key.as_str() {
-                                    ui.label(RichText::new(key_str).strong().monospace().color(egui::Color32::WHITE));
-                                    let val_str = match value {
-                                        serde_yaml::Value::String(s) => s.clone(),
-                                        serde_yaml::Value::Sequence(seq) => {
-                                            let items: Vec<String> = seq.iter().map(|v| v.as_str().unwrap_or("").to_string()).collect();
-                                            items.join(", ")
-                                        }
-                                        _ => serde_yaml::to_string(value).unwrap_or_default(),
-                                    };
-                                    ui.label(RichText::new(val_str).monospace().color(egui::Color32::WHITE));
-                                    ui.end_row();
-                                }
+                            for (key, val) in pairs {
+                                ui.label(RichText::new(key).strong().monospace().color(egui::Color32::WHITE));
+                                ui.label(RichText::new(val).monospace().color(egui::Color32::WHITE));
+                                ui.end_row();
                             }
                         });
                 });
@@ -149,7 +214,11 @@ pub fn render_yaml_table(ui: &mut egui::Ui, yaml: &serde_yaml::Value) {
     }
 }
 
-pub fn render_markdown(ui: &mut egui::Ui, markdown_text: &str, scroll_to_id: &mut Option<egui::Id>) {
+/// Purpose: Parses markdown text into a sequence of render events.
+/// Inputs: `markdown_text` (&str)
+/// Outputs: `Vec<RenderEvent>` representing the logical blocks to draw.
+/// Purity: Pure function.
+pub fn parse_markdown_to_events(markdown_text: &str) -> Vec<RenderEvent> {
     use pulldown_cmark::{Event, HeadingLevel, Options, Parser, Tag, TagEnd};
 
     let mut options = Options::empty();
@@ -159,13 +228,13 @@ pub fn render_markdown(ui: &mut egui::Ui, markdown_text: &str, scroll_to_id: &mu
     options.insert(Options::ENABLE_TASKLISTS);
     
     let parser = Parser::new_ext(markdown_text, options);
+    let mut events = Vec::new();
 
     let mut in_code_block = false;
     let mut code_block_content = String::new();
     let mut in_heading = false;
     let mut heading_level = 0;
     let mut heading_text = String::new();
-    let mut code_block_idx = 0;
 
     let mut buffered_inline: Vec<InlineElem> = Vec::new();
     let mut current_style = TextStyle::default();
@@ -179,22 +248,38 @@ pub fn render_markdown(ui: &mut egui::Ui, markdown_text: &str, scroll_to_id: &mu
     let mut table_cells: Vec<Vec<Vec<InlineElem>>> = Vec::new();
     let mut current_row: Vec<Vec<InlineElem>> = Vec::new();
 
+    let mut push_inline = |events: &mut Vec<RenderEvent>, elems: &mut Vec<InlineElem>, bullet: &mut bool, task: &mut Option<bool>, indent: usize, wrap: bool| {
+        if elems.is_empty() && !*bullet && task.is_none() {
+            return;
+        }
+        events.push(RenderEvent::FlushInline {
+            elems: elems.clone(),
+            needs_bullet: *bullet,
+            task_checked: *task,
+            indent,
+            wrap,
+        });
+        elems.clear();
+        *bullet = false;
+        *task = None;
+    };
+
     for event in parser {
         match event {
             Event::Start(Tag::CodeBlock(_info)) => {
                 if !buffered_inline.is_empty() {
-                    flush_inline(ui, &mut buffered_inline, &mut needs_bullet, &mut task_checked, list_depth, true);
+                    push_inline(&mut events, &mut buffered_inline, &mut needs_bullet, &mut task_checked, list_depth, true);
                 }
                 in_code_block = true;
                 code_block_content.clear();
             }
             Event::End(TagEnd::CodeBlock) => {
                 in_code_block = false;
-                render_code_block(ui, &code_block_content, &mut code_block_idx);
+                events.push(RenderEvent::CodeBlock(code_block_content.clone()));
             }
             Event::Start(Tag::Heading { level, .. }) => {
                 if !buffered_inline.is_empty() {
-                    flush_inline(ui, &mut buffered_inline, &mut needs_bullet, &mut task_checked, list_depth, true);
+                    push_inline(&mut events, &mut buffered_inline, &mut needs_bullet, &mut task_checked, list_depth, true);
                 }
                 in_heading = true;
                 heading_level = match level {
@@ -206,77 +291,62 @@ pub fn render_markdown(ui: &mut egui::Ui, markdown_text: &str, scroll_to_id: &mu
                 heading_text.clear();
             }
             Event::End(TagEnd::Heading(_)) => {
-                render_heading(ui, &heading_text, heading_level, scroll_to_id);
+                events.push(RenderEvent::Heading { level: heading_level, text: heading_text.clone() });
                 in_heading = false;
                 heading_level = 0;
             }
             Event::Start(Tag::Paragraph) => {
                 if !in_table_cell {
                     if !buffered_inline.is_empty() {
-                        flush_inline(ui, &mut buffered_inline, &mut needs_bullet, &mut task_checked, list_depth, true);
+                        push_inline(&mut events, &mut buffered_inline, &mut needs_bullet, &mut task_checked, list_depth, true);
                     }
                 }
             }
             Event::End(TagEnd::Paragraph) => {
                 if !in_table_cell {
-                    flush_inline(ui, &mut buffered_inline, &mut needs_bullet, &mut task_checked, list_depth, true);
-                    ui.add_space(4.0);
+                    push_inline(&mut events, &mut buffered_inline, &mut needs_bullet, &mut task_checked, list_depth, true);
+                    events.push(RenderEvent::Space(4.0));
                 }
             }
             Event::Start(Tag::List(_)) => {
                 if !buffered_inline.is_empty() {
-                    flush_inline(ui, &mut buffered_inline, &mut needs_bullet, &mut task_checked, list_depth, true);
+                    push_inline(&mut events, &mut buffered_inline, &mut needs_bullet, &mut task_checked, list_depth, true);
                 }
                 list_depth += 1;
             }
             Event::End(TagEnd::List(_)) => {
-                flush_inline(ui, &mut buffered_inline, &mut needs_bullet, &mut task_checked, list_depth, true);
+                push_inline(&mut events, &mut buffered_inline, &mut needs_bullet, &mut task_checked, list_depth, true);
                 if list_depth > 0 {
                     list_depth -= 1;
                 }
             }
             Event::Start(Tag::Item) => {
                 if !buffered_inline.is_empty() {
-                    flush_inline(ui, &mut buffered_inline, &mut needs_bullet, &mut task_checked, list_depth, true);
+                    push_inline(&mut events, &mut buffered_inline, &mut needs_bullet, &mut task_checked, list_depth, true);
                 }
                 needs_bullet = true;
             }
             Event::End(TagEnd::Item) => {
-                flush_inline(ui, &mut buffered_inline, &mut needs_bullet, &mut task_checked, list_depth, true);
+                push_inline(&mut events, &mut buffered_inline, &mut needs_bullet, &mut task_checked, list_depth, true);
             }
             Event::Start(Tag::BlockQuote) => {
                 if !buffered_inline.is_empty() {
-                    flush_inline(ui, &mut buffered_inline, &mut needs_bullet, &mut task_checked, list_depth, true);
+                    push_inline(&mut events, &mut buffered_inline, &mut needs_bullet, &mut task_checked, list_depth, true);
                 }
             }
             Event::End(TagEnd::BlockQuote) => {
-                flush_inline(ui, &mut buffered_inline, &mut needs_bullet, &mut task_checked, list_depth, true);
+                push_inline(&mut events, &mut buffered_inline, &mut needs_bullet, &mut task_checked, list_depth, true);
             }
             Event::Start(Tag::Table(_)) => {
                 if !buffered_inline.is_empty() {
-                    flush_inline(ui, &mut buffered_inline, &mut needs_bullet, &mut task_checked, list_depth, true);
+                    push_inline(&mut events, &mut buffered_inline, &mut needs_bullet, &mut task_checked, list_depth, true);
                 }
                 table_cells.clear();
             }
             Event::End(TagEnd::Table) => {
-                egui::ScrollArea::horizontal().id_source(ui.next_auto_id()).show(ui, |ui| {
-                    egui::Grid::new(ui.next_auto_id())
-                        .striped(true)
-                        .spacing([10.0, 4.0])
-                        .show(ui, |ui| {
-                            for row in &table_cells {
-                                for cell in row {
-                                    let mut mut_cell = cell.clone();
-                                    let mut dummy_needs_bullet = false;
-                                    let mut dummy_task = None;
-                                    flush_inline(ui, &mut mut_cell, &mut dummy_needs_bullet, &mut dummy_task, 0, false);
-                                }
-                                ui.end_row();
-                            }
-                        });
-                });
+                events.push(RenderEvent::Table(table_cells.clone()));
                 table_cells.clear();
-                ui.add_space(4.0);
+                events.push(RenderEvent::Space(4.0));
             }
             Event::Start(Tag::TableHead) => {}
             Event::End(TagEnd::TableHead) => {}
@@ -343,15 +413,15 @@ pub fn render_markdown(ui: &mut egui::Ui, markdown_text: &str, scroll_to_id: &mu
             Event::HardBreak => {
                 if !in_code_block && !in_heading {
                     if !in_table_cell {
-                        flush_inline(ui, &mut buffered_inline, &mut needs_bullet, &mut task_checked, list_depth, true);
+                        push_inline(&mut events, &mut buffered_inline, &mut needs_bullet, &mut task_checked, list_depth, true);
                     } else {
                         buffered_inline.push(InlineElem::SoftBreak);
                     }
                 }
             }
             Event::Rule => {
-                flush_inline(ui, &mut buffered_inline, &mut needs_bullet, &mut task_checked, list_depth, true);
-                ui.separator();
+                push_inline(&mut events, &mut buffered_inline, &mut needs_bullet, &mut task_checked, list_depth, true);
+                events.push(RenderEvent::Separator);
             }
             Event::TaskListMarker(checked) => {
                 task_checked = Some(checked);
@@ -371,31 +441,69 @@ pub fn render_markdown(ui: &mut egui::Ui, markdown_text: &str, scroll_to_id: &mu
             }
             Event::Start(Tag::FootnoteDefinition(name)) => {
                 if !buffered_inline.is_empty() {
-                    flush_inline(ui, &mut buffered_inline, &mut needs_bullet, &mut task_checked, list_depth, true);
+                    push_inline(&mut events, &mut buffered_inline, &mut needs_bullet, &mut task_checked, list_depth, true);
                 }
-                ui.separator();
+                events.push(RenderEvent::Separator);
                 let text = format!("[^{}]: ", name);
                 let mut s = current_style.clone();
                 s.bold = true;
                 buffered_inline.push(InlineElem::Text(text, s));
             }
             Event::End(TagEnd::FootnoteDefinition) => {
-                flush_inline(ui, &mut buffered_inline, &mut needs_bullet, &mut task_checked, list_depth, true);
+                push_inline(&mut events, &mut buffered_inline, &mut needs_bullet, &mut task_checked, list_depth, true);
             }
             Event::Start(Tag::HtmlBlock) => {
                 if !buffered_inline.is_empty() {
-                    flush_inline(ui, &mut buffered_inline, &mut needs_bullet, &mut task_checked, list_depth, true);
+                    push_inline(&mut events, &mut buffered_inline, &mut needs_bullet, &mut task_checked, list_depth, true);
                 }
             }
             Event::End(TagEnd::HtmlBlock) => {
-                flush_inline(ui, &mut buffered_inline, &mut needs_bullet, &mut task_checked, list_depth, true);
+                push_inline(&mut events, &mut buffered_inline, &mut needs_bullet, &mut task_checked, list_depth, true);
             }
             _ => {}
         }
     }
-    flush_inline(ui, &mut buffered_inline, &mut needs_bullet, &mut task_checked, list_depth, true);
+    push_inline(&mut events, &mut buffered_inline, &mut needs_bullet, &mut task_checked, list_depth, true);
+    
+    events
 }
 
+/// Purpose: Renders markdown text to UI.
+/// Inputs: `ui` (mut), `markdown_text`, `scroll_to_id` (mut)
+/// Outputs: None
+/// Purity: Impure (modifies UI state). Coordinates parsing and rendering.
+pub fn render_markdown(ui: &mut egui::Ui, markdown_text: &str, scroll_to_id: &mut Option<egui::Id>) {
+    let events = parse_markdown_to_events(markdown_text);
+    let mut code_block_idx = 0;
+    
+    for event in events {
+        match event {
+            RenderEvent::FlushInline { elems, needs_bullet, task_checked, indent, wrap } => {
+                render_inline(ui, &elems, needs_bullet, task_checked, indent, wrap);
+            }
+            RenderEvent::CodeBlock(content) => {
+                render_code_block(ui, &content, &mut code_block_idx);
+            }
+            RenderEvent::Heading { level, text } => {
+                render_heading(ui, &text, level, scroll_to_id);
+            }
+            RenderEvent::Table(cells) => {
+                render_table(ui, &cells);
+            }
+            RenderEvent::Space(amount) => {
+                ui.add_space(amount);
+            }
+            RenderEvent::Separator => {
+                ui.separator();
+            }
+        }
+    }
+}
+
+/// Purpose: Builds a Table of Contents from markdown.
+/// Inputs: `markdown_text`
+/// Outputs: List of `ToCEntry` elements.
+/// Purity: Pure function.
 pub fn build_toc(markdown_text: &str) -> Vec<crate::ui::ToCEntry> {
     use pulldown_cmark::{Event, HeadingLevel, Options, Parser, Tag, TagEnd};
 
@@ -448,4 +556,113 @@ pub fn build_toc(markdown_text: &str) -> Vec<crate::ui::ToCEntry> {
         }
     }
     toc
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_parse_yaml_to_pairs() {
+        let yaml_str = "key1: value1\nkey2: [item1, item2]";
+        let val: serde_yaml::Value = serde_yaml::from_str(yaml_str).unwrap();
+        let pairs = parse_yaml_to_pairs(&val).unwrap();
+        assert_eq!(pairs[0], ("key1".to_string(), "value1".to_string()));
+        assert_eq!(pairs[1], ("key2".to_string(), "item1, item2".to_string()));
+    }
+
+    #[test]
+    fn test_parse_markdown_to_events() {
+        let md = "# Heading 1\nSome *text*\n- List item";
+        let events = parse_markdown_to_events(md);
+        
+        assert_eq!(events[0], RenderEvent::Heading { level: 1, text: "Heading 1".to_string() });
+        
+        // Next is the paragraph "Some text"
+        match &events[1] {
+            RenderEvent::FlushInline { elems, .. } => {
+                assert_eq!(elems.len(), 2);
+                match &elems[0] {
+                    InlineElem::Text(t, style) => {
+                        assert_eq!(t, "Some ");
+                        assert!(!style.italic);
+                    }
+                    _ => panic!("Expected text"),
+                }
+                match &elems[1] {
+                    InlineElem::Text(t, style) => {
+                        assert_eq!(t, "text");
+                        assert!(style.italic);
+                    }
+                    _ => panic!("Expected italic text"),
+                }
+            },
+            _ => panic!("Expected FlushInline"),
+        }
+        
+        // Then paragraph space
+        assert_eq!(events[2], RenderEvent::Space(4.0));
+        
+        // Then list item
+        match &events[3] {
+            RenderEvent::FlushInline { elems, needs_bullet, indent, .. } => {
+                assert!(*needs_bullet);
+                assert_eq!(*indent, 1);
+                assert_eq!(elems.len(), 1);
+                match &elems[0] {
+                    InlineElem::Text(t, _) => assert_eq!(t, "List item"),
+                    _ => panic!("Expected text"),
+                }
+            },
+            _ => panic!("Expected FlushInline"),
+        }
+    }
+
+    #[test]
+    fn test_build_toc() {
+        let md = "# Title\nSome text\n## Subtitle";
+        let toc = build_toc(md);
+        assert_eq!(toc.len(), 2);
+        assert_eq!(toc[0].title, "Title");
+        assert_eq!(toc[0].level, 1);
+        assert_eq!(toc[1].title, "Subtitle");
+        assert_eq!(toc[1].level, 2);
+    }
+    
+    // Quick fuzz-style property test for parser (no panic on arbitrary markdown strings)
+    #[test]
+    fn test_parse_markdown_fuzz_property() {
+        let random_markdowns = [
+            "",
+            "#",
+            "*bold*",
+            "```\ncode\n```",
+            "|a|b|\n|-|-|\n|1|2|",
+            "[link](http://example.com)",
+            "- [ ] task",
+        ];
+        for md in random_markdowns {
+            let _events = parse_markdown_to_events(md);
+        }
+    }
+}
+
+#[cfg(test)]
+mod e2e_tests {
+    use super::*;
+
+    #[test]
+    fn test_render_markdown_e2e() {
+        let ctx = egui::Context::default();
+        let _ = ctx.run(egui::RawInput::default(), |ctx| {
+            egui::CentralPanel::default().show(ctx, |ui| {
+                let mut scroll_id = None;
+                render_markdown(ui, "# Test\n\n- [ ] Task\n\n```rust\nlet x = 1;\n```", &mut scroll_id);
+                
+                let yaml_str = "a: 1\nb: 2";
+                let val: serde_yaml::Value = serde_yaml::from_str(yaml_str).unwrap();
+                render_yaml_table(ui, &val);
+            });
+        });
+    }
 }
