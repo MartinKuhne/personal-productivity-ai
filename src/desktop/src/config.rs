@@ -153,6 +153,9 @@ fn default_feature_flags() -> HashMap<String, bool> {
     // has the same contact data with broader provider support, so it's the
     // safer default. Set this to `false` in your config to opt back into JMAP.
     m.insert("useDAVForContacts".to_string(), true);
+    // When enabled, tool call responses include full data in logs (may be verbose).
+    // When disabled (default), only basic success/failure is logged for privacy.
+    m.insert("toolCallDebugMode".to_string(), false);
     m
 }
 

@@ -64,6 +64,12 @@ macro_rules! define_tools {
         pub fn execute_tool(config: &AppConfig, root_path: &Path, name: &str, args_str: &str) -> String {
             rustls::crypto::ring::default_provider().install_default().ok();
 
+            let debug_mode = config
+                .feature_flags
+                .get("toolCallDebugMode")
+                .copied()
+                .unwrap_or(false);
+
             let args_compact = args_str.to_string();
             tracing::info!(name = "tool.registry.call", tool_name = %name, args = %args_compact, "Executing tool call");
             let start_time = std::time::Instant::now();
@@ -133,7 +139,12 @@ macro_rules! define_tools {
             let elapsed = start_time.elapsed();
             let response_dto = match result_raw {
                 Ok(data) => {
-                    tracing::info!(name = "tool.registry.success", tool_name = %name, elapsed = ?elapsed, "Tool execution succeeded");
+                    if debug_mode {
+                        let data_str = serde_json::to_string(&data).unwrap_or_else(|_| "<serialization error>".to_string());
+                        tracing::info!(name = "tool.registry.success", tool_name = %name, elapsed = ?elapsed, data = %data_str, "Tool execution succeeded");
+                    } else {
+                        tracing::info!(name = "tool.registry.success", tool_name = %name, elapsed = ?elapsed, "Tool execution succeeded");
+                    }
                     crate::tools::dtos::ToolResponse::Success { data }
                 },
                 Err(err) => {
@@ -656,6 +667,35 @@ mod tests {
         let root = Path::new("C:\\");
         let res = execute_tool(&config, root, "list_files", "not valid json");
         assert!(res.contains("Invalid args") || res.contains("error"));
+    }
+
+    #[test]
+    fn test_tool_call_debug_mode_feature_flag() {
+        // Test that the feature flag controls debug logging behavior
+        // Default config has toolCallDebugMode = false
+        let mut config = AppConfig::default();
+        assert_eq!(
+            config.feature_flags.get("toolCallDebugMode").copied().unwrap_or(false),
+            false,
+            "toolCallDebugMode should default to false"
+        );
+
+        // Test enabling the flag
+        config
+            .feature_flags
+            .insert("toolCallDebugMode".to_string(), true);
+        assert_eq!(
+            config.feature_flags.get("toolCallDebugMode").copied().unwrap_or(false),
+            true,
+            "toolCallDebugMode should be true when set"
+        );
+
+        // Test that execute_tool uses the flag (we can't easily test log output,
+        // but we verify the flag is accessible from config)
+        let root = Path::new("C:\\");
+        let res = execute_tool(&config, root, "unknown_tool", "{}");
+        // Should still work the same way, just with different logging behavior
+        assert!(res.contains("not found") || res.contains("error"));
     }
 
     // -- list_files_by_tag paging -----------------------------------------
