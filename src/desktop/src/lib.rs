@@ -6,6 +6,7 @@ pub mod browser;
 pub mod config;
 pub mod document;
 pub mod editor;
+pub mod error;
 pub mod file_events;
 pub mod file_processor;
 pub mod messages;
@@ -14,6 +15,8 @@ pub mod tag_manager;
 pub mod tools;
 pub mod ui;
 pub mod utils;
+
+pub use error::AgentError;
 
 pub use agent::run_agent;
 pub use background_task::Task;

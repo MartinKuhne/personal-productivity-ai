@@ -47,7 +47,10 @@ pub fn show_left_panel(app: &mut FastMdApp, ctx: &egui::Context) {
 
         if let (Some(lib), Some(rel_path)) = (target_lib, rel_path_res) {
             let lib_node_name = lib.name.clone();
-            let mut current_node = root_node.children.get_mut(&lib_node_name).unwrap();
+            let Some(current_node_ref) = root_node.children.get_mut(&lib_node_name) else {
+                return;
+            };
+            let mut current_node = current_node_ref;
             let mut current_path = std::path::PathBuf::from(&lib.root_folder);
 
             let components: Vec<_> = rel_path.components().collect();
@@ -57,11 +60,16 @@ pub fn show_left_panel(app: &mut FastMdApp, ctx: &egui::Context) {
                 let is_last = i == components.len() - 1;
                 let is_dir = !is_last;
 
-                current_node
-                    .children
-                    .entry(name.clone())
-                    .or_insert_with(|| TreeNode::new(name.clone(), current_path.clone(), is_dir));
-                current_node = current_node.children.get_mut(&name).unwrap();
+                if !current_node.children.contains_key(&name) {
+                    current_node.children.insert(
+                        name.clone(),
+                        TreeNode::new(name.clone(), current_path.clone(), is_dir),
+                    );
+                }
+                match current_node.children.get_mut(&name) {
+                    Some(n) => current_node = n,
+                    None => break,
+                }
             }
         }
     }

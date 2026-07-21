@@ -8,13 +8,11 @@ fn create_context(row: &csv::StringRecord, headers: &csv::StringRecord) -> HashM
     for (i, header) in headers.iter().enumerate() {
         if let Some(val) = row.get(i) {
             if let Ok(num) = val.parse::<i64>() {
-                context.set_value(header.into(), Value::Int(num)).unwrap();
+                let _ = context.set_value(header.into(), Value::Int(num));
             } else if let Ok(num) = val.parse::<f64>() {
-                context.set_value(header.into(), Value::Float(num)).unwrap();
+                let _ = context.set_value(header.into(), Value::Float(num));
             } else {
-                context
-                    .set_value(header.into(), Value::String(val.to_string()))
-                    .unwrap();
+                let _ = context.set_value(header.into(), Value::String(val.to_string()));
             }
         }
     }

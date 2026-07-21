@@ -14,9 +14,7 @@ pub fn find_matching_files(directory: &Path, pattern: &str) -> Result<Vec<PathBu
             continue;
         }
 
-        let relative = path
-            .strip_prefix(directory)
-            .expect("WalkDir entries are always under the root directory");
+        let relative = path.strip_prefix(directory).unwrap_or(path);
         let relative_str = relative.to_string_lossy();
         if pat.matches(&relative_str) {
             matches.push(path.to_path_buf());
