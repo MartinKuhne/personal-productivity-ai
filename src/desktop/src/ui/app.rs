@@ -446,7 +446,7 @@ impl eframe::App for FastMdApp {
         if let Ok(mgr) = self.background_manager.lock() {
             let log_path = crate::config::get_config_path()
                 .parent()
-                .unwrap()
+                .unwrap_or(std::path::Path::new("."))
                 .join("logs/background-process.log");
             let _ = mgr.save_logs(&log_path);
         }

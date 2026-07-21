@@ -255,42 +255,87 @@ pub fn run_agent(
                 "tool_choice": "auto"
             });
 
-            let response = match agent
-                .post(&format!(
-                    "{}/chat/completions",
-                    api_url.trim_matches('"').trim_end_matches('/')
-                ))
-                .set("Authorization", &format!("Bearer {}", api_key))
-                .set("Content-Type", "application/json")
-                .send_json(request_body)
-            {
-                Ok(resp) => resp,
-                Err(ureq::Error::Status(code, resp)) => {
-                    let body = resp
-                        .into_string()
-                        .unwrap_or_else(|_| "[Could not read body]".to_string());
-                    tracing::error!(
-                        name = "agent.api.failed",
-                        status = code,
-                        response = %body,
-                        "Failed to get chat completion from AI API. This may cause the agent to stop responding. Likely cause: invalid API key, rate limiting, or API downtime. Operator should check the configured API key and API provider status."
-                    );
-                    let _ = tx_gui_agent.send(BackgroundMessage::AgentFailed(format!(
-                        "HTTP Request failed with status {}: {}",
-                        code, body
-                    )));
-                    return;
+            let max_retries = 3u32;
+            let mut retry_attempt = 0u32;
+            let response = 'retry: loop {
+                let result = agent
+                    .post(&format!(
+                        "{}/chat/completions",
+                        api_url.trim_matches('"').trim_end_matches('/')
+                    ))
+                    .set("Authorization", &format!("Bearer {}", api_key))
+                    .set("Content-Type", "application/json")
+                    .send_json(request_body.clone());
+
+                match result {
+                    Ok(resp) => break 'retry Ok(resp),
+                    Err(ureq::Error::Status(code, resp)) if code >= 500 || code == 429 => {
+                        if retry_attempt < max_retries {
+                            let delay_secs = 1u64 << retry_attempt;
+                            tracing::warn!(
+                                name = "agent.api.retry",
+                                status = code,
+                                attempt = retry_attempt + 1,
+                                delay_secs = delay_secs,
+                                "Retryable HTTP error, will retry"
+                            );
+                            std::thread::sleep(std::time::Duration::from_secs(delay_secs));
+                            retry_attempt += 1;
+                            continue 'retry;
+                        }
+                        let body = resp
+                            .into_string()
+                            .unwrap_or_else(|_| "[Could not read body]".to_string());
+                        tracing::error!(
+                            name = "agent.api.failed",
+                            status = code,
+                            response = %body,
+                            "Failed to get chat completion from AI API after all retries."
+                        );
+                        break 'retry Err(crate::error::AgentError::HttpError { status: code, body });
+                    }
+                    Err(ureq::Error::Status(code, resp)) => {
+                        let body = resp
+                            .into_string()
+                            .unwrap_or_else(|_| "[Could not read body]".to_string());
+                        tracing::error!(
+                            name = "agent.api.failed",
+                            status = code,
+                            response = %body,
+                            "Failed to get chat completion from AI API. Likely cause: invalid API key or bad request."
+                        );
+                        break 'retry Err(crate::error::AgentError::HttpError { status: code, body });
+                    }
+                    Err(ref e) => {
+                        let err_str = e.to_string();
+                        let is_timeout = err_str.contains("timed out")
+                            || err_str.contains("Timeout")
+                            || err_str.contains("Network is unreachable");
+                        if is_timeout && retry_attempt < max_retries {
+                            let delay_secs = 1u64 << retry_attempt;
+                            tracing::warn!(
+                                name = "agent.api.retry",
+                                error = %e,
+                                attempt = retry_attempt + 1,
+                                delay_secs = delay_secs,
+                                "Timeout, will retry"
+                            );
+                            std::thread::sleep(std::time::Duration::from_secs(delay_secs));
+                            retry_attempt += 1;
+                            continue 'retry;
+                        }
+                        if is_timeout {
+                            break 'retry Err(crate::error::AgentError::Timeout);
+                        }
+                        break 'retry Err(crate::error::AgentError::NetworkError(err_str));
+                    }
                 }
+            };
+
+            let response = match response {
+                Ok(resp) => resp,
                 Err(e) => {
-                    tracing::error!(
-                        name = "agent.api.network_error",
-                        error = %e,
-                        "Network request to AI API failed completely. Agent cannot proceed. Likely cause: no internet connection or DNS failure. Operator should check network connectivity."
-                    );
-                    let _ = tx_gui_agent.send(BackgroundMessage::AgentFailed(format!(
-                        "HTTP Request failed: {}",
-                        e
-                    )));
+                    let _ = tx_gui_agent.send(BackgroundMessage::AgentFailed(e.user_message()));
                     return;
                 }
             };
@@ -425,10 +470,19 @@ pub fn run_agent(
                     }
                 }
 
-                let rt = tokio::runtime::Builder::new_multi_thread()
+                let rt = match tokio::runtime::Builder::new_multi_thread()
                     .enable_all()
                     .build()
-                    .unwrap();
+                {
+                    Ok(rt) => rt,
+                    Err(e) => {
+                        tracing::error!(name = "agent.runtime.build_failed", error = %e, "Failed to build tokio runtime for tool execution");
+                        let _ = tx_gui_agent.send(BackgroundMessage::AgentFailed(format!(
+                            "Internal error: failed to create async runtime: {}", e
+                        )));
+                        return;
+                    }
+                };
                 let config_arc = std::sync::Arc::new(config.clone());
                 let root_path_arc = std::sync::Arc::new(PathBuf::new());
 
@@ -1017,7 +1071,7 @@ mod tests {
         while let Ok(msg) = rx.recv() {
             match msg {
                 BackgroundMessage::AgentFailed(err) => {
-                    assert!(err.contains("HTTP Request failed"));
+                    assert!(err.contains("Network error") || err.contains("timed out"));
                     got_failed = true;
                     break;
                 }
@@ -1143,8 +1197,8 @@ mod tests {
             match msg {
                 BackgroundMessage::AgentFailed(err) => {
                     assert!(
-                        err.contains("HTTP Request failed with status 400"),
-                        "Expected 'HTTP Request failed with status 400', got '{}'",
+                        err.contains("HTTP 400 error"),
+                        "Expected 'HTTP 400 error', got '{}'",
                         err
                     );
                     got_failed = true;

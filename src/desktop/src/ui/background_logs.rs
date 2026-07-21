@@ -56,7 +56,10 @@ pub fn show_background_logs_window(app: &mut FastMdApp, ctx: &egui::Context) {
         .collapsible(true)
         .default_size([600.0, 400.0])
         .show(ctx, |ui| {
-            let mut mgr = app.background_manager.lock().unwrap();
+            let Ok(mut mgr) = app.background_manager.lock() else {
+                ui.label("Error: could not access background manager");
+                return;
+            };
 
             ui.horizontal(|ui| {
                 ui.label("Search:");
