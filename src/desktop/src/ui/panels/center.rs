@@ -1,8 +1,10 @@
 use crate::ui::render::{render_markdown, render_yaml_table};
-use crate::ui::{FastMdApp, generate_format_prompt, open_in_system_editor, show_in_file_explorer};
+use crate::ui::{generate_format_prompt, open_in_system_editor, show_in_file_explorer, FastMdApp};
 use eframe::egui;
 use egui::RichText;
 use std::path::PathBuf;
+use std::sync::atomic::AtomicBool;
+use std::sync::Arc;
 
 /// Action that can be applied to tabs.
 #[derive(Debug, PartialEq, Clone)]
@@ -20,11 +22,9 @@ pub enum TabAction {
 /// Postconditions: Agent results are hidden, history and text buffers are cleared, and any running agent is flagged for cancellation.
 pub fn clear_agent_session_state(app: &mut FastMdApp) {
     app.show_agent_results = false;
-    app.agent_history = None;
-    app.agent_response.clear();
-    app.agent_thinking.clear();
-    if let Some(flag) = &app.agent_cancel_flag {
-        flag.store(true, std::sync::atomic::Ordering::SeqCst);
+    app.agent.clear_history();
+    if app.agent.state().running {
+        app.agent.cancel();
     }
 }
 
@@ -90,8 +90,8 @@ fn render_agent_session(ui: &mut egui::Ui, app: &mut FastMdApp) {
     ui.separator();
 
     ui.horizontal(|ui| {
-        ui.label(RichText::new(format!("Status: {}", app.agent_status)).strong());
-        if app.agent_running {
+        ui.label(RichText::new(format!("Status: {}", app.agent.state().status)).strong());
+        if app.agent.state().running {
             ui.spinner();
         }
     });
@@ -101,10 +101,10 @@ fn render_agent_session(ui: &mut egui::Ui, app: &mut FastMdApp) {
         .id_source("agent_thinking_scroll")
         .stick_to_bottom(true)
         .show(ui, |ui| {
-            if !app.agent_thinking.is_empty() {
+            if !app.agent.state().thinking.is_empty() {
                 ui.collapsing("Thinking Process", |ui| {
                     ui.label(
-                        egui::RichText::new(&app.agent_thinking)
+                        egui::RichText::new(&app.agent.state().thinking)
                             .italics()
                             .color(egui::Color32::from_rgb(160, 160, 160)),
                     );
@@ -112,11 +112,15 @@ fn render_agent_session(ui: &mut egui::Ui, app: &mut FastMdApp) {
                 ui.add_space(8.0);
             }
 
-            if !app.agent_response.is_empty() {
+            if !app.agent.state().response.is_empty() {
                 ui.heading("Response");
                 ui.separator();
-                render_markdown(ui, &app.agent_response, &mut app.agent_scroll_to_id);
-                if app.agent_running {
+                render_markdown(
+                    ui,
+                    &app.agent.state().response,
+                    &mut app.agent.state_mut().scroll_to_id,
+                );
+                if app.agent.state().running {
                     ui.scroll_to_cursor(Some(egui::Align::BOTTOM));
                 }
             }
@@ -274,8 +278,8 @@ mod tests {
     use super::*;
     use crate::ui::generate_format_prompt;
     use std::path::PathBuf;
-    use std::sync::Arc;
     use std::sync::atomic::{AtomicBool, Ordering};
+    use std::sync::Arc;
 
     fn create_test_app() -> FastMdApp {
         FastMdApp::empty_state()
@@ -371,22 +375,26 @@ mod tests {
 
     #[test]
     fn test_clear_agent_session_state() {
-        let mut app = create_test_app();
-        let cancel_flag = Arc::new(AtomicBool::new(false));
+        use std::sync::atomic::AtomicBool;
+        use std::sync::Arc;
 
+        let mut app = create_test_app();
+
+        // Setup agent state via manager
+        app.agent.state_mut().history =
+            Some(vec![serde_json::json!({"role": "user", "content": "hi"})]);
+        app.agent.set_response("response text".to_string());
+        app.agent.set_thinking("thinking process".to_string());
+        app.agent.state_mut().running = true;
         app.show_agent_results = true;
-        app.agent_history = Some(vec![serde_json::json!({"role": "user", "content": "hi"})]);
-        app.agent_response = "response text".to_string();
-        app.agent_thinking = "thinking process".to_string();
-        app.agent_cancel_flag = Some(cancel_flag.clone());
 
         clear_agent_session_state(&mut app);
 
         assert!(!app.show_agent_results);
-        assert!(app.agent_history.is_none());
-        assert!(app.agent_response.is_empty());
-        assert!(app.agent_thinking.is_empty());
-        assert!(cancel_flag.load(Ordering::SeqCst));
+        assert!(app.agent.state().history.is_none());
+        assert!(app.agent.state().response.is_empty());
+        assert!(app.agent.state().thinking.is_empty());
+        assert!(!app.agent.state().running); // cancel() sets running false
     }
 
     #[test]
@@ -419,10 +427,11 @@ mod tests {
 
         // Mode 3: Agent results state
         app.show_agent_results = true;
-        app.agent_running = true;
-        app.agent_status = "Thinking...".to_string();
-        app.agent_thinking = "Reasoning step 1".to_string();
-        app.agent_response = "Final agent summary answer".to_string();
+        app.agent.set_running(true);
+        app.agent.set_status("Thinking...".to_string());
+        app.agent.set_thinking("Reasoning step 1".to_string());
+        app.agent
+            .set_response("Final agent summary answer".to_string());
 
         let _ = ctx.run(Default::default(), |ctx| {
             show_center_panel(&mut app, ctx);
