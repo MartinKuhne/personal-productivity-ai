@@ -2,6 +2,9 @@ use std::path::{Path, PathBuf};
 
 use std::collections::HashMap;
 
+pub mod virtual_path;
+pub use virtual_path::{VirtualPath, VirtualPathError};
+
 #[derive(serde::Serialize, serde::Deserialize, Clone)]
 pub struct JmapClient {
     pub url: String,
@@ -34,7 +37,7 @@ impl std::fmt::Debug for CalDavClient {
     }
 }
 
-#[derive(serde::Serialize, serde::Deserialize, Clone)]
+#[derive(serde::Serialize, serde::Deserialize, Clone, PartialEq)]
 pub struct LlmConfig {
     /// The literal model ID to pass to the API (e.g. `google/gemini-2.5-flash:free`).
     pub model: String,
@@ -128,6 +131,26 @@ impl ContentLibrary {
             label.pop();
         }
         Some(label)
+    }
+
+    /// Check if the given absolute path is inside this library's root folder.
+    pub fn contains_path(&self, path: &Path) -> bool {
+        path.starts_with(&self.root_folder)
+    }
+
+    /// Resolve a sub-path relative to this library's root folder.
+    pub fn resolve(&self, sub: &Path) -> PathBuf {
+        PathBuf::from(&self.root_folder).join(sub)
+    }
+
+    /// Returns `true` if this library allows writes.
+    pub fn is_writable(&self) -> bool {
+        !self.readonly
+    }
+
+    /// Returns the root folder as a `PathBuf`.
+    pub fn root_path(&self) -> PathBuf {
+        PathBuf::from(&self.root_folder)
     }
 }
 
@@ -476,11 +499,9 @@ mod tests {
             },
         );
         let warnings = config.validate();
-        assert!(
-            warnings
-                .iter()
-                .any(|w| w.contains("No model configured with 'chat'"))
-        );
+        assert!(warnings
+            .iter()
+            .any(|w| w.contains("No model configured with 'chat'")));
     }
 
     #[test]
@@ -568,6 +589,81 @@ user_name: "TestUser"
     }
 
     #[test]
+    fn test_content_library_contains_path_inside() {
+        let lib = ContentLibrary {
+            root_folder: "C:/lib/one".to_string(),
+            name: "One".to_string(),
+            kind: "text".to_string(),
+            readonly: true,
+            priority: 0,
+        };
+        assert!(lib.contains_path(Path::new("C:/lib/one/sub/file.md")));
+        assert!(lib.contains_path(Path::new("C:/lib/one")));
+    }
+
+    #[test]
+    fn test_content_library_contains_path_outside() {
+        let lib = ContentLibrary {
+            root_folder: "C:/lib/one".to_string(),
+            name: "One".to_string(),
+            kind: "text".to_string(),
+            readonly: true,
+            priority: 0,
+        };
+        assert!(!lib.contains_path(Path::new("C:/lib/two/file.md")));
+        assert!(!lib.contains_path(Path::new("D:/other/path.md")));
+    }
+
+    #[test]
+    fn test_content_library_resolve() {
+        let lib = ContentLibrary {
+            root_folder: "C:/base".to_string(),
+            name: "Base".to_string(),
+            kind: "text".to_string(),
+            readonly: false,
+            priority: 0,
+        };
+        assert_eq!(
+            lib.resolve(Path::new("sub/file.md")),
+            PathBuf::from("C:/base/sub/file.md")
+        );
+        assert_eq!(lib.resolve(Path::new("")), PathBuf::from("C:/base"));
+    }
+
+    #[test]
+    fn test_content_library_is_writable() {
+        let writable = ContentLibrary {
+            root_folder: "C:/w".to_string(),
+            name: "W".to_string(),
+            kind: "text".to_string(),
+            readonly: false,
+            priority: 0,
+        };
+        assert!(writable.is_writable());
+
+        let readonly = ContentLibrary {
+            root_folder: "C:/r".to_string(),
+            name: "R".to_string(),
+            kind: "text".to_string(),
+            readonly: true,
+            priority: 0,
+        };
+        assert!(!readonly.is_writable());
+    }
+
+    #[test]
+    fn test_content_library_root_path() {
+        let lib = ContentLibrary {
+            root_folder: "C:/my/library".to_string(),
+            name: "Test".to_string(),
+            kind: "text".to_string(),
+            readonly: false,
+            priority: 0,
+        };
+        assert_eq!(lib.root_path(), PathBuf::from("C:/my/library"));
+    }
+
+    #[test]
     fn test_content_library_display_label_for_member() {
         let lib = ContentLibrary {
             root_folder: "C:/my/test/dir".to_string(),
@@ -585,10 +681,9 @@ user_name: "TestUser"
             lib.display_label_for(Path::new("C:/my/test/dir")),
             Some("TestLib".to_string())
         );
-        assert!(
-            lib.display_label_for(Path::new("C:/other/path.md"))
-                .is_none()
-        );
+        assert!(lib
+            .display_label_for(Path::new("C:/other/path.md"))
+            .is_none());
     }
 
     #[test]

@@ -139,6 +139,11 @@ pub struct BusReader<T> {
 }
 
 impl<T> BusReader<T> {
+    /// Create a BusReader from an existing receiver (for testing).
+    pub fn new(rx: Receiver<T>) -> Self {
+        Self { rx }
+    }
+
     /// Try to receive an event without blocking. Returns immediately
     /// with `Err(TryRecvError::Empty)` if no event is available.
     pub fn try_recv(&self) -> Result<T, std::sync::mpsc::TryRecvError> {

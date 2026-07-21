@@ -11,8 +11,8 @@ pub fn show_batch_modal(
     config: &mut BatchDialogConfig,
 ) -> Option<BatchDialogResult> {
     let mut result = None;
-    let is_running = app.batch_handle.is_some();
-    let mut dialog_open = app.batch_dialog_open;
+    let is_running = app.dialogs.batch_handle.is_some();
+    let mut dialog_open = app.dialogs.batch_dialog_open;
 
     // Refresh prompts from the tag manager on every dialog open so
     // the list stays in sync with the tag index (prompt discovery no
@@ -39,12 +39,12 @@ pub fn show_batch_modal(
             }
         });
 
-    app.batch_dialog_open = dialog_open;
+    app.dialogs.batch_dialog_open = dialog_open;
 
     // Handle dialog close via window X button
     if !dialog_open && result.is_none() {
         // If running, cancel before closing
-        if let Some(handle) = &app.batch_handle {
+        if let Some(handle) = &app.dialogs.batch_handle {
             handle.cancel();
         }
         result = Some(BatchDialogResult::Cancel);
@@ -186,6 +186,7 @@ fn show_running_view(
     result: &mut Option<BatchDialogResult>,
 ) {
     let is_finished = app
+        .dialogs
         .batch_handle
         .as_ref()
         .map(|h| h.thread.is_finished())
@@ -196,7 +197,7 @@ fn show_running_view(
 
     if is_finished {
         ui.label("Batch processing completed.");
-        if let Some(cancel_flag) = &app.batch_cancel_flag {
+        if let Some(cancel_flag) = &app.dialogs.batch_cancel_flag {
             if cancel_flag.load(std::sync::atomic::Ordering::SeqCst) {
                 ui.colored_label(egui::Color32::YELLOW, "Batch was cancelled by user.");
             }
@@ -217,7 +218,7 @@ fn show_running_view(
                 }
             } else {
                 if ui.button("Cancel").clicked() {
-                    if let Some(handle) = &app.batch_handle {
+                    if let Some(handle) = &app.dialogs.batch_handle {
                         handle.cancel();
                     }
                 }
