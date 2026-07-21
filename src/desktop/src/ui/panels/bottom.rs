@@ -12,11 +12,6 @@ pub enum CommandIntent {
 }
 
 /// Parses the user prompt to determine the intended command.
-/// Inputs: `prompt` (the trimmed string from the user).
-/// Outputs: Returns a `CommandIntent`.
-/// Purity: Pure.
-/// Preconditions: `prompt` is a string slice.
-/// Postconditions: Returns `ShowModels`, `ShowDeprecatedModelMessage`, `RunAgent` (if not empty), or `Empty`.
 pub fn parse_command_intent(prompt: &str) -> CommandIntent {
     let trimmed = prompt.trim();
     if trimmed.starts_with("/models") {
@@ -31,11 +26,6 @@ pub fn parse_command_intent(prompt: &str) -> CommandIntent {
 }
 
 /// Computes the prompt prefix based on the selected directory and available content libraries.
-/// Inputs: `selected_dir` (optional path), `content_libraries` (list of content libraries).
-/// Outputs: Returns a string representing the prompt prefix.
-/// Purity: Pure.
-/// Preconditions: `selected_dir` should be a valid path if Some.
-/// Postconditions: Returns `>` if no dir is selected, or if the relative path is empty, otherwise `relative/path >`.
 pub fn compute_prompt_prefix(
     selected_dir: Option<&std::path::Path>,
     content_libraries: &[crate::config::ContentLibrary],
@@ -53,19 +43,6 @@ pub fn compute_prompt_prefix(
     }
 }
 
-/// Generates the prompt for formatting the current document into correct markdown.
-/// Inputs: `current_date` (the current date string in RFC3339 format).
-/// Outputs: Returns a string containing the prompt.
-/// Purity: Pure.
-/// Preconditions: `current_date` must be a valid string.
-/// Postconditions: Returns a formatted string containing the YAML template.
-
-/// Formats the available models into a human-readable string.
-/// Inputs: `models` (hash map of available models).
-/// Outputs: Returns a string with the models list.
-/// Purity: Pure.
-/// Preconditions: `models` hash map may be empty or contain `LlmConfig`.
-/// Postconditions: Returns a formatted string listing models deterministically sorted by name.
 pub fn format_models_list(
     models: &std::collections::HashMap<String, crate::config::LlmConfig>,
 ) -> String {
@@ -95,9 +72,11 @@ pub fn show_bottom_panel(app: &mut FastMdApp, ctx: &egui::Context) {
         .min_height(32.0)
         .show(ctx, |ui| {
             ui.horizontal(|ui| {
-                let prompt_prefix = compute_prompt_prefix(app.selected_dir.as_deref(), &app.content_libraries);
+                let prompt_prefix = compute_prompt_prefix(
+                    app.selected_dir.as_deref(),
+                    &app.content_libraries,
+                );
                 ui.label(RichText::new(prompt_prefix).monospace().strong());
-
 
                 let text_width = ui.available_width() - 130.0;
                 let response = ui.add_sized(
@@ -125,16 +104,12 @@ pub fn show_bottom_panel(app: &mut FastMdApp, ctx: &egui::Context) {
                         }
                     });
 
-                    if app.agent_running
+                    if app.agent.state().running
                         && ui
                             .button(RichText::new("⏹ Stop").color(egui::Color32::RED))
                             .clicked()
                     {
-                        if let Some(flag) = &app.agent_cancel_flag {
-                            flag.store(true, std::sync::atomic::Ordering::SeqCst);
-                        }
-                        app.agent_running = false;
-                        app.agent_status = "Aborted by user.".to_string();
+                        app.agent.cancel();
                     }
                 });
 
@@ -144,50 +119,27 @@ pub fn show_bottom_panel(app: &mut FastMdApp, ctx: &egui::Context) {
 
                     match parse_command_intent(&prompt) {
                         CommandIntent::ShowModels => {
-                            app.agent_status = "Done".to_string();
-                            app.agent_response = format_models_list(&app.config.models);
+                            app.agent.set_status("Done".to_string());
+                            app.agent.set_response(format_models_list(&app.config.models));
                             app.show_agent_results = true;
                         }
                         CommandIntent::ShowDeprecatedModelMessage => {
-                            app.agent_status = "Error".to_string();
-                            app.agent_response = "The /model command is deprecated. Models are now automatically selected based on use case and cost.".to_string();
+                            app.agent.set_status("Error".to_string());
+                            app.agent.set_response(
+                                "The /model command is deprecated. Models are now automatically selected based on use case and cost.".to_string(),
+                            );
                             app.show_agent_results = true;
                         }
                         CommandIntent::RunAgent(agent_prompt) => {
-                            app.agent_status = "Initializing agent...".to_string();
-                            app.agent_thinking.clear();
-                            if app.agent_history.is_none() || !app.show_agent_results {
-                                app.agent_response.clear();
-                                app.agent_history = None;
-                            } else {
-                                app.agent_response.push_str(&format!("> **User:** {}\n\n", agent_prompt));
-                            }
-                            app.show_agent_results = true;
-                            app.agent_running = true;
-
-                            let cancel_flag =
-                                std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
-                            app.agent_cancel_flag = Some(cancel_flag.clone());
-                            let tx_gui_agent = app.tx.clone();
-                            let active_file_agent = app.selected_file.clone();
-                            let active_dir_agent = app.selected_dir.clone();
-                            let history = app.agent_history.clone();
-                            let current_response = app.agent_response.clone();
-                            let selected_files_agent = app.selected_files.clone();
-                            let file_event_bus = app.file_event_bus.clone();
-
-                            crate::agent::run_agent(
-                                app.config.clone(),
-                                tx_gui_agent,
-                                active_file_agent,
-                                active_dir_agent,
-                                selected_files_agent,
+                            app.agent.start_session(
+                                app.tx.clone(),
                                 agent_prompt,
-                                cancel_flag,
-                                history,
-                                current_response,
-                                file_event_bus,
+                                app.selected_file.clone(),
+                                app.selected_dir.clone(),
+                                app.selected_files.clone(),
+                                app.file_event_bus.clone(),
                             );
+                            app.show_agent_results = true;
                         }
                         CommandIntent::Empty => {}
                     }
@@ -318,10 +270,9 @@ mod tests {
 #[cfg(test)]
 mod ui_tests {
     use super::*;
-    use std::sync::Arc;
 
     fn create_test_app() -> FastMdApp {
-        FastMdApp::empty_state()
+        FastMdApp::empty_state(crate::config::AppConfig::default())
     }
 
     #[test]
@@ -339,13 +290,12 @@ mod ui_tests {
     fn test_show_bottom_panel_stop_agent() {
         let ctx = egui::Context::default();
         let mut app = create_test_app();
-        app.agent_running = true;
-        let cancel_flag = Arc::new(std::sync::atomic::AtomicBool::new(false));
-        app.agent_cancel_flag = Some(cancel_flag.clone());
+        app.agent.state_mut().running = true;
 
         let _ = ctx.run(egui::RawInput::default(), |ctx| {
             show_bottom_panel(&mut app, ctx);
         });
-        assert!(app.agent_running);
+
+        assert!(app.agent.state().running);
     }
 }
