@@ -1,8 +1,8 @@
-use std::collections::VecDeque;
-use std::sync::{Arc, Mutex};
 use crate::background::models::{BackgroundLogEntry, LogCategory};
+use std::collections::VecDeque;
 use std::fs::File;
 use std::io::Write;
+use std::sync::{Arc, Mutex};
 
 pub const MAX_LOG_ENTRIES: usize = 10_000;
 
@@ -39,18 +39,23 @@ impl BackgroundProcessManager {
     pub fn get_logs(&self) -> &VecDeque<BackgroundLogEntry> {
         &self.logs
     }
-    
+
     pub fn clear_logs(&mut self) {
         self.logs.clear();
     }
-    
+
     pub fn save_logs(&self, path: &std::path::Path) -> std::io::Result<()> {
         if let Some(parent) = path.parent() {
             let _ = std::fs::create_dir_all(parent);
         }
         let mut file = File::create(path)?;
         for log in &self.logs {
-            let line = format!("[{}] [{}] {}\n", log.timestamp.format("%Y-%m-%d %H:%M:%S%.3f"), log.category, log.message);
+            let line = format!(
+                "[{}] [{}] {}\n",
+                log.timestamp.format("%Y-%m-%d %H:%M:%S%.3f"),
+                log.category,
+                log.message
+            );
             let _ = file.write_all(line.as_bytes());
         }
         Ok(())
@@ -114,8 +119,14 @@ mod tests {
     #[test]
     fn test_filter_category_none_shows_all() {
         let mut mgr = BackgroundProcessManager::new();
-        mgr.push_log(BackgroundLogEntry::new(LogCategory::Indexer, "idx".to_string()));
-        mgr.push_log(BackgroundLogEntry::new(LogCategory::Watcher, "wtch".to_string()));
+        mgr.push_log(BackgroundLogEntry::new(
+            LogCategory::Indexer,
+            "idx".to_string(),
+        ));
+        mgr.push_log(BackgroundLogEntry::new(
+            LogCategory::Watcher,
+            "wtch".to_string(),
+        ));
 
         mgr.filter_category = None;
         // With no filter, all pass through
@@ -130,10 +141,18 @@ mod tests {
         mgr.push_log(make_entry("cherry date"));
 
         mgr.search_text = "apple".to_string();
-        let filtered: Vec<_> = mgr.get_logs().iter().filter(|l| {
-            if mgr.search_text.is_empty() { return true; }
-            l.message.to_lowercase().contains(&mgr.search_text.to_lowercase())
-        }).collect();
+        let filtered: Vec<_> = mgr
+            .get_logs()
+            .iter()
+            .filter(|l| {
+                if mgr.search_text.is_empty() {
+                    return true;
+                }
+                l.message
+                    .to_lowercase()
+                    .contains(&mgr.search_text.to_lowercase())
+            })
+            .collect();
         assert_eq!(filtered.len(), 1);
         assert_eq!(filtered[0].message, "apple banana");
     }

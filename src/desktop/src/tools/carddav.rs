@@ -47,7 +47,11 @@ async fn get_all_addressbooks(
         }
     }
 
-    let mut principal_opt = client.discover_current_user_principal().await.ok().flatten();
+    let mut principal_opt = client
+        .discover_current_user_principal()
+        .await
+        .ok()
+        .flatten();
 
     if principal_opt.is_none() {
         let base_trimmed = base_url.trim_end_matches('/');
@@ -59,8 +63,7 @@ async fn get_all_addressbooks(
         }
     }
 
-    let principal =
-        principal_opt.ok_or_else(|| anyhow::anyhow!("No principal found"))?;
+    let principal = principal_opt.ok_or_else(|| anyhow::anyhow!("No principal found"))?;
     let homes = client.discover_addressbook_home_set(&principal).await?;
     let home = homes
         .first()
@@ -141,17 +144,15 @@ fn json_to_vcard(json_str: &str, uid_override: Option<&str>) -> String {
     let parsed: serde_json::Value =
         serde_json::from_str(json_str).unwrap_or_else(|_| serde_json::json!({}));
 
-    let uid = uid_override
-        .map(|s| s.to_string())
-        .unwrap_or_else(|| {
-            format!(
-                "{}",
-                std::time::SystemTime::now()
-                    .duration_since(std::time::UNIX_EPOCH)
-                    .unwrap()
-                    .as_millis()
-            )
-        });
+    let uid = uid_override.map(|s| s.to_string()).unwrap_or_else(|| {
+        format!(
+            "{}",
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_millis()
+        )
+    });
 
     let fn_name = escape_vcard_text(
         parsed
@@ -161,7 +162,10 @@ fn json_to_vcard(json_str: &str, uid_override: Option<&str>) -> String {
     );
     let email = parsed.get("email").and_then(|v| v.as_str());
     let tel = parsed.get("tel").and_then(|v| v.as_str());
-    let org = parsed.get("org").and_then(|v| v.as_str()).map(escape_vcard_text);
+    let org = parsed
+        .get("org")
+        .and_then(|v| v.as_str())
+        .map(escape_vcard_text);
 
     let mut vcard = String::new();
     vcard.push_str("BEGIN:VCARD\r\n");
@@ -298,7 +302,11 @@ pub fn tool_add_contact(
             if !resp.status().is_success() {
                 let status = resp.status();
                 let body = String::from_utf8_lossy(&resp.into_body()).to_string();
-                return Err(anyhow::anyhow!("Failed to PUT contact: {} - {}", status, body));
+                return Err(anyhow::anyhow!(
+                    "Failed to PUT contact: {} - {}",
+                    status,
+                    body
+                ));
             }
             anyhow::Result::<String>::Ok(format!("Created at {}", path))
         });
@@ -330,7 +338,7 @@ mod tests {
     fn test_parse_vcard_basic() {
         let data = "BEGIN:VCARD\r\nVERSION:3.0\r\nFN:Alice Smith\r\nEMAIL:alice@example.com\r\nTEL:+1234567890\r\nORG:Acme Corp\r\nEND:VCARD";
         let contact = parse_vcard("client1", "/contacts/alice.vcf", data);
-        
+
         assert_eq!(contact.client, "client1");
         assert_eq!(contact.href, "/contacts/alice.vcf");
         assert_eq!(contact.fn_name, Some("Alice Smith".to_string()));
@@ -345,7 +353,7 @@ mod tests {
         // EMAIL;TYPE=INTERNET and TEL;TYPE=CELL should still parse
         let data = "BEGIN:VCARD\r\nVERSION:3.0\r\nFN:Bob\r\nEMAIL;TYPE=INTERNET,WORK:bob@example.com\r\nTEL;TYPE=CELL,VOICE:+9876543210\r\nEND:VCARD";
         let contact = parse_vcard("c", "/b.vcf", data);
-        
+
         assert_eq!(contact.fn_name, Some("Bob".to_string()));
         assert_eq!(contact.email, Some("bob@example.com".to_string()));
         assert_eq!(contact.tel, Some("+9876543210".to_string()));
@@ -356,9 +364,12 @@ mod tests {
         // vCard spec allows line folding with leading space/tab
         let data = "BEGIN:VCARD\r\nVERSION:3.0\r\nFN:Very Long Name\r\n That Is Folded\r\nEMAIL:long@example.com\r\nEND:VCARD";
         let contact = parse_vcard("c", "/h", data);
-        
+
         // The unfold logic removes leading whitespace and concatenates
-        assert_eq!(contact.fn_name, Some("Very Long NameThat Is Folded".to_string()));
+        assert_eq!(
+            contact.fn_name,
+            Some("Very Long NameThat Is Folded".to_string())
+        );
         assert_eq!(contact.email, Some("long@example.com".to_string()));
     }
 
@@ -367,7 +378,7 @@ mod tests {
         // Only FN present
         let data = "BEGIN:VCARD\r\nVERSION:3.0\r\nFN:No Contact Info\r\nEND:VCARD";
         let contact = parse_vcard("c", "/h", data);
-        
+
         assert_eq!(contact.fn_name, Some("No Contact Info".to_string()));
         assert_eq!(contact.email, None);
         assert_eq!(contact.tel, None);
@@ -378,7 +389,7 @@ mod tests {
     fn test_parse_vcard_empty_values() {
         let data = "BEGIN:VCARD\r\nVERSION:3.0\r\nFN:\r\nEMAIL:\r\nEND:VCARD";
         let contact = parse_vcard("c", "/h", data);
-        
+
         assert_eq!(contact.fn_name, Some("".to_string()));
         assert_eq!(contact.email, Some("".to_string()));
     }
@@ -388,15 +399,16 @@ mod tests {
         // Lines without colon should be skipped
         let data = "BEGIN:VCARD\r\nVERSION:3.0\r\nNOCOLON\r\nFN:Valid Name\r\nEND:VCARD";
         let contact = parse_vcard("c", "/h", data);
-        
+
         assert_eq!(contact.fn_name, Some("Valid Name".to_string()));
     }
 
     #[test]
     fn test_parse_vcard_with_whitespace_only_lines() {
-        let data = "BEGIN:VCARD\r\nVERSION:3.0\r\nFN:Test\r\n \r\n\t\r\nEMAIL:test@test.com\r\nEND:VCARD";
+        let data =
+            "BEGIN:VCARD\r\nVERSION:3.0\r\nFN:Test\r\n \r\n\t\r\nEMAIL:test@test.com\r\nEND:VCARD";
         let contact = parse_vcard("c", "/h", data);
-        
+
         assert_eq!(contact.fn_name, Some("Test".to_string()));
         assert_eq!(contact.email, Some("test@test.com".to_string()));
     }
@@ -449,9 +461,10 @@ mod tests {
 
     #[test]
     fn test_json_to_vcard_basic() {
-        let input = r#"{"fn":"John Doe","email":"john@example.com","tel":"+1234567890","org":"Acme"}"#;
+        let input =
+            r#"{"fn":"John Doe","email":"john@example.com","tel":"+1234567890","org":"Acme"}"#;
         let vcard = json_to_vcard(input, None);
-        
+
         assert!(vcard.starts_with("BEGIN:VCARD"));
         assert!(vcard.contains("VERSION:3.0"));
         assert!(vcard.contains("FN:John Doe"));
@@ -466,7 +479,7 @@ mod tests {
         // Only FN required, rest optional
         let input = r#"{"fn":"Anonymous"}"#;
         let vcard = json_to_vcard(input, None);
-        
+
         assert!(vcard.contains("BEGIN:VCARD"));
         assert!(vcard.contains("VERSION:3.0"));
         assert!(vcard.contains("FN:Anonymous"));
@@ -481,7 +494,7 @@ mod tests {
     fn test_json_to_vcard_missing_fn_defaults_to_unknown() {
         let input = r#"{"email":"test@example.com"}"#;
         let vcard = json_to_vcard(input, None);
-        
+
         assert!(vcard.contains("FN:Unknown"));
     }
 
@@ -489,7 +502,7 @@ mod tests {
     fn test_json_to_vcard_invalid_json() {
         // Invalid JSON should use defaults
         let vcard = json_to_vcard("not json", None);
-        
+
         assert!(vcard.starts_with("BEGIN:VCARD"));
         assert!(vcard.contains("FN:Unknown")); // Default
     }
@@ -498,7 +511,7 @@ mod tests {
     fn test_json_to_vcard_with_uid_override() {
         let input = r#"{"fn":"Test"}"#;
         let vcard = json_to_vcard(input, Some("custom-uid-12345"));
-        
+
         assert!(vcard.contains("UID:custom-uid-12345"));
     }
 
@@ -506,7 +519,7 @@ mod tests {
     fn test_json_to_vcard_escapes_special_chars() {
         let input = r#"{"fn":"John; Doe","email":"test@example.com"}"#;
         let vcard = json_to_vcard(input, None);
-        
+
         assert!(vcard.contains("FN:John\\; Doe"));
     }
 
@@ -515,12 +528,16 @@ mod tests {
         // Test that json_to_vcard generates a UID field
         let input = r#"{"fn":"Test"}"#;
         let vcard = json_to_vcard(input, None);
-        
+
         // UID should be present and contain only digits (timestamp-based)
         let uid_line = vcard.lines().find(|l| l.starts_with("UID:"));
         assert!(uid_line.is_some(), "UID field should be present");
         let uid = uid_line.unwrap().trim_start_matches("UID:");
-        assert!(uid.chars().all(|c| c.is_ascii_digit()), "UID should be numeric: {}", uid);
+        assert!(
+            uid.chars().all(|c| c.is_ascii_digit()),
+            "UID should be numeric: {}",
+            uid
+        );
     }
 
     // =====================================================================
@@ -529,13 +546,13 @@ mod tests {
     // Full integration tests with mock servers require async network handling
     // which is better suited for integration tests rather than unit tests.
     // =====================================================================
-    
+
     #[test]
     fn test_tool_search_contact_handles_empty_clients_gracefully() {
         // When caldav_clients is empty, the function should handle it gracefully
         let config = crate::config::AppConfig::default();
         let res = tool_search_contact(&config, "test");
-        
+
         // Should handle empty config without panicking
         // Result may be Ok with empty response or Err depending on implementation
         assert!(res.is_ok() || res.is_err());

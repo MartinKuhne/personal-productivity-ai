@@ -3,11 +3,15 @@ use crate::utils::markdown::parse_front_matter;
 use serde_yaml::{Mapping, Value};
 use std::path::Path;
 
-pub fn tool_read_yaml_header(path_str: &str) -> Result<crate::tools::dtos::ReadYamlHeaderResponse, String> {
+pub fn tool_read_yaml_header(
+    path_str: &str,
+) -> Result<crate::tools::dtos::ReadYamlHeaderResponse, String> {
     match std::fs::read_to_string(path_str) {
         Ok(content) => {
             if let Some((yaml_val, _)) = parse_front_matter(&content) {
-                Ok(crate::tools::dtos::ReadYamlHeaderResponse { content: format!("{:#?}", yaml_val) })
+                Ok(crate::tools::dtos::ReadYamlHeaderResponse {
+                    content: format!("{:#?}", yaml_val),
+                })
             } else {
                 tracing::warn!(name = "tool.yaml.read_no_header", path = %path_str, "No YAML header found in this file. Operator should check if the file is expected to have one.");
                 Err("No YAML header found in this file.".to_string())
@@ -39,17 +43,26 @@ pub fn tool_write_yaml_header(
 
     let mut map = Mapping::new();
     if let Some(t) = title {
-        map.insert(Value::String("title".to_string()), Value::String(t.to_string()));
+        map.insert(
+            Value::String("title".to_string()),
+            Value::String(t.to_string()),
+        );
     }
     if let Some(s) = summary {
-        map.insert(Value::String("summary".to_string()), Value::String(s.to_string()));
+        map.insert(
+            Value::String("summary".to_string()),
+            Value::String(s.to_string()),
+        );
     }
     if let Some(tg) = tags {
         let seq: Vec<Value> = tg.into_iter().map(Value::String).collect();
         map.insert(Value::String("tags".to_string()), Value::Sequence(seq));
     }
     if let Some(hd) = header_date {
-        map.insert(Value::String("header-date".to_string()), Value::String(hd.to_string()));
+        map.insert(
+            Value::String("header-date".to_string()),
+            Value::String(hd.to_string()),
+        );
     }
 
     let yaml_val = Value::Mapping(map);
@@ -75,7 +88,9 @@ pub fn tool_write_yaml_header(
                     } else {
                         producer.publish_discovered(path);
                     }
-                    Ok(crate::tools::dtos::WriteYamlHeaderResponse { result: "YAML header written successfully.".to_string() })
+                    Ok(crate::tools::dtos::WriteYamlHeaderResponse {
+                        result: "YAML header written successfully.".to_string(),
+                    })
                 }
                 Err(e) => {
                     tracing::error!(name = "tool.yaml.write_failed", error = %e, path = %path_str, "Failed to write file after YAML header update. Likely cause: disk full or permission denied.");
@@ -101,8 +116,7 @@ mod tests {
     /// need to consume the events — they only care about the
     /// success/failure of the underlying file operation.
     fn noop_producer() -> FileEventProducer<'static> {
-        let bus: &'static Bus<crate::file_events::FileEvent> =
-            Box::leak(Box::new(Bus::new()));
+        let bus: &'static Bus<crate::file_events::FileEvent> = Box::leak(Box::new(Bus::new()));
         FileEventProducer::new(bus)
     }
 
@@ -111,8 +125,10 @@ mod tests {
         let dir = tempdir().unwrap();
         let file_path = dir.path().join("test.md");
         fs::write(&file_path, "---\ntitle: Test\ntags: [tag1]\n---\nContent").unwrap();
-        
-        let result = tool_read_yaml_header(file_path.to_str().unwrap()).unwrap().content;
+
+        let result = tool_read_yaml_header(file_path.to_str().unwrap())
+            .unwrap()
+            .content;
         assert!(result.contains("title"));
         assert!(result.contains("Test"));
     }
@@ -122,7 +138,7 @@ mod tests {
         let dir = tempdir().unwrap();
         let file_path = dir.path().join("test.md");
         fs::write(&file_path, "No header here").unwrap();
-        
+
         let result = tool_read_yaml_header(file_path.to_str().unwrap());
         assert_eq!(result.unwrap_err(), "No YAML header found in this file.");
     }
@@ -140,7 +156,9 @@ mod tests {
             Some(vec!["tag1".to_string(), "tag2".to_string()]),
             Some("2024-01-01T00:00:00Z"),
             &producer,
-        ).unwrap().result;
+        )
+        .unwrap()
+        .result;
 
         assert_eq!(result, "YAML header written successfully.");
 
@@ -167,7 +185,9 @@ mod tests {
             None,
             None,
             &producer,
-        ).unwrap().result;
+        )
+        .unwrap()
+        .result;
 
         assert_eq!(result, "YAML header written successfully.");
 
@@ -190,7 +210,9 @@ mod tests {
             None,
             None,
             &producer,
-        ).unwrap().result;
+        )
+        .unwrap()
+        .result;
 
         assert_eq!(result, "YAML header written successfully.");
         assert!(file_path.exists());

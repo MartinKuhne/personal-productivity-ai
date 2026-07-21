@@ -56,7 +56,9 @@ pub fn parse_usage_block(usage: &serde_json::Value) -> Option<TokenUsageInfo> {
         prompt_tokens: prompt_tokens.unwrap_or(0),
         completion_tokens: completion_tokens.unwrap_or(0),
         total_tokens: total_tokens.unwrap_or_else(|| {
-            prompt_tokens.unwrap_or(0).saturating_add(completion_tokens.unwrap_or(0))
+            prompt_tokens
+                .unwrap_or(0)
+                .saturating_add(completion_tokens.unwrap_or(0))
         }),
         cached_tokens,
         reasoning_tokens,
@@ -78,7 +80,10 @@ fn split_thinking_and_content(text: &str) -> (String, String) {
 
 pub fn get_base_system_prompt(config: &crate::config::AppConfig) -> String {
     let date_str = chrono::Local::now().format("%Y-%m-%d %H:%M:%S").to_string();
-    let mut system_prompt = format!("You are FastMD Agent, an autonomous assistant helper for managing the Markdown workspace. You can read, create, search, and edit files, fetch web pages, and manage tags using your tools. Help the user achieve their goal by using tools step by step. Respond to the user using Markdown format.\n\nCRITICAL: Avoid context bloat! Do NOT use the `read_file` tool on multiple files in a single step. Always prefer `read_yaml_header` to survey documents, or `grep` to extract specific information without reading entire files.\n\nToday's date and time is: {}", date_str);
+    let mut system_prompt = format!(
+        "You are FastMD Agent, an autonomous assistant helper for managing the Markdown workspace. You can read, create, search, and edit files, fetch web pages, and manage tags using your tools. Help the user achieve their goal by using tools step by step. Respond to the user using Markdown format.\n\nCRITICAL: Avoid context bloat! Do NOT use the `read_file` tool on multiple files in a single step. Always prefer `read_yaml_header` to survey documents, or `grep` to extract specific information without reading entire files.\n\nToday's date and time is: {}",
+        date_str
+    );
 
     if let Some(name) = &config.user_name {
         system_prompt.push_str(&format!("\nUser's Name: {}", name));
@@ -97,7 +102,9 @@ pub fn get_base_system_prompt(config: &crate::config::AppConfig) -> String {
         {
             let today = chrono::Local::now().naive_local().date();
             let mut age = today.year() - parsed_date.year();
-            if today.month() < parsed_date.month() || (today.month() == parsed_date.month() && today.day() < parsed_date.day()) {
+            if today.month() < parsed_date.month()
+                || (today.month() == parsed_date.month() && today.day() < parsed_date.day())
+            {
                 age -= 1;
             }
             age_str = Some(age.to_string());
@@ -139,7 +146,6 @@ pub fn run_agent(
     file_event_bus: Bus<FileEvent>,
 ) {
     std::thread::spawn(move || {
-
         let mut api_key = String::new();
         let mut api_url = String::new();
         let mut model_name = String::new();
@@ -177,10 +183,7 @@ pub fn run_agent(
 
         if let Some(active) = active_file {
             let rel = to_virtual(&active);
-            system_prompt.push_str(&format!(
-                " The user is currently viewing the file: {}",
-                rel
-            ));
+            system_prompt.push_str(&format!(" The user is currently viewing the file: {}", rel));
         } else if let Some(dir) = active_dir {
             let rel = to_virtual(&dir);
             system_prompt.push_str(&format!(
@@ -203,8 +206,7 @@ pub fn run_agent(
                 if let Ok(content) = std::fs::read_to_string(&user_md_path) {
                     system_prompt.push_str(&format!(
                         "\n\nUser Context (from {}):\n{}",
-                        lib.name,
-                        content
+                        lib.name, content
                     ));
                 }
             }
@@ -253,17 +255,20 @@ pub fn run_agent(
                 "tool_choice": "auto"
             });
 
-            let response = match agent.post(&format!(
-                "{}/chat/completions",
-                api_url.trim_matches('"').trim_end_matches('/')
-            ))
-            .set("Authorization", &format!("Bearer {}", api_key))
-            .set("Content-Type", "application/json")
-            .send_json(request_body)
+            let response = match agent
+                .post(&format!(
+                    "{}/chat/completions",
+                    api_url.trim_matches('"').trim_end_matches('/')
+                ))
+                .set("Authorization", &format!("Bearer {}", api_key))
+                .set("Content-Type", "application/json")
+                .send_json(request_body)
             {
                 Ok(resp) => resp,
                 Err(ureq::Error::Status(code, resp)) => {
-                    let body = resp.into_string().unwrap_or_else(|_| "[Could not read body]".to_string());
+                    let body = resp
+                        .into_string()
+                        .unwrap_or_else(|_| "[Could not read body]".to_string());
                     tracing::error!(
                         name = "agent.api.failed",
                         status = code,
@@ -389,8 +394,30 @@ pub fn run_agent(
                 let mut unsafe_calls = Vec::new();
 
                 for tool_call in tool_calls {
-                    let func_name = tool_call.get("function").and_then(|f| f.get("name")).and_then(|n| n.as_str()).unwrap_or("");
-                    let is_safe = matches!(func_name, "grep" | "read_tags" | "list_files_by_tag" | "list_files" | "read_file" | "read_file_lines" | "web_fetch" | "read_yaml_header" | "web_search" | "search_calendar" | "get_calendar" | "get_calendar_item" | "search_email" | "get_email_by_id" | "search_contact" | "get_contact");
+                    let func_name = tool_call
+                        .get("function")
+                        .and_then(|f| f.get("name"))
+                        .and_then(|n| n.as_str())
+                        .unwrap_or("");
+                    let is_safe = matches!(
+                        func_name,
+                        "grep"
+                            | "read_tags"
+                            | "list_files_by_tag"
+                            | "list_files"
+                            | "read_file"
+                            | "read_file_lines"
+                            | "web_fetch"
+                            | "read_yaml_header"
+                            | "web_search"
+                            | "search_calendar"
+                            | "get_calendar"
+                            | "get_calendar_item"
+                            | "search_email"
+                            | "get_email_by_id"
+                            | "search_contact"
+                            | "get_contact"
+                    );
                     if is_safe {
                         safe_calls.push(tool_call.clone());
                     } else {
@@ -398,7 +425,10 @@ pub fn run_agent(
                     }
                 }
 
-                let rt = tokio::runtime::Builder::new_multi_thread().enable_all().build().unwrap();
+                let rt = tokio::runtime::Builder::new_multi_thread()
+                    .enable_all()
+                    .build()
+                    .unwrap();
                 let config_arc = std::sync::Arc::new(config.clone());
                 let root_path_arc = std::sync::Arc::new(PathBuf::new());
 
@@ -407,9 +437,23 @@ pub fn run_agent(
                 rt.block_on(async {
                     let mut join_set = tokio::task::JoinSet::new();
                     for tool_call in safe_calls {
-                        let call_id = tool_call.get("id").and_then(|id| id.as_str()).unwrap_or("").to_string();
-                        let func_name = tool_call.get("function").and_then(|f| f.get("name")).and_then(|n| n.as_str()).unwrap_or("").to_string();
-                        let func_args_str = tool_call.get("function").and_then(|f| f.get("arguments")).and_then(|a| a.as_str()).unwrap_or("{}").to_string();
+                        let call_id = tool_call
+                            .get("id")
+                            .and_then(|id| id.as_str())
+                            .unwrap_or("")
+                            .to_string();
+                        let func_name = tool_call
+                            .get("function")
+                            .and_then(|f| f.get("name"))
+                            .and_then(|n| n.as_str())
+                            .unwrap_or("")
+                            .to_string();
+                        let func_args_str = tool_call
+                            .get("function")
+                            .and_then(|f| f.get("arguments"))
+                            .and_then(|a| a.as_str())
+                            .unwrap_or("{}")
+                            .to_string();
                         let cfg = config_arc.clone();
                         let rp = root_path_arc.clone();
                         let tool_call_clone = tool_call.clone();
@@ -428,12 +472,38 @@ pub fn run_agent(
                 });
 
                 for tool_call in unsafe_calls {
-                    let call_id = tool_call.get("id").and_then(|id| id.as_str()).unwrap_or("").to_string();
-                    let func_name = tool_call.get("function").and_then(|f| f.get("name")).and_then(|n| n.as_str()).unwrap_or("").to_string();
-                    let func_args_str = tool_call.get("function").and_then(|f| f.get("arguments")).and_then(|a| a.as_str()).unwrap_or("{}").to_string();
+                    let call_id = tool_call
+                        .get("id")
+                        .and_then(|id| id.as_str())
+                        .unwrap_or("")
+                        .to_string();
+                    let func_name = tool_call
+                        .get("function")
+                        .and_then(|f| f.get("name"))
+                        .and_then(|n| n.as_str())
+                        .unwrap_or("")
+                        .to_string();
+                    let func_args_str = tool_call
+                        .get("function")
+                        .and_then(|f| f.get("arguments"))
+                        .and_then(|a| a.as_str())
+                        .unwrap_or("{}")
+                        .to_string();
 
-                    let result = execute_tool(&config, &PathBuf::new(), &func_name, &func_args_str, &file_event_bus);
-                    completed_results.push((tool_call.clone(), call_id, func_name, func_args_str, result));
+                    let result = execute_tool(
+                        &config,
+                        &PathBuf::new(),
+                        &func_name,
+                        &func_args_str,
+                        &file_event_bus,
+                    );
+                    completed_results.push((
+                        tool_call.clone(),
+                        call_id,
+                        func_name,
+                        func_args_str,
+                        result,
+                    ));
                 }
 
                 // Notify the UI about files created via tool calls so the
@@ -443,24 +513,42 @@ pub fn run_agent(
                     if func_name == "create_file" {
                         if let Ok(parsed) = serde_json::from_str::<serde_json::Value>(result) {
                             if parsed.get("status").and_then(|s| s.as_str()) == Some("success") {
-                                if let Ok(args_val) = serde_json::from_str::<serde_json::Value>(func_args_str) {
-                                    if let Some(path_str) = args_val.get("path").and_then(|p| p.as_str()) {
+                                if let Ok(args_val) =
+                                    serde_json::from_str::<serde_json::Value>(func_args_str)
+                                {
+                                    if let Some(path_str) =
+                                        args_val.get("path").and_then(|p| p.as_str())
+                                    {
                                         let vpath = Path::new(path_str);
                                         let mut comps = vpath.components().peekable();
                                         while let Some(c) = comps.peek() {
                                             match c {
-                                                std::path::Component::RootDir | std::path::Component::CurDir => { comps.next(); },
+                                                std::path::Component::RootDir
+                                                | std::path::Component::CurDir => {
+                                                    comps.next();
+                                                }
                                                 _ => break,
                                             }
                                         }
-                                        if let Some(std::path::Component::Normal(first)) = comps.next() {
+                                        if let Some(std::path::Component::Normal(first)) =
+                                            comps.next()
+                                        {
                                             let lib_name = first.to_string_lossy();
                                             for lib in &config.content_libraries {
                                                 if lib.name == lib_name {
                                                     let rest: PathBuf = comps.collect();
-                                                    let abs_path = Path::new(&lib.root_folder).join(rest);
-                                                    let tags = crate::utils::tags::extract_tags_from_file(&abs_path);
-                                                    let _ = tx_gui_agent.send(BackgroundMessage::FileModified { path: abs_path, tags });
+                                                    let abs_path =
+                                                        Path::new(&lib.root_folder).join(rest);
+                                                    let tags =
+                                                        crate::utils::tags::extract_tags_from_file(
+                                                            &abs_path,
+                                                        );
+                                                    let _ = tx_gui_agent.send(
+                                                        BackgroundMessage::FileModified {
+                                                            path: abs_path,
+                                                            tags,
+                                                        },
+                                                    );
                                                     break;
                                                 }
                                             }
@@ -478,19 +566,30 @@ pub fn run_agent(
                 }
 
                 for tool_call in tool_calls {
-                    let call_id = tool_call.get("id").and_then(|id| id.as_str()).unwrap_or("").to_string();
-                    if let Some((_tc, func_name, func_args_str, result)) = results_map.remove(&call_id) {
-                        let (formatted_args, _is_empty_args) = match serde_json::from_str::<serde_json::Value>(&func_args_str) {
-                            Ok(val) => {
-                                let empty = match &val {
-                                    serde_json::Value::Object(o) => o.is_empty(),
-                                    serde_json::Value::Array(a) => a.is_empty(),
-                                    _ => false,
-                                };
-                                (serde_json::to_string_pretty(&val).unwrap_or_else(|_| func_args_str.to_string()), empty)
-                            },
-                            Err(_) => (func_args_str.to_string(), func_args_str.trim() == "{}"),
-                        };
+                    let call_id = tool_call
+                        .get("id")
+                        .and_then(|id| id.as_str())
+                        .unwrap_or("")
+                        .to_string();
+                    if let Some((_tc, func_name, func_args_str, result)) =
+                        results_map.remove(&call_id)
+                    {
+                        let (formatted_args, _is_empty_args) =
+                            match serde_json::from_str::<serde_json::Value>(&func_args_str) {
+                                Ok(val) => {
+                                    let empty = match &val {
+                                        serde_json::Value::Object(o) => o.is_empty(),
+                                        serde_json::Value::Array(a) => a.is_empty(),
+                                        _ => false,
+                                    };
+                                    (
+                                        serde_json::to_string_pretty(&val)
+                                            .unwrap_or_else(|_| func_args_str.to_string()),
+                                        empty,
+                                    )
+                                }
+                                Err(_) => (func_args_str.to_string(), func_args_str.trim() == "{}"),
+                            };
 
                         let formatted_args_quoted = formatted_args
                             .lines()
@@ -500,17 +599,26 @@ pub fn run_agent(
 
                         let tool_msg = if func_name == "create_file" {
                             let mut msg = format!("> **Executing tool `{}`**\n", func_name);
-                            if let Ok(args_val) = serde_json::from_str::<serde_json::Value>(&func_args_str) {
-                                let path = args_val.get("path").and_then(|p| p.as_str()).unwrap_or("unknown");
+                            if let Ok(args_val) =
+                                serde_json::from_str::<serde_json::Value>(&func_args_str)
+                            {
+                                let path = args_val
+                                    .get("path")
+                                    .and_then(|p| p.as_str())
+                                    .unwrap_or("unknown");
                                 msg.push_str(&format!("> Path: `{}`\n", path));
                             }
                             msg
                         } else {
-                            format!("> **Executing tool `{}`**\n{}", func_name, formatted_args_quoted)
+                            format!(
+                                "> **Executing tool `{}`**\n{}",
+                                func_name, formatted_args_quoted
+                            )
                         };
                         full_response.push_str(&tool_msg);
                         full_response.push_str("\n\n");
-                        let _ = tx_gui_agent.send(BackgroundMessage::AgentResponse(full_response.clone()));
+                        let _ = tx_gui_agent
+                            .send(BackgroundMessage::AgentResponse(full_response.clone()));
 
                         let mut is_error = false;
                         let mut error_msg = String::new();
@@ -519,7 +627,11 @@ pub fn run_agent(
                             if let Some(status) = parsed.get("status").and_then(|s| s.as_str()) {
                                 if status == "error" {
                                     is_error = true;
-                                    error_msg = parsed.get("message").and_then(|m| m.as_str()).unwrap_or("Unknown error").to_string();
+                                    error_msg = parsed
+                                        .get("message")
+                                        .and_then(|m| m.as_str())
+                                        .unwrap_or("Unknown error")
+                                        .to_string();
                                 } else if status == "success" {
                                     if let Some(data) = parsed.get("data") {
                                         result_data = data.clone();
@@ -529,7 +641,10 @@ pub fn run_agent(
                         }
 
                         if func_name == "read_file" && !is_error {
-                            let content = result_data.get("content").and_then(|c| c.as_str()).unwrap_or("");
+                            let content = result_data
+                                .get("content")
+                                .and_then(|c| c.as_str())
+                                .unwrap_or("");
                             tracing::info!(
                                 name = "agent.tool.success",
                                 tool = %func_name,
@@ -545,7 +660,10 @@ pub fn run_agent(
                                 "Tool execution returned an error status. The agent may attempt to recover or try another tool."
                             );
                         } else if func_name == "create_file" {
-                            let size = result_data.get("size_bytes").and_then(|s| s.as_u64()).unwrap_or(0);
+                            let size = result_data
+                                .get("size_bytes")
+                                .and_then(|s| s.as_u64())
+                                .unwrap_or(0);
                             tracing::info!(
                                 name = "agent.tool.success",
                                 tool = %func_name,
@@ -564,33 +682,75 @@ pub fn run_agent(
                         let result_msg = if is_error {
                             format!("> **Result Error:** {}\n\n", error_msg)
                         } else if func_name == "create_file" {
-                            let size = result_data.get("size_bytes").and_then(|s| s.as_u64()).unwrap_or(0);
+                            let size = result_data
+                                .get("size_bytes")
+                                .and_then(|s| s.as_u64())
+                                .unwrap_or(0);
                             format!("> **Result:** File created ({} B).\n\n", size)
                         } else if func_name == "list_files" {
-                            let count = result_data.get("files").and_then(|f| f.as_array()).map(|a| a.len()).unwrap_or(0);
-                            let total = result_data.get("total").and_then(|t| t.as_u64()).unwrap_or(count as u64);
-                            format!("> **Result:** {} files returned (total: {}).\n\n", count, total)
+                            let count = result_data
+                                .get("files")
+                                .and_then(|f| f.as_array())
+                                .map(|a| a.len())
+                                .unwrap_or(0);
+                            let total = result_data
+                                .get("total")
+                                .and_then(|t| t.as_u64())
+                                .unwrap_or(count as u64);
+                            format!(
+                                "> **Result:** {} files returned (total: {}).\n\n",
+                                count, total
+                            )
                         } else if func_name == "list_files_by_tag" {
-                            let count = result_data.get("files").and_then(|f| f.as_array()).map(|a| a.len()).unwrap_or(0);
-                            let total = result_data.get("total").and_then(|t| t.as_u64()).unwrap_or(count as u64);
-                            format!("> **Result:** {} files returned (total: {}).\n\n", count, total)
+                            let count = result_data
+                                .get("files")
+                                .and_then(|f| f.as_array())
+                                .map(|a| a.len())
+                                .unwrap_or(0);
+                            let total = result_data
+                                .get("total")
+                                .and_then(|t| t.as_u64())
+                                .unwrap_or(count as u64);
+                            format!(
+                                "> **Result:** {} files returned (total: {}).\n\n",
+                                count, total
+                            )
                         } else if func_name == "read_tags" {
-                            let count = result_data.get("tags").and_then(|t| t.as_array()).map(|a| a.len()).unwrap_or(0);
+                            let count = result_data
+                                .get("tags")
+                                .and_then(|t| t.as_array())
+                                .map(|a| a.len())
+                                .unwrap_or(0);
                             format!("> **Result:** {} tag(s) found.\n\n", count)
                         } else if func_name == "read_file" || func_name == "read_file_lines" {
-                            let content = result_data.get("content").and_then(|f| f.as_str()).unwrap_or("");
+                            let content = result_data
+                                .get("content")
+                                .and_then(|f| f.as_str())
+                                .unwrap_or("");
                             let count = content.lines().count();
                             format!("> **Result:** {} line(s) read.\n\n", count)
                         } else if func_name == "web_fetch" {
-                            let content = result_data.get("content").and_then(|f| f.as_str()).unwrap_or("");
+                            let content = result_data
+                                .get("content")
+                                .and_then(|f| f.as_str())
+                                .unwrap_or("");
                             let count = content.lines().count();
                             format!("> **Result:** {} markdown lines returned.\n\n", count)
                         } else if func_name == "web_search" {
-                            let content = result_data.get("results").and_then(|f| f.as_str()).unwrap_or("");
-                            let count = content.split("\n\n").filter(|s| !s.trim().is_empty()).count();
+                            let content = result_data
+                                .get("results")
+                                .and_then(|f| f.as_str())
+                                .unwrap_or("");
+                            let count = content
+                                .split("\n\n")
+                                .filter(|s| !s.trim().is_empty())
+                                .count();
                             format!("> **Result:** {} search results returned.\n\n", count)
                         } else if func_name == "grep" {
-                            let content = result_data.get("matches").and_then(|f| f.as_str()).unwrap_or("");
+                            let content = result_data
+                                .get("matches")
+                                .and_then(|f| f.as_str())
+                                .unwrap_or("");
                             if content == "No matches found." || content.is_empty() {
                                 format!("> **Result:** 0 file(s) match\n\n")
                             } else {
@@ -607,13 +767,27 @@ pub fn run_agent(
                                 format!("> **Result:** {} file(s) match\n\n", files.len())
                             }
                         } else if func_name == "get_email_by_id" {
-                            let subject = result_data.get("result").and_then(|v| v.as_str()).and_then(|s| serde_json::from_str::<serde_json::Value>(s).ok())
+                            let subject = result_data
+                                .get("result")
+                                .and_then(|v| v.as_str())
+                                .and_then(|s| serde_json::from_str::<serde_json::Value>(s).ok())
                                 .and_then(|val| val.as_array().and_then(|a| a.first().cloned()))
-                                .and_then(|obj| obj.get("subject").and_then(|s| s.as_str()).map(|s| s.to_string()))
+                                .and_then(|obj| {
+                                    obj.get("subject")
+                                        .and_then(|s| s.as_str())
+                                        .map(|s| s.to_string())
+                                })
                                 .unwrap_or_default();
-                            let date = result_data.get("result").and_then(|v| v.as_str()).and_then(|s| serde_json::from_str::<serde_json::Value>(s).ok())
+                            let date = result_data
+                                .get("result")
+                                .and_then(|v| v.as_str())
+                                .and_then(|s| serde_json::from_str::<serde_json::Value>(s).ok())
                                 .and_then(|val| val.as_array().and_then(|a| a.first().cloned()))
-                                .and_then(|obj| obj.get("date").and_then(|s| s.as_str()).map(|s| s.to_string()))
+                                .and_then(|obj| {
+                                    obj.get("date")
+                                        .and_then(|s| s.as_str())
+                                        .map(|s| s.to_string())
+                                })
                                 .unwrap_or_default();
                             if !subject.is_empty() || !date.is_empty() {
                                 format!("> **Result:** {} - {}\n\n", date, subject)
@@ -621,8 +795,14 @@ pub fn run_agent(
                                 format!("> **Result:** Email content retrieved.\n\n")
                             }
                         } else if func_name == "search_email" {
-                            let total = result_data.get("total").and_then(|t| t.as_u64()).unwrap_or(0);
-                            let hint = result_data.get("hint").and_then(|h| h.as_str()).unwrap_or("");
+                            let total = result_data
+                                .get("total")
+                                .and_then(|t| t.as_u64())
+                                .unwrap_or(0);
+                            let hint = result_data
+                                .get("hint")
+                                .and_then(|h| h.as_str())
+                                .unwrap_or("");
                             if !hint.is_empty() {
                                 format!("> **Result:** {} item(s) found. {}\n\n", total, hint)
                             } else {
@@ -630,7 +810,12 @@ pub fn run_agent(
                             }
                         } else if func_name.starts_with("search_") {
                             let mut count = 0;
-                            if let Some(arr) = result_data.get("results").and_then(|r| r.as_str()).and_then(|s| serde_json::from_str::<serde_json::Value>(s).ok()).and_then(|v| v.as_array().cloned()) {
+                            if let Some(arr) = result_data
+                                .get("results")
+                                .and_then(|r| r.as_str())
+                                .and_then(|s| serde_json::from_str::<serde_json::Value>(s).ok())
+                                .and_then(|v| v.as_array().cloned())
+                            {
                                 count = arr.len();
                             } else if let Some(arr) = result_data.as_array() {
                                 count = arr.len();
@@ -640,10 +825,14 @@ pub fn run_agent(
                             format!("> **Result:** {}\n\n", result)
                         } else {
                             let action = func_name.replace("_", " ");
-                            format!("> **Result:** Tool '{}' completed successfully.\n\n", action)
+                            format!(
+                                "> **Result:** Tool '{}' completed successfully.\n\n",
+                                action
+                            )
                         };
                         full_response.push_str(&result_msg);
-                        let _ = tx_gui_agent.send(BackgroundMessage::AgentResponse(full_response.clone()));
+                        let _ = tx_gui_agent
+                            .send(BackgroundMessage::AgentResponse(full_response.clone()));
 
                         messages.push(serde_json::json!({
                             "role": "tool",
@@ -666,9 +855,7 @@ pub fn run_agent(
         // synchronously when the user clicked Stop, and we don't want to
         // clobber that.
         if !cancel_flag.load(std::sync::atomic::Ordering::SeqCst) {
-            let _ = tx_gui_agent.send(BackgroundMessage::AgentStatus(
-                "Done".to_string(),
-            ));
+            let _ = tx_gui_agent.send(BackgroundMessage::AgentStatus("Done".to_string()));
         }
 
         let _ = tx_gui_agent.send(BackgroundMessage::AgentFinished(messages));
@@ -760,13 +947,16 @@ mod tests {
     #[test]
     fn test_run_agent_missing_api_key() {
         let mut config = crate::config::AppConfig::default();
-        config.models.insert("test".to_string(), crate::config::LlmConfig {
-            model: "test".to_string(),
-            api_url: "http://localhost".to_string(),
-            api_key: "".to_string(),
-            cost: None,
-            use_case: vec!["chat".to_string()],
-        });
+        config.models.insert(
+            "test".to_string(),
+            crate::config::LlmConfig {
+                model: "test".to_string(),
+                api_url: "http://localhost".to_string(),
+                api_key: "".to_string(),
+                cost: None,
+                use_case: vec!["chat".to_string()],
+            },
+        );
 
         let (tx, rx) = std::sync::mpsc::channel();
         let cancel_flag = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
@@ -796,13 +986,16 @@ mod tests {
     #[test]
     fn test_run_agent_network_error() {
         let mut config = crate::config::AppConfig::default();
-        config.models.insert("test".to_string(), crate::config::LlmConfig {
-            model: "test".to_string(),
-            api_url: "http://127.0.0.1:0".to_string(),
-            api_key: "valid-key".to_string(),
-            cost: None,
-            use_case: vec!["chat".to_string()],
-        });
+        config.models.insert(
+            "test".to_string(),
+            crate::config::LlmConfig {
+                model: "test".to_string(),
+                api_url: "http://127.0.0.1:0".to_string(),
+                api_key: "valid-key".to_string(),
+                cost: None,
+                use_case: vec!["chat".to_string()],
+            },
+        );
 
         let (tx, rx) = std::sync::mpsc::channel();
         let cancel_flag = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
@@ -852,13 +1045,16 @@ mod tests {
         });
 
         let mut config = crate::config::AppConfig::default();
-        config.models.insert("test".to_string(), crate::config::LlmConfig {
-            model: "test".to_string(),
-            api_url: format!("http://127.0.0.1:{}", port),
-            api_key: "valid-key".to_string(),
-            cost: None,
-            use_case: vec!["chat".to_string()],
-        });
+        config.models.insert(
+            "test".to_string(),
+            crate::config::LlmConfig {
+                model: "test".to_string(),
+                api_url: format!("http://127.0.0.1:{}", port),
+                api_key: "valid-key".to_string(),
+                cost: None,
+                use_case: vec!["chat".to_string()],
+            },
+        );
 
         let (tx, rx) = std::sync::mpsc::channel();
         let cancel_flag = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
@@ -883,7 +1079,11 @@ mod tests {
         while let Ok(msg) = rx.recv() {
             match msg {
                 BackgroundMessage::AgentFailed(err) => {
-                    assert!(err.contains("Failed to parse JSON response"), "Expected 'Failed to parse JSON response', got '{}'", err);
+                    assert!(
+                        err.contains("Failed to parse JSON response"),
+                        "Expected 'Failed to parse JSON response', got '{}'",
+                        err
+                    );
                     got_failed = true;
                     break;
                 }
@@ -911,13 +1111,16 @@ mod tests {
         });
 
         let mut config = crate::config::AppConfig::default();
-        config.models.insert("test".to_string(), crate::config::LlmConfig {
-            model: "test".to_string(),
-            api_url: format!("http://127.0.0.1:{}", port),
-            api_key: "valid-key".to_string(),
-            cost: None,
-            use_case: vec!["chat".to_string()],
-        });
+        config.models.insert(
+            "test".to_string(),
+            crate::config::LlmConfig {
+                model: "test".to_string(),
+                api_url: format!("http://127.0.0.1:{}", port),
+                api_key: "valid-key".to_string(),
+                cost: None,
+                use_case: vec!["chat".to_string()],
+            },
+        );
 
         let (tx, rx) = std::sync::mpsc::channel();
         let cancel_flag = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
@@ -939,7 +1142,11 @@ mod tests {
         while let Ok(msg) = rx.recv() {
             match msg {
                 BackgroundMessage::AgentFailed(err) => {
-                    assert!(err.contains("HTTP Request failed with status 400"), "Expected 'HTTP Request failed with status 400', got '{}'", err);
+                    assert!(
+                        err.contains("HTTP Request failed with status 400"),
+                        "Expected 'HTTP Request failed with status 400', got '{}'",
+                        err
+                    );
                     got_failed = true;
                     break;
                 }
@@ -1013,20 +1220,27 @@ mod tests {
                 let mut buf = [0; 2048];
                 let _ = stream.read(&mut buf);
                 let body = "{}";
-                let response = format!("HTTP/1.1 200 OK\r\nContent-Length: {}\r\n\r\n{}", body.len(), body);
+                let response = format!(
+                    "HTTP/1.1 200 OK\r\nContent-Length: {}\r\n\r\n{}",
+                    body.len(),
+                    body
+                );
                 let _ = stream.write_all(response.as_bytes());
                 std::thread::sleep(std::time::Duration::from_millis(200));
             }
         });
 
         let mut config = crate::config::AppConfig::default();
-        config.models.insert("test".to_string(), crate::config::LlmConfig {
-            model: "test".to_string(),
-            api_url: format!("http://127.0.0.1:{}", port),
-            api_key: "valid-key".to_string(),
-            cost: None,
-            use_case: vec!["chat".to_string()],
-        });
+        config.models.insert(
+            "test".to_string(),
+            crate::config::LlmConfig {
+                model: "test".to_string(),
+                api_url: format!("http://127.0.0.1:{}", port),
+                api_key: "valid-key".to_string(),
+                cost: None,
+                use_case: vec!["chat".to_string()],
+            },
+        );
 
         let (tx, rx) = std::sync::mpsc::channel();
         let cancel_flag = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
@@ -1048,7 +1262,11 @@ mod tests {
         while let Ok(msg) = rx.recv() {
             match msg {
                 BackgroundMessage::AgentFailed(err) => {
-                    assert!(err.contains("Invalid response schema"), "Expected 'Invalid response schema', got '{}'", err);
+                    assert!(
+                        err.contains("Invalid response schema"),
+                        "Expected 'Invalid response schema', got '{}'",
+                        err
+                    );
                     got_failed = true;
                     break;
                 }
@@ -1154,7 +1372,9 @@ mod tests {
         }
         assert!(saw_finished, "expected AgentFinished to be sent");
         assert!(
-            statuses.iter().any(|s| s == "Waiting for LLM completions..."),
+            statuses
+                .iter()
+                .any(|s| s == "Waiting for LLM completions..."),
             "expected the per-iteration 'Waiting for LLM completions...' status, got {:?}",
             statuses
         );

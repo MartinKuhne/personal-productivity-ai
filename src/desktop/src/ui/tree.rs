@@ -1,5 +1,5 @@
 use crate::messages::BackgroundMessage;
-use crate::print::{execute_print_blocking, PrintJob};
+use crate::print::{PrintJob, execute_print_blocking};
 use crate::ui::TreeNode;
 use eframe::egui;
 use std::collections::HashSet;

@@ -66,7 +66,11 @@ pub fn get_csv_tools(_config: &AppConfig, prompt: &str) -> Vec<Value> {
     ]
 }
 
-pub fn execute_csv_tool(config: &AppConfig, name: &str, args_str: &str) -> Option<Result<Value, String>> {
+pub fn execute_csv_tool(
+    config: &AppConfig,
+    name: &str,
+    args_str: &str,
+) -> Option<Result<Value, String>> {
     match name {
         "create_csv" => {
             let input: schema::CreateCsvInput = match serde_json::from_str(args_str) {
@@ -74,35 +78,35 @@ pub fn execute_csv_tool(config: &AppConfig, name: &str, args_str: &str) -> Optio
                 Err(e) => return Some(Err(format!("Invalid args: {}", e))),
             };
             Some(operations::create_csv(config, input).map(|r| serde_json::to_value(r).unwrap()))
-        },
+        }
         "list_csv" => {
             let input: schema::ListCsvInput = match serde_json::from_str(args_str) {
                 Ok(v) => v,
                 Err(e) => return Some(Err(format!("Invalid args: {}", e))),
             };
             Some(operations::list_csv(config, input).map(|r| serde_json::to_value(r).unwrap()))
-        },
+        }
         "add_rows" => {
             let input: schema::AddRowsInput = match serde_json::from_str(args_str) {
                 Ok(v) => v,
                 Err(e) => return Some(Err(format!("Invalid args: {}", e))),
             };
             Some(operations::add_rows(config, input).map(|r| serde_json::to_value(r).unwrap()))
-        },
+        }
         "delete_rows" => {
             let input: schema::DeleteRowsInput = match serde_json::from_str(args_str) {
                 Ok(v) => v,
                 Err(e) => return Some(Err(format!("Invalid args: {}", e))),
             };
             Some(query::delete_rows(config, input).map(|r| serde_json::to_value(r).unwrap()))
-        },
+        }
         "query" => {
             let input: schema::QueryRequest = match serde_json::from_str(args_str) {
                 Ok(v) => v,
                 Err(e) => return Some(Err(format!("Invalid args: {}", e))),
             };
             Some(query::query_csv(config, input).map(|r| serde_json::to_value(r).unwrap()))
-        },
+        }
         _ => None,
     }
 }
@@ -122,7 +126,7 @@ mod tests {
         assert!(should_enable_tools("delete_rows from table"));
         assert!(should_enable_tools("create_csv test"));
         assert!(should_enable_tools("query test"));
-        
+
         assert!(!should_enable_tools("just a normal message"));
         assert!(!should_enable_tools("hello world"));
     }

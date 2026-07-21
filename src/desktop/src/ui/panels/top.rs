@@ -71,6 +71,11 @@ pub fn show_top_panel(app: &mut FastMdApp, ctx: &egui::Context) {
             ui.checkbox(&mut app.show_background_logs, "Show log");
             ui.separator();
 
+            if ui.button("Batch...").clicked() {
+                app.batch_dialog_open = true;
+            }
+            ui.separator();
+
             if !app.indexing_finished {
                 ui.spinner();
             }
@@ -88,7 +93,7 @@ pub fn show_top_panel(app: &mut FastMdApp, ctx: &egui::Context) {
                         let mut changed = ui
                             .selectable_value(&mut app.selected_tag, None, "All")
                             .changed();
-                        for tag in &app.all_tags {
+                        for tag in app.tag_manager.all_tags() {
                             changed |= ui
                                 .selectable_value(&mut app.selected_tag, Some(tag.clone()), tag)
                                 .changed();
@@ -97,7 +102,7 @@ pub fn show_top_panel(app: &mut FastMdApp, ctx: &egui::Context) {
                             app.selected_file = compute_next_selected_file(
                                 app.selected_file.as_ref(),
                                 app.selected_tag.as_ref(),
-                                &app.file_tags,
+                                app.tag_manager.file_tags(),
                             );
                         }
                     });
@@ -210,8 +215,10 @@ mod ui_tests {
         let ctx = egui::Context::default();
         let mut app = create_test_app();
         app.indexing_finished = true;
-        app.all_tags.insert("Rust".to_string());
-        app.all_tags.insert("Docs".to_string());
+        app.tag_manager.add_tags(
+            PathBuf::from("dummy.md"),
+            vec!["Rust".to_string(), "Docs".to_string()],
+        );
 
         let _ = ctx.run(egui::RawInput::default(), |ctx| {
             show_top_panel(&mut app, ctx);

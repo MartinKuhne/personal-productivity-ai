@@ -9,7 +9,7 @@ pub fn show_left_panel(app: &mut FastMdApp, ctx: &egui::Context) {
         .iter()
         .filter(|p| {
             if let Some(active_tag) = &app.selected_tag {
-                if let Some(tags) = app.file_tags.get(*p) {
+                if let Some(tags) = app.tag_manager.file_tags().get(*p) {
                     tags.contains(active_tag)
                 } else {
                     false
@@ -204,10 +204,10 @@ mod tests {
         let file1 = lib_dir.join("notes.md");
         let file2 = lib_dir.join("archived.md");
         app.all_files = vec![file1.clone(), file2.clone()];
-        app.file_tags
-            .insert(file1.clone(), vec!["work".to_string()]);
-        app.file_tags
-            .insert(file2.clone(), vec!["archive".to_string()]);
+        app.tag_manager
+            .add_tags(file1.clone(), vec!["work".to_string()]);
+        app.tag_manager
+            .add_tags(file2.clone(), vec!["archive".to_string()]);
 
         // 1. Without tag filter
         let _ = ctx.run(Default::default(), |ctx| {

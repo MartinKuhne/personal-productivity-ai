@@ -129,7 +129,12 @@ impl EditorState {
     /// palette, and so the REQ-261 requirement ("inverted, black text on
     /// white background") is expressed as data rather than scattered
     /// `Color32::*` constants in the rendering code.
-    pub fn show_with_colors(&mut self, ctx: &egui::Context, colors: EditorColors, producer: &FileEventProducer) -> bool {
+    pub fn show_with_colors(
+        &mut self,
+        ctx: &egui::Context,
+        colors: EditorColors,
+        producer: &FileEventProducer,
+    ) -> bool {
         if !self.is_open {
             return false;
         }
@@ -272,8 +277,7 @@ mod tests {
     /// don't need to consume the events — they only care about the
     /// file I/O outcome.
     fn noop_producer() -> FileEventProducer<'static> {
-        let bus: &'static Bus<crate::file_events::FileEvent> =
-            Box::leak(Box::new(Bus::new()));
+        let bus: &'static Bus<crate::file_events::FileEvent> = Box::leak(Box::new(Bus::new()));
         FileEventProducer::new(bus)
     }
 

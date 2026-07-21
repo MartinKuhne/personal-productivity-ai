@@ -209,7 +209,11 @@ mod tests {
         let port = listener.local_addr().unwrap().port();
         let api_url = format!("http://127.0.0.1:{}", port);
         let body_str = body.into().replace("{API_URL}", &api_url);
-        let response_str = format!("HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nConnection: close\r\nContent-Length: {}\r\n\r\n{}", body_str.len(), body_str);
+        let response_str = format!(
+            "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nConnection: close\r\nContent-Length: {}\r\n\r\n{}",
+            body_str.len(),
+            body_str
+        );
         std::thread::spawn(move || {
             for stream in listener.incoming() {
                 if let Ok(mut stream) = stream {
@@ -226,10 +230,13 @@ mod tests {
 
     fn mock_config(api_url: &str) -> AppConfig {
         let mut clients = HashMap::new();
-        clients.insert("test_jmap".to_string(), JmapClient {
-            url: api_url.to_string(),
-            token: "test_token".to_string(),
-        });
+        clients.insert(
+            "test_jmap".to_string(),
+            JmapClient {
+                url: api_url.to_string(),
+                token: "test_token".to_string(),
+            },
+        );
         AppConfig {
             jmap_clients: clients,
             ..AppConfig::default()
@@ -238,7 +245,9 @@ mod tests {
 
     #[test]
     fn test_contact_operations_success() {
-        rustls::crypto::ring::default_provider().install_default().ok();
+        rustls::crypto::ring::default_provider()
+            .install_default()
+            .ok();
         let json_resp = serde_json::json!({
             "apiUrl": "{API_URL}",
             "primaryAccounts": {
@@ -264,7 +273,9 @@ mod tests {
 
     #[test]
     fn test_contact_operations_errors() {
-        rustls::crypto::ring::default_provider().install_default().ok();
+        rustls::crypto::ring::default_provider()
+            .install_default()
+            .ok();
         let json_resp = serde_json::json!({
             "apiUrl": "{API_URL}",
             "primaryAccounts": {
@@ -279,7 +290,12 @@ mod tests {
 
         let res_search = tool_search_contact(&config, "alice");
         assert!(res_search.is_ok());
-        assert!(res_search.unwrap().results.contains("Error from JMAP server"));
+        assert!(
+            res_search
+                .unwrap()
+                .results
+                .contains("Error from JMAP server")
+        );
 
         let res_add_err = tool_add_contact(&config, "{invalid json}");
         assert!(res_add_err.is_err());
@@ -296,12 +312,19 @@ mod tests {
 
     #[test]
     fn test_contact_operations_session_error() {
-        rustls::crypto::ring::default_provider().install_default().ok();
+        rustls::crypto::ring::default_provider()
+            .install_default()
+            .ok();
         let url = spawn_mock_server("HTTP/1.1 401 Unauthorized\r\nContent-Length: 5\r\n\r\nerror");
         let config = mock_config(&url);
 
         let res_search = tool_search_contact(&config, "alice");
-        assert!(res_search.unwrap().results.contains("Error fetching JMAP session"));
+        assert!(
+            res_search
+                .unwrap()
+                .results
+                .contains("Error fetching JMAP session")
+        );
 
         let res_add = tool_add_contact(&config, "{}");
         assert!(res_add.is_err());
@@ -319,7 +342,9 @@ mod tests {
     fn test_is_contact_unknown_method_ignores_other_errors() {
         // Server errors, transport errors, and other unknownMethod targets
         // (e.g. for Mail or Calendar) must NOT trigger the fallback.
-        assert!(!is_contact_unknown_method("type: serverError: boom (callId: 0)"));
+        assert!(!is_contact_unknown_method(
+            "type: serverError: boom (callId: 0)"
+        ));
         assert!(!is_contact_unknown_method(
             "type: unknownMethod: Unknown object 'JMAPApp::DataType::Email' (callId: 0)"
         ));
@@ -355,7 +380,9 @@ mod tests {
 
     #[test]
     fn test_contact_unknown_method_falls_back_to_dav() {
-        rustls::crypto::ring::default_provider().install_default().ok();
+        rustls::crypto::ring::default_provider()
+            .install_default()
+            .ok();
         // JMAP mock returns the exact Fastmail-style "Unknown object Contact"
         // error so the tool attempts a CardDAV fallback.
         let json_resp = serde_json::json!({
@@ -403,7 +430,9 @@ mod tests {
 
     #[test]
     fn test_contact_unknown_method_no_dav_client_does_not_fallback() {
-        rustls::crypto::ring::default_provider().install_default().ok();
+        rustls::crypto::ring::default_provider()
+            .install_default()
+            .ok();
         let json_resp = serde_json::json!({
             "apiUrl": "{API_URL}",
             "primaryAccounts": {

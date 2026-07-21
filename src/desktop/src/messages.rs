@@ -1,6 +1,6 @@
-use std::path::PathBuf;
 use notify::RecommendedWatcher;
 use serde_json::Value;
+use std::path::PathBuf;
 
 /// Token usage statistics returned by the LLM API.
 ///
@@ -30,12 +30,22 @@ pub struct TokenUsageInfo {
 
 #[derive(Debug)]
 pub enum BackgroundMessage {
-    FileParsed { path: PathBuf, tags: Vec<String> },
-    DirParsed { path: PathBuf },
+    FileParsed {
+        path: PathBuf,
+        tags: Vec<String>,
+    },
+    DirParsed {
+        path: PathBuf,
+    },
     Finished(RecommendedWatcher),
     FinishedWithoutWatcher,
-    FileModified { path: PathBuf, tags: Vec<String> },
-    FileDeleted { path: PathBuf },
+    FileModified {
+        path: PathBuf,
+        tags: Vec<String>,
+    },
+    FileDeleted {
+        path: PathBuf,
+    },
 
     AgentStatus(String),
     AgentThinking(String),
