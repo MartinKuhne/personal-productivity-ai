@@ -1,6 +1,8 @@
+use crate::agent::AgentSessionManager;
 use crate::background::{BackgroundProcessManager, SharedProcessManager};
 use crate::background_task::Task;
 use crate::batch::types::{BatchDialogConfig, BatchHandle};
+use crate::file_processor::FileEventProcessor;
 use crate::messages::{BackgroundMessage, TokenUsageInfo};
 use crate::tag_manager::TagManager;
 use crate::ui::modals::{show_create_dir_modal, show_move_modal, show_rename_modal};
@@ -85,16 +87,8 @@ pub struct FastMdApp {
     pub _watcher: Option<notify::RecommendedWatcher>,
 
     pub show_agent_results: bool,
-    pub agent_running: bool,
-    pub agent_status: String,
-    pub agent_thinking: String,
-    pub agent_response: String,
-    pub agent_scroll_to_id: Option<egui::Id>,
-    pub agent_cancel_flag: Option<std::sync::Arc<std::sync::atomic::AtomicBool>>,
-    pub agent_history: Option<Vec<serde_json::Value>>,
-    pub agent_token_usage: Option<TokenUsageInfo>,
-    pub agent_total_usage: TokenUsageInfo,
-    pub left_panel_reset_count: u32,
+    /// Agent session manager - encapsulates all agent state and lifecycle.
+    pub agent: AgentSessionManager,
     pub submit_prompt: Option<String>,
     pub editor_state: crate::editor::EditorState,
     pub inline_editor_enabled: bool,
@@ -254,15 +248,6 @@ impl FastMdApp {
             scroll_to_header_id: None,
             _watcher: None,
             show_agent_results: false,
-            agent_running: false,
-            agent_status: String::new(),
-            agent_thinking: String::new(),
-            agent_response: String::new(),
-            agent_scroll_to_id: None,
-            agent_cancel_flag: None,
-            agent_history: None,
-            agent_token_usage: None,
-            agent_total_usage: TokenUsageInfo::default(),
             left_panel_reset_count: 0,
             submit_prompt: None,
             editor_state: crate::editor::EditorState::default(),
@@ -274,6 +259,7 @@ impl FastMdApp {
             batch_dialog_config,
             batch_handle: None,
             batch_cancel_flag: None,
+            agent: AgentSessionManager::new(config.clone()),
         }
     }
 
@@ -324,15 +310,7 @@ impl FastMdApp {
             scroll_to_header_id: None,
             _watcher: None,
             show_agent_results: false,
-            agent_running: false,
-            agent_status: String::new(),
-            agent_thinking: String::new(),
-            agent_response: String::new(),
-            agent_scroll_to_id: None,
-            agent_cancel_flag: None,
-            agent_history: None,
-            agent_token_usage: None,
-            agent_total_usage: TokenUsageInfo::default(),
+            agent: AgentSessionManager::new(config.clone()),
             left_panel_reset_count: 0,
             submit_prompt: None,
             editor_state: crate::editor::EditorState::default(),
@@ -346,46 +324,24 @@ impl FastMdApp {
             batch_cancel_flag: None,
         }
     }
-    }
 
     /// Purpose: Submits a prompt to the agent and starts a new session, taking ownership of all relevant state.
     /// Inputs: `prompt` - the prompt text to send to the agent.
     /// Outputs: None.
     /// Purity: Impure (mutates self, spawns the agent thread).
     /// Preconditions: `prompt` should be non-empty.
-    /// Postconditions: `command_input` is cleared, `agent_running` is set, `agent_cancel_flag` holds a fresh flag, and the agent thread is launched.
+    /// Postconditions: `command_input` is cleared, agent state reflects running, cancel flag is set, agent thread launched.
     pub fn start_agent_session(&mut self, prompt: String) {
-        self.command_input = prompt;
-        self.agent_status = "Initializing agent...".to_string();
-        self.agent_thinking.clear();
-        if self.agent_history.is_none() || !self.show_agent_results {
-            self.agent_response.clear();
-            self.agent_history = None;
-            self.agent_token_usage = None;
-            self.agent_total_usage = TokenUsageInfo::default();
-        } else {
-            self.agent_response
-                .push_str(&format!("> **User:** {}\n\n", self.command_input));
-        }
-        self.show_agent_results = true;
-        self.agent_running = true;
-
-        let cancel_flag = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
-        self.agent_cancel_flag = Some(cancel_flag.clone());
-
-        crate::agent::run_agent(
-            self.config.clone(),
+        self.command_input = prompt.clone();
+        self.agent.start_session(
             self.tx.clone(),
+            prompt,
             self.selected_file.clone(),
             self.selected_dir.clone(),
             self.selected_files.clone(),
-            self.command_input.clone(),
-            cancel_flag,
-            self.agent_history.clone(),
-            self.agent_response.clone(),
             self.file_event_bus.clone(),
         );
-        self.command_input.clear();
+        self.show_agent_results = true;
     }
 }
 
@@ -454,7 +410,7 @@ impl FastMdApp {
                     self.indexing_finished = true;
                     self.tag_manager.rebuild();
                 }
-BackgroundMessage::FileModified { path, tags } => {
+                BackgroundMessage::FileModified { path, tags } => {
                     self.tag_manager.add_tags(path.clone(), tags);
                     if !self.file_processor.all_files.contains(&path) {
                         self.file_processor.all_files.push(path.clone());
@@ -487,51 +443,14 @@ BackgroundMessage::FileModified { path, tags } => {
                         self.loaded_path = None;
                     }
                 }
-                BackgroundMessage::AgentStatus(status) => {
-                    self.agent_status = status;
-                }
-                BackgroundMessage::AgentThinking(thinking) => {
-                    self.agent_thinking = thinking;
-                }
-                BackgroundMessage::AgentResponse(resp) => {
-                    self.agent_response = resp;
-                }
-                BackgroundMessage::AgentFinished(history) => {
-                    self.agent_running = false;
-                    self.agent_history = Some(history);
-                }
-                BackgroundMessage::AgentFailed(err) => {
-                    self.agent_status = format!("Error: {}", err);
-                    self.agent_running = false;
-                }
-                BackgroundMessage::AgentTokenUsage(info) => {
-                    // Track the peak prompt size across the session so the
-                    // operator can see how close the conversation is to the
-                    // model's context window.
-                    if info.prompt_tokens > self.agent_total_usage.prompt_tokens {
-                        self.agent_total_usage.prompt_tokens = info.prompt_tokens;
-                    }
-                    self.agent_total_usage.completion_tokens = self
-                        .agent_total_usage
-                        .completion_tokens
-                        .saturating_add(info.completion_tokens);
-                    self.agent_total_usage.total_tokens = self
-                        .agent_total_usage
-                        .total_tokens
-                        .saturating_add(info.total_tokens);
-                    self.agent_total_usage.cached_tokens = Some(
-                        self.agent_total_usage
-                            .cached_tokens
-                            .unwrap_or(0)
-                            .saturating_add(info.cached_tokens.unwrap_or(0)),
-                    );
-                    self.agent_total_usage.reasoning_tokens = Some(
-                        self.agent_total_usage
-                            .reasoning_tokens
-                            .unwrap_or(0)
-                            .saturating_add(info.reasoning_tokens.unwrap_or(0)),
-                    );
-                    self.agent_token_usage = Some(info);
+                // Agent messages are delegated to AgentSessionManager
+                BackgroundMessage::AgentStatus(_)
+                | BackgroundMessage::AgentThinking(_)
+                | BackgroundMessage::AgentResponse(_)
+                | BackgroundMessage::AgentFinished(_)
+                | BackgroundMessage::AgentFailed(_)
+                | BackgroundMessage::AgentTokenUsage(_) => {
+                    self.agent.handle_background_message(msg);
                 }
                 BackgroundMessage::LogEntry(entry) => {
                     if let Ok(mut mgr) = self.background_manager.lock() {
@@ -736,9 +655,9 @@ mod tests {
         assert!(app.file_processor.all_files.contains(&test_file));
         assert!(app.file_processor.all_dirs.contains(&test_dir));
         assert!(app.indexing_finished);
-        assert_eq!(app.agent_status, "Processing...");
-        assert_eq!(app.agent_thinking, "Thinking step");
-        assert_eq!(app.agent_response, "Done result");
+        assert_eq!(app.agent.state().status, "Processing...");
+        assert_eq!(app.agent.state().thinking, "Thinking step");
+        assert_eq!(app.agent.state().response, "Done result");
     }
 
     #[test]
@@ -797,8 +716,8 @@ mod tests {
             app.update_ui(ctx);
         });
 
-        assert_eq!(app.agent_status, "Error: Network timeout");
-        assert!(!app.agent_running);
+        assert_eq!(app.agent.state().status, "Error: Network timeout");
+        assert!(!app.agent.state().running);
 
         app.tx
             .send(BackgroundMessage::AgentFinished(vec![
@@ -810,8 +729,8 @@ mod tests {
             app.update_ui(ctx);
         });
 
-        assert!(!app.agent_running);
-        assert!(app.agent_history.is_some());
+        assert!(!app.agent.state().running);
+        assert!(app.agent.state().history.is_some());
     }
 
     #[test]
@@ -834,15 +753,24 @@ mod tests {
             app.update_ui(ctx);
         });
 
-        assert_eq!(app.agent_token_usage.as_ref().unwrap().prompt_tokens, 100);
         assert_eq!(
-            app.agent_total_usage.prompt_tokens, 100,
+            app.agent
+                .state()
+                .token_usage
+                .as_ref()
+                .unwrap()
+                .prompt_tokens,
+            100
+        );
+        assert_eq!(
+            app.agent.state().total_usage.prompt_tokens,
+            100,
             "prompt_tokens should track the peak seen so far"
         );
-        assert_eq!(app.agent_total_usage.completion_tokens, 20);
-        assert_eq!(app.agent_total_usage.total_tokens, 120);
-        assert_eq!(app.agent_total_usage.cached_tokens, Some(0));
-        assert_eq!(app.agent_total_usage.reasoning_tokens, Some(0));
+        assert_eq!(app.agent.state().total_usage.completion_tokens, 20);
+        assert_eq!(app.agent.state().total_usage.total_tokens, 120);
+        assert_eq!(app.agent.state().total_usage.cached_tokens, Some(0));
+        assert_eq!(app.agent.state().total_usage.reasoning_tokens, Some(0));
 
         // Second turn: context grew, completion + reasoning added.
         app.tx
@@ -859,15 +787,24 @@ mod tests {
             app.update_ui(ctx);
         });
 
-        assert_eq!(app.agent_token_usage.as_ref().unwrap().prompt_tokens, 250);
         assert_eq!(
-            app.agent_total_usage.prompt_tokens, 250,
+            app.agent
+                .state()
+                .token_usage
+                .as_ref()
+                .unwrap()
+                .prompt_tokens,
+            250
+        );
+        assert_eq!(
+            app.agent.state().total_usage.prompt_tokens,
+            250,
             "peak should rise with the larger turn"
         );
-        assert_eq!(app.agent_total_usage.completion_tokens, 50);
-        assert_eq!(app.agent_total_usage.total_tokens, 400);
-        assert_eq!(app.agent_total_usage.cached_tokens, Some(50));
-        assert_eq!(app.agent_total_usage.reasoning_tokens, Some(5));
+        assert_eq!(app.agent.state().total_usage.completion_tokens, 50);
+        assert_eq!(app.agent.state().total_usage.total_tokens, 400);
+        assert_eq!(app.agent.state().total_usage.cached_tokens, Some(50));
+        assert_eq!(app.agent.state().total_usage.reasoning_tokens, Some(5));
 
         // Third turn: smaller context — peak should NOT shrink.
         app.tx
@@ -885,12 +822,13 @@ mod tests {
         });
 
         assert_eq!(
-            app.agent_total_usage.prompt_tokens, 250,
+            app.agent.state().total_usage.prompt_tokens,
+            250,
             "peak prompt size must not regress"
         );
-        assert_eq!(app.agent_total_usage.completion_tokens, 60);
-        assert_eq!(app.agent_total_usage.cached_tokens, Some(50));
-        assert_eq!(app.agent_total_usage.reasoning_tokens, Some(5));
+        assert_eq!(app.agent.state().total_usage.completion_tokens, 60);
+        assert_eq!(app.agent.state().total_usage.cached_tokens, Some(50));
+        assert_eq!(app.agent.state().total_usage.reasoning_tokens, Some(5));
     }
 
     // -- process_file_events: tab reload on file Updated --
@@ -1011,7 +949,9 @@ mod tests {
             "markdown files must appear in the workspace tree"
         );
         assert!(
-            app.file_processor.all_dirs.contains(&PathBuf::from("/tmp/lib")),
+            app.file_processor
+                .all_dirs
+                .contains(&PathBuf::from("/tmp/lib")),
             "directories containing workspace files must appear in the tree"
         );
 
@@ -1112,7 +1052,9 @@ mod tests {
         // Pre-populate tag manager so the tag exists.
         app.tag_manager
             .add_tags(PathBuf::from("/lib/notes.md"), vec!["work".to_string()]);
-        app.file_processor.all_files.push(PathBuf::from("/lib/notes.md"));
+        app.file_processor
+            .all_files
+            .push(PathBuf::from("/lib/notes.md"));
 
         // A `Removed` event must trigger `rebuid`, which
         // evicts the file's tags.
