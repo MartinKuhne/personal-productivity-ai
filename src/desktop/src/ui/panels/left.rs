@@ -203,7 +203,7 @@ mod tests {
 
         let file1 = lib_dir.join("notes.md");
         let file2 = lib_dir.join("archived.md");
-        app.all_files = vec![file1.clone(), file2.clone()];
+        app.file_processor.all_files = vec![file1.clone(), file2.clone()];
         app.tag_manager
             .add_tags(file1.clone(), vec!["work".to_string()]);
         app.tag_manager
@@ -244,7 +244,7 @@ mod tests {
             readonly: false,
             priority: 0,
         });
-        app.all_files = vec![lib_dir.join("doc.md")];
+        app.file_processor.all_files = vec![lib_dir.join("doc.md")];
         app.left_panel_dirty = false;
 
         let _ = ctx.run(Default::default(), |ctx| {
@@ -276,7 +276,7 @@ mod tests {
         });
 
         let long_name = "a".repeat(500);
-        app.all_files = vec![lib_dir.join(format!("{}.md", long_name))];
+        app.file_processor.all_files = vec![lib_dir.join(format!("{}.md", long_name))];
         app.indexing_finished = true;
         app.indexing_finished_handled = false;
 
