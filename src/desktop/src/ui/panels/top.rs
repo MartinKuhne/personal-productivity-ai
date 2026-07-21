@@ -82,7 +82,7 @@ pub fn show_top_panel(app: &mut FastMdApp, ctx: &egui::Context) {
 
             ui.label(build_indexing_status_text(
                 app.indexing_finished,
-                app.all_files.len(),
+                app.file_processor.all_files.len(),
             ));
 
             if app.indexing_finished {

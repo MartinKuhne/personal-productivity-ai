@@ -15,10 +15,10 @@ pub fn show_move_modal(app: &mut FastMdApp, ctx: &egui::Context) {
                 for lib in &app.content_libraries {
                     folders.insert(std::path::PathBuf::from(&lib.root_folder));
                 }
-                for dir in &app.all_dirs {
+                for dir in &app.file_processor.all_dirs {
                     folders.insert(dir.clone());
                 }
-                for file in &app.all_files {
+                for file in &app.file_processor.all_files {
                     if let Some(parent) = file.parent() {
                         folders.insert(parent.to_path_buf());
                     }
@@ -116,8 +116,8 @@ pub fn show_create_dir_modal(app: &mut FastMdApp, ctx: &egui::Context) {
                                             "Failed to create new directory. Likely cause: permission denied or invalid path. Operator should verify permissions on parent directory."
                                         );
                                     } else {
-                                        if !app.all_dirs.contains(&new_dir_path) {
-                                            app.all_dirs.push(new_dir_path.clone());
+                                        if !app.file_processor.all_dirs.contains(&new_dir_path) {
+                                            app.file_processor.all_dirs.push(new_dir_path.clone());
                                         }
                                         if let Some(watcher) = &mut app._watcher {
                                             use notify::Watcher;
@@ -208,11 +208,11 @@ pub fn show_rename_modal(app: &mut FastMdApp, ctx: &egui::Context) {
                                         }
                                         // Update directory tree immediately (not waiting
                                         // for the filesystem watcher).
-                                        app.all_files.retain(|p| p != file);
-                                        if app.all_dirs.contains(file) {
-                                            app.all_dirs.retain(|p| p != file);
-                                            if !app.all_dirs.contains(&new_path) {
-                                                app.all_dirs.push(new_path.clone());
+                                        app.file_processor.all_files.retain(|p| p != file);
+                                        if app.file_processor.all_dirs.contains(file) {
+                                            app.file_processor.all_dirs.retain(|p| p != file);
+                                            if !app.file_processor.all_dirs.contains(&new_path) {
+                                                app.file_processor.all_dirs.push(new_path.clone());
                                             }
                                         }
                                         let ext = new_path
@@ -220,8 +220,8 @@ pub fn show_rename_modal(app: &mut FastMdApp, ctx: &egui::Context) {
                                             .and_then(|e| e.to_str())
                                             .unwrap_or("");
                                         if ext == "md" || ext == "markdown" {
-                                            if !app.all_files.contains(&new_path) {
-                                                app.all_files.push(new_path.clone());
+                                            if !app.file_processor.all_files.contains(&new_path) {
+                                                app.file_processor.all_files.push(new_path.clone());
                                             }
                                         }
                                         let tags =
@@ -279,7 +279,7 @@ mod tests {
 
         app.move_dialog_open = true;
         app.file_to_move = Some(src_file.clone());
-        app.all_dirs.push(dest_dir.clone());
+        app.file_processor.all_dirs.push(dest_dir.clone());
         app.selected_move_folder = Some(dest_dir.clone());
 
         let _ = ctx.run(Default::default(), |ctx| {

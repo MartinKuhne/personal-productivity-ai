@@ -19,7 +19,7 @@
 //! thread panics or is shut down.
 
 use std::path::PathBuf;
-use std::sync::mpsc::{Receiver, Sender, channel};
+use std::sync::mpsc::{channel, Receiver, Sender};
 use std::sync::{Arc, Mutex};
 
 /// What happened to a file in one of the configured content libraries.
@@ -147,6 +147,11 @@ pub struct BusReader<T> {
 }
 
 impl<T> BusReader<T> {
+    /// Create a BusReader from an existing receiver (for testing).
+    pub fn new(rx: Receiver<T>) -> Self {
+        Self { rx }
+    }
+
     /// Try to receive an event without blocking. Returns immediately
     /// with `Err(TryRecvError::Empty)` if no event is available.
     pub fn try_recv(&self) -> Result<T, std::sync::mpsc::TryRecvError> {
@@ -171,8 +176,8 @@ impl<T> BusReader<T> {
 mod tests {
     use super::*;
     use std::collections::HashSet;
-    use std::sync::Arc;
     use std::sync::atomic::{AtomicUsize, Ordering};
+    use std::sync::Arc;
     use std::thread;
     use std::time::Duration;
 

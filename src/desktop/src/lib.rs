@@ -7,6 +7,7 @@ pub mod config;
 pub mod document;
 pub mod editor;
 pub mod file_events;
+pub mod file_processor;
 pub mod messages;
 pub mod print;
 pub mod tag_manager;

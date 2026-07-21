@@ -45,17 +45,9 @@ pub struct FastMdApp {
     pub content_libraries: Vec<crate::config::ContentLibrary>,
     pub rx: Receiver<BackgroundMessage>,
     pub tx: std::sync::mpsc::Sender<BackgroundMessage>,
-    /// Shared bus for `FileEvent`s. The app keeps a clone so it can
-    /// publish events from UI handlers (e.g. editor save, rename
-    /// modal) and pass the bus to the agent and the tool registry.
     pub file_event_bus: crate::file_events::Bus<crate::file_events::FileEvent>,
-    /// Subscriber end of the file-event bus. Receives `Discovered`,
-    /// `Updated`, and `Removed` events from the initial scan and the
-    /// file system watcher. Owned by the app so the directory tree can
-    /// react to new / changed / deleted files.
     pub file_event_reader: Option<crate::file_events::BusReader<crate::file_events::FileEvent>>,
-    pub all_files: Vec<PathBuf>,
-    pub all_dirs: Vec<PathBuf>,
+    pub file_processor: FileEventProcessor,
     pub tag_manager: TagManager,
     pub selected_tag: Option<String>,
     pub indexing_finished: bool,
@@ -89,6 +81,7 @@ pub struct FastMdApp {
     pub command_input: String,
     pub toc: Vec<ToCEntry>,
     pub scroll_to_header_id: Option<egui::Id>,
+
     pub _watcher: Option<notify::RecommendedWatcher>,
 
     pub show_agent_results: bool,
@@ -99,13 +92,7 @@ pub struct FastMdApp {
     pub agent_scroll_to_id: Option<egui::Id>,
     pub agent_cancel_flag: Option<std::sync::Arc<std::sync::atomic::AtomicBool>>,
     pub agent_history: Option<Vec<serde_json::Value>>,
-    /// Token usage from the most recent LLM turn. `prompt_tokens` here is
-    /// the size of the full conversation context the model just saw, so
-    /// it is what you'd compare against the model's context window.
     pub agent_token_usage: Option<TokenUsageInfo>,
-    /// Cumulative token usage across every LLM turn in the current session.
-    /// `prompt_tokens` is the peak seen; `completion_tokens` and the
-    /// optional detail fields are summed.
     pub agent_total_usage: TokenUsageInfo,
     pub left_panel_reset_count: u32,
     pub submit_prompt: Option<String>,
@@ -114,7 +101,6 @@ pub struct FastMdApp {
     pub background_manager: SharedProcessManager,
     pub show_background_logs: bool,
     pub config: crate::config::AppConfig,
-    // Batch processing state
     pub batch_dialog_open: bool,
     pub batch_dialog_config: BatchDialogConfig,
     pub batch_handle: Option<BatchHandle>,
@@ -122,77 +108,12 @@ pub struct FastMdApp {
 }
 
 impl FastMdApp {
-    /// Drain pending `FileEvent`s from the bus and update the
-    /// directory tree's `all_files` and `all_dirs` collections.
-    ///
-    /// The tag manager has its own consumer in
-    /// `background_task.rs` (the worker threads that extract tags
-    /// and send `BackgroundMessage`). This consumer only handles
-    /// the directory tree. Both run in parallel and never block
-    /// each other.
+    /// Drain pending `FileEvent`s from the bus and update.
     ///
     /// Returns `true` if any event was processed, so callers can
     /// schedule a follow-up UI repaint.
     fn process_file_events(&mut self) -> bool {
-        let Some(reader) = self.file_event_reader.as_ref() else {
-            return false;
-        };
-        let mut changed = false;
-        let mut loaded_dirty = false;
-        let mut had_removal = false;
-        loop {
-            match reader.try_recv() {
-                Ok(event) => {
-                    use crate::file_events::FileEventKind;
-                    match event.kind {
-                        FileEventKind::Discovered | FileEventKind::Updated => {
-                            if Self::is_workspace_file(&event.path) {
-                                if !self.all_files.contains(&event.path) {
-                                    self.all_files.push(event.path.clone());
-                                    changed = true;
-                                }
-                                if let Some(parent) = event.path.parent() {
-                                    if !self.all_dirs.contains(&parent.to_path_buf()) {
-                                        self.all_dirs.push(parent.to_path_buf());
-                                        changed = true;
-                                    }
-                                }
-                            }
-                            if self.loaded_path.as_ref() == Some(&event.path)
-                                && !self.editor_state.is_open
-                            {
-                                self.loaded_path = None;
-                                loaded_dirty = true;
-                            }
-                        }
-                        FileEventKind::Removed => {
-                            had_removal = true;
-                            if Self::is_workspace_file(&event.path) {
-                                self.all_files.retain(|p| p != &event.path);
-                            }
-                            self.tag_manager.remove_file(&event.path);
-                            if self.selected_file.as_ref() == Some(&event.path) {
-                                self.selected_file = None;
-                                self.current_yaml = None;
-                                self.current_markdown.clear();
-                                self.toc.clear();
-                            }
-                            self.selected_files.remove(&event.path);
-                            if self.loaded_path.as_ref() == Some(&event.path) {
-                                self.loaded_path = None;
-                            }
-                            changed = true;
-                        }
-                    }
-                }
-                Err(std::sync::mpsc::TryRecvError::Empty) => break,
-                Err(std::sync::mpsc::TryRecvError::Disconnected) => break,
-            }
-        }
-        if had_removal {
-            self.tag_manager.rebuild();
-        }
-        changed || loaded_dirty
+        self.file_processor.process_events()
     }
 
     /// Returns `true` if `path` is a user-editable workspace file
@@ -285,12 +206,8 @@ impl FastMdApp {
         }
 
         let background_task = Task::new(config.clone());
-        // Subscribe to the file-event bus so the directory tree can
-        // react to Discovered/Updated/Removed events. Subscribing
-        // before the task starts means we'll receive the full initial
-        // scan output (the bus retains a reference to our channel
-        // until the task's initial scan finishes).
         let file_event_reader = background_task.file_event_bus.subscribe();
+        let file_processor = FileEventProcessor::new(file_event_reader);
         let background_manager = Arc::new(Mutex::new(BackgroundProcessManager::new()));
         let inline_editor_enabled = config.inline_editor_enabled;
 
@@ -308,6 +225,47 @@ impl FastMdApp {
             tx: background_task.tx,
             file_event_bus: background_task.file_event_bus,
             file_event_reader: Some(file_event_reader),
+            file_processor,
+            tag_manager: TagManager::new(),
+            selected_tag: None,
+            indexing_finished: false,
+            indexing_finished_handled: false,
+            left_panel_width: None,
+            left_panel_dirty: false,
+            selected_file: None,
+            selected_files: HashSet::new(),
+            selected_dir: None,
+            expanded_dirs: HashSet::new(),
+            loaded_path: None,
+            current_yaml: None,
+            current_markdown: String::new(),
+            tabs: Vec::new(),
+            move_dialog_open: false,
+            file_to_move: None,
+            selected_move_folder: None,
+            create_dir_dialog_open: false,
+            create_dir_parent: None,
+            create_dir_name: String::new(),
+            rename_dialog_open: false,
+            file_to_rename: None,
+            rename_new_name: String::new(),
+            command_input: String::new(),
+            toc: Vec::new(),
+            scroll_to_header_id: None,
+            _watcher: None,
+            show_agent_results: false,
+            agent_running: false,
+            agent_status: String::new(),
+            agent_thinking: String::new(),
+            agent_response: String::new(),
+            agent_scroll_to_id: None,
+            agent_cancel_flag: None,
+            agent_history: None,
+            agent_token_usage: None,
+            agent_total_usage: TokenUsageInfo::default(),
+            left_panel_reset_count: 0,
+            submit_prompt: None,
+            editor_state: crate::editor::EditorState::default(),
             inline_editor_enabled,
             background_manager,
             show_background_logs: false,
@@ -316,7 +274,6 @@ impl FastMdApp {
             batch_dialog_config,
             batch_handle: None,
             batch_cancel_flag: None,
-            ..Self::empty_state()
         }
     }
 
@@ -334,8 +291,11 @@ impl FastMdApp {
             tx,
             file_event_bus: crate::file_events::Bus::new(),
             file_event_reader: None,
-            all_files: Vec::new(),
-            all_dirs: Vec::new(),
+            file_processor: FileEventProcessor {
+                reader: crate::file_events::BusReader::new(std::sync::mpsc::channel().1), // dummy
+                all_files: Vec::new(),
+                all_dirs: Vec::new(),
+            },
             tag_manager: TagManager::new(),
             selected_tag: None,
             indexing_finished: false,
@@ -385,6 +345,7 @@ impl FastMdApp {
             batch_handle: None,
             batch_cancel_flag: None,
         }
+    }
     }
 
     /// Purpose: Submits a prompt to the agent and starts a new session, taking ownership of all relevant state.
@@ -475,13 +436,13 @@ impl FastMdApp {
             match msg {
                 BackgroundMessage::FileParsed { path, tags } => {
                     self.tag_manager.add_tags(path.clone(), tags);
-                    if !self.all_files.contains(&path) {
-                        self.all_files.push(path);
+                    if !self.file_processor.all_files.contains(&path) {
+                        self.file_processor.all_files.push(path);
                     }
                 }
                 BackgroundMessage::DirParsed { path } => {
-                    if !self.all_dirs.contains(&path) {
-                        self.all_dirs.push(path);
+                    if !self.file_processor.all_dirs.contains(&path) {
+                        self.file_processor.all_dirs.push(path);
                     }
                 }
                 BackgroundMessage::Finished(watcher) => {
@@ -493,18 +454,26 @@ impl FastMdApp {
                     self.indexing_finished = true;
                     self.tag_manager.rebuild();
                 }
-                BackgroundMessage::FileModified { path, tags } => {
+BackgroundMessage::FileModified { path, tags } => {
                     self.tag_manager.add_tags(path.clone(), tags);
-                    if !self.all_files.contains(&path) {
-                        self.all_files.push(path.clone());
+                    if !self.file_processor.all_files.contains(&path) {
+                        self.file_processor.all_files.push(path.clone());
                     }
+                    self.tag_manager.rebuild();
+                    if self.loaded_path.as_ref() == Some(&path) {
+                        self.loaded_path = None;
+                    }
+                }
+                BackgroundMessage::FileDeleted { path } => {
+                    self.file_processor.all_files.retain(|p| p != &path);
+                    self.tag_manager.remove_file(&path);
                     self.tag_manager.rebuild();
                     if self.loaded_path.as_ref() == Some(&path) {
                         self.loaded_path = None; // Trigger reload
                     }
                 }
                 BackgroundMessage::FileDeleted { path } => {
-                    self.all_files.retain(|p| p != &path);
+                    self.file_processor.all_files.retain(|p| p != &path);
                     self.tag_manager.remove_file(&path);
                     self.tag_manager.rebuild();
                     if self.selected_file.as_ref() == Some(&path) {
@@ -764,8 +733,8 @@ mod tests {
             app.update_ui(ctx);
         });
 
-        assert!(app.all_files.contains(&test_file));
-        assert!(app.all_dirs.contains(&test_dir));
+        assert!(app.file_processor.all_files.contains(&test_file));
+        assert!(app.file_processor.all_dirs.contains(&test_dir));
         assert!(app.indexing_finished);
         assert_eq!(app.agent_status, "Processing...");
         assert_eq!(app.agent_thinking, "Thinking step");
@@ -778,7 +747,7 @@ mod tests {
         let mut app = create_test_app();
         let file_path = PathBuf::from("modified_file.md");
 
-        app.all_files.push(file_path.clone());
+        app.file_processor.all_files.push(file_path.clone());
         app.selected_file = Some(file_path.clone());
         app.selected_files.insert(file_path.clone());
         app.loaded_path = Some(file_path.clone());
@@ -808,7 +777,7 @@ mod tests {
             app.update_ui(ctx);
         });
 
-        assert!(!app.all_files.contains(&file_path));
+        assert!(!app.file_processor.all_files.contains(&file_path));
         assert!(app.selected_file.is_none());
         assert!(!app.selected_files.contains(&file_path));
     }
@@ -940,7 +909,7 @@ mod tests {
 
         app.selected_file = Some(path.clone());
         app.loaded_path = Some(path.clone());
-        app.all_files.push(path.clone());
+        app.file_processor.all_files.push(path.clone());
 
         // Subscribe a reader to the bus so we can publish into it
         // and have process_file_events pick up the event.
@@ -972,7 +941,7 @@ mod tests {
 
         app.selected_file = Some(path.clone());
         app.loaded_path = Some(path.clone());
-        app.all_files.push(path.clone());
+        app.file_processor.all_files.push(path.clone());
         app.editor_state.open(&path, "old content");
         assert!(app.editor_state.is_open);
 
@@ -998,7 +967,7 @@ mod tests {
 
         app.selected_file = Some(path.clone());
         app.loaded_path = Some(path.clone());
-        app.all_files.push(path.clone());
+        app.file_processor.all_files.push(path.clone());
 
         app.file_event_reader = Some(app.file_event_bus.subscribe());
         let publisher = app.file_event_bus.clone();
@@ -1038,11 +1007,11 @@ mod tests {
         // The markdown file should be in the tree and its
         // parent should be in `all_dirs`.
         assert!(
-            app.all_files.contains(&md),
+            app.file_processor.all_files.contains(&md),
             "markdown files must appear in the workspace tree"
         );
         assert!(
-            app.all_dirs.contains(&PathBuf::from("/tmp/lib")),
+            app.file_processor.all_dirs.contains(&PathBuf::from("/tmp/lib")),
             "directories containing workspace files must appear in the tree"
         );
 
@@ -1050,18 +1019,18 @@ mod tests {
         // they were published to the bus (the converters need
         // them).
         assert!(
-            !app.all_files.contains(&pdf),
+            !app.file_processor.all_files.contains(&pdf),
             "PDFs must not appear in the workspace tree"
         );
         assert!(
-            !app.all_files.contains(&img),
+            !app.file_processor.all_files.contains(&img),
             "images must not appear in the workspace tree"
         );
 
         // A directory that contains only a PDF must not be added
         // to `all_dirs`.
         assert!(
-            !app.all_dirs.contains(&pdf_only_dir),
+            !app.file_processor.all_dirs.contains(&pdf_only_dir),
             "directories that contain only non-workspace files must not appear in the tree"
         );
     }
@@ -1143,7 +1112,7 @@ mod tests {
         // Pre-populate tag manager so the tag exists.
         app.tag_manager
             .add_tags(PathBuf::from("/lib/notes.md"), vec!["work".to_string()]);
-        app.all_files.push(PathBuf::from("/lib/notes.md"));
+        app.file_processor.all_files.push(PathBuf::from("/lib/notes.md"));
 
         // A `Removed` event must trigger `rebuid`, which
         // evicts the file's tags.
