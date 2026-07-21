@@ -9,7 +9,7 @@ pub fn show_left_panel(app: &mut FastMdApp, ctx: &egui::Context) {
         .all_files
         .iter()
         .filter(|p| {
-            if let Some(active_tag) = &app.selected_tag {
+            if let Some(active_tag) = &app.tag_manager.selected_tag {
                 if let Some(tags) = app.tag_manager.file_tags().get(*p) {
                     tags.contains(active_tag)
                 } else {
@@ -74,8 +74,10 @@ pub fn show_left_panel(app: &mut FastMdApp, ctx: &egui::Context) {
         }
     }
 
-    if (app.indexing_finished && !app.indexing_finished_handled) || app.left_panel_dirty {
-        app.indexing_finished_handled = true;
+    if (app.file_processor.indexing_finished && !app.file_processor.indexing_finished_handled)
+        || app.layout.left_panel_dirty
+    {
+        app.file_processor.indexing_finished_handled = true;
         fn calc_max_width(node: &TreeNode, depth: usize, ctx: &egui::Context) -> f32 {
             let mut max_w = 0.0_f32;
             for child in node.children.values() {
@@ -102,15 +104,20 @@ pub fn show_left_panel(app: &mut FastMdApp, ctx: &egui::Context) {
         }
         let calculated = calc_max_width(&root_node, 0, ctx);
         let max_allowed = ctx.available_rect().width() * 0.2;
-        app.left_panel_width = Some(calculated.min(max_allowed));
-        app.left_panel_reset_count += 1;
-        app.left_panel_dirty = false;
+        app.layout.left_panel_width = Some(calculated.min(max_allowed));
+        app.layout.left_panel_reset_count += 1;
+        app.layout.left_panel_dirty = false;
     }
 
     let max_w = ctx.available_rect().width() * 0.2;
-    let default_w = app.left_panel_width.unwrap_or(280.0).max(180.0).min(max_w);
+    let default_w = app
+        .layout
+        .left_panel_width
+        .unwrap_or(280.0)
+        .max(180.0)
+        .min(max_w);
 
-    egui::SidePanel::left(egui::Id::new("left_panel").with(app.left_panel_reset_count))
+    egui::SidePanel::left(egui::Id::new("left_panel").with(app.layout.left_panel_reset_count))
         .resizable(true)
         .default_width(default_w)
         .max_width(max_w)
@@ -135,19 +142,19 @@ pub fn show_left_panel(app: &mut FastMdApp, ctx: &egui::Context) {
                             b.is_dir.cmp(&a.is_dir).then_with(|| a.name.cmp(&b.name))
                         });
                         let modifiers = ui.input(|i| i.modifiers);
+                        let selection = &mut app.selection;
                         for child in children {
                             let mut ctx = TreeNodeContext {
-                                expanded_dirs: &mut app.expanded_dirs,
-                                selected_file: &mut app.selected_file,
-                                selected_files: &mut app.selected_files,
-                                tabs: &mut app.tabs,
+                                expanded_dirs: &mut selection.expanded_dirs,
+                                selected_file: &mut selection.selected_file,
+                                selected_files: &mut selection.selected_files,
+                                tabs: &mut app.tab_manager.tabs,
                                 file_to_move: &mut app.dialogs.file_to_move,
                                 move_dialog_open: &mut app.dialogs.move_dialog_open,
-                                selected_dir: &mut app.selected_dir,
+                                selected_dir: &mut selection.selected_dir,
                                 create_dir_dialog_open: &mut app.dialogs.create_dir_dialog_open,
                                 create_dir_parent: &mut app.dialogs.create_dir_parent,
-                                left_panel_reset_count: &mut app.left_panel_reset_count,
-                                left_panel_dirty: &mut app.left_panel_dirty,
+                                layout: &mut app.layout,
                                 rename_dialog_open: &mut app.dialogs.rename_dialog_open,
                                 file_to_rename: &mut app.dialogs.file_to_rename,
                                 rename_new_name: &mut app.dialogs.rename_new_name,
@@ -186,20 +193,20 @@ mod tests {
     fn test_show_left_panel_empty() {
         let ctx = egui::Context::default();
         let mut app = create_test_app();
-        app.left_panel_dirty = false;
+        app.layout.left_panel_dirty = false;
 
         let _ = ctx.run(Default::default(), |ctx| {
             show_left_panel(&mut app, ctx);
         });
 
-        assert_eq!(app.left_panel_reset_count, 0);
+        assert_eq!(app.layout.left_panel_reset_count, 0);
     }
 
     #[test]
     fn test_show_left_panel_with_libraries_and_files() {
         let ctx = egui::Context::default();
         let mut app = create_test_app();
-        app.left_panel_dirty = false;
+        app.layout.left_panel_dirty = false;
 
         let lib_dir = std::env::temp_dir().join("fastmd_left_test_lib");
         app.content_libraries.push(crate::config::ContentLibrary {
@@ -224,21 +231,21 @@ mod tests {
         });
 
         // 2. With tag filter matching file1
-        app.selected_tag = Some("work".to_string());
+        app.tag_manager.selected_tag = Some("work".to_string());
         let _ = ctx.run(Default::default(), |ctx| {
             show_left_panel(&mut app, ctx);
         });
 
         // 3. Indexing finished width calculation
-        app.indexing_finished = true;
-        app.indexing_finished_handled = false;
+        app.file_processor.indexing_finished = true;
+        app.file_processor.indexing_finished_handled = false;
         let _ = ctx.run(Default::default(), |ctx| {
             show_left_panel(&mut app, ctx);
         });
 
-        assert!(app.indexing_finished_handled);
-        assert!(app.left_panel_width.is_some());
-        assert_eq!(app.left_panel_reset_count, 1);
+        assert!(app.file_processor.indexing_finished_handled);
+        assert!(app.layout.left_panel_width.is_some());
+        assert_eq!(app.layout.left_panel_reset_count, 1);
     }
 
     #[test]
@@ -254,21 +261,21 @@ mod tests {
             priority: 0,
         });
         app.file_processor.all_files = vec![lib_dir.join("doc.md")];
-        app.left_panel_dirty = false;
+        app.layout.left_panel_dirty = false;
 
         let _ = ctx.run(Default::default(), |ctx| {
             show_left_panel(&mut app, ctx);
         });
-        assert_eq!(app.left_panel_reset_count, 0);
-        assert!(!app.left_panel_dirty);
+        assert_eq!(app.layout.left_panel_reset_count, 0);
+        assert!(!app.layout.left_panel_dirty);
 
-        app.left_panel_dirty = true;
+        app.layout.left_panel_dirty = true;
         let _ = ctx.run(Default::default(), |ctx| {
             show_left_panel(&mut app, ctx);
         });
-        assert_eq!(app.left_panel_reset_count, 1);
-        assert!(!app.left_panel_dirty);
-        assert!(app.left_panel_width.is_some());
+        assert_eq!(app.layout.left_panel_reset_count, 1);
+        assert!(!app.layout.left_panel_dirty);
+        assert!(app.layout.left_panel_width.is_some());
     }
 
     #[test]
@@ -286,8 +293,8 @@ mod tests {
 
         let long_name = "a".repeat(500);
         app.file_processor.all_files = vec![lib_dir.join(format!("{}.md", long_name))];
-        app.indexing_finished = true;
-        app.indexing_finished_handled = false;
+        app.file_processor.indexing_finished = true;
+        app.file_processor.indexing_finished_handled = false;
 
         let mut inside_available: f32 = 0.0;
         let _ = ctx.run(Default::default(), |ctx| {
@@ -295,7 +302,7 @@ mod tests {
             show_left_panel(&mut app, ctx);
         });
 
-        let stored = app.left_panel_width.expect("width should be set");
+        let stored = app.layout.left_panel_width.expect("width should be set");
         let cap_at_recalc_time = inside_available * 0.2;
         assert!(
             stored <= cap_at_recalc_time + 0.5,

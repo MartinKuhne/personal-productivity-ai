@@ -129,19 +129,19 @@ fn render_agent_session(ui: &mut egui::Ui, app: &mut FastMdApp) {
 /// Inputs: `ui` - Egui UI context, `app` - FastMdApp state.
 /// Outputs: None.
 /// Purity: Impure (performs UI rendering).
-/// Preconditions: `app.tabs` is not empty.
+/// Preconditions: `app.tab_manager.tabs` is not empty.
 /// Postconditions: Rendered tabs and file content.
 fn render_tabs_and_content(ui: &mut egui::Ui, app: &mut FastMdApp) {
     ui.horizontal(|ui| {
         let mut tab_action = None;
 
-        for (i, tab_path) in app.tabs.iter().enumerate() {
-            let is_selected = app.selected_file.as_ref() == Some(tab_path);
+        for (i, tab_path) in app.tab_manager.tabs.iter().enumerate() {
+            let is_selected = app.selection.selected_file() == Some(tab_path);
             let title = tab_path.file_name().unwrap_or_default().to_string_lossy();
 
             let response = ui.selectable_label(is_selected, title);
             if response.clicked() {
-                app.selected_file = Some(tab_path.clone());
+                *app.selection.selected_file_mut() = Some(tab_path.clone());
             }
             if response.middle_clicked() {
                 tab_action = Some(TabAction::Close(i));
@@ -187,7 +187,7 @@ fn render_tabs_and_content(ui: &mut egui::Ui, app: &mut FastMdApp) {
                     let now = chrono::Local::now();
                     let date_str = now.to_rfc3339();
                     app.submit_prompt = Some(generate_format_prompt(&date_str));
-                    app.selected_file = Some(tab_path.clone());
+                    *app.selection.selected_file_mut() = Some(tab_path.clone());
                     ui.close_menu();
                 }
             });
@@ -199,12 +199,16 @@ fn render_tabs_and_content(ui: &mut egui::Ui, app: &mut FastMdApp) {
         }
 
         if let Some(action) = tab_action {
-            apply_tab_action(&mut app.tabs, &mut app.selected_file, action);
+            apply_tab_action(
+                &mut app.tab_manager.tabs,
+                app.selection.selected_file_mut(),
+                action,
+            );
         }
     });
     ui.separator();
 
-    if let Some(selected_path) = &app.selected_file {
+    if let Some(selected_path) = app.selection.selected_file() {
         ui.horizontal(|ui| {
             ui.heading(
                 RichText::new(
@@ -228,10 +232,14 @@ fn render_tabs_and_content(ui: &mut egui::Ui, app: &mut FastMdApp) {
         egui::ScrollArea::vertical()
             .id_source("main_markdown_scroll")
             .show(ui, |ui| {
-                if let Some(yaml) = &app.current_yaml {
+                if let Some(yaml) = &app.tab_manager.current_yaml {
                     render_yaml_table(ui, yaml);
                 }
-                render_markdown(ui, &app.current_markdown, &mut app.scroll_to_header_id);
+                render_markdown(
+                    ui,
+                    &app.tab_manager.current_markdown,
+                    &mut app.tab_manager.scroll_to_header_id,
+                );
             });
     }
 }
@@ -263,7 +271,7 @@ pub fn show_center_panel(app: &mut FastMdApp, ctx: &egui::Context) {
     egui::CentralPanel::default().show(ctx, |ui| {
         if app.show_agent_results {
             render_agent_session(ui, app);
-        } else if !app.tabs.is_empty() {
+        } else if !app.tab_manager.tabs.is_empty() {
             render_tabs_and_content(ui, app);
         } else {
             render_empty_state(ui);
@@ -409,10 +417,10 @@ mod tests {
         });
 
         // Mode 2: Tabs and content state
-        app.tabs = vec![PathBuf::from("doc1.md"), PathBuf::from("doc2.md")];
-        app.selected_file = Some(PathBuf::from("doc1.md"));
-        app.current_markdown = "# Document 1 Header".to_string();
-        app.current_yaml = Some(serde_yaml::from_str("title: Doc 1").unwrap());
+        app.tab_manager.tabs = vec![PathBuf::from("doc1.md"), PathBuf::from("doc2.md")];
+        *app.selection.selected_file_mut() = Some(PathBuf::from("doc1.md"));
+        app.tab_manager.current_markdown = "# Document 1 Header".to_string();
+        app.tab_manager.current_yaml = Some(serde_yaml::from_str("title: Doc 1").unwrap());
 
         let _ = ctx.run(Default::default(), |ctx| {
             show_center_panel(&mut app, ctx);

@@ -71,6 +71,8 @@ impl<'a> ToolContext<'a> {
             FileEventKind::Discovered => producer.publish_discovered(path),
             FileEventKind::Updated => producer.publish_updated(path),
             FileEventKind::Removed => producer.publish_removed(path),
+            FileEventKind::DirDiscovered => producer.publish_dir_discovered(path),
+            FileEventKind::DirRemoved => producer.publish_dir_removed(path),
         }
     }
 

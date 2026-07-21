@@ -11,6 +11,7 @@ pub struct BackgroundProcessManager {
     pub filter_category: Option<LogCategory>,
     pub search_text: String,
     pub auto_scroll: bool,
+    pub show_background_logs: bool,
 }
 
 impl Default for BackgroundProcessManager {
@@ -20,6 +21,7 @@ impl Default for BackgroundProcessManager {
             filter_category: None,
             search_text: String::new(),
             auto_scroll: true,
+            show_background_logs: false,
         }
     }
 }

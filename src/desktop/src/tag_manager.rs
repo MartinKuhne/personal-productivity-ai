@@ -12,6 +12,7 @@ pub struct TagManager {
     file_tags: BTreeMap<PathBuf, Vec<String>>,
     all_tags: BTreeSet<String>,
     prompt_paths: BTreeSet<PathBuf>,
+    pub selected_tag: Option<String>,
 }
 
 impl TagManager {
@@ -20,6 +21,7 @@ impl TagManager {
             file_tags: BTreeMap::new(),
             all_tags: BTreeSet::new(),
             prompt_paths: BTreeSet::new(),
+            selected_tag: None,
         }
     }
 

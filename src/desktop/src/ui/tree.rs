@@ -1,5 +1,6 @@
 use crate::messages::BackgroundMessage;
 use crate::print::{execute_print_blocking, PrintJob};
+use crate::ui::panel_layout::PanelLayout;
 use crate::ui::TreeNode;
 use eframe::egui;
 use std::collections::HashSet;
@@ -16,8 +17,7 @@ pub struct TreeNodeContext<'a> {
     pub selected_dir: &'a mut Option<PathBuf>,
     pub create_dir_dialog_open: &'a mut bool,
     pub create_dir_parent: &'a mut Option<PathBuf>,
-    pub left_panel_reset_count: &'a mut u32,
-    pub left_panel_dirty: &'a mut bool,
+    pub layout: &'a mut PanelLayout,
     pub rename_dialog_open: &'a mut bool,
     pub file_to_rename: &'a mut Option<PathBuf>,
     pub rename_new_name: &'a mut String,
@@ -67,10 +67,10 @@ pub fn draw_tree_node(ui: &mut egui::Ui, node: &TreeNode, ctx: &mut TreeNodeCont
             *ctx.selected_file = None;
             ctx.selected_files.clear();
             *ctx.selected_dir = Some(node.path.clone());
-            *ctx.left_panel_dirty = true;
+            ctx.layout.mark_dirty();
         }
         if response.double_clicked() {
-            *ctx.left_panel_reset_count += 1;
+            ctx.layout.left_panel_reset_count += 1;
         }
 
         response.context_menu(|ui| {
@@ -373,8 +373,7 @@ mod tests {
         let mut selected_dir = None;
         let mut create_dir_dialog_open = false;
         let mut create_dir_parent = None;
-        let mut left_panel_reset_count = 0;
-        let mut left_panel_dirty = false;
+        let mut layout = PanelLayout::new();
         let mut rename_dialog_open = false;
         let mut file_to_rename = None;
         let mut rename_new_name = String::new();
@@ -393,8 +392,7 @@ mod tests {
                     selected_dir: &mut selected_dir,
                     create_dir_dialog_open: &mut create_dir_dialog_open,
                     create_dir_parent: &mut create_dir_parent,
-                    left_panel_reset_count: &mut left_panel_reset_count,
-                    left_panel_dirty: &mut left_panel_dirty,
+                    layout: &mut layout,
                     rename_dialog_open: &mut rename_dialog_open,
                     file_to_rename: &mut file_to_rename,
                     rename_new_name: &mut rename_new_name,
@@ -445,8 +443,7 @@ mod tests {
         let mut selected_dir = None;
         let mut create_dir_dialog_open = false;
         let mut create_dir_parent = None;
-        let mut left_panel_reset_count = 0;
-        let mut left_panel_dirty = false;
+        let mut layout = PanelLayout::new();
         let mut rename_dialog_open = false;
         let mut file_to_rename = None;
         let mut rename_new_name = String::new();
@@ -466,8 +463,7 @@ mod tests {
                     selected_dir: &mut selected_dir,
                     create_dir_dialog_open: &mut create_dir_dialog_open,
                     create_dir_parent: &mut create_dir_parent,
-                    left_panel_reset_count: &mut left_panel_reset_count,
-                    left_panel_dirty: &mut left_panel_dirty,
+                    layout: &mut layout,
                     rename_dialog_open: &mut rename_dialog_open,
                     file_to_rename: &mut file_to_rename,
                     rename_new_name: &mut rename_new_name,

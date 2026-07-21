@@ -44,11 +44,11 @@ pub fn filter_logs<'a>(
 }
 
 pub fn show_background_logs_window(app: &mut FastMdApp, ctx: &egui::Context) {
-    if !app.show_background_logs {
+    if !app.background_manager.lock().unwrap().show_background_logs {
         return;
     }
 
-    let mut open = app.show_background_logs;
+    let mut open = app.background_manager.lock().unwrap().show_background_logs;
 
     egui::Window::new("Background Processes")
         .open(&mut open)
@@ -136,7 +136,7 @@ pub fn show_background_logs_window(app: &mut FastMdApp, ctx: &egui::Context) {
                 });
         });
 
-    app.show_background_logs = open;
+    app.background_manager.lock().unwrap().show_background_logs = open;
 }
 
 #[cfg(test)]
@@ -222,19 +222,19 @@ mod ui_tests {
     fn test_show_background_logs_window_closed() {
         let ctx = egui::Context::default();
         let mut app = create_test_app();
-        app.show_background_logs = false;
+        app.background_manager.lock().unwrap().show_background_logs = false;
 
         let _ = ctx.run(egui::RawInput::default(), |ctx| {
             show_background_logs_window(&mut app, ctx);
         });
-        assert!(!app.show_background_logs);
+        assert!(!app.background_manager.lock().unwrap().show_background_logs);
     }
 
     #[test]
     fn test_show_background_logs_window_open_with_logs() {
         let ctx = egui::Context::default();
         let mut app = create_test_app();
-        app.show_background_logs = true;
+        app.background_manager.lock().unwrap().show_background_logs = true;
 
         {
             let mut mgr = app.background_manager.lock().unwrap();
@@ -251,6 +251,6 @@ mod ui_tests {
         let _ = ctx.run(egui::RawInput::default(), |ctx| {
             show_background_logs_window(&mut app, ctx);
         });
-        assert!(app.show_background_logs);
+        assert!(app.background_manager.lock().unwrap().show_background_logs);
     }
 }

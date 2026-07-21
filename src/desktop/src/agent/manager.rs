@@ -36,6 +36,7 @@ pub struct AgentSessionManager {
     state: AgentState,
     cancel_flag: Option<Arc<AtomicBool>>,
     config: AppConfig,
+    pub command_input: String,
 }
 
 impl AgentSessionManager {
@@ -54,6 +55,7 @@ impl AgentSessionManager {
             },
             cancel_flag: None,
             config,
+            command_input: String::new(),
         }
     }
 

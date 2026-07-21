@@ -32,7 +32,10 @@ pub fn calculate_font_size(level: usize) -> f32 {
 }
 
 pub fn show_right_panel(app: &mut FastMdApp, ctx: &egui::Context) {
-    if should_show_panel(!app.toc.is_empty(), app.selected_file.is_some()) {
+    if should_show_panel(
+        !app.tab_manager.toc.is_empty(),
+        app.selection.selected_file().is_some(),
+    ) {
         egui::SidePanel::right("toc_panel")
             .width_range(150.0..=250.0)
             .resizable(true)
@@ -49,14 +52,14 @@ pub fn show_right_panel(app: &mut FastMdApp, ctx: &egui::Context) {
                 egui::ScrollArea::vertical()
                     .id_source("right_toc_scroll")
                     .show(ui, |ui| {
-                        for entry in &app.toc {
+                        for entry in &app.tab_manager.toc {
                             let indent = calculate_indent(entry.level as usize);
                             ui.horizontal(|ui| {
                                 ui.add_space(indent);
                                 let label = egui::RichText::new(&entry.title)
                                     .size(calculate_font_size(entry.level as usize));
                                 if ui.selectable_label(false, label).clicked() {
-                                    app.scroll_to_header_id = Some(entry.id.clone());
+                                    app.tab_manager.scroll_to_header_id = Some(entry.id.clone());
                                 }
                             });
                         }
@@ -114,12 +117,12 @@ mod ui_tests {
     fn test_show_right_panel_hidden_when_no_file() {
         let ctx = egui::Context::default();
         let mut app = create_test_app();
-        app.toc.push(ToCEntry {
+        app.tab_manager.toc.push(ToCEntry {
             title: "Header".to_string(),
             level: 1,
             id: egui::Id::new("header"),
         });
-        app.selected_file = None;
+        *app.selection.selected_file_mut() = None;
 
         let _ = ctx.run(egui::RawInput::default(), |ctx| {
             show_right_panel(&mut app, ctx);
@@ -130,17 +133,17 @@ mod ui_tests {
     fn test_show_right_panel_shown_with_toc() {
         let ctx = egui::Context::default();
         let mut app = create_test_app();
-        app.toc.push(ToCEntry {
+        app.tab_manager.toc.push(ToCEntry {
             title: "Header 1".to_string(),
             level: 1,
             id: egui::Id::new("h1"),
         });
-        app.toc.push(ToCEntry {
+        app.tab_manager.toc.push(ToCEntry {
             title: "Header 2".to_string(),
             level: 2,
             id: egui::Id::new("h2"),
         });
-        app.selected_file = Some(PathBuf::from("doc.md"));
+        *app.selection.selected_file_mut() = Some(PathBuf::from("doc.md"));
 
         let _ = ctx.run(egui::RawInput::default(), |ctx| {
             show_right_panel(&mut app, ctx);
