@@ -1,6 +1,7 @@
 use crate::config::get_config_path;
 use crate::file_events::{Bus, FileEvent};
 use crate::messages::{BackgroundMessage, TokenUsageInfo};
+use crate::tools::context::ToolContext;
 use crate::tools::{execute_tool, get_tools_schema};
 use std::path::{Path, PathBuf};
 use std::sync::mpsc::Sender;
@@ -484,7 +485,6 @@ pub fn run_agent(
                     }
                 };
                 let config_arc = std::sync::Arc::new(config.clone());
-                let root_path_arc = std::sync::Arc::new(PathBuf::new());
 
                 let mut completed_results = Vec::new();
 
@@ -509,12 +509,12 @@ pub fn run_agent(
                             .unwrap_or("{}")
                             .to_string();
                         let cfg = config_arc.clone();
-                        let rp = root_path_arc.clone();
                         let tool_call_clone = tool_call.clone();
                         let bus = file_event_bus.clone();
 
                         join_set.spawn_blocking(move || {
-                            let result = execute_tool(&cfg, &rp, &func_name, &func_args_str, &bus);
+                            let ctx = ToolContext::new(&cfg, &bus);
+                            let result = execute_tool(&ctx, &func_name, &func_args_str);
                             (tool_call_clone, call_id, func_name, func_args_str, result)
                         });
                     }
@@ -544,13 +544,8 @@ pub fn run_agent(
                         .unwrap_or("{}")
                         .to_string();
 
-                    let result = execute_tool(
-                        &config,
-                        &PathBuf::new(),
-                        &func_name,
-                        &func_args_str,
-                        &file_event_bus,
-                    );
+                    let ctx = ToolContext::new(&config, &file_event_bus);
+                    let result = execute_tool(&ctx, &func_name, &func_args_str);
                     completed_results.push((
                         tool_call.clone(),
                         call_id,
