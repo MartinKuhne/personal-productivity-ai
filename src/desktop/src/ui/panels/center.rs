@@ -3,8 +3,6 @@ use crate::ui::{generate_format_prompt, open_in_system_editor, show_in_file_expl
 use eframe::egui;
 use egui::RichText;
 use std::path::PathBuf;
-use std::sync::atomic::AtomicBool;
-use std::sync::Arc;
 
 /// Action that can be applied to tabs.
 #[derive(Debug, PartialEq, Clone)]
@@ -23,6 +21,8 @@ pub enum TabAction {
 pub fn clear_agent_session_state(app: &mut FastMdApp) {
     app.show_agent_results = false;
     app.agent.clear_history();
+    app.agent.set_response(String::new());
+    app.agent.set_thinking(String::new());
     if app.agent.state().running {
         app.agent.cancel();
     }
@@ -115,11 +115,9 @@ fn render_agent_session(ui: &mut egui::Ui, app: &mut FastMdApp) {
             if !app.agent.state().response.is_empty() {
                 ui.heading("Response");
                 ui.separator();
-                render_markdown(
-                    ui,
-                    &app.agent.state().response,
-                    &mut app.agent.state_mut().scroll_to_id,
-                );
+                let agent = &mut app.agent;
+                let response = agent.state().response.clone();
+                render_markdown(ui, &response, &mut agent.state_mut().scroll_to_id);
                 if app.agent.state().running {
                     ui.scroll_to_cursor(Some(egui::Align::BOTTOM));
                 }
@@ -278,11 +276,9 @@ mod tests {
     use super::*;
     use crate::ui::generate_format_prompt;
     use std::path::PathBuf;
-    use std::sync::atomic::{AtomicBool, Ordering};
-    use std::sync::Arc;
 
     fn create_test_app() -> FastMdApp {
-        FastMdApp::empty_state()
+        FastMdApp::empty_state(crate::config::AppConfig::default())
     }
 
     #[test]
@@ -375,9 +371,6 @@ mod tests {
 
     #[test]
     fn test_clear_agent_session_state() {
-        use std::sync::atomic::AtomicBool;
-        use std::sync::Arc;
-
         let mut app = create_test_app();
 
         // Setup agent state via manager

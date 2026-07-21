@@ -5,6 +5,7 @@ use egui::RichText;
 
 pub fn show_left_panel(app: &mut FastMdApp, ctx: &egui::Context) {
     let filtered_files: Vec<&std::path::PathBuf> = app
+        .file_processor
         .all_files
         .iter()
         .filter(|p| {
@@ -132,16 +133,16 @@ pub fn show_left_panel(app: &mut FastMdApp, ctx: &egui::Context) {
                                 selected_file: &mut app.selected_file,
                                 selected_files: &mut app.selected_files,
                                 tabs: &mut app.tabs,
-                                file_to_move: &mut app.file_to_move,
-                                move_dialog_open: &mut app.move_dialog_open,
+                                file_to_move: &mut app.dialogs.file_to_move,
+                                move_dialog_open: &mut app.dialogs.move_dialog_open,
                                 selected_dir: &mut app.selected_dir,
-                                create_dir_dialog_open: &mut app.create_dir_dialog_open,
-                                create_dir_parent: &mut app.create_dir_parent,
+                                create_dir_dialog_open: &mut app.dialogs.create_dir_dialog_open,
+                                create_dir_parent: &mut app.dialogs.create_dir_parent,
                                 left_panel_reset_count: &mut app.left_panel_reset_count,
                                 left_panel_dirty: &mut app.left_panel_dirty,
-                                rename_dialog_open: &mut app.rename_dialog_open,
-                                file_to_rename: &mut app.file_to_rename,
-                                rename_new_name: &mut app.rename_new_name,
+                                rename_dialog_open: &mut app.dialogs.rename_dialog_open,
+                                file_to_rename: &mut app.dialogs.file_to_rename,
+                                rename_new_name: &mut app.dialogs.rename_new_name,
                                 modifiers,
                                 submit_prompt: &mut app.submit_prompt,
                                 content_libraries: &app.content_libraries,
@@ -170,7 +171,7 @@ mod tests {
     use super::*;
 
     fn create_test_app() -> FastMdApp {
-        FastMdApp::empty_state()
+        FastMdApp::empty_state(crate::config::AppConfig::default())
     }
 
     #[test]

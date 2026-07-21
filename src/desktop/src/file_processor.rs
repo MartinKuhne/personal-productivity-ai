@@ -1,6 +1,5 @@
-use crate::file_events::{Bus, BusReader, FileEvent, FileEventKind};
+use crate::file_events::{BusReader, FileEvent, FileEventKind};
 use std::path::PathBuf;
-use std::sync::mpsc::Receiver;
 
 /// Processes file system events from the background indexing and watcher.
 ///
@@ -40,6 +39,7 @@ impl FileEventProcessor {
                 FileEventKind::Discovered => {
                     if !self.all_files.contains(&event.path) {
                         self.all_files.push(event.path);
+                        needs_reload = true;
                     }
                 }
                 FileEventKind::Updated => {

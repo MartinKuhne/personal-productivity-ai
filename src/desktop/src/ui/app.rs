@@ -1,11 +1,10 @@
 use crate::agent::AgentSessionManager;
 use crate::background::{BackgroundProcessManager, SharedProcessManager};
 use crate::background_task::Task;
-use crate::batch::types::{BatchDialogConfig, BatchHandle};
 use crate::file_processor::FileEventProcessor;
-use crate::messages::{BackgroundMessage, TokenUsageInfo};
+use crate::messages::BackgroundMessage;
 use crate::tag_manager::TagManager;
-use crate::ui::modals::{show_create_dir_modal, show_move_modal, show_rename_modal};
+use crate::ui::dialog_manager::DialogManager;
 use crate::ui::panels::{
     show_bottom_panel, show_center_panel, show_left_panel, show_right_panel, show_top_panel,
 };
@@ -13,7 +12,6 @@ use crate::utils::parse_front_matter;
 use eframe::egui;
 use std::collections::{BTreeMap, HashSet};
 use std::path::PathBuf;
-use std::sync::atomic::AtomicBool;
 use std::sync::mpsc::Receiver;
 use std::sync::{Arc, Mutex};
 
@@ -56,6 +54,7 @@ pub struct FastMdApp {
     pub indexing_finished_handled: bool,
     pub left_panel_width: Option<f32>,
     pub left_panel_dirty: bool,
+    pub left_panel_reset_count: u32,
 
     pub selected_file: Option<PathBuf>,
     pub selected_files: HashSet<PathBuf>,
@@ -68,18 +67,6 @@ pub struct FastMdApp {
 
     pub tabs: Vec<PathBuf>,
 
-    pub move_dialog_open: bool,
-    pub file_to_move: Option<PathBuf>,
-    pub selected_move_folder: Option<PathBuf>,
-
-    pub create_dir_dialog_open: bool,
-    pub create_dir_parent: Option<PathBuf>,
-    pub create_dir_name: String,
-
-    pub rename_dialog_open: bool,
-    pub file_to_rename: Option<PathBuf>,
-    pub rename_new_name: String,
-
     pub command_input: String,
     pub toc: Vec<ToCEntry>,
     pub scroll_to_header_id: Option<egui::Id>,
@@ -89,16 +76,14 @@ pub struct FastMdApp {
     pub show_agent_results: bool,
     /// Agent session manager - encapsulates all agent state and lifecycle.
     pub agent: AgentSessionManager,
+    /// Dialog manager - owns all modal state and rendering.
+    pub dialogs: DialogManager,
     pub submit_prompt: Option<String>,
     pub editor_state: crate::editor::EditorState,
     pub inline_editor_enabled: bool,
     pub background_manager: SharedProcessManager,
     pub show_background_logs: bool,
     pub config: crate::config::AppConfig,
-    pub batch_dialog_open: bool,
-    pub batch_dialog_config: BatchDialogConfig,
-    pub batch_handle: Option<BatchHandle>,
-    pub batch_cancel_flag: Option<Arc<AtomicBool>>,
 }
 
 impl FastMdApp {
@@ -107,7 +92,52 @@ impl FastMdApp {
     /// Returns `true` if any event was processed, so callers can
     /// schedule a follow-up UI repaint.
     fn process_file_events(&mut self) -> bool {
-        self.file_processor.process_events()
+        use crate::file_events::FileEventKind;
+
+        let mut changed = false;
+        let mut needs_rebuild = false;
+
+        if let Some(reader) = &self.file_event_reader {
+            while let Ok(event) = reader.try_recv() {
+                changed = true;
+                match event.kind {
+                    FileEventKind::Discovered => {
+                        if Self::is_workspace_file(&event.path) {
+                            if !self.file_processor.all_files.contains(&event.path) {
+                                self.file_processor.all_files.push(event.path.clone());
+                            }
+                            if let Some(parent) = event.path.parent() {
+                                let parent = parent.to_path_buf();
+                                if !self.file_processor.all_dirs.contains(&parent) {
+                                    self.file_processor.all_dirs.push(parent);
+                                }
+                            }
+                        }
+                    }
+                    FileEventKind::Updated => {
+                        if self.loaded_path.as_ref() == Some(&event.path)
+                            && !self.editor_state.is_open
+                        {
+                            self.loaded_path = None;
+                        }
+                    }
+                    FileEventKind::Removed => {
+                        self.file_processor.all_files.retain(|p| p != &event.path);
+                        if self.loaded_path.as_ref() == Some(&event.path) {
+                            self.loaded_path = None;
+                        }
+                        self.tag_manager.remove_file(&event.path);
+                        needs_rebuild = true;
+                    }
+                }
+            }
+        }
+
+        if needs_rebuild {
+            self.tag_manager.rebuild();
+        }
+
+        changed
     }
 
     /// Returns `true` if `path` is a user-editable workspace file
@@ -200,25 +230,26 @@ impl FastMdApp {
         }
 
         let background_task = Task::new(config.clone());
-        let file_event_reader = background_task.file_event_bus.subscribe();
-        let file_processor = FileEventProcessor::new(file_event_reader);
+        let file_processor = FileEventProcessor::new(background_task.file_event_bus.subscribe());
         let background_manager = Arc::new(Mutex::new(BackgroundProcessManager::new()));
         let inline_editor_enabled = config.inline_editor_enabled;
 
-        // Initialize batch dialog config with available directories and prompts
-        let mut batch_dialog_config = BatchDialogConfig::default();
+        let mut batch_dialog_config = crate::batch::types::BatchDialogConfig::default();
         batch_dialog_config.available_dirs = config
             .content_libraries
             .iter()
             .map(|lib| PathBuf::from(&lib.root_folder))
             .collect();
+        let mut dialogs = DialogManager::new();
+        dialogs.batch_dialog_config = batch_dialog_config;
 
+        let event_bus = background_task.file_event_bus;
         Self {
             content_libraries: config.content_libraries.clone(),
             rx: background_task.rx,
             tx: background_task.tx,
-            file_event_bus: background_task.file_event_bus,
-            file_event_reader: Some(file_event_reader),
+            file_event_reader: Some(event_bus.subscribe()),
+            file_event_bus: event_bus,
             file_processor,
             tag_manager: TagManager::new(),
             selected_tag: None,
@@ -226,6 +257,7 @@ impl FastMdApp {
             indexing_finished_handled: false,
             left_panel_width: None,
             left_panel_dirty: false,
+            left_panel_reset_count: 0,
             selected_file: None,
             selected_files: HashSet::new(),
             selected_dir: None,
@@ -234,32 +266,19 @@ impl FastMdApp {
             current_yaml: None,
             current_markdown: String::new(),
             tabs: Vec::new(),
-            move_dialog_open: false,
-            file_to_move: None,
-            selected_move_folder: None,
-            create_dir_dialog_open: false,
-            create_dir_parent: None,
-            create_dir_name: String::new(),
-            rename_dialog_open: false,
-            file_to_rename: None,
-            rename_new_name: String::new(),
             command_input: String::new(),
             toc: Vec::new(),
             scroll_to_header_id: None,
             _watcher: None,
             show_agent_results: false,
-            left_panel_reset_count: 0,
+            agent: AgentSessionManager::new(config.clone()),
+            dialogs,
             submit_prompt: None,
             editor_state: crate::editor::EditorState::default(),
             inline_editor_enabled,
             background_manager,
             show_background_logs: false,
             config,
-            batch_dialog_open: false,
-            batch_dialog_config,
-            batch_handle: None,
-            batch_cancel_flag: None,
-            agent: AgentSessionManager::new(config.clone()),
         }
     }
 
@@ -269,7 +288,7 @@ impl FastMdApp {
     /// Purity: Constructs a new value; no side effects.
     /// Preconditions: None.
     /// Postconditions: Caller still owns a usable `Sender<BackgroundMessage>` paired with `rx`.
-    pub fn empty_state() -> Self {
+    pub fn empty_state(config: crate::config::AppConfig) -> Self {
         let (tx, rx) = std::sync::mpsc::channel();
         Self {
             content_libraries: Vec::new(),
@@ -277,17 +296,16 @@ impl FastMdApp {
             tx,
             file_event_bus: crate::file_events::Bus::new(),
             file_event_reader: None,
-            file_processor: FileEventProcessor {
-                reader: crate::file_events::BusReader::new(std::sync::mpsc::channel().1), // dummy
-                all_files: Vec::new(),
-                all_dirs: Vec::new(),
-            },
+            file_processor: FileEventProcessor::new(crate::file_events::BusReader::new(
+                std::sync::mpsc::channel().1,
+            )),
             tag_manager: TagManager::new(),
             selected_tag: None,
             indexing_finished: false,
             indexing_finished_handled: false,
             left_panel_width: None,
             left_panel_dirty: false,
+            left_panel_reset_count: 0,
             selected_file: None,
             selected_files: HashSet::new(),
             selected_dir: None,
@@ -296,32 +314,19 @@ impl FastMdApp {
             current_yaml: None,
             current_markdown: String::new(),
             tabs: Vec::new(),
-            move_dialog_open: false,
-            file_to_move: None,
-            selected_move_folder: None,
-            create_dir_dialog_open: false,
-            create_dir_parent: None,
-            create_dir_name: String::new(),
-            rename_dialog_open: false,
-            file_to_rename: None,
-            rename_new_name: String::new(),
             command_input: String::new(),
             toc: Vec::new(),
             scroll_to_header_id: None,
             _watcher: None,
             show_agent_results: false,
             agent: AgentSessionManager::new(config.clone()),
-            left_panel_reset_count: 0,
+            dialogs: DialogManager::new(),
             submit_prompt: None,
             editor_state: crate::editor::EditorState::default(),
             inline_editor_enabled: true,
             background_manager: Arc::new(Mutex::new(BackgroundProcessManager::new())),
             show_background_logs: false,
-            config: crate::config::AppConfig::default(),
-            batch_dialog_open: false,
-            batch_dialog_config: BatchDialogConfig::default(),
-            batch_handle: None,
-            batch_cancel_flag: None,
+            config,
         }
     }
 
@@ -424,14 +429,6 @@ impl FastMdApp {
                     self.file_processor.all_files.retain(|p| p != &path);
                     self.tag_manager.remove_file(&path);
                     self.tag_manager.rebuild();
-                    if self.loaded_path.as_ref() == Some(&path) {
-                        self.loaded_path = None; // Trigger reload
-                    }
-                }
-                BackgroundMessage::FileDeleted { path } => {
-                    self.file_processor.all_files.retain(|p| p != &path);
-                    self.tag_manager.remove_file(&path);
-                    self.tag_manager.rebuild();
                     if self.selected_file.as_ref() == Some(&path) {
                         self.selected_file = None;
                         self.current_yaml = None;
@@ -490,22 +487,50 @@ impl FastMdApp {
             self.loaded_path = None;
         }
 
-        // Show modals
-        show_move_modal(self, ctx);
-        show_create_dir_modal(self, ctx);
-        show_rename_modal(self, ctx);
+        if self.dialogs.move_dialog_open {
+            crate::ui::modals::show_move_modal_dialog(
+                &mut self.dialogs,
+                &self.content_libraries,
+                &self.file_processor,
+                &self.file_event_bus,
+                ctx,
+            );
+        }
+        if self.dialogs.create_dir_dialog_open {
+            crate::ui::modals::show_create_dir_dialog(
+                &mut self.dialogs,
+                &mut self.file_processor.all_dirs,
+                &mut self._watcher,
+                ctx,
+            );
+        }
+        if self.dialogs.rename_dialog_open {
+            crate::ui::modals::show_rename_dialog(
+                &mut self.dialogs,
+                &self.file_event_bus,
+                &mut self.loaded_path,
+                &mut self.selected_file,
+                &mut self.selected_dir,
+                &mut self.tabs,
+                &mut self.file_processor,
+                &mut self.tag_manager,
+                &mut self.expanded_dirs,
+                ctx,
+            );
+        }
+
+        // Show background logs window (separate, not part of DialogManager)
         crate::ui::background_logs::show_background_logs_window(self, ctx);
 
         // Show batch processing modal
-        if self.batch_dialog_open {
-            let mut dialog_config = self.batch_dialog_config.clone();
+        if self.dialogs.batch_dialog_open {
+            let mut dialog_config = self.dialogs.batch_dialog_config.clone();
             if let Some(result) =
                 crate::batch::dialog::show_batch_modal(self, ctx, &mut dialog_config)
             {
                 match result {
                     crate::batch::types::BatchDialogResult::Process(config) => {
-                        // Only start if not already running
-                        if self.batch_handle.is_none() {
+                        if self.dialogs.batch_handle.is_none() {
                             let prompt_text = dialog_config
                                 .available_prompts
                                 .get(dialog_config.selected_prompt_idx.unwrap_or(0))
@@ -521,19 +546,18 @@ impl FastMdApp {
                                     prompt_text,
                                 );
                             let handle = coordinator.execute();
-                            self.batch_handle = Some(handle);
-                            self.batch_cancel_flag = Some(cancel_flag);
+                            self.dialogs.batch_handle = Some(handle);
+                            self.dialogs.batch_cancel_flag = Some(cancel_flag);
                         }
                     }
                     crate::batch::types::BatchDialogResult::Cancel => {
-                        self.batch_dialog_open = false;
-                        // Clear cached prompts so they're re-discovered on next open
+                        self.dialogs.batch_dialog_open = false;
                         dialog_config.available_prompts.clear();
                         dialog_config.selected_prompt_idx = None;
                     }
                 }
             }
-            self.batch_dialog_config = dialog_config;
+            self.dialogs.batch_dialog_config = dialog_config;
         }
 
         // Top panel
@@ -556,17 +580,13 @@ impl FastMdApp {
             self.start_agent_session(prompt);
         }
 
-        // Poll batch handle for completion
-        if let Some(handle) = self.batch_handle.take() {
+        if let Some(handle) = self.dialogs.batch_handle.take() {
             if handle.thread.is_finished() {
                 let result = handle.join();
-                // Clear cancel flag after completion
-                self.batch_cancel_flag = None;
-                // Could show a notification or log the result
+                self.dialogs.batch_cancel_flag = None;
                 eprintln!("Batch completed: {:?}", result);
             } else {
-                // Put it back if not finished
-                self.batch_handle = Some(handle);
+                self.dialogs.batch_handle = Some(handle);
             }
         }
     }
@@ -575,10 +595,11 @@ impl FastMdApp {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::messages::TokenUsageInfo;
     use std::path::PathBuf;
 
     fn create_test_app() -> FastMdApp {
-        FastMdApp::empty_state()
+        FastMdApp::empty_state(crate::config::AppConfig::default())
     }
 
     #[test]
