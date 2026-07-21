@@ -1,4 +1,3 @@
-use crate::agent::AgentSessionManager;
 use crate::ui::FastMdApp;
 use eframe::egui;
 use egui::RichText;
@@ -271,10 +270,9 @@ mod tests {
 #[cfg(test)]
 mod ui_tests {
     use super::*;
-    use std::sync::Arc;
 
     fn create_test_app() -> FastMdApp {
-        FastMdApp::empty_state()
+        FastMdApp::empty_state(crate::config::AppConfig::default())
     }
 
     #[test]

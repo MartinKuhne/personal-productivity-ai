@@ -4,10 +4,7 @@ use serde_json::Value;
 use std::collections::HashSet;
 use std::path::PathBuf;
 use std::sync::mpsc::Sender;
-use std::sync::{
-    atomic::{AtomicBool, Ordering},
-    Arc,
-};
+use std::sync::{atomic::AtomicBool, Arc};
 
 /// Consolidated context for running an agent session.
 ///
@@ -59,6 +56,7 @@ impl AgentContext {
 mod tests {
     use super::*;
     use crate::config::AppConfig;
+    use std::path::Path;
     use std::sync::mpsc::channel;
 
     #[test]

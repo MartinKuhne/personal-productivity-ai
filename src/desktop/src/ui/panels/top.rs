@@ -72,7 +72,7 @@ pub fn show_top_panel(app: &mut FastMdApp, ctx: &egui::Context) {
             ui.separator();
 
             if ui.button("Batch...").clicked() {
-                app.batch_dialog_open = true;
+                app.dialogs.batch_dialog_open = true;
             }
             ui.separator();
 
@@ -196,7 +196,7 @@ mod ui_tests {
     use super::*;
 
     fn create_test_app() -> FastMdApp {
-        FastMdApp::empty_state()
+        FastMdApp::empty_state(crate::config::AppConfig::default())
     }
 
     #[test]
