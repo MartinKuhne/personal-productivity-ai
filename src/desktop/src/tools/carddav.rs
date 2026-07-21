@@ -22,7 +22,9 @@ struct CardDavResponse {
 
 fn block_on<F: std::future::Future>(f: F) -> F::Output {
     static RT: OnceLock<Runtime> = OnceLock::new();
-    let rt = RT.get_or_init(|| Runtime::new().expect("Failed to create Tokio runtime"));
+    let rt = RT.get_or_init(|| Runtime::new().unwrap_or_else(|e| {
+        panic!("Failed to create Tokio runtime: {}", e)
+    }));
     rt.block_on(f)
 }
 
@@ -149,7 +151,7 @@ fn json_to_vcard(json_str: &str, uid_override: Option<&str>) -> String {
             "{}",
             std::time::SystemTime::now()
                 .duration_since(std::time::UNIX_EPOCH)
-                .unwrap()
+                .unwrap_or_default()
                 .as_millis()
         )
     });
@@ -292,7 +294,7 @@ pub fn tool_add_contact(
                 "{}",
                 std::time::SystemTime::now()
                     .duration_since(std::time::UNIX_EPOCH)
-                    .unwrap()
+                    .unwrap_or_default()
                     .as_millis()
             );
             let path = format!("{}{}.vcf", default_book.trim_end_matches('/'), uid);

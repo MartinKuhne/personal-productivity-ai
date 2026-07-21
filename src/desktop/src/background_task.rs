@@ -113,7 +113,10 @@ impl Task {
             let handle = std::thread::spawn(move || {
                 loop {
                     let path = {
-                        let rx = rx_work_clone.lock().unwrap();
+                        let rx = match rx_work_clone.lock() {
+                            Ok(guard) => guard,
+                            Err(_) => break,
+                        };
                         match rx.recv() {
                             Ok(p) => p,
                             Err(e) => {
