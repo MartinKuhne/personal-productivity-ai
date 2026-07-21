@@ -107,7 +107,7 @@ mod ui_tests {
     use std::path::PathBuf;
 
     fn create_test_app() -> FastMdApp {
-        FastMdApp::empty_state()
+        FastMdApp::empty_state(crate::config::AppConfig::default())
     }
 
     #[test]

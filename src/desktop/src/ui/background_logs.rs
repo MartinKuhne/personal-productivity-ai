@@ -212,7 +212,7 @@ mod ui_tests {
     use super::*;
 
     fn create_test_app() -> FastMdApp {
-        FastMdApp::empty_state()
+        FastMdApp::empty_state(crate::config::AppConfig::default())
     }
 
     #[test]

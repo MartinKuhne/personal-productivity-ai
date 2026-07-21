@@ -7,6 +7,7 @@ pub mod config;
 pub mod document;
 pub mod editor;
 pub mod file_events;
+pub mod file_processor;
 pub mod messages;
 pub mod print;
 pub mod tag_manager;
@@ -16,7 +17,7 @@ pub mod utils;
 
 pub use agent::run_agent;
 pub use background_task::Task;
-pub use config::{AppConfig, get_config_path, load_config};
+pub use config::{AppConfig, VirtualPath, VirtualPathError, get_config_path, load_config};
 pub use messages::BackgroundMessage;
 pub use print::{PrintJob, execute_print_blocking};
 pub use tag_manager::TagManager;

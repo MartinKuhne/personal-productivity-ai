@@ -1,9 +1,10 @@
+use crate::agent::AgentSessionManager;
 use crate::background::{BackgroundProcessManager, SharedProcessManager};
 use crate::background_task::Task;
-use crate::batch::types::{BatchDialogConfig, BatchHandle};
-use crate::messages::{BackgroundMessage, TokenUsageInfo};
+use crate::file_processor::FileEventProcessor;
+use crate::messages::BackgroundMessage;
 use crate::tag_manager::TagManager;
-use crate::ui::modals::{show_create_dir_modal, show_move_modal, show_rename_modal};
+use crate::ui::dialog_manager::DialogManager;
 use crate::ui::panels::{
     show_bottom_panel, show_center_panel, show_left_panel, show_right_panel, show_top_panel,
 };
@@ -11,7 +12,6 @@ use crate::utils::parse_front_matter;
 use eframe::egui;
 use std::collections::{BTreeMap, HashSet};
 use std::path::PathBuf;
-use std::sync::atomic::AtomicBool;
 use std::sync::mpsc::Receiver;
 use std::sync::{Arc, Mutex};
 
@@ -45,23 +45,16 @@ pub struct FastMdApp {
     pub content_libraries: Vec<crate::config::ContentLibrary>,
     pub rx: Receiver<BackgroundMessage>,
     pub tx: std::sync::mpsc::Sender<BackgroundMessage>,
-    /// Shared bus for `FileEvent`s. The app keeps a clone so it can
-    /// publish events from UI handlers (e.g. editor save, rename
-    /// modal) and pass the bus to the agent and the tool registry.
     pub file_event_bus: crate::file_events::Bus<crate::file_events::FileEvent>,
-    /// Subscriber end of the file-event bus. Receives `Discovered`,
-    /// `Updated`, and `Removed` events from the initial scan and the
-    /// file system watcher. Owned by the app so the directory tree can
-    /// react to new / changed / deleted files.
     pub file_event_reader: Option<crate::file_events::BusReader<crate::file_events::FileEvent>>,
-    pub all_files: Vec<PathBuf>,
-    pub all_dirs: Vec<PathBuf>,
+    pub file_processor: FileEventProcessor,
     pub tag_manager: TagManager,
     pub selected_tag: Option<String>,
     pub indexing_finished: bool,
     pub indexing_finished_handled: bool,
     pub left_panel_width: Option<f32>,
     pub left_panel_dirty: bool,
+    pub left_panel_reset_count: u32,
 
     pub selected_file: Option<PathBuf>,
     pub selected_files: HashSet<PathBuf>,
@@ -74,125 +67,77 @@ pub struct FastMdApp {
 
     pub tabs: Vec<PathBuf>,
 
-    pub move_dialog_open: bool,
-    pub file_to_move: Option<PathBuf>,
-    pub selected_move_folder: Option<PathBuf>,
-
-    pub create_dir_dialog_open: bool,
-    pub create_dir_parent: Option<PathBuf>,
-    pub create_dir_name: String,
-
-    pub rename_dialog_open: bool,
-    pub file_to_rename: Option<PathBuf>,
-    pub rename_new_name: String,
-
     pub command_input: String,
     pub toc: Vec<ToCEntry>,
     pub scroll_to_header_id: Option<egui::Id>,
+
     pub _watcher: Option<notify::RecommendedWatcher>,
 
     pub show_agent_results: bool,
-    pub agent_running: bool,
-    pub agent_status: String,
-    pub agent_thinking: String,
-    pub agent_response: String,
-    pub agent_scroll_to_id: Option<egui::Id>,
-    pub agent_cancel_flag: Option<std::sync::Arc<std::sync::atomic::AtomicBool>>,
-    pub agent_history: Option<Vec<serde_json::Value>>,
-    /// Token usage from the most recent LLM turn. `prompt_tokens` here is
-    /// the size of the full conversation context the model just saw, so
-    /// it is what you'd compare against the model's context window.
-    pub agent_token_usage: Option<TokenUsageInfo>,
-    /// Cumulative token usage across every LLM turn in the current session.
-    /// `prompt_tokens` is the peak seen; `completion_tokens` and the
-    /// optional detail fields are summed.
-    pub agent_total_usage: TokenUsageInfo,
-    pub left_panel_reset_count: u32,
+    /// Agent session manager - encapsulates all agent state and lifecycle.
+    pub agent: AgentSessionManager,
+    /// Dialog manager - owns all modal state and rendering.
+    pub dialogs: DialogManager,
     pub submit_prompt: Option<String>,
     pub editor_state: crate::editor::EditorState,
     pub inline_editor_enabled: bool,
     pub background_manager: SharedProcessManager,
     pub show_background_logs: bool,
     pub config: crate::config::AppConfig,
-    // Batch processing state
-    pub batch_dialog_open: bool,
-    pub batch_dialog_config: BatchDialogConfig,
-    pub batch_handle: Option<BatchHandle>,
-    pub batch_cancel_flag: Option<Arc<AtomicBool>>,
 }
 
 impl FastMdApp {
-    /// Drain pending `FileEvent`s from the bus and update the
-    /// directory tree's `all_files` and `all_dirs` collections.
-    ///
-    /// The tag manager has its own consumer in
-    /// `background_task.rs` (the worker threads that extract tags
-    /// and send `BackgroundMessage`). This consumer only handles
-    /// the directory tree. Both run in parallel and never block
-    /// each other.
+    /// Drain pending `FileEvent`s from the bus and update.
     ///
     /// Returns `true` if any event was processed, so callers can
     /// schedule a follow-up UI repaint.
     fn process_file_events(&mut self) -> bool {
-        let Some(reader) = self.file_event_reader.as_ref() else {
-            return false;
-        };
+        use crate::file_events::FileEventKind;
+
         let mut changed = false;
-        let mut loaded_dirty = false;
-        let mut had_removal = false;
-        loop {
-            match reader.try_recv() {
-                Ok(event) => {
-                    use crate::file_events::FileEventKind;
-                    match event.kind {
-                        FileEventKind::Discovered | FileEventKind::Updated => {
-                            if Self::is_workspace_file(&event.path) {
-                                if !self.all_files.contains(&event.path) {
-                                    self.all_files.push(event.path.clone());
-                                    changed = true;
-                                }
-                                if let Some(parent) = event.path.parent() {
-                                    if !self.all_dirs.contains(&parent.to_path_buf()) {
-                                        self.all_dirs.push(parent.to_path_buf());
-                                        changed = true;
-                                    }
+        let mut needs_rebuild = false;
+
+        if let Some(reader) = &self.file_event_reader {
+            while let Ok(event) = reader.try_recv() {
+                changed = true;
+                match event.kind {
+                    FileEventKind::Discovered => {
+                        if Self::is_workspace_file(&event.path) {
+                            if !self.file_processor.all_files.contains(&event.path) {
+                                self.file_processor.all_files.push(event.path.clone());
+                            }
+                            if let Some(parent) = event.path.parent() {
+                                let parent = parent.to_path_buf();
+                                if !self.file_processor.all_dirs.contains(&parent) {
+                                    self.file_processor.all_dirs.push(parent);
                                 }
                             }
-                            if self.loaded_path.as_ref() == Some(&event.path)
-                                && !self.editor_state.is_open
-                            {
-                                self.loaded_path = None;
-                                loaded_dirty = true;
-                            }
-                        }
-                        FileEventKind::Removed => {
-                            had_removal = true;
-                            if Self::is_workspace_file(&event.path) {
-                                self.all_files.retain(|p| p != &event.path);
-                            }
-                            self.tag_manager.remove_file(&event.path);
-                            if self.selected_file.as_ref() == Some(&event.path) {
-                                self.selected_file = None;
-                                self.current_yaml = None;
-                                self.current_markdown.clear();
-                                self.toc.clear();
-                            }
-                            self.selected_files.remove(&event.path);
-                            if self.loaded_path.as_ref() == Some(&event.path) {
-                                self.loaded_path = None;
-                            }
-                            changed = true;
                         }
                     }
+                    FileEventKind::Updated => {
+                        if self.loaded_path.as_ref() == Some(&event.path)
+                            && !self.editor_state.is_open
+                        {
+                            self.loaded_path = None;
+                        }
+                    }
+                    FileEventKind::Removed => {
+                        self.file_processor.all_files.retain(|p| p != &event.path);
+                        if self.loaded_path.as_ref() == Some(&event.path) {
+                            self.loaded_path = None;
+                        }
+                        self.tag_manager.remove_file(&event.path);
+                        needs_rebuild = true;
+                    }
                 }
-                Err(std::sync::mpsc::TryRecvError::Empty) => break,
-                Err(std::sync::mpsc::TryRecvError::Disconnected) => break,
             }
         }
-        if had_removal {
+
+        if needs_rebuild {
             self.tag_manager.rebuild();
         }
-        changed || loaded_dirty
+
+        changed
     }
 
     /// Returns `true` if `path` is a user-editable workspace file
@@ -285,38 +230,55 @@ impl FastMdApp {
         }
 
         let background_task = Task::new(config.clone());
-        // Subscribe to the file-event bus so the directory tree can
-        // react to Discovered/Updated/Removed events. Subscribing
-        // before the task starts means we'll receive the full initial
-        // scan output (the bus retains a reference to our channel
-        // until the task's initial scan finishes).
-        let file_event_reader = background_task.file_event_bus.subscribe();
+        let file_processor = FileEventProcessor::new(background_task.file_event_bus.subscribe());
         let background_manager = Arc::new(Mutex::new(BackgroundProcessManager::new()));
         let inline_editor_enabled = config.inline_editor_enabled;
 
-        // Initialize batch dialog config with available directories and prompts
-        let mut batch_dialog_config = BatchDialogConfig::default();
+        let mut batch_dialog_config = crate::batch::types::BatchDialogConfig::default();
         batch_dialog_config.available_dirs = config
             .content_libraries
             .iter()
             .map(|lib| PathBuf::from(&lib.root_folder))
             .collect();
+        let mut dialogs = DialogManager::new();
+        dialogs.batch_dialog_config = batch_dialog_config;
 
+        let event_bus = background_task.file_event_bus;
         Self {
             content_libraries: config.content_libraries.clone(),
             rx: background_task.rx,
             tx: background_task.tx,
-            file_event_bus: background_task.file_event_bus,
-            file_event_reader: Some(file_event_reader),
+            file_event_reader: Some(event_bus.subscribe()),
+            file_event_bus: event_bus,
+            file_processor,
+            tag_manager: TagManager::new(),
+            selected_tag: None,
+            indexing_finished: false,
+            indexing_finished_handled: false,
+            left_panel_width: None,
+            left_panel_dirty: false,
+            left_panel_reset_count: 0,
+            selected_file: None,
+            selected_files: HashSet::new(),
+            selected_dir: None,
+            expanded_dirs: HashSet::new(),
+            loaded_path: None,
+            current_yaml: None,
+            current_markdown: String::new(),
+            tabs: Vec::new(),
+            command_input: String::new(),
+            toc: Vec::new(),
+            scroll_to_header_id: None,
+            _watcher: None,
+            show_agent_results: false,
+            agent: AgentSessionManager::new(config.clone()),
+            dialogs,
+            submit_prompt: None,
+            editor_state: crate::editor::EditorState::default(),
             inline_editor_enabled,
             background_manager,
             show_background_logs: false,
             config,
-            batch_dialog_open: false,
-            batch_dialog_config,
-            batch_handle: None,
-            batch_cancel_flag: None,
-            ..Self::empty_state()
         }
     }
 
@@ -326,7 +288,7 @@ impl FastMdApp {
     /// Purity: Constructs a new value; no side effects.
     /// Preconditions: None.
     /// Postconditions: Caller still owns a usable `Sender<BackgroundMessage>` paired with `rx`.
-    pub fn empty_state() -> Self {
+    pub fn empty_state(config: crate::config::AppConfig) -> Self {
         let (tx, rx) = std::sync::mpsc::channel();
         Self {
             content_libraries: Vec::new(),
@@ -334,14 +296,16 @@ impl FastMdApp {
             tx,
             file_event_bus: crate::file_events::Bus::new(),
             file_event_reader: None,
-            all_files: Vec::new(),
-            all_dirs: Vec::new(),
+            file_processor: FileEventProcessor::new(crate::file_events::BusReader::new(
+                std::sync::mpsc::channel().1,
+            )),
             tag_manager: TagManager::new(),
             selected_tag: None,
             indexing_finished: false,
             indexing_finished_handled: false,
             left_panel_width: None,
             left_panel_dirty: false,
+            left_panel_reset_count: 0,
             selected_file: None,
             selected_files: HashSet::new(),
             selected_dir: None,
@@ -350,40 +314,19 @@ impl FastMdApp {
             current_yaml: None,
             current_markdown: String::new(),
             tabs: Vec::new(),
-            move_dialog_open: false,
-            file_to_move: None,
-            selected_move_folder: None,
-            create_dir_dialog_open: false,
-            create_dir_parent: None,
-            create_dir_name: String::new(),
-            rename_dialog_open: false,
-            file_to_rename: None,
-            rename_new_name: String::new(),
             command_input: String::new(),
             toc: Vec::new(),
             scroll_to_header_id: None,
             _watcher: None,
             show_agent_results: false,
-            agent_running: false,
-            agent_status: String::new(),
-            agent_thinking: String::new(),
-            agent_response: String::new(),
-            agent_scroll_to_id: None,
-            agent_cancel_flag: None,
-            agent_history: None,
-            agent_token_usage: None,
-            agent_total_usage: TokenUsageInfo::default(),
-            left_panel_reset_count: 0,
+            agent: AgentSessionManager::new(config.clone()),
+            dialogs: DialogManager::new(),
             submit_prompt: None,
             editor_state: crate::editor::EditorState::default(),
             inline_editor_enabled: true,
             background_manager: Arc::new(Mutex::new(BackgroundProcessManager::new())),
             show_background_logs: false,
-            config: crate::config::AppConfig::default(),
-            batch_dialog_open: false,
-            batch_dialog_config: BatchDialogConfig::default(),
-            batch_handle: None,
-            batch_cancel_flag: None,
+            config,
         }
     }
 
@@ -392,39 +335,18 @@ impl FastMdApp {
     /// Outputs: None.
     /// Purity: Impure (mutates self, spawns the agent thread).
     /// Preconditions: `prompt` should be non-empty.
-    /// Postconditions: `command_input` is cleared, `agent_running` is set, `agent_cancel_flag` holds a fresh flag, and the agent thread is launched.
+    /// Postconditions: `command_input` is cleared, agent state reflects running, cancel flag is set, agent thread launched.
     pub fn start_agent_session(&mut self, prompt: String) {
-        self.command_input = prompt;
-        self.agent_status = "Initializing agent...".to_string();
-        self.agent_thinking.clear();
-        if self.agent_history.is_none() || !self.show_agent_results {
-            self.agent_response.clear();
-            self.agent_history = None;
-            self.agent_token_usage = None;
-            self.agent_total_usage = TokenUsageInfo::default();
-        } else {
-            self.agent_response
-                .push_str(&format!("> **User:** {}\n\n", self.command_input));
-        }
-        self.show_agent_results = true;
-        self.agent_running = true;
-
-        let cancel_flag = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
-        self.agent_cancel_flag = Some(cancel_flag.clone());
-
-        crate::agent::run_agent(
-            self.config.clone(),
+        self.command_input = prompt.clone();
+        self.agent.start_session(
             self.tx.clone(),
+            prompt,
             self.selected_file.clone(),
             self.selected_dir.clone(),
             self.selected_files.clone(),
-            self.command_input.clone(),
-            cancel_flag,
-            self.agent_history.clone(),
-            self.agent_response.clone(),
             self.file_event_bus.clone(),
         );
-        self.command_input.clear();
+        self.show_agent_results = true;
     }
 }
 
@@ -475,13 +397,13 @@ impl FastMdApp {
             match msg {
                 BackgroundMessage::FileParsed { path, tags } => {
                     self.tag_manager.add_tags(path.clone(), tags);
-                    if !self.all_files.contains(&path) {
-                        self.all_files.push(path);
+                    if !self.file_processor.all_files.contains(&path) {
+                        self.file_processor.all_files.push(path);
                     }
                 }
                 BackgroundMessage::DirParsed { path } => {
-                    if !self.all_dirs.contains(&path) {
-                        self.all_dirs.push(path);
+                    if !self.file_processor.all_dirs.contains(&path) {
+                        self.file_processor.all_dirs.push(path);
                     }
                 }
                 BackgroundMessage::Finished(watcher) => {
@@ -495,16 +417,16 @@ impl FastMdApp {
                 }
                 BackgroundMessage::FileModified { path, tags } => {
                     self.tag_manager.add_tags(path.clone(), tags);
-                    if !self.all_files.contains(&path) {
-                        self.all_files.push(path.clone());
+                    if !self.file_processor.all_files.contains(&path) {
+                        self.file_processor.all_files.push(path.clone());
                     }
                     self.tag_manager.rebuild();
                     if self.loaded_path.as_ref() == Some(&path) {
-                        self.loaded_path = None; // Trigger reload
+                        self.loaded_path = None;
                     }
                 }
                 BackgroundMessage::FileDeleted { path } => {
-                    self.all_files.retain(|p| p != &path);
+                    self.file_processor.all_files.retain(|p| p != &path);
                     self.tag_manager.remove_file(&path);
                     self.tag_manager.rebuild();
                     if self.selected_file.as_ref() == Some(&path) {
@@ -518,51 +440,14 @@ impl FastMdApp {
                         self.loaded_path = None;
                     }
                 }
-                BackgroundMessage::AgentStatus(status) => {
-                    self.agent_status = status;
-                }
-                BackgroundMessage::AgentThinking(thinking) => {
-                    self.agent_thinking = thinking;
-                }
-                BackgroundMessage::AgentResponse(resp) => {
-                    self.agent_response = resp;
-                }
-                BackgroundMessage::AgentFinished(history) => {
-                    self.agent_running = false;
-                    self.agent_history = Some(history);
-                }
-                BackgroundMessage::AgentFailed(err) => {
-                    self.agent_status = format!("Error: {}", err);
-                    self.agent_running = false;
-                }
-                BackgroundMessage::AgentTokenUsage(info) => {
-                    // Track the peak prompt size across the session so the
-                    // operator can see how close the conversation is to the
-                    // model's context window.
-                    if info.prompt_tokens > self.agent_total_usage.prompt_tokens {
-                        self.agent_total_usage.prompt_tokens = info.prompt_tokens;
-                    }
-                    self.agent_total_usage.completion_tokens = self
-                        .agent_total_usage
-                        .completion_tokens
-                        .saturating_add(info.completion_tokens);
-                    self.agent_total_usage.total_tokens = self
-                        .agent_total_usage
-                        .total_tokens
-                        .saturating_add(info.total_tokens);
-                    self.agent_total_usage.cached_tokens = Some(
-                        self.agent_total_usage
-                            .cached_tokens
-                            .unwrap_or(0)
-                            .saturating_add(info.cached_tokens.unwrap_or(0)),
-                    );
-                    self.agent_total_usage.reasoning_tokens = Some(
-                        self.agent_total_usage
-                            .reasoning_tokens
-                            .unwrap_or(0)
-                            .saturating_add(info.reasoning_tokens.unwrap_or(0)),
-                    );
-                    self.agent_token_usage = Some(info);
+                // Agent messages are delegated to AgentSessionManager
+                BackgroundMessage::AgentStatus(_)
+                | BackgroundMessage::AgentThinking(_)
+                | BackgroundMessage::AgentResponse(_)
+                | BackgroundMessage::AgentFinished(_)
+                | BackgroundMessage::AgentFailed(_)
+                | BackgroundMessage::AgentTokenUsage(_) => {
+                    self.agent.handle_background_message(msg);
                 }
                 BackgroundMessage::LogEntry(entry) => {
                     if let Ok(mut mgr) = self.background_manager.lock() {
@@ -602,22 +487,50 @@ impl FastMdApp {
             self.loaded_path = None;
         }
 
-        // Show modals
-        show_move_modal(self, ctx);
-        show_create_dir_modal(self, ctx);
-        show_rename_modal(self, ctx);
+        if self.dialogs.move_dialog_open {
+            crate::ui::modals::show_move_modal_dialog(
+                &mut self.dialogs,
+                &self.content_libraries,
+                &self.file_processor,
+                &self.file_event_bus,
+                ctx,
+            );
+        }
+        if self.dialogs.create_dir_dialog_open {
+            crate::ui::modals::show_create_dir_dialog(
+                &mut self.dialogs,
+                &mut self.file_processor.all_dirs,
+                &mut self._watcher,
+                ctx,
+            );
+        }
+        if self.dialogs.rename_dialog_open {
+            crate::ui::modals::show_rename_dialog(
+                &mut self.dialogs,
+                &self.file_event_bus,
+                &mut self.loaded_path,
+                &mut self.selected_file,
+                &mut self.selected_dir,
+                &mut self.tabs,
+                &mut self.file_processor,
+                &mut self.tag_manager,
+                &mut self.expanded_dirs,
+                ctx,
+            );
+        }
+
+        // Show background logs window (separate, not part of DialogManager)
         crate::ui::background_logs::show_background_logs_window(self, ctx);
 
         // Show batch processing modal
-        if self.batch_dialog_open {
-            let mut dialog_config = self.batch_dialog_config.clone();
+        if self.dialogs.batch_dialog_open {
+            let mut dialog_config = self.dialogs.batch_dialog_config.clone();
             if let Some(result) =
                 crate::batch::dialog::show_batch_modal(self, ctx, &mut dialog_config)
             {
                 match result {
                     crate::batch::types::BatchDialogResult::Process(config) => {
-                        // Only start if not already running
-                        if self.batch_handle.is_none() {
+                        if self.dialogs.batch_handle.is_none() {
                             let prompt_text = dialog_config
                                 .available_prompts
                                 .get(dialog_config.selected_prompt_idx.unwrap_or(0))
@@ -633,19 +546,18 @@ impl FastMdApp {
                                     prompt_text,
                                 );
                             let handle = coordinator.execute();
-                            self.batch_handle = Some(handle);
-                            self.batch_cancel_flag = Some(cancel_flag);
+                            self.dialogs.batch_handle = Some(handle);
+                            self.dialogs.batch_cancel_flag = Some(cancel_flag);
                         }
                     }
                     crate::batch::types::BatchDialogResult::Cancel => {
-                        self.batch_dialog_open = false;
-                        // Clear cached prompts so they're re-discovered on next open
+                        self.dialogs.batch_dialog_open = false;
                         dialog_config.available_prompts.clear();
                         dialog_config.selected_prompt_idx = None;
                     }
                 }
             }
-            self.batch_dialog_config = dialog_config;
+            self.dialogs.batch_dialog_config = dialog_config;
         }
 
         // Top panel
@@ -668,17 +580,13 @@ impl FastMdApp {
             self.start_agent_session(prompt);
         }
 
-        // Poll batch handle for completion
-        if let Some(handle) = self.batch_handle.take() {
+        if let Some(handle) = self.dialogs.batch_handle.take() {
             if handle.thread.is_finished() {
                 let result = handle.join();
-                // Clear cancel flag after completion
-                self.batch_cancel_flag = None;
-                // Could show a notification or log the result
+                self.dialogs.batch_cancel_flag = None;
                 eprintln!("Batch completed: {:?}", result);
             } else {
-                // Put it back if not finished
-                self.batch_handle = Some(handle);
+                self.dialogs.batch_handle = Some(handle);
             }
         }
     }
@@ -687,10 +595,11 @@ impl FastMdApp {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::messages::TokenUsageInfo;
     use std::path::PathBuf;
 
     fn create_test_app() -> FastMdApp {
-        FastMdApp::empty_state()
+        FastMdApp::empty_state(crate::config::AppConfig::default())
     }
 
     #[test]
@@ -764,12 +673,12 @@ mod tests {
             app.update_ui(ctx);
         });
 
-        assert!(app.all_files.contains(&test_file));
-        assert!(app.all_dirs.contains(&test_dir));
+        assert!(app.file_processor.all_files.contains(&test_file));
+        assert!(app.file_processor.all_dirs.contains(&test_dir));
         assert!(app.indexing_finished);
-        assert_eq!(app.agent_status, "Processing...");
-        assert_eq!(app.agent_thinking, "Thinking step");
-        assert_eq!(app.agent_response, "Done result");
+        assert_eq!(app.agent.state().status, "Processing...");
+        assert_eq!(app.agent.state().thinking, "Thinking step");
+        assert_eq!(app.agent.state().response, "Done result");
     }
 
     #[test]
@@ -778,7 +687,7 @@ mod tests {
         let mut app = create_test_app();
         let file_path = PathBuf::from("modified_file.md");
 
-        app.all_files.push(file_path.clone());
+        app.file_processor.all_files.push(file_path.clone());
         app.selected_file = Some(file_path.clone());
         app.selected_files.insert(file_path.clone());
         app.loaded_path = Some(file_path.clone());
@@ -808,7 +717,7 @@ mod tests {
             app.update_ui(ctx);
         });
 
-        assert!(!app.all_files.contains(&file_path));
+        assert!(!app.file_processor.all_files.contains(&file_path));
         assert!(app.selected_file.is_none());
         assert!(!app.selected_files.contains(&file_path));
     }
@@ -828,8 +737,8 @@ mod tests {
             app.update_ui(ctx);
         });
 
-        assert_eq!(app.agent_status, "Error: Network timeout");
-        assert!(!app.agent_running);
+        assert_eq!(app.agent.state().status, "Error: Network timeout");
+        assert!(!app.agent.state().running);
 
         app.tx
             .send(BackgroundMessage::AgentFinished(vec![
@@ -841,8 +750,8 @@ mod tests {
             app.update_ui(ctx);
         });
 
-        assert!(!app.agent_running);
-        assert!(app.agent_history.is_some());
+        assert!(!app.agent.state().running);
+        assert!(app.agent.state().history.is_some());
     }
 
     #[test]
@@ -865,15 +774,24 @@ mod tests {
             app.update_ui(ctx);
         });
 
-        assert_eq!(app.agent_token_usage.as_ref().unwrap().prompt_tokens, 100);
         assert_eq!(
-            app.agent_total_usage.prompt_tokens, 100,
+            app.agent
+                .state()
+                .token_usage
+                .as_ref()
+                .unwrap()
+                .prompt_tokens,
+            100
+        );
+        assert_eq!(
+            app.agent.state().total_usage.prompt_tokens,
+            100,
             "prompt_tokens should track the peak seen so far"
         );
-        assert_eq!(app.agent_total_usage.completion_tokens, 20);
-        assert_eq!(app.agent_total_usage.total_tokens, 120);
-        assert_eq!(app.agent_total_usage.cached_tokens, Some(0));
-        assert_eq!(app.agent_total_usage.reasoning_tokens, Some(0));
+        assert_eq!(app.agent.state().total_usage.completion_tokens, 20);
+        assert_eq!(app.agent.state().total_usage.total_tokens, 120);
+        assert_eq!(app.agent.state().total_usage.cached_tokens, Some(0));
+        assert_eq!(app.agent.state().total_usage.reasoning_tokens, Some(0));
 
         // Second turn: context grew, completion + reasoning added.
         app.tx
@@ -890,15 +808,24 @@ mod tests {
             app.update_ui(ctx);
         });
 
-        assert_eq!(app.agent_token_usage.as_ref().unwrap().prompt_tokens, 250);
         assert_eq!(
-            app.agent_total_usage.prompt_tokens, 250,
+            app.agent
+                .state()
+                .token_usage
+                .as_ref()
+                .unwrap()
+                .prompt_tokens,
+            250
+        );
+        assert_eq!(
+            app.agent.state().total_usage.prompt_tokens,
+            250,
             "peak should rise with the larger turn"
         );
-        assert_eq!(app.agent_total_usage.completion_tokens, 50);
-        assert_eq!(app.agent_total_usage.total_tokens, 400);
-        assert_eq!(app.agent_total_usage.cached_tokens, Some(50));
-        assert_eq!(app.agent_total_usage.reasoning_tokens, Some(5));
+        assert_eq!(app.agent.state().total_usage.completion_tokens, 50);
+        assert_eq!(app.agent.state().total_usage.total_tokens, 400);
+        assert_eq!(app.agent.state().total_usage.cached_tokens, Some(50));
+        assert_eq!(app.agent.state().total_usage.reasoning_tokens, Some(5));
 
         // Third turn: smaller context — peak should NOT shrink.
         app.tx
@@ -916,12 +843,13 @@ mod tests {
         });
 
         assert_eq!(
-            app.agent_total_usage.prompt_tokens, 250,
+            app.agent.state().total_usage.prompt_tokens,
+            250,
             "peak prompt size must not regress"
         );
-        assert_eq!(app.agent_total_usage.completion_tokens, 60);
-        assert_eq!(app.agent_total_usage.cached_tokens, Some(50));
-        assert_eq!(app.agent_total_usage.reasoning_tokens, Some(5));
+        assert_eq!(app.agent.state().total_usage.completion_tokens, 60);
+        assert_eq!(app.agent.state().total_usage.cached_tokens, Some(50));
+        assert_eq!(app.agent.state().total_usage.reasoning_tokens, Some(5));
     }
 
     // -- process_file_events: tab reload on file Updated --
@@ -940,7 +868,7 @@ mod tests {
 
         app.selected_file = Some(path.clone());
         app.loaded_path = Some(path.clone());
-        app.all_files.push(path.clone());
+        app.file_processor.all_files.push(path.clone());
 
         // Subscribe a reader to the bus so we can publish into it
         // and have process_file_events pick up the event.
@@ -972,7 +900,7 @@ mod tests {
 
         app.selected_file = Some(path.clone());
         app.loaded_path = Some(path.clone());
-        app.all_files.push(path.clone());
+        app.file_processor.all_files.push(path.clone());
         app.editor_state.open(&path, "old content");
         assert!(app.editor_state.is_open);
 
@@ -998,7 +926,7 @@ mod tests {
 
         app.selected_file = Some(path.clone());
         app.loaded_path = Some(path.clone());
-        app.all_files.push(path.clone());
+        app.file_processor.all_files.push(path.clone());
 
         app.file_event_reader = Some(app.file_event_bus.subscribe());
         let publisher = app.file_event_bus.clone();
@@ -1038,11 +966,13 @@ mod tests {
         // The markdown file should be in the tree and its
         // parent should be in `all_dirs`.
         assert!(
-            app.all_files.contains(&md),
+            app.file_processor.all_files.contains(&md),
             "markdown files must appear in the workspace tree"
         );
         assert!(
-            app.all_dirs.contains(&PathBuf::from("/tmp/lib")),
+            app.file_processor
+                .all_dirs
+                .contains(&PathBuf::from("/tmp/lib")),
             "directories containing workspace files must appear in the tree"
         );
 
@@ -1050,18 +980,18 @@ mod tests {
         // they were published to the bus (the converters need
         // them).
         assert!(
-            !app.all_files.contains(&pdf),
+            !app.file_processor.all_files.contains(&pdf),
             "PDFs must not appear in the workspace tree"
         );
         assert!(
-            !app.all_files.contains(&img),
+            !app.file_processor.all_files.contains(&img),
             "images must not appear in the workspace tree"
         );
 
         // A directory that contains only a PDF must not be added
         // to `all_dirs`.
         assert!(
-            !app.all_dirs.contains(&pdf_only_dir),
+            !app.file_processor.all_dirs.contains(&pdf_only_dir),
             "directories that contain only non-workspace files must not appear in the tree"
         );
     }
@@ -1143,7 +1073,9 @@ mod tests {
         // Pre-populate tag manager so the tag exists.
         app.tag_manager
             .add_tags(PathBuf::from("/lib/notes.md"), vec!["work".to_string()]);
-        app.all_files.push(PathBuf::from("/lib/notes.md"));
+        app.file_processor
+            .all_files
+            .push(PathBuf::from("/lib/notes.md"));
 
         // A `Removed` event must trigger `rebuid`, which
         // evicts the file's tags.
