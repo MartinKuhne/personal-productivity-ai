@@ -127,7 +127,7 @@ macro_rules! define_tools {
                                     let $resolve_path = &resolve_and_check_path;
                                     let $producer = &producer;
                                     let res = $exec;
-                                    res.map(|r| serde_json::to_value(r).unwrap())
+                                    res.map(|r| serde_json::to_value(r).unwrap_or_else(|e| serde_json::json!({"error": e.to_string()})))
                                 },
                                 Err(e) => Err(format!("Invalid args: {}", e)),
                             }
@@ -1020,11 +1020,9 @@ mod tests {
         // Each path is the virtual one (Lib/<file>) — the
         // separator is platform-specific so we just check the
         // library prefix and the leaf.
-        assert!(
-            files
-                .iter()
-                .all(|p| p.starts_with("Lib") && p.contains("note_"))
-        );
+        assert!(files
+            .iter()
+            .all(|p| p.starts_with("Lib") && p.contains("note_")));
     }
 
     #[test]

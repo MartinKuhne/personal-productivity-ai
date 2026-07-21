@@ -121,10 +121,19 @@ impl BatchCoordinator {
         }
 
         // Run jobs with concurrency control using tokio runtime
-        let rt = tokio::runtime::Builder::new_multi_thread()
+        let Ok(rt) = tokio::runtime::Builder::new_multi_thread()
             .enable_all()
             .build()
-            .expect("failed to create tokio runtime for batch processing");
+        else {
+            tracing::error!(name = "batch.runtime.build_failed", "Failed to create tokio runtime for batch processing");
+            return BatchResult {
+                total_jobs: 0,
+                completed: 0,
+                failed: 0,
+                cancelled: 0,
+                duration: start_time.elapsed(),
+            };
+        };
 
         let semaphore = Arc::new(Semaphore::new(self.config.concurrency as usize));
         let mut join_set = tokio::task::JoinSet::new();
@@ -143,11 +152,15 @@ impl BatchCoordinator {
                     continue;
                 }
 
-                let permit = semaphore
+                let Ok(permit) = semaphore
                     .clone()
                     .acquire_owned()
                     .await
-                    .expect("batch semaphore should not be closed");
+                else {
+                    jobs[idx].status = BatchJobStatus::Failed;
+                    failed += 1;
+                    continue;
+                };
                 let job_id = jobs[idx].id;
                 let target_path = jobs[idx].target_path.clone();
                 let active_file = jobs[idx].active_file.clone();

@@ -19,7 +19,7 @@
 //! thread panics or is shut down.
 
 use std::path::PathBuf;
-use std::sync::mpsc::{Receiver, Sender, channel};
+use std::sync::mpsc::{channel, Receiver, Sender};
 use std::sync::{Arc, Mutex};
 
 /// What happened to a file in one of the configured content libraries.
@@ -99,11 +99,9 @@ impl<T: Send + 'static + Clone> Bus<T> {
     /// registered consumer.
     pub fn subscribe(&self) -> BusReader<T> {
         let (tx, rx) = channel();
-        self.inner
-            .subscribers
-            .lock()
-            .expect("Bus subscriber list poisoned")
-            .push(tx);
+        if let Ok(mut subs) = self.inner.subscribers.lock() {
+            subs.push(tx);
+        }
         BusReader { rx }
     }
 
@@ -113,11 +111,9 @@ impl<T: Send + 'static + Clone> Bus<T> {
     /// Returns the number of consumers the event was successfully
     /// delivered to.
     pub fn publish(&self, event: T) -> usize {
-        let mut subscribers = self
-            .inner
-            .subscribers
-            .lock()
-            .expect("Bus subscriber list poisoned");
+        let Ok(mut subscribers) = self.inner.subscribers.lock() else {
+            return 0;
+        };
         subscribers.retain(|tx| tx.send(event.clone()).is_ok());
         subscribers.len()
     }
@@ -125,11 +121,7 @@ impl<T: Send + 'static + Clone> Bus<T> {
     /// Number of currently registered consumers. Mainly useful for
     /// tests and diagnostics.
     pub fn subscriber_count(&self) -> usize {
-        self.inner
-            .subscribers
-            .lock()
-            .expect("Bus subscriber list poisoned")
-            .len()
+        self.inner.subscribers.lock().map(|s| s.len()).unwrap_or(0)
     }
 }
 
@@ -171,8 +163,8 @@ impl<T> BusReader<T> {
 mod tests {
     use super::*;
     use std::collections::HashSet;
-    use std::sync::Arc;
     use std::sync::atomic::{AtomicUsize, Ordering};
+    use std::sync::Arc;
     use std::thread;
     use std::time::Duration;
 

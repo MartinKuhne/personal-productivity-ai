@@ -77,35 +77,50 @@ pub fn execute_csv_tool(
                 Ok(v) => v,
                 Err(e) => return Some(Err(format!("Invalid args: {}", e))),
             };
-            Some(operations::create_csv(config, input).map(|r| serde_json::to_value(r).unwrap()))
+            Some(operations::create_csv(config, input).map(|r| {
+                serde_json::to_value(r)
+                    .unwrap_or_else(|e| serde_json::json!({"error": e.to_string()}))
+            }))
         }
         "list_csv" => {
             let input: schema::ListCsvInput = match serde_json::from_str(args_str) {
                 Ok(v) => v,
                 Err(e) => return Some(Err(format!("Invalid args: {}", e))),
             };
-            Some(operations::list_csv(config, input).map(|r| serde_json::to_value(r).unwrap()))
+            Some(operations::list_csv(config, input).map(|r| {
+                serde_json::to_value(r)
+                    .unwrap_or_else(|e| serde_json::json!({"error": e.to_string()}))
+            }))
         }
         "add_rows" => {
             let input: schema::AddRowsInput = match serde_json::from_str(args_str) {
                 Ok(v) => v,
                 Err(e) => return Some(Err(format!("Invalid args: {}", e))),
             };
-            Some(operations::add_rows(config, input).map(|r| serde_json::to_value(r).unwrap()))
+            Some(operations::add_rows(config, input).map(|r| {
+                serde_json::to_value(r)
+                    .unwrap_or_else(|e| serde_json::json!({"error": e.to_string()}))
+            }))
         }
         "delete_rows" => {
             let input: schema::DeleteRowsInput = match serde_json::from_str(args_str) {
                 Ok(v) => v,
                 Err(e) => return Some(Err(format!("Invalid args: {}", e))),
             };
-            Some(query::delete_rows(config, input).map(|r| serde_json::to_value(r).unwrap()))
+            Some(query::delete_rows(config, input).map(|r| {
+                serde_json::to_value(r)
+                    .unwrap_or_else(|e| serde_json::json!({"error": e.to_string()}))
+            }))
         }
         "query" => {
             let input: schema::QueryRequest = match serde_json::from_str(args_str) {
                 Ok(v) => v,
                 Err(e) => return Some(Err(format!("Invalid args: {}", e))),
             };
-            Some(query::query_csv(config, input).map(|r| serde_json::to_value(r).unwrap()))
+            Some(query::query_csv(config, input).map(|r| {
+                serde_json::to_value(r)
+                    .unwrap_or_else(|e| serde_json::json!({"error": e.to_string()}))
+            }))
         }
         _ => None,
     }
