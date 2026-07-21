@@ -73,7 +73,7 @@ pub fn show_bottom_panel(app: &mut FastMdApp, ctx: &egui::Context) {
         .show(ctx, |ui| {
             ui.horizontal(|ui| {
                 let prompt_prefix = compute_prompt_prefix(
-                    app.selected_dir.as_deref(),
+                    app.selection.selected_dir().map(|p| p.as_path()),
                     &app.content_libraries,
                 );
                 ui.label(RichText::new(prompt_prefix).monospace().strong());
@@ -81,7 +81,7 @@ pub fn show_bottom_panel(app: &mut FastMdApp, ctx: &egui::Context) {
                 let text_width = ui.available_width() - 130.0;
                 let response = ui.add_sized(
                     egui::vec2(text_width, ui.available_height()),
-                    egui::TextEdit::multiline(&mut app.command_input)
+                    egui::TextEdit::multiline(&mut app.agent.command_input)
                         .desired_width(f32::INFINITY)
                         .hint_text("Type command (Enter to submit, Shift+Enter for new line)"),
                 );
@@ -98,7 +98,7 @@ pub fn show_bottom_panel(app: &mut FastMdApp, ctx: &egui::Context) {
                         if ui.button("Format Markdown").clicked() {
                             let now = chrono::Local::now();
                             let date_str = now.to_rfc3339();
-                            app.command_input = crate::ui::generate_format_prompt(&date_str);
+                            app.agent.command_input = crate::ui::generate_format_prompt(&date_str);
                             submit = true;
                             ui.close_menu();
                         }
@@ -114,8 +114,8 @@ pub fn show_bottom_panel(app: &mut FastMdApp, ctx: &egui::Context) {
                 });
 
                 if submit {
-                    let prompt = app.command_input.trim_end().to_string();
-                    app.command_input.clear();
+                    let prompt = app.agent.command_input.trim_end().to_string();
+                    app.agent.command_input.clear();
 
                     match parse_command_intent(&prompt) {
                         CommandIntent::ShowModels => {
@@ -134,9 +134,9 @@ pub fn show_bottom_panel(app: &mut FastMdApp, ctx: &egui::Context) {
                             app.agent.start_session(
                                 app.tx.clone(),
                                 agent_prompt,
-                                app.selected_file.clone(),
-                                app.selected_dir.clone(),
-                                app.selected_files.clone(),
+                                app.selection.selected_file().cloned(),
+                                app.selection.selected_dir().cloned(),
+                                app.selection.selected_files().clone(),
                                 app.file_event_bus.clone(),
                             );
                             app.show_agent_results = true;
@@ -279,11 +279,11 @@ mod ui_tests {
     fn test_show_bottom_panel_render() {
         let ctx = egui::Context::default();
         let mut app = create_test_app();
-        app.command_input = "test input".to_string();
+        app.agent.command_input = "test input".to_string();
         let _ = ctx.run(egui::RawInput::default(), |ctx| {
             show_bottom_panel(&mut app, ctx);
         });
-        assert_eq!(app.command_input, "test input");
+        assert_eq!(app.agent.command_input, "test input");
     }
 
     #[test]

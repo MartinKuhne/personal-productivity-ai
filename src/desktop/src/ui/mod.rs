@@ -3,8 +3,11 @@ pub mod background_logs;
 pub mod dialog_manager;
 mod modals;
 pub mod os_shell;
+pub mod panel_layout;
 mod panels;
 pub mod render;
+pub mod selection_manager;
+pub mod tab_manager;
 mod tree;
 
 pub use app::{generate_format_prompt, FastMdApp, ToCEntry, TreeNode};

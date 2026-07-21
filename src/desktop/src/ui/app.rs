@@ -5,12 +5,15 @@ use crate::file_processor::FileEventProcessor;
 use crate::messages::BackgroundMessage;
 use crate::tag_manager::TagManager;
 use crate::ui::dialog_manager::DialogManager;
+use crate::ui::panel_layout::PanelLayout;
 use crate::ui::panels::{
     show_bottom_panel, show_center_panel, show_left_panel, show_right_panel, show_top_panel,
 };
+use crate::ui::selection_manager::SelectionManager;
+use crate::ui::tab_manager::TabManager;
 use crate::utils::parse_front_matter;
 use eframe::egui;
-use std::collections::{BTreeMap, HashSet};
+use std::collections::BTreeMap;
 use std::path::PathBuf;
 use std::sync::mpsc::Receiver;
 use std::sync::{Arc, Mutex};
@@ -49,27 +52,9 @@ pub struct FastMdApp {
     pub file_event_reader: Option<crate::file_events::BusReader<crate::file_events::FileEvent>>,
     pub file_processor: FileEventProcessor,
     pub tag_manager: TagManager,
-    pub selected_tag: Option<String>,
-    pub indexing_finished: bool,
-    pub indexing_finished_handled: bool,
-    pub left_panel_width: Option<f32>,
-    pub left_panel_dirty: bool,
-    pub left_panel_reset_count: u32,
-
-    pub selected_file: Option<PathBuf>,
-    pub selected_files: HashSet<PathBuf>,
-    pub selected_dir: Option<PathBuf>,
-    pub expanded_dirs: HashSet<PathBuf>,
-
-    pub loaded_path: Option<PathBuf>,
-    pub current_yaml: Option<serde_yaml::Value>,
-    pub current_markdown: String,
-
-    pub tabs: Vec<PathBuf>,
-
-    pub command_input: String,
-    pub toc: Vec<ToCEntry>,
-    pub scroll_to_header_id: Option<egui::Id>,
+    pub layout: PanelLayout,
+    pub selection: SelectionManager,
+    pub tab_manager: TabManager,
 
     pub _watcher: Option<notify::RecommendedWatcher>,
 
@@ -82,7 +67,6 @@ pub struct FastMdApp {
     pub editor_state: crate::editor::EditorState,
     pub inline_editor_enabled: bool,
     pub background_manager: SharedProcessManager,
-    pub show_background_logs: bool,
     pub config: crate::config::AppConfig,
 }
 
@@ -115,19 +99,22 @@ impl FastMdApp {
                         }
                     }
                     FileEventKind::Updated => {
-                        if self.loaded_path.as_ref() == Some(&event.path)
+                        if self.tab_manager.loaded_path.as_ref() == Some(&event.path)
                             && !self.editor_state.is_open
                         {
-                            self.loaded_path = None;
+                            self.tab_manager.loaded_path = None;
                         }
                     }
                     FileEventKind::Removed => {
                         self.file_processor.all_files.retain(|p| p != &event.path);
-                        if self.loaded_path.as_ref() == Some(&event.path) {
-                            self.loaded_path = None;
+                        if self.tab_manager.loaded_path.as_ref() == Some(&event.path) {
+                            self.tab_manager.loaded_path = None;
                         }
                         self.tag_manager.remove_file(&event.path);
                         needs_rebuild = true;
+                    }
+                    FileEventKind::DirDiscovered | FileEventKind::DirRemoved => {
+                        // Directory events are handled by DirectoryTracker.
                     }
                 }
             }
@@ -252,23 +239,9 @@ impl FastMdApp {
             file_event_bus: event_bus,
             file_processor,
             tag_manager: TagManager::new(),
-            selected_tag: None,
-            indexing_finished: false,
-            indexing_finished_handled: false,
-            left_panel_width: None,
-            left_panel_dirty: false,
-            left_panel_reset_count: 0,
-            selected_file: None,
-            selected_files: HashSet::new(),
-            selected_dir: None,
-            expanded_dirs: HashSet::new(),
-            loaded_path: None,
-            current_yaml: None,
-            current_markdown: String::new(),
-            tabs: Vec::new(),
-            command_input: String::new(),
-            toc: Vec::new(),
-            scroll_to_header_id: None,
+            layout: PanelLayout::new(),
+            selection: SelectionManager::new(),
+            tab_manager: TabManager::new(),
             _watcher: None,
             show_agent_results: false,
             agent: AgentSessionManager::new(config.clone()),
@@ -277,7 +250,6 @@ impl FastMdApp {
             editor_state: crate::editor::EditorState::default(),
             inline_editor_enabled,
             background_manager,
-            show_background_logs: false,
             config,
         }
     }
@@ -300,23 +272,9 @@ impl FastMdApp {
                 std::sync::mpsc::channel().1,
             )),
             tag_manager: TagManager::new(),
-            selected_tag: None,
-            indexing_finished: false,
-            indexing_finished_handled: false,
-            left_panel_width: None,
-            left_panel_dirty: false,
-            left_panel_reset_count: 0,
-            selected_file: None,
-            selected_files: HashSet::new(),
-            selected_dir: None,
-            expanded_dirs: HashSet::new(),
-            loaded_path: None,
-            current_yaml: None,
-            current_markdown: String::new(),
-            tabs: Vec::new(),
-            command_input: String::new(),
-            toc: Vec::new(),
-            scroll_to_header_id: None,
+            layout: PanelLayout::new(),
+            selection: SelectionManager::new(),
+            tab_manager: TabManager::new(),
             _watcher: None,
             show_agent_results: false,
             agent: AgentSessionManager::new(config.clone()),
@@ -325,7 +283,6 @@ impl FastMdApp {
             editor_state: crate::editor::EditorState::default(),
             inline_editor_enabled: true,
             background_manager: Arc::new(Mutex::new(BackgroundProcessManager::new())),
-            show_background_logs: false,
             config,
         }
     }
@@ -337,13 +294,13 @@ impl FastMdApp {
     /// Preconditions: `prompt` should be non-empty.
     /// Postconditions: `command_input` is cleared, agent state reflects running, cancel flag is set, agent thread launched.
     pub fn start_agent_session(&mut self, prompt: String) {
-        self.command_input = prompt.clone();
+        self.agent.command_input = prompt.clone();
         self.agent.start_session(
             self.tx.clone(),
             prompt,
-            self.selected_file.clone(),
-            self.selected_dir.clone(),
-            self.selected_files.clone(),
+            self.selection.selected_file().cloned(),
+            self.selection.selected_dir().cloned(),
+            self.selection.selected_files().clone(),
             self.file_event_bus.clone(),
         );
         self.show_agent_results = true;
@@ -408,11 +365,11 @@ impl FastMdApp {
                 }
                 BackgroundMessage::Finished(watcher) => {
                     self._watcher = Some(watcher);
-                    self.indexing_finished = true;
+                    self.file_processor.indexing_finished = true;
                     self.tag_manager.rebuild();
                 }
                 BackgroundMessage::FinishedWithoutWatcher => {
-                    self.indexing_finished = true;
+                    self.file_processor.indexing_finished = true;
                     self.tag_manager.rebuild();
                 }
                 BackgroundMessage::FileModified { path, tags } => {
@@ -421,23 +378,23 @@ impl FastMdApp {
                         self.file_processor.all_files.push(path.clone());
                     }
                     self.tag_manager.rebuild();
-                    if self.loaded_path.as_ref() == Some(&path) {
-                        self.loaded_path = None;
+                    if self.tab_manager.loaded_path.as_ref() == Some(&path) {
+                        self.tab_manager.loaded_path = None;
                     }
                 }
                 BackgroundMessage::FileDeleted { path } => {
                     self.file_processor.all_files.retain(|p| p != &path);
                     self.tag_manager.remove_file(&path);
                     self.tag_manager.rebuild();
-                    if self.selected_file.as_ref() == Some(&path) {
-                        self.selected_file = None;
-                        self.current_yaml = None;
-                        self.current_markdown = String::new();
-                        self.toc.clear();
+                    if self.selection.selected_file().is_some_and(|p| p == &path) {
+                        *self.selection.selected_file_mut() = None;
+                        self.tab_manager.current_yaml = None;
+                        self.tab_manager.current_markdown = String::new();
+                        self.tab_manager.toc.clear();
                     }
-                    self.selected_files.remove(&path);
-                    if self.loaded_path.as_ref() == Some(&path) {
-                        self.loaded_path = None;
+                    self.selection.selected_files_mut().remove(&path);
+                    if self.tab_manager.loaded_path.as_ref() == Some(&path) {
+                        self.tab_manager.loaded_path = None;
                     }
                 }
                 // Agent messages are delegated to AgentSessionManager
@@ -458,24 +415,25 @@ impl FastMdApp {
         }
 
         // Repaint if still indexing
-        if !self.indexing_finished {
+        if !self.file_processor.indexing_finished {
             ctx.request_repaint();
         }
 
         // Handle file selection and dynamic content loading
-        if let Some(selected_path) = &self.selected_file {
-            if self.loaded_path.as_ref() != Some(selected_path) {
+        if let Some(selected_path) = self.selection.selected_file() {
+            if self.tab_manager.loaded_path.as_ref() != Some(selected_path) {
                 if let Ok(content) = std::fs::read_to_string(selected_path) {
                     if let Some((yaml_val, md_content)) = parse_front_matter(&content) {
-                        self.current_yaml = Some(yaml_val);
-                        self.current_markdown = md_content.to_string();
+                        self.tab_manager.current_yaml = Some(yaml_val);
+                        self.tab_manager.current_markdown = md_content.to_string();
                     } else {
-                        self.current_yaml = None;
-                        self.current_markdown = content;
+                        self.tab_manager.current_yaml = None;
+                        self.tab_manager.current_markdown = content;
                     }
-                    self.loaded_path = Some(selected_path.clone());
-                    self.toc = crate::ui::render::build_toc(&self.current_markdown);
-                    self.scroll_to_header_id = None;
+                    self.tab_manager.loaded_path = Some(selected_path.clone());
+                    self.tab_manager.toc =
+                        crate::ui::render::build_toc(&self.tab_manager.current_markdown);
+                    self.tab_manager.scroll_to_header_id = None;
                 }
             }
         }
@@ -484,7 +442,7 @@ impl FastMdApp {
         let producer = crate::file_events::FileEventProducer::new(&self.file_event_bus);
         if self.editor_state.show(ctx, &producer) {
             // Force reload if we edited the active document
-            self.loaded_path = None;
+            self.tab_manager.loaded_path = None;
         }
 
         if self.dialogs.move_dialog_open {
@@ -505,16 +463,17 @@ impl FastMdApp {
             );
         }
         if self.dialogs.rename_dialog_open {
+            let selection = &mut self.selection;
             crate::ui::modals::show_rename_dialog(
                 &mut self.dialogs,
                 &self.file_event_bus,
-                &mut self.loaded_path,
-                &mut self.selected_file,
-                &mut self.selected_dir,
-                &mut self.tabs,
+                &mut self.tab_manager.loaded_path,
+                &mut selection.selected_file,
+                &mut selection.selected_dir,
+                &mut self.tab_manager.tabs,
                 &mut self.file_processor,
                 &mut self.tag_manager,
-                &mut self.expanded_dirs,
+                &mut selection.expanded_dirs,
                 ctx,
             );
         }
@@ -675,7 +634,7 @@ mod tests {
 
         assert!(app.file_processor.all_files.contains(&test_file));
         assert!(app.file_processor.all_dirs.contains(&test_dir));
-        assert!(app.indexing_finished);
+        assert!(app.file_processor.indexing_finished);
         assert_eq!(app.agent.state().status, "Processing...");
         assert_eq!(app.agent.state().thinking, "Thinking step");
         assert_eq!(app.agent.state().response, "Done result");
@@ -688,9 +647,9 @@ mod tests {
         let file_path = PathBuf::from("modified_file.md");
 
         app.file_processor.all_files.push(file_path.clone());
-        app.selected_file = Some(file_path.clone());
-        app.selected_files.insert(file_path.clone());
-        app.loaded_path = Some(file_path.clone());
+        *app.selection.selected_file_mut() = Some(file_path.clone());
+        app.selection.selected_files_mut().insert(file_path.clone());
+        app.tab_manager.loaded_path = Some(file_path.clone());
 
         // File modified message
         app.tx
@@ -704,7 +663,7 @@ mod tests {
             app.update_ui(ctx);
         });
 
-        assert!(app.loaded_path.is_none()); // Trigger reload
+        assert!(app.tab_manager.loaded_path.is_none()); // Trigger reload
 
         // File deleted message
         app.tx
@@ -718,8 +677,8 @@ mod tests {
         });
 
         assert!(!app.file_processor.all_files.contains(&file_path));
-        assert!(app.selected_file.is_none());
-        assert!(!app.selected_files.contains(&file_path));
+        assert!(app.selection.selected_file().is_none());
+        assert!(!app.selection.selected_files().contains(&file_path));
     }
 
     #[test]
@@ -866,8 +825,8 @@ mod tests {
         let mut app = create_test_app();
         let path = PathBuf::from("/tmp/active_doc.md");
 
-        app.selected_file = Some(path.clone());
-        app.loaded_path = Some(path.clone());
+        *app.selection.selected_file_mut() = Some(path.clone());
+        app.tab_manager.loaded_path = Some(path.clone());
         app.file_processor.all_files.push(path.clone());
 
         // Subscribe a reader to the bus so we can publish into it
@@ -882,12 +841,12 @@ mod tests {
         let changed = app.process_file_events();
         assert!(changed, "process_file_events should report a change");
         assert!(
-            app.loaded_path.is_none(),
+            app.tab_manager.loaded_path.is_none(),
             "loaded_path must be cleared so the renderer reloads on the next frame"
         );
         // selected_file must be preserved so the renderer knows
         // what to render.
-        assert_eq!(app.selected_file.as_ref(), Some(&path));
+        assert_eq!(app.selection.selected_file(), Some(&path));
     }
 
     #[test]
@@ -898,8 +857,8 @@ mod tests {
         let mut app = create_test_app();
         let path = PathBuf::from("/tmp/being_edited.md");
 
-        app.selected_file = Some(path.clone());
-        app.loaded_path = Some(path.clone());
+        *app.selection.selected_file_mut() = Some(path.clone());
+        app.tab_manager.loaded_path = Some(path.clone());
         app.file_processor.all_files.push(path.clone());
         app.editor_state.open(&path, "old content");
         assert!(app.editor_state.is_open);
@@ -910,7 +869,7 @@ mod tests {
 
         let _ = app.process_file_events();
         assert!(
-            app.loaded_path.is_some(),
+            app.tab_manager.loaded_path.is_some(),
             "loaded_path must NOT be cleared while the inline editor is open"
         );
     }
@@ -924,8 +883,8 @@ mod tests {
         let mut app = create_test_app();
         let path = PathBuf::from("/tmp/gone.md");
 
-        app.selected_file = Some(path.clone());
-        app.loaded_path = Some(path.clone());
+        *app.selection.selected_file_mut() = Some(path.clone());
+        app.tab_manager.loaded_path = Some(path.clone());
         app.file_processor.all_files.push(path.clone());
 
         app.file_event_reader = Some(app.file_event_bus.subscribe());
@@ -933,7 +892,7 @@ mod tests {
         publisher.publish(crate::file_events::FileEvent::removed(path.clone()));
 
         let _ = app.process_file_events();
-        assert!(app.loaded_path.is_none());
+        assert!(app.tab_manager.loaded_path.is_none());
     }
 
     #[test]
@@ -1038,7 +997,7 @@ mod tests {
         // `left_panel_dirty`. The width is calculated once,
         // when indexing finishes, in `show_left_panel`.
         let mut app = create_test_app();
-        assert!(!app.left_panel_dirty);
+        assert!(!app.layout.left_panel_dirty);
 
         app.file_event_reader = Some(app.file_event_bus.subscribe());
         let publisher = app.file_event_bus.clone();
@@ -1054,7 +1013,7 @@ mod tests {
 
         let _ = app.process_file_events();
         assert!(
-            !app.left_panel_dirty,
+            !app.layout.left_panel_dirty,
             "process_file_events must not set left_panel_dirty — the width is \
              calculated once when indexing finishes, not per bus event"
         );
