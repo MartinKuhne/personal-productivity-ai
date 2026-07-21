@@ -224,18 +224,12 @@ pub fn show_rename_modal(app: &mut FastMdApp, ctx: &egui::Context) {
                                                 app.all_files.push(new_path.clone());
                                             }
                                         }
-                                        app.file_tags.remove(file);
                                         let tags =
                                             crate::utils::tags::extract_tags_from_file(&new_path);
-                                        app.file_tags.insert(new_path.clone(), tags);
+                                        app.tag_manager.remove_file(file);
+                                        app.tag_manager.add_tags(new_path.clone(), tags);
                                         if app.expanded_dirs.remove(file) {
                                             app.expanded_dirs.insert(new_path.clone());
-                                        }
-                                        app.all_tags.clear();
-                                        for tags in app.file_tags.values() {
-                                            for tag in tags {
-                                                app.all_tags.insert(tag.clone());
-                                            }
                                         }
                                     }
                                 }
@@ -392,8 +386,10 @@ mod tests {
         });
 
         // The file should have been renamed with .md extension preserved
-        assert!(!temp_dir.join("renamed_doc.md").exists() || temp_dir.join("my_document.md").exists(),
-            "Rename should complete without error");
+        assert!(
+            !temp_dir.join("renamed_doc.md").exists() || temp_dir.join("my_document.md").exists(),
+            "Rename should complete without error"
+        );
 
         // Clean up
         let _ = fs::remove_dir_all(&temp_dir);

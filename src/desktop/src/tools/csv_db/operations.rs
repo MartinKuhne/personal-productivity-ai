@@ -1,22 +1,21 @@
+use super::schema::{AddRowsInput, CreateCsvInput, CsvDatabase, ListCsvInput};
 use crate::config::AppConfig;
-use super::schema::{CreateCsvInput, ListCsvInput, AddRowsInput, CsvDatabase};
 use std::path::PathBuf;
 
 pub fn get_db_dir(config: &AppConfig) -> PathBuf {
     let path = if let Some(ref override_path) = config.csv_db_path {
         PathBuf::from(override_path)
     } else {
-        let app_data = std::env::var("APPDATA")
-            .unwrap_or_else(|_| {
-                let home = std::env::var("HOME").unwrap_or_else(|_| ".".to_string());
-                format!("{}/.config", home)
-            });
+        let app_data = std::env::var("APPDATA").unwrap_or_else(|_| {
+            let home = std::env::var("HOME").unwrap_or_else(|_| ".".to_string());
+            format!("{}/.config", home)
+        });
         let mut p = PathBuf::from(app_data);
         p.push("fastmd");
         p.push("db");
         p
     };
-    
+
     let _ = std::fs::create_dir_all(&path);
     path
 }
@@ -32,11 +31,13 @@ pub fn create_csv(config: &AppConfig, input: CreateCsvInput) -> Result<CsvDataba
     if db_path.exists() {
         return Err(format!("Database '{}' already exists", input.db_name));
     }
-    
-    let mut wtr = csv::Writer::from_path(&db_path).map_err(|e| format!("Failed to create csv: {}", e))?;
-    wtr.write_record(&input.headers).map_err(|e| format!("Failed to write headers: {}", e))?;
+
+    let mut wtr =
+        csv::Writer::from_path(&db_path).map_err(|e| format!("Failed to create csv: {}", e))?;
+    wtr.write_record(&input.headers)
+        .map_err(|e| format!("Failed to write headers: {}", e))?;
     wtr.flush().map_err(|e| format!("Failed to flush: {}", e))?;
-    
+
     Ok(CsvDatabase {
         name: input.db_name,
         path: db_path,
@@ -47,15 +48,23 @@ pub fn create_csv(config: &AppConfig, input: CreateCsvInput) -> Result<CsvDataba
 pub fn list_csv(config: &AppConfig, _input: ListCsvInput) -> Result<Vec<CsvDatabase>, String> {
     let db_dir = get_db_dir(config);
     let mut dbs = Vec::new();
-    
+
     if let Ok(entries) = std::fs::read_dir(db_dir) {
         for entry in entries.flatten() {
             let path = entry.path();
             if path.extension().and_then(|e| e.to_str()) == Some("csv") {
-                let name = path.file_stem().and_then(|n| n.to_str()).unwrap_or("").to_string();
-                if let Ok(mut rdr) = csv::ReaderBuilder::new().has_headers(false).from_path(&path) {
+                let name = path
+                    .file_stem()
+                    .and_then(|n| n.to_str())
+                    .unwrap_or("")
+                    .to_string();
+                if let Ok(mut rdr) = csv::ReaderBuilder::new()
+                    .has_headers(false)
+                    .from_path(&path)
+                {
                     if let Some(Ok(header_record)) = rdr.records().next() {
-                        let headers: Vec<String> = header_record.iter().map(|s| s.to_string()).collect();
+                        let headers: Vec<String> =
+                            header_record.iter().map(|s| s.to_string()).collect();
                         dbs.push(CsvDatabase {
                             name,
                             path,
@@ -66,7 +75,7 @@ pub fn list_csv(config: &AppConfig, _input: ListCsvInput) -> Result<Vec<CsvDatab
             }
         }
     }
-    
+
     Ok(dbs)
 }
 
@@ -75,44 +84,59 @@ pub fn add_rows(config: &AppConfig, input: AddRowsInput) -> Result<String, Strin
     if !db_path.exists() {
         return Err(format!("Database '{}' does not exist", input.db_name));
     }
-    
-    let mut rdr = csv::Reader::from_path(&db_path).map_err(|e| format!("Failed to read csv: {}", e))?;
-    let headers_record = rdr.headers().map_err(|e| format!("Failed to read headers: {}", e))?.clone();
+
+    let mut rdr =
+        csv::Reader::from_path(&db_path).map_err(|e| format!("Failed to read csv: {}", e))?;
+    let headers_record = rdr
+        .headers()
+        .map_err(|e| format!("Failed to read headers: {}", e))?
+        .clone();
     let headers: Vec<String> = headers_record.iter().map(|s| s.to_string()).collect();
-    
+
     for (i, row) in input.rows.iter().enumerate() {
         for key in row.keys() {
             if !headers.contains(key) {
-                return Err(format!("Row {} contains invalid header: '{}'. Valid headers are: {:?}", i, key, headers));
+                return Err(format!(
+                    "Row {} contains invalid header: '{}'. Valid headers are: {:?}",
+                    i, key, headers
+                ));
             }
         }
         for header in &headers {
             if !row.contains_key(header) {
-                return Err(format!("Row {} is missing required header: '{}'", i, header));
+                return Err(format!(
+                    "Row {} is missing required header: '{}'",
+                    i, header
+                ));
             }
         }
     }
-    
-    let file = std::fs::OpenOptions::new().write(true).append(true).open(&db_path).map_err(|e| format!("Failed to open file: {}", e))?;
+
+    let file = std::fs::OpenOptions::new()
+        .write(true)
+        .append(true)
+        .open(&db_path)
+        .map_err(|e| format!("Failed to open file: {}", e))?;
     let mut wtr = csv::Writer::from_writer(file);
-    
+
     for row in &input.rows {
         let mut record = Vec::new();
         for header in &headers {
             record.push(row.get(header).cloned().unwrap_or_default());
         }
-        wtr.write_record(&record).map_err(|e| format!("Failed to write row: {}", e))?;
+        wtr.write_record(&record)
+            .map_err(|e| format!("Failed to write row: {}", e))?;
     }
     wtr.flush().map_err(|e| format!("Failed to flush: {}", e))?;
-    
+
     Ok(format!("Added {} rows", input.rows.len()))
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use tempfile::tempdir;
     use std::collections::HashMap;
+    use tempfile::tempdir;
 
     #[test]
     fn test_create_and_list_and_add_rows() {
@@ -140,12 +164,12 @@ mod tests {
         row1.insert("id".to_string(), "1".to_string());
         row1.insert("name".to_string(), "Alice".to_string());
         row1.insert("age".to_string(), "25".to_string());
-        
+
         let mut row2 = HashMap::new();
         row2.insert("id".to_string(), "2".to_string());
         row2.insert("name".to_string(), "Bob".to_string());
         row2.insert("age".to_string(), "30".to_string());
-        
+
         let add_input = AddRowsInput {
             db_name: "test_db".to_string(),
             rows: vec![row1, row2],
@@ -175,10 +199,14 @@ mod tests {
         assert!(err_missing.contains("missing required header"));
 
         // Test add to non-existent db
-        let err_not_exist = add_rows(&config, AddRowsInput {
-            db_name: "missing_db".to_string(),
-            rows: vec![],
-        }).unwrap_err();
+        let err_not_exist = add_rows(
+            &config,
+            AddRowsInput {
+                db_name: "missing_db".to_string(),
+                rows: vec![],
+            },
+        )
+        .unwrap_err();
         assert!(err_not_exist.contains("does not exist"));
     }
 }

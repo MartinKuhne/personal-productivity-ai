@@ -141,7 +141,7 @@ pub fn show_bottom_panel(app: &mut FastMdApp, ctx: &egui::Context) {
                 if submit {
                     let prompt = app.command_input.trim_end().to_string();
                     app.command_input.clear();
-                    
+
                     match parse_command_intent(&prompt) {
                         CommandIntent::ShowModels => {
                             app.agent_status = "Done".to_string();

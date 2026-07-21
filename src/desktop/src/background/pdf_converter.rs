@@ -1,9 +1,10 @@
-use std::path::PathBuf;
-use tokio::process::Command;
-use crate::messages::BackgroundMessage;
 use crate::background::models::{BackgroundLogEntry, LogCategory};
+use crate::messages::BackgroundMessage;
+use std::path::PathBuf;
 use std::sync::mpsc::Sender;
-#[cfg(test)] use std::sync::mpsc::channel;
+#[cfg(test)]
+use std::sync::mpsc::channel;
+use tokio::process::Command;
 
 pub struct PdfConversionJob {
     pub input_pdf: PathBuf,
@@ -14,14 +15,20 @@ impl PdfConversionJob {
     pub fn new(input_pdf: PathBuf) -> Self {
         let mut output_md = input_pdf.clone();
         output_md.set_extension("md");
-        Self { input_pdf, output_md }
+        Self {
+            input_pdf,
+            output_md,
+        }
     }
 
     pub fn should_convert(&self) -> bool {
         if !self.output_md.exists() {
             return true;
         }
-        if let (Ok(pdf_meta), Ok(md_meta)) = (std::fs::metadata(&self.input_pdf), std::fs::metadata(&self.output_md)) {
+        if let (Ok(pdf_meta), Ok(md_meta)) = (
+            std::fs::metadata(&self.input_pdf),
+            std::fs::metadata(&self.output_md),
+        ) {
             if let (Ok(pdf_time), Ok(md_time)) = (pdf_meta.modified(), md_meta.modified()) {
                 return pdf_time > md_time;
             }
@@ -29,27 +36,40 @@ impl PdfConversionJob {
         false
     }
 
-    pub async fn execute(self, cmd_template: Option<Vec<String>>, tx: Sender<BackgroundMessage>) -> Result<(), String> {
+    pub async fn execute(
+        self,
+        cmd_template: Option<Vec<String>>,
+        tx: Sender<BackgroundMessage>,
+    ) -> Result<(), String> {
         if let Some(template) = cmd_template {
             if template.is_empty() {
-                tracing::warn!(name = "pdf_converter.config.empty_template", "PDF converter command template is empty. Skipping conversion. Operator should verify pdf_converter_command in configuration.");
+                tracing::warn!(
+                    name = "pdf_converter.config.empty_template",
+                    "PDF converter command template is empty. Skipping conversion. Operator should verify pdf_converter_command in configuration."
+                );
                 return Err("Command template is empty".to_string());
             }
             let mut args = Vec::new();
             let exe = template[0].clone();
-            
+
             let exe_lower = exe.to_lowercase();
-            let is_marker = exe_lower.ends_with("marker") 
-                         || exe_lower.ends_with("marker.exe")
-                         || exe_lower.ends_with("marker_single")
-                         || exe_lower.ends_with("marker_single.exe")
-                         || exe_lower.ends_with("marker_pdf")
-                         || exe_lower.ends_with("marker_pdf.exe");
-            
+            let is_marker = exe_lower.ends_with("marker")
+                || exe_lower.ends_with("marker.exe")
+                || exe_lower.ends_with("marker_single")
+                || exe_lower.ends_with("marker_single.exe")
+                || exe_lower.ends_with("marker_pdf")
+                || exe_lower.ends_with("marker_pdf.exe");
+
             let mut actual_output_dir = None;
 
             if is_marker {
-                let temp_name = format!("marker_{}", std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos());
+                let temp_name = format!(
+                    "marker_{}",
+                    std::time::SystemTime::now()
+                        .duration_since(std::time::UNIX_EPOCH)
+                        .unwrap()
+                        .as_nanos()
+                );
                 let temp = std::env::temp_dir().join(temp_name);
                 let _ = std::fs::create_dir_all(&temp);
                 actual_output_dir = Some(temp);
@@ -62,14 +82,18 @@ impl PdfConversionJob {
                     self.output_md.to_string_lossy().to_string()
                 };
 
-                let arg = arg.replace("{input}", &self.input_pdf.to_string_lossy())
-                             .replace("{output}", &replacement_out);
+                let arg = arg
+                    .replace("{input}", &self.input_pdf.to_string_lossy())
+                    .replace("{output}", &replacement_out);
                 args.push(arg);
             }
-            
+
             let _ = tx.send(BackgroundMessage::LogEntry(BackgroundLogEntry::new(
                 LogCategory::PdfConverter,
-                format!("Converting {:?}", self.input_pdf.file_name().unwrap_or_default())
+                format!(
+                    "Converting {:?}",
+                    self.input_pdf.file_name().unwrap_or_default()
+                ),
             )));
 
             let output = Command::new(&exe)
@@ -107,32 +131,45 @@ impl PdfConversionJob {
                         }
                     }
                     let _ = std::fs::remove_dir_all(&temp);
-                    
+
                     if !md_found {
                         let _ = tx.send(BackgroundMessage::LogEntry(BackgroundLogEntry::new(
                             LogCategory::PdfConverter,
-                            format!("Warning: Could not find output markdown from marker for {:?}", self.input_pdf.file_name().unwrap_or_default())
+                            format!(
+                                "Warning: Could not find output markdown from marker for {:?}",
+                                self.input_pdf.file_name().unwrap_or_default()
+                            ),
                         )));
                     }
                 }
 
                 let _ = tx.send(BackgroundMessage::LogEntry(BackgroundLogEntry::new(
                     LogCategory::PdfConverter,
-                    format!("Successfully converted {:?}", self.input_pdf.file_name().unwrap_or_default())
+                    format!(
+                        "Successfully converted {:?}",
+                        self.input_pdf.file_name().unwrap_or_default()
+                    ),
                 )));
                 Ok(())
             } else {
                 let err_msg = String::from_utf8_lossy(&output.stderr).to_string();
-                let msg = format!("Conversion failed for {:?}: {}", self.input_pdf.file_name().unwrap_or_default(), err_msg);
+                let msg = format!(
+                    "Conversion failed for {:?}: {}",
+                    self.input_pdf.file_name().unwrap_or_default(),
+                    err_msg
+                );
                 tracing::error!(name = "pdf_converter.process.failed", path = %self.input_pdf.display(), exit_code = ?output.status.code(), stderr = %err_msg, "PDF conversion process returned a non-zero exit status. Operator should check the stderr output for details.");
                 let _ = tx.send(BackgroundMessage::LogEntry(BackgroundLogEntry::new(
                     LogCategory::PdfConverter,
-                    msg.clone()
+                    msg.clone(),
                 )));
                 Err(msg)
             }
         } else {
-            tracing::warn!(name = "pdf_converter.config.not_configured", "No pdf_converter_command configured. Skipping PDF conversion. Operator should provide a command template in configuration if PDF conversion is desired.");
+            tracing::warn!(
+                name = "pdf_converter.config.not_configured",
+                "No pdf_converter_command configured. Skipping PDF conversion. Operator should provide a command template in configuration if PDF conversion is desired."
+            );
             Err("No pdf_converter_command configured".to_string())
         }
     }
@@ -220,7 +257,10 @@ mod tests {
         let mut output = input.clone();
         output.set_extension("md");
 
-        let job = PdfConversionJob { input_pdf: input, output_md: output };
+        let job = PdfConversionJob {
+            input_pdf: input,
+            output_md: output,
+        };
         let template = Some(vec![
             "pandoc".to_string(),
             "{input}".to_string(),
@@ -259,9 +299,14 @@ mod tests {
 
         let rt = tokio::runtime::Runtime::new().unwrap();
         let job = PdfConversionJob::new(pdf);
-        
+
         #[cfg(windows)]
-        let cmd = Some(vec!["cmd".to_string(), "/C".to_string(), "echo".to_string(), "done".to_string()]);
+        let cmd = Some(vec![
+            "cmd".to_string(),
+            "/C".to_string(),
+            "echo".to_string(),
+            "done".to_string(),
+        ]);
         #[cfg(not(windows))]
         let cmd = Some(vec!["echo".to_string(), "done".to_string()]);
 
@@ -278,9 +323,14 @@ mod tests {
 
         let rt = tokio::runtime::Runtime::new().unwrap();
         let job = PdfConversionJob::new(pdf);
-        
+
         #[cfg(windows)]
-        let cmd = Some(vec!["cmd".to_string(), "/C".to_string(), "exit".to_string(), "1".to_string()]);
+        let cmd = Some(vec![
+            "cmd".to_string(),
+            "/C".to_string(),
+            "exit".to_string(),
+            "1".to_string(),
+        ]);
         #[cfg(not(windows))]
         let cmd = Some(vec!["false".to_string()]);
 
@@ -294,22 +344,39 @@ mod tests {
         let dir = tempdir().unwrap();
         let pdf = dir.path().join("doc.pdf");
         std::fs::write(&pdf, "pdf").unwrap();
-        
+
         // Find a system binary to copy.
-        let source = if cfg!(windows) { "C:\\Windows\\System32\\cmd.exe" } else { "/bin/sh" };
-        let marker_exe = dir.path().join(if cfg!(windows) { "marker.exe" } else { "marker" });
+        let source = if cfg!(windows) {
+            "C:\\Windows\\System32\\cmd.exe"
+        } else {
+            "/bin/sh"
+        };
+        let marker_exe = dir.path().join(if cfg!(windows) {
+            "marker.exe"
+        } else {
+            "marker"
+        });
         std::fs::copy(source, &marker_exe).unwrap_or_default();
 
         let (tx, _rx) = channel();
         let rt = tokio::runtime::Runtime::new().unwrap();
         let job = PdfConversionJob::new(pdf);
-        
+
         let cmd = if cfg!(windows) {
-            Some(vec![marker_exe.to_string_lossy().to_string(), "/C".to_string(), "echo".to_string(), "success".to_string()])
+            Some(vec![
+                marker_exe.to_string_lossy().to_string(),
+                "/C".to_string(),
+                "echo".to_string(),
+                "success".to_string(),
+            ])
         } else {
-            Some(vec![marker_exe.to_string_lossy().to_string(), "-c".to_string(), "echo success".to_string()])
+            Some(vec![
+                marker_exe.to_string_lossy().to_string(),
+                "-c".to_string(),
+                "echo success".to_string(),
+            ])
         };
-        
+
         // This should hit the marker code branch and succeed.
         let result = rt.block_on(job.execute(cmd, tx));
         assert!(result.is_ok() || result.is_err()); // Either way we cover the branch

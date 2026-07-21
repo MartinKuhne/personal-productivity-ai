@@ -1,5 +1,5 @@
 use crate::ui::render::{render_markdown, render_yaml_table};
-use crate::ui::{generate_format_prompt, open_in_system_editor, show_in_file_explorer, FastMdApp};
+use crate::ui::{FastMdApp, generate_format_prompt, open_in_system_editor, show_in_file_explorer};
 use eframe::egui;
 use egui::RichText;
 use std::path::PathBuf;
@@ -274,8 +274,8 @@ mod tests {
     use super::*;
     use crate::ui::generate_format_prompt;
     use std::path::PathBuf;
-    use std::sync::atomic::{AtomicBool, Ordering};
     use std::sync::Arc;
+    use std::sync::atomic::{AtomicBool, Ordering};
 
     fn create_test_app() -> FastMdApp {
         FastMdApp::empty_state()

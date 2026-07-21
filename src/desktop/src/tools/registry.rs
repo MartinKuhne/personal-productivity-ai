@@ -672,7 +672,13 @@ mod tests {
         let config = AppConfig::default();
         let root = Path::new("C:\\");
         let bus = test_bus();
-        let res = execute_tool(&config, root, "list_files", r#"{"path": "NonExistentLib"}"#, bus);
+        let res = execute_tool(
+            &config,
+            root,
+            "list_files",
+            r#"{"path": "NonExistentLib"}"#,
+            bus,
+        );
         assert!(res.contains("Content library 'NonExistentLib' not found"));
     }
 
@@ -700,7 +706,11 @@ mod tests {
         // Default config has toolCallDebugMode = false
         let mut config = AppConfig::default();
         assert_eq!(
-            config.feature_flags.get("toolCallDebugMode").copied().unwrap_or(false),
+            config
+                .feature_flags
+                .get("toolCallDebugMode")
+                .copied()
+                .unwrap_or(false),
             false,
             "toolCallDebugMode should default to false"
         );
@@ -710,7 +720,11 @@ mod tests {
             .feature_flags
             .insert("toolCallDebugMode".to_string(), true);
         assert_eq!(
-            config.feature_flags.get("toolCallDebugMode").copied().unwrap_or(false),
+            config
+                .feature_flags
+                .get("toolCallDebugMode")
+                .copied()
+                .unwrap_or(false),
             true,
             "toolCallDebugMode should be true when set"
         );
@@ -1006,9 +1020,11 @@ mod tests {
         // Each path is the virtual one (Lib/<file>) — the
         // separator is platform-specific so we just check the
         // library prefix and the leaf.
-        assert!(files
-            .iter()
-            .all(|p| p.starts_with("Lib") && p.contains("note_")));
+        assert!(
+            files
+                .iter()
+                .all(|p| p.starts_with("Lib") && p.contains("note_"))
+        );
     }
 
     #[test]
@@ -1108,7 +1124,13 @@ mod tests {
         // the user asked for.
         let (config, _fix) = single_lib_with_n_md_files(3);
         let envelope = run_list_files(&config, r#"{"path":"Lib"}"#);
-        let raw = execute_tool(&config, Path::new(""), "list_files", r#"{"path":"Lib"}"#, test_bus());
+        let raw = execute_tool(
+            &config,
+            Path::new(""),
+            "list_files",
+            r#"{"path":"Lib"}"#,
+            test_bus(),
+        );
         let parsed: Value = serde_json::from_str(&raw).unwrap();
         assert!(parsed["data"]["files"].is_array());
         // And on the parsed envelope, same shape.

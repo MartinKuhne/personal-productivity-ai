@@ -34,14 +34,22 @@ pub async fn browser_click(page: &Page, selector: &str) -> Result<(), Box<dyn st
 }
 
 /// Fills an input element with text.
-pub async fn browser_fill_input(page: &Page, selector: &str, text: &str) -> Result<(), Box<dyn std::error::Error>> {
+pub async fn browser_fill_input(
+    page: &Page,
+    selector: &str,
+    text: &str,
+) -> Result<(), Box<dyn std::error::Error>> {
     let locator = page.locator(selector).await;
     locator.fill(text, None).await?;
     Ok(())
 }
 
 /// Selects an option in a dropdown.
-pub async fn browser_select_dropdown(page: &Page, selector: &str, value: &str) -> Result<(), Box<dyn std::error::Error>> {
+pub async fn browser_select_dropdown(
+    page: &Page,
+    selector: &str,
+    value: &str,
+) -> Result<(), Box<dyn std::error::Error>> {
     let locator = page.locator(selector).await;
     locator.select_option(value, None).await?;
     Ok(())
@@ -54,7 +62,10 @@ pub async fn browser_press_key(page: &Page, key: &str) -> Result<(), Box<dyn std
 }
 
 /// Evaluates raw JavaScript in the page.
-pub async fn browser_evaluate_js(page: &Page, script: &str) -> Result<String, Box<dyn std::error::Error>> {
+pub async fn browser_evaluate_js(
+    page: &Page,
+    script: &str,
+) -> Result<String, Box<dyn std::error::Error>> {
     let val: serde_json::Value = page.evaluate(script, None::<&()>).await?;
     Ok(serde_json::to_string(&val)?)
 }
@@ -62,9 +73,9 @@ pub async fn browser_evaluate_js(page: &Page, script: &str) -> Result<String, Bo
 #[cfg(test)]
 mod tests {
     use super::*;
-    use playwright_rs::{Playwright, Browser};
+    use playwright_rs::{Browser, Playwright};
 
-    // A helper to initialize Playwright. 
+    // A helper to initialize Playwright.
     // In CI or environments without browsers, this might fail, so we ignore it by default.
     // Run with `cargo test -- --ignored` if browsers are installed.
     async fn setup_page() -> Result<(Playwright, Browser, Page), Box<dyn std::error::Error>> {
@@ -79,9 +90,9 @@ mod tests {
     #[ignore = "Requires playwright browsers installed locally"]
     async fn test_browser_navigate_and_state() -> Result<(), Box<dyn std::error::Error>> {
         let (_playwright, _browser, page) = setup_page().await?;
-        
+
         browser_navigate(&page, "https://example.com").await?;
-        
+
         let state = browser_get_page_state(&page).await?;
         assert!(state.contains("a")); // example.com has an <a> link
 
@@ -92,9 +103,9 @@ mod tests {
     #[ignore = "Requires playwright browsers installed locally"]
     async fn test_browser_evaluate() -> Result<(), Box<dyn std::error::Error>> {
         let (_playwright, _browser, page) = setup_page().await?;
-        
+
         browser_navigate(&page, "https://example.com").await?;
-        
+
         let result = browser_evaluate_js(&page, "() => 2 + 2").await?;
         assert_eq!(result, "4");
 

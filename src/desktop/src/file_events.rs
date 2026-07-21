@@ -19,8 +19,8 @@
 //! thread panics or is shut down.
 
 use std::path::PathBuf;
+use std::sync::mpsc::{Receiver, Sender, channel};
 use std::sync::{Arc, Mutex};
-use std::sync::mpsc::{channel, Receiver, Sender};
 
 /// What happened to a file in one of the configured content libraries.
 ///
@@ -49,15 +49,24 @@ pub struct FileEvent {
 
 impl FileEvent {
     pub fn discovered(path: PathBuf) -> Self {
-        Self { kind: FileEventKind::Discovered, path }
+        Self {
+            kind: FileEventKind::Discovered,
+            path,
+        }
     }
 
     pub fn updated(path: PathBuf) -> Self {
-        Self { kind: FileEventKind::Updated, path }
+        Self {
+            kind: FileEventKind::Updated,
+            path,
+        }
     }
 
     pub fn removed(path: PathBuf) -> Self {
-        Self { kind: FileEventKind::Removed, path }
+        Self {
+            kind: FileEventKind::Removed,
+            path,
+        }
     }
 }
 
@@ -162,8 +171,8 @@ impl<T> BusReader<T> {
 mod tests {
     use super::*;
     use std::collections::HashSet;
-    use std::sync::atomic::{AtomicUsize, Ordering};
     use std::sync::Arc;
+    use std::sync::atomic::{AtomicUsize, Ordering};
     use std::thread;
     use std::time::Duration;
 

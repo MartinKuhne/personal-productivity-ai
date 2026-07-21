@@ -8,6 +8,7 @@ pub enum LogCategory {
     ImageVision,
     LlmTools,
     Print,
+    Batch,
 }
 
 #[cfg(test)]
@@ -84,6 +85,7 @@ impl std::fmt::Display for LogCategory {
             LogCategory::ImageVision => "Image Vision",
             LogCategory::LlmTools => "LLM Tools",
             LogCategory::Print => "Print",
+            LogCategory::Batch => "Batch",
         };
         write!(f, "{}", s)
     }

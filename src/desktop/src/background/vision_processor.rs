@@ -1,10 +1,10 @@
+use crate::background::models::{BackgroundLogEntry, ImageJob, LogCategory};
 use crate::config::AppConfig;
 use crate::file_events::FileEventProducer;
 use crate::messages::BackgroundMessage;
-use crate::background::models::{BackgroundLogEntry, LogCategory, ImageJob};
-use std::sync::mpsc::Sender;
 use base64::{Engine as _, engine::general_purpose::STANDARD as b64};
 use serde_json::json;
+use std::sync::mpsc::Sender;
 
 pub async fn process_image<'a>(
     job: ImageJob,
@@ -17,11 +17,14 @@ pub async fn process_image<'a>(
     let model_cfg = match vision_model {
         Some(m) => m,
         None => {
-            tracing::warn!(name = "vision.model.missing", "No vision model configured. Image processing skipped. Operator should configure a model with the 'vision' use case.");
+            tracing::warn!(
+                name = "vision.model.missing",
+                "No vision model configured. Image processing skipped. Operator should configure a model with the 'vision' use case."
+            );
             return Err("No vision model configured".to_string());
         }
     };
-    
+
     // Read and encode image
     let img_data = match std::fs::read(&job.image_path) {
         Ok(data) => data,
@@ -31,8 +34,13 @@ pub async fn process_image<'a>(
         }
     };
     let b64_encoded = b64.encode(&img_data);
-    
-    let ext = job.image_path.extension().unwrap_or_default().to_string_lossy().to_lowercase();
+
+    let ext = job
+        .image_path
+        .extension()
+        .unwrap_or_default()
+        .to_string_lossy()
+        .to_lowercase();
     let mime = match ext.as_str() {
         "jpg" | "jpeg" => "image/jpeg",
         "png" => "image/png",
@@ -43,7 +51,7 @@ pub async fn process_image<'a>(
         "avif" => "image/avif",
         _ => "image/jpeg",
     };
-    
+
     let payload = json!({
         "model": model_cfg.model,
         "messages": [
@@ -64,16 +72,21 @@ pub async fn process_image<'a>(
             }
         ]
     });
-    
+
     let api_url = model_cfg.api_url.clone();
     let api_key = model_cfg.api_key.clone();
-    let img_name = job.image_path.file_name().unwrap_or_default().to_string_lossy().into_owned();
-    
+    let img_name = job
+        .image_path
+        .file_name()
+        .unwrap_or_default()
+        .to_string_lossy()
+        .into_owned();
+
     let _ = tx.send(BackgroundMessage::LogEntry(BackgroundLogEntry::new(
         LogCategory::ImageVision,
-        format!("Analyzing image {:?}", img_name)
+        format!("Analyzing image {:?}", img_name),
     )));
-    
+
     // Perform blocking HTTP request
     let response = tokio::task::spawn_blocking(move || {
         ureq::post(&format!("{}/chat/completions", api_url.trim_end_matches('/')))
@@ -84,7 +97,7 @@ pub async fn process_image<'a>(
         tracing::error!(name = "vision.api.spawn_failed", error = %e, "Failed to spawn blocking task for vision API request. Operator should check system resources.");
         format!("Spawn blocking error: {}", e)
     })?;
-    
+
     match response {
         Ok(resp) => {
             let json: serde_json::Value = resp.into_json().map_err(|e| {
@@ -95,7 +108,10 @@ pub async fn process_image<'a>(
                 if let Err(e) = std::fs::write(&job.md_path, content) {
                     tracing::error!(name = "vision.output.write_failed", path = %job.md_path.display(), error = %e, "Failed to write markdown output from vision analysis. Operator should verify disk space and write permissions.");
                     let msg = format!("Failed to write markdown for {:?}: {}", img_name, e);
-                    let _ = tx.send(BackgroundMessage::LogEntry(BackgroundLogEntry::new(LogCategory::ImageVision, msg.clone())));
+                    let _ = tx.send(BackgroundMessage::LogEntry(BackgroundLogEntry::new(
+                        LogCategory::ImageVision,
+                        msg.clone(),
+                    )));
                     return Err(msg);
                 }
 
@@ -107,17 +123,19 @@ pub async fn process_image<'a>(
 
                 let _ = tx.send(BackgroundMessage::LogEntry(BackgroundLogEntry::new(
                     LogCategory::ImageVision,
-                    format!("Successfully analyzed {:?}", img_name)
+                    format!("Successfully analyzed {:?}", img_name),
                 )));
                 Ok(())
             } else {
-
                 tracing::error!(name = "vision.api.no_content", image = %img_name, response = ?json, "Vision API returned no content in choices. Operator should check model compatibility.");
                 let msg = format!("No content in response for {:?}", img_name);
-                let _ = tx.send(BackgroundMessage::LogEntry(BackgroundLogEntry::new(LogCategory::ImageVision, msg.clone())));
+                let _ = tx.send(BackgroundMessage::LogEntry(BackgroundLogEntry::new(
+                    LogCategory::ImageVision,
+                    msg.clone(),
+                )));
                 Err(msg)
             }
-        },
+        }
         Err(e) => {
             let mut err_msg = format!("API request failed for {:?}: {}", img_name, e);
             if let ureq::Error::Status(code, r) = e {
@@ -127,7 +145,10 @@ pub async fn process_image<'a>(
             } else {
                 tracing::error!(name = "vision.api.network_error", image = %img_name, error = %e, "Vision API request failed completely. Operator should check network connectivity.");
             }
-            let _ = tx.send(BackgroundMessage::LogEntry(BackgroundLogEntry::new(LogCategory::ImageVision, err_msg.clone())));
+            let _ = tx.send(BackgroundMessage::LogEntry(BackgroundLogEntry::new(
+                LogCategory::ImageVision,
+                err_msg.clone(),
+            )));
             Err(err_msg)
         }
     }
@@ -136,9 +157,9 @@ pub async fn process_image<'a>(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::config::{AppConfig, LlmConfig};
     use crate::file_events::{Bus, FileEvent};
     use std::path::PathBuf;
-    use crate::config::{AppConfig, LlmConfig};
     use std::sync::mpsc;
 
     /// Build a `FileEventProducer` backed by a leaked (and therefore
@@ -170,13 +191,16 @@ mod tests {
             md_path: PathBuf::from("test.md"),
         };
         let mut config = AppConfig::default();
-        config.models.insert("test".to_string(), LlmConfig {
-            model: "test-vision".to_string(),
-            api_key: "dummy".to_string(),
-            api_url: "dummy".to_string(),
-            cost: None,
-            use_case: vec!["vision".to_string()],
-        });
+        config.models.insert(
+            "test".to_string(),
+            LlmConfig {
+                model: "test-vision".to_string(),
+                api_key: "dummy".to_string(),
+                api_url: "dummy".to_string(),
+                cost: None,
+                use_case: vec!["vision".to_string()],
+            },
+        );
         let (tx, _rx) = mpsc::channel();
         let result = process_image(job, config, tx, &noop_producer()).await;
         assert!(result.is_err());
@@ -192,7 +216,8 @@ mod tests {
             let body = r#"{"choices": [{"message": {"content": "Mock description"}}]}"#;
             let response = format!(
                 "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nConnection: close\r\nContent-Length: {}\r\n\r\n{}",
-                body.len(), body
+                body.len(),
+                body
             );
             std::thread::spawn(move || {
                 for stream in listener.incoming() {
@@ -220,13 +245,16 @@ mod tests {
         };
 
         let mut config = AppConfig::default();
-        config.models.insert("test".to_string(), LlmConfig {
-            model: "test-vision".to_string(),
-            api_key: "dummy".to_string(),
-            api_url: mock_server,
-            cost: None,
-            use_case: vec!["vision".to_string()],
-        });
+        config.models.insert(
+            "test".to_string(),
+            LlmConfig {
+                model: "test-vision".to_string(),
+                api_key: "dummy".to_string(),
+                api_url: mock_server,
+                cost: None,
+                use_case: vec!["vision".to_string()],
+            },
+        );
 
         // Wire up a real (leaked) bus + reader so we can verify
         // that `process_image` publishes a Discovered event for
@@ -261,7 +289,8 @@ mod tests {
             let body = r#"{"error": "bad request"}"#;
             let response = format!(
                 "HTTP/1.1 400 Bad Request\r\nContent-Type: application/json\r\nConnection: close\r\nContent-Length: {}\r\n\r\n{}",
-                body.len(), body
+                body.len(),
+                body
             );
             std::thread::spawn(move || {
                 for stream in listener.incoming() {
@@ -289,13 +318,16 @@ mod tests {
         };
 
         let mut config = AppConfig::default();
-        config.models.insert("test".to_string(), LlmConfig {
-            model: "test-vision".to_string(),
-            api_key: "dummy".to_string(),
-            api_url: mock_server,
-            cost: None,
-            use_case: vec!["vision".to_string()],
-        });
+        config.models.insert(
+            "test".to_string(),
+            LlmConfig {
+                model: "test-vision".to_string(),
+                api_key: "dummy".to_string(),
+                api_url: mock_server,
+                cost: None,
+                use_case: vec!["vision".to_string()],
+            },
+        );
 
         let (tx, _rx) = mpsc::channel();
         let result = process_image(job, config, tx, &noop_producer()).await;
@@ -313,7 +345,8 @@ mod tests {
             let body = r#"{"choices": [{"message": {}}]}"#;
             let response = format!(
                 "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nConnection: close\r\nContent-Length: {}\r\n\r\n{}",
-                body.len(), body
+                body.len(),
+                body
             );
             std::thread::spawn(move || {
                 for stream in listener.incoming() {
@@ -341,13 +374,16 @@ mod tests {
         };
 
         let mut config = AppConfig::default();
-        config.models.insert("test".to_string(), LlmConfig {
-            model: "test-vision".to_string(),
-            api_key: "dummy".to_string(),
-            api_url: mock_server,
-            cost: None,
-            use_case: vec!["vision".to_string()],
-        });
+        config.models.insert(
+            "test".to_string(),
+            LlmConfig {
+                model: "test-vision".to_string(),
+                api_key: "dummy".to_string(),
+                api_url: mock_server,
+                cost: None,
+                use_case: vec!["vision".to_string()],
+            },
+        );
 
         let (tx, _rx) = mpsc::channel();
         let result = process_image(job, config, tx, &noop_producer()).await;

@@ -2,7 +2,7 @@ use crate::file_events::{Bus, FileEvent};
 use crate::messages::BackgroundMessage;
 use notify::Watcher;
 use std::path::PathBuf;
-use std::sync::mpsc::{channel, Receiver, Sender};
+use std::sync::mpsc::{Receiver, Sender, channel};
 
 /// Handle to the background indexing task.
 ///
@@ -64,7 +64,11 @@ impl Task {
                             // tab see it without waiting for the
                             // notify watcher to fire.
                             let output_md = job.output_md.clone();
-                            if job.execute(cmd_template.clone(), tx_gui_pdf.clone()).await.is_ok() {
+                            if job
+                                .execute(cmd_template.clone(), tx_gui_pdf.clone())
+                                .await
+                                .is_ok()
+                            {
                                 bus_pdf.publish(FileEvent::discovered(output_md));
                             }
                         }
@@ -88,8 +92,7 @@ impl Task {
                             // `FileEventProducer` so it can publish a
                             // Discovered event on success — same
                             // pattern as the PDF worker above.
-                            let producer =
-                                crate::file_events::FileEventProducer::new(&bus_img);
+                            let producer = crate::file_events::FileEventProducer::new(&bus_img);
                             let _ = crate::background::vision_processor::process_image(
                                 job,
                                 config_img.clone(),
@@ -155,8 +158,7 @@ impl Task {
                         let ext_str = ext.to_string_lossy().to_lowercase();
                         if ext_str == "md" || ext_str == "markdown" || ext_str == "txt" {
                             // Producer: emit a Discovered event to the bus.
-                            file_event_bus
-                                .publish(FileEvent::discovered(path.to_path_buf()));
+                            file_event_bus.publish(FileEvent::discovered(path.to_path_buf()));
                             let _ = tx_work.send(path.to_path_buf());
                         } else if ext_str == "pdf" {
                             // Producer: publish the PDF to the bus so the
@@ -164,16 +166,19 @@ impl Task {
                             // can convert it. We still push to `tx_pdf`
                             // directly as a fast path — the converter
                             // worker deduplicates via `should_convert()`.
-                            file_event_bus
-                                .publish(FileEvent::discovered(path.to_path_buf()));
+                            file_event_bus.publish(FileEvent::discovered(path.to_path_buf()));
                             let job = crate::background::PdfConversionJob::new(path.to_path_buf());
                             if job.should_convert() {
                                 pdfs_queued += 1;
                                 let _ = tx_pdf.send(path.to_path_buf());
                             }
-                        } else if matches!(ext_str.as_str(), "jpg" | "jpeg" | "png" | "gif" | "webp" | "bmp" | "tiff" | "avif") {
+                        } else if matches!(
+                            ext_str.as_str(),
+                            "jpg" | "jpeg" | "png" | "gif" | "webp" | "bmp" | "tiff" | "avif"
+                        ) {
                             if is_image_lib {
-                                let job = crate::background::models::ImageJob::new(path.to_path_buf());
+                                let job =
+                                    crate::background::models::ImageJob::new(path.to_path_buf());
                                 if job.should_process() {
                                     images_queued += 1;
                                     let _ = tx_img.send(path.to_path_buf());
@@ -182,14 +187,21 @@ impl Task {
                         }
                     }
                 } else if path.is_dir() {
-                    let _ = tx.send(BackgroundMessage::DirParsed { path: path.to_path_buf() });
+                    let _ = tx.send(BackgroundMessage::DirParsed {
+                        path: path.to_path_buf(),
+                    });
                 }
 
                 if files_scanned % 500 == 0 || last_log_time.elapsed().as_secs() >= 5 {
-                    let _ = tx.send(BackgroundMessage::LogEntry(crate::background::BackgroundLogEntry::new(
-                        crate::background::LogCategory::Indexer,
-                        format!("Scanned {} files, queued {} PDFs, queued {} images", files_scanned, pdfs_queued, images_queued)
-                    )));
+                    let _ = tx.send(BackgroundMessage::LogEntry(
+                        crate::background::BackgroundLogEntry::new(
+                            crate::background::LogCategory::Indexer,
+                            format!(
+                                "Scanned {} files, queued {} PDFs, queued {} images",
+                                files_scanned, pdfs_queued, images_queued
+                            ),
+                        ),
+                    ));
                     last_log_time = std::time::Instant::now();
                 }
                 if files_scanned % 50 == 0 {
@@ -218,116 +230,122 @@ impl Task {
         let tx_pdf_watcher = tx_pdf.clone();
         let tx_img_watcher = tx_img.clone();
         let bus_watcher = file_event_bus.clone();
-        let watcher_result = notify::recommended_watcher(move |res: Result<notify::Event, notify::Error>| {
-            if let Ok(event) = res {
-                for path in event.paths {
-                    if path.components().any(|c| c.as_os_str() == ".git") {
-                        continue;
-                    }
-
-                    let event_type = match event.kind {
-                        notify::EventKind::Create(_) => "created",
-                        notify::EventKind::Modify(_) => "modified",
-                        notify::EventKind::Remove(_) => "deleted",
-                        _ => "changed",
-                    };
-
-                    let mut is_image_lib = false;
-                    for lib in &config_watcher.content_libraries {
-                        let lib_path = std::path::PathBuf::from(&lib.root_folder);
-                        if lib.kind == "image" && path.starts_with(&lib_path) {
-                            is_image_lib = true;
-                            break;
+        let watcher_result =
+            notify::recommended_watcher(move |res: Result<notify::Event, notify::Error>| {
+                if let Ok(event) = res {
+                    for path in event.paths {
+                        if path.components().any(|c| c.as_os_str() == ".git") {
+                            continue;
                         }
-                    }
 
-                    let mut is_md = false;
-                    let mut is_pdf = false;
-                    let mut is_img = false;
-                    if let Some(ext) = path.extension() {
-                        let ext_str = ext.to_string_lossy().to_lowercase();
-                        if ext_str == "md" || ext_str == "markdown" || ext_str == "txt" {
-                            is_md = true;
-                        } else if ext_str == "pdf" {
-                            is_pdf = true;
-                        } else if matches!(ext_str.as_str(), "jpg" | "jpeg" | "png" | "gif" | "webp" | "bmp" | "tiff" | "avif") {
-                            if is_image_lib {
-                                is_img = true;
+                        let event_type = match event.kind {
+                            notify::EventKind::Create(_) => "created",
+                            notify::EventKind::Modify(_) => "modified",
+                            notify::EventKind::Remove(_) => "deleted",
+                            _ => "changed",
+                        };
+
+                        let mut is_image_lib = false;
+                        for lib in &config_watcher.content_libraries {
+                            let lib_path = std::path::PathBuf::from(&lib.root_folder);
+                            if lib.kind == "image" && path.starts_with(&lib_path) {
+                                is_image_lib = true;
+                                break;
                             }
                         }
-                    }
 
-                    if is_md || is_pdf || is_img {
-                        let _ = tx_notify.send(BackgroundMessage::LogEntry(crate::background::BackgroundLogEntry::new(
-                            crate::background::LogCategory::Watcher,
-                            format!("File {} {:?}", event_type, path.file_name().unwrap_or_default())
-                        )));
-                    }
+                        let mut is_md = false;
+                        let mut is_pdf = false;
+                        let mut is_img = false;
+                        if let Some(ext) = path.extension() {
+                            let ext_str = ext.to_string_lossy().to_lowercase();
+                            if ext_str == "md" || ext_str == "markdown" || ext_str == "txt" {
+                                is_md = true;
+                            } else if ext_str == "pdf" {
+                                is_pdf = true;
+                            } else if matches!(
+                                ext_str.as_str(),
+                                "jpg" | "jpeg" | "png" | "gif" | "webp" | "bmp" | "tiff" | "avif"
+                            ) {
+                                if is_image_lib {
+                                    is_img = true;
+                                }
+                            }
+                        }
 
-                    if is_md {
-                        match event.kind {
-                            notify::EventKind::Create(_) | notify::EventKind::Modify(_) => {
-                                if path.is_file() {
-                                    let tags = crate::utils::tags::extract_tags_from_file(&path);
-                                    let _ = tx_notify.send(
-                                        BackgroundMessage::FileModified {
+                        if is_md || is_pdf || is_img {
+                            let _ = tx_notify.send(BackgroundMessage::LogEntry(
+                                crate::background::BackgroundLogEntry::new(
+                                    crate::background::LogCategory::Watcher,
+                                    format!(
+                                        "File {} {:?}",
+                                        event_type,
+                                        path.file_name().unwrap_or_default()
+                                    ),
+                                ),
+                            ));
+                        }
+
+                        if is_md {
+                            match event.kind {
+                                notify::EventKind::Create(_) | notify::EventKind::Modify(_) => {
+                                    if path.is_file() {
+                                        let tags =
+                                            crate::utils::tags::extract_tags_from_file(&path);
+                                        let _ = tx_notify.send(BackgroundMessage::FileModified {
                                             path: path.clone(),
                                             tags,
-                                        },
-                                    );
-                                    // Producer: emit an Updated event to the bus.
-                                    bus_watcher
-                                        .publish(FileEvent::updated(path.clone()));
+                                        });
+                                        // Producer: emit an Updated event to the bus.
+                                        bus_watcher.publish(FileEvent::updated(path.clone()));
+                                    }
                                 }
-                            }
-                            notify::EventKind::Remove(_) => {
-                                let _ =
-                                    tx_notify.send(BackgroundMessage::FileDeleted {
+                                notify::EventKind::Remove(_) => {
+                                    let _ = tx_notify.send(BackgroundMessage::FileDeleted {
                                         path: path.clone(),
                                     });
-                                // Producer: emit a Removed event to the bus.
-                                bus_watcher
-                                    .publish(FileEvent::removed(path.clone()));
-                            }
-                            _ => {}
-                        }
-                    } else if is_pdf {
-                        match event.kind {
-                            notify::EventKind::Create(_) | notify::EventKind::Modify(_) => {
-                                // Producer: publish to the bus so the
-                                // PDF-converter consumer (subscribed
-                                // below) can convert it. The direct
-                                // `tx_pdf_watcher.send` remains as a
-                                // fast path.
-                                bus_watcher
-                                    .publish(FileEvent::updated(path.clone()));
-                                let job = crate::background::PdfConversionJob::new(path.clone());
-                                if job.should_convert() {
-                                    let _ = tx_pdf_watcher.send(path.clone());
+                                    // Producer: emit a Removed event to the bus.
+                                    bus_watcher.publish(FileEvent::removed(path.clone()));
                                 }
+                                _ => {}
                             }
-                            _ => {}
-                        }
-                    } else if is_img {
-                        match event.kind {
-                            notify::EventKind::Create(_) | notify::EventKind::Modify(_) => {
-                                let job = crate::background::models::ImageJob::new(path.clone());
-                                if job.should_process() {
-                                    let _ = tx_img_watcher.send(path.clone());
+                        } else if is_pdf {
+                            match event.kind {
+                                notify::EventKind::Create(_) | notify::EventKind::Modify(_) => {
+                                    // Producer: publish to the bus so the
+                                    // PDF-converter consumer (subscribed
+                                    // below) can convert it. The direct
+                                    // `tx_pdf_watcher.send` remains as a
+                                    // fast path.
+                                    bus_watcher.publish(FileEvent::updated(path.clone()));
+                                    let job =
+                                        crate::background::PdfConversionJob::new(path.clone());
+                                    if job.should_convert() {
+                                        let _ = tx_pdf_watcher.send(path.clone());
+                                    }
                                 }
+                                _ => {}
                             }
-                            _ => {}
+                        } else if is_img {
+                            match event.kind {
+                                notify::EventKind::Create(_) | notify::EventKind::Modify(_) => {
+                                    let job =
+                                        crate::background::models::ImageJob::new(path.clone());
+                                    if job.should_process() {
+                                        let _ = tx_img_watcher.send(path.clone());
+                                    }
+                                }
+                                _ => {}
+                            }
+                        } else if !path.exists() {
+                            let _ = tx_notify
+                                .send(BackgroundMessage::FileDeleted { path: path.clone() });
+                            // Producer: emit a Removed event to the bus.
+                            bus_watcher.publish(FileEvent::removed(path.clone()));
                         }
-                    } else if !path.exists() {
-                        let _ = tx_notify
-                            .send(BackgroundMessage::FileDeleted { path: path.clone() });
-                        // Producer: emit a Removed event to the bus.
-                        bus_watcher
-                            .publish(FileEvent::removed(path.clone()));
                     }
                 }
-            }
-        });
+            });
 
         if let Ok(mut watcher) = watcher_result {
             for lib in &config.content_libraries {
@@ -374,7 +392,10 @@ impl Task {
                     Err(_) => break, // bus was dropped
                 };
                 use crate::file_events::FileEventKind;
-                if !matches!(event.kind, FileEventKind::Discovered | FileEventKind::Updated) {
+                if !matches!(
+                    event.kind,
+                    FileEventKind::Discovered | FileEventKind::Updated
+                ) {
                     continue;
                 }
                 // Only consider PDF files.
@@ -421,7 +442,10 @@ impl Task {
                     Err(_) => break, // bus was dropped
                 };
                 use crate::file_events::FileEventKind;
-                if !matches!(event.kind, FileEventKind::Discovered | FileEventKind::Updated) {
+                if !matches!(
+                    event.kind,
+                    FileEventKind::Discovered | FileEventKind::Updated
+                ) {
                     continue;
                 }
                 // Only consider image files. Keep the extension list
@@ -468,7 +492,9 @@ mod tests {
         let start = std::time::Instant::now();
         while start.elapsed().as_secs() < 5 {
             if let Ok(msg) = task.rx.recv_timeout(std::time::Duration::from_millis(100)) {
-                if let BackgroundMessage::Finished(_) | BackgroundMessage::FinishedWithoutWatcher = msg {
+                if let BackgroundMessage::Finished(_) | BackgroundMessage::FinishedWithoutWatcher =
+                    msg
+                {
                     got_finished = true;
                     break;
                 }
@@ -543,7 +569,9 @@ mod tests {
         let start = std::time::Instant::now();
         while start.elapsed().as_secs() < 5 {
             if let Ok(msg) = task.rx.recv_timeout(std::time::Duration::from_millis(100)) {
-                if let BackgroundMessage::Finished(_) | BackgroundMessage::FinishedWithoutWatcher = msg {
+                if let BackgroundMessage::Finished(_) | BackgroundMessage::FinishedWithoutWatcher =
+                    msg
+                {
                     got_finished = true;
                     break;
                 }
@@ -601,7 +629,9 @@ mod tests {
         let start = std::time::Instant::now();
         while start.elapsed().as_secs() < 5 {
             if let Ok(msg) = task.rx.recv_timeout(std::time::Duration::from_millis(100)) {
-                if let BackgroundMessage::Finished(_) | BackgroundMessage::FinishedWithoutWatcher = msg {
+                if let BackgroundMessage::Finished(_) | BackgroundMessage::FinishedWithoutWatcher =
+                    msg
+                {
                     break;
                 }
             }
@@ -652,7 +682,9 @@ mod tests {
         let start = std::time::Instant::now();
         while start.elapsed().as_secs() < 5 {
             if let Ok(msg) = task.rx.recv_timeout(std::time::Duration::from_millis(100)) {
-                if let BackgroundMessage::Finished(_) | BackgroundMessage::FinishedWithoutWatcher = msg {
+                if let BackgroundMessage::Finished(_) | BackgroundMessage::FinishedWithoutWatcher =
+                    msg
+                {
                     break;
                 }
             }
@@ -719,7 +751,9 @@ mod tests {
         let start = std::time::Instant::now();
         while start.elapsed().as_secs() < 5 {
             if let Ok(msg) = task.rx.recv_timeout(std::time::Duration::from_millis(100)) {
-                if let BackgroundMessage::Finished(_) | BackgroundMessage::FinishedWithoutWatcher = msg {
+                if let BackgroundMessage::Finished(_) | BackgroundMessage::FinishedWithoutWatcher =
+                    msg
+                {
                     break;
                 }
             }
@@ -745,8 +779,7 @@ mod tests {
         // event is delivered to zero consumers and lost.
         let pdf_path = dir.path().join("dropped.pdf");
         std::fs::write(&pdf_path, b"dummy").unwrap();
-        task
-            .file_event_bus
+        task.file_event_bus
             .publish(crate::file_events::FileEvent::discovered(pdf_path.clone()));
 
         let mut saw_success = false;
@@ -817,7 +850,9 @@ mod tests {
         let start = std::time::Instant::now();
         while start.elapsed().as_secs() < 5 {
             if let Ok(msg) = task.rx.recv_timeout(std::time::Duration::from_millis(100)) {
-                if let BackgroundMessage::Finished(_) | BackgroundMessage::FinishedWithoutWatcher = msg {
+                if let BackgroundMessage::Finished(_) | BackgroundMessage::FinishedWithoutWatcher =
+                    msg
+                {
                     break;
                 }
             }
@@ -840,8 +875,7 @@ mod tests {
         // `.md`.
         let pdf_path = dir.path().join("dropped.pdf");
         std::fs::write(&pdf_path, b"dummy").unwrap();
-        task
-            .file_event_bus
+        task.file_event_bus
             .publish(crate::file_events::FileEvent::discovered(pdf_path.clone()));
 
         // The corresponding `.md` path (input path with extension swapped).
@@ -923,7 +957,9 @@ mod tests {
         let start = std::time::Instant::now();
         while start.elapsed().as_secs() < 5 {
             if let Ok(msg) = task.rx.recv_timeout(std::time::Duration::from_millis(100)) {
-                if let BackgroundMessage::Finished(_) | BackgroundMessage::FinishedWithoutWatcher = msg {
+                if let BackgroundMessage::Finished(_) | BackgroundMessage::FinishedWithoutWatcher =
+                    msg
+                {
                     break;
                 }
             }
@@ -935,8 +971,7 @@ mod tests {
         // Drop an image and publish a Discovered event for it.
         let img_path = dir.path().join("dropped.png");
         std::fs::write(&img_path, b"dummy image data").unwrap();
-        task
-            .file_event_bus
+        task.file_event_bus
             .publish(crate::file_events::FileEvent::discovered(img_path.clone()));
 
         // The bus subscriber should forward the path to the

@@ -476,9 +476,11 @@ mod tests {
             },
         );
         let warnings = config.validate();
-        assert!(warnings
-            .iter()
-            .any(|w| w.contains("No model configured with 'chat'")));
+        assert!(
+            warnings
+                .iter()
+                .any(|w| w.contains("No model configured with 'chat'"))
+        );
     }
 
     #[test]
@@ -583,9 +585,10 @@ user_name: "TestUser"
             lib.display_label_for(Path::new("C:/my/test/dir")),
             Some("TestLib".to_string())
         );
-        assert!(lib
-            .display_label_for(Path::new("C:/other/path.md"))
-            .is_none());
+        assert!(
+            lib.display_label_for(Path::new("C:/other/path.md"))
+                .is_none()
+        );
     }
 
     #[test]

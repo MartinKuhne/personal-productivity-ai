@@ -1,14 +1,17 @@
 use crate::background::{BackgroundProcessManager, SharedProcessManager};
 use crate::background_task::Task;
+use crate::batch::types::{BatchDialogConfig, BatchHandle};
 use crate::messages::{BackgroundMessage, TokenUsageInfo};
+use crate::tag_manager::TagManager;
 use crate::ui::modals::{show_create_dir_modal, show_move_modal, show_rename_modal};
 use crate::ui::panels::{
     show_bottom_panel, show_center_panel, show_left_panel, show_right_panel, show_top_panel,
 };
 use crate::utils::parse_front_matter;
 use eframe::egui;
-use std::collections::{BTreeMap, BTreeSet, HashSet};
+use std::collections::{BTreeMap, HashSet};
 use std::path::PathBuf;
+use std::sync::atomic::AtomicBool;
 use std::sync::mpsc::Receiver;
 use std::sync::{Arc, Mutex};
 
@@ -53,8 +56,7 @@ pub struct FastMdApp {
     pub file_event_reader: Option<crate::file_events::BusReader<crate::file_events::FileEvent>>,
     pub all_files: Vec<PathBuf>,
     pub all_dirs: Vec<PathBuf>,
-    pub file_tags: BTreeMap<PathBuf, Vec<String>>,
-    pub all_tags: BTreeSet<String>,
+    pub tag_manager: TagManager,
     pub selected_tag: Option<String>,
     pub indexing_finished: bool,
     pub indexing_finished_handled: bool,
@@ -112,16 +114,22 @@ pub struct FastMdApp {
     pub background_manager: SharedProcessManager,
     pub show_background_logs: bool,
     pub config: crate::config::AppConfig,
+    // Batch processing state
+    pub batch_dialog_open: bool,
+    pub batch_dialog_config: BatchDialogConfig,
+    pub batch_handle: Option<BatchHandle>,
+    pub batch_cancel_flag: Option<Arc<AtomicBool>>,
 }
 
 impl FastMdApp {
     /// Drain pending `FileEvent`s from the bus and update the
     /// directory tree's `all_files` and `all_dirs` collections.
     ///
-    /// This is the directory tree's "consumer" of the file-event
-    /// bus. The tag manager/indexer has its own consumer in
-    /// `background_task.rs` (the worker threads that extract tags).
-    /// Both run in parallel and never block each other.
+    /// The tag manager has its own consumer in
+    /// `background_task.rs` (the worker threads that extract tags
+    /// and send `BackgroundMessage`). This consumer only handles
+    /// the directory tree. Both run in parallel and never block
+    /// each other.
     ///
     /// Returns `true` if any event was processed, so callers can
     /// schedule a follow-up UI repaint.
@@ -131,16 +139,6 @@ impl FastMdApp {
         };
         let mut changed = false;
         let mut loaded_dirty = false;
-        // Track whether any `Removed` event fired during this
-        // drain. `Discovered` / `Updated` events do NOT need a
-        // `rebuild_tags` because the tag-manager worker pushes
-        // `FileParsed` messages that update `all_tags`
-        // incrementally; calling `rebuild_tags` on every event
-        // makes the UI thread do O(n) work per event during the
-        // initial scan, which is the main source of "unresponsive
-        // on startup". `Removed` events DO need `rebuild_tags`
-        // because the file's tags must be evicted from
-        // `all_tags`.
         let mut had_removal = false;
         loop {
             match reader.try_recv() {
@@ -148,24 +146,11 @@ impl FastMdApp {
                     use crate::file_events::FileEventKind;
                     match event.kind {
                         FileEventKind::Discovered | FileEventKind::Updated => {
-                            // The workspace tree only shows files
-                            // the user can edit — markdown (and the
-                            // plain-text companions we currently
-                            // treat as the same). PDFs and images
-                            // are inputs to the converters; they
-                            // still flow through the bus (so the
-                            // PDF-converter and image-vision
-                            // workers see them) but they must NOT
-                            // appear in the directory tree, and a
-                            // directory that contains only PDFs /
-                            // images must not appear either.
                             if Self::is_workspace_file(&event.path) {
                                 if !self.all_files.contains(&event.path) {
                                     self.all_files.push(event.path.clone());
                                     changed = true;
                                 }
-                                // Add parent directories so the
-                                // tree can render them.
                                 if let Some(parent) = event.path.parent() {
                                     if !self.all_dirs.contains(&parent.to_path_buf()) {
                                         self.all_dirs.push(parent.to_path_buf());
@@ -173,19 +158,6 @@ impl FastMdApp {
                                     }
                                 }
                             }
-                            // If the open tab's file was updated
-                            // (e.g. by the PDF converter writing a
-                            // fresh `.md` next to the `.pdf`, or by
-                            // the user editing it through the inline
-                            // editor), the tab must reload on the
-                            // next frame. Clearing `loaded_path`
-                            // forces `load_selected_file` to re-read
-                            // from disk.
-                            //
-                            // Skip the reload if the inline editor
-                            // is currently open on this file — the
-                            // user has unsaved changes in memory and
-                            // we must not clobber them.
                             if self.loaded_path.as_ref() == Some(&event.path)
                                 && !self.editor_state.is_open
                             {
@@ -195,20 +167,10 @@ impl FastMdApp {
                         }
                         FileEventKind::Removed => {
                             had_removal = true;
-                            // `all_files` only ever holds workspace
-                            // files, so a `Removed` event for a
-                            // PDF is a no-op against it. The
-                            // `file_tags` map is keyed the same
-                            // way. We still process the event so
-                            // selection / loaded-state cleanup runs
-                            // if the removed file was the open
-                            // one.
                             if Self::is_workspace_file(&event.path) {
                                 self.all_files.retain(|p| p != &event.path);
                             }
-                            self.file_tags.remove(&event.path);
-                            // Clear selection / loaded state if the
-                            // removed file was selected.
+                            self.tag_manager.remove_file(&event.path);
                             if self.selected_file.as_ref() == Some(&event.path) {
                                 self.selected_file = None;
                                 self.current_yaml = None;
@@ -227,26 +189,9 @@ impl FastMdApp {
                 Err(std::sync::mpsc::TryRecvError::Disconnected) => break,
             }
         }
-        // Only refresh the tag set when a file actually left —
-        // for adds, the `FileParsed` handler keeps `all_tags`
-        // up to date incrementally.
         if had_removal {
-            self.rebuild_tags();
+            self.tag_manager.rebuild();
         }
-        // `left_panel_dirty` is intentionally NOT set here. It is
-        // a UI-side flag for "the tree structure changed enough
-        // that the panel should be re-laid out" — and tying it to
-        // every bus event made `calc_max_width` (a recursive
-        // O(n) text-layout pass) run once per event during the
-        // initial scan, which was the root cause of the
-        // unresponsive-on-startup bug. The initial width is
-        // computed once, when indexing finishes
-        // (see `show_left_panel`).
-        //
-        // `loaded_dirty` is informational — egui's update loop is
-        // already continuous, and the next frame will see
-        // `loaded_path == None` and reload from disk via
-        // `load_selected_file`.
         changed || loaded_dirty
     }
 
@@ -266,15 +211,6 @@ impl FastMdApp {
                 lower == "md" || lower == "markdown" || lower == "txt"
             })
             .unwrap_or(false)
-    }
-
-    fn rebuild_tags(&mut self) {
-        self.all_tags.clear();
-        for tags in self.file_tags.values() {
-            for tag in tags {
-                self.all_tags.insert(tag.clone());
-            }
-        }
     }
 
     pub fn new(cc: &eframe::CreationContext<'_>, mut config: crate::config::AppConfig) -> Self {
@@ -355,8 +291,16 @@ impl FastMdApp {
         // scan output (the bus retains a reference to our channel
         // until the task's initial scan finishes).
         let file_event_reader = background_task.file_event_bus.subscribe();
-        let inline_editor_enabled = config.inline_editor_enabled;
         let background_manager = Arc::new(Mutex::new(BackgroundProcessManager::new()));
+        let inline_editor_enabled = config.inline_editor_enabled;
+
+        // Initialize batch dialog config with available directories and prompts
+        let mut batch_dialog_config = BatchDialogConfig::default();
+        batch_dialog_config.available_dirs = config
+            .content_libraries
+            .iter()
+            .map(|lib| PathBuf::from(&lib.root_folder))
+            .collect();
 
         Self {
             content_libraries: config.content_libraries.clone(),
@@ -368,6 +312,10 @@ impl FastMdApp {
             background_manager,
             show_background_logs: false,
             config,
+            batch_dialog_open: false,
+            batch_dialog_config,
+            batch_handle: None,
+            batch_cancel_flag: None,
             ..Self::empty_state()
         }
     }
@@ -388,20 +336,11 @@ impl FastMdApp {
             file_event_reader: None,
             all_files: Vec::new(),
             all_dirs: Vec::new(),
-            file_tags: BTreeMap::new(),
-            all_tags: BTreeSet::new(),
+            tag_manager: TagManager::new(),
             selected_tag: None,
             indexing_finished: false,
             indexing_finished_handled: false,
             left_panel_width: None,
-            // `left_panel_dirty` is the user-interaction flag set
-            // by the tree (e.g. when a directory is selected via
-            // a click). It must start `false` so that the
-            // `show_left_panel` block doesn't run on the first
-            // frame with empty data and prematurely set
-            // `indexing_finished_handled = true` — that would
-            // prevent the real width calculation from running
-            // when the initial scan finishes.
             left_panel_dirty: false,
             selected_file: None,
             selected_files: HashSet::new(),
@@ -441,6 +380,10 @@ impl FastMdApp {
             background_manager: Arc::new(Mutex::new(BackgroundProcessManager::new())),
             show_background_logs: false,
             config: crate::config::AppConfig::default(),
+            batch_dialog_open: false,
+            batch_dialog_config: BatchDialogConfig::default(),
+            batch_handle: None,
+            batch_cancel_flag: None,
         }
     }
 
@@ -492,7 +435,10 @@ impl FastMdApp {
 /// Preconditions: None.
 /// Postconditions: Returns a valid prompt string containing the provided date.
 pub fn generate_format_prompt(date_str: &str) -> String {
-    format!("Format the current document into correct markdown and use this template for the yaml front matter. Focus ONLY on the currently active file, and DO NOT use list_files or search for other files.\n```yaml\n---\ntitle: A brief title\nsummary: A three sentence summary of the contents\ntags: [\"tag1\",\"tag2\"]\nheader-date: {}\n---\n```", date_str)
+    format!(
+        "Format the current document into correct markdown and use this template for the yaml front matter. Focus ONLY on the currently active file, and DO NOT use list_files or search for other files.\n```yaml\n---\ntitle: A brief title\nsummary: A three sentence summary of the contents\ntags: [\"tag1\",\"tag2\"]\nheader-date: {}\n---\n```",
+        date_str
+    )
 }
 
 impl eframe::App for FastMdApp {
@@ -528,10 +474,7 @@ impl FastMdApp {
         while let Ok(msg) = self.rx.try_recv() {
             match msg {
                 BackgroundMessage::FileParsed { path, tags } => {
-                    self.file_tags.insert(path.clone(), tags.clone());
-                    for tag in tags {
-                        self.all_tags.insert(tag);
-                    }
+                    self.tag_manager.add_tags(path.clone(), tags);
                     if !self.all_files.contains(&path) {
                         self.all_files.push(path);
                     }
@@ -544,26 +487,26 @@ impl FastMdApp {
                 BackgroundMessage::Finished(watcher) => {
                     self._watcher = Some(watcher);
                     self.indexing_finished = true;
-                    self.rebuild_tags();
+                    self.tag_manager.rebuild();
                 }
                 BackgroundMessage::FinishedWithoutWatcher => {
                     self.indexing_finished = true;
-                    self.rebuild_tags();
+                    self.tag_manager.rebuild();
                 }
                 BackgroundMessage::FileModified { path, tags } => {
-                    self.file_tags.insert(path.clone(), tags);
+                    self.tag_manager.add_tags(path.clone(), tags);
                     if !self.all_files.contains(&path) {
                         self.all_files.push(path.clone());
                     }
-                    self.rebuild_tags();
+                    self.tag_manager.rebuild();
                     if self.loaded_path.as_ref() == Some(&path) {
                         self.loaded_path = None; // Trigger reload
                     }
                 }
                 BackgroundMessage::FileDeleted { path } => {
                     self.all_files.retain(|p| p != &path);
-                    self.file_tags.remove(&path);
-                    self.rebuild_tags();
+                    self.tag_manager.remove_file(&path);
+                    self.tag_manager.rebuild();
                     if self.selected_file.as_ref() == Some(&path) {
                         self.selected_file = None;
                         self.current_yaml = None;
@@ -665,6 +608,46 @@ impl FastMdApp {
         show_rename_modal(self, ctx);
         crate::ui::background_logs::show_background_logs_window(self, ctx);
 
+        // Show batch processing modal
+        if self.batch_dialog_open {
+            let mut dialog_config = self.batch_dialog_config.clone();
+            if let Some(result) =
+                crate::batch::dialog::show_batch_modal(self, ctx, &mut dialog_config)
+            {
+                match result {
+                    crate::batch::types::BatchDialogResult::Process(config) => {
+                        // Only start if not already running
+                        if self.batch_handle.is_none() {
+                            let prompt_text = dialog_config
+                                .available_prompts
+                                .get(dialog_config.selected_prompt_idx.unwrap_or(0))
+                                .map(|p| p.content.clone())
+                                .unwrap_or_default();
+
+                            let (coordinator, cancel_flag) =
+                                crate::batch::coordinator::BatchCoordinator::new(
+                                    config,
+                                    self.config.clone(),
+                                    self.tx.clone(),
+                                    self.file_event_bus.clone(),
+                                    prompt_text,
+                                );
+                            let handle = coordinator.execute();
+                            self.batch_handle = Some(handle);
+                            self.batch_cancel_flag = Some(cancel_flag);
+                        }
+                    }
+                    crate::batch::types::BatchDialogResult::Cancel => {
+                        self.batch_dialog_open = false;
+                        // Clear cached prompts so they're re-discovered on next open
+                        dialog_config.available_prompts.clear();
+                        dialog_config.selected_prompt_idx = None;
+                    }
+                }
+            }
+            self.batch_dialog_config = dialog_config;
+        }
+
         // Top panel
         show_top_panel(self, ctx);
 
@@ -683,6 +666,20 @@ impl FastMdApp {
         // Handle programmatic prompt submission
         if let Some(prompt) = self.submit_prompt.take() {
             self.start_agent_session(prompt);
+        }
+
+        // Poll batch handle for completion
+        if let Some(handle) = self.batch_handle.take() {
+            if handle.thread.is_finished() {
+                let result = handle.join();
+                // Clear cancel flag after completion
+                self.batch_cancel_flag = None;
+                // Could show a notification or log the result
+                eprintln!("Batch completed: {:?}", result);
+            } else {
+                // Put it back if not finished
+                self.batch_handle = Some(handle);
+            }
         }
     }
 }
@@ -706,23 +703,21 @@ mod tests {
     }
 
     #[test]
-    fn test_rebuild_tags() {
+    fn test_tag_manager_tracks_tags_correctly() {
         let mut app = create_test_app();
-        app.file_tags.insert(
+        app.tag_manager.add_tags(
             PathBuf::from("file1.md"),
             vec!["rust".to_string(), "ui".to_string()],
         );
-        app.file_tags.insert(
+        app.tag_manager.add_tags(
             PathBuf::from("file2.md"),
             vec!["rust".to_string(), "testing".to_string()],
         );
 
-        app.rebuild_tags();
-
-        assert_eq!(app.all_tags.len(), 3);
-        assert!(app.all_tags.contains("rust"));
-        assert!(app.all_tags.contains("ui"));
-        assert!(app.all_tags.contains("testing"));
+        assert_eq!(app.tag_manager.all_tags().len(), 3);
+        assert!(app.tag_manager.all_tags().contains("rust"));
+        assert!(app.tag_manager.all_tags().contains("ui"));
+        assert!(app.tag_manager.all_tags().contains("testing"));
     }
 
     #[test]
@@ -1079,12 +1074,24 @@ mod tests {
         // no extension) is not.
         assert!(FastMdApp::is_workspace_file(&PathBuf::from("/a/b/note.md")));
         assert!(FastMdApp::is_workspace_file(&PathBuf::from("/a/b/note.MD")));
-        assert!(FastMdApp::is_workspace_file(&PathBuf::from("/a/b/note.markdown")));
-        assert!(FastMdApp::is_workspace_file(&PathBuf::from("/a/b/note.txt")));
-        assert!(!FastMdApp::is_workspace_file(&PathBuf::from("/a/b/doc.pdf")));
-        assert!(!FastMdApp::is_workspace_file(&PathBuf::from("/a/b/photo.png")));
-        assert!(!FastMdApp::is_workspace_file(&PathBuf::from("/a/b/photo.jpg")));
-        assert!(!FastMdApp::is_workspace_file(&PathBuf::from("/a/b/no_extension")));
+        assert!(FastMdApp::is_workspace_file(&PathBuf::from(
+            "/a/b/note.markdown"
+        )));
+        assert!(FastMdApp::is_workspace_file(&PathBuf::from(
+            "/a/b/note.txt"
+        )));
+        assert!(!FastMdApp::is_workspace_file(&PathBuf::from(
+            "/a/b/doc.pdf"
+        )));
+        assert!(!FastMdApp::is_workspace_file(&PathBuf::from(
+            "/a/b/photo.png"
+        )));
+        assert!(!FastMdApp::is_workspace_file(&PathBuf::from(
+            "/a/b/photo.jpg"
+        )));
+        assert!(!FastMdApp::is_workspace_file(&PathBuf::from(
+            "/a/b/no_extension"
+        )));
     }
 
     // -- process_file_events: performance invariants (regression) --
@@ -1105,15 +1112,15 @@ mod tests {
 
         app.file_event_reader = Some(app.file_event_bus.subscribe());
         let publisher = app.file_event_bus.clone();
-        publisher.publish(crate::file_events::FileEvent::discovered(
-            PathBuf::from("/lib/notes.md"),
-        ));
-        publisher.publish(crate::file_events::FileEvent::discovered(
-            PathBuf::from("/lib/extra.md"),
-        ));
-        publisher.publish(crate::file_events::FileEvent::updated(
-            PathBuf::from("/lib/notes.md"),
-        ));
+        publisher.publish(crate::file_events::FileEvent::discovered(PathBuf::from(
+            "/lib/notes.md",
+        )));
+        publisher.publish(crate::file_events::FileEvent::discovered(PathBuf::from(
+            "/lib/extra.md",
+        )));
+        publisher.publish(crate::file_events::FileEvent::updated(PathBuf::from(
+            "/lib/notes.md",
+        )));
 
         let _ = app.process_file_events();
         assert!(
@@ -1124,57 +1131,46 @@ mod tests {
     }
 
     #[test]
-    fn test_process_file_events_rebuild_tags_only_on_removal() {
-        // `rebuild_tags` is O(n) in `file_tags.size()`. Calling
-        // it on every bus event (Discovered or Updated) made
-        // the UI thread do unnecessary work during the initial
-        // scan. The `FileParsed` handler keeps `all_tags` up
-        // to date incrementally, so `rebuild_tags` is only
-        // needed when a file actually leaves (`Removed`).
-        //
-        // We can't directly observe the rebuild from outside
-        // (it has no return value), so we observe a side
-        // effect: for `Removed`, the removed file's tags must
-        // be evicted from `all_tags`. For `Discovered`, a
-        // manually-pre-populated tag must remain (the
-        // `FileParsed` path, not `process_file_events`, is
-        // responsible for adding it).
+    fn test_process_file_events_rebuild_only_on_removal() {
+        // `rebuild` is O(n) in the tag manager. Calling it on
+        // every bus event (Discovered or Updated) made the UI
+        // thread do unnecessary work during the initial scan.
+        // The `FileParsed` handler keeps tags up to date
+        // incrementally, so rebuild is only needed when a file
+        // actually leaves (`Removed`).
         let mut app = create_test_app();
 
-        // Pre-populate `all_tags` with a tag the file would
-        // have. After a `Removed`, `rebuild_tags` must drop it.
-        app.file_tags.insert(
-            PathBuf::from("/lib/notes.md"),
-            vec!["work".to_string()],
-        );
-        app.all_tags.insert("work".to_string());
+        // Pre-populate tag manager so the tag exists.
+        app.tag_manager
+            .add_tags(PathBuf::from("/lib/notes.md"), vec!["work".to_string()]);
         app.all_files.push(PathBuf::from("/lib/notes.md"));
 
-        // A `Removed` event must trigger `rebuild_tags`, which
-        // evicts the file's tags from `all_tags`.
+        // A `Removed` event must trigger `rebuid`, which
+        // evicts the file's tags.
         app.file_event_reader = Some(app.file_event_bus.subscribe());
-        app.file_event_bus.publish(crate::file_events::FileEvent::removed(
-            PathBuf::from("/lib/notes.md"),
-        ));
+        app.file_event_bus
+            .publish(crate::file_events::FileEvent::removed(PathBuf::from(
+                "/lib/notes.md",
+            )));
         let _ = app.process_file_events();
         assert!(
-            !app.all_tags.contains("work"),
-            "Removed events must trigger rebuild_tags so stale tags are evicted"
+            !app.tag_manager.all_tags().contains("work"),
+            "Removed events must trigger rebuild so stale tags are evicted"
         );
 
-        // A `Discovered` event must NOT call `rebuild_tags`
-        // (which would clear `all_tags` and lose the tag we
-        // just added). We verify this by adding a tag, then
-        // publishing a Discovered, and asserting the tag is
-        // still there.
-        app.all_tags.insert("keep".to_string());
-        app.file_event_bus.publish(crate::file_events::FileEvent::discovered(
-            PathBuf::from("/lib/other.md"),
-        ));
+        // A `Discovered` event must NOT call rebuild (which
+        // would clear all_tags and lose the tag we just
+        // added).
+        app.tag_manager
+            .add_tags(PathBuf::from("/lib/other.md"), vec!["keep".to_string()]);
+        app.file_event_bus
+            .publish(crate::file_events::FileEvent::discovered(PathBuf::from(
+                "/lib/other.md",
+            )));
         let _ = app.process_file_events();
         assert!(
-            app.all_tags.contains("keep"),
-            "Discovered events must NOT call rebuild_tags — the FileParsed path \
+            app.tag_manager.all_tags().contains("keep"),
+            "Discovered events must NOT call rebuild — the FileParsed path \
              updates all_tags incrementally"
         );
     }

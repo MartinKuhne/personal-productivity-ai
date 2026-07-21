@@ -1,6 +1,6 @@
 use crate::background::{BackgroundLogEntry, LogCategory};
 use crate::messages::BackgroundMessage as MsgBackgroundMessage;
-use pulldown_cmark::{html, Options, Parser};
+use pulldown_cmark::{Options, Parser, html};
 use std::io::Write;
 use std::path::PathBuf;
 use std::sync::mpsc::Sender;

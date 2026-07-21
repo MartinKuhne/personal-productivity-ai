@@ -263,7 +263,11 @@ mod tests {
         let port = listener.local_addr().unwrap().port();
         let api_url = format!("http://127.0.0.1:{}", port);
         let body_str = body.into().replace("{API_URL}", &api_url);
-        let response_str = format!("HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nConnection: close\r\nContent-Length: {}\r\n\r\n{}", body_str.len(), body_str);
+        let response_str = format!(
+            "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nConnection: close\r\nContent-Length: {}\r\n\r\n{}",
+            body_str.len(),
+            body_str
+        );
         std::thread::spawn(move || {
             for stream in listener.incoming() {
                 if let Ok(mut stream) = stream {
@@ -280,10 +284,13 @@ mod tests {
 
     fn mock_config(api_url: &str) -> AppConfig {
         let mut clients = HashMap::new();
-        clients.insert("test_jmap".to_string(), JmapClient {
-            url: api_url.to_string(),
-            token: "test_token".to_string(),
-        });
+        clients.insert(
+            "test_jmap".to_string(),
+            JmapClient {
+                url: api_url.to_string(),
+                token: "test_token".to_string(),
+            },
+        );
         AppConfig {
             jmap_clients: clients,
             ..AppConfig::default()
@@ -292,7 +299,9 @@ mod tests {
 
     #[test]
     fn test_calendar_operations_success() {
-        rustls::crypto::ring::default_provider().install_default().ok();
+        rustls::crypto::ring::default_provider()
+            .install_default()
+            .ok();
         let json_resp = serde_json::json!({
             "apiUrl": "{API_URL}",
             "primaryAccounts": {
@@ -327,7 +336,9 @@ mod tests {
 
     #[test]
     fn test_calendar_operations_errors() {
-        rustls::crypto::ring::default_provider().install_default().ok();
+        rustls::crypto::ring::default_provider()
+            .install_default()
+            .ok();
         let json_resp = serde_json::json!({
             "apiUrl": "{API_URL}",
             "primaryAccounts": {
@@ -342,7 +353,12 @@ mod tests {
 
         let res_search = tool_search_calendar(&config, "meet");
         assert!(res_search.is_ok());
-        assert!(res_search.unwrap().results.contains("Error from JMAP server"));
+        assert!(
+            res_search
+                .unwrap()
+                .results
+                .contains("Error from JMAP server")
+        );
 
         let res_add_err = tool_add_calendar_item(&config, "{invalid json}");
         assert!(res_add_err.is_err());
@@ -366,23 +382,37 @@ mod tests {
 
     #[test]
     fn test_calendar_operations_session_error() {
-        rustls::crypto::ring::default_provider().install_default().ok();
+        rustls::crypto::ring::default_provider()
+            .install_default()
+            .ok();
         // Respond with 401 Unauthorized for session
         let url = spawn_mock_server("HTTP/1.1 401 Unauthorized\r\nContent-Length: 5\r\n\r\nerror");
         let config = mock_config(&url);
-        
+
         let res_search = tool_search_calendar(&config, "meet");
         // tool_search_calendar skips failed sessions and continues, but if all fail it returns an error
-        assert!(res_search.unwrap().results.contains("Error fetching JMAP session"));
+        assert!(
+            res_search
+                .unwrap()
+                .results
+                .contains("Error fetching JMAP session")
+        );
 
         let res_add = tool_add_calendar_item(&config, "{}");
-        assert!(res_add.unwrap().result.contains("Error fetching JMAP session"));
+        assert!(
+            res_add
+                .unwrap()
+                .result
+                .contains("Error fetching JMAP session")
+        );
     }
 
     #[test]
     fn test_calendar_search_returns_empty_list() {
         // POSITIVE: Empty results should be handled gracefully
-        rustls::crypto::ring::default_provider().install_default().ok();
+        rustls::crypto::ring::default_provider()
+            .install_default()
+            .ok();
         let json_resp = serde_json::json!({
             "apiUrl": "{API_URL}",
             "primaryAccounts": {
@@ -405,7 +435,9 @@ mod tests {
     #[test]
     fn test_calendar_get_with_empty_list() {
         // POSITIVE: Get calendar with no events in date range
-        rustls::crypto::ring::default_provider().install_default().ok();
+        rustls::crypto::ring::default_provider()
+            .install_default()
+            .ok();
         let json_resp = serde_json::json!({
             "apiUrl": "{API_URL}",
             "primaryAccounts": {
@@ -428,7 +460,9 @@ mod tests {
     fn test_calendar_delete_nonexistent_item() {
         // BOUNDARY: Deleting an item that doesn't exist should still return success
         // (the server may report success or notFound - both are acceptable)
-        rustls::crypto::ring::default_provider().install_default().ok();
+        rustls::crypto::ring::default_provider()
+            .install_default()
+            .ok();
         let json_resp = serde_json::json!({
             "apiUrl": "{API_URL}",
             "primaryAccounts": {

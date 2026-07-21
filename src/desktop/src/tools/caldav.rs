@@ -40,9 +40,25 @@ fn parse_ical_data(client: &str, href: &str, data: &str) -> CalDavEventDetails {
         if d.len() == 8 {
             format!("{}-{}-{}", &d[0..4], &d[4..6], &d[6..8])
         } else if d.len() == 15 && d.chars().nth(8) == Some('T') {
-            format!("{}-{}-{}T{}:{}:{}", &d[0..4], &d[4..6], &d[6..8], &d[9..11], &d[11..13], &d[13..15])
+            format!(
+                "{}-{}-{}T{}:{}:{}",
+                &d[0..4],
+                &d[4..6],
+                &d[6..8],
+                &d[9..11],
+                &d[11..13],
+                &d[13..15]
+            )
         } else if d.len() == 16 && d.chars().nth(8) == Some('T') && d.ends_with('Z') {
-            format!("{}-{}-{}T{}:{}:{}Z", &d[0..4], &d[4..6], &d[6..8], &d[9..11], &d[11..13], &d[13..15])
+            format!(
+                "{}-{}-{}T{}:{}:{}Z",
+                &d[0..4],
+                &d[4..6],
+                &d[6..8],
+                &d[9..11],
+                &d[11..13],
+                &d[13..15]
+            )
         } else {
             d.to_string()
         }
@@ -64,26 +80,30 @@ fn parse_ical_data(client: &str, href: &str, data: &str) -> CalDavEventDetails {
         if let Some(rest) = line.strip_prefix("SUMMARY:") {
             event.summary = Some(rest.trim().to_string());
         } else if let Some(rest) = line.strip_prefix("DESCRIPTION:") {
-            let desc = rest.replace("\\n", "\n").replace("\\N", "\n").replace("\\,", ",").replace("\\;", ";");
+            let desc = rest
+                .replace("\\n", "\n")
+                .replace("\\N", "\n")
+                .replace("\\,", ",")
+                .replace("\\;", ";");
             event.description = Some(desc.trim().to_string());
         } else if let Some(rest) = line.strip_prefix("LOCATION:") {
             let loc = rest.replace("\\,", ",").replace("\\;", ";");
             event.location = Some(loc.trim().to_string());
         } else if line.starts_with("DTSTART:") || line.starts_with("DTSTART;") {
             if let Some(idx) = line.find(':') {
-                event.start = Some(format_ical_date(&line[idx+1..]));
+                event.start = Some(format_ical_date(&line[idx + 1..]));
             }
         } else if line.starts_with("DTEND:") || line.starts_with("DTEND;") {
             if let Some(idx) = line.find(':') {
-                event.end = Some(format_ical_date(&line[idx+1..]));
+                event.end = Some(format_ical_date(&line[idx + 1..]));
             }
         } else if line.starts_with("ORGANIZER:") || line.starts_with("ORGANIZER;") {
             if let Some(idx) = line.find(':') {
-                event.organizer = Some(line[idx+1..].trim().to_string());
+                event.organizer = Some(line[idx + 1..].trim().to_string());
             }
         }
     }
-    
+
     event
 }
 fn block_on<F: std::future::Future>(f: F) -> F::Output {
@@ -92,13 +112,17 @@ fn block_on<F: std::future::Future>(f: F) -> F::Output {
     rt.block_on(f)
 }
 
-async fn get_all_calendars(client: &CalDavClient, base_url: &str, username: &str) -> anyhow::Result<Vec<String>> {
+async fn get_all_calendars(
+    client: &CalDavClient,
+    base_url: &str,
+    username: &str,
+) -> anyhow::Result<Vec<String>> {
     if let Ok(calendars) = client.list_calendars(base_url).await {
         if !calendars.is_empty() {
             return Ok(calendars.into_iter().map(|c| c.href).collect());
         }
     }
-    
+
     if let Ok(homes) = client.discover_calendar_home_set(base_url).await {
         if let Some(home) = homes.first() {
             if let Ok(calendars) = client.list_calendars(home).await {
@@ -109,8 +133,12 @@ async fn get_all_calendars(client: &CalDavClient, base_url: &str, username: &str
         }
     }
 
-    let mut principal_opt = client.discover_current_user_principal().await.ok().flatten();
-    
+    let mut principal_opt = client
+        .discover_current_user_principal()
+        .await
+        .ok()
+        .flatten();
+
     // Fallback for Fastmail or other servers that use /dav/principals/user/username/
     if principal_opt.is_none() {
         let base_trimmed = base_url.trim_end_matches('/');
@@ -124,27 +152,39 @@ async fn get_all_calendars(client: &CalDavClient, base_url: &str, username: &str
 
     let principal = principal_opt.ok_or_else(|| anyhow::anyhow!("No principal found"))?;
     let homes = client.discover_calendar_home_set(&principal).await?;
-    let home = homes.first().ok_or_else(|| anyhow::anyhow!("No calendar home found"))?;
+    let home = homes
+        .first()
+        .ok_or_else(|| anyhow::anyhow!("No calendar home found"))?;
     let calendars = client.list_calendars(home).await?;
     Ok(calendars.into_iter().map(|c| c.href).collect())
 }
 
-pub fn tool_search_calendar(config: &AppConfig, keyword: &str) -> Result<crate::tools::dtos::SearchCalendarResponse, String> {
+pub fn tool_search_calendar(
+    config: &AppConfig,
+    keyword: &str,
+) -> Result<crate::tools::dtos::SearchCalendarResponse, String> {
     let mut results = Vec::new();
     let mut errors = Vec::new();
     let kw = keyword.to_lowercase();
-    
+
     for (name, client_config) in &config.caldav_clients {
         let res = block_on(async {
-            let client = match CalDavClient::new(&client_config.url, Some(&client_config.username), Some(&client_config.password)) {
+            let client = match CalDavClient::new(
+                &client_config.url,
+                Some(&client_config.username),
+                Some(&client_config.password),
+            ) {
                 Ok(c) => c,
                 Err(e) => return Err(anyhow::anyhow!("Client config error: {}", e)),
             };
-            
-            let cals = get_all_calendars(&client, &client_config.url, &client_config.username).await?;
+
+            let cals =
+                get_all_calendars(&client, &client_config.url, &client_config.username).await?;
             let mut matches = Vec::new();
             for cal_path in cals {
-                let items = client.calendar_query_timerange(&cal_path, "VEVENT", None, None, true).await?;
+                let items = client
+                    .calendar_query_timerange(&cal_path, "VEVENT", None, None, true)
+                    .await?;
                 for item in items {
                     if let Some(data) = &item.calendar_data {
                         if data.to_lowercase().contains(&kw) {
@@ -155,43 +195,64 @@ pub fn tool_search_calendar(config: &AppConfig, keyword: &str) -> Result<crate::
             }
             anyhow::Result::<Vec<_>>::Ok(matches)
         });
-        
+
         match res {
             Ok(mut matches) => results.append(&mut matches),
             Err(e) => errors.push(format!("Error on client {}: {}", name, e)),
         }
     }
-    
+
     let resp = CalDavResponse { results, errors };
     Ok(crate::tools::dtos::SearchCalendarResponse {
-        results: serde_json::to_string_pretty(&resp).unwrap_or_else(|_| "{}".to_string())
+        results: serde_json::to_string_pretty(&resp).unwrap_or_else(|_| "{}".to_string()),
     })
 }
 
-pub fn tool_get_calendar(config: &AppConfig, start: &str, end: &str) -> Result<crate::tools::dtos::GetCalendarResponse, String> {
+pub fn tool_get_calendar(
+    config: &AppConfig,
+    start: &str,
+    end: &str,
+) -> Result<crate::tools::dtos::GetCalendarResponse, String> {
     let mut results = Vec::new();
     let mut errors = Vec::new();
 
     let format_caldav_date = |d: &str, is_end: bool| -> String {
         if d.len() == 10 && d.chars().nth(4) == Some('-') && d.chars().nth(7) == Some('-') {
             let clean = d.replace("-", "");
-            if is_end { format!("{}T235959Z", clean) } else { format!("{}T000000Z", clean) }
+            if is_end {
+                format!("{}T235959Z", clean)
+            } else {
+                format!("{}T000000Z", clean)
+            }
         } else {
             d.to_string()
         }
     };
-    
+
     let start_fmt = format_caldav_date(start, false);
     let end_fmt = format_caldav_date(end, true);
-    
+
     for (name, client_config) in &config.caldav_clients {
         let res = block_on(async {
-            let client = CalDavClient::new(&client_config.url, Some(&client_config.username), Some(&client_config.password))
-                .map_err(|e| anyhow::anyhow!("Client config error: {}", e))?;
-            let cals = get_all_calendars(&client, &client_config.url, &client_config.username).await?;
+            let client = CalDavClient::new(
+                &client_config.url,
+                Some(&client_config.username),
+                Some(&client_config.password),
+            )
+            .map_err(|e| anyhow::anyhow!("Client config error: {}", e))?;
+            let cals =
+                get_all_calendars(&client, &client_config.url, &client_config.username).await?;
             let mut matches = Vec::new();
             for cal_path in cals {
-                let items = client.calendar_query_timerange(&cal_path, "VEVENT", Some(&start_fmt), Some(&end_fmt), true).await?;
+                let items = client
+                    .calendar_query_timerange(
+                        &cal_path,
+                        "VEVENT",
+                        Some(&start_fmt),
+                        Some(&end_fmt),
+                        true,
+                    )
+                    .await?;
                 for item in items {
                     if let Some(data) = &item.calendar_data {
                         matches.push(parse_ical_data(name, &item.href, data));
@@ -200,27 +261,34 @@ pub fn tool_get_calendar(config: &AppConfig, start: &str, end: &str) -> Result<c
             }
             anyhow::Result::<Vec<_>>::Ok(matches)
         });
-        
+
         match res {
             Ok(mut m) => results.append(&mut m),
             Err(e) => errors.push(format!("Error on client {}: {}", name, e)),
         }
     }
-    
+
     let resp = CalDavResponse { results, errors };
     Ok(crate::tools::dtos::GetCalendarResponse {
-        results: serde_json::to_string_pretty(&resp).unwrap_or_else(|_| "{}".to_string())
+        results: serde_json::to_string_pretty(&resp).unwrap_or_else(|_| "{}".to_string()),
     })
 }
 
-pub fn tool_get_calendar_item(config: &AppConfig, id: &str) -> Result<crate::tools::dtos::GetCalendarItemResponse, String> {
+pub fn tool_get_calendar_item(
+    config: &AppConfig,
+    id: &str,
+) -> Result<crate::tools::dtos::GetCalendarItemResponse, String> {
     let mut results = Vec::new();
     let mut errors = Vec::new();
-    
+
     for (name, client_config) in &config.caldav_clients {
         let res = block_on(async {
-            let client = CalDavClient::new(&client_config.url, Some(&client_config.username), Some(&client_config.password))
-                .map_err(|e| anyhow::anyhow!("Client config error: {}", e))?;
+            let client = CalDavClient::new(
+                &client_config.url,
+                Some(&client_config.username),
+                Some(&client_config.password),
+            )
+            .map_err(|e| anyhow::anyhow!("Client config error: {}", e))?;
             let resp = client.get(id).await?;
             if !resp.status().is_success() {
                 let status = resp.status();
@@ -232,23 +300,23 @@ pub fn tool_get_calendar_item(config: &AppConfig, id: &str) -> Result<crate::too
             let body = String::from_utf8_lossy(&bytes).to_string();
             anyhow::Result::<CalDavEventDetails>::Ok(parse_ical_data(name, id, &body))
         });
-        
+
         match res {
             Ok(data) => results.push(data),
             Err(e) => errors.push(format!("Error on client {}: {}", name, e)),
         }
     }
-    
+
     let resp = CalDavResponse { results, errors };
     Ok(crate::tools::dtos::GetCalendarItemResponse {
-        result: serde_json::to_string_pretty(&resp).unwrap_or_else(|_| "{}".to_string())
+        result: serde_json::to_string_pretty(&resp).unwrap_or_else(|_| "{}".to_string()),
     })
 }
 
 pub fn update_ical_string(original: &str, updates: &serde_json::Value) -> String {
     let mut out = String::new();
     let mut in_vevent = false;
-    
+
     let mut has_summary = false;
     let mut has_start = false;
     let mut has_end = false;
@@ -256,14 +324,33 @@ pub fn update_ical_string(original: &str, updates: &serde_json::Value) -> String
     let mut has_loc = false;
 
     fn escape_ical_text(text: &str) -> String {
-        text.replace("\\", "\\\\").replace(";", "\\;").replace(",", "\\,").replace("\n", "\\n").replace("\r", "")
+        text.replace("\\", "\\\\")
+            .replace(";", "\\;")
+            .replace(",", "\\,")
+            .replace("\n", "\\n")
+            .replace("\r", "")
     }
 
-    let u_summary = updates.get("summary").and_then(|v| v.as_str()).map(escape_ical_text);
-    let u_start = updates.get("start").and_then(|v| v.as_str()).map(|s| s.replace("-", "").replace(":", ""));
-    let u_end = updates.get("end").and_then(|v| v.as_str()).map(|s| s.replace("-", "").replace(":", ""));
-    let u_desc = updates.get("description").and_then(|v| v.as_str()).map(escape_ical_text);
-    let u_loc = updates.get("location").and_then(|v| v.as_str()).map(escape_ical_text);
+    let u_summary = updates
+        .get("summary")
+        .and_then(|v| v.as_str())
+        .map(escape_ical_text);
+    let u_start = updates
+        .get("start")
+        .and_then(|v| v.as_str())
+        .map(|s| s.replace("-", "").replace(":", ""));
+    let u_end = updates
+        .get("end")
+        .and_then(|v| v.as_str())
+        .map(|s| s.replace("-", "").replace(":", ""));
+    let u_desc = updates
+        .get("description")
+        .and_then(|v| v.as_str())
+        .map(escape_ical_text);
+    let u_loc = updates
+        .get("location")
+        .and_then(|v| v.as_str())
+        .map(escape_ical_text);
 
     let mut lines = original.lines().peekable();
     while let Some(line) = lines.next() {
@@ -272,14 +359,42 @@ pub fn update_ical_string(original: &str, updates: &serde_json::Value) -> String
             out.push_str(&format!("{}\r\n", line));
             continue;
         }
-        
+
         if line.starts_with("END:VEVENT") {
-            if let Some(s) = &u_summary { if !has_summary { out.push_str(&format!("SUMMARY:{}\r\n", s)); } }
-            if let Some(s) = &u_start { if !has_start { if s.len() == 8 { out.push_str(&format!("DTSTART;VALUE=DATE:{}\r\n", s)); } else { out.push_str(&format!("DTSTART:{}\r\n", s)); } } }
-            if let Some(e) = &u_end { if !has_end { if e.len() == 8 { out.push_str(&format!("DTEND;VALUE=DATE:{}\r\n", e)); } else { out.push_str(&format!("DTEND:{}\r\n", e)); } } }
-            if let Some(s) = &u_desc { if !has_desc { out.push_str(&format!("DESCRIPTION:{}\r\n", s)); } }
-            if let Some(s) = &u_loc { if !has_loc { out.push_str(&format!("LOCATION:{}\r\n", s)); } }
-            
+            if let Some(s) = &u_summary {
+                if !has_summary {
+                    out.push_str(&format!("SUMMARY:{}\r\n", s));
+                }
+            }
+            if let Some(s) = &u_start {
+                if !has_start {
+                    if s.len() == 8 {
+                        out.push_str(&format!("DTSTART;VALUE=DATE:{}\r\n", s));
+                    } else {
+                        out.push_str(&format!("DTSTART:{}\r\n", s));
+                    }
+                }
+            }
+            if let Some(e) = &u_end {
+                if !has_end {
+                    if e.len() == 8 {
+                        out.push_str(&format!("DTEND;VALUE=DATE:{}\r\n", e));
+                    } else {
+                        out.push_str(&format!("DTEND:{}\r\n", e));
+                    }
+                }
+            }
+            if let Some(s) = &u_desc {
+                if !has_desc {
+                    out.push_str(&format!("DESCRIPTION:{}\r\n", s));
+                }
+            }
+            if let Some(s) = &u_loc {
+                if !has_loc {
+                    out.push_str(&format!("LOCATION:{}\r\n", s));
+                }
+            }
+
             out.push_str(&format!("{}\r\n", line));
             in_vevent = false;
             continue;
@@ -289,19 +404,37 @@ pub fn update_ical_string(original: &str, updates: &serde_json::Value) -> String
             let mut replace_line = None;
             if line.starts_with("SUMMARY:") {
                 has_summary = true;
-                if let Some(s) = &u_summary { replace_line = Some(format!("SUMMARY:{}", s)); }
+                if let Some(s) = &u_summary {
+                    replace_line = Some(format!("SUMMARY:{}", s));
+                }
             } else if line.starts_with("DTSTART:") || line.starts_with("DTSTART;") {
                 has_start = true;
-                if let Some(s) = &u_start { replace_line = Some(if s.len() == 8 { format!("DTSTART;VALUE=DATE:{}", s) } else { format!("DTSTART:{}", s) }); }
+                if let Some(s) = &u_start {
+                    replace_line = Some(if s.len() == 8 {
+                        format!("DTSTART;VALUE=DATE:{}", s)
+                    } else {
+                        format!("DTSTART:{}", s)
+                    });
+                }
             } else if line.starts_with("DTEND:") || line.starts_with("DTEND;") {
                 has_end = true;
-                if let Some(e) = &u_end { replace_line = Some(if e.len() == 8 { format!("DTEND;VALUE=DATE:{}", e) } else { format!("DTEND:{}", e) }); }
+                if let Some(e) = &u_end {
+                    replace_line = Some(if e.len() == 8 {
+                        format!("DTEND;VALUE=DATE:{}", e)
+                    } else {
+                        format!("DTEND:{}", e)
+                    });
+                }
             } else if line.starts_with("DESCRIPTION:") {
                 has_desc = true;
-                if let Some(s) = &u_desc { replace_line = Some(format!("DESCRIPTION:{}", s)); }
+                if let Some(s) = &u_desc {
+                    replace_line = Some(format!("DESCRIPTION:{}", s));
+                }
             } else if line.starts_with("LOCATION:") {
                 has_loc = true;
-                if let Some(s) = &u_loc { replace_line = Some(format!("LOCATION:{}", s)); }
+                if let Some(s) = &u_loc {
+                    replace_line = Some(format!("LOCATION:{}", s));
+                }
             }
 
             if let Some(repl) = replace_line {
@@ -321,22 +454,42 @@ pub fn update_ical_string(original: &str, updates: &serde_json::Value) -> String
     out
 }
 
-pub fn tool_add_calendar_item(config: &AppConfig, item_json: &str) -> Result<crate::tools::dtos::AddCalendarItemResponse, String> {
+pub fn tool_add_calendar_item(
+    config: &AppConfig,
+    item_json: &str,
+) -> Result<crate::tools::dtos::AddCalendarItemResponse, String> {
     let mut all_results = Vec::new();
     if let Some((name, client_config)) = config.caldav_clients.iter().next() {
         let res = block_on(async {
-            let client = CalDavClient::new(&client_config.url, Some(&client_config.username), Some(&client_config.password))
-                .map_err(|e| anyhow::anyhow!("Client config error: {}", e))?;
-            let cals = get_all_calendars(&client, &client_config.url, &client_config.username).await?;
-            let default_cal = cals.first().ok_or_else(|| anyhow::anyhow!("No calendar found to add to"))?;
-            let uid = format!("{}", std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_millis());
+            let client = CalDavClient::new(
+                &client_config.url,
+                Some(&client_config.username),
+                Some(&client_config.password),
+            )
+            .map_err(|e| anyhow::anyhow!("Client config error: {}", e))?;
+            let cals =
+                get_all_calendars(&client, &client_config.url, &client_config.username).await?;
+            let default_cal = cals
+                .first()
+                .ok_or_else(|| anyhow::anyhow!("No calendar found to add to"))?;
+            let uid = format!(
+                "{}",
+                std::time::SystemTime::now()
+                    .duration_since(std::time::UNIX_EPOCH)
+                    .unwrap()
+                    .as_millis()
+            );
             let path = format!("{}{}.ics", default_cal, uid);
             let ical_data = crate::tools::caldav::json_to_ical(item_json, Some(&uid));
             let resp = client.put(&path, ical_data.into_bytes().into()).await?;
             if !resp.status().is_success() {
                 let status = resp.status();
                 let body = String::from_utf8_lossy(&resp.into_body()).to_string();
-                return Err(anyhow::anyhow!("Failed to PUT event: {} - {}", status, body));
+                return Err(anyhow::anyhow!(
+                    "Failed to PUT event: {} - {}",
+                    status,
+                    body
+                ));
             }
             anyhow::Result::<String>::Ok(format!("Created at {}", path))
         });
@@ -348,34 +501,53 @@ pub fn tool_add_calendar_item(config: &AppConfig, item_json: &str) -> Result<cra
     if all_results.is_empty() {
         Err("No CalDAV clients configured.".to_string())
     } else {
-        Ok(crate::tools::dtos::AddCalendarItemResponse { result: all_results.join("\n\n") })
+        Ok(crate::tools::dtos::AddCalendarItemResponse {
+            result: all_results.join("\n\n"),
+        })
     }
 }
 
-pub fn tool_update_calendar_item(config: &AppConfig, id: &str, update_json: &str) -> Result<crate::tools::dtos::UpdateCalendarItemResponse, String> {
+pub fn tool_update_calendar_item(
+    config: &AppConfig,
+    id: &str,
+    update_json: &str,
+) -> Result<crate::tools::dtos::UpdateCalendarItemResponse, String> {
     let mut all_results = Vec::new();
     for (name, client_config) in &config.caldav_clients {
         let res = block_on(async {
-            let client = CalDavClient::new(&client_config.url, Some(&client_config.username), Some(&client_config.password))
-                .map_err(|e| anyhow::anyhow!("Client config error: {}", e))?;
-            
+            let client = CalDavClient::new(
+                &client_config.url,
+                Some(&client_config.username),
+                Some(&client_config.password),
+            )
+            .map_err(|e| anyhow::anyhow!("Client config error: {}", e))?;
+
             let get_resp = client.get(id).await?;
             if !get_resp.status().is_success() {
                 let status = get_resp.status();
                 let body = String::from_utf8_lossy(&get_resp.into_body()).to_string();
-                return Err(anyhow::anyhow!("Failed to fetch event for update: {} - {}", status, body));
+                return Err(anyhow::anyhow!(
+                    "Failed to fetch event for update: {} - {}",
+                    status,
+                    body
+                ));
             }
             let bytes = get_resp.into_body();
             let body = String::from_utf8_lossy(&bytes).to_string();
-            
-            let update_parsed: serde_json::Value = serde_json::from_str(update_json).unwrap_or_else(|_| serde_json::json!({}));
+
+            let update_parsed: serde_json::Value =
+                serde_json::from_str(update_json).unwrap_or_else(|_| serde_json::json!({}));
             let ical_data = crate::tools::caldav::update_ical_string(&body, &update_parsed);
-            
+
             let resp = client.put(id, ical_data.into_bytes().into()).await?;
             if !resp.status().is_success() {
                 let status = resp.status();
                 let body = String::from_utf8_lossy(&resp.into_body()).to_string();
-                return Err(anyhow::anyhow!("Failed to PUT update event: {} - {}", status, body));
+                return Err(anyhow::anyhow!(
+                    "Failed to PUT update event: {} - {}",
+                    status,
+                    body
+                ));
             }
             anyhow::Result::<String>::Ok("Updated successfully".to_string())
         });
@@ -387,21 +559,34 @@ pub fn tool_update_calendar_item(config: &AppConfig, id: &str, update_json: &str
     if all_results.is_empty() {
         Err("No CalDAV clients configured.".to_string())
     } else {
-        Ok(crate::tools::dtos::UpdateCalendarItemResponse { result: all_results.join("\n\n") })
+        Ok(crate::tools::dtos::UpdateCalendarItemResponse {
+            result: all_results.join("\n\n"),
+        })
     }
 }
 
-pub fn tool_delete_calendar_item(config: &AppConfig, id: &str) -> Result<crate::tools::dtos::DeleteCalendarItemResponse, String> {
+pub fn tool_delete_calendar_item(
+    config: &AppConfig,
+    id: &str,
+) -> Result<crate::tools::dtos::DeleteCalendarItemResponse, String> {
     let mut all_results = Vec::new();
     for (name, client_config) in &config.caldav_clients {
         let res = block_on(async {
-            let client = CalDavClient::new(&client_config.url, Some(&client_config.username), Some(&client_config.password))
-                .map_err(|e| anyhow::anyhow!("Client config error: {}", e))?;
+            let client = CalDavClient::new(
+                &client_config.url,
+                Some(&client_config.username),
+                Some(&client_config.password),
+            )
+            .map_err(|e| anyhow::anyhow!("Client config error: {}", e))?;
             let resp = client.delete(id).await?;
             if !resp.status().is_success() {
                 let status = resp.status();
                 let body = String::from_utf8_lossy(&resp.into_body()).to_string();
-                return Err(anyhow::anyhow!("Failed to DELETE event: {} - {}", status, body));
+                return Err(anyhow::anyhow!(
+                    "Failed to DELETE event: {} - {}",
+                    status,
+                    body
+                ));
             }
             anyhow::Result::<String>::Ok("Deleted successfully".to_string())
         });
@@ -413,17 +598,26 @@ pub fn tool_delete_calendar_item(config: &AppConfig, id: &str) -> Result<crate::
     if all_results.is_empty() {
         Err("No CalDAV clients configured.".to_string())
     } else {
-        Ok(crate::tools::dtos::DeleteCalendarItemResponse { result: all_results.join("\n\n") })
+        Ok(crate::tools::dtos::DeleteCalendarItemResponse {
+            result: all_results.join("\n\n"),
+        })
     }
 }
 
 pub fn json_to_ical(json_str: &str, uid_override: Option<&str>) -> String {
-    let parsed: serde_json::Value = serde_json::from_str(json_str).unwrap_or_else(|_| serde_json::json!({}));
-    
+    let parsed: serde_json::Value =
+        serde_json::from_str(json_str).unwrap_or_else(|_| serde_json::json!({}));
+
     let uid = uid_override.map(|s| s.to_string()).unwrap_or_else(|| {
-        format!("{}", std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_millis())
+        format!(
+            "{}",
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_millis()
+        )
     });
-    
+
     fn escape_ical_text(text: &str) -> String {
         text.replace("\\", "\\\\")
             .replace(";", "\\;")
@@ -431,12 +625,27 @@ pub fn json_to_ical(json_str: &str, uid_override: Option<&str>) -> String {
             .replace("\n", "\\n")
             .replace("\r", "")
     }
-    
-    let summary = escape_ical_text(parsed.get("summary").and_then(|v| v.as_str()).unwrap_or("New Event"));
+
+    let summary = escape_ical_text(
+        parsed
+            .get("summary")
+            .and_then(|v| v.as_str())
+            .unwrap_or("New Event"),
+    );
     let start = parsed.get("start").and_then(|v| v.as_str()).unwrap_or("");
     let end = parsed.get("end").and_then(|v| v.as_str()).unwrap_or("");
-    let description = escape_ical_text(parsed.get("description").and_then(|v| v.as_str()).unwrap_or(""));
-    let location = escape_ical_text(parsed.get("location").and_then(|v| v.as_str()).unwrap_or(""));
+    let description = escape_ical_text(
+        parsed
+            .get("description")
+            .and_then(|v| v.as_str())
+            .unwrap_or(""),
+    );
+    let location = escape_ical_text(
+        parsed
+            .get("location")
+            .and_then(|v| v.as_str())
+            .unwrap_or(""),
+    );
 
     let start_fmt = start.replace("-", "").replace(":", "");
     let end_fmt = end.replace("-", "").replace(":", "");
@@ -448,7 +657,7 @@ pub fn json_to_ical(json_str: &str, uid_override: Option<&str>) -> String {
     ical.push_str("BEGIN:VEVENT\r\n");
     ical.push_str(&format!("UID:{}\r\n", uid));
     ical.push_str(&format!("DTSTAMP:{}\r\n", dtstamp));
-    
+
     if !start_fmt.is_empty() {
         if start_fmt.len() == 8 {
             ical.push_str(&format!("DTSTART;VALUE=DATE:{}\r\n", start_fmt));
@@ -456,7 +665,7 @@ pub fn json_to_ical(json_str: &str, uid_override: Option<&str>) -> String {
             ical.push_str(&format!("DTSTART:{}\r\n", start_fmt));
         }
     }
-    
+
     if !end_fmt.is_empty() {
         if end_fmt.len() == 8 {
             ical.push_str(&format!("DTEND;VALUE=DATE:{}\r\n", end_fmt));
@@ -472,7 +681,7 @@ pub fn json_to_ical(json_str: &str, uid_override: Option<&str>) -> String {
     if !location.is_empty() {
         ical.push_str(&format!("LOCATION:{}\r\n", location));
     }
-    
+
     ical.push_str("END:VEVENT\r\n");
     ical.push_str("END:VCALENDAR\r\n");
     ical
@@ -507,7 +716,10 @@ mod tests {
         let ev = parse_ical_data("c", "/h", data);
         assert_eq!(ev.start, Some("2024-01-01T12:00:00Z".to_string()));
         assert_eq!(ev.end, Some("invalid".to_string()));
-        assert_eq!(ev.description, Some("Line 1\nLine 2\nLine 3,Comma;Semicolon".to_string()));
+        assert_eq!(
+            ev.description,
+            Some("Line 1\nLine 2\nLine 3,Comma;Semicolon".to_string())
+        );
         assert_eq!(ev.location, Some("Room 1, Building A; Fl 2".to_string()));
         assert_eq!(ev.organizer, Some("mailto:alice@test.com".to_string()));
     }
@@ -645,7 +857,9 @@ mod tests {
         let original = "BEGIN:VCALENDAR\r\nBEGIN:VEVENT\r\nSUMMARY:Test\r\nDTSTART:20240101\r\nEND:VEVENT\r\nEND:VCALENDAR";
         let updates = serde_json::json!({"start": "20250101"});
         let result = update_ical_string(original, &updates);
-        assert!(result.contains("DTSTART;VALUE=DATE:20250101") || result.contains("DTSTART:20250101"));
+        assert!(
+            result.contains("DTSTART;VALUE=DATE:20250101") || result.contains("DTSTART:20250101")
+        );
     }
 
     #[test]
@@ -662,29 +876,62 @@ mod tests {
     fn test_caldav_tools_empty_config() {
         let config = AppConfig::default();
 
-        assert_eq!(tool_add_calendar_item(&config, "{}").unwrap_err(), "No CalDAV clients configured.");
-        assert_eq!(tool_update_calendar_item(&config, "/item.ics", "{}").unwrap_err(), "No CalDAV clients configured.");
-        assert_eq!(tool_delete_calendar_item(&config, "/item.ics").unwrap_err(), "No CalDAV clients configured.");
+        assert_eq!(
+            tool_add_calendar_item(&config, "{}").unwrap_err(),
+            "No CalDAV clients configured."
+        );
+        assert_eq!(
+            tool_update_calendar_item(&config, "/item.ics", "{}").unwrap_err(),
+            "No CalDAV clients configured."
+        );
+        assert_eq!(
+            tool_delete_calendar_item(&config, "/item.ics").unwrap_err(),
+            "No CalDAV clients configured."
+        );
 
         let search_res = tool_search_calendar(&config, "test").unwrap();
-        assert_eq!(search_res.results, serde_json::to_string_pretty(&CalDavResponse { results: vec![], errors: vec![] }).unwrap());
+        assert_eq!(
+            search_res.results,
+            serde_json::to_string_pretty(&CalDavResponse {
+                results: vec![],
+                errors: vec![]
+            })
+            .unwrap()
+        );
 
         let get_res = tool_get_calendar(&config, "2024-01-01", "2024-01-02").unwrap();
-        assert_eq!(get_res.results, serde_json::to_string_pretty(&CalDavResponse { results: vec![], errors: vec![] }).unwrap());
+        assert_eq!(
+            get_res.results,
+            serde_json::to_string_pretty(&CalDavResponse {
+                results: vec![],
+                errors: vec![]
+            })
+            .unwrap()
+        );
 
         let item_res = tool_get_calendar_item(&config, "/item.ics").unwrap();
-        assert_eq!(item_res.result, serde_json::to_string_pretty(&CalDavResponse { results: vec![], errors: vec![] }).unwrap());
+        assert_eq!(
+            item_res.result,
+            serde_json::to_string_pretty(&CalDavResponse {
+                results: vec![],
+                errors: vec![]
+            })
+            .unwrap()
+        );
     }
 
     #[test]
     fn test_caldav_tools_unreachable_client() {
         let _ = rustls::crypto::ring::default_provider().install_default();
         let mut config = AppConfig::default();
-        config.caldav_clients.insert("test_client".to_string(), crate::config::CalDavClient {
-            url: "http://127.0.0.1:1".to_string(),
-            username: "user".to_string(),
-            password: "password".to_string(),
-        });
+        config.caldav_clients.insert(
+            "test_client".to_string(),
+            crate::config::CalDavClient {
+                url: "http://127.0.0.1:1".to_string(),
+                username: "user".to_string(),
+                password: "password".to_string(),
+            },
+        );
 
         let search_res = tool_search_calendar(&config, "test").unwrap();
         assert!(search_res.results.contains("Error on client test_client"));
@@ -788,11 +1035,14 @@ END:VCALENDAR</c:calendar-data>
         let server_url = spawn_mock_caldav_server();
 
         let mut config = AppConfig::default();
-        config.caldav_clients.insert("mock_client".to_string(), crate::config::CalDavClient {
-            url: server_url,
-            username: "user".to_string(),
-            password: "password".to_string(),
-        });
+        config.caldav_clients.insert(
+            "mock_client".to_string(),
+            crate::config::CalDavClient {
+                url: server_url,
+                username: "user".to_string(),
+                password: "password".to_string(),
+            },
+        );
 
         // 1. Search calendar
         let search_res = tool_search_calendar(&config, "Bob").unwrap();
@@ -815,12 +1065,20 @@ END:VCALENDAR</c:calendar-data>
         assert!(add_res.result.contains("Created at /calendars/primary/"));
 
         // 6. Update calendar item success
-        let update_res = tool_update_calendar_item(&config, "/item1.ics", r#"{"summary":"Updated Mtg"}"#).unwrap();
+        let update_res =
+            tool_update_calendar_item(&config, "/item1.ics", r#"{"summary":"Updated Mtg"}"#)
+                .unwrap();
         assert!(update_res.result.contains("Updated successfully"));
 
         // 7. Update calendar item 404
-        let update_res_404 = tool_update_calendar_item(&config, "/notfound", r#"{"summary":"Updated Mtg"}"#).unwrap();
-        assert!(update_res_404.result.contains("Failed to fetch event for update"));
+        let update_res_404 =
+            tool_update_calendar_item(&config, "/notfound", r#"{"summary":"Updated Mtg"}"#)
+                .unwrap();
+        assert!(
+            update_res_404
+                .result
+                .contains("Failed to fetch event for update")
+        );
 
         // 8. Delete calendar item success
         let delete_res = tool_delete_calendar_item(&config, "/item1.ics").unwrap();
@@ -831,4 +1089,3 @@ END:VCALENDAR</c:calendar-data>
         assert!(delete_res_err.result.contains("Failed to DELETE event"));
     }
 }
-

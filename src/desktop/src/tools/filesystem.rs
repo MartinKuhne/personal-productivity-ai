@@ -110,10 +110,7 @@ pub fn tool_list_files_by_tag(
 /// applied here — the call site (`registry.rs`) is responsible for
 /// slicing the result so the page and total fields stay consistent
 /// regardless of how the call is dispatched.
-pub fn tool_list_files(
-    target_dir: &Path,
-    virtual_prefix: &str,
-) -> Result<Vec<String>, String> {
+pub fn tool_list_files(target_dir: &Path, virtual_prefix: &str) -> Result<Vec<String>, String> {
     let mut files = Vec::new();
     if let Ok(entries) = std::fs::read_dir(target_dir) {
         for entry in entries.filter_map(|e| e.ok()) {
@@ -314,8 +311,7 @@ mod tests {
         // We can't return a reference tied to a local bus, so
         // instead use a leaked one. Tests run in a single thread
         // here so leaking is fine for the test lifetime.
-        let bus: &'static Bus<crate::file_events::FileEvent> =
-            Box::leak(Box::new(Bus::new()));
+        let bus: &'static Bus<crate::file_events::FileEvent> = Box::leak(Box::new(Bus::new()));
         FileEventProducer::new(bus)
     }
 
@@ -326,9 +322,14 @@ mod tests {
         std::fs::write(&file_path, "Line 1\nOld Text\nLine 3").unwrap();
 
         let producer = noop_producer();
-        let result = tool_replace_text(file_path.to_str().unwrap(), "Old Text", "New Text", &producer)
-            .unwrap()
-            .result;
+        let result = tool_replace_text(
+            file_path.to_str().unwrap(),
+            "Old Text",
+            "New Text",
+            &producer,
+        )
+        .unwrap()
+        .result;
         assert_eq!(result, "Successfully replaced 1 occurrence(s).");
 
         let content = std::fs::read_to_string(&file_path).unwrap();
@@ -342,7 +343,12 @@ mod tests {
         std::fs::write(&file_path, "Line 1\nOld Text\nLine 3").unwrap();
 
         let producer = noop_producer();
-        let result = tool_replace_text(file_path.to_str().unwrap(), "Missing Text", "New Text", &producer);
+        let result = tool_replace_text(
+            file_path.to_str().unwrap(),
+            "Missing Text",
+            "New Text",
+            &producer,
+        );
         assert_eq!(
             result.unwrap_err(),
             "The specified old_string was not found in the file."
@@ -480,9 +486,14 @@ mod tests {
         fs::write(&file_path, "Line 1\nLine 2\nLine 3").unwrap();
 
         let producer = noop_producer();
-        let result = tool_insert_lines(file_path.to_str().unwrap(), 2, &["New Line".to_string()], &producer)
-            .unwrap()
-            .result;
+        let result = tool_insert_lines(
+            file_path.to_str().unwrap(),
+            2,
+            &["New Line".to_string()],
+            &producer,
+        )
+        .unwrap()
+        .result;
         assert_eq!(result, "Lines inserted successfully.");
 
         let content = fs::read_to_string(&file_path).unwrap();
@@ -496,7 +507,12 @@ mod tests {
         fs::write(&file_path, "Line 1\nLine 2").unwrap();
 
         let producer = noop_producer();
-        let result = tool_insert_lines(file_path.to_str().unwrap(), 5, &["New".to_string()], &producer);
+        let result = tool_insert_lines(
+            file_path.to_str().unwrap(),
+            5,
+            &["New".to_string()],
+            &producer,
+        );
         assert_eq!(result.unwrap_err(), "Line index out of range.");
     }
 
@@ -578,11 +594,7 @@ mod tests {
     #[test]
     fn test_list_files_by_tag_no_matches_returns_empty() {
         let dir = tempdir().unwrap();
-        fs::write(
-            dir.path().join("solo.md"),
-            "---\ntags: [other]\n---\n# x\n",
-        )
-        .unwrap();
+        fs::write(dir.path().join("solo.md"), "---\ntags: [other]\n---\n# x\n").unwrap();
         let res = tool_list_files_by_tag(dir.path(), "Workspace", "meeting").unwrap();
         assert!(res.is_empty());
     }
@@ -616,7 +628,7 @@ mod tests {
         let md_file = dir.path().join("test.md");
         let txt_file = dir.path().join("secret.txt");
         let pdf_file = dir.path().join("notes.pdf");
-        
+
         fs::write(&md_file, "# Project\nContains search term here").unwrap();
         fs::write(&txt_file, "This also contains search term").unwrap();
         fs::write(&pdf_file, "Search term in PDF").unwrap();
@@ -636,18 +648,23 @@ mod tests {
         // same file, they should appear in line number order.
         let dir = tempdir().unwrap();
         let file_path = dir.path().join("test.md");
-        fs::write(&file_path, "Line 1: foo\nLine 2: bar\nLine 3: foo\nLine 4: baz\nLine 5: foo").unwrap();
+        fs::write(
+            &file_path,
+            "Line 1: foo\nLine 2: bar\nLine 3: foo\nLine 4: baz\nLine 5: foo",
+        )
+        .unwrap();
 
         let result = tool_grep(dir.path(), "Workspace", "foo").unwrap();
         let matches_text = result.matches;
         let lines: Vec<&str> = matches_text.lines().collect();
-        
+
         // Should find 3 matches at lines 1, 3, 5
         assert_eq!(lines.len(), 3, "Expected 3 matches, got: {}", matches_text);
-        
+
         // Verify line numbers are in ascending order by extracting from the format "path:line - content"
         // The format is: "path:line_number - content"
-        let line_nums: Vec<usize> = lines.iter()
+        let line_nums: Vec<usize> = lines
+            .iter()
             .filter_map(|l| {
                 // Find the first colon that's followed by digits (the line number)
                 let colon_pos = l.find(':')?;
@@ -661,7 +678,7 @@ mod tests {
             })
             .collect();
         assert_eq!(line_nums, vec![1, 3, 5], "Line numbers should be in order");
-        
+
         // Verify the matches are in the correct positions
         assert!(lines[0].contains("Line 1"));
         assert!(lines[1].contains("Line 3"));
@@ -726,11 +743,7 @@ mod tests {
         let file_path = dir.path().join("new.markdown");
 
         let producer = noop_producer();
-        let result = tool_create_file(
-            file_path.to_str().unwrap(),
-            "# Hello",
-            &producer,
-        );
+        let result = tool_create_file(file_path.to_str().unwrap(), "# Hello", &producer);
         // Should reject .markdown extension
         assert_eq!(
             result.unwrap_err(),

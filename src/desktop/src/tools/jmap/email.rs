@@ -436,7 +436,10 @@ pub fn tool_search_email(
     result_parts.extend(error_messages);
 
     if config.jmap_clients.is_empty() {
-        tracing::warn!(name = "tool.email.search.no_clients", "No JMAP clients configured. Operator should configure at least one email account in settings.");
+        tracing::warn!(
+            name = "tool.email.search.no_clients",
+            "No JMAP clients configured. Operator should configure at least one email account in settings."
+        );
         Err("No JMAP clients configured.".to_string())
     } else {
         Ok(crate::tools::dtos::SearchEmailResponse {
@@ -550,7 +553,10 @@ pub fn tool_send_email(
         }
     }
     if all_results.is_empty() {
-        tracing::warn!(name = "tool.email.send.no_clients", "No JMAP clients configured. Operator should configure at least one email account in settings.");
+        tracing::warn!(
+            name = "tool.email.send.no_clients",
+            "No JMAP clients configured. Operator should configure at least one email account in settings."
+        );
         Err("No JMAP clients configured.".to_string())
     } else {
         Ok(crate::tools::dtos::SendEmailResponse {
@@ -651,9 +657,11 @@ mod tests {
             ]]
         });
         let result = convert_html_in_jmap(res);
-        assert!(result["methodResponses"][0][1]["list"][0]["subject"]
-            .as_str()
-            .is_some());
+        assert!(
+            result["methodResponses"][0][1]["list"][0]["subject"]
+                .as_str()
+                .is_some()
+        );
     }
 
     #[test]
@@ -1013,7 +1021,11 @@ mod tests {
         let port = listener.local_addr().unwrap().port();
         let api_url = format!("http://127.0.0.1:{}", port);
         let body_str = body.into().replace("{API_URL}", &api_url);
-        let response_str = format!("HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nConnection: close\r\nContent-Length: {}\r\n\r\n{}", body_str.len(), body_str);
+        let response_str = format!(
+            "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nConnection: close\r\nContent-Length: {}\r\n\r\n{}",
+            body_str.len(),
+            body_str
+        );
         thread::spawn(move || {
             for stream in listener.incoming() {
                 if let Ok(mut stream) = stream {
@@ -1212,9 +1224,10 @@ mod tests {
             &config, None, None, None, None, None, None, None, None, 1, 10,
         );
         assert!(res.is_err());
-        assert!(res
-            .unwrap_err()
-            .contains("At least one filter field must be provided"));
+        assert!(
+            res.unwrap_err()
+                .contains("At least one filter field must be provided")
+        );
     }
 
     // -- Pagination tests ------------------------------------------------

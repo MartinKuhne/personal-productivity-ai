@@ -1,5 +1,5 @@
-use fast_h2m::convert;
 use crate::config::AppConfig;
+use fast_h2m::convert;
 
 pub fn tool_web_fetch(url: &str) -> Result<crate::tools::dtos::WebFetchResponse, String> {
     match ureq::get(url)
@@ -28,7 +28,10 @@ pub fn tool_web_fetch(url: &str) -> Result<crate::tools::dtos::WebFetchResponse,
 }
 
 // Reference: https://docs.searxng.org/dev/search_api.html
-pub fn tool_web_search(url: &str, query: &str) -> Result<crate::tools::dtos::WebSearchResponse, String> {
+pub fn tool_web_search(
+    url: &str,
+    query: &str,
+) -> Result<crate::tools::dtos::WebSearchResponse, String> {
     let endpoint = format!("{}/search", url);
     match ureq::get(&endpoint)
         .set("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36")
@@ -88,8 +91,10 @@ pub fn tool_web_search(url: &str, query: &str) -> Result<crate::tools::dtos::Web
     }
 }
 
-
-pub fn tool_web_delegate(config: &AppConfig, instruction: &str) -> Result<crate::tools::dtos::WebDelegateResponse, String> {
+pub fn tool_web_delegate(
+    config: &AppConfig,
+    instruction: &str,
+) -> Result<crate::tools::dtos::WebDelegateResponse, String> {
     let mut api_key = String::new();
     let mut api_url = String::new();
     let mut model_name = String::new();
@@ -107,7 +112,10 @@ pub fn tool_web_delegate(config: &AppConfig, instruction: &str) -> Result<crate:
     }
 
     if api_key == "your-api-key-here" || api_key.is_empty() {
-        tracing::warn!(name = "tool.web_delegate.missing_api_key", "API key not set. Cannot use web_delegate. Operator should configure a valid API key in settings.");
+        tracing::warn!(
+            name = "tool.web_delegate.missing_api_key",
+            "API key not set. Cannot use web_delegate. Operator should configure a valid API key in settings."
+        );
         return Err("API key not set. Cannot use web_delegate.".to_string());
     }
 
@@ -122,16 +130,14 @@ pub fn tool_web_delegate(config: &AppConfig, instruction: &str) -> Result<crate:
         }),
     ];
 
-    let mut tools_json = vec![
-        serde_json::json!({
-            "type": "function",
-            "function": {
-                "name": "web_fetch",
-                "description": "Fetch content from a URL.",
-                "parameters": schemars::schema_for!(crate::tools::dtos::WebFetchInput)
-            }
-        })
-    ];
+    let mut tools_json = vec![serde_json::json!({
+        "type": "function",
+        "function": {
+            "name": "web_fetch",
+            "description": "Fetch content from a URL.",
+            "parameters": schemars::schema_for!(crate::tools::dtos::WebFetchInput)
+        }
+    })];
 
     if config.searxng_url.is_some() {
         tools_json.push(serde_json::json!({
@@ -143,7 +149,7 @@ pub fn tool_web_delegate(config: &AppConfig, instruction: &str) -> Result<crate:
             }
         }));
     }
-    
+
     let agent = ureq::AgentBuilder::new()
         .timeout_connect(std::time::Duration::from_secs(30))
         .timeout_read(std::time::Duration::from_secs(120))
@@ -162,7 +168,11 @@ pub fn tool_web_delegate(config: &AppConfig, instruction: &str) -> Result<crate:
             "tool_choice": "auto"
         });
 
-        let response = match agent.post(&format!("{}/chat/completions", api_url.trim_matches('"').trim_end_matches('/')))
+        let response = match agent
+            .post(&format!(
+                "{}/chat/completions",
+                api_url.trim_matches('"').trim_end_matches('/')
+            ))
             .set("Authorization", &format!("Bearer {}", api_key))
             .set("Content-Type", "application/json")
             .send_json(request_body)
@@ -195,8 +205,11 @@ pub fn tool_web_delegate(config: &AppConfig, instruction: &str) -> Result<crate:
                 return Err("No message in delegate choice".to_string());
             }
         };
-        
-        let content_str = message.get("content").and_then(|c| c.as_str()).unwrap_or("");
+
+        let content_str = message
+            .get("content")
+            .and_then(|c| c.as_str())
+            .unwrap_or("");
         if !content_str.is_empty() {
             final_content.push_str(content_str);
         }
@@ -206,27 +219,59 @@ pub fn tool_web_delegate(config: &AppConfig, instruction: &str) -> Result<crate:
                 break;
             }
             messages.push(message.clone());
-            
+
             for tool_call in tool_calls {
                 let call_id = tool_call.get("id").and_then(|id| id.as_str()).unwrap_or("");
-                let func_name = tool_call.get("function").and_then(|f| f.get("name")).and_then(|n| n.as_str()).unwrap_or("");
-                let func_args_str = tool_call.get("function").and_then(|f| f.get("arguments")).and_then(|a| a.as_str()).unwrap_or("{}");
-                
+                let func_name = tool_call
+                    .get("function")
+                    .and_then(|f| f.get("name"))
+                    .and_then(|n| n.as_str())
+                    .unwrap_or("");
+                let func_args_str = tool_call
+                    .get("function")
+                    .and_then(|f| f.get("arguments"))
+                    .and_then(|a| a.as_str())
+                    .unwrap_or("{}");
+
                 let result = if func_name == "web_fetch" {
-                    if let Ok(input) = serde_json::from_str::<crate::tools::dtos::WebFetchInput>(func_args_str) {
+                    if let Ok(input) =
+                        serde_json::from_str::<crate::tools::dtos::WebFetchInput>(func_args_str)
+                    {
                         match tool_web_fetch(&input.url) {
-                            Ok(res) => serde_json::to_string(&crate::tools::dtos::ToolResponse::Success { data: res }).unwrap_or_default(),
-                            Err(e) => serde_json::to_string(&crate::tools::dtos::ToolResponse::<crate::tools::dtos::WebFetchResponse>::Error { message: e }).unwrap_or_default(),
+                            Ok(res) => {
+                                serde_json::to_string(&crate::tools::dtos::ToolResponse::Success {
+                                    data: res,
+                                })
+                                .unwrap_or_default()
+                            }
+                            Err(e) => serde_json::to_string(&crate::tools::dtos::ToolResponse::<
+                                crate::tools::dtos::WebFetchResponse,
+                            >::Error {
+                                message: e,
+                            })
+                            .unwrap_or_default(),
                         }
                     } else {
                         r#"{"status":"error","message":"Invalid input"}"#.to_string()
                     }
                 } else if func_name == "web_search" {
-                    if let Ok(input) = serde_json::from_str::<crate::tools::dtos::WebSearchInput>(func_args_str) {
+                    if let Ok(input) =
+                        serde_json::from_str::<crate::tools::dtos::WebSearchInput>(func_args_str)
+                    {
                         if let Some(url) = &config.searxng_url {
                             match tool_web_search(url, &input.query) {
-                                Ok(res) => serde_json::to_string(&crate::tools::dtos::ToolResponse::Success { data: res }).unwrap_or_default(),
-                                Err(e) => serde_json::to_string(&crate::tools::dtos::ToolResponse::<crate::tools::dtos::WebSearchResponse>::Error { message: e }).unwrap_or_default(),
+                                Ok(res) => serde_json::to_string(
+                                    &crate::tools::dtos::ToolResponse::Success { data: res },
+                                )
+                                .unwrap_or_default(),
+                                Err(e) => {
+                                    serde_json::to_string(&crate::tools::dtos::ToolResponse::<
+                                        crate::tools::dtos::WebSearchResponse,
+                                    >::Error {
+                                        message: e,
+                                    })
+                                    .unwrap_or_default()
+                                }
                             }
                         } else {
                             r#"{"status":"error","message":"web_search disabled"}"#.to_string()
@@ -249,7 +294,9 @@ pub fn tool_web_delegate(config: &AppConfig, instruction: &str) -> Result<crate:
         }
     }
 
-    Ok(crate::tools::dtos::WebDelegateResponse { result: final_content })
+    Ok(crate::tools::dtos::WebDelegateResponse {
+        result: final_content,
+    })
 }
 
 #[cfg(test)]
@@ -261,7 +308,11 @@ mod tests {
         let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
         let port = listener.local_addr().unwrap().port();
         let body_str = body.into();
-        let response_str = format!("HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nConnection: close\r\nContent-Length: {}\r\n\r\n{}", body_str.len(), body_str);
+        let response_str = format!(
+            "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nConnection: close\r\nContent-Length: {}\r\n\r\n{}",
+            body_str.len(),
+            body_str
+        );
         std::thread::spawn(move || {
             for stream in listener.incoming() {
                 if let Ok(mut stream) = stream {
@@ -278,7 +329,9 @@ mod tests {
 
     #[test]
     fn test_tool_web_fetch_mock() {
-        rustls::crypto::ring::default_provider().install_default().ok();
+        rustls::crypto::ring::default_provider()
+            .install_default()
+            .ok();
         let server_url = spawn_mock_server("<html><body><h1>Hello World</h1></body></html>");
         let result = tool_web_fetch(&server_url).unwrap().content;
         assert!(result.contains("Hello") || result.contains("World"));
@@ -286,14 +339,18 @@ mod tests {
 
     #[test]
     fn test_tool_web_fetch_error() {
-        rustls::crypto::ring::default_provider().install_default().ok();
+        rustls::crypto::ring::default_provider()
+            .install_default()
+            .ok();
         let result = tool_web_fetch("http://127.0.0.1:1"); // Invalid port
         assert!(result.is_err());
     }
 
     #[test]
     fn test_tool_web_search_mock() {
-        rustls::crypto::ring::default_provider().install_default().ok();
+        rustls::crypto::ring::default_provider()
+            .install_default()
+            .ok();
         let mock_json = serde_json::json!({
             "results": [
                 {
@@ -312,7 +369,9 @@ mod tests {
 
     #[test]
     fn test_tool_web_search_empty() {
-        rustls::crypto::ring::default_provider().install_default().ok();
+        rustls::crypto::ring::default_provider()
+            .install_default()
+            .ok();
         let mock_json = serde_json::json!({
             "results": []
         });
@@ -325,7 +384,9 @@ mod tests {
     fn test_tool_web_search_returns_full_default_page() {
         // SearXNG with default `search.max_results=10` returns 10 results.
         // Verify we surface all of them.
-        rustls::crypto::ring::default_provider().install_default().ok();
+        rustls::crypto::ring::default_provider()
+            .install_default()
+            .ok();
         let results: Vec<serde_json::Value> = (1..=10)
             .map(|i| {
                 serde_json::json!({
@@ -354,7 +415,9 @@ mod tests {
         // SearXNG returns without a client-side cap. Even if the server
         // returns more than the default 10 (e.g. an instance with many
         // engines enabled), we must pass every result through.
-        rustls::crypto::ring::default_provider().install_default().ok();
+        rustls::crypto::ring::default_provider()
+            .install_default()
+            .ok();
         let total = 25;
         let results: Vec<serde_json::Value> = (1..=total)
             .map(|i| {
@@ -376,10 +439,12 @@ mod tests {
             );
         }
     }
-    
+
     #[test]
     fn test_tool_web_search_invalid_json() {
-        rustls::crypto::ring::default_provider().install_default().ok();
+        rustls::crypto::ring::default_provider()
+            .install_default()
+            .ok();
         let server_url = spawn_mock_server("invalid json");
         let result = tool_web_search(&server_url, "test query");
         assert!(result.is_err());
@@ -388,22 +453,30 @@ mod tests {
     #[test]
     fn test_tool_web_delegate_missing_api_key() {
         let mut config = AppConfig::default();
-        config.models.insert("chat".to_string(), LlmConfig {
-            model: "test-model".to_string(),
-            api_url: "http://example.com".to_string(),
-            api_key: "".to_string(), // Missing API key
-            cost: None,
-            use_case: vec!["chat".to_string()],
-        });
-        
+        config.models.insert(
+            "chat".to_string(),
+            LlmConfig {
+                model: "test-model".to_string(),
+                api_url: "http://example.com".to_string(),
+                api_key: "".to_string(), // Missing API key
+                cost: None,
+                use_case: vec!["chat".to_string()],
+            },
+        );
+
         let result = tool_web_delegate(&config, "do something");
         assert!(result.is_err());
-        assert_eq!(result.unwrap_err(), "API key not set. Cannot use web_delegate.");
+        assert_eq!(
+            result.unwrap_err(),
+            "API key not set. Cannot use web_delegate."
+        );
     }
 
     #[test]
     fn test_tool_web_delegate_mock() {
-        rustls::crypto::ring::default_provider().install_default().ok();
+        rustls::crypto::ring::default_provider()
+            .install_default()
+            .ok();
         let mock_response = serde_json::json!({
             "choices": [
                 {
@@ -414,26 +487,31 @@ mod tests {
                 }
             ]
         });
-        
+
         let server_url = spawn_mock_server(mock_response.to_string());
-        
+
         let mut config = AppConfig::default();
-        config.models.insert("chat".to_string(), LlmConfig {
-            model: "test-model".to_string(),
-            api_url: server_url.clone(),
-            api_key: "valid-key".to_string(),
-            cost: None,
-            use_case: vec!["chat".to_string()],
-        });
-        
+        config.models.insert(
+            "chat".to_string(),
+            LlmConfig {
+                model: "test-model".to_string(),
+                api_url: server_url.clone(),
+                api_key: "valid-key".to_string(),
+                cost: None,
+                use_case: vec!["chat".to_string()],
+            },
+        );
+
         let result = tool_web_delegate(&config, "search for tests").unwrap();
         assert_eq!(result.result, "Final summarized answer");
     }
-    
+
     #[test]
     fn test_tool_web_delegate_with_unknown_tool_handled_gracefully() {
-        rustls::crypto::ring::default_provider().install_default().ok();
-        
+        rustls::crypto::ring::default_provider()
+            .install_default()
+            .ok();
+
         // Mock server returns a tool_call with unknown function name
         // The delegate should handle this gracefully and continue
         let mock_response = serde_json::json!({
@@ -450,19 +528,22 @@ mod tests {
                 }
             }]
         });
-        
+
         let server_url = spawn_mock_server(mock_response.to_string());
-        
+
         let mut config = AppConfig::default();
-        config.models.insert("chat".to_string(), LlmConfig {
-            model: "test-model".to_string(),
-            api_url: server_url.clone(),
-            api_key: "valid-key".to_string(),
-            cost: None,
-            use_case: vec!["chat".to_string()],
-        });
+        config.models.insert(
+            "chat".to_string(),
+            LlmConfig {
+                model: "test-model".to_string(),
+                api_url: server_url.clone(),
+                api_key: "valid-key".to_string(),
+                cost: None,
+                use_case: vec!["chat".to_string()],
+            },
+        );
         config.searxng_url = None;
-        
+
         // Should not panic - handles unknown tool gracefully
         let result = tool_web_delegate(&config, "do something");
         // Either succeeds or returns an error we can handle
@@ -471,8 +552,10 @@ mod tests {
 
     #[test]
     fn test_tool_web_delegate_handles_api_error_gracefully() {
-        rustls::crypto::ring::default_provider().install_default().ok();
-        
+        rustls::crypto::ring::default_provider()
+            .install_default()
+            .ok();
+
         // Mock server that returns an error status
         let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
         let port = listener.local_addr().unwrap().port();
@@ -482,21 +565,25 @@ mod tests {
                     use std::io::{Read, Write};
                     let mut buf = [0; 4096];
                     let _ = stream.read(&mut buf);
-                    let response = "HTTP/1.1 500 Internal Server Error\r\nContent-Length: 5\r\n\r\nerror";
+                    let response =
+                        "HTTP/1.1 500 Internal Server Error\r\nContent-Length: 5\r\n\r\nerror";
                     let _ = stream.write_all(response.as_bytes());
                 }
             }
         });
-        
+
         let mut config = AppConfig::default();
-        config.models.insert("chat".to_string(), LlmConfig {
-            model: "test-model".to_string(),
-            api_url: format!("http://127.0.0.1:{}", port),
-            api_key: "valid-key".to_string(),
-            cost: None,
-            use_case: vec!["chat".to_string()],
-        });
-        
+        config.models.insert(
+            "chat".to_string(),
+            LlmConfig {
+                model: "test-model".to_string(),
+                api_url: format!("http://127.0.0.1:{}", port),
+                api_key: "valid-key".to_string(),
+                cost: None,
+                use_case: vec!["chat".to_string()],
+            },
+        );
+
         let result = tool_web_delegate(&config, "test");
         // Should return an error, not panic
         assert!(result.is_err() || result.is_ok());
