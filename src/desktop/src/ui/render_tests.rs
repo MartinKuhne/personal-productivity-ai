@@ -36,6 +36,20 @@ mod tests {
     }
 
     #[test]
+    fn test_build_toc_h4_h5_h6() {
+        let toc = build_toc("# H1\n\n#### H4\n\n##### H5\n\n###### H6");
+        assert_eq!(toc.len(), 4);
+        assert_eq!(toc[0].level, 1);
+        assert_eq!(toc[0].title, "H1");
+        assert_eq!(toc[1].level, 4);
+        assert_eq!(toc[1].title, "H4");
+        assert_eq!(toc[2].level, 5);
+        assert_eq!(toc[2].title, "H5");
+        assert_eq!(toc[3].level, 6);
+        assert_eq!(toc[3].title, "H6");
+    }
+
+    #[test]
     fn test_build_toc_heading_with_code() {
         let toc = build_toc("# `code` in heading");
         assert_eq!(toc.len(), 1);
