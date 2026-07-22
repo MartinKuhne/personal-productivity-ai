@@ -179,16 +179,18 @@ pub fn run_agent_blocking(
     let (tx, rx) = channel();
 
     run_agent(
-        config,
-        tx,
-        active_file,
-        active_dir,
-        selected_files,
-        prompt,
-        cancel_flag,
-        history,
-        current_response,
-        file_event_bus,
+        crate::agent::AgentContext::new(
+            config,
+            tx,
+            file_event_bus,
+            active_file,
+            active_dir,
+            selected_files,
+            prompt,
+            cancel_flag,
+            history,
+            current_response,
+        ),
     );
 
     let mut status = BatchJobStatus::Completed;

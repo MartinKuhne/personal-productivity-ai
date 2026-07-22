@@ -44,7 +44,7 @@ fn main() -> eframe::Result<()> {
 
     let config = fastmd::config::load_config();
 
-    let prompt = fastmd::agent::get_base_system_prompt(&config);
+    let prompt = fastmd::agent::prompt_builder::SystemPromptBuilder::new(&config).build(&config);
     tracing::info!(
         name = "app.startup",
         system_prompt = %prompt,
