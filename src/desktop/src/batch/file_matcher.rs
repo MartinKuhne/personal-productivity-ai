@@ -1,3 +1,5 @@
+//! Glob-based file discovery for batch File mode and immediate-subdirectory discovery for batch Directory mode.
+
 use glob::Pattern;
 use std::path::{Path, PathBuf};
 use walkdir::WalkDir;

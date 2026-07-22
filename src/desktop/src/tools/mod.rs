@@ -1,3 +1,5 @@
+//! LLM-callable tools — the `Tool` trait, tool registry, and implementations for filesystem, web, calendar, contacts, email, CSV, and weather.
+
 pub mod caldav;
 pub mod carddav;
 pub mod context;

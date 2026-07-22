@@ -1,6 +1,8 @@
+//! Renders markdown to HTML and drives physical printing (or PDF export) via an embedded web-view pipeline.
+
 use crate::background::{BackgroundLogEntry, LogCategory};
 use crate::messages::BackgroundMessage as MsgBackgroundMessage;
-use pulldown_cmark::{Options, Parser, html};
+use pulldown_cmark::{html, Options, Parser};
 use std::io::Write;
 use std::path::PathBuf;
 use std::sync::mpsc::Sender;

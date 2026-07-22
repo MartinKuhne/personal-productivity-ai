@@ -1,3 +1,5 @@
+//! Tool registry — registers all available tools, dispatches execution by name, and produces the JSON-Schema tool list for the LLM.
+
 use crate::config::AppConfig;
 use crate::tools::context::ToolContext;
 use crate::tools::Tool;
@@ -263,11 +265,9 @@ impl Tool for GrepTool {
         let mut libs: Vec<_> = ctx.config.content_libraries.iter().collect();
         libs.sort_by(|a, b| b.priority.cmp(&a.priority));
         for lib in libs {
-            if let Ok(res) = crate::tools::filesystem::tool_grep(
-                std::path::Path::new(&lib.root_folder),
-                &lib.name,
-                &input.query,
-            ) {
+            if let Ok(res) =
+                crate::tools::filesystem::tool_grep(&lib.root_path(), &lib.name, &input.query)
+            {
                 if res.matches != "No matches found." {
                     all_results.push(res.matches);
                 }
@@ -309,9 +309,7 @@ impl Tool for ReadTagsTool {
             serde_json::from_str(args).map_err(|e| format!("Invalid args: {}", e))?;
         let mut all_tags = std::collections::BTreeSet::new();
         for lib in &ctx.config.content_libraries {
-            if let Ok(res) =
-                crate::tools::filesystem::tool_read_tags(std::path::Path::new(&lib.root_folder))
-            {
+            if let Ok(res) = crate::tools::filesystem::tool_read_tags(&lib.root_path()) {
                 for tag in res.tags {
                     all_tags.insert(tag);
                 }
@@ -352,7 +350,7 @@ impl Tool for ListFilesByTagTool {
         let mut all_matches: Vec<String> = Vec::new();
         for lib in &ctx.config.content_libraries {
             match crate::tools::filesystem::tool_list_files_by_tag(
-                std::path::Path::new(&lib.root_folder),
+                &lib.root_path(),
                 &lib.name,
                 &input.tag,
             ) {
@@ -1325,7 +1323,7 @@ mod tests {
             "read_file",
             r#"{"path": "TestLib\\..\\Windows\\System32\\cmd.exe"}"#,
         );
-        assert!(res3.contains("Path traversal not allowed"));
+        assert!(res3.contains("path traversal"));
 
         let res4 = execute_tool(&ctx, "read_file", r#"{"path": "UnknownLib\\file.md"}"#);
         assert!(res4.contains("Content library 'UnknownLib' not found"));
@@ -1381,17 +1379,17 @@ mod tests {
         let ctx = test_ctx(&config);
 
         let res = execute_tool(&ctx, "read_file", r#"{"path": "Lib/../../etc/passwd"}"#);
-        assert!(res.contains("Path traversal not allowed"));
+        assert!(res.contains("path traversal"));
 
         let res2 = execute_tool(&ctx, "read_file", r#"{"path": "Lib/.."}"#);
-        assert!(res2.contains("Path traversal not allowed"));
+        assert!(res2.contains("path traversal"));
     }
 
     #[test]
     fn test_resolve_path_with_library_missing() {
         let config = AppConfig::default();
         let ctx = test_ctx(&config);
-        let res = execute_tool(&ctx, "list_files", r#"{"path": "NonExistentLib"}"#);
+        let res = execute_tool(&ctx, "list_files", r#"{"path": "NonExistentLib/file.md"}"#);
         assert!(res.contains("Content library 'NonExistentLib' not found"));
     }
 

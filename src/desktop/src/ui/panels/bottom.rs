@@ -1,3 +1,5 @@
+//! Bottom command/agent panel — prompt intent parsing (`/models`, agent prompt), agent status, response, and token-usage stats.
+
 use crate::ui::FastMdApp;
 use eframe::egui;
 use egui::RichText;
@@ -73,15 +75,15 @@ pub fn show_bottom_panel(app: &mut FastMdApp, ctx: &egui::Context) {
         .show(ctx, |ui| {
             ui.horizontal(|ui| {
                 let prompt_prefix = compute_prompt_prefix(
-                    app.selected_dir.as_deref(),
-                    &app.content_libraries,
+                    app.selection().selected_dir().map(|p| p.as_path()),
+                    app.content_libraries(),
                 );
                 ui.label(RichText::new(prompt_prefix).monospace().strong());
 
                 let text_width = ui.available_width() - 130.0;
                 let response = ui.add_sized(
                     egui::vec2(text_width, ui.available_height()),
-                    egui::TextEdit::multiline(&mut app.command_input)
+                    egui::TextEdit::multiline(&mut app.agent_mut().command_input)
                         .desired_width(f32::INFINITY)
                         .hint_text("Type command (Enter to submit, Shift+Enter for new line)"),
                 );
@@ -98,48 +100,47 @@ pub fn show_bottom_panel(app: &mut FastMdApp, ctx: &egui::Context) {
                         if ui.button("Format Markdown").clicked() {
                             let now = chrono::Local::now();
                             let date_str = now.to_rfc3339();
-                            app.command_input = crate::ui::generate_format_prompt(&date_str);
+                            app.agent_mut().command_input = crate::ui::generate_format_prompt(&date_str);
                             submit = true;
                             ui.close_menu();
                         }
                     });
 
-                    if app.agent.state().running
+                    if app.agent().state().running
                         && ui
                             .button(RichText::new("⏹ Stop").color(egui::Color32::RED))
                             .clicked()
                     {
-                        app.agent.cancel();
+                        app.agent_mut().cancel();
                     }
                 });
 
                 if submit {
-                    let prompt = app.command_input.trim_end().to_string();
-                    app.command_input.clear();
+                    let prompt = app.agent_mut().command_input.trim_end().to_string();
+                    app.agent_mut().command_input.clear();
 
                     match parse_command_intent(&prompt) {
                         CommandIntent::ShowModels => {
-                            app.agent.set_status("Done".to_string());
-                            app.agent.set_response(format_models_list(&app.config.models));
-                            app.show_agent_results = true;
+                            app.agent_mut().set_status("Done".to_string());
+                            let models_response = format_models_list(&app.config.models);
+                            app.agent_mut().set_response(models_response);
+                            app.agent_mut().set_show_results(true);
                         }
                         CommandIntent::ShowDeprecatedModelMessage => {
-                            app.agent.set_status("Error".to_string());
-                            app.agent.set_response(
+                            app.agent_mut().set_status("Error".to_string());
+                            app.agent_mut().set_response(
                                 "The /model command is deprecated. Models are now automatically selected based on use case and cost.".to_string(),
                             );
-                            app.show_agent_results = true;
+                            app.agent_mut().set_show_results(true);
                         }
                         CommandIntent::RunAgent(agent_prompt) => {
-                            app.agent.start_session(
-                                app.tx.clone(),
-                                agent_prompt,
-                                app.selected_file.clone(),
-                                app.selected_dir.clone(),
-                                app.selected_files.clone(),
-                                app.file_event_bus.clone(),
-                            );
-                            app.show_agent_results = true;
+                            let tx = app.tx.clone();
+                            let file = app.selection().selected_file().cloned();
+                            let dir = app.selection().selected_dir().cloned();
+                            let files = app.selection().selected_files().clone();
+                            let bus = app.file_event_bus.clone();
+                            app.agent_mut().start_session(tx, agent_prompt, file, dir, files, bus);
+                            app.agent_mut().set_show_results(true);
                         }
                         CommandIntent::Empty => {}
                     }
@@ -279,23 +280,23 @@ mod ui_tests {
     fn test_show_bottom_panel_render() {
         let ctx = egui::Context::default();
         let mut app = create_test_app();
-        app.command_input = "test input".to_string();
+        app.agent_mut().command_input = "test input".to_string();
         let _ = ctx.run(egui::RawInput::default(), |ctx| {
             show_bottom_panel(&mut app, ctx);
         });
-        assert_eq!(app.command_input, "test input");
+        assert_eq!(app.agent().command_input, "test input");
     }
 
     #[test]
     fn test_show_bottom_panel_stop_agent() {
         let ctx = egui::Context::default();
         let mut app = create_test_app();
-        app.agent.state_mut().running = true;
+        app.agent_mut().state_mut().running = true;
 
         let _ = ctx.run(egui::RawInput::default(), |ctx| {
             show_bottom_panel(&mut app, ctx);
         });
 
-        assert!(app.agent.state().running);
+        assert!(app.agent().state().running);
     }
 }

@@ -1,3 +1,5 @@
+//! Message types flowing from background threads to the UI — background messages and token-usage statistics.
+
 use notify::RecommendedWatcher;
 use serde_json::Value;
 use std::path::PathBuf;

@@ -1,3 +1,5 @@
+//! Batch job executor — runs the LLM agent against each discovered unit (file or directory) with configurable concurrency.
+
 use crate::batch::types::{BatchJob, BatchJobStatus, BatchResult};
 use crate::config::AppConfig;
 use crate::file_events::Bus;
@@ -179,16 +181,18 @@ pub fn run_agent_blocking(
     let (tx, rx) = channel();
 
     run_agent(
-        config,
-        tx,
-        active_file,
-        active_dir,
-        selected_files,
-        prompt,
-        cancel_flag,
-        history,
-        current_response,
-        file_event_bus,
+        crate::agent::AgentContext::new(
+            config,
+            tx,
+            file_event_bus,
+            active_file,
+            active_dir,
+            selected_files,
+            prompt,
+            cancel_flag,
+            history,
+            current_response,
+        ),
     );
 
     let mut status = BatchJobStatus::Completed;

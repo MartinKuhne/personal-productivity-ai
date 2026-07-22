@@ -1,3 +1,5 @@
+//! Safe-basename validation — ensures a user-supplied filename is a traversal-free single path segment.
+
 use std::path::{Component, Path};
 
 /// Purpose: Validate that a user-supplied name is a single safe path segment (no traversal, no separators).

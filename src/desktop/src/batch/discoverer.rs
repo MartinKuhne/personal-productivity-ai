@@ -1,3 +1,5 @@
+//! Job discoverer trait and implementations — resolves which paths a batch job should process (files or directories).
+
 use crate::batch::types::{BatchConfig, BatchMode};
 use std::path::PathBuf;
 

@@ -1,3 +1,5 @@
+//! Batch-processing subsystem — coordinator, dialog, discoverer, executor, file matcher, prompts, and types.
+
 pub mod coordinator;
 pub mod dialog;
 pub mod discoverer;

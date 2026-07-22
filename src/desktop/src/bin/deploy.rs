@@ -1,3 +1,5 @@
+//! Deploy helper binary — runs `cargo build --release` and copies the resulting `fastmd.exe` to `C:\tools`.
+
 use std::fs;
 use std::process::Command;
 
