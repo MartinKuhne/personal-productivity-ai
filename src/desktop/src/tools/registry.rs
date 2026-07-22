@@ -62,12 +62,17 @@ impl ToolRegistry {
         let mut tools = Vec::new();
         for tool in self.tools.values() {
             if tool.is_enabled(config, prompt) {
+                let mut params = tool.parameters_schema();
+                // LM Studio requires `properties` to be present in the parameters schema.
+                if params.get("properties").is_none() {
+                    params["properties"] = serde_json::Value::Object(Default::default());
+                }
                 tools.push(serde_json::json!({
                     "type": "function",
                     "function": {
                         "name": tool.name(),
                         "description": tool.description(),
-                        "parameters": tool.parameters_schema()
+                        "parameters": params
                     }
                 }));
             }
