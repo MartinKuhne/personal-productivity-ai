@@ -188,14 +188,10 @@ impl FastMdApp {
                     FileEventKind::Discovered => {
                         for p in &event.paths {
                             if Self::is_workspace_file(p) {
-                                if !self.file_processor.all_files.contains(p) {
-                                    self.file_processor.all_files.push(p.clone());
-                                }
+                                self.file_processor.add_file(p.clone());
                                 if let Some(parent) = p.parent() {
                                     let parent = parent.to_path_buf();
-                                    if !self.file_processor.all_dirs.contains(&parent) {
-                                        self.file_processor.all_dirs.push(parent);
-                                    }
+                                    self.file_processor.add_dir(parent);
                                 }
                             }
                         }
@@ -211,7 +207,7 @@ impl FastMdApp {
                     }
                     FileEventKind::Removed => {
                         for p in &event.paths {
-                            self.file_processor.all_files.retain(|fp| fp != p);
+                            self.file_processor.remove_file(p);
                             if self.tab_manager.loaded_path.as_ref() == Some(p) {
                                 self.tab_manager.loaded_path = None;
                             }
@@ -221,14 +217,12 @@ impl FastMdApp {
                     }
                     FileEventKind::DirDiscovered => {
                         for p in &event.paths {
-                            if !self.file_processor.all_dirs.contains(p) {
-                                self.file_processor.all_dirs.push(p.clone());
-                            }
+                            self.file_processor.add_dir(p.clone());
                         }
                     }
                     FileEventKind::DirRemoved => {
                         for p in &event.paths {
-                            self.file_processor.all_dirs.retain(|dp| dp != p);
+                            self.file_processor.remove_dir(p);
                         }
                     }
                 }
@@ -471,14 +465,10 @@ impl FastMdApp {
             match msg {
                 BackgroundMessage::FileParsed { path, tags } => {
                     self.tag_manager.add_tags(path.clone(), tags);
-                    if !self.file_processor.all_files.contains(&path) {
-                        self.file_processor.all_files.push(path);
-                    }
+                    self.file_processor.add_file(path);
                 }
                 BackgroundMessage::DirParsed { path } => {
-                    if !self.file_processor.all_dirs.contains(&path) {
-                        self.file_processor.all_dirs.push(path);
-                    }
+                    self.file_processor.add_dir(path);
                 }
                 BackgroundMessage::Finished(watcher) => {
                     self._watcher = Some(watcher);
@@ -491,16 +481,14 @@ impl FastMdApp {
                 }
                 BackgroundMessage::FileModified { path, tags } => {
                     self.tag_manager.add_tags(path.clone(), tags);
-                    if !self.file_processor.all_files.contains(&path) {
-                        self.file_processor.all_files.push(path.clone());
-                    }
+                    self.file_processor.add_file(path.clone());
                     self.tag_manager.rebuild();
                     if self.tab_manager.loaded_path.as_ref() == Some(&path) {
                         self.tab_manager.loaded_path = None;
                     }
                 }
                 BackgroundMessage::FileDeleted { path } => {
-                    self.file_processor.all_files.retain(|p| p != &path);
+                    self.file_processor.remove_file(&path);
                     self.tag_manager.remove_file(&path);
                     self.tag_manager.rebuild();
                     if self.selection.selected_file().is_some_and(|p| p == &path) {
@@ -574,7 +562,7 @@ impl FastMdApp {
         if self.dialogs.create_dir_dialog_open {
             crate::ui::modals::show_create_dir_dialog(
                 &mut self.dialogs,
-                &mut self.file_processor.all_dirs,
+                &mut self.file_processor,
                 &mut self._watcher,
                 &self.file_event_bus,
                 ctx,

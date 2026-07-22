@@ -93,7 +93,7 @@ pub fn show_move_modal_dialog(
 
 pub fn show_create_dir_dialog(
     dm: &mut DialogManager,
-    all_dirs: &mut Vec<PathBuf>,
+    file_processor: &mut FileEventProcessor,
     watcher: &mut Option<notify::RecommendedWatcher>,
     file_event_bus: &Bus<crate::file_events::FileEvent>,
     ctx: &egui::Context,
@@ -131,9 +131,7 @@ pub fn show_create_dir_dialog(
                                             "Failed to create new directory. Likely cause: permission denied or invalid path. Operator should verify permissions on parent directory."
                                         );
                                     } else {
-                                        if !all_dirs.contains(&new_dir_path) {
-                                            all_dirs.push(new_dir_path.clone());
-                                        }
+                                        file_processor.add_dir(new_dir_path.clone());
                                         let producer = FileEventProducer::new(file_event_bus);
                                         producer.publish_dir_discovered(&new_dir_path);
                                         if let Some(watcher) = watcher {
@@ -228,21 +226,17 @@ pub fn show_rename_dialog(
                                                 tabs[i] = new_path.clone();
                                             }
                                         }
-                                        file_processor.all_files.retain(|p| p != file);
-                                        if file_processor.all_dirs.contains(file) {
-                                            file_processor.all_dirs.retain(|p| p != file);
-                                            if !file_processor.all_dirs.contains(&new_path) {
-                                                file_processor.all_dirs.push(new_path.clone());
-                                            }
+                                        file_processor.remove_file(file);
+                                        if file_processor.contains_dir(file) {
+                                            file_processor.remove_dir(file);
+                                            file_processor.add_dir(new_path.clone());
                                         }
                                         let ext = new_path
                                             .extension()
                                             .and_then(|e| e.to_str())
                                             .unwrap_or("");
                                         if ext == "md" || ext == "markdown" {
-                                            if !file_processor.all_files.contains(&new_path) {
-                                                file_processor.all_files.push(new_path.clone());
-                                            }
+                                            file_processor.add_file(new_path.clone());
                                         }
                                         let tags =
                                             crate::utils::tags::extract_tags_from_file(&new_path);
@@ -335,7 +329,7 @@ mod tests {
 
         show_create_dir_dialog(
             &mut app.dialogs,
-            &mut app.file_processor.all_dirs,
+            &mut app.file_processor,
             &mut watcher,
             &app.file_event_bus,
             &ctx,
@@ -349,7 +343,7 @@ mod tests {
         let _ = ctx.run(Default::default(), |ctx| {
             show_create_dir_dialog(
                 &mut app.dialogs,
-                &mut app.file_processor.all_dirs,
+                &mut app.file_processor,
                 &mut watcher,
                 &app.file_event_bus,
                 ctx,
@@ -362,7 +356,7 @@ mod tests {
         let _ = ctx.run(Default::default(), |ctx| {
             show_create_dir_dialog(
                 &mut app.dialogs,
-                &mut app.file_processor.all_dirs,
+                &mut app.file_processor,
                 &mut watcher,
                 &app.file_event_bus,
                 ctx,

@@ -2,6 +2,7 @@
 
 use crate::ui::app::ToCEntry;
 use eframe::egui;
+use std::collections::HashSet;
 use std::path::PathBuf;
 
 pub struct TabManager {
@@ -9,6 +10,7 @@ pub struct TabManager {
     pub current_yaml: Option<serde_yaml::Value>,
     pub current_markdown: String,
     pub tabs: Vec<PathBuf>,
+    tabs_set: HashSet<PathBuf>,
     pub toc: Vec<ToCEntry>,
     pub scroll_to_header_id: Option<egui::Id>,
 }
@@ -20,19 +22,22 @@ impl TabManager {
             current_yaml: None,
             current_markdown: String::new(),
             tabs: Vec::new(),
+            tabs_set: HashSet::new(),
             toc: Vec::new(),
             scroll_to_header_id: None,
         }
     }
 
     pub fn open_tab(&mut self, path: PathBuf) {
-        if !self.tabs.contains(&path) {
+        if self.tabs_set.insert(path.clone()) {
             self.tabs.push(path);
         }
     }
 
     pub fn close_tab(&mut self, path: &PathBuf) {
-        self.tabs.retain(|p| p != path);
+        if self.tabs_set.remove(path) {
+            self.tabs.retain(|p| p != path);
+        }
     }
 
     pub fn has_tabs(&self) -> bool {

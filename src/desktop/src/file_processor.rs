@@ -132,7 +132,7 @@ impl FileEventProcessor {
 
     /// Check if the given path is one of the discovered workspace files.
     pub fn is_workspace_file(&self, path: &PathBuf) -> bool {
-        self.all_files.contains(path)
+        self.all_files_set.contains(path)
     }
 
     /// Get all discovered files (sorted for deterministic display).
@@ -174,13 +174,13 @@ mod tests {
         let reader = bus.subscribe();
         let mut processor = FileEventProcessor::new(reader);
 
-        processor.all_files.push(PathBuf::from("keep.md"));
-        processor.all_files.push(PathBuf::from("remove.md"));
+        processor.add_file(PathBuf::from("keep.md"));
+        processor.add_file(PathBuf::from("remove.md"));
 
         bus.publish(FileEvent::removed_one(PathBuf::from("remove.md")));
 
         assert!(processor.process_events());
         assert_eq!(processor.all_files.len(), 1);
-        assert!(processor.all_files.contains(&PathBuf::from("keep.md")));
+        assert!(processor.contains_file(&PathBuf::from("keep.md")));
     }
 }
