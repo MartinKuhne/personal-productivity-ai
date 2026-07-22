@@ -56,6 +56,9 @@ pub fn tool_web_fetch(
             }
             match response.into_string() {
                 Ok(body) => match convert(&body, None) {
+                    // Note: `html2md` emits a `WARN html5ever::tree_builder: foster parenting not implemented`
+                    // when parsing HTML with elements in invalid positions (e.g. <div> inside <table>).
+                    // This is a known harmless upstream issue: https://github.com/servo/html5ever/issues/446
                     Ok(res) => {
                         let md_content = res.content.unwrap_or_default();
                         let total_lines = md_content.lines().count();
