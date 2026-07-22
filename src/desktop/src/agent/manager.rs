@@ -37,6 +37,7 @@ pub struct AgentSessionManager {
     cancel_flag: Option<Arc<AtomicBool>>,
     config: AppConfig,
     pub command_input: String,
+    show_results: bool,
 }
 
 impl AgentSessionManager {
@@ -56,6 +57,7 @@ impl AgentSessionManager {
             cancel_flag: None,
             config,
             command_input: String::new(),
+            show_results: false,
         }
     }
 
@@ -94,6 +96,14 @@ impl AgentSessionManager {
     /// Set the running flag.
     pub fn set_running(&mut self, running: bool) {
         self.state.running = running;
+    }
+
+    pub fn show_results(&self) -> bool {
+        self.show_results
+    }
+
+    pub fn set_show_results(&mut self, show: bool) {
+        self.show_results = show;
     }
 
     /// Set the conversation history.

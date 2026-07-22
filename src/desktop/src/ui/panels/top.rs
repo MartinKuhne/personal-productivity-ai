@@ -75,33 +75,32 @@ pub fn show_top_panel(app: &mut FastMdApp, ctx: &egui::Context) {
             ui.separator();
 
             if ui.button("Batch...").clicked() {
-                app.dialogs.batch_dialog_open = true;
+                app.dialogs_mut().batch_dialog_open = true;
             }
             ui.separator();
 
-            if !app.file_processor.indexing_finished {
+            if !app.file_processor().indexing_finished {
                 ui.spinner();
             }
 
             ui.label(build_indexing_status_text(
-                app.file_processor.indexing_finished,
-                app.file_processor.all_files.len(),
+                app.file_processor().indexing_finished,
+                app.file_processor().all_files.len(),
             ));
 
-            if app.file_processor.indexing_finished {
+            if app.file_processor().indexing_finished {
                 ui.separator();
                 egui::ComboBox::from_id_source("tag_combobox")
-                    .selected_text(get_tag_filter_text(app.tag_manager.selected_tag.as_ref()))
+                    .selected_text(get_tag_filter_text(app.tags().selected_tag.as_ref()))
                     .show_ui(ui, |ui| {
                         let mut changed = ui
-                            .selectable_value(&mut app.tag_manager.selected_tag, None, "All")
+                            .selectable_value(&mut app.tags_mut().selected_tag, None, "All")
                             .changed();
-                        let all_tags: Vec<String> =
-                            app.tag_manager.all_tags().iter().cloned().collect();
+                        let all_tags: Vec<String> = app.tags().all_tags().iter().cloned().collect();
                         for tag in all_tags {
                             changed |= ui
                                 .selectable_value(
-                                    &mut app.tag_manager.selected_tag,
+                                    &mut app.tags_mut().selected_tag,
                                     Some(tag.clone()),
                                     &tag,
                                 )
@@ -109,11 +108,11 @@ pub fn show_top_panel(app: &mut FastMdApp, ctx: &egui::Context) {
                         }
                         if changed {
                             let next = compute_next_selected_file(
-                                app.selection.selected_file(),
-                                app.tag_manager.selected_tag.as_ref(),
-                                app.tag_manager.file_tags(),
+                                app.selection().selected_file(),
+                                app.tags().selected_tag.as_ref(),
+                                app.tags().file_tags(),
                             );
-                            *app.selection.selected_file_mut() = next;
+                            *app.selection_mut().selected_file_mut() = next;
                         }
                     });
             }
@@ -213,19 +212,19 @@ mod ui_tests {
     fn test_show_top_panel_indexing_unfinished() {
         let ctx = egui::Context::default();
         let mut app = create_test_app();
-        app.file_processor.indexing_finished = false;
+        app.file_processor_mut().indexing_finished = false;
         let _ = ctx.run(egui::RawInput::default(), |ctx| {
             show_top_panel(&mut app, ctx);
         });
-        assert!(!app.file_processor.indexing_finished);
+        assert!(!app.file_processor().indexing_finished);
     }
 
     #[test]
     fn test_show_top_panel_indexing_finished_with_tags() {
         let ctx = egui::Context::default();
         let mut app = create_test_app();
-        app.file_processor.indexing_finished = true;
-        app.tag_manager.add_tags(
+        app.file_processor_mut().indexing_finished = true;
+        app.tags_mut().add_tags(
             PathBuf::from("dummy.md"),
             vec!["Rust".to_string(), "Docs".to_string()],
         );
@@ -233,6 +232,6 @@ mod ui_tests {
         let _ = ctx.run(egui::RawInput::default(), |ctx| {
             show_top_panel(&mut app, ctx);
         });
-        assert!(app.file_processor.indexing_finished);
+        assert!(app.file_processor().indexing_finished);
     }
 }

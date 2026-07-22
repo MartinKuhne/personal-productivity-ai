@@ -58,7 +58,6 @@ pub struct FastMdApp {
 
     pub _watcher: Option<notify::RecommendedWatcher>,
 
-    pub show_agent_results: bool,
     /// Agent session manager - encapsulates all agent state and lifecycle.
     pub agent: AgentSessionManager,
     /// Dialog manager - owns all modal state and rendering.
@@ -71,6 +70,98 @@ pub struct FastMdApp {
 }
 
 impl FastMdApp {
+    pub fn content_libraries(&self) -> &[crate::config::ContentLibrary] {
+        &self.content_libraries
+    }
+
+    pub fn content_libraries_mut(&mut self) -> &mut Vec<crate::config::ContentLibrary> {
+        &mut self.content_libraries
+    }
+
+    pub fn file_processor(&self) -> &FileEventProcessor {
+        &self.file_processor
+    }
+
+    pub fn file_processor_mut(&mut self) -> &mut FileEventProcessor {
+        &mut self.file_processor
+    }
+
+    pub fn tags(&self) -> &TagManager {
+        &self.tag_manager
+    }
+
+    pub fn tags_mut(&mut self) -> &mut TagManager {
+        &mut self.tag_manager
+    }
+
+    pub fn layout(&self) -> &PanelLayout {
+        &self.layout
+    }
+
+    pub fn layout_mut(&mut self) -> &mut PanelLayout {
+        &mut self.layout
+    }
+
+    pub fn selection(&self) -> &SelectionManager {
+        &self.selection
+    }
+
+    pub fn selection_mut(&mut self) -> &mut SelectionManager {
+        &mut self.selection
+    }
+
+    pub fn tabs(&self) -> &TabManager {
+        &self.tab_manager
+    }
+
+    pub fn tabs_mut(&mut self) -> &mut TabManager {
+        &mut self.tab_manager
+    }
+
+    pub fn agent(&self) -> &AgentSessionManager {
+        &self.agent
+    }
+
+    pub fn agent_mut(&mut self) -> &mut AgentSessionManager {
+        &mut self.agent
+    }
+
+    pub fn dialogs(&self) -> &DialogManager {
+        &self.dialogs
+    }
+
+    pub fn dialogs_mut(&mut self) -> &mut DialogManager {
+        &mut self.dialogs
+    }
+
+    pub fn editor(&self) -> &crate::editor::EditorState {
+        &self.editor_state
+    }
+
+    pub fn editor_mut(&mut self) -> &mut crate::editor::EditorState {
+        &mut self.editor_state
+    }
+
+    pub fn config(&self) -> &crate::config::AppConfig {
+        &self.config
+    }
+
+    pub fn config_mut(&mut self) -> &mut crate::config::AppConfig {
+        &mut self.config
+    }
+
+    pub fn submit_prompt(&self) -> &Option<String> {
+        &self.submit_prompt
+    }
+
+    pub fn submit_prompt_mut(&mut self) -> &mut Option<String> {
+        &mut self.submit_prompt
+    }
+
+    pub fn inline_editor_enabled(&self) -> bool {
+        self.inline_editor_enabled
+    }
+
     /// Drain pending `FileEvent`s from the bus and update.
     ///
     /// Returns `true` if any event was processed, so callers can
@@ -243,7 +334,6 @@ impl FastMdApp {
             selection: SelectionManager::new(),
             tab_manager: TabManager::new(),
             _watcher: None,
-            show_agent_results: false,
             agent: AgentSessionManager::new(config.clone()),
             dialogs,
             submit_prompt: None,
@@ -276,7 +366,6 @@ impl FastMdApp {
             selection: SelectionManager::new(),
             tab_manager: TabManager::new(),
             _watcher: None,
-            show_agent_results: false,
             agent: AgentSessionManager::new(config.clone()),
             dialogs: DialogManager::new(),
             submit_prompt: None,
@@ -303,7 +392,7 @@ impl FastMdApp {
             self.selection.selected_files().clone(),
             self.file_event_bus.clone(),
         );
-        self.show_agent_results = true;
+        self.agent.set_show_results(true);
     }
 }
 

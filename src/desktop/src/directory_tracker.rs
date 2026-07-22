@@ -108,7 +108,6 @@ impl DirectoryTracker {
 mod tests {
     use super::*;
     use crate::file_events::Bus;
-    use std::time::Duration;
 
     fn make_bus_and_tracker() -> (Bus<FileEvent>, DirectoryTracker) {
         let bus: Bus<FileEvent> = Bus::new();
