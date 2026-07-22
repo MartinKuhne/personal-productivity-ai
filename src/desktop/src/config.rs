@@ -319,14 +319,16 @@ pub fn load_config() -> AppConfig {
     let config_path = get_config_path();
     if config_path.exists() {
         if let Ok(content) = std::fs::read_to_string(&config_path) {
-            if let Ok(config) = serde_yaml::from_str::<AppConfig>(&content) {
-                return config;
-            } else {
-                tracing::error!(
-                    name = "config.parse.failed",
-                    path = %config_path.display(),
-                    "Failed to parse config file. Using default configuration. Likely cause: invalid YAML syntax or missing required fields. Operator should check the config file for errors."
-                );
+            match serde_yaml::from_str::<AppConfig>(&content) {
+                Ok(config) => return config,
+                Err(err) => {
+                    tracing::error!(
+                        name = "config.parse.failed",
+                        path = %config_path.display(),
+                        error = %err,
+                        "Failed to parse config file. Using default configuration."
+                    );
+                }
             }
         } else {
             tracing::error!(
