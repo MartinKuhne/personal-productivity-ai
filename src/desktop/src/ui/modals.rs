@@ -1,7 +1,7 @@
 //! Modal dialog UIs — move-file, create-directory, rename, delete confirmation, and batch prompt-processing dialogs.
 
 use crate::config::ContentLibrary;
-use crate::file_events::Bus;
+use crate::file_events::{Bus, FileEventProducer};
 use crate::file_processor::FileEventProcessor;
 use crate::ui::dialog_manager::DialogManager;
 use eframe::egui;
@@ -95,6 +95,7 @@ pub fn show_create_dir_dialog(
     dm: &mut DialogManager,
     all_dirs: &mut Vec<PathBuf>,
     watcher: &mut Option<notify::RecommendedWatcher>,
+    file_event_bus: &Bus<crate::file_events::FileEvent>,
     ctx: &egui::Context,
 ) {
     let mut close_create_modal = false;
@@ -133,6 +134,8 @@ pub fn show_create_dir_dialog(
                                         if !all_dirs.contains(&new_dir_path) {
                                             all_dirs.push(new_dir_path.clone());
                                         }
+                                        let producer = FileEventProducer::new(file_event_bus);
+                                        producer.publish_dir_discovered(&new_dir_path);
                                         if let Some(watcher) = watcher {
                                             use notify::Watcher;
                                             let _ = watcher.watch(&new_dir_path, notify::RecursiveMode::Recursive);
@@ -334,6 +337,7 @@ mod tests {
             &mut app.dialogs,
             &mut app.file_processor.all_dirs,
             &mut watcher,
+            &app.file_event_bus,
             &ctx,
         );
         assert!(!app.dialogs.create_dir_dialog_open);
@@ -347,6 +351,7 @@ mod tests {
                 &mut app.dialogs,
                 &mut app.file_processor.all_dirs,
                 &mut watcher,
+                &app.file_event_bus,
                 ctx,
             );
         });
@@ -359,6 +364,7 @@ mod tests {
                 &mut app.dialogs,
                 &mut app.file_processor.all_dirs,
                 &mut watcher,
+                &app.file_event_bus,
                 ctx,
             );
         });

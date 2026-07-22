@@ -76,6 +76,45 @@ pub fn show_left_panel(app: &mut FastMdApp, ctx: &egui::Context) {
         }
     }
 
+    for dir in app.file_processor().all_dirs.iter() {
+        let mut target_lib = None;
+        let mut rel_path_res = None;
+
+        for lib in app.content_libraries() {
+            let lib_root = std::path::Path::new(&lib.root_folder);
+            if let Ok(rel_path) = dir.strip_prefix(lib_root) {
+                target_lib = Some(lib);
+                rel_path_res = Some(rel_path);
+                break;
+            }
+        }
+
+        if let (Some(lib), Some(rel_path)) = (target_lib, rel_path_res) {
+            let lib_node_name = lib.name.clone();
+            let Some(current_node_ref) = root_node.children.get_mut(&lib_node_name) else {
+                continue;
+            };
+            let mut current_node = current_node_ref;
+            let mut current_path = std::path::PathBuf::from(&lib.root_folder);
+
+            let components: Vec<_> = rel_path.components().collect();
+            for comp in &components {
+                let name = comp.as_os_str().to_string_lossy().into_owned();
+                current_path = current_path.join(&name);
+                if !current_node.children.contains_key(&name) {
+                    current_node.children.insert(
+                        name.clone(),
+                        TreeNode::new(name.clone(), current_path.clone(), true),
+                    );
+                }
+                match current_node.children.get_mut(&name) {
+                    Some(n) => current_node = n,
+                    None => break,
+                }
+            }
+        }
+    }
+
     if (app.file_processor().indexing_finished && !app.file_processor().indexing_finished_handled)
         || app.layout().left_panel_dirty
     {

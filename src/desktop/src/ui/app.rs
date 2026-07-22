@@ -213,8 +213,13 @@ impl FastMdApp {
                         self.tag_manager.remove_file(&event.path);
                         needs_rebuild = true;
                     }
-                    FileEventKind::DirDiscovered | FileEventKind::DirRemoved => {
-                        // Directory events consumed by DirectoryTracker above via its own subscriber.
+                    FileEventKind::DirDiscovered => {
+                        if !self.file_processor.all_dirs.contains(&event.path) {
+                            self.file_processor.all_dirs.push(event.path.clone());
+                        }
+                    }
+                    FileEventKind::DirRemoved => {
+                        self.file_processor.all_dirs.retain(|p| p != &event.path);
                     }
                 }
             }
@@ -561,6 +566,7 @@ impl FastMdApp {
                 &mut self.dialogs,
                 &mut self.file_processor.all_dirs,
                 &mut self._watcher,
+                &self.file_event_bus,
                 ctx,
             );
         }
