@@ -1,6 +1,6 @@
-use crate::config::AppConfig;
+use crate::config::{AppConfig, VirtualPath, VirtualPathError};
 use crate::file_events::{Bus, FileEvent, FileEventKind, FileEventProducer};
-use std::path::{Component, Path, PathBuf};
+use std::path::{Path, PathBuf};
 
 pub struct ToolContext<'a> {
     pub config: &'a AppConfig,
@@ -20,49 +20,53 @@ impl<'a> ToolContext<'a> {
         vpath: &str,
         allow_write: bool,
     ) -> Result<Option<(PathBuf, bool)>, String> {
-        if Path::new(vpath)
-            .components()
-            .any(|c| c == Component::ParentDir)
-        {
-            return Err("Path traversal not allowed".to_string());
-        }
-
-        let path = Path::new(vpath);
-        let mut components = path.components().peekable();
-
-        while let Some(c) = components.peek() {
-            match c {
-                Component::RootDir | Component::CurDir => {
-                    components.next();
-                }
-                _ => break,
-            }
-        }
-
-        if components.peek().is_none() {
+        let normalized = vpath.replace('\\', "/");
+        let trimmed = normalized.trim_matches('/');
+        if trimmed.is_empty() || trimmed == "." {
             return Ok(None);
         }
 
-        if let Some(Component::Normal(first)) = components.next() {
-            let first_str = first.to_string_lossy();
-            for lib in &self.config.content_libraries {
-                if lib.name == first_str {
-                    if allow_write && lib.readonly {
+        let vp = match VirtualPath::parse(vpath) {
+            Ok(vp) => vp,
+            Err(VirtualPathError::InvalidFormat(_)) => {
+                let lib = self
+                    .config
+                    .content_libraries
+                    .iter()
+                    .find(|l| l.name == trimmed);
+                if let Some(lib) = lib {
+                    if allow_write && !lib.is_writable() {
                         return Err(
                             "Cannot perform this operation on a read-only library".to_string()
                         );
                     }
-                    let rest: PathBuf = components.collect();
-                    return Ok(Some((Path::new(&lib.root_folder).join(rest), lib.readonly)));
+                    return Ok(Some((lib.root_path(), lib.readonly)));
                 }
+                return Err(format!(
+                    "Content library '{}' not found in virtual path '{}'",
+                    trimmed, vpath
+                ));
             }
-            Err(format!(
-                "Content library '{}' not found in virtual path '{}'",
-                first_str, vpath
-            ))
-        } else {
-            Err(format!("Invalid virtual path: '{}'", vpath))
+            Err(e) => return Err(e.to_string()),
+        };
+
+        let lib = self
+            .config
+            .content_libraries
+            .iter()
+            .find(|l| l.name == vp.library)
+            .ok_or_else(|| {
+                format!(
+                    "Content library '{}' not found in virtual path '{}'",
+                    vp.library, vpath
+                )
+            })?;
+
+        if allow_write && !lib.is_writable() {
+            return Err("Cannot perform this operation on a read-only library".to_string());
         }
+
+        Ok(Some((lib.resolve(&vp.sub_path), lib.readonly)))
     }
 
     pub fn publish_file_event(&self, kind: FileEventKind, path: &Path) {
@@ -124,7 +128,7 @@ mod tests {
         let ctx = ToolContext::new(&config, &bus);
         let result = ctx.resolve_virtual_path("TestLib/../outside", false);
         assert!(result.is_err());
-        assert!(result.unwrap_err().contains("Path traversal not allowed"));
+        assert!(result.unwrap_err().contains("path traversal"));
     }
 
     #[test]
