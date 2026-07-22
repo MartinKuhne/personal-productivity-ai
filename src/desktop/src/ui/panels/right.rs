@@ -19,6 +19,9 @@ pub fn calculate_indent(level: usize) -> f32 {
         1 => 0.0,
         2 => 10.0,
         3 => 20.0,
+        4 => 30.0,
+        5 => 40.0,
+        6 => 50.0,
         _ => 0.0,
     }
 }
@@ -82,7 +85,9 @@ mod tests {
         assert_eq!(calculate_indent(1), 0.0);
         assert_eq!(calculate_indent(2), 10.0);
         assert_eq!(calculate_indent(3), 20.0);
-        assert_eq!(calculate_indent(4), 0.0); // Fallback
+        assert_eq!(calculate_indent(4), 30.0);
+        assert_eq!(calculate_indent(5), 40.0);
+        assert_eq!(calculate_indent(6), 50.0);
         assert_eq!(calculate_indent(99), 0.0); // Edge case
     }
 
