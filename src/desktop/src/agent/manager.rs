@@ -154,18 +154,7 @@ impl AgentSessionManager {
         };
 
         std::thread::spawn(move || {
-            crate::agent::run_agent(
-                ctx.config,
-                ctx.tx_gui,
-                ctx.active_file,
-                ctx.active_dir,
-                ctx.selected_files,
-                ctx.prompt,
-                ctx.cancel_flag,
-                ctx.history,
-                ctx.current_response,
-                ctx.file_event_bus,
-            );
+            crate::agent::run_agent(ctx);
         });
     }
 
