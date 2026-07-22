@@ -1,3 +1,5 @@
+//! Centralised modal-dialog state — open/closed flags and temporary inputs for every dialog in the application.
+
 use std::path::PathBuf;
 
 /// Manager for all modal dialogs in the application.

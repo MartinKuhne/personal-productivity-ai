@@ -1,3 +1,5 @@
+//! Center content panel — tab bar, markdown preview, YAML front-matter editor, agent chat output, and inline editor.
+
 use crate::ui::render::{render_markdown, render_yaml_table};
 use crate::ui::{generate_format_prompt, open_in_system_editor, show_in_file_explorer, FastMdApp};
 use eframe::egui;
@@ -16,15 +18,15 @@ pub enum TabAction {
 /// Inputs: `app` - A mutable reference to the `FastMdApp` state.
 /// Outputs: None
 /// Purity: Impure (mutates application state).
-/// Preconditions: `app.show_agent_results` must be true.
+/// Preconditions: `app.agent.show_results()` must be true.
 /// Postconditions: Agent results are hidden, history and text buffers are cleared, and any running agent is flagged for cancellation.
 pub fn clear_agent_session_state(app: &mut FastMdApp) {
-    app.show_agent_results = false;
-    app.agent.clear_history();
-    app.agent.set_response(String::new());
-    app.agent.set_thinking(String::new());
-    if app.agent.state().running {
-        app.agent.cancel();
+    app.agent_mut().set_show_results(false);
+    app.agent_mut().clear_history();
+    app.agent_mut().set_response(String::new());
+    app.agent_mut().set_thinking(String::new());
+    if app.agent().state().running {
+        app.agent_mut().cancel();
     }
 }
 
@@ -72,7 +74,7 @@ pub fn apply_tab_action(
 /// Inputs: `ui` - Egui UI context, `app` - FastMdApp state.
 /// Outputs: None.
 /// Purity: Impure (performs UI rendering).
-/// Preconditions: `app.show_agent_results` is true.
+/// Preconditions: `app.agent.show_results()` is true.
 /// Postconditions: Rendered agent session. State might be mutated if "Back to Document" is clicked.
 fn render_agent_session(ui: &mut egui::Ui, app: &mut FastMdApp) {
     ui.horizontal(|ui| {
@@ -90,8 +92,8 @@ fn render_agent_session(ui: &mut egui::Ui, app: &mut FastMdApp) {
     ui.separator();
 
     ui.horizontal(|ui| {
-        ui.label(RichText::new(format!("Status: {}", app.agent.state().status)).strong());
-        if app.agent.state().running {
+        ui.label(RichText::new(format!("Status: {}", app.agent().state().status)).strong());
+        if app.agent().state().running {
             ui.spinner();
         }
     });
@@ -101,10 +103,10 @@ fn render_agent_session(ui: &mut egui::Ui, app: &mut FastMdApp) {
         .id_source("agent_thinking_scroll")
         .stick_to_bottom(true)
         .show(ui, |ui| {
-            if !app.agent.state().thinking.is_empty() {
+            if !app.agent().state().thinking.is_empty() {
                 ui.collapsing("Thinking Process", |ui| {
                     ui.label(
-                        egui::RichText::new(&app.agent.state().thinking)
+                        egui::RichText::new(&app.agent().state().thinking)
                             .italics()
                             .color(egui::Color32::from_rgb(160, 160, 160)),
                     );
@@ -112,13 +114,13 @@ fn render_agent_session(ui: &mut egui::Ui, app: &mut FastMdApp) {
                 ui.add_space(8.0);
             }
 
-            if !app.agent.state().response.is_empty() {
+            if !app.agent().state().response.is_empty() {
                 ui.heading("Response");
                 ui.separator();
-                let agent = &mut app.agent;
+                let agent = app.agent_mut();
                 let response = agent.state().response.clone();
                 render_markdown(ui, &response, &mut agent.state_mut().scroll_to_id);
-                if app.agent.state().running {
+                if app.agent().state().running {
                     ui.scroll_to_cursor(Some(egui::Align::BOTTOM));
                 }
             }
@@ -129,19 +131,20 @@ fn render_agent_session(ui: &mut egui::Ui, app: &mut FastMdApp) {
 /// Inputs: `ui` - Egui UI context, `app` - FastMdApp state.
 /// Outputs: None.
 /// Purity: Impure (performs UI rendering).
-/// Preconditions: `app.tabs` is not empty.
+/// Preconditions: `app.tabs().tabs` is not empty.
 /// Postconditions: Rendered tabs and file content.
 fn render_tabs_and_content(ui: &mut egui::Ui, app: &mut FastMdApp) {
     ui.horizontal(|ui| {
         let mut tab_action = None;
+        let tabs_snapshot: Vec<PathBuf> = app.tab_manager.tabs.clone();
 
-        for (i, tab_path) in app.tabs.iter().enumerate() {
-            let is_selected = app.selected_file.as_ref() == Some(tab_path);
+        for (i, tab_path) in tabs_snapshot.iter().enumerate() {
+            let is_selected = app.selection.selected_file() == Some(tab_path);
             let title = tab_path.file_name().unwrap_or_default().to_string_lossy();
 
             let response = ui.selectable_label(is_selected, title);
             if response.clicked() {
-                app.selected_file = Some(tab_path.clone());
+                *app.selection_mut().selected_file_mut() = Some(tab_path.clone());
             }
             if response.middle_clicked() {
                 tab_action = Some(TabAction::Close(i));
@@ -187,7 +190,7 @@ fn render_tabs_and_content(ui: &mut egui::Ui, app: &mut FastMdApp) {
                     let now = chrono::Local::now();
                     let date_str = now.to_rfc3339();
                     app.submit_prompt = Some(generate_format_prompt(&date_str));
-                    app.selected_file = Some(tab_path.clone());
+                    *app.selection.selected_file_mut() = Some(tab_path.clone());
                     ui.close_menu();
                 }
             });
@@ -199,12 +202,16 @@ fn render_tabs_and_content(ui: &mut egui::Ui, app: &mut FastMdApp) {
         }
 
         if let Some(action) = tab_action {
-            apply_tab_action(&mut app.tabs, &mut app.selected_file, action);
+            apply_tab_action(
+                &mut app.tab_manager.tabs,
+                app.selection.selected_file_mut(),
+                action,
+            );
         }
     });
     ui.separator();
 
-    if let Some(selected_path) = &app.selected_file {
+    if let Some(selected_path) = app.selection().selected_file() {
         ui.horizontal(|ui| {
             ui.heading(
                 RichText::new(
@@ -228,10 +235,14 @@ fn render_tabs_and_content(ui: &mut egui::Ui, app: &mut FastMdApp) {
         egui::ScrollArea::vertical()
             .id_source("main_markdown_scroll")
             .show(ui, |ui| {
-                if let Some(yaml) = &app.current_yaml {
+                if let Some(yaml) = &app.tab_manager.current_yaml {
                     render_yaml_table(ui, yaml);
                 }
-                render_markdown(ui, &app.current_markdown, &mut app.scroll_to_header_id);
+                render_markdown(
+                    ui,
+                    &app.tab_manager.current_markdown,
+                    &mut app.tab_manager.scroll_to_header_id,
+                );
             });
     }
 }
@@ -261,9 +272,9 @@ fn render_empty_state(ui: &mut egui::Ui) {
 /// Postconditions: Renders the central panel content.
 pub fn show_center_panel(app: &mut FastMdApp, ctx: &egui::Context) {
     egui::CentralPanel::default().show(ctx, |ui| {
-        if app.show_agent_results {
+        if app.agent().show_results() {
             render_agent_session(ui, app);
-        } else if !app.tabs.is_empty() {
+        } else if !app.tabs().tabs.is_empty() {
             render_tabs_and_content(ui, app);
         } else {
             render_empty_state(ui);
@@ -373,21 +384,20 @@ mod tests {
     fn test_clear_agent_session_state() {
         let mut app = create_test_app();
 
-        // Setup agent state via manager
-        app.agent.state_mut().history =
+        app.agent_mut().state_mut().history =
             Some(vec![serde_json::json!({"role": "user", "content": "hi"})]);
-        app.agent.set_response("response text".to_string());
-        app.agent.set_thinking("thinking process".to_string());
-        app.agent.state_mut().running = true;
-        app.show_agent_results = true;
+        app.agent_mut().set_response("response text".to_string());
+        app.agent_mut().set_thinking("thinking process".to_string());
+        app.agent_mut().state_mut().running = true;
+        app.agent_mut().set_show_results(true);
 
         clear_agent_session_state(&mut app);
 
-        assert!(!app.show_agent_results);
-        assert!(app.agent.state().history.is_none());
-        assert!(app.agent.state().response.is_empty());
-        assert!(app.agent.state().thinking.is_empty());
-        assert!(!app.agent.state().running); // cancel() sets running false
+        assert!(!app.agent().show_results());
+        assert!(app.agent().state().history.is_none());
+        assert!(app.agent().state().response.is_empty());
+        assert!(app.agent().state().thinking.is_empty());
+        assert!(!app.agent().state().running);
     }
 
     #[test]
@@ -403,27 +413,24 @@ mod tests {
         let ctx = egui::Context::default();
         let mut app = create_test_app();
 
-        // Mode 1: Empty state
         let _ = ctx.run(Default::default(), |ctx| {
             show_center_panel(&mut app, ctx);
         });
 
-        // Mode 2: Tabs and content state
-        app.tabs = vec![PathBuf::from("doc1.md"), PathBuf::from("doc2.md")];
-        app.selected_file = Some(PathBuf::from("doc1.md"));
-        app.current_markdown = "# Document 1 Header".to_string();
-        app.current_yaml = Some(serde_yaml::from_str("title: Doc 1").unwrap());
+        app.tabs_mut().tabs = vec![PathBuf::from("doc1.md"), PathBuf::from("doc2.md")];
+        *app.selection_mut().selected_file_mut() = Some(PathBuf::from("doc1.md"));
+        app.tabs_mut().current_markdown = "# Document 1 Header".to_string();
+        app.tabs_mut().current_yaml = Some(serde_yaml::from_str("title: Doc 1").unwrap());
 
         let _ = ctx.run(Default::default(), |ctx| {
             show_center_panel(&mut app, ctx);
         });
 
-        // Mode 3: Agent results state
-        app.show_agent_results = true;
-        app.agent.set_running(true);
-        app.agent.set_status("Thinking...".to_string());
-        app.agent.set_thinking("Reasoning step 1".to_string());
-        app.agent
+        app.agent_mut().set_show_results(true);
+        app.agent_mut().set_running(true);
+        app.agent_mut().set_status("Thinking...".to_string());
+        app.agent_mut().set_thinking("Reasoning step 1".to_string());
+        app.agent_mut()
             .set_response("Final agent summary answer".to_string());
 
         let _ = ctx.run(Default::default(), |ctx| {

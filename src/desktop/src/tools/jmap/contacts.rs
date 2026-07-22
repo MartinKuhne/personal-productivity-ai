@@ -290,12 +290,10 @@ mod tests {
 
         let res_search = tool_search_contact(&config, "alice");
         assert!(res_search.is_ok());
-        assert!(
-            res_search
-                .unwrap()
-                .results
-                .contains("Error from JMAP server")
-        );
+        assert!(res_search
+            .unwrap()
+            .results
+            .contains("Error from JMAP server"));
 
         let res_add_err = tool_add_contact(&config, "{invalid json}");
         assert!(res_add_err.is_err());
@@ -319,12 +317,10 @@ mod tests {
         let config = mock_config(&url);
 
         let res_search = tool_search_contact(&config, "alice");
-        assert!(
-            res_search
-                .unwrap()
-                .results
-                .contains("Error fetching JMAP session")
-        );
+        assert!(res_search
+            .unwrap()
+            .results
+            .contains("Error fetching JMAP session"));
 
         let res_add = tool_add_contact(&config, "{}");
         assert!(res_add.is_err());

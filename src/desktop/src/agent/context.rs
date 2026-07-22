@@ -1,3 +1,5 @@
+//! Agent context — bundles all inputs (config, channels, file bus, active file/dir, prompt, cancel flag, history) for an agent session.
+
 use crate::config::AppConfig;
 use crate::file_events::Bus;
 use serde_json::Value;
@@ -55,6 +57,7 @@ impl AgentContext {
 #[cfg(test)]
 mod tests {
     use super::*;
+
     use crate::config::AppConfig;
     use std::path::Path;
     use std::sync::mpsc::channel;

@@ -1,3 +1,5 @@
+//! Virtual path syntax — library-prefixed paths (e.g. `library/relative/path`) mapped to real filesystem locations with traversal protection.
+
 use std::path::{Path, PathBuf};
 
 #[derive(Debug, Clone, PartialEq)]
@@ -114,7 +116,7 @@ impl VirtualPath {
             .iter()
             .find(|l| l.name == self.library)
             .ok_or_else(|| VirtualPathError::LibraryNotFound(self.library.clone()))?;
-        Ok(PathBuf::from(&lib.root_folder).join(&self.sub_path))
+        Ok(lib.resolve(&self.sub_path))
     }
 
     pub fn is_writable(
@@ -125,7 +127,7 @@ impl VirtualPath {
             .iter()
             .find(|l| l.name == self.library)
             .ok_or_else(|| VirtualPathError::LibraryNotFound(self.library.clone()))?;
-        Ok(!lib.readonly)
+        Ok(lib.is_writable())
     }
 
     pub fn to_string(&self) -> String {

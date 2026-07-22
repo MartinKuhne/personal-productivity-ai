@@ -1,3 +1,5 @@
+//! CSV-database query and delete operations — expression-based (evalexpr) predicate evaluation against row values.
+
 use super::schema::{DeleteRowsInput, QueryRequest, QueryResponse};
 use crate::config::AppConfig;
 use evalexpr::{ContextWithMutableVariables, HashMapContext, Value};

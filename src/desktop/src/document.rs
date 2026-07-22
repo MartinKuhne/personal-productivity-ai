@@ -1,3 +1,5 @@
+//! Markdown document model — splits raw text into YAML front matter and body.
+
 #[derive(Debug, Clone, PartialEq)]
 pub struct DocumentContent {
     pub front_matter: Option<String>,

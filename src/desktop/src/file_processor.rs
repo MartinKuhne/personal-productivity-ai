@@ -1,3 +1,5 @@
+//! Drains file events from the bus to maintain running lists of all known files and directories.
+
 use crate::file_events::{BusReader, FileEvent, FileEventKind};
 use std::path::PathBuf;
 
@@ -16,6 +18,10 @@ pub struct FileEventProcessor {
     pub all_files: Vec<PathBuf>,
     /// Accumulated list of all directories (populated during initial scan)
     pub all_dirs: Vec<PathBuf>,
+    /// Whether indexing has finished
+    pub indexing_finished: bool,
+    /// Whether the indexing_finished event has been handled
+    pub indexing_finished_handled: bool,
 }
 
 impl FileEventProcessor {
@@ -25,6 +31,8 @@ impl FileEventProcessor {
             reader,
             all_files: Vec::new(),
             all_dirs: Vec::new(),
+            indexing_finished: false,
+            indexing_finished_handled: false,
         }
     }
 
@@ -52,6 +60,9 @@ impl FileEventProcessor {
                     self.all_files.retain(|p| p != &event.path);
                     // Deletion handled by FastMdApp; we just signal change
                     needs_reload = true;
+                }
+                FileEventKind::DirDiscovered | FileEventKind::DirRemoved => {
+                    // Directory events are handled by DirectoryTracker.
                 }
             }
         }

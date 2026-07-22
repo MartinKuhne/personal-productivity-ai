@@ -1,3 +1,5 @@
+//! Modal dialog UIs — move-file, create-directory, rename, delete confirmation, and batch prompt-processing dialogs.
+
 use crate::config::ContentLibrary;
 use crate::file_events::Bus;
 use crate::file_processor::FileEventProcessor;
@@ -375,37 +377,41 @@ mod tests {
         let file_path = temp_dir.join("old_name.txt");
         let _ = fs::write(&file_path, "sample text");
 
-        show_rename_dialog(
-            &mut app.dialogs,
-            &app.file_event_bus,
-            &mut app.loaded_path,
-            &mut app.selected_file,
-            &mut app.selected_dir,
-            &mut app.tabs,
-            &mut app.file_processor,
-            &mut app.tag_manager,
-            &mut app.expanded_dirs,
-            &ctx,
-        );
+        {
+            let sel = &mut app.selection;
+            show_rename_dialog(
+                &mut app.dialogs,
+                &app.file_event_bus,
+                &mut app.tab_manager.loaded_path,
+                &mut sel.selected_file,
+                &mut sel.selected_dir,
+                &mut app.tab_manager.tabs,
+                &mut app.file_processor,
+                &mut app.tag_manager,
+                &mut sel.expanded_dirs,
+                &ctx,
+            );
+        }
         assert!(!app.dialogs.rename_dialog_open);
 
         app.dialogs.rename_dialog_open = true;
         app.dialogs.file_to_rename = Some(file_path.clone());
         app.dialogs.rename_new_name = "new_name".to_string();
-        app.selected_file = Some(file_path.clone());
-        app.tabs = vec![file_path.clone()];
+        *app.selection.selected_file_mut() = Some(file_path.clone());
+        app.tab_manager.tabs = vec![file_path.clone()];
 
         let _ = ctx.run(Default::default(), |ctx| {
+            let sel = &mut app.selection;
             show_rename_dialog(
                 &mut app.dialogs,
                 &app.file_event_bus,
-                &mut app.loaded_path,
-                &mut app.selected_file,
-                &mut app.selected_dir,
-                &mut app.tabs,
+                &mut app.tab_manager.loaded_path,
+                &mut sel.selected_file,
+                &mut sel.selected_dir,
+                &mut app.tab_manager.tabs,
                 &mut app.file_processor,
                 &mut app.tag_manager,
-                &mut app.expanded_dirs,
+                &mut sel.expanded_dirs,
                 ctx,
             );
         });
@@ -414,16 +420,17 @@ mod tests {
 
         app.dialogs.rename_new_name = "invalid/name".to_string();
         let _ = ctx.run(Default::default(), |ctx| {
+            let sel = &mut app.selection;
             show_rename_dialog(
                 &mut app.dialogs,
                 &app.file_event_bus,
-                &mut app.loaded_path,
-                &mut app.selected_file,
-                &mut app.selected_dir,
-                &mut app.tabs,
+                &mut app.tab_manager.loaded_path,
+                &mut sel.selected_file,
+                &mut sel.selected_dir,
+                &mut app.tab_manager.tabs,
                 &mut app.file_processor,
                 &mut app.tag_manager,
-                &mut app.expanded_dirs,
+                &mut sel.expanded_dirs,
                 ctx,
             );
         });
@@ -447,16 +454,17 @@ mod tests {
         app.dialogs.rename_new_name = "renamed_doc".to_string();
 
         let _ = ctx.run(Default::default(), |ctx| {
+            let sel = &mut app.selection;
             show_rename_dialog(
                 &mut app.dialogs,
                 &app.file_event_bus,
-                &mut app.loaded_path,
-                &mut app.selected_file,
-                &mut app.selected_dir,
-                &mut app.tabs,
+                &mut app.tab_manager.loaded_path,
+                &mut sel.selected_file,
+                &mut sel.selected_dir,
+                &mut app.tab_manager.tabs,
                 &mut app.file_processor,
                 &mut app.tag_manager,
-                &mut app.expanded_dirs,
+                &mut sel.expanded_dirs,
                 ctx,
             );
         });
