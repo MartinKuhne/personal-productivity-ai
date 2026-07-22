@@ -139,23 +139,22 @@ fn render_code_block(ui: &mut egui::Ui, content: &str, _idx: &mut usize) {
 /// Outputs: None
 /// Purity: Impure (modifies UI state). Thin adapter.
 fn render_heading(ui: &mut egui::Ui, title: &str, level: u32, scroll_to_id: &mut Option<egui::Id>) {
-    if level > 0 {
-        let trimmed = title.trim().to_string();
-        if !trimmed.is_empty() {
-            let heading_id = egui::Id::new(&trimmed);
-            if *scroll_to_id == Some(heading_id) {
-                ui.scroll_to_rect(ui.max_rect(), None);
-                *scroll_to_id = None;
-            }
-            let size = match level {
-                1 => 32.0,
-                2 => 24.0,
-                3 => 18.0,
-                _ => 14.0,
-            };
-            ui.heading(RichText::new(trimmed).size(size).strong());
-            ui.add_space(4.0);
+    let trimmed = title.trim().to_string();
+    if !trimmed.is_empty() {
+        let heading_id = egui::Id::new(&trimmed);
+        if *scroll_to_id == Some(heading_id) {
+            ui.scroll_to_rect(ui.max_rect(), None);
+            *scroll_to_id = None;
         }
+        let size = match level {
+            1 => 32.0,
+            2 => 24.0,
+            3 => 18.0,
+            4 => 14.0,
+            _ => 12.0,
+        };
+        ui.heading(RichText::new(trimmed).size(size).strong());
+        ui.add_space(4.0);
     }
 }
 
@@ -337,7 +336,9 @@ pub fn parse_markdown_to_events(markdown_text: &str) -> Vec<RenderEvent> {
                     HeadingLevel::H1 => 1,
                     HeadingLevel::H2 => 2,
                     HeadingLevel::H3 => 3,
-                    _ => 0,
+                    HeadingLevel::H4 => 4,
+                    HeadingLevel::H5 => 5,
+                    HeadingLevel::H6 => 6,
                 };
                 heading_text.clear();
             }
@@ -705,12 +706,12 @@ pub fn build_toc(markdown_text: &str) -> Vec<crate::ui::ToCEntry> {
                     HeadingLevel::H1 => 1,
                     HeadingLevel::H2 => 2,
                     HeadingLevel::H3 => 3,
-                    _ => 0,
+                    HeadingLevel::H4 => 4,
+                    HeadingLevel::H5 => 5,
+                    HeadingLevel::H6 => 6,
                 };
-                if lvl > 0 {
-                    heading_level = Some(lvl);
-                    current_header.clear();
-                }
+                heading_level = Some(lvl);
+                current_header.clear();
             }
             Event::Text(text) => {
                 if heading_level.is_some() {
@@ -855,7 +856,7 @@ mod tests {
         assert_eq!(
             events[3],
             RenderEvent::Heading {
-                level: 0,
+                level: 4,
                 text: "H4".to_string()
             }
         );
@@ -1128,7 +1129,7 @@ def foo():
                     "scroll_to_id should be cleared after scroll"
                 );
 
-                // Heading level 0 or empty title should not trigger scroll
+                // Empty title should not trigger scroll
                 let mut dummy_scroll = Some(target_id);
                 render_heading(ui, "", 1, &mut dummy_scroll);
                 assert_eq!(dummy_scroll, Some(target_id));
