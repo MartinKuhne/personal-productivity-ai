@@ -264,7 +264,7 @@ models:
 | `insert_lines` | Insert new lines of text into an existing file at a specific 1-indexed position. |
 | `delete_lines` | Delete specific lines from a file (1-indexed, inclusive). |
 | `replace_text` | Replace exact occurrences of old_string with new_string in a file. |
-| `web_fetch` | Fetch content from a URL and convert HTML to Markdown. |
+| `web_fetch` | Fetch content from a URL and convert HTML to Markdown. Supports pagination via `limit`/`offset`, optional response `headers`, and a 5-minute cache. |
 | `web_search` | Search the web using SearXNG. Requires searxng_url config. |
 | `web_delegate` | Delegate complex web research to a sub-agent with web_fetch/web_search tools. |
 | `read_yaml_header` | Parse a YAML header from a markdown file and return its content. |
@@ -294,6 +294,15 @@ models:
 * [REQ-651] Query Evaluation: The `query` tool shall use the `evalexpr` crate to parse and execute query predicates as dynamic expressions against CSV rows.
 * [REQ-652] Aggregate Functions: The query system shall allow `sum` and `average` as aggregate functions over a specified column.
 * [REQ-653] The system shall store all csv databases in a user specified location. Default to %APPDATA%\fastmd\db\ if not configured.
+
+### Web Fetch Pagination & Caching
+
+* [REQ-660] Web Fetch Headers: The `web_fetch` tool shall accept an optional `headers` boolean parameter (default: `false`). When `true`, the response shall include the HTTP response headers as a JSON object alongside the content.
+* [REQ-661] Web Fetch Pagination: The `web_fetch` tool shall accept optional `limit` (integer) and `offset` (integer, default 0) parameters. The `limit` parameter shall restrict the number of lines returned. The `offset` parameter shall skip the specified number of lines from the start of the content.
+* [REQ-662] Web Fetch Total Lines: The `web_fetch` response shall include a `total_lines` integer indicating the total number of lines in the full fetched content, enabling the caller to paginate through the content.
+* [REQ-663] Web Fetch Cache: The system shall cache fetched Markdown content for 5 minutes. Subsequent calls to `web_fetch` with the same URL and `force_refetch` set to `false` (default) shall return the cached content without making a network request.
+* [REQ-664] Web Fetch Force Refetch: The `web_fetch` tool shall accept an optional `force_refetch` boolean parameter (default: `false`). When `true`, the system shall bypass the cache and fetch fresh content from the URL, replacing the cached entry.
+* [REQ-665] Web Fetch Context Efficiency: The tool description shall encourage the LLM to save context by fetching a page once and issuing partial reads via `limit` and `offset` to paginate through the content, rather than re-fetching the full page multiple times.
 
 
 

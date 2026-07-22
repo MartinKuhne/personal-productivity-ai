@@ -131,10 +131,22 @@ pub struct DeleteLinesResponse {
 #[derive(Deserialize, Debug, JsonSchema)]
 pub struct WebFetchInput {
     pub url: String,
+    #[serde(default)]
+    pub headers: bool,
+    #[serde(default)]
+    pub force_refetch: bool,
+    #[serde(default)]
+    pub limit: Option<usize>,
+    #[serde(default)]
+    pub offset: Option<usize>,
 }
 #[derive(Serialize, Debug, JsonSchema)]
 pub struct WebFetchResponse {
     pub content: String,
+    pub total_lines: usize,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub response_headers: Option<std::collections::HashMap<String, String>>,
+    pub from_cache: bool,
 }
 
 #[derive(Deserialize, Debug, JsonSchema)]

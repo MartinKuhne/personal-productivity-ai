@@ -2,24 +2,91 @@
 
 use crate::config::AppConfig;
 use fast_h2m::convert;
+use std::collections::HashMap;
+use std::sync::Mutex;
 
-pub fn tool_web_fetch(url: &str) -> Result<crate::tools::dtos::WebFetchResponse, String> {
+struct CacheEntry {
+    content: String,
+    response_headers: HashMap<String, String>,
+    fetched_at: std::time::Instant,
+}
+
+static WEB_FETCH_CACHE: std::sync::LazyLock<Mutex<HashMap<String, CacheEntry>>> =
+    std::sync::LazyLock::new(|| Mutex::new(HashMap::new()));
+
+const CACHE_TTL: std::time::Duration = std::time::Duration::from_secs(300);
+
+pub fn tool_web_fetch(
+    input: &crate::tools::dtos::WebFetchInput,
+) -> Result<crate::tools::dtos::WebFetchResponse, String> {
+    let url = &input.url;
+
+    if !input.force_refetch {
+        if let Ok(cache) = WEB_FETCH_CACHE.lock() {
+            if let Some(entry) = cache.get(url) {
+                if entry.fetched_at.elapsed() < CACHE_TTL {
+                    let total_lines = entry.content.lines().count();
+                    let content = apply_pagination(&entry.content, input.offset, input.limit);
+                    return Ok(crate::tools::dtos::WebFetchResponse {
+                        content,
+                        total_lines,
+                        response_headers: if input.headers {
+                            Some(entry.response_headers.clone())
+                        } else {
+                            None
+                        },
+                        from_cache: true,
+                    });
+                }
+            }
+        }
+    }
+
     match ureq::get(url)
         .set("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36")
         .set("Accept", "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8")
         .set("Accept-Language", "en-US,en;q=0.9")
         .call() {
-        Ok(response) => match response.into_string() {
-            Ok(body) => match convert(&body, None) {
-                Ok(res) => Ok(crate::tools::dtos::WebFetchResponse { content: res.content.unwrap_or_default() }),
-                Err(e) => {
-                    tracing::error!(name = "tool.web.html2md_failed", error = %e, url = %url, "Failed to convert fetched HTML to Markdown. Operator should verify if the URL returns valid HTML.");
-                    Err(format!("Failed to convert HTML to Markdown: {}", e))
+        Ok(response) => {
+            let mut response_headers = HashMap::new();
+            for name in response.headers_names() {
+                if let Some(val) = response.header(&name) {
+                    response_headers.insert(name, val.to_string());
                 }
-            },
-            Err(e) => {
-                tracing::error!(name = "tool.web.read_body_failed", error = %e, url = %url, "Failed to read response body from web fetch. Operator should check network connectivity or URL validity.");
-                Err(format!("Failed to read web response body: {}", e))
+            }
+            match response.into_string() {
+                Ok(body) => match convert(&body, None) {
+                    Ok(res) => {
+                        let md_content = res.content.unwrap_or_default();
+                        let total_lines = md_content.lines().count();
+                        let content = apply_pagination(&md_content, input.offset, input.limit);
+                        if let Ok(mut cache) = WEB_FETCH_CACHE.lock() {
+                            cache.insert(url.clone(), CacheEntry {
+                                content: md_content,
+                                response_headers: response_headers.clone(),
+                                fetched_at: std::time::Instant::now(),
+                            });
+                        }
+                        Ok(crate::tools::dtos::WebFetchResponse {
+                            content,
+                            total_lines,
+                            response_headers: if input.headers {
+                                Some(response_headers)
+                            } else {
+                                None
+                            },
+                            from_cache: false,
+                        })
+                    },
+                    Err(e) => {
+                        tracing::error!(name = "tool.web.html2md_failed", error = %e, url = %url, "Failed to convert fetched HTML to Markdown. Operator should verify if the URL returns valid HTML.");
+                        Err(format!("Failed to convert HTML to Markdown: {}", e))
+                    }
+                },
+                Err(e) => {
+                    tracing::error!(name = "tool.web.read_body_failed", error = %e, url = %url, "Failed to read response body from web fetch. Operator should check network connectivity or URL validity.");
+                    Err(format!("Failed to read web response body: {}", e))
+                }
             }
         },
         Err(e) => {
@@ -27,6 +94,16 @@ pub fn tool_web_fetch(url: &str) -> Result<crate::tools::dtos::WebFetchResponse,
             Err(format!("Failed to fetch URL: {}", e))
         }
     }
+}
+
+fn apply_pagination(content: &str, offset: Option<usize>, limit: Option<usize>) -> String {
+    let lines: Vec<&str> = content.lines().collect();
+    let start = offset.unwrap_or(0).min(lines.len());
+    let end = match limit {
+        Some(l) => (start + l).min(lines.len()),
+        None => lines.len(),
+    };
+    lines[start..end].join("\n")
 }
 
 // Reference: https://docs.searxng.org/dev/search_api.html
@@ -136,7 +213,7 @@ pub fn tool_web_delegate(
         "type": "function",
         "function": {
             "name": "web_fetch",
-            "description": "Fetch content from a URL.",
+            "description": "Fetch content from a URL and convert to Markdown. Use limit/offset to paginate through content and save context. Cache lasts 5 minutes; use force_refetch=true to bypass.",
             "parameters": schemars::schema_for!(crate::tools::dtos::WebFetchInput)
         }
     })];
@@ -239,7 +316,7 @@ pub fn tool_web_delegate(
                     if let Ok(input) =
                         serde_json::from_str::<crate::tools::dtos::WebFetchInput>(func_args_str)
                     {
-                        match tool_web_fetch(&input.url) {
+                        match tool_web_fetch(&input) {
                             Ok(res) => {
                                 serde_json::to_string(&crate::tools::dtos::ToolResponse::Success {
                                     data: res,
@@ -335,7 +412,14 @@ mod tests {
             .install_default()
             .ok();
         let server_url = spawn_mock_server("<html><body><h1>Hello World</h1></body></html>");
-        let result = tool_web_fetch(&server_url).unwrap().content;
+        let input = crate::tools::dtos::WebFetchInput {
+            url: server_url.clone(),
+            headers: false,
+            force_refetch: true,
+            limit: None,
+            offset: None,
+        };
+        let result = tool_web_fetch(&input).unwrap().content;
         assert!(result.contains("Hello") || result.contains("World"));
     }
 
@@ -344,8 +428,116 @@ mod tests {
         rustls::crypto::ring::default_provider()
             .install_default()
             .ok();
-        let result = tool_web_fetch("http://127.0.0.1:1"); // Invalid port
+        let input = crate::tools::dtos::WebFetchInput {
+            url: "http://127.0.0.1:1".to_string(),
+            headers: false,
+            force_refetch: true,
+            limit: None,
+            offset: None,
+        };
+        let result = tool_web_fetch(&input);
         assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_tool_web_fetch_pagination() {
+        rustls::crypto::ring::default_provider()
+            .install_default()
+            .ok();
+        let html = "<html><body><p>line1</p><p>line2</p><p>line3</p><p>line4</p><p>line5</p></body></html>";
+        let server_url = spawn_mock_server(html);
+        let input = crate::tools::dtos::WebFetchInput {
+            url: server_url.clone(),
+            headers: false,
+            force_refetch: true,
+            limit: Some(2),
+            offset: Some(1),
+        };
+        let result = tool_web_fetch(&input).unwrap();
+        assert!(result.total_lines >= 3);
+        assert_eq!(result.content.lines().count(), 2);
+        assert!(!result.from_cache);
+    }
+
+    #[test]
+    fn test_tool_web_fetch_headers() {
+        rustls::crypto::ring::default_provider()
+            .install_default()
+            .ok();
+        let server_url = spawn_mock_server("<html><body><h1>Test</h1></body></html>");
+        let input = crate::tools::dtos::WebFetchInput {
+            url: server_url.clone(),
+            headers: true,
+            force_refetch: true,
+            limit: None,
+            offset: None,
+        };
+        let result = tool_web_fetch(&input).unwrap();
+        assert!(result.response_headers.is_some());
+        let headers = result.response_headers.unwrap();
+        assert!(headers.contains_key("content-type") || headers.contains_key("Content-Type"));
+    }
+
+    #[test]
+    fn test_tool_web_fetch_cache_hit() {
+        rustls::crypto::ring::default_provider()
+            .install_default()
+            .ok();
+        let server_url = spawn_mock_server("<html><body><h1>Cached</h1></body></html>");
+        let input = crate::tools::dtos::WebFetchInput {
+            url: server_url.clone(),
+            headers: false,
+            force_refetch: false,
+            limit: None,
+            offset: None,
+        };
+        let first = tool_web_fetch(&input).unwrap();
+        assert!(!first.from_cache);
+        let second = tool_web_fetch(&input).unwrap();
+        assert!(second.from_cache);
+        assert_eq!(first.content, second.content);
+    }
+
+    #[test]
+    fn test_tool_web_fetch_force_refetch() {
+        rustls::crypto::ring::default_provider()
+            .install_default()
+            .ok();
+        let server_url = spawn_mock_server("<html><body><h1>Force</h1></body></html>");
+        let input = crate::tools::dtos::WebFetchInput {
+            url: server_url.clone(),
+            headers: false,
+            force_refetch: false,
+            limit: None,
+            offset: None,
+        };
+        let _first = tool_web_fetch(&input).unwrap();
+        let force_input = crate::tools::dtos::WebFetchInput {
+            url: server_url.clone(),
+            headers: false,
+            force_refetch: true,
+            limit: None,
+            offset: None,
+        };
+        let second = tool_web_fetch(&force_input).unwrap();
+        assert!(!second.from_cache);
+    }
+
+    #[test]
+    fn test_apply_pagination() {
+        let content = "line1\nline2\nline3\nline4\nline5";
+        assert_eq!(apply_pagination(content, None, None), content);
+        assert_eq!(
+            apply_pagination(content, Some(2), None),
+            "line3\nline4\nline5"
+        );
+        assert_eq!(apply_pagination(content, None, Some(2)), "line1\nline2");
+        assert_eq!(apply_pagination(content, Some(1), Some(2)), "line2\nline3");
+        assert_eq!(apply_pagination(content, Some(10), None), "");
+        assert_eq!(
+            apply_pagination(content, Some(3), Some(100)),
+            "line4\nline5"
+        );
     }
 
     #[test]
