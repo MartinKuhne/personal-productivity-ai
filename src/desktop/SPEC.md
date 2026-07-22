@@ -198,6 +198,7 @@ models:
     * [REQ-604]: If the configuration file does not exist, then the FastMD Viewer shall create a default template configuration file.
     * [REQ-604a] Multi-Use Model Configuration: The configuration shall support a `models` list where each entry defines `model`, `api_url`, `api_key` (optional, inherits global), `use_case` (array: `chat`, `embeddings`, `vision`), and `cost` (optional integer, default 0, lower = cheaper). The system shall route requests to the appropriate model based on use_case. When multiple models match a use_case, the system shall prefer the model with the lowest `cost`.
     * [REQ-604b] PDF Converter Configuration: The configuration shall support `pdf_converter_command` as an array of command and arguments with `{input}` and `{output}` placeholders.
+    * [REQ-604c] Max Tokens Configuration: The configuration shall support a `max_tokens` field (default: 32768) in `config.yaml` to prevent runaway token generation. The system shall include this value in all LLM API requests as the `max_tokens` parameter.
 * [REQ-605] Monospace Command Prompt: When the bottom panel command entry field is submitted, the FastMD Viewer shall execute the command through the Local LLM completions thread.
 * [REQ-606] LLM Tools Library: The LLM Agent shall utilize functional tools as per the [LLM Tools] section below.
 * [REQ-607] Real-time Stream Output: The FastMD Viewer shall display the LLM's active thinking sequence and render the final Markdown response in real-time inside the Central Panel.
@@ -263,7 +264,7 @@ models:
 | `insert_lines` | Insert new lines of text into an existing file at a specific 1-indexed position. |
 | `delete_lines` | Delete specific lines from a file (1-indexed, inclusive). |
 | `replace_text` | Replace exact occurrences of old_string with new_string in a file. |
-| `web_fetch` | Fetch content from a URL and convert HTML to Markdown. |
+| `web_fetch` | Fetch content from a URL and convert HTML to Markdown. Supports pagination via `limit`/`offset`, optional response `headers`, and a 5-minute cache. |
 | `web_search` | Search the web using SearXNG. Requires searxng_url config. |
 | `web_delegate` | Delegate complex web research to a sub-agent with web_fetch/web_search tools. |
 | `read_yaml_header` | Parse a YAML header from a markdown file and return its content. |
@@ -293,6 +294,15 @@ models:
 * [REQ-651] Query Evaluation: The `query` tool shall use the `evalexpr` crate to parse and execute query predicates as dynamic expressions against CSV rows.
 * [REQ-652] Aggregate Functions: The query system shall allow `sum` and `average` as aggregate functions over a specified column.
 * [REQ-653] The system shall store all csv databases in a user specified location. Default to %APPDATA%\fastmd\db\ if not configured.
+
+### Web Fetch Pagination & Caching
+
+* [REQ-660] Web Fetch Headers: The `web_fetch` tool shall accept an optional `headers` boolean parameter (default: `false`). When `true`, the response shall include the HTTP response headers as a JSON object alongside the content.
+* [REQ-661] Web Fetch Pagination: The `web_fetch` tool shall accept optional `limit` (integer) and `offset` (integer, default 0) parameters. The `limit` parameter shall restrict the number of lines returned. The `offset` parameter shall skip the specified number of lines from the start of the content.
+* [REQ-662] Web Fetch Total Lines: The `web_fetch` response shall include a `total_lines` integer indicating the total number of lines in the full fetched content, enabling the caller to paginate through the content.
+* [REQ-663] Web Fetch Cache: The system shall cache fetched Markdown content for 5 minutes. Subsequent calls to `web_fetch` with the same URL and `force_refetch` set to `false` (default) shall return the cached content without making a network request.
+* [REQ-664] Web Fetch Force Refetch: The `web_fetch` tool shall accept an optional `force_refetch` boolean parameter (default: `false`). When `true`, the system shall bypass the cache and fetch fresh content from the URL, replacing the cached entry.
+* [REQ-665] Web Fetch Context Efficiency: The tool description shall encourage the LLM to save context by fetching a page once and issuing partial reads via `limit` and `offset` to paginate through the content, rather than re-fetching the full page multiple times.
 
 
 

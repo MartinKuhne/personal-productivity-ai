@@ -184,6 +184,10 @@ fn default_feature_flags() -> HashMap<String, bool> {
     m
 }
 
+fn default_max_tokens() -> u32 {
+    32768
+}
+
 #[derive(serde::Serialize, serde::Deserialize, Clone)]
 #[serde(default)]
 pub struct AppConfig {
@@ -219,6 +223,9 @@ pub struct AppConfig {
     /// Runtime feature flags. Map of feature name to enabled/disabled.
     #[serde(default = "default_feature_flags")]
     pub feature_flags: HashMap<String, bool>,
+    /// Maximum tokens for LLM responses (REQ-604c). Default: 32768.
+    #[serde(default = "default_max_tokens")]
+    pub max_tokens: u32,
 }
 
 impl std::fmt::Debug for AppConfig {
@@ -238,6 +245,7 @@ impl std::fmt::Debug for AppConfig {
             .field("inline_editor_enabled", &self.inline_editor_enabled)
             .field("csv_db_path", &self.csv_db_path)
             .field("feature_flags", &self.feature_flags)
+            .field("max_tokens", &self.max_tokens)
             .finish()
     }
 }
@@ -259,6 +267,7 @@ impl Default for AppConfig {
             inline_editor_enabled: false,
             csv_db_path: None,
             feature_flags: default_feature_flags(),
+            max_tokens: default_max_tokens(),
         }
     }
 }
