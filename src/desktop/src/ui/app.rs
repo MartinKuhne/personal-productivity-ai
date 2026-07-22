@@ -3,6 +3,7 @@
 use crate::agent::AgentSessionManager;
 use crate::background::{BackgroundProcessManager, SharedProcessManager};
 use crate::background_task::Task;
+use crate::directory_tracker::DirectoryTracker;
 use crate::file_processor::FileEventProcessor;
 use crate::messages::BackgroundMessage;
 use crate::tag_manager::TagManager;
@@ -54,6 +55,7 @@ pub struct FastMdApp {
     pub file_event_reader: Option<crate::file_events::BusReader<crate::file_events::FileEvent>>,
     pub file_processor: FileEventProcessor,
     pub tag_manager: TagManager,
+    pub directory_tracker: DirectoryTracker,
     pub layout: PanelLayout,
     pub selection: SelectionManager,
     pub tab_manager: TabManager,
@@ -174,6 +176,11 @@ impl FastMdApp {
         let mut changed = false;
         let mut needs_rebuild = false;
 
+        // Let DirectoryTracker consume directory events from its own subscriber.
+        if self.directory_tracker.process_events() {
+            changed = true;
+        }
+
         if let Some(reader) = &self.file_event_reader {
             while let Ok(event) = reader.try_recv() {
                 changed = true;
@@ -207,7 +214,7 @@ impl FastMdApp {
                         needs_rebuild = true;
                     }
                     FileEventKind::DirDiscovered | FileEventKind::DirRemoved => {
-                        // Directory events are handled by DirectoryTracker.
+                        // Directory events consumed by DirectoryTracker above via its own subscriber.
                     }
                 }
             }
@@ -324,6 +331,7 @@ impl FastMdApp {
         dialogs.batch_dialog_config = batch_dialog_config;
 
         let event_bus = background_task.file_event_bus;
+        let dir_tracker = DirectoryTracker::new(event_bus.subscribe());
         Self {
             content_libraries: config.content_libraries.clone(),
             rx: background_task.rx,
@@ -331,6 +339,7 @@ impl FastMdApp {
             file_event_reader: Some(event_bus.subscribe()),
             file_event_bus: event_bus,
             file_processor,
+            directory_tracker: dir_tracker,
             tag_manager: TagManager::new(),
             layout: PanelLayout::new(),
             selection: SelectionManager::new(),
@@ -374,6 +383,9 @@ impl FastMdApp {
             editor_state: crate::editor::EditorState::default(),
             inline_editor_enabled: true,
             background_manager: Arc::new(Mutex::new(BackgroundProcessManager::new())),
+            directory_tracker: DirectoryTracker::new(crate::file_events::BusReader::new(
+                std::sync::mpsc::channel().1,
+            )),
             config,
         }
     }
@@ -574,6 +586,17 @@ impl FastMdApp {
         // Show batch processing modal
         if self.dialogs.batch_dialog_open {
             let mut dialog_config = self.dialogs.batch_dialog_config.clone();
+
+            // Populate available directories from DirectoryTracker (all known directories, including subdirectories).
+            // Preserve selection by path if the previously selected dir still exists in the updated list.
+            let prev_selected = dialog_config
+                .selected_dir_idx
+                .and_then(|i| dialog_config.available_dirs.get(i).cloned());
+            dialog_config.available_dirs = self.directory_tracker.dirs_sorted();
+            dialog_config.selected_dir_idx = prev_selected
+                .as_ref()
+                .and_then(|p| dialog_config.available_dirs.iter().position(|d| d == p));
+
             if let Some(result) =
                 crate::batch::dialog::show_batch_modal(self, ctx, &mut dialog_config)
             {

@@ -222,7 +222,7 @@ impl BatchHandle {
 /// Dialog configuration state
 #[derive(Debug, Clone)]
 pub struct BatchDialogConfig {
-    /// Available directories from content libraries
+    /// Available directories sourced from DirectoryTracker (all discovered directories, not just top-level libraries)
     pub available_dirs: Vec<PathBuf>,
     /// Discovered prompt files
     pub available_prompts: Vec<PromptInfo>,
