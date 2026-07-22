@@ -1,7 +1,8 @@
 use crate::background::models::{BackgroundLogEntry, LogCategory};
+use crate::file_events::{Bus, FileEvent};
 use crate::messages::BackgroundMessage;
 use std::path::PathBuf;
-use std::sync::mpsc::Sender;
+use std::sync::mpsc::{Receiver, Sender};
 #[cfg(test)]
 use std::sync::mpsc::channel;
 use tokio::process::Command;
@@ -172,6 +173,46 @@ impl PdfConversionJob {
             );
             Err("No pdf_converter_command configured".to_string())
         }
+    }
+}
+
+pub struct PdfConverterWorker {
+    rx: Receiver<PathBuf>,
+    tx: Sender<BackgroundMessage>,
+    bus: Bus<FileEvent>,
+    cmd: Option<Vec<String>>,
+}
+
+impl PdfConverterWorker {
+    pub fn new(
+        rx: Receiver<PathBuf>,
+        tx: Sender<BackgroundMessage>,
+        bus: Bus<FileEvent>,
+        cmd: Option<Vec<String>>,
+    ) -> Self {
+        Self { rx, tx, bus, cmd }
+    }
+
+    pub fn spawn(self) {
+        std::thread::spawn(move || {
+            if let Ok(rt) = tokio::runtime::Runtime::new() {
+                rt.block_on(async {
+                    while let Ok(path) = self.rx.recv() {
+                        let job = PdfConversionJob::new(path);
+                        if job.should_convert() {
+                            let output_md = job.output_md.clone();
+                            if job
+                                .execute(self.cmd.clone(), self.tx.clone())
+                                .await
+                                .is_ok()
+                            {
+                                self.bus.publish(FileEvent::discovered(output_md));
+                            }
+                        }
+                    }
+                });
+            }
+        });
     }
 }
 
