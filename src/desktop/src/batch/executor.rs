@@ -7,7 +7,7 @@ use crate::file_events::FileEvent;
 use crate::messages::BackgroundMessage;
 use chrono::Local;
 use std::path::PathBuf;
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::{Arc, mpsc};
 use std::time::Instant;
 use tokio::sync::Semaphore;
@@ -57,6 +57,16 @@ impl BatchJobExecutor {
             };
         };
 
+        // Round-robin across all models tied for the minimum cost for "chat".
+        let min_cost_models: Vec<String> = self
+            .app_config
+            .models_for_use_case_min_cost("chat")
+            .into_iter()
+            .map(|(key, _)| key.clone())
+            .collect();
+        let model_count = min_cost_models.len();
+        let rr_counter = Arc::new(AtomicUsize::new(0));
+
         let semaphore = Arc::new(Semaphore::new(concurrency as usize));
         let mut join_set = tokio::task::JoinSet::new();
         let cancel_flag = self.cancel_flag.clone();
@@ -88,6 +98,14 @@ impl BatchJobExecutor {
                 let file_event_bus = self.file_event_bus.clone();
                 let cancel_flag = cancel_flag.clone();
 
+                // Assign model round-robin when multiple min-cost models exist.
+                let model_name = if model_count > 1 {
+                    let i = rr_counter.fetch_add(1, Ordering::Relaxed) % model_count;
+                    Some(min_cost_models[i].clone())
+                } else {
+                    None
+                };
+
                 jobs[idx].status = BatchJobStatus::Running;
                 jobs[idx].start_time = Some(Local::now());
 
@@ -109,6 +127,7 @@ impl BatchJobExecutor {
                         None,
                         String::new(),
                         file_event_bus,
+                        model_name,
                     );
 
                     drop(permit);
@@ -174,26 +193,27 @@ pub fn run_agent_blocking(
     history: Option<Vec<serde_json::Value>>,
     current_response: String,
     file_event_bus: Bus<FileEvent>,
+    model_name: Option<String>,
 ) -> (BatchJobStatus, Option<String>) {
     use crate::agent::run_agent;
     use std::sync::mpsc::channel;
 
     let (tx, rx) = channel();
 
-    run_agent(
-        crate::agent::AgentContext::new(
-            config,
-            tx,
-            file_event_bus,
-            active_file,
-            active_dir,
-            selected_files,
-            prompt,
-            cancel_flag,
-            history,
-            current_response,
-        ),
+    let mut ctx = crate::agent::AgentContext::new(
+        config,
+        tx,
+        file_event_bus,
+        active_file,
+        active_dir,
+        selected_files,
+        prompt,
+        cancel_flag,
+        history,
+        current_response,
     );
+    ctx.model_name = model_name;
+    run_agent(ctx);
 
     let mut status = BatchJobStatus::Completed;
     let mut error = None;

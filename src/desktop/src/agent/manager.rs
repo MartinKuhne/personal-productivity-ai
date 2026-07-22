@@ -163,6 +163,7 @@ impl AgentSessionManager {
             cancel_flag,
             history: self.state.history.clone(),
             current_response: self.state.response.clone(),
+            model_name: None,
         };
 
         std::thread::spawn(move || {

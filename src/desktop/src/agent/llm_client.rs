@@ -49,8 +49,10 @@ pub struct LLMClient {
 }
 
 impl LLMClient {
-    pub fn from_config(config: &AppConfig) -> Option<Self> {
-        let model_cfg = if let Some((_key, cfg)) = config.model_for_use_case("chat") {
+    pub fn from_config(config: &AppConfig, model_name: Option<&str>) -> Option<Self> {
+        let model_cfg = if let Some(name) = model_name {
+            config.models.get(name)?.clone()
+        } else if let Some((_key, cfg)) = config.model_for_use_case("chat") {
             cfg.clone()
         } else {
             config.models.values().next()?.clone()
@@ -271,7 +273,7 @@ mod tests {
             },
         );
         config.max_tokens = 16384;
-        let client = LLMClient::from_config(&config).unwrap();
+        let client = LLMClient::from_config(&config, None).unwrap();
         assert_eq!(client.max_tokens, 16384);
     }
 }

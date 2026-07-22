@@ -102,7 +102,7 @@ fn process_turn(
     }
 }
 fn resolve_ll_client(ctx: &AgentContext) -> Option<LLMClient> {
-    let client = LLMClient::from_config(&ctx.config)?;
+    let client = LLMClient::from_config(&ctx.config, ctx.model_name.as_deref())?;
     if !client.api_key_valid() {
         tracing::warn!(name = "agent.api_key.missing", "Agent run skipped.");
         let _ = ctx.tx_gui.send(BackgroundMessage::AgentFailed(format!(

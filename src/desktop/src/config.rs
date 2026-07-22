@@ -282,6 +282,27 @@ impl AppConfig {
             .min_by_key(|(_, cfg)| cfg.get_cost())
     }
 
+    /// Find all models tied for the minimum cost for a given use_case.
+    pub fn models_for_use_case_min_cost(
+        &self,
+        use_case: impl AsRef<str>,
+    ) -> Vec<(&String, &LlmConfig)> {
+        let uc_ref = use_case.as_ref();
+        let candidates: Vec<_> = self
+            .models
+            .iter()
+            .filter(|(_, cfg)| cfg.has_use_case(uc_ref))
+            .collect();
+        let min_cost = match candidates.iter().map(|(_, cfg)| cfg.get_cost()).min() {
+            Some(c) => c,
+            None => return Vec::new(),
+        };
+        candidates
+            .into_iter()
+            .filter(|(_, cfg)| cfg.get_cost() == min_cost)
+            .collect()
+    }
+
     /// Validate configuration, returning a list of warnings.
     pub fn validate(&self) -> Vec<String> {
         let mut warnings = Vec::new();

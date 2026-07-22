@@ -23,6 +23,9 @@ pub struct AgentContext {
     pub cancel_flag: Arc<AtomicBool>,
     pub history: Option<Vec<Value>>,
     pub current_response: String,
+    /// Optional model name override. When set, `LLMClient::from_config` uses this model
+    /// directly instead of selecting the cheapest available model.
+    pub model_name: Option<String>,
 }
 
 impl AgentContext {
@@ -50,6 +53,7 @@ impl AgentContext {
             cancel_flag,
             history,
             current_response,
+            model_name: None,
         }
     }
 }
