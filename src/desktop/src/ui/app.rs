@@ -383,9 +383,8 @@ impl FastMdApp {
     /// Outputs: None.
     /// Purity: Impure (mutates self, spawns the agent thread).
     /// Preconditions: `prompt` should be non-empty.
-    /// Postconditions: `command_input` is cleared, agent state reflects running, cancel flag is set, agent thread launched.
+    /// Postconditions: agent state reflects running, cancel flag is set, agent thread launched.
     pub fn start_agent_session(&mut self, prompt: String) {
-        self.agent.command_input = prompt.clone();
         self.agent.start_session(
             self.tx.clone(),
             prompt,

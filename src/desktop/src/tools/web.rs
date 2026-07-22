@@ -99,10 +99,8 @@ pub fn tool_web_fetch(
 fn apply_pagination(content: &str, offset: Option<usize>, limit: Option<usize>) -> String {
     let lines: Vec<&str> = content.lines().collect();
     let start = offset.unwrap_or(0).min(lines.len());
-    let end = match limit {
-        Some(l) => (start + l).min(lines.len()),
-        None => lines.len(),
-    };
+    let limit = limit.unwrap_or(100);
+    let end = (start + limit).min(lines.len());
     lines[start..end].join("\n")
 }
 
