@@ -45,13 +45,15 @@ The `config.yaml` file supports the following options:
 | `user_birthdate` | String (Optional) | `null` | The birthdate of the user. |
 | `user_gender` | String (Optional) | `null` | The gender of the user. |
 | `system_prompt_extension` | String (Optional) | `null` | Additional text to append to the AI system prompt. |
-| `models` | HashMap (Optional) | `{}` | A mapping of model aliases to specific LLM configurations (`model`, `api_url`, `api_key`). Use `/models` to list and `/model <alias>` to switch models. |
+| `models` | HashMap (Optional) | `{}` | A mapping of model aliases to specific LLM configurations. Fields: `model` (API model ID), `api_url`, `api_key`, `cost` (lower = preferred for auto-selection), `use_case` or `capabilities` (list: `chat`, `vision`, `embeddings`). Use `/models` to list and `/model <alias>` to switch models. |
 | `searxng_url` | String (Optional) | `http://localhost:8090` | The URL for a SearXNG instance to enable the `web_search` tool. Leave null to disable. |
 | `jmap_clients` | HashMap (Optional) | `{}` | A mapping of account names to JMAP configuration objects (`url`, `token`) for email/contact tools. |
 | `caldav_clients` | HashMap (Optional) | `{}` | A mapping of account names to CalDAV configuration objects (`url`, `username`, `password`) for calendar tools. |
 | `content_libraries` | Array (Optional) | `[]` | List of content library configurations (`name`, `root_folder`, `kind`, `readonly`, `priority`). |
 | `pdf_converter_command` | Array (Optional) | `null` | Command template for PDF conversion (e.g. `["pandoc", "-f", "pdf", "-o", "{output}", "{input}"]`). |
 | `inline_editor_enabled` | Boolean | `false` | Enable the built-in inline text editor. |
+| `csv_db_path` | String (Optional) | `null` | Override the default storage location for CSV databases. |
+| `feature_flags` | HashMap (Optional) | `{ "useDAVForContacts": true, "toolCallDebugMode": false }` | Runtime feature flags. `useDAVForContacts` routes contact lookups through CardDAV (default `true`); `toolCallDebugMode` includes full response data in logs (default `false`). |
 
 > [!NOTE]
 > **Using Marker for PDF Conversion**
