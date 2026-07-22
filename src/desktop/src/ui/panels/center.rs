@@ -77,7 +77,7 @@ pub fn apply_tab_action(
 /// Preconditions: `app.agent.show_results()` is true.
 /// Postconditions: Rendered agent session. State might be mutated if "Back to Document" is clicked.
 fn render_agent_session(ui: &mut egui::Ui, app: &mut FastMdApp) {
-    ui.horizontal(|ui| {
+    ui.horizontal_wrapped(|ui| {
         ui.heading(
             RichText::new("🤖 FastMD Agent Session")
                 .size(18.0)
@@ -91,7 +91,7 @@ fn render_agent_session(ui: &mut egui::Ui, app: &mut FastMdApp) {
     });
     ui.separator();
 
-    ui.horizontal(|ui| {
+    ui.horizontal_wrapped(|ui| {
         ui.label(RichText::new(format!("Status: {}", app.agent().state().status)).strong());
         if app.agent().state().running {
             ui.spinner();

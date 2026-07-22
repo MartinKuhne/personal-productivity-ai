@@ -144,10 +144,6 @@ fn render_heading(ui: &mut egui::Ui, title: &str, level: u32, scroll_to_id: &mut
     let trimmed = title.trim().to_string();
     if !trimmed.is_empty() {
         let heading_id = egui::Id::new(&trimmed);
-        if *scroll_to_id == Some(heading_id) {
-            ui.scroll_to_rect(ui.max_rect(), None);
-            *scroll_to_id = None;
-        }
         let size = match level {
             1 => 32.0,
             2 => 24.0,
@@ -155,7 +151,11 @@ fn render_heading(ui: &mut egui::Ui, title: &str, level: u32, scroll_to_id: &mut
             4 => 14.0,
             _ => 12.0,
         };
-        ui.heading(RichText::new(trimmed).size(size).strong());
+        let response = ui.heading(RichText::new(&trimmed).size(size).strong());
+        if *scroll_to_id == Some(heading_id) {
+            response.scroll_to_me(Some(egui::Align::Center));
+            *scroll_to_id = None;
+        }
         ui.add_space(4.0);
     }
 }
