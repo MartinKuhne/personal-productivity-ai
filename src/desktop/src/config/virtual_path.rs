@@ -114,7 +114,7 @@ impl VirtualPath {
             .iter()
             .find(|l| l.name == self.library)
             .ok_or_else(|| VirtualPathError::LibraryNotFound(self.library.clone()))?;
-        Ok(PathBuf::from(&lib.root_folder).join(&self.sub_path))
+        Ok(lib.resolve(&self.sub_path))
     }
 
     pub fn is_writable(
@@ -125,7 +125,7 @@ impl VirtualPath {
             .iter()
             .find(|l| l.name == self.library)
             .ok_or_else(|| VirtualPathError::LibraryNotFound(self.library.clone()))?;
-        Ok(!lib.readonly)
+        Ok(lib.is_writable())
     }
 
     pub fn to_string(&self) -> String {
