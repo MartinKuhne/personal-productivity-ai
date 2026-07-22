@@ -104,7 +104,7 @@ The requirements below have been formatted using the **Easy Approach to Requirem
 ### Markdown
 
 * [REQ-201] GFM Parsing: The Markdown parser shall support the GitHub Flavored Markdown (GFM) tables extension. The parser shall enable the `ENABLE_TABLES`, `ENABLE_FOOTNOTES`, `ENABLE_STRIKETHROUGH`, and `ENABLE_TASKLISTS` options. The `ENABLE_HARD_BREAKS` option is NOT enabled by default.
-* [REQ-202] Heading Sizing: The FastMD Viewer shall render H1, H2, and H3 headings at 24px, 20px, and 16px respectively.
+* [REQ-202] Heading Sizing: The FastMD Viewer shall render H1 through H6 headings at 32px, 24px, 18px, 14px, 12px, and 12px respectively.
 * [REQ-203] Break Semantics:
     * [REQ-204]: When a single carriage return (newline) is encountered, the Markdown parser shall render it as a single space character (soft break).
     * [REQ-205]: Hard breaks (two trailing spaces followed by a newline, or backslash-newline) require the `ENABLE_HARD_BREAKS` parser option which is disabled by default. With the option enabled, the parser shall force a line split.
@@ -117,8 +117,9 @@ The requirements below have been formatted using the **Easy Approach to Requirem
     * [REQ-211b]: Tables shall be rendered with a distinct visual frame (rounded corners, background color) to separate from body text. [Gap: Not yet implemented.]
 * [REQ-212] YAML Front-Matter: Where a document contains a YAML front-matter header, the FastMD Viewer shall parse the metadata into key-value pairs and render them inside a dedicated container table.
 * [REQ-213] Table of Contents (ToC) Navigation:
-    * [REQ-214]: The ToC panel shall display H1–H3 headers indented by header depth.
+    * [REQ-214]: The ToC panel shall display H1–H6 headers indented by header depth.
     * [REQ-215]: When a ToC element is clicked, the FastMD Viewer shall invoke a viewport scroll event to the selected heading.
+* [REQ-216] Markdown Cheatsheet Conformance: The FastMD Viewer shall conform to the [Markdown Cheatsheet](https://github.com/adam-p/markdown-here/wiki/markdown-cheatsheet) specification for all core Markdown features including: Headers (H1–H6, setext-style), Emphasis (bold, italic, strikethrough), Lists (ordered, unordered, nested), Links (inline, reference, auto-links), Images (inline, reference), Code (inline, fenced blocks with syntax highlighting), Footnotes, Tables (with alignment), Blockquotes, Inline HTML, Horizontal Rules, and Line Breaks (soft and hard).
 
 ### 3. Concurrent Workspace Indexer Pipeline
 * [REQ-301] Parallel Startup Indexer: When the application starts, the FastMD Viewer shall initialize a background directory crawler thread to recursively scan the workspace directory and populate a shared work queue with Markdown file paths.
