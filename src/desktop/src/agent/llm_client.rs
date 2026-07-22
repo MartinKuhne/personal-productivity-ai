@@ -45,6 +45,7 @@ pub struct LLMClient {
     api_url: String,
     api_key: String,
     model_name: String,
+    max_tokens: u32,
 }
 
 impl LLMClient {
@@ -58,6 +59,7 @@ impl LLMClient {
             api_url: model_cfg.api_url,
             api_key: model_cfg.api_key,
             model_name: model_cfg.model,
+            max_tokens: config.max_tokens,
         })
     }
 
@@ -84,7 +86,8 @@ impl LLMClient {
             "model": self.model_name,
             "messages": messages,
             "tools": tools,
-            "tool_choice": "auto"
+            "tool_choice": "auto",
+            "max_tokens": self.max_tokens
         });
 
         let max_retries = 3u32;
@@ -227,6 +230,7 @@ mod tests {
             api_url: "http://localhost".to_string(),
             api_key: "real-key".to_string(),
             model_name: "test".to_string(),
+            max_tokens: 32768,
         };
         assert!(client.api_key_valid());
     }
@@ -237,6 +241,7 @@ mod tests {
             api_url: "http://localhost".to_string(),
             api_key: "".to_string(),
             model_name: "test".to_string(),
+            max_tokens: 32768,
         };
         assert!(!client.api_key_valid());
     }
@@ -247,7 +252,26 @@ mod tests {
             api_url: "http://localhost".to_string(),
             api_key: "your-api-key-here".to_string(),
             model_name: "test".to_string(),
+            max_tokens: 32768,
         };
         assert!(!client.api_key_valid());
+    }
+
+    #[test]
+    fn test_llm_client_from_config_includes_max_tokens() {
+        let mut config = AppConfig::default();
+        config.models.insert(
+            "test_model".to_string(),
+            crate::config::LlmConfig {
+                model: "gpt-4".to_string(),
+                api_url: "http://api.example.com".to_string(),
+                api_key: "test-key".to_string(),
+                cost: None,
+                use_case: vec!["chat".to_string()],
+            },
+        );
+        config.max_tokens = 16384;
+        let client = LLMClient::from_config(&config).unwrap();
+        assert_eq!(client.max_tokens, 16384);
     }
 }
