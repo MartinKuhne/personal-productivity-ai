@@ -1,3 +1,5 @@
+//! File-tree selection state — single-file selection, multi-file selection, selected directory, and expanded directories.
+
 use std::collections::HashSet;
 use std::path::PathBuf;
 

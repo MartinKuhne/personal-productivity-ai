@@ -1,3 +1,5 @@
+//! Maintains the set of all known directories by consuming file events from the event bus.
+
 use crate::file_events::{BusReader, FileEvent, FileEventKind};
 use std::collections::HashSet;
 use std::path::{Path, PathBuf};

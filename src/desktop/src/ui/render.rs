@@ -1,3 +1,5 @@
+//! Pulldown-cmark event-driven markdown renderer — emits egui widgets for headings, paragraphs, code blocks, lists, tables, links, and images.
+
 use eframe::egui;
 use egui::RichText;
 

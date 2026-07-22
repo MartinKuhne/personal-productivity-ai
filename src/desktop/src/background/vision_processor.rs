@@ -1,3 +1,5 @@
+//! Vision-model inference worker — generates markdown descriptions for discovered images using an LLM.
+
 use crate::background::models::{BackgroundLogEntry, ImageJob, LogCategory};
 use crate::config::AppConfig;
 use crate::file_events::{Bus, FileEvent, FileEventProducer};

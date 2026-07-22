@@ -1,3 +1,5 @@
+//! Integration tests for `run_agent` — mock HTTP server simulating LLM responses, verifying tool calls, streaming, and cancellation.
+
 use crate::agent::agent_impl::run_agent;
 use crate::agent::context::AgentContext;
 use crate::config::AppConfig;

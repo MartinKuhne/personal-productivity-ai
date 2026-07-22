@@ -1,3 +1,5 @@
+//! Virtual path syntax — library-prefixed paths (e.g. `library/relative/path`) mapped to real filesystem locations with traversal protection.
+
 use std::path::{Path, PathBuf};
 
 #[derive(Debug, Clone, PartialEq)]

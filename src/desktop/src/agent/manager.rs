@@ -1,3 +1,5 @@
+//! Agent session manager — lifecycle and UI-visible state for a single LLM agent session (status, response, thinking, history, token usage).
+
 use crate::agent::AgentContext;
 use crate::config::AppConfig;
 use crate::file_events::Bus;

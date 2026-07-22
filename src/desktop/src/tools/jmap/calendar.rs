@@ -1,7 +1,7 @@
-// JMAP Calendar operations — currently unreachable (Fastmail lacks JMAP Calendar support).
-// Uses the core JMAP protocol (RFC 8620) via `urn:ietf:params:jmap:calendars`.
-// Error handling follows RFC 8620 §3.6.2.
-// See: <https://www.rfc-editor.org/rfc/rfc8620>
+//! JMAP Calendar operations — search, get, add, update, delete calendar events via `urn:ietf:params:jmap:calendars`.
+//!
+//! Error handling follows RFC 8620 §3.6.2.
+//! See: <https://www.rfc-editor.org/rfc/rfc8620>
 
 use crate::config::AppConfig;
 use serde_json::Value;
@@ -353,12 +353,10 @@ mod tests {
 
         let res_search = tool_search_calendar(&config, "meet");
         assert!(res_search.is_ok());
-        assert!(
-            res_search
-                .unwrap()
-                .results
-                .contains("Error from JMAP server")
-        );
+        assert!(res_search
+            .unwrap()
+            .results
+            .contains("Error from JMAP server"));
 
         let res_add_err = tool_add_calendar_item(&config, "{invalid json}");
         assert!(res_add_err.is_err());
@@ -391,20 +389,16 @@ mod tests {
 
         let res_search = tool_search_calendar(&config, "meet");
         // tool_search_calendar skips failed sessions and continues, but if all fail it returns an error
-        assert!(
-            res_search
-                .unwrap()
-                .results
-                .contains("Error fetching JMAP session")
-        );
+        assert!(res_search
+            .unwrap()
+            .results
+            .contains("Error fetching JMAP session"));
 
         let res_add = tool_add_calendar_item(&config, "{}");
-        assert!(
-            res_add
-                .unwrap()
-                .result
-                .contains("Error fetching JMAP session")
-        );
+        assert!(res_add
+            .unwrap()
+            .result
+            .contains("Error fetching JMAP session"));
     }
 
     #[test]

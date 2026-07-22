@@ -1,3 +1,5 @@
+//! Agent subsystem — agent implementation, context, LLM client, session manager, prompt builder, response formatter, and tool executor.
+
 pub mod agent_impl;
 pub mod context;
 pub mod llm_client;

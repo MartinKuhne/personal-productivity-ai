@@ -1,3 +1,5 @@
+//! Root egui `App` struct — owns all application state and wires together background tasks, panels, agent, and dialogs.
+
 use crate::agent::AgentSessionManager;
 use crate::background::{BackgroundProcessManager, SharedProcessManager};
 use crate::background_task::Task;

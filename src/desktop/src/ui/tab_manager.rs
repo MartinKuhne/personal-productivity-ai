@@ -1,3 +1,5 @@
+//! Open-document tab manager — adding, closing, switching tabs, and tracking loaded markdown content, YAML front matter, and TOC.
+
 use crate::ui::app::ToCEntry;
 use eframe::egui;
 use std::path::PathBuf;

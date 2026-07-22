@@ -1,3 +1,5 @@
+//! Left-panel layout state — width, dirty flag, and reset counter so the panel remembers its size across workspace changes.
+
 pub struct PanelLayout {
     pub left_panel_width: Option<f32>,
     pub left_panel_dirty: bool,

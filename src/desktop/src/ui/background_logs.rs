@@ -1,3 +1,5 @@
+//! Background-logs viewer panel — category filter, text search, auto-scroll, and copy-to-clipboard.
+
 use crate::background::{BackgroundLogEntry, LogCategory};
 use crate::ui::FastMdApp;
 use eframe::egui;

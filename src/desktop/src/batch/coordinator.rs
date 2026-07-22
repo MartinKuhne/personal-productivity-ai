@@ -1,3 +1,5 @@
+//! Batch coordinator — discovers targets, spawns the executor on a background thread, polls progress, and reports results.
+
 use crate::batch::discoverer::JobDiscoverer;
 use crate::batch::executor::BatchJobExecutor;
 use crate::batch::types::{

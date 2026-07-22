@@ -1,3 +1,5 @@
+//! Application configuration types and persistence — JMAP, CalDAV, CardDAV clients, content libraries, model settings.
+
 use std::path::{Path, PathBuf};
 
 use std::collections::HashMap;

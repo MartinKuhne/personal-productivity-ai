@@ -1,3 +1,5 @@
+//! Background subsystem — bus router, indexer, manager, models, PDF converter, vision processor, and watcher.
+
 pub mod bus_router;
 pub mod indexer;
 pub mod manager;

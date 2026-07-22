@@ -1,3 +1,5 @@
+//! Weather tool — geocodes a location via Nominatim and fetches current conditions and forecasts from Open-Meteo.
+
 use serde_json::Value;
 
 fn geocode(location: &str) -> Result<(f64, f64), String> {
@@ -260,11 +262,9 @@ mod tests {
         }
         let result_invalid = geocode("Seattle, WA");
         assert!(result_invalid.is_err());
-        assert!(
-            result_invalid
-                .unwrap_err()
-                .starts_with("Nominatim JSON error")
-        );
+        assert!(result_invalid
+            .unwrap_err()
+            .starts_with("Nominatim JSON error"));
 
         // test_tool_get_weather_success
         let nom_resp = serde_json::json!([{"lat": "47.6062", "lon": "-122.3321"}]);

@@ -1,3 +1,5 @@
+//! Background subsystem data types — `LogCategory`, `BackgroundLogEntry`, `ImageJob`, `PdfConversionJob`.
+
 use chrono::{DateTime, Local};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]

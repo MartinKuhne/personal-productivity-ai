@@ -1,3 +1,5 @@
+//! Tool-call dispatcher — receives tool-call JSON from the LLM, dispatches through the registry, and feeds results back.
+
 use crate::config::AppConfig;
 use crate::file_events::{Bus, FileEvent};
 use crate::messages::BackgroundMessage;

@@ -25,3 +25,11 @@ When working on this codebase, all AI agents must adhere strictly to the followi
 
 ## 6. Code Quality
 - Write modular code with minimal side effects.
+
+## 7. Documentation
+- Every module must have a `//!` module-level doc comment.
+- Start with a concise one-sentence summary, then add detail if needed.
+- The first line (before any blank line) is used in search results and overviews — keep it short and descriptive.
+- Every `pub` item (struct, enum, function, trait, type alias, const) must have a `///` doc comment.
+- Include examples in doc comments where they clarify usage.
+- Run `cargo doc --no-deps` to verify documentation builds without warnings.

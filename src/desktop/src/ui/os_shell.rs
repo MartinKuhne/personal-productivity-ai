@@ -1,3 +1,5 @@
+//! Platform-specific helpers — open a file in the system default editor and reveal a file in the OS file explorer.
+
 use std::path::Path;
 
 /// Purpose: Open a file in the system default editor via the OS shell.

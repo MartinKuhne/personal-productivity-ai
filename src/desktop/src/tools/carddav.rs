@@ -1,3 +1,5 @@
+//! CardDAV agent tools — search, retrieve, create, update, and delete contacts across configured CardDAV servers.
+
 use crate::config::AppConfig;
 use fast_dav_rs::CardDavClient;
 use std::sync::OnceLock;

@@ -1,3 +1,5 @@
+//! Splits LLM thinking/reasoning blocks from final content and formats tool-call/result messages for the chat UI.
+
 pub fn split_thinking_and_content(text: &str) -> (String, String) {
     let delim = "\u{1f914}";
     if let Some(start_idx) = text.find(delim) {

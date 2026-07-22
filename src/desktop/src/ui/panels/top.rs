@@ -1,3 +1,5 @@
+//! Top toolbar panel — indexing status, tag filter dropdown, new-file/new-dir buttons, and content-library name.
+
 use crate::ui::FastMdApp;
 use eframe::egui;
 use egui::RichText;

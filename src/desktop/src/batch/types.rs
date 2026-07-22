@@ -1,3 +1,5 @@
+//! Batch-processing data types — `BatchMode`, `BatchConfig`, `BatchJob`, `BatchResult`, `BatchHandle`, and validation logic.
+
 use chrono::{DateTime, Local};
 use std::path::PathBuf;
 use std::sync::atomic::AtomicBool;

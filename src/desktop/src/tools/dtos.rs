@@ -1,3 +1,5 @@
+//! Input/output data-transfer objects for every tool — `serde` and `JsonSchema` derives for LLM argument serialisation.
+
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 

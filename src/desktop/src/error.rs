@@ -1,3 +1,5 @@
+//! Error types for the agent subsystem — covers network, HTTP, JSON, IO, tool, and config error variants.
+
 use std::fmt;
 
 #[derive(Debug)]

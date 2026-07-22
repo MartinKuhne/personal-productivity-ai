@@ -1,3 +1,5 @@
+//! JMAP subsystem — email, contact, and calendar tool functions over the JMAP protocol (RFC 8620/8621).
+
 pub mod calendar;
 pub mod client;
 pub mod contacts;
