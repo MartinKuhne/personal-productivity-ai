@@ -1,3 +1,5 @@
+//! Five-panel layout — top, bottom, left, right, and center panel submodules and their entry-point functions.
+
 pub mod bottom;
 pub mod center;
 pub mod left;

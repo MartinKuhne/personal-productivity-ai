@@ -1,3 +1,5 @@
+//! Parses YAML front matter from a markdown string, returning the parsed value and remaining body.
+
 use serde_yaml::Value;
 
 /// Parse YAML front matter from markdown content.

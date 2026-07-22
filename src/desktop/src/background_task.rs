@@ -1,3 +1,5 @@
+//! Background task orchestrator — spawns and owns all worker threads (watcher, indexer, PDF converter, vision processor, bus router).
+
 use crate::background::bus_router::BusRouter;
 use crate::background::indexer::Indexer;
 use crate::background::pdf_converter::PdfConverterWorker;

@@ -1,3 +1,5 @@
+//! Inline text editor with inverted (white-on-black) colour scheme for editing markdown files inside egui.
+
 use crate::document::DocumentContent;
 use crate::file_events::FileEventProducer;
 use eframe::egui::{self, Key};

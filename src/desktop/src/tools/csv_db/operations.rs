@@ -1,3 +1,5 @@
+//! CSV-database CRUD operations — create a new CSV database, add rows, list databases, and path resolution.
+
 use super::schema::{AddRowsInput, CreateCsvInput, CsvDatabase, ListCsvInput};
 use crate::config::AppConfig;
 use std::path::PathBuf;

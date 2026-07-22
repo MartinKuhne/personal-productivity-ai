@@ -1,3 +1,5 @@
+//! Right table-of-contents panel — clickable heading entries with level-based indentation and font sizing.
+
 use crate::ui::FastMdApp;
 use eframe::egui;
 use egui::RichText;

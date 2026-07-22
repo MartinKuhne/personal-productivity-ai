@@ -1,3 +1,5 @@
+//! CSV-database data types — `CsvDatabase` descriptor and serde/JsonSchema input/output structs for CRUD and query operations.
+
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;

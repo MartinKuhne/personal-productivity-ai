@@ -1,3 +1,5 @@
+//! PDF-to-markdown converter worker — invokes an external tool to produce a sibling `.md` file for each PDF.
+
 use crate::background::models::{BackgroundLogEntry, LogCategory};
 use crate::file_events::{Bus, FileEvent};
 use crate::messages::BackgroundMessage;

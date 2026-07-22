@@ -1,3 +1,5 @@
+//! Initial recursive scanner — walks content-library directories emitting `FileEvent::Discovered` for each entry.
+
 use crate::background::models::{BackgroundLogEntry, LogCategory};
 use crate::background::PdfConversionJob;
 use crate::config::AppConfig;

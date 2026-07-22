@@ -1,3 +1,5 @@
+//! Left file-tree panel — builds `TreeNode` hierarchy from content libraries and discovered files, renders with tag filtering.
+
 use crate::ui::FastMdApp;
 use crate::ui::{TreeNode, TreeNodeContext};
 use eframe::egui;

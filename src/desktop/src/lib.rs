@@ -1,3 +1,5 @@
+//! Desktop application library for FastMd — a markdown knowledge-base manager with agent, tooling, and UI.
+
 pub mod agent;
 pub mod background;
 pub mod background_task;

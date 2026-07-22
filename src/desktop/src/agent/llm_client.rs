@@ -1,3 +1,5 @@
+//! LLM HTTP client — builds requests, streams responses, parses tool calls, and extracts token-usage blocks from OpenAI/Anthropic APIs.
+
 use crate::config::AppConfig;
 use crate::error::AgentError;
 use crate::messages::TokenUsageInfo;

@@ -1,3 +1,5 @@
+//! System-prompt builder — augments the base config prompt with context about the active file, directory, and selected files.
+
 use crate::config::AppConfig;
 use std::collections::HashSet;
 use std::path::PathBuf;

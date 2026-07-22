@@ -1,3 +1,5 @@
+//! Drains file events from the bus to maintain running lists of all known files and directories.
+
 use crate::file_events::{BusReader, FileEvent, FileEventKind};
 use std::path::PathBuf;
 

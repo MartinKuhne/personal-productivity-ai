@@ -1,3 +1,5 @@
+//! Playwright-based async browser automation — navigate, get page state, click, type, screenshot.
+
 use playwright_rs::Page;
 
 /// Navigates the page to the given URL.

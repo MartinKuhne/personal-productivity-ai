@@ -1,3 +1,5 @@
+//! Tool registry — registers all available tools, dispatches execution by name, and produces the JSON-Schema tool list for the LLM.
+
 use crate::config::AppConfig;
 use crate::tools::context::ToolContext;
 use crate::tools::Tool;

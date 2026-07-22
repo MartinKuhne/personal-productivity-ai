@@ -1,3 +1,5 @@
+//! Web-fetching tools — fetch a URL and convert HTML to markdown, and search via a SearXNG instance.
+
 use crate::config::AppConfig;
 use fast_h2m::convert;
 

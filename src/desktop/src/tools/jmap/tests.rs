@@ -1,3 +1,5 @@
+//! Unit tests for the JMAP client's `jmap_check_errors` function.
+
 use super::client::jmap_check_errors;
 use serde_json::json;
 

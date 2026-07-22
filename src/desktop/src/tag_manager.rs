@@ -1,3 +1,5 @@
+//! Global tag index — per-file tag map, derived set of all tags, and prompt-tagged file tracking.
+
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
 

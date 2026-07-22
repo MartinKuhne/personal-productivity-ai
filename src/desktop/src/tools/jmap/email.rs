@@ -657,11 +657,9 @@ mod tests {
             ]]
         });
         let result = convert_html_in_jmap(res);
-        assert!(
-            result["methodResponses"][0][1]["list"][0]["subject"]
-                .as_str()
-                .is_some()
-        );
+        assert!(result["methodResponses"][0][1]["list"][0]["subject"]
+            .as_str()
+            .is_some());
     }
 
     #[test]
@@ -1224,10 +1222,9 @@ mod tests {
             &config, None, None, None, None, None, None, None, None, 1, 10,
         );
         assert!(res.is_err());
-        assert!(
-            res.unwrap_err()
-                .contains("At least one filter field must be provided")
-        );
+        assert!(res
+            .unwrap_err()
+            .contains("At least one filter field must be provided"));
     }
 
     // -- Pagination tests ------------------------------------------------

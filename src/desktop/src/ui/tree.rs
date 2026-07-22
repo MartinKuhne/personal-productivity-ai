@@ -1,3 +1,5 @@
+//! File-system tree widget — expand/collapse, file selection, multi-select, and context-menu operations (rename, move, delete, new file/dir).
+
 use crate::messages::BackgroundMessage;
 use crate::print::{execute_print_blocking, PrintJob};
 use crate::ui::panel_layout::PanelLayout;
