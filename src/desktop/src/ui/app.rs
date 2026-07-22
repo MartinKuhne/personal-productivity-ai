@@ -186,40 +186,50 @@ impl FastMdApp {
                 changed = true;
                 match event.kind {
                     FileEventKind::Discovered => {
-                        if Self::is_workspace_file(&event.path) {
-                            if !self.file_processor.all_files.contains(&event.path) {
-                                self.file_processor.all_files.push(event.path.clone());
-                            }
-                            if let Some(parent) = event.path.parent() {
-                                let parent = parent.to_path_buf();
-                                if !self.file_processor.all_dirs.contains(&parent) {
-                                    self.file_processor.all_dirs.push(parent);
+                        for p in &event.paths {
+                            if Self::is_workspace_file(p) {
+                                if !self.file_processor.all_files.contains(p) {
+                                    self.file_processor.all_files.push(p.clone());
+                                }
+                                if let Some(parent) = p.parent() {
+                                    let parent = parent.to_path_buf();
+                                    if !self.file_processor.all_dirs.contains(&parent) {
+                                        self.file_processor.all_dirs.push(parent);
+                                    }
                                 }
                             }
                         }
                     }
                     FileEventKind::Updated => {
-                        if self.tab_manager.loaded_path.as_ref() == Some(&event.path)
-                            && !self.editor_state.is_open
-                        {
-                            self.tab_manager.loaded_path = None;
+                        for p in &event.paths {
+                            if self.tab_manager.loaded_path.as_ref() == Some(p)
+                                && !self.editor_state.is_open
+                            {
+                                self.tab_manager.loaded_path = None;
+                            }
                         }
                     }
                     FileEventKind::Removed => {
-                        self.file_processor.all_files.retain(|p| p != &event.path);
-                        if self.tab_manager.loaded_path.as_ref() == Some(&event.path) {
-                            self.tab_manager.loaded_path = None;
+                        for p in &event.paths {
+                            self.file_processor.all_files.retain(|fp| fp != p);
+                            if self.tab_manager.loaded_path.as_ref() == Some(p) {
+                                self.tab_manager.loaded_path = None;
+                            }
+                            self.tag_manager.remove_file(p);
                         }
-                        self.tag_manager.remove_file(&event.path);
                         needs_rebuild = true;
                     }
                     FileEventKind::DirDiscovered => {
-                        if !self.file_processor.all_dirs.contains(&event.path) {
-                            self.file_processor.all_dirs.push(event.path.clone());
+                        for p in &event.paths {
+                            if !self.file_processor.all_dirs.contains(p) {
+                                self.file_processor.all_dirs.push(p.clone());
+                            }
                         }
                     }
                     FileEventKind::DirRemoved => {
-                        self.file_processor.all_dirs.retain(|p| p != &event.path);
+                        for p in &event.paths {
+                            self.file_processor.all_dirs.retain(|dp| dp != p);
+                        }
                     }
                 }
             }
@@ -955,7 +965,7 @@ mod tests {
         // Use a separate clone of the bus to publish; both clones
         // share the same subscriber list.
         let publisher = app.file_event_bus.clone();
-        publisher.publish(crate::file_events::FileEvent::updated(path.clone()));
+        publisher.publish(crate::file_events::FileEvent::updated_one(path.clone()));
 
         let changed = app.process_file_events();
         assert!(changed, "process_file_events should report a change");
@@ -984,7 +994,7 @@ mod tests {
 
         app.file_event_reader = Some(app.file_event_bus.subscribe());
         let publisher = app.file_event_bus.clone();
-        publisher.publish(crate::file_events::FileEvent::updated(path.clone()));
+        publisher.publish(crate::file_events::FileEvent::updated_one(path.clone()));
 
         let _ = app.process_file_events();
         assert!(
@@ -1008,7 +1018,7 @@ mod tests {
 
         app.file_event_reader = Some(app.file_event_bus.subscribe());
         let publisher = app.file_event_bus.clone();
-        publisher.publish(crate::file_events::FileEvent::removed(path.clone()));
+        publisher.publish(crate::file_events::FileEvent::removed_one(path.clone()));
 
         let _ = app.process_file_events();
         assert!(app.tab_manager.loaded_path.is_none());
@@ -1032,10 +1042,10 @@ mod tests {
 
         app.file_event_reader = Some(app.file_event_bus.subscribe());
         let publisher = app.file_event_bus.clone();
-        publisher.publish(crate::file_events::FileEvent::discovered(pdf.clone()));
-        publisher.publish(crate::file_events::FileEvent::discovered(img.clone()));
-        publisher.publish(crate::file_events::FileEvent::discovered(md.clone()));
-        publisher.publish(crate::file_events::FileEvent::discovered(
+        publisher.publish(crate::file_events::FileEvent::discovered_one(pdf.clone()));
+        publisher.publish(crate::file_events::FileEvent::discovered_one(img.clone()));
+        publisher.publish(crate::file_events::FileEvent::discovered_one(md.clone()));
+        publisher.publish(crate::file_events::FileEvent::discovered_one(
             pdf_in_pdf_only_dir.clone(),
         ));
 
@@ -1120,13 +1130,13 @@ mod tests {
 
         app.file_event_reader = Some(app.file_event_bus.subscribe());
         let publisher = app.file_event_bus.clone();
-        publisher.publish(crate::file_events::FileEvent::discovered(PathBuf::from(
-            "/lib/notes.md",
-        )));
-        publisher.publish(crate::file_events::FileEvent::discovered(PathBuf::from(
-            "/lib/extra.md",
-        )));
-        publisher.publish(crate::file_events::FileEvent::updated(PathBuf::from(
+        publisher.publish(crate::file_events::FileEvent::discovered_one(
+            PathBuf::from("/lib/notes.md"),
+        ));
+        publisher.publish(crate::file_events::FileEvent::discovered_one(
+            PathBuf::from("/lib/extra.md"),
+        ));
+        publisher.publish(crate::file_events::FileEvent::updated_one(PathBuf::from(
             "/lib/notes.md",
         )));
 
@@ -1159,7 +1169,7 @@ mod tests {
         // evicts the file's tags.
         app.file_event_reader = Some(app.file_event_bus.subscribe());
         app.file_event_bus
-            .publish(crate::file_events::FileEvent::removed(PathBuf::from(
+            .publish(crate::file_events::FileEvent::removed_one(PathBuf::from(
                 "/lib/notes.md",
             )));
         let _ = app.process_file_events();
@@ -1174,9 +1184,9 @@ mod tests {
         app.tag_manager
             .add_tags(PathBuf::from("/lib/other.md"), vec!["keep".to_string()]);
         app.file_event_bus
-            .publish(crate::file_events::FileEvent::discovered(PathBuf::from(
-                "/lib/other.md",
-            )));
+            .publish(crate::file_events::FileEvent::discovered_one(
+                PathBuf::from("/lib/other.md"),
+            ));
         let _ = app.process_file_events();
         assert!(
             app.tag_manager.all_tags().contains("keep"),

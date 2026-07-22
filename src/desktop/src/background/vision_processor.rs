@@ -320,7 +320,7 @@ mod tests {
             .recv_timeout(std::time::Duration::from_millis(200))
             .expect("process_image should publish a Discovered event for the output .md");
         assert_eq!(event.kind, crate::file_events::FileEventKind::Discovered);
-        assert_eq!(event.path, md_path);
+        assert_eq!(event.paths[0], md_path);
     }
 
     #[tokio::test]

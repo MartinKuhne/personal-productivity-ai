@@ -45,9 +45,11 @@ impl FileEventProcessor {
         while let Ok(event) = self.reader.try_recv() {
             match event.kind {
                 FileEventKind::Discovered => {
-                    if !self.all_files.contains(&event.path) {
-                        self.all_files.push(event.path);
-                        needs_reload = true;
+                    for p in &event.paths {
+                        if !self.all_files.contains(p) {
+                            self.all_files.push(p.clone());
+                            needs_reload = true;
+                        }
                     }
                 }
                 FileEventKind::Updated => {
@@ -57,7 +59,9 @@ impl FileEventProcessor {
                     needs_reload = true;
                 }
                 FileEventKind::Removed => {
-                    self.all_files.retain(|p| p != &event.path);
+                    for p in &event.paths {
+                        self.all_files.retain(|fp| fp != p);
+                    }
                     // Deletion handled by FastMdApp; we just signal change
                     needs_reload = true;
                 }
@@ -101,8 +105,8 @@ mod tests {
         let reader = bus.subscribe();
         let mut processor = FileEventProcessor::new(reader);
 
-        bus.publish(FileEvent::discovered(PathBuf::from("a.md")));
-        bus.publish(FileEvent::discovered(PathBuf::from("b.md")));
+        bus.publish(FileEvent::discovered_one(PathBuf::from("a.md")));
+        bus.publish(FileEvent::discovered_one(PathBuf::from("b.md")));
 
         assert!(processor.process_events());
         assert_eq!(processor.all_files.len(), 2);
@@ -117,7 +121,7 @@ mod tests {
         processor.all_files.push(PathBuf::from("keep.md"));
         processor.all_files.push(PathBuf::from("remove.md"));
 
-        bus.publish(FileEvent::removed(PathBuf::from("remove.md")));
+        bus.publish(FileEvent::removed_one(PathBuf::from("remove.md")));
 
         assert!(processor.process_events());
         assert_eq!(processor.all_files.len(), 1);

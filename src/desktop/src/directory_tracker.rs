@@ -40,20 +40,26 @@ impl DirectoryTracker {
         while let Ok(event) = self.reader.try_recv() {
             match event.kind {
                 FileEventKind::DirDiscovered => {
-                    if self.dirs.insert(event.path) {
-                        changed = true;
+                    for p in &event.paths {
+                        if self.dirs.insert(p.clone()) {
+                            changed = true;
+                        }
                     }
                 }
                 FileEventKind::DirRemoved => {
-                    if self.remove_dir_and_descendants(&event.path) {
-                        changed = true;
+                    for p in &event.paths {
+                        if self.remove_dir_and_descendants(p) {
+                            changed = true;
+                        }
                     }
                 }
                 FileEventKind::Discovered => {
                     // Safety net: ensure parent directory is tracked.
-                    if let Some(parent) = event.path.parent() {
-                        if self.dirs.insert(parent.to_path_buf()) {
-                            changed = true;
+                    for p in &event.paths {
+                        if let Some(parent) = p.parent() {
+                            if self.dirs.insert(parent.to_path_buf()) {
+                                changed = true;
+                            }
                         }
                     }
                 }
@@ -121,7 +127,7 @@ mod tests {
     #[test]
     fn test_dir_discovered_adds_directory() {
         let (bus, mut tracker) = make_bus_and_tracker();
-        bus.publish(FileEvent::dir_discovered(PathBuf::from("/a")));
+        bus.publish(FileEvent::dir_discovered_one(PathBuf::from("/a")));
 
         assert!(tracker.process_events());
         assert!(tracker.contains(Path::new("/a")));
@@ -131,8 +137,8 @@ mod tests {
     #[test]
     fn test_dir_discovered_idempotent() {
         let (bus, mut tracker) = make_bus_and_tracker();
-        bus.publish(FileEvent::dir_discovered(PathBuf::from("/a")));
-        bus.publish(FileEvent::dir_discovered(PathBuf::from("/a")));
+        bus.publish(FileEvent::dir_discovered_one(PathBuf::from("/a")));
+        bus.publish(FileEvent::dir_discovered_one(PathBuf::from("/a")));
 
         assert!(tracker.process_events());
         assert_eq!(tracker.len(), 1);
@@ -141,11 +147,11 @@ mod tests {
     #[test]
     fn test_dir_removed_removes_directory() {
         let (bus, mut tracker) = make_bus_and_tracker();
-        bus.publish(FileEvent::dir_discovered(PathBuf::from("/a")));
+        bus.publish(FileEvent::dir_discovered_one(PathBuf::from("/a")));
         tracker.process_events();
         assert_eq!(tracker.len(), 1);
 
-        bus.publish(FileEvent::dir_removed(PathBuf::from("/a")));
+        bus.publish(FileEvent::dir_removed_one(PathBuf::from("/a")));
         assert!(tracker.process_events());
         assert!(!tracker.contains(Path::new("/a")));
         assert_eq!(tracker.len(), 0);
@@ -154,14 +160,14 @@ mod tests {
     #[test]
     fn test_dir_removed_cascades_to_descendants() {
         let (bus, mut tracker) = make_bus_and_tracker();
-        bus.publish(FileEvent::dir_discovered(PathBuf::from("/a")));
-        bus.publish(FileEvent::dir_discovered(PathBuf::from("/a/b")));
-        bus.publish(FileEvent::dir_discovered(PathBuf::from("/a/b/c")));
-        bus.publish(FileEvent::dir_discovered(PathBuf::from("/d")));
+        bus.publish(FileEvent::dir_discovered_one(PathBuf::from("/a")));
+        bus.publish(FileEvent::dir_discovered_one(PathBuf::from("/a/b")));
+        bus.publish(FileEvent::dir_discovered_one(PathBuf::from("/a/b/c")));
+        bus.publish(FileEvent::dir_discovered_one(PathBuf::from("/d")));
         tracker.process_events();
         assert_eq!(tracker.len(), 4);
 
-        bus.publish(FileEvent::dir_removed(PathBuf::from("/a")));
+        bus.publish(FileEvent::dir_removed_one(PathBuf::from("/a")));
         assert!(tracker.process_events());
         assert!(!tracker.contains(Path::new("/a")));
         assert!(!tracker.contains(Path::new("/a/b")));
@@ -173,14 +179,14 @@ mod tests {
     #[test]
     fn test_dir_removed_unknown_is_noop() {
         let (bus, mut tracker) = make_bus_and_tracker();
-        bus.publish(FileEvent::dir_removed(PathBuf::from("/nonexistent")));
+        bus.publish(FileEvent::dir_removed_one(PathBuf::from("/nonexistent")));
         assert!(!tracker.process_events());
     }
 
     #[test]
     fn test_file_discovered_adds_parent_directory() {
         let (bus, mut tracker) = make_bus_and_tracker();
-        bus.publish(FileEvent::discovered(PathBuf::from("/a/b/file.md")));
+        bus.publish(FileEvent::discovered_one(PathBuf::from("/a/b/file.md")));
 
         assert!(tracker.process_events());
         assert!(tracker.contains(Path::new("/a/b")));
@@ -191,9 +197,9 @@ mod tests {
     #[test]
     fn test_file_discovered_idempotent_for_parent() {
         let (bus, mut tracker) = make_bus_and_tracker();
-        bus.publish(FileEvent::discovered(PathBuf::from("/a/b/file.md")));
-        bus.publish(FileEvent::discovered(PathBuf::from("/a/b/other.md")));
-        bus.publish(FileEvent::dir_discovered(PathBuf::from("/a/b")));
+        bus.publish(FileEvent::discovered_one(PathBuf::from("/a/b/file.md")));
+        bus.publish(FileEvent::discovered_one(PathBuf::from("/a/b/other.md")));
+        bus.publish(FileEvent::dir_discovered_one(PathBuf::from("/a/b")));
 
         assert!(tracker.process_events());
         assert_eq!(tracker.len(), 1);
@@ -202,9 +208,9 @@ mod tests {
     #[test]
     fn test_dirs_sorted_returns_sorted() {
         let (bus, mut tracker) = make_bus_and_tracker();
-        bus.publish(FileEvent::dir_discovered(PathBuf::from("/c")));
-        bus.publish(FileEvent::dir_discovered(PathBuf::from("/a")));
-        bus.publish(FileEvent::dir_discovered(PathBuf::from("/b")));
+        bus.publish(FileEvent::dir_discovered_one(PathBuf::from("/c")));
+        bus.publish(FileEvent::dir_discovered_one(PathBuf::from("/a")));
+        bus.publish(FileEvent::dir_discovered_one(PathBuf::from("/b")));
         tracker.process_events();
 
         let sorted = tracker.dirs_sorted();
@@ -217,11 +223,11 @@ mod tests {
     #[test]
     fn test_file_removed_or_updated_does_not_affect_dirs() {
         let (bus, mut tracker) = make_bus_and_tracker();
-        bus.publish(FileEvent::dir_discovered(PathBuf::from("/a")));
+        bus.publish(FileEvent::dir_discovered_one(PathBuf::from("/a")));
         tracker.process_events();
 
-        bus.publish(FileEvent::removed(PathBuf::from("/a/file.md")));
-        bus.publish(FileEvent::updated(PathBuf::from("/a/file.md")));
+        bus.publish(FileEvent::removed_one(PathBuf::from("/a/file.md")));
+        bus.publish(FileEvent::updated_one(PathBuf::from("/a/file.md")));
         assert!(!tracker.process_events());
         assert_eq!(tracker.len(), 1);
     }
@@ -236,9 +242,9 @@ mod tests {
     #[test]
     fn test_process_events_handles_multiple_events_in_order() {
         let (bus, mut tracker) = make_bus_and_tracker();
-        bus.publish(FileEvent::dir_discovered(PathBuf::from("/a")));
-        bus.publish(FileEvent::dir_discovered(PathBuf::from("/b")));
-        bus.publish(FileEvent::dir_removed(PathBuf::from("/a")));
+        bus.publish(FileEvent::dir_discovered_one(PathBuf::from("/a")));
+        bus.publish(FileEvent::dir_discovered_one(PathBuf::from("/b")));
+        bus.publish(FileEvent::dir_removed_one(PathBuf::from("/a")));
 
         assert!(tracker.process_events());
         assert!(!tracker.contains(Path::new("/a")));
@@ -249,13 +255,13 @@ mod tests {
     #[test]
     fn test_dir_removed_is_idempotent() {
         let (bus, mut tracker) = make_bus_and_tracker();
-        bus.publish(FileEvent::dir_discovered(PathBuf::from("/a")));
+        bus.publish(FileEvent::dir_discovered_one(PathBuf::from("/a")));
         tracker.process_events();
 
-        bus.publish(FileEvent::dir_removed(PathBuf::from("/a")));
+        bus.publish(FileEvent::dir_removed_one(PathBuf::from("/a")));
         tracker.process_events();
 
-        bus.publish(FileEvent::dir_removed(PathBuf::from("/a")));
+        bus.publish(FileEvent::dir_removed_one(PathBuf::from("/a")));
         assert!(!tracker.process_events());
     }
 }

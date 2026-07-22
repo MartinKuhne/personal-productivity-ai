@@ -68,6 +68,15 @@ impl Indexer {
         workers
     }
 
+    /// Walk every content library and emit a single `FileEvent::Discovered`
+    /// per directory containing **all** files found inside it (Markdown,
+    /// PDF, image, etc.), batching them into the `paths` vec.  This keeps
+    /// the event count low during the initial scan — downstream consumers
+    /// iterate `event.paths` regardless, so the behaviour is identical.
+    ///
+    /// Each library is walked independently with its own batch; PDF and
+    /// image files are also forwarded on their respective channels for
+    /// background conversion / vision processing.
     pub fn scan_libraries(
         &self,
         tx_work: &Sender<PathBuf>,
@@ -86,20 +95,35 @@ impl Indexer {
                 .into_iter()
                 .filter_entry(|e| e.file_name() != ".git");
 
+            let mut batch_paths: Vec<PathBuf> = Vec::new();
+            let mut current_parent: Option<PathBuf> = None;
+
+            let flush_batch = |batch: &mut Vec<PathBuf>, bus: &Bus<FileEvent>| {
+                if !batch.is_empty() {
+                    bus.publish(FileEvent::discovered(std::mem::take(batch)));
+                }
+            };
+
             for entry in walker.filter_map(|e| e.ok()) {
                 if self.cancel.load(Ordering::SeqCst) {
+                    flush_batch(&mut batch_paths, &self.bus);
                     return;
                 }
                 files_scanned += 1;
                 let path = entry.path();
                 if path.is_file() {
+                    let parent = path.parent().map(|p| p.to_path_buf());
+                    if parent != current_parent {
+                        flush_batch(&mut batch_paths, &self.bus);
+                        current_parent = parent;
+                    }
                     if let Some(ext) = path.extension() {
                         let ext_str = ext.to_string_lossy().to_lowercase();
                         if ext_str == "md" || ext_str == "markdown" || ext_str == "txt" {
-                            self.bus.publish(FileEvent::discovered(path.to_path_buf()));
+                            batch_paths.push(path.to_path_buf());
                             let _ = tx_work.send(path.to_path_buf());
                         } else if ext_str == "pdf" {
-                            self.bus.publish(FileEvent::discovered(path.to_path_buf()));
+                            batch_paths.push(path.to_path_buf());
                             let job = PdfConversionJob::new(path.to_path_buf());
                             if job.should_convert() {
                                 pdfs_queued += 1;
@@ -141,6 +165,8 @@ impl Indexer {
                     std::thread::yield_now();
                 }
             }
+
+            flush_batch(&mut batch_paths, &self.bus);
         }
 
         let _ = self
@@ -191,7 +217,7 @@ mod tests {
         let mut discovered = Vec::new();
         while let Ok(ev) = reader.recv_timeout(std::time::Duration::from_millis(100)) {
             if ev.kind == crate::file_events::FileEventKind::Discovered {
-                discovered.push(ev.path);
+                discovered.extend(ev.paths);
             }
         }
         assert_eq!(discovered.len(), 2);
@@ -229,7 +255,7 @@ mod tests {
         let mut discovered = Vec::new();
         while let Ok(ev) = reader.recv_timeout(std::time::Duration::from_millis(100)) {
             if ev.kind == crate::file_events::FileEventKind::Discovered {
-                discovered.push(ev.path);
+                discovered.extend(ev.paths);
             }
         }
         assert_eq!(discovered.len(), 1);

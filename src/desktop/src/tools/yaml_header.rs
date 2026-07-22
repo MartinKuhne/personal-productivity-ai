@@ -245,7 +245,7 @@ mod tests {
             .recv_timeout(std::time::Duration::from_millis(100))
             .unwrap();
         assert_eq!(event.kind, crate::file_events::FileEventKind::Discovered);
-        assert_eq!(event.path, file_path);
+        assert_eq!(event.paths[0], file_path);
     }
 
     #[test]
@@ -274,6 +274,6 @@ mod tests {
             .recv_timeout(std::time::Duration::from_millis(100))
             .unwrap();
         assert_eq!(event.kind, crate::file_events::FileEventKind::Updated);
-        assert_eq!(event.path, file_path);
+        assert_eq!(event.paths[0], file_path);
     }
 }

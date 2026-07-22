@@ -107,21 +107,21 @@ impl FileWatcher {
                                             path: path.clone(),
                                             tags,
                                         });
-                                        bus_watcher.publish(FileEvent::updated(path.clone()));
+                                        bus_watcher.publish(FileEvent::updated_one(path.clone()));
                                     }
                                 }
                                 notify::EventKind::Remove(_) => {
                                     let _ = tx_notify.send(BackgroundMessage::FileDeleted {
                                         path: path.clone(),
                                     });
-                                    bus_watcher.publish(FileEvent::removed(path.clone()));
+                                    bus_watcher.publish(FileEvent::removed_one(path.clone()));
                                 }
                                 _ => {}
                             }
                         } else if is_pdf {
                             match event.kind {
                                 notify::EventKind::Create(_) | notify::EventKind::Modify(_) => {
-                                    bus_watcher.publish(FileEvent::updated(path.clone()));
+                                    bus_watcher.publish(FileEvent::updated_one(path.clone()));
                                     let job = PdfConversionJob::new(path.clone());
                                     if job.should_convert() {
                                         let _ = tx_pdf_watcher.send(path.clone());
@@ -143,7 +143,7 @@ impl FileWatcher {
                         } else if !path.exists() {
                             let _ = tx_notify
                                 .send(BackgroundMessage::FileDeleted { path: path.clone() });
-                            bus_watcher.publish(FileEvent::removed(path.clone()));
+                            bus_watcher.publish(FileEvent::removed_one(path.clone()));
                         }
                     }
                 }

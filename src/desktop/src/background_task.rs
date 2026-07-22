@@ -188,10 +188,15 @@ mod tests {
             .iter()
             .filter(|e| e.kind == crate::file_events::FileEventKind::Discovered)
             .collect();
-        assert_eq!(discovered.len(), 3);
+        let total: usize = discovered.iter().map(|e| e.paths.len()).sum();
+        assert_eq!(total, 3);
         let mut names: Vec<String> = discovered
             .iter()
-            .map(|e| e.path.file_name().unwrap().to_string_lossy().to_string())
+            .flat_map(|e| {
+                e.paths
+                    .iter()
+                    .map(|p| p.file_name().unwrap().to_string_lossy().to_string())
+            })
             .collect();
         names.sort();
         assert_eq!(names, vec!["a.md", "b.md", "c.txt"]);
@@ -237,7 +242,7 @@ mod tests {
 
         assert_eq!(tag_events.len(), 1);
         assert_eq!(tree_events.len(), 1);
-        assert_eq!(tag_events[0].path, tree_events[0].path);
+        assert_eq!(tag_events[0].paths[0], tree_events[0].paths[0]);
         assert_eq!(
             tag_events[0].kind,
             crate::file_events::FileEventKind::Discovered
@@ -281,10 +286,10 @@ mod tests {
             .iter()
             .find(|e| {
                 e.kind == crate::file_events::FileEventKind::Discovered
-                    && e.path.extension().and_then(|x| x.to_str()) == Some("pdf")
+                    && e.paths[0].extension().and_then(|x| x.to_str()) == Some("pdf")
             })
             .expect("initial scan should publish Discovered for PDFs");
-        assert_eq!(pdf_discovered.path, dir.path().join("report.pdf"));
+        assert_eq!(pdf_discovered.paths[0], dir.path().join("report.pdf"));
     }
 
     #[test]
@@ -330,7 +335,9 @@ mod tests {
         let pdf_path = dir.path().join("dropped.pdf");
         std::fs::write(&pdf_path, b"dummy").unwrap();
         task.file_event_bus
-            .publish(crate::file_events::FileEvent::discovered(pdf_path.clone()));
+            .publish(crate::file_events::FileEvent::discovered_one(
+                pdf_path.clone(),
+            ));
 
         let mut saw_success = false;
         let start = std::time::Instant::now();
@@ -404,7 +411,9 @@ mod tests {
         let pdf_path = dir.path().join("dropped.pdf");
         std::fs::write(&pdf_path, b"dummy").unwrap();
         task.file_event_bus
-            .publish(crate::file_events::FileEvent::discovered(pdf_path.clone()));
+            .publish(crate::file_events::FileEvent::discovered_one(
+                pdf_path.clone(),
+            ));
 
         let expected_md = {
             let mut p = pdf_path.clone();
@@ -418,7 +427,7 @@ mod tests {
             match bus_reader.recv_timeout(std::time::Duration::from_millis(100)) {
                 Ok(event) => {
                     if event.kind == crate::file_events::FileEventKind::Discovered
-                        && event.path == expected_md
+                        && event.paths.contains(&expected_md)
                     {
                         saw_discovered = true;
                         break;
@@ -478,7 +487,9 @@ mod tests {
         let img_path = dir.path().join("dropped.png");
         std::fs::write(&img_path, b"dummy image data").unwrap();
         task.file_event_bus
-            .publish(crate::file_events::FileEvent::discovered(img_path.clone()));
+            .publish(crate::file_events::FileEvent::discovered_one(
+                img_path.clone(),
+            ));
 
         let start = std::time::Instant::now();
         let mut all_messages: Vec<String> = Vec::new();

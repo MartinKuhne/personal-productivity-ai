@@ -208,7 +208,7 @@ impl PdfConverterWorker {
                                 .await
                                 .is_ok()
                             {
-                                self.bus.publish(FileEvent::discovered(output_md));
+                                self.bus.publish(FileEvent::discovered_one(output_md));
                             }
                         }
                     }

@@ -35,22 +35,23 @@ impl BusRouter {
                 ) {
                     continue;
                 }
-                let is_pdf = event
-                    .path
-                    .extension()
-                    .and_then(|e| e.to_str())
-                    .map(|e| e.eq_ignore_ascii_case("pdf"))
-                    .unwrap_or(false);
-                if !is_pdf {
-                    continue;
-                }
-                if let Err(e) = tx_pdf.send(event.path) {
-                    tracing::warn!(
-                        name = "background_task.pdf_bus.tx_closed",
-                        error = %e,
-                        "PDF bus subscriber could not deliver to tx_pdf. Channel is closed."
-                    );
-                    break;
+                for p in &event.paths {
+                    let is_pdf = p
+                        .extension()
+                        .and_then(|e| e.to_str())
+                        .map(|e| e.eq_ignore_ascii_case("pdf"))
+                        .unwrap_or(false);
+                    if !is_pdf {
+                        continue;
+                    }
+                    if let Err(e) = tx_pdf.send(p.clone()) {
+                        tracing::warn!(
+                            name = "background_task.pdf_bus.tx_closed",
+                            error = %e,
+                            "PDF bus subscriber could not deliver to tx_pdf. Channel is closed."
+                        );
+                        return;
+                    }
                 }
             }
         });
@@ -70,27 +71,28 @@ impl BusRouter {
                 ) {
                     continue;
                 }
-                let is_img = event
-                    .path
-                    .extension()
-                    .and_then(|e| e.to_str())
-                    .map(|e| {
-                        matches!(
-                            e.to_lowercase().as_str(),
-                            "jpg" | "jpeg" | "png" | "gif" | "webp" | "bmp" | "tiff" | "avif"
-                        )
-                    })
-                    .unwrap_or(false);
-                if !is_img {
-                    continue;
-                }
-                if let Err(e) = tx_img.send(event.path) {
-                    tracing::warn!(
-                        name = "background_task.img_bus.tx_closed",
-                        error = %e,
-                        "Image bus subscriber could not deliver to tx_img. Channel is closed."
-                    );
-                    break;
+                for p in &event.paths {
+                    let is_img = p
+                        .extension()
+                        .and_then(|e| e.to_str())
+                        .map(|e| {
+                            matches!(
+                                e.to_lowercase().as_str(),
+                                "jpg" | "jpeg" | "png" | "gif" | "webp" | "bmp" | "tiff" | "avif"
+                            )
+                        })
+                        .unwrap_or(false);
+                    if !is_img {
+                        continue;
+                    }
+                    if let Err(e) = tx_img.send(p.clone()) {
+                        tracing::warn!(
+                            name = "background_task.img_bus.tx_closed",
+                            error = %e,
+                            "Image bus subscriber could not deliver to tx_img. Channel is closed."
+                        );
+                        return;
+                    }
                 }
             }
         });
@@ -112,7 +114,7 @@ mod tests {
         router.spawn();
         std::thread::sleep(std::time::Duration::from_millis(50));
 
-        bus.publish(FileEvent::discovered(PathBuf::from("test.pdf")));
+        bus.publish(FileEvent::discovered_one(PathBuf::from("test.pdf")));
 
         let path = rx_pdf.recv_timeout(std::time::Duration::from_millis(500));
         assert!(path.is_ok());
@@ -129,7 +131,7 @@ mod tests {
         router.spawn();
         std::thread::sleep(std::time::Duration::from_millis(50));
 
-        bus.publish(FileEvent::discovered(PathBuf::from("test.md")));
+        bus.publish(FileEvent::discovered_one(PathBuf::from("test.md")));
 
         let path = rx_pdf.recv_timeout(std::time::Duration::from_millis(100));
         assert!(path.is_err());
@@ -145,7 +147,7 @@ mod tests {
         router.spawn();
         std::thread::sleep(std::time::Duration::from_millis(50));
 
-        bus.publish(FileEvent::discovered(PathBuf::from("test.png")));
+        bus.publish(FileEvent::discovered_one(PathBuf::from("test.png")));
 
         let path = rx_img.recv_timeout(std::time::Duration::from_millis(500));
         assert!(path.is_ok());
@@ -162,7 +164,7 @@ mod tests {
         router.spawn();
         std::thread::sleep(std::time::Duration::from_millis(50));
 
-        bus.publish(FileEvent::discovered(PathBuf::from("test.pdf")));
+        bus.publish(FileEvent::discovered_one(PathBuf::from("test.pdf")));
 
         let path = rx_img.recv_timeout(std::time::Duration::from_millis(100));
         assert!(path.is_err());

@@ -46,46 +46,69 @@ pub enum FileEventKind {
 }
 
 /// A single file-system event published to the bus.
+///
+/// Each event carries one or more affected paths — typically one,
+/// but batch operations or renames may include multiple.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct FileEvent {
     pub kind: FileEventKind,
-    pub path: PathBuf,
+    pub paths: Vec<PathBuf>,
 }
 
 impl FileEvent {
-    pub fn discovered(path: PathBuf) -> Self {
+    pub fn discovered(paths: Vec<PathBuf>) -> Self {
         Self {
             kind: FileEventKind::Discovered,
-            path,
+            paths,
         }
     }
 
-    pub fn updated(path: PathBuf) -> Self {
+    pub fn discovered_one(path: PathBuf) -> Self {
+        Self::discovered(vec![path])
+    }
+
+    pub fn updated(paths: Vec<PathBuf>) -> Self {
         Self {
             kind: FileEventKind::Updated,
-            path,
+            paths,
         }
     }
 
-    pub fn removed(path: PathBuf) -> Self {
+    pub fn updated_one(path: PathBuf) -> Self {
+        Self::updated(vec![path])
+    }
+
+    pub fn removed(paths: Vec<PathBuf>) -> Self {
         Self {
             kind: FileEventKind::Removed,
-            path,
+            paths,
         }
     }
 
-    pub fn dir_discovered(path: PathBuf) -> Self {
+    pub fn removed_one(path: PathBuf) -> Self {
+        Self::removed(vec![path])
+    }
+
+    pub fn dir_discovered(paths: Vec<PathBuf>) -> Self {
         Self {
             kind: FileEventKind::DirDiscovered,
-            path,
+            paths,
         }
     }
 
-    pub fn dir_removed(path: PathBuf) -> Self {
+    pub fn dir_discovered_one(path: PathBuf) -> Self {
+        Self::dir_discovered(vec![path])
+    }
+
+    pub fn dir_removed(paths: Vec<PathBuf>) -> Self {
         Self {
             kind: FileEventKind::DirRemoved,
-            path,
+            paths,
         }
+    }
+
+    pub fn dir_removed_one(path: PathBuf) -> Self {
+        Self::dir_removed(vec![path])
     }
 }
 
@@ -317,27 +340,30 @@ mod tests {
     #[test]
     fn test_file_event_constructors() {
         let p = PathBuf::from("docs/notes.md");
-        let d = FileEvent::discovered(p.clone());
+        let d = FileEvent::discovered_one(p.clone());
         assert_eq!(d.kind, FileEventKind::Discovered);
-        assert_eq!(d.path, p);
+        assert_eq!(d.paths, vec![p]);
 
-        let u = FileEvent::updated(p.clone());
+        let p = PathBuf::from("docs/notes.md");
+        let u = FileEvent::updated_one(p.clone());
         assert_eq!(u.kind, FileEventKind::Updated);
 
-        let r = FileEvent::removed(p.clone());
+        let p = PathBuf::from("docs/notes.md");
+        let r = FileEvent::removed_one(p.clone());
         assert_eq!(r.kind, FileEventKind::Removed);
     }
 
     #[test]
     fn test_dir_event_constructors() {
         let p = PathBuf::from("docs/subdir");
-        let d = FileEvent::dir_discovered(p.clone());
+        let d = FileEvent::dir_discovered_one(p.clone());
         assert_eq!(d.kind, FileEventKind::DirDiscovered);
-        assert_eq!(d.path, p);
+        assert_eq!(d.paths, vec![p]);
 
-        let r = FileEvent::dir_removed(p.clone());
+        let p = PathBuf::from("docs/subdir");
+        let r = FileEvent::dir_removed_one(p.clone());
         assert_eq!(r.kind, FileEventKind::DirRemoved);
-        assert_eq!(r.path, p);
+        assert_eq!(r.paths, vec![p]);
     }
 
     #[test]
@@ -345,13 +371,13 @@ mod tests {
         let bus: Bus<FileEvent> = Bus::new();
         let reader = bus.subscribe();
         let path = PathBuf::from("a/b/c.md");
-        bus.publish(FileEvent::discovered(path.clone()));
-        bus.publish(FileEvent::updated(path.clone()));
-        bus.publish(FileEvent::removed(path.clone()));
+        bus.publish(FileEvent::discovered_one(path.clone()));
+        bus.publish(FileEvent::updated_one(path.clone()));
+        bus.publish(FileEvent::removed_one(path.clone()));
 
         let e1 = reader.recv_timeout(Duration::from_millis(100)).unwrap();
         assert_eq!(e1.kind, FileEventKind::Discovered);
-        assert_eq!(e1.path, path);
+        assert_eq!(e1.paths, vec![path]);
         let e2 = reader.recv_timeout(Duration::from_millis(100)).unwrap();
         assert_eq!(e2.kind, FileEventKind::Updated);
         let e3 = reader.recv_timeout(Duration::from_millis(100)).unwrap();
@@ -373,7 +399,7 @@ mod tests {
 
         let event = reader.recv_timeout(Duration::from_millis(100)).unwrap();
         assert_eq!(event.kind, FileEventKind::Discovered);
-        assert_eq!(event.path, path);
+        assert_eq!(event.paths, vec![path]);
     }
 
     #[test]
@@ -387,7 +413,7 @@ mod tests {
 
         let event = reader.recv_timeout(Duration::from_millis(100)).unwrap();
         assert_eq!(event.kind, FileEventKind::Updated);
-        assert_eq!(event.path, path);
+        assert_eq!(event.paths, vec![path]);
     }
 
     #[test]
@@ -401,7 +427,7 @@ mod tests {
 
         let event = reader.recv_timeout(Duration::from_millis(100)).unwrap();
         assert_eq!(event.kind, FileEventKind::Removed);
-        assert_eq!(event.path, path);
+        assert_eq!(event.paths, vec![path]);
     }
 
     #[test]
@@ -418,10 +444,10 @@ mod tests {
 
         let e1 = reader.recv_timeout(Duration::from_millis(100)).unwrap();
         assert_eq!(e1.kind, FileEventKind::Removed);
-        assert_eq!(e1.path, old);
+        assert_eq!(e1.paths, vec![old]);
         let e2 = reader.recv_timeout(Duration::from_millis(100)).unwrap();
         assert_eq!(e2.kind, FileEventKind::Discovered);
-        assert_eq!(e2.path, new);
+        assert_eq!(e2.paths, vec![new]);
     }
 
     #[test]
@@ -435,7 +461,7 @@ mod tests {
 
         let event = reader.recv_timeout(Duration::from_millis(100)).unwrap();
         assert_eq!(event.kind, FileEventKind::DirDiscovered);
-        assert_eq!(event.path, path);
+        assert_eq!(event.paths, vec![path]);
     }
 
     #[test]
@@ -449,7 +475,7 @@ mod tests {
 
         let event = reader.recv_timeout(Duration::from_millis(100)).unwrap();
         assert_eq!(event.kind, FileEventKind::DirRemoved);
-        assert_eq!(event.path, path);
+        assert_eq!(event.paths, vec![path]);
     }
 
     #[test]
@@ -464,10 +490,10 @@ mod tests {
 
         let e1 = reader.recv_timeout(Duration::from_millis(100)).unwrap();
         assert_eq!(e1.kind, FileEventKind::DirRemoved);
-        assert_eq!(e1.path, old);
+        assert_eq!(e1.paths, vec![old]);
         let e2 = reader.recv_timeout(Duration::from_millis(100)).unwrap();
         assert_eq!(e2.kind, FileEventKind::DirDiscovered);
-        assert_eq!(e2.path, new);
+        assert_eq!(e2.paths, vec![new]);
     }
 }
 
@@ -497,17 +523,18 @@ impl<'a> FileEventProducer<'a> {
 
     /// Publish a `Discovered` event for a newly created file.
     pub fn publish_discovered(&self, path: &std::path::Path) {
-        self.bus.publish(FileEvent::discovered(path.to_path_buf()));
+        self.bus
+            .publish(FileEvent::discovered_one(path.to_path_buf()));
     }
 
     /// Publish an `Updated` event for a modified file.
     pub fn publish_updated(&self, path: &std::path::Path) {
-        self.bus.publish(FileEvent::updated(path.to_path_buf()));
+        self.bus.publish(FileEvent::updated_one(path.to_path_buf()));
     }
 
     /// Publish a `Removed` event for a deleted file.
     pub fn publish_removed(&self, path: &std::path::Path) {
-        self.bus.publish(FileEvent::removed(path.to_path_buf()));
+        self.bus.publish(FileEvent::removed_one(path.to_path_buf()));
     }
 
     /// Publish a rename as a `Removed` event for the old path and a
@@ -515,26 +542,29 @@ impl<'a> FileEventProducer<'a> {
     /// in order so consumers that drain synchronously see the
     /// removal before the discovery.
     pub fn publish_rename(&self, old: &std::path::Path, new: &std::path::Path) {
-        self.bus.publish(FileEvent::removed(old.to_path_buf()));
-        self.bus.publish(FileEvent::discovered(new.to_path_buf()));
+        self.bus.publish(FileEvent::removed_one(old.to_path_buf()));
+        self.bus
+            .publish(FileEvent::discovered_one(new.to_path_buf()));
     }
 
     /// Publish a `DirDiscovered` event for a newly created directory.
     pub fn publish_dir_discovered(&self, path: &std::path::Path) {
         self.bus
-            .publish(FileEvent::dir_discovered(path.to_path_buf()));
+            .publish(FileEvent::dir_discovered_one(path.to_path_buf()));
     }
 
     /// Publish a `DirRemoved` event for a deleted directory.
     pub fn publish_dir_removed(&self, path: &std::path::Path) {
-        self.bus.publish(FileEvent::dir_removed(path.to_path_buf()));
+        self.bus
+            .publish(FileEvent::dir_removed_one(path.to_path_buf()));
     }
 
     /// Publish a directory rename as a `DirRemoved` event for the old
     /// path and a `DirDiscovered` event for the new path.
     pub fn publish_dir_rename(&self, old: &std::path::Path, new: &std::path::Path) {
-        self.bus.publish(FileEvent::dir_removed(old.to_path_buf()));
         self.bus
-            .publish(FileEvent::dir_discovered(new.to_path_buf()));
+            .publish(FileEvent::dir_removed_one(old.to_path_buf()));
+        self.bus
+            .publish(FileEvent::dir_discovered_one(new.to_path_buf()));
     }
 }
