@@ -1,10 +1,11 @@
 use crate::background::models::{BackgroundLogEntry, ImageJob, LogCategory};
 use crate::config::AppConfig;
-use crate::file_events::FileEventProducer;
+use crate::file_events::{Bus, FileEvent, FileEventProducer};
 use crate::messages::BackgroundMessage;
 use base64::{Engine as _, engine::general_purpose::STANDARD as b64};
 use serde_json::json;
-use std::sync::mpsc::Sender;
+use std::path::PathBuf;
+use std::sync::mpsc::{Receiver, Sender};
 
 pub async fn process_image<'a>(
     job: ImageJob,
@@ -151,6 +152,46 @@ pub async fn process_image<'a>(
             )));
             Err(err_msg)
         }
+    }
+}
+
+pub struct ImageVisionWorker {
+    rx: Receiver<PathBuf>,
+    tx: Sender<BackgroundMessage>,
+    config: AppConfig,
+    bus: Bus<FileEvent>,
+}
+
+impl ImageVisionWorker {
+    pub fn new(
+        rx: Receiver<PathBuf>,
+        tx: Sender<BackgroundMessage>,
+        config: AppConfig,
+        bus: Bus<FileEvent>,
+    ) -> Self {
+        Self { rx, tx, config, bus }
+    }
+
+    pub fn spawn(self) {
+        std::thread::spawn(move || {
+            if let Ok(rt) = tokio::runtime::Runtime::new() {
+                rt.block_on(async {
+                    while let Ok(path) = self.rx.recv() {
+                        let job = ImageJob::new(path);
+                        if job.should_process() {
+                            let producer = FileEventProducer::new(&self.bus);
+                            let _ = process_image(
+                                job,
+                                self.config.clone(),
+                                self.tx.clone(),
+                                &producer,
+                            )
+                            .await;
+                        }
+                    }
+                });
+            }
+        });
     }
 }
 
