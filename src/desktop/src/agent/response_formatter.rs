@@ -103,9 +103,19 @@ pub fn format_tool_result_message(func_name: &str, result: &str) -> String {
                 .get("content")
                 .and_then(|f| f.as_str())
                 .unwrap_or("");
+            let total_lines = result_data
+                .get("total_lines")
+                .and_then(|f| f.as_u64())
+                .unwrap_or(0);
+            let from_cache = result_data
+                .get("from_cache")
+                .and_then(|f| f.as_bool())
+                .unwrap_or(false);
+            let cache_tag = if from_cache { " (cached)" } else { "" };
+            let returned = content.lines().count();
             format!(
-                "> **Result:** {} markdown lines returned.\n\n",
-                content.lines().count()
+                "> **Result:** {} of {} markdown lines returned{}. Use limit/offset to read other sections.\n\n",
+                returned, total_lines, cache_tag
             )
         }
         "web_search" => {

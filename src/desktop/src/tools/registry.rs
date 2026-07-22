@@ -613,7 +613,7 @@ impl Tool for WebFetchTool {
         "web_fetch"
     }
     fn description(&self) -> &'static str {
-        "Fetch content from a URL."
+        "Fetch content from a URL and convert to Markdown. Supports pagination via limit/offset to save context — fetch once, then read sections. Response includes total_lines for pagination. Content is cached for 5 minutes; use force_refetch=true to bypass cache."
     }
     fn input_type(&self) -> TypeId {
         TypeId::of::<dtos::WebFetchInput>()
@@ -627,7 +627,7 @@ impl Tool for WebFetchTool {
     fn execute(&self, _ctx: &ToolContext, args: &str) -> Result<serde_json::Value, String> {
         let input: dtos::WebFetchInput =
             serde_json::from_str(args).map_err(|e| format!("Invalid args: {}", e))?;
-        crate::tools::web::tool_web_fetch(&input.url).map(|r| {
+        crate::tools::web::tool_web_fetch(&input).map(|r| {
             serde_json::to_value(r).unwrap_or_else(|e| serde_json::json!({"error": e.to_string()}))
         })
     }
