@@ -33,3 +33,12 @@ When working on this codebase, all AI agents must adhere strictly to the followi
 - Every `pub` item (struct, enum, function, trait, type alias, const) must have a `///` doc comment.
 - Include examples in doc comments where they clarify usage.
 - Run `cargo doc --no-deps` to verify documentation builds without warnings.
+
+## 8. Quality Gate (Rust)
+
+Before marking any task as complete, run the following and ensure they all pass cleanly:
+- `cargo check` — no errors or warnings
+- `cargo test` — all tests pass
+- `cargo clippy -- -D warnings` — no lint warnings (deny all)
+- `cargo fmt --check` — code is properly formatted
+- `cargo doc --no-deps --quiet` — documentation builds without warnings
