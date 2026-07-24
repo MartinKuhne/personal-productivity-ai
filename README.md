@@ -14,7 +14,7 @@ Until it becomes every hard fact there is to know about you, which is not someth
 
 This is what it looks like
 
-![Screenshot](./content/Screenshot.png)
+![Screenshot](doc/img/Screenshot.png)
 
 ## Tools
 
