@@ -72,7 +72,7 @@ pub fn draw_tree_node(ui: &mut egui::Ui, node: &TreeNode, ctx: &mut TreeNodeCont
             ctx.layout.mark_dirty();
         }
         if response.double_clicked() {
-            ctx.layout.left_panel_reset_count += 1;
+            ctx.layout.mark_dirty();
         }
 
         response.context_menu(|ui| {

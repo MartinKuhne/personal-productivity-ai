@@ -3,7 +3,14 @@
 use crate::ui::FastMdApp;
 use crate::ui::{TreeNode, TreeNodeContext};
 use eframe::egui;
+use egui::containers::panel::PanelState;
 use egui::RichText;
+
+/// Stable ID for the left panel — used both as the egui SidePanel identifier
+/// and as the key for persisted width state in `IdTypeMap`.
+fn left_panel_id() -> egui::Id {
+    egui::Id::new("left_panel")
+}
 
 pub fn show_left_panel(app: &mut FastMdApp, ctx: &egui::Context) {
     let filtered_files: Vec<&std::path::PathBuf> = app
@@ -118,6 +125,9 @@ pub fn show_left_panel(app: &mut FastMdApp, ctx: &egui::Context) {
     if (app.file_processor().indexing_finished && !app.file_processor().indexing_finished_handled)
         || app.layout().left_panel_dirty
     {
+        // Remove egui's cached PanelState so it accepts the new default_width.
+        ctx.data_mut(|d| d.remove::<PanelState>(left_panel_id()));
+
         app.file_processor_mut().indexing_finished_handled = true;
         fn calc_max_width(node: &TreeNode, depth: usize, ctx: &egui::Context) -> f32 {
             let mut max_w = 0.0_f32;
@@ -146,7 +156,6 @@ pub fn show_left_panel(app: &mut FastMdApp, ctx: &egui::Context) {
         let calculated = calc_max_width(&root_node, 0, ctx);
         let max_allowed = ctx.available_rect().width() * 0.2;
         app.layout_mut().left_panel_width = Some(calculated.min(max_allowed));
-        app.layout_mut().left_panel_reset_count += 1;
         app.layout_mut().left_panel_dirty = false;
     }
 
@@ -158,7 +167,7 @@ pub fn show_left_panel(app: &mut FastMdApp, ctx: &egui::Context) {
         .max(180.0)
         .min(max_w);
 
-    egui::SidePanel::left(egui::Id::new("left_panel").with(app.layout().left_panel_reset_count))
+    egui::SidePanel::left(left_panel_id())
         .resizable(true)
         .default_width(default_w)
         .max_width(max_w)
@@ -248,7 +257,8 @@ mod tests {
             show_left_panel(&mut app, ctx);
         });
 
-        assert_eq!(app.layout().left_panel_reset_count, 0);
+        // Panel renders without crashing; width is unset because the dirty flag is false.
+        assert!(app.layout().left_panel_width.is_none());
     }
 
     #[test]
@@ -292,7 +302,6 @@ mod tests {
 
         assert!(app.file_processor().indexing_finished_handled);
         assert!(app.layout().left_panel_width.is_some());
-        assert_eq!(app.layout().left_panel_reset_count, 1);
     }
 
     #[test]
@@ -314,14 +323,12 @@ mod tests {
         let _ = ctx.run(Default::default(), |ctx| {
             show_left_panel(&mut app, ctx);
         });
-        assert_eq!(app.layout().left_panel_reset_count, 0);
         assert!(!app.layout().left_panel_dirty);
 
         app.layout_mut().left_panel_dirty = true;
         let _ = ctx.run(Default::default(), |ctx| {
             show_left_panel(&mut app, ctx);
         });
-        assert_eq!(app.layout().left_panel_reset_count, 1);
         assert!(!app.layout().left_panel_dirty);
         assert!(app.layout().left_panel_width.is_some());
     }
