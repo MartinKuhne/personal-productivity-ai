@@ -207,28 +207,38 @@ pub fn show_left_panel(app: &mut FastMdApp, ctx: &egui::Context) {
                             .show_rows(ui, TREE_ROW_HEIGHT, rows.len(), |ui, row_range| {
                                 let tx = app.tx.clone();
                                 let mut ctx = TreeNodeContext {
-                                    expanded_dirs: &mut selection.expanded_dirs,
-                                    selected_file: &mut selection.selected_file,
-                                    selected_files: &mut selection.selected_files,
-                                    tabs: &mut tab_manager.tabs,
-                                    file_to_move: &mut dialogs.file_to_move,
-                                    move_dialog_open: &mut dialogs.move_dialog_open,
-                                    selected_dir: &mut selection.selected_dir,
-                                    create_dir_dialog_open: &mut dialogs.create_dir_dialog_open,
-                                    create_dir_parent: &mut dialogs.create_dir_parent,
-                                    layout,
-                                    rename_dialog_open: &mut dialogs.rename_dialog_open,
-                                    file_to_rename: &mut dialogs.file_to_rename,
-                                    rename_new_name: &mut dialogs.rename_new_name,
-                                    modifiers,
-                                    submit_prompt,
-                                    content_libraries,
-                                    open_editor: &mut open_editor,
-                                    inline_editor_enabled,
-                                    bg_tx: &Some(tx),
-                                    file_event_producer: Some(
-                                        crate::file_events::FileEventProducer::new(file_event_bus),
-                                    ),
+                                    file_ops: crate::ui::tree::FileOpsContext {
+                                        file_to_move: &mut dialogs.file_to_move,
+                                        move_dialog_open: &mut dialogs.move_dialog_open,
+                                        file_to_rename: &mut dialogs.file_to_rename,
+                                        rename_dialog_open: &mut dialogs.rename_dialog_open,
+                                        rename_new_name: &mut dialogs.rename_new_name,
+                                    },
+                                    dir_ops: crate::ui::tree::DirOpsContext {
+                                        selected_dir: &mut selection.selected_dir,
+                                        create_dir_dialog_open: &mut dialogs.create_dir_dialog_open,
+                                        create_dir_parent: &mut dialogs.create_dir_parent,
+                                    },
+                                    selection: crate::ui::tree::SelectionContext {
+                                        selected_file: &mut selection.selected_file,
+                                        selected_files: &mut selection.selected_files,
+                                        expanded_dirs: &mut selection.expanded_dirs,
+                                        tabs: &mut tab_manager.tabs,
+                                    },
+                                    app: crate::ui::tree::AppIntegrationContext {
+                                        layout,
+                                        submit_prompt,
+                                        content_libraries,
+                                        open_editor: &mut open_editor,
+                                        modifiers,
+                                        inline_editor_enabled,
+                                        bg_tx: &Some(tx),
+                                        file_event_producer: Some(
+                                            crate::file_events::FileEventProducer::new(
+                                                file_event_bus,
+                                            ),
+                                        ),
+                                    },
                                 };
                                 for i in row_range {
                                     render_flat_row(ui, &rows[i], &mut ctx);
