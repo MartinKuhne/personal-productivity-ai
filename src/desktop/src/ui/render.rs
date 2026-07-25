@@ -1051,7 +1051,7 @@ mod tests {
 
     #[test]
     fn test_parse_markdown_table_with_bold_and_special_chars() {
-        let md = "| Name | Account | Amount | Type |\n|---|---|---|---|\n| **Vanguard** | #20470986 | $1 | Taxable (investment) |";
+        let md = "| Name | Account | Amount | Type |\n|---|---|---|---|\n| **Vanguard** | #12345678 | $1 | Taxable (investment) |";
         let events = parse_markdown_to_events(md);
 
         let mut found_table = false;
@@ -1222,7 +1222,7 @@ def foo():
     #[test]
     fn test_render_table_with_bold_and_special_chars_e2e() {
         let ctx = egui::Context::default();
-        let md = "| Name | Account | Amount | Type |\n|---|---|---|---|\n| **Vanguard** | #20470986 | $1 | Taxable (investment) |";
+        let md = "| Name | Account | Amount | Type |\n|---|---|---|---|\n| **Vanguard** | #12345678 | $1 | Taxable (investment) |";
         let _ = ctx.run(egui::RawInput::default(), |ctx| {
             egui::CentralPanel::default().show(ctx, |ui| {
                 let mut scroll_id = None;
