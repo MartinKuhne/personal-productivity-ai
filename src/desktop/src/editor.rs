@@ -249,10 +249,8 @@ impl EditorState {
                 ui.separator();
 
                 ui.horizontal(|ui| {
-                    if ui.button("Save").clicked() {
-                        if self.save(producer).is_ok() {
-                            did_save = true;
-                        }
+                    if ui.button("Save").clicked() && self.save(producer).is_ok() {
+                        did_save = true;
                     }
                     if ui.button("Cancel").clicked() {
                         self.close();

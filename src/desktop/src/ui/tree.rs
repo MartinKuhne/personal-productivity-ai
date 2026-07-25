@@ -193,7 +193,7 @@ pub fn draw_tree_node(ui: &mut egui::Ui, node: &TreeNode, ctx: &mut TreeNodeCont
             if ctx.selected_files.len() > 1 && ctx.selected_files.contains(&node.path) {
                 // Multi-select context menu
                 if ui.button("Merge").clicked() {
-                    *ctx.submit_prompt = Some(build_merge_prompt(ctx.content_libraries, &ctx.selected_files));
+                    *ctx.submit_prompt = Some(build_merge_prompt(ctx.content_libraries, ctx.selected_files));
                     ui.close_menu();
                 }
                 if ui.button("Delete").clicked() {

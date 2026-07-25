@@ -1,7 +1,7 @@
 //! Batch prompt-processing dialog UI — directory/prompt/concurrency selection, progress display, and results summary.
 
 use crate::batch::types::{
-    validate_batch_params, BatchConfig, BatchDialogConfig, BatchDialogResult, BatchMode,
+    BatchConfig, BatchDialogConfig, BatchDialogResult, BatchMode, validate_batch_params,
 };
 use eframe::egui;
 
@@ -149,24 +149,21 @@ fn show_config_view(
             if ui
                 .add_enabled(process_enabled, egui::Button::new("Process"))
                 .clicked()
-            {
-                if let (Some(dir_idx), Some(prompt_idx)) =
+                && let (Some(dir_idx), Some(prompt_idx)) =
                     (config.selected_dir_idx, config.selected_prompt_idx)
-                {
-                    if let (Some(directory), Some(prompt)) = (
-                        config.available_dirs.get(dir_idx),
-                        config.available_prompts.get(prompt_idx),
-                    ) {
-                        let batch_config = BatchConfig {
-                            directory: directory.clone(),
-                            pattern: config.pattern.clone(),
-                            prompt_path: prompt.path.clone(),
-                            mode: config.mode,
-                            concurrency: config.concurrency,
-                        };
-                        *result = Some(BatchDialogResult::Process(batch_config));
-                    }
-                }
+                && let (Some(directory), Some(prompt)) = (
+                    config.available_dirs.get(dir_idx),
+                    config.available_prompts.get(prompt_idx),
+                )
+            {
+                let batch_config = BatchConfig {
+                    directory: directory.clone(),
+                    pattern: config.pattern.clone(),
+                    prompt_path: prompt.path.clone(),
+                    mode: config.mode,
+                    concurrency: config.concurrency,
+                };
+                *result = Some(BatchDialogResult::Process(batch_config));
             }
 
             if ui.button("Cancel").clicked() {
@@ -194,10 +191,10 @@ fn show_running_view(
 
     if is_finished {
         ui.label("Batch processing completed.");
-        if let Some(cancel_flag) = &app.dialogs().batch_cancel_flag {
-            if cancel_flag.load(std::sync::atomic::Ordering::SeqCst) {
-                ui.colored_label(egui::Color32::YELLOW, "Batch was cancelled by user.");
-            }
+        if let Some(cancel_flag) = &app.dialogs().batch_cancel_flag
+            && cancel_flag.load(std::sync::atomic::Ordering::SeqCst)
+        {
+            ui.colored_label(egui::Color32::YELLOW, "Batch was cancelled by user.");
         }
     } else {
         ui.label("Processing...");
@@ -214,10 +211,10 @@ fn show_running_view(
                     *result = Some(BatchDialogResult::Cancel);
                 }
             } else {
-                if ui.button("Cancel").clicked() {
-                    if let Some(handle) = &app.dialogs().batch_handle {
-                        handle.cancel();
-                    }
+                if ui.button("Cancel").clicked()
+                    && let Some(handle) = &app.dialogs().batch_handle
+                {
+                    handle.cancel();
                 }
             }
         });

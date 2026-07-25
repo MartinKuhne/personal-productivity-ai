@@ -99,10 +99,10 @@ fn parse_ical_data(client: &str, href: &str, data: &str) -> CalDavEventDetails {
             if let Some(idx) = line.find(':') {
                 event.end = Some(format_ical_date(&line[idx + 1..]));
             }
-        } else if line.starts_with("ORGANIZER:") || line.starts_with("ORGANIZER;") {
-            if let Some(idx) = line.find(':') {
-                event.organizer = Some(line[idx + 1..].trim().to_string());
-            }
+        } else if (line.starts_with("ORGANIZER:") || line.starts_with("ORGANIZER;"))
+            && let Some(idx) = line.find(':')
+        {
+            event.organizer = Some(line[idx + 1..].trim().to_string());
         }
     }
 
@@ -110,9 +110,9 @@ fn parse_ical_data(client: &str, href: &str, data: &str) -> CalDavEventDetails {
 }
 fn block_on<F: std::future::Future>(f: F) -> F::Output {
     static RT: OnceLock<Runtime> = OnceLock::new();
-    let rt = RT.get_or_init(|| Runtime::new().unwrap_or_else(|e| {
-        panic!("Failed to create Tokio runtime: {}", e)
-    }));
+    let rt = RT.get_or_init(|| {
+        Runtime::new().unwrap_or_else(|e| panic!("Failed to create Tokio runtime: {}", e))
+    });
     rt.block_on(f)
 }
 
@@ -121,20 +121,18 @@ async fn get_all_calendars(
     base_url: &str,
     username: &str,
 ) -> anyhow::Result<Vec<String>> {
-    if let Ok(calendars) = client.list_calendars(base_url).await {
-        if !calendars.is_empty() {
-            return Ok(calendars.into_iter().map(|c| c.href).collect());
-        }
+    if let Ok(calendars) = client.list_calendars(base_url).await
+        && !calendars.is_empty()
+    {
+        return Ok(calendars.into_iter().map(|c| c.href).collect());
     }
 
-    if let Ok(homes) = client.discover_calendar_home_set(base_url).await {
-        if let Some(home) = homes.first() {
-            if let Ok(calendars) = client.list_calendars(home).await {
-                if !calendars.is_empty() {
-                    return Ok(calendars.into_iter().map(|c| c.href).collect());
-                }
-            }
-        }
+    if let Ok(homes) = client.discover_calendar_home_set(base_url).await
+        && let Some(home) = homes.first()
+        && let Ok(calendars) = client.list_calendars(home).await
+        && !calendars.is_empty()
+    {
+        return Ok(calendars.into_iter().map(|c| c.href).collect());
     }
 
     let mut principal_opt = client
@@ -147,10 +145,10 @@ async fn get_all_calendars(
     if principal_opt.is_none() {
         let base_trimmed = base_url.trim_end_matches('/');
         let guess = format!("{}/dav/principals/user/{}/", base_trimmed, username);
-        if let Ok(homes) = client.discover_calendar_home_set(&guess).await {
-            if !homes.is_empty() {
-                principal_opt = Some(guess);
-            }
+        if let Ok(homes) = client.discover_calendar_home_set(&guess).await
+            && !homes.is_empty()
+        {
+            principal_opt = Some(guess);
         }
     }
 
@@ -190,10 +188,10 @@ pub fn tool_search_calendar(
                     .calendar_query_timerange(&cal_path, "VEVENT", None, None, true)
                     .await?;
                 for item in items {
-                    if let Some(data) = &item.calendar_data {
-                        if data.to_lowercase().contains(&kw) {
-                            matches.push(parse_ical_data(name, &item.href, data));
-                        }
+                    if let Some(data) = &item.calendar_data
+                        && data.to_lowercase().contains(&kw)
+                    {
+                        matches.push(parse_ical_data(name, &item.href, data));
                     }
                 }
             }
@@ -365,38 +363,38 @@ pub fn update_ical_string(original: &str, updates: &serde_json::Value) -> String
         }
 
         if line.starts_with("END:VEVENT") {
-            if let Some(s) = &u_summary {
-                if !has_summary {
-                    out.push_str(&format!("SUMMARY:{}\r\n", s));
+            if let Some(s) = &u_summary
+                && !has_summary
+            {
+                out.push_str(&format!("SUMMARY:{}\r\n", s));
+            }
+            if let Some(s) = &u_start
+                && !has_start
+            {
+                if s.len() == 8 {
+                    out.push_str(&format!("DTSTART;VALUE=DATE:{}\r\n", s));
+                } else {
+                    out.push_str(&format!("DTSTART:{}\r\n", s));
                 }
             }
-            if let Some(s) = &u_start {
-                if !has_start {
-                    if s.len() == 8 {
-                        out.push_str(&format!("DTSTART;VALUE=DATE:{}\r\n", s));
-                    } else {
-                        out.push_str(&format!("DTSTART:{}\r\n", s));
-                    }
+            if let Some(e) = &u_end
+                && !has_end
+            {
+                if e.len() == 8 {
+                    out.push_str(&format!("DTEND;VALUE=DATE:{}\r\n", e));
+                } else {
+                    out.push_str(&format!("DTEND:{}\r\n", e));
                 }
             }
-            if let Some(e) = &u_end {
-                if !has_end {
-                    if e.len() == 8 {
-                        out.push_str(&format!("DTEND;VALUE=DATE:{}\r\n", e));
-                    } else {
-                        out.push_str(&format!("DTEND:{}\r\n", e));
-                    }
-                }
+            if let Some(s) = &u_desc
+                && !has_desc
+            {
+                out.push_str(&format!("DESCRIPTION:{}\r\n", s));
             }
-            if let Some(s) = &u_desc {
-                if !has_desc {
-                    out.push_str(&format!("DESCRIPTION:{}\r\n", s));
-                }
-            }
-            if let Some(s) = &u_loc {
-                if !has_loc {
-                    out.push_str(&format!("LOCATION:{}\r\n", s));
-                }
+            if let Some(s) = &u_loc
+                && !has_loc
+            {
+                out.push_str(&format!("LOCATION:{}\r\n", s));
             }
 
             out.push_str(&format!("{}\r\n", line));

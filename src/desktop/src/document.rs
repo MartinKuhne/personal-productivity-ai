@@ -31,13 +31,14 @@ impl DocumentContent {
             body: raw.to_string(),
         }
     }
+}
 
-    /// Combines the front-matter and body into a single string to save.
-    pub fn to_string(&self) -> String {
+impl std::fmt::Display for DocumentContent {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         if let Some(fm) = &self.front_matter {
-            format!("{}{}", fm, self.body)
+            write!(f, "{}{}", fm, self.body)
         } else {
-            self.body.clone()
+            write!(f, "{}", self.body)
         }
     }
 }

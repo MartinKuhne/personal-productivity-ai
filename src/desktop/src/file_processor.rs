@@ -2,7 +2,7 @@
 
 use crate::file_events::{BusReader, FileEvent, FileEventKind};
 use std::collections::HashSet;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 /// Processes file system events from the background indexing and watcher.
 ///
@@ -138,7 +138,7 @@ impl FileEventProcessor {
     /// If `p` is a markdown file whose sibling `.pdf` exists, add it to `to_add`.
     /// If `p` is a PDF whose sibling markdown is in `all_files_set`, add the markdown to `to_add`.
     fn update_pdf_backing_for_path(
-        p: &PathBuf,
+        p: &Path,
         to_add: &mut Vec<PathBuf>,
         all_files_set: &HashSet<PathBuf>,
     ) {
@@ -149,7 +149,7 @@ impl FileEventProcessor {
         match ext.as_str() {
             "md" | "markdown" => {
                 if p.with_extension("pdf").exists() {
-                    to_add.push(p.clone());
+                    to_add.push(p.to_path_buf());
                 }
             }
             "pdf" => {
@@ -167,7 +167,7 @@ impl FileEventProcessor {
     /// If `p` is a markdown file, remove it from the PDF-backed set.
     /// If `p` is a PDF whose sibling markdown is in `all_files_set`, remove the markdown.
     fn remove_pdf_backing_for_path(
-        p: &PathBuf,
+        p: &Path,
         to_remove: &mut Vec<PathBuf>,
         all_files_set: &HashSet<PathBuf>,
     ) {
@@ -177,7 +177,7 @@ impl FileEventProcessor {
         };
         match ext.as_str() {
             "md" | "markdown" => {
-                to_remove.push(p.clone());
+                to_remove.push(p.to_path_buf());
             }
             "pdf" => {
                 for alt_ext in ["md", "markdown"] {

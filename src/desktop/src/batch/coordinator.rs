@@ -10,7 +10,7 @@ use crate::file_events::Bus;
 use crate::file_events::FileEvent;
 use crate::messages::BackgroundMessage;
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::{mpsc, Arc};
+use std::sync::{Arc, mpsc};
 use std::thread;
 use std::time::Instant;
 

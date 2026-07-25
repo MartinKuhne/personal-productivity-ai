@@ -56,10 +56,10 @@ impl DirectoryTracker {
                 FileEventKind::Discovered => {
                     // Safety net: ensure parent directory is tracked.
                     for p in &event.paths {
-                        if let Some(parent) = p.parent() {
-                            if self.dirs.insert(parent.to_path_buf()) {
-                                changed = true;
-                            }
+                        if let Some(parent) = p.parent()
+                            && self.dirs.insert(parent.to_path_buf())
+                        {
+                            changed = true;
                         }
                     }
                 }

@@ -65,7 +65,7 @@ pub fn show_right_panel(app: &mut FastMdApp, ctx: &egui::Context) {
                                 let label = egui::RichText::new(&entry.title)
                                     .size(calculate_font_size(entry.level as usize));
                                 if ui.selectable_label(false, label).clicked() {
-                                    app.tab_manager.scroll_to_header_id = Some(entry.id.clone());
+                                    app.tab_manager.scroll_to_header_id = Some(entry.id);
                                 }
                             });
                         }

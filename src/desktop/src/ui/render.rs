@@ -353,17 +353,15 @@ pub fn parse_markdown_to_events(markdown_text: &str) -> Vec<RenderEvent> {
                 heading_level = 0;
             }
             Event::Start(Tag::Paragraph) => {
-                if !in_table_cell {
-                    if !buffered_inline.is_empty() {
-                        push_inline(
-                            &mut events,
-                            &mut buffered_inline,
-                            &mut needs_bullet,
-                            &mut task_checked,
-                            list_depth,
-                            true,
-                        );
-                    }
+                if !in_table_cell && !buffered_inline.is_empty() {
+                    push_inline(
+                        &mut events,
+                        &mut buffered_inline,
+                        &mut needs_bullet,
+                        &mut task_checked,
+                        list_depth,
+                        true,
+                    );
                 }
             }
             Event::End(TagEnd::Paragraph) => {
@@ -401,9 +399,7 @@ pub fn parse_markdown_to_events(markdown_text: &str) -> Vec<RenderEvent> {
                     list_depth,
                     true,
                 );
-                if list_depth > 0 {
-                    list_depth -= 1;
-                }
+                list_depth = list_depth.saturating_sub(1);
             }
             Event::Start(Tag::Item) => {
                 if !buffered_inline.is_empty() {

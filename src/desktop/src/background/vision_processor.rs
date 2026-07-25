@@ -9,6 +9,7 @@ use serde_json::json;
 use std::path::PathBuf;
 use std::sync::mpsc::{Receiver, Sender};
 
+#[allow(clippy::result_large_err)]
 pub async fn process_image<'a>(
     job: ImageJob,
     config: AppConfig,
@@ -171,7 +172,12 @@ impl ImageVisionWorker {
         config: AppConfig,
         bus: Bus<FileEvent>,
     ) -> Self {
-        Self { rx, tx, config, bus }
+        Self {
+            rx,
+            tx,
+            config,
+            bus,
+        }
     }
 
     pub fn spawn(self) {
@@ -182,13 +188,9 @@ impl ImageVisionWorker {
                         let job = ImageJob::new(path);
                         if job.should_process() {
                             let producer = FileEventProducer::new(&self.bus);
-                            let _ = process_image(
-                                job,
-                                self.config.clone(),
-                                self.tx.clone(),
-                                &producer,
-                            )
-                            .await;
+                            let _ =
+                                process_image(job, self.config.clone(), self.tx.clone(), &producer)
+                                    .await;
                         }
                     }
                 });

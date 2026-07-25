@@ -24,11 +24,7 @@ impl BusRouter {
         let tx_pdf = self.tx_pdf;
         std::thread::spawn(move || {
             let reader = bus_pdf.subscribe();
-            loop {
-                let event = match reader.recv() {
-                    Ok(e) => e,
-                    Err(_) => break,
-                };
+            while let Ok(event) = reader.recv() {
                 if !matches!(
                     event.kind,
                     FileEventKind::Discovered | FileEventKind::Updated
@@ -60,11 +56,7 @@ impl BusRouter {
         let tx_img = self.tx_img;
         std::thread::spawn(move || {
             let reader = bus_img.subscribe();
-            loop {
-                let event = match reader.recv() {
-                    Ok(e) => e,
-                    Err(_) => break,
-                };
+            while let Ok(event) = reader.recv() {
                 if !matches!(
                     event.kind,
                     FileEventKind::Discovered | FileEventKind::Updated

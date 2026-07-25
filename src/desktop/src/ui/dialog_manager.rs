@@ -58,6 +58,12 @@ impl DialogManager {
     }
 }
 
+impl Default for DialogManager {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

@@ -1,5 +1,7 @@
 //! YAML front-matter tools — `read_yaml_header` and `write_yaml_header` for title, summary, tags, date, etc.
 
+use chrono::Utc;
+
 use crate::file_events::FileEventProducer;
 use crate::utils::markdown::parse_front_matter;
 use serde_yaml::{Mapping, Value};
@@ -60,12 +62,13 @@ pub fn tool_write_yaml_header(
         let seq: Vec<Value> = tg.into_iter().map(Value::String).collect();
         map.insert(Value::String("tags".to_string()), Value::Sequence(seq));
     }
-    if let Some(hd) = header_date {
-        map.insert(
-            Value::String("header-date".to_string()),
-            Value::String(hd.to_string()),
-        );
-    }
+    let header_date_value = header_date
+        .map(|hd| hd.to_string())
+        .unwrap_or_else(|| Utc::now().format("%Y-%m-%dT%H:%M:%SZ").to_string());
+    map.insert(
+        Value::String("header-date".to_string()),
+        Value::String(header_date_value),
+    );
 
     let yaml_val = Value::Mapping(map);
     match serde_yaml::to_string(&yaml_val) {
@@ -171,6 +174,46 @@ mod tests {
         assert!(content.contains("tag1"));
         assert!(content.contains("tag2"));
         assert!(content.contains("header-date: 2024-01-01T00:00:00Z"));
+    }
+
+    #[test]
+    fn test_tool_write_yaml_header_auto_header_date() {
+        let dir = tempdir().unwrap();
+        let file_path = dir.path().join("auto.md");
+
+        let producer = noop_producer();
+        let before = chrono::Utc::now().format("%Y-%m-%dT%H:%M:%SZ").to_string();
+        let result = tool_write_yaml_header(
+            file_path.to_str().unwrap(),
+            Some("Title"),
+            None,
+            None,
+            None,
+            &producer,
+        )
+        .unwrap()
+        .result;
+        let after = chrono::Utc::now().format("%Y-%m-%dT%H:%M:%SZ").to_string();
+
+        assert_eq!(result, "YAML header written successfully.");
+
+        let content = fs::read_to_string(&file_path).unwrap();
+        assert!(
+            content.contains("header-date:"),
+            "header-date was not auto-stamped: {content}"
+        );
+        let stamp_line = content
+            .lines()
+            .find(|l| l.starts_with("header-date:"))
+            .unwrap();
+        let stamp = stamp_line.trim_start_matches("header-date:").trim();
+        let parsed = chrono::DateTime::parse_from_rfc3339(stamp).unwrap();
+        let before_ts = chrono::DateTime::parse_from_rfc3339(&before).unwrap();
+        let after_ts = chrono::DateTime::parse_from_rfc3339(&after).unwrap();
+        assert!(
+            parsed >= before_ts && parsed <= after_ts,
+            "auto-stamped header-date {stamp} outside [{before}, {after}]"
+        );
     }
 
     #[test]

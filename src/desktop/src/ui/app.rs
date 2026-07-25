@@ -330,12 +330,14 @@ impl FastMdApp {
         let background_manager = Arc::new(Mutex::new(BackgroundProcessManager::new()));
         let inline_editor_enabled = config.inline_editor_enabled;
 
-        let mut batch_dialog_config = crate::batch::types::BatchDialogConfig::default();
-        batch_dialog_config.available_dirs = config
-            .content_libraries
-            .iter()
-            .map(|lib| PathBuf::from(&lib.root_folder))
-            .collect();
+        let batch_dialog_config = crate::batch::types::BatchDialogConfig {
+            available_dirs: config
+                .content_libraries
+                .iter()
+                .map(|lib| PathBuf::from(&lib.root_folder))
+                .collect(),
+            ..Default::default()
+        };
         let mut dialogs = DialogManager::new();
         dialogs.batch_dialog_config = batch_dialog_config;
 
@@ -525,22 +527,20 @@ impl FastMdApp {
         }
 
         // Handle file selection and dynamic content loading
-        if let Some(selected_path) = self.selection.selected_file() {
-            if self.tab_manager.loaded_path.as_ref() != Some(selected_path) {
-                if let Ok(content) = std::fs::read_to_string(selected_path) {
-                    if let Some((yaml_val, md_content)) = parse_front_matter(&content) {
-                        self.tab_manager.current_yaml = Some(yaml_val);
-                        self.tab_manager.current_markdown = md_content.to_string();
-                    } else {
-                        self.tab_manager.current_yaml = None;
-                        self.tab_manager.current_markdown = content;
-                    }
-                    self.tab_manager.loaded_path = Some(selected_path.clone());
-                    self.tab_manager.toc =
-                        crate::ui::render::build_toc(&self.tab_manager.current_markdown);
-                    self.tab_manager.scroll_to_header_id = None;
-                }
+        if let Some(selected_path) = self.selection.selected_file()
+            && self.tab_manager.loaded_path.as_ref() != Some(selected_path)
+            && let Ok(content) = std::fs::read_to_string(selected_path)
+        {
+            if let Some((yaml_val, md_content)) = parse_front_matter(&content) {
+                self.tab_manager.current_yaml = Some(yaml_val);
+                self.tab_manager.current_markdown = md_content.to_string();
+            } else {
+                self.tab_manager.current_yaml = None;
+                self.tab_manager.current_markdown = content;
             }
+            self.tab_manager.loaded_path = Some(selected_path.clone());
+            self.tab_manager.toc = crate::ui::render::build_toc(&self.tab_manager.current_markdown);
+            self.tab_manager.scroll_to_header_id = None;
         }
 
         // Show inline editor overlay

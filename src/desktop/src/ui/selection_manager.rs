@@ -10,6 +10,12 @@ pub struct SelectionManager {
     pub expanded_dirs: HashSet<PathBuf>,
 }
 
+impl Default for SelectionManager {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl SelectionManager {
     pub fn new() -> Self {
         Self {

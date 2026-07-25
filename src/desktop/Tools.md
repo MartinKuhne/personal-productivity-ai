@@ -186,15 +186,14 @@ All tool responses follow the same envelope:
   ```
 
 ##### `write_yaml_header`
-* **Description:** Write or update data in a YAML header to a markdown file.
+* **Description:** Write or update data in a YAML header to a markdown file. The tool stamps a `header-date` field (ISO-8601, UTC) onto every header it writes or updates; this value is provided by the tool, not by the LLM.
 * **Request:**
   ```json
   {
     "path": "MyLib/doc.md",
     "title": "Updated Title",
     "summary": "New summary.",
-    "tags": ["meeting", "notes"],
-    "header-date": "2026-07-20T12:00:00Z"
+    "tags": ["meeting", "notes"]
   }
   ```
 * **Response (`data`):**

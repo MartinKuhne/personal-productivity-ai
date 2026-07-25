@@ -21,25 +21,23 @@ pub fn tool_web_fetch(
 ) -> Result<crate::tools::dtos::WebFetchResponse, String> {
     let url = &input.url;
 
-    if !input.force_refetch {
-        if let Ok(cache) = WEB_FETCH_CACHE.lock() {
-            if let Some(entry) = cache.get(url) {
-                if entry.fetched_at.elapsed() < CACHE_TTL {
-                    let total_lines = entry.content.lines().count();
-                    let content = apply_pagination(&entry.content, input.offset, input.limit);
-                    return Ok(crate::tools::dtos::WebFetchResponse {
-                        content,
-                        total_lines,
-                        response_headers: if input.headers {
-                            Some(entry.response_headers.clone())
-                        } else {
-                            None
-                        },
-                        from_cache: true,
-                    });
-                }
-            }
-        }
+    if !input.force_refetch
+        && let Ok(cache) = WEB_FETCH_CACHE.lock()
+        && let Some(entry) = cache.get(url)
+        && entry.fetched_at.elapsed() < CACHE_TTL
+    {
+        let total_lines = entry.content.lines().count();
+        let content = apply_pagination(&entry.content, input.offset, input.limit);
+        return Ok(crate::tools::dtos::WebFetchResponse {
+            content,
+            total_lines,
+            response_headers: if input.headers {
+                Some(entry.response_headers.clone())
+            } else {
+                None
+            },
+            from_cache: true,
+        });
     }
 
     match ureq::get(url)
@@ -183,12 +181,12 @@ pub fn tool_web_delegate(
         api_key = model_cfg.api_key.clone();
         api_url = model_cfg.api_url.clone();
         model_name = model_cfg.model.clone();
-    } else if !config.models.is_empty() {
-        if let Some(model_cfg) = config.models.values().next() {
-            api_key = model_cfg.api_key.clone();
-            api_url = model_cfg.api_url.clone();
-            model_name = model_cfg.model.clone();
-        }
+    } else if !config.models.is_empty()
+        && let Some(model_cfg) = config.models.values().next()
+    {
+        api_key = model_cfg.api_key.clone();
+        api_url = model_cfg.api_url.clone();
+        model_name = model_cfg.model.clone();
     }
 
     if api_key == "your-api-key-here" || api_key.is_empty() {

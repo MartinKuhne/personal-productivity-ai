@@ -14,22 +14,19 @@ fn convert_html_in_jmap(mut res: serde_json::Value) -> serde_json::Value {
     fn process(val: &mut serde_json::Value) {
         match val {
             serde_json::Value::Object(map) => {
-                if let Some(body_values) = map.get_mut("bodyValues") {
-                    if let serde_json::Value::Object(parts) = body_values {
-                        for (_, part_obj) in parts.iter_mut() {
-                            if let serde_json::Value::Object(part_map) = part_obj {
-                                if let Some(serde_json::Value::String(val_str)) =
-                                    part_map.get_mut("value")
-                                {
-                                    if val_str.contains("<") && val_str.contains(">") {
-                                        if let Ok(conv) = convert(val_str, None) {
-                                            if let Some(md) = conv.content {
-                                                *val_str = md;
-                                            }
-                                        }
-                                    }
-                                }
-                            }
+                if let Some(body_values) = map.get_mut("bodyValues")
+                    && let serde_json::Value::Object(parts) = body_values
+                {
+                    for (_, part_obj) in parts.iter_mut() {
+                        if let serde_json::Value::Object(part_map) = part_obj
+                            && let Some(serde_json::Value::String(val_str)) =
+                                part_map.get_mut("value")
+                            && val_str.contains("<")
+                            && val_str.contains(">")
+                            && let Ok(conv) = convert(val_str, None)
+                            && let Some(md) = conv.content
+                        {
+                            *val_str = md;
                         }
                     }
                 }
@@ -54,138 +51,97 @@ fn simplify_jmap_emails(res: serde_json::Value, max_lines: Option<usize>) -> ser
 
     if let Some(method_responses) = res.get("methodResponses").and_then(|mr| mr.as_array()) {
         for resp in method_responses {
-            if let Some(resp_arr) = resp.as_array() {
-                if resp_arr.get(0).and_then(|n| n.as_str()) == Some("Email/get") {
-                    if let Some(args) = resp_arr.get(1).and_then(|a| a.as_object()) {
-                        if let Some(list) = args.get("list").and_then(|l| l.as_array()) {
-                            for email in list {
-                                let mut simplified = serde_json::Map::new();
+            if let Some(resp_arr) = resp.as_array()
+                && resp_arr.first().and_then(|n| n.as_str()) == Some("Email/get")
+                && let Some(args) = resp_arr.get(1).and_then(|a| a.as_object())
+                && let Some(list) = args.get("list").and_then(|l| l.as_array())
+            {
+                for email in list {
+                    let mut simplified = serde_json::Map::new();
 
-                                let id =
-                                    email.get("id").unwrap_or(&serde_json::Value::Null).clone();
-                                simplified.insert("id".to_string(), id);
+                    let id = email.get("id").unwrap_or(&serde_json::Value::Null).clone();
+                    simplified.insert("id".to_string(), id);
 
-                                let subject = email
-                                    .get("subject")
-                                    .unwrap_or(&serde_json::Value::Null)
-                                    .clone();
-                                simplified.insert("subject".to_string(), subject);
+                    let subject = email
+                        .get("subject")
+                        .unwrap_or(&serde_json::Value::Null)
+                        .clone();
+                    simplified.insert("subject".to_string(), subject);
 
-                                let date = email
-                                    .get("receivedAt")
-                                    .unwrap_or(&serde_json::Value::Null)
-                                    .clone();
-                                simplified.insert("date".to_string(), date);
+                    let date = email
+                        .get("receivedAt")
+                        .unwrap_or(&serde_json::Value::Null)
+                        .clone();
+                    simplified.insert("date".to_string(), date);
 
-                                let from = email
-                                    .get("from")
-                                    .unwrap_or(&serde_json::Value::Null)
-                                    .clone();
-                                simplified.insert("from".to_string(), from);
+                    let from = email
+                        .get("from")
+                        .unwrap_or(&serde_json::Value::Null)
+                        .clone();
+                    simplified.insert("from".to_string(), from);
 
-                                let to =
-                                    email.get("to").unwrap_or(&serde_json::Value::Null).clone();
-                                simplified.insert("to".to_string(), to);
+                    let to = email.get("to").unwrap_or(&serde_json::Value::Null).clone();
+                    simplified.insert("to".to_string(), to);
 
-                                let cc =
-                                    email.get("cc").unwrap_or(&serde_json::Value::Null).clone();
-                                simplified.insert("cc".to_string(), cc);
+                    let cc = email.get("cc").unwrap_or(&serde_json::Value::Null).clone();
+                    simplified.insert("cc".to_string(), cc);
 
-                                let bcc =
-                                    email.get("bcc").unwrap_or(&serde_json::Value::Null).clone();
-                                simplified.insert("bcc".to_string(), bcc);
+                    let bcc = email.get("bcc").unwrap_or(&serde_json::Value::Null).clone();
+                    simplified.insert("bcc".to_string(), bcc);
 
-                                let mut body_str = String::new();
-                                let mut is_truncated = false;
-                                if let Some(body_values) =
-                                    email.get("bodyValues").and_then(|bv| bv.as_object())
-                                {
-                                    let mut found_html = false;
-                                    if let Some(html_bodies) =
-                                        email.get("htmlBody").and_then(|h| h.as_array())
-                                    {
-                                        if let Some(first_html) =
-                                            html_bodies.first().and_then(|h| h.as_object())
-                                        {
-                                            if let Some(part_id) =
-                                                first_html.get("partId").and_then(|p| p.as_str())
-                                            {
-                                                if let Some(part_val) = body_values
-                                                    .get(part_id)
-                                                    .and_then(|v| v.as_object())
-                                                {
-                                                    if let Some(val) = part_val
-                                                        .get("value")
-                                                        .and_then(|v| v.as_str())
-                                                    {
-                                                        body_str = val.to_string();
-                                                        is_truncated = part_val
-                                                            .get("isTruncated")
-                                                            .and_then(|t| t.as_bool())
-                                                            .unwrap_or(false);
-                                                        found_html = true;
-                                                    }
-                                                }
-                                            }
-                                        }
-                                    }
+                    let mut body_str = String::new();
+                    let mut is_truncated = false;
+                    if let Some(body_values) = email.get("bodyValues").and_then(|bv| bv.as_object())
+                    {
+                        let mut found_html = false;
+                        if let Some(html_bodies) = email.get("htmlBody").and_then(|h| h.as_array())
+                            && let Some(first_html) =
+                                html_bodies.first().and_then(|h| h.as_object())
+                            && let Some(part_id) = first_html.get("partId").and_then(|p| p.as_str())
+                            && let Some(part_val) =
+                                body_values.get(part_id).and_then(|v| v.as_object())
+                            && let Some(val) = part_val.get("value").and_then(|v| v.as_str())
+                        {
+                            body_str = val.to_string();
+                            is_truncated = part_val
+                                .get("isTruncated")
+                                .and_then(|t| t.as_bool())
+                                .unwrap_or(false);
+                            found_html = true;
+                        }
 
-                                    if !found_html {
-                                        if let Some(text_bodies) =
-                                            email.get("textBody").and_then(|t| t.as_array())
-                                        {
-                                            if let Some(first_text) =
-                                                text_bodies.first().and_then(|t| t.as_object())
-                                            {
-                                                if let Some(part_id) = first_text
-                                                    .get("partId")
-                                                    .and_then(|p| p.as_str())
-                                                {
-                                                    if let Some(part_val) = body_values
-                                                        .get(part_id)
-                                                        .and_then(|v| v.as_object())
-                                                    {
-                                                        if let Some(val) = part_val
-                                                            .get("value")
-                                                            .and_then(|v| v.as_str())
-                                                        {
-                                                            body_str = val.to_string();
-                                                            is_truncated = part_val
-                                                                .get("isTruncated")
-                                                                .and_then(|t| t.as_bool())
-                                                                .unwrap_or(false);
-                                                        }
-                                                    }
-                                                }
-                                            }
-                                        }
-                                    }
-                                }
-
-                                if let Some(limit) = max_lines {
-                                    let total_lines = body_str.lines().count();
-                                    if total_lines > limit {
-                                        body_str = body_str
-                                            .lines()
-                                            .take(limit)
-                                            .collect::<Vec<_>>()
-                                            .join("\n");
-                                        is_truncated = true;
-                                    }
-                                }
-
-                                if is_truncated {
-                                    body_str.push_str("\n... (truncated - use the get_email_by_id tool with the email id to read the full content)");
-                                }
-
-                                simplified.insert(
-                                    "body".to_string(),
-                                    serde_json::Value::String(body_str),
-                                );
-                                simplified_emails.push(serde_json::Value::Object(simplified));
-                            }
+                        if !found_html
+                            && let Some(text_bodies) =
+                                email.get("textBody").and_then(|t| t.as_array())
+                            && let Some(first_text) =
+                                text_bodies.first().and_then(|t| t.as_object())
+                            && let Some(part_id) = first_text.get("partId").and_then(|p| p.as_str())
+                            && let Some(part_val) =
+                                body_values.get(part_id).and_then(|v| v.as_object())
+                            && let Some(val) = part_val.get("value").and_then(|v| v.as_str())
+                        {
+                            body_str = val.to_string();
+                            is_truncated = part_val
+                                .get("isTruncated")
+                                .and_then(|t| t.as_bool())
+                                .unwrap_or(false);
                         }
                     }
+
+                    if let Some(limit) = max_lines {
+                        let total_lines = body_str.lines().count();
+                        if total_lines > limit {
+                            body_str = body_str.lines().take(limit).collect::<Vec<_>>().join("\n");
+                            is_truncated = true;
+                        }
+                    }
+
+                    if is_truncated {
+                        body_str.push_str("\n... (truncated - use the get_email_by_id tool with the email id to read the full content)");
+                    }
+
+                    simplified.insert("body".to_string(), serde_json::Value::String(body_str));
+                    simplified_emails.push(serde_json::Value::Object(simplified));
                 }
             }
         }
@@ -207,22 +163,18 @@ fn lookup_mailbox_id(
     let res = jmap_call(api_url, token, &["urn:ietf:params:jmap:mail"], calls)?;
     if let Some(method_responses) = res.get("methodResponses").and_then(|mr| mr.as_array()) {
         for resp in method_responses {
-            if let Some(resp_arr) = resp.as_array() {
-                if resp_arr.get(0).and_then(|n| n.as_str()) == Some("Mailbox/get") {
-                    if let Some(args) = resp_arr.get(1).and_then(|a| a.as_object()) {
-                        if let Some(list) = args.get("list").and_then(|l| l.as_array()) {
-                            let lower_name = folder_name.to_lowercase();
-                            for mailbox in list {
-                                if let Some(name) = mailbox.get("name").and_then(|n| n.as_str()) {
-                                    if name.to_lowercase() == lower_name {
-                                        if let Some(id) = mailbox.get("id").and_then(|i| i.as_str())
-                                        {
-                                            return Ok(id.to_string());
-                                        }
-                                    }
-                                }
-                            }
-                        }
+            if let Some(resp_arr) = resp.as_array()
+                && resp_arr.first().and_then(|n| n.as_str()) == Some("Mailbox/get")
+                && let Some(args) = resp_arr.get(1).and_then(|a| a.as_object())
+                && let Some(list) = args.get("list").and_then(|l| l.as_array())
+            {
+                let lower_name = folder_name.to_lowercase();
+                for mailbox in list {
+                    if let Some(name) = mailbox.get("name").and_then(|n| n.as_str())
+                        && name.to_lowercase() == lower_name
+                        && let Some(id) = mailbox.get("id").and_then(|i| i.as_str())
+                    {
+                        return Ok(id.to_string());
                     }
                 }
             }
@@ -231,6 +183,7 @@ fn lookup_mailbox_id(
     Err(format!("Mailbox not found with name: {}", folder_name))
 }
 
+#[allow(clippy::too_many_arguments)]
 pub fn tool_search_email(
     config: &AppConfig,
     keyword: Option<&str>,
@@ -260,30 +213,30 @@ pub fn tool_search_email(
     // reject "no filters" early without having to round-trip to the
     // JMAP server.
     let mut conditions: Vec<serde_json::Value> = Vec::new();
-    if let Some(k) = keyword {
-        if !k.is_empty() {
-            conditions.push(serde_json::json!({ "text": k }));
-        }
+    if let Some(k) = keyword
+        && !k.is_empty()
+    {
+        conditions.push(serde_json::json!({ "text": k }));
     }
-    if let Some(s) = start_date {
-        if !s.is_empty() {
-            conditions.push(serde_json::json!({ "after": format_jmap_date(s, false) }));
-        }
+    if let Some(s) = start_date
+        && !s.is_empty()
+    {
+        conditions.push(serde_json::json!({ "after": format_jmap_date(s, false) }));
     }
-    if let Some(e) = end_date {
-        if !e.is_empty() {
-            conditions.push(serde_json::json!({ "before": format_jmap_date(e, true) }));
-        }
+    if let Some(e) = end_date
+        && !e.is_empty()
+    {
+        conditions.push(serde_json::json!({ "before": format_jmap_date(e, true) }));
     }
-    if let Some(s) = from {
-        if !s.is_empty() {
-            conditions.push(serde_json::json!({ "from": s }));
-        }
+    if let Some(s) = from
+        && !s.is_empty()
+    {
+        conditions.push(serde_json::json!({ "from": s }));
     }
-    if let Some(r) = to {
-        if !r.is_empty() {
-            conditions.push(serde_json::json!({ "to": r }));
-        }
+    if let Some(r) = to
+        && !r.is_empty()
+    {
+        conditions.push(serde_json::json!({ "to": r }));
     }
     if let Some(u) = is_unread {
         if u {
@@ -325,8 +278,8 @@ pub fn tool_search_email(
         // Resolve the folder name to a JMAP mailbox id; append to the
         // condition list so the per-client filter can be built below.
         let mut client_conditions = conditions.clone();
-        match folder {
-            Some(f) => match lookup_mailbox_id(&api_url, &token, &account_id, f) {
+        if let Some(f) = folder {
+            match lookup_mailbox_id(&api_url, &token, &account_id, f) {
                 Ok(mailbox_id) => {
                     client_conditions.push(serde_json::json!({ "inMailbox": mailbox_id }));
                 }
@@ -334,8 +287,7 @@ pub fn tool_search_email(
                     error_messages.push(format!("Error for {}: {}", name, e));
                     continue;
                 }
-            },
-            None => {}
+            }
         }
 
         if client_conditions.is_empty() {
@@ -363,15 +315,15 @@ pub fn tool_search_email(
                     res.get("methodResponses").and_then(|mr| mr.as_array())
                 {
                     for resp in method_responses {
-                        if let Some(resp_arr) = resp.as_array() {
-                            if resp_arr.get(0).and_then(|s| s.as_str()) == Some("error") {
-                                error_messages.push(format!(
-                                    "Error from JMAP server for {}: {}",
-                                    name,
-                                    serde_json::to_string_pretty(resp_arr).unwrap_or_default()
-                                ));
-                                is_error = true;
-                            }
+                        if let Some(resp_arr) = resp.as_array()
+                            && resp_arr.first().and_then(|s| s.as_str()) == Some("error")
+                        {
+                            error_messages.push(format!(
+                                "Error from JMAP server for {}: {}",
+                                name,
+                                serde_json::to_string_pretty(resp_arr).unwrap_or_default()
+                            ));
+                            is_error = true;
                         }
                     }
                 }
@@ -470,14 +422,14 @@ pub fn tool_get_email_by_id(
                     res.get("methodResponses").and_then(|mr| mr.as_array())
                 {
                     for resp in method_responses {
-                        if let Some(resp_arr) = resp.as_array() {
-                            if resp_arr.get(0).and_then(|s| s.as_str()) == Some("error") {
-                                return Err(format!(
-                                    "Error from JMAP server for {}: {}",
-                                    name,
-                                    serde_json::to_string_pretty(resp_arr).unwrap_or_default()
-                                ));
-                            }
+                        if let Some(resp_arr) = resp.as_array()
+                            && resp_arr.first().and_then(|s| s.as_str()) == Some("error")
+                        {
+                            return Err(format!(
+                                "Error from JMAP server for {}: {}",
+                                name,
+                                serde_json::to_string_pretty(resp_arr).unwrap_or_default()
+                            ));
                         }
                     }
                 }
@@ -657,9 +609,11 @@ mod tests {
             ]]
         });
         let result = convert_html_in_jmap(res);
-        assert!(result["methodResponses"][0][1]["list"][0]["subject"]
-            .as_str()
-            .is_some());
+        assert!(
+            result["methodResponses"][0][1]["list"][0]["subject"]
+                .as_str()
+                .is_some()
+        );
     }
 
     #[test]
@@ -1222,9 +1176,10 @@ mod tests {
             &config, None, None, None, None, None, None, None, None, 1, 10,
         );
         assert!(res.is_err());
-        assert!(res
-            .unwrap_err()
-            .contains("At least one filter field must be provided"));
+        assert!(
+            res.unwrap_err()
+                .contains("At least one filter field must be provided")
+        );
     }
 
     // -- Pagination tests ------------------------------------------------

@@ -1,7 +1,7 @@
 //! Initial recursive scanner — walks content-library directories emitting `FileEvent::Discovered` for each entry.
 
-use crate::background::models::{BackgroundLogEntry, LogCategory};
 use crate::background::PdfConversionJob;
+use crate::background::models::{BackgroundLogEntry, LogCategory};
 use crate::config::AppConfig;
 use crate::file_events::{Bus, FileEvent};
 use crate::messages::BackgroundMessage;
@@ -41,27 +41,29 @@ impl Indexer {
         for _ in 0..num {
             let rx = rx_work.clone();
             let tx_clone = tx_gui.clone();
-            let handle = std::thread::spawn(move || loop {
-                let path = {
-                    let rx = match rx.lock() {
-                        Ok(guard) => guard,
-                        Err(_) => break,
-                    };
-                    match rx.recv() {
-                        Ok(p) => p,
-                        Err(e) => {
-                            tracing::info!(
-                                name = "background_task.worker_shutdown",
-                                error = %e,
-                                "Worker channel closed. Shutting down worker thread."
-                            );
-                            break;
+            let handle = std::thread::spawn(move || {
+                loop {
+                    let path = {
+                        let rx = match rx.lock() {
+                            Ok(guard) => guard,
+                            Err(_) => break,
+                        };
+                        match rx.recv() {
+                            Ok(p) => p,
+                            Err(e) => {
+                                tracing::info!(
+                                    name = "background_task.worker_shutdown",
+                                    error = %e,
+                                    "Worker channel closed. Shutting down worker thread."
+                                );
+                                break;
+                            }
                         }
-                    }
-                };
-                let tags = crate::utils::tags::extract_tags_from_file(&path);
-                let _ = tx_clone.send(BackgroundMessage::FileParsed { path, tags });
-                std::thread::yield_now();
+                    };
+                    let tags = crate::utils::tags::extract_tags_from_file(&path);
+                    let _ = tx_clone.send(BackgroundMessage::FileParsed { path, tags });
+                    std::thread::yield_now();
+                }
             });
             workers.push(handle);
         }
@@ -132,14 +134,12 @@ impl Indexer {
                         } else if matches!(
                             ext_str.as_str(),
                             "jpg" | "jpeg" | "png" | "gif" | "webp" | "bmp" | "tiff" | "avif"
-                        ) {
-                            if is_image_lib {
-                                let job =
-                                    crate::background::models::ImageJob::new(path.to_path_buf());
-                                if job.should_process() {
-                                    images_queued += 1;
-                                    let _ = tx_img.send(path.to_path_buf());
-                                }
+                        ) && is_image_lib
+                        {
+                            let job = crate::background::models::ImageJob::new(path.to_path_buf());
+                            if job.should_process() {
+                                images_queued += 1;
+                                let _ = tx_img.send(path.to_path_buf());
                             }
                         }
                     }

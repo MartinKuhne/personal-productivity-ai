@@ -35,11 +35,7 @@ impl BatchJobExecutor {
         }
     }
 
-    pub fn execute_concurrent(
-        &self,
-        mut jobs: Vec<BatchJob>,
-        concurrency: u8,
-    ) -> BatchResult {
+    pub fn execute_concurrent(&self, mut jobs: Vec<BatchJob>, concurrency: u8) -> BatchResult {
         let start_time = Instant::now();
         let total_jobs = jobs.len();
 
@@ -76,24 +72,24 @@ impl BatchJobExecutor {
         let mut cancelled: usize = 0;
 
         rt.block_on(async {
-            for idx in 0..jobs.len() {
+            for job in &mut jobs {
                 if cancel_flag.load(Ordering::SeqCst) {
-                    jobs[idx].status = BatchJobStatus::Cancelled;
+                    job.status = BatchJobStatus::Cancelled;
                     cancelled += 1;
                     continue;
                 }
 
                 let Ok(permit) = semaphore.clone().acquire_owned().await else {
-                    jobs[idx].status = BatchJobStatus::Failed;
+                    job.status = BatchJobStatus::Failed;
                     failed += 1;
                     continue;
                 };
 
-                let job_id = jobs[idx].id;
-                let target_path = jobs[idx].target_path.clone();
-                let active_file = jobs[idx].active_file.clone();
-                let active_dir = jobs[idx].active_dir.clone();
-                let prompt_text = jobs[idx].prompt_text.clone();
+                let job_id = job.id;
+                let target_path = job.target_path.clone();
+                let active_file = job.active_file.clone();
+                let active_dir = job.active_dir.clone();
+                let prompt_text = job.prompt_text.clone();
                 let app_config = self.app_config.clone();
                 let file_event_bus = self.file_event_bus.clone();
                 let cancel_flag = cancel_flag.clone();
@@ -106,8 +102,8 @@ impl BatchJobExecutor {
                     None
                 };
 
-                jobs[idx].status = BatchJobStatus::Running;
-                jobs[idx].start_time = Some(Local::now());
+                job.status = BatchJobStatus::Running;
+                job.start_time = Some(Local::now());
 
                 tracing::info!(target: "batch", job_id, path = ?target_path, "Starting batch job");
 
@@ -183,6 +179,7 @@ impl BatchJobExecutor {
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 pub fn run_agent_blocking(
     config: AppConfig,
     active_file: Option<PathBuf>,
@@ -272,19 +269,17 @@ mod tests {
             cancel_flag,
         );
 
-        let jobs = vec![
-            BatchJob {
-                id: 0,
-                target_path: PathBuf::from("/tmp/test1.md"),
-                active_file: Some(PathBuf::from("/tmp/test1.md")),
-                active_dir: None,
-                prompt_text: "test".to_string(),
-                status: BatchJobStatus::Pending,
-                start_time: None,
-                end_time: None,
-                error: None,
-            },
-        ];
+        let jobs = vec![BatchJob {
+            id: 0,
+            target_path: PathBuf::from("/tmp/test1.md"),
+            active_file: Some(PathBuf::from("/tmp/test1.md")),
+            active_dir: None,
+            prompt_text: "test".to_string(),
+            status: BatchJobStatus::Pending,
+            start_time: None,
+            end_time: None,
+            error: None,
+        }];
 
         let result = executor.execute_concurrent(jobs, 4);
         assert_eq!(result.total_jobs, 1);

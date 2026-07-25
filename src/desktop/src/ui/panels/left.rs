@@ -3,8 +3,8 @@
 use crate::ui::FastMdApp;
 use crate::ui::{TreeNode, TreeNodeContext};
 use eframe::egui;
-use egui::containers::panel::PanelState;
 use egui::RichText;
+use egui::containers::panel::PanelState;
 
 /// Stable ID for the left panel — used both as the egui SidePanel identifier
 /// and as the key for persisted width state in `IdTypeMap`.
@@ -230,10 +230,10 @@ pub fn show_left_panel(app: &mut FastMdApp, ctx: &egui::Context) {
                         }
                     }
 
-                    if let Some(path) = open_editor {
-                        if let Ok(content) = std::fs::read_to_string(&path) {
-                            app.editor_mut().open(&path, &content);
-                        }
+                    if let Some(path) = open_editor
+                        && let Ok(content) = std::fs::read_to_string(&path)
+                    {
+                        app.editor_mut().open(&path, &content);
                     }
                 });
         });

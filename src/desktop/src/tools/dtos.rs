@@ -174,8 +174,6 @@ pub struct WriteYamlHeaderInput {
     pub title: Option<String>,
     pub summary: Option<String>,
     pub tags: Option<Vec<String>>,
-    #[serde(rename = "header-date")]
-    pub header_date: Option<String>,
 }
 #[derive(Serialize, Debug, JsonSchema)]
 pub struct WriteYamlHeaderResponse {
