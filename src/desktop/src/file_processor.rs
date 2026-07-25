@@ -95,9 +95,14 @@ impl FileEventProcessor {
 
     /// Drain all pending file events from the bus and update internal state.
     ///
+    /// Also populates the global [`PDF_BACKED`](crate::utils::markdown::update_pdf_backed)
+    /// set so that call-sites can quickly check whether a markdown file is backed by a PDF.
+    ///
     /// Returns `true` if any tab needs to be reloaded due to file changes.
     pub fn process_events(&mut self) -> bool {
         let mut needs_reload = false;
+        let mut to_add: Vec<PathBuf> = Vec::new();
+        let mut to_remove: Vec<PathBuf> = Vec::new();
 
         while let Ok(event) = self.reader.try_recv() {
             match event.kind {
@@ -106,28 +111,84 @@ impl FileEventProcessor {
                         if self.add_file(p.clone()) {
                             needs_reload = true;
                         }
+                        Self::update_pdf_backing_for_path(p, &mut to_add, &self.all_files_set);
                     }
                 }
                 FileEventKind::Updated => {
-                    // Mark that loaded file may need refresh if it's the active file
-                    // The actual reload decision is made by FastMdApp based on loaded_path
-                    // We just signal that something changed.
                     needs_reload = true;
                 }
                 FileEventKind::Removed => {
                     for p in &event.paths {
                         self.remove_file(p);
+                        Self::remove_pdf_backing_for_path(p, &mut to_remove, &self.all_files_set);
                     }
-                    // Deletion handled by FastMdApp; we just signal change
                     needs_reload = true;
                 }
-                FileEventKind::DirDiscovered | FileEventKind::DirRemoved => {
-                    // Directory events are handled by DirectoryTracker.
-                }
+                FileEventKind::DirDiscovered | FileEventKind::DirRemoved => {}
             }
         }
 
+        if !to_add.is_empty() || !to_remove.is_empty() {
+            crate::utils::markdown::update_pdf_backed(&to_add, &to_remove);
+        }
+
         needs_reload
+    }
+
+    /// If `p` is a markdown file whose sibling `.pdf` exists, add it to `to_add`.
+    /// If `p` is a PDF whose sibling markdown is in `all_files_set`, add the markdown to `to_add`.
+    fn update_pdf_backing_for_path(
+        p: &PathBuf,
+        to_add: &mut Vec<PathBuf>,
+        all_files_set: &HashSet<PathBuf>,
+    ) {
+        let ext = match p.extension().and_then(|e| e.to_str()) {
+            Some(e) => e.to_lowercase(),
+            None => return,
+        };
+        match ext.as_str() {
+            "md" | "markdown" => {
+                if p.with_extension("pdf").exists() {
+                    to_add.push(p.clone());
+                }
+            }
+            "pdf" => {
+                for alt_ext in ["md", "markdown"] {
+                    let md_path = p.with_extension(alt_ext);
+                    if md_path.exists() && all_files_set.contains(&md_path) {
+                        to_add.push(md_path);
+                    }
+                }
+            }
+            _ => {}
+        }
+    }
+
+    /// If `p` is a markdown file, remove it from the PDF-backed set.
+    /// If `p` is a PDF whose sibling markdown is in `all_files_set`, remove the markdown.
+    fn remove_pdf_backing_for_path(
+        p: &PathBuf,
+        to_remove: &mut Vec<PathBuf>,
+        all_files_set: &HashSet<PathBuf>,
+    ) {
+        let ext = match p.extension().and_then(|e| e.to_str()) {
+            Some(e) => e.to_lowercase(),
+            None => return,
+        };
+        match ext.as_str() {
+            "md" | "markdown" => {
+                to_remove.push(p.clone());
+            }
+            "pdf" => {
+                for alt_ext in ["md", "markdown"] {
+                    let md_path = p.with_extension(alt_ext);
+                    if all_files_set.contains(&md_path) {
+                        to_remove.push(md_path);
+                    }
+                }
+            }
+            _ => {}
+        }
     }
 
     /// Check if the given path is one of the discovered workspace files.

@@ -1,8 +1,9 @@
 //! Tool registry — registers all available tools, dispatches execution by name, and produces the JSON-Schema tool list for the LLM.
 
 use crate::config::AppConfig;
-use crate::tools::context::ToolContext;
 use crate::tools::Tool;
+use crate::tools::context::ToolContext;
+use crate::utils::markdown::has_pdf_backing;
 use std::collections::HashMap;
 
 pub(crate) fn paginate_in_range<T: Clone>(
@@ -232,6 +233,9 @@ impl Tool for ReplaceTextTool {
             .ok_or_else(|| "Cannot perform this operation on the virtual root".to_string())?;
         if readonly {
             return Err("Cannot perform this operation on a read-only library".to_string());
+        }
+        if has_pdf_backing(&path) {
+            return Err("Cannot perform this operation on a file backed by a PDF".to_string());
         }
         let producer = ctx.file_event_producer();
         crate::tools::filesystem::tool_replace_text(
@@ -560,6 +564,9 @@ impl Tool for InsertLinesTool {
         if readonly {
             return Err("Cannot perform this operation on a read-only library".to_string());
         }
+        if has_pdf_backing(&path) {
+            return Err("Cannot perform this operation on a file backed by a PDF".to_string());
+        }
         let producer = ctx.file_event_producer();
         crate::tools::filesystem::tool_insert_lines(
             &path.to_string_lossy(),
@@ -598,6 +605,9 @@ impl Tool for DeleteLinesTool {
             .ok_or_else(|| "Cannot perform this operation on the virtual root".to_string())?;
         if readonly {
             return Err("Cannot perform this operation on a read-only library".to_string());
+        }
+        if has_pdf_backing(&path) {
+            return Err("Cannot perform this operation on a file backed by a PDF".to_string());
         }
         let producer = ctx.file_event_producer();
         crate::tools::filesystem::tool_delete_lines(
@@ -699,7 +709,7 @@ impl Tool for WriteYamlHeaderTool {
             input.title.as_deref(),
             input.summary.as_deref(),
             input.tags,
-            input.header_date.as_deref(),
+            None,
             &producer,
         )
         .map(|r| {
@@ -1673,9 +1683,11 @@ mod tests {
         assert_eq!(data["total"], 5);
         let files = files_array(data);
         assert_eq!(files.len(), 5);
-        assert!(files
-            .iter()
-            .all(|p| p.starts_with("Lib") && p.contains("note_")));
+        assert!(
+            files
+                .iter()
+                .all(|p| p.starts_with("Lib") && p.contains("note_"))
+        );
     }
 
     #[test]
@@ -1799,5 +1811,86 @@ mod tests {
             .collect();
         assert!(!names.contains(&"create_csv"));
         assert!(!names.contains(&"list_csv"));
+    }
+
+    // --- PDF-backing tool blocking tests -------------------------------------
+
+    fn pdf_backed_lib_config() -> (AppConfig, tempfile::TempDir) {
+        let dir = tempfile::tempdir().unwrap();
+        let md_path = dir.path().join("doc.md");
+        let pdf_path = dir.path().join("doc.pdf");
+        fs::write(&md_path, "Hello world").unwrap();
+        fs::write(&pdf_path, b"pdf data").unwrap();
+        let mut config = AppConfig::default();
+        config
+            .content_libraries
+            .push(crate::config::ContentLibrary {
+                name: "Lib".to_string(),
+                root_folder: dir.path().to_string_lossy().into_owned(),
+                kind: "text".to_string(),
+                readonly: false,
+                priority: 0,
+            });
+        (config, dir)
+    }
+
+    #[test]
+    fn test_replace_text_rejects_pdf_backed() {
+        let (config, _dir) = pdf_backed_lib_config();
+        let ctx = test_ctx(&config);
+        let res = execute_tool(
+            &ctx,
+            "replace_text",
+            r#"{"path": "Lib/doc.md", "old_string": "Hello", "new_string": "Goodbye"}"#,
+        );
+        assert!(
+            res.contains("backed by a PDF"),
+            "expected PDF error, got: {res}"
+        );
+    }
+
+    #[test]
+    fn test_insert_lines_rejects_pdf_backed() {
+        let (config, _dir) = pdf_backed_lib_config();
+        let ctx = test_ctx(&config);
+        let res = execute_tool(
+            &ctx,
+            "insert_lines",
+            r#"{"path": "Lib/doc.md", "line_index": 1, "lines": ["new line"]}"#,
+        );
+        assert!(
+            res.contains("backed by a PDF"),
+            "expected PDF error, got: {res}"
+        );
+    }
+
+    #[test]
+    fn test_delete_lines_rejects_pdf_backed() {
+        let (config, _dir) = pdf_backed_lib_config();
+        let ctx = test_ctx(&config);
+        let res = execute_tool(
+            &ctx,
+            "delete_lines",
+            r#"{"path": "Lib/doc.md", "start_line": 1, "end_line": 1}"#,
+        );
+        assert!(
+            res.contains("backed by a PDF"),
+            "expected PDF error, got: {res}"
+        );
+    }
+
+    #[test]
+    fn test_write_yaml_header_allowed_on_pdf_backed() {
+        let (config, _dir) = pdf_backed_lib_config();
+        let ctx = test_ctx(&config);
+        let res = execute_tool(
+            &ctx,
+            "write_yaml_header",
+            r#"{"path": "Lib/doc.md", "title": "Updated Title"}"#,
+        );
+        assert!(
+            !res.contains("backed by a PDF"),
+            "expected no PDF error, got: {res}"
+        );
     }
 }

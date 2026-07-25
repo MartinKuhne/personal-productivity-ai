@@ -1,10 +1,12 @@
 //! File-system tree widget — expand/collapse, file selection, multi-select, and context-menu operations (rename, move, delete, new file/dir).
 
 use crate::messages::BackgroundMessage;
-use crate::print::{execute_print_blocking, PrintJob};
-use crate::ui::panel_layout::PanelLayout;
+use crate::print::{PrintJob, execute_print_blocking};
 use crate::ui::TreeNode;
+use crate::ui::panel_layout::PanelLayout;
+use crate::utils::markdown::has_pdf_backing;
 use eframe::egui;
+use egui::RichText;
 use std::collections::HashSet;
 use std::path::PathBuf;
 use std::sync::mpsc::Sender;
@@ -151,7 +153,11 @@ pub fn draw_tree_node(ui: &mut egui::Ui, node: &TreeNode, ctx: &mut TreeNodeCont
     } else {
         let is_selected = ctx.selected_files.contains(&node.path)
             || ctx.selected_file.as_ref() == Some(&node.path);
-        let label = format!("📄 {}", node.name);
+        let label = if has_pdf_backing(&node.path) {
+            RichText::new(format!("📄 {}", node.name)).color(egui::Color32::from_rgb(200, 180, 120))
+        } else {
+            RichText::new(format!("📄 {}", node.name))
+        };
         let response = ui.selectable_label(is_selected, label);
 
         if response.clicked() {

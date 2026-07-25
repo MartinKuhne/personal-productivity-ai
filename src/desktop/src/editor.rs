@@ -2,6 +2,7 @@
 
 use crate::document::DocumentContent;
 use crate::file_events::FileEventProducer;
+use crate::utils::markdown::has_pdf_backing;
 use eframe::egui::{self, Key};
 use pulldown_cmark::{Options, Parser};
 use std::fs;
@@ -55,6 +56,12 @@ pub struct EditorState {
 
 impl EditorState {
     pub fn open(&mut self, file_path: &Path, raw_content: &str) {
+        if has_pdf_backing(file_path) {
+            self.is_open = false;
+            self.error_message = Some("This file is backed by a PDF and is read-only.".to_string());
+            return;
+        }
+
         self.is_open = true;
         self.file_path = file_path.to_path_buf();
         self.error_message = None;
@@ -412,6 +419,27 @@ mod tests {
         // Should return false and do nothing when not open
         let producer = noop_producer();
         assert!(!state.show(&ctx, &producer));
+    }
+
+    #[test]
+    fn test_editor_rejects_pdf_backed_file() {
+        use std::fs;
+        let dir = tempfile::tempdir().unwrap();
+        let md_path = dir.path().join("doc.md");
+        let pdf_path = dir.path().join("doc.pdf");
+        fs::write(&md_path, "---\ntitle: Test\n---\nBody").unwrap();
+        fs::write(&pdf_path, b"pdf data").unwrap();
+
+        let mut state = EditorState::default();
+        let raw = fs::read_to_string(&md_path).unwrap();
+        state.open(&md_path, &raw);
+
+        assert!(!state.is_open);
+        let err = state.error_message.as_deref().unwrap_or("");
+        assert!(
+            err.contains("backed by a PDF"),
+            "expected error to mention backed by a PDF, got: {err}"
+        );
     }
 
     // --- REQ-261: inverted (black text on white) colour scheme -----------
