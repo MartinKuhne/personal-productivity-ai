@@ -58,6 +58,21 @@ pub enum BackgroundMessage {
     /// use `prompt_tokens` as the current context-window occupancy for that
     /// turn, and accumulate the other fields to track spend.
     AgentTokenUsage(TokenUsageInfo),
+    ToolConfirmationRequest(ToolConfirmationRequest),
 
     LogEntry(crate::background::BackgroundLogEntry),
+}
+
+/// Request from the agent thread for the GUI to confirm execution of an unsafe tool.
+#[derive(Debug, Clone)]
+pub struct ToolConfirmationRequest {
+    pub tool_name: String,
+    pub tool_args: String,
+    pub response_tx: std::sync::mpsc::Sender<ToolConfirmationResponse>,
+}
+
+/// Response from the GUI back to the agent thread.
+#[derive(Debug, Clone)]
+pub struct ToolConfirmationResponse {
+    pub approved: bool,
 }

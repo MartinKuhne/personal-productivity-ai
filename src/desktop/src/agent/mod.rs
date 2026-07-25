@@ -2,6 +2,7 @@
 
 pub mod agent_impl;
 pub mod context;
+pub mod input_guard;
 pub mod llm_client;
 pub mod manager;
 pub mod prompt_builder;

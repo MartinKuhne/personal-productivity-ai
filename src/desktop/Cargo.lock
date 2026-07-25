@@ -1470,6 +1470,7 @@ dependencies = [
  "notify",
  "playwright-rs",
  "pulldown-cmark",
+ "regex",
  "rustls",
  "schemars",
  "serde",

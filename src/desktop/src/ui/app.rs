@@ -418,6 +418,45 @@ impl FastMdApp {
         );
         self.agent.set_show_results(true);
     }
+
+    fn show_tool_confirmation_dialog(&mut self, ctx: &egui::Context) {
+        let pending = self.agent.pending_confirmation.is_some();
+        if !pending {
+            return;
+        }
+        let req = self.agent.pending_confirmation.as_ref().unwrap();
+        let tool_name = req.tool_name.clone();
+        let tool_args = req.tool_args.clone();
+
+        egui::Window::new("Tool Confirmation Required")
+            .collapsible(false)
+            .resizable(false)
+            .anchor(egui::Align2::CENTER_CENTER, egui::Vec2::ZERO)
+            .show(ctx, |ui| {
+                ui.label("The agent wants to execute a potentially destructive tool:");
+                ui.add_space(8.0);
+                ui.label(egui::RichText::new(&tool_name).strong().monospace());
+                ui.add_space(4.0);
+                ui.label("Arguments:");
+                ui.add(
+                    egui::TextEdit::multiline(&mut tool_args.as_str())
+                        .desired_width(400.0)
+                        .desired_rows(4)
+                        .interactive(false),
+                );
+                ui.add_space(8.0);
+                ui.horizontal(|ui| {
+                    if ui.button("Approve").clicked() {
+                        self.agent.respond_to_confirmation(true);
+                        ctx.request_repaint();
+                    }
+                    if ui.button("Deny").clicked() {
+                        self.agent.respond_to_confirmation(false);
+                        ctx.request_repaint();
+                    }
+                });
+            });
+    }
 }
 
 /// Purpose: Generates the markdown formatting prompt with a dynamic date.
@@ -510,7 +549,8 @@ impl FastMdApp {
                 | BackgroundMessage::AgentResponse(_)
                 | BackgroundMessage::AgentFinished(_)
                 | BackgroundMessage::AgentFailed(_)
-                | BackgroundMessage::AgentTokenUsage(_) => {
+                | BackgroundMessage::AgentTokenUsage(_)
+                | BackgroundMessage::ToolConfirmationRequest(_) => {
                     self.agent.handle_background_message(msg);
                 }
                 BackgroundMessage::LogEntry(entry) => {
@@ -586,6 +626,8 @@ impl FastMdApp {
 
         // Show background logs window (separate, not part of DialogManager)
         crate::ui::background_logs::show_background_logs_window(self, ctx);
+
+        self.show_tool_confirmation_dialog(ctx);
 
         // Show batch processing modal
         if self.dialogs.batch_dialog_open {

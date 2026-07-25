@@ -2,7 +2,7 @@
 
 use crate::config::AppConfig;
 use crate::file_events::{Bus, FileEvent};
-use crate::messages::BackgroundMessage;
+use crate::messages::{BackgroundMessage, ToolConfirmationRequest, ToolConfirmationResponse};
 use crate::tools::context::ToolContext;
 use crate::tools::execute_tool;
 use std::path::Path;
@@ -11,13 +11,19 @@ use std::sync::mpsc::Sender;
 pub struct ToolExecutor {
     config: AppConfig,
     file_event_bus: Bus<FileEvent>,
+    hitl_enabled: bool,
 }
 
 impl ToolExecutor {
-    pub fn new(config: AppConfig, file_event_bus: Bus<FileEvent>) -> Self {
+    pub fn new(
+        config: AppConfig,
+        file_event_bus: Bus<FileEvent>,
+        confirmation_tx: Option<Sender<ToolConfirmationRequest>>,
+    ) -> Self {
         Self {
             config,
             file_event_bus,
+            hitl_enabled: confirmation_tx.is_some(),
         }
     }
 
@@ -41,7 +47,7 @@ impl ToolExecutor {
             }
         }
         let mut results = self.execute_parallel(&safe_calls);
-        results.extend(self.execute_sequential(&unsafe_calls));
+        results.extend(self.execute_sequential(&unsafe_calls, tx_gui));
         self.notify_file_creations(&results, tx_gui);
         results
     }
@@ -88,12 +94,47 @@ impl ToolExecutor {
     fn execute_sequential(
         &self,
         calls: &[serde_json::Value],
+        tx_gui: &Sender<BackgroundMessage>,
     ) -> Vec<(String, String, String, String)> {
         let mut results = Vec::new();
         for tc in calls {
             let call_id = extract_str(tc, &["id"]).to_string();
             let func_name = extract_str(tc, &["function", "name"]).to_string();
             let func_args = extract_str(tc, &["function", "arguments"]).to_string();
+
+            if self.hitl_enabled {
+                let (resp_tx, resp_rx) = std::sync::mpsc::channel();
+                let request = ToolConfirmationRequest {
+                    tool_name: func_name.clone(),
+                    tool_args: func_args.clone(),
+                    response_tx: resp_tx,
+                };
+                let _ = tx_gui.send(BackgroundMessage::ToolConfirmationRequest(request));
+                match resp_rx.recv() {
+                    Ok(ToolConfirmationResponse { approved: true }) => {}
+                    Ok(ToolConfirmationResponse { approved: false }) => {
+                        let denial = serde_json::to_string(&crate::tools::dtos::ToolResponse::<
+                            serde_json::Value,
+                        >::Error {
+                            message: "Tool execution denied by user.".to_string(),
+                        })
+                        .unwrap_or_default();
+                        results.push((call_id, func_name, func_args, denial));
+                        continue;
+                    }
+                    Err(_) => {
+                        let denial = serde_json::to_string(&crate::tools::dtos::ToolResponse::<
+                            serde_json::Value,
+                        >::Error {
+                            message: "Confirmation channel closed.".to_string(),
+                        })
+                        .unwrap_or_default();
+                        results.push((call_id, func_name, func_args, denial));
+                        continue;
+                    }
+                }
+            }
+
             let ctx = ToolContext::new(&self.config, &self.file_event_bus);
             let result = execute_tool(&ctx, &func_name, &func_args);
             results.push((call_id, func_name, func_args, result));
@@ -222,7 +263,7 @@ mod tests {
     fn test_tool_executor_new() {
         let config = AppConfig::default();
         let bus = Bus::new();
-        let executor = ToolExecutor::new(config, bus);
+        let executor = ToolExecutor::new(config, bus, None);
         assert!(executor.config.models.is_empty());
     }
 }

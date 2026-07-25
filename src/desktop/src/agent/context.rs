@@ -26,6 +26,8 @@ pub struct AgentContext {
     /// Optional model name override. When set, `LLMClient::from_config` uses this model
     /// directly instead of selecting the cheapest available model.
     pub model_name: Option<String>,
+    /// Channel for the agent thread to request HITL tool confirmation from the GUI.
+    pub confirmation_tx: Option<Sender<crate::messages::ToolConfirmationRequest>>,
 }
 
 impl AgentContext {
@@ -55,6 +57,7 @@ impl AgentContext {
             history,
             current_response,
             model_name: None,
+            confirmation_tx: None,
         }
     }
 }

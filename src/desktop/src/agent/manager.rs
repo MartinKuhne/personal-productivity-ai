@@ -3,7 +3,9 @@
 use crate::agent::AgentContext;
 use crate::config::AppConfig;
 use crate::file_events::Bus;
-use crate::messages::{BackgroundMessage, TokenUsageInfo};
+use crate::messages::{
+    BackgroundMessage, TokenUsageInfo, ToolConfirmationRequest, ToolConfirmationResponse,
+};
 use eframe::egui;
 use serde_json::Value;
 use std::collections::HashSet;
@@ -40,6 +42,7 @@ pub struct AgentSessionManager {
     config: AppConfig,
     pub command_input: String,
     show_results: bool,
+    pub pending_confirmation: Option<ToolConfirmationRequest>,
 }
 
 impl AgentSessionManager {
@@ -60,6 +63,7 @@ impl AgentSessionManager {
             config,
             command_input: String::new(),
             show_results: false,
+            pending_confirmation: None,
         }
     }
 
@@ -150,8 +154,10 @@ impl AgentSessionManager {
         self.state.response.clear();
         self.cancel_flag = Some(Arc::new(AtomicBool::new(false)));
         let cancel_flag = self.cancel_flag.clone().unwrap();
+        self.pending_confirmation = None;
 
-        // Build context
+        let (hitl_tx, _hitl_rx) = std::sync::mpsc::channel();
+
         let ctx = AgentContext {
             config: self.config.clone(),
             tx_gui: gui_tx,
@@ -164,6 +170,7 @@ impl AgentSessionManager {
             history: self.state.history.clone(),
             current_response: self.state.response.clone(),
             model_name: None,
+            confirmation_tx: Some(hitl_tx),
         };
 
         std::thread::spawn(move || {
@@ -229,8 +236,26 @@ impl AgentSessionManager {
                 self.state.token_usage = Some(info);
                 true
             }
+            BackgroundMessage::ToolConfirmationRequest(request) => {
+                self.pending_confirmation = Some(request);
+                true
+            }
             _ => false,
         }
+    }
+
+    /// Send a confirmation response back to the agent thread.
+    pub fn respond_to_confirmation(&mut self, approved: bool) {
+        if let Some(request) = self.pending_confirmation.take() {
+            let _ = request
+                .response_tx
+                .send(ToolConfirmationResponse { approved });
+        }
+    }
+
+    /// Store a pending confirmation request for the UI to handle.
+    pub fn set_pending_confirmation(&mut self, request: ToolConfirmationRequest) {
+        self.pending_confirmation = Some(request);
     }
 }
 

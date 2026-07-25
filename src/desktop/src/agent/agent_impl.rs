@@ -1,6 +1,7 @@
 //! Top-level agent orchestration — builds the system prompt, sends requests, executes tool calls, and streams results back to the UI.
 
 use crate::agent::context::AgentContext;
+use crate::agent::input_guard::InputGuard;
 use crate::agent::llm_client::{LLMClient, parse_usage_block};
 use crate::agent::prompt_builder::SystemPromptBuilder;
 use crate::agent::response_formatter::{
@@ -21,15 +22,38 @@ fn run_agent_inner(ctx: AgentContext) {
         Some(c) => c,
         None => return,
     };
+    let guard = InputGuard::new();
+    let sanitized_prompt = guard.sanitize_content(&ctx.prompt);
+    let validated_prompt = match guard.validate_user_prompt(&sanitized_prompt) {
+        crate::agent::input_guard::ValidationOutcome::Ok(s) => s,
+        crate::agent::input_guard::ValidationOutcome::Truncated(s) => {
+            tracing::warn!(
+                name = "agent.prompt.truncated",
+                "User prompt exceeded size limit and was truncated."
+            );
+            let _ = ctx.tx_gui.send(BackgroundMessage::AgentStatus(
+                "Warning: Prompt was truncated due to length.".into(),
+            ));
+            s
+        }
+    };
+    let injections = guard.scan_for_injections(&validated_prompt);
+    if !injections.is_empty() {
+        tracing::warn!(name = "agent.injection.detected", patterns = ?injections, "Potential prompt injection detected in user prompt.");
+    }
     let system_prompt = SystemPromptBuilder::new(&ctx.config)
         .with_active_file(ctx.active_file.clone())
         .with_active_dir(ctx.active_dir.clone())
         .with_selected_files(ctx.selected_files.clone())
         .build(&ctx.config);
-    let mut messages = build_messages(system_prompt, &ctx.prompt, ctx.history.clone());
+    let mut messages = build_messages(system_prompt, &validated_prompt, ctx.history.clone());
     let tools_json = get_tools_schema(&ctx.config, &ctx.prompt);
     let mut full_response = ctx.current_response.clone();
-    let executor = ToolExecutor::new(ctx.config.clone(), ctx.file_event_bus.clone());
+    let executor = ToolExecutor::new(
+        ctx.config.clone(),
+        ctx.file_event_bus.clone(),
+        ctx.confirmation_tx.clone(),
+    );
     loop {
         if ctx.cancel_flag.load(Ordering::SeqCst) {
             break;
@@ -41,6 +65,7 @@ fn run_agent_inner(ctx: AgentContext) {
             &tools_json,
             &mut full_response,
             &executor,
+            &guard,
         ) {
             Turn::Continue => {}
             Turn::Done => break,
@@ -66,6 +91,7 @@ fn process_turn(
     tools_json: &serde_json::Value,
     full_response: &mut String,
     executor: &ToolExecutor,
+    guard: &InputGuard,
 ) -> Turn {
     let _ = ctx.tx_gui.send(BackgroundMessage::AgentStatus(
         "Waiting for LLM completions...".into(),
@@ -95,7 +121,7 @@ fn process_turn(
     match message.get("tool_calls").and_then(|t| t.as_array()) {
         Some(tc) if !tc.is_empty() => {
             let results = executor.execute_all(tc, &ctx.tx_gui);
-            process_tool_results(&results, tc, messages, full_response, &ctx.tx_gui);
+            process_tool_results(&results, tc, messages, full_response, &ctx.tx_gui, guard);
             Turn::Continue
         }
         _ => Turn::Done,
@@ -173,6 +199,7 @@ fn process_tool_results(
     messages: &mut Vec<serde_json::Value>,
     full_response: &mut String,
     tx: &Sender<BackgroundMessage>,
+    guard: &InputGuard,
 ) {
     let mut map: std::collections::HashMap<String, (String, String, String)> =
         std::collections::HashMap::new();
@@ -192,8 +219,24 @@ fn process_tool_results(
             let _ = tx.send(BackgroundMessage::AgentResponse(full_response.clone()));
             full_response.push_str(&format_tool_result_message(&fn_name, &result));
             let _ = tx.send(BackgroundMessage::AgentResponse(full_response.clone()));
-            messages
-                .push(serde_json::json!({"role": "tool", "tool_call_id": cid, "content": result}));
+
+            let truncated_result = match guard.truncate_tool_result(&result) {
+                crate::agent::input_guard::ValidationOutcome::Truncated(s) => {
+                    tracing::warn!(name = "agent.tool_result.truncated", tool = %fn_name, "Tool result truncated for LLM context.");
+                    s
+                }
+                crate::agent::input_guard::ValidationOutcome::Ok(s) => s,
+            };
+
+            let llm_content = if is_external_data_source(&fn_name) {
+                guard.tag_as_external_data(&fn_name, &truncated_result)
+            } else {
+                truncated_result
+            };
+
+            messages.push(
+                serde_json::json!({"role": "tool", "tool_call_id": cid, "content": llm_content}),
+            );
         }
     }
 }
@@ -209,4 +252,11 @@ fn log_tool_result(func_name: &str, result: &str) {
             tracing::info!(name = "agent.tool.success", tool = %func_name);
         }
     }
+}
+
+fn is_external_data_source(func_name: &str) -> bool {
+    matches!(
+        func_name,
+        "web_fetch" | "web_search" | "web_delegate" | "get_email_by_id" | "get_contact"
+    )
 }
