@@ -1,9 +1,9 @@
 //! File-system tree widget — expand/collapse, file selection, multi-select, and context-menu operations (rename, move, delete, new file/dir).
 
 use crate::messages::BackgroundMessage;
-use crate::print::{execute_print_blocking, PrintJob};
-use crate::ui::panel_layout::PanelLayout;
+use crate::print::{PrintJob, execute_print_blocking};
 use crate::ui::TreeNode;
+use crate::ui::panel_layout::PanelLayout;
 use eframe::egui;
 use std::collections::HashSet;
 use std::path::PathBuf;
@@ -51,6 +51,279 @@ pub fn initial_rename_value(path: &std::path::Path, fallback_name: &str) -> Stri
         .and_then(|s| s.to_str())
         .unwrap_or(fallback_name)
         .to_string()
+}
+
+/// A single visible row in the flattened virtual tree list.
+#[derive(Clone)]
+pub struct FlatRow {
+    /// Indentation depth (0 = top-level child of root).
+    pub depth: usize,
+    /// Display name of the node.
+    pub name: String,
+    /// Full path of the node.
+    pub path: PathBuf,
+    /// Whether this node is a directory.
+    pub is_dir: bool,
+    /// For directories: whether currently expanded.
+    pub is_expanded: bool,
+}
+
+/// Fixed height for each virtual tree row in pixels.
+pub const TREE_ROW_HEIGHT: f32 = 22.0;
+
+/// Flatten a `TreeNode` hierarchy into a `Vec<FlatRow>` in DFS pre-order,
+/// respecting the set of expanded directories.
+pub fn flatten_tree(
+    node: &TreeNode,
+    depth: usize,
+    expanded: &HashSet<PathBuf>,
+    rows: &mut Vec<FlatRow>,
+) {
+    if depth > 0 {
+        rows.push(FlatRow {
+            depth: depth - 1,
+            name: node.name.clone(),
+            path: node.path.clone(),
+            is_dir: node.is_dir,
+            is_expanded: node.is_dir && expanded.contains(&node.path),
+        });
+    }
+    if node.is_dir && (depth == 0 || expanded.contains(&node.path)) {
+        let mut children: Vec<_> = node.children.values().collect();
+        children.sort_by(|a, b| b.is_dir.cmp(&a.is_dir).then_with(|| a.name.cmp(&b.name)));
+        for child in children {
+            flatten_tree(child, depth + 1, expanded, rows);
+        }
+    }
+}
+
+/// Render a single flat row with the same interaction logic as `draw_tree_node`
+/// but without recursion.
+pub fn render_flat_row(ui: &mut egui::Ui, row: &FlatRow, ctx: &mut TreeNodeContext<'_>) {
+    if row.is_dir {
+        let icon = if row.is_expanded { "📂 " } else { "📁 " };
+        let label = format!("{}{}", icon, row.name);
+
+        ui.horizontal(|ui| {
+            ui.add_space(row.depth as f32 * 18.0);
+            let response = ui.selectable_label(false, label);
+            if response.clicked() {
+                if row.is_expanded {
+                    ctx.expanded_dirs.remove(&row.path);
+                } else {
+                    ctx.expanded_dirs.insert(row.path.clone());
+                }
+                *ctx.selected_file = None;
+                ctx.selected_files.clear();
+                *ctx.selected_dir = Some(row.path.clone());
+                ctx.layout.mark_dirty();
+            }
+            if response.double_clicked() {
+                ctx.layout.mark_dirty();
+            }
+
+            response.context_menu(|ui| {
+                if ui.button("Show in File Explorer").clicked() {
+                    let _ = std::process::Command::new("explorer")
+                        .arg(&row.path)
+                        .spawn();
+                    ui.close_menu();
+                }
+                if ui.button("Copy path").clicked() {
+                    ui.output_mut(|o| o.copied_text = row.path.to_string_lossy().to_string());
+                    ui.close_menu();
+                }
+                if ui.button("Rename").clicked() {
+                    *ctx.file_to_rename = Some(row.path.clone());
+                    *ctx.rename_new_name = initial_rename_value(&row.path, &row.name);
+                    *ctx.rename_dialog_open = true;
+                    ui.close_menu();
+                }
+                if ui.button("Move").clicked() {
+                    *ctx.file_to_move = Some(row.path.clone());
+                    *ctx.move_dialog_open = true;
+                    ui.close_menu();
+                }
+                if ui.button("Create Directory ...").clicked() {
+                    *ctx.create_dir_parent = Some(row.path.clone());
+                    *ctx.create_dir_dialog_open = true;
+                    ui.close_menu();
+                }
+                if ui.button("New document").clicked() {
+                    let mut new_path = row.path.join("New document.md");
+                    if new_path.exists() {
+                        let now = chrono::Local::now();
+                        let date_str = now.format("%Y-%m-%d %H-%M-%S");
+                        new_path = row.path.join(format!("New document {}.md", date_str));
+                    }
+                    let yaml_header = "---\ntitle: New document\n---\n\n";
+                    if let Err(e) = std::fs::write(&new_path, yaml_header) {
+                        tracing::error!(
+                            name = "ui.file.create_failed",
+                            path = %new_path.display(),
+                            error = %e,
+                            "Failed to create new document."
+                        );
+                    } else if let Some(producer) = ctx.file_event_producer.as_ref() {
+                        producer.publish_discovered(&new_path);
+                    }
+                    ui.close_menu();
+                }
+                if ui.button("Delete").clicked() {
+                    let path = row.path.clone();
+                    if let Err(e) = trash::delete(&path) {
+                        tracing::error!(
+                            name = "ui.directory.delete_failed",
+                            path = %path.display(),
+                            error = %e,
+                            "Failed to delete directory to trash."
+                        );
+                    }
+                    ui.close_menu();
+                }
+            });
+        });
+    } else {
+        let is_selected =
+            ctx.selected_files.contains(&row.path) || ctx.selected_file.as_ref() == Some(&row.path);
+        let label = format!("📄 {}", row.name);
+
+        ui.horizontal(|ui| {
+            ui.add_space(row.depth as f32 * 18.0);
+            let response = ui.selectable_label(is_selected, label);
+
+            if response.clicked() {
+                if ctx.modifiers.shift || ctx.modifiers.ctrl || ctx.modifiers.command {
+                    if ctx.selected_files.contains(&row.path) {
+                        ctx.selected_files.remove(&row.path);
+                        if ctx.selected_file.as_ref() == Some(&row.path) {
+                            *ctx.selected_file = None;
+                        }
+                    } else {
+                        ctx.selected_files.insert(row.path.clone());
+                        *ctx.selected_file = Some(row.path.clone());
+                    }
+                } else {
+                    ctx.selected_files.clear();
+                    ctx.selected_files.insert(row.path.clone());
+                    *ctx.selected_file = Some(row.path.clone());
+                    if !ctx.tabs.contains(&row.path) {
+                        ctx.tabs.push(row.path.clone());
+                    }
+                }
+            }
+
+            if response.double_clicked() {
+                if ctx.inline_editor_enabled {
+                    *ctx.open_editor = Some(row.path.clone());
+                } else {
+                    crate::ui::open_in_system_editor(&row.path);
+                }
+            }
+
+            response.context_menu(|ui| {
+                if ctx.selected_files.len() > 1 && ctx.selected_files.contains(&row.path) {
+                    if ui.button("Merge").clicked() {
+                        *ctx.submit_prompt = Some(build_merge_prompt(
+                            ctx.content_libraries,
+                            ctx.selected_files,
+                        ));
+                        ui.close_menu();
+                    }
+                    if ui.button("Delete").clicked() {
+                        for file in ctx.selected_files.iter() {
+                            if let Err(e) = trash::delete(file) {
+                                tracing::error!(
+                                    name = "ui.file.multi_delete_failed",
+                                    path = %file.display(),
+                                    error = %e,
+                                    "Failed to delete file to trash during multi-selection."
+                                );
+                            } else if let Some(producer) = ctx.file_event_producer.as_ref() {
+                                producer.publish_removed(file);
+                            }
+                        }
+                        ctx.selected_files.clear();
+                        ui.close_menu();
+                    }
+                } else {
+                    if ui.button("Edit").clicked() {
+                        if ctx.inline_editor_enabled {
+                            *ctx.open_editor = Some(row.path.clone());
+                        } else {
+                            crate::ui::open_in_system_editor(&row.path);
+                        }
+                        ui.close_menu();
+                    }
+                    if ui.button("Show in File Explorer").clicked() {
+                        crate::ui::show_in_file_explorer(&row.path);
+                        ui.close_menu();
+                    }
+                    if ui.button("Copy path").clicked() {
+                        ui.output_mut(|o| o.copied_text = row.path.to_string_lossy().to_string());
+                        ui.close_menu();
+                    }
+                    if ui.button("Format Markdown").clicked() {
+                        let now = chrono::Local::now();
+                        let date_str = now.to_rfc3339();
+                        *ctx.submit_prompt = Some(crate::ui::generate_format_prompt(&date_str));
+                        ui.close_menu();
+                    }
+                    if ui.button("Run as prompt").clicked() {
+                        if let Ok(content) = std::fs::read_to_string(&row.path) {
+                            *ctx.submit_prompt = Some(content);
+                        } else {
+                            tracing::error!(
+                                name = "ui.file.run_as_prompt_failed",
+                                path = %row.path.display(),
+                                "Failed to read file content to run as prompt."
+                            );
+                        }
+                        ui.close_menu();
+                    }
+                    if ui.button("Print").clicked() {
+                        let path_to_print = row.path.clone();
+                        if let Some(tx) = ctx.bg_tx.clone() {
+                            let job = PrintJob::new(path_to_print.clone());
+                            let _ = execute_print_blocking(job, Some(tx));
+                        } else {
+                            tracing::warn!(
+                                name = "ui.file.print_no_channel",
+                                path = %path_to_print.display(),
+                                "Print requested but no background channel available"
+                            );
+                        }
+                        ui.close_menu();
+                    }
+                    if ui.button("Rename").clicked() {
+                        *ctx.file_to_rename = Some(row.path.clone());
+                        *ctx.rename_new_name = initial_rename_value(&row.path, &row.name);
+                        *ctx.rename_dialog_open = true;
+                        ui.close_menu();
+                    }
+                    if ui.button("Move").clicked() {
+                        *ctx.file_to_move = Some(row.path.clone());
+                        *ctx.move_dialog_open = true;
+                        ui.close_menu();
+                    }
+                    if ui.button("Delete").clicked() {
+                        let path = row.path.clone();
+                        if let Err(e) = trash::delete(&path) {
+                            tracing::error!(
+                                name = "ui.file.delete_failed",
+                                path = %path.display(),
+                                error = %e,
+                                "Failed to delete file to trash."
+                            );
+                        } else if let Some(producer) = ctx.file_event_producer.as_ref() {
+                            producer.publish_removed(&path);
+                        }
+                        ui.close_menu();
+                    }
+                }
+            });
+        });
+    }
 }
 
 pub fn draw_tree_node(ui: &mut egui::Ui, node: &TreeNode, ctx: &mut TreeNodeContext<'_>) {
@@ -187,7 +460,7 @@ pub fn draw_tree_node(ui: &mut egui::Ui, node: &TreeNode, ctx: &mut TreeNodeCont
             if ctx.selected_files.len() > 1 && ctx.selected_files.contains(&node.path) {
                 // Multi-select context menu
                 if ui.button("Merge").clicked() {
-                    *ctx.submit_prompt = Some(build_merge_prompt(ctx.content_libraries, &ctx.selected_files));
+                    *ctx.submit_prompt = Some(build_merge_prompt(ctx.content_libraries, ctx.selected_files));
                     ui.close_menu();
                 }
                 if ui.button("Delete").clicked() {

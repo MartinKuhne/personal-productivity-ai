@@ -114,13 +114,18 @@ impl ToolExecutor {
                 if parsed.get("status").and_then(|s| s.as_str()) != Some("success") {
                     continue;
                 }
-                let path_owned: String = match serde_json::from_str::<serde_json::Value>(func_args_str) {
-                    Ok(v) => match v.get("path").and_then(|p| p.as_str()).map(|s| s.to_string()) {
-                        Some(s) => s,
-                        None => continue,
-                    },
-                    Err(_) => continue,
-                };
+                let path_owned: String =
+                    match serde_json::from_str::<serde_json::Value>(func_args_str) {
+                        Ok(v) => match v
+                            .get("path")
+                            .and_then(|p| p.as_str())
+                            .map(|s| s.to_string())
+                        {
+                            Some(s) => s,
+                            None => continue,
+                        },
+                        Err(_) => continue,
+                    };
                 let vpath = Path::new(&path_owned);
                 let mut comps = vpath.components().peekable();
                 while let Some(c) = comps.peek() {

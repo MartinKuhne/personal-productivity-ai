@@ -1,7 +1,7 @@
-﻿//! Top-level agent orchestration — builds the system prompt, sends requests, executes tool calls, and streams results back to the UI.
+//! Top-level agent orchestration — builds the system prompt, sends requests, executes tool calls, and streams results back to the UI.
 
 use crate::agent::context::AgentContext;
-use crate::agent::llm_client::{parse_usage_block, LLMClient};
+use crate::agent::llm_client::{LLMClient, parse_usage_block};
 use crate::agent::prompt_builder::SystemPromptBuilder;
 use crate::agent::response_formatter::{
     format_tool_call_message, format_tool_result_message, split_thinking_and_content,

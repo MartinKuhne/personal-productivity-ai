@@ -1,8 +1,8 @@
 //! Tool registry — registers all available tools, dispatches execution by name, and produces the JSON-Schema tool list for the LLM.
 
 use crate::config::AppConfig;
-use crate::tools::context::ToolContext;
 use crate::tools::Tool;
+use crate::tools::context::ToolContext;
 use std::collections::HashMap;
 
 pub(crate) fn paginate_in_range<T: Clone>(
@@ -1673,9 +1673,11 @@ mod tests {
         assert_eq!(data["total"], 5);
         let files = files_array(data);
         assert_eq!(files.len(), 5);
-        assert!(files
-            .iter()
-            .all(|p| p.starts_with("Lib") && p.contains("note_")));
+        assert!(
+            files
+                .iter()
+                .all(|p| p.starts_with("Lib") && p.contains("note_"))
+        );
     }
 
     #[test]

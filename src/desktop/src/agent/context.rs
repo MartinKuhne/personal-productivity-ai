@@ -6,7 +6,7 @@ use serde_json::Value;
 use std::collections::HashSet;
 use std::path::PathBuf;
 use std::sync::mpsc::Sender;
-use std::sync::{atomic::AtomicBool, Arc};
+use std::sync::{Arc, atomic::AtomicBool};
 
 /// Consolidated context for running an agent session.
 ///

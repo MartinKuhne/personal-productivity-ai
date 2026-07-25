@@ -171,7 +171,12 @@ impl ImageVisionWorker {
         config: AppConfig,
         bus: Bus<FileEvent>,
     ) -> Self {
-        Self { rx, tx, config, bus }
+        Self {
+            rx,
+            tx,
+            config,
+            bus,
+        }
     }
 
     pub fn spawn(self) {
@@ -182,13 +187,9 @@ impl ImageVisionWorker {
                         let job = ImageJob::new(path);
                         if job.should_process() {
                             let producer = FileEventProducer::new(&self.bus);
-                            let _ = process_image(
-                                job,
-                                self.config.clone(),
-                                self.tx.clone(),
-                                &producer,
-                            )
-                            .await;
+                            let _ =
+                                process_image(job, self.config.clone(), self.tx.clone(), &producer)
+                                    .await;
                         }
                     }
                 });

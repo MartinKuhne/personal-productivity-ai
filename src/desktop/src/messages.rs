@@ -60,4 +60,10 @@ pub enum BackgroundMessage {
     AgentTokenUsage(TokenUsageInfo),
 
     LogEntry(crate::background::BackgroundLogEntry),
+
+    /// File content loaded from a background thread.
+    FileLoaded {
+        path: PathBuf,
+        content: Result<String, String>,
+    },
 }

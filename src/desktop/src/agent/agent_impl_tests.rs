@@ -5,8 +5,8 @@ use crate::agent::context::AgentContext;
 use crate::config::AppConfig;
 use crate::messages::BackgroundMessage;
 use std::collections::HashSet;
-use std::sync::atomic::AtomicBool;
 use std::sync::Arc;
+use std::sync::atomic::AtomicBool;
 
 fn make_config(port: u16) -> AppConfig {
     let mut config = AppConfig::default();
@@ -189,7 +189,11 @@ fn test_run_agent_emits_done_status_on_natural_completion() {
         if let Ok((mut stream, _)) = listener.accept() {
             let mut buf = [0; 8192];
             let _ = stream.read(&mut buf);
-            let resp = format!("HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}", body.len(), body);
+            let resp = format!(
+                "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
+                body.len(),
+                body
+            );
             let _ = stream.write_all(resp.as_bytes());
             let _ = stream.flush();
             std::thread::sleep(std::time::Duration::from_millis(200));
@@ -228,7 +232,11 @@ fn test_run_agent_skips_done_status_when_cancelled() {
         if let Ok((mut stream, _)) = listener.accept() {
             let mut buf = [0; 8192];
             let _ = stream.read(&mut buf);
-            let resp = format!("HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}", body.len(), body);
+            let resp = format!(
+                "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
+                body.len(),
+                body
+            );
             let _ = stream.write_all(resp.as_bytes());
             let _ = stream.flush();
             std::thread::sleep(std::time::Duration::from_millis(200));

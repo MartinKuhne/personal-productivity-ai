@@ -35,11 +35,7 @@ impl BatchJobExecutor {
         }
     }
 
-    pub fn execute_concurrent(
-        &self,
-        mut jobs: Vec<BatchJob>,
-        concurrency: u8,
-    ) -> BatchResult {
+    pub fn execute_concurrent(&self, mut jobs: Vec<BatchJob>, concurrency: u8) -> BatchResult {
         let start_time = Instant::now();
         let total_jobs = jobs.len();
 
@@ -272,19 +268,17 @@ mod tests {
             cancel_flag,
         );
 
-        let jobs = vec![
-            BatchJob {
-                id: 0,
-                target_path: PathBuf::from("/tmp/test1.md"),
-                active_file: Some(PathBuf::from("/tmp/test1.md")),
-                active_dir: None,
-                prompt_text: "test".to_string(),
-                status: BatchJobStatus::Pending,
-                start_time: None,
-                end_time: None,
-                error: None,
-            },
-        ];
+        let jobs = vec![BatchJob {
+            id: 0,
+            target_path: PathBuf::from("/tmp/test1.md"),
+            active_file: Some(PathBuf::from("/tmp/test1.md")),
+            active_dir: None,
+            prompt_text: "test".to_string(),
+            status: BatchJobStatus::Pending,
+            start_time: None,
+            end_time: None,
+            error: None,
+        }];
 
         let result = executor.execute_concurrent(jobs, 4);
         assert_eq!(result.total_jobs, 1);

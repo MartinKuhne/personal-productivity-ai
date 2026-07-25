@@ -4,9 +4,9 @@ use crate::background::models::{BackgroundLogEntry, LogCategory};
 use crate::file_events::{Bus, FileEvent};
 use crate::messages::BackgroundMessage;
 use std::path::PathBuf;
-use std::sync::mpsc::{Receiver, Sender};
 #[cfg(test)]
 use std::sync::mpsc::channel;
+use std::sync::mpsc::{Receiver, Sender};
 use tokio::process::Command;
 
 pub struct PdfConversionJob {
@@ -203,11 +203,7 @@ impl PdfConverterWorker {
                         let job = PdfConversionJob::new(path);
                         if job.should_convert() {
                             let output_md = job.output_md.clone();
-                            if job
-                                .execute(self.cmd.clone(), self.tx.clone())
-                                .await
-                                .is_ok()
-                            {
+                            if job.execute(self.cmd.clone(), self.tx.clone()).await.is_ok() {
                                 self.bus.publish(FileEvent::discovered_one(output_md));
                             }
                         }

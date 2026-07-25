@@ -140,9 +140,11 @@ mod tests {
         let ctx = ToolContext::new(&config, &bus);
         let result = ctx.resolve_virtual_path("NonExistent/file.md", false);
         assert!(result.is_err());
-        assert!(result
-            .unwrap_err()
-            .contains("Content library 'NonExistent' not found"));
+        assert!(
+            result
+                .unwrap_err()
+                .contains("Content library 'NonExistent' not found")
+        );
     }
 
     #[test]

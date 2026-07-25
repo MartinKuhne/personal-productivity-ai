@@ -9,8 +9,8 @@ use serde_json::Value;
 use std::collections::HashSet;
 use std::path::PathBuf;
 use std::sync::{
-    atomic::{AtomicBool, Ordering},
     Arc,
+    atomic::{AtomicBool, Ordering},
 };
 
 /// Agent state exposed to UI components.

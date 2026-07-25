@@ -1,7 +1,7 @@
 //! Filesystem watcher — observes content-library directories and routes changes to PDF converter and vision processor queues.
 
-use crate::background::models::{BackgroundLogEntry, LogCategory};
 use crate::background::PdfConversionJob;
+use crate::background::models::{BackgroundLogEntry, LogCategory};
 use crate::config::AppConfig;
 use crate::file_events::{Bus, FileEvent};
 use crate::messages::BackgroundMessage;

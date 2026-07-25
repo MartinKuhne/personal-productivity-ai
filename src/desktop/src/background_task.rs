@@ -9,7 +9,7 @@ use crate::file_events::{Bus, FileEvent};
 use crate::messages::BackgroundMessage;
 use std::path::PathBuf;
 use std::sync::atomic::AtomicBool;
-use std::sync::mpsc::{channel, Receiver, Sender};
+use std::sync::mpsc::{Receiver, Sender, channel};
 use std::sync::{Arc, Mutex};
 
 pub struct Task {
