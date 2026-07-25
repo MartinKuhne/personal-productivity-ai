@@ -114,7 +114,7 @@ pub fn format_tool_result_message(func_name: &str, result: &str) -> String {
             let cache_tag = if from_cache { " (cached)" } else { "" };
             let returned = content.lines().count();
             format!(
-                "> **Result:** {} of {} markdown lines returned{}. Use limit/offset to read other sections.\n\n",
+                "> **Result:** {} of {} markdown lines returned{}. To read other sections, set offset to the number of lines already retrieved (e.g., if you received 100 lines starting at offset 0, next use offset=100). Track cumulative coverage to avoid gaps.\n\n",
                 returned, total_lines, cache_tag
             )
         }

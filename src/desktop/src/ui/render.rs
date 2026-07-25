@@ -160,6 +160,54 @@ fn render_heading(ui: &mut egui::Ui, title: &str, level: u32, scroll_to_id: &mut
     }
 }
 
+/// Purpose: Renders a single table cell, always emitting at least one widget.
+/// Inputs: `ui` (mut), `cell` (inline elements for the cell)
+/// Outputs: None
+/// Purity: Impure (modifies UI state). Thin adapter for Grid cells.
+fn render_table_cell(ui: &mut egui::Ui, cell: &[InlineElem]) {
+    if cell.is_empty() {
+        ui.label("");
+        return;
+    }
+    ui.horizontal_wrapped(|ui| {
+        ui.spacing_mut().item_spacing.x = 0.0;
+        for elem in cell {
+            match elem {
+                InlineElem::Text(t, style) => {
+                    let mut rt = RichText::new(t);
+                    if style.bold {
+                        rt = rt.strong();
+                    }
+                    if style.italic {
+                        rt = rt.italics();
+                    }
+                    if style.code {
+                        rt = rt
+                            .monospace()
+                            .background_color(egui::Color32::from_gray(40));
+                    }
+                    if style.strikethrough {
+                        rt = rt.strikethrough();
+                    }
+                    ui.label(rt);
+                }
+                InlineElem::Link(url, text) => {
+                    ui.hyperlink_to(text, url);
+                }
+                InlineElem::Image(url) => {
+                    ui.label(format!("[Image: {}]", url));
+                }
+                InlineElem::Html(html) => {
+                    ui.label(RichText::new(html).italics().color(egui::Color32::GRAY));
+                }
+                InlineElem::SoftBreak => {
+                    ui.label(" ");
+                }
+            }
+        }
+    });
+}
+
 /// Purpose: Renders a table.
 /// Inputs: `ui` (mut), `table_cells`
 /// Outputs: None
@@ -174,7 +222,7 @@ fn render_table(ui: &mut egui::Ui, table_cells: &[Vec<Vec<InlineElem>>]) {
                 .show(ui, |ui| {
                     for row in table_cells {
                         for cell in row {
-                            render_inline(ui, cell, false, None, 0, false);
+                            render_table_cell(ui, cell);
                         }
                         ui.end_row();
                     }
@@ -353,17 +401,15 @@ pub fn parse_markdown_to_events(markdown_text: &str) -> Vec<RenderEvent> {
                 heading_level = 0;
             }
             Event::Start(Tag::Paragraph) => {
-                if !in_table_cell {
-                    if !buffered_inline.is_empty() {
-                        push_inline(
-                            &mut events,
-                            &mut buffered_inline,
-                            &mut needs_bullet,
-                            &mut task_checked,
-                            list_depth,
-                            true,
-                        );
-                    }
+                if !in_table_cell && !buffered_inline.is_empty() {
+                    push_inline(
+                        &mut events,
+                        &mut buffered_inline,
+                        &mut needs_bullet,
+                        &mut task_checked,
+                        list_depth,
+                        true,
+                    );
                 }
             }
             Event::End(TagEnd::Paragraph) => {
@@ -401,9 +447,7 @@ pub fn parse_markdown_to_events(markdown_text: &str) -> Vec<RenderEvent> {
                     list_depth,
                     true,
                 );
-                if list_depth > 0 {
-                    list_depth -= 1;
-                }
+                list_depth = list_depth.saturating_sub(1);
             }
             Event::Start(Tag::Item) => {
                 if !buffered_inline.is_empty() {
@@ -986,6 +1030,52 @@ mod tests {
     }
 
     #[test]
+    fn test_parse_markdown_table_empty_cells() {
+        let md = "| A | | C |\n|---|---|---|\n| | B | |";
+        let events = parse_markdown_to_events(md);
+
+        let mut found_table = false;
+        for ev in events {
+            if let RenderEvent::Table(rows) = ev {
+                found_table = true;
+                assert_eq!(rows.len(), 2);
+                assert_eq!(rows[0].len(), 3);
+                assert_eq!(rows[1].len(), 3);
+                assert!(rows[0][1].is_empty(), "Header cell 1 should be empty");
+                assert!(rows[1][0].is_empty(), "Data cell 0 should be empty");
+                assert!(rows[1][2].is_empty(), "Data cell 2 should be empty");
+            }
+        }
+        assert!(found_table, "Expected Table event");
+    }
+
+    #[test]
+    fn test_parse_markdown_table_with_bold_and_special_chars() {
+        let md = "| Name | Account | Amount | Type |\n|---|---|---|---|\n| **Vanguard** | #12345678 | $1 | Taxable (investment) |";
+        let events = parse_markdown_to_events(md);
+
+        let mut found_table = false;
+        for ev in events {
+            if let RenderEvent::Table(rows) = ev {
+                found_table = true;
+                assert_eq!(rows.len(), 2);
+                assert_eq!(rows[0].len(), 4);
+                assert_eq!(rows[1].len(), 4);
+                let vanguard_cell = &rows[1][0];
+                assert_eq!(vanguard_cell.len(), 1);
+                match &vanguard_cell[0] {
+                    InlineElem::Text(t, style) => {
+                        assert_eq!(t, "Vanguard");
+                        assert!(style.bold, "Vanguard should be bold");
+                    }
+                    _ => panic!("Expected Text element"),
+                }
+            }
+        }
+        assert!(found_table, "Expected Table event");
+    }
+
+    #[test]
     fn test_parse_markdown_rule_and_blockquote() {
         let md = "---\n\n> Quote text";
         let events = parse_markdown_to_events(md);
@@ -1113,6 +1203,30 @@ def foo():
                 // Render non-mapping YAML table
                 let non_map = serde_yaml::Value::String("test".to_string());
                 render_yaml_table(ui, &non_map);
+            });
+        });
+    }
+
+    #[test]
+    fn test_render_table_with_empty_cells_e2e() {
+        let ctx = egui::Context::default();
+        let md = "| A | | C |\n|---|---|---|\n| | B | |";
+        let _ = ctx.run(egui::RawInput::default(), |ctx| {
+            egui::CentralPanel::default().show(ctx, |ui| {
+                let mut scroll_id = None;
+                render_markdown(ui, md, &mut scroll_id);
+            });
+        });
+    }
+
+    #[test]
+    fn test_render_table_with_bold_and_special_chars_e2e() {
+        let ctx = egui::Context::default();
+        let md = "| Name | Account | Amount | Type |\n|---|---|---|---|\n| **Vanguard** | #12345678 | $1 | Taxable (investment) |";
+        let _ = ctx.run(egui::RawInput::default(), |ctx| {
+            egui::CentralPanel::default().show(ctx, |ui| {
+                let mut scroll_id = None;
+                render_markdown(ui, md, &mut scroll_id);
             });
         });
     }
