@@ -12,8 +12,10 @@ pub mod selection_manager;
 pub mod tab_manager;
 mod tree;
 
-pub use app::{generate_format_prompt, FastMdApp, ToCEntry, TreeNode};
+pub use app::{FastMdApp, ToCEntry, TreeNode, generate_format_prompt};
 pub use os_shell::{open_in_system_editor, show_in_file_explorer};
 pub use render::{build_toc, render_markdown, render_yaml_table};
-pub use tree::{draw_tree_node, TreeNodeContext};
+pub use tree::{
+    FlatRow, TREE_ROW_HEIGHT, TreeNodeContext, draw_tree_node, flatten_tree, render_flat_row,
+};
 mod render_tests;

@@ -1,39 +1,186 @@
 //! File-system tree widget — expand/collapse, file selection, multi-select, and context-menu operations (rename, move, delete, new file/dir).
 
 use crate::messages::BackgroundMessage;
-use crate::print::{execute_print_blocking, PrintJob};
-use crate::ui::panel_layout::PanelLayout;
+use crate::print::{PrintJob, execute_print_blocking};
 use crate::ui::TreeNode;
+use crate::ui::panel_layout::PanelLayout;
 use eframe::egui;
 use std::collections::HashSet;
 use std::path::PathBuf;
 use std::sync::mpsc::Sender;
 
-pub struct TreeNodeContext<'a> {
-    pub expanded_dirs: &'a mut HashSet<PathBuf>,
-    pub selected_file: &'a mut Option<PathBuf>,
-    pub selected_files: &'a mut HashSet<PathBuf>,
-    pub tabs: &'a mut Vec<PathBuf>,
+/// Context for file operations (rename, move).
+pub struct FileOpsContext<'a> {
+    /// File currently queued for move operation.
     pub file_to_move: &'a mut Option<PathBuf>,
+    /// Whether move dialog is open.
     pub move_dialog_open: &'a mut bool,
-    pub selected_dir: &'a mut Option<PathBuf>,
-    pub create_dir_dialog_open: &'a mut bool,
-    pub create_dir_parent: &'a mut Option<PathBuf>,
-    pub layout: &'a mut PanelLayout,
-    pub rename_dialog_open: &'a mut bool,
+    /// File currently queued for rename operation.
     pub file_to_rename: &'a mut Option<PathBuf>,
+    /// Whether rename dialog is open.
+    pub rename_dialog_open: &'a mut bool,
+    /// New name input for rename dialog.
     pub rename_new_name: &'a mut String,
-    pub modifiers: egui::Modifiers,
+}
+
+/// Context for directory operations (create directory).
+pub struct DirOpsContext<'a> {
+    /// Selected directory (for context menu operations).
+    pub selected_dir: &'a mut Option<PathBuf>,
+    /// Whether create directory dialog is open.
+    pub create_dir_dialog_open: &'a mut bool,
+    /// Parent directory for new directory creation.
+    pub create_dir_parent: &'a mut Option<PathBuf>,
+}
+
+/// Context for selection state (single and multi-select).
+pub struct SelectionContext<'a> {
+    /// Currently selected file (single selection).
+    pub selected_file: &'a mut Option<PathBuf>,
+    /// Currently selected files (multi-selection).
+    pub selected_files: &'a mut HashSet<PathBuf>,
+    /// Set of expanded directory paths.
+    pub expanded_dirs: &'a mut HashSet<PathBuf>,
+    /// Open tabs (files opened in editor).
+    pub tabs: &'a mut Vec<PathBuf>,
+}
+
+/// Context for application-level integration (layout, prompts, editor).
+pub struct AppIntegrationContext<'a> {
+    /// Panel layout state (widths, dirty flags).
+    pub layout: &'a mut PanelLayout,
+    /// Prompt to submit to agent (from context menu actions).
     pub submit_prompt: &'a mut Option<String>,
+    /// Content libraries configuration.
     pub content_libraries: &'a [crate::config::ContentLibrary],
+    /// File path to open in inline editor.
     pub open_editor: &'a mut Option<PathBuf>,
+    /// Keyboard modifiers state (shift, ctrl, command).
+    pub modifiers: egui::Modifiers,
+    /// Whether inline editor is enabled.
     pub inline_editor_enabled: bool,
+    /// Background message sender (for print jobs, etc.).
     pub bg_tx: &'a Option<Sender<BackgroundMessage>>,
-    /// Optional file-event producer. When set, mutations done via
-    /// the tree (new document, delete) publish a `Discovered` /
-    /// `Removed` event so the rest of the app refreshes
-    /// immediately without waiting for the OS-level notify event.
+    /// Optional file-event producer for immediate UI updates.
     pub file_event_producer: Option<crate::file_events::FileEventProducer<'a>>,
+}
+
+/// Composite context for tree rendering operations.
+/// Groups related state into semantic sub-contexts for better organization.
+pub struct TreeNodeContext<'a> {
+    /// File operations context (rename, move).
+    pub file_ops: FileOpsContext<'a>,
+    /// Directory operations context (create directory).
+    pub dir_ops: DirOpsContext<'a>,
+    /// Selection state context (single and multi-select).
+    pub selection: SelectionContext<'a>,
+    /// Application integration context (layout, prompts, editor).
+    pub app: AppIntegrationContext<'a>,
+}
+
+/// Backward-compatible accessors for TreeNodeContext fields.
+/// These provide the same API as the old flat struct while internally
+/// delegating to the sub-contexts.
+impl<'a> TreeNodeContext<'a> {
+    /// Access expanded directories set.
+    pub fn expanded_dirs(&mut self) -> &mut HashSet<PathBuf> {
+        self.selection.expanded_dirs
+    }
+
+    /// Access selected file.
+    pub fn selected_file(&mut self) -> &mut Option<PathBuf> {
+        self.selection.selected_file
+    }
+
+    /// Access selected files set.
+    pub fn selected_files(&mut self) -> &mut HashSet<PathBuf> {
+        self.selection.selected_files
+    }
+
+    /// Access tabs vector.
+    pub fn tabs(&mut self) -> &mut Vec<PathBuf> {
+        self.selection.tabs
+    }
+
+    /// Access file to move.
+    pub fn file_to_move(&mut self) -> &mut Option<PathBuf> {
+        self.file_ops.file_to_move
+    }
+
+    /// Access move dialog open flag.
+    pub fn move_dialog_open(&mut self) -> &mut bool {
+        self.file_ops.move_dialog_open
+    }
+
+    /// Access selected directory.
+    pub fn selected_dir(&mut self) -> &mut Option<PathBuf> {
+        self.dir_ops.selected_dir
+    }
+
+    /// Access create directory dialog open flag.
+    pub fn create_dir_dialog_open(&mut self) -> &mut bool {
+        self.dir_ops.create_dir_dialog_open
+    }
+
+    /// Access create directory parent.
+    pub fn create_dir_parent(&mut self) -> &mut Option<PathBuf> {
+        self.dir_ops.create_dir_parent
+    }
+
+    /// Access layout.
+    pub fn layout(&mut self) -> &mut PanelLayout {
+        self.app.layout
+    }
+
+    /// Access rename dialog open flag.
+    pub fn rename_dialog_open(&mut self) -> &mut bool {
+        self.file_ops.rename_dialog_open
+    }
+
+    /// Access file to rename.
+    pub fn file_to_rename(&mut self) -> &mut Option<PathBuf> {
+        self.file_ops.file_to_rename
+    }
+
+    /// Access rename new name.
+    pub fn rename_new_name(&mut self) -> &mut String {
+        self.file_ops.rename_new_name
+    }
+
+    /// Access modifiers.
+    pub fn modifiers(&self) -> egui::Modifiers {
+        self.app.modifiers
+    }
+
+    /// Access submit prompt.
+    pub fn submit_prompt(&mut self) -> &mut Option<String> {
+        self.app.submit_prompt
+    }
+
+    /// Access content libraries.
+    pub fn content_libraries(&self) -> &[crate::config::ContentLibrary] {
+        self.app.content_libraries
+    }
+
+    /// Access open editor.
+    pub fn open_editor(&mut self) -> &mut Option<PathBuf> {
+        self.app.open_editor
+    }
+
+    /// Access inline editor enabled flag.
+    pub fn inline_editor_enabled(&self) -> bool {
+        self.app.inline_editor_enabled
+    }
+
+    /// Access background sender.
+    pub fn bg_tx(&self) -> &Option<Sender<BackgroundMessage>> {
+        self.app.bg_tx
+    }
+
+    /// Access file event producer.
+    pub fn file_event_producer(&self) -> &Option<crate::file_events::FileEventProducer<'a>> {
+        &self.app.file_event_producer
+    }
 }
 
 /// Purpose: Build the initial value for the rename text field, offering
@@ -53,33 +200,326 @@ pub fn initial_rename_value(path: &std::path::Path, fallback_name: &str) -> Stri
         .to_string()
 }
 
+/// Maximum tree depth to prevent stack overflow in flatten_tree and visual overflow in rendering.
+pub const MAX_TREE_DEPTH: usize = 1000;
+
+/// A single visible row in the flattened virtual tree list.
+#[derive(Clone)]
+pub struct FlatRow {
+    /// Indentation depth (0 = top-level child of root).
+    pub depth: usize,
+    /// Display name of the node.
+    pub name: String,
+    /// Full path of the node.
+    pub path: PathBuf,
+    /// Whether this node is a directory.
+    pub is_dir: bool,
+    /// For directories: whether currently expanded. Always false for files.
+    pub is_expanded: bool,
+}
+
+/// Fixed height for each virtual tree row in pixels.
+/// Matches egui default monospace line height (14pt) + 4px padding.
+pub const TREE_ROW_HEIGHT: f32 = 22.0;
+
+/// Flatten a `TreeNode` hierarchy into a `Vec<FlatRow>` in DFS pre-order,
+/// respecting the set of expanded directories.
+pub fn flatten_tree(
+    node: &TreeNode,
+    depth: usize,
+    expanded: &HashSet<PathBuf>,
+    rows: &mut Vec<FlatRow>,
+) {
+    // Prevent stack overflow on maliciously deep directory structures.
+    if depth > MAX_TREE_DEPTH {
+        return;
+    }
+    if depth > 0 {
+        rows.push(FlatRow {
+            depth: depth - 1,
+            name: node.name.clone(),
+            path: node.path.clone(),
+            is_dir: node.is_dir,
+            is_expanded: node.is_dir && expanded.contains(&node.path),
+        });
+    }
+    if node.is_dir && (depth == 0 || expanded.contains(&node.path)) {
+        let mut children: Vec<_> = node.children.values().collect();
+        children.sort_by(|a, b| b.is_dir.cmp(&a.is_dir).then_with(|| a.name.cmp(&b.name)));
+        for child in children {
+            flatten_tree(child, depth + 1, expanded, rows);
+        }
+    }
+}
+
+/// Render a single flat row with the same interaction logic as `draw_tree_node`
+/// but without recursion.
+pub fn render_flat_row(ui: &mut egui::Ui, row: &FlatRow, ctx: &mut TreeNodeContext<'_>) {
+    if row.is_dir {
+        let icon = if row.is_expanded { "📂 " } else { "📁 " };
+        let label = format!("{}{}", icon, row.name);
+
+        ui.horizontal(|ui| {
+            // Clamp depth to prevent visual overflow on deeply nested paths
+            let clamped_depth = row.depth.min(50);
+            ui.add_space(clamped_depth as f32 * 18.0);
+            let response = ui.selectable_label(false, label);
+            if response.clicked() {
+                if row.is_expanded {
+                    ctx.expanded_dirs().remove(&row.path);
+                } else {
+                    ctx.expanded_dirs().insert(row.path.clone());
+                }
+                *ctx.selected_file() = None;
+                ctx.selected_files().clear();
+                *ctx.selected_dir() = Some(row.path.clone());
+                ctx.layout().mark_dirty();
+            }
+            if response.double_clicked() {
+                // Toggle expansion on double-click
+                if row.is_expanded {
+                    ctx.expanded_dirs().remove(&row.path);
+                } else {
+                    ctx.expanded_dirs().insert(row.path.clone());
+                }
+                ctx.layout().mark_dirty();
+            }
+
+            response.context_menu(|ui| {
+                if ui.button("Show in File Explorer").clicked() {
+                    crate::ui::show_in_file_explorer(&row.path);
+                    ui.close_menu();
+                }
+                if ui.button("Copy path").clicked() {
+                    ui.output_mut(|o| o.copied_text = row.path.to_string_lossy().to_string());
+                    ui.close_menu();
+                }
+                if ui.button("Rename").clicked() {
+                    *ctx.file_to_rename() = Some(row.path.clone());
+                    *ctx.rename_new_name() = initial_rename_value(&row.path, &row.name);
+                    *ctx.rename_dialog_open() = true;
+                    ui.close_menu();
+                }
+                if ui.button("Move").clicked() {
+                    *ctx.file_to_move() = Some(row.path.clone());
+                    *ctx.move_dialog_open() = true;
+                    ui.close_menu();
+                }
+                if ui.button("Create Directory ...").clicked() {
+                    *ctx.create_dir_parent() = Some(row.path.clone());
+                    *ctx.create_dir_dialog_open() = true;
+                    ui.close_menu();
+                }
+                if ui.button("New document").clicked() {
+                    let mut new_path = row.path.join("New document.md");
+                    if new_path.exists() {
+                        let now = chrono::Local::now();
+                        let date_str = now.format("%Y-%m-%d %H-%M-%S");
+                        new_path = row.path.join(format!("New document {}.md", date_str));
+                    }
+                    let yaml_header = "---\ntitle: New document\n---\n\n";
+                    if let Err(e) = std::fs::write(&new_path, yaml_header) {
+                        tracing::error!(
+                            name = "ui.file.create_failed",
+                            path = %new_path.display(),
+                            error = %e,
+                            "Failed to create new document."
+                        );
+                    } else if let Some(producer) = ctx.file_event_producer().as_ref() {
+                        producer.publish_discovered(&new_path);
+                    }
+                    ui.close_menu();
+                }
+                if ui.button("Delete").clicked() {
+                    let path = row.path.clone();
+                    if let Err(e) = trash::delete(&path) {
+                        tracing::error!(
+                            name = "ui.directory.delete_failed",
+                            path = %path.display(),
+                            error = %e,
+                            "Failed to delete directory to trash."
+                        );
+                    }
+                    ui.close_menu();
+                }
+            });
+        });
+    } else {
+        let is_selected = ctx.selected_files().contains(&row.path)
+            || ctx.selected_file().as_ref() == Some(&row.path);
+        let label = format!("📄 {}", row.name);
+
+        ui.horizontal(|ui| {
+            // Clamp depth to prevent visual overflow on deeply nested paths
+            let clamped_depth = row.depth.min(50);
+            ui.add_space(clamped_depth as f32 * 18.0);
+            let response = ui.selectable_label(is_selected, label);
+
+            if response.clicked() {
+                if ctx.modifiers().shift || ctx.modifiers().ctrl || ctx.modifiers().command {
+                    if ctx.selected_files().contains(&row.path) {
+                        ctx.selected_files().remove(&row.path);
+                        if ctx.selected_file().as_ref() == Some(&row.path) {
+                            *ctx.selected_file() = None;
+                        }
+                    } else {
+                        ctx.selected_files().insert(row.path.clone());
+                        *ctx.selected_file() = Some(row.path.clone());
+                    }
+                } else {
+                    ctx.selected_files().clear();
+                    ctx.selected_files().insert(row.path.clone());
+                    *ctx.selected_file() = Some(row.path.clone());
+                    if !ctx.tabs().contains(&row.path) {
+                        ctx.tabs().push(row.path.clone());
+                    }
+                }
+            }
+
+            if response.double_clicked() {
+                if ctx.inline_editor_enabled() {
+                    *ctx.open_editor() = Some(row.path.clone());
+                } else {
+                    crate::ui::open_in_system_editor(&row.path);
+                }
+            }
+
+            response.context_menu(|ui| {
+                if ctx.selected_files().len() > 1 && ctx.selected_files().contains(&row.path) {
+                    if ui.button("Merge").clicked() {
+                        let files: HashSet<_> = ctx.selected_files().iter().cloned().collect();
+                        let prompt = build_merge_prompt(ctx.content_libraries(), &files);
+                        *ctx.submit_prompt() = Some(prompt);
+                        ui.close_menu();
+                    }
+                    if ui.button("Delete").clicked() {
+                        let files: Vec<_> = ctx.selected_files().iter().cloned().collect();
+                        for file in files.iter() {
+                            if let Err(e) = trash::delete(file) {
+                                tracing::error!(
+                                    name = "ui.file.multi_delete_failed",
+                                    path = %file.display(),
+                                    error = %e,
+                                    "Failed to delete file to trash during multi-selection."
+                                );
+                            } else if let Some(producer) = ctx.file_event_producer().as_ref() {
+                                producer.publish_removed(file);
+                            }
+                        }
+                        ctx.selected_files().clear();
+                        ui.close_menu();
+                    }
+                } else {
+                    if ui.button("Edit").clicked() {
+                        if ctx.inline_editor_enabled() {
+                            *ctx.open_editor() = Some(row.path.clone());
+                        } else {
+                            crate::ui::open_in_system_editor(&row.path);
+                        }
+                        ui.close_menu();
+                    }
+                    if ui.button("Show in File Explorer").clicked() {
+                        crate::ui::show_in_file_explorer(&row.path);
+                        ui.close_menu();
+                    }
+                    if ui.button("Copy path").clicked() {
+                        ui.output_mut(|o| o.copied_text = row.path.to_string_lossy().to_string());
+                        ui.close_menu();
+                    }
+                    if ui.button("Format Markdown").clicked() {
+                        let now = chrono::Local::now();
+                        let date_str = now.to_rfc3339();
+                        *ctx.submit_prompt() = Some(crate::ui::generate_format_prompt(&date_str));
+                        ui.close_menu();
+                    }
+                    if ui.button("Run as prompt").clicked() {
+                        if let Ok(content) = std::fs::read_to_string(&row.path) {
+                            *ctx.submit_prompt() = Some(content);
+                        } else {
+                            tracing::error!(
+                                name = "ui.file.run_as_prompt_failed",
+                                path = %row.path.display(),
+                                "Failed to read file content to run as prompt."
+                            );
+                        }
+                        ui.close_menu();
+                    }
+                    if ui.button("Print").clicked() {
+                        let path_to_print = row.path.clone();
+                        if let Some(tx) = ctx.bg_tx().clone() {
+                            let job = PrintJob::new(path_to_print.clone());
+                            let _ = execute_print_blocking(job, Some(tx));
+                        } else {
+                            tracing::warn!(
+                                name = "ui.file.print_no_channel",
+                                path = %path_to_print.display(),
+                                "Print requested but no background channel available"
+                            );
+                        }
+                        ui.close_menu();
+                    }
+                    if ui.button("Rename").clicked() {
+                        *ctx.file_to_rename() = Some(row.path.clone());
+                        *ctx.rename_new_name() = initial_rename_value(&row.path, &row.name);
+                        *ctx.rename_dialog_open() = true;
+                        ui.close_menu();
+                    }
+                    if ui.button("Move").clicked() {
+                        *ctx.file_to_move() = Some(row.path.clone());
+                        *ctx.move_dialog_open() = true;
+                        ui.close_menu();
+                    }
+                    if ui.button("Delete").clicked() {
+                        let path = row.path.clone();
+                        if let Err(e) = trash::delete(&path) {
+                            tracing::error!(
+                                name = "ui.file.delete_failed",
+                                path = %path.display(),
+                                error = %e,
+                                "Failed to delete file to trash."
+                            );
+                        } else if let Some(producer) = ctx.file_event_producer().as_ref() {
+                            producer.publish_removed(&path);
+                        }
+                        ui.close_menu();
+                    }
+                }
+            });
+        });
+    }
+}
+
 pub fn draw_tree_node(ui: &mut egui::Ui, node: &TreeNode, ctx: &mut TreeNodeContext<'_>) {
     if node.is_dir {
-        let is_expanded = ctx.expanded_dirs.contains(&node.path);
+        let is_expanded = ctx.expanded_dirs().contains(&node.path);
         let icon = if is_expanded { "📂 " } else { "📁 " };
         let label = format!("{}{}", icon, node.name);
 
         let response = ui.selectable_label(false, label);
         if response.clicked() {
             if is_expanded {
-                ctx.expanded_dirs.remove(&node.path);
+                ctx.expanded_dirs().remove(&node.path);
             } else {
-                ctx.expanded_dirs.insert(node.path.clone());
+                ctx.expanded_dirs().insert(node.path.clone());
             }
-            *ctx.selected_file = None;
-            ctx.selected_files.clear();
-            *ctx.selected_dir = Some(node.path.clone());
-            ctx.layout.mark_dirty();
+            *ctx.selected_file() = None;
+            ctx.selected_files().clear();
+            *ctx.selected_dir() = Some(node.path.clone());
+            ctx.layout().mark_dirty();
         }
         if response.double_clicked() {
-            ctx.layout.mark_dirty();
+            // Toggle expansion on double-click
+            if is_expanded {
+                ctx.expanded_dirs().remove(&node.path);
+            } else {
+                ctx.expanded_dirs().insert(node.path.clone());
+            }
+            ctx.layout().mark_dirty();
         }
 
         response.context_menu(|ui| {
             if ui.button("Show in File Explorer").clicked() {
-                let _ = std::process::Command::new("explorer")
-                    .arg(&node.path)
-                    .spawn();
+                crate::ui::show_in_file_explorer(&node.path);
                 ui.close_menu();
             }
             if ui.button("Copy path").clicked() {
@@ -87,19 +527,19 @@ pub fn draw_tree_node(ui: &mut egui::Ui, node: &TreeNode, ctx: &mut TreeNodeCont
                 ui.close_menu();
             }
             if ui.button("Rename").clicked() {
-                *ctx.file_to_rename = Some(node.path.clone());
-                *ctx.rename_new_name = initial_rename_value(&node.path, &node.name);
-                *ctx.rename_dialog_open = true;
+                *ctx.file_to_rename() = Some(node.path.clone());
+                *ctx.rename_new_name() = initial_rename_value(&node.path, &node.name);
+                *ctx.rename_dialog_open() = true;
                 ui.close_menu();
             }
             if ui.button("Move").clicked() {
-                *ctx.file_to_move = Some(node.path.clone());
-                *ctx.move_dialog_open = true;
+                *ctx.file_to_move() = Some(node.path.clone());
+                *ctx.move_dialog_open() = true;
                 ui.close_menu();
             }
             if ui.button("Create Directory ...").clicked() {
-                *ctx.create_dir_parent = Some(node.path.clone());
-                *ctx.create_dir_dialog_open = true;
+                *ctx.create_dir_parent() = Some(node.path.clone());
+                *ctx.create_dir_dialog_open() = true;
                 ui.close_menu();
             }
             if ui.button("New document").clicked() {
@@ -117,7 +557,7 @@ pub fn draw_tree_node(ui: &mut egui::Ui, node: &TreeNode, ctx: &mut TreeNodeCont
                         error = %e,
                         "Failed to create new document. Likely cause: permission denied or disk full. Operator should verify directory permissions."
                     );
-                } else if let Some(producer) = ctx.file_event_producer.as_ref() {
+                } else if let Some(producer) = ctx.file_event_producer().as_ref() {
                     // Tell the rest of the app this file now exists
                     // so the directory tree and tag manager refresh
                     // immediately.
@@ -149,49 +589,52 @@ pub fn draw_tree_node(ui: &mut egui::Ui, node: &TreeNode, ctx: &mut TreeNodeCont
             });
         }
     } else {
-        let is_selected = ctx.selected_files.contains(&node.path)
-            || ctx.selected_file.as_ref() == Some(&node.path);
+        let is_selected = ctx.selected_files().contains(&node.path)
+            || ctx.selected_file().as_ref() == Some(&node.path);
         let label = format!("📄 {}", node.name);
         let response = ui.selectable_label(is_selected, label);
 
         if response.clicked() {
-            if ctx.modifiers.shift || ctx.modifiers.ctrl || ctx.modifiers.command {
-                if ctx.selected_files.contains(&node.path) {
-                    ctx.selected_files.remove(&node.path);
-                    if ctx.selected_file.as_ref() == Some(&node.path) {
-                        *ctx.selected_file = None;
+            if ctx.modifiers().shift || ctx.modifiers().ctrl || ctx.modifiers().command {
+                if ctx.selected_files().contains(&node.path) {
+                    ctx.selected_files().remove(&node.path);
+                    if ctx.selected_file().as_ref() == Some(&node.path) {
+                        *ctx.selected_file() = None;
                     }
                 } else {
-                    ctx.selected_files.insert(node.path.clone());
-                    *ctx.selected_file = Some(node.path.clone());
+                    ctx.selected_files().insert(node.path.clone());
+                    *ctx.selected_file() = Some(node.path.clone());
                 }
             } else {
-                ctx.selected_files.clear();
-                ctx.selected_files.insert(node.path.clone());
-                *ctx.selected_file = Some(node.path.clone());
-                if !ctx.tabs.contains(&node.path) {
-                    ctx.tabs.push(node.path.clone());
+                ctx.selected_files().clear();
+                ctx.selected_files().insert(node.path.clone());
+                *ctx.selected_file() = Some(node.path.clone());
+                if !ctx.tabs().contains(&node.path) {
+                    ctx.tabs().push(node.path.clone());
                 }
             }
         }
 
         if response.double_clicked() {
-            if ctx.inline_editor_enabled {
-                *ctx.open_editor = Some(node.path.clone());
+            if ctx.inline_editor_enabled() {
+                *ctx.open_editor() = Some(node.path.clone());
             } else {
                 crate::ui::open_in_system_editor(&node.path);
             }
         }
 
         response.context_menu(|ui| {
-            if ctx.selected_files.len() > 1 && ctx.selected_files.contains(&node.path) {
+            if ctx.selected_files().len() > 1 && ctx.selected_files().contains(&node.path) {
                 // Multi-select context menu
                 if ui.button("Merge").clicked() {
-                    *ctx.submit_prompt = Some(build_merge_prompt(ctx.content_libraries, &ctx.selected_files));
+                    let files: HashSet<_> = ctx.selected_files().iter().cloned().collect();
+                    let prompt = build_merge_prompt(ctx.content_libraries(), &files);
+                    *ctx.submit_prompt() = Some(prompt);
                     ui.close_menu();
                 }
                 if ui.button("Delete").clicked() {
-                    for file in ctx.selected_files.iter() {
+                    let files: Vec<_> = ctx.selected_files().iter().cloned().collect();
+                    for file in files.iter() {
                         if let Err(e) = trash::delete(file) {
                             tracing::error!(
                                 name = "ui.file.multi_delete_failed",
@@ -199,18 +642,18 @@ pub fn draw_tree_node(ui: &mut egui::Ui, node: &TreeNode, ctx: &mut TreeNodeCont
                                 error = %e,
                                 "Failed to delete file to trash during multi-selection. Likely cause: file in use or permission denied. Operator should check file locks."
                             );
-                        } else if let Some(producer) = ctx.file_event_producer.as_ref() {
+                        } else if let Some(producer) = ctx.file_event_producer().as_ref() {
                             producer.publish_removed(file);
                         }
                     }
-                    ctx.selected_files.clear();
+                    ctx.selected_files().clear();
                     ui.close_menu();
                 }
             } else {
                 // Single-select context menu
                 if ui.button("Edit").clicked() {
-                    if ctx.inline_editor_enabled {
-                        *ctx.open_editor = Some(node.path.clone());
+                    if ctx.inline_editor_enabled() {
+                        *ctx.open_editor() = Some(node.path.clone());
                     } else {
                         crate::ui::open_in_system_editor(&node.path);
                     }
@@ -227,12 +670,12 @@ pub fn draw_tree_node(ui: &mut egui::Ui, node: &TreeNode, ctx: &mut TreeNodeCont
                 if ui.button("Format Markdown").clicked() {
                     let now = chrono::Local::now();
                     let date_str = now.to_rfc3339();
-                    *ctx.submit_prompt = Some(crate::ui::generate_format_prompt(&date_str));
+                    *ctx.submit_prompt() = Some(crate::ui::generate_format_prompt(&date_str));
                     ui.close_menu();
                 }
                 if ui.button("Run as prompt").clicked() {
                     if let Ok(content) = std::fs::read_to_string(&node.path) {
-                        *ctx.submit_prompt = Some(content);
+                        *ctx.submit_prompt() = Some(content);
                     } else {
                         tracing::error!(
                             name = "ui.file.run_as_prompt_failed",
@@ -244,7 +687,7 @@ pub fn draw_tree_node(ui: &mut egui::Ui, node: &TreeNode, ctx: &mut TreeNodeCont
                 }
                 if ui.button("Print").clicked() {
                     let path_to_print = node.path.clone();
-                    if let Some(tx) = ctx.bg_tx.clone() {
+                    if let Some(tx) = ctx.bg_tx().clone() {
                         let job = PrintJob::new(path_to_print.clone());
                         let _ = execute_print_blocking(job, Some(tx));
                     } else {
@@ -257,14 +700,14 @@ pub fn draw_tree_node(ui: &mut egui::Ui, node: &TreeNode, ctx: &mut TreeNodeCont
                     ui.close_menu();
                 }
                 if ui.button("Rename").clicked() {
-                    *ctx.file_to_rename = Some(node.path.clone());
-                    *ctx.rename_new_name = initial_rename_value(&node.path, &node.name);
-                    *ctx.rename_dialog_open = true;
+                    *ctx.file_to_rename() = Some(node.path.clone());
+                    *ctx.rename_new_name() = initial_rename_value(&node.path, &node.name);
+                    *ctx.rename_dialog_open() = true;
                     ui.close_menu();
                 }
                 if ui.button("Move").clicked() {
-                    *ctx.file_to_move = Some(node.path.clone());
-                    *ctx.move_dialog_open = true;
+                    *ctx.file_to_move() = Some(node.path.clone());
+                    *ctx.move_dialog_open() = true;
                     ui.close_menu();
                 }
                 if ui.button("Delete").clicked() {
@@ -276,7 +719,7 @@ pub fn draw_tree_node(ui: &mut egui::Ui, node: &TreeNode, ctx: &mut TreeNodeCont
                             error = %e,
                             "Failed to delete file to trash. Likely cause: file in use or permission denied. Operator should check file locks."
                         );
-                    } else if let Some(producer) = ctx.file_event_producer.as_ref() {
+                    } else if let Some(producer) = ctx.file_event_producer().as_ref() {
                         producer.publish_removed(&path);
                     }
                     ui.close_menu();
@@ -385,33 +828,41 @@ mod tests {
         let _ = ctx_egui.run(Default::default(), |ctx| {
             egui::CentralPanel::default().show(ctx, |ui| {
                 let mut tree_ctx = TreeNodeContext {
-                    expanded_dirs: &mut expanded_dirs,
-                    selected_file: &mut selected_file,
-                    selected_files: &mut selected_files,
-                    tabs: &mut tabs,
-                    file_to_move: &mut file_to_move,
-                    move_dialog_open: &mut move_dialog_open,
-                    selected_dir: &mut selected_dir,
-                    create_dir_dialog_open: &mut create_dir_dialog_open,
-                    create_dir_parent: &mut create_dir_parent,
-                    layout: &mut layout,
-                    rename_dialog_open: &mut rename_dialog_open,
-                    file_to_rename: &mut file_to_rename,
-                    rename_new_name: &mut rename_new_name,
-                    modifiers: egui::Modifiers::default(),
-                    submit_prompt: &mut submit_prompt,
-                    content_libraries: &[],
-                    open_editor: &mut open_editor,
-                    inline_editor_enabled: true,
-                    bg_tx: &None,
-                    file_event_producer: None,
+                    file_ops: FileOpsContext {
+                        file_to_move: &mut file_to_move,
+                        move_dialog_open: &mut move_dialog_open,
+                        file_to_rename: &mut file_to_rename,
+                        rename_dialog_open: &mut rename_dialog_open,
+                        rename_new_name: &mut rename_new_name,
+                    },
+                    dir_ops: DirOpsContext {
+                        selected_dir: &mut selected_dir,
+                        create_dir_dialog_open: &mut create_dir_dialog_open,
+                        create_dir_parent: &mut create_dir_parent,
+                    },
+                    selection: SelectionContext {
+                        selected_file: &mut selected_file,
+                        selected_files: &mut selected_files,
+                        expanded_dirs: &mut expanded_dirs,
+                        tabs: &mut tabs,
+                    },
+                    app: AppIntegrationContext {
+                        layout: &mut layout,
+                        submit_prompt: &mut submit_prompt,
+                        content_libraries: &[],
+                        open_editor: &mut open_editor,
+                        modifiers: egui::Modifiers::default(),
+                        inline_editor_enabled: true,
+                        bg_tx: &None,
+                        file_event_producer: None,
+                    },
                 };
 
                 // Render collapsed directory
                 draw_tree_node(ui, &root, &mut tree_ctx);
 
                 // Render expanded directory with child file
-                tree_ctx.expanded_dirs.insert(root.path.clone());
+                tree_ctx.expanded_dirs().insert(root.path.clone());
                 draw_tree_node(ui, &root, &mut tree_ctx);
 
                 // Render standalone file node
@@ -456,29 +907,37 @@ mod tests {
             egui::CentralPanel::default().show(ctx, |ui| {
                 // Test ctrl multi-select simulation
                 let mut tree_ctx = TreeNodeContext {
-                    expanded_dirs: &mut expanded_dirs,
-                    selected_file: &mut selected_file,
-                    selected_files: &mut selected_files,
-                    tabs: &mut tabs,
-                    file_to_move: &mut file_to_move,
-                    move_dialog_open: &mut move_dialog_open,
-                    selected_dir: &mut selected_dir,
-                    create_dir_dialog_open: &mut create_dir_dialog_open,
-                    create_dir_parent: &mut create_dir_parent,
-                    layout: &mut layout,
-                    rename_dialog_open: &mut rename_dialog_open,
-                    file_to_rename: &mut file_to_rename,
-                    rename_new_name: &mut rename_new_name,
-                    modifiers: egui::Modifiers {
-                        ctrl: true,
-                        ..Default::default()
+                    file_ops: FileOpsContext {
+                        file_to_move: &mut file_to_move,
+                        move_dialog_open: &mut move_dialog_open,
+                        file_to_rename: &mut file_to_rename,
+                        rename_dialog_open: &mut rename_dialog_open,
+                        rename_new_name: &mut rename_new_name,
                     },
-                    submit_prompt: &mut submit_prompt,
-                    content_libraries: &[],
-                    open_editor: &mut open_editor,
-                    inline_editor_enabled: true,
-                    bg_tx: &None,
-                    file_event_producer: None,
+                    dir_ops: DirOpsContext {
+                        selected_dir: &mut selected_dir,
+                        create_dir_dialog_open: &mut create_dir_dialog_open,
+                        create_dir_parent: &mut create_dir_parent,
+                    },
+                    selection: SelectionContext {
+                        selected_file: &mut selected_file,
+                        selected_files: &mut selected_files,
+                        expanded_dirs: &mut expanded_dirs,
+                        tabs: &mut tabs,
+                    },
+                    app: AppIntegrationContext {
+                        layout: &mut layout,
+                        submit_prompt: &mut submit_prompt,
+                        content_libraries: &[],
+                        open_editor: &mut open_editor,
+                        modifiers: egui::Modifiers {
+                            ctrl: true,
+                            ..Default::default()
+                        },
+                        inline_editor_enabled: true,
+                        bg_tx: &None,
+                        file_event_producer: None,
+                    },
                 };
 
                 draw_tree_node(ui, &file1, &mut tree_ctx);

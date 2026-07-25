@@ -24,9 +24,9 @@ struct CardDavResponse {
 
 fn block_on<F: std::future::Future>(f: F) -> F::Output {
     static RT: OnceLock<Runtime> = OnceLock::new();
-    let rt = RT.get_or_init(|| Runtime::new().unwrap_or_else(|e| {
-        panic!("Failed to create Tokio runtime: {}", e)
-    }));
+    let rt = RT.get_or_init(|| {
+        Runtime::new().unwrap_or_else(|e| panic!("Failed to create Tokio runtime: {}", e))
+    });
     rt.block_on(f)
 }
 

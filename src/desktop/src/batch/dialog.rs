@@ -1,7 +1,7 @@
 //! Batch prompt-processing dialog UI — directory/prompt/concurrency selection, progress display, and results summary.
 
 use crate::batch::types::{
-    validate_batch_params, BatchConfig, BatchDialogConfig, BatchDialogResult, BatchMode,
+    BatchConfig, BatchDialogConfig, BatchDialogResult, BatchMode, validate_batch_params,
 };
 use eframe::egui;
 

@@ -22,11 +22,7 @@ pub trait Tool: Send + Sync {
     fn input_type(&self) -> TypeId;
     fn parameters_schema(&self) -> serde_json::Value;
     fn is_enabled(&self, config: &AppConfig, prompt: &str) -> bool;
-    fn execute(
-        &self,
-        ctx: &ToolContext,
-        input_json: &str,
-    ) -> Result<serde_json::Value, String>;
+    fn execute(&self, ctx: &ToolContext, input_json: &str) -> Result<serde_json::Value, String>;
 }
 
 pub use context::ToolContext as ToolContextType;

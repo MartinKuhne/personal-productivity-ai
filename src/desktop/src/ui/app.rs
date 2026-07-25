@@ -16,10 +16,12 @@ use crate::ui::selection_manager::SelectionManager;
 use crate::ui::tab_manager::TabManager;
 use crate::utils::parse_front_matter;
 use eframe::egui;
-use std::collections::BTreeMap;
+use serde::{Deserialize, Serialize};
+use std::collections::{BTreeMap, HashSet};
 use std::path::PathBuf;
 use std::sync::mpsc::Receiver;
 use std::sync::{Arc, Mutex};
+use std::time::Duration;
 
 #[derive(Clone)]
 pub struct TreeNode {
@@ -47,6 +49,17 @@ pub struct ToCEntry {
     pub id: egui::Id,
 }
 
+/// UI state persisted across application restarts via `eframe::Storage`.
+#[derive(Serialize, Deserialize, Clone, Debug, Default)]
+pub struct PersistedUiState {
+    #[serde(default)]
+    pub left_panel_width: Option<f32>,
+    #[serde(default)]
+    pub collapsed_dirs: HashSet<PathBuf>,
+}
+
+const PERSISTED_UI_STATE_KEY: &str = "ppai_ui_state";
+
 pub struct FastMdApp {
     pub content_libraries: Vec<crate::config::ContentLibrary>,
     pub rx: Receiver<BackgroundMessage>,
@@ -71,6 +84,9 @@ pub struct FastMdApp {
     pub inline_editor_enabled: bool,
     pub background_manager: SharedProcessManager,
     pub config: crate::config::AppConfig,
+    pub persisted_ui_state: PersistedUiState,
+    pub pending_file_load: Option<PathBuf>,
+    pub repaint_interval: Duration,
 }
 
 impl FastMdApp {
@@ -341,6 +357,28 @@ impl FastMdApp {
 
         let event_bus = background_task.file_event_bus;
         let dir_tracker = DirectoryTracker::new(event_bus.subscribe());
+
+        let persisted_ui_state: PersistedUiState = cc
+            .storage
+            .and_then(|s| s.get_string(PERSISTED_UI_STATE_KEY))
+            .map(|json| {
+                serde_json::from_str(&json).unwrap_or_else(|e| {
+                    tracing::warn!(error = %e, "Failed to parse persisted UI state, using defaults");
+                    PersistedUiState::default()
+                })
+            })
+            .unwrap_or_default();
+
+        let mut layout = PanelLayout::new();
+        if let Some(w) = persisted_ui_state.left_panel_width {
+            layout.left_panel_width = Some(w);
+        }
+
+        let mut selection = SelectionManager::new();
+        for dir in &persisted_ui_state.collapsed_dirs {
+            selection.expanded_dirs.insert(dir.clone());
+        }
+
         Self {
             content_libraries: config.content_libraries.clone(),
             rx: background_task.rx,
@@ -350,8 +388,8 @@ impl FastMdApp {
             file_processor,
             directory_tracker: dir_tracker,
             tag_manager: TagManager::new(),
-            layout: PanelLayout::new(),
-            selection: SelectionManager::new(),
+            layout,
+            selection,
             tab_manager: TabManager::new(),
             _watcher: None,
             agent: AgentSessionManager::new(config.clone()),
@@ -361,6 +399,9 @@ impl FastMdApp {
             inline_editor_enabled,
             background_manager,
             config,
+            persisted_ui_state,
+            pending_file_load: None,
+            repaint_interval: Duration::from_millis(16),
         }
     }
 
@@ -396,6 +437,9 @@ impl FastMdApp {
                 std::sync::mpsc::channel().1,
             )),
             config,
+            persisted_ui_state: PersistedUiState::default(),
+            pending_file_load: None,
+            repaint_interval: Duration::from_millis(16),
         }
     }
 
@@ -442,6 +486,15 @@ impl eframe::App for FastMdApp {
         }
     }
 
+    fn save(&mut self, storage: &mut dyn eframe::Storage) {
+        self.persisted_ui_state.left_panel_width = self.layout.left_panel_width;
+        let all_dirs: HashSet<PathBuf> = self.selection.expanded_dirs.iter().cloned().collect();
+        self.persisted_ui_state.collapsed_dirs = all_dirs;
+        if let Ok(json) = serde_json::to_string(&self.persisted_ui_state) {
+            storage.set_string(PERSISTED_UI_STATE_KEY, json);
+        }
+    }
+
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
         self.update_ui(ctx);
     }
@@ -449,18 +502,22 @@ impl eframe::App for FastMdApp {
 
 impl FastMdApp {
     pub fn update_ui(&mut self, ctx: &egui::Context) {
-        // Process file events from the bus. This is the directory
-        // tree's "consumer" of the file-event bus — the
-        // tag manager/indexer has its own consumers in
-        // `background_task.rs`.
-        if self.process_file_events() {
-            // At least one tab needs to reload because its file
-            // changed on disk. Force a repaint so the change
-            // shows up immediately.
-            ctx.request_repaint();
-        }
+        self.process_file_events_and_repaint(ctx);
+        self.drain_background_channel();
+        self.handle_file_selection(ctx);
+        self.show_editor_overlay(ctx);
+        self.show_modals(ctx);
+        self.render_panels(ctx);
+        self.handle_deferred_actions();
+    }
 
-        // Handle background messages
+    fn process_file_events_and_repaint(&mut self, ctx: &egui::Context) {
+        if self.process_file_events() || !self.file_processor.indexing_finished {
+            ctx.request_repaint_after(self.repaint_interval);
+        }
+    }
+
+    fn drain_background_channel(&mut self) {
         while let Ok(msg) = self.rx.try_recv() {
             match msg {
                 BackgroundMessage::FileParsed { path, tags } => {
@@ -502,7 +559,6 @@ impl FastMdApp {
                         self.tab_manager.loaded_path = None;
                     }
                 }
-                // Agent messages are delegated to AgentSessionManager
                 BackgroundMessage::AgentStatus(_)
                 | BackgroundMessage::AgentThinking(_)
                 | BackgroundMessage::AgentResponse(_)
@@ -516,40 +572,54 @@ impl FastMdApp {
                         mgr.push_log(entry);
                     }
                 }
-            }
-        }
-
-        // Repaint if still indexing
-        if !self.file_processor.indexing_finished {
-            ctx.request_repaint();
-        }
-
-        // Handle file selection and dynamic content loading
-        if let Some(selected_path) = self.selection.selected_file() {
-            if self.tab_manager.loaded_path.as_ref() != Some(selected_path) {
-                if let Ok(content) = std::fs::read_to_string(selected_path) {
-                    if let Some((yaml_val, md_content)) = parse_front_matter(&content) {
-                        self.tab_manager.current_yaml = Some(yaml_val);
-                        self.tab_manager.current_markdown = md_content.to_string();
-                    } else {
-                        self.tab_manager.current_yaml = None;
-                        self.tab_manager.current_markdown = content;
+                BackgroundMessage::FileLoaded { path, content } => {
+                    self.pending_file_load = None;
+                    if let Ok(content) = content {
+                        if let Some((yaml_val, md_content)) = parse_front_matter(&content) {
+                            self.tab_manager.current_yaml = Some(yaml_val);
+                            self.tab_manager.current_markdown = md_content.to_string();
+                        } else {
+                            self.tab_manager.current_yaml = None;
+                            self.tab_manager.current_markdown = content;
+                        }
+                        self.tab_manager.loaded_path = Some(path.clone());
+                        self.tab_manager.toc =
+                            crate::ui::render::build_toc(&self.tab_manager.current_markdown);
+                        self.tab_manager.scroll_to_header_id = None;
                     }
-                    self.tab_manager.loaded_path = Some(selected_path.clone());
-                    self.tab_manager.toc =
-                        crate::ui::render::build_toc(&self.tab_manager.current_markdown);
-                    self.tab_manager.scroll_to_header_id = None;
                 }
             }
         }
+    }
 
-        // Show inline editor overlay
+    fn handle_file_selection(&mut self, _ctx: &egui::Context) {
+        if let Some(selected_path) = self.selection.selected_file()
+            && self.tab_manager.loaded_path.as_ref() != Some(selected_path)
+            && self.pending_file_load.as_ref() != Some(selected_path)
+        {
+            self.pending_file_load = Some(selected_path.clone());
+            let tx = self.tx.clone();
+            let path = selected_path.clone();
+            std::thread::spawn(move || {
+                let content = std::fs::read_to_string(&path).map_err(|e| e.to_string());
+                if tx
+                    .send(BackgroundMessage::FileLoaded { path, content })
+                    .is_err()
+                {
+                    tracing::warn!("Background channel closed, file load result dropped");
+                }
+            });
+        }
+    }
+
+    fn show_editor_overlay(&mut self, ctx: &egui::Context) {
         let producer = crate::file_events::FileEventProducer::new(&self.file_event_bus);
         if self.editor_state.show(ctx, &producer) {
-            // Force reload if we edited the active document
             self.tab_manager.loaded_path = None;
         }
+    }
 
+    fn show_modals(&mut self, ctx: &egui::Context) {
         if self.dialogs.move_dialog_open {
             crate::ui::modals::show_move_modal_dialog(
                 &mut self.dialogs,
@@ -584,15 +654,11 @@ impl FastMdApp {
             );
         }
 
-        // Show background logs window (separate, not part of DialogManager)
         crate::ui::background_logs::show_background_logs_window(self, ctx);
 
-        // Show batch processing modal
         if self.dialogs.batch_dialog_open {
             let mut dialog_config = self.dialogs.batch_dialog_config.clone();
 
-            // Populate available directories from DirectoryTracker (all known directories, including subdirectories).
-            // Preserve selection by path if the previously selected dir still exists in the updated list.
             let prev_selected = dialog_config
                 .selected_dir_idx
                 .and_then(|i| dialog_config.available_dirs.get(i).cloned());
@@ -635,23 +701,17 @@ impl FastMdApp {
             }
             self.dialogs.batch_dialog_config = dialog_config;
         }
+    }
 
-        // Top panel
+    fn render_panels(&mut self, ctx: &egui::Context) {
         show_top_panel(self, ctx);
-
-        // Bottom panel
         show_bottom_panel(self, ctx);
-
-        // Right panel (Table of Contents)
         show_right_panel(self, ctx);
-
-        // Left panel (Directory tree)
         show_left_panel(self, ctx);
-
-        // Center panel (Markdown content or Agent)
         show_center_panel(self, ctx);
+    }
 
-        // Handle programmatic prompt submission
+    fn handle_deferred_actions(&mut self) {
         if let Some(prompt) = self.submit_prompt.take() {
             self.start_agent_session(prompt);
         }

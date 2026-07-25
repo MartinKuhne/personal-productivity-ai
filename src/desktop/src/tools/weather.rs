@@ -262,9 +262,11 @@ mod tests {
         }
         let result_invalid = geocode("Seattle, WA");
         assert!(result_invalid.is_err());
-        assert!(result_invalid
-            .unwrap_err()
-            .starts_with("Nominatim JSON error"));
+        assert!(
+            result_invalid
+                .unwrap_err()
+                .starts_with("Nominatim JSON error")
+        );
 
         // test_tool_get_weather_success
         let nom_resp = serde_json::json!([{"lat": "47.6062", "lon": "-122.3321"}]);
