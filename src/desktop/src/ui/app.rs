@@ -361,7 +361,12 @@ impl FastMdApp {
         let persisted_ui_state: PersistedUiState = cc
             .storage
             .and_then(|s| s.get_string(PERSISTED_UI_STATE_KEY))
-            .and_then(|json| serde_json::from_str(&json).ok())
+            .map(|json| {
+                serde_json::from_str(&json).unwrap_or_else(|e| {
+                    tracing::warn!(error = %e, "Failed to parse persisted UI state, using defaults");
+                    PersistedUiState::default()
+                })
+            })
             .unwrap_or_default();
 
         let mut layout = PanelLayout::new();
@@ -507,10 +512,7 @@ impl FastMdApp {
     }
 
     fn process_file_events_and_repaint(&mut self, ctx: &egui::Context) {
-        if self.process_file_events() {
-            ctx.request_repaint_after(self.repaint_interval);
-        }
-        if !self.file_processor.indexing_finished {
+        if self.process_file_events() || !self.file_processor.indexing_finished {
             ctx.request_repaint_after(self.repaint_interval);
         }
     }
@@ -600,7 +602,12 @@ impl FastMdApp {
             let path = selected_path.clone();
             std::thread::spawn(move || {
                 let content = std::fs::read_to_string(&path).map_err(|e| e.to_string());
-                let _ = tx.send(BackgroundMessage::FileLoaded { path, content });
+                if tx
+                    .send(BackgroundMessage::FileLoaded { path, content })
+                    .is_err()
+                {
+                    tracing::warn!("Background channel closed, file load result dropped");
+                }
             });
         }
     }

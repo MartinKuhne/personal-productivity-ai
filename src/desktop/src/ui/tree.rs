@@ -200,6 +200,9 @@ pub fn initial_rename_value(path: &std::path::Path, fallback_name: &str) -> Stri
         .to_string()
 }
 
+/// Maximum tree depth to prevent stack overflow in flatten_tree and visual overflow in rendering.
+pub const MAX_TREE_DEPTH: usize = 1000;
+
 /// A single visible row in the flattened virtual tree list.
 #[derive(Clone)]
 pub struct FlatRow {
@@ -211,11 +214,12 @@ pub struct FlatRow {
     pub path: PathBuf,
     /// Whether this node is a directory.
     pub is_dir: bool,
-    /// For directories: whether currently expanded.
+    /// For directories: whether currently expanded. Always false for files.
     pub is_expanded: bool,
 }
 
 /// Fixed height for each virtual tree row in pixels.
+/// Matches egui default monospace line height (14pt) + 4px padding.
 pub const TREE_ROW_HEIGHT: f32 = 22.0;
 
 /// Flatten a `TreeNode` hierarchy into a `Vec<FlatRow>` in DFS pre-order,
@@ -226,6 +230,10 @@ pub fn flatten_tree(
     expanded: &HashSet<PathBuf>,
     rows: &mut Vec<FlatRow>,
 ) {
+    // Prevent stack overflow on maliciously deep directory structures.
+    if depth > MAX_TREE_DEPTH {
+        return;
+    }
     if depth > 0 {
         rows.push(FlatRow {
             depth: depth - 1,
@@ -252,7 +260,9 @@ pub fn render_flat_row(ui: &mut egui::Ui, row: &FlatRow, ctx: &mut TreeNodeConte
         let label = format!("{}{}", icon, row.name);
 
         ui.horizontal(|ui| {
-            ui.add_space(row.depth as f32 * 18.0);
+            // Clamp depth to prevent visual overflow on deeply nested paths
+            let clamped_depth = row.depth.min(50);
+            ui.add_space(clamped_depth as f32 * 18.0);
             let response = ui.selectable_label(false, label);
             if response.clicked() {
                 if row.is_expanded {
@@ -266,14 +276,18 @@ pub fn render_flat_row(ui: &mut egui::Ui, row: &FlatRow, ctx: &mut TreeNodeConte
                 ctx.layout().mark_dirty();
             }
             if response.double_clicked() {
+                // Toggle expansion on double-click
+                if row.is_expanded {
+                    ctx.expanded_dirs().remove(&row.path);
+                } else {
+                    ctx.expanded_dirs().insert(row.path.clone());
+                }
                 ctx.layout().mark_dirty();
             }
 
             response.context_menu(|ui| {
                 if ui.button("Show in File Explorer").clicked() {
-                    let _ = std::process::Command::new("explorer")
-                        .arg(&row.path)
-                        .spawn();
+                    crate::ui::show_in_file_explorer(&row.path);
                     ui.close_menu();
                 }
                 if ui.button("Copy path").clicked() {
@@ -336,7 +350,9 @@ pub fn render_flat_row(ui: &mut egui::Ui, row: &FlatRow, ctx: &mut TreeNodeConte
         let label = format!("📄 {}", row.name);
 
         ui.horizontal(|ui| {
-            ui.add_space(row.depth as f32 * 18.0);
+            // Clamp depth to prevent visual overflow on deeply nested paths
+            let clamped_depth = row.depth.min(50);
+            ui.add_space(clamped_depth as f32 * 18.0);
             let response = ui.selectable_label(is_selected, label);
 
             if response.clicked() {
@@ -492,14 +508,18 @@ pub fn draw_tree_node(ui: &mut egui::Ui, node: &TreeNode, ctx: &mut TreeNodeCont
             ctx.layout().mark_dirty();
         }
         if response.double_clicked() {
+            // Toggle expansion on double-click
+            if is_expanded {
+                ctx.expanded_dirs().remove(&node.path);
+            } else {
+                ctx.expanded_dirs().insert(node.path.clone());
+            }
             ctx.layout().mark_dirty();
         }
 
         response.context_menu(|ui| {
             if ui.button("Show in File Explorer").clicked() {
-                let _ = std::process::Command::new("explorer")
-                    .arg(&node.path)
-                    .spawn();
+                crate::ui::show_in_file_explorer(&node.path);
                 ui.close_menu();
             }
             if ui.button("Copy path").clicked() {
