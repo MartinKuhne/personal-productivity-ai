@@ -161,15 +161,19 @@ fn render_heading(ui: &mut egui::Ui, title: &str, level: u32, scroll_to_id: &mut
 }
 
 /// Purpose: Renders a single table cell, always emitting at least one widget.
-/// Inputs: `ui` (mut), `cell` (inline elements for the cell)
-/// Outputs: None
-/// Purity: Impure (modifies UI state). Thin adapter for Grid cells.
+///
+/// Uses `horizontal` (not `horizontal_wrapped`) so the cell reports a real
+/// intrinsic width to the parent `Grid`. With `horizontal_wrapped`, the cell
+/// would happily shrink to the smallest unbreakable word and the whole table
+/// would collapse to ~one word per column regardless of viewport width.
+/// Long content that does not fit will overflow the column and the wrapping
+/// `ScrollArea` lets the user scroll horizontally to see it.
 fn render_table_cell(ui: &mut egui::Ui, cell: &[InlineElem]) {
     if cell.is_empty() {
         ui.label("");
         return;
     }
-    ui.horizontal_wrapped(|ui| {
+    ui.horizontal(|ui| {
         ui.spacing_mut().item_spacing.x = 0.0;
         for elem in cell {
             match elem {
@@ -209,9 +213,12 @@ fn render_table_cell(ui: &mut egui::Ui, cell: &[InlineElem]) {
 }
 
 /// Purpose: Renders a table.
-/// Inputs: `ui` (mut), `table_cells`
-/// Outputs: None
-/// Purity: Impure (modifies UI state). Thin adapter.
+///
+/// Columns are sized to their content (`render_table_cell` reports a real
+/// intrinsic width), so the grid is exactly as wide as it needs to be — no
+/// extra whitespace when content is short, and no collapse when content is
+/// long. If the resulting table is wider than the viewport, the wrapping
+/// `ScrollArea` lets the user scroll horizontally to see the rest.
 fn render_table(ui: &mut egui::Ui, table_cells: &[Vec<Vec<InlineElem>>]) {
     egui::ScrollArea::horizontal()
         .id_source(ui.next_auto_id())
@@ -265,6 +272,7 @@ pub fn parse_yaml_to_pairs(yaml: &serde_yaml::Value) -> Option<Vec<(String, Stri
 /// Purity: Impure (modifies UI state). Coordinates parsing and rendering.
 pub fn render_yaml_table(ui: &mut egui::Ui, yaml: &serde_yaml::Value) {
     if let Some(pairs) = parse_yaml_to_pairs(yaml) {
+        let available_width = ui.available_width();
         egui::Frame::none()
             .fill(egui::Color32::from_rgb(24, 24, 27))
             .stroke(egui::Stroke::new(1.0_f32, egui::Color32::from_gray(40)))
@@ -274,6 +282,7 @@ pub fn render_yaml_table(ui: &mut egui::Ui, yaml: &serde_yaml::Value) {
                 egui::ScrollArea::horizontal()
                     .id_source("yaml_scroll")
                     .show(ui, |ui| {
+                        ui.set_min_width(available_width);
                         egui::Grid::new("yaml_grid")
                             .num_columns(2)
                             .striped(true)
