@@ -1,71 +1,39 @@
 //! Error types for the agent subsystem — covers network, HTTP, JSON, IO, tool, and config error variants.
 
-use std::fmt;
-
-#[derive(Debug)]
+#[derive(Debug, thiserror::Error)]
 pub enum AgentError {
+    #[error("Network error: {0}. Please check your internet connection.")]
     NetworkError(String),
+
+    #[error("HTTP {status} error: {body}")]
     HttpError { status: u16, body: String },
+
+    #[error("Failed to parse response: {0}. The API may have returned an unexpected format.")]
     JsonParseError(String),
+
+    #[error("Invalid response from API: {0}. The API format may be incompatible.")]
     InvalidResponseSchema(String),
+
+    #[error("API key is not configured. Please set your API key in the settings.")]
     MissingApiKey,
-    IoError(std::io::Error),
+
+    #[error("File system error: {0}")]
+    IoError(#[from] std::io::Error),
+
+    #[error("Tool execution failed: {0}")]
     ToolError(String),
+
+    #[error("Request timed out. The server may be overloaded or unreachable.")]
     Timeout,
+
+    #[error("Failed to serialize data: {0}")]
     SerializationError(String),
+
+    #[error("Configuration error: {0}")]
     ConfigError(String),
+
+    #[error("Runtime error: {0}")]
     RuntimeError(String),
-}
-
-impl fmt::Display for AgentError {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            AgentError::NetworkError(msg) => write!(
-                f,
-                "Network error: {}. Please check your internet connection.",
-                msg
-            ),
-            AgentError::HttpError { status, body } => write!(f, "HTTP {} error: {}", status, body),
-            AgentError::JsonParseError(msg) => write!(
-                f,
-                "Failed to parse response: {}. The API may have returned an unexpected format.",
-                msg
-            ),
-            AgentError::InvalidResponseSchema(msg) => write!(
-                f,
-                "Invalid response from API: {}. The API format may be incompatible.",
-                msg
-            ),
-            AgentError::MissingApiKey => write!(
-                f,
-                "API key is not configured. Please set your API key in the settings."
-            ),
-            AgentError::IoError(err) => write!(f, "File system error: {}", err),
-            AgentError::ToolError(msg) => write!(f, "Tool execution failed: {}", msg),
-            AgentError::Timeout => write!(
-                f,
-                "Request timed out. The server may be overloaded or unreachable."
-            ),
-            AgentError::SerializationError(msg) => write!(f, "Failed to serialize data: {}", msg),
-            AgentError::ConfigError(msg) => write!(f, "Configuration error: {}", msg),
-            AgentError::RuntimeError(msg) => write!(f, "Runtime error: {}", msg),
-        }
-    }
-}
-
-impl std::error::Error for AgentError {
-    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
-        match self {
-            AgentError::IoError(err) => Some(err),
-            _ => None,
-        }
-    }
-}
-
-impl From<std::io::Error> for AgentError {
-    fn from(err: std::io::Error) -> Self {
-        AgentError::IoError(err)
-    }
 }
 
 impl AgentError {
@@ -74,14 +42,14 @@ impl AgentError {
             AgentError::NetworkError(_) => true,
             AgentError::HttpError { status, .. } => *status >= 500 || *status == 429,
             AgentError::Timeout => true,
-            AgentError::IoError(_) => false,
-            AgentError::JsonParseError(_) => false,
-            AgentError::InvalidResponseSchema(_) => false,
-            AgentError::MissingApiKey => false,
-            AgentError::ToolError(_) => false,
-            AgentError::SerializationError(_) => false,
-            AgentError::ConfigError(_) => false,
-            AgentError::RuntimeError(_) => false,
+            AgentError::IoError(_)
+            | AgentError::JsonParseError(_)
+            | AgentError::InvalidResponseSchema(_)
+            | AgentError::MissingApiKey
+            | AgentError::ToolError(_)
+            | AgentError::SerializationError(_)
+            | AgentError::ConfigError(_)
+            | AgentError::RuntimeError(_) => false,
         }
     }
 

@@ -58,8 +58,8 @@ pub fn show_move_modal_dialog(
                 let submit = ctx.input_mut(|i| i.consume_key(egui::Modifiers::NONE, egui::Key::Enter));
                 ui.horizontal(|ui| {
                     if ui.button("Ok").clicked() || (submit && dm.selected_move_folder.is_some()) {
-                        if let (Some(file), Some(folder)) = (&dm.file_to_move, &dm.selected_move_folder) {
-                            if let Some(name) = file.file_name() {
+                        if let (Some(file), Some(folder)) = (&dm.file_to_move, &dm.selected_move_folder)
+                            && let Some(name) = file.file_name() {
                                 let new_path = folder.join(name);
                                 if let Err(e) = std::fs::rename(file, &new_path) {
                                     tracing::error!(
@@ -74,7 +74,6 @@ pub fn show_move_modal_dialog(
                                     producer.publish_rename(file, &new_path);
                                 }
                             }
-                        }
                         close_modal = true;
                     }
                     if ui.button("Cancel").clicked() {
@@ -112,8 +111,8 @@ pub fn show_create_dir_dialog(
 
                 ui.horizontal(|ui| {
                     if ui.button("Ok").clicked() || submit {
-                        if let Some(parent) = &dm.create_dir_parent {
-                            if !dm.create_dir_name.trim().is_empty() {
+                        if let Some(parent) = &dm.create_dir_parent
+                            && !dm.create_dir_name.trim().is_empty() {
                                 let dir_name = dm.create_dir_name.trim();
                                 if !crate::utils::path::is_safe_basename(dir_name) {
                                     tracing::warn!(
@@ -141,7 +140,6 @@ pub fn show_create_dir_dialog(
                                     }
                                 }
                             }
-                        }
                         close_create_modal = true;
                     }
                     if ui.button("Cancel").clicked() {
@@ -158,13 +156,14 @@ pub fn show_create_dir_dialog(
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 pub fn show_rename_dialog(
     dm: &mut DialogManager,
     file_event_bus: &Bus<crate::file_events::FileEvent>,
     loaded_path: &mut Option<PathBuf>,
     selected_file: &mut Option<PathBuf>,
     selected_dir: &mut Option<PathBuf>,
-    tabs: &mut Vec<PathBuf>,
+    tabs: &mut [PathBuf],
     file_processor: &mut FileEventProcessor,
     tag_manager: &mut crate::tag_manager::TagManager,
     expanded_dirs: &mut std::collections::HashSet<PathBuf>,
@@ -184,8 +183,8 @@ pub fn show_rename_dialog(
 
                 ui.horizontal(|ui| {
                     if ui.button("Ok").clicked() || submit {
-                        if let Some(file) = &dm.file_to_rename {
-                            if !dm.rename_new_name.trim().is_empty() {
+                        if let Some(file) = &dm.file_to_rename
+                            && !dm.rename_new_name.trim().is_empty() {
                                 let new_name = dm.rename_new_name.trim();
                                 if !crate::utils::path::is_safe_basename(new_name) {
                                     tracing::warn!(
@@ -221,9 +220,9 @@ pub fn show_rename_dialog(
                                         if selected_dir.as_ref() == Some(file) {
                                             *selected_dir = Some(new_path.clone());
                                         }
-                                        for i in 0..tabs.len() {
-                                            if tabs[i] == *file {
-                                                tabs[i] = new_path.clone();
+                                        for tab in tabs.iter_mut() {
+                                            if *tab == *file {
+                                                *tab = new_path.clone();
                                             }
                                         }
                                         file_processor.remove_file(file);
@@ -248,7 +247,6 @@ pub fn show_rename_dialog(
                                     }
                                 }
                             }
-                        }
                         close_rename_modal = true;
                     }
                     if ui.button("Cancel").clicked() {

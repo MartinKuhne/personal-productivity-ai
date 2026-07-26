@@ -14,24 +14,16 @@ pub fn tool_grep(
     let mut results = Vec::new();
     let query_lower = query.to_lowercase();
     for entry in WalkDir::new(root_path).into_iter().filter_map(|e| e.ok()) {
-        if entry.path().is_file() {
-            if let Some(ext) = entry.path().extension() {
-                if ext == "md" || ext == "markdown" {
-                    if let Ok(content) = std::fs::read_to_string(entry.path()) {
-                        for (idx, line) in content.lines().enumerate() {
-                            if line.to_lowercase().contains(&query_lower) {
-                                let rel_path =
-                                    entry.path().strip_prefix(root_path).unwrap_or(entry.path());
-                                let virtual_path = Path::new(virtual_prefix).join(rel_path);
-                                results.push(format!(
-                                    "{}:{} - {}",
-                                    virtual_path.display(),
-                                    idx + 1,
-                                    line
-                                ));
-                            }
-                        }
-                    }
+        if entry.path().is_file()
+            && let Some(ext) = entry.path().extension()
+            && (ext == "md" || ext == "markdown")
+            && let Ok(content) = std::fs::read_to_string(entry.path())
+        {
+            for (idx, line) in content.lines().enumerate() {
+                if line.to_lowercase().contains(&query_lower) {
+                    let rel_path = entry.path().strip_prefix(root_path).unwrap_or(entry.path());
+                    let virtual_path = Path::new(virtual_prefix).join(rel_path);
+                    results.push(format!("{}:{} - {}", virtual_path.display(), idx + 1, line));
                 }
             }
         }
@@ -50,14 +42,13 @@ pub fn tool_grep(
 pub fn tool_read_tags(root_path: &Path) -> Result<crate::tools::dtos::ReadTagsResponse, String> {
     let mut all_tags = std::collections::BTreeSet::new();
     for entry in WalkDir::new(root_path).into_iter().filter_map(|e| e.ok()) {
-        if entry.path().is_file() {
-            if let Some(ext) = entry.path().extension() {
-                if ext == "md" || ext == "markdown" {
-                    let tags = extract_tags_from_file(entry.path());
-                    for tag in tags {
-                        all_tags.insert(tag);
-                    }
-                }
+        if entry.path().is_file()
+            && let Some(ext) = entry.path().extension()
+            && (ext == "md" || ext == "markdown")
+        {
+            let tags = extract_tags_from_file(entry.path());
+            for tag in tags {
+                all_tags.insert(tag);
             }
         }
     }
@@ -87,16 +78,15 @@ pub fn tool_list_files_by_tag(
 ) -> Result<Vec<String>, String> {
     let mut matching_files = Vec::new();
     for entry in WalkDir::new(root_path).into_iter().filter_map(|e| e.ok()) {
-        if entry.path().is_file() {
-            if let Some(ext) = entry.path().extension() {
-                if ext == "md" || ext == "markdown" {
-                    let tags = extract_tags_from_file(entry.path());
-                    if tags.contains(&tag.to_string()) {
-                        let rel_path = entry.path().strip_prefix(root_path).unwrap_or(entry.path());
-                        let virtual_path = Path::new(virtual_prefix).join(rel_path);
-                        matching_files.push(virtual_path.to_string_lossy().into_owned());
-                    }
-                }
+        if entry.path().is_file()
+            && let Some(ext) = entry.path().extension()
+            && (ext == "md" || ext == "markdown")
+        {
+            let tags = extract_tags_from_file(entry.path());
+            if tags.contains(&tag.to_string()) {
+                let rel_path = entry.path().strip_prefix(root_path).unwrap_or(entry.path());
+                let virtual_path = Path::new(virtual_prefix).join(rel_path);
+                matching_files.push(virtual_path.to_string_lossy().into_owned());
             }
         }
     }
@@ -116,17 +106,16 @@ pub fn tool_list_files(target_dir: &Path, virtual_prefix: &str) -> Result<Vec<St
     let mut files = Vec::new();
     if let Ok(entries) = std::fs::read_dir(target_dir) {
         for entry in entries.filter_map(|e| e.ok()) {
-            if let Ok(file_type) = entry.file_type() {
-                if file_type.is_file() {
-                    let path = entry.path();
-                    if let Some(ext) = path.extension() {
-                        if ext == "md" || ext == "markdown" {
-                            if let Some(name) = path.file_name() {
-                                let virtual_path = Path::new(virtual_prefix).join(name);
-                                files.push(virtual_path.to_string_lossy().into_owned());
-                            }
-                        }
-                    }
+            if let Ok(file_type) = entry.file_type()
+                && file_type.is_file()
+            {
+                let path = entry.path();
+                if let Some(ext) = path.extension()
+                    && (ext == "md" || ext == "markdown")
+                    && let Some(name) = path.file_name()
+                {
+                    let virtual_path = Path::new(virtual_prefix).join(name);
+                    files.push(virtual_path.to_string_lossy().into_owned());
                 }
             }
         }
@@ -190,10 +179,10 @@ pub fn tool_create_file(
     for _ in parser {}
 
     let path = Path::new(path_str);
-    if let Some(parent) = path.parent() {
-        if let Err(e) = std::fs::create_dir_all(parent) {
-            return Err(format!("Failed to create parent directories: {}", e));
-        }
+    if let Some(parent) = path.parent()
+        && let Err(e) = std::fs::create_dir_all(parent)
+    {
+        return Err(format!("Failed to create parent directories: {}", e));
     }
     match std::fs::write(path, content) {
         Ok(_) => {

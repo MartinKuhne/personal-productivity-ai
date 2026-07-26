@@ -9,6 +9,7 @@ use serde_json::json;
 use std::path::PathBuf;
 use std::sync::mpsc::{Receiver, Sender};
 
+#[allow(clippy::result_large_err)]
 pub async fn process_image<'a>(
     job: ImageJob,
     config: AppConfig,
@@ -96,7 +97,9 @@ pub async fn process_image<'a>(
             .set("Authorization", &format!("Bearer {}", api_key))
             .set("Content-Type", "application/json")
             .send_json(payload)
-    }).await.map_err(|e| {
+    })
+    .await
+    .map_err(|e| {
         tracing::error!(name = "vision.api.spawn_failed", error = %e, "Failed to spawn blocking task for vision API request. Operator should check system resources.");
         format!("Spawn blocking error: {}", e)
     })?;

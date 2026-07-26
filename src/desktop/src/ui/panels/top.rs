@@ -51,12 +51,11 @@ pub fn compute_next_selected_file(
 ) -> Option<PathBuf> {
     let selected = selected_file?;
     if let Some(active_tag) = selected_tag {
-        if let Some(tags) = file_tags.get(selected) {
+        {
+            let tags = file_tags.get(selected)?;
             if !tags.contains(active_tag) {
                 return None;
             }
-        } else {
-            return None;
         }
     }
     Some(selected.clone())

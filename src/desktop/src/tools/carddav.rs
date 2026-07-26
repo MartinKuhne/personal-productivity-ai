@@ -35,20 +35,18 @@ async fn get_all_addressbooks(
     base_url: &str,
     username: &str,
 ) -> anyhow::Result<Vec<String>> {
-    if let Ok(books) = client.list_addressbooks(base_url).await {
-        if !books.is_empty() {
-            return Ok(books.into_iter().map(|b| b.href).collect());
-        }
+    if let Ok(books) = client.list_addressbooks(base_url).await
+        && !books.is_empty()
+    {
+        return Ok(books.into_iter().map(|b| b.href).collect());
     }
 
-    if let Ok(homes) = client.discover_addressbook_home_set(base_url).await {
-        if let Some(home) = homes.first() {
-            if let Ok(books) = client.list_addressbooks(home).await {
-                if !books.is_empty() {
-                    return Ok(books.into_iter().map(|b| b.href).collect());
-                }
-            }
-        }
+    if let Ok(homes) = client.discover_addressbook_home_set(base_url).await
+        && let Some(home) = homes.first()
+        && let Ok(books) = client.list_addressbooks(home).await
+        && !books.is_empty()
+    {
+        return Ok(books.into_iter().map(|b| b.href).collect());
     }
 
     let mut principal_opt = client
@@ -60,10 +58,10 @@ async fn get_all_addressbooks(
     if principal_opt.is_none() {
         let base_trimmed = base_url.trim_end_matches('/');
         let guess = format!("{}/dav/principals/user/{}/", base_trimmed, username);
-        if let Ok(homes) = client.discover_addressbook_home_set(&guess).await {
-            if !homes.is_empty() {
-                principal_opt = Some(guess);
-            }
+        if let Ok(homes) = client.discover_addressbook_home_set(&guess).await
+            && !homes.is_empty()
+        {
+            principal_opt = Some(guess);
         }
     }
 

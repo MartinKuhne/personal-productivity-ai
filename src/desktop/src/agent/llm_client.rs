@@ -3,6 +3,8 @@
 use crate::config::AppConfig;
 use crate::error::AgentError;
 use crate::messages::TokenUsageInfo;
+use backoff::ExponentialBackoff;
+use backoff::retry;
 
 pub fn parse_usage_block(usage: &serde_json::Value) -> Option<TokenUsageInfo> {
     let prompt_tokens = usage
@@ -92,10 +94,15 @@ impl LLMClient {
             "max_tokens": self.max_tokens
         });
 
-        let max_retries = 3u32;
-        let mut retry_attempt = 0u32;
+        let backoff = ExponentialBackoff {
+            initial_interval: std::time::Duration::from_secs(1),
+            multiplier: 2.0,
+            max_interval: std::time::Duration::from_secs(8),
+            max_elapsed_time: Some(std::time::Duration::from_secs(10)),
+            ..Default::default()
+        };
 
-        let response = loop {
+        let response = retry(backoff, || {
             let result = agent
                 .post(&url)
                 .set("Authorization", &format!("Bearer {}", self.api_key))
@@ -103,77 +110,65 @@ impl LLMClient {
                 .send_json(body.clone());
 
             match result {
-                Ok(resp) => break Ok(resp),
-                Err(ureq::Error::Status(code, resp)) if code >= 500 || code == 429 => {
-                    if retry_attempt < max_retries {
-                        let delay = 1u64 << retry_attempt;
-                        tracing::warn!(
-                            name = "agent.api.retry",
-                            status = code,
-                            attempt = retry_attempt + 1,
-                            delay_secs = delay,
-                            "Retryable HTTP error, will retry"
-                        );
-                        std::thread::sleep(std::time::Duration::from_secs(delay));
-                        retry_attempt += 1;
-                        continue;
-                    }
-                    let body_str = resp
-                        .into_string()
-                        .unwrap_or_else(|_| "[Could not read body]".to_string());
-                    tracing::error!(
-                        name = "agent.api.failed",
-                        status = code,
-                        response = %body_str,
-                        "Failed to get chat completion after all retries."
-                    );
-                    break Err(AgentError::HttpError {
-                        status: code,
-                        body: body_str,
-                    });
-                }
+                Ok(resp) => Ok(resp),
                 Err(ureq::Error::Status(code, resp)) => {
                     let body_str = resp
                         .into_string()
                         .unwrap_or_else(|_| "[Could not read body]".to_string());
-                    tracing::error!(
-                        name = "agent.api.failed",
-                        status = code,
-                        response = %body_str,
-                        "Failed to get chat completion."
-                    );
-                    break Err(AgentError::HttpError {
-                        status: code,
-                        body: body_str,
-                    });
+                    if code >= 500 || code == 429 {
+                        tracing::warn!(
+                            name = "agent.api.retry",
+                            status = code,
+                            "Retryable HTTP error, will retry"
+                        );
+                        Err(backoff::Error::Transient {
+                            err: AgentError::HttpError {
+                                status: code,
+                                body: body_str,
+                            },
+                            retry_after: None,
+                        })
+                    } else {
+                        tracing::error!(
+                            name = "agent.api.failed",
+                            status = code,
+                            response = %body_str,
+                            "Non-retryable HTTP error."
+                        );
+                        Err(backoff::Error::Permanent(AgentError::HttpError {
+                            status: code,
+                            body: body_str,
+                        }))
+                    }
                 }
-                Err(ref e) => {
+                Err(ureq::Error::Transport(e)) => {
                     let err_str = e.to_string();
                     let is_timeout = err_str.contains("timed out")
                         || err_str.contains("Timeout")
                         || err_str.contains("Network is unreachable");
-                    if is_timeout && retry_attempt < max_retries {
-                        let delay = 1u64 << retry_attempt;
+                    if is_timeout {
                         tracing::warn!(
                             name = "agent.api.retry",
-                            error = %e,
-                            attempt = retry_attempt + 1,
-                            delay_secs = delay,
+                            error = %err_str,
                             "Timeout, will retry"
                         );
-                        std::thread::sleep(std::time::Duration::from_secs(delay));
-                        retry_attempt += 1;
-                        continue;
+                        Err(backoff::Error::Transient {
+                            err: AgentError::Timeout,
+                            retry_after: None,
+                        })
+                    } else {
+                        Err(backoff::Error::Permanent(AgentError::NetworkError(err_str)))
                     }
-                    if is_timeout {
-                        break Err(AgentError::Timeout);
-                    }
-                    break Err(AgentError::NetworkError(err_str));
                 }
             }
-        };
+        });
 
-        response?.into_json().map_err(|e| {
+        let response = response.map_err(|e| match e {
+            backoff::Error::Permanent(e) => e,
+            backoff::Error::Transient { err: e, .. } => e,
+        })?;
+
+        response.into_json().map_err(|e| {
             tracing::error!(
                 name = "agent.api.invalid_json",
                 error = %e,

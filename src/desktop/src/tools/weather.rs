@@ -3,10 +3,10 @@
 use serde_json::Value;
 
 fn geocode(location: &str) -> Result<(f64, f64), String> {
-    if let Some((lat_str, lon_str)) = location.split_once(',') {
-        if let (Ok(lat), Ok(lon)) = (lat_str.trim().parse::<f64>(), lon_str.trim().parse::<f64>()) {
-            return Ok((lat, lon));
-        }
+    if let Some((lat_str, lon_str)) = location.split_once(',')
+        && let (Ok(lat), Ok(lon)) = (lat_str.trim().parse::<f64>(), lon_str.trim().parse::<f64>())
+    {
+        return Ok((lat, lon));
     }
 
     let query = if location.len() == 5 && location.chars().all(|c| c.is_ascii_digit()) {
@@ -70,10 +70,7 @@ pub fn tool_get_weather(
 ) -> Result<crate::tools::dtos::GetWeatherResponse, String> {
     // Reference: https://www.weather.gov/documentation/services-web-api
 
-    let (lat, lon) = match geocode(location) {
-        Ok(coords) => coords,
-        Err(e) => return Err(e),
-    };
+    let (lat, lon) = geocode(location)?;
 
     let points_url = format!("https://api.weather.gov/points/{},{}", lat, lon);
     #[cfg(test)]

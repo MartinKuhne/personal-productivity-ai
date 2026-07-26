@@ -10,7 +10,7 @@ use std::path::PathBuf;
 /// tokens, reasoning tokens emitted by o-series models). For Anthropic-style
 /// endpoints, `input_tokens` and `output_tokens` from the response are mapped
 /// onto `prompt_tokens` and `completion_tokens` respectively by the parser.
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone, Default, serde::Deserialize)]
 pub struct TokenUsageInfo {
     /// Tokens consumed by the prompt (i.e. the full conversation context
     /// sent on this turn). On Anthropic-style responses this is the

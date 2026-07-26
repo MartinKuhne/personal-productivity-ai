@@ -50,7 +50,7 @@ pub(crate) fn validate_batch_params(
     pattern: &str,
     concurrency: u8,
 ) -> Result<(), String> {
-    if concurrency < 1 || concurrency > 8 {
+    if !(1..=8).contains(&concurrency) {
         return Err("Concurrency must be 1-8".to_string());
     }
     if mode == BatchMode::File {

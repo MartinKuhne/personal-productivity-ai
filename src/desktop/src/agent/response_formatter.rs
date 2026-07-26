@@ -2,13 +2,13 @@
 
 pub fn split_thinking_and_content(text: &str) -> (String, String) {
     let delim = "\u{1f914}";
-    if let Some(start_idx) = text.find(delim) {
-        if let Some(offset) = text[start_idx + delim.len()..].find(delim) {
-            let end_idx = start_idx + delim.len() + offset;
-            let thinking = text[start_idx + delim.len()..end_idx].to_string();
-            let content = format!("{}{}", &text[..start_idx], &text[end_idx + delim.len()..]);
-            return (thinking, content);
-        }
+    if let Some(start_idx) = text.find(delim)
+        && let Some(offset) = text[start_idx + delim.len()..].find(delim)
+    {
+        let end_idx = start_idx + delim.len() + offset;
+        let thinking = text[start_idx + delim.len()..end_idx].to_string();
+        let content = format!("{}{}", &text[..start_idx], &text[end_idx + delim.len()..]);
+        return (thinking, content);
     }
     (String::new(), text.to_string())
 }
@@ -16,10 +16,10 @@ pub fn split_thinking_and_content(text: &str) -> (String, String) {
 pub fn format_tool_call_message(func_name: &str, func_args_str: &str) -> String {
     if func_name == "create_file" {
         let mut msg = format!("> **Executing tool `{}`**\n", func_name);
-        if let Ok(args_val) = serde_json::from_str::<serde_json::Value>(func_args_str) {
-            if let Some(path) = args_val.get("path").and_then(|p| p.as_str()) {
-                msg.push_str(&format!("> Path: `{}`\n", path));
-            }
+        if let Ok(args_val) = serde_json::from_str::<serde_json::Value>(func_args_str)
+            && let Some(path) = args_val.get("path").and_then(|p| p.as_str())
+        {
+            msg.push_str(&format!("> Path: `{}`\n", path));
         }
         return msg;
     }
@@ -46,20 +46,20 @@ pub fn format_tool_result_message(func_name: &str, result: &str) -> String {
     let mut is_error = false;
     let mut error_msg = String::new();
     let mut result_data = serde_json::Value::Null;
-    if let Ok(parsed) = serde_json::from_str::<serde_json::Value>(result) {
-        if let Some(status) = parsed.get("status").and_then(|s| s.as_str()) {
-            if status == "error" {
-                is_error = true;
-                error_msg = parsed
-                    .get("message")
-                    .and_then(|m| m.as_str())
-                    .unwrap_or("Unknown error")
-                    .to_string();
-            } else if status == "success" {
-                if let Some(data) = parsed.get("data") {
-                    result_data = data.clone();
-                }
-            }
+    if let Ok(parsed) = serde_json::from_str::<serde_json::Value>(result)
+        && let Some(status) = parsed.get("status").and_then(|s| s.as_str())
+    {
+        if status == "error" {
+            is_error = true;
+            error_msg = parsed
+                .get("message")
+                .and_then(|m| m.as_str())
+                .unwrap_or("Unknown error")
+                .to_string();
+        } else if status == "success"
+            && let Some(data) = parsed.get("data")
+        {
+            result_data = data.clone();
         }
     }
     if is_error {

@@ -9,15 +9,15 @@ use serde_yaml::Value;
 /// front matter verbatim for save) can do so without re-parsing or
 /// re-splitting the markdown.
 #[derive(Debug)]
-pub struct FrontMatter<'a> {
+pub struct FrontMatter {
     /// The parsed YAML value.
     pub yaml: Value,
     /// The original YAML source text between the `---` delimiters,
     /// preserved verbatim (no whitespace trimming). Suitable for
     /// round-trip serialization back to disk.
-    pub source: &'a str,
+    pub source: String,
     /// The body content: everything after the closing `---` delimiter.
-    pub body: &'a str,
+    pub body: String,
 }
 
 /// Parse YAML front matter from markdown content.
@@ -42,7 +42,7 @@ pub struct FrontMatter<'a> {
 /// assert_eq!(fm.yaml["title"], "Test");
 /// assert_eq!(fm.body.trim(), "# Hello World");
 /// ```
-pub fn parse_front_matter(content: &str) -> Option<FrontMatter<'_>> {
+pub fn parse_front_matter(content: &str) -> Option<FrontMatter> {
     let content = content.strip_prefix('\u{feff}').unwrap_or(content);
     let parts: Vec<&str> = content.splitn(3, "---").collect();
     if parts.len() == 3 && parts[0].trim().is_empty() {
@@ -51,8 +51,8 @@ pub fn parse_front_matter(content: &str) -> Option<FrontMatter<'_>> {
         if let Ok(yaml) = serde_yaml::from_str::<Value>(yaml_source) {
             return Some(FrontMatter {
                 yaml,
-                source: yaml_source,
-                body,
+                source: yaml_source.to_string(),
+                body: body.to_string(),
             });
         }
     }
@@ -110,9 +110,6 @@ mod tests {
         let fm = parse_front_matter(content).unwrap();
         assert!(fm.yaml.is_null());
         assert_eq!(fm.body.trim(), "Content");
-        // `source` is the literal slice between the two `---` delimiters
-        // — for an empty front matter, that's just the newline between
-        // them (the splitn(3) keeps the inter-delimiter text intact).
         assert_eq!(fm.source, "\n");
     }
 
@@ -173,10 +170,6 @@ mod tests {
 
     #[test]
     fn test_source_preserves_verbatim_yaml() {
-        // The `source` field must be the literal slice between the
-        // delimiters — no trimming, no reformatting. Callers like
-        // `DocumentContent::parse` rely on it for round-trip
-        // preservation of the original front matter text.
         let content = "---\n  title:   Test  \n  tags: [a, b]\n---\nbody";
         let fm = parse_front_matter(content).unwrap();
         assert_eq!(fm.source, "\n  title:   Test  \n  tags: [a, b]\n");

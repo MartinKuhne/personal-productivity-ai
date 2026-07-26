@@ -382,12 +382,14 @@ impl FastMdApp {
         let background_manager = Arc::new(Mutex::new(BackgroundProcessManager::new()));
         let inline_editor_enabled = config.inline_editor_enabled;
 
-        let mut batch_dialog_config = crate::batch::types::BatchDialogConfig::default();
-        batch_dialog_config.available_dirs = config
-            .content_libraries
-            .iter()
-            .map(|lib| PathBuf::from(&lib.root_folder))
-            .collect();
+        let batch_dialog_config = crate::batch::types::BatchDialogConfig {
+            available_dirs: config
+                .content_libraries
+                .iter()
+                .map(|lib| PathBuf::from(&lib.root_folder))
+                .collect(),
+            ..Default::default()
+        };
         let mut dialogs = DialogManager::new();
         dialogs.batch_dialog_config = batch_dialog_config;
 
@@ -455,9 +457,7 @@ impl FastMdApp {
             tx,
             file_event_bus: crate::file_events::Bus::new(),
             file_event_reader: None,
-            file_processor: FileEventProcessor::new(crate::file_events::BusReader::new(
-                std::sync::mpsc::channel().1,
-            )),
+            file_processor: FileEventProcessor::new(crate::file_events::BusReader::detached()),
             tag_manager: TagManager::new(),
             layout: PanelLayout::new(),
             selection: SelectionManager::new(),
@@ -469,9 +469,7 @@ impl FastMdApp {
             editor_state: crate::editor::EditorState::default(),
             inline_editor_enabled: true,
             background_manager: Arc::new(Mutex::new(BackgroundProcessManager::new())),
-            directory_tracker: DirectoryTracker::new(crate::file_events::BusReader::new(
-                std::sync::mpsc::channel().1,
-            )),
+            directory_tracker: DirectoryTracker::new(crate::file_events::BusReader::detached()),
             config,
             persisted_ui_state: PersistedUiState::default(),
             pending_file_load: None,
@@ -1006,8 +1004,7 @@ mod tests {
                 prompt_tokens: 100,
                 completion_tokens: 20,
                 total_tokens: 120,
-                cached_tokens: None,
-                reasoning_tokens: None,
+                ..Default::default()
             }))
             .unwrap();
 
@@ -1037,7 +1034,7 @@ mod tests {
         // Second turn: context grew, completion + reasoning added.
         app.tx
             .send(BackgroundMessage::AgentTokenUsage(TokenUsageInfo {
-                prompt_tokens: 250, // larger than first turn
+                prompt_tokens: 250,
                 completion_tokens: 30,
                 total_tokens: 280,
                 cached_tokens: Some(50),
@@ -1068,14 +1065,13 @@ mod tests {
         assert_eq!(app.agent.state().total_usage.cached_tokens, Some(50));
         assert_eq!(app.agent.state().total_usage.reasoning_tokens, Some(5));
 
-        // Third turn: smaller context Ã¢â‚¬â€ peak should NOT shrink.
+        // Third turn: smaller context — peak should NOT shrink.
         app.tx
             .send(BackgroundMessage::AgentTokenUsage(TokenUsageInfo {
                 prompt_tokens: 80,
                 completion_tokens: 10,
                 total_tokens: 90,
-                cached_tokens: None,
-                reasoning_tokens: None,
+                ..Default::default()
             }))
             .unwrap();
 

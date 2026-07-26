@@ -133,10 +133,9 @@ impl ImageJob {
         if let (Ok(img_meta), Ok(md_meta)) = (
             std::fs::metadata(&self.image_path),
             std::fs::metadata(&self.md_path),
-        ) {
-            if let (Ok(img_time), Ok(md_time)) = (img_meta.modified(), md_meta.modified()) {
-                return img_time > md_time;
-            }
+        ) && let (Ok(img_time), Ok(md_time)) = (img_meta.modified(), md_meta.modified())
+        {
+            return img_time > md_time;
         }
         false
     }
