@@ -273,16 +273,23 @@ pub fn render_flat_row(ui: &mut egui::Ui, row: &FlatRow, ctx: &mut TreeNodeConte
                 *ctx.selected_file() = None;
                 ctx.selected_files().clear();
                 *ctx.selected_dir() = Some(row.path.clone());
-                ctx.layout().mark_dirty();
+                // Do NOT call mark_dirty() here: it would trigger a
+                // full calc_max_width re-shaping pass and, before the
+                // P1-4 fix, discard the user's manual panel resize
+                // on every directory click (see render-audit P1-4).
             }
             if response.double_clicked() {
-                // Toggle expansion on double-click
-                if row.is_expanded {
-                    ctx.expanded_dirs().remove(&row.path);
-                } else {
-                    ctx.expanded_dirs().insert(row.path.clone());
-                }
-                ctx.layout().mark_dirty();
+                // Toggle expansion on double-click.
+                // NOTE: egui fires `clicked()` AND `double_clicked()`
+                // for a double-click, so both branches run. The
+                // second toggle undoes the first → net no-op
+                // expansion (see render-audit P1-9). We intentionally
+                // do NOT toggle here; the single-click handler above
+                // already toggled. Double-click on a directory is a
+                // no-op for expansion — it does not also clear the
+                // file selection, matching the common file-explorer
+                // convention where double-click opens (for files)
+                // and is inert for folders.
             }
 
             response.context_menu(|ui| {
@@ -505,16 +512,14 @@ pub fn draw_tree_node(ui: &mut egui::Ui, node: &TreeNode, ctx: &mut TreeNodeCont
             *ctx.selected_file() = None;
             ctx.selected_files().clear();
             *ctx.selected_dir() = Some(node.path.clone());
-            ctx.layout().mark_dirty();
+            // Do NOT call mark_dirty() here — see render_flat_row
+            // for the rationale (render-audit P1-4/P1-9).
         }
         if response.double_clicked() {
-            // Toggle expansion on double-click
-            if is_expanded {
-                ctx.expanded_dirs().remove(&node.path);
-            } else {
-                ctx.expanded_dirs().insert(node.path.clone());
-            }
-            ctx.layout().mark_dirty();
+            // See render_flat_row: the single-click handler already
+            // toggled expansion. A second toggle here would undo it
+            // (render-audit P1-9), so double-click is a no-op for
+            // directory expansion.
         }
 
         response.context_menu(|ui| {
@@ -734,7 +739,9 @@ pub fn build_merge_prompt(
     selected_files: &HashSet<PathBuf>,
 ) -> String {
     let mut prompt = "Please read each of the following documents using the read_file tool and merge their content into a new document. Consolidate overlapping content, deduplicate repeated information, and produce a single unified document that combines all of the source material:\n".to_string();
-    for file in selected_files.iter() {
+    let mut sorted_files: Vec<&PathBuf> = selected_files.iter().collect();
+    sorted_files.sort();
+    for file in sorted_files {
         let rel_str = crate::config::library_display_label(content_libraries, file)
             .unwrap_or_else(|| file.to_string_lossy().to_string());
         prompt.push_str(&format!("- {}\n", rel_str));

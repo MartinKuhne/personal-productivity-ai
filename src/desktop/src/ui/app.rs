@@ -55,7 +55,7 @@ pub struct PersistedUiState {
     #[serde(default)]
     pub left_panel_width: Option<f32>,
     #[serde(default)]
-    pub collapsed_dirs: HashSet<PathBuf>,
+    pub expanded_dirs: HashSet<PathBuf>,
 }
 
 const PERSISTED_UI_STATE_KEY: &str = "ppai_ui_state";
@@ -413,7 +413,7 @@ impl FastMdApp {
         }
 
         let mut selection = SelectionManager::new();
-        for dir in &persisted_ui_state.collapsed_dirs {
+        for dir in &persisted_ui_state.expanded_dirs {
             selection.expanded_dirs.insert(dir.clone());
         }
 
@@ -523,7 +523,7 @@ impl eframe::App for FastMdApp {
     fn save(&mut self, storage: &mut dyn eframe::Storage) {
         self.persisted_ui_state.left_panel_width = self.layout.left_panel_width;
         let all_dirs: HashSet<PathBuf> = self.selection.expanded_dirs.iter().cloned().collect();
-        self.persisted_ui_state.collapsed_dirs = all_dirs;
+        self.persisted_ui_state.expanded_dirs = all_dirs;
         if let Ok(json) = serde_json::to_string(&self.persisted_ui_state) {
             storage.set_string(PERSISTED_UI_STATE_KEY, json);
         }
@@ -777,7 +777,7 @@ impl FastMdApp {
             if handle.thread.is_finished() {
                 let result = handle.join();
                 self.dialogs.batch_cancel_flag = None;
-                eprintln!("Batch completed: {:?}", result);
+                tracing::info!("Batch completed: {:?}", result);
             } else {
                 self.dialogs.batch_handle = Some(handle);
             }

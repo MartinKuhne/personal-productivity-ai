@@ -120,10 +120,26 @@ fn render_agent_session(ui: &mut egui::Ui, app: &mut FastMdApp) {
                 ui.separator();
                 let agent = app.agent_mut();
                 let response = agent.state().response.clone();
-                render_markdown(ui, &response, &mut agent.state_mut().scroll_to_id);
-                if app.agent().state().running {
-                    ui.scroll_to_cursor(Some(egui::Align::BOTTOM));
+                let mut toggles = Vec::new();
+                render_markdown(
+                    ui,
+                    &response,
+                    &mut agent.state_mut().scroll_to_id,
+                    &mut toggles,
+                );
+                // P0-2: Apply task checkbox toggles to the response source.
+                if !toggles.is_empty() {
+                    for (idx, checked) in toggles {
+                        crate::ui::render::apply_task_toggle(
+                            &mut agent.state_mut().response,
+                            idx,
+                            checked,
+                        );
+                    }
                 }
+                // `stick_to_bottom(true)` on the ScrollArea handles
+                // auto-scroll; an explicit `scroll_to_cursor` here would
+                // compete with it and cause jitter.
             }
         });
 }
@@ -136,7 +152,7 @@ fn render_agent_session(ui: &mut egui::Ui, app: &mut FastMdApp) {
 /// Postconditions: Rendered tabs and file content.
 fn render_tabs_and_content(ui: &mut egui::Ui, app: &mut FastMdApp) {
     ui.horizontal(|ui| {
-        let mut tab_action = None;
+        let mut tab_actions: Vec<TabAction> = Vec::new();
         let tabs_snapshot: Vec<PathBuf> = app.tab_manager.tabs.clone();
 
         for (i, tab_path) in tabs_snapshot.iter().enumerate() {
@@ -152,7 +168,7 @@ fn render_tabs_and_content(ui: &mut egui::Ui, app: &mut FastMdApp) {
                 *app.selection_mut().selected_file_mut() = Some(tab_path.clone());
             }
             if response.inner.middle_clicked() {
-                tab_action = Some(TabAction::Close(i));
+                tab_actions.push(TabAction::Close(i));
             }
             response.inner.context_menu(|ui| {
                 if ui.button("Edit").clicked() {
@@ -167,15 +183,15 @@ fn render_tabs_and_content(ui: &mut egui::Ui, app: &mut FastMdApp) {
                 }
                 ui.separator();
                 if ui.button("Close").clicked() {
-                    tab_action = Some(TabAction::Close(i));
+                    tab_actions.push(TabAction::Close(i));
                     ui.close();
                 }
                 if ui.button("Close Others").clicked() {
-                    tab_action = Some(TabAction::CloseOthers(i));
+                    tab_actions.push(TabAction::CloseOthers(i));
                     ui.close();
                 }
                 if ui.button("Close All").clicked() {
-                    tab_action = Some(TabAction::CloseAll);
+                    tab_actions.push(TabAction::CloseAll);
                     ui.close();
                 }
                 ui.separator();
@@ -202,13 +218,13 @@ fn render_tabs_and_content(ui: &mut egui::Ui, app: &mut FastMdApp) {
                 }
             });
 
-            if ui.button("×").clicked() {
-                tab_action = Some(TabAction::Close(i));
+            if ui.push_id(tab_path, |ui| ui.button("×")).inner.clicked() {
+                tab_actions.push(TabAction::Close(i));
             }
             ui.separator();
         }
 
-        if let Some(action) = tab_action {
+        for action in tab_actions {
             apply_tab_action(
                 &mut app.tab_manager.tabs,
                 app.selection.selected_file_mut(),
@@ -249,7 +265,18 @@ fn render_tabs_and_content(ui: &mut egui::Ui, app: &mut FastMdApp) {
                     ui,
                     &app.tab_manager.current_markdown,
                     &mut app.tab_manager.scroll_to_header_id,
+                    &mut app.tab_manager.pending_task_toggles,
                 );
+                // P0-2: Apply task checkbox toggles to the markdown source.
+                if !app.tab_manager.pending_task_toggles.is_empty() {
+                    for (idx, checked) in app.tab_manager.pending_task_toggles.drain(..) {
+                        crate::ui::render::apply_task_toggle(
+                            &mut app.tab_manager.current_markdown,
+                            idx,
+                            checked,
+                        );
+                    }
+                }
             });
     }
 }

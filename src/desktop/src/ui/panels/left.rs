@@ -61,7 +61,7 @@ pub fn show_left_panel(app: &mut FastMdApp, parent_ui: &mut egui::Ui) {
         if let (Some(lib), Some(rel_path)) = (target_lib, rel_path_res) {
             let lib_node_name = lib.name.clone();
             let Some(current_node_ref) = root_node.children.get_mut(&lib_node_name) else {
-                return;
+                continue;
             };
             let mut current_node = current_node_ref;
             let mut current_path = std::path::PathBuf::from(&lib.root_folder);
@@ -126,11 +126,20 @@ pub fn show_left_panel(app: &mut FastMdApp, parent_ui: &mut egui::Ui) {
         }
     }
 
-    if (app.file_processor().indexing_finished && !app.file_processor().indexing_finished_handled)
-        || app.layout().left_panel_dirty
-    {
-        // Remove egui's cached PanelState so it accepts the new default_width.
-        ctx.data_mut(|d| d.remove::<PanelState>(left_panel_id()));
+    let indexing_just_finished =
+        app.file_processor().indexing_finished && !app.file_processor().indexing_finished_handled;
+    if indexing_just_finished || app.layout().left_panel_dirty {
+        // Only wipe egui's cached PanelState when indexing first
+        // completes — never on ordinary tree navigation (dirty).
+        // Removing PanelState on every directory click/expand would
+        // discard the user's manual panel resize (see render-audit
+        // P1-4). The recomputed `left_panel_width` below becomes the
+        // new *default*; if the user has already resized, egui's
+        // persisted PanelState wins and the default is only used on a
+        // future reset.
+        if indexing_just_finished {
+            ctx.data_mut(|d| d.remove::<PanelState>(left_panel_id()));
+        }
 
         app.file_processor_mut().indexing_finished_handled = true;
         fn calc_max_width(node: &TreeNode, depth: usize, ctx: &egui::Context) -> f32 {

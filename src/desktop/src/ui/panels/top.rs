@@ -71,9 +71,17 @@ pub fn show_top_panel(app: &mut FastMdApp, parent_ui: &mut egui::Ui) {
                     .color(egui::Color32::from_rgb(100, 200, 255)),
             );
             ui.separator();
-            let mut show_bg = app.background_manager.lock().unwrap().show_background_logs;
-            if ui.checkbox(&mut show_bg, "Show log").changed() {
-                app.background_manager.lock().unwrap().show_background_logs = show_bg;
+            // Single lock acquisition for the read-modify-write of
+            // `show_background_logs`. The previous revision locked
+            // twice (read + write) with an `unwrap()` on each — two
+            // panic-on-poison sites per frame plus a lost-update
+            // window between the locks (render-audit P1-8).
+            {
+                let mut bg = app.background_manager.lock().unwrap();
+                let mut show_bg = bg.show_background_logs;
+                if ui.checkbox(&mut show_bg, "Show log").changed() {
+                    bg.show_background_logs = show_bg;
+                }
             }
             ui.separator();
 

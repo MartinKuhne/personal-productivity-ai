@@ -13,28 +13,44 @@ pub fn should_show_panel(has_toc: bool, has_selected_file: bool) -> bool {
     has_toc && has_selected_file
 }
 
+/// Maximum supported Markdown heading level (ATX headings `#`..`######`).
+const MAX_HEADING_LEVEL: usize = 6;
+
+/// Clamps a heading level into the supported ATX range `1..=6`.
+///
+/// Out-of-range values (0 or >6) collapse to the nearest valid level so that
+/// `calculate_indent` / `calculate_font_size` stay continuous and positive
+/// for any `level` without special-casing at every call site.
+fn clamp_level(level: usize) -> usize {
+    level.clamp(1, MAX_HEADING_LEVEL)
+}
+
 /// Calculates the indentation in points for a given TOC heading level.
 /// Precondition: `level` should be the heading level (usually 1-6).
 /// Postcondition: Returns the horizontal space to indent the TOC entry.
+/// Out-of-range levels are clamped to `1..=6` so the result is always
+/// between the level-1 and level-6 indents (never `0.0`).
 /// Purity: Pure function.
 pub fn calculate_indent(level: usize) -> f32 {
-    match level {
+    match clamp_level(level) {
         1 => 4.0,
         2 => 14.0,
         3 => 24.0,
         4 => 34.0,
         5 => 44.0,
         6 => 54.0,
-        _ => 0.0,
+        _ => 4.0,
     }
 }
 
 /// Calculates the font size for a given TOC heading level.
 /// Precondition: `level` is the heading level (usually 1-6).
 /// Postcondition: Returns a font size scaled appropriately for the heading level.
+/// Out-of-range levels are clamped to `1..=6` so the result is always
+/// positive and bounded (`10.0..=12.5`).
 /// Purity: Pure function.
 pub fn calculate_font_size(level: usize) -> f32 {
-    13.0 - (level as f32 * 0.5)
+    13.0 - (clamp_level(level) as f32 * 0.5)
 }
 
 pub fn show_right_panel(app: &mut FastMdApp, parent_ui: &mut egui::Ui) {
@@ -100,7 +116,11 @@ mod tests {
         assert_eq!(calculate_indent(4), 34.0);
         assert_eq!(calculate_indent(5), 44.0);
         assert_eq!(calculate_indent(6), 54.0);
-        assert_eq!(calculate_indent(99), 0.0); // Edge case
+        // Out-of-range levels clamp to the nearest valid level, never 0.0.
+        assert_eq!(calculate_indent(0), 4.0);
+        assert_eq!(calculate_indent(7), 54.0);
+        assert_eq!(calculate_indent(99), 54.0);
+        assert!(calculate_indent(usize::MAX) > 0.0);
     }
 
     #[test]
@@ -114,6 +134,13 @@ mod tests {
             let expected = 13.0 - (level as f32 * 0.5);
             assert_eq!(calculate_font_size(level), expected);
         }
+
+        // Out-of-range levels clamp, staying positive and within the
+        // level-1..=6 font-size range.
+        assert_eq!(calculate_font_size(0), 12.5);
+        assert_eq!(calculate_font_size(7), 10.0);
+        assert_eq!(calculate_font_size(26), 10.0);
+        assert!(calculate_font_size(usize::MAX) > 0.0);
     }
 }
 

@@ -27,7 +27,10 @@ pub enum RenderEvent {
         needs_bullet: bool,
         task_checked: Option<bool>,
         indent: usize,
-        wrap: bool,
+        /// Ordinal for ordered list items. `None` → bullet, `Some(n)` → `"n. "`.
+        list_ordinal: Option<u64>,
+        /// Blockquote nesting depth. `0` → not inside a blockquote.
+        blockquote_depth: usize,
     },
     CodeBlock(String),
     Heading {
@@ -66,95 +69,174 @@ pub fn heading_plain_text(elems: &[InlineElem]) -> String {
 /// Inputs: `ui` (mut), `elems`, `needs_bullet`, `task_checked`, `indent`, `wrap`
 /// Outputs: None
 /// Purity: Impure (modifies UI state). Thin adapter for rendering text.
+#[allow(clippy::too_many_arguments)]
 fn render_inline(
     ui: &mut egui::Ui,
     elems: &[InlineElem],
     needs_bullet: bool,
     task_checked: Option<bool>,
     indent: usize,
-    wrap: bool,
+    list_ordinal: Option<u64>,
+    blockquote_depth: usize,
+    task_index: usize,
+    pending_toggles: &mut Vec<(usize, bool)>,
 ) {
     if elems.is_empty() && !needs_bullet && task_checked.is_none() {
         return;
     }
 
-    let add_content = |ui: &mut egui::Ui| {
-        ui.spacing_mut().item_spacing.x = 0.0;
+    // P0-6: Render blockquotes with a left bar + indent for visual
+    // distinction from ordinary paragraphs.
+    if blockquote_depth > 0 {
+        let bar_width = 3.0;
+        let bar_gap = 8.0;
+        let depth = blockquote_depth as f32;
+        let total_indent = depth * (bar_width + bar_gap);
+        let bar_color = egui::Color32::from_rgb(100, 100, 110);
+        let content = |ui: &mut egui::Ui| {
+            // Draw quote bars for each nesting level.
+            let top_left = ui.cursor().min;
+            let height = ui.available_height();
+            for i in 0..blockquote_depth {
+                let x = top_left.x + i as f32 * (bar_width + bar_gap);
+                ui.painter().line_segment(
+                    [
+                        egui::pos2(x, top_left.y),
+                        egui::pos2(x, top_left.y + height),
+                    ],
+                    egui::Stroke::new(bar_width, bar_color),
+                );
+            }
+            ui.add_space(total_indent);
+            render_inline_inner(
+                ui,
+                elems,
+                needs_bullet,
+                task_checked,
+                indent,
+                list_ordinal,
+                task_index,
+                pending_toggles,
+            );
+        };
+        ui.horizontal_wrapped(content);
+        return;
+    }
 
-        if indent > 0 {
-            ui.add_space(indent as f32 * 20.0);
-        }
-        if needs_bullet {
+    ui.horizontal_wrapped(|ui| {
+        render_inline_inner(
+            ui,
+            elems,
+            needs_bullet,
+            task_checked,
+            indent,
+            list_ordinal,
+            task_index,
+            pending_toggles,
+        );
+    });
+}
+
+/// Inner inline rendering shared by the blockquote and non-blockquote paths.
+#[allow(clippy::too_many_arguments)]
+fn render_inline_inner(
+    ui: &mut egui::Ui,
+    elems: &[InlineElem],
+    needs_bullet: bool,
+    task_checked: Option<bool>,
+    indent: usize,
+    list_ordinal: Option<u64>,
+    task_index: usize,
+    pending_toggles: &mut Vec<(usize, bool)>,
+) {
+    ui.spacing_mut().item_spacing.x = 0.0;
+
+    if indent > 0 {
+        ui.add_space(indent as f32 * 20.0);
+    }
+    // P0-3: Render ordered list ordinals instead of bullets.
+    if needs_bullet {
+        if let Some(n) = list_ordinal {
+            ui.label(RichText::new(format!("{}. ", n)).size(14.0));
+        } else {
             ui.label(RichText::new("• ").size(14.0));
         }
-        if let Some(checked) = task_checked {
-            ui.add_space(4.0);
-            let mut c = checked;
-            ui.checkbox(&mut c, "");
-            ui.add_space(4.0);
+    }
+    if let Some(checked) = task_checked {
+        ui.add_space(4.0);
+        let mut c = checked;
+        let resp = ui.checkbox(&mut c, "");
+        // P0-2: Write back the toggle result instead of discarding it.
+        // The caller drains `pending_toggles` after rendering and applies
+        // them to the markdown source.
+        if resp.changed() {
+            pending_toggles.push((task_index, c));
         }
+        ui.add_space(4.0);
+    }
 
-        for elem in elems {
-            match elem {
-                InlineElem::Text(t, style) => {
-                    let mut rt = RichText::new(t);
-                    if style.bold {
-                        rt = rt.strong();
-                    }
-                    if style.italic {
-                        rt = rt.italics();
-                    }
-                    if style.code {
-                        rt = rt
-                            .monospace()
-                            .background_color(egui::Color32::from_gray(40));
-                    }
-                    if style.strikethrough {
-                        rt = rt.strikethrough();
-                    }
-                    ui.label(rt);
+    for elem in elems {
+        match elem {
+            InlineElem::Text(t, style) => {
+                let mut rt = RichText::new(t);
+                if style.bold {
+                    rt = rt.strong();
                 }
-                InlineElem::Link(url, text) => {
-                    ui.hyperlink_to(text, url);
+                if style.italic {
+                    rt = rt.italics();
                 }
-                InlineElem::Image(url) => {
-                    ui.label(format!("[Image: {}]", url));
+                if style.code {
+                    rt = rt
+                        .monospace()
+                        .background_color(egui::Color32::from_gray(40));
                 }
-                InlineElem::Html(html) => {
-                    ui.label(RichText::new(html).italics().color(egui::Color32::GRAY));
+                if style.strikethrough {
+                    rt = rt.strikethrough();
                 }
-                InlineElem::SoftBreak => {
-                    ui.label(" ");
-                }
+                ui.label(rt);
+            }
+            InlineElem::Link(url, text) => {
+                ui.hyperlink_to(text, url);
+            }
+            InlineElem::Image(url) => {
+                ui.label(format!("[Image: {}]", url));
+            }
+            InlineElem::Html(html) => {
+                ui.label(RichText::new(html).italics().color(egui::Color32::GRAY));
+            }
+            InlineElem::SoftBreak => {
+                ui.label(" ");
             }
         }
-    };
-
-    if wrap {
-        ui.horizontal_wrapped(add_content);
-    } else {
-        ui.horizontal(add_content);
     }
 }
 
 /// Purpose: Renders a code block.
-/// Inputs: `ui` (mut), `content`, `_idx` (mut)
-/// Outputs: None
+///
+/// Inputs: `ui` (mut), `content`
+///
 /// Purity: Impure (modifies UI state). Thin adapter.
-fn render_code_block(ui: &mut egui::Ui, content: &str, _idx: &mut usize) {
+fn render_code_block(ui: &mut egui::Ui, content: &str) {
     egui::Frame::NONE
         .fill(egui::Color32::from_rgb(20, 20, 22))
         .stroke(egui::Stroke::new(1.0_f32, egui::Color32::from_gray(40)))
         .inner_margin(8.0)
         .corner_radius(4.0)
         .show(ui, |ui| {
+            // Constrain the wrapping label's width so the copy button
+            // always has room. The previous code added the flexible
+            // `Label::wrap` first, which consumed all available width
+            // and left ~0 for the right-to-left button layout.
             ui.horizontal_top(|ui| {
-                ui.add(egui::Label::new(RichText::new(content).monospace()).wrap());
-                ui.with_layout(egui::Layout::right_to_left(egui::Align::TOP), |ui| {
-                    if ui.button("📋").on_hover_text("Copy code").clicked() {
-                        copy_code_to_output(ui, content);
-                    }
-                });
+                let button_width = 30.0;
+                let label_width = (ui.available_width() - button_width).max(0.0);
+                ui.add_sized(
+                    egui::vec2(label_width, ui.available_height()),
+                    egui::Label::new(RichText::new(content).monospace()).wrap(),
+                );
+                if ui.button("📋").on_hover_text("Copy code").clicked() {
+                    copy_code_to_output(ui, content);
+                }
             });
         });
 }
@@ -173,21 +255,23 @@ fn copy_code_to_output(ui: &mut egui::Ui, content: &str) {
 }
 
 /// Purpose: Renders a heading.
-/// Inputs: `ui` (mut), `elems` (heading inline elements), `level`, `scroll_to_id` (mut)
-/// Outputs: None
+///
+/// Inputs: `ui` (mut), `elems` (heading inline elements), `level`,
+/// `scroll_to_id` (mut), `heading_id` (pre-computed stable id).
+///
 /// Purity: Impure (modifies UI state). Thin adapter.
 fn render_heading(
     ui: &mut egui::Ui,
     elems: &[InlineElem],
     level: u32,
     scroll_to_id: &mut Option<egui::Id>,
+    heading_id: egui::Id,
 ) {
     let plain = heading_plain_text(elems);
     let trimmed = plain.trim().to_string();
     if trimmed.is_empty() {
         return;
     }
-    let heading_id = egui::Id::new(&trimmed);
     let size = match level {
         1 => 32.0,
         2 => 24.0,
@@ -195,17 +279,21 @@ fn render_heading(
         4 => 14.0,
         _ => 12.0,
     };
-    // Render the styled inline elements with the heading's size + weight.
-    // Each InlineElem becomes its own label inside a horizontal flow, so
-    // bold/italic/code/strikethrough all survive into the rendered
-    // heading. The trailing space is added via the layout's natural
-    // padding; no explicit spacer needed because each label's contents
-    // already include their own whitespace.
-    let response = ui.horizontal(|ui| {
+    // Render the styled inline elements with the heading's size.
+    // Use `horizontal_wrapped` so long headings wrap instead of
+    // overflowing horizontally, and zero `item_spacing.x` to avoid
+    // spurious gaps between styled spans (matching `render_inline`).
+    let response = ui.horizontal_wrapped(|ui| {
+        ui.spacing_mut().item_spacing.x = 0.0;
         for elem in elems {
             match elem {
                 InlineElem::Text(t, style) => {
-                    let mut rt = RichText::new(t).size(size).strong();
+                    let mut rt = RichText::new(t).size(size);
+                    // Respect the heading's TextStyle.bold instead of
+                    // unconditionally applying .strong().
+                    if style.bold {
+                        rt = rt.strong();
+                    }
                     if style.italic {
                         rt = rt.italics();
                     }
@@ -220,9 +308,6 @@ fn render_heading(
                     ui.label(rt);
                 }
                 InlineElem::Link(url, text) => {
-                    // Links inside a heading inherit the heading size and
-                    // weight (no .strong() override, since ui.hyperlink
-                    // uses its own styling).
                     ui.hyperlink_to(egui::RichText::new(text).size(size), url);
                 }
                 InlineElem::Image(url) => {
@@ -242,9 +327,6 @@ fn render_heading(
             }
         }
     });
-    // `ui.horizontal` returns a response wrapping the whole row; use
-    // its bounding rect for scroll-to-me so the whole heading scrolls
-    // into view (not just the first styled element).
     if *scroll_to_id == Some(heading_id) {
         response.response.scroll_to_me(Some(egui::Align::Center));
         *scroll_to_id = None;
@@ -312,12 +394,14 @@ fn render_table_cell(ui: &mut egui::Ui, cell: &[InlineElem], pinned_width: Optio
         }
     };
     if let Some(w) = pinned_width {
-        let (rect, _) = ui.allocate_at_least(egui::vec2(w, 0.0), egui::Sense::hover());
+        // Use `allocate_ui_with_layout` so the child Ui's `min_rect` is
+        // fed back to the parent via `advance_cursor_after_rect` (inside
+        // `scope_dyn`). The previous `allocate_at_least(vec2(w, 0.0))` +
+        // `new_child` pattern allocated zero height and never reported
+        // the child's actual height, causing Grid rows to overlap when
+        // cells wrapped to multiple lines.
         let layout = egui::Layout::left_to_right(egui::Align::Min).with_main_wrap(true);
-        // egui 0.35: `Ui::child_ui(rect, layout)` was replaced by
-        // `Ui::new_child(UiBuilder)` which takes a builder.
-        let mut child_ui = ui.new_child(egui::UiBuilder::new().max_rect(rect).layout(layout));
-        content(&mut child_ui);
+        ui.allocate_ui_with_layout(egui::vec2(w, 0.0), layout, content);
     } else {
         ui.horizontal(content);
     }
@@ -338,7 +422,7 @@ fn render_table_cell(ui: &mut egui::Ui, cell: &[InlineElem], pinned_width: Optio
 /// Grid spacing is `[10.0, 4.0]` (10 px gutters). The available content width
 /// passed to FTWA subtracts `(N - 1) * 10.0` for those gutters so the assigned
 /// widths sum to the true content rect.
-fn render_table(ui: &mut egui::Ui, table_cells: &[Vec<Vec<InlineElem>>]) {
+fn render_table(ui: &mut egui::Ui, table_cells: &[Vec<Vec<InlineElem>>], table_ordinal: usize) {
     let n = table_cells.iter().map(|row| row.len()).max().unwrap_or(0);
     if n == 0 {
         return;
@@ -349,13 +433,19 @@ fn render_table(ui: &mut egui::Ui, table_cells: &[Vec<Vec<InlineElem>>]) {
     let avail = (ui.available_width() - (n as f32 - 1.0) * gutter).max(0.0);
     let decision = crate::ui::table_width::ftwa(&max_w, &min_w, avail);
 
+    // Stable id derived from a table ordinal rather than `ui.next_auto_id()`
+    // (a positional peek that shifts whenever any widget above the table
+    // changes). Using a content-derived ordinal keeps the Grid's persisted
+    // column-width cache stable across edits/reflows.
+    let table_id = egui::Id::new("md_table").with(table_ordinal);
+
     if decision.needs_horizontal_scroll {
-        // Ã‚Â§3.6 fallback: nothing can fit; preserve the never-break-token
+        // §3.6 fallback: nothing can fit; preserve the never-break-token
         // invariant by letting content overflow into a horizontal ScrollArea.
         egui::ScrollArea::horizontal()
-            .id_salt(ui.next_auto_id())
+            .id_salt(table_id.with("scroll"))
             .show(ui, |ui| {
-                egui::Grid::new(ui.next_auto_id())
+                egui::Grid::new(table_id.with("grid"))
                     .striped(true)
                     .spacing([10.0, 4.0])
                     .show(ui, |ui| {
@@ -371,17 +461,18 @@ fn render_table(ui: &mut egui::Ui, table_cells: &[Vec<Vec<InlineElem>>]) {
     }
 
     // FTWA path: pin every cell to its assigned column width.
-    egui::Grid::new(ui.next_auto_id())
+    egui::Grid::new(table_id.with("grid"))
         .striped(true)
         .spacing([10.0, 4.0])
         .show(ui, |ui| {
             for row in table_cells {
                 for (j, cell) in row.iter().enumerate() {
-                    let w = decision
-                        .widths
-                        .get(j)
-                        .copied()
-                        .filter(|w| w.is_finite() && *w > 0.0);
+                    let w = decision.widths.get(j).copied();
+                    debug_assert!(
+                        w.is_some_and(|w| w.is_finite() && w > 0.0),
+                        "FTWA invariant violated: table {table_ordinal} column {j} width = {w:?}"
+                    );
+                    let w = w.filter(|w| w.is_finite() && *w > 0.0);
                     render_table_cell(ui, cell, w);
                 }
                 ui.end_row();
@@ -421,7 +512,13 @@ pub fn parse_yaml_to_pairs(yaml: &serde_yaml::Value) -> Option<Vec<(String, Stri
                 serde_yaml::Value::Sequence(seq) => {
                     let items: Vec<String> = seq
                         .iter()
-                        .map(|v| v.as_str().unwrap_or("").to_string())
+                        .map(|v| match v {
+                            serde_yaml::Value::String(s) => s.clone(),
+                            _ => serde_yaml::to_string(v)
+                                .unwrap_or_default()
+                                .trim()
+                                .to_string(),
+                        })
                         .collect();
                     items.join(", ")
                 }
@@ -442,13 +539,18 @@ pub fn parse_yaml_to_pairs(yaml: &serde_yaml::Value) -> Option<Vec<(String, Stri
 /// Purity: Impure (modifies UI state). Coordinates parsing and rendering.
 pub fn render_yaml_table(ui: &mut egui::Ui, yaml: &serde_yaml::Value) {
     if let Some(pairs) = parse_yaml_to_pairs(yaml) {
-        let available_width = ui.available_width();
         egui::Frame::NONE
             .fill(egui::Color32::from_rgb(24, 24, 27))
             .stroke(egui::Stroke::new(1.0_f32, egui::Color32::from_gray(40)))
             .inner_margin(8.0)
             .corner_radius(4.0)
             .show(ui, |ui| {
+                // Capture available width *inside* the frame so it accounts
+                // for the inner_margin. The previous code captured it
+                // before entering the frame, making set_min_width exceed
+                // the content rect by ~16px and forcing a permanent
+                // horizontal scrollbar.
+                let available_width = ui.available_width();
                 egui::ScrollArea::horizontal()
                     .id_salt("yaml_scroll")
                     .show(ui, |ui| {
@@ -531,12 +633,20 @@ pub fn parse_markdown_to_events(markdown_text: &str) -> Vec<RenderEvent> {
     let mut table_cells: Vec<Vec<Vec<InlineElem>>> = Vec::new();
     let mut current_row: Vec<Vec<InlineElem>> = Vec::new();
 
+    // P0-3: Track ordered-list ordinals via a stack (one entry per
+    // nesting level). `Some(n)` means the next item in this list
+    // should render as `"n. "`, `None` means bullet.
+    let mut list_ordinal_stack: Vec<Option<u64>> = Vec::new();
+    // P0-6: Blockquote nesting depth.
+    let mut blockquote_depth: usize = 0;
+
     let push_inline = |events: &mut Vec<RenderEvent>,
                        elems: &mut Vec<InlineElem>,
                        bullet: &mut bool,
                        task: &mut Option<bool>,
                        indent: usize,
-                       wrap: bool| {
+                       list_ordinal: Option<u64>,
+                       bq_depth: usize| {
         if elems.is_empty() && !*bullet && task.is_none() {
             return;
         }
@@ -545,7 +655,8 @@ pub fn parse_markdown_to_events(markdown_text: &str) -> Vec<RenderEvent> {
             needs_bullet: *bullet,
             task_checked: *task,
             indent,
-            wrap,
+            list_ordinal,
+            blockquote_depth: bq_depth,
         });
         elems.clear();
         *bullet = false;
@@ -562,15 +673,18 @@ pub fn parse_markdown_to_events(markdown_text: &str) -> Vec<RenderEvent> {
                         &mut needs_bullet,
                         &mut task_checked,
                         list_depth,
-                        true,
+                        list_ordinal_stack.last().copied().flatten(),
+                        blockquote_depth,
                     );
                 }
                 in_code_block = true;
                 code_block_content.clear();
             }
             Event::End(TagEnd::CodeBlock) => {
-                in_code_block = false;
-                events.push(RenderEvent::CodeBlock(code_block_content.clone()));
+                if in_code_block {
+                    in_code_block = false;
+                    events.push(RenderEvent::CodeBlock(code_block_content.clone()));
+                }
             }
             Event::Start(Tag::Heading { level, .. }) => {
                 if !buffered_inline.is_empty() {
@@ -580,7 +694,8 @@ pub fn parse_markdown_to_events(markdown_text: &str) -> Vec<RenderEvent> {
                         &mut needs_bullet,
                         &mut task_checked,
                         list_depth,
-                        true,
+                        list_ordinal_stack.last().copied().flatten(),
+                        blockquote_depth,
                     );
                 }
                 in_heading = true;
@@ -610,7 +725,8 @@ pub fn parse_markdown_to_events(markdown_text: &str) -> Vec<RenderEvent> {
                         &mut needs_bullet,
                         &mut task_checked,
                         list_depth,
-                        true,
+                        list_ordinal_stack.last().copied().flatten(),
+                        blockquote_depth,
                     );
                 }
             }
@@ -622,12 +738,13 @@ pub fn parse_markdown_to_events(markdown_text: &str) -> Vec<RenderEvent> {
                         &mut needs_bullet,
                         &mut task_checked,
                         list_depth,
-                        true,
+                        list_ordinal_stack.last().copied().flatten(),
+                        blockquote_depth,
                     );
                     events.push(RenderEvent::Space(4.0));
                 }
             }
-            Event::Start(Tag::List(_)) => {
+            Event::Start(Tag::List(list_kind)) => {
                 if !buffered_inline.is_empty() {
                     push_inline(
                         &mut events,
@@ -635,10 +752,15 @@ pub fn parse_markdown_to_events(markdown_text: &str) -> Vec<RenderEvent> {
                         &mut needs_bullet,
                         &mut task_checked,
                         list_depth,
-                        true,
+                        list_ordinal_stack.last().copied().flatten(),
+                        blockquote_depth,
                     );
                 }
                 list_depth += 1;
+                // P0-3: Track ordered-list start number for rendering
+                // `"n. "` instead of `"• "`. `list_kind` is `Some(n)`
+                // for ordered lists, `None` for unordered.
+                list_ordinal_stack.push(list_kind);
             }
             Event::End(TagEnd::List(_)) => {
                 push_inline(
@@ -647,9 +769,11 @@ pub fn parse_markdown_to_events(markdown_text: &str) -> Vec<RenderEvent> {
                     &mut needs_bullet,
                     &mut task_checked,
                     list_depth,
-                    true,
+                    list_ordinal_stack.last().copied().flatten(),
+                    blockquote_depth,
                 );
                 list_depth = list_depth.saturating_sub(1);
+                list_ordinal_stack.pop();
             }
             Event::Start(Tag::Item) => {
                 if !buffered_inline.is_empty() {
@@ -659,7 +783,8 @@ pub fn parse_markdown_to_events(markdown_text: &str) -> Vec<RenderEvent> {
                         &mut needs_bullet,
                         &mut task_checked,
                         list_depth,
-                        true,
+                        list_ordinal_stack.last().copied().flatten(),
+                        blockquote_depth,
                     );
                 }
                 needs_bullet = true;
@@ -671,8 +796,15 @@ pub fn parse_markdown_to_events(markdown_text: &str) -> Vec<RenderEvent> {
                     &mut needs_bullet,
                     &mut task_checked,
                     list_depth,
-                    true,
+                    list_ordinal_stack.last().copied().flatten(),
+                    blockquote_depth,
                 );
+                // P0-3: Increment ordinal for the next item in this
+                // ordered list. The flush above already captured the
+                // current item's ordinal.
+                if let Some(Some(n)) = list_ordinal_stack.last_mut() {
+                    *n += 1;
+                }
             }
             Event::Start(Tag::BlockQuote) => {
                 if !buffered_inline.is_empty() {
@@ -682,9 +814,13 @@ pub fn parse_markdown_to_events(markdown_text: &str) -> Vec<RenderEvent> {
                         &mut needs_bullet,
                         &mut task_checked,
                         list_depth,
-                        true,
+                        list_ordinal_stack.last().copied().flatten(),
+                        blockquote_depth,
                     );
                 }
+                // P0-6: Track blockquote nesting depth for visual
+                // distinction (indent + quote bar).
+                blockquote_depth += 1;
             }
             Event::End(TagEnd::BlockQuote) => {
                 push_inline(
@@ -693,8 +829,10 @@ pub fn parse_markdown_to_events(markdown_text: &str) -> Vec<RenderEvent> {
                     &mut needs_bullet,
                     &mut task_checked,
                     list_depth,
-                    true,
+                    list_ordinal_stack.last().copied().flatten(),
+                    blockquote_depth,
                 );
+                blockquote_depth = blockquote_depth.saturating_sub(1);
             }
             Event::Start(Tag::Table(_)) => {
                 if !buffered_inline.is_empty() {
@@ -704,15 +842,18 @@ pub fn parse_markdown_to_events(markdown_text: &str) -> Vec<RenderEvent> {
                         &mut needs_bullet,
                         &mut task_checked,
                         list_depth,
-                        true,
+                        list_ordinal_stack.last().copied().flatten(),
+                        blockquote_depth,
                     );
                 }
                 table_cells.clear();
             }
             Event::End(TagEnd::Table) => {
-                events.push(RenderEvent::Table(table_cells.clone()));
+                if !table_cells.is_empty() {
+                    events.push(RenderEvent::Table(table_cells.clone()));
+                    events.push(RenderEvent::Space(4.0));
+                }
                 table_cells.clear();
-                events.push(RenderEvent::Space(4.0));
             }
             Event::Start(Tag::TableHead) => {
                 current_row.clear();
@@ -732,7 +873,21 @@ pub fn parse_markdown_to_events(markdown_text: &str) -> Vec<RenderEvent> {
             }
             Event::Start(Tag::TableCell) => {
                 in_table_cell = true;
-                buffered_inline.clear();
+                // Flush pending inline content rather than silently
+                // discarding it via `clear()`. In well-formed tables
+                // this is a no-op (buffer is empty between cells), but
+                // for malformed markdown it preserves stray content.
+                if !buffered_inline.is_empty() {
+                    push_inline(
+                        &mut events,
+                        &mut buffered_inline,
+                        &mut needs_bullet,
+                        &mut task_checked,
+                        list_depth,
+                        list_ordinal_stack.last().copied().flatten(),
+                        blockquote_depth,
+                    );
+                }
             }
             Event::End(TagEnd::TableCell) => {
                 in_table_cell = false;
@@ -804,7 +959,8 @@ pub fn parse_markdown_to_events(markdown_text: &str) -> Vec<RenderEvent> {
                             &mut needs_bullet,
                             &mut task_checked,
                             list_depth,
-                            true,
+                            list_ordinal_stack.last().copied().flatten(),
+                            blockquote_depth,
                         );
                     } else {
                         buffered_inline.push(InlineElem::SoftBreak);
@@ -818,7 +974,8 @@ pub fn parse_markdown_to_events(markdown_text: &str) -> Vec<RenderEvent> {
                     &mut needs_bullet,
                     &mut task_checked,
                     list_depth,
-                    true,
+                    list_ordinal_stack.last().copied().flatten(),
+                    blockquote_depth,
                 );
                 events.push(RenderEvent::Separator);
             }
@@ -846,7 +1003,8 @@ pub fn parse_markdown_to_events(markdown_text: &str) -> Vec<RenderEvent> {
                         &mut needs_bullet,
                         &mut task_checked,
                         list_depth,
-                        true,
+                        list_ordinal_stack.last().copied().flatten(),
+                        blockquote_depth,
                     );
                 }
                 events.push(RenderEvent::Separator);
@@ -862,7 +1020,8 @@ pub fn parse_markdown_to_events(markdown_text: &str) -> Vec<RenderEvent> {
                     &mut needs_bullet,
                     &mut task_checked,
                     list_depth,
-                    true,
+                    list_ordinal_stack.last().copied().flatten(),
+                    blockquote_depth,
                 );
             }
             Event::Start(Tag::HtmlBlock) => {
@@ -873,7 +1032,8 @@ pub fn parse_markdown_to_events(markdown_text: &str) -> Vec<RenderEvent> {
                         &mut needs_bullet,
                         &mut task_checked,
                         list_depth,
-                        true,
+                        list_ordinal_stack.last().copied().flatten(),
+                        blockquote_depth,
                     );
                 }
             }
@@ -884,7 +1044,8 @@ pub fn parse_markdown_to_events(markdown_text: &str) -> Vec<RenderEvent> {
                     &mut needs_bullet,
                     &mut task_checked,
                     list_depth,
-                    true,
+                    list_ordinal_stack.last().copied().flatten(),
+                    blockquote_depth,
                 );
             }
             _ => {}
@@ -896,7 +1057,8 @@ pub fn parse_markdown_to_events(markdown_text: &str) -> Vec<RenderEvent> {
         &mut needs_bullet,
         &mut task_checked,
         list_depth,
-        true,
+        list_ordinal_stack.last().copied().flatten(),
+        blockquote_depth,
     );
 
     events
@@ -910,9 +1072,28 @@ pub fn render_markdown(
     ui: &mut egui::Ui,
     markdown_text: &str,
     scroll_to_id: &mut Option<egui::Id>,
+    pending_toggles: &mut Vec<(usize, bool)>,
 ) {
     let events = parse_markdown_to_events(markdown_text);
-    let mut code_block_idx = 0;
+    let mut table_ordinal = 0usize;
+    let mut task_index = 0usize;
+
+    // Pre-compute heading ids with duplicate disambiguation so that
+    // `render_heading` and `build_toc` derive the same id for each
+    // heading. The occurrence ordinal is appended via `Id::with` for
+    // duplicates (occurrence > 0).
+    use std::collections::HashMap;
+    let mut heading_seen: HashMap<String, usize> = HashMap::new();
+    let mut heading_id_for = |text: &str| -> egui::Id {
+        let occurrence = heading_seen.entry(text.to_string()).or_insert(0);
+        let id = if *occurrence == 0 {
+            egui::Id::new(text)
+        } else {
+            egui::Id::new(text).with(*occurrence)
+        };
+        *occurrence += 1;
+        id
+    };
 
     for event in events {
         match event {
@@ -921,18 +1102,53 @@ pub fn render_markdown(
                 needs_bullet,
                 task_checked,
                 indent,
-                wrap,
+                list_ordinal,
+                blockquote_depth,
             } => {
-                render_inline(ui, &elems, needs_bullet, task_checked, indent, wrap);
+                // P0-2: Assign a task index to each task list item so
+                // checkbox toggles can be mapped back to the source.
+                if task_checked.is_some() {
+                    render_inline(
+                        ui,
+                        &elems,
+                        needs_bullet,
+                        task_checked,
+                        indent,
+                        list_ordinal,
+                        blockquote_depth,
+                        task_index,
+                        pending_toggles,
+                    );
+                    task_index += 1;
+                } else {
+                    render_inline(
+                        ui,
+                        &elems,
+                        needs_bullet,
+                        task_checked,
+                        indent,
+                        list_ordinal,
+                        blockquote_depth,
+                        task_index,
+                        pending_toggles,
+                    );
+                }
             }
             RenderEvent::CodeBlock(content) => {
-                render_code_block(ui, &content, &mut code_block_idx);
+                render_code_block(ui, &content);
             }
             RenderEvent::Heading { level, elems } => {
-                render_heading(ui, &elems, level, scroll_to_id);
+                let text = heading_plain_text(&elems);
+                let trimmed = text.trim();
+                if trimmed.is_empty() {
+                    continue;
+                }
+                let heading_id = heading_id_for(trimmed);
+                render_heading(ui, &elems, level, scroll_to_id, heading_id);
             }
             RenderEvent::Table(cells) => {
-                render_table(ui, &cells);
+                render_table(ui, &cells, table_ordinal);
+                table_ordinal += 1;
             }
             RenderEvent::Space(amount) => {
                 ui.add_space(amount);
@@ -940,6 +1156,78 @@ pub fn render_markdown(
             RenderEvent::Separator => {
                 ui.separator();
             }
+        }
+    }
+}
+
+/// Toggles the checkbox marker for the Nth task list item in the
+/// markdown source. Called after rendering when the user clicks a
+/// task checkbox, so the change persists across re-parses.
+///
+/// # Arguments
+/// * `markdown` - The full markdown source (modified in place)
+/// * `task_index` - Zero-based index of the task item to toggle
+/// * `checked` - The new checked state (`true` → `[x]`, `false` → `[ ]`)
+///
+/// # Examples
+///
+/// ```
+/// use fastmd::ui::render::apply_task_toggle;
+/// let mut md = "- [ ] first\n- [ ] second".to_string();
+/// apply_task_toggle(&mut md, 1, true);
+/// assert_eq!(md, "- [ ] first\n- [x] second");
+/// ```
+pub fn apply_task_toggle(markdown: &mut String, task_index: usize, checked: bool) {
+    let new_marker = if checked { "[x]" } else { "[ ]" };
+    let mut count = 0usize;
+
+    let result: String = markdown
+        .lines()
+        .map(|line| {
+            if let Some(checkbox_start) = find_task_checkbox(line) {
+                if count == task_index {
+                    count += 1;
+                    let before = &line[..checkbox_start];
+                    let after = &line[checkbox_start + 3..];
+                    return format!("{}{}{}", before, new_marker, after);
+                }
+                count += 1;
+            }
+            line.to_string()
+        })
+        .collect::<Vec<_>>()
+        .join("\n");
+
+    *markdown = result;
+
+    /// Scan a single line for a task-list checkbox marker.
+    /// Returns the byte offset of the `[` in `[ ]` / `[x]`.
+    fn find_task_checkbox(line: &str) -> Option<usize> {
+        let trimmed_start = line.len() - line.trim_start().len();
+        let rest = &line[trimmed_start..];
+
+        // Match bullet markers: "- ", "* ", "+ ", or "N. "
+        let bullet_len =
+            if rest.starts_with("- ") || rest.starts_with("* ") || rest.starts_with("+ ") {
+                2
+            } else {
+                // Try ordered list: digits followed by ". "
+                let dot = rest.find(". ")?;
+                let num_part = &rest[..dot];
+                if !num_part.chars().all(|c| c.is_ascii_digit()) || num_part.is_empty() {
+                    return None;
+                }
+                dot + 2
+            };
+
+        let after_bullet = &rest[bullet_len..];
+        if after_bullet.starts_with("[ ]")
+            || after_bullet.starts_with("[x]")
+            || after_bullet.starts_with("[X]")
+        {
+            Some(trimmed_start + bullet_len)
+        } else {
+            None
         }
     }
 }
@@ -966,54 +1254,38 @@ pub fn render_markdown(
 /// assert!(build_toc("just a paragraph").is_empty());
 /// ```
 pub fn build_toc(markdown_text: &str) -> Vec<crate::ui::ToCEntry> {
-    use pulldown_cmark::{Event, HeadingLevel, Options, Parser, Tag, TagEnd};
-
-    let mut options = Options::empty();
-    options.insert(Options::ENABLE_TABLES);
-    let parser = Parser::new_ext(markdown_text, options);
-
+    // Use the same parser options and text extraction as
+    // `parse_markdown_to_events` + `heading_plain_text` so that ToC
+    // ids match the ids computed by `render_markdown`. The previous
+    // implementation used a separate parser with only `ENABLE_TABLES`
+    // and accumulated raw `Event::Text`, which diverged from
+    // `heading_plain_text` for strikethrough, images, and footnotes.
+    let events = parse_markdown_to_events(markdown_text);
     let mut toc = Vec::new();
-    let mut current_header = String::new();
-    let mut heading_level = None;
+    use std::collections::HashMap;
+    let mut seen: HashMap<String, usize> = HashMap::new();
 
-    for event in parser {
-        match event {
-            Event::Start(Tag::Heading { level, .. }) => {
-                let lvl = match level {
-                    HeadingLevel::H1 => 1,
-                    HeadingLevel::H2 => 2,
-                    HeadingLevel::H3 => 3,
-                    HeadingLevel::H4 => 4,
-                    HeadingLevel::H5 => 5,
-                    HeadingLevel::H6 => 6,
-                };
-                heading_level = Some(lvl);
-                current_header.clear();
+    for event in events {
+        if let RenderEvent::Heading { level, elems } = event {
+            let text = heading_plain_text(&elems);
+            let trimmed = text.trim().to_string();
+            if trimmed.is_empty() {
+                continue;
             }
-            Event::Text(text) => {
-                if heading_level.is_some() {
-                    current_header.push_str(&text);
-                }
-            }
-            Event::Code(code) => {
-                if heading_level.is_some() {
-                    current_header.push_str(&code);
-                }
-            }
-            Event::End(TagEnd::Heading(_)) => {
-                if let Some(lvl) = heading_level.take() {
-                    let title = current_header.trim().to_string();
-                    if !title.is_empty() {
-                        let id = egui::Id::new(&title);
-                        toc.push(super::ToCEntry {
-                            title,
-                            level: lvl,
-                            id,
-                        });
-                    }
-                }
-            }
-            _ => {}
+            // Disambiguate duplicate headings with an occurrence ordinal,
+            // matching the logic in `render_markdown`.
+            let occurrence = seen.entry(trimmed.clone()).or_insert(0);
+            let id = if *occurrence == 0 {
+                egui::Id::new(&trimmed)
+            } else {
+                egui::Id::new(&trimmed).with(*occurrence)
+            };
+            *occurrence += 1;
+            toc.push(super::ToCEntry {
+                title: trimmed,
+                level,
+                id,
+            });
         }
     }
     toc
@@ -1782,6 +2054,7 @@ mod e2e_tests {
                     ui,
                     "# Test\n\n- [ ] Task\n\n```rust\nlet x = 1;\n```",
                     &mut scroll_id,
+                    &mut Vec::new(),
                 );
 
                 let yaml_str = "a: 1\nb: 2";
@@ -1822,7 +2095,7 @@ def foo():
         let _ = ctx.run_ui(egui::RawInput::default(), |ui| {
             egui::CentralPanel::default().show(ui, |ui| {
                 let mut scroll_id = None;
-                render_markdown(ui, md, &mut scroll_id);
+                render_markdown(ui, md, &mut scroll_id, &mut Vec::new());
 
                 // Render non-mapping YAML table
                 let non_map = serde_yaml::Value::String("test".to_string());
@@ -1838,7 +2111,7 @@ def foo():
         let _ = ctx.run_ui(egui::RawInput::default(), |ui| {
             egui::CentralPanel::default().show(ui, |ui| {
                 let mut scroll_id = None;
-                render_markdown(ui, md, &mut scroll_id);
+                render_markdown(ui, md, &mut scroll_id, &mut Vec::new());
             });
         });
     }
@@ -1850,7 +2123,7 @@ def foo():
         let _ = ctx.run_ui(egui::RawInput::default(), |ui| {
             egui::CentralPanel::default().show(ui, |ui| {
                 let mut scroll_id = None;
-                render_markdown(ui, md, &mut scroll_id);
+                render_markdown(ui, md, &mut scroll_id, &mut Vec::new());
             });
         });
     }
@@ -1931,7 +2204,7 @@ def foo():
         let _ = ctx.run_ui(egui::RawInput::default(), |ui| {
             egui::CentralPanel::default().show(ui, |ui| {
                 let mut scroll_id = None;
-                render_markdown(ui, md, &mut scroll_id);
+                render_markdown(ui, md, &mut scroll_id, &mut Vec::new());
             });
         });
     }
@@ -1948,7 +2221,7 @@ def foo():
                     "Target Heading".to_string(),
                     TextStyle::default(),
                 )];
-                render_heading(ui, &elems, 1, &mut scroll_id);
+                render_heading(ui, &elems, 1, &mut scroll_id, target_id);
                 assert_eq!(
                     scroll_id, None,
                     "scroll_to_id should be cleared after scroll"
@@ -1956,7 +2229,7 @@ def foo():
 
                 // Empty title should not trigger scroll
                 let mut dummy_scroll = Some(target_id);
-                render_heading(ui, &[], 1, &mut dummy_scroll);
+                render_heading(ui, &[], 1, &mut dummy_scroll, target_id);
                 assert_eq!(dummy_scroll, Some(target_id));
             });
         });
@@ -1996,7 +2269,7 @@ def foo():
                 // `needs_horizontal_scroll`. Without a visual harness, we
                 // can't assert on pixels, but a panic in `render_table`
                 // would surface here.
-                render_table(ui, table_cells);
+                render_table(ui, table_cells, 0);
             });
         });
         captured.expect("ctx.run should have populated `captured`")
@@ -2167,8 +2440,7 @@ def foo():
         // than from `ctx.output` after `run_ui` returns.
         let output = ctx.run_ui(egui::RawInput::default(), |ui| {
             egui::CentralPanel::default().show(ui, |ui| {
-                let mut idx = 0;
-                render_code_block(ui, "let x = 1;", &mut idx);
+                render_code_block(ui, "let x = 1;");
             });
         });
         // Without a click, no `CopyText` command should have been
@@ -2260,7 +2532,7 @@ def foo():
             egui::CentralPanel::default().show(ui, |ui| {
                 // task_checked=None, needs_bullet=false â†’ not a list
                 // item; renders the link inline.
-                render_inline(ui, &elems, false, None, 0, true);
+                render_inline(ui, &elems, false, None, 0, None, 0, 0, &mut Vec::new());
             });
         });
         // No click happened, so the UI's `OpenUrl` output must be
@@ -2302,7 +2574,7 @@ def foo():
             )];
             // task_checked=None, needs_bullet=false → not a list
             // item; renders the link inline.
-            render_inline(ui, &elems, false, None, 0, true);
+            render_inline(ui, &elems, false, None, 0, None, 0, 0, &mut Vec::new());
         });
         harness.fit_contents();
         harness.run();
@@ -2361,8 +2633,8 @@ def foo():
         let _ = ctx.run_ui(egui::RawInput::default(), |ui| {
             egui::CentralPanel::default().show(ui, |ui| {
                 let mut scroll_id = None;
-                let mut md = String::from("- [ ] todo\n- [x] done");
-                render_markdown(ui, &mut md, &mut scroll_id);
+                let md = String::from("- [ ] todo\n- [x] done");
+                render_markdown(ui, &md, &mut scroll_id, &mut Vec::new());
             });
         });
     }
