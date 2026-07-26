@@ -301,7 +301,7 @@ mod tests {
             output_md: output,
         };
         let template = Some(vec![
-            "pandoc".to_string(),
+            "__definitely_not_a_real_exe__".to_string(),
             "{input}".to_string(),
             "-o".to_string(),
             "{output}".to_string(),
@@ -310,7 +310,7 @@ mod tests {
 
         let rt = tokio::runtime::Runtime::new().unwrap();
         let result = rt.block_on(job.execute(template, tx));
-        // pandoc doesn't exist on the PATH in CI, so this will fail with spawn error
+        // the binary doesn't exist on PATH on any platform, so spawn will fail
         assert!(result.is_err());
         let err = result.unwrap_err();
         assert!(err.contains("Failed to spawn"));
