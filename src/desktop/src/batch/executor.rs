@@ -197,7 +197,7 @@ pub fn run_agent_blocking(
 
     let (tx, rx) = channel();
 
-    let mut ctx = crate::agent::AgentContext {
+    let ctx = crate::agent::AgentContext {
         config,
         tx_gui: tx,
         file_event_bus,
