@@ -2,7 +2,6 @@
 
 use crate::background::{BackgroundLogEntry, LogCategory};
 use crate::messages::BackgroundMessage as MsgBackgroundMessage;
-use pulldown_cmark::{Options, Parser, html};
 use std::io::Write;
 use std::path::PathBuf;
 use std::sync::mpsc::Sender;
@@ -40,10 +39,7 @@ impl PrintJob {
 }
 
 fn markdown_to_html(markdown: &str) -> String {
-    let parser = Parser::new_ext(markdown, Options::all());
-    let mut html_output = String::new();
-    html::push_html(&mut html_output, parser);
-    html_output
+    crate::markdown::render_markdown_to_html(markdown)
 }
 
 fn build_html_document(title: &str, content: &str) -> String {

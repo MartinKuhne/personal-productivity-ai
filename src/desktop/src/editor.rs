@@ -3,7 +3,6 @@
 use crate::document::DocumentContent;
 use crate::file_events::FileEventProducer;
 use eframe::egui::{self, Key};
-use pulldown_cmark::{Options, Parser};
 use std::fs;
 use std::path::{Path, PathBuf};
 
@@ -73,23 +72,7 @@ impl EditorState {
     }
 
     pub fn save(&mut self, producer: &FileEventProducer) -> Result<(), String> {
-        // Validation using pulldown-cmark
-        let mut options = Options::empty();
-        options.insert(Options::ENABLE_TABLES);
-        options.insert(Options::ENABLE_FOOTNOTES);
-        options.insert(Options::ENABLE_STRIKETHROUGH);
-        options.insert(Options::ENABLE_TASKLISTS);
-
-        let parser = Parser::new_ext(&self.content, options);
-        // Just consume the parser to see if it panics or we can do more.
-        // pulldown-cmark doesn't typically "fail" parsing as Markdown is very forgiving.
-        // However, if we want to catch broken tables or something we could check events.
-        // For our MVP, just running the parser validates it doesn't crash.
-        // Wait, what defines a "parse error" in pulldown-cmark?
-        // Actually, cmark parses everything. So "invalid markdown" usually isn't an error in cmark.
-        // The requirements say "If parsing fails, the save shall be aborted".
-        // Let's just run it to ensure no panics, or check if we want to do any custom validation.
-        let _events: Vec<_> = parser.collect();
+        let _events = crate::markdown::parse_markdown_to_events(&self.content);
 
         // Actually, if there's any specific "broken syntax", cmark just renders it as text.
         // But let's assume it passes.
