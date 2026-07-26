@@ -3,6 +3,7 @@
 use crate::config::AppConfig;
 use crate::file_events::{Bus, FileEvent};
 use crate::messages::BackgroundMessage;
+use crate::tools::Safety;
 use crate::tools::context::ToolContext;
 use crate::tools::execute_tool;
 use std::path::Path;
@@ -34,7 +35,7 @@ impl ToolExecutor {
                 .and_then(|f| f.get("name"))
                 .and_then(|n| n.as_str())
                 .unwrap_or("");
-            if is_safe_tool(func_name) {
+            if Self::classify(func_name) == Safety::ReadOnly {
                 safe_calls.push(tc.clone());
             } else {
                 unsafe_calls.push(tc.clone());
@@ -44,6 +45,16 @@ impl ToolExecutor {
         results.extend(self.execute_sequential(&unsafe_calls));
         self.notify_file_creations(&results, tx_gui);
         results
+    }
+
+    /// Look up a tool by name through the registry and ask it for its
+    /// [`Safety`] classification. Falls back to [`Safety::Mutating`]
+    /// (the conservative choice) when the name is unknown — that way
+    /// an LLM-emitted call to a missing tool runs sequentially instead
+    /// of in parallel, and the registry returns its normal "tool not
+    /// found" error.
+    fn classify(name: &str) -> Safety {
+        crate::tools::registry::safety_of(name)
     }
 
     fn execute_parallel(
@@ -167,44 +178,29 @@ fn extract_str<'a>(val: &'a serde_json::Value, path: &[&str]) -> &'a str {
     current.as_str().unwrap_or("")
 }
 
-fn is_safe_tool(name: &str) -> bool {
-    matches!(
-        name,
-        "grep"
-            | "read_tags"
-            | "list_files_by_tag"
-            | "list_files"
-            | "read_file"
-            | "read_file_lines"
-            | "web_fetch"
-            | "read_yaml_header"
-            | "web_search"
-            | "search_calendar"
-            | "get_calendar"
-            | "get_calendar_item"
-            | "search_email"
-            | "get_email_by_id"
-            | "search_contact"
-            | "get_contact"
-    )
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
 
     #[test]
-    fn test_is_safe_tool_read() {
-        assert!(is_safe_tool("read_file"));
-        assert!(is_safe_tool("grep"));
-        assert!(is_safe_tool("list_files"));
-    }
-
-    #[test]
-    fn test_is_safe_tool_write() {
-        assert!(!is_safe_tool("create_file"));
-        assert!(!is_safe_tool("delete_file"));
-        assert!(!is_safe_tool("edit_file"));
+    fn test_safety_of_classifies_known_tools() {
+        // Regression for the is_safe_tool string-list: the registry now
+        // exposes a single `safety_of(name)` lookup that returns
+        // Safety::ReadOnly / Safety::Mutating.
+        assert_eq!(
+            crate::tools::registry::safety_of("read_file"),
+            Safety::ReadOnly
+        );
+        assert_eq!(crate::tools::registry::safety_of("grep"), Safety::ReadOnly);
+        assert_eq!(
+            crate::tools::registry::safety_of("create_file"),
+            Safety::Mutating
+        );
+        // Unknown tools fall back to Mutating (the conservative choice).
+        assert_eq!(
+            crate::tools::registry::safety_of("nonexistent"),
+            Safety::Mutating
+        );
     }
 
     #[test]

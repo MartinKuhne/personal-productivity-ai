@@ -183,20 +183,54 @@ fn lookup_mailbox_id(
     Err(format!("Mailbox not found with name: {}", folder_name))
 }
 
-#[allow(clippy::too_many_arguments)]
+/// Optional filters an LLM can pass to `tool_search_email`. Bundled
+/// into a single argument (PSD-002) so test call-sites can use
+/// `..Default::default()` instead of repeating eight `None`s.
+#[derive(Debug, Default, Clone)]
+pub struct SearchEmailFilters<'a> {
+    pub keyword: Option<&'a str>,
+    pub folder: Option<&'a str>,
+    pub start_date: Option<&'a str>,
+    pub end_date: Option<&'a str>,
+    pub from: Option<&'a str>,
+    pub to: Option<&'a str>,
+    pub is_unread: Option<bool>,
+    pub is_flagged: Option<bool>,
+}
+
+/// Pagination for `tool_search_email`. Separated from the filter struct
+/// so the page/page_size fields can change independently (e.g. to a
+/// cursor later) without churning the filter API.
+#[derive(Debug, Clone, Copy)]
+pub struct SearchEmailPagination {
+    pub page: usize,
+    pub page_size: usize,
+}
+
+impl Default for SearchEmailPagination {
+    fn default() -> Self {
+        Self {
+            page: 1,
+            page_size: 10,
+        }
+    }
+}
+
 pub fn tool_search_email(
     config: &AppConfig,
-    keyword: Option<&str>,
-    folder: Option<&str>,
-    start_date: Option<&str>,
-    end_date: Option<&str>,
-    from: Option<&str>,
-    to: Option<&str>,
-    is_unread: Option<bool>,
-    is_flagged: Option<bool>,
-    page: usize,
-    page_size: usize,
+    filters: SearchEmailFilters<'_>,
+    pagination: SearchEmailPagination,
 ) -> Result<crate::tools::dtos::SearchEmailResponse, String> {
+    let keyword = filters.keyword;
+    let folder = filters.folder;
+    let start_date = filters.start_date;
+    let end_date = filters.end_date;
+    let from = filters.from;
+    let to = filters.to;
+    let is_unread = filters.is_unread;
+    let is_flagged = filters.is_flagged;
+    let page = pagination.page.max(1);
+    let page_size = pagination.page_size.max(1);
     let format_jmap_date = |d: &str, is_end: bool| -> String {
         if d.len() == 10 && d.chars().nth(4) == Some('-') && d.chars().nth(7) == Some('-') {
             if is_end {
@@ -962,7 +996,10 @@ mod tests {
         assert_eq!(result[0]["bcc"][0]["email"], "bcc@t.com");
     }
 
-    use super::{tool_get_email_by_id, tool_search_email, tool_send_email};
+    use super::{
+        SearchEmailFilters, SearchEmailPagination, tool_get_email_by_id, tool_search_email,
+        tool_send_email,
+    };
     use crate::config::{AppConfig, JmapClient};
     use std::io::{Read, Write};
     use std::net::TcpListener;
@@ -996,16 +1033,20 @@ mod tests {
         let config = AppConfig::default();
         let res = tool_search_email(
             &config,
-            Some("test"),
-            None,
-            None,
-            None,
-            None,
-            None,
-            None,
-            None,
-            1,
-            10,
+            SearchEmailFilters {
+                keyword: Some("test"),
+                folder: None,
+                start_date: None,
+                end_date: None,
+                from: None,
+                to: None,
+                is_unread: None,
+                is_flagged: None,
+            },
+            SearchEmailPagination {
+                page: 1,
+                page_size: 10,
+            },
         );
         assert!(res.is_err());
     }
@@ -1034,16 +1075,20 @@ mod tests {
         );
         let res = tool_search_email(
             &config,
-            Some("test"),
-            None,
-            None,
-            None,
-            None,
-            None,
-            None,
-            None,
-            1,
-            10,
+            SearchEmailFilters {
+                keyword: Some("test"),
+                folder: None,
+                start_date: None,
+                end_date: None,
+                from: None,
+                to: None,
+                is_unread: None,
+                is_flagged: None,
+            },
+            SearchEmailPagination {
+                page: 1,
+                page_size: 10,
+            },
         );
         assert!(res.is_ok());
     }
@@ -1100,16 +1145,20 @@ mod tests {
         );
         let res = tool_search_email(
             &config,
-            None,
-            None,
-            Some("2026-07-01"),
-            Some("2026-07-10"),
-            Some("s@test.com"),
-            Some("r@test.com"),
-            Some(true),
-            Some(false),
-            1,
-            10,
+            SearchEmailFilters {
+                keyword: None,
+                folder: None,
+                start_date: Some("2026-07-01"),
+                end_date: Some("2026-07-10"),
+                from: Some("s@test.com"),
+                to: Some("r@test.com"),
+                is_unread: Some(true),
+                is_flagged: Some(false),
+            },
+            SearchEmailPagination {
+                page: 1,
+                page_size: 10,
+            },
         );
         assert!(res.is_ok());
     }
@@ -1147,7 +1196,21 @@ mod tests {
         // filter case.
         let config = AppConfig::default();
         let res = tool_search_email(
-            &config, None, None, None, None, None, None, None, None, 1, 10,
+            &config,
+            SearchEmailFilters {
+                keyword: None,
+                folder: None,
+                start_date: None,
+                end_date: None,
+                from: None,
+                to: None,
+                is_unread: None,
+                is_flagged: None,
+            },
+            SearchEmailPagination {
+                page: 1,
+                page_size: 10,
+            },
         );
         assert!(res.is_err());
         let msg = res.unwrap_err();
@@ -1173,7 +1236,21 @@ mod tests {
             },
         );
         let res = tool_search_email(
-            &config, None, None, None, None, None, None, None, None, 1, 10,
+            &config,
+            SearchEmailFilters {
+                keyword: None,
+                folder: None,
+                start_date: None,
+                end_date: None,
+                from: None,
+                to: None,
+                is_unread: None,
+                is_flagged: None,
+            },
+            SearchEmailPagination {
+                page: 1,
+                page_size: 10,
+            },
         );
         assert!(res.is_err());
         assert!(
@@ -1218,16 +1295,20 @@ mod tests {
         );
         let res = tool_search_email(
             &config,
-            Some("test"),
-            None,
-            None,
-            None,
-            None,
-            None,
-            None,
-            None,
-            1,
-            10,
+            SearchEmailFilters {
+                keyword: Some("test"),
+                folder: None,
+                start_date: None,
+                end_date: None,
+                from: None,
+                to: None,
+                is_unread: None,
+                is_flagged: None,
+            },
+            SearchEmailPagination {
+                page: 1,
+                page_size: 10,
+            },
         );
         assert!(res.is_ok());
         let response = res.unwrap();
@@ -1273,16 +1354,20 @@ mod tests {
         );
         let res = tool_search_email(
             &config,
-            Some("test"),
-            None,
-            None,
-            None,
-            None,
-            None,
-            None,
-            None,
-            2, // page
-            2, // page_size
+            SearchEmailFilters {
+                keyword: Some("test"),
+                folder: None,
+                start_date: None,
+                end_date: None,
+                from: None,
+                to: None,
+                is_unread: None,
+                is_flagged: None,
+            },
+            SearchEmailPagination {
+                page: 2,
+                page_size: 2,
+            },
         );
         assert!(res.is_ok());
         let response = res.unwrap();
@@ -1326,16 +1411,20 @@ mod tests {
         );
         let res = tool_search_email(
             &config,
-            Some("test"),
-            None,
-            None,
-            None,
-            None,
-            None,
-            None,
-            None,
-            99, // page
-            10, // page_size
+            SearchEmailFilters {
+                keyword: Some("test"),
+                folder: None,
+                start_date: None,
+                end_date: None,
+                from: None,
+                to: None,
+                is_unread: None,
+                is_flagged: None,
+            },
+            SearchEmailPagination {
+                page: 99,
+                page_size: 10,
+            },
         );
         assert!(res.is_ok());
         let response = res.unwrap();
@@ -1380,16 +1469,18 @@ mod tests {
         );
         let res = tool_search_email(
             &config,
-            Some("test"),
-            None,
-            None,
-            None,
-            None,
-            None,
-            None,
-            None,
-            0, // page → treated as page 1 by registry
-            10,
+            SearchEmailFilters {
+                keyword: Some("test"),
+                folder: None,
+                start_date: None,
+                end_date: None,
+                from: None,
+                to: None,
+                is_unread: None,
+                is_flagged: None,
+            },
+            SearchEmailPagination { page: 0, page_size: // page → treated as page 1 by registry
+            10 },
         );
         assert!(res.is_ok());
         let response = res.unwrap();
@@ -1424,16 +1515,20 @@ mod tests {
         );
         let res = tool_search_email(
             &config,
-            Some("test"),
-            None,
-            None,
-            None,
-            None,
-            None,
-            None,
-            None,
-            1,
-            10,
+            SearchEmailFilters {
+                keyword: Some("test"),
+                folder: None,
+                start_date: None,
+                end_date: None,
+                from: None,
+                to: None,
+                is_unread: None,
+                is_flagged: None,
+            },
+            SearchEmailPagination {
+                page: 1,
+                page_size: 10,
+            },
         );
         assert!(res.is_ok());
         let response = res.unwrap();

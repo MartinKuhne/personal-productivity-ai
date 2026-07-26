@@ -65,7 +65,13 @@ mod tests {
     #[test]
     fn test_heading_plain_text_all_variants() {
         let elems = vec![
-            InlineElem::Text("Heading ".to_string(), TextStyle { bold: true, ..Default::default() }),
+            InlineElem::Text(
+                "Heading ".to_string(),
+                TextStyle {
+                    bold: true,
+                    ..Default::default()
+                },
+            ),
             InlineElem::Link("https://example.com".to_string(), "Link".to_string()),
             InlineElem::SoftBreak,
             InlineElem::Image("pic.png".to_string()),

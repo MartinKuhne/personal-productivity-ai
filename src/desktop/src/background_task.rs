@@ -8,7 +8,7 @@ use crate::background::watcher::FileWatcher;
 use crate::file_events::{Bus, FileEvent};
 use crate::messages::BackgroundMessage;
 use std::path::PathBuf;
-use std::sync::atomic::AtomicBool;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::{Receiver, Sender, channel};
 use std::sync::{Arc, Mutex};
 
@@ -17,6 +17,9 @@ pub struct Task {
     pub tx: Sender<BackgroundMessage>,
     pub file_event_bus: Bus<FileEvent>,
     pub _watcher: Option<notify::RecommendedWatcher>,
+    /// Cancellation signal shared with the indexer. Set to `true` via
+    /// [`Task::cancel`] to ask the initial library scan to stop early.
+    cancel: Arc<AtomicBool>,
 }
 
 impl Task {
@@ -38,12 +41,16 @@ impl Task {
             tx,
             file_event_bus,
             _watcher: None,
+            cancel,
         }
     }
 
+    /// Signal the initial library scan to stop. The watcher and the
+    /// post-scan workers are not affected (they have their own
+    /// shutdown paths). Calling this after the scan has already
+    /// completed is a no-op.
     pub fn cancel(&self) {
-        // This is a no-op placeholder. The actual cancel logic would need
-        // to store the AtomicBool in Task. For now, we keep the field private.
+        self.cancel.store(true, Ordering::SeqCst);
     }
 
     fn run_indexing(
@@ -109,6 +116,29 @@ mod tests {
             }
         }
         assert!(got_finished, "Should complete initialization");
+    }
+
+    #[test]
+    fn test_cancel_signals_indexer_without_panicking() {
+        // Regression for the no-op `Task::cancel` stub: after the fix the
+        // method must store into the shared `Arc<AtomicBool>` and not
+        // panic on repeated or out-of-order calls.
+        let config = AppConfig::default();
+        let task = Task::new(config);
+        task.cancel();
+        task.cancel(); // second call must also be safe
+        // Drive the background to completion so the test exits cleanly.
+        let start = std::time::Instant::now();
+        while start.elapsed().as_secs() < 5 {
+            if let Ok(msg) = task.rx.recv_timeout(std::time::Duration::from_millis(100))
+                && matches!(
+                    msg,
+                    BackgroundMessage::Finished(_) | BackgroundMessage::FinishedWithoutWatcher
+                )
+            {
+                break;
+            }
+        }
     }
 
     #[test]

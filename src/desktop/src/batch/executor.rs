@@ -197,9 +197,9 @@ pub fn run_agent_blocking(
 
     let (tx, rx) = channel();
 
-    let mut ctx = crate::agent::AgentContext::new(
+    let ctx = crate::agent::AgentContext {
         config,
-        tx,
+        tx_gui: tx,
         file_event_bus,
         active_file,
         active_dir,
@@ -208,8 +208,8 @@ pub fn run_agent_blocking(
         cancel_flag,
         history,
         current_response,
-    );
-    ctx.model_name = model_name;
+        model_name,
+    };
     run_agent(ctx);
 
     let mut status = BatchJobStatus::Completed;

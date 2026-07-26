@@ -64,6 +64,17 @@ impl ToolRegistry {
         tool.execute(ctx, args)
     }
 
+    /// Look up a tool by name and return its [`crate::tools::Safety`]
+    /// classification. Unknown names return [`crate::tools::Safety::Mutating`]
+    /// (the conservative choice) so the agent loop never accidentally
+    /// parallelises an unknown call.
+    pub fn safety_of(&self, name: &str) -> crate::tools::Safety {
+        self.tools
+            .get(name)
+            .map(|t| t.safety())
+            .unwrap_or(crate::tools::Safety::Mutating)
+    }
+
     pub fn get_schema(&self, config: &AppConfig, prompt: &str) -> serde_json::Value {
         let mut tools = Vec::new();
         for tool in self.tools.values() {
@@ -129,6 +140,12 @@ pub fn get_tools_schema(config: &AppConfig, prompt: &str) -> serde_json::Value {
     TOOL_REGISTRY.get_schema(config, prompt)
 }
 
+/// Look up a tool's [`crate::tools::Safety`] classification by name.
+/// See [`ToolRegistry::safety_of`].
+pub fn safety_of(name: &str) -> crate::tools::Safety {
+    TOOL_REGISTRY.safety_of(name)
+}
+
 pub fn execute_tool(ctx: &ToolContext, name: &str, args_str: &str) -> String {
     rustls::crypto::ring::default_provider()
         .install_default()
@@ -187,6 +204,17 @@ pub fn execute_tool(ctx: &ToolContext, name: &str, args_str: &str) -> String {
 use crate::tools::dtos;
 use std::any::TypeId;
 
+/// Generate the JSON Schema for a tool's input DTO. Centralised so
+/// the 30+ `parameters_schema` impls don't have to repeat the
+/// `schemars::schema_for!` / `serde_json::to_value` / `unwrap`
+/// incantation (PSD-009). The `unwrap` is safe here because every
+/// input DTO is a static, derive-only type — the schemars
+/// generation can only fail if the derive is broken, which is a
+/// build-time concern, not a runtime one.
+fn json_schema<T: schemars::JsonSchema>() -> serde_json::Value {
+    serde_json::to_value(schemars::schema_for!(T)).unwrap()
+}
+
 struct WebDelegateTool;
 impl Tool for WebDelegateTool {
     fn name(&self) -> &'static str {
@@ -199,7 +227,7 @@ impl Tool for WebDelegateTool {
         TypeId::of::<dtos::WebDelegateInput>()
     }
     fn parameters_schema(&self) -> serde_json::Value {
-        serde_json::to_value(schemars::schema_for!(dtos::WebDelegateInput)).unwrap()
+        json_schema::<dtos::WebDelegateInput>()
     }
     fn is_enabled(&self, _: &AppConfig, _: &str) -> bool {
         true
@@ -225,7 +253,7 @@ impl Tool for ReplaceTextTool {
         TypeId::of::<dtos::ReplaceTextInput>()
     }
     fn parameters_schema(&self) -> serde_json::Value {
-        serde_json::to_value(schemars::schema_for!(dtos::ReplaceTextInput)).unwrap()
+        json_schema::<dtos::ReplaceTextInput>()
     }
     fn is_enabled(&self, _: &AppConfig, _: &str) -> bool {
         true
@@ -233,12 +261,7 @@ impl Tool for ReplaceTextTool {
     fn execute(&self, ctx: &ToolContext, args: &str) -> Result<serde_json::Value, String> {
         let input: dtos::ReplaceTextInput =
             serde_json::from_str(args).map_err(|e| format!("Invalid args: {}", e))?;
-        let (path, readonly) = ctx
-            .resolve_virtual_path(&input.path, true)?
-            .ok_or_else(|| "Cannot perform this operation on the virtual root".to_string())?;
-        if readonly {
-            return Err("Cannot perform this operation on a read-only library".to_string());
-        }
+        let path = ctx.resolve_writable(&input.path)?;
         let producer = ctx.file_event_producer();
         crate::tools::filesystem::tool_replace_text(
             &path.to_string_lossy(),
@@ -264,10 +287,13 @@ impl Tool for GrepTool {
         TypeId::of::<dtos::GrepInput>()
     }
     fn parameters_schema(&self) -> serde_json::Value {
-        serde_json::to_value(schemars::schema_for!(dtos::GrepInput)).unwrap()
+        json_schema::<dtos::GrepInput>()
     }
     fn is_enabled(&self, _: &AppConfig, _: &str) -> bool {
         true
+    }
+    fn safety(&self) -> crate::tools::Safety {
+        crate::tools::Safety::ReadOnly
     }
     fn execute(&self, ctx: &ToolContext, args: &str) -> Result<serde_json::Value, String> {
         let input: dtos::GrepInput =
@@ -309,10 +335,13 @@ impl Tool for ReadTagsTool {
         TypeId::of::<dtos::ReadTagsInput>()
     }
     fn parameters_schema(&self) -> serde_json::Value {
-        serde_json::to_value(schemars::schema_for!(dtos::ReadTagsInput)).unwrap()
+        json_schema::<dtos::ReadTagsInput>()
     }
     fn is_enabled(&self, _: &AppConfig, _: &str) -> bool {
         true
+    }
+    fn safety(&self) -> crate::tools::Safety {
+        crate::tools::Safety::ReadOnly
     }
     fn execute(&self, ctx: &ToolContext, args: &str) -> Result<serde_json::Value, String> {
         let _: dtos::ReadTagsInput =
@@ -344,10 +373,13 @@ impl Tool for ListFilesByTagTool {
         TypeId::of::<dtos::ListFilesByTagInput>()
     }
     fn parameters_schema(&self) -> serde_json::Value {
-        serde_json::to_value(schemars::schema_for!(dtos::ListFilesByTagInput)).unwrap()
+        json_schema::<dtos::ListFilesByTagInput>()
     }
     fn is_enabled(&self, _: &AppConfig, _: &str) -> bool {
         true
+    }
+    fn safety(&self) -> crate::tools::Safety {
+        crate::tools::Safety::ReadOnly
     }
     fn execute(&self, ctx: &ToolContext, args: &str) -> Result<serde_json::Value, String> {
         let input: dtos::ListFilesByTagInput =
@@ -396,10 +428,13 @@ impl Tool for ListFilesTool {
         TypeId::of::<dtos::ListFilesInput>()
     }
     fn parameters_schema(&self) -> serde_json::Value {
-        serde_json::to_value(schemars::schema_for!(dtos::ListFilesInput)).unwrap()
+        json_schema::<dtos::ListFilesInput>()
     }
     fn is_enabled(&self, _: &AppConfig, _: &str) -> bool {
         true
+    }
+    fn safety(&self) -> crate::tools::Safety {
+        crate::tools::Safety::ReadOnly
     }
     fn execute(&self, ctx: &ToolContext, args: &str) -> Result<serde_json::Value, String> {
         let input: dtos::ListFilesInput =
@@ -450,10 +485,13 @@ impl Tool for ReadFileTool {
         TypeId::of::<dtos::ReadFileInput>()
     }
     fn parameters_schema(&self) -> serde_json::Value {
-        serde_json::to_value(schemars::schema_for!(dtos::ReadFileInput)).unwrap()
+        json_schema::<dtos::ReadFileInput>()
     }
     fn is_enabled(&self, _: &AppConfig, _: &str) -> bool {
         true
+    }
+    fn safety(&self) -> crate::tools::Safety {
+        crate::tools::Safety::ReadOnly
     }
     fn execute(&self, ctx: &ToolContext, args: &str) -> Result<serde_json::Value, String> {
         let input: dtos::ReadFileInput =
@@ -479,10 +517,13 @@ impl Tool for ReadFileLinesTool {
         TypeId::of::<dtos::ReadFileLinesInput>()
     }
     fn parameters_schema(&self) -> serde_json::Value {
-        serde_json::to_value(schemars::schema_for!(dtos::ReadFileLinesInput)).unwrap()
+        json_schema::<dtos::ReadFileLinesInput>()
     }
     fn is_enabled(&self, _: &AppConfig, _: &str) -> bool {
         true
+    }
+    fn safety(&self) -> crate::tools::Safety {
+        crate::tools::Safety::ReadOnly
     }
     fn execute(&self, ctx: &ToolContext, args: &str) -> Result<serde_json::Value, String> {
         let input: dtos::ReadFileLinesInput =
@@ -513,7 +554,7 @@ impl Tool for CreateFileTool {
         TypeId::of::<dtos::CreateFileInput>()
     }
     fn parameters_schema(&self) -> serde_json::Value {
-        serde_json::to_value(schemars::schema_for!(dtos::CreateFileInput)).unwrap()
+        json_schema::<dtos::CreateFileInput>()
     }
     fn is_enabled(&self, _: &AppConfig, _: &str) -> bool {
         true
@@ -521,12 +562,7 @@ impl Tool for CreateFileTool {
     fn execute(&self, ctx: &ToolContext, args: &str) -> Result<serde_json::Value, String> {
         let input: dtos::CreateFileInput =
             serde_json::from_str(args).map_err(|e| format!("Invalid args: {}", e))?;
-        let (path, readonly) = ctx
-            .resolve_virtual_path(&input.path, true)?
-            .ok_or_else(|| "Cannot perform this operation on the virtual root".to_string())?;
-        if readonly {
-            return Err("Cannot perform this operation on a read-only library".to_string());
-        }
+        let path = ctx.resolve_writable(&input.path)?;
         let producer = ctx.file_event_producer();
         crate::tools::filesystem::tool_create_file(
             &path.to_string_lossy(),
@@ -551,7 +587,7 @@ impl Tool for InsertLinesTool {
         TypeId::of::<dtos::InsertLinesInput>()
     }
     fn parameters_schema(&self) -> serde_json::Value {
-        serde_json::to_value(schemars::schema_for!(dtos::InsertLinesInput)).unwrap()
+        json_schema::<dtos::InsertLinesInput>()
     }
     fn is_enabled(&self, _: &AppConfig, _: &str) -> bool {
         true
@@ -559,12 +595,7 @@ impl Tool for InsertLinesTool {
     fn execute(&self, ctx: &ToolContext, args: &str) -> Result<serde_json::Value, String> {
         let input: dtos::InsertLinesInput =
             serde_json::from_str(args).map_err(|e| format!("Invalid args: {}", e))?;
-        let (path, readonly) = ctx
-            .resolve_virtual_path(&input.path, true)?
-            .ok_or_else(|| "Cannot perform this operation on the virtual root".to_string())?;
-        if readonly {
-            return Err("Cannot perform this operation on a read-only library".to_string());
-        }
+        let path = ctx.resolve_writable(&input.path)?;
         let producer = ctx.file_event_producer();
         crate::tools::filesystem::tool_insert_lines(
             &path.to_string_lossy(),
@@ -590,7 +621,7 @@ impl Tool for DeleteLinesTool {
         TypeId::of::<dtos::DeleteLinesInput>()
     }
     fn parameters_schema(&self) -> serde_json::Value {
-        serde_json::to_value(schemars::schema_for!(dtos::DeleteLinesInput)).unwrap()
+        json_schema::<dtos::DeleteLinesInput>()
     }
     fn is_enabled(&self, _: &AppConfig, _: &str) -> bool {
         true
@@ -598,12 +629,7 @@ impl Tool for DeleteLinesTool {
     fn execute(&self, ctx: &ToolContext, args: &str) -> Result<serde_json::Value, String> {
         let input: dtos::DeleteLinesInput =
             serde_json::from_str(args).map_err(|e| format!("Invalid args: {}", e))?;
-        let (path, readonly) = ctx
-            .resolve_virtual_path(&input.path, true)?
-            .ok_or_else(|| "Cannot perform this operation on the virtual root".to_string())?;
-        if readonly {
-            return Err("Cannot perform this operation on a read-only library".to_string());
-        }
+        let path = ctx.resolve_writable(&input.path)?;
         let producer = ctx.file_event_producer();
         crate::tools::filesystem::tool_delete_lines(
             &path.to_string_lossy(),
@@ -629,10 +655,13 @@ impl Tool for WebFetchTool {
         TypeId::of::<dtos::WebFetchInput>()
     }
     fn parameters_schema(&self) -> serde_json::Value {
-        serde_json::to_value(schemars::schema_for!(dtos::WebFetchInput)).unwrap()
+        json_schema::<dtos::WebFetchInput>()
     }
     fn is_enabled(&self, _: &AppConfig, _: &str) -> bool {
         true
+    }
+    fn safety(&self) -> crate::tools::Safety {
+        crate::tools::Safety::ReadOnly
     }
     fn execute(&self, _ctx: &ToolContext, args: &str) -> Result<serde_json::Value, String> {
         let input: dtos::WebFetchInput =
@@ -655,10 +684,13 @@ impl Tool for ReadYamlHeaderTool {
         TypeId::of::<dtos::ReadYamlHeaderInput>()
     }
     fn parameters_schema(&self) -> serde_json::Value {
-        serde_json::to_value(schemars::schema_for!(dtos::ReadYamlHeaderInput)).unwrap()
+        json_schema::<dtos::ReadYamlHeaderInput>()
     }
     fn is_enabled(&self, _: &AppConfig, _: &str) -> bool {
         true
+    }
+    fn safety(&self) -> crate::tools::Safety {
+        crate::tools::Safety::ReadOnly
     }
     fn execute(&self, ctx: &ToolContext, args: &str) -> Result<serde_json::Value, String> {
         let input: dtos::ReadYamlHeaderInput =
@@ -684,7 +716,7 @@ impl Tool for WriteYamlHeaderTool {
         TypeId::of::<dtos::WriteYamlHeaderInput>()
     }
     fn parameters_schema(&self) -> serde_json::Value {
-        serde_json::to_value(schemars::schema_for!(dtos::WriteYamlHeaderInput)).unwrap()
+        json_schema::<dtos::WriteYamlHeaderInput>()
     }
     fn is_enabled(&self, _: &AppConfig, _: &str) -> bool {
         true
@@ -692,12 +724,7 @@ impl Tool for WriteYamlHeaderTool {
     fn execute(&self, ctx: &ToolContext, args: &str) -> Result<serde_json::Value, String> {
         let input: dtos::WriteYamlHeaderInput =
             serde_json::from_str(args).map_err(|e| format!("Invalid args: {}", e))?;
-        let (path, readonly) = ctx
-            .resolve_virtual_path(&input.path, true)?
-            .ok_or_else(|| "Cannot perform this operation on the virtual root".to_string())?;
-        if readonly {
-            return Err("Cannot perform this operation on a read-only library".to_string());
-        }
+        let path = ctx.resolve_writable(&input.path)?;
         let producer = ctx.file_event_producer();
         crate::tools::yaml_header::tool_write_yaml_header(
             &path.to_string_lossy(),
@@ -725,10 +752,13 @@ impl Tool for WebSearchTool {
         TypeId::of::<dtos::WebSearchInput>()
     }
     fn parameters_schema(&self) -> serde_json::Value {
-        serde_json::to_value(schemars::schema_for!(dtos::WebSearchInput)).unwrap()
+        json_schema::<dtos::WebSearchInput>()
     }
     fn is_enabled(&self, config: &AppConfig, _: &str) -> bool {
         config.searxng_url.is_some()
+    }
+    fn safety(&self) -> crate::tools::Safety {
+        crate::tools::Safety::ReadOnly
     }
     fn execute(&self, ctx: &ToolContext, args: &str) -> Result<serde_json::Value, String> {
         let input: dtos::WebSearchInput =
@@ -756,10 +786,13 @@ impl Tool for SearchCalendarTool {
         TypeId::of::<dtos::SearchCalendarInput>()
     }
     fn parameters_schema(&self) -> serde_json::Value {
-        serde_json::to_value(schemars::schema_for!(dtos::SearchCalendarInput)).unwrap()
+        json_schema::<dtos::SearchCalendarInput>()
     }
     fn is_enabled(&self, config: &AppConfig, _: &str) -> bool {
         !config.caldav_clients.is_empty()
+    }
+    fn safety(&self) -> crate::tools::Safety {
+        crate::tools::Safety::ReadOnly
     }
     fn execute(&self, ctx: &ToolContext, args: &str) -> Result<serde_json::Value, String> {
         let input: dtos::SearchCalendarInput =
@@ -782,10 +815,13 @@ impl Tool for GetCalendarTool {
         TypeId::of::<dtos::GetCalendarInput>()
     }
     fn parameters_schema(&self) -> serde_json::Value {
-        serde_json::to_value(schemars::schema_for!(dtos::GetCalendarInput)).unwrap()
+        json_schema::<dtos::GetCalendarInput>()
     }
     fn is_enabled(&self, config: &AppConfig, _: &str) -> bool {
         !config.caldav_clients.is_empty()
+    }
+    fn safety(&self) -> crate::tools::Safety {
+        crate::tools::Safety::ReadOnly
     }
     fn execute(&self, ctx: &ToolContext, args: &str) -> Result<serde_json::Value, String> {
         let input: dtos::GetCalendarInput =
@@ -811,10 +847,13 @@ impl Tool for GetCalendarItemTool {
         TypeId::of::<dtos::GetCalendarItemInput>()
     }
     fn parameters_schema(&self) -> serde_json::Value {
-        serde_json::to_value(schemars::schema_for!(dtos::GetCalendarItemInput)).unwrap()
+        json_schema::<dtos::GetCalendarItemInput>()
     }
     fn is_enabled(&self, config: &AppConfig, _: &str) -> bool {
         !config.caldav_clients.is_empty()
+    }
+    fn safety(&self) -> crate::tools::Safety {
+        crate::tools::Safety::ReadOnly
     }
     fn execute(&self, ctx: &ToolContext, args: &str) -> Result<serde_json::Value, String> {
         let input: dtos::GetCalendarItemInput =
@@ -837,7 +876,7 @@ impl Tool for AddCalendarItemTool {
         TypeId::of::<dtos::AddCalendarItemInput>()
     }
     fn parameters_schema(&self) -> serde_json::Value {
-        serde_json::to_value(schemars::schema_for!(dtos::AddCalendarItemInput)).unwrap()
+        json_schema::<dtos::AddCalendarItemInput>()
     }
     fn is_enabled(&self, config: &AppConfig, _: &str) -> bool {
         !config.caldav_clients.is_empty()
@@ -863,7 +902,7 @@ impl Tool for UpdateCalendarItemTool {
         TypeId::of::<dtos::UpdateCalendarItemInput>()
     }
     fn parameters_schema(&self) -> serde_json::Value {
-        serde_json::to_value(schemars::schema_for!(dtos::UpdateCalendarItemInput)).unwrap()
+        json_schema::<dtos::UpdateCalendarItemInput>()
     }
     fn is_enabled(&self, config: &AppConfig, _: &str) -> bool {
         !config.caldav_clients.is_empty()
@@ -891,7 +930,7 @@ impl Tool for DeleteCalendarItemTool {
         TypeId::of::<dtos::DeleteCalendarItemInput>()
     }
     fn parameters_schema(&self) -> serde_json::Value {
-        serde_json::to_value(schemars::schema_for!(dtos::DeleteCalendarItemInput)).unwrap()
+        json_schema::<dtos::DeleteCalendarItemInput>()
     }
     fn is_enabled(&self, config: &AppConfig, _: &str) -> bool {
         !config.caldav_clients.is_empty()
@@ -917,10 +956,13 @@ impl Tool for SearchEmailTool {
         TypeId::of::<dtos::SearchEmailInput>()
     }
     fn parameters_schema(&self) -> serde_json::Value {
-        serde_json::to_value(schemars::schema_for!(dtos::SearchEmailInput)).unwrap()
+        json_schema::<dtos::SearchEmailInput>()
     }
     fn is_enabled(&self, config: &AppConfig, _: &str) -> bool {
         !config.jmap_clients.is_empty()
+    }
+    fn safety(&self) -> crate::tools::Safety {
+        crate::tools::Safety::ReadOnly
     }
     fn execute(&self, ctx: &ToolContext, args: &str) -> Result<serde_json::Value, String> {
         let input: dtos::SearchEmailInput =
@@ -929,16 +971,17 @@ impl Tool for SearchEmailTool {
         let page_size = input.page_size.unwrap_or(10).max(1);
         crate::tools::jmap::tool_search_email(
             ctx.config,
-            input.keyword.as_deref(),
-            input.folder.as_deref(),
-            input.start_date.as_deref(),
-            input.end_date.as_deref(),
-            input.from.as_deref(),
-            input.to.as_deref(),
-            input.is_unread,
-            input.is_flagged,
-            page,
-            page_size,
+            crate::tools::jmap::SearchEmailFilters {
+                keyword: input.keyword.as_deref(),
+                folder: input.folder.as_deref(),
+                start_date: input.start_date.as_deref(),
+                end_date: input.end_date.as_deref(),
+                from: input.from.as_deref(),
+                to: input.to.as_deref(),
+                is_unread: input.is_unread,
+                is_flagged: input.is_flagged,
+            },
+            crate::tools::jmap::SearchEmailPagination { page, page_size },
         )
         .map(|r| {
             serde_json::to_value(r).unwrap_or_else(|e| serde_json::json!({"error": e.to_string()}))
@@ -958,10 +1001,13 @@ impl Tool for GetEmailByIdTool {
         TypeId::of::<dtos::GetEmailByIdInput>()
     }
     fn parameters_schema(&self) -> serde_json::Value {
-        serde_json::to_value(schemars::schema_for!(dtos::GetEmailByIdInput)).unwrap()
+        json_schema::<dtos::GetEmailByIdInput>()
     }
     fn is_enabled(&self, config: &AppConfig, _: &str) -> bool {
         !config.jmap_clients.is_empty()
+    }
+    fn safety(&self) -> crate::tools::Safety {
+        crate::tools::Safety::ReadOnly
     }
     fn execute(&self, ctx: &ToolContext, args: &str) -> Result<serde_json::Value, String> {
         let input: dtos::GetEmailByIdInput =
@@ -984,7 +1030,7 @@ impl Tool for SendEmailTool {
         TypeId::of::<dtos::SendEmailInput>()
     }
     fn parameters_schema(&self) -> serde_json::Value {
-        serde_json::to_value(schemars::schema_for!(dtos::SendEmailInput)).unwrap()
+        json_schema::<dtos::SendEmailInput>()
     }
     fn is_enabled(&self, config: &AppConfig, _: &str) -> bool {
         !config.jmap_clients.is_empty()
@@ -1013,7 +1059,7 @@ impl Tool for SearchContactTool {
         TypeId::of::<dtos::SearchContactInput>()
     }
     fn parameters_schema(&self) -> serde_json::Value {
-        serde_json::to_value(schemars::schema_for!(dtos::SearchContactInput)).unwrap()
+        json_schema::<dtos::SearchContactInput>()
     }
     fn is_enabled(&self, config: &AppConfig, _: &str) -> bool {
         if config
@@ -1026,6 +1072,9 @@ impl Tool for SearchContactTool {
         } else {
             !config.jmap_clients.is_empty()
         }
+    }
+    fn safety(&self) -> crate::tools::Safety {
+        crate::tools::Safety::ReadOnly
     }
     fn execute(&self, ctx: &ToolContext, args: &str) -> Result<serde_json::Value, String> {
         let input: dtos::SearchContactInput =
@@ -1059,7 +1108,7 @@ impl Tool for AddContactTool {
         TypeId::of::<dtos::AddContactInput>()
     }
     fn parameters_schema(&self) -> serde_json::Value {
-        serde_json::to_value(schemars::schema_for!(dtos::AddContactInput)).unwrap()
+        json_schema::<dtos::AddContactInput>()
     }
     fn is_enabled(&self, config: &AppConfig, _: &str) -> bool {
         if config
@@ -1105,7 +1154,7 @@ impl Tool for GetContactTool {
         TypeId::of::<dtos::GetContactInput>()
     }
     fn parameters_schema(&self) -> serde_json::Value {
-        serde_json::to_value(schemars::schema_for!(dtos::GetContactInput)).unwrap()
+        json_schema::<dtos::GetContactInput>()
     }
     fn is_enabled(&self, config: &AppConfig, _: &str) -> bool {
         if config
@@ -1118,6 +1167,9 @@ impl Tool for GetContactTool {
         } else {
             !config.jmap_clients.is_empty()
         }
+    }
+    fn safety(&self) -> crate::tools::Safety {
+        crate::tools::Safety::ReadOnly
     }
     fn execute(&self, ctx: &ToolContext, args: &str) -> Result<serde_json::Value, String> {
         let input: dtos::GetContactInput =
@@ -1165,10 +1217,7 @@ impl Tool for CsvCreateTool {
         TypeId::of::<crate::tools::csv_db::schema::CreateCsvInput>()
     }
     fn parameters_schema(&self) -> serde_json::Value {
-        serde_json::to_value(schemars::schema_for!(
-            crate::tools::csv_db::schema::CreateCsvInput
-        ))
-        .unwrap()
+        json_schema::<crate::tools::csv_db::schema::CreateCsvInput>()
     }
     fn is_enabled(&self, _: &AppConfig, prompt: &str) -> bool {
         csv_tools_enabled(prompt)
@@ -1194,13 +1243,13 @@ impl Tool for CsvListTool {
         TypeId::of::<crate::tools::csv_db::schema::ListCsvInput>()
     }
     fn parameters_schema(&self) -> serde_json::Value {
-        serde_json::to_value(schemars::schema_for!(
-            crate::tools::csv_db::schema::ListCsvInput
-        ))
-        .unwrap()
+        json_schema::<crate::tools::csv_db::schema::ListCsvInput>()
     }
     fn is_enabled(&self, _: &AppConfig, prompt: &str) -> bool {
         csv_tools_enabled(prompt)
+    }
+    fn safety(&self) -> crate::tools::Safety {
+        crate::tools::Safety::ReadOnly
     }
     fn execute(&self, ctx: &ToolContext, args: &str) -> Result<serde_json::Value, String> {
         let input: crate::tools::csv_db::schema::ListCsvInput =
@@ -1223,10 +1272,7 @@ impl Tool for CsvAddRowsTool {
         TypeId::of::<crate::tools::csv_db::schema::AddRowsInput>()
     }
     fn parameters_schema(&self) -> serde_json::Value {
-        serde_json::to_value(schemars::schema_for!(
-            crate::tools::csv_db::schema::AddRowsInput
-        ))
-        .unwrap()
+        json_schema::<crate::tools::csv_db::schema::AddRowsInput>()
     }
     fn is_enabled(&self, _: &AppConfig, prompt: &str) -> bool {
         csv_tools_enabled(prompt)
@@ -1252,10 +1298,7 @@ impl Tool for CsvDeleteRowsTool {
         TypeId::of::<crate::tools::csv_db::schema::DeleteRowsInput>()
     }
     fn parameters_schema(&self) -> serde_json::Value {
-        serde_json::to_value(schemars::schema_for!(
-            crate::tools::csv_db::schema::DeleteRowsInput
-        ))
-        .unwrap()
+        json_schema::<crate::tools::csv_db::schema::DeleteRowsInput>()
     }
     fn is_enabled(&self, _: &AppConfig, prompt: &str) -> bool {
         csv_tools_enabled(prompt)
@@ -1281,13 +1324,13 @@ impl Tool for CsvQueryTool {
         TypeId::of::<crate::tools::csv_db::schema::QueryRequest>()
     }
     fn parameters_schema(&self) -> serde_json::Value {
-        serde_json::to_value(schemars::schema_for!(
-            crate::tools::csv_db::schema::QueryRequest
-        ))
-        .unwrap()
+        json_schema::<crate::tools::csv_db::schema::QueryRequest>()
     }
     fn is_enabled(&self, _: &AppConfig, prompt: &str) -> bool {
         csv_tools_enabled(prompt)
+    }
+    fn safety(&self) -> crate::tools::Safety {
+        crate::tools::Safety::ReadOnly
     }
     fn execute(&self, ctx: &ToolContext, args: &str) -> Result<serde_json::Value, String> {
         let input: crate::tools::csv_db::schema::QueryRequest =

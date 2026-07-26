@@ -511,31 +511,19 @@ pub fn render_markdown(
             } => {
                 // P0-2: Assign a task index to each task list item so
                 // checkbox toggles can be mapped back to the source.
+                render_inline(
+                    ui,
+                    &elems,
+                    needs_bullet,
+                    task_checked,
+                    indent,
+                    list_ordinal,
+                    blockquote_depth,
+                    task_index,
+                    pending_toggles,
+                );
                 if task_checked.is_some() {
-                    render_inline(
-                        ui,
-                        &elems,
-                        needs_bullet,
-                        task_checked,
-                        indent,
-                        list_ordinal,
-                        blockquote_depth,
-                        task_index,
-                        pending_toggles,
-                    );
                     task_index += 1;
-                } else {
-                    render_inline(
-                        ui,
-                        &elems,
-                        needs_bullet,
-                        task_checked,
-                        indent,
-                        list_ordinal,
-                        blockquote_depth,
-                        task_index,
-                        pending_toggles,
-                    );
                 }
             }
             RenderEvent::CodeBlock(content) => {

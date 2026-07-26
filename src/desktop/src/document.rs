@@ -170,7 +170,7 @@ mod tests {
         let doc = DocumentContent::parse(invalid_yaml);
         assert!(
             doc.front_matter.is_none(),
-            "DocumentContent::parse disagrees with utils::parse_front_matter: \
+            "DocumentContent::parse disagrees with utils::markdown::parse_front_matter: \
              editor sees front matter ({:?}) but tag extractor does not",
             doc.front_matter
         );

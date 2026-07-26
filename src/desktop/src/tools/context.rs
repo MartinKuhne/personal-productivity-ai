@@ -77,6 +77,20 @@ impl<'a> ToolContext<'a> {
         Ok(Some((lib.resolve(&vp.sub_path), lib.readonly)))
     }
 
+    /// Resolve a virtual path for a mutating tool. Bundles the three
+    /// lines every mutating tool needed: path resolution, the
+    /// virtual-root rejection, and the read-only-library rejection.
+    /// [`Self::resolve_virtual_path`] already returns an error when
+    /// the target library is read-only, so this helper is sufficient
+    /// on its own (no separate `if readonly` check needed at the
+    /// call site). Returns the absolute filesystem path on success.
+    pub fn resolve_writable(&self, vpath: &str) -> Result<PathBuf, String> {
+        match self.resolve_virtual_path(vpath, true)? {
+            Some((path, _readonly)) => Ok(path),
+            None => Err("Cannot perform this operation on the virtual root".to_string()),
+        }
+    }
+
     pub fn publish_file_event(&self, kind: FileEventKind, path: &Path) {
         let producer = FileEventProducer::new(self.file_event_bus);
         match kind {

@@ -195,19 +195,19 @@ impl PdfConverterWorker {
     }
 
     pub fn spawn(self) {
-        std::thread::spawn(move || {
-            if let Ok(rt) = tokio::runtime::Runtime::new() {
-                rt.block_on(async {
-                    while let Ok(path) = self.rx.recv() {
-                        let job = PdfConversionJob::new(path);
-                        if job.should_convert() {
-                            let output_md = job.output_md.clone();
-                            if job.execute(self.cmd.clone(), self.tx.clone()).await.is_ok() {
-                                self.bus.publish(FileEvent::discovered_one(output_md));
-                            }
-                        }
+        let PdfConverterWorker { rx, tx, bus, cmd } = self;
+        crate::background::spawn_path_worker(rx, move |path| {
+            let bus = bus.clone();
+            let tx = tx.clone();
+            let cmd = cmd.clone();
+            async move {
+                let job = PdfConversionJob::new(path);
+                if job.should_convert() {
+                    let output_md = job.output_md.clone();
+                    if job.execute(cmd, tx).await.is_ok() {
+                        bus.publish(FileEvent::discovered_one(output_md));
                     }
-                });
+                }
             }
         });
     }
