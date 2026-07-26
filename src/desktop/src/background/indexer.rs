@@ -332,8 +332,7 @@ mod tests {
         // is drained.
         drop(tx_work);
 
-        let mut parsed_paths: std::collections::HashSet<PathBuf> =
-            std::collections::HashSet::new();
+        let mut parsed_paths: std::collections::HashSet<PathBuf> = std::collections::HashSet::new();
         while let Ok(msg) = rx_gui.recv_timeout(std::time::Duration::from_secs(5)) {
             if let crate::messages::BackgroundMessage::FileParsed { path, .. } = msg {
                 parsed_paths.insert(path);

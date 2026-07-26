@@ -100,7 +100,10 @@ mod tests {
     }
     impl FailingWriter {
         fn new(fail_after: usize) -> Self {
-            Self { written: 0, fail_after }
+            Self {
+                written: 0,
+                fail_after,
+            }
         }
     }
     impl io::Write for FailingWriter {
