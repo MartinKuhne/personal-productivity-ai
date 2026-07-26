@@ -268,7 +268,7 @@ pub fn show_left_panel(app: &mut FastMdApp, parent_ui: &mut egui::Ui) {
                     };
                     for i in row_range {
                         let row = &rows[i];
-                        ui.push_id(&row.path, |ui| render_flat_row(ui, row, &mut ctx));
+                        ui.push_id((i, &row.path), |ui| render_flat_row(ui, row, &mut ctx));
                     }
                 });
 

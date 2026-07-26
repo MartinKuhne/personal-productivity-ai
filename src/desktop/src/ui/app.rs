@@ -759,13 +759,15 @@ impl FastMdApp {
     fn render_panels(&mut self, parent_ui: &mut egui::Ui) {
         // egui 0.35: each `*Panel` allocates itself from a parent
         // `&mut Ui`; pass the root `Ui` from `App::ui` straight
-        // through. The order is preserved from 0.27: top Ã¢â€ â€™ bottom Ã¢â€ â€™
-        // right Ã¢â€ â€™ left Ã¢â€ â€™ center.
-        show_top_panel(self, parent_ui);
-        show_bottom_panel(self, parent_ui);
-        show_right_panel(self, parent_ui);
-        show_left_panel(self, parent_ui);
-        show_center_panel(self, parent_ui);
+        // through. The order is preserved from 0.27: top → bottom →
+        // right → left → center. Isolate each panel in a dedicated ID scope
+        // so conditional panel rendering (e.g. right TOC panel) does not shift
+        // auto-ID stacks of sibling panels between passes.
+        parent_ui.push_id("top_panel_scope", |ui| show_top_panel(self, ui));
+        parent_ui.push_id("bottom_panel_scope", |ui| show_bottom_panel(self, ui));
+        parent_ui.push_id("right_panel_scope", |ui| show_right_panel(self, ui));
+        parent_ui.push_id("left_panel_scope", |ui| show_left_panel(self, ui));
+        parent_ui.push_id("center_panel_scope", |ui| show_center_panel(self, ui));
     }
 
     fn handle_deferred_actions(&mut self) {
