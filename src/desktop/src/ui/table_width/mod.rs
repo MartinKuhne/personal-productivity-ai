@@ -632,7 +632,6 @@ mod tests {
         let max: Vec<f32> = (0..n).map(|i| 50.0 + (i % 10) as f32).collect();
         let min: Vec<f32> = (0..n).map(|i| 10.0 + (i % 5) as f32).collect();
         let sum_max: f32 = max.iter().sum();
-        let sum_min: f32 = min.iter().sum();
 
         // Surplus: 2x sum_max.
         let d = ftwa(&max, &min, sum_max * 2.0);

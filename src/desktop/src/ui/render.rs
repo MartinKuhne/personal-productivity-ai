@@ -32,11 +32,34 @@ pub enum RenderEvent {
     CodeBlock(String),
     Heading {
         level: u32,
-        text: String,
+        /// Styled inline elements that make up the heading text. Captures
+        /// bold, italic, code, strikethrough, links, and images — the
+        /// previous `text: String` field discarded all of these, so
+        /// `# *italic*` rendered as a plain bold heading with the text
+        /// "italic" (the emphasis marker was silently dropped).
+        elems: Vec<InlineElem>,
     },
     Table(Vec<Vec<Vec<InlineElem>>>),
     Space(f32),
     Separator,
+}
+
+/// Concatenate the plain-text content of inline elements. Used to derive
+/// the scroll-id key and the ToC title from a heading's styled elements.
+pub fn heading_plain_text(elems: &[InlineElem]) -> String {
+    let mut out = String::new();
+    for e in elems {
+        match e {
+            InlineElem::Text(t, _) => out.push_str(t),
+            InlineElem::Link(_, t) => out.push_str(t),
+            InlineElem::Image(url) => {
+                out.push_str(&format!("[Image: {}]", url));
+            }
+            InlineElem::Html(h) => out.push_str(h),
+            InlineElem::SoftBreak => out.push(' '),
+        }
+    }
+    out
 }
 
 /// Purpose: Renders inline markdown elements.
@@ -137,27 +160,83 @@ fn render_code_block(ui: &mut egui::Ui, content: &str, _idx: &mut usize) {
 }
 
 /// Purpose: Renders a heading.
-/// Inputs: `ui` (mut), `title`, `level`, `scroll_to_id` (mut)
+/// Inputs: `ui` (mut), `elems` (heading inline elements), `level`, `scroll_to_id` (mut)
 /// Outputs: None
 /// Purity: Impure (modifies UI state). Thin adapter.
-fn render_heading(ui: &mut egui::Ui, title: &str, level: u32, scroll_to_id: &mut Option<egui::Id>) {
-    let trimmed = title.trim().to_string();
-    if !trimmed.is_empty() {
-        let heading_id = egui::Id::new(&trimmed);
-        let size = match level {
-            1 => 32.0,
-            2 => 24.0,
-            3 => 18.0,
-            4 => 14.0,
-            _ => 12.0,
-        };
-        let response = ui.heading(RichText::new(&trimmed).size(size).strong());
-        if *scroll_to_id == Some(heading_id) {
-            response.scroll_to_me(Some(egui::Align::Center));
-            *scroll_to_id = None;
-        }
-        ui.add_space(4.0);
+fn render_heading(
+    ui: &mut egui::Ui,
+    elems: &[InlineElem],
+    level: u32,
+    scroll_to_id: &mut Option<egui::Id>,
+) {
+    let plain = heading_plain_text(elems);
+    let trimmed = plain.trim().to_string();
+    if trimmed.is_empty() {
+        return;
     }
+    let heading_id = egui::Id::new(&trimmed);
+    let size = match level {
+        1 => 32.0,
+        2 => 24.0,
+        3 => 18.0,
+        4 => 14.0,
+        _ => 12.0,
+    };
+    // Render the styled inline elements with the heading's size + weight.
+    // Each InlineElem becomes its own label inside a horizontal flow, so
+    // bold/italic/code/strikethrough all survive into the rendered
+    // heading. The trailing space is added via the layout's natural
+    // padding; no explicit spacer needed because each label's contents
+    // already include their own whitespace.
+    let response = ui.horizontal(|ui| {
+        for elem in elems {
+            match elem {
+                InlineElem::Text(t, style) => {
+                    let mut rt = RichText::new(t).size(size).strong();
+                    if style.italic {
+                        rt = rt.italics();
+                    }
+                    if style.code {
+                        rt = rt
+                            .monospace()
+                            .background_color(egui::Color32::from_gray(40));
+                    }
+                    if style.strikethrough {
+                        rt = rt.strikethrough();
+                    }
+                    ui.label(rt);
+                }
+                InlineElem::Link(url, text) => {
+                    // Links inside a heading inherit the heading size and
+                    // weight (no .strong() override, since ui.hyperlink
+                    // uses its own styling).
+                    ui.hyperlink_to(egui::RichText::new(text).size(size), url);
+                }
+                InlineElem::Image(url) => {
+                    ui.label(RichText::new(format!("[Image: {}]", url)).size(size));
+                }
+                InlineElem::Html(h) => {
+                    ui.label(
+                        RichText::new(h)
+                            .size(size)
+                            .italics()
+                            .color(egui::Color32::GRAY),
+                    );
+                }
+                InlineElem::SoftBreak => {
+                    ui.label(RichText::new(" ").size(size));
+                }
+            }
+        }
+    });
+    // `ui.horizontal` returns a response wrapping the whole row; use
+    // its bounding rect for scroll-to-me so the whole heading scrolls
+    // into view (not just the first styled element).
+    if *scroll_to_id == Some(heading_id) {
+        response.response.scroll_to_me(Some(egui::Align::Center));
+        *scroll_to_id = None;
+    }
+    ui.add_space(4.0);
 }
 
 /// Purpose: Renders a single table cell, always emitting at least one widget.
@@ -392,7 +471,11 @@ pub fn render_yaml_table(ui: &mut egui::Ui, yaml: &serde_yaml::Value) {
 ///
 /// let events = parse_markdown_to_events("# Title\n\nhello *world*");
 /// // First event is the H1 heading.
-/// assert!(matches!(&events[0], RenderEvent::Heading { level: 1, text } if text == "Title"));
+/// let heading_text = match &events[0] {
+///     RenderEvent::Heading { elems, .. } => fastmd::ui::render::heading_plain_text(elems),
+///     _ => panic!("expected first event to be a heading"),
+/// };
+/// assert_eq!(heading_text, "Title");
 /// // The paragraph flushes inline elements with mixed styling.
 /// let para = events.iter().find_map(|e| match e {
 ///     RenderEvent::FlushInline { elems, needs_bullet: false, .. } if !elems.is_empty() => Some(elems),
@@ -416,7 +499,10 @@ pub fn parse_markdown_to_events(markdown_text: &str) -> Vec<RenderEvent> {
     let mut code_block_content = String::new();
     let mut in_heading = false;
     let mut heading_level = 0;
-    let mut heading_text = String::new();
+    // Headings preserve their inline elements (styled spans, links,
+    // images) instead of collapsing to plain text. See the `Heading`
+    // variant of `RenderEvent` for the motivation.
+    let mut heading_elems: Vec<InlineElem> = Vec::new();
 
     let mut buffered_inline: Vec<InlineElem> = Vec::new();
     let mut current_style = TextStyle::default();
@@ -491,12 +577,12 @@ pub fn parse_markdown_to_events(markdown_text: &str) -> Vec<RenderEvent> {
                     HeadingLevel::H5 => 5,
                     HeadingLevel::H6 => 6,
                 };
-                heading_text.clear();
+                heading_elems.clear();
             }
             Event::End(TagEnd::Heading(_)) => {
                 events.push(RenderEvent::Heading {
                     level: heading_level,
-                    text: heading_text.clone(),
+                    elems: heading_elems.clone(),
                 });
                 in_heading = false;
                 heading_level = 0;
@@ -658,10 +744,20 @@ pub fn parse_markdown_to_events(markdown_text: &str) -> Vec<RenderEvent> {
             Event::Text(text) => {
                 if in_code_block {
                     code_block_content.push_str(&text);
-                } else if in_heading {
-                    heading_text.push_str(&text);
                 } else if in_link {
-                    buffered_inline.push(InlineElem::Link(link_url.clone(), text.to_string()));
+                    // A link is its own inline element regardless of
+                    // whether we're inside a heading — a link inside a
+                    // heading stays a link.
+                    if in_heading {
+                        heading_elems.push(InlineElem::Link(link_url.clone(), text.to_string()));
+                    } else {
+                        buffered_inline.push(InlineElem::Link(link_url.clone(), text.to_string()));
+                    }
+                } else if in_heading {
+                    // Styled spans inside a heading. The renderer uses
+                    // these directly; `heading_plain_text` derives the
+                    // scroll-id key from them.
+                    heading_elems.push(InlineElem::Text(text.to_string(), current_style.clone()));
                 } else {
                     buffered_inline.push(InlineElem::Text(text.to_string(), current_style.clone()));
                 }
@@ -670,7 +766,9 @@ pub fn parse_markdown_to_events(markdown_text: &str) -> Vec<RenderEvent> {
                 if in_code_block {
                     code_block_content.push_str(&code);
                 } else if in_heading {
-                    heading_text.push_str(&code);
+                    let mut s = current_style.clone();
+                    s.code = true;
+                    heading_elems.push(InlineElem::Text(code.to_string(), s));
                 } else {
                     let mut s = current_style.clone();
                     s.code = true;
@@ -815,8 +913,8 @@ pub fn render_markdown(
             RenderEvent::CodeBlock(content) => {
                 render_code_block(ui, &content, &mut code_block_idx);
             }
-            RenderEvent::Heading { level, text } => {
-                render_heading(ui, &text, level, scroll_to_id);
+            RenderEvent::Heading { level, elems } => {
+                render_heading(ui, &elems, level, scroll_to_id);
             }
             RenderEvent::Table(cells) => {
                 render_table(ui, &cells);
@@ -944,9 +1042,10 @@ mod tests {
 
         // H1 heading must be present, regardless of position.
         assert!(
-            events.iter().any(
-                |e| matches!(e, RenderEvent::Heading { level: 1, text } if text == "Heading 1")
-            ),
+            events.iter().any(|e| matches!(
+                e,
+                RenderEvent::Heading { level: 1, elems } if heading_plain_text(elems) == "Heading 1"
+            )),
             "missing H1 'Heading 1' in {events:?}"
         );
 
@@ -1009,9 +1108,10 @@ mod tests {
         let events = parse_markdown_to_events(md);
         for (level, text) in [(1, "H1"), (2, "H2"), (3, "H3"), (4, "H4")] {
             assert!(
-                events
-                    .iter()
-                    .any(|e| matches!(e, RenderEvent::Heading { level: l, text: t } if *l == level && t == text)),
+                events.iter().any(|e| matches!(
+                    e,
+                    RenderEvent::Heading { level: l, elems } if *l == level && heading_plain_text(elems) == text
+                )),
                 "missing H{level} '{text}' in {events:?}"
             );
         }
@@ -1347,9 +1447,10 @@ mod tests {
         // Heading event, not be swallowed by the blockquote handling.
         let events = parse_markdown_to_events("> # heading in quote");
         assert!(
-            events
-                .iter()
-                .any(|e| matches!(e, RenderEvent::Heading { level: 1, text } if text.contains("heading in quote"))),
+            events.iter().any(|e| matches!(
+                e,
+                RenderEvent::Heading { level: 1, elems } if heading_plain_text(elems).contains("heading in quote")
+            )),
             "heading inside blockquote was lost: {events:?}"
         );
     }
@@ -1385,9 +1486,10 @@ mod tests {
         // Image in heading: `# ![alt](url)` — image must not be dropped.
         let events = parse_markdown_to_events("# ![alt text](https://x/y.png)");
         assert!(
-            events
-                .iter()
-                .any(|e| matches!(e, RenderEvent::Heading { level: 1, text } if text.contains("alt text"))),
+            events.iter().any(|e| matches!(
+                e,
+                RenderEvent::Heading { level: 1, elems } if heading_plain_text(elems).contains("alt text")
+            )),
             "image alt text lost from heading: {events:?}"
         );
 
@@ -1396,7 +1498,7 @@ mod tests {
         let headings: Vec<_> = events
             .iter()
             .filter_map(|e| match e {
-                RenderEvent::Heading { level, text } => Some((*level, text.clone())),
+                RenderEvent::Heading { level, elems } => Some((*level, heading_plain_text(elems))),
                 _ => None,
             })
             .collect();
@@ -1441,25 +1543,129 @@ mod tests {
     }
 
     // TODO(TDD follow-up): `# *italic*`, `# **bold**`, `# `code``,
-    // `# ~~strike~~`, `# [link](url)` all lose their inline
-    // formatting because `RenderEvent::Heading` stores `text: String`
-    // rather than `elems: Vec<InlineElem>`. The fix is to change the
-    // struct and the renderer; tracking the desired contract here so
-    // future work can express the assertion cleanly. Skipped in this
-    // PR — the refactor is broader than the high-value defect fixes.
+    /// `# *italic*`, `# **bold**`, `# \`code\``, `# ~~strike~~`, and
+    /// `# [link](url)` all previously lost their inline formatting
+    /// because `RenderEvent::Heading` stored `text: String` (plain
+    /// concatenation) rather than `elems: Vec<InlineElem>`. The struct
+    /// now carries the styled elements; the renderer renders each
+    /// span with the heading's size and weight. These tests pin the
+    /// expected contract end-to-end.
     #[test]
-    #[ignore = "tracked defect: heading inline formatting is lost; see TODO above"]
-    fn test_heading_preserves_inline_formatting() {
-        // Expected contract: `parse_markdown_to_events("# *hello*")`
-        // produces a `RenderEvent::Heading` whose elements carry the
-        // italic style, not just a plain `text: "hello"`.
+    fn test_heading_preserves_italic() {
         let events = parse_markdown_to_events("# *hello*");
-        let heading_event = events
+        let heading = events
             .iter()
-            .find(|e| matches!(e, RenderEvent::Heading { .. }));
+            .find_map(|e| {
+                if let RenderEvent::Heading { level, elems } = e {
+                    Some((*level, elems))
+                } else {
+                    None
+                }
+            })
+            .expect("must have a Heading event");
+        assert_eq!(heading.0, 1);
+        assert_eq!(heading_plain_text(&heading.1), "hello");
+        // At least one elem carries the italic style.
         assert!(
-            heading_event.is_some(),
-            "no heading event for `# *hello*`: {events:?}"
+            heading.1.iter().any(|e| matches!(
+                e,
+                InlineElem::Text(_, style) if style.italic
+            )),
+            "italic style not preserved in heading elems: {:?}",
+            heading.1
+        );
+    }
+
+    #[test]
+    fn test_heading_preserves_bold() {
+        let events = parse_markdown_to_events("# **loud**");
+        let heading = events
+            .iter()
+            .find_map(|e| {
+                if let RenderEvent::Heading { level, elems } = e {
+                    Some((*level, elems))
+                } else {
+                    None
+                }
+            })
+            .unwrap();
+        assert_eq!(heading.0, 1);
+        assert!(
+            heading.1.iter().any(|e| matches!(
+                e,
+                InlineElem::Text(_, style) if style.bold
+            )),
+            "bold style not preserved: {:?}",
+            heading.1
+        );
+    }
+
+    #[test]
+    fn test_heading_preserves_code() {
+        let events = parse_markdown_to_events("# `code` in heading");
+        let heading = events
+            .iter()
+            .find_map(|e| {
+                if let RenderEvent::Heading { level, elems } = e {
+                    Some((*level, elems))
+                } else {
+                    None
+                }
+            })
+            .unwrap();
+        assert!(
+            heading.1.iter().any(|e| matches!(
+                e,
+                InlineElem::Text(_, style) if style.code
+            )),
+            "code style not preserved: {:?}",
+            heading.1
+        );
+    }
+
+    #[test]
+    fn test_heading_preserves_link() {
+        let events = parse_markdown_to_events("# [click](https://example.com)");
+        let heading = events
+            .iter()
+            .find_map(|e| {
+                if let RenderEvent::Heading { level, elems } = e {
+                    Some((*level, elems))
+                } else {
+                    None
+                }
+            })
+            .unwrap();
+        assert!(
+            heading.1.iter().any(|e| matches!(
+                e,
+                InlineElem::Link(url, text) if url == "https://example.com" && text == "click"
+            )),
+            "link not preserved in heading: {:?}",
+            heading.1
+        );
+    }
+
+    #[test]
+    fn test_heading_preserves_strikethrough() {
+        let events = parse_markdown_to_events("# ~~old~~");
+        let heading = events
+            .iter()
+            .find_map(|e| {
+                if let RenderEvent::Heading { level, elems } = e {
+                    Some((*level, elems))
+                } else {
+                    None
+                }
+            })
+            .unwrap();
+        assert!(
+            heading.1.iter().any(|e| matches!(
+                e,
+                InlineElem::Text(_, style) if style.strikethrough
+            )),
+            "strikethrough not preserved: {:?}",
+            heading.1
         );
     }
 
@@ -1510,10 +1716,10 @@ mod tests {
 
             for event in &events {
                 match event {
-                    RenderEvent::Heading { level, text } => {
+                    RenderEvent::Heading { level, elems } => {
                         assert!(
                             (1..=6).contains(level),
-                            "heading level out of range: {level} in {text:?}"
+                            "heading level out of range: {level} in {elems:?}"
                         );
                     }
                     RenderEvent::Table(rows) => {
@@ -1723,7 +1929,11 @@ def foo():
                 let target_id = egui::Id::new("Target Heading");
                 let mut scroll_id = Some(target_id);
 
-                render_heading(ui, "Target Heading", 1, &mut scroll_id);
+                let elems = vec![InlineElem::Text(
+                    "Target Heading".to_string(),
+                    TextStyle::default(),
+                )];
+                render_heading(ui, &elems, 1, &mut scroll_id);
                 assert_eq!(
                     scroll_id, None,
                     "scroll_to_id should be cleared after scroll"
@@ -1731,7 +1941,7 @@ def foo():
 
                 // Empty title should not trigger scroll
                 let mut dummy_scroll = Some(target_id);
-                render_heading(ui, "", 1, &mut dummy_scroll);
+                render_heading(ui, &[], 1, &mut dummy_scroll);
                 assert_eq!(dummy_scroll, Some(target_id));
             });
         });
