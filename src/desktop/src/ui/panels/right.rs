@@ -54,46 +54,70 @@ pub fn calculate_font_size(level: usize) -> f32 {
 }
 
 pub fn show_right_panel(app: &mut FastMdApp, parent_ui: &mut egui::Ui) {
-    if should_show_panel(
+    // Compute visibility once, outside the panel closure, so the
+    // same value is used in every layout pass of this frame.
+    //
+    // The previous revision wrapped the entire `Panel::right` in
+    // `if should_show_panel(...)`, which made the panel itself
+    // appear and disappear on the select/deselect transition. That
+    // shifted the parent `Ui`'s auto-id counter (and therefore the
+    // auto-id of the `CentralPanel` and every widget inside it)
+    // every time the user opened or closed a file, flooding the
+    // log with `WARN egui::context: Widget rect ... changed id
+    // between passes` lines. Allocating the panel unconditionally
+    // and hiding its content with `ui.set_invisible()` when no
+    // file is selected keeps the parent `Ui`'s auto-id counter
+    // stable across the transition.
+    //
+    // Trade-off: the panel chrome (a 150-250px strip on the right)
+    // is visible even when no file is selected. The center panel
+    // therefore reserves that width whether or not the TOC is
+    // visible, which is what removes the warning. If the empty
+    // strip becomes a UX issue, the next step is to give
+    // `Panel::right` a custom rect allocation that collapses to
+    // zero width when invisible.
+    let toc_visible = should_show_panel(
         !app.tabs().toc.is_empty(),
         app.selection().selected_file().is_some(),
-    ) {
-        // egui 0.35 unified `SidePanel`/`TopBottomPanel` into `Panel`,
-        // and panels now allocate within a parent `&mut Ui`.
-        // `width_range` is now `size_range`.
-        Panel::right("toc_panel")
-            .size_range(150.0..=250.0)
-            .resizable(true)
-            .show(parent_ui, |ui| {
-                ui.add_space(4.0);
-                ui.heading(
-                    RichText::new("Table of Contents")
-                        .size(14.0)
-                        .strong()
-                        .color(egui::Color32::from_rgb(100, 200, 255)),
-                );
-                ui.add_space(4.0);
+    );
+    // egui 0.35 unified `SidePanel`/`TopBottomPanel` into `Panel`,
+    // and panels now allocate within a parent `&mut Ui`.
+    // `width_range` is now `size_range`.
+    Panel::right("toc_panel")
+        .size_range(150.0..=250.0)
+        .resizable(true)
+        .show(parent_ui, |ui| {
+            if !toc_visible {
+                ui.set_invisible();
+            }
+            ui.add_space(4.0);
+            ui.heading(
+                RichText::new("Table of Contents")
+                    .size(14.0)
+                    .strong()
+                    .color(egui::Color32::from_rgb(100, 200, 255)),
+            );
+            ui.add_space(4.0);
 
-                egui::ScrollArea::vertical()
-                    .id_salt("right_toc_scroll")
-                    .show(ui, |ui| {
-                        let toc_snapshot = app.tab_manager.toc.clone();
-                        for (i, entry) in toc_snapshot.iter().enumerate() {
-                            let indent = calculate_indent(entry.level as usize);
-                            ui.push_id((i, entry.id, "toc_item"), |ui| {
-                                ui.horizontal(|ui| {
-                                    ui.add_space(indent);
-                                    let label = egui::RichText::new(&entry.title)
-                                        .size(calculate_font_size(entry.level as usize));
-                                    if ui.selectable_label(false, label).clicked() {
-                                        app.tab_manager.scroll_to_header_id = Some(entry.id);
-                                    }
-                                })
-                            });
-                        }
-                    });
-            });
-    }
+            egui::ScrollArea::vertical()
+                .id_salt("right_toc_scroll")
+                .show(ui, |ui| {
+                    let toc_snapshot = app.tab_manager.toc.clone();
+                    for (i, entry) in toc_snapshot.iter().enumerate() {
+                        let indent = calculate_indent(entry.level as usize);
+                        ui.push_id((i, entry.id, "toc_item"), |ui| {
+                            ui.horizontal(|ui| {
+                                ui.add_space(indent);
+                                let label = egui::RichText::new(&entry.title)
+                                    .size(calculate_font_size(entry.level as usize));
+                                if ui.selectable_label(false, label).clicked() {
+                                    app.tab_manager.scroll_to_header_id = Some(entry.id);
+                                }
+                            })
+                        });
+                    }
+                });
+        });
 }
 
 #[cfg(test)]

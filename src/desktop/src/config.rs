@@ -336,10 +336,29 @@ pub fn get_config_path() -> PathBuf {
     }
 }
 
+/// Load the application configuration from the platform-default location
+/// (resolved via [`get_config_path`]). Thin wrapper around the path-based
+/// loader for production callers.
 pub fn load_config() -> AppConfig {
-    let config_path = get_config_path();
+    load_config_from_path(&get_config_path())
+}
+
+/// Load the application configuration from an explicit file path.
+///
+/// Behaviour:
+/// - If the file exists and parses cleanly, return the parsed config.
+/// - If the file exists but is unreadable or unparseable, log a `tracing`
+///   error and fall back to [`AppConfig::default`].
+/// - If the file does not exist, create the parent directory and write a
+///   default-config YAML so subsequent loads succeed, then return the
+///   default.
+///
+/// Taking an explicit path (rather than reading `APPDATA` from the
+/// environment) makes the function deterministic for tests and prevents
+/// parallel tests from racing on the process-wide environment.
+pub(crate) fn load_config_from_path(config_path: &Path) -> AppConfig {
     if config_path.exists() {
-        if let Ok(content) = std::fs::read_to_string(&config_path) {
+        if let Ok(content) = std::fs::read_to_string(config_path) {
             match serde_yaml::from_str::<AppConfig>(&content) {
                 Ok(config) => return config,
                 Err(err) => {
@@ -364,7 +383,7 @@ pub fn load_config() -> AppConfig {
         }
         let default_config = AppConfig::default();
         if let Ok(yaml_str) = serde_yaml::to_string(&default_config) {
-            let _ = std::fs::write(&config_path, yaml_str);
+            let _ = std::fs::write(config_path, yaml_str);
         }
     }
     AppConfig::default()
@@ -396,12 +415,9 @@ mod tests {
         let dir = tempdir().unwrap();
         let config_path = dir.path().join("fastmd").join("config.yaml");
 
-        // Temporarily override the config path
-        unsafe {
-            std::env::set_var("APPDATA", dir.path());
-        }
-
-        let _config = load_config();
+        // No global env mutation: pass the path explicitly so this test
+        // cannot race with any other test that also touches APPDATA.
+        let _config = load_config_from_path(&config_path);
 
         // Config file should have been created
         assert!(config_path.exists());
@@ -616,11 +632,7 @@ user_name: "TestUser"
 "#;
         std::fs::write(&config_path, yaml).unwrap();
 
-        unsafe {
-            std::env::set_var("APPDATA", dir.path());
-        }
-
-        let config = load_config();
+        let config = load_config_from_path(&config_path);
         assert_eq!(config.user_name, Some("TestUser".to_string()));
     }
 
@@ -755,11 +767,7 @@ user_name: "TestUser"
         std::fs::create_dir_all(config_path.parent().unwrap()).unwrap();
         std::fs::write(&config_path, "invalid: yaml: [").unwrap();
 
-        unsafe {
-            std::env::set_var("APPDATA", dir.path());
-        }
-
-        let config = load_config();
+        let config = load_config_from_path(&config_path);
         // Should return default
         assert!(config.user_name.is_none());
     }
@@ -794,5 +802,55 @@ user_name: "TestUser"
         let cfg = AppConfig::default();
         let s2 = format!("{:?}", cfg);
         assert!(s2.contains("AppConfig"));
+    }
+
+    /// Regression: previously the three `test_load_config_*` tests mutated
+    /// the process-wide `APPDATA` env var, and `load_config()` read it
+    /// back. Under the parallel test runner, another test could overwrite
+    /// `APPDATA` between the `set_var` and the `load_config` call, so
+    /// `test_load_config_invalid_file` would sometimes load a sibling
+    /// test's valid YAML and see `user_name: Some("TestUser")` instead of
+    /// the expected `None`.
+    ///
+    /// The refactor that moved the file I/O behind a path parameter
+    /// removed the shared state; this test pins that property by loading
+    /// N independent config files from N threads simultaneously and
+    /// asserting every thread sees its own data.
+    #[test]
+    fn test_load_config_from_path_is_isolated() {
+        use std::sync::{Arc, Barrier};
+        use std::thread;
+
+        const N: usize = 16;
+        let dir = tempdir().unwrap();
+        let barrier = Arc::new(Barrier::new(N));
+
+        let handles: Vec<_> = (0..N)
+            .map(|i| {
+                let dir = dir.path().to_path_buf();
+                let barrier = Arc::clone(&barrier);
+                thread::spawn(move || {
+                    let config_path = dir.join(format!("cfg_{i}.yaml"));
+                    let yaml = format!("user_name: \"User{i}\"\n");
+                    std::fs::write(&config_path, yaml).unwrap();
+
+                    // Maximise the race window: every worker waits here
+                    // so all N `load_config_from_path` calls happen
+                    // concurrently.
+                    barrier.wait();
+
+                    let config = load_config_from_path(&config_path);
+                    assert_eq!(
+                        config.user_name,
+                        Some(format!("User{i}")),
+                        "thread {i} saw the wrong config (cross-talk between loads)"
+                    );
+                })
+            })
+            .collect();
+
+        for h in handles {
+            h.join().expect("worker thread panicked");
+        }
     }
 }
