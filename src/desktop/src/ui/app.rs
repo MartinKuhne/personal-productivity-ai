@@ -1345,4 +1345,66 @@ mod tests {
              updates all_tags incrementally"
         );
     }
+
+    /// Regression: rendering a document with a Table of Contents (such as
+    /// `Laptop.md`) dynamically shows `Panel::right("toc_panel")`.
+    /// Previously `render_panels` allocated side panels directly from the
+    /// shared `parent_ui` without isolated `push_id` scopes, causing the
+    /// appearance/disappearance of the right TOC panel to shift the auto-ID
+    /// stacks of `left_panel` and `center_panel` between passes.
+    ///
+    /// This test verifies that `render_panels` produces a stable widget tree
+    /// (0 red-stroke ID-change warning shapes in egui) when transitioning
+    /// from an empty TOC to a non-empty TOC.
+    #[test]
+    fn test_render_panels_no_id_change_warnings_on_toc_transition() {
+        let ctx = egui::Context::default();
+        let mut app = create_test_app();
+        let file = PathBuf::from("Laptop.md");
+
+        app.tab_manager.tabs = vec![file.clone()];
+        *app.selection.selected_file_mut() = Some(file.clone());
+        app.layout.left_panel_width = Some(200.0);
+        app.layout.left_panel_dirty = false;
+
+        // Pass 1: Render panels without TOC (right panel hidden).
+        let _ = ctx.run_ui(Default::default(), |ui| {
+            app.render_panels(ui);
+        });
+
+        // Populate TOC (simulating rendering a document with headings like Laptop.md).
+        app.tab_manager.toc = vec![
+            crate::ui::ToCEntry {
+                title: "Introduction".to_string(),
+                level: 1,
+                id: egui::Id::new("intro"),
+            },
+            crate::ui::ToCEntry {
+                title: "Specifications".to_string(),
+                level: 2,
+                id: egui::Id::new("specs"),
+            },
+        ];
+
+        // Pass 2: Render panels with TOC active (right panel shown).
+        let output = ctx.run_ui(Default::default(), |ui| {
+            app.render_panels(ui);
+        });
+
+        let mut flagged = Vec::new();
+        for clipped in &output.shapes {
+            if let egui::Shape::Rect(rs) = &clipped.shape
+                && rs.stroke.color == egui::Color32::RED
+            {
+                flagged.push(rs.rect);
+            }
+        }
+
+        assert!(
+            flagged.is_empty(),
+            "render_panels must produce a stable widget tree when TOC panel activates, but egui flagged {} rect(s) with ID change warnings: {:?}",
+            flagged.len(),
+            flagged
+        );
+    }
 }
