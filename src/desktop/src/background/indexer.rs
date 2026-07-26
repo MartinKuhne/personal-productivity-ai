@@ -305,4 +305,44 @@ mod tests {
             let _ = w.join();
         }
     }
+
+    #[test]
+    fn test_spawn_workers_processes_all_items() {
+        // Functional correctness: every item pushed into the work
+        // channel must produce a matching `FileParsed` message.
+        // The existing `test_spawn_workers_creates_correct_number`
+        // only checked the handle count, not the actual work.
+        let dir = tempdir().unwrap();
+        let mut paths = Vec::new();
+        for i in 0..16 {
+            let p = dir.path().join(format!("file_{}.md", i));
+            std::fs::write(&p, "---\ntags: [a]\n---\nbody").unwrap();
+            paths.push(p);
+        }
+
+        let (tx_work, rx_work) = std::sync::mpsc::channel();
+        let rx_work = Arc::new(Mutex::new(rx_work));
+        let (tx_gui, rx_gui) = std::sync::mpsc::channel();
+
+        let workers = Indexer::spawn_workers(4, rx_work, tx_gui);
+        for p in &paths {
+            tx_work.send(p.clone()).unwrap();
+        }
+        // Closing the sender signals workers to exit once the queue
+        // is drained.
+        drop(tx_work);
+
+        let mut parsed_paths: std::collections::HashSet<PathBuf> = std::collections::HashSet::new();
+        while let Ok(msg) = rx_gui.recv_timeout(std::time::Duration::from_secs(5)) {
+            if let crate::messages::BackgroundMessage::FileParsed { path, .. } = msg {
+                parsed_paths.insert(path);
+            }
+        }
+        for w in workers {
+            let _ = w.join();
+        }
+
+        let expected: std::collections::HashSet<PathBuf> = paths.into_iter().collect();
+        assert_eq!(parsed_paths, expected);
+    }
 }

@@ -19,4 +19,3 @@ pub use render::{build_toc, render_markdown, render_yaml_table};
 pub use tree::{
     FlatRow, TREE_ROW_HEIGHT, TreeNodeContext, draw_tree_node, flatten_tree, render_flat_row,
 };
-mod render_tests;

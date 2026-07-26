@@ -38,9 +38,11 @@ pub fn discover_prompts(config: &AppConfig) -> Vec<PromptInfo> {
                 }
             };
 
-            let Some((yaml_val, body)) = parse_front_matter(&content) else {
+            let Some(fm) = parse_front_matter(&content) else {
                 continue;
             };
+            let yaml_val = &fm.yaml;
+            let body = fm.body;
 
             if !has_prompt_tag(&yaml_val) {
                 continue;
@@ -85,7 +87,7 @@ pub fn resolve_prompts(
                 }
             };
             let body = match parse_front_matter(&content) {
-                Some((_, body)) => body.trim().to_string(),
+                Some(fm) => fm.body.trim().to_string(),
                 None => content.trim().to_string(),
             };
             // Find the library this path belongs to.
@@ -137,9 +139,10 @@ fn has_prompt_tag(yaml_val: &Value) -> bool {
 /// Reads prompt content from file (body only, excluding YAML front matter).
 pub fn read_prompt_content(path: &Path) -> Result<String, std::io::Error> {
     let content = std::fs::read_to_string(path)?;
-    let Some((_, body)) = crate::utils::markdown::parse_front_matter(&content) else {
+    let Some(fm) = crate::utils::markdown::parse_front_matter(&content) else {
         return Ok(content); // No front matter, return whole content
     };
+    let body = fm.body;
     Ok(body.trim().to_string())
 }
 

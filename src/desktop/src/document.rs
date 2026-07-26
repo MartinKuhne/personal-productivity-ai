@@ -8,22 +8,46 @@ pub struct DocumentContent {
 
 impl DocumentContent {
     /// Parses a raw document string into front-matter and body.
+    ///
+    /// Delegates the front-matter detection to
+    /// [`crate::utils::markdown::parse_front_matter`] so the editor's
+    /// view of a file stays consistent with the rest of the crate
+    /// (tag extraction, YAML header tools, batch prompts). The original
+    /// front-matter text is preserved verbatim via `parse_front_matter`'s
+    /// `source` field, so the editor can round-trip on save without
+    /// re-parsing or re-splitting.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use fastmd::document::DocumentContent;
+    ///
+    /// let doc = DocumentContent::parse("---\ntitle: T\n---\nbody");
+    /// assert_eq!(doc.front_matter.as_deref(), Some("---\ntitle: T\n---"));
+    /// assert_eq!(doc.body, "\nbody");
+    ///
+    /// // No front matter → entire input is the body.
+    /// let doc2 = DocumentContent::parse("just body");
+    /// assert!(doc2.front_matter.is_none());
+    /// assert_eq!(doc2.body, "just body");
+    /// ```
+    /// view of a file stays consistent with the rest of the crate
+    /// (tag extraction, YAML header tools, batch prompts). The original
+    /// front-matter text is preserved verbatim via `parse_front_matter`'s
+    /// `source` field, so the editor can round-trip on save without
+    /// re-parsing or re-splitting.
     pub fn parse(raw: &str) -> Self {
         let content = raw.strip_prefix('\u{feff}').unwrap_or(raw);
 
-        // Match behavior similar to parse_front_matter where it must start with ---
-        if content.starts_with("---") || content.trim_start().starts_with("---") {
-            let parts: Vec<&str> = content.splitn(3, "---").collect();
-            if parts.len() == 3 && parts[0].trim().is_empty() {
-                // Return the exact front matter block, including delimiters
-                let original_fm = format!("---{}---", parts[1]);
-                let body = parts[2].to_string();
-
-                return Self {
-                    front_matter: Some(original_fm),
-                    body,
-                };
-            }
+        if let Some(fm) = crate::utils::markdown::parse_front_matter(content) {
+            // `source` is the literal slice between the `---` delimiters
+            // (preserved verbatim, no trimming). Re-wrapping it with the
+            // delimiters round-trips the file exactly.
+            let original_fm = format!("---{}---", fm.source);
+            return Self {
+                front_matter: Some(original_fm),
+                body: fm.body.to_string(),
+            };
         }
 
         Self {
@@ -113,5 +137,42 @@ mod tests {
             body: String::new(),
         };
         assert_eq!(doc.to_string(), "---\ntitle: Test\n---");
+    }
+
+    #[test]
+    fn test_parse_agrees_with_utils_parse_front_matter() {
+        // Two parsers exist for front matter in this crate:
+        //   1. `crate::utils::markdown::parse_front_matter` — validates YAML,
+        //      returns `None` if the YAML is malformed.
+        //   2. `DocumentContent::parse` (this fn) — splits on `---` without
+        //      validation; treats anything between delimiters as front matter.
+        //
+        // The editor's `open()` uses (2) to populate `original_front_matter`,
+        // while `crate::utils::tags::extract_tags_from_file` and other tools
+        // use (1) to extract structured data. If the two disagree, the editor
+        // and the tag extractor see different things in the same file.
+        //
+        // The expected contract: BOTH parsers either accept the input as
+        // front matter or reject it — and they agree on which.
+
+        let invalid_yaml = "---\ninvalid: [unclosed\n---\nBody";
+
+        // utils::markdown::parse_front_matter rejects this.
+        let utils_result = crate::utils::markdown::parse_front_matter(invalid_yaml);
+        assert!(
+            utils_result.is_none(),
+            "utils parser should reject malformed YAML; got {utils_result:?}"
+        );
+
+        // DocumentContent::parse should agree — also reject (front_matter: None,
+        // body contains the entire input).
+        let doc = DocumentContent::parse(invalid_yaml);
+        assert!(
+            doc.front_matter.is_none(),
+            "DocumentContent::parse disagrees with utils::parse_front_matter: \
+             editor sees front matter ({:?}) but tag extractor does not",
+            doc.front_matter
+        );
+        assert_eq!(doc.body, invalid_yaml);
     }
 }

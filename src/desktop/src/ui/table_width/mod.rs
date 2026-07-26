@@ -52,6 +52,19 @@ pub struct ColumnWidths {
 ///
 /// Returns `widths.len() == max_content.len()`. Empty input → empty output,
 /// no scroll needed.
+///
+/// # Panics
+///
+/// Panics if `available` is not finite (NaN or ±∞), if any element of
+/// `max_content` or `min_content` is not finite, or if any `max_content[j]
+/// < min_content[j]` (the FTWA invariant). Callers that receive
+/// measurements from external sources should validate finiteness first.
+///
+/// # Examples
+///
+/// (This function is not part of the public API; the `ui::table_width`
+/// module is intentionally private. See the unit tests in this file
+/// for usage examples covering all three regimes.)
 pub fn ftwa(max_content: &[f32], min_content: &[f32], available: f32) -> ColumnWidths {
     let n = max_content.len();
     if n == 0 {
@@ -65,6 +78,36 @@ pub fn ftwa(max_content: &[f32], min_content: &[f32], available: f32) -> ColumnW
         min_content.len(),
         "ftwa: max_content and min_content must have equal length"
     );
+
+    // NaN / infinity in input is a programmer error. Without this guard,
+    // NaN propagates silently through every arithmetic comparison (they
+    // all return false against NaN), causing the function to fall through
+    // to the deficit branch with NaN sum_max / deficit, eventually
+    // returning NaN-containing widths that crash egui's layout downstream.
+    assert!(
+        available.is_finite(),
+        "ftwa: available must be finite, got {available}"
+    );
+    assert!(
+        max_content.iter().all(|x| x.is_finite()),
+        "ftwa: max_content must be finite, got {max_content:?}"
+    );
+    assert!(
+        min_content.iter().all(|x| x.is_finite()),
+        "ftwa: min_content must be finite, got {min_content:?}"
+    );
+
+    // max_content[j] >= min_content[j] is an invariant (max-content is
+    // always at least the width of the longest unbreakable token).
+    // Without this check, a corrupted measurement (e.g. min longer than
+    // max) silently triggers the §3.6 fallback ("can't fit") instead of
+    // surfacing the data error to the caller.
+    for (j, (&mx, &mn)) in max_content.iter().zip(min_content.iter()).enumerate() {
+        assert!(
+            mx >= mn,
+            "ftwa: max_content[{j}] = {mx} < min_content[{j}] = {mn} (invariant violation)"
+        );
+    }
 
     let sum_max: f32 = max_content.iter().copied().sum();
     let sum_min: f32 = min_content.iter().copied().sum();
@@ -485,6 +528,134 @@ mod tests {
     }
 
     #[test]
+    fn nan_input_panics_instead_of_propagating() {
+        // NaN is a programmer error. The function must panic with a
+        // clear message, not silently return NaN-containing widths that
+        // would propagate into egui's layout (which then renders garbage
+        // or asserts deep inside).
+        let max_nan = [f32::NAN, 1.0];
+        let min = [0.0, 0.0];
+        let result_max = std::panic::catch_unwind(|| ftwa(&max_nan, &min, 1.0));
+        assert!(
+            result_max.is_err(),
+            "NaN in max_content must panic; got {result_max:?}"
+        );
+
+        let max = [1.0, 1.0];
+        let min_nan = [0.0, f32::NAN];
+        let result_min = std::panic::catch_unwind(|| ftwa(&max, &min_nan, 1.0));
+        assert!(
+            result_min.is_err(),
+            "NaN in min_content must panic; got {result_min:?}"
+        );
+
+        let max = [1.0, 1.0];
+        let min = [0.0, 0.0];
+        let result_avail = std::panic::catch_unwind(|| ftwa(&max, &min, f32::NAN));
+        assert!(
+            result_avail.is_err(),
+            "NaN available must panic; got {result_avail:?}"
+        );
+    }
+
+    #[test]
+    fn max_geq_min_invariant_panics_on_violation() {
+        // The function assumes max_content[j] >= min_content[j] for every
+        // column (slack = max - min must be non-negative). A violation
+        // means the caller fed in inconsistent measurements; the function
+        // must panic with a clear message rather than silently produce
+        // nonsensical widths.
+        let max = [5.0, 5.0];
+        let min = [10.0, 0.0]; // column 0: max < min
+        let result = std::panic::catch_unwind(|| ftwa(&max, &min, 5.0));
+        assert!(
+            result.is_err(),
+            "max_content[j] < min_content[j] must panic; got {result:?}"
+        );
+    }
+
+    #[test]
+    fn infinity_available_panics() {
+        // `f32::INFINITY` as `available` is a programmer error: it
+        // would lead to `f32::INFINITY * (m / sum_max)` in the surplus
+        // share, producing `ColumnWidths` with `f32::INFINITY` widths
+        // that egui's layout cannot use. Like NaN, must be caught at
+        // the boundary, not propagated.
+        let max = [100.0, 100.0];
+        let min = [50.0, 50.0];
+        let result = std::panic::catch_unwind(|| ftwa(&max, &min, f32::INFINITY));
+        assert!(
+            result.is_err(),
+            "available = INFINITY must panic; got {result:?}"
+        );
+
+        // NEG_INFINITY is also non-finite and must panic — it would
+        // also break the surplus/deficit comparison logic.
+        let result_neg = std::panic::catch_unwind(|| ftwa(&max, &min, f32::NEG_INFINITY));
+        assert!(
+            result_neg.is_err(),
+            "available = NEG_INFINITY must panic; got {result_neg:?}"
+        );
+    }
+
+    #[test]
+    fn single_column_table_works_in_all_regimes() {
+        // n = 1 exercises every code path (surplus, deficit, fallback)
+        // without the complexity of slack ordering between columns.
+        // All three regimes must produce a single valid width.
+
+        // Surplus: 1 column with max=50, available=200.
+        let d = ftwa(&[50.0], &[20.0], 200.0);
+        assert!(!d.needs_horizontal_scroll);
+        assert_eq!(d.widths.len(), 1);
+        assert!((d.widths[0] - 200.0).abs() < 1e-3, "got {}", d.widths[0]);
+
+        // Deficit: 1 column, available between sum_min and sum_max.
+        let d = ftwa(&[100.0], &[30.0], 60.0);
+        assert!(!d.needs_horizontal_scroll);
+        assert_eq!(d.widths.len(), 1);
+        assert!(d.widths[0] >= 30.0 - 1e-3, "below min: {}", d.widths[0]);
+
+        // Fallback: 1 column, available < sum_min.
+        let d = ftwa(&[100.0], &[80.0], 50.0);
+        assert!(d.needs_horizontal_scroll);
+        assert_eq!(d.widths, vec![80.0]);
+    }
+
+    #[test]
+    fn very_large_column_count_is_well_formed() {
+        // 1000 columns is a realistic worst case (a big CSV-as-table).
+        // The algorithm is O(n log n) due to the sort; this should
+        // complete in milliseconds, not seconds, and the output must
+        // be well-formed regardless of n.
+        let n = 1000;
+        let max: Vec<f32> = (0..n).map(|i| 50.0 + (i % 10) as f32).collect();
+        let min: Vec<f32> = (0..n).map(|i| 10.0 + (i % 5) as f32).collect();
+        let sum_max: f32 = max.iter().sum();
+
+        // Surplus: 2x sum_max.
+        let d = ftwa(&max, &min, sum_max * 2.0);
+        assert!(!d.needs_horizontal_scroll);
+        assert_eq!(d.widths.len(), n);
+        let sum: f32 = d.widths.iter().sum();
+        assert!((sum - sum_max * 2.0).abs() < 1.0, "Σ must equal available");
+
+        // Deficit: half of sum_max, well above sum_min.
+        let d = ftwa(&max, &min, sum_max * 0.5);
+        assert!(!d.needs_horizontal_scroll);
+        assert_eq!(d.widths.len(), n);
+        for (j, (&w, (&mx, &mn))) in d.widths.iter().zip(max.iter().zip(min.iter())).enumerate() {
+            assert!(w >= mn - 1e-3, "col {j}: width {w} below min {mn}");
+            assert!(w <= mx + 1e-3, "col {j}: width {w} above max {mx}");
+        }
+
+        // Fallback: tiny available.
+        let d = ftwa(&max, &min, 1.0);
+        assert!(d.needs_horizontal_scroll);
+        assert_eq!(d.widths, min);
+    }
+
+    #[test]
     fn three_columns_wraps_minimum_count() {
         // max = [60, 50, 40], min = [10, 10, 10]. sum_max = 150.
         // available = 110, deficit = 40. slacks = [50, 40, 30].
@@ -504,5 +675,149 @@ mod tests {
             .count();
         assert_eq!(wrapping, 1);
         assert!((d.widths.iter().sum::<f32>() - 110.0).abs() < 1e-3);
+    }
+
+    // --- Permutation matrix: similar vs dissimilar columns ×
+    //     fits viewport / requires word wrap / exceeds viewport ------
+
+    /// Helper: assert a `ColumnWidths` decision respects the actual FTWA contract:
+    /// - `sum == available` (G3), **except in the §3.6 fallback** where
+    ///   `widths == min_content` and the caller is expected to enable
+    ///   horizontal scrolling instead.
+    /// - no width below min (never-break-token invariant)
+    /// - `needs_horizontal_scroll` iff `available < sum_min` (the §3.6 condition)
+    ///
+    /// Note: the surplus regime *intentionally* grows columns beyond their
+    /// max-content (spare is distributed proportionally), so no upper bound
+    /// is asserted here — only the lower bound and the sum/scroll invariants.
+    fn assert_decision_invariants(d: &ColumnWidths, _max: &[f32], min: &[f32], available: f32) {
+        let sum: f32 = d.widths.iter().copied().sum();
+        if !d.needs_horizontal_scroll {
+            assert!(
+                (sum - available).abs() < 1e-3,
+                "Σ widths ({sum}) must equal available ({available}); got {:?}",
+                d.widths
+            );
+        }
+        for (j, (&w, &mn)) in d.widths.iter().zip(min.iter()).enumerate() {
+            assert!(w >= mn - 1e-3, "col {j}: width {w} below min {mn}");
+        }
+        let sum_min: f32 = min.iter().copied().sum();
+        assert_eq!(
+            d.needs_horizontal_scroll,
+            available < sum_min,
+            "needs_horizontal_scroll must match `available < sum_min` ({} < {} = {})",
+            available,
+            sum_min,
+            available < sum_min
+        );
+    }
+
+    /// 3 columns of similar width, viewport comfortably larger than max-content.
+    /// Every column gets max + proportional share of the spare.
+    #[test]
+    fn permutation_similar_columns_fit_viewport() {
+        let max = [200.0, 200.0, 200.0];
+        let min = [50.0, 50.0, 50.0];
+        let available = 700.0; // sum_max = 600, spare = 100
+        let d = ftwa(&max, &min, available);
+        assert_decision_invariants(&d, &max, &min, available);
+        assert!(!d.needs_horizontal_scroll);
+        // Surplus: spare split 1:1:1 → 33.33 each, plus max 200 → 233.33 each.
+        for (j, &w) in d.widths.iter().enumerate() {
+            assert!((w - 233.333).abs() < 0.5, "col {j}: {w} not ~233.33");
+        }
+    }
+
+    /// 3 columns of similar width, viewport forces word wrap on the deficit.
+    /// G2 exact: the minimum-cardinality wrap set is chosen. With equal
+    /// slacks of 200, covering the 400 deficit takes 2 columns, not 3.
+    /// The 3rd column stays at max.
+    #[test]
+    fn permutation_similar_columns_require_word_wrap() {
+        let max = [300.0, 300.0, 300.0];
+        let min = [100.0, 100.0, 100.0];
+        let available = 500.0; // sum_max = 900, sum_min = 300, deficit = 400
+        let d = ftwa(&max, &min, available);
+        assert_decision_invariants(&d, &max, &min, available);
+        assert!(!d.needs_horizontal_scroll);
+        // G2: only 2 of 3 columns wrap (slack 200 × 2 = 400 = deficit).
+        // The 3rd column (index 2) stays at max = 300.
+        let wrapping = d
+            .widths
+            .iter()
+            .zip(max.iter())
+            .filter(|&(w, m)| *w < *m - 1e-3)
+            .count();
+        assert_eq!(wrapping, 2, "G2: minimum-cardinality wrap set");
+        // The 3rd column is the one that stays at max.
+        assert_eq!(d.widths[2], 300.0, "col 2 pinned at max");
+        // The wrap set picks the smallest slack-desc prefix, which with
+        // equal slacks is {0, 1} → widths[0] == widths[1] == min = 100.
+        assert_eq!(d.widths[0], 100.0);
+        assert_eq!(d.widths[1], 100.0);
+    }
+
+    /// 3 columns of similar width, viewport below sum_min → §3.6 fallback.
+    /// Even at min-content, the table cannot fit; render must use ScrollArea.
+    #[test]
+    fn permutation_similar_columns_exceed_viewport() {
+        let max = [400.0, 400.0, 400.0];
+        let min = [300.0, 300.0, 300.0];
+        let available = 500.0; // sum_min = 900, way below
+        let d = ftwa(&max, &min, available);
+        assert_decision_invariants(&d, &max, &min, available);
+        assert!(d.needs_horizontal_scroll);
+        // §3.6 returns min-content widths exactly — never break a token.
+        assert_eq!(d.widths, vec![300.0, 300.0, 300.0]);
+    }
+
+    /// Dissimilar widths (narrow / wide / narrow) in a wide viewport.
+    /// Wide column gets most of the spare, narrow columns get a fair share.
+    #[test]
+    fn permutation_dissimilar_columns_fit_viewport() {
+        let max = [100.0, 500.0, 100.0];
+        let min = [30.0, 200.0, 30.0];
+        let available = 1000.0; // sum_max = 700, spare = 300
+        let d = ftwa(&max, &min, available);
+        assert_decision_invariants(&d, &max, &min, available);
+        assert!(!d.needs_horizontal_scroll);
+        // Spare split proportional to max: col 0/2 get 100/700*300 = 42.86,
+        // col 1 gets 500/700*300 = 214.29.
+        assert!((d.widths[0] - 142.86).abs() < 0.5, "narrow col 0");
+        assert!((d.widths[1] - 714.29).abs() < 0.5, "wide col 1");
+        assert!((d.widths[2] - 142.86).abs() < 0.5, "narrow col 2");
+    }
+
+    /// Dissimilar widths where the wide column is the only one with enough
+    /// slack to absorb the deficit. Narrow columns must stay pinned at max.
+    #[test]
+    fn permutation_dissimilar_columns_require_word_wrap() {
+        let max = [200.0, 800.0];
+        let min = [50.0, 300.0];
+        // sum_max = 1000, sum_min = 350. available = 700 → deficit = 300.
+        // slack = [150, 500]. col 1 alone has slack 500 ≥ 300 → wrap_set = {1}.
+        let available = 700.0;
+        let d = ftwa(&max, &min, available);
+        assert_decision_invariants(&d, &max, &min, available);
+        assert!(!d.needs_horizontal_scroll);
+        // Only the wide column wraps; narrow column pinned at max.
+        assert_eq!(d.widths[0], 200.0, "narrow col pinned at max");
+        assert!(d.widths[1] < 800.0, "wide col must shrink");
+        assert!(d.widths[1] >= 300.0, "wide col must not break token");
+    }
+
+    /// Dissimilar widths where even the wide column's min-content alone
+    /// exceeds the available viewport → §3.6 fallback.
+    #[test]
+    fn permutation_dissimilar_columns_exceed_viewport() {
+        let max = [300.0, 600.0];
+        let min = [200.0, 500.0];
+        let available = 500.0; // sum_min = 700, below
+        let d = ftwa(&max, &min, available);
+        assert_decision_invariants(&d, &max, &min, available);
+        assert!(d.needs_horizontal_scroll);
+        // min-content widths returned exactly.
+        assert_eq!(d.widths, vec![200.0, 500.0]);
     }
 }
