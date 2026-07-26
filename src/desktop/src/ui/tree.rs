@@ -255,214 +255,51 @@ pub fn flatten_tree(
 /// Render a single flat row with the same interaction logic as `draw_tree_node`
 /// but without recursion.
 pub fn render_flat_row(ui: &mut egui::Ui, row: &FlatRow, ctx: &mut TreeNodeContext<'_>) {
-    if row.is_dir {
-        let icon = if row.is_expanded { "▼ " } else { "▶ " };
-        let label = format!("{}{}", icon, row.name);
+    ui.push_id((&row.path, row.is_dir), |ui| {
+        if row.is_dir {
+            let icon = if row.is_expanded { "▼ " } else { "▶ " };
+            let label = format!("{}{}", icon, row.name);
 
-        ui.horizontal(|ui| {
-            // Clamp depth to prevent visual overflow on deeply nested paths
-            let clamped_depth = row.depth.min(50);
-            ui.add_space(clamped_depth as f32 * 18.0);
-            let response = ui.selectable_label(false, label);
-            if response.clicked() {
-                if row.is_expanded {
-                    ctx.expanded_dirs().remove(&row.path);
-                } else {
-                    ctx.expanded_dirs().insert(row.path.clone());
-                }
-                *ctx.selected_file() = None;
-                ctx.selected_files().clear();
-                *ctx.selected_dir() = Some(row.path.clone());
-                // Do NOT call mark_dirty() here: it would trigger a
-                // full calc_max_width re-shaping pass and, before the
-                // P1-4 fix, discard the user's manual panel resize
-                // on every directory click (see render-audit P1-4).
-            }
-            if response.double_clicked() {
-                // Toggle expansion on double-click.
-                // NOTE: egui fires `clicked()` AND `double_clicked()`
-                // for a double-click, so both branches run. The
-                // second toggle undoes the first → net no-op
-                // expansion (see render-audit P1-9). We intentionally
-                // do NOT toggle here; the single-click handler above
-                // already toggled. Double-click on a directory is a
-                // no-op for expansion — it does not also clear the
-                // file selection, matching the common file-explorer
-                // convention where double-click opens (for files)
-                // and is inert for folders.
-            }
-
-            response.context_menu(|ui| {
-                if ui.button("Show in File Explorer").clicked() {
-                    crate::ui::show_in_file_explorer(&row.path);
-                    ui.close();
-                }
-                if ui.button("Copy path").clicked() {
-                    ui.copy_text(row.path.to_string_lossy().to_string());
-                    ui.close();
-                }
-                if ui.button("Rename").clicked() {
-                    *ctx.file_to_rename() = Some(row.path.clone());
-                    *ctx.rename_new_name() = initial_rename_value(&row.path, &row.name);
-                    *ctx.rename_dialog_open() = true;
-                    ui.close();
-                }
-                if ui.button("Move").clicked() {
-                    *ctx.file_to_move() = Some(row.path.clone());
-                    *ctx.move_dialog_open() = true;
-                    ui.close();
-                }
-                if ui.button("Create Directory ...").clicked() {
-                    *ctx.create_dir_parent() = Some(row.path.clone());
-                    *ctx.create_dir_dialog_open() = true;
-                    ui.close();
-                }
-                if ui.button("New document").clicked() {
-                    let mut new_path = row.path.join("New document.md");
-                    if new_path.exists() {
-                        let now = chrono::Local::now();
-                        let date_str = now.format("%Y-%m-%d %H-%M-%S");
-                        new_path = row.path.join(format!("New document {}.md", date_str));
-                    }
-                    let yaml_header = "---\ntitle: New document\n---\n\n";
-                    if let Err(e) = std::fs::write(&new_path, yaml_header) {
-                        tracing::error!(
-                            name = "ui.file.create_failed",
-                            path = %new_path.display(),
-                            error = %e,
-                            "Failed to create new document."
-                        );
-                    } else if let Some(producer) = ctx.file_event_producer().as_ref() {
-                        producer.publish_discovered(&new_path);
-                    }
-                    ui.close();
-                }
-                if ui.button("Delete").clicked() {
-                    let path = row.path.clone();
-                    if let Err(e) = trash::delete(&path) {
-                        tracing::error!(
-                            name = "ui.directory.delete_failed",
-                            path = %path.display(),
-                            error = %e,
-                            "Failed to delete directory to trash."
-                        );
-                    }
-                    ui.close();
-                }
-            });
-        });
-    } else {
-        let is_selected = ctx.selected_files().contains(&row.path)
-            || ctx.selected_file().as_ref() == Some(&row.path);
-        let label = format!("  {}", row.name);
-
-        ui.horizontal(|ui| {
-            // Clamp depth to prevent visual overflow on deeply nested paths
-            let clamped_depth = row.depth.min(50);
-            ui.add_space(clamped_depth as f32 * 18.0);
-            let response = ui.selectable_label(is_selected, label);
-
-            if response.clicked() {
-                if ctx.modifiers().shift || ctx.modifiers().ctrl || ctx.modifiers().command {
-                    if ctx.selected_files().contains(&row.path) {
-                        ctx.selected_files().remove(&row.path);
-                        if ctx.selected_file().as_ref() == Some(&row.path) {
-                            *ctx.selected_file() = None;
-                        }
+            ui.horizontal(|ui| {
+                // Clamp depth to prevent visual overflow on deeply nested paths
+                let clamped_depth = row.depth.min(50);
+                ui.add_space(clamped_depth as f32 * 18.0);
+                let response = ui.selectable_label(false, label);
+                if response.clicked() {
+                    if row.is_expanded {
+                        ctx.expanded_dirs().remove(&row.path);
                     } else {
-                        ctx.selected_files().insert(row.path.clone());
-                        *ctx.selected_file() = Some(row.path.clone());
+                        ctx.expanded_dirs().insert(row.path.clone());
                     }
-                } else {
+                    *ctx.selected_file() = None;
                     ctx.selected_files().clear();
-                    ctx.selected_files().insert(row.path.clone());
-                    *ctx.selected_file() = Some(row.path.clone());
-                    if !ctx.tabs().contains(&row.path) {
-                        ctx.tabs().push(row.path.clone());
-                    }
+                    *ctx.selected_dir() = Some(row.path.clone());
+                    // Do NOT call mark_dirty() here: it would trigger a
+                    // full calc_max_width re-shaping pass and, before the
+                    // P1-4 fix, discard the user's manual panel resize
+                    // on every directory click (see render-audit P1-4).
                 }
-            }
-
-            if response.double_clicked() {
-                if ctx.inline_editor_enabled() {
-                    *ctx.open_editor() = Some(row.path.clone());
-                } else {
-                    crate::ui::open_in_system_editor(&row.path);
+                if response.double_clicked() {
+                    // Toggle expansion on double-click.
+                    // NOTE: egui fires `clicked()` AND `double_clicked()`
+                    // for a double-click, so both branches run. The
+                    // second toggle undoes the first → net no-op
+                    // expansion (see render-audit P1-9). We intentionally
+                    // do NOT toggle here; the single-click handler above
+                    // already toggled. Double-click on a directory is a
+                    // no-op for expansion — it does not also clear the
+                    // file selection, matching the common file-explorer
+                    // convention where double-click opens (for files)
+                    // and is inert for folders.
                 }
-            }
 
-            response.context_menu(|ui| {
-                if ctx.selected_files().len() > 1 && ctx.selected_files().contains(&row.path) {
-                    if ui.button("Merge").clicked() {
-                        let files: HashSet<_> = ctx.selected_files().iter().cloned().collect();
-                        let prompt = build_merge_prompt(ctx.content_libraries(), &files);
-                        *ctx.submit_prompt() = Some(prompt);
-                        ui.close();
-                    }
-                    if ui.button("Delete").clicked() {
-                        let files: Vec<_> = ctx.selected_files().iter().cloned().collect();
-                        for file in files.iter() {
-                            if let Err(e) = trash::delete(file) {
-                                tracing::error!(
-                                    name = "ui.file.multi_delete_failed",
-                                    path = %file.display(),
-                                    error = %e,
-                                    "Failed to delete file to trash during multi-selection."
-                                );
-                            } else if let Some(producer) = ctx.file_event_producer().as_ref() {
-                                producer.publish_removed(file);
-                            }
-                        }
-                        ctx.selected_files().clear();
-                        ui.close();
-                    }
-                } else {
-                    if ui.button("Edit").clicked() {
-                        if ctx.inline_editor_enabled() {
-                            *ctx.open_editor() = Some(row.path.clone());
-                        } else {
-                            crate::ui::open_in_system_editor(&row.path);
-                        }
-                        ui.close();
-                    }
+                response.context_menu(|ui| {
                     if ui.button("Show in File Explorer").clicked() {
                         crate::ui::show_in_file_explorer(&row.path);
                         ui.close();
                     }
                     if ui.button("Copy path").clicked() {
                         ui.copy_text(row.path.to_string_lossy().to_string());
-                        ui.close();
-                    }
-                    if ui.button("Format Markdown").clicked() {
-                        let now = chrono::Local::now();
-                        let date_str = now.to_rfc3339();
-                        *ctx.submit_prompt() = Some(crate::ui::generate_format_prompt(&date_str));
-                        ui.close();
-                    }
-                    if ui.button("Run as prompt").clicked() {
-                        if let Ok(content) = std::fs::read_to_string(&row.path) {
-                            *ctx.submit_prompt() = Some(content);
-                        } else {
-                            tracing::error!(
-                                name = "ui.file.run_as_prompt_failed",
-                                path = %row.path.display(),
-                                "Failed to read file content to run as prompt."
-                            );
-                        }
-                        ui.close();
-                    }
-                    if ui.button("Print").clicked() {
-                        let path_to_print = row.path.clone();
-                        if let Some(tx) = ctx.bg_tx().clone() {
-                            let job = PrintJob::new(path_to_print.clone());
-                            let _ = execute_print_blocking(job, Some(tx));
-                        } else {
-                            tracing::warn!(
-                                name = "ui.file.print_no_channel",
-                                path = %path_to_print.display(),
-                                "Print requested but no background channel available"
-                            );
-                        }
                         ui.close();
                     }
                     if ui.button("Rename").clicked() {
@@ -476,24 +313,190 @@ pub fn render_flat_row(ui: &mut egui::Ui, row: &FlatRow, ctx: &mut TreeNodeConte
                         *ctx.move_dialog_open() = true;
                         ui.close();
                     }
+                    if ui.button("Create Directory ...").clicked() {
+                        *ctx.create_dir_parent() = Some(row.path.clone());
+                        *ctx.create_dir_dialog_open() = true;
+                        ui.close();
+                    }
+                    if ui.button("New document").clicked() {
+                        let mut new_path = row.path.join("New document.md");
+                        if new_path.exists() {
+                            let now = chrono::Local::now();
+                            let date_str = now.format("%Y-%m-%d %H-%M-%S");
+                            new_path = row.path.join(format!("New document {}.md", date_str));
+                        }
+                        let yaml_header = "---\ntitle: New document\n---\n\n";
+                        if let Err(e) = std::fs::write(&new_path, yaml_header) {
+                            tracing::error!(
+                                name = "ui.file.create_failed",
+                                path = %new_path.display(),
+                                error = %e,
+                                "Failed to create new document."
+                            );
+                        } else if let Some(producer) = ctx.file_event_producer().as_ref() {
+                            producer.publish_discovered(&new_path);
+                        }
+                        ui.close();
+                    }
                     if ui.button("Delete").clicked() {
                         let path = row.path.clone();
                         if let Err(e) = trash::delete(&path) {
                             tracing::error!(
-                                name = "ui.file.delete_failed",
+                                name = "ui.directory.delete_failed",
                                 path = %path.display(),
                                 error = %e,
-                                "Failed to delete file to trash."
+                                "Failed to delete directory to trash."
                             );
-                        } else if let Some(producer) = ctx.file_event_producer().as_ref() {
-                            producer.publish_removed(&path);
                         }
                         ui.close();
                     }
-                }
+                });
             });
-        });
-    }
+        } else {
+            let is_selected = ctx.selected_files().contains(&row.path)
+                || ctx.selected_file().as_ref() == Some(&row.path);
+            let label = format!("  {}", row.name);
+
+            ui.horizontal(|ui| {
+                // Clamp depth to prevent visual overflow on deeply nested paths
+                let clamped_depth = row.depth.min(50);
+                ui.add_space(clamped_depth as f32 * 18.0);
+                let response = ui.selectable_label(is_selected, label);
+
+                if response.clicked() {
+                    if ctx.modifiers().shift || ctx.modifiers().ctrl || ctx.modifiers().command {
+                        if ctx.selected_files().contains(&row.path) {
+                            ctx.selected_files().remove(&row.path);
+                            if ctx.selected_file().as_ref() == Some(&row.path) {
+                                *ctx.selected_file() = None;
+                            }
+                        } else {
+                            ctx.selected_files().insert(row.path.clone());
+                            *ctx.selected_file() = Some(row.path.clone());
+                        }
+                    } else {
+                        ctx.selected_files().clear();
+                        ctx.selected_files().insert(row.path.clone());
+                        *ctx.selected_file() = Some(row.path.clone());
+                        if !ctx.tabs().contains(&row.path) {
+                            ctx.tabs().push(row.path.clone());
+                        }
+                    }
+                }
+
+                if response.double_clicked() {
+                    if ctx.inline_editor_enabled() {
+                        *ctx.open_editor() = Some(row.path.clone());
+                    } else {
+                        crate::ui::open_in_system_editor(&row.path);
+                    }
+                }
+
+                response.context_menu(|ui| {
+                    if ctx.selected_files().len() > 1 && ctx.selected_files().contains(&row.path) {
+                        if ui.button("Merge").clicked() {
+                            let files: HashSet<_> = ctx.selected_files().iter().cloned().collect();
+                            let prompt = build_merge_prompt(ctx.content_libraries(), &files);
+                            *ctx.submit_prompt() = Some(prompt);
+                            ui.close();
+                        }
+                        if ui.button("Delete").clicked() {
+                            let files: Vec<_> = ctx.selected_files().iter().cloned().collect();
+                            for file in files.iter() {
+                                if let Err(e) = trash::delete(file) {
+                                    tracing::error!(
+                                        name = "ui.file.multi_delete_failed",
+                                        path = %file.display(),
+                                        error = %e,
+                                        "Failed to delete file to trash during multi-selection."
+                                    );
+                                } else if let Some(producer) = ctx.file_event_producer().as_ref() {
+                                    producer.publish_removed(file);
+                                }
+                            }
+                            ctx.selected_files().clear();
+                            ui.close();
+                        }
+                    } else {
+                        if ui.button("Edit").clicked() {
+                            if ctx.inline_editor_enabled() {
+                                *ctx.open_editor() = Some(row.path.clone());
+                            } else {
+                                crate::ui::open_in_system_editor(&row.path);
+                            }
+                            ui.close();
+                        }
+                        if ui.button("Show in File Explorer").clicked() {
+                            crate::ui::show_in_file_explorer(&row.path);
+                            ui.close();
+                        }
+                        if ui.button("Copy path").clicked() {
+                            ui.copy_text(row.path.to_string_lossy().to_string());
+                            ui.close();
+                        }
+                        if ui.button("Format Markdown").clicked() {
+                            let now = chrono::Local::now();
+                            let date_str = now.to_rfc3339();
+                            *ctx.submit_prompt() =
+                                Some(crate::ui::generate_format_prompt(&date_str));
+                            ui.close();
+                        }
+                        if ui.button("Run as prompt").clicked() {
+                            if let Ok(content) = std::fs::read_to_string(&row.path) {
+                                *ctx.submit_prompt() = Some(content);
+                            } else {
+                                tracing::error!(
+                                    name = "ui.file.run_as_prompt_failed",
+                                    path = %row.path.display(),
+                                    "Failed to read file content to run as prompt."
+                                );
+                            }
+                            ui.close();
+                        }
+                        if ui.button("Print").clicked() {
+                            let path_to_print = row.path.clone();
+                            if let Some(tx) = ctx.bg_tx().clone() {
+                                let job = PrintJob::new(path_to_print.clone());
+                                let _ = execute_print_blocking(job, Some(tx));
+                            } else {
+                                tracing::warn!(
+                                    name = "ui.file.print_no_channel",
+                                    path = %path_to_print.display(),
+                                    "Print requested but no background channel available"
+                                );
+                            }
+                            ui.close();
+                        }
+                        if ui.button("Rename").clicked() {
+                            *ctx.file_to_rename() = Some(row.path.clone());
+                            *ctx.rename_new_name() = initial_rename_value(&row.path, &row.name);
+                            *ctx.rename_dialog_open() = true;
+                            ui.close();
+                        }
+                        if ui.button("Move").clicked() {
+                            *ctx.file_to_move() = Some(row.path.clone());
+                            *ctx.move_dialog_open() = true;
+                            ui.close();
+                        }
+                        if ui.button("Delete").clicked() {
+                            let path = row.path.clone();
+                            if let Err(e) = trash::delete(&path) {
+                                tracing::error!(
+                                    name = "ui.file.delete_failed",
+                                    path = %path.display(),
+                                    error = %e,
+                                    "Failed to delete file to trash."
+                                );
+                            } else if let Some(producer) = ctx.file_event_producer().as_ref() {
+                                producer.publish_removed(&path);
+                            }
+                            ui.close();
+                        }
+                    }
+                });
+            });
+        }
+    });
 }
 
 pub fn draw_tree_node(ui: &mut egui::Ui, node: &TreeNode, ctx: &mut TreeNodeContext<'_>) {
@@ -1026,5 +1029,41 @@ mod tests {
         );
         assert!(prompt.contains("alpha.md"), "prompt should list alpha.md");
         assert!(prompt.contains("beta.md"), "prompt should list beta.md");
+    }
+
+    /// TDD Test: Verify that render_flat_row produces identical, stable egui IDs
+    /// for a given file/dir path regardless of virtual scroll window slice index.
+    #[test]
+    fn test_tree_row_id_stability_independent_of_slice_index() {
+        let ctx = egui::Context::default();
+        let row = FlatRow {
+            path: PathBuf::from("Laptop.md"),
+            name: "Laptop.md".to_string(),
+            depth: 0,
+            is_dir: false,
+            is_expanded: false,
+        };
+
+        let mut id_pass1 = None;
+        let mut id_pass2 = None;
+
+        // Render pass 1
+        let _ = ctx.run_ui(Default::default(), |ui| {
+            ui.push_id((&row.path, row.is_dir), |ui| {
+                id_pass1 = Some(ui.id());
+            });
+        });
+
+        // Render pass 2
+        let _ = ctx.run_ui(Default::default(), |ui| {
+            ui.push_id((&row.path, row.is_dir), |ui| {
+                id_pass2 = Some(ui.id());
+            });
+        });
+
+        assert_eq!(
+            id_pass1, id_pass2,
+            "Row ID must be strictly determined by row.path and is_dir, staying identical across passes"
+        );
     }
 }

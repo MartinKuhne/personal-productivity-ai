@@ -1,69 +1,12 @@
-//! Pulldown-cmark event-driven markdown renderer Ã¢â‚¬â€ emits egui widgets for headings, paragraphs, code blocks, lists, tables, links, and images.
+//! Pulldown-cmark event-driven markdown renderer — emits egui widgets for headings, paragraphs, code blocks, lists, tables, links, and images.
 
 use eframe::egui;
 use egui::RichText;
 
-#[derive(Clone, Debug, PartialEq)]
-pub enum InlineElem {
-    Text(String, TextStyle),
-    Link(String, String),
-    Image(String),
-    Html(String),
-    SoftBreak,
-}
-
-#[derive(Clone, Default, Debug, PartialEq)]
-pub struct TextStyle {
-    pub bold: bool,
-    pub italic: bool,
-    pub code: bool,
-    pub strikethrough: bool,
-}
-
-#[derive(Clone, Debug, PartialEq)]
-pub enum RenderEvent {
-    FlushInline {
-        elems: Vec<InlineElem>,
-        needs_bullet: bool,
-        task_checked: Option<bool>,
-        indent: usize,
-        /// Ordinal for ordered list items. `None` → bullet, `Some(n)` → `"n. "`.
-        list_ordinal: Option<u64>,
-        /// Blockquote nesting depth. `0` → not inside a blockquote.
-        blockquote_depth: usize,
-    },
-    CodeBlock(String),
-    Heading {
-        level: u32,
-        /// Styled inline elements that make up the heading text. Captures
-        /// bold, italic, code, strikethrough, links, and images Ã¢â‚¬â€ the
-        /// previous `text: String` field discarded all of these, so
-        /// `# *italic*` rendered as a plain bold heading with the text
-        /// "italic" (the emphasis marker was silently dropped).
-        elems: Vec<InlineElem>,
-    },
-    Table(Vec<Vec<Vec<InlineElem>>>),
-    Space(f32),
-    Separator,
-}
-
-/// Concatenate the plain-text content of inline elements. Used to derive
-/// the scroll-id key and the ToC title from a heading's styled elements.
-pub fn heading_plain_text(elems: &[InlineElem]) -> String {
-    let mut out = String::new();
-    for e in elems {
-        match e {
-            InlineElem::Text(t, _) => out.push_str(t),
-            InlineElem::Link(_, t) => out.push_str(t),
-            InlineElem::Image(url) => {
-                out.push_str(&format!("[Image: {}]", url));
-            }
-            InlineElem::Html(h) => out.push_str(h),
-            InlineElem::SoftBreak => out.push(' '),
-        }
-    }
-    out
-}
+pub use crate::markdown::{
+    InlineElem, RenderEvent, TextStyle, apply_task_toggle, build_toc, heading_plain_text,
+    parse_markdown_to_events, parse_yaml_to_pairs,
+};
 
 /// Purpose: Renders inline markdown elements.
 /// Inputs: `ui` (mut), `elems`, `needs_bullet`, `task_checked`, `indent`, `wrap`
@@ -93,20 +36,7 @@ fn render_inline(
         let depth = blockquote_depth as f32;
         let total_indent = depth * (bar_width + bar_gap);
         let bar_color = egui::Color32::from_rgb(100, 100, 110);
-        let content = |ui: &mut egui::Ui| {
-            // Draw quote bars for each nesting level.
-            let top_left = ui.cursor().min;
-            let height = ui.available_height();
-            for i in 0..blockquote_depth {
-                let x = top_left.x + i as f32 * (bar_width + bar_gap);
-                ui.painter().line_segment(
-                    [
-                        egui::pos2(x, top_left.y),
-                        egui::pos2(x, top_left.y + height),
-                    ],
-                    egui::Stroke::new(bar_width, bar_color),
-                );
-            }
+        let response = ui.horizontal_wrapped(|ui| {
             ui.add_space(total_indent);
             render_inline_inner(
                 ui,
@@ -118,8 +48,20 @@ fn render_inline(
                 task_index,
                 pending_toggles,
             );
-        };
-        ui.horizontal_wrapped(content);
+        });
+        let rect = response.response.rect;
+        let top_left = rect.min;
+        let height = rect.height().max(14.0);
+        for i in 0..blockquote_depth {
+            let x = top_left.x + i as f32 * (bar_width + bar_gap);
+            ui.painter().line_segment(
+                [
+                    egui::pos2(x, top_left.y),
+                    egui::pos2(x, top_left.y + height),
+                ],
+                egui::Stroke::new(bar_width, bar_color),
+            );
+        }
         return;
     }
 
@@ -224,15 +166,16 @@ fn render_code_block(ui: &mut egui::Ui, content: &str) {
         .corner_radius(4.0)
         .show(ui, |ui| {
             // Constrain the wrapping label's width so the copy button
-            // always has room. The previous code added the flexible
-            // `Label::wrap` first, which consumed all available width
-            // and left ~0 for the right-to-left button layout.
+            // always has room, while computing content height dynamically.
             ui.horizontal_top(|ui| {
                 let button_width = 30.0;
                 let label_width = (ui.available_width() - button_width).max(0.0);
-                ui.add_sized(
-                    egui::vec2(label_width, ui.available_height()),
-                    egui::Label::new(RichText::new(content).monospace()).wrap(),
+                ui.allocate_ui_with_layout(
+                    egui::vec2(label_width, 0.0),
+                    egui::Layout::top_down(egui::Align::Min),
+                    |ui| {
+                        ui.add(egui::Label::new(RichText::new(content).monospace()).wrap());
+                    },
                 );
                 if ui.button("📋").on_hover_text("Copy code").clicked() {
                     copy_code_to_output(ui, content);
@@ -350,7 +293,8 @@ fn render_heading(
 fn render_table_cell(ui: &mut egui::Ui, cell: &[InlineElem], pinned_width: Option<f32>) {
     if cell.is_empty() {
         if let Some(w) = pinned_width {
-            ui.allocate_at_least(egui::vec2(w, 0.0), egui::Sense::hover());
+            let min_h = ui.text_style_height(&egui::TextStyle::Body);
+            ui.allocate_at_least(egui::vec2(w, min_h), egui::Sense::hover());
         } else {
             ui.label("");
         }
@@ -480,65 +424,13 @@ fn render_table(ui: &mut egui::Ui, table_cells: &[Vec<Vec<InlineElem>>], table_o
         });
 }
 
-/// Purpose: Parses a YAML mapping into a list of key-value string pairs.
-/// Inputs: `yaml`
-/// Outputs: List of (String, String) if valid mapping, else None.
-/// Purity: Pure function.
-///
-/// # Examples
-///
-/// ```
-/// use fastmd::ui::render::parse_yaml_to_pairs;
-/// use serde_yaml::Value;
-///
-/// let yaml: Value = serde_yaml::from_str("a: 1\nb: hello\nc: [x, y]").unwrap();
-/// let pairs = parse_yaml_to_pairs(&yaml).unwrap();
-/// assert_eq!(pairs.len(), 3);
-/// assert_eq!(pairs[0], ("a".to_string(), "1".to_string()));
-/// assert_eq!(pairs[1], ("b".to_string(), "hello".to_string()));
-/// assert_eq!(pairs[2], ("c".to_string(), "x, y".to_string()));
-///
-/// // Non-mapping values produce None.
-/// let s: Value = serde_yaml::from_str("just a string").unwrap();
-/// assert!(parse_yaml_to_pairs(&s).is_none());
-/// ```
-pub fn parse_yaml_to_pairs(yaml: &serde_yaml::Value) -> Option<Vec<(String, String)>> {
-    let mapping = yaml.as_mapping()?;
-    let mut pairs = Vec::new();
-    for (key, value) in mapping {
-        if let Some(key_str) = key.as_str() {
-            let val_str = match value {
-                serde_yaml::Value::String(s) => s.clone(),
-                serde_yaml::Value::Sequence(seq) => {
-                    let items: Vec<String> = seq
-                        .iter()
-                        .map(|v| match v {
-                            serde_yaml::Value::String(s) => s.clone(),
-                            _ => serde_yaml::to_string(v)
-                                .unwrap_or_default()
-                                .trim()
-                                .to_string(),
-                        })
-                        .collect();
-                    items.join(", ")
-                }
-                _ => serde_yaml::to_string(value)
-                    .unwrap_or_default()
-                    .trim()
-                    .to_string(),
-            };
-            pairs.push((key_str.to_string(), val_str));
-        }
-    }
-    Some(pairs)
-}
-
 /// Purpose: Renders a YAML table UI from a parsed mapping.
 /// Inputs: `ui` (mut), `yaml`
 /// Outputs: None
 /// Purity: Impure (modifies UI state). Coordinates parsing and rendering.
 pub fn render_yaml_table(ui: &mut egui::Ui, yaml: &serde_yaml::Value) {
     if let Some(pairs) = parse_yaml_to_pairs(yaml) {
+        let table_id = ui.make_persistent_id("yaml_table");
         egui::Frame::NONE
             .fill(egui::Color32::from_rgb(24, 24, 27))
             .stroke(egui::Stroke::new(1.0_f32, egui::Color32::from_gray(40)))
@@ -552,10 +444,10 @@ pub fn render_yaml_table(ui: &mut egui::Ui, yaml: &serde_yaml::Value) {
                 // horizontal scrollbar.
                 let available_width = ui.available_width();
                 egui::ScrollArea::horizontal()
-                    .id_salt("yaml_scroll")
+                    .id_salt(table_id.with("scroll"))
                     .show(ui, |ui| {
                         ui.set_min_width(available_width);
-                        egui::Grid::new("yaml_grid")
+                        egui::Grid::new(table_id.with("grid"))
                             .num_columns(2)
                             .striped(true)
                             .spacing([12.0, 4.0])
@@ -574,494 +466,6 @@ pub fn render_yaml_table(ui: &mut egui::Ui, yaml: &serde_yaml::Value) {
             });
         ui.add_space(8.0);
     }
-}
-
-/// Purpose: Parses markdown text into a sequence of render events.
-/// Inputs: `markdown_text` (&str)
-/// Outputs: `Vec<RenderEvent>` representing the logical blocks to draw.
-/// Purity: Pure function.
-///
-/// # Examples
-///
-/// ```
-/// use fastmd::ui::render::{parse_markdown_to_events, RenderEvent, InlineElem, TextStyle};
-///
-/// let events = parse_markdown_to_events("# Title\n\nhello *world*");
-/// // First event is the H1 heading.
-/// let heading_text = match &events[0] {
-///     RenderEvent::Heading { elems, .. } => fastmd::ui::render::heading_plain_text(elems),
-///     _ => panic!("expected first event to be a heading"),
-/// };
-/// assert_eq!(heading_text, "Title");
-/// // The paragraph flushes inline elements with mixed styling.
-/// let para = events.iter().find_map(|e| match e {
-///     RenderEvent::FlushInline { elems, needs_bullet: false, .. } if !elems.is_empty() => Some(elems),
-///     _ => None,
-/// });
-/// assert!(para.is_some());
-/// ```
-pub fn parse_markdown_to_events(markdown_text: &str) -> Vec<RenderEvent> {
-    use pulldown_cmark::{Event, HeadingLevel, Options, Parser, Tag, TagEnd};
-
-    let mut options = Options::empty();
-    options.insert(Options::ENABLE_TABLES);
-    options.insert(Options::ENABLE_FOOTNOTES);
-    options.insert(Options::ENABLE_STRIKETHROUGH);
-    options.insert(Options::ENABLE_TASKLISTS);
-
-    let parser = Parser::new_ext(markdown_text, options);
-    let mut events = Vec::new();
-
-    let mut in_code_block = false;
-    let mut code_block_content = String::new();
-    let mut in_heading = false;
-    let mut heading_level = 0;
-    // Headings preserve their inline elements (styled spans, links,
-    // images) instead of collapsing to plain text. See the `Heading`
-    // variant of `RenderEvent` for the motivation.
-    let mut heading_elems: Vec<InlineElem> = Vec::new();
-
-    let mut buffered_inline: Vec<InlineElem> = Vec::new();
-    let mut current_style = TextStyle::default();
-    let mut link_url = String::new();
-    let mut in_link = false;
-    let mut list_depth = 0;
-    let mut needs_bullet = false;
-    let mut task_checked = None;
-
-    let mut in_table_cell = false;
-    let mut table_cells: Vec<Vec<Vec<InlineElem>>> = Vec::new();
-    let mut current_row: Vec<Vec<InlineElem>> = Vec::new();
-
-    // P0-3: Track ordered-list ordinals via a stack (one entry per
-    // nesting level). `Some(n)` means the next item in this list
-    // should render as `"n. "`, `None` means bullet.
-    let mut list_ordinal_stack: Vec<Option<u64>> = Vec::new();
-    // P0-6: Blockquote nesting depth.
-    let mut blockquote_depth: usize = 0;
-
-    let push_inline = |events: &mut Vec<RenderEvent>,
-                       elems: &mut Vec<InlineElem>,
-                       bullet: &mut bool,
-                       task: &mut Option<bool>,
-                       indent: usize,
-                       list_ordinal: Option<u64>,
-                       bq_depth: usize| {
-        if elems.is_empty() && !*bullet && task.is_none() {
-            return;
-        }
-        events.push(RenderEvent::FlushInline {
-            elems: elems.clone(),
-            needs_bullet: *bullet,
-            task_checked: *task,
-            indent,
-            list_ordinal,
-            blockquote_depth: bq_depth,
-        });
-        elems.clear();
-        *bullet = false;
-        *task = None;
-    };
-
-    for event in parser {
-        match event {
-            Event::Start(Tag::CodeBlock(_info)) => {
-                if !buffered_inline.is_empty() {
-                    push_inline(
-                        &mut events,
-                        &mut buffered_inline,
-                        &mut needs_bullet,
-                        &mut task_checked,
-                        list_depth,
-                        list_ordinal_stack.last().copied().flatten(),
-                        blockquote_depth,
-                    );
-                }
-                in_code_block = true;
-                code_block_content.clear();
-            }
-            Event::End(TagEnd::CodeBlock) => {
-                if in_code_block {
-                    in_code_block = false;
-                    events.push(RenderEvent::CodeBlock(code_block_content.clone()));
-                }
-            }
-            Event::Start(Tag::Heading { level, .. }) => {
-                if !buffered_inline.is_empty() {
-                    push_inline(
-                        &mut events,
-                        &mut buffered_inline,
-                        &mut needs_bullet,
-                        &mut task_checked,
-                        list_depth,
-                        list_ordinal_stack.last().copied().flatten(),
-                        blockquote_depth,
-                    );
-                }
-                in_heading = true;
-                heading_level = match level {
-                    HeadingLevel::H1 => 1,
-                    HeadingLevel::H2 => 2,
-                    HeadingLevel::H3 => 3,
-                    HeadingLevel::H4 => 4,
-                    HeadingLevel::H5 => 5,
-                    HeadingLevel::H6 => 6,
-                };
-                heading_elems.clear();
-            }
-            Event::End(TagEnd::Heading(_)) => {
-                events.push(RenderEvent::Heading {
-                    level: heading_level,
-                    elems: heading_elems.clone(),
-                });
-                in_heading = false;
-                heading_level = 0;
-            }
-            Event::Start(Tag::Paragraph) => {
-                if !in_table_cell && !buffered_inline.is_empty() {
-                    push_inline(
-                        &mut events,
-                        &mut buffered_inline,
-                        &mut needs_bullet,
-                        &mut task_checked,
-                        list_depth,
-                        list_ordinal_stack.last().copied().flatten(),
-                        blockquote_depth,
-                    );
-                }
-            }
-            Event::End(TagEnd::Paragraph) => {
-                if !in_table_cell {
-                    push_inline(
-                        &mut events,
-                        &mut buffered_inline,
-                        &mut needs_bullet,
-                        &mut task_checked,
-                        list_depth,
-                        list_ordinal_stack.last().copied().flatten(),
-                        blockquote_depth,
-                    );
-                    events.push(RenderEvent::Space(4.0));
-                }
-            }
-            Event::Start(Tag::List(list_kind)) => {
-                if !buffered_inline.is_empty() {
-                    push_inline(
-                        &mut events,
-                        &mut buffered_inline,
-                        &mut needs_bullet,
-                        &mut task_checked,
-                        list_depth,
-                        list_ordinal_stack.last().copied().flatten(),
-                        blockquote_depth,
-                    );
-                }
-                list_depth += 1;
-                // P0-3: Track ordered-list start number for rendering
-                // `"n. "` instead of `"• "`. `list_kind` is `Some(n)`
-                // for ordered lists, `None` for unordered.
-                list_ordinal_stack.push(list_kind);
-            }
-            Event::End(TagEnd::List(_)) => {
-                push_inline(
-                    &mut events,
-                    &mut buffered_inline,
-                    &mut needs_bullet,
-                    &mut task_checked,
-                    list_depth,
-                    list_ordinal_stack.last().copied().flatten(),
-                    blockquote_depth,
-                );
-                list_depth = list_depth.saturating_sub(1);
-                list_ordinal_stack.pop();
-            }
-            Event::Start(Tag::Item) => {
-                if !buffered_inline.is_empty() {
-                    push_inline(
-                        &mut events,
-                        &mut buffered_inline,
-                        &mut needs_bullet,
-                        &mut task_checked,
-                        list_depth,
-                        list_ordinal_stack.last().copied().flatten(),
-                        blockquote_depth,
-                    );
-                }
-                needs_bullet = true;
-            }
-            Event::End(TagEnd::Item) => {
-                push_inline(
-                    &mut events,
-                    &mut buffered_inline,
-                    &mut needs_bullet,
-                    &mut task_checked,
-                    list_depth,
-                    list_ordinal_stack.last().copied().flatten(),
-                    blockquote_depth,
-                );
-                // P0-3: Increment ordinal for the next item in this
-                // ordered list. The flush above already captured the
-                // current item's ordinal.
-                if let Some(Some(n)) = list_ordinal_stack.last_mut() {
-                    *n += 1;
-                }
-            }
-            Event::Start(Tag::BlockQuote) => {
-                if !buffered_inline.is_empty() {
-                    push_inline(
-                        &mut events,
-                        &mut buffered_inline,
-                        &mut needs_bullet,
-                        &mut task_checked,
-                        list_depth,
-                        list_ordinal_stack.last().copied().flatten(),
-                        blockquote_depth,
-                    );
-                }
-                // P0-6: Track blockquote nesting depth for visual
-                // distinction (indent + quote bar).
-                blockquote_depth += 1;
-            }
-            Event::End(TagEnd::BlockQuote) => {
-                push_inline(
-                    &mut events,
-                    &mut buffered_inline,
-                    &mut needs_bullet,
-                    &mut task_checked,
-                    list_depth,
-                    list_ordinal_stack.last().copied().flatten(),
-                    blockquote_depth,
-                );
-                blockquote_depth = blockquote_depth.saturating_sub(1);
-            }
-            Event::Start(Tag::Table(_)) => {
-                if !buffered_inline.is_empty() {
-                    push_inline(
-                        &mut events,
-                        &mut buffered_inline,
-                        &mut needs_bullet,
-                        &mut task_checked,
-                        list_depth,
-                        list_ordinal_stack.last().copied().flatten(),
-                        blockquote_depth,
-                    );
-                }
-                table_cells.clear();
-            }
-            Event::End(TagEnd::Table) => {
-                if !table_cells.is_empty() {
-                    events.push(RenderEvent::Table(table_cells.clone()));
-                    events.push(RenderEvent::Space(4.0));
-                }
-                table_cells.clear();
-            }
-            Event::Start(Tag::TableHead) => {
-                current_row.clear();
-            }
-            Event::End(TagEnd::TableHead) => {
-                if !current_row.is_empty() {
-                    table_cells.push(current_row.clone());
-                    current_row.clear();
-                }
-            }
-            Event::Start(Tag::TableRow) => {
-                current_row.clear();
-            }
-            Event::End(TagEnd::TableRow) => {
-                table_cells.push(current_row.clone());
-                current_row.clear();
-            }
-            Event::Start(Tag::TableCell) => {
-                in_table_cell = true;
-                // Flush pending inline content rather than silently
-                // discarding it via `clear()`. In well-formed tables
-                // this is a no-op (buffer is empty between cells), but
-                // for malformed markdown it preserves stray content.
-                if !buffered_inline.is_empty() {
-                    push_inline(
-                        &mut events,
-                        &mut buffered_inline,
-                        &mut needs_bullet,
-                        &mut task_checked,
-                        list_depth,
-                        list_ordinal_stack.last().copied().flatten(),
-                        blockquote_depth,
-                    );
-                }
-            }
-            Event::End(TagEnd::TableCell) => {
-                in_table_cell = false;
-                current_row.push(buffered_inline.clone());
-                buffered_inline.clear();
-            }
-            Event::Start(Tag::Link { dest_url, .. }) => {
-                in_link = true;
-                link_url = dest_url.to_string();
-            }
-            Event::End(TagEnd::Link) => {
-                in_link = false;
-            }
-            Event::Start(Tag::Image { dest_url, .. }) => {
-                buffered_inline.push(InlineElem::Image(dest_url.to_string()));
-            }
-            Event::End(TagEnd::Image) => {}
-            Event::Start(Tag::Emphasis) => current_style.italic = true,
-            Event::End(TagEnd::Emphasis) => current_style.italic = false,
-            Event::Start(Tag::Strong) => current_style.bold = true,
-            Event::End(TagEnd::Strong) => current_style.bold = false,
-            Event::Start(Tag::Strikethrough) => current_style.strikethrough = true,
-            Event::End(TagEnd::Strikethrough) => current_style.strikethrough = false,
-            Event::Text(text) => {
-                if in_code_block {
-                    code_block_content.push_str(&text);
-                } else if in_link {
-                    // A link is its own inline element regardless of
-                    // whether we're inside a heading Ã¢â‚¬â€ a link inside a
-                    // heading stays a link.
-                    if in_heading {
-                        heading_elems.push(InlineElem::Link(link_url.clone(), text.to_string()));
-                    } else {
-                        buffered_inline.push(InlineElem::Link(link_url.clone(), text.to_string()));
-                    }
-                } else if in_heading {
-                    // Styled spans inside a heading. The renderer uses
-                    // these directly; `heading_plain_text` derives the
-                    // scroll-id key from them.
-                    heading_elems.push(InlineElem::Text(text.to_string(), current_style.clone()));
-                } else {
-                    buffered_inline.push(InlineElem::Text(text.to_string(), current_style.clone()));
-                }
-            }
-            Event::Code(code) => {
-                if in_code_block {
-                    code_block_content.push_str(&code);
-                } else if in_heading {
-                    let mut s = current_style.clone();
-                    s.code = true;
-                    heading_elems.push(InlineElem::Text(code.to_string(), s));
-                } else {
-                    let mut s = current_style.clone();
-                    s.code = true;
-                    buffered_inline.push(InlineElem::Text(code.to_string(), s));
-                }
-            }
-            Event::SoftBreak => {
-                if !in_code_block && !in_heading {
-                    buffered_inline.push(InlineElem::SoftBreak);
-                }
-            }
-            Event::HardBreak => {
-                if !in_code_block && !in_heading {
-                    if !in_table_cell {
-                        push_inline(
-                            &mut events,
-                            &mut buffered_inline,
-                            &mut needs_bullet,
-                            &mut task_checked,
-                            list_depth,
-                            list_ordinal_stack.last().copied().flatten(),
-                            blockquote_depth,
-                        );
-                    } else {
-                        buffered_inline.push(InlineElem::SoftBreak);
-                    }
-                }
-            }
-            Event::Rule => {
-                push_inline(
-                    &mut events,
-                    &mut buffered_inline,
-                    &mut needs_bullet,
-                    &mut task_checked,
-                    list_depth,
-                    list_ordinal_stack.last().copied().flatten(),
-                    blockquote_depth,
-                );
-                events.push(RenderEvent::Separator);
-            }
-            Event::TaskListMarker(checked) => {
-                task_checked = Some(checked);
-                needs_bullet = false;
-            }
-            Event::Html(html) => {
-                buffered_inline.push(InlineElem::Html(html.to_string()));
-            }
-            Event::InlineHtml(html) => {
-                buffered_inline.push(InlineElem::Html(html.to_string()));
-            }
-            Event::FootnoteReference(name) => {
-                let text = format!("[^{}]", name);
-                let mut s = current_style.clone();
-                s.code = true;
-                buffered_inline.push(InlineElem::Text(text, s));
-            }
-            Event::Start(Tag::FootnoteDefinition(name)) => {
-                if !buffered_inline.is_empty() {
-                    push_inline(
-                        &mut events,
-                        &mut buffered_inline,
-                        &mut needs_bullet,
-                        &mut task_checked,
-                        list_depth,
-                        list_ordinal_stack.last().copied().flatten(),
-                        blockquote_depth,
-                    );
-                }
-                events.push(RenderEvent::Separator);
-                let text = format!("[^{}]: ", name);
-                let mut s = current_style.clone();
-                s.bold = true;
-                buffered_inline.push(InlineElem::Text(text, s));
-            }
-            Event::End(TagEnd::FootnoteDefinition) => {
-                push_inline(
-                    &mut events,
-                    &mut buffered_inline,
-                    &mut needs_bullet,
-                    &mut task_checked,
-                    list_depth,
-                    list_ordinal_stack.last().copied().flatten(),
-                    blockquote_depth,
-                );
-            }
-            Event::Start(Tag::HtmlBlock) => {
-                if !buffered_inline.is_empty() {
-                    push_inline(
-                        &mut events,
-                        &mut buffered_inline,
-                        &mut needs_bullet,
-                        &mut task_checked,
-                        list_depth,
-                        list_ordinal_stack.last().copied().flatten(),
-                        blockquote_depth,
-                    );
-                }
-            }
-            Event::End(TagEnd::HtmlBlock) => {
-                push_inline(
-                    &mut events,
-                    &mut buffered_inline,
-                    &mut needs_bullet,
-                    &mut task_checked,
-                    list_depth,
-                    list_ordinal_stack.last().copied().flatten(),
-                    blockquote_depth,
-                );
-            }
-            _ => {}
-        }
-    }
-    push_inline(
-        &mut events,
-        &mut buffered_inline,
-        &mut needs_bullet,
-        &mut task_checked,
-        list_depth,
-        list_ordinal_stack.last().copied().flatten(),
-        blockquote_depth,
-    );
-
-    events
 }
 
 /// Purpose: Renders markdown text to UI.
@@ -1152,132 +556,6 @@ pub fn render_markdown(
 /// markdown source. Called after rendering when the user clicks a
 /// task checkbox, so the change persists across re-parses.
 ///
-/// # Arguments
-/// * `markdown` - The full markdown source (modified in place)
-/// * `task_index` - Zero-based index of the task item to toggle
-/// * `checked` - The new checked state (`true` → `[x]`, `false` → `[ ]`)
-///
-/// # Examples
-///
-/// ```
-/// use fastmd::ui::render::apply_task_toggle;
-/// let mut md = "- [ ] first\n- [ ] second".to_string();
-/// apply_task_toggle(&mut md, 1, true);
-/// assert_eq!(md, "- [ ] first\n- [x] second");
-/// ```
-pub fn apply_task_toggle(markdown: &mut String, task_index: usize, checked: bool) {
-    let new_marker = if checked { "[x]" } else { "[ ]" };
-    let mut count = 0usize;
-
-    let result: String = markdown
-        .lines()
-        .map(|line| {
-            if let Some(checkbox_start) = find_task_checkbox(line) {
-                if count == task_index {
-                    count += 1;
-                    let before = &line[..checkbox_start];
-                    let after = &line[checkbox_start + 3..];
-                    return format!("{}{}{}", before, new_marker, after);
-                }
-                count += 1;
-            }
-            line.to_string()
-        })
-        .collect::<Vec<_>>()
-        .join("\n");
-
-    *markdown = result;
-
-    /// Scan a single line for a task-list checkbox marker.
-    /// Returns the byte offset of the `[` in `[ ]` / `[x]`.
-    fn find_task_checkbox(line: &str) -> Option<usize> {
-        let trimmed_start = line.len() - line.trim_start().len();
-        let rest = &line[trimmed_start..];
-
-        // Match bullet markers: "- ", "* ", "+ ", or "N. "
-        let bullet_len =
-            if rest.starts_with("- ") || rest.starts_with("* ") || rest.starts_with("+ ") {
-                2
-            } else {
-                // Try ordered list: digits followed by ". "
-                let dot = rest.find(". ")?;
-                let num_part = &rest[..dot];
-                if !num_part.chars().all(|c| c.is_ascii_digit()) || num_part.is_empty() {
-                    return None;
-                }
-                dot + 2
-            };
-
-        let after_bullet = &rest[bullet_len..];
-        if after_bullet.starts_with("[ ]")
-            || after_bullet.starts_with("[x]")
-            || after_bullet.starts_with("[X]")
-        {
-            Some(trimmed_start + bullet_len)
-        } else {
-            None
-        }
-    }
-}
-
-/// Purpose: Builds a Table of Contents from markdown.
-/// Inputs: `markdown_text`
-/// Outputs: List of `ToCEntry` elements.
-/// Purity: Pure function.
-/// Builds a Table of Contents from markdown.
-///
-/// # Examples
-///
-/// ```
-/// use fastmd::ui::render::build_toc;
-///
-/// let toc = build_toc("# Title\n\n## Sub\n\nbody");
-/// assert_eq!(toc.len(), 2);
-/// assert_eq!(toc[0].title, "Title");
-/// assert_eq!(toc[0].level, 1);
-/// assert_eq!(toc[1].title, "Sub");
-/// assert_eq!(toc[1].level, 2);
-///
-/// // No headings Ã¢â€ â€™ empty TOC.
-/// assert!(build_toc("just a paragraph").is_empty());
-/// ```
-pub fn build_toc(markdown_text: &str) -> Vec<crate::ui::ToCEntry> {
-    // Use the same parser options and text extraction as
-    // `parse_markdown_to_events` + `heading_plain_text` so that ToC
-    // ids match the ids computed by `render_markdown`. The previous
-    // implementation used a separate parser with only `ENABLE_TABLES`
-    // and accumulated raw `Event::Text`, which diverged from
-    // `heading_plain_text` for strikethrough, images, and footnotes.
-    let events = parse_markdown_to_events(markdown_text);
-    let mut toc = Vec::new();
-    use std::collections::HashMap;
-    let mut seen: HashMap<String, usize> = HashMap::new();
-
-    for event in events {
-        if let RenderEvent::Heading { level, elems } = event {
-            let text = heading_plain_text(&elems);
-            let trimmed = text.trim().to_string();
-            if trimmed.is_empty() {
-                continue;
-            }
-            // Disambiguate duplicate headings with an occurrence ordinal,
-            // matching the logic in `render_markdown`.
-            let occurrence = seen.entry(trimmed.clone()).or_insert(0);
-            let id = if *occurrence == 0 {
-                egui::Id::new(&trimmed)
-            } else {
-                egui::Id::new(&trimmed).with(*occurrence)
-            };
-            *occurrence += 1;
-            toc.push(super::ToCEntry {
-                title: trimmed,
-                level,
-                id,
-            });
-        }
-    }
-    toc
-}
 
 #[cfg(test)]
 mod tests {
@@ -2685,5 +1963,14 @@ def foo():
             captured.iter().any(|&v| v),
             "at least one captured value must be `true` (the post-click frame); got {captured:?}"
         );
+    }
+
+    #[test]
+    fn test_apply_task_toggle_preserves_crlf_and_code_block_checkboxes() {
+        let mut md = "```rust\r\n// - [ ] in code\r\n```\r\n\r\n- [ ] Real Task\r\n".to_string();
+        apply_task_toggle(&mut md, 0, true);
+        assert!(md.contains("// - [ ] in code"));
+        assert!(md.contains("- [x] Real Task"));
+        assert!(md.contains("\r\n"));
     }
 }

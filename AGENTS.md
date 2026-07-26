@@ -43,6 +43,13 @@ always read the nearest one before editing. See
 - Refactor code as required to limit cyclomatic complexity before adding new features on top of it.
 - Prefer splitting large functions, extracting helpers, and reducing nesting over introducing additional branches into already-complex code.
 
+## 10. Issue-Fixing Workflow (Test-First)
+- When asked to fix an issue (bug, defect, or regression), **develop a failing test first** that reproduces the issue before writing the fix.
+- The test must capture the bug's symptom: write it, run it, and confirm it fails for the same reason the issue describes. Only then implement the fix.
+- Use the newly added test to validate the fix: it should now pass. Keep the test in the suite as regression coverage — do not delete or weaken it after the fix lands.
+- If the issue cannot be reproduced at the unit or integration level (e.g. timing-, UI-, or environment-dependent), document why in the task/PR and add the closest possible deterministic test (snapshot, contract, or integration harness) rather than skipping coverage.
+- Sequence: reproduce (failing test) → fix → verify (test passes) → run the component's full quality gate (see the component's own `AGENTS.md`).
+
 ## Component-specific rules
 
 Each subdirectory owns its own `AGENTS.md`. Resolve rules by working directory:

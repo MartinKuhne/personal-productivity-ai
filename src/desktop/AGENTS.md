@@ -19,6 +19,18 @@ this file adds Rust/egui-specific conventions and the quality gate.
 - The 5-pane layout is owned by `ui::panel_layout::PanelLayout` (REQ-101); do not ad-hoc side panels in `FastMdApp::update`.
 - All cross-cutting state lives on `FastMdApp` (`ui/app.rs`); split new UI concerns into a dedicated manager struct (cf. `DialogManager`, `SelectionManager`, `TabManager`) rather than growing `app.rs`.
 
+### `egui::Id` Stability and Salting Rules
+- **Purpose of `egui::Id`s:** `egui` tracks interactive widget state (hover, focus, animation, context menus, drag/drop) across frames and multi-pass layout renders (e.g., `SidePanel` / `Panel`, `ScrollArea::show_rows`, `Grid`) using `egui::Id`.
+- **Preventing `WARN egui::context` pass-to-pass ID changes:** If `egui` sees a widget at the exact same physical coordinates (`rect`) assigned a different `Id` between layout passes (Pass 1 measurement vs. Pass 2 paint), it emits a `WARN egui::context: Widget rect [...] changed id between passes` warning and paints red debug outlines.
+- **Rules for setting `egui::Id`s:**
+  1. **Never re-use duplicate keys for sibling widgets:** If a loop renders multiple widgets per item (e.g., a tab label and a tab close button `×`), salt each key with a string label tuple:
+     ```rust
+     ui.push_id((tab_path, "tab_label"), |ui| ui.selectable_label(is_selected, &title));
+     ui.push_id((tab_path, "tab_close"), |ui| ui.button("×"));
+     ```
+  2. **Wrap iterated list and tree rows in salted scopes:** When rendering dynamic lists (`ScrollArea::show_rows`, file trees, TOC lists), wrap each row in `ui.push_id((&item_key, item_type), |ui| { ... })` so internal `ui.horizontal` calls generate stable child auto-IDs.
+  3. **Isolate structural blocks:** Assign explicit string keys to top-level containers (`ui.push_id("selected_file_header", ...)`, `ScrollArea::id_salt(...)`) to insulate child auto-ID counters from sibling layout passes.
+
 ## 3. Tool trait contract
 - Every tool implements `tools::Tool` and is registered in `tools/registry.rs::ToolRegistry::register_all`.
 - `Tool::execute` takes a **single** `ToolContext<'a>` (config + `&Bus<FileEvent>`) — do not add extra parameters (REQ-609).
