@@ -1,24 +1,10 @@
-Guardrail: AI agents may not edit, modify, change or delete this file
-
 # SPEC.md: FastMD Technical Specification
-
-## RFC Metadata Block
-- **Authors**: FastMD Contributors
-- **Date**: July 15, 2026
-- **Version**: 1.0.0
-- **Category**: Technical Specification
-
----
 
 ## Summary
 This document specifies the technical requirements and architecture for **FastMD**, a hardware-accelerated, native Windows Markdown viewer. FastMD delivers high-performance filesystem navigation, GFM table layout, hierarchical Table of Contents (ToC) scrolling, real-time filesystem synchronization, and concurrent metadata indexing.
 
----
-
 ## Background / Context
 Markdown document viewers often rely on web engines or Electron shell instances, which impose significant memory and CPU overhead. FastMD addresses this by providing a single native binary using the Rust programming language and the GPU-accelerated `egui` framework, resulting in instant startup, minimal memory footprint, and fluid rendering.
-
----
 
 ## Requirements
 
@@ -44,16 +30,14 @@ The requirements below have been formatted using the **Easy Approach to Requirem
 +-----------------------------------------------------------------------+
 ```
 
-
 * [REQ-101] Pane Structure: The FastMD Viewer shall display a multi-pane layout consisting of a Left Pane (directory tree and tag filter), Central Pane (Markdown document), Right Pane (Table of Contents), and Bottom Pane (command prompt).
-* [REQ-102] Color System: The FastMD Viewer shall render a premium dark mode layout with a dark gray background, bright off-white body text, and amber-accented inline code snippets.
-* [REQ-102a] Dark Color Scheme: The FastMD Viewer shall pin egui to its `Theme::Dark` at startup (via `Context::set_theme(egui::Theme::Dark)`) and apply the FastMD brand palette to the dark theme's visuals so the dark surface is the source of truth regardless of the host system's reported theme preference. The brand palette is:
+* [REQ-102] Dark Color Scheme: The FastMD Viewer shall pin egui to its `Theme::Dark` at startup and apply the FastMD brand palette to the dark theme's visuals so the dark surface is the source of truth regardless of the host system's reported theme preference. The brand palette is:
     * Window and panel surface: `RGB(9, 9, 11)` (a near-black neutral with a 1-unit cool bias so the surface reads as a black panel, not a brown one).
     * Selection background: `RGB(99, 102, 241)` (indigo-500; the FastMD primary accent).
     * Window corner radius: 8 px. Widget (noninteractive / inactive / hovered / active) corner radius: 4 px.
     * Body text: `RGB(210, 210, 210)` (off-white) for non-interactive and inactive widgets; pure white for hovered and active widgets.
     * The egui "default dark" palette (`RGB(27, 27, 27)` panel fill) shall NOT be used; the FastMD palette above is the only acceptable dark surface.
-    * The palette is applied via `FastMdApp::configure_dark_theme`, which is the single point of truth for the dark color scheme. Any future change to the brand palette is a change to that function and to the test `test_configure_dark_theme_pins_dark_with_brand_palette`.
+    * The palette is applied via `FastMdApp::configure_dark_theme`, which is the single point of truth for the dark color scheme.
 * [REQ-103] UI Responsiveness: While executing disk I/O, compilation, or file system crawls, the FastMD Viewer shall maintain an unblocked, responsive UI thread.
 
 ### Left column / Directory tree
@@ -75,7 +59,6 @@ The requirements below have been formatted using the **Easy Approach to Requirem
 * [REQ-172] The directory tree should not display folders that contain no markdown files
 * [REQ-173] When the user selects [Format Markdown] from the context menu, the system executes the Format Markdown quick task as described elsewhere
 * [REQ-174] When the user selects [Run as prompt] from the context menu, and the object under the mouse cursor is a file, the system shall execute the content of th file as an agent prompt
-
 * [REQ-180] When the user holds the shift, the system shall allow the user to select multiple documents
 * [REQ-181] When the user has selected multiple documents, and they right click on one of the selected documents, the [multi select context menu] is shown
 * [REQ-182] When the user selects [Merge] from the [multi select context menu], the system shall run a new LLM prompt instructing the LLM to merge the content into a new document and consolidate the content. 
@@ -136,7 +119,7 @@ The requirements below have been formatted using the **Easy Approach to Requirem
 * [REQ-305] Progress Completion: When index workers complete, the system shall increase the width of the left column to accomodate the maximum possible file/directory combination found.
 
 ### 4. Live Workspace File System Watcher
-* [REQ-401] File System Watcher: When the initial index completes, the FastMD Viewer shall schedule a background file system watcher utilizing Windows directory change notifications.
+* [REQ-401] File System Watcher: When the initial index completes, the FastMD Viewer shall schedule a background file system watcher utilizing Windows file/directory change notifications.
 * [REQ-402] Hot Reloading:
     * [REQ-403]: When a file is created or modified, the FastMD Viewer shall re-scan the document's YAML tags and update the tag list and directory tree.
     * [REQ-404]: When a file is deleted or renamed, the FastMD Viewer shall remove the document from the tree and tag lists. Rename is detected as a delete + create event pair.
@@ -144,11 +127,11 @@ The requirements below have been formatted using the **Easy Approach to Requirem
     * [REQ-406]: If the active document is deleted, then the FastMD Viewer shall reset the viewer pane.
 * [REQ-407] New Directory Watch: When a new directory is created, the file watcher shall automatically begin watching it recursively.
 
-### PDF to Markdown Conversion
+### PDF support
 
 * [REQ-450] PDF Discovery: The system shall scan all configured text libraries for PDF files (extension `.pdf`) during initial indexing (REQ-301) and on file system change notifications (REQ-401).
 * [REQ-451] PDF Visibility: PDF files shall NOT be displayed in the directory tree, tab bar, or exposed to any LLM tools (grep, list_files, read_file, etc.). They remain hidden from the user interface.
-* [REQ-452] Corresponding Markdown Check: For each discovered PDF file, the system shall check if a Markdown file with the same name (same stem, `.md` extension) exists in the same directory.
+* [REQ-452] Corresponding Markdown Check: For each discovered PDF file, the system shall check if a Markdown file with the same name (same stem, `.md` extension) exists in the same directory. IF the backing PDF exists, the corresponding .MD file shall be rendered in a PDF-appropriate color in the tree
 * [REQ-453] Conversion Trigger: If the corresponding Markdown file does not exist, OR if the Markdown file's last-modified timestamp is older than the PDF's last-modified timestamp, the system shall queue the PDF for conversion.
 * [REQ-454] Converter Configuration: The system shall provide a configuration option `pdf_converter_command` in `config.yaml` specifying the executable and arguments to convert PDF to Markdown. The command shall receive the PDF file path as the first argument and the output Markdown file path as the second argument. Example: `["pandoc", "-f", "pdf", "-t", "markdown", "-o", "{output}", "{input}"]`.
 * [REQ-455] Conversion Execution: The converter shall run as a background process. The system shall capture stdout/stderr and log to the Background Process Log (REQ-460).
@@ -171,22 +154,6 @@ The requirements below have been formatted using the **Easy Approach to Requirem
 * [REQ-471] Image Visibility: Image files shall NOT be displayed in the directory tree, tab bar, or exposed to LLM file tools (grep, list_files, read_file, etc.). They remain hidden from the standard file UI.
 * [REQ-472] Corresponding Markdown Check: For each discovered image file, the system shall check if a Markdown file with the same name (same stem, `.md` extension) exists in the same directory.
 * [REQ-473] Vision Analysis Trigger: If the corresponding Markdown file does not exist, OR if the Markdown file's last-modified timestamp is older than the image's last-modified timestamp, the system shall queue the image for vision analysis.
-* [REQ-474] Vision Model Configuration: The system shall support a `models` configuration section in `config.yaml` defining multiple models with `use_case` tags: `chat` (default), `embeddings`, `vision`, and an optional `cost` field (integer, default 0, lower = cheaper) used for auto-model selection (REQ-613). Example:
-```yaml
-models:
-  - model: "gpt-4o-mini"
-    api_url: "https://api.openai.com/v1"
-    use_case: ["chat", "vision"]
-    cost: 5
-  - model: "text-embedding-3-small"
-    api_url: "https://api.openai.com/v1"
-    use_case: ["embeddings"]
-    cost: 1
-  - model: "google/gemini-2.5-flash:free"
-    api_url: "https://openrouter.ai/api/v1"
-    use_case: ["chat"]
-    cost: 0
-```
 * [REQ-475] Vision Analysis Execution: The system shall invoke the model tagged with `vision` use_case, sending the image as base64-encoded data URL in the message content. The prompt shall request a detailed Markdown description of the image contents (text, objects, scenes, charts, diagrams, UI elements, etc.).
 * [REQ-476] Vision Result Handling: On success, the generated Markdown description shall be written to the corresponding `.md` file (creating or overwriting). The file watcher (REQ-403) shall pick it up and index it. On failure, the error shall be logged to the Background Process Log (REQ-460).
 * [REQ-477] Periodic Image Scan Progress: During initial indexing (REQ-301), the system shall emit progress messages every 500 files or 5 seconds, reporting images found, analyses queued/completed.
@@ -196,7 +163,7 @@ models:
 * [REQ-501] CLI Directory Input: The FastMD Viewer shall accept a workspace directory path as its first command-line argument.
     * [REQ-502]: If the provided workspace path does not exist, then the FastMD Viewer shall fallback to the current working directory.
 * [REQ-503] UNC Path Normalization: The FastMD Viewer shall normalize and strip UNC prefixes (`\\?\`) from Windows paths.
-* [REQ-504] Deployment Binary: The build system shall include a release-deployment binary target (`deploy`) that compiles and deploys the optimized binary to `C:\tools\fastmd.exe` when invoked via `cargo run --bin deploy`.
+* [REQ-504] Deployment Binary: The build system shall include a release-deployment binary target (`deploy`)
 
 ### 6. Local LLM Interface & Tool Call Agent
 * [REQ-601] OpenAI Compatible Endpoint: The FastMD Viewer shall support connections to an OpenAI compatible chat completions API.
@@ -215,15 +182,29 @@ models:
 * [REQ-611] Active Directory Context: When the user selects a directory from the left pane, it becomes the directory context for the AI prompt. When the user sends an AI prompt and there is NO file being displayed in the middle pane, the system shall send the full virtual path of the directory context with the system prompt.
 * [REQ-612] Active Directory Context Display: The AI prompt shall display the directory context, relative to the base directory, with the prompt. Example: 'Users\Martin >'
 * [REQ-620] When displaying tool call arguments, format the JSON
-* [REQ-699] Cancel AI Prompt: While an AI prompt is being executed, the system shall display a stop button. When the user clicks the stop button, the system shall abort the prompt processing.
-
+* [REQ-630] Cancel AI Prompt: While an AI prompt is being executed, the system shall display a stop button. When the user clicks the stop button, the system shall abort the prompt processing.
+* [REQ-640] Model Configuration: The system shall support a `models` configuration section in `config.yaml` defining multiple models with `use_case` tags: `chat` (default), `embeddings`, `vision`, and an optional `cost` field (integer, default 0, lower = cheaper) used for auto-model selection (REQ-613). Example:
+```yaml
+models:
+  - model: "gpt-4o-mini"
+    api_url: "https://api.openai.com/v1"
+    use_case: ["chat", "vision"]
+    cost: 5
+  - model: "text-embedding-3-small"
+    api_url: "https://api.openai.com/v1"
+    use_case: ["embeddings"]
+    cost: 1
+  - model: "google/gemini-2.5-flash:free"
+    api_url: "https://openrouter.ai/api/v1"
+    use_case: ["chat"]
+    cost: 0
+```
 ### Agent Behavior & UI
 
 * [REQ-613] Auto-Model Selection: On application startup, if multiple models are configured with the `chat` use_case, the system shall automatically select the model with the lowest `cost` value and persist the selection to the configuration file.
 * [REQ-614] USER.md Context Injection: For each configured content library, if a USER.md file exists at the library root, its contents shall be appended to the system prompt as user context.
 * [REQ-615] Agent Conversation History: The agent shall maintain conversation history across prompts within a session. History is reset when the user clicks "Back to Document" or starts a new session.
 * [REQ-616] Thinking Delimiter: Model reasoning/thinking content wrapped in `🤔...🤔` delimiters shall be extracted and displayed in a collapsible "Thinking Process" section separate from the main response.
-* [REQ-617] Model Management Commands: The command prompt shall support `/models` to list available models with their cost and use_cases, and `/model <name>` to switch the active model and persist to config.
 * [REQ-618] Quick Tasks Menu: The bottom panel shall provide a "Quick Tasks" menu with predefined prompts (e.g., "Format Markdown") that inject a structured prompt with YAML front-matter template.
 * [REQ-619] Tabbed Document Interface: The center panel shall support multiple open documents as tabs. Clicking a file opens it in a new tab; middle-click or close button closes tabs.
 
@@ -311,9 +292,6 @@ models:
 * [REQ-664] Web Fetch Force Refetch: The `web_fetch` tool shall accept an optional `force_refetch` boolean parameter (default: `false`). When `true`, the system shall bypass the cache and fetch fresh content from the URL, replacing the cached entry.
 * [REQ-665] Web Fetch Context Efficiency: The tool description shall encourage the LLM to save context by fetching a page once and issuing partial reads via `limit` and `offset` to paginate through the content, rather than re-fetching the full page multiple times.
 
-
-
-
 ### YAML frontmatter template
 
 ```yaml
@@ -321,16 +299,9 @@ models:
 title: A brief title
 summary: A three sentence summary of the contents
 tags: ["tag1","tag2"]
-header-date: RFC 3339 timestamp
+header-date: <RFC 3339 timestamp>
 ---
 ```
-
-## Key Findings / Recommendations
-- **Thread Pool Coordination**: Wrapping a receiver channel in an `Arc<Mutex<Receiver<PathBuf>>>` is the recommended method to implement a shared work queue in Rust standard library.
-- **Scroll Alignment**: Using `response.scroll_to_me(Some(egui::Align::TOP))` provides optimal navigation within `egui::ScrollArea` components.
-- **UNC Stripping**: Windows standard canonicalization returns path prefixes starting with `\\?\`, which should be removed before visual tree rendering to maintain clean layout headers.
-
----
 
 ## Sources
 - RFC 2119 Key Words Reference: [ietf.org/rfc/rfc2119.txt](https://www.ietf.org/rfc/rfc2119.txt)
