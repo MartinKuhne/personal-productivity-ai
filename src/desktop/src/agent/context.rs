@@ -12,6 +12,8 @@ use std::sync::{Arc, atomic::AtomicBool};
 ///
 /// This struct replaces the 11 separate parameters previously passed to `run_agent`.
 /// It groups related data and reduces the interface to a single argument (PSD-002).
+/// Construct with the struct literal `AgentContext { ... }`; the previous
+/// `AgentContext::new` was a pass-through forwarder (PSD-004) and was removed.
 pub struct AgentContext {
     pub config: AppConfig,
     pub tx_gui: Sender<crate::messages::BackgroundMessage>,
@@ -28,37 +30,6 @@ pub struct AgentContext {
     pub model_name: Option<String>,
 }
 
-impl AgentContext {
-    /// Build a new AgentContext from constituent parts.
-    #[allow(clippy::too_many_arguments)]
-    pub fn new(
-        config: AppConfig,
-        tx_gui: Sender<crate::messages::BackgroundMessage>,
-        file_event_bus: Bus<crate::file_events::FileEvent>,
-        active_file: Option<PathBuf>,
-        active_dir: Option<PathBuf>,
-        selected_files: HashSet<PathBuf>,
-        prompt: String,
-        cancel_flag: Arc<AtomicBool>,
-        history: Option<Vec<Value>>,
-        current_response: String,
-    ) -> Self {
-        Self {
-            config,
-            tx_gui,
-            file_event_bus,
-            active_file,
-            active_dir,
-            selected_files,
-            prompt,
-            cancel_flag,
-            history,
-            current_response,
-            model_name: None,
-        }
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -72,18 +43,19 @@ mod tests {
         let (tx, _rx) = channel();
         let config = AppConfig::default();
         let bus = Bus::new();
-        let ctx = AgentContext::new(
-            config.clone(),
-            tx,
-            bus,
-            Some(PathBuf::from("test.md")),
-            None,
-            HashSet::new(),
-            "hello".to_string(),
-            Arc::new(AtomicBool::new(false)),
-            None,
-            String::new(),
-        );
+        let ctx = AgentContext {
+            config: config.clone(),
+            tx_gui: tx,
+            file_event_bus: bus,
+            active_file: Some(PathBuf::from("test.md")),
+            active_dir: None,
+            selected_files: HashSet::new(),
+            prompt: "hello".to_string(),
+            cancel_flag: Arc::new(AtomicBool::new(false)),
+            history: None,
+            current_response: String::new(),
+            model_name: None,
+        };
         assert_eq!(ctx.config.models, config.models);
         assert!(ctx.active_file.as_deref() == Some(Path::new("test.md")));
         assert_eq!(ctx.prompt, "hello");

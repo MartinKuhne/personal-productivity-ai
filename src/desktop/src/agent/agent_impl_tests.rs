@@ -25,18 +25,19 @@ fn make_config(port: u16) -> AppConfig {
 
 fn make_ctx(config: AppConfig) -> (AgentContext, std::sync::mpsc::Receiver<BackgroundMessage>) {
     let (tx, rx) = std::sync::mpsc::channel();
-    let ctx = AgentContext::new(
+    let ctx = AgentContext {
         config,
-        tx,
-        crate::file_events::Bus::new(),
-        None,
-        None,
-        HashSet::new(),
-        "Hello".to_string(),
-        Arc::new(AtomicBool::new(false)),
-        None,
-        String::new(),
-    );
+        tx_gui: tx,
+        file_event_bus: crate::file_events::Bus::new(),
+        active_file: None,
+        active_dir: None,
+        selected_files: HashSet::new(),
+        prompt: "Hello".to_string(),
+        cancel_flag: Arc::new(AtomicBool::new(false)),
+        history: None,
+        current_response: String::new(),
+        model_name: None,
+    };
     (ctx, rx)
 }
 
@@ -243,18 +244,19 @@ fn test_run_agent_skips_done_status_when_cancelled() {
         }
     });
     let (tx, rx) = std::sync::mpsc::channel();
-    let ctx = AgentContext::new(
-        make_config(port),
-        tx,
-        crate::file_events::Bus::new(),
-        None,
-        None,
-        HashSet::new(),
-        "Hello".to_string(),
-        Arc::new(AtomicBool::new(true)),
-        None,
-        String::new(),
-    );
+    let ctx = AgentContext {
+        config: make_config(port),
+        tx_gui: tx,
+        file_event_bus: crate::file_events::Bus::new(),
+        active_file: None,
+        active_dir: None,
+        selected_files: HashSet::new(),
+        prompt: "Hello".to_string(),
+        cancel_flag: Arc::new(AtomicBool::new(true)),
+        history: None,
+        current_response: String::new(),
+        model_name: None,
+    };
     run_agent(ctx);
     let mut saw_done = false;
     let mut saw_finished = false;
