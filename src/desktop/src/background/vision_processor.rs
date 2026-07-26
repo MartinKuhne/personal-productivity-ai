@@ -183,19 +183,17 @@ impl ImageVisionWorker {
     }
 
     pub fn spawn(self) {
-        std::thread::spawn(move || {
-            if let Ok(rt) = tokio::runtime::Runtime::new() {
-                rt.block_on(async {
-                    while let Ok(path) = self.rx.recv() {
-                        let job = ImageJob::new(path);
-                        if job.should_process() {
-                            let producer = FileEventProducer::new(&self.bus);
-                            let _ =
-                                process_image(job, self.config.clone(), self.tx.clone(), &producer)
-                                    .await;
-                        }
-                    }
-                });
+        let ImageVisionWorker { rx, tx, config, bus } = self;
+        crate::background::spawn_path_worker(rx, move |path| {
+            let bus = bus.clone();
+            let tx = tx.clone();
+            let config = config.clone();
+            async move {
+                let job = ImageJob::new(path);
+                if job.should_process() {
+                    let producer = FileEventProducer::new(&bus);
+                    let _ = process_image(job, config, tx, &producer).await;
+                }
             }
         });
     }
