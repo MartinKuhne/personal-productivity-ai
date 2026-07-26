@@ -13,6 +13,9 @@ pub struct TabManager {
     tabs_set: HashSet<PathBuf>,
     pub toc: Vec<ToCEntry>,
     pub scroll_to_header_id: Option<egui::Id>,
+    /// Pending task checkbox toggles queued by `render_markdown`.
+    /// Drained and applied to `current_markdown` after each frame.
+    pub pending_task_toggles: Vec<(usize, bool)>,
 }
 
 impl TabManager {
@@ -25,6 +28,7 @@ impl TabManager {
             tabs_set: HashSet::new(),
             toc: Vec::new(),
             scroll_to_header_id: None,
+            pending_task_toggles: Vec::new(),
         }
     }
 

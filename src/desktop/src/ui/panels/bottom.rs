@@ -89,7 +89,7 @@ pub fn show_bottom_panel(app: &mut FastMdApp, parent_ui: &mut egui::Ui) {
                 );
                 ui.label(RichText::new(prompt_prefix).monospace().strong());
 
-                let text_width = ui.available_width() - 130.0;
+                let text_width = (ui.available_width() - 130.0).max(0.0);
                 let response = ui.add_sized(
                     egui::vec2(text_width, ui.available_height()),
                     egui::TextEdit::multiline(&mut app.agent_mut().command_input)
