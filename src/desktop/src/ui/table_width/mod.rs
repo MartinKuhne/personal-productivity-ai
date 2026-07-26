@@ -582,4 +582,153 @@ mod tests {
         assert_eq!(wrapping, 1);
         assert!((d.widths.iter().sum::<f32>() - 110.0).abs() < 1e-3);
     }
+
+    // --- Permutation matrix: similar vs dissimilar columns ×
+    //     fits viewport / requires word wrap / exceeds viewport ------
+
+    /// Helper: assert a `ColumnWidths` decision respects the actual FTWA contract:
+    /// - `sum == available` (G3), **except in the §3.6 fallback** where
+    ///   `widths == min_content` and the caller is expected to enable
+    ///   horizontal scrolling instead.
+    /// - no width below min (never-break-token invariant)
+    /// - `needs_horizontal_scroll` iff `available < sum_min` (the §3.6 condition)
+    ///
+    /// Note: the surplus regime *intentionally* grows columns beyond their
+    /// max-content (spare is distributed proportionally), so no upper bound
+    /// is asserted here — only the lower bound and the sum/scroll invariants.
+    fn assert_decision_invariants(
+        d: &ColumnWidths,
+        _max: &[f32],
+        min: &[f32],
+        available: f32,
+    ) {
+        let sum: f32 = d.widths.iter().copied().sum();
+        if !d.needs_horizontal_scroll {
+            assert!(
+                (sum - available).abs() < 1e-3,
+                "Σ widths ({sum}) must equal available ({available}); got {:?}",
+                d.widths
+            );
+        }
+        for (j, (&w, &mn)) in d.widths.iter().zip(min.iter()).enumerate() {
+            assert!(w >= mn - 1e-3, "col {j}: width {w} below min {mn}");
+        }
+        let sum_min: f32 = min.iter().copied().sum();
+        assert_eq!(
+            d.needs_horizontal_scroll,
+            available < sum_min,
+            "needs_horizontal_scroll must match `available < sum_min` ({} < {} = {})",
+            available,
+            sum_min,
+            available < sum_min
+        );
+    }
+
+    /// 3 columns of similar width, viewport comfortably larger than max-content.
+    /// Every column gets max + proportional share of the spare.
+    #[test]
+    fn permutation_similar_columns_fit_viewport() {
+        let max = [200.0, 200.0, 200.0];
+        let min = [50.0, 50.0, 50.0];
+        let available = 700.0; // sum_max = 600, spare = 100
+        let d = ftwa(&max, &min, available);
+        assert_decision_invariants(&d, &max, &min, available);
+        assert!(!d.needs_horizontal_scroll);
+        // Surplus: spare split 1:1:1 → 33.33 each, plus max 200 → 233.33 each.
+        for (j, &w) in d.widths.iter().enumerate() {
+            assert!((w - 233.333).abs() < 0.5, "col {j}: {w} not ~233.33");
+        }
+    }
+
+    /// 3 columns of similar width, viewport forces word wrap on the deficit.
+    /// G2 exact: the minimum-cardinality wrap set is chosen. With equal
+    /// slacks of 200, covering the 400 deficit takes 2 columns, not 3.
+    /// The 3rd column stays at max.
+    #[test]
+    fn permutation_similar_columns_require_word_wrap() {
+        let max = [300.0, 300.0, 300.0];
+        let min = [100.0, 100.0, 100.0];
+        let available = 500.0; // sum_max = 900, sum_min = 300, deficit = 400
+        let d = ftwa(&max, &min, available);
+        assert_decision_invariants(&d, &max, &min, available);
+        assert!(!d.needs_horizontal_scroll);
+        // G2: only 2 of 3 columns wrap (slack 200 × 2 = 400 = deficit).
+        // The 3rd column (index 2) stays at max = 300.
+        let wrapping = d
+            .widths
+            .iter()
+            .zip(max.iter())
+            .filter(|&(w, m)| *w < *m - 1e-3)
+            .count();
+        assert_eq!(wrapping, 2, "G2: minimum-cardinality wrap set");
+        // The 3rd column is the one that stays at max.
+        assert_eq!(d.widths[2], 300.0, "col 2 pinned at max");
+        // The wrap set picks the smallest slack-desc prefix, which with
+        // equal slacks is {0, 1} → widths[0] == widths[1] == min = 100.
+        assert_eq!(d.widths[0], 100.0);
+        assert_eq!(d.widths[1], 100.0);
+    }
+
+    /// 3 columns of similar width, viewport below sum_min → §3.6 fallback.
+    /// Even at min-content, the table cannot fit; render must use ScrollArea.
+    #[test]
+    fn permutation_similar_columns_exceed_viewport() {
+        let max = [400.0, 400.0, 400.0];
+        let min = [300.0, 300.0, 300.0];
+        let available = 500.0; // sum_min = 900, way below
+        let d = ftwa(&max, &min, available);
+        assert_decision_invariants(&d, &max, &min, available);
+        assert!(d.needs_horizontal_scroll);
+        // §3.6 returns min-content widths exactly — never break a token.
+        assert_eq!(d.widths, vec![300.0, 300.0, 300.0]);
+    }
+
+    /// Dissimilar widths (narrow / wide / narrow) in a wide viewport.
+    /// Wide column gets most of the spare, narrow columns get a fair share.
+    #[test]
+    fn permutation_dissimilar_columns_fit_viewport() {
+        let max = [100.0, 500.0, 100.0];
+        let min = [30.0, 200.0, 30.0];
+        let available = 1000.0; // sum_max = 700, spare = 300
+        let d = ftwa(&max, &min, available);
+        assert_decision_invariants(&d, &max, &min, available);
+        assert!(!d.needs_horizontal_scroll);
+        // Spare split proportional to max: col 0/2 get 100/700*300 = 42.86,
+        // col 1 gets 500/700*300 = 214.29.
+        assert!((d.widths[0] - 142.86).abs() < 0.5, "narrow col 0");
+        assert!((d.widths[1] - 714.29).abs() < 0.5, "wide col 1");
+        assert!((d.widths[2] - 142.86).abs() < 0.5, "narrow col 2");
+    }
+
+    /// Dissimilar widths where the wide column is the only one with enough
+    /// slack to absorb the deficit. Narrow columns must stay pinned at max.
+    #[test]
+    fn permutation_dissimilar_columns_require_word_wrap() {
+        let max = [200.0, 800.0];
+        let min = [50.0, 300.0];
+        // sum_max = 1000, sum_min = 350. available = 700 → deficit = 300.
+        // slack = [150, 500]. col 1 alone has slack 500 ≥ 300 → wrap_set = {1}.
+        let available = 700.0;
+        let d = ftwa(&max, &min, available);
+        assert_decision_invariants(&d, &max, &min, available);
+        assert!(!d.needs_horizontal_scroll);
+        // Only the wide column wraps; narrow column pinned at max.
+        assert_eq!(d.widths[0], 200.0, "narrow col pinned at max");
+        assert!(d.widths[1] < 800.0, "wide col must shrink");
+        assert!(d.widths[1] >= 300.0, "wide col must not break token");
+    }
+
+    /// Dissimilar widths where even the wide column's min-content alone
+    /// exceeds the available viewport → §3.6 fallback.
+    #[test]
+    fn permutation_dissimilar_columns_exceed_viewport() {
+        let max = [300.0, 600.0];
+        let min = [200.0, 500.0];
+        let available = 500.0; // sum_min = 700, below
+        let d = ftwa(&max, &min, available);
+        assert_decision_invariants(&d, &max, &min, available);
+        assert!(d.needs_horizontal_scroll);
+        // min-content widths returned exactly.
+        assert_eq!(d.widths, vec![200.0, 500.0]);
+    }
 }

@@ -575,9 +575,9 @@ impl FastMdApp {
                 BackgroundMessage::FileLoaded { path, content } => {
                     self.pending_file_load = None;
                     if let Ok(content) = content {
-                        if let Some((yaml_val, md_content)) = parse_front_matter(&content) {
-                            self.tab_manager.current_yaml = Some(yaml_val);
-                            self.tab_manager.current_markdown = md_content.to_string();
+                        if let Some(fm) = parse_front_matter(&content) {
+                            self.tab_manager.current_yaml = Some(fm.yaml);
+                            self.tab_manager.current_markdown = fm.body.to_string();
                         } else {
                             self.tab_manager.current_yaml = None;
                             self.tab_manager.current_markdown = content;

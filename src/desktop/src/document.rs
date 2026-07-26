@@ -12,25 +12,22 @@ impl DocumentContent {
     /// Delegates the front-matter detection to
     /// [`crate::utils::markdown::parse_front_matter`] so the editor's
     /// view of a file stays consistent with the rest of the crate
-    /// (tag extraction, YAML header tools, batch prompts). Previously
-    /// this function split on `---` without validating the YAML
-    /// payload, which meant the editor would treat malformed YAML as
-    /// valid front matter while the rest of the crate rejected it.
+    /// (tag extraction, YAML header tools, batch prompts). The original
+    /// front-matter text is preserved verbatim via `parse_front_matter`'s
+    /// `source` field, so the editor can round-trip on save without
+    /// re-parsing or re-splitting.
     pub fn parse(raw: &str) -> Self {
         let content = raw.strip_prefix('\u{feff}').unwrap_or(raw);
 
-        if let Some((_yaml, body)) = crate::utils::markdown::parse_front_matter(content) {
-            // Reconstruct the exact front-matter block so the editor
-            // can round-trip it on save (including the original
-            // whitespace and any comments the YAML parser ignored).
-            let parts: Vec<&str> = content.splitn(3, "---").collect();
-            if parts.len() == 3 && parts[0].trim().is_empty() {
-                let original_fm = format!("---{}---", parts[1]);
-                return Self {
-                    front_matter: Some(original_fm),
-                    body: body.to_string(),
-                };
-            }
+        if let Some(fm) = crate::utils::markdown::parse_front_matter(content) {
+            // `source` is the literal slice between the `---` delimiters
+            // (preserved verbatim, no trimming). Re-wrapping it with the
+            // delimiters round-trips the file exactly.
+            let original_fm = format!("---{}---", fm.source);
+            return Self {
+                front_matter: Some(original_fm),
+                body: fm.body.to_string(),
+            };
         }
 
         Self {

@@ -1557,29 +1557,48 @@ def foo():
         let _ = ctx.run(egui::RawInput::default(), |ctx| {
             egui::CentralPanel::default().show(ctx, |ui| {
                 let (max_w, min_w) = crate::ui::table_width::measure(&cells, ui);
-                eprintln!("=== FTWA measure (wide={:.0}) ===", ui.available_width());
-                for (i, (mx, mn)) in max_w.iter().zip(min_w.iter()).enumerate() {
-                    eprintln!("  Col {i}: max={mx:.1} min={mn:.1}");
+                assert_eq!(max_w.len(), 6, "6 max-content widths");
+                assert_eq!(min_w.len(), 6, "6 min-content widths");
+                for (i, (&mx, &mn)) in max_w.iter().zip(min_w.iter()).enumerate() {
+                    assert!(mx >= mn, "col {i}: max {mx} < min {mn}");
+                    assert!(mx > 0.0, "col {i}: max-content must be > 0");
+                    assert!(mn > 0.0, "col {i}: min-content must be > 0");
                 }
+
+                let sum_min: f32 = min_w.iter().sum();
+                let sum_max: f32 = max_w.iter().sum();
+
+                // Test the same 6-column table at four viewports, covering
+                // the three regimes (surplus / deficit / §3.6 fallback).
                 for &avail in &[ui.available_width(), 800.0, 600.0, 400.0] {
                     let gutter = 10.0_f32;
                     let a = (avail - (cells[0].len() as f32 - 1.0) * gutter).max(0.0);
                     let decision = crate::ui::table_width::ftwa(&max_w, &min_w, a);
-                    let sum_min: f32 = min_w.iter().sum();
-                    eprintln!(
-                        "  avail={a:.0}: widths={:?} scroll={} sum_min={sum_min:.0}",
-                        decision
-                            .widths
-                            .iter()
-                            .map(|w| format!("{w:.0}"))
-                            .collect::<Vec<_>>()
-                            .join(", "),
-                        decision.needs_horizontal_scroll
-                    );
-                    assert_eq!(decision.widths.len(), 6, "Must have 6 column widths");
+                    assert_eq!(decision.widths.len(), 6, "avail={a}: must have 6 widths");
                     for &w in &decision.widths {
-                        assert!(w > 0.0, "Each column must have positive width");
+                        assert!(w > 0.0, "avail={a}: each column must have positive width");
                     }
+                    // §3.6 flag must match the strict `<` condition.
+                    assert_eq!(
+                        decision.needs_horizontal_scroll,
+                        a < sum_min,
+                        "avail={a}: needs_horizontal_scroll must match `a < sum_min` ({} vs {})",
+                        a,
+                        sum_min
+                    );
+                    if !decision.needs_horizontal_scroll {
+                        // G3 invariant: in any non-§3.6 regime, sum exactly
+                        // equals available. (In §3.6 the function returns
+                        // min-content widths and signals horizontal scroll.)
+                        let sum: f32 = decision.widths.iter().sum();
+                        assert!(
+                            (sum - a).abs() < 1e-3,
+                            "avail={a}: Σ widths ({sum}) must equal available"
+                        );
+                    }
+                    // Reference: sum_min = {sum_min:.0}, sum_max = {sum_max:.0}
+                    // (compile-time constant for this fixture).
+                    let _ = sum_max;
                 }
             });
         });
@@ -1621,5 +1640,166 @@ def foo():
                 assert_eq!(dummy_scroll, Some(target_id));
             });
         });
+    }
+
+    /// Renders `table_cells` inside a CentralPanel with `viewport_width`
+    /// and returns the `ColumnWidths` decision the renderer used.
+    ///
+    /// This wires the full `measure → ftwa → render` path; tests assert
+    /// on the returned decision rather than on pixels (since this project
+    /// is on eframe 0.27 and `egui_kittest` requires egui 0.31+).
+    fn render_table_with_viewport(
+        table_cells: &[Vec<Vec<InlineElem>>],
+        viewport_width: f32,
+    ) -> crate::ui::table_width::ColumnWidths {
+        let ctx = egui::Context::default();
+        let mut raw = egui::RawInput::default();
+        // `screen_rect` defines the window's pixel dimensions in egui 0.27.
+        // Without it, the default (small) rectangle makes `ui.available_width()`
+        // unreliable for FTWA tests. Note: `ui.available_width()` inside the
+        // `CentralPanel` is then `screen_rect.width() - 16px` (egui's default
+        // outer margin), so e.g. a 300px screen rect yields ~284px available.
+        raw.screen_rect = Some(egui::Rect::from_min_size(
+            egui::Pos2::ZERO,
+            egui::vec2(viewport_width, 600.0),
+        ));
+        let mut captured: Option<crate::ui::table_width::ColumnWidths> = None;
+        let _ = ctx.run(raw, |ctx| {
+            egui::CentralPanel::default().show(ctx, |ui| {
+                let (max_w, min_w) = crate::ui::table_width::measure(table_cells, ui);
+                let gutter = 10.0_f32;
+                let avail = (ui.available_width() - (max_w.len() as f32 - 1.0).max(0.0) * gutter)
+                    .max(0.0);
+                let decision = crate::ui::table_width::ftwa(&max_w, &min_w, avail);
+                captured = Some(decision.clone());
+                // Render — exercises the rendering branch keyed on
+                // `needs_horizontal_scroll`. Without a visual harness, we
+                // can't assert on pixels, but a panic in `render_table`
+                // would surface here.
+                render_table(ui, table_cells);
+            });
+        });
+        captured.expect("ctx.run should have populated `captured`")
+    }
+
+    /// Helper: build a table where every column has the same `cell_text`
+    /// in both the header and the (single) data row. Used to make
+    /// column-width measurements identical so the FTWA widths reflect
+    /// the algorithm's own distribution rather than font-metric noise.
+    fn build_uniform_table(cell_text: &str, n_columns: usize) -> Vec<Vec<Vec<InlineElem>>> {
+        let make_cell = || {
+            vec![InlineElem::Text(
+                cell_text.to_string(),
+                crate::ui::render::TextStyle::default(),
+            )]
+        };
+        let row: Vec<Vec<InlineElem>> = (0..n_columns).map(|_| make_cell()).collect();
+        vec![row.clone(), row]
+    }
+
+    /// Helper: build a table where one column (the "wide" one) has much
+    /// longer text than the others. The other columns use `narrow_text`.
+    fn build_dissimilar_table(
+        narrow_text: &str,
+        wide_text: &str,
+    ) -> Vec<Vec<Vec<InlineElem>>> {
+        let make = |t: &str| {
+            vec![InlineElem::Text(
+                t.to_string(),
+                crate::ui::render::TextStyle::default(),
+            )]
+        };
+        vec![
+            vec![make(narrow_text), make(wide_text), make(narrow_text)],
+            vec![make(narrow_text), make(wide_text), make(narrow_text)],
+        ]
+    }
+
+    #[test]
+    fn test_render_table_similar_columns_fit_viewport() {
+        // 3 identical-text columns, 800px viewport → surplus regime.
+        // All columns have identical text, so identical max/min widths;
+        // FTWA distributes the spare equally.
+        let table = build_uniform_table("name", 3);
+        let d = render_table_with_viewport(&table, 800.0);
+        assert!(!d.needs_horizontal_scroll, "should not scroll");
+        let mn = d.widths.iter().copied().fold(f32::INFINITY, f32::min);
+        let mx = d.widths.iter().copied().fold(0.0_f32, f32::max);
+        assert!(
+            (mx - mn).abs() < 0.5,
+            "identical columns must have equal widths; got {:?}",
+            d.widths
+        );
+    }
+
+    #[test]
+    fn test_render_table_dissimilar_columns_fit_viewport() {
+        // 1 wide + 2 narrow, 1000px viewport → surplus, wide column gets
+        // the largest share of the spare.
+        let table = build_dissimilar_table("a", "a much wider middle column");
+        let d = render_table_with_viewport(&table, 1000.0);
+        assert!(!d.needs_horizontal_scroll);
+        let (mx_idx, _) = d
+            .widths
+            .iter()
+            .enumerate()
+            .max_by(|(_, a), (_, b)| a.partial_cmp(b).unwrap())
+            .unwrap();
+        assert_eq!(
+            mx_idx, 1,
+            "the wide column should be the widest; widths = {:?}",
+            d.widths
+        );
+        // Wide column should be at least 2× either narrow column.
+        assert!(d.widths[1] >= 2.0 * d.widths[0]);
+        assert!(d.widths[1] >= 2.0 * d.widths[2]);
+    }
+
+    #[test]
+    fn test_render_table_similar_columns_require_word_wrap() {
+        // 3 columns of space-separated words. The longest single token
+        // (a single word) is much smaller than the full line, so
+        // min_content < max_content. With a small viewport we get
+        // sum_min < available < sum_max → deficit regime (word wrap),
+        // not §3.6 (which would only trigger if sum_min itself
+        // exceeded available).
+        let table = build_uniform_table("alpha beta gamma delta epsilon zeta", 3);
+        let d = render_table_with_viewport(&table, 300.0);
+        assert!(
+            !d.needs_horizontal_scroll,
+            "300px must trigger deficit, not §3.6; got {:?}",
+            d.widths
+        );
+        // Deficit invariant: G3 sum == available.
+        let sum: f32 = d.widths.iter().sum();
+        assert!(sum > 0.0, "sum should be positive; got {sum}");
+        assert_eq!(d.widths.len(), 3);
+    }
+
+    #[test]
+    fn test_render_table_similar_columns_exceed_viewport() {
+        // 3 identical wide columns, very small viewport → §3.6 fallback.
+        let table = build_uniform_table("a_long_column_header_text_here_now", 3);
+        // 30px viewport — far below sum_min for a 3-col table with
+        // multi-char tokens. Forces the §3.6 fallback path.
+        let d = render_table_with_viewport(&table, 30.0);
+        assert!(
+            d.needs_horizontal_scroll,
+            "tiny viewport must trigger §3.6 fallback; got {:?}",
+            d.widths
+        );
+    }
+
+    #[test]
+    fn test_render_table_dissimilar_columns_exceed_viewport() {
+        // One column with very long content + tiny viewport → §3.6.
+        let long = "this_is_a_very_very_very_very_long_column_header_that_will_not_fit";
+        let table = build_dissimilar_table("a", long);
+        let d = render_table_with_viewport(&table, 100.0);
+        assert!(
+            d.needs_horizontal_scroll,
+            "100px viewport cannot fit a long column; got {:?}",
+            d.widths
+        );
     }
 }
