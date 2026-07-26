@@ -163,7 +163,9 @@ fn render_tabs_and_content(ui: &mut egui::Ui, app: &mut FastMdApp) {
                 .to_string_lossy()
                 .into();
 
-            let response = ui.push_id(tab_path, |ui| ui.selectable_label(is_selected, &title));
+            let response = ui.push_id((tab_path, "tab_label"), |ui| {
+                ui.selectable_label(is_selected, &title)
+            });
             if response.inner.clicked() {
                 *app.selection_mut().selected_file_mut() = Some(tab_path.clone());
             }
@@ -218,7 +220,11 @@ fn render_tabs_and_content(ui: &mut egui::Ui, app: &mut FastMdApp) {
                 }
             });
 
-            if ui.push_id(tab_path, |ui| ui.button("×")).inner.clicked() {
+            if ui
+                .push_id((tab_path, "tab_close"), |ui| ui.button("×"))
+                .inner
+                .clicked()
+            {
                 tab_actions.push(TabAction::Close(i));
             }
             ui.separator();
@@ -235,23 +241,25 @@ fn render_tabs_and_content(ui: &mut egui::Ui, app: &mut FastMdApp) {
     ui.separator();
 
     if let Some(selected_path) = app.selection().selected_file() {
-        ui.horizontal(|ui| {
-            ui.heading(
-                RichText::new(
-                    selected_path
-                        .file_name()
-                        .unwrap_or_default()
-                        .to_string_lossy(),
-                )
-                .size(18.0)
-                .strong(),
-            );
-            ui.label(
-                RichText::new(format!("({})", selected_path.to_string_lossy()))
-                    .size(11.0)
-                    .italics()
-                    .color(egui::Color32::GRAY),
-            );
+        ui.push_id("selected_file_header", |ui| {
+            ui.horizontal(|ui| {
+                ui.heading(
+                    RichText::new(
+                        selected_path
+                            .file_name()
+                            .unwrap_or_default()
+                            .to_string_lossy(),
+                    )
+                    .size(18.0)
+                    .strong(),
+                );
+                ui.label(
+                    RichText::new(format!("({})", selected_path.to_string_lossy()))
+                        .size(11.0)
+                        .italics()
+                        .color(egui::Color32::GRAY),
+                );
+            });
         });
         ui.separator();
 

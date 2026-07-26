@@ -80,7 +80,7 @@ pub fn show_right_panel(app: &mut FastMdApp, parent_ui: &mut egui::Ui) {
                         let toc_snapshot = app.tab_manager.toc.clone();
                         for entry in &toc_snapshot {
                             let indent = calculate_indent(entry.level as usize);
-                            ui.push_id(entry.id, |ui| {
+                            ui.push_id((entry.id, "toc_item"), |ui| {
                                 ui.horizontal(|ui| {
                                     ui.add_space(indent);
                                     let label = egui::RichText::new(&entry.title)
