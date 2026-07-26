@@ -34,7 +34,24 @@ When working on this codebase, all AI agents must adhere strictly to the followi
 - Include examples in doc comments where they clarify usage.
 - Run `cargo doc --no-deps` to verify documentation builds without warnings.
 
-## 8. Quality Gate (Rust)
+## 8. String Constants and Reuse
+- Use string constants (e.g. `const` items) for repeat strings or user-facing literals rather than duplicating them inline.
+- Centralize such constants near the module or type they pertain to so they can be updated in one place.
+
+## 9. Prefer Existing Libraries
+- Prefer using available, well-maintained libraries (from `crates.io` or the existing dependency tree) over hand-coding equivalent functions.
+- Before implementing a utility from scratch, check whether an existing dependency already provides it.
+
+## 10. egui Best Practices
+- Follow egui's recommended patterns and idioms when building UI.
+- Follow egui testing best practices (e.g. using `egui::__run_test_ctx` / `State::test_ctx` style harnesses as appropriate) for deterministic UI tests.
+- Keep `update` methods side-effect free where possible and avoid storing unnecessary state in `egui::Id`s.
+
+## 11. Cyclomatic Complexity
+- Refactor code as required to limit cyclomatic complexity before adding new features on top of it.
+- Prefer splitting large functions, extracting helpers, and reducing nesting over introducing additional branches into already-complex code.
+
+## 12. Quality Gate (Rust)
 
 Before marking any task as complete, run the following and ensure they all pass cleanly:
 - `cargo check` — no errors or warnings
