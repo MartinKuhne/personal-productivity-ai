@@ -1305,7 +1305,11 @@ mod tests {
                 _ => None,
             })
             .collect();
-        assert_eq!(headings, vec![(1, "A".to_string()), (1, "B".to_string())], "consecutive headings: {events:?}");
+        assert_eq!(
+            headings,
+            vec![(1, "A".to_string()), (1, "B".to_string())],
+            "consecutive headings: {events:?}"
+        );
 
         // An empty list `- ` (item with no text). The parser should still
         // emit a FlushInline (with empty elems but bullet) so the bullet
@@ -1314,19 +1318,54 @@ mod tests {
         // but `needs_bullet` is true here, so the bullet *should* render.
         let events = parse_markdown_to_events("- ");
         assert!(
-            events
-                .iter()
-                .any(|e| matches!(e, RenderEvent::FlushInline { needs_bullet: true, .. })),
+            events.iter().any(|e| matches!(
+                e,
+                RenderEvent::FlushInline {
+                    needs_bullet: true,
+                    ..
+                }
+            )),
             "empty list item lost: {events:?}"
         );
 
         // A table with only the header row, no data rows. The Table event
         // should still emit (with 1 row), not be dropped.
         let events = parse_markdown_to_events("| H1 | H2 |\n|---|---|\n");
-        let table_event = events
+        let table_event = events.iter().find_map(|e| {
+            if let RenderEvent::Table(rows) = e {
+                Some(rows.len())
+            } else {
+                None
+            }
+        });
+        assert_eq!(
+            table_event,
+            Some(1),
+            "header-only table dropped: {events:?}"
+        );
+    }
+
+    // TODO(TDD follow-up): `# *italic*`, `# **bold**`, `# `code``,
+    // `# ~~strike~~`, `# [link](url)` all lose their inline
+    // formatting because `RenderEvent::Heading` stores `text: String`
+    // rather than `elems: Vec<InlineElem>`. The fix is to change the
+    // struct and the renderer; tracking the desired contract here so
+    // future work can express the assertion cleanly. Skipped in this
+    // PR — the refactor is broader than the high-value defect fixes.
+    #[test]
+    #[ignore = "tracked defect: heading inline formatting is lost; see TODO above"]
+    fn test_heading_preserves_inline_formatting() {
+        // Expected contract: `parse_markdown_to_events("# *hello*")`
+        // produces a `RenderEvent::Heading` whose elements carry the
+        // italic style, not just a plain `text: "hello"`.
+        let events = parse_markdown_to_events("# *hello*");
+        let heading_event = events
             .iter()
-            .find_map(|e| if let RenderEvent::Table(rows) = e { Some(rows.len()) } else { None });
-        assert_eq!(table_event, Some(1), "header-only table dropped: {events:?}");
+            .find(|e| matches!(e, RenderEvent::Heading { .. }));
+        assert!(
+            heading_event.is_some(),
+            "no heading event for `# *hello*`: {events:?}"
+        );
     }
 
     #[test]
@@ -1354,8 +1393,7 @@ mod tests {
                 1 => Just(format!("{table_row}\\n{table_sep}\\n{table_row}")),
                 1 => Just(link.to_string()),
             ];
-            proptest::collection::vec(inline, 0..8)
-                .prop_map(|v| v.join("\n\n"))
+            proptest::collection::vec(inline, 0..8).prop_map(|v| v.join("\n\n"))
         }
 
         let mut runner = proptest::test_runner::TestRunner::default();

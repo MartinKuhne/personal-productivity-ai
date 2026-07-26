@@ -538,8 +538,7 @@ mod tests {
 
         let max = [1.0, 1.0];
         let min = [0.0, 0.0];
-        let result_avail =
-            std::panic::catch_unwind(|| ftwa(&max, &min, f32::NAN));
+        let result_avail = std::panic::catch_unwind(|| ftwa(&max, &min, f32::NAN));
         assert!(
             result_avail.is_err(),
             "NaN available must panic; got {result_avail:?}"
