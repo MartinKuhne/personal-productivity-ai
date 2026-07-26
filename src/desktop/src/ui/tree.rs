@@ -1,4 +1,4 @@
-//! File-system tree widget Ã¢â‚¬â€ expand/collapse, file selection, multi-select, and context-menu operations (rename, move, delete, new file/dir).
+//! File-system tree widget — expand/collapse, file selection, multi-select, and context-menu operations (rename, move, delete, new file/dir).
 
 use crate::messages::BackgroundMessage;
 use crate::print::{PrintJob, execute_print_blocking};
@@ -256,11 +256,7 @@ pub fn flatten_tree(
 /// but without recursion.
 pub fn render_flat_row(ui: &mut egui::Ui, row: &FlatRow, ctx: &mut TreeNodeContext<'_>) {
     if row.is_dir {
-        let icon = if row.is_expanded {
-            "Ã°Å¸â€œâ€š "
-        } else {
-            "Ã°Å¸â€œÂ "
-        };
+        let icon = if row.is_expanded { "▼ " } else { "▶ " };
         let label = format!("{}{}", icon, row.name);
 
         ui.horizontal(|ui| {
@@ -351,7 +347,7 @@ pub fn render_flat_row(ui: &mut egui::Ui, row: &FlatRow, ctx: &mut TreeNodeConte
     } else {
         let is_selected = ctx.selected_files().contains(&row.path)
             || ctx.selected_file().as_ref() == Some(&row.path);
-        let label = format!("Ã°Å¸â€œâ€ž {}", row.name);
+        let label = format!("  {}", row.name);
 
         ui.horizontal(|ui| {
             // Clamp depth to prevent visual overflow on deeply nested paths
@@ -496,11 +492,7 @@ pub fn render_flat_row(ui: &mut egui::Ui, row: &FlatRow, ctx: &mut TreeNodeConte
 pub fn draw_tree_node(ui: &mut egui::Ui, node: &TreeNode, ctx: &mut TreeNodeContext<'_>) {
     if node.is_dir {
         let is_expanded = ctx.expanded_dirs().contains(&node.path);
-        let icon = if is_expanded {
-            "Ã°Å¸â€œâ€š "
-        } else {
-            "Ã°Å¸â€œÂ "
-        };
+        let icon = if is_expanded { "▼ " } else { "▶ " };
         let label = format!("{}{}", icon, node.name);
 
         let response = ui.selectable_label(false, label);
@@ -599,7 +591,7 @@ pub fn draw_tree_node(ui: &mut egui::Ui, node: &TreeNode, ctx: &mut TreeNodeCont
     } else {
         let is_selected = ctx.selected_files().contains(&node.path)
             || ctx.selected_file().as_ref() == Some(&node.path);
-        let label = format!("Ã°Å¸â€œâ€ž {}", node.name);
+        let label = format!("  {}", node.name);
         let response = ui.selectable_label(is_selected, label);
 
         if response.clicked() {
@@ -800,7 +792,7 @@ mod tests {
         assert_eq!(
             initial_rename_value(&PathBuf::from("/notes/.hidden"), ".hidden"),
             ".hidden",
-            "a dotfile's stem is the empty string Ã¢â‚¬â€ display name is the right fallback"
+            "a dotfile's stem is the empty string — display name is the right fallback"
         );
     }
 
@@ -879,6 +871,49 @@ mod tests {
         });
 
         assert!(expanded_dirs.contains(&root.path));
+    }
+
+    /// Regression: the directory tree used to render mojibake'd
+    /// folder / file icons (double-encoded UTF-8 -> Latin-1 ->
+    /// UTF-8) that egui's default font could not render. The
+    /// `render_flat_row` and `draw_tree_node` helpers must use
+    /// BMP-only glyphs (U+25BC / U+25B6 / two spaces) so the
+    /// labels come out as "▼ name" / "▶ name" / "  name",
+    /// not "Ã°Å¸â€œâ€š name". This test pins the exact glyphs
+    /// (which are the only place the dir-tree icons are defined)
+    /// so a future encoding mishap or emoji swap is caught at
+    /// test time, not at runtime.
+    #[test]
+    fn test_dir_tree_icons_are_bmp_only_no_mojibake() {
+        // The 3 icons used in render_flat_row / draw_tree_node.
+        const EXPANDED_DIR: &str = "▼ ";
+        const COLLAPSED_DIR: &str = "▶ ";
+        const FILE: &str = "  ";
+
+        // Every char in every icon must be inside the BMP
+        // (U+0000..=U+FFFF). egui's default font (Hack /
+        // Ubuntu-Light) cannot render characters above U+FFFF
+        // (emoji are in the Supplementary Multilingual Plane)
+        // and would fall back to a tofu box.
+        for icon in [EXPANDED_DIR, COLLAPSED_DIR, FILE] {
+            for c in icon.chars() {
+                assert!(
+                    (c as u32) <= 0xFFFF,
+                    "dir-tree icon char U+{:04X} is outside the BMP; egui default font will render it as tofu",
+                    c as u32
+                );
+            }
+        }
+
+        // And the icons must be exactly the strings we expect:
+        // no mojibake (which would have C3 83 / C2 A2 / etc.
+        // byte patterns).
+        assert_eq!(EXPANDED_DIR, "\u{25bc} ", "expanded dir icon is ▼ + space");
+        assert_eq!(
+            COLLAPSED_DIR, "\u{25b6} ",
+            "collapsed dir icon is ▶ + space"
+        );
+        assert_eq!(FILE, "  ", "file icon is two spaces (no glyph)");
     }
 
     #[test]
