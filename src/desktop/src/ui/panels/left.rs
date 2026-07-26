@@ -555,11 +555,13 @@ mod tests {
         app.layout_mut().left_panel_width = Some(294.7);
         app.layout_mut().left_panel_dirty = false;
 
-        let mut raw_input = egui::RawInput::default();
-        raw_input.screen_rect = Some(egui::Rect::from_min_size(
-            egui::Pos2::ZERO,
-            egui::vec2(1024.0, 768.0),
-        ));
+        let raw_input = egui::RawInput {
+            screen_rect: Some(egui::Rect::from_min_size(
+                egui::Pos2::ZERO,
+                egui::vec2(1024.0, 768.0),
+            )),
+            ..egui::RawInput::default()
+        };
 
         // Prime egui data memory with stored PanelState at width 294.7px
         ctx.data_mut(|d| {

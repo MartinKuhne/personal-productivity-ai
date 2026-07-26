@@ -237,7 +237,7 @@ mod tests {
 
     #[test]
     fn test_error_trait_source() {
-        let io_err = std::io::Error::new(std::io::ErrorKind::Other, "test");
+        let io_err = std::io::Error::other("test");
         let err = AgentError::IoError(io_err);
         assert!(std::error::Error::source(&err).is_some());
 
@@ -256,7 +256,7 @@ mod tests {
             AgentError::JsonParseError("test".into()),
             AgentError::InvalidResponseSchema("test".into()),
             AgentError::MissingApiKey,
-            AgentError::IoError(std::io::Error::new(std::io::ErrorKind::Other, "test")),
+            AgentError::IoError(std::io::Error::other("test")),
             AgentError::ToolError("test".into()),
             AgentError::Timeout,
             AgentError::SerializationError("test".into()),

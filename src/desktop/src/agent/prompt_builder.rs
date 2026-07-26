@@ -154,9 +154,11 @@ mod tests {
 
     #[test]
     fn test_base_prompt_with_user_info() {
-        let mut config = AppConfig::default();
-        config.user_name = Some("Alice".to_string());
-        config.user_gender = Some("female".to_string());
+        let config = AppConfig {
+            user_name: Some("Alice".to_string()),
+            user_gender: Some("female".to_string()),
+            ..AppConfig::default()
+        };
         let prompt = build_base_prompt(&config);
         assert!(prompt.contains("Alice"));
         assert!(prompt.contains("female"));
@@ -164,8 +166,10 @@ mod tests {
 
     #[test]
     fn test_base_prompt_with_extension() {
-        let mut config = AppConfig::default();
-        config.system_prompt_extension = Some("Custom instructions.".to_string());
+        let config = AppConfig {
+            system_prompt_extension: Some("Custom instructions.".to_string()),
+            ..AppConfig::default()
+        };
         let prompt = build_base_prompt(&config);
         assert!(prompt.contains("Custom instructions."));
     }

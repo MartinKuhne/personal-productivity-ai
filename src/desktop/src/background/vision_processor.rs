@@ -270,15 +270,12 @@ mod tests {
                 body
             );
             std::thread::spawn(move || {
-                for stream in listener.incoming() {
-                    if let Ok(mut stream) = stream {
-                        use std::io::{Read, Write};
-                        let mut buf = [0; 4096];
-                        let _ = stream.read(&mut buf);
-                        let _ = stream.write_all(response.as_bytes());
-                        std::thread::sleep(std::time::Duration::from_millis(200));
-                        break;
-                    }
+                if let Some(mut stream) = listener.incoming().flatten().next() {
+                    use std::io::{Read, Write};
+                    let mut buf = [0; 4096];
+                    let _ = stream.read(&mut buf);
+                    let _ = stream.write_all(response.as_bytes());
+                    std::thread::sleep(std::time::Duration::from_millis(200));
                 }
             });
             format!("http://127.0.0.1:{}", port)
@@ -343,15 +340,12 @@ mod tests {
                 body
             );
             std::thread::spawn(move || {
-                for stream in listener.incoming() {
-                    if let Ok(mut stream) = stream {
-                        use std::io::{Read, Write};
-                        let mut buf = [0; 4096];
-                        let _ = stream.read(&mut buf);
-                        let _ = stream.write_all(response.as_bytes());
-                        std::thread::sleep(std::time::Duration::from_millis(200));
-                        break;
-                    }
+                if let Some(mut stream) = listener.incoming().flatten().next() {
+                    use std::io::{Read, Write};
+                    let mut buf = [0; 4096];
+                    let _ = stream.read(&mut buf);
+                    let _ = stream.write_all(response.as_bytes());
+                    std::thread::sleep(std::time::Duration::from_millis(200));
                 }
             });
             format!("http://127.0.0.1:{}", port)
@@ -399,15 +393,12 @@ mod tests {
                 body
             );
             std::thread::spawn(move || {
-                for stream in listener.incoming() {
-                    if let Ok(mut stream) = stream {
-                        use std::io::{Read, Write};
-                        let mut buf = [0; 4096];
-                        let _ = stream.read(&mut buf);
-                        let _ = stream.write_all(response.as_bytes());
-                        std::thread::sleep(std::time::Duration::from_millis(200));
-                        break;
-                    }
+                if let Some(mut stream) = listener.incoming().flatten().next() {
+                    use std::io::{Read, Write};
+                    let mut buf = [0; 4096];
+                    let _ = stream.read(&mut buf);
+                    let _ = stream.write_all(response.as_bytes());
+                    std::thread::sleep(std::time::Duration::from_millis(200));
                 }
             });
             format!("http://127.0.0.1:{}", port)

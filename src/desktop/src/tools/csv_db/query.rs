@@ -148,8 +148,10 @@ mod tests {
     #[test]
     fn test_query_and_delete() {
         let dir = tempdir().unwrap();
-        let mut config = AppConfig::default();
-        config.csv_db_path = Some(dir.path().to_string_lossy().to_string());
+        let config = AppConfig {
+            csv_db_path: Some(dir.path().to_string_lossy().to_string()),
+            ..AppConfig::default()
+        };
 
         let _ = super::super::operations::create_csv(
             &config,

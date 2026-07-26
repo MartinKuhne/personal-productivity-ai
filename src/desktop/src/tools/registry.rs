@@ -1412,7 +1412,7 @@ mod tests {
                 priority: 100,
             });
         let mut libs: Vec<_> = config.content_libraries.iter().collect();
-        libs.sort_by(|a, b| b.priority.cmp(&a.priority));
+        libs.sort_by_key(|b| std::cmp::Reverse(b.priority));
         assert_eq!(libs[0].name, "High");
         assert_eq!(libs[1].name, "Low");
     }
@@ -1465,24 +1465,22 @@ mod tests {
     #[test]
     fn test_tool_call_debug_mode_feature_flag() {
         let mut config = AppConfig::default();
-        assert_eq!(
-            config
+        assert!(
+            !config
                 .feature_flags
                 .get("toolCallDebugMode")
                 .copied()
-                .unwrap_or(false),
-            false
+                .unwrap_or(false)
         );
         config
             .feature_flags
             .insert("toolCallDebugMode".to_string(), true);
-        assert_eq!(
+        assert!(
             config
                 .feature_flags
                 .get("toolCallDebugMode")
                 .copied()
-                .unwrap_or(false),
-            true
+                .unwrap_or(false)
         );
         let ctx = test_ctx(&config);
         let res = execute_tool(&ctx, "unknown_tool", "{}");

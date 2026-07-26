@@ -215,6 +215,58 @@ impl<T: Clone> BusReader<T> {
     }
 }
 
+// =====================================================================
+// FileEventProducer
+// =====================================================================
+
+/// A thin handle for publishing [`FileEvent`]s from code that mutates
+/// the filesystem (UI handlers, tool implementations, the agent, etc.).
+pub struct FileEventProducer<'a> {
+    bus: &'a Bus<FileEvent>,
+}
+
+impl<'a> FileEventProducer<'a> {
+    pub fn new(bus: &'a Bus<FileEvent>) -> Self {
+        Self { bus }
+    }
+
+    pub fn publish_discovered(&self, path: &std::path::Path) {
+        self.bus
+            .publish(FileEvent::discovered_one(path.to_path_buf()));
+    }
+
+    pub fn publish_updated(&self, path: &std::path::Path) {
+        self.bus.publish(FileEvent::updated_one(path.to_path_buf()));
+    }
+
+    pub fn publish_removed(&self, path: &std::path::Path) {
+        self.bus.publish(FileEvent::removed_one(path.to_path_buf()));
+    }
+
+    pub fn publish_rename(&self, old: &std::path::Path, new: &std::path::Path) {
+        self.bus.publish(FileEvent::removed_one(old.to_path_buf()));
+        self.bus
+            .publish(FileEvent::discovered_one(new.to_path_buf()));
+    }
+
+    pub fn publish_dir_discovered(&self, path: &std::path::Path) {
+        self.bus
+            .publish(FileEvent::dir_discovered_one(path.to_path_buf()));
+    }
+
+    pub fn publish_dir_removed(&self, path: &std::path::Path) {
+        self.bus
+            .publish(FileEvent::dir_removed_one(path.to_path_buf()));
+    }
+
+    pub fn publish_dir_rename(&self, old: &std::path::Path, new: &std::path::Path) {
+        self.bus
+            .publish(FileEvent::dir_removed_one(old.to_path_buf()));
+        self.bus
+            .publish(FileEvent::dir_discovered_one(new.to_path_buf()));
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -498,57 +550,5 @@ mod tests {
         let e2 = reader.recv_timeout(Duration::from_millis(100)).unwrap();
         assert_eq!(e2.kind, FileEventKind::DirDiscovered);
         assert_eq!(e2.paths, vec![new]);
-    }
-}
-
-// =====================================================================
-// FileEventProducer
-// =====================================================================
-
-/// A thin handle for publishing [`FileEvent`]s from code that mutates
-/// the filesystem (UI handlers, tool implementations, the agent, etc.).
-pub struct FileEventProducer<'a> {
-    bus: &'a Bus<FileEvent>,
-}
-
-impl<'a> FileEventProducer<'a> {
-    pub fn new(bus: &'a Bus<FileEvent>) -> Self {
-        Self { bus }
-    }
-
-    pub fn publish_discovered(&self, path: &std::path::Path) {
-        self.bus
-            .publish(FileEvent::discovered_one(path.to_path_buf()));
-    }
-
-    pub fn publish_updated(&self, path: &std::path::Path) {
-        self.bus.publish(FileEvent::updated_one(path.to_path_buf()));
-    }
-
-    pub fn publish_removed(&self, path: &std::path::Path) {
-        self.bus.publish(FileEvent::removed_one(path.to_path_buf()));
-    }
-
-    pub fn publish_rename(&self, old: &std::path::Path, new: &std::path::Path) {
-        self.bus.publish(FileEvent::removed_one(old.to_path_buf()));
-        self.bus
-            .publish(FileEvent::discovered_one(new.to_path_buf()));
-    }
-
-    pub fn publish_dir_discovered(&self, path: &std::path::Path) {
-        self.bus
-            .publish(FileEvent::dir_discovered_one(path.to_path_buf()));
-    }
-
-    pub fn publish_dir_removed(&self, path: &std::path::Path) {
-        self.bus
-            .publish(FileEvent::dir_removed_one(path.to_path_buf()));
-    }
-
-    pub fn publish_dir_rename(&self, old: &std::path::Path, new: &std::path::Path) {
-        self.bus
-            .publish(FileEvent::dir_removed_one(old.to_path_buf()));
-        self.bus
-            .publish(FileEvent::dir_discovered_one(new.to_path_buf()));
     }
 }

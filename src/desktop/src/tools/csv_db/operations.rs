@@ -186,10 +186,7 @@ mod tests {
     impl std::io::Write for FailingWriter {
         fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
             if self.written >= self.fail_after {
-                return Err(std::io::Error::new(
-                    std::io::ErrorKind::Other,
-                    "simulated mid-write failure",
-                ));
+                return Err(std::io::Error::other("simulated mid-write failure"));
             }
             let take = (self.fail_after - self.written).min(buf.len());
             self.written += take;
@@ -203,8 +200,10 @@ mod tests {
     #[test]
     fn test_create_and_list_and_add_rows() {
         let dir = tempdir().unwrap();
-        let mut config = AppConfig::default();
-        config.csv_db_path = Some(dir.path().to_string_lossy().to_string());
+        let config = AppConfig {
+            csv_db_path: Some(dir.path().to_string_lossy().to_string()),
+            ..AppConfig::default()
+        };
 
         let create_input = CreateCsvInput {
             db_name: "test_db".to_string(),

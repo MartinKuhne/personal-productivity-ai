@@ -8,6 +8,21 @@ pub use crate::markdown::{
     parse_markdown_to_events, parse_yaml_to_pairs,
 };
 
+/// Dark gray stroke used as the border around every markdown table cell.
+///
+/// Matches the `from_gray(40)` convention shared by `render_code_block`
+/// (code block outline) and `render_yaml_table` (YAML metadata table
+/// outline) so all "outlined" surfaces look the same.
+///
+/// The stroke is 1 px wide and the frame that carries it uses zero
+/// inner/outer margin, so the only space the border consumes inside
+/// the Grid cell is its own 1 px on each side — see
+/// `render_table_cell` for how the pinned-width path compensates.
+const TABLE_CELL_STROKE: egui::Stroke = egui::Stroke {
+    width: 1.0,
+    color: egui::Color32::from_gray(40),
+};
+
 /// Purpose: Renders inline markdown elements.
 /// Inputs: `ui` (mut), `elems`, `needs_bullet`, `task_checked`, `indent`, `wrap`
 /// Outputs: None
@@ -290,65 +305,85 @@ fn render_heading(
 /// `ui.horizontal` (no wrap) so the cell reports its full single-line intrinsic
 /// width to the parent `Grid`; any overflow is handled by the wrapping
 /// `ScrollArea` (current pre-FTWA behaviour).
+///
+/// Every cell is wrapped in a 1 px dark-gray `Frame` (see `TABLE_CELL_STROKE`)
+/// so the rendered table shows a visible border around every cell. The frame
+/// uses zero `inner_margin` / `outer_margin`; the stroke is drawn on the
+/// inside of the cell's rect, so the cell's content area is shrunk by
+/// `TABLE_CELL_STROKE.width` (1 px) on each side. In the pinned-width path
+/// the inner layout is therefore given `w - 2 * stroke_width` so the text
+/// still fits the FTWA-assigned column.
 fn render_table_cell(ui: &mut egui::Ui, cell: &[InlineElem], pinned_width: Option<f32>) {
-    if cell.is_empty() {
-        if let Some(w) = pinned_width {
-            let min_h = ui.text_style_height(&egui::TextStyle::Body);
-            ui.allocate_at_least(egui::vec2(w, min_h), egui::Sense::hover());
-        } else {
-            ui.label("");
+    let cell_frame = egui::Frame::NONE
+        .inner_margin(egui::Margin::ZERO)
+        .outer_margin(egui::Margin::ZERO)
+        .stroke(TABLE_CELL_STROKE);
+    // The frame's `total_margin()` is `stroke.width` on each side, so the
+    // content rect is reduced by `stroke.width` per side. The cell's
+    // *pinned* width `w` is the Grid column width; the inner layout must
+    // use the post-frame width so its text wraps inside the visible cell.
+    let inner_avail_w = pinned_width.map(|w| (w - 2.0 * TABLE_CELL_STROKE.width).max(0.0));
+
+    cell_frame.show(ui, |ui| {
+        if cell.is_empty() {
+            if let Some(w) = inner_avail_w {
+                let min_h = ui.text_style_height(&egui::TextStyle::Body);
+                ui.allocate_at_least(egui::vec2(w, min_h), egui::Sense::hover());
+            } else {
+                ui.label("");
+            }
+            return;
         }
-        return;
-    }
-    let content = |ui: &mut egui::Ui| {
-        ui.spacing_mut().item_spacing.x = 0.0;
-        for elem in cell {
-            match elem {
-                InlineElem::Text(t, style) => {
-                    let mut rt = RichText::new(t);
-                    if style.bold {
-                        rt = rt.strong();
+        let content = |ui: &mut egui::Ui| {
+            ui.spacing_mut().item_spacing.x = 0.0;
+            for elem in cell {
+                match elem {
+                    InlineElem::Text(t, style) => {
+                        let mut rt = RichText::new(t);
+                        if style.bold {
+                            rt = rt.strong();
+                        }
+                        if style.italic {
+                            rt = rt.italics();
+                        }
+                        if style.code {
+                            rt = rt
+                                .monospace()
+                                .background_color(egui::Color32::from_gray(40));
+                        }
+                        if style.strikethrough {
+                            rt = rt.strikethrough();
+                        }
+                        ui.add(egui::Label::new(rt).wrap());
                     }
-                    if style.italic {
-                        rt = rt.italics();
+                    InlineElem::Link(url, text) => {
+                        ui.hyperlink_to(text, url);
                     }
-                    if style.code {
-                        rt = rt
-                            .monospace()
-                            .background_color(egui::Color32::from_gray(40));
+                    InlineElem::Image(url) => {
+                        ui.label(format!("[Image: {}]", url));
                     }
-                    if style.strikethrough {
-                        rt = rt.strikethrough();
+                    InlineElem::Html(html) => {
+                        ui.label(RichText::new(html).italics().color(egui::Color32::GRAY));
                     }
-                    ui.add(egui::Label::new(rt).wrap());
-                }
-                InlineElem::Link(url, text) => {
-                    ui.hyperlink_to(text, url);
-                }
-                InlineElem::Image(url) => {
-                    ui.label(format!("[Image: {}]", url));
-                }
-                InlineElem::Html(html) => {
-                    ui.label(RichText::new(html).italics().color(egui::Color32::GRAY));
-                }
-                InlineElem::SoftBreak => {
-                    ui.label(" ");
+                    InlineElem::SoftBreak => {
+                        ui.label(" ");
+                    }
                 }
             }
+        };
+        if let Some(w) = inner_avail_w {
+            // Use `allocate_ui_with_layout` so the child Ui's `min_rect` is
+            // fed back to the parent via `advance_cursor_after_rect` (inside
+            // `scope_dyn`). The previous `allocate_at_least(vec2(w, 0.0))` +
+            // `new_child` pattern allocated zero height and never reported
+            // the child's actual height, causing Grid rows to overlap when
+            // cells wrapped to multiple lines.
+            let layout = egui::Layout::left_to_right(egui::Align::Min).with_main_wrap(true);
+            ui.allocate_ui_with_layout(egui::vec2(w, 0.0), layout, content);
+        } else {
+            ui.horizontal(content);
         }
-    };
-    if let Some(w) = pinned_width {
-        // Use `allocate_ui_with_layout` so the child Ui's `min_rect` is
-        // fed back to the parent via `advance_cursor_after_rect` (inside
-        // `scope_dyn`). The previous `allocate_at_least(vec2(w, 0.0))` +
-        // `new_child` pattern allocated zero height and never reported
-        // the child's actual height, causing Grid rows to overlap when
-        // cells wrapped to multiple lines.
-        let layout = egui::Layout::left_to_right(egui::Align::Min).with_main_wrap(true);
-        ui.allocate_ui_with_layout(egui::vec2(w, 0.0), layout, content);
-    } else {
-        ui.horizontal(content);
-    }
+    });
 }
 
 /// Purpose: Renders a table using the Fair Table Width Algorithm (FTWA).
@@ -555,8 +590,6 @@ pub fn render_markdown(
 /// Toggles the checkbox marker for the Nth task list item in the
 /// markdown source. Called after rendering when the user clicks a
 /// task checkbox, so the change persists across re-parses.
-///
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -718,10 +751,8 @@ mod tests {
                                 has_link = true;
                             }
                         }
-                        InlineElem::Image(url) => {
-                            if url == "https://example.com/a.jpg" {
-                                has_image = true;
-                            }
+                        InlineElem::Image(url) if url == "https://example.com/a.jpg" => {
+                            has_image = true;
                         }
                         _ => {}
                     }
@@ -752,21 +783,21 @@ mod tests {
                 ..
             } = ev
             {
-                if let Some(false) = task_checked {
-                    if elems.iter().any(|e| match e {
+                if let Some(false) = task_checked
+                    && elems.iter().any(|e| match e {
                         InlineElem::Text(t, _) => t == "Task 1",
                         _ => false,
-                    }) {
-                        found_unchecked = true;
-                    }
+                    })
+                {
+                    found_unchecked = true;
                 }
-                if let Some(true) = task_checked {
-                    if elems.iter().any(|e| match e {
+                if let Some(true) = task_checked
+                    && elems.iter().any(|e| match e {
                         InlineElem::Text(t, _) => t == "Task 2",
                         _ => false,
-                    }) {
-                        found_checked = true;
-                    }
+                    })
+                {
+                    found_checked = true;
                 }
             }
         }
@@ -1117,7 +1148,7 @@ mod tests {
             })
             .expect("must have a Heading event");
         assert_eq!(heading.0, 1);
-        assert_eq!(heading_plain_text(&heading.1), "hello");
+        assert_eq!(heading_plain_text(heading.1), "hello");
         // At least one elem carries the italic style.
         assert!(
             heading.1.iter().any(|e| matches!(
@@ -1512,16 +1543,18 @@ def foo():
         viewport_width: f32,
     ) -> crate::ui::table_width::ColumnWidths {
         let ctx = egui::Context::default();
-        let mut raw = egui::RawInput::default();
         // `screen_rect` defines the window's pixel dimensions in egui 0.27.
         // Without it, the default (small) rectangle makes `ui.available_width()`
         // unreliable for FTWA tests. Note: `ui.available_width()` inside the
         // `CentralPanel` is then `screen_rect.width() - 16px` (egui's default
         // outer margin), so e.g. a 300px screen rect yields ~284px available.
-        raw.screen_rect = Some(egui::Rect::from_min_size(
-            egui::Pos2::ZERO,
-            egui::vec2(viewport_width, 600.0),
-        ));
+        let raw = egui::RawInput {
+            screen_rect: Some(egui::Rect::from_min_size(
+                egui::Pos2::ZERO,
+                egui::vec2(viewport_width, 600.0),
+            )),
+            ..egui::RawInput::default()
+        };
         let mut captured: Option<crate::ui::table_width::ColumnWidths> = None;
         let _ = ctx.run_ui(raw, |ui| {
             egui::CentralPanel::default().show(ui, |ui| {
@@ -1657,6 +1690,118 @@ def foo():
             "100px viewport cannot fit a long column; got {:?}",
             d.widths
         );
+    }
+
+    /// Counts the paint-shape rectangles that carry the table cell border
+    /// stroke (`TABLE_CELL_STROKE`) and have the default `Frame::NONE`
+    /// transparent fill. A `Frame::NONE` cell wrapper paints exactly one
+    /// such shape per cell, so this also counts as "how many cells got
+    /// bordered".
+    fn count_table_cell_borders(output: &egui::FullOutput) -> usize {
+        use eframe::epaint::{Color32, Shape, StrokeKind};
+        output
+            .shapes
+            .iter()
+            .filter(|cs| {
+                let Shape::Rect(rect) = &cs.shape else {
+                    return false;
+                };
+                rect.fill == Color32::TRANSPARENT
+                    && rect.stroke == TABLE_CELL_STROKE
+                    && rect.stroke_kind == StrokeKind::Inside
+            })
+            .count()
+    }
+
+    /// Renders `table_cells` in a wide viewport so the FTWA path runs
+    /// (not the §3.6 horizontal-scroll fallback) and returns the
+    /// `FullOutput` for shape inspection.
+    fn render_table_with_paint_output(
+        table_cells: &[Vec<Vec<InlineElem>>],
+    ) -> egui::FullOutput {
+        let ctx = egui::Context::default();
+        let raw = egui::RawInput {
+            screen_rect: Some(egui::Rect::from_min_size(
+                egui::Pos2::ZERO,
+                egui::vec2(800.0, 600.0),
+            )),
+            ..egui::RawInput::default()
+        };
+        ctx.run_ui(raw, |ui| {
+            egui::CentralPanel::default().show(ui, |ui| {
+                // 800px viewport with 3 narrow columns guarantees the
+                // FTWA path is taken (no horizontal-scroll fallback).
+                render_table(ui, table_cells, 0);
+            });
+        })
+    }
+
+    /// The FTWA-pinned path must draw one `TABLE_CELL_STROKE` border
+    /// rectangle for every cell in the table — that is the user-visible
+    /// "dark gray line around all table cells" requirement.
+    #[test]
+    fn test_render_table_draws_border_around_every_cell_ftwa_path() {
+        // 2 rows × 3 columns = 6 cells. Mixed content (plain text +
+        // empty) exercises both the empty-cell branch and the
+        // content-rendering branch in `render_table_cell`.
+        let make = |t: &str| {
+            vec![InlineElem::Text(
+                t.to_string(),
+                crate::ui::render::TextStyle::default(),
+            )]
+        };
+        let table: Vec<Vec<Vec<InlineElem>>> = vec![
+            vec![make("h1"), make("h2"), make("h3")],
+            vec![make("a"), vec![], make("c")],
+        ];
+        let expected_cells: usize = table.iter().map(|r| r.len()).sum();
+        assert_eq!(expected_cells, 6);
+
+        let output = render_table_with_paint_output(&table);
+        let bordered = count_table_cell_borders(&output);
+        assert_eq!(
+            bordered, expected_cells,
+            "every cell must get a `TABLE_CELL_STROKE` border; got {bordered} \
+             for {expected_cells} cells"
+        );
+    }
+
+    /// The §3.6 horizontal-scroll fallback path (taken when even
+    /// min-content cannot fit the viewport) must also draw a border
+    /// around every cell — the user-facing requirement is path-agnostic.
+    #[test]
+    fn test_render_table_draws_border_around_every_cell_fallback_path() {
+        // 3 columns of single very long tokens, tiny viewport → §3.6.
+        let table = build_uniform_table("a_long_column_header_text_here_now", 3);
+        let d = render_table_with_viewport(&table, 30.0);
+        assert!(d.needs_horizontal_scroll, "must be on the fallback path");
+
+        let output = render_table_with_paint_output(&table);
+        let expected_cells: usize = table.iter().map(|r| r.len()).sum();
+        let bordered = count_table_cell_borders(&output);
+        assert_eq!(
+            bordered, expected_cells,
+            "fallback path must also border every cell; got {bordered} \
+             for {expected_cells} cells"
+        );
+    }
+
+    /// Belt-and-braces: a single-cell table is degenerate but must still
+    /// produce exactly one border shape (catches off-by-one frame
+    /// allocations at row/column boundaries).
+    #[test]
+    fn test_render_table_single_cell_borders_once() {
+        let make = |t: &str| {
+            vec![InlineElem::Text(
+                t.to_string(),
+                crate::ui::render::TextStyle::default(),
+            )]
+        };
+        let table: Vec<Vec<Vec<InlineElem>>> = vec![vec![make("solo")]];
+
+        let output = render_table_with_paint_output(&table);
+        let bordered = count_table_cell_borders(&output);
+        assert_eq!(bordered, 1, "a 1×1 table must draw exactly one border");
     }
 
     // --- P0-2: click-handler coverage ---------------------------------

@@ -1016,13 +1016,11 @@ mod tests {
             body_str
         );
         thread::spawn(move || {
-            for stream in listener.incoming() {
-                if let Ok(mut stream) = stream {
-                    let mut buf = [0; 4096];
-                    let _ = stream.read(&mut buf);
-                    let _ = stream.write_all(response_str.as_bytes());
-                    std::thread::sleep(std::time::Duration::from_millis(200));
-                }
+            for mut stream in listener.incoming().flatten() {
+                let mut buf = [0; 4096];
+                let _ = stream.read(&mut buf);
+                let _ = stream.write_all(response_str.as_bytes());
+                std::thread::sleep(std::time::Duration::from_millis(200));
             }
         });
         format!("http://127.0.0.1:{}", port)
@@ -1267,23 +1265,22 @@ mod tests {
             .install_default()
             .ok();
         // Build a response with 3 emails — all should fit on page 1 of size 10.
-        let body = format!(
-            r#"{{
-                "apiUrl": "{{API_URL}}",
-                "primaryAccounts": {{"urn:ietf:params:jmap:mail": "acc1"}},
+        let body = r#"{
+                "apiUrl": "{API_URL}",
+                "primaryAccounts": {"urn:ietf:params:jmap:mail": "acc1"},
                 "methodResponses": [
-                    ["Email/query", {{"ids": ["e1","e2","e3"]}}, "0"],
-                    ["Email/get", {{
+                    ["Email/query", {"ids": ["e1","e2","e3"]}, "0"],
+                    ["Email/get", {
                         "list": [
-                            {{"id": "e1", "subject": "First", "receivedAt": "2026-07-19T10:00:00Z", "from": [{{"email":"a@t.com"}}], "to": [{{"email":"b@t.com"}}], "htmlBody": [{{"partId":"p1"}}], "bodyValues": {{"p1": {{"value":"Body 1","isTruncated":false}}}}}},
-                            {{"id": "e2", "subject": "Second", "receivedAt": "2026-07-19T11:00:00Z", "from": [{{"email":"c@t.com"}}], "to": [{{"email":"d@t.com"}}], "htmlBody": [{{"partId":"p2"}}], "bodyValues": {{"p2": {{"value":"Body 2","isTruncated":false}}}}}},
-                            {{"id": "e3", "subject": "Third", "receivedAt": "2026-07-19T12:00:00Z", "from": [{{"email":"e@t.com"}}], "to": [{{"email":"f@t.com"}}], "htmlBody": [{{"partId":"p3"}}], "bodyValues": {{"p3": {{"value":"Body 3","isTruncated":false}}}}}}
+                            {"id": "e1", "subject": "First", "receivedAt": "2026-07-19T10:00:00Z", "from": [{"email":"a@t.com"}], "to": [{"email":"b@t.com"}], "htmlBody": [{"partId":"p1"}], "bodyValues": {"p1": {"value":"Body 1","isTruncated":false}}}},
+                            {"id": "e2", "subject": "Second", "receivedAt": "2026-07-19T11:00:00Z", "from": [{"email":"c@t.com"}], "to": [{"email":"d@t.com"}], "htmlBody": [{"partId":"p2"}], "bodyValues": {"p2": {"value":"Body 2","isTruncated":false}}}},
+                            {"id": "e3", "subject": "Third", "receivedAt": "2026-07-19T12:00:00Z", "from": [{"email":"e@t.com"}], "to": [{"email":"f@t.com"}], "htmlBody": [{"partId":"p3"}], "bodyValues": {"p3": {"value":"Body 3","isTruncated":false}}}}
                         ],
                         "notFound": []
-                    }}, "1"]
+                    }, "1"]
                 ]
-            }}"#
-        );
+            }"#
+        .to_string();
         let url = spawn_mock_server(body);
         let mut config = AppConfig::default();
         config.jmap_clients.insert(
@@ -1324,25 +1321,24 @@ mod tests {
             .ok();
         // Build a response with 5 emails; page 2 with page_size 2 should
         // return items at indices 2..=3.
-        let body = format!(
-            r#"{{
-                "apiUrl": "{{API_URL}}",
-                "primaryAccounts": {{"urn:ietf:params:jmap:mail": "acc1"}},
+        let body = r#"{
+                "apiUrl": "{API_URL}",
+                "primaryAccounts": {"urn:ietf:params:jmap:mail": "acc1"},
                 "methodResponses": [
-                    ["Email/query", {{"ids": ["e1","e2","e3","e4","e5"]}}, "0"],
-                    ["Email/get", {{
+                    ["Email/query", {"ids": ["e1","e2","e3","e4","e5"]}, "0"],
+                    ["Email/get", {
                         "list": [
-                            {{"id": "e1", "subject": "S1", "receivedAt": "2026-07-19T10:00:00Z", "from": [{{"email":"a@t.com"}}], "to": [{{"email":"b@t.com"}}], "htmlBody": [{{"partId":"p1"}}], "bodyValues": {{"p1": {{"value":"B1","isTruncated":false}}}}}},
-                            {{"id": "e2", "subject": "S2", "receivedAt": "2026-07-19T11:00:00Z", "from": [{{"email":"c@t.com"}}], "to": [{{"email":"d@t.com"}}], "htmlBody": [{{"partId":"p2"}}], "bodyValues": {{"p2": {{"value":"B2","isTruncated":false}}}}}},
-                            {{"id": "e3", "subject": "S3", "receivedAt": "2026-07-19T12:00:00Z", "from": [{{"email":"e@t.com"}}], "to": [{{"email":"f@t.com"}}], "htmlBody": [{{"partId":"p3"}}], "bodyValues": {{"p3": {{"value":"B3","isTruncated":false}}}}}},
-                            {{"id": "e4", "subject": "S4", "receivedAt": "2026-07-19T13:00:00Z", "from": [{{"email":"g@t.com"}}], "to": [{{"email":"h@t.com"}}], "htmlBody": [{{"partId":"p4"}}], "bodyValues": {{"p4": {{"value":"B4","isTruncated":false}}}}}},
-                            {{"id": "e5", "subject": "S5", "receivedAt": "2026-07-19T14:00:00Z", "from": [{{"email":"i@t.com"}}], "to": [{{"email":"j@t.com"}}], "htmlBody": [{{"partId":"p5"}}], "bodyValues": {{"p5": {{"value":"B5","isTruncated":false}}}}}}
+                            {"id": "e1", "subject": "S1", "receivedAt": "2026-07-19T10:00:00Z", "from": [{"email":"a@t.com"}], "to": [{"email":"b@t.com"}], "htmlBody": [{"partId":"p1"}], "bodyValues": {"p1": {"value":"B1","isTruncated":false}}}},
+                            {"id": "e2", "subject": "S2", "receivedAt": "2026-07-19T11:00:00Z", "from": [{"email":"c@t.com"}], "to": [{"email":"d@t.com"}], "htmlBody": [{"partId":"p2"}], "bodyValues": {"p2": {"value":"B2","isTruncated":false}}}},
+                            {"id": "e3", "subject": "S3", "receivedAt": "2026-07-19T12:00:00Z", "from": [{"email":"e@t.com"}], "to": [{"email":"f@t.com"}], "htmlBody": [{"partId":"p3"}], "bodyValues": {"p3": {"value":"B3","isTruncated":false}}}},
+                            {"id": "e4", "subject": "S4", "receivedAt": "2026-07-19T13:00:00Z", "from": [{"email":"g@t.com"}], "to": [{"email":"h@t.com"}], "htmlBody": [{"partId":"p4"}], "bodyValues": {"p4": {"value":"B4","isTruncated":false}}}},
+                            {"id": "e5", "subject": "S5", "receivedAt": "2026-07-19T14:00:00Z", "from": [{"email":"i@t.com"}], "to": [{"email":"j@t.com"}], "htmlBody": [{"partId":"p5"}], "bodyValues": {"p5": {"value":"B5","isTruncated":false}}}}
                         ],
                         "notFound": []
-                    }}, "1"]
+                    }, "1"]
                 ]
-            }}"#
-        );
+            }"#
+        .to_string();
         let url = spawn_mock_server(body);
         let mut config = AppConfig::default();
         config.jmap_clients.insert(
@@ -1385,21 +1381,20 @@ mod tests {
         rustls::crypto::ring::default_provider()
             .install_default()
             .ok();
-        let body = format!(
-            r#"{{
-                "apiUrl": "{{API_URL}}",
-                "primaryAccounts": {{"urn:ietf:params:jmap:mail": "acc1"}},
+        let body = r#"{
+                "apiUrl": "{API_URL}",
+                "primaryAccounts": {"urn:ietf:params:jmap:mail": "acc1"},
                 "methodResponses": [
-                    ["Email/query", {{"ids": ["e1"]}}, "0"],
-                    ["Email/get", {{
+                    ["Email/query", {"ids": ["e1"]}, "0"],
+                    ["Email/get", {
                         "list": [
-                            {{"id": "e1", "subject": "Only", "receivedAt": "2026-07-19T10:00:00Z", "from": [{{"email":"a@t.com"}}], "to": [{{"email":"b@t.com"}}], "htmlBody": [{{"partId":"p1"}}], "bodyValues": {{"p1": {{"value":"Body","isTruncated":false}}}}}}
+                            {"id": "e1", "subject": "Only", "receivedAt": "2026-07-19T10:00:00Z", "from": [{"email":"a@t.com"}], "to": [{"email":"b@t.com"}], "htmlBody": [{"partId":"p1"}], "bodyValues": {"p1": {"value":"Body","isTruncated":false}}}}
                         ],
                         "notFound": []
-                    }}, "1"]
+                    }, "1"]
                 ]
-            }}"#
-        );
+            }"#
+        .to_string();
         let url = spawn_mock_server(body);
         let mut config = AppConfig::default();
         config.jmap_clients.insert(
@@ -1443,21 +1438,20 @@ mod tests {
         rustls::crypto::ring::default_provider()
             .install_default()
             .ok();
-        let body = format!(
-            r#"{{
-                "apiUrl": "{{API_URL}}",
-                "primaryAccounts": {{"urn:ietf:params:jmap:mail": "acc1"}},
+        let body = r#"{
+                "apiUrl": "{API_URL}",
+                "primaryAccounts": {"urn:ietf:params:jmap:mail": "acc1"},
                 "methodResponses": [
-                    ["Email/query", {{"ids": ["e1"]}}, "0"],
-                    ["Email/get", {{
+                    ["Email/query", {"ids": ["e1"]}, "0"],
+                    ["Email/get", {
                         "list": [
-                            {{"id": "e1", "subject": "Only", "receivedAt": "2026-07-19T10:00:00Z", "from": [{{"email":"a@t.com"}}], "to": [{{"email":"b@t.com"}}], "htmlBody": [{{"partId":"p1"}}], "bodyValues": {{"p1": {{"value":"Body","isTruncated":false}}}}}}
+                            {"id": "e1", "subject": "Only", "receivedAt": "2026-07-19T10:00:00Z", "from": [{"email":"a@t.com"}], "to": [{"email":"b@t.com"}], "htmlBody": [{"partId":"p1"}], "bodyValues": {"p1": {"value":"Body","isTruncated":false}}}}
                         ],
                         "notFound": []
-                    }}, "1"]
+                    }, "1"]
                 ]
-            }}"#
-        );
+            }"#
+        .to_string();
         let url = spawn_mock_server(body);
         let mut config = AppConfig::default();
         config.jmap_clients.insert(
@@ -1494,16 +1488,15 @@ mod tests {
             .install_default()
             .ok();
         // Email/query returns zero IDs → no items, but still a valid response.
-        let body = format!(
-            r#"{{
-                "apiUrl": "{{API_URL}}",
-                "primaryAccounts": {{"urn:ietf:params:jmap:mail": "acc1"}},
+        let body = r#"{
+                "apiUrl": "{API_URL}",
+                "primaryAccounts": {"urn:ietf:params:jmap:mail": "acc1"},
                 "methodResponses": [
-                    ["Email/query", {{"ids": []}}, "0"],
-                    ["Email/get", {{"list": [], "notFound": []}}, "1"]
+                    ["Email/query", {"ids": []}, "0"],
+                    ["Email/get", {"list": [], "notFound": []}, "1"]
                 ]
-            }}"#
-        );
+            }"#
+        .to_string();
         let url = spawn_mock_server(body);
         let mut config = AppConfig::default();
         config.jmap_clients.insert(

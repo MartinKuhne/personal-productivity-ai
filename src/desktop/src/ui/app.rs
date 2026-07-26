@@ -1426,11 +1426,13 @@ mod tests {
             id: egui::Id::new("laptop_specs"),
         }];
 
-        let mut raw_input = egui::RawInput::default();
-        raw_input.screen_rect = Some(egui::Rect::from_min_size(
-            egui::Pos2::ZERO,
-            egui::vec2(1024.0, 768.0),
-        ));
+        let raw_input = egui::RawInput {
+            screen_rect: Some(egui::Rect::from_min_size(
+                egui::Pos2::ZERO,
+                egui::vec2(1024.0, 768.0),
+            )),
+            ..egui::RawInput::default()
+        };
 
         // Execute render_panels
         let output = ctx.run_ui(raw_input, |ui| {

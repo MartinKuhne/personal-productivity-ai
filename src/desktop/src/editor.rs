@@ -393,9 +393,11 @@ mod tests {
         let dir = tempdir().unwrap();
         let bad_path = dir.path().join("missing_subdir").join("file.md");
 
-        let mut state = EditorState::default();
-        state.file_path = bad_path.clone();
-        state.content = "Body".to_string();
+        let mut state = EditorState {
+            file_path: bad_path.clone(),
+            content: "Body".to_string(),
+            ..EditorState::default()
+        };
 
         let producer = noop_producer();
         let result = state.save(&producer);
@@ -405,9 +407,11 @@ mod tests {
             "expected error_message to be set after a failed save"
         );
 
-        let mut state2 = EditorState::default();
-        state2.file_path = dir.path().join("missing_subdir_2").join("file.md");
-        state2.content = "Body".to_string();
+        let mut state2 = EditorState {
+            file_path: dir.path().join("missing_subdir_2").join("file.md"),
+            content: "Body".to_string(),
+            ..EditorState::default()
+        };
         let producer2 = noop_producer();
         state2.save(&producer2).unwrap_err();
         // After save failure, the error_message is set; we test the close path separately

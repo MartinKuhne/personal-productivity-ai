@@ -196,7 +196,7 @@ mod tests {
 
     #[test]
     fn test_filter_logs() {
-        let logs = vec![
+        let logs = [
             make_log(LogCategory::Indexer, "Index 1"),
             make_log(LogCategory::Indexer, "Index 2"),
             make_log(LogCategory::Watcher, "Watch 1"),

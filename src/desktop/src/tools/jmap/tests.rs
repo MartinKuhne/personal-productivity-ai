@@ -202,14 +202,14 @@ fn test_check_response_with_extra_fields_in_error_obj() {
 fn email_inline_check(res: &serde_json::Value, name: &str) -> Option<String> {
     if let Some(method_responses) = res.get("methodResponses").and_then(|mr| mr.as_array()) {
         for resp in method_responses {
-            if let Some(resp_arr) = resp.as_array() {
-                if resp_arr.get(0).and_then(|s| s.as_str()) == Some("error") {
-                    return Some(format!(
-                        "Error from JMAP server for {}: {}",
-                        name,
-                        serde_json::to_string_pretty(resp_arr).unwrap_or_default()
-                    ));
-                }
+            if let Some(resp_arr) = resp.as_array()
+                && resp_arr.first().and_then(|s| s.as_str()) == Some("error")
+            {
+                return Some(format!(
+                    "Error from JMAP server for {}: {}",
+                    name,
+                    serde_json::to_string_pretty(resp_arr).unwrap_or_default()
+                ));
             }
         }
     }
