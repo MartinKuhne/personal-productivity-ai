@@ -44,6 +44,12 @@ tempfile = "3.8"
 tokio = { version = "1.53.0", features = ["rt", "rt-multi-thread", "macros"] }
 filetime = "0.2"
 proptest = "1.4"
+egui_kittest = { version = "0.35", features = ["eframe", "snapshot"] }
+# `accesskit::Role` is the type used by `egui_kittest::Role` /
+# `kittest::Queryable::get_by_role`; pull it in as a direct
+# dev-dep so the tests can `use accesskit::Role` without having
+# to reach through the harness's re-exports.
+accesskit = "0.24"
 
 [[bin]]
 name = "fastmd"
