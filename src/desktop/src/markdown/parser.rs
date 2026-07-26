@@ -482,3 +482,24 @@ pub fn parse_yaml_to_pairs(yaml: &serde_yaml::Value) -> Option<Vec<(String, Stri
     }
     Some(pairs)
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_render_markdown_to_html() {
+        let md = "# Title\n\nHello *world*";
+        let html = render_markdown_to_html(md);
+        assert!(html.contains("<h1>Title</h1>"));
+        assert!(html.contains("<em>world</em>"));
+    }
+
+    #[test]
+    fn test_parse_yaml_to_pairs() {
+        let yaml: serde_yaml::Value = serde_yaml::from_str("key: val\nlist: [a, b]").unwrap();
+        let pairs = parse_yaml_to_pairs(&yaml).unwrap();
+        assert_eq!(pairs[0], ("key".to_string(), "val".to_string()));
+        assert_eq!(pairs[1], ("list".to_string(), "a, b".to_string()));
+    }
+}

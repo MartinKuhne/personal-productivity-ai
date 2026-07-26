@@ -57,3 +57,22 @@ pub fn heading_plain_text(elems: &[InlineElem]) -> String {
     }
     out
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_heading_plain_text_all_variants() {
+        let elems = vec![
+            InlineElem::Text("Heading ".to_string(), TextStyle { bold: true, ..Default::default() }),
+            InlineElem::Link("https://example.com".to_string(), "Link".to_string()),
+            InlineElem::SoftBreak,
+            InlineElem::Image("pic.png".to_string()),
+            InlineElem::SoftBreak,
+            InlineElem::Html("<span>Tag</span>".to_string()),
+        ];
+        let plain = heading_plain_text(&elems);
+        assert_eq!(plain, "Heading Link [Image: pic.png] <span>Tag</span>");
+    }
+}
