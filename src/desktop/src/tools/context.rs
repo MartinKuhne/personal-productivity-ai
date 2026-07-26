@@ -80,10 +80,10 @@ impl<'a> ToolContext<'a> {
     /// Resolve a virtual path for a mutating tool. Bundles the three
     /// lines every mutating tool needed: path resolution, the
     /// virtual-root rejection, and the read-only-library rejection.
-    /// [`resolve_virtual_path`] already returns an error when the
-    /// target library is read-only, so this helper is sufficient on
-    /// its own (no separate `if readonly` check needed at the call
-    /// site). Returns the absolute filesystem path on success.
+    /// [`Self::resolve_virtual_path`] already returns an error when
+    /// the target library is read-only, so this helper is sufficient
+    /// on its own (no separate `if readonly` check needed at the
+    /// call site). Returns the absolute filesystem path on success.
     pub fn resolve_writable(&self, vpath: &str) -> Result<PathBuf, String> {
         match self.resolve_virtual_path(vpath, true)? {
             Some((path, _readonly)) => Ok(path),
