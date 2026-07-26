@@ -19,12 +19,12 @@ pub fn should_show_panel(has_toc: bool, has_selected_file: bool) -> bool {
 /// Purity: Pure function.
 pub fn calculate_indent(level: usize) -> f32 {
     match level {
-        1 => 0.0,
-        2 => 10.0,
-        3 => 20.0,
-        4 => 30.0,
-        5 => 40.0,
-        6 => 50.0,
+        1 => 4.0,
+        2 => 14.0,
+        3 => 24.0,
+        4 => 34.0,
+        5 => 44.0,
+        6 => 54.0,
         _ => 0.0,
     }
 }
@@ -64,13 +64,15 @@ pub fn show_right_panel(app: &mut FastMdApp, parent_ui: &mut egui::Ui) {
                         let toc_snapshot = app.tab_manager.toc.clone();
                         for entry in &toc_snapshot {
                             let indent = calculate_indent(entry.level as usize);
-                            ui.horizontal(|ui| {
-                                ui.add_space(indent);
-                                let label = egui::RichText::new(&entry.title)
-                                    .size(calculate_font_size(entry.level as usize));
-                                if ui.selectable_label(false, label).clicked() {
-                                    app.tab_manager.scroll_to_header_id = Some(entry.id.clone());
-                                }
+                            ui.push_id(entry.id, |ui| {
+                                ui.horizontal(|ui| {
+                                    ui.add_space(indent);
+                                    let label = egui::RichText::new(&entry.title)
+                                        .size(calculate_font_size(entry.level as usize));
+                                    if ui.selectable_label(false, label).clicked() {
+                                        app.tab_manager.scroll_to_header_id = Some(entry.id);
+                                    }
+                                })
                             });
                         }
                     });
@@ -92,12 +94,12 @@ mod tests {
 
     #[test]
     fn test_calculate_indent() {
-        assert_eq!(calculate_indent(1), 0.0);
-        assert_eq!(calculate_indent(2), 10.0);
-        assert_eq!(calculate_indent(3), 20.0);
-        assert_eq!(calculate_indent(4), 30.0);
-        assert_eq!(calculate_indent(5), 40.0);
-        assert_eq!(calculate_indent(6), 50.0);
+        assert_eq!(calculate_indent(1), 4.0);
+        assert_eq!(calculate_indent(2), 14.0);
+        assert_eq!(calculate_indent(3), 24.0);
+        assert_eq!(calculate_indent(4), 34.0);
+        assert_eq!(calculate_indent(5), 44.0);
+        assert_eq!(calculate_indent(6), 54.0);
         assert_eq!(calculate_indent(99), 0.0); // Edge case
     }
 

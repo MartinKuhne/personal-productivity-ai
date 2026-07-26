@@ -80,7 +80,7 @@ pub fn apply_tab_action(
 fn render_agent_session(ui: &mut egui::Ui, app: &mut FastMdApp) {
     ui.horizontal_wrapped(|ui| {
         ui.heading(
-            RichText::new("Ã°Å¸Â¤â€“ FastMD Agent Session")
+            RichText::new("🤖 FastMD Agent Session")
                 .size(18.0)
                 .strong()
                 .color(egui::Color32::from_rgb(100, 200, 255)),
@@ -141,16 +141,20 @@ fn render_tabs_and_content(ui: &mut egui::Ui, app: &mut FastMdApp) {
 
         for (i, tab_path) in tabs_snapshot.iter().enumerate() {
             let is_selected = app.selection.selected_file() == Some(tab_path);
-            let title = tab_path.file_name().unwrap_or_default().to_string_lossy();
+            let title: String = tab_path
+                .file_name()
+                .unwrap_or_default()
+                .to_string_lossy()
+                .into();
 
-            let response = ui.selectable_label(is_selected, title);
-            if response.clicked() {
+            let response = ui.push_id(tab_path, |ui| ui.selectable_label(is_selected, &title));
+            if response.inner.clicked() {
                 *app.selection_mut().selected_file_mut() = Some(tab_path.clone());
             }
-            if response.middle_clicked() {
+            if response.inner.middle_clicked() {
                 tab_action = Some(TabAction::Close(i));
             }
-            response.context_menu(|ui| {
+            response.inner.context_menu(|ui| {
                 if ui.button("Edit").clicked() {
                     if app.inline_editor_enabled {
                         if let Ok(content) = std::fs::read_to_string(tab_path) {
@@ -198,7 +202,7 @@ fn render_tabs_and_content(ui: &mut egui::Ui, app: &mut FastMdApp) {
                 }
             });
 
-            if ui.button("Ã¢ÂÅ’").clicked() {
+            if ui.button("×").clicked() {
                 tab_action = Some(TabAction::Close(i));
             }
             ui.separator();

@@ -67,7 +67,7 @@ pub fn show_top_panel(app: &mut FastMdApp, parent_ui: &mut egui::Ui) {
     Panel::top("top_panel").show(parent_ui, |ui| {
         ui.horizontal(|ui| {
             ui.heading(
-                RichText::new("Ã¢Å¡Â¡ FastMD Viewer")
+                RichText::new("⚡ FastMD Viewer")
                     .strong()
                     .color(egui::Color32::from_rgb(100, 200, 255)),
             );

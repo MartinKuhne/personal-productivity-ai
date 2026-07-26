@@ -85,7 +85,7 @@ fn render_inline(
             ui.add_space(indent as f32 * 20.0);
         }
         if needs_bullet {
-            ui.label(RichText::new("Ã¢â‚¬Â¢ ").size(14.0));
+            ui.label(RichText::new("• ").size(14.0));
         }
         if let Some(checked) = task_checked {
             ui.add_space(4.0);
@@ -151,7 +151,7 @@ fn render_code_block(ui: &mut egui::Ui, content: &str, _idx: &mut usize) {
             ui.horizontal_top(|ui| {
                 ui.add(egui::Label::new(RichText::new(content).monospace()).wrap());
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::TOP), |ui| {
-                    if ui.button("Ã°Å¸â€œâ€¹").on_hover_text("Copy code").clicked() {
+                    if ui.button("📋").on_hover_text("Copy code").clicked() {
                         copy_code_to_output(ui, content);
                     }
                 });

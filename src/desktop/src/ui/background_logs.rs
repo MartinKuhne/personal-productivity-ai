@@ -121,18 +121,20 @@ pub fn show_background_logs_window(app: &mut FastMdApp, ctx: &egui::Context) {
                 .show_rows(ui, row_height, logs.len(), |ui, row_range| {
                     for i in row_range {
                         let log = &logs[i];
-                        ui.horizontal(|ui| {
-                            ui.label(
-                                egui::RichText::new(
-                                    log.timestamp.format("%H:%M:%S%.3f").to_string(),
-                                )
-                                .color(egui::Color32::DARK_GRAY),
-                            );
-                            ui.label(
-                                egui::RichText::new(format!("[{}]", log.category))
-                                    .color(egui::Color32::LIGHT_BLUE),
-                            );
-                            ui.label(&log.message);
+                        ui.push_id(i, |ui| {
+                            ui.horizontal(|ui| {
+                                ui.label(
+                                    egui::RichText::new(
+                                        log.timestamp.format("%H:%M:%S%.3f").to_string(),
+                                    )
+                                    .color(egui::Color32::DARK_GRAY),
+                                );
+                                ui.label(
+                                    egui::RichText::new(format!("[{}]", log.category))
+                                        .color(egui::Color32::LIGHT_BLUE),
+                                );
+                                ui.label(&log.message);
+                            })
                         });
                     }
                 });

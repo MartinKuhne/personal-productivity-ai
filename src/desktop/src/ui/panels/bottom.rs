@@ -105,7 +105,7 @@ pub fn show_bottom_panel(app: &mut FastMdApp, parent_ui: &mut egui::Ui) {
                 }
 
                 ui.vertical(|ui| {
-                    ui.menu_button("Ã¢Å¡Â¡ Quick Tasks", |ui| {
+                    ui.menu_button("⚡ Quick Tasks", |ui| {
                         if ui.button("Format Markdown").clicked() {
                             let now = chrono::Local::now();
                             let date_str = now.to_rfc3339();
@@ -117,7 +117,7 @@ pub fn show_bottom_panel(app: &mut FastMdApp, parent_ui: &mut egui::Ui) {
 
                     if app.agent().state().running
                         && ui
-                            .button(RichText::new("Ã¢ÂÂ¹ Stop").color(egui::Color32::RED))
+                            .button(RichText::new("⏹ Stop").color(egui::Color32::RED))
                             .clicked()
                     {
                         app.agent_mut().cancel();
