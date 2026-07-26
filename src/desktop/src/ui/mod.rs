@@ -10,6 +10,7 @@ mod panels;
 pub mod render;
 pub mod selection_manager;
 pub mod tab_manager;
+mod table_width;
 mod tree;
 
 pub use app::{FastMdApp, ToCEntry, TreeNode, generate_format_prompt};

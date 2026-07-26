@@ -162,18 +162,30 @@ fn render_heading(ui: &mut egui::Ui, title: &str, level: u32, scroll_to_id: &mut
 
 /// Purpose: Renders a single table cell, always emitting at least one widget.
 ///
-/// Uses `horizontal` (not `horizontal_wrapped`) so the cell reports a real
-/// intrinsic width to the parent `Grid`. With `horizontal_wrapped`, the cell
-/// would happily shrink to the smallest unbreakable word and the whole table
-/// would collapse to ~one word per column regardless of viewport width.
-/// Long content that does not fit will overflow the column and the wrapping
-/// `ScrollArea` lets the user scroll horizontally to see it.
-fn render_table_cell(ui: &mut egui::Ui, cell: &[InlineElem]) {
+/// When `pinned_width` is `Some(w)`, the cell Ui is clamped to exactly `w`
+/// pixels (`ui.set_width`) and text is laid out with `horizontal_wrapped` +
+/// `Label::wrap(true)` so that multi-word cells wrap at whitespace. This is the
+/// FTWA-pinned mode (`crates::ui::table_width`). The FTWA invariant
+/// `w >= min_content >= longest-token` guarantees no unbreakable token is ever
+/// split or clipped — only inter-word whitespace wraps.
+///
+/// When `pinned_width` is `None` (the §3.6 fallback path), the cell uses
+/// `ui.horizontal` (no wrap) so the cell reports its full single-line intrinsic
+/// width to the parent `Grid`; any overflow is handled by the wrapping
+/// `ScrollArea` (current pre-FTWA behaviour).
+fn render_table_cell(ui: &mut egui::Ui, cell: &[InlineElem], pinned_width: Option<f32>) {
+    if let Some(w) = pinned_width
+        && w.is_finite()
+        && w > 0.0
+    {
+        ui.set_width(w);
+    }
     if cell.is_empty() {
         ui.label("");
         return;
     }
-    ui.horizontal(|ui| {
+    let wrap = pinned_width.is_some();
+    let content = |ui: &mut egui::Ui| {
         ui.spacing_mut().item_spacing.x = 0.0;
         for elem in cell {
             match elem {
@@ -193,7 +205,11 @@ fn render_table_cell(ui: &mut egui::Ui, cell: &[InlineElem]) {
                     if style.strikethrough {
                         rt = rt.strikethrough();
                     }
-                    ui.label(rt);
+                    if wrap {
+                        ui.add(egui::Label::new(rt).wrap(true));
+                    } else {
+                        ui.label(rt);
+                    }
                 }
                 InlineElem::Link(url, text) => {
                     ui.hyperlink_to(text, url);
@@ -209,31 +225,77 @@ fn render_table_cell(ui: &mut egui::Ui, cell: &[InlineElem]) {
                 }
             }
         }
-    });
+    };
+    if wrap {
+        ui.horizontal_wrapped(content);
+    } else {
+        ui.horizontal(content);
+    }
 }
 
-/// Purpose: Renders a table.
+/// Purpose: Renders a table using the Fair Table Width Algorithm (FTWA).
 ///
-/// Columns are sized to their content (`render_table_cell` reports a real
-/// intrinsic width), so the grid is exactly as wide as it needs to be — no
-/// extra whitespace when content is short, and no collapse when content is
-/// long. If the resulting table is wider than the viewport, the wrapping
-/// `ScrollArea` lets the user scroll horizontally to see the rest.
+/// Per-column pixel widths are computed by `crate::ui::table_width::ftwa` from
+/// egui-shaped max-content and min-content measurements; cells are then pinned
+/// to their assigned width via `ui.set_width` so egui's `Grid` records those
+/// widths as the column tracks (see `doc/planning/table-column-width-algorithm.md`
+/// §5 decision Q5). When the available width falls below the sum of min-content
+/// (`decision.needs_horizontal_scroll`), the table physically cannot fit even
+/// with every column at its longest-token floor and we fall back to the prior
+/// behaviour: a wrapping `ScrollArea` over max-content columns (doc §3.6) so the
+/// strongest invariant — never split a token — is preserved.
+///
+/// Grid spacing is `[10.0, 4.0]` (10 px gutters). The available content width
+/// passed to FTWA subtracts `(N - 1) * 10.0` for those gutters so the assigned
+/// widths sum to the true content rect.
 fn render_table(ui: &mut egui::Ui, table_cells: &[Vec<Vec<InlineElem>>]) {
-    egui::ScrollArea::horizontal()
-        .id_source(ui.next_auto_id())
-        .show(ui, |ui| {
-            egui::Grid::new(ui.next_auto_id())
-                .striped(true)
-                .spacing([10.0, 4.0])
-                .show(ui, |ui| {
-                    for row in table_cells {
-                        for cell in row {
-                            render_table_cell(ui, cell);
+    let n = table_cells.iter().map(|row| row.len()).max().unwrap_or(0);
+    if n == 0 {
+        return;
+    }
+
+    let (max_w, min_w) = crate::ui::table_width::measure(table_cells, ui);
+    let gutter = 10.0_f32;
+    let avail = (ui.available_width() - (n as f32 - 1.0) * gutter).max(0.0);
+    let decision = crate::ui::table_width::ftwa(&max_w, &min_w, avail);
+
+    if decision.needs_horizontal_scroll {
+        // §3.6 fallback: nothing can fit; preserve the never-break-token
+        // invariant by letting content overflow into a horizontal ScrollArea.
+        egui::ScrollArea::horizontal()
+            .id_source(ui.next_auto_id())
+            .show(ui, |ui| {
+                egui::Grid::new(ui.next_auto_id())
+                    .striped(true)
+                    .spacing([10.0, 4.0])
+                    .show(ui, |ui| {
+                        for row in table_cells {
+                            for cell in row {
+                                render_table_cell(ui, cell, None);
+                            }
+                            ui.end_row();
                         }
-                        ui.end_row();
-                    }
-                });
+                    });
+            });
+        return;
+    }
+
+    // FTWA path: pin every cell to its assigned column width.
+    egui::Grid::new(ui.next_auto_id())
+        .striped(true)
+        .spacing([10.0, 4.0])
+        .show(ui, |ui| {
+            for row in table_cells {
+                for (j, cell) in row.iter().enumerate() {
+                    let w = decision
+                        .widths
+                        .get(j)
+                        .copied()
+                        .filter(|w| w.is_finite() && *w > 0.0);
+                    render_table_cell(ui, cell, w);
+                }
+                ui.end_row();
+            }
         });
 }
 
