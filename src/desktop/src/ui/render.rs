@@ -93,20 +93,7 @@ fn render_inline(
         let depth = blockquote_depth as f32;
         let total_indent = depth * (bar_width + bar_gap);
         let bar_color = egui::Color32::from_rgb(100, 100, 110);
-        let content = |ui: &mut egui::Ui| {
-            // Draw quote bars for each nesting level.
-            let top_left = ui.cursor().min;
-            let height = ui.available_height();
-            for i in 0..blockquote_depth {
-                let x = top_left.x + i as f32 * (bar_width + bar_gap);
-                ui.painter().line_segment(
-                    [
-                        egui::pos2(x, top_left.y),
-                        egui::pos2(x, top_left.y + height),
-                    ],
-                    egui::Stroke::new(bar_width, bar_color),
-                );
-            }
+        let response = ui.horizontal_wrapped(|ui| {
             ui.add_space(total_indent);
             render_inline_inner(
                 ui,
@@ -118,8 +105,20 @@ fn render_inline(
                 task_index,
                 pending_toggles,
             );
-        };
-        ui.horizontal_wrapped(content);
+        });
+        let rect = response.response.rect;
+        let top_left = rect.min;
+        let height = rect.height().max(14.0);
+        for i in 0..blockquote_depth {
+            let x = top_left.x + i as f32 * (bar_width + bar_gap);
+            ui.painter().line_segment(
+                [
+                    egui::pos2(x, top_left.y),
+                    egui::pos2(x, top_left.y + height),
+                ],
+                egui::Stroke::new(bar_width, bar_color),
+            );
+        }
         return;
     }
 
@@ -224,15 +223,16 @@ fn render_code_block(ui: &mut egui::Ui, content: &str) {
         .corner_radius(4.0)
         .show(ui, |ui| {
             // Constrain the wrapping label's width so the copy button
-            // always has room. The previous code added the flexible
-            // `Label::wrap` first, which consumed all available width
-            // and left ~0 for the right-to-left button layout.
+            // always has room, while computing content height dynamically.
             ui.horizontal_top(|ui| {
                 let button_width = 30.0;
                 let label_width = (ui.available_width() - button_width).max(0.0);
-                ui.add_sized(
-                    egui::vec2(label_width, ui.available_height()),
-                    egui::Label::new(RichText::new(content).monospace()).wrap(),
+                ui.allocate_ui_with_layout(
+                    egui::vec2(label_width, 0.0),
+                    egui::Layout::top_down(egui::Align::Min),
+                    |ui| {
+                        ui.add(egui::Label::new(RichText::new(content).monospace()).wrap());
+                    },
                 );
                 if ui.button("📋").on_hover_text("Copy code").clicked() {
                     copy_code_to_output(ui, content);
@@ -350,7 +350,8 @@ fn render_heading(
 fn render_table_cell(ui: &mut egui::Ui, cell: &[InlineElem], pinned_width: Option<f32>) {
     if cell.is_empty() {
         if let Some(w) = pinned_width {
-            ui.allocate_at_least(egui::vec2(w, 0.0), egui::Sense::hover());
+            let min_h = ui.text_style_height(&egui::TextStyle::Body);
+            ui.allocate_at_least(egui::vec2(w, min_h), egui::Sense::hover());
         } else {
             ui.label("");
         }
@@ -539,6 +540,7 @@ pub fn parse_yaml_to_pairs(yaml: &serde_yaml::Value) -> Option<Vec<(String, Stri
 /// Purity: Impure (modifies UI state). Coordinates parsing and rendering.
 pub fn render_yaml_table(ui: &mut egui::Ui, yaml: &serde_yaml::Value) {
     if let Some(pairs) = parse_yaml_to_pairs(yaml) {
+        let table_id = ui.make_persistent_id("yaml_table");
         egui::Frame::NONE
             .fill(egui::Color32::from_rgb(24, 24, 27))
             .stroke(egui::Stroke::new(1.0_f32, egui::Color32::from_gray(40)))
@@ -552,10 +554,10 @@ pub fn render_yaml_table(ui: &mut egui::Ui, yaml: &serde_yaml::Value) {
                 // horizontal scrollbar.
                 let available_width = ui.available_width();
                 egui::ScrollArea::horizontal()
-                    .id_salt("yaml_scroll")
+                    .id_salt(table_id.with("scroll"))
                     .show(ui, |ui| {
                         ui.set_min_width(available_width);
-                        egui::Grid::new("yaml_grid")
+                        egui::Grid::new(table_id.with("grid"))
                             .num_columns(2)
                             .striped(true)
                             .spacing([12.0, 4.0])
@@ -1178,56 +1180,34 @@ pub fn render_markdown(
 /// assert_eq!(md, "- [ ] first\n- [x] second");
 /// ```
 pub fn apply_task_toggle(markdown: &mut String, task_index: usize, checked: bool) {
+    use pulldown_cmark::{Event, Options, Parser};
+
+    let mut options = Options::empty();
+    options.insert(Options::ENABLE_TABLES);
+    options.insert(Options::ENABLE_FOOTNOTES);
+    options.insert(Options::ENABLE_STRIKETHROUGH);
+    options.insert(Options::ENABLE_TASKLISTS);
+
+    let parser = Parser::new_ext(markdown, options).into_offset_iter();
     let new_marker = if checked { "[x]" } else { "[ ]" };
     let mut count = 0usize;
 
-    let result: String = markdown
-        .lines()
-        .map(|line| {
-            if let Some(checkbox_start) = find_task_checkbox(line) {
-                if count == task_index {
-                    count += 1;
-                    let before = &line[..checkbox_start];
-                    let after = &line[checkbox_start + 3..];
-                    return format!("{}{}{}", before, new_marker, after);
+    for (event, range) in parser {
+        if let Event::TaskListMarker(_) = event {
+            if count == task_index {
+                let slice = &markdown[range.clone()];
+                let offset = slice
+                    .find('[')
+                    .or_else(|| markdown[range.start..].find('['));
+                if let Some(off) = offset {
+                    let start = range.start + off;
+                    if start + 3 <= markdown.len() {
+                        markdown.replace_range(start..start + 3, new_marker);
+                    }
                 }
-                count += 1;
+                return;
             }
-            line.to_string()
-        })
-        .collect::<Vec<_>>()
-        .join("\n");
-
-    *markdown = result;
-
-    /// Scan a single line for a task-list checkbox marker.
-    /// Returns the byte offset of the `[` in `[ ]` / `[x]`.
-    fn find_task_checkbox(line: &str) -> Option<usize> {
-        let trimmed_start = line.len() - line.trim_start().len();
-        let rest = &line[trimmed_start..];
-
-        // Match bullet markers: "- ", "* ", "+ ", or "N. "
-        let bullet_len =
-            if rest.starts_with("- ") || rest.starts_with("* ") || rest.starts_with("+ ") {
-                2
-            } else {
-                // Try ordered list: digits followed by ". "
-                let dot = rest.find(". ")?;
-                let num_part = &rest[..dot];
-                if !num_part.chars().all(|c| c.is_ascii_digit()) || num_part.is_empty() {
-                    return None;
-                }
-                dot + 2
-            };
-
-        let after_bullet = &rest[bullet_len..];
-        if after_bullet.starts_with("[ ]")
-            || after_bullet.starts_with("[x]")
-            || after_bullet.starts_with("[X]")
-        {
-            Some(trimmed_start + bullet_len)
-        } else {
-            None
+            count += 1;
         }
     }
 }
@@ -2697,5 +2677,14 @@ def foo():
             captured.iter().any(|&v| v),
             "at least one captured value must be `true` (the post-click frame); got {captured:?}"
         );
+    }
+
+    #[test]
+    fn test_apply_task_toggle_preserves_crlf_and_code_block_checkboxes() {
+        let mut md = "```rust\r\n// - [ ] in code\r\n```\r\n\r\n- [ ] Real Task\r\n".to_string();
+        apply_task_toggle(&mut md, 0, true);
+        assert!(md.contains("// - [ ] in code"));
+        assert!(md.contains("- [x] Real Task"));
+        assert!(md.contains("\r\n"));
     }
 }

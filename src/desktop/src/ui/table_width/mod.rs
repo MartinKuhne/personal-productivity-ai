@@ -351,59 +351,91 @@ fn measure_cell(
     let mut max_w = 0.0_f32;
     let mut min_w = 0.0_f32;
 
-    for elem in cell {
-        match elem {
-            InlineElem::Text(t, style) => {
-                let font = if style.code { mono_font } else { body_font };
-                accumulate(t, font, ui, color, &mut max_w, &mut min_w);
-            }
-            InlineElem::Link(_, display) => {
-                accumulate(display, body_font, ui, color, &mut max_w, &mut min_w);
-            }
-            InlineElem::Image(url) => {
-                // render_table_cell prints "[Image: {url}]" â€” measure that.
-                let displayed = format!("[Image: {}]", url);
-                accumulate(&displayed, body_font, ui, color, &mut max_w, &mut min_w);
-            }
-            InlineElem::Html(h) => {
-                accumulate(h, body_font, ui, color, &mut max_w, &mut min_w);
-            }
-            InlineElem::SoftBreak => {
-                // SoftBreak is rendered as a single space; never a wrap point
-                // of its own but contributes one space-width to max-content.
-                accumulate(" ", body_font, ui, color, &mut max_w, &mut min_w);
+    let mut current_token = String::new();
+    let mut current_font = body_font;
+
+    let measure_token = |tok: &str, font: &egui::FontId, min_w: &mut f32| {
+        if !tok.is_empty() {
+            let g = ui.fonts_mut(|f| f.layout_no_wrap(tok.to_string(), font.clone(), color));
+            let w = g.size().x;
+            if w > *min_w {
+                *min_w = w;
             }
         }
+    };
+
+    for elem in cell {
+        let (displayed, font) = match elem {
+            InlineElem::Text(t, style) => {
+                let f = if style.code { mono_font } else { body_font };
+                (t.clone(), f)
+            }
+            InlineElem::Link(_, display) => (display.clone(), body_font),
+            InlineElem::Image(url) => (format!("[Image: {}]", url), body_font),
+            InlineElem::Html(h) => (h.clone(), body_font),
+            InlineElem::SoftBreak => (" ".to_string(), body_font),
+        };
+
+        if displayed.is_empty() {
+            continue;
+        }
+
+        let g = ui.fonts_mut(|f| f.layout_no_wrap(displayed.clone(), font.clone(), color));
+        max_w += g.size().x;
+
+        let parts: Vec<&str> = displayed.split_whitespace().collect();
+        if parts.is_empty() {
+            if !current_token.is_empty() {
+                let tok = std::mem::take(&mut current_token);
+                measure_token(&tok, current_font, &mut min_w);
+            }
+        } else {
+            let starts_ws = displayed.chars().next().is_some_and(char::is_whitespace);
+            let ends_ws = displayed.chars().last().is_some_and(char::is_whitespace);
+
+            if starts_ws {
+                if !current_token.is_empty() {
+                    let tok = std::mem::take(&mut current_token);
+                    measure_token(&tok, current_font, &mut min_w);
+                }
+                for &p in &parts[..parts.len() - 1] {
+                    measure_token(p, font, &mut min_w);
+                }
+                if ends_ws {
+                    measure_token(parts.last().unwrap(), font, &mut min_w);
+                } else {
+                    current_token.push_str(parts.last().unwrap());
+                    current_font = font;
+                }
+            } else {
+                current_token.push_str(parts[0]);
+                if parts.len() > 1 {
+                    let tok = std::mem::take(&mut current_token);
+                    measure_token(&tok, current_font, &mut min_w);
+                    for &p in &parts[1..parts.len() - 1] {
+                        measure_token(p, font, &mut min_w);
+                    }
+                    if ends_ws {
+                        measure_token(parts.last().unwrap(), font, &mut min_w);
+                    } else {
+                        current_token.push_str(parts.last().unwrap());
+                        current_font = font;
+                    }
+                } else if ends_ws {
+                    let tok = std::mem::take(&mut current_token);
+                    measure_token(&tok, current_font, &mut min_w);
+                } else {
+                    current_font = font;
+                }
+            }
+        }
+    }
+
+    if !current_token.is_empty() {
+        measure_token(&current_token, current_font, &mut min_w);
     }
 
     (max_w, min_w)
-}
-
-/// Add `text`'s contribution to `max_w` (full single-line width) and update
-/// `min_w` with the longest whitespace-separated token width.
-fn accumulate(
-    text: &str,
-    font: &egui::FontId,
-    ui: &egui::Ui,
-    color: egui::Color32,
-    max_w: &mut f32,
-    min_w: &mut f32,
-) {
-    if text.is_empty() {
-        return;
-    }
-    // egui 0.35: `FontsView::layout_no_wrap` requires `&mut self`, so the
-    // call site has to use `fonts_mut` instead of `fonts`. The shape of
-    // the closure argument is otherwise identical.
-    let g = ui.fonts_mut(|f| f.layout_no_wrap(text.to_string(), font.clone(), color));
-    *max_w += g.size().x;
-    for tok in text.split_whitespace() {
-        let g = ui.fonts_mut(|f| f.layout_no_wrap(tok.to_string(), font.clone(), color));
-        let w = g.size().x;
-        if w > *min_w {
-            *min_w = w;
-        }
-    }
 }
 
 #[cfg(test)]
@@ -1154,5 +1186,32 @@ mod tests {
                 prop_assert!(w >= mn - 1e-3, "col {j}: width {w} < min {mn}");
             }
         }
+    }
+
+    #[test]
+    fn test_measure_cell_fragmented_tokens() {
+        let ctx = egui::Context::default();
+        let _ = ctx.run_ui(egui::RawInput::default(), |ui| {
+            egui::CentralPanel::default().show(ui, |ui| {
+                let cell_fragmented = vec![
+                    InlineElem::Text("super".to_string(), crate::ui::render::TextStyle { bold: true, ..Default::default() }),
+                    InlineElem::Text("califragilistic".to_string(), crate::ui::render::TextStyle::default()),
+                ];
+                let cell_single = vec![
+                    InlineElem::Text("supercalifragilistic".to_string(), crate::ui::render::TextStyle::default()),
+                ];
+                let body_font = egui::FontId::proportional(14.0);
+                let mono_font = egui::FontId::monospace(14.0);
+                let color = egui::Color32::WHITE;
+
+                let (_, min_frag) = measure_cell(&cell_fragmented, ui, &body_font, &mono_font, color);
+                let (_, min_sing) = measure_cell(&cell_single, ui, &body_font, &mono_font, color);
+
+                assert!(
+                    (min_frag - min_sing).abs() < 1.0,
+                    "fragmented token min_content {min_frag} should match single token min_content {min_sing}"
+                );
+            });
+        });
     }
 }
