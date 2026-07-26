@@ -218,9 +218,22 @@ pub struct FlatRow {
     pub is_expanded: bool,
 }
 
-/// Fixed height for each virtual tree row in pixels.
-/// Matches egui default monospace line height (14pt) + 4px padding.
-pub const TREE_ROW_HEIGHT: f32 = 22.0;
+/// Sans-spacing slot height passed to `ScrollArea::show_rows`. egui
+/// adds `ui.spacing().item_spacing.y` (default 3.0) on top of this
+/// to compute the actual per-row slot height. The row content
+/// rendered by [`render_flat_row`] is a `ui.horizontal` block whose
+/// height is the max of its children: a `selectable_label`, which
+/// in egui 0.35 is `interact_size.y` (18) — `button_padding.y`
+/// (1 top + 1 bottom) is added inside the frame, but the text is
+/// short enough that the interact_size dominates and the rendered
+/// height reconciles to 18px. To keep the slot exactly matched to
+/// the rendered content (and avoid empty space accumulating at the
+/// bottom of every row), this constant is set so that
+/// `TREE_ROW_HEIGHT + item_spacing.y` == actual `selectable_label`
+/// height. The companion regression test
+/// `test_tree_row_height_matches_selectable_label_height` pins
+/// this invariant.
+pub const TREE_ROW_HEIGHT: f32 = 15.0;
 
 /// Flatten a `TreeNode` hierarchy into a `Vec<FlatRow>` in DFS pre-order,
 /// respecting the set of expanded directories.
@@ -1064,6 +1077,55 @@ mod tests {
         assert_eq!(
             id_pass1, id_pass2,
             "Row ID must be strictly determined by row.path and is_dir, staying identical across passes"
+        );
+    }
+
+    /// Regression: `TREE_ROW_HEIGHT` is the `row_height_sans_spacing`
+    /// passed to `ScrollArea::show_rows`. egui adds
+    /// `ui.spacing().item_spacing.y` on top of it to compute the
+    /// per-row slot height — so the actual slot is
+    /// `TREE_ROW_HEIGHT + item_spacing.y`, not the constant alone.
+    ///
+    /// The previous constant (22.0) was calibrated to a now-stale
+    /// estimate ("14pt line height + 4px padding"). The actual
+    /// `selectable_label` widget in egui 0.35 is 18px (the
+    /// `interact_size.y` min height, with the frame's
+    /// `button_padding` reconciling into the same 18px). With
+    /// `item_spacing.y = 3`, the slot was 25px and the widget only
+    /// filled 18px — 7px of empty space at the bottom of every
+    /// rendered row, accumulating to a visible "unused space at
+    /// the bottom of the left directory tree" that scales with
+    /// tree depth.
+    ///
+    /// This test pins the invariant: the slot height
+    /// (constant + item_spacing.y) must match the actual
+    /// `selectable_label` height within a small tolerance, so no
+    /// per-row vertical gap accumulates in the tree.
+    #[test]
+    fn test_tree_row_height_matches_selectable_label_height() {
+        let ctx = egui::Context::default();
+        let mut button_height = 0.0_f32;
+        let mut spacing_y = 0.0_f32;
+        let _ = ctx.run_ui(Default::default(), |ui| {
+            let response = ui.selectable_label(false, "sample tree row");
+            button_height = response.rect.height();
+            spacing_y = ui.spacing().item_spacing.y;
+        });
+        let slot_height = TREE_ROW_HEIGHT + spacing_y;
+        let tolerance = 1.0_f32;
+        let diff = (button_height - slot_height).abs();
+        assert!(
+            diff < tolerance,
+            "TREE_ROW_HEIGHT ({}) is the row_height_sans_spacing passed to \
+             ScrollArea::show_rows; egui adds item_spacing.y ({}) on top, so \
+             the actual per-row slot is {}px. The actual selectable_label \
+             widget is {}px tall. A mismatch of {}px leaves empty space at \
+             the bottom of every row in the directory tree.",
+            TREE_ROW_HEIGHT,
+            spacing_y,
+            slot_height,
+            button_height,
+            diff,
         );
     }
 }
