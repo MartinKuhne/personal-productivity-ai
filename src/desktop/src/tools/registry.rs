@@ -204,6 +204,17 @@ pub fn execute_tool(ctx: &ToolContext, name: &str, args_str: &str) -> String {
 use crate::tools::dtos;
 use std::any::TypeId;
 
+/// Generate the JSON Schema for a tool's input DTO. Centralised so
+/// the 30+ `parameters_schema` impls don't have to repeat the
+/// `schemars::schema_for!` / `serde_json::to_value` / `unwrap`
+/// incantation (PSD-009). The `unwrap` is safe here because every
+/// input DTO is a static, derive-only type — the schemars
+/// generation can only fail if the derive is broken, which is a
+/// build-time concern, not a runtime one.
+fn json_schema<T: schemars::JsonSchema>() -> serde_json::Value {
+    serde_json::to_value(schemars::schema_for!(T)).unwrap()
+}
+
 struct WebDelegateTool;
 impl Tool for WebDelegateTool {
     fn name(&self) -> &'static str {
@@ -216,7 +227,7 @@ impl Tool for WebDelegateTool {
         TypeId::of::<dtos::WebDelegateInput>()
     }
     fn parameters_schema(&self) -> serde_json::Value {
-        serde_json::to_value(schemars::schema_for!(dtos::WebDelegateInput)).unwrap()
+        json_schema::<dtos::WebDelegateInput>()
     }
     fn is_enabled(&self, _: &AppConfig, _: &str) -> bool {
         true
@@ -242,7 +253,7 @@ impl Tool for ReplaceTextTool {
         TypeId::of::<dtos::ReplaceTextInput>()
     }
     fn parameters_schema(&self) -> serde_json::Value {
-        serde_json::to_value(schemars::schema_for!(dtos::ReplaceTextInput)).unwrap()
+        json_schema::<dtos::ReplaceTextInput>()
     }
     fn is_enabled(&self, _: &AppConfig, _: &str) -> bool {
         true
@@ -276,7 +287,7 @@ impl Tool for GrepTool {
         TypeId::of::<dtos::GrepInput>()
     }
     fn parameters_schema(&self) -> serde_json::Value {
-        serde_json::to_value(schemars::schema_for!(dtos::GrepInput)).unwrap()
+        json_schema::<dtos::GrepInput>()
     }
     fn is_enabled(&self, _: &AppConfig, _: &str) -> bool {
         true
@@ -324,7 +335,7 @@ impl Tool for ReadTagsTool {
         TypeId::of::<dtos::ReadTagsInput>()
     }
     fn parameters_schema(&self) -> serde_json::Value {
-        serde_json::to_value(schemars::schema_for!(dtos::ReadTagsInput)).unwrap()
+        json_schema::<dtos::ReadTagsInput>()
     }
     fn is_enabled(&self, _: &AppConfig, _: &str) -> bool {
         true
@@ -362,7 +373,7 @@ impl Tool for ListFilesByTagTool {
         TypeId::of::<dtos::ListFilesByTagInput>()
     }
     fn parameters_schema(&self) -> serde_json::Value {
-        serde_json::to_value(schemars::schema_for!(dtos::ListFilesByTagInput)).unwrap()
+        json_schema::<dtos::ListFilesByTagInput>()
     }
     fn is_enabled(&self, _: &AppConfig, _: &str) -> bool {
         true
@@ -417,7 +428,7 @@ impl Tool for ListFilesTool {
         TypeId::of::<dtos::ListFilesInput>()
     }
     fn parameters_schema(&self) -> serde_json::Value {
-        serde_json::to_value(schemars::schema_for!(dtos::ListFilesInput)).unwrap()
+        json_schema::<dtos::ListFilesInput>()
     }
     fn is_enabled(&self, _: &AppConfig, _: &str) -> bool {
         true
@@ -474,7 +485,7 @@ impl Tool for ReadFileTool {
         TypeId::of::<dtos::ReadFileInput>()
     }
     fn parameters_schema(&self) -> serde_json::Value {
-        serde_json::to_value(schemars::schema_for!(dtos::ReadFileInput)).unwrap()
+        json_schema::<dtos::ReadFileInput>()
     }
     fn is_enabled(&self, _: &AppConfig, _: &str) -> bool {
         true
@@ -506,7 +517,7 @@ impl Tool for ReadFileLinesTool {
         TypeId::of::<dtos::ReadFileLinesInput>()
     }
     fn parameters_schema(&self) -> serde_json::Value {
-        serde_json::to_value(schemars::schema_for!(dtos::ReadFileLinesInput)).unwrap()
+        json_schema::<dtos::ReadFileLinesInput>()
     }
     fn is_enabled(&self, _: &AppConfig, _: &str) -> bool {
         true
@@ -543,7 +554,7 @@ impl Tool for CreateFileTool {
         TypeId::of::<dtos::CreateFileInput>()
     }
     fn parameters_schema(&self) -> serde_json::Value {
-        serde_json::to_value(schemars::schema_for!(dtos::CreateFileInput)).unwrap()
+        json_schema::<dtos::CreateFileInput>()
     }
     fn is_enabled(&self, _: &AppConfig, _: &str) -> bool {
         true
@@ -576,7 +587,7 @@ impl Tool for InsertLinesTool {
         TypeId::of::<dtos::InsertLinesInput>()
     }
     fn parameters_schema(&self) -> serde_json::Value {
-        serde_json::to_value(schemars::schema_for!(dtos::InsertLinesInput)).unwrap()
+        json_schema::<dtos::InsertLinesInput>()
     }
     fn is_enabled(&self, _: &AppConfig, _: &str) -> bool {
         true
@@ -610,7 +621,7 @@ impl Tool for DeleteLinesTool {
         TypeId::of::<dtos::DeleteLinesInput>()
     }
     fn parameters_schema(&self) -> serde_json::Value {
-        serde_json::to_value(schemars::schema_for!(dtos::DeleteLinesInput)).unwrap()
+        json_schema::<dtos::DeleteLinesInput>()
     }
     fn is_enabled(&self, _: &AppConfig, _: &str) -> bool {
         true
@@ -644,7 +655,7 @@ impl Tool for WebFetchTool {
         TypeId::of::<dtos::WebFetchInput>()
     }
     fn parameters_schema(&self) -> serde_json::Value {
-        serde_json::to_value(schemars::schema_for!(dtos::WebFetchInput)).unwrap()
+        json_schema::<dtos::WebFetchInput>()
     }
     fn is_enabled(&self, _: &AppConfig, _: &str) -> bool {
         true
@@ -673,7 +684,7 @@ impl Tool for ReadYamlHeaderTool {
         TypeId::of::<dtos::ReadYamlHeaderInput>()
     }
     fn parameters_schema(&self) -> serde_json::Value {
-        serde_json::to_value(schemars::schema_for!(dtos::ReadYamlHeaderInput)).unwrap()
+        json_schema::<dtos::ReadYamlHeaderInput>()
     }
     fn is_enabled(&self, _: &AppConfig, _: &str) -> bool {
         true
@@ -705,7 +716,7 @@ impl Tool for WriteYamlHeaderTool {
         TypeId::of::<dtos::WriteYamlHeaderInput>()
     }
     fn parameters_schema(&self) -> serde_json::Value {
-        serde_json::to_value(schemars::schema_for!(dtos::WriteYamlHeaderInput)).unwrap()
+        json_schema::<dtos::WriteYamlHeaderInput>()
     }
     fn is_enabled(&self, _: &AppConfig, _: &str) -> bool {
         true
@@ -741,7 +752,7 @@ impl Tool for WebSearchTool {
         TypeId::of::<dtos::WebSearchInput>()
     }
     fn parameters_schema(&self) -> serde_json::Value {
-        serde_json::to_value(schemars::schema_for!(dtos::WebSearchInput)).unwrap()
+        json_schema::<dtos::WebSearchInput>()
     }
     fn is_enabled(&self, config: &AppConfig, _: &str) -> bool {
         config.searxng_url.is_some()
@@ -775,7 +786,7 @@ impl Tool for SearchCalendarTool {
         TypeId::of::<dtos::SearchCalendarInput>()
     }
     fn parameters_schema(&self) -> serde_json::Value {
-        serde_json::to_value(schemars::schema_for!(dtos::SearchCalendarInput)).unwrap()
+        json_schema::<dtos::SearchCalendarInput>()
     }
     fn is_enabled(&self, config: &AppConfig, _: &str) -> bool {
         !config.caldav_clients.is_empty()
@@ -804,7 +815,7 @@ impl Tool for GetCalendarTool {
         TypeId::of::<dtos::GetCalendarInput>()
     }
     fn parameters_schema(&self) -> serde_json::Value {
-        serde_json::to_value(schemars::schema_for!(dtos::GetCalendarInput)).unwrap()
+        json_schema::<dtos::GetCalendarInput>()
     }
     fn is_enabled(&self, config: &AppConfig, _: &str) -> bool {
         !config.caldav_clients.is_empty()
@@ -836,7 +847,7 @@ impl Tool for GetCalendarItemTool {
         TypeId::of::<dtos::GetCalendarItemInput>()
     }
     fn parameters_schema(&self) -> serde_json::Value {
-        serde_json::to_value(schemars::schema_for!(dtos::GetCalendarItemInput)).unwrap()
+        json_schema::<dtos::GetCalendarItemInput>()
     }
     fn is_enabled(&self, config: &AppConfig, _: &str) -> bool {
         !config.caldav_clients.is_empty()
@@ -865,7 +876,7 @@ impl Tool for AddCalendarItemTool {
         TypeId::of::<dtos::AddCalendarItemInput>()
     }
     fn parameters_schema(&self) -> serde_json::Value {
-        serde_json::to_value(schemars::schema_for!(dtos::AddCalendarItemInput)).unwrap()
+        json_schema::<dtos::AddCalendarItemInput>()
     }
     fn is_enabled(&self, config: &AppConfig, _: &str) -> bool {
         !config.caldav_clients.is_empty()
@@ -891,7 +902,7 @@ impl Tool for UpdateCalendarItemTool {
         TypeId::of::<dtos::UpdateCalendarItemInput>()
     }
     fn parameters_schema(&self) -> serde_json::Value {
-        serde_json::to_value(schemars::schema_for!(dtos::UpdateCalendarItemInput)).unwrap()
+        json_schema::<dtos::UpdateCalendarItemInput>()
     }
     fn is_enabled(&self, config: &AppConfig, _: &str) -> bool {
         !config.caldav_clients.is_empty()
@@ -919,7 +930,7 @@ impl Tool for DeleteCalendarItemTool {
         TypeId::of::<dtos::DeleteCalendarItemInput>()
     }
     fn parameters_schema(&self) -> serde_json::Value {
-        serde_json::to_value(schemars::schema_for!(dtos::DeleteCalendarItemInput)).unwrap()
+        json_schema::<dtos::DeleteCalendarItemInput>()
     }
     fn is_enabled(&self, config: &AppConfig, _: &str) -> bool {
         !config.caldav_clients.is_empty()
@@ -945,7 +956,7 @@ impl Tool for SearchEmailTool {
         TypeId::of::<dtos::SearchEmailInput>()
     }
     fn parameters_schema(&self) -> serde_json::Value {
-        serde_json::to_value(schemars::schema_for!(dtos::SearchEmailInput)).unwrap()
+        json_schema::<dtos::SearchEmailInput>()
     }
     fn is_enabled(&self, config: &AppConfig, _: &str) -> bool {
         !config.jmap_clients.is_empty()
@@ -990,7 +1001,7 @@ impl Tool for GetEmailByIdTool {
         TypeId::of::<dtos::GetEmailByIdInput>()
     }
     fn parameters_schema(&self) -> serde_json::Value {
-        serde_json::to_value(schemars::schema_for!(dtos::GetEmailByIdInput)).unwrap()
+        json_schema::<dtos::GetEmailByIdInput>()
     }
     fn is_enabled(&self, config: &AppConfig, _: &str) -> bool {
         !config.jmap_clients.is_empty()
@@ -1019,7 +1030,7 @@ impl Tool for SendEmailTool {
         TypeId::of::<dtos::SendEmailInput>()
     }
     fn parameters_schema(&self) -> serde_json::Value {
-        serde_json::to_value(schemars::schema_for!(dtos::SendEmailInput)).unwrap()
+        json_schema::<dtos::SendEmailInput>()
     }
     fn is_enabled(&self, config: &AppConfig, _: &str) -> bool {
         !config.jmap_clients.is_empty()
@@ -1048,7 +1059,7 @@ impl Tool for SearchContactTool {
         TypeId::of::<dtos::SearchContactInput>()
     }
     fn parameters_schema(&self) -> serde_json::Value {
-        serde_json::to_value(schemars::schema_for!(dtos::SearchContactInput)).unwrap()
+        json_schema::<dtos::SearchContactInput>()
     }
     fn is_enabled(&self, config: &AppConfig, _: &str) -> bool {
         if config
@@ -1097,7 +1108,7 @@ impl Tool for AddContactTool {
         TypeId::of::<dtos::AddContactInput>()
     }
     fn parameters_schema(&self) -> serde_json::Value {
-        serde_json::to_value(schemars::schema_for!(dtos::AddContactInput)).unwrap()
+        json_schema::<dtos::AddContactInput>()
     }
     fn is_enabled(&self, config: &AppConfig, _: &str) -> bool {
         if config
@@ -1143,7 +1154,7 @@ impl Tool for GetContactTool {
         TypeId::of::<dtos::GetContactInput>()
     }
     fn parameters_schema(&self) -> serde_json::Value {
-        serde_json::to_value(schemars::schema_for!(dtos::GetContactInput)).unwrap()
+        json_schema::<dtos::GetContactInput>()
     }
     fn is_enabled(&self, config: &AppConfig, _: &str) -> bool {
         if config
@@ -1206,10 +1217,7 @@ impl Tool for CsvCreateTool {
         TypeId::of::<crate::tools::csv_db::schema::CreateCsvInput>()
     }
     fn parameters_schema(&self) -> serde_json::Value {
-        serde_json::to_value(schemars::schema_for!(
-            crate::tools::csv_db::schema::CreateCsvInput
-        ))
-        .unwrap()
+        json_schema::<crate::tools::csv_db::schema::CreateCsvInput>()
     }
     fn is_enabled(&self, _: &AppConfig, prompt: &str) -> bool {
         csv_tools_enabled(prompt)
@@ -1235,10 +1243,7 @@ impl Tool for CsvListTool {
         TypeId::of::<crate::tools::csv_db::schema::ListCsvInput>()
     }
     fn parameters_schema(&self) -> serde_json::Value {
-        serde_json::to_value(schemars::schema_for!(
-            crate::tools::csv_db::schema::ListCsvInput
-        ))
-        .unwrap()
+        json_schema::<crate::tools::csv_db::schema::ListCsvInput>()
     }
     fn is_enabled(&self, _: &AppConfig, prompt: &str) -> bool {
         csv_tools_enabled(prompt)
@@ -1267,10 +1272,7 @@ impl Tool for CsvAddRowsTool {
         TypeId::of::<crate::tools::csv_db::schema::AddRowsInput>()
     }
     fn parameters_schema(&self) -> serde_json::Value {
-        serde_json::to_value(schemars::schema_for!(
-            crate::tools::csv_db::schema::AddRowsInput
-        ))
-        .unwrap()
+        json_schema::<crate::tools::csv_db::schema::AddRowsInput>()
     }
     fn is_enabled(&self, _: &AppConfig, prompt: &str) -> bool {
         csv_tools_enabled(prompt)
@@ -1296,10 +1298,7 @@ impl Tool for CsvDeleteRowsTool {
         TypeId::of::<crate::tools::csv_db::schema::DeleteRowsInput>()
     }
     fn parameters_schema(&self) -> serde_json::Value {
-        serde_json::to_value(schemars::schema_for!(
-            crate::tools::csv_db::schema::DeleteRowsInput
-        ))
-        .unwrap()
+        json_schema::<crate::tools::csv_db::schema::DeleteRowsInput>()
     }
     fn is_enabled(&self, _: &AppConfig, prompt: &str) -> bool {
         csv_tools_enabled(prompt)
@@ -1325,10 +1324,7 @@ impl Tool for CsvQueryTool {
         TypeId::of::<crate::tools::csv_db::schema::QueryRequest>()
     }
     fn parameters_schema(&self) -> serde_json::Value {
-        serde_json::to_value(schemars::schema_for!(
-            crate::tools::csv_db::schema::QueryRequest
-        ))
-        .unwrap()
+        json_schema::<crate::tools::csv_db::schema::QueryRequest>()
     }
     fn is_enabled(&self, _: &AppConfig, prompt: &str) -> bool {
         csv_tools_enabled(prompt)
