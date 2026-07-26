@@ -1,5 +1,5 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
-//! FastMd desktop application entry point — initialises tracing, panic hooks, and launches the egui app.
+//! FastMd desktop application entry point â€” initialises tracing, panic hooks, and launches the egui app.
 
 use eframe::egui;
 use fastmd::ui::FastMdApp;
@@ -39,7 +39,7 @@ fn main() -> eframe::Result<()> {
     let options = eframe::NativeOptions {
         viewport: egui::ViewportBuilder::default()
             .with_inner_size([1000.0, 700.0])
-            .with_title("⚡ FastMD Viewer"),
+            .with_title("âš¡ FastMD Viewer"),
         ..Default::default()
     };
 
@@ -55,6 +55,11 @@ fn main() -> eframe::Result<()> {
     eframe::run_native(
         "fastmd",
         options,
-        Box::new(move |cc| Box::new(FastMdApp::new(cc, config))),
+        // egui 0.28+ wraps the `Box<dyn App>` returned by the
+        // creation callback in a `Result`, so the app can fail
+        // during setup instead of panicking. We don't currently
+        // have any fallible setup work to do, so we always return
+        // `Ok`.
+        Box::new(move |cc| Ok(Box::new(FastMdApp::new(cc, config)))),
     )
 }

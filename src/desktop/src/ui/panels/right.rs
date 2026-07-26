@@ -1,8 +1,9 @@
-//! Right table-of-contents panel — clickable heading entries with level-based indentation and font sizing.
+//! Right table-of-contents panel Ã¢â‚¬â€ clickable heading entries with level-based indentation and font sizing.
 
 use crate::ui::FastMdApp;
 use eframe::egui;
 use egui::RichText;
+use egui::containers::Panel;
 
 /// Determines if the right panel should be shown based on application state.
 /// Precondition: None.
@@ -36,15 +37,18 @@ pub fn calculate_font_size(level: usize) -> f32 {
     13.0 - (level as f32 * 0.5)
 }
 
-pub fn show_right_panel(app: &mut FastMdApp, ctx: &egui::Context) {
+pub fn show_right_panel(app: &mut FastMdApp, parent_ui: &mut egui::Ui) {
     if should_show_panel(
         !app.tabs().toc.is_empty(),
         app.selection().selected_file().is_some(),
     ) {
-        egui::SidePanel::right("toc_panel")
-            .width_range(150.0..=250.0)
+        // egui 0.35 unified `SidePanel`/`TopBottomPanel` into `Panel`,
+        // and panels now allocate within a parent `&mut Ui`.
+        // `width_range` is now `size_range`.
+        Panel::right("toc_panel")
+            .size_range(150.0..=250.0)
             .resizable(true)
-            .show(ctx, |ui| {
+            .show(parent_ui, |ui| {
                 ui.add_space(4.0);
                 ui.heading(
                     RichText::new("Table of Contents")
@@ -55,7 +59,7 @@ pub fn show_right_panel(app: &mut FastMdApp, ctx: &egui::Context) {
                 ui.add_space(4.0);
 
                 egui::ScrollArea::vertical()
-                    .id_source("right_toc_scroll")
+                    .id_salt("right_toc_scroll")
                     .show(ui, |ui| {
                         let toc_snapshot = app.tab_manager.toc.clone();
                         for entry in &toc_snapshot {
@@ -132,8 +136,8 @@ mod ui_tests {
         });
         *app.selection_mut().selected_file_mut() = None;
 
-        let _ = ctx.run(egui::RawInput::default(), |ctx| {
-            show_right_panel(&mut app, ctx);
+        let _ = ctx.run_ui(egui::RawInput::default(), |ui| {
+            show_right_panel(&mut app, ui);
         });
     }
 
@@ -153,8 +157,8 @@ mod ui_tests {
         });
         *app.selection_mut().selected_file_mut() = Some(PathBuf::from("doc.md"));
 
-        let _ = ctx.run(egui::RawInput::default(), |ctx| {
-            show_right_panel(&mut app, ctx);
+        let _ = ctx.run_ui(egui::RawInput::default(), |ui| {
+            show_right_panel(&mut app, ui);
         });
     }
 }

@@ -1,9 +1,10 @@
-//! Center content panel — tab bar, markdown preview, YAML front-matter editor, agent chat output, and inline editor.
+//! Center content panel Ã¢â‚¬â€ tab bar, markdown preview, YAML front-matter editor, agent chat output, and inline editor.
 
 use crate::ui::render::{render_markdown, render_yaml_table};
 use crate::ui::{FastMdApp, generate_format_prompt, open_in_system_editor, show_in_file_explorer};
 use eframe::egui;
 use egui::RichText;
+use egui::containers::CentralPanel;
 use std::path::PathBuf;
 
 /// Action that can be applied to tabs.
@@ -79,7 +80,7 @@ pub fn apply_tab_action(
 fn render_agent_session(ui: &mut egui::Ui, app: &mut FastMdApp) {
     ui.horizontal_wrapped(|ui| {
         ui.heading(
-            RichText::new("🤖 FastMD Agent Session")
+            RichText::new("Ã°Å¸Â¤â€“ FastMD Agent Session")
                 .size(18.0)
                 .strong()
                 .color(egui::Color32::from_rgb(100, 200, 255)),
@@ -100,7 +101,7 @@ fn render_agent_session(ui: &mut egui::Ui, app: &mut FastMdApp) {
     ui.add_space(8.0);
 
     egui::ScrollArea::vertical()
-        .id_source("agent_thinking_scroll")
+        .id_salt("agent_thinking_scroll")
         .stick_to_bottom(true)
         .show(ui, |ui| {
             if !app.agent().state().thinking.is_empty() {
@@ -158,44 +159,46 @@ fn render_tabs_and_content(ui: &mut egui::Ui, app: &mut FastMdApp) {
                     } else {
                         open_in_system_editor(tab_path);
                     }
-                    ui.close_menu();
+                    ui.close();
                 }
                 ui.separator();
                 if ui.button("Close").clicked() {
                     tab_action = Some(TabAction::Close(i));
-                    ui.close_menu();
+                    ui.close();
                 }
                 if ui.button("Close Others").clicked() {
                     tab_action = Some(TabAction::CloseOthers(i));
-                    ui.close_menu();
+                    ui.close();
                 }
                 if ui.button("Close All").clicked() {
                     tab_action = Some(TabAction::CloseAll);
-                    ui.close_menu();
+                    ui.close();
                 }
                 ui.separator();
                 if ui.button("Copy Path").clicked() {
-                    ui.output_mut(|o| o.copied_text = tab_path.to_string_lossy().to_string());
-                    ui.close_menu();
+                    // egui 0.35: `PlatformOutput::copied_text` was
+                    // removed; use the dedicated `Ui::copy_text` helper.
+                    ui.copy_text(tab_path.to_string_lossy().to_string());
+                    ui.close();
                 }
                 if ui.button("Show in File Explorer").clicked() {
                     show_in_file_explorer(tab_path);
-                    ui.close_menu();
+                    ui.close();
                 }
                 if ui.button("Open in Editor").clicked() {
                     open_in_system_editor(tab_path);
-                    ui.close_menu();
+                    ui.close();
                 }
                 if ui.button("Format Markdown").clicked() {
                     let now = chrono::Local::now();
                     let date_str = now.to_rfc3339();
                     app.submit_prompt = Some(generate_format_prompt(&date_str));
                     *app.selection.selected_file_mut() = Some(tab_path.clone());
-                    ui.close_menu();
+                    ui.close();
                 }
             });
 
-            if ui.button("❌").clicked() {
+            if ui.button("Ã¢ÂÅ’").clicked() {
                 tab_action = Some(TabAction::Close(i));
             }
             ui.separator();
@@ -233,7 +236,7 @@ fn render_tabs_and_content(ui: &mut egui::Ui, app: &mut FastMdApp) {
         ui.separator();
 
         egui::ScrollArea::vertical()
-            .id_source("main_markdown_scroll")
+            .id_salt("main_markdown_scroll")
             .show(ui, |ui| {
                 if let Some(yaml) = &app.tab_manager.current_yaml {
                     render_yaml_table(ui, yaml);
@@ -270,8 +273,11 @@ fn render_empty_state(ui: &mut egui::Ui) {
 /// Purity: Impure (performs UI rendering and routes side effects).
 /// Preconditions: None.
 /// Postconditions: Renders the central panel content.
-pub fn show_center_panel(app: &mut FastMdApp, ctx: &egui::Context) {
-    egui::CentralPanel::default().show(ctx, |ui| {
+pub fn show_center_panel(app: &mut FastMdApp, parent_ui: &mut egui::Ui) {
+    // egui 0.35: `CentralPanel::show` now takes the parent
+    // `&mut Ui` rather than a `&Context`; allocate within the
+    // root Ui we got from `App::ui`.
+    CentralPanel::default().show(parent_ui, |ui| {
         if app.agent().show_results() {
             render_agent_session(ui, app);
         } else if !app.tabs().tabs.is_empty() {
@@ -413,8 +419,8 @@ mod tests {
         let ctx = egui::Context::default();
         let mut app = create_test_app();
 
-        let _ = ctx.run(Default::default(), |ctx| {
-            show_center_panel(&mut app, ctx);
+        let _ = ctx.run_ui(Default::default(), |ui| {
+            show_center_panel(&mut app, ui);
         });
 
         app.tabs_mut().tabs = vec![PathBuf::from("doc1.md"), PathBuf::from("doc2.md")];
@@ -422,8 +428,8 @@ mod tests {
         app.tabs_mut().current_markdown = "# Document 1 Header".to_string();
         app.tabs_mut().current_yaml = Some(serde_yaml::from_str("title: Doc 1").unwrap());
 
-        let _ = ctx.run(Default::default(), |ctx| {
-            show_center_panel(&mut app, ctx);
+        let _ = ctx.run_ui(Default::default(), |ui| {
+            show_center_panel(&mut app, ui);
         });
 
         app.agent_mut().set_show_results(true);
@@ -433,8 +439,8 @@ mod tests {
         app.agent_mut()
             .set_response("Final agent summary answer".to_string());
 
-        let _ = ctx.run(Default::default(), |ctx| {
-            show_center_panel(&mut app, ctx);
+        let _ = ctx.run_ui(Default::default(), |ui| {
+            show_center_panel(&mut app, ui);
         });
     }
 }

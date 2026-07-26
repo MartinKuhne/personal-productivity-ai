@@ -1,4 +1,4 @@
-//! Root egui `App` struct — owns all application state and wires together background tasks, panels, agent, and dialogs.
+//! Root egui `App` struct Ã¢â‚¬â€ owns all application state and wires together background tasks, panels, agent, and dialogs.
 
 use crate::agent::AgentSessionManager;
 use crate::background::{BackgroundProcessManager, SharedProcessManager};
@@ -275,11 +275,11 @@ impl FastMdApp {
         visuals.window_fill = egui::Color32::from_rgb(9, 9, 11);
         visuals.panel_fill = egui::Color32::from_rgb(9, 9, 11);
         visuals.selection.bg_fill = egui::Color32::from_rgb(99, 102, 241);
-        visuals.window_rounding = 8.0.into();
-        visuals.widgets.noninteractive.rounding = 4.0.into();
-        visuals.widgets.inactive.rounding = 4.0.into();
-        visuals.widgets.hovered.rounding = 4.0.into();
-        visuals.widgets.active.rounding = 4.0.into();
+        visuals.window_corner_radius = 8.0.into();
+        visuals.widgets.noninteractive.corner_radius = 4.0.into();
+        visuals.widgets.inactive.corner_radius = 4.0.into();
+        visuals.widgets.hovered.corner_radius = 4.0.into();
+        visuals.widgets.active.corner_radius = 4.0.into();
 
         let bright_text = egui::Color32::from_gray(210);
         visuals.widgets.noninteractive.fg_stroke.color = bright_text;
@@ -495,19 +495,33 @@ impl eframe::App for FastMdApp {
         }
     }
 
-    fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
-        self.update_ui(ctx);
+    fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
+        self.update_ui(ui);
     }
 }
 
 impl FastMdApp {
-    pub fn update_ui(&mut self, ctx: &egui::Context) {
+    /// Purpose: Drive one frame of the app.
+    /// Inputs: `ui` - The root [`egui::Ui`] supplied by eframe.
+    /// Outputs: None.
+    /// Purity: Impure (mutates `self`, paints to `ui`).
+    /// Preconditions: None.
+    /// Postconditions: The root view has been rendered for this frame.
+    ///
+    /// egui 0.35 changed `App::update` to `App::ui`, and the
+    /// `eframe::App` entry point now hands us a `&mut egui::Ui`
+    /// rather than a `&Context`. We use the inner `Ui` to draw
+    /// all panels, and pluck out the [`egui::Context`] for the
+    /// non-rendering bookkeeping (file-event drain, repaint
+    /// scheduling, etc).
+    pub fn update_ui(&mut self, ui: &mut egui::Ui) {
+        let ctx = ui.ctx();
         self.process_file_events_and_repaint(ctx);
         self.drain_background_channel();
         self.handle_file_selection(ctx);
         self.show_editor_overlay(ctx);
-        self.show_modals(ctx);
-        self.render_panels(ctx);
+        self.show_modals(ui);
+        self.render_panels(ui);
         self.handle_deferred_actions();
     }
 
@@ -619,7 +633,12 @@ impl FastMdApp {
         }
     }
 
-    fn show_modals(&mut self, ctx: &egui::Context) {
+    fn show_modals(&mut self, parent_ui: &mut egui::Ui) {
+        // egui 0.35: modal dialogs are still rendered through
+        // `egui::Window`, which can take the context directly. We
+        // pull the `Context` off the root `Ui` so the existing
+        // `show_*_modal` helpers (which take `&Context`) keep working.
+        let ctx = parent_ui.ctx();
         if self.dialogs.move_dialog_open {
             crate::ui::modals::show_move_modal_dialog(
                 &mut self.dialogs,
@@ -703,12 +722,16 @@ impl FastMdApp {
         }
     }
 
-    fn render_panels(&mut self, ctx: &egui::Context) {
-        show_top_panel(self, ctx);
-        show_bottom_panel(self, ctx);
-        show_right_panel(self, ctx);
-        show_left_panel(self, ctx);
-        show_center_panel(self, ctx);
+    fn render_panels(&mut self, parent_ui: &mut egui::Ui) {
+        // egui 0.35: each `*Panel` allocates itself from a parent
+        // `&mut Ui`; pass the root `Ui` from `App::ui` straight
+        // through. The order is preserved from 0.27: top Ã¢â€ â€™ bottom Ã¢â€ â€™
+        // right Ã¢â€ â€™ left Ã¢â€ â€™ center.
+        show_top_panel(self, parent_ui);
+        show_bottom_panel(self, parent_ui);
+        show_right_panel(self, parent_ui);
+        show_left_panel(self, parent_ui);
+        show_center_panel(self, parent_ui);
     }
 
     fn handle_deferred_actions(&mut self) {
@@ -805,8 +828,8 @@ mod tests {
             .send(BackgroundMessage::AgentResponse("Done result".to_string()))
             .unwrap();
 
-        let _ = ctx.run(Default::default(), |ctx| {
-            app.update_ui(ctx);
+        let _ = ctx.run_ui(Default::default(), |ui| {
+            app.update_ui(ui);
         });
 
         assert!(app.file_processor.all_files.contains(&test_file));
@@ -836,8 +859,8 @@ mod tests {
             })
             .unwrap();
 
-        let _ = ctx.run(Default::default(), |ctx| {
-            app.update_ui(ctx);
+        let _ = ctx.run_ui(Default::default(), |ui| {
+            app.update_ui(ui);
         });
 
         assert!(app.tab_manager.loaded_path.is_none()); // Trigger reload
@@ -849,8 +872,8 @@ mod tests {
             })
             .unwrap();
 
-        let _ = ctx.run(Default::default(), |ctx| {
-            app.update_ui(ctx);
+        let _ = ctx.run_ui(Default::default(), |ui| {
+            app.update_ui(ui);
         });
 
         assert!(!app.file_processor.all_files.contains(&file_path));
@@ -869,8 +892,8 @@ mod tests {
             ))
             .unwrap();
 
-        let _ = ctx.run(Default::default(), |ctx| {
-            app.update_ui(ctx);
+        let _ = ctx.run_ui(Default::default(), |ui| {
+            app.update_ui(ui);
         });
 
         assert_eq!(app.agent.state().status, "Error: Network timeout");
@@ -882,8 +905,8 @@ mod tests {
             ]))
             .unwrap();
 
-        let _ = ctx.run(Default::default(), |ctx| {
-            app.update_ui(ctx);
+        let _ = ctx.run_ui(Default::default(), |ui| {
+            app.update_ui(ui);
         });
 
         assert!(!app.agent.state().running);
@@ -906,8 +929,8 @@ mod tests {
             }))
             .unwrap();
 
-        let _ = ctx.run(Default::default(), |ctx| {
-            app.update_ui(ctx);
+        let _ = ctx.run_ui(Default::default(), |ui| {
+            app.update_ui(ui);
         });
 
         assert_eq!(
@@ -940,8 +963,8 @@ mod tests {
             }))
             .unwrap();
 
-        let _ = ctx.run(Default::default(), |ctx| {
-            app.update_ui(ctx);
+        let _ = ctx.run_ui(Default::default(), |ui| {
+            app.update_ui(ui);
         });
 
         assert_eq!(
@@ -963,7 +986,7 @@ mod tests {
         assert_eq!(app.agent.state().total_usage.cached_tokens, Some(50));
         assert_eq!(app.agent.state().total_usage.reasoning_tokens, Some(5));
 
-        // Third turn: smaller context — peak should NOT shrink.
+        // Third turn: smaller context Ã¢â‚¬â€ peak should NOT shrink.
         app.tx
             .send(BackgroundMessage::AgentTokenUsage(TokenUsageInfo {
                 prompt_tokens: 80,
@@ -974,8 +997,8 @@ mod tests {
             }))
             .unwrap();
 
-        let _ = ctx.run(Default::default(), |ctx| {
-            app.update_ui(ctx);
+        let _ = ctx.run_ui(Default::default(), |ui| {
+            app.update_ui(ui);
         });
 
         assert_eq!(
@@ -996,7 +1019,7 @@ mod tests {
         // file that is currently loaded into the renderer, the
         // next frame must reload it from disk. We model "currently
         // loaded" by setting `loaded_path = Some(path)` while
-        // leaving `selected_file` alone — `load_selected_file`
+        // leaving `selected_file` alone Ã¢â‚¬â€ `load_selected_file`
         // (the actual reload driver) only fires when
         // `selected_file.is_some() && loaded_path != selected_file`.
         let mut app = create_test_app();
@@ -1056,7 +1079,7 @@ mod tests {
         // Sanity check: a Removed event still clears `loaded_path`
         // regardless of whether the editor is open. (We accept
         // losing unsaved edits in the editor if the file was
-        // deleted out from under us — that's the user's action.)
+        // deleted out from under us Ã¢â‚¬â€ that's the user's action.)
         let mut app = create_test_app();
         let path = PathBuf::from("/tmp/gone.md");
 
@@ -1191,7 +1214,7 @@ mod tests {
         let _ = app.process_file_events();
         assert!(
             !app.layout.left_panel_dirty,
-            "process_file_events must not set left_panel_dirty — the width is \
+            "process_file_events must not set left_panel_dirty Ã¢â‚¬â€ the width is \
              calculated once when indexing finishes, not per bus event"
         );
     }
@@ -1238,7 +1261,7 @@ mod tests {
         let _ = app.process_file_events();
         assert!(
             app.tag_manager.all_tags().contains("keep"),
-            "Discovered events must NOT call rebuild — the FileParsed path \
+            "Discovered events must NOT call rebuild Ã¢â‚¬â€ the FileParsed path \
              updates all_tags incrementally"
         );
     }
