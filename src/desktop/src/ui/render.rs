@@ -1195,18 +1195,221 @@ mod tests {
     }
 
     #[test]
+    fn test_parse_edge_cases_expose_quirks() {
+        // Targeted probes for known-fragile areas. Each assertion captures
+        // the expected behavior; a failure here is a parser defect.
+
+        // Empty input must produce zero events (no spurious separators).
+        assert_eq!(
+            parse_markdown_to_events(""),
+            vec![],
+            "empty input should produce no events"
+        );
+
+        // Whitespace-only input must produce zero events.
+        assert_eq!(
+            parse_markdown_to_events("   \n\n\n"),
+            vec![],
+            "whitespace input should produce no events"
+        );
+
+        // A table with all empty cells must have all rows with N cells.
+        let events = parse_markdown_to_events("| | | |\n|---|---|---|\n");
+        for ev in &events {
+            if let RenderEvent::Table(rows) = ev {
+                for (i, row) in rows.iter().enumerate() {
+                    assert_eq!(row.len(), 3, "empty-cell table row {i} should have 3 cells");
+                }
+            }
+        }
+
+        // A table where the separator has fewer columns than the header
+        // must still produce a rectangular table — pulldown-cmark normalizes
+        // this. If the parser blindly concatenates, the row would be ragged.
+        let events = parse_markdown_to_events("| a | b | c |\n|---|---|\n| 1 | 2 | 3 |");
+        for ev in &events {
+            if let RenderEvent::Table(rows) = ev {
+                for (i, row) in rows.iter().enumerate() {
+                    assert!(
+                        row.iter().all(|c| c.len() == row.len()),
+                        "mismatched-col table row {i} has inconsistent cell count: {:?}",
+                        row.iter().map(Vec::len).collect::<Vec<_>>()
+                    );
+                }
+            }
+        }
+
+        // Nested lists: every FlushInline must have `indent` ≤ the input's
+        // list depth. A 3-deep nested list should produce indents up to 3.
+        let events = parse_markdown_to_events("- a\n  - b\n    - c\n- d");
+        for ev in &events {
+            if let RenderEvent::FlushInline { indent, .. } = ev {
+                assert!(*indent <= 3, "3-deep nested list produced indent={indent}");
+            }
+        }
+
+        // Heading inside a blockquote: the heading must still emit a
+        // Heading event, not be swallowed by the blockquote handling.
+        let events = parse_markdown_to_events("> # heading in quote");
+        assert!(
+            events
+                .iter()
+                .any(|e| matches!(e, RenderEvent::Heading { level: 1, text } if text.contains("heading in quote"))),
+            "heading inside blockquote was lost: {events:?}"
+        );
+    }
+
+    #[test]
+    fn test_parse_suspicious_paths() {
+        // These probe paths the existing tests don't exercise.
+        // Each captures an expected invariant; failure = parser bug.
+
+        // Empty link: `[text]()` should produce a Link with empty URL.
+        let events = parse_markdown_to_events("[text]()");
+        assert!(
+            events.iter().any(|e| matches!(
+                e,
+                RenderEvent::FlushInline { elems, .. } if elems.iter().any(|el| matches!(
+                    el,
+                    InlineElem::Link(url, text) if url.is_empty() && text == "text"
+                ))
+            )),
+            "empty-URL link lost: {events:?}"
+        );
+
+        // Empty code block: ```\n``` should produce a CodeBlock with
+        // empty content, not be dropped entirely.
+        let events = parse_markdown_to_events("```\n```");
+        assert!(
+            events
+                .iter()
+                .any(|e| matches!(e, RenderEvent::CodeBlock(c) if c.is_empty())),
+            "empty code block lost: {events:?}"
+        );
+
+        // Image in heading: `# ![alt](url)` — image must not be dropped.
+        let events = parse_markdown_to_events("# ![alt text](https://x/y.png)");
+        assert!(
+            events
+                .iter()
+                .any(|e| matches!(e, RenderEvent::Heading { level: 1, text } if text.contains("alt text"))),
+            "image alt text lost from heading: {events:?}"
+        );
+
+        // Heading immediately followed by heading: `# A\n# B`
+        let events = parse_markdown_to_events("# A\n# B");
+        let headings: Vec<_> = events
+            .iter()
+            .filter_map(|e| match e {
+                RenderEvent::Heading { level, text } => Some((*level, text.clone())),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(headings, vec![(1, "A".to_string()), (1, "B".to_string())], "consecutive headings: {events:?}");
+
+        // An empty list `- ` (item with no text). The parser should still
+        // emit a FlushInline (with empty elems but bullet) so the bullet
+        // gets rendered. The current `push_inline` helper skips when
+        // `elems.is_empty() && !needs_bullet && task_checked.is_none()` —
+        // but `needs_bullet` is true here, so the bullet *should* render.
+        let events = parse_markdown_to_events("- ");
+        assert!(
+            events
+                .iter()
+                .any(|e| matches!(e, RenderEvent::FlushInline { needs_bullet: true, .. })),
+            "empty list item lost: {events:?}"
+        );
+
+        // A table with only the header row, no data rows. The Table event
+        // should still emit (with 1 row), not be dropped.
+        let events = parse_markdown_to_events("| H1 | H2 |\n|---|---|\n");
+        let table_event = events
+            .iter()
+            .find_map(|e| if let RenderEvent::Table(rows) = e { Some(rows.len()) } else { None });
+        assert_eq!(table_event, Some(1), "header-only table dropped: {events:?}");
+    }
+
+    #[test]
     fn test_parse_markdown_fuzz_property() {
-        let random_markdowns = [
-            "",
-            "#",
-            "*bold*",
-            "```\ncode\n```",
-            "|a|b|\n|-|-|\n|1|2|",
-            "[link](http://example.com)",
-            "- [ ] task",
-        ];
-        for md in random_markdowns {
-            let _events = parse_markdown_to_events(md);
+        use proptest::prelude::*;
+        use proptest::strategy::ValueTree;
+
+        // Generates a string of common markdown elements joined by blank
+        // lines, so the parser sees a realistic mix of constructs.
+        fn md_grammar() -> impl Strategy<Value = String> {
+            let heading = "[#]{1,6}[ \\t]+[A-Za-z ]{1,30}";
+            let para = "[A-Za-z ,.!?]{0,80}";
+            let code_block = "```[a-z]*\\n[a-zA-Z0-9 ;]{0,40}\\n```";
+            let bullet = "- [ \\t]{0,3}[A-Za-z ]{1,30}";
+            let task = "- \\[[ x]\\] [A-Za-z ]{1,30}";
+            let table_row = "\\|?[A-Za-z ]{1,5}(\\|[A-Za-z ]{1,5})*\\|?";
+            let table_sep = "\\|?[ -]{3}(\\|[ -]{3})*\\|?";
+            let link = "\\[[A-Za-z ]{1,20}\\]\\(https?://[a-z.]+\\)";
+            let inline = prop_oneof![
+                2 => Just(para.to_string()),
+                1 => Just(heading.to_string()),
+                1 => Just(code_block.to_string()),
+                1 => Just(bullet.to_string()),
+                1 => Just(task.to_string()),
+                1 => Just(format!("{table_row}\\n{table_sep}\\n{table_row}")),
+                1 => Just(link.to_string()),
+            ];
+            proptest::collection::vec(inline, 0..8)
+                .prop_map(|v| v.join("\n\n"))
+        }
+
+        let mut runner = proptest::test_runner::TestRunner::default();
+        let strategy = md_grammar();
+        for _ in 0..64 {
+            let input = strategy
+                .new_tree(&mut runner)
+                .expect("strategy should generate a value")
+                .current();
+            let events = parse_markdown_to_events(&input);
+
+            // Output must be bounded — no input of this size can produce
+            // more than a small constant multiple of its byte count in events.
+            assert!(
+                events.len() < 1_000,
+                "event count exploded for input {input:?}: {} events",
+                events.len()
+            );
+
+            for event in &events {
+                match event {
+                    RenderEvent::Heading { level, text } => {
+                        assert!(
+                            (1..=6).contains(level),
+                            "heading level out of range: {level} in {text:?}"
+                        );
+                    }
+                    RenderEvent::Table(rows) => {
+                        // Tables must be rectangular — pulldown-cmark emits
+                        // them as a sequence of `TableRow` / `TableCell`
+                        // events; the parser concatenates them and a
+                        // non-rectangular result is a parser bug.
+                        if let Some(first) = rows.first() {
+                            let expected = first.len();
+                            for (i, row) in rows.iter().enumerate() {
+                                assert_eq!(
+                                    row.len(),
+                                    expected,
+                                    "table row {i} has {} cells, expected {expected}",
+                                    row.len()
+                                );
+                            }
+                        }
+                    }
+                    RenderEvent::FlushInline { indent, .. } => {
+                        // `indent` must not exceed the observed list depth.
+                        // The parser increments `list_depth` on `Tag::List`
+                        // and decrements on `TagEnd::List`; an indent > 8
+                        // is impossible for a small input.
+                        assert!(*indent <= 8, "indent {indent} exceeds safe bound");
+                    }
+                    _ => {}
+                }
+            }
         }
     }
 }

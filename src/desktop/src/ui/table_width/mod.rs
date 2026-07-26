@@ -66,6 +66,36 @@ pub fn ftwa(max_content: &[f32], min_content: &[f32], available: f32) -> ColumnW
         "ftwa: max_content and min_content must have equal length"
     );
 
+    // NaN / infinity in input is a programmer error. Without this guard,
+    // NaN propagates silently through every arithmetic comparison (they
+    // all return false against NaN), causing the function to fall through
+    // to the deficit branch with NaN sum_max / deficit, eventually
+    // returning NaN-containing widths that crash egui's layout downstream.
+    assert!(
+        available.is_finite(),
+        "ftwa: available must be finite, got {available}"
+    );
+    assert!(
+        max_content.iter().all(|x| x.is_finite()),
+        "ftwa: max_content must be finite, got {max_content:?}"
+    );
+    assert!(
+        min_content.iter().all(|x| x.is_finite()),
+        "ftwa: min_content must be finite, got {min_content:?}"
+    );
+
+    // max_content[j] >= min_content[j] is an invariant (max-content is
+    // always at least the width of the longest unbreakable token).
+    // Without this check, a corrupted measurement (e.g. min longer than
+    // max) silently triggers the §3.6 fallback ("can't fit") instead of
+    // surfacing the data error to the caller.
+    for (j, (&mx, &mn)) in max_content.iter().zip(min_content.iter()).enumerate() {
+        assert!(
+            mx >= mn,
+            "ftwa: max_content[{j}] = {mx} < min_content[{j}] = {mn} (invariant violation)"
+        );
+    }
+
     let sum_max: f32 = max_content.iter().copied().sum();
     let sum_min: f32 = min_content.iter().copied().sum();
 
@@ -481,6 +511,54 @@ mod tests {
             "sum {} must equal available {}",
             sum,
             available
+        );
+    }
+
+    #[test]
+    fn nan_input_panics_instead_of_propagating() {
+        // NaN is a programmer error. The function must panic with a
+        // clear message, not silently return NaN-containing widths that
+        // would propagate into egui's layout (which then renders garbage
+        // or asserts deep inside).
+        let max_nan = [f32::NAN, 1.0];
+        let min = [0.0, 0.0];
+        let result_max = std::panic::catch_unwind(|| ftwa(&max_nan, &min, 1.0));
+        assert!(
+            result_max.is_err(),
+            "NaN in max_content must panic; got {result_max:?}"
+        );
+
+        let max = [1.0, 1.0];
+        let min_nan = [0.0, f32::NAN];
+        let result_min = std::panic::catch_unwind(|| ftwa(&max, &min_nan, 1.0));
+        assert!(
+            result_min.is_err(),
+            "NaN in min_content must panic; got {result_min:?}"
+        );
+
+        let max = [1.0, 1.0];
+        let min = [0.0, 0.0];
+        let result_avail =
+            std::panic::catch_unwind(|| ftwa(&max, &min, f32::NAN));
+        assert!(
+            result_avail.is_err(),
+            "NaN available must panic; got {result_avail:?}"
+        );
+    }
+
+    #[test]
+    fn max_geq_min_invariant_panics_on_violation() {
+        // The function assumes max_content[j] >= min_content[j] for every
+        // column (slack = max - min must be non-negative). A violation
+        // means the caller fed in inconsistent measurements; the function
+        // must panic with a clear message rather than silently produce
+        // nonsensical widths.
+        let max = [5.0, 5.0];
+        let min = [10.0, 0.0]; // column 0: max < min
+        let result = std::panic::catch_unwind(|| ftwa(&max, &min, 5.0));
+        assert!(
+            result.is_err(),
+            "max_content[j] < min_content[j] must panic; got {result:?}"
         );
     }
 
