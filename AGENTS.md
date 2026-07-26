@@ -1,10 +1,15 @@
 # AI Agent Instructions
 
-When working on this codebase, all AI agents must adhere strictly to the following guidelines:
+When working on this codebase, all AI agents must adhere strictly to the following guidelines.
+
+These are the **repo-wide** principles that apply to every component. Each
+component also has its own `AGENTS.md` with rules specific to that directory;
+always read the nearest one before editing. See
+[Component-specific rules](#component-specific-rules) below for the index.
 
 ## 1. Small Iterations
-- Work in small, manageable iterations. 
-- Do not attempt sweeping, massive refactors in a single pass. 
+- Work in small, manageable iterations.
+- Do not attempt sweeping, massive refactors in a single pass.
 - Break tasks into logical steps, implement a change, and verify it before moving to the next step.
 
 ## 2. Test-Driven Changes
@@ -18,7 +23,7 @@ When working on this codebase, all AI agents must adhere strictly to the followi
 ## 4. Warnings and Compilation
 - **Fix all warnings:** You must fix all new and existing compile or test warnings before considering a task "done."
 - Never leave dangling unused variables, imports, or future-incompatibilities if they are within your control to fix.
-- Ensure `cargo check` and `cargo test` run perfectly clean.
+- Ensure the component's build and test commands run perfectly clean (e.g. `cargo check` / `cargo test` for Rust crates — see the component's own `AGENTS.md`).
 
 ## 5. Clarification
 - Always refuse a task or ask for clarification if the requirements or context are unclear.
@@ -26,36 +31,31 @@ When working on this codebase, all AI agents must adhere strictly to the followi
 ## 6. Code Quality
 - Write modular code with minimal side effects.
 
-## 7. Documentation
-- Every module must have a `//!` module-level doc comment.
-- Start with a concise one-sentence summary, then add detail if needed.
-- The first line (before any blank line) is used in search results and overviews — keep it short and descriptive.
-- Every `pub` item (struct, enum, function, trait, type alias, const) must have a `///` doc comment.
-- Include examples in doc comments where they clarify usage.
-- Run `cargo doc --no-deps` to verify documentation builds without warnings.
-
-## 8. String Constants and Reuse
+## 7. String Constants and Reuse
 - Use string constants (e.g. `const` items) for repeat strings or user-facing literals rather than duplicating them inline.
 - Centralize such constants near the module or type they pertain to so they can be updated in one place.
 
-## 9. Prefer Existing Libraries
+## 8. Prefer Existing Libraries
 - Prefer using available, well-maintained libraries (from `crates.io` or the existing dependency tree) over hand-coding equivalent functions.
 - Before implementing a utility from scratch, check whether an existing dependency already provides it.
 
-## 10. egui Best Practices
-- Follow egui's recommended patterns and idioms when building UI.
-- Follow egui testing best practices (e.g. using `egui::__run_test_ctx` / `State::test_ctx` style harnesses as appropriate) for deterministic UI tests.
-- Keep `update` methods side-effect free where possible and avoid storing unnecessary state in `egui::Id`s.
-
-## 11. Cyclomatic Complexity
+## 9. Cyclomatic Complexity
 - Refactor code as required to limit cyclomatic complexity before adding new features on top of it.
 - Prefer splitting large functions, extracting helpers, and reducing nesting over introducing additional branches into already-complex code.
 
-## 12. Quality Gate (Rust)
+## Component-specific rules
 
-Before marking any task as complete, run the following and ensure they all pass cleanly:
-- `cargo check` — no errors or warnings
-- `cargo test` — all tests pass
-- `cargo clippy -- -D warnings` — no lint warnings (deny all)
-- `cargo fmt --check` — code is properly formatted
-- `cargo doc --no-deps --quiet` — documentation builds without warnings
+Each subdirectory owns its own `AGENTS.md`. Resolve rules by working directory:
+when editing files under one of these directories, that directory's `AGENTS.md`
+takes precedence for tooling, conventions, and quality gates.
+
+| Directory                    | Scope                                                                                  |
+|------------------------------|----------------------------------------------------------------------------------------|
+| [`src/desktop/AGENTS.md`](src/desktop/AGENTS.md)               | Rust `fastmd` crate: documentation, egui, quality gate, tool/UI contracts. |
+| [`src/android/AGENTS.md`](src/android/AGENTS.md)               | Android Kotlin/Gradle companion app.                                                  |
+| [`doc/technical-context/AGENTS.md`](doc/technical-context/AGENTS.md) | Maintenance of `ARCHITECTURE_C4.md`, `RUST.md`, `SPEC.md`.                |
+| [`doc/planning/AGENTS.md`](doc/planning/AGENTS.md)             | Planning / design-record documents.                                                   |
+| [`src/test/wiki/AGENTS.md`](src/test/wiki/AGENTS.md)           | Test wiki fixtures.                                                                   |
+| [`.agents/AGENTS.md`](.agents/AGENTS.md)                       | Speckit skills workflow.                                                              |
+
+If a directory does not have its own `AGENTS.md`, fall back to this file.
