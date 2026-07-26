@@ -29,4 +29,4 @@ pub use print::{PrintJob, execute_print_blocking};
 pub use tag_manager::TagManager;
 pub use tools::{execute_tool, get_tools_schema};
 pub use ui::FastMdApp;
-pub use utils::{extract_tags_from_file, parse_front_matter};
+pub use utils::extract_tags_from_file;

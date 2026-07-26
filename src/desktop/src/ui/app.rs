@@ -14,7 +14,7 @@ use crate::ui::panels::{
 };
 use crate::ui::selection_manager::SelectionManager;
 use crate::ui::tab_manager::TabManager;
-use crate::utils::parse_front_matter;
+use crate::utils::markdown::parse_front_matter;
 use eframe::egui;
 use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, HashSet};
