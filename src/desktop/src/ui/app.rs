@@ -693,18 +693,18 @@ impl FastMdApp {
         }
         if self.dialogs.rename_dialog_open {
             let selection = &mut self.selection;
-            crate::ui::modals::show_rename_dialog(
-                &mut self.dialogs,
-                &self.file_event_bus,
-                &mut self.tab_manager.loaded_path,
-                &mut selection.selected_file,
-                &mut selection.selected_dir,
-                &mut self.tab_manager.tabs,
-                &mut self.file_processor,
-                &mut self.tag_manager,
-                &mut selection.expanded_dirs,
+            crate::ui::modals::show_rename_dialog(crate::ui::modals::RenameDialogCtx {
+                dialog_manager: &mut self.dialogs,
+                file_event_bus: &self.file_event_bus,
+                loaded_path: &mut self.tab_manager.loaded_path,
+                selected_file: &mut selection.selected_file,
+                selected_dir: &mut selection.selected_dir,
+                tabs: &mut self.tab_manager.tabs,
+                file_processor: &mut self.file_processor,
+                tag_manager: &mut self.tag_manager,
+                expanded_dirs: &mut selection.expanded_dirs,
                 ctx,
-            );
+            });
         }
 
         crate::ui::background_logs::show_background_logs_window(self, ctx);

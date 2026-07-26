@@ -156,21 +156,38 @@ pub fn show_create_dir_dialog(
     }
 }
 
-#[allow(clippy::too_many_arguments)]
-pub fn show_rename_dialog(
-    dm: &mut DialogManager,
-    file_event_bus: &Bus<crate::file_events::FileEvent>,
-    loaded_path: &mut Option<PathBuf>,
-    selected_file: &mut Option<PathBuf>,
-    selected_dir: &mut Option<PathBuf>,
-    tabs: &mut [PathBuf],
-    file_processor: &mut FileEventProcessor,
-    tag_manager: &mut crate::tag_manager::TagManager,
-    expanded_dirs: &mut std::collections::HashSet<PathBuf>,
-    ctx: &egui::Context,
-) {
+/// Borrowed inputs the rename dialog needs. Bundled so the function
+/// signature stays under four parameters (PSD-002) — the call site
+/// in `FastMdApp::show_modals` constructs the bundle by reborrowing
+/// each field from `&mut self`.
+pub struct RenameDialogCtx<'a> {
+    pub dialog_manager: &'a mut DialogManager,
+    pub file_event_bus: &'a Bus<crate::file_events::FileEvent>,
+    pub loaded_path: &'a mut Option<PathBuf>,
+    pub selected_file: &'a mut Option<PathBuf>,
+    pub selected_dir: &'a mut Option<PathBuf>,
+    pub tabs: &'a mut [PathBuf],
+    pub file_processor: &'a mut FileEventProcessor,
+    pub tag_manager: &'a mut crate::tag_manager::TagManager,
+    pub expanded_dirs: &'a mut std::collections::HashSet<PathBuf>,
+    pub ctx: &'a egui::Context,
+}
+
+pub fn show_rename_dialog(ctx: RenameDialogCtx<'_>) {
     let mut close_rename_modal = false;
-    if dm.rename_dialog_open {
+    if ctx.dialog_manager.rename_dialog_open {
+        let RenameDialogCtx {
+            dialog_manager: dm,
+            file_event_bus,
+            loaded_path,
+            selected_file,
+            selected_dir,
+            tabs,
+            file_processor,
+            tag_manager,
+            expanded_dirs,
+            ctx,
+        } = ctx;
         egui::Window::new("Rename")
             .collapsible(false)
             .resizable(false)
@@ -377,18 +394,18 @@ mod tests {
 
         {
             let sel = &mut app.selection;
-            show_rename_dialog(
-                &mut app.dialogs,
-                &app.file_event_bus,
-                &mut app.tab_manager.loaded_path,
-                &mut sel.selected_file,
-                &mut sel.selected_dir,
-                &mut app.tab_manager.tabs,
-                &mut app.file_processor,
-                &mut app.tag_manager,
-                &mut sel.expanded_dirs,
-                &ctx,
-            );
+            show_rename_dialog(RenameDialogCtx {
+                dialog_manager: &mut app.dialogs,
+                file_event_bus: &app.file_event_bus,
+                loaded_path: &mut app.tab_manager.loaded_path,
+                selected_file: &mut sel.selected_file,
+                selected_dir: &mut sel.selected_dir,
+                tabs: &mut app.tab_manager.tabs,
+                file_processor: &mut app.file_processor,
+                tag_manager: &mut app.tag_manager,
+                expanded_dirs: &mut sel.expanded_dirs,
+                ctx: &ctx,
+            });
         }
         assert!(!app.dialogs.rename_dialog_open);
 
@@ -400,18 +417,18 @@ mod tests {
 
         let _ = ctx.run_ui(Default::default(), |ui| {
             let sel = &mut app.selection;
-            show_rename_dialog(
-                &mut app.dialogs,
-                &app.file_event_bus,
-                &mut app.tab_manager.loaded_path,
-                &mut sel.selected_file,
-                &mut sel.selected_dir,
-                &mut app.tab_manager.tabs,
-                &mut app.file_processor,
-                &mut app.tag_manager,
-                &mut sel.expanded_dirs,
-                ui.ctx(),
-            );
+            show_rename_dialog(RenameDialogCtx {
+                dialog_manager: &mut app.dialogs,
+                file_event_bus: &app.file_event_bus,
+                loaded_path: &mut app.tab_manager.loaded_path,
+                selected_file: &mut sel.selected_file,
+                selected_dir: &mut sel.selected_dir,
+                tabs: &mut app.tab_manager.tabs,
+                file_processor: &mut app.file_processor,
+                tag_manager: &mut app.tag_manager,
+                expanded_dirs: &mut sel.expanded_dirs,
+                ctx: ui.ctx(),
+            });
         });
 
         assert!(app.dialogs.rename_dialog_open);
@@ -419,18 +436,18 @@ mod tests {
         app.dialogs.rename_new_name = "invalid/name".to_string();
         let _ = ctx.run_ui(Default::default(), |ui| {
             let sel = &mut app.selection;
-            show_rename_dialog(
-                &mut app.dialogs,
-                &app.file_event_bus,
-                &mut app.tab_manager.loaded_path,
-                &mut sel.selected_file,
-                &mut sel.selected_dir,
-                &mut app.tab_manager.tabs,
-                &mut app.file_processor,
-                &mut app.tag_manager,
-                &mut sel.expanded_dirs,
-                ui.ctx(),
-            );
+            show_rename_dialog(RenameDialogCtx {
+                dialog_manager: &mut app.dialogs,
+                file_event_bus: &app.file_event_bus,
+                loaded_path: &mut app.tab_manager.loaded_path,
+                selected_file: &mut sel.selected_file,
+                selected_dir: &mut sel.selected_dir,
+                tabs: &mut app.tab_manager.tabs,
+                file_processor: &mut app.file_processor,
+                tag_manager: &mut app.tag_manager,
+                expanded_dirs: &mut sel.expanded_dirs,
+                ctx: ui.ctx(),
+            });
         });
 
         let _ = fs::remove_dir_all(&temp_dir);
@@ -453,18 +470,18 @@ mod tests {
 
         let _ = ctx.run_ui(Default::default(), |ui| {
             let sel = &mut app.selection;
-            show_rename_dialog(
-                &mut app.dialogs,
-                &app.file_event_bus,
-                &mut app.tab_manager.loaded_path,
-                &mut sel.selected_file,
-                &mut sel.selected_dir,
-                &mut app.tab_manager.tabs,
-                &mut app.file_processor,
-                &mut app.tag_manager,
-                &mut sel.expanded_dirs,
-                ui.ctx(),
-            );
+            show_rename_dialog(RenameDialogCtx {
+                dialog_manager: &mut app.dialogs,
+                file_event_bus: &app.file_event_bus,
+                loaded_path: &mut app.tab_manager.loaded_path,
+                selected_file: &mut sel.selected_file,
+                selected_dir: &mut sel.selected_dir,
+                tabs: &mut app.tab_manager.tabs,
+                file_processor: &mut app.file_processor,
+                tag_manager: &mut app.tag_manager,
+                expanded_dirs: &mut sel.expanded_dirs,
+                ctx: ui.ctx(),
+            });
         });
 
         assert!(
