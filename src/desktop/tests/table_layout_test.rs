@@ -62,24 +62,87 @@ mod tests {
         fn gen_f32(&mut self, lo: f32, hi: f32) -> f32 {
             lo + (self.next_u64() as f32 / u64::MAX as f32) * (hi - lo)
         }
-        /// Generate a "word" of random length (1–12 characters).
-        fn gen_word(&mut self) -> String {
-            let len = (self.next_u64() as usize) % 12 + 1;
-            let mut s = String::with_capacity(len);
-            for _ in 0..len {
-                let ch = b'a' + (self.next_u64() as u8) % 26;
-                s.push(ch as char);
+        fn pick<'a>(&mut self, items: &'a [&str]) -> &'a str {
+            items[(self.next_u64() as usize) % items.len()]
+        }
+        fn gen_insurance_text(&mut self, count: usize) -> String {
+            let companies = [
+                "State Farm",
+                "Geico",
+                "Progressive",
+                "Allstate",
+                "Liberty Mutual",
+                "Nationwide",
+                "USAA",
+                "Travelers",
+                "Aetna",
+                "Cigna",
+                "Blue Cross Blue Shield",
+                "UnitedHealthcare",
+                "MetLife",
+                "Prudential",
+                "Farmers",
+                "American Family",
+                "Erie Insurance",
+                "Chubb",
+            ];
+            let terms = [
+                "Comprehensive coverage",
+                "Collision deductible",
+                "Liability limit",
+                "Uninsured motorist",
+                "Personal injury protection",
+                "Medical payments",
+                "Property damage",
+                "Bodily injury",
+                "Rental reimbursement",
+                "Roadside assistance",
+                "Gap coverage",
+                "Annual premium",
+                "Monthly payment",
+                "Deductible amount",
+                "Out-of-pocket maximum",
+                "Co-payment",
+                "Co-insurance",
+                "Policy renewal",
+                "Coverage limit",
+                "Benefit period",
+                "Waiting period",
+                "Network provider",
+                "Preferred provider",
+                "Out-of-network",
+                "Prior authorization",
+            ];
+            let mut parts = Vec::with_capacity(count);
+            for _ in 0..count {
+                match self.next_u64() % 3 {
+                    0 => parts.push(self.pick(&companies).to_string()),
+                    _ => parts.push(self.pick(&terms).to_string()),
+                }
+            }
+            let mut s = parts.join(" ");
+            if let Some(c) = s.chars().next() {
+                let uc = c.to_uppercase().to_string();
+                s = uc + &s[c.len_utf8()..];
             }
             s
         }
-        /// Generate a sentence of `count` random words.
-        fn gen_sentence(&mut self, count: usize) -> String {
-            let mut words: Vec<String> = (0..count).map(|_| self.gen_word()).collect();
-            words[0] = {
-                let mut c = words[0].chars();
-                c.next().unwrap().to_uppercase().to_string() + c.as_str()
-            };
-            words.join(" ") + "."
+        fn gen_short_insurance(&mut self) -> String {
+            let short_terms = [
+                "Deductible",
+                "Premium",
+                "Co-pay",
+                "Liability",
+                "Coverage",
+                "Policy",
+                "Claim",
+                "Limit",
+                "Waiver",
+                "Rider",
+                "Exclusion",
+                "Benefit",
+            ];
+            self.pick(&short_terms).to_string()
         }
     }
 
@@ -87,9 +150,10 @@ mod tests {
 
     /// Verify that `allocate_at_least` + `child_ui` + `with_main_wrap(true)`
     /// wraps content at the FTWA-assigned width `w` inside a Grid *regardless* of
-    /// the specific column width or text (randomised over 20 iterations).
+    /// the specific column width or text (randomised over 20 iterations with
+    /// realistic insurance data — company names and dollar amounts).
     #[test]
-    fn fix_allocate_ui_randomised() {
+    fn fix_allocate_ui_insurance_data() {
         let ctx = egui::Context::default();
         for iteration in 0..20 {
             let mut rng = SimpleRng::new(SEED.wrapping_add(iteration as u64));
@@ -102,10 +166,9 @@ mod tests {
                         .striped(true)
                         .spacing([10.0, 4.0])
                         .show(ui, |ui| {
-                            // Long sentence — word count proportional to column width
-                            // so text is guaranteed to wrap at col_w.
-                            let word_count = (col_w / 35.0).ceil() as usize + 10;
-                            let long_text = rng.gen_sentence(word_count);
+                            // Long insurance text — phrase count proportional to column width
+                            let phrase_count = (col_w / 45.0).ceil() as usize + 8;
+                            let long_text = rng.gen_insurance_text(phrase_count);
                             let (rect, _) = ui
                                 .allocate_at_least(egui::vec2(col_w, 0.0), egui::Sense::hover());
                             let layout = egui::Layout::left_to_right(egui::Align::Min)
@@ -123,8 +186,8 @@ mod tests {
                                 (content_w - col_w).abs()
                             );
 
-                            // Short text in same column
-                            let short_text = rng.gen_word();
+                            // Short insurance term in same column
+                            let short_text = rng.gen_short_insurance();
                             let (rect, _) = ui
                                 .allocate_at_least(egui::vec2(col_w, 0.0), egui::Sense::hover());
                             let layout = egui::Layout::left_to_right(egui::Align::Min)
@@ -147,9 +210,12 @@ mod tests {
                             let layout = egui::Layout::left_to_right(egui::Align::Min)
                                 .with_main_wrap(true);
                             let mut child_ui3 = ui.child_ui(rect, layout);
-                            let row2_words = (col_w / 35.0).ceil() as usize + 5;
+                            let row2_phrases = (col_w / 45.0).ceil() as usize + 5;
                             let r3 = child_ui3.horizontal_wrapped(|ui| {
-                                ui.add(egui::Label::new(rng.gen_sentence(row2_words)).wrap(true));
+                                ui.add(
+                                    egui::Label::new(rng.gen_insurance_text(row2_phrases))
+                                        .wrap(true),
+                                );
                             });
                             let w3 = r3.response.rect.width();
                             let slack3 = (col_w * 0.15).max(20.0);
