@@ -985,16 +985,17 @@ impl Tool for SearchEmailTool {
         let page_size = input.page_size.unwrap_or(10).max(1);
         crate::tools::jmap::tool_search_email(
             ctx.config,
-            input.keyword.as_deref(),
-            input.folder.as_deref(),
-            input.start_date.as_deref(),
-            input.end_date.as_deref(),
-            input.from.as_deref(),
-            input.to.as_deref(),
-            input.is_unread,
-            input.is_flagged,
-            page,
-            page_size,
+            crate::tools::jmap::SearchEmailFilters {
+                keyword: input.keyword.as_deref(),
+                folder: input.folder.as_deref(),
+                start_date: input.start_date.as_deref(),
+                end_date: input.end_date.as_deref(),
+                from: input.from.as_deref(),
+                to: input.to.as_deref(),
+                is_unread: input.is_unread,
+                is_flagged: input.is_flagged,
+            },
+            crate::tools::jmap::SearchEmailPagination { page, page_size },
         )
         .map(|r| {
             serde_json::to_value(r).unwrap_or_else(|e| serde_json::json!({"error": e.to_string()}))
