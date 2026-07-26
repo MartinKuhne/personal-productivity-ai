@@ -14,5 +14,6 @@ pub use calendar::{
 };
 pub use contacts::{tool_add_contact, tool_get_contact, tool_search_contact};
 pub use email::{
-    tool_get_email_by_id, tool_search_email, tool_send_email, SearchEmailFilters, SearchEmailPagination,
+    SearchEmailFilters, SearchEmailPagination, tool_get_email_by_id, tool_search_email,
+    tool_send_email,
 };

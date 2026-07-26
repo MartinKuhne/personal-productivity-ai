@@ -187,11 +187,20 @@ mod tests {
         // Regression for the is_safe_tool string-list: the registry now
         // exposes a single `safety_of(name)` lookup that returns
         // Safety::ReadOnly / Safety::Mutating.
-        assert_eq!(crate::tools::registry::safety_of("read_file"), Safety::ReadOnly);
+        assert_eq!(
+            crate::tools::registry::safety_of("read_file"),
+            Safety::ReadOnly
+        );
         assert_eq!(crate::tools::registry::safety_of("grep"), Safety::ReadOnly);
-        assert_eq!(crate::tools::registry::safety_of("create_file"), Safety::Mutating);
+        assert_eq!(
+            crate::tools::registry::safety_of("create_file"),
+            Safety::Mutating
+        );
         // Unknown tools fall back to Mutating (the conservative choice).
-        assert_eq!(crate::tools::registry::safety_of("nonexistent"), Safety::Mutating);
+        assert_eq!(
+            crate::tools::registry::safety_of("nonexistent"),
+            Safety::Mutating
+        );
     }
 
     #[test]

@@ -183,7 +183,12 @@ impl ImageVisionWorker {
     }
 
     pub fn spawn(self) {
-        let ImageVisionWorker { rx, tx, config, bus } = self;
+        let ImageVisionWorker {
+            rx,
+            tx,
+            config,
+            bus,
+        } = self;
         crate::background::spawn_path_worker(rx, move |path| {
             let bus = bus.clone();
             let tx = tx.clone();

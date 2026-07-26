@@ -996,7 +996,10 @@ mod tests {
         assert_eq!(result[0]["bcc"][0]["email"], "bcc@t.com");
     }
 
-    use super::{tool_get_email_by_id, tool_search_email, tool_send_email, SearchEmailFilters, SearchEmailPagination};
+    use super::{
+        SearchEmailFilters, SearchEmailPagination, tool_get_email_by_id, tool_search_email,
+        tool_send_email,
+    };
     use crate::config::{AppConfig, JmapClient};
     use std::io::{Read, Write};
     use std::net::TcpListener;
@@ -1040,7 +1043,10 @@ mod tests {
                 is_unread: None,
                 is_flagged: None,
             },
-            SearchEmailPagination { page: 1, page_size: 10 },
+            SearchEmailPagination {
+                page: 1,
+                page_size: 10,
+            },
         );
         assert!(res.is_err());
     }
@@ -1079,7 +1085,10 @@ mod tests {
                 is_unread: None,
                 is_flagged: None,
             },
-            SearchEmailPagination { page: 1, page_size: 10 },
+            SearchEmailPagination {
+                page: 1,
+                page_size: 10,
+            },
         );
         assert!(res.is_ok());
     }
@@ -1146,7 +1155,10 @@ mod tests {
                 is_unread: Some(true),
                 is_flagged: Some(false),
             },
-            SearchEmailPagination { page: 1, page_size: 10 },
+            SearchEmailPagination {
+                page: 1,
+                page_size: 10,
+            },
         );
         assert!(res.is_ok());
     }
@@ -1195,7 +1207,10 @@ mod tests {
                 is_unread: None,
                 is_flagged: None,
             },
-            SearchEmailPagination { page: 1, page_size: 10 },
+            SearchEmailPagination {
+                page: 1,
+                page_size: 10,
+            },
         );
         assert!(res.is_err());
         let msg = res.unwrap_err();
@@ -1232,7 +1247,10 @@ mod tests {
                 is_unread: None,
                 is_flagged: None,
             },
-            SearchEmailPagination { page: 1, page_size: 10 },
+            SearchEmailPagination {
+                page: 1,
+                page_size: 10,
+            },
         );
         assert!(res.is_err());
         assert!(
@@ -1287,7 +1305,10 @@ mod tests {
                 is_unread: None,
                 is_flagged: None,
             },
-            SearchEmailPagination { page: 1, page_size: 10 },
+            SearchEmailPagination {
+                page: 1,
+                page_size: 10,
+            },
         );
         assert!(res.is_ok());
         let response = res.unwrap();
@@ -1343,7 +1364,10 @@ mod tests {
                 is_unread: None,
                 is_flagged: None,
             },
-            SearchEmailPagination { page: 2, page_size: 2 },
+            SearchEmailPagination {
+                page: 2,
+                page_size: 2,
+            },
         );
         assert!(res.is_ok());
         let response = res.unwrap();
@@ -1397,7 +1421,10 @@ mod tests {
                 is_unread: None,
                 is_flagged: None,
             },
-            SearchEmailPagination { page: 99, page_size: 10 },
+            SearchEmailPagination {
+                page: 99,
+                page_size: 10,
+            },
         );
         assert!(res.is_ok());
         let response = res.unwrap();
@@ -1498,7 +1525,10 @@ mod tests {
                 is_unread: None,
                 is_flagged: None,
             },
-            SearchEmailPagination { page: 1, page_size: 10 },
+            SearchEmailPagination {
+                page: 1,
+                page_size: 10,
+            },
         );
         assert!(res.is_ok());
         let response = res.unwrap();
