@@ -64,6 +64,17 @@ impl ToolRegistry {
         tool.execute(ctx, args)
     }
 
+    /// Look up a tool by name and return its [`crate::tools::Safety`]
+    /// classification. Unknown names return [`crate::tools::Safety::Mutating`]
+    /// (the conservative choice) so the agent loop never accidentally
+    /// parallelises an unknown call.
+    pub fn safety_of(&self, name: &str) -> crate::tools::Safety {
+        self.tools
+            .get(name)
+            .map(|t| t.safety())
+            .unwrap_or(crate::tools::Safety::Mutating)
+    }
+
     pub fn get_schema(&self, config: &AppConfig, prompt: &str) -> serde_json::Value {
         let mut tools = Vec::new();
         for tool in self.tools.values() {
@@ -127,6 +138,12 @@ static TOOL_REGISTRY: std::sync::LazyLock<ToolRegistry> =
 
 pub fn get_tools_schema(config: &AppConfig, prompt: &str) -> serde_json::Value {
     TOOL_REGISTRY.get_schema(config, prompt)
+}
+
+/// Look up a tool's [`crate::tools::Safety`] classification by name.
+/// See [`ToolRegistry::safety_of`].
+pub fn safety_of(name: &str) -> crate::tools::Safety {
+    TOOL_REGISTRY.safety_of(name)
 }
 
 pub fn execute_tool(ctx: &ToolContext, name: &str, args_str: &str) -> String {
@@ -269,6 +286,9 @@ impl Tool for GrepTool {
     fn is_enabled(&self, _: &AppConfig, _: &str) -> bool {
         true
     }
+    fn safety(&self) -> crate::tools::Safety {
+        crate::tools::Safety::ReadOnly
+    }
     fn execute(&self, ctx: &ToolContext, args: &str) -> Result<serde_json::Value, String> {
         let input: dtos::GrepInput =
             serde_json::from_str(args).map_err(|e| format!("Invalid args: {}", e))?;
@@ -314,6 +334,9 @@ impl Tool for ReadTagsTool {
     fn is_enabled(&self, _: &AppConfig, _: &str) -> bool {
         true
     }
+    fn safety(&self) -> crate::tools::Safety {
+        crate::tools::Safety::ReadOnly
+    }
     fn execute(&self, ctx: &ToolContext, args: &str) -> Result<serde_json::Value, String> {
         let _: dtos::ReadTagsInput =
             serde_json::from_str(args).map_err(|e| format!("Invalid args: {}", e))?;
@@ -348,6 +371,9 @@ impl Tool for ListFilesByTagTool {
     }
     fn is_enabled(&self, _: &AppConfig, _: &str) -> bool {
         true
+    }
+    fn safety(&self) -> crate::tools::Safety {
+        crate::tools::Safety::ReadOnly
     }
     fn execute(&self, ctx: &ToolContext, args: &str) -> Result<serde_json::Value, String> {
         let input: dtos::ListFilesByTagInput =
@@ -400,6 +426,9 @@ impl Tool for ListFilesTool {
     }
     fn is_enabled(&self, _: &AppConfig, _: &str) -> bool {
         true
+    }
+    fn safety(&self) -> crate::tools::Safety {
+        crate::tools::Safety::ReadOnly
     }
     fn execute(&self, ctx: &ToolContext, args: &str) -> Result<serde_json::Value, String> {
         let input: dtos::ListFilesInput =
@@ -455,6 +484,9 @@ impl Tool for ReadFileTool {
     fn is_enabled(&self, _: &AppConfig, _: &str) -> bool {
         true
     }
+    fn safety(&self) -> crate::tools::Safety {
+        crate::tools::Safety::ReadOnly
+    }
     fn execute(&self, ctx: &ToolContext, args: &str) -> Result<serde_json::Value, String> {
         let input: dtos::ReadFileInput =
             serde_json::from_str(args).map_err(|e| format!("Invalid args: {}", e))?;
@@ -483,6 +515,9 @@ impl Tool for ReadFileLinesTool {
     }
     fn is_enabled(&self, _: &AppConfig, _: &str) -> bool {
         true
+    }
+    fn safety(&self) -> crate::tools::Safety {
+        crate::tools::Safety::ReadOnly
     }
     fn execute(&self, ctx: &ToolContext, args: &str) -> Result<serde_json::Value, String> {
         let input: dtos::ReadFileLinesInput =
@@ -634,6 +669,9 @@ impl Tool for WebFetchTool {
     fn is_enabled(&self, _: &AppConfig, _: &str) -> bool {
         true
     }
+    fn safety(&self) -> crate::tools::Safety {
+        crate::tools::Safety::ReadOnly
+    }
     fn execute(&self, _ctx: &ToolContext, args: &str) -> Result<serde_json::Value, String> {
         let input: dtos::WebFetchInput =
             serde_json::from_str(args).map_err(|e| format!("Invalid args: {}", e))?;
@@ -659,6 +697,9 @@ impl Tool for ReadYamlHeaderTool {
     }
     fn is_enabled(&self, _: &AppConfig, _: &str) -> bool {
         true
+    }
+    fn safety(&self) -> crate::tools::Safety {
+        crate::tools::Safety::ReadOnly
     }
     fn execute(&self, ctx: &ToolContext, args: &str) -> Result<serde_json::Value, String> {
         let input: dtos::ReadYamlHeaderInput =
@@ -730,6 +771,9 @@ impl Tool for WebSearchTool {
     fn is_enabled(&self, config: &AppConfig, _: &str) -> bool {
         config.searxng_url.is_some()
     }
+    fn safety(&self) -> crate::tools::Safety {
+        crate::tools::Safety::ReadOnly
+    }
     fn execute(&self, ctx: &ToolContext, args: &str) -> Result<serde_json::Value, String> {
         let input: dtos::WebSearchInput =
             serde_json::from_str(args).map_err(|e| format!("Invalid args: {}", e))?;
@@ -761,6 +805,9 @@ impl Tool for SearchCalendarTool {
     fn is_enabled(&self, config: &AppConfig, _: &str) -> bool {
         !config.caldav_clients.is_empty()
     }
+    fn safety(&self) -> crate::tools::Safety {
+        crate::tools::Safety::ReadOnly
+    }
     fn execute(&self, ctx: &ToolContext, args: &str) -> Result<serde_json::Value, String> {
         let input: dtos::SearchCalendarInput =
             serde_json::from_str(args).map_err(|e| format!("Invalid args: {}", e))?;
@@ -786,6 +833,9 @@ impl Tool for GetCalendarTool {
     }
     fn is_enabled(&self, config: &AppConfig, _: &str) -> bool {
         !config.caldav_clients.is_empty()
+    }
+    fn safety(&self) -> crate::tools::Safety {
+        crate::tools::Safety::ReadOnly
     }
     fn execute(&self, ctx: &ToolContext, args: &str) -> Result<serde_json::Value, String> {
         let input: dtos::GetCalendarInput =
@@ -815,6 +865,9 @@ impl Tool for GetCalendarItemTool {
     }
     fn is_enabled(&self, config: &AppConfig, _: &str) -> bool {
         !config.caldav_clients.is_empty()
+    }
+    fn safety(&self) -> crate::tools::Safety {
+        crate::tools::Safety::ReadOnly
     }
     fn execute(&self, ctx: &ToolContext, args: &str) -> Result<serde_json::Value, String> {
         let input: dtos::GetCalendarItemInput =
@@ -922,6 +975,9 @@ impl Tool for SearchEmailTool {
     fn is_enabled(&self, config: &AppConfig, _: &str) -> bool {
         !config.jmap_clients.is_empty()
     }
+    fn safety(&self) -> crate::tools::Safety {
+        crate::tools::Safety::ReadOnly
+    }
     fn execute(&self, ctx: &ToolContext, args: &str) -> Result<serde_json::Value, String> {
         let input: dtos::SearchEmailInput =
             serde_json::from_str(args).map_err(|e| format!("Invalid args: {}", e))?;
@@ -962,6 +1018,9 @@ impl Tool for GetEmailByIdTool {
     }
     fn is_enabled(&self, config: &AppConfig, _: &str) -> bool {
         !config.jmap_clients.is_empty()
+    }
+    fn safety(&self) -> crate::tools::Safety {
+        crate::tools::Safety::ReadOnly
     }
     fn execute(&self, ctx: &ToolContext, args: &str) -> Result<serde_json::Value, String> {
         let input: dtos::GetEmailByIdInput =
@@ -1026,6 +1085,9 @@ impl Tool for SearchContactTool {
         } else {
             !config.jmap_clients.is_empty()
         }
+    }
+    fn safety(&self) -> crate::tools::Safety {
+        crate::tools::Safety::ReadOnly
     }
     fn execute(&self, ctx: &ToolContext, args: &str) -> Result<serde_json::Value, String> {
         let input: dtos::SearchContactInput =
@@ -1119,6 +1181,9 @@ impl Tool for GetContactTool {
             !config.jmap_clients.is_empty()
         }
     }
+    fn safety(&self) -> crate::tools::Safety {
+        crate::tools::Safety::ReadOnly
+    }
     fn execute(&self, ctx: &ToolContext, args: &str) -> Result<serde_json::Value, String> {
         let input: dtos::GetContactInput =
             serde_json::from_str(args).map_err(|e| format!("Invalid args: {}", e))?;
@@ -1201,6 +1266,9 @@ impl Tool for CsvListTool {
     }
     fn is_enabled(&self, _: &AppConfig, prompt: &str) -> bool {
         csv_tools_enabled(prompt)
+    }
+    fn safety(&self) -> crate::tools::Safety {
+        crate::tools::Safety::ReadOnly
     }
     fn execute(&self, ctx: &ToolContext, args: &str) -> Result<serde_json::Value, String> {
         let input: crate::tools::csv_db::schema::ListCsvInput =
@@ -1288,6 +1356,9 @@ impl Tool for CsvQueryTool {
     }
     fn is_enabled(&self, _: &AppConfig, prompt: &str) -> bool {
         csv_tools_enabled(prompt)
+    }
+    fn safety(&self) -> crate::tools::Safety {
+        crate::tools::Safety::ReadOnly
     }
     fn execute(&self, ctx: &ToolContext, args: &str) -> Result<serde_json::Value, String> {
         let input: crate::tools::csv_db::schema::QueryRequest =
