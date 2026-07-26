@@ -389,16 +389,30 @@ mod tests {
 
     #[test]
     fn test_editor_save_error_message_on_failure() {
+        // Build a "missing parent" path inside a tempdir we never create a
+        // subdir under. The previous test hardcoded `C:\nonexistent_dir\...`
+        // which was a flake waiting to happen: on the GitHub Windows runner
+        // the path resolved to a writable location, so `fs::write` succeeded
+        // and `save` returned `Ok(())`, breaking the assertion. Building the
+        // bad path off a fresh `tempdir()` makes the missing parent
+        // deterministic on every platform and every runner.
+        let dir = tempdir().unwrap();
+        let bad_path = dir.path().join("missing_subdir").join("file.md");
+
         let mut state = EditorState::default();
-        state.file_path = PathBuf::from("C:\\nonexistent_dir\\file.md");
+        state.file_path = bad_path.clone();
         state.content = "Body".to_string();
 
         let producer = noop_producer();
         let result = state.save(&producer);
-        assert!(result.is_err());
+        assert!(result.is_err(), "expected save to fail, got {:?}", result);
+        assert!(
+            state.error_message.is_some(),
+            "expected error_message to be set after a failed save"
+        );
 
         let mut state2 = EditorState::default();
-        state2.file_path = PathBuf::from("C:\\nonexistent_dir\\file.md");
+        state2.file_path = dir.path().join("missing_subdir_2").join("file.md");
         state2.content = "Body".to_string();
         let producer2 = noop_producer();
         state2.save(&producer2).unwrap_err();
