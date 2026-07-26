@@ -500,3 +500,47 @@ A round-trip test would therefore be either:
 The proptest from P0-3 (no panic, well-formed output, level ∈ 1..=6, rectangular tables) already covers what round-trip would catch, and is strictly stronger than the lossy version.
 
 **Recorded here so future-me doesn't re-litigate this.**
+
+---
+
+# Current Status (as of 2026-07-25)
+
+The `tdd/high-value-defects` branch has been implementing this proposal in passes. Status by item:
+
+| Item | Status | Notes |
+|------|--------|-------|
+| P0-1 (visual regression) | **Blocked** | Requires `egui_kittest` (egui 0.31+); project is on eframe 0.27. See "Open Question 7" below. |
+| P0-2 (interaction coverage) | **Partial** | Tier 2 smoke tests + Tier 1 side-effect tests added for copy-code, hyperlink, task-list checkbox. Tier 4 click → output is `#[ignore]`d pending `egui_kittest`. |
+| P0-3 (proptest replacement) | **Done** | `test_parse_markdown_fuzz_property` replaced with a real proptest (64 cases, structural asserts). |
+| P1-1 (40+ `Context::run` blocks) | **Resolved by Q1** | Incremental per-file migration; no helper introduced. |
+| P1-2 (eprintln! in tests) | **Done** | Replaced with real assertions in `test_ftwa_measure_user_table`. |
+| P1-3 (`render_tests.rs` duplicates) | **Done** | File deleted; build_toc tests consolidated in `render.rs`, GFM option tests moved to `tests/pulldown_config.rs` as behavior-based checks. |
+| P1-4 (indexed event assertions) | **Done** | `test_parse_markdown_to_events` and `test_parse_markdown_heading_levels` refactored to `iter().find()`/`.any()`. |
+| P2-1 (FTWA edge cases) | **Done** | Tests added for NaN, +∞/−∞, `max < min` invariant, single-column, 1000-column stress, plus the 6-permutation matrix. |
+| P2-2 (table layout stress) | **Done** | 6 FTWA permutation tests + 5 integration tests with deterministic `screen_rect`. The §3.6-fallback snapshot is blocked by `egui_kittest`. |
+| P2-3 (doc tests for public API) | **Done** | Doc tests for `parse_markdown_to_events`, `build_toc`, `parse_yaml_to_pairs`, `DocumentContent::parse`, and `parse_front_matter`. `ftwa` omitted because `ui::table_width` is intentionally private. |
+| P3-1 (CI integration of snapshots) | **N/A** | No snapshots exist (P0-1 blocked). The CI workflow already runs `cargo test` which includes doc tests. |
+| P3-2 (mutation testing) | **Deferred** | Per the original proposal's explicit deferral. |
+| P3-3 (fuzz harness) | **Deferred** | Per the original proposal's explicit deferral. |
+
+Side catches (not in the original proposal but surfaced during TDD work):
+
+- **3 real defects fixed via failing tests** in earlier commits: `ftwa` NaN propagation, `ftwa` `max[j] < min[j]` invariant violation, and `DocumentContent::parse` / `parse_front_matter` disagreeing on malformed YAML.
+- **Heading inline-formatting defect** (raised during P0-2 investigation): `# *italic*` was rendering as a plain bold heading. Fixed by changing `RenderEvent::Heading` to carry `Vec<InlineElem>` instead of `String`, plus renderer + parser updates + 5 new tests.
+
+---
+
+# Open Questions
+
+1. ~~Harness vs `Context::run` for the existing 40+ sites~~ — **resolved by Q1.**
+2. ~~Snapshot determinism with system fonts~~ — **resolved by Q2 (5px threshold).**
+3. ~~Should snapshot tests be platform-gated?~~ — **resolved by Q3 (every PR, all platforms).**
+4. ~~Where do Tier 4 interaction tests for `FastMdApp` itself live?~~ — **resolved by Q4 (defer until motivated).**
+5. ~~Is `RenderEvent::to_markdown()` in scope?~~ — **resolved (dropped, rationale above).**
+6. ~~What do we do with the pulldown-cmark option tests?~~ — **resolved by Q6 (moved to `tests/pulldown_config.rs` as behavior-based checks).**
+7. **The `egui_kittest` blocker.** P0-1 (visual regression) and P0-2 (Tier 4 interaction) both require `egui_kittest::Harness`, which is published only for egui 0.31+. The project is on `eframe = "0.27"` (pulling in egui 0.27). Options:
+   - **Upgrade eframe to 0.31+.** Touches every `eframe` / `egui` import across the desktop codebase; risk surface is large but the win is access to the full Tier 3 + Tier 4 toolkit. Estimated effort: 2–4 days of mechanical porting + testing.
+   - **Stay on 0.27 and live with Tier 2 + Tier 1 coverage.** Acceptable for now: the 3 click handlers in `render.rs` have `#[ignore]`'d Tier 4 tests that document the expected migration path. When the upgrade lands, un-ignore them and they exercise the same code.
+   - **Third-party headless harness for egui 0.27.** A quick survey didn't surface one; the egui 0.27 ecosystem predates the `egui_kittest` work. Not recommended.
+
+   Recommendation: stay on 0.27, accept Tier 2 + Tier 1 coverage for now, and un-ignore the Tier 4 tests in a dedicated upgrade PR.

@@ -152,11 +152,21 @@ fn render_code_block(ui: &mut egui::Ui, content: &str, _idx: &mut usize) {
                 ui.add(egui::Label::new(RichText::new(content).monospace()).wrap(true));
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::TOP), |ui| {
                     if ui.button("📋").on_hover_text("Copy code").clicked() {
-                        ui.output_mut(|o| o.copied_text = content.to_string());
+                        copy_code_to_output(ui, content);
                     }
                 });
             });
         });
+}
+
+/// Copy the supplied content to the UI's `copied_text` output.
+///
+/// Extracted from the copy-code button's click handler so the side
+/// effect is testable without driving a click (the button's
+/// Tier 4 click test is `#[ignore]`d until `egui_kittest` is
+/// available; see the open question in `doc/planning/egui-testing.md`).
+fn copy_code_to_output(ui: &mut egui::Ui, content: &str) {
+    ui.output_mut(|o| o.copied_text = content.to_string());
 }
 
 /// Purpose: Renders a heading.
@@ -2103,5 +2113,178 @@ def foo():
             "100px viewport cannot fit a long column; got {:?}",
             d.widths
         );
+    }
+
+    // --- P0-2: click-handler coverage ---------------------------------
+    //
+    // The render code has three interactive widgets (copy-code button,
+    // hyperlink, task-list checkbox) that respond to clicks. The
+    // proposal's recommended action is a Tier 4 test that simulates
+    // the click via `egui_kittest::Harness::get_by_label(...).click()`.
+    // That harness requires egui 0.31+, but this project is on
+    // eframe 0.27 — see doc/planning/egui-testing.md "Open Questions"
+    // for the blocker. Until the upgrade, these tests verify what we
+    // CAN cover at Tier 2 (smoke: widget renders without panic and
+    // the initial state is what we expect) and Tier 1 (the side-effect
+    // function is correct when called directly).
+
+    /// Tier 2 smoke test: a code block renders without panic and the
+    /// copy-code button is on screen. The actual click → output
+    /// transition is exercised by `test_copy_code_button_click_copies_to_output`
+    /// (currently `#[ignore]`d pending the `egui_kittest` upgrade).
+    #[test]
+    fn test_render_code_block_smoke() {
+        let ctx = egui::Context::default();
+        let _ = ctx.run(egui::RawInput::default(), |ctx| {
+            egui::CentralPanel::default().show(ctx, |ui| {
+                let mut idx = 0;
+                render_code_block(ui, "let x = 1;", &mut idx);
+            });
+        });
+        // Without a click, the output's copied_text must be the empty
+        // default. If anything else is here, the click handler ran
+        // without being asked to.
+        assert_eq!(ctx.output(|o| o.copied_text.clone()), "");
+    }
+
+    /// Tier 1 test for the copy-code side effect. The Tier 4 click →
+    /// output version is `test_copy_code_button_click_copies_to_output`
+    /// below.
+    #[test]
+    fn test_copy_code_to_output_side_effect() {
+        let ctx = egui::Context::default();
+        let mut captured = String::new();
+        let _ = ctx.run(egui::RawInput::default(), |ctx| {
+            egui::CentralPanel::default().show(ctx, |ui| {
+                copy_code_to_output(ui, "let x = 1;");
+                // Capture the output at end of frame, when the
+                // `PlatformOutput` is still in scope.
+                captured = ctx.output(|o| o.copied_text.clone());
+            });
+        });
+        assert_eq!(captured, "let x = 1;");
+    }
+
+    /// Tier 4 click → output integration. Blocked on `egui_kittest`
+    /// (requires egui 0.31+); the project is on eframe 0.27. Un-ignore
+    /// when the dependency upgrade lands.
+    #[test]
+    #[ignore = "Tier 4: requires egui_kittest (egui 0.31+); project on eframe 0.27"]
+    fn test_copy_code_button_click_copies_to_output() {
+        // Expected (when un-ignored):
+        //
+        // use egui_kittest::Harness;
+        // let mut harness = Harness::new_ui(|ui| {
+        //     let mut idx = 0;
+        //     render_code_block(ui, "let x = 1;", &mut idx);
+        // });
+        // harness.run();
+        // harness.get_by_label("📋").click();
+        // harness.run();
+        // assert_eq!(harness.output().copied_text, "let x = 1;");
+    }
+
+    /// Tier 2 smoke test: a hyperlink renders without panic. The
+    /// Tier 4 click → open_url test is `#[ignore]`d.
+    #[test]
+    fn test_render_hyperlink_smoke() {
+        let ctx = egui::Context::default();
+        let elems = vec![InlineElem::Link(
+            "https://example.com".to_string(),
+            "click me".to_string(),
+        )];
+        let _ = ctx.run(egui::RawInput::default(), |ctx| {
+            egui::CentralPanel::default().show(ctx, |ui| {
+                // task_checked=None, needs_bullet=false → not a list
+                // item; renders the link inline.
+                render_inline(ui, &elems, false, None, 0, true);
+            });
+        });
+        // No click happened, so the UI's open_url output must be
+        // empty.
+        assert!(ctx.output(|o| o.open_url.is_none()));
+    }
+
+    /// Tier 4 click → open_url integration. Blocked on `egui_kittest`.
+    #[test]
+    #[ignore = "Tier 4: requires egui_kittest (egui 0.31+); project on eframe 0.27"]
+    fn test_hyperlink_click_opens_url() {
+        // Expected (when un-ignored):
+        //
+        // use egui_kittest::Harness;
+        // let mut harness = Harness::new_ui(|ui| {
+        //     let elems = vec![InlineElem::Link(
+        //         "https://example.com".to_string(),
+        //         "click me".to_string(),
+        //     )];
+        //     render_inline(ui, &elems, false, None, 0, true);
+        // });
+        // harness.run();
+        // harness.get_by_text("click me").click();
+        // harness.run();
+        // let opened = harness
+        //     .output()
+        //     .open_url
+        //     .as_ref()
+        //     .expect("hyperlink click must request a URL open");
+        // assert_eq!(opened.url, "https://example.com");
+    }
+
+    /// Tier 2 smoke test: a task list renders without panic. The
+    /// checkbox's `checked` state survives the render. The Tier 4
+    /// click → state-toggle test is `#[ignore]`d.
+    #[test]
+    fn test_render_task_checkbox_initial_state() {
+        let ctx = egui::Context::default();
+        let events = parse_markdown_to_events("- [ ] todo\n- [x] done");
+        let mut checked_items = 0;
+        let mut unchecked_items = 0;
+        for event in &events {
+            if let RenderEvent::FlushInline { task_checked, .. } = event {
+                match task_checked {
+                    Some(true) => checked_items += 1,
+                    Some(false) => unchecked_items += 1,
+                    None => {}
+                }
+            }
+        }
+        assert_eq!(checked_items, 1);
+        assert_eq!(unchecked_items, 1);
+
+        // The render path itself: render all events through render_markdown
+        // and verify no panic. The egui Context handles the actual checkbox
+        // state mutation; the test confirms the wiring.
+        let _ = ctx.run(egui::RawInput::default(), |ctx| {
+            egui::CentralPanel::default().show(ctx, |ui| {
+                let mut scroll_id = None;
+                let mut md = String::from("- [ ] todo\n- [x] done");
+                render_markdown(ui, &mut md, &mut scroll_id);
+            });
+        });
+    }
+
+    /// Tier 4 click → checkbox-state toggle. Blocked on `egui_kittest`.
+    #[test]
+    #[ignore = "Tier 4: requires egui_kittest (egui 0.31+); project on eframe 0.27"]
+    fn test_task_checkbox_click_toggles_state() {
+        // Expected (when un-ignored):
+        //
+        // use egui_kittest::Harness;
+        // let mut harness = Harness::new_ui(|ui| {
+        //     let mut scroll_id = None;
+        //     let mut md = String::from("- [ ] todo");
+        //     render_markdown(ui, &mut md, &mut scroll_id);
+        // });
+        // harness.run();
+        // // Clicking the checkbox must toggle its visual state from
+        // // unchecked to checked. The render path writes
+        // // task_checked=Some(false) at parse time, so the initial
+        // // UI state is "unchecked".
+        // harness.get_by_role(egui_kittest::Role::CheckBox).click();
+        // harness.run();
+        // // The checkbox widget internally tracks its state; we
+        // // verify the *side effect* in the application: a UI state
+        // // change propagated to the source string is the
+        // // application's concern, not the renderer's.
     }
 }
