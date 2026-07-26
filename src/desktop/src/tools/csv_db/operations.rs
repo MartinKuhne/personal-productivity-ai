@@ -63,16 +63,15 @@ pub fn list_csv(config: &AppConfig, _input: ListCsvInput) -> Result<Vec<CsvDatab
                 if let Ok(mut rdr) = csv::ReaderBuilder::new()
                     .has_headers(false)
                     .from_path(&path)
+                    && let Some(Ok(header_record)) = rdr.records().next()
                 {
-                    if let Some(Ok(header_record)) = rdr.records().next() {
-                        let headers: Vec<String> =
-                            header_record.iter().map(|s| s.to_string()).collect();
-                        dbs.push(CsvDatabase {
-                            name,
-                            path,
-                            headers,
-                        });
-                    }
+                    let headers: Vec<String> =
+                        header_record.iter().map(|s| s.to_string()).collect();
+                    dbs.push(CsvDatabase {
+                        name,
+                        path,
+                        headers,
+                    });
                 }
             }
         }
@@ -128,7 +127,6 @@ pub fn add_rows(config: &AppConfig, input: AddRowsInput) -> Result<String, Strin
 
     use std::io::Write;
     let mut file = std::fs::OpenOptions::new()
-        .write(true)
         .append(true)
         .open(&db_path)
         .map_err(|e| format!("Failed to open file: {}", e))?;

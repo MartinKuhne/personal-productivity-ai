@@ -32,6 +32,12 @@ pub struct ToolRegistry {
     tools: HashMap<&'static str, Box<dyn Tool>>,
 }
 
+impl Default for ToolRegistry {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl ToolRegistry {
     pub fn new() -> Self {
         let mut registry = Self {
@@ -268,14 +274,13 @@ impl Tool for GrepTool {
             serde_json::from_str(args).map_err(|e| format!("Invalid args: {}", e))?;
         let mut all_results = Vec::new();
         let mut libs: Vec<_> = ctx.config.content_libraries.iter().collect();
-        libs.sort_by(|a, b| b.priority.cmp(&a.priority));
+        libs.sort_by_key(|b| std::cmp::Reverse(b.priority));
         for lib in libs {
             if let Ok(res) =
                 crate::tools::filesystem::tool_grep(&lib.root_path(), &lib.name, &input.query)
+                && res.matches != "No matches found."
             {
-                if res.matches != "No matches found." {
-                    all_results.push(res.matches);
-                }
+                all_results.push(res.matches);
             }
         }
         if all_results.is_empty() {

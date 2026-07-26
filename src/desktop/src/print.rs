@@ -146,27 +146,7 @@ pub fn execute_print_blocking(
 
     let path_str = file_path.to_string_lossy().to_string();
 
-    #[cfg(target_os = "windows")]
-    {
-        std::process::Command::new("cmd")
-            .args(["/c", "start", "", &path_str])
-            .spawn()
-            .map_err(|e| format!("Failed to open browser: {}", e))?;
-    }
-
-    #[cfg(not(target_os = "windows"))]
-    {
-        let status = std::process::Command::new("xdg-open")
-            .arg(&path_str)
-            .status()
-            .map_err(|e| format!("Failed to open browser: {}", e))?;
-        if !status.success() {
-            std::process::Command::new("open")
-                .arg(&path_str)
-                .spawn()
-                .map_err(|e| format!("Failed to open browser: {}", e))?;
-        }
-    }
+    webbrowser::open(&path_str).map_err(|e| format!("Failed to open browser: {}", e))?;
 
     let _ = tx.as_ref().map(|sender| {
         let _ = sender.send(MsgBackgroundMessage::LogEntry(BackgroundLogEntry::new(

@@ -269,8 +269,7 @@ mod tests {
             prompt_tokens: 100,
             completion_tokens: 50,
             total_tokens: 150,
-            cached_tokens: None,
-            reasoning_tokens: None,
+            ..Default::default()
         });
         mgr.clear_history();
         assert!(mgr.state.history.is_none());

@@ -2,40 +2,30 @@
 //! notification watchers) from consumers (tag manager/indexer, directory
 //! tree).
 //!
-//! The bus implements a simple multi-producer / multi-consumer pattern
-//! using `std::sync::mpsc` channels under the hood. Every consumer that
-//! calls `subscribe()` gets its own channel; every call to `publish()`
-//! sends the event to every registered consumer.
+//! The bus implements a multi-producer / multi-consumer broadcast pattern
+//! using `tokio::sync::broadcast` under the hood. Every consumer that
+//! calls `subscribe()` gets its own receiver from the broadcast sender.
 //!
 //! Producers (the initial scan and the notify watcher) clone the bus
-//! cheaply (it's wrapped in an `Arc`).
+//! cheaply (it's wrapped in an `Arc` internally).
 //!
 //! Consumers (the tag manager and the directory tree) call `subscribe()`
 //! once at startup to get a `BusReader` they can iterate over.
 //!
-//! A dropped consumer is detected lazily: when `publish()` tries to send
-//! on a disconnected channel, the receiver is removed from the bus and
-//! the slot is reclaimed. This keeps memory bounded even if a consumer
-//! thread panics or is shut down.
+//! A dropped consumer is detected lazily: when `publish()` calls `send()`
+//! on the broadcast channel, the subscriber count automatically reflects
+//! how many consumers are still alive.
 
 use std::path::PathBuf;
-use std::sync::mpsc::{Receiver, Sender, channel};
-use std::sync::{Arc, Mutex};
+use std::sync::Mutex;
+use std::time::Duration;
+use tokio::sync::broadcast;
+
+/// Default capacity for the underlying broadcast channel.
+const BUS_CAPACITY: usize = 8192;
 
 /// What happened to a file-system entry in one of the configured content
 /// libraries.
-///
-/// File variants:
-/// `Discovered` — the file was seen for the first time during the
-///                 initial scan.
-/// `Updated`    — the file was created, modified, or renamed on disk
-///                 (reported by the notify watcher).
-/// `Removed`    — the file no longer exists.
-///
-/// Directory variants:
-/// `DirDiscovered` — a directory was seen during the initial scan or
-///                    created by the user.
-/// `DirRemoved`    — a directory was deleted or renamed away by the user.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum FileEventKind {
     Discovered,
@@ -46,9 +36,6 @@ pub enum FileEventKind {
 }
 
 /// A single file-system event published to the bus.
-///
-/// Each event carries one or more affected paths — typically one,
-/// but batch operations or renames may include multiple.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct FileEvent {
     pub kind: FileEventKind,
@@ -112,97 +99,119 @@ impl FileEvent {
     }
 }
 
-/// A thread-safe, multi-producer / multi-consumer event bus.
+/// A thread-safe, multi-producer / multi-consumer event bus backed by
+/// `tokio::sync::broadcast`.
 ///
-/// Cloning a `Bus` is cheap (it's an `Arc` internally) and produces a
-/// new handle that shares the same subscriber list. This makes `Bus`
-/// suitable for handing to background threads.
+/// Cloning a `Bus` is cheap (it's an `Arc` of the sender internally) and
+/// produces a new handle that shares the same broadcast channel.
 #[derive(Clone)]
-pub struct Bus<T: Send + 'static + Clone> {
-    inner: Arc<BusInner<T>>,
+pub struct Bus<T: Clone + Send + 'static> {
+    sender: broadcast::Sender<T>,
 }
 
-struct BusInner<T> {
-    subscribers: Mutex<Vec<Sender<T>>>,
-}
-
-impl<T: Send + 'static + Clone> Bus<T> {
-    /// Create a new, empty bus with no subscribers.
+impl<T: Clone + Send + 'static> Bus<T> {
+    /// Create a new bus with a fixed-capacity broadcast channel.
     pub fn new() -> Self {
-        Self {
-            inner: Arc::new(BusInner {
-                subscribers: Mutex::new(Vec::new()),
-            }),
-        }
+        let (sender, _) = broadcast::channel(BUS_CAPACITY);
+        Self { sender }
     }
 
-    /// Register a new consumer. Each consumer gets its own private
-    /// channel; events sent to the bus are delivered to every
-    /// registered consumer.
+    /// Register a new consumer. Each consumer gets its own receiver;
+    /// events sent to the bus are delivered to every registered consumer.
     pub fn subscribe(&self) -> BusReader<T> {
-        let (tx, rx) = channel();
-        if let Ok(mut subs) = self.inner.subscribers.lock() {
-            subs.push(tx);
+        BusReader {
+            inner: Mutex::new(self.sender.subscribe()),
         }
-        BusReader { rx }
     }
 
-    /// Publish an event to every registered consumer. Consumers that
-    /// have been dropped are silently removed from the bus.
+    /// Publish an event to every registered consumer.
     ///
     /// Returns the number of consumers the event was successfully
-    /// delivered to.
+    /// delivered to. Consumers that are lagging behind may miss
+    /// events (the broadcast channel drops the oldest events when
+    /// full).
     pub fn publish(&self, event: T) -> usize {
-        let Ok(mut subscribers) = self.inner.subscribers.lock() else {
-            return 0;
-        };
-        subscribers.retain(|tx| tx.send(event.clone()).is_ok());
-        subscribers.len()
+        self.sender.send(event).unwrap_or(0)
     }
 
-    /// Number of currently registered consumers. Mainly useful for
-    /// tests and diagnostics.
+    /// Number of currently registered consumers.
     pub fn subscriber_count(&self) -> usize {
-        self.inner.subscribers.lock().map(|s| s.len()).unwrap_or(0)
+        self.sender.receiver_count()
     }
 }
 
-impl<T: Send + 'static + Clone> Default for Bus<T> {
+impl<T: Clone + Send + 'static> Default for Bus<T> {
     fn default() -> Self {
         Self::new()
     }
 }
 
-/// The receive end of a bus subscription. Iterate with
-/// `try_recv` / `recv` / `recv_timeout` exactly like a regular
-/// `std::sync::mpsc::Receiver`.
-pub struct BusReader<T> {
-    rx: Receiver<T>,
+/// The receive end of a bus subscription. Backed by a
+/// `tokio::sync::broadcast::Receiver` wrapped in a `Mutex` for
+/// interior mutability (all methods take `&self`).
+pub struct BusReader<T: Clone> {
+    inner: Mutex<broadcast::Receiver<T>>,
 }
 
-impl<T> BusReader<T> {
-    /// Create a BusReader from an existing receiver (for testing).
-    pub fn new(rx: Receiver<T>) -> Self {
-        Self { rx }
+impl<T: Clone> BusReader<T> {
+    /// Create a BusReader from an existing broadcast receiver.
+    pub fn new(rx: broadcast::Receiver<T>) -> Self {
+        Self {
+            inner: Mutex::new(rx),
+        }
     }
 
-    /// Try to receive an event without blocking. Returns immediately
-    /// with `Err(TryRecvError::Empty)` if no event is available.
+    /// Try to receive an event without blocking.
     pub fn try_recv(&self) -> Result<T, std::sync::mpsc::TryRecvError> {
-        self.rx.try_recv()
+        self.inner.lock().unwrap().try_recv().map_err(|e| match e {
+            broadcast::error::TryRecvError::Closed => std::sync::mpsc::TryRecvError::Disconnected,
+            broadcast::error::TryRecvError::Empty => std::sync::mpsc::TryRecvError::Empty,
+            broadcast::error::TryRecvError::Lagged(_) => std::sync::mpsc::TryRecvError::Empty,
+        })
     }
 
     /// Block until an event is available, or the channel is closed.
+    /// Uses a spin-wait with short sleeps since the underlying broadcast
+    /// receiver has no blocking synchronous API.
     pub fn recv(&self) -> Result<T, std::sync::mpsc::RecvError> {
-        self.rx.recv()
+        loop {
+            match self.inner.lock().unwrap().try_recv() {
+                Ok(val) => return Ok(val),
+                Err(broadcast::error::TryRecvError::Closed) => {
+                    return Err(std::sync::mpsc::RecvError);
+                }
+                Err(_) => std::thread::sleep(Duration::from_millis(10)),
+            }
+        }
     }
 
     /// Block for at most `timeout` waiting for an event.
-    pub fn recv_timeout(
-        &self,
-        timeout: std::time::Duration,
-    ) -> Result<T, std::sync::mpsc::RecvTimeoutError> {
-        self.rx.recv_timeout(timeout)
+    pub fn recv_timeout(&self, timeout: Duration) -> Result<T, std::sync::mpsc::RecvTimeoutError> {
+        let start = std::time::Instant::now();
+        loop {
+            match self.inner.lock().unwrap().try_recv() {
+                Ok(val) => return Ok(val),
+                Err(broadcast::error::TryRecvError::Closed) => {
+                    return Err(std::sync::mpsc::RecvTimeoutError::Disconnected);
+                }
+                Err(_) => {
+                    if start.elapsed() >= timeout {
+                        return Err(std::sync::mpsc::RecvTimeoutError::Timeout);
+                    }
+                    std::thread::sleep(Duration::from_millis(10));
+                }
+            }
+        }
+    }
+}
+
+impl<T: Clone> BusReader<T> {
+    /// Create a detached BusReader that is not connected to any bus.
+    /// Useful for initializing consumers that will later be rewired
+    /// to a real bus.
+    pub fn detached() -> Self {
+        let (_tx, rx) = broadcast::channel(16);
+        Self::new(rx)
     }
 }
 
@@ -247,13 +256,12 @@ mod tests {
         assert_eq!(bus.subscriber_count(), 2);
 
         drop(r1);
-        // Lazy cleanup: subscriber still in list until publish is called.
-        assert_eq!(bus.subscriber_count(), 2);
+        // Dropping the reader immediately drops the receiver, so the
+        // subscriber count should update right away.
+        assert_eq!(bus.subscriber_count(), 1);
 
         let delivered = bus.publish(7);
-        // r1 was dropped, so the publish should only succeed for r2.
         assert_eq!(delivered, 1);
-        assert_eq!(bus.subscriber_count(), 1);
         assert_eq!(r2.recv_timeout(Duration::from_millis(100)).unwrap(), 7);
     }
 
@@ -393,8 +401,6 @@ mod tests {
         let producer = FileEventProducer::new(&bus);
         let path = PathBuf::from("/tmp/new.md");
 
-        // Simulate creating a new file. The producer publishes Discovered
-        // on success.
         producer.publish_discovered(&path);
 
         let event = reader.recv_timeout(Duration::from_millis(100)).unwrap();
@@ -432,8 +438,6 @@ mod tests {
 
     #[test]
     fn test_producer_publishes_rename_as_removed_plus_discovered() {
-        // A rename is logically "old is gone, new exists" — publish both
-        // events so consumers can update any state keyed on either path.
         let bus: Bus<FileEvent> = Bus::new();
         let reader = bus.subscribe();
         let producer = FileEventProducer::new(&bus);
@@ -503,15 +507,6 @@ mod tests {
 
 /// A thin handle for publishing [`FileEvent`]s from code that mutates
 /// the filesystem (UI handlers, tool implementations, the agent, etc.).
-///
-/// Centralising the publish calls in a producer (rather than calling
-/// `bus.publish` from every write site) gives us:
-/// 1. **One place to add new event semantics** — e.g. if we ever want
-///    a rename to publish a single `Renamed` event instead of two
-///    events, the change lives here.
-/// 2. **A non-`Clone` borrow surface** — every consumer of the bus
-///    can take a `&FileEventProducer` instead of cloning the bus,
-///    which makes ownership clearer in threaded code.
 pub struct FileEventProducer<'a> {
     bus: &'a Bus<FileEvent>,
 }
@@ -521,46 +516,35 @@ impl<'a> FileEventProducer<'a> {
         Self { bus }
     }
 
-    /// Publish a `Discovered` event for a newly created file.
     pub fn publish_discovered(&self, path: &std::path::Path) {
         self.bus
             .publish(FileEvent::discovered_one(path.to_path_buf()));
     }
 
-    /// Publish an `Updated` event for a modified file.
     pub fn publish_updated(&self, path: &std::path::Path) {
         self.bus.publish(FileEvent::updated_one(path.to_path_buf()));
     }
 
-    /// Publish a `Removed` event for a deleted file.
     pub fn publish_removed(&self, path: &std::path::Path) {
         self.bus.publish(FileEvent::removed_one(path.to_path_buf()));
     }
 
-    /// Publish a rename as a `Removed` event for the old path and a
-    /// `Discovered` event for the new path. The two events are sent
-    /// in order so consumers that drain synchronously see the
-    /// removal before the discovery.
     pub fn publish_rename(&self, old: &std::path::Path, new: &std::path::Path) {
         self.bus.publish(FileEvent::removed_one(old.to_path_buf()));
         self.bus
             .publish(FileEvent::discovered_one(new.to_path_buf()));
     }
 
-    /// Publish a `DirDiscovered` event for a newly created directory.
     pub fn publish_dir_discovered(&self, path: &std::path::Path) {
         self.bus
             .publish(FileEvent::dir_discovered_one(path.to_path_buf()));
     }
 
-    /// Publish a `DirRemoved` event for a deleted directory.
     pub fn publish_dir_removed(&self, path: &std::path::Path) {
         self.bus
             .publish(FileEvent::dir_removed_one(path.to_path_buf()));
     }
 
-    /// Publish a directory rename as a `DirRemoved` event for the old
-    /// path and a `DirDiscovered` event for the new path.
     pub fn publish_dir_rename(&self, old: &std::path::Path, new: &std::path::Path) {
         self.bus
             .publish(FileEvent::dir_removed_one(old.to_path_buf()));

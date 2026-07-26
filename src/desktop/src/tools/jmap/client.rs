@@ -98,23 +98,23 @@ pub fn jmap_call(
 pub fn jmap_check_errors(res: &Value) -> Option<String> {
     if let Some(method_responses) = res.get("methodResponses").and_then(|mr| mr.as_array()) {
         for resp in method_responses {
-            if let Some(resp_arr) = resp.as_array() {
-                if resp_arr.get(0).and_then(|s| s.as_str()) == Some("error") {
-                    let err_obj = resp_arr.get(1);
-                    let err_type = err_obj
-                        .and_then(|e| e.get("type"))
-                        .and_then(|t| t.as_str())
-                        .unwrap_or("unknown");
-                    let description = err_obj
-                        .and_then(|e| e.get("description"))
-                        .and_then(|d| d.as_str());
-                    let call_id = resp_arr.get(2).and_then(|c| c.as_str()).unwrap_or("?");
-                    let msg = match description {
-                        Some(desc) => format!("type: {}: {} (callId: {})", err_type, desc, call_id),
-                        None => format!("type: {} (callId: {})", err_type, call_id),
-                    };
-                    return Some(msg);
-                }
+            if let Some(resp_arr) = resp.as_array()
+                && resp_arr.first().and_then(|s| s.as_str()) == Some("error")
+            {
+                let err_obj = resp_arr.get(1);
+                let err_type = err_obj
+                    .and_then(|e| e.get("type"))
+                    .and_then(|t| t.as_str())
+                    .unwrap_or("unknown");
+                let description = err_obj
+                    .and_then(|e| e.get("description"))
+                    .and_then(|d| d.as_str());
+                let call_id = resp_arr.get(2).and_then(|c| c.as_str()).unwrap_or("?");
+                let msg = match description {
+                    Some(desc) => format!("type: {}: {} (callId: {})", err_type, desc, call_id),
+                    None => format!("type: {} (callId: {})", err_type, call_id),
+                };
+                return Some(msg);
             }
         }
     }

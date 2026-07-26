@@ -7,21 +7,21 @@ use std::path::Path;
 /// Tags are normalized to lowercase.
 pub fn extract_tags_from_file(path: &Path) -> Vec<String> {
     let mut tags = Vec::new();
-    if let Ok(content) = std::fs::read_to_string(path) {
-        if let Some(fm) = parse_front_matter(&content) {
-            let yaml_val = &fm.yaml;
-            if let Some(mapping) = yaml_val.as_mapping() {
-                if let Some(tags_val) = mapping.get(serde_yaml::Value::String("tags".to_string())) {
-                    if let Some(arr) = tags_val.as_sequence() {
-                        for item in arr {
-                            if let Some(s) = item.as_str() {
-                                tags.push(s.to_lowercase());
-                            }
-                        }
-                    } else if let Some(s) = tags_val.as_str() {
+    if let Ok(content) = std::fs::read_to_string(path)
+        && let Some(fm) = parse_front_matter(&content)
+    {
+        let yaml_val = &fm.yaml;
+        if let Some(mapping) = yaml_val.as_mapping()
+            && let Some(tags_val) = mapping.get(serde_yaml::Value::String("tags".to_string()))
+        {
+            if let Some(arr) = tags_val.as_sequence() {
+                for item in arr {
+                    if let Some(s) = item.as_str() {
                         tags.push(s.to_lowercase());
                     }
                 }
+            } else if let Some(s) = tags_val.as_str() {
+                tags.push(s.to_lowercase());
             }
         }
     }

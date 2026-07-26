@@ -65,13 +65,13 @@ impl SystemPromptBuilder {
 
         for lib in &config.content_libraries {
             let user_md = std::path::Path::new(&lib.root_folder).join("USER.md");
-            if user_md.exists() {
-                if let Ok(content) = std::fs::read_to_string(&user_md) {
-                    prompt.push_str(&format!(
-                        "\n\nUser Context (from {}):\n{}",
-                        lib.name, content
-                    ));
-                }
+            if user_md.exists()
+                && let Ok(content) = std::fs::read_to_string(&user_md)
+            {
+                prompt.push_str(&format!(
+                    "\n\nUser Context (from {}):\n{}",
+                    lib.name, content
+                ));
             }
         }
         prompt

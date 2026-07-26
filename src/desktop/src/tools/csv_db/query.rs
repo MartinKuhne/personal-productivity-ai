@@ -112,11 +112,11 @@ pub fn query_csv(config: &AppConfig, input: QueryRequest) -> Result<QueryRespons
         let mut sum = 0.0;
         let mut count = 0;
         for row in &matched_rows {
-            if let Some(val_str) = row.get(col) {
-                if let Ok(num) = val_str.parse::<f64>() {
-                    sum += num;
-                    count += 1;
-                }
+            if let Some(val_str) = row.get(col)
+                && let Ok(num) = val_str.parse::<f64>()
+            {
+                sum += num;
+                count += 1;
             }
         }
 

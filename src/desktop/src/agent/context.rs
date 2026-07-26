@@ -30,6 +30,7 @@ pub struct AgentContext {
 
 impl AgentContext {
     /// Build a new AgentContext from constituent parts.
+    #[allow(clippy::too_many_arguments)]
     pub fn new(
         config: AppConfig,
         tx_gui: Sender<crate::messages::BackgroundMessage>,

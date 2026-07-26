@@ -77,10 +77,9 @@ impl FileWatcher {
                             } else if matches!(
                                 ext_str.as_str(),
                                 "jpg" | "jpeg" | "png" | "gif" | "webp" | "bmp" | "tiff" | "avif"
-                            ) {
-                                if is_image_lib {
-                                    is_img = true;
-                                }
+                            ) && is_image_lib
+                            {
+                                is_img = true;
                             }
                         }
 

@@ -129,7 +129,7 @@ fn build_messages(
     }
 }
 fn emit_usage(resp: &serde_json::Value, tx: &Sender<BackgroundMessage>) {
-    if let Some(info) = resp.get("usage").and_then(|u| parse_usage_block(u)) {
+    if let Some(info) = resp.get("usage").and_then(parse_usage_block) {
         tracing::info!(
             name = "agent.usage",
             prompt_tokens = info.prompt_tokens,

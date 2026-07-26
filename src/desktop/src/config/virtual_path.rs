@@ -129,9 +129,11 @@ impl VirtualPath {
             .ok_or_else(|| VirtualPathError::LibraryNotFound(self.library.clone()))?;
         Ok(lib.is_writable())
     }
+}
 
-    pub fn to_string(&self) -> String {
-        format!("{}/{}", self.library, self.sub_path.display())
+impl std::fmt::Display for VirtualPath {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}/{}", self.library, self.sub_path.display())
     }
 }
 

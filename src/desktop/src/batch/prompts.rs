@@ -44,7 +44,7 @@ pub fn discover_prompts(config: &AppConfig) -> Vec<PromptInfo> {
             let yaml_val = &fm.yaml;
             let body = fm.body;
 
-            if !has_prompt_tag(&yaml_val) {
+            if !has_prompt_tag(yaml_val) {
                 continue;
             }
 
@@ -121,13 +121,13 @@ fn has_prompt_tag(yaml_val: &Value) -> bool {
     let Some(mapping) = yaml_val.as_mapping() else {
         return false;
     };
-    let Some(tags_val) = mapping.get(&Value::String("tags".to_string())) else {
+    let Some(tags_val) = mapping.get(Value::String("tags".to_string())) else {
         return false;
     };
     if let Some(arr) = tags_val.as_sequence() {
         arr.iter().any(|item| {
             item.as_str()
-                .map_or(false, |s| s.eq_ignore_ascii_case("prompt"))
+                .is_some_and(|s| s.eq_ignore_ascii_case("prompt"))
         })
     } else if let Some(s) = tags_val.as_str() {
         s.eq_ignore_ascii_case("prompt")

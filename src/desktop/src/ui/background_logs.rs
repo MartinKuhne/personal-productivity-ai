@@ -15,15 +15,13 @@ pub fn is_log_visible(
     category: Option<LogCategory>,
     search_lower: &str,
 ) -> bool {
-    if let Some(cat) = category {
-        if log.category != cat {
-            return false;
-        }
+    if let Some(cat) = category
+        && log.category != cat
+    {
+        return false;
     }
-    if !search_lower.is_empty() {
-        if !log.message.to_lowercase().contains(search_lower) {
-            return false;
-        }
+    if !search_lower.is_empty() && !log.message.to_lowercase().contains(search_lower) {
+        return false;
     }
     true
 }
