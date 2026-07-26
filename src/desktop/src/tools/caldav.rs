@@ -958,25 +958,104 @@ mod tests {
                 .unwrap();
             rt.block_on(async {
                 let listener = tokio::net::TcpListener::from_std(listener).unwrap();
-                while let Ok((mut socket, _)) = listener.accept().await {
-                    tokio::spawn(async move {
-                        use tokio::io::{AsyncReadExt, AsyncWriteExt};
-                        let mut buf = [0u8; 4096];
-                        let n = socket.read(&mut buf).await.unwrap_or(0);
-                        let req = String::from_utf8_lossy(&buf[..n]);
+                while let Ok((socket, _)) = listener.accept().await {
+                    tokio::spawn(handle_mock_connection(socket));
+                }
+            });
+        });
 
-                        let response = if req.starts_with("GET /item1.ics") {
-                            "HTTP/1.1 200 OK\r\nContent-Type: text/calendar\r\nContent-Length: 104\r\n\r\nBEGIN:VCALENDAR\r\nBEGIN:VEVENT\r\nSUMMARY:Existing Item\r\nDTSTART:20240101T100000Z\r\nEND:VEVENT\r\nEND:VCALENDAR".to_string()
-                        } else if req.starts_with("GET /notfound") {
-                            "HTTP/1.1 404 Not Found\r\nContent-Length: 9\r\n\r\nNot Found".to_string()
-                        } else if req.starts_with("PUT") {
-                            "HTTP/1.1 201 Created\r\nContent-Length: 0\r\n\r\n".to_string()
-                        } else if req.starts_with("DELETE /item1.ics") {
-                            "HTTP/1.1 204 No Content\r\nContent-Length: 0\r\n\r\n".to_string()
-                        } else if req.starts_with("DELETE /fail") {
-                            "HTTP/1.1 500 Internal Server Error\r\nContent-Length: 5\r\n\r\nError".to_string()
-                        } else if req.starts_with("PROPFIND") {
-                            let xml_body = r#"<?xml version="1.0" encoding="utf-8"?>
+        format!("http://{}", addr)
+    }
+
+    /// Serve a single HTTP/1.1 keep-alive connection for the mock DAV
+    /// server. Reads a complete request (headers + `Content-Length` body),
+    /// dispatches on the request line, writes the response, and loops
+    /// until the client half-closes the connection.
+    ///
+    /// `fast-dav-rs` is built on `hyper_util::client::legacy::Client`, which
+    /// pools HTTP/1.1 connections. A single `CalDavClient` therefore reuses
+    /// the same TCP socket across the `PROPFIND` + `REPORT` sequence inside
+    /// `tool_get_calendar`. The previous one-shot handler closed the socket
+    /// after the first response, which intermittently turned the second
+    /// request into a "connection closed before message completed" error
+    /// and made the test flake.
+    async fn handle_mock_connection(mut socket: tokio::net::TcpStream) {
+        use tokio::io::{AsyncBufReadExt, AsyncReadExt, AsyncWriteExt, BufReader};
+
+        let (read_half, mut write_half) = socket.split();
+        let mut reader = BufReader::new(read_half);
+        let mut header_buf: Vec<u8> = Vec::with_capacity(512);
+
+        loop {
+            header_buf.clear();
+
+            // Read header lines until we hit the empty CRLF that terminates
+            // the header block. EOF here means the client closed the
+            // connection cleanly — exit the loop.
+            loop {
+                let mut line = Vec::new();
+                let n = match reader.read_until(b'\n', &mut line).await {
+                    Ok(n) => n,
+                    Err(_) => return,
+                };
+                if n == 0 {
+                    return;
+                }
+                let is_blank = line == b"\r\n" || line == b"\n";
+                header_buf.extend_from_slice(&line);
+                if is_blank {
+                    break;
+                }
+            }
+
+            // Pull Content-Length so we can drain the request body before
+            // dispatching. PROPFIND/REPORT carry XML bodies; the client
+            // expects the server to consume them before responding.
+            let header_str = String::from_utf8_lossy(&header_buf);
+            let content_length: usize = header_str
+                .lines()
+                .find_map(|line| {
+                    let (name, value) = line.split_once(':')?;
+                    if name.trim().eq_ignore_ascii_case("content-length") {
+                        value.trim().parse().ok()
+                    } else {
+                        None
+                    }
+                })
+                .unwrap_or(0);
+
+            if content_length > 0 {
+                let mut body = vec![0u8; content_length];
+                if reader.read_exact(&mut body).await.is_err() {
+                    return;
+                }
+            }
+
+            let response = mock_dav_response(&header_str);
+            if write_half.write_all(response.as_bytes()).await.is_err() {
+                return;
+            }
+        }
+    }
+
+    /// Build the canned response for a parsed mock DAV request. Dispatches
+    /// purely on the request line — the request body is not inspected.
+    fn mock_dav_response(req: &str) -> String {
+        if req.starts_with("GET /item1.ics") {
+            "HTTP/1.1 200 OK\r\nContent-Type: text/calendar\r\nContent-Length: 104\r\nConnection: keep-alive\r\n\r\nBEGIN:VCALENDAR\r\nBEGIN:VEVENT\r\nSUMMARY:Existing Item\r\nDTSTART:20240101T100000Z\r\nEND:VEVENT\r\nEND:VCALENDAR".to_string()
+        } else if req.starts_with("GET /notfound") {
+            "HTTP/1.1 404 Not Found\r\nContent-Length: 9\r\nConnection: keep-alive\r\n\r\nNot Found"
+                .to_string()
+        } else if req.starts_with("PUT") {
+            "HTTP/1.1 201 Created\r\nContent-Length: 0\r\nConnection: keep-alive\r\n\r\n"
+                .to_string()
+        } else if req.starts_with("DELETE /item1.ics") {
+            "HTTP/1.1 204 No Content\r\nContent-Length: 0\r\nConnection: keep-alive\r\n\r\n"
+                .to_string()
+        } else if req.starts_with("DELETE /fail") {
+            "HTTP/1.1 500 Internal Server Error\r\nContent-Length: 5\r\nConnection: close\r\n\r\nError".to_string()
+        } else if req.starts_with("PROPFIND") {
+            let xml_body = r#"<?xml version="1.0" encoding="utf-8"?>
 <d:multistatus xmlns:d="DAV:" xmlns:c="urn:ietf:params:xml:ns:caldav">
  <d:response>
   <d:href>/calendars/primary/</d:href>
@@ -988,9 +1067,13 @@ mod tests {
   </d:propstat>
  </d:response>
 </d:multistatus>"#;
-                            format!("HTTP/1.1 207 Multi-Status\r\nContent-Type: application/xml\r\nContent-Length: {}\r\n\r\n{}", xml_body.len(), xml_body)
-                        } else if req.starts_with("REPORT") {
-                            let xml_body = r#"<?xml version="1.0" encoding="utf-8"?>
+            format!(
+                "HTTP/1.1 207 Multi-Status\r\nContent-Type: application/xml\r\nContent-Length: {}\r\nConnection: keep-alive\r\n\r\n{}",
+                xml_body.len(),
+                xml_body
+            )
+        } else if req.starts_with("REPORT") {
+            let xml_body = r#"<?xml version="1.0" encoding="utf-8"?>
 <d:multistatus xmlns:d="DAV:" xmlns:c="urn:ietf:params:xml:ns:caldav">
  <d:response>
   <d:href>/calendars/primary/event1.ics</d:href>
@@ -1009,18 +1092,14 @@ END:VCALENDAR</c:calendar-data>
   </d:propstat>
  </d:response>
 </d:multistatus>"#;
-                            format!("HTTP/1.1 207 Multi-Status\r\nContent-Type: application/xml\r\nContent-Length: {}\r\n\r\n{}", xml_body.len(), xml_body)
-                        } else {
-                            "HTTP/1.1 400 Bad Request\r\nContent-Length: 0\r\n\r\n".to_string()
-                        };
-
-                        let _ = socket.write_all(response.as_bytes()).await;
-                    });
-                }
-            });
-        });
-
-        format!("http://{}", addr)
+            format!(
+                "HTTP/1.1 207 Multi-Status\r\nContent-Type: application/xml\r\nContent-Length: {}\r\nConnection: keep-alive\r\n\r\n{}",
+                xml_body.len(),
+                xml_body
+            )
+        } else {
+            "HTTP/1.1 400 Bad Request\r\nContent-Length: 0\r\nConnection: close\r\n\r\n".to_string()
+        }
     }
 
     #[test]
@@ -1081,5 +1160,75 @@ END:VCALENDAR</c:calendar-data>
         // 9. Delete calendar item 500 error
         let delete_res_err = tool_delete_calendar_item(&config, "/fail").unwrap();
         assert!(delete_res_err.result.contains("Failed to DELETE event"));
+    }
+
+    /// Regression: `fast-dav-rs` uses hyper-util connection pooling, so
+    /// `tool_get_calendar` reuses the same TCP connection for its internal
+    /// PROPFIND + REPORT sequence. A mock server that drops the connection
+    /// after one request turns the second request into a connection-closed
+    /// error and silently returns an empty `results` payload. Loop the call
+    /// to make the race observable without flakiness.
+    #[test]
+    fn test_caldav_tools_mock_server_keep_alive() {
+        let _ = rustls::crypto::ring::default_provider().install_default();
+        let server_url = spawn_mock_caldav_server();
+
+        let mut config = AppConfig::default();
+        config.caldav_clients.insert(
+            "mock_client".to_string(),
+            crate::config::CalDavClient {
+                url: server_url,
+                username: "user".to_string(),
+                password: "password".to_string(),
+            },
+        );
+
+        for _ in 0..16 {
+            let get_res = tool_get_calendar(&config, "2024-01-01", "2024-01-02").unwrap();
+            assert!(
+                get_res.results.contains("Meeting with Bob"),
+                "expected REPORT response on reused connection, got: {}",
+                get_res.results
+            );
+        }
+    }
+
+    /// Regression: many sequential requests through one `CalDavClient` —
+    /// the most aggressive form of the keep-alive race. A mock that drops
+    /// the connection after each response will see every other request
+    /// fail with `connection closed before message completed`.
+    #[test]
+    fn test_caldav_tools_mock_server_single_client_reuse() {
+        use crate::tools::blocking::block_on;
+
+        let _ = rustls::crypto::ring::default_provider().install_default();
+        let server_url = spawn_mock_caldav_server();
+
+        block_on(async {
+            let client = CalDavClient::new(&server_url, Some("user"), Some("password")).unwrap();
+            for _ in 0..32 {
+                let items = client
+                    .calendar_query_timerange(
+                        "/calendars/primary/",
+                        "VEVENT",
+                        Some("20240101T000000Z"),
+                        Some("20240102T000000Z"),
+                        true,
+                    )
+                    .await
+                    .expect("REPORT should succeed on a kept-alive connection");
+                assert!(
+                    !items.is_empty(),
+                    "expected at least one calendar item on reused connection"
+                );
+                assert!(
+                    items[0]
+                        .calendar_data
+                        .as_deref()
+                        .unwrap_or("")
+                        .contains("Meeting with Bob")
+                );
+            }
+        });
     }
 }
