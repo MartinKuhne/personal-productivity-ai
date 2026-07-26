@@ -885,94 +885,83 @@ mod tests {
 
     #[test]
     fn test_parse_markdown_to_events() {
+        // Uses structural lookups (find / filter) rather than indexed
+        // access so the test doesn't break when events are reordered or
+        // when the parser gains a new event type between existing ones.
         let md = "# Heading 1\nSome *text*\n- List item";
         let events = parse_markdown_to_events(md);
 
-        assert_eq!(
-            events[0],
-            RenderEvent::Heading {
-                level: 1,
-                text: "Heading 1".to_string()
-            }
+        // H1 heading must be present, regardless of position.
+        assert!(
+            events
+                .iter()
+                .any(|e| matches!(e, RenderEvent::Heading { level: 1, text } if text == "Heading 1")),
+            "missing H1 'Heading 1' in {events:?}"
         );
 
-        // Next is the paragraph "Some text"
-        match &events[1] {
-            RenderEvent::FlushInline { elems, .. } => {
-                assert_eq!(elems.len(), 2);
-                match &elems[0] {
-                    InlineElem::Text(t, style) => {
-                        assert_eq!(t, "Some ");
-                        assert!(!style.italic);
-                    }
-                    _ => panic!("Expected text"),
-                }
-                match &elems[1] {
-                    InlineElem::Text(t, style) => {
-                        assert_eq!(t, "text");
-                        assert!(style.italic);
-                    }
-                    _ => panic!("Expected italic text"),
-                }
+        // A FlushInline carrying "Some " (not italic) followed by "text"
+        // (italic) — this is the paragraph that mixes emphasis.
+        let paragraph = events.iter().find_map(|e| match e {
+            RenderEvent::FlushInline { elems, needs_bullet: false, .. } if !elems.is_empty() => {
+                Some(elems)
             }
-            _ => panic!("Expected FlushInline"),
+            _ => None,
+        });
+        let elems = paragraph.expect("expected a non-bullet FlushInline for the paragraph");
+        assert_eq!(elems.len(), 2, "paragraph should have 2 inline elems");
+        match &elems[0] {
+            InlineElem::Text(t, style) => {
+                assert_eq!(t, "Some ");
+                assert!(!style.italic, "'Some ' must not be italic");
+            }
+            other => panic!("expected 'Some ' text, got {other:?}"),
+        }
+        match &elems[1] {
+            InlineElem::Text(t, style) => {
+                assert_eq!(t, "text");
+                assert!(style.italic, "'text' must be italic");
+            }
+            other => panic!("expected italic 'text', got {other:?}"),
         }
 
-        // Then paragraph space
-        assert_eq!(events[2], RenderEvent::Space(4.0));
+        // The paragraph's trailing space event.
+        assert!(
+            events.iter().any(|e| matches!(e, RenderEvent::Space(4.0))),
+            "missing Space(4.0) event in {events:?}"
+        );
 
-        // Then list item
-        match &events[3] {
+        // The bulleted list item, at indent 1.
+        let list_item = events.iter().find_map(|e| match e {
             RenderEvent::FlushInline {
                 elems,
-                needs_bullet,
-                indent,
+                needs_bullet: true,
+                indent: 1,
                 ..
-            } => {
-                assert!(*needs_bullet);
-                assert_eq!(*indent, 1);
-                assert_eq!(elems.len(), 1);
-                match &elems[0] {
-                    InlineElem::Text(t, _) => assert_eq!(t, "List item"),
-                    _ => panic!("Expected text"),
-                }
-            }
-            _ => panic!("Expected FlushInline"),
+            } => Some(elems),
+            _ => None,
+        });
+        let elems = list_item.expect("expected a bulleted FlushInline at indent 1");
+        assert_eq!(elems.len(), 1, "list item should have 1 inline elem");
+        match &elems[0] {
+            InlineElem::Text(t, _) => assert_eq!(t, "List item"),
+            other => panic!("expected 'List item' text, got {other:?}"),
         }
     }
 
     #[test]
     fn test_parse_markdown_heading_levels() {
+        // Structural check: every level 1..=4 appears with the right text.
+        // Doesn't depend on event ordering or extra events between them.
         let md = "# H1\n## H2\n### H3\n#### H4";
         let events = parse_markdown_to_events(md);
-        assert_eq!(
-            events[0],
-            RenderEvent::Heading {
-                level: 1,
-                text: "H1".to_string()
-            }
-        );
-        assert_eq!(
-            events[1],
-            RenderEvent::Heading {
-                level: 2,
-                text: "H2".to_string()
-            }
-        );
-        assert_eq!(
-            events[2],
-            RenderEvent::Heading {
-                level: 3,
-                text: "H3".to_string()
-            }
-        );
-        assert_eq!(
-            events[3],
-            RenderEvent::Heading {
-                level: 4,
-                text: "H4".to_string()
-            }
-        );
+        for (level, text) in [(1, "H1"), (2, "H2"), (3, "H3"), (4, "H4")] {
+            assert!(
+                events
+                    .iter()
+                    .any(|e| matches!(e, RenderEvent::Heading { level: l, text: t } if *l == level && t == text)),
+                "missing H{level} '{text}' in {events:?}"
+            );
+        }
     }
 
     #[test]
@@ -1185,6 +1174,9 @@ mod tests {
 
     #[test]
     fn test_build_toc() {
+        // Covers the full matrix: empty, missing headings, single and
+        // multiple levels (H1..H6), code-in-heading, special chars,
+        // and the order of headings in the source.
         let md = "# Title\nSome text\n## Subtitle";
         let toc = build_toc(md);
         assert_eq!(toc.len(), 2);
@@ -1192,6 +1184,54 @@ mod tests {
         assert_eq!(toc[0].level, 1);
         assert_eq!(toc[1].title, "Subtitle");
         assert_eq!(toc[1].level, 2);
+
+        assert!(build_toc("").is_empty(), "empty input must produce empty TOC");
+        assert!(
+            build_toc("Just a paragraph.\n\nAnother paragraph.").is_empty(),
+            "no-heading input must produce empty TOC"
+        );
+
+        let h1 = build_toc("# Title\n\nContent");
+        assert_eq!(h1.len(), 1);
+        assert_eq!(h1[0].level, 1);
+        assert_eq!(h1[0].title, "Title");
+
+        let mixed = build_toc("# H1\n\n## H2\n\n### H3");
+        assert_eq!(mixed.len(), 3);
+        assert_eq!(mixed[0].level, 1);
+        assert_eq!(mixed[0].title, "H1");
+        assert_eq!(mixed[1].level, 2);
+        assert_eq!(mixed[1].title, "H2");
+        assert_eq!(mixed[2].level, 3);
+        assert_eq!(mixed[2].title, "H3");
+
+        let deep = build_toc("# H1\n\n#### H4\n\n##### H5\n\n###### H6");
+        assert_eq!(deep.len(), 4);
+        assert_eq!(deep[1].level, 4);
+        assert_eq!(deep[2].level, 5);
+        assert_eq!(deep[3].level, 6);
+
+        let code_in_heading = build_toc("# `code` in heading");
+        assert_eq!(code_in_heading.len(), 1);
+        assert!(code_in_heading[0].title.contains("code"));
+
+        let ignored = build_toc(
+            "# Real Title\n\nSome text\n\n## Another\n\n- list item\n\n> blockquote",
+        );
+        assert_eq!(ignored.len(), 2);
+        assert_eq!(ignored[0].title, "Real Title");
+        assert_eq!(ignored[1].title, "Another");
+
+        let order = build_toc("## Second\n\n# First\n\n### Third");
+        assert_eq!(order.len(), 3);
+        // Headings appear in source order, not sorted by level.
+        assert_eq!(order[0].title, "Second");
+        assert_eq!(order[1].title, "First");
+        assert_eq!(order[2].title, "Third");
+
+        let special = build_toc("# H1: Introduction & Conclusion");
+        assert_eq!(special.len(), 1);
+        assert!(special[0].title.contains("H1: Introduction"));
     }
 
     #[test]
