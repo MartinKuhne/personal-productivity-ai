@@ -151,7 +151,7 @@ mod tests {
     /// Verify that `allocate_at_least` + `child_ui` + `with_main_wrap(true)`
     /// wraps content at the FTWA-assigned width `w` inside a Grid *regardless* of
     /// the specific column width or text (randomised over 20 iterations with
-    /// realistic insurance data — company names and dollar amounts).
+    /// realistic insurance data — company names and terms).
     #[test]
     fn fix_allocate_ui_insurance_data() {
         let ctx = egui::Context::default();
