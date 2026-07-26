@@ -55,6 +55,10 @@ egui_kittest = { version = "0.35", features = ["eframe", "snapshot"] }
 # dev-dep so the tests can `use accesskit::Role` without having
 # to reach through the harness's re-exports.
 accesskit = "0.24"
+# `log` is used directly by `egui` for its `WARN` output, and the
+# panel-id-stability tests install a `log::Log` implementation
+# to capture those records and assert they do not fire.
+log = "0.4"
 
 [[bin]]
 name = "fastmd"

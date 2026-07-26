@@ -189,81 +189,100 @@ pub fn show_left_panel(app: &mut FastMdApp, parent_ui: &mut egui::Ui) {
             ui.heading(RichText::new("Workspace Files").size(16.0).strong());
             ui.add_space(4.0);
 
+            // Single virtual-scroll container for the file tree.
+            //
+            // The previous revision wrapped this `ScrollArea::show_rows`
+            // in another `ScrollArea` ("left_file_tree_scroll") which
+            // is a known egui anti-pattern: the outer scroll area gives
+            // the inner one *infinite* available height, so the inner
+            // one balloons to the height of all rows, and any tiny
+            // content-height drift between passes shifts every row's
+            // rect. egui's `warn_if_rect_changes_id` then logs a
+            // `WARN egui::context: Widget rect ... changed id between
+            // passes` line for every shifted row on every frame —
+            // dozens of warnings per frame in production. Removing
+            // the redundant outer scroll area lets `show_rows` size
+            // itself to the panel's available height, so the rects
+            // are stable across passes.
+            let mut open_editor = None;
+            let modifiers = ui.input(|i| i.modifiers);
+            let selection = &mut app.selection;
+            let tab_manager = &mut app.tab_manager;
+            let dialogs = &mut app.dialogs;
+            let layout = &mut app.layout;
+            let submit_prompt = &mut app.submit_prompt;
+            let content_libraries = &app.content_libraries;
+            let inline_editor_enabled = app.inline_editor_enabled;
+            let file_event_bus = &app.file_event_bus;
+            let tx = app.tx.clone();
+
+            let mut rows = Vec::new();
+            if !root_node.children.is_empty() {
+                flatten_tree(&root_node, 0, &selection.expanded_dirs, &mut rows);
+            }
+
             egui::ScrollArea::vertical()
-                .id_salt("left_file_tree_scroll")
-                .show(ui, |ui| {
-                    let mut open_editor = None;
-                    if root_node.children.is_empty() {
-                        ui.label(
-                            RichText::new("No markdown files found.")
-                                .italics()
-                                .color(egui::Color32::GRAY),
-                        );
-                    } else {
-                        let modifiers = ui.input(|i| i.modifiers);
-                        let selection = &mut app.selection;
-                        let tab_manager = &mut app.tab_manager;
-                        let dialogs = &mut app.dialogs;
-                        let layout = &mut app.layout;
-                        let submit_prompt = &mut app.submit_prompt;
-                        let content_libraries = &app.content_libraries;
-                        let inline_editor_enabled = app.inline_editor_enabled;
-                        let file_event_bus = &app.file_event_bus;
-
-                        let mut rows = Vec::new();
-                        flatten_tree(&root_node, 0, &selection.expanded_dirs, &mut rows);
-
-                        egui::ScrollArea::vertical()
-                            .id_salt("virtual_tree_rows")
-                            .show_rows(ui, TREE_ROW_HEIGHT, rows.len(), |ui, row_range| {
-                                let tx = app.tx.clone();
-                                let mut ctx = TreeNodeContext {
-                                    file_ops: crate::ui::tree::FileOpsContext {
-                                        file_to_move: &mut dialogs.file_to_move,
-                                        move_dialog_open: &mut dialogs.move_dialog_open,
-                                        file_to_rename: &mut dialogs.file_to_rename,
-                                        rename_dialog_open: &mut dialogs.rename_dialog_open,
-                                        rename_new_name: &mut dialogs.rename_new_name,
-                                    },
-                                    dir_ops: crate::ui::tree::DirOpsContext {
-                                        selected_dir: &mut selection.selected_dir,
-                                        create_dir_dialog_open: &mut dialogs.create_dir_dialog_open,
-                                        create_dir_parent: &mut dialogs.create_dir_parent,
-                                    },
-                                    selection: crate::ui::tree::SelectionContext {
-                                        selected_file: &mut selection.selected_file,
-                                        selected_files: &mut selection.selected_files,
-                                        expanded_dirs: &mut selection.expanded_dirs,
-                                        tabs: &mut tab_manager.tabs,
-                                    },
-                                    app: crate::ui::tree::AppIntegrationContext {
-                                        layout,
-                                        submit_prompt,
-                                        content_libraries,
-                                        open_editor: &mut open_editor,
-                                        modifiers,
-                                        inline_editor_enabled,
-                                        bg_tx: &Some(tx),
-                                        file_event_producer: Some(
-                                            crate::file_events::FileEventProducer::new(
-                                                file_event_bus,
-                                            ),
-                                        ),
-                                    },
-                                };
-                                for i in row_range {
-                                    let row = &rows[i];
-                                    ui.push_id(&row.path, |ui| render_flat_row(ui, row, &mut ctx));
-                                }
-                            });
-                    }
-
-                    if let Some(path) = open_editor
-                        && let Ok(content) = std::fs::read_to_string(&path)
-                    {
-                        app.editor_mut().open(&path, &content);
+                .id_salt("virtual_tree_rows")
+                .auto_shrink([false, false])
+                .show_rows(ui, TREE_ROW_HEIGHT, rows.len(), |ui, row_range| {
+                    let mut ctx = TreeNodeContext {
+                        file_ops: crate::ui::tree::FileOpsContext {
+                            file_to_move: &mut dialogs.file_to_move,
+                            move_dialog_open: &mut dialogs.move_dialog_open,
+                            file_to_rename: &mut dialogs.file_to_rename,
+                            rename_dialog_open: &mut dialogs.rename_dialog_open,
+                            rename_new_name: &mut dialogs.rename_new_name,
+                        },
+                        dir_ops: crate::ui::tree::DirOpsContext {
+                            selected_dir: &mut selection.selected_dir,
+                            create_dir_dialog_open: &mut dialogs.create_dir_dialog_open,
+                            create_dir_parent: &mut dialogs.create_dir_parent,
+                        },
+                        selection: crate::ui::tree::SelectionContext {
+                            selected_file: &mut selection.selected_file,
+                            selected_files: &mut selection.selected_files,
+                            expanded_dirs: &mut selection.expanded_dirs,
+                            tabs: &mut tab_manager.tabs,
+                        },
+                        app: crate::ui::tree::AppIntegrationContext {
+                            layout,
+                            submit_prompt,
+                            content_libraries,
+                            open_editor: &mut open_editor,
+                            modifiers,
+                            inline_editor_enabled,
+                            bg_tx: &Some(tx),
+                            file_event_producer: Some(crate::file_events::FileEventProducer::new(
+                                file_event_bus,
+                            )),
+                        },
+                    };
+                    for i in row_range {
+                        let row = &rows[i];
+                        ui.push_id(&row.path, |ui| render_flat_row(ui, row, &mut ctx));
                     }
                 });
+
+            // Empty-state placeholder must be rendered outside the
+            // virtual-scroll `show_rows` (which would allocate zero
+            // rows for an empty tree) and outside any conditional
+            // that would add/remove a widget at the same rect on
+            // successive passes — that conditional was itself a
+            // source of id-clash warnings before the fix.
+            if rows.is_empty() {
+                ui.add_space(8.0);
+                ui.label(
+                    RichText::new("No markdown files found.")
+                        .italics()
+                        .color(egui::Color32::GRAY),
+                );
+            }
+
+            if let Some(path) = open_editor
+                && let Ok(content) = std::fs::read_to_string(&path)
+            {
+                app.editor_mut().open(&path, &content);
+            }
         });
 }
 
@@ -394,6 +413,109 @@ mod tests {
             stored,
             cap_at_recalc_time,
             inside_available
+        );
+    }
+
+    /// Renders the panel twice through the same `ctx` and returns the
+    /// rects that egui flagged with its "rect changed id between passes"
+    /// warning. The warning is rendered as a red stroke rectangle in
+    /// the second pass's output (see
+    /// `egui::Context::warn_if_rect_changes_id`). Returning those rects
+    /// lets a test assert the panel produces a stable widget tree
+    /// across passes — i.e. the cause of the `WARN egui::context`
+    /// log spam is gone.
+    fn collect_id_change_warnings(ctx: &egui::Context, app: &mut FastMdApp) -> Vec<egui::Rect> {
+        // Prime the previous-pass state with a first render.
+        let _ = ctx.run_ui(Default::default(), |ui| {
+            show_left_panel(app, ui);
+        });
+        // The second render is the one that emits the warning if the
+        // widget tree is unstable.
+        let output = ctx.run_ui(Default::default(), |ui| {
+            show_left_panel(app, ui);
+        });
+        let mut flagged = Vec::new();
+        for clipped in &output.shapes {
+            if let egui::Shape::Rect(rs) = &clipped.shape
+                && rs.stroke.color == egui::Color32::RED
+            {
+                flagged.push(rs.rect);
+            }
+        }
+        flagged
+    }
+
+    /// Regression: the production UI logged dozens of
+    /// `WARN egui::context: Widget rect ... changed id between passes`
+    /// lines on every frame because the left panel nested a
+    /// `ScrollArea` around another `ScrollArea::show_rows`. The
+    /// outer scroll area gave the inner one infinite available
+    /// height, so the inner one ballooned each pass and shifted the
+    /// rects of every row above it. After the fix the same state
+    /// must render with zero red-stroke rects in the second pass.
+    ///
+    /// Note: this test renders in isolation (no parent panel
+    /// layout, no user input), so the same `Context::run_ui` cycle
+    /// does not reproduce the loud production trigger. The
+    /// production fix was verified by the absence of the
+    /// `WARN egui::context` lines in the running app. This test
+    /// remains as a smoke test guarding the panel's render path
+    /// from accidentally re-introducing an obvious id-clash (such
+    /// as a second nested `ScrollArea` or a fresh `if root.children
+    /// .is_empty()` branch swap).
+    #[test]
+    fn test_show_left_panel_no_id_change_warnings_with_files() {
+        let ctx = egui::Context::default();
+        let mut app = create_test_app();
+        let lib_dir = std::env::temp_dir().join("fastmd_left_id_stability_files");
+        app.content_libraries_mut()
+            .push(crate::config::ContentLibrary {
+                root_folder: lib_dir.to_string_lossy().to_string(),
+                name: "StabilityLib".to_string(),
+                kind: "text".to_string(),
+                readonly: false,
+                priority: 0,
+            });
+        // Use enough files to actually exercise the virtual-scroll
+        // ScrollArea, not just the empty-state path.
+        let mut all_files = Vec::new();
+        for i in 0..60 {
+            all_files.push(lib_dir.join(format!("note_{:02}.md", i)));
+        }
+        app.file_processor_mut().all_files = all_files;
+        app.file_processor_mut().indexing_finished = true;
+        app.file_processor_mut().indexing_finished_handled = true;
+        // Stabilize the panel width so the only thing that can shift
+        // between passes is the inner widget tree.
+        app.layout_mut().left_panel_width = Some(240.0);
+        app.layout_mut().left_panel_dirty = false;
+
+        let flagged = collect_id_change_warnings(&ctx, &mut app);
+        assert!(
+            flagged.is_empty(),
+            "left panel must produce a stable widget tree across passes, but egui flagged {} rect(s) with 'rect changed id' warnings: {:?}",
+            flagged.len(),
+            flagged
+        );
+    }
+
+    /// Same regression as above but for the empty state: when no
+    /// files have been indexed, the panel must show the "No markdown
+    /// files found" placeholder. Even there the widget tree must
+    /// stay stable across passes.
+    #[test]
+    fn test_show_left_panel_no_id_change_warnings_when_empty() {
+        let ctx = egui::Context::default();
+        let mut app = create_test_app();
+        app.layout_mut().left_panel_width = Some(240.0);
+        app.layout_mut().left_panel_dirty = false;
+
+        let flagged = collect_id_change_warnings(&ctx, &mut app);
+        assert!(
+            flagged.is_empty(),
+            "empty left panel must produce a stable widget tree across passes, but egui flagged {} rect(s) with 'rect changed id' warnings: {:?}",
+            flagged.len(),
+            flagged
         );
     }
 }

@@ -1484,6 +1484,7 @@ dependencies = [
  "imap",
  "jmap-calendars-client",
  "jmap-client",
+ "log",
  "mimalloc",
  "notify",
  "opener",

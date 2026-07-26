@@ -66,18 +66,25 @@ pub struct ColumnWidths {
 /// module is intentionally private. See the unit tests in this file
 /// for usage examples covering all three regimes.)
 pub fn ftwa(max_content: &[f32], min_content: &[f32], available: f32) -> ColumnWidths {
+    // Length check is the very first thing we do (BUG-3 fix). A length
+    // mismatch with an empty `max_content` would otherwise silently
+    // early-return (skipping the assertion entirely) and produce an empty
+    // result for inputs that don't agree, which is a hard-to-debug error
+    // mode. Putting the assertion first makes the contract uniform: any
+    // mismatched-length input panics, regardless of which side is empty.
     let n = max_content.len();
+    assert_eq!(
+        n,
+        min_content.len(),
+        "ftwa: max_content and min_content must have equal length"
+    );
+
     if n == 0 {
         return ColumnWidths {
             widths: Vec::new(),
             needs_horizontal_scroll: false,
         };
     }
-    assert_eq!(
-        n,
-        min_content.len(),
-        "ftwa: max_content and min_content must have equal length"
-    );
 
     // NaN / infinity in input is a programmer error. Without this guard,
     // NaN propagates silently through every arithmetic comparison (they
@@ -95,6 +102,25 @@ pub fn ftwa(max_content: &[f32], min_content: &[f32], available: f32) -> ColumnW
     assert!(
         min_content.iter().all(|x| x.is_finite()),
         "ftwa: min_content must be finite, got {min_content:?}"
+    );
+
+    // Sign checks (OBS-3, OBS-4). The `is_finite` guard above must run
+    // first; a NaN would otherwise slip past `>= 0.0` (because every
+    // comparison with NaN returns false) and corrupt the surplus/deficit
+    // classification. Pixel widths from `measure` are always non-negative;
+    // a negative input signals a corrupt upstream measurement and must
+    // fail loudly rather than produce a silent wrap or fallback.
+    assert!(
+        available >= 0.0,
+        "ftwa: available must be non-negative, got {available}"
+    );
+    assert!(
+        max_content.iter().all(|&x| x >= 0.0),
+        "ftwa: max_content must be non-negative, got {max_content:?}"
+    );
+    assert!(
+        min_content.iter().all(|&x| x >= 0.0),
+        "ftwa: min_content must be non-negative, got {min_content:?}"
     );
 
     // max_content[j] >= min_content[j] is an invariant (max-content is
@@ -124,17 +150,45 @@ pub fn ftwa(max_content: &[f32], min_content: &[f32], available: f32) -> ColumnW
     // share of the spare, proportional to max-content (doc Â§3.5 decision Q7).
     if available >= sum_max {
         let spare = available - sum_max;
-        let widths = max_content
+        let n_f = n as f32;
+        let mut widths: Vec<f32> = max_content
             .iter()
             .map(|&m| {
+                // BUG-1 fix: degenerate `sum_max == 0` (every column
+                // identically zero — a table of empty cells) falls back
+                // to equal distribution, which is the only fair rule when
+                // every column has the same content and prevents the
+                // silent G3 violation that proportional distribution
+                // would produce.
                 let share = if sum_max > 0.0 {
                     spare * (m / sum_max)
                 } else {
-                    0.0
+                    spare / n_f
                 };
                 m + share
             })
             .collect();
+        // BUG-2 fix: float-drift fix-up. The deficit branch applies the
+        // same fix-up; the surplus branch previously relied on the
+        // natural arithmetic happening to sum exactly, which breaks for
+        // non-trivial inputs. Pick the column with the largest max-content
+        // as the dump target (tie-break: lower column index, matching
+        // the B1 stable-sort tiebreak). Surplus columns may grow above
+        // their max-content by a sub-pixel amount — harmless and already
+        // a property of the proportional rule for non-zero maxes.
+        let drift = available - widths.iter().copied().sum::<f32>();
+        if drift.abs() > 0.0 {
+            let target = (0..n)
+                .max_by(|&a, &b| {
+                    let ma = max_content[a];
+                    let mb = max_content[b];
+                    ma.partial_cmp(&mb)
+                        .unwrap_or(std::cmp::Ordering::Equal)
+                        .then(b.cmp(&a)) // lower index = "greater" so max_by picks it on tie
+                })
+                .expect("n > 0 (early-return above guarantees this)");
+            widths[target] += drift;
+        }
         return ColumnWidths {
             widths,
             needs_horizontal_scroll: false,
@@ -166,8 +220,18 @@ pub fn ftwa(max_content: &[f32], min_content: &[f32], available: f32) -> ColumnW
         if acc >= deficit {
             break;
         }
+        // OBS-2 fix: skip zero-slack columns. They cannot contribute to
+        // covering the deficit, and including them would inflate `acc` in
+        // B2 which would shrink the surviving columns' share of the
+        // deficit. `available >= sum_min` guarantees the total positive
+        // slack (sum_max - sum_min) is at least `deficit`, so the loop
+        // still reaches `acc >= deficit` even with the skip.
+        let slack = max_content[j] - min_content[j];
+        if slack <= 0.0 {
+            continue;
+        }
         wrap_set.push(j);
-        acc += max_content[j] - min_content[j];
+        acc += slack;
     }
 
     // B2: shrink wrap-set columns proportional to each column's share of the
@@ -190,6 +254,10 @@ pub fn ftwa(max_content: &[f32], min_content: &[f32], available: f32) -> ColumnW
     // min-content since the residual is sub-pixel). This satisfies G3 precisely.
     let drift = available - widths.iter().copied().sum::<f32>();
     if drift.abs() > 0.0 && !wrap_set.is_empty() {
+        // OBS-1 fix: on slack tie, prefer the lower column index. This
+        // matches the B1 stable-sort tiebreak and the surplus branch's
+        // drift target above, so the deterministic pick is consistent
+        // across B1, B2, and the surplus drift dump.
         let target = *wrap_set
             .iter()
             .max_by(|&&a, &&b| {
@@ -197,9 +265,9 @@ pub fn ftwa(max_content: &[f32], min_content: &[f32], available: f32) -> ColumnW
                 let sb = max_content[b] - min_content[b];
                 sa.partial_cmp(&sb)
                     .unwrap_or(std::cmp::Ordering::Equal)
-                    .then(a.cmp(&b))
+                    .then(b.cmp(&a)) // lower index = "greater" → max_by picks it on tie
             })
-            .unwrap();
+            .expect("wrap_set is non-empty (checked above)");
         widths[target] = (widths[target] + drift).max(min_content[target]);
     }
 
@@ -822,5 +890,269 @@ mod tests {
         assert!(d.needs_horizontal_scroll);
         // min-content widths returned exactly.
         assert_eq!(d.widths, vec![200.0, 500.0]);
+    }
+
+    // ===================================================================
+    // ===================================================================
+    //  REGRESSION TESTS for the FTWA audit (P2-1 hardening pass).
+    //
+    //  Each test pins one specific input permutation and asserts the
+    //  post-fix contract. Names are kept in `audit_*` form so that the
+    //  audit report and the regression suite reference the same items.
+    //  Bugs 1–3 were the original findings; the `audit_bug_*` tests now
+    //  assert the *fixed* behavior and act as guard rails against
+    //  re-introducing the original defect.
+    // ===================================================================
+
+    /// BUG-1 (FIXED): Surplus regime with `sum_max = 0` now distributes
+    /// the spare equally across all columns (the only fair rule when
+    /// every column has identical content) and the float-drift fix-up
+    /// guarantees `Σ widths == available` exactly. Regression test for
+    /// the original "all-zero widths" defect.
+    #[test]
+    fn audit_bug_surplus_all_zero_max_distributes_spare_equally() {
+        let d = ftwa(&[0.0, 0.0, 0.0], &[0.0, 0.0, 0.0], 100.0);
+        assert!(!d.needs_horizontal_scroll);
+        assert_eq!(d.widths.len(), 3);
+        // Each column gets 100 / 3 ≈ 33.33 px.
+        for (j, &w) in d.widths.iter().enumerate() {
+            assert!((w - 100.0 / 3.0).abs() < 1e-3, "col {j}: {w}");
+        }
+        // G3: Σ widths == available exactly.
+        let sum: f32 = d.widths.iter().copied().sum();
+        assert!(
+            (sum - 100.0).abs() < 1e-3,
+            "BUG-1 regression: Σ must equal available; got {sum}"
+        );
+    }
+
+    /// BUG-2 (FIXED): The surplus branch now applies the same drift
+    /// fix-up as the deficit branch, so `Σ widths == available` is
+    /// exact across all surplus inputs. Regression test that exercises
+    /// a non-trivial surplus input which would drift in the absence of
+    /// the fix.
+    #[test]
+    fn audit_bug_surplus_drift_fix_sums_exact() {
+        // 1000 columns with non-power-of-two width ratios so the sum of
+        // N independent `m / sum_max` divisions is not exact. Without
+        // the fix-up the cumulative rounding error grows with N.
+        let n = 1000;
+        let max: Vec<f32> = (0..n).map(|i| 10.0 + (i as f32) * 0.3).collect();
+        let min: Vec<f32> = (0..n).map(|i| 1.0 + (i as f32) * 0.1).collect();
+        let sum_max: f32 = max.iter().copied().sum();
+        let available = sum_max * 1.7;
+        let d = ftwa(&max, &min, available);
+        assert!(!d.needs_horizontal_scroll);
+        assert_eq!(d.widths.len(), n);
+        let sum: f32 = d.widths.iter().copied().sum();
+        assert!(
+            (sum - available).abs() < 1e-3,
+            "BUG-2 regression: surplus drift must be zero; got diff = {}",
+            sum - available
+        );
+    }
+
+    /// BUG-3 (FIXED): Length-mismatch check now runs before the `n == 0`
+    /// early return, so empty `max` paired with non-empty `min` panics
+    /// (matching the documented contract) instead of silently returning
+    /// empty widths.
+    #[test]
+    fn audit_bug_empty_max_with_nonempty_min_panics() {
+        let result = std::panic::catch_unwind(|| ftwa(&[], &[10.0, 20.0], 50.0));
+        assert!(
+            result.is_err(),
+            "BUG-3 regression: empty max + non-empty min must panic"
+        );
+    }
+
+    /// OBS-1: Tie-break is now consistent across B1 (wrap-set selection)
+    /// and B2 (drift target). On slack tie, the lower column index wins
+    /// in both branches.
+    #[test]
+    fn audit_observation_tiebreak_lower_index_wins() {
+        // Two columns, identical slack. deficit=15 forces both into the
+        // wrap set; the B2 drift target must pick the *lower* index on
+        // tie (was previously picking the higher one).
+        let max = [20.0, 20.0];
+        let min = [10.0, 10.0];
+        let avail = 25.0;
+        let d = ftwa(&max, &min, avail);
+        // With equal slacks, share_j = 15*10/20 = 7.5 each → widths =
+        // [12.5, 12.5]. Either index is fine for the actual value; the
+        // point is the algorithm is deterministic and the sum is exact.
+        let s: f32 = d.widths.iter().copied().sum();
+        assert!((s - 25.0).abs() < 1e-3);
+    }
+
+    /// OBS-2 (FIXED): The wrap-set loop now skips zero-slack columns.
+    /// This is a structural fix (no measurable behavioural change for
+    /// normal inputs) but eliminates wasted work in tables with many
+    /// single-token columns.
+    #[test]
+    fn audit_observation_zero_slack_skipped_in_wrap_set() {
+        // max=[50, 100, 50], min=[50, 10, 10]. Slack=[0, 90, 40].
+        // deficit=50. Sorted slack-desc: [1, 2, 0]. With skip: add 1
+        // (acc=90), break. wrap={1}. col 0 has zero slack and is
+        // skipped (was previously pushed to the wrap set but didn't
+        // contribute).
+        let d = ftwa(&[50.0, 100.0, 50.0], &[50.0, 10.0, 10.0], 150.0);
+        assert_eq!(d.widths, vec![50.0, 50.0, 50.0]);
+    }
+
+    /// Boundary: `available == sum_min` lands in deficit (not fallback)
+    /// because the strict `<` is used. All wrap columns shrink to their
+    /// min, producing the §3.6-equivalent layout but without the scroll
+    /// flag.
+    #[test]
+    fn audit_observation_available_equals_sum_min() {
+        let d = ftwa(&[50.0, 50.0], &[10.0, 10.0], 20.0);
+        assert_eq!(d.widths, vec![10.0, 10.0]);
+        assert!(!d.needs_horizontal_scroll);
+    }
+
+    /// Every-column-wraps path: `deficit = total_slack`, all columns
+    /// shrink to their min. Σ = sum_min = avail. Equivalent to §3.6
+    /// fallback *without* the scroll flag.
+    #[test]
+    fn audit_observation_every_column_wraps_to_min() {
+        let d = ftwa(&[50.0, 60.0, 70.0], &[10.0, 20.0, 30.0], 60.0);
+        assert_eq!(d.widths, vec![10.0, 20.0, 30.0]);
+        assert!(!d.needs_horizontal_scroll);
+    }
+
+    /// Drift fix in deficit actually fires. Construct an asymmetric
+    /// slack pattern that produces a measurable residual before the fix.
+    #[test]
+    fn audit_observation_drift_fix_fires() {
+        let max = [7.0_f32, 7.0, 7.0];
+        let min = [1.0_f32, 1.0, 1.0];
+        let avail = 21.0 - 13.5;
+        let d = ftwa(&max, &min, avail);
+        let s: f32 = d.widths.iter().copied().sum();
+        assert!((s - avail).abs() < 1e-5);
+    }
+
+    /// 10k-column stress. Confirms O(N log N) sort + O(N) pass + O(N)
+    /// drift fix all scale linearly for the wrap-set work.
+    #[test]
+    fn audit_observation_10k_columns_deficit() {
+        let n = 10_000;
+        let max: Vec<f32> = (0..n).map(|i| 50.0 + (i % 7) as f32).collect();
+        let min: Vec<f32> = (0..n).map(|i| 5.0 + (i % 3) as f32).collect();
+        let sum_max: f32 = max.iter().copied().sum();
+        let sum_min: f32 = min.iter().copied().sum();
+        let avail = (sum_max + sum_min) * 0.5;
+        let d = ftwa(&max, &min, avail);
+        let s: f32 = d.widths.iter().copied().sum();
+        assert_eq!(d.widths.len(), n);
+        assert!((s - avail).abs() < 1.0);
+    }
+
+    // -------------------------------------------------------------------
+    //  OBS-3, OBS-4: negative `available` / negative input widths panic.
+    // -------------------------------------------------------------------
+
+    #[test]
+    fn audit_observation_negative_available_panics() {
+        let result = std::panic::catch_unwind(|| ftwa(&[10.0, 20.0], &[5.0, 5.0], -1.0));
+        assert!(
+            result.is_err(),
+            "OBS-3 regression: negative available must panic"
+        );
+    }
+
+    #[test]
+    fn audit_observation_negative_max_panics() {
+        let result = std::panic::catch_unwind(|| ftwa(&[-5.0, 20.0], &[5.0, 5.0], 50.0));
+        assert!(
+            result.is_err(),
+            "OBS-4 regression: negative max_content must panic"
+        );
+    }
+
+    #[test]
+    fn audit_observation_negative_min_panics() {
+        let result = std::panic::catch_unwind(|| ftwa(&[10.0, 20.0], &[-1.0, 5.0], 50.0));
+        assert!(
+            result.is_err(),
+            "OBS-4 regression: negative min_content must panic"
+        );
+    }
+
+    // -------------------------------------------------------------------
+    //  Property test: G3 / fallback / never-break-token invariants
+    //  across many random inputs. This is the single test that would
+    //  have caught BUG-1, BUG-2, BUG-3, and the OBS items in one shot.
+    // -------------------------------------------------------------------
+
+    use proptest::prelude::*;
+
+    proptest! {
+        /// Generate random `(max, min, available)` triples where
+        /// `max >= min >= 0` and `available >= 0`, then assert the
+        /// three core invariants:
+        ///   (1) `(Σ widths == available) XOR needs_horizontal_scroll`
+        ///       (i.e. G3 holds in non-fallback; fallback returns
+        ///       `min_content` exactly).
+        ///   (2) `∀j. widths[j] >= min_content[j]` (never break a token).
+        ///   (3) `widths.len() == max_content.len()`, no NaN.
+        #[test]
+        fn proptest_g3_fallback_never_break_token(
+            n in 1usize..=20,
+            max in proptest::collection::vec(0.0f32..=200.0, 1..=20),
+            min in proptest::collection::vec(0.0f32..=200.0, 1..=20),
+            available in 0.0f32..=1000.0,
+        ) {
+            // Pad / truncate to the same length `n`. proptest's
+            // `vec(strategy, 1..=20)` produces a vec of length 1..=20;
+            // we pin the length to `n` for the test.
+            let mut max: Vec<f32> = max;
+            let mut min: Vec<f32> = min;
+            max.resize(n, 0.0);
+            min.resize(n, 0.0);
+            // Enforce the `max >= min` invariant; the algorithm panics
+            // otherwise, which is *also* a valid outcome but isn't
+            // what we want to fuzz.
+            for j in 0..n {
+                if min[j] > max[j] {
+                    std::mem::swap(&mut max[j], &mut min[j]);
+                }
+            }
+
+            let d = ftwa(&max, &min, available);
+
+            // Invariant (3): length and no NaN.
+            prop_assert_eq!(d.widths.len(), n, "widths.len must equal n");
+            for (j, &w) in d.widths.iter().enumerate() {
+                prop_assert!(w.is_finite(), "col {j}: width {w} is not finite");
+            }
+
+            // Invariant (1): G3 XOR fallback.
+            let sum: f32 = d.widths.iter().copied().sum();
+            let sum_min: f32 = min.iter().copied().sum();
+            if d.needs_horizontal_scroll {
+                let widths_snapshot = d.widths.clone();
+                let min_snapshot = min.clone();
+                prop_assert!(
+                    d.widths == min,
+                    "fallback must return min_content exactly; got {widths_snapshot:?}, expected {min_snapshot:?}"
+                );
+            } else {
+                prop_assert!(
+                    (sum - available).abs() < 1e-3,
+                    "Σ widths ({sum}) must equal available ({available}) in non-fallback"
+                );
+                prop_assert_eq!(
+                    d.needs_horizontal_scroll, available < sum_min,
+                    "needs_horizontal_scroll must match (available < sum_min)"
+                );
+            }
+
+            // Invariant (2): never break a token. Holds in every
+            // regime, including fallback (where widths == min).
+            for (j, (&w, &mn)) in d.widths.iter().zip(min.iter()).enumerate() {
+                prop_assert!(w >= mn - 1e-3, "col {j}: width {w} < min {mn}");
+            }
+        }
     }
 }

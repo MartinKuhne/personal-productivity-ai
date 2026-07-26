@@ -82,17 +82,40 @@ pub fn show_top_panel(app: &mut FastMdApp, parent_ui: &mut egui::Ui) {
             }
             ui.separator();
 
-            if !app.file_processor().indexing_finished {
-                ui.spinner();
-            }
+            // Spinner and tag combobox must always allocate, even
+            // when invisible, so their widget ids stay stable across
+            // the indexing-finished transition. The previous
+            // revision rendered the spinner only while indexing and
+            // the combobox only after indexing; the conditional
+            // add/remove swapped different widgets into the same
+            // rect on successive passes and triggered
+            // `WARN egui::context: Widget rect ... changed id
+            // between passes` for the whole toolbar row.
+            ui.add_visible(
+                !app.file_processor().indexing_finished,
+                egui::Spinner::new(),
+            );
 
             ui.label(build_indexing_status_text(
                 app.file_processor().indexing_finished,
                 app.file_processor().all_files.len(),
             ));
 
-            if app.file_processor().indexing_finished {
-                ui.separator();
+            // Allocate the tag combobox unconditionally so its id is
+            // stable across the indexing transition, then hide its
+            // content with `set_visible(false)` while we are still
+            // indexing. The previous revision put both the separator
+            // and the combobox inside `if indexing_finished`, which
+            // was the direct cause of the per-frame id-clash log
+            // spam on the toolbar row.
+            ui.scope(|ui| {
+                if !app.file_processor().indexing_finished {
+                    ui.set_invisible();
+                }
+                ui.add_visible(
+                    app.file_processor().indexing_finished,
+                    egui::Separator::default(),
+                );
                 egui::ComboBox::from_id_salt("tag_combobox")
                     .selected_text(get_tag_filter_text(app.tags().selected_tag.as_ref()))
                     .show_ui(ui, |ui| {
@@ -118,7 +141,7 @@ pub fn show_top_panel(app: &mut FastMdApp, parent_ui: &mut egui::Ui) {
                             *app.selection_mut().selected_file_mut() = next;
                         }
                     });
-            }
+            });
         });
     });
 }
@@ -236,5 +259,92 @@ mod ui_tests {
             show_top_panel(&mut app, ui);
         });
         assert!(app.file_processor().indexing_finished);
+    }
+
+    /// Regression: the production UI logged
+    /// `WARN egui::context: Widget rect ... changed id between passes`
+    /// for the toolbar row on every frame around the
+    /// `indexing_finished` transition. The previous revision put the
+    /// spinner and the tag combobox under mutually-exclusive
+    /// `if`/`else if` blocks keyed on the bool, so the moment
+    /// indexing finished a different widget (combobox) replaced the
+    /// previous one (spinner) at the same rect and egui flagged the
+    /// whole row. After the fix, both widgets always allocate (via
+    /// `add_visible` / `set_invisible`) so their ids are stable
+    /// across the bool flip. The test simulates the transition by
+    /// flipping `indexing_finished` between two passes and asserts
+    /// no `changed id between passes` warning is emitted.
+    #[test]
+    fn test_show_top_panel_no_id_change_warnings_on_indexing_finished_transition() {
+        use std::sync::{Mutex, OnceLock};
+        struct Capture {
+            msgs: Mutex<Vec<String>>,
+        }
+        impl log::Log for Capture {
+            fn enabled(&self, _: &log::Metadata) -> bool {
+                true
+            }
+            fn log(&self, record: &log::Record) {
+                self.msgs
+                    .lock()
+                    .unwrap()
+                    .push(format!("[{}] {}", record.level(), record.args()));
+            }
+            fn flush(&self) {}
+        }
+        static LOGGER: OnceLock<Capture> = OnceLock::new();
+        static INSTALLED: OnceLock<()> = OnceLock::new();
+        let cap = LOGGER.get_or_init(|| Capture {
+            msgs: Mutex::new(Vec::new()),
+        });
+        INSTALLED.get_or_init(|| {
+            let _ = log::set_logger(cap);
+            log::set_max_level(log::LevelFilter::Trace);
+        });
+        cap.msgs.lock().unwrap().clear();
+
+        let ctx = egui::Context::default();
+        let mut app = create_test_app();
+        app.file_processor_mut().indexing_finished = false;
+        app.tags_mut().add_tags(
+            PathBuf::from("dummy.md"),
+            vec!["Rust".to_string(), "Docs".to_string()],
+        );
+
+        // Pre-finish: spinner is visible, combobox is hidden but
+        // still allocated.
+        let _ = ctx.run_ui(egui::RawInput::default(), |ui| {
+            show_top_panel(&mut app, ui);
+        });
+        // Flip the bool and render again — the rects the spinner
+        // and combobox live at must stay the same; only their
+        // visibility changes.
+        app.file_processor_mut().indexing_finished = true;
+        let _ = ctx.run_ui(egui::RawInput::default(), |ui| {
+            show_top_panel(&mut app, ui);
+        });
+        // Stabilise on the finished side.
+        let _ = ctx.run_ui(egui::RawInput::default(), |ui| {
+            show_top_panel(&mut app, ui);
+        });
+
+        let msgs = cap.msgs.lock().unwrap().clone();
+        let id_change_count = msgs
+            .iter()
+            .filter(|m| m.contains("changed id between passes"))
+            .count();
+        assert!(
+            !msgs.is_empty(),
+            "log capture is empty — the test is not actually running under the installed log::Log impl"
+        );
+        assert_eq!(
+            id_change_count,
+            0,
+            "top panel must produce a stable widget tree across the indexing_finished transition, but egui emitted {} 'changed id' warning(s): {:?}",
+            id_change_count,
+            msgs.iter()
+                .filter(|m| m.contains("changed id between passes"))
+                .collect::<Vec<_>>()
+        );
     }
 }
