@@ -759,8 +759,9 @@ impl FastMdApp {
     fn render_panels(&mut self, parent_ui: &mut egui::Ui) {
         // egui 0.35: each `*Panel` allocates itself from a parent
         // `&mut Ui`; pass the root `Ui` from `App::ui` straight
-        // through. The order is preserved from 0.27: top Ã¢â€ â€™ bottom Ã¢â€ â€™
-        // right Ã¢â€ â€™ left Ã¢â€ â€™ center.
+        // through. The order is preserved from 0.27: top → bottom →
+        // right → left → center. Panels must be allocated directly from
+        // the parent_ui container, not nested within child_ui scopes.
         show_top_panel(self, parent_ui);
         show_bottom_panel(self, parent_ui);
         show_right_panel(self, parent_ui);
@@ -1341,6 +1342,172 @@ mod tests {
             app.tag_manager.all_tags().contains("keep"),
             "Discovered events must NOT call rebuild Ã¢â‚¬â€ the FileParsed path \
              updates all_tags incrementally"
+        );
+    }
+
+    /// Regression: rendering a document with a Table of Contents (such as
+    /// `Laptop.md`) shows `Panel::right("toc_panel")`. When the TOC panel is
+    /// active, all 5 side panels must produce a stable widget tree across
+    /// multi-pass renders (0 red-stroke ID-change warning shapes in egui).
+    #[test]
+    fn test_render_panels_no_id_change_warnings_on_toc_transition() {
+        let ctx = egui::Context::default();
+        let mut app = create_test_app();
+        let file = PathBuf::from("Laptop.md");
+
+        app.tab_manager.tabs = vec![file.clone()];
+        *app.selection.selected_file_mut() = Some(file.clone());
+        app.layout.left_panel_width = Some(200.0);
+        app.layout.left_panel_dirty = false;
+
+        // Populate TOC (simulating rendering a document with headings like Laptop.md).
+        app.tab_manager.toc = vec![
+            crate::ui::ToCEntry {
+                title: "Introduction".to_string(),
+                level: 1,
+                id: egui::Id::new("intro"),
+            },
+            crate::ui::ToCEntry {
+                title: "Specifications".to_string(),
+                level: 2,
+                id: egui::Id::new("specs"),
+            },
+        ];
+
+        // Pass 1: Initial render pass with TOC active.
+        let _ = ctx.run_ui(Default::default(), |ui| {
+            app.render_panels(ui);
+        });
+
+        // Pass 2: Second render pass with TOC active — must produce 0 ID change warnings.
+        let output = ctx.run_ui(Default::default(), |ui| {
+            app.render_panels(ui);
+        });
+
+        let mut flagged = Vec::new();
+        for clipped in &output.shapes {
+            if let egui::Shape::Rect(rs) = &clipped.shape
+                && rs.stroke.color == egui::Color32::RED
+            {
+                flagged.push(rs.rect);
+            }
+        }
+
+        assert!(
+            flagged.is_empty(),
+            "render_panels must produce a stable widget tree when TOC panel is active, but egui flagged {} rect(s) with ID change warnings: {:?}",
+            flagged.len(),
+            flagged
+        );
+    }
+
+    /// High-level layout integration test ensuring all 5 top-level UI panels
+    /// (Top, Left, Right, Center, Bottom) allocate non-zero, full-window layout
+    /// rects and render their expected child elements without collapsing or
+    /// disappearing.
+    #[test]
+    fn test_all_top_level_panels_visible_and_rendered() {
+        let ctx = egui::Context::default();
+        let mut app = create_test_app();
+        let file = PathBuf::from("Laptop.md");
+
+        app.tab_manager.tabs = vec![file.clone()];
+        *app.selection.selected_file_mut() = Some(file.clone());
+        app.layout.left_panel_width = Some(200.0);
+        app.layout.left_panel_dirty = false;
+        app.file_processor_mut().indexing_finished = true;
+        app.tab_manager.current_markdown =
+            "# Laptop Specifications\n\n- CPU: 8 Cores\n- RAM: 32GB".to_string();
+
+        // Populate TOC so the right panel is active.
+        app.tab_manager.toc = vec![crate::ui::ToCEntry {
+            title: "Laptop Specifications".to_string(),
+            level: 1,
+            id: egui::Id::new("laptop_specs"),
+        }];
+
+        let mut raw_input = egui::RawInput::default();
+        raw_input.screen_rect = Some(egui::Rect::from_min_size(
+            egui::Pos2::ZERO,
+            egui::vec2(1024.0, 768.0),
+        ));
+
+        // Execute render_panels
+        let output = ctx.run_ui(raw_input, |ui| {
+            app.render_panels(ui);
+        });
+
+        let mut texts = Vec::new();
+        let mut min_pos = egui::Pos2::new(f32::MAX, f32::MAX);
+        let mut max_pos = egui::Pos2::new(f32::MIN, f32::MIN);
+
+        for clipped in &output.shapes {
+            let rect = clipped.shape.visual_bounding_rect();
+            if rect.is_finite() && !rect.is_negative() {
+                min_pos.x = min_pos.x.min(rect.min.x);
+                min_pos.y = min_pos.y.min(rect.min.y);
+                max_pos.x = max_pos.x.max(rect.max.x);
+                max_pos.y = max_pos.y.max(rect.max.y);
+            }
+
+            fn extract_text(shape: &egui::Shape, acc: &mut Vec<String>) {
+                match shape {
+                    egui::Shape::Text(text_shape) => {
+                        acc.push(text_shape.galley.text().to_string());
+                    }
+                    egui::Shape::Vec(shapes) => {
+                        for s in shapes {
+                            extract_text(s, acc);
+                        }
+                    }
+                    _ => {}
+                }
+            }
+            extract_text(&clipped.shape, &mut texts);
+        }
+
+        let rendered_width = max_pos.x - min_pos.x;
+        let rendered_height = max_pos.y - min_pos.y;
+
+        // 1. Verify that overall visual bounding box covers top-left to bottom-right of viewport.
+        assert!(
+            rendered_width >= 800.0,
+            "UI layout must span the window width (expected >= 800px, got {}px)",
+            rendered_width
+        );
+        assert!(
+            rendered_height >= 600.0,
+            "UI layout must span the window height (expected >= 600px, got {}px)",
+            rendered_height
+        );
+
+        // 2. Verify that unique text content from ALL 5 PANELS is present in the rendered output shapes.
+        let all_text = texts.join(" ");
+
+        assert!(
+            all_text.contains("FastMD Viewer"),
+            "Top panel content ('FastMD Viewer') must be rendered, text: {}",
+            all_text
+        );
+        assert!(
+            all_text.contains("Workspace Files"),
+            "Left panel content ('Workspace Files') must be rendered, text: {}",
+            all_text
+        );
+        assert!(
+            all_text.contains("Table of Contents"),
+            "Right panel content ('Table of Contents') must be rendered, text: {}",
+            all_text
+        );
+        assert!(
+            all_text.contains("Laptop Specifications"),
+            "Center panel content ('Laptop Specifications') must be rendered, text: {}",
+            all_text
+        );
+        assert!(
+            all_text.contains("Indexing finished") || all_text.contains("files"),
+            "Bottom/Top status bar content must be rendered, text: {}",
+            all_text
         );
     }
 }

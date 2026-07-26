@@ -175,8 +175,7 @@ pub fn tool_create_file(
     }
 
     // Validate the markdown by ensuring it parses successfully
-    let parser = pulldown_cmark::Parser::new(content);
-    for _ in parser {}
+    let _events = crate::markdown::parse_markdown_to_events(content);
 
     let path = Path::new(path_str);
     if let Some(parent) = path.parent()

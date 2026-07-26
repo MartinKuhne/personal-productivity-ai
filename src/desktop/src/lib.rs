@@ -12,6 +12,7 @@ pub mod editor;
 pub mod error;
 pub mod file_events;
 pub mod file_processor;
+pub mod markdown;
 pub mod messages;
 pub mod print;
 pub mod tag_manager;
