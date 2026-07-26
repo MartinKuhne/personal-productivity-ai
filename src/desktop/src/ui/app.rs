@@ -1400,4 +1400,114 @@ mod tests {
             flagged
         );
     }
+
+    /// High-level layout integration test ensuring all 5 top-level UI panels
+    /// (Top, Left, Right, Center, Bottom) allocate non-zero, full-window layout
+    /// rects and render their expected child elements without collapsing or
+    /// disappearing.
+    #[test]
+    fn test_all_top_level_panels_visible_and_rendered() {
+        let ctx = egui::Context::default();
+        let mut app = create_test_app();
+        let file = PathBuf::from("Laptop.md");
+
+        app.tab_manager.tabs = vec![file.clone()];
+        *app.selection.selected_file_mut() = Some(file.clone());
+        app.layout.left_panel_width = Some(200.0);
+        app.layout.left_panel_dirty = false;
+        app.file_processor_mut().indexing_finished = true;
+        app.tab_manager.current_markdown =
+            "# Laptop Specifications\n\n- CPU: 8 Cores\n- RAM: 32GB".to_string();
+
+        // Populate TOC so the right panel is active.
+        app.tab_manager.toc = vec![crate::ui::ToCEntry {
+            title: "Laptop Specifications".to_string(),
+            level: 1,
+            id: egui::Id::new("laptop_specs"),
+        }];
+
+        let mut raw_input = egui::RawInput::default();
+        raw_input.screen_rect = Some(egui::Rect::from_min_size(
+            egui::Pos2::ZERO,
+            egui::vec2(1024.0, 768.0),
+        ));
+
+        // Execute render_panels
+        let output = ctx.run_ui(raw_input, |ui| {
+            app.render_panels(ui);
+        });
+
+        let mut texts = Vec::new();
+        let mut min_pos = egui::Pos2::new(f32::MAX, f32::MAX);
+        let mut max_pos = egui::Pos2::new(f32::MIN, f32::MIN);
+
+        for clipped in &output.shapes {
+            let rect = clipped.shape.visual_bounding_rect();
+            if rect.is_finite() && !rect.is_negative() {
+                min_pos.x = min_pos.x.min(rect.min.x);
+                min_pos.y = min_pos.y.min(rect.min.y);
+                max_pos.x = max_pos.x.max(rect.max.x);
+                max_pos.y = max_pos.y.max(rect.max.y);
+            }
+
+            fn extract_text(shape: &egui::Shape, acc: &mut Vec<String>) {
+                match shape {
+                    egui::Shape::Text(text_shape) => {
+                        acc.push(text_shape.galley.text().to_string());
+                    }
+                    egui::Shape::Vec(shapes) => {
+                        for s in shapes {
+                            extract_text(s, acc);
+                        }
+                    }
+                    _ => {}
+                }
+            }
+            extract_text(&clipped.shape, &mut texts);
+        }
+
+        let rendered_width = max_pos.x - min_pos.x;
+        let rendered_height = max_pos.y - min_pos.y;
+
+        // 1. Verify that overall visual bounding box covers top-left to bottom-right of viewport.
+        assert!(
+            rendered_width >= 800.0,
+            "UI layout must span the window width (expected >= 800px, got {}px)",
+            rendered_width
+        );
+        assert!(
+            rendered_height >= 600.0,
+            "UI layout must span the window height (expected >= 600px, got {}px)",
+            rendered_height
+        );
+
+        // 2. Verify that unique text content from ALL 5 PANELS is present in the rendered output shapes.
+        let all_text = texts.join(" ");
+
+        assert!(
+            all_text.contains("FastMD Viewer"),
+            "Top panel content ('FastMD Viewer') must be rendered, text: {}",
+            all_text
+        );
+        assert!(
+            all_text.contains("Workspace Files"),
+            "Left panel content ('Workspace Files') must be rendered, text: {}",
+            all_text
+        );
+        assert!(
+            all_text.contains("Table of Contents"),
+            "Right panel content ('Table of Contents') must be rendered, text: {}",
+            all_text
+        );
+        assert!(
+            all_text.contains("Laptop Specifications"),
+            "Center panel content ('Laptop Specifications') must be rendered, text: {}",
+            all_text
+        );
+        assert!(
+            all_text.contains("Indexing finished") || all_text.contains("files"),
+            "Bottom/Top status bar content must be rendered, text: {}",
+            all_text
+        );
+    }
 }
