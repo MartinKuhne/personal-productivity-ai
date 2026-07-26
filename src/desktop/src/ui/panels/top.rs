@@ -1,8 +1,9 @@
-//! Top toolbar panel — indexing status, tag filter dropdown, new-file/new-dir buttons, and content-library name.
+//! Top toolbar panel Ã¢â‚¬â€ indexing status, tag filter dropdown, new-file/new-dir buttons, and content-library name.
 
 use crate::ui::FastMdApp;
 use eframe::egui;
 use egui::RichText;
+use egui::containers::Panel;
 use std::collections::BTreeMap;
 use std::path::PathBuf;
 
@@ -61,8 +62,9 @@ pub fn compute_next_selected_file(
     Some(selected.clone())
 }
 
-pub fn show_top_panel(app: &mut FastMdApp, ctx: &egui::Context) {
-    egui::TopBottomPanel::top("top_panel").show(ctx, |ui| {
+pub fn show_top_panel(app: &mut FastMdApp, parent_ui: &mut egui::Ui) {
+    // egui 0.35 unified `TopBottomPanel` into `Panel`.
+    Panel::top("top_panel").show(parent_ui, |ui| {
         ui.horizontal(|ui| {
             ui.heading(
                 RichText::new("⚡ FastMD Viewer")
@@ -92,7 +94,7 @@ pub fn show_top_panel(app: &mut FastMdApp, ctx: &egui::Context) {
 
             if app.file_processor().indexing_finished {
                 ui.separator();
-                egui::ComboBox::from_id_source("tag_combobox")
+                egui::ComboBox::from_id_salt("tag_combobox")
                     .selected_text(get_tag_filter_text(app.tags().selected_tag.as_ref()))
                     .show_ui(ui, |ui| {
                         let mut changed = ui
@@ -215,8 +217,8 @@ mod ui_tests {
         let ctx = egui::Context::default();
         let mut app = create_test_app();
         app.file_processor_mut().indexing_finished = false;
-        let _ = ctx.run(egui::RawInput::default(), |ctx| {
-            show_top_panel(&mut app, ctx);
+        let _ = ctx.run_ui(egui::RawInput::default(), |ui| {
+            show_top_panel(&mut app, ui);
         });
         assert!(!app.file_processor().indexing_finished);
     }
@@ -231,8 +233,8 @@ mod ui_tests {
             vec!["Rust".to_string(), "Docs".to_string()],
         );
 
-        let _ = ctx.run(egui::RawInput::default(), |ctx| {
-            show_top_panel(&mut app, ctx);
+        let _ = ctx.run_ui(egui::RawInput::default(), |ui| {
+            show_top_panel(&mut app, ui);
         });
         assert!(app.file_processor().indexing_finished);
     }

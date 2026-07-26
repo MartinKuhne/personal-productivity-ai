@@ -1,8 +1,9 @@
-//! Bottom command/agent panel — prompt intent parsing (`/models`, agent prompt), agent status, response, and token-usage stats.
+//! Bottom command/agent panel Ã¢â‚¬â€ prompt intent parsing (`/models`, agent prompt), agent status, response, and token-usage stats.
 
 use crate::ui::FastMdApp;
 use eframe::egui;
 use egui::RichText;
+use egui::containers::Panel;
 
 /// Enum representing the parsed intent from a user command prompt.
 #[derive(Debug, PartialEq)]
@@ -68,11 +69,19 @@ pub fn format_models_list(
     output
 }
 
-pub fn show_bottom_panel(app: &mut FastMdApp, ctx: &egui::Context) {
-    egui::TopBottomPanel::bottom("bottom_panel")
+pub fn show_bottom_panel(app: &mut FastMdApp, parent_ui: &mut egui::Ui) {
+    // egui 0.35 unified `TopBottomPanel`/`SidePanel` into `Panel`,
+    // and panels now allocate within a parent `&mut Ui` (using
+    // `show_inside`) rather than from a `&Context`.
+    Panel::bottom("bottom_panel")
         .resizable(true)
-        .min_height(32.0)
-        .show(ctx, |ui| {
+        // egui 0.35: `min_height` was replaced by `min_size` (and the
+        // same `size` parameter is used for all four sides).
+        .min_size(32.0)
+        .show(parent_ui, |ui| {
+            // Some branches below still need the context for input
+            // polling Ã¢â‚¬â€ pull it from the inner Ui.
+            let ctx = ui.ctx().clone();
             ui.horizontal(|ui| {
                 let prompt_prefix = compute_prompt_prefix(
                     app.selection().selected_dir().map(|p| p.as_path()),
@@ -102,7 +111,7 @@ pub fn show_bottom_panel(app: &mut FastMdApp, ctx: &egui::Context) {
                             let date_str = now.to_rfc3339();
                             app.agent_mut().command_input = crate::ui::generate_format_prompt(&date_str);
                             submit = true;
-                            ui.close_menu();
+                            ui.close();
                         }
                     });
 
@@ -281,8 +290,8 @@ mod ui_tests {
         let ctx = egui::Context::default();
         let mut app = create_test_app();
         app.agent_mut().command_input = "test input".to_string();
-        let _ = ctx.run(egui::RawInput::default(), |ctx| {
-            show_bottom_panel(&mut app, ctx);
+        let _ = ctx.run_ui(egui::RawInput::default(), |ui| {
+            show_bottom_panel(&mut app, ui);
         });
         assert_eq!(app.agent().command_input, "test input");
     }
@@ -293,8 +302,8 @@ mod ui_tests {
         let mut app = create_test_app();
         app.agent_mut().state_mut().running = true;
 
-        let _ = ctx.run(egui::RawInput::default(), |ctx| {
-            show_bottom_panel(&mut app, ctx);
+        let _ = ctx.run_ui(egui::RawInput::default(), |ui| {
+            show_bottom_panel(&mut app, ui);
         });
 
         assert!(app.agent().state().running);

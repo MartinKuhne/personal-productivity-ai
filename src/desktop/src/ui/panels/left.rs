@@ -6,6 +6,7 @@ use crate::ui::TreeNodeContext;
 use crate::ui::tree::{TREE_ROW_HEIGHT, flatten_tree, render_flat_row};
 use eframe::egui;
 use egui::RichText;
+use egui::containers::Panel;
 use egui::containers::panel::PanelState;
 
 /// Stable ID for the left panel — used both as the egui SidePanel identifier
@@ -14,7 +15,8 @@ fn left_panel_id() -> egui::Id {
     egui::Id::new("left_panel")
 }
 
-pub fn show_left_panel(app: &mut FastMdApp, ctx: &egui::Context) {
+pub fn show_left_panel(app: &mut FastMdApp, parent_ui: &mut egui::Ui) {
+    let ctx = parent_ui.ctx();
     let filtered_files: Vec<&std::path::PathBuf> = app
         .file_processor()
         .all_files
@@ -140,9 +142,11 @@ pub fn show_left_panel(app: &mut FastMdApp, ctx: &egui::Context) {
                 }
             }
             if depth > 0 {
-                let icon = if node.is_dir { "📁 " } else { "📄 " };
+                let icon = if node.is_dir { "▶ " } else { "  " };
                 let text = format!("{}{}", icon, node.name);
-                let text_w = ctx.fonts(|f| {
+                // egui 0.35: `FontsView::layout_no_wrap` requires
+                // `&mut self`, so we need `fonts_mut` rather than `fonts`.
+                let text_w = ctx.fonts_mut(|f| {
                     f.layout_no_wrap(text, egui::FontId::proportional(14.0), egui::Color32::WHITE)
                         .size()
                         .x
@@ -156,12 +160,16 @@ pub fn show_left_panel(app: &mut FastMdApp, ctx: &egui::Context) {
             max_w
         }
         let calculated = calc_max_width(&root_node, 0, ctx);
-        let max_allowed = ctx.available_rect().width() * 0.2;
+        // egui 0.35: `Context::available_rect` was removed. Use
+        // `viewport_rect` (the full area available to egui, equivalent
+        // to the old `available_rect` for this purpose) to size the
+        // left panel.
+        let max_allowed = ctx.viewport_rect().width() * 0.2;
         app.layout_mut().left_panel_width = Some(calculated.min(max_allowed));
         app.layout_mut().left_panel_dirty = false;
     }
 
-    let max_w = ctx.available_rect().width() * 0.2;
+    let max_w = ctx.viewport_rect().width() * 0.2;
     let default_w = app
         .layout()
         .left_panel_width
@@ -169,17 +177,20 @@ pub fn show_left_panel(app: &mut FastMdApp, ctx: &egui::Context) {
         .max(180.0)
         .min(max_w);
 
-    egui::SidePanel::left(left_panel_id())
+    // egui 0.35 unified `SidePanel`/`TopBottomPanel` into `Panel`,
+    // and panels now allocate within a parent `&mut Ui`.
+    // `default_width` / `max_width` are now `default_size` / `max_size`.
+    Panel::left(left_panel_id())
         .resizable(true)
-        .default_width(default_w)
-        .max_width(max_w)
-        .show(ctx, |ui| {
+        .default_size(default_w)
+        .max_size(max_w)
+        .show(parent_ui, |ui| {
             ui.add_space(4.0);
             ui.heading(RichText::new("Workspace Files").size(16.0).strong());
             ui.add_space(4.0);
 
             egui::ScrollArea::vertical()
-                .id_source("left_file_tree_scroll")
+                .id_salt("left_file_tree_scroll")
                 .show(ui, |ui| {
                     let mut open_editor = None;
                     if root_node.children.is_empty() {
@@ -203,7 +214,7 @@ pub fn show_left_panel(app: &mut FastMdApp, ctx: &egui::Context) {
                         flatten_tree(&root_node, 0, &selection.expanded_dirs, &mut rows);
 
                         egui::ScrollArea::vertical()
-                            .id_source("virtual_tree_rows")
+                            .id_salt("virtual_tree_rows")
                             .show_rows(ui, TREE_ROW_HEIGHT, rows.len(), |ui, row_range| {
                                 let tx = app.tx.clone();
                                 let mut ctx = TreeNodeContext {
@@ -241,7 +252,8 @@ pub fn show_left_panel(app: &mut FastMdApp, ctx: &egui::Context) {
                                     },
                                 };
                                 for i in row_range {
-                                    render_flat_row(ui, &rows[i], &mut ctx);
+                                    let row = &rows[i];
+                                    ui.push_id(&row.path, |ui| render_flat_row(ui, row, &mut ctx));
                                 }
                             });
                     }
@@ -269,8 +281,8 @@ mod tests {
         let mut app = create_test_app();
         app.layout_mut().left_panel_dirty = false;
 
-        let _ = ctx.run(Default::default(), |ctx| {
-            show_left_panel(&mut app, ctx);
+        let _ = ctx.run_ui(Default::default(), |ui| {
+            show_left_panel(&mut app, ui);
         });
 
         // Panel renders without crashing; width is unset because the dirty flag is false.
@@ -301,19 +313,19 @@ mod tests {
         app.tags_mut()
             .add_tags(file2.clone(), vec!["archive".to_string()]);
 
-        let _ = ctx.run(Default::default(), |ctx| {
-            show_left_panel(&mut app, ctx);
+        let _ = ctx.run_ui(Default::default(), |ui| {
+            show_left_panel(&mut app, ui);
         });
 
         app.tags_mut().selected_tag = Some("work".to_string());
-        let _ = ctx.run(Default::default(), |ctx| {
-            show_left_panel(&mut app, ctx);
+        let _ = ctx.run_ui(Default::default(), |ui| {
+            show_left_panel(&mut app, ui);
         });
 
         app.file_processor_mut().indexing_finished = true;
         app.file_processor_mut().indexing_finished_handled = false;
-        let _ = ctx.run(Default::default(), |ctx| {
-            show_left_panel(&mut app, ctx);
+        let _ = ctx.run_ui(Default::default(), |ui| {
+            show_left_panel(&mut app, ui);
         });
 
         assert!(app.file_processor().indexing_finished_handled);
@@ -336,14 +348,14 @@ mod tests {
         app.file_processor_mut().all_files = vec![lib_dir.join("doc.md")];
         app.layout_mut().left_panel_dirty = false;
 
-        let _ = ctx.run(Default::default(), |ctx| {
-            show_left_panel(&mut app, ctx);
+        let _ = ctx.run_ui(Default::default(), |ui| {
+            show_left_panel(&mut app, ui);
         });
         assert!(!app.layout().left_panel_dirty);
 
         app.layout_mut().left_panel_dirty = true;
-        let _ = ctx.run(Default::default(), |ctx| {
-            show_left_panel(&mut app, ctx);
+        let _ = ctx.run_ui(Default::default(), |ui| {
+            show_left_panel(&mut app, ui);
         });
         assert!(!app.layout().left_panel_dirty);
         assert!(app.layout().left_panel_width.is_some());
@@ -369,9 +381,9 @@ mod tests {
         app.file_processor_mut().indexing_finished_handled = false;
 
         let mut inside_available: f32 = 0.0;
-        let _ = ctx.run(Default::default(), |ctx| {
-            inside_available = ctx.available_rect().width();
-            show_left_panel(&mut app, ctx);
+        let _ = ctx.run_ui(Default::default(), |ui| {
+            inside_available = ui.ctx().viewport_rect().width();
+            show_left_panel(&mut app, ui);
         });
 
         let stored = app.layout().left_panel_width.expect("width should be set");

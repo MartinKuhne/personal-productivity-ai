@@ -1,4 +1,4 @@
-//! Background-logs viewer panel — category filter, text search, auto-scroll, and copy-to-clipboard.
+//! Background-logs viewer panel Ã¢â‚¬â€ category filter, text search, auto-scroll, and copy-to-clipboard.
 
 use crate::background::{BackgroundLogEntry, LogCategory};
 use crate::ui::FastMdApp;
@@ -68,7 +68,7 @@ pub fn show_background_logs_window(app: &mut FastMdApp, ctx: &egui::Context) {
                 ui.text_edit_singleline(&mut mgr.search_text);
 
                 ui.label("Category:");
-                egui::ComboBox::from_id_source("category_filter")
+                egui::ComboBox::from_id_salt("category_filter")
                     .selected_text(match mgr.filter_category {
                         Some(c) => c.to_string(),
                         None => "All".to_string(),
@@ -121,18 +121,20 @@ pub fn show_background_logs_window(app: &mut FastMdApp, ctx: &egui::Context) {
                 .show_rows(ui, row_height, logs.len(), |ui, row_range| {
                     for i in row_range {
                         let log = &logs[i];
-                        ui.horizontal(|ui| {
-                            ui.label(
-                                egui::RichText::new(
-                                    log.timestamp.format("%H:%M:%S%.3f").to_string(),
-                                )
-                                .color(egui::Color32::DARK_GRAY),
-                            );
-                            ui.label(
-                                egui::RichText::new(format!("[{}]", log.category))
-                                    .color(egui::Color32::LIGHT_BLUE),
-                            );
-                            ui.label(&log.message);
+                        ui.push_id(i, |ui| {
+                            ui.horizontal(|ui| {
+                                ui.label(
+                                    egui::RichText::new(
+                                        log.timestamp.format("%H:%M:%S%.3f").to_string(),
+                                    )
+                                    .color(egui::Color32::DARK_GRAY),
+                                );
+                                ui.label(
+                                    egui::RichText::new(format!("[{}]", log.category))
+                                        .color(egui::Color32::LIGHT_BLUE),
+                                );
+                                ui.label(&log.message);
+                            })
                         });
                     }
                 });
@@ -226,8 +228,8 @@ mod ui_tests {
         let mut app = create_test_app();
         app.background_manager.lock().unwrap().show_background_logs = false;
 
-        let _ = ctx.run(egui::RawInput::default(), |ctx| {
-            show_background_logs_window(&mut app, ctx);
+        let _ = ctx.run_ui(egui::RawInput::default(), |ui| {
+            show_background_logs_window(&mut app, ui.ctx());
         });
         assert!(!app.background_manager.lock().unwrap().show_background_logs);
     }
@@ -250,8 +252,8 @@ mod ui_tests {
             ));
         }
 
-        let _ = ctx.run(egui::RawInput::default(), |ctx| {
-            show_background_logs_window(&mut app, ctx);
+        let _ = ctx.run_ui(egui::RawInput::default(), |ui| {
+            show_background_logs_window(&mut app, ui.ctx());
         });
         assert!(app.background_manager.lock().unwrap().show_background_logs);
     }

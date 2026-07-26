@@ -148,10 +148,14 @@ impl EditorState {
         // rest of the dark-themed app. We start from the default window
         // frame (so margins / rounding / shadow match the platform look)
         // and override fill + stroke so the editor clearly stands out.
+        //
+        // egui 0.35 removed `Context::style`; use `style_of(Theme)` to
+        // retrieve the style that `Frame::window` expects.
+        let style = ctx.style_of(egui::Theme::Dark);
         let editor_frame = egui::Frame {
             fill: colors.background,
             stroke: egui::Stroke::new(1.0_f32, colors.border),
-            ..egui::Frame::window(&ctx.style())
+            ..egui::Frame::window(&style)
         };
 
         egui::Window::new("Inline Editor")
@@ -190,7 +194,7 @@ impl EditorState {
                     page_scroll = (avail - button_bar) * 0.9;
                 }
                 egui::ScrollArea::vertical()
-                    .id_source("inline_editor_scroll")
+                    .id_salt("inline_editor_scroll")
                     .max_height(avail - button_bar)
                     .show(ui, |ui| {
                         if page_scroll != 0.0 {
@@ -209,18 +213,27 @@ impl EditorState {
                         v.widgets.active.bg_fill = extreme_bg;
                         v.widgets.open.bg_fill = extreme_bg;
 
+                        // egui 0.35: `TextEdit::frame(bool)` was replaced
+                        // with `.frame(Frame)` (use `Frame::NONE` to keep
+                        // the previous `false` behaviour, or build a
+                        // custom frame). We want the editor's bordered
+                        // surface, so pass `Frame::NONE` here and let the
+                        // window frame own the visible border.
                         let text_edit = egui::TextEdit::multiline(&mut self.content)
                             .font(egui::TextStyle::Monospace)
                             .code_editor()
                             .desired_width(f32::INFINITY)
                             .lock_focus(true)
                             .text_color(colors.text)
-                            .frame(true);
+                            .frame(egui::Frame::NONE);
 
                         let output = text_edit.show(ui);
 
                         if let Some(cursor_range) = output.cursor_range {
-                            let cursor_char_idx = cursor_range.primary.ccursor.index;
+                            // egui 0.35: `CCursor` no longer has a
+                            // `ccursor` field â€” the cursor itself IS the
+                            // `CCursor`, with `index: CharIndex(usize)`.
+                            let cursor_char_idx = cursor_range.primary.index.0;
                             let byte_idx = self
                                 .content
                                 .char_indices()
@@ -276,7 +289,7 @@ mod tests {
     use tempfile::tempdir;
 
     /// A producer that publishes to a throwaway bus. Editor tests
-    /// don't need to consume the events — they only care about the
+    /// don't need to consume the events â€” they only care about the
     /// file I/O outcome.
     fn noop_producer() -> FileEventProducer<'static> {
         let bus: &'static Bus<crate::file_events::FileEvent> = Box::leak(Box::new(Bus::new()));
@@ -471,7 +484,7 @@ mod tests {
         // REQ-261 can't be visually asserted without a running egui
         // context (which needs fonts initialised via `Context::run`),
         // but we can at least prove the explicit-palette entry point
-        // is hooked up and short-circuits when the editor isn't open —
+        // is hooked up and short-circuits when the editor isn't open â€”
         // just like the legacy `show` method does.
         let mut state = EditorState::default();
         let ctx = egui::Context::default();

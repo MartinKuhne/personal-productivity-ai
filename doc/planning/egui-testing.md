@@ -19,6 +19,8 @@ Concretely:
 
 The pattern is also **not what egui itself recommends for 2024+**. The community-standard tool is `egui_kittest`, which provides a `Harness` that simulates events, captures pixels, and supports snapshot tests — without needing `Context::run` boilerplate.
 
+> **2026-07-25 update:** The project has been upgraded to **`eframe = "0.35"`** (from 0.27). That means the `egui_kittest` blocker described throughout this doc is no longer in effect — `egui_kittest 0.35` is available and matches the upgraded egui. The recommended rollout below should now proceed; see the [Current Status](#current-status) table for the up-to-date per-item status.
+
 ---
 
 # Best Practices: The egui Test Pyramid
@@ -161,12 +163,12 @@ Add to `src/desktop/Cargo.toml`:
 ```toml
 [dev-dependencies]
 # ... existing ...
-egui_kittest = { version = "0.27", features = ["eframe", "snapshot"] }
+egui_kittest = { version = "0.35", features = ["eframe", "snapshot"] }
 insta = { version = "1.40", features = ["png"] }
 proptest = "1.4"  # for property-based tests on the parser
 ```
 
-- `egui_kittest` 0.27 is the matching version for `eframe = "0.27"`. The `eframe` feature pulls in the harness; the `snapshot` feature adds the `snapshot()` API.
+- `egui_kittest` 0.35 is the matching version for `eframe = "0.35"`. The `eframe` feature pulls in the harness; the `snapshot` feature adds the `snapshot()` API.
 - `insta` is the snapshot file format used by `egui_kittest`'s snapshot feature. PNG output is needed for visual regression.
 - `proptest` shrinks random inputs that find a bug, producing a minimal failing case. The current `test_parse_markdown_fuzz_property` is a hand-rolled version of this and should be replaced.
 
@@ -503,23 +505,44 @@ The proptest from P0-3 (no panic, well-formed output, level ∈ 1..=6, rectangul
 
 ---
 
+## Q7 — Test-relevant changes from the egui 0.27 → 0.35 upgrade (2026-07-25)
+
+The `upgrade/egui-0.35` branch lands eight minor versions of `egui`/`eframe` in one shot. A few of those changes are visible at the test layer and worth recording so the next person touching tests knows what to expect:
+
+| API (0.27) | API (0.35) | Migration in test code |
+|-------------|------------|-------------------------|
+| `ctx.run(RawInput, \|ctx\| { ... })` | `ctx.run_ui(RawInput, \|ui\| { ... })` | The closure now takes `&mut Ui`, not `&Context`. Every `Context::run` call site (≈40) was renamed to `Context::run_ui` and the parameter was renamed `ui`. `CentralPanel::default().show(ctx, …)` became `CentralPanel::default().show(ui, …)` (panels allocate from a parent `Ui` now). |
+| `PlatformOutput::copied_text` | `PlatformOutput::commands: Vec<OutputCommand>` (`CopyText(_)`) | `ctx.output(\|o\| o.copied_text.clone())` no longer compiles. The replacement reads from the **`FullOutput` returned by `ctx.run_ui`**, not from the live `ctx.output` (which is reset between frames). See `commands_capture` in `src/ui/render.rs:2145` for the helper. |
+| `PlatformOutput::open_url` | `OutputCommand::OpenUrl(_)` | Same shift; see the hyperlink smoke test for the pattern. |
+| `ComboBox::from_id_source(…)` | `ComboBox::from_id_salt(…)` | Mechanical rename in the integration tests. |
+| `ScrollArea::id_source(…)` | `ScrollArea::id_salt(…)` | Same. |
+| `Label::wrap(bool)` | `Label::wrap()` / `wrap_mode(…)` | `tests/table_layout_test.rs:150` flipped from `.wrap(true)` to `.wrap()`. |
+| `ui.child_ui(rect, layout)` | `ui.new_child(UiBuilder::new().max_rect(rect).layout(layout))` | `tests/table_layout_test.rs:145`. |
+| `Context::style()` | `Context::style_of(Theme)` | Only one call site (`editor.rs`); fixed in the upgrade commit. |
+
+**Why this matters for `egui_kittest` migration:** the harness API itself is stable across the upgrade — `Harness::new_ui`, `Harness::builder`, `harness.get_by_label`, `harness.run`, `harness.output` all have the same shape in 0.35 as in 0.31. So the test bodies you write with the harness do **not** need to absorb these 0.27→0.35 renames — only the existing `Context::run_ui(...)` smoke tests do. When converting a smoke test to a `Harness` test, the body becomes the same widget call, but the boilerplate around it shrinks to two lines instead of five.
+
+**Recorded here so future-me doesn't re-litigate this.**
+
+---
+
 # Current Status (as of 2026-07-25)
 
 The `tdd/high-value-defects` branch has been implementing this proposal in passes. Status by item:
 
 | Item | Status | Notes |
 |------|--------|-------|
-| P0-1 (visual regression) | **Blocked** | Requires `egui_kittest` (egui 0.31+); project is on eframe 0.27. See "Open Question 7" below. |
-| P0-2 (interaction coverage) | **Partial** | Tier 2 smoke tests + Tier 1 side-effect tests added for copy-code, hyperlink, task-list checkbox. Tier 4 click → output is `#[ignore]`d pending `egui_kittest`. |
+| P0-1 (visual regression) | **Unblocked** | `eframe` upgraded to 0.35 on the `upgrade/egui-0.35` branch (commit `0b6d643`). `egui_kittest = 0.35` matches; add to dev-deps and start writing snapshot tests for FTWA table, full markdown, modal. The §3.6-fallback snapshot in P2-2 is now actionable. |
+| P0-2 (interaction coverage) | **Partial** | Tier 2 smoke tests + Tier 1 side-effect tests added for copy-code, hyperlink, task-list checkbox. Tier 4 click → output is still `#[ignore]`d; un-ignore in the first `egui_kittest` PR. |
 | P0-3 (proptest replacement) | **Done** | `test_parse_markdown_fuzz_property` replaced with a real proptest (64 cases, structural asserts). |
-| P1-1 (40+ `Context::run` blocks) | **Resolved by Q1** | Incremental per-file migration; no helper introduced. |
+| P1-1 (40+ `Context::run` blocks) | **Shape-changed, not yet migrated** | The 0.27→0.35 upgrade renamed `ctx.run(input, \|ctx\| ...)` to `ctx.run_ui(input, \|ui\| ...)` (closure now receives `&mut Ui`); the count is still ~40, just uniform. Q1's "incremental per-file migration to `Harness`" plan still applies — pick it up the next time a UI file is touched. |
 | P1-2 (eprintln! in tests) | **Done** | Replaced with real assertions in `test_ftwa_measure_user_table`. |
 | P1-3 (`render_tests.rs` duplicates) | **Done** | File deleted; build_toc tests consolidated in `render.rs`, GFM option tests moved to `tests/pulldown_config.rs` as behavior-based checks. |
 | P1-4 (indexed event assertions) | **Done** | `test_parse_markdown_to_events` and `test_parse_markdown_heading_levels` refactored to `iter().find()`/`.any()`. |
 | P2-1 (FTWA edge cases) | **Done** | Tests added for NaN, +∞/−∞, `max < min` invariant, single-column, 1000-column stress, plus the 6-permutation matrix. |
-| P2-2 (table layout stress) | **Done** | 6 FTWA permutation tests + 5 integration tests with deterministic `screen_rect`. The §3.6-fallback snapshot is blocked by `egui_kittest`. |
+| P2-2 (table layout stress) | **Done** | 6 FTWA permutation tests + 5 integration tests with deterministic `screen_rect`. The §3.6-fallback snapshot is **now actionable** (P0-1 unblocked). |
 | P2-3 (doc tests for public API) | **Done** | Doc tests for `parse_markdown_to_events`, `build_toc`, `parse_yaml_to_pairs`, `DocumentContent::parse`, and `parse_front_matter`. `ftwa` omitted because `ui::table_width` is intentionally private. |
-| P3-1 (CI integration of snapshots) | **N/A** | No snapshots exist (P0-1 blocked). The CI workflow already runs `cargo test` which includes doc tests. |
+| P3-1 (CI integration of snapshots) | **Next** | Add `egui_kittest` to dev-deps on a fresh branch; commit initial snapshots; enable snapshot review in CI. |
 | P3-2 (mutation testing) | **Deferred** | Per the original proposal's explicit deferral. |
 | P3-3 (fuzz harness) | **Deferred** | Per the original proposal's explicit deferral. |
 
@@ -538,9 +561,12 @@ Side catches (not in the original proposal but surfaced during TDD work):
 4. ~~Where do Tier 4 interaction tests for `FastMdApp` itself live?~~ — **resolved by Q4 (defer until motivated).**
 5. ~~Is `RenderEvent::to_markdown()` in scope?~~ — **resolved (dropped, rationale above).**
 6. ~~What do we do with the pulldown-cmark option tests?~~ — **resolved by Q6 (moved to `tests/pulldown_config.rs` as behavior-based checks).**
-7. **The `egui_kittest` blocker.** P0-1 (visual regression) and P0-2 (Tier 4 interaction) both require `egui_kittest::Harness`, which is published only for egui 0.31+. The project is on `eframe = "0.27"` (pulling in egui 0.27). Options:
-   - **Upgrade eframe to 0.31+.** Touches every `eframe` / `egui` import across the desktop codebase; risk surface is large but the win is access to the full Tier 3 + Tier 4 toolkit. Estimated effort: 2–4 days of mechanical porting + testing.
-   - **Stay on 0.27 and live with Tier 2 + Tier 1 coverage.** Acceptable for now: the 3 click handlers in `render.rs` have `#[ignore]`'d Tier 4 tests that document the expected migration path. When the upgrade lands, un-ignore them and they exercise the same code.
-   - **Third-party headless harness for egui 0.27.** A quick survey didn't surface one; the egui 0.27 ecosystem predates the `egui_kittest` work. Not recommended.
+7. ~~The `egui_kittest` blocker.~~ — **resolved by the egui 0.27→0.35 upgrade (commit `0b6d643` on `upgrade/egui-0.35`).** The project is now on `eframe = "0.35"`, which matches `egui_kittest = "0.35"`. The blocker that gated P0-1 (visual regression) and the Tier 4 half of P0-2 (interaction) is gone.
 
-   Recommendation: stay on 0.27, accept Tier 2 + Tier 1 coverage for now, and un-ignore the Tier 4 tests in a dedicated upgrade PR.
+   **Next step (separate PR, after the upgrade lands on `main`):**
+   1. Add `egui_kittest = { version = "0.35", features = ["eframe", "snapshot"] }` and `insta = { version = "1.40", features = ["png"] }` to `[dev-dependencies]`.
+   2. Convert one or two of the `#[ignore]`'d Tier 4 tests in `render.rs` to `Harness::new_ui` + `harness.get_by_label(...).click()` and un-ignore them. Use those as the template for the rest.
+   3. Add 3–4 Tier 3 snapshot tests (FTWA 6-col table, full markdown document, the move-file modal, the §3.6-fallback `ScrollArea`). Commit the resulting `.png` files under `src/desktop/tests/snapshots/`.
+   4. Enable snapshot review in CI (per Q3, the 5px threshold is set per-harness, not per-platform; no `#[cfg(target_os)]`).
+
+   The `Context::run` / `Context::run_ui` helper from §A remains unnecessary — the harness is the abstraction. The ~40 existing smoke tests can keep their current shape (now uniform at `ctx.run_ui(...)`) until they're touched for another reason, per Q1.

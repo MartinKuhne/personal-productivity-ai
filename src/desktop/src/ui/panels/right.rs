@@ -1,8 +1,9 @@
-//! Right table-of-contents panel — clickable heading entries with level-based indentation and font sizing.
+//! Right table-of-contents panel Ã¢â‚¬â€ clickable heading entries with level-based indentation and font sizing.
 
 use crate::ui::FastMdApp;
 use eframe::egui;
 use egui::RichText;
+use egui::containers::Panel;
 
 /// Determines if the right panel should be shown based on application state.
 /// Precondition: None.
@@ -18,12 +19,12 @@ pub fn should_show_panel(has_toc: bool, has_selected_file: bool) -> bool {
 /// Purity: Pure function.
 pub fn calculate_indent(level: usize) -> f32 {
     match level {
-        1 => 0.0,
-        2 => 10.0,
-        3 => 20.0,
-        4 => 30.0,
-        5 => 40.0,
-        6 => 50.0,
+        1 => 4.0,
+        2 => 14.0,
+        3 => 24.0,
+        4 => 34.0,
+        5 => 44.0,
+        6 => 54.0,
         _ => 0.0,
     }
 }
@@ -36,15 +37,18 @@ pub fn calculate_font_size(level: usize) -> f32 {
     13.0 - (level as f32 * 0.5)
 }
 
-pub fn show_right_panel(app: &mut FastMdApp, ctx: &egui::Context) {
+pub fn show_right_panel(app: &mut FastMdApp, parent_ui: &mut egui::Ui) {
     if should_show_panel(
         !app.tabs().toc.is_empty(),
         app.selection().selected_file().is_some(),
     ) {
-        egui::SidePanel::right("toc_panel")
-            .width_range(150.0..=250.0)
+        // egui 0.35 unified `SidePanel`/`TopBottomPanel` into `Panel`,
+        // and panels now allocate within a parent `&mut Ui`.
+        // `width_range` is now `size_range`.
+        Panel::right("toc_panel")
+            .size_range(150.0..=250.0)
             .resizable(true)
-            .show(ctx, |ui| {
+            .show(parent_ui, |ui| {
                 ui.add_space(4.0);
                 ui.heading(
                     RichText::new("Table of Contents")
@@ -55,18 +59,20 @@ pub fn show_right_panel(app: &mut FastMdApp, ctx: &egui::Context) {
                 ui.add_space(4.0);
 
                 egui::ScrollArea::vertical()
-                    .id_source("right_toc_scroll")
+                    .id_salt("right_toc_scroll")
                     .show(ui, |ui| {
                         let toc_snapshot = app.tab_manager.toc.clone();
                         for entry in &toc_snapshot {
                             let indent = calculate_indent(entry.level as usize);
-                            ui.horizontal(|ui| {
-                                ui.add_space(indent);
-                                let label = egui::RichText::new(&entry.title)
-                                    .size(calculate_font_size(entry.level as usize));
-                                if ui.selectable_label(false, label).clicked() {
-                                    app.tab_manager.scroll_to_header_id = Some(entry.id.clone());
-                                }
+                            ui.push_id(entry.id, |ui| {
+                                ui.horizontal(|ui| {
+                                    ui.add_space(indent);
+                                    let label = egui::RichText::new(&entry.title)
+                                        .size(calculate_font_size(entry.level as usize));
+                                    if ui.selectable_label(false, label).clicked() {
+                                        app.tab_manager.scroll_to_header_id = Some(entry.id);
+                                    }
+                                })
                             });
                         }
                     });
@@ -88,12 +94,12 @@ mod tests {
 
     #[test]
     fn test_calculate_indent() {
-        assert_eq!(calculate_indent(1), 0.0);
-        assert_eq!(calculate_indent(2), 10.0);
-        assert_eq!(calculate_indent(3), 20.0);
-        assert_eq!(calculate_indent(4), 30.0);
-        assert_eq!(calculate_indent(5), 40.0);
-        assert_eq!(calculate_indent(6), 50.0);
+        assert_eq!(calculate_indent(1), 4.0);
+        assert_eq!(calculate_indent(2), 14.0);
+        assert_eq!(calculate_indent(3), 24.0);
+        assert_eq!(calculate_indent(4), 34.0);
+        assert_eq!(calculate_indent(5), 44.0);
+        assert_eq!(calculate_indent(6), 54.0);
         assert_eq!(calculate_indent(99), 0.0); // Edge case
     }
 
@@ -132,8 +138,8 @@ mod ui_tests {
         });
         *app.selection_mut().selected_file_mut() = None;
 
-        let _ = ctx.run(egui::RawInput::default(), |ctx| {
-            show_right_panel(&mut app, ctx);
+        let _ = ctx.run_ui(egui::RawInput::default(), |ui| {
+            show_right_panel(&mut app, ui);
         });
     }
 
@@ -153,8 +159,8 @@ mod ui_tests {
         });
         *app.selection_mut().selected_file_mut() = Some(PathBuf::from("doc.md"));
 
-        let _ = ctx.run(egui::RawInput::default(), |ctx| {
-            show_right_panel(&mut app, ctx);
+        let _ = ctx.run_ui(egui::RawInput::default(), |ui| {
+            show_right_panel(&mut app, ui);
         });
     }
 }

@@ -1,4 +1,4 @@
-//! Batch prompt-processing dialog UI — directory/prompt/concurrency selection, progress display, and results summary.
+//! Batch prompt-processing dialog UI Ã¢â‚¬â€ directory/prompt/concurrency selection, progress display, and results summary.
 
 use crate::batch::types::{
     BatchConfig, BatchDialogConfig, BatchDialogResult, BatchMode, validate_batch_params,
@@ -60,7 +60,7 @@ fn show_config_view(
     // Directory selector
     ui.horizontal(|ui| {
         ui.label("Directory:");
-        egui::ComboBox::from_id_source("batch_dir_combo")
+        egui::ComboBox::from_id_salt("batch_dir_combo")
             .selected_text(
                 config
                     .selected_dir_idx
@@ -92,7 +92,7 @@ fn show_config_view(
     // Prompt selector
     ui.horizontal(|ui| {
         ui.label("Prompt:");
-        egui::ComboBox::from_id_source("batch_prompt_combo")
+        egui::ComboBox::from_id_salt("batch_prompt_combo")
             .selected_text(
                 config
                     .selected_prompt_idx
@@ -125,7 +125,7 @@ fn show_config_view(
     // Concurrency selector
     ui.horizontal(|ui| {
         ui.label("Concurrency:");
-        egui::ComboBox::from_id_source("batch_concurrency_combo")
+        egui::ComboBox::from_id_salt("batch_concurrency_combo")
             .selected_text(config.concurrency.to_string())
             .show_ui(ui, |ui| {
                 for n in 1..=8 {

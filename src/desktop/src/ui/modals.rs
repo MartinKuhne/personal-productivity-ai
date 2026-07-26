@@ -1,4 +1,4 @@
-//! Modal dialog UIs — move-file, create-directory, rename, delete confirmation, and batch prompt-processing dialogs.
+//! Modal dialog UIs Ã¢â‚¬â€ move-file, create-directory, rename, delete confirmation, and batch prompt-processing dialogs.
 
 use crate::config::ContentLibrary;
 use crate::file_events::{Bus, FileEventProducer};
@@ -37,7 +37,7 @@ pub fn show_move_modal_dialog(
                 }
 
                 egui::ScrollArea::vertical()
-                    .id_source("move_modal_folder_scroll")
+                    .id_salt("move_modal_folder_scroll")
                     .max_height(200.0)
                     .show(ui, |ui| {
                         for folder in folders {
@@ -303,13 +303,13 @@ mod tests {
         app.file_processor.all_dirs.push(dest_dir.clone());
         app.dialogs.selected_move_folder = Some(dest_dir.clone());
 
-        let _ = ctx.run(Default::default(), |ctx| {
+        let _ = ctx.run_ui(Default::default(), |ui| {
             show_move_modal_dialog(
                 &mut app.dialogs,
                 &app.content_libraries,
                 &app.file_processor,
                 &app.file_event_bus,
-                ctx,
+                ui.ctx(),
             );
         });
 
@@ -340,26 +340,26 @@ mod tests {
         app.dialogs.create_dir_parent = Some(temp_dir.clone());
         app.dialogs.create_dir_name = "subfolder".to_string();
 
-        let _ = ctx.run(Default::default(), |ctx| {
+        let _ = ctx.run_ui(Default::default(), |ui| {
             show_create_dir_dialog(
                 &mut app.dialogs,
                 &mut app.file_processor,
                 &mut watcher,
                 &app.file_event_bus,
-                ctx,
+                ui.ctx(),
             );
         });
 
         assert!(app.dialogs.create_dir_dialog_open);
 
         app.dialogs.create_dir_name = "../invalid_traversal".to_string();
-        let _ = ctx.run(Default::default(), |ctx| {
+        let _ = ctx.run_ui(Default::default(), |ui| {
             show_create_dir_dialog(
                 &mut app.dialogs,
                 &mut app.file_processor,
                 &mut watcher,
                 &app.file_event_bus,
-                ctx,
+                ui.ctx(),
             );
         });
 
@@ -400,7 +400,7 @@ mod tests {
         *app.selection.selected_file_mut() = Some(file_path.clone());
         app.tab_manager.tabs = vec![file_path.clone()];
 
-        let _ = ctx.run(Default::default(), |ctx| {
+        let _ = ctx.run_ui(Default::default(), |ui| {
             let sel = &mut app.selection;
             show_rename_dialog(
                 &mut app.dialogs,
@@ -412,14 +412,14 @@ mod tests {
                 &mut app.file_processor,
                 &mut app.tag_manager,
                 &mut sel.expanded_dirs,
-                ctx,
+                ui.ctx(),
             );
         });
 
         assert!(app.dialogs.rename_dialog_open);
 
         app.dialogs.rename_new_name = "invalid/name".to_string();
-        let _ = ctx.run(Default::default(), |ctx| {
+        let _ = ctx.run_ui(Default::default(), |ui| {
             let sel = &mut app.selection;
             show_rename_dialog(
                 &mut app.dialogs,
@@ -431,7 +431,7 @@ mod tests {
                 &mut app.file_processor,
                 &mut app.tag_manager,
                 &mut sel.expanded_dirs,
-                ctx,
+                ui.ctx(),
             );
         });
 
@@ -453,7 +453,7 @@ mod tests {
         app.dialogs.file_to_rename = Some(md_file.clone());
         app.dialogs.rename_new_name = "renamed_doc".to_string();
 
-        let _ = ctx.run(Default::default(), |ctx| {
+        let _ = ctx.run_ui(Default::default(), |ui| {
             let sel = &mut app.selection;
             show_rename_dialog(
                 &mut app.dialogs,
@@ -465,7 +465,7 @@ mod tests {
                 &mut app.file_processor,
                 &mut app.tag_manager,
                 &mut sel.expanded_dirs,
-                ctx,
+                ui.ctx(),
             );
         });
 

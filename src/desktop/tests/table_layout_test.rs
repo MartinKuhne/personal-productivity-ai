@@ -3,21 +3,21 @@ mod tests {
     use eframe::egui;
 
     /// Probe the egui Grid bug: `set_width` + `horizontal_wrapped` produces
-    /// content wrapped at ~40 px (the Grid's initial column allocation) instead
+    /// content wrapped at ~40Ã¢â‚¬Â¯px (the Grid's initial column allocation) instead
     /// of the assigned column width.
     #[test]
     fn old_bug_set_width_ignored() {
         let ctx = egui::Context::default();
-        let _ = ctx.run(egui::RawInput::default(), |ctx| {
-            egui::CentralPanel::default().show(ctx, |ui| {
+        let _ = ctx.run_ui(egui::RawInput::default(), |ui| {
+            egui::CentralPanel::default().show(ui, |ui| {
                 egui::Grid::new("bug_grid")
                     .striped(true)
                     .spacing([10.0, 4.0])
                     .show(ui, |ui| {
-                        // Row1 C0 — set_width(100) + horizontal_wrapped
+                        // Row1 C0 Ã¢â‚¬â€ set_width(100) + horizontal_wrapped
                         ui.set_width(100.0);
                         let hw = ui.horizontal_wrapped(|ui| {
-                            ui.add(egui::Label::new("Short").wrap(true));
+                            ui.add(egui::Label::new("Short").wrap());
                         });
                         // response_rect width should be ~40 (wrapped at Grid default column allocation)
                         dbg!(hw.response.rect.width());
@@ -27,7 +27,7 @@ mod tests {
                         let hw2 = ui.horizontal_wrapped(|ui| {
                             ui.add(
                                 egui::Label::new("Much longer text here for wrapping testing")
-                                    .wrap(true),
+                                    .wrap(),
                             );
                         });
                         dbg!(hw2.response.rect.width());
@@ -37,7 +37,7 @@ mod tests {
                         // Row2 C0
                         ui.set_width(100.0);
                         let hw3 = ui.horizontal_wrapped(|ui| {
-                            ui.add(egui::Label::new("Another").wrap(true));
+                            ui.add(egui::Label::new("Another").wrap());
                         });
                         dbg!(hw3.response.rect.width());
                     });
@@ -92,24 +92,24 @@ mod tests {
         for iteration in 0..20 {
             let mut rng = SimpleRng::new(SEED.wrapping_add(iteration as u64));
 
-            let _ = ctx.run(egui::RawInput::default(), |ctx| {
-                egui::CentralPanel::default().show(ctx, |ui| {
+            let _ = ctx.run_ui(egui::RawInput::default(), |ui| {
+                egui::CentralPanel::default().show(ui, |ui| {
                     let col_w = rng.gen_f32(80.0, 400.0);
 
                     egui::Grid::new(("fix_random_grid", iteration))
                         .striped(true)
                         .spacing([10.0, 4.0])
                         .show(ui, |ui| {
-                            // Long text — phrase count proportional to column width
+                            // Long text Ã¢â‚¬â€ phrase count proportional to column width
                             let phrase_count = (col_w / 45.0).ceil() as usize + 8;
                             let long_text = rng.gen_long_text(phrase_count, col_w);
                             let (rect, _) = ui
                                 .allocate_at_least(egui::vec2(col_w, 0.0), egui::Sense::hover());
                             let layout = egui::Layout::left_to_right(egui::Align::Min)
                                 .with_main_wrap(true);
-                            let mut child_ui = ui.child_ui(rect, layout);
+                            let mut child_ui = ui.new_child(egui::UiBuilder::new().max_rect(rect).layout(layout));
                             let r = child_ui.horizontal_wrapped(|ui| {
-                                ui.add(egui::Label::new(long_text).wrap(true));
+                                ui.add(egui::Label::new(long_text).wrap());
                             });
                             // Content should be wider than the Grid's ~40px default,
                             // and at least half of col_w (accounting for word-width granularity)
@@ -125,9 +125,9 @@ mod tests {
                                 .allocate_at_least(egui::vec2(col_w, 0.0), egui::Sense::hover());
                             let layout = egui::Layout::left_to_right(egui::Align::Min)
                                 .with_main_wrap(true);
-                            let mut child_ui2 = ui.child_ui(rect, layout);
+                            let mut child_ui2 = ui.new_child(egui::UiBuilder::new().max_rect(rect).layout(layout));
                             let r2 = child_ui2.horizontal_wrapped(|ui| {
-                                ui.add(egui::Label::new(short_text).wrap(true));
+                                ui.add(egui::Label::new(short_text).wrap());
                             });
                             let w2 = r2.response.rect.width();
                             assert!(
@@ -137,17 +137,17 @@ mod tests {
 
                             ui.end_row();
 
-                            // Second row — reuses column; wraps correctly again
+                            // Second row Ã¢â‚¬â€ reuses column; wraps correctly again
                             let (rect, _) = ui
                                 .allocate_at_least(egui::vec2(col_w, 0.0), egui::Sense::hover());
                             let layout = egui::Layout::left_to_right(egui::Align::Min)
                                 .with_main_wrap(true);
-                            let mut child_ui3 = ui.child_ui(rect, layout);
+                            let mut child_ui3 = ui.new_child(egui::UiBuilder::new().max_rect(rect).layout(layout));
                             let row2_phrases = (col_w / 45.0).ceil() as usize + 5;
                             let r3 = child_ui3.horizontal_wrapped(|ui| {
                                 ui.add(
                                     egui::Label::new(rng.gen_long_text(row2_phrases, col_w))
-                                        .wrap(true),
+                                        .wrap(),
                                 );
                             });
                             let w3 = r3.response.rect.width();

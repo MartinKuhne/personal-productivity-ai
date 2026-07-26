@@ -1,4 +1,4 @@
-//! Root egui `App` struct — owns all application state and wires together background tasks, panels, agent, and dialogs.
+//! Root egui `App` struct Ã¢â‚¬â€ owns all application state and wires together background tasks, panels, agent, and dialogs.
 
 use crate::agent::AgentSessionManager;
 use crate::background::{BackgroundProcessManager, SharedProcessManager};
@@ -270,23 +270,59 @@ impl FastMdApp {
             .unwrap_or(false)
     }
 
-    pub fn new(cc: &eframe::CreationContext<'_>, mut config: crate::config::AppConfig) -> Self {
+    /// Purpose: Pin the egui context to the dark theme with the FastMD brand
+    /// palette (RGB(9, 9, 11) surfaces, indigo selection, 8px window corners,
+    /// 4px widget corners, bright off-white text).
+    /// Inputs: `ctx` - The egui context whose theme is to be configured.
+    /// Outputs: None.
+    /// Purity: Impure (mutates the egui context's options).
+    /// Preconditions: `ctx` is a valid egui context.
+    /// Postconditions: The dark theme is the active theme, and the dark
+    /// theme's visuals match the FastMD palette so REQ-102 (dark color
+    /// scheme) holds even if the system preference reports light mode.
+    ///
+    /// egui 0.35 split the global style into a Dark and a Light theme,
+    /// picked at runtime by `ThemePreference` (default `System`).
+    /// `set_visuals` writes to the *currently active* theme only, so on
+    /// systems that report a light-mode preference the next frame can
+    /// flip the active theme back to the default light visuals and the
+    /// carefully tuned dark background is lost. Forcing the dark theme
+    /// and applying the visuals to the dark theme explicitly makes the
+    /// dark color scheme the source of truth.
+    pub fn configure_dark_theme(ctx: &egui::Context) {
+        ctx.set_theme(egui::Theme::Dark);
+
         let mut visuals = egui::Visuals::dark();
         visuals.window_fill = egui::Color32::from_rgb(9, 9, 11);
         visuals.panel_fill = egui::Color32::from_rgb(9, 9, 11);
         visuals.selection.bg_fill = egui::Color32::from_rgb(99, 102, 241);
-        visuals.window_rounding = 8.0.into();
-        visuals.widgets.noninteractive.rounding = 4.0.into();
-        visuals.widgets.inactive.rounding = 4.0.into();
-        visuals.widgets.hovered.rounding = 4.0.into();
-        visuals.widgets.active.rounding = 4.0.into();
+        visuals.window_corner_radius = 8.0.into();
+        visuals.widgets.noninteractive.corner_radius = 4.0.into();
+        visuals.widgets.inactive.corner_radius = 4.0.into();
+        visuals.widgets.hovered.corner_radius = 4.0.into();
+        visuals.widgets.active.corner_radius = 4.0.into();
 
         let bright_text = egui::Color32::from_gray(210);
         visuals.widgets.noninteractive.fg_stroke.color = bright_text;
         visuals.widgets.inactive.fg_stroke.color = bright_text;
         visuals.widgets.active.fg_stroke.color = egui::Color32::WHITE;
         visuals.widgets.hovered.fg_stroke.color = egui::Color32::WHITE;
-        cc.egui_ctx.set_visuals(visuals);
+
+        // Apply to the dark theme explicitly so the visuals persist
+        // even if the active theme ever flips to Light.
+        ctx.set_visuals_of(egui::Theme::Dark, visuals);
+    }
+
+    pub fn new(cc: &eframe::CreationContext<'_>, mut config: crate::config::AppConfig) -> Self {
+        // egui 0.35 split the global style into a Dark and a Light
+        // theme, picked at runtime by `ThemePreference` (default
+        // `System`). `set_visuals` writes to the *currently active*
+        // theme only, so on systems that report a light-mode
+        // preference the next frame can flip the active theme back
+        // to the default light visuals and the carefully tuned
+        // dark background is lost. Force the dark theme and apply
+        // our custom visuals to the dark theme explicitly.
+        Self::configure_dark_theme(&cc.egui_ctx);
 
         let args: Vec<String> = std::env::args().collect();
         if args.len() > 1 {
@@ -495,19 +531,33 @@ impl eframe::App for FastMdApp {
         }
     }
 
-    fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
-        self.update_ui(ctx);
+    fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
+        self.update_ui(ui);
     }
 }
 
 impl FastMdApp {
-    pub fn update_ui(&mut self, ctx: &egui::Context) {
+    /// Purpose: Drive one frame of the app.
+    /// Inputs: `ui` - The root [`egui::Ui`] supplied by eframe.
+    /// Outputs: None.
+    /// Purity: Impure (mutates `self`, paints to `ui`).
+    /// Preconditions: None.
+    /// Postconditions: The root view has been rendered for this frame.
+    ///
+    /// egui 0.35 changed `App::update` to `App::ui`, and the
+    /// `eframe::App` entry point now hands us a `&mut egui::Ui`
+    /// rather than a `&Context`. We use the inner `Ui` to draw
+    /// all panels, and pluck out the [`egui::Context`] for the
+    /// non-rendering bookkeeping (file-event drain, repaint
+    /// scheduling, etc).
+    pub fn update_ui(&mut self, ui: &mut egui::Ui) {
+        let ctx = ui.ctx();
         self.process_file_events_and_repaint(ctx);
         self.drain_background_channel();
         self.handle_file_selection(ctx);
         self.show_editor_overlay(ctx);
-        self.show_modals(ctx);
-        self.render_panels(ctx);
+        self.show_modals(ui);
+        self.render_panels(ui);
         self.handle_deferred_actions();
     }
 
@@ -619,7 +669,12 @@ impl FastMdApp {
         }
     }
 
-    fn show_modals(&mut self, ctx: &egui::Context) {
+    fn show_modals(&mut self, parent_ui: &mut egui::Ui) {
+        // egui 0.35: modal dialogs are still rendered through
+        // `egui::Window`, which can take the context directly. We
+        // pull the `Context` off the root `Ui` so the existing
+        // `show_*_modal` helpers (which take `&Context`) keep working.
+        let ctx = parent_ui.ctx();
         if self.dialogs.move_dialog_open {
             crate::ui::modals::show_move_modal_dialog(
                 &mut self.dialogs,
@@ -703,12 +758,16 @@ impl FastMdApp {
         }
     }
 
-    fn render_panels(&mut self, ctx: &egui::Context) {
-        show_top_panel(self, ctx);
-        show_bottom_panel(self, ctx);
-        show_right_panel(self, ctx);
-        show_left_panel(self, ctx);
-        show_center_panel(self, ctx);
+    fn render_panels(&mut self, parent_ui: &mut egui::Ui) {
+        // egui 0.35: each `*Panel` allocates itself from a parent
+        // `&mut Ui`; pass the root `Ui` from `App::ui` straight
+        // through. The order is preserved from 0.27: top Ã¢â€ â€™ bottom Ã¢â€ â€™
+        // right Ã¢â€ â€™ left Ã¢â€ â€™ center.
+        show_top_panel(self, parent_ui);
+        show_bottom_panel(self, parent_ui);
+        show_right_panel(self, parent_ui);
+        show_left_panel(self, parent_ui);
+        show_center_panel(self, parent_ui);
     }
 
     fn handle_deferred_actions(&mut self) {
@@ -736,6 +795,52 @@ mod tests {
 
     fn create_test_app() -> FastMdApp {
         FastMdApp::empty_state(crate::config::AppConfig::default())
+    }
+
+    /// REQ-102 (dark color scheme): `configure_dark_theme` must pin the
+    /// active theme to Dark and apply the FastMD brand palette
+    /// (RGB(9, 9, 11) surface, indigo selection) to the dark theme.
+    /// Regression guard: the egui 0.27 → 0.35 upgrade silently fell
+    /// back to the active theme's default visuals on systems reporting
+    /// light mode, losing the black background.
+    #[test]
+    fn test_configure_dark_theme_pins_dark_with_brand_palette() {
+        let ctx = egui::Context::default();
+
+        // First, flip the active theme to Light to simulate a host
+        // that reports light mode as a preference. The fix must hold
+        // even in that case.
+        ctx.set_theme(egui::Theme::Light);
+        assert_eq!(ctx.theme(), egui::Theme::Light);
+
+        FastMdApp::configure_dark_theme(&ctx);
+
+        // Theme is forced to Dark regardless of the prior preference.
+        assert_eq!(
+            ctx.theme(),
+            egui::Theme::Dark,
+            "configure_dark_theme must force the active theme to Dark"
+        );
+
+        // The dark theme's visuals are the FastMD brand palette,
+        // not the default `Visuals::dark()` (which is RGB(27, 27, 27)
+        // for both window_fill and panel_fill).
+        let dark_visuals = ctx.style_of(egui::Theme::Dark).visuals.clone();
+        let expected_panel = egui::Color32::from_rgb(9, 9, 11);
+        let expected_window = egui::Color32::from_rgb(9, 9, 11);
+        assert_eq!(
+            dark_visuals.panel_fill, expected_panel,
+            "dark theme's panel_fill must be the FastMD brand RGB(9, 9, 11)"
+        );
+        assert_eq!(
+            dark_visuals.window_fill, expected_window,
+            "dark theme's window_fill must be the FastMD brand RGB(9, 9, 11)"
+        );
+        assert_eq!(
+            dark_visuals.selection.bg_fill,
+            egui::Color32::from_rgb(99, 102, 241),
+            "selection.bg_fill must be the FastMD indigo RGB(99, 102, 241)"
+        );
     }
 
     #[test]
@@ -805,8 +910,8 @@ mod tests {
             .send(BackgroundMessage::AgentResponse("Done result".to_string()))
             .unwrap();
 
-        let _ = ctx.run(Default::default(), |ctx| {
-            app.update_ui(ctx);
+        let _ = ctx.run_ui(Default::default(), |ui| {
+            app.update_ui(ui);
         });
 
         assert!(app.file_processor.all_files.contains(&test_file));
@@ -836,8 +941,8 @@ mod tests {
             })
             .unwrap();
 
-        let _ = ctx.run(Default::default(), |ctx| {
-            app.update_ui(ctx);
+        let _ = ctx.run_ui(Default::default(), |ui| {
+            app.update_ui(ui);
         });
 
         assert!(app.tab_manager.loaded_path.is_none()); // Trigger reload
@@ -849,8 +954,8 @@ mod tests {
             })
             .unwrap();
 
-        let _ = ctx.run(Default::default(), |ctx| {
-            app.update_ui(ctx);
+        let _ = ctx.run_ui(Default::default(), |ui| {
+            app.update_ui(ui);
         });
 
         assert!(!app.file_processor.all_files.contains(&file_path));
@@ -869,8 +974,8 @@ mod tests {
             ))
             .unwrap();
 
-        let _ = ctx.run(Default::default(), |ctx| {
-            app.update_ui(ctx);
+        let _ = ctx.run_ui(Default::default(), |ui| {
+            app.update_ui(ui);
         });
 
         assert_eq!(app.agent.state().status, "Error: Network timeout");
@@ -882,8 +987,8 @@ mod tests {
             ]))
             .unwrap();
 
-        let _ = ctx.run(Default::default(), |ctx| {
-            app.update_ui(ctx);
+        let _ = ctx.run_ui(Default::default(), |ui| {
+            app.update_ui(ui);
         });
 
         assert!(!app.agent.state().running);
@@ -906,8 +1011,8 @@ mod tests {
             }))
             .unwrap();
 
-        let _ = ctx.run(Default::default(), |ctx| {
-            app.update_ui(ctx);
+        let _ = ctx.run_ui(Default::default(), |ui| {
+            app.update_ui(ui);
         });
 
         assert_eq!(
@@ -940,8 +1045,8 @@ mod tests {
             }))
             .unwrap();
 
-        let _ = ctx.run(Default::default(), |ctx| {
-            app.update_ui(ctx);
+        let _ = ctx.run_ui(Default::default(), |ui| {
+            app.update_ui(ui);
         });
 
         assert_eq!(
@@ -963,7 +1068,7 @@ mod tests {
         assert_eq!(app.agent.state().total_usage.cached_tokens, Some(50));
         assert_eq!(app.agent.state().total_usage.reasoning_tokens, Some(5));
 
-        // Third turn: smaller context — peak should NOT shrink.
+        // Third turn: smaller context Ã¢â‚¬â€ peak should NOT shrink.
         app.tx
             .send(BackgroundMessage::AgentTokenUsage(TokenUsageInfo {
                 prompt_tokens: 80,
@@ -974,8 +1079,8 @@ mod tests {
             }))
             .unwrap();
 
-        let _ = ctx.run(Default::default(), |ctx| {
-            app.update_ui(ctx);
+        let _ = ctx.run_ui(Default::default(), |ui| {
+            app.update_ui(ui);
         });
 
         assert_eq!(
@@ -996,7 +1101,7 @@ mod tests {
         // file that is currently loaded into the renderer, the
         // next frame must reload it from disk. We model "currently
         // loaded" by setting `loaded_path = Some(path)` while
-        // leaving `selected_file` alone — `load_selected_file`
+        // leaving `selected_file` alone Ã¢â‚¬â€ `load_selected_file`
         // (the actual reload driver) only fires when
         // `selected_file.is_some() && loaded_path != selected_file`.
         let mut app = create_test_app();
@@ -1056,7 +1161,7 @@ mod tests {
         // Sanity check: a Removed event still clears `loaded_path`
         // regardless of whether the editor is open. (We accept
         // losing unsaved edits in the editor if the file was
-        // deleted out from under us — that's the user's action.)
+        // deleted out from under us Ã¢â‚¬â€ that's the user's action.)
         let mut app = create_test_app();
         let path = PathBuf::from("/tmp/gone.md");
 
@@ -1191,7 +1296,7 @@ mod tests {
         let _ = app.process_file_events();
         assert!(
             !app.layout.left_panel_dirty,
-            "process_file_events must not set left_panel_dirty — the width is \
+            "process_file_events must not set left_panel_dirty Ã¢â‚¬â€ the width is \
              calculated once when indexing finishes, not per bus event"
         );
     }
@@ -1238,7 +1343,7 @@ mod tests {
         let _ = app.process_file_events();
         assert!(
             app.tag_manager.all_tags().contains("keep"),
-            "Discovered events must NOT call rebuild — the FileParsed path \
+            "Discovered events must NOT call rebuild Ã¢â‚¬â€ the FileParsed path \
              updates all_tags incrementally"
         );
     }
