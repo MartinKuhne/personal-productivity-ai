@@ -250,12 +250,7 @@ impl Tool for ReplaceTextTool {
     fn execute(&self, ctx: &ToolContext, args: &str) -> Result<serde_json::Value, String> {
         let input: dtos::ReplaceTextInput =
             serde_json::from_str(args).map_err(|e| format!("Invalid args: {}", e))?;
-        let (path, readonly) = ctx
-            .resolve_virtual_path(&input.path, true)?
-            .ok_or_else(|| "Cannot perform this operation on the virtual root".to_string())?;
-        if readonly {
-            return Err("Cannot perform this operation on a read-only library".to_string());
-        }
+        let path = ctx.resolve_writable(&input.path)?;
         let producer = ctx.file_event_producer();
         crate::tools::filesystem::tool_replace_text(
             &path.to_string_lossy(),
@@ -556,12 +551,7 @@ impl Tool for CreateFileTool {
     fn execute(&self, ctx: &ToolContext, args: &str) -> Result<serde_json::Value, String> {
         let input: dtos::CreateFileInput =
             serde_json::from_str(args).map_err(|e| format!("Invalid args: {}", e))?;
-        let (path, readonly) = ctx
-            .resolve_virtual_path(&input.path, true)?
-            .ok_or_else(|| "Cannot perform this operation on the virtual root".to_string())?;
-        if readonly {
-            return Err("Cannot perform this operation on a read-only library".to_string());
-        }
+        let path = ctx.resolve_writable(&input.path)?;
         let producer = ctx.file_event_producer();
         crate::tools::filesystem::tool_create_file(
             &path.to_string_lossy(),
@@ -594,12 +584,7 @@ impl Tool for InsertLinesTool {
     fn execute(&self, ctx: &ToolContext, args: &str) -> Result<serde_json::Value, String> {
         let input: dtos::InsertLinesInput =
             serde_json::from_str(args).map_err(|e| format!("Invalid args: {}", e))?;
-        let (path, readonly) = ctx
-            .resolve_virtual_path(&input.path, true)?
-            .ok_or_else(|| "Cannot perform this operation on the virtual root".to_string())?;
-        if readonly {
-            return Err("Cannot perform this operation on a read-only library".to_string());
-        }
+        let path = ctx.resolve_writable(&input.path)?;
         let producer = ctx.file_event_producer();
         crate::tools::filesystem::tool_insert_lines(
             &path.to_string_lossy(),
@@ -633,12 +618,7 @@ impl Tool for DeleteLinesTool {
     fn execute(&self, ctx: &ToolContext, args: &str) -> Result<serde_json::Value, String> {
         let input: dtos::DeleteLinesInput =
             serde_json::from_str(args).map_err(|e| format!("Invalid args: {}", e))?;
-        let (path, readonly) = ctx
-            .resolve_virtual_path(&input.path, true)?
-            .ok_or_else(|| "Cannot perform this operation on the virtual root".to_string())?;
-        if readonly {
-            return Err("Cannot perform this operation on a read-only library".to_string());
-        }
+        let path = ctx.resolve_writable(&input.path)?;
         let producer = ctx.file_event_producer();
         crate::tools::filesystem::tool_delete_lines(
             &path.to_string_lossy(),
@@ -733,12 +713,7 @@ impl Tool for WriteYamlHeaderTool {
     fn execute(&self, ctx: &ToolContext, args: &str) -> Result<serde_json::Value, String> {
         let input: dtos::WriteYamlHeaderInput =
             serde_json::from_str(args).map_err(|e| format!("Invalid args: {}", e))?;
-        let (path, readonly) = ctx
-            .resolve_virtual_path(&input.path, true)?
-            .ok_or_else(|| "Cannot perform this operation on the virtual root".to_string())?;
-        if readonly {
-            return Err("Cannot perform this operation on a read-only library".to_string());
-        }
+        let path = ctx.resolve_writable(&input.path)?;
         let producer = ctx.file_event_producer();
         crate::tools::yaml_header::tool_write_yaml_header(
             &path.to_string_lossy(),
