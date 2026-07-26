@@ -50,9 +50,22 @@ impl BackgroundProcessManager {
 
     pub fn save_logs(&self, path: &std::path::Path) -> std::io::Result<()> {
         if let Some(parent) = path.parent() {
-            let _ = std::fs::create_dir_all(parent);
+            std::fs::create_dir_all(parent)?;
         }
         let mut file = File::create(path)?;
+        self.write_logs_to(&mut file)
+    }
+
+    /// Serialize the log buffer into the provided writer.
+    ///
+    /// Splitting this out from `save_logs` makes the write path unit-
+    /// testable with a mock `Write` (see `FailingWriter` in the test
+    /// module) and ensures that mid-write failures propagate instead
+    /// of being silently swallowed. The previous implementation did
+    /// `let _ = file.write_all(line.as_bytes())` per line, which
+    /// returned `Ok(())` on a truncated file when the disk filled up
+    /// or the writer was closed.
+    pub(crate) fn write_logs_to<W: Write>(&self, writer: &mut W) -> std::io::Result<()> {
         for log in &self.logs {
             let line = format!(
                 "[{}] [{}] {}\n",
@@ -60,7 +73,7 @@ impl BackgroundProcessManager {
                 log.category,
                 log.message
             );
-            let _ = file.write_all(line.as_bytes());
+            writer.write_all(line.as_bytes())?;
         }
         Ok(())
     }
@@ -71,9 +84,40 @@ pub type SharedProcessManager = Arc<Mutex<BackgroundProcessManager>>;
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::io;
 
     fn make_entry(msg: &str) -> BackgroundLogEntry {
         BackgroundLogEntry::new(LogCategory::Indexer, msg.to_string())
+    }
+
+    /// A `Write` that succeeds for the first `fail_after` bytes, then
+    /// returns `Other` on every subsequent call. Used to simulate
+    /// mid-write failures (disk full, broken pipe, etc.) without
+    /// relying on OS-level quirks.
+    struct FailingWriter {
+        written: usize,
+        fail_after: usize,
+    }
+    impl FailingWriter {
+        fn new(fail_after: usize) -> Self {
+            Self { written: 0, fail_after }
+        }
+    }
+    impl io::Write for FailingWriter {
+        fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
+            if self.written >= self.fail_after {
+                return Err(io::Error::new(
+                    io::ErrorKind::Other,
+                    "simulated mid-write failure",
+                ));
+            }
+            let take = (self.fail_after - self.written).min(buf.len());
+            self.written += take;
+            Ok(take)
+        }
+        fn flush(&mut self) -> io::Result<()> {
+            Ok(())
+        }
     }
 
     #[test]
@@ -118,6 +162,29 @@ mod tests {
         assert!(content.contains("Indexer"));
         assert!(content.contains("line one"));
         assert!(content.contains("line two"));
+    }
+
+    #[test]
+    fn test_save_logs_propagates_write_errors() {
+        // The original save_logs loop did `let _ = file.write_all(...)`
+        // which silently swallowed mid-write failures (disk full,
+        // broken pipe, etc.) and returned Ok(()) on a truncated file.
+        // Contract: when the underlying write fails, save_logs must
+        // return Err so the caller knows the file is incomplete.
+        let mut mgr = BackgroundProcessManager::new();
+        // Several entries so we cross the "fail_after" boundary
+        // mid-stream and not on the first line.
+        for i in 0..10 {
+            mgr.push_log(make_entry(&format!("entry {}", i)));
+        }
+
+        let mut failing = FailingWriter::new(0);
+        let result = mgr.write_logs_to(&mut failing);
+        assert!(
+            result.is_err(),
+            "expected write failure to propagate, got {:?}",
+            result
+        );
     }
 
     #[test]
