@@ -174,17 +174,14 @@ fn render_heading(ui: &mut egui::Ui, title: &str, level: u32, scroll_to_id: &mut
 /// width to the parent `Grid`; any overflow is handled by the wrapping
 /// `ScrollArea` (current pre-FTWA behaviour).
 fn render_table_cell(ui: &mut egui::Ui, cell: &[InlineElem], pinned_width: Option<f32>) {
-    if let Some(w) = pinned_width
-        && w.is_finite()
-        && w > 0.0
-    {
-        ui.set_width(w);
-    }
     if cell.is_empty() {
-        ui.label("");
+        if let Some(w) = pinned_width {
+            ui.allocate_at_least(egui::vec2(w, 0.0), egui::Sense::hover());
+        } else {
+            ui.label("");
+        }
         return;
     }
-    let wrap = pinned_width.is_some();
     let content = |ui: &mut egui::Ui| {
         ui.spacing_mut().item_spacing.x = 0.0;
         for elem in cell {
@@ -205,11 +202,7 @@ fn render_table_cell(ui: &mut egui::Ui, cell: &[InlineElem], pinned_width: Optio
                     if style.strikethrough {
                         rt = rt.strikethrough();
                     }
-                    if wrap {
-                        ui.add(egui::Label::new(rt).wrap(true));
-                    } else {
-                        ui.label(rt);
-                    }
+                    ui.add(egui::Label::new(rt).wrap(true));
                 }
                 InlineElem::Link(url, text) => {
                     ui.hyperlink_to(text, url);
@@ -226,8 +219,11 @@ fn render_table_cell(ui: &mut egui::Ui, cell: &[InlineElem], pinned_width: Optio
             }
         }
     };
-    if wrap {
-        ui.horizontal_wrapped(content);
+    if let Some(w) = pinned_width {
+        let (rect, _) = ui.allocate_at_least(egui::vec2(w, 0.0), egui::Sense::hover());
+        let layout = egui::Layout::left_to_right(egui::Align::Min).with_main_wrap(true);
+        let mut child_ui = ui.child_ui(rect, layout);
+        content(&mut child_ui);
     } else {
         ui.horizontal(content);
     }
@@ -237,8 +233,8 @@ fn render_table_cell(ui: &mut egui::Ui, cell: &[InlineElem], pinned_width: Optio
 ///
 /// Per-column pixel widths are computed by `crate::ui::table_width::ftwa` from
 /// egui-shaped max-content and min-content measurements; cells are then pinned
-/// to their assigned width via `ui.set_width` so egui's `Grid` records those
-/// widths as the column tracks (see `doc/planning/table-column-width-algorithm.md`
+/// to their assigned width via `ui.allocate_ui_at_least` so the child Ui's
+/// available_width matches the column width (see `doc/planning/table-column-width-algorithm.md`
 /// §5 decision Q5). When the available width falls below the sum of min-content
 /// (`decision.needs_horizontal_scroll`), the table physically cannot fit even
 /// with every column at its longest-token floor and we fall back to the prior
@@ -1294,6 +1290,68 @@ def foo():
     fn test_render_table_with_bold_and_special_chars_e2e() {
         let ctx = egui::Context::default();
         let md = "| Name | Account | Amount | Type |\n|---|---|---|---|\n| **Vanguard** | #12345678 | $1 | Taxable (investment) |";
+        let _ = ctx.run(egui::RawInput::default(), |ctx| {
+            egui::CentralPanel::default().show(ctx, |ui| {
+                let mut scroll_id = None;
+                render_markdown(ui, md, &mut scroll_id);
+            });
+        });
+    }
+
+    #[test]
+    fn test_ftwa_measure_user_table() {
+        let ctx = egui::Context::default();
+        let md = r#"| Plan Name | Monthly Premium | Annual Deductible | Max Out-of-Pocket | Quality Rating | Notes/Evaluation |
+|-----------|-----------------|-------------------|---------------------|----------------|-----------------------|
+| Ambetter Cascade Select Complete Gold | $891.55 | $1,000 Individual / $2,000 Family | $7,000 Indiv. / $14,000 Fam. | ★★★☆ | Good balance of low deductible and moderate premium. |
+| Kaiser Permanente Cascade Complete Gold | $1,103.11 | $1,000 Individual / $2,000 Family | $7,000 Indiv. / $14,000 Fam. | ★★★★ | Excellent reputation and high quality rating. |
+"#;
+        let events = parse_markdown_to_events(md);
+        let cells = match events.iter().find(|e| matches!(e, RenderEvent::Table(_))) {
+            Some(RenderEvent::Table(c)) => c.clone(),
+            _ => panic!("No table found"),
+        };
+        assert_eq!(cells.len(), 3); // header + 2 data rows
+        assert_eq!(cells[0].len(), 6);
+        let _ = ctx.run(egui::RawInput::default(), |ctx| {
+            egui::CentralPanel::default().show(ctx, |ui| {
+                let (max_w, min_w) = crate::ui::table_width::measure(&cells, ui);
+                eprintln!("=== FTWA measure (wide={:.0}) ===", ui.available_width());
+                for (i, (mx, mn)) in max_w.iter().zip(min_w.iter()).enumerate() {
+                    eprintln!("  Col {i}: max={mx:.1} min={mn:.1}");
+                }
+                for &avail in &[ui.available_width(), 800.0, 600.0, 400.0] {
+                    let gutter = 10.0_f32;
+                    let a = (avail - (cells[0].len() as f32 - 1.0) * gutter).max(0.0);
+                    let decision = crate::ui::table_width::ftwa(&max_w, &min_w, a);
+                    let sum_min: f32 = min_w.iter().sum();
+                    eprintln!(
+                        "  avail={a:.0}: widths={:?} scroll={} sum_min={sum_min:.0}",
+                        decision
+                            .widths
+                            .iter()
+                            .map(|w| format!("{w:.0}"))
+                            .collect::<Vec<_>>()
+                            .join(", "),
+                        decision.needs_horizontal_scroll
+                    );
+                    assert_eq!(decision.widths.len(), 6, "Must have 6 column widths");
+                    for &w in &decision.widths {
+                        assert!(w > 0.0, "Each column must have positive width");
+                    }
+                }
+            });
+        });
+    }
+
+    #[test]
+    fn test_render_table_with_stars_and_long_cells_e2e() {
+        let ctx = egui::Context::default();
+        let md = r#"| Plan Name | Monthly Premium | Annual Deductible | Max Out-of-Pocket | Quality Rating | Notes/Evaluation |
+|-----------|-----------------|-------------------|---------------------|----------------|-----------------------|
+| Ambetter Cascade Select Complete Gold | $891.55 | $1,000 Individual / $2,000 Family | $7,000 Indiv. / $14,000 Fam. | ★★★☆ | Good balance of low deductible and moderate premium. |
+| Kaiser Permanente Cascade Complete Gold | $1,103.11 | $1,000 Individual / $2,000 Family | $7,000 Indiv. / $14,000 Fam. | ★★★★ | Excellent reputation and high quality rating. |
+"#;
         let _ = ctx.run(egui::RawInput::default(), |ctx| {
             egui::CentralPanel::default().show(ctx, |ui| {
                 let mut scroll_id = None;
