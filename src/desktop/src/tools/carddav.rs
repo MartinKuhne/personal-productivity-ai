@@ -1,9 +1,8 @@
 //! CardDAV agent tools — search, retrieve, create, update, and delete contacts across configured CardDAV servers.
 
 use crate::config::AppConfig;
+use crate::tools::blocking::block_on;
 use fast_dav_rs::CardDavClient;
-use std::sync::OnceLock;
-use tokio::runtime::Runtime;
 
 #[derive(serde::Serialize)]
 struct CardDavContactDetails {
@@ -20,14 +19,6 @@ struct CardDavContactDetails {
 struct CardDavResponse {
     results: Vec<CardDavContactDetails>,
     errors: Vec<String>,
-}
-
-fn block_on<F: std::future::Future>(f: F) -> F::Output {
-    static RT: OnceLock<Runtime> = OnceLock::new();
-    let rt = RT.get_or_init(|| {
-        Runtime::new().unwrap_or_else(|e| panic!("Failed to create Tokio runtime: {}", e))
-    });
-    rt.block_on(f)
 }
 
 async fn get_all_addressbooks(
