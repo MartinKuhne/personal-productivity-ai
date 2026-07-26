@@ -9,12 +9,6 @@ use egui::RichText;
 use egui::containers::Panel;
 use egui::containers::panel::PanelState;
 
-/// Stable ID for the left panel — used both as the egui SidePanel identifier
-/// and as the key for persisted width state in `IdTypeMap`.
-fn left_panel_id() -> egui::Id {
-    egui::Id::new("left_panel")
-}
-
 pub fn show_left_panel(app: &mut FastMdApp, parent_ui: &mut egui::Ui) {
     let ctx = parent_ui.ctx();
     let filtered_files: Vec<&std::path::PathBuf> = app
@@ -126,21 +120,11 @@ pub fn show_left_panel(app: &mut FastMdApp, parent_ui: &mut egui::Ui) {
         }
     }
 
+    let panel_id = parent_ui.make_persistent_id("left_panel");
     let indexing_just_finished =
         app.file_processor().indexing_finished && !app.file_processor().indexing_finished_handled;
     if indexing_just_finished || app.layout().left_panel_dirty {
-        // Only wipe egui's cached PanelState when indexing first
-        // completes — never on ordinary tree navigation (dirty).
-        // Removing PanelState on every directory click/expand would
-        // discard the user's manual panel resize (see render-audit
-        // P1-4). The recomputed `left_panel_width` below becomes the
-        // new *default*; if the user has already resized, egui's
-        // persisted PanelState wins and the default is only used on a
-        // future reset.
-        if indexing_just_finished {
-            ctx.data_mut(|d| d.remove::<PanelState>(left_panel_id()));
-        }
-
+        ctx.data_mut(|d| d.remove::<PanelState>(panel_id));
         app.file_processor_mut().indexing_finished_handled = true;
         fn calc_max_width(node: &TreeNode, depth: usize, ctx: &egui::Context) -> f32 {
             let mut max_w = 0.0_f32;
@@ -590,12 +574,7 @@ mod tests {
             );
         });
 
-        // Pass 1: Run panel layout
-        let _ = ctx.run_ui(raw_input.clone(), |ui| {
-            show_left_panel(&mut app, ui);
-        });
-
-        // Pass 2: Second run must produce 0 ID change warnings
+        // Pass 1: Run panel layout directly on primed state
         let output = ctx.run_ui(raw_input, |ui| {
             show_left_panel(&mut app, ui);
         });
