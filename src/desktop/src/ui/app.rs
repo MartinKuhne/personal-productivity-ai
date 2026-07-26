@@ -270,7 +270,28 @@ impl FastMdApp {
             .unwrap_or(false)
     }
 
-    pub fn new(cc: &eframe::CreationContext<'_>, mut config: crate::config::AppConfig) -> Self {
+    /// Purpose: Pin the egui context to the dark theme with the FastMD brand
+    /// palette (RGB(9, 9, 11) surfaces, indigo selection, 8px window corners,
+    /// 4px widget corners, bright off-white text).
+    /// Inputs: `ctx` - The egui context whose theme is to be configured.
+    /// Outputs: None.
+    /// Purity: Impure (mutates the egui context's options).
+    /// Preconditions: `ctx` is a valid egui context.
+    /// Postconditions: The dark theme is the active theme, and the dark
+    /// theme's visuals match the FastMD palette so REQ-102 (dark color
+    /// scheme) holds even if the system preference reports light mode.
+    ///
+    /// egui 0.35 split the global style into a Dark and a Light theme,
+    /// picked at runtime by `ThemePreference` (default `System`).
+    /// `set_visuals` writes to the *currently active* theme only, so on
+    /// systems that report a light-mode preference the next frame can
+    /// flip the active theme back to the default light visuals and the
+    /// carefully tuned dark background is lost. Forcing the dark theme
+    /// and applying the visuals to the dark theme explicitly makes the
+    /// dark color scheme the source of truth.
+    pub fn configure_dark_theme(ctx: &egui::Context) {
+        ctx.set_theme(egui::Theme::Dark);
+
         let mut visuals = egui::Visuals::dark();
         visuals.window_fill = egui::Color32::from_rgb(9, 9, 11);
         visuals.panel_fill = egui::Color32::from_rgb(9, 9, 11);
@@ -286,7 +307,22 @@ impl FastMdApp {
         visuals.widgets.inactive.fg_stroke.color = bright_text;
         visuals.widgets.active.fg_stroke.color = egui::Color32::WHITE;
         visuals.widgets.hovered.fg_stroke.color = egui::Color32::WHITE;
-        cc.egui_ctx.set_visuals(visuals);
+
+        // Apply to the dark theme explicitly so the visuals persist
+        // even if the active theme ever flips to Light.
+        ctx.set_visuals_of(egui::Theme::Dark, visuals);
+    }
+
+    pub fn new(cc: &eframe::CreationContext<'_>, mut config: crate::config::AppConfig) -> Self {
+        // egui 0.35 split the global style into a Dark and a Light
+        // theme, picked at runtime by `ThemePreference` (default
+        // `System`). `set_visuals` writes to the *currently active*
+        // theme only, so on systems that report a light-mode
+        // preference the next frame can flip the active theme back
+        // to the default light visuals and the carefully tuned
+        // dark background is lost. Force the dark theme and apply
+        // our custom visuals to the dark theme explicitly.
+        Self::configure_dark_theme(&cc.egui_ctx);
 
         let args: Vec<String> = std::env::args().collect();
         if args.len() > 1 {
@@ -759,6 +795,52 @@ mod tests {
 
     fn create_test_app() -> FastMdApp {
         FastMdApp::empty_state(crate::config::AppConfig::default())
+    }
+
+    /// REQ-102 (dark color scheme): `configure_dark_theme` must pin the
+    /// active theme to Dark and apply the FastMD brand palette
+    /// (RGB(9, 9, 11) surface, indigo selection) to the dark theme.
+    /// Regression guard: the egui 0.27 → 0.35 upgrade silently fell
+    /// back to the active theme's default visuals on systems reporting
+    /// light mode, losing the black background.
+    #[test]
+    fn test_configure_dark_theme_pins_dark_with_brand_palette() {
+        let ctx = egui::Context::default();
+
+        // First, flip the active theme to Light to simulate a host
+        // that reports light mode as a preference. The fix must hold
+        // even in that case.
+        ctx.set_theme(egui::Theme::Light);
+        assert_eq!(ctx.theme(), egui::Theme::Light);
+
+        FastMdApp::configure_dark_theme(&ctx);
+
+        // Theme is forced to Dark regardless of the prior preference.
+        assert_eq!(
+            ctx.theme(),
+            egui::Theme::Dark,
+            "configure_dark_theme must force the active theme to Dark"
+        );
+
+        // The dark theme's visuals are the FastMD brand palette,
+        // not the default `Visuals::dark()` (which is RGB(27, 27, 27)
+        // for both window_fill and panel_fill).
+        let dark_visuals = ctx.style_of(egui::Theme::Dark).visuals.clone();
+        let expected_panel = egui::Color32::from_rgb(9, 9, 11);
+        let expected_window = egui::Color32::from_rgb(9, 9, 11);
+        assert_eq!(
+            dark_visuals.panel_fill, expected_panel,
+            "dark theme's panel_fill must be the FastMD brand RGB(9, 9, 11)"
+        );
+        assert_eq!(
+            dark_visuals.window_fill, expected_window,
+            "dark theme's window_fill must be the FastMD brand RGB(9, 9, 11)"
+        );
+        assert_eq!(
+            dark_visuals.selection.bg_fill,
+            egui::Color32::from_rgb(99, 102, 241),
+            "selection.bg_fill must be the FastMD indigo RGB(99, 102, 241)"
+        );
     }
 
     #[test]

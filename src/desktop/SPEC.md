@@ -47,6 +47,13 @@ The requirements below have been formatted using the **Easy Approach to Requirem
 
 * [REQ-101] Pane Structure: The FastMD Viewer shall display a multi-pane layout consisting of a Left Pane (directory tree and tag filter), Central Pane (Markdown document), Right Pane (Table of Contents), and Bottom Pane (command prompt).
 * [REQ-102] Color System: The FastMD Viewer shall render a premium dark mode layout with a dark gray background, bright off-white body text, and amber-accented inline code snippets.
+* [REQ-102a] Dark Color Scheme: The FastMD Viewer shall pin egui to its `Theme::Dark` at startup (via `Context::set_theme(egui::Theme::Dark)`) and apply the FastMD brand palette to the dark theme's visuals so the dark surface is the source of truth regardless of the host system's reported theme preference. The brand palette is:
+    * Window and panel surface: `RGB(9, 9, 11)` (a near-black neutral with a 1-unit cool bias so the surface reads as a black panel, not a brown one).
+    * Selection background: `RGB(99, 102, 241)` (indigo-500; the FastMD primary accent).
+    * Window corner radius: 8 px. Widget (noninteractive / inactive / hovered / active) corner radius: 4 px.
+    * Body text: `RGB(210, 210, 210)` (off-white) for non-interactive and inactive widgets; pure white for hovered and active widgets.
+    * The egui "default dark" palette (`RGB(27, 27, 27)` panel fill) shall NOT be used; the FastMD palette above is the only acceptable dark surface.
+    * The palette is applied via `FastMdApp::configure_dark_theme`, which is the single point of truth for the dark color scheme. Any future change to the brand palette is a change to that function and to the test `test_configure_dark_theme_pins_dark_with_brand_palette`.
 * [REQ-103] UI Responsiveness: While executing disk I/O, compilation, or file system crawls, the FastMD Viewer shall maintain an unblocked, responsive UI thread.
 
 ### Left column / Directory tree
