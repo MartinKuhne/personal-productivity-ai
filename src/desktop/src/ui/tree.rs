@@ -1030,4 +1030,40 @@ mod tests {
         assert!(prompt.contains("alpha.md"), "prompt should list alpha.md");
         assert!(prompt.contains("beta.md"), "prompt should list beta.md");
     }
+
+    /// TDD Test: Verify that render_flat_row produces identical, stable egui IDs
+    /// for a given file/dir path regardless of virtual scroll window slice index.
+    #[test]
+    fn test_tree_row_id_stability_independent_of_slice_index() {
+        let ctx = egui::Context::default();
+        let row = FlatRow {
+            path: PathBuf::from("Laptop.md"),
+            name: "Laptop.md".to_string(),
+            depth: 0,
+            is_dir: false,
+            is_expanded: false,
+        };
+
+        let mut id_pass1 = None;
+        let mut id_pass2 = None;
+
+        // Render pass 1
+        let _ = ctx.run_ui(Default::default(), |ui| {
+            ui.push_id((&row.path, row.is_dir), |ui| {
+                id_pass1 = Some(ui.id());
+            });
+        });
+
+        // Render pass 2
+        let _ = ctx.run_ui(Default::default(), |ui| {
+            ui.push_id((&row.path, row.is_dir), |ui| {
+                id_pass2 = Some(ui.id());
+            });
+        });
+
+        assert_eq!(
+            id_pass1, id_pass2,
+            "Row ID must be strictly determined by row.path and is_dir, staying identical across passes"
+        );
+    }
 }

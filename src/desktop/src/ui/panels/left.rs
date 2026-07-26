@@ -189,7 +189,7 @@ pub fn show_left_panel(app: &mut FastMdApp, parent_ui: &mut egui::Ui) {
     // egui 0.35 unified `SidePanel`/`TopBottomPanel` into `Panel`,
     // and panels now allocate within a parent `&mut Ui`.
     // `default_width` / `max_width` are now `default_size` / `max_size`.
-    Panel::left(left_panel_id())
+    Panel::left("left_panel")
         .resizable(true)
         .default_size(default_w)
         .max_size(max_w)
@@ -268,7 +268,7 @@ pub fn show_left_panel(app: &mut FastMdApp, parent_ui: &mut egui::Ui) {
                     };
                     for i in row_range {
                         let row = &rows[i];
-                        ui.push_id((i, &row.path), |ui| render_flat_row(ui, row, &mut ctx));
+                        render_flat_row(ui, row, &mut ctx);
                     }
                 });
 
@@ -523,6 +523,95 @@ mod tests {
         assert!(
             flagged.is_empty(),
             "empty left panel must produce a stable widget tree across passes, but egui flagged {} rect(s) with 'rect changed id' warnings: {:?}",
+            flagged.len(),
+            flagged
+        );
+    }
+
+    /// TDD Test: When indexing completes (`indexing_finished = true` and
+    /// `indexing_finished_handled = false`), the first pass wipin PanelState
+    /// must NOT cause egui ID-change warnings on Pass 2 of the layout.
+    #[test]
+    fn test_show_left_panel_no_id_change_warnings_on_indexing_finished_transition() {
+        let ctx = egui::Context::default();
+        let mut app = create_test_app();
+        let lib_dir = std::env::temp_dir().join("fastmd_left_id_stability_transition");
+        app.content_libraries_mut()
+            .push(crate::config::ContentLibrary {
+                root_folder: lib_dir.to_string_lossy().to_string(),
+                name: "StabilityLib".to_string(),
+                kind: "text".to_string(),
+                readonly: false,
+                priority: 0,
+            });
+        let mut all_files = Vec::new();
+        for i in 0..10 {
+            all_files.push(lib_dir.join(format!("note_{:02}.md", i)));
+        }
+        app.file_processor_mut().all_files = all_files;
+        app.file_processor_mut().indexing_finished = true;
+        app.file_processor_mut().indexing_finished_handled = false;
+
+        let flagged = collect_id_change_warnings(&ctx, &mut app);
+        assert!(
+            flagged.is_empty(),
+            "left panel must produce a stable widget tree when indexing finishes, but egui flagged {} rect(s) with 'rect changed id' warnings: {:?}",
+            flagged.len(),
+            flagged
+        );
+    }
+
+    /// TDD Test: When stored PanelState width (e.g. 294.7px) exceeds max_size (204.8px),
+    /// Panel::left must clamp default_size and size_range BEFORE passing to Panel::left,
+    /// so Pass 1 and Pass 2 evaluate identical bounds and 0 ID change warnings are emitted.
+    #[test]
+    fn test_left_panel_clamped_width_pass_stability() {
+        let ctx = egui::Context::default();
+        let mut app = create_test_app();
+        app.layout_mut().left_panel_width = Some(294.7);
+        app.layout_mut().left_panel_dirty = false;
+
+        let mut raw_input = egui::RawInput::default();
+        raw_input.screen_rect = Some(egui::Rect::from_min_size(
+            egui::Pos2::ZERO,
+            egui::vec2(1024.0, 768.0),
+        ));
+
+        // Prime egui data memory with stored PanelState at width 294.7px
+        ctx.data_mut(|d| {
+            d.insert_persisted(
+                egui::Id::new("left_panel"),
+                PanelState {
+                    outer_rect: egui::Rect::from_min_size(
+                        egui::Pos2::new(0.0, 24.8),
+                        egui::vec2(294.7, 900.0),
+                    ),
+                },
+            );
+        });
+
+        // Pass 1: Run panel layout
+        let _ = ctx.run_ui(raw_input.clone(), |ui| {
+            show_left_panel(&mut app, ui);
+        });
+
+        // Pass 2: Second run must produce 0 ID change warnings
+        let output = ctx.run_ui(raw_input, |ui| {
+            show_left_panel(&mut app, ui);
+        });
+
+        let mut flagged = Vec::new();
+        for clipped in &output.shapes {
+            if let egui::Shape::Rect(rs) = &clipped.shape
+                && rs.stroke.color == egui::Color32::RED
+            {
+                flagged.push(rs.rect);
+            }
+        }
+
+        assert!(
+            flagged.is_empty(),
+            "left panel must maintain stable width across passes even when stored PanelState exceeds max_w, but egui flagged {} rect(s): {:?}",
             flagged.len(),
             flagged
         );

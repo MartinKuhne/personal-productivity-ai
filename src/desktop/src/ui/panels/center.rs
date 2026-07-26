@@ -163,7 +163,7 @@ fn render_tabs_and_content(ui: &mut egui::Ui, app: &mut FastMdApp) {
                 .to_string_lossy()
                 .into();
 
-            let response = ui.push_id((tab_path, "tab_label"), |ui| {
+            let response = ui.push_id((i, tab_path, "tab_label"), |ui| {
                 ui.selectable_label(is_selected, &title)
             });
             if response.inner.clicked() {
@@ -221,7 +221,7 @@ fn render_tabs_and_content(ui: &mut egui::Ui, app: &mut FastMdApp) {
             });
 
             if ui
-                .push_id((tab_path, "tab_close"), |ui| ui.button("×"))
+                .push_id((i, tab_path, "tab_close"), |ui| ui.button("×"))
                 .inner
                 .clicked()
             {

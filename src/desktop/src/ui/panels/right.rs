@@ -78,9 +78,9 @@ pub fn show_right_panel(app: &mut FastMdApp, parent_ui: &mut egui::Ui) {
                     .id_salt("right_toc_scroll")
                     .show(ui, |ui| {
                         let toc_snapshot = app.tab_manager.toc.clone();
-                        for entry in &toc_snapshot {
+                        for (i, entry) in toc_snapshot.iter().enumerate() {
                             let indent = calculate_indent(entry.level as usize);
-                            ui.push_id((entry.id, "toc_item"), |ui| {
+                            ui.push_id((i, entry.id, "toc_item"), |ui| {
                                 ui.horizontal(|ui| {
                                     ui.add_space(indent);
                                     let label = egui::RichText::new(&entry.title)
