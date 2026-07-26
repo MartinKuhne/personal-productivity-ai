@@ -299,6 +299,24 @@ fn render_table(ui: &mut egui::Ui, table_cells: &[Vec<Vec<InlineElem>>]) {
 /// Inputs: `yaml`
 /// Outputs: List of (String, String) if valid mapping, else None.
 /// Purity: Pure function.
+///
+/// # Examples
+///
+/// ```
+/// use fastmd::ui::render::parse_yaml_to_pairs;
+/// use serde_yaml::Value;
+///
+/// let yaml: Value = serde_yaml::from_str("a: 1\nb: hello\nc: [x, y]").unwrap();
+/// let pairs = parse_yaml_to_pairs(&yaml).unwrap();
+/// assert_eq!(pairs.len(), 3);
+/// assert_eq!(pairs[0], ("a".to_string(), "1".to_string()));
+/// assert_eq!(pairs[1], ("b".to_string(), "hello".to_string()));
+/// assert_eq!(pairs[2], ("c".to_string(), "x, y".to_string()));
+///
+/// // Non-mapping values produce None.
+/// let s: Value = serde_yaml::from_str("just a string").unwrap();
+/// assert!(parse_yaml_to_pairs(&s).is_none());
+/// ```
 pub fn parse_yaml_to_pairs(yaml: &serde_yaml::Value) -> Option<Vec<(String, String)>> {
     let mapping = yaml.as_mapping()?;
     let mut pairs = Vec::new();
@@ -366,6 +384,22 @@ pub fn render_yaml_table(ui: &mut egui::Ui, yaml: &serde_yaml::Value) {
 /// Inputs: `markdown_text` (&str)
 /// Outputs: `Vec<RenderEvent>` representing the logical blocks to draw.
 /// Purity: Pure function.
+///
+/// # Examples
+///
+/// ```
+/// use fastmd::ui::render::{parse_markdown_to_events, RenderEvent, InlineElem, TextStyle};
+///
+/// let events = parse_markdown_to_events("# Title\n\nhello *world*");
+/// // First event is the H1 heading.
+/// assert!(matches!(&events[0], RenderEvent::Heading { level: 1, text } if text == "Title"));
+/// // The paragraph flushes inline elements with mixed styling.
+/// let para = events.iter().find_map(|e| match e {
+///     RenderEvent::FlushInline { elems, needs_bullet: false, .. } if !elems.is_empty() => Some(elems),
+///     _ => None,
+/// });
+/// assert!(para.is_some());
+/// ```
 pub fn parse_markdown_to_events(markdown_text: &str) -> Vec<RenderEvent> {
     use pulldown_cmark::{Event, HeadingLevel, Options, Parser, Tag, TagEnd};
 
@@ -801,6 +835,23 @@ pub fn render_markdown(
 /// Inputs: `markdown_text`
 /// Outputs: List of `ToCEntry` elements.
 /// Purity: Pure function.
+/// Builds a Table of Contents from markdown.
+///
+/// # Examples
+///
+/// ```
+/// use fastmd::ui::render::build_toc;
+///
+/// let toc = build_toc("# Title\n\n## Sub\n\nbody");
+/// assert_eq!(toc.len(), 2);
+/// assert_eq!(toc[0].title, "Title");
+/// assert_eq!(toc[0].level, 1);
+/// assert_eq!(toc[1].title, "Sub");
+/// assert_eq!(toc[1].level, 2);
+///
+/// // No headings → empty TOC.
+/// assert!(build_toc("just a paragraph").is_empty());
+/// ```
 pub fn build_toc(markdown_text: &str) -> Vec<crate::ui::ToCEntry> {
     use pulldown_cmark::{Event, HeadingLevel, Options, Parser, Tag, TagEnd};
 
@@ -893,18 +944,20 @@ mod tests {
 
         // H1 heading must be present, regardless of position.
         assert!(
-            events
-                .iter()
-                .any(|e| matches!(e, RenderEvent::Heading { level: 1, text } if text == "Heading 1")),
+            events.iter().any(
+                |e| matches!(e, RenderEvent::Heading { level: 1, text } if text == "Heading 1")
+            ),
             "missing H1 'Heading 1' in {events:?}"
         );
 
         // A FlushInline carrying "Some " (not italic) followed by "text"
         // (italic) — this is the paragraph that mixes emphasis.
         let paragraph = events.iter().find_map(|e| match e {
-            RenderEvent::FlushInline { elems, needs_bullet: false, .. } if !elems.is_empty() => {
-                Some(elems)
-            }
+            RenderEvent::FlushInline {
+                elems,
+                needs_bullet: false,
+                ..
+            } if !elems.is_empty() => Some(elems),
             _ => None,
         });
         let elems = paragraph.expect("expected a non-bullet FlushInline for the paragraph");
@@ -1185,7 +1238,10 @@ mod tests {
         assert_eq!(toc[1].title, "Subtitle");
         assert_eq!(toc[1].level, 2);
 
-        assert!(build_toc("").is_empty(), "empty input must produce empty TOC");
+        assert!(
+            build_toc("").is_empty(),
+            "empty input must produce empty TOC"
+        );
         assert!(
             build_toc("Just a paragraph.\n\nAnother paragraph.").is_empty(),
             "no-heading input must produce empty TOC"
@@ -1215,9 +1271,8 @@ mod tests {
         assert_eq!(code_in_heading.len(), 1);
         assert!(code_in_heading[0].title.contains("code"));
 
-        let ignored = build_toc(
-            "# Real Title\n\nSome text\n\n## Another\n\n- list item\n\n> blockquote",
-        );
+        let ignored =
+            build_toc("# Real Title\n\nSome text\n\n## Another\n\n- list item\n\n> blockquote");
         assert_eq!(ignored.len(), 2);
         assert_eq!(ignored[0].title, "Real Title");
         assert_eq!(ignored[1].title, "Another");
@@ -1708,8 +1763,8 @@ def foo():
             egui::CentralPanel::default().show(ctx, |ui| {
                 let (max_w, min_w) = crate::ui::table_width::measure(table_cells, ui);
                 let gutter = 10.0_f32;
-                let avail = (ui.available_width() - (max_w.len() as f32 - 1.0).max(0.0) * gutter)
-                    .max(0.0);
+                let avail =
+                    (ui.available_width() - (max_w.len() as f32 - 1.0).max(0.0) * gutter).max(0.0);
                 let decision = crate::ui::table_width::ftwa(&max_w, &min_w, avail);
                 captured = Some(decision.clone());
                 // Render — exercises the rendering branch keyed on
@@ -1739,10 +1794,7 @@ def foo():
 
     /// Helper: build a table where one column (the "wide" one) has much
     /// longer text than the others. The other columns use `narrow_text`.
-    fn build_dissimilar_table(
-        narrow_text: &str,
-        wide_text: &str,
-    ) -> Vec<Vec<Vec<InlineElem>>> {
+    fn build_dissimilar_table(narrow_text: &str, wide_text: &str) -> Vec<Vec<Vec<InlineElem>>> {
         let make = |t: &str| {
             vec![InlineElem::Text(
                 t.to_string(),

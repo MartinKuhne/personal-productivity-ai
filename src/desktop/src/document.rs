@@ -16,6 +16,26 @@ impl DocumentContent {
     /// front-matter text is preserved verbatim via `parse_front_matter`'s
     /// `source` field, so the editor can round-trip on save without
     /// re-parsing or re-splitting.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use fastmd::document::DocumentContent;
+    ///
+    /// let doc = DocumentContent::parse("---\ntitle: T\n---\nbody");
+    /// assert_eq!(doc.front_matter.as_deref(), Some("---\ntitle: T\n---"));
+    /// assert_eq!(doc.body, "\nbody");
+    ///
+    /// // No front matter → entire input is the body.
+    /// let doc2 = DocumentContent::parse("just body");
+    /// assert!(doc2.front_matter.is_none());
+    /// assert_eq!(doc2.body, "just body");
+    /// ```
+    /// view of a file stays consistent with the rest of the crate
+    /// (tag extraction, YAML header tools, batch prompts). The original
+    /// front-matter text is preserved verbatim via `parse_front_matter`'s
+    /// `source` field, so the editor can round-trip on save without
+    /// re-parsing or re-splitting.
     pub fn parse(raw: &str) -> Self {
         let content = raw.strip_prefix('\u{feff}').unwrap_or(raw);
 

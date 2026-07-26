@@ -12,8 +12,8 @@
 //! instead, so the test fails when the user's markdown stops being
 //! recognized.
 
-use fastmd::ui::render::parse_markdown_to_events;
 use fastmd::ui::render::RenderEvent;
+use fastmd::ui::render::parse_markdown_to_events;
 
 fn has_table(events: &[RenderEvent]) -> bool {
     events.iter().any(|e| matches!(e, RenderEvent::Table(_)))

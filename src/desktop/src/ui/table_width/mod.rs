@@ -52,6 +52,19 @@ pub struct ColumnWidths {
 ///
 /// Returns `widths.len() == max_content.len()`. Empty input → empty output,
 /// no scroll needed.
+///
+/// # Panics
+///
+/// Panics if `available` is not finite (NaN or ±∞), if any element of
+/// `max_content` or `min_content` is not finite, or if any `max_content[j]
+/// < min_content[j]` (the FTWA invariant). Callers that receive
+/// measurements from external sources should validate finiteness first.
+///
+/// # Examples
+///
+/// (This function is not part of the public API; the `ui::table_width`
+/// module is intentionally private. See the unit tests in this file
+/// for usage examples covering all three regimes.)
 pub fn ftwa(max_content: &[f32], min_content: &[f32], available: f32) -> ColumnWidths {
     let n = max_content.len();
     if n == 0 {
@@ -562,6 +575,88 @@ mod tests {
     }
 
     #[test]
+    fn infinity_available_panics() {
+        // `f32::INFINITY` as `available` is a programmer error: it
+        // would lead to `f32::INFINITY * (m / sum_max)` in the surplus
+        // share, producing `ColumnWidths` with `f32::INFINITY` widths
+        // that egui's layout cannot use. Like NaN, must be caught at
+        // the boundary, not propagated.
+        let max = [100.0, 100.0];
+        let min = [50.0, 50.0];
+        let result = std::panic::catch_unwind(|| ftwa(&max, &min, f32::INFINITY));
+        assert!(
+            result.is_err(),
+            "available = INFINITY must panic; got {result:?}"
+        );
+
+        // NEG_INFINITY is also non-finite and must panic — it would
+        // also break the surplus/deficit comparison logic.
+        let result_neg = std::panic::catch_unwind(|| ftwa(&max, &min, f32::NEG_INFINITY));
+        assert!(
+            result_neg.is_err(),
+            "available = NEG_INFINITY must panic; got {result_neg:?}"
+        );
+    }
+
+    #[test]
+    fn single_column_table_works_in_all_regimes() {
+        // n = 1 exercises every code path (surplus, deficit, fallback)
+        // without the complexity of slack ordering between columns.
+        // All three regimes must produce a single valid width.
+
+        // Surplus: 1 column with max=50, available=200.
+        let d = ftwa(&[50.0], &[20.0], 200.0);
+        assert!(!d.needs_horizontal_scroll);
+        assert_eq!(d.widths.len(), 1);
+        assert!((d.widths[0] - 200.0).abs() < 1e-3, "got {}", d.widths[0]);
+
+        // Deficit: 1 column, available between sum_min and sum_max.
+        let d = ftwa(&[100.0], &[30.0], 60.0);
+        assert!(!d.needs_horizontal_scroll);
+        assert_eq!(d.widths.len(), 1);
+        assert!(d.widths[0] >= 30.0 - 1e-3, "below min: {}", d.widths[0]);
+
+        // Fallback: 1 column, available < sum_min.
+        let d = ftwa(&[100.0], &[80.0], 50.0);
+        assert!(d.needs_horizontal_scroll);
+        assert_eq!(d.widths, vec![80.0]);
+    }
+
+    #[test]
+    fn very_large_column_count_is_well_formed() {
+        // 1000 columns is a realistic worst case (a big CSV-as-table).
+        // The algorithm is O(n log n) due to the sort; this should
+        // complete in milliseconds, not seconds, and the output must
+        // be well-formed regardless of n.
+        let n = 1000;
+        let max: Vec<f32> = (0..n).map(|i| 50.0 + (i % 10) as f32).collect();
+        let min: Vec<f32> = (0..n).map(|i| 10.0 + (i % 5) as f32).collect();
+        let sum_max: f32 = max.iter().sum();
+        let sum_min: f32 = min.iter().sum();
+
+        // Surplus: 2x sum_max.
+        let d = ftwa(&max, &min, sum_max * 2.0);
+        assert!(!d.needs_horizontal_scroll);
+        assert_eq!(d.widths.len(), n);
+        let sum: f32 = d.widths.iter().sum();
+        assert!((sum - sum_max * 2.0).abs() < 1.0, "Σ must equal available");
+
+        // Deficit: half of sum_max, well above sum_min.
+        let d = ftwa(&max, &min, sum_max * 0.5);
+        assert!(!d.needs_horizontal_scroll);
+        assert_eq!(d.widths.len(), n);
+        for (j, (&w, (&mx, &mn))) in d.widths.iter().zip(max.iter().zip(min.iter())).enumerate() {
+            assert!(w >= mn - 1e-3, "col {j}: width {w} below min {mn}");
+            assert!(w <= mx + 1e-3, "col {j}: width {w} above max {mx}");
+        }
+
+        // Fallback: tiny available.
+        let d = ftwa(&max, &min, 1.0);
+        assert!(d.needs_horizontal_scroll);
+        assert_eq!(d.widths, min);
+    }
+
+    #[test]
     fn three_columns_wraps_minimum_count() {
         // max = [60, 50, 40], min = [10, 10, 10]. sum_max = 150.
         // available = 110, deficit = 40. slacks = [50, 40, 30].
@@ -596,12 +691,7 @@ mod tests {
     /// Note: the surplus regime *intentionally* grows columns beyond their
     /// max-content (spare is distributed proportionally), so no upper bound
     /// is asserted here — only the lower bound and the sum/scroll invariants.
-    fn assert_decision_invariants(
-        d: &ColumnWidths,
-        _max: &[f32],
-        min: &[f32],
-        available: f32,
-    ) {
+    fn assert_decision_invariants(d: &ColumnWidths, _max: &[f32], min: &[f32], available: f32) {
         let sum: f32 = d.widths.iter().copied().sum();
         if !d.needs_horizontal_scroll {
             assert!(
