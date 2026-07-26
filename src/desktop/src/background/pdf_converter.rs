@@ -31,10 +31,9 @@ impl PdfConversionJob {
         if let (Ok(pdf_meta), Ok(md_meta)) = (
             std::fs::metadata(&self.input_pdf),
             std::fs::metadata(&self.output_md),
-        ) {
-            if let (Ok(pdf_time), Ok(md_time)) = (pdf_meta.modified(), md_meta.modified()) {
-                return pdf_time > md_time;
-            }
+        ) && let (Ok(pdf_time), Ok(md_time)) = (pdf_meta.modified(), md_meta.modified())
+        {
+            return pdf_time > md_time;
         }
         false
     }
@@ -114,19 +113,19 @@ impl PdfConversionJob {
                     for entry in walkdir::WalkDir::new(&temp)
                         .into_iter()
                         .filter_map(Result::ok)
-                        .filter(|e| e.path().extension().map_or(false, |ext| ext == "md"))
+                        .filter(|e| e.path().extension().is_some_and(|ext| ext == "md"))
                     {
-                        if let Ok(_) = std::fs::copy(entry.path(), &self.output_md) {
+                        if std::fs::copy(entry.path(), &self.output_md).is_ok() {
                             md_found = true;
-                            if let Some(parent_dir) = entry.path().parent() {
-                                if let Ok(siblings) = std::fs::read_dir(parent_dir) {
-                                    for sibling in siblings.flatten() {
-                                        if sibling.path() != entry.path() {
-                                            if let Some(out_parent) = self.output_md.parent() {
-                                                let target = out_parent.join(sibling.file_name());
-                                                let _ = std::fs::rename(sibling.path(), target);
-                                            }
-                                        }
+                            if let Some(parent_dir) = entry.path().parent()
+                                && let Ok(siblings) = std::fs::read_dir(parent_dir)
+                            {
+                                for sibling in siblings.flatten() {
+                                    if sibling.path() != entry.path()
+                                        && let Some(out_parent) = self.output_md.parent()
+                                    {
+                                        let target = out_parent.join(sibling.file_name());
+                                        let _ = std::fs::rename(sibling.path(), target);
                                     }
                                 }
                             }
