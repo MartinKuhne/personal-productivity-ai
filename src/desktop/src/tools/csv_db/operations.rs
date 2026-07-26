@@ -114,24 +114,54 @@ pub fn add_rows(config: &AppConfig, input: AddRowsInput) -> Result<String, Strin
         }
     }
 
-    let file = std::fs::OpenOptions::new()
+    // Serialize the new rows through an in-memory buffer first, then
+    // commit the buffer to the file in a single `write_all` call.
+    //
+    // The previous implementation streamed each `write_record` directly
+    // into the live file, so a mid-write failure (disk full, broken
+    // pipe, etc.) would leave the database with the first N rows
+    // appended and the rest missing — the caller had no way to know
+    // the file was in a torn state. Buffering first makes the file
+    // update atomic: either every row lands or none of them do.
+    let mut buffer: Vec<u8> = Vec::new();
+    write_rows_to_writer(&input.rows, &headers, &mut buffer)?;
+
+    use std::io::Write;
+    let mut file = std::fs::OpenOptions::new()
         .write(true)
         .append(true)
         .open(&db_path)
         .map_err(|e| format!("Failed to open file: {}", e))?;
-    let mut wtr = csv::Writer::from_writer(file);
+    file.write_all(&buffer)
+        .map_err(|e| format!("Failed to write to file: {}", e))?;
 
-    for row in &input.rows {
+    Ok(format!("Added {} rows", input.rows.len()))
+}
+
+/// Serialize `rows` into `writer` as CSV records ordered by `headers`.
+///
+/// Extracted from `add_rows` so the row-formatting path is unit-testable
+/// with a mock `Write` (see `FailingWriter` in the test module). The
+/// caller is responsible for atomically committing the resulting bytes
+/// to durable storage — that is, this helper must not be pointed
+/// directly at a live file, or a mid-write failure would tear the
+/// destination just like the old streaming path did.
+pub(crate) fn write_rows_to_writer<W: std::io::Write>(
+    rows: &[std::collections::HashMap<String, String>],
+    headers: &[String],
+    writer: &mut W,
+) -> Result<(), String> {
+    let mut wtr = csv::Writer::from_writer(writer);
+    for row in rows {
         let mut record = Vec::new();
-        for header in &headers {
+        for header in headers {
             record.push(row.get(header).cloned().unwrap_or_default());
         }
         wtr.write_record(&record)
             .map_err(|e| format!("Failed to write row: {}", e))?;
     }
     wtr.flush().map_err(|e| format!("Failed to flush: {}", e))?;
-
-    Ok(format!("Added {} rows", input.rows.len()))
+    Ok(())
 }
 
 #[cfg(test)]
@@ -139,6 +169,38 @@ mod tests {
     use super::*;
     use std::collections::HashMap;
     use tempfile::tempdir;
+
+    /// A `Write` that succeeds for the first `fail_after` bytes, then
+    /// returns an error on every subsequent call. Used to simulate
+    /// mid-write failures without relying on OS-level disk-full quirks.
+    struct FailingWriter {
+        written: usize,
+        fail_after: usize,
+    }
+    impl FailingWriter {
+        fn new(fail_after: usize) -> Self {
+            Self {
+                written: 0,
+                fail_after,
+            }
+        }
+    }
+    impl std::io::Write for FailingWriter {
+        fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
+            if self.written >= self.fail_after {
+                return Err(std::io::Error::new(
+                    std::io::ErrorKind::Other,
+                    "simulated mid-write failure",
+                ));
+            }
+            let take = (self.fail_after - self.written).min(buf.len());
+            self.written += take;
+            Ok(take)
+        }
+        fn flush(&mut self) -> std::io::Result<()> {
+            Ok(())
+        }
+    }
 
     #[test]
     fn test_create_and_list_and_add_rows() {
@@ -210,5 +272,37 @@ mod tests {
         )
         .unwrap_err();
         assert!(err_not_exist.contains("does not exist"));
+    }
+
+    #[test]
+    fn test_add_rows_write_helper_propagates_errors() {
+        // The CSV writer previously streamed records directly into
+        // the live file as each row was produced; a mid-write failure
+        // (disk full, broken pipe, etc.) would leave the database with
+        // the first N rows appended and the rest missing — the caller
+        // had no way to know the file was in a torn state.
+        //
+        // The fix is to serialize the new rows through an in-memory
+        // buffer first, so a single `write_all` to the file is
+        // atomic. This test exercises the buffer-writing path with a
+        // `FailingWriter` to prove it propagates errors instead of
+        // silently returning Ok.
+        let mut row_a = HashMap::new();
+        row_a.insert("id".to_string(), "1".to_string());
+        row_a.insert("name".to_string(), "Alice".to_string());
+        let mut row_b = HashMap::new();
+        row_b.insert("id".to_string(), "2".to_string());
+        row_b.insert("name".to_string(), "Bob".to_string());
+        let rows = vec![row_a, row_b];
+        let headers = vec!["id".to_string(), "name".to_string()];
+
+        // fail_after = 0 means every write fails immediately.
+        let mut failing = FailingWriter::new(0);
+        let result = write_rows_to_writer(&rows, &headers, &mut failing);
+        assert!(
+            result.is_err(),
+            "expected write failure to propagate, got {:?}",
+            result
+        );
     }
 }
