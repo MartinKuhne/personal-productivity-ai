@@ -319,10 +319,14 @@ fn render_table_cell(ui: &mut egui::Ui, cell: &[InlineElem], pinned_width: Optio
         .outer_margin(egui::Margin::ZERO)
         .stroke(TABLE_CELL_STROKE);
 
-    // egui::Grid centers cells vertically within a row by default.
-    // Wrapping the entire cell in a top_down layout forces top-alignment so
-    // all cells in a row start at the same Y coordinate.
-    ui.with_layout(egui::Layout::top_down(egui::Align::Min), |ui| {
+    // egui::Grid cells use left_to_right(Align::Center) by default, which
+    // centers cell contents vertically within the row. We override to
+    // left_to_right(Align::Min) so the cross-axis (Y) is aligned to the
+    // top of the row instead. Crucially, left_to_right keeps the main axis
+    // the same as the Grid, so the column cursor X is preserved correctly —
+    // top_down(Align::Min) would place content at max_rect.min.x (the panel
+    // left edge) instead of the column's cursor X, clipping left-side text.
+    ui.with_layout(egui::Layout::left_to_right(egui::Align::Min), |ui| {
         cell_frame.show(ui, |ui| {
             // In egui::Grid pass 2, ui.available_width() is the resolved column
             // width. Frame::NONE with inner_margin=ZERO does not shrink the inner
