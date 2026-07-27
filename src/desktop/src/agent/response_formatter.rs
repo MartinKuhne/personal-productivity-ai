@@ -222,13 +222,28 @@ fn format_search_email_result(func_name: &str, data: &serde_json::Value) -> Stri
 }
 
 fn format_generic_search_result(func_name: &str, data: &serde_json::Value) -> String {
+    let extract_len = |val: &serde_json::Value| -> Option<usize> {
+        if let Some(arr) = val.as_array() {
+            return Some(arr.len());
+        }
+        if let Some(arr) = val.get("results").and_then(|r| r.as_array()) {
+            return Some(arr.len());
+        }
+        None
+    };
+
     let count = data
         .get("results")
-        .and_then(|r| r.as_str())
-        .and_then(|s| serde_json::from_str::<serde_json::Value>(s).ok())
-        .and_then(|v| v.as_array().cloned())
-        .map(|a| a.len())
-        .unwrap_or_else(|| data.as_array().map(|a| a.len()).unwrap_or(0));
+        .and_then(|r| {
+            if let Some(s) = r.as_str() {
+                serde_json::from_str::<serde_json::Value>(s).ok()
+            } else {
+                Some(r.clone())
+            }
+        })
+        .and_then(|v| extract_len(&v))
+        .unwrap_or_else(|| extract_len(data).unwrap_or(0));
+
     format!(
         "> **Result (`{}`):** {} item(s) found\n\n",
         func_name, count
@@ -327,6 +342,21 @@ mod tests {
         let result = r#"{"status":"success","data":{"results":"[{\"a\":1}]"}}"#;
         let msg = format_tool_result_message("search_calendar", result);
         assert!(msg.contains("search_calendar"));
+        assert!(msg.contains("1 item(s)"));
+    }
+
+    #[test]
+    fn test_format_result_search_contact_nested_object() {
+        let contact_json = r#"{"results":[{"href":"/logan.vcf","name":"Logan"}],"errors":[]}"#;
+        let result = serde_json::json!({
+            "status": "success",
+            "data": {
+                "results": contact_json
+            }
+        })
+        .to_string();
+        let msg = format_tool_result_message("search_contact", &result);
+        assert!(msg.contains("search_contact"));
         assert!(msg.contains("1 item(s)"));
     }
 

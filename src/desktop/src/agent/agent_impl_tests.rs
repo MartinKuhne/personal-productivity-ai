@@ -312,6 +312,7 @@ fn test_run_agent_emits_executing_tool_message_immediately() {
             );
             let _ = stream.write_all(resp.as_bytes());
             let _ = stream.flush();
+            let _ = stream.shutdown(std::net::Shutdown::Both);
         }
         if let Ok((mut stream, _)) = listener.accept() {
             let mut buf = [0; 8192];
@@ -323,6 +324,7 @@ fn test_run_agent_emits_executing_tool_message_immediately() {
             );
             let _ = stream.write_all(resp.as_bytes());
             let _ = stream.flush();
+            let _ = stream.shutdown(std::net::Shutdown::Both);
         }
     });
     let (ctx, rx) = make_ctx(make_config(port));
