@@ -188,6 +188,98 @@ fn default_max_tokens() -> u32 {
     32768
 }
 
+fn default_true() -> bool {
+    true
+}
+
+/// Configuration options for enabling or disabling specific tool groups.
+#[derive(serde::Serialize, serde::Deserialize, Clone, Debug, PartialEq, Eq)]
+pub struct ToolGroupsConfig {
+    /// Enable or disable filesystem tools.
+    #[serde(default = "default_true")]
+    pub filesystem: bool,
+    /// Enable or disable web tools.
+    #[serde(default = "default_true")]
+    pub web: bool,
+    /// Enable or disable email tools.
+    #[serde(default = "default_true")]
+    pub email: bool,
+    /// Enable or disable contacts tools.
+    #[serde(default = "default_true")]
+    pub contacts: bool,
+    /// Enable or disable calendar tools.
+    #[serde(default = "default_true")]
+    pub calendar: bool,
+    /// Enable or disable CSV database tools.
+    #[serde(default = "default_true")]
+    pub csv_db: bool,
+    /// Enable or disable weather tools.
+    #[serde(default = "default_true")]
+    pub weather: bool,
+}
+
+impl Default for ToolGroupsConfig {
+    fn default() -> Self {
+        Self {
+            filesystem: true,
+            web: true,
+            email: true,
+            contacts: true,
+            calendar: true,
+            csv_db: true,
+            weather: true,
+        }
+    }
+}
+
+/// Configuration for an external MCP (Model Context Protocol) server connection.
+#[derive(serde::Serialize, serde::Deserialize, Clone, PartialEq, Eq)]
+#[serde(tag = "transport", rename_all = "snake_case")]
+pub enum McpServerConfig {
+    /// Local subprocess transport over standard input/output.
+    Stdio {
+        /// Executable command name or absolute path.
+        command: String,
+        /// Command line arguments.
+        #[serde(default)]
+        args: Vec<String>,
+        /// Environment variables for the subprocess.
+        #[serde(default)]
+        env: HashMap<String, String>,
+    },
+    /// Remote Server-Sent Events transport.
+    Sse {
+        /// HTTP/HTTPS URL for the SSE endpoint.
+        url: String,
+        /// Optional HTTP headers (e.g. authorization tokens).
+        #[serde(default)]
+        headers: HashMap<String, String>,
+    },
+}
+
+impl std::fmt::Debug for McpServerConfig {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Stdio { command, args, env } => f
+                .debug_struct("McpServerConfig::Stdio")
+                .field("command", command)
+                .field("args", args)
+                .field("env", env)
+                .finish(),
+            Self::Sse { url, headers } => {
+                let redacted_headers: HashMap<_, _> = headers
+                    .keys()
+                    .map(|k| (k.clone(), "[REDACTED]".to_string()))
+                    .collect();
+                f.debug_struct("McpServerConfig::Sse")
+                    .field("url", url)
+                    .field("headers", &redacted_headers)
+                    .finish()
+            }
+        }
+    }
+}
+
 #[derive(serde::Serialize, serde::Deserialize, Clone)]
 #[serde(default)]
 pub struct AppConfig {
@@ -226,6 +318,12 @@ pub struct AppConfig {
     /// Maximum tokens for LLM responses (REQ-604c). Default: 32768.
     #[serde(default = "default_max_tokens")]
     pub max_tokens: u32,
+    /// Configuration for enabling/disabling tool groups.
+    #[serde(default)]
+    pub tool_groups: ToolGroupsConfig,
+    /// Configured external MCP servers by server name.
+    #[serde(default)]
+    pub mcp_servers: HashMap<String, McpServerConfig>,
 }
 
 impl std::fmt::Debug for AppConfig {
@@ -246,6 +344,8 @@ impl std::fmt::Debug for AppConfig {
             .field("csv_db_path", &self.csv_db_path)
             .field("feature_flags", &self.feature_flags)
             .field("max_tokens", &self.max_tokens)
+            .field("tool_groups", &self.tool_groups)
+            .field("mcp_servers", &self.mcp_servers)
             .finish()
     }
 }
@@ -268,6 +368,8 @@ impl Default for AppConfig {
             csv_db_path: None,
             feature_flags: default_feature_flags(),
             max_tokens: default_max_tokens(),
+            tool_groups: ToolGroupsConfig::default(),
+            mcp_servers: HashMap::new(),
         }
     }
 }
@@ -852,5 +954,48 @@ user_name: "TestUser"
         for h in handles {
             h.join().expect("worker thread panicked");
         }
+    }
+
+    #[test]
+    fn test_tool_groups_config_defaults() {
+        let yaml = "{}";
+        let cfg: ToolGroupsConfig = serde_yaml::from_str(yaml).unwrap();
+        assert!(cfg.filesystem);
+        assert!(cfg.web);
+        assert!(cfg.email);
+        assert!(cfg.contacts);
+        assert!(cfg.calendar);
+        assert!(cfg.csv_db);
+        assert!(cfg.weather);
+
+        let default_cfg = ToolGroupsConfig::default();
+        assert_eq!(cfg, default_cfg);
+    }
+
+    #[test]
+    fn test_mcp_server_config_deserialization_and_debug_redaction() {
+        let stdio_yaml = r#"
+transport: stdio
+command: npx
+args: ["-y", "@modelcontextprotocol/server-memory"]
+env:
+  API_KEY: "secret"
+"#;
+        let stdio_cfg: McpServerConfig = serde_yaml::from_str(stdio_yaml).unwrap();
+        let debug_stdio = format!("{:?}", stdio_cfg);
+        assert!(debug_stdio.contains("McpServerConfig::Stdio"));
+        assert!(debug_stdio.contains("npx"));
+
+        let sse_yaml = r#"
+transport: sse
+url: https://mcp.example.com/sse
+headers:
+  Authorization: Bearer supersecrettoken
+"#;
+        let sse_cfg: McpServerConfig = serde_yaml::from_str(sse_yaml).unwrap();
+        let debug_sse = format!("{:?}", sse_cfg);
+        assert!(debug_sse.contains("McpServerConfig::Sse"));
+        assert!(debug_sse.contains("[REDACTED]"));
+        assert!(!debug_sse.contains("supersecrettoken"));
     }
 }

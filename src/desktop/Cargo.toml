@@ -43,6 +43,7 @@ gray_matter = "0.3"
 csv = "1.4.0"
 evalexpr = "13.1.0"
 html-escape = "0.2"
+mcp-client-rust = "0.1"
 
 [dev-dependencies]
 tempfile = "3.8"

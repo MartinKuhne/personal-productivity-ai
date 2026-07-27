@@ -8,6 +8,7 @@ pub mod csv_db;
 pub mod dtos;
 pub mod filesystem;
 pub mod jmap;
+pub mod mcp;
 pub mod registry;
 pub mod weather;
 pub mod web;
@@ -35,10 +36,11 @@ pub enum Safety {
 }
 
 pub trait Tool: Send + Sync {
-    fn name(&self) -> &'static str;
-    fn description(&self) -> &'static str;
+    fn name(&self) -> &str;
+    fn description(&self) -> &str;
     fn input_type(&self) -> TypeId;
     fn parameters_schema(&self) -> serde_json::Value;
+
     fn is_enabled(&self, config: &AppConfig, prompt: &str) -> bool;
     /// Classification used by the agent loop to decide parallel vs.
     /// sequential dispatch. Default is `Mutating`; tools that cannot
