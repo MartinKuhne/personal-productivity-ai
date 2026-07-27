@@ -1,6 +1,6 @@
 [package]
 name = "fastmd"
-version = "1.0.0"
+version = "1.2.0"
 edition = "2024"
 description = "Fast Markdown viewer with AI agent capabilities"
 license = "MIT"
@@ -20,9 +20,7 @@ chrono = "0.4.45"
 eframe = { version = "0.35", default-features = false, features = ["default_fonts", "glow", "wayland", "x11", "accesskit"] }
 fast-dav-rs = "0.4.3"
 fast_h2m = "*"
-imap = "2.4.1"
-jmap-calendars-client = "0.1.2"
-jmap-client = "0.4.2"
+jmap-client = { version = "=0.4.1", default-features = false, features = ["blocking", "rustls"] }
 notify = "6.0"
 playwright-rs = "0.14.1"
 pulldown-cmark = { version = "0.10", features = ["html"] }
@@ -36,6 +34,7 @@ trash = "5.2.6"
 ureq = { version = "2.9", features = ["json"] }
 walkdir = "2.4"
 glob = "0.3"
+reqwest = { version = "0.12", features = ["blocking"] }
 opener = { version = "0.7", features = ["reveal"] }
 webbrowser = "1"
 backoff = { version = "0.4", features = ["tokio"] }

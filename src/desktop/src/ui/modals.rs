@@ -17,11 +17,11 @@ pub fn show_move_modal_dialog(
 ) {
     let mut close_modal = false;
     if dm.move_dialog_open {
-        egui::Window::new("Move File")
+        egui::Window::new(crate::ui::strings::MOVE_FILE_WINDOW)
             .collapsible(false)
             .resizable(false)
             .show(ctx, |ui| {
-                ui.label("Select destination folder:");
+                ui.label(crate::ui::strings::SELECT_DESTINATION_FOLDER);
 
                 let mut folders = BTreeSet::new();
                 for lib in content_libraries {
@@ -57,7 +57,7 @@ pub fn show_move_modal_dialog(
 
                 let submit = ctx.input_mut(|i| i.consume_key(egui::Modifiers::NONE, egui::Key::Enter));
                 ui.horizontal(|ui| {
-                    if ui.button("Ok").clicked() || (submit && dm.selected_move_folder.is_some()) {
+                    if ui.button(crate::ui::strings::OK_BUTTON).clicked() || (submit && dm.selected_move_folder.is_some()) {
                         if let (Some(file), Some(folder)) = (&dm.file_to_move, &dm.selected_move_folder)
                             && let Some(name) = file.file_name() {
                                 let new_path = folder.join(name);
@@ -76,7 +76,7 @@ pub fn show_move_modal_dialog(
                             }
                         close_modal = true;
                     }
-                    if ui.button("Cancel").clicked() {
+                    if ui.button(crate::ui::strings::CANCEL_BUTTON).clicked() {
                         close_modal = true;
                     }
                 });
@@ -99,18 +99,18 @@ pub fn show_create_dir_dialog(
 ) {
     let mut close_create_modal = false;
     if dm.create_dir_dialog_open {
-        egui::Window::new("Create Directory")
+        egui::Window::new(crate::ui::strings::CREATE_DIRECTORY_WINDOW)
             .collapsible(false)
             .resizable(false)
             .show(ctx, |ui| {
-                ui.label("Enter directory name:");
+                ui.label(crate::ui::strings::ENTER_DIRECTORY_NAME);
                 let response = ui.text_edit_singleline(&mut dm.create_dir_name);
                 response.request_focus();
 
                 let submit = ctx.input_mut(|i| i.consume_key(egui::Modifiers::NONE, egui::Key::Enter));
 
                 ui.horizontal(|ui| {
-                    if ui.button("Ok").clicked() || submit {
+                    if ui.button(crate::ui::strings::OK_BUTTON).clicked() || submit {
                         if let Some(parent) = &dm.create_dir_parent
                             && !dm.create_dir_name.trim().is_empty() {
                                 let dir_name = dm.create_dir_name.trim();
@@ -142,7 +142,7 @@ pub fn show_create_dir_dialog(
                             }
                         close_create_modal = true;
                     }
-                    if ui.button("Cancel").clicked() {
+                    if ui.button(crate::ui::strings::CANCEL_BUTTON).clicked() {
                         close_create_modal = true;
                     }
                 });
@@ -188,18 +188,18 @@ pub fn show_rename_dialog(ctx: RenameDialogCtx<'_>) {
             expanded_dirs,
             ctx,
         } = ctx;
-        egui::Window::new("Rename")
+        egui::Window::new(crate::ui::strings::RENAME_WINDOW)
             .collapsible(false)
             .resizable(false)
             .show(ctx, |ui| {
-                ui.label("Enter new name:");
+                ui.label(crate::ui::strings::ENTER_NEW_NAME);
                 let response = ui.text_edit_singleline(&mut dm.rename_new_name);
                 response.request_focus();
 
                 let submit = ctx.input_mut(|i| i.consume_key(egui::Modifiers::NONE, egui::Key::Enter));
 
                 ui.horizontal(|ui| {
-                    if ui.button("Ok").clicked() || submit {
+                    if ui.button(crate::ui::strings::OK_BUTTON).clicked() || submit {
                         if let Some(file) = &dm.file_to_rename
                             && !dm.rename_new_name.trim().is_empty() {
                                 let new_name = dm.rename_new_name.trim();
@@ -266,7 +266,7 @@ pub fn show_rename_dialog(ctx: RenameDialogCtx<'_>) {
                             }
                         close_rename_modal = true;
                     }
-                    if ui.button("Cancel").clicked() {
+                    if ui.button(crate::ui::strings::CANCEL_BUTTON).clicked() {
                         close_rename_modal = true;
                     }
                 });

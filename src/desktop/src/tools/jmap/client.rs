@@ -1,90 +1,199 @@
 //! JMAP client transport layer.
 //!
-//! Implements the core JMAP protocol as defined in RFC 8620.
+//! Wraps `jmap_client::Client` and provides convenience methods for
+//! account resolution, capability checks, and raw JMAP POST requests.
 //! - Session resource: Section 2
 //! - Request/Response objects: Sections 3.3-3.4
 //! - Method-level error handling: Section 3.6.2
 //!
 //! See: <https://www.rfc-editor.org/rfc/rfc8620>
 
+use std::collections::HashMap;
+
 use crate::config::JmapClient;
-use serde_json::Value;
 
-pub fn get_jmap_session(client: &JmapClient) -> Result<(String, String, Value), String> {
-    let url = &client.url;
-    let token = &client.token;
+/// Attempt to extract a human-readable error detail from a response body.
+///
+/// Handles RFC 7807 problem+json (`{"type", "title", "detail", "status"}`),
+/// JMAP method errors (`{"type", "description"}`), and falls back to None
+/// for unstructured bodies.
+fn parse_error_detail(body: &str) -> Option<String> {
+    let val: serde_json::Value = serde_json::from_str(body).ok()?;
+    let obj = val.as_object()?;
 
-    let session_url = if url.ends_with("/api") {
-        format!("{}/session", url.strip_suffix("/api").unwrap_or(url))
-    } else {
-        url.to_string()
-    };
+    let rfc7807_detail = obj.get("detail").and_then(|v| v.as_str());
+    let rfc7807_title = obj.get("title").and_then(|v| v.as_str());
+    let jmap_description = obj.get("description").and_then(|v| v.as_str());
+    let error_type = obj.get("type").and_then(|v| v.as_str());
 
-    let resp = match ureq::get(&session_url)
-        .set("Authorization", &format!("Bearer {}", token))
-        .call()
-    {
-        Ok(r) => {
-            tracing::debug!(
-                name = "jmap.client.session",
-                status = r.status(),
-                "JMAP session response received"
-            );
-            r
-        }
-        Err(e) => {
-            if let ureq::Error::Status(code, response) = e {
-                let body = response.into_string().unwrap_or_default();
-                return Err(format!("JMAP Error {}: {}", code, body));
-            }
-            return Err(e.to_string());
-        }
-    };
-
-    let json: Value = resp.into_json().map_err(|e| e.to_string())?;
-    let api_url = json["apiUrl"].as_str().unwrap_or(url).to_string();
-    let primary_accounts = json["primaryAccounts"].clone();
-
-    Ok((api_url, token.to_string(), primary_accounts))
+    match (error_type, rfc7807_title, rfc7807_detail, jmap_description) {
+        (_, _, Some(detail), _) => Some(detail.to_string()),
+        (_, Some(title), _, _) => Some(title.to_string()),
+        (Some(typ), _, _, Some(desc)) => Some(format!("{typ}: {desc}")),
+        (Some(typ), _, _, _) => Some(typ.to_string()),
+        _ => None,
+    }
 }
 
-pub fn jmap_call(
-    api_url: &str,
-    token: &str,
-    capabilities: &[&str],
-    method_calls: Value,
-) -> Result<Value, String> {
-    let mut using = vec!["urn:ietf:params:jmap:core"];
-    using.extend(capabilities);
+/// Opaque handle to a connected JMAP session.
+///
+/// Wraps `jmap_client::Client` and provides:
+/// - `connect()` — establishes a session with the JMAP server
+/// - `account_id()` — resolves a primary account ID for a capability
+/// - `has_capability()` — checks if the session supports a capability
+/// - `inner()` — exposes the underlying `jmap_client::Client` for raw calls
+/// - `post()` — sends a raw JMAP POST request for operations not covered
+///   by the typed crate methods (contacts, calendar, etc.)
+pub struct JmapSession {
+    client: jmap_client::client::Client,
+    account_cache: HashMap<String, String>,
+}
 
-    let payload = serde_json::json!({
-        "using": using,
-        "methodCalls": method_calls
-    });
+impl JmapSession {
+    /// Connect to a JMAP server using a bearer token.
+    pub fn connect(config: &JmapClient) -> Result<Self, String> {
+        let client = jmap_client::client::Client::new()
+            .credentials(config.token.as_str())
+            .connect(&config.url)
+            .map_err(|e| format!("Failed to connect to JMAP server: {}", e))?;
+        Ok(Self {
+            client,
+            account_cache: HashMap::new(),
+        })
+    }
 
-    let resp = match ureq::post(api_url)
-        .set("Authorization", &format!("Bearer {}", token))
-        .set("Content-Type", "application/json")
-        .send_json(payload)
-    {
-        Ok(r) => {
-            tracing::debug!(
-                name = "jmap.client.call",
-                status = r.status(),
-                "JMAP API call response received"
+    /// Resolve the primary account ID for a capability.
+    ///
+    /// Falls back to the core account ID if the specific capability has
+    /// no primary account. Results are cached for subsequent calls.
+    pub fn account_id(&mut self, cap: &str) -> String {
+        if let Some(id) = self.account_cache.get(cap) {
+            return id.clone();
+        }
+        let id = self
+            .client
+            .session()
+            .primary_accounts()
+            .find_map(|(capability, account_id)| {
+                if capability == cap {
+                    Some(account_id.to_string())
+                } else {
+                    None
+                }
+            })
+            .or_else(|| {
+                self.client
+                    .session()
+                    .primary_accounts()
+                    .find_map(|(capability, account_id)| {
+                        if capability == "urn:ietf:params:jmap:core" {
+                            Some(account_id.to_string())
+                        } else {
+                            None
+                        }
+                    })
+            })
+            .unwrap_or_default();
+        self.account_cache.insert(cap.to_string(), id.clone());
+        id
+    }
+
+    /// Check if the session supports a given capability.
+    pub fn has_capability(&self, cap: &str) -> bool {
+        self.client.session().has_capability(cap)
+    }
+
+    /// Access the underlying `jmap_client::Client`.
+    pub fn inner(&self) -> &jmap_client::client::Client {
+        &self.client
+    }
+
+    /// Send a raw JMAP POST request using the session's authentication.
+    ///
+    /// This is used for JMAP methods not covered by the typed crate API
+    /// (e.g., Contact/query, CalendarEvent/query). Builds the request body
+    /// with the `using` array and `methodCalls`, sends via `reqwest`, and
+    /// returns the parsed JSON response.
+    pub fn post(
+        &self,
+        capabilities: &[&str],
+        method_calls: serde_json::Value,
+    ) -> Result<serde_json::Value, String> {
+        // Build the using array from capabilities
+        let mut using = vec!["urn:ietf:params:jmap:core".to_string()];
+        for cap in capabilities {
+            using.push(cap.to_string());
+        }
+
+        // Build the request body
+        let request_body = serde_json::json!({
+            "using": using,
+            "methodCalls": method_calls
+        });
+
+        // Send via reqwest using the session's auth headers
+        let session = self.client.session();
+        let headers = self.client.headers();
+
+        let client = reqwest::blocking::Client::builder()
+            .timeout(std::time::Duration::from_secs(30))
+            .build()
+            .map_err(|e| format!("Failed to build HTTP client: {}", e))?;
+
+        let response = client
+            .post(session.api_url())
+            .headers(headers.clone())
+            .body(serde_json::to_string(&request_body).map_err(|e| format!("JSON error: {}", e))?)
+            .send()
+            .map_err(|e| format!("Request failed: {}", e))?;
+
+        let status = response.status();
+        let body = response
+            .text()
+            .map_err(|e| format!("Failed to read response body: {}", e))?;
+
+        if !status.is_success() {
+            let detail = parse_error_detail(&body);
+            let msg = match detail {
+                Some(ref d) => format!("Server returned {status}: {d}"),
+                None => {
+                    let snippet = if body.len() > 500 {
+                        format!("{}...", &body[..500])
+                    } else {
+                        body.clone()
+                    };
+                    if snippet.is_empty() {
+                        format!("Server returned {status} (empty body)")
+                    } else {
+                        format!("Server returned {status}: {snippet}")
+                    }
+                }
+            };
+            tracing::error!(
+                name = "jmap.post.http_error",
+                status = %status.as_u16(),
+                body = %body,
+                "JMAP POST returned non-success HTTP status"
             );
-            r
+            return Err(msg);
         }
-        Err(e) => {
-            if let ureq::Error::Status(code, response) = e {
-                let body = response.into_string().unwrap_or_default();
-                return Err(format!("JMAP Error {}: {}", code, body));
-            }
-            return Err(e.to_string());
-        }
-    };
 
-    resp.into_json().map_err(|e| e.to_string())
+        let json: serde_json::Value = serde_json::from_str(&body).map_err(|e| {
+            let snippet = if body.len() > 500 {
+                format!("{}...", &body[..500])
+            } else {
+                body.clone()
+            };
+            tracing::error!(
+                name = "jmap.post.parse_error",
+                error = %e,
+                body = %snippet,
+                "Failed to parse JMAP response as JSON"
+            );
+            format!("Failed to parse response as JSON: {e}: {snippet}")
+        })?;
+        Ok(json)
+    }
 }
 
 /// Check if a JMAP response contains method-level errors (RFC 8620 §3.6.2).
@@ -95,7 +204,11 @@ pub fn jmap_call(
 /// ```
 /// The `type` field is mandatory; `description` is optional.
 /// Returns the first error found as a formatted string, or None.
-pub fn jmap_check_errors(res: &Value) -> Option<String> {
+///
+/// **Note:** This function is kept for use in tests and legacy inline
+/// error checks. Production code should prefer typed methods from
+/// `jmap_client::Client` which return `Result<T, Error>` directly.
+pub fn jmap_check_errors(res: &serde_json::Value) -> Option<String> {
     if let Some(method_responses) = res.get("methodResponses").and_then(|mr| mr.as_array()) {
         for resp in method_responses {
             if let Some(resp_arr) = resp.as_array()
@@ -121,80 +234,9 @@ pub fn jmap_check_errors(res: &Value) -> Option<String> {
     None
 }
 
-pub fn get_account_id(primary_accounts: &Value, cap: &str) -> String {
-    primary_accounts[cap]
-        .as_str()
-        .or_else(|| primary_accounts["urn:ietf:params:jmap:core"].as_str())
-        .unwrap_or("")
-        .to_string()
-}
-
 #[cfg(test)]
 mod tests {
     use serde_json::json;
-
-    use super::get_account_id;
-
-    #[test]
-    fn test_get_account_id_exact_match() {
-        let accs = json!({
-            "urn:ietf:params:jmap:mail": "account-mail-123",
-            "urn:ietf:params:jmap:contacts": "account-contacts-456"
-        });
-        assert_eq!(
-            get_account_id(&accs, "urn:ietf:params:jmap:mail"),
-            "account-mail-123"
-        );
-        assert_eq!(
-            get_account_id(&accs, "urn:ietf:params:jmap:contacts"),
-            "account-contacts-456"
-        );
-    }
-
-    #[test]
-    fn test_get_account_id_fallback_to_core() {
-        let accs = json!({
-            "urn:ietf:params:jmap:core": "fallback-account"
-        });
-        assert_eq!(
-            get_account_id(&accs, "urn:ietf:params:jmap:mail"),
-            "fallback-account"
-        );
-    }
-
-    #[test]
-    fn test_get_account_id_nothing_matches() {
-        let accs = json!({
-            "other:capability": "some-id"
-        });
-        assert_eq!(get_account_id(&accs, "urn:ietf:params:jmap:mail"), "");
-    }
-
-    #[test]
-    fn test_get_account_id_empty_object() {
-        let accs = json!({});
-        assert_eq!(get_account_id(&accs, "urn:ietf:params:jmap:mail"), "");
-    }
-
-    #[test]
-    fn test_get_account_id_cap_matches_is_preferred() {
-        let accs = json!({
-            "urn:ietf:params:jmap:mail": "mail-account",
-            "urn:ietf:params:jmap:core": "core-account"
-        });
-        assert_eq!(
-            get_account_id(&accs, "urn:ietf:params:jmap:mail"),
-            "mail-account"
-        );
-    }
-
-    #[test]
-    fn test_get_account_id_null_value_in_primary_accounts() {
-        let accs = json!({
-            "urn:ietf:params:jmap:mail": null
-        });
-        assert_eq!(get_account_id(&accs, "urn:ietf:params:jmap:mail"), "");
-    }
 
     use super::jmap_check_errors;
 
@@ -252,89 +294,5 @@ mod tests {
             jmap_check_errors(&res),
             Some("type: accountNotFound (callId: 1)".to_string())
         );
-    }
-
-    use super::{get_jmap_session, jmap_call};
-    use crate::config::JmapClient;
-    use std::io::{Read, Write};
-    use std::net::TcpListener;
-    use std::thread;
-
-    fn spawn_mock_server(response: impl Into<String>) -> String {
-        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
-        let port = listener.local_addr().unwrap().port();
-        let response_str = response.into();
-        thread::spawn(move || {
-            if let Ok((mut stream, _)) = listener.accept() {
-                let mut buf = [0; 4096];
-                let _ = stream.read(&mut buf);
-                let _ = stream.write_all(response_str.as_bytes());
-                std::thread::sleep(std::time::Duration::from_millis(200));
-            }
-        });
-        format!("http://127.0.0.1:{}", port)
-    }
-
-    #[test]
-    fn test_get_jmap_session_success() {
-        rustls::crypto::ring::default_provider()
-            .install_default()
-            .ok();
-        let response = "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\n\r\n{\"apiUrl\": \"/api\", \"primaryAccounts\": {\"core\": \"acc1\"}}";
-        let url = spawn_mock_server(response);
-        let client = JmapClient {
-            url: url.clone(),
-            token: "tok".to_string(),
-        };
-        let res = get_jmap_session(&client);
-        assert!(res.is_ok());
-        let (api_url, token, accs) = res.unwrap();
-        assert_eq!(api_url, "/api");
-        assert_eq!(token, "tok");
-        assert_eq!(accs["core"], "acc1");
-    }
-
-    #[test]
-    fn test_get_jmap_session_error_status() {
-        rustls::crypto::ring::default_provider()
-            .install_default()
-            .ok();
-        let response = "HTTP/1.1 401 Unauthorized\r\nContent-Length: 5\r\n\r\nerror";
-        let url = spawn_mock_server(response);
-        let client = JmapClient {
-            url: url.clone(),
-            token: "tok".to_string(),
-        };
-        let res = get_jmap_session(&client);
-        assert!(res.is_err());
-        assert!(res.unwrap_err().contains("JMAP Error 401"));
-    }
-
-    #[test]
-    fn test_jmap_call_success() {
-        rustls::crypto::ring::default_provider()
-            .install_default()
-            .ok();
-        let body = "{\"methodResponses\": []}";
-        let response = format!(
-            "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\n\r\n{}",
-            body.len(),
-            body
-        );
-        let url = spawn_mock_server(response);
-        let res = jmap_call(&url, "token", &["cap1"], json!([]));
-        assert!(res.is_ok(), "Error: {}", res.unwrap_err());
-    }
-
-    #[test]
-    fn test_jmap_call_error_status() {
-        rustls::crypto::ring::default_provider()
-            .install_default()
-            .ok();
-        let response = "HTTP/1.1 500 Internal Server Error\r\nContent-Length: 4\r\n\r\nfail";
-        let url = spawn_mock_server(response);
-        let res = jmap_call(&url, "token", &[], json!([]));
-        assert!(res.is_err());
-        assert!(res.unwrap_err().contains("JMAP Error 500"));
     }
 }

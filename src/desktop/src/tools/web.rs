@@ -392,14 +392,12 @@ mod tests {
             body_str
         );
         std::thread::spawn(move || {
-            for stream in listener.incoming() {
-                if let Ok(mut stream) = stream {
-                    use std::io::{Read, Write};
-                    let mut buf = [0; 4096];
-                    let _ = stream.read(&mut buf);
-                    let _ = stream.write_all(response_str.as_bytes());
-                    std::thread::sleep(std::time::Duration::from_millis(200));
-                }
+            for mut stream in listener.incoming().flatten() {
+                use std::io::{Read, Write};
+                let mut buf = [0; 4096];
+                let _ = stream.read(&mut buf);
+                let _ = stream.write_all(response_str.as_bytes());
+                std::thread::sleep(std::time::Duration::from_millis(200));
             }
         });
         format!("http://127.0.0.1:{}", port)
@@ -753,15 +751,13 @@ mod tests {
         let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
         let port = listener.local_addr().unwrap().port();
         std::thread::spawn(move || {
-            for stream in listener.incoming() {
-                if let Ok(mut stream) = stream {
-                    use std::io::{Read, Write};
-                    let mut buf = [0; 4096];
-                    let _ = stream.read(&mut buf);
-                    let response =
-                        "HTTP/1.1 500 Internal Server Error\r\nContent-Length: 5\r\n\r\nerror";
-                    let _ = stream.write_all(response.as_bytes());
-                }
+            for mut stream in listener.incoming().flatten() {
+                use std::io::{Read, Write};
+                let mut buf = [0; 4096];
+                let _ = stream.read(&mut buf);
+                let response =
+                    "HTTP/1.1 500 Internal Server Error\r\nContent-Length: 5\r\n\r\nerror";
+                let _ = stream.write_all(response.as_bytes());
             }
         });
 

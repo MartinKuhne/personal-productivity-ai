@@ -76,23 +76,28 @@ impl ToolRegistry {
     }
 
     pub fn get_schema(&self, config: &AppConfig, prompt: &str) -> serde_json::Value {
+        let mut enabled_tools: Vec<_> = self
+            .tools
+            .values()
+            .filter(|tool| tool.is_enabled(config, prompt))
+            .collect();
+        enabled_tools.sort_by_key(|tool| tool.name());
+
         let mut tools = Vec::new();
-        for tool in self.tools.values() {
-            if tool.is_enabled(config, prompt) {
-                let mut params = tool.parameters_schema();
-                // LM Studio requires `properties` to be present in the parameters schema.
-                if params.get("properties").is_none() {
-                    params["properties"] = serde_json::Value::Object(Default::default());
-                }
-                tools.push(serde_json::json!({
-                    "type": "function",
-                    "function": {
-                        "name": tool.name(),
-                        "description": tool.description(),
-                        "parameters": params
-                    }
-                }));
+        for tool in enabled_tools {
+            let mut params = tool.parameters_schema();
+            // LM Studio requires `properties` to be present in the parameters schema.
+            if params.get("properties").is_none() {
+                params["properties"] = serde_json::Value::Object(Default::default());
             }
+            tools.push(serde_json::json!({
+                "type": "function",
+                "function": {
+                    "name": tool.name(),
+                    "description": tool.description(),
+                    "parameters": params
+                }
+            }));
         }
         serde_json::Value::Array(tools)
     }
@@ -130,6 +135,7 @@ impl ToolRegistry {
         self.register(Box::new(CsvAddRowsTool));
         self.register(Box::new(CsvDeleteRowsTool));
         self.register(Box::new(CsvQueryTool));
+        self.register(Box::new(GetWeatherTool));
     }
 }
 
@@ -774,176 +780,6 @@ impl Tool for WebSearchTool {
     }
 }
 
-struct SearchCalendarTool;
-impl Tool for SearchCalendarTool {
-    fn name(&self) -> &'static str {
-        "search_calendar"
-    }
-    fn description(&self) -> &'static str {
-        "Search the calendar by keyword."
-    }
-    fn input_type(&self) -> TypeId {
-        TypeId::of::<dtos::SearchCalendarInput>()
-    }
-    fn parameters_schema(&self) -> serde_json::Value {
-        json_schema::<dtos::SearchCalendarInput>()
-    }
-    fn is_enabled(&self, config: &AppConfig, _: &str) -> bool {
-        !config.caldav_clients.is_empty()
-    }
-    fn safety(&self) -> crate::tools::Safety {
-        crate::tools::Safety::ReadOnly
-    }
-    fn execute(&self, ctx: &ToolContext, args: &str) -> Result<serde_json::Value, String> {
-        let input: dtos::SearchCalendarInput =
-            serde_json::from_str(args).map_err(|e| format!("Invalid args: {}", e))?;
-        crate::tools::caldav::tool_search_calendar(ctx.config, &input.keyword).map(|r| {
-            serde_json::to_value(r).unwrap_or_else(|e| serde_json::json!({"error": e.to_string()}))
-        })
-    }
-}
-
-struct GetCalendarTool;
-impl Tool for GetCalendarTool {
-    fn name(&self) -> &'static str {
-        "get_calendar"
-    }
-    fn description(&self) -> &'static str {
-        "Get calendar items by date range."
-    }
-    fn input_type(&self) -> TypeId {
-        TypeId::of::<dtos::GetCalendarInput>()
-    }
-    fn parameters_schema(&self) -> serde_json::Value {
-        json_schema::<dtos::GetCalendarInput>()
-    }
-    fn is_enabled(&self, config: &AppConfig, _: &str) -> bool {
-        !config.caldav_clients.is_empty()
-    }
-    fn safety(&self) -> crate::tools::Safety {
-        crate::tools::Safety::ReadOnly
-    }
-    fn execute(&self, ctx: &ToolContext, args: &str) -> Result<serde_json::Value, String> {
-        let input: dtos::GetCalendarInput =
-            serde_json::from_str(args).map_err(|e| format!("Invalid args: {}", e))?;
-        crate::tools::caldav::tool_get_calendar(ctx.config, &input.start_date, &input.end_date).map(
-            |r| {
-                serde_json::to_value(r)
-                    .unwrap_or_else(|e| serde_json::json!({"error": e.to_string()}))
-            },
-        )
-    }
-}
-
-struct GetCalendarItemTool;
-impl Tool for GetCalendarItemTool {
-    fn name(&self) -> &'static str {
-        "get_calendar_item"
-    }
-    fn description(&self) -> &'static str {
-        "Get a specific calendar item by its full href. IMPORTANT: Use the exact, full 'href' value returned by search or get tools (e.g., '/dav/calendars/user/.../item.ics'). Do not use just the UUID."
-    }
-    fn input_type(&self) -> TypeId {
-        TypeId::of::<dtos::GetCalendarItemInput>()
-    }
-    fn parameters_schema(&self) -> serde_json::Value {
-        json_schema::<dtos::GetCalendarItemInput>()
-    }
-    fn is_enabled(&self, config: &AppConfig, _: &str) -> bool {
-        !config.caldav_clients.is_empty()
-    }
-    fn safety(&self) -> crate::tools::Safety {
-        crate::tools::Safety::ReadOnly
-    }
-    fn execute(&self, ctx: &ToolContext, args: &str) -> Result<serde_json::Value, String> {
-        let input: dtos::GetCalendarItemInput =
-            serde_json::from_str(args).map_err(|e| format!("Invalid args: {}", e))?;
-        crate::tools::caldav::tool_get_calendar_item(ctx.config, &input.href).map(|r| {
-            serde_json::to_value(r).unwrap_or_else(|e| serde_json::json!({"error": e.to_string()}))
-        })
-    }
-}
-
-struct AddCalendarItemTool;
-impl Tool for AddCalendarItemTool {
-    fn name(&self) -> &'static str {
-        "add_calendar_item"
-    }
-    fn description(&self) -> &'static str {
-        "Add a new calendar item."
-    }
-    fn input_type(&self) -> TypeId {
-        TypeId::of::<dtos::AddCalendarItemInput>()
-    }
-    fn parameters_schema(&self) -> serde_json::Value {
-        json_schema::<dtos::AddCalendarItemInput>()
-    }
-    fn is_enabled(&self, config: &AppConfig, _: &str) -> bool {
-        !config.caldav_clients.is_empty()
-    }
-    fn execute(&self, ctx: &ToolContext, args: &str) -> Result<serde_json::Value, String> {
-        let input: dtos::AddCalendarItemInput =
-            serde_json::from_str(args).map_err(|e| format!("Invalid args: {}", e))?;
-        crate::tools::caldav::tool_add_calendar_item(ctx.config, &input.item_json).map(|r| {
-            serde_json::to_value(r).unwrap_or_else(|e| serde_json::json!({"error": e.to_string()}))
-        })
-    }
-}
-
-struct UpdateCalendarItemTool;
-impl Tool for UpdateCalendarItemTool {
-    fn name(&self) -> &'static str {
-        "update_calendar_item"
-    }
-    fn description(&self) -> &'static str {
-        "Update a calendar item."
-    }
-    fn input_type(&self) -> TypeId {
-        TypeId::of::<dtos::UpdateCalendarItemInput>()
-    }
-    fn parameters_schema(&self) -> serde_json::Value {
-        json_schema::<dtos::UpdateCalendarItemInput>()
-    }
-    fn is_enabled(&self, config: &AppConfig, _: &str) -> bool {
-        !config.caldav_clients.is_empty()
-    }
-    fn execute(&self, ctx: &ToolContext, args: &str) -> Result<serde_json::Value, String> {
-        let input: dtos::UpdateCalendarItemInput =
-            serde_json::from_str(args).map_err(|e| format!("Invalid args: {}", e))?;
-        crate::tools::caldav::tool_update_calendar_item(ctx.config, &input.id, &input.update_json)
-            .map(|r| {
-                serde_json::to_value(r)
-                    .unwrap_or_else(|e| serde_json::json!({"error": e.to_string()}))
-            })
-    }
-}
-
-struct DeleteCalendarItemTool;
-impl Tool for DeleteCalendarItemTool {
-    fn name(&self) -> &'static str {
-        "delete_calendar_item"
-    }
-    fn description(&self) -> &'static str {
-        "Delete a calendar item."
-    }
-    fn input_type(&self) -> TypeId {
-        TypeId::of::<dtos::DeleteCalendarItemInput>()
-    }
-    fn parameters_schema(&self) -> serde_json::Value {
-        json_schema::<dtos::DeleteCalendarItemInput>()
-    }
-    fn is_enabled(&self, config: &AppConfig, _: &str) -> bool {
-        !config.caldav_clients.is_empty()
-    }
-    fn execute(&self, ctx: &ToolContext, args: &str) -> Result<serde_json::Value, String> {
-        let input: dtos::DeleteCalendarItemInput =
-            serde_json::from_str(args).map_err(|e| format!("Invalid args: {}", e))?;
-        crate::tools::caldav::tool_delete_calendar_item(ctx.config, &input.id).map(|r| {
-            serde_json::to_value(r).unwrap_or_else(|e| serde_json::json!({"error": e.to_string()}))
-        })
-    }
-}
-
 struct SearchEmailTool;
 impl Tool for SearchEmailTool {
     fn name(&self) -> &'static str {
@@ -1053,7 +889,7 @@ impl Tool for SearchContactTool {
         "search_contact"
     }
     fn description(&self) -> &'static str {
-        "Search contacts by keyword."
+        "Search contacts by keyword using CardDAV."
     }
     fn input_type(&self) -> TypeId {
         TypeId::of::<dtos::SearchContactInput>()
@@ -1062,16 +898,7 @@ impl Tool for SearchContactTool {
         json_schema::<dtos::SearchContactInput>()
     }
     fn is_enabled(&self, config: &AppConfig, _: &str) -> bool {
-        if config
-            .feature_flags
-            .get("useDAVForContacts")
-            .copied()
-            .unwrap_or(false)
-        {
-            !config.caldav_clients.is_empty()
-        } else {
-            !config.jmap_clients.is_empty()
-        }
+        !config.caldav_clients.is_empty()
     }
     fn safety(&self) -> crate::tools::Safety {
         crate::tools::Safety::ReadOnly
@@ -1079,18 +906,7 @@ impl Tool for SearchContactTool {
     fn execute(&self, ctx: &ToolContext, args: &str) -> Result<serde_json::Value, String> {
         let input: dtos::SearchContactInput =
             serde_json::from_str(args).map_err(|e| format!("Invalid args: {}", e))?;
-        if ctx
-            .config
-            .feature_flags
-            .get("useDAVForContacts")
-            .copied()
-            .unwrap_or(false)
-        {
-            crate::tools::carddav::tool_search_contact(ctx.config, &input.keyword)
-        } else {
-            crate::tools::jmap::tool_search_contact(ctx.config, &input.keyword)
-        }
-        .map(|r| {
+        crate::tools::carddav::tool_search_contact(ctx.config, &input.keyword).map(|r| {
             serde_json::to_value(r).unwrap_or_else(|e| serde_json::json!({"error": e.to_string()}))
         })
     }
@@ -1102,7 +918,7 @@ impl Tool for AddContactTool {
         "add_contact"
     }
     fn description(&self) -> &'static str {
-        "Add a new contact."
+        "Add a new contact using CardDAV."
     }
     fn input_type(&self) -> TypeId {
         TypeId::of::<dtos::AddContactInput>()
@@ -1111,32 +927,12 @@ impl Tool for AddContactTool {
         json_schema::<dtos::AddContactInput>()
     }
     fn is_enabled(&self, config: &AppConfig, _: &str) -> bool {
-        if config
-            .feature_flags
-            .get("useDAVForContacts")
-            .copied()
-            .unwrap_or(false)
-        {
-            !config.caldav_clients.is_empty()
-        } else {
-            !config.jmap_clients.is_empty()
-        }
+        !config.caldav_clients.is_empty()
     }
     fn execute(&self, ctx: &ToolContext, args: &str) -> Result<serde_json::Value, String> {
         let input: dtos::AddContactInput =
             serde_json::from_str(args).map_err(|e| format!("Invalid args: {}", e))?;
-        if ctx
-            .config
-            .feature_flags
-            .get("useDAVForContacts")
-            .copied()
-            .unwrap_or(false)
-        {
-            crate::tools::carddav::tool_add_contact(ctx.config, &input.contact_json)
-        } else {
-            crate::tools::jmap::tool_add_contact(ctx.config, &input.contact_json)
-        }
-        .map(|r| {
+        crate::tools::carddav::tool_add_contact(ctx.config, &input.contact_json).map(|r| {
             serde_json::to_value(r).unwrap_or_else(|e| serde_json::json!({"error": e.to_string()}))
         })
     }
@@ -1148,7 +944,7 @@ impl Tool for GetContactTool {
         "get_contact"
     }
     fn description(&self) -> &'static str {
-        "Get contact by id."
+        "Get contact by id using CardDAV."
     }
     fn input_type(&self) -> TypeId {
         TypeId::of::<dtos::GetContactInput>()
@@ -1157,16 +953,7 @@ impl Tool for GetContactTool {
         json_schema::<dtos::GetContactInput>()
     }
     fn is_enabled(&self, config: &AppConfig, _: &str) -> bool {
-        if config
-            .feature_flags
-            .get("useDAVForContacts")
-            .copied()
-            .unwrap_or(false)
-        {
-            !config.caldav_clients.is_empty()
-        } else {
-            !config.jmap_clients.is_empty()
-        }
+        !config.caldav_clients.is_empty()
     }
     fn safety(&self) -> crate::tools::Safety {
         crate::tools::Safety::ReadOnly
@@ -1174,18 +961,179 @@ impl Tool for GetContactTool {
     fn execute(&self, ctx: &ToolContext, args: &str) -> Result<serde_json::Value, String> {
         let input: dtos::GetContactInput =
             serde_json::from_str(args).map_err(|e| format!("Invalid args: {}", e))?;
-        if ctx
-            .config
-            .feature_flags
-            .get("useDAVForContacts")
-            .copied()
-            .unwrap_or(false)
-        {
-            crate::tools::carddav::tool_get_contact(ctx.config, &input.id)
-        } else {
-            crate::tools::jmap::tool_get_contact(ctx.config, &input.id)
-        }
-        .map(|r| {
+        crate::tools::carddav::tool_get_contact(ctx.config, &input.id).map(|r| {
+            serde_json::to_value(r).unwrap_or_else(|e| serde_json::json!({"error": e.to_string()}))
+        })
+    }
+}
+
+// --- Calendar Tools ---
+
+struct SearchCalendarTool;
+impl Tool for SearchCalendarTool {
+    fn name(&self) -> &'static str {
+        "search_calendar"
+    }
+    fn description(&self) -> &'static str {
+        "Search calendar events by keyword using CalDAV."
+    }
+    fn input_type(&self) -> TypeId {
+        TypeId::of::<dtos::SearchCalendarInput>()
+    }
+    fn parameters_schema(&self) -> serde_json::Value {
+        json_schema::<dtos::SearchCalendarInput>()
+    }
+    fn is_enabled(&self, config: &AppConfig, _: &str) -> bool {
+        !config.caldav_clients.is_empty()
+    }
+    fn safety(&self) -> crate::tools::Safety {
+        crate::tools::Safety::ReadOnly
+    }
+    fn execute(&self, ctx: &ToolContext, args: &str) -> Result<serde_json::Value, String> {
+        let input: dtos::SearchCalendarInput =
+            serde_json::from_str(args).map_err(|e| format!("Invalid args: {}", e))?;
+        crate::tools::caldav::tool_search_calendar(ctx.config, &input.keyword).map(|r| {
+            serde_json::to_value(r).unwrap_or_else(|e| serde_json::json!({"error": e.to_string()}))
+        })
+    }
+}
+
+struct GetCalendarTool;
+impl Tool for GetCalendarTool {
+    fn name(&self) -> &'static str {
+        "get_calendar"
+    }
+    fn description(&self) -> &'static str {
+        "Get calendar events by date range using CalDAV."
+    }
+    fn input_type(&self) -> TypeId {
+        TypeId::of::<dtos::GetCalendarInput>()
+    }
+    fn parameters_schema(&self) -> serde_json::Value {
+        json_schema::<dtos::GetCalendarInput>()
+    }
+    fn is_enabled(&self, config: &AppConfig, _: &str) -> bool {
+        !config.caldav_clients.is_empty()
+    }
+    fn safety(&self) -> crate::tools::Safety {
+        crate::tools::Safety::ReadOnly
+    }
+    fn execute(&self, ctx: &ToolContext, args: &str) -> Result<serde_json::Value, String> {
+        let input: dtos::GetCalendarInput =
+            serde_json::from_str(args).map_err(|e| format!("Invalid args: {}", e))?;
+        crate::tools::caldav::tool_get_calendar(ctx.config, &input.start_date, &input.end_date).map(
+            |r| {
+                serde_json::to_value(r)
+                    .unwrap_or_else(|e| serde_json::json!({"error": e.to_string()}))
+            },
+        )
+    }
+}
+
+struct GetCalendarItemTool;
+impl Tool for GetCalendarItemTool {
+    fn name(&self) -> &'static str {
+        "get_calendar_item"
+    }
+    fn description(&self) -> &'static str {
+        "Get a specific calendar item by its full href."
+    }
+    fn input_type(&self) -> TypeId {
+        TypeId::of::<dtos::GetCalendarItemInput>()
+    }
+    fn parameters_schema(&self) -> serde_json::Value {
+        json_schema::<dtos::GetCalendarItemInput>()
+    }
+    fn is_enabled(&self, config: &AppConfig, _: &str) -> bool {
+        !config.caldav_clients.is_empty()
+    }
+    fn safety(&self) -> crate::tools::Safety {
+        crate::tools::Safety::ReadOnly
+    }
+    fn execute(&self, ctx: &ToolContext, args: &str) -> Result<serde_json::Value, String> {
+        let input: dtos::GetCalendarItemInput =
+            serde_json::from_str(args).map_err(|e| format!("Invalid args: {}", e))?;
+        crate::tools::caldav::tool_get_calendar_item(ctx.config, &input.href).map(|r| {
+            serde_json::to_value(r).unwrap_or_else(|e| serde_json::json!({"error": e.to_string()}))
+        })
+    }
+}
+
+struct AddCalendarItemTool;
+impl Tool for AddCalendarItemTool {
+    fn name(&self) -> &'static str {
+        "add_calendar_item"
+    }
+    fn description(&self) -> &'static str {
+        "Add a new calendar item using CalDAV."
+    }
+    fn input_type(&self) -> TypeId {
+        TypeId::of::<dtos::AddCalendarItemInput>()
+    }
+    fn parameters_schema(&self) -> serde_json::Value {
+        json_schema::<dtos::AddCalendarItemInput>()
+    }
+    fn is_enabled(&self, config: &AppConfig, _: &str) -> bool {
+        !config.caldav_clients.is_empty()
+    }
+    fn execute(&self, ctx: &ToolContext, args: &str) -> Result<serde_json::Value, String> {
+        let input: dtos::AddCalendarItemInput =
+            serde_json::from_str(args).map_err(|e| format!("Invalid args: {}", e))?;
+        crate::tools::caldav::tool_add_calendar_item(ctx.config, &input.item_json).map(|r| {
+            serde_json::to_value(r).unwrap_or_else(|e| serde_json::json!({"error": e.to_string()}))
+        })
+    }
+}
+
+struct UpdateCalendarItemTool;
+impl Tool for UpdateCalendarItemTool {
+    fn name(&self) -> &'static str {
+        "update_calendar_item"
+    }
+    fn description(&self) -> &'static str {
+        "Update a calendar item using CalDAV."
+    }
+    fn input_type(&self) -> TypeId {
+        TypeId::of::<dtos::UpdateCalendarItemInput>()
+    }
+    fn parameters_schema(&self) -> serde_json::Value {
+        json_schema::<dtos::UpdateCalendarItemInput>()
+    }
+    fn is_enabled(&self, config: &AppConfig, _: &str) -> bool {
+        !config.caldav_clients.is_empty()
+    }
+    fn execute(&self, ctx: &ToolContext, args: &str) -> Result<serde_json::Value, String> {
+        let input: dtos::UpdateCalendarItemInput =
+            serde_json::from_str(args).map_err(|e| format!("Invalid args: {}", e))?;
+        crate::tools::caldav::tool_update_calendar_item(ctx.config, &input.id, &input.update_json)
+            .map(|r| {
+                serde_json::to_value(r)
+                    .unwrap_or_else(|e| serde_json::json!({"error": e.to_string()}))
+            })
+    }
+}
+
+struct DeleteCalendarItemTool;
+impl Tool for DeleteCalendarItemTool {
+    fn name(&self) -> &'static str {
+        "delete_calendar_item"
+    }
+    fn description(&self) -> &'static str {
+        "Delete a calendar item using CalDAV."
+    }
+    fn input_type(&self) -> TypeId {
+        TypeId::of::<dtos::DeleteCalendarItemInput>()
+    }
+    fn parameters_schema(&self) -> serde_json::Value {
+        json_schema::<dtos::DeleteCalendarItemInput>()
+    }
+    fn is_enabled(&self, config: &AppConfig, _: &str) -> bool {
+        !config.caldav_clients.is_empty()
+    }
+    fn execute(&self, ctx: &ToolContext, args: &str) -> Result<serde_json::Value, String> {
+        let input: dtos::DeleteCalendarItemInput =
+            serde_json::from_str(args).map_err(|e| format!("Invalid args: {}", e))?;
+        crate::tools::caldav::tool_delete_calendar_item(ctx.config, &input.id).map(|r| {
             serde_json::to_value(r).unwrap_or_else(|e| serde_json::json!({"error": e.to_string()}))
         })
     }
@@ -1341,6 +1289,38 @@ impl Tool for CsvQueryTool {
     }
 }
 
+struct GetWeatherTool;
+impl Tool for GetWeatherTool {
+    fn name(&self) -> &'static str {
+        "get_weather"
+    }
+    fn description(&self) -> &'static str {
+        "Get current weather and forecast for a given location and optional date range."
+    }
+    fn input_type(&self) -> TypeId {
+        TypeId::of::<dtos::GetWeatherInput>()
+    }
+    fn parameters_schema(&self) -> serde_json::Value {
+        json_schema::<dtos::GetWeatherInput>()
+    }
+    fn is_enabled(&self, _: &AppConfig, _: &str) -> bool {
+        true
+    }
+    fn safety(&self) -> crate::tools::Safety {
+        crate::tools::Safety::ReadOnly
+    }
+    fn execute(&self, _ctx: &ToolContext, args: &str) -> Result<serde_json::Value, String> {
+        let input: dtos::GetWeatherInput =
+            serde_json::from_str(args).map_err(|e| format!("Invalid args: {}", e))?;
+        crate::tools::weather::tool_get_weather(&input.location, input.date_range.as_deref()).map(
+            |r| {
+                serde_json::to_value(r)
+                    .unwrap_or_else(|e| serde_json::json!({"error": e.to_string()}))
+            },
+        )
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1412,9 +1392,32 @@ mod tests {
                 priority: 100,
             });
         let mut libs: Vec<_> = config.content_libraries.iter().collect();
-        libs.sort_by(|a, b| b.priority.cmp(&a.priority));
+        libs.sort_by_key(|b| std::cmp::Reverse(b.priority));
         assert_eq!(libs[0].name, "High");
         assert_eq!(libs[1].name, "Low");
+    }
+
+    #[test]
+    fn test_get_schema_is_sorted_alphabetically() {
+        let registry = ToolRegistry::new();
+        let config = AppConfig::default();
+        let schema = registry.get_schema(&config, "");
+        let arr = schema.as_array().expect("schema should be array");
+        let names: Vec<&str> = arr
+            .iter()
+            .map(|t| {
+                t.get("function")
+                    .and_then(|f| f.get("name"))
+                    .and_then(|n| n.as_str())
+                    .unwrap()
+            })
+            .collect();
+        let mut sorted = names.clone();
+        sorted.sort();
+        assert_eq!(
+            names, sorted,
+            "Tool schema list must be sorted alphabetically for prompt caching consistency"
+        );
     }
 
     #[test]
@@ -1465,24 +1468,22 @@ mod tests {
     #[test]
     fn test_tool_call_debug_mode_feature_flag() {
         let mut config = AppConfig::default();
-        assert_eq!(
-            config
+        assert!(
+            !config
                 .feature_flags
                 .get("toolCallDebugMode")
                 .copied()
-                .unwrap_or(false),
-            false
+                .unwrap_or(false)
         );
         config
             .feature_flags
             .insert("toolCallDebugMode".to_string(), true);
-        assert_eq!(
+        assert!(
             config
                 .feature_flags
                 .get("toolCallDebugMode")
                 .copied()
-                .unwrap_or(false),
-            true
+                .unwrap_or(false)
         );
         let ctx = test_ctx(&config);
         let res = execute_tool(&ctx, "unknown_tool", "{}");
@@ -1849,5 +1850,78 @@ mod tests {
             .collect();
         assert!(!names.contains(&"create_csv"));
         assert!(!names.contains(&"list_csv"));
+    }
+
+    #[test]
+    fn test_weather_tool_in_registry() {
+        let config = AppConfig::default();
+        let schema = get_tools_schema(&config, "what is the weather");
+        let tools = schema.as_array().unwrap();
+        let names: Vec<&str> = tools
+            .iter()
+            .filter_map(|t| t["function"]["name"].as_str())
+            .collect();
+        assert!(names.contains(&"get_weather"));
+
+        let ctx = test_ctx(&config);
+        let res = execute_tool(&ctx, "get_weather", r#"{"location":"Seattle, WA"}"#);
+        assert!(!res.contains("Tool get_weather not found"));
+
+        assert_eq!(safety_of("get_weather"), crate::tools::Safety::ReadOnly);
+    }
+
+    #[test]
+    fn test_calendar_tools_in_registry() {
+        let mut config = AppConfig::default();
+        let schema_empty = get_tools_schema(&config, "check my schedule");
+        let names_empty: Vec<&str> = schema_empty
+            .as_array()
+            .unwrap()
+            .iter()
+            .filter_map(|t| t["function"]["name"].as_str())
+            .collect();
+        assert!(!names_empty.contains(&"search_calendar"));
+
+        config.caldav_clients.insert(
+            "test_cal".to_string(),
+            crate::config::CalDavClient {
+                url: "http://localhost:8080".to_string(),
+                username: "user".to_string(),
+                password: "pass".to_string(),
+            },
+        );
+
+        let schema = get_tools_schema(&config, "check my schedule");
+        let tools = schema.as_array().unwrap();
+        let names: Vec<&str> = tools
+            .iter()
+            .filter_map(|t| t["function"]["name"].as_str())
+            .collect();
+
+        assert!(names.contains(&"search_calendar"));
+        assert!(names.contains(&"get_calendar"));
+        assert!(names.contains(&"get_calendar_item"));
+        assert!(names.contains(&"add_calendar_item"));
+        assert!(names.contains(&"update_calendar_item"));
+        assert!(names.contains(&"delete_calendar_item"));
+
+        assert_eq!(safety_of("search_calendar"), crate::tools::Safety::ReadOnly);
+        assert_eq!(safety_of("get_calendar"), crate::tools::Safety::ReadOnly);
+        assert_eq!(
+            safety_of("get_calendar_item"),
+            crate::tools::Safety::ReadOnly
+        );
+        assert_eq!(
+            safety_of("add_calendar_item"),
+            crate::tools::Safety::Mutating
+        );
+        assert_eq!(
+            safety_of("update_calendar_item"),
+            crate::tools::Safety::Mutating
+        );
+        assert_eq!(
+            safety_of("delete_calendar_item"),
+            crate::tools::Safety::Mutating
+        );
     }
 }

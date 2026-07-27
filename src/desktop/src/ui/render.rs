@@ -8,6 +8,21 @@ pub use crate::markdown::{
     parse_markdown_to_events, parse_yaml_to_pairs,
 };
 
+/// Dark gray stroke used as the border around every markdown table cell.
+///
+/// Matches the `from_gray(40)` convention shared by `render_code_block`
+/// (code block outline) and `render_yaml_table` (YAML metadata table
+/// outline) so all "outlined" surfaces look the same.
+///
+/// The stroke is 1 px wide and the frame that carries it uses zero
+/// inner/outer margin, so the only space the border consumes inside
+/// the Grid cell is its own 1 px on each side — see
+/// `render_table_cell` for how the pinned-width path compensates.
+const TABLE_CELL_STROKE: egui::Stroke = egui::Stroke {
+    width: 1.0,
+    color: egui::Color32::from_gray(40),
+};
+
 /// Purpose: Renders inline markdown elements.
 /// Inputs: `ui` (mut), `elems`, `needs_bullet`, `task_checked`, `indent`, `wrap`
 /// Outputs: None
@@ -290,65 +305,92 @@ fn render_heading(
 /// `ui.horizontal` (no wrap) so the cell reports its full single-line intrinsic
 /// width to the parent `Grid`; any overflow is handled by the wrapping
 /// `ScrollArea` (current pre-FTWA behaviour).
+///
+/// Every cell is wrapped in a 1 px dark-gray `Frame` (see `TABLE_CELL_STROKE`)
+/// so the rendered table shows a visible border around every cell. The frame
+/// uses zero `inner_margin` / `outer_margin`; the stroke is drawn on the
+/// inside of the cell's rect, so the cell's content area is shrunk by
+/// `TABLE_CELL_STROKE.width` (1 px) on each side. In the pinned-width path
+/// the inner layout is therefore given `w - 2 * stroke_width` so the text
+/// still fits the FTWA-assigned column.
 fn render_table_cell(ui: &mut egui::Ui, cell: &[InlineElem], pinned_width: Option<f32>) {
-    if cell.is_empty() {
-        if let Some(w) = pinned_width {
-            let min_h = ui.text_style_height(&egui::TextStyle::Body);
-            ui.allocate_at_least(egui::vec2(w, min_h), egui::Sense::hover());
-        } else {
-            ui.label("");
-        }
-        return;
-    }
-    let content = |ui: &mut egui::Ui| {
-        ui.spacing_mut().item_spacing.x = 0.0;
-        for elem in cell {
-            match elem {
-                InlineElem::Text(t, style) => {
-                    let mut rt = RichText::new(t);
-                    if style.bold {
-                        rt = rt.strong();
-                    }
-                    if style.italic {
-                        rt = rt.italics();
-                    }
-                    if style.code {
-                        rt = rt
-                            .monospace()
-                            .background_color(egui::Color32::from_gray(40));
-                    }
-                    if style.strikethrough {
-                        rt = rt.strikethrough();
-                    }
-                    ui.add(egui::Label::new(rt).wrap());
-                }
-                InlineElem::Link(url, text) => {
-                    ui.hyperlink_to(text, url);
-                }
-                InlineElem::Image(url) => {
-                    ui.label(format!("[Image: {}]", url));
-                }
-                InlineElem::Html(html) => {
-                    ui.label(RichText::new(html).italics().color(egui::Color32::GRAY));
-                }
-                InlineElem::SoftBreak => {
-                    ui.label(" ");
-                }
+    let cell_frame = egui::Frame::NONE
+        .inner_margin(egui::Margin::ZERO)
+        .outer_margin(egui::Margin::ZERO)
+        .stroke(TABLE_CELL_STROKE);
+
+    // egui::Grid cells use left_to_right(Align::Center) by default, which
+    // centers cell contents vertically within the row. We override to
+    // left_to_right(Align::Min) so the cross-axis (Y) is aligned to the
+    // top of the row instead. Crucially, left_to_right keeps the main axis
+    // the same as the Grid, so the column cursor X is preserved correctly —
+    // top_down(Align::Min) would place content at max_rect.min.x (the panel
+    // left edge) instead of the column's cursor X, clipping left-side text.
+    ui.with_layout(egui::Layout::left_to_right(egui::Align::Min), |ui| {
+        cell_frame.show(ui, |ui| {
+            // In egui::Grid pass 2, ui.available_width() is the resolved column
+            // width. Frame::NONE with inner_margin=ZERO does not shrink the inner
+            // Ui — the stroke is painted visually but does not consume content
+            // space — so we use available_width() as-is. In the pinned-width
+            // (FTWA) path we take max(pinned, available) so the cell frame
+            // expands whenever the grid column widens beyond the original estimate.
+            let avail_w = ui.available_width();
+            let inner_w = match pinned_width {
+                Some(w) => w.max(avail_w),
+                None => avail_w,
+            };
+
+            if cell.is_empty() {
+                let min_h = ui.text_style_height(&egui::TextStyle::Body);
+                ui.set_min_size(egui::vec2(inner_w, min_h));
+                return;
             }
-        }
-    };
-    if let Some(w) = pinned_width {
-        // Use `allocate_ui_with_layout` so the child Ui's `min_rect` is
-        // fed back to the parent via `advance_cursor_after_rect` (inside
-        // `scope_dyn`). The previous `allocate_at_least(vec2(w, 0.0))` +
-        // `new_child` pattern allocated zero height and never reported
-        // the child's actual height, causing Grid rows to overlap when
-        // cells wrapped to multiple lines.
-        let layout = egui::Layout::left_to_right(egui::Align::Min).with_main_wrap(true);
-        ui.allocate_ui_with_layout(egui::vec2(w, 0.0), layout, content);
-    } else {
-        ui.horizontal(content);
-    }
+
+            let content = |ui: &mut egui::Ui| {
+                ui.spacing_mut().item_spacing.x = 0.0;
+                for elem in cell {
+                    match elem {
+                        InlineElem::Text(t, style) => {
+                            let mut rt = RichText::new(t);
+                            if style.bold {
+                                rt = rt.strong();
+                            }
+                            if style.italic {
+                                rt = rt.italics();
+                            }
+                            if style.code {
+                                rt = rt
+                                    .monospace()
+                                    .background_color(egui::Color32::from_gray(40));
+                            }
+                            if style.strikethrough {
+                                rt = rt.strikethrough();
+                            }
+                            ui.add(egui::Label::new(rt).wrap());
+                        }
+                        InlineElem::Link(url, text) => {
+                            ui.hyperlink_to(text, url);
+                        }
+                        InlineElem::Image(url) => {
+                            ui.label(format!("[Image: {}]", url));
+                        }
+                        InlineElem::Html(html) => {
+                            ui.label(RichText::new(html).italics().color(egui::Color32::GRAY));
+                        }
+                        InlineElem::SoftBreak => {
+                            ui.label(" ");
+                        }
+                    }
+                }
+            };
+
+            let layout = egui::Layout::left_to_right(egui::Align::Min).with_main_wrap(true);
+            ui.allocate_ui_with_layout(egui::vec2(inner_w, 0.0), layout, |ui| {
+                ui.set_min_width(inner_w);
+                content(ui);
+            });
+        });
+    });
 }
 
 /// Purpose: Renders a table using the Fair Table Width Algorithm (FTWA).
@@ -394,8 +436,9 @@ fn render_table(ui: &mut egui::Ui, table_cells: &[Vec<Vec<InlineElem>>], table_o
                     .spacing([10.0, 4.0])
                     .show(ui, |ui| {
                         for row in table_cells {
-                            for cell in row {
-                                render_table_cell(ui, cell, None);
+                            for (j, cell) in row.iter().enumerate() {
+                                let w = max_w.get(j).copied();
+                                render_table_cell(ui, cell, w);
                             }
                             ui.end_row();
                         }
@@ -555,8 +598,6 @@ pub fn render_markdown(
 /// Toggles the checkbox marker for the Nth task list item in the
 /// markdown source. Called after rendering when the user clicks a
 /// task checkbox, so the change persists across re-parses.
-///
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -718,10 +759,8 @@ mod tests {
                                 has_link = true;
                             }
                         }
-                        InlineElem::Image(url) => {
-                            if url == "https://example.com/a.jpg" {
-                                has_image = true;
-                            }
+                        InlineElem::Image(url) if url == "https://example.com/a.jpg" => {
+                            has_image = true;
                         }
                         _ => {}
                     }
@@ -752,21 +791,21 @@ mod tests {
                 ..
             } = ev
             {
-                if let Some(false) = task_checked {
-                    if elems.iter().any(|e| match e {
+                if let Some(false) = task_checked
+                    && elems.iter().any(|e| match e {
                         InlineElem::Text(t, _) => t == "Task 1",
                         _ => false,
-                    }) {
-                        found_unchecked = true;
-                    }
+                    })
+                {
+                    found_unchecked = true;
                 }
-                if let Some(true) = task_checked {
-                    if elems.iter().any(|e| match e {
+                if let Some(true) = task_checked
+                    && elems.iter().any(|e| match e {
                         InlineElem::Text(t, _) => t == "Task 2",
                         _ => false,
-                    }) {
-                        found_checked = true;
-                    }
+                    })
+                {
+                    found_checked = true;
                 }
             }
         }
@@ -1117,7 +1156,7 @@ mod tests {
             })
             .expect("must have a Heading event");
         assert_eq!(heading.0, 1);
-        assert_eq!(heading_plain_text(&heading.1), "hello");
+        assert_eq!(heading_plain_text(heading.1), "hello");
         // At least one elem carries the italic style.
         assert!(
             heading.1.iter().any(|e| matches!(
@@ -1441,14 +1480,24 @@ def foo():
                         a,
                         sum_min
                     );
-                    if !decision.needs_horizontal_scroll {
-                        // G3 invariant: in any non-Ã‚Â§3.6 regime, sum exactly
-                        // equals available. (In Ã‚Â§3.6 the function returns
-                        // min-content widths and signals horizontal scroll.)
+                    if decision.needs_horizontal_scroll {
+                        // §3.6 fallback: widths == min_content exactly.
+                        assert_eq!(
+                            decision.widths, min_w,
+                            "avail={a}: fallback must return min_content"
+                        );
+                    } else if a >= sum_max {
+                        // Surplus: columns pinned at max_content exactly.
+                        assert_eq!(
+                            decision.widths, max_w,
+                            "avail={a}: surplus must return max_content (no stretching)"
+                        );
+                    } else {
+                        // Deficit: G3 sum == available exactly.
                         let sum: f32 = decision.widths.iter().sum();
                         assert!(
                             (sum - a).abs() < 1e-3,
-                            "avail={a}: ÃŽÂ£ widths ({sum}) must equal available"
+                            "avail={a}: deficit sum ({sum}) must equal available"
                         );
                     }
                     // Reference: sum_min = {sum_min:.0}, sum_max = {sum_max:.0}
@@ -1457,6 +1506,50 @@ def foo():
                 }
             });
         });
+    }
+
+    #[test]
+    fn test_render_table_surplus_does_not_stretch_columns_e2e() {
+        // Regression for the "infinite-width column" defect: a 2-column
+        // table whose content is much narrower than the viewport must
+        // NOT stretch either column beyond its max_content width.
+        // The Trailers.md table (Model | Cost) is the motivating case.
+        let ctx = egui::Context::default();
+        let md = "| Model | Cost |\n|-------|------|\n| NuCamp T@B 320 / 400 | $42,000 |\n| Wolf Pup | |\n";
+        let events = parse_markdown_to_events(md);
+        let cells = match events.iter().find(|e| matches!(e, RenderEvent::Table(_))) {
+            Some(RenderEvent::Table(c)) => c.clone(),
+            _ => panic!("No table found"),
+        };
+        let _ = ctx.run_ui(
+            egui::RawInput {
+                screen_rect: Some(egui::Rect::from_min_size(
+                    egui::Pos2::ZERO,
+                    egui::vec2(1600.0, 600.0),
+                )),
+                ..egui::RawInput::default()
+            },
+            |ui| {
+                egui::CentralPanel::default().show(ui, |ui| {
+                    let (max_w, min_w) = crate::ui::table_width::measure(&cells, ui);
+                    let gutter = 10.0_f32;
+                    let avail = (ui.available_width()
+                        - (max_w.len() as f32 - 1.0).max(0.0) * gutter)
+                        .max(0.0);
+                    let decision = crate::ui::table_width::ftwa(&max_w, &min_w, avail);
+                    // Surplus regime (viewport much wider than content).
+                    assert!(!decision.needs_horizontal_scroll);
+                    // Columns must be pinned at max_content, not stretched.
+                    assert_eq!(decision.widths.len(), 2);
+                    for (j, (&w, &mx)) in decision.widths.iter().zip(max_w.iter()).enumerate() {
+                        assert!(
+                            (w - mx).abs() < 1.0,
+                            "col {j}: width {w} must equal max_content {mx} (no stretching)"
+                        );
+                    }
+                });
+            },
+        );
     }
 
     #[test]
@@ -1512,16 +1605,18 @@ def foo():
         viewport_width: f32,
     ) -> crate::ui::table_width::ColumnWidths {
         let ctx = egui::Context::default();
-        let mut raw = egui::RawInput::default();
         // `screen_rect` defines the window's pixel dimensions in egui 0.27.
         // Without it, the default (small) rectangle makes `ui.available_width()`
         // unreliable for FTWA tests. Note: `ui.available_width()` inside the
         // `CentralPanel` is then `screen_rect.width() - 16px` (egui's default
         // outer margin), so e.g. a 300px screen rect yields ~284px available.
-        raw.screen_rect = Some(egui::Rect::from_min_size(
-            egui::Pos2::ZERO,
-            egui::vec2(viewport_width, 600.0),
-        ));
+        let raw = egui::RawInput {
+            screen_rect: Some(egui::Rect::from_min_size(
+                egui::Pos2::ZERO,
+                egui::vec2(viewport_width, 600.0),
+            )),
+            ..egui::RawInput::default()
+        };
         let mut captured: Option<crate::ui::table_width::ColumnWidths> = None;
         let _ = ctx.run_ui(raw, |ui| {
             egui::CentralPanel::default().show(ui, |ui| {
@@ -1657,6 +1752,387 @@ def foo():
             "100px viewport cannot fit a long column; got {:?}",
             d.widths
         );
+    }
+
+    /// Counts the paint-shape rectangles that carry the table cell border
+    /// stroke (`TABLE_CELL_STROKE`) and have the default `Frame::NONE`
+    /// transparent fill. A `Frame::NONE` cell wrapper paints exactly one
+    /// such shape per cell, so this also counts as "how many cells got
+    /// bordered".
+    fn count_table_cell_borders(output: &egui::FullOutput) -> usize {
+        use eframe::epaint::{Color32, Shape, StrokeKind};
+        output
+            .shapes
+            .iter()
+            .filter(|cs| {
+                let Shape::Rect(rect) = &cs.shape else {
+                    return false;
+                };
+                rect.fill == Color32::TRANSPARENT
+                    && rect.stroke == TABLE_CELL_STROKE
+                    && rect.stroke_kind == StrokeKind::Inside
+            })
+            .count()
+    }
+
+    /// Helper to render `table_cells` in a specified viewport width and return `FullOutput`.
+    fn render_table_with_paint_output_viewport(
+        table_cells: &[Vec<Vec<InlineElem>>],
+        viewport_width: f32,
+    ) -> egui::FullOutput {
+        let ctx = egui::Context::default();
+        let raw = egui::RawInput {
+            screen_rect: Some(egui::Rect::from_min_size(
+                egui::Pos2::ZERO,
+                egui::vec2(viewport_width, 600.0),
+            )),
+            ..egui::RawInput::default()
+        };
+        ctx.run_ui(raw, |ui| {
+            egui::CentralPanel::default().show(ui, |ui| {
+                render_table(ui, table_cells, 0);
+            });
+        })
+    }
+
+    /// Renders `table_cells` in a wide viewport so the FTWA path runs
+    /// (not the §3.6 horizontal-scroll fallback) and returns the
+    /// `FullOutput` for shape inspection.
+    fn render_table_with_paint_output(table_cells: &[Vec<Vec<InlineElem>>]) -> egui::FullOutput {
+        render_table_with_paint_output_viewport(table_cells, 800.0)
+    }
+
+    /// The FTWA-pinned path must draw one `TABLE_CELL_STROKE` border
+    /// rectangle for every cell in the table — that is the user-visible
+    /// "dark gray line around all table cells" requirement.
+    #[test]
+    fn test_render_table_draws_border_around_every_cell_ftwa_path() {
+        // 2 rows × 3 columns = 6 cells. Mixed content (plain text +
+        // empty) exercises both the empty-cell branch and the
+        // content-rendering branch in `render_table_cell`.
+        let make = |t: &str| {
+            vec![InlineElem::Text(
+                t.to_string(),
+                crate::ui::render::TextStyle::default(),
+            )]
+        };
+        let table: Vec<Vec<Vec<InlineElem>>> = vec![
+            vec![make("h1"), make("h2"), make("h3")],
+            vec![make("a"), vec![], make("c")],
+        ];
+        let expected_cells: usize = table.iter().map(|r| r.len()).sum();
+        assert_eq!(expected_cells, 6);
+
+        let output = render_table_with_paint_output(&table);
+        let bordered = count_table_cell_borders(&output);
+        assert_eq!(
+            bordered, expected_cells,
+            "every cell must get a `TABLE_CELL_STROKE` border; got {bordered} \
+             for {expected_cells} cells"
+        );
+    }
+
+    /// The §3.6 horizontal-scroll fallback path (taken when even
+    /// min-content cannot fit the viewport) must also draw a border
+    /// around every cell — the user-facing requirement is path-agnostic.
+    #[test]
+    fn test_render_table_draws_border_around_every_cell_fallback_path() {
+        // 3 columns of single very long tokens, tiny viewport → §3.6.
+        let table = build_uniform_table("a_long_column_header_text_here_now", 3);
+        let d = render_table_with_viewport(&table, 30.0);
+        assert!(d.needs_horizontal_scroll, "must be on the fallback path");
+
+        let output = render_table_with_paint_output(&table);
+        let expected_cells: usize = table.iter().map(|r| r.len()).sum();
+        let bordered = count_table_cell_borders(&output);
+        assert_eq!(
+            bordered, expected_cells,
+            "fallback path must also border every cell; got {bordered} \
+             for {expected_cells} cells"
+        );
+    }
+
+    /// Belt-and-braces: a single-cell table is degenerate but must still
+    /// produce exactly one border shape (catches off-by-one frame
+    /// allocations at row/column boundaries).
+    #[test]
+    fn test_render_table_single_cell_borders_once() {
+        let make = |t: &str| {
+            vec![InlineElem::Text(
+                t.to_string(),
+                crate::ui::render::TextStyle::default(),
+            )]
+        };
+        let table: Vec<Vec<Vec<InlineElem>>> = vec![vec![make("solo")]];
+
+        let output = render_table_with_paint_output(&table);
+        let bordered = count_table_cell_borders(&output);
+        assert_eq!(bordered, 1, "a 1×1 table must draw exactly one border");
+    }
+
+    /// Verifies that column 0 and subsequent columns are properly aligned
+    /// across rows and maintain uniform inter-column gutter spacing, even when
+    /// cell content requires word wrapping onto multiple lines.
+    #[test]
+    fn test_render_table_column_alignment_across_rows() {
+        use eframe::epaint::{Shape, StrokeKind};
+
+        let make = |t: &str| {
+            vec![InlineElem::Text(
+                t.to_string(),
+                crate::ui::render::TextStyle::default(),
+            )]
+        };
+        // Table with multi-word space-separated text that requires word wrapping
+        // in a constrained viewport.
+        let table: Vec<Vec<Vec<InlineElem>>> = vec![
+            vec![
+                make("Header column one with multi word text requiring word wrap"),
+                make("Header column two long text"),
+                make("H3"),
+            ],
+            vec![
+                make("Alpha beta gamma delta epsilon"),
+                make("Short"),
+                make("Gamma delta"),
+            ],
+            vec![
+                make("Row three column one extra text"),
+                make("R3C2 multi word text"),
+                make("R3C3"),
+            ],
+        ];
+
+        // 260px viewport forces deficit regime and word-wrapping for long cells,
+        // while remaining wide enough to avoid §3.6 horizontal scroll fallback.
+        let output = render_table_with_paint_output_viewport(&table, 260.0);
+
+        // Collect all cell border rects
+        let mut rects: Vec<_> = output
+            .shapes
+            .iter()
+            .filter_map(|cs| match &cs.shape {
+                Shape::Rect(r)
+                    if r.fill == egui::Color32::TRANSPARENT
+                        && r.stroke == TABLE_CELL_STROKE
+                        && r.stroke_kind == StrokeKind::Inside =>
+                {
+                    Some(r.rect)
+                }
+                _ => None,
+            })
+            .collect();
+
+        assert_eq!(rects.len(), 9, "Expected 9 cell borders for 3x3 table");
+
+        // Sort by Y position (row) then X position (column)
+        rects.sort_by(|a, b| {
+            a.min
+                .y
+                .partial_cmp(&b.min.y)
+                .unwrap()
+                .then(a.min.x.partial_cmp(&b.min.x).unwrap())
+        });
+
+        // Group into 3 rows of 3 cells each
+        let rows = vec![
+            vec![rects[0], rects[1], rects[2]],
+            vec![rects[3], rects[4], rects[5]],
+            vec![rects[6], rects[7], rects[8]],
+        ];
+
+        // Verify that word wrapping actually occurred in the long multi-word cells
+        // (wrapped cell height should be significantly larger than single-line cell height).
+        let single_line_height = rows[1][1].height(); // "Short" cell
+        let wrapped_height = rows[0][0].height(); // "Header column one..." cell
+        assert!(
+            wrapped_height > single_line_height * 1.5,
+            "Expected cell (0,0) to word wrap: wrapped height {wrapped_height} vs single-line height {single_line_height}"
+        );
+
+        // For each column j ∈ 0..3, check that min.x and width match across all rows
+        for col in 0..3 {
+            let first_min_x = rows[0][col].min.x;
+            let first_width = rows[0][col].width();
+
+            for row in 1..3 {
+                let min_x = rows[row][col].min.x;
+                let width = rows[row][col].width();
+
+                assert!(
+                    (min_x - first_min_x).abs() < 1e-3,
+                    "Column {col} left border misaligned at row {row}: expected {first_min_x}, got {min_x}"
+                );
+                assert!(
+                    (width - first_width).abs() < 1e-3,
+                    "Column {col} width mismatch at row {row}: expected {first_width}, got {width}"
+                );
+            }
+        }
+
+        // Verify gutter spacing between columns is 10px across all rows
+        for row in 0..3 {
+            let col0_right = rows[row][0].max.x;
+            let col1_left = rows[row][1].min.x;
+            let col1_right = rows[row][1].max.x;
+            let col2_left = rows[row][2].min.x;
+
+            let gutter_0_1 = col1_left - col0_right;
+            let gutter_1_2 = col2_left - col1_right;
+
+            assert!(
+                (gutter_0_1 - 10.0).abs() < 1e-3,
+                "Row {row} gutter between Col 0 and Col 1 should be 10.0, got {gutter_0_1}"
+            );
+            assert!(
+                (gutter_1_2 - 10.0).abs() < 1e-3,
+                "Row {row} gutter between Col 1 and Col 2 should be 10.0, got {gutter_1_2}"
+            );
+        }
+    }
+
+    /// Verifies that tables with empty header cells (e.g. `| | |`) render
+    /// empty cells in row 0 at the full column width matching subsequent data rows,
+    /// preventing row 0 cell collapse or misalignment (regression test for Laptop.md).
+    #[test]
+    fn test_render_table_empty_header_cells_alignment() {
+        use eframe::epaint::{Shape, StrokeKind};
+
+        let make = |t: &str| {
+            vec![InlineElem::Text(
+                t.to_string(),
+                crate::ui::render::TextStyle::default(),
+            )]
+        };
+        // Table with empty header row 0 (common in key-value markdown tables like Laptop.md)
+        let table: Vec<Vec<Vec<InlineElem>>> = vec![
+            vec![vec![], vec![]],
+            vec![make("Price"), make("$1,399.99 (Costco Members)")],
+            vec![make("MSRP"), make("$1,799.99")],
+        ];
+
+        let output = render_table_with_paint_output(&table);
+
+        // Collect all cell border rects
+        let mut rects: Vec<_> = output
+            .shapes
+            .iter()
+            .filter_map(|cs| match &cs.shape {
+                Shape::Rect(r)
+                    if r.fill == egui::Color32::TRANSPARENT
+                        && r.stroke == TABLE_CELL_STROKE
+                        && r.stroke_kind == StrokeKind::Inside =>
+                {
+                    Some(r.rect)
+                }
+                _ => None,
+            })
+            .collect();
+
+        assert_eq!(rects.len(), 6, "Expected 6 cell borders for 3x2 table");
+
+        // Sort by Y position (row) then X position (column)
+        rects.sort_by(|a, b| {
+            a.min
+                .y
+                .partial_cmp(&b.min.y)
+                .unwrap()
+                .then(a.min.x.partial_cmp(&b.min.x).unwrap())
+        });
+
+        let rows = vec![
+            vec![rects[0], rects[1]],
+            vec![rects[2], rects[3]],
+            vec![rects[4], rects[5]],
+        ];
+
+        // For column 0 and column 1, empty row 0 cells must match row 1 & 2 width and left edge
+        for col in 0..2 {
+            let col_width = rows[1][col].width();
+            let col_min_x = rows[1][col].min.x;
+
+            let row0_width = rows[0][col].width();
+            let row0_min_x = rows[0][col].min.x;
+
+            assert!(
+                (row0_min_x - col_min_x).abs() < 1e-3,
+                "Empty header row 0 cell in column {col} misaligned: expected min.x {col_min_x}, got {row0_min_x}"
+            );
+            assert!(
+                (row0_width - col_width).abs() < 1e-3,
+                "Empty header row 0 cell in column {col} collapsed: expected width {col_width}, got {row0_width}"
+            );
+        }
+    }
+
+    /// Regression test: all cells in the same row must share the same top Y
+    /// coordinate (min.y). egui::Grid centers cells vertically by default — so
+    /// when col 1 wraps to two lines, col 0 ("Make") would appear lower without
+    /// the `top_down` layout wrapper added to `render_table_cell`.
+    #[test]
+    fn test_render_table_cells_top_aligned_within_row() {
+        use eframe::epaint::{Shape, StrokeKind};
+
+        let make = |t: &str| {
+            vec![InlineElem::Text(
+                t.to_string(),
+                crate::ui::render::TextStyle::default(),
+            )]
+        };
+        let table: Vec<Vec<Vec<InlineElem>>> = vec![
+            vec![
+                make("Make"),
+                make("Model and Model Number"),
+                make("Market Price (Original)"),
+            ],
+            vec![
+                make("Dell"),
+                make("XPS 15 9570"),
+                make("~$1,500-$2,000 (discontinued)"),
+            ],
+        ];
+
+        let output = render_table_with_paint_output(&table);
+
+        let mut rects: Vec<_> = output
+            .shapes
+            .iter()
+            .filter_map(|cs| match &cs.shape {
+                Shape::Rect(r)
+                    if r.fill == egui::Color32::TRANSPARENT
+                        && r.stroke == TABLE_CELL_STROKE
+                        && r.stroke_kind == StrokeKind::Inside =>
+                {
+                    Some(r.rect)
+                }
+                _ => None,
+            })
+            .collect();
+
+        assert_eq!(rects.len(), 6, "Expected 6 cell borders for 2x3 table");
+
+        // Sort by Y-bucket (15px) then X
+        rects.sort_by(|a, b| {
+            let y_a = (a.min.y / 15.0).round() as i32;
+            let y_b = (b.min.y / 15.0).round() as i32;
+            y_a.cmp(&y_b)
+                .then_with(|| a.min.x.partial_cmp(&b.min.x).unwrap())
+        });
+
+        let row0 = &rects[0..3];
+        let row1 = &rects[3..6];
+
+        // Within each row all cells must share the same top Y (top-aligned)
+        for (r_idx, row) in [row0, row1].iter().enumerate() {
+            let expected_min_y = row[0].min.y;
+            for (c_idx, rect) in row.iter().enumerate() {
+                assert!(
+                    (rect.min.y - expected_min_y).abs() < 1.0,
+                    "Row {r_idx} col {c_idx} top misaligned: expected min.y {expected_min_y}, got {}",
+                    rect.min.y
+                );
+            }
+        }
     }
 
     // --- P0-2: click-handler coverage ---------------------------------
@@ -1972,5 +2448,128 @@ def foo():
         assert!(md.contains("// - [ ] in code"));
         assert!(md.contains("- [x] Real Task"));
         assert!(md.contains("\r\n"));
+    }
+
+    /// Verifies that every column in every rendered table is left-edge and
+    /// width-consistent across all rows, covering the table patterns that
+    /// were previously broken:
+    ///   • Tables with an empty header row (`| | |`) followed by data rows
+    ///   • Multi-column key-value tables where cells word-wrap
+    ///   • Multiple tables in a single document
+    ///
+    /// Uses self-contained inline Markdown — no external file paths.
+    #[test]
+    fn test_multi_table_document_column_alignment() {
+        use eframe::epaint::{Shape, StrokeKind};
+
+        // Sample Markdown that exercises the same structural patterns as the
+        // original real-file test without leaking developer paths or content.
+        let content = "\
+# Reference: Sample Device
+
+## Specifications
+
+| | |
+|---|---|
+| Make | Acme Corp |
+| Model | Widgeteer Pro 9000 |
+| Display | 15.6\" FHD (1920x1080) IPS or 4K OLED, 60Hz |
+| Processor | Generic Core i5 (4C/8T) |
+| RAM | 16 GB DDR4 |
+| Storage | 512 GB NVMe SSD |
+
+## Benchmarks
+
+| Benchmark | Score | Notes |
+|---|---|---|
+| Single-core | 2271 | Turbo sustained |
+| Multi-core | 7545 | All-core sustained |
+| GPU | 4800 | Integrated only |
+
+## Accessories
+
+| | |
+|---|---|
+| Charger | 130W USB-C GaN (barrel adapter included) |
+| Bag | 15\" Slim sleeve |
+";
+        let events = parse_markdown_to_events(content);
+
+        let mut table_ordinal = 0;
+        for ev in events {
+            if let RenderEvent::Table(table_cells) = ev {
+                let num_rows = table_cells.len();
+                let num_cols = table_cells.iter().map(|r| r.len()).max().unwrap_or(0);
+                if num_rows == 0 || num_cols == 0 {
+                    continue;
+                }
+
+                let output = render_table_with_paint_output(&table_cells);
+
+                let mut rects: Vec<_> = output
+                    .shapes
+                    .iter()
+                    .filter_map(|cs| match &cs.shape {
+                        Shape::Rect(r)
+                            if r.fill == egui::Color32::TRANSPARENT
+                                && r.stroke == TABLE_CELL_STROKE
+                                && r.stroke_kind == StrokeKind::Inside =>
+                        {
+                            Some(r.rect)
+                        }
+                        _ => None,
+                    })
+                    .collect();
+
+                let total_expected_cells: usize = table_cells.iter().map(|r| r.len()).sum();
+                assert_eq!(
+                    rects.len(),
+                    total_expected_cells,
+                    "Table {table_ordinal}: expected {total_expected_cells} cell rects, got {}",
+                    rects.len()
+                );
+
+                // Sort rects by Y-bucket (nearest 15px line) then X coordinate
+                rects.sort_by(|a, b| {
+                    let y_a = (a.min.y / 15.0).round() as i32;
+                    let y_b = (b.min.y / 15.0).round() as i32;
+                    y_a.cmp(&y_b)
+                        .then_with(|| a.min.x.partial_cmp(&b.min.x).unwrap())
+                });
+
+                // Slice rects into row groups based on the exact expected cell count per row
+                let mut row_groups: Vec<Vec<egui::Rect>> = Vec::new();
+                let mut offset = 0;
+                for row_cells in &table_cells {
+                    let len = row_cells.len();
+                    row_groups.push(rects[offset..offset + len].to_vec());
+                    offset += len;
+                }
+
+                for col in 0..num_cols {
+                    let first_row_with_col = row_groups.iter().find(|rg| rg.len() > col);
+                    if let Some(first_row) = first_row_with_col {
+                        let expected_min_x = first_row[col].min.x;
+                        let expected_width = first_row[col].width();
+
+                        for (r_idx, rg) in row_groups.iter().enumerate() {
+                            if col < rg.len() {
+                                let min_x = rg[col].min.x;
+                                let width = rg[col].width();
+                                assert!(
+                                    (min_x - expected_min_x).abs() < 1e-3,
+                                    "Table {table_ordinal} col {col} min_x mismatch at row {r_idx}: expected {expected_min_x}, got {min_x}"
+                                );
+                                assert!(
+                                    (width - expected_width).abs() < 0.5,
+                                    "Table {table_ordinal} col {col} width mismatch at row {r_idx}: expected {expected_width}, got {width}"
+                                );
+                            }
+                        }
+                    }
+                }
+                table_ordinal += 1;
+            }
+        }
     }
 }

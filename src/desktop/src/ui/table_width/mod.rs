@@ -1,4 +1,4 @@
-//! Fair Table Width Algorithm (FTWA) â€” assigns per-column pixel widths to a markdown/GFM table.
+﻿//! Fair Table Width Algorithm (FTWA) â€” assigns per-column pixel widths to a markdown/GFM table.
 //!
 //! Reconciles three lexicographically-ordered goals (see
 //! `doc/planning/table-column-width-algorithm.md`):
@@ -32,33 +32,39 @@ pub struct ColumnWidths {
 /// columns) and approximately for G1 (within the chosen wrap set).
 ///
 /// `max_content[j]` is column `j`'s single-line width; `min_content[j]` is its
-/// longest unbreakable-token width (`min_content[j] â‰¤ max_content[j]`).
+/// longest unbreakable-token width (`min_content[j] <= max_content[j]`).
 /// `available` is the content width minus gutters. The algorithm proceeds:
 ///
-/// * **Surplus** (`available â‰¥ Î£ max_content`): pin every column to `max_content`
-///   and distribute the spare proportionally to `max_content` (doc Â§3.5/Â§3.2).
-///   No column wraps. G1 = G2 = 0.
-/// * **Deficit** (`Î£ min_content â‰¤ available < Î£ max_content`): pick the
-///   smallest top-slack prefix whose cumulative slack covers the deficit
-///   (`D = Î£ max_content âˆ’ available`) â€” this is the exact minimum-cardinality
-///   wrap set by the exchange argument in doc Â§2.11. Non-wrap columns stay at
-///   `max_content`; the wrap set is shrunk proportionally to slack (v1
-///   simplification of the doc Â§3.3 B2 breakpoint water-fill), never below
-///   `min_content`. Float drift is absorbed into the deepest-slack wrap column
-///   so `Î£ widths == available` exactly.
-/// * **Fallback** (`available < Î£ min_content`): return `min_content` and set
-///   `needs_horizontal_scroll = true` (doc Â§3.6). The strongest invariant
-///   (tokens never break) holds by construction.
+/// * **Surplus** (`available >= sum of max_content`): pin every column to its
+///   `max_content`. No column wraps and no column is stretched beyond its
+///   content (G1 = G2 = 0). The table may not fill the full available width
+///   when content is narrow; this matches browser/spreadsheet auto-fit
+///   behavior and avoids the "infinite-width column" visual defect that
+///   proportional spare distribution produced. G3 ("use all space") is
+///   intentionally relaxed in the surplus regime (see doc Ãâ€šÃ‚Â§3.5).
+/// * **Deficit** (`sum of min_content <= available < sum of max_content`):
+///   pick the smallest top-slack prefix whose cumulative slack covers the
+///   deficit (`D = sum of max_content - available`) ÃÂ¢Ã¢â€šÂ¬Ã¢â‚¬Â this is the exact
+///   minimum-cardinality wrap set by the exchange argument in doc Ãâ€šÃ‚Â§2.11.
+///   Non-wrap columns stay at `max_content`; the wrap set is shrunk
+///   proportionally to slack (v1 simplification of the doc Ãâ€šÃ‚Â§3.3 B2
+///   breakpoint water-fill), never below `min_content`. Float drift is
+///   absorbed into the deepest-slack wrap column so the sum of `widths`
+///   equals `available` exactly.
+/// * **Fallback** (`available < sum of min_content`): return `min_content`
+///   and set `needs_horizontal_scroll = true` (doc Ãâ€šÃ‚Â§3.6). The strongest
+///   invariant (tokens never break) holds by construction.
 ///
-/// Returns `widths.len() == max_content.len()`. Empty input â†’ empty output,
-/// no scroll needed.
+/// Returns `widths.len() == max_content.len()`. Empty input returns empty
+/// output, no scroll needed.
 ///
 /// # Panics
 ///
-/// Panics if `available` is not finite (NaN or Â±âˆž), if any element of
-/// `max_content` or `min_content` is not finite, or if any `max_content[j]
-/// < min_content[j]` (the FTWA invariant). Callers that receive
-/// measurements from external sources should validate finiteness first.
+/// Panics if `available` is not finite (NaN or +/-infinity), if any element
+/// of `max_content` or `min_content` is not finite, or if any
+/// `max_content[j] < min_content[j]` (the FTWA invariant). Callers that
+/// receive measurements from external sources should validate finiteness
+/// first.
 ///
 /// # Examples
 ///
@@ -146,51 +152,19 @@ pub fn ftwa(max_content: &[f32], min_content: &[f32], available: f32) -> ColumnW
         };
     }
 
-    // Â§3.2 surplus regime: give every column its max-content plus a fair
-    // share of the spare, proportional to max-content (doc Â§3.5 decision Q7).
+    // §3.2 surplus regime: every column fits at its max-content width.
+    // Columns are pinned at `max_content` (not stretched). Stretching
+    // columns beyond their content to fill the available width produced
+    // the "infinite-width column" visual defect (e.g. a narrow Cost
+    // column rendered hundreds of pixels wide with empty trailing
+    // whitespace). Browser/spreadsheet auto-fit tables behave the same
+    // way: a table whose content is narrower than the viewport simply
+    // does not use the full width. G3 ("use all space") is intentionally
+    // relaxed in the surplus regime in favor of not distorting column
+    // widths (see doc §3.5).
     if available >= sum_max {
-        let spare = available - sum_max;
-        let n_f = n as f32;
-        let mut widths: Vec<f32> = max_content
-            .iter()
-            .map(|&m| {
-                // BUG-1 fix: degenerate `sum_max == 0` (every column
-                // identically zero — a table of empty cells) falls back
-                // to equal distribution, which is the only fair rule when
-                // every column has the same content and prevents the
-                // silent G3 violation that proportional distribution
-                // would produce.
-                let share = if sum_max > 0.0 {
-                    spare * (m / sum_max)
-                } else {
-                    spare / n_f
-                };
-                m + share
-            })
-            .collect();
-        // BUG-2 fix: float-drift fix-up. The deficit branch applies the
-        // same fix-up; the surplus branch previously relied on the
-        // natural arithmetic happening to sum exactly, which breaks for
-        // non-trivial inputs. Pick the column with the largest max-content
-        // as the dump target (tie-break: lower column index, matching
-        // the B1 stable-sort tiebreak). Surplus columns may grow above
-        // their max-content by a sub-pixel amount — harmless and already
-        // a property of the proportional rule for non-zero maxes.
-        let drift = available - widths.iter().copied().sum::<f32>();
-        if drift.abs() > 0.0 {
-            let target = (0..n)
-                .max_by(|&a, &b| {
-                    let ma = max_content[a];
-                    let mb = max_content[b];
-                    ma.partial_cmp(&mb)
-                        .unwrap_or(std::cmp::Ordering::Equal)
-                        .then(b.cmp(&a)) // lower index = "greater" so max_by picks it on tie
-                })
-                .expect("n > 0 (early-return above guarantees this)");
-            widths[target] += drift;
-        }
         return ColumnWidths {
-            widths,
+            widths: max_content.to_vec(),
             needs_horizontal_scroll: false,
         };
     }
@@ -464,14 +438,14 @@ mod tests {
     }
 
     #[test]
-    fn surplus_regime_distributes_proportional_to_max() {
-        // max = [20, 80], sum = 100. available = 150 â†’ spare 50, split 1:4.
+    fn surplus_regime_pins_columns_at_max_content() {
+        // max = [20, 80], sum = 100. available = 150 > sum_max → surplus.
+        // Columns are pinned at max_content (not stretched to fill 150).
         let max = [20.0, 80.0];
         let min = [10.0, 40.0];
         let d = ftwa(&max, &min, 150.0);
         assert!(!d.needs_horizontal_scroll);
-        assert_eq!(round_vec(&d.widths), vec![30.0, 120.0]);
-        assert!((d.widths.iter().sum::<f32>() - 150.0).abs() < 1e-3);
+        assert_eq!(round_vec(&d.widths), vec![20.0, 80.0]);
     }
 
     #[test]
@@ -711,7 +685,7 @@ mod tests {
         let d = ftwa(&[50.0], &[20.0], 200.0);
         assert!(!d.needs_horizontal_scroll);
         assert_eq!(d.widths.len(), 1);
-        assert!((d.widths[0] - 200.0).abs() < 1e-3, "got {}", d.widths[0]);
+        assert!((d.widths[0] - 50.0).abs() < 1e-3, "got {}", d.widths[0]);
 
         // Deficit: 1 column, available between sum_min and sum_max.
         let d = ftwa(&[100.0], &[30.0], 60.0);
@@ -736,12 +710,11 @@ mod tests {
         let min: Vec<f32> = (0..n).map(|i| 10.0 + (i % 5) as f32).collect();
         let sum_max: f32 = max.iter().sum();
 
-        // Surplus: 2x sum_max.
+        // Surplus: 2x sum_max → columns pinned at max_content.
         let d = ftwa(&max, &min, sum_max * 2.0);
         assert!(!d.needs_horizontal_scroll);
         assert_eq!(d.widths.len(), n);
-        let sum: f32 = d.widths.iter().sum();
-        assert!((sum - sum_max * 2.0).abs() < 1.0, "Î£ must equal available");
+        assert_eq!(d.widths, max, "surplus must return max_content exactly");
 
         // Deficit: half of sum_max, well above sum_min.
         let d = ftwa(&max, &min, sum_max * 0.5);
@@ -784,28 +757,44 @@ mod tests {
     //     fits viewport / requires word wrap / exceeds viewport ------
 
     /// Helper: assert a `ColumnWidths` decision respects the actual FTWA contract:
-    /// - `sum == available` (G3), **except in the Â§3.6 fallback** where
-    ///   `widths == min_content` and the caller is expected to enable
-    ///   horizontal scrolling instead.
+    /// - `sum == available` (G3) in the **deficit** regime only. In the
+    ///   **surplus** regime (`available >= sum_max`) columns are pinned at
+    ///   `max_content` and the table may not fill the full available
+    ///   width (G3 is intentionally relaxed - see `ftwa` doc). In the
+    ///   3.6 fallback, `widths == min_content` and the caller is
+    ///   expected to enable horizontal scrolling instead.
     /// - no width below min (never-break-token invariant)
-    /// - `needs_horizontal_scroll` iff `available < sum_min` (the Â§3.6 condition)
-    ///
-    /// Note: the surplus regime *intentionally* grows columns beyond their
-    /// max-content (spare is distributed proportionally), so no upper bound
-    /// is asserted here â€” only the lower bound and the sum/scroll invariants.
-    fn assert_decision_invariants(d: &ColumnWidths, _max: &[f32], min: &[f32], available: f32) {
+    /// - in surplus, no width above max (columns never stretch)
+    /// - `needs_horizontal_scroll` iff `available < sum_min` (the 3.6 condition)
+    fn assert_decision_invariants(d: &ColumnWidths, max: &[f32], min: &[f32], available: f32) {
         let sum: f32 = d.widths.iter().copied().sum();
-        if !d.needs_horizontal_scroll {
+        let sum_max: f32 = max.iter().copied().sum();
+        let sum_min: f32 = min.iter().copied().sum();
+        if d.needs_horizontal_scroll {
+            // 3.6 fallback: widths == min_content exactly.
+            assert_eq!(
+                d.widths, min,
+                "fallback must return min_content exactly; got {:?}",
+                d.widths
+            );
+        } else if available >= sum_max {
+            // Surplus: columns pinned at max_content; sum may be < available.
+            assert_eq!(
+                d.widths, max,
+                "surplus must return max_content exactly; got {:?}",
+                d.widths
+            );
+        } else {
+            // Deficit: G3 sum == available exactly.
             assert!(
                 (sum - available).abs() < 1e-3,
-                "Î£ widths ({sum}) must equal available ({available}); got {:?}",
+                "deficit: sum ({sum}) must equal available ({available}); got {:?}",
                 d.widths
             );
         }
         for (j, (&w, &mn)) in d.widths.iter().zip(min.iter()).enumerate() {
             assert!(w >= mn - 1e-3, "col {j}: width {w} below min {mn}");
         }
-        let sum_min: f32 = min.iter().copied().sum();
         assert_eq!(
             d.needs_horizontal_scroll,
             available < sum_min,
@@ -826,9 +815,10 @@ mod tests {
         let d = ftwa(&max, &min, available);
         assert_decision_invariants(&d, &max, &min, available);
         assert!(!d.needs_horizontal_scroll);
-        // Surplus: spare split 1:1:1 â†’ 33.33 each, plus max 200 â†’ 233.33 each.
+        // Surplus: columns pinned at max_content (200 each); table does
+        // not stretch to fill the 700px viewport.
         for (j, &w) in d.widths.iter().enumerate() {
-            assert!((w - 233.333).abs() < 0.5, "col {j}: {w} not ~233.33");
+            assert!((w - 200.0).abs() < 0.5, "col {j}: {w} not ~200");
         }
     }
 
@@ -876,7 +866,7 @@ mod tests {
     }
 
     /// Dissimilar widths (narrow / wide / narrow) in a wide viewport.
-    /// Wide column gets most of the spare, narrow columns get a fair share.
+    /// Columns are pinned at their max_content; table does not stretch.
     #[test]
     fn permutation_dissimilar_columns_fit_viewport() {
         let max = [100.0, 500.0, 100.0];
@@ -885,11 +875,8 @@ mod tests {
         let d = ftwa(&max, &min, available);
         assert_decision_invariants(&d, &max, &min, available);
         assert!(!d.needs_horizontal_scroll);
-        // Spare split proportional to max: col 0/2 get 100/700*300 = 42.86,
-        // col 1 gets 500/700*300 = 214.29.
-        assert!((d.widths[0] - 142.86).abs() < 0.5, "narrow col 0");
-        assert!((d.widths[1] - 714.29).abs() < 0.5, "wide col 1");
-        assert!((d.widths[2] - 142.86).abs() < 0.5, "narrow col 2");
+        // Surplus: columns pinned at max_content exactly.
+        assert_eq!(d.widths, vec![100.0, 500.0, 100.0]);
     }
 
     /// Dissimilar widths where the wide column is the only one with enough
@@ -936,38 +923,33 @@ mod tests {
     //  re-introducing the original defect.
     // ===================================================================
 
-    /// BUG-1 (FIXED): Surplus regime with `sum_max = 0` now distributes
-    /// the spare equally across all columns (the only fair rule when
-    /// every column has identical content) and the float-drift fix-up
-    /// guarantees `Σ widths == available` exactly. Regression test for
-    /// the original "all-zero widths" defect.
+    /// BUG-1 (FIXED, then revised): Surplus regime with `sum_max = 0`
+    /// (every column empty) now pins every column at its `max_content`
+    /// (which is 0). The original defect (all-zero columns collapsing)
+    /// is still prevented by the `measure` function's 1px floor guard,
+    /// not by the surplus branch distributing spare width. With the
+    /// surplus regime no longer stretching columns, an all-zero table
+    /// simply has zero-width columns at the FTWA layer; `measure`
+    /// guarantees the inputs to FTWA are never literally zero, so this
+    /// input is now a degenerate contract test rather than a
+    /// distribution test.
     #[test]
-    fn audit_bug_surplus_all_zero_max_distributes_spare_equally() {
+    fn audit_bug_surplus_all_zero_max_returns_zero_widths() {
         let d = ftwa(&[0.0, 0.0, 0.0], &[0.0, 0.0, 0.0], 100.0);
         assert!(!d.needs_horizontal_scroll);
         assert_eq!(d.widths.len(), 3);
-        // Each column gets 100 / 3 ≈ 33.33 px.
-        for (j, &w) in d.widths.iter().enumerate() {
-            assert!((w - 100.0 / 3.0).abs() < 1e-3, "col {j}: {w}");
-        }
-        // G3: Σ widths == available exactly.
-        let sum: f32 = d.widths.iter().copied().sum();
-        assert!(
-            (sum - 100.0).abs() < 1e-3,
-            "BUG-1 regression: Σ must equal available; got {sum}"
-        );
+        // Surplus pins at max_content (0); no stretching.
+        assert_eq!(d.widths, vec![0.0, 0.0, 0.0]);
     }
 
-    /// BUG-2 (FIXED): The surplus branch now applies the same drift
-    /// fix-up as the deficit branch, so `Σ widths == available` is
-    /// exact across all surplus inputs. Regression test that exercises
-    /// a non-trivial surplus input which would drift in the absence of
-    /// the fix.
+    /// BUG-2 (FIXED, then revised): With the surplus regime pinning
+    /// columns at `max_content` (no spare distribution), there is no
+    /// float drift to fix in the surplus branch. The test now verifies
+    /// the surplus branch returns `max_content` exactly for a
+    /// non-trivial input that previously accumulated drift under the
+    /// old proportional-distribution rule.
     #[test]
-    fn audit_bug_surplus_drift_fix_sums_exact() {
-        // 1000 columns with non-power-of-two width ratios so the sum of
-        // N independent `m / sum_max` divisions is not exact. Without
-        // the fix-up the cumulative rounding error grows with N.
+    fn audit_bug_surplus_pins_max_content_exactly() {
         let n = 1000;
         let max: Vec<f32> = (0..n).map(|i| 10.0 + (i as f32) * 0.3).collect();
         let min: Vec<f32> = (0..n).map(|i| 1.0 + (i as f32) * 0.1).collect();
@@ -976,12 +958,8 @@ mod tests {
         let d = ftwa(&max, &min, available);
         assert!(!d.needs_horizontal_scroll);
         assert_eq!(d.widths.len(), n);
-        let sum: f32 = d.widths.iter().copied().sum();
-        assert!(
-            (sum - available).abs() < 1e-3,
-            "BUG-2 regression: surplus drift must be zero; got diff = {}",
-            sum - available
-        );
+        // Surplus pins at max_content exactly — no drift, no stretching.
+        assert_eq!(d.widths, max);
     }
 
     /// BUG-3 (FIXED): Length-mismatch check now runs before the `n == 0`
@@ -1123,13 +1101,18 @@ mod tests {
         /// Generate random `(max, min, available)` triples where
         /// `max >= min >= 0` and `available >= 0`, then assert the
         /// three core invariants:
-        ///   (1) `(Σ widths == available) XOR needs_horizontal_scroll`
-        ///       (i.e. G3 holds in non-fallback; fallback returns
-        ///       `min_content` exactly).
+        ///   (1) Regime contract:
+        ///       - fallback (`available < sum_min`): `widths == min_content`
+        ///         and `needs_horizontal_scroll`.
+        ///       - surplus (`available >= sum_max`): `widths == max_content`
+        ///         (columns pinned, table may not fill the full width;
+        ///         G3 intentionally relaxed in surplus — see `ftwa` doc).
+        ///       - deficit (`sum_min <= available < sum_max`):
+        ///         `sum(widths) == available` (G3 exact).
         ///   (2) `∀j. widths[j] >= min_content[j]` (never break a token).
         ///   (3) `widths.len() == max_content.len()`, no NaN.
         #[test]
-        fn proptest_g3_fallback_never_break_token(
+        fn proptest_regimes_never_break_token(
             n in 1usize..=20,
             max in proptest::collection::vec(0.0f32..=200.0, 1..=20),
             min in proptest::collection::vec(0.0f32..=200.0, 1..=20),
@@ -1159,9 +1142,10 @@ mod tests {
                 prop_assert!(w.is_finite(), "col {j}: width {w} is not finite");
             }
 
-            // Invariant (1): G3 XOR fallback.
+            // Invariant (1): regime contract.
             let sum: f32 = d.widths.iter().copied().sum();
             let sum_min: f32 = min.iter().copied().sum();
+            let sum_max: f32 = max.iter().copied().sum();
             if d.needs_horizontal_scroll {
                 let widths_snapshot = d.widths.clone();
                 let min_snapshot = min.clone();
@@ -1169,10 +1153,23 @@ mod tests {
                     d.widths == min,
                     "fallback must return min_content exactly; got {widths_snapshot:?}, expected {min_snapshot:?}"
                 );
+                prop_assert_eq!(
+                    d.needs_horizontal_scroll, available < sum_min,
+                    "needs_horizontal_scroll must match (available < sum_min)"
+                );
+            } else if available >= sum_max {
+                // Surplus: columns pinned at max_content; sum may be < available.
+                let widths_snapshot = d.widths.clone();
+                let max_snapshot = max.clone();
+                prop_assert!(
+                    d.widths == max,
+                    "surplus must return max_content exactly; got {widths_snapshot:?}, expected {max_snapshot:?}"
+                );
             } else {
+                // Deficit: G3 sum == available exactly.
                 prop_assert!(
                     (sum - available).abs() < 1e-3,
-                    "Σ widths ({sum}) must equal available ({available}) in non-fallback"
+                    "deficit: sum widths ({sum}) must equal available ({available})"
                 );
                 prop_assert_eq!(
                     d.needs_horizontal_scroll, available < sum_min,

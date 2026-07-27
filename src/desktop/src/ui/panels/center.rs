@@ -76,24 +76,34 @@ pub fn apply_tab_action(
 /// Outputs: None.
 /// Purity: Impure (performs UI rendering).
 /// Preconditions: `app.agent.show_results()` is true.
-/// Postconditions: Rendered agent session. State might be mutated if "Back to Document" is clicked.
+/// Postconditions: Rendered agent session. State might be mutated if "Close" is clicked.
 fn render_agent_session(ui: &mut egui::Ui, app: &mut FastMdApp) {
     ui.horizontal_wrapped(|ui| {
         ui.heading(
-            RichText::new("🤖 FastMD Agent Session")
+            RichText::new(crate::ui::strings::AGENT_SESSION_HEADER)
                 .size(18.0)
                 .strong()
                 .color(egui::Color32::from_rgb(100, 200, 255)),
         );
         ui.separator();
-        if ui.button("Back to Document").clicked() {
+        if ui
+            .button(crate::ui::strings::AGENT_SESSION_CLOSE_BUTTON)
+            .clicked()
+        {
             clear_agent_session_state(app);
         }
     });
     ui.separator();
 
     ui.horizontal_wrapped(|ui| {
-        ui.label(RichText::new(format!("Status: {}", app.agent().state().status)).strong());
+        ui.label(
+            RichText::new(format!(
+                "{}{}",
+                crate::ui::strings::AGENT_STATUS_PREFIX,
+                app.agent().state().status
+            ))
+            .strong(),
+        );
         if app.agent().state().running {
             ui.spinner();
         }
@@ -105,7 +115,7 @@ fn render_agent_session(ui: &mut egui::Ui, app: &mut FastMdApp) {
         .stick_to_bottom(true)
         .show(ui, |ui| {
             if !app.agent().state().thinking.is_empty() {
-                ui.collapsing("Thinking Process", |ui| {
+                ui.collapsing(crate::ui::strings::AGENT_THINKING_PROCESS, |ui| {
                     ui.label(
                         egui::RichText::new(&app.agent().state().thinking)
                             .italics()
@@ -116,7 +126,7 @@ fn render_agent_session(ui: &mut egui::Ui, app: &mut FastMdApp) {
             }
 
             if !app.agent().state().response.is_empty() {
-                ui.heading("Response");
+                ui.heading(crate::ui::strings::AGENT_RESPONSE);
                 ui.separator();
                 let agent = app.agent_mut();
                 let response = agent.state().response.clone();
@@ -173,7 +183,7 @@ fn render_tabs_and_content(ui: &mut egui::Ui, app: &mut FastMdApp) {
                 tab_actions.push(TabAction::Close(i));
             }
             response.inner.context_menu(|ui| {
-                if ui.button("Edit").clicked() {
+                if ui.button(crate::ui::strings::EDIT_BUTTON).clicked() {
                     if app.inline_editor_enabled {
                         if let Ok(content) = std::fs::read_to_string(tab_path) {
                             app.editor_state.open(tab_path, &content);
@@ -184,34 +194,43 @@ fn render_tabs_and_content(ui: &mut egui::Ui, app: &mut FastMdApp) {
                     ui.close();
                 }
                 ui.separator();
-                if ui.button("Close").clicked() {
+                if ui.button(crate::ui::strings::CLOSE_TAB_MENU).clicked() {
                     tab_actions.push(TabAction::Close(i));
                     ui.close();
                 }
-                if ui.button("Close Others").clicked() {
+                if ui.button(crate::ui::strings::CLOSE_OTHERS_MENU).clicked() {
                     tab_actions.push(TabAction::CloseOthers(i));
                     ui.close();
                 }
-                if ui.button("Close All").clicked() {
+                if ui.button(crate::ui::strings::CLOSE_ALL_TABS_MENU).clicked() {
                     tab_actions.push(TabAction::CloseAll);
                     ui.close();
                 }
                 ui.separator();
-                if ui.button("Copy Path").clicked() {
+                if ui.button(crate::ui::strings::COPY_PATH_ACTION).clicked() {
                     // egui 0.35: `PlatformOutput::copied_text` was
                     // removed; use the dedicated `Ui::copy_text` helper.
                     ui.copy_text(tab_path.to_string_lossy().to_string());
                     ui.close();
                 }
-                if ui.button("Show in File Explorer").clicked() {
+                if ui
+                    .button(crate::ui::strings::SHOW_IN_EXPLORER_ACTION)
+                    .clicked()
+                {
                     show_in_file_explorer(tab_path);
                     ui.close();
                 }
-                if ui.button("Open in Editor").clicked() {
+                if ui
+                    .button(crate::ui::strings::OPEN_IN_EDITOR_ACTION)
+                    .clicked()
+                {
                     open_in_system_editor(tab_path);
                     ui.close();
                 }
-                if ui.button("Format Markdown").clicked() {
+                if ui
+                    .button(crate::ui::strings::FORMAT_MARKDOWN_ACTION)
+                    .clicked()
+                {
                     let now = chrono::Local::now();
                     let date_str = now.to_rfc3339();
                     app.submit_prompt = Some(generate_format_prompt(&date_str));
@@ -298,7 +317,7 @@ fn render_tabs_and_content(ui: &mut egui::Ui, app: &mut FastMdApp) {
 fn render_empty_state(ui: &mut egui::Ui) {
     ui.centered_and_justified(|ui| {
         ui.label(
-            RichText::new("Select a markdown file from the left pane to view its content")
+            RichText::new(crate::ui::strings::NO_FILE_SELECTED_PROMPT)
                 .size(15.0)
                 .italics()
                 .color(egui::Color32::GRAY),
@@ -481,5 +500,10 @@ mod tests {
         let _ = ctx.run_ui(Default::default(), |ui| {
             show_center_panel(&mut app, ui);
         });
+    }
+
+    #[test]
+    fn test_agent_session_close_button_label() {
+        assert_eq!(crate::ui::strings::AGENT_SESSION_CLOSE_BUTTON, "Close");
     }
 }

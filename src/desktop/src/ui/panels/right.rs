@@ -84,6 +84,7 @@ pub fn show_right_panel(app: &mut FastMdApp, parent_ui: &mut egui::Ui) {
     // and panels now allocate within a parent `&mut Ui`.
     // `width_range` is now `size_range`.
     Panel::right("toc_panel")
+        .default_size(200.0)
         .size_range(150.0..=250.0)
         .resizable(true)
         .show(parent_ui, |ui| {
@@ -92,7 +93,7 @@ pub fn show_right_panel(app: &mut FastMdApp, parent_ui: &mut egui::Ui) {
             }
             ui.add_space(4.0);
             ui.heading(
-                RichText::new("Table of Contents")
+                RichText::new(crate::ui::strings::TABLE_OF_CONTENTS_HEADER)
                     .size(14.0)
                     .strong()
                     .color(egui::Color32::from_rgb(100, 200, 255)),
@@ -101,19 +102,48 @@ pub fn show_right_panel(app: &mut FastMdApp, parent_ui: &mut egui::Ui) {
 
             egui::ScrollArea::vertical()
                 .id_salt("right_toc_scroll")
+                // Pin the scroll area's inner WIDTH to the panel's width
+                // (do not let it follow the content). Without this, the
+                // default `auto_shrink = [true, true]` lets a single
+                // long TOC entry grow the placer's `min_rect` to the
+                // right (because `ui.horizontal` has `main_wrap = false`
+                // and `ui.selectable_label` does not wrap), and that
+                // right-shifted origin is then inherited by every
+                // subsequent row. The panel's `clip_rect(outer_rect)`
+                // then hides the left side of every TOC item — the
+                // user sees only the right tail of each title (e.g.
+                // "Table of Contents" → "tents"). Forcing
+                // `auto_shrink[0] = false` keeps the inner width
+                // clamped to the panel so rows stay anchored at the
+                // panel's left edge; titles wider than the panel are
+                // clipped on the right (the expected behavior for a
+                // narrow, resizable panel) instead of drifting the
+                // origin and clipping on the left.
+                .auto_shrink([false, true])
                 .show(ui, |ui| {
                     let toc_snapshot = app.tab_manager.toc.clone();
                     for (i, entry) in toc_snapshot.iter().enumerate() {
-                        let indent = calculate_indent(entry.level as usize);
                         ui.push_id((i, entry.id, "toc_item"), |ui| {
+                            let font_size = calculate_font_size(entry.level as usize);
+                            let indent = calculate_indent(entry.level as usize);
                             ui.horizontal(|ui| {
                                 ui.add_space(indent);
-                                let label = egui::RichText::new(&entry.title)
-                                    .size(calculate_font_size(entry.level as usize));
-                                if ui.selectable_label(false, label).clicked() {
+                                // Cap the label's layout width to the remaining
+                                // available space. Without this, a non-wrapping
+                                // label's allocation grows the placer's min_rect
+                                // past the panel right edge even when truncate()
+                                // clips the visual rendering — left-side text then
+                                // disappears behind the panel's clip_rect.
+                                let max_label_w = (ui.available_width()).max(0.0);
+                                ui.set_max_width(max_label_w);
+                                let label = egui::Label::new(
+                                    egui::RichText::new(&entry.title).size(font_size),
+                                )
+                                .truncate();
+                                if ui.add(label).clicked() {
                                     app.tab_manager.scroll_to_header_id = Some(entry.id);
                                 }
-                            })
+                            });
                         });
                     }
                 });
@@ -126,10 +156,10 @@ mod tests {
 
     #[test]
     fn test_should_show_panel() {
-        assert_eq!(should_show_panel(true, true), true);
-        assert_eq!(should_show_panel(false, true), false);
-        assert_eq!(should_show_panel(true, false), false);
-        assert_eq!(should_show_panel(false, false), false);
+        assert!(should_show_panel(true, true));
+        assert!(!should_show_panel(false, true));
+        assert!(!should_show_panel(true, false));
+        assert!(!should_show_panel(false, false));
     }
 
     #[test]
@@ -213,5 +243,117 @@ mod ui_tests {
         let _ = ctx.run_ui(egui::RawInput::default(), |ui| {
             show_right_panel(&mut app, ui);
         });
+    }
+
+    /// Regression test for the right-panel "left side cut off" bug.
+    ///
+    /// **Symptom.** The heading "Table of Contents" and every TOC row
+    /// showed only its right tail (e.g. "Table of Contents" → "tents",
+    /// "Candidates" → "ndidates"). The left edge of every row was
+    /// clipped, even though `ui.horizontal` is left-to-right and the
+    /// text is laid out starting at the panel's left edge.
+    ///
+    /// **Root cause.** `egui::ScrollArea::vertical()` defaults to
+    /// `auto_shrink = [true, true]`. On the X axis that resolves to
+    /// `(direction_enabled = false, auto_shrink = true)` →
+    /// `inner_size.x = content_size.x` (the scroll area grows to fit
+    /// its content). Inside the scroll area, `ui.horizontal` runs with
+    /// `main_wrap = false` and `ui.selectable_label` does not wrap, so
+    /// a long TOC entry overflows horizontally. The placer's
+    /// `expand_to_include_rect` grows the parent Ui's `min_rect` to the
+    /// right to fit the overflowing child; `auto_shrink` then
+    /// propagates that into the scroll area's inner rect. Once a
+    /// single long row has shifted the placer's `min` to the right, the
+    /// panel's `clip_rect(outer_rect)` clips out the left side of every
+    /// subsequent row.
+    ///
+    /// **Fix.** Pin the scroll area's inner width to the panel's width
+    /// via `.auto_shrink([false, true])`. Long rows are then clipped on
+    /// the right (the expected narrow-panel behavior) instead of
+    /// dragging the origin and clipping on the left.
+    ///
+    /// This test reproduces the original bug: a 400px-wide window with
+    /// a TOC containing a 240-char title would, *without* the fix,
+    /// place the long row's left edge well past the panel's left edge.
+    /// The assertion is the regression — we expect the row's
+    /// `rect.left()` to match the panel's left edge (within a pixel of
+    /// rounding), not a value that has drifted to the right.
+    #[test]
+    fn test_show_right_panel_long_titles_anchor_at_panel_left_edge() {
+        use egui_kittest::Harness;
+        use egui_kittest::kittest::Queryable;
+
+        // 400px window gives a 200px right panel (Panel::right's
+        // default `default_outer_size` for left/right sides, REQ-101
+        // and `egui-0.35/src/containers/panel.rs:255-257`).
+        const WINDOW_WIDTH: f32 = 400.0;
+        const WINDOW_HEIGHT: f32 = 600.0;
+        // The frame the panel uses by default (`Frame::side_top_panel`,
+        // `egui-0.35/src/containers/frame.rs:185-188`) has an 8pt inner
+        // margin on each side. The first character of every row must
+        // sit at `panel_left + 8` (within sub-pixel rounding).
+        const _FRAME_INNER_MARGIN_X: f32 = 8.0;
+        const PIXEL_TOLERANCE: f32 = 2.0;
+
+        // A title deliberately wider than the entire 400px window, so
+        // that without the `auto_shrink` fix the placer would
+        // absolutely grow the scroll area past the right edge and
+        // shift the origin to the right of the panel's left clip.
+        let long_title = "A".repeat(240);
+
+        let mut app = create_test_app();
+        app.tabs_mut().toc.push(ToCEntry {
+            title: long_title.clone(),
+            level: 1,
+            id: egui::Id::new("long"),
+        });
+        *app.selection_mut().selected_file_mut() = Some(PathBuf::from("doc.md"));
+
+        let mut harness = Harness::builder()
+            .with_size(egui::Vec2::new(WINDOW_WIDTH, WINDOW_HEIGHT))
+            .build_ui(|ui| {
+                show_right_panel(&mut app, ui);
+            });
+        harness.run();
+
+        // Expected: panel occupies 250px (the max size_range in test harness),
+        // with its inner content area starting at (400 - 250) + 4 = 154px from the
+        // left of the screen.
+        let expected_left = WINDOW_WIDTH - 250.0 + 4.0;
+
+        // Locate the long TOC row by a substring of its label
+        // (truncation may strip characters but the accesskit node
+        // keeps the semantic text).
+        let nodes: Vec<_> = harness
+            .query_all_by_label_contains(&long_title[..32])
+            .collect();
+        assert!(
+            !nodes.is_empty(),
+            "long TOC row should be present in the accesskit tree"
+        );
+
+        // Debug: print rects of all matching nodes so we can see which
+        // one represents the row's left edge.
+        let rects: Vec<_> = nodes.iter().map(|n| n.rect()).collect();
+        eprintln!("matching node rects: {rects:?}, expected_left={expected_left}");
+
+        // The TOC row's outer container (the `ui.horizontal` wrapper)
+        // is the widest matching node; the accesskit tree may also
+        // emit separate `Button` / `Label` nodes for the clickable
+        // area and the text. Pick the leftmost rect — that is the
+        // one that would be clipped on the left if the origin drifts.
+        let left = rects
+            .iter()
+            .map(egui::Rect::left)
+            .fold(f32::INFINITY, f32::min);
+
+        assert!(
+            (left - expected_left).abs() <= PIXEL_TOLERANCE,
+            "long TOC row's left edge drifted: got {left:.2}, expected ~{expected_left:.2} \
+             (tolerance {PIXEL_TOLERANCE:.1}). Without `.auto_shrink([false, true])` on the \
+             scroll area, `ui.horizontal` + a non-wrapping `selectable_label` grows the \
+             placer's min_rect to the right of the panel, and the panel's clip_rect hides \
+             the left side of every row."
+        );
     }
 }

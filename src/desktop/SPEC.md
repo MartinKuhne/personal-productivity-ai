@@ -59,6 +59,7 @@ The requirements below have been formatted using the **Easy Approach to Requirem
 * [REQ-172] The directory tree should not display folders that contain no markdown files
 * [REQ-173] When the user selects [Format Markdown] from the context menu, the system executes the Format Markdown quick task as described elsewhere
 * [REQ-174] When the user selects [Run as prompt] from the context menu, and the object under the mouse cursor is a file, the system shall execute the content of th file as an agent prompt
+* [REQ-175] Tag Filter Directory Hiding: When filtering by tag, the directory tree shall not display directories that do not contain any files matching the active tag.
 * [REQ-180] When the user holds the shift, the system shall allow the user to select multiple documents
 * [REQ-181] When the user has selected multiple documents, and they right click on one of the selected documents, the [multi select context menu] is shown
 * [REQ-182] When the user selects [Merge] from the [multi select context menu], the system shall run a new LLM prompt instructing the LLM to merge the content into a new document and consolidate the content. 
@@ -203,7 +204,7 @@ models:
 
 * [REQ-613] Auto-Model Selection: On application startup, if multiple models are configured with the `chat` use_case, the system shall automatically select the model with the lowest `cost` value and persist the selection to the configuration file.
 * [REQ-614] USER.md Context Injection: For each configured content library, if a USER.md file exists at the library root, its contents shall be appended to the system prompt as user context.
-* [REQ-615] Agent Conversation History: The agent shall maintain conversation history across prompts within a session. History is reset when the user clicks "Back to Document" or starts a new session.
+* [REQ-615] Agent Conversation History: The agent shall maintain conversation history across prompts within a session. History is reset when the user clicks "Close" or starts a new session.
 * [REQ-616] Thinking Delimiter: Model reasoning/thinking content wrapped in `🤔...🤔` delimiters shall be extracted and displayed in a collapsible "Thinking Process" section separate from the main response.
 * [REQ-618] Quick Tasks Menu: The bottom panel shall provide a "Quick Tasks" menu with predefined prompts (e.g., "Format Markdown") that inject a structured prompt with YAML front-matter template.
 * [REQ-619] Tabbed Document Interface: The center panel shall support multiple open documents as tabs. Clicking a file opens it in a new tab; middle-click or close button closes tabs.

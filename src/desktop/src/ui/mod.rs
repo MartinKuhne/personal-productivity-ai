@@ -9,6 +9,7 @@ pub mod panel_layout;
 mod panels;
 pub mod render;
 pub mod selection_manager;
+pub mod strings;
 pub mod tab_manager;
 mod table_width;
 mod tree;

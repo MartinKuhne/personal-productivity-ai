@@ -15,14 +15,10 @@ use std::path::PathBuf;
 /// Postconditions: Returns green text with "Indexing finished" if true, or italicized text with "Indexing workspace" if false.
 pub fn build_indexing_status_text(indexing_finished: bool, file_count: usize) -> RichText {
     if indexing_finished {
-        RichText::new(format!("Indexing finished ({} files)", file_count))
+        RichText::new(crate::ui::strings::build_indexing_finished_text(file_count))
             .color(egui::Color32::from_rgb(100, 255, 100))
     } else {
-        RichText::new(format!(
-            "Indexing workspace (found {} files)...",
-            file_count
-        ))
-        .italics()
+        RichText::new(crate::ui::strings::build_indexing_progress_text(file_count)).italics()
     }
 }
 
@@ -35,7 +31,7 @@ pub fn build_indexing_status_text(indexing_finished: bool, file_count: usize) ->
 pub fn get_tag_filter_text(selected_tag: Option<&String>) -> &str {
     selected_tag
         .map(|s| s.as_str())
-        .unwrap_or("Filter by Tag: All")
+        .unwrap_or(crate::ui::strings::TAG_FILTER_DEFAULT)
 }
 
 /// Purpose: Determines the next selected file after the active tag filter changes.
@@ -66,7 +62,7 @@ pub fn show_top_panel(app: &mut FastMdApp, parent_ui: &mut egui::Ui) {
     Panel::top("top_panel").show(parent_ui, |ui| {
         ui.horizontal(|ui| {
             ui.heading(
-                RichText::new("⚡ FastMD Viewer")
+                RichText::new(crate::ui::strings::APP_TITLE)
                     .strong()
                     .color(egui::Color32::from_rgb(100, 200, 255)),
             );
@@ -79,13 +75,16 @@ pub fn show_top_panel(app: &mut FastMdApp, parent_ui: &mut egui::Ui) {
             {
                 let mut bg = app.background_manager.lock().unwrap();
                 let mut show_bg = bg.show_background_logs;
-                if ui.checkbox(&mut show_bg, "Show log").changed() {
+                if ui
+                    .checkbox(&mut show_bg, crate::ui::strings::SHOW_LOG_CHECKBOX)
+                    .changed()
+                {
                     bg.show_background_logs = show_bg;
                 }
             }
             ui.separator();
 
-            if ui.button("Batch...").clicked() {
+            if ui.button(crate::ui::strings::BATCH_BUTTON).clicked() {
                 app.dialogs_mut().batch_dialog_open = true;
             }
             ui.separator();
@@ -124,11 +123,15 @@ pub fn show_top_panel(app: &mut FastMdApp, parent_ui: &mut egui::Ui) {
                     app.file_processor().indexing_finished,
                     egui::Separator::default(),
                 );
-                egui::ComboBox::from_id_salt("tag_combobox")
+                egui::ComboBox::from_id_salt(crate::ui::strings::TAG_FILTER_ID_SALT)
                     .selected_text(get_tag_filter_text(app.tags().selected_tag.as_ref()))
                     .show_ui(ui, |ui| {
                         let mut changed = ui
-                            .selectable_value(&mut app.tags_mut().selected_tag, None, "All")
+                            .selectable_value(
+                                &mut app.tags_mut().selected_tag,
+                                None,
+                                crate::ui::strings::TAG_FILTER_ALL,
+                            )
                             .changed();
                         let all_tags: Vec<String> = app.tags().all_tags().iter().cloned().collect();
                         for tag in all_tags {

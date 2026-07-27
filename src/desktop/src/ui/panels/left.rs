@@ -9,8 +9,20 @@ use egui::RichText;
 use egui::containers::Panel;
 use egui::containers::panel::PanelState;
 
-pub fn show_left_panel(app: &mut FastMdApp, parent_ui: &mut egui::Ui) {
-    let ctx = parent_ui.ctx();
+/// Recursively removes directory nodes that do not contain any child files or subdirectories.
+fn prune_empty_dirs(node: &mut TreeNode) {
+    node.children.retain(|_, child| {
+        if child.is_dir {
+            prune_empty_dirs(child);
+            !child.children.is_empty()
+        } else {
+            true
+        }
+    });
+}
+
+/// Builds the `TreeNode` hierarchy from content libraries, discovered files, and tag filters.
+pub fn build_workspace_tree(app: &FastMdApp) -> TreeNode {
     let filtered_files: Vec<&std::path::PathBuf> = app
         .file_processor()
         .all_files
@@ -28,7 +40,11 @@ pub fn show_left_panel(app: &mut FastMdApp, parent_ui: &mut egui::Ui) {
         })
         .collect();
 
-    let mut root_node = TreeNode::new("Workspace".to_string(), std::path::PathBuf::new(), true);
+    let mut root_node = TreeNode::new(
+        crate::ui::strings::DEFAULT_WORKSPACE_NAME.to_string(),
+        std::path::PathBuf::new(),
+        true,
+    );
 
     for lib in app.content_libraries() {
         let lib_node_name = lib.name.clone();
@@ -81,44 +97,55 @@ pub fn show_left_panel(app: &mut FastMdApp, parent_ui: &mut egui::Ui) {
         }
     }
 
-    for dir in app.file_processor().all_dirs.iter() {
-        let mut target_lib = None;
-        let mut rel_path_res = None;
+    if app.tags().selected_tag.is_none() {
+        for dir in app.file_processor().all_dirs.iter() {
+            let mut target_lib = None;
+            let mut rel_path_res = None;
 
-        for lib in app.content_libraries() {
-            let lib_root = std::path::Path::new(&lib.root_folder);
-            if let Ok(rel_path) = dir.strip_prefix(lib_root) {
-                target_lib = Some(lib);
-                rel_path_res = Some(rel_path);
-                break;
-            }
-        }
-
-        if let (Some(lib), Some(rel_path)) = (target_lib, rel_path_res) {
-            let lib_node_name = lib.name.clone();
-            let Some(current_node_ref) = root_node.children.get_mut(&lib_node_name) else {
-                continue;
-            };
-            let mut current_node = current_node_ref;
-            let mut current_path = std::path::PathBuf::from(&lib.root_folder);
-
-            let components: Vec<_> = rel_path.components().collect();
-            for comp in &components {
-                let name = comp.as_os_str().to_string_lossy().into_owned();
-                current_path = current_path.join(&name);
-                if !current_node.children.contains_key(&name) {
-                    current_node.children.insert(
-                        name.clone(),
-                        TreeNode::new(name.clone(), current_path.clone(), true),
-                    );
-                }
-                match current_node.children.get_mut(&name) {
-                    Some(n) => current_node = n,
-                    None => break,
+            for lib in app.content_libraries() {
+                let lib_root = std::path::Path::new(&lib.root_folder);
+                if let Ok(rel_path) = dir.strip_prefix(lib_root) {
+                    target_lib = Some(lib);
+                    rel_path_res = Some(rel_path);
+                    break;
                 }
             }
+
+            if let (Some(lib), Some(rel_path)) = (target_lib, rel_path_res) {
+                let lib_node_name = lib.name.clone();
+                let Some(current_node_ref) = root_node.children.get_mut(&lib_node_name) else {
+                    continue;
+                };
+                let mut current_node = current_node_ref;
+                let mut current_path = std::path::PathBuf::from(&lib.root_folder);
+
+                let components: Vec<_> = rel_path.components().collect();
+                for comp in &components {
+                    let name = comp.as_os_str().to_string_lossy().into_owned();
+                    current_path = current_path.join(&name);
+                    if !current_node.children.contains_key(&name) {
+                        current_node.children.insert(
+                            name.clone(),
+                            TreeNode::new(name.clone(), current_path.clone(), true),
+                        );
+                    }
+                    match current_node.children.get_mut(&name) {
+                        Some(n) => current_node = n,
+                        None => break,
+                    }
+                }
+            }
         }
+    } else {
+        prune_empty_dirs(&mut root_node);
     }
+
+    root_node
+}
+
+pub fn show_left_panel(app: &mut FastMdApp, parent_ui: &mut egui::Ui) {
+    let ctx = parent_ui.ctx();
+    let root_node = build_workspace_tree(app);
 
     let panel_id = parent_ui.make_persistent_id("left_panel");
     let indexing_just_finished =
@@ -179,7 +206,11 @@ pub fn show_left_panel(app: &mut FastMdApp, parent_ui: &mut egui::Ui) {
         .max_size(max_w)
         .show(parent_ui, |ui| {
             ui.add_space(4.0);
-            ui.heading(RichText::new("Workspace Files").size(16.0).strong());
+            ui.heading(
+                RichText::new(crate::ui::strings::WORKSPACE_HEADER)
+                    .size(16.0)
+                    .strong(),
+            );
             ui.add_space(4.0);
 
             // Single virtual-scroll container for the file tree.
@@ -265,7 +296,7 @@ pub fn show_left_panel(app: &mut FastMdApp, parent_ui: &mut egui::Ui) {
             if rows.is_empty() {
                 ui.add_space(8.0);
                 ui.label(
-                    RichText::new("No markdown files found.")
+                    RichText::new(crate::ui::strings::NO_MARKDOWN_FILES)
                         .italics()
                         .color(egui::Color32::GRAY),
                 );
@@ -555,11 +586,13 @@ mod tests {
         app.layout_mut().left_panel_width = Some(294.7);
         app.layout_mut().left_panel_dirty = false;
 
-        let mut raw_input = egui::RawInput::default();
-        raw_input.screen_rect = Some(egui::Rect::from_min_size(
-            egui::Pos2::ZERO,
-            egui::vec2(1024.0, 768.0),
-        ));
+        let raw_input = egui::RawInput {
+            screen_rect: Some(egui::Rect::from_min_size(
+                egui::Pos2::ZERO,
+                egui::vec2(1024.0, 768.0),
+            )),
+            ..egui::RawInput::default()
+        };
 
         // Prime egui data memory with stored PanelState at width 294.7px
         ctx.data_mut(|d| {
@@ -593,6 +626,67 @@ mod tests {
             "left panel must maintain stable width across passes even when stored PanelState exceeds max_w, but egui flagged {} rect(s): {:?}",
             flagged.len(),
             flagged
+        );
+    }
+
+    #[test]
+    fn test_show_left_panel_tag_filter_hides_directories_without_matching_files() {
+        let mut app = create_test_app();
+        let lib_dir = std::env::temp_dir().join("fastmd_left_test_tag_filter_dirs");
+        app.content_libraries_mut()
+            .push(crate::config::ContentLibrary {
+                root_folder: lib_dir.to_string_lossy().to_string(),
+                name: "TagTestLib".to_string(),
+                kind: "text".to_string(),
+                readonly: false,
+                priority: 0,
+            });
+        app.content_libraries_mut()
+            .push(crate::config::ContentLibrary {
+                root_folder: std::env::temp_dir()
+                    .join("fastmd_left_test_empty_lib")
+                    .to_string_lossy()
+                    .to_string(),
+                name: "EmptyLib".to_string(),
+                kind: "text".to_string(),
+                readonly: false,
+                priority: 0,
+            });
+
+        let matching_dir = lib_dir.join("matching_folder");
+        let non_matching_dir = lib_dir.join("non_matching_folder");
+
+        let file_match = matching_dir.join("match.md");
+        let file_no_match = non_matching_dir.join("other.md");
+
+        app.file_processor_mut().all_files = vec![file_match.clone(), file_no_match.clone()];
+        app.file_processor_mut().all_dirs = vec![matching_dir.clone(), non_matching_dir.clone()];
+
+        app.tags_mut()
+            .add_tags(file_match.clone(), vec!["target_tag".to_string()]);
+        app.tags_mut()
+            .add_tags(file_no_match.clone(), vec!["other_tag".to_string()]);
+
+        // Select the tag filter
+        app.tags_mut().selected_tag = Some("target_tag".to_string());
+
+        let tree = build_workspace_tree(&app);
+
+        let lib_node = tree
+            .children
+            .get("TagTestLib")
+            .expect("TagTestLib node should exist");
+        assert!(
+            lib_node.children.contains_key("matching_folder"),
+            "matching_folder should be in the tree when filtering by target_tag"
+        );
+        assert!(
+            !lib_node.children.contains_key("non_matching_folder"),
+            "non_matching_folder should NOT be in the tree when filtering by target_tag"
+        );
+        assert!(
+            !tree.children.contains_key("EmptyLib"),
+            "EmptyLib (library without matching files) should NOT be in the tree when filtering by target_tag"
         );
     }
 }

@@ -109,10 +109,7 @@ mod tests {
     impl io::Write for FailingWriter {
         fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
             if self.written >= self.fail_after {
-                return Err(io::Error::new(
-                    io::ErrorKind::Other,
-                    "simulated mid-write failure",
-                ));
+                return Err(io::Error::other("simulated mid-write failure"));
             }
             let take = (self.fail_after - self.written).min(buf.len());
             self.written += take;

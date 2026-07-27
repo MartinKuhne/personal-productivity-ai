@@ -218,9 +218,22 @@ pub struct FlatRow {
     pub is_expanded: bool,
 }
 
-/// Fixed height for each virtual tree row in pixels.
-/// Matches egui default monospace line height (14pt) + 4px padding.
-pub const TREE_ROW_HEIGHT: f32 = 22.0;
+/// Sans-spacing slot height passed to `ScrollArea::show_rows`. egui
+/// adds `ui.spacing().item_spacing.y` (default 3.0) on top of this
+/// to compute the actual per-row slot height. The row content
+/// rendered by [`render_flat_row`] is a `ui.horizontal` block whose
+/// height is the max of its children: a `selectable_label`, which
+/// in egui 0.35 is `interact_size.y` (18) — `button_padding.y`
+/// (1 top + 1 bottom) is added inside the frame, but the text is
+/// short enough that the interact_size dominates and the rendered
+/// height reconciles to 18px. To keep the slot exactly matched to
+/// the rendered content (and avoid empty space accumulating at the
+/// bottom of every row), this constant is set so that
+/// `TREE_ROW_HEIGHT + item_spacing.y` == actual `selectable_label`
+/// height. The companion regression test
+/// `test_tree_row_height_matches_selectable_label_height` pins
+/// this invariant.
+pub const TREE_ROW_HEIGHT: f32 = 15.0;
 
 /// Flatten a `TreeNode` hierarchy into a `Vec<FlatRow>` in DFS pre-order,
 /// respecting the set of expanded directories.
@@ -294,31 +307,37 @@ pub fn render_flat_row(ui: &mut egui::Ui, row: &FlatRow, ctx: &mut TreeNodeConte
                 }
 
                 response.context_menu(|ui| {
-                    if ui.button("Show in File Explorer").clicked() {
+                    if ui
+                        .button(crate::ui::strings::SHOW_IN_EXPLORER_ACTION)
+                        .clicked()
+                    {
                         crate::ui::show_in_file_explorer(&row.path);
                         ui.close();
                     }
-                    if ui.button("Copy path").clicked() {
+                    if ui.button(crate::ui::strings::COPY_PATH_ACTION).clicked() {
                         ui.copy_text(row.path.to_string_lossy().to_string());
                         ui.close();
                     }
-                    if ui.button("Rename").clicked() {
+                    if ui.button(crate::ui::strings::RENAME_ACTION).clicked() {
                         *ctx.file_to_rename() = Some(row.path.clone());
                         *ctx.rename_new_name() = initial_rename_value(&row.path, &row.name);
                         *ctx.rename_dialog_open() = true;
                         ui.close();
                     }
-                    if ui.button("Move").clicked() {
+                    if ui.button(crate::ui::strings::MOVE_ACTION).clicked() {
                         *ctx.file_to_move() = Some(row.path.clone());
                         *ctx.move_dialog_open() = true;
                         ui.close();
                     }
-                    if ui.button("Create Directory ...").clicked() {
+                    if ui
+                        .button(crate::ui::strings::CREATE_DIRECTORY_ACTION)
+                        .clicked()
+                    {
                         *ctx.create_dir_parent() = Some(row.path.clone());
                         *ctx.create_dir_dialog_open() = true;
                         ui.close();
                     }
-                    if ui.button("New document").clicked() {
+                    if ui.button(crate::ui::strings::NEW_DOCUMENT_ACTION).clicked() {
                         let mut new_path = row.path.join("New document.md");
                         if new_path.exists() {
                             let now = chrono::Local::now();
@@ -338,7 +357,7 @@ pub fn render_flat_row(ui: &mut egui::Ui, row: &FlatRow, ctx: &mut TreeNodeConte
                         }
                         ui.close();
                     }
-                    if ui.button("Delete").clicked() {
+                    if ui.button(crate::ui::strings::DELETE_ACTION).clicked() {
                         let path = row.path.clone();
                         if let Err(e) = trash::delete(&path) {
                             tracing::error!(
@@ -394,13 +413,13 @@ pub fn render_flat_row(ui: &mut egui::Ui, row: &FlatRow, ctx: &mut TreeNodeConte
 
                 response.context_menu(|ui| {
                     if ctx.selected_files().len() > 1 && ctx.selected_files().contains(&row.path) {
-                        if ui.button("Merge").clicked() {
+                        if ui.button(crate::ui::strings::MERGE_ACTION).clicked() {
                             let files: HashSet<_> = ctx.selected_files().iter().cloned().collect();
                             let prompt = build_merge_prompt(ctx.content_libraries(), &files);
                             *ctx.submit_prompt() = Some(prompt);
                             ui.close();
                         }
-                        if ui.button("Delete").clicked() {
+                        if ui.button(crate::ui::strings::DELETE_ACTION).clicked() {
                             let files: Vec<_> = ctx.selected_files().iter().cloned().collect();
                             for file in files.iter() {
                                 if let Err(e) = trash::delete(file) {
@@ -418,7 +437,7 @@ pub fn render_flat_row(ui: &mut egui::Ui, row: &FlatRow, ctx: &mut TreeNodeConte
                             ui.close();
                         }
                     } else {
-                        if ui.button("Edit").clicked() {
+                        if ui.button(crate::ui::strings::EDIT_BUTTON).clicked() {
                             if ctx.inline_editor_enabled() {
                                 *ctx.open_editor() = Some(row.path.clone());
                             } else {
@@ -426,22 +445,31 @@ pub fn render_flat_row(ui: &mut egui::Ui, row: &FlatRow, ctx: &mut TreeNodeConte
                             }
                             ui.close();
                         }
-                        if ui.button("Show in File Explorer").clicked() {
+                        if ui
+                            .button(crate::ui::strings::SHOW_IN_EXPLORER_ACTION)
+                            .clicked()
+                        {
                             crate::ui::show_in_file_explorer(&row.path);
                             ui.close();
                         }
-                        if ui.button("Copy path").clicked() {
+                        if ui.button(crate::ui::strings::COPY_PATH_ACTION).clicked() {
                             ui.copy_text(row.path.to_string_lossy().to_string());
                             ui.close();
                         }
-                        if ui.button("Format Markdown").clicked() {
+                        if ui
+                            .button(crate::ui::strings::FORMAT_MARKDOWN_ACTION)
+                            .clicked()
+                        {
                             let now = chrono::Local::now();
                             let date_str = now.to_rfc3339();
                             *ctx.submit_prompt() =
                                 Some(crate::ui::generate_format_prompt(&date_str));
                             ui.close();
                         }
-                        if ui.button("Run as prompt").clicked() {
+                        if ui
+                            .button(crate::ui::strings::RUN_AS_PROMPT_ACTION)
+                            .clicked()
+                        {
                             if let Ok(content) = std::fs::read_to_string(&row.path) {
                                 *ctx.submit_prompt() = Some(content);
                             } else {
@@ -453,7 +481,7 @@ pub fn render_flat_row(ui: &mut egui::Ui, row: &FlatRow, ctx: &mut TreeNodeConte
                             }
                             ui.close();
                         }
-                        if ui.button("Print").clicked() {
+                        if ui.button(crate::ui::strings::PRINT_ACTION).clicked() {
                             let path_to_print = row.path.clone();
                             if let Some(tx) = ctx.bg_tx().clone() {
                                 let job = PrintJob::new(path_to_print.clone());
@@ -467,18 +495,18 @@ pub fn render_flat_row(ui: &mut egui::Ui, row: &FlatRow, ctx: &mut TreeNodeConte
                             }
                             ui.close();
                         }
-                        if ui.button("Rename").clicked() {
+                        if ui.button(crate::ui::strings::RENAME_ACTION).clicked() {
                             *ctx.file_to_rename() = Some(row.path.clone());
                             *ctx.rename_new_name() = initial_rename_value(&row.path, &row.name);
                             *ctx.rename_dialog_open() = true;
                             ui.close();
                         }
-                        if ui.button("Move").clicked() {
+                        if ui.button(crate::ui::strings::MOVE_ACTION).clicked() {
                             *ctx.file_to_move() = Some(row.path.clone());
                             *ctx.move_dialog_open() = true;
                             ui.close();
                         }
-                        if ui.button("Delete").clicked() {
+                        if ui.button(crate::ui::strings::DELETE_ACTION).clicked() {
                             let path = row.path.clone();
                             if let Err(e) = trash::delete(&path) {
                                 tracing::error!(
@@ -526,31 +554,31 @@ pub fn draw_tree_node(ui: &mut egui::Ui, node: &TreeNode, ctx: &mut TreeNodeCont
         }
 
         response.context_menu(|ui| {
-            if ui.button("Show in File Explorer").clicked() {
+            if ui.button(crate::ui::strings::SHOW_IN_EXPLORER_ACTION).clicked() {
                 crate::ui::show_in_file_explorer(&node.path);
                 ui.close();
             }
-            if ui.button("Copy path").clicked() {
+            if ui.button(crate::ui::strings::COPY_PATH_ACTION).clicked() {
                 ui.copy_text(node.path.to_string_lossy().to_string());
                 ui.close();
             }
-            if ui.button("Rename").clicked() {
+            if ui.button(crate::ui::strings::RENAME_ACTION).clicked() {
                 *ctx.file_to_rename() = Some(node.path.clone());
                 *ctx.rename_new_name() = initial_rename_value(&node.path, &node.name);
                 *ctx.rename_dialog_open() = true;
                 ui.close();
             }
-            if ui.button("Move").clicked() {
+            if ui.button(crate::ui::strings::MOVE_ACTION).clicked() {
                 *ctx.file_to_move() = Some(node.path.clone());
                 *ctx.move_dialog_open() = true;
                 ui.close();
             }
-            if ui.button("Create Directory ...").clicked() {
+            if ui.button(crate::ui::strings::CREATE_DIRECTORY_ACTION).clicked() {
                 *ctx.create_dir_parent() = Some(node.path.clone());
                 *ctx.create_dir_dialog_open() = true;
                 ui.close();
             }
-            if ui.button("New document").clicked() {
+            if ui.button(crate::ui::strings::NEW_DOCUMENT_ACTION).clicked() {
                 let mut new_path = node.path.join("New document.md");
                 if new_path.exists() {
                     let now = chrono::Local::now();
@@ -573,7 +601,7 @@ pub fn draw_tree_node(ui: &mut egui::Ui, node: &TreeNode, ctx: &mut TreeNodeCont
                 }
                 ui.close();
             }
-            if ui.button("Delete").clicked() {
+            if ui.button(crate::ui::strings::DELETE_ACTION).clicked() {
                 let path = node.path.clone();
                 if let Err(e) = trash::delete(&path) {
                     tracing::error!(
@@ -634,13 +662,13 @@ pub fn draw_tree_node(ui: &mut egui::Ui, node: &TreeNode, ctx: &mut TreeNodeCont
         response.context_menu(|ui| {
             if ctx.selected_files().len() > 1 && ctx.selected_files().contains(&node.path) {
                 // Multi-select context menu
-                if ui.button("Merge").clicked() {
+                if ui.button(crate::ui::strings::MERGE_ACTION).clicked() {
                     let files: HashSet<_> = ctx.selected_files().iter().cloned().collect();
                     let prompt = build_merge_prompt(ctx.content_libraries(), &files);
                     *ctx.submit_prompt() = Some(prompt);
                     ui.close();
                 }
-                if ui.button("Delete").clicked() {
+                if ui.button(crate::ui::strings::DELETE_ACTION).clicked() {
                     let files: Vec<_> = ctx.selected_files().iter().cloned().collect();
                     for file in files.iter() {
                         if let Err(e) = trash::delete(file) {
@@ -659,7 +687,7 @@ pub fn draw_tree_node(ui: &mut egui::Ui, node: &TreeNode, ctx: &mut TreeNodeCont
                 }
             } else {
                 // Single-select context menu
-                if ui.button("Edit").clicked() {
+                if ui.button(crate::ui::strings::EDIT_BUTTON).clicked() {
                     if ctx.inline_editor_enabled() {
                         *ctx.open_editor() = Some(node.path.clone());
                     } else {
@@ -667,21 +695,21 @@ pub fn draw_tree_node(ui: &mut egui::Ui, node: &TreeNode, ctx: &mut TreeNodeCont
                     }
                     ui.close();
                 }
-                if ui.button("Show in File Explorer").clicked() {
+                if ui.button(crate::ui::strings::SHOW_IN_EXPLORER_ACTION).clicked() {
                     crate::ui::show_in_file_explorer(&node.path);
                     ui.close();
                 }
-                if ui.button("Copy path").clicked() {
+                if ui.button(crate::ui::strings::COPY_PATH_ACTION).clicked() {
                     ui.copy_text(node.path.to_string_lossy().to_string());
                     ui.close();
                 }
-                if ui.button("Format Markdown").clicked() {
+                if ui.button(crate::ui::strings::FORMAT_MARKDOWN_ACTION).clicked() {
                     let now = chrono::Local::now();
                     let date_str = now.to_rfc3339();
                     *ctx.submit_prompt() = Some(crate::ui::generate_format_prompt(&date_str));
                     ui.close();
                 }
-                if ui.button("Run as prompt").clicked() {
+                if ui.button(crate::ui::strings::RUN_AS_PROMPT_ACTION).clicked() {
                     if let Ok(content) = std::fs::read_to_string(&node.path) {
                         *ctx.submit_prompt() = Some(content);
                     } else {
@@ -693,7 +721,7 @@ pub fn draw_tree_node(ui: &mut egui::Ui, node: &TreeNode, ctx: &mut TreeNodeCont
                     }
                     ui.close();
                 }
-                if ui.button("Print").clicked() {
+                if ui.button(crate::ui::strings::PRINT_ACTION).clicked() {
                     let path_to_print = node.path.clone();
                     if let Some(tx) = ctx.bg_tx().clone() {
                         let job = PrintJob::new(path_to_print.clone());
@@ -707,18 +735,18 @@ pub fn draw_tree_node(ui: &mut egui::Ui, node: &TreeNode, ctx: &mut TreeNodeCont
                     }
                     ui.close();
                 }
-                if ui.button("Rename").clicked() {
+                if ui.button(crate::ui::strings::RENAME_ACTION).clicked() {
                     *ctx.file_to_rename() = Some(node.path.clone());
                     *ctx.rename_new_name() = initial_rename_value(&node.path, &node.name);
                     *ctx.rename_dialog_open() = true;
                     ui.close();
                 }
-                if ui.button("Move").clicked() {
+                if ui.button(crate::ui::strings::MOVE_ACTION).clicked() {
                     *ctx.file_to_move() = Some(node.path.clone());
                     *ctx.move_dialog_open() = true;
                     ui.close();
                 }
-                if ui.button("Delete").clicked() {
+                if ui.button(crate::ui::strings::DELETE_ACTION).clicked() {
                     let path = node.path.clone();
                     if let Err(e) = trash::delete(&path) {
                         tracing::error!(
@@ -1064,6 +1092,55 @@ mod tests {
         assert_eq!(
             id_pass1, id_pass2,
             "Row ID must be strictly determined by row.path and is_dir, staying identical across passes"
+        );
+    }
+
+    /// Regression: `TREE_ROW_HEIGHT` is the `row_height_sans_spacing`
+    /// passed to `ScrollArea::show_rows`. egui adds
+    /// `ui.spacing().item_spacing.y` on top of it to compute the
+    /// per-row slot height — so the actual slot is
+    /// `TREE_ROW_HEIGHT + item_spacing.y`, not the constant alone.
+    ///
+    /// The previous constant (22.0) was calibrated to a now-stale
+    /// estimate ("14pt line height + 4px padding"). The actual
+    /// `selectable_label` widget in egui 0.35 is 18px (the
+    /// `interact_size.y` min height, with the frame's
+    /// `button_padding` reconciling into the same 18px). With
+    /// `item_spacing.y = 3`, the slot was 25px and the widget only
+    /// filled 18px — 7px of empty space at the bottom of every
+    /// rendered row, accumulating to a visible "unused space at
+    /// the bottom of the left directory tree" that scales with
+    /// tree depth.
+    ///
+    /// This test pins the invariant: the slot height
+    /// (constant + item_spacing.y) must match the actual
+    /// `selectable_label` height within a small tolerance, so no
+    /// per-row vertical gap accumulates in the tree.
+    #[test]
+    fn test_tree_row_height_matches_selectable_label_height() {
+        let ctx = egui::Context::default();
+        let mut button_height = 0.0_f32;
+        let mut spacing_y = 0.0_f32;
+        let _ = ctx.run_ui(Default::default(), |ui| {
+            let response = ui.selectable_label(false, "sample tree row");
+            button_height = response.rect.height();
+            spacing_y = ui.spacing().item_spacing.y;
+        });
+        let slot_height = TREE_ROW_HEIGHT + spacing_y;
+        let tolerance = 1.0_f32;
+        let diff = (button_height - slot_height).abs();
+        assert!(
+            diff < tolerance,
+            "TREE_ROW_HEIGHT ({}) is the row_height_sans_spacing passed to \
+             ScrollArea::show_rows; egui adds item_spacing.y ({}) on top, so \
+             the actual per-row slot is {}px. The actual selectable_label \
+             widget is {}px tall. A mismatch of {}px leaves empty space at \
+             the bottom of every row in the directory tree.",
+            TREE_ROW_HEIGHT,
+            spacing_y,
+            slot_height,
+            button_height,
+            diff,
         );
     }
 }
