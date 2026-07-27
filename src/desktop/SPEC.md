@@ -59,6 +59,7 @@ The requirements below have been formatted using the **Easy Approach to Requirem
 * [REQ-172] The directory tree should not display folders that contain no markdown files
 * [REQ-173] When the user selects [Format Markdown] from the context menu, the system executes the Format Markdown quick task as described elsewhere
 * [REQ-174] When the user selects [Run as prompt] from the context menu, and the object under the mouse cursor is a file, the system shall execute the content of th file as an agent prompt
+* [REQ-175] Tag Filter Directory Hiding: When filtering by tag, the directory tree shall not display directories that do not contain any files matching the active tag.
 * [REQ-180] When the user holds the shift, the system shall allow the user to select multiple documents
 * [REQ-181] When the user has selected multiple documents, and they right click on one of the selected documents, the [multi select context menu] is shown
 * [REQ-182] When the user selects [Merge] from the [multi select context menu], the system shall run a new LLM prompt instructing the LLM to merge the content into a new document and consolidate the content. 
