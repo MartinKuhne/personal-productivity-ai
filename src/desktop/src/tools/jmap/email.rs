@@ -330,15 +330,16 @@ pub fn tool_search_email(
         {
             Ok(q) => q,
             Err(e) => {
-                eprintln!("[email] email_query error for {}: {}", name, e);
-                tracing::error!(name = "tool.email.search.query_failed", client = %name, error = %e, "Failed to query emails via JMAP.");
+                tracing::error!(name = "tool.email.search.query_failed", client = %name, error = %e, "[email] email_query error for {}: {}", name, e);
                 error_messages.push(format!("Error querying email for {}: {}", name, e));
                 continue;
             }
         };
 
         let email_ids = query_response.take_ids();
-        eprintln!(
+        tracing::debug!(
+            client = %name,
+            count = email_ids.len(),
             "[email] email_query returned {} ids for {}",
             email_ids.len(),
             name
@@ -354,17 +355,32 @@ pub fn tool_search_email(
                 .email_get(email_id, None::<Vec<jmap_client::email::Property>>)
             {
                 Ok(Some(mut email)) => {
-                    eprintln!("[email] email_get succeeded for id={}", email_id);
+                    tracing::debug!(
+                        client = %name,
+                        email_id = %email_id,
+                        "[email] email_get succeeded for id={}",
+                        email_id
+                    );
                     let email_json = convert_html_in_jmap(simplify_email(&mut email, Some(10)));
                     emails_json.push(email_json);
                 }
                 Ok(None) => {
-                    eprintln!("[email] email_get returned None for id={}", email_id);
-                    tracing::warn!(client = %name, email_id = %email_id, "Email not found in response");
+                    tracing::warn!(
+                        client = %name,
+                        email_id = %email_id,
+                        "[email] email_get returned None for id={}",
+                        email_id
+                    );
                 }
                 Err(e) => {
-                    eprintln!("[email] email_get error for id={}: {}", email_id, e);
-                    tracing::warn!(client = %name, email_id = %email_id, error = %e, "Failed to fetch email details");
+                    tracing::warn!(
+                        client = %name,
+                        email_id = %email_id,
+                        error = %e,
+                        "[email] email_get error for id={}: {}",
+                        email_id,
+                        e
+                    );
                 }
             }
         }
@@ -1620,5 +1636,50 @@ mod tests {
         assert_eq!(response.total, 2);
         assert!(response.results.contains("client1"));
         assert!(response.results.contains("client2"));
+    }
+
+    #[test]
+    fn test_tool_search_email_logs_tracing() {
+        rustls::crypto::ring::default_provider()
+            .install_default()
+            .ok();
+        let body = r#"{
+                "apiUrl": "{API_URL}",
+                "primaryAccounts": {"urn:ietf:params:jmap:mail": "acc1"},
+                "methodResponses": [
+                    ["Email/query", {"ids": ["e1", "e2"]}, "0"],
+                    ["Email/get", {
+                        "list": [
+                            {"id": "e1", "subject": "First"},
+                            {"id": "e2", "subject": "Second"}
+                        ],
+                        "notFound": []
+                    }, "1"]
+                ]
+            }"#
+        .to_string();
+        let url = spawn_mock_server(body);
+        let mut config = AppConfig::default();
+        config.jmap_clients.insert(
+            "fastmail".to_string(),
+            JmapClient {
+                url,
+                token: "tok".to_string(),
+            },
+        );
+        let res = tool_search_email(
+            &config,
+            SearchEmailFilters {
+                keyword: Some("fastmail"),
+                ..Default::default()
+            },
+            SearchEmailPagination {
+                page: 1,
+                page_size: 10,
+            },
+        );
+        assert!(res.is_ok());
+        let response = res.unwrap();
+        assert_eq!(response.total, 2);
     }
 }
