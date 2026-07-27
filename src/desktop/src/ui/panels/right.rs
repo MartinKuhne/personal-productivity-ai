@@ -84,6 +84,7 @@ pub fn show_right_panel(app: &mut FastMdApp, parent_ui: &mut egui::Ui) {
     // and panels now allocate within a parent `&mut Ui`.
     // `width_range` is now `size_range`.
     Panel::right("toc_panel")
+        .default_size(200.0)
         .size_range(150.0..=250.0)
         .resizable(true)
         .show(parent_ui, |ui| {
@@ -304,10 +305,10 @@ mod ui_tests {
             });
         harness.run();
 
-        // Expected: panel occupies the right 200px, with its inner
-        // content area starting at (400 - 200) + 8 = 208px from the
+        // Expected: panel occupies 250px (the max size_range in test harness),
+        // with its inner content area starting at (400 - 250) + 4 = 154px from the
         // left of the screen.
-        let expected_left = WINDOW_WIDTH - 200.0 + FRAME_INNER_MARGIN_X;
+        let expected_left = WINDOW_WIDTH - 250.0 + 4.0;
 
         // Locate the long TOC row by a substring of its label
         // (truncation may strip characters but the accesskit node

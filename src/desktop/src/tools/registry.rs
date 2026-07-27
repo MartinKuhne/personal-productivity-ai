@@ -113,12 +113,6 @@ impl ToolRegistry {
         self.register(Box::new(ReadYamlHeaderTool));
         self.register(Box::new(WriteYamlHeaderTool));
         self.register(Box::new(WebSearchTool));
-        self.register(Box::new(SearchCalendarTool));
-        self.register(Box::new(GetCalendarTool));
-        self.register(Box::new(GetCalendarItemTool));
-        self.register(Box::new(AddCalendarItemTool));
-        self.register(Box::new(UpdateCalendarItemTool));
-        self.register(Box::new(DeleteCalendarItemTool));
         self.register(Box::new(SearchEmailTool));
         self.register(Box::new(GetEmailByIdTool));
         self.register(Box::new(SendEmailTool));
@@ -774,176 +768,6 @@ impl Tool for WebSearchTool {
     }
 }
 
-struct SearchCalendarTool;
-impl Tool for SearchCalendarTool {
-    fn name(&self) -> &'static str {
-        "search_calendar"
-    }
-    fn description(&self) -> &'static str {
-        "Search the calendar by keyword."
-    }
-    fn input_type(&self) -> TypeId {
-        TypeId::of::<dtos::SearchCalendarInput>()
-    }
-    fn parameters_schema(&self) -> serde_json::Value {
-        json_schema::<dtos::SearchCalendarInput>()
-    }
-    fn is_enabled(&self, config: &AppConfig, _: &str) -> bool {
-        !config.caldav_clients.is_empty()
-    }
-    fn safety(&self) -> crate::tools::Safety {
-        crate::tools::Safety::ReadOnly
-    }
-    fn execute(&self, ctx: &ToolContext, args: &str) -> Result<serde_json::Value, String> {
-        let input: dtos::SearchCalendarInput =
-            serde_json::from_str(args).map_err(|e| format!("Invalid args: {}", e))?;
-        crate::tools::caldav::tool_search_calendar(ctx.config, &input.keyword).map(|r| {
-            serde_json::to_value(r).unwrap_or_else(|e| serde_json::json!({"error": e.to_string()}))
-        })
-    }
-}
-
-struct GetCalendarTool;
-impl Tool for GetCalendarTool {
-    fn name(&self) -> &'static str {
-        "get_calendar"
-    }
-    fn description(&self) -> &'static str {
-        "Get calendar items by date range."
-    }
-    fn input_type(&self) -> TypeId {
-        TypeId::of::<dtos::GetCalendarInput>()
-    }
-    fn parameters_schema(&self) -> serde_json::Value {
-        json_schema::<dtos::GetCalendarInput>()
-    }
-    fn is_enabled(&self, config: &AppConfig, _: &str) -> bool {
-        !config.caldav_clients.is_empty()
-    }
-    fn safety(&self) -> crate::tools::Safety {
-        crate::tools::Safety::ReadOnly
-    }
-    fn execute(&self, ctx: &ToolContext, args: &str) -> Result<serde_json::Value, String> {
-        let input: dtos::GetCalendarInput =
-            serde_json::from_str(args).map_err(|e| format!("Invalid args: {}", e))?;
-        crate::tools::caldav::tool_get_calendar(ctx.config, &input.start_date, &input.end_date).map(
-            |r| {
-                serde_json::to_value(r)
-                    .unwrap_or_else(|e| serde_json::json!({"error": e.to_string()}))
-            },
-        )
-    }
-}
-
-struct GetCalendarItemTool;
-impl Tool for GetCalendarItemTool {
-    fn name(&self) -> &'static str {
-        "get_calendar_item"
-    }
-    fn description(&self) -> &'static str {
-        "Get a specific calendar item by its full href. IMPORTANT: Use the exact, full 'href' value returned by search or get tools (e.g., '/dav/calendars/user/.../item.ics'). Do not use just the UUID."
-    }
-    fn input_type(&self) -> TypeId {
-        TypeId::of::<dtos::GetCalendarItemInput>()
-    }
-    fn parameters_schema(&self) -> serde_json::Value {
-        json_schema::<dtos::GetCalendarItemInput>()
-    }
-    fn is_enabled(&self, config: &AppConfig, _: &str) -> bool {
-        !config.caldav_clients.is_empty()
-    }
-    fn safety(&self) -> crate::tools::Safety {
-        crate::tools::Safety::ReadOnly
-    }
-    fn execute(&self, ctx: &ToolContext, args: &str) -> Result<serde_json::Value, String> {
-        let input: dtos::GetCalendarItemInput =
-            serde_json::from_str(args).map_err(|e| format!("Invalid args: {}", e))?;
-        crate::tools::caldav::tool_get_calendar_item(ctx.config, &input.href).map(|r| {
-            serde_json::to_value(r).unwrap_or_else(|e| serde_json::json!({"error": e.to_string()}))
-        })
-    }
-}
-
-struct AddCalendarItemTool;
-impl Tool for AddCalendarItemTool {
-    fn name(&self) -> &'static str {
-        "add_calendar_item"
-    }
-    fn description(&self) -> &'static str {
-        "Add a new calendar item."
-    }
-    fn input_type(&self) -> TypeId {
-        TypeId::of::<dtos::AddCalendarItemInput>()
-    }
-    fn parameters_schema(&self) -> serde_json::Value {
-        json_schema::<dtos::AddCalendarItemInput>()
-    }
-    fn is_enabled(&self, config: &AppConfig, _: &str) -> bool {
-        !config.caldav_clients.is_empty()
-    }
-    fn execute(&self, ctx: &ToolContext, args: &str) -> Result<serde_json::Value, String> {
-        let input: dtos::AddCalendarItemInput =
-            serde_json::from_str(args).map_err(|e| format!("Invalid args: {}", e))?;
-        crate::tools::caldav::tool_add_calendar_item(ctx.config, &input.item_json).map(|r| {
-            serde_json::to_value(r).unwrap_or_else(|e| serde_json::json!({"error": e.to_string()}))
-        })
-    }
-}
-
-struct UpdateCalendarItemTool;
-impl Tool for UpdateCalendarItemTool {
-    fn name(&self) -> &'static str {
-        "update_calendar_item"
-    }
-    fn description(&self) -> &'static str {
-        "Update a calendar item."
-    }
-    fn input_type(&self) -> TypeId {
-        TypeId::of::<dtos::UpdateCalendarItemInput>()
-    }
-    fn parameters_schema(&self) -> serde_json::Value {
-        json_schema::<dtos::UpdateCalendarItemInput>()
-    }
-    fn is_enabled(&self, config: &AppConfig, _: &str) -> bool {
-        !config.caldav_clients.is_empty()
-    }
-    fn execute(&self, ctx: &ToolContext, args: &str) -> Result<serde_json::Value, String> {
-        let input: dtos::UpdateCalendarItemInput =
-            serde_json::from_str(args).map_err(|e| format!("Invalid args: {}", e))?;
-        crate::tools::caldav::tool_update_calendar_item(ctx.config, &input.id, &input.update_json)
-            .map(|r| {
-                serde_json::to_value(r)
-                    .unwrap_or_else(|e| serde_json::json!({"error": e.to_string()}))
-            })
-    }
-}
-
-struct DeleteCalendarItemTool;
-impl Tool for DeleteCalendarItemTool {
-    fn name(&self) -> &'static str {
-        "delete_calendar_item"
-    }
-    fn description(&self) -> &'static str {
-        "Delete a calendar item."
-    }
-    fn input_type(&self) -> TypeId {
-        TypeId::of::<dtos::DeleteCalendarItemInput>()
-    }
-    fn parameters_schema(&self) -> serde_json::Value {
-        json_schema::<dtos::DeleteCalendarItemInput>()
-    }
-    fn is_enabled(&self, config: &AppConfig, _: &str) -> bool {
-        !config.caldav_clients.is_empty()
-    }
-    fn execute(&self, ctx: &ToolContext, args: &str) -> Result<serde_json::Value, String> {
-        let input: dtos::DeleteCalendarItemInput =
-            serde_json::from_str(args).map_err(|e| format!("Invalid args: {}", e))?;
-        crate::tools::caldav::tool_delete_calendar_item(ctx.config, &input.id).map(|r| {
-            serde_json::to_value(r).unwrap_or_else(|e| serde_json::json!({"error": e.to_string()}))
-        })
-    }
-}
-
 struct SearchEmailTool;
 impl Tool for SearchEmailTool {
     fn name(&self) -> &'static str {
@@ -1053,7 +877,7 @@ impl Tool for SearchContactTool {
         "search_contact"
     }
     fn description(&self) -> &'static str {
-        "Search contacts by keyword."
+        "Search contacts by keyword using CardDAV."
     }
     fn input_type(&self) -> TypeId {
         TypeId::of::<dtos::SearchContactInput>()
@@ -1062,16 +886,7 @@ impl Tool for SearchContactTool {
         json_schema::<dtos::SearchContactInput>()
     }
     fn is_enabled(&self, config: &AppConfig, _: &str) -> bool {
-        if config
-            .feature_flags
-            .get("useDAVForContacts")
-            .copied()
-            .unwrap_or(false)
-        {
-            !config.caldav_clients.is_empty()
-        } else {
-            !config.jmap_clients.is_empty()
-        }
+        !config.caldav_clients.is_empty()
     }
     fn safety(&self) -> crate::tools::Safety {
         crate::tools::Safety::ReadOnly
@@ -1079,18 +894,7 @@ impl Tool for SearchContactTool {
     fn execute(&self, ctx: &ToolContext, args: &str) -> Result<serde_json::Value, String> {
         let input: dtos::SearchContactInput =
             serde_json::from_str(args).map_err(|e| format!("Invalid args: {}", e))?;
-        if ctx
-            .config
-            .feature_flags
-            .get("useDAVForContacts")
-            .copied()
-            .unwrap_or(false)
-        {
-            crate::tools::carddav::tool_search_contact(ctx.config, &input.keyword)
-        } else {
-            crate::tools::jmap::tool_search_contact(ctx.config, &input.keyword)
-        }
-        .map(|r| {
+        crate::tools::carddav::tool_search_contact(ctx.config, &input.keyword).map(|r| {
             serde_json::to_value(r).unwrap_or_else(|e| serde_json::json!({"error": e.to_string()}))
         })
     }
@@ -1102,7 +906,7 @@ impl Tool for AddContactTool {
         "add_contact"
     }
     fn description(&self) -> &'static str {
-        "Add a new contact."
+        "Add a new contact using CardDAV."
     }
     fn input_type(&self) -> TypeId {
         TypeId::of::<dtos::AddContactInput>()
@@ -1111,32 +915,12 @@ impl Tool for AddContactTool {
         json_schema::<dtos::AddContactInput>()
     }
     fn is_enabled(&self, config: &AppConfig, _: &str) -> bool {
-        if config
-            .feature_flags
-            .get("useDAVForContacts")
-            .copied()
-            .unwrap_or(false)
-        {
-            !config.caldav_clients.is_empty()
-        } else {
-            !config.jmap_clients.is_empty()
-        }
+        !config.caldav_clients.is_empty()
     }
     fn execute(&self, ctx: &ToolContext, args: &str) -> Result<serde_json::Value, String> {
         let input: dtos::AddContactInput =
             serde_json::from_str(args).map_err(|e| format!("Invalid args: {}", e))?;
-        if ctx
-            .config
-            .feature_flags
-            .get("useDAVForContacts")
-            .copied()
-            .unwrap_or(false)
-        {
-            crate::tools::carddav::tool_add_contact(ctx.config, &input.contact_json)
-        } else {
-            crate::tools::jmap::tool_add_contact(ctx.config, &input.contact_json)
-        }
-        .map(|r| {
+        crate::tools::carddav::tool_add_contact(ctx.config, &input.contact_json).map(|r| {
             serde_json::to_value(r).unwrap_or_else(|e| serde_json::json!({"error": e.to_string()}))
         })
     }
@@ -1148,7 +932,7 @@ impl Tool for GetContactTool {
         "get_contact"
     }
     fn description(&self) -> &'static str {
-        "Get contact by id."
+        "Get contact by id using CardDAV."
     }
     fn input_type(&self) -> TypeId {
         TypeId::of::<dtos::GetContactInput>()
@@ -1157,16 +941,7 @@ impl Tool for GetContactTool {
         json_schema::<dtos::GetContactInput>()
     }
     fn is_enabled(&self, config: &AppConfig, _: &str) -> bool {
-        if config
-            .feature_flags
-            .get("useDAVForContacts")
-            .copied()
-            .unwrap_or(false)
-        {
-            !config.caldav_clients.is_empty()
-        } else {
-            !config.jmap_clients.is_empty()
-        }
+        !config.caldav_clients.is_empty()
     }
     fn safety(&self) -> crate::tools::Safety {
         crate::tools::Safety::ReadOnly
@@ -1174,18 +949,7 @@ impl Tool for GetContactTool {
     fn execute(&self, ctx: &ToolContext, args: &str) -> Result<serde_json::Value, String> {
         let input: dtos::GetContactInput =
             serde_json::from_str(args).map_err(|e| format!("Invalid args: {}", e))?;
-        if ctx
-            .config
-            .feature_flags
-            .get("useDAVForContacts")
-            .copied()
-            .unwrap_or(false)
-        {
-            crate::tools::carddav::tool_get_contact(ctx.config, &input.id)
-        } else {
-            crate::tools::jmap::tool_get_contact(ctx.config, &input.id)
-        }
-        .map(|r| {
+        crate::tools::carddav::tool_get_contact(ctx.config, &input.id).map(|r| {
             serde_json::to_value(r).unwrap_or_else(|e| serde_json::json!({"error": e.to_string()}))
         })
     }

@@ -172,12 +172,6 @@ fn default_readonly() -> bool {
 
 fn default_feature_flags() -> HashMap<String, bool> {
     let mut m = HashMap::new();
-    // Default to CardDAV for contact operations. Some JMAP providers (notably
-    // Fastmail) don't expose the contact data type via JMAP and return
-    // `unknownMethod: Unknown object 'JMAPApp::DataType::Contact'`. CardDAV
-    // has the same contact data with broader provider support, so it's the
-    // safer default. Set this to `false` in your config to opt back into JMAP.
-    m.insert("useDAVForContacts".to_string(), true);
     // When enabled, tool call responses include full data in logs (may be verbose).
     // When disabled (default), only basic success/failure is logged for privacy.
     m.insert("toolCallDebugMode".to_string(), false);
@@ -399,15 +393,6 @@ mod tests {
         let config = AppConfig::default();
         assert!(config.pdf_converter_command.is_none());
         assert!(!config.inline_editor_enabled);
-        // CardDAV is the default for contact operations because some JMAP
-        // providers (notably Fastmail) don't expose the Contact data type.
-        // This makes the registry's contact tools route to CardDAV out of
-        // the box.
-        assert_eq!(
-            config.feature_flags.get("useDAVForContacts").copied(),
-            Some(true),
-            "useDAVForContacts must default to true so contact lookups don't fail on JMAP servers without a Contact data type"
-        );
     }
 
     #[test]
