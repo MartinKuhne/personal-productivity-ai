@@ -43,6 +43,25 @@ jobs:
         with:
           workspaces: src/desktop
       - run: cargo test
+      # Tier 3 visual regression gate. `egui_kittest`'s snapshot
+      # feature writes `{name}.new.png` next to each saved
+      # `{name}.png` when the rendered output differs. Failing
+      # the build on any `.new.png` is the egui_kittest equivalent
+      # of `cargo insta pending-snapshots`. Reviewers can
+      # inspect the diff locally and commit the new PNG to accept
+      # intentional changes. See Q3 in
+      # `doc/planning/egui-testing.md` for the policy.
+      - name: Fail on pending snapshot diffs
+        shell: bash
+        run: |
+          if compgen -G "tests/snapshots/*.new.png" > /dev/null; then
+            echo "Error: pending snapshot diffs detected:"
+            ls -la tests/snapshots/*.new.png
+            echo ""
+            echo "Inspect the diffs locally and either accept the new"
+            echo "PNG (rename .new.png to .png) or fix the regression."
+            exit 1
+          fi
 
   clippy:
     name: cargo clippy
