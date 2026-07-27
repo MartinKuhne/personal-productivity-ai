@@ -185,8 +185,20 @@ Define the per-column discrete cost function on these breakpoints:
 `cost_j(max_j) = 0` and `cost_j(min_j) =` the worst-case wrap count.
 
 ### 3.2 Phase A — surplus regime (`W ≥ Σ max_j`)
-No column *needs* to wrap. Set `w_j = max_j + share(W − Σ max_j)` where `share`
-is a fairness rule (see §3.5). Goals G1 = G2 = 0; G3 satisfied. **Done.**
+No column *needs* to wrap. Set `w_j = max_j` for every column. Goals
+G1 = G2 = 0; G3 is intentionally **relaxed** (the table may not fill the
+full available width). **Done.**
+
+> **Revision note.** An earlier revision of this algorithm distributed
+> the spare `W − Σ max_j` proportionally to `max_j` (Decision 7 below).
+> That produced the "infinite-width column" visual defect: a column
+> whose content is narrow (e.g. a `Cost` column with `$42,000`) was
+> stretched hundreds of pixels wide with empty trailing whitespace
+> whenever the viewport was much wider than the table's content.
+> Browser/spreadsheet auto-fit tables size to content and leave spare
+> space unused; FTWA now does the same in the surplus regime. The
+> deficit and fallback regimes are unchanged (G3 still holds exactly
+> in the deficit regime, `Σ w_j == W`).
 
 ### 3.3 Phase B — deficit regime (`W < Σ max_j`)
 Let `D = Σ max_j − W` (total shrinkage required from the ideal widths).
@@ -266,8 +278,7 @@ fn fair_column_widths(
 
     // 3.2 surplus
     if avail >= total_max {
-        let spare = avail - total_max;
-        return max.iter().map(|&m| m + spare * (m / total_max)).collect();
+        return max.to_vec();  // pin at max_content; spare unused (see §3.2 revision note)
     }
 
     // 3.3 B1: choose wrap set S = smallest top-slack prefix with sum >= D
@@ -405,10 +416,17 @@ smaller `Δcost / Δwidth` to get the most shrinkage for the least wrap.
    (content hash, W rounded to e.g. 0.1px) and reused across frames until text
    or width meaningfully changes. Repro exact widths frame-to-frame; avoids
    shimmer during resize.
-7. **Surplus policy — proportional to `max_content`.** `spare_j = spare ·
-   max_j / Σmax`. Visible whitespace grows in proportion to the column's
-   information density; preserves visual weight of wide content columns rather
-   than flattening all columns equally.
+7. **Surplus policy — pin at `max_content` (no stretching).
+   SUPERSEDED**: ~~proportional to `max_content`, `spare_j = spare ·
+   max_j / Σmax`, so visible whitespace grows in proportion to the
+   column's information density.~~ The proportional rule produced the
+   "infinite-width column" defect (see §3.2 revision note): a narrow
+   content column stretched far beyond its content width in a wide
+   viewport. The surplus regime now pins every column at its
+   `max_content` and leaves the spare space unused to the right of
+   the table, matching browser/spreadsheet auto-fit behaviour. G3
+   ("use all space") is intentionally relaxed in the surplus regime;
+   G3 still holds exactly in the deficit regime (`Σ w_j == W`).
 
 ### 5.1 No remaining open items
 All seven decisions are resolved; the egui spike confirmed Path (a) as the

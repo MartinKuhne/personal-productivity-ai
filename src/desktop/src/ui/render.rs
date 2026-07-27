@@ -1472,14 +1472,24 @@ def foo():
                         a,
                         sum_min
                     );
-                    if !decision.needs_horizontal_scroll {
-                        // G3 invariant: in any non-Ã‚Â§3.6 regime, sum exactly
-                        // equals available. (In Ã‚Â§3.6 the function returns
-                        // min-content widths and signals horizontal scroll.)
+                    if decision.needs_horizontal_scroll {
+                        // §3.6 fallback: widths == min_content exactly.
+                        assert_eq!(
+                            decision.widths, min_w,
+                            "avail={a}: fallback must return min_content"
+                        );
+                    } else if a >= sum_max {
+                        // Surplus: columns pinned at max_content exactly.
+                        assert_eq!(
+                            decision.widths, max_w,
+                            "avail={a}: surplus must return max_content (no stretching)"
+                        );
+                    } else {
+                        // Deficit: G3 sum == available exactly.
                         let sum: f32 = decision.widths.iter().sum();
                         assert!(
                             (sum - a).abs() < 1e-3,
-                            "avail={a}: ÃŽÂ£ widths ({sum}) must equal available"
+                            "avail={a}: deficit sum ({sum}) must equal available"
                         );
                     }
                     // Reference: sum_min = {sum_min:.0}, sum_max = {sum_max:.0}
@@ -1488,6 +1498,50 @@ def foo():
                 }
             });
         });
+    }
+
+    #[test]
+    fn test_render_table_surplus_does_not_stretch_columns_e2e() {
+        // Regression for the "infinite-width column" defect: a 2-column
+        // table whose content is much narrower than the viewport must
+        // NOT stretch either column beyond its max_content width.
+        // The Trailers.md table (Model | Cost) is the motivating case.
+        let ctx = egui::Context::default();
+        let md = "| Model | Cost |\n|-------|------|\n| NuCamp T@B 320 / 400 | $42,000 |\n| Wolf Pup | |\n";
+        let events = parse_markdown_to_events(md);
+        let cells = match events.iter().find(|e| matches!(e, RenderEvent::Table(_))) {
+            Some(RenderEvent::Table(c)) => c.clone(),
+            _ => panic!("No table found"),
+        };
+        let _ = ctx.run_ui(
+            egui::RawInput {
+                screen_rect: Some(egui::Rect::from_min_size(
+                    egui::Pos2::ZERO,
+                    egui::vec2(1600.0, 600.0),
+                )),
+                ..egui::RawInput::default()
+            },
+            |ui| {
+                egui::CentralPanel::default().show(ui, |ui| {
+                    let (max_w, min_w) = crate::ui::table_width::measure(&cells, ui);
+                    let gutter = 10.0_f32;
+                    let avail = (ui.available_width()
+                        - (max_w.len() as f32 - 1.0).max(0.0) * gutter)
+                        .max(0.0);
+                    let decision = crate::ui::table_width::ftwa(&max_w, &min_w, avail);
+                    // Surplus regime (viewport much wider than content).
+                    assert!(!decision.needs_horizontal_scroll);
+                    // Columns must be pinned at max_content, not stretched.
+                    assert_eq!(decision.widths.len(), 2);
+                    for (j, (&w, &mx)) in decision.widths.iter().zip(max_w.iter()).enumerate() {
+                        assert!(
+                            (w - mx).abs() < 1.0,
+                            "col {j}: width {w} must equal max_content {mx} (no stretching)"
+                        );
+                    }
+                });
+            },
+        );
     }
 
     #[test]
@@ -1716,9 +1770,7 @@ def foo():
     /// Renders `table_cells` in a wide viewport so the FTWA path runs
     /// (not the §3.6 horizontal-scroll fallback) and returns the
     /// `FullOutput` for shape inspection.
-    fn render_table_with_paint_output(
-        table_cells: &[Vec<Vec<InlineElem>>],
-    ) -> egui::FullOutput {
+    fn render_table_with_paint_output(table_cells: &[Vec<Vec<InlineElem>>]) -> egui::FullOutput {
         let ctx = egui::Context::default();
         let raw = egui::RawInput {
             screen_rect: Some(egui::Rect::from_min_size(
