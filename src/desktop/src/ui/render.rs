@@ -324,14 +324,15 @@ fn render_table_cell(ui: &mut egui::Ui, cell: &[InlineElem], pinned_width: Optio
     // all cells in a row start at the same Y coordinate.
     ui.with_layout(egui::Layout::top_down(egui::Align::Min), |ui| {
         cell_frame.show(ui, |ui| {
-            // Compute available width inside cell_frame (accounting for 1px border stroke per side).
-            // In egui::Grid pass 2, ui.available_width() reflects the column width calculated
-            // across all rows. Taking max(pinned_width - 2, ui.available_width() - 2) ensures
-            // that both FTWA and fallback path cells expand to the full grid column width.
-            let stroke_margin = 2.0 * TABLE_CELL_STROKE.width;
-            let avail_w = (ui.available_width() - stroke_margin).max(0.0);
+            // In egui::Grid pass 2, ui.available_width() is the resolved column
+            // width. Frame::NONE with inner_margin=ZERO does not shrink the inner
+            // Ui — the stroke is painted visually but does not consume content
+            // space — so we use available_width() as-is. In the pinned-width
+            // (FTWA) path we take max(pinned, available) so the cell frame
+            // expands whenever the grid column widens beyond the original estimate.
+            let avail_w = ui.available_width();
             let inner_w = match pinned_width {
-                Some(w) => (w - stroke_margin).max(avail_w),
+                Some(w) => w.max(avail_w),
                 None => avail_w,
             };
 
