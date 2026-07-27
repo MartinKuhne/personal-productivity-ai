@@ -22,4 +22,5 @@
 
 pub mod assert;
 pub mod interact;
+pub mod snapshot;
 pub mod text;
