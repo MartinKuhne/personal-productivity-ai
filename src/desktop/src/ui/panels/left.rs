@@ -28,7 +28,11 @@ pub fn show_left_panel(app: &mut FastMdApp, parent_ui: &mut egui::Ui) {
         })
         .collect();
 
-    let mut root_node = TreeNode::new("Workspace".to_string(), std::path::PathBuf::new(), true);
+    let mut root_node = TreeNode::new(
+        crate::ui::strings::DEFAULT_WORKSPACE_NAME.to_string(),
+        std::path::PathBuf::new(),
+        true,
+    );
 
     for lib in app.content_libraries() {
         let lib_node_name = lib.name.clone();
@@ -179,7 +183,11 @@ pub fn show_left_panel(app: &mut FastMdApp, parent_ui: &mut egui::Ui) {
         .max_size(max_w)
         .show(parent_ui, |ui| {
             ui.add_space(4.0);
-            ui.heading(RichText::new("Workspace Files").size(16.0).strong());
+            ui.heading(
+                RichText::new(crate::ui::strings::WORKSPACE_HEADER)
+                    .size(16.0)
+                    .strong(),
+            );
             ui.add_space(4.0);
 
             // Single virtual-scroll container for the file tree.
@@ -265,7 +273,7 @@ pub fn show_left_panel(app: &mut FastMdApp, parent_ui: &mut egui::Ui) {
             if rows.is_empty() {
                 ui.add_space(8.0);
                 ui.label(
-                    RichText::new("No markdown files found.")
+                    RichText::new(crate::ui::strings::NO_MARKDOWN_FILES)
                         .italics()
                         .color(egui::Color32::GRAY),
                 );

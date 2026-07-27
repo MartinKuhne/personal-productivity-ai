@@ -203,7 +203,7 @@ models:
 
 * [REQ-613] Auto-Model Selection: On application startup, if multiple models are configured with the `chat` use_case, the system shall automatically select the model with the lowest `cost` value and persist the selection to the configuration file.
 * [REQ-614] USER.md Context Injection: For each configured content library, if a USER.md file exists at the library root, its contents shall be appended to the system prompt as user context.
-* [REQ-615] Agent Conversation History: The agent shall maintain conversation history across prompts within a session. History is reset when the user clicks "Back to Document" or starts a new session.
+* [REQ-615] Agent Conversation History: The agent shall maintain conversation history across prompts within a session. History is reset when the user clicks "Close" or starts a new session.
 * [REQ-616] Thinking Delimiter: Model reasoning/thinking content wrapped in `🤔...🤔` delimiters shall be extracted and displayed in a collapsible "Thinking Process" section separate from the main response.
 * [REQ-618] Quick Tasks Menu: The bottom panel shall provide a "Quick Tasks" menu with predefined prompts (e.g., "Format Markdown") that inject a structured prompt with YAML front-matter template.
 * [REQ-619] Tabbed Document Interface: The center panel shall support multiple open documents as tabs. Clicking a file opens it in a new tab; middle-click or close button closes tabs.

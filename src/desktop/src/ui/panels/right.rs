@@ -93,7 +93,7 @@ pub fn show_right_panel(app: &mut FastMdApp, parent_ui: &mut egui::Ui) {
             }
             ui.add_space(4.0);
             ui.heading(
-                RichText::new("Table of Contents")
+                RichText::new(crate::ui::strings::TABLE_OF_CONTENTS_HEADER)
                     .size(14.0)
                     .strong()
                     .color(egui::Color32::from_rgb(100, 200, 255)),

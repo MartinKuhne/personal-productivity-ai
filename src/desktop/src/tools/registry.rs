@@ -1664,4 +1664,3 @@ mod tests {
         assert_eq!(safety_of("get_weather"), crate::tools::Safety::ReadOnly);
     }
 }
-

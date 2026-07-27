@@ -50,59 +50,66 @@ pub fn show_background_logs_window(app: &mut FastMdApp, ctx: &egui::Context) {
 
     let mut open = app.background_manager.lock().unwrap().show_background_logs;
 
-    egui::Window::new("Background Processes")
+    egui::Window::new(crate::ui::strings::BACKGROUND_PROCESSES_WINDOW)
         .open(&mut open)
         .resizable(true)
         .collapsible(true)
         .default_size([600.0, 400.0])
         .show(ctx, |ui| {
             let Ok(mut mgr) = app.background_manager.lock() else {
-                ui.label("Error: could not access background manager");
+                ui.label(crate::ui::strings::BACKGROUND_MGR_ACCESS_ERROR);
                 return;
             };
 
             ui.horizontal(|ui| {
-                ui.label("Search:");
+                ui.label(crate::ui::strings::SEARCH_LABEL);
                 ui.text_edit_singleline(&mut mgr.search_text);
 
-                ui.label("Category:");
+                ui.label(crate::ui::strings::CATEGORY_LABEL);
                 egui::ComboBox::from_id_salt("category_filter")
                     .selected_text(match mgr.filter_category {
                         Some(c) => c.to_string(),
-                        None => "All".to_string(),
+                        None => crate::ui::strings::LOG_CATEGORY_ALL.to_string(),
                     })
                     .show_ui(ui, |ui| {
-                        ui.selectable_value(&mut mgr.filter_category, None, "All");
+                        ui.selectable_value(
+                            &mut mgr.filter_category,
+                            None,
+                            crate::ui::strings::LOG_CATEGORY_ALL,
+                        );
                         ui.selectable_value(
                             &mut mgr.filter_category,
                             Some(LogCategory::Indexer),
-                            "Indexer",
+                            crate::ui::strings::LOG_CATEGORY_INDEXER,
                         );
                         ui.selectable_value(
                             &mut mgr.filter_category,
                             Some(LogCategory::Watcher),
-                            "Watcher",
+                            crate::ui::strings::LOG_CATEGORY_WATCHER,
                         );
                         ui.selectable_value(
                             &mut mgr.filter_category,
                             Some(LogCategory::PdfConverter),
-                            "PDF Converter",
+                            crate::ui::strings::LOG_CATEGORY_PDF_CONVERTER,
                         );
                         ui.selectable_value(
                             &mut mgr.filter_category,
                             Some(LogCategory::ImageVision),
-                            "Image Vision",
+                            crate::ui::strings::LOG_CATEGORY_IMAGE_VISION,
                         );
                         ui.selectable_value(
                             &mut mgr.filter_category,
                             Some(LogCategory::LlmTools),
-                            "LLM Tools",
+                            crate::ui::strings::LOG_CATEGORY_LLM_TOOLS,
                         );
                     });
 
-                ui.checkbox(&mut mgr.auto_scroll, "Auto-scroll");
+                ui.checkbox(
+                    &mut mgr.auto_scroll,
+                    crate::ui::strings::AUTO_SCROLL_CHECKBOX,
+                );
 
-                if ui.button("Clear").clicked() {
+                if ui.button(crate::ui::strings::CLEAR_BUTTON).clicked() {
                     mgr.clear_logs();
                 }
             });

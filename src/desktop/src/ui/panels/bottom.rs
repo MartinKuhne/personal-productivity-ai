@@ -49,7 +49,7 @@ pub fn compute_prompt_prefix(
 pub fn format_models_list(
     models: &std::collections::HashMap<String, crate::config::LlmConfig>,
 ) -> String {
-    let mut output = "Available Models:\n".to_string();
+    let mut output = crate::ui::strings::MODELS_LIST_HEADER.to_string();
     let mut sorted_names: Vec<&String> = models.keys().collect();
     sorted_names.sort();
 
@@ -64,7 +64,7 @@ pub fn format_models_list(
         ));
     }
     if models.is_empty() {
-        output.push_str("No additional models configured.\n");
+        output.push_str(crate::ui::strings::MODELS_LIST_NO_ADDITIONAL);
     }
     output
 }
@@ -80,7 +80,7 @@ pub fn show_bottom_panel(app: &mut FastMdApp, parent_ui: &mut egui::Ui) {
         .min_size(32.0)
         .show(parent_ui, |ui| {
             // Some branches below still need the context for input
-            // polling Ã¢â‚¬â€ pull it from the inner Ui.
+            // polling — pull it from the inner Ui.
             let ctx = ui.ctx().clone();
             ui.horizontal(|ui| {
                 let prompt_prefix = compute_prompt_prefix(
@@ -94,7 +94,7 @@ pub fn show_bottom_panel(app: &mut FastMdApp, parent_ui: &mut egui::Ui) {
                     egui::vec2(text_width, ui.available_height()),
                     egui::TextEdit::multiline(&mut app.agent_mut().command_input)
                         .desired_width(f32::INFINITY)
-                        .hint_text("Type command (Enter to submit, Shift+Enter for new line)"),
+                        .hint_text(crate::ui::strings::COMMAND_INPUT_HINT),
                 );
 
                 let mut submit = false;
@@ -105,11 +105,15 @@ pub fn show_bottom_panel(app: &mut FastMdApp, parent_ui: &mut egui::Ui) {
                 }
 
                 ui.vertical(|ui| {
-                    ui.menu_button("⚡ Quick Tasks", |ui| {
-                        if ui.button("Format Markdown").clicked() {
+                    ui.menu_button(crate::ui::strings::QUICK_TASKS_MENU, |ui| {
+                        if ui
+                            .button(crate::ui::strings::FORMAT_MARKDOWN_ACTION)
+                            .clicked()
+                        {
                             let now = chrono::Local::now();
                             let date_str = now.to_rfc3339();
-                            app.agent_mut().command_input = crate::ui::generate_format_prompt(&date_str);
+                            app.agent_mut().command_input =
+                                crate::ui::generate_format_prompt(&date_str);
                             submit = true;
                             ui.close();
                         }
@@ -117,7 +121,10 @@ pub fn show_bottom_panel(app: &mut FastMdApp, parent_ui: &mut egui::Ui) {
 
                     if app.agent().state().running
                         && ui
-                            .button(RichText::new("⏹ Stop").color(egui::Color32::RED))
+                            .button(
+                                RichText::new(crate::ui::strings::STOP_AGENT_BUTTON)
+                                    .color(egui::Color32::RED),
+                            )
                             .clicked()
                     {
                         app.agent_mut().cancel();
@@ -138,7 +145,7 @@ pub fn show_bottom_panel(app: &mut FastMdApp, parent_ui: &mut egui::Ui) {
                         CommandIntent::ShowDeprecatedModelMessage => {
                             app.agent_mut().set_status("Error".to_string());
                             app.agent_mut().set_response(
-                                "The /model command is deprecated. Models are now automatically selected based on use case and cost.".to_string(),
+                                crate::ui::strings::DEPRECATED_MODEL_MESSAGE.to_string(),
                             );
                             app.agent_mut().set_show_results(true);
                         }
@@ -148,7 +155,8 @@ pub fn show_bottom_panel(app: &mut FastMdApp, parent_ui: &mut egui::Ui) {
                             let dir = app.selection().selected_dir().cloned();
                             let files = app.selection().selected_files().clone();
                             let bus = app.file_event_bus.clone();
-                            app.agent_mut().start_session(tx, agent_prompt, file, dir, files, bus);
+                            app.agent_mut()
+                                .start_session(tx, agent_prompt, file, dir, files, bus);
                             app.agent_mut().set_show_results(true);
                         }
                         CommandIntent::Empty => {}

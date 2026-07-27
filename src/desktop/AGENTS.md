@@ -19,6 +19,11 @@ this file adds Rust/egui-specific conventions and the quality gate.
 - The 5-pane layout is owned by `ui::panel_layout::PanelLayout` (REQ-101); do not ad-hoc side panels in `FastMdApp::update`.
 - All cross-cutting state lives on `FastMdApp` (`ui/app.rs`); split new UI concerns into a dedicated manager struct (cf. `DialogManager`, `SelectionManager`, `TabManager`) rather than growing `app.rs`.
 
+### User Interface Text Strings Isolation
+- **Centralized UI Strings:** All user-facing text strings (button labels, headers, dialog prompts, context menu items, tooltips, status messages) must be isolated into `src/desktop/src/ui/strings.rs` as `pub const` items or formatted string builder functions.
+- **No Hardcoded UI Literals:** Avoid duplicating or embedding inline string literals in egui panel rendering modules (`ui/panels/*`, `ui/modals.rs`, `ui/tree.rs`, `editor.rs`, etc.). Always reference `crate::ui::strings::<CONST_NAME>`.
+- **Documentation & Unit Tests:** Every `pub const` or helper function in `strings.rs` must include a `///` doc comment. Include unit tests in `strings.rs` verifying constant values and formatting logic.
+
 ### `egui::Id` Stability and Salting Rules
 - **Purpose of `egui::Id`s:** `egui` tracks interactive widget state (hover, focus, animation, context menus, drag/drop) across frames and multi-pass layout renders (e.g., `SidePanel` / `Panel`, `ScrollArea::show_rows`, `Grid`) using `egui::Id`.
 - **Preventing `WARN egui::context` pass-to-pass ID changes:** If `egui` sees a widget at the exact same physical coordinates (`rect`) assigned a different `Id` between layout passes (Pass 1 measurement vs. Pass 2 paint), it emits a `WARN egui::context: Widget rect [...] changed id between passes` warning and paints red debug outlines.

@@ -238,10 +238,12 @@ impl EditorState {
                 ui.separator();
 
                 ui.horizontal(|ui| {
-                    if ui.button("Save").clicked() && self.save(producer).is_ok() {
+                    if ui.button(crate::ui::strings::SAVE_BUTTON).clicked()
+                        && self.save(producer).is_ok()
+                    {
                         did_save = true;
                     }
-                    if ui.button("Cancel").clicked() {
+                    if ui.button(crate::ui::strings::CANCEL_BUTTON).clicked() {
                         self.close();
                     }
 
