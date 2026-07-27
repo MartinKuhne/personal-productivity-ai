@@ -2445,17 +2445,50 @@ def foo():
         assert!(md.contains("\r\n"));
     }
 
-    /// Diagnostic test: parses and renders all tables in Laptop.md and verifies
-    /// alignment of every column across rows for every table in the document.
+    /// Verifies that every column in every rendered table is left-edge and
+    /// width-consistent across all rows, covering the table patterns that
+    /// were previously broken:
+    ///   • Tables with an empty header row (`| | |`) followed by data rows
+    ///   • Multi-column key-value tables where cells word-wrap
+    ///   • Multiple tables in a single document
+    ///
+    /// Uses self-contained inline Markdown — no external file paths.
     #[test]
-    fn test_laptop_md_real_file_table_alignment() {
+    fn test_multi_table_document_column_alignment() {
         use eframe::epaint::{Shape, StrokeKind};
-        let path = std::path::Path::new(r"C:\Users\mkuhn\OneDrive\Wiki\Laptop.md");
-        if !path.exists() {
-            return;
-        }
-        let content = std::fs::read_to_string(path).expect("failed to read Laptop.md");
-        let events = parse_markdown_to_events(&content);
+
+        // Sample Markdown that exercises the same structural patterns as the
+        // original real-file test without leaking developer paths or content.
+        let content = "\
+# Reference: Sample Device
+
+## Specifications
+
+| | |
+|---|---|
+| Make | Acme Corp |
+| Model | Widgeteer Pro 9000 |
+| Display | 15.6\" FHD (1920x1080) IPS or 4K OLED, 60Hz |
+| Processor | Generic Core i5 (4C/8T) |
+| RAM | 16 GB DDR4 |
+| Storage | 512 GB NVMe SSD |
+
+## Benchmarks
+
+| Benchmark | Score | Notes |
+|---|---|---|
+| Single-core | 2271 | Turbo sustained |
+| Multi-core | 7545 | All-core sustained |
+| GPU | 4800 | Integrated only |
+
+## Accessories
+
+| | |
+|---|---|
+| Charger | 130W USB-C GaN (barrel adapter included) |
+| Bag | 15\" Slim sleeve |
+";
+        let events = parse_markdown_to_events(content);
 
         let mut table_ordinal = 0;
         for ev in events {
