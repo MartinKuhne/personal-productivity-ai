@@ -123,16 +123,27 @@ pub fn show_right_panel(app: &mut FastMdApp, parent_ui: &mut egui::Ui) {
                 .show(ui, |ui| {
                     let toc_snapshot = app.tab_manager.toc.clone();
                     for (i, entry) in toc_snapshot.iter().enumerate() {
-                        let indent = calculate_indent(entry.level as usize);
                         ui.push_id((i, entry.id, "toc_item"), |ui| {
+                            let font_size = calculate_font_size(entry.level as usize);
+                            let indent = calculate_indent(entry.level as usize);
                             ui.horizontal(|ui| {
                                 ui.add_space(indent);
-                                let label = egui::RichText::new(&entry.title)
-                                    .size(calculate_font_size(entry.level as usize));
-                                if ui.selectable_label(false, label).clicked() {
+                                // Cap the label's layout width to the remaining
+                                // available space. Without this, a non-wrapping
+                                // label's allocation grows the placer's min_rect
+                                // past the panel right edge even when truncate()
+                                // clips the visual rendering — left-side text then
+                                // disappears behind the panel's clip_rect.
+                                let max_label_w = (ui.available_width()).max(0.0);
+                                ui.set_max_width(max_label_w);
+                                let label = egui::Label::new(
+                                    egui::RichText::new(&entry.title).size(font_size),
+                                )
+                                .truncate();
+                                if ui.add(label).clicked() {
                                     app.tab_manager.scroll_to_header_id = Some(entry.id);
                                 }
-                            })
+                            });
                         });
                     }
                 });
