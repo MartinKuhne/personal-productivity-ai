@@ -320,20 +320,35 @@ mod tests {
 
     #[test]
     fn test_show_left_panel_empty() {
+        use crate::ui::strings::WORKSPACE_HEADER;
+        use crate::ui::test_helpers::text::assert_text_contains;
+
         let ctx = egui::Context::default();
         let mut app = create_test_app();
         app.layout_mut().left_panel_dirty = false;
 
-        let _ = ctx.run_ui(Default::default(), |ui| {
+        let output = ctx.run_ui(Default::default(), |ui| {
             show_left_panel(&mut app, ui);
         });
 
+        // R-2 / Q12: replace the tautological state check with a
+        // rendered-content assertion. The empty-state label is
+        // conditionally rendered and falls below the panel's clip
+        // rect under the default test viewport (no screen_rect), so
+        // it is not in the rendered output here. The id-stability
+        // test for the empty state (`test_show_left_panel_no_id_change_warnings_when_empty`)
+        // covers the empty-state widget tree separately. Header-only
+        // assertion is correct per the Q12 borderline policy.
+        assert_text_contains(&output.shapes, WORKSPACE_HEADER);
         // Panel renders without crashing; width is unset because the dirty flag is false.
         assert!(app.layout().left_panel_width.is_none());
     }
 
     #[test]
     fn test_show_left_panel_with_libraries_and_files() {
+        use crate::ui::strings::WORKSPACE_HEADER;
+        use crate::ui::test_helpers::text::assert_text_contains;
+
         let ctx = egui::Context::default();
         let mut app = create_test_app();
         app.layout_mut().left_panel_dirty = false;
@@ -356,9 +371,12 @@ mod tests {
         app.tags_mut()
             .add_tags(file2.clone(), vec!["archive".to_string()]);
 
-        let _ = ctx.run_ui(Default::default(), |ui| {
+        let output = ctx.run_ui(Default::default(), |ui| {
             show_left_panel(&mut app, ui);
         });
+        // Header assertion (Q12 borderline case): the library name and
+        // file paths are dynamic, but the panel header is stable.
+        assert_text_contains(&output.shapes, WORKSPACE_HEADER);
 
         app.tags_mut().selected_tag = Some("work".to_string());
         let _ = ctx.run_ui(Default::default(), |ui| {

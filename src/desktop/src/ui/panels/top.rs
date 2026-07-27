@@ -240,6 +240,8 @@ mod tests {
 #[cfg(test)]
 mod ui_tests {
     use super::*;
+    use crate::ui::strings::{APP_TITLE, BATCH_BUTTON, SHOW_LOG_CHECKBOX};
+    use crate::ui::test_helpers::text::assert_text_contains;
 
     fn create_test_app() -> FastMdApp {
         FastMdApp::empty_state(crate::config::AppConfig::default())
@@ -250,9 +252,14 @@ mod ui_tests {
         let ctx = egui::Context::default();
         let mut app = create_test_app();
         app.file_processor_mut().indexing_finished = false;
-        let _ = ctx.run_ui(egui::RawInput::default(), |ui| {
+        let output = ctx.run_ui(egui::RawInput::default(), |ui| {
             show_top_panel(&mut app, ui);
         });
+        // R-2 / Q12: the top panel always renders the app title, the log
+        // checkbox, and the batch button — those are stable across states.
+        assert_text_contains(&output.shapes, APP_TITLE);
+        assert_text_contains(&output.shapes, SHOW_LOG_CHECKBOX);
+        assert_text_contains(&output.shapes, BATCH_BUTTON);
         assert!(!app.file_processor().indexing_finished);
     }
 
@@ -266,9 +273,13 @@ mod ui_tests {
             vec!["Rust".to_string(), "Docs".to_string()],
         );
 
-        let _ = ctx.run_ui(egui::RawInput::default(), |ui| {
+        let output = ctx.run_ui(egui::RawInput::default(), |ui| {
             show_top_panel(&mut app, ui);
         });
+        // Header assertion (Q12 borderline case): the toolbar chrome is
+        // the stable surface here. The tag combobox content is dynamic
+        // so we don't assert on individual tag names.
+        assert_text_contains(&output.shapes, APP_TITLE);
         assert!(app.file_processor().indexing_finished);
     }
 

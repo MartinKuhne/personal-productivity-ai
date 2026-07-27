@@ -474,19 +474,45 @@ mod tests {
 
     #[test]
     fn test_show_center_panel_render_modes() {
+        use crate::ui::strings::{AGENT_SESSION_HEADER, NO_FILE_SELECTED_PROMPT};
+        use crate::ui::test_helpers::text::assert_text_contains;
+
+        // The center panel renders the tab bar at the top and the
+        // body inside a `ScrollArea`. Under the default test viewport
+        // (no `screen_rect`), the body's content is below the panel's
+        // clip rect and not in `output.shapes`. Set an explicit
+        // viewport so the markdown + YAML render is observable.
+        let raw_input = || egui::RawInput {
+            screen_rect: Some(egui::Rect::from_min_size(
+                egui::Pos2::ZERO,
+                egui::vec2(1024.0, 768.0),
+            )),
+            ..egui::RawInput::default()
+        };
+
         let ctx = egui::Context::default();
         let mut app = create_test_app();
 
-        let _ = ctx.run_ui(Default::default(), |ui| {
+        // Mode 1: no tab open. Assert the empty-state prompt is present
+        // (Q12 borderline case — the prompt is the only stable string).
+        let output = ctx.run_ui(raw_input(), |ui| {
             show_center_panel(&mut app, ui);
         });
+        assert_text_contains(&output.shapes, NO_FILE_SELECTED_PROMPT);
 
         app.tabs_mut().tabs = vec![PathBuf::from("doc1.md"), PathBuf::from("doc2.md")];
         *app.selection_mut().selected_file_mut() = Some(PathBuf::from("doc1.md"));
         app.tabs_mut().current_markdown = "# Document 1 Header".to_string();
         app.tabs_mut().current_yaml = Some(serde_yaml::from_str("title: Doc 1").unwrap());
 
-        let _ = ctx.run_ui(Default::default(), |ui| {
+        // Mode 2: a tab is open with markdown + YAML. The center panel
+        // has no stable canonical string for this mode (the tab labels
+        // are file paths, the body is markdown content, the YAML
+        // table does not emit a "YAML Front-Matter" header — that
+        // string is only used in the inline editor). The render path
+        // is exercised; full visual coverage of the markdown + YAML
+        // view comes from the Tier 3 snapshot in R-1c.
+        let _ = ctx.run_ui(raw_input(), |ui| {
             show_center_panel(&mut app, ui);
         });
 
@@ -497,9 +523,12 @@ mod tests {
         app.agent_mut()
             .set_response("Final agent summary answer".to_string());
 
-        let _ = ctx.run_ui(Default::default(), |ui| {
+        // Mode 3: agent session active. The agent session header is the
+        // stable string for this mode.
+        let output = ctx.run_ui(raw_input(), |ui| {
             show_center_panel(&mut app, ui);
         });
+        assert_text_contains(&output.shapes, AGENT_SESSION_HEADER);
     }
 
     #[test]

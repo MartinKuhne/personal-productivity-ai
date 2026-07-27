@@ -288,6 +288,8 @@ mod tests {
 #[cfg(test)]
 mod ui_tests {
     use super::*;
+    use crate::ui::strings::{QUICK_TASKS_MENU, STOP_AGENT_BUTTON};
+    use crate::ui::test_helpers::text::assert_text_contains;
 
     fn create_test_app() -> FastMdApp {
         FastMdApp::empty_state(crate::config::AppConfig::default())
@@ -298,10 +300,19 @@ mod ui_tests {
         let ctx = egui::Context::default();
         let mut app = create_test_app();
         app.agent_mut().command_input = "test input".to_string();
-        let _ = ctx.run_ui(egui::RawInput::default(), |ui| {
+        let output = ctx.run_ui(egui::RawInput::default(), |ui| {
             show_bottom_panel(&mut app, ui);
         });
-        assert_eq!(app.agent().command_input, "test input");
+        // R-2 / Q12: replace the tautological state check with a
+        // rendered-content assertion. The Quick Tasks menu is the
+        // stable header for the bottom panel.
+        //
+        // Note: we do not assert on COMMAND_INPUT_HINT because
+        // `TextEdit::hint_text` is hidden once the user has typed
+        // anything (egui's standard behavior). The hint is only
+        // visible when the field is empty; an empty-field test
+        // would catch a regression there.
+        assert_text_contains(&output.shapes, QUICK_TASKS_MENU);
     }
 
     #[test]
@@ -310,10 +321,13 @@ mod ui_tests {
         let mut app = create_test_app();
         app.agent_mut().state_mut().running = true;
 
-        let _ = ctx.run_ui(egui::RawInput::default(), |ui| {
+        let output = ctx.run_ui(egui::RawInput::default(), |ui| {
             show_bottom_panel(&mut app, ui);
         });
 
+        // The state is unchanged (no click happened); the Stop button is
+        // rendered while running, so the label is in the output.
+        assert_text_contains(&output.shapes, STOP_AGENT_BUTTON);
         assert!(app.agent().state().running);
     }
 }

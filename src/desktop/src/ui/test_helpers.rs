@@ -22,3 +22,4 @@
 
 pub mod assert;
 pub mod interact;
+pub mod text;

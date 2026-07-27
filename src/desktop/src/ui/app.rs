@@ -1484,26 +1484,35 @@ mod tests {
         );
 
         // 2. Verify that unique text content from ALL 5 PANELS is present in the rendered output shapes.
+        // P1-7: reference `crate::ui::strings::*` constants rather than
+        // hardcoding literals so copy changes flow through one place.
         let all_text = texts.join(" ");
+        use crate::ui::strings::{
+            APP_TITLE, TABLE_OF_CONTENTS_HEADER, WORKSPACE_HEADER,
+        };
 
         assert!(
-            all_text.contains("FastMD Viewer"),
-            "Top panel content ('FastMD Viewer') must be rendered, text: {}",
+            all_text.contains(APP_TITLE),
+            "Top panel content (APP_TITLE) must be rendered, text: {}",
             all_text
         );
         assert!(
-            all_text.contains("Workspace Files"),
-            "Left panel content ('Workspace Files') must be rendered, text: {}",
+            all_text.contains(WORKSPACE_HEADER),
+            "Left panel content (WORKSPACE_HEADER) must be rendered, text: {}",
             all_text
         );
         assert!(
-            all_text.contains("Table of Contents"),
-            "Right panel content ('Table of Contents') must be rendered, text: {}",
+            all_text.contains(TABLE_OF_CONTENTS_HEADER),
+            "Right panel content (TABLE_OF_CONTENTS_HEADER) must be rendered, text: {}",
             all_text
         );
+        // Center panel: the markdown body is the rendered content. The
+        // heading "Laptop Specifications" is the marker we use here; it
+        // is set by the test's `current_markdown` and is therefore not a
+        // canonical copy string. Keep the literal but add a comment.
         assert!(
             all_text.contains("Laptop Specifications"),
-            "Center panel content ('Laptop Specifications') must be rendered, text: {}",
+            "Center panel content (markdown heading) must be rendered, text: {}",
             all_text
         );
         assert!(
