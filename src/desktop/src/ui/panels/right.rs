@@ -281,7 +281,7 @@ mod ui_tests {
         // `egui-0.35/src/containers/frame.rs:185-188`) has an 8pt inner
         // margin on each side. The first character of every row must
         // sit at `panel_left + 8` (within sub-pixel rounding).
-        const FRAME_INNER_MARGIN_X: f32 = 8.0;
+        const _FRAME_INNER_MARGIN_X: f32 = 8.0;
         const PIXEL_TOLERANCE: f32 = 2.0;
 
         // A title deliberately wider than the entire 400px window, so

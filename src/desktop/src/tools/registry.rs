@@ -124,6 +124,7 @@ impl ToolRegistry {
         self.register(Box::new(CsvAddRowsTool));
         self.register(Box::new(CsvDeleteRowsTool));
         self.register(Box::new(CsvQueryTool));
+        self.register(Box::new(GetWeatherTool));
     }
 }
 
@@ -1105,6 +1106,38 @@ impl Tool for CsvQueryTool {
     }
 }
 
+struct GetWeatherTool;
+impl Tool for GetWeatherTool {
+    fn name(&self) -> &'static str {
+        "get_weather"
+    }
+    fn description(&self) -> &'static str {
+        "Get current weather and forecast for a given location and optional date range."
+    }
+    fn input_type(&self) -> TypeId {
+        TypeId::of::<dtos::GetWeatherInput>()
+    }
+    fn parameters_schema(&self) -> serde_json::Value {
+        json_schema::<dtos::GetWeatherInput>()
+    }
+    fn is_enabled(&self, _: &AppConfig, _: &str) -> bool {
+        true
+    }
+    fn safety(&self) -> crate::tools::Safety {
+        crate::tools::Safety::ReadOnly
+    }
+    fn execute(&self, _ctx: &ToolContext, args: &str) -> Result<serde_json::Value, String> {
+        let input: dtos::GetWeatherInput =
+            serde_json::from_str(args).map_err(|e| format!("Invalid args: {}", e))?;
+        crate::tools::weather::tool_get_weather(&input.location, input.date_range.as_deref()).map(
+            |r| {
+                serde_json::to_value(r)
+                    .unwrap_or_else(|e| serde_json::json!({"error": e.to_string()}))
+            },
+        )
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1612,4 +1645,23 @@ mod tests {
         assert!(!names.contains(&"create_csv"));
         assert!(!names.contains(&"list_csv"));
     }
+
+    #[test]
+    fn test_weather_tool_in_registry() {
+        let config = AppConfig::default();
+        let schema = get_tools_schema(&config, "what is the weather");
+        let tools = schema.as_array().unwrap();
+        let names: Vec<&str> = tools
+            .iter()
+            .filter_map(|t| t["function"]["name"].as_str())
+            .collect();
+        assert!(names.contains(&"get_weather"));
+
+        let ctx = test_ctx(&config);
+        let res = execute_tool(&ctx, "get_weather", r#"{"location":"Seattle, WA"}"#);
+        assert!(!res.contains("Tool get_weather not found"));
+
+        assert_eq!(safety_of("get_weather"), crate::tools::Safety::ReadOnly);
+    }
 }
+
