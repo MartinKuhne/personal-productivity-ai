@@ -57,7 +57,9 @@ impl SystemPromptBuilder {
 
         if !self.selected_files.is_empty() {
             prompt.push_str(" The user has also selected the following files:");
-            for f in &self.selected_files {
+            let mut sorted_files: Vec<_> = self.selected_files.iter().collect();
+            sorted_files.sort();
+            for f in sorted_files {
                 prompt.push_str(&format!(" {}", to_virtual(f)));
             }
             prompt.push('.');
@@ -79,7 +81,7 @@ impl SystemPromptBuilder {
 }
 
 fn build_base_prompt(config: &AppConfig) -> String {
-    let date_str = chrono::Local::now().format("%Y-%m-%d %H:%M:%S").to_string();
+    let date_str = chrono::Local::now().format("%Y-%m-%d").to_string();
     let mut prompt = format!(
         "You are FastMD Agent, an autonomous assistant helper for managing the Markdown workspace. You can read, create, search, and edit files, fetch web pages, and manage tags using your tools. Help the user achieve their goal by using tools step by step. Respond to the user using Markdown format.\n\nCRITICAL: Avoid context bloat! Do NOT use the `read_file` tool on multiple files in a single step. Always prefer `read_yaml_header` to survey documents, or `grep` to extract specific information without reading entire files.\n\nToday's date and time is: {}",
         date_str
@@ -229,5 +231,49 @@ mod tests {
     #[test]
     fn test_parse_age_invalid() {
         assert!(parse_age("not-a-date").is_none());
+    }
+
+    #[test]
+    fn test_base_prompt_date_format_no_seconds() {
+        let config = AppConfig::default();
+        let prompt = build_base_prompt(&config);
+        let date_line = prompt
+            .lines()
+            .find(|l| l.contains("Today's date and time is:"))
+            .expect("date line should exist");
+        let date_val = date_line
+            .split("Today's date and time is: ")
+            .nth(1)
+            .unwrap();
+        assert_eq!(
+            date_val.len(),
+            10,
+            "Date format should be YYYY-MM-DD (10 chars), got: {}",
+            date_val
+        );
+    }
+
+    #[test]
+    fn test_builder_selected_files_deterministic_order() {
+        let config = AppConfig::default();
+        let mut files = HashSet::new();
+        files.insert(PathBuf::from("z_file.md"));
+        files.insert(PathBuf::from("a_file.md"));
+        files.insert(PathBuf::from("m_file.md"));
+        files.insert(PathBuf::from("b_file.md"));
+
+        let prompt = SystemPromptBuilder::new(&config)
+            .with_selected_files(files)
+            .build(&config);
+
+        let selected_part = prompt
+            .split("The user has also selected the following files:")
+            .nth(1)
+            .expect("should contain selected files section");
+        assert!(
+            selected_part.contains("a_file.md b_file.md m_file.md z_file.md"),
+            "Selected files must be sorted alphabetically, got: {}",
+            selected_part
+        );
     }
 }

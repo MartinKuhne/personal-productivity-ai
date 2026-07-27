@@ -76,23 +76,28 @@ impl ToolRegistry {
     }
 
     pub fn get_schema(&self, config: &AppConfig, prompt: &str) -> serde_json::Value {
+        let mut enabled_tools: Vec<_> = self
+            .tools
+            .values()
+            .filter(|tool| tool.is_enabled(config, prompt))
+            .collect();
+        enabled_tools.sort_by_key(|tool| tool.name());
+
         let mut tools = Vec::new();
-        for tool in self.tools.values() {
-            if tool.is_enabled(config, prompt) {
-                let mut params = tool.parameters_schema();
-                // LM Studio requires `properties` to be present in the parameters schema.
-                if params.get("properties").is_none() {
-                    params["properties"] = serde_json::Value::Object(Default::default());
-                }
-                tools.push(serde_json::json!({
-                    "type": "function",
-                    "function": {
-                        "name": tool.name(),
-                        "description": tool.description(),
-                        "parameters": params
-                    }
-                }));
+        for tool in enabled_tools {
+            let mut params = tool.parameters_schema();
+            // LM Studio requires `properties` to be present in the parameters schema.
+            if params.get("properties").is_none() {
+                params["properties"] = serde_json::Value::Object(Default::default());
             }
+            tools.push(serde_json::json!({
+                "type": "function",
+                "function": {
+                    "name": tool.name(),
+                    "description": tool.description(),
+                    "parameters": params
+                }
+            }));
         }
         serde_json::Value::Array(tools)
     }
@@ -1212,6 +1217,29 @@ mod tests {
         libs.sort_by_key(|b| std::cmp::Reverse(b.priority));
         assert_eq!(libs[0].name, "High");
         assert_eq!(libs[1].name, "Low");
+    }
+
+    #[test]
+    fn test_get_schema_is_sorted_alphabetically() {
+        let registry = ToolRegistry::new();
+        let config = AppConfig::default();
+        let schema = registry.get_schema(&config, "");
+        let arr = schema.as_array().expect("schema should be array");
+        let names: Vec<&str> = arr
+            .iter()
+            .map(|t| {
+                t.get("function")
+                    .and_then(|f| f.get("name"))
+                    .and_then(|n| n.as_str())
+                    .unwrap()
+            })
+            .collect();
+        let mut sorted = names.clone();
+        sorted.sort();
+        assert_eq!(
+            names, sorted,
+            "Tool schema list must be sorted alphabetically for prompt caching consistency"
+        );
     }
 
     #[test]
