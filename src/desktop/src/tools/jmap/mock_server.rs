@@ -201,28 +201,26 @@ fn build_session_resource(server_body: &serde_json::Value, api_url: &str) -> ser
         .entry("capabilities".to_string())
         .or_insert(session_capabilities());
 
-    if !session_obj.contains_key("accounts")
+    if (!session_obj.contains_key("accounts")
         || session_obj["accounts"]
             .as_object()
-            .map_or(true, |o| o.is_empty())
-    {
-        if let Some(primary) = session_obj
+            .is_none_or(|o| o.is_empty()))
+        && let Some(primary) = session_obj
             .get("primaryAccounts")
             .and_then(|p| p.as_object())
-        {
-            let mut accounts = serde_json::Map::new();
-            for (_cap, account_id) in primary {
-                if let Some(id_str) = account_id.as_str() {
-                    accounts.entry(id_str.to_string()).or_insert(json!({
-                        "name": "Test Account",
-                        "isPersonal": true,
-                        "isReadOnly": false,
-                        "accountCapabilities": account_capabilities()
-                    }));
-                }
+    {
+        let mut accounts = serde_json::Map::new();
+        for (_cap, account_id) in primary {
+            if let Some(id_str) = account_id.as_str() {
+                accounts.entry(id_str.to_string()).or_insert(json!({
+                    "name": "Test Account",
+                    "isPersonal": true,
+                    "isReadOnly": false,
+                    "accountCapabilities": account_capabilities()
+                }));
             }
-            session_obj.insert("accounts".to_string(), serde_json::Value::Object(accounts));
         }
+        session_obj.insert("accounts".to_string(), serde_json::Value::Object(accounts));
     }
 
     session_obj
@@ -257,7 +255,7 @@ fn build_session_resource(server_body: &serde_json::Value, api_url: &str) -> ser
 fn handle_jmap_post(body_text: &str, method_responses: &[serde_json::Value]) -> serde_json::Value {
     let body_json = serde_json::from_str::<serde_json::Value>(body_text).ok();
 
-    let response = if let Some(body) = body_json {
+    if let Some(body) = body_json {
         if let Some(calls) = body.get("methodCalls").and_then(|c| c.as_array()) {
             let mut responses: Vec<serde_json::Value> = Vec::new();
             for call in calls {
@@ -300,8 +298,7 @@ fn handle_jmap_post(body_text: &str, method_responses: &[serde_json::Value]) -> 
         }
     } else {
         json!({ "methodResponses": method_responses, "sessionState": "mock-state-0" })
-    };
-    response
+    }
 }
 
 /// Filter a `/get` response's `list` to only include items whose `id` matches
