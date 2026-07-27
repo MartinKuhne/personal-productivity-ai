@@ -58,6 +58,10 @@ accesskit = "0.24"
 # panel-id-stability tests install a `log::Log` implementation
 # to capture those records and assert they do not fire.
 log = "0.4"
+# `image` is used by `egui_kittest::snapshot` to load and diff the
+# PNG snapshots. The `png` feature is required for the snapshot
+# format. Snapshots are saved as PNGs in `src/desktop/tests/snapshots/`.
+image = { version = "0.25", default-features = false, features = ["png"] }
 
 [[bin]]
 name = "fastmd"
