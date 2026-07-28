@@ -33,6 +33,7 @@ pub struct Breakpoint {
 /// Both strategies preserve G2 (minimum-cardinality wrap set) and the
 /// never-break-token invariant. They differ only in how they allocate the
 /// deficit among the wrap-set columns.
+#[derive(Clone, Copy, Debug, PartialEq)]
 #[allow(dead_code)]
 pub enum DeficitStrategy {
     /// v1: shrink each column proportionally to its slack. O(|S|).
@@ -43,6 +44,16 @@ pub enum DeficitStrategy {
     /// aggressively by allocating deficit to columns with the lowest
     /// marginal cost (fewest extra lines per pixel of shrinkage).
     BreakpointWaterFill,
+}
+
+impl DeficitStrategy {
+    /// Parse from the config string. Unknown values fall back to ProportionalToSlack.
+    pub fn from_config(s: &str) -> Self {
+        match s {
+            "waterfill" | "water-fill" | "water_fill" => Self::BreakpointWaterFill,
+            _ => Self::ProportionalToSlack,
+        }
+    }
 }
 
 /// Marginal cost entry for the water-fill min-heap.
@@ -472,19 +483,22 @@ fn b2_breakpoint_water_fill(
 
 /// Find the next breakpoint strictly below `below_width` by scanning
 /// `bp_idx` downward. Returns the breakpoint and advances `bp_idx`.
+/// Uses `bps.len()` as a sentinel for "exhausted" (no more breakpoints).
 fn next_breakpoint_below(
     bps: &[Breakpoint],
     bp_idx: &mut usize,
     below_width: f32,
 ) -> Option<Breakpoint> {
-    while *bp_idx < bps.len() {
-        let bp = &bps[*bp_idx];
-        *bp_idx = bp_idx.saturating_sub(1);
+    loop {
+        if *bp_idx >= bps.len() {
+            return None;
+        }
+        let bp = bps[*bp_idx].clone();
+        *bp_idx = (*bp_idx).checked_sub(1).unwrap_or(bps.len());
         if bp.width < below_width - 1e-6 {
-            return Some(bp.clone());
+            return Some(bp);
         }
     }
-    None
 }
 
 /// Measure the per-column max-content, min-content widths, and breakpoints of a table.
@@ -592,12 +606,11 @@ fn compute_column_breakpoints(cell_tokens: &[CellTokens], space_width: f32) -> V
     let mut width_set: Vec<f32> = Vec::new();
     for bps in &all_cell_bps {
         for bp in bps {
-            if !width_set.iter().any(|&w| (w - bp.width).abs() < 1e-6) {
-                width_set.push(bp.width);
-            }
+            width_set.push(bp.width);
         }
     }
     width_set.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
+    width_set.dedup_by(|a, b| (*a - *b).abs() < 1e-6);
 
     let mut merged = Vec::with_capacity(width_set.len());
     for w in width_set {
@@ -697,16 +710,12 @@ fn greedy_line_count(token_widths: &[f32], space_width: f32, col_width: f32) -> 
 /// the extra_lines is the extra_lines of the breakpoint with the largest
 /// width <= w. If w is larger than all breakpoints, extra_lines = 0.
 fn extra_lines_at_width(bps: &[Breakpoint], w: f32) -> i32 {
-    // Find the last breakpoint with width <= w.
-    let mut result = 0;
-    for bp in bps {
-        if bp.width <= w + 1e-6 {
-            result = bp.extra_lines;
-        } else {
-            break;
-        }
+    let idx = bps.partition_point(|bp| bp.width <= w + 1e-6);
+    if idx == 0 {
+        0
+    } else {
+        bps[idx - 1].extra_lines
     }
-    result
 }
 
 /// Measure one cell's `(max_content, min_content)` width and collect token data.
@@ -1855,5 +1864,112 @@ mod tests {
         assert_eq!(bps.len(), 1);
         assert!((bps[0].width - 50.0).abs() < 1e-3);
         assert_eq!(bps[0].extra_lines, 2);
+    }
+
+    #[test]
+    fn next_breakpoint_below_terminates_at_index_zero() {
+        let bps = vec![
+            Breakpoint {
+                width: 10.0,
+                extra_lines: 2,
+            },
+            Breakpoint {
+                width: 50.0,
+                extra_lines: 1,
+            },
+        ];
+        let mut idx = 0;
+        let result = next_breakpoint_below(&bps, &mut idx, 5.0);
+        assert!(result.is_none(), "no breakpoint below 5.0");
+        assert_eq!(idx, bps.len(), "idx must be sentinel after exhaustion");
+    }
+
+    #[test]
+    fn next_breakpoint_below_returns_highest_match() {
+        let bps = vec![
+            Breakpoint {
+                width: 10.0,
+                extra_lines: 3,
+            },
+            Breakpoint {
+                width: 30.0,
+                extra_lines: 2,
+            },
+            Breakpoint {
+                width: 60.0,
+                extra_lines: 1,
+            },
+        ];
+        let mut idx = bps.len() - 1;
+        let bp = next_breakpoint_below(&bps, &mut idx, 50.0).unwrap();
+        assert_eq!(bp.width, 30.0);
+        assert_eq!(bp.extra_lines, 2);
+    }
+
+    #[test]
+    fn deficit_strategy_from_config() {
+        assert_eq!(
+            DeficitStrategy::from_config("waterfill"),
+            DeficitStrategy::BreakpointWaterFill
+        );
+        assert_eq!(
+            DeficitStrategy::from_config("water-fill"),
+            DeficitStrategy::BreakpointWaterFill
+        );
+        assert_eq!(
+            DeficitStrategy::from_config("water_fill"),
+            DeficitStrategy::BreakpointWaterFill
+        );
+        assert_eq!(
+            DeficitStrategy::from_config("proportional"),
+            DeficitStrategy::ProportionalToSlack
+        );
+        assert_eq!(
+            DeficitStrategy::from_config("unknown"),
+            DeficitStrategy::ProportionalToSlack
+        );
+        assert_eq!(
+            DeficitStrategy::from_config(""),
+            DeficitStrategy::ProportionalToSlack
+        );
+    }
+
+    #[test]
+    fn extra_lines_at_width_binary_search_correctness() {
+        let bps = vec![
+            Breakpoint {
+                width: 20.0,
+                extra_lines: 3,
+            },
+            Breakpoint {
+                width: 50.0,
+                extra_lines: 2,
+            },
+            Breakpoint {
+                width: 80.0,
+                extra_lines: 1,
+            },
+        ];
+        assert_eq!(extra_lines_at_width(&bps, 10.0), 0);
+        assert_eq!(extra_lines_at_width(&bps, 20.0), 3);
+        assert_eq!(extra_lines_at_width(&bps, 35.0), 3);
+        assert_eq!(extra_lines_at_width(&bps, 50.0), 2);
+        assert_eq!(extra_lines_at_width(&bps, 80.0), 1);
+        assert_eq!(extra_lines_at_width(&bps, 100.0), 1);
+        assert_eq!(extra_lines_at_width(&[], 50.0), 0);
+    }
+
+    #[test]
+    fn water_fill_terminates_with_single_breakpoint_at_max() {
+        let max = [100.0];
+        let min = [50.0];
+        let bps = vec![vec![Breakpoint {
+            width: 100.0,
+            extra_lines: 1,
+        }]];
+        let d = ftwa_wf(&max, &min, &bps, 75.0);
+        assert!(!d.needs_horizontal_scroll);
+        assert!(d.widths[0] >= 50.0);
+        assert!(d.widths[0] <= 100.0);
     }
 }

@@ -20,7 +20,7 @@
 //!
 //! let mut harness = snapshot_harness("ftwa_6col_table", egui::vec2(1200.0, 600.0), |ui| {
 //!     let table = build_six_col_table();
-//!     fastmd::ui::render::render_table(ui, &table, 0);
+//!     fastmd::ui::render::render_table(ui, &table, 0, fastmd::ui::table_width::DeficitStrategy::ProportionalToSlack);
 //! });
 //! harness.run();
 //! harness.snapshot("ftwa_6col_table");

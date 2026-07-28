@@ -115,7 +115,13 @@ fn snapshot_full_markdown_doc() {
         egui::CentralPanel::default().show(ui, |ui| {
             let mut scroll_id: Option<egui::Id> = None;
             let mut pending_toggles: Vec<(usize, bool)> = Vec::new();
-            fastmd::ui::render::render_markdown(ui, content, &mut scroll_id, &mut pending_toggles);
+            fastmd::ui::render::render_markdown(
+                ui,
+                content,
+                &mut scroll_id,
+                &mut pending_toggles,
+                fastmd::ui::table_width::DeficitStrategy::ProportionalToSlack,
+            );
         });
     });
     harness.run();

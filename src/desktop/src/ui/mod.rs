@@ -11,7 +11,7 @@ pub mod render;
 pub mod selection_manager;
 pub mod strings;
 pub mod tab_manager;
-mod table_width;
+pub mod table_width;
 mod tree;
 
 #[cfg(test)]
