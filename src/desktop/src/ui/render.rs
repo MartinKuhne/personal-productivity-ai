@@ -67,8 +67,19 @@ fn render_inline(
         let rect = response.response.rect;
         let top_left = rect.min;
         let height = rect.height().max(14.0);
+        // The bar must sit to the LEFT of the text, not on top of it.
+        //
+        // `top_left.x` is the inner Ui's `min_rect.min.x`, which only
+        // contains the text widget's rect — `Ui::add_space` does not
+        // expand the inner Ui's `min_rect` because it only advances the
+        // cursor, it does not call `advance_cursor_after_rect`. So
+        // `top_left.x` equals the text's x, not the inner container's
+        // start. The bar's x must be `top_left.x - total_indent + i *
+        // (bar_width + bar_gap)` to anchor it to the inner container's
+        // start, leaving `bar_gap` of visible space between the bar
+        // and the text.
         for i in 0..blockquote_depth {
-            let x = top_left.x + i as f32 * (bar_width + bar_gap);
+            let x = top_left.x - total_indent + i as f32 * (bar_width + bar_gap);
             ui.painter().line_segment(
                 [
                     egui::pos2(x, top_left.y),
@@ -3029,6 +3040,171 @@ def foo():
             "REQ-218: a long heading in a 184 px-wide viewport should \
              produce multiple rows, but only {} were emitted.",
             heading_galley.rows.len()
+        );
+    }
+
+    /// Bar colour for the blockquote vertical line, kept in sync with
+    /// the constant inside `render_inline` so the test can identify
+    /// the bar among all rendered shapes without false positives.
+    const BLOCKQUOTE_BAR_COLOR: egui::Color32 = egui::Color32::from_rgb(100, 100, 110);
+
+    /// Render a single `FlushInline` into a fresh egui `Context` and
+    /// return the resulting `FullOutput`. Centralises the boilerplate
+    /// (viewport setup, run_ui call) so the bar-position tests stay
+    /// focused on their assertions.
+    fn render_blockquote_into_output(
+        elems: &[InlineElem],
+        blockquote_depth: usize,
+    ) -> egui::FullOutput {
+        let ctx = egui::Context::default();
+        let raw_input = egui::RawInput {
+            screen_rect: Some(egui::Rect::from_min_size(
+                egui::Pos2::ZERO,
+                egui::vec2(1024.0, 768.0),
+            )),
+            ..egui::RawInput::default()
+        };
+        ctx.run_ui(raw_input, |ui| {
+            render_inline(
+                ui,
+                elems,
+                false,
+                None,
+                0,
+                None,
+                blockquote_depth,
+                0,
+                &mut Vec::new(),
+            );
+        })
+    }
+
+    /// Collect every `Shape::LineSegment` whose stroke colour matches
+    /// the blockquote bar colour, in the order they were drawn.
+    /// Returns the x of each bar's top point.
+    fn collect_blockquote_bar_xs(shapes: &[egui::epaint::ClippedShape]) -> Vec<f32> {
+        let mut out = Vec::new();
+        for cs in shapes {
+            if let egui::Shape::LineSegment { points, stroke } = &cs.shape
+                && stroke.color == BLOCKQUOTE_BAR_COLOR
+            {
+                out.push(points[0].x);
+            }
+        }
+        out
+    }
+
+    /// Find the rendered `Shape::Text` whose galley text contains
+    /// `needle` and return the x of its bounding rect's left edge.
+    fn find_text_min_x(shapes: &[egui::epaint::ClippedShape], needle: &str) -> Option<f32> {
+        for cs in shapes {
+            if let egui::Shape::Text(t) = &cs.shape
+                && t.galley.text().contains(needle)
+            {
+                return Some(t.pos.x);
+            }
+        }
+        None
+    }
+
+    /// Regression test for the agent-window clipping bug. The
+    /// blockquote bar must sit to the **left** of the text, not on
+    /// top of it. The current code draws the bar at
+    /// `response.response.rect.min.x`, which is the text's own x
+    /// (because `Ui::add_space` does not expand the inner Ui's
+    /// `min_rect` — only real widget rects do). The bar is 3px wide,
+    /// so the first ~3px of the text get painted over by the bar in
+    /// the agent output view.
+    #[test]
+    fn test_blockquote_bar_sits_left_of_text() {
+        let elems = vec![InlineElem::Text(
+            "Executing tool".to_string(),
+            TextStyle::default(),
+        )];
+        let output = render_blockquote_into_output(&elems, 1);
+
+        let bar_xs = collect_blockquote_bar_xs(&output.shapes);
+        assert_eq!(
+            bar_xs.len(),
+            1,
+            "depth-1 blockquote must draw exactly one bar; got {}",
+            bar_xs.len()
+        );
+        let bar_x = bar_xs[0];
+
+        let text_x = find_text_min_x(&output.shapes, "Executing tool")
+            .expect("blockquote text must be rendered");
+
+        // The bar's right edge must be strictly to the left of the
+        // text's left edge, so the bar never paints over a glyph.
+        assert!(
+            bar_x + 3.0 <= text_x,
+            "blockquote bar (x={bar_x}) overlaps text (x={text_x}): \
+             bar right edge {:.1} must be <= text left edge {:.1}",
+            bar_x + 3.0,
+            text_x
+        );
+        // The intended layout is `bar_width + bar_gap = 3 + 8 = 11`
+        // pixels between the bar's right edge and the text's left
+        // edge. Allow 0.5px for float round-off.
+        assert!(
+            bar_x + 3.0 + 8.0 <= text_x + 0.5,
+            "blockquote bar/text gap is wrong: bar right edge {:.1} vs \
+             text left edge {:.1}; expected bar_gap (8px) + bar_width (3px) \
+             of separation",
+            bar_x + 3.0,
+            text_x
+        );
+    }
+
+    /// Regression test for nested blockquotes. Depth 2 must draw two
+    /// bars, both to the left of the text. The current bug also
+    /// mispositions the inner bar: with the broken formula
+    /// `top_left.x + i * (bar_width + bar_gap)`, `i=1` lands 11px
+    /// to the *right* of the text instead of 11px to the left of
+    /// it.
+    #[test]
+    fn test_blockquote_bar_sits_left_of_text_nested() {
+        let elems = vec![InlineElem::Text(
+            "Nested quote".to_string(),
+            TextStyle::default(),
+        )];
+        let output = render_blockquote_into_output(&elems, 2);
+
+        let bar_xs = collect_blockquote_bar_xs(&output.shapes);
+        assert_eq!(
+            bar_xs.len(),
+            2,
+            "depth-2 blockquote must draw exactly two bars; got {}",
+            bar_xs.len()
+        );
+
+        let text_x = find_text_min_x(&output.shapes, "Nested quote")
+            .expect("nested blockquote text must be rendered");
+
+        // Every bar must be strictly to the left of the text.
+        for (i, bar_x) in bar_xs.iter().enumerate() {
+            assert!(
+                *bar_x + 3.0 <= text_x,
+                "blockquote bar #{i} (x={bar_x}) overlaps nested text \
+                 (x={text_x}): bar right edge {:.1} must be <= text left \
+                 edge {:.1}",
+                bar_x + 3.0,
+                text_x
+            );
+        }
+        // And the two bars must be ordered: bar 0 (outer) is the
+        // leftmost, bar 1 (inner) is 11px to its right.
+        assert!(
+            bar_xs[0] < bar_xs[1],
+            "nested blockquote bars must be ordered left-to-right as \
+             outer-then-inner; got bar_xs = {bar_xs:?}"
+        );
+        let spacing = bar_xs[1] - bar_xs[0];
+        assert!(
+            (spacing - 11.0).abs() < 0.5,
+            "nested blockquote bars must be spaced by bar_width + \
+             bar_gap = 11px; got {spacing:.1}px"
         );
     }
 }
