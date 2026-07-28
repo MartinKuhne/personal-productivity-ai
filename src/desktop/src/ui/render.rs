@@ -334,30 +334,24 @@ fn render_table_cell(ui: &mut egui::Ui, cell: &[InlineElem], pinned_width: Optio
         .outer_margin(egui::Margin::ZERO)
         .stroke(TABLE_CELL_STROKE);
 
-    // egui::Grid cells use left_to_right(Align::Center) by default, which
-    // centers cell contents vertically within the row. We override to
-    // left_to_right(Align::Min) so the cross-axis (Y) is aligned to the
-    // top of the row instead. Crucially, left_to_right keeps the main axis
-    // the same as the Grid, so the column cursor X is preserved correctly —
-    // top_down(Align::Min) would place content at max_rect.min.x (the panel
-    // left edge) instead of the column's cursor X, clipping left-side text.
-    ui.with_layout(egui::Layout::left_to_right(egui::Align::Min), |ui| {
-        cell_frame.show(ui, |ui| {
-            // In egui::Grid pass 2, ui.available_width() is the resolved column
-            // width. Frame::NONE with inner_margin=ZERO does not shrink the inner
-            // Ui — the stroke is painted visually but does not consume content
-            // space — so we use available_width() as-is. In the pinned-width
-            // (FTWA) path we take max(pinned, available) so the cell frame
-            // expands whenever the grid column widens beyond the original estimate.
-            let avail_w = ui.available_width();
-            let inner_w = match pinned_width {
-                Some(w) => w.max(avail_w),
-                None => avail_w,
-            };
+    let avail_w = ui.available_width();
+    let avail_h = ui.available_height();
+    let inner_w = match pinned_width {
+        Some(w) => w,
+        None => avail_w,
+    };
 
+    // Use top_down(Align::Min) so content starts at top y of Grid cell.
+    ui.with_layout(egui::Layout::top_down(egui::Align::Min), |ui| {
+        cell_frame.show(ui, |ui| {
             if cell.is_empty() {
                 let min_h = ui.text_style_height(&egui::TextStyle::Body);
-                ui.set_min_size(egui::vec2(inner_w, min_h));
+                let target_h = if avail_h.is_finite() && avail_h > min_h {
+                    avail_h
+                } else {
+                    min_h
+                };
+                ui.set_min_size(egui::vec2(inner_w, target_h));
                 return;
             }
 
@@ -399,11 +393,21 @@ fn render_table_cell(ui: &mut egui::Ui, cell: &[InlineElem], pinned_width: Optio
                 }
             };
 
-            let layout = egui::Layout::left_to_right(egui::Align::Min).with_main_wrap(true);
-            ui.allocate_ui_with_layout(egui::vec2(inner_w, 0.0), layout, |ui| {
-                ui.set_min_width(inner_w);
-                content(ui);
-            });
+            // Render text content tightly packed at top of cell without min_height constraint
+            ui.with_layout(
+                egui::Layout::left_to_right(egui::Align::Min).with_main_wrap(true),
+                |ui| {
+                    ui.set_min_width(inner_w);
+                    ui.set_max_width(inner_w);
+                    content(ui);
+                },
+            );
+
+            // Expand border frame height AFTER text rendering so border box fills row height
+            // without stretching or centering text.
+            if avail_h.is_finite() && avail_h > 0.0 {
+                ui.set_min_height(avail_h);
+            }
         });
     });
 }
@@ -543,36 +547,30 @@ pub fn render_yaml_table(ui: &mut egui::Ui, yaml: &serde_yaml::Value) {
                     .spacing([12.0, 4.0])
                     .show(ui, |ui| {
                         for (k, v) in pairs {
-                            // Key cell: allocate exactly `key_col_width`
-                            // so the value column knows its remaining budget.
-                            ui.allocate_ui_with_layout(
-                                egui::vec2(key_col_width, 0.0),
-                                egui::Layout::left_to_right(egui::Align::Min),
-                                |ui| {
-                                    ui.label(
-                                        RichText::new(k)
-                                            .strong()
-                                            .color(egui::Color32::from_rgb(150, 200, 255)),
-                                    );
-                                },
-                            );
-                            // Value cell: allocate the remaining width
-                            // and wrap the text inside that constraint.
-                            // The `Label::wrap()` is what causes long
-                            // values to break across multiple lines
-                            // instead of overflowing the panel.
-                            ui.allocate_ui_with_layout(
-                                egui::vec2(value_col_width, 0.0),
-                                egui::Layout::left_to_right(egui::Align::Min),
-                                |ui| {
-                                    ui.add(
-                                        egui::Label::new(
-                                            RichText::new(v).color(egui::Color32::from_gray(220)),
-                                        )
-                                        .wrap(),
-                                    );
-                                },
-                            );
+                            // Key cell: set key_col_width and align top.
+                            ui.with_layout(egui::Layout::left_to_right(egui::Align::Min), |ui| {
+                                ui.set_min_width(key_col_width);
+                                ui.set_max_width(key_col_width);
+                                ui.label(
+                                    RichText::new(k)
+                                        .strong()
+                                        .color(egui::Color32::from_rgb(150, 200, 255)),
+                                );
+                            });
+                            // Value cell: set value_col_width and wrap text inside.
+                            // `with_layout` computes the full wrapped `min_rect`
+                            // and allocates it in the Grid cell, so the row height
+                            // expands properly to fit multi-line values.
+                            ui.with_layout(egui::Layout::left_to_right(egui::Align::Min), |ui| {
+                                ui.set_min_width(value_col_width);
+                                ui.set_max_width(value_col_width);
+                                ui.add(
+                                    egui::Label::new(
+                                        RichText::new(v).color(egui::Color32::from_gray(220)),
+                                    )
+                                    .wrap(),
+                                );
+                            });
                             ui.end_row();
                         }
                     });
@@ -1547,6 +1545,144 @@ def foo():
         );
     }
 
+    /// Regression: multi-line YAML front-matter values must expand grid row height
+    /// so subsequent rows do not print over the wrapped text lines.
+    #[test]
+    fn test_render_yaml_table_row_height_prevents_text_overlap() {
+        let ctx = egui::Context::default();
+        let viewport_width: f32 = 320.0;
+        let raw = egui::RawInput {
+            screen_rect: Some(egui::Rect::from_min_size(
+                egui::Pos2::ZERO,
+                egui::vec2(viewport_width, 800.0),
+            )),
+            ..egui::RawInput::default()
+        };
+        let long_summary = "Cloud native software architect profile focused on scalable, \
+            performant, and resilient services. Highlights skills in legacy application \
+            migration to microservices and building developer communities.";
+        let yaml_str = format!(
+            "title: 2020 LinkedIn Profile - Cloud Native Architect\n\
+             summary: \"{long_summary}\"\n\
+             tags: [professional, career, linkedin, architect]\n"
+        );
+        let yaml: serde_yaml::Value = serde_yaml::from_str(&yaml_str).unwrap();
+
+        let output = ctx.run_ui(raw, |ui| {
+            egui::CentralPanel::default().show(ui, |ui| {
+                render_yaml_table(ui, &yaml);
+            });
+        });
+
+        // Find the summary value text shape and the tags key/value text shape.
+        let summary_shape = output
+            .shapes
+            .iter()
+            .find_map(|cs| match &cs.shape {
+                egui::Shape::Text(t) if t.galley.text().contains("microservices") => Some(t),
+                _ => None,
+            })
+            .expect("expected summary text shape");
+
+        let tags_shape = output
+            .shapes
+            .iter()
+            .find_map(|cs| match &cs.shape {
+                egui::Shape::Text(t) if t.galley.text() == "tags" => Some(t),
+                _ => None,
+            })
+            .expect("expected tags key text shape");
+
+        let summary_bottom_y = summary_shape.pos.y + summary_shape.galley.rect.height();
+        let tags_top_y = tags_shape.pos.y;
+
+        assert!(
+            tags_top_y >= summary_bottom_y,
+            "expected tags row (y={tags_top_y:.1}) to start below summary wrapped content (bottom y={summary_bottom_y:.1}), but it overlapped!",
+        );
+    }
+
+    /// Regression: multi-line markdown table cells must respect FTWA column widths (fit viewport)
+    /// or enable horizontal scrolling when min_w exceeds viewport, and expand grid row height
+    /// so subsequent rows do not overlap.
+    #[test]
+    fn test_render_table_multiline_cells_fit_panel_and_expand_row_height() {
+        let ctx = egui::Context::default();
+
+        // 1. Table that fits within viewport (3 columns, 600px viewport)
+        let fit_table = vec![
+            vec![
+                vec![InlineElem::Text("Make".into(), Default::default())],
+                vec![InlineElem::Text("Model".into(), Default::default())],
+                vec![InlineElem::Text("Summary".into(), Default::default())],
+            ],
+            vec![
+                vec![InlineElem::Text("Acer".into(), Default::default())],
+                vec![InlineElem::Text("Swift 16 AI".into(), Default::default())],
+                vec![InlineElem::Text("Excellent value. Vibrant OLED touch screen, lightweight (~1.5kg), everyday performance.".into(), Default::default())],
+            ],
+            vec![
+                vec![InlineElem::Text("Dell".into(), Default::default())],
+                vec![InlineElem::Text("XPS 16".into(), Default::default())],
+                vec![InlineElem::Text("Dell's flagship premium laptop.".into(), Default::default())],
+            ],
+        ];
+
+        let viewport_width: f32 = 600.0;
+        let raw = egui::RawInput {
+            screen_rect: Some(egui::Rect::from_min_size(
+                egui::Pos2::ZERO,
+                egui::vec2(viewport_width, 800.0),
+            )),
+            ..egui::RawInput::default()
+        };
+
+        let output = ctx.run_ui(raw, |ui| {
+            egui::CentralPanel::default().show(ui, |ui| {
+                render_table(
+                    ui,
+                    &fit_table,
+                    0,
+                    crate::ui::table_width::DeficitStrategy::BreakpointWaterFill,
+                );
+            });
+        });
+
+        // Summary text in Row 1 must fit inside viewport
+        let summary_shape = output
+            .shapes
+            .iter()
+            .find_map(|cs| match &cs.shape {
+                egui::Shape::Text(t) if t.galley.text().contains("Vibrant OLED") => Some(t),
+                _ => None,
+            })
+            .expect("expected row 1 summary text shape");
+
+        let summary_right_x = summary_shape.pos.x + summary_shape.galley.rect.width();
+        assert!(
+            summary_right_x <= viewport_width + 1.0,
+            "expected summary text right x ({summary_right_x:.1}) to fit inside viewport ({viewport_width:.1})",
+        );
+
+        // Row 2 (Dell) must start below Row 1 Summary text bottom Y (no text overlap)
+        let dell_shape = output
+            .shapes
+            .iter()
+            .find_map(|cs| match &cs.shape {
+                egui::Shape::Text(t) if t.galley.text() == "Dell" => Some(t),
+                _ => None,
+            })
+            .expect("expected dell text shape");
+
+        let summary_bottom_y = summary_shape.pos.y + summary_shape.galley.rect.height();
+        let dell_top_y = dell_shape.pos.y;
+
+        assert!(
+            dell_top_y >= summary_bottom_y,
+            "expected dell row (y={dell_top_y:.1}) to start below summary wrapped content (bottom y={summary_bottom_y:.1}), but it overlapped!",
+        );
+    }
+
     /// Regression: long body paragraphs must word-wrap inside the preview.
     ///
     /// `render_inline_inner` renders each `InlineElem::Text` via
@@ -2052,10 +2188,22 @@ def foo():
         let raw = egui::RawInput {
             screen_rect: Some(egui::Rect::from_min_size(
                 egui::Pos2::ZERO,
-                egui::vec2(viewport_width, 600.0),
+                egui::vec2(viewport_width, 1600.0),
             )),
             ..egui::RawInput::default()
         };
+        // Pass 1: measure row heights in Grid
+        let _ = ctx.run_ui(raw.clone(), |ui| {
+            egui::CentralPanel::default().show(ui, |ui| {
+                render_table(
+                    ui,
+                    table_cells,
+                    0,
+                    crate::ui::table_width::DeficitStrategy::ProportionalToSlack,
+                );
+            });
+        });
+        // Pass 2: paint with resolved Grid row heights stored in memory
         ctx.run_ui(raw, |ui| {
             egui::CentralPanel::default().show(ui, |ui| {
                 render_table(
@@ -2196,7 +2344,12 @@ def foo():
             })
             .collect();
 
-        assert_eq!(rects.len(), 9, "Expected 9 cell borders for 3x3 table");
+        assert_eq!(
+            rects.len(),
+            9,
+            "Expected 9 cell borders for 3x3 table; got rects: {:?}",
+            rects
+        );
 
         // Sort by Y position (row) then X position (column)
         rects.sort_by(|a, b| {
@@ -2215,12 +2368,20 @@ def foo():
         ];
 
         // Verify that word wrapping actually occurred in the long multi-word cells
-        // (wrapped cell height should be significantly larger than single-line cell height).
-        let single_line_height = rows[1][1].height(); // "Short" cell
-        let wrapped_height = rows[0][0].height(); // "Header column one..." cell
+        // (wrapped text galley has >1 row).
+        let wrapped_text = output
+            .shapes
+            .iter()
+            .find_map(|cs| match &cs.shape {
+                egui::Shape::Text(t) if t.galley.text().contains("Header column one") => Some(t),
+                _ => None,
+            })
+            .expect("expected Header column one text shape");
+
         assert!(
-            wrapped_height > single_line_height * 1.5,
-            "Expected cell (0,0) to word wrap: wrapped height {wrapped_height} vs single-line height {single_line_height}"
+            wrapped_text.galley.rows.len() > 1,
+            "Expected cell (0,0) text to word wrap, got {} row(s)",
+            wrapped_text.galley.rows.len()
         );
 
         // For each column j ∈ 0..3, check that min.x and width match across all rows
@@ -2406,6 +2567,169 @@ def foo():
                 );
             }
         }
+    }
+
+    /// Regression: single-line cell text in a tall row must top-align (match top Y of multi-line neighbor cell),
+    /// not center vertically across multi-pass Grid layouts.
+    #[test]
+    fn test_render_table_cell_text_is_top_aligned_in_tall_row() {
+        let make = |t: &str| {
+            vec![InlineElem::Text(
+                t.to_string(),
+                crate::ui::render::TextStyle::default(),
+            )]
+        };
+        let long_summary = "Intel Core Ultra 7 256V (8C/8T Lunar Lake) high performance mobile processor with dedicated NPU for artificial intelligence workloads.";
+        let table: Vec<Vec<Vec<InlineElem>>> = vec![
+            vec![make("Make"), make("Processor")],
+            vec![make("Dell"), make(long_summary)],
+        ];
+
+        let ctx = egui::Context::default();
+        let viewport_width: f32 = 300.0;
+        let raw = egui::RawInput {
+            screen_rect: Some(egui::Rect::from_min_size(
+                egui::Pos2::ZERO,
+                egui::vec2(viewport_width, 800.0),
+            )),
+            ..egui::RawInput::default()
+        };
+
+        // Pass 1: measure row heights in Grid
+        let _ = ctx.run_ui(raw.clone(), |ui| {
+            egui::CentralPanel::default().show(ui, |ui| {
+                render_table(
+                    ui,
+                    &table,
+                    0,
+                    crate::ui::table_width::DeficitStrategy::BreakpointWaterFill,
+                );
+            });
+        });
+
+        // Pass 2: paint with resolved row heights stored in Grid memory
+        let output = ctx.run_ui(raw, |ui| {
+            egui::CentralPanel::default().show(ui, |ui| {
+                render_table(
+                    ui,
+                    &table,
+                    0,
+                    crate::ui::table_width::DeficitStrategy::BreakpointWaterFill,
+                );
+            });
+        });
+
+        let text_shapes: Vec<_> = output
+            .shapes
+            .iter()
+            .filter_map(|cs| match &cs.shape {
+                egui::Shape::Text(t) => Some(t),
+                _ => None,
+            })
+            .collect();
+
+        for (i, t) in text_shapes.iter().enumerate() {
+            println!(
+                "Shape {i}: text={:?}, pos={:?}, galley_h={:.1}",
+                t.galley.text(),
+                t.pos,
+                t.galley.rect.height()
+            );
+        }
+
+        let short_text = text_shapes
+            .iter()
+            .find(|t| t.galley.text() == "Dell")
+            .expect("expected Dell text shape");
+        let tall_text = text_shapes
+            .iter()
+            .find(|t| t.galley.text().contains("Intel Core"))
+            .expect("expected Intel Core text shape");
+
+        assert!(
+            (short_text.pos.y - tall_text.pos.y).abs() <= 2.0,
+            "expected short cell text top y ({:.1}) to match tall cell text top y ({:.1}), but short cell text was vertically misaligned/centered on pass 2! (diff={:.1}px)",
+            short_text.pos.y,
+            tall_text.pos.y,
+            (short_text.pos.y - tall_text.pos.y).abs()
+        );
+    }
+
+    /// Regression: multi-item cell text in a tall row must render tightly packed at top
+    /// without internal vertical gaps between items or vertical centering of single items.
+    #[test]
+    fn test_render_table_cell_no_internal_vertical_gap_or_centering() {
+        let make = |t: &str| {
+            vec![InlineElem::Text(
+                t.to_string(),
+                crate::ui::render::TextStyle::default(),
+            )]
+        };
+        let summary_text = "Premium build, excellent keyboard, great 4K OLED option, Thunderbolt 3. Now aging with 8th gen Intel. Shows the value of modern efficiency.";
+        let table: Vec<Vec<Vec<InlineElem>>> = vec![
+            vec![make("PassMark"), make("Summary")],
+            vec![make("2,271 / 7,545"), make(summary_text)],
+        ];
+
+        let ctx = egui::Context::default();
+        let viewport_width: f32 = 200.0;
+        let raw = egui::RawInput {
+            screen_rect: Some(egui::Rect::from_min_size(
+                egui::Pos2::ZERO,
+                egui::vec2(viewport_width, 800.0),
+            )),
+            ..egui::RawInput::default()
+        };
+
+        // Pass 1: measure row heights
+        let _ = ctx.run_ui(raw.clone(), |ui| {
+            egui::CentralPanel::default().show(ui, |ui| {
+                render_table(
+                    ui,
+                    &table,
+                    0,
+                    crate::ui::table_width::DeficitStrategy::BreakpointWaterFill,
+                );
+            });
+        });
+
+        // Pass 2: paint with resolved row heights
+        let output = ctx.run_ui(raw, |ui| {
+            egui::CentralPanel::default().show(ui, |ui| {
+                render_table(
+                    ui,
+                    &table,
+                    0,
+                    crate::ui::table_width::DeficitStrategy::BreakpointWaterFill,
+                );
+            });
+        });
+
+        let passmark_text = output
+            .shapes
+            .iter()
+            .find_map(|cs| match &cs.shape {
+                egui::Shape::Text(t) if t.galley.text() == "2,271 / 7,545" => Some(t),
+                _ => None,
+            })
+            .expect("expected PassMark text shape");
+
+        let summary_part1 = output
+            .shapes
+            .iter()
+            .find_map(|cs| match &cs.shape {
+                egui::Shape::Text(t) if t.galley.text().contains("Premium build") => Some(t),
+                _ => None,
+            })
+            .expect("expected summary part 1 text shape");
+
+        // PassMark single line must top-align with Summary part 1
+        assert!(
+            (passmark_text.pos.y - summary_part1.pos.y).abs() <= 2.0,
+            "PassMark text (y={:.1}) was vertically centered instead of top-aligned with Summary (y={:.1})",
+            passmark_text.pos.y,
+            summary_part1.pos.y
+        );
     }
 
     // --- P0-2: click-handler coverage ---------------------------------

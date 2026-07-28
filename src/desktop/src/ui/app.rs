@@ -560,7 +560,12 @@ impl FastMdApp {
     }
 
     fn process_file_events_and_repaint(&mut self, ctx: &egui::Context) {
-        if self.process_file_events() || !self.file_processor.indexing_finished {
+        if self.process_file_events()
+            || !self.file_processor.indexing_finished
+            || !ctx.input(|i| i.raw.events.is_empty())
+        {
+            ctx.request_repaint();
+        } else {
             ctx.request_repaint_after(self.repaint_interval);
         }
     }
