@@ -150,16 +150,31 @@ fn render_inline_inner(
                 if style.strikethrough {
                     rt = rt.strikethrough();
                 }
-                ui.label(rt);
+                // P1: egui 0.35 `Label::new` defaults `wrap_mode` to
+                // `None`; wrap is only inherited if the parent layout
+                // is vertical or horizontal+main_wrap AND the available
+                // width is finite — a fragile contract. The other text
+                // paths in this file (`render_code_block`,
+                // `render_table_cell`, `render_yaml_table`) already pin
+                // `.wrap()` explicitly for the same reason. Pinned by
+                // `test_render_markdown_long_paragraph_wraps_in_preview`.
+                ui.add(egui::Label::new(rt).wrap());
             }
             InlineElem::Link(url, text) => {
                 ui.hyperlink_to(text, url);
             }
             InlineElem::Image(url) => {
-                ui.label(format!("[Image: {}]", url));
+                // Same egui 0.35 wrap-mode default-off hazard as
+                // `InlineElem::Text`; pin the wrap explicitly.
+                ui.add(egui::Label::new(format!("[Image: {}]", url)).wrap());
             }
             InlineElem::Html(html) => {
-                ui.label(RichText::new(html).italics().color(egui::Color32::GRAY));
+                // Same egui 0.35 wrap-mode default-off hazard as
+                // `InlineElem::Text`; pin the wrap explicitly.
+                ui.add(
+                    egui::Label::new(RichText::new(html).italics().color(egui::Color32::GRAY))
+                        .wrap(),
+                );
             }
             InlineElem::SoftBreak => {
                 ui.label(" ");
@@ -1529,6 +1544,105 @@ def foo():
             rendered_width <= max_allowed + 1.0,
             "expected wrapped text width <= {max_allowed:.0}px; got {rendered_width:.1}px \
              (the value is overflowing the panel — the horizontal ScrollArea is clipping it)",
+        );
+    }
+
+    /// Regression: long body paragraphs must word-wrap inside the preview.
+    ///
+    /// `render_inline_inner` renders each `InlineElem::Text` via
+    /// `ui.add(egui::Label::new(rt).wrap())`. In egui 0.35, `Label::new`
+    /// defaults `wrap_mode` to `None` and only wraps if the parent
+    /// layout is vertical or horizontal+main_wrap AND the available
+    /// width is finite — a fragile contract that already broke for
+    /// `render_yaml_table` (see
+    /// `test_render_yaml_table_wraps_long_values_within_viewport`),
+    /// `render_code_block`, and `render_table_cell`, each of which
+    /// had to be patched with an explicit `.wrap()`. This test pins
+    /// the same invariant for the paragraph path so a future
+    /// refactor (e.g. swapping the `horizontal_wrapped` parent for a
+    /// `Grid` or removing the explicit `.wrap()`) cannot silently
+    /// regress long-paragraph wrapping.
+    ///
+    /// Mirrors the shape of
+    /// `test_render_yaml_table_wraps_long_values_within_viewport` above:
+    /// render in a deliberately narrow 320px viewport, locate the
+    /// `Shape::Text` that carries the long paragraph (matched by an
+    /// unambiguous substring that cannot appear in the table or header
+    /// text), and assert the underlying `Galley` wraps to multiple
+    /// rows and stays within the viewport.
+    #[test]
+    fn test_render_markdown_long_paragraph_wraps_in_preview() {
+        use crate::ui::test_helpers::text::extract_text;
+
+        let ctx = egui::Context::default();
+        let viewport_width: f32 = 320.0;
+        let raw = egui::RawInput {
+            screen_rect: Some(egui::Rect::from_min_size(
+                egui::Pos2::ZERO,
+                egui::vec2(viewport_width, 800.0),
+            )),
+            ..egui::RawInput::default()
+        };
+        // Same shape as the user's `Mythical man-month.md` body: one
+        // long German sentence with normal whitespace, ~570 chars.
+        let long_paragraph = "Es ist ein Mix an Methoden im Einsatz. \
+            Einerseits soll im traditionellen Projektmanagement in Voraus \
+            der Funktionsumfang und die Projektdauer feststehen. Die zur \
+            Planung notwendige Dokumentation der Anforderungen, Technologien \
+            und Risken findet aber nicht statt. Daraufhin trägt das \
+            ausführende Team ein erhebliches Risiko, wenn sich die \
+            Anforderungen ändern oder die Arbeit komplexer ist als erwartet.";
+        let md = format!("\n{long_paragraph}\n");
+
+        let output = ctx.run_ui(raw, |ui| {
+            egui::CentralPanel::default().show(ui, |ui| {
+                let mut scroll_id = None;
+                render_markdown(
+                    ui,
+                    &md,
+                    &mut scroll_id,
+                    &mut Vec::new(),
+                    crate::ui::table_width::DeficitStrategy::ProportionalToSlack,
+                );
+            });
+        });
+
+        // Sanity: the long paragraph must have been rendered.
+        let texts = extract_text(&output.shapes);
+        let needle = "erhebliches Risiko, wenn sich";
+        assert!(
+            texts.iter().any(|t| t.contains(needle)),
+            "expected the long paragraph to be rendered; got {} text shape(s): {:?}",
+            texts.len(),
+            texts,
+        );
+
+        // Locate the Text shape whose galley carries the long paragraph.
+        let paragraph_shape = output.shapes.iter().find_map(|cs| match &cs.shape {
+            egui::Shape::Text(t) if t.galley.text().contains(needle) => Some(t),
+            _ => None,
+        });
+        let shape = paragraph_shape.expect("expected a Text shape for the long paragraph");
+        let galley = &shape.galley;
+
+        // 1. The paragraph must wrap: more than one row.
+        assert!(
+            galley.rows.len() > 1,
+            "expected the long paragraph to word-wrap; got galley with {} row(s) \
+             and rect width={:.1}px (viewport={viewport_width:.0}px) — \
+             the text is overflowing instead of wrapping",
+            galley.rows.len(),
+            galley.rect.width(),
+        );
+
+        // 2. The wrapped text must fit inside the viewport.
+        let max_allowed = viewport_width;
+        assert!(
+            galley.rect.width() <= max_allowed + 1.0,
+            "expected wrapped paragraph width <= {max_allowed:.0}px; got {:.1}px \
+             (the paragraph is overflowing the panel — the preview will \
+             horizontal-scroll the long line instead of wrapping it)",
+            galley.rect.width(),
         );
     }
 
