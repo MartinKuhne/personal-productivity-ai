@@ -69,7 +69,77 @@ pub fn format_models_list(
     output
 }
 
+/// Purpose: Applies the side effect of pressing Enter in the
+/// command input (or clicking an equivalent submit trigger).
+/// Inputs: app (the application state)
+/// Outputs: ()
+/// Purity: Impure (mutates `app.agent`, `app.config`,
+/// `app.selection`).
+/// Preconditions: `app.agent().command_input` contains the user's
+/// prompt. The `command_input` is consumed and cleared as part of
+/// the call.
+/// Postconditions: Dispatches based on `parse_command_intent`:
+///   * `ShowModels` — sets status to "Done", response to the
+///     formatted model list, and show_results to `true`.
+///   * `ShowDeprecatedModelMessage` — sets status to "Error" and
+///     response to the deprecation message.
+///   * `RunAgent(agent_prompt)` — starts an agent session with
+///     the prompt and the current selection context, and sets
+///     show_results to `true`.
+///   * `Empty` — no-op.
+///
+/// The Enter-key handler and the Quick-Tasks format menu item in
+/// `show_bottom_panel` both ultimately call this function (the
+/// format menu pre-loads `command_input` with
+/// `generate_format_prompt(...)` first). It is extracted so the
+/// dispatch can be unit-tested without driving the egui harness.
+pub fn apply_send_click(app: &mut FastMdApp) {
+    let prompt = app.agent_mut().command_input.trim_end().to_string();
+    app.agent_mut().command_input.clear();
+
+    match parse_command_intent(&prompt) {
+        CommandIntent::ShowModels => {
+            app.agent_mut().set_status("Done".to_string());
+            let models_response = format_models_list(&app.config.models);
+            app.agent_mut().set_response(models_response);
+            app.agent_mut().set_show_results(true);
+        }
+        CommandIntent::ShowDeprecatedModelMessage => {
+            app.agent_mut().set_status("Error".to_string());
+            app.agent_mut()
+                .set_response(crate::ui::strings::DEPRECATED_MODEL_MESSAGE.to_string());
+            app.agent_mut().set_show_results(true);
+        }
+        CommandIntent::RunAgent(agent_prompt) => {
+            let tx = app.tx.clone();
+            let file = app.selection().selected_file().cloned();
+            let dir = app.selection().selected_dir().cloned();
+            let files = app.selection().selected_files().clone();
+            let bus = app.file_event_bus.clone();
+            app.agent_mut()
+                .start_session(tx, agent_prompt, file, dir, files, bus);
+            app.agent_mut().set_show_results(true);
+        }
+        CommandIntent::Empty => {}
+    }
+}
+
 pub fn show_bottom_panel(app: &mut FastMdApp, parent_ui: &mut egui::Ui) {
+    show_bottom_panel_capture(app, parent_ui, |_| {});
+}
+
+/// Tier 4 test variant of [`show_bottom_panel`]. The `on_click`
+/// callback is invoked after every dispatch trigger (Enter key on
+/// the command input, or the Quick-Tasks format menu item) with a
+/// stable event name. The production caller
+/// ([`show_bottom_panel`]) passes a no-op closure; the test caller
+/// in `tests::test_send_enter_key_captures_event` passes a closure
+/// that pushes the event into the harness's persistent state.
+pub fn show_bottom_panel_capture(
+    app: &mut FastMdApp,
+    parent_ui: &mut egui::Ui,
+    mut on_click: impl FnMut(&'static str),
+) {
     // egui 0.35 unified `TopBottomPanel`/`SidePanel` into `Panel`,
     // and panels now allocate within a parent `&mut Ui` (using
     // `show_inside`) rather than from a `&Context`.
@@ -132,35 +202,8 @@ pub fn show_bottom_panel(app: &mut FastMdApp, parent_ui: &mut egui::Ui) {
                 });
 
                 if submit {
-                    let prompt = app.agent_mut().command_input.trim_end().to_string();
-                    app.agent_mut().command_input.clear();
-
-                    match parse_command_intent(&prompt) {
-                        CommandIntent::ShowModels => {
-                            app.agent_mut().set_status("Done".to_string());
-                            let models_response = format_models_list(&app.config.models);
-                            app.agent_mut().set_response(models_response);
-                            app.agent_mut().set_show_results(true);
-                        }
-                        CommandIntent::ShowDeprecatedModelMessage => {
-                            app.agent_mut().set_status("Error".to_string());
-                            app.agent_mut().set_response(
-                                crate::ui::strings::DEPRECATED_MODEL_MESSAGE.to_string(),
-                            );
-                            app.agent_mut().set_show_results(true);
-                        }
-                        CommandIntent::RunAgent(agent_prompt) => {
-                            let tx = app.tx.clone();
-                            let file = app.selection().selected_file().cloned();
-                            let dir = app.selection().selected_dir().cloned();
-                            let files = app.selection().selected_files().clone();
-                            let bus = app.file_event_bus.clone();
-                            app.agent_mut()
-                                .start_session(tx, agent_prompt, file, dir, files, bus);
-                            app.agent_mut().set_show_results(true);
-                        }
-                        CommandIntent::Empty => {}
-                    }
+                    apply_send_click(app);
+                    on_click("send");
                 }
             });
         });
@@ -172,6 +215,151 @@ mod tests {
     use crate::config::{ContentLibrary, LlmConfig};
     use std::collections::HashMap;
     use std::path::PathBuf;
+
+    /// Tier 1 test for the `apply_send_click` effect: a bare
+    /// `/models` prompt dispatches to `CommandIntent::ShowModels`,
+    /// which sets the agent status, response, and show_results
+    /// flag. We verify the effect without driving the egui
+    /// harness.
+    #[test]
+    fn test_apply_send_click_show_models_dispatch() {
+        let mut app = create_test_app();
+        // Populate at least one model so `format_models_list` is
+        // non-empty and the test can assert the response contains
+        // the model name.
+        app.config.models.insert(
+            "test-model".to_string(),
+            LlmConfig {
+                api_key: String::new(),
+                api_url: String::new(),
+                model: "test-model".to_string(),
+                cost: None,
+                use_case: Vec::new(),
+            },
+        );
+        app.agent.command_input = "/models".to_string();
+        assert!(!app.agent.show_results(), "show_results must start false");
+
+        apply_send_click(&mut app);
+
+        assert_eq!(app.agent.state().status, "Done");
+        assert!(
+            app.agent.show_results(),
+            "ShowModels dispatch must set show_results"
+        );
+        assert!(
+            app.agent.state().response.contains("test-model"),
+            "ShowModels dispatch must put the model list into the response, got: {}",
+            app.agent.state().response
+        );
+        assert!(
+            app.agent.command_input.is_empty(),
+            "command_input must be cleared after dispatch"
+        );
+    }
+
+    /// Tier 1 test: an empty prompt produces `CommandIntent::Empty`
+    /// and `apply_send_click` is a no-op (no status change, no
+    /// show_results toggle, command_input is still cleared).
+    #[test]
+    fn test_apply_send_click_empty_prompt_is_noop() {
+        let mut app = create_test_app();
+        app.agent.command_input = "   ".to_string();
+
+        apply_send_click(&mut app);
+
+        assert!(
+            !app.agent.show_results(),
+            "Empty intent must not toggle show_results"
+        );
+        assert!(
+            app.agent.command_input.is_empty(),
+            "command_input is still cleared (the .clear() runs before the match)"
+        );
+    }
+
+    /// Tier 1 test: an unknown `/foo` style command produces
+    /// `CommandIntent::RunAgent("/foo")` and starts an agent
+    /// session. We don't verify the full session state (that
+    /// requires the background LLM machinery) — just that
+    /// show_results is toggled and the command_input is cleared.
+    #[test]
+    fn test_apply_send_click_run_agent_dispatches_with_prompt() {
+        let mut app = create_test_app();
+        app.agent.command_input = "hello world".to_string();
+
+        apply_send_click(&mut app);
+
+        assert!(
+            app.agent.show_results(),
+            "RunAgent dispatch must set show_results"
+        );
+        assert!(
+            app.agent.command_input.is_empty(),
+            "command_input must be cleared after dispatch"
+        );
+    }
+
+    /// Tier 4 click test: pressing Enter in the bottom-panel
+    /// command input must dispatch the prompt via
+    /// `apply_send_click` and fire the `on_click("send")` callback.
+    ///
+    /// The harness owns `&mut app` for its lifetime, so the
+    /// post-click observation goes through the captured
+    /// `&'static str` event name (per the state-capture pattern
+    /// in `test_helpers::interact`). The dispatch's effect on
+    /// `app.agent` is verified separately in the Tier 1 tests
+    /// above.
+    #[test]
+    fn test_send_enter_key_captures_event() {
+        use crate::ui::test_helpers::interact::stateful_harness;
+
+        let mut harness = stateful_harness(Vec::<&'static str>::new(), |ui, captured| {
+            let mut app = create_test_app();
+            app.agent.command_input = "/models".to_string();
+            show_bottom_panel_capture(&mut app, ui, |event| {
+                captured.push(event);
+            });
+        });
+        harness.fit_contents();
+        // The TextEdit must have focus for the production
+        // Enter-handler to fire (it gates on
+        // `response.has_focus()`). Click into it first to set
+        // focus. The bottom-panel command input is a multi-line
+        // TextEdit, which has `accesskit::Role::TextInput` (or
+        // `MultilineTextEdit` in some versions). Query by role
+        // to find it without depending on the hint-text label
+        // (which the TextEdit doesn't expose as an accessible
+        // name).
+        use accesskit::Role;
+        use egui_kittest::kittest::Queryable;
+        let candidates: Vec<_> = harness
+            .query_all_by_role(Role::TextInput)
+            .chain(harness.query_all_by_role(Role::MultilineTextInput))
+            .collect();
+        // The bottom panel is the only panel rendered in this
+        // test, so any TextInput we find IS the command input.
+        assert!(
+            !candidates.is_empty(),
+            "expected at least one TextInput node in the bottom panel"
+        );
+        candidates[0].click();
+        harness.run_steps(2);
+        // Synthesize an Enter key press. The harness queues the
+        // event; `run_steps` processes it through the input
+        // pipeline.
+        harness.key_press(egui::Key::Enter);
+        harness.run_steps(2);
+        harness.run_steps(2);
+
+        let captured = harness.state();
+        assert!(
+            captured.contains(&"send"),
+            "pressing Enter in the command input must fire the `send` \
+             on_click event; got: {:?}",
+            captured
+        );
+    }
 
     #[test]
     fn test_compute_prompt_prefix_no_dir() {
@@ -283,11 +471,11 @@ mod tests {
         let index_b = output.find(expected_b).unwrap();
         assert!(index_a < index_b);
     }
-}
 
-#[cfg(test)]
-mod ui_tests {
-    use super::*;
+    // --- UI / window tests (R-7: merged from `mod ui_tests`) ---
+
+    use crate::ui::strings::{QUICK_TASKS_MENU, STOP_AGENT_BUTTON};
+    use crate::ui::test_helpers::text::assert_text_contains;
 
     fn create_test_app() -> FastMdApp {
         FastMdApp::empty_state(crate::config::AppConfig::default())
@@ -298,10 +486,19 @@ mod ui_tests {
         let ctx = egui::Context::default();
         let mut app = create_test_app();
         app.agent_mut().command_input = "test input".to_string();
-        let _ = ctx.run_ui(egui::RawInput::default(), |ui| {
+        let output = ctx.run_ui(egui::RawInput::default(), |ui| {
             show_bottom_panel(&mut app, ui);
         });
-        assert_eq!(app.agent().command_input, "test input");
+        // R-2 / Q12: replace the tautological state check with a
+        // rendered-content assertion. The Quick Tasks menu is the
+        // stable header for the bottom panel.
+        //
+        // Note: we do not assert on COMMAND_INPUT_HINT because
+        // `TextEdit::hint_text` is hidden once the user has typed
+        // anything (egui's standard behavior). The hint is only
+        // visible when the field is empty; an empty-field test
+        // would catch a regression there.
+        assert_text_contains(&output.shapes, QUICK_TASKS_MENU);
     }
 
     #[test]
@@ -310,10 +507,13 @@ mod ui_tests {
         let mut app = create_test_app();
         app.agent_mut().state_mut().running = true;
 
-        let _ = ctx.run_ui(egui::RawInput::default(), |ui| {
+        let output = ctx.run_ui(egui::RawInput::default(), |ui| {
             show_bottom_panel(&mut app, ui);
         });
 
+        // The state is unchanged (no click happened); the Stop button is
+        // rendered while running, so the label is in the output.
+        assert_text_contains(&output.shapes, STOP_AGENT_BUTTON);
         assert!(app.agent().state().running);
     }
 }

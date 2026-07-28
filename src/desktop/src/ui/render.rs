@@ -1570,28 +1570,37 @@ def foo():
 
     #[test]
     fn test_render_heading_scroll_to_id() {
+        // R-10: the previous revision put `assert_eq!` calls inside
+        // the `ctx.run_ui` closure that egui runs in measure-paint
+        // passes. The assertions conceptually belong in the test
+        // body — capture the relevant state into cells, run the
+        // closure, then assert in the test body.
         let ctx = egui::Context::default();
+        let target_id = egui::Id::new("Target Heading");
+        let mut scroll_id: Option<egui::Id> = Some(target_id);
+        let mut dummy_scroll: Option<egui::Id> = Some(target_id);
+
         let _ = ctx.run_ui(egui::RawInput::default(), |ui| {
             egui::CentralPanel::default().show(ui, |ui| {
-                let target_id = egui::Id::new("Target Heading");
-                let mut scroll_id = Some(target_id);
-
                 let elems = vec![InlineElem::Text(
                     "Target Heading".to_string(),
                     TextStyle::default(),
                 )];
                 render_heading(ui, &elems, 1, &mut scroll_id, target_id);
-                assert_eq!(
-                    scroll_id, None,
-                    "scroll_to_id should be cleared after scroll"
-                );
-
                 // Empty title should not trigger scroll
-                let mut dummy_scroll = Some(target_id);
                 render_heading(ui, &[], 1, &mut dummy_scroll, target_id);
-                assert_eq!(dummy_scroll, Some(target_id));
             });
         });
+
+        assert_eq!(
+            scroll_id, None,
+            "scroll_to_id should be cleared after scroll"
+        );
+        assert_eq!(
+            dummy_scroll,
+            Some(target_id),
+            "empty title should not trigger scroll"
+        );
     }
 
     /// Renders `table_cells` inside a CentralPanel with `viewport_width`

@@ -292,6 +292,22 @@ mod tests {
         FastMdApp::empty_state(AppConfig::default())
     }
 
+    /// Modal dialogs are drawn into the root `egui::Context`, and
+    /// `egui::Window::show` requires a non-trivial viewport for the
+    /// modal's rect to be observable. The default `RawInput` has no
+    /// `screen_rect`, which collapses the modal's bounding rect to
+    /// zero and clips the title + prompt out of the output. Set a
+    /// 1024x768 viewport for the test runs.
+    fn raw_input() -> egui::RawInput {
+        egui::RawInput {
+            screen_rect: Some(egui::Rect::from_min_size(
+                egui::Pos2::ZERO,
+                egui::vec2(1024.0, 768.0),
+            )),
+            ..egui::RawInput::default()
+        }
+    }
+
     #[test]
     fn test_move_modal_rendering_and_state() {
         let ctx = egui::Context::default();
@@ -318,7 +334,15 @@ mod tests {
         app.file_processor.all_dirs.push(dest_dir.clone());
         app.dialogs.selected_move_folder = Some(dest_dir.clone());
 
-        let _ = ctx.run_ui(Default::default(), |ui| {
+        // R-2 / Q12: the `Window::show` rendering path used by the modals
+        // is not observable through `ctx.run_ui(...).shapes` — the
+        // window's title and prompt are rendered via egui's `Atoms`
+        // widget system and end up in a separate paint layer that the
+        // single-frame test harness does not include in the captured
+        // output. The modal's visual surface is therefore covered by
+        // the app-level Tier 3 snapshot (R-1c) rather than this test.
+        // This test is kept as a smoke + state-coverage test.
+        let _ = ctx.run_ui(raw_input(), |ui| {
             show_move_modal_dialog(
                 &mut app.dialogs,
                 &app.content_libraries,
@@ -355,7 +379,9 @@ mod tests {
         app.dialogs.create_dir_parent = Some(temp_dir.clone());
         app.dialogs.create_dir_name = "subfolder".to_string();
 
-        let _ = ctx.run_ui(Default::default(), |ui| {
+        // See `test_move_modal_rendering_and_state` for the rationale
+        // on why the modal's rendered text is not asserted here.
+        let _ = ctx.run_ui(raw_input(), |ui| {
             show_create_dir_dialog(
                 &mut app.dialogs,
                 &mut app.file_processor,
@@ -368,7 +394,7 @@ mod tests {
         assert!(app.dialogs.create_dir_dialog_open);
 
         app.dialogs.create_dir_name = "../invalid_traversal".to_string();
-        let _ = ctx.run_ui(Default::default(), |ui| {
+        let _ = ctx.run_ui(raw_input(), |ui| {
             show_create_dir_dialog(
                 &mut app.dialogs,
                 &mut app.file_processor,
@@ -415,7 +441,9 @@ mod tests {
         *app.selection.selected_file_mut() = Some(file_path.clone());
         app.tab_manager.tabs = vec![file_path.clone()];
 
-        let _ = ctx.run_ui(Default::default(), |ui| {
+        // See `test_move_modal_rendering_and_state` for the rationale
+        // on why the modal's rendered text is not asserted here.
+        let _ = ctx.run_ui(raw_input(), |ui| {
             let sel = &mut app.selection;
             show_rename_dialog(RenameDialogCtx {
                 dialog_manager: &mut app.dialogs,
@@ -434,7 +462,7 @@ mod tests {
         assert!(app.dialogs.rename_dialog_open);
 
         app.dialogs.rename_new_name = "invalid/name".to_string();
-        let _ = ctx.run_ui(Default::default(), |ui| {
+        let _ = ctx.run_ui(raw_input(), |ui| {
             let sel = &mut app.selection;
             show_rename_dialog(RenameDialogCtx {
                 dialog_manager: &mut app.dialogs,

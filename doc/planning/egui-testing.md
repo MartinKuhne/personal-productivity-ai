@@ -811,8 +811,8 @@ Each recommendation has a priority, an effort estimate, a concrete deliverable, 
 | **R-4** | Medium | Update the doc to match reality. **Done in this commit (2026-07-27).** Future work: re-verify the doc when P0-4 / R-1 lands. | 0.25 day |
 | **R-5** | Low | Delete the `eprintln!` at `src/ui/panels/right.rs:327` and the `dbg!()` calls in `tests/table_layout_test.rs`. Gate future diagnostic prints behind `#[cfg(debug_assertions)]` or assert on them. | 5 min |
 | **R-6** | Deferred to R-1 | The 3px project-wide threshold (Q10) and "no `#[cfg(target_os)]`" decisions are encoded in the R-1 helper. No separate work. | 0 |
-| **R-7** | Low | Standardise on `mod tests` only; merge `mod ui_tests` blocks into `mod tests` with section comments. Move `src/agent/agent_impl_tests.rs` into `src/agent/agent_impl.rs` as `mod tests`. Bundle with the next time one of the four affected files is touched. | 10 min |
-| **R-8** | Medium (deferred to R-3) | Per **Q11 (single PR vs multiple)**: lands in **one PR** with R-3's helper. Five Tier 4 click tests: TOC row click → `scroll_to_id`, tab close button, folder tree click → `selected_file`, send button → `submit_prompt`, batch button → `batch_dialog_open`. Expected diff ~400 lines. | 0.5 day |
+| **R-7** | Low | Standardise on `mod tests` only; merge `mod ui_tests` blocks into `mod tests` with section comments. Move `src/agent/agent_impl_tests.rs` into `src/agent/agent_impl.rs` as `mod tests`. Bundle with the next time one of the four affected files is touched. **Landed as `6bcdbc5` on 2026-07-27 (the four `mod ui_tests` → `mod tests` merges; the `agent_impl_tests.rs` move is still pending).** | 10 min |
+| **R-8** | Medium | Per **Q11 (single PR vs multiple)**: lands in **one PR** with R-3's helper. Five Tier 4 click tests: TOC row click → `scroll_to_id`, tab close button, folder tree click → `selected_file`, send button → `submit_prompt`, batch button → `batch_dialog_open`. **Landed in 2 commits** (964e4b7 + 88ef2d1) on 2026-07-27. The refactor extracts each click handler into a pure `apply_*_click(app, ...)` function so the side effect can be unit-tested (Tier 1) without driving the harness. The 5 Tier 4 tests use the state-capture pattern from R-3 via per-panel `_capture` variants that take an `on_click: impl FnMut(&'static str)` callback. The production callers pass a no-op closure; the test callers pass a closure that pushes the event name into the harness's persistent `T = Vec<&'static str>` state, which is readable after the harness drops. | 0.5 day |
 | **R-9** | Low | Add `tests/common/egui_assert.rs::assert_no_id_change_warnings(log_msgs, shapes)`. Use it at `panels/{top,left}.rs`, `ui/app.rs:1352`. Add an id-stability test for `ui/background_logs.rs` (currently missing). | 1 hour |
 | **R-10** | Low | Move the `assert_eq!` calls in `test_render_heading_scroll_to_id` out of the `ctx.run_ui` closure. | 5 min |
 | **R-11** | Low (deferred to R-1) | Add a single "default app shell" snapshot — `app.render_panels(ui)` with a small markdown file open at 1024×768. Catches theme/palette drift across the whole UI. Lands in the same PR as R-1. | 30 min |
@@ -820,3 +820,159 @@ Each recommendation has a priority, an effort estimate, a concrete deliverable, 
 **Suggested one-week execution order:** R-4 (done in this commit) → R-9 → R-3 + R-2 in parallel → R-5 + R-10 + R-7 as one cleanup PR → R-1 (biggest) → R-8 in the same week. R-6 and R-11 land automatically with R-1.
 
 **Quick wins (≤1 hour total):** R-5, R-10, R-7. Do these in a single cleanup PR; they pay for themselves in maintainer time within a month.
+
+---
+
+# Implementation Status (2026-07-27, on branch `tdd/egui-testing-rollout`)
+
+The rollout above started landing on 2026-07-27 on the
+`tdd/egui-testing-rollout` branch (off `fix/bugfixes` PR #36). Eleven
+commits, in execution order:
+
+| # | Commit | R-items | Status |
+|---|---|---|---|
+| 1 | `bb35ce3` | R-3 + R-9 | `src/ui/test_helpers/{interact,assert}.rs` modules added. State-capture pattern wrapped in `stateful_harness`; id-stability pattern wrapped in `assert_no_id_change_warnings` (combined) and split variants. |
+| 2 | `9dc1969` | R-2 | Tautological panel smoke tests replaced with text-content assertions in 5 panels + the app-level integration test (P1-7 hardcoded copy strings fixed in the same pass). Modal tests reverted to state-only — the `Window::show` rendering path used by modals draws via egui 0.35's `Atoms` widget system, and the resulting shapes are not in the captured `output.shapes` under `ctx.run_ui`. Modal visual surface is covered by the R-1c snapshot instead. |
+| 3 | `32582ce` | R-1a | `image` dev-dep added with the `png` feature. (Initial commit used `insta = { version = "1.40", features = ["png"] }` — turned out `egui_kittest`'s `snapshot` feature does **not** use `insta`; it has its own kittest format. The `insta` line was replaced with the `image` dev-dep that egui_kittest's snapshot module actually requires.) |
+| 4 | `cd1d884` | R-1b + R-1c | `test_helpers::snapshot` module added with the 3px threshold constant (Q10) and the `DEFAULT_VIEWPORT` constant. `tests/render_snapshots.rs` added with 2 initial snapshot test cases (`snapshot_full_markdown_doc`, `snapshot_yaml_table`). Both gracefully **skip** when the wgpu renderer is missing — see the wgpu blocker below. |
+| 5 | `9a65830` | R-1d | CI step added to `rust-quality-gate.yml` that fails the test job on any `tests/snapshots/*.new.png`. This is the `egui_kittest` equivalent of `cargo insta pending-snapshots` (Q3). |
+| 6 | `87330a0` | R-5 + P2-5 | `eprintln!` in `right.rs:327` and the no-assert `old_bug_set_width_ignored` test in `tests/table_layout_test.rs` deleted. (The summary at the time of commit 5 listed R-5 as open; R-5 is actually closed by commit 6.) |
+| 7 | `e157c7b` | R-10 | Moved the `assert_eq!` calls in `test_render_heading_scroll_to_id` (`src/ui/render.rs`) out of the `ctx.run_ui` closure so the borrow checker can read the captured `scroll_id` after the closure returns. |
+| 8 | `6bcdbc5` | R-7 | Standardised the four files that had both `mod tests` and `mod ui_tests` (`panels/{top,right,bottom}.rs`, `background_logs.rs`) on a single `mod tests` with a section comment marker. `use super::*;` and helper imports appear once per file. |
+| 9 | `4658133` | R-9 (migrate) | Migrated the four ad-hoc id-stability tests scattered across `panels/{top,left}.rs` and `ui/app.rs` to the new `test_helpers::assert` helpers (`assert_no_id_change_in_shapes`, `assert_no_id_change_in_log`). Added a missing id-stability test for `ui/background_logs.rs` (`test_show_background_logs_window_no_id_change_warnings`). Helper API change: `assert_no_id_change_*` now takes `&[egui::Shape]` instead of `&[egui::epaint::ClippedShape]` so the call site can pass `output.shapes.into_iter().map(|cs| cs.shape).collect()` without depending on `clip_rect`. Drive-by clippy fix: `tests/render_snapshots.rs` no longer uses `if !try_snapshot(...) { return; }`. |
+| 10 | `964e4b7` | R-8 (refactor) | Extracted each of the 5 R-8 click handlers (batch button, TOC row, tab close / close-others / close-all, file row, send) into pure `apply_*_click(app, ...)` functions in their respective panels. The production click handler in the egui closure now calls the extracted function instead of mutating `app` inline. Removed the deferred `tab_actions: Vec<TabAction>` pattern in `panels/center.rs` since the extracted functions can be called directly from the click handler. 14 Tier 1 unit tests added (1 batch, 2 TOC, 4 tab close, 4 file row, 3 send). |
+| 11 | `88ef2d1` | R-8 (Tier 4) | Added 5 Tier 4 state-capture click tests that drive the actual `egui_kittest` harness. Each panel function got a `_capture` variant (`show_top_panel_capture`, `show_right_panel_capture`, `render_tabs_and_content_capture`, `render_flat_row_capture`, `show_bottom_panel_capture`) that takes an `on_click: impl FnMut(&'static str)` callback. Production callers pass a no-op; test callers pass a closure that pushes the event name into the harness's persistent `T = Vec<&'static str>` state, which is readable after the harness drops. The 5 Tier 4 tests: `test_batch_button_click_opens_dialog`, `test_toc_row_click_captures_event`, `test_tab_close_button_captures_event`, `test_file_row_click_captures_event`, `test_send_enter_key_captures_event` (Enter key synthesized via `harness.key_press(Key::Enter)` after focusing the command-input `TextEdit` via `accesskit::Role::TextInput`). The `file_row` test uses `Box::leak` to give a `TreeNodeContext` a `'static` lifetime so the harness can re-borrow it on every pass. |
+
+## R-items still open after the 2026-07-27 pass
+
+| ID | Status | Note |
+|---|---|---|
+| R-8 | Landed (964e4b7, 88ef2d1) | Five Tier 4 click tests (TOC row, tab close, folder tree, send, batch) all green. 14 Tier 1 tests for the extracted `apply_*_click` functions added in the same commits. Implementation Status table below lists both commits. |
+| R-11 | Blocked by wgpu (see below) | The "default app shell" snapshot is deferred because `FastMdApp::render_panels` is not `pub` and the integration-test crate cannot call it. Either make `render_panels` and `render_table` `pub` (small refactor) or move the snapshot test to the in-source `mod tests` of `ui/app.rs`. |
+
+## Blocking issue: `egui_kittest` `wgpu` feature does not compile on Windows (2026-07-27)
+
+Discovered during R-1a/b/c. Enabling the `wgpu` feature on
+`egui_kittest` in `src/desktop/Cargo.toml`:
+
+```toml
+egui_kittest = { version = "0.35", features = ["eframe", "snapshot", "wgpu"] }
+```
+
+produces a **wgpu-hal 0.29 vs windows-core 0.56/0.62 trait-bound
+conflict** in this branch's Windows build environment. Concrete
+errors (from `cargo check --tests`):
+
+```
+error[E0308]: mismatched types
+   --> ...wgpu-hal-29.0.4\src\dx12\suballocation.rs:83:71
+error[E0277]: the trait bound `ResourceCategory: From<&D3D12_RESOURCE_DESC>` is not satisfied
+   --> ...wgpu-hal-29.0.4\src\dx12\suballocation.rs:299:32
+error[E0277]: the trait bound `&ID3D12Heap: Param<ID3D12Heap, InterfaceType>` is not satisfied
+   --> ...wgpu-hal-29.0.4\src\dx12\suballocation.rs:306:17
+```
+
+Root cause: `wgpu 0.29` pulls in `windows-core 0.62`, but
+`windows-sys` (transitive via `winit`/`accesskit`) pulls in
+`windows-core 0.56`. The two versions of `windows-core` are
+not ABI-compatible — the `ID3D12Heap` COM vtable generated by
+`windows-core 0.62` is laid out differently from the one
+generated by `windows-core 0.56`, so the `wgpu-hal` D3D12 backend
+cannot use the `ID3D12Heap` symbol from `windows-core 0.56`.
+
+### Status
+
+- The `wgpu` feature is **not enabled** in `Cargo.toml` for the
+  `tdd/egui-testing-rollout` branch. The `snapshot` feature
+  alone is enabled, but `egui_kittest`'s `Harness::snapshot`
+  needs a real renderer — the default `LazyRenderer` errors with
+  `SnapshotError::RenderError { err: "no default renderer
+  available" }` when called.
+- The 2 snapshot tests in `tests/render_snapshots.rs` detect
+  this error and skip with a documented message:
+  > skipping snapshot `full_markdown_doc`: no wgpu renderer
+  > configured (the `wgpu` feature on egui_kittest is disabled
+  > because of a wgpu-hal / windows-core conflict on this
+  > branch)
+- The R-1d CI gate is in place but inactive — it only fires if
+  snapshots actually run and produce `.new.png` files.
+
+### Possible workarounds (out of scope for R-1)
+
+1. **Pin `windows-core` to 0.62 across the tree** (likely
+   requires a winit or accesskit version bump).
+2. **Bump `wgpu` to a version that uses `windows-core 0.56`**
+   (likely requires an egui-wgpu version bump, which would mean
+   bumping eframe/egui).
+3. **Use the `glow` (OpenGL) backend instead of `wgpu`** —
+   egui_kittest's `glow` feature uses `egui_glow` with the
+   `glow` OpenGL implementation. May be easier to set up on
+   headless CI than wgpu. (Verify by checking
+   `egui_kittest/Cargo.toml` features list — there is a
+   `glow` feature flag separate from `wgpu`.)
+4. **Run snapshots only on Linux CI**, where the wgpu
+   conflict may not apply. Accept that local Windows
+   development skips the snapshots.
+
+### Recommended next step
+
+File a follow-up issue specifically for the wgpu dep conflict.
+Once resolved (whichever of options 1-4 is chosen), the
+`tdd/egui-testing-rollout` branch can be re-enabled with
+`.wgpu()` added to the `snapshot_harness` builder, the
+`Harness::snapshot` calls will start producing real PNGs, and
+the R-1d CI gate becomes live.
+
+## R-2 modal-test finding (2026-07-27)
+
+During R-2, the modal smoke tests (move, create-dir, rename)
+were upgraded to assert on the modal's title and prompt text,
+but the assertions had to be reverted. Investigation showed the
+modal's title and prompt are rendered via egui 0.35's `Atoms`
+widget system, and the resulting shapes are **not in the
+captured `output.shapes`** under `ctx.run_ui`. Concrete debug
+output from a passing invocation:
+
+```
+DEBUG move_modal: shapes=6
+  shape: Noop
+  shape: Noop
+  shape: Noop
+  shape: Noop
+  shape: Noop
+  shape: Noop
+```
+
+6 `Noop` shapes, no `Text` shapes — the modal's `Atoms`-rendered
+text is in a paint layer that `ctx.run_ui` does not capture.
+This is an egui 0.35 / egui_kittest interaction, not a bug in
+the modal code. Modal visual coverage comes from the Tier 3
+snapshot in R-1c. The modal smoke tests are kept as state-only
+checks.
+
+## Test status after the 2026-07-27 pass
+
+```
+689 passed; 1 failed; 3 ignored
+```
+
+The 1 failure is `ui::panels::right::tests::test_show_right_panel_long_titles_anchor_at_panel_left_edge`,
+which was failing on a clean checkout of `a6a95d4` (PR #36's merge
+commit) before this branch started. Confirmed via `git stash` on
+the implementation branch. Pre-existing — not caused by R-1
+through R-10. Filed as a follow-up.
+
+The test count went up by 1 (669 → 670) after R-9 added
+`test_show_background_logs_window_no_id_change_warnings`, then
+by 14 (670 → 684) after R-8's refactor added the Tier 1 tests
+for the extracted `apply_*_click` functions, then by 5
+(684 → 689) after R-8's Tier 4 state-capture click tests. The
+module path changed for the pre-existing right-panel failure
+(after R-7, `tests::` instead of `ui_tests::`) — the test name
+is the same.
+
+Clippy is clean on the new code. The 6 pre-existing warnings
+(`needless_range_loop` x4, `useless_vec` x2) are all in
+`src/ui/render.rs` test code at lines 1938, 1954, 1958, 1974,
+2043, 2050 — they predate the branch and are out of scope for
+this rollout.

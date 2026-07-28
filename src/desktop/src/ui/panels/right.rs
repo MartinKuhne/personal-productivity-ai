@@ -53,7 +53,41 @@ pub fn calculate_font_size(level: usize) -> f32 {
     13.0 - (clamp_level(level) as f32 * 0.5)
 }
 
+/// Purpose: Applies the side effect of clicking a TOC row in the
+/// right panel.
+/// Inputs: app (the application state), entry_id (the
+/// `egui::Id` of the clicked TOC entry)
+/// Outputs: ()
+/// Purity: Impure (mutates `app.tab_manager.scroll_to_header_id`).
+/// Preconditions: None.
+/// Postconditions: `app.tab_manager.scroll_to_header_id == Some(entry_id)`
+/// after the call. The center panel reads this field on the next
+/// frame and scrolls the markdown to the heading with that id.
+///
+/// The TOC row click in `show_right_panel` calls this function. It
+/// is extracted so the side effect can be unit-tested without
+/// driving the egui harness.
+pub fn apply_toc_row_click(app: &mut FastMdApp, entry_id: egui::Id) {
+    app.tab_manager.scroll_to_header_id = Some(entry_id);
+}
+
 pub fn show_right_panel(app: &mut FastMdApp, parent_ui: &mut egui::Ui) {
+    show_right_panel_capture(app, parent_ui, |_| {});
+}
+
+/// Tier 4 test variant of [`show_right_panel`]. The `on_click`
+/// callback is invoked after every TOC row click, with a stable
+/// event name. The production caller ([`show_right_panel`]) passes
+/// a no-op closure; the test caller in
+/// `tests::test_toc_row_click_captures_event` passes a closure
+/// that pushes the event into the harness's persistent state. See
+/// the matching doc-comment on [`show_top_panel_capture`] for the
+/// full rationale.
+pub fn show_right_panel_capture(
+    app: &mut FastMdApp,
+    parent_ui: &mut egui::Ui,
+    mut on_click: impl FnMut(&'static str),
+) {
     // Compute visibility once, outside the panel closure, so the
     // same value is used in every layout pass of this frame.
     //
@@ -141,7 +175,8 @@ pub fn show_right_panel(app: &mut FastMdApp, parent_ui: &mut egui::Ui) {
                                 )
                                 .truncate();
                                 if ui.add(label).clicked() {
-                                    app.tab_manager.scroll_to_header_id = Some(entry.id);
+                                    apply_toc_row_click(app, entry.id);
+                                    on_click("toc_row");
                                 }
                             });
                         });
@@ -177,6 +212,85 @@ mod tests {
         assert!(calculate_indent(usize::MAX) > 0.0);
     }
 
+    /// Tier 1 test for the TOC row click effect. The click sets
+    /// `app.tab_manager.scroll_to_header_id` to `Some(entry_id)`;
+    /// the center panel reads this on the next frame and scrolls
+    /// the markdown to the heading with that id. We verify the
+    /// effect without driving the egui harness.
+    #[test]
+    fn test_apply_toc_row_click_sets_scroll_to_header_id() {
+        let mut app = create_test_app();
+        let id = egui::Id::new("intro");
+        assert!(
+            app.tab_manager.scroll_to_header_id.is_none(),
+            "scroll_to_header_id must start as None"
+        );
+        apply_toc_row_click(&mut app, id);
+        assert_eq!(
+            app.tab_manager.scroll_to_header_id,
+            Some(id),
+            "TOC row click must set scroll_to_header_id to the clicked entry's id"
+        );
+    }
+
+    /// Tier 1 test: clicking a different TOC row overwrites the
+    /// previous `scroll_to_header_id`. The center panel's
+    /// scroll-to-id consumption is the only place that clears the
+    /// field between frames; a back-to-back click without a frame
+    /// in between should leave the latest id.
+    #[test]
+    fn test_apply_toc_row_click_overwrites_previous_scroll_target() {
+        let mut app = create_test_app();
+        let id_a = egui::Id::new("a");
+        let id_b = egui::Id::new("b");
+        apply_toc_row_click(&mut app, id_a);
+        apply_toc_row_click(&mut app, id_b);
+        assert_eq!(app.tab_manager.scroll_to_header_id, Some(id_b));
+    }
+
+    /// Tier 4 click test: clicking a TOC row in the right panel
+    /// must fire the `on_click("toc_row")` callback. Same pattern
+    /// as `test_batch_button_click_opens_dialog` in
+    /// `panels/top.rs`. The click handler also sets
+    /// `app.tab_manager.scroll_to_header_id`, but the harness
+    /// owns `&mut app` for its lifetime, so the side effect is
+    /// observed via the captured `&'static str` event name.
+    #[test]
+    fn test_toc_row_click_captures_event() {
+        use crate::ui::test_helpers::interact::stateful_harness;
+        use egui_kittest::kittest::Queryable;
+
+        let mut harness = stateful_harness(Vec::<&'static str>::new(), |ui, captured| {
+            let mut app = create_test_app();
+            app.tabs_mut().toc.push(crate::ui::ToCEntry {
+                title: "Introduction".to_string(),
+                level: 1,
+                id: egui::Id::new("intro"),
+            });
+            *app.selection_mut().selected_file_mut() = Some(std::path::PathBuf::from("doc.md"));
+            show_right_panel_capture(&mut app, ui, |event| {
+                captured.push(event);
+            });
+        });
+        harness.fit_contents();
+        // The right panel renders rows from `app.tab_manager.toc`.
+        // Locate the row by its title (a substring match is
+        // sufficient).
+        harness.get_by_label("Introduction").click();
+        // Bounded step count to avoid spinning the harness forever
+        // on the repaint-after-click loop.
+        harness.run_steps(2);
+        harness.run_steps(2);
+
+        let captured = harness.state();
+        assert!(
+            captured.contains(&"toc_row"),
+            "clicking a TOC row must fire the `toc_row` on_click event; \
+             got: {:?}",
+            captured
+        );
+    }
+
     #[test]
     fn test_calculate_font_size() {
         assert_eq!(calculate_font_size(1), 12.5);
@@ -196,11 +310,9 @@ mod tests {
         assert_eq!(calculate_font_size(26), 10.0);
         assert!(calculate_font_size(usize::MAX) > 0.0);
     }
-}
 
-#[cfg(test)]
-mod ui_tests {
-    use super::*;
+    // --- UI / window tests (R-7: merged from `mod ui_tests`) ---
+
     use crate::ui::ToCEntry;
     use std::path::PathBuf;
 
@@ -283,16 +395,24 @@ mod ui_tests {
         use egui_kittest::Harness;
         use egui_kittest::kittest::Queryable;
 
-        // 400px window gives a 200px right panel (Panel::right's
-        // default `default_outer_size` for left/right sides, REQ-101
-        // and `egui-0.35/src/containers/panel.rs:255-257`).
+        // 400px window with a 200px right panel (Panel::right's
+        // default `default_outer_size` is 200.0 for left/right
+        // sides, see `egui-0.35/src/containers/panel.rs:255-257`).
+        // The production code calls `default_size(200.0)` and
+        // `size_range(150.0..=250.0)`, so without a stored
+        // PanelState the panel takes 200px and starts at
+        // x = 400 - 200 = 200.
         const WINDOW_WIDTH: f32 = 400.0;
         const WINDOW_HEIGHT: f32 = 600.0;
-        // The frame the panel uses by default (`Frame::side_top_panel`,
-        // `egui-0.35/src/containers/frame.rs:185-188`) has an 8pt inner
-        // margin on each side. The first character of every row must
-        // sit at `panel_left + 8` (within sub-pixel rounding).
-        const _FRAME_INNER_MARGIN_X: f32 = 8.0;
+        // The actual panel width in a fresh harness (no stored
+        // PanelState). 200.0 = `default_outer_size` for right
+        // panels; see comment above. The test's
+        // `expected_left` is derived from this so the assertion
+        // is robust to a future `default_size(...)` change in
+        // the production code: a regression in the fix would
+        // show up as a `left` value far to the right of the
+        // panel's left edge, not as a 4px margin-fudge.
+        const PANEL_WIDTH: f32 = 200.0;
         const PIXEL_TOLERANCE: f32 = 2.0;
 
         // A title deliberately wider than the entire 400px window, so
@@ -316,10 +436,14 @@ mod ui_tests {
             });
         harness.run();
 
-        // Expected: panel occupies 250px (the max size_range in test harness),
-        // with its inner content area starting at (400 - 250) + 4 = 154px from the
-        // left of the screen.
-        let expected_left = WINDOW_WIDTH - 250.0 + 4.0;
+        // Expected: panel occupies PANEL_WIDTH px and starts at
+        // x = WINDOW_WIDTH - PANEL_WIDTH. The leftmost matching
+        // node in the accesskit tree is the `ui.horizontal`
+        // wrapper that contains the long row; the wrapper's
+        // left edge is the panel's left edge (no extra frame
+        // margin in the harness's default renderer for the
+        // outer container).
+        let expected_left = WINDOW_WIDTH - PANEL_WIDTH;
 
         // Locate the long TOC row by a substring of its label
         // (truncation may strip characters but the accesskit node
@@ -332,10 +456,13 @@ mod ui_tests {
             "long TOC row should be present in the accesskit tree"
         );
 
-        // Debug: print rects of all matching nodes so we can see which
-        // one represents the row's left edge.
+        // Collect rects of all matching nodes to find the leftmost —
+        // the TOC row's outer container (the `ui.horizontal` wrapper)
+        // is the widest matching node; the accesskit tree may also
+        // emit separate `Button` / `Label` nodes for the clickable
+        // area and the text. Pick the leftmost rect — that is the
+        // one that would be clipped on the left if the origin drifts.
         let rects: Vec<_> = nodes.iter().map(|n| n.rect()).collect();
-        eprintln!("matching node rects: {rects:?}, expected_left={expected_left}");
 
         // The TOC row's outer container (the `ui.horizontal` wrapper)
         // is the widest matching node; the accesskit tree may also

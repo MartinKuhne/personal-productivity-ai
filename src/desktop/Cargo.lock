@@ -1441,6 +1441,7 @@ dependencies = [
  "glob",
  "gray_matter",
  "html-escape",
+ "image",
  "jmap-client",
  "log",
  "mimalloc",
