@@ -1,4 +1,4 @@
-﻿//! Fair Table Width Algorithm (FTWA) â€” assigns per-column pixel widths to a markdown/GFM table.
+//! Fair Table Width Algorithm (FTWA) â€” assigns per-column pixel widths to a markdown/GFM table.
 //!
 //! Reconciles three lexicographically-ordered goals (see
 //! `doc/planning/table-column-width-algorithm.md`):
@@ -577,6 +577,132 @@ pub fn measure(
         .collect();
 
     (max_w, min_w, breakpoints)
+}
+
+/// Internal cached measurements for a table to avoid redundant egui text shaping.
+#[derive(Clone, Debug)]
+pub struct TableMeasureCache {
+    /// Hash of the table cells AST.
+    pub cell_hash: u64,
+    /// Hash of the egui font style parameters.
+    pub font_hash: u64,
+    /// Measured max-content widths per column.
+    pub max_w: Vec<f32>,
+    /// Measured min-content widths per column.
+    pub min_w: Vec<f32>,
+    /// Measured breakpoints per column.
+    pub breakpoints: Vec<Vec<Breakpoint>>,
+}
+
+/// Internal cached decision for a table solver invocation to avoid redundant FTWA calculation.
+#[derive(Clone, Debug)]
+pub struct TableDecisionCache {
+    /// Hash of input max_content and min_content widths.
+    pub input_hash: u64,
+    /// Available width during solver pass.
+    pub avail: f32,
+    /// Strategy used for solver pass.
+    pub strategy: DeficitStrategy,
+    /// Resulting column widths decision.
+    pub decision: ColumnWidths,
+}
+
+/// Measure table column widths and breakpoints with result memoization via egui memory.
+///
+/// Prevents re-running costly font text shaping on every frame when table content and font style
+/// remain identical across renders.
+pub fn measure_cached(
+    table_id: egui::Id,
+    cells: &[Vec<Vec<InlineElem>>],
+    ui: &egui::Ui,
+) -> (Vec<f32>, Vec<f32>, Vec<Vec<Breakpoint>>) {
+    use std::hash::{Hash, Hasher};
+
+    let mut cell_hasher = std::collections::hash_map::DefaultHasher::new();
+    cells.hash(&mut cell_hasher);
+    let cell_hash = cell_hasher.finish();
+
+    let body_font = ui
+        .style()
+        .text_styles
+        .get(&egui::TextStyle::Body)
+        .cloned()
+        .unwrap_or_else(|| egui::FontId::proportional(14.0));
+    let mut font_hasher = std::collections::hash_map::DefaultHasher::new();
+    body_font.family.hash(&mut font_hasher);
+    body_font.size.to_bits().hash(&mut font_hasher);
+    let font_hash = font_hasher.finish();
+
+    let cache_id = table_id.with("measure_cache");
+    if let Some(cached) = ui
+        .data(|d| d.get_temp::<TableMeasureCache>(cache_id))
+        .filter(|c| c.cell_hash == cell_hash && c.font_hash == font_hash)
+    {
+        return (cached.max_w, cached.min_w, cached.breakpoints);
+    }
+
+    let (max_w, min_w, breakpoints) = measure(cells, ui);
+
+    let cache = TableMeasureCache {
+        cell_hash,
+        font_hash,
+        max_w: max_w.clone(),
+        min_w: min_w.clone(),
+        breakpoints: breakpoints.clone(),
+    };
+    ui.data_mut(|d| d.insert_temp(cache_id, cache));
+
+    (max_w, min_w, breakpoints)
+}
+
+/// Solve FTWA table column widths with decision memoization via egui memory.
+///
+/// Prevents re-executing the deficit solver on every frame when input measurements, available width,
+/// and deficit strategy remain unchanged.
+pub fn ftwa_cached(
+    table_id: egui::Id,
+    max_content: &[f32],
+    min_content: &[f32],
+    breakpoints: &[Vec<Breakpoint>],
+    available: f32,
+    strategy: DeficitStrategy,
+    ui: &egui::Ui,
+) -> ColumnWidths {
+    use std::hash::{Hash, Hasher};
+
+    let mut input_hasher = std::collections::hash_map::DefaultHasher::new();
+    max_content.len().hash(&mut input_hasher);
+    for &w in max_content {
+        w.to_bits().hash(&mut input_hasher);
+    }
+    for &w in min_content {
+        w.to_bits().hash(&mut input_hasher);
+    }
+    let input_hash = input_hasher.finish();
+
+    let cache_id = table_id.with("decision_cache");
+    if let Some(cached) = ui
+        .data(|d| d.get_temp::<TableDecisionCache>(cache_id))
+        .filter(|c| {
+            c.input_hash == input_hash
+                && c.strategy == strategy
+                && (c.avail - available).abs() < 1e-3
+        })
+    {
+        return cached.decision;
+    }
+
+    let decision = ftwa(max_content, min_content, breakpoints, available, strategy);
+
+    let cache = TableDecisionCache {
+        input_hash,
+        avail: available,
+        strategy,
+        decision: decision.clone(),
+    };
+    ui.data_mut(|d| d.insert_temp(cache_id, cache));
+
+    decision
 }
 
 /// Token data for a single cell, used for breakpoint computation.
@@ -1971,5 +2097,79 @@ mod tests {
         assert!(!d.needs_horizontal_scroll);
         assert!(d.widths[0] >= 50.0);
         assert!(d.widths[0] <= 100.0);
+    }
+
+    #[test]
+    fn test_ftwa_cached_memoizes_and_invalidates_correctly() {
+        let ctx = egui::Context::default();
+        let _ = ctx.run_ui(egui::RawInput::default(), |ctx| {
+            egui::CentralPanel::default().show(ctx, |ui| {
+                let table_id = egui::Id::new("test_cache_table");
+                let max = [100.0, 200.0];
+                let min = [50.0, 100.0];
+                let bps = vec![vec![], vec![]];
+
+                let d1 = ftwa_cached(
+                    table_id,
+                    &max,
+                    &min,
+                    &bps,
+                    250.0,
+                    DeficitStrategy::ProportionalToSlack,
+                    ui,
+                );
+                // Second call with same parameters should return from cache
+                let d2 = ftwa_cached(
+                    table_id,
+                    &max,
+                    &min,
+                    &bps,
+                    250.0,
+                    DeficitStrategy::ProportionalToSlack,
+                    ui,
+                );
+                assert_eq!(d1, d2);
+
+                // Changing available width invalidates solver cache
+                let d3 = ftwa_cached(
+                    table_id,
+                    &max,
+                    &min,
+                    &bps,
+                    200.0,
+                    DeficitStrategy::ProportionalToSlack,
+                    ui,
+                );
+                assert_ne!(d1.widths, d3.widths);
+            });
+        });
+    }
+
+    #[test]
+    fn test_measure_cached_memoizes_and_invalidates_on_cell_change() {
+        let ctx = egui::Context::default();
+        let _ = ctx.run_ui(egui::RawInput::default(), |ctx| {
+            egui::CentralPanel::default().show(ctx, |ui| {
+                let table_id = egui::Id::new("test_measure_table");
+                let cells1 = vec![vec![vec![InlineElem::Text(
+                    "Hello".to_string(),
+                    Default::default(),
+                )]]];
+                let cells2 = vec![vec![vec![InlineElem::Text(
+                    "Hello World Long Text".to_string(),
+                    Default::default(),
+                )]]];
+
+                let (max1, min1, _bp1) = measure_cached(table_id, &cells1, ui);
+                let (max1_again, min1_again, _bp1_again) = measure_cached(table_id, &cells1, ui);
+                assert_eq!(max1, max1_again);
+                assert_eq!(min1, min1_again);
+
+                // Changing cell content invalidates measure cache
+                let (max2, min2, _bp2) = measure_cached(table_id, &cells2, ui);
+                assert_ne!(max1, max2);
+                assert_ne!(min1, min2);
+            });
+        });
     }
 }
