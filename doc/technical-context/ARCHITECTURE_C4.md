@@ -80,7 +80,7 @@ Top-level public modules exposed by `lib.rs`:
 C4Component fastmd
   title FastMD — UI Layer
 
-  Component(app, "FastMdApp", "ui/app.rs", "eframe::App root; owns AgentSessionManager, BackgroundProcessManager, Task, DirectoryTracker, FileEventProcessor, TagManager, DialogManager, PanelLayout, SelectionManager, TabManager, bus")
+  Component(app, "FastMdApp", "ui/app.rs", "eframe::App root; owns AgentSessionManager, BackgroundProcessManager, Task, DirectoryTracker, FileEventProcessor, TagManager, DialogManager, PanelLayout, SelectionManager, TabManager, bus. Pre-builds the file-event bus and registers every consumer via Bus::subscribe before calling Task::new_with_bus (REQ-816)")
   Component(panels, "PanelLayout + panels", "ui/panel_layout.rs, ui/panels/{top,bottom,left,right,center}.rs", "5-pane layout REQ-101")
   Component(render, "render", "ui/render.rs", "build_toc, render_markdown (GFM pulldown-cmark REQ-201/216), render_yaml_table (REQ-212)")
   Component(tree, "tree", "ui/tree.rs", "flatten_tree, draw_tree_node, FlatRow, TREE_ROW_HEIGHT, TreeNodeContext, render_flat_row")
@@ -197,11 +197,19 @@ Tool inventory (matches `Tools.md` + conditional tools):
 which owns the `mpsc` channels and the `notify::RecommendedWatcher`. A
 `Bus<FileEvent>` (see Event Bus below) feeds producers and consumers.
 
+The `Task` exposes two constructors: `Task::new(config)` creates a private bus
+suitable only when no consumer needs to observe the initial scan, and
+`Task::new_with_bus(config, bus)` accepts a caller-supplied bus so consumers
+can subscribe **before** the indexer thread is spawned. The `tokio::sync::broadcast`
+channel that backs `Bus` does not replay past events to late subscribers, so
+this subscribe-before-spawn contract is the only way to guarantee the UI
+receives events emitted during the initial library scan (REQ-814..816).
+
 ```mermaid
 C4Component fastmd
   title FastMD — Background Workers
 
-  Component(task, "Task", "background_task.rs (518)", "Owns rx/tx (std::sync::mpsc), file_event_bus: Bus<FileEvent>, watcher: Option<notify::RecommendedWatcher>; spawns indexing thread; run_indexing wires all workers")
+  Component(task, "Task", "background_task.rs (518)", "Owns rx/tx (std::sync::mpsc), file_event_bus: Bus<FileEvent>, watcher: Option<notify::RecommendedWatcher>; spawns indexing thread; run_indexing wires all workers. `Task::new_with_bus(config, bus)` lets callers pre-subscribe consumers before spawn (REQ-814..816)")
   Component(indexer, "Indexer", "background/indexer.rs", "Worker pool up to 4 threads (REQ-301/302)")
   Component(watcher, "FileWatcher", "background/watcher.rs", "notify 6.0; recursive; auto-watch new dirs (REQ-401/407)")
   Component(pdf, "PdfConverterWorker", "background/pdf_converter.rs", "PdfConversionJob queue; pdf_converter_command (REQ-450..458)")
@@ -229,7 +237,7 @@ C4Component fastmd
   title FastMD — Supporting Modules
 
   Component(cfg, "config", "config.rs (798) + config/virtual_path.rs (302)", "AppConfig, LlmConfig{model,api_url,api_key,cost,use_case}, JmapClient, CalDavClient, CardDavClient, content_libraries; load_config, get_config_path; Debug redacts secrets. VirtualPath + VirtualPathError{EmptyPath,TraversalDetected,InvalidFormat,LibraryNotFound,LibraryNotWritable}; rejects '..' traversal (REQ-700..708)")
-  Component(ev, "file_events", "file_events.rs (554)", "Bus<T> (tokio::sync::broadcast, BUS_CAPACITY=8192); FileEvent; FileEventKind{Discovered,Updated,Removed,DirDiscovered,DirRemoved}; FileEventProducer; BusReader. Multi-producer/multi-consumer")
+  Component(ev, "file_events", "file_events.rs (554)", "Bus<T> (tokio::sync::broadcast, BUS_CAPACITY=8192); FileEvent; FileEventKind{Discovered,Updated,Removed,DirDiscovered,DirRemoved}; FileEventProducer; BusReader. Multi-producer/multi-consumer. Late subscribers do NOT see events published before subscribe() (REQ-815)")
   Component(fp, "file_processor", "file_processor.rs (186)", "FileEventProcessor{reader, all_files, all_files_set, all_dirs, all_dirs_set, indexing_finished, indexing_finished_handled}")
   Component(dt, "directory_tracker", "directory_tracker.rs (267)", "Single source of truth for known dirs; consumes DirDiscovered/DirRemoved + file Discovered")
   Component(tm, "tag_manager", "tag_manager.rs (220)", "TagManager{file_tags:BTreeMap<PathBuf,Vec<String>>, all_tags:BTreeSet<String>, prompt_paths:BTreeSet<PathBuf>, selected_tag}")

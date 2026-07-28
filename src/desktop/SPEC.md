@@ -240,6 +240,12 @@ models:
 * [REQ-812] While processing is underway, the [batch prompt processing dialog] shall disable the 'Process'
 * [REQ-813] While processing is underway, the [batch prompt processing dialog] shall stop processing new prompts when the user clicks the 'Cancel' button
 
+### File-event bus contract
+
+* [REQ-814] The background task orchestrator (`background_task::Task`) shall expose two constructors: `Task::new(config)` (creates a private bus; suitable only when no consumer needs to observe the initial scan) and `Task::new_with_bus(config, bus)` (uses a caller-supplied bus).
+* [REQ-815] Any consumer that needs to observe events published during the initial library scan **must** call `Bus::subscribe` on the supplied bus **before** invoking `Task::new_with_bus`. Subscribing after the constructor returns may miss events because the indexer thread is already running and the underlying `tokio::sync::broadcast` channel does not replay past events to late subscribers.
+* [REQ-816] The production wiring in `FastMdApp::new` shall pre-build the file-event bus, register every consumer (`FileEventProcessor`, `DirectoryTracker`, and the app-level `file_event_reader`) via `Bus::subscribe` first, and only then call `Task::new_with_bus` to spawn the indexer thread.
+
 ### LLM tools
 
 | Tool | Description |

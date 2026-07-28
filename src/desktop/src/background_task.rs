@@ -1,4 +1,18 @@
 //! Background task orchestrator — spawns and owns all worker threads (watcher, indexer, PDF converter, vision processor, bus router).
+//!
+//! The file-event bus is a `tokio::sync::broadcast` channel: a `BusReader`
+//! created via [`Bus::subscribe`] only sees events published **after** the
+//! subscription. The indexer thread spawned by [`Task::new`] (or
+//! [`Task::new_with_bus`]) starts publishing `Discovered` events as soon as
+//! the initial scan begins, so any consumer that subscribes after the
+//! spawn may miss events.
+//!
+//! To avoid this race, callers that need to observe the initial scan
+//! should construct the bus themselves with `Bus::new()`, register every
+//! consumer via `Bus::subscribe` first, and then hand the bus to
+//! [`Task::new_with_bus`]. [`Task::new`] is a convenience wrapper that
+//! internally creates a fresh bus and is suitable only when the caller
+//! does not need to observe events emitted during the initial scan.
 
 use crate::background::bus_router::BusRouter;
 use crate::background::indexer::Indexer;
@@ -23,10 +37,25 @@ pub struct Task {
 }
 
 impl Task {
+    /// Spawn the background task with a fresh, private bus.
+    ///
+    /// Use this when the caller does not need to observe the very first
+    /// events emitted by the initial library scan. Callers that need that
+    /// coverage must build the bus themselves (see [`Task::new_with_bus`]).
     pub fn new(config: crate::config::AppConfig) -> Self {
+        Self::new_with_bus(config, Bus::new())
+    }
+
+    /// Spawn the background task using a caller-supplied bus.
+    ///
+    /// Every consumer that needs to observe the initial library scan
+    /// **must** call `file_event_bus.subscribe()` on the supplied bus
+    /// **before** invoking this constructor — once the constructor returns
+    /// the indexer thread is already running and may have published
+    /// `Discovered` events to a bus with no registered consumers.
+    pub fn new_with_bus(config: crate::config::AppConfig, file_event_bus: Bus<FileEvent>) -> Self {
         let (tx, rx) = channel();
         let tx_clone = tx.clone();
-        let file_event_bus = Bus::new();
         let config_clone = config.clone();
         let bus_clone = file_event_bus.clone();
         let cancel = Arc::new(AtomicBool::new(false));
@@ -193,8 +222,11 @@ mod tests {
             priority: 0,
         });
 
-        let task = Task::new(config);
-        let reader = task.file_event_bus.subscribe();
+        // Pre-build the bus and subscribe *before* spawning the task so the
+        // indexer's first batched `Discovered` event is delivered to us.
+        let bus = Bus::<crate::file_events::FileEvent>::new();
+        let reader = bus.subscribe();
+        let task = Task::new_with_bus(config, bus);
 
         let mut got_finished = false;
         let start = std::time::Instant::now();
@@ -248,9 +280,13 @@ mod tests {
             priority: 0,
         });
 
-        let task = Task::new(config);
-        let tag_reader = task.file_event_bus.subscribe();
-        let tree_reader = task.file_event_bus.subscribe();
+        // Subscribe *before* the indexer thread is spawned so the test
+        // does not race with the bus publish (see the module doc comment
+        // for the subscribe-before-spawn contract).
+        let bus = Bus::<crate::file_events::FileEvent>::new();
+        let tag_reader = bus.subscribe();
+        let tree_reader = bus.subscribe();
+        let task = Task::new_with_bus(config, bus);
 
         let start = std::time::Instant::now();
         while start.elapsed().as_secs() < 5 {
@@ -296,8 +332,11 @@ mod tests {
             priority: 0,
         });
 
-        let task = Task::new(config);
-        let reader = task.file_event_bus.subscribe();
+        // Subscribe *before* spawning the task — same race-avoidance
+        // pattern as the other initial-scan tests.
+        let bus = Bus::<crate::file_events::FileEvent>::new();
+        let reader = bus.subscribe();
+        let task = Task::new_with_bus(config, bus);
 
         let start = std::time::Instant::now();
         while start.elapsed().as_secs() < 5 {

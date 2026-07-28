@@ -377,8 +377,16 @@ impl FastMdApp {
                 });
         }
 
-        let background_task = Task::new(config.clone());
-        let file_processor = FileEventProcessor::new(background_task.file_event_bus.subscribe());
+        // Pre-build the file-event bus and register every consumer *before*
+        // spawning the background task — see the module-level doc on
+        // `background_task::Task` for the subscribe-before-spawn contract.
+        // Without this, the indexer thread may publish its first batched
+        // `Discovered` event to a bus with no subscribers.
+        let event_bus = crate::file_events::Bus::<crate::file_events::FileEvent>::new();
+        let file_processor = FileEventProcessor::new(event_bus.subscribe());
+        let dir_tracker = DirectoryTracker::new(event_bus.subscribe());
+        let file_event_reader = event_bus.subscribe();
+        let background_task = Task::new_with_bus(config.clone(), event_bus.clone());
         let background_manager = Arc::new(Mutex::new(BackgroundProcessManager::new()));
         let inline_editor_enabled = config.inline_editor_enabled;
 
@@ -392,9 +400,6 @@ impl FastMdApp {
         };
         let mut dialogs = DialogManager::new();
         dialogs.batch_dialog_config = batch_dialog_config;
-
-        let event_bus = background_task.file_event_bus;
-        let dir_tracker = DirectoryTracker::new(event_bus.subscribe());
 
         let persisted_ui_state: PersistedUiState = cc
             .storage
@@ -421,7 +426,7 @@ impl FastMdApp {
             content_libraries: config.content_libraries.clone(),
             rx: background_task.rx,
             tx: background_task.tx,
-            file_event_reader: Some(event_bus.subscribe()),
+            file_event_reader: Some(file_event_reader),
             file_event_bus: event_bus,
             file_processor,
             directory_tracker: dir_tracker,
