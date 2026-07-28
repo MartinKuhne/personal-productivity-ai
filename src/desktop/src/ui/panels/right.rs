@@ -332,10 +332,13 @@ mod ui_tests {
             "long TOC row should be present in the accesskit tree"
         );
 
-        // Debug: print rects of all matching nodes so we can see which
-        // one represents the row's left edge.
+        // Collect rects of all matching nodes to find the leftmost —
+        // the TOC row's outer container (the `ui.horizontal` wrapper)
+        // is the widest matching node; the accesskit tree may also
+        // emit separate `Button` / `Label` nodes for the clickable
+        // area and the text. Pick the leftmost rect — that is the
+        // one that would be clipped on the left if the origin drifts.
         let rects: Vec<_> = nodes.iter().map(|n| n.rect()).collect();
-        eprintln!("matching node rects: {rects:?}, expected_left={expected_left}");
 
         // The TOC row's outer container (the `ui.horizontal` wrapper)
         // is the widest matching node; the accesskit tree may also

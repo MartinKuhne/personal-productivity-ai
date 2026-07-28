@@ -2,48 +2,14 @@
 mod tests {
     use eframe::egui;
 
-    /// Probe the egui Grid bug: `set_width` + `horizontal_wrapped` produces
-    /// content wrapped at ~40Ã¢â‚¬Â¯px (the Grid's initial column allocation) instead
-    /// of the assigned column width.
-    #[test]
-    fn old_bug_set_width_ignored() {
-        let ctx = egui::Context::default();
-        let _ = ctx.run_ui(egui::RawInput::default(), |ui| {
-            egui::CentralPanel::default().show(ui, |ui| {
-                egui::Grid::new("bug_grid")
-                    .striped(true)
-                    .spacing([10.0, 4.0])
-                    .show(ui, |ui| {
-                        // Row1 C0 Ã¢â‚¬â€ set_width(100) + horizontal_wrapped
-                        ui.set_width(100.0);
-                        let hw = ui.horizontal_wrapped(|ui| {
-                            ui.add(egui::Label::new("Short").wrap());
-                        });
-                        // response_rect width should be ~40 (wrapped at Grid default column allocation)
-                        dbg!(hw.response.rect.width());
-
-                        // Row1 C1
-                        ui.set_width(200.0);
-                        let hw2 = ui.horizontal_wrapped(|ui| {
-                            ui.add(
-                                egui::Label::new("Much longer text here for wrapping testing")
-                                    .wrap(),
-                            );
-                        });
-                        dbg!(hw2.response.rect.width());
-
-                        ui.end_row();
-
-                        // Row2 C0
-                        ui.set_width(100.0);
-                        let hw3 = ui.horizontal_wrapped(|ui| {
-                            ui.add(egui::Label::new("Another").wrap());
-                        });
-                        dbg!(hw3.response.rect.width());
-                    });
-            });
-        });
-    }
+    // The previous `old_bug_set_width_ignored` test that lived at
+    // the top of this module was a no-assert diagnostic that
+    // printed widths via `dbg!`. The regression it documented
+    // (`set_width` + `horizontal_wrapped` content wrapped at the
+    // Grid's default column allocation instead of the assigned
+    // width) is now pinned by `fix_allocate_ui_randomised` below
+    // via real assertions. R-5 + P2-5: delete the no-assert
+    // diagnostic. See `doc/planning/egui-testing.md` §P2-5.
 
     /// Deterministic minimal PRNG so we don't need the `rand` crate.
     struct SimpleRng(u64);
