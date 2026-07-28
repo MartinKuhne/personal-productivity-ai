@@ -414,10 +414,16 @@ fn render_table(ui: &mut egui::Ui, table_cells: &[Vec<Vec<InlineElem>>], table_o
         return;
     }
 
-    let (max_w, min_w) = crate::ui::table_width::measure(table_cells, ui);
+    let (max_w, min_w, breakpoints) = crate::ui::table_width::measure(table_cells, ui);
     let gutter = 10.0_f32;
     let avail = (ui.available_width() - (n as f32 - 1.0) * gutter).max(0.0);
-    let decision = crate::ui::table_width::ftwa(&max_w, &min_w, avail);
+    let decision = crate::ui::table_width::ftwa(
+        &max_w,
+        &min_w,
+        &breakpoints,
+        avail,
+        crate::ui::table_width::DeficitStrategy::ProportionalToSlack,
+    );
 
     // Stable id derived from a table ordinal rather than `ui.next_auto_id()`
     // (a positional peek that shifts whenever any widget above the table
@@ -1582,9 +1588,10 @@ def foo():
         assert_eq!(cells[0].len(), 6);
         let _ = ctx.run_ui(egui::RawInput::default(), |ui| {
             egui::CentralPanel::default().show(ui, |ui| {
-                let (max_w, min_w) = crate::ui::table_width::measure(&cells, ui);
+                let (max_w, min_w, breakpoints) = crate::ui::table_width::measure(&cells, ui);
                 assert_eq!(max_w.len(), 6, "6 max-content widths");
                 assert_eq!(min_w.len(), 6, "6 min-content widths");
+                assert_eq!(breakpoints.len(), 6, "6 breakpoint vectors");
                 for (i, (&mx, &mn)) in max_w.iter().zip(min_w.iter()).enumerate() {
                     assert!(mx >= mn, "col {i}: max {mx} < min {mn}");
                     assert!(mx > 0.0, "col {i}: max-content must be > 0");
@@ -1595,11 +1602,17 @@ def foo():
                 let sum_max: f32 = max_w.iter().sum();
 
                 // Test the same 6-column table at four viewports, covering
-                // the three regimes (surplus / deficit / Ã‚Â§3.6 fallback).
+                // the three regimes (surplus / deficit / §3.6 fallback).
                 for &avail in &[ui.available_width(), 800.0, 600.0, 400.0] {
                     let gutter = 10.0_f32;
                     let a = (avail - (cells[0].len() as f32 - 1.0) * gutter).max(0.0);
-                    let decision = crate::ui::table_width::ftwa(&max_w, &min_w, a);
+                    let decision = crate::ui::table_width::ftwa(
+                        &max_w,
+                        &min_w,
+                        &breakpoints,
+                        a,
+                        crate::ui::table_width::DeficitStrategy::ProportionalToSlack,
+                    );
                     assert_eq!(decision.widths.len(), 6, "avail={a}: must have 6 widths");
                     for &w in &decision.widths {
                         assert!(w > 0.0, "avail={a}: each column must have positive width");
@@ -1663,12 +1676,18 @@ def foo():
             },
             |ui| {
                 egui::CentralPanel::default().show(ui, |ui| {
-                    let (max_w, min_w) = crate::ui::table_width::measure(&cells, ui);
+                    let (max_w, min_w, breakpoints) = crate::ui::table_width::measure(&cells, ui);
                     let gutter = 10.0_f32;
                     let avail = (ui.available_width()
                         - (max_w.len() as f32 - 1.0).max(0.0) * gutter)
                         .max(0.0);
-                    let decision = crate::ui::table_width::ftwa(&max_w, &min_w, avail);
+                    let decision = crate::ui::table_width::ftwa(
+                        &max_w,
+                        &min_w,
+                        &breakpoints,
+                        avail,
+                        crate::ui::table_width::DeficitStrategy::ProportionalToSlack,
+                    );
                     // Surplus regime (viewport much wider than content).
                     assert!(!decision.needs_horizontal_scroll);
                     // Columns must be pinned at max_content, not stretched.
@@ -1761,11 +1780,17 @@ def foo():
         let mut captured: Option<crate::ui::table_width::ColumnWidths> = None;
         let _ = ctx.run_ui(raw, |ui| {
             egui::CentralPanel::default().show(ui, |ui| {
-                let (max_w, min_w) = crate::ui::table_width::measure(table_cells, ui);
+                let (max_w, min_w, breakpoints) = crate::ui::table_width::measure(table_cells, ui);
                 let gutter = 10.0_f32;
                 let avail =
                     (ui.available_width() - (max_w.len() as f32 - 1.0).max(0.0) * gutter).max(0.0);
-                let decision = crate::ui::table_width::ftwa(&max_w, &min_w, avail);
+                let decision = crate::ui::table_width::ftwa(
+                    &max_w,
+                    &min_w,
+                    &breakpoints,
+                    avail,
+                    crate::ui::table_width::DeficitStrategy::ProportionalToSlack,
+                );
                 captured = Some(decision.clone());
                 // Render Ã¢â‚¬â€ exercises the rendering branch keyed on
                 // `needs_horizontal_scroll`. Without a visual harness, we
