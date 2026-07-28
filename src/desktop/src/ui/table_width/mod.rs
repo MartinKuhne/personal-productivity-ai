@@ -1186,6 +1186,52 @@ mod tests {
     }
 
     #[test]
+    fn edge_available_equals_sum_max_returns_max_content() {
+        let max = [100.0, 200.0, 150.0];
+        let min = [30.0, 50.0, 40.0];
+        let available = max.iter().sum::<f32>();
+        let d = ftwa(&max, &min, available);
+        assert!(!d.needs_horizontal_scroll);
+        assert_eq!(d.widths, max.to_vec());
+    }
+
+    #[test]
+    fn edge_all_zero_slack_deficit_returns_min() {
+        let max = [50.0, 50.0, 50.0];
+        let min = [50.0, 50.0, 50.0];
+        let available = 100.0;
+        let d = ftwa(&max, &min, available);
+        assert!(d.needs_horizontal_scroll);
+        assert_eq!(d.widths, vec![50.0, 50.0, 50.0]);
+    }
+
+    #[test]
+    fn edge_zero_slack_column_stays_pinned_in_deficit() {
+        let max = [80.0, 80.0];
+        let min = [80.0, 10.0];
+        let available = 100.0;
+        let d = ftwa(&max, &min, available);
+        assert!(!d.needs_horizontal_scroll);
+        assert_eq!(d.widths[0], 80.0);
+        assert!(d.widths[1] >= 10.0 - 1e-3);
+        assert!((d.widths.iter().sum::<f32>() - 100.0).abs() < 1e-3);
+    }
+
+    #[test]
+    fn edge_single_column_at_exact_min() {
+        let d = ftwa(&[100.0], &[50.0], 50.0);
+        assert!(!d.needs_horizontal_scroll);
+        assert_eq!(d.widths, vec![50.0]);
+    }
+
+    #[test]
+    fn edge_empty_inputs() {
+        let d = ftwa(&[], &[], 100.0);
+        assert!(!d.needs_horizontal_scroll);
+        assert!(d.widths.is_empty());
+    }
+
+    #[test]
     fn test_measure_cell_fragmented_tokens() {
         let ctx = egui::Context::default();
         let _ = ctx.run_ui(egui::RawInput::default(), |ui| {

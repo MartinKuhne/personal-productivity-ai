@@ -7,7 +7,6 @@
 pub mod ast;
 pub mod document;
 pub mod parser;
-pub mod table_width;
 pub mod toc;
 
 pub use ast::{InlineElem, RenderEvent, TextStyle, heading_plain_text};
