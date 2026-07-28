@@ -239,6 +239,7 @@ mod tests {
     // --- UI / window tests (R-7: merged from `mod ui_tests`) ---
 
     use crate::ui::strings::{APP_TITLE, BATCH_BUTTON, SHOW_LOG_CHECKBOX};
+    use crate::ui::test_helpers::assert::assert_no_id_change_in_log;
     use crate::ui::test_helpers::text::assert_text_contains;
 
     fn create_test_app() -> FastMdApp {
@@ -349,22 +350,13 @@ mod tests {
         });
 
         let msgs = cap.msgs.lock().unwrap().clone();
-        let id_change_count = msgs
-            .iter()
-            .filter(|m| m.contains("changed id between passes"))
-            .count();
+        // Sanity check that the log capture is actually wired up —
+        // an empty `msgs` would silently pass the id-stability check
+        // even if the warning fires through a different sink.
         assert!(
             !msgs.is_empty(),
             "log capture is empty — the test is not actually running under the installed log::Log impl"
         );
-        assert_eq!(
-            id_change_count,
-            0,
-            "top panel must produce a stable widget tree across the indexing_finished transition, but egui emitted {} 'changed id' warning(s): {:?}",
-            id_change_count,
-            msgs.iter()
-                .filter(|m| m.contains("changed id between passes"))
-                .collect::<Vec<_>>()
-        );
+        assert_no_id_change_in_log(&msgs);
     }
 }

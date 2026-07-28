@@ -156,6 +156,44 @@ mod tests {
         BackgroundLogEntry::new(category, message.to_string())
     }
 
+    /// Id-stability: the background-logs window is a `egui::Window` that
+    /// combines a `ui.horizontal` filter row with a `ScrollArea::show_rows`
+    /// over a `Vec<BackgroundLogEntry>`. Both are common sources of the
+    /// "rect changed id between passes" warning class documented in
+    /// `AGENTS.md` §"Conditional rendering" — the filter row is rebuilt
+    /// every frame and the scroll area can balloon between passes if the
+    /// `len()` or the available rect changes. Render twice through the
+    /// same `ctx` and assert no red-stroke rect appears in the second
+    /// pass.
+    #[test]
+    fn test_show_background_logs_window_no_id_change_warnings() {
+        use crate::ui::test_helpers::assert::assert_no_id_change_in_shapes;
+        let ctx = egui::Context::default();
+        let mut app = create_test_app();
+        app.background_manager.lock().unwrap().show_background_logs = true;
+        {
+            let mut mgr = app.background_manager.lock().unwrap();
+            for i in 0..60 {
+                mgr.push_log(BackgroundLogEntry::new(
+                    LogCategory::Indexer,
+                    format!("log {i}"),
+                ));
+            }
+        }
+
+        // Pass 1: prime previous-pass state.
+        let _ = ctx.run_ui(egui::RawInput::default(), |ui| {
+            show_background_logs_window(&mut app, ui.ctx());
+        });
+        // Pass 2: surface red-stroke rect if the widget tree shifted.
+        let output = ctx.run_ui(egui::RawInput::default(), |ui| {
+            show_background_logs_window(&mut app, ui.ctx());
+        });
+
+        let shapes: Vec<egui::Shape> = output.shapes.into_iter().map(|cs| cs.shape).collect();
+        assert_no_id_change_in_shapes(&shapes);
+    }
+
     #[test]
     fn test_is_log_visible_no_filters() {
         let log = make_log(LogCategory::Indexer, "Indexing started");

@@ -78,10 +78,7 @@ pub fn assert_text_contains(shapes: &[egui::epaint::ClippedShape], needle: &str)
 ///
 /// Use this when the panel has multiple stable, locatable strings (e.g.
 /// header + empty-state message).
-pub fn assert_text_contains_all(
-    shapes: &[egui::epaint::ClippedShape],
-    needles: &[&str],
-) {
+pub fn assert_text_contains_all(shapes: &[egui::epaint::ClippedShape], needles: &[&str]) {
     let texts = extract_text(shapes);
     for needle in needles {
         assert!(

@@ -790,6 +790,7 @@ impl FastMdApp {
 mod tests {
     use super::*;
     use crate::messages::TokenUsageInfo;
+    use crate::ui::test_helpers::assert::assert_no_id_change_in_shapes;
     use std::path::PathBuf;
 
     fn create_test_app() -> FastMdApp {
@@ -1384,21 +1385,8 @@ mod tests {
             app.render_panels(ui);
         });
 
-        let mut flagged = Vec::new();
-        for clipped in &output.shapes {
-            if let egui::Shape::Rect(rs) = &clipped.shape
-                && rs.stroke.color == egui::Color32::RED
-            {
-                flagged.push(rs.rect);
-            }
-        }
-
-        assert!(
-            flagged.is_empty(),
-            "render_panels must produce a stable widget tree when TOC panel is active, but egui flagged {} rect(s) with ID change warnings: {:?}",
-            flagged.len(),
-            flagged
-        );
+        let shapes: Vec<egui::Shape> = output.shapes.into_iter().map(|cs| cs.shape).collect();
+        assert_no_id_change_in_shapes(&shapes);
     }
 
     /// High-level layout integration test ensuring all 5 top-level UI panels
@@ -1487,9 +1475,7 @@ mod tests {
         // P1-7: reference `crate::ui::strings::*` constants rather than
         // hardcoding literals so copy changes flow through one place.
         let all_text = texts.join(" ");
-        use crate::ui::strings::{
-            APP_TITLE, TABLE_OF_CONTENTS_HEADER, WORKSPACE_HEADER,
-        };
+        use crate::ui::strings::{APP_TITLE, TABLE_OF_CONTENTS_HEADER, WORKSPACE_HEADER};
 
         assert!(
             all_text.contains(APP_TITLE),

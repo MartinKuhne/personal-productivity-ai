@@ -111,26 +111,15 @@ fn snapshot_full_markdown_doc() {
 | Bag | 15\" Slim sleeve |
 ";
 
-    let mut harness = snapshot_harness(
-        "full_markdown_doc",
-        egui::vec2(1024.0, 768.0),
-        move |ui| {
-            egui::CentralPanel::default().show(ui, |ui| {
-                let mut scroll_id: Option<egui::Id> = None;
-                let mut pending_toggles: Vec<(usize, bool)> = Vec::new();
-                fastmd::ui::render::render_markdown(
-                    ui,
-                    content,
-                    &mut scroll_id,
-                    &mut pending_toggles,
-                );
-            });
-        },
-    );
+    let mut harness = snapshot_harness("full_markdown_doc", egui::vec2(1024.0, 768.0), move |ui| {
+        egui::CentralPanel::default().show(ui, |ui| {
+            let mut scroll_id: Option<egui::Id> = None;
+            let mut pending_toggles: Vec<(usize, bool)> = Vec::new();
+            fastmd::ui::render::render_markdown(ui, content, &mut scroll_id, &mut pending_toggles);
+        });
+    });
     harness.run();
-    if !try_snapshot(&mut harness, "full_markdown_doc") {
-        return;
-    }
+    let _ = try_snapshot(&mut harness, "full_markdown_doc");
 }
 
 #[test]
@@ -141,17 +130,11 @@ fn snapshot_yaml_table() {
     let yaml: serde_yaml::Value =
         serde_yaml::from_str("title: Sample\nauthor: Tester\ntags:\n  - rust\n  - egui\n")
             .expect("valid yaml");
-    let mut harness = snapshot_harness(
-        "yaml_table",
-        egui::vec2(1024.0, 768.0),
-        move |ui| {
-            egui::CentralPanel::default().show(ui, |ui| {
-                fastmd::ui::render::render_yaml_table(ui, &yaml);
-            });
-        },
-    );
+    let mut harness = snapshot_harness("yaml_table", egui::vec2(1024.0, 768.0), move |ui| {
+        egui::CentralPanel::default().show(ui, |ui| {
+            fastmd::ui::render::render_yaml_table(ui, &yaml);
+        });
+    });
     harness.run();
-    if !try_snapshot(&mut harness, "yaml_table") {
-        return;
-    }
+    let _ = try_snapshot(&mut harness, "yaml_table");
 }

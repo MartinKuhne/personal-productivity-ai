@@ -62,19 +62,22 @@ use eframe::egui;
 /// Run both checks. If a test installs log capture, pass `log_msgs` with
 /// the captured messages; if not, pass an empty slice and the helper will
 /// only run the shape check. Same in reverse for `shapes`.
-pub fn assert_no_id_change_warnings(
-    log_msgs: &[String],
-    shapes: &[egui::epaint::ClippedShape],
-) {
+///
+/// Accepts `&[Shape]` for `shapes` (the inner `Shape` of
+/// `ClippedShape`); the `clip_rect` field is not needed for the
+/// red-stroke detection. Callers can pass
+/// `output.shapes.into_iter().map(|cs| cs.shape).collect()` to convert
+/// from `Vec<ClippedShape>`.
+pub fn assert_no_id_change_warnings(log_msgs: &[String], shapes: &[egui::Shape]) {
     let log_warns = log_msgs
         .iter()
         .filter(|m| m.contains("changed id between passes"))
         .count();
     let shape_warns = shapes
         .iter()
-        .filter(|cs| {
+        .filter(|shape| {
             matches!(
-                &cs.shape,
+                shape,
                 egui::Shape::Rect(r) if r.stroke.color == egui::Color32::RED
             )
         })
@@ -90,12 +93,16 @@ pub fn assert_no_id_change_warnings(
 /// Assert no "widget rect changed id between passes" warnings in the
 /// rendered shapes only. Use this when the test does not install log
 /// capture and only the visual side of the detection is needed.
-pub fn assert_no_id_change_in_shapes(shapes: &[egui::epaint::ClippedShape]) {
+///
+/// Accepts `&[Shape]` rather than `&[ClippedShape]` so the call site
+/// can pass `output.shapes.into_iter().map(|cs| cs.shape).collect()`
+/// without depending on the `clip_rect` field.
+pub fn assert_no_id_change_in_shapes(shapes: &[egui::Shape]) {
     let shape_warns = shapes
         .iter()
-        .filter(|cs| {
+        .filter(|shape| {
             matches!(
-                &cs.shape,
+                shape,
                 egui::Shape::Rect(r) if r.stroke.color == egui::Color32::RED
             )
         })

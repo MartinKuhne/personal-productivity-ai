@@ -313,6 +313,7 @@ pub fn show_left_panel(app: &mut FastMdApp, parent_ui: &mut egui::Ui) {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::ui::test_helpers::assert::assert_no_id_change_in_shapes;
 
     fn create_test_app() -> FastMdApp {
         FastMdApp::empty_state(crate::config::AppConfig::default())
@@ -459,32 +460,23 @@ mod tests {
     }
 
     /// Renders the panel twice through the same `ctx` and returns the
-    /// rects that egui flagged with its "rect changed id between passes"
-    /// warning. The warning is rendered as a red stroke rectangle in
-    /// the second pass's output (see
-    /// `egui::Context::warn_if_rect_changes_id`). Returning those rects
-    /// lets a test assert the panel produces a stable widget tree
-    /// across passes — i.e. the cause of the `WARN egui::context`
-    /// log spam is gone.
-    fn collect_id_change_warnings(ctx: &egui::Context, app: &mut FastMdApp) -> Vec<egui::Rect> {
-        // Prime the previous-pass state with a first render.
+    /// shapes from the second pass. The second pass is the one that
+    /// emits egui's "rect changed id between passes" warning as a red
+    /// stroke rectangle in `output.shapes` (see
+    /// `egui::Context::warn_if_rect_changes_id`). The first pass
+    /// primes the previous-pass state so the warning is actually
+    /// emitted on the second pass.
+    ///
+    /// Tests then call `assert_no_id_change_in_shapes` to assert the
+    /// panel produces a stable widget tree across passes.
+    fn render_left_panel_twice(ctx: &egui::Context, app: &mut FastMdApp) -> Vec<egui::Shape> {
         let _ = ctx.run_ui(Default::default(), |ui| {
             show_left_panel(app, ui);
         });
-        // The second render is the one that emits the warning if the
-        // widget tree is unstable.
         let output = ctx.run_ui(Default::default(), |ui| {
             show_left_panel(app, ui);
         });
-        let mut flagged = Vec::new();
-        for clipped in &output.shapes {
-            if let egui::Shape::Rect(rs) = &clipped.shape
-                && rs.stroke.color == egui::Color32::RED
-            {
-                flagged.push(rs.rect);
-            }
-        }
-        flagged
+        output.shapes.into_iter().map(|cs| cs.shape).collect()
     }
 
     /// Regression: the production UI logged dozens of
@@ -532,13 +524,8 @@ mod tests {
         app.layout_mut().left_panel_width = Some(240.0);
         app.layout_mut().left_panel_dirty = false;
 
-        let flagged = collect_id_change_warnings(&ctx, &mut app);
-        assert!(
-            flagged.is_empty(),
-            "left panel must produce a stable widget tree across passes, but egui flagged {} rect(s) with 'rect changed id' warnings: {:?}",
-            flagged.len(),
-            flagged
-        );
+        let shapes = render_left_panel_twice(&ctx, &mut app);
+        assert_no_id_change_in_shapes(&shapes);
     }
 
     /// Same regression as above but for the empty state: when no
@@ -552,13 +539,8 @@ mod tests {
         app.layout_mut().left_panel_width = Some(240.0);
         app.layout_mut().left_panel_dirty = false;
 
-        let flagged = collect_id_change_warnings(&ctx, &mut app);
-        assert!(
-            flagged.is_empty(),
-            "empty left panel must produce a stable widget tree across passes, but egui flagged {} rect(s) with 'rect changed id' warnings: {:?}",
-            flagged.len(),
-            flagged
-        );
+        let shapes = render_left_panel_twice(&ctx, &mut app);
+        assert_no_id_change_in_shapes(&shapes);
     }
 
     /// TDD Test: When indexing completes (`indexing_finished = true` and
@@ -585,13 +567,8 @@ mod tests {
         app.file_processor_mut().indexing_finished = true;
         app.file_processor_mut().indexing_finished_handled = false;
 
-        let flagged = collect_id_change_warnings(&ctx, &mut app);
-        assert!(
-            flagged.is_empty(),
-            "left panel must produce a stable widget tree when indexing finishes, but egui flagged {} rect(s) with 'rect changed id' warnings: {:?}",
-            flagged.len(),
-            flagged
-        );
+        let shapes = render_left_panel_twice(&ctx, &mut app);
+        assert_no_id_change_in_shapes(&shapes);
     }
 
     /// TDD Test: When stored PanelState width (e.g. 294.7px) exceeds max_size (204.8px),
@@ -630,21 +607,8 @@ mod tests {
             show_left_panel(&mut app, ui);
         });
 
-        let mut flagged = Vec::new();
-        for clipped in &output.shapes {
-            if let egui::Shape::Rect(rs) = &clipped.shape
-                && rs.stroke.color == egui::Color32::RED
-            {
-                flagged.push(rs.rect);
-            }
-        }
-
-        assert!(
-            flagged.is_empty(),
-            "left panel must maintain stable width across passes even when stored PanelState exceeds max_w, but egui flagged {} rect(s): {:?}",
-            flagged.len(),
-            flagged
-        );
+        let shapes: Vec<egui::Shape> = output.shapes.into_iter().map(|cs| cs.shape).collect();
+        assert_no_id_change_in_shapes(&shapes);
     }
 
     #[test]

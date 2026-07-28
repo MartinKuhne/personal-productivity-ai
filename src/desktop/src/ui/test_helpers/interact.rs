@@ -72,10 +72,7 @@
 /// The lifetime parameter `'a` ties the harness to the closure's borrow
 /// lifetime. In practice, this is the lifetime of the test function —
 /// the closure is non-`'static` and the harness borrows from it.
-pub fn stateful_harness<'a, T, F>(
-    initial_state: T,
-    body: F,
-) -> egui_kittest::Harness<'a, T>
+pub fn stateful_harness<'a, T, F>(initial_state: T, body: F) -> egui_kittest::Harness<'a, T>
 where
     T: 'static,
     F: FnMut(&mut eframe::egui::Ui, &mut T) + 'a,
