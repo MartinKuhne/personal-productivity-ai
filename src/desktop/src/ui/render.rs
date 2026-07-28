@@ -467,6 +467,14 @@ fn render_table(ui: &mut egui::Ui, table_cells: &[Vec<Vec<InlineElem>>], table_o
         });
 }
 
+/// Width (in logical pixels) reserved for the YAML front-matter table's
+/// key column. Picked to comfortably fit the longest realistic YAML
+/// front-matter key (e.g. `header-date`, `last-modified`, `navigation`)
+/// while leaving the rest of the panel for the value column — which is
+/// the column that holds the long content (e.g. `summary`,
+/// `description`) that must word-wrap.
+const YAML_KEY_COLUMN_WIDTH: f32 = 110.0;
+
 /// Purpose: Renders a YAML table UI from a parsed mapping.
 /// Inputs: `ui` (mut), `yaml`
 /// Outputs: None
@@ -486,25 +494,58 @@ pub fn render_yaml_table(ui: &mut egui::Ui, yaml: &serde_yaml::Value) {
                 // the content rect by ~16px and forcing a permanent
                 // horizontal scrollbar.
                 let available_width = ui.available_width();
-                egui::ScrollArea::horizontal()
-                    .id_salt(table_id.with("scroll"))
+                // Reserve a fixed width for the key column and let the
+                // value column take the remainder. Without this, the
+                // `Grid` auto-sizes each column to its widest cell, the
+                // long value cell expands past the panel width, and the
+                // value text gets clipped mid-word (e.g. "Microsoft in
+                // Re…") by the inner horizontal ScrollArea. By giving
+                // each cell an explicit width, the value cell knows its
+                // wrap budget and the total grid width matches
+                // `available_width` exactly, so no horizontal scrolling
+                // is needed.
+                let key_col_width = YAML_KEY_COLUMN_WIDTH.min((available_width - 20.0).max(40.0));
+                // `12.0` matches the Grid's `spacing([12.0, 4.0]).x` below.
+                let value_col_width = (available_width - key_col_width - 12.0).max(40.0);
+
+                egui::Grid::new(table_id.with("grid"))
+                    .num_columns(2)
+                    .striped(true)
+                    .spacing([12.0, 4.0])
                     .show(ui, |ui| {
-                        ui.set_min_width(available_width);
-                        egui::Grid::new(table_id.with("grid"))
-                            .num_columns(2)
-                            .striped(true)
-                            .spacing([12.0, 4.0])
-                            .show(ui, |ui| {
-                                for (k, v) in pairs {
+                        for (k, v) in pairs {
+                            // Key cell: allocate exactly `key_col_width`
+                            // so the value column knows its remaining budget.
+                            ui.allocate_ui_with_layout(
+                                egui::vec2(key_col_width, 0.0),
+                                egui::Layout::left_to_right(egui::Align::Min),
+                                |ui| {
                                     ui.label(
                                         RichText::new(k)
                                             .strong()
                                             .color(egui::Color32::from_rgb(150, 200, 255)),
                                     );
-                                    ui.label(RichText::new(v).color(egui::Color32::from_gray(220)));
-                                    ui.end_row();
-                                }
-                            });
+                                },
+                            );
+                            // Value cell: allocate the remaining width
+                            // and wrap the text inside that constraint.
+                            // The `Label::wrap()` is what causes long
+                            // values to break across multiple lines
+                            // instead of overflowing the panel.
+                            ui.allocate_ui_with_layout(
+                                egui::vec2(value_col_width, 0.0),
+                                egui::Layout::left_to_right(egui::Align::Min),
+                                |ui| {
+                                    ui.add(
+                                        egui::Label::new(
+                                            RichText::new(v).color(egui::Color32::from_gray(220)),
+                                        )
+                                        .wrap(),
+                                    );
+                                },
+                            );
+                            ui.end_row();
+                        }
                     });
             });
         ui.add_space(8.0);
@@ -1419,6 +1460,97 @@ def foo():
                 render_markdown(ui, md, &mut scroll_id, &mut Vec::new());
             });
         });
+    }
+
+    /// Regression: a long YAML value must word-wrap inside the YAML
+    /// metadata table rather than overflow the panel's content rect
+    /// and get clipped by the inner horizontal `ScrollArea`.
+    ///
+    /// Before the fix, `render_yaml_table` rendered both columns with
+    /// `ui.label(...)` inside an unconstrained `Grid`, so the value
+    /// column expanded to the natural width of the longest text. The
+    /// value text therefore ran off the right edge of the viewport
+    /// and the user saw the value truncated mid-word (e.g.
+    /// "Microsoft in Re…").
+    ///
+    /// The test pins the symptom by:
+    /// 1. Rendering the YAML table in a deliberately narrow 320px
+    ///    viewport so a long value cannot fit on a single line.
+    /// 2. Locating the `Shape::Text` that carries the long summary
+    ///    text (uniquely identified by its leading "Heise Invoice"
+    ///    substring).
+    /// 3. Asserting the underlying `Galley` has more than one row
+    ///    (the text wrapped) and that the rendered rect's width fits
+    ///    within the available content area (no horizontal overflow).
+    #[test]
+    fn test_render_yaml_table_wraps_long_values_within_viewport() {
+        use crate::ui::test_helpers::text::extract_text;
+
+        let ctx = egui::Context::default();
+        let viewport_width: f32 = 320.0;
+        let raw = egui::RawInput {
+            screen_rect: Some(egui::Rect::from_min_size(
+                egui::Pos2::ZERO,
+                egui::vec2(viewport_width, 800.0),
+            )),
+            ..egui::RawInput::default()
+        };
+        // The exact string the user reported in the screenshot.
+        let long_summary = "January 2005 invoice from Heise Zeitschriften Verlag for \
+            Microsoft half-year archive CD-ROMs, shipped tax-free to Martin Kühne at \
+            Microsoft in Redmond, WA, USA, for archive and product-evaluation purposes \
+            under Microsoft product license terms.";
+        let yaml_str = format!(
+            "title: Heise Invoice for Microsoft Product — Tax-Free Export Delivery\n\
+             summary: \"{long_summary}\"\n\
+             tags: [invoice, receipt, technology, documents]\n\
+             header-date: 2026-07-22T19:32:47Z\n"
+        );
+        let yaml: serde_yaml::Value = serde_yaml::from_str(&yaml_str).unwrap();
+
+        let output = ctx.run_ui(raw, |ui| {
+            egui::CentralPanel::default().show(ui, |ui| {
+                render_yaml_table(ui, &yaml);
+            });
+        });
+
+        // Sanity: the long value must actually have been rendered.
+        let texts = extract_text(&output.shapes);
+        let needle = "Heise Zeitschriften Verlag";
+        assert!(
+            texts.iter().any(|t| t.contains(needle)),
+            "expected the long summary to be rendered; got {} text shape(s)",
+            texts.len()
+        );
+
+        // Locate the `Shape::Text` whose galley carries the long
+        // summary (matched by an unambiguous substring that cannot
+        // appear in any other YAML key in the fixture).
+        let summary_shape = output.shapes.iter().find_map(|cs| match &cs.shape {
+            egui::Shape::Text(t) if t.galley.text().contains(needle) => Some(t),
+            _ => None,
+        });
+        let shape = summary_shape.expect("expected a Text shape for the long summary");
+        let galley = &shape.galley;
+        let rendered_width = galley.rect.width();
+
+        // 1. The long value must wrap: more than one row in the galley.
+        assert!(
+            galley.rows.len() > 1,
+            "expected the long summary to word-wrap; got galley with {} row(s) and rect width={:.1}px (viewport={viewport_width:.0}px)",
+            galley.rows.len(),
+            rendered_width,
+        );
+
+        // 2. The wrapped text must fit inside the viewport — the
+        //    rect width should never exceed the viewport. Use a small
+        //    tolerance for the CentralPanel's outer margins.
+        let max_allowed = viewport_width;
+        assert!(
+            rendered_width <= max_allowed + 1.0,
+            "expected wrapped text width <= {max_allowed:.0}px; got {rendered_width:.1}px \
+             (the value is overflowing the panel — the horizontal ScrollArea is clipping it)",
+        );
     }
 
     #[test]
