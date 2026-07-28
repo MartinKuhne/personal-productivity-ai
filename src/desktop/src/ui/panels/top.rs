@@ -57,6 +57,23 @@ pub fn compute_next_selected_file(
     Some(selected.clone())
 }
 
+/// Purpose: Applies the side effect of clicking the batch-processing
+/// button in the top toolbar.
+/// Inputs: app (the application state)
+/// Outputs: ()
+/// Purity: Impure (mutates `app.dialogs.batch_dialog_open`).
+/// Preconditions: None.
+/// Postconditions: `app.dialogs.batch_dialog_open` is `true` after
+/// the call. The flag is sticky; the batch dialog itself resets the
+/// flag to `false` when it closes (`ui/app.rs:749`).
+///
+/// The button click in `show_top_panel` calls this function. It is
+/// extracted so the side effect can be unit-tested without driving
+/// the egui harness.
+pub fn apply_batch_button_click(app: &mut FastMdApp) {
+    app.dialogs_mut().batch_dialog_open = true;
+}
+
 pub fn show_top_panel(app: &mut FastMdApp, parent_ui: &mut egui::Ui) {
     // egui 0.35 unified `TopBottomPanel` into `Panel`.
     Panel::top("top_panel").show(parent_ui, |ui| {
@@ -85,7 +102,7 @@ pub fn show_top_panel(app: &mut FastMdApp, parent_ui: &mut egui::Ui) {
             ui.separator();
 
             if ui.button(crate::ui::strings::BATCH_BUTTON).clicked() {
-                app.dialogs_mut().batch_dialog_open = true;
+                apply_batch_button_click(app);
             }
             ui.separator();
 
@@ -160,6 +177,21 @@ pub fn show_top_panel(app: &mut FastMdApp, parent_ui: &mut egui::Ui) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Tier 1 test for the batch button click effect. The click sets
+    /// `app.dialogs.batch_dialog_open` to `true`; the dialog itself
+    /// resets the flag to `false` when it closes. We verify the
+    /// effect without driving the egui harness.
+    #[test]
+    fn test_apply_batch_button_click_sets_dialog_open() {
+        let mut app = create_test_app();
+        assert!(!app.dialogs.batch_dialog_open, "dialog must start closed");
+        apply_batch_button_click(&mut app);
+        assert!(
+            app.dialogs.batch_dialog_open,
+            "batch button click must open the batch dialog"
+        );
+    }
 
     #[test]
     fn test_build_indexing_status_text_finished() {

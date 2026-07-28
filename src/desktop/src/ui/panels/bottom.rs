@@ -69,6 +69,61 @@ pub fn format_models_list(
     output
 }
 
+/// Purpose: Applies the side effect of pressing Enter in the
+/// command input (or clicking an equivalent submit trigger).
+/// Inputs: app (the application state)
+/// Outputs: ()
+/// Purity: Impure (mutates `app.agent`, `app.config`,
+/// `app.selection`).
+/// Preconditions: `app.agent().command_input` contains the user's
+/// prompt. The `command_input` is consumed and cleared as part of
+/// the call.
+/// Postconditions: Dispatches based on `parse_command_intent`:
+///   * `ShowModels` — sets status to "Done", response to the
+///     formatted model list, and show_results to `true`.
+///   * `ShowDeprecatedModelMessage` — sets status to "Error" and
+///     response to the deprecation message.
+///   * `RunAgent(agent_prompt)` — starts an agent session with
+///     the prompt and the current selection context, and sets
+///     show_results to `true`.
+///   * `Empty` — no-op.
+///
+/// The Enter-key handler and the Quick-Tasks format menu item in
+/// `show_bottom_panel` both ultimately call this function (the
+/// format menu pre-loads `command_input` with
+/// `generate_format_prompt(...)` first). It is extracted so the
+/// dispatch can be unit-tested without driving the egui harness.
+pub fn apply_send_click(app: &mut FastMdApp) {
+    let prompt = app.agent_mut().command_input.trim_end().to_string();
+    app.agent_mut().command_input.clear();
+
+    match parse_command_intent(&prompt) {
+        CommandIntent::ShowModels => {
+            app.agent_mut().set_status("Done".to_string());
+            let models_response = format_models_list(&app.config.models);
+            app.agent_mut().set_response(models_response);
+            app.agent_mut().set_show_results(true);
+        }
+        CommandIntent::ShowDeprecatedModelMessage => {
+            app.agent_mut().set_status("Error".to_string());
+            app.agent_mut()
+                .set_response(crate::ui::strings::DEPRECATED_MODEL_MESSAGE.to_string());
+            app.agent_mut().set_show_results(true);
+        }
+        CommandIntent::RunAgent(agent_prompt) => {
+            let tx = app.tx.clone();
+            let file = app.selection().selected_file().cloned();
+            let dir = app.selection().selected_dir().cloned();
+            let files = app.selection().selected_files().clone();
+            let bus = app.file_event_bus.clone();
+            app.agent_mut()
+                .start_session(tx, agent_prompt, file, dir, files, bus);
+            app.agent_mut().set_show_results(true);
+        }
+        CommandIntent::Empty => {}
+    }
+}
+
 pub fn show_bottom_panel(app: &mut FastMdApp, parent_ui: &mut egui::Ui) {
     // egui 0.35 unified `TopBottomPanel`/`SidePanel` into `Panel`,
     // and panels now allocate within a parent `&mut Ui` (using
@@ -132,35 +187,7 @@ pub fn show_bottom_panel(app: &mut FastMdApp, parent_ui: &mut egui::Ui) {
                 });
 
                 if submit {
-                    let prompt = app.agent_mut().command_input.trim_end().to_string();
-                    app.agent_mut().command_input.clear();
-
-                    match parse_command_intent(&prompt) {
-                        CommandIntent::ShowModels => {
-                            app.agent_mut().set_status("Done".to_string());
-                            let models_response = format_models_list(&app.config.models);
-                            app.agent_mut().set_response(models_response);
-                            app.agent_mut().set_show_results(true);
-                        }
-                        CommandIntent::ShowDeprecatedModelMessage => {
-                            app.agent_mut().set_status("Error".to_string());
-                            app.agent_mut().set_response(
-                                crate::ui::strings::DEPRECATED_MODEL_MESSAGE.to_string(),
-                            );
-                            app.agent_mut().set_show_results(true);
-                        }
-                        CommandIntent::RunAgent(agent_prompt) => {
-                            let tx = app.tx.clone();
-                            let file = app.selection().selected_file().cloned();
-                            let dir = app.selection().selected_dir().cloned();
-                            let files = app.selection().selected_files().clone();
-                            let bus = app.file_event_bus.clone();
-                            app.agent_mut()
-                                .start_session(tx, agent_prompt, file, dir, files, bus);
-                            app.agent_mut().set_show_results(true);
-                        }
-                        CommandIntent::Empty => {}
-                    }
+                    apply_send_click(app);
                 }
             });
         });
@@ -172,6 +199,90 @@ mod tests {
     use crate::config::{ContentLibrary, LlmConfig};
     use std::collections::HashMap;
     use std::path::PathBuf;
+
+    /// Tier 1 test for the `apply_send_click` effect: a bare
+    /// `/models` prompt dispatches to `CommandIntent::ShowModels`,
+    /// which sets the agent status, response, and show_results
+    /// flag. We verify the effect without driving the egui
+    /// harness.
+    #[test]
+    fn test_apply_send_click_show_models_dispatch() {
+        let mut app = create_test_app();
+        // Populate at least one model so `format_models_list` is
+        // non-empty and the test can assert the response contains
+        // the model name.
+        app.config.models.insert(
+            "test-model".to_string(),
+            LlmConfig {
+                api_key: String::new(),
+                api_url: String::new(),
+                model: "test-model".to_string(),
+                cost: None,
+                use_case: Vec::new(),
+            },
+        );
+        app.agent.command_input = "/models".to_string();
+        assert!(!app.agent.show_results(), "show_results must start false");
+
+        apply_send_click(&mut app);
+
+        assert_eq!(app.agent.state().status, "Done");
+        assert!(
+            app.agent.show_results(),
+            "ShowModels dispatch must set show_results"
+        );
+        assert!(
+            app.agent.state().response.contains("test-model"),
+            "ShowModels dispatch must put the model list into the response, got: {}",
+            app.agent.state().response
+        );
+        assert!(
+            app.agent.command_input.is_empty(),
+            "command_input must be cleared after dispatch"
+        );
+    }
+
+    /// Tier 1 test: an empty prompt produces `CommandIntent::Empty`
+    /// and `apply_send_click` is a no-op (no status change, no
+    /// show_results toggle, command_input is still cleared).
+    #[test]
+    fn test_apply_send_click_empty_prompt_is_noop() {
+        let mut app = create_test_app();
+        app.agent.command_input = "   ".to_string();
+
+        apply_send_click(&mut app);
+
+        assert!(
+            !app.agent.show_results(),
+            "Empty intent must not toggle show_results"
+        );
+        assert!(
+            app.agent.command_input.is_empty(),
+            "command_input is still cleared (the .clear() runs before the match)"
+        );
+    }
+
+    /// Tier 1 test: an unknown `/foo` style command produces
+    /// `CommandIntent::RunAgent("/foo")` and starts an agent
+    /// session. We don't verify the full session state (that
+    /// requires the background LLM machinery) — just that
+    /// show_results is toggled and the command_input is cleared.
+    #[test]
+    fn test_apply_send_click_run_agent_dispatches_with_prompt() {
+        let mut app = create_test_app();
+        app.agent.command_input = "hello world".to_string();
+
+        apply_send_click(&mut app);
+
+        assert!(
+            app.agent.show_results(),
+            "RunAgent dispatch must set show_results"
+        );
+        assert!(
+            app.agent.command_input.is_empty(),
+            "command_input must be cleared after dispatch"
+        );
+    }
 
     #[test]
     fn test_compute_prompt_prefix_no_dir() {

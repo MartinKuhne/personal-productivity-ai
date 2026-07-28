@@ -53,6 +53,24 @@ pub fn calculate_font_size(level: usize) -> f32 {
     13.0 - (clamp_level(level) as f32 * 0.5)
 }
 
+/// Purpose: Applies the side effect of clicking a TOC row in the
+/// right panel.
+/// Inputs: app (the application state), entry_id (the
+/// `egui::Id` of the clicked TOC entry)
+/// Outputs: ()
+/// Purity: Impure (mutates `app.tab_manager.scroll_to_header_id`).
+/// Preconditions: None.
+/// Postconditions: `app.tab_manager.scroll_to_header_id == Some(entry_id)`
+/// after the call. The center panel reads this field on the next
+/// frame and scrolls the markdown to the heading with that id.
+///
+/// The TOC row click in `show_right_panel` calls this function. It
+/// is extracted so the side effect can be unit-tested without
+/// driving the egui harness.
+pub fn apply_toc_row_click(app: &mut FastMdApp, entry_id: egui::Id) {
+    app.tab_manager.scroll_to_header_id = Some(entry_id);
+}
+
 pub fn show_right_panel(app: &mut FastMdApp, parent_ui: &mut egui::Ui) {
     // Compute visibility once, outside the panel closure, so the
     // same value is used in every layout pass of this frame.
@@ -141,7 +159,7 @@ pub fn show_right_panel(app: &mut FastMdApp, parent_ui: &mut egui::Ui) {
                                 )
                                 .truncate();
                                 if ui.add(label).clicked() {
-                                    app.tab_manager.scroll_to_header_id = Some(entry.id);
+                                    apply_toc_row_click(app, entry.id);
                                 }
                             });
                         });
@@ -175,6 +193,42 @@ mod tests {
         assert_eq!(calculate_indent(7), 54.0);
         assert_eq!(calculate_indent(99), 54.0);
         assert!(calculate_indent(usize::MAX) > 0.0);
+    }
+
+    /// Tier 1 test for the TOC row click effect. The click sets
+    /// `app.tab_manager.scroll_to_header_id` to `Some(entry_id)`;
+    /// the center panel reads this on the next frame and scrolls
+    /// the markdown to the heading with that id. We verify the
+    /// effect without driving the egui harness.
+    #[test]
+    fn test_apply_toc_row_click_sets_scroll_to_header_id() {
+        let mut app = create_test_app();
+        let id = egui::Id::new("intro");
+        assert!(
+            app.tab_manager.scroll_to_header_id.is_none(),
+            "scroll_to_header_id must start as None"
+        );
+        apply_toc_row_click(&mut app, id);
+        assert_eq!(
+            app.tab_manager.scroll_to_header_id,
+            Some(id),
+            "TOC row click must set scroll_to_header_id to the clicked entry's id"
+        );
+    }
+
+    /// Tier 1 test: clicking a different TOC row overwrites the
+    /// previous `scroll_to_header_id`. The center panel's
+    /// scroll-to-id consumption is the only place that clears the
+    /// field between frames; a back-to-back click without a frame
+    /// in between should leave the latest id.
+    #[test]
+    fn test_apply_toc_row_click_overwrites_previous_scroll_target() {
+        let mut app = create_test_app();
+        let id_a = egui::Id::new("a");
+        let id_b = egui::Id::new("b");
+        apply_toc_row_click(&mut app, id_a);
+        apply_toc_row_click(&mut app, id_b);
+        assert_eq!(app.tab_manager.scroll_to_header_id, Some(id_b));
     }
 
     #[test]

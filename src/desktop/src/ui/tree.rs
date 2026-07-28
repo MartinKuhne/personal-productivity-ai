@@ -265,6 +265,80 @@ pub fn flatten_tree(
     }
 }
 
+/// Purpose: Applies the side effect of clicking a file row in the
+/// left panel's tree view.
+/// Inputs: ctx (the `TreeNodeContext`; its `selected_file`,
+/// `selected_files`, and `tabs` are mutated), row (the clicked
+/// `FlatRow`)
+/// Outputs: ()
+/// Purity: Impure (mutates the selection and tab state).
+/// Preconditions: `row.is_dir` should be `false` (caller filters
+/// files vs directories). Modifiers are taken from `ctx.modifiers()`
+/// at the moment of the call.
+/// Postconditions:
+///   * With any of shift/ctrl/command held: toggles the row's
+///     inclusion in `ctx.selected_files()`. If it was already in
+///     the set, it is removed and `ctx.selected_file()` is cleared
+///     if it pointed at this path. If it was not, it is added and
+///     `ctx.selected_file()` is set to it.
+///   * With no modifier: replaces the selection with this single
+///     file and pushes it onto `ctx.tabs()` if not already open.
+///
+/// Takes `&mut TreeNodeContext` rather than three separate `&mut`
+/// fields because Rust's borrow checker treats three calls to
+/// `ctx.selected_file()` / `ctx.selected_files()` / `ctx.tabs()` as
+/// overlapping re-borrows of `*ctx` (since the accessors all return
+/// `&mut` to disjoint sub-fields of the same struct, but the
+/// compiler does not see through the accessor boundary). The
+/// function extracts the three sub-references via split-borrow
+/// inside its own body.
+///
+/// The file-row click in `render_flat_row` calls this function.
+/// It is extracted so the modifier logic can be unit-tested
+/// without driving the egui harness. The directory-row click
+/// path is unchanged — it has a different effect (toggle
+/// expansion + set `selected_dir`).
+pub fn apply_file_row_click(ctx: &mut TreeNodeContext<'_>, row: &FlatRow) {
+    let modifiers = ctx.modifiers();
+    // Use split borrows through the struct's sub-fields rather than
+    // calling the accessor methods three times: the accessors are
+    // `&mut self` methods that return `&mut` to disjoint sub-fields,
+    // but the borrow checker cannot see through the method body to
+    // prove disjointness, so it treats the three calls as overlapping
+    // re-borrows of `*ctx`. Field access through `ctx.selection.*`
+    // lets the compiler split-borrow the inner struct directly.
+    let TreeNodeContext {
+        file_ops: _,
+        dir_ops: _,
+        selection:
+            SelectionContext {
+                selected_file,
+                selected_files,
+                expanded_dirs: _,
+                tabs,
+            },
+        app: _,
+    } = ctx;
+    if modifiers.shift || modifiers.ctrl || modifiers.command {
+        if selected_files.contains(&row.path) {
+            selected_files.remove(&row.path);
+            if selected_file.as_ref() == Some(&row.path) {
+                **selected_file = None;
+            }
+        } else {
+            selected_files.insert(row.path.clone());
+            **selected_file = Some(row.path.clone());
+        }
+    } else {
+        selected_files.clear();
+        selected_files.insert(row.path.clone());
+        **selected_file = Some(row.path.clone());
+        if !tabs.contains(&row.path) {
+            tabs.push(row.path.clone());
+        }
+    }
+}
+
 /// Render a single flat row with the same interaction logic as `draw_tree_node`
 /// but without recursion.
 pub fn render_flat_row(ui: &mut egui::Ui, row: &FlatRow, ctx: &mut TreeNodeContext<'_>) {
@@ -383,24 +457,7 @@ pub fn render_flat_row(ui: &mut egui::Ui, row: &FlatRow, ctx: &mut TreeNodeConte
                 let response = ui.selectable_label(is_selected, label);
 
                 if response.clicked() {
-                    if ctx.modifiers().shift || ctx.modifiers().ctrl || ctx.modifiers().command {
-                        if ctx.selected_files().contains(&row.path) {
-                            ctx.selected_files().remove(&row.path);
-                            if ctx.selected_file().as_ref() == Some(&row.path) {
-                                *ctx.selected_file() = None;
-                            }
-                        } else {
-                            ctx.selected_files().insert(row.path.clone());
-                            *ctx.selected_file() = Some(row.path.clone());
-                        }
-                    } else {
-                        ctx.selected_files().clear();
-                        ctx.selected_files().insert(row.path.clone());
-                        *ctx.selected_file() = Some(row.path.clone());
-                        if !ctx.tabs().contains(&row.path) {
-                            ctx.tabs().push(row.path.clone());
-                        }
-                    }
+                    apply_file_row_click(ctx, row);
                 }
 
                 if response.double_clicked() {
@@ -785,6 +842,257 @@ mod tests {
     use super::*;
     use std::collections::HashSet;
     use std::path::PathBuf;
+
+    /// Tier 1 test: a file row click with no modifier replaces
+    /// the single selection with the clicked file and pushes it
+    /// onto `tabs` if not already there.
+    #[test]
+    fn test_apply_file_row_click_no_modifier_replaces_selection_and_opens_tab() {
+        let mut tabs: Vec<PathBuf> = vec![PathBuf::from("a.md")];
+        let mut selected_file = Some(PathBuf::from("a.md"));
+        let mut selected_files = HashSet::new();
+        selected_files.insert(PathBuf::from("a.md"));
+        let mut expanded_dirs = HashSet::new();
+        let row = FlatRow {
+            depth: 0,
+            name: "b.md".to_string(),
+            path: PathBuf::from("b.md"),
+            is_dir: false,
+            is_expanded: false,
+        };
+        let mut ctx = TreeNodeContext {
+            file_ops: FileOpsContext {
+                file_to_move: &mut None,
+                move_dialog_open: &mut false,
+                file_to_rename: &mut None,
+                rename_dialog_open: &mut false,
+                rename_new_name: &mut String::new(),
+            },
+            dir_ops: DirOpsContext {
+                selected_dir: &mut None,
+                create_dir_dialog_open: &mut false,
+                create_dir_parent: &mut None,
+            },
+            selection: SelectionContext {
+                selected_file: &mut selected_file,
+                selected_files: &mut selected_files,
+                expanded_dirs: &mut expanded_dirs,
+                tabs: &mut tabs,
+            },
+            app: AppIntegrationContext {
+                layout: &mut PanelLayout::default(),
+                submit_prompt: &mut None,
+                content_libraries: &[],
+                open_editor: &mut None,
+                modifiers: egui::Modifiers::default(),
+                inline_editor_enabled: false,
+                bg_tx: &None,
+                file_event_producer: None,
+            },
+        };
+
+        apply_file_row_click(&mut ctx, &row);
+
+        assert_eq!(selected_file, Some(PathBuf::from("b.md")));
+        assert!(selected_files.contains(&PathBuf::from("b.md")));
+        assert_eq!(
+            selected_files.len(),
+            1,
+            "previous selection must be cleared"
+        );
+        assert_eq!(
+            tabs,
+            vec![PathBuf::from("a.md"), PathBuf::from("b.md")],
+            "clicked file must be pushed onto tabs"
+        );
+    }
+
+    /// Tier 1 test: a file row click with shift held toggles the
+    /// row's membership in `selected_files`. Toggling an
+    /// already-selected file removes it and clears `selected_file`
+    /// if it pointed at that file.
+    #[test]
+    fn test_apply_file_row_click_shift_toggles_off() {
+        let mut tabs: Vec<PathBuf> = vec![];
+        let mut selected_file = Some(PathBuf::from("b.md"));
+        let mut selected_files = HashSet::new();
+        selected_files.insert(PathBuf::from("b.md"));
+        let mut expanded_dirs = HashSet::new();
+        let row = FlatRow {
+            depth: 0,
+            name: "b.md".to_string(),
+            path: PathBuf::from("b.md"),
+            is_dir: false,
+            is_expanded: false,
+        };
+        let mut ctx = TreeNodeContext {
+            file_ops: FileOpsContext {
+                file_to_move: &mut None,
+                move_dialog_open: &mut false,
+                file_to_rename: &mut None,
+                rename_dialog_open: &mut false,
+                rename_new_name: &mut String::new(),
+            },
+            dir_ops: DirOpsContext {
+                selected_dir: &mut None,
+                create_dir_dialog_open: &mut false,
+                create_dir_parent: &mut None,
+            },
+            selection: SelectionContext {
+                selected_file: &mut selected_file,
+                selected_files: &mut selected_files,
+                expanded_dirs: &mut expanded_dirs,
+                tabs: &mut tabs,
+            },
+            app: AppIntegrationContext {
+                layout: &mut PanelLayout::default(),
+                submit_prompt: &mut None,
+                content_libraries: &[],
+                open_editor: &mut None,
+                modifiers: egui::Modifiers {
+                    shift: true,
+                    ..Default::default()
+                },
+                inline_editor_enabled: false,
+                bg_tx: &None,
+                file_event_producer: None,
+            },
+        };
+
+        apply_file_row_click(&mut ctx, &row);
+
+        assert!(
+            !selected_files.contains(&PathBuf::from("b.md")),
+            "shift-click on a selected file must remove it from selected_files"
+        );
+        assert!(
+            selected_file.is_none(),
+            "selected_file must be cleared when the toggled-off file was the selected one"
+        );
+    }
+
+    /// Tier 1 test: shift-clicking a file that is NOT in
+    /// `selected_files` adds it to the set and makes it the
+    /// `selected_file` without touching `tabs` (multi-select does
+    /// not auto-open tabs).
+    #[test]
+    fn test_apply_file_row_click_shift_adds_to_selection_without_opening_tab() {
+        let mut tabs: Vec<PathBuf> = vec![];
+        let mut selected_file = Some(PathBuf::from("a.md"));
+        let mut selected_files = HashSet::new();
+        selected_files.insert(PathBuf::from("a.md"));
+        let mut expanded_dirs = HashSet::new();
+        let row = FlatRow {
+            depth: 0,
+            name: "b.md".to_string(),
+            path: PathBuf::from("b.md"),
+            is_dir: false,
+            is_expanded: false,
+        };
+        let mut ctx = TreeNodeContext {
+            file_ops: FileOpsContext {
+                file_to_move: &mut None,
+                move_dialog_open: &mut false,
+                file_to_rename: &mut None,
+                rename_dialog_open: &mut false,
+                rename_new_name: &mut String::new(),
+            },
+            dir_ops: DirOpsContext {
+                selected_dir: &mut None,
+                create_dir_dialog_open: &mut false,
+                create_dir_parent: &mut None,
+            },
+            selection: SelectionContext {
+                selected_file: &mut selected_file,
+                selected_files: &mut selected_files,
+                expanded_dirs: &mut expanded_dirs,
+                tabs: &mut tabs,
+            },
+            app: AppIntegrationContext {
+                layout: &mut PanelLayout::default(),
+                submit_prompt: &mut None,
+                content_libraries: &[],
+                open_editor: &mut None,
+                modifiers: egui::Modifiers {
+                    shift: true,
+                    ..Default::default()
+                },
+                inline_editor_enabled: false,
+                bg_tx: &None,
+                file_event_producer: None,
+            },
+        };
+
+        apply_file_row_click(&mut ctx, &row);
+
+        assert!(selected_files.contains(&PathBuf::from("b.md")));
+        assert_eq!(
+            selected_file,
+            Some(PathBuf::from("b.md")),
+            "shift-click must set selected_file to the clicked file"
+        );
+        assert!(
+            tabs.is_empty(),
+            "shift-click must NOT auto-open the clicked file as a tab (multi-select mode)"
+        );
+    }
+
+    /// Tier 1 test: clicking a file that is already open in a tab
+    /// does NOT push a duplicate. Tab list is the unique set of
+    /// open paths.
+    #[test]
+    fn test_apply_file_row_click_no_duplicate_tab() {
+        let mut tabs: Vec<PathBuf> = vec![PathBuf::from("a.md")];
+        let mut selected_file = Some(PathBuf::from("a.md"));
+        let mut selected_files = HashSet::new();
+        selected_files.insert(PathBuf::from("a.md"));
+        let mut expanded_dirs = HashSet::new();
+        let row = FlatRow {
+            depth: 0,
+            name: "a.md".to_string(),
+            path: PathBuf::from("a.md"),
+            is_dir: false,
+            is_expanded: false,
+        };
+        let mut ctx = TreeNodeContext {
+            file_ops: FileOpsContext {
+                file_to_move: &mut None,
+                move_dialog_open: &mut false,
+                file_to_rename: &mut None,
+                rename_dialog_open: &mut false,
+                rename_new_name: &mut String::new(),
+            },
+            dir_ops: DirOpsContext {
+                selected_dir: &mut None,
+                create_dir_dialog_open: &mut false,
+                create_dir_parent: &mut None,
+            },
+            selection: SelectionContext {
+                selected_file: &mut selected_file,
+                selected_files: &mut selected_files,
+                expanded_dirs: &mut expanded_dirs,
+                tabs: &mut tabs,
+            },
+            app: AppIntegrationContext {
+                layout: &mut PanelLayout::default(),
+                submit_prompt: &mut None,
+                content_libraries: &[],
+                open_editor: &mut None,
+                modifiers: egui::Modifiers::default(),
+                inline_editor_enabled: false,
+                bg_tx: &None,
+                file_event_producer: None,
+            },
+        };
+
+        apply_file_row_click(&mut ctx, &row);
+
+        assert_eq!(
+            tabs,
+            vec![PathBuf::from("a.md")],
+            "clicking an already-open tab must not push a duplicate"
+        );
+    }
 
     /// Regression: the rename dialog must pre-fill with just the file stem
     /// (no extension). The modal reattaches the original extension on

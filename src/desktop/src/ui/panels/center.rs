@@ -71,6 +71,71 @@ pub fn apply_tab_action(
     }
 }
 
+/// Purpose: Applies the side effect of clicking the tab close `×`
+/// button in the center panel.
+/// Inputs: app (the application state), i (the index of the tab to
+/// close, as it appeared in the tab strip on the frame the button
+/// was clicked)
+/// Outputs: ()
+/// Purity: Impure (mutates `app.tab_manager.tabs` and
+/// `app.selection.selected_file`).
+/// Preconditions: None — `i` is bounds-checked inside
+/// `apply_tab_action`; an out-of-range index is a silent no-op.
+/// Postconditions: If `i` was in range, the tab at that index is
+/// removed. If the closed tab was the selected file, the selection
+/// falls back to the new last tab (or `None` if no tabs remain).
+///
+/// The `×` button click in `render_tabs_and_content` calls this
+/// function. It is extracted so the side effect can be unit-tested
+/// without driving the egui harness. Existing unit tests for
+/// `apply_tab_action` cover the underlying logic; this wrapper just
+/// adapts the `&mut FastMdApp` API to the field-level `apply_tab_action`
+/// API.
+pub fn apply_tab_close_click(app: &mut FastMdApp, i: usize) {
+    apply_tab_action(
+        &mut app.tab_manager.tabs,
+        app.selection.selected_file_mut(),
+        TabAction::Close(i),
+    );
+}
+
+/// Purpose: Applies the side effect of clicking the context menu's
+/// "Close Other Tabs" item.
+/// Inputs: app (the application state), i (the index of the tab to
+/// keep, as it appeared in the tab strip on the frame the menu
+/// item was clicked)
+/// Outputs: ()
+/// Purity: Impure (mutates `app.tab_manager.tabs` and
+/// `app.selection.selected_file`).
+/// Preconditions: None — `i` is bounds-checked inside
+/// `apply_tab_action`.
+/// Postconditions: All tabs except the one at index `i` are
+/// removed. The kept tab is `app.tab_manager.tabs[0]` after the
+/// call. `selected_file` is updated if it was a closed tab.
+pub fn apply_tab_close_others_click(app: &mut FastMdApp, i: usize) {
+    apply_tab_action(
+        &mut app.tab_manager.tabs,
+        app.selection.selected_file_mut(),
+        TabAction::CloseOthers(i),
+    );
+}
+
+/// Purpose: Applies the side effect of clicking the context menu's
+/// "Close All Tabs" item.
+/// Inputs: app (the application state)
+/// Outputs: ()
+/// Purity: Impure (mutates `app.tab_manager.tabs` and
+/// `app.selection.selected_file`).
+/// Preconditions: None.
+/// Postconditions: All tabs are removed. `selected_file` is `None`.
+pub fn apply_tab_close_all_click(app: &mut FastMdApp) {
+    apply_tab_action(
+        &mut app.tab_manager.tabs,
+        app.selection.selected_file_mut(),
+        TabAction::CloseAll,
+    );
+}
+
 /// Purpose: Renders the agent session view in the center panel.
 /// Inputs: `ui` - Egui UI context, `app` - FastMdApp state.
 /// Outputs: None.
@@ -162,7 +227,6 @@ fn render_agent_session(ui: &mut egui::Ui, app: &mut FastMdApp) {
 /// Postconditions: Rendered tabs and file content.
 fn render_tabs_and_content(ui: &mut egui::Ui, app: &mut FastMdApp) {
     ui.horizontal(|ui| {
-        let mut tab_actions: Vec<TabAction> = Vec::new();
         let tabs_snapshot: Vec<PathBuf> = app.tab_manager.tabs.clone();
 
         for (i, tab_path) in tabs_snapshot.iter().enumerate() {
@@ -180,7 +244,7 @@ fn render_tabs_and_content(ui: &mut egui::Ui, app: &mut FastMdApp) {
                 *app.selection_mut().selected_file_mut() = Some(tab_path.clone());
             }
             if response.inner.middle_clicked() {
-                tab_actions.push(TabAction::Close(i));
+                apply_tab_close_click(app, i);
             }
             response.inner.context_menu(|ui| {
                 if ui.button(crate::ui::strings::EDIT_BUTTON).clicked() {
@@ -195,15 +259,15 @@ fn render_tabs_and_content(ui: &mut egui::Ui, app: &mut FastMdApp) {
                 }
                 ui.separator();
                 if ui.button(crate::ui::strings::CLOSE_TAB_MENU).clicked() {
-                    tab_actions.push(TabAction::Close(i));
+                    apply_tab_close_click(app, i);
                     ui.close();
                 }
                 if ui.button(crate::ui::strings::CLOSE_OTHERS_MENU).clicked() {
-                    tab_actions.push(TabAction::CloseOthers(i));
+                    apply_tab_close_others_click(app, i);
                     ui.close();
                 }
                 if ui.button(crate::ui::strings::CLOSE_ALL_TABS_MENU).clicked() {
-                    tab_actions.push(TabAction::CloseAll);
+                    apply_tab_close_all_click(app);
                     ui.close();
                 }
                 ui.separator();
@@ -244,17 +308,9 @@ fn render_tabs_and_content(ui: &mut egui::Ui, app: &mut FastMdApp) {
                 .inner
                 .clicked()
             {
-                tab_actions.push(TabAction::Close(i));
+                apply_tab_close_click(app, i);
             }
             ui.separator();
-        }
-
-        for action in tab_actions {
-            apply_tab_action(
-                &mut app.tab_manager.tabs,
-                app.selection.selected_file_mut(),
-                action,
-            );
         }
     });
     ui.separator();
@@ -354,6 +410,90 @@ mod tests {
 
     fn create_test_app() -> FastMdApp {
         FastMdApp::empty_state(crate::config::AppConfig::default())
+    }
+
+    /// Tier 1 test for the `×` tab close button click effect. The
+    /// click removes the tab at `i` from `app.tab_manager.tabs`.
+    /// We verify the effect without driving the egui harness.
+    #[test]
+    fn test_apply_tab_close_click_removes_tab_at_index() {
+        let mut app = create_test_app();
+        app.tab_manager.tabs = vec![
+            PathBuf::from("a.md"),
+            PathBuf::from("b.md"),
+            PathBuf::from("c.md"),
+        ];
+        *app.selection.selected_file_mut() = Some(PathBuf::from("b.md"));
+
+        apply_tab_close_click(&mut app, 1);
+
+        assert_eq!(
+            app.tab_manager.tabs,
+            vec![PathBuf::from("a.md"), PathBuf::from("c.md")],
+            "tab at i=1 must be removed"
+        );
+        // `b.md` was the selected file and is now closed, so
+        // selection falls back to the last remaining tab.
+        assert_eq!(
+            app.selection.selected_file(),
+            Some(&PathBuf::from("c.md")),
+            "selected_file must fall back to the last tab after the selected tab is closed"
+        );
+    }
+
+    /// Tier 1 test: out-of-range index on the close button is a
+    /// silent no-op. Matches the behavior of the underlying
+    /// `apply_tab_action` (`ui/panels/center.rs:46`).
+    #[test]
+    fn test_apply_tab_close_click_out_of_range_is_noop() {
+        let mut app = create_test_app();
+        app.tab_manager.tabs = vec![PathBuf::from("a.md")];
+        *app.selection.selected_file_mut() = Some(PathBuf::from("a.md"));
+
+        apply_tab_close_click(&mut app, 5);
+
+        assert_eq!(app.tab_manager.tabs, vec![PathBuf::from("a.md")]);
+        assert_eq!(app.selection.selected_file(), Some(&PathBuf::from("a.md")));
+    }
+
+    /// Tier 1 test for the context-menu "Close Others" item.
+    /// Verifies all tabs except the keep-index are removed, and
+    /// the kept tab is the only remaining entry.
+    #[test]
+    fn test_apply_tab_close_others_click_keeps_only_target_tab() {
+        let mut app = create_test_app();
+        app.tab_manager.tabs = vec![
+            PathBuf::from("a.md"),
+            PathBuf::from("b.md"),
+            PathBuf::from("c.md"),
+        ];
+        *app.selection.selected_file_mut() = Some(PathBuf::from("a.md"));
+
+        apply_tab_close_others_click(&mut app, 1);
+
+        assert_eq!(app.tab_manager.tabs, vec![PathBuf::from("b.md")]);
+        assert_eq!(app.selection.selected_file(), Some(&PathBuf::from("b.md")));
+    }
+
+    /// Tier 1 test for the context-menu "Close All Tabs" item.
+    /// Verifies all tabs are removed and `selected_file` is `None`.
+    #[test]
+    fn test_apply_tab_close_all_click_clears_all_tabs() {
+        let mut app = create_test_app();
+        app.tab_manager.tabs = vec![
+            PathBuf::from("a.md"),
+            PathBuf::from("b.md"),
+            PathBuf::from("c.md"),
+        ];
+        *app.selection.selected_file_mut() = Some(PathBuf::from("b.md"));
+
+        apply_tab_close_all_click(&mut app);
+
+        assert!(app.tab_manager.tabs.is_empty());
+        assert!(
+            app.selection.selected_file().is_none(),
+            "selected_file must be None when all tabs are closed"
+        );
     }
 
     #[test]
