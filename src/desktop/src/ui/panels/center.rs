@@ -193,6 +193,7 @@ fn render_agent_session(ui: &mut egui::Ui, app: &mut FastMdApp) {
             if !app.agent().state().response.is_empty() {
                 ui.heading(crate::ui::strings::AGENT_RESPONSE);
                 ui.separator();
+                let strategy = app.config.deficit_strategy();
                 let agent = app.agent_mut();
                 let response = agent.state().response.clone();
                 let mut toggles = Vec::new();
@@ -201,6 +202,7 @@ fn render_agent_session(ui: &mut egui::Ui, app: &mut FastMdApp) {
                     &response,
                     &mut agent.state_mut().scroll_to_id,
                     &mut toggles,
+                    strategy,
                 );
                 // P0-2: Apply task checkbox toggles to the response source.
                 if !toggles.is_empty() {
@@ -370,6 +372,7 @@ pub fn render_tabs_and_content_capture(
                     &app.tab_manager.current_markdown,
                     &mut app.tab_manager.scroll_to_header_id,
                     &mut app.tab_manager.pending_task_toggles,
+                    app.config.deficit_strategy(),
                 );
                 // P0-2: Apply task checkbox toggles to the markdown source.
                 if !app.tab_manager.pending_task_toggles.is_empty() {

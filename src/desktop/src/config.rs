@@ -182,6 +182,10 @@ fn default_max_tokens() -> u32 {
     32768
 }
 
+fn default_table_width_strategy() -> String {
+    "waterfill".to_string()
+}
+
 #[derive(serde::Serialize, serde::Deserialize, Clone)]
 #[serde(default)]
 pub struct AppConfig {
@@ -220,6 +224,10 @@ pub struct AppConfig {
     /// Maximum tokens for LLM responses (REQ-604c). Default: 32768.
     #[serde(default = "default_max_tokens")]
     pub max_tokens: u32,
+    /// Table width algorithm for deficit regime. Default: "proportional".
+    /// Options: "proportional" (fast, O(|S|)), "waterfill" (better G1, O(K log |S|)).
+    #[serde(default = "default_table_width_strategy")]
+    pub table_width_strategy: String,
 }
 
 impl std::fmt::Debug for AppConfig {
@@ -240,6 +248,7 @@ impl std::fmt::Debug for AppConfig {
             .field("csv_db_path", &self.csv_db_path)
             .field("feature_flags", &self.feature_flags)
             .field("max_tokens", &self.max_tokens)
+            .field("table_width_strategy", &self.table_width_strategy)
             .finish()
     }
 }
@@ -262,11 +271,19 @@ impl Default for AppConfig {
             csv_db_path: None,
             feature_flags: default_feature_flags(),
             max_tokens: default_max_tokens(),
+            table_width_strategy: default_table_width_strategy(),
         }
     }
 }
 
 impl AppConfig {
+    /// Parse `table_width_strategy` into the enum used by the FTWA algorithm.
+    /// Returns `DeficitStrategy::BreakpointWaterFill` for "waterfill",
+    /// `DeficitStrategy::ProportionalToSlack` for everything else.
+    pub fn deficit_strategy(&self) -> crate::ui::table_width::DeficitStrategy {
+        crate::ui::table_width::DeficitStrategy::from_config(&self.table_width_strategy)
+    }
+
     /// Find the best model for a given use_case (lowest cost among matches).
     pub fn model_for_use_case(&self, use_case: impl AsRef<str>) -> Option<(&String, &LlmConfig)> {
         let uc_ref = use_case.as_ref();
@@ -837,5 +854,24 @@ user_name: "TestUser"
         for h in handles {
             h.join().expect("worker thread panicked");
         }
+    }
+
+    #[test]
+    fn deficit_strategy_default_is_waterfill() {
+        let config = AppConfig::default();
+        assert_eq!(
+            config.deficit_strategy(),
+            crate::ui::table_width::DeficitStrategy::BreakpointWaterFill
+        );
+    }
+
+    #[test]
+    fn deficit_strategy_respects_config_value() {
+        let mut config = AppConfig::default();
+        config.table_width_strategy = "proportional".to_string();
+        assert_eq!(
+            config.deficit_strategy(),
+            crate::ui::table_width::DeficitStrategy::ProportionalToSlack
+        );
     }
 }

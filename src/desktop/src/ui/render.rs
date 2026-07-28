@@ -408,16 +408,21 @@ fn render_table_cell(ui: &mut egui::Ui, cell: &[InlineElem], pinned_width: Optio
 /// Grid spacing is `[10.0, 4.0]` (10 px gutters). The available content width
 /// passed to FTWA subtracts `(N - 1) * 10.0` for those gutters so the assigned
 /// widths sum to the true content rect.
-fn render_table(ui: &mut egui::Ui, table_cells: &[Vec<Vec<InlineElem>>], table_ordinal: usize) {
+fn render_table(
+    ui: &mut egui::Ui,
+    table_cells: &[Vec<Vec<InlineElem>>],
+    table_ordinal: usize,
+    strategy: crate::ui::table_width::DeficitStrategy,
+) {
     let n = table_cells.iter().map(|row| row.len()).max().unwrap_or(0);
     if n == 0 {
         return;
     }
 
-    let (max_w, min_w) = crate::ui::table_width::measure(table_cells, ui);
+    let (max_w, min_w, breakpoints) = crate::ui::table_width::measure(table_cells, ui);
     let gutter = 10.0_f32;
     let avail = (ui.available_width() - (n as f32 - 1.0) * gutter).max(0.0);
-    let decision = crate::ui::table_width::ftwa(&max_w, &min_w, avail);
+    let decision = crate::ui::table_width::ftwa(&max_w, &min_w, &breakpoints, avail, strategy);
 
     // Stable id derived from a table ordinal rather than `ui.next_auto_id()`
     // (a positional peek that shifts whenever any widget above the table
@@ -561,6 +566,7 @@ pub fn render_markdown(
     markdown_text: &str,
     scroll_to_id: &mut Option<egui::Id>,
     pending_toggles: &mut Vec<(usize, bool)>,
+    strategy: crate::ui::table_width::DeficitStrategy,
 ) {
     let events = parse_markdown_to_events(markdown_text);
     let mut table_ordinal = 0usize;
@@ -623,7 +629,7 @@ pub fn render_markdown(
                 render_heading(ui, &elems, level, scroll_to_id, heading_id);
             }
             RenderEvent::Table(cells) => {
-                render_table(ui, &cells, table_ordinal);
+                render_table(ui, &cells, table_ordinal, strategy);
                 table_ordinal += 1;
             }
             RenderEvent::Space(amount) => {
@@ -1401,6 +1407,7 @@ mod e2e_tests {
                     "# Test\n\n- [ ] Task\n\n```rust\nlet x = 1;\n```",
                     &mut scroll_id,
                     &mut Vec::new(),
+                    crate::ui::table_width::DeficitStrategy::ProportionalToSlack,
                 );
 
                 let yaml_str = "a: 1\nb: 2";
@@ -1441,7 +1448,13 @@ def foo():
         let _ = ctx.run_ui(egui::RawInput::default(), |ui| {
             egui::CentralPanel::default().show(ui, |ui| {
                 let mut scroll_id = None;
-                render_markdown(ui, md, &mut scroll_id, &mut Vec::new());
+                render_markdown(
+                    ui,
+                    md,
+                    &mut scroll_id,
+                    &mut Vec::new(),
+                    crate::ui::table_width::DeficitStrategy::ProportionalToSlack,
+                );
 
                 // Render non-mapping YAML table
                 let non_map = serde_yaml::Value::String("test".to_string());
@@ -1457,7 +1470,13 @@ def foo():
         let _ = ctx.run_ui(egui::RawInput::default(), |ui| {
             egui::CentralPanel::default().show(ui, |ui| {
                 let mut scroll_id = None;
-                render_markdown(ui, md, &mut scroll_id, &mut Vec::new());
+                render_markdown(
+                    ui,
+                    md,
+                    &mut scroll_id,
+                    &mut Vec::new(),
+                    crate::ui::table_width::DeficitStrategy::ProportionalToSlack,
+                );
             });
         });
     }
@@ -1560,7 +1579,13 @@ def foo():
         let _ = ctx.run_ui(egui::RawInput::default(), |ui| {
             egui::CentralPanel::default().show(ui, |ui| {
                 let mut scroll_id = None;
-                render_markdown(ui, md, &mut scroll_id, &mut Vec::new());
+                render_markdown(
+                    ui,
+                    md,
+                    &mut scroll_id,
+                    &mut Vec::new(),
+                    crate::ui::table_width::DeficitStrategy::ProportionalToSlack,
+                );
             });
         });
     }
@@ -1582,9 +1607,10 @@ def foo():
         assert_eq!(cells[0].len(), 6);
         let _ = ctx.run_ui(egui::RawInput::default(), |ui| {
             egui::CentralPanel::default().show(ui, |ui| {
-                let (max_w, min_w) = crate::ui::table_width::measure(&cells, ui);
+                let (max_w, min_w, breakpoints) = crate::ui::table_width::measure(&cells, ui);
                 assert_eq!(max_w.len(), 6, "6 max-content widths");
                 assert_eq!(min_w.len(), 6, "6 min-content widths");
+                assert_eq!(breakpoints.len(), 6, "6 breakpoint vectors");
                 for (i, (&mx, &mn)) in max_w.iter().zip(min_w.iter()).enumerate() {
                     assert!(mx >= mn, "col {i}: max {mx} < min {mn}");
                     assert!(mx > 0.0, "col {i}: max-content must be > 0");
@@ -1595,11 +1621,17 @@ def foo():
                 let sum_max: f32 = max_w.iter().sum();
 
                 // Test the same 6-column table at four viewports, covering
-                // the three regimes (surplus / deficit / Ã‚Â§3.6 fallback).
+                // the three regimes (surplus / deficit / §3.6 fallback).
                 for &avail in &[ui.available_width(), 800.0, 600.0, 400.0] {
                     let gutter = 10.0_f32;
                     let a = (avail - (cells[0].len() as f32 - 1.0) * gutter).max(0.0);
-                    let decision = crate::ui::table_width::ftwa(&max_w, &min_w, a);
+                    let decision = crate::ui::table_width::ftwa(
+                        &max_w,
+                        &min_w,
+                        &breakpoints,
+                        a,
+                        crate::ui::table_width::DeficitStrategy::ProportionalToSlack,
+                    );
                     assert_eq!(decision.widths.len(), 6, "avail={a}: must have 6 widths");
                     for &w in &decision.widths {
                         assert!(w > 0.0, "avail={a}: each column must have positive width");
@@ -1663,12 +1695,18 @@ def foo():
             },
             |ui| {
                 egui::CentralPanel::default().show(ui, |ui| {
-                    let (max_w, min_w) = crate::ui::table_width::measure(&cells, ui);
+                    let (max_w, min_w, breakpoints) = crate::ui::table_width::measure(&cells, ui);
                     let gutter = 10.0_f32;
                     let avail = (ui.available_width()
                         - (max_w.len() as f32 - 1.0).max(0.0) * gutter)
                         .max(0.0);
-                    let decision = crate::ui::table_width::ftwa(&max_w, &min_w, avail);
+                    let decision = crate::ui::table_width::ftwa(
+                        &max_w,
+                        &min_w,
+                        &breakpoints,
+                        avail,
+                        crate::ui::table_width::DeficitStrategy::ProportionalToSlack,
+                    );
                     // Surplus regime (viewport much wider than content).
                     assert!(!decision.needs_horizontal_scroll);
                     // Columns must be pinned at max_content, not stretched.
@@ -1695,7 +1733,13 @@ def foo():
         let _ = ctx.run_ui(egui::RawInput::default(), |ui| {
             egui::CentralPanel::default().show(ui, |ui| {
                 let mut scroll_id = None;
-                render_markdown(ui, md, &mut scroll_id, &mut Vec::new());
+                render_markdown(
+                    ui,
+                    md,
+                    &mut scroll_id,
+                    &mut Vec::new(),
+                    crate::ui::table_width::DeficitStrategy::ProportionalToSlack,
+                );
             });
         });
     }
@@ -1745,6 +1789,18 @@ def foo():
         table_cells: &[Vec<Vec<InlineElem>>],
         viewport_width: f32,
     ) -> crate::ui::table_width::ColumnWidths {
+        render_table_with_viewport_and_strategy(
+            table_cells,
+            viewport_width,
+            crate::ui::table_width::DeficitStrategy::ProportionalToSlack,
+        )
+    }
+
+    fn render_table_with_viewport_and_strategy(
+        table_cells: &[Vec<Vec<InlineElem>>],
+        viewport_width: f32,
+        strategy: crate::ui::table_width::DeficitStrategy,
+    ) -> crate::ui::table_width::ColumnWidths {
         let ctx = egui::Context::default();
         // `screen_rect` defines the window's pixel dimensions in egui 0.27.
         // Without it, the default (small) rectangle makes `ui.available_width()`
@@ -1761,17 +1817,14 @@ def foo():
         let mut captured: Option<crate::ui::table_width::ColumnWidths> = None;
         let _ = ctx.run_ui(raw, |ui| {
             egui::CentralPanel::default().show(ui, |ui| {
-                let (max_w, min_w) = crate::ui::table_width::measure(table_cells, ui);
+                let (max_w, min_w, breakpoints) = crate::ui::table_width::measure(table_cells, ui);
                 let gutter = 10.0_f32;
                 let avail =
                     (ui.available_width() - (max_w.len() as f32 - 1.0).max(0.0) * gutter).max(0.0);
-                let decision = crate::ui::table_width::ftwa(&max_w, &min_w, avail);
+                let decision =
+                    crate::ui::table_width::ftwa(&max_w, &min_w, &breakpoints, avail, strategy);
                 captured = Some(decision.clone());
-                // Render Ã¢â‚¬â€ exercises the rendering branch keyed on
-                // `needs_horizontal_scroll`. Without a visual harness, we
-                // can't assert on pixels, but a panic in `render_table`
-                // would surface here.
-                render_table(ui, table_cells, 0);
+                render_table(ui, table_cells, 0, strategy);
             });
         });
         captured.expect("ctx.run should have populated `captured`")
@@ -1931,7 +1984,12 @@ def foo():
         };
         ctx.run_ui(raw, |ui| {
             egui::CentralPanel::default().show(ui, |ui| {
-                render_table(ui, table_cells, 0);
+                render_table(
+                    ui,
+                    table_cells,
+                    0,
+                    crate::ui::table_width::DeficitStrategy::ProportionalToSlack,
+                );
             });
         })
     }
@@ -2517,7 +2575,13 @@ def foo():
             egui::CentralPanel::default().show(ui, |ui| {
                 let mut scroll_id = None;
                 let md = String::from("- [ ] todo\n- [x] done");
-                render_markdown(ui, &md, &mut scroll_id, &mut Vec::new());
+                render_markdown(
+                    ui,
+                    &md,
+                    &mut scroll_id,
+                    &mut Vec::new(),
+                    crate::ui::table_width::DeficitStrategy::ProportionalToSlack,
+                );
             });
         });
     }
