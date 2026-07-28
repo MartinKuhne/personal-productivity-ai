@@ -236,7 +236,7 @@ Two panics-on-poison per frame in the UI thread, plus a read-modify-write split 
 
 ### Heading rendering (`src/ui/render.rs:204-244`)
 
-- Uses `ui.horizontal` (not `horizontal_wrapped`), so a long heading overflows horizontally instead of wrapping — inconsistent with `render_inline` (`src/ui/render.rs:134`).
+- ~~Uses `ui.horizontal` (not `horizontal_wrapped`), so a long heading overflows horizontally instead of wrapping — inconsistent with `render_inline` (`src/ui/render.rs:134`).~~ **Fixed in 2026-07-27 commit (REQ-218):** `render_heading` now uses `ui.horizontal_wrapped(...)` and every per-span `ui.label(rt)` is explicitly `ui.add(egui::Label::new(rt).wrap())`. Long headings (including those containing unbreakable tokens) word-wrap within the available viewport width. Regression coverage in `src/ui/render.rs::e2e_tests::test_long_heading_wraps`; REQ-218 documented in `src/desktop/SPEC.md`.
 - Does not zero `item_spacing.x`, unlike `render_inline` (`:82`) and `render_table_cell` (`:278`), so a heading split into multiple styled spans shows spurious gaps between them.
 - `style.bold` is ignored: `RichText::new(t).size(size).strong()` (`:208`) is unconditional, so `**bold**` inside a heading is indistinguishable and the `TextStyle.bold` bit is dead on this path.
 

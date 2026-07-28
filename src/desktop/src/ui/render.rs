@@ -150,18 +150,34 @@ fn render_inline_inner(
                 if style.strikethrough {
                     rt = rt.strikethrough();
                 }
-                ui.label(rt);
+                // REQ-218: wrap each styled text span explicitly so a
+                // long span (long word, long URL, long unbreakable
+                // token) breaks to fit the available width. Without
+                // this, a single `InlineElem::Text` wider than the
+                // viewport overflows the panel. egui's `ui.label()`
+                // would inherit the `Wrap` wrap mode from the
+                // `horizontal_wrapped` outer container today, but
+                // pinning `.wrap()` at the call site defends against
+                // a future refactor of the outer container silently
+                // disabling wrap, and matches the `render_code_block`
+                // / `render_table_cell` pattern.
+                ui.add(egui::Label::new(rt).wrap());
             }
             InlineElem::Link(url, text) => {
+                // egui hyperlinks already wrap.
                 ui.hyperlink_to(text, url);
             }
             InlineElem::Image(url) => {
-                ui.label(format!("[Image: {}]", url));
+                ui.add(egui::Label::new(format!("[Image: {}]", url)).wrap());
             }
             InlineElem::Html(html) => {
-                ui.label(RichText::new(html).italics().color(egui::Color32::GRAY));
+                ui.add(
+                    egui::Label::new(RichText::new(html).italics().color(egui::Color32::GRAY))
+                        .wrap(),
+                );
             }
             InlineElem::SoftBreak => {
+                // A single space: no wrap needed.
                 ui.label(" ");
             }
         }
@@ -241,6 +257,15 @@ fn render_heading(
     // Use `horizontal_wrapped` so long headings wrap instead of
     // overflowing horizontally, and zero `item_spacing.x` to avoid
     // spurious gaps between styled spans (matching `render_inline`).
+    //
+    // REQ-218: every per-span `ui.label(rt)` is also explicitly
+    // `.wrap()`-ed so a long span (e.g. a long unbreakable token
+    // inside a heading) breaks at character boundaries instead of
+    // overflowing. `ui.label()` would inherit `Wrap` from the
+    // `horizontal_wrapped` outer container today, but pinning
+    // `.wrap()` at the call site defends against a future refactor
+    // of the outer container and matches the `render_inline`,
+    // `render_code_block`, and `render_table_cell` pattern.
     let response = ui.horizontal_wrapped(|ui| {
         ui.spacing_mut().item_spacing.x = 0.0;
         for elem in elems {
@@ -263,23 +288,31 @@ fn render_heading(
                     if style.strikethrough {
                         rt = rt.strikethrough();
                     }
-                    ui.label(rt);
+                    ui.add(egui::Label::new(rt).wrap());
                 }
                 InlineElem::Link(url, text) => {
+                    // egui hyperlinks already wrap.
                     ui.hyperlink_to(egui::RichText::new(text).size(size), url);
                 }
                 InlineElem::Image(url) => {
-                    ui.label(RichText::new(format!("[Image: {}]", url)).size(size));
+                    ui.add(
+                        egui::Label::new(RichText::new(format!("[Image: {}]", url)).size(size))
+                            .wrap(),
+                    );
                 }
                 InlineElem::Html(h) => {
-                    ui.label(
-                        RichText::new(h)
-                            .size(size)
-                            .italics()
-                            .color(egui::Color32::GRAY),
+                    ui.add(
+                        egui::Label::new(
+                            RichText::new(h)
+                                .size(size)
+                                .italics()
+                                .color(egui::Color32::GRAY),
+                        )
+                        .wrap(),
                     );
                 }
                 InlineElem::SoftBreak => {
+                    // A single space: no wrap needed.
                     ui.label(RichText::new(" ").size(size));
                 }
             }
@@ -2809,5 +2842,193 @@ def foo():
                 table_ordinal += 1;
             }
         }
+    }
+
+    // -----------------------------------------------------------------
+    // REQ-218: Word-wrap for paragraphs and headings
+    // -----------------------------------------------------------------
+    //
+    // Regression coverage for the "regular text does not word-wrap"
+    // defect documented in `doc/planning/render-audit.md`. The
+    // renderer used to call `ui.label(rt)` on each `InlineElem::Text`
+    // span without `.wrap(true)`, so a single long span wider than
+    // the available width overflowed the viewport instead of
+    // breaking. Code blocks and table cells already wrapped; this
+    // gap was the inconsistency. The fix flips `ui.label(rt)` to
+    // `ui.add(egui::Label::new(rt).wrap())` and brings headings
+    // onto the same `horizontal_wrapped` + `.wrap()` path.
+    //
+    // The tests render with a deliberately narrow viewport, walk
+    // the emitted `Shape::Text` entries, and assert the galley
+    // width is bounded by the available width.
+
+    /// Renders `markdown_text` in a 200x400 viewport and returns the
+    /// `egui::FullOutput`. The viewport's narrow width forces
+    /// paragraphs and headings to wrap if the renderer is doing the
+    /// right thing.
+    fn render_in_narrow_viewport(markdown_text: &str) -> egui::FullOutput {
+        let ctx = egui::Context::default();
+        let raw = egui::RawInput {
+            screen_rect: Some(egui::Rect::from_min_size(
+                egui::Pos2::ZERO,
+                egui::vec2(200.0, 400.0),
+            )),
+            ..egui::RawInput::default()
+        };
+        ctx.run_ui(raw, |ui| {
+            egui::CentralPanel::default().show(ui, |ui| {
+                let mut scroll_id = None;
+                render_markdown(ui, markdown_text, &mut scroll_id, &mut Vec::new());
+            });
+        })
+    }
+
+    /// Maximum galley width that the renderer can produce without
+    /// overflowing the viewport. egui's default `CentralPanel`
+    /// outer margin is 8 px per side, so the content rect is
+    /// `viewport_width - 16`.
+    const NARROW_VIEWPORT_INNER: f32 = 200.0 - 16.0;
+
+    /// REQ-218: A paragraph with a single unbreakable token wider
+    /// than the available width must be character-broken to fit.
+    /// Before the fix, the text shape's galley would be the full
+    /// natural single-line width of the long token (~hundreds of
+    /// px in 14 pt), overflowing the viewport.
+    #[test]
+    fn test_paragraph_long_unbreakable_token_wraps() {
+        let long_token = "a".repeat(400);
+        let md = format!(
+            "A sentence with an unbreakable {long_token} token inside it. \
+             Without wrap the label overflows the viewport."
+        );
+        let output = render_in_narrow_viewport(&md);
+
+        let text_shapes: Vec<_> = output
+            .shapes
+            .iter()
+            .filter_map(|cs| match &cs.shape {
+                egui::Shape::Text(t) => Some(t),
+                _ => None,
+            })
+            .collect();
+        assert!(
+            !text_shapes.is_empty(),
+            "expected at least one Shape::Text in the rendered output"
+        );
+        for t in &text_shapes {
+            let w = t.galley.rect.width();
+            assert!(
+                w <= NARROW_VIEWPORT_INNER,
+                "REQ-218: paragraph text galley width {w:.1}px exceeds \
+                 available width {NARROW_VIEWPORT_INNER:.1}px; the \
+                 paragraph did not wrap. Text: {:?}",
+                t.galley.text()
+            );
+        }
+    }
+
+    /// REQ-218: A paragraph made of many short words that together
+    /// exceed the available width must wrap at word boundaries.
+    /// The galley must report a multi-row layout and the widest
+    /// row must fit the available width.
+    #[test]
+    fn test_paragraph_long_sentence_wraps() {
+        let md = "The quick brown fox jumps over the lazy dog and keeps on \
+                  running across an open meadow until it reaches the river \
+                  bank where it finally stops to drink some cold water";
+        let output = render_in_narrow_viewport(md);
+
+        let text_shapes: Vec<_> = output
+            .shapes
+            .iter()
+            .filter_map(|cs| match &cs.shape {
+                egui::Shape::Text(t) => Some(t),
+                _ => None,
+            })
+            .collect();
+        assert!(
+            !text_shapes.is_empty(),
+            "expected at least one Shape::Text in the rendered output"
+        );
+        // Find the galley that contains the paragraph (it is the
+        // largest galley, by character count).
+        let para_galley = text_shapes
+            .iter()
+            .max_by_key(|t| t.galley.text().len())
+            .expect("at least one text shape")
+            .galley
+            .clone();
+        assert!(
+            para_galley.rect.width() <= NARROW_VIEWPORT_INNER,
+            "REQ-218: paragraph galley width {:.1}px exceeds available \
+             width {:.1}px; the sentence did not wrap. Rows: {}",
+            para_galley.rect.width(),
+            NARROW_VIEWPORT_INNER,
+            para_galley.rows.len()
+        );
+        // The sentence is long enough that it must have produced
+        // more than one row; otherwise wrap is silently being
+        // skipped (e.g. ellipsized / truncated).
+        assert!(
+            para_galley.rows.len() > 1,
+            "REQ-218: a long sentence in a 184 px-wide viewport should \
+             produce multiple rows, but only {} were emitted; wrap may \
+             be truncating instead of breaking. Galley text: {:?}",
+            para_galley.rows.len(),
+            para_galley.text()
+        );
+    }
+
+    /// REQ-218: A long heading must wrap. Before the fix, headings
+    /// used `ui.horizontal` (no wrap) and overflowed the viewport
+    /// even when the underlying spans carried `.wrap()`. After the
+    /// fix, headings use `horizontal_wrapped` + per-span
+    /// `Label::wrap()`.
+    #[test]
+    fn test_long_heading_wraps() {
+        let md = "# A very long heading that should wrap within the \
+                  available viewport width instead of overflowing \
+                  horizontally off the right edge of the panel";
+        let output = render_in_narrow_viewport(md);
+
+        let text_shapes: Vec<_> = output
+            .shapes
+            .iter()
+            .filter_map(|cs| match &cs.shape {
+                egui::Shape::Text(t) => Some(t),
+                _ => None,
+            })
+            .collect();
+        assert!(
+            !text_shapes.is_empty(),
+            "expected at least one Shape::Text in the rendered output"
+        );
+        // The heading galley is the widest galley (32 pt).
+        let heading_galley = text_shapes
+            .iter()
+            .max_by(|a, b| {
+                a.galley
+                    .rect
+                    .width()
+                    .partial_cmp(&b.galley.rect.width())
+                    .unwrap_or(std::cmp::Ordering::Equal)
+            })
+            .expect("at least one text shape")
+            .galley
+            .clone();
+        assert!(
+            heading_galley.rect.width() <= NARROW_VIEWPORT_INNER + 0.5,
+            "REQ-218: heading galley width {:.1}px exceeds available \
+             width {:.1}px; the heading did not wrap. Rows: {}",
+            heading_galley.rect.width(),
+            NARROW_VIEWPORT_INNER,
+            heading_galley.rows.len()
+        );
+        assert!(
+            heading_galley.rows.len() > 1,
+            "REQ-218: a long heading in a 184 px-wide viewport should \
+             produce multiple rows, but only {} were emitted.",
+            heading_galley.rows.len()
+        );
     }
 }
