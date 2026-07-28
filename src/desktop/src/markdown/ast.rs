@@ -1,6 +1,6 @@
 //! Strongly typed Markdown AST representations and render events.
 
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub enum InlineElem {
     Text(String, TextStyle),
     Link(String, String),
@@ -9,7 +9,7 @@ pub enum InlineElem {
     SoftBreak,
 }
 
-#[derive(Clone, Default, Debug, PartialEq)]
+#[derive(Clone, Default, Debug, PartialEq, Eq, Hash)]
 pub struct TextStyle {
     pub bold: bool,
     pub italic: bool,

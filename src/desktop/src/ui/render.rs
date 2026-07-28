@@ -419,16 +419,25 @@ fn render_table(
         return;
     }
 
-    let (max_w, min_w, breakpoints) = crate::ui::table_width::measure(table_cells, ui);
-    let gutter = 10.0_f32;
-    let avail = (ui.available_width() - (n as f32 - 1.0) * gutter).max(0.0);
-    let decision = crate::ui::table_width::ftwa(&max_w, &min_w, &breakpoints, avail, strategy);
-
     // Stable id derived from a table ordinal rather than `ui.next_auto_id()`
     // (a positional peek that shifts whenever any widget above the table
     // changes). Using a content-derived ordinal keeps the Grid's persisted
     // column-width cache stable across edits/reflows.
     let table_id = egui::Id::new("md_table").with(table_ordinal);
+
+    let (max_w, min_w, breakpoints) =
+        crate::ui::table_width::measure_cached(table_id, table_cells, ui);
+    let gutter = 10.0_f32;
+    let avail = (ui.available_width() - (n as f32 - 1.0) * gutter).max(0.0);
+    let decision = crate::ui::table_width::ftwa_cached(
+        table_id,
+        &max_w,
+        &min_w,
+        &breakpoints,
+        avail,
+        strategy,
+        ui,
+    );
 
     if decision.needs_horizontal_scroll {
         // §3.6 fallback: nothing can fit; preserve the never-break-token
