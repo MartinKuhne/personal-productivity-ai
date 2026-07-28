@@ -422,7 +422,7 @@ fn render_table(ui: &mut egui::Ui, table_cells: &[Vec<Vec<InlineElem>>], table_o
         &min_w,
         &breakpoints,
         avail,
-        crate::ui::table_width::DeficitStrategy::ProportionalToSlack,
+        crate::ui::table_width::DeficitStrategy::BreakpointWaterFill,
     );
 
     // Stable id derived from a table ordinal rather than `ui.next_auto_id()`
@@ -1611,7 +1611,7 @@ def foo():
                         &min_w,
                         &breakpoints,
                         a,
-                        crate::ui::table_width::DeficitStrategy::ProportionalToSlack,
+                        crate::ui::table_width::DeficitStrategy::BreakpointWaterFill,
                     );
                     assert_eq!(decision.widths.len(), 6, "avail={a}: must have 6 widths");
                     for &w in &decision.widths {
@@ -1686,7 +1686,7 @@ def foo():
                         &min_w,
                         &breakpoints,
                         avail,
-                        crate::ui::table_width::DeficitStrategy::ProportionalToSlack,
+                        crate::ui::table_width::DeficitStrategy::BreakpointWaterFill,
                     );
                     // Surplus regime (viewport much wider than content).
                     assert!(!decision.needs_horizontal_scroll);
@@ -1789,7 +1789,7 @@ def foo():
                     &min_w,
                     &breakpoints,
                     avail,
-                    crate::ui::table_width::DeficitStrategy::ProportionalToSlack,
+                    crate::ui::table_width::DeficitStrategy::BreakpointWaterFill,
                 );
                 captured = Some(decision.clone());
                 // Render Ã¢â‚¬â€ exercises the rendering branch keyed on
