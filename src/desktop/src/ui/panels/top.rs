@@ -75,6 +75,25 @@ pub fn apply_batch_button_click(app: &mut FastMdApp) {
 }
 
 pub fn show_top_panel(app: &mut FastMdApp, parent_ui: &mut egui::Ui) {
+    show_top_panel_capture(app, parent_ui, |_| {});
+}
+
+/// Tier 4 test variant of [`show_top_panel`]. The `on_click` callback
+/// is invoked after every button click in the toolbar, with a stable
+/// event name. The production caller ([`show_top_panel`]) passes a
+/// no-op closure; the test caller in
+/// `tests::test_batch_button_click_opens_dialog` passes a closure
+/// that pushes the event into the harness's persistent state. The
+/// callback runs on the same frame as the click, *after* the side
+/// effect on `app` is applied, so the test can read both `app`
+/// (via the captured `&mut FastMdApp` in the closure) and the
+/// harness's `state()` after `harness.run()` to verify the
+/// integration end-to-end.
+pub fn show_top_panel_capture(
+    app: &mut FastMdApp,
+    parent_ui: &mut egui::Ui,
+    mut on_click: impl FnMut(&'static str),
+) {
     // egui 0.35 unified `TopBottomPanel` into `Panel`.
     Panel::top("top_panel").show(parent_ui, |ui| {
         ui.horizontal(|ui| {
@@ -103,6 +122,7 @@ pub fn show_top_panel(app: &mut FastMdApp, parent_ui: &mut egui::Ui) {
 
             if ui.button(crate::ui::strings::BATCH_BUTTON).clicked() {
                 apply_batch_button_click(app);
+                on_click("batch_button");
             }
             ui.separator();
 
@@ -177,6 +197,64 @@ pub fn show_top_panel(app: &mut FastMdApp, parent_ui: &mut egui::Ui) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Tier 4 click test: clicking the batch-processing button in
+    /// the top toolbar must open the batch dialog (sets
+    /// `app.dialogs.batch_dialog_open = true`) and fire the
+    /// `on_click("batch_button")` callback that the test
+    /// harness captures into its persistent state.
+    ///
+    /// Uses the `stateful_harness` helper from `test_helpers::interact`
+    /// (R-3). The closure calls the production `show_top_panel_capture`
+    /// with a callback that pushes the event into the harness's
+    /// `T = Vec<&'static str>` state. After the click settles, we
+    /// read the state and verify the event was captured.
+    #[test]
+    fn test_batch_button_click_opens_dialog() {
+        use crate::ui::test_helpers::interact::stateful_harness;
+        use egui_kittest::kittest::Queryable;
+
+        let mut harness = stateful_harness(Vec::<&'static str>::new(), |ui, captured| {
+            // `app` is moved into the closure. The closure is
+            // called once per pass; the harness owns it for
+            // its lifetime. After the harness drops, the
+            // captured `&'static str` events are the only
+            // post-click observable state (per the state-
+            // capture pattern documented in
+            // `test_helpers::interact`).
+            let mut app = create_test_app();
+            assert!(!app.dialogs.batch_dialog_open);
+            show_top_panel_capture(&mut app, ui, |event| {
+                captured.push(event);
+            });
+        });
+        harness.fit_contents();
+        // The top toolbar shows a spinner while indexing is in
+        // progress, which keeps repainting forever. Use
+        // `run_steps` with a bounded count rather than `run()`
+        // (which would hit `Harness::run exceeded max_steps`).
+        harness.run_steps(2);
+        // Locate the batch button by its label (from
+        // `strings::BATCH_BUTTON`) and click it.
+        harness
+            .get_by_label(crate::ui::strings::BATCH_BUTTON)
+            .click();
+        // Two `run_steps` calls after the click: the first
+        // processes the pointer events (hover + press + release
+        // = three steps), the second settles any post-click
+        // repaint. Bounded count to avoid the spinner infinite
+        // loop.
+        harness.run_steps(2);
+        harness.run_steps(2);
+
+        let captured = harness.state();
+        assert!(
+            captured.contains(&"batch_button"),
+            "clicking the batch button must fire the `batch_button` \
+             on_click event; got: {:?}",
+            captured
+        );
+    }
 
     /// Tier 1 test for the batch button click effect. The click sets
     /// `app.dialogs.batch_dialog_open` to `true`; the dialog itself

@@ -125,6 +125,21 @@ pub fn apply_send_click(app: &mut FastMdApp) {
 }
 
 pub fn show_bottom_panel(app: &mut FastMdApp, parent_ui: &mut egui::Ui) {
+    show_bottom_panel_capture(app, parent_ui, |_| {});
+}
+
+/// Tier 4 test variant of [`show_bottom_panel`]. The `on_click`
+/// callback is invoked after every dispatch trigger (Enter key on
+/// the command input, or the Quick-Tasks format menu item) with a
+/// stable event name. The production caller
+/// ([`show_bottom_panel`]) passes a no-op closure; the test caller
+/// in `tests::test_send_enter_key_captures_event` passes a closure
+/// that pushes the event into the harness's persistent state.
+pub fn show_bottom_panel_capture(
+    app: &mut FastMdApp,
+    parent_ui: &mut egui::Ui,
+    mut on_click: impl FnMut(&'static str),
+) {
     // egui 0.35 unified `TopBottomPanel`/`SidePanel` into `Panel`,
     // and panels now allocate within a parent `&mut Ui` (using
     // `show_inside`) rather than from a `&Context`.
@@ -188,6 +203,7 @@ pub fn show_bottom_panel(app: &mut FastMdApp, parent_ui: &mut egui::Ui) {
 
                 if submit {
                     apply_send_click(app);
+                    on_click("send");
                 }
             });
         });
@@ -281,6 +297,67 @@ mod tests {
         assert!(
             app.agent.command_input.is_empty(),
             "command_input must be cleared after dispatch"
+        );
+    }
+
+    /// Tier 4 click test: pressing Enter in the bottom-panel
+    /// command input must dispatch the prompt via
+    /// `apply_send_click` and fire the `on_click("send")` callback.
+    ///
+    /// The harness owns `&mut app` for its lifetime, so the
+    /// post-click observation goes through the captured
+    /// `&'static str` event name (per the state-capture pattern
+    /// in `test_helpers::interact`). The dispatch's effect on
+    /// `app.agent` is verified separately in the Tier 1 tests
+    /// above.
+    #[test]
+    fn test_send_enter_key_captures_event() {
+        use crate::ui::test_helpers::interact::stateful_harness;
+
+        let mut harness = stateful_harness(Vec::<&'static str>::new(), |ui, captured| {
+            let mut app = create_test_app();
+            app.agent.command_input = "/models".to_string();
+            show_bottom_panel_capture(&mut app, ui, |event| {
+                captured.push(event);
+            });
+        });
+        harness.fit_contents();
+        // The TextEdit must have focus for the production
+        // Enter-handler to fire (it gates on
+        // `response.has_focus()`). Click into it first to set
+        // focus. The bottom-panel command input is a multi-line
+        // TextEdit, which has `accesskit::Role::TextInput` (or
+        // `MultilineTextEdit` in some versions). Query by role
+        // to find it without depending on the hint-text label
+        // (which the TextEdit doesn't expose as an accessible
+        // name).
+        use accesskit::Role;
+        use egui_kittest::kittest::Queryable;
+        let candidates: Vec<_> = harness
+            .query_all_by_role(Role::TextInput)
+            .chain(harness.query_all_by_role(Role::MultilineTextInput))
+            .collect();
+        // The bottom panel is the only panel rendered in this
+        // test, so any TextInput we find IS the command input.
+        assert!(
+            !candidates.is_empty(),
+            "expected at least one TextInput node in the bottom panel"
+        );
+        candidates[0].click();
+        harness.run_steps(2);
+        // Synthesize an Enter key press. The harness queues the
+        // event; `run_steps` processes it through the input
+        // pipeline.
+        harness.key_press(egui::Key::Enter);
+        harness.run_steps(2);
+        harness.run_steps(2);
+
+        let captured = harness.state();
+        assert!(
+            captured.contains(&"send"),
+            "pressing Enter in the command input must fire the `send` \
+             on_click event; got: {:?}",
+            captured
         );
     }
 

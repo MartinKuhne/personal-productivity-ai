@@ -72,6 +72,22 @@ pub fn apply_toc_row_click(app: &mut FastMdApp, entry_id: egui::Id) {
 }
 
 pub fn show_right_panel(app: &mut FastMdApp, parent_ui: &mut egui::Ui) {
+    show_right_panel_capture(app, parent_ui, |_| {});
+}
+
+/// Tier 4 test variant of [`show_right_panel`]. The `on_click`
+/// callback is invoked after every TOC row click, with a stable
+/// event name. The production caller ([`show_right_panel`]) passes
+/// a no-op closure; the test caller in
+/// `tests::test_toc_row_click_captures_event` passes a closure
+/// that pushes the event into the harness's persistent state. See
+/// the matching doc-comment on [`show_top_panel_capture`] for the
+/// full rationale.
+pub fn show_right_panel_capture(
+    app: &mut FastMdApp,
+    parent_ui: &mut egui::Ui,
+    mut on_click: impl FnMut(&'static str),
+) {
     // Compute visibility once, outside the panel closure, so the
     // same value is used in every layout pass of this frame.
     //
@@ -160,6 +176,7 @@ pub fn show_right_panel(app: &mut FastMdApp, parent_ui: &mut egui::Ui) {
                                 .truncate();
                                 if ui.add(label).clicked() {
                                     apply_toc_row_click(app, entry.id);
+                                    on_click("toc_row");
                                 }
                             });
                         });
@@ -229,6 +246,49 @@ mod tests {
         apply_toc_row_click(&mut app, id_a);
         apply_toc_row_click(&mut app, id_b);
         assert_eq!(app.tab_manager.scroll_to_header_id, Some(id_b));
+    }
+
+    /// Tier 4 click test: clicking a TOC row in the right panel
+    /// must fire the `on_click("toc_row")` callback. Same pattern
+    /// as `test_batch_button_click_opens_dialog` in
+    /// `panels/top.rs`. The click handler also sets
+    /// `app.tab_manager.scroll_to_header_id`, but the harness
+    /// owns `&mut app` for its lifetime, so the side effect is
+    /// observed via the captured `&'static str` event name.
+    #[test]
+    fn test_toc_row_click_captures_event() {
+        use crate::ui::test_helpers::interact::stateful_harness;
+        use egui_kittest::kittest::Queryable;
+
+        let mut harness = stateful_harness(Vec::<&'static str>::new(), |ui, captured| {
+            let mut app = create_test_app();
+            app.tabs_mut().toc.push(crate::ui::ToCEntry {
+                title: "Introduction".to_string(),
+                level: 1,
+                id: egui::Id::new("intro"),
+            });
+            *app.selection_mut().selected_file_mut() = Some(std::path::PathBuf::from("doc.md"));
+            show_right_panel_capture(&mut app, ui, |event| {
+                captured.push(event);
+            });
+        });
+        harness.fit_contents();
+        // The right panel renders rows from `app.tab_manager.toc`.
+        // Locate the row by its title (a substring match is
+        // sufficient).
+        harness.get_by_label("Introduction").click();
+        // Bounded step count to avoid spinning the harness forever
+        // on the repaint-after-click loop.
+        harness.run_steps(2);
+        harness.run_steps(2);
+
+        let captured = harness.state();
+        assert!(
+            captured.contains(&"toc_row"),
+            "clicking a TOC row must fire the `toc_row` on_click event; \
+             got: {:?}",
+            captured
+        );
     }
 
     #[test]

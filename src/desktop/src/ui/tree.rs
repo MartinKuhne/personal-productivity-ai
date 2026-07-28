@@ -342,6 +342,22 @@ pub fn apply_file_row_click(ctx: &mut TreeNodeContext<'_>, row: &FlatRow) {
 /// Render a single flat row with the same interaction logic as `draw_tree_node`
 /// but without recursion.
 pub fn render_flat_row(ui: &mut egui::Ui, row: &FlatRow, ctx: &mut TreeNodeContext<'_>) {
+    render_flat_row_capture(ui, row, ctx, |_| {});
+}
+
+/// Tier 4 test variant of [`render_flat_row`]. The `on_click`
+/// callback is invoked after every row click (both directory and
+/// file), with a stable event name. The production caller
+/// ([`render_flat_row`]) passes a no-op closure; the test caller
+/// in `tests::test_file_row_click_captures_event` passes a
+/// closure that pushes the event into the harness's persistent
+/// state.
+pub fn render_flat_row_capture(
+    ui: &mut egui::Ui,
+    row: &FlatRow,
+    ctx: &mut TreeNodeContext<'_>,
+    mut on_click: impl FnMut(&'static str),
+) {
     ui.push_id((&row.path, row.is_dir), |ui| {
         if row.is_dir {
             let icon = if row.is_expanded { "▼ " } else { "▶ " };
@@ -361,6 +377,7 @@ pub fn render_flat_row(ui: &mut egui::Ui, row: &FlatRow, ctx: &mut TreeNodeConte
                     *ctx.selected_file() = None;
                     ctx.selected_files().clear();
                     *ctx.selected_dir() = Some(row.path.clone());
+                    on_click("dir_row");
                     // Do NOT call mark_dirty() here: it would trigger a
                     // full calc_max_width re-shaping pass and, before the
                     // P1-4 fix, discard the user's manual panel resize
@@ -458,6 +475,7 @@ pub fn render_flat_row(ui: &mut egui::Ui, row: &FlatRow, ctx: &mut TreeNodeConte
 
                 if response.clicked() {
                     apply_file_row_click(ctx, row);
+                    on_click("file_row");
                 }
 
                 if response.double_clicked() {
@@ -1091,6 +1109,125 @@ mod tests {
             tabs,
             vec![PathBuf::from("a.md")],
             "clicking an already-open tab must not push a duplicate"
+        );
+    }
+
+    /// Tier 4 click test: clicking a file row in the left panel's
+    /// tree view must fire the `on_click("file_row")` callback.
+    ///
+    /// The challenge this test solves: `render_flat_row` takes a
+    /// `&mut TreeNodeContext<'_>` whose lifetime is tied to the
+    /// borrowed sub-fields (selected_file, selected_files, tabs).
+    /// The harness closure is `FnMut(&mut Ui, &mut T)` and runs
+    /// for many passes; the context must therefore live across
+    /// all those passes. We use `Box::leak` to give the context
+    /// a `'static` lifetime so the harness can re-borrow it on
+    /// every pass. The leak is per-test and bounded (one
+    /// `TreeNodeContext` per test run), so it does not affect
+    /// long-running test executables.
+    #[test]
+    fn test_file_row_click_captures_event() {
+        use crate::ui::test_helpers::interact::stateful_harness;
+        use egui_kittest::kittest::Queryable;
+        use std::sync::{Mutex, OnceLock};
+
+        // Build the 'static context and row once; reuse across
+        // every harness pass.
+        struct StaticFixture {
+            ctx: Mutex<Option<TreeNodeContext<'static>>>,
+            row: FlatRow,
+        }
+        static FIXTURE: OnceLock<StaticFixture> = OnceLock::new();
+        let fixture = FIXTURE.get_or_init(|| {
+            let selected_file = Box::leak(Box::new(None::<PathBuf>));
+            let selected_files = Box::leak(Box::new(HashSet::<PathBuf>::new()));
+            let expanded_dirs = Box::leak(Box::new(HashSet::<PathBuf>::new()));
+            let tabs = Box::leak(Box::new(Vec::<PathBuf>::new()));
+            let selected_dir = Box::leak(Box::new(None::<PathBuf>));
+            let create_dir_dialog_open = Box::leak(Box::new(false));
+            let create_dir_parent = Box::leak(Box::new(None::<PathBuf>));
+            let file_to_move = Box::leak(Box::new(None::<PathBuf>));
+            let move_dialog_open = Box::leak(Box::new(false));
+            let file_to_rename = Box::leak(Box::new(None::<PathBuf>));
+            let rename_dialog_open = Box::leak(Box::new(false));
+            let rename_new_name = Box::leak(Box::new(String::new()));
+            let layout = Box::leak(Box::new(PanelLayout::default()));
+            let submit_prompt = Box::leak(Box::new(None::<String>));
+            let open_editor = Box::leak(Box::new(None::<PathBuf>));
+            let content_libraries = Box::leak(Box::new(Vec::new()));
+
+            let ctx = TreeNodeContext {
+                file_ops: FileOpsContext {
+                    file_to_move,
+                    move_dialog_open,
+                    file_to_rename,
+                    rename_dialog_open,
+                    rename_new_name,
+                },
+                dir_ops: DirOpsContext {
+                    selected_dir,
+                    create_dir_dialog_open,
+                    create_dir_parent,
+                },
+                selection: SelectionContext {
+                    selected_file,
+                    selected_files,
+                    expanded_dirs,
+                    tabs,
+                },
+                app: AppIntegrationContext {
+                    layout,
+                    submit_prompt,
+                    content_libraries,
+                    open_editor,
+                    modifiers: egui::Modifiers::default(),
+                    inline_editor_enabled: false,
+                    bg_tx: &None,
+                    file_event_producer: None,
+                },
+            };
+            let row = FlatRow {
+                depth: 0,
+                name: "notes.md".to_string(),
+                path: PathBuf::from("notes.md"),
+                is_dir: false,
+                is_expanded: false,
+            };
+            StaticFixture {
+                ctx: Mutex::new(Some(ctx)),
+                row,
+            }
+        });
+
+        let mut harness = stateful_harness(Vec::<&'static str>::new(), |ui, captured| {
+            let mut guard = fixture.ctx.lock().unwrap();
+            let ctx = guard.as_mut().expect("context not initialized");
+            render_flat_row_capture(ui, &fixture.row, ctx, |event| {
+                captured.push(event);
+            });
+        });
+        harness.fit_contents();
+        // The selectable_label text is "  notes.md" (two leading
+        // spaces from the `format!("  {}", row.name)` in the
+        // production code). Search by a substring to avoid
+        // depending on the exact whitespace.
+        let nodes: Vec<_> = harness.query_all_by_label_contains("notes.md").collect();
+        assert!(
+            !nodes.is_empty(),
+            "expected the file row labelled with `notes.md` to be present; \
+             found {} matching nodes",
+            nodes.len()
+        );
+        nodes[0].click();
+        harness.run_steps(2);
+        harness.run_steps(2);
+
+        let captured = harness.state();
+        assert!(
+            captured.contains(&"file_row"),
+            "clicking the file row must fire the `file_row` on_click event; \
+             got: {:?}",
+            captured
         );
     }
 

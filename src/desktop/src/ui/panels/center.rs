@@ -226,6 +226,22 @@ fn render_agent_session(ui: &mut egui::Ui, app: &mut FastMdApp) {
 /// Preconditions: `app.tabs().tabs` is not empty.
 /// Postconditions: Rendered tabs and file content.
 fn render_tabs_and_content(ui: &mut egui::Ui, app: &mut FastMdApp) {
+    render_tabs_and_content_capture(ui, app, |_| {});
+}
+
+/// Tier 4 test variant of [`render_tabs_and_content`]. The
+/// `on_click` callback is invoked after every tab-strip click
+/// (`×` close button, label click, context-menu items) with a
+/// stable event name. The production caller
+/// ([`render_tabs_and_content`]) passes a no-op closure; the
+/// test caller in `tests::test_tab_close_button_captures_event`
+/// passes a closure that pushes the event into the harness's
+/// persistent state.
+pub fn render_tabs_and_content_capture(
+    ui: &mut egui::Ui,
+    app: &mut FastMdApp,
+    mut on_click: impl FnMut(&'static str),
+) {
     ui.horizontal(|ui| {
         let tabs_snapshot: Vec<PathBuf> = app.tab_manager.tabs.clone();
 
@@ -245,6 +261,7 @@ fn render_tabs_and_content(ui: &mut egui::Ui, app: &mut FastMdApp) {
             }
             if response.inner.middle_clicked() {
                 apply_tab_close_click(app, i);
+                on_click("tab_middle_click");
             }
             response.inner.context_menu(|ui| {
                 if ui.button(crate::ui::strings::EDIT_BUTTON).clicked() {
@@ -260,14 +277,17 @@ fn render_tabs_and_content(ui: &mut egui::Ui, app: &mut FastMdApp) {
                 ui.separator();
                 if ui.button(crate::ui::strings::CLOSE_TAB_MENU).clicked() {
                     apply_tab_close_click(app, i);
+                    on_click("tab_close_menu");
                     ui.close();
                 }
                 if ui.button(crate::ui::strings::CLOSE_OTHERS_MENU).clicked() {
                     apply_tab_close_others_click(app, i);
+                    on_click("tab_close_others_menu");
                     ui.close();
                 }
                 if ui.button(crate::ui::strings::CLOSE_ALL_TABS_MENU).clicked() {
                     apply_tab_close_all_click(app);
+                    on_click("tab_close_all_menu");
                     ui.close();
                 }
                 ui.separator();
@@ -309,6 +329,7 @@ fn render_tabs_and_content(ui: &mut egui::Ui, app: &mut FastMdApp) {
                 .clicked()
             {
                 apply_tab_close_click(app, i);
+                on_click("tab_close_button");
             }
             ui.separator();
         }
@@ -493,6 +514,48 @@ mod tests {
         assert!(
             app.selection.selected_file().is_none(),
             "selected_file must be None when all tabs are closed"
+        );
+    }
+
+    /// Tier 4 click test: clicking the tab-strip `×` close button
+    /// in the center panel must fire the `on_click("tab_close_button")`
+    /// callback. Renders `render_tabs_and_content_capture` (not the
+    /// full `show_center_panel`) so the test stays focused on the
+    /// tab-strip click. The click handler also removes the tab
+    /// from `app.tab_manager.tabs`, but the harness owns `&mut app`
+    /// so the side effect is observed via the captured event.
+    #[test]
+    fn test_tab_close_button_captures_event() {
+        use crate::ui::test_helpers::interact::stateful_harness;
+        use egui_kittest::kittest::Queryable;
+
+        let mut harness = stateful_harness(Vec::<&'static str>::new(), |ui, captured| {
+            let mut app = create_test_app();
+            app.tab_manager.tabs = vec![PathBuf::from("a.md"), PathBuf::from("b.md")];
+            *app.selection.selected_file_mut() = Some(PathBuf::from("a.md"));
+            render_tabs_and_content_capture(ui, &mut app, |event| {
+                captured.push(event);
+            });
+        });
+        harness.fit_contents();
+        // Two tabs → two `×` buttons. Click the first one.
+        let close_buttons: Vec<_> = harness.query_all_by_label("×").collect();
+        assert_eq!(
+            close_buttons.len(),
+            2,
+            "expected one × button per tab; got {}",
+            close_buttons.len()
+        );
+        close_buttons[0].click();
+        harness.run_steps(2);
+        harness.run_steps(2);
+
+        let captured = harness.state();
+        assert!(
+            captured.contains(&"tab_close_button"),
+            "clicking the tab-strip × close button must fire the \
+             `tab_close_button` on_click event; got: {:?}",
+            captured
         );
     }
 
