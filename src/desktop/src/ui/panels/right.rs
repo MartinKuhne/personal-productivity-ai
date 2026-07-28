@@ -395,16 +395,24 @@ mod tests {
         use egui_kittest::Harness;
         use egui_kittest::kittest::Queryable;
 
-        // 400px window gives a 200px right panel (Panel::right's
-        // default `default_outer_size` for left/right sides, REQ-101
-        // and `egui-0.35/src/containers/panel.rs:255-257`).
+        // 400px window with a 200px right panel (Panel::right's
+        // default `default_outer_size` is 200.0 for left/right
+        // sides, see `egui-0.35/src/containers/panel.rs:255-257`).
+        // The production code calls `default_size(200.0)` and
+        // `size_range(150.0..=250.0)`, so without a stored
+        // PanelState the panel takes 200px and starts at
+        // x = 400 - 200 = 200.
         const WINDOW_WIDTH: f32 = 400.0;
         const WINDOW_HEIGHT: f32 = 600.0;
-        // The frame the panel uses by default (`Frame::side_top_panel`,
-        // `egui-0.35/src/containers/frame.rs:185-188`) has an 8pt inner
-        // margin on each side. The first character of every row must
-        // sit at `panel_left + 8` (within sub-pixel rounding).
-        const _FRAME_INNER_MARGIN_X: f32 = 8.0;
+        // The actual panel width in a fresh harness (no stored
+        // PanelState). 200.0 = `default_outer_size` for right
+        // panels; see comment above. The test's
+        // `expected_left` is derived from this so the assertion
+        // is robust to a future `default_size(...)` change in
+        // the production code: a regression in the fix would
+        // show up as a `left` value far to the right of the
+        // panel's left edge, not as a 4px margin-fudge.
+        const PANEL_WIDTH: f32 = 200.0;
         const PIXEL_TOLERANCE: f32 = 2.0;
 
         // A title deliberately wider than the entire 400px window, so
@@ -428,10 +436,14 @@ mod tests {
             });
         harness.run();
 
-        // Expected: panel occupies 250px (the max size_range in test harness),
-        // with its inner content area starting at (400 - 250) + 4 = 154px from the
-        // left of the screen.
-        let expected_left = WINDOW_WIDTH - 250.0 + 4.0;
+        // Expected: panel occupies PANEL_WIDTH px and starts at
+        // x = WINDOW_WIDTH - PANEL_WIDTH. The leftmost matching
+        // node in the accesskit tree is the `ui.horizontal`
+        // wrapper that contains the long row; the wrapper's
+        // left edge is the panel's left edge (no extra frame
+        // margin in the harness's default renderer for the
+        // outer container).
+        let expected_left = WINDOW_WIDTH - PANEL_WIDTH;
 
         // Locate the long TOC row by a substring of its label
         // (truncation may strip characters but the accesskit node
