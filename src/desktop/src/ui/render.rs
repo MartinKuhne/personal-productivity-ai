@@ -328,15 +328,26 @@ fn render_table_cell(ui: &mut egui::Ui, cell: &[InlineElem], pinned_width: Optio
     // left edge) instead of the column's cursor X, clipping left-side text.
     ui.with_layout(egui::Layout::left_to_right(egui::Align::Min), |ui| {
         cell_frame.show(ui, |ui| {
-            // In egui::Grid pass 2, ui.available_width() is the resolved column
-            // width. Frame::NONE with inner_margin=ZERO does not shrink the inner
-            // Ui — the stroke is painted visually but does not consume content
-            // space — so we use available_width() as-is. In the pinned-width
-            // (FTWA) path we take max(pinned, available) so the cell frame
-            // expands whenever the grid column widens beyond the original estimate.
+            // In egui::Grid pass 2, `ui.available_width()` is the resolved
+            // column width. Frame::NONE with `inner_margin = ZERO` does not
+            // shrink the inner Ui — the stroke is painted visually but does
+            // not consume content space — so we use `available_width()` as-is
+            // in the unpinned (§3.6 fallback) path.
+            //
+            // In the FTWA-pinned path, `inner_w` is **unconditionally** the
+            // FTWA decision. The Grid's `available_width()` is ignored on
+            // purpose: FTWA is the authority, and we must not let the Grid's
+            // natural content width feed back into the column width
+            // (that was the previous bug — `w.max(avail_w)` made the cell
+            // claim the Grid's wider allocation, which the Grid then
+            // recorded as the column's `min_col_width` for the next frame,
+            // creating a positive-feedback loop that stretched narrow
+            // columns like "Make" / "Dell" hundreds of pixels wide).
+            // Content wraps at `inner_w` via `with_main_wrap(true)` +
+            // `Label::wrap()`.
             let avail_w = ui.available_width();
             let inner_w = match pinned_width {
-                Some(w) => w.max(avail_w),
+                Some(w) => w,
                 None => avail_w,
             };
 
@@ -387,6 +398,13 @@ fn render_table_cell(ui: &mut egui::Ui, cell: &[InlineElem], pinned_width: Optio
             let layout = egui::Layout::left_to_right(egui::Align::Min).with_main_wrap(true);
             ui.allocate_ui_with_layout(egui::vec2(inner_w, 0.0), layout, |ui| {
                 ui.set_min_width(inner_w);
+                if pinned_width.is_some() {
+                    // Symmetric to `set_min_width` above: the cell must
+                    // neither shrink below FTWA (`min`) nor grow above
+                    // FTWA (`max`). The `max` clamp is the bug fix; the
+                    // `min` clamp was already correct.
+                    ui.set_max_width(inner_w);
+                }
                 content(ui);
             });
         });
@@ -1944,7 +1962,7 @@ def foo():
         });
 
         // Group into 3 rows of 3 cells each
-        let rows = vec![
+        let rows: [Vec<egui::Rect>; 3] = [
             vec![rects[0], rects[1], rects[2]],
             vec![rects[3], rects[4], rects[5]],
             vec![rects[6], rects[7], rects[8]],
@@ -1960,42 +1978,45 @@ def foo():
         );
 
         // For each column j ∈ 0..3, check that min.x and width match across all rows
-        for col in 0..3 {
-            let first_min_x = rows[0][col].min.x;
-            let first_width = rows[0][col].width();
+        for (col, row_cells) in rows[0].iter().enumerate() {
+            let first_min_x = row_cells.min.x;
+            let first_width = row_cells.width();
 
-            for row in 1..3 {
-                let min_x = rows[row][col].min.x;
-                let width = rows[row][col].width();
+            for (row_idx, row) in rows[1..].iter().enumerate() {
+                let cell = &row[col];
+                let min_x = cell.min.x;
+                let width = cell.width();
 
                 assert!(
                     (min_x - first_min_x).abs() < 1e-3,
-                    "Column {col} left border misaligned at row {row}: expected {first_min_x}, got {min_x}"
+                    "Column {col} left border misaligned at row {}: expected {first_min_x}, got {min_x}",
+                    row_idx + 1
                 );
                 assert!(
                     (width - first_width).abs() < 1e-3,
-                    "Column {col} width mismatch at row {row}: expected {first_width}, got {width}"
+                    "Column {col} width mismatch at row {}: expected {first_width}, got {width}",
+                    row_idx + 1
                 );
             }
         }
 
         // Verify gutter spacing between columns is 10px across all rows
-        for row in 0..3 {
-            let col0_right = rows[row][0].max.x;
-            let col1_left = rows[row][1].min.x;
-            let col1_right = rows[row][1].max.x;
-            let col2_left = rows[row][2].min.x;
+        for (row_idx, row) in rows.iter().enumerate() {
+            let col0_right = row[0].max.x;
+            let col1_left = row[1].min.x;
+            let col1_right = row[1].max.x;
+            let col2_left = row[2].min.x;
 
             let gutter_0_1 = col1_left - col0_right;
             let gutter_1_2 = col2_left - col1_right;
 
             assert!(
                 (gutter_0_1 - 10.0).abs() < 1e-3,
-                "Row {row} gutter between Col 0 and Col 1 should be 10.0, got {gutter_0_1}"
+                "Row {row_idx} gutter between Col 0 and Col 1 should be 10.0, got {gutter_0_1}"
             );
             assert!(
                 (gutter_1_2 - 10.0).abs() < 1e-3,
-                "Row {row} gutter between Col 1 and Col 2 should be 10.0, got {gutter_1_2}"
+                "Row {row_idx} gutter between Col 1 and Col 2 should be 10.0, got {gutter_1_2}"
             );
         }
     }
@@ -2049,19 +2070,19 @@ def foo():
                 .then(a.min.x.partial_cmp(&b.min.x).unwrap())
         });
 
-        let rows = vec![
+        let rows: [Vec<egui::Rect>; 3] = [
             vec![rects[0], rects[1]],
             vec![rects[2], rects[3]],
             vec![rects[4], rects[5]],
         ];
 
         // For column 0 and column 1, empty row 0 cells must match row 1 & 2 width and left edge
-        for col in 0..2 {
+        for (col, row0_cell) in rows[0].iter().enumerate() {
             let col_width = rows[1][col].width();
             let col_min_x = rows[1][col].min.x;
 
-            let row0_width = rows[0][col].width();
-            let row0_min_x = rows[0][col].min.x;
+            let row0_width = row0_cell.width();
+            let row0_min_x = row0_cell.min.x;
 
             assert!(
                 (row0_min_x - col_min_x).abs() < 1e-3,
@@ -2142,6 +2163,214 @@ def foo():
                 );
             }
         }
+    }
+
+    /// Cell-level contract test for the pinned-width path. The bug is a
+    /// multi-frame feedback loop (Grid's `prev_state` accumulates the
+    /// wrong width), so the table-level test below alone is not enough
+    /// to pin the rule at the cell layer. This test directly exercises
+    /// the cell with an `available_width()` far wider than
+    /// `pinned_width`, simulating what the Grid does to the cell on
+    /// pass 2 once `prev_state` has gone wrong.
+    ///
+    /// Before the fix: `inner_w = pinned_width.max(available_width)`
+    /// lets the cell expand to the Grid's wider allocation. The cell
+    /// then reports that wider width, the Grid records it, and the
+    /// leak is locked in.
+    ///
+    /// After the fix: `inner_w = pinned_width` (and
+    /// `set_max_width(pinned_width)` on the inner Ui) prevents the
+    /// cell from ever exceeding the FTWA decision.
+    #[test]
+    fn test_render_table_cell_respects_pinned_width_when_available_is_wider() {
+        use eframe::epaint::{Shape, StrokeKind};
+
+        // Render a "Dell" cell with `pinned_width = 50.0` inside a Ui
+        // whose `available_width()` is 400.0 (simulating a Grid that
+        // has gone wide for whatever reason). The cell's painted
+        // border rect must be ≤ 50 + stroke, not 400.
+        let ctx = egui::Context::default();
+        let raw = egui::RawInput {
+            screen_rect: Some(egui::Rect::from_min_size(
+                egui::Pos2::ZERO,
+                egui::vec2(800.0, 600.0),
+            )),
+            ..egui::RawInput::default()
+        };
+        let cell: Vec<InlineElem> =
+            vec![InlineElem::Text("Dell".to_string(), TextStyle::default())];
+
+        let output = ctx.run_ui(raw, |ui| {
+            // Force a wide available rect for the cell's parent Ui.
+            // We allocate a 400x40 child Ui by hand, then call
+            // `render_table_cell` inside it. The cell will see
+            // `ui.available_width() ≈ 400` but receive `pinned_width = 50`.
+            let (rect, _) = ui.allocate_at_least(egui::vec2(400.0, 40.0), egui::Sense::hover());
+            let mut child_ui = ui.new_child(egui::UiBuilder::new().max_rect(rect));
+            render_table_cell(&mut child_ui, &cell, Some(50.0));
+        });
+
+        // Find the cell border rect.
+        let cell_rects: Vec<_> = output
+            .shapes
+            .iter()
+            .filter_map(|cs| match &cs.shape {
+                Shape::Rect(r)
+                    if r.fill == egui::Color32::TRANSPARENT
+                        && r.stroke == TABLE_CELL_STROKE
+                        && r.stroke_kind == StrokeKind::Inside =>
+                {
+                    Some(r.rect)
+                }
+                _ => None,
+            })
+            .collect();
+
+        assert_eq!(
+            cell_rects.len(),
+            1,
+            "expected exactly one cell border; got {}",
+            cell_rects.len()
+        );
+
+        let r = cell_rects[0];
+        // The cell must not exceed `pinned_width + 2 * stroke_width`
+        // (1-px stroke on each side). Allow a 4-px tolerance for
+        // font-metric rounding. Before the fix the rect is ~400 px.
+        assert!(
+            r.width() < 60.0,
+            "cell must respect pinned_width=50; got {:.0} px (cell leaked \
+             to the Grid's wider allocation via `inner_w = max(pinned, available)`)",
+            r.width()
+        );
+        // And it must be at least pinned_width (the cell should not
+        // have collapsed below the FTWA decision either).
+        assert!(
+            r.width() >= 50.0 - 1.0,
+            "cell must not collapse below pinned_width=50; got {:.0} px",
+            r.width()
+        );
+    }
+
+    /// Regression test: a narrow-content column must NOT inherit width from
+    /// the Grid's natural content width. FTWA's pinned-width decision is
+    /// authoritative; the cell must not feed the Grid's `available_width()`
+    /// back as its own width.
+    ///
+    /// This is the user's laptop-research table from the bug screenshot
+    /// ("Reference: My Current Laptop"). In any viewport where the table
+    /// fits in surplus, the "Make" column's painted width must be the
+    /// width of "Make" (the longest token in the column), NOT the
+    /// Grid's natural column width.
+    ///
+    /// Before the fix: the "Make" column rendered ~280 px wide for the
+    /// word "Dell" because `render_table_cell` took
+    /// `inner_w = pinned_width.max(available_width)`, allowing the cell
+    /// to claim and report the Grid's wider natural allocation. The
+    /// pinned width leaked away.
+    #[test]
+    fn test_render_table_narrow_column_not_stretched_by_grid_allocation() {
+        use eframe::epaint::{Shape, StrokeKind};
+
+        let make = |t: &str| {
+            vec![InlineElem::Text(
+                t.to_string(),
+                crate::ui::render::TextStyle::default(),
+            )]
+        };
+        // The user's exact 4-column table. "Make" / "Dell" is the narrow
+        // column we are asserting on.
+        let table: Vec<Vec<Vec<InlineElem>>> = vec![
+            vec![
+                make("Make"),
+                make("Model and Model Number"),
+                make("Market Price (Original)"),
+                make("Display"),
+            ],
+            vec![
+                make("Dell"),
+                make("XPS 15 9570"),
+                make("~$1,500-$2,000 (discontinued)"),
+                make(r#"15.6" FHD (1920x1080)"#),
+            ],
+        ];
+
+        // 800 px viewport — well above sum_max, so the table is in the
+        // surplus regime and FTWA pins every column at its max_content.
+        let output = render_table_with_paint_output_viewport(&table, 800.0);
+
+        // Collect cell border rects and sort row-major (Y then X).
+        let mut rects: Vec<_> = output
+            .shapes
+            .iter()
+            .filter_map(|cs| match &cs.shape {
+                Shape::Rect(r)
+                    if r.fill == egui::Color32::TRANSPARENT
+                        && r.stroke == TABLE_CELL_STROKE
+                        && r.stroke_kind == StrokeKind::Inside =>
+                {
+                    Some(r.rect)
+                }
+                _ => None,
+            })
+            .collect();
+
+        assert_eq!(
+            rects.len(),
+            8,
+            "Expected 8 cell borders for 2x4 table; got {}",
+            rects.len()
+        );
+
+        rects.sort_by(|a, b| {
+            a.min
+                .y
+                .partial_cmp(&b.min.y)
+                .unwrap()
+                .then(a.min.x.partial_cmp(&b.min.x).unwrap())
+        });
+
+        // Header row (row 0): rects[0..4] is the "Make", "Model and
+        // Model Number", "Market Price (Original)", "Display" cells.
+        // Data row (row 1): rects[4..8] is "Dell", "XPS 15 9570", etc.
+        let make_header = rects[0];
+        let dell_data = rects[4];
+
+        // "Make" is a 4-letter word in the default body font (~14 px
+        // proportional). The column's longest token is "Make" itself
+        // (the header — "Dell" the data is shorter), so the column's
+        // max_content is ~50 px. With the 1-px TABLE_CELL_STROKE on
+        // each side, the painted border rect is ~50 px wide. Allow a
+        // generous upper bound (70 px) to absorb font-metric noise and
+        // the 1-px stroke on each edge, but stay well below the
+        // pre-fix ~280 px the user observed.
+        assert!(
+            make_header.width() < 70.0,
+            "Make header cell should be ~50 px wide (width of 'Make'); \
+             got {:.0} px. The column is being stretched by the Grid's \
+             natural content width — the pinned FTWA width is leaking \
+             through `inner_w = pinned_width.max(available_width)`.",
+            make_header.width()
+        );
+
+        // "Dell" data cell must match the "Make" header cell width —
+        // the same column, so the column width is column-wide, not
+        // cell-specific. The Grid's `prev_state` caching means the
+        // column width must be the same across both rows.
+        assert!(
+            (make_header.width() - dell_data.width()).abs() < 1.0,
+            "Make column width must match across rows: header = {:.1}, \
+             data = {:.1}",
+            make_header.width(),
+            dell_data.width()
+        );
+        assert!(
+            (make_header.min.x - dell_data.min.x).abs() < 1.0,
+            "Make column left edge must align across rows: header.x = {:.1}, \
+             data.x = {:.1}",
+            make_header.min.x,
+            dell_data.min.x
+        );
     }
 
     // --- P0-2: click-handler coverage ---------------------------------
