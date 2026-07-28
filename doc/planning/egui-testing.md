@@ -812,7 +812,7 @@ Each recommendation has a priority, an effort estimate, a concrete deliverable, 
 | **R-5** | Low | Delete the `eprintln!` at `src/ui/panels/right.rs:327` and the `dbg!()` calls in `tests/table_layout_test.rs`. Gate future diagnostic prints behind `#[cfg(debug_assertions)]` or assert on them. | 5 min |
 | **R-6** | Deferred to R-1 | The 3px project-wide threshold (Q10) and "no `#[cfg(target_os)]`" decisions are encoded in the R-1 helper. No separate work. | 0 |
 | **R-7** | Low | Standardise on `mod tests` only; merge `mod ui_tests` blocks into `mod tests` with section comments. Move `src/agent/agent_impl_tests.rs` into `src/agent/agent_impl.rs` as `mod tests`. Bundle with the next time one of the four affected files is touched. **Landed as `6bcdbc5` on 2026-07-27 (the four `mod ui_tests` → `mod tests` merges; the `agent_impl_tests.rs` move is still pending).** | 10 min |
-| **R-8** | Medium (deferred) | Per **Q11 (single PR vs multiple)**: lands in **one PR** with R-3's helper. Five Tier 4 click tests: TOC row click → `scroll_to_id`, tab close button, folder tree click → `selected_file`, send button → `submit_prompt`, batch button → `batch_dialog_open`. **Blocked on the test-infra scope of this branch:** the production click handlers in `ui/render.rs` and `ui/panels/right.rs` mutate fields of `FastMdApp` directly (`app.tab_manager.scroll_to = ...`, `app.tab_manager.tabs.remove(i)`, etc.), and the state-capture pattern (R-3) requires the click handler to push the side effect into the harness's persistent `T` state in addition to mutating `app`. The two existing working Tier 4 click tests in `ui/render.rs` (`test_copy_code_button_click_copies_to_output`, `test_hyperlink_click_opens_url`) test functions that are either (a) closures constructed entirely inside the test (no production code) or (b) only do work via `PlatformOutput::commands` (no `app` mutation). R-8 needs the production click handlers to be refactored to take a `&mut T` "side-effect sink" parameter — out of scope for the test-infra-only rule of this branch. | 0.5 day |
+| **R-8** | Medium | Per **Q11 (single PR vs multiple)**: lands in **one PR** with R-3's helper. Five Tier 4 click tests: TOC row click → `scroll_to_id`, tab close button, folder tree click → `selected_file`, send button → `submit_prompt`, batch button → `batch_dialog_open`. **Landed in 2 commits** (964e4b7 + 88ef2d1) on 2026-07-27. The refactor extracts each click handler into a pure `apply_*_click(app, ...)` function so the side effect can be unit-tested (Tier 1) without driving the harness. The 5 Tier 4 tests use the state-capture pattern from R-3 via per-panel `_capture` variants that take an `on_click: impl FnMut(&'static str)` callback. The production callers pass a no-op closure; the test callers pass a closure that pushes the event name into the harness's persistent `T = Vec<&'static str>` state, which is readable after the harness drops. | 0.5 day |
 | **R-9** | Low | Add `tests/common/egui_assert.rs::assert_no_id_change_warnings(log_msgs, shapes)`. Use it at `panels/{top,left}.rs`, `ui/app.rs:1352`. Add an id-stability test for `ui/background_logs.rs` (currently missing). | 1 hour |
 | **R-10** | Low | Move the `assert_eq!` calls in `test_render_heading_scroll_to_id` out of the `ctx.run_ui` closure. | 5 min |
 | **R-11** | Low (deferred to R-1) | Add a single "default app shell" snapshot — `app.render_panels(ui)` with a small markdown file open at 1024×768. Catches theme/palette drift across the whole UI. Lands in the same PR as R-1. | 30 min |
@@ -826,7 +826,7 @@ Each recommendation has a priority, an effort estimate, a concrete deliverable, 
 # Implementation Status (2026-07-27, on branch `tdd/egui-testing-rollout`)
 
 The rollout above started landing on 2026-07-27 on the
-`tdd/egui-testing-rollout` branch (off `fix/bugfixes` PR #36). Seven
+`tdd/egui-testing-rollout` branch (off `fix/bugfixes` PR #36). Eleven
 commits, in execution order:
 
 | # | Commit | R-items | Status |
@@ -840,12 +840,14 @@ commits, in execution order:
 | 7 | `e157c7b` | R-10 | Moved the `assert_eq!` calls in `test_render_heading_scroll_to_id` (`src/ui/render.rs`) out of the `ctx.run_ui` closure so the borrow checker can read the captured `scroll_id` after the closure returns. |
 | 8 | `6bcdbc5` | R-7 | Standardised the four files that had both `mod tests` and `mod ui_tests` (`panels/{top,right,bottom}.rs`, `background_logs.rs`) on a single `mod tests` with a section comment marker. `use super::*;` and helper imports appear once per file. |
 | 9 | `4658133` | R-9 (migrate) | Migrated the four ad-hoc id-stability tests scattered across `panels/{top,left}.rs` and `ui/app.rs` to the new `test_helpers::assert` helpers (`assert_no_id_change_in_shapes`, `assert_no_id_change_in_log`). Added a missing id-stability test for `ui/background_logs.rs` (`test_show_background_logs_window_no_id_change_warnings`). Helper API change: `assert_no_id_change_*` now takes `&[egui::Shape]` instead of `&[egui::epaint::ClippedShape]` so the call site can pass `output.shapes.into_iter().map(|cs| cs.shape).collect()` without depending on `clip_rect`. Drive-by clippy fix: `tests/render_snapshots.rs` no longer uses `if !try_snapshot(...) { return; }`. |
+| 10 | `964e4b7` | R-8 (refactor) | Extracted each of the 5 R-8 click handlers (batch button, TOC row, tab close / close-others / close-all, file row, send) into pure `apply_*_click(app, ...)` functions in their respective panels. The production click handler in the egui closure now calls the extracted function instead of mutating `app` inline. Removed the deferred `tab_actions: Vec<TabAction>` pattern in `panels/center.rs` since the extracted functions can be called directly from the click handler. 14 Tier 1 unit tests added (1 batch, 2 TOC, 4 tab close, 4 file row, 3 send). |
+| 11 | `88ef2d1` | R-8 (Tier 4) | Added 5 Tier 4 state-capture click tests that drive the actual `egui_kittest` harness. Each panel function got a `_capture` variant (`show_top_panel_capture`, `show_right_panel_capture`, `render_tabs_and_content_capture`, `render_flat_row_capture`, `show_bottom_panel_capture`) that takes an `on_click: impl FnMut(&'static str)` callback. Production callers pass a no-op; test callers pass a closure that pushes the event name into the harness's persistent `T = Vec<&'static str>` state, which is readable after the harness drops. The 5 Tier 4 tests: `test_batch_button_click_opens_dialog`, `test_toc_row_click_captures_event`, `test_tab_close_button_captures_event`, `test_file_row_click_captures_event`, `test_send_enter_key_captures_event` (Enter key synthesized via `harness.key_press(Key::Enter)` after focusing the command-input `TextEdit` via `accesskit::Role::TextInput`). The `file_row` test uses `Box::leak` to give a `TreeNodeContext` a `'static` lifetime so the harness can re-borrow it on every pass. |
 
 ## R-items still open after the 2026-07-27 pass
 
 | ID | Status | Note |
 |---|---|---|
-| R-8 | Open (deferred) | Five Tier 4 click tests (TOC row, tab close, folder tree, send, batch) per Q11 — lands in one PR with R-3's helper once the doc is reviewed. **The state-capture pattern (R-3) works when the production code writes to a `&mut T` captured by the harness closure, but the existing production click handlers write to `app.tab_manager.X` (a field on `FastMdApp`, not on a captured `T`). Refactoring those click paths to be testable without exposing `&mut FastMdApp` to the harness is a small but distinct piece of work.** |
+| R-8 | Landed (964e4b7, 88ef2d1) | Five Tier 4 click tests (TOC row, tab close, folder tree, send, batch) all green. 14 Tier 1 tests for the extracted `apply_*_click` functions added in the same commits. Implementation Status table below lists both commits. |
 | R-11 | Blocked by wgpu (see below) | The "default app shell" snapshot is deferred because `FastMdApp::render_panels` is not `pub` and the integration-test crate cannot call it. Either make `render_panels` and `render_table` `pub` (small refactor) or move the snapshot test to the in-source `mod tests` of `ui/app.rs`. |
 
 ## Blocking issue: `egui_kittest` `wgpu` feature does not compile on Windows (2026-07-27)
@@ -951,18 +953,21 @@ checks.
 ## Test status after the 2026-07-27 pass
 
 ```
-670 passed; 1 failed; 3 ignored
+689 passed; 1 failed; 3 ignored
 ```
 
 The 1 failure is `ui::panels::right::tests::test_show_right_panel_long_titles_anchor_at_panel_left_edge`,
 which was failing on a clean checkout of `a6a95d4` (PR #36's merge
 commit) before this branch started. Confirmed via `git stash` on
 the implementation branch. Pre-existing — not caused by R-1
-through R-9. Filed as a follow-up.
+through R-10. Filed as a follow-up.
 
 The test count went up by 1 (669 → 670) after R-9 added
-`test_show_background_logs_window_no_id_change_warnings`. The
-module path changed for the pre-existing right-panel failure too
+`test_show_background_logs_window_no_id_change_warnings`, then
+by 14 (670 → 684) after R-8's refactor added the Tier 1 tests
+for the extracted `apply_*_click` functions, then by 5
+(684 → 689) after R-8's Tier 4 state-capture click tests. The
+module path changed for the pre-existing right-panel failure
 (after R-7, `tests::` instead of `ui_tests::`) — the test name
 is the same.
 
