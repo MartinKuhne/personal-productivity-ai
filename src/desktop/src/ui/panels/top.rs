@@ -235,11 +235,9 @@ mod tests {
             None
         );
     }
-}
 
-#[cfg(test)]
-mod ui_tests {
-    use super::*;
+    // --- UI / window tests (R-7: merged from `mod ui_tests`) ---
+
     use crate::ui::strings::{APP_TITLE, BATCH_BUTTON, SHOW_LOG_CHECKBOX};
     use crate::ui::test_helpers::text::assert_text_contains;
 

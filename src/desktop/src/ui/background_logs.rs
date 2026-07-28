@@ -217,11 +217,8 @@ mod tests {
         assert_eq!(filtered_search.len(), 1);
         assert_eq!(filtered_search[0].message, "Watch 1");
     }
-}
 
-#[cfg(test)]
-mod ui_tests {
-    use super::*;
+    // --- UI / window tests (R-7: merged from `mod ui_tests`) ---
 
     fn create_test_app() -> FastMdApp {
         FastMdApp::empty_state(crate::config::AppConfig::default())

@@ -196,11 +196,9 @@ mod tests {
         assert_eq!(calculate_font_size(26), 10.0);
         assert!(calculate_font_size(usize::MAX) > 0.0);
     }
-}
 
-#[cfg(test)]
-mod ui_tests {
-    use super::*;
+    // --- UI / window tests (R-7: merged from `mod ui_tests`) ---
+
     use crate::ui::ToCEntry;
     use std::path::PathBuf;
 

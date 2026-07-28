@@ -283,11 +283,9 @@ mod tests {
         let index_b = output.find(expected_b).unwrap();
         assert!(index_a < index_b);
     }
-}
 
-#[cfg(test)]
-mod ui_tests {
-    use super::*;
+    // --- UI / window tests (R-7: merged from `mod ui_tests`) ---
+
     use crate::ui::strings::{QUICK_TASKS_MENU, STOP_AGENT_BUTTON};
     use crate::ui::test_helpers::text::assert_text_contains;
 
