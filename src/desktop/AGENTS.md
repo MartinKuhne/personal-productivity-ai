@@ -173,7 +173,9 @@ When adding or moving code, place files by **concern**, not by type:
 
 Before marking any task as complete, run the following from `src/desktop/` and ensure they all pass cleanly:
 - `cargo check` — no errors or warnings
-- `cargo test` — all tests pass
+- `cargo nextest run` — all tests pass (the `default` profile in `.config/nextest.toml` retries flaky tier-4 click tests twice; CI uses the `ci` profile which is strict)
 - `cargo clippy -- -D warnings` — no lint warnings (deny all)
 - `cargo fmt --check` — code is properly formatted
 - `cargo doc --no-deps --quiet` — documentation builds without warnings
+
+The project uses [`cargo-nextest`](https://nexte.st/) for the test runner instead of the built-in `cargo test`. nextest runs each test in its own process, surfaces per-test timing, and gives flaky tier-4 click tests a chance to retry. Install with `cargo install cargo-nextest --locked`; the configuration lives in `src/desktop/.config/nextest.toml`.

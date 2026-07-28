@@ -343,4 +343,77 @@ mod tests {
         let expected: std::collections::HashSet<PathBuf> = paths.into_iter().collect();
         assert_eq!(parsed_paths, expected);
     }
+
+    /// Drop-shutdown: workers must terminate promptly when the
+    /// sender is dropped with no pending work. The previous tests
+    /// always sent work before dropping the sender; a regression
+    /// that breaks the channel-close signal would still pass
+    /// those tests because the queue is non-empty at shutdown.
+    /// Here we drop with an empty queue and assert every worker
+    /// join completes within a short budget.
+    #[test]
+    fn test_spawn_workers_terminates_when_sender_dropped_with_empty_queue() {
+        let (_tx_work, rx_work) = std::sync::mpsc::channel();
+        let rx_work = Arc::new(Mutex::new(rx_work));
+        let (tx_gui, _rx_gui) = std::sync::mpsc::channel();
+
+        let workers = Indexer::spawn_workers(4, rx_work, tx_gui);
+        // Sender is in scope, but no items are sent. Drop the
+        // sender now; workers must see the channel close and exit.
+        drop(_tx_work);
+
+        let start = std::time::Instant::now();
+        for w in workers {
+            // join timeout: workers should exit in well under a
+            // second on a quiet queue. If a worker hangs, this
+            // surfaces as a hang rather than a silent infinite loop.
+            let join_budget = std::time::Duration::from_secs(2);
+            assert!(
+                start.elapsed() < join_budget,
+                "workers did not shut down within {join_budget:?}"
+            );
+            let _ = w.join();
+        }
+    }
+
+    /// A path that points at a non-existent file must not panic;
+    /// the worker should produce a `FileParsed` message with an
+    /// empty tag vector and move on. The existing tests only
+    /// cover happy paths where the file exists; a missing-file
+    /// path would surface as a panic that crashes the worker
+    /// thread and the channel goes silent.
+    #[test]
+    fn test_spawn_workers_handles_missing_file() {
+        let (tx_work, rx_work) = std::sync::mpsc::channel();
+        let rx_work = Arc::new(Mutex::new(rx_work));
+        let (tx_gui, rx_gui) = std::sync::mpsc::channel();
+
+        let workers = Indexer::spawn_workers(1, rx_work, tx_gui);
+        let missing = PathBuf::from("definitely/does/not/exist/note.md");
+        tx_work.send(missing.clone()).unwrap();
+        drop(tx_work);
+
+        let mut got_file_parsed = false;
+        let start = std::time::Instant::now();
+        while start.elapsed() < std::time::Duration::from_secs(2) {
+            if let Ok(crate::messages::BackgroundMessage::FileParsed { path, tags }) =
+                rx_gui.recv_timeout(std::time::Duration::from_millis(100))
+            {
+                assert_eq!(path, missing);
+                assert!(
+                    tags.is_empty(),
+                    "missing file must produce an empty tag list, got {tags:?}"
+                );
+                got_file_parsed = true;
+                break;
+            }
+        }
+        assert!(
+            got_file_parsed,
+            "worker must produce a FileParsed message for a missing file"
+        );
+        for w in workers {
+            let _ = w.join();
+        }
+    }
 }

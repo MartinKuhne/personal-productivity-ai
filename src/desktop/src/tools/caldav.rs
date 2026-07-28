@@ -915,6 +915,9 @@ mod tests {
     }
 
     #[test]
+    #[ignore = "tries to connect to a dead TCP port (127.0.0.1:1); the OS-level connect \
+                timeout makes this test take ~37s, dominating the suite. Re-enable on demand \
+                with `cargo nextest run --run-ignored all -- tools::caldav::tests::test_caldav_tools_unreachable_client`."]
     fn test_caldav_tools_unreachable_client() {
         let _ = rustls::crypto::ring::default_provider().install_default();
         let mut config = AppConfig::default();

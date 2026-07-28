@@ -559,11 +559,6 @@ mod tests {
     }
 
     #[test]
-    fn test_validate_missing_active_model() {
-        // Test removed as active model is now deprecated.
-    }
-
-    #[test]
     fn test_backward_compat_old_field_names() {
         let yaml = r#"
 model: "test"
@@ -867,8 +862,10 @@ user_name: "TestUser"
 
     #[test]
     fn deficit_strategy_respects_config_value() {
-        let mut config = AppConfig::default();
-        config.table_width_strategy = "proportional".to_string();
+        let config = AppConfig {
+            table_width_strategy: "proportional".to_string(),
+            ..AppConfig::default()
+        };
         assert_eq!(
             config.deficit_strategy(),
             crate::ui::table_width::DeficitStrategy::ProportionalToSlack

@@ -571,56 +571,13 @@ mod tests {
         assert!(prompt.contains("header-date: 2026-07-20T12:00:00Z"));
     }
 
-    #[test]
-    fn test_apply_tab_action_close() {
-        let mut tabs = vec![
-            PathBuf::from("a.md"),
-            PathBuf::from("b.md"),
-            PathBuf::from("c.md"),
-        ];
-        let mut selected = Some(PathBuf::from("a.md"));
-
-        apply_tab_action(&mut tabs, &mut selected, TabAction::Close(0));
-        assert_eq!(tabs, vec![PathBuf::from("b.md"), PathBuf::from("c.md")]);
-        // selected was a.md, so it falls back to the last tab (c.md)
-        assert_eq!(selected, Some(PathBuf::from("c.md")));
-    }
-
-    #[test]
-    fn test_apply_tab_action_close_others() {
-        let mut tabs = vec![
-            PathBuf::from("a.md"),
-            PathBuf::from("b.md"),
-            PathBuf::from("c.md"),
-        ];
-        let mut selected = Some(PathBuf::from("a.md"));
-
-        apply_tab_action(&mut tabs, &mut selected, TabAction::CloseOthers(1));
-        assert_eq!(tabs, vec![PathBuf::from("b.md")]);
-        assert_eq!(selected, Some(PathBuf::from("b.md")));
-    }
-
-    #[test]
-    fn test_apply_tab_action_close_all() {
-        let mut tabs = vec![PathBuf::from("a.md"), PathBuf::from("b.md")];
-        let mut selected = Some(PathBuf::from("b.md"));
-
-        apply_tab_action(&mut tabs, &mut selected, TabAction::CloseAll);
-        assert!(tabs.is_empty());
-        assert_eq!(selected, None);
-    }
-
-    #[test]
-    fn test_apply_tab_action_out_of_bounds() {
-        let mut tabs = vec![PathBuf::from("a.md")];
-        let mut selected = Some(PathBuf::from("a.md"));
-
-        // Invalid index should do nothing
-        apply_tab_action(&mut tabs, &mut selected, TabAction::Close(5));
-        assert_eq!(tabs.len(), 1);
-        assert_eq!(selected, Some(PathBuf::from("a.md")));
-    }
-
+    /// The previous four `test_apply_tab_action_*` tests
+    /// (Close / CloseOthers / CloseAll / out_of_bounds) are all
+    /// subsumed by this property test, which sweeps every input
+    /// combination for every `TabAction` variant. The fuzz catches
+    /// any regression in the per-variant code paths; the hand-written
+    /// tests only re-exercised the happy paths the fuzz already
+    /// covers at the (0..20 × 0..30 × 3 variants) scale.
     #[test]
     fn prop_apply_tab_action_preserves_invariants_fuzz() {
         for tab_count in 0..20 {
@@ -629,7 +586,6 @@ mod tests {
                     .map(|i| PathBuf::from(format!("{}.md", i)))
                     .collect();
                 let mut selected = tabs.last().cloned();
-
                 let initial_len = tabs.len();
 
                 apply_tab_action(&mut tabs, &mut selected, TabAction::Close(close_idx));
@@ -646,6 +602,40 @@ mod tests {
                 } else {
                     assert_eq!(tabs.len(), initial_len);
                 }
+            }
+
+            // CloseOthers: every tab except the keep-index is dropped,
+            // selection falls back to the kept tab.
+            for keep_idx in 0..tab_count + 1 {
+                let mut tabs: Vec<PathBuf> = (0..tab_count)
+                    .map(|i| PathBuf::from(format!("{}.md", i)))
+                    .collect();
+                let mut selected = tabs.last().cloned();
+
+                apply_tab_action(&mut tabs, &mut selected, TabAction::CloseOthers(keep_idx));
+
+                if keep_idx < tab_count {
+                    assert_eq!(tabs.len(), 1);
+                    assert_eq!(
+                        selected,
+                        tabs.first().cloned(),
+                        "CloseOthers: selected must point at the kept tab"
+                    );
+                } else {
+                    // Out-of-bounds keep: tabs untouched.
+                    assert_eq!(tabs.len(), tab_count);
+                }
+            }
+
+            // CloseAll: every tab dropped, selection cleared.
+            {
+                let mut tabs: Vec<PathBuf> = (0..tab_count)
+                    .map(|i| PathBuf::from(format!("{}.md", i)))
+                    .collect();
+                let mut selected = tabs.last().cloned();
+                apply_tab_action(&mut tabs, &mut selected, TabAction::CloseAll);
+                assert!(tabs.is_empty());
+                assert!(selected.is_none());
             }
         }
     }
@@ -718,9 +708,20 @@ mod tests {
         // string is only used in the inline editor). The render path
         // is exercised; full visual coverage of the markdown + YAML
         // view comes from the Tier 3 snapshot in R-1c.
-        let _ = ctx.run_ui(raw_input(), |ui| {
+        // Mode 2: a tab is open with markdown + YAML. The previous
+        // version of this test bound the rendered output to `_` and
+        // verified nothing about Mode 2; a regression in the
+        // markdown + YAML render path would not fail the test. The
+        // assertions below pin the contract: the markdown body
+        // text and the YAML title key both appear in the rendered
+        // output. Full pixel-level visual coverage of the
+        // markdown + YAML view comes from the Tier 3 snapshot in
+        // R-1c; this test is the deterministic safety net.
+        let output = ctx.run_ui(raw_input(), |ui| {
             show_center_panel(&mut app, ui);
         });
+        assert_text_contains(&output.shapes, "Document 1 Header");
+        assert_text_contains(&output.shapes, "title");
 
         app.agent_mut().set_show_results(true);
         app.agent_mut().set_running(true);
