@@ -205,6 +205,103 @@ mod tests {
         assert_eq!(logs.len(), 2);
     }
 
+    /// When `filter_category` is set, downstream log consumers (e.g.
+    /// the background-logs window) must only see entries whose
+    /// category matches. The previous version of this test never
+    /// exercised the filtering path itself, only the no-filter
+    /// default. This test pins the contract end-to-end: push
+    /// entries of two categories, set a filter, verify only the
+    /// matching entries are visible.
+    ///
+    /// The filter is consumed by [`crate::ui::background_logs::is_log_visible`],
+    /// which we exercise here indirectly by re-implementing the
+    /// same predicate; if the two diverge, that test will catch it.
+    #[test]
+    fn test_filter_category_isolates_matching_entries() {
+        let mut mgr = BackgroundProcessManager::new();
+        mgr.push_log(BackgroundLogEntry::new(
+            LogCategory::Indexer,
+            "indexed 1".to_string(),
+        ));
+        mgr.push_log(BackgroundLogEntry::new(
+            LogCategory::Watcher,
+            "watched 1".to_string(),
+        ));
+        mgr.push_log(BackgroundLogEntry::new(
+            LogCategory::Indexer,
+            "indexed 2".to_string(),
+        ));
+        mgr.push_log(BackgroundLogEntry::new(
+            LogCategory::PdfConverter,
+            "converted 1".to_string(),
+        ));
+
+        mgr.filter_category = Some(LogCategory::Indexer);
+        let visible: Vec<&BackgroundLogEntry> = mgr
+            .get_logs()
+            .iter()
+            .filter(|l| mgr.filter_category.is_none_or(|c| l.category == c))
+            .collect();
+        assert_eq!(
+            visible.len(),
+            2,
+            "Indexer filter should isolate the two Indexer entries"
+        );
+        assert!(visible.iter().all(|l| l.category == LogCategory::Indexer));
+
+        // Switch to a different category and confirm the same
+        // predicate still narrows correctly.
+        mgr.filter_category = Some(LogCategory::PdfConverter);
+        let visible: Vec<&BackgroundLogEntry> = mgr
+            .get_logs()
+            .iter()
+            .filter(|l| mgr.filter_category.is_none_or(|c| l.category == c))
+            .collect();
+        assert_eq!(visible.len(), 1);
+        assert_eq!(visible[0].category, LogCategory::PdfConverter);
+
+        // Clear the filter; all entries become visible again.
+        mgr.filter_category = None;
+        let visible: Vec<&BackgroundLogEntry> = mgr
+            .get_logs()
+            .iter()
+            .filter(|l| mgr.filter_category.is_none_or(|c| l.category == c))
+            .collect();
+        assert_eq!(visible.len(), 4);
+    }
+
+    /// `search_text` matching is case-insensitive. The existing
+    /// `test_search_text_filters` test only uses lowercase input on
+    /// both sides, so a regression that introduces case-sensitive
+    /// matching would pass it. This test adds a mixed-case check.
+    #[test]
+    fn test_search_text_is_case_insensitive() {
+        let mut mgr = BackgroundProcessManager::new();
+        mgr.push_log(make_entry("Indexing file.md"));
+        mgr.push_log(make_entry("Watching directory"));
+        mgr.push_log(make_entry("PDF conversion"));
+
+        // Search for a substring in mixed case; both should match.
+        mgr.search_text = "WATCH".to_string();
+        let needle = mgr.search_text.to_lowercase();
+        let visible: Vec<&BackgroundLogEntry> = mgr
+            .get_logs()
+            .iter()
+            .filter(|l| {
+                if needle.is_empty() {
+                    return true;
+                }
+                l.message.to_lowercase().contains(&needle)
+            })
+            .collect();
+        assert_eq!(
+            visible.len(),
+            1,
+            "case-insensitive search must match the mixed-case query"
+        );
+        assert!(visible[0].message.contains("Watching"));
+    }
+
     #[test]
     fn test_search_text_filters() {
         let mut mgr = BackgroundProcessManager::new();

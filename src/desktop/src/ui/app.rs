@@ -1427,9 +1427,42 @@ mod tests {
             app.render_panels(ui);
         });
 
-        let mut texts = Vec::new();
+        // Extract (text, rect) for every text shape, plus the
+        // overall bounding rect of the rendered output. The positional
+        // assertions below use each panel's stable text marker plus
+        // its expected spatial region, so a regression that swaps two
+        // panels (e.g. TOC appears on the left) fails the test.
+        //
+        // We use the text shape's `visual_bounding_rect` for the
+        // position. `text_shape.galley.rect` is in local widget
+        // coordinates and `clipped.clip_rect` is the parent panel's
+        // full allocation; neither is what we want. The visual
+        // bounding rect is the rect of the actually-rendered glyphs
+        // in root-Ui coordinates, which is where the text sits on
+        // screen.
+        let mut text_rects: Vec<(String, egui::Rect)> = Vec::new();
         let mut min_pos = egui::Pos2::new(f32::MAX, f32::MAX);
         let mut max_pos = egui::Pos2::new(f32::MIN, f32::MIN);
+
+        fn collect_text_rects(shape: &egui::Shape, acc: &mut Vec<(String, egui::Rect)>) {
+            match shape {
+                egui::Shape::Text(text_shape) => {
+                    let text = text_shape.galley.text().to_string();
+                    if !text.trim().is_empty() {
+                        let rect = text_shape.visual_bounding_rect();
+                        if rect.is_finite() && !rect.is_negative() {
+                            acc.push((text, rect));
+                        }
+                    }
+                }
+                egui::Shape::Vec(shapes) => {
+                    for s in shapes {
+                        collect_text_rects(s, acc);
+                    }
+                }
+                _ => {}
+            }
+        }
 
         for clipped in &output.shapes {
             let rect = clipped.shape.visual_bounding_rect();
@@ -1439,27 +1472,13 @@ mod tests {
                 max_pos.x = max_pos.x.max(rect.max.x);
                 max_pos.y = max_pos.y.max(rect.max.y);
             }
-
-            fn extract_text(shape: &egui::Shape, acc: &mut Vec<String>) {
-                match shape {
-                    egui::Shape::Text(text_shape) => {
-                        acc.push(text_shape.galley.text().to_string());
-                    }
-                    egui::Shape::Vec(shapes) => {
-                        for s in shapes {
-                            extract_text(s, acc);
-                        }
-                    }
-                    _ => {}
-                }
-            }
-            extract_text(&clipped.shape, &mut texts);
+            collect_text_rects(&clipped.shape, &mut text_rects);
         }
 
         let rendered_width = max_pos.x - min_pos.x;
         let rendered_height = max_pos.y - min_pos.y;
 
-        // 1. Verify that overall visual bounding box covers top-left to bottom-right of viewport.
+        // 1. Overall bounding box covers most of the 1024x768 viewport.
         assert!(
             rendered_width >= 800.0,
             "UI layout must span the window width (expected >= 800px, got {}px)",
@@ -1471,36 +1490,76 @@ mod tests {
             rendered_height
         );
 
-        // 2. Verify that unique text content from ALL 5 PANELS is present in the rendered output shapes.
-        // P1-7: reference `crate::ui::strings::*` constants rather than
-        // hardcoding literals so copy changes flow through one place.
-        let all_text = texts.join(" ");
+        // 2. Each panel's stable text marker is rendered AND sits in
+        // the expected spatial region. P1-7: reference
+        // `crate::ui::strings::*` constants rather than hardcoding
+        // literals so copy changes flow through one place.
         use crate::ui::strings::{APP_TITLE, TABLE_OF_CONTENTS_HEADER, WORKSPACE_HEADER};
 
+        let find_marker = |marker: &str| -> Option<egui::Rect> {
+            text_rects
+                .iter()
+                .find(|(t, _)| t.contains(marker))
+                .map(|(_, r)| *r)
+        };
+
+        // Top panel: header sits at the very top of the viewport.
+        let title_rect = find_marker(APP_TITLE)
+            .unwrap_or_else(|| panic!("Top panel content ({APP_TITLE:?}) not rendered"));
         assert!(
-            all_text.contains(APP_TITLE),
-            "Top panel content (APP_TITLE) must be rendered, text: {}",
-            all_text
+            title_rect.min.y < 50.0,
+            "Top panel must sit at the top of the viewport (min.y < 50, got {})",
+            title_rect.min.y
         );
+
+        // Left panel: header is in the leftmost ~250px column.
+        let left_rect = find_marker(WORKSPACE_HEADER)
+            .unwrap_or_else(|| panic!("Left panel content ({WORKSPACE_HEADER:?}) not rendered"));
         assert!(
-            all_text.contains(WORKSPACE_HEADER),
-            "Left panel content (WORKSPACE_HEADER) must be rendered, text: {}",
-            all_text
+            left_rect.min.x < 250.0,
+            "Left panel must sit in the leftmost column (min.x < 250, got {})",
+            left_rect.min.x
         );
+
+        // Right panel (TOC): header is on the right half of the
+        // viewport. The right panel anchors to the right edge, so
+        // its right side should be near the viewport's right edge.
+        let right_rect = find_marker(TABLE_OF_CONTENTS_HEADER).unwrap_or_else(|| {
+            panic!("Right panel content ({TABLE_OF_CONTENTS_HEADER:?}) not rendered")
+        });
         assert!(
-            all_text.contains(TABLE_OF_CONTENTS_HEADER),
-            "Right panel content (TABLE_OF_CONTENTS_HEADER) must be rendered, text: {}",
-            all_text
+            right_rect.max.x > 500.0,
+            "Right panel must sit on the right half of the viewport (max.x > 500, got {})",
+            right_rect.max.x
         );
-        // Center panel: the markdown body is the rendered content. The
-        // heading "Laptop Specifications" is the marker we use here; it
-        // is set by the test's `current_markdown` and is therefore not a
-        // canonical copy string. Keep the literal but add a comment.
+
+        // Center panel: the markdown heading is the body marker. The
+        // `Laptop Specifications` literal is set by the test's
+        // `current_markdown` and is therefore not a canonical copy
+        // string; keep the literal but add a comment.
+        //
+        // We only assert the left edge of the center text. The
+        // right edge can extend into the right panel's x range
+        // because the right panel renders on top of the center
+        // panel (it's the topmost layer in the 5-pane layout);
+        // checking max.x would couple the test to the heading's
+        // glyph width rather than the panel's actual position.
+        let center_rect = find_marker("Laptop Specifications")
+            .unwrap_or_else(|| panic!("Center panel content (markdown heading) not rendered"));
         assert!(
-            all_text.contains("Laptop Specifications"),
-            "Center panel content (markdown heading) must be rendered, text: {}",
-            all_text
+            center_rect.min.x > left_rect.max.x - 5.0,
+            "Center panel content must start after (or at) the left panel's right edge (left.max={}, center.min={})",
+            left_rect.max.x,
+            center_rect.min.x
         );
+
+        // Bottom/status bar: at least one of "Indexing finished" or
+        // "files" appears in the rendered text.
+        let all_text: String = text_rects
+            .iter()
+            .map(|(t, _)| t.as_str())
+            .collect::<Vec<_>>()
+            .join(" ");
         assert!(
             all_text.contains("Indexing finished") || all_text.contains("files"),
             "Bottom/Top status bar content must be rendered, text: {}",

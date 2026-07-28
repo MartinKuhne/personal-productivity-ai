@@ -1924,4 +1924,112 @@ mod tests {
             crate::tools::Safety::Mutating
         );
     }
+
+    /// Every tool registered in [`ToolRegistry::register_all`] must
+    /// be reachable in some config. Two sweeps:
+    ///  1. With `AppConfig::default()` (no credentials), every
+    ///     tool whose `is_enabled` default returns `true` must
+    ///     appear in the schema.
+    ///  2. With credentials populated, the credential-gated
+    ///     tools (CalDAV/CardDAV contacts + calendar, JMAP email)
+    ///     must also appear.
+    ///
+    /// Before this test, only CSV, weather, and calendar tools
+    /// were covered for prompt-gating; the other 30+ tools'
+    /// presence in the schema was untested. A misspelled
+    /// `register(Box::new(...))` or an `is_enabled` that always
+    /// returned false would not fail any other test.
+    #[test]
+    fn test_every_registered_tool_is_in_default_schema() {
+        let config = AppConfig::default();
+        let schema = get_tools_schema(&config, "");
+        let names: std::collections::BTreeSet<String> = schema
+            .as_array()
+            .expect("schema should be an array")
+            .iter()
+            .filter_map(|t| t["function"]["name"].as_str().map(String::from))
+            .collect();
+
+        let registry = ToolRegistry::new();
+        for name in registry.tools.keys() {
+            let tool = &registry.tools[name];
+            // Tools that are unconditionally enabled must be in
+            // the default-config schema.
+            if tool.is_enabled(&config, "") {
+                let entry = schema
+                    .as_array()
+                    .unwrap()
+                    .iter()
+                    .find(|t| t["function"]["name"].as_str() == Some(name))
+                    .unwrap_or_else(|| {
+                        panic!(
+                            "registered tool {name:?} is enabled by default but missing from \
+                             the schema; check that `name()` and the JSON schema name match"
+                        )
+                    });
+                let desc = entry["function"]["description"]
+                    .as_str()
+                    .unwrap_or_else(|| panic!("tool {name:?} has empty description"));
+                assert!(
+                    !desc.trim().is_empty(),
+                    "tool {name:?} has empty description; the LLM can't pick a tool it can't tell apart"
+                );
+            }
+        }
+
+        // Now enable all credential-gated tools and verify they
+        // appear in the schema. The gating on credentials is the
+        // intended behaviour; this sweep just confirms the tool
+        // is reachable when the credentials are present.
+        let mut cred_config = AppConfig::default();
+        cred_config.caldav_clients.insert(
+            "test_cal".to_string(),
+            crate::config::CalDavClient {
+                url: "http://localhost".to_string(),
+                username: "u".to_string(),
+                password: "p".to_string(),
+            },
+        );
+        cred_config.jmap_clients.insert(
+            "test_jmap".to_string(),
+            crate::config::JmapClient {
+                url: "http://localhost".to_string(),
+                token: "t".to_string(),
+            },
+        );
+        cred_config.searxng_url = Some("http://localhost".to_string());
+        // The CSV tools are gated on a prompt containing "csv" or
+        // related keywords (see `csv_tools_enabled`); use a CSV
+        // prompt for the second sweep so the CSV tools are enabled.
+        let cred_schema = get_tools_schema(&cred_config, "create a csv database");
+        let cred_names: std::collections::BTreeSet<String> = cred_schema
+            .as_array()
+            .unwrap()
+            .iter()
+            .filter_map(|t| t["function"]["name"].as_str().map(String::from))
+            .collect();
+
+        for name in registry.tools.keys() {
+            let name_owned: String = (*name).to_string();
+            if !registry.tools[name].is_enabled(&cred_config, "create a csv database") {
+                panic!(
+                    "registered tool {name_owned:?} cannot be enabled by any config we know about; \
+                     check the is_enabled predicate and the test's config setup"
+                );
+            }
+            assert!(
+                cred_names.contains(&name_owned),
+                "tool {name_owned:?} should be in the schema when credentials are populated"
+            );
+        }
+
+        // The schema must be non-empty: the project ships with
+        // 30+ tools; a regression that returns an empty array
+        // (e.g. a broken `is_enabled` default) would silently
+        // disable the agent.
+        assert!(
+            !names.is_empty(),
+            "get_tools_schema returned no tools; check is_enabled defaults"
+        );
+    }
 }

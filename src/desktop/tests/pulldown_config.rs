@@ -46,15 +46,6 @@ fn has_task_marker(events: &[RenderEvent]) -> bool {
     })
 }
 
-fn has_hard_break(events: &[RenderEvent]) -> bool {
-    events.iter().any(|e| match e {
-        RenderEvent::FlushInline { elems, .. } => elems
-            .iter()
-            .any(|el| matches!(el, fastmd::ui::render::InlineElem::SoftBreak)),
-        _ => false,
-    })
-}
-
 #[test]
 fn gfm_tables_are_recognized() {
     let md = "| A | B |\n|---|---|\n| 1 | 2 |";
@@ -96,25 +87,42 @@ fn task_lists_are_recognized() {
 }
 
 #[test]
-fn hard_breaks_are_not_enabled() {
-    // The project does not enable ENABLE_HARD_BREAKS. A single newline
-    // in markdown should be a soft break (rendered as a space) — not
-    // a hard line break. Verify by checking that no SoftBreak (the
-    // soft-break sentinel) is emitted for a single-newline input.
+fn parse_emits_flush_inline_for_newline_separated_text() {
+    // A single-newline input must produce a `FlushInline` carrying
+    // both fragments — the parser collapses the soft line break into
+    // a single inline stream with a space. This is the contract
+    // pinned here: a regression that promotes `\n` to a hard line
+    // break (or drops one of the fragments) would surface as either
+    // two separate `FlushInline` events or a missing fragment.
+    //
+    // Note: the project does not enable `Options::ENABLE_HARD_BREAKS`,
+    // and `RenderEvent` has no `HardBreak` variant — the soft-break
+    // path is the only legal one. If a future refactor adds a
+    // `HardBreak` variant or enables the option, this test will
+    // catch the event-stream change.
     let md = "line1\nline2";
     let events = parse_markdown_to_events(md);
-    // The parser does still emit a SoftBreak for \n in the source; the
-    // point is that it must NOT have promoted it to a hard break at
-    // the pulldown-cmark layer. The event stream is the same either
-    // way (the parser collapses both into FlushInline with a space),
-    // so we simply assert that the parser does not crash and emits
-    // a FlushInline for the line. The real assertion lives in the
-    // parser's structural tests.
+    let inline_texts: Vec<String> = events
+        .iter()
+        .filter_map(|e| match e {
+            RenderEvent::FlushInline { elems, .. } => {
+                let mut s = String::new();
+                for elem in elems {
+                    if let fastmd::ui::render::InlineElem::Text(t, _) = elem {
+                        s.push_str(t);
+                    }
+                }
+                Some(s)
+            }
+            _ => None,
+        })
+        .collect();
     assert!(
-        events
-            .iter()
-            .any(|e| matches!(e, RenderEvent::FlushInline { .. })),
-        "single-newline input should produce a FlushInline; got {events:?}"
+        inline_texts.iter().any(|t| t.contains("line1")),
+        "first fragment lost from the inline stream: {events:?}"
     );
-    let _ = has_hard_break; // silence dead-code warning if the helper isn't used elsewhere
+    assert!(
+        inline_texts.iter().any(|t| t.contains("line2")),
+        "second fragment lost from the inline stream: {events:?}"
+    );
 }
