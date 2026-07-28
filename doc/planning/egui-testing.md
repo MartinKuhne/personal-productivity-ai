@@ -826,7 +826,7 @@ Each recommendation has a priority, an effort estimate, a concrete deliverable, 
 # Implementation Status (2026-07-27, on branch `tdd/egui-testing-rollout`)
 
 The rollout above started landing on 2026-07-27 on the
-`tdd/egui-testing-rollout` branch (off `fix/bugfixes` PR #36). Five
+`tdd/egui-testing-rollout` branch (off `fix/bugfixes` PR #36). Seven
 commits, in execution order:
 
 | # | Commit | R-items | Status |
@@ -836,16 +836,16 @@ commits, in execution order:
 | 3 | `32582ce` | R-1a | `image` dev-dep added with the `png` feature. (Initial commit used `insta = { version = "1.40", features = ["png"] }` — turned out `egui_kittest`'s `snapshot` feature does **not** use `insta`; it has its own kittest format. The `insta` line was replaced with the `image` dev-dep that egui_kittest's snapshot module actually requires.) |
 | 4 | `cd1d884` | R-1b + R-1c | `test_helpers::snapshot` module added with the 3px threshold constant (Q10) and the `DEFAULT_VIEWPORT` constant. `tests/render_snapshots.rs` added with 2 initial snapshot test cases (`snapshot_full_markdown_doc`, `snapshot_yaml_table`). Both gracefully **skip** when the wgpu renderer is missing — see the wgpu blocker below. |
 | 5 | `9a65830` | R-1d | CI step added to `rust-quality-gate.yml` that fails the test job on any `tests/snapshots/*.new.png`. This is the `egui_kittest` equivalent of `cargo insta pending-snapshots` (Q3). |
+| 6 | `87330a0` | R-5 + P2-5 | `eprintln!` in `right.rs:327` and the no-assert `old_bug_set_width_ignored` test in `tests/table_layout_test.rs` deleted. (The summary at the time of commit 5 listed R-5 as open; R-5 is actually closed by commit 6.) |
+| 7 | `e157c7b` | R-10 | Moved the `assert_eq!` calls in `test_render_heading_scroll_to_id` (`src/ui/render.rs`) out of the `ctx.run_ui` closure so the borrow checker can read the captured `scroll_id` after the closure returns. |
+| 8 | `6bcdbc5` | R-7 | Standardised the four files that had both `mod tests` and `mod ui_tests` (`panels/{top,right,bottom}.rs`, `background_logs.rs`) on a single `mod tests` with a section comment marker. `use super::*;` and helper imports appear once per file. |
+| 9 | `4658133` | R-9 (migrate) | Migrated the four ad-hoc id-stability tests scattered across `panels/{top,left}.rs` and `ui/app.rs` to the new `test_helpers::assert` helpers (`assert_no_id_change_in_shapes`, `assert_no_id_change_in_log`). Added a missing id-stability test for `ui/background_logs.rs` (`test_show_background_logs_window_no_id_change_warnings`). Helper API change: `assert_no_id_change_*` now takes `&[egui::Shape]` instead of `&[egui::epaint::ClippedShape]` so the call site can pass `output.shapes.into_iter().map(|cs| cs.shape).collect()` without depending on `clip_rect`. Drive-by clippy fix: `tests/render_snapshots.rs` no longer uses `if !try_snapshot(...) { return; }`. |
 
 ## R-items still open after the 2026-07-27 pass
 
 | ID | Status | Note |
 |---|---|---|
-| R-5 | Open | `eprintln!` in `right.rs:327` and `dbg!()` in `tests/table_layout_test.rs` still leak diagnostic output. |
-| R-7 | Open | `mod tests` / `mod ui_tests` naming inconsistency in 4 files (`panels/{top,right,bottom}.rs`, `background_logs.rs`) and `#[path]` indirection in `agent/mod.rs` for `agent_impl_tests.rs` still in place. |
-| R-8 | Open | Five Tier 4 click tests (TOC row, tab close, folder tree, send, batch) per Q11 — lands in one PR with R-3's helper once the doc is reviewed. |
-| R-9 | Open | Migrate the existing ad-hoc id-stability tests in `panels/{top,left}.rs` and `ui/app.rs:1352` to the new `test_helpers::assert::assert_no_id_change_*` helpers. Add an id-stability test for `ui/background_logs.rs` (currently missing). |
-| R-10 | Open | Move the `assert_eq!` calls in `test_render_heading_scroll_to_id` (`src/ui/render.rs:1574-1594`) out of the `ctx.run_ui` closure. |
+| R-8 | Open (deferred) | Five Tier 4 click tests (TOC row, tab close, folder tree, send, batch) per Q11 — lands in one PR with R-3's helper once the doc is reviewed. **The state-capture pattern (R-3) works when the production code writes to a `&mut T` captured by the harness closure, but the existing production click handlers write to `app.tab_manager.X` (a field on `FastMdApp`, not on a captured `T`). Refactoring those click paths to be testable without exposing `&mut FastMdApp` to the harness is a small but distinct piece of work.** |
 | R-11 | Blocked by wgpu (see below) | The "default app shell" snapshot is deferred because `FastMdApp::render_panels` is not `pub` and the integration-test crate cannot call it. Either make `render_panels` and `render_table` `pub` (small refactor) or move the snapshot test to the in-source `mod tests` of `ui/app.rs`. |
 
 ## Blocking issue: `egui_kittest` `wgpu` feature does not compile on Windows (2026-07-27)
@@ -951,15 +951,23 @@ checks.
 ## Test status after the 2026-07-27 pass
 
 ```
-669 passed; 1 failed; 3 ignored
+670 passed; 1 failed; 3 ignored
 ```
 
-The 1 failure is `ui::panels::right::ui_tests::test_show_right_panel_long_titles_anchor_at_panel_left_edge`,
+The 1 failure is `ui::panels::right::tests::test_show_right_panel_long_titles_anchor_at_panel_left_edge`,
 which was failing on a clean checkout of `a6a95d4` (PR #36's merge
 commit) before this branch started. Confirmed via `git stash` on
 the implementation branch. Pre-existing — not caused by R-1
-through R-3. Filed as a follow-up.
+through R-9. Filed as a follow-up.
 
-Clippy is clean on the new code (the 6 pre-existing warnings are
-all in `src/ui/render.rs:1938`, `1954`, `1958`, `1974`, `2043`,
-`2050`).
+The test count went up by 1 (669 → 670) after R-9 added
+`test_show_background_logs_window_no_id_change_warnings`. The
+module path changed for the pre-existing right-panel failure too
+(after R-7, `tests::` instead of `ui_tests::`) — the test name
+is the same.
+
+Clippy is clean on the new code. The 6 pre-existing warnings
+(`needless_range_loop` x4, `useless_vec` x2) are all in
+`src/ui/render.rs` test code at lines 1938, 1954, 1958, 1974,
+2043, 2050 — they predate the branch and are out of scope for
+this rollout.
