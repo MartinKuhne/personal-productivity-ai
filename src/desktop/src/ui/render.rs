@@ -3175,4 +3175,108 @@ def foo():
             }
         }
     }
+
+    // ---- Off-viewport text guards (REQ-211c) -------------------------
+
+    /// Render the long-table-row fixture at a phone-sized viewport
+    /// and assert no `Shape::Text` is permanently outside its
+    /// containing clip rect. Catches the F1 (horizontal clip) and
+    /// F3 (table column overflow) failure modes; the §3.6 fallback
+    /// in `render_table` must wrap the table in a horizontal
+    /// `ScrollArea` so cell text remains reachable.
+    ///
+    /// Mirrors the production render path: `render_markdown` is
+    /// always wrapped in a vertical `ScrollArea` by the center panel
+    /// (`src/ui/panels/center.rs:364`). The test must do the same,
+    /// otherwise tall content trivially exceeds the viewport's
+    /// bottom edge and triggers a false positive.
+    #[test]
+    fn render_markdown_no_offscreen_text_at_narrow_viewport() {
+        use crate::ui::test_helpers::offscreen::assert_no_offscreen_text;
+
+        // Markdown body that contains a table wider than the viewport
+        // plus surrounding prose and headings. The fixture lives under
+        // `src/test/wiki/Travel/long-table-row.md` per
+        // `src/test/wiki/AGENTS.md` §"Fixtures only".
+        let md = include_str!("../../../test/wiki/Travel/long-table-row.md");
+
+        // 320 px is the iPhone 5 / SE 1st-gen width — the narrowest
+        // viewport we expect to support. A 6-column table with long
+        // text guarantees `decision.needs_horizontal_scroll == true`
+        // on this viewport, exercising the §3.6 fallback path.
+        let viewport_width: f32 = 320.0;
+        let viewport_height: f32 = 800.0;
+
+        let raw = egui::RawInput {
+            screen_rect: Some(egui::Rect::from_min_size(
+                egui::Pos2::ZERO,
+                egui::vec2(viewport_width, viewport_height),
+            )),
+            ..egui::RawInput::default()
+        };
+        let mut scroll_id = None;
+        let mut pending_toggles = Vec::new();
+
+        let ctx = egui::Context::default();
+        let output = ctx.run_ui(raw, |ui| {
+            egui::CentralPanel::default().show(ui, |ui| {
+                egui::ScrollArea::vertical()
+                    .id_salt("main_markdown_scroll")
+                    .show(ui, |ui| {
+                        render_markdown(
+                            ui,
+                            md,
+                            &mut scroll_id,
+                            &mut pending_toggles,
+                            crate::ui::table_width::DeficitStrategy::ProportionalToSlack,
+                        );
+                    });
+            });
+        });
+
+        assert_no_offscreen_text(&output.shapes);
+    }
+
+    /// Same fixture at a desktop-sized viewport (the FTWA path, not
+    /// the §3.6 fallback). The table fits in columns; the helper
+    /// must still report no off-viewport text inside the vertical
+    /// scroll content rect.
+    #[test]
+    fn render_markdown_no_offscreen_text_at_wide_viewport() {
+        use crate::ui::test_helpers::offscreen::assert_no_offscreen_text;
+
+        let md = include_str!("../../../test/wiki/Travel/long-table-row.md");
+
+        let viewport_width: f32 = 1600.0;
+        let viewport_height: f32 = 800.0;
+
+        let raw = egui::RawInput {
+            screen_rect: Some(egui::Rect::from_min_size(
+                egui::Pos2::ZERO,
+                egui::vec2(viewport_width, viewport_height),
+            )),
+            ..egui::RawInput::default()
+        };
+        let mut scroll_id = None;
+        let mut pending_toggles = Vec::new();
+
+        let ctx = egui::Context::default();
+        let output = ctx.run_ui(raw, |ui| {
+            egui::CentralPanel::default().show(ui, |ui| {
+                egui::ScrollArea::vertical()
+                    .id_salt("main_markdown_scroll")
+                    .show(ui, |ui| {
+                        render_markdown(
+                            ui,
+                            md,
+                            &mut scroll_id,
+                            &mut pending_toggles,
+                            crate::ui::table_width::DeficitStrategy::ProportionalToSlack,
+                        );
+                    });
+            });
+        });
+
+        assert_no_offscreen_text(&output.shapes);
+    }
 }
