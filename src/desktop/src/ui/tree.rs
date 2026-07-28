@@ -283,6 +283,14 @@ pub fn flatten_tree(
 ///     `ctx.selected_file()` is set to it.
 ///   * With no modifier: replaces the selection with this single
 ///     file and pushes it onto `ctx.tabs()` if not already open.
+///   * **Always:** updates `ctx.selected_dir()` (the "current
+///     directory context" used by the bottom-panel prompt prefix
+///     and by the agent session dispatch) to the file's
+///     containing directory — `row.path.parent()`. If the file
+///     has no parent component, `selected_dir` is cleared to
+///     `None`. This runs in both the modifier and no-modifier
+///     branches: the user is operating in the clicked file's
+///     directory regardless of how they selected it.
 ///
 /// Takes `&mut TreeNodeContext` rather than three separate `&mut`
 /// fields because Rust's borrow checker treats three calls to
@@ -309,7 +317,12 @@ pub fn apply_file_row_click(ctx: &mut TreeNodeContext<'_>, row: &FlatRow) {
     // lets the compiler split-borrow the inner struct directly.
     let TreeNodeContext {
         file_ops: _,
-        dir_ops: _,
+        dir_ops:
+            DirOpsContext {
+                selected_dir,
+                create_dir_dialog_open: _,
+                create_dir_parent: _,
+            },
         selection:
             SelectionContext {
                 selected_file,
@@ -337,6 +350,14 @@ pub fn apply_file_row_click(ctx: &mut TreeNodeContext<'_>, row: &FlatRow) {
             tabs.push(row.path.clone());
         }
     }
+    // Always refresh the current directory context to the file's
+    // containing directory. The bottom-panel prompt prefix and
+    // the agent session dispatch both read `selected_dir`, so a
+    // stale value would mislead both surfaces after a file click.
+    // `Path::parent` returns `None` for bare filenames (no parent
+    // component), which is the right neutral state for the bottom
+    // panel's `>` prefix.
+    **selected_dir = row.path.parent().map(|p| p.to_path_buf());
 }
 
 /// Render a single flat row with the same interaction logic as `draw_tree_node`
@@ -1109,6 +1130,209 @@ mod tests {
             tabs,
             vec![PathBuf::from("a.md")],
             "clicking an already-open tab must not push a duplicate"
+        );
+    }
+
+    /// TDD regression: clicking a file row in the left directory
+    /// tree must update `selected_dir` (the "current directory
+    /// context" used by the bottom-panel prompt prefix and the
+    /// agent session) to the file's containing directory.
+    ///
+    /// Before the fix, `apply_file_row_click` only updated
+    /// `selected_file` / `selected_files` / `tabs` — `selected_dir`
+    /// kept whatever value the previous directory click (or app
+    /// start) had set, so the bottom panel would keep showing a
+    /// stale directory prefix and the agent would receive the
+    /// wrong context once the user opened a file.
+    #[test]
+    fn test_apply_file_row_click_updates_selected_dir_to_parent() {
+        let mut tabs: Vec<PathBuf> = vec![];
+        let mut selected_file: Option<PathBuf> = None;
+        let mut selected_files: HashSet<PathBuf> = HashSet::new();
+        let mut expanded_dirs: HashSet<PathBuf> = HashSet::new();
+        // Pre-existing stale value to prove the click overwrites it.
+        let mut selected_dir: Option<PathBuf> = Some(PathBuf::from("C:/old/dir"));
+        let file_path = PathBuf::from("C:/notes/folder/file.md");
+        let expected_parent = Some(PathBuf::from("C:/notes/folder"));
+        let row = FlatRow {
+            depth: 1,
+            name: "file.md".to_string(),
+            path: file_path.clone(),
+            is_dir: false,
+            is_expanded: false,
+        };
+        let mut ctx = TreeNodeContext {
+            file_ops: FileOpsContext {
+                file_to_move: &mut None,
+                move_dialog_open: &mut false,
+                file_to_rename: &mut None,
+                rename_dialog_open: &mut false,
+                rename_new_name: &mut String::new(),
+            },
+            dir_ops: DirOpsContext {
+                selected_dir: &mut selected_dir,
+                create_dir_dialog_open: &mut false,
+                create_dir_parent: &mut None,
+            },
+            selection: SelectionContext {
+                selected_file: &mut selected_file,
+                selected_files: &mut selected_files,
+                expanded_dirs: &mut expanded_dirs,
+                tabs: &mut tabs,
+            },
+            app: AppIntegrationContext {
+                layout: &mut PanelLayout::default(),
+                submit_prompt: &mut None,
+                content_libraries: &[],
+                open_editor: &mut None,
+                modifiers: egui::Modifiers::default(),
+                inline_editor_enabled: false,
+                bg_tx: &None,
+                file_event_producer: None,
+            },
+        };
+
+        apply_file_row_click(&mut ctx, &row);
+
+        assert_eq!(
+            selected_dir, expected_parent,
+            "clicking a file row must update selected_dir to the file's containing directory"
+        );
+    }
+
+    /// TDD regression: even with a multi-select modifier (shift),
+    /// clicking a file row must still update `selected_dir` to
+    /// the file's containing directory. The user is operating
+    /// in that directory and the bottom-panel prefix / agent
+    /// context should reflect it.
+    #[test]
+    fn test_apply_file_row_click_shift_updates_selected_dir_to_parent() {
+        let mut tabs: Vec<PathBuf> = vec![];
+        let mut selected_file: Option<PathBuf> = None;
+        let mut selected_files: HashSet<PathBuf> = HashSet::new();
+        let mut expanded_dirs: HashSet<PathBuf> = HashSet::new();
+        let mut selected_dir: Option<PathBuf> = None;
+        let file_path = PathBuf::from("C:/notes/folder/file.md");
+        let expected_parent = Some(PathBuf::from("C:/notes/folder"));
+        let row = FlatRow {
+            depth: 1,
+            name: "file.md".to_string(),
+            path: file_path.clone(),
+            is_dir: false,
+            is_expanded: false,
+        };
+        let mut ctx = TreeNodeContext {
+            file_ops: FileOpsContext {
+                file_to_move: &mut None,
+                move_dialog_open: &mut false,
+                file_to_rename: &mut None,
+                rename_dialog_open: &mut false,
+                rename_new_name: &mut String::new(),
+            },
+            dir_ops: DirOpsContext {
+                selected_dir: &mut selected_dir,
+                create_dir_dialog_open: &mut false,
+                create_dir_parent: &mut None,
+            },
+            selection: SelectionContext {
+                selected_file: &mut selected_file,
+                selected_files: &mut selected_files,
+                expanded_dirs: &mut expanded_dirs,
+                tabs: &mut tabs,
+            },
+            app: AppIntegrationContext {
+                layout: &mut PanelLayout::default(),
+                submit_prompt: &mut None,
+                content_libraries: &[],
+                open_editor: &mut None,
+                modifiers: egui::Modifiers {
+                    shift: true,
+                    ..Default::default()
+                },
+                inline_editor_enabled: false,
+                bg_tx: &None,
+                file_event_producer: None,
+            },
+        };
+
+        apply_file_row_click(&mut ctx, &row);
+
+        assert_eq!(
+            selected_dir, expected_parent,
+            "shift-clicking a file row must also update selected_dir to the file's containing directory"
+        );
+    }
+
+    /// Edge case: a file with no parent component (a bare
+    /// filename like `file.md`) must refresh `selected_dir` away
+    /// from any stale prior value. `Path::parent("file.md")`
+    /// returns `Some(Path::new(""))` (an empty path), not `None`,
+    /// because the OS-level "containing directory" of a bare
+    /// filename is the empty path. The downstream
+    /// `compute_prompt_prefix` already handles this case — an
+    /// empty path falls through to its `is_empty()` branch and
+    /// renders the bare `">"` prefix, matching the `None` case.
+    #[test]
+    fn test_apply_file_row_click_bare_filename_sets_empty_parent() {
+        let mut tabs: Vec<PathBuf> = vec![];
+        let mut selected_file: Option<PathBuf> = None;
+        let mut selected_files: HashSet<PathBuf> = HashSet::new();
+        let mut expanded_dirs: HashSet<PathBuf> = HashSet::new();
+        let mut selected_dir: Option<PathBuf> = Some(PathBuf::from("C:/stale/dir"));
+        let row = FlatRow {
+            depth: 0,
+            name: "file.md".to_string(),
+            path: PathBuf::from("file.md"),
+            is_dir: false,
+            is_expanded: false,
+        };
+        let mut ctx = TreeNodeContext {
+            file_ops: FileOpsContext {
+                file_to_move: &mut None,
+                move_dialog_open: &mut false,
+                file_to_rename: &mut None,
+                rename_dialog_open: &mut false,
+                rename_new_name: &mut String::new(),
+            },
+            dir_ops: DirOpsContext {
+                selected_dir: &mut selected_dir,
+                create_dir_dialog_open: &mut false,
+                create_dir_parent: &mut None,
+            },
+            selection: SelectionContext {
+                selected_file: &mut selected_file,
+                selected_files: &mut selected_files,
+                expanded_dirs: &mut expanded_dirs,
+                tabs: &mut tabs,
+            },
+            app: AppIntegrationContext {
+                layout: &mut PanelLayout::default(),
+                submit_prompt: &mut None,
+                content_libraries: &[],
+                open_editor: &mut None,
+                modifiers: egui::Modifiers::default(),
+                inline_editor_enabled: false,
+                bg_tx: &None,
+                file_event_producer: None,
+            },
+        };
+
+        apply_file_row_click(&mut ctx, &row);
+
+        // `Path::parent("file.md")` is `Some(Path::new(""))`,
+        // not `None`. Verify the click refreshes the stale
+        // value to that canonical empty-parent form, and that
+        // the resulting bottom-panel prefix renders as the bare
+        // ">" (same surface as `selected_dir == None`).
+        assert_eq!(
+            selected_dir,
+            Some(PathBuf::new()),
+            "clicking a bare-filename row must set selected_dir to Some(Path::new(\"\"))"
+        );
+        let prefix = crate::ui::panels::bottom::compute_prompt_prefix(selected_dir.as_deref(), &[]);
+        assert_eq!(
+            prefix, ">",
+            "an empty-path selected_dir must render as the bare `>` prefix in the bottom panel"
         );
     }
 
