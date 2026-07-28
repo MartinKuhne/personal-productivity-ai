@@ -1944,7 +1944,7 @@ def foo():
         });
 
         // Group into 3 rows of 3 cells each
-        let rows = vec![
+        let rows: [Vec<egui::Rect>; 3] = [
             vec![rects[0], rects[1], rects[2]],
             vec![rects[3], rects[4], rects[5]],
             vec![rects[6], rects[7], rects[8]],
@@ -1960,13 +1960,13 @@ def foo():
         );
 
         // For each column j ∈ 0..3, check that min.x and width match across all rows
-        for col in 0..3 {
-            let first_min_x = rows[0][col].min.x;
-            let first_width = rows[0][col].width();
+        for (col, first_cell) in rows[0].iter().enumerate() {
+            let first_min_x = first_cell.min.x;
+            let first_width = first_cell.width();
 
-            for row in 1..3 {
-                let min_x = rows[row][col].min.x;
-                let width = rows[row][col].width();
+            for (row, row_data) in rows.iter().enumerate().skip(1) {
+                let min_x = row_data[col].min.x;
+                let width = row_data[col].width();
 
                 assert!(
                     (min_x - first_min_x).abs() < 1e-3,
@@ -1980,11 +1980,11 @@ def foo():
         }
 
         // Verify gutter spacing between columns is 10px across all rows
-        for row in 0..3 {
-            let col0_right = rows[row][0].max.x;
-            let col1_left = rows[row][1].min.x;
-            let col1_right = rows[row][1].max.x;
-            let col2_left = rows[row][2].min.x;
+        for (row, row_data) in rows.iter().enumerate() {
+            let col0_right = row_data[0].max.x;
+            let col1_left = row_data[1].min.x;
+            let col1_right = row_data[1].max.x;
+            let col2_left = row_data[2].min.x;
 
             let gutter_0_1 = col1_left - col0_right;
             let gutter_1_2 = col2_left - col1_right;
@@ -2049,19 +2049,19 @@ def foo():
                 .then(a.min.x.partial_cmp(&b.min.x).unwrap())
         });
 
-        let rows = vec![
+        let rows: [Vec<egui::Rect>; 3] = [
             vec![rects[0], rects[1]],
             vec![rects[2], rects[3]],
             vec![rects[4], rects[5]],
         ];
 
         // For column 0 and column 1, empty row 0 cells must match row 1 & 2 width and left edge
-        for col in 0..2 {
-            let col_width = rows[1][col].width();
-            let col_min_x = rows[1][col].min.x;
+        for (col, (header_cell, ref_cell)) in rows[0].iter().zip(rows[1].iter()).enumerate() {
+            let col_width = ref_cell.width();
+            let col_min_x = ref_cell.min.x;
 
-            let row0_width = rows[0][col].width();
-            let row0_min_x = rows[0][col].min.x;
+            let row0_width = header_cell.width();
+            let row0_min_x = header_cell.min.x;
 
             assert!(
                 (row0_min_x - col_min_x).abs() < 1e-3,
