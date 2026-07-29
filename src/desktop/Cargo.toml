@@ -1,11 +1,11 @@
 [package]
 name = "fastmd"
-version = "1.2.0"
+version = "0.2.0"
 edition = "2024"
 description = "Fast Markdown viewer with AI agent capabilities"
 license = "MIT"
-repository = "https://github.com/user/fastmd"
-categories = ["command-line-utilities", "text-editors", "development-tools"]
+repository = "https://github.com/MartinKuhne/personal-productivity-ai/"
+categories = ["text-editors"]
 keywords = ["markdown", "viewer", "ai", "agent"]
 
 [dependencies]
