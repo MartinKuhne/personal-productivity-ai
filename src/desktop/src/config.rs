@@ -370,7 +370,7 @@ pub fn load_config() -> AppConfig {
 pub(crate) fn load_config_from_path(config_path: &Path) -> AppConfig {
     if config_path.exists() {
         if let Ok(content) = std::fs::read_to_string(config_path) {
-            match serde_yaml::from_str::<AppConfig>(&content) {
+            match serde_yml::from_str::<AppConfig>(&content) {
                 Ok(config) => return config,
                 Err(err) => {
                     tracing::error!(
@@ -393,7 +393,7 @@ pub(crate) fn load_config_from_path(config_path: &Path) -> AppConfig {
             let _ = std::fs::create_dir_all(parent);
         }
         let default_config = AppConfig::default();
-        if let Ok(yaml_str) = serde_yaml::to_string(&default_config) {
+        if let Ok(yaml_str) = serde_yml::to_string(&default_config) {
             let _ = std::fs::write(config_path, yaml_str);
         }
     }
@@ -569,7 +569,7 @@ models:
     api_key: "old-key"
     capabilities: "chat"
 "#;
-        let config: AppConfig = serde_yaml::from_str(yaml).unwrap();
+        let config: AppConfig = serde_yml::from_str(yaml).unwrap();
         let m = config.models.get("legacy_model").unwrap();
         // Old field names should deserialize without issues
         assert_eq!(m.model, "old-model-name");
@@ -590,7 +590,7 @@ models:
       - chat
       - vision
 "#;
-        let config: AppConfig = serde_yaml::from_str(yaml).unwrap();
+        let config: AppConfig = serde_yml::from_str(yaml).unwrap();
         let m = config.models.get("new_model").unwrap();
         assert_eq!(m.model, "new-model-name");
         assert_eq!(m.api_url, "http://new-endpoint");
@@ -612,7 +612,7 @@ pdf_converter_command:
   - "{input}"
 inline_editor_enabled: true
 "#;
-        let config: AppConfig = serde_yaml::from_str(yaml).unwrap();
+        let config: AppConfig = serde_yml::from_str(yaml).unwrap();
         assert!(config.pdf_converter_command.is_some());
         let cmd = config.pdf_converter_command.unwrap();
         assert_eq!(cmd[0], "pandoc");

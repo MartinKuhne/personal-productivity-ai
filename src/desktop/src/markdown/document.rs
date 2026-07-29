@@ -2,7 +2,7 @@
 
 use crate::markdown::ast::RenderEvent;
 use crate::markdown::parser::parse_markdown_to_events;
-use serde_yaml::Value;
+use serde_yml::Value;
 
 /// The result of successfully parsing a YAML front matter block.
 #[derive(Debug)]
@@ -22,7 +22,7 @@ pub fn parse_front_matter(content: &str) -> Option<FrontMatter> {
     if parts.len() == 3 && parts[0].trim().is_empty() {
         let yaml_source = parts[1];
         let body = parts[2];
-        if let Ok(yaml) = serde_yaml::from_str::<Value>(yaml_source) {
+        if let Ok(yaml) = serde_yml::from_str::<Value>(yaml_source) {
             return Some(FrontMatter {
                 yaml,
                 source: yaml_source.to_string(),

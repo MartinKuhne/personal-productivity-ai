@@ -1,7 +1,7 @@
 //! Markdown subsystem — parsing, rendering AST models, table layout algorithms, and document state.
 //!
 //! Per `src/desktop/AGENTS.md`, this subsystem is the single import point for `pulldown-cmark`,
-//! `serde_yaml` front-matter/table parsing, and Markdown AST types. `ui/`, `tools/`, `print.rs`,
+//! `serde_yml` front-matter/table parsing, and Markdown AST types. `ui/`, `tools/`, `print.rs`,
 //! and `editor.rs` call into `markdown::` rather than handling Markdown directly.
 
 pub mod ast;

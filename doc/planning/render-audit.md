@@ -253,7 +253,7 @@ Two panics-on-poison per frame in the UI thread, plus a read-modify-write split 
 
 ### YAML front matter (`src/ui/render.rs:414-437`)
 
-- `Sequence` items use `v.as_str().unwrap_or("")` (`:424`) → numbers, bools, and nested structures become **empty strings**. `a: [1, 2]` renders as `", "`. The `_ =>` arm two lines below already handles non-strings correctly via `serde_yaml::to_string`; the sequence arm does not reuse it.
+- `Sequence` items use `v.as_str().unwrap_or("")` (`:424`) → numbers, bools, and nested structures become **empty strings**. `a: [1, 2]` renders as `", "`. The `_ =>` arm two lines below already handles non-strings correctly via `serde_yml::to_string`; the sequence arm does not reuse it.
 - Non-string keys are silently dropped (`:418`).
 
 ### ToC panel (`src/ui/panels/right.rs`)

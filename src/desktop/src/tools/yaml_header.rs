@@ -2,7 +2,7 @@
 
 use crate::file_events::FileEventProducer;
 use crate::utils::markdown::parse_front_matter;
-use serde_yaml::{Mapping, Value};
+use serde_yml::{Mapping, Value};
 use std::path::Path;
 
 pub fn tool_read_yaml_header(
@@ -46,30 +46,21 @@ pub fn tool_write_yaml_header(
 
     let mut map = Mapping::new();
     if let Some(t) = title {
-        map.insert(
-            Value::String("title".to_string()),
-            Value::String(t.to_string()),
-        );
+        map.insert("title".to_string(), Value::String(t.to_string()));
     }
     if let Some(s) = summary {
-        map.insert(
-            Value::String("summary".to_string()),
-            Value::String(s.to_string()),
-        );
+        map.insert("summary".to_string(), Value::String(s.to_string()));
     }
     if let Some(tg) = tags {
         let seq: Vec<Value> = tg.into_iter().map(Value::String).collect();
-        map.insert(Value::String("tags".to_string()), Value::Sequence(seq));
+        map.insert("tags".to_string(), Value::Sequence(seq));
     }
     if let Some(hd) = header_date {
-        map.insert(
-            Value::String("header-date".to_string()),
-            Value::String(hd.to_string()),
-        );
+        map.insert("header-date".to_string(), Value::String(hd.to_string()));
     }
 
     let yaml_val = Value::Mapping(map);
-    match serde_yaml::to_string(&yaml_val) {
+    match serde_yml::to_string(&yaml_val) {
         Ok(yaml_str) => {
             let yaml_inner = yaml_str.trim_start_matches("---\n");
             let mut yaml_final = yaml_inner.to_string();
@@ -171,7 +162,20 @@ mod tests {
         assert!(content.contains("tags:"));
         assert!(content.contains("tag1"));
         assert!(content.contains("tag2"));
-        assert!(content.contains("header-date: 2024-01-01T00:00:00Z"));
+        // `serde_yml` (YAML 1.2 strict) explicitly quotes strings that
+        // match the timestamp regex to avoid silent re-typing on re-parse
+        // — accept either form to keep this test stable across YAML
+        // emitters, and assert the value round-trips.
+        assert!(
+            content.contains("header-date: 2024-01-01T00:00:00Z")
+                || content.contains("header-date: \"2024-01-01T00:00:00Z\""),
+            "header-date not present in expected form: {content}"
+        );
+        let parsed: serde_yml::Value = serde_yml::from_str(&content).unwrap();
+        assert_eq!(
+            parsed.get("header-date").and_then(|v| v.as_str()),
+            Some("2024-01-01T00:00:00Z")
+        );
     }
 
     #[test]
