@@ -205,7 +205,7 @@ pub fn parse_markdown_to_events(markdown_text: &str) -> Vec<RenderEvent> {
                     *n += 1;
                 }
             }
-            Event::Start(Tag::BlockQuote) => {
+            Event::Start(Tag::BlockQuote(_)) => {
                 if !buffered_inline.is_empty() {
                     push_inline(
                         &mut events,
@@ -219,7 +219,7 @@ pub fn parse_markdown_to_events(markdown_text: &str) -> Vec<RenderEvent> {
                 }
                 blockquote_depth += 1;
             }
-            Event::End(TagEnd::BlockQuote) => {
+            Event::End(TagEnd::BlockQuote(_)) => {
                 push_inline(
                     &mut events,
                     &mut buffered_inline,
