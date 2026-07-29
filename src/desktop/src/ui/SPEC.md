@@ -37,17 +37,14 @@ The key words "MUST", "MUST NOT", "REQUIRED", "SHALL", "SHALL NOT", "SHOULD", "S
 
 * [TBL-030] The System MUST align horizontal content LEFT.
 * [TBL-031] The System MUST align vertical content alignment within cells: TOP.
-* [TBL-032] The System SHOULD have inner cell padding (top, bottom, left, right) on a per-cell, per-column, or global table level.
-* [TBL-033] Padding MUST be factored into all column width and row height calculations.
+* [TBL-032] The System MAY have inner cell padding (top, bottom, left, right) on a per-cell, per-column, or global table level.
+* [TBL-033] If present, Padding MUST be factored into all column width and row height calculations.
 
 ---
 
 ## 5. Rendering & Decoration
 
-* [TBL-040] The System shall have medium gray border styling around the table perimeter.
-* [TBL-041] The System shall have dark gray border styling between adjacent cells.
-* [TBL-042] When cell borders intersect, the System SHOULD perform border collapsing to ensure clean junction rendering (e.g., proper box-drawing or grid line intersection characters).
-* [TBL-043] The Renderer MUST output the final table without visually truncating or obscuring text unless explicitly configured to clip overflow.
+* [TBL-045] The System MUST render a medium-gray border around the outer perimeter of every markdown table — Width 1 px, color ≈ `Color32::from_gray(120)`.
 * [TBL-044] The Renderer SHOULD NOT perform redundant re-layout passes if neither table data nor target viewport dimensions have changed.
 
 ---

@@ -58,34 +58,7 @@ Add unit tests (by `/speckit-implement`, not part of `/speckit-plan`):
 
 **Expected outcome**: all three resolution tests pass.
 
-### Scenario 4 — Two distinct border greys + collapsed junctions (`SC-007`, FR-040, FR-041, FR-042)
-
-UI snapshot + paint-output test; relies on `egui_kittest`:
-
-```powershell
-PS> cargo nextest run -p fastmd table_border_styles
-```
-New tests:
-- Two-cell-row table snapshot: the painted strokes include exactly one medium-gray rectangle along the outer perimeter and exactly one dark-gray line between the cells. Implement by capturing `FullOutput::shapes` from an `egui_kittest` harness (the existing `render_table_with_paint_output` helper in `src/desktop/src/ui/render.rs:2222` already does this) and counting `Shape::stroke` entries whose `Color32` matches each gray band.
-- Snapshot PNG at `src/desktop/tests/snapshots/` for visual regression of the medium-gray perimeter + dark-gray interior on a representative table (single header row + two data rows with short text).
-- A 1-cell table snapshot has the medium-gray perimeter and **no** dark-gray interior separators (verifying the collapse path doesn't paint spurious lines on edge cells).
-
-**Expected outcome**: snapshots pass; the shape-counting assertions pass; `-D warnings` clean.
-
-### Scenario 5 — Clip-overflow flag toggles text masking (`SC-003`, FR-043)
-
-Targets the new `clip_overflow: bool` on `TableRenderConfig`:
-
-```powershell
-PS> cargo nextest run -p fastmd table_clip_overflow
-```
-Add tests:
-- `clip_overflow = false` (default) — a cell containing a single continuous word longer than the allocated column width still appears fully on-screen via the horizontal `ScrollArea` fallback path (`TBL-022`).
-- `clip_overflow = true` — the same cell's overflowing characters are clipped at the column boundary and the rest of the cell remains visible. Verify by checking the rendered text glyphs' x-extent does not exceed the cell's right edge.
-
-**Expected outcome**: both branches pass; the default applies the no-clip path; the explicit `true` enables clip precisely.
-
-### Scenario 6 — End-to-end Markdown table render including formatted cells (`SC-004`, `SC-005`, `SC-010`)
+### Scenario 4 — End-to-end Markdown table render including formatted cells (`SC-004`, `SC-005`, `SC-010`)
 
 ```powershell
 PS> cargo nextest run -p fastmd render_table
@@ -94,7 +67,7 @@ The existing tests in `src/desktop/src/ui/render.rs::tests` (`test_parse_markdow
 
 **Expected outcome**: every existing `render_table`-tagged test passes; the snapshot harnesses unchanged; `cargo doc --no-deps` succeeds.
 
-### Scenario 7 — Full quality gate (`SC-009`, `TBL-044`, `TBL-50`, `TBL-51`)
+### Scenario 5 — Full quality gate (`SC-009`, `TBL-044`, `TBL-50`, `TBL-51`)
 
 Run the entire gate from `src/desktop/`:
 

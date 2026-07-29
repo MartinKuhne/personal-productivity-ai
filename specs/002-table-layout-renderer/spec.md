@@ -45,36 +45,33 @@ A reader opens a Markdown document whose table cells contain inline markdown for
 
 ---
 
-### User Story 3 - Render tables with consistent alignment, padding, and borders (Priority: P3)
+### User Story 3 - Render tables with consistent alignment and configurable padding (Priority: P3)
 
-A reader views a rendered table and sees consistent horizontal alignment (LEFT) and vertical alignment (TOP) within every cell, configurable inner cell padding that does not break width or height calculations, and visually clean border decoration — a medium-gray border around the table perimeter, dark-gray borders between adjacent cells, and clean junctions at border intersections (no double-drawn or ragged grid lines). The reader can change padding at global, per-column, or per-cell level and the layout adjusts correctly.
+A reader views a rendered table and sees consistent horizontal alignment (LEFT) and vertical alignment (TOP) within every cell, and configurable inner cell padding that does not break width or height calculations. The reader can change padding at global, per-column, or per-cell level and the layout adjusts correctly.
 
-**Why this priority**: Decoration and alignment polish the readable output produced by stories 1 and 2; they are visible to the reader but do not block reading. They satisfy `TBL-030`…`TBL-033` and `TBL-040`…`TBL-042`.
+**Why this priority**: Alignment and padding polish the readable output produced by stories 1 and 2; they are visible to the reader but do not block reading. They satisfy `TBL-030`…`TBL-033`.
 
-**Independent Test**: A Markdown table is rendered with the required alignment, configurable padding that is correctly factored into width and height calculations, and the required border styling; switching padding at the three configurable levels visibly changes the rendered output without breaking layout.
+**Independent Test**: A Markdown table is rendered with the required alignment and configurable padding that is correctly factored into width and height calculations; switching padding at the three configurable levels visibly changes the rendered output without breaking layout.
 
 **Acceptance Scenarios**:
 
 1. **Given** any rendered table, **When** the reader views a cell, **Then** the cell content is horizontally aligned LEFT (`TBL-030`) and vertically aligned to the TOP (`TBL-031`).
 2. **Given** inner cell padding is configured at global, per-column, or per-cell level, **When** the table is rendered, **Then** the configured padding is applied (`TBL-032`) and every column width and row height calculation accounts for the configured padding (`TBL-033`).
-3. **Given** a rendered table, **When** the reader views it, **Then** the table perimeter is drawn with medium-gray border styling (`TBL-040`) and adjacent cells are separated by dark-gray border styling (`TBL-041`).
-4. **Given** a rendered table where two or more cell borders intersect, **When** the reader views the intersection, **Then** the borders are collapsed so the junction renders cleanly without ragged or doubled grid lines (`TBL-042`).
 
 ---
 
-### User Story 4 - Handle overflow gracefully and avoid masking content unless clipping is explicitly requested (Priority: P3)
+### User Story 4 - Handle overflow gracefully without masking content (Priority: P3)
 
-A reader encounters a table that cannot fit the available width even at minimum column widths, or a cell containing a single continuous word that cannot wrap. Rather than silently clipping or truncating the text, the System falls back to horizontal scrolling so the reader can reach the obscured content; it never visually truncates or obscures text unless the reader has explicitly configured clip-overflow behaviour.
+A reader encounters a table that cannot fit the available width even at minimum column widths, or a cell containing a single continuous word that cannot wrap. Rather than silently clipping or truncating the text, the System falls back to horizontal scrolling so the reader can reach the obscured content.
 
-**Why this priority**: Robustness/edge-case handling. It satisfies `TBL-013`'s overflow case, `TBL-022`'s unbreakable-word fallback, and `TBL-043`'s no-masking rule. It is P3 because it only triggers when stories 1 and 2 have already done their work and an overflow condition exists.
+**Why this priority**: Robustness/edge-case handling. It satisfies `TBL-013`'s overflow case and `TBL-022`'s unbreakable-word fallback. It is P3 because it only triggers when stories 1 and 2 have already done their work and an overflow condition exists.
 
-**Independent Test**: A Markdown table whose total minimum width exceeds the available width (or a cell containing a single word longer than its column width) is rendered so all content remains reachable — the reader can scroll horizontally to see the obscured part — and no text is visually truncated unless clip-overflow has been explicitly configured.
+**Independent Test**: A Markdown table whose total minimum width exceeds the available width (or a cell containing a single word longer than its column width) is rendered so all content remains reachable — the reader can scroll horizontally to see the obscured part.
 
 **Acceptance Scenarios**:
 
-1. **Given** a table whose total minimum column width exceeds the available width, **When** the reader views the table, **Then** no column is shrunk below its minimum content width (`TBL-013`), the system surfaces the overflow through horizontal scrolling (`TBL-022`), and no text is visually truncated unless clipping overflow is explicitly configured (`TBL-043`).
+1. **Given** a table whose total minimum column width exceeds the available width, **When** the reader views the table, **Then** no column is shrunk below its minimum content width (`TBL-013`) and the system surfaces the overflow through horizontal scrolling (`TBL-022`).
 2. **Given** a cell containing a single continuous word longer than the allocated column width, **When** the table is rendered, **Then** the system falls back to horizontal scrolling so the word remains reachable (`TBL-022`), rather than clipping the word.
-3. **Given** clipping overflow has been explicitly configured for the table, **When** a cell's content exceeds the allocated width, **Then** the content is clipped as configured and the reader is made aware that clipping is active.
 
 ---
 
@@ -122,10 +119,6 @@ The functional requirements below are grouped to mirror the structure of `src/de
 
 #### Rendering & Decoration
 
-- **FR-040** (`TBL-040`): The System MUST render a medium-gray border around the table perimeter.
-- **FR-041** (`TBL-041`): The System MUST render a dark-gray border between adjacent cells.
-- **FR-042** (`TBL-042`): When cell borders intersect, the System SHOULD perform border collapsing so junctions render cleanly (e.g., proper box-drawing or grid-line intersection behaviour, no doubled or ragged lines).
-- **FR-043** (`TBL-043`): The Renderer MUST output the final table without visually truncating or obscuring text unless the table has been explicitly configured to clip overflow.
 - **FR-044** (`TBL-044`): The Renderer SHOULD NOT perform redundant re-layout passes when neither the table data nor the target viewport dimensions have changed since the last layout.
 
 #### Performance & Error Handling
@@ -148,11 +141,10 @@ The functional requirements below are grouped to mirror the structure of `src/de
 
 - **SC-001**: 100% of Markdown tables in the test corpus render fully within the available width when their columns' preferred widths fit, with no column widened or narrowed beyond the fitting rule (User Story 1 / FR-012).
 - **SC-002**: 100% of Markdown tables whose preferred widths do not fit but whose minimum widths do fit render within the available width with no column reduced below its minimum content width (User Story 1 / FR-013).
-- **SC-003**: 100% of tables whose total minimum width exceeds the available width keep every column at-or-above its minimum content width and surface the overflow through horizontal scrolling, with no text visually masked unless clipping is explicitly configured (User Story 4 / FR-013, FR-022, FR-043).
+- **SC-003**: 100% of tables whose total minimum width exceeds the available width keep every column at-or-above its minimum content width and surface the overflow through horizontal scrolling (User Story 4 / FR-013, FR-022).
 - **SC-004**: 100% of cells whose content exceeds their allocated column width wrap their text onto subsequent lines, preferring whitespace break points where available (User Story 1 / FR-020, FR-021).
 - **SC-005**: 100% of tested cell content containing inline markdown formatting renders with the formatting applied per the Markdown specification (User Story 2 / FR-003).
 - **SC-006**: All rendered tables display LEFT horizontal alignment and TOP vertical alignment in every cell, and all configured padding (global, per-column, per-cell) is correctly reflected in width and height calculations (User Story 3 / FR-030, FR-031, FR-033).
-- **SC-007**: All rendered tables display the required medium-gray perimeter border, dark-gray inter-cell borders, and cleanly collapsed junctions (User Story 3 / FR-040, FR-041, FR-042).
 - **SC-008**: 100% of tested malformed inputs (inconsistent row lengths, negative padding) do not produce undefined behaviour, crashes, or memory corruption, and the System either reports a descriptive error or renders a normalised result (Edge Cases / FR-050).
 - **SC-009**: For tables that have not changed in content or available width, the System performs zero redundant re-layout passes between consecutive renders (User Story 1 / Edge Cases / FR-044).
 - **SC-010**: Users report they can read rendered Markdown tables including formatted cell content and overflow scenarios without manually inspecting source Markdown (qualitative outcome, verifiable via a user review of a rendered sample set).

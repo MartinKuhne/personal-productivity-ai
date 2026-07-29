@@ -14,8 +14,7 @@ The top-level input/output unit. Built from parsed markdown events (`RenderEvent
 - `available_width: f32` (`W_max`) — supplied by the parent rendering context (`ui.available_width()` minus gutters); must be finite and non-negative (`ftwa` invariant — panics otherwise).
 - `ordinal: usize` — content-derived ordinal used as a stable `egui::Id` seed; insulates persisted caches from auto-id positional drift (per desktop AGENTS.md §2 id stability rules).
 - `global_padding: TablePadding` — resolved global default.
-- `clip_overflow: bool` — explicit `TBL-043` flag, default `false`.
-- `config: TableRenderConfig` — borrowed reference to the app-level config (global padding + clip flag), so the table does not own a copy.
+- `config: TableRenderConfig` — borrowed reference to the app-level config (global padding), so the table does not own a copy.
 
 **Relationships**: owns many `Row`s; derives `Column`s for measurement. Belongs to a rendering pass in `render_table`.
 
@@ -91,7 +90,6 @@ Small app-wide config value, stored inline on `FastMdApp` (Decision 5 in researc
 
 **Fields**:
 - `global_padding: TablePadding` — default padding applied to every table cell unless overridden.
-- `clip_overflow: bool` — `TBL-043` flag; `false` = never mask content (default, matches current behaviour), `true` = allow clipping where configured.
 
 **Relationships**: owned by `FastMdApp`; shared by reference into every `Table` built by `render_table`.
 

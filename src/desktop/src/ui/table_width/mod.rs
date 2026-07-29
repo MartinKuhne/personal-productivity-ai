@@ -1,10 +1,12 @@
 //! Fair Table Width Algorithm (FTWA) — assigns per-column pixel widths to a markdown/GFM table.
 //!
-//! Reconciles three lexicographically-ordered goals (see
-//! `doc/planning/table-column-width-algorithm.md`):
-//!   **G1** minimize total word-wrap (extra wrapped lines),
-//!   **G2** minimize the number of columns that wrap, and
+//! Reconciles two goals (see `doc/planning/table-column-width-algorithm.md`):
+//!   **G1** minimize total word-wrap (extra wrapped lines) and
 //!   **G3** use all available horizontal space.
+//!
+//! G2 ("minimize the number of columns that wrap") is no longer a goal: every
+//! positive-slack column can participate in shrinking the deficit, and B2
+//! distributes the deficit across all of them.
 //!
 //! Pure `ftwa` core lives in `crate::markdown::table_width` (pure layout math,
 //! per `src/desktop/AGENTS.md §5`); this module bridges to egui text shaping via
@@ -102,18 +104,14 @@ pub fn resolve_padding(
 
 /// Cross-cutting table rendering configuration carried on `FastMdApp`
 /// (per `src/desktop/AGENTS.md §2` "all cross-cutting state lives on
-/// `FastMdApp`"). Holds the global padding default and the explicit
-/// overflow-clip flag (`TBL-043`).
+/// `FastMdApp`"). Holds the global padding default applied to every
+/// cell that has no per-column or per-cell override.
 ///
 /// See [contracts/table-renderer.md](../../../specs/002-table-layout-renderer/contracts/table-renderer.md) Part C.
 #[derive(Clone, Copy, Debug, PartialEq, Default)]
 pub struct TableRenderConfig {
     /// Padding applied to every cell with no per-column/per-cell override.
     pub global_padding: TablePadding,
-    /// When `true`, overflowing cell content is clipped to the cell rect
-    /// instead of falling back to horizontal scrolling. Default `false`
-    /// (`TBL-043` — clipping only when explicitly configured).
-    pub clip_overflow: bool,
 }
 
 /// Measure the per-column max-content, min-content widths, and breakpoints of a table.

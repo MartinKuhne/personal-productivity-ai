@@ -80,7 +80,7 @@ pub struct CellTokens {
 }
 ```
 
-**Behaviour contract** (verbatim from the existing `ftwa()` doc, incorporated by reference): the three regimes are surplus (`available >= Σ max_content`, columns pinned at `max_content`), deficit (`Σ min_content <= available < Σ max_content`, minimum-cardinality wrap set chosen, columns shrunk via `DeficitStrategy`, never below `min_content`, float drift dumped into the deepest-slack wrap column), and fallback (`available < Σ min_content`, returns `min_content` and sets `needs_horizontal_scroll = true`). Satisfies `TBL-010`–`TBL-013`, `TBL-022` flag.
+**Behaviour contract** (verbatim from the existing `ftwa()` doc, incorporated by reference): the three regimes are surplus (`available >= Σ max_content`, columns pinned at `max_content`), deficit (`Σ min_content <= available < Σ max_content`, **minimum-cardinality wrap set** built greedily by sorting positive-slack columns by slack descending and adding them until their combined slack covers the deficit — only those columns are shrunk, every other column stays at `max_content`; B2 then distributes the deficit across the wrap set via `DeficitStrategy` proportional-to-slack or by marginal-cost water-fill, never below `min_content`, float drift dumped into the deepest-slack wrap column), and fallback (`available < Σ min_content`, returns `min_content` and sets `needs_horizontal_scroll = true`). Satisfies `TBL-010`–`TBL-013`, `TBL-022` flag.
 
 ## Part B — egui adapter (`crate::ui::table_width`)
 
@@ -174,13 +174,11 @@ impl TablePadding {
 #[derive(Clone, Debug)]
 pub struct TableRenderConfig {
     pub global_padding: TablePadding,
-    pub clip_overflow: bool,
 }
 
 impl Default for TableRenderConfig {
     /// Defaults: small uniform padding (4 px all sides — concrete value
-    /// decided in tasks.md) and `clip_overflow = false` (matches today's
-    /// behaviour and `TBL-043`'s "unless explicitly configured" default).
+    /// decided in tasks.md).
     fn default() -> Self;
 }
 
@@ -203,8 +201,8 @@ The existing public call sites for tables:
 /// Existing external entry point used by `markdown::render` to dispatch
 /// a parsed `RenderEvent::Table` into the egui canvas. Signature unchanged
 /// from the existing `render_table` in `src/desktop/src/ui/render.rs:430`,
-/// except it now takes a `&TableRenderConfig` it reads padding + clip flag
-/// from. The function remains private to `ui::render` (called from the
+/// except it now takes a `&TableRenderConfig` it reads padding from. The
+/// function remains private to `ui::render` (called from the
 /// `RenderEvent::Table` arm of `render_markdown_events`).
 fn render_table(
     ui: &mut egui::Ui,
@@ -214,17 +212,13 @@ fn render_table(
     config: &crate::ui::table_width::TableRenderConfig,
 );
 
-/// Cell renderer. Signature gains the resolved per-cell padding and the
-/// `clip_overflow` flag. Per Decision 3 in research.md it no longer paints
-/// its own perimeter stroke; only intra-grid separators and the outer
-/// table's perimeter are painted. Satisfies `TBL-030`, `TBL-031`, `TBL-040`,
-/// `TBL-041`, `TBL-042`, `TBL-043`.
+/// Cell renderer. Signature gains the resolved per-cell padding. Satisfies
+/// `TBL-030`, `TBL-031`.
 fn render_table_cell(
     ui: &mut egui::Ui,
     cell: &[crate::markdown::InlineElem],
     pinned_width: Option<f32>,
     padding: crate::ui::table_width::TablePadding,
-    clip_overflow: bool,
 );
 ```
 

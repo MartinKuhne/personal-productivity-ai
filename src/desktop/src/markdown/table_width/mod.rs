@@ -1,11 +1,11 @@
-//! Fair Table Width Algorithm (FTWA) — pure column-width solver.
+//! Fair Table Width Algorithm (FTWA) - pure column-width solver.
 //!
 //! Pure layout math with no egui dependency and no Markdown types; consumes
 //! `&[f32]` measurements. Lives in `markdown::` per `src/desktop/AGENTS.md §5`
 //! (pure layout math belongs in `markdown/`, not `ui/`).
 //!
-//! The egui-bridging adapter — `measure`, `measure_cached`, `ftwa_cached`,
-//! `measure_cell`, and the per-UI caches — lives in `crate::ui::table_width`
+//! The egui-bridging adapter - `measure`, `measure_cached`, `ftwa_cached`,
+//! `measure_cell`, and the per-UI caches - lives in `crate::ui::table_width`
 //! and re-exports the pure API via `pub use`.
 
 use std::cmp::Reverse;
@@ -25,15 +25,17 @@ pub struct Breakpoint {
     pub extra_lines: i32,
 }
 
-/// Strategy for distributing the deficit across the wrap set (B2).
+/// Strategy for distributing the deficit across the (minimum-cardinality)
+/// wrap set.
 ///
-/// Both strategies preserve G2 (minimum-cardinality wrap set) and the
-/// never-break-token invariant. They differ only in how they allocate the
-/// deficit among the wrap-set columns.
+/// The wrap set is the smallest subset of positive-slack columns whose
+/// combined slack can absorb the deficit (G2 — "only wrap what must wrap").
+/// Both strategies preserve the never-break-token invariant; they differ
+/// only in how they allocate the deficit among the wrap-set columns.
 #[derive(Clone, Copy, Debug, PartialEq)]
 #[allow(dead_code)]
 pub enum DeficitStrategy {
-    /// v1: shrink each column proportionally to its slack. O(|S|).
+    /// v1: shrink each wrap-set column proportionally to its slack. O(N).
     /// Simple but may produce suboptimal G1 (total wrapped lines).
     ProportionalToSlack,
     /// v2: greedy marginal-cost water-fill using per-column breakpoints.
@@ -97,12 +99,12 @@ impl PartialOrd for ShrinkStep {
 pub struct ColumnWidths {
     /// Per-column assigned pixel width, in input order.
     pub widths: Vec<f32>,
-    /// `true` when `available < ÃŽÂ£ min_content` Ã¢â‚¬â€ caller must enable horizontal scroll.
+    /// `true` when `available < ÃŽÂ£ min_content` Ã¢â'¬â€ caller must enable horizontal scroll.
     pub needs_horizontal_scroll: bool,
 }
 
-/// Pure FTWA core. Solves the deficit regime exactly for G2 (fewest wrapping
-/// columns) and approximately for G1 (within the chosen wrap set).
+/// Pure FTWA core. Solves the deficit regime for G2 (minimum-cardinality
+/// wrap set) plus G1 (minimize total wrapped lines within that set).
 ///
 /// `max_content[j]` is column `j`'s single-line width; `min_content[j]` is its
 /// longest unbreakable-token width (`min_content[j] <= max_content[j]`).
@@ -112,20 +114,22 @@ pub struct ColumnWidths {
 ///
 /// * **Surplus** (`available >= sum of max_content`): pin every column to its
 ///   `max_content`. No column wraps and no column is stretched beyond its
-///   content (G1 = G2 = 0). The table may not fill the full available width
-///   when content is narrow; this matches browser/spreadsheet auto-fit
+///   content (G1 = 0, G2 = 0). The table may not fill the full available
+///   width when content is narrow; this matches browser/spreadsheet auto-fit
 ///   behavior and avoids the "infinite-width column" visual defect that
 ///   proportional spare distribution produced. G3 ("use all space") is
 ///   intentionally relaxed in the surplus regime (see doc Â§3.5).
 /// * **Deficit** (`sum of min_content <= available < sum of max_content`):
-///   pick the smallest top-slack prefix whose cumulative slack covers the
-///   deficit (`D = sum of max_content - available`) â€” this is the exact
-///   minimum-cardinality wrap set by the exchange argument in doc Â§2.11.
-///   Non-wrap columns stay at `max_content`; the wrap set is shrunk using
-///   the chosen `DeficitStrategy` (proportional-to-slack or breakpoint
-///   water-fill), never below `min_content`. Float drift is absorbed into
-///   the deepest-slack wrap column so the sum of `widths` equals `available`
-///   exactly.
+///   build a **minimum-cardinality wrap set** by sorting positive-slack
+///   columns by slack descending and greedily adding them until their
+///   combined slack covers the deficit. The deficit
+///   (`D = sum of max_content - available`) is then distributed across
+///   the wrap set per the chosen `DeficitStrategy` (proportional-to-slack
+///   or breakpoint water-fill), never below `min_content`. Columns
+///   outside the wrap set keep their `max_content` and do not wrap
+///   (G2 § "only wrap what must wrap"). Float drift is absorbed into
+///   the deepest-slack wrap column so the sum of `widths` equals
+///   `available` exactly.
 /// * **Fallback** (`available < sum of min_content`): return `min_content`
 ///   and set `needs_horizontal_scroll = true` (doc Â§3.6). The strongest
 ///   invariant (tokens never break) holds by construction.
@@ -218,7 +222,7 @@ pub fn ftwa(
     // max_content[j] >= min_content[j] is an invariant (max-content is
     // always at least the width of the longest unbreakable token).
     // Without this check, a corrupted measurement (e.g. min longer than
-    // max) silently triggers the Ã‚Â§3.6 fallback ("can't fit") instead of
+    // max) silently triggers the Ã'Â§3.6 fallback ("can't fit") instead of
     // surfacing the data error to the caller.
     for (j, (&mx, &mn)) in max_content.iter().zip(min_content.iter()).enumerate() {
         assert!(
@@ -230,7 +234,7 @@ pub fn ftwa(
     let sum_max: f32 = max_content.iter().copied().sum();
     let sum_min: f32 = min_content.iter().copied().sum();
 
-    // Ã‚Â§3.6 fallback: even at min-content the table cannot fit.
+    // Ã'Â§3.6 fallback: even at min-content the table cannot fit.
     if available < sum_min {
         return ColumnWidths {
             widths: min_content.to_vec(),
@@ -255,14 +259,32 @@ pub fn ftwa(
         };
     }
 
-    // Ã‚Â§3.3 deficit regime.
+    // Ã'Â§3.3 deficit regime.
     let deficit = sum_max - available;
 
-    // B1: choose the minimum-cardinality wrap set. Sort indices by slack desc
-    // with index asc as a stable tie-break (doc Ã‚Â§5 Q6 stability), then take
-    // the smallest prefix whose cumulative slack reaches `deficit`.
-    let mut order: Vec<usize> = (0..n).collect();
-    order.sort_by(|&a, &b| {
+    // §3.3 deficit regime. **G2 is back**: the wrap set is the
+    // *minimum-cardinality* subset of positive-slack columns that can
+    // collectively absorb the deficit. A column only enters the wrap
+    // set if its slack is actually needed — i.e. adding it is what
+    // makes the running slack-sum reach the deficit. This restores
+    // the "only wrap what must wrap" property the surplus branch has:
+    // a short cell with positive slack (e.g. `XPS 15 9570`) stays
+    // single-line at its max-content width when a long cell
+    // (e.g. a multi-sentence Summary) can absorb the deficit alone.
+    //
+    // The wrap set is built greedily: sort positive-slack columns by
+    // slack descending (ties broken by ascending index, OBS-1), then
+    // push columns one at a time until the running sum meets the
+    // deficit. `available >= sum_min` guarantees the loop terminates
+    // (the worst case consumes every positive-slack column, which
+    // always sums to `sum_max - sum_min >= deficit`). Zero-slack
+    // columns are excluded by construction (they have nothing to
+    // give); the never-break-token invariant is preserved because B2
+    // clamps every shrunk width to `min_content`.
+    let mut positives: Vec<usize> = (0..n)
+        .filter(|&j| max_content[j] - min_content[j] > 0.0)
+        .collect();
+    positives.sort_by(|&a, &b| {
         let slack_a = max_content[a] - min_content[a];
         let slack_b = max_content[b] - min_content[b];
         slack_b
@@ -270,29 +292,19 @@ pub fn ftwa(
             .unwrap_or(std::cmp::Ordering::Equal)
             .then(a.cmp(&b))
     });
-
-    // Determine the wrap set: smallest slack-desc prefix covering the deficit.
-    // `available >= sum_min` guarantees total slack (`sum_max - sum_min`) is
-    // at least `deficit`, so the loop always reaches `acc >= deficit`.
-    let mut wrap_set: Vec<usize> = Vec::new();
-    let mut acc = 0.0_f32;
-    for &j in &order {
-        if acc >= deficit {
+    let mut wrap_set: Vec<usize> = Vec::with_capacity(positives.len());
+    let mut acc_slack = 0.0_f32;
+    for j in positives {
+        wrap_set.push(j);
+        acc_slack += max_content[j] - min_content[j];
+        if acc_slack >= deficit {
             break;
         }
-        // OBS-2 fix: skip zero-slack columns. They cannot contribute to
-        // covering the deficit, and including them would inflate `acc` in
-        // B2 which would shrink the surviving columns' share of the
-        // deficit. `available >= sum_min` guarantees the total positive
-        // slack (sum_max - sum_min) is at least `deficit`, so the loop
-        // still reaches `acc >= deficit` even with the skip.
-        let slack = max_content[j] - min_content[j];
-        if slack <= 0.0 {
-            continue;
-        }
-        wrap_set.push(j);
-        acc += slack;
     }
+    // `acc_slack` is the total slack of the minimum-cardinality wrap
+    // set. It is always `>= deficit` (loop termination), and the B2
+    // distribution is normalised against it.
+    let total_slack: f32 = acc_slack;
 
     // B2: shrink wrap-set columns according to the chosen strategy,
     // never below min-content.
@@ -305,7 +317,7 @@ pub fn ftwa(
                 max_content,
                 min_content,
                 deficit,
-                acc,
+                total_slack,
             );
         }
         DeficitStrategy::BreakpointWaterFill => {
@@ -325,10 +337,10 @@ pub fn ftwa(
     // min-content since the residual is sub-pixel). This satisfies G3 precisely.
     let drift = available - widths.iter().copied().sum::<f32>();
     if drift.abs() > 0.0 && !wrap_set.is_empty() {
-        // OBS-1 fix: on slack tie, prefer the lower column index. This
-        // matches the B1 stable-sort tiebreak and the surplus branch's
-        // drift target above, so the deterministic pick is consistent
-        // across B1, B2, and the surplus drift dump.
+        // OBS-1: on slack tie, prefer the lower column index. Matches
+        // the wrap-set sort order above and the surplus branch's
+        // drift target, so the deterministic pick is consistent
+        // across the deficit and surplus drift dumps.
         let target = *wrap_set
             .iter()
             .max_by(|&&a, &&b| {
@@ -336,7 +348,7 @@ pub fn ftwa(
                 let sb = max_content[b] - min_content[b];
                 sa.partial_cmp(&sb)
                     .unwrap_or(std::cmp::Ordering::Equal)
-                    .then(b.cmp(&a)) // lower index = "greater" â†’ max_by picks it on tie
+                    .then(b.cmp(&a)) // lower index = "greater" â†' max_by picks it on tie
             })
             .expect("wrap_set is non-empty (checked above)");
         widths[target] = (widths[target] + drift).max(min_content[target]);
@@ -550,7 +562,7 @@ pub fn compute_column_breakpoints(cell_tokens: &[CellTokens], space_width: f32) 
 
 /// Compute breakpoints for a single cell from its token widths.
 ///
-/// Uses O(kÂ³) approach: for each of O(kÂ²) candidate line widths, simulate
+/// Uses O(kÂ3) approach: for each of O(kÂ2) candidate line widths, simulate
 /// greedy left-to-right packing to get line count. With k â‰¤ 15 tokens per
 /// cell, this is fast enough.
 fn cell_breakpoints(token_widths: &[f32], space_width: f32) -> Vec<Breakpoint> {
@@ -675,7 +687,7 @@ mod tests {
 
     #[test]
     fn surplus_regime_pins_columns_at_max_content() {
-        // max = [20, 80], sum = 100. available = 150 > sum_max â†’ surplus.
+        // max = [20, 80], sum = 100. available = 150 > sum_max â†' surplus.
         // Columns are pinned at max_content (not stretched to fill 150).
         let max = [20.0, 80.0];
         let min = [10.0, 40.0];
@@ -694,52 +706,71 @@ mod tests {
     }
 
     #[test]
-    fn deficit_one_column_wraps_exact_minimum() {
-        // max = [100, 100], sum = 200, min = [10, 10] (lots of slack).
-        // available = 150, deficit = 50. Both columns have equal slack Ã¢â€ â€™
-        // wrap set = {0} only (slack 90 Ã¢â€°Â¥ 50). Column 1 pinned at 100.
+    fn deficit_picks_minimum_cardinality_wrap_set() {
+        // max = [100, 100], min = [10, 10], sum_max = 200, sum_min = 20.
+        // available = 150, deficit = 50, per-column slack = 90.
+        // With G2 (minimum-cardinality wrap set), one column's slack
+        // (90) already covers the deficit (50), so the wrap set is a
+        // single column. Tie-break picks the lower index, so col 0
+        // absorbs all 50 and shrinks from 100 to 50; col 1 stays at
+        // max 100. widths = [50, 100]. Only one column wraps.
         let max = [100.0, 100.0];
         let min = [10.0, 10.0];
         let d = ftwa_v1(&max, &min, 150.0);
         assert!(!d.needs_horizontal_scroll);
-        // Column 0 absorbs the full deficit; column 1 stays at max.
-        assert_eq!(d.widths[1], 100.0);
         // Sum exact.
         assert!(
             (d.widths.iter().sum::<f32>() - 150.0).abs() < 1e-3,
             "sum should equal available exactly; got {}",
             d.widths.iter().sum::<f32>()
         );
-        // Exactly one column wraps (w_j < max_j).
-        let wrapping = d
-            .widths
-            .iter()
-            .zip(max.iter())
-            .filter(|&(w, m)| *w < *m - 1e-3)
-            .count();
-        assert_eq!(wrapping, 1, "G2 exact min: exactly 1 wrapping column");
+        // G2: the lower-index column is the wrap set (absorbs 50),
+        // the higher-index column is pinned at max.
+        assert!(
+            (d.widths[0] - 50.0).abs() < 1e-3,
+            "col 0 absorbs all deficit: got {}",
+            d.widths[0]
+        );
+        assert!(
+            (d.widths[1] - 100.0).abs() < 1e-3,
+            "col 1 pinned at max (G2): got {}",
+            d.widths[1]
+        );
+        // No column below min.
+        for (&w, &mn) in d.widths.iter().zip(min.iter()) {
+            assert!(w >= mn - 1e-3, "w {} < min {}", w, mn);
+        }
     }
 
     #[test]
-    fn deficit_spread_across_required_wrap_set() {
+    fn deficit_two_columns_cover_third_pinned_at_max() {
         // Three columns: max = [50, 50, 50], min = [10, 10, 10], sum_max = 150.
         // available = 100, deficit = 50, per-column slack = 40.
-        // Greedy: col 0 covers slack 40 < 50, col 0+1 covers slack 80 Ã¢â€°Â¥ 50.
-        // Ã¢â€ â€™ wrap set = {0, 1}, col 2 stays at 50 (does not wrap).
+        // With G2, one column's slack (40) does not cover the deficit
+        // (50), so the greedy selection adds a second column (total
+        // 80 >= 50). The third column's slack is unnecessary, so it
+        // is pinned at max. Proportional distribution across {0, 1}:
+        // each absorbs `50 * (40/80) = 25`, widths = [25, 25, 50].
         let max = [50.0, 50.0, 50.0];
         let min = [10.0, 10.0, 10.0];
         let d = ftwa_v1(&max, &min, 100.0);
         assert!(!d.needs_horizontal_scroll);
-        // Column 2 unwrapped.
-        assert_eq!(d.widths[2], 50.0);
-        // Two columns wrap.
-        let wrapping = d
-            .widths
-            .iter()
-            .zip(max.iter())
-            .filter(|&(w, m)| *w < *m - 1e-3)
-            .count();
-        assert_eq!(wrapping, 2);
+        // Two columns wrap, one pinned at max (G2 minimum-cardinality).
+        assert!(
+            (d.widths[0] - 25.0).abs() < 1e-3,
+            "col 0: got {}",
+            d.widths[0]
+        );
+        assert!(
+            (d.widths[1] - 25.0).abs() < 1e-3,
+            "col 1: got {}",
+            d.widths[1]
+        );
+        assert!(
+            (d.widths[2] - 50.0).abs() < 1e-3,
+            "col 2 pinned at max (G2): got {}",
+            d.widths[2]
+        );
         // Sum exact.
         assert!((d.widths.iter().sum::<f32>() - 100.0).abs() < 1e-3);
         // No column below min.
@@ -752,7 +783,7 @@ mod tests {
     fn single_token_column_never_wraps() {
         // Column 1 is single-token: max == min, slack == 0. With equal-slack
         // tie-break it sorts last and is never admitted to the wrap set.
-        // max = [100, 100], min = [10, 100] Ã¢â€ â€™ col 1 has zero slack.
+        // max = [100, 100], min = [10, 100] Ã¢â€ â€TM col 1 has zero slack.
         // available = 150, deficit = 50. Wrap set = {0}; col 1 pinned at 100.
         let max = [100.0, 100.0];
         let min = [10.0, 100.0];
@@ -765,7 +796,7 @@ mod tests {
 
     #[test]
     fn fallback_when_below_sum_min() {
-        // available < ÃŽÂ£ min Ã¢â€ â€™ return min widths, flag horizontal scroll.
+        // available < ÃŽÂ£ min Ã¢â€ â€TM return min widths, flag horizontal scroll.
         let max = [200.0, 200.0];
         let min = [80.0, 80.0];
         let d = ftwa_v1(&max, &min, 100.0);
@@ -786,17 +817,28 @@ mod tests {
     #[test]
     fn deficit_respects_min_floor() {
         // max = [80, 80], min = [70, 10]. available = 100, deficit = 60.
-        // slack [10, 70]. sort desc: col 1 first.
-        // col 1 slack 70 Ã¢â€°Â¥ 60 Ã¢â€ â€™ wrap set = {1}. col 0 pinned at 80.
-        // col 1 shrunk: 80 - 60 = 20, clamp to max(20, min[1]=10) = 20.
+        // slack [10, 70]. With G2, the higher-slack column (col 1,
+        // slack 70) alone covers the deficit (60), so the wrap set is
+        // {1}. col 0 stays at max 80 (its slack of 10 is not needed).
+        // col 1 absorbs all 60 and shrinks from 80 to 20 (above min 10).
+        // widths = [80, 20].
         let max = [80.0, 80.0];
         let min = [70.0, 10.0];
         let d = ftwa_v1(&max, &min, 100.0);
         assert!(!d.needs_horizontal_scroll);
-        assert_eq!(
-            d.widths[0], 80.0,
-            "col 0 is pinned (no slack left after wrap picks col 1)"
+        // G2: col 0 pinned at max; col 1 absorbs the deficit.
+        assert!(
+            (d.widths[0] - 80.0).abs() < 1e-3,
+            "col 0 pinned at max (G2): got {}",
+            d.widths[0]
         );
+        assert!(
+            (d.widths[1] - 20.0).abs() < 1e-3,
+            "col 1 absorbs deficit: got {}",
+            d.widths[1]
+        );
+        // Both columns stay above their min.
+        assert!(d.widths[0] >= min[0] - 1e-3);
         assert!(d.widths[1] >= min[1] - 1e-3);
         assert!((d.widths.iter().sum::<f32>() - 100.0).abs() < 1e-3);
     }
@@ -818,7 +860,7 @@ mod tests {
         let max = [50.0, 50.0];
         let min = [50.0, 50.0];
         let d = ftwa_v1(&max, &min, 100.0);
-        // sum_max == sum_min == 100, available == 100 Ã¢â€ â€™ surplus branch (>=).
+        // sum_max == sum_min == 100, available == 100 Ã¢â€ â€TM surplus branch (>=).
         assert!(!d.needs_horizontal_scroll);
         assert_eq!(round_vec(&d.widths), vec![50.0, 50.0]);
     }
@@ -902,7 +944,7 @@ mod tests {
             "available = INFINITY must panic; got {result:?}"
         );
 
-        // NEG_INFINITY is also non-finite and must panic Ã¢â‚¬â€ it would
+        // NEG_INFINITY is also non-finite and must panic Ã¢â'¬â€ it would
         // also break the surplus/deficit comparison logic.
         let result_neg = std::panic::catch_unwind(|| ftwa_v1(&max, &min, f32::NEG_INFINITY));
         assert!(
@@ -946,7 +988,7 @@ mod tests {
         let min: Vec<f32> = (0..n).map(|i| 10.0 + (i % 5) as f32).collect();
         let sum_max: f32 = max.iter().sum();
 
-        // Surplus: 2x sum_max â†’ columns pinned at max_content.
+        // Surplus: 2x sum_max â†' columns pinned at max_content.
         let d = ftwa_v1(&max, &min, sum_max * 2.0);
         assert!(!d.needs_horizontal_scroll);
         assert_eq!(d.widths.len(), n);
@@ -968,28 +1010,42 @@ mod tests {
     }
 
     #[test]
-    fn three_columns_wraps_minimum_count() {
+    fn single_high_slack_column_covers_deficit() {
         // max = [60, 50, 40], min = [10, 10, 10]. sum_max = 150.
         // available = 110, deficit = 40. slacks = [50, 40, 30].
-        // Sort desc by slack: 0, 1, 2. col 0 slack 50 Ã¢â€°Â¥ 40 Ã¢â€ â€™ wrap_set = {0}.
-        // col 1 and col 2 pinned at their max.
+        // With G2, the highest-slack column (col 0, slack 50) alone
+        // covers the deficit (40), so the wrap set is {0}. Cols 1
+        // and 2 stay at max (50 and 40). col 0 absorbs all 40 and
+        // shrinks from 60 to 20 (above min 10). widths = [20, 50, 40].
         let max = [60.0, 50.0, 40.0];
         let min = [10.0, 10.0, 10.0];
         let d = ftwa_v1(&max, &min, 110.0);
         assert!(!d.needs_horizontal_scroll);
-        assert_eq!(d.widths[1], 50.0);
-        assert_eq!(d.widths[2], 40.0);
-        let wrapping = d
-            .widths
-            .iter()
-            .zip(max.iter())
-            .filter(|&(w, m)| *w < *m - 1e-3)
-            .count();
-        assert_eq!(wrapping, 1);
+        // G2: col 0 absorbs all deficit; cols 1, 2 pinned at max.
+        assert!(
+            (d.widths[0] - 20.0).abs() < 1e-3,
+            "col 0: got {}",
+            d.widths[0]
+        );
+        assert!(
+            (d.widths[1] - 50.0).abs() < 1e-3,
+            "col 1 pinned at max (G2): got {}",
+            d.widths[1]
+        );
+        assert!(
+            (d.widths[2] - 40.0).abs() < 1e-3,
+            "col 2 pinned at max (G2): got {}",
+            d.widths[2]
+        );
+        // Sum exact.
         assert!((d.widths.iter().sum::<f32>() - 110.0).abs() < 1e-3);
+        // No column below min.
+        for (&w, &mn) in d.widths.iter().zip(min.iter()) {
+            assert!(w >= mn - 1e-3, "w {} < min {}", w, mn);
+        }
     }
 
-    // --- Permutation matrix: similar vs dissimilar columns Ãƒâ€”
+    // --- Permutation matrix: similar vs dissimilar columns Ãƒâ€"
     //     fits viewport / requires word wrap / exceeds viewport ------
 
     /// Helper: assert a `ColumnWidths` decision respects the actual FTWA contract:
@@ -1059,9 +1115,12 @@ mod tests {
     }
 
     /// 3 columns of similar width, viewport forces word wrap on the deficit.
-    /// G2 exact: the minimum-cardinality wrap set is chosen. With equal
-    /// slacks of 200, covering the 400 deficit takes 2 columns, not 3.
-    /// The 3rd column stays at max.
+    /// With G2 (minimum-cardinality wrap set), each column's slack
+    /// (200) is less than the deficit (400), so the greedy selection
+    /// picks two columns: their combined slack (400) covers the deficit.
+    /// The third column is pinned at max (its slack is unnecessary).
+    /// Proportional distribution across the wrap set: each absorbs
+    /// `400 * (200 / 400) = 200`, so widths = [100, 100, 300].
     #[test]
     fn permutation_similar_columns_require_word_wrap() {
         let max = [300.0, 300.0, 300.0];
@@ -1070,24 +1129,31 @@ mod tests {
         let d = ftwa_v1(&max, &min, available);
         assert_decision_invariants(&d, &max, &min, available);
         assert!(!d.needs_horizontal_scroll);
-        // G2: only 2 of 3 columns wrap (slack 200 Ãƒâ€” 2 = 400 = deficit).
-        // The 3rd column (index 2) stays at max = 300.
-        let wrapping = d
-            .widths
-            .iter()
-            .zip(max.iter())
-            .filter(|&(w, m)| *w < *m - 1e-3)
-            .count();
-        assert_eq!(wrapping, 2, "G2: minimum-cardinality wrap set");
-        // The 3rd column is the one that stays at max.
-        assert_eq!(d.widths[2], 300.0, "col 2 pinned at max");
-        // The wrap set picks the smallest slack-desc prefix, which with
-        // equal slacks is {0, 1} Ã¢â€ â€™ widths[0] == widths[1] == min = 100.
-        assert_eq!(d.widths[0], 100.0);
-        assert_eq!(d.widths[1], 100.0);
+        // G2: two columns wrap, one pinned at max.
+        assert!(
+            (d.widths[0] - 100.0).abs() < 1e-3,
+            "col 0: got {}",
+            d.widths[0]
+        );
+        assert!(
+            (d.widths[1] - 100.0).abs() < 1e-3,
+            "col 1: got {}",
+            d.widths[1]
+        );
+        assert!(
+            (d.widths[2] - 300.0).abs() < 1e-3,
+            "col 2 pinned at max (G2): got {}",
+            d.widths[2]
+        );
+        // Sum exact.
+        assert!((d.widths.iter().sum::<f32>() - 500.0).abs() < 1e-3);
+        // No column below min.
+        for (&w, &mn) in d.widths.iter().zip(min.iter()) {
+            assert!(w >= mn - 1e-3, "w {} < min {}", w, mn);
+        }
     }
 
-    /// 3 columns of similar width, viewport below sum_min Ã¢â€ â€™ Ã‚Â§3.6 fallback.
+    /// 3 columns of similar width, viewport below sum_min Ã¢â€ â€TM Ã'Â§3.6 fallback.
     /// Even at min-content, the table cannot fit; render must use ScrollArea.
     #[test]
     fn permutation_similar_columns_exceed_viewport() {
@@ -1097,7 +1163,7 @@ mod tests {
         let d = ftwa_v1(&max, &min, available);
         assert_decision_invariants(&d, &max, &min, available);
         assert!(d.needs_horizontal_scroll);
-        // Ã‚Â§3.6 returns min-content widths exactly Ã¢â‚¬â€ never break a token.
+        // Ã'Â§3.6 returns min-content widths exactly Ã¢â'¬â€ never break a token.
         assert_eq!(d.widths, vec![300.0, 300.0, 300.0]);
     }
 
@@ -1115,26 +1181,41 @@ mod tests {
         assert_eq!(d.widths, vec![100.0, 500.0, 100.0]);
     }
 
-    /// Dissimilar widths where the wide column is the only one with enough
-    /// slack to absorb the deficit. Narrow columns must stay pinned at max.
+    /// Dissimilar widths where the wide column's slack alone covers
+    /// the deficit. G2: only the wide column enters the wrap set;
+    /// the narrow column is pinned at its max_content.
     #[test]
     fn permutation_dissimilar_columns_require_word_wrap() {
+        // With G2 (minimum-cardinality wrap set), the wide column's
+        // slack (500) already covers the deficit (300), so the wrap
+        // set is {1}. The narrow column is pinned at max 200 (its
+        // slack of 150 is not needed). col 1 absorbs all 300 and
+        // shrinks from 800 to 500 (above min 300). widths = [200, 500].
         let max = [200.0, 800.0];
         let min = [50.0, 300.0];
-        // sum_max = 1000, sum_min = 350. available = 700 Ã¢â€ â€™ deficit = 300.
-        // slack = [150, 500]. col 1 alone has slack 500 Ã¢â€°Â¥ 300 Ã¢â€ â€™ wrap_set = {1}.
         let available = 700.0;
         let d = ftwa_v1(&max, &min, available);
         assert_decision_invariants(&d, &max, &min, available);
         assert!(!d.needs_horizontal_scroll);
-        // Only the wide column wraps; narrow column pinned at max.
-        assert_eq!(d.widths[0], 200.0, "narrow col pinned at max");
-        assert!(d.widths[1] < 800.0, "wide col must shrink");
+        // G2: narrow col pinned at max; wide col absorbs the deficit.
+        assert!(
+            (d.widths[0] - 200.0).abs() < 1e-3,
+            "narrow col pinned at max (G2): got {}",
+            d.widths[0]
+        );
+        assert!(
+            (d.widths[1] - 500.0).abs() < 1e-3,
+            "wide col absorbs deficit: got {}",
+            d.widths[1]
+        );
+        // No column below min.
+        assert!(d.widths[0] >= 50.0, "narrow col must not break token");
         assert!(d.widths[1] >= 300.0, "wide col must not break token");
+        // Sum exact.
+        assert!((d.widths.iter().sum::<f32>() - 700.0).abs() < 1e-3);
     }
-
     /// Dissimilar widths where even the wide column's min-content alone
-    /// exceeds the available viewport Ã¢â€ â€™ Ã‚Â§3.6 fallback.
+    /// exceeds the available viewport Ã¢â€ â€TM Ã'Â§3.6 fallback.
     #[test]
     fn permutation_dissimilar_columns_exceed_viewport() {
         let max = [300.0, 600.0];
@@ -1154,7 +1235,7 @@ mod tests {
     //  Each test pins one specific input permutation and asserts the
     //  post-fix contract. Names are kept in `audit_*` form so that the
     //  audit report and the regression suite reference the same items.
-    //  Bugs 1â€“3 were the original findings; the `audit_bug_*` tests now
+    //  Bugs 1â€"3 were the original findings; the `audit_bug_*` tests now
     //  assert the *fixed* behavior and act as guard rails against
     //  re-introducing the original defect.
     // ===================================================================
@@ -1194,7 +1275,7 @@ mod tests {
         let d = ftwa_v1(&max, &min, available);
         assert!(!d.needs_horizontal_scroll);
         assert_eq!(d.widths.len(), n);
-        // Surplus pins at max_content exactly â€” no drift, no stretching.
+        // Surplus pins at max_content exactly â€" no drift, no stretching.
         assert_eq!(d.widths, max);
     }
 
@@ -1223,26 +1304,43 @@ mod tests {
         let min = [10.0, 10.0];
         let avail = 25.0;
         let d = ftwa_v1(&max, &min, avail);
-        // With equal slacks, share_j = 15*10/20 = 7.5 each â†’ widths =
+        // With equal slacks, share_j = 15*10/20 = 7.5 each â†' widths =
         // [12.5, 12.5]. Either index is fine for the actual value; the
         // point is the algorithm is deterministic and the sum is exact.
         let s: f32 = d.widths.iter().copied().sum();
         assert!((s - 25.0).abs() < 1e-3);
     }
 
-    /// OBS-2 (FIXED): The wrap-set loop now skips zero-slack columns.
-    /// This is a structural fix (no measurable behavioural change for
-    /// normal inputs) but eliminates wasted work in tables with many
-    /// single-token columns.
+    /// OBS-2: The wrap-set construction excludes zero-slack columns
+    /// (they have nothing to give toward the deficit). This is
+    /// enforced both by the G2 minimum-cardinality selection (col 0
+    /// cannot be selected because its slack is 0) and by the surplus
+    /// branch (zero-slack columns are pinned at max either way).
     #[test]
     fn audit_observation_zero_slack_skipped_in_wrap_set() {
         // max=[50, 100, 50], min=[50, 10, 10]. Slack=[0, 90, 40].
-        // deficit=50. Sorted slack-desc: [1, 2, 0]. With skip: add 1
-        // (acc=90), break. wrap={1}. col 0 has zero slack and is
-        // skipped (was previously pushed to the wrap set but didn't
-        // contribute).
+        // deficit=50. With G2, the highest-slack column (col 1,
+        // slack 90) alone covers the deficit (50), so the wrap set
+        // is {1}. Col 0 stays at max 50 (zero slack, not selectable).
+        // Col 2 stays at max 50 (its slack of 40 is not needed).
+        // col 1 absorbs all 50 and shrinks from 100 to 50.
+        // widths = [50, 50, 50].
         let d = ftwa_v1(&[50.0, 100.0, 50.0], &[50.0, 10.0, 10.0], 150.0);
-        assert_eq!(d.widths, vec![50.0, 50.0, 50.0]);
+        // col 0 unchanged (zero slack, not in wrap set).
+        assert!((d.widths[0] - 50.0).abs() < 1e-3);
+        // G2: col 1 absorbs all deficit, col 2 pinned at max.
+        assert!(
+            (d.widths[1] - 50.0).abs() < 1e-3,
+            "col 1: got {}",
+            d.widths[1]
+        );
+        assert!(
+            (d.widths[2] - 50.0).abs() < 1e-3,
+            "col 2 pinned at max (G2): got {}",
+            d.widths[2]
+        );
+        // Sum exact.
+        assert!((d.widths.iter().sum::<f32>() - 150.0).abs() < 1e-3);
     }
 
     /// Boundary: `available == sum_min` lands in deficit (not fallback)
@@ -1294,6 +1392,54 @@ mod tests {
         assert!((s - avail).abs() < 1.0);
     }
 
+    /// Regression test for the 7-column laptop-spec bug caught by
+    /// `test_render_table_laptop_spec_short_cells_unwrap_long_wraps`.
+    /// One column has enough slack to absorb the entire deficit, so
+    /// G2 (minimum-cardinality wrap set) puts only that column in
+    /// the wrap set; every other column stays at `max_content` and
+    /// does not wrap. Without G2 (the "every positive-slack column
+    /// participates" behaviour that was in effect before the fix),
+    /// short cells like "XPS 15 9570" got shrunk below their
+    /// max_content width and were force-wrapped to two lines.
+    #[test]
+    fn audit_g2_one_big_slack_column_absorbs_entire_deficit() {
+        // Six short/medium cells with small but positive slack, plus
+        // one long "Summary" cell with slack large enough to cover
+        // the entire deficit on its own.
+        let max = [
+            22.875_f32, 72.25, 176.5, 259.71875, 157.4375, 75.65625, 820.25,
+        ];
+        let min = [
+            22.875_f32, 29.3125, 90.71875, 73.1875, 52.40625, 32.53125, 72.375,
+        ];
+        // 1000 px viewport minus 6 gutters of 10 px = 940, minus the
+        // 16 px outer frame margin used by CentralPanel = 924.
+        let avail = 924.0_f32;
+        let d = ftwa_v1(&max, &min, avail);
+        assert!(!d.needs_horizontal_scroll);
+        // Sum exact (G3).
+        assert!((d.widths.iter().sum::<f32>() - avail).abs() < 1e-3);
+        // G2: the only column in the wrap set is the Summary column
+        // (index 6, slack 747.88 >= deficit 660.69). Every other
+        // column stays at max_content.
+        for j in 0..6 {
+            assert!(
+                (d.widths[j] - max[j]).abs() < 1e-3,
+                "col {j} must be pinned at max {} (G2); got {}",
+                max[j],
+                d.widths[j]
+            );
+        }
+        // Summary absorbs the full deficit and shrinks accordingly.
+        let deficit = max.iter().sum::<f32>() - avail;
+        assert!(
+            (d.widths[6] - (max[6] - deficit)).abs() < 1e-3,
+            "Summary col must absorb all deficit; got {} expected {}",
+            d.widths[6],
+            max[6] - deficit
+        );
+    }
+
     // -------------------------------------------------------------------
     //  OBS-3, OBS-4: negative `available` / negative input widths panic.
     // -------------------------------------------------------------------
@@ -1342,7 +1488,7 @@ mod tests {
         ///         and `needs_horizontal_scroll`.
         ///       - surplus (`available >= sum_max`): `widths == max_content`
         ///         (columns pinned, table may not fill the full width;
-        ///         G3 intentionally relaxed in surplus â€” see `ftwa` doc).
+        ///         G3 intentionally relaxed in surplus â€" see `ftwa` doc).
         ///       - deficit (`sum_min <= available < sum_max`):
         ///         `sum(widths) == available` (G3 exact).
         ///   (2) `âˆ€j. widths[j] >= min_content[j]` (never break a token).
