@@ -43,15 +43,13 @@ pub fn parse_markdown_to_events(markdown_text: &str) -> Vec<RenderEvent> {
     let mut current_row: Vec<Vec<InlineElem>> = Vec::new();
 
     let mut list_ordinal_stack: Vec<Option<u64>> = Vec::new();
-    let mut blockquote_depth: usize = 0;
 
     let push_inline = |events: &mut Vec<RenderEvent>,
                        elems: &mut Vec<InlineElem>,
                        bullet: &mut bool,
                        task: &mut Option<bool>,
                        indent: usize,
-                       list_ordinal: Option<u64>,
-                       bq_depth: usize| {
+                       list_ordinal: Option<u64>| {
         if elems.is_empty() && !*bullet && task.is_none() {
             return;
         }
@@ -61,7 +59,6 @@ pub fn parse_markdown_to_events(markdown_text: &str) -> Vec<RenderEvent> {
             task_checked: *task,
             indent,
             list_ordinal,
-            blockquote_depth: bq_depth,
         });
         elems.clear();
         *bullet = false;
@@ -79,7 +76,6 @@ pub fn parse_markdown_to_events(markdown_text: &str) -> Vec<RenderEvent> {
                         &mut task_checked,
                         list_depth,
                         list_ordinal_stack.last().copied().flatten(),
-                        blockquote_depth,
                     );
                 }
                 in_code_block = true;
@@ -100,7 +96,6 @@ pub fn parse_markdown_to_events(markdown_text: &str) -> Vec<RenderEvent> {
                         &mut task_checked,
                         list_depth,
                         list_ordinal_stack.last().copied().flatten(),
-                        blockquote_depth,
                     );
                 }
                 in_heading = true;
@@ -131,7 +126,6 @@ pub fn parse_markdown_to_events(markdown_text: &str) -> Vec<RenderEvent> {
                         &mut task_checked,
                         list_depth,
                         list_ordinal_stack.last().copied().flatten(),
-                        blockquote_depth,
                     );
                 }
             }
@@ -144,7 +138,6 @@ pub fn parse_markdown_to_events(markdown_text: &str) -> Vec<RenderEvent> {
                         &mut task_checked,
                         list_depth,
                         list_ordinal_stack.last().copied().flatten(),
-                        blockquote_depth,
                     );
                     events.push(RenderEvent::Space(4.0));
                 }
@@ -158,7 +151,6 @@ pub fn parse_markdown_to_events(markdown_text: &str) -> Vec<RenderEvent> {
                         &mut task_checked,
                         list_depth,
                         list_ordinal_stack.last().copied().flatten(),
-                        blockquote_depth,
                     );
                 }
                 list_depth += 1;
@@ -172,7 +164,6 @@ pub fn parse_markdown_to_events(markdown_text: &str) -> Vec<RenderEvent> {
                     &mut task_checked,
                     list_depth,
                     list_ordinal_stack.last().copied().flatten(),
-                    blockquote_depth,
                 );
                 list_depth = list_depth.saturating_sub(1);
                 list_ordinal_stack.pop();
@@ -186,7 +177,6 @@ pub fn parse_markdown_to_events(markdown_text: &str) -> Vec<RenderEvent> {
                         &mut task_checked,
                         list_depth,
                         list_ordinal_stack.last().copied().flatten(),
-                        blockquote_depth,
                     );
                 }
                 needs_bullet = true;
@@ -199,7 +189,6 @@ pub fn parse_markdown_to_events(markdown_text: &str) -> Vec<RenderEvent> {
                     &mut task_checked,
                     list_depth,
                     list_ordinal_stack.last().copied().flatten(),
-                    blockquote_depth,
                 );
                 if let Some(Some(n)) = list_ordinal_stack.last_mut() {
                     *n += 1;
@@ -214,10 +203,8 @@ pub fn parse_markdown_to_events(markdown_text: &str) -> Vec<RenderEvent> {
                         &mut task_checked,
                         list_depth,
                         list_ordinal_stack.last().copied().flatten(),
-                        blockquote_depth,
                     );
                 }
-                blockquote_depth += 1;
             }
             Event::End(TagEnd::BlockQuote) => {
                 push_inline(
@@ -227,9 +214,7 @@ pub fn parse_markdown_to_events(markdown_text: &str) -> Vec<RenderEvent> {
                     &mut task_checked,
                     list_depth,
                     list_ordinal_stack.last().copied().flatten(),
-                    blockquote_depth,
                 );
-                blockquote_depth = blockquote_depth.saturating_sub(1);
             }
             Event::Start(Tag::Table(_)) => {
                 if !buffered_inline.is_empty() {
@@ -240,7 +225,6 @@ pub fn parse_markdown_to_events(markdown_text: &str) -> Vec<RenderEvent> {
                         &mut task_checked,
                         list_depth,
                         list_ordinal_stack.last().copied().flatten(),
-                        blockquote_depth,
                     );
                 }
                 table_cells.clear();
@@ -278,7 +262,6 @@ pub fn parse_markdown_to_events(markdown_text: &str) -> Vec<RenderEvent> {
                         &mut task_checked,
                         list_depth,
                         list_ordinal_stack.last().copied().flatten(),
-                        blockquote_depth,
                     );
                 }
             }
@@ -347,7 +330,6 @@ pub fn parse_markdown_to_events(markdown_text: &str) -> Vec<RenderEvent> {
                             &mut task_checked,
                             list_depth,
                             list_ordinal_stack.last().copied().flatten(),
-                            blockquote_depth,
                         );
                     } else {
                         buffered_inline.push(InlineElem::SoftBreak);
@@ -362,7 +344,6 @@ pub fn parse_markdown_to_events(markdown_text: &str) -> Vec<RenderEvent> {
                     &mut task_checked,
                     list_depth,
                     list_ordinal_stack.last().copied().flatten(),
-                    blockquote_depth,
                 );
                 events.push(RenderEvent::Separator);
             }
@@ -391,7 +372,6 @@ pub fn parse_markdown_to_events(markdown_text: &str) -> Vec<RenderEvent> {
                         &mut task_checked,
                         list_depth,
                         list_ordinal_stack.last().copied().flatten(),
-                        blockquote_depth,
                     );
                 }
                 events.push(RenderEvent::Separator);
@@ -408,7 +388,6 @@ pub fn parse_markdown_to_events(markdown_text: &str) -> Vec<RenderEvent> {
                     &mut task_checked,
                     list_depth,
                     list_ordinal_stack.last().copied().flatten(),
-                    blockquote_depth,
                 );
             }
             Event::Start(Tag::HtmlBlock) => {
@@ -420,7 +399,6 @@ pub fn parse_markdown_to_events(markdown_text: &str) -> Vec<RenderEvent> {
                         &mut task_checked,
                         list_depth,
                         list_ordinal_stack.last().copied().flatten(),
-                        blockquote_depth,
                     );
                 }
             }
@@ -432,7 +410,6 @@ pub fn parse_markdown_to_events(markdown_text: &str) -> Vec<RenderEvent> {
                     &mut task_checked,
                     list_depth,
                     list_ordinal_stack.last().copied().flatten(),
-                    blockquote_depth,
                 );
             }
             _ => {}
@@ -445,7 +422,6 @@ pub fn parse_markdown_to_events(markdown_text: &str) -> Vec<RenderEvent> {
         &mut task_checked,
         list_depth,
         list_ordinal_stack.last().copied().flatten(),
-        blockquote_depth,
     );
 
     events
@@ -499,7 +475,7 @@ mod tests {
     fn test_parse_yaml_to_pairs() {
         let yaml: serde_yaml::Value = serde_yaml::from_str("key: val\nlist: [a, b]").unwrap();
         let pairs = parse_yaml_to_pairs(&yaml).unwrap();
-        assert_eq!(pairs[0], ("key".to_string(), "val".to_string()));
-        assert_eq!(pairs[1], ("list".to_string(), "a, b".to_string()));
+        assert_eq!(pairs[0], ("key".to_string(), ("val").to_string()));
+        assert_eq!(pairs[1], ("list".to_string(), ("a, b").to_string()));
     }
 }

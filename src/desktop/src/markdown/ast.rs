@@ -26,8 +26,6 @@ pub enum RenderEvent {
         indent: usize,
         /// Ordinal for ordered list items. `None` → bullet, `Some(n)` → `"n. "`.
         list_ordinal: Option<u64>,
-        /// Blockquote nesting depth. `0` → not inside a blockquote.
-        blockquote_depth: usize,
     },
     CodeBlock(String),
     Heading {

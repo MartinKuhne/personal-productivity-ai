@@ -3,10 +3,13 @@
 > Status: **Research / options document** (non-destructive). No code changes yet.
 > Scope: Algorithm design for assigning pixel widths to markdown/GFM table columns
 > rendered in the egui center panel (see `src/desktop/src/ui/render.rs:215` `render_table`).
-> Author intent: reconcile three conflicting goals:
->   **G1** – minimize total word-wrap (extra wrapped lines),
->   **G2** – minimize the *number* of columns that wrap,
+> Author intent: reconcile two goals:
+>   **G1** – minimize total word-wrap (extra wrapped lines) and
 >   **G3** – use all available horizontal space.
+>
+> (G2 – "minimize the number of columns that wrap" – was a third goal in earlier
+> revisions. It has been removed: every positive-slack column now participates in
+> shrinking the deficit, and B2 distributes the deficit across all of them.)
 
 ---
 
@@ -33,27 +36,28 @@ absorb spare width when `W` is abundant). Subject to `Σ w_j = W` (G3).
 
 ### 1.1 Why the goals conflict
 
-* If `Σ max_j ≤ W`, all three are simultaneously satisfiable: give every column
-  `max_j` and split the leftover fairly (G1 = G2 = 0, only G3 distribution left).
+* If `Σ max_j ≤ W`, both goals are simultaneously satisfiable: give every column
+  `max_j` and split the leftover fairly (G1 = 0, only G3 distribution left).
 * The interesting regime is the **deficit** case `Σ max_j > W`. We must shrink some
-  columns below `max_j`, forcing wraps. *Which* columns take the hit, and by how
-  much, is where G1 and G2 diverge:
-  * **G2-first**: concentrate the deficit on the fewest columns → fewest "victims."
-  * **G1-first**: spread the deficit so each column wraps as little as possible →
-    more columns wrap but each minimally.
+  columns below `max_j`, forcing wraps. **G2 picks which columns** — the wrap
+  set is the minimum-cardinality subset of positive-slack columns whose
+  combined slack can absorb the deficit. **G1 picks how much each of those
+  columns shrinks** — B2 distributes the deficit across the (small) wrap set
+  per the chosen strategy (proportional-to-slack or breakpoint water-fill).
 * G3 ("use all space") is a hard equality constraint; in the surplus regime it is
   pure spare distribution and competes only with aesthetics.
 
 ### 1.2 What "fair" means here
 
-We adopt a **lexicographic / Rawlsian** reading of fairness, mirroring how a fair
-allocator minimizes the number of harmed parties first, then the severity of harm:
+We adopt a **weighted / Rawlsian** reading of fairness: every positive-slack
+column contributes to absorbing the deficit, and the chosen `DeficitStrategy`
+distributes that contribution either proportionally to slack (uniform) or
+by marginal cost (water-fill on per-column wrap-cost curves).
 
 ```
-Priority A  minimize  C = |{ j : column j wraps }|            (G2)
-Priority B  minimize  T = Σ_j extraLines_j(w_j)               (G1)
-Priority C  use all space  (Σ w_j = W)                         (G3)
-Priority D  distribute any remaining slack/spare evenly        (fairness tiebreak)
+Priority A  minimize  T = Σ_j extraLines_j(w_j)               (G1)
+Priority B  use all space  (Σ w_j = W)                         (G3)
+Priority C  distribute any remaining slack/spare evenly        (fairness tiebreak)
 ```
 
 Rationale: a solution that wraps 1 column by 4 lines is "fairer" than one that
@@ -167,8 +171,10 @@ slack. So **Priority A is solvable in `O(N log N)`**.
 
 ## 3. Proposed algorithm — "Fair Table Width Algorithm" (FTWA)
 
-Combines §2.11 (exact wrap-count minimization) for G2, §2.10 (water-filling) for
-G1/fairness inside the chosen wrap set, and §2.1 surplus distribution for G3.
+Combines §2.10 (water-filling) for G1 minimization across the wrap set and
+§2.1 surplus distribution for G3. The wrap set is every column with positive
+slack (G2 — minimum-cardinality wrap set — is no longer a goal: every
+positive-slack column participates in absorbing the deficit).
 
 ### 3.1 Inputs / precompute (the measurement pass)
 For each column `j`, walk every cell once and record:
@@ -203,45 +209,51 @@ full available width). **Done.**
 ### 3.3 Phase B — deficit regime (`W < Σ max_j`)
 Let `D = Σ max_j − W` (total shrinkage required from the ideal widths).
 
-**Step B1 — pick the wrap set S (minimize G2).** Sort columns by `slack_j`
-descending; let `S` be the smallest prefix with `Σ_{j∈S} slack_j ≥ D`. Columns
-not in `S` are pinned at `max_j` (they will not wrap). This is the exact
-minimum-cardinality wrap set (§2.11).
+**Step B1 — build the wrap set (every positive-slack column).** The wrap set
+is *every* column `j` with `slack_j > 0` (G2 is not a goal here — see §1.1). Each
+wrap-set column can contribute to absorbing the deficit, proportional to its
+slack or per its marginal-cost curve.
 
 *Edge case*: if `Σ_j slack_j < D` (even shrinking *every* column to its min
 cannot reach `W`), fall back to §3.6 (give every column `min_j` and enable
-horizontal scroll — done; G1/G2 are as good as physically possible).
+horizontal scroll — done; G1 is as good as physically possible).
 
-**Step B2 — distribute the deficit across S to minimize G1 (water-filling on
+**Step B2 — distribute the deficit across the wrap set to minimize G1 (water-filling on
 extra lines).**
-1. Initialize `w_j = max_j` for all `j ∈ S`.
+1. Initialize `w_j = max_j` for all `j` in the wrap set.
 2. Compute current `extraLines_j(w_j) = 0` for all.
-3. Repeatedly "spend" a unit of deficit on the column in `S` that offers the
-   smallest *marginal* increase in `extraLines` per unit of width removed — i.e.
-   step down to the next breakpoint of the column whose `cost_j` at the next lower
+3. Repeatedly "spend" a unit of deficit on the column that offers the smallest
+   *marginal* increase in `extraLines` per unit of width removed — i.e. step
+   down to the next breakpoint of the column whose `cost_j` at the next lower
    breakpoint introduces zero or the fewest new lines. This is greedy marginal
    cost minimization over the piecewise-constant `cost_j` curves (equivalently,
    a discrete water-filling that equalizes marginal cost).
-4. Stop when `Σ_{j∈S} (max_j − w_j) = D`.
+4. Stop when `Σ_j (max_j − w_j) = D`.
 
 Because `cost_j` is monotone and piecewise-constant, the greedy "always take the
 cheapest next breakpoint" rule is optimal for minimizing `Σ extraLines` subject
-to a total-shrink budget over `S` (the breakpoints form a matroid-like greedy
-structure: at each step the cheapest marginal step dominates). Implementation
-uses a min-heap keyed by `Δcost / Δwidth`, O((B) log N) where `B` is the total
-number of breakpoints.
+to a total-shrink budget over the wrap set (the breakpoints form a matroid-like
+greedy structure: at each step the cheapest marginal step dominates).
+Implementation uses a min-heap keyed by `Δcost / Δwidth`, O((B) log N) where
+`B` is the total number of breakpoints.
 
-**Step B3 — push leftover width (Priority D).** If after reaching exactly `D`
-the algorithm holds at `Σ w_j = W`, nothing is left. If rounding/integer
-arithmetic leaves a residue `r` (0 ≤ r < N), distribute it to `S` first (raise
-the columns with the most extra lines, reducing G1 further), then to non-`S`.
+A simpler v1 strategy, `ProportionalToSlack`, skips the marginal-cost
+computation and assigns each wrap-set column a share of the deficit
+proportional to its slack (`deficit * slack_j / Σ slack_j`). This is
+`O(|S|)` and produces a more uniform distribution.
 
-### 3.4 Why this satisfies the lexicographic goal
-* **G2** is minimized exactly by §3.3 Step B1 (§2.11 proof).
-* **G1** is minimized *within* the lock-in of G2 by Step B3 greedy marginal
-  allocation (optimal over the fixed wrap set `S`).
+**Step B3 — push leftover width (fairness tiebreak).** If rounding/floating-point
+arithmetic leaves a residue `r` (0 ≤ |r| < N sub-pixel), dump it into the
+deepest-slack wrap column (lower index on tie) so `Σ w_j = W` exactly. G3 holds
+by construction.
+
+### 3.4 Why this satisfies the goal
+* **G1** is minimized by §3.3 Step B2 (greedy marginal-cost allocation over
+  the wrap set, or proportional-to-slack for the simpler v1 strategy).
 * **G3** holds by construction (`Σ w_j = W`).
-* Remaining ties (same `{w_j}` from cost perspective) resolved by even surplus.
+* Ties (same `{w_j}` from cost perspective) are resolved by the deterministic
+  drift-dump tiebreak (deepest slack, lower index on tie — matches the
+  wrap-set sort order).
 
 ### 3.5 Surplus distribution rules (options for the fair tiebreak)
 When spare pixels exist, candidates to assign `share`:
@@ -338,16 +350,16 @@ smaller `Δcost / Δwidth` to get the most shrinkage for the least wrap.
 
 ## 4. Comparison matrix
 
-| Algorithm | G1 total wrap | G2 wrap-cols | G3 uses space | Cost | Notes |
-|---|---|---|---|---|---|
-| Current code (`ScrollArea`+`Grid`, §2.5) | 0 (in-table) | 0 | **no** (scrolls) | O(N) | baseline we beat on G3 |
-| `table-layout:auto` (§2.1/2.9) | heuristic | spread (bad for G2) | yes | O(N·px) | no wrap-col minimization |
-| `table-layout:fixed` (§2.3) | unbounded | all | yes | O(N) | content-blind |
-| Qt `Stretch` (§2.6) | large | all | yes | O(N) | ignores content |
-| Knuth–Plass per-col (§2.7) | optimal (fixed w) | external | external | heavy | widths chosen elsewhere |
-| LP surrogate (§2.8) | soft via `L1` | soft (λ-tuned) | yes | solver | overkill for UI |
-| Pure water-filling (§2.10) | equalized | **maximized** | yes | O(B log N) | good distributor, bad selector |
-| **FTWA (§3)** | optimal over S | **exact minimum** | yes | O(N log N + B log N) | recommended |
+| Algorithm | G1 total wrap | G3 uses space | Cost | Notes |
+|---|---|---|---|---|
+| Current code (`ScrollArea`+`Grid`, §2.5) | 0 (in-table) | **no** (scrolls) | O(N) | baseline we beat on G3 |
+| `table-layout:auto` (§2.1/2.9) | heuristic | yes | O(N·px) | proportional resize; ignores content shape |
+| `table-layout:fixed` (§2.3) | unbounded | yes | O(N) | content-blind |
+| Qt `Stretch` (§2.6) | large | yes | O(N) | ignores content |
+| Knuth–Plass per-col (§2.7) | optimal (fixed w) | external | heavy | widths chosen elsewhere |
+| LP surrogate (§2.8) | soft via `L1` | yes | solver | overkill for UI |
+| Pure water-filling (§2.10) | equalized | yes | O(B log N) | good distributor on its own |
+| **FTWA (§3, current revision)** | optimal over the wrap set | yes | O(N log N + B log N) | every positive-slack column participates |
 
 ---
 
