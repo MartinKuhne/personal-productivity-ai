@@ -194,7 +194,7 @@ pub fn parse_markdown_to_events(markdown_text: &str) -> Vec<RenderEvent> {
                     *n += 1;
                 }
             }
-            Event::Start(Tag::BlockQuote) => {
+            Event::Start(Tag::BlockQuote(_)) => {
                 if !buffered_inline.is_empty() {
                     push_inline(
                         &mut events,
@@ -206,7 +206,7 @@ pub fn parse_markdown_to_events(markdown_text: &str) -> Vec<RenderEvent> {
                     );
                 }
             }
-            Event::End(TagEnd::BlockQuote) => {
+            Event::End(TagEnd::BlockQuote(_)) => {
                 push_inline(
                     &mut events,
                     &mut buffered_inline,
@@ -428,33 +428,31 @@ pub fn parse_markdown_to_events(markdown_text: &str) -> Vec<RenderEvent> {
 }
 
 /// Parses a YAML mapping into a list of key-value string pairs.
-pub fn parse_yaml_to_pairs(yaml: &serde_yaml::Value) -> Option<Vec<(String, String)>> {
+pub fn parse_yaml_to_pairs(yaml: &serde_yml::Value) -> Option<Vec<(String, String)>> {
     let mapping = yaml.as_mapping()?;
     let mut pairs = Vec::new();
     for (key, value) in mapping {
-        if let Some(key_str) = key.as_str() {
-            let val_str = match value {
-                serde_yaml::Value::String(s) => s.clone(),
-                serde_yaml::Value::Sequence(seq) => {
-                    let items: Vec<String> = seq
-                        .iter()
-                        .map(|v| match v {
-                            serde_yaml::Value::String(s) => s.clone(),
-                            _ => serde_yaml::to_string(v)
-                                .unwrap_or_default()
-                                .trim()
-                                .to_string(),
-                        })
-                        .collect();
-                    items.join(", ")
-                }
-                _ => serde_yaml::to_string(value)
-                    .unwrap_or_default()
-                    .trim()
-                    .to_string(),
-            };
-            pairs.push((key_str.to_string(), val_str));
-        }
+        let val_str = match value {
+            serde_yml::Value::String(s) => s.clone(),
+            serde_yml::Value::Sequence(seq) => {
+                let items: Vec<String> = seq
+                    .iter()
+                    .map(|v| match v {
+                        serde_yml::Value::String(s) => s.clone(),
+                        _ => serde_yml::to_string(v)
+                            .unwrap_or_default()
+                            .trim()
+                            .to_string(),
+                    })
+                    .collect();
+                items.join(", ")
+            }
+            _ => serde_yml::to_string(value)
+                .unwrap_or_default()
+                .trim()
+                .to_string(),
+        };
+        pairs.push((key.to_string(), val_str));
     }
     Some(pairs)
 }
@@ -473,7 +471,7 @@ mod tests {
 
     #[test]
     fn test_parse_yaml_to_pairs() {
-        let yaml: serde_yaml::Value = serde_yaml::from_str("key: val\nlist: [a, b]").unwrap();
+        let yaml: serde_yml::Value = serde_yml::from_str("key: val\nlist: [a, b]").unwrap();
         let pairs = parse_yaml_to_pairs(&yaml).unwrap();
         assert_eq!(pairs[0], ("key".to_string(), ("val").to_string()));
         assert_eq!(pairs[1], ("list".to_string(), ("a, b").to_string()));

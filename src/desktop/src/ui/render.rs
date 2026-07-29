@@ -534,7 +534,7 @@ const YAML_KEY_COLUMN_WIDTH: f32 = 110.0;
 /// Inputs: `ui` (mut), `yaml`
 /// Outputs: None
 /// Purity: Impure (modifies UI state). Coordinates parsing and rendering.
-pub fn render_yaml_table(ui: &mut egui::Ui, yaml: &serde_yaml::Value) {
+pub fn render_yaml_table(ui: &mut egui::Ui, yaml: &serde_yml::Value) {
     if let Some(pairs) = parse_yaml_to_pairs(yaml) {
         let table_id = ui.make_persistent_id("yaml_table");
         egui::Frame::NONE
@@ -700,7 +700,7 @@ mod tests {
     #[test]
     fn test_parse_yaml_to_pairs() {
         let yaml_str = "key1: value1\nkey2: [item1, item2]\nkey3: 100\nkey4: true";
-        let val: serde_yaml::Value = serde_yaml::from_str(yaml_str).unwrap();
+        let val: serde_yml::Value = serde_yml::from_str(yaml_str).unwrap();
         let pairs = parse_yaml_to_pairs(&val).unwrap();
         assert_eq!(pairs[0], ("key1".to_string(), "value1".to_string()));
         assert_eq!(pairs[1], ("key2".to_string(), "item1, item2".to_string()));
@@ -710,14 +710,14 @@ mod tests {
 
     #[test]
     fn test_parse_yaml_to_pairs_non_mapping() {
-        let string_val = serde_yaml::Value::String("just string".to_string());
+        let string_val = serde_yml::Value::String("just string".to_string());
         assert_eq!(parse_yaml_to_pairs(&string_val), None);
 
         let seq_val =
-            serde_yaml::Value::Sequence(vec![serde_yaml::Value::String("item".to_string())]);
+            serde_yml::Value::Sequence(vec![serde_yml::Value::String("item".to_string())]);
         assert_eq!(parse_yaml_to_pairs(&seq_val), None);
 
-        let null_val = serde_yaml::Value::Null;
+        let null_val = serde_yml::Value::Null;
         assert_eq!(parse_yaml_to_pairs(&null_val), None);
     }
 
@@ -1410,7 +1410,7 @@ mod e2e_tests {
                 );
 
                 let yaml_str = "a: 1\nb: 2";
-                let val: serde_yaml::Value = serde_yaml::from_str(yaml_str).unwrap();
+                let val: serde_yml::Value = serde_yml::from_str(yaml_str).unwrap();
                 render_yaml_table(ui, &val);
             });
         });
@@ -1456,7 +1456,7 @@ def foo():
                 );
 
                 // Render non-mapping YAML table
-                let non_map = serde_yaml::Value::String("test".to_string());
+                let non_map = serde_yml::Value::String("test".to_string());
                 render_yaml_table(ui, &non_map);
             });
         });
@@ -1524,7 +1524,7 @@ def foo():
              tags: [invoice, receipt, technology, documents]\n\
              header-date: 2026-07-22T19:32:47Z\n"
         );
-        let yaml: serde_yaml::Value = serde_yaml::from_str(&yaml_str).unwrap();
+        let yaml: serde_yml::Value = serde_yml::from_str(&yaml_str).unwrap();
 
         let output = ctx.run_ui(raw, |ui| {
             egui::CentralPanel::default().show(ui, |ui| {
@@ -1592,7 +1592,7 @@ def foo():
              summary: \"{long_summary}\"\n\
              tags: [professional, career, linkedin, architect]\n"
         );
-        let yaml: serde_yaml::Value = serde_yaml::from_str(&yaml_str).unwrap();
+        let yaml: serde_yml::Value = serde_yml::from_str(&yaml_str).unwrap();
 
         let output = ctx.run_ui(raw, |ui| {
             egui::CentralPanel::default().show(ui, |ui| {

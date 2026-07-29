@@ -326,7 +326,7 @@ pub fn render_test_with_size(size: egui::Vec2, f: impl FnOnce(&mut egui::Ui)) {
 
 | | |
 |---|---|
-| **What** | Functions like `pub fn parse_markdown_to_events(markdown_text: &str) -> Vec<RenderEvent>`, `pub fn parse_yaml_to_pairs(yaml: &serde_yaml::Value) -> ...`, `pub fn build_toc(markdown_text: &str) -> Vec<ToCEntry>` have no doc tests. The AGENTS.md requires `///` doc comments and examples "where they clarify usage" but nothing verifies those examples compile. |
+| **What** | Functions like `pub fn parse_markdown_to_events(markdown_text: &str) -> Vec<RenderEvent>`, `pub fn parse_yaml_to_pairs(yaml: &serde_yml::Value) -> ...`, `pub fn build_toc(markdown_text: &str) -> Vec<ToCEntry>` have no doc tests. The AGENTS.md requires `///` doc comments and examples "where they clarify usage" but nothing verifies those examples compile. |
 | **Where** | `src/desktop/src/ui/render.rs:329` (`parse_markdown_to_events`), `:215` (`parse_yaml_to_pairs`), `:573` (`build_toc`). |
 | **Why** | Doc tests are documentation that won't rot. They also test the public API surface from the caller's perspective. |
 | **Action** | Add a one-line `///` example to each public function. `cargo test --doc` is already wired in. |
