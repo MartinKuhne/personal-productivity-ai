@@ -686,7 +686,29 @@ pub fn render_markdown(
     pending_toggles: &mut Vec<(usize, bool)>,
     strategy: crate::ui::table_width::DeficitStrategy,
 ) {
-    let events = parse_markdown_to_events(markdown_text);
+    use std::sync::Arc;
+    let text_hash = egui::Id::new(markdown_text);
+    let cache_key = egui::Id::new("md_events_cache");
+    type CachedEvents = (egui::Id, Arc<Vec<RenderEvent>>);
+
+    let events: Arc<Vec<RenderEvent>> = if let Some((cached_hash, cached_events)) =
+        ui.ctx().data(|d| d.get_temp::<CachedEvents>(cache_key))
+    {
+        if cached_hash == text_hash {
+            cached_events
+        } else {
+            let parsed = Arc::new(parse_markdown_to_events(markdown_text));
+            ui.ctx()
+                .data_mut(|d| d.insert_temp(cache_key, (text_hash, parsed.clone())));
+            parsed
+        }
+    } else {
+        let parsed = Arc::new(parse_markdown_to_events(markdown_text));
+        ui.ctx()
+            .data_mut(|d| d.insert_temp(cache_key, (text_hash, parsed.clone())));
+        parsed
+    };
+
     let mut table_ordinal = 0usize;
     let mut task_index = 0usize;
 
@@ -707,7 +729,34 @@ pub fn render_markdown(
         id
     };
 
-    for event in events {
+    let clip = ui.clip_rect();
+    let viewport_margin = 400.0_f32;
+
+    for event in events.iter() {
+        let top_y = ui.cursor().min.y;
+        if clip.is_positive() && top_y > clip.max.y + viewport_margin {
+            match event {
+                RenderEvent::FlushInline {
+                    elems,
+                    task_checked,
+                    ..
+                } => {
+                    if task_checked.is_some() {
+                        task_index += 1;
+                    }
+                    let est_h = (elems.len() as f32 * 18.0).max(18.0);
+                    ui.add_space(est_h);
+                    continue;
+                }
+                RenderEvent::CodeBlock(content) => {
+                    let line_count = content.lines().count().max(1) as f32;
+                    let est_h = line_count * 18.0 + 20.0;
+                    ui.add_space(est_h);
+                    continue;
+                }
+                _ => {}
+            }
+        }
         match event {
             RenderEvent::FlushInline {
                 elems,
@@ -720,11 +769,11 @@ pub fn render_markdown(
                 // checkbox toggles can be mapped back to the source.
                 render_inline(
                     ui,
-                    &elems,
-                    needs_bullet,
-                    task_checked,
-                    indent,
-                    list_ordinal,
+                    elems,
+                    *needs_bullet,
+                    *task_checked,
+                    *indent,
+                    *list_ordinal,
                     task_index,
                     pending_toggles,
                 );
@@ -733,21 +782,21 @@ pub fn render_markdown(
                 }
             }
             RenderEvent::CodeBlock(content) => {
-                render_code_block(ui, &content);
+                render_code_block(ui, content);
             }
             RenderEvent::Heading { level, elems } => {
-                let text = heading_plain_text(&elems);
+                let text = heading_plain_text(elems);
                 let trimmed = text.trim();
                 if trimmed.is_empty() {
                     continue;
                 }
                 let heading_id = heading_id_for(trimmed);
-                render_heading(ui, &elems, level, scroll_to_id, heading_id);
+                render_heading(ui, elems, *level, scroll_to_id, heading_id);
             }
             RenderEvent::Table(cells) => {
                 render_table_with_config(
                     ui,
-                    &cells,
+                    cells,
                     table_ordinal,
                     strategy,
                     &crate::ui::table_width::TableRenderConfig::default(),
@@ -755,7 +804,7 @@ pub fn render_markdown(
                 table_ordinal += 1;
             }
             RenderEvent::Space(amount) => {
-                ui.add_space(amount);
+                ui.add_space(*amount);
             }
             RenderEvent::Separator => {
                 ui.separator();
