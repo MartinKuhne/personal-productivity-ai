@@ -181,28 +181,12 @@ fn format_grep_result(func_name: &str, data: &serde_json::Value) -> String {
 }
 
 fn format_email_by_id_result(func_name: &str, data: &serde_json::Value) -> String {
-    let extract = |field: &str| -> String {
-        data.get("result")
-            .and_then(|v| v.as_str())
-            .and_then(|s| serde_json::from_str::<serde_json::Value>(s).ok())
-            .and_then(|val| val.as_array().and_then(|a| a.first().cloned()))
-            .and_then(|obj| {
-                obj.get(field)
-                    .and_then(|s| s.as_str())
-                    .map(|s| s.to_string())
-            })
-            .unwrap_or_default()
-    };
-    let subject = extract("subject");
-    let date = extract("date");
-    if !subject.is_empty() || !date.is_empty() {
-        format!("> **Result (`{}`):** {} - {}\n\n", func_name, date, subject)
-    } else {
-        format!(
-            "> **Result (`{}`):** Email content retrieved.\n\n",
-            func_name
-        )
-    }
+    let content = data.get("result").and_then(|f| f.as_str()).unwrap_or("");
+    format!(
+        "> **Result (`{}`):** {} line(s) read.\n\n",
+        func_name,
+        content.lines().count()
+    )
 }
 
 fn format_search_email_result(func_name: &str, data: &serde_json::Value) -> String {
@@ -374,5 +358,13 @@ mod tests {
         let msg = format_tool_result_message("some_tool", "ok");
         assert!(msg.contains("some_tool"));
         assert!(msg.contains("ok"));
+    }
+
+    #[test]
+    fn test_format_result_get_email_by_id() {
+        let result = r#"{"status":"success","data":{"result":"line1\nline2\nline3"}}"#;
+        let msg = format_tool_result_message("get_email_by_id", result);
+        assert!(msg.contains("get_email_by_id"));
+        assert!(msg.contains("3 line(s) read"));
     }
 }

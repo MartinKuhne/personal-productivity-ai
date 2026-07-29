@@ -90,7 +90,8 @@ C4Component fastmd
   Component(modals, "modals", "ui/modals.rs", "Modal rendering (private module)")
   Component(bglogs, "background_logs", "ui/background_logs.rs", "Background Processes tab REQ-460..465")
   Component(osshell, "os_shell", "ui/os_shell.rs", "open_in_system_editor, show_in_file_explorer, ShellExecute 'print' REQ-159")
-  Component(tblw, "table_width", "ui/table_width/mod.rs", "Table column width algorithm")
+  Component(tblw_pure, "table_width (pure core)", "markdown/table_width/mod.rs", "Fair Table Width Algorithm: pure f32 column-width solver (no egui dependency)")
+  Component(tblw_adapter, "table_width (egui adapter)", "ui/table_width/mod.rs", "egui-bridging measure/measure_cached/ftwa_cached + re-exports pure core; TablePadding, TableRenderConfig, resolve_padding")
 
   Rel(app, panels, "delegates update()")
   Rel(app, render, "renders markdown")
@@ -100,6 +101,8 @@ C4Component fastmd
   Rel(app, dialog, "modal actions")
   Rel(app, bglogs, "shows background logs")
   Rel(app, osshell, "OS integration")
+  Rel(render, tblw_adapter, "measure_cached, ftwa_cached")
+  Rel(tblw_adapter, tblw_pure, "re-exports ftwa, Breakpoint, ColumnWidths, DeficitStrategy, CellTokens, compute_column_breakpoints")
 ```
 
 Supporting UI types: `TreeNode{name,path,is_dir,children:BTreeMap}`,

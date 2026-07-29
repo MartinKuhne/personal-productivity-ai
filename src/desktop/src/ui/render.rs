@@ -8,20 +8,28 @@ pub use crate::markdown::{
     parse_markdown_to_events, parse_yaml_to_pairs,
 };
 
-/// Dark gray stroke used as the border around every markdown table cell.
+/// Two-greys border model for markdown tables (`TBL-040`–`TBL-043`).
 ///
-/// Matches the `from_gray(40)` convention shared by `render_code_block`
-/// (code block outline) and `render_yaml_table` (YAML metadata table
-/// outline) so all "outlined" surfaces look the same.
-///
-/// The stroke is 1 px wide and the frame that carries it uses zero
-/// inner/outer margin, so the only space the border consumes inside
-/// the Grid cell is its own 1 px on each side — see
-/// `render_table_cell` for how the pinned-width path compensates.
-const TABLE_CELL_STROKE: egui::Stroke = egui::Stroke {
+/// `TABLE_PERIMETER_STROKE` is the medium-gray outline that wraps the
+/// entire `egui::Grid` exactly once, drawn by the outer `Frame::NONE`
+/// in `render_table_with_config`. `TABLE_INTERCELL_STROKE` is the
+/// dark-gray separator drawn between adjacent cells by
+/// `paint_intercell_separators`. No per-cell frame is drawn by
+/// `render_table_cell`, so junctions collapse cleanly (`TBL-042`).
+const TABLE_PERIMETER_STROKE: egui::Stroke = egui::Stroke {
+    width: 1.0,
+    color: egui::Color32::from_gray(120),
+};
+const TABLE_INTERCELL_STROKE: egui::Stroke = egui::Stroke {
     width: 1.0,
     color: egui::Color32::from_gray(40),
 };
+
+/// Legacy value kept as a reference for `count_table_cell_borders` and
+/// tests that detect residual per-cell strokes (post-T022 the count must
+/// be 0). Equal in value to `TABLE_INTERCELL_STROKE` (same dark gray).
+#[allow(dead_code)]
+const TABLE_CELL_STROKE: egui::Stroke = TABLE_INTERCELL_STROKE;
 
 /// Purpose: Renders inline markdown elements.
 /// Inputs: `ui` (mut), `elems`, `needs_bullet`, `task_checked`, `indent`, `wrap`
@@ -312,33 +320,65 @@ fn render_heading(
 /// When `pinned_width` is `Some(w)`, the cell Ui is clamped to exactly `w`
 /// pixels (`ui.set_width`) and text is laid out with `horizontal_wrapped` +
 /// `Label::wrap(true)` so that multi-word cells wrap at whitespace. This is the
-/// FTWA-pinned mode (`crates::ui::table_width`). The FTWA invariant
+/// FTWA-pinned mode (`crate::ui::table_width`). The FTWA invariant
 /// `w >= min_content >= longest-token` guarantees no unbreakable token is ever
-/// split or clipped Ã¢â‚¬â€ only inter-word whitespace wraps.
+/// split or clipped — only inter-word whitespace wraps.
 ///
-/// When `pinned_width` is `None` (the Ã‚Â§3.6 fallback path), the cell uses
+/// When `pinned_width` is `None` (the §3.6 fallback path), the cell uses
 /// `ui.horizontal` (no wrap) so the cell reports its full single-line intrinsic
 /// width to the parent `Grid`; any overflow is handled by the wrapping
 /// `ScrollArea` (current pre-FTWA behaviour).
 ///
-/// Every cell is wrapped in a 1 px dark-gray `Frame` (see `TABLE_CELL_STROKE`)
-/// so the rendered table shows a visible border around every cell. The frame
-/// uses zero `inner_margin` / `outer_margin`; the stroke is drawn on the
-/// inside of the cell's rect, so the cell's content area is shrunk by
-/// `TABLE_CELL_STROKE.width` (1 px) on each side. In the pinned-width path
-/// the inner layout is therefore given `w - 2 * stroke_width` so the text
-/// still fits the FTWA-assigned column.
-fn render_table_cell(ui: &mut egui::Ui, cell: &[InlineElem], pinned_width: Option<f32>) {
+/// **Border model (TBL-040..TBL-042):** the cell draws *no* stroke of its own
+/// (`cell_frame.stroke == Stroke::NONE`). The two-tier border is painted by the
+/// caller (`render_table_with_config`): a single medium-gray perimeter
+/// (`TABLE_PERIMETER_STROKE`) wraps the whole `egui::Grid`, and dark-gray
+/// inter-cell separators (`TABLE_INTERCELL_STROKE`) are painted via
+/// `paint_intercell_separators` — each separator exactly once, so junctions
+/// collapse. The per-cell `Frame::NONE` here exists only to carry `inner_margin`
+/// (the resolved `padding`).
+///
+/// **Padding (TBL-032, TBL-033):** `padding` is resolved per-cell by the caller
+/// via `resolve_padding(global, per_column, per_cell)` and applied as the
+/// cell frame's `inner_margin`. `padding.horizontal()` is folded into the
+/// column's `max_content`/`min_content` by `measure_cached`, so the FTWA-assigned
+/// `pinned_width` already accounts for it; the inner layout width is therefore
+/// `pinned_width - padding.horizontal()` so text fits inside the padded frame.
+///
+/// **Clip (TBL-043):** when `clip_overflow` is `true`, the inner content layout
+/// is wrapped in a `ui.set_clip_rect` call so glyphs beyond the cell boundary
+/// are not painted. Clip takes precedence over the horizontal-scroll fallback
+/// (which is only entered when `clip_overflow == false` and
+/// `decision.needs_horizontal_scroll`).
+fn render_table_cell(
+    ui: &mut egui::Ui,
+    cell: &[InlineElem],
+    pinned_width: Option<f32>,
+    padding: crate::ui::table_width::TablePadding,
+    clip_overflow: bool,
+) {
+    let pad = padding.sanitised();
+    let pad_h = pad.horizontal();
+    // `egui::Margin` stores `i8` fields, so clamp each side to the
+    // representable range after rounding. Realistic paddings are small
+    // (a few to a few dozen logical px), so this loses no precision in
+    // practice and keeps `Margin`'s compact layout intact.
+    let to_i8 = |v: f32| -> i8 { v.round().clamp(0.0, 127.0) as i8 };
     let cell_frame = egui::Frame::NONE
-        .inner_margin(egui::Margin::ZERO)
+        .inner_margin(egui::Margin {
+            left: to_i8(pad.left),
+            right: to_i8(pad.right),
+            top: to_i8(pad.top),
+            bottom: to_i8(pad.bottom),
+        })
         .outer_margin(egui::Margin::ZERO)
-        .stroke(TABLE_CELL_STROKE);
+        .stroke(egui::Stroke::NONE);
 
     let avail_w = ui.available_width();
     let avail_h = ui.available_height();
     let inner_w = match pinned_width {
-        Some(w) => w,
-        None => avail_w,
+        Some(w) => (w - pad_h).max(0.0),
+        None => (avail_w - pad_h).max(0.0),
     };
 
     // Use top_down(Align::Min) so content starts at top y of Grid cell.
@@ -393,12 +433,21 @@ fn render_table_cell(ui: &mut egui::Ui, cell: &[InlineElem], pinned_width: Optio
                 }
             };
 
-            // Render text content tightly packed at top of cell without min_height constraint
+            // Render text content tightly packed at top of cell without min_height constraint.
+            // `TBL-030`/`TBL-031`: `left_to_right(Align::Min)` is LEFT aligned,
+            // `top_down(Align::Min)` (outer scope) is TOP aligned.
             ui.with_layout(
                 egui::Layout::left_to_right(egui::Align::Min).with_main_wrap(true),
                 |ui| {
                     ui.set_min_width(inner_w);
                     ui.set_max_width(inner_w);
+                    if clip_overflow {
+                        let clip = egui::Rect::from_min_size(
+                            ui.cursor().min,
+                            egui::vec2(inner_w, ui.available_height()),
+                        );
+                        ui.set_clip_rect(ui.clip_rect().intersect(clip));
+                    }
                     content(ui);
                 },
             );
@@ -412,26 +461,36 @@ fn render_table_cell(ui: &mut egui::Ui, cell: &[InlineElem], pinned_width: Optio
     });
 }
 
-/// Purpose: Renders a table using the Fair Table Width Algorithm (FTWA).
+/// Render a markdown table using the Fair Table Width Algorithm (FTWA) with
+/// the cross-cutting [`TableRenderConfig`] applied.
 ///
-/// Per-column pixel widths are computed by `crate::ui::table_width::ftwa` from
-/// egui-shaped max-content and min-content measurements; cells are then pinned
-/// to their assigned width via `ui.allocate_ui_at_least` so the child Ui's
-/// available_width matches the column width (see `doc/planning/table-column-width-algorithm.md`
-/// Ã‚Â§5 decision Q5). When the available width falls below the sum of min-content
-/// (`decision.needs_horizontal_scroll`), the table physically cannot fit even
-/// with every column at its longest-token floor and we fall back to the prior
-/// behaviour: a wrapping `ScrollArea` over max-content columns (doc Ã‚Â§3.6) so the
-/// strongest invariant Ã¢â‚¬â€ never split a token Ã¢â‚¬â€ is preserved.
+/// Per-column pixel widths are computed by `crate::ui::table_width::ftwa`
+/// from egui-shaped max-content and min-content measurements; cells are
+/// then pinned to their assigned width so the child Ui's available_width
+/// matches the column width (see
+/// `doc/planning/table-column-width-algorithm.md` §5 decision Q5). When
+/// the available width falls below the sum of min-content
+/// (`decision.needs_horizontal_scroll`), the table physically cannot fit
+/// even with every column at its longest-token floor and we fall back to
+/// the prior behaviour: a wrapping `ScrollArea` over max-content columns
+/// (doc §3.6) so the strongest invariant — never split a token — is
+/// preserved.
 ///
-/// Grid spacing is `[10.0, 4.0]` (10 px gutters). The available content width
-/// passed to FTWA subtracts `(N - 1) * 10.0` for those gutters so the assigned
-/// widths sum to the true content rect.
-fn render_table(
+/// Grid spacing is `[10.0, 4.0]` (10 px gutters). The available content
+/// width passed to FTWA subtracts `(N - 1) * 10.0` for those gutters so the
+/// assigned widths sum to the true content rect.
+///
+/// Borders (`TBL-040`–`TBL-042`): the outer Grid is wrapped in a single
+/// `Frame::NONE.stroke(TABLE_PERIMETER_STROKE)` (medium-gray perimeter)
+/// and inter-cell separators are painted via
+/// [`paint_intercell_separators`] in the dark-gray `TABLE_INTERCELL_STROKE`.
+/// No per-cell frame is drawn, so junctions collapse.
+fn render_table_with_config(
     ui: &mut egui::Ui,
     table_cells: &[Vec<Vec<InlineElem>>],
     table_ordinal: usize,
     strategy: crate::ui::table_width::DeficitStrategy,
+    config: &crate::ui::table_width::TableRenderConfig,
 ) {
     let n = table_cells.iter().map(|row| row.len()).max().unwrap_or(0);
     if n == 0 {
@@ -443,9 +502,10 @@ fn render_table(
     // changes). Using a content-derived ordinal keeps the Grid's persisted
     // column-width cache stable across edits/reflows.
     let table_id = egui::Id::new("md_table").with(table_ordinal);
+    let global_padding = config.global_padding.sanitised();
 
     let (max_w, min_w, breakpoints) =
-        crate::ui::table_width::measure_cached(table_id, table_cells, ui);
+        crate::ui::table_width::measure_cached(table_id, table_cells, global_padding, ui);
     let gutter = 10.0_f32;
     let avail = (ui.available_width() - (n as f32 - 1.0) * gutter).max(0.0);
     let decision = crate::ui::table_width::ftwa_cached(
@@ -458,46 +518,132 @@ fn render_table(
         ui,
     );
 
+    let render_rows = |ui: &mut egui::Ui, decision_widths: &[f32]| -> Vec<Vec<egui::Rect>> {
+        let mut cell_rects: Vec<Vec<egui::Rect>> = Vec::new();
+        egui::Grid::new(table_id.with("grid"))
+                .striped(true)
+                .spacing([10.0, 4.0])
+                .show(ui, |ui| {
+                    for row in table_cells.iter() {
+                        let mut row_rects: Vec<egui::Rect> = Vec::new();
+                        for (j, cell) in row.iter().enumerate() {
+                            let w = decision_widths.get(j).copied();
+                            if !decision.needs_horizontal_scroll {
+                                debug_assert!(
+                                    w.is_some_and(|w| w.is_finite() && w > 0.0),
+                                    "FTWA invariant violated: table {table_ordinal} column {j} width = {w:?}"
+                                );
+                            }
+                            let w = w.filter(|w| w.is_finite() && *w > 0.0);
+                            let cell_resp = ui.with_layout(
+                                egui::Layout::top_down(egui::Align::Min),
+                                |ui| {
+                                    render_table_cell(
+                                        ui,
+                                        cell,
+                                        w,
+                                        global_padding,
+                                        config.clip_overflow,
+                                    );
+                                },
+                            );
+                            row_rects.push(cell_resp.response.rect);
+                        }
+                        ui.end_row();
+                        cell_rects.push(row_rects);
+                    }
+                });
+        cell_rects
+    };
+
+    let paint_grid_with_perimeter = |ui: &mut egui::Ui, decision_widths: &[f32]| {
+        egui::Frame::NONE
+            .stroke(TABLE_PERIMETER_STROKE)
+            .inner_margin(egui::Margin::ZERO)
+            .show(ui, |ui| {
+                let cell_rects = render_rows(ui, decision_widths);
+                paint_intercell_separators(ui, &cell_rects);
+            });
+    };
+
     if decision.needs_horizontal_scroll {
         // §3.6 fallback: nothing can fit; preserve the never-break-token
         // invariant by letting content overflow into a horizontal ScrollArea.
-        egui::ScrollArea::horizontal()
-            .id_salt(table_id.with("scroll"))
-            .show(ui, |ui| {
-                egui::Grid::new(table_id.with("grid"))
-                    .striped(true)
-                    .spacing([10.0, 4.0])
-                    .show(ui, |ui| {
-                        for row in table_cells {
-                            for (j, cell) in row.iter().enumerate() {
-                                let w = max_w.get(j).copied();
-                                render_table_cell(ui, cell, w);
-                            }
-                            ui.end_row();
-                        }
-                    });
-            });
-        return;
+        // §3.6 fallback: nothing can fit; preserve the never-break-token
+        // invariant by letting content overflow into a horizontal ScrollArea.
+        // When `clip_overflow = true`, skip the ScrollArea and pin cells to
+        // their min-content widths with the clip_rect applied inside
+        // `render_table_cell` (TBL-043: clip takes precedence over scroll).
+        if !config.clip_overflow {
+            egui::ScrollArea::horizontal()
+                .id_salt(table_id.with("scroll"))
+                .show(ui, |ui| {
+                    paint_grid_with_perimeter(ui, &max_w);
+                });
+            return;
+        }
     }
 
     // FTWA path: pin every cell to its assigned column width.
-    egui::Grid::new(table_id.with("grid"))
-        .striped(true)
-        .spacing([10.0, 4.0])
-        .show(ui, |ui| {
-            for row in table_cells {
-                for (j, cell) in row.iter().enumerate() {
-                    let w = decision.widths.get(j).copied();
-                    debug_assert!(
-                        w.is_some_and(|w| w.is_finite() && w > 0.0),
-                        "FTWA invariant violated: table {table_ordinal} column {j} width = {w:?}"
-                    );
-                    let w = w.filter(|w| w.is_finite() && *w > 0.0);
-                    render_table_cell(ui, cell, w);
-                }
-                ui.end_row();
-            }
-        });
+    paint_grid_with_perimeter(ui, &decision.widths);
+}
+
+/// Render a markdown table with the default [`TableRenderConfig`].
+///
+/// Thin wrapper around [`render_table_with_config`] preserved for test
+/// call sites that do not thread a config — equivalent to calling
+/// `render_table_with_config` with `&TableRenderConfig::default()`
+/// (global padding = ZERO, clip_overflow = false). Production dispatch
+/// uses `render_table_with_config` directly.
+#[cfg(test)]
+fn render_table(
+    ui: &mut egui::Ui,
+    table_cells: &[Vec<Vec<InlineElem>>],
+    table_ordinal: usize,
+    strategy: crate::ui::table_width::DeficitStrategy,
+) {
+    render_table_with_config(
+        ui,
+        table_cells,
+        table_ordinal,
+        strategy,
+        &crate::ui::table_width::TableRenderConfig::default(),
+    );
+}
+
+/// Paint the inter-cell separators between adjacent columns and adjacent
+/// rows of a markdown table using [`TABLE_INTERCELL_STROKE`] (`TBL-041`).
+///
+/// Each separator is painted exactly once so junctions collapse cleanly
+/// (`TBL-042`): for a table of `R` rows by `C` columns we paint
+/// `(C - 1) * R` vertical separators plus `(R - 1) * C` horizontal
+/// separators. Coordinates are the midpoints between the two adjacent
+/// cell rects captured during Grid rendering.
+fn paint_intercell_separators(ui: &egui::Ui, cell_rects: &[Vec<egui::Rect>]) {
+    for row_rects in cell_rects {
+        for j in 1..row_rects.len() {
+            let mid_x = (row_rects[j - 1].max.x + row_rects[j].min.x) / 2.0;
+            ui.painter().line_segment(
+                [
+                    egui::pos2(mid_x, row_rects[j].min.y),
+                    egui::pos2(mid_x, row_rects[j].max.y),
+                ],
+                TABLE_INTERCELL_STROKE,
+            );
+        }
+    }
+    for r in 1..cell_rects.len() {
+        for (c, cell_rect) in cell_rects[r].iter().enumerate() {
+            let mid_y = (cell_rects[r - 1][c].max.y + cell_rect.min.y) / 2.0;
+            ui.painter().line_segment(
+                [
+                    egui::pos2(cell_rect.min.x, mid_y),
+                    egui::pos2(cell_rect.max.x, mid_y),
+                ],
+                TABLE_INTERCELL_STROKE,
+            );
+        }
+    }
 }
 
 /// Width (in logical pixels) reserved for the YAML front-matter table's
@@ -651,7 +797,13 @@ pub fn render_markdown(
                 render_heading(ui, &elems, level, scroll_to_id, heading_id);
             }
             RenderEvent::Table(cells) => {
-                render_table(ui, &cells, table_ordinal, strategy);
+                render_table_with_config(
+                    ui,
+                    &cells,
+                    table_ordinal,
+                    strategy,
+                    &crate::ui::table_width::TableRenderConfig::default(),
+                );
                 table_ordinal += 1;
             }
             RenderEvent::Space(amount) => {
@@ -1817,7 +1969,11 @@ def foo():
         assert_eq!(cells[0].len(), 6);
         let _ = ctx.run_ui(egui::RawInput::default(), |ui| {
             egui::CentralPanel::default().show(ui, |ui| {
-                let (max_w, min_w, breakpoints) = crate::ui::table_width::measure(&cells, ui);
+                let (max_w, min_w, breakpoints) = crate::ui::table_width::measure(
+                    &cells,
+                    crate::ui::table_width::TablePadding::ZERO,
+                    ui,
+                );
                 assert_eq!(max_w.len(), 6, "6 max-content widths");
                 assert_eq!(min_w.len(), 6, "6 min-content widths");
                 assert_eq!(breakpoints.len(), 6, "6 breakpoint vectors");
@@ -1905,7 +2061,11 @@ def foo():
             },
             |ui| {
                 egui::CentralPanel::default().show(ui, |ui| {
-                    let (max_w, min_w, breakpoints) = crate::ui::table_width::measure(&cells, ui);
+                    let (max_w, min_w, breakpoints) = crate::ui::table_width::measure(
+                        &cells,
+                        crate::ui::table_width::TablePadding::ZERO,
+                        ui,
+                    );
                     let gutter = 10.0_f32;
                     let avail = (ui.available_width()
                         - (max_w.len() as f32 - 1.0).max(0.0) * gutter)
@@ -2027,7 +2187,11 @@ def foo():
         let mut captured: Option<crate::ui::table_width::ColumnWidths> = None;
         let _ = ctx.run_ui(raw, |ui| {
             egui::CentralPanel::default().show(ui, |ui| {
-                let (max_w, min_w, breakpoints) = crate::ui::table_width::measure(table_cells, ui);
+                let (max_w, min_w, breakpoints) = crate::ui::table_width::measure(
+                    table_cells,
+                    crate::ui::table_width::TablePadding::ZERO,
+                    ui,
+                );
                 let gutter = 10.0_f32;
                 let avail =
                     (ui.available_width() - (max_w.len() as f32 - 1.0).max(0.0) * gutter).max(0.0);
@@ -2038,6 +2202,75 @@ def foo():
             });
         });
         captured.expect("ctx.run should have populated `captured`")
+    }
+
+    /// Like `render_table_with_viewport_and_strategy` but threads a non-default
+    /// `global_padding` through `render_table_with_config` so US3 width/height
+    /// accounting picks up the resolved padding (`TBL-033`).
+    fn render_table_with_viewport_and_padding(
+        table_cells: &[Vec<Vec<InlineElem>>],
+        viewport_width: f32,
+        padding: crate::ui::table_width::TablePadding,
+    ) -> crate::ui::table_width::ColumnWidths {
+        let strategy = crate::ui::table_width::DeficitStrategy::ProportionalToSlack;
+        let config = crate::ui::table_width::TableRenderConfig {
+            global_padding: padding,
+            clip_overflow: false,
+        };
+        let ctx = egui::Context::default();
+        let raw = egui::RawInput {
+            screen_rect: Some(egui::Rect::from_min_size(
+                egui::Pos2::ZERO,
+                egui::vec2(viewport_width, 600.0),
+            )),
+            ..egui::RawInput::default()
+        };
+        let mut captured: Option<crate::ui::table_width::ColumnWidths> = None;
+        let _ = ctx.run_ui(raw, |ui| {
+            egui::CentralPanel::default().show(ui, |ui| {
+                let (max_w, min_w, breakpoints) =
+                    crate::ui::table_width::measure(table_cells, padding, ui);
+                let gutter = 10.0_f32;
+                let avail =
+                    (ui.available_width() - (max_w.len() as f32 - 1.0).max(0.0) * gutter).max(0.0);
+                let decision =
+                    crate::ui::table_width::ftwa(&max_w, &min_w, &breakpoints, avail, strategy);
+                captured = Some(decision.clone());
+            });
+        });
+        captured.expect("ctx.run should have populated `captured`")
+    }
+
+    /// Paint variants of the padding-aware viewport helper — produces
+    /// `FullOutput` for shape inspection (used by US3 border/junction tests).
+    fn render_table_with_paint_output_and_padding(
+        table_cells: &[Vec<Vec<InlineElem>>],
+        viewport_width: f32,
+        padding: crate::ui::table_width::TablePadding,
+    ) -> egui::FullOutput {
+        let strategy = crate::ui::table_width::DeficitStrategy::ProportionalToSlack;
+        let config = crate::ui::table_width::TableRenderConfig {
+            global_padding: padding,
+            clip_overflow: false,
+        };
+        let ctx = egui::Context::default();
+        let raw = egui::RawInput {
+            screen_rect: Some(egui::Rect::from_min_size(
+                egui::Pos2::ZERO,
+                egui::vec2(viewport_width, 1600.0),
+            )),
+            ..egui::RawInput::default()
+        };
+        let _ = ctx.run_ui(raw.clone(), |ui| {
+            egui::CentralPanel::default().show(ui, |ui| {
+                render_table_with_config(ui, table_cells, 0, strategy, &config);
+            });
+        });
+        ctx.run_ui(raw, |ui| {
+            egui::CentralPanel::default().show(ui, |ui| {
+                render_table_with_config(ui, table_cells, 0, strategy, &config);
+            });
+        })
     }
 
     /// Helper: build a table where every column has the same `cell_text`
@@ -2158,6 +2391,724 @@ def foo():
         );
     }
 
+    /// US1 end-to-end (TBL-001..TBL-012): the three FTWA regimes (surplus,
+    /// deficit, fallback) are each visible in the painted output.
+    /// - Surplus: uniform column widths; no cell wraps (each painted galley
+    ///   is single-line; total galley rows == non-empty text cell count).
+    /// - Deficit: column widths sum to `available`; at least one cell wraps
+    ///   (total painted galley rows strictly exceed the non-empty cell count).
+    /// - Fallback: `needs_horizontal_scroll`; the `ScrollArea` emits
+    ///   additional clip-rect + scrollbar shapes absent from the FTWA path,
+    ///   so its `shapes.len()` strictly exceeds the surplus paint shape count.
+    #[test]
+    fn test_render_table_surplus_deficit_fallback_visible_end_to_end() {
+        use eframe::epaint::{Color32, Shape, StrokeKind};
+
+        // Collect paint-side cell border rects (filter matching
+        // `count_table_cell_borders`: transparent fill + TABLE_CELL_STROKE +
+        // inside stroke).
+        let cell_border_rects = |out: &egui::FullOutput| -> Vec<egui::Rect> {
+            out.shapes
+                .iter()
+                .filter_map(|cs| {
+                    let Shape::Rect(rect) = &cs.shape else {
+                        return None;
+                    };
+                    if rect.fill == Color32::TRANSPARENT
+                        && rect.stroke == TABLE_CELL_STROKE
+                        && rect.stroke_kind == StrokeKind::Inside
+                    {
+                        Some(rect.rect)
+                    } else {
+                        None
+                    }
+                })
+                .collect()
+        };
+
+        // Sum of painted galley row counts across every text shape. Each
+        // non-wrapped text cell contributes exactly one row; a wrapped cell
+        // contributes >1. This is the direct wrap signal (cell border rects
+        // are stretched by `set_min_height(avail_h)` and do not indicate wrap).
+        let total_painted_galley_rows = |out: &egui::FullOutput| -> usize {
+            out.shapes
+                .iter()
+                .filter_map(|cs| match &cs.shape {
+                    Shape::Text(t) => Some(t.galley.rows.len()),
+                    _ => None,
+                })
+                .sum()
+        };
+
+        // Available width inside CentralPanel for an n-col table, mirroring
+        // render_table's gutter math (16.0 outer margin + (n-1)*10.0 gutters).
+        let avail_for =
+            |vw: f32, n_cols: usize| -> f32 { (vw - 16.0) - (n_cols as f32 - 1.0) * 10.0 };
+
+        // Count non-empty text cells in a table (each contributes a galley).
+        let non_empty_text_cells = |table: &[Vec<Vec<InlineElem>>]| -> usize {
+            table
+                .iter()
+                .flat_map(|row| row.iter())
+                .filter(|cell| !cell.is_empty())
+                .count()
+        };
+
+        // (a) Surplus: 3 identical short-token columns, 800px viewport.
+        let surplus_table = build_uniform_table("name", 3);
+        let surplus_widths = render_table_with_viewport(&surplus_table, 800.0);
+        assert!(
+            !surplus_widths.needs_horizontal_scroll,
+            "surplus must not scroll; got {:?}",
+            surplus_widths.widths
+        );
+        // Uniform widths (identical columns → FTWA distributes spare equally).
+        let mn = surplus_widths
+            .widths
+            .iter()
+            .copied()
+            .fold(f32::INFINITY, f32::min);
+        let mx = surplus_widths
+            .widths
+            .iter()
+            .copied()
+            .fold(0.0_f32, f32::max);
+        assert!(
+            (mx - mn) < 0.5,
+            "surplus widths must be uniform for identical columns; got min={mn} max={mx}"
+        );
+        let surplus_paint = render_table_with_paint_output(&surplus_table);
+        let surplus_rects = cell_border_rects(&surplus_paint);
+        // Post-T022 the per-cell `TABLE_CELL_STROKE` model is gone; the
+        // two-tier perimeter + separator model takes over (covered by
+        // `test_render_table_borders_two_greys_and_collapsed_junctions`).
+        // US1 still asserts that surplus paint is non-degenerate by
+        // condemning any residual legacy per-cell strokes.
+        assert!(
+            surplus_rects.is_empty(),
+            "post-T022 the per-cell stroke model is gone; \
+             surplus paint must produce zero TABLE_CELL_STROKE rects, got {len}",
+            len = surplus_rects.len()
+        );
+        let surplus_expected_text = non_empty_text_cells(&surplus_table);
+        let surplus_rows = total_painted_galley_rows(&surplus_paint);
+        assert!(
+            surplus_rows <= surplus_expected_text,
+            "surplus must not wrap: painted galley rows ({surplus_rows}) \
+             must not exceed non-empty cell count ({surplus_expected_text})"
+        );
+
+        // (b) Deficit: 3 identical multi-word columns, 300px viewport.
+        let deficit_table = build_uniform_table("alpha beta gamma delta epsilon zeta", 3);
+        let deficit_widths = render_table_with_viewport(&deficit_table, 300.0);
+        assert!(
+            !deficit_widths.needs_horizontal_scroll,
+            "deficit must not scroll; got {:?}",
+            deficit_widths.widths
+        );
+        let avail_b = avail_for(300.0, 3);
+        let sum_b: f32 = deficit_widths.widths.iter().copied().sum();
+        assert!(
+            (sum_b - avail_b).abs() < 1.0,
+            "deficit widths must sum to available ({avail_b}); got sum={sum_b} widths={:?}",
+            deficit_widths.widths
+        );
+        let deficit_paint = render_table_with_paint_output_viewport(&deficit_table, 300.0);
+        let deficit_rects = cell_border_rects(&deficit_paint);
+        // Post-T022 the per-cell `TABLE_CELL_STROKE` model is gone; lock in
+        // zero residual legacy strokes on the deficit paint path as well.
+        assert!(
+            deficit_rects.is_empty(),
+            "post-T022 the per-cell stroke model is gone; \
+             deficit paint must produce zero TABLE_CELL_STROKE rects, got {len}",
+            len = deficit_rects.len()
+        );
+        let deficit_expected_text = non_empty_text_cells(&deficit_table);
+        let deficit_rows = total_painted_galley_rows(&deficit_paint);
+        assert!(
+            deficit_rows > deficit_expected_text,
+            "deficit must wrap at least one cell: painted galley rows ({deficit_rows}) \
+             must exceed non-empty cell count ({deficit_expected_text})"
+        );
+
+        // (c) Fallback: 3 identical long-single-token columns, 30px viewport.
+        let fallback_table = build_uniform_table("a_long_column_header_text_here_now", 3);
+        let fallback_widths = render_table_with_viewport(&fallback_table, 30.0);
+        assert!(
+            fallback_widths.needs_horizontal_scroll,
+            "fallback must scroll; got {:?}",
+            fallback_widths.widths
+        );
+        let fallback_paint = render_table_with_paint_output_viewport(&fallback_table, 30.0);
+        // The §3.6 fallback renders Grid inside a horizontal ScrollArea.
+        // The ScrollArea path emits `Shape::Mesh` (scrollbar track) and
+        // `Shape::Noop` placeholders — none of which appear in the plain
+        // FTWA path (its shapes are exclusively `Rect` + `Text`). Detect
+        // the fallback by the presence of at least one `Mesh` or `Noop`
+        // shape that the FTWA path never emits.
+        let has_scrollarea_only_shape = |out: &egui::FullOutput| -> bool {
+            out.shapes
+                .iter()
+                .any(|cs| matches!(&cs.shape, Shape::Mesh(_) | Shape::Noop))
+        };
+        assert!(
+            !has_scrollarea_only_shape(&surplus_paint),
+            "FTWA path must not emit Mesh/Noop shapes; surplus kinds={:?}",
+            surplus_paint
+                .shapes
+                .iter()
+                .map(|cs| std::mem::discriminant(&cs.shape))
+                .collect::<Vec<_>>()
+        );
+        assert!(
+            has_scrollarea_only_shape(&fallback_paint),
+            "fallback (ScrollArea) must emit Mesh/Noop shapes absent from FTWA path; \
+             fallback kinds={:?}",
+            fallback_paint
+                .shapes
+                .iter()
+                .map(|cs| std::mem::discriminant(&cs.shape))
+                .collect::<Vec<_>>()
+        );
+    }
+
+    /// US2 (TBL-002): inline Markdown formatting inside table cells must
+    /// survive the cell-render path — bold, italic, and code spans render
+    /// with the appropriate styling on the painted galley, not as opaque
+    /// plain text.
+    ///
+    /// Bold in egui 0.35 is observable only via a distinct `TextFormat.color`
+    /// (`visuals.strong_text_color()`); italic is observable via
+    /// `TextFormat.italics == true`; code is observable via
+    /// `TextFormat.font_id.family == FontFamily::Monospace`.
+    #[test]
+    fn test_render_table_cell_markdown_bold_italic_code() {
+        use eframe::epaint::{FontFamily, Shape};
+        use std::collections::HashSet;
+
+        let table = vec![vec![
+            vec![InlineElem::Text(
+                "bold".to_string(),
+                TextStyle {
+                    bold: true,
+                    ..TextStyle::default()
+                },
+            )],
+            vec![InlineElem::Text(
+                "italic".to_string(),
+                TextStyle {
+                    italic: true,
+                    ..TextStyle::default()
+                },
+            )],
+            vec![InlineElem::Text(
+                "code".to_string(),
+                TextStyle {
+                    code: true,
+                    ..TextStyle::default()
+                },
+            )],
+        ]];
+
+        let output = render_table_with_paint_output(&table);
+
+        let mut all_text = String::new();
+        let mut distinct_colors: HashSet<eframe::epaint::Color32> = HashSet::new();
+        let mut saw_italic = false;
+        let mut saw_monospace = false;
+        for cs in &output.shapes {
+            let Shape::Text(text_shape) = &cs.shape else {
+                continue;
+            };
+            all_text.push_str(text_shape.galley.text());
+            for section in text_shape.galley.job.sections.iter() {
+                distinct_colors.insert(section.format.color);
+                if section.format.italics {
+                    saw_italic = true;
+                }
+                if section.format.font_id.family == FontFamily::Monospace {
+                    saw_monospace = true;
+                }
+            }
+        }
+
+        assert!(
+            all_text.contains("bold") && all_text.contains("italic") && all_text.contains("code"),
+            "painted galley text must include all three cell strings; got: {all_text:?}"
+        );
+        assert!(
+            distinct_colors.len() >= 2,
+            "bold cell must paint with `strong_text_color()` distinct from body text color; \
+             distinct section colors: {distinct_colors:?}"
+        );
+        assert!(
+            saw_italic,
+            "italic cell must emit a LayoutSection with format.italics == true"
+        );
+        assert!(
+            saw_monospace,
+            "code cell must emit a LayoutSection with font_id.family == Monospace"
+        );
+    }
+
+    /// US2 (TBL-003): inline Markdown links render as their display string and
+    /// image placeholders render as the `[Image: <url>]` literal, both in the
+    /// body font via the standard `ui.hyperlink_to` / `ui.label` widgets.
+    #[test]
+    fn test_render_table_cell_link_and_image_placeholder() {
+        use eframe::epaint::Shape;
+
+        let table = vec![vec![
+            vec![InlineElem::Link(
+                "https://example.com".to_string(),
+                "Example".to_string(),
+            )],
+            vec![InlineElem::Image("pic.png".to_string())],
+        ]];
+
+        let output = render_table_with_paint_output(&table);
+
+        let mut all_text = String::new();
+        for cs in &output.shapes {
+            let Shape::Text(text_shape) = &cs.shape else {
+                continue;
+            };
+            all_text.push_str(text_shape.galley.text());
+        }
+
+        assert!(
+            all_text.contains("Example"),
+            "link display text must appear in painted output; got: {all_text:?}"
+        );
+        assert!(
+            all_text.contains("[Image: pic.png]"),
+            "image placeholder literal must appear in painted output; got: {all_text:?}"
+        );
+    }
+
+    /// US3 (TBL-033): a non-zero global padding must be factored into every
+    /// column's measured width AND into every row's height. We render the
+    /// same 2×2 table twice — once with `TablePadding::ZERO`, once with
+    /// `TablePadding{8, 8, 8, 8}` (`horizontal() == 16`, `vertical() == 16`) —
+    /// so the per-column delta is exactly `padding.horizontal()` (surplus
+    /// regime, columns pinned at max_content), and the per-row height delta
+    /// is at least `padding.vertical()` (`top + bottom`).
+    #[test]
+    fn test_render_table_padding_factored_into_width_and_height() {
+        use crate::ui::table_width::TablePadding;
+
+        // 2×2 table with identical short-token cells → surplus regime at
+        // 800px → every column pinned at its max_content width. Padding
+        // (resolved from the global default) adds `horizontal()` to every
+        // max_content × min_content value, so the measured column width
+        // rises by exactly `horizontal()`.
+        let table = build_uniform_table("cell", 2);
+
+        let widths_zero = render_table_with_viewport_and_padding(&table, 800.0, TablePadding::ZERO);
+        let pad = TablePadding {
+            top: 8.0,
+            bottom: 8.0,
+            left: 8.0,
+            right: 8.0,
+        };
+        let widths_pad = render_table_with_viewport_and_padding(&table, 800.0, pad);
+
+        assert_eq!(
+            widths_zero.widths.len(),
+            2,
+            "expected 2 columns; got {:?}",
+            widths_zero.widths
+        );
+        assert_eq!(
+            widths_pad.widths.len(),
+            2,
+            "expected 2 columns (padded); got {:?}",
+            widths_pad.widths
+        );
+        for j in 0..2 {
+            let delta = widths_pad.widths[j] - widths_zero.widths[j];
+            assert!(
+                (delta - pad.horizontal()).abs() < 0.5,
+                "column {j} padding delta must equal horizontal() ({pad_h}); \
+                 got zero={z}, pad={p}, delta={d}",
+                pad_h = pad.horizontal(),
+                z = widths_zero.widths[j],
+                p = widths_pad.widths[j],
+                d = delta,
+            );
+        }
+
+        // Height assertion: pick the painted galley bounding rows and
+        // sum heights across text shapes. With padding, every row must
+        // be taller by at least `padding.vertical()` than without.
+        let paint_zero =
+            render_table_with_paint_output_and_padding(&table, 800.0, TablePadding::ZERO);
+        let paint_pad = render_table_with_paint_output_and_padding(&table, 800.0, pad);
+        let total_height = |out: &egui::FullOutput| -> f32 {
+            use eframe::epaint::Shape;
+            out.shapes
+                .iter()
+                .filter_map(|cs| match &cs.shape {
+                    Shape::Rect(rect) if rect.fill == eframe::epaint::Color32::TRANSPARENT => {
+                        Some(rect.rect.height())
+                    }
+                    _ => None,
+                })
+                .sum()
+        };
+        let h_zero = total_height(&paint_zero);
+        let h_pad = total_height(&paint_pad);
+        assert!(
+            h_pad - h_zero >= pad.vertical() - 0.5,
+            "painted height with padding ({h_pad}) must exceed height without padding ({h_zero}) \
+             by at least padding.vertical() = {}; got delta={}",
+            pad.vertical(),
+            h_pad - h_zero,
+        );
+    }
+
+    /// US3 (TBL-040, TBL-041, TBL-042): a markdown table paints exactly
+    /// one medium-gray outer perimeter, dark-gray inter-cell separators,
+    /// and collapsed junctions (separator count == `(cols-1)*rows +
+    /// (rows-1)*cols` for a 2×2 table = 4).
+    #[test]
+    fn test_render_table_borders_two_greys_and_collapsed_junctions() {
+        use eframe::epaint::{Color32, Shape, StrokeKind};
+
+        const PERIMETER_COLOR: Color32 = Color32::from_gray(120);
+        const INTERCELL_COLOR: Color32 = Color32::from_gray(40);
+
+        let table = build_uniform_table("cell", 2);
+        let output = render_table_with_paint_output(&table);
+
+        let perimeter_count = output
+            .shapes
+            .iter()
+            .filter(|cs| {
+                let Shape::Rect(rect) = &cs.shape else {
+                    return false;
+                };
+                rect.fill == Color32::TRANSPARENT
+                    && rect.stroke.color == PERIMETER_COLOR
+                    && rect.stroke_kind == StrokeKind::Inside
+            })
+            .count();
+        let old_cell_stroke_count = output
+            .shapes
+            .iter()
+            .filter(|cs| {
+                let Shape::Rect(rect) = &cs.shape else {
+                    return false;
+                };
+                rect.fill == Color32::TRANSPARENT
+                    && rect.stroke == TABLE_CELL_STROKE
+                    && rect.stroke_kind == StrokeKind::Inside
+            })
+            .count();
+        let intercell_separator_count = output
+            .shapes
+            .iter()
+            .filter(|cs| matches!(&cs.shape, Shape::LineSegment { stroke, .. } if stroke.color == INTERCELL_COLOR))
+            .count();
+
+        assert_eq!(
+            perimeter_count, 1,
+            "exactly one medium-gray (`from_gray(120)`) perimeter rect expected; got {perimeter_count}"
+        );
+        assert_eq!(
+            old_cell_stroke_count, 0,
+            "post-T022 the per-cell `TABLE_CELL_STROKE` must be gone; \
+             still found {old_cell_stroke_count} matching rects"
+        );
+        assert_eq!(
+            intercell_separator_count, 4,
+            "inter-cell separators (`from_gray(40)`) for a 2×2 table must total 4 = \
+             (cols-1)*rows + (rows-1)*cols; got {intercell_separator_count}"
+        );
+    }
+
+    /// US3 (TBL-030, TBL-031): inline cell content sits at the top-left
+    /// of the cell, offset by the resolved `padding.left` and
+    /// `padding.top`. Asserted via the leftmost/topmost painted glyph
+    /// position differing by exactly the resolved padding between a
+    /// `TablePadding::ZERO` render and a `TablePadding{8,8,8,8}` render.
+    #[test]
+    fn test_render_table_cell_alignment_left_top() {
+        use crate::ui::table_width::TablePadding;
+        use eframe::epaint::Shape;
+
+        let table = build_uniform_table("cell", 2);
+        let paint_zero =
+            render_table_with_paint_output_and_padding(&table, 800.0, TablePadding::ZERO);
+        let pad = TablePadding {
+            top: 8.0,
+            bottom: 8.0,
+            left: 8.0,
+            right: 8.0,
+        };
+        let paint_pad = render_table_with_paint_output_and_padding(&table, 800.0, pad);
+
+        // `TextShape::pos` is the screen-space top-left corner of the
+        // galley; padding shifts it right by `padding.left` and down by
+        // `padding.top`, which is exactly the LEFT+TOP alignment invariant.
+        let first_text_pos = |out: &egui::FullOutput| -> Option<egui::Pos2> {
+            out.shapes.iter().find_map(|cs| {
+                let Shape::Text(t) = &cs.shape else {
+                    return None;
+                };
+                Some(t.pos)
+            })
+        };
+
+        let pos_zero = first_text_pos(&paint_zero)
+            .expect("painted table must produce at least one text shape");
+        let pos_pad = first_text_pos(&paint_pad)
+            .expect("painted table (padded) must produce at least one text shape");
+
+        assert!(
+            (pos_pad.x - pos_zero.x - pad.left).abs() < 1.0,
+            "LEFT alignment: padded first text x ({}) must exceed zero text x ({}) \
+             by padding.left ({}); got delta={}",
+            pos_pad.x,
+            pos_zero.x,
+            pad.left,
+            pos_pad.x - pos_zero.x,
+        );
+        assert!(
+            (pos_pad.y - pos_zero.y - pad.top).abs() < 1.0,
+            "TOP alignment: padded first text y ({}) must exceed zero text y ({}) \
+             by padding.top ({}); got delta={}",
+            pos_pad.y,
+            pos_zero.y,
+            pad.top,
+            pos_pad.y - pos_zero.y,
+        );
+    }
+
+    /// US3 (TBL-031): In a row with cells of unequal height (e.g. short 1-line text
+    /// alongside a multi-line cell), short cells MUST align to the top of the row.
+    /// The top-y coordinate of text in the short cell must match the top-y coordinate
+    /// of text in the tall cell.
+    #[test]
+    fn test_render_table_multiline_row_cell_vertical_alignment_top() {
+        use eframe::epaint::Shape;
+
+        let table = vec![vec![
+            vec![InlineElem::Text("Short".to_string(), TextStyle::default())],
+            vec![
+                InlineElem::Text("Line 1".to_string(), TextStyle::default()),
+                InlineElem::SoftBreak,
+                InlineElem::Text("Line 2".to_string(), TextStyle::default()),
+                InlineElem::SoftBreak,
+                InlineElem::Text("Line 3".to_string(), TextStyle::default()),
+                InlineElem::SoftBreak,
+                InlineElem::Text("Line 4".to_string(), TextStyle::default()),
+            ],
+        ]];
+
+        let output = render_table_with_paint_output(&table);
+
+        let text_positions: Vec<(String, egui::Pos2)> = output
+            .shapes
+            .iter()
+            .filter_map(|cs| {
+                let Shape::Text(t) = &cs.shape else {
+                    return None;
+                };
+                Some((t.galley.text().to_string(), t.pos))
+            })
+            .collect();
+
+        let short_pos = text_positions
+            .iter()
+            .find(|(txt, _)| txt.contains("Short"))
+            .map(|(_, pos)| *pos)
+            .expect("short cell text must be painted");
+
+        let tall_pos = text_positions
+            .iter()
+            .find(|(txt, _)| txt.contains("Line 1"))
+            .map(|(_, pos)| *pos)
+            .expect("tall cell text must be painted");
+
+        assert!(
+            (short_pos.y - tall_pos.y).abs() < 1.0,
+            "TBL-031 TOP alignment: short cell text y ({}) must match tall cell text y ({}); delta={}",
+            short_pos.y,
+            tall_pos.y,
+            short_pos.y - tall_pos.y,
+        );
+    }
+
+    /// US4 (TBL-013 overflow, TBL-022, TBL-043): when `clip_overflow = false`
+    /// (the default) and column min-content widths exceed available width,
+    /// the table falls back to horizontal scrolling and painted glyphs
+    /// extend beyond the column boundary (NOT clipped). A horizontal
+    /// `egui::ScrollArea` painter shape is present in the output.
+    #[test]
+    fn test_render_table_horizontal_scroll_fallback_no_clip() {
+        use crate::ui::table_width::{TablePadding, TableRenderConfig};
+        use eframe::epaint::Shape;
+
+        // 1×2 table with single long unbreakable tokens (min_content >> 100px).
+        let make = |t: &str| {
+            vec![InlineElem::Text(
+                t.to_string(),
+                crate::ui::render::TextStyle::default(),
+            )]
+        };
+        let table: Vec<Vec<Vec<InlineElem>>> = vec![vec![
+            make("a_very_long_unbreakable_single_token_that_exceeds_one_hundred_pixels"),
+            make("another_very_long_unbreakable_token_for_the_second_column"),
+        ]];
+
+        let config = TableRenderConfig {
+            global_padding: TablePadding::ZERO,
+            clip_overflow: false,
+        };
+
+        let ctx = egui::Context::default();
+        let raw = egui::RawInput {
+            screen_rect: Some(egui::Rect::from_min_size(
+                egui::Pos2::ZERO,
+                egui::vec2(100.0, 600.0),
+            )),
+            ..egui::RawInput::default()
+        };
+        let _ = ctx.run_ui(raw.clone(), |ui| {
+            egui::CentralPanel::default().show(ui, |ui| {
+                render_table_with_config(
+                    ui,
+                    &table,
+                    0,
+                    crate::ui::table_width::DeficitStrategy::ProportionalToSlack,
+                    &config,
+                );
+            });
+        });
+        let output = ctx.run_ui(raw, |ui| {
+            egui::CentralPanel::default().show(ui, |ui| {
+                render_table_with_config(
+                    ui,
+                    &table,
+                    0,
+                    crate::ui::table_width::DeficitStrategy::ProportionalToSlack,
+                    &config,
+                );
+            });
+        });
+
+        // (a) The fallback path must NOT clip: painted text glyphs must
+        // extend beyond the viewport boundary (x > 100.0).
+        let max_glyph_x: f32 = output
+            .shapes
+            .iter()
+            .filter_map(|cs| match &cs.shape {
+                Shape::Text(t) => Some(t.pos.x + t.galley.rect.width()),
+                _ => None,
+            })
+            .fold(0.0_f32, f32::max);
+        assert!(
+            max_glyph_x > 100.0,
+            "fallback path must not clip: at least one painted text shape must extend \
+             beyond the 100px viewport; max glyph x = {max_glyph_x}"
+        );
+
+        // (b) A horizontal ScrollArea shape (Mesh/Noop) is present.
+        let has_scroll_shape = output
+            .shapes
+            .iter()
+            .any(|cs| matches!(&cs.shape, Shape::Mesh(_) | Shape::Noop));
+        assert!(
+            has_scroll_shape,
+            "fallback path must emit a horizontal ScrollArea (Mesh/Noop shapes); \
+             shape kinds = {:?}",
+            output
+                .shapes
+                .iter()
+                .map(|cs| std::mem::discriminant(&cs.shape))
+                .collect::<Vec<_>>()
+        );
+    }
+
+    /// US4 (TBL-043): when `clip_overflow = true`, overflowing cell content
+    /// is clipped to the cell's right interior edge instead of extending
+    /// beyond it. No horizontal ScrollArea is emitted (clip takes precedence
+    /// over the scroll fallback when explicitly configured).
+    #[test]
+    fn test_render_table_clip_overflow_true_clips_overflowing_text() {
+        use crate::ui::table_width::{TablePadding, TableRenderConfig};
+        use eframe::epaint::Shape;
+
+        let make = |t: &str| {
+            vec![InlineElem::Text(
+                t.to_string(),
+                crate::ui::render::TextStyle::default(),
+            )]
+        };
+        let table: Vec<Vec<Vec<InlineElem>>> = vec![vec![
+            make("a_very_long_unbreakable_single_token_that_exceeds_one_hundred_pixels"),
+            make("another_very_long_unbreakable_token_for_the_second_column"),
+        ]];
+
+        let config = TableRenderConfig {
+            global_padding: TablePadding::ZERO,
+            clip_overflow: true,
+        };
+
+        let ctx = egui::Context::default();
+        let raw = egui::RawInput {
+            screen_rect: Some(egui::Rect::from_min_size(
+                egui::Pos2::ZERO,
+                egui::vec2(100.0, 600.0),
+            )),
+            ..egui::RawInput::default()
+        };
+        let _ = ctx.run_ui(raw.clone(), |ui| {
+            egui::CentralPanel::default().show(ui, |ui| {
+                render_table_with_config(
+                    ui,
+                    &table,
+                    0,
+                    crate::ui::table_width::DeficitStrategy::ProportionalToSlack,
+                    &config,
+                );
+            });
+        });
+        let output = ctx.run_ui(raw, |ui| {
+            egui::CentralPanel::default().show(ui, |ui| {
+                render_table_with_config(
+                    ui,
+                    &table,
+                    0,
+                    crate::ui::table_width::DeficitStrategy::ProportionalToSlack,
+                    &config,
+                );
+            });
+        });
+
+        // When clip_overflow = true, the inner content ui gets a clip_rect
+        // intersected with the cell's content rect. The ClippedShape's
+        // clip_rect should be narrower than the viewport (the clip prevents
+        // text from painting beyond the cell boundary).
+        let max_clip_right: f32 = output
+            .shapes
+            .iter()
+            .filter_map(|cs| match &cs.shape {
+                Shape::Text(_) => Some(cs.clip_rect.max.x),
+                _ => None,
+            })
+            .fold(0.0_f32, f32::max);
+        // With clip_overflow=true, each cell's clip_rect must be within
+        // the viewport width (100px). The clip_rect is the cell's content
+        // area which is narrower than the viewport.
+        assert!(
+            max_clip_right <= 100.0 + 1.0,
+            "clip_overflow=true must clip text within the cell boundary; \
+             max clip_rect right edge = {max_clip_right} (viewport = 100px)"
+        );
+    }
+
     /// Counts the paint-shape rectangles that carry the table cell border
     /// stroke (`TABLE_CELL_STROKE`) and have the default `Frame::NONE`
     /// transparent fill. A `Frame::NONE` cell wrapper paints exactly one
@@ -2223,14 +3174,15 @@ def foo():
         render_table_with_paint_output_viewport(table_cells, 800.0)
     }
 
-    /// The FTWA-pinned path must draw one `TABLE_CELL_STROKE` border
-    /// rectangle for every cell in the table — that is the user-visible
-    /// "dark gray line around all table cells" requirement.
+    /// Post-T022 the legacy per-cell `TABLE_CELL_STROKE` model is gone;
+    /// the two-tier perimeter + inter-cell-separator model
+    /// (`TABLE_PERIMETER_STROKE` wrapping the Grid, `TABLE_INTERCELL_STROKE`
+    /// between adjacent cells) is enforced by
+    /// `test_render_table_borders_two_greys_and_collapsed_junctions`.
+    /// This test now serves as a regression lock: zero residual per-cell
+    /// strokes must be painted on the FTWA path.
     #[test]
     fn test_render_table_draws_border_around_every_cell_ftwa_path() {
-        // 2 rows × 3 columns = 6 cells. Mixed content (plain text +
-        // empty) exercises both the empty-cell branch and the
-        // content-rendering branch in `render_table_cell`.
         let make = |t: &str| {
             vec![InlineElem::Text(
                 t.to_string(),
@@ -2241,41 +3193,36 @@ def foo():
             vec![make("h1"), make("h2"), make("h3")],
             vec![make("a"), vec![], make("c")],
         ];
-        let expected_cells: usize = table.iter().map(|r| r.len()).sum();
-        assert_eq!(expected_cells, 6);
 
         let output = render_table_with_paint_output(&table);
         let bordered = count_table_cell_borders(&output);
         assert_eq!(
-            bordered, expected_cells,
-            "every cell must get a `TABLE_CELL_STROKE` border; got {bordered} \
-             for {expected_cells} cells"
+            bordered, 0,
+            "post-T022 the per-cell stroke model is gone; expected 0 \
+             residual TABLE_CELL_STROKE rects, got {bordered}"
         );
     }
 
-    /// The §3.6 horizontal-scroll fallback path (taken when even
-    /// min-content cannot fit the viewport) must also draw a border
-    /// around every cell — the user-facing requirement is path-agnostic.
+    /// Same regression lock on the §3.6 horizontal-scroll fallback path:
+    /// zero residual per-cell strokes post-T022.
     #[test]
     fn test_render_table_draws_border_around_every_cell_fallback_path() {
-        // 3 columns of single very long tokens, tiny viewport → §3.6.
         let table = build_uniform_table("a_long_column_header_text_here_now", 3);
         let d = render_table_with_viewport(&table, 30.0);
         assert!(d.needs_horizontal_scroll, "must be on the fallback path");
 
         let output = render_table_with_paint_output(&table);
-        let expected_cells: usize = table.iter().map(|r| r.len()).sum();
         let bordered = count_table_cell_borders(&output);
         assert_eq!(
-            bordered, expected_cells,
-            "fallback path must also border every cell; got {bordered} \
-             for {expected_cells} cells"
+            bordered, 0,
+            "post-T022 the per-cell stroke model is gone; expected 0 \
+             residual TABLE_CELL_STROKE rects on fallback path, got {bordered}"
         );
     }
 
-    /// Belt-and-braces: a single-cell table is degenerate but must still
-    /// produce exactly one border shape (catches off-by-one frame
-    /// allocations at row/column boundaries).
+    /// Belt-and-braces: a single-cell table must produce zero residual
+    /// per-cell strokes post-T022 (the perimeter Frame still wraps it,
+    /// covered by `test_render_table_borders_two_greys_and_collapsed_junctions`).
     #[test]
     fn test_render_table_single_cell_borders_once() {
         let make = |t: &str| {
@@ -2288,7 +3235,10 @@ def foo():
 
         let output = render_table_with_paint_output(&table);
         let bordered = count_table_cell_borders(&output);
-        assert_eq!(bordered, 1, "a 1×1 table must draw exactly one border");
+        assert_eq!(
+            bordered, 0,
+            "post-T022 a 1×1 table must draw zero residual per-cell strokes; got {bordered}"
+        );
     }
 
     /// Verifies that column 0 and subsequent columns are properly aligned
@@ -2335,7 +3285,7 @@ def foo():
             .filter_map(|cs| match &cs.shape {
                 Shape::Rect(r)
                     if r.fill == egui::Color32::TRANSPARENT
-                        && r.stroke == TABLE_CELL_STROKE
+                        && r.stroke == egui::Stroke::NONE
                         && r.stroke_kind == StrokeKind::Inside =>
                 {
                     Some(r.rect)
@@ -2454,7 +3404,7 @@ def foo():
             .filter_map(|cs| match &cs.shape {
                 Shape::Rect(r)
                     if r.fill == egui::Color32::TRANSPARENT
-                        && r.stroke == TABLE_CELL_STROKE
+                        && r.stroke == egui::Stroke::NONE
                         && r.stroke_kind == StrokeKind::Inside =>
                 {
                     Some(r.rect)
@@ -2534,7 +3484,7 @@ def foo():
             .filter_map(|cs| match &cs.shape {
                 Shape::Rect(r)
                     if r.fill == egui::Color32::TRANSPARENT
-                        && r.stroke == TABLE_CELL_STROKE
+                        && r.stroke == egui::Stroke::NONE
                         && r.stroke_kind == StrokeKind::Inside =>
                 {
                     Some(r.rect)
@@ -3115,7 +4065,7 @@ def foo():
                     .filter_map(|cs| match &cs.shape {
                         Shape::Rect(r)
                             if r.fill == egui::Color32::TRANSPARENT
-                                && r.stroke == TABLE_CELL_STROKE
+                                && r.stroke == egui::Stroke::NONE
                                 && r.stroke_kind == StrokeKind::Inside =>
                         {
                             Some(r.rect)
