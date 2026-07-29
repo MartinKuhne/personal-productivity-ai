@@ -620,29 +620,85 @@ fn render_table(
 /// separators. Coordinates are the midpoints between the two adjacent
 /// cell rects captured during Grid rendering.
 fn paint_intercell_separators(ui: &egui::Ui, cell_rects: &[Vec<egui::Rect>]) {
-    for row_rects in cell_rects {
-        for j in 1..row_rects.len() {
-            let mid_x = (row_rects[j - 1].max.x + row_rects[j].min.x) / 2.0;
+    if cell_rects.is_empty() {
+        return;
+    }
+
+    // Find the global min_x and max_x of the table
+    let table_min_x = cell_rects
+        .iter()
+        .flat_map(|row| row.first())
+        .map(|r| r.min.x)
+        .fold(f32::INFINITY, f32::min);
+
+    let table_max_x = cell_rects
+        .iter()
+        .flat_map(|row| row.last())
+        .map(|r| r.max.x)
+        .fold(f32::NEG_INFINITY, f32::max);
+
+    // Find the global min_y and max_y of the table
+    let table_min_y = cell_rects
+        .first()
+        .unwrap()
+        .iter()
+        .map(|r| r.min.y)
+        .fold(f32::INFINITY, f32::min);
+
+    let table_max_y = cell_rects
+        .last()
+        .unwrap()
+        .iter()
+        .map(|r| r.max.y)
+        .fold(f32::NEG_INFINITY, f32::max);
+
+    // Draw vertical separators.
+    // We assume the number of columns is consistent and take it from the first row.
+    let num_cols = cell_rects[0].len();
+    for j in 1..num_cols {
+        // Average the right edge of col j-1 and left edge of col j across all rows
+        // to find the true center of the gutter.
+        let mut sum_mid_x = 0.0;
+        let mut count = 0.0;
+        for row in cell_rects {
+            if row.len() > j {
+                sum_mid_x += (row[j - 1].max.x + row[j].min.x) / 2.0;
+                count += 1.0;
+            }
+        }
+        if count > 0.0 {
+            let mid_x = sum_mid_x / count;
             ui.painter().line_segment(
                 [
-                    egui::pos2(mid_x, row_rects[j].min.y),
-                    egui::pos2(mid_x, row_rects[j].max.y),
+                    egui::pos2(mid_x, table_min_y),
+                    egui::pos2(mid_x, table_max_y),
                 ],
                 TABLE_INTERCELL_STROKE,
             );
         }
     }
+
+    // Draw horizontal separators.
     for r in 1..cell_rects.len() {
-        for (c, cell_rect) in cell_rects[r].iter().enumerate() {
-            let mid_y = (cell_rects[r - 1][c].max.y + cell_rect.min.y) / 2.0;
-            ui.painter().line_segment(
-                [
-                    egui::pos2(cell_rect.min.x, mid_y),
-                    egui::pos2(cell_rect.max.x, mid_y),
-                ],
-                TABLE_INTERCELL_STROKE,
-            );
-        }
+        let true_bottom_prev = cell_rects[r - 1]
+            .iter()
+            .map(|rect| rect.max.y)
+            .fold(f32::NEG_INFINITY, f32::max);
+
+        let true_top_curr = cell_rects[r]
+            .iter()
+            .map(|rect| rect.min.y)
+            .fold(f32::INFINITY, f32::min);
+
+        let mid_y = (true_bottom_prev + true_top_curr) / 2.0;
+
+        ui.painter().line_segment(
+            [
+                egui::pos2(table_min_x, mid_y),
+                egui::pos2(table_max_x, mid_y),
+            ],
+            TABLE_INTERCELL_STROKE,
+        );
     }
 }
 
@@ -2821,9 +2877,9 @@ def foo():
              still found {old_cell_stroke_count} matching rects"
         );
         assert_eq!(
-            intercell_separator_count, 4,
-            "inter-cell separators (`from_gray(40)`) for a 2×2 table must total 4 = \
-             (cols-1)*rows + (rows-1)*cols; got {intercell_separator_count}"
+            intercell_separator_count, 2,
+            "inter-cell separators (`from_gray(40)`) for a 2×2 table must total 2 = \
+             (cols-1) + (rows-1) continuous lines; got {intercell_separator_count}"
         );
     }
 
@@ -3558,6 +3614,18 @@ def foo():
         });
 
         // Pass 2: paint with resolved row heights stored in Grid memory
+        let _ = ctx.run_ui(raw.clone(), |ui| {
+            egui::CentralPanel::default().show(ui, |ui| {
+                render_table(
+                    ui,
+                    &table,
+                    0,
+                    crate::ui::table_width::DeficitStrategy::BreakpointWaterFill,
+                );
+            });
+        });
+
+        // Pass 3: paint again
         let output = ctx.run_ui(raw, |ui| {
             egui::CentralPanel::default().show(ui, |ui| {
                 render_table(
