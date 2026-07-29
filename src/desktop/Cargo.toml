@@ -38,7 +38,6 @@ reqwest = { version = "0.12", features = ["blocking"] }
 opener = { version = "0.7", features = ["reveal"] }
 webbrowser = "1"
 backoff = { version = "0.4", features = ["tokio"] }
-gray_matter = "0.3"
 csv = "1.4.0"
 evalexpr = "13.1.0"
 html-escape = "0.2"
