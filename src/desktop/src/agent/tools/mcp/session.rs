@@ -420,7 +420,7 @@ impl McpClientSession {
         let Some(child_arc) = Arc::get_mut(&mut transport.child) else {
             return;
         };
-        let Some(mut child) = child_arc.lock().ok().and_then(|mut g| g.take()) else {
+        let Some(mut child) = child_arc.get_mut().ok().and_then(|g| g.take()) else {
             return;
         };
 
@@ -479,10 +479,10 @@ impl McpClientSession {
     /// Initialize the session if it is not yet active. Idempotent.
     pub fn ensure_initialized(&self) -> Result<(), McpError> {
         // Fast path: already active.
-        if let Ok(state) = self.state.lock() {
-            if state.phase == SessionPhase::Active {
-                return Ok(());
-            }
+        if let Ok(state) = self.state.lock()
+            && state.phase == SessionPhase::Active
+        {
+            return Ok(());
         }
 
         // Slow path: do the init handshake.
@@ -501,22 +501,22 @@ impl McpClientSession {
             state.server_capabilities = value.get("capabilities").cloned();
             state.server_info = value.get("serverInfo").cloned();
 
-            if let Some(v) = server_version {
-                if !SUPPORTED_PROTOCOL_VERSIONS.contains(&v) {
-                    let err = McpError::transport(
-                        format!("server '{}'", self.config_label()),
-                        format!(
-                            "unsupported protocol version '{v}' (supported: {:?}) per spec §2.6",
-                            SUPPORTED_PROTOCOL_VERSIONS
-                        ),
-                    );
-                    // Drop the lock before tearing down the
-                    // transport — `disconnect_after_init` takes it
-                    // again.
-                    drop(state);
-                    self.disconnect_after_init();
-                    return Err(err);
-                }
+            if let Some(v) = server_version
+                && !SUPPORTED_PROTOCOL_VERSIONS.contains(&v)
+            {
+                let err = McpError::transport(
+                    format!("server '{}'", self.config_label()),
+                    format!(
+                        "unsupported protocol version '{v}' (supported: {:?}) per spec §2.6",
+                        SUPPORTED_PROTOCOL_VERSIONS
+                    ),
+                );
+                // Drop the lock before tearing down the
+                // transport — `disconnect_after_init` takes it
+                // again.
+                drop(state);
+                self.disconnect_after_init();
+                return Err(err);
             }
         }
         state.phase = SessionPhase::Active;
@@ -535,13 +535,13 @@ impl McpClientSession {
             );
             state.phase = SessionPhase::Uninitialized;
             state.session_id = None;
-            if let Some(transport) = state.stdio.take() {
-                if let Some(mut child) = transport.child.lock().ok().and_then(|mut g| g.take()) {
-                    let _ = child.kill();
-                    std::thread::spawn(move || {
-                        let _ = child.wait();
-                    });
-                }
+            if let Some(transport) = state.stdio.take()
+                && let Some(mut child) = transport.child.lock().ok().and_then(|mut g| g.take())
+            {
+                let _ = child.kill();
+                std::thread::spawn(move || {
+                    let _ = child.wait();
+                });
             }
         }
     }
@@ -812,10 +812,7 @@ impl McpClientSession {
                 ));
             }
             let remaining = deadline.saturating_duration_since(now);
-            let line = match self.recv_stdio_line(remaining) {
-                Ok(line) => line,
-                Err(e) => return Err(e),
-            };
+            let line = self.recv_stdio_line(remaining)?;
             let value: serde_json::Value = match serde_json::from_str(&line) {
                 Ok(v) => v,
                 Err(e) => {
@@ -1225,10 +1222,10 @@ impl McpClientSession {
             // `Last-Event-ID` (spec §3.3). Full resumption is
             // still TODO — we currently only persist the id, we
             // don't open a GET to resume.
-            if let Some(eid) = walk.last_event_id {
-                if let Ok(mut state) = self.state.lock() {
-                    state.last_event_id = Some(eid);
-                }
+            if let Some(eid) = walk.last_event_id
+                && let Ok(mut state) = self.state.lock()
+            {
+                state.last_event_id = Some(eid);
             }
             Ok(walk.response)
         } else {
@@ -1316,16 +1313,16 @@ impl McpClientSession {
             }
         };
         if let Ok(mut state) = self.state.lock() {
-            if let Some(prev) = state.progress_tokens.get(&token).copied() {
-                if progress < prev {
-                    tracing::warn!(
-                        server = %self.config_label(),
-                        token = %token,
-                        prev,
-                        now = progress,
-                        "progress notification went backwards (spec §5.3 says progress MUST increase)"
-                    );
-                }
+            if let Some(prev) = state.progress_tokens.get(&token).copied()
+                && progress < prev
+            {
+                tracing::warn!(
+                    server = %self.config_label(),
+                    token = %token,
+                    prev,
+                    now = progress,
+                    "progress notification went backwards (spec §5.3 says progress MUST increase)"
+                );
             }
             state.progress_tokens.insert(token.clone(), progress);
         }
@@ -1349,15 +1346,15 @@ impl McpClientSession {
     /// state, but `Tool::execute` is sync, so the tool executor
     /// doesn't run parallel MCP calls today.
     fn drop_progress_tokens(&self) {
-        if let Ok(mut state) = self.state.lock() {
-            if !state.progress_tokens.is_empty() {
-                tracing::debug!(
-                    server = %self.config_label(),
-                    tracked = state.progress_tokens.len(),
-                    "clearing progress tokens after request completion (spec §5.3)"
-                );
-                state.progress_tokens.clear();
-            }
+        if let Ok(mut state) = self.state.lock()
+            && !state.progress_tokens.is_empty()
+        {
+            tracing::debug!(
+                server = %self.config_label(),
+                tracked = state.progress_tokens.len(),
+                "clearing progress tokens after request completion (spec §5.3)"
+            );
+            state.progress_tokens.clear();
         }
     }
 

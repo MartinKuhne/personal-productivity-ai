@@ -98,6 +98,7 @@ pub struct SseWalkResult {
     /// Notifications the server sent before the response. Each is the
     /// already-parsed `params` object. The `method` is preserved
     /// alongside so the caller can dispatch.
+    #[allow(dead_code)]
     pub notifications: Vec<SseNotification>,
     /// The most recent SSE `id:` field observed on any event in
     /// the stream (notifications or the response itself). Spec
@@ -153,18 +154,20 @@ pub fn walk_for_response(
         let id = value.get("id");
         let method = value.get("method").and_then(|v| v.as_str());
 
-        if id.is_none() && method.is_some() {
-            let params = value
-                .get("params")
-                .cloned()
-                .unwrap_or(serde_json::Value::Null);
-            let note = SseNotification {
-                method: method.unwrap().to_owned(),
-                params,
-            };
-            on_notification(&note);
-            notifications.push(note);
-            continue;
+        if id.is_none() {
+            if let Some(m) = method {
+                let params = value
+                    .get("params")
+                    .cloned()
+                    .unwrap_or(serde_json::Value::Null);
+                let note = SseNotification {
+                    method: m.to_owned(),
+                    params,
+                };
+                on_notification(&note);
+                notifications.push(note);
+                continue;
+            }
         }
 
         // Match by id (string or number per spec).

@@ -1,7 +1,7 @@
 //! Filesystem agent tools — grep/search, read file, list files by tag, create/update/delete files, and directory listing.
 
 use crate::app::watcher::events::FileEventProducer;
-use crate::utils::markdown::parse_front_matter;
+use crate::markdown::parse_front_matter;
 use crate::utils::tags::extract_tags_from_file;
 use std::path::Path;
 use walkdir::WalkDir;

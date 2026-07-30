@@ -36,9 +36,8 @@ use std::sync::{Arc, Mutex};
 
 pub use error::McpError;
 pub use session::{
-    http_session_delete, is_valid_session_id, probe_legacy_transport, McpClientSession,
-    McpToolDescriptor, CLIENT_NAME, CLIENT_VERSION, DEFAULT_REQUEST_TIMEOUT, MAX_REQUEST_TIMEOUT,
-    PROTOCOL_VERSION,
+    CLIENT_NAME, CLIENT_VERSION, DEFAULT_REQUEST_TIMEOUT, MAX_REQUEST_TIMEOUT, McpClientSession,
+    McpToolDescriptor, PROTOCOL_VERSION, is_valid_session_id,
 };
 pub use tool_source::DynamicToolSource;
 
@@ -433,10 +432,9 @@ impl DynamicToolSource for McpClientManager {
 
 #[cfg(test)]
 mod tests {
-    use super::is_valid_session_id;
-    use super::session::http_session_delete;
-    use super::session::probe_legacy_transport;
     use super::MAX_REQUEST_TIMEOUT;
+    use super::McpClientSession;
+    use super::is_valid_session_id;
     use super::*;
     use std::collections::HashMap;
 
@@ -543,10 +541,11 @@ mod tests {
         });
         let bad = McpClientSession::extract_result("srv", "tools/call", bad_envelope);
         assert!(bad.is_err());
-        assert!(bad
-            .unwrap_err()
-            .message
-            .contains("not a JSON-RPC 2.0 envelope"));
+        assert!(
+            bad.unwrap_err()
+                .message
+                .contains("not a JSON-RPC 2.0 envelope")
+        );
 
         // Neither result nor error is also rejected.
         let neither = serde_json::json!({ "jsonrpc": "2.0", "id": 1 });
@@ -1059,7 +1058,7 @@ while True:
         drop(listener);
         let url = format!("http://127.0.0.1:{port}/mcp");
         let headers = std::collections::HashMap::new();
-        let result = http_session_delete(&url, &headers, "abc123");
+        let result = McpClientSession::http_session_delete(&url, &headers, "abc123");
         assert!(result.is_err(), "unreachable server should error");
     }
 
@@ -1628,7 +1627,7 @@ while True:
     /// hand-rolled SSE body.
     #[test]
     fn test_walk_for_response_returns_last_event_id() {
-        use super::sse::{parse_sse_body, walk_for_response, SseEvent};
+        use super::sse::{parse_sse_body, walk_for_response};
 
         // Two events, each with an id, the last being the
         // response. We expect `last_event_id` to be the
@@ -1679,7 +1678,8 @@ data: {\"jsonrpc\":\"2.0\",\"id\":42,\"result\":{\"ok\":true}}
         drop(listener);
         let url = format!("http://127.0.0.1:{port}/mcp");
         let headers = std::collections::HashMap::new();
-        let err = probe_legacy_transport(&url, &headers, 405, "Method Not Allowed");
+        let err =
+            McpClientSession::probe_legacy_transport(&url, &headers, 405, "Method Not Allowed");
         let msg = err.to_string();
         assert!(msg.contains("405"), "should mention POST status: {msg}");
         assert!(

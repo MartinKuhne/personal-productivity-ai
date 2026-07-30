@@ -39,7 +39,7 @@ impl DocumentContent {
     pub fn parse(raw: &str) -> Self {
         let content = raw.strip_prefix('\u{feff}').unwrap_or(raw);
 
-        if let Some(fm) = crate::utils::markdown::parse_front_matter(content) {
+        if let Some(fm) = crate::markdown::parse_front_matter(content) {
             // `source` is the literal slice between the `---` delimiters
             // (preserved verbatim, no trimming). Re-wrapping it with the
             // delimiters round-trips the file exactly.
@@ -159,7 +159,7 @@ mod tests {
         let invalid_yaml = "---\ninvalid: [unclosed\n---\nBody";
 
         // utils::markdown::parse_front_matter rejects this.
-        let utils_result = crate::utils::markdown::parse_front_matter(invalid_yaml);
+        let utils_result = crate::markdown::parse_front_matter(invalid_yaml);
         assert!(
             utils_result.is_none(),
             "utils parser should reject malformed YAML; got {utils_result:?}"

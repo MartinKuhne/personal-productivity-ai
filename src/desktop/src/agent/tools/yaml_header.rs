@@ -1,7 +1,7 @@
 //! YAML front-matter tools — `read_yaml_header` and `write_yaml_header` for title, summary, tags, date, etc.
 
 use crate::app::watcher::events::FileEventProducer;
-use crate::utils::markdown::parse_front_matter;
+use crate::markdown::parse_front_matter;
 use serde_yml::{Mapping, Value};
 use std::path::Path;
 

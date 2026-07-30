@@ -11,6 +11,7 @@
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 
+#[deprecated(note = "import directly from crate::app::vfs")]
 pub use crate::app::vfs::{
     ContentLibraryExt, VirtualPath, VirtualPathError, library_display_label,
 };

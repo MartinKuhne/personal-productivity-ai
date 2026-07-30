@@ -258,7 +258,7 @@ impl AgentSessionManager {
     /// Consume and handle a single typed [`AgentEvent`].
     ///
     /// This is the typed-channel counterpart to
-    /// [`handle_background_message`]. It performs the same state
+    /// [`Self::handle_background_message`]. It performs the same state
     /// updates but accepts the domain-specific [`AgentEvent`] enum
     /// introduced by the P1-6 architecture review pilot.
     ///

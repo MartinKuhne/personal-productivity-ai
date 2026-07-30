@@ -2,7 +2,7 @@
 
 use crate::batch::types::PromptInfo;
 use crate::config::{AppConfig, ContentLibrary};
-use crate::utils::markdown::parse_front_matter;
+use crate::markdown::parse_front_matter;
 use serde_yml::Value;
 use std::collections::BTreeSet;
 use std::path::{Path, PathBuf};
@@ -139,7 +139,7 @@ fn has_prompt_tag(yaml_val: &Value) -> bool {
 /// Reads prompt content from file (body only, excluding YAML front matter).
 pub fn read_prompt_content(path: &Path) -> Result<String, std::io::Error> {
     let content = std::fs::read_to_string(path)?;
-    let Some(fm) = crate::utils::markdown::parse_front_matter(&content) else {
+    let Some(fm) = crate::markdown::parse_front_matter(&content) else {
         return Ok(content); // No front matter, return whole content
     };
     let body = fm.body;

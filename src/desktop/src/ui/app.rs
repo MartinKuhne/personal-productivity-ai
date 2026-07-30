@@ -13,10 +13,10 @@ use crate::background::BackgroundLogEntry;
 use crate::background::LogCategory;
 use crate::background::{BackgroundProcessManager, SharedProcessManager};
 use crate::background_task::Task;
+use crate::markdown::parse_front_matter;
 use crate::ui::panels::{
     show_bottom_panel, show_center_panel, show_left_panel, show_right_panel, show_top_panel,
 };
-use crate::utils::markdown::parse_front_matter;
 use eframe::egui;
 use std::collections::{BTreeMap, HashSet};
 use std::path::PathBuf;
