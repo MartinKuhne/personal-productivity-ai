@@ -169,20 +169,7 @@ The requirements below have been formatted using the **Easy Approach to Requirem
 
 ### Batch processing
 
-* [REQ-800] The system shall display a 'Batch ...' button on the top navigation/menu bar bar
-* [REQ-801] When the user clicks on the 'Batch ...' button, the [batch prompt processing dialog] opens
-* [REQ-802] The [batch prompt processing dialog] shall let the user select a directory from the available directories to process files in
-* [REQ-803] The [batch prompt processing dialog] shall let the user specify a wildcard patters of file names to process
-* [REQ-804] The [batch prompt processing dialog] shall let the user select a prompt from a list of prompts. Prompts are markdown files with the 'prompt' tag
-* [REQ-805] The [batch prompt processing dialog] shall let the user choose between [Batch modes]. Batch modes are [File] and [Directory].
-* [REQ-806] The [batch prompt processing dialog] shall hide and ignore the contents of the wildcard pattern when the batch mode is [Directory], since it will not have control over which files are being processed.
-* [REQ-807] The [batch prompt processing dialog] shall let the user select a processing concurrency number. This shall be a drop-down box with available numbers from 1 to 8. The system shall process that number of prompts concurrently.
-* [REQ-808] When the user clicks the 'Cancel' button in the [batch prompt processing dialog], the system shall close the dialog with no action taken and no files modified
-* [REQ-809] When the user clicks the 'Process' button in the [batch prompt processing dialog], and the batch mode is [File], the system shall add the file context to the system context and process the prompt once per file.
-* [REQ-810] When the user clicks the 'Process' button in the [batch prompt processing dialog], and the batch mode is [Directory], the system shall add the directory context to the system context and process the prompt once per Directory.
-* [REQ-811] The [batch prompt processing dialog] shall log the start and end of LLM processing for each file to the background log window.
-* [REQ-812] While processing is underway, the [batch prompt processing dialog] shall disable the 'Process'
-* [REQ-813] While processing is underway, the [batch prompt processing dialog] shall stop processing new prompts when the user clicks the 'Cancel' button
+> Batch processing requirements moved to [`src/batch/SPEC.md`](src/batch/SPEC.md) (BATCH-001..BATCH-014). See that file for the full specification of the batch prompt processing dialog, modes, concurrency, and lifecycle.
 
 ### LLM Tools
 

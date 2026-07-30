@@ -1,4 +1,6 @@
 //! Batch-processing subsystem — coordinator, dialog, discoverer, executor, file matcher, prompts, and types.
+//!
+//! Requirements: see [`SPEC.md`](SPEC.md) (BATCH-001..BATCH-014) for the full specification.
 
 pub mod coordinator;
 pub mod dialog;
