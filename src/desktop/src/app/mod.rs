@@ -1,4 +1,4 @@
-//! Application domain types — managers, persisted state, and the background-message channel.
+//! Application domain types — managers and persisted state.
 //!
 //! This module owns the egui-independent application state. The managers
 //! here can be unit-tested in isolation: they do not import `eframe::egui`
@@ -9,14 +9,14 @@
 //! (e.g. `ToCEntry::id` is a `String` here, which the right panel maps
 //! to `egui::Id::new(&id_str)` at render time).
 //!
-//! The file-watcher plumbing lives in [`watcher`].
+//! The file-watcher plumbing lives in [`watcher`]. All cross-thread
+//! messaging primitives (event buses, message types, bus routing) live
+//! in [`crate::bus`].
 
-pub mod background_events;
 pub mod background_task;
 pub mod batch;
 pub mod dialog_manager;
 pub mod document;
-pub mod messages;
 pub mod panel_layout;
 pub mod persisted;
 pub mod print;
@@ -27,10 +27,7 @@ pub mod text_buffer;
 pub mod vfs;
 pub mod watcher;
 
-pub use background_events::{AgentEvent, BackgroundEvent, FsEvent, ProcessEvent};
-
 pub use dialog_manager::DialogManager;
-pub use messages::{BackgroundMessage, TokenUsageInfo};
 pub use panel_layout::PanelLayout;
 pub use persisted::PersistedUiState;
 pub use selection_manager::SelectionManager;

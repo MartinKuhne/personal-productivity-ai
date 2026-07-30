@@ -1,8 +1,9 @@
 //! Vision-model inference worker — generates markdown descriptions for discovered images using an LLM.
 
-use crate::app::messages::BackgroundMessage;
-use crate::app::watcher::events::{Bus, FileEvent, FileEventProducer};
 use crate::background::models::{BackgroundLogEntry, ImageJob, LogCategory};
+use crate::bus::core::Bus;
+use crate::bus::events::file::{FileEvent, FileEventProducer};
+use crate::bus::events::messages::BackgroundMessage;
 use crate::config::AppConfig;
 use base64::{Engine as _, engine::general_purpose::STANDARD as b64};
 use serde_json::json;
@@ -189,7 +190,7 @@ impl ImageVisionWorker {
             config,
             bus,
         } = self;
-        crate::background::spawn_path_worker(rx, move |path| {
+        crate::bus::router::spawn_path_worker(rx, move |path| {
             let bus = bus.clone();
             let tx = tx.clone();
             let config = config.clone();
@@ -207,7 +208,8 @@ impl ImageVisionWorker {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::app::watcher::events::{Bus, FileEvent};
+    use crate::bus::core::Bus;
+    use crate::bus::events::file::{FileEvent, FileEventKind};
     use crate::config::{AppConfig, LlmConfig};
     use std::path::PathBuf;
     use std::sync::mpsc;
@@ -323,10 +325,7 @@ mod tests {
         let event = reader
             .recv_timeout(std::time::Duration::from_millis(200))
             .expect("process_image should publish a Discovered event for the output .md");
-        assert_eq!(
-            event.kind,
-            crate::app::watcher::events::FileEventKind::Discovered
-        );
+        assert_eq!(event.kind, FileEventKind::Discovered);
         assert_eq!(event.paths[0], md_path);
     }
 

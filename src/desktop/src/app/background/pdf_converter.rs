@@ -1,8 +1,9 @@
 //! PDF-to-markdown converter worker — invokes an external tool to produce a sibling `.md` file for each PDF.
 
-use crate::app::messages::BackgroundMessage;
-use crate::app::watcher::events::{Bus, FileEvent};
 use crate::background::models::{BackgroundLogEntry, LogCategory};
+use crate::bus::core::Bus;
+use crate::bus::events::file::FileEvent;
+use crate::bus::events::messages::BackgroundMessage;
 use std::path::PathBuf;
 #[cfg(test)]
 use std::sync::mpsc::channel;
@@ -196,7 +197,7 @@ impl PdfConverterWorker {
 
     pub fn spawn(self) {
         let PdfConverterWorker { rx, tx, bus, cmd } = self;
-        crate::background::spawn_path_worker(rx, move |path| {
+        crate::bus::router::spawn_path_worker(rx, move |path| {
             let bus = bus.clone();
             let tx = tx.clone();
             let cmd = cmd.clone();

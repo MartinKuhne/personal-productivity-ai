@@ -1,9 +1,13 @@
-//! File-event bus router — subscribes to bus events and routes newly discovered files to PDF/vision worker queues by extension.
+//! File-event bus router — subscribes to bus events and routes newly
+//! discovered files to PDF/vision worker queues by extension.
 
-use crate::app::watcher::events::{Bus, FileEvent, FileEventKind};
+use crate::bus::core::Bus;
+use crate::bus::events::file::{FileEvent, FileEventKind};
 use std::path::PathBuf;
 use std::sync::mpsc::Sender;
 
+/// Subscribes to a [`Bus<FileEvent>`] and fans out newly discovered /
+/// updated files to per-format worker channels by extension.
 pub struct BusRouter {
     bus: Bus<FileEvent>,
     tx_pdf: Sender<PathBuf>,

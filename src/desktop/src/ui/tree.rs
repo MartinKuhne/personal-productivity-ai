@@ -1,8 +1,9 @@
 //! File-system tree widget — expand/collapse, file selection, multi-select, and context-menu operations (rename, move, delete, new file/dir).
 
-use crate::app::messages::BackgroundMessage;
 use crate::app::panel_layout::PanelLayout;
 use crate::app::print::{PrintJob, execute_print_blocking};
+use crate::bus::events::file::FileEventProducer;
+use crate::bus::events::messages::BackgroundMessage;
 use crate::ui::TreeNode;
 use eframe::egui;
 use std::collections::HashSet;
@@ -62,7 +63,7 @@ pub struct AppIntegrationContext<'a> {
     /// Background message sender (for print jobs, etc.).
     pub bg_tx: &'a Option<Sender<BackgroundMessage>>,
     /// Optional file-event producer for immediate UI updates.
-    pub file_event_producer: Option<crate::app::watcher::events::FileEventProducer<'a>>,
+    pub file_event_producer: Option<FileEventProducer<'a>>,
 }
 
 /// Composite context for tree rendering operations.
@@ -178,9 +179,7 @@ impl<'a> TreeNodeContext<'a> {
     }
 
     /// Access file event producer.
-    pub fn file_event_producer(
-        &self,
-    ) -> &Option<crate::app::watcher::events::FileEventProducer<'a>> {
+    pub fn file_event_producer(&self) -> &Option<FileEventProducer<'a>> {
         &self.app.file_event_producer
     }
 }

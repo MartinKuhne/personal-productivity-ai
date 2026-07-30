@@ -2,6 +2,7 @@
 
 pub mod agent;
 pub mod app;
+pub mod bus;
 pub mod markdown;
 pub mod ui;
 pub mod utils;
@@ -24,16 +25,19 @@ pub use ui::editor_egui;
 pub use agent::run_agent;
 pub use app::background_task::Task;
 pub use app::print::{PrintJob, execute_print_blocking};
-pub use app::watcher::{
-    Bus, BusReader, DirectoryTracker, FileEvent, FileEventKind, FileEventProcessor,
-    FileEventProducer, FileWatcher,
-};
+pub use app::watcher::{DirectoryTracker, FileEventProcessor, FileWatcher};
 pub use app::{
-    BackgroundMessage, Cursor, DialogManager, PanelLayout, PersistedUiState, Selection,
-    SelectionManager, TabManager, TagManager, TextBuffer, TokenUsageInfo, UndoStack, VirtualPath,
-    VirtualPathError,
+    Cursor, DialogManager, PanelLayout, PersistedUiState, Selection, SelectionManager, TabManager,
+    TagManager, TextBuffer, UndoStack, VirtualPath, VirtualPathError,
 };
-pub use config::{AppConfig, ConfigArrived, config_bus, get_config_path, load_config};
+pub use bus::config::{CONFIG_ARRIVAL_TIMEOUT, config_bus};
+pub use bus::core::{Bus, BusReader};
+pub use bus::events::{
+    AgentEvent, BackgroundEvent, BackgroundMessage, ConfigArrived, FileEvent, FileEventKind,
+    FileEventProducer, FsEvent, ProcessEvent, TokenUsageInfo,
+};
+pub use bus::router::{BusRouter, ChannelWorker, spawn_path_worker};
+pub use config::{AppConfig, get_config_path, load_config};
 pub use error::AgentError;
 pub use markdown::ToCEntry;
 pub use tools::{execute_tool, get_tools_schema};

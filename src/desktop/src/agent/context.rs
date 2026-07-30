@@ -1,6 +1,7 @@
 //! Agent context — bundles all inputs (config, channels, file bus, active file/dir, prompt, cancel flag, history) for an agent session.
 
-use crate::app::watcher::events::Bus;
+use crate::bus::core::Bus;
+use crate::bus::events::file::FileEvent;
 use crate::config::AppConfig;
 use serde_json::Value;
 use std::collections::HashSet;
@@ -16,8 +17,8 @@ use std::sync::{Arc, atomic::AtomicBool};
 /// `AgentContext::new` was a pass-through forwarder (PSD-004) and was removed.
 pub struct AgentContext {
     pub config: AppConfig,
-    pub tx_gui: Sender<crate::app::messages::BackgroundMessage>,
-    pub file_event_bus: Bus<crate::app::watcher::events::FileEvent>,
+    pub tx_gui: Sender<crate::bus::events::messages::BackgroundMessage>,
+    pub file_event_bus: Bus<FileEvent>,
     pub active_file: Option<PathBuf>,
     pub active_dir: Option<PathBuf>,
     pub selected_files: HashSet<PathBuf>,

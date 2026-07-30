@@ -1,8 +1,6 @@
 //! Root egui `App` struct — owns all application state and wires together background tasks, panels, agent, and dialogs.
 
 use crate::agent::AgentSessionManager;
-use crate::app::background_events::BackgroundEvent;
-use crate::app::messages::BackgroundMessage;
 use crate::app::watcher::directory_tracker::DirectoryTracker;
 use crate::app::watcher::file_processor::FileEventProcessor;
 use crate::app::{
@@ -13,6 +11,11 @@ use crate::background::BackgroundLogEntry;
 use crate::background::LogCategory;
 use crate::background::{BackgroundProcessManager, SharedProcessManager};
 use crate::background_task::Task;
+use crate::bus::core::{Bus, BusReader};
+use crate::bus::events::config::ConfigArrived;
+use crate::bus::events::file::{FileEvent, FileEventProducer};
+use crate::bus::events::messages::BackgroundMessage;
+use crate::bus::events::typed::{BackgroundEvent, FsEvent, ProcessEvent};
 use crate::config::AppConfig;
 use crate::markdown::parse_front_matter;
 use crate::ui::panels::{
@@ -50,9 +53,8 @@ pub struct FastMdApp {
     pub content_libraries: Vec<crate::config::ContentLibrary>,
     pub rx: Receiver<BackgroundMessage>,
     pub tx: std::sync::mpsc::Sender<BackgroundMessage>,
-    pub file_event_bus: crate::app::watcher::events::Bus<crate::app::watcher::events::FileEvent>,
-    pub file_event_reader:
-        Option<crate::app::watcher::events::BusReader<crate::app::watcher::events::FileEvent>>,
+    pub file_event_bus: Bus<FileEvent>,
+    pub file_event_reader: Option<BusReader<FileEvent>>,
     pub file_processor: FileEventProcessor,
     pub tag_manager: TagManager,
     pub directory_tracker: DirectoryTracker,
@@ -72,13 +74,13 @@ pub struct FastMdApp {
     pub background_manager: SharedProcessManager,
     /// The currently-loaded application configuration. Starts as
     /// [`AppConfig::default`] and is replaced on the first frame
-    /// that observes a [`crate::config::ConfigArrived`] event on
+    /// that observes a [`crate::bus::events::config::ConfigArrived`] event on
     /// the configuration bus.
     pub config: crate::config::AppConfig,
     /// Reader for the configuration-arrival bus. Subscribed during
     /// construction; dropped after the first successful drain so
     /// subsequent frames do not touch the bus.
-    config_reader: Option<crate::app::watcher::events::BusReader<crate::config::ConfigArrived>>,
+    config_reader: Option<BusReader<ConfigArrived>>,
     pub persisted_ui_state: PersistedUiState,
     pub pending_file_load: Option<PathBuf>,
     pub repaint_interval: Duration,
@@ -190,7 +192,7 @@ impl FastMdApp {
     /// Returns `true` if any event was processed, so callers can
     /// schedule a follow-up UI repaint.
     fn process_file_events(&mut self) -> bool {
-        use crate::app::watcher::events::FileEventKind;
+        use crate::bus::events::file::FileEventKind;
 
         let mut changed = false;
         let mut needs_rebuild = false;
@@ -316,10 +318,7 @@ impl FastMdApp {
         ctx.set_visuals_of(egui::Theme::Dark, visuals);
     }
 
-    pub fn new(
-        cc: &eframe::CreationContext<'_>,
-        config_bus: crate::app::watcher::events::Bus<crate::config::ConfigArrived>,
-    ) -> Self {
+    pub fn new(cc: &eframe::CreationContext<'_>, config_bus: Bus<ConfigArrived>) -> Self {
         // egui 0.35 split the global style into a Dark and a Light
         // theme, picked at runtime by `ThemePreference` (default
         // `System`). `set_visuals` writes to the *currently active*
@@ -414,8 +413,8 @@ impl FastMdApp {
         // `empty_state_via_bus` build the struct through the same
         // bus-driven init path. This keeps a single code path for
         // tests that don't need a real `CreationContext`.
-        let bus = crate::config::config_bus();
-        bus.publish(crate::config::ConfigArrived::new(config.clone()));
+        let bus = crate::bus::config::config_bus();
+        bus.publish(ConfigArrived::new(config.clone()));
         Self::empty_state_via_bus(bus, config)
     }
 
@@ -423,10 +422,7 @@ impl FastMdApp {
     /// a private bus and draining it synchronously. This is the test
     /// counterpart of [`Self::new`]: no `CreationContext` is needed
     /// because we don't apply egui visuals.
-    fn empty_state_via_bus(
-        bus: crate::app::watcher::events::Bus<crate::config::ConfigArrived>,
-        config: crate::config::AppConfig,
-    ) -> Self {
+    fn empty_state_via_bus(bus: Bus<ConfigArrived>, config: crate::config::AppConfig) -> Self {
         let (tx, rx) = std::sync::mpsc::channel();
         let background_task = Task::new(bus.clone());
         let file_processor = FileEventProcessor::new(background_task.file_event_bus.subscribe());
@@ -572,7 +568,7 @@ impl FastMdApp {
     fn drain_config_bus(&mut self) {
         // Snapshot the reader out of `self` so we can do a
         // non-borrowing drain (we also need to mutate other fields).
-        let mut config: Option<crate::config::ConfigArrived> = None;
+        let mut config: Option<ConfigArrived> = None;
         if let Some(reader) = self.config_reader.as_ref() {
             match reader.try_recv() {
                 Ok(event) => config = Some(event),
@@ -727,12 +723,8 @@ impl FastMdApp {
         }
     }
 
-    fn handle_fs_event(
-        &mut self,
-        ev: crate::app::background_events::FsEvent,
-        _msg: &BackgroundMessage,
-    ) {
-        use crate::app::background_events::FsEvent;
+    fn handle_fs_event(&mut self, ev: FsEvent, _msg: &BackgroundMessage) {
+        use FsEvent;
         match ev {
             FsEvent::FileParsed { path, tags } => {
                 self.tag_manager.add_tags(path.clone(), tags);
@@ -777,12 +769,8 @@ impl FastMdApp {
         }
     }
 
-    fn handle_process_event(
-        &mut self,
-        ev: crate::app::background_events::ProcessEvent,
-        _msg: &BackgroundMessage,
-    ) {
-        use crate::app::background_events::ProcessEvent;
+    fn handle_process_event(&mut self, ev: ProcessEvent, _msg: &BackgroundMessage) {
+        use ProcessEvent;
         match ev {
             ProcessEvent::LogEntry(entry) => {
                 if let Ok(mut mgr) = self.background_manager.lock() {
@@ -870,7 +858,7 @@ impl FastMdApp {
     }
 
     fn show_editor_overlay(&mut self, ui: &mut egui::Ui) {
-        let producer = crate::app::watcher::events::FileEventProducer::new(&self.file_event_bus);
+        let producer = FileEventProducer::new(&self.file_event_bus);
         // The editor opens its own top-level `egui::Window` from
         // the context pulled out of `ui`. After it returns we
         // check whether the buffer was closed (either by a
@@ -1006,7 +994,7 @@ impl FastMdApp {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::app::messages::TokenUsageInfo;
+    use crate::bus::events::messages::TokenUsageInfo;
     use crate::ui::test_helpers::assert::assert_no_id_change_in_shapes;
     use std::path::PathBuf;
 
@@ -1333,9 +1321,7 @@ mod tests {
         // Use a separate clone of the bus to publish; both clones
         // share the same subscriber list.
         let publisher = app.file_event_bus.clone();
-        publisher.publish(crate::app::watcher::events::FileEvent::updated_one(
-            path.clone(),
-        ));
+        publisher.publish(FileEvent::updated_one(path.clone()));
 
         let changed = app.process_file_events();
         assert!(changed, "process_file_events should report a change");
@@ -1364,9 +1350,7 @@ mod tests {
 
         app.file_event_reader = Some(app.file_event_bus.subscribe());
         let publisher = app.file_event_bus.clone();
-        publisher.publish(crate::app::watcher::events::FileEvent::updated_one(
-            path.clone(),
-        ));
+        publisher.publish(FileEvent::updated_one(path.clone()));
 
         let _ = app.process_file_events();
         assert!(
@@ -1390,9 +1374,7 @@ mod tests {
 
         app.file_event_reader = Some(app.file_event_bus.subscribe());
         let publisher = app.file_event_bus.clone();
-        publisher.publish(crate::app::watcher::events::FileEvent::removed_one(
-            path.clone(),
-        ));
+        publisher.publish(FileEvent::removed_one(path.clone()));
 
         let _ = app.process_file_events();
         assert!(app.tab_manager.loaded_path.is_none());
@@ -1416,18 +1398,10 @@ mod tests {
 
         app.file_event_reader = Some(app.file_event_bus.subscribe());
         let publisher = app.file_event_bus.clone();
-        publisher.publish(crate::app::watcher::events::FileEvent::discovered_one(
-            pdf.clone(),
-        ));
-        publisher.publish(crate::app::watcher::events::FileEvent::discovered_one(
-            img.clone(),
-        ));
-        publisher.publish(crate::app::watcher::events::FileEvent::discovered_one(
-            md.clone(),
-        ));
-        publisher.publish(crate::app::watcher::events::FileEvent::discovered_one(
-            pdf_in_pdf_only_dir.clone(),
-        ));
+        publisher.publish(FileEvent::discovered_one(pdf.clone()));
+        publisher.publish(FileEvent::discovered_one(img.clone()));
+        publisher.publish(FileEvent::discovered_one(md.clone()));
+        publisher.publish(FileEvent::discovered_one(pdf_in_pdf_only_dir.clone()));
 
         let _ = app.process_file_events();
 
@@ -1510,15 +1484,9 @@ mod tests {
 
         app.file_event_reader = Some(app.file_event_bus.subscribe());
         let publisher = app.file_event_bus.clone();
-        publisher.publish(crate::app::watcher::events::FileEvent::discovered_one(
-            PathBuf::from("/lib/notes.md"),
-        ));
-        publisher.publish(crate::app::watcher::events::FileEvent::discovered_one(
-            PathBuf::from("/lib/extra.md"),
-        ));
-        publisher.publish(crate::app::watcher::events::FileEvent::updated_one(
-            PathBuf::from("/lib/notes.md"),
-        ));
+        publisher.publish(FileEvent::discovered_one(PathBuf::from("/lib/notes.md")));
+        publisher.publish(FileEvent::discovered_one(PathBuf::from("/lib/extra.md")));
+        publisher.publish(FileEvent::updated_one(PathBuf::from("/lib/notes.md")));
 
         let _ = app.process_file_events();
         assert!(
@@ -1549,9 +1517,7 @@ mod tests {
         // evicts the file's tags.
         app.file_event_reader = Some(app.file_event_bus.subscribe());
         app.file_event_bus
-            .publish(crate::app::watcher::events::FileEvent::removed_one(
-                PathBuf::from("/lib/notes.md"),
-            ));
+            .publish(FileEvent::removed_one(PathBuf::from("/lib/notes.md")));
         let _ = app.process_file_events();
         assert!(
             !app.tag_manager.all_tags().contains("work"),
@@ -1564,9 +1530,7 @@ mod tests {
         app.tag_manager
             .add_tags(PathBuf::from("/lib/other.md"), vec!["keep".to_string()]);
         app.file_event_bus
-            .publish(crate::app::watcher::events::FileEvent::discovered_one(
-                PathBuf::from("/lib/other.md"),
-            ));
+            .publish(FileEvent::discovered_one(PathBuf::from("/lib/other.md")));
         let _ = app.process_file_events();
         assert!(
             app.tag_manager.all_tags().contains("keep"),

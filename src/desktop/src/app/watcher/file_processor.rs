@@ -1,6 +1,7 @@
 //! Drains file events from the bus to maintain running lists of all known files and directories.
 
-use crate::app::watcher::events::{BusReader, FileEvent, FileEventKind};
+use crate::bus::core::BusReader;
+use crate::bus::events::file::{FileEvent, FileEventKind};
 use std::collections::HashSet;
 use std::path::PathBuf;
 
@@ -153,7 +154,7 @@ impl FileEventProcessor {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::app::watcher::events::Bus;
+    use crate::bus::core::Bus;
 
     #[test]
     fn test_processor_receives_discovered() {

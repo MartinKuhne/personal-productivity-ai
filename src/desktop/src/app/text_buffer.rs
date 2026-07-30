@@ -25,14 +25,14 @@
 //! ## Save path
 //!
 //! [`TextBuffer::save`] writes the buffer to disk, publishes an
-//! `Updated` [`crate::app::watcher::events::FileEvent`] so the rest of
+//! `Updated` [`crate::bus::events::file::FileEvent`] so the rest of
 //! the app refreshes immediately, and closes the editor. The publish
 //! needs a [`FileEventProducer`], which is itself egui-free; the
 //! producer reference is passed in rather than held on the buffer so
 //! the type stays plain Rust data with no framework-specific slots.
 
 use crate::app::document::DocumentContent;
-use crate::app::watcher::events::FileEventProducer;
+use crate::bus::events::file::FileEventProducer;
 use std::fs;
 use std::path::{Path, PathBuf};
 
@@ -364,7 +364,8 @@ impl TextBuffer {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::app::watcher::events::Bus;
+    use crate::bus::core::Bus;
+    use crate::bus::events::file::FileEvent;
     use std::fs;
     use tempfile::tempdir;
 
@@ -372,8 +373,7 @@ mod tests {
     /// to consume the events — they only care about the file I/O
     /// outcome.
     fn noop_producer() -> FileEventProducer<'static> {
-        let bus: &'static Bus<crate::app::watcher::events::FileEvent> =
-            Box::leak(Box::new(Bus::new()));
+        let bus: &'static Bus<FileEvent> = Box::leak(Box::new(Bus::new()));
         FileEventProducer::new(bus)
     }
 

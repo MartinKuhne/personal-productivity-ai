@@ -50,7 +50,7 @@ fn main() -> eframe::Result<()> {
     // and uses to perform its own initialization work. We create it
     // here, hand it to the app, and publish the loaded config so
     // every subscriber observes the same first-arrival event.
-    let config_bus = fastmd::config::config_bus();
+    let config_bus = fastmd::bus::config::config_bus();
 
     eframe::run_native(
         "fastmd",

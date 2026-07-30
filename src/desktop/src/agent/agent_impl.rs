@@ -7,7 +7,7 @@ use crate::agent::response_formatter::{
     format_tool_call_message, format_tool_result_message, split_thinking_and_content,
 };
 use crate::agent::tool_executor::ToolExecutor;
-use crate::app::messages::BackgroundMessage;
+use crate::bus::events::messages::BackgroundMessage;
 use crate::config::get_config_path;
 use crate::tools::get_tools_schema;
 use std::sync::atomic::Ordering;

@@ -1,13 +1,13 @@
 //! Batch coordinator — discovers targets, spawns the executor on a background thread, polls progress, and reports results.
 
-use crate::app::messages::BackgroundMessage;
-use crate::app::watcher::events::Bus;
-use crate::app::watcher::events::FileEvent;
 use crate::batch::discoverer::JobDiscoverer;
 use crate::batch::executor::BatchJobExecutor;
 use crate::batch::types::{
     BatchConfig, BatchHandle, BatchJob, BatchJobStatus, BatchMode, BatchResult,
 };
+use crate::bus::core::Bus;
+use crate::bus::events::file::FileEvent;
+use crate::bus::events::messages::BackgroundMessage;
 use crate::config::AppConfig;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, mpsc};

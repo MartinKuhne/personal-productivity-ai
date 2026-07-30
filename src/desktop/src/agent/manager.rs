@@ -1,10 +1,11 @@
 //! Agent session manager — lifecycle and UI-visible state for a single LLM agent session (status, response, thinking, history, token usage).
 
 use crate::agent::AgentContext;
-use crate::app::background_events::AgentEvent;
-use crate::app::messages::{BackgroundMessage, TokenUsageInfo};
-use crate::app::watcher::events::{Bus, BusReader};
-use crate::config::{AppConfig, ConfigArrived};
+use crate::bus::core::{Bus, BusReader};
+use crate::bus::events::config::ConfigArrived;
+use crate::bus::events::messages::{BackgroundMessage, TokenUsageInfo};
+use crate::bus::events::typed::AgentEvent;
+use crate::config::AppConfig;
 use serde_json::Value;
 use std::collections::HashSet;
 use std::path::PathBuf;
@@ -33,7 +34,7 @@ pub struct AgentState {
 ///
 /// Responsibilities:
 /// - Owns agent state (status, thinking, response, history, token usage)
-/// - Subscribes to the [`crate::config::ConfigArrived`] bus so the
+/// - Subscribes to the [`crate::bus::events::config::ConfigArrived`] bus so the
 ///   [`AppConfig`] used by `start_session` and `initialize_mcp` is
 ///   the one published at startup, not a value captured at
 ///   construction time.
@@ -255,7 +256,7 @@ impl AgentSessionManager {
         active_file: Option<PathBuf>,
         active_dir: Option<PathBuf>,
         selected_files: HashSet<PathBuf>,
-        file_event_bus: Bus<crate::app::watcher::events::FileEvent>,
+        file_event_bus: Bus<crate::bus::events::file::FileEvent>,
     ) {
         // Reset state for new session
         self.state.running = true;
@@ -462,7 +463,8 @@ mod tests {
     /// no-op.
     #[test]
     fn test_drain_config_observes_first_event() {
-        use crate::config::{ConfigArrived, config_bus};
+        use crate::bus::config::config_bus;
+        use crate::bus::events::config::ConfigArrived;
 
         let bus = config_bus();
         let mut mgr = AgentSessionManager::new(bus.clone());
@@ -489,7 +491,7 @@ mod tests {
     /// flag.
     #[test]
     fn test_drain_config_returns_false_when_empty() {
-        let bus = crate::config::config_bus();
+        let bus = crate::bus::config::config_bus();
         let mut mgr = AgentSessionManager::new(bus);
 
         assert!(!mgr.drain_config());
@@ -505,7 +507,7 @@ mod tests {
     /// the manager (which subscribes), then publish, then drain.
     #[test]
     fn test_construct_then_publish_order_drains_config() {
-        let bus = crate::config::config_bus();
+        let bus = crate::bus::config::config_bus();
         // 1. Construct first — this is the `AgentSessionManager::new`
         //    call inside `FastMdApp::new`. It subscribes here.
         let mut mgr = AgentSessionManager::new(bus.clone());
@@ -531,7 +533,7 @@ mod tests {
     /// refactor that flips the order is caught immediately.
     #[test]
     fn test_publish_then_construct_order_drops_event() {
-        let bus = crate::config::config_bus();
+        let bus = crate::bus::config::config_bus();
         bus.publish(ConfigArrived::new(AppConfig::default()));
 
         // Subscribing after the publish means the broadcast

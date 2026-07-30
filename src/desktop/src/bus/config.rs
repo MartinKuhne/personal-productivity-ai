@@ -1,47 +1,14 @@
-//! Configuration arrival bus — fans out the loaded [`AppConfig`] to every
-//! subsystem that needs to bootstrap from it.
+//! Configuration-arrival bus constructor and subscriber timeout.
 //!
-//! The bus implements a multi-producer / multi-consumer broadcast pattern
-//! using `tokio::sync::broadcast` (via the shared [`crate::app::watcher::Bus`]
-//! wrapper). `main` loads the config from disk once, wraps it in a
-//! [`ConfigArrived`], and publishes a single event. Subscribers register
-//! during their own construction (e.g. [`crate::app::background_task::Task`]
-//! for the background workers, [`crate::ui::FastMdApp`] for the UI, and the
-//! agent entry points) and perform their initialization work on receipt.
-//!
-//! # Why a bus and not a shared `Arc<AppConfig>`
-//!
-//! Each subscriber can own its own copy of the configuration without
-//! serialising on a `Mutex`, and the same shape supports lazy worker
-//! construction (the background `Task` does not spawn its indexer / PDF /
-//! vision workers until the event is observed).
-//!
-//! # Hot reload
-//!
-//! Out of scope: the bus carries the first arrival only. Subscribers
-//! `take()` the reader after the first frame so a second publish would
-//! not re-initialise anything.
+//! The [`ConfigArrived`] event payload lives in
+//! [`crate::bus::events::config`]; this module owns only the
+//! constructor and the timeout constant that polling subscribers use
+//! when they can't block the UI thread.
 
 use std::time::Duration;
 
-use crate::app::watcher::events::Bus;
-use crate::config::AppConfig;
-
-/// The single event published to the configuration bus. Carries the
-/// loaded [`AppConfig`] by value so each subscriber can own a private
-/// clone without going through a shared lock.
-#[derive(Debug, Clone)]
-pub struct ConfigArrived {
-    /// The application configuration that has just been loaded.
-    pub config: AppConfig,
-}
-
-impl ConfigArrived {
-    /// Build a `ConfigArrived` event from a freshly loaded configuration.
-    pub fn new(config: AppConfig) -> Self {
-        Self { config }
-    }
-}
+use crate::bus::core::Bus;
+use crate::bus::events::config::ConfigArrived;
 
 /// Construct a fresh configuration-arrival bus.
 ///
@@ -54,15 +21,15 @@ pub fn config_bus() -> Bus<ConfigArrived> {
 
 /// Default timeout for subscribers that poll the bus without blocking
 /// the UI thread. If the event is not observed within this window the
-/// subscriber falls back to [`AppConfig::default`] and emits a
-/// `config.arrived.timeout` tracing event.
+/// subscriber falls back to [`crate::config::AppConfig::default`] and
+/// emits a `config.arrived.timeout` tracing event.
 pub const CONFIG_ARRIVAL_TIMEOUT: Duration = Duration::from_millis(100);
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::config::AppConfig;
     use std::thread;
-    use std::time::Duration;
 
     #[test]
     fn test_publish_delivers_to_every_subscriber() {

@@ -1,8 +1,9 @@
 //! Modal dialog UIs — move-file, create-directory, rename, delete confirmation, and batch prompt-processing dialogs.
 
 use crate::app::dialog_manager::DialogManager;
-use crate::app::watcher::events::{Bus, FileEventProducer};
 use crate::app::watcher::file_processor::FileEventProcessor;
+use crate::bus::core::Bus;
+use crate::bus::events::file::{FileEvent, FileEventProducer};
 use crate::config::ContentLibrary;
 use eframe::egui;
 use std::collections::BTreeSet;
@@ -12,7 +13,7 @@ pub fn show_move_modal_dialog(
     dm: &mut DialogManager,
     content_libraries: &[ContentLibrary],
     file_processor: &FileEventProcessor,
-    file_event_bus: &Bus<crate::app::watcher::events::FileEvent>,
+    file_event_bus: &Bus<FileEvent>,
     ctx: &egui::Context,
 ) {
     let mut close_modal = false;
@@ -70,7 +71,7 @@ pub fn show_move_modal_dialog(
                                         "Failed to move file to new destination. Likely cause: permission denied or file in use. Operator should check file locks."
                                     );
                                 } else {
-                                    let producer = crate::app::watcher::events::FileEventProducer::new(file_event_bus);
+                                    let producer = FileEventProducer::new(file_event_bus);
                                     producer.publish_rename(file, &new_path);
                                 }
                             }
@@ -94,7 +95,7 @@ pub fn show_create_dir_dialog(
     dm: &mut DialogManager,
     file_processor: &mut FileEventProcessor,
     watcher: &mut Option<notify::RecommendedWatcher>,
-    file_event_bus: &Bus<crate::app::watcher::events::FileEvent>,
+    file_event_bus: &Bus<FileEvent>,
     ctx: &egui::Context,
 ) {
     let mut close_create_modal = false;
@@ -162,7 +163,7 @@ pub fn show_create_dir_dialog(
 /// each field from `&mut self`.
 pub struct RenameDialogCtx<'a> {
     pub dialog_manager: &'a mut DialogManager,
-    pub file_event_bus: &'a Bus<crate::app::watcher::events::FileEvent>,
+    pub file_event_bus: &'a Bus<FileEvent>,
     pub loaded_path: &'a mut Option<PathBuf>,
     pub selected_file: &'a mut Option<PathBuf>,
     pub selected_dir: &'a mut Option<PathBuf>,
@@ -226,7 +227,7 @@ pub fn show_rename_dialog(ctx: RenameDialogCtx<'_>) {
                                             "Failed to rename file. Likely cause: permission denied or file in use. Operator should check file locks."
                                         );
                                     } else {
-                                        let producer = crate::app::watcher::events::FileEventProducer::new(file_event_bus);
+                                        let producer = FileEventProducer::new(file_event_bus);
                                         producer.publish_rename(file, &new_path);
                                         if loaded_path.as_ref() == Some(file) {
                                             *loaded_path = Some(new_path.clone());

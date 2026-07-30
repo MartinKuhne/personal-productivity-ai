@@ -31,9 +31,22 @@ src/
 ├── error.rs                # AgentError
 ├── bin/deploy.rs           # deploy binary target
 │
+├── bus/                    # Messaging subsystem — transports, event payloads,
+│   │                       # bus-side routing (see `doc/planning/.../bus-folder-consolidation.md`)
+│   ├── core.rs             # Bus<T>, BusReader<T>  (tokio::sync::broadcast wrapper)
+│   ├── events/             # every event payload that flows over a bus or channel
+│   │   ├── file.rs         # FileEvent, FileEventKind, FileEventProducer
+│   │   ├── messages.rs     # BackgroundMessage (legacy god-enum), TokenUsageInfo
+│   │   ├── typed.rs        # BackgroundEvent, AgentEvent, FsEvent, ProcessEvent (typed pilot)
+│   │   └── config.rs       # ConfigArrived
+│   ├── router/             # bus-side plumbing
+│   │   ├── bus_router.rs   # BusRouter (per-extension fan-out to PDF/vision channels)
+│   │   └── worker.rs       # spawn_path_worker, ChannelWorker (generic channel drainers)
+│   └── config.rs           # config_bus() constructor, CONFIG_ARRIVAL_TIMEOUT
 ├── config/                 # AppConfig + client structs, loader, secrets (data shapes only)
 ├── app/                    # egui-free application domain (managers, watcher, vfs)
 │   ├── vfs/                # Virtual File System — parser, library behaviour, resolver (app/vfs/SPEC.md)
+│   ├── watcher/            # FileWatcher (notify), FileEventProcessor, DirectoryTracker
 │   └── (managers)          # TabManager, SelectionManager, DialogManager, PanelLayout, TagManager, TextBuffer
 ├── agent/                  # LLM tool-loop: manager, llm_client, prompt_builder,
 │                           #   response_formatter, tool_executor, context, agent_impl
@@ -45,15 +58,12 @@ src/
 ├── ui/                     # egui layer only: FastMdApp, PanelLayout, panels/,
 │                           #   tree, tab/selection/dialog managers, modals,
 │                           #   background_logs, os_shell
-├── background/             # Indexer, FileWatcher, PdfConverterWorker,
-│                           #   ImageVisionWorker, BusRouter, ProcessManager,
-│                           #   Task orchestrator
+├── background/             # Worker pool — Indexer, PdfConverterWorker,
+│                           #   ImageVisionWorker, ProcessManager
 ├── batch/                  # Batch prompt processing (coordinator, discoverer,
 │                           #   executor, file_matcher, prompts, types)
-├── events/                 # Bus<FileEvent>, FileEventProcessor, DirectoryTracker
 ├── editor.rs               # Inline egui text editor widget (calls markdown::)
 ├── tag_manager.rs          # TagManager (file_tags, all_tags, prompt_paths)
-├── messages.rs             # BackgroundMessage + TokenUsageInfo
 ├── print.rs                # PrintJob (calls markdown::render for HTML)
 ├── browser.rs              # Playwright wrapper
 └── utils/                  # Generic helpers only (path, tags) — NO Markdown knowledge
@@ -83,9 +93,12 @@ When adding or moving code, place files by **concern**, not by type:
   implementations or UI code here.
 - **Background workers** and the `Task` orchestrator go in `background/`.
   Channel/bus plumbing between workers and the UI belongs here, not in `ui/`.
-- **Event bus + its consumers** (`Bus<FileEvent>`, `FileEventProcessor`,
-  `DirectoryTracker`) go in `events/`. Producers (indexer, watcher) live in
-  `background/`; consumers that drive UI state live in `events/` or `ui/`.
+- **Messaging primitives** (buses, event payload types, bus-side routing,
+  generic channel-drain workers) go in `bus/`. Producers (indexer,
+  watcher) live in `background/`; consumers that drive UI state live in
+  `app/` or `ui/`. The `Bus<T>` transport is in `bus::core`; per-event
+  payload types are in `bus::events::*`; the bus-side router and
+  channel-drain helpers are in `bus::router::*`.
 - **Configuration** (data types, loader, secret-redacting Debug impls)
   goes in `config/`. Keep `AppConfig` data-only; the `ContentLibrary`
   data type lives here but its behaviour lives in `app/vfs/`. The VFS
@@ -97,8 +110,9 @@ When adding or moving code, place files by **concern**, not by type:
   go in `utils/`. If a helper knows about Markdown, it belongs in `markdown/`,
   not `utils/`.
 - **Cross-cutting value types** with no single home (e.g. `BackgroundMessage`,
-  `TokenUsageInfo`) may live as top-level modules (`messages.rs`); prefer a
-  subsystem home when one exists.
+  `TokenUsageInfo`) live in `bus::events::messages` (legacy god-enum and
+  its `TokenUsageInfo` companion) or `bus::events::typed` (per-domain
+  replacement). The `app/` module no longer hosts these.
 
 ### Module size and splitting
 
@@ -117,10 +131,12 @@ When adding or moving code, place files by **concern**, not by type:
 
 The `app/` module owns the application-domain types: managers
 (`TabManager`, `SelectionManager`, `DialogManager`, `PanelLayout`,
-`TagManager`), the file-watcher plumbing (`Bus<FileEvent>`,
-`FileEventProcessor`, `DirectoryTracker`, `FileWatcher`,
-`FileEventProducer`), the `BackgroundMessage` channel, the `ToCEntry`
+`TagManager`), the file-watcher plumbing (`FileEventProcessor`,
+`DirectoryTracker`, `FileWatcher`), the `ToCEntry`
 data type, and the persisted UI struct (`PersistedUiState`).
+
+The `Bus<T>` transport and all event payload types live in
+[`crate::bus`]; `app/` does not define or re-export them.
 
 - **No `egui` references.** No `.rs` file under `app/` may import
   `eframe::egui`, `egui`, or any other UI crate. Doc comments may

@@ -1,6 +1,6 @@
 //! Filesystem agent tools — grep/search, read file, list files by tag, create/update/delete files, and directory listing.
 
-use crate::app::watcher::events::FileEventProducer;
+use crate::bus::events::file::FileEventProducer;
 use crate::markdown::parse_front_matter;
 use crate::utils::tags::extract_tags_from_file;
 use std::path::Path;
@@ -292,7 +292,8 @@ pub fn tool_replace_text(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::app::watcher::events::Bus;
+    use crate::bus::core::Bus;
+    use crate::bus::events::file::FileEvent;
 
     /// A producer that publishes to a throwaway bus. Tests don't
     /// need to consume the events — they only care about the
@@ -301,8 +302,7 @@ mod tests {
         // We can't return a reference tied to a local bus, so
         // instead use a leaked one. Tests run in a single thread
         // here so leaking is fine for the test lifetime.
-        let bus: &'static Bus<crate::app::watcher::events::FileEvent> =
-            Box::leak(Box::new(Bus::new()));
+        let bus: &'static Bus<FileEvent> = Box::leak(Box::new(Bus::new()));
         FileEventProducer::new(bus)
     }
 

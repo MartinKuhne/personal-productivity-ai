@@ -12,7 +12,7 @@
 //!    position back via [`TextBuffer::set_cursor`] before returning.
 
 use crate::app::text_buffer::TextBuffer;
-use crate::app::watcher::events::FileEventProducer;
+use crate::bus::events::file::FileEventProducer;
 use eframe::egui::{self, Key};
 
 /// Inverted color scheme for the inline text editor (UI-046).
@@ -232,14 +232,14 @@ pub fn show_text_editor_with_colors(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::app::watcher::events::Bus;
+    use crate::bus::core::Bus;
+    use crate::bus::events::file::FileEvent;
 
     /// A producer that publishes to a throwaway bus. Editor tests
     /// don't need to consume the events — they only care about the
     /// rendered output / early-return path.
     fn noop_producer() -> FileEventProducer<'static> {
-        let bus: &'static Bus<crate::app::watcher::events::FileEvent> =
-            Box::leak(Box::new(Bus::new()));
+        let bus: &'static Bus<FileEvent> = Box::leak(Box::new(Bus::new()));
         FileEventProducer::new(bus)
     }
 

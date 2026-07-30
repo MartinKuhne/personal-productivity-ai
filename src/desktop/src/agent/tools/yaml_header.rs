@@ -1,6 +1,6 @@
 //! YAML front-matter tools — `read_yaml_header` and `write_yaml_header` for title, summary, tags, date, etc.
 
-use crate::app::watcher::events::FileEventProducer;
+use crate::bus::events::file::FileEventProducer;
 use crate::markdown::parse_front_matter;
 use serde_yml::{Mapping, Value};
 use std::path::Path;
@@ -102,7 +102,9 @@ pub fn tool_write_yaml_header(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::app::watcher::events::Bus;
+    use crate::bus::core::Bus;
+    use crate::bus::events::file::FileEvent;
+    use crate::bus::events::file::FileEventKind;
     use std::fs;
     use tempfile::tempdir;
 
@@ -110,8 +112,7 @@ mod tests {
     /// need to consume the events — they only care about the
     /// success/failure of the underlying file operation.
     fn noop_producer() -> FileEventProducer<'static> {
-        let bus: &'static Bus<crate::app::watcher::events::FileEvent> =
-            Box::leak(Box::new(Bus::new()));
+        let bus: &'static Bus<FileEvent> = Box::leak(Box::new(Bus::new()));
         FileEventProducer::new(bus)
     }
 
@@ -230,7 +231,7 @@ mod tests {
     fn test_tool_write_yaml_header_publishes_discovered_for_new_file() {
         // A brand new file must publish a Discovered event so the
         // directory tree and tag manager pick it up.
-        let bus: Bus<crate::app::watcher::events::FileEvent> = Bus::new();
+        let bus: Bus<FileEvent> = Bus::new();
         let reader = bus.subscribe();
         let producer = FileEventProducer::new(&bus);
 
@@ -250,10 +251,7 @@ mod tests {
         let event = reader
             .recv_timeout(std::time::Duration::from_millis(100))
             .unwrap();
-        assert_eq!(
-            event.kind,
-            crate::app::watcher::events::FileEventKind::Discovered
-        );
+        assert_eq!(event.kind, FileEventKind::Discovered);
         assert_eq!(event.paths[0], file_path);
     }
 
@@ -261,7 +259,7 @@ mod tests {
     fn test_tool_write_yaml_header_publishes_updated_for_existing_file() {
         // An existing file getting its header rewritten must
         // publish an Updated event.
-        let bus: Bus<crate::app::watcher::events::FileEvent> = Bus::new();
+        let bus: Bus<FileEvent> = Bus::new();
         let reader = bus.subscribe();
         let producer = FileEventProducer::new(&bus);
 
@@ -282,10 +280,7 @@ mod tests {
         let event = reader
             .recv_timeout(std::time::Duration::from_millis(100))
             .unwrap();
-        assert_eq!(
-            event.kind,
-            crate::app::watcher::events::FileEventKind::Updated
-        );
+        assert_eq!(event.kind, FileEventKind::Updated);
         assert_eq!(event.paths[0], file_path);
     }
 }

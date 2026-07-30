@@ -277,7 +277,7 @@ pub fn show_left_panel(app: &mut FastMdApp, parent_ui: &mut egui::Ui) {
                             inline_editor_enabled,
                             bg_tx: &Some(tx),
                             file_event_producer: Some(
-                                crate::app::watcher::events::FileEventProducer::new(file_event_bus),
+                                crate::bus::events::file::FileEventProducer::new(file_event_bus),
                             ),
                         },
                     };

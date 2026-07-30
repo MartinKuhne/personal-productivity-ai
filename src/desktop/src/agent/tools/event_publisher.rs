@@ -3,7 +3,8 @@
 //! Extracted from [`ToolContext`] so mutating tools can pick up
 //! exactly the bus capability they need.
 
-use crate::app::watcher::events::{Bus, FileEvent, FileEventKind, FileEventProducer};
+use crate::bus::core::Bus;
+use crate::bus::events::file::{FileEvent, FileEventKind, FileEventProducer};
 use std::path::Path;
 
 /// Thin bus publisher that owns only the event sender.

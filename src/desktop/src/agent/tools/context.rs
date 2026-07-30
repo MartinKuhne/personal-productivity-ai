@@ -1,7 +1,8 @@
 //! Tool context — provides tools with access to `AppConfig` and the file event bus, plus safe virtual-path resolution.
 
 use crate::app::vfs;
-use crate::app::watcher::events::{Bus, FileEvent, FileEventKind, FileEventProducer};
+use crate::bus::core::Bus;
+use crate::bus::events::file::{FileEvent, FileEventKind, FileEventProducer};
 use std::path::{Path, PathBuf};
 
 /// Read-only VFS path resolver wrapping `AppConfig`.

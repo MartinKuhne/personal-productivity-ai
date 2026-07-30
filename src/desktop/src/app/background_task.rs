@@ -1,13 +1,16 @@
 //! Background task orchestrator — spawns and owns all worker threads (watcher, indexer, PDF converter, vision processor, bus router).
 
-use crate::app::messages::BackgroundMessage;
-use crate::app::watcher::events::{Bus, FileEvent};
 use crate::app::watcher::file_watcher::FileWatcher;
-use crate::background::bus_router::BusRouter;
 use crate::background::indexer::Indexer;
 use crate::background::pdf_converter::PdfConverterWorker;
 use crate::background::vision_processor::ImageVisionWorker;
-use crate::config::{AppConfig, CONFIG_ARRIVAL_TIMEOUT, ConfigArrived};
+use crate::bus::config::CONFIG_ARRIVAL_TIMEOUT;
+use crate::bus::core::Bus;
+use crate::bus::events::config::ConfigArrived;
+use crate::bus::events::file::FileEvent;
+use crate::bus::events::messages::BackgroundMessage;
+use crate::bus::router::BusRouter;
+use crate::config::AppConfig;
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::{Receiver, Sender, channel};
@@ -137,6 +140,7 @@ impl Task {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::bus::events::file::FileEventKind;
     use crate::config::{AppConfig, ContentLibrary};
     use tempfile::tempdir;
 
@@ -260,7 +264,7 @@ mod tests {
 
         let discovered: Vec<_> = events
             .iter()
-            .filter(|e| e.kind == crate::app::watcher::events::FileEventKind::Discovered)
+            .filter(|e| e.kind == FileEventKind::Discovered)
             .collect();
         let total: usize = discovered.iter().map(|e| e.paths.len()).sum();
         assert_eq!(total, 3);
@@ -318,10 +322,7 @@ mod tests {
         assert_eq!(tag_events.len(), 1);
         assert_eq!(tree_events.len(), 1);
         assert_eq!(tag_events[0].paths[0], tree_events[0].paths[0]);
-        assert_eq!(
-            tag_events[0].kind,
-            crate::app::watcher::events::FileEventKind::Discovered
-        );
+        assert_eq!(tag_events[0].kind, FileEventKind::Discovered);
     }
 
     #[test]
@@ -361,7 +362,7 @@ mod tests {
         let pdf_discovered = events
             .iter()
             .find(|e| {
-                e.kind == crate::app::watcher::events::FileEventKind::Discovered
+                e.kind == FileEventKind::Discovered
                     && e.paths[0].extension().and_then(|x| x.to_str()) == Some("pdf")
             })
             .expect("initial scan should publish Discovered for PDFs");
@@ -412,9 +413,7 @@ mod tests {
         let pdf_path = dir.path().join("dropped.pdf");
         std::fs::write(&pdf_path, b"dummy").unwrap();
         task.file_event_bus
-            .publish(crate::app::watcher::events::FileEvent::discovered_one(
-                pdf_path.clone(),
-            ));
+            .publish(FileEvent::discovered_one(pdf_path.clone()));
 
         let mut saw_success = false;
         let start = std::time::Instant::now();
@@ -490,9 +489,7 @@ mod tests {
         let pdf_path = dir.path().join("dropped.pdf");
         std::fs::write(&pdf_path, b"dummy").unwrap();
         task.file_event_bus
-            .publish(crate::app::watcher::events::FileEvent::discovered_one(
-                pdf_path.clone(),
-            ));
+            .publish(FileEvent::discovered_one(pdf_path.clone()));
 
         let expected_md = {
             let mut p = pdf_path.clone();
@@ -505,8 +502,7 @@ mod tests {
         while start.elapsed().as_secs() < 5 {
             match bus_reader.recv_timeout(std::time::Duration::from_millis(100)) {
                 Ok(event) => {
-                    if event.kind == crate::app::watcher::events::FileEventKind::Discovered
-                        && event.paths.contains(&expected_md)
+                    if event.kind == FileEventKind::Discovered && event.paths.contains(&expected_md)
                     {
                         saw_discovered = true;
                         break;
@@ -567,9 +563,7 @@ mod tests {
         let img_path = dir.path().join("dropped.png");
         std::fs::write(&img_path, b"dummy image data").unwrap();
         task.file_event_bus
-            .publish(crate::app::watcher::events::FileEvent::discovered_one(
-                img_path.clone(),
-            ));
+            .publish(FileEvent::discovered_one(img_path.clone()));
 
         let start = std::time::Instant::now();
         let mut all_messages: Vec<String> = Vec::new();
@@ -608,7 +602,7 @@ mod tests {
     /// a reliable assertion. The subscriber count is.
     #[test]
     fn test_task_does_not_spawn_workers_before_publish() {
-        let bus = crate::config::config_bus();
+        let bus = crate::bus::config::config_bus();
         let task = Task::new(bus.clone());
 
         assert_eq!(
@@ -627,7 +621,7 @@ mod tests {
     /// signal that the workers have done their first pass.)
     #[test]
     fn test_task_spawns_workers_after_publish() {
-        let bus = crate::config::config_bus();
+        let bus = crate::bus::config::config_bus();
         let task = Task::new(bus.clone());
 
         // Publish before the worker thread has a chance to poll.

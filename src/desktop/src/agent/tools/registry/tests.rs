@@ -1,14 +1,15 @@
 //! Unit tests for ToolRegistry.
 
 use super::*;
-use crate::app::watcher::events::Bus;
+use crate::bus::core::Bus;
+use crate::bus::events::file::FileEvent;
 use crate::config::AppConfig;
 use crate::tools::context::ToolContext;
 use serde_json::Value;
 use std::fs;
 use tempfile::TempDir;
 
-fn test_bus() -> &'static Bus<crate::app::watcher::events::FileEvent> {
+fn test_bus() -> &'static Bus<FileEvent> {
     Box::leak(Box::new(Bus::new()))
 }
 

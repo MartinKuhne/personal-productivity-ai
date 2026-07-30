@@ -1,5 +1,9 @@
-//! Generic background worker that drains a channel of paths and runs a
-//! per-path async job on a dedicated Tokio runtime.
+//! Generic background workers built on `std::sync::mpsc` channels.
+//!
+//! These are domain-free helpers: the path drainer spawns a Tokio runtime
+//! per worker and runs a user-supplied async closure per item. The
+//! [`ChannelWorker`] shim is kept for source-level compatibility with
+//! older call sites that constructed workers via a builder API.
 
 use std::marker::PhantomData;
 use std::path::PathBuf;
@@ -33,7 +37,7 @@ where
 /// to compile unchanged while we migrate them onto
 /// [`spawn_path_worker`]. New code should call `spawn_path_worker`
 /// directly with a closure; new wrappers can be added under
-/// `background/` if a third worker appears.
+/// `bus/router/` if a third worker appears.
 pub struct ChannelWorker<F>(PhantomData<F>);
 
 impl<F> ChannelWorker<F> {

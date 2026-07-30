@@ -1,5 +1,13 @@
-//! Message types flowing from background threads to the UI — background messages and token-usage statistics.
+//! Legacy `BackgroundMessage` enum — the monolithic background-to-UI event type.
+//!
+//! This is the god-enum that the architecture review (P1-6) flagged for
+//! replacement. Producers across the background subsystem still send
+//! these; the UI matches on the flat enum. A typed replacement lives in
+//! [`crate::bus::events::typed`] (`BackgroundEvent` + per-domain
+//! sub-enums) and is being migrated to. Until that migration is
+//! complete, every variant defined here remains load-bearing.
 
+use crate::background::BackgroundLogEntry;
 use notify::RecommendedWatcher;
 use serde_json::Value;
 use std::path::PathBuf;
@@ -30,6 +38,9 @@ pub struct TokenUsageInfo {
     pub reasoning_tokens: Option<u64>,
 }
 
+/// Monolithic background-to-UI message. Replaced piecemeal by
+/// [`crate::bus::events::typed::BackgroundEvent`]; see the architecture
+/// review (P1-6) and the migration comment in that module.
 #[derive(Debug)]
 pub enum BackgroundMessage {
     FileParsed {
@@ -59,7 +70,7 @@ pub enum BackgroundMessage {
     /// turn, and accumulate the other fields to track spend.
     AgentTokenUsage(TokenUsageInfo),
 
-    LogEntry(crate::background::BackgroundLogEntry),
+    LogEntry(BackgroundLogEntry),
 
     /// File content loaded from a background thread.
     FileLoaded {
