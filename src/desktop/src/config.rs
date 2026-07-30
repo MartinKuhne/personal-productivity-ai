@@ -172,12 +172,6 @@ fn default_readonly() -> bool {
 
 fn default_feature_flags() -> HashMap<String, bool> {
     let mut m = HashMap::new();
-    // Default to CardDAV for contact operations. Some JMAP providers (notably
-    // Fastmail) don't expose the contact data type via JMAP and return
-    // `unknownMethod: Unknown object 'JMAPApp::DataType::Contact'`. CardDAV
-    // has the same contact data with broader provider support, so it's the
-    // safer default. Set this to `false` in your config to opt back into JMAP.
-    m.insert("useDAVForContacts".to_string(), true);
     // When enabled, tool call responses include full data in logs (may be verbose).
     // When disabled (default), only basic success/failure is logged for privacy.
     m.insert("toolCallDebugMode".to_string(), false);
@@ -190,6 +184,10 @@ fn default_max_tokens() -> u32 {
 
 fn default_true() -> bool {
     true
+}
+
+fn default_table_width_strategy() -> String {
+    "waterfill".to_string()
 }
 
 /// Configuration options for enabling or disabling specific tool groups.
@@ -324,6 +322,10 @@ pub struct AppConfig {
     /// Configured external MCP servers by server name.
     #[serde(default)]
     pub mcp_servers: HashMap<String, McpServerConfig>,
+    /// Table width algorithm for deficit regime. Default: "proportional".
+    /// Options: "proportional" (fast, O(|S|)), "waterfill" (better G1, O(K log |S|)).
+    #[serde(default = "default_table_width_strategy")]
+    pub table_width_strategy: String,
 }
 
 impl std::fmt::Debug for AppConfig {
@@ -346,6 +348,7 @@ impl std::fmt::Debug for AppConfig {
             .field("max_tokens", &self.max_tokens)
             .field("tool_groups", &self.tool_groups)
             .field("mcp_servers", &self.mcp_servers)
+            .field("table_width_strategy", &self.table_width_strategy)
             .finish()
     }
 }
@@ -370,11 +373,19 @@ impl Default for AppConfig {
             max_tokens: default_max_tokens(),
             tool_groups: ToolGroupsConfig::default(),
             mcp_servers: HashMap::new(),
+            table_width_strategy: default_table_width_strategy(),
         }
     }
 }
 
 impl AppConfig {
+    /// Parse `table_width_strategy` into the enum used by the FTWA algorithm.
+    /// Returns `DeficitStrategy::BreakpointWaterFill` for "waterfill",
+    /// `DeficitStrategy::ProportionalToSlack` for everything else.
+    pub fn deficit_strategy(&self) -> crate::ui::table_width::DeficitStrategy {
+        crate::ui::table_width::DeficitStrategy::from_config(&self.table_width_strategy)
+    }
+
     /// Find the best model for a given use_case (lowest cost among matches).
     pub fn model_for_use_case(&self, use_case: impl AsRef<str>) -> Option<(&String, &LlmConfig)> {
         let uc_ref = use_case.as_ref();
@@ -461,7 +472,7 @@ pub fn load_config() -> AppConfig {
 pub(crate) fn load_config_from_path(config_path: &Path) -> AppConfig {
     if config_path.exists() {
         if let Ok(content) = std::fs::read_to_string(config_path) {
-            match serde_yaml::from_str::<AppConfig>(&content) {
+            match serde_yml::from_str::<AppConfig>(&content) {
                 Ok(config) => return config,
                 Err(err) => {
                     tracing::error!(
@@ -484,7 +495,7 @@ pub(crate) fn load_config_from_path(config_path: &Path) -> AppConfig {
             let _ = std::fs::create_dir_all(parent);
         }
         let default_config = AppConfig::default();
-        if let Ok(yaml_str) = serde_yaml::to_string(&default_config) {
+        if let Ok(yaml_str) = serde_yml::to_string(&default_config) {
             let _ = std::fs::write(config_path, yaml_str);
         }
     }
@@ -501,15 +512,6 @@ mod tests {
         let config = AppConfig::default();
         assert!(config.pdf_converter_command.is_none());
         assert!(!config.inline_editor_enabled);
-        // CardDAV is the default for contact operations because some JMAP
-        // providers (notably Fastmail) don't expose the Contact data type.
-        // This makes the registry's contact tools route to CardDAV out of
-        // the box.
-        assert_eq!(
-            config.feature_flags.get("useDAVForContacts").copied(),
-            Some(true),
-            "useDAVForContacts must default to true so contact lookups don't fail on JMAP servers without a Contact data type"
-        );
     }
 
     #[test]
@@ -659,11 +661,6 @@ mod tests {
     }
 
     #[test]
-    fn test_validate_missing_active_model() {
-        // Test removed as active model is now deprecated.
-    }
-
-    #[test]
     fn test_backward_compat_old_field_names() {
         let yaml = r#"
 model: "test"
@@ -674,7 +671,7 @@ models:
     api_key: "old-key"
     capabilities: "chat"
 "#;
-        let config: AppConfig = serde_yaml::from_str(yaml).unwrap();
+        let config: AppConfig = serde_yml::from_str(yaml).unwrap();
         let m = config.models.get("legacy_model").unwrap();
         // Old field names should deserialize without issues
         assert_eq!(m.model, "old-model-name");
@@ -695,7 +692,7 @@ models:
       - chat
       - vision
 "#;
-        let config: AppConfig = serde_yaml::from_str(yaml).unwrap();
+        let config: AppConfig = serde_yml::from_str(yaml).unwrap();
         let m = config.models.get("new_model").unwrap();
         assert_eq!(m.model, "new-model-name");
         assert_eq!(m.api_url, "http://new-endpoint");
@@ -717,7 +714,7 @@ pdf_converter_command:
   - "{input}"
 inline_editor_enabled: true
 "#;
-        let config: AppConfig = serde_yaml::from_str(yaml).unwrap();
+        let config: AppConfig = serde_yml::from_str(yaml).unwrap();
         assert!(config.pdf_converter_command.is_some());
         let cmd = config.pdf_converter_command.unwrap();
         assert_eq!(cmd[0], "pandoc");
@@ -959,7 +956,7 @@ user_name: "TestUser"
     #[test]
     fn test_tool_groups_config_defaults() {
         let yaml = "{}";
-        let cfg: ToolGroupsConfig = serde_yaml::from_str(yaml).unwrap();
+        let cfg: ToolGroupsConfig = serde_yml::from_str(yaml).unwrap();
         assert!(cfg.filesystem);
         assert!(cfg.web);
         assert!(cfg.email);
@@ -981,7 +978,7 @@ args: ["-y", "@modelcontextprotocol/server-memory"]
 env:
   API_KEY: "secret"
 "#;
-        let stdio_cfg: McpServerConfig = serde_yaml::from_str(stdio_yaml).unwrap();
+        let stdio_cfg: McpServerConfig = serde_yml::from_str(stdio_yaml).unwrap();
         let debug_stdio = format!("{:?}", stdio_cfg);
         assert!(debug_stdio.contains("McpServerConfig::Stdio"));
         assert!(debug_stdio.contains("npx"));
@@ -992,10 +989,31 @@ url: https://mcp.example.com/sse
 headers:
   Authorization: Bearer supersecrettoken
 "#;
-        let sse_cfg: McpServerConfig = serde_yaml::from_str(sse_yaml).unwrap();
+        let sse_cfg: McpServerConfig = serde_yml::from_str(sse_yaml).unwrap();
         let debug_sse = format!("{:?}", sse_cfg);
         assert!(debug_sse.contains("McpServerConfig::Sse"));
         assert!(debug_sse.contains("[REDACTED]"));
         assert!(!debug_sse.contains("supersecrettoken"));
+    }
+
+    #[test]
+    fn deficit_strategy_default_is_waterfill() {
+        let config = AppConfig::default();
+        assert_eq!(
+            config.deficit_strategy(),
+            crate::ui::table_width::DeficitStrategy::BreakpointWaterFill
+        );
+    }
+
+    #[test]
+    fn deficit_strategy_respects_config_value() {
+        let config = AppConfig {
+            table_width_strategy: "proportional".to_string(),
+            ..AppConfig::default()
+        };
+        assert_eq!(
+            config.deficit_strategy(),
+            crate::ui::table_width::DeficitStrategy::ProportionalToSlack
+        );
     }
 }

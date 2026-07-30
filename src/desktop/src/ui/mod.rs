@@ -9,9 +9,13 @@ pub mod panel_layout;
 mod panels;
 pub mod render;
 pub mod selection_manager;
+pub mod strings;
 pub mod tab_manager;
-mod table_width;
+pub mod table_width;
 mod tree;
+
+#[cfg(test)]
+pub mod test_helpers;
 
 pub use app::{FastMdApp, ToCEntry, TreeNode, generate_format_prompt};
 pub use os_shell::{open_in_system_editor, show_in_file_explorer};

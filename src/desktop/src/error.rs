@@ -62,106 +62,90 @@ impl AgentError {
 mod tests {
     use super::*;
 
+    /// Drives the retryability decision for every [`AgentError`]
+    /// variant. The matrix below used to be 13 hand-rolled
+    /// `#[test] fn test_*_is_retryable` / `_not_retryable` tests,
+    /// each differing only in the constructor call and the expected
+    /// bool. Consolidating to one parameterised test makes the
+    /// `expected × actual` policy trivially auditable: each row
+    /// says "this variant's contract is `expected`" and the test
+    /// fails if `is_retryable()` disagrees.
     #[test]
-    fn test_network_error_is_retryable() {
-        let err = AgentError::NetworkError("connection refused".to_string());
-        assert!(err.is_retryable());
+    fn test_is_retryable_per_variant() {
+        let cases: Vec<(&str, AgentError, bool)> = vec![
+            (
+                "NetworkError",
+                AgentError::NetworkError("connection refused".to_string()),
+                true,
+            ),
+            ("HttpError 500", make_http(500), true),
+            ("HttpError 502", make_http(502), true),
+            ("HttpError 503", make_http(503), true),
+            ("HttpError 504", make_http(504), true),
+            ("HttpError 429", make_http(429), true),
+            ("HttpError 400", make_http(400), false),
+            ("HttpError 401", make_http(401), false),
+            ("HttpError 403", make_http(403), false),
+            ("HttpError 404", make_http(404), false),
+            ("HttpError 499", make_http(499), false),
+            ("Timeout", AgentError::Timeout, true),
+            (
+                "IoError",
+                AgentError::IoError(std::io::Error::new(
+                    std::io::ErrorKind::NotFound,
+                    "file not found",
+                )),
+                false,
+            ),
+            (
+                "JsonParseError",
+                AgentError::JsonParseError("unexpected token".to_string()),
+                false,
+            ),
+            ("MissingApiKey", AgentError::MissingApiKey, false),
+            (
+                "ToolError",
+                AgentError::ToolError("invalid path".to_string()),
+                false,
+            ),
+            (
+                "SerializationError",
+                AgentError::SerializationError("bad json".to_string()),
+                false,
+            ),
+            (
+                "ConfigError",
+                AgentError::ConfigError("missing field".to_string()),
+                false,
+            ),
+            (
+                "RuntimeError",
+                AgentError::RuntimeError("oops".to_string()),
+                false,
+            ),
+            (
+                "InvalidResponseSchema",
+                AgentError::InvalidResponseSchema("bad shape".to_string()),
+                false,
+            ),
+        ];
+
+        for (label, err, expected) in cases {
+            assert_eq!(
+                err.is_retryable(),
+                expected,
+                "{label}: is_retryable() returned {} but contract says {} (err = {err:?})",
+                err.is_retryable(),
+                expected,
+            );
+        }
     }
 
-    #[test]
-    fn test_http_500_is_retryable() {
-        let err = AgentError::HttpError {
-            status: 500,
-            body: "Internal Server Error".to_string(),
-        };
-        assert!(err.is_retryable());
-    }
-
-    #[test]
-    fn test_http_502_is_retryable() {
-        let err = AgentError::HttpError {
-            status: 502,
-            body: "Bad Gateway".to_string(),
-        };
-        assert!(err.is_retryable());
-    }
-
-    #[test]
-    fn test_http_503_is_retryable() {
-        let err = AgentError::HttpError {
-            status: 503,
-            body: "Service Unavailable".to_string(),
-        };
-        assert!(err.is_retryable());
-    }
-
-    #[test]
-    fn test_http_429_is_retryable() {
-        let err = AgentError::HttpError {
-            status: 429,
-            body: "Too Many Requests".to_string(),
-        };
-        assert!(err.is_retryable());
-    }
-
-    #[test]
-    fn test_http_400_not_retryable() {
-        let err = AgentError::HttpError {
-            status: 400,
-            body: "Bad Request".to_string(),
-        };
-        assert!(!err.is_retryable());
-    }
-
-    #[test]
-    fn test_http_401_not_retryable() {
-        let err = AgentError::HttpError {
-            status: 401,
-            body: "Unauthorized".to_string(),
-        };
-        assert!(!err.is_retryable());
-    }
-
-    #[test]
-    fn test_http_404_not_retryable() {
-        let err = AgentError::HttpError {
-            status: 404,
-            body: "Not Found".to_string(),
-        };
-        assert!(!err.is_retryable());
-    }
-
-    #[test]
-    fn test_timeout_is_retryable() {
-        let err = AgentError::Timeout;
-        assert!(err.is_retryable());
-    }
-
-    #[test]
-    fn test_io_error_not_retryable() {
-        let err = AgentError::IoError(std::io::Error::new(
-            std::io::ErrorKind::NotFound,
-            "file not found",
-        ));
-        assert!(!err.is_retryable());
-    }
-
-    #[test]
-    fn test_json_parse_error_not_retryable() {
-        let err = AgentError::JsonParseError("unexpected token".to_string());
-        assert!(!err.is_retryable());
-    }
-
-    #[test]
-    fn test_missing_api_key_not_retryable() {
-        let err = AgentError::MissingApiKey;
-        assert!(!err.is_retryable());
-    }
-
-    #[test]
-    fn test_tool_error_not_retryable() {
-        let err = AgentError::ToolError("invalid path".to_string());
-        assert!(!err.is_retryable());
+    fn make_http(status: u16) -> AgentError {
+        AgentError::HttpError {
+            status,
+            body: format!("status {status}"),
+        }
     }
 
     #[test]
@@ -237,7 +221,7 @@ mod tests {
 
     #[test]
     fn test_error_trait_source() {
-        let io_err = std::io::Error::new(std::io::ErrorKind::Other, "test");
+        let io_err = std::io::Error::other("test");
         let err = AgentError::IoError(io_err);
         assert!(std::error::Error::source(&err).is_some());
 
@@ -256,7 +240,7 @@ mod tests {
             AgentError::JsonParseError("test".into()),
             AgentError::InvalidResponseSchema("test".into()),
             AgentError::MissingApiKey,
-            AgentError::IoError(std::io::Error::new(std::io::ErrorKind::Other, "test")),
+            AgentError::IoError(std::io::Error::other("test")),
             AgentError::ToolError("test".into()),
             AgentError::Timeout,
             AgentError::SerializationError("test".into()),

@@ -50,59 +50,66 @@ pub fn show_background_logs_window(app: &mut FastMdApp, ctx: &egui::Context) {
 
     let mut open = app.background_manager.lock().unwrap().show_background_logs;
 
-    egui::Window::new("Background Processes")
+    egui::Window::new(crate::ui::strings::BACKGROUND_PROCESSES_WINDOW)
         .open(&mut open)
         .resizable(true)
         .collapsible(true)
         .default_size([600.0, 400.0])
         .show(ctx, |ui| {
             let Ok(mut mgr) = app.background_manager.lock() else {
-                ui.label("Error: could not access background manager");
+                ui.label(crate::ui::strings::BACKGROUND_MGR_ACCESS_ERROR);
                 return;
             };
 
             ui.horizontal(|ui| {
-                ui.label("Search:");
+                ui.label(crate::ui::strings::SEARCH_LABEL);
                 ui.text_edit_singleline(&mut mgr.search_text);
 
-                ui.label("Category:");
+                ui.label(crate::ui::strings::CATEGORY_LABEL);
                 egui::ComboBox::from_id_salt("category_filter")
                     .selected_text(match mgr.filter_category {
                         Some(c) => c.to_string(),
-                        None => "All".to_string(),
+                        None => crate::ui::strings::LOG_CATEGORY_ALL.to_string(),
                     })
                     .show_ui(ui, |ui| {
-                        ui.selectable_value(&mut mgr.filter_category, None, "All");
+                        ui.selectable_value(
+                            &mut mgr.filter_category,
+                            None,
+                            crate::ui::strings::LOG_CATEGORY_ALL,
+                        );
                         ui.selectable_value(
                             &mut mgr.filter_category,
                             Some(LogCategory::Indexer),
-                            "Indexer",
+                            crate::ui::strings::LOG_CATEGORY_INDEXER,
                         );
                         ui.selectable_value(
                             &mut mgr.filter_category,
                             Some(LogCategory::Watcher),
-                            "Watcher",
+                            crate::ui::strings::LOG_CATEGORY_WATCHER,
                         );
                         ui.selectable_value(
                             &mut mgr.filter_category,
                             Some(LogCategory::PdfConverter),
-                            "PDF Converter",
+                            crate::ui::strings::LOG_CATEGORY_PDF_CONVERTER,
                         );
                         ui.selectable_value(
                             &mut mgr.filter_category,
                             Some(LogCategory::ImageVision),
-                            "Image Vision",
+                            crate::ui::strings::LOG_CATEGORY_IMAGE_VISION,
                         );
                         ui.selectable_value(
                             &mut mgr.filter_category,
                             Some(LogCategory::LlmTools),
-                            "LLM Tools",
+                            crate::ui::strings::LOG_CATEGORY_LLM_TOOLS,
                         );
                     });
 
-                ui.checkbox(&mut mgr.auto_scroll, "Auto-scroll");
+                ui.checkbox(
+                    &mut mgr.auto_scroll,
+                    crate::ui::strings::AUTO_SCROLL_CHECKBOX,
+                );
 
-                if ui.button("Clear").clicked() {
+                if ui.button(crate::ui::strings::CLEAR_BUTTON).clicked() {
                     mgr.clear_logs();
                 }
             });
@@ -147,6 +154,44 @@ mod tests {
 
     fn make_log(category: LogCategory, message: &str) -> BackgroundLogEntry {
         BackgroundLogEntry::new(category, message.to_string())
+    }
+
+    /// Id-stability: the background-logs window is a `egui::Window` that
+    /// combines a `ui.horizontal` filter row with a `ScrollArea::show_rows`
+    /// over a `Vec<BackgroundLogEntry>`. Both are common sources of the
+    /// "rect changed id between passes" warning class documented in
+    /// `AGENTS.md` §"Conditional rendering" — the filter row is rebuilt
+    /// every frame and the scroll area can balloon between passes if the
+    /// `len()` or the available rect changes. Render twice through the
+    /// same `ctx` and assert no red-stroke rect appears in the second
+    /// pass.
+    #[test]
+    fn test_show_background_logs_window_no_id_change_warnings() {
+        use crate::ui::test_helpers::assert::assert_no_id_change_in_shapes;
+        let ctx = egui::Context::default();
+        let mut app = create_test_app();
+        app.background_manager.lock().unwrap().show_background_logs = true;
+        {
+            let mut mgr = app.background_manager.lock().unwrap();
+            for i in 0..60 {
+                mgr.push_log(BackgroundLogEntry::new(
+                    LogCategory::Indexer,
+                    format!("log {i}"),
+                ));
+            }
+        }
+
+        // Pass 1: prime previous-pass state.
+        let _ = ctx.run_ui(egui::RawInput::default(), |ui| {
+            show_background_logs_window(&mut app, ui.ctx());
+        });
+        // Pass 2: surface red-stroke rect if the widget tree shifted.
+        let output = ctx.run_ui(egui::RawInput::default(), |ui| {
+            show_background_logs_window(&mut app, ui.ctx());
+        });
+
+        let shapes: Vec<egui::Shape> = output.shapes.into_iter().map(|cs| cs.shape).collect();
+        assert_no_id_change_in_shapes(&shapes);
     }
 
     #[test]
@@ -196,7 +241,7 @@ mod tests {
 
     #[test]
     fn test_filter_logs() {
-        let logs = vec![
+        let logs = [
             make_log(LogCategory::Indexer, "Index 1"),
             make_log(LogCategory::Indexer, "Index 2"),
             make_log(LogCategory::Watcher, "Watch 1"),
@@ -210,11 +255,8 @@ mod tests {
         assert_eq!(filtered_search.len(), 1);
         assert_eq!(filtered_search[0].message, "Watch 1");
     }
-}
 
-#[cfg(test)]
-mod ui_tests {
-    use super::*;
+    // --- UI / window tests (R-7: merged from `mod ui_tests`) ---
 
     fn create_test_app() -> FastMdApp {
         FastMdApp::empty_state(crate::config::AppConfig::default())

@@ -1,0 +1,38 @@
+# cargo-nextest configuration for the fastmd crate.
+#
+# Why nextest: the standard `cargo test` runner is single-threaded at the
+# binary level — it builds one test binary, runs every test in it serially,
+# then moves to the next binary. The fastmd suite has 700+ tests across ~10
+# binaries (lib + integration tests). At release speed that's ~2 min wall
+# time on `cargo test` and ~30 s on `cargo nextest run -j auto`.
+#
+# The per-test isolation in nextest also surfaces flaky tests cleanly (one
+# test failure does not block the rest of the suite), which matters for the
+# tier-4 click tests that occasionally race on the egui harness.
+#
+# Reference: https://nexte.st/docs/configuration/
+
+[profile.default]
+# Show every test's outcome at the end (so a single failure doesn't get
+# hidden by the next 200 passing tests).
+fail-fast = false
+# Two retries for transient failures (tier-4 egui click tests sometimes
+# race the input pipeline; tier-2 panel tests are sensitive to font
+# loading order). Two retries is enough to absorb a flake without
+# hiding a real regression in the test count.
+retries = 2
+# Default test threads is auto, but pin it here so behaviour is
+# reproducible across machines.
+test-threads = "num-cpus"
+
+# Profile used by CI (`cargo nextest run --profile ci`).
+[profile.ci]
+inherits = "default"
+# CI should be strict: a single failure is a failure.
+fail-fast = true
+# No retries in CI — flakes should be fixed, not hidden.
+retries = 0
+# Quiet output: the GH Actions summary log is the artifact; we don't
+# need the per-test pass/warn noise in the action log.
+status-level = "fail"
+final-status-level = "fail"

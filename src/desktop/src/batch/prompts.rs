@@ -3,7 +3,7 @@
 use crate::batch::types::PromptInfo;
 use crate::config::{AppConfig, ContentLibrary};
 use crate::utils::markdown::parse_front_matter;
-use serde_yaml::Value;
+use serde_yml::Value;
 use std::collections::BTreeSet;
 use std::path::{Path, PathBuf};
 use walkdir::WalkDir;
@@ -121,7 +121,7 @@ fn has_prompt_tag(yaml_val: &Value) -> bool {
     let Some(mapping) = yaml_val.as_mapping() else {
         return false;
     };
-    let Some(tags_val) = mapping.get(Value::String("tags".to_string())) else {
+    let Some(tags_val) = mapping.get("tags") else {
         return false;
     };
     if let Some(arr) = tags_val.as_sequence() {

@@ -94,6 +94,26 @@ fn process_turn(
     messages.push(message.clone());
     match message.get("tool_calls").and_then(|t| t.as_array()) {
         Some(tc) if !tc.is_empty() => {
+            for tool_call in tc {
+                let fn_name = tool_call
+                    .get("function")
+                    .and_then(|f| f.get("name"))
+                    .and_then(|n| n.as_str())
+                    .unwrap_or("");
+                let args = tool_call
+                    .get("function")
+                    .and_then(|f| f.get("arguments"))
+                    .and_then(|a| a.as_str())
+                    .unwrap_or("");
+                full_response.push_str(&format_tool_call_message(fn_name, args));
+                full_response.push_str("\n\n");
+                let _ = ctx
+                    .tx_gui
+                    .send(BackgroundMessage::AgentResponse(full_response.clone()));
+            }
+            let _ = ctx
+                .tx_gui
+                .send(BackgroundMessage::AgentStatus("Executing tools...".into()));
             let results = executor.execute_all(tc, &ctx.tx_gui);
             process_tool_results(&results, tc, messages, full_response, &ctx.tx_gui);
             Turn::Continue
@@ -185,11 +205,8 @@ fn process_tool_results(
             .and_then(|id| id.as_str())
             .unwrap_or("")
             .to_string();
-        if let Some((fn_name, args, result)) = map.remove(&cid) {
+        if let Some((fn_name, _args, result)) = map.remove(&cid) {
             log_tool_result(&fn_name, &result);
-            full_response.push_str(&format_tool_call_message(&fn_name, &args));
-            full_response.push_str("\n\n");
-            let _ = tx.send(BackgroundMessage::AgentResponse(full_response.clone()));
             full_response.push_str(&format_tool_result_message(&fn_name, &result));
             let _ = tx.send(BackgroundMessage::AgentResponse(full_response.clone()));
             messages

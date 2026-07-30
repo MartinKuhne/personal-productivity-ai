@@ -19,6 +19,11 @@ this file adds Rust/egui-specific conventions and the quality gate.
 - The 5-pane layout is owned by `ui::panel_layout::PanelLayout` (REQ-101); do not ad-hoc side panels in `FastMdApp::update`.
 - All cross-cutting state lives on `FastMdApp` (`ui/app.rs`); split new UI concerns into a dedicated manager struct (cf. `DialogManager`, `SelectionManager`, `TabManager`) rather than growing `app.rs`.
 
+### User Interface Text Strings Isolation
+- **Centralized UI Strings:** All user-facing text strings (button labels, headers, dialog prompts, context menu items, tooltips, status messages) must be isolated into `src/desktop/src/ui/strings.rs` as `pub const` items or formatted string builder functions.
+- **No Hardcoded UI Literals:** Avoid duplicating or embedding inline string literals in egui panel rendering modules (`ui/panels/*`, `ui/modals.rs`, `ui/tree.rs`, `editor.rs`, etc.). Always reference `crate::ui::strings::<CONST_NAME>`.
+- **Documentation & Unit Tests:** Every `pub const` or helper function in `strings.rs` must include a `///` doc comment. Include unit tests in `strings.rs` verifying constant values and formatting logic.
+
 ### `egui::Id` Stability and Salting Rules
 - **Purpose of `egui::Id`s:** `egui` tracks interactive widget state (hover, focus, animation, context menus, drag/drop) across frames and multi-pass layout renders (e.g., `SidePanel` / `Panel`, `ScrollArea::show_rows`, `Grid`) using `egui::Id`.
 - **Preventing `WARN egui::context` pass-to-pass ID changes:** If `egui` sees a widget at the exact same physical coordinates (`rect`) assigned a different `Id` between layout passes (Pass 1 measurement vs. Pass 2 paint), it emits a `WARN egui::context: Widget rect [...] changed id between passes` warning and paints red debug outlines.
@@ -168,7 +173,9 @@ When adding or moving code, place files by **concern**, not by type:
 
 Before marking any task as complete, run the following from `src/desktop/` and ensure they all pass cleanly:
 - `cargo check` — no errors or warnings
-- `cargo test` — all tests pass
+- `cargo nextest run` — all tests pass (the `default` profile in `.config/nextest.toml` retries flaky tier-4 click tests twice; CI uses the `ci` profile which is strict)
 - `cargo clippy -- -D warnings` — no lint warnings (deny all)
 - `cargo fmt --check` — code is properly formatted
 - `cargo doc --no-deps --quiet` — documentation builds without warnings
+
+The project uses [`cargo-nextest`](https://nexte.st/) for the test runner instead of the built-in `cargo test`. nextest runs each test in its own process, surfaces per-test timing, and gives flaky tier-4 click tests a chance to retry. Install with `cargo install cargo-nextest --locked`; the configuration lives in `src/desktop/.config/nextest.toml`.

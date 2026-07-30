@@ -12,7 +12,7 @@ pub fn extract_tags_from_file(path: &Path) -> Vec<String> {
     {
         let yaml_val = &fm.yaml;
         if let Some(mapping) = yaml_val.as_mapping()
-            && let Some(tags_val) = mapping.get(serde_yaml::Value::String("tags".to_string()))
+            && let Some(tags_val) = mapping.get("tags")
         {
             if let Some(arr) = tags_val.as_sequence() {
                 for item in arr {

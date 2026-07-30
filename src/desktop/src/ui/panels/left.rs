@@ -9,8 +9,20 @@ use egui::RichText;
 use egui::containers::Panel;
 use egui::containers::panel::PanelState;
 
-pub fn show_left_panel(app: &mut FastMdApp, parent_ui: &mut egui::Ui) {
-    let ctx = parent_ui.ctx();
+/// Recursively removes directory nodes that do not contain any child files or subdirectories.
+fn prune_empty_dirs(node: &mut TreeNode) {
+    node.children.retain(|_, child| {
+        if child.is_dir {
+            prune_empty_dirs(child);
+            !child.children.is_empty()
+        } else {
+            true
+        }
+    });
+}
+
+/// Builds the `TreeNode` hierarchy from content libraries, discovered files, and tag filters.
+pub fn build_workspace_tree(app: &FastMdApp) -> TreeNode {
     let filtered_files: Vec<&std::path::PathBuf> = app
         .file_processor()
         .all_files
@@ -28,7 +40,11 @@ pub fn show_left_panel(app: &mut FastMdApp, parent_ui: &mut egui::Ui) {
         })
         .collect();
 
-    let mut root_node = TreeNode::new("Workspace".to_string(), std::path::PathBuf::new(), true);
+    let mut root_node = TreeNode::new(
+        crate::ui::strings::DEFAULT_WORKSPACE_NAME.to_string(),
+        std::path::PathBuf::new(),
+        true,
+    );
 
     for lib in app.content_libraries() {
         let lib_node_name = lib.name.clone();
@@ -81,44 +97,55 @@ pub fn show_left_panel(app: &mut FastMdApp, parent_ui: &mut egui::Ui) {
         }
     }
 
-    for dir in app.file_processor().all_dirs.iter() {
-        let mut target_lib = None;
-        let mut rel_path_res = None;
+    if app.tags().selected_tag.is_none() {
+        for dir in app.file_processor().all_dirs.iter() {
+            let mut target_lib = None;
+            let mut rel_path_res = None;
 
-        for lib in app.content_libraries() {
-            let lib_root = std::path::Path::new(&lib.root_folder);
-            if let Ok(rel_path) = dir.strip_prefix(lib_root) {
-                target_lib = Some(lib);
-                rel_path_res = Some(rel_path);
-                break;
-            }
-        }
-
-        if let (Some(lib), Some(rel_path)) = (target_lib, rel_path_res) {
-            let lib_node_name = lib.name.clone();
-            let Some(current_node_ref) = root_node.children.get_mut(&lib_node_name) else {
-                continue;
-            };
-            let mut current_node = current_node_ref;
-            let mut current_path = std::path::PathBuf::from(&lib.root_folder);
-
-            let components: Vec<_> = rel_path.components().collect();
-            for comp in &components {
-                let name = comp.as_os_str().to_string_lossy().into_owned();
-                current_path = current_path.join(&name);
-                if !current_node.children.contains_key(&name) {
-                    current_node.children.insert(
-                        name.clone(),
-                        TreeNode::new(name.clone(), current_path.clone(), true),
-                    );
-                }
-                match current_node.children.get_mut(&name) {
-                    Some(n) => current_node = n,
-                    None => break,
+            for lib in app.content_libraries() {
+                let lib_root = std::path::Path::new(&lib.root_folder);
+                if let Ok(rel_path) = dir.strip_prefix(lib_root) {
+                    target_lib = Some(lib);
+                    rel_path_res = Some(rel_path);
+                    break;
                 }
             }
+
+            if let (Some(lib), Some(rel_path)) = (target_lib, rel_path_res) {
+                let lib_node_name = lib.name.clone();
+                let Some(current_node_ref) = root_node.children.get_mut(&lib_node_name) else {
+                    continue;
+                };
+                let mut current_node = current_node_ref;
+                let mut current_path = std::path::PathBuf::from(&lib.root_folder);
+
+                let components: Vec<_> = rel_path.components().collect();
+                for comp in &components {
+                    let name = comp.as_os_str().to_string_lossy().into_owned();
+                    current_path = current_path.join(&name);
+                    if !current_node.children.contains_key(&name) {
+                        current_node.children.insert(
+                            name.clone(),
+                            TreeNode::new(name.clone(), current_path.clone(), true),
+                        );
+                    }
+                    match current_node.children.get_mut(&name) {
+                        Some(n) => current_node = n,
+                        None => break,
+                    }
+                }
+            }
         }
+    } else {
+        prune_empty_dirs(&mut root_node);
     }
+
+    root_node
+}
+
+pub fn show_left_panel(app: &mut FastMdApp, parent_ui: &mut egui::Ui) {
+    let ctx = parent_ui.ctx();
+    let root_node = build_workspace_tree(app);
 
     let panel_id = parent_ui.make_persistent_id("left_panel");
     let indexing_just_finished =
@@ -179,7 +206,11 @@ pub fn show_left_panel(app: &mut FastMdApp, parent_ui: &mut egui::Ui) {
         .max_size(max_w)
         .show(parent_ui, |ui| {
             ui.add_space(4.0);
-            ui.heading(RichText::new("Workspace Files").size(16.0).strong());
+            ui.heading(
+                RichText::new(crate::ui::strings::WORKSPACE_HEADER)
+                    .size(16.0)
+                    .strong(),
+            );
             ui.add_space(4.0);
 
             // Single virtual-scroll container for the file tree.
@@ -265,7 +296,7 @@ pub fn show_left_panel(app: &mut FastMdApp, parent_ui: &mut egui::Ui) {
             if rows.is_empty() {
                 ui.add_space(8.0);
                 ui.label(
-                    RichText::new("No markdown files found.")
+                    RichText::new(crate::ui::strings::NO_MARKDOWN_FILES)
                         .italics()
                         .color(egui::Color32::GRAY),
                 );
@@ -282,6 +313,7 @@ pub fn show_left_panel(app: &mut FastMdApp, parent_ui: &mut egui::Ui) {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::ui::test_helpers::assert::assert_no_id_change_in_shapes;
 
     fn create_test_app() -> FastMdApp {
         FastMdApp::empty_state(crate::config::AppConfig::default())
@@ -289,20 +321,35 @@ mod tests {
 
     #[test]
     fn test_show_left_panel_empty() {
+        use crate::ui::strings::WORKSPACE_HEADER;
+        use crate::ui::test_helpers::text::assert_text_contains;
+
         let ctx = egui::Context::default();
         let mut app = create_test_app();
         app.layout_mut().left_panel_dirty = false;
 
-        let _ = ctx.run_ui(Default::default(), |ui| {
+        let output = ctx.run_ui(Default::default(), |ui| {
             show_left_panel(&mut app, ui);
         });
 
+        // R-2 / Q12: replace the tautological state check with a
+        // rendered-content assertion. The empty-state label is
+        // conditionally rendered and falls below the panel's clip
+        // rect under the default test viewport (no screen_rect), so
+        // it is not in the rendered output here. The id-stability
+        // test for the empty state (`test_show_left_panel_no_id_change_warnings_when_empty`)
+        // covers the empty-state widget tree separately. Header-only
+        // assertion is correct per the Q12 borderline policy.
+        assert_text_contains(&output.shapes, WORKSPACE_HEADER);
         // Panel renders without crashing; width is unset because the dirty flag is false.
         assert!(app.layout().left_panel_width.is_none());
     }
 
     #[test]
     fn test_show_left_panel_with_libraries_and_files() {
+        use crate::ui::strings::WORKSPACE_HEADER;
+        use crate::ui::test_helpers::text::assert_text_contains;
+
         let ctx = egui::Context::default();
         let mut app = create_test_app();
         app.layout_mut().left_panel_dirty = false;
@@ -325,9 +372,12 @@ mod tests {
         app.tags_mut()
             .add_tags(file2.clone(), vec!["archive".to_string()]);
 
-        let _ = ctx.run_ui(Default::default(), |ui| {
+        let output = ctx.run_ui(Default::default(), |ui| {
             show_left_panel(&mut app, ui);
         });
+        // Header assertion (Q12 borderline case): the library name and
+        // file paths are dynamic, but the panel header is stable.
+        assert_text_contains(&output.shapes, WORKSPACE_HEADER);
 
         app.tags_mut().selected_tag = Some("work".to_string());
         let _ = ctx.run_ui(Default::default(), |ui| {
@@ -410,32 +460,23 @@ mod tests {
     }
 
     /// Renders the panel twice through the same `ctx` and returns the
-    /// rects that egui flagged with its "rect changed id between passes"
-    /// warning. The warning is rendered as a red stroke rectangle in
-    /// the second pass's output (see
-    /// `egui::Context::warn_if_rect_changes_id`). Returning those rects
-    /// lets a test assert the panel produces a stable widget tree
-    /// across passes — i.e. the cause of the `WARN egui::context`
-    /// log spam is gone.
-    fn collect_id_change_warnings(ctx: &egui::Context, app: &mut FastMdApp) -> Vec<egui::Rect> {
-        // Prime the previous-pass state with a first render.
+    /// shapes from the second pass. The second pass is the one that
+    /// emits egui's "rect changed id between passes" warning as a red
+    /// stroke rectangle in `output.shapes` (see
+    /// `egui::Context::warn_if_rect_changes_id`). The first pass
+    /// primes the previous-pass state so the warning is actually
+    /// emitted on the second pass.
+    ///
+    /// Tests then call `assert_no_id_change_in_shapes` to assert the
+    /// panel produces a stable widget tree across passes.
+    fn render_left_panel_twice(ctx: &egui::Context, app: &mut FastMdApp) -> Vec<egui::Shape> {
         let _ = ctx.run_ui(Default::default(), |ui| {
             show_left_panel(app, ui);
         });
-        // The second render is the one that emits the warning if the
-        // widget tree is unstable.
         let output = ctx.run_ui(Default::default(), |ui| {
             show_left_panel(app, ui);
         });
-        let mut flagged = Vec::new();
-        for clipped in &output.shapes {
-            if let egui::Shape::Rect(rs) = &clipped.shape
-                && rs.stroke.color == egui::Color32::RED
-            {
-                flagged.push(rs.rect);
-            }
-        }
-        flagged
+        output.shapes.into_iter().map(|cs| cs.shape).collect()
     }
 
     /// Regression: the production UI logged dozens of
@@ -483,13 +524,8 @@ mod tests {
         app.layout_mut().left_panel_width = Some(240.0);
         app.layout_mut().left_panel_dirty = false;
 
-        let flagged = collect_id_change_warnings(&ctx, &mut app);
-        assert!(
-            flagged.is_empty(),
-            "left panel must produce a stable widget tree across passes, but egui flagged {} rect(s) with 'rect changed id' warnings: {:?}",
-            flagged.len(),
-            flagged
-        );
+        let shapes = render_left_panel_twice(&ctx, &mut app);
+        assert_no_id_change_in_shapes(&shapes);
     }
 
     /// Same regression as above but for the empty state: when no
@@ -503,13 +539,8 @@ mod tests {
         app.layout_mut().left_panel_width = Some(240.0);
         app.layout_mut().left_panel_dirty = false;
 
-        let flagged = collect_id_change_warnings(&ctx, &mut app);
-        assert!(
-            flagged.is_empty(),
-            "empty left panel must produce a stable widget tree across passes, but egui flagged {} rect(s) with 'rect changed id' warnings: {:?}",
-            flagged.len(),
-            flagged
-        );
+        let shapes = render_left_panel_twice(&ctx, &mut app);
+        assert_no_id_change_in_shapes(&shapes);
     }
 
     /// TDD Test: When indexing completes (`indexing_finished = true` and
@@ -536,13 +567,8 @@ mod tests {
         app.file_processor_mut().indexing_finished = true;
         app.file_processor_mut().indexing_finished_handled = false;
 
-        let flagged = collect_id_change_warnings(&ctx, &mut app);
-        assert!(
-            flagged.is_empty(),
-            "left panel must produce a stable widget tree when indexing finishes, but egui flagged {} rect(s) with 'rect changed id' warnings: {:?}",
-            flagged.len(),
-            flagged
-        );
+        let shapes = render_left_panel_twice(&ctx, &mut app);
+        assert_no_id_change_in_shapes(&shapes);
     }
 
     /// TDD Test: When stored PanelState width (e.g. 294.7px) exceeds max_size (204.8px),
@@ -555,11 +581,13 @@ mod tests {
         app.layout_mut().left_panel_width = Some(294.7);
         app.layout_mut().left_panel_dirty = false;
 
-        let mut raw_input = egui::RawInput::default();
-        raw_input.screen_rect = Some(egui::Rect::from_min_size(
-            egui::Pos2::ZERO,
-            egui::vec2(1024.0, 768.0),
-        ));
+        let raw_input = egui::RawInput {
+            screen_rect: Some(egui::Rect::from_min_size(
+                egui::Pos2::ZERO,
+                egui::vec2(1024.0, 768.0),
+            )),
+            ..egui::RawInput::default()
+        };
 
         // Prime egui data memory with stored PanelState at width 294.7px
         ctx.data_mut(|d| {
@@ -579,20 +607,68 @@ mod tests {
             show_left_panel(&mut app, ui);
         });
 
-        let mut flagged = Vec::new();
-        for clipped in &output.shapes {
-            if let egui::Shape::Rect(rs) = &clipped.shape
-                && rs.stroke.color == egui::Color32::RED
-            {
-                flagged.push(rs.rect);
-            }
-        }
+        let shapes: Vec<egui::Shape> = output.shapes.into_iter().map(|cs| cs.shape).collect();
+        assert_no_id_change_in_shapes(&shapes);
+    }
 
+    #[test]
+    fn test_show_left_panel_tag_filter_hides_directories_without_matching_files() {
+        let mut app = create_test_app();
+        let lib_dir = std::env::temp_dir().join("fastmd_left_test_tag_filter_dirs");
+        app.content_libraries_mut()
+            .push(crate::config::ContentLibrary {
+                root_folder: lib_dir.to_string_lossy().to_string(),
+                name: "TagTestLib".to_string(),
+                kind: "text".to_string(),
+                readonly: false,
+                priority: 0,
+            });
+        app.content_libraries_mut()
+            .push(crate::config::ContentLibrary {
+                root_folder: std::env::temp_dir()
+                    .join("fastmd_left_test_empty_lib")
+                    .to_string_lossy()
+                    .to_string(),
+                name: "EmptyLib".to_string(),
+                kind: "text".to_string(),
+                readonly: false,
+                priority: 0,
+            });
+
+        let matching_dir = lib_dir.join("matching_folder");
+        let non_matching_dir = lib_dir.join("non_matching_folder");
+
+        let file_match = matching_dir.join("match.md");
+        let file_no_match = non_matching_dir.join("other.md");
+
+        app.file_processor_mut().all_files = vec![file_match.clone(), file_no_match.clone()];
+        app.file_processor_mut().all_dirs = vec![matching_dir.clone(), non_matching_dir.clone()];
+
+        app.tags_mut()
+            .add_tags(file_match.clone(), vec!["target_tag".to_string()]);
+        app.tags_mut()
+            .add_tags(file_no_match.clone(), vec!["other_tag".to_string()]);
+
+        // Select the tag filter
+        app.tags_mut().selected_tag = Some("target_tag".to_string());
+
+        let tree = build_workspace_tree(&app);
+
+        let lib_node = tree
+            .children
+            .get("TagTestLib")
+            .expect("TagTestLib node should exist");
         assert!(
-            flagged.is_empty(),
-            "left panel must maintain stable width across passes even when stored PanelState exceeds max_w, but egui flagged {} rect(s): {:?}",
-            flagged.len(),
-            flagged
+            lib_node.children.contains_key("matching_folder"),
+            "matching_folder should be in the tree when filtering by target_tag"
+        );
+        assert!(
+            !lib_node.children.contains_key("non_matching_folder"),
+            "non_matching_folder should NOT be in the tree when filtering by target_tag"
+        );
+        assert!(
+            !tree.children.contains_key("EmptyLib"),
+            "EmptyLib (library without matching files) should NOT be in the tree when filtering by target_tag"
         );
     }
 }

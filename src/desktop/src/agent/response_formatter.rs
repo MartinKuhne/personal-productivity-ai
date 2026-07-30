@@ -63,7 +63,7 @@ pub fn format_tool_result_message(func_name: &str, result: &str) -> String {
         }
     }
     if is_error {
-        return format!("> **Result Error:** {}\n\n", error_msg);
+        return format!("> **Result Error (`{}`):** {}\n\n", func_name, error_msg);
     }
     match func_name {
         "create_file" => {
@@ -71,7 +71,10 @@ pub fn format_tool_result_message(func_name: &str, result: &str) -> String {
                 .get("size_bytes")
                 .and_then(|s| s.as_u64())
                 .unwrap_or(0);
-            format!("> **Result:** File created ({} B).\n\n", size)
+            format!(
+                "> **Result (`{}`):** File created ({} B).\n\n",
+                func_name, size
+            )
         }
         "list_files" | "list_files_by_tag" => {
             let count = count_from_data(&result_data, "files");
@@ -80,13 +83,16 @@ pub fn format_tool_result_message(func_name: &str, result: &str) -> String {
                 .and_then(|t| t.as_u64())
                 .unwrap_or(count as u64);
             format!(
-                "> **Result:** {} files returned (total: {}).\n\n",
-                count, total
+                "> **Result (`{}`):** {} files returned (total: {}).\n\n",
+                func_name, count, total
             )
         }
         "read_tags" => {
             let count = count_from_data(&result_data, "tags");
-            format!("> **Result:** {} tag(s) found.\n\n", count)
+            format!(
+                "> **Result (`{}`):** {} tag(s) found.\n\n",
+                func_name, count
+            )
         }
         "read_file" | "read_file_lines" => {
             let content = result_data
@@ -94,7 +100,8 @@ pub fn format_tool_result_message(func_name: &str, result: &str) -> String {
                 .and_then(|f| f.as_str())
                 .unwrap_or("");
             format!(
-                "> **Result:** {} line(s) read.\n\n",
+                "> **Result (`{}`):** {} line(s) read.\n\n",
+                func_name,
                 content.lines().count()
             )
         }
@@ -114,8 +121,8 @@ pub fn format_tool_result_message(func_name: &str, result: &str) -> String {
             let cache_tag = if from_cache { " (cached)" } else { "" };
             let returned = content.lines().count();
             format!(
-                "> **Result:** {} of {} markdown lines returned{}. To read other sections, set offset to the number of lines already retrieved (e.g., if you received 100 lines starting at offset 0, next use offset=100). Track cumulative coverage to avoid gaps.\n\n",
-                returned, total_lines, cache_tag
+                "> **Result (`{}`):** {} of {} markdown lines returned{}. To read other sections, set offset to the number of lines already retrieved (e.g., if you received 100 lines starting at offset 0, next use offset=100). Track cumulative coverage to avoid gaps.\n\n",
+                func_name, returned, total_lines, cache_tag
             )
         }
         "web_search" => {
@@ -127,29 +134,34 @@ pub fn format_tool_result_message(func_name: &str, result: &str) -> String {
                 .split("\n\n")
                 .filter(|s| !s.trim().is_empty())
                 .count();
-            format!("> **Result:** {} search results returned.\n\n", count)
+            format!(
+                "> **Result (`{}`):** {} search results returned.\n\n",
+                func_name, count
+            )
         }
-        "grep" => format_grep_result(&result_data),
-        "get_email_by_id" => format_email_by_id_result(&result_data),
-        "search_email" => format_search_email_result(&result_data),
-        name if name.starts_with("search_") => format_generic_search_result(&result_data),
+        "grep" => format_grep_result(func_name, &result_data),
+        "get_email_by_id" => format_email_by_id_result(func_name, &result_data),
+        "search_email" => format_search_email_result(func_name, &result_data),
+        name if name.starts_with("search_") => {
+            format_generic_search_result(func_name, &result_data)
+        }
         _ if result.len() < 100 && result.lines().count() <= 1 => {
-            format!("> **Result:** {}\n\n", result)
+            format!("> **Result (`{}`):** {}\n\n", func_name, result)
         }
         _ => {
             let action = func_name.replace('_', " ");
             format!(
-                "> **Result:** Tool '{}' completed successfully.\n\n",
-                action
+                "> **Result (`{}`):** Tool '{}' completed successfully.\n\n",
+                func_name, action
             )
         }
     }
 }
 
-fn format_grep_result(data: &serde_json::Value) -> String {
+fn format_grep_result(func_name: &str, data: &serde_json::Value) -> String {
     let content = data.get("matches").and_then(|f| f.as_str()).unwrap_or("");
     if content == "No matches found." || content.is_empty() {
-        return "> **Result:** 0 file(s) match\n\n".to_string();
+        return format!("> **Result (`{}`):** 0 file(s) match\n\n", func_name);
     }
     let mut files = std::collections::HashSet::new();
     for line in content.lines() {
@@ -161,50 +173,65 @@ fn format_grep_result(data: &serde_json::Value) -> String {
             files.insert(&line[..idx]);
         }
     }
-    format!("> **Result:** {} file(s) match\n\n", files.len())
+    format!(
+        "> **Result (`{}`):** {} file(s) match\n\n",
+        func_name,
+        files.len()
+    )
 }
 
-fn format_email_by_id_result(data: &serde_json::Value) -> String {
-    let extract = |field: &str| -> String {
-        data.get("result")
-            .and_then(|v| v.as_str())
-            .and_then(|s| serde_json::from_str::<serde_json::Value>(s).ok())
-            .and_then(|val| val.as_array().and_then(|a| a.first().cloned()))
-            .and_then(|obj| {
-                obj.get(field)
-                    .and_then(|s| s.as_str())
-                    .map(|s| s.to_string())
-            })
-            .unwrap_or_default()
-    };
-    let subject = extract("subject");
-    let date = extract("date");
-    if !subject.is_empty() || !date.is_empty() {
-        format!("> **Result:** {} - {}\n\n", date, subject)
-    } else {
-        "> **Result:** Email content retrieved.\n\n".to_string()
-    }
+fn format_email_by_id_result(func_name: &str, data: &serde_json::Value) -> String {
+    let content = data.get("result").and_then(|f| f.as_str()).unwrap_or("");
+    format!(
+        "> **Result (`{}`):** {} line(s) read.\n\n",
+        func_name,
+        content.lines().count()
+    )
 }
 
-fn format_search_email_result(data: &serde_json::Value) -> String {
+fn format_search_email_result(func_name: &str, data: &serde_json::Value) -> String {
     let total = data.get("total").and_then(|t| t.as_u64()).unwrap_or(0);
     let hint = data.get("hint").and_then(|h| h.as_str()).unwrap_or("");
     if !hint.is_empty() {
-        format!("> **Result:** {} item(s) found. {}\n\n", total, hint)
+        format!(
+            "> **Result (`{}`):** {} item(s) found. {}\n\n",
+            func_name, total, hint
+        )
     } else {
-        format!("> **Result:** {} item(s) found\n\n", total)
+        format!(
+            "> **Result (`{}`):** {} item(s) found\n\n",
+            func_name, total
+        )
     }
 }
 
-fn format_generic_search_result(data: &serde_json::Value) -> String {
+fn format_generic_search_result(func_name: &str, data: &serde_json::Value) -> String {
+    let extract_len = |val: &serde_json::Value| -> Option<usize> {
+        if let Some(arr) = val.as_array() {
+            return Some(arr.len());
+        }
+        if let Some(arr) = val.get("results").and_then(|r| r.as_array()) {
+            return Some(arr.len());
+        }
+        None
+    };
+
     let count = data
         .get("results")
-        .and_then(|r| r.as_str())
-        .and_then(|s| serde_json::from_str::<serde_json::Value>(s).ok())
-        .and_then(|v| v.as_array().cloned())
-        .map(|a| a.len())
-        .unwrap_or_else(|| data.as_array().map(|a| a.len()).unwrap_or(0));
-    format!("> **Result:** {} item(s) found\n\n", count)
+        .and_then(|r| {
+            if let Some(s) = r.as_str() {
+                serde_json::from_str::<serde_json::Value>(s).ok()
+            } else {
+                Some(r.clone())
+            }
+        })
+        .and_then(|v| extract_len(&v))
+        .unwrap_or_else(|| extract_len(data).unwrap_or(0));
+
+    format!(
+        "> **Result (`{}`):** {} item(s) found\n\n",
+        func_name, count
+    )
 }
 
 #[cfg(test)]
@@ -258,6 +285,7 @@ mod tests {
         let result = r#"{"status":"error","message":"not found"}"#;
         let msg = format_tool_result_message("read_file", result);
         assert!(msg.contains("Error"));
+        assert!(msg.contains("read_file"));
         assert!(msg.contains("not found"));
     }
 
@@ -265,6 +293,7 @@ mod tests {
     fn test_format_result_create_file() {
         let result = r#"{"status":"success","data":{"size_bytes":42}}"#;
         let msg = format_tool_result_message("create_file", result);
+        assert!(msg.contains("create_file"));
         assert!(msg.contains("42 B"));
     }
 
@@ -272,6 +301,7 @@ mod tests {
     fn test_format_result_read_tags() {
         let result = r#"{"status":"success","data":{"tags":["a","b"]}}"#;
         let msg = format_tool_result_message("read_tags", result);
+        assert!(msg.contains("read_tags"));
         assert!(msg.contains("2 tag(s)"));
     }
 
@@ -279,6 +309,7 @@ mod tests {
     fn test_format_result_read_file() {
         let result = r#"{"status":"success","data":{"content":"line1\nline2"}}"#;
         let msg = format_tool_result_message("read_file", result);
+        assert!(msg.contains("read_file"));
         assert!(msg.contains("2 line(s)"));
     }
 
@@ -286,6 +317,7 @@ mod tests {
     fn test_format_result_grep_no_matches() {
         let result = r#"{"status":"success","data":{"matches":"No matches found."}}"#;
         let msg = format_tool_result_message("grep", result);
+        assert!(msg.contains("grep"));
         assert!(msg.contains("0 file(s)"));
     }
 
@@ -293,6 +325,22 @@ mod tests {
     fn test_format_result_generic_search() {
         let result = r#"{"status":"success","data":{"results":"[{\"a\":1}]"}}"#;
         let msg = format_tool_result_message("search_calendar", result);
+        assert!(msg.contains("search_calendar"));
+        assert!(msg.contains("1 item(s)"));
+    }
+
+    #[test]
+    fn test_format_result_search_contact_nested_object() {
+        let contact_json = r#"{"results":[{"href":"/logan.vcf","name":"Logan"}],"errors":[]}"#;
+        let result = serde_json::json!({
+            "status": "success",
+            "data": {
+                "results": contact_json
+            }
+        })
+        .to_string();
+        let msg = format_tool_result_message("search_contact", &result);
+        assert!(msg.contains("search_contact"));
         assert!(msg.contains("1 item(s)"));
     }
 
@@ -300,6 +348,7 @@ mod tests {
     fn test_format_result_unknown_tool_long_result() {
         let result = "x".repeat(200);
         let msg = format_tool_result_message("some_tool", &result);
+        assert!(msg.contains("some_tool"));
         assert!(msg.contains("some tool"));
         assert!(msg.contains("completed successfully"));
     }
@@ -307,6 +356,15 @@ mod tests {
     #[test]
     fn test_format_result_unknown_tool_short_result() {
         let msg = format_tool_result_message("some_tool", "ok");
+        assert!(msg.contains("some_tool"));
         assert!(msg.contains("ok"));
+    }
+
+    #[test]
+    fn test_format_result_get_email_by_id() {
+        let result = r#"{"status":"success","data":{"result":"line1\nline2\nline3"}}"#;
+        let msg = format_tool_result_message("get_email_by_id", result);
+        assert!(msg.contains("get_email_by_id"));
+        assert!(msg.contains("3 line(s) read"));
     }
 }

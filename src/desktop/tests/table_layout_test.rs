@@ -2,48 +2,14 @@
 mod tests {
     use eframe::egui;
 
-    /// Probe the egui Grid bug: `set_width` + `horizontal_wrapped` produces
-    /// content wrapped at ~40Ã¢â‚¬Â¯px (the Grid's initial column allocation) instead
-    /// of the assigned column width.
-    #[test]
-    fn old_bug_set_width_ignored() {
-        let ctx = egui::Context::default();
-        let _ = ctx.run_ui(egui::RawInput::default(), |ui| {
-            egui::CentralPanel::default().show(ui, |ui| {
-                egui::Grid::new("bug_grid")
-                    .striped(true)
-                    .spacing([10.0, 4.0])
-                    .show(ui, |ui| {
-                        // Row1 C0 Ã¢â‚¬â€ set_width(100) + horizontal_wrapped
-                        ui.set_width(100.0);
-                        let hw = ui.horizontal_wrapped(|ui| {
-                            ui.add(egui::Label::new("Short").wrap());
-                        });
-                        // response_rect width should be ~40 (wrapped at Grid default column allocation)
-                        dbg!(hw.response.rect.width());
-
-                        // Row1 C1
-                        ui.set_width(200.0);
-                        let hw2 = ui.horizontal_wrapped(|ui| {
-                            ui.add(
-                                egui::Label::new("Much longer text here for wrapping testing")
-                                    .wrap(),
-                            );
-                        });
-                        dbg!(hw2.response.rect.width());
-
-                        ui.end_row();
-
-                        // Row2 C0
-                        ui.set_width(100.0);
-                        let hw3 = ui.horizontal_wrapped(|ui| {
-                            ui.add(egui::Label::new("Another").wrap());
-                        });
-                        dbg!(hw3.response.rect.width());
-                    });
-            });
-        });
-    }
+    // The previous `old_bug_set_width_ignored` test that lived at
+    // the top of this module was a no-assert diagnostic that
+    // printed widths via `dbg!`. The regression it documented
+    // (`set_width` + `horizontal_wrapped` content wrapped at the
+    // Grid's default column allocation instead of the assigned
+    // width) is now pinned by `fix_allocate_ui_randomised` below
+    // via real assertions. R-5 + P2-5: delete the no-assert
+    // diagnostic. See `doc/planning/egui-testing.md` §P2-5.
 
     /// Deterministic minimal PRNG so we don't need the `rand` crate.
     struct SimpleRng(u64);
@@ -95,12 +61,10 @@ mod tests {
             let _ = ctx.run_ui(egui::RawInput::default(), |ui| {
                 egui::CentralPanel::default().show(ui, |ui| {
                     let col_w = rng.gen_f32(80.0, 400.0);
-
-                    egui::Grid::new(("fix_random_grid", iteration))
-                        .striped(true)
-                        .spacing([10.0, 4.0])
-                        .show(ui, |ui| {
-                            // Long text Ã¢â‚¬â€ phrase count proportional to column width
+                    ui.vertical(|ui| {
+                        ui.spacing_mut().item_spacing = egui::vec2(10.0, 4.0);
+                        ui.horizontal(|ui| {
+                            // Long text — phrase count proportional to column width
                             let phrase_count = (col_w / 45.0).ceil() as usize + 8;
                             let long_text = rng.gen_long_text(phrase_count, col_w);
                             let (rect, _) = ui
@@ -111,12 +75,12 @@ mod tests {
                             let r = child_ui.horizontal_wrapped(|ui| {
                                 ui.add(egui::Label::new(long_text).wrap());
                             });
-                            // Content should be wider than the Grid's ~40px default,
+                            // Content should be wider than ~40px default,
                             // and at least half of col_w (accounting for word-width granularity)
                             let content_w = r.response.rect.width();
                             assert!(
                                 content_w > 50.0 && content_w > col_w * 0.35,
-                                "Iter {iteration}: content_w={content_w:.0} at col_w={col_w:.0} (wrapped at Grid ~40px default)"
+                                "Iter {iteration}: content_w={content_w:.0} at col_w={col_w:.0} (wrapped at ~40px default)"
                             );
 
                             // Short text in same column
@@ -134,10 +98,10 @@ mod tests {
                                 w2 > 8.0 && w2 < col_w * 1.2,
                                 "Iter {iteration}: short text width {w2:.0} out of range"
                             );
+                        });
 
-                            ui.end_row();
-
-                            // Second row Ã¢â‚¬â€ reuses column; wraps correctly again
+                        // Second row — reuses column; wraps correctly again
+                        ui.horizontal(|ui| {
                             let (rect, _) = ui
                                 .allocate_at_least(egui::vec2(col_w, 0.0), egui::Sense::hover());
                             let layout = egui::Layout::left_to_right(egui::Align::Min)
@@ -153,9 +117,10 @@ mod tests {
                             let w3 = r3.response.rect.width();
                             assert!(
                                 w3 > 50.0 && w3 > col_w * 0.35,
-                                "Iter {iteration}: row2 w3={w3:.0} at col_w={col_w:.0} (wrapped at Grid default)"
+                                "Iter {iteration}: row2 w3={w3:.0} at col_w={col_w:.0} (wrapped at default)"
                             );
                         });
+                    });
                 });
             });
         }

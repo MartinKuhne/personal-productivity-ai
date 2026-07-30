@@ -106,13 +106,14 @@ mod tests {
         let mut got_finished = false;
         let start = std::time::Instant::now();
         while start.elapsed().as_secs() < 5 {
-            if let Ok(msg) = task.rx.recv_timeout(std::time::Duration::from_millis(100)) {
-                if let BackgroundMessage::Finished(_) | BackgroundMessage::FinishedWithoutWatcher =
-                    msg
-                {
-                    got_finished = true;
-                    break;
-                }
+            if let Ok(msg) = task.rx.recv_timeout(std::time::Duration::from_millis(100))
+                && matches!(
+                    msg,
+                    BackgroundMessage::Finished(_) | BackgroundMessage::FinishedWithoutWatcher
+                )
+            {
+                got_finished = true;
+                break;
             }
         }
         assert!(got_finished, "Should complete initialization");
@@ -163,14 +164,14 @@ mod tests {
         let mut got_finished = false;
         let start = std::time::Instant::now();
         while start.elapsed().as_secs() < 5 {
-            if let Ok(msg) = task.rx.recv_timeout(std::time::Duration::from_millis(100)) {
-                match msg {
-                    BackgroundMessage::Finished(_) | BackgroundMessage::FinishedWithoutWatcher => {
-                        got_finished = true;
-                        break;
-                    }
-                    _ => {}
-                }
+            if let Ok(msg) = task.rx.recv_timeout(std::time::Duration::from_millis(100))
+                && matches!(
+                    msg,
+                    BackgroundMessage::Finished(_) | BackgroundMessage::FinishedWithoutWatcher
+                )
+            {
+                got_finished = true;
+                break;
             }
         }
         assert!(got_finished, "Should complete indexing");
@@ -198,13 +199,14 @@ mod tests {
         let mut got_finished = false;
         let start = std::time::Instant::now();
         while start.elapsed().as_secs() < 5 {
-            if let Ok(msg) = task.rx.recv_timeout(std::time::Duration::from_millis(100)) {
-                if let BackgroundMessage::Finished(_) | BackgroundMessage::FinishedWithoutWatcher =
-                    msg
-                {
-                    got_finished = true;
-                    break;
-                }
+            if let Ok(msg) = task.rx.recv_timeout(std::time::Duration::from_millis(100))
+                && matches!(
+                    msg,
+                    BackgroundMessage::Finished(_) | BackgroundMessage::FinishedWithoutWatcher
+                )
+            {
+                got_finished = true;
+                break;
             }
         }
         assert!(got_finished, "Should complete initialization");
@@ -252,12 +254,13 @@ mod tests {
 
         let start = std::time::Instant::now();
         while start.elapsed().as_secs() < 5 {
-            if let Ok(msg) = task.rx.recv_timeout(std::time::Duration::from_millis(100)) {
-                if let BackgroundMessage::Finished(_) | BackgroundMessage::FinishedWithoutWatcher =
-                    msg
-                {
-                    break;
-                }
+            if let Ok(msg) = task.rx.recv_timeout(std::time::Duration::from_millis(100))
+                && matches!(
+                    msg,
+                    BackgroundMessage::Finished(_) | BackgroundMessage::FinishedWithoutWatcher
+                )
+            {
+                break;
             }
         }
 
@@ -298,12 +301,13 @@ mod tests {
 
         let start = std::time::Instant::now();
         while start.elapsed().as_secs() < 5 {
-            if let Ok(msg) = task.rx.recv_timeout(std::time::Duration::from_millis(100)) {
-                if let BackgroundMessage::Finished(_) | BackgroundMessage::FinishedWithoutWatcher =
-                    msg
-                {
-                    break;
-                }
+            if let Ok(msg) = task.rx.recv_timeout(std::time::Duration::from_millis(100))
+                && matches!(
+                    msg,
+                    BackgroundMessage::Finished(_) | BackgroundMessage::FinishedWithoutWatcher
+                )
+            {
+                break;
             }
         }
 
@@ -351,12 +355,13 @@ mod tests {
 
         let start = std::time::Instant::now();
         while start.elapsed().as_secs() < 5 {
-            if let Ok(msg) = task.rx.recv_timeout(std::time::Duration::from_millis(100)) {
-                if let BackgroundMessage::Finished(_) | BackgroundMessage::FinishedWithoutWatcher =
-                    msg
-                {
-                    break;
-                }
+            if let Ok(msg) = task.rx.recv_timeout(std::time::Duration::from_millis(100))
+                && matches!(
+                    msg,
+                    BackgroundMessage::Finished(_) | BackgroundMessage::FinishedWithoutWatcher
+                )
+            {
+                break;
             }
         }
 
@@ -373,20 +378,21 @@ mod tests {
         let start = std::time::Instant::now();
         let mut all_messages: Vec<String> = Vec::new();
         while start.elapsed().as_secs() < 5 {
-            if let Ok(msg) = task.rx.recv_timeout(std::time::Duration::from_millis(100)) {
-                match msg {
-                    BackgroundMessage::LogEntry(entry) => {
-                        all_messages.push(format!("{:?}: {}", entry.category, entry.message));
-                        if entry.category == LogCategory::PdfConverter
-                            && entry.message.contains("Successfully converted")
-                        {
-                            saw_success = true;
-                            break;
-                        }
+            let Ok(msg) = task.rx.recv_timeout(std::time::Duration::from_millis(100)) else {
+                continue;
+            };
+            match msg {
+                BackgroundMessage::LogEntry(entry) => {
+                    all_messages.push(format!("{:?}: {}", entry.category, entry.message));
+                    if entry.category == LogCategory::PdfConverter
+                        && entry.message.contains("Successfully converted")
+                    {
+                        saw_success = true;
+                        break;
                     }
-                    other => {
-                        all_messages.push(format!("other: {:?}", std::mem::discriminant(&other)));
-                    }
+                }
+                other => {
+                    all_messages.push(format!("other: {:?}", std::mem::discriminant(&other)));
                 }
             }
         }
@@ -426,12 +432,13 @@ mod tests {
 
         let start = std::time::Instant::now();
         while start.elapsed().as_secs() < 5 {
-            if let Ok(msg) = task.rx.recv_timeout(std::time::Duration::from_millis(100)) {
-                if let BackgroundMessage::Finished(_) | BackgroundMessage::FinishedWithoutWatcher =
-                    msg
-                {
-                    break;
-                }
+            if let Ok(msg) = task.rx.recv_timeout(std::time::Duration::from_millis(100))
+                && matches!(
+                    msg,
+                    BackgroundMessage::Finished(_) | BackgroundMessage::FinishedWithoutWatcher
+                )
+            {
+                break;
             }
         }
 
@@ -503,12 +510,13 @@ mod tests {
 
         let start = std::time::Instant::now();
         while start.elapsed().as_secs() < 5 {
-            if let Ok(msg) = task.rx.recv_timeout(std::time::Duration::from_millis(100)) {
-                if let BackgroundMessage::Finished(_) | BackgroundMessage::FinishedWithoutWatcher =
-                    msg
-                {
-                    break;
-                }
+            if let Ok(msg) = task.rx.recv_timeout(std::time::Duration::from_millis(100))
+                && matches!(
+                    msg,
+                    BackgroundMessage::Finished(_) | BackgroundMessage::FinishedWithoutWatcher
+                )
+            {
+                break;
             }
         }
 
@@ -525,15 +533,15 @@ mod tests {
         let mut all_messages: Vec<String> = Vec::new();
         let mut saw_analyzing = false;
         while start.elapsed().as_secs() < 10 {
-            if let Ok(msg) = task.rx.recv_timeout(std::time::Duration::from_millis(100)) {
-                if let BackgroundMessage::LogEntry(entry) = msg {
-                    all_messages.push(format!("{:?}: {}", entry.category, entry.message));
-                    if entry.category == LogCategory::ImageVision
-                        && entry.message.contains("Analyzing image")
-                    {
-                        saw_analyzing = true;
-                        break;
-                    }
+            if let Ok(msg) = task.rx.recv_timeout(std::time::Duration::from_millis(100))
+                && let BackgroundMessage::LogEntry(entry) = msg
+            {
+                all_messages.push(format!("{:?}: {}", entry.category, entry.message));
+                if entry.category == LogCategory::ImageVision
+                    && entry.message.contains("Analyzing image")
+                {
+                    saw_analyzing = true;
+                    break;
                 }
             }
         }

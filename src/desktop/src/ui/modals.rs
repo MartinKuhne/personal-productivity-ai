@@ -17,11 +17,11 @@ pub fn show_move_modal_dialog(
 ) {
     let mut close_modal = false;
     if dm.move_dialog_open {
-        egui::Window::new("Move File")
+        egui::Window::new(crate::ui::strings::MOVE_FILE_WINDOW)
             .collapsible(false)
             .resizable(false)
             .show(ctx, |ui| {
-                ui.label("Select destination folder:");
+                ui.label(crate::ui::strings::SELECT_DESTINATION_FOLDER);
 
                 let mut folders = BTreeSet::new();
                 for lib in content_libraries {
@@ -57,7 +57,7 @@ pub fn show_move_modal_dialog(
 
                 let submit = ctx.input_mut(|i| i.consume_key(egui::Modifiers::NONE, egui::Key::Enter));
                 ui.horizontal(|ui| {
-                    if ui.button("Ok").clicked() || (submit && dm.selected_move_folder.is_some()) {
+                    if ui.button(crate::ui::strings::OK_BUTTON).clicked() || (submit && dm.selected_move_folder.is_some()) {
                         if let (Some(file), Some(folder)) = (&dm.file_to_move, &dm.selected_move_folder)
                             && let Some(name) = file.file_name() {
                                 let new_path = folder.join(name);
@@ -76,7 +76,7 @@ pub fn show_move_modal_dialog(
                             }
                         close_modal = true;
                     }
-                    if ui.button("Cancel").clicked() {
+                    if ui.button(crate::ui::strings::CANCEL_BUTTON).clicked() {
                         close_modal = true;
                     }
                 });
@@ -99,18 +99,18 @@ pub fn show_create_dir_dialog(
 ) {
     let mut close_create_modal = false;
     if dm.create_dir_dialog_open {
-        egui::Window::new("Create Directory")
+        egui::Window::new(crate::ui::strings::CREATE_DIRECTORY_WINDOW)
             .collapsible(false)
             .resizable(false)
             .show(ctx, |ui| {
-                ui.label("Enter directory name:");
+                ui.label(crate::ui::strings::ENTER_DIRECTORY_NAME);
                 let response = ui.text_edit_singleline(&mut dm.create_dir_name);
                 response.request_focus();
 
                 let submit = ctx.input_mut(|i| i.consume_key(egui::Modifiers::NONE, egui::Key::Enter));
 
                 ui.horizontal(|ui| {
-                    if ui.button("Ok").clicked() || submit {
+                    if ui.button(crate::ui::strings::OK_BUTTON).clicked() || submit {
                         if let Some(parent) = &dm.create_dir_parent
                             && !dm.create_dir_name.trim().is_empty() {
                                 let dir_name = dm.create_dir_name.trim();
@@ -142,7 +142,7 @@ pub fn show_create_dir_dialog(
                             }
                         close_create_modal = true;
                     }
-                    if ui.button("Cancel").clicked() {
+                    if ui.button(crate::ui::strings::CANCEL_BUTTON).clicked() {
                         close_create_modal = true;
                     }
                 });
@@ -188,18 +188,18 @@ pub fn show_rename_dialog(ctx: RenameDialogCtx<'_>) {
             expanded_dirs,
             ctx,
         } = ctx;
-        egui::Window::new("Rename")
+        egui::Window::new(crate::ui::strings::RENAME_WINDOW)
             .collapsible(false)
             .resizable(false)
             .show(ctx, |ui| {
-                ui.label("Enter new name:");
+                ui.label(crate::ui::strings::ENTER_NEW_NAME);
                 let response = ui.text_edit_singleline(&mut dm.rename_new_name);
                 response.request_focus();
 
                 let submit = ctx.input_mut(|i| i.consume_key(egui::Modifiers::NONE, egui::Key::Enter));
 
                 ui.horizontal(|ui| {
-                    if ui.button("Ok").clicked() || submit {
+                    if ui.button(crate::ui::strings::OK_BUTTON).clicked() || submit {
                         if let Some(file) = &dm.file_to_rename
                             && !dm.rename_new_name.trim().is_empty() {
                                 let new_name = dm.rename_new_name.trim();
@@ -266,7 +266,7 @@ pub fn show_rename_dialog(ctx: RenameDialogCtx<'_>) {
                             }
                         close_rename_modal = true;
                     }
-                    if ui.button("Cancel").clicked() {
+                    if ui.button(crate::ui::strings::CANCEL_BUTTON).clicked() {
                         close_rename_modal = true;
                     }
                 });
@@ -290,6 +290,22 @@ mod tests {
 
     fn create_test_app() -> FastMdApp {
         FastMdApp::empty_state(AppConfig::default())
+    }
+
+    /// Modal dialogs are drawn into the root `egui::Context`, and
+    /// `egui::Window::show` requires a non-trivial viewport for the
+    /// modal's rect to be observable. The default `RawInput` has no
+    /// `screen_rect`, which collapses the modal's bounding rect to
+    /// zero and clips the title + prompt out of the output. Set a
+    /// 1024x768 viewport for the test runs.
+    fn raw_input() -> egui::RawInput {
+        egui::RawInput {
+            screen_rect: Some(egui::Rect::from_min_size(
+                egui::Pos2::ZERO,
+                egui::vec2(1024.0, 768.0),
+            )),
+            ..egui::RawInput::default()
+        }
     }
 
     #[test]
@@ -318,7 +334,15 @@ mod tests {
         app.file_processor.all_dirs.push(dest_dir.clone());
         app.dialogs.selected_move_folder = Some(dest_dir.clone());
 
-        let _ = ctx.run_ui(Default::default(), |ui| {
+        // R-2 / Q12: the `Window::show` rendering path used by the modals
+        // is not observable through `ctx.run_ui(...).shapes` — the
+        // window's title and prompt are rendered via egui's `Atoms`
+        // widget system and end up in a separate paint layer that the
+        // single-frame test harness does not include in the captured
+        // output. The modal's visual surface is therefore covered by
+        // the app-level Tier 3 snapshot (R-1c) rather than this test.
+        // This test is kept as a smoke + state-coverage test.
+        let _ = ctx.run_ui(raw_input(), |ui| {
             show_move_modal_dialog(
                 &mut app.dialogs,
                 &app.content_libraries,
@@ -355,7 +379,9 @@ mod tests {
         app.dialogs.create_dir_parent = Some(temp_dir.clone());
         app.dialogs.create_dir_name = "subfolder".to_string();
 
-        let _ = ctx.run_ui(Default::default(), |ui| {
+        // See `test_move_modal_rendering_and_state` for the rationale
+        // on why the modal's rendered text is not asserted here.
+        let _ = ctx.run_ui(raw_input(), |ui| {
             show_create_dir_dialog(
                 &mut app.dialogs,
                 &mut app.file_processor,
@@ -368,7 +394,7 @@ mod tests {
         assert!(app.dialogs.create_dir_dialog_open);
 
         app.dialogs.create_dir_name = "../invalid_traversal".to_string();
-        let _ = ctx.run_ui(Default::default(), |ui| {
+        let _ = ctx.run_ui(raw_input(), |ui| {
             show_create_dir_dialog(
                 &mut app.dialogs,
                 &mut app.file_processor,
@@ -415,7 +441,9 @@ mod tests {
         *app.selection.selected_file_mut() = Some(file_path.clone());
         app.tab_manager.tabs = vec![file_path.clone()];
 
-        let _ = ctx.run_ui(Default::default(), |ui| {
+        // See `test_move_modal_rendering_and_state` for the rationale
+        // on why the modal's rendered text is not asserted here.
+        let _ = ctx.run_ui(raw_input(), |ui| {
             let sel = &mut app.selection;
             show_rename_dialog(RenameDialogCtx {
                 dialog_manager: &mut app.dialogs,
@@ -434,7 +462,7 @@ mod tests {
         assert!(app.dialogs.rename_dialog_open);
 
         app.dialogs.rename_new_name = "invalid/name".to_string();
-        let _ = ctx.run_ui(Default::default(), |ui| {
+        let _ = ctx.run_ui(raw_input(), |ui| {
             let sel = &mut app.selection;
             show_rename_dialog(RenameDialogCtx {
                 dialog_manager: &mut app.dialogs,

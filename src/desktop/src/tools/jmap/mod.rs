@@ -1,18 +1,20 @@
-//! JMAP subsystem — email, contact, and calendar tool functions over the JMAP protocol (RFC 8620/8621).
+//! JMAP subsystem — email tool functions over the JMAP protocol (RFC 8620/8621).
+//!
+//! Email operations use typed methods from the `jmap_client` crate:
+//! - `email_query()` — filter by text, mailbox, dates, keywords
+//! - `email_get()` — fetch full email details by ID
+//! - `email_import()` — import raw email as draft
 
-pub mod calendar;
 pub mod client;
-pub mod contacts;
 pub mod email;
 
 #[cfg(test)]
-mod tests;
+mod mock_server;
 
-pub use calendar::{
-    tool_add_calendar_item, tool_delete_calendar_item, tool_get_calendar, tool_get_calendar_item,
-    tool_search_calendar, tool_update_calendar_item,
-};
-pub use contacts::{tool_add_contact, tool_get_contact, tool_search_contact};
+#[cfg(test)]
+#[allow(unused_imports)]
+pub(crate) use mock_server::spawn_mock_server;
+
 pub use email::{
     SearchEmailFilters, SearchEmailPagination, tool_get_email_by_id, tool_search_email,
     tool_send_email,

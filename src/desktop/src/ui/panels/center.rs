@@ -71,29 +71,104 @@ pub fn apply_tab_action(
     }
 }
 
+/// Purpose: Applies the side effect of clicking the tab close `×`
+/// button in the center panel.
+/// Inputs: app (the application state), i (the index of the tab to
+/// close, as it appeared in the tab strip on the frame the button
+/// was clicked)
+/// Outputs: ()
+/// Purity: Impure (mutates `app.tab_manager.tabs` and
+/// `app.selection.selected_file`).
+/// Preconditions: None — `i` is bounds-checked inside
+/// `apply_tab_action`; an out-of-range index is a silent no-op.
+/// Postconditions: If `i` was in range, the tab at that index is
+/// removed. If the closed tab was the selected file, the selection
+/// falls back to the new last tab (or `None` if no tabs remain).
+///
+/// The `×` button click in `render_tabs_and_content` calls this
+/// function. It is extracted so the side effect can be unit-tested
+/// without driving the egui harness. Existing unit tests for
+/// `apply_tab_action` cover the underlying logic; this wrapper just
+/// adapts the `&mut FastMdApp` API to the field-level `apply_tab_action`
+/// API.
+pub fn apply_tab_close_click(app: &mut FastMdApp, i: usize) {
+    apply_tab_action(
+        &mut app.tab_manager.tabs,
+        app.selection.selected_file_mut(),
+        TabAction::Close(i),
+    );
+}
+
+/// Purpose: Applies the side effect of clicking the context menu's
+/// "Close Other Tabs" item.
+/// Inputs: app (the application state), i (the index of the tab to
+/// keep, as it appeared in the tab strip on the frame the menu
+/// item was clicked)
+/// Outputs: ()
+/// Purity: Impure (mutates `app.tab_manager.tabs` and
+/// `app.selection.selected_file`).
+/// Preconditions: None — `i` is bounds-checked inside
+/// `apply_tab_action`.
+/// Postconditions: All tabs except the one at index `i` are
+/// removed. The kept tab is `app.tab_manager.tabs[0]` after the
+/// call. `selected_file` is updated if it was a closed tab.
+pub fn apply_tab_close_others_click(app: &mut FastMdApp, i: usize) {
+    apply_tab_action(
+        &mut app.tab_manager.tabs,
+        app.selection.selected_file_mut(),
+        TabAction::CloseOthers(i),
+    );
+}
+
+/// Purpose: Applies the side effect of clicking the context menu's
+/// "Close All Tabs" item.
+/// Inputs: app (the application state)
+/// Outputs: ()
+/// Purity: Impure (mutates `app.tab_manager.tabs` and
+/// `app.selection.selected_file`).
+/// Preconditions: None.
+/// Postconditions: All tabs are removed. `selected_file` is `None`.
+pub fn apply_tab_close_all_click(app: &mut FastMdApp) {
+    apply_tab_action(
+        &mut app.tab_manager.tabs,
+        app.selection.selected_file_mut(),
+        TabAction::CloseAll,
+    );
+}
+
 /// Purpose: Renders the agent session view in the center panel.
 /// Inputs: `ui` - Egui UI context, `app` - FastMdApp state.
 /// Outputs: None.
 /// Purity: Impure (performs UI rendering).
 /// Preconditions: `app.agent.show_results()` is true.
-/// Postconditions: Rendered agent session. State might be mutated if "Back to Document" is clicked.
+/// Postconditions: Rendered agent session. State might be mutated if "Close" is clicked.
 fn render_agent_session(ui: &mut egui::Ui, app: &mut FastMdApp) {
     ui.horizontal_wrapped(|ui| {
         ui.heading(
-            RichText::new("🤖 FastMD Agent Session")
+            RichText::new(crate::ui::strings::AGENT_SESSION_HEADER)
                 .size(18.0)
                 .strong()
                 .color(egui::Color32::from_rgb(100, 200, 255)),
         );
         ui.separator();
-        if ui.button("Back to Document").clicked() {
+        if ui
+            .button(crate::ui::strings::AGENT_SESSION_CLOSE_BUTTON)
+            .clicked()
+        {
             clear_agent_session_state(app);
         }
     });
     ui.separator();
 
     ui.horizontal_wrapped(|ui| {
-        ui.label(RichText::new(format!("Status: {}", app.agent().state().status)).strong());
+        ui.label(
+            RichText::new(format!(
+                "{}{}",
+                crate::ui::strings::AGENT_STATUS_PREFIX,
+                app.agent().state().status
+            ))
+            .strong(),
+        );
         if app.agent().state().running {
             ui.spinner();
         }
@@ -105,7 +180,7 @@ fn render_agent_session(ui: &mut egui::Ui, app: &mut FastMdApp) {
         .stick_to_bottom(true)
         .show(ui, |ui| {
             if !app.agent().state().thinking.is_empty() {
-                ui.collapsing("Thinking Process", |ui| {
+                ui.collapsing(crate::ui::strings::AGENT_THINKING_PROCESS, |ui| {
                     ui.label(
                         egui::RichText::new(&app.agent().state().thinking)
                             .italics()
@@ -116,8 +191,9 @@ fn render_agent_session(ui: &mut egui::Ui, app: &mut FastMdApp) {
             }
 
             if !app.agent().state().response.is_empty() {
-                ui.heading("Response");
+                ui.heading(crate::ui::strings::AGENT_RESPONSE);
                 ui.separator();
+                let strategy = app.config.deficit_strategy();
                 let agent = app.agent_mut();
                 let response = agent.state().response.clone();
                 let mut toggles = Vec::new();
@@ -126,6 +202,7 @@ fn render_agent_session(ui: &mut egui::Ui, app: &mut FastMdApp) {
                     &response,
                     &mut agent.state_mut().scroll_to_id,
                     &mut toggles,
+                    strategy,
                 );
                 // P0-2: Apply task checkbox toggles to the response source.
                 if !toggles.is_empty() {
@@ -151,8 +228,23 @@ fn render_agent_session(ui: &mut egui::Ui, app: &mut FastMdApp) {
 /// Preconditions: `app.tabs().tabs` is not empty.
 /// Postconditions: Rendered tabs and file content.
 fn render_tabs_and_content(ui: &mut egui::Ui, app: &mut FastMdApp) {
+    render_tabs_and_content_capture(ui, app, |_| {});
+}
+
+/// Tier 4 test variant of [`render_tabs_and_content`]. The
+/// `on_click` callback is invoked after every tab-strip click
+/// (`×` close button, label click, context-menu items) with a
+/// stable event name. The production caller
+/// ([`render_tabs_and_content`]) passes a no-op closure; the
+/// test caller in `tests::test_tab_close_button_captures_event`
+/// passes a closure that pushes the event into the harness's
+/// persistent state.
+pub fn render_tabs_and_content_capture(
+    ui: &mut egui::Ui,
+    app: &mut FastMdApp,
+    mut on_click: impl FnMut(&'static str),
+) {
     ui.horizontal(|ui| {
-        let mut tab_actions: Vec<TabAction> = Vec::new();
         let tabs_snapshot: Vec<PathBuf> = app.tab_manager.tabs.clone();
 
         for (i, tab_path) in tabs_snapshot.iter().enumerate() {
@@ -170,10 +262,11 @@ fn render_tabs_and_content(ui: &mut egui::Ui, app: &mut FastMdApp) {
                 *app.selection_mut().selected_file_mut() = Some(tab_path.clone());
             }
             if response.inner.middle_clicked() {
-                tab_actions.push(TabAction::Close(i));
+                apply_tab_close_click(app, i);
+                on_click("tab_middle_click");
             }
             response.inner.context_menu(|ui| {
-                if ui.button("Edit").clicked() {
+                if ui.button(crate::ui::strings::EDIT_BUTTON).clicked() {
                     if app.inline_editor_enabled {
                         if let Ok(content) = std::fs::read_to_string(tab_path) {
                             app.editor_state.open(tab_path, &content);
@@ -184,34 +277,46 @@ fn render_tabs_and_content(ui: &mut egui::Ui, app: &mut FastMdApp) {
                     ui.close();
                 }
                 ui.separator();
-                if ui.button("Close").clicked() {
-                    tab_actions.push(TabAction::Close(i));
+                if ui.button(crate::ui::strings::CLOSE_TAB_MENU).clicked() {
+                    apply_tab_close_click(app, i);
+                    on_click("tab_close_menu");
                     ui.close();
                 }
-                if ui.button("Close Others").clicked() {
-                    tab_actions.push(TabAction::CloseOthers(i));
+                if ui.button(crate::ui::strings::CLOSE_OTHERS_MENU).clicked() {
+                    apply_tab_close_others_click(app, i);
+                    on_click("tab_close_others_menu");
                     ui.close();
                 }
-                if ui.button("Close All").clicked() {
-                    tab_actions.push(TabAction::CloseAll);
+                if ui.button(crate::ui::strings::CLOSE_ALL_TABS_MENU).clicked() {
+                    apply_tab_close_all_click(app);
+                    on_click("tab_close_all_menu");
                     ui.close();
                 }
                 ui.separator();
-                if ui.button("Copy Path").clicked() {
+                if ui.button(crate::ui::strings::COPY_PATH_ACTION).clicked() {
                     // egui 0.35: `PlatformOutput::copied_text` was
                     // removed; use the dedicated `Ui::copy_text` helper.
                     ui.copy_text(tab_path.to_string_lossy().to_string());
                     ui.close();
                 }
-                if ui.button("Show in File Explorer").clicked() {
+                if ui
+                    .button(crate::ui::strings::SHOW_IN_EXPLORER_ACTION)
+                    .clicked()
+                {
                     show_in_file_explorer(tab_path);
                     ui.close();
                 }
-                if ui.button("Open in Editor").clicked() {
+                if ui
+                    .button(crate::ui::strings::OPEN_IN_EDITOR_ACTION)
+                    .clicked()
+                {
                     open_in_system_editor(tab_path);
                     ui.close();
                 }
-                if ui.button("Format Markdown").clicked() {
+                if ui
+                    .button(crate::ui::strings::FORMAT_MARKDOWN_ACTION)
+                    .clicked()
+                {
                     let now = chrono::Local::now();
                     let date_str = now.to_rfc3339();
                     app.submit_prompt = Some(generate_format_prompt(&date_str));
@@ -225,17 +330,10 @@ fn render_tabs_and_content(ui: &mut egui::Ui, app: &mut FastMdApp) {
                 .inner
                 .clicked()
             {
-                tab_actions.push(TabAction::Close(i));
+                apply_tab_close_click(app, i);
+                on_click("tab_close_button");
             }
             ui.separator();
-        }
-
-        for action in tab_actions {
-            apply_tab_action(
-                &mut app.tab_manager.tabs,
-                app.selection.selected_file_mut(),
-                action,
-            );
         }
     });
     ui.separator();
@@ -274,6 +372,7 @@ fn render_tabs_and_content(ui: &mut egui::Ui, app: &mut FastMdApp) {
                     &app.tab_manager.current_markdown,
                     &mut app.tab_manager.scroll_to_header_id,
                     &mut app.tab_manager.pending_task_toggles,
+                    app.config.deficit_strategy(),
                 );
                 // P0-2: Apply task checkbox toggles to the markdown source.
                 if !app.tab_manager.pending_task_toggles.is_empty() {
@@ -298,7 +397,7 @@ fn render_tabs_and_content(ui: &mut egui::Ui, app: &mut FastMdApp) {
 fn render_empty_state(ui: &mut egui::Ui) {
     ui.centered_and_justified(|ui| {
         ui.label(
-            RichText::new("Select a markdown file from the left pane to view its content")
+            RichText::new(crate::ui::strings::NO_FILE_SELECTED_PROMPT)
                 .size(15.0)
                 .italics()
                 .color(egui::Color32::GRAY),
@@ -337,6 +436,132 @@ mod tests {
         FastMdApp::empty_state(crate::config::AppConfig::default())
     }
 
+    /// Tier 1 test for the `×` tab close button click effect. The
+    /// click removes the tab at `i` from `app.tab_manager.tabs`.
+    /// We verify the effect without driving the egui harness.
+    #[test]
+    fn test_apply_tab_close_click_removes_tab_at_index() {
+        let mut app = create_test_app();
+        app.tab_manager.tabs = vec![
+            PathBuf::from("a.md"),
+            PathBuf::from("b.md"),
+            PathBuf::from("c.md"),
+        ];
+        *app.selection.selected_file_mut() = Some(PathBuf::from("b.md"));
+
+        apply_tab_close_click(&mut app, 1);
+
+        assert_eq!(
+            app.tab_manager.tabs,
+            vec![PathBuf::from("a.md"), PathBuf::from("c.md")],
+            "tab at i=1 must be removed"
+        );
+        // `b.md` was the selected file and is now closed, so
+        // selection falls back to the last remaining tab.
+        assert_eq!(
+            app.selection.selected_file(),
+            Some(&PathBuf::from("c.md")),
+            "selected_file must fall back to the last tab after the selected tab is closed"
+        );
+    }
+
+    /// Tier 1 test: out-of-range index on the close button is a
+    /// silent no-op. Matches the behavior of the underlying
+    /// `apply_tab_action` (`ui/panels/center.rs:46`).
+    #[test]
+    fn test_apply_tab_close_click_out_of_range_is_noop() {
+        let mut app = create_test_app();
+        app.tab_manager.tabs = vec![PathBuf::from("a.md")];
+        *app.selection.selected_file_mut() = Some(PathBuf::from("a.md"));
+
+        apply_tab_close_click(&mut app, 5);
+
+        assert_eq!(app.tab_manager.tabs, vec![PathBuf::from("a.md")]);
+        assert_eq!(app.selection.selected_file(), Some(&PathBuf::from("a.md")));
+    }
+
+    /// Tier 1 test for the context-menu "Close Others" item.
+    /// Verifies all tabs except the keep-index are removed, and
+    /// the kept tab is the only remaining entry.
+    #[test]
+    fn test_apply_tab_close_others_click_keeps_only_target_tab() {
+        let mut app = create_test_app();
+        app.tab_manager.tabs = vec![
+            PathBuf::from("a.md"),
+            PathBuf::from("b.md"),
+            PathBuf::from("c.md"),
+        ];
+        *app.selection.selected_file_mut() = Some(PathBuf::from("a.md"));
+
+        apply_tab_close_others_click(&mut app, 1);
+
+        assert_eq!(app.tab_manager.tabs, vec![PathBuf::from("b.md")]);
+        assert_eq!(app.selection.selected_file(), Some(&PathBuf::from("b.md")));
+    }
+
+    /// Tier 1 test for the context-menu "Close All Tabs" item.
+    /// Verifies all tabs are removed and `selected_file` is `None`.
+    #[test]
+    fn test_apply_tab_close_all_click_clears_all_tabs() {
+        let mut app = create_test_app();
+        app.tab_manager.tabs = vec![
+            PathBuf::from("a.md"),
+            PathBuf::from("b.md"),
+            PathBuf::from("c.md"),
+        ];
+        *app.selection.selected_file_mut() = Some(PathBuf::from("b.md"));
+
+        apply_tab_close_all_click(&mut app);
+
+        assert!(app.tab_manager.tabs.is_empty());
+        assert!(
+            app.selection.selected_file().is_none(),
+            "selected_file must be None when all tabs are closed"
+        );
+    }
+
+    /// Tier 4 click test: clicking the tab-strip `×` close button
+    /// in the center panel must fire the `on_click("tab_close_button")`
+    /// callback. Renders `render_tabs_and_content_capture` (not the
+    /// full `show_center_panel`) so the test stays focused on the
+    /// tab-strip click. The click handler also removes the tab
+    /// from `app.tab_manager.tabs`, but the harness owns `&mut app`
+    /// so the side effect is observed via the captured event.
+    #[test]
+    fn test_tab_close_button_captures_event() {
+        use crate::ui::test_helpers::interact::stateful_harness;
+        use egui_kittest::kittest::Queryable;
+
+        let mut harness = stateful_harness(Vec::<&'static str>::new(), |ui, captured| {
+            let mut app = create_test_app();
+            app.tab_manager.tabs = vec![PathBuf::from("a.md"), PathBuf::from("b.md")];
+            *app.selection.selected_file_mut() = Some(PathBuf::from("a.md"));
+            render_tabs_and_content_capture(ui, &mut app, |event| {
+                captured.push(event);
+            });
+        });
+        harness.fit_contents();
+        // Two tabs → two `×` buttons. Click the first one.
+        let close_buttons: Vec<_> = harness.query_all_by_label("×").collect();
+        assert_eq!(
+            close_buttons.len(),
+            2,
+            "expected one × button per tab; got {}",
+            close_buttons.len()
+        );
+        close_buttons[0].click();
+        harness.run_steps(2);
+        harness.run_steps(2);
+
+        let captured = harness.state();
+        assert!(
+            captured.contains(&"tab_close_button"),
+            "clicking the tab-strip × close button must fire the \
+             `tab_close_button` on_click event; got: {:?}",
+            captured
+        );
+    }
+
     #[test]
     fn test_generate_format_prompt() {
         let date_str = "2026-07-20T12:00:00Z";
@@ -346,56 +571,13 @@ mod tests {
         assert!(prompt.contains("header-date: 2026-07-20T12:00:00Z"));
     }
 
-    #[test]
-    fn test_apply_tab_action_close() {
-        let mut tabs = vec![
-            PathBuf::from("a.md"),
-            PathBuf::from("b.md"),
-            PathBuf::from("c.md"),
-        ];
-        let mut selected = Some(PathBuf::from("a.md"));
-
-        apply_tab_action(&mut tabs, &mut selected, TabAction::Close(0));
-        assert_eq!(tabs, vec![PathBuf::from("b.md"), PathBuf::from("c.md")]);
-        // selected was a.md, so it falls back to the last tab (c.md)
-        assert_eq!(selected, Some(PathBuf::from("c.md")));
-    }
-
-    #[test]
-    fn test_apply_tab_action_close_others() {
-        let mut tabs = vec![
-            PathBuf::from("a.md"),
-            PathBuf::from("b.md"),
-            PathBuf::from("c.md"),
-        ];
-        let mut selected = Some(PathBuf::from("a.md"));
-
-        apply_tab_action(&mut tabs, &mut selected, TabAction::CloseOthers(1));
-        assert_eq!(tabs, vec![PathBuf::from("b.md")]);
-        assert_eq!(selected, Some(PathBuf::from("b.md")));
-    }
-
-    #[test]
-    fn test_apply_tab_action_close_all() {
-        let mut tabs = vec![PathBuf::from("a.md"), PathBuf::from("b.md")];
-        let mut selected = Some(PathBuf::from("b.md"));
-
-        apply_tab_action(&mut tabs, &mut selected, TabAction::CloseAll);
-        assert!(tabs.is_empty());
-        assert_eq!(selected, None);
-    }
-
-    #[test]
-    fn test_apply_tab_action_out_of_bounds() {
-        let mut tabs = vec![PathBuf::from("a.md")];
-        let mut selected = Some(PathBuf::from("a.md"));
-
-        // Invalid index should do nothing
-        apply_tab_action(&mut tabs, &mut selected, TabAction::Close(5));
-        assert_eq!(tabs.len(), 1);
-        assert_eq!(selected, Some(PathBuf::from("a.md")));
-    }
-
+    /// The previous four `test_apply_tab_action_*` tests
+    /// (Close / CloseOthers / CloseAll / out_of_bounds) are all
+    /// subsumed by this property test, which sweeps every input
+    /// combination for every `TabAction` variant. The fuzz catches
+    /// any regression in the per-variant code paths; the hand-written
+    /// tests only re-exercised the happy paths the fuzz already
+    /// covers at the (0..20 × 0..30 × 3 variants) scale.
     #[test]
     fn prop_apply_tab_action_preserves_invariants_fuzz() {
         for tab_count in 0..20 {
@@ -404,7 +586,6 @@ mod tests {
                     .map(|i| PathBuf::from(format!("{}.md", i)))
                     .collect();
                 let mut selected = tabs.last().cloned();
-
                 let initial_len = tabs.len();
 
                 apply_tab_action(&mut tabs, &mut selected, TabAction::Close(close_idx));
@@ -421,6 +602,40 @@ mod tests {
                 } else {
                     assert_eq!(tabs.len(), initial_len);
                 }
+            }
+
+            // CloseOthers: every tab except the keep-index is dropped,
+            // selection falls back to the kept tab.
+            for keep_idx in 0..tab_count + 1 {
+                let mut tabs: Vec<PathBuf> = (0..tab_count)
+                    .map(|i| PathBuf::from(format!("{}.md", i)))
+                    .collect();
+                let mut selected = tabs.last().cloned();
+
+                apply_tab_action(&mut tabs, &mut selected, TabAction::CloseOthers(keep_idx));
+
+                if keep_idx < tab_count {
+                    assert_eq!(tabs.len(), 1);
+                    assert_eq!(
+                        selected,
+                        tabs.first().cloned(),
+                        "CloseOthers: selected must point at the kept tab"
+                    );
+                } else {
+                    // Out-of-bounds keep: tabs untouched.
+                    assert_eq!(tabs.len(), tab_count);
+                }
+            }
+
+            // CloseAll: every tab dropped, selection cleared.
+            {
+                let mut tabs: Vec<PathBuf> = (0..tab_count)
+                    .map(|i| PathBuf::from(format!("{}.md", i)))
+                    .collect();
+                let mut selected = tabs.last().cloned();
+                apply_tab_action(&mut tabs, &mut selected, TabAction::CloseAll);
+                assert!(tabs.is_empty());
+                assert!(selected.is_none());
             }
         }
     }
@@ -455,21 +670,58 @@ mod tests {
 
     #[test]
     fn test_show_center_panel_render_modes() {
+        use crate::ui::strings::{AGENT_SESSION_HEADER, NO_FILE_SELECTED_PROMPT};
+        use crate::ui::test_helpers::text::assert_text_contains;
+
+        // The center panel renders the tab bar at the top and the
+        // body inside a `ScrollArea`. Under the default test viewport
+        // (no `screen_rect`), the body's content is below the panel's
+        // clip rect and not in `output.shapes`. Set an explicit
+        // viewport so the markdown + YAML render is observable.
+        let raw_input = || egui::RawInput {
+            screen_rect: Some(egui::Rect::from_min_size(
+                egui::Pos2::ZERO,
+                egui::vec2(1024.0, 768.0),
+            )),
+            ..egui::RawInput::default()
+        };
+
         let ctx = egui::Context::default();
         let mut app = create_test_app();
 
-        let _ = ctx.run_ui(Default::default(), |ui| {
+        // Mode 1: no tab open. Assert the empty-state prompt is present
+        // (Q12 borderline case — the prompt is the only stable string).
+        let output = ctx.run_ui(raw_input(), |ui| {
             show_center_panel(&mut app, ui);
         });
+        assert_text_contains(&output.shapes, NO_FILE_SELECTED_PROMPT);
 
         app.tabs_mut().tabs = vec![PathBuf::from("doc1.md"), PathBuf::from("doc2.md")];
         *app.selection_mut().selected_file_mut() = Some(PathBuf::from("doc1.md"));
         app.tabs_mut().current_markdown = "# Document 1 Header".to_string();
-        app.tabs_mut().current_yaml = Some(serde_yaml::from_str("title: Doc 1").unwrap());
+        app.tabs_mut().current_yaml = Some(serde_yml::from_str("title: Doc 1").unwrap());
 
-        let _ = ctx.run_ui(Default::default(), |ui| {
+        // Mode 2: a tab is open with markdown + YAML. The center panel
+        // has no stable canonical string for this mode (the tab labels
+        // are file paths, the body is markdown content, the YAML
+        // table does not emit a "YAML Front-Matter" header — that
+        // string is only used in the inline editor). The render path
+        // is exercised; full visual coverage of the markdown + YAML
+        // view comes from the Tier 3 snapshot in R-1c.
+        // Mode 2: a tab is open with markdown + YAML. The previous
+        // version of this test bound the rendered output to `_` and
+        // verified nothing about Mode 2; a regression in the
+        // markdown + YAML render path would not fail the test. The
+        // assertions below pin the contract: the markdown body
+        // text and the YAML title key both appear in the rendered
+        // output. Full pixel-level visual coverage of the
+        // markdown + YAML view comes from the Tier 3 snapshot in
+        // R-1c; this test is the deterministic safety net.
+        let output = ctx.run_ui(raw_input(), |ui| {
             show_center_panel(&mut app, ui);
         });
+        assert_text_contains(&output.shapes, "Document 1 Header");
+        assert_text_contains(&output.shapes, "title");
 
         app.agent_mut().set_show_results(true);
         app.agent_mut().set_running(true);
@@ -478,8 +730,16 @@ mod tests {
         app.agent_mut()
             .set_response("Final agent summary answer".to_string());
 
-        let _ = ctx.run_ui(Default::default(), |ui| {
+        // Mode 3: agent session active. The agent session header is the
+        // stable string for this mode.
+        let output = ctx.run_ui(raw_input(), |ui| {
             show_center_panel(&mut app, ui);
         });
+        assert_text_contains(&output.shapes, AGENT_SESSION_HEADER);
+    }
+
+    #[test]
+    fn test_agent_session_close_button_label() {
+        assert_eq!(crate::ui::strings::AGENT_SESSION_CLOSE_BUTTON, "Close");
     }
 }

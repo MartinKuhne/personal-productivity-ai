@@ -121,7 +121,7 @@ Foo {
 - **Format:** `cargo fmt` (uses `rustfmt` with default style)
 - **Lint:** `cargo clippy -- -D warnings`
 - **Check:** `cargo check` (fast type-check)
-- **Test:** `cargo test`
+- **Test:** `cargo nextest run` (see `src/desktop/.config/nextest.toml`; the standard `cargo test` runner is too slow for the 700+ test suite)
 - **Docs:** `cargo doc --no-deps`
 
 ---

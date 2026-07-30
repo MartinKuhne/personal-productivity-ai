@@ -270,3 +270,78 @@ fn test_run_agent_skips_done_status_when_cancelled() {
     assert!(saw_finished);
     assert!(!saw_done);
 }
+
+#[test]
+fn test_run_agent_emits_executing_tool_message_immediately() {
+    use std::io::{Read, Write};
+    use std::net::TcpListener;
+    let tool_call_body = serde_json::json!({
+        "id": "chatcmpl-tool", "object": "chat.completion", "created": 0, "model": "test",
+        "choices": [{
+            "index": 0,
+            "message": {
+                "role": "assistant",
+                "content": null,
+                "tool_calls": [{
+                    "id": "call_1",
+                    "type": "function",
+                    "function": {
+                        "name": "read_tags",
+                        "arguments": "{}"
+                    }
+                }]
+            },
+            "finish_reason": "tool_calls"
+        }]
+    })
+    .to_string();
+    let final_body = serde_json::json!({
+        "id": "chatcmpl-final", "object": "chat.completion", "created": 0, "model": "test",
+        "choices": [{"index": 0, "message": {"role": "assistant", "content": "Done with tools."}, "finish_reason": "stop"}]
+    }).to_string();
+    let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+    let port = listener.local_addr().unwrap().port();
+    std::thread::spawn(move || {
+        if let Ok((mut stream, _)) = listener.accept() {
+            let mut buf = [0; 8192];
+            let _ = stream.read(&mut buf);
+            let resp = format!(
+                "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
+                tool_call_body.len(),
+                tool_call_body
+            );
+            let _ = stream.write_all(resp.as_bytes());
+            let _ = stream.flush();
+            std::thread::sleep(std::time::Duration::from_millis(100));
+        }
+        if let Ok((mut stream, _)) = listener.accept() {
+            let mut buf = [0; 8192];
+            let _ = stream.read(&mut buf);
+            let resp = format!(
+                "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
+                final_body.len(),
+                final_body
+            );
+            let _ = stream.write_all(resp.as_bytes());
+            let _ = stream.flush();
+            std::thread::sleep(std::time::Duration::from_millis(100));
+        }
+    });
+    let (ctx, rx) = make_ctx(make_config(port));
+    run_agent(ctx);
+    let mut responses = Vec::new();
+    while let Ok(msg) = rx.recv() {
+        match msg {
+            BackgroundMessage::AgentResponse(resp) => responses.push(resp),
+            BackgroundMessage::AgentFinished(_) => break,
+            BackgroundMessage::AgentFailed(err) => panic!("agent failed: {}", err),
+            _ => {}
+        }
+    }
+    assert!(
+        responses
+            .iter()
+            .any(|r| r.contains("Executing tool `read_tags`"))
+    );
+    assert!(responses.iter().any(|r| r.contains("Result (`read_tags`)")));
+}
