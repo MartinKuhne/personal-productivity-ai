@@ -25,6 +25,7 @@
 mod error;
 mod session;
 mod sse;
+pub mod tool_source;
 
 use crate::config::{AppConfig, McpServerConfig};
 use crate::tools::context::ToolContext;
@@ -35,9 +36,11 @@ use std::sync::{Arc, Mutex};
 
 pub use error::McpError;
 pub use session::{
-    McpClientSession, McpToolDescriptor, CLIENT_NAME, CLIENT_VERSION, PROTOCOL_VERSION,
-    DEFAULT_REQUEST_TIMEOUT,
+    http_session_delete, is_valid_session_id, probe_legacy_transport, McpClientSession,
+    McpToolDescriptor, CLIENT_NAME, CLIENT_VERSION, DEFAULT_REQUEST_TIMEOUT, MAX_REQUEST_TIMEOUT,
+    PROTOCOL_VERSION,
 };
+pub use tool_source::DynamicToolSource;
 
 // ---------------------------------------------------------------------------
 // McpToolAdapter
@@ -49,17 +52,40 @@ pub struct McpToolAdapter {
     name: String,
     description: String,
     parameters: serde_json::Value,
-    manager: Arc<McpClientManager>,
+    manager: Arc<dyn DynamicToolSource>,
 }
 
 impl McpToolAdapter {
     /// Constructs a new [`McpToolAdapter`].
+    ///
+    /// The public signature is pinned to [`McpClientManager`] so
+    /// existing callers do not need to change; the adapter widens
+    /// the concrete type internally so it can also be constructed
+    /// from any [`DynamicToolSource`] back-end.
     pub fn new(
         server_name: impl Into<String>,
         name: impl Into<String>,
         description: impl Into<String>,
         parameters: serde_json::Value,
         manager: Arc<McpClientManager>,
+    ) -> Self {
+        Self {
+            server_name: server_name.into(),
+            name: name.into(),
+            description: description.into(),
+            parameters,
+            manager,
+        }
+    }
+
+    /// Construct from any [`DynamicToolSource`] back-end.
+    /// Preferred by the registry after the P0-1 split.
+    pub fn from_dynamic_source(
+        server_name: impl Into<String>,
+        name: impl Into<String>,
+        description: impl Into<String>,
+        parameters: serde_json::Value,
+        manager: Arc<dyn DynamicToolSource>,
     ) -> Self {
         Self {
             server_name: server_name.into(),
@@ -101,11 +127,7 @@ impl Tool for McpToolAdapter {
         Safety::Mutating
     }
 
-    fn execute(
-        &self,
-        _ctx: &ToolContext,
-        input_json: &str,
-    ) -> Result<serde_json::Value, String> {
+    fn execute(&self, _ctx: &ToolContext, input_json: &str) -> Result<serde_json::Value, String> {
         let args: serde_json::Value = if input_json.trim().is_empty() {
             serde_json::json!({})
         } else {
@@ -120,8 +142,7 @@ impl Tool for McpToolAdapter {
             })?
         };
 
-        self.manager
-            .call_tool(&self.server_name, &self.name, args)
+        self.manager.call_tool(&self.server_name, &self.name, args)
     }
 }
 
@@ -181,7 +202,7 @@ impl McpClientManager {
             .filter(|name| {
                 !new_servers.contains_key(*name)
                     || new_servers.get(*name) != state.servers.get(*name)
-                })
+            })
             .cloned()
             .collect();
         for name in stale {
@@ -208,8 +229,7 @@ impl McpClientManager {
             .servers
             .keys()
             .filter(|k| {
-                new_servers.contains_key(*k)
-                    && new_servers.get(*k) != state.servers.get(*k)
+                new_servers.contains_key(*k) && new_servers.get(*k) != state.servers.get(*k)
             })
             .collect();
         if !added.is_empty() || !removed.is_empty() || !changed.is_empty() {
@@ -227,10 +247,7 @@ impl McpClientManager {
     /// Eagerly initialize the session for a given server. Returns
     /// the cached [`McpClientSession`] so callers can inspect the
     /// negotiated protocol version, server info, etc. Idempotent.
-    pub fn initialize_server(
-        &self,
-        server_name: &str,
-    ) -> Result<Arc<McpClientSession>, String> {
+    pub fn initialize_server(&self, server_name: &str) -> Result<Arc<McpClientSession>, String> {
         let session = self.get_or_create_session(server_name)?;
         session.ensure_initialized().map_err(|e| e.to_string())?;
         Ok(session)
@@ -244,10 +261,7 @@ impl McpClientManager {
     /// currently exposes. Errors (transport, JSON-RPC, or
     /// validation) are surfaced so callers can decide whether to
     /// skip the server or surface the failure.
-    pub fn discover_tools(
-        &self,
-        server_name: &str,
-    ) -> Result<Vec<McpToolDescriptor>, String> {
+    pub fn discover_tools(&self, server_name: &str) -> Result<Vec<McpToolDescriptor>, String> {
         let session = self.get_or_create_session(server_name)?;
         session.list_tools().map_err(|e| e.to_string())
     }
@@ -347,7 +361,9 @@ impl McpClientManager {
     /// Gracefully shut down all active sessions. Safe to call
     /// multiple times.
     pub fn shutdown(&self) {
-        let Ok(mut state) = self.state.lock() else { return };
+        let Ok(mut state) = self.state.lock() else {
+            return;
+        };
         for (_, session) in state.sessions.drain() {
             session.shutdown();
         }
@@ -361,13 +377,11 @@ impl McpClientManager {
             .unwrap_or_default()
     }
 
-    fn get_or_create_session(
-        &self,
-        server_name: &str,
-    ) -> Result<Arc<McpClientSession>, String> {
-        let mut state = self.state.lock().map_err(|e| {
-            format!("Failed to lock MCP manager state: {e}")
-        })?;
+    fn get_or_create_session(&self, server_name: &str) -> Result<Arc<McpClientSession>, String> {
+        let mut state = self
+            .state
+            .lock()
+            .map_err(|e| format!("Failed to lock MCP manager state: {e}"))?;
         if let Some(session) = state.sessions.get(server_name) {
             return Ok(session.clone());
         }
@@ -377,7 +391,9 @@ impl McpClientManager {
             .cloned()
             .ok_or_else(|| format!("MCP server '{server_name}' is not configured."))?;
         let session = Arc::new(McpClientSession::new(cfg));
-        state.sessions.insert(server_name.to_owned(), session.clone());
+        state
+            .sessions
+            .insert(server_name.to_owned(), session.clone());
         Ok(session)
     }
 }
@@ -388,12 +404,39 @@ impl Drop for McpClientManager {
     }
 }
 
+impl DynamicToolSource for McpClientManager {
+    fn configured_servers(&self) -> Vec<String> {
+        McpClientManager::configured_servers(self)
+    }
+    fn discover_tools(&self, server: &str) -> Result<Vec<McpToolDescriptor>, String> {
+        McpClientManager::discover_tools(self, server)
+    }
+    fn update_config(&self, config: &AppConfig) {
+        McpClientManager::update_config(self, config);
+    }
+    fn ping_all_servers(&self) -> usize {
+        McpClientManager::ping_all_servers(self)
+    }
+    fn call_tool(
+        &self,
+        server: &str,
+        tool_name: &str,
+        arguments: serde_json::Value,
+    ) -> Result<serde_json::Value, String> {
+        McpClientManager::call_tool(self, server, tool_name, arguments)
+    }
+}
+
 // ---------------------------------------------------------------------------
 // Tests
 // ---------------------------------------------------------------------------
 
 #[cfg(test)]
 mod tests {
+    use super::is_valid_session_id;
+    use super::session::http_session_delete;
+    use super::session::probe_legacy_transport;
+    use super::MAX_REQUEST_TIMEOUT;
     use super::*;
     use std::collections::HashMap;
 
@@ -500,7 +543,10 @@ mod tests {
         });
         let bad = McpClientSession::extract_result("srv", "tools/call", bad_envelope);
         assert!(bad.is_err());
-        assert!(bad.unwrap_err().message.contains("not a JSON-RPC 2.0 envelope"));
+        assert!(bad
+            .unwrap_err()
+            .message
+            .contains("not a JSON-RPC 2.0 envelope"));
 
         // Neither result nor error is also rejected.
         let neither = serde_json::json!({ "jsonrpc": "2.0", "id": 1 });
@@ -703,9 +749,7 @@ while True:
         let manager = McpClientManager::new();
         manager.update_config(&config);
 
-        manager
-            .ping("pingable")
-            .expect("first ping should succeed");
+        manager.ping("pingable").expect("first ping should succeed");
         manager
             .ping("pingable")
             .expect("second ping should succeed (reuses session)");
@@ -776,9 +820,7 @@ with open(r"{cap_path}", "w") as f:
         // default conditions to keep the test suite fast; enable
         // by setting `MCP_TIMEOUT_TEST=1` when manually validating.
         if std::env::var("MCP_TIMEOUT_TEST").is_err() {
-            eprintln!(
-                "set MCP_TIMEOUT_TEST=1 to run the 60s stdio timeout test"
-            );
+            eprintln!("set MCP_TIMEOUT_TEST=1 to run the 60s stdio timeout test");
             let _ = std::fs::remove_file(&tmp);
             let _ = std::fs::remove_file(&captured);
             return;
@@ -788,11 +830,12 @@ with open(r"{cap_path}", "w") as f:
         manager.update_config(&config);
 
         let start = std::time::Instant::now();
-        let err = manager
-            .ping("hanger")
-            .expect_err("ping should time out");
+        let err = manager.ping("hanger").expect_err("ping should time out");
         let elapsed = start.elapsed();
-        assert!(elapsed < DEFAULT_REQUEST_TIMEOUT * 2, "elapsed: {elapsed:?}");
+        assert!(
+            elapsed < DEFAULT_REQUEST_TIMEOUT * 2,
+            "elapsed: {elapsed:?}"
+        );
         assert!(
             err.contains("timed out") || err.contains("timeout"),
             "error: {err}"
@@ -1016,7 +1059,7 @@ while True:
         drop(listener);
         let url = format!("http://127.0.0.1:{port}/mcp");
         let headers = std::collections::HashMap::new();
-        let result = McpClientSession::http_session_delete(&url, &headers, "abc123");
+        let result = http_session_delete(&url, &headers, "abc123");
         assert!(result.is_err(), "unreachable server should error");
     }
 
@@ -1361,7 +1404,11 @@ while True:
         let names: Vec<&str> = tools.iter().map(|t| t.name.as_str()).collect();
         assert!(names.contains(&"alpha"), "missing alpha in {names:?}");
         assert!(names.contains(&"beta"), "missing beta in {names:?}");
-        assert_eq!(tools.len(), 2, "expected 2 tools across pages, got {names:?}");
+        assert_eq!(
+            tools.len(),
+            2,
+            "expected 2 tools across pages, got {names:?}"
+        );
 
         let _ = std::fs::remove_file(&tmp);
     }
@@ -1469,14 +1516,8 @@ with open(r"{cap_path}", "w") as f:
         assert!(info["version"].is_string(), "version present: {info}");
         assert_eq!(info["title"], "FastMD");
         assert!(info["description"].is_string(), "description present");
-        assert!(info["description"]
-            .as_str()
-            .unwrap()
-            .contains("markdown"));
-        assert!(info["websiteUrl"]
-            .as_str()
-            .unwrap()
-            .starts_with("https://"));
+        assert!(info["description"].as_str().unwrap().contains("markdown"));
+        assert!(info["websiteUrl"].as_str().unwrap().starts_with("https://"));
 
         let _ = std::fs::remove_file(&tmp);
         let _ = std::fs::remove_file(&captured);
@@ -1587,7 +1628,7 @@ while True:
     /// hand-rolled SSE body.
     #[test]
     fn test_walk_for_response_returns_last_event_id() {
-        use super::super::sse::{parse_sse_body, walk_for_response, SseEvent};
+        use super::sse::{parse_sse_body, walk_for_response, SseEvent};
 
         // Two events, each with an id, the last being the
         // response. We expect `last_event_id` to be the
@@ -1614,7 +1655,7 @@ data: {\"jsonrpc\":\"2.0\",\"id\":42,\"result\":{\"ok\":true}}
     /// when the server never assigned event ids.
     #[test]
     fn test_walk_for_response_no_event_id() {
-        use super::super::sse::{parse_sse_body, walk_for_response};
+        use super::sse::{parse_sse_body, walk_for_response};
 
         let body = "data: {\"jsonrpc\":\"2.0\",\"id\":7,\"result\":{}}\n\n";
         let events = parse_sse_body(body);
@@ -1638,7 +1679,7 @@ data: {\"jsonrpc\":\"2.0\",\"id\":42,\"result\":{\"ok\":true}}
         drop(listener);
         let url = format!("http://127.0.0.1:{port}/mcp");
         let headers = std::collections::HashMap::new();
-        let err = McpClientSession::probe_legacy_transport(&url, &headers, 405, "Method Not Allowed");
+        let err = probe_legacy_transport(&url, &headers, 405, "Method Not Allowed");
         let msg = err.to_string();
         assert!(msg.contains("405"), "should mention POST status: {msg}");
         assert!(
@@ -1873,10 +1914,7 @@ send({
         let err = manager
             .call_tool("futuristic", "any", serde_json::json!({}))
             .expect_err("init must fail on version mismatch");
-        assert!(
-            err.contains("unsupported protocol version"),
-            "error: {err}"
-        );
+        assert!(err.contains("unsupported protocol version"), "error: {err}");
         assert!(err.contains("2099-01-01"), "error: {err}");
 
         let _ = std::fs::remove_file(&tmp);
@@ -1967,7 +2005,10 @@ while True:
             )
             .expect_err("call must fail against a silent server");
         let elapsed = start.elapsed();
-        assert!(elapsed < std::time::Duration::from_secs(5), "elapsed: {elapsed:?}");
+        assert!(
+            elapsed < std::time::Duration::from_secs(5),
+            "elapsed: {elapsed:?}"
+        );
         assert!(err.contains("timed out"), "error: {err}");
 
         // Now prove the cap is also enforced for the *default*

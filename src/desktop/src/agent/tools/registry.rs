@@ -4,7 +4,9 @@ use crate::app::vfs::library::ContentLibraryExt;
 use crate::config::AppConfig;
 use crate::tools::Tool;
 use crate::tools::context::ToolContext;
+use crate::tools::mcp::DynamicToolSource;
 use std::collections::HashMap;
+use std::sync::Arc;
 
 pub(crate) fn paginate_in_range<T: Clone>(
     items: &[T],
@@ -29,8 +31,6 @@ pub(crate) fn paginate_in_range<T: Clone>(
     (items[start..end].to_vec(), None)
 }
 
-use std::sync::Arc;
-
 pub struct ToolRegistry {
     tools: HashMap<String, Box<dyn Tool>>,
     /// Names of tools that we auto-registered from MCP server
@@ -38,7 +38,7 @@ pub struct ToolRegistry {
     /// refresh. Maps tool name -> the server it came from (kept
     /// for diagnostics).
     auto_mcp_tools: HashMap<String, String>,
-    pub mcp_manager: Arc<crate::tools::mcp::McpClientManager>,
+    pub mcp_manager: Arc<dyn DynamicToolSource>,
 }
 
 impl Default for ToolRegistry {
@@ -71,7 +71,7 @@ impl ToolRegistry {
         description: impl Into<String>,
         parameters: serde_json::Value,
     ) {
-        let adapter = crate::tools::mcp::McpToolAdapter::new(
+        let adapter = crate::tools::mcp::McpToolAdapter::from_dynamic_source(
             server_name,
             tool_name,
             description,
@@ -154,8 +154,7 @@ impl ToolRegistry {
                             tool.description,
                             tool.input_schema,
                         );
-                        self.auto_mcp_tools
-                            .insert(tool.name, server_name.clone());
+                        self.auto_mcp_tools.insert(tool.name, server_name.clone());
                     }
                 }
                 Err(e) => {

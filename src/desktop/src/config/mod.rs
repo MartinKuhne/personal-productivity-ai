@@ -1,3 +1,4 @@
-//! Re-export bridge — the public path `crate::config` resolves to `crate::config::config`.
+//! Configuration data types, loader, and secret-redacting Debug impls.
 
-pub use crate::config::config;
+pub use crate::config::config::{get_config_path, load_config, AppConfig};
+pub mod config;

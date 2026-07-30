@@ -159,12 +159,7 @@ impl Drop for StdioTransport {
         // child and let the OS reap it. We don't wait synchronously
         // (Drop is sync); the child handle will be released as
         // soon as the process exits.
-        if let Some(mut child) = self
-            .child
-            .lock()
-            .ok()
-            .and_then(|mut g| g.take())
-        {
+        if let Some(mut child) = self.child.lock().ok().and_then(|mut g| g.take()) {
             let _ = child.kill();
             // Reap in the background so the OS handle doesn't leak.
             std::thread::spawn(move || {
@@ -261,7 +256,9 @@ impl McpClientSession {
     /// If the session is HTTP and has a `MCP-Session-Id`, return
     /// the URL, user-configured headers, and session id; otherwise
     /// `None`. Used to issue the spec §3.4 DELETE.
-    fn http_session_endpoint(&self) -> Option<(String, std::collections::HashMap<String, String>, String)> {
+    fn http_session_endpoint(
+        &self,
+    ) -> Option<(String, std::collections::HashMap<String, String>, String)> {
         let state = self.state.lock().ok()?;
         match &self.config {
             McpServerConfig::Sse { url, headers } => {
@@ -282,7 +279,7 @@ impl McpClientSession {
     /// URL. If the GET also fails or returns no endpoint event,
     /// we surface a "could not negotiate transport" error with
     /// both status codes.
-    fn probe_legacy_transport(
+    pub fn probe_legacy_transport(
         url: &str,
         headers: &std::collections::HashMap<String, String>,
         post_code: u16,
@@ -356,7 +353,7 @@ impl McpClientSession {
     /// `405 Method Not Allowed` (server-managed lifetime).
     /// Everything else is reported via the returned
     /// [`McpError`].
-    fn http_session_delete(
+    pub fn http_session_delete(
         url: &str,
         headers: &std::collections::HashMap<String, String>,
         session_id: &str,
@@ -499,9 +496,7 @@ impl McpClientSession {
         // disconnect happens locally.
         let mut state = self.lock_state()?;
         if let Some(value) = init_response.get("result") {
-            let server_version = value
-                .get("protocolVersion")
-                .and_then(|v| v.as_str());
+            let server_version = value.get("protocolVersion").and_then(|v| v.as_str());
             state.protocol_version = server_version.map(str::to_owned);
             state.server_capabilities = value.get("capabilities").cloned();
             state.server_info = value.get("serverInfo").cloned();
@@ -541,9 +536,7 @@ impl McpClientSession {
             state.phase = SessionPhase::Uninitialized;
             state.session_id = None;
             if let Some(transport) = state.stdio.take() {
-                if let Some(mut child) =
-                    transport.child.lock().ok().and_then(|mut g| g.take())
-                {
+                if let Some(mut child) = transport.child.lock().ok().and_then(|mut g| g.take()) {
                     let _ = child.kill();
                     std::thread::spawn(move || {
                         let _ = child.wait();
@@ -633,7 +626,8 @@ impl McpClientSession {
             }
         });
         let init_id: u64 = 1;
-        let init_response = self.send_request(init_id, "initialize", init_params, DEFAULT_REQUEST_TIMEOUT)?;
+        let init_response =
+            self.send_request(init_id, "initialize", init_params, DEFAULT_REQUEST_TIMEOUT)?;
         Self::extract_result(&self.config_label(), "initialize", init_response.clone())?;
 
         // Send `notifications/initialized`. It's a notification
@@ -809,10 +803,13 @@ impl McpClientSession {
                 // or "server closed stdout" error after
                 // `mark_stdio_dead` killed the child — that hid
                 // the real reason (timeout) from the caller.
-                return Err(self.mark_stdio_dead("timeout", std::io::Error::new(
-                    std::io::ErrorKind::TimedOut,
-                    format!("request id {request_id} timed out after {timeout:?}"),
-                )));
+                return Err(self.mark_stdio_dead(
+                    "timeout",
+                    std::io::Error::new(
+                        std::io::ErrorKind::TimedOut,
+                        format!("request id {request_id} timed out after {timeout:?}"),
+                    ),
+                ));
             }
             let remaining = deadline.saturating_duration_since(now);
             let line = match self.recv_stdio_line(remaining) {
@@ -822,10 +819,13 @@ impl McpClientSession {
             let value: serde_json::Value = match serde_json::from_str(&line) {
                 Ok(v) => v,
                 Err(e) => {
-                    self.mark_stdio_dead("parse", std::io::Error::new(
-                        std::io::ErrorKind::InvalidData,
-                        format!("invalid JSON-RPC line: {e}; body: {line}"),
-                    ));
+                    self.mark_stdio_dead(
+                        "parse",
+                        std::io::Error::new(
+                            std::io::ErrorKind::InvalidData,
+                            format!("invalid JSON-RPC line: {e}; body: {line}"),
+                        ),
+                    );
                     continue;
                 }
             };
@@ -840,18 +840,13 @@ impl McpClientSession {
                     .get("params")
                     .cloned()
                     .unwrap_or(serde_json::Value::Null);
-                self.handle_server_notification(&super::sse::SseNotification {
-                    method,
-                    params,
-                });
+                self.handle_server_notification(&super::sse::SseNotification { method, params });
                 continue;
             }
             // Look for a response matching our id.
             let matches = match value.get("id") {
                 Some(serde_json::Value::Number(n)) => n.as_u64() == Some(request_id),
-                Some(serde_json::Value::String(s)) => {
-                    s.parse::<u64>().ok() == Some(request_id)
-                }
+                Some(serde_json::Value::String(s)) => s.parse::<u64>().ok() == Some(request_id),
                 _ => false,
             };
             if matches {
@@ -863,10 +858,7 @@ impl McpClientSession {
         }
     }
 
-    fn recv_stdio_line(
-        &self,
-        timeout: std::time::Duration,
-    ) -> Result<String, McpError> {
+    fn recv_stdio_line(&self, timeout: std::time::Duration) -> Result<String, McpError> {
         // Grab an Arc handle to the receiver so the session-level
         // lock is released before we sleep.
         let rx = {
@@ -882,9 +874,10 @@ impl McpClientSession {
         let deadline = std::time::Instant::now() + timeout;
         let sleep_step = std::time::Duration::from_millis(5);
         loop {
-            let recv = rx.lock().map_err(|_| {
-                McpError::transport("stdio", "line receiver lock poisoned")
-            })?.try_recv();
+            let recv = rx
+                .lock()
+                .map_err(|_| McpError::transport("stdio", "line receiver lock poisoned"))?
+                .try_recv();
             match recv {
                 // The inner Ok is `std::io::Result<String>`; convert
                 // any read error into a transport error.
@@ -941,9 +934,9 @@ impl McpClientSession {
                 .stdin
                 .clone()
         };
-        let mut stdin = transport.lock().map_err(|_| {
-            McpError::transport("stdio", "stdin lock poisoned")
-        })?;
+        let mut stdin = transport
+            .lock()
+            .map_err(|_| McpError::transport("stdio", "stdin lock poisoned"))?;
         if let Err(e) = Self::write_json_line(&mut *stdin, payload) {
             tracing::warn!(
                 server = %self.config_label(),
@@ -1063,12 +1056,7 @@ impl McpClientSession {
                 // Take the child out and kill it; the Drop impl on
                 // StdioTransport will also catch this but we want to
                 // be explicit and not block.
-                if let Some(mut child) = transport
-                    .child
-                    .lock()
-                    .ok()
-                    .and_then(|mut g| g.take())
-                {
+                if let Some(mut child) = transport.child.lock().ok().and_then(|mut g| g.take()) {
                     let _ = child.kill();
                     std::thread::spawn(move || {
                         let _ = child.wait();
@@ -1166,12 +1154,7 @@ impl McpClientSession {
                 // surface a clear error naming the discovered
                 // endpoint URL so the operator can debug.
                 if matches!(code, 400 | 404 | 405) {
-                    return Err(Self::probe_legacy_transport(
-                        &url,
-                        &headers,
-                        code,
-                        &body,
-                    ));
+                    return Err(Self::probe_legacy_transport(&url, &headers, code, &body));
                 }
                 return Err(McpError::transport(
                     format!("HTTP server '{}'", self.config_label()),
@@ -1234,11 +1217,9 @@ impl McpClientSession {
             let mut on_note = |note: &super::sse::SseNotification| {
                 self.handle_server_notification(note);
             };
-            let walk = super::sse::walk_for_response(events, id, &mut on_note)
-                .map_err(|e| McpError::transport(
-                    format!("HTTP server '{}'", self.config_label()),
-                    e.message,
-                ))?;
+            let walk = super::sse::walk_for_response(events, id, &mut on_note).map_err(|e| {
+                McpError::transport(format!("HTTP server '{}'", self.config_label()), e.message)
+            })?;
             // Cache the most recent SSE event id on the session so
             // a future request can resume a dropped stream with
             // `Last-Event-ID` (spec §3.3). Full resumption is
@@ -1480,22 +1461,19 @@ impl McpClientSession {
             page += 1;
             let mut params = serde_json::Map::new();
             if let Some(c) = &cursor {
-                params.insert(
-                    "cursor".to_owned(),
-                    serde_json::Value::String(c.clone()),
-                );
+                params.insert("cursor".to_owned(), serde_json::Value::String(c.clone()));
             }
-            let result =
-                self.call_request("tools/list", serde_json::Value::Object(params))?;
+            let result = self.call_request("tools/list", serde_json::Value::Object(params))?;
 
-            let tools = result.get("tools").and_then(|v| v.as_array()).ok_or_else(
-                || {
+            let tools = result
+                .get("tools")
+                .and_then(|v| v.as_array())
+                .ok_or_else(|| {
                     McpError::transport(
                         format!("server '{}'", self.config_label()),
                         "tools/list response missing 'tools' array",
                     )
-                },
-            )?;
+                })?;
 
             for tool in tools {
                 let name = tool
@@ -1516,9 +1494,10 @@ impl McpClientSession {
                 // Per spec (server/tools), the input schema is
                 // `inputSchema` (a JSON Schema object). Default to
                 // an empty object schema if the server omitted it.
-                let input_schema = tool.get("inputSchema").cloned().unwrap_or_else(|| {
-                    serde_json::json!({ "type": "object", "properties": {} })
-                });
+                let input_schema = tool
+                    .get("inputSchema")
+                    .cloned()
+                    .unwrap_or_else(|| serde_json::json!({ "type": "object", "properties": {} }));
                 all.push(McpToolDescriptor {
                     name,
                     description,
@@ -1557,7 +1536,7 @@ impl McpClientSession {
 /// characters (0x21 through 0x7E)." Returns `true` if `s` is
 /// non-empty and every byte is in range. Used to validate
 /// `MCP-Session-Id` before caching it.
-fn is_valid_session_id(s: &str) -> bool {
+pub fn is_valid_session_id(s: &str) -> bool {
     !s.is_empty() && s.bytes().all(|b| (0x21..=0x7E).contains(&b))
 }
 
@@ -1613,9 +1592,7 @@ fn spawn_stdio_reader_thread(
                 Ok(_) => {
                     // Strip the trailing newline for cleaner
                     // downstream parsing.
-                    let trimmed = line
-                        .trim_end_matches(['\n', '\r'])
-                        .to_owned();
+                    let trimmed = line.trim_end_matches(['\n', '\r']).to_owned();
                     if tx.send(Ok(trimmed)).is_err() {
                         // Receiver dropped; transport is going away.
                         break;

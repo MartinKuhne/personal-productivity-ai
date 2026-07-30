@@ -3,32 +3,7 @@
 use std::collections::HashSet;
 use std::path::PathBuf;
 
-/// One row in the table of contents.
-///
-/// `id` is a **stable string identifier** that uniquely names the
-/// heading within a document. The UI layer maps it to
-/// `egui::Id::new(&id)` at render time; the application layer
-/// itself never touches egui.
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub struct ToCEntry {
-    pub title: String,
-    pub level: u32,
-    /// Stable string identifier for the heading. The first
-    /// occurrence of `"Intro"` has `id == "Intro"`; the second
-    /// has `id == "Intro#1"`; the third `"Intro#2"`, etc.
-    pub id: String,
-}
-
-impl ToCEntry {
-    /// Construct a new entry.
-    pub fn new(title: impl Into<String>, level: u32, id: impl Into<String>) -> Self {
-        Self {
-            title: title.into(),
-            level,
-            id: id.into(),
-        }
-    }
-}
+use crate::markdown::toc_entry::ToCEntry;
 
 pub struct TabManager {
     pub loaded_path: Option<PathBuf>,

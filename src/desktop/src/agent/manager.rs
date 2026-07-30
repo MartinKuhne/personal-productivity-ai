@@ -1,6 +1,7 @@
 //! Agent session manager — lifecycle and UI-visible state for a single LLM agent session (status, response, thinking, history, token usage).
 
 use crate::agent::AgentContext;
+use crate::app::background_events::AgentEvent;
 use crate::app::messages::{BackgroundMessage, TokenUsageInfo};
 use crate::app::watcher::events::Bus;
 use crate::config::AppConfig;
@@ -46,21 +47,13 @@ pub struct AgentSessionManager {
 
 impl AgentSessionManager {
     /// Create a new, empty manager (no active session).
+    ///
+    /// This is a pure constructor — it initialises state from the
+    /// supplied config and returns immediately without performing
+    /// any network I/O.  MCP server initialisation is deferred to
+    /// [`Self::initialize_mcp`], which the UI calls once after it
+    /// is ready so that startup latency does not block construction.
     pub fn new(config: AppConfig) -> Self {
-        // MCP-002: on agent-session start, push the latest config
-        // into the MCP manager, ping every configured server, and
-        // warm the tool-discovery cache. Errors are logged inside
-        // the helper; a broken server does not prevent the
-        // manager from being constructed.
-        let pinged = crate::tools::registry::init_mcp_on_startup(&config);
-        if pinged > 0 {
-            tracing::info!(
-                name = "agent.mcp.startup",
-                servers_ok = pinged,
-                "MCP startup ping complete"
-            );
-        }
-
         Self {
             state: AgentState {
                 running: false,
@@ -77,6 +70,19 @@ impl AgentSessionManager {
             command_input: String::new(),
             show_results: false,
         }
+    }
+
+    /// Perform the one-time MCP startup ping.
+    ///
+    /// This **does** perform network I/O: it pushes the current
+    /// config into the MCP manager, pings every configured server,
+    /// and warms the tool-discovery cache.  It should be called
+    /// exactly once after the UI is running (e.g. on the first
+    /// frame) so that progress is visible in the background log.
+    ///
+    /// Returns the number of servers that responded to the ping.
+    pub fn initialize_mcp(&self) -> usize {
+        crate::tools::registry::init_mcp_on_startup(&self.config)
     }
 
     /// Get a read-only view of the current agent state.
@@ -246,6 +252,72 @@ impl AgentSessionManager {
                 true
             }
             _ => false,
+        }
+    }
+
+    /// Consume and handle a single typed [`AgentEvent`].
+    ///
+    /// This is the typed-channel counterpart to
+    /// [`handle_background_message`]. It performs the same state
+    /// updates but accepts the domain-specific [`AgentEvent`] enum
+    /// introduced by the P1-6 architecture review pilot.
+    ///
+    /// Returns `true` if the UI should repaint.
+    pub fn handle_agent_event(&mut self, event: AgentEvent) -> bool {
+        match event {
+            AgentEvent::Status(status) => {
+                self.state.status = status;
+                true
+            }
+            AgentEvent::Thinking(thinking) => {
+                self.state.thinking = thinking;
+                true
+            }
+            AgentEvent::Response(resp) => {
+                self.state.response = resp.clone();
+                true
+            }
+            AgentEvent::Finished(history) => {
+                self.state.running = false;
+                self.state.history = Some(history);
+                true
+            }
+            AgentEvent::Failed(err) => {
+                self.state.running = false;
+                self.state.status = format!("Error: {}", err);
+                true
+            }
+            AgentEvent::TokenUsage(info) => {
+                if info.prompt_tokens > self.state.total_usage.prompt_tokens {
+                    self.state.total_usage.prompt_tokens = info.prompt_tokens;
+                }
+                self.state.total_usage.completion_tokens = self
+                    .state
+                    .total_usage
+                    .completion_tokens
+                    .saturating_add(info.completion_tokens);
+                self.state.total_usage.total_tokens = self
+                    .state
+                    .total_usage
+                    .total_tokens
+                    .saturating_add(info.total_tokens);
+                self.state.total_usage.cached_tokens = Some(
+                    self.state
+                        .total_usage
+                        .cached_tokens
+                        .unwrap_or(0)
+                        .saturating_add(info.cached_tokens.unwrap_or(0)),
+                );
+                self.state.total_usage.reasoning_tokens = Some(
+                    self.state
+                        .total_usage
+                        .reasoning_tokens
+                        .unwrap_or(0)
+                        .saturating_add(info.reasoning_tokens.unwrap_or(0)),
+                );
+                self.state.token_usage = Some(info);
+                true
+            }
         }
     }
 }

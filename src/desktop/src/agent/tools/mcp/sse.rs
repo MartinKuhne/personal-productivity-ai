@@ -154,7 +154,10 @@ pub fn walk_for_response(
         let method = value.get("method").and_then(|v| v.as_str());
 
         if id.is_none() && method.is_some() {
-            let params = value.get("params").cloned().unwrap_or(serde_json::Value::Null);
+            let params = value
+                .get("params")
+                .cloned()
+                .unwrap_or(serde_json::Value::Null);
             let note = SseNotification {
                 method: method.unwrap().to_owned(),
                 params,
@@ -183,9 +186,7 @@ pub fn walk_for_response(
     }
     Err(McpError::transport(
         "SSE stream",
-        format!(
-            "stream ended without a JSON-RPC response for id {expected_id}"
-        ),
+        format!("stream ended without a JSON-RPC response for id {expected_id}"),
     ))
 }
 
@@ -246,7 +247,8 @@ data: {\"jsonrpc\":\"2.0\",\"id\":7,\"result\":{\"ok\":true}}
 
     #[test]
     fn walk_errors_on_stream_without_response() {
-        let body = "data: {\"jsonrpc\":\"2.0\",\"method\":\"notifications/progress\",\"params\":{}}\n\n";
+        let body =
+            "data: {\"jsonrpc\":\"2.0\",\"method\":\"notifications/progress\",\"params\":{}}\n\n";
         let events = parse_sse_body(body);
         let result = walk_for_response(events, 99, &mut |_| {});
         assert!(result.is_err());

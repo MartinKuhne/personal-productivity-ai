@@ -1,8 +1,8 @@
 //! Table of Contents (ToC) generation from Markdown AST events.
 
-use crate::app::ToCEntry;
 use crate::markdown::ast::heading_plain_text;
 use crate::markdown::parser::parse_markdown_to_events;
+use crate::markdown::toc_entry::ToCEntry;
 
 /// Builds a Table of Contents from markdown.
 pub fn build_toc(markdown_text: &str) -> Vec<ToCEntry> {

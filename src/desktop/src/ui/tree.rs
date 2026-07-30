@@ -2,7 +2,7 @@
 
 use crate::app::messages::BackgroundMessage;
 use crate::app::panel_layout::PanelLayout;
-use crate::app::print::{execute_print_blocking, PrintJob};
+use crate::app::print::{PrintJob, execute_print_blocking};
 use crate::ui::TreeNode;
 use eframe::egui;
 use std::collections::HashSet;

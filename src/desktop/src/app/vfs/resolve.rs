@@ -151,9 +151,11 @@ mod tests {
         let libs = test_config();
         let result = resolve("NonExistent/file.md", false, &libs);
         assert!(result.is_err());
-        assert!(result
-            .unwrap_err()
-            .contains("Content library 'NonExistent' not found"));
+        assert!(
+            result
+                .unwrap_err()
+                .contains("Content library 'NonExistent' not found")
+        );
     }
 
     #[test]

@@ -19,10 +19,7 @@ pub struct McpError {
 impl McpError {
     /// Build an error from a JSON-RPC error object body.
     pub fn from_jsonrpc(server: &str, value: &serde_json::Value) -> Self {
-        let code = value
-            .get("code")
-            .and_then(|v| v.as_i64())
-            .unwrap_or(-1);
+        let code = value.get("code").and_then(|v| v.as_i64()).unwrap_or(-1);
         let message = value
             .get("message")
             .and_then(|v| v.as_str())

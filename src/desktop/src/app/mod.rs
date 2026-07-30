@@ -11,26 +11,30 @@
 //!
 //! The file-watcher plumbing lives in [`watcher`].
 
-pub mod document;
+pub mod background_events;
+pub mod background_task;
+pub mod batch;
 pub mod dialog_manager;
+pub mod document;
 pub mod messages;
 pub mod panel_layout;
 pub mod persisted;
+pub mod print;
 pub mod selection_manager;
 pub mod tab_manager;
 pub mod tag_manager;
 pub mod text_buffer;
-pub mod background_task;
-pub mod print;
 pub mod vfs;
 pub mod watcher;
+
+pub use background_events::{AgentEvent, BackgroundEvent, FsEvent, ProcessEvent};
 
 pub use dialog_manager::DialogManager;
 pub use messages::{BackgroundMessage, TokenUsageInfo};
 pub use panel_layout::PanelLayout;
 pub use persisted::PersistedUiState;
 pub use selection_manager::SelectionManager;
-pub use tab_manager::{TabManager, ToCEntry};
+pub use tab_manager::TabManager;
 pub use tag_manager::TagManager;
 pub use text_buffer::{Cursor, Selection, TextBuffer, UndoStack};
 pub use vfs::{VirtualPath, VirtualPathError};

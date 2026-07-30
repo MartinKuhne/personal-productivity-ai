@@ -1,6 +1,7 @@
 //! Root egui `App` struct Ã¢â‚¬â€ owns all application state and wires together background tasks, panels, agent, and dialogs.
 
 use crate::agent::AgentSessionManager;
+use crate::app::background_events::BackgroundEvent;
 use crate::app::messages::BackgroundMessage;
 use crate::app::watcher::directory_tracker::DirectoryTracker;
 use crate::app::watcher::file_processor::FileEventProcessor;
@@ -8,6 +9,8 @@ use crate::app::{
     DialogManager, PanelLayout, PersistedUiState, SelectionManager, TabManager, TagManager,
     TextBuffer,
 };
+use crate::background::BackgroundLogEntry;
+use crate::background::LogCategory;
 use crate::background::{BackgroundProcessManager, SharedProcessManager};
 use crate::background_task::Task;
 use crate::ui::panels::{
@@ -70,6 +73,14 @@ pub struct FastMdApp {
     pub persisted_ui_state: PersistedUiState,
     pub pending_file_load: Option<PathBuf>,
     pub repaint_interval: Duration,
+    /// Tracks whether the one-time MCP startup ping has run.
+    ///
+    /// The ping performs network I/O (contacts each configured MCP
+    /// server and warms the tool-discovery cache), so we defer it
+    /// from construction (`AgentSessionManager::new`) to the first
+    /// UI frame and run it on a background thread.  This keeps the
+    /// UI responsive and lets progress appear in the log panel.
+    mcp_initialized: bool,
 }
 
 impl FastMdApp {
@@ -423,6 +434,7 @@ impl FastMdApp {
             persisted_ui_state,
             pending_file_load: None,
             repaint_interval: Duration::from_millis(16),
+            mcp_initialized: false,
         }
     }
 
@@ -461,6 +473,7 @@ impl FastMdApp {
             persisted_ui_state: PersistedUiState::default(),
             pending_file_load: None,
             repaint_interval: Duration::from_millis(16),
+            mcp_initialized: false,
         }
     }
 
@@ -539,6 +552,7 @@ impl FastMdApp {
         let ctx = ui.ctx();
         self.process_file_events_and_repaint(ctx);
         self.drain_background_channel();
+        self.initialize_mcp_on_first_frame();
         self.handle_file_selection(ctx);
         self.show_editor_overlay(ui);
         self.show_modals(ui);
@@ -559,77 +573,152 @@ impl FastMdApp {
 
     fn drain_background_channel(&mut self) {
         while let Ok(msg) = self.rx.try_recv() {
-            match msg {
-                BackgroundMessage::FileParsed { path, tags } => {
-                    self.tag_manager.add_tags(path.clone(), tags);
-                    self.file_processor.add_file(path);
+            // Route through the typed BackgroundEvent layer. The
+            // `from_legacy` converter maps each BackgroundMessage
+            // variant to a domain-specific typed event. The handler
+            // below dispatches by domain (Agent / Fs / Process),
+            // replacing the flat match-on-enum pattern.
+            let event = BackgroundEvent::from_legacy(&msg);
+            match event {
+                Some(BackgroundEvent::Agent(agent_ev)) => {
+                    self.agent.handle_agent_event(agent_ev);
                 }
-                BackgroundMessage::DirParsed { path } => {
-                    self.file_processor.add_dir(path);
+                Some(BackgroundEvent::Fs(fs_ev)) => {
+                    self.handle_fs_event(fs_ev, &msg);
                 }
-                BackgroundMessage::Finished(watcher) => {
-                    self._watcher = Some(watcher);
-                    self.file_processor.indexing_finished = true;
-                    self.tag_manager.rebuild();
+                Some(BackgroundEvent::Process(proc_ev)) => {
+                    self.handle_process_event(proc_ev, &msg);
                 }
-                BackgroundMessage::FinishedWithoutWatcher => {
-                    self.file_processor.indexing_finished = true;
-                    self.tag_manager.rebuild();
-                }
-                BackgroundMessage::FileModified { path, tags } => {
-                    self.tag_manager.add_tags(path.clone(), tags);
-                    self.file_processor.add_file(path.clone());
-                    self.tag_manager.rebuild();
-                    if self.tab_manager.loaded_path.as_ref() == Some(&path) {
-                        self.tab_manager.loaded_path = None;
-                    }
-                }
-                BackgroundMessage::FileDeleted { path } => {
-                    self.file_processor.remove_file(&path);
-                    self.tag_manager.remove_file(&path);
-                    self.tag_manager.rebuild();
-                    if self.selection.selected_file().is_some_and(|p| p == &path) {
-                        *self.selection.selected_file_mut() = None;
-                        self.tab_manager.current_yaml = None;
-                        self.tab_manager.current_markdown = String::new();
-                        self.tab_manager.toc.clear();
-                    }
-                    self.selection.selected_files_mut().remove(&path);
-                    if self.tab_manager.loaded_path.as_ref() == Some(&path) {
-                        self.tab_manager.loaded_path = None;
-                    }
-                }
-                BackgroundMessage::AgentStatus(_)
-                | BackgroundMessage::AgentThinking(_)
-                | BackgroundMessage::AgentResponse(_)
-                | BackgroundMessage::AgentFinished(_)
-                | BackgroundMessage::AgentFailed(_)
-                | BackgroundMessage::AgentTokenUsage(_) => {
-                    self.agent.handle_background_message(msg);
-                }
-                BackgroundMessage::LogEntry(entry) => {
-                    if let Ok(mut mgr) = self.background_manager.lock() {
-                        mgr.push_log(entry);
-                    }
-                }
-                BackgroundMessage::FileLoaded { path, content } => {
-                    self.pending_file_load = None;
-                    if let Ok(content) = content {
-                        if let Some(fm) = parse_front_matter(&content) {
-                            self.tab_manager.current_yaml = Some(fm.yaml);
-                            self.tab_manager.current_markdown = fm.body.to_string();
-                        } else {
-                            self.tab_manager.current_yaml = None;
-                            self.tab_manager.current_markdown = content;
-                        }
-                        self.tab_manager.loaded_path = Some(path.clone());
-                        self.tab_manager.toc =
-                            crate::ui::render::build_toc(&self.tab_manager.current_markdown);
-                        self.tab_manager.scroll_to_header_id = None;
-                    }
+                None => {
+                    // Variants that carry non-cloneable handles
+                    // (e.g. Finished(RecommendedWatcher)) fall
+                    // through to the legacy handler.
+                    self.handle_legacy_message(msg);
                 }
             }
         }
+    }
+
+    fn handle_fs_event(
+        &mut self,
+        ev: crate::app::background_events::FsEvent,
+        _msg: &BackgroundMessage,
+    ) {
+        use crate::app::background_events::FsEvent;
+        match ev {
+            FsEvent::FileParsed { path, tags } => {
+                self.tag_manager.add_tags(path.clone(), tags);
+                self.file_processor.add_file(path);
+            }
+            FsEvent::DirParsed { path } => {
+                self.file_processor.add_dir(path);
+            }
+            FsEvent::Finished => {
+                // Should not arrive here — Finished carries a non-cloneable
+                // RecommendedWatcher and is handled via the legacy path.
+                self.file_processor.indexing_finished = true;
+                self.tag_manager.rebuild();
+            }
+            FsEvent::FinishedWithoutWatcher => {
+                self.file_processor.indexing_finished = true;
+                self.tag_manager.rebuild();
+            }
+            FsEvent::FileModified { path, tags } => {
+                self.tag_manager.add_tags(path.clone(), tags);
+                self.file_processor.add_file(path.clone());
+                self.tag_manager.rebuild();
+                if self.tab_manager.loaded_path.as_ref() == Some(&path) {
+                    self.tab_manager.loaded_path = None;
+                }
+            }
+            FsEvent::FileDeleted { path } => {
+                self.file_processor.remove_file(&path);
+                self.tag_manager.remove_file(&path);
+                self.tag_manager.rebuild();
+                if self.selection.selected_file().is_some_and(|p| p == &path) {
+                    *self.selection.selected_file_mut() = None;
+                    self.tab_manager.current_yaml = None;
+                    self.tab_manager.current_markdown = String::new();
+                    self.tab_manager.toc.clear();
+                }
+                self.selection.selected_files_mut().remove(&path);
+                if self.tab_manager.loaded_path.as_ref() == Some(&path) {
+                    self.tab_manager.loaded_path = None;
+                }
+            }
+        }
+    }
+
+    fn handle_process_event(
+        &mut self,
+        ev: crate::app::background_events::ProcessEvent,
+        _msg: &BackgroundMessage,
+    ) {
+        use crate::app::background_events::ProcessEvent;
+        match ev {
+            ProcessEvent::LogEntry(entry) => {
+                if let Ok(mut mgr) = self.background_manager.lock() {
+                    mgr.push_log(entry);
+                }
+            }
+            ProcessEvent::FileLoaded { path, content } => {
+                self.pending_file_load = None;
+                if let Ok(content) = content {
+                    if let Some(fm) = parse_front_matter(&content) {
+                        self.tab_manager.current_yaml = Some(fm.yaml);
+                        self.tab_manager.current_markdown = fm.body.to_string();
+                    } else {
+                        self.tab_manager.current_yaml = None;
+                        self.tab_manager.current_markdown = content;
+                    }
+                    self.tab_manager.loaded_path = Some(path.clone());
+                    self.tab_manager.toc =
+                        crate::ui::render::build_toc(&self.tab_manager.current_markdown);
+                    self.tab_manager.scroll_to_header_id = None;
+                }
+            }
+        }
+    }
+
+    /// Fallback handler for `BackgroundMessage` variants that cannot
+    /// be converted to `BackgroundEvent` (e.g. those carrying a
+    /// non-cloneable `RecommendedWatcher` handle).
+    fn handle_legacy_message(&mut self, msg: BackgroundMessage) {
+        match msg {
+            BackgroundMessage::Finished(watcher) => {
+                self._watcher = Some(watcher);
+                self.file_processor.indexing_finished = true;
+                self.tag_manager.rebuild();
+            }
+            _ => {
+                // All other variants are handled via typed events.
+                // If we reach here, the `from_legacy` mapping is
+                // incomplete and should be updated.
+                tracing::warn!("unhandled legacy BackgroundMessage in handle_legacy_message");
+            }
+        }
+    }
+
+    /// Runs the one-time MCP startup ping on the first call.
+    ///
+    /// We deliberately defer network I/O from construction (where it
+    /// could delay startup) to here, where the UI is already running.
+    /// The ping is dispatched on a background thread (`std::thread::spawn`)
+    /// so the egui UI thread never blocks; progress is posted into the
+    /// background log channel so it appears in the log panel alongside
+    /// other startup messages.
+    fn initialize_mcp_on_first_frame(&mut self) {
+        if self.mcp_initialized {
+            return;
+        }
+        self.mcp_initialized = true;
+
+        let tx = self.tx.clone();
+        let servers_ok = self.agent.initialize_mcp();
+        let _ = tx.send(BackgroundMessage::LogEntry(BackgroundLogEntry::new(
+            LogCategory::Indexer,
+            format!("MCP startup ping complete: {servers_ok} server(s) responded"),
+        )));
     }
 
     fn handle_file_selection(&mut self, _ctx: &egui::Context) {

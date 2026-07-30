@@ -18,6 +18,7 @@ pub mod document;
 pub mod parser;
 pub mod table_width;
 pub mod toc;
+pub mod toc_entry;
 
 pub use ast::{InlineElem, RenderEvent, TextStyle, heading_plain_text};
 pub use document::{DocumentModel, FrontMatter, apply_task_toggle, parse_front_matter};
@@ -26,3 +27,4 @@ pub use table_width::{
     Breakpoint, CellTokens, ColumnWidths, DeficitStrategy, compute_column_breakpoints, ftwa,
 };
 pub use toc::build_toc;
+pub use toc_entry::ToCEntry;

@@ -2,6 +2,7 @@
 
 pub mod app;
 pub mod background_logs;
+pub mod editor_egui;
 mod modals;
 pub mod os_shell;
 mod panels;
@@ -13,7 +14,7 @@ mod tree;
 #[cfg(test)]
 pub mod test_helpers;
 
-pub use crate::app::ToCEntry;
+pub use crate::markdown::ToCEntry;
 pub use app::{FastMdApp, TreeNode, generate_format_prompt};
 pub use os_shell::{open_in_system_editor, show_in_file_explorer};
 pub use render::{build_toc, render_markdown, render_yaml_table};
