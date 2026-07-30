@@ -5,9 +5,8 @@
 > reflected in the corresponding implementation code. If drift is detected between
 > this spec and the actual code behavior, notify the user immediately.
 >
-> Part of [`SPEC.md`](../../SPEC.md) (FastMD crate). See the [Requirements Index](../../SPEC.md#requirements-index) for the full REQ-xxx → file map.
->
-> Owns AGENT-001..AGENT-023. Cross-cutting requirements that also touch this module are listed at the bottom of this file.
+> Part of [`SPEC.md`](../../SPEC.md) (FastMD crate).
+
 
 ## Scope
 
@@ -61,7 +60,4 @@ models:
 
 ## Cross-cutting references
 
-- AGENT-005 / AGENT-018 — Schema definition lives in [`src/config/SPEC.md`](../config/SPEC.md); behaviour (use-case routing, cost-based selection) lives here.
-- AGENT-006 / AGENT-007 — Schema definition lives in [`src/config/SPEC.md`](../config/SPEC.md); this module consumes the values.
-- AGENT-022 — UI rendering of the thinking section lives in [`src/ui/SPEC.md`](../ui/SPEC.md#thinking-process-section) (REQ-616 equivalent).
-- AGENT-023 — Tabbed document interface UI behaviour lives in [`src/ui/SPEC.md`](../ui/SPEC.md#tabbed-document-interface) (REQ-619 equivalent).
+- [`src/config/SPEC.md`](../config/SPEC.md): Configuration

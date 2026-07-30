@@ -34,5 +34,5 @@ This module owns the Batch Prompt Processing subsystem. It covers the batch proc
 
 ## Cross-cutting references
 
-- BATCH-001 — UI button on top panel lives in [`src/ui/SPEC.md`](../ui/SPEC.md) (REQ-800 equivalent).
-- BATCH-012 — Background process logging lives in [`src/background/SPEC.md`](../background/SPEC.md) (REQ-460 equivalent).
+- BATCH-001 — UI button on top panel lives in [`src/ui/SPEC.md`](../ui/SPEC.md)
+- BATCH-012 — Background process logging lives in [`src/background/SPEC.md`](../background/SPEC.md)

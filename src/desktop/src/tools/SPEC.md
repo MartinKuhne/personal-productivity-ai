@@ -5,12 +5,7 @@
 > reflected in the corresponding implementation code. If drift is detected between
 > this spec and the actual code behavior, notify the user immediately.
 >
-> Part of [`SPEC.md`](../../SPEC.md) (FastMD crate). See the
-> [Requirements Index](../../SPEC.md#requirements-index) for the full
-> REQ-xxx → file map.
->
-> Owns TOOL-001..010. Cross-cutting requirements that also touch other
-> modules are listed at the bottom of this file.
+> Part of [`SPEC.md`](../../SPEC.md) (FastMD crate)
 
 ## Requirements
 
@@ -55,8 +50,6 @@ The requirements below have been formatted using the **Easy Approach to Requirem
 | `query` | Query a CSV file database using an evalexpr predicate, supporting sum and average aggregates. |
 
 ### CSV Database Tools
-
-> Conditionally available — only offered to the LLM when the user prompt contains "table", "csv", "database", or a CSV tool name.
 
 * [TOOL-001] Tool Availability: The CSV database tools (`add_rows`, `delete_rows`, `create_csv`, `list_csv`, `query`) shall only be offered to the LLM if the user's query contains any of the tool names, "table", "csv", or "database".
 * [TOOL-002] Query Evaluation: The `query` tool shall use the `evalexpr` crate to parse and execute query predicates as dynamic expressions against CSV rows.
