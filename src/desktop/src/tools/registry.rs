@@ -1482,19 +1482,23 @@ mod tests {
     #[test]
     fn test_tool_call_debug_mode_feature_flag() {
         let mut config = AppConfig::default();
-        assert!(!config
-            .feature_flags
-            .get("toolCallDebugMode")
-            .copied()
-            .unwrap_or(false));
+        assert!(
+            !config
+                .feature_flags
+                .get("toolCallDebugMode")
+                .copied()
+                .unwrap_or(false)
+        );
         config
             .feature_flags
             .insert("toolCallDebugMode".to_string(), true);
-        assert!(config
-            .feature_flags
-            .get("toolCallDebugMode")
-            .copied()
-            .unwrap_or(false));
+        assert!(
+            config
+                .feature_flags
+                .get("toolCallDebugMode")
+                .copied()
+                .unwrap_or(false)
+        );
         let ctx = test_ctx(&config);
         let res = execute_tool(&ctx, "unknown_tool", "{}");
         assert!(res.contains("not found") || res.contains("error"));
