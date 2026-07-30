@@ -69,7 +69,7 @@ Stable `push_id` salts (rules above) are still required for sibling loops — th
 
 ## 3. Tool trait contract
 - Every tool implements `tools::Tool` and is registered in `tools/registry.rs::ToolRegistry::register_all`.
-- `Tool::execute` takes a **single** `ToolContext<'a>` (config + `&Bus<FileEvent>`) — do not add extra parameters (REQ-609).
+- `Tool::execute` takes a **single** `ToolContext<'a>` (config + `&Bus<FileEvent>`) — do not add extra parameters (AGENT-012).
 - Filesystem tools must resolve paths through `ToolContext::resolve_virtual_path(vpath, allow_write)`; never accept raw filesystem paths from LLM input (REQ-700..708).
 - Tools surface conditional availability via `Tool::is_enabled(config, prompt)`; do not branch inside `execute` on prompt keywords (CSV DB gating, TOOL-001, is the canonical pattern).
 - Safe tools may be dispatched in parallel; unsafe (mutating) tools must be sequential. `agent::tool_executor::ToolExecutor` already enforces this — do not bypass it.
@@ -77,7 +77,7 @@ Stable `push_id` salts (rules above) are still required for sibling loops — th
 
 ## 4. Spec traceability
 - Every user-facing behaviour maps to a `REQ-xxx` in `SPEC.md`. When adding a feature, add the requirement first; when changing behaviour, update the REQ in place.
-- Code may cite `REQ-xxx` in `//!`/`///` comments where it aids review (e.g. `(REQ-609)` next to the safe/unsafe split). Do not sprinkle citations inline in business logic.
+- Code may cite `REQ-xxx` / `MD-xxx` / `TOOL-xxx` / `AGENT-xxx` in `//!`/`///` comments where it aids review (e.g. `(AGENT-012)` next to the safe/unsafe split). Do not sprinkle citations inline in business logic.
 - `ARCHITECTURE_C4.md` (in `doc/technical-context/`) is the authoritative architecture picture; update it when module boundaries change.
 
 ## 5. Folder structure

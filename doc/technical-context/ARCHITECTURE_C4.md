@@ -21,7 +21,7 @@ C4Context
     System(fastmd, "FastMD Desktop", "Rust + egui native Windows app (crate 'fastmd')")
   }
 
-  System_Ext(llm, "OpenAI-compatible LLM", "OpenRouter / any compatible endpoint (REQ-601)")
+  System_Ext(llm, "OpenAI-compatible LLM", "OpenRouter / any compatible endpoint (AGENT-001)")
   System_Ext(jmap, "JMAP Server", "Email, calendar, contacts (Rustave Stork AG)")
   System_Ext(caldav, "CalDAV/CardDAV", "Calendar + address-book servers")
   System_Ext(searxng, "SearXNG", "Web search backend (self-hosted)")
@@ -31,7 +31,7 @@ C4Context
   System_Ext(fs, "Local Filesystem", "Content libraries on disk")
 
   Rel(user, fastmd, "Uses")
-  Rel(fastmd, llm, "Chat completions / vision (REQ-601, 470..478)")
+  Rel(fastmd, llm, "Chat completions / vision (AGENT-001, 470..478)")
   Rel(fastmd, jmap, "JMAP (email/calendar/contacts)")
   Rel(fastmd, cald, "CalDAV/CardDAV")
   Rel(fastmd, searxng, "web_search (TOOL-010)")
@@ -115,7 +115,7 @@ Supporting UI types: `TreeNode{name,path,is_dir,children:BTreeMap}`,
 `agent/` implements the LLM tool-loop. `run_agent` spawns a dedicated thread,
 builds messages from `SystemPromptBuilder`, queries an OpenAI-compatible
 endpoint, and loops turns (`Continue` / `Done` / `Failed`) honouring a cancel
-flag. REQ-601..640, 613..619.
+flag. AGENT-001..AGENT-023.
 
 ```mermaid
 C4Component fastmd
@@ -125,9 +125,9 @@ C4Component fastmd
   Component(impl, "run_agent / run_agent_inner", "agent/agent_impl.rs (212)", "Resolves LLM client, builds messages, get_tools_schema, ToolExecutor::new, turn loop")
   Component(ctx, "AgentContext", "agent/context.rs", "config, prompt, history, active_file, active_dir, selected_files, cancel_flag, channels")
   Component(llm, "LLMClient", "agent/llm_client.rs", "parse_usage_block; OpenAI-compatible HTTP")
-  Component(pb, "SystemPromptBuilder", "agent/prompt_builder.rs", "with_active_file/dir/selected_files; USER.md injection per library (REQ-614)")
-  Component(rf, "ResponseFormatter", "agent/response_formatter.rs", "split_thinking_and_content (🤔...🤔 REQ-616), format_tool_call_message, format_tool_result_message")
-  Component(te, "ToolExecutor", "agent/tool_executor.rs", "safe tools parallel / unsafe tools sequential (REQ-609)")
+  Component(pb, "SystemPromptBuilder", "agent/prompt_builder.rs", "with_active_file/dir/selected_files; USER.md injection per library (AGENT-020)")
+  Component(rf, "ResponseFormatter", "agent/response_formatter.rs", "split_thinking_and_content (🤔...🤔 AGENT-022), format_tool_call_message, format_tool_result_message")
+  Component(te, "ToolExecutor", "agent/tool_executor.rs", "safe tools parallel / unsafe tools sequential (AGENT-012)")
 
   Rel(mgr, impl, "start_session -> run_agent")
   Rel(impl, ctx, "passes context")
@@ -145,7 +145,7 @@ C4Component fastmd
 `tools/` defines the `Tool` trait and a `ToolRegistry` holding
 `HashMap<&'static str, Box<dyn Tool>>`. `ToolContext<'a>` is the single
 parameter passed to every `Tool::execute`, carrying `&AppConfig` and
-`&Bus<FileEvent>` (REQ-609).
+`&Bus<FileEvent>` (AGENT-012).
 
 ```mermaid
 C4Component fastmd
@@ -280,8 +280,8 @@ C4Component fastmd
    `PanelLayout` draws 5 panes.
 4. **Agent session** (`AgentSessionManager::start_session`): spawns
    `run_agent(AgentContext)`; turn loop runs safe tools in parallel and unsafe
-   tools sequentially (`ToolExecutor`, REQ-609); responses flow back via
+   tools sequentially (`ToolExecutor`, AGENT-012); responses flow back via
    `BackgroundMessage::Agent*` and are formatted by `ResponseFormatter`
-   (🤔...🤔 thinking delimiters, REQ-616).
+   (🤔...🤔 thinking delimiters, AGENT-022).
 5. **Batch processing** (`batch/`): discoverer selects files/dirs, executor
    runs prompts with concurrency 1-8 (REQ-800..813).

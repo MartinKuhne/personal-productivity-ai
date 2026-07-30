@@ -6,6 +6,7 @@ use crate::app::watcher::directory_tracker::DirectoryTracker;
 use crate::app::watcher::file_processor::FileEventProcessor;
 use crate::app::{
     DialogManager, PanelLayout, PersistedUiState, SelectionManager, TabManager, TagManager,
+    TextBuffer,
 };
 use crate::background::{BackgroundProcessManager, SharedProcessManager};
 use crate::background_task::Task;
@@ -62,7 +63,7 @@ pub struct FastMdApp {
     /// Dialog manager - owns all modal state and rendering.
     pub dialogs: DialogManager,
     pub submit_prompt: Option<String>,
-    pub editor_state: crate::editor::EditorState,
+    pub text_buffer: TextBuffer,
     pub inline_editor_enabled: bool,
     pub background_manager: SharedProcessManager,
     pub config: crate::config::AppConfig,
@@ -136,12 +137,12 @@ impl FastMdApp {
         &mut self.dialogs
     }
 
-    pub fn editor(&self) -> &crate::editor::EditorState {
-        &self.editor_state
+    pub fn editor(&self) -> &TextBuffer {
+        &self.text_buffer
     }
 
-    pub fn editor_mut(&mut self) -> &mut crate::editor::EditorState {
-        &mut self.editor_state
+    pub fn editor_mut(&mut self) -> &mut TextBuffer {
+        &mut self.text_buffer
     }
 
     pub fn config(&self) -> &crate::config::AppConfig {
@@ -197,7 +198,7 @@ impl FastMdApp {
                     FileEventKind::Updated => {
                         for p in &event.paths {
                             if self.tab_manager.loaded_path.as_ref() == Some(p)
-                                && !self.editor_state.is_open
+                                && !self.text_buffer.is_open
                             {
                                 self.tab_manager.loaded_path = None;
                             }
@@ -415,7 +416,7 @@ impl FastMdApp {
             agent: AgentSessionManager::new(config.clone()),
             dialogs,
             submit_prompt: None,
-            editor_state: crate::editor::EditorState::default(),
+            text_buffer: TextBuffer::new(),
             inline_editor_enabled,
             background_manager,
             config,
@@ -450,7 +451,7 @@ impl FastMdApp {
             agent: AgentSessionManager::new(config.clone()),
             dialogs: DialogManager::new(),
             submit_prompt: None,
-            editor_state: crate::editor::EditorState::default(),
+            text_buffer: TextBuffer::new(),
             inline_editor_enabled: true,
             background_manager: Arc::new(Mutex::new(BackgroundProcessManager::new())),
             directory_tracker: DirectoryTracker::new(
@@ -539,7 +540,7 @@ impl FastMdApp {
         self.process_file_events_and_repaint(ctx);
         self.drain_background_channel();
         self.handle_file_selection(ctx);
-        self.show_editor_overlay(ctx);
+        self.show_editor_overlay(ui);
         self.show_modals(ui);
         self.render_panels(ui);
         self.handle_deferred_actions();
@@ -651,9 +652,17 @@ impl FastMdApp {
         }
     }
 
-    fn show_editor_overlay(&mut self, ctx: &egui::Context) {
+    fn show_editor_overlay(&mut self, ui: &mut egui::Ui) {
         let producer = crate::app::watcher::events::FileEventProducer::new(&self.file_event_bus);
-        if self.editor_state.show(ctx, &producer) {
+        // The editor opens its own top-level `egui::Window` from
+        // the context pulled out of `ui`. After it returns we
+        // check whether the buffer was closed (either by a
+        // successful save or a manual cancel) and clear the
+        // loaded path so the centre panel reloads the file on
+        // the next frame.
+        let was_open = self.text_buffer.is_open;
+        let _ = crate::editor_egui::show_text_editor(ui, &mut self.text_buffer, &producer);
+        if was_open && !self.text_buffer.is_open {
             self.tab_manager.loaded_path = None;
         }
     }
@@ -1133,8 +1142,8 @@ mod tests {
         *app.selection.selected_file_mut() = Some(path.clone());
         app.tab_manager.loaded_path = Some(path.clone());
         app.file_processor.all_files.push(path.clone());
-        app.editor_state.open(&path, "old content");
-        assert!(app.editor_state.is_open);
+        app.text_buffer.open(&path, "old content");
+        assert!(app.text_buffer.is_open);
 
         app.file_event_reader = Some(app.file_event_bus.subscribe());
         let publisher = app.file_event_bus.clone();

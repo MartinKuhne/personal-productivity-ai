@@ -4064,7 +4064,7 @@ def foo():
         }
     }
 
-    // ---- Off-viewport text guards (REQ-211c) -------------------------
+    // ---- Off-viewport text guards (MD-013) -------------------------
 
     /// Render the long-table-row fixture at a phone-sized viewport
     /// and assert no `Shape::Text` is permanently outside its

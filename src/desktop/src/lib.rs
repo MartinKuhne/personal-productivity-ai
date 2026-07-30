@@ -8,7 +8,7 @@ pub mod batch;
 pub mod browser;
 pub mod config;
 pub mod document;
-pub mod editor;
+pub mod editor_egui;
 pub mod error;
 pub mod markdown;
 pub mod print;
@@ -24,8 +24,8 @@ pub use app::watcher::{
     FileEventProducer, FileWatcher,
 };
 pub use app::{
-    BackgroundMessage, DialogManager, PanelLayout, PersistedUiState, SelectionManager, TabManager,
-    TagManager, ToCEntry, TokenUsageInfo,
+    BackgroundMessage, Cursor, DialogManager, PanelLayout, PersistedUiState, Selection,
+    SelectionManager, TabManager, TagManager, TextBuffer, ToCEntry, TokenUsageInfo, UndoStack,
 };
 pub use background_task::Task;
 pub use config::{AppConfig, VirtualPath, VirtualPathError, get_config_path, load_config};

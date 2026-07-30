@@ -151,47 +151,8 @@ The requirements below have been formatted using the **Easy Approach to Requirem
 * [REQ-504] Deployment Binary: The build system shall include a release-deployment binary target (`deploy`)
 
 ### 6. Local LLM Interface & Tool Call Agent
-* [REQ-601] OpenAI Compatible Endpoint: The FastMD Viewer shall support connections to an OpenAI compatible chat completions API.
-* [REQ-602] Default Settings: The FastMD Viewer shall default to the OpenRouter endpoint using the free model `google/gemini-2.5-flash:free`.
-* [REQ-603] Configuration File: The FastMD Viewer shall parse a YAML configuration file (`config.yaml`) from the standard user configuration path to retrieve the API key, model, endpoint URL, and multi-use model configuration.
-    * [REQ-604]: If the configuration file does not exist, then the FastMD Viewer shall create a default template configuration file.
-    * [REQ-604a] Multi-Use Model Configuration: The configuration shall support a `models` list where each entry defines `model`, `api_url`, `api_key` (optional, inherits global), `use_case` (array: `chat`, `embeddings`, `vision`), and `cost` (optional integer, default 0, lower = cheaper). The system shall route requests to the appropriate model based on use_case. When multiple models match a use_case, the system shall prefer the model with the lowest `cost`.
-    * [REQ-604b] PDF Converter Configuration: The configuration shall support `pdf_converter_command` as an array of command and arguments with `{input}` and `{output}` placeholders.
-    * [REQ-604c] Max Tokens Configuration: The configuration shall support a `max_tokens` field (default: 32768) in `config.yaml` to prevent runaway token generation. The system shall include this value in all LLM API requests as the `max_tokens` parameter.
-* [REQ-605] Monospace Command Prompt: When the bottom panel command entry field is submitted, the FastMD Viewer shall execute the command through the Local LLM completions thread.
-* [REQ-606] LLM Tools Library: The LLM Agent shall utilize functional tools as per the [LLM Tools] section below.
-* [REQ-607] Real-time Stream Output: The FastMD Viewer shall display the LLM's active thinking sequence and render the final Markdown response in real-time inside the Central Panel.
-* [REQ-608] Tool Invocation Logging: The system shall print tool call invocations with their significant parameters to the response window. Tool arguments shall be formatted as pretty-printed JSON.
-* [REQ-609] Agent Loop: The agent shall execute a tool-use loop: (1) call LLM with tools, (2) execute safe tools in parallel, (3) execute unsafe tools sequentially, (4) append results to conversation, (5) repeat until LLM returns no tool calls or max 10 iterations. Safe tools: grep, read_tags, list_files_by_tag, list_files, read_file, read_file_lines, web_fetch, web_search, read_yaml_header, search_calendar, get_calendar, get_calendar_item, search_email, get_email_by_id, get_email, search_contact, get_contact, list_csv, query. Unsafe tools: create_file, insert_lines, delete_lines, replace_text, write_yaml_header, add_calendar_item, update_calendar_item, delete_calendar_item, send_email, add_contact, web_delegate, add_rows, delete_rows, create_csv.
-* [REQ-610] Active File Context: When the user sends an AI prompt and there is a file being displayed in the middle pane, the system shall send the full virtual path of that file with the system prompt.
-* [REQ-611] Active Directory Context: When the user selects a directory from the left pane, it becomes the directory context for the AI prompt. When the user sends an AI prompt and there is NO file being displayed in the middle pane, the system shall send the full virtual path of the directory context with the system prompt.
-* [REQ-612] Active Directory Context Display: The AI prompt shall display the directory context, relative to the base directory, with the prompt. Example: 'Users\Martin >'
-* [REQ-620] When displaying tool call arguments, format the JSON
-* [REQ-630] Cancel AI Prompt: While an AI prompt is being executed, the system shall display a stop button. When the user clicks the stop button, the system shall abort the prompt processing.
-* [REQ-640] Model Configuration: The system shall support a `models` configuration section in `config.yaml` defining multiple models with `use_case` tags: `chat` (default), `embeddings`, `vision`, and an optional `cost` field (integer, default 0, lower = cheaper) used for auto-model selection (REQ-613). Example:
-```yaml
-models:
-  - model: "gpt-4o-mini"
-    api_url: "https://api.openai.com/v1"
-    use_case: ["chat", "vision"]
-    cost: 5
-  - model: "text-embedding-3-small"
-    api_url: "https://api.openai.com/v1"
-    use_case: ["embeddings"]
-    cost: 1
-  - model: "google/gemini-2.5-flash:free"
-    api_url: "https://openrouter.ai/api/v1"
-    use_case: ["chat"]
-    cost: 0
-```
-### Agent Behavior & UI
 
-* [REQ-613] Auto-Model Selection: On application startup, if multiple models are configured with the `chat` use_case, the system shall automatically select the model with the lowest `cost` value and persist the selection to the configuration file.
-* [REQ-614] USER.md Context Injection: For each configured content library, if a USER.md file exists at the library root, its contents shall be appended to the system prompt as user context.
-* [REQ-615] Agent Conversation History: The agent shall maintain conversation history across prompts within a session. History is reset when the user clicks "Close" or starts a new session.
-* [REQ-616] Thinking Delimiter: Model reasoning/thinking content wrapped in `🤔...🤔` delimiters shall be extracted and displayed in a collapsible "Thinking Process" section separate from the main response.
-* [REQ-618] Quick Tasks Menu: The bottom panel shall provide a "Quick Tasks" menu with predefined prompts (e.g., "Format Markdown") that inject a structured prompt with YAML front-matter template.
-* [REQ-619] Tabbed Document Interface: The center panel shall support multiple open documents as tabs. Clicking a file opens it in a new tab; middle-click or close button closes tabs.
+> LLM Agent requirements moved to [`src/agent/SPEC.md`](src/agent/SPEC.md) (AGENT-001..AGENT-023). See that file for the full specification of the OpenAI-compatible endpoint, agent loop, model routing, context injection, tool execution, thinking delimiters, and quick tasks.
 
 ### Libraries
 

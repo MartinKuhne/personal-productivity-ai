@@ -4,7 +4,7 @@
 * **Date:** 2026-07-26
 * **Deciders:** Architecture Review Board
 * **Replaces:** Monolithic `ui::render` design ([`src/desktop/src/ui/render.rs`](file:///C:/Users/mkuhn/src/ppai/src/desktop/src/ui/render.rs))
-* **Requirements Traceability:** [REQ-101], [REQ-102], [REQ-103], [REQ-201], [REQ-202], [REQ-203], [REQ-204], [REQ-205]
+* **Requirements Traceability:** [REQ-101], [REQ-102], [REQ-103], [MD-001], [MD-002], [MD-003], [MD-004], [MD-005]
 
 ---
 
@@ -19,7 +19,7 @@ While functioning, the current architecture suffers from three structural limita
 2. **GUI Context Dependency in Layout Mathematics:**
    Table column width math (FTWA, [`src/desktop/src/ui/table_width/mod.rs`](file:///C:/Users/mkuhn/src/ppai/src/desktop/src/ui/table_width/mod.rs)) and block height calculations are executed directly inside `egui::Ui` layout closures. Testing layout geometry and table wrapping math currently requires initializing mock `egui::Context` instances.
 3. **State Mutation vs. Render Desynchronization:**
-   Task list checkbox toggles ([REQ-201]) were historically applied via line-by-line string regex searches ([`apply_task_toggle`](file:///C:/Users/mkuhn/src/ppai/src/desktop/src/ui/render.rs#L1180)), creating risks of desynchronization between parsed AST task indices and string offsets.
+   Task list checkbox toggles ([MD-001]) were historically applied via line-by-line string regex searches ([`apply_task_toggle`](file:///C:/Users/mkuhn/src/ppai/src/desktop/src/ui/render.rs#L1180)), creating risks of desynchronization between parsed AST task indices and string offsets.
 
 ---
 
@@ -43,7 +43,7 @@ We propose refactoring the rendering subsystem into a **4-stage decoupled pipeli
 ### Stage 1: Pure AST Subsystem (`markdown::ast`)
 * **Location:** `src/desktop/src/markdown/ast.rs`
 * **Purity:** 100% Pure Rust, Zero `egui` or GUI dependencies.
-* **Responsibility:** Wraps `pulldown_cmark` with GFM options ([REQ-201]). Converts markdown source into a strongly typed, immutable AST (`MarkdownDoc`) with exact source byte ranges (`Range<usize>`) for every node.
+* **Responsibility:** Wraps `pulldown_cmark` with GFM options ([MD-001]). Converts markdown source into a strongly typed, immutable AST (`MarkdownDoc`) with exact source byte ranges (`Range<usize>`) for every node.
 
 ### Stage 2: Document State & Reactive Cache (`markdown::document`)
 * **Location:** `src/desktop/src/markdown/document.rs` & `src/desktop/src/ui/cache.rs`

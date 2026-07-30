@@ -18,6 +18,7 @@ pub mod persisted;
 pub mod selection_manager;
 pub mod tab_manager;
 pub mod tag_manager;
+pub mod text_buffer;
 pub mod watcher;
 
 pub use dialog_manager::DialogManager;
@@ -27,3 +28,4 @@ pub use persisted::PersistedUiState;
 pub use selection_manager::SelectionManager;
 pub use tab_manager::{TabManager, ToCEntry};
 pub use tag_manager::TagManager;
+pub use text_buffer::{Cursor, Selection, TextBuffer, UndoStack};

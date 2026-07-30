@@ -1,4 +1,6 @@
 //! Agent subsystem — agent implementation, context, LLM client, session manager, prompt builder, response formatter, and tool executor.
+//!
+//! Requirements: see [`SPEC.md`](SPEC.md) (AGENT-001..AGENT-023) for the full specification.
 
 pub mod agent_impl;
 pub mod context;

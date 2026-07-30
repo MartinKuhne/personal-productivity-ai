@@ -301,7 +301,7 @@ pub struct AppConfig {
     pub caldav_clients: HashMap<String, CalDavClient>,
     #[serde(default)]
     pub content_libraries: Vec<ContentLibrary>,
-    /// PDF converter command template (REQ-604b).
+    /// PDF converter command template (AGENT-009).
     #[serde(default)]
     pub pdf_converter_command: Option<Vec<String>>,
     /// Enable built-in inline text editor (REQ-250). Default: false.
@@ -313,7 +313,7 @@ pub struct AppConfig {
     /// Runtime feature flags. Map of feature name to enabled/disabled.
     #[serde(default = "default_feature_flags")]
     pub feature_flags: HashMap<String, bool>,
-    /// Maximum tokens for LLM responses (REQ-604c). Default: 32768.
+    /// Maximum tokens for LLM responses (AGENT-010). Default: 32768.
     #[serde(default = "default_max_tokens")]
     pub max_tokens: u32,
     /// Configuration for enabling/disabling tool groups.
@@ -653,11 +653,9 @@ mod tests {
             },
         );
         let warnings = config.validate();
-        assert!(
-            warnings
-                .iter()
-                .any(|w| w.contains("No model configured with 'chat'"))
-        );
+        assert!(warnings
+            .iter()
+            .any(|w| w.contains("No model configured with 'chat'")));
     }
 
     #[test]
@@ -828,10 +826,9 @@ user_name: "TestUser"
             lib.display_label_for(Path::new("C:/my/test/dir")),
             Some("TestLib".to_string())
         );
-        assert!(
-            lib.display_label_for(Path::new("C:/other/path.md"))
-                .is_none()
-        );
+        assert!(lib
+            .display_label_for(Path::new("C:/other/path.md"))
+            .is_none());
     }
 
     #[test]

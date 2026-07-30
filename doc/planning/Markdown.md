@@ -63,7 +63,7 @@ Reference: https://github.com/adam-p/markdown-here/wiki/markdown-cheatsheet
 - [ ] Column alignment (colons in separator row) — alignment info from `Tag::TableHead` is not applied
 - [x] Striped rows
 - [x] Bold header row
-- [ ] Visual frame with rounded corners (REQ-211b — documented gap)
+- [ ] Visual frame with rounded corners (MD-012 — documented gap)
 
 ## Blockquotes
 

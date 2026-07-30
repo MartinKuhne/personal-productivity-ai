@@ -269,7 +269,7 @@ pub fn render_tabs_and_content_capture(
                 if ui.button(crate::ui::strings::EDIT_BUTTON).clicked() {
                     if app.inline_editor_enabled {
                         if let Ok(content) = std::fs::read_to_string(tab_path) {
-                            app.editor_state.open(tab_path, &content);
+                            app.text_buffer.open(tab_path, &content);
                         }
                     } else {
                         open_in_system_editor(tab_path);
