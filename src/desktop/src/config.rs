@@ -1,4 +1,6 @@
 //! Application configuration types and persistence — JMAP, CalDAV, CardDAV clients, content libraries, model settings.
+//!
+//! Requirements: see [`SPEC.md`](SPEC.md) (CONFIG-001..CONFIG-009) for the full specification.
 
 use std::path::{Path, PathBuf};
 
@@ -304,7 +306,7 @@ pub struct AppConfig {
     /// PDF converter command template (AGENT-009).
     #[serde(default)]
     pub pdf_converter_command: Option<Vec<String>>,
-    /// Enable built-in inline text editor (REQ-250). Default: false.
+    /// Enable built-in inline text editor (CONFIG-001). Default: false.
     #[serde(default)]
     pub inline_editor_enabled: bool,
     /// Override default storage location for CSV databases.

@@ -77,20 +77,9 @@ The requirements below have been formatted using the **Easy Approach to Requirem
     * [REQ-197] [Format Markdown] - Executes the Format Markdown quick task on the tab's file.
 * [REQ-198] The tab context menu items [Copy Path], [Show in File Explorer], [Open in Editor], [Format Markdown] shall also be available when right-clicking on a file in the directory tree (see REQ-152 through REQ-173), providing consistent behavior across both UI locations.
 
-### Inline Text Editor
+### Configuration
 
-* [REQ-250] Inline Editor Toggle: The system shall provide a configuration option `inline_editor_enabled` (default: `false`) in `config.yaml` to enable the built-in inline text editor.
-* [REQ-251] Edit Behavior Override: When `inline_editor_enabled` is `true`, selecting [Edit] from the file context menu (directory tree or tab bar) shall open the inline editor instead of launching the system default editor.
-* [REQ-252] Editor Content: The inline editor shall display only the raw Markdown body content of the file, excluding the YAML front-matter header. The front-matter shall remain unchanged on save.
-* [REQ-253] Editor UI: The inline editor shall appear as a modal dialog or panel overlay with a monospace text editing area, a status bar showing line/column position, and [Save] and [Cancel] buttons.
-* [REQ-254] Text Selection: The editor shall support standard text selection via mouse drag, double-click to select word, triple-click to select line, and Shift+arrow keys.
-* [REQ-255] Clipboard Operations: The editor shall support Copy (Ctrl+C), Cut (Ctrl+X), and Paste (Ctrl+V) via keyboard shortcuts and context menu.
-* [REQ-256] Cursor Navigation: The editor shall support cursor movement by character (←/→), word (Ctrl+←/→), line (↑/↓), line start (Home), line end (End), document start (Ctrl+Home), and document end (Ctrl+End).
-* [REQ-257] Undo/Redo: The editor shall support Undo (Ctrl+Z) and Redo (Ctrl+Y) with a minimum of 100 history entries.
-* [REQ-258] Markdown Validation: Before saving, the system shall validate the edited Markdown by parsing it with the same GFM parser used for rendering (pulldown-cmark with ENABLE_TABLES, ENABLE_FOOTNOTES, ENABLE_STRIKETHROUGH, ENABLE_TASKLISTS). If parsing fails, the save shall be aborted and an error message displayed with the parse error location.
-* [REQ-259] Save Behavior: On successful validation, the editor shall write the new Markdown body combined with the original YAML front-matter back to the file, then close the editor. The file watcher (REQ-403) shall detect the change and hot-reload the view.
-* [REQ-260] Cancel Behavior: Selecting [Cancel] shall discard all unsaved changes and close the editor without modifying the file.
-* [REQ-261] The inline text editor shall have an inverted, black text on white background color scheme, to help it stand out from other content.
+> Configuration requirements moved to [`src/config/SPEC.md`](src/config/SPEC.md) (CONFIG-001..CONFIG-009). See that file for the full specification of the YAML config file schema, model configuration, virtual path resolution, and default template generation.
 
 ### Markdown
 
@@ -118,7 +107,6 @@ The requirements below have been formatted using the **Easy Approach to Requirem
 * [REQ-451] PDF Visibility: PDF files shall NOT be displayed in the directory tree, tab bar, or exposed to any LLM tools (grep, list_files, read_file, etc.). They remain hidden from the user interface.
 * [REQ-452] Corresponding Markdown Check: For each discovered PDF file, the system shall check if a Markdown file with the same name (same stem, `.md` extension) exists in the same directory. IF the backing PDF exists, the corresponding .MD file shall be rendered in a PDF-appropriate color in the tree
 * [REQ-453] Conversion Trigger: If the corresponding Markdown file does not exist, OR if the Markdown file's last-modified timestamp is older than the PDF's last-modified timestamp, the system shall queue the PDF for conversion.
-* [REQ-454] Converter Configuration: The system shall provide a configuration option `pdf_converter_command` in `config.yaml` specifying the executable and arguments to convert PDF to Markdown. The command shall receive the PDF file path as the first argument and the output Markdown file path as the second argument. Example: `["pandoc", "-f", "pdf", "-t", "markdown", "-o", "{output}", "{input}"]`.
 * [REQ-455] Conversion Execution: The converter shall run as a background process. The system shall capture stdout/stderr and log to the Background Process Log (REQ-460).
 * [REQ-456] Conversion Result Handling: On successful conversion (exit code 0), the generated Markdown file shall be picked up by the normal file watcher (REQ-403) and indexed. On failure, the error shall be logged and the Markdown file shall not be created.
 * [REQ-457] Periodic Scan Progress: During initial indexing (REQ-301), the system shall emit progress messages every 500 files scanned or every 5 seconds (whichever comes first), reporting files processed, PDFs found, and conversions queued/completed.
