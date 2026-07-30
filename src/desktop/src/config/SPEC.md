@@ -1,5 +1,10 @@
 # Configuration Specification
 
+> **GUARDRAIL**: This specification file is managed by the spec-split workflow. Do not edit
+> this file directly unless explicitly instructed. Any changes to requirements must be
+> reflected in the corresponding implementation code. If drift is detected between
+> this spec and the actual code behavior, notify the user immediately.
+>
 > Part of [`SPEC.md`](../../SPEC.md) (FastMD crate). See the [Requirements Index](../../SPEC.md#requirements-index) for the full REQ-xxx → file map.
 >
 > Owns CONFIG-001..CONFIG-009. Cross-cutting requirements that also touch this module are listed at the bottom of this file.

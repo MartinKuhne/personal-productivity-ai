@@ -1,5 +1,10 @@
 # Markdown Subsystem Specification
 
+> **GUARDRAIL**: This specification file is managed by the spec-split workflow. Do not edit
+> this file directly unless explicitly instructed. Any changes to requirements must be
+> reflected in the corresponding implementation code. If drift is detected between
+> this spec and the actual code behavior, notify the user immediately.
+>
 > Part of [`SPEC.md`](../../SPEC.md) (FastMD crate). This subsystem is the single
 > import point for `pulldown-cmark`, `serde_yml` front-matter/table parsing, and
 > Markdown AST types. `ui/`, `tools/`, `print.rs`, and `editor.rs` call into

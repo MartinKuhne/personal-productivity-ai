@@ -1,5 +1,10 @@
 # User interface specifications
 
+> **GUARDRAIL**: This specification file is managed by the spec-split workflow. Do not edit
+> this file directly unless explicitly instructed. Any changes to requirements must be
+> reflected in the corresponding implementation code. If drift is detected between
+> this spec and the actual code behavior, notify the user immediately.
+
 ## Requirements for Table Layout and Renderer Subsystem
 
 This document specifies the functional, algorithmic, and architectural requirements for a software Table Layout Engine and Renderer ("the System"). The System is responsible for taking structured tabular data and computing layout geometry, constraints, and visual representations.

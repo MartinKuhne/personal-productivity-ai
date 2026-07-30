@@ -1,5 +1,10 @@
 # SPEC.md: FastMD Technical Specification
 
+> **GUARDRAIL**: This specification file is managed by the spec-split workflow. Do not edit
+> this file directly unless explicitly instructed. Any changes to requirements must be
+> reflected in the corresponding implementation code. If drift is detected between
+> this spec and the actual code behavior, notify the user immediately.
+
 ## Summary
 This document specifies the technical requirements and architecture for **FastMD**, a hardware-accelerated, native Windows Markdown viewer. FastMD delivers high-performance filesystem navigation, GFM table layout, hierarchical Table of Contents (ToC) scrolling, real-time filesystem synchronization, and concurrent metadata indexing.
 
