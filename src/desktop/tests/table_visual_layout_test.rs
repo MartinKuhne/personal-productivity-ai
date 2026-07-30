@@ -94,6 +94,33 @@ fn collect_text_positions(shapes: &[eframe::epaint::ClippedShape]) -> Vec<(Strin
     out
 }
 
+/// Like [`collect_text_positions`] but also captures the visual bounding
+/// rect of each text shape so tests can measure text width (e.g. for
+/// column-gutter calculations that need to know the right edge of one
+/// cell's text and the left edge of the next).
+fn collect_text_rects(shapes: &[eframe::epaint::ClippedShape]) -> Vec<(String, egui::Rect)> {
+    use eframe::epaint::Shape;
+    fn recurse(shape: &Shape, out: &mut Vec<(String, egui::Rect)>) {
+        match shape {
+            Shape::Text(t) => {
+                out.push((t.galley.text().to_string(), t.visual_bounding_rect()));
+            }
+            Shape::Vec(children) => {
+                for child in children {
+                    recurse(child, out);
+                }
+            }
+            _ => {}
+        }
+    }
+
+    let mut out = Vec::new();
+    for cs in shapes {
+        recurse(&cs.shape, &mut out);
+    }
+    out
+}
+
 #[test]
 fn test_integration_table_header_columns_aligned_at_top_y() {
     let output = render_table_markdown_to_shapes(LAPTOP_TABLE_MARKDOWN, 2000.0);
@@ -345,4 +372,172 @@ fn test_integration_table_snapshot_harness_harness_setup() {
 
     harness.run();
     let _ = harness;
+}
+
+/// Regression: row-to-row vertical gutter in a single-line table must equal
+/// the configured `item_spacing.y` (4.0 px) plus the cell's vertical inner
+/// padding (default `TablePadding::ZERO` = 0).  A rendered gap significantly
+/// larger than 4 px indicates the table is silently adding inter-row space
+/// (e.g. an extra `add_space` or doubled spacing) and the table looks
+/// sparse / "row gutter too large".
+///
+/// Test fixture: a 3-row × 2-column table whose every cell is a single short
+/// line so no wrap changes row height; the inter-row gap is therefore
+/// `cell_height + configured_gutter` and we can subtract the body-text line
+/// height to recover the gutter.
+#[test]
+fn test_integration_table_row_gutter_is_configured_value() {
+    const GUTTER_FIXTURE: &str = r#"
+| Alpha | Bravo |
+| --- | --- |
+| one | two |
+| three | four |
+"#;
+    let output = render_table_markdown_to_shapes(GUTTER_FIXTURE, 600.0);
+    let text_positions = collect_text_positions(&output.shapes);
+
+    // Find the y of each row's first cell text. "Alpha" and "Bravo" share the
+    // header row; we use the header label as the anchor for row 0 and the
+    // first data cell of each subsequent row.
+    fn y_of(text_positions: &[(String, egui::Pos2)], needle: &str) -> f32 {
+        text_positions
+            .iter()
+            .find(|(txt, _)| txt.trim() == needle)
+            .map(|(_, pos)| pos.y)
+            .unwrap_or_else(|| {
+                panic!("expected text {needle:?} in rendered output; got: {text_positions:?}")
+            })
+    }
+
+    let y_header = y_of(&text_positions, "Alpha");
+    let y_row1 = y_of(&text_positions, "one");
+    let y_row2 = y_of(&text_positions, "three");
+
+    // Both data rows contain a single line of body text, so the y-delta
+    // between consecutive row tops is `line_height + configured_gutter`.
+    // The body line height in egui is ~13-15 px depending on font, so the
+    // gutter contribution is `delta_y - line_height`. We assert the
+    // upper bound to be robust against font-loading variations: a healthy
+    // gutter (≤ 8 px) is well under the >20 px the user reported as
+    // "row gutter too large".
+    let delta_row0_to_row1 = y_row1 - y_header;
+    let delta_row1_to_row2 = y_row2 - y_row1;
+
+    // The body text is rendered with `ui.add(egui::Label::new(...).wrap())`,
+    // so its height is the body `TextStyle` line height. egui's default
+    // body height is ~13 px and varies slightly with the active font; we
+    // use 13 px as a conservative baseline. The upper bound of
+    // `line_height + 8 px` corresponds to the configured 4 px row gutter
+    // (see `render_table_with_config` in `src/ui/render.rs`) plus a 4 px
+    // margin to stay robust against font-loading jitter.
+    let line_height: f32 = 13.0;
+
+    // The y-step between the header and the first data row is the gutter
+    // plus any extra space inserted by the header/separator transition.
+    // We compare both deltas to an upper bound of (line_height + 8 px)
+    // which is the "configured 4 px row gutter" plus a 4 px margin.
+    let upper_bound = line_height + 8.0;
+    assert!(
+        delta_row0_to_row1 <= upper_bound,
+        "row gutter between header and first data row is too large: \
+         delta_y = {delta_row0_to_row1:.2} px (line_height ≈ {line_height:.2} px, \
+         upper bound = {upper_bound:.2} px). Rendered text positions: {text_positions:?}"
+    );
+    assert!(
+        delta_row1_to_row2 <= upper_bound,
+        "row gutter between consecutive data rows is too large: \
+         delta_y = {delta_row1_to_row2:.2} px (line_height ≈ {line_height:.2} px, \
+         upper bound = {upper_bound:.2} px). Rendered text positions: {text_positions:?}"
+    );
+
+    // The lower bound sanity-checks that the row spacing is non-trivially
+    // positive (no negative gap from layout collapse).
+    assert!(
+        delta_row0_to_row1 >= line_height - 1.0,
+        "row gutter between header and first data row collapsed: \
+         delta_y = {delta_row0_to_row1:.2} px (line_height ≈ {line_height:.2} px). \
+         Rendered text positions: {text_positions:?}"
+    );
+    assert!(
+        delta_row1_to_row2 >= line_height - 1.0,
+        "row gutter between consecutive data rows collapsed: \
+         delta_y = {delta_row1_to_row2:.2} px (line_height ≈ {line_height:.2} px). \
+         Rendered text positions: {text_positions:?}"
+    );
+}
+
+/// Regression: column-to-column horizontal gutter in a single-row table
+/// must equal the configured `item_spacing.x` of 10.0 px (see
+/// `render_table_with_config`'s row `left_to_right` block in
+/// `src/ui/render.rs`). A rendered gap significantly larger than 10 px
+/// (e.g. doubled to 20 px) is the column-axis analogue of the
+/// "row gutter too large" bug — every cell would be counted twice when
+/// the `push_id` chain walks the cell min_rect up to advance the
+/// row cursor, inflating the gap between adjacent columns.
+///
+/// Test fixture: the same 3-row × 2-column table used for the row-gutter
+/// regression. The two columns are populated with single short words so
+/// the cells size to their natural content width and the measured
+/// column gap is the `push_id`/`item_spacing` gutter (not the FTWA
+/// surplus).
+#[test]
+fn test_integration_table_column_gutter_is_configured_value() {
+    const GUTTER_FIXTURE: &str = r#"
+| Alpha | Bravo |
+| --- | --- |
+| one | two |
+| three | four |
+"#;
+    let output = render_table_markdown_to_shapes(GUTTER_FIXTURE, 600.0);
+    let text_rects = collect_text_rects(&output.shapes);
+
+    // Helper: locate a single-line label's visual bounding rect.
+    fn rect_of(text_rects: &[(String, egui::Rect)], needle: &str) -> egui::Rect {
+        text_rects
+            .iter()
+            .find(|(txt, _)| txt.trim() == needle)
+            .map(|(_, r)| *r)
+            .unwrap_or_else(|| {
+                panic!("expected text {needle:?} in rendered output; got: {text_rects:?}")
+            })
+    }
+
+    // Cells in a row share the same x positions (FTWA pins every row's
+    // cells to the same column widths), so the column-0 / column-1 left
+    // edges are invariant across rows. We measure the gutter using the
+    // *header* row because that row's text is the longest in each
+    // column and therefore fills its cell with the least internal
+    // padding; data rows with shorter text leave empty space on the
+    // right of the column-0 cell, inflating the text-to-text gap by
+    // the empty-cell-width and making the measurement unreliable.
+    let col0 = rect_of(&text_rects, "Alpha");
+    let col1 = rect_of(&text_rects, "Bravo");
+
+    // The cell-to-cell column gutter = column-0 right edge − column-1
+    // left edge. With text that fills its cell this is the configured
+    // 10 px; with the cell padding we observe in this codebase
+    // (~0.2 px on the right of the left cell + ~1 px on the left of
+    // the right cell, from each cell's internal
+    // `left_to_right(Align::Min).with_main_wrap(true)` layout) the
+    // measured text-to-text gap is ~11.2 px. A doubled-gutter
+    // regression would push this to ≈ 20+ px and fail the assertion.
+    const CONFIGURED_COL_GUTTER: f32 = 10.0;
+    const TOLERANCE: f32 = 3.0;
+
+    let gap = col1.min.x - col0.max.x;
+    assert!(
+        (gap - CONFIGURED_COL_GUTTER).abs() <= TOLERANCE,
+        "column gutter is {gap:.2} px, expected \
+         {CONFIGURED_COL_GUTTER:.2} px ± {TOLERANCE:.2} px. \
+         col0 (Alpha)={col0:?}, col1 (Bravo)={col1:?}, all_rects={text_rects:?}"
+    );
+    // A 0 px or negative gap would mean the cells abut (or overlap)
+    // with no gutter at all — also a regression.
+    assert!(
+        gap > 0.0,
+        "column gutter collapsed: gap = {gap:.2} px \
+         (col0.max.x = {:.2}, col1.min.x = {:.2}). all_rects={text_rects:?}",
+        col0.max.x,
+        col1.min.x,
+    );
 }

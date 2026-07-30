@@ -274,7 +274,7 @@ fn render_heading(
 ///
 /// When `pinned_width` is `None` (the §3.6 fallback path), the cell uses
 /// `ui.horizontal` (no wrap) so the cell reports its full single-line intrinsic
-/// width to the parent `Grid`; any overflow is handled by the wrapping
+/// width to the parent table layout; any overflow is handled by the wrapping
 /// `ScrollArea` (current pre-FTWA behaviour).
 ///
 /// **Padding (TBL-032, TBL-033):** `padding` is resolved per-cell by the caller
@@ -287,103 +287,110 @@ fn render_table_cell(
     ui: &mut egui::Ui,
     cell: &[InlineElem],
     pinned_width: Option<f32>,
+    pinned_height: Option<f32>,
     padding: crate::ui::table_width::TablePadding,
-) {
+) -> f32 {
     let pad = padding.sanitised();
     let pad_h = pad.horizontal();
+    let pad_v = pad.vertical();
     // `egui::Margin` stores `i8` fields, so clamp each side to the
     // representable range after rounding. Realistic paddings are small
     // (a few to a few dozen logical px), so this loses no precision in
     // practice and keeps `Margin`'s compact layout intact.
     let to_i8 = |v: f32| -> i8 { v.round().clamp(0.0, 127.0) as i8 };
     let cell_frame = egui::Frame::NONE
+        .fill(egui::Color32::TRANSPARENT)
+        .stroke(egui::Stroke::NONE)
         .inner_margin(egui::Margin {
             left: to_i8(pad.left),
             right: to_i8(pad.right),
             top: to_i8(pad.top),
             bottom: to_i8(pad.bottom),
         })
-        .outer_margin(egui::Margin::ZERO)
-        .stroke(egui::Stroke::NONE);
+        .outer_margin(egui::Margin::ZERO);
 
     let avail_w = ui.available_width();
-    let avail_h = ui.available_height();
     let inner_w = match pinned_width {
         Some(w) => (w - pad_h).max(0.0),
         None => (avail_w - pad_h).max(0.0),
     };
 
-    // Use top_down(Align::Min) so content starts at top y of Grid cell.
-    ui.with_layout(egui::Layout::top_down(egui::Align::Min), |ui| {
-        cell_frame.show(ui, |ui| {
-            if cell.is_empty() {
-                let min_h = ui.text_style_height(&egui::TextStyle::Body);
-                let target_h = if avail_h.is_finite() && avail_h > min_h {
-                    avail_h
-                } else {
-                    min_h
-                };
-                ui.set_min_size(egui::vec2(inner_w, target_h));
-                return;
-            }
+    let frame_res = cell_frame.show(ui, |ui| {
+        let min_h = ui.text_style_height(&egui::TextStyle::Body);
 
-            let content = |ui: &mut egui::Ui| {
-                ui.spacing_mut().item_spacing.x = 0.0;
-                for elem in cell {
-                    match elem {
-                        InlineElem::Text(t, style) => {
-                            let mut rt = RichText::new(t);
-                            if style.bold {
-                                rt = rt.strong();
-                            }
-                            if style.italic {
-                                rt = rt.italics();
-                            }
-                            if style.code {
-                                rt = rt
-                                    .monospace()
-                                    .background_color(egui::Color32::from_gray(40));
-                            }
-                            if style.strikethrough {
-                                rt = rt.strikethrough();
-                            }
-                            ui.add(egui::Label::new(rt).wrap());
+        if cell.is_empty() {
+            let target_h = pinned_height.unwrap_or(min_h);
+            let inner_target = (target_h - pad_v).max(min_h);
+            ui.set_min_size(egui::vec2(inner_w, inner_target));
+            return min_h + pad_v;
+        }
+
+        let content = |ui: &mut egui::Ui| {
+            ui.spacing_mut().item_spacing.x = 0.0;
+            for elem in cell {
+                match elem {
+                    InlineElem::Text(t, style) => {
+                        let mut rt = RichText::new(t);
+                        if style.bold {
+                            rt = rt.strong();
                         }
-                        InlineElem::Link(url, text) => {
-                            ui.hyperlink_to(text, url);
+                        if style.italic {
+                            rt = rt.italics();
                         }
-                        InlineElem::Image(url) => {
-                            ui.label(format!("[Image: {}]", url));
+                        if style.code {
+                            rt = rt
+                                .monospace()
+                                .background_color(egui::Color32::from_gray(40));
                         }
-                        InlineElem::Html(html) => {
-                            ui.label(RichText::new(html).italics().color(egui::Color32::GRAY));
+                        if style.strikethrough {
+                            rt = rt.strikethrough();
                         }
-                        InlineElem::SoftBreak => {
-                            ui.label(" ");
-                        }
+                        ui.add(egui::Label::new(rt).wrap());
+                    }
+                    InlineElem::Link(url, text) => {
+                        ui.hyperlink_to(text, url);
+                    }
+                    InlineElem::Image(url) => {
+                        ui.label(format!("[Image: {}]", url));
+                    }
+                    InlineElem::Html(html) => {
+                        ui.label(RichText::new(html).italics().color(egui::Color32::GRAY));
+                    }
+                    InlineElem::SoftBreak => {
+                        ui.label(" ");
                     }
                 }
-            };
-
-            // Render text content tightly packed at top of cell without min_height constraint.
-            // `TBL-030`/`TBL-031`: `left_to_right(Align::Min)` is LEFT aligned,
-            // `top_down(Align::Min)` (outer scope) is TOP aligned.
-            ui.with_layout(
-                egui::Layout::left_to_right(egui::Align::Min).with_main_wrap(true),
-                |ui| {
-                    ui.set_min_width(inner_w);
-                    ui.set_max_width(inner_w);
-                    content(ui);
-                },
-            );
-
-            // Expand border frame height AFTER text rendering so border box fills row height
-            // without stretching or centering text.
-            if avail_h.is_finite() && avail_h > 0.0 {
-                ui.set_min_height(avail_h);
             }
-        });
+        };
+
+        // Render text content tightly packed at top of cell without min_height constraint.
+        // `TBL-030`/`TBL-031`: `left_to_right(Align::Min)` is LEFT aligned,
+        // `top_down(Align::Min)` (outer scope) is TOP aligned.
+        let content_res = ui.with_layout(
+            egui::Layout::left_to_right(egui::Align::Min).with_main_wrap(true),
+            |ui| {
+                ui.spacing_mut().item_spacing = egui::Vec2::ZERO;
+                ui.set_min_width(inner_w);
+                ui.set_max_width(inner_w);
+                content(ui);
+            },
+        );
+
+        let unconstrained_text_h = content_res.response.rect.height();
+
+        // `pinned_height` is reserved up front by the caller on the *cell* Ui
+        // (see `cell_size.y` in `render_table_with_config`), so the cell frame
+        // here is already inside a `pinned_height`-tall cell. No inner
+        // `set_min_height`/`set_max_height` is needed: those calls would
+        // cause the cell's `min_rect` to be remembered by every ancestor
+        // `push_id`, which would double-count the cell height when advancing
+        // the row cursor and inflate the inter-row gutter to ~17 px (the
+        // "row gutter too large" bug).
+
+        unconstrained_text_h + pad_v
     });
+
+    frame_res.inner
 }
 
 /// Render a markdown table using the Fair Table Width Algorithm (FTWA) with
@@ -401,7 +408,7 @@ fn render_table_cell(
 /// (doc §3.6) so the strongest invariant — never split a token — is
 /// preserved.
 ///
-/// Grid spacing is `[10.0, 4.0]` (10 px gutters). The available content
+/// Column spacing is 10.0 px and row spacing is 4.0 px. The available content
 /// width passed to FTWA subtracts `(N - 1) * 10.0` for those gutters so the
 /// assigned widths sum to the true content rect.
 ///
@@ -423,7 +430,7 @@ fn render_table_with_config(
 
     // Stable id derived from a table ordinal rather than `ui.next_auto_id()`
     // (a positional peek that shifts whenever any widget above the table
-    // changes). Using a content-derived ordinal keeps the Grid's persisted
+    // changes). Using a content-derived ordinal keeps the table's persisted
     // column-width cache stable across edits/reflows.
     let table_id = egui::Id::new("md_table").with(table_ordinal);
     let global_padding = config.global_padding.sanitised();
@@ -443,12 +450,27 @@ fn render_table_with_config(
     );
 
     let render_rows = |ui: &mut egui::Ui, decision_widths: &[f32]| {
-        let _ = egui::Grid::new(table_id.with("grid"))
-                .striped(true)
-                .spacing([10.0, 4.0])
-                .show(ui, |ui| {
-                    for row in table_cells.iter() {
-                        for (j, cell) in row.iter().enumerate() {
+        let cached_heights_id = table_id.with("row_heights");
+        let cached_row_heights: Option<Vec<f32>> = ui.ctx().data(|d| d.get_temp(cached_heights_id));
+        let mut new_row_heights = Vec::with_capacity(table_cells.len());
+
+        ui.vertical(|ui| {
+            ui.spacing_mut().item_spacing = egui::vec2(10.0, 4.0);
+            for (row_idx, row) in table_cells.iter().enumerate() {
+                let is_striped = row_idx % 2 == 1;
+                let bg_idx = if is_striped {
+                    Some(ui.painter().add(egui::Shape::Noop))
+                } else {
+                    None
+                };
+                let target_h = cached_row_heights.as_ref().and_then(|h| h.get(row_idx).copied());
+
+                let mut row_max_h: f32 = 0.0;
+                let row_response = ui.push_id((table_id, "row", row_idx), |ui| {
+                    ui.with_layout(egui::Layout::left_to_right(egui::Align::Min), |ui| {
+                        ui.spacing_mut().item_spacing = egui::vec2(10.0, 0.0);
+                        for j in 0..n {
+                            let cell = row.get(j).map(|v| v.as_slice()).unwrap_or(&[]);
                             let w = decision_widths.get(j).copied();
                             if !decision.needs_horizontal_scroll {
                                 debug_assert!(
@@ -457,21 +479,56 @@ fn render_table_with_config(
                                 );
                             }
                             let w = w.filter(|w| w.is_finite() && *w > 0.0);
-                            ui.with_layout(
-                                egui::Layout::top_down(egui::Align::Min),
-                                |ui| {
-                                    render_table_cell(
-                                        ui,
-                                        cell,
-                                        w,
-                                        global_padding,
-                                    );
-                                },
-                            );
+                            let cell_res = ui.push_id(("col", j), |ui| {
+                                // If we know the row's target height from a previous
+                                // frame, reserve it up front so the cell's natural
+                                // content sits at the top and the cell UI doesn't
+                                // double-expand to 2× the target height (the bug
+                                // that produced a ~17 px "phantom" gutter).
+                                let cell_size = egui::vec2(
+                                    w.unwrap_or_else(|| ui.available_width()),
+                                    target_h.unwrap_or(0.0),
+                                );
+                                ui.allocate_ui_with_layout(
+                                    cell_size,
+                                    egui::Layout::top_down(egui::Align::Min),
+                                    |ui| {
+                                        render_table_cell(
+                                            ui,
+                                            cell,
+                                            w,
+                                            target_h,
+                                            global_padding,
+                                        )
+                                    },
+                                )
+                                .inner
+                            });
+                            let h = cell_res.inner;
+                            if h.is_finite() {
+                                row_max_h = row_max_h.max(h);
+                            }
                         }
-                        ui.end_row();
-                    }
+                    })
                 });
+
+                new_row_heights.push(row_max_h);
+
+                if let Some(idx) = bg_idx {
+                    ui.painter().set(
+                        idx,
+                        egui::Shape::rect_filled(
+                            row_response.response.rect,
+                            0.0,
+                            ui.visuals().faint_bg_color,
+                        ),
+                    );
+                }
+            }
+        });
+
+        ui.ctx()
+            .data_mut(|d| d.insert_temp(cached_heights_id, new_row_heights));
     };
 
     if decision.needs_horizontal_scroll {
@@ -550,52 +607,75 @@ pub fn render_yaml_table(ui: &mut egui::Ui, yaml: &serde_yml::Value) {
                 // horizontal scrollbar.
                 let available_width = ui.available_width();
                 // Reserve a fixed width for the key column and let the
-                // value column take the remainder. Without this, the
-                // `Grid` auto-sizes each column to its widest cell, the
-                // long value cell expands past the panel width, and the
-                // value text gets clipped mid-word (e.g. "Microsoft in
-                // Re…") by the inner horizontal ScrollArea. By giving
-                // each cell an explicit width, the value cell knows its
-                // wrap budget and the total grid width matches
+                // value column take the remainder. Without explicit widths, a
+                // cell might expand past the panel width.
+                // By giving each cell an explicit width, the value cell knows its
+                // wrap budget and the total table width matches
                 // `available_width` exactly, so no horizontal scrolling
                 // is needed.
                 let key_col_width = YAML_KEY_COLUMN_WIDTH.min((available_width - 20.0).max(40.0));
-                // `12.0` matches the Grid's `spacing([12.0, 4.0]).x` below.
+                // `12.0` matches the column spacing `12.0` below.
                 let value_col_width = (available_width - key_col_width - 12.0).max(40.0);
 
-                egui::Grid::new(table_id.with("grid"))
-                    .num_columns(2)
-                    .striped(true)
-                    .spacing([12.0, 4.0])
-                    .show(ui, |ui| {
-                        for (k, v) in pairs {
-                            // Key cell: set key_col_width and align top.
+                ui.vertical(|ui| {
+                    ui.spacing_mut().item_spacing = egui::vec2(12.0, 4.0);
+                    for (row_idx, (k, v)) in pairs.into_iter().enumerate() {
+                        let is_striped = row_idx % 2 == 1;
+                        let bg_idx = if is_striped {
+                            Some(ui.painter().add(egui::Shape::Noop))
+                        } else {
+                            None
+                        };
+
+                        let row_response = ui.push_id((table_id, "yaml_row", row_idx), |ui| {
                             ui.with_layout(egui::Layout::left_to_right(egui::Align::Min), |ui| {
-                                ui.set_min_width(key_col_width);
-                                ui.set_max_width(key_col_width);
-                                ui.label(
-                                    RichText::new(k)
-                                        .strong()
-                                        .color(egui::Color32::from_rgb(150, 200, 255)),
-                                );
-                            });
-                            // Value cell: set value_col_width and wrap text inside.
-                            // `with_layout` computes the full wrapped `min_rect`
-                            // and allocates it in the Grid cell, so the row height
-                            // expands properly to fit multi-line values.
-                            ui.with_layout(egui::Layout::left_to_right(egui::Align::Min), |ui| {
-                                ui.set_min_width(value_col_width);
-                                ui.set_max_width(value_col_width);
-                                ui.add(
-                                    egui::Label::new(
-                                        RichText::new(v).color(egui::Color32::from_gray(220)),
-                                    )
-                                    .wrap(),
-                                );
-                            });
-                            ui.end_row();
+                                // Key cell: set key_col_width and align top.
+                                ui.push_id("key", |ui| {
+                                    ui.with_layout(
+                                        egui::Layout::left_to_right(egui::Align::Min),
+                                        |ui| {
+                                            ui.set_min_width(key_col_width);
+                                            ui.set_max_width(key_col_width);
+                                            ui.label(
+                                                RichText::new(k)
+                                                    .strong()
+                                                    .color(egui::Color32::from_rgb(150, 200, 255)),
+                                            );
+                                        },
+                                    );
+                                });
+                                // Value cell: set value_col_width and wrap text inside.
+                                ui.push_id("value", |ui| {
+                                    ui.with_layout(
+                                        egui::Layout::left_to_right(egui::Align::Min),
+                                        |ui| {
+                                            ui.set_min_width(value_col_width);
+                                            ui.set_max_width(value_col_width);
+                                            ui.add(
+                                                egui::Label::new(
+                                                    RichText::new(v)
+                                                        .color(egui::Color32::from_gray(220)),
+                                                )
+                                                .wrap(),
+                                            );
+                                        },
+                                    );
+                                });
+                            })
+                        });
+
+                        if let Some(idx) = bg_idx {
+                            ui.painter().set(
+                                idx,
+                                egui::Shape::rect_filled(
+                                    row_response.response.rect,
+                                    0.0,
+                                    ui.visuals().faint_bg_color,
+                                ),
+                            );
                         }
-                    });
+                    }
+                });
             });
         ui.add_space(8.0);
     }
@@ -612,7 +692,29 @@ pub fn render_markdown(
     pending_toggles: &mut Vec<(usize, bool)>,
     strategy: crate::ui::table_width::DeficitStrategy,
 ) {
-    let events = parse_markdown_to_events(markdown_text);
+    use std::sync::Arc;
+    let text_hash = egui::Id::new(markdown_text);
+    let cache_key = egui::Id::new("md_events_cache");
+    type CachedEvents = (egui::Id, Arc<Vec<RenderEvent>>);
+
+    let events: Arc<Vec<RenderEvent>> = if let Some((cached_hash, cached_events)) =
+        ui.ctx().data(|d| d.get_temp::<CachedEvents>(cache_key))
+    {
+        if cached_hash == text_hash {
+            cached_events
+        } else {
+            let parsed = Arc::new(parse_markdown_to_events(markdown_text));
+            ui.ctx()
+                .data_mut(|d| d.insert_temp(cache_key, (text_hash, parsed.clone())));
+            parsed
+        }
+    } else {
+        let parsed = Arc::new(parse_markdown_to_events(markdown_text));
+        ui.ctx()
+            .data_mut(|d| d.insert_temp(cache_key, (text_hash, parsed.clone())));
+        parsed
+    };
+
     let mut table_ordinal = 0usize;
     let mut task_index = 0usize;
 
@@ -633,7 +735,34 @@ pub fn render_markdown(
         id
     };
 
-    for event in events {
+    let clip = ui.clip_rect();
+    let viewport_margin = 400.0_f32;
+
+    for event in events.iter() {
+        let top_y = ui.cursor().min.y;
+        if clip.is_positive() && top_y > clip.max.y + viewport_margin {
+            match event {
+                RenderEvent::FlushInline {
+                    elems,
+                    task_checked,
+                    ..
+                } => {
+                    if task_checked.is_some() {
+                        task_index += 1;
+                    }
+                    let est_h = (elems.len() as f32 * 18.0).max(18.0);
+                    ui.add_space(est_h);
+                    continue;
+                }
+                RenderEvent::CodeBlock(content) => {
+                    let line_count = content.lines().count().max(1) as f32;
+                    let est_h = line_count * 18.0 + 20.0;
+                    ui.add_space(est_h);
+                    continue;
+                }
+                _ => {}
+            }
+        }
         match event {
             RenderEvent::FlushInline {
                 elems,
@@ -646,11 +775,11 @@ pub fn render_markdown(
                 // checkbox toggles can be mapped back to the source.
                 render_inline(
                     ui,
-                    &elems,
-                    needs_bullet,
-                    task_checked,
-                    indent,
-                    list_ordinal,
+                    elems,
+                    *needs_bullet,
+                    *task_checked,
+                    *indent,
+                    *list_ordinal,
                     task_index,
                     pending_toggles,
                 );
@@ -659,21 +788,21 @@ pub fn render_markdown(
                 }
             }
             RenderEvent::CodeBlock(content) => {
-                render_code_block(ui, &content);
+                render_code_block(ui, content);
             }
             RenderEvent::Heading { level, elems } => {
-                let text = heading_plain_text(&elems);
+                let text = heading_plain_text(elems);
                 let trimmed = text.trim();
                 if trimmed.is_empty() {
                     continue;
                 }
                 let heading_id = heading_id_for(trimmed);
-                render_heading(ui, &elems, level, scroll_to_id, heading_id);
+                render_heading(ui, elems, *level, scroll_to_id, heading_id);
             }
             RenderEvent::Table(cells) => {
                 render_table_with_config(
                     ui,
-                    &cells,
+                    cells,
                     table_ordinal,
                     strategy,
                     &crate::ui::table_width::TableRenderConfig::default(),
@@ -681,7 +810,7 @@ pub fn render_markdown(
                 table_ordinal += 1;
             }
             RenderEvent::Space(amount) => {
-                ui.add_space(amount);
+                ui.add_space(*amount);
             }
             RenderEvent::Separator => {
                 ui.separator();
@@ -4028,5 +4157,137 @@ def foo():
         });
 
         assert_no_offscreen_text(&output.shapes);
+    }
+
+    /// Regression test: Verify that table row heights remain 100% stable
+    /// across multiple consecutive render frames (frame 1 through 10) on the
+    /// same egui::Context, with zero inter-frame height growth or oscillation.
+    #[test]
+    fn test_render_table_multi_frame_height_stability() {
+        let md = "| Col 1 | Col 2 |\n|---|---|\n| Short cell | Multi line cell with long text wrapping into several lines |\n";
+        let ctx = egui::Context::default();
+        let mut frame_1_heights: Vec<f32> = Vec::new();
+
+        for frame in 0..30 {
+            let raw = egui::RawInput {
+                screen_rect: Some(egui::Rect::from_min_size(
+                    egui::Pos2::ZERO,
+                    egui::vec2(800.0, 600.0),
+                )),
+                ..egui::RawInput::default()
+            };
+            let mut scroll_id = None;
+            let mut pending_toggles = Vec::new();
+
+            let output = ctx.run_ui(raw, |ui| {
+                egui::CentralPanel::default().show(ui, |ui| {
+                    render_markdown(
+                        ui,
+                        md,
+                        &mut scroll_id,
+                        &mut pending_toggles,
+                        crate::ui::table_width::DeficitStrategy::ProportionalToSlack,
+                    );
+                });
+            });
+
+            let current_rect_heights: Vec<f32> = output
+                .shapes
+                .iter()
+                .filter_map(|cs| match &cs.shape {
+                    egui::Shape::Rect(r)
+                        if r.fill == egui::Color32::TRANSPARENT
+                            && r.stroke == egui::Stroke::NONE
+                            && r.stroke_kind == egui::StrokeKind::Inside =>
+                    {
+                        Some(r.rect.height())
+                    }
+                    _ => None,
+                })
+                .collect();
+
+            assert_eq!(
+                current_rect_heights.len(),
+                4,
+                "Expected 4 cell rects (2x2 table)"
+            );
+
+            if frame == 1 {
+                frame_1_heights = current_rect_heights.clone();
+            } else if frame > 1 {
+                for (idx, (h_base, h_curr)) in frame_1_heights
+                    .iter()
+                    .zip(current_rect_heights.iter())
+                    .enumerate()
+                {
+                    assert!(
+                        (h_base - h_curr).abs() < 0.01,
+                        "Frame {frame}: Cell rect {idx} height changed from {h_base} (frame 1) to {h_curr}!"
+                    );
+                }
+            }
+        }
+    }
+
+    /// Regression test: Verify that cell text in tall rows starts top-aligned
+    /// (matching Y coordinate) and that row height is compact (< 150px).
+    #[test]
+    fn test_render_table_top_aligned_and_compact_row_height() {
+        let md = "| Short | Tall |\n|---|---|\n| Cell A | Line 1<br>Line 2<br>Line 3<br>Line 4 |\n";
+        let ctx = egui::Context::default();
+        let raw = egui::RawInput {
+            screen_rect: Some(egui::Rect::from_min_size(
+                egui::Pos2::ZERO,
+                egui::vec2(800.0, 600.0),
+            )),
+            ..egui::RawInput::default()
+        };
+        let mut scroll_id = None;
+        let mut pending_toggles = Vec::new();
+
+        let output = ctx.run_ui(raw, |ui| {
+            egui::CentralPanel::default().show(ui, |ui| {
+                render_markdown(
+                    ui,
+                    md,
+                    &mut scroll_id,
+                    &mut pending_toggles,
+                    crate::ui::table_width::DeficitStrategy::ProportionalToSlack,
+                );
+            });
+        });
+
+        // Find cell rects for Row 1
+        let rects: Vec<_> = output
+            .shapes
+            .iter()
+            .filter_map(|cs| match &cs.shape {
+                egui::Shape::Rect(r)
+                    if r.fill == egui::Color32::TRANSPARENT
+                        && r.stroke == egui::Stroke::NONE
+                        && r.stroke_kind == egui::StrokeKind::Inside =>
+                {
+                    Some(r.rect)
+                }
+                _ => None,
+            })
+            .collect();
+
+        assert_eq!(rects.len(), 4, "Expected 4 cell rects for 2x2 table");
+
+        // Row 1 short cell (rects[2]) and tall cell (rects[3]) should have identical top Y
+        assert!(
+            (rects[2].min.y - rects[3].min.y).abs() < 1.0,
+            "Row 1 cells top Y mismatch: short cell top Y = {}, tall cell top Y = {}",
+            rects[2].min.y,
+            rects[3].min.y
+        );
+
+        // Row 1 height should be compact and bounded
+        assert!(
+            rects[2].height() < 150.0,
+            "Row height too tall: {}",
+            rects[2].height()
+        );
     }
 }
