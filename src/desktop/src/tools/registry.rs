@@ -1360,9 +1360,9 @@ impl Tool for CsvQueryTool {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::file_events::Bus;
+    use crate::app::watcher::events::Bus;
 
-    fn test_bus() -> &'static Bus<crate::file_events::FileEvent> {
+    fn test_bus() -> &'static Bus<crate::app::watcher::events::FileEvent> {
         Box::leak(Box::new(Bus::new()))
     }
 

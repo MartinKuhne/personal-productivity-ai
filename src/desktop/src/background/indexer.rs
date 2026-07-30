@@ -1,10 +1,10 @@
 //! Initial recursive scanner — walks content-library directories emitting `FileEvent::Discovered` for each entry.
 
+use crate::app::messages::BackgroundMessage;
+use crate::app::watcher::events::{Bus, FileEvent};
 use crate::background::PdfConversionJob;
 use crate::background::models::{BackgroundLogEntry, LogCategory};
 use crate::config::AppConfig;
-use crate::file_events::{Bus, FileEvent};
-use crate::messages::BackgroundMessage;
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::{Receiver, Sender};
@@ -216,7 +216,7 @@ mod tests {
 
         let mut discovered = Vec::new();
         while let Ok(ev) = reader.recv_timeout(std::time::Duration::from_millis(100)) {
-            if ev.kind == crate::file_events::FileEventKind::Discovered {
+            if ev.kind == crate::app::watcher::events::FileEventKind::Discovered {
                 discovered.extend(ev.paths);
             }
         }
@@ -254,7 +254,7 @@ mod tests {
 
         let mut discovered = Vec::new();
         while let Ok(ev) = reader.recv_timeout(std::time::Duration::from_millis(100)) {
-            if ev.kind == crate::file_events::FileEventKind::Discovered {
+            if ev.kind == crate::app::watcher::events::FileEventKind::Discovered {
                 discovered.extend(ev.paths);
             }
         }
@@ -332,7 +332,7 @@ mod tests {
 
         let mut parsed_paths: std::collections::HashSet<PathBuf> = std::collections::HashSet::new();
         while let Ok(msg) = rx_gui.recv_timeout(std::time::Duration::from_secs(5)) {
-            if let crate::messages::BackgroundMessage::FileParsed { path, .. } = msg {
+            if let crate::app::messages::BackgroundMessage::FileParsed { path, .. } = msg {
                 parsed_paths.insert(path);
             }
         }
@@ -396,7 +396,7 @@ mod tests {
         let mut got_file_parsed = false;
         let start = std::time::Instant::now();
         while start.elapsed() < std::time::Duration::from_secs(2) {
-            if let Ok(crate::messages::BackgroundMessage::FileParsed { path, tags }) =
+            if let Ok(crate::app::messages::BackgroundMessage::FileParsed { path, tags }) =
                 rx_gui.recv_timeout(std::time::Duration::from_millis(100))
             {
                 assert_eq!(path, missing);

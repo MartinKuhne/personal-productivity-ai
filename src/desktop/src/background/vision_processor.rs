@@ -1,9 +1,9 @@
 //! Vision-model inference worker — generates markdown descriptions for discovered images using an LLM.
 
+use crate::app::messages::BackgroundMessage;
+use crate::app::watcher::events::{Bus, FileEvent, FileEventProducer};
 use crate::background::models::{BackgroundLogEntry, ImageJob, LogCategory};
 use crate::config::AppConfig;
-use crate::file_events::{Bus, FileEvent, FileEventProducer};
-use crate::messages::BackgroundMessage;
 use base64::{Engine as _, engine::general_purpose::STANDARD as b64};
 use serde_json::json;
 use std::path::PathBuf;
@@ -207,8 +207,8 @@ impl ImageVisionWorker {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::app::watcher::events::{Bus, FileEvent};
     use crate::config::{AppConfig, LlmConfig};
-    use crate::file_events::{Bus, FileEvent};
     use std::path::PathBuf;
     use std::sync::mpsc;
 
@@ -323,7 +323,10 @@ mod tests {
         let event = reader
             .recv_timeout(std::time::Duration::from_millis(200))
             .expect("process_image should publish a Discovered event for the output .md");
-        assert_eq!(event.kind, crate::file_events::FileEventKind::Discovered);
+        assert_eq!(
+            event.kind,
+            crate::app::watcher::events::FileEventKind::Discovered
+        );
         assert_eq!(event.paths[0], md_path);
     }
 

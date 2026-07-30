@@ -1,6 +1,6 @@
 //! Maintains the set of all known directories by consuming file events from the event bus.
 
-use crate::file_events::{BusReader, FileEvent, FileEventKind};
+use crate::app::watcher::events::{BusReader, FileEvent, FileEventKind};
 use std::collections::HashSet;
 use std::path::{Path, PathBuf};
 
@@ -115,7 +115,7 @@ impl DirectoryTracker {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::file_events::Bus;
+    use crate::app::watcher::events::Bus;
 
     fn make_bus_and_tracker() -> (Bus<FileEvent>, DirectoryTracker) {
         let bus: Bus<FileEvent> = Bus::new();

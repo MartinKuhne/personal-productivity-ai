@@ -1,7 +1,7 @@
 //! Tool context — provides tools with access to `AppConfig` and the file event bus, plus safe virtual-path resolution.
 
+use crate::app::watcher::events::{Bus, FileEvent, FileEventKind, FileEventProducer};
 use crate::config::{AppConfig, VirtualPath, VirtualPathError};
-use crate::file_events::{Bus, FileEvent, FileEventKind, FileEventProducer};
 use std::path::{Path, PathBuf};
 
 pub struct ToolContext<'a> {

@@ -169,6 +169,36 @@ When adding or moving code, place files by **concern**, not by type:
   `pub use` in the parent `mod.rs`. External callers (and `main.rs`) must not
   see path changes.
 
+### `app/` is egui-free
+
+The `app/` module owns the application-domain types: managers
+(`TabManager`, `SelectionManager`, `DialogManager`, `PanelLayout`,
+`TagManager`), the file-watcher plumbing (`Bus<FileEvent>`,
+`FileEventProcessor`, `DirectoryTracker`, `FileWatcher`,
+`FileEventProducer`), the `BackgroundMessage` channel, the `ToCEntry`
+data type, and the persisted UI struct (`PersistedUiState`).
+
+- **No `egui` references.** No `.rs` file under `app/` may import
+  `eframe::egui`, `egui`, or any other UI crate. Doc comments may
+  mention `egui::Id` (e.g. to document how a stable string id
+  maps to one at render time), but `use` statements must not.
+  The module is unit-tested without driving the UI harness, so an
+  `egui` dependency would couple those tests to the framework.
+- **Stable identifiers are `String`s.** Anything the UI layer needs
+  to address by id (`ToCEntry::id`, `TabManager::scroll_to_header_id`,
+  `AgentState::scroll_to_id`) is stored as a `String` (or
+  `Option<String>`). The UI layer converts to `egui::Id::new(&s)`
+  at the boundary.
+- **The UI layer adapts, the app layer doesn't.** `app/` exposes
+  plain Rust types and behaviour; `ui/` is the only consumer that
+  knows about `eframe::egui`. New application-domain types belong in
+  `app/`; new rendering concerns belong in `ui/`.
+- **Verification.** `cargo clippy --all-targets` does not catch
+  accidental `egui` imports in `app/` (clippy is framework-agnostic).
+  When adding code under `app/`, run
+  `rg -n '^\s*use .*egui|^\s*use eframe' src/desktop/src/app` and
+  confirm it returns nothing.
+
 ## 6. Quality Gate (Rust)
 
 Before marking any task as complete, run the following from `src/desktop/` and ensure they all pass cleanly:

@@ -276,9 +276,9 @@ pub fn show_left_panel(app: &mut FastMdApp, parent_ui: &mut egui::Ui) {
                             modifiers,
                             inline_editor_enabled,
                             bg_tx: &Some(tx),
-                            file_event_producer: Some(crate::file_events::FileEventProducer::new(
-                                file_event_bus,
-                            )),
+                            file_event_producer: Some(
+                                crate::app::watcher::events::FileEventProducer::new(file_event_bus),
+                            ),
                         },
                     };
                     for i in row_range {

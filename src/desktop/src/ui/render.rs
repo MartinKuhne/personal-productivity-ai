@@ -186,15 +186,17 @@ fn copy_code_to_output(ui: &mut egui::Ui, content: &str) {
 /// Purpose: Renders a heading.
 ///
 /// Inputs: `ui` (mut), `elems` (heading inline elements), `level`,
-/// `scroll_to_id` (mut), `heading_id` (pre-computed stable id).
+/// `scroll_to_id_str` (mut, the stable string id of the heading
+/// the user wants to scroll to), `heading_id_str` (pre-computed
+/// stable string id for this heading).
 ///
 /// Purity: Impure (modifies UI state). Thin adapter.
 fn render_heading(
     ui: &mut egui::Ui,
     elems: &[InlineElem],
     level: u32,
-    scroll_to_id: &mut Option<egui::Id>,
-    heading_id: egui::Id,
+    scroll_to_id_str: &mut Option<String>,
+    heading_id_str: &str,
 ) {
     let plain = heading_plain_text(elems);
     let trimmed = plain.trim().to_string();
@@ -256,9 +258,9 @@ fn render_heading(
             }
         }
     });
-    if *scroll_to_id == Some(heading_id) {
+    if scroll_to_id_str.as_deref() == Some(heading_id_str) {
         response.response.scroll_to_me(Some(egui::Align::Center));
-        *scroll_to_id = None;
+        *scroll_to_id_str = None;
     }
     ui.add_space(4.0);
 }
@@ -682,13 +684,20 @@ pub fn render_yaml_table(ui: &mut egui::Ui, yaml: &serde_yml::Value) {
 }
 
 /// Purpose: Renders markdown text to UI.
-/// Inputs: `ui` (mut), `markdown_text`, `scroll_to_id` (mut)
+/// Inputs: `ui` (mut), `markdown_text`, `scroll_to_id_str` (mut, the
+/// stable string id of the heading the centre panel should scroll to)
 /// Outputs: None
 /// Purity: Impure (modifies UI state). Coordinates parsing and rendering.
+///
+/// `scroll_to_id_str` is the egui-free stable identifier that lives in
+/// `TabManager::scroll_to_header_id`; this function takes it by `&mut
+/// Option<String>`, converts it to an `egui::Id` for the inner
+/// scroll-to-me comparison, and clears the field when the matching
+/// heading has been scrolled to.
 pub fn render_markdown(
     ui: &mut egui::Ui,
     markdown_text: &str,
-    scroll_to_id: &mut Option<egui::Id>,
+    scroll_to_id_str: &mut Option<String>,
     pending_toggles: &mut Vec<(usize, bool)>,
     strategy: crate::ui::table_width::DeficitStrategy,
 ) {
@@ -724,12 +733,12 @@ pub fn render_markdown(
     // duplicates (occurrence > 0).
     use std::collections::HashMap;
     let mut heading_seen: HashMap<String, usize> = HashMap::new();
-    let mut heading_id_for = |text: &str| -> egui::Id {
+    let mut heading_id_for = |text: &str| -> String {
         let occurrence = heading_seen.entry(text.to_string()).or_insert(0);
         let id = if *occurrence == 0 {
-            egui::Id::new(text)
+            text.to_string()
         } else {
-            egui::Id::new(text).with(*occurrence)
+            format!("{}#{}", text, *occurrence)
         };
         *occurrence += 1;
         id
@@ -796,8 +805,8 @@ pub fn render_markdown(
                 if trimmed.is_empty() {
                     continue;
                 }
-                let heading_id = heading_id_for(trimmed);
-                render_heading(ui, elems, *level, scroll_to_id, heading_id);
+                let heading_id_str = heading_id_for(trimmed);
+                render_heading(ui, elems, *level, scroll_to_id_str, &heading_id_str);
             }
             RenderEvent::Table(cells) => {
                 render_table_with_config(
@@ -2125,9 +2134,9 @@ def foo():
         // body — capture the relevant state into cells, run the
         // closure, then assert in the test body.
         let ctx = egui::Context::default();
-        let target_id = egui::Id::new("Target Heading");
-        let mut scroll_id: Option<egui::Id> = Some(target_id);
-        let mut dummy_scroll: Option<egui::Id> = Some(target_id);
+        let target_id_str = "Target Heading".to_string();
+        let mut scroll_id: Option<String> = Some(target_id_str.clone());
+        let mut dummy_scroll: Option<String> = Some(target_id_str.clone());
 
         let _ = ctx.run_ui(egui::RawInput::default(), |ui| {
             egui::CentralPanel::default().show(ui, |ui| {
@@ -2135,9 +2144,9 @@ def foo():
                     "Target Heading".to_string(),
                     TextStyle::default(),
                 )];
-                render_heading(ui, &elems, 1, &mut scroll_id, target_id);
+                render_heading(ui, &elems, 1, &mut scroll_id, &target_id_str);
                 // Empty title should not trigger scroll
-                render_heading(ui, &[], 1, &mut dummy_scroll, target_id);
+                render_heading(ui, &[], 1, &mut dummy_scroll, &target_id_str);
             });
         });
 
@@ -2147,7 +2156,7 @@ def foo():
         );
         assert_eq!(
             dummy_scroll,
-            Some(target_id),
+            Some(target_id_str),
             "empty title should not trigger scroll"
         );
     }

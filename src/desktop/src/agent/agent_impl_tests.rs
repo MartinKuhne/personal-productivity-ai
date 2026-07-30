@@ -2,8 +2,8 @@
 
 use crate::agent::agent_impl::run_agent;
 use crate::agent::context::AgentContext;
+use crate::app::messages::BackgroundMessage;
 use crate::config::AppConfig;
-use crate::messages::BackgroundMessage;
 use std::collections::HashSet;
 use std::sync::Arc;
 use std::sync::atomic::AtomicBool;
@@ -28,7 +28,7 @@ fn make_ctx(config: AppConfig) -> (AgentContext, std::sync::mpsc::Receiver<Backg
     let ctx = AgentContext {
         config,
         tx_gui: tx,
-        file_event_bus: crate::file_events::Bus::new(),
+        file_event_bus: crate::app::watcher::events::Bus::new(),
         active_file: None,
         active_dir: None,
         selected_files: HashSet::new(),
@@ -247,7 +247,7 @@ fn test_run_agent_skips_done_status_when_cancelled() {
     let ctx = AgentContext {
         config: make_config(port),
         tx_gui: tx,
-        file_event_bus: crate::file_events::Bus::new(),
+        file_event_bus: crate::app::watcher::events::Bus::new(),
         active_file: None,
         active_dir: None,
         selected_files: HashSet::new(),

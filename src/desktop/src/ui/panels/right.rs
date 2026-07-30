@@ -60,15 +60,16 @@ pub fn calculate_font_size(level: usize) -> f32 {
 /// Outputs: ()
 /// Purity: Impure (mutates `app.tab_manager.scroll_to_header_id`).
 /// Preconditions: None.
-/// Postconditions: `app.tab_manager.scroll_to_header_id == Some(entry_id)`
+/// Postconditions: `app.tab_manager.scroll_to_header_id == Some(entry_id_str)`
 /// after the call. The center panel reads this field on the next
-/// frame and scrolls the markdown to the heading with that id.
+/// frame, converts it to an `egui::Id` at render time, and scrolls
+/// the markdown to the heading with that id.
 ///
 /// The TOC row click in `show_right_panel` calls this function. It
 /// is extracted so the side effect can be unit-tested without
 /// driving the egui harness.
-pub fn apply_toc_row_click(app: &mut FastMdApp, entry_id: egui::Id) {
-    app.tab_manager.scroll_to_header_id = Some(entry_id);
+pub fn apply_toc_row_click(app: &mut FastMdApp, entry_id: &str) {
+    app.tab_manager.scroll_to_header_id = Some(entry_id.to_string());
 }
 
 pub fn show_right_panel(app: &mut FastMdApp, parent_ui: &mut egui::Ui) {
@@ -157,7 +158,7 @@ pub fn show_right_panel_capture(
                 .show(ui, |ui| {
                     let toc_snapshot = app.tab_manager.toc.clone();
                     for (i, entry) in toc_snapshot.iter().enumerate() {
-                        ui.push_id((i, entry.id, "toc_item"), |ui| {
+                        ui.push_id((i, &entry.id, "toc_item"), |ui| {
                             let font_size = calculate_font_size(entry.level as usize);
                             let indent = calculate_indent(entry.level as usize);
                             ui.horizontal(|ui| {
@@ -175,7 +176,7 @@ pub fn show_right_panel_capture(
                                 )
                                 .truncate();
                                 if ui.add(label).clicked() {
-                                    apply_toc_row_click(app, entry.id);
+                                    apply_toc_row_click(app, &entry.id);
                                     on_click("toc_row");
                                 }
                             });
@@ -213,19 +214,20 @@ mod tests {
     }
 
     /// Tier 1 test for the TOC row click effect. The click sets
-    /// `app.tab_manager.scroll_to_header_id` to `Some(entry_id)`;
-    /// the center panel reads this on the next frame and scrolls
-    /// the markdown to the heading with that id. We verify the
-    /// effect without driving the egui harness.
+    /// `app.tab_manager.scroll_to_header_id` to `Some(entry_id_str)`;
+    /// the center panel reads this on the next frame, converts it
+    /// to an `egui::Id`, and scrolls the markdown to the heading
+    /// with that id. We verify the effect without driving the
+    /// egui harness.
     #[test]
     fn test_apply_toc_row_click_sets_scroll_to_header_id() {
         let mut app = create_test_app();
-        let id = egui::Id::new("intro");
+        let id = "intro".to_string();
         assert!(
             app.tab_manager.scroll_to_header_id.is_none(),
             "scroll_to_header_id must start as None"
         );
-        apply_toc_row_click(&mut app, id);
+        apply_toc_row_click(&mut app, &id);
         assert_eq!(
             app.tab_manager.scroll_to_header_id,
             Some(id),
@@ -241,10 +243,10 @@ mod tests {
     #[test]
     fn test_apply_toc_row_click_overwrites_previous_scroll_target() {
         let mut app = create_test_app();
-        let id_a = egui::Id::new("a");
-        let id_b = egui::Id::new("b");
-        apply_toc_row_click(&mut app, id_a);
-        apply_toc_row_click(&mut app, id_b);
+        let id_a = "a".to_string();
+        let id_b = "b".to_string();
+        apply_toc_row_click(&mut app, &id_a);
+        apply_toc_row_click(&mut app, &id_b);
         assert_eq!(app.tab_manager.scroll_to_header_id, Some(id_b));
     }
 
@@ -265,7 +267,7 @@ mod tests {
             app.tabs_mut().toc.push(crate::ui::ToCEntry {
                 title: "Introduction".to_string(),
                 level: 1,
-                id: egui::Id::new("intro"),
+                id: "intro".to_string(),
             });
             *app.selection_mut().selected_file_mut() = Some(std::path::PathBuf::from("doc.md"));
             show_right_panel_capture(&mut app, ui, |event| {
@@ -327,7 +329,7 @@ mod tests {
         app.tabs_mut().toc.push(ToCEntry {
             title: "Header".to_string(),
             level: 1,
-            id: egui::Id::new("header"),
+            id: "header".to_string(),
         });
         *app.selection_mut().selected_file_mut() = None;
 
@@ -343,12 +345,12 @@ mod tests {
         app.tabs_mut().toc.push(ToCEntry {
             title: "Header 1".to_string(),
             level: 1,
-            id: egui::Id::new("h1"),
+            id: "h1".to_string(),
         });
         app.tabs_mut().toc.push(ToCEntry {
             title: "Header 2".to_string(),
             level: 2,
-            id: egui::Id::new("h2"),
+            id: "h2".to_string(),
         });
         *app.selection_mut().selected_file_mut() = Some(PathBuf::from("doc.md"));
 
@@ -425,7 +427,7 @@ mod tests {
         app.tabs_mut().toc.push(ToCEntry {
             title: long_title.clone(),
             level: 1,
-            id: egui::Id::new("long"),
+            id: "long".to_string(),
         });
         *app.selection_mut().selected_file_mut() = Some(PathBuf::from("doc.md"));
 

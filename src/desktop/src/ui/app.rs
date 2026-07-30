@@ -1,22 +1,19 @@
 //! Root egui `App` struct Ã¢â‚¬â€ owns all application state and wires together background tasks, panels, agent, and dialogs.
 
 use crate::agent::AgentSessionManager;
+use crate::app::messages::BackgroundMessage;
+use crate::app::watcher::directory_tracker::DirectoryTracker;
+use crate::app::watcher::file_processor::FileEventProcessor;
+use crate::app::{
+    DialogManager, PanelLayout, PersistedUiState, SelectionManager, TabManager, TagManager,
+};
 use crate::background::{BackgroundProcessManager, SharedProcessManager};
 use crate::background_task::Task;
-use crate::directory_tracker::DirectoryTracker;
-use crate::file_processor::FileEventProcessor;
-use crate::messages::BackgroundMessage;
-use crate::tag_manager::TagManager;
-use crate::ui::dialog_manager::DialogManager;
-use crate::ui::panel_layout::PanelLayout;
 use crate::ui::panels::{
     show_bottom_panel, show_center_panel, show_left_panel, show_right_panel, show_top_panel,
 };
-use crate::ui::selection_manager::SelectionManager;
-use crate::ui::tab_manager::TabManager;
 use crate::utils::markdown::parse_front_matter;
 use eframe::egui;
-use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, HashSet};
 use std::path::PathBuf;
 use std::sync::mpsc::Receiver;
@@ -42,30 +39,15 @@ impl TreeNode {
     }
 }
 
-#[derive(Clone)]
-pub struct ToCEntry {
-    pub title: String,
-    pub level: u32,
-    pub id: egui::Id,
-}
-
-/// UI state persisted across application restarts via `eframe::Storage`.
-#[derive(Serialize, Deserialize, Clone, Debug, Default)]
-pub struct PersistedUiState {
-    #[serde(default)]
-    pub left_panel_width: Option<f32>,
-    #[serde(default)]
-    pub expanded_dirs: HashSet<PathBuf>,
-}
-
 const PERSISTED_UI_STATE_KEY: &str = "ppai_ui_state";
 
 pub struct FastMdApp {
     pub content_libraries: Vec<crate::config::ContentLibrary>,
     pub rx: Receiver<BackgroundMessage>,
     pub tx: std::sync::mpsc::Sender<BackgroundMessage>,
-    pub file_event_bus: crate::file_events::Bus<crate::file_events::FileEvent>,
-    pub file_event_reader: Option<crate::file_events::BusReader<crate::file_events::FileEvent>>,
+    pub file_event_bus: crate::app::watcher::events::Bus<crate::app::watcher::events::FileEvent>,
+    pub file_event_reader:
+        Option<crate::app::watcher::events::BusReader<crate::app::watcher::events::FileEvent>>,
     pub file_processor: FileEventProcessor,
     pub tag_manager: TagManager,
     pub directory_tracker: DirectoryTracker,
@@ -187,7 +169,7 @@ impl FastMdApp {
     /// Returns `true` if any event was processed, so callers can
     /// schedule a follow-up UI repaint.
     fn process_file_events(&mut self) -> bool {
-        use crate::file_events::FileEventKind;
+        use crate::app::watcher::events::FileEventKind;
 
         let mut changed = false;
         let mut needs_rebuild = false;
@@ -455,9 +437,11 @@ impl FastMdApp {
             content_libraries: Vec::new(),
             rx,
             tx,
-            file_event_bus: crate::file_events::Bus::new(),
+            file_event_bus: crate::app::watcher::events::Bus::new(),
             file_event_reader: None,
-            file_processor: FileEventProcessor::new(crate::file_events::BusReader::detached()),
+            file_processor: FileEventProcessor::new(
+                crate::app::watcher::events::BusReader::detached(),
+            ),
             tag_manager: TagManager::new(),
             layout: PanelLayout::new(),
             selection: SelectionManager::new(),
@@ -469,7 +453,9 @@ impl FastMdApp {
             editor_state: crate::editor::EditorState::default(),
             inline_editor_enabled: true,
             background_manager: Arc::new(Mutex::new(BackgroundProcessManager::new())),
-            directory_tracker: DirectoryTracker::new(crate::file_events::BusReader::detached()),
+            directory_tracker: DirectoryTracker::new(
+                crate::app::watcher::events::BusReader::detached(),
+            ),
             config,
             persisted_ui_state: PersistedUiState::default(),
             pending_file_load: None,
@@ -666,7 +652,7 @@ impl FastMdApp {
     }
 
     fn show_editor_overlay(&mut self, ctx: &egui::Context) {
-        let producer = crate::file_events::FileEventProducer::new(&self.file_event_bus);
+        let producer = crate::app::watcher::events::FileEventProducer::new(&self.file_event_bus);
         if self.editor_state.show(ctx, &producer) {
             self.tab_manager.loaded_path = None;
         }
@@ -794,7 +780,7 @@ impl FastMdApp {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::messages::TokenUsageInfo;
+    use crate::app::messages::TokenUsageInfo;
     use crate::ui::test_helpers::assert::assert_no_id_change_in_shapes;
     use std::path::PathBuf;
 
@@ -1121,7 +1107,9 @@ mod tests {
         // Use a separate clone of the bus to publish; both clones
         // share the same subscriber list.
         let publisher = app.file_event_bus.clone();
-        publisher.publish(crate::file_events::FileEvent::updated_one(path.clone()));
+        publisher.publish(crate::app::watcher::events::FileEvent::updated_one(
+            path.clone(),
+        ));
 
         let changed = app.process_file_events();
         assert!(changed, "process_file_events should report a change");
@@ -1150,7 +1138,9 @@ mod tests {
 
         app.file_event_reader = Some(app.file_event_bus.subscribe());
         let publisher = app.file_event_bus.clone();
-        publisher.publish(crate::file_events::FileEvent::updated_one(path.clone()));
+        publisher.publish(crate::app::watcher::events::FileEvent::updated_one(
+            path.clone(),
+        ));
 
         let _ = app.process_file_events();
         assert!(
@@ -1174,7 +1164,9 @@ mod tests {
 
         app.file_event_reader = Some(app.file_event_bus.subscribe());
         let publisher = app.file_event_bus.clone();
-        publisher.publish(crate::file_events::FileEvent::removed_one(path.clone()));
+        publisher.publish(crate::app::watcher::events::FileEvent::removed_one(
+            path.clone(),
+        ));
 
         let _ = app.process_file_events();
         assert!(app.tab_manager.loaded_path.is_none());
@@ -1198,10 +1190,16 @@ mod tests {
 
         app.file_event_reader = Some(app.file_event_bus.subscribe());
         let publisher = app.file_event_bus.clone();
-        publisher.publish(crate::file_events::FileEvent::discovered_one(pdf.clone()));
-        publisher.publish(crate::file_events::FileEvent::discovered_one(img.clone()));
-        publisher.publish(crate::file_events::FileEvent::discovered_one(md.clone()));
-        publisher.publish(crate::file_events::FileEvent::discovered_one(
+        publisher.publish(crate::app::watcher::events::FileEvent::discovered_one(
+            pdf.clone(),
+        ));
+        publisher.publish(crate::app::watcher::events::FileEvent::discovered_one(
+            img.clone(),
+        ));
+        publisher.publish(crate::app::watcher::events::FileEvent::discovered_one(
+            md.clone(),
+        ));
+        publisher.publish(crate::app::watcher::events::FileEvent::discovered_one(
             pdf_in_pdf_only_dir.clone(),
         ));
 
@@ -1286,15 +1284,15 @@ mod tests {
 
         app.file_event_reader = Some(app.file_event_bus.subscribe());
         let publisher = app.file_event_bus.clone();
-        publisher.publish(crate::file_events::FileEvent::discovered_one(
+        publisher.publish(crate::app::watcher::events::FileEvent::discovered_one(
             PathBuf::from("/lib/notes.md"),
         ));
-        publisher.publish(crate::file_events::FileEvent::discovered_one(
+        publisher.publish(crate::app::watcher::events::FileEvent::discovered_one(
             PathBuf::from("/lib/extra.md"),
         ));
-        publisher.publish(crate::file_events::FileEvent::updated_one(PathBuf::from(
-            "/lib/notes.md",
-        )));
+        publisher.publish(crate::app::watcher::events::FileEvent::updated_one(
+            PathBuf::from("/lib/notes.md"),
+        ));
 
         let _ = app.process_file_events();
         assert!(
@@ -1325,9 +1323,9 @@ mod tests {
         // evicts the file's tags.
         app.file_event_reader = Some(app.file_event_bus.subscribe());
         app.file_event_bus
-            .publish(crate::file_events::FileEvent::removed_one(PathBuf::from(
-                "/lib/notes.md",
-            )));
+            .publish(crate::app::watcher::events::FileEvent::removed_one(
+                PathBuf::from("/lib/notes.md"),
+            ));
         let _ = app.process_file_events();
         assert!(
             !app.tag_manager.all_tags().contains("work"),
@@ -1340,7 +1338,7 @@ mod tests {
         app.tag_manager
             .add_tags(PathBuf::from("/lib/other.md"), vec!["keep".to_string()]);
         app.file_event_bus
-            .publish(crate::file_events::FileEvent::discovered_one(
+            .publish(crate::app::watcher::events::FileEvent::discovered_one(
                 PathBuf::from("/lib/other.md"),
             ));
         let _ = app.process_file_events();
@@ -1371,12 +1369,12 @@ mod tests {
             crate::ui::ToCEntry {
                 title: "Introduction".to_string(),
                 level: 1,
-                id: egui::Id::new("intro"),
+                id: "intro".to_string(),
             },
             crate::ui::ToCEntry {
                 title: "Specifications".to_string(),
                 level: 2,
-                id: egui::Id::new("specs"),
+                id: "specs".to_string(),
             },
         ];
 
@@ -1416,7 +1414,7 @@ mod tests {
         app.tab_manager.toc = vec![crate::ui::ToCEntry {
             title: "Laptop Specifications".to_string(),
             level: 1,
-            id: egui::Id::new("laptop_specs"),
+            id: "laptop_specs".to_string(),
         }];
 
         let raw_input = egui::RawInput {

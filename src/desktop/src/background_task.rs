@@ -1,12 +1,12 @@
 //! Background task orchestrator — spawns and owns all worker threads (watcher, indexer, PDF converter, vision processor, bus router).
 
+use crate::app::messages::BackgroundMessage;
+use crate::app::watcher::events::{Bus, FileEvent};
+use crate::app::watcher::file_watcher::FileWatcher;
 use crate::background::bus_router::BusRouter;
 use crate::background::indexer::Indexer;
 use crate::background::pdf_converter::PdfConverterWorker;
 use crate::background::vision_processor::ImageVisionWorker;
-use crate::background::watcher::FileWatcher;
-use crate::file_events::{Bus, FileEvent};
-use crate::messages::BackgroundMessage;
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::{Receiver, Sender, channel};
@@ -218,7 +218,7 @@ mod tests {
 
         let discovered: Vec<_> = events
             .iter()
-            .filter(|e| e.kind == crate::file_events::FileEventKind::Discovered)
+            .filter(|e| e.kind == crate::app::watcher::events::FileEventKind::Discovered)
             .collect();
         let total: usize = discovered.iter().map(|e| e.paths.len()).sum();
         assert_eq!(total, 3);
@@ -278,7 +278,7 @@ mod tests {
         assert_eq!(tag_events[0].paths[0], tree_events[0].paths[0]);
         assert_eq!(
             tag_events[0].kind,
-            crate::file_events::FileEventKind::Discovered
+            crate::app::watcher::events::FileEventKind::Discovered
         );
     }
 
@@ -319,7 +319,7 @@ mod tests {
         let pdf_discovered = events
             .iter()
             .find(|e| {
-                e.kind == crate::file_events::FileEventKind::Discovered
+                e.kind == crate::app::watcher::events::FileEventKind::Discovered
                     && e.paths[0].extension().and_then(|x| x.to_str()) == Some("pdf")
             })
             .expect("initial scan should publish Discovered for PDFs");
@@ -370,7 +370,7 @@ mod tests {
         let pdf_path = dir.path().join("dropped.pdf");
         std::fs::write(&pdf_path, b"dummy").unwrap();
         task.file_event_bus
-            .publish(crate::file_events::FileEvent::discovered_one(
+            .publish(crate::app::watcher::events::FileEvent::discovered_one(
                 pdf_path.clone(),
             ));
 
@@ -448,7 +448,7 @@ mod tests {
         let pdf_path = dir.path().join("dropped.pdf");
         std::fs::write(&pdf_path, b"dummy").unwrap();
         task.file_event_bus
-            .publish(crate::file_events::FileEvent::discovered_one(
+            .publish(crate::app::watcher::events::FileEvent::discovered_one(
                 pdf_path.clone(),
             ));
 
@@ -463,7 +463,7 @@ mod tests {
         while start.elapsed().as_secs() < 5 {
             match bus_reader.recv_timeout(std::time::Duration::from_millis(100)) {
                 Ok(event) => {
-                    if event.kind == crate::file_events::FileEventKind::Discovered
+                    if event.kind == crate::app::watcher::events::FileEventKind::Discovered
                         && event.paths.contains(&expected_md)
                     {
                         saw_discovered = true;
@@ -525,7 +525,7 @@ mod tests {
         let img_path = dir.path().join("dropped.png");
         std::fs::write(&img_path, b"dummy image data").unwrap();
         task.file_event_bus
-            .publish(crate::file_events::FileEvent::discovered_one(
+            .publish(crate::app::watcher::events::FileEvent::discovered_one(
                 img_path.clone(),
             ));
 

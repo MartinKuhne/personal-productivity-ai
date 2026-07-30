@@ -1,7 +1,7 @@
 //! Inline text editor with inverted (white-on-black) colour scheme for editing markdown files inside egui.
 
+use crate::app::watcher::events::FileEventProducer;
 use crate::document::DocumentContent;
-use crate::file_events::FileEventProducer;
 use eframe::egui::{self, Key};
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -267,7 +267,7 @@ impl EditorState {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::file_events::Bus;
+    use crate::app::watcher::events::Bus;
     use std::fs;
     use tempfile::tempdir;
 
@@ -275,7 +275,8 @@ mod tests {
     /// don't need to consume the events â€” they only care about the
     /// file I/O outcome.
     fn noop_producer() -> FileEventProducer<'static> {
-        let bus: &'static Bus<crate::file_events::FileEvent> = Box::leak(Box::new(Bus::new()));
+        let bus: &'static Bus<crate::app::watcher::events::FileEvent> =
+            Box::leak(Box::new(Bus::new()));
         FileEventProducer::new(bus)
     }
 

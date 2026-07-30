@@ -1,10 +1,9 @@
 //! Agent session manager — lifecycle and UI-visible state for a single LLM agent session (status, response, thinking, history, token usage).
 
 use crate::agent::AgentContext;
+use crate::app::messages::{BackgroundMessage, TokenUsageInfo};
+use crate::app::watcher::events::Bus;
 use crate::config::AppConfig;
-use crate::file_events::Bus;
-use crate::messages::{BackgroundMessage, TokenUsageInfo};
-use eframe::egui;
 use serde_json::Value;
 use std::collections::HashSet;
 use std::path::PathBuf;
@@ -20,7 +19,10 @@ pub struct AgentState {
     pub status: String,
     pub thinking: String,
     pub response: String,
-    pub scroll_to_id: Option<egui::Id>,
+    /// Stable string id of the heading the agent-results panel
+    /// should scroll to. The UI layer maps it to an
+    /// `egui::Id` at render time.
+    pub scroll_to_id: Option<String>,
     pub history: Option<Vec<Value>>,
     pub token_usage: Option<TokenUsageInfo>,
     pub total_usage: TokenUsageInfo,
@@ -91,7 +93,7 @@ impl AgentSessionManager {
     }
 
     /// Set the scroll-to-id for the agent UI.
-    pub fn set_scroll_to_id(&mut self, id: Option<egui::Id>) {
+    pub fn set_scroll_to_id(&mut self, id: Option<String>) {
         self.state.scroll_to_id = id;
     }
 
@@ -141,7 +143,7 @@ impl AgentSessionManager {
         active_file: Option<PathBuf>,
         active_dir: Option<PathBuf>,
         selected_files: HashSet<PathBuf>,
-        file_event_bus: Bus<crate::file_events::FileEvent>,
+        file_event_bus: Bus<crate::app::watcher::events::FileEvent>,
     ) {
         // Reset state for new session
         self.state.running = true;
