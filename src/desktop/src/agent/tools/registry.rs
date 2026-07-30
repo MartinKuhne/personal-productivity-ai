@@ -33,6 +33,11 @@ use std::sync::Arc;
 
 pub struct ToolRegistry {
     tools: HashMap<String, Box<dyn Tool>>,
+    /// Names of tools that we auto-registered from MCP server
+    /// discovery, so we can drop and replace them on the next
+    /// refresh. Maps tool name -> the server it came from (kept
+    /// for diagnostics).
+    auto_mcp_tools: HashMap<String, String>,
     pub mcp_manager: Arc<crate::tools::mcp::McpClientManager>,
 }
 
@@ -46,6 +51,7 @@ impl ToolRegistry {
     pub fn new() -> Self {
         let mut registry = Self {
             tools: HashMap::new(),
+            auto_mcp_tools: HashMap::new(),
             mcp_manager: Arc::new(crate::tools::mcp::McpClientManager::new()),
         };
         registry.register_all();
@@ -121,6 +127,48 @@ impl ToolRegistry {
         serde_json::Value::Array(tools)
     }
 
+    /// Drop all auto-registered MCP tools and re-discover them from
+    /// every currently-configured server. Tools that fail to
+    /// discover are silently skipped (a warning is logged) so a
+    /// single broken server doesn't break the schema for the rest.
+    ///
+    /// Called automatically by [`get_tools_schema`] before the
+    /// schema is built, so the LLM always sees the freshest set of
+    /// tools each server advertises.
+    pub fn refresh_mcp_tools(&mut self) {
+        // Drop any previously auto-registered tools.
+        for name in self.auto_mcp_tools.keys() {
+            self.tools.remove(name);
+        }
+        self.auto_mcp_tools.clear();
+
+        // Re-discover from each configured server.
+        let server_names = self.mcp_manager.configured_servers();
+        for server_name in server_names {
+            match self.mcp_manager.discover_tools(&server_name) {
+                Ok(tools) => {
+                    for tool in tools {
+                        self.register_mcp_tool(
+                            server_name.clone(),
+                            tool.name.clone(),
+                            tool.description,
+                            tool.input_schema,
+                        );
+                        self.auto_mcp_tools
+                            .insert(tool.name, server_name.clone());
+                    }
+                }
+                Err(e) => {
+                    tracing::warn!(
+                        server = %server_name,
+                        error = %e,
+                        "Failed to discover tools from MCP server; skipping"
+                    );
+                }
+            }
+        }
+    }
+
     fn register_all(&mut self) {
         self.register(Box::new(WebDelegateTool));
         self.register(Box::new(ReplaceTextTool));
@@ -173,8 +221,15 @@ pub fn register_mcp_tool(
 }
 
 pub fn get_tools_schema(config: &AppConfig, prompt: &str) -> serde_json::Value {
-    let registry = TOOL_REGISTRY.read().unwrap();
+    // We need a write lock because refresh_mcp_tools mutates the
+    // tools map. We hold it for the duration of MCP discovery so
+    // a parallel get_tools_schema / execute_tool call sees a
+    // consistent view. Discovery is one round-trip per configured
+    // server (or zero if the session is already initialized and
+    // `tools/list` is cheap), so the lock-hold is bounded.
+    let mut registry = TOOL_REGISTRY.write().unwrap_or_else(|e| e.into_inner());
     registry.mcp_manager.update_config(config);
+    registry.refresh_mcp_tools();
     registry.get_schema(config, prompt)
 }
 
@@ -183,6 +238,28 @@ pub fn get_tools_schema(config: &AppConfig, prompt: &str) -> serde_json::Value {
 pub fn safety_of(name: &str) -> crate::tools::Safety {
     let registry = TOOL_REGISTRY.read().unwrap();
     registry.safety_of(name)
+}
+
+/// Initialize the MCP subsystem on app start. Pushes the latest
+/// `AppConfig` into the manager and pings every configured server
+/// to satisfy spec MCP-002 (the registry-level equivalent of "on
+/// app start, connect to all servers and ping"). Failures are
+/// logged but never propagated — a single broken server must not
+/// prevent the app from starting.
+///
+/// Returns the number of servers that responded to the startup
+/// ping. Callers can log this if they want telemetry.
+pub fn init_mcp_on_startup(config: &AppConfig) -> usize {
+    let Ok(mut registry) = TOOL_REGISTRY.write() else {
+        return 0;
+    };
+    registry.mcp_manager.update_config(config);
+    let ok = registry.mcp_manager.ping_all_servers();
+    // Warm the schema right now so the first agent turn doesn't
+    // pay the discovery cost. Errors here are the same as the
+    // ping errors and are already logged inside `refresh_mcp_tools`.
+    registry.refresh_mcp_tools();
+    ok
 }
 
 pub fn execute_tool(ctx: &ToolContext, name: &str, args_str: &str) -> String {

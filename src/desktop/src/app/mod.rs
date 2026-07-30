@@ -11,6 +11,7 @@
 //!
 //! The file-watcher plumbing lives in [`watcher`].
 
+pub mod document;
 pub mod dialog_manager;
 pub mod messages;
 pub mod panel_layout;
@@ -19,6 +20,8 @@ pub mod selection_manager;
 pub mod tab_manager;
 pub mod tag_manager;
 pub mod text_buffer;
+pub mod background_task;
+pub mod print;
 pub mod vfs;
 pub mod watcher;
 

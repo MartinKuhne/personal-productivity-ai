@@ -4,7 +4,7 @@
 //! virtual path and a list of libraries, applies traversal protection
 //! and read-only enforcement, and returns the absolute path on disk.
 //!
-//! [`crate::tools::context::ToolContext::resolve_virtual_path`] is a
+//! [`crate::agent::tools::context::ToolContext::resolve_virtual_path`] is a
 //! one-line shim over [`resolve`] that pulls the libraries from the
 //! active config.
 //!
@@ -151,11 +151,9 @@ mod tests {
         let libs = test_config();
         let result = resolve("NonExistent/file.md", false, &libs);
         assert!(result.is_err());
-        assert!(
-            result
-                .unwrap_err()
-                .contains("Content library 'NonExistent' not found")
-        );
+        assert!(result
+            .unwrap_err()
+            .contains("Content library 'NonExistent' not found"));
     }
 
     #[test]

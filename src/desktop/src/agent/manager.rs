@@ -47,6 +47,20 @@ pub struct AgentSessionManager {
 impl AgentSessionManager {
     /// Create a new, empty manager (no active session).
     pub fn new(config: AppConfig) -> Self {
+        // MCP-002: on agent-session start, push the latest config
+        // into the MCP manager, ping every configured server, and
+        // warm the tool-discovery cache. Errors are logged inside
+        // the helper; a broken server does not prevent the
+        // manager from being constructed.
+        let pinged = crate::tools::registry::init_mcp_on_startup(&config);
+        if pinged > 0 {
+            tracing::info!(
+                name = "agent.mcp.startup",
+                servers_ok = pinged,
+                "MCP startup ping complete"
+            );
+        }
+
         Self {
             state: AgentState {
                 running: false,

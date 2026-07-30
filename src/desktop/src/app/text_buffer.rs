@@ -32,7 +32,7 @@
 //! the type stays plain Rust data with no framework-specific slots.
 
 use crate::app::watcher::events::FileEventProducer;
-use crate::document::DocumentContent;
+use crate::app::document::DocumentContent;
 use std::fs;
 use std::path::{Path, PathBuf};
 
