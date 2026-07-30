@@ -48,7 +48,7 @@ Current SPEC.md sections (with REQ ranges and the module they describe):
 | 8. CLI & Deployment | 501-504 | `main.rs`, `bin/deploy.rs` |
 | 9. LLM Interface & Agent | 601-620, 630, 640 | `agent/`, `config/` |
 | 10. Agent Behavior & UI | 613-619, 616 | `agent/`, `ui/panels/bottom.rs`, `ui/panels/center.rs` |
-| 11. Libraries (virtual FS) | 700-708 | `config/virtual_path.rs`, `tools/filesystem.rs`, `ui/tree.rs` |
+| 11. Libraries (virtual FS) | 700-708 (renumbered VFS-001..VFS-009) | `app/vfs/`, `tools/filesystem.rs`, `ui/tree.rs` (moved by `vfs-refactor-plan.md`) |
 | 12. Batch processing | 800-813 | `batch/`, `ui/panels/top.rs` |
 | 13. LLM tools table | (no REQ-xxx; tool-name-keyed) | `tools/` (and every tool family) |
 | 14. CSV DB tools | 650-653 | `tools/csv_db/` |
@@ -198,10 +198,13 @@ selection). Both SPECs reference the other.
 - `## Libraries (Virtual File System)` (REQ-700..708)
 
 REQ-700..708 is a borderline case (it touches `config/virtual_path.rs`,
-`tools/filesystem.rs`, and `ui/tree.rs`). It lands in `tools/SPEC.md`
-because the tool surface is where most of the requirements are enforced
-(REQ-704..708); `config/virtual_path.rs` and `ui/tree.rs` get a
-`See tools/SPEC.md` comment when the REQ is implemented.
+`tools/filesystem.rs`, and `ui/tree.rs`). **Superseded by
+`vfs-refactor-plan.md`:** the VFS got its own home at
+`src/desktop/src/app/vfs/` and a dedicated spec at
+`src/desktop/src/app/vfs/SPEC.md` with the requirements renumbered to
+**VFS-001..VFS-009** (the REQ-700..708 IDs are retired). The VFS is a
+domain concern, not a tool concern, so it lives next to the code that
+implements it rather than in `tools/SPEC.md`.
 
 ### 4.8 `src/desktop/src/batch/SPEC.md` (new)
 
@@ -244,7 +247,7 @@ in. Format:
 | 614, 616, 619 | USER.md context, thinking process, tabbed interface (rendering half) | `src/agent/SPEC.md` + `src/ui/SPEC.md` |
 | 650–653 | CSV database tools, query, aggregates, location | `src/tools/SPEC.md` |
 | 660–665 | Web fetch pagination, headers, cache, force-refetch | `src/tools/SPEC.md` |
-| 700–708 | Content libraries, virtual paths, priority, grep ordering | `src/tools/SPEC.md` |
+| 700–708 (now VFS-001..VFS-009) | Content libraries, virtual paths, priority, grep ordering | `src/app/vfs/SPEC.md` |
 | 800–813 | Batch processing: dialog, modes, concurrency, cancel | `src/batch/SPEC.md` |
 | (tool table) | `grep`, `read_file`, `web_fetch`, JMAP/CalDAV/CardDAV, CSV DB tools | `src/tools/SPEC.md` |
 ```

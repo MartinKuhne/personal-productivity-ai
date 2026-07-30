@@ -17,70 +17,7 @@ The requirements below have been formatted using the **Easy Approach to Requirem
 
 ### 1. User Interface Layout & Styling
 
-```text
-+-----------------------------------------------------------------------+
-| ⚡ FastMD Viewer     [ Spinner ] Indexing workspace...  [ Tag Filter ] |
-+-------------------+-----------------------------------+---------------+
-| Workspace Files   | # Document Title                  | Table of      |
-|                   |                                   | Contents      |
-| 📂 docs/          | YAML Front Matter                 |               |
-|   📄 api.md       | +-------+-----------------------+ | H1 Document   |
-|   📄 spec.md      | | Key   | Value                 | |   H2 Section  |
-|                   | +-------+-----------------------+ |   H2 Section  |
-| 📂 src/           |                                   |     H3 Sub    |
-|   📄 main.rs      | Markdown Content...               |               |
-|                   |                                   |               |
-+-------------------+-----------------------------------+---------------+
-| > LLM Command Prompt (Agent input...)                                 |
-+-----------------------------------------------------------------------+
-```
-
-* [REQ-101] Pane Structure: The FastMD Viewer shall display a multi-pane layout consisting of a Left Pane (directory tree and tag filter), Central Pane (Markdown document), Right Pane (Table of Contents), and Bottom Pane (command prompt).
-* [REQ-102] Dark Color Scheme: The FastMD Viewer shall pin egui to its `Theme::Dark` at startup and apply the FastMD brand palette to the dark theme's visuals so the dark surface is the source of truth regardless of the host system's reported theme preference. The brand palette is:
-    * Window and panel surface: `RGB(9, 9, 11)` (a near-black neutral with a 1-unit cool bias so the surface reads as a black panel, not a brown one).
-    * Selection background: `RGB(99, 102, 241)` (indigo-500; the FastMD primary accent).
-    * Window corner radius: 8 px. Widget (noninteractive / inactive / hovered / active) corner radius: 4 px.
-    * Body text: `RGB(210, 210, 210)` (off-white) for non-interactive and inactive widgets; pure white for hovered and active widgets.
-    * The egui "default dark" palette (`RGB(27, 27, 27)` panel fill) shall NOT be used; the FastMD palette above is the only acceptable dark surface.
-    * The palette is applied via `FastMdApp::configure_dark_theme`, which is the single point of truth for the dark color scheme.
-* [REQ-103] UI Responsiveness: While executing disk I/O, compilation, or file system crawls, the FastMD Viewer shall maintain an unblocked, responsive UI thread.
-
-### Left column / Directory tree
-
-* [REQ-149] When the user clicks on a file, it opens as a new tab in the file viewer area
-* [REQ-150] When the user double-clicks on a file, it opens in the system default editor
-* [REQ-151] When the user right-clicks on a file or folder in the directory tree, the context menu appears
-* [REQ-152] When the user selects [Edit] from the context menu, and the object under the mouse cursor is a file, it opens in the system default editor.
-* [REQ-153] When the user selects [Delete] from the context menu, the file or folder gets moved to the recycle bin
-* [REQ-154] When the user selects [Show in File Explorer] from the context menu, the system opens the system file exporer with the directory that contains the file
-* [REQ-155] When the user selects [Move] from the context menu, the system shows a modal dialog containing all the known folders as well as 'Ok' and 'Cancel' buttons. When the user selects a folder and then 'Ok' the system moves the file to that folder, then closes the dialog. When the user selects 'Cancel' the dialog closes and the file is not moved or changed.
-* [REQ-156] When the user selects [Create Directory ...] from the context menu, the system opens a modal dialog for the user to enter a directory name, as well as 'Ok' and 'Cancel' buttons. When the user enters a valid folder name and then clicks 'Ok' the system creates the directory, then closes the dialog. When the user selects 'Cancel' the dialog closes and no side effects occur
-* [REQ-157] When the user selects [Rename] from the context menu, the system shows a modal dialog containing the current file name as well as 'Ok' and 'Cancel' buttons. When the user makes changes to the file name and then clicks 'Ok' or presses the enter key, the system renames the file or folder, then closes the dialog. When the user selects 'Cancel' the dialog closes and the file is not moved or changed.
-* [REQ-158] When the user selects [Copy path] from the context menu, the system copies the fully qualified file or directory name to the clipboard
-* [REQ-159] When the user selects [Print] from the context menu, and the item under the mouse cursor is a file, the system prints the page using the windows system print dialog (implemented via ShellExecute "print" verb).
-* [REQ-160] When the user selects [New document] from the context menu, and the item under the mouse cursor is a directory, the system creates a document containing the yaml markdown header and the name 'New document.md'. If a file with that name exist, add the current date and time do the document name until a unique file name is generated.
-* [REQ-170] The left column shall increase in size to display any one item without line breaks, to use up to 20% of the available width. The system shall re-evaluate the width needed when the user navigates to a new directory.
-* [REQ-171] On every level of the directory tree, directories appear before files
-* [REQ-172] The directory tree should not display folders that contain no markdown files
-* [REQ-173] When the user selects [Format Markdown] from the context menu, the system executes the Format Markdown quick task as described elsewhere
-* [REQ-174] When the user selects [Run as prompt] from the context menu, and the object under the mouse cursor is a file, the system shall execute the content of th file as an agent prompt
-* [REQ-175] Tag Filter Directory Hiding: When filtering by tag, the directory tree shall not display directories that do not contain any files matching the active tag.
-* [REQ-180] When the user holds the shift, the system shall allow the user to select multiple documents
-* [REQ-181] When the user has selected multiple documents, and they right click on one of the selected documents, the [multi select context menu] is shown
-* [REQ-182] When the user selects [Merge] from the [multi select context menu], the system shall run a new LLM prompt instructing the LLM to merge the content into a new document and consolidate the content. 
-* [REQ-183] When the user selects [Delete] from the [multi select context menu], the system shall move all the selected files to the recycle bin
-
-### Middle column / File viewer area
-
-* [REQ-190] When the user right-clicks on a document tab in the center panel tab bar, a tab context menu shall appear with the following options:
-    * [REQ-191] [Close] - Closes the selected tab. If the tab has unsaved changes, prompt for confirmation.
-    * [REQ-192] [Close Others] - Closes all other tabs except the selected one.
-    * [REQ-193] [Close All] - Closes all open tabs. If any have unsaved changes, prompt for confirmation.
-    * [REQ-194] [Copy Path] - Copies the full virtual path of the tab's file to the clipboard.
-    * [REQ-195] [Show in File Explorer] - Opens the system file explorer with the tab's file selected.
-    * [REQ-196] [Open in Editor] - Opens the tab's file in the system default editor (same behavior as double-click in directory tree).
-    * [REQ-197] [Format Markdown] - Executes the Format Markdown quick task on the tab's file.
-* [REQ-198] The tab context menu items [Copy Path], [Show in File Explorer], [Open in Editor], [Format Markdown] shall also be available when right-clicking on a file in the directory tree (see REQ-152 through REQ-173), providing consistent behavior across both UI locations.
+> User Interface requirements moved to [`src/ui/SPEC.md`](src/ui/SPEC.md) (UI-001..UI-049, TBL-001..TBL-051). See that file for the full specification of pane layout, directory tree, file viewer area, inline editor, background process log, thinking process, tabbed interface, and table layout renderer.
 
 ### Configuration
 
@@ -149,16 +86,7 @@ The requirements below have been formatted using the **Easy Approach to Requirem
 
 ### Libraries
 
-* [REQ-700] The system shall support multiple content libraries. The libraries have [root_folder, name, kind, readonly (optional, default true), priority (optional, default 0)] attributes
-* [REQ-701] The system shall support a content library 'text'. The behaviours throughout this document apply to this type. The tools are markdown focused.
-* [REQ-701b] The system shall support a content library 'image'. The image library stores image files that are not directly exposed to the UI or tools. Instead, the system performs vision analysis on images (REQ-470 through REQ-478) and generates corresponding Markdown files that are indexed as text content.
-* [REQ-702] The system shall support a virtual file system. The virtual paths are composed of the library name, then the files and directories present at the configured root_folder. Path traversal (.. components) shall be rejected.
-* [REQ-703] The Directory tree pane shall display the content library name for each library as the top level node
-* [REQ-704] The file based tools shall take virtual paths as arguments, and shall resolve these paths to fully qualified file names for the underlying operating system.
-* [REQ-705] The [grep] tool shall search all libraries in priority order (highest first), and return a concatenated result
-* [REQ-706] When the [list_files] tool is invoked with the '/' or '.' argument alone, it shall enumerate the list of libraries, enabling the LLM to continue the folder search for the virtual library subfolders
-* [REQ-707] ContentLibrary priority field (default 0): grep searches libraries in descending priority order
-* [REQ-708] Virtual path resolution shall reject paths containing parent directory (..) components and validate the library name exists
+> Moved to [`src/app/vfs/SPEC.md`](src/app/vfs/SPEC.md) (VFS-001..VFS-009). The previous REQ-700..708 numbering is retired; the new file is the only one new VFS work should cite. CONFIG-009 is superseded.
 
 ### Batch processing
 

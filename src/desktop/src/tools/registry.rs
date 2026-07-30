@@ -1,5 +1,6 @@
 //! Tool registry — registers all available tools, dispatches execution by name, and produces the JSON-Schema tool list for the LLM.
 
+use crate::app::vfs::library::ContentLibraryExt;
 use crate::config::AppConfig;
 use crate::tools::Tool;
 use crate::tools::context::ToolContext;
@@ -1428,7 +1429,7 @@ mod tests {
                 priority: 100,
             });
         let mut libs: Vec<_> = config.content_libraries.iter().collect();
-        libs.sort_by(|a, b| b.priority.cmp(&a.priority));
+        libs.sort_by_key(|b| std::cmp::Reverse(b.priority));
         assert_eq!(libs[0].name, "High");
         assert_eq!(libs[1].name, "Low");
     }
@@ -1481,25 +1482,19 @@ mod tests {
     #[test]
     fn test_tool_call_debug_mode_feature_flag() {
         let mut config = AppConfig::default();
-        assert_eq!(
-            config
-                .feature_flags
-                .get("toolCallDebugMode")
-                .copied()
-                .unwrap_or(false),
-            false
-        );
+        assert!(!config
+            .feature_flags
+            .get("toolCallDebugMode")
+            .copied()
+            .unwrap_or(false));
         config
             .feature_flags
             .insert("toolCallDebugMode".to_string(), true);
-        assert_eq!(
-            config
-                .feature_flags
-                .get("toolCallDebugMode")
-                .copied()
-                .unwrap_or(false),
-            true
-        );
+        assert!(config
+            .feature_flags
+            .get("toolCallDebugMode")
+            .copied()
+            .unwrap_or(false));
         let ctx = test_ctx(&config);
         let res = execute_tool(&ctx, "unknown_tool", "{}");
         assert!(res.contains("not found") || res.contains("error"));

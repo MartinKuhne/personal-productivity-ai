@@ -6,7 +6,7 @@
 //! The two responsibilities of this file are:
 //!
 //! 1. Hold the inverted (black text on white) colour palette required
-//!    by REQ-261 in [`EditorColors`].
+//!    by UI-046 in [`EditorColors`].
 //! 2. Render the buffer with [`show_text_editor`], reading the
 //!    [`TextBuffer::content`] and writing the resulting cursor
 //!    position back via [`TextBuffer::set_cursor`] before returning.
@@ -15,7 +15,7 @@ use crate::app::text_buffer::TextBuffer;
 use crate::app::watcher::events::FileEventProducer;
 use eframe::egui::{self, Key};
 
-/// Inverted color scheme for the inline text editor (REQ-261).
+/// Inverted color scheme for the inline text editor (UI-046).
 ///
 /// The editor must look distinctly different from the rest of the
 /// dark-themed application: black text on a white background, with a
@@ -42,7 +42,7 @@ impl Default for EditorColors {
 
 impl EditorColors {
     /// Returns the inverted (black text on white) palette required by
-    /// REQ-261.
+    /// UI-046.
     pub const fn inverted() -> Self {
         Self {
             background: egui::Color32::WHITE,
@@ -78,7 +78,7 @@ pub fn show_text_editor(
 /// Render the inline text editor with an explicit colour palette.
 ///
 /// Exposed so tests and callers can drive the rendering with a known
-/// palette, and so the REQ-261 requirement ("inverted, black text on
+/// palette, and so the UI-046 requirement ("inverted, black text on
 /// white background") is expressed as data rather than scattered
 /// `Color32::*` constants in the rendering code.
 pub fn show_text_editor_with_colors(
@@ -94,7 +94,7 @@ pub fn show_text_editor_with_colors(
     let mut is_open = buf.is_open;
     let mut did_save = false;
 
-    // REQ-261: the editor's surface must be inverted relative to the
+    // UI-046: the editor's surface must be inverted relative to the
     // rest of the dark-themed app. We start from the default window
     // frame (so margins / rounding / shadow match the platform look)
     // and override fill + stroke so the editor clearly stands out.
@@ -131,7 +131,7 @@ pub fn show_text_editor_with_colors(
             // egui 0.27 dropped TextEdit::background_color; the
             // background of a TextEdit is taken from
             // `visuals.extreme_bg_color`. We scope a fresh style
-            // around the TextEdit so the inverted palette REQ-261
+            // around the TextEdit so the inverted palette UI-046
             // asks for is applied without leaking into the rest
             // of the app.
             let extreme_bg = colors.background;
@@ -258,7 +258,7 @@ mod tests {
 
     #[test]
     fn test_show_text_editor_with_colors_is_a_noop_when_buffer_closed() {
-        // REQ-261 can't be visually asserted without a running egui
+        // UI-046 can't be visually asserted without a running egui
         // context (which needs fonts initialised via `Context::run`),
         // but we can at least prove the explicit-palette entry point
         // is hooked up and short-circuits when the buffer isn't
@@ -272,15 +272,15 @@ mod tests {
         });
     }
 
-    // --- REQ-261: inverted (black text on white) colour scheme ---
+    // --- UI-046: inverted (black text on white) colour scheme ---
 
-    /// REQ-261 in one assertion set: the inverted palette has
+    /// UI-046 in one assertion set: the inverted palette has
     /// black text on a white background with a black border, the
     /// default palette equals the inverted one (so callers don't
     /// have to opt in), and the per-channel RGB contrast between
     /// text and background is maximal.
     #[test]
-    fn test_editor_colors_inverted_satisfies_req261() {
+    fn test_editor_colors_inverted_satisfies_ui046() {
         let colors = EditorColors::inverted();
 
         // Inverted palette: white surface, black foreground, black border.

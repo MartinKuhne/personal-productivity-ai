@@ -261,7 +261,7 @@ impl FastMdApp {
     /// Purity: Impure (mutates the egui context's options).
     /// Preconditions: `ctx` is a valid egui context.
     /// Postconditions: The dark theme is the active theme, and the dark
-    /// theme's visuals match the FastMD palette so REQ-102 (dark color
+    /// theme's visuals match the FastMD palette so UI-002 (dark color
     /// scheme) holds even if the system preference reports light mode.
     ///
     /// egui 0.35 split the global style into a Dark and a Light theme,
@@ -797,7 +797,7 @@ mod tests {
         FastMdApp::empty_state(crate::config::AppConfig::default())
     }
 
-    /// REQ-102 (dark color scheme): `configure_dark_theme` must pin the
+    /// UI-002 (dark color scheme): `configure_dark_theme` must pin the
     /// active theme to Dark and apply the FastMD brand palette
     /// (RGB(9, 9, 11) surface, indigo selection) to the dark theme.
     /// Regression guard: the egui 0.27 → 0.35 upgrade silently fell

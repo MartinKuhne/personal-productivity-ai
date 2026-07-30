@@ -38,7 +38,7 @@ C4Context
   Rel(fastmd, nominatim, "weather tool (geocode + forecast)")
   Rel(fastmd, playwright, "browser_* tools (browser.rs)")
   Rel(fastmd, pdf, "PDF rendering worker (REQ-450..458)")
-  Rel(fastmd, fs, "Reads/writes content libraries (REQ-700..708)")
+  Rel(fastmd, fs, "Reads/writes content libraries (app/vfs/SPEC.md, VFS-001..VFS-009)")
 ```
 
 ---
@@ -152,7 +152,7 @@ C4Component fastmd
   title FastMD — Tool System
 
   Component(reg, "ToolRegistry", "tools/registry.rs (1810)", "register_all, execute, get_tools_schema; paginate_in_range helper")
-  Component(tctx, "ToolContext", "tools/context.rs (268)", "{config, file_event_bus}; resolve_virtual_path(vpath, allow_write) -> Option<(PathBuf,bool)>")
+  Component(tctx, "ToolContext", "tools/context.rs (~80)", "{config, file_event_bus}; thin shim over app::vfs::resolve::resolve(vpath, allow_write, libraries) -> Option<(PathBuf,bool)>")
   Component(fs, "filesystem tools", "tools/filesystem.rs", "grep, read_file, read_file_lines, create_file, insert_lines, delete_lines, replace_text, list_files")
   Component(yaml, "yaml_header", "tools/yaml_header.rs", "read_yaml_header, write_yaml_header")
   Component(web, "web", "tools/web.rs", "web_fetch (pagination/headers/5-min cache TOOL-005..010), web_search (SearXNG), web_delegate sub-agent")
@@ -172,7 +172,23 @@ C4Component fastmd
   Rel(reg, caldav, "registers")
   Rel(reg, carddav, "registers")
   Rel(reg, weather, "registers (extra)")
-  Rel(tctx, fs, "resolve_virtual_path for read/write")
+  Rel(tctx, fs, "app::vfs::resolve::resolve for read/write")
+```
+
+```mermaid
+C4Component fastmd
+  title FastMD — Virtual File System (app/vfs/)
+
+  Component(vp, "virtual_path", "app/vfs/virtual_path.rs", "VirtualPath, VirtualPathError{EmptyPath,TraversalDetected,InvalidFormat,LibraryNotFound,LibraryNotWritable}; parse/resolve/is_writable; rejects '..' traversal (VFS-004, VFS-009)")
+  Component(lib, "library", "app/vfs/library.rs", "ContentLibraryExt trait (display_label_for, contains_path, resolve, is_writable, root_path); library_display_label free function (VFS-001, VFS-002, VFS-008)")
+  Component(res, "resolve", "app/vfs/resolve.rs", "Pure resolve(vpath, allow_write, libraries) -> Result<Option<(PathBuf,bool)>, String>; resolve_writable helper for mutating tools (VFS-004, VFS-007, VFS-009)")
+  Component(tctx, "ToolContext (shim)", "tools/context.rs", "resolve_virtual_path / resolve_writable forward to app::vfs::resolve::resolve")
+  Component(cl, "ContentLibrary (data type)", "config.rs", "struct ContentLibrary{root_folder, name, kind, readonly, priority} — data shape owned by config/, behaviour owned by app::vfs")
+
+  Rel(tctx, res, "calls resolve(allow_write, libraries) with self.config.content_libraries")
+  Rel(res, vp, "VirtualPath::parse, resolve, is_writable")
+  Rel(res, lib, "ContentLibraryExt::{is_writable, root_path, resolve} on matched library")
+  Rel(lib, cl, "impl ContentLibraryExt for ContentLibrary")
 ```
 
 Tool inventory (matches `Tools.md` + conditional tools):
@@ -231,7 +247,7 @@ Cross-cutting modules that the UI, Agent, Tools and Background all depend on.
 C4Component fastmd
   title FastMD — Supporting Modules
 
-  Component(cfg, "config", "config.rs (798) + config/virtual_path.rs (302)", "AppConfig, LlmConfig{model,api_url,api_key,cost,use_case}, JmapClient, CalDavClient, CardDavClient, content_libraries; load_config, get_config_path; Debug redacts secrets. VirtualPath + VirtualPathError{EmptyPath,TraversalDetected,InvalidFormat,LibraryNotFound,LibraryNotWritable}; rejects '..' traversal (REQ-700..708)")
+  Component(cfg, "config", "config.rs (data shapes only; VFS moved to app/vfs/)", "AppConfig, LlmConfig{model,api_url,api_key,cost,use_case}, JmapClient, CalDavClient, CardDavClient, content_libraries: Vec<ContentLibrary>; load_config, get_config_path; Debug redacts secrets. VFS types re-exported from app::vfs for backwards compat. CONFIG-001..008 (CONFIG-009 superseded by VFS-004/009)")
   Component(ev, "file_events", "file_events.rs (554)", "Bus<T> (tokio::sync::broadcast, BUS_CAPACITY=8192); FileEvent; FileEventKind{Discovered,Updated,Removed,DirDiscovered,DirRemoved}; FileEventProducer; BusReader. Multi-producer/multi-consumer")
   Component(fp, "file_processor", "file_processor.rs (186)", "FileEventProcessor{reader, all_files, all_files_set, all_dirs, all_dirs_set, indexing_finished, indexing_finished_handled}")
   Component(dt, "directory_tracker", "directory_tracker.rs (267)", "Single source of truth for known dirs; consumes DirDiscovered/DirRemoved + file Discovered")
@@ -245,7 +261,7 @@ C4Component fastmd
   Component(utils, "utils", "utils/", "markdown (parse_front_matter), path, tags (extract_tags_from_file)")
   Component(err, "error", "error.rs", "AgentError")
 
-  Rel(cfg, ev, "VirtualPath resolves against content_libraries")
+  Rel(cfg, ev, "ContentLibrary data flows into file events")
   Rel(ev, fp, "feeds")
   Rel(ev, dt, "feeds")
   Rel(fp, tm, "file list -> tags")

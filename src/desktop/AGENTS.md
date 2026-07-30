@@ -70,7 +70,7 @@ Stable `push_id` salts (rules above) are still required for sibling loops — th
 ## 3. Tool trait contract
 - Every tool implements `tools::Tool` and is registered in `tools/registry.rs::ToolRegistry::register_all`.
 - `Tool::execute` takes a **single** `ToolContext<'a>` (config + `&Bus<FileEvent>`) — do not add extra parameters (AGENT-012).
-- Filesystem tools must resolve paths through `ToolContext::resolve_virtual_path(vpath, allow_write)`; never accept raw filesystem paths from LLM input (REQ-700..708).
+- Filesystem tools must resolve paths through `ToolContext::resolve_virtual_path(vpath, allow_write)`; never accept raw filesystem paths from LLM input (see `src/app/vfs/SPEC.md`, VFS-001..VFS-009).
 - Tools surface conditional availability via `Tool::is_enabled(config, prompt)`; do not branch inside `execute` on prompt keywords (CSV DB gating, TOOL-001, is the canonical pattern).
 - Safe tools may be dispatched in parallel; unsafe (mutating) tools must be sequential. `agent::tool_executor::ToolExecutor` already enforces this — do not bypass it.
 - When adding a tool, also update `Tools.md` and the tool table in `SPEC.md`.
@@ -94,7 +94,10 @@ src/
 ├── error.rs                # AgentError
 ├── bin/deploy.rs           # deploy binary target
 │
-├── config/                 # AppConfig + client structs, loader, secrets, VirtualPath
+├── config/                 # AppConfig + client structs, loader, secrets (data shapes only)
+├── app/                    # egui-free application domain (managers, watcher, vfs)
+│   ├── vfs/                # Virtual File System — parser, library behaviour, resolver (app/vfs/SPEC.md)
+│   └── (managers)          # TabManager, SelectionManager, DialogManager, PanelLayout, TagManager, TextBuffer
 ├── agent/                  # LLM tool-loop: manager, llm_client, prompt_builder,
 │                           #   response_formatter, tool_executor, context, agent_impl
 ├── tools/                  # Tool trait, ToolContext, ToolRegistry, and every tool
@@ -146,9 +149,13 @@ When adding or moving code, place files by **concern**, not by type:
 - **Event bus + its consumers** (`Bus<FileEvent>`, `FileEventProcessor`,
   `DirectoryTracker`) go in `events/`. Producers (indexer, watcher) live in
   `background/`; consumers that drive UI state live in `events/` or `ui/`.
-- **Configuration** (data types, loader, secret-redacting Debug impls,
-  `VirtualPath`) goes in `config/`. Keep `AppConfig` data-only; behaviour lives
-  in the subsystem that uses it.
+- **Configuration** (data types, loader, secret-redacting Debug impls)
+  goes in `config/`. Keep `AppConfig` data-only; the `ContentLibrary`
+  data type lives here but its behaviour lives in `app/vfs/`. The VFS
+  parser, errors, and resolver live in `app/vfs/` (see
+  `src/app/vfs/SPEC.md`); `config.rs` re-exports the public types for
+  backwards compatibility, but new code should import from
+  `crate::app::vfs`.
 - **Generic, domain-free helpers** (path utilities, file-walk tag extraction)
   go in `utils/`. If a helper knows about Markdown, it belongs in `markdown/`,
   not `utils/`.

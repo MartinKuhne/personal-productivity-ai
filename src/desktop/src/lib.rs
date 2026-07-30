@@ -26,9 +26,10 @@ pub use app::watcher::{
 pub use app::{
     BackgroundMessage, Cursor, DialogManager, PanelLayout, PersistedUiState, Selection,
     SelectionManager, TabManager, TagManager, TextBuffer, ToCEntry, TokenUsageInfo, UndoStack,
+    VirtualPath, VirtualPathError,
 };
 pub use background_task::Task;
-pub use config::{AppConfig, VirtualPath, VirtualPathError, get_config_path, load_config};
+pub use config::{AppConfig, get_config_path, load_config};
 pub use print::{PrintJob, execute_print_blocking};
 pub use tools::{execute_tool, get_tools_schema};
 pub use ui::FastMdApp;

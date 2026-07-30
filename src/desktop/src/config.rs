@@ -1,13 +1,19 @@
 //! Application configuration types and persistence — JMAP, CalDAV, CardDAV clients, content libraries, model settings.
 //!
-//! Requirements: see [`SPEC.md`](SPEC.md) (CONFIG-001..CONFIG-009) for the full specification.
-
-use std::path::{Path, PathBuf};
+//! Requirements: see [`SPEC.md`](SPEC.md) (CONFIG-001..CONFIG-008; CONFIG-009 superseded by VFS-004/009) for the full specification.
+//!
+//! The VFS domain types ([`VirtualPath`], [`VirtualPathError`], and the
+//! behaviour on [`ContentLibrary`]) now live under
+//! [`crate::app::vfs`] and are re-exported here for backwards
+//! compatibility — prefer importing from `crate::app::vfs` in new
+//! code. See [`app/vfs/SPEC.md`](../app/vfs/SPEC.md).
 
 use std::collections::HashMap;
+use std::path::{Path, PathBuf};
 
-pub mod virtual_path;
-pub use virtual_path::{VirtualPath, VirtualPathError};
+pub use crate::app::vfs::{
+    ContentLibraryExt, VirtualPath, VirtualPathError, library_display_label,
+};
 
 #[derive(serde::Serialize, serde::Deserialize, Clone)]
 pub struct JmapClient {
@@ -117,55 +123,6 @@ pub struct ContentLibrary {
     pub readonly: bool,
     #[serde(default)]
     pub priority: i32,
-}
-
-impl ContentLibrary {
-    /// Purpose: Compute the user-facing display label for an absolute path under this library.
-    /// Inputs: `path` (the absolute path to localize).
-    /// Outputs: `Some(label)` when `path` lives inside `self.root_folder`, otherwise `None`.
-    /// Purity: Pure function.
-    /// Preconditions: `self.root_folder` should be an absolute path.
-    /// Postconditions: The returned label uses `/` separators and `self.name` as the root segment; trailing separators from `Path::join` are trimmed.
-    pub fn display_label_for(&self, path: &Path) -> Option<String> {
-        let root = Path::new(&self.root_folder);
-        let rel = path.strip_prefix(root).ok()?;
-        let joined = Path::new(&self.name).join(rel);
-        let mut label = joined.to_string_lossy().into_owned();
-        if label.ends_with('\\') || label.ends_with('/') {
-            label.pop();
-        }
-        Some(label)
-    }
-
-    /// Check if the given absolute path is inside this library's root folder.
-    pub fn contains_path(&self, path: &Path) -> bool {
-        path.starts_with(&self.root_folder)
-    }
-
-    /// Resolve a sub-path relative to this library's root folder.
-    pub fn resolve(&self, sub: &Path) -> PathBuf {
-        PathBuf::from(&self.root_folder).join(sub)
-    }
-
-    /// Returns `true` if this library allows writes.
-    pub fn is_writable(&self) -> bool {
-        !self.readonly
-    }
-
-    /// Returns the root folder as a `PathBuf`.
-    pub fn root_path(&self) -> PathBuf {
-        PathBuf::from(&self.root_folder)
-    }
-}
-
-/// Purpose: Find the first library that contains the given absolute path and return its display label.
-/// Inputs: `libraries` (slice of registered content libraries), `path` (the absolute path to localize).
-/// Outputs: `Some(label)` if any library contains `path`, otherwise `None`.
-/// Purity: Pure function.
-/// Preconditions: Each library's `root_folder` should be an absolute path.
-/// Postconditions: Returns `None` if no library matches.
-pub fn library_display_label(libraries: &[ContentLibrary], path: &Path) -> Option<String> {
-    libraries.iter().find_map(|lib| lib.display_label_for(path))
 }
 
 fn default_readonly() -> bool {
@@ -655,9 +612,11 @@ mod tests {
             },
         );
         let warnings = config.validate();
-        assert!(warnings
-            .iter()
-            .any(|w| w.contains("No model configured with 'chat'")));
+        assert!(
+            warnings
+                .iter()
+                .any(|w| w.contains("No model configured with 'chat'"))
+        );
     }
 
     #[test]
@@ -733,129 +692,6 @@ user_name: "TestUser"
 
         let config = load_config_from_path(&config_path);
         assert_eq!(config.user_name, Some("TestUser".to_string()));
-    }
-
-    #[test]
-    fn test_content_library_contains_path_inside() {
-        let lib = ContentLibrary {
-            root_folder: "C:/lib/one".to_string(),
-            name: "One".to_string(),
-            kind: "text".to_string(),
-            readonly: true,
-            priority: 0,
-        };
-        assert!(lib.contains_path(Path::new("C:/lib/one/sub/file.md")));
-        assert!(lib.contains_path(Path::new("C:/lib/one")));
-    }
-
-    #[test]
-    fn test_content_library_contains_path_outside() {
-        let lib = ContentLibrary {
-            root_folder: "C:/lib/one".to_string(),
-            name: "One".to_string(),
-            kind: "text".to_string(),
-            readonly: true,
-            priority: 0,
-        };
-        assert!(!lib.contains_path(Path::new("C:/lib/two/file.md")));
-        assert!(!lib.contains_path(Path::new("D:/other/path.md")));
-    }
-
-    #[test]
-    fn test_content_library_resolve() {
-        let lib = ContentLibrary {
-            root_folder: "C:/base".to_string(),
-            name: "Base".to_string(),
-            kind: "text".to_string(),
-            readonly: false,
-            priority: 0,
-        };
-        assert_eq!(
-            lib.resolve(Path::new("sub/file.md")),
-            PathBuf::from("C:/base/sub/file.md")
-        );
-        assert_eq!(lib.resolve(Path::new("")), PathBuf::from("C:/base"));
-    }
-
-    #[test]
-    fn test_content_library_is_writable() {
-        let writable = ContentLibrary {
-            root_folder: "C:/w".to_string(),
-            name: "W".to_string(),
-            kind: "text".to_string(),
-            readonly: false,
-            priority: 0,
-        };
-        assert!(writable.is_writable());
-
-        let readonly = ContentLibrary {
-            root_folder: "C:/r".to_string(),
-            name: "R".to_string(),
-            kind: "text".to_string(),
-            readonly: true,
-            priority: 0,
-        };
-        assert!(!readonly.is_writable());
-    }
-
-    #[test]
-    fn test_content_library_root_path() {
-        let lib = ContentLibrary {
-            root_folder: "C:/my/library".to_string(),
-            name: "Test".to_string(),
-            kind: "text".to_string(),
-            readonly: false,
-            priority: 0,
-        };
-        assert_eq!(lib.root_path(), PathBuf::from("C:/my/library"));
-    }
-
-    #[test]
-    fn test_content_library_display_label_for_member() {
-        let lib = ContentLibrary {
-            root_folder: "C:/my/test/dir".to_string(),
-            name: "TestLib".to_string(),
-            kind: "text".to_string(),
-            readonly: true,
-            priority: 0,
-        };
-        let expected = PathBuf::from("TestLib").join("sub/file.md");
-        let actual = lib
-            .display_label_for(Path::new("C:/my/test/dir/sub/file.md"))
-            .expect("path is inside library");
-        assert_eq!(actual, expected.to_string_lossy());
-        assert_eq!(
-            lib.display_label_for(Path::new("C:/my/test/dir")),
-            Some("TestLib".to_string())
-        );
-        assert!(lib
-            .display_label_for(Path::new("C:/other/path.md"))
-            .is_none());
-    }
-
-    #[test]
-    fn test_library_display_label_finds_first_match() {
-        let libs = vec![
-            ContentLibrary {
-                root_folder: "C:/lib/one".to_string(),
-                name: "One".to_string(),
-                kind: "text".to_string(),
-                readonly: true,
-                priority: 0,
-            },
-            ContentLibrary {
-                root_folder: "C:/lib/two".to_string(),
-                name: "Two".to_string(),
-                kind: "text".to_string(),
-                readonly: true,
-                priority: 0,
-            },
-        ];
-        let expected = PathBuf::from("Two").join("note.md");
-        let actual = library_display_label(&libs, Path::new("C:/lib/two/note.md"))
-            .expect("path is inside a library");
-        assert_eq!(actual, expected.to_string_lossy());
-        assert!(library_display_label(&libs, Path::new("C:/other/note.md")).is_none());
     }
 
     #[test]

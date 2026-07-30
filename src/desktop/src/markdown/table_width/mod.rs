@@ -1422,12 +1422,12 @@ mod tests {
         // G2: the only column in the wrap set is the Summary column
         // (index 6, slack 747.88 >= deficit 660.69). Every other
         // column stays at max_content.
-        for j in 0..6 {
+        for (j, (w, &m)) in d.widths.iter().zip(max.iter()).enumerate().take(6) {
             assert!(
-                (d.widths[j] - max[j]).abs() < 1e-3,
+                (w - m).abs() < 1e-3,
                 "col {j} must be pinned at max {} (G2); got {}",
-                max[j],
-                d.widths[j]
+                m,
+                w
             );
         }
         // Summary absorbs the full deficit and shrinks accordingly.

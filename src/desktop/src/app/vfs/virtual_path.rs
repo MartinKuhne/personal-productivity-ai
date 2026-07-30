@@ -1,6 +1,10 @@
 //! Virtual path syntax — library-prefixed paths (e.g. `library/relative/path`) mapped to real filesystem locations with traversal protection.
+//!
+//! Spec: [`app/vfs/SPEC.md`](../vfs/SPEC.md) (VFS-002, VFS-009).
 
 use std::path::{Path, PathBuf};
+
+use crate::app::vfs::library::ContentLibraryExt;
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum VirtualPathError {

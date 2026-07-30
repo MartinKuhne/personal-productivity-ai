@@ -7,7 +7,7 @@
 >
 > Part of [`SPEC.md`](../../SPEC.md) (FastMD crate). See the [Requirements Index](../../SPEC.md#requirements-index) for the full REQ-xxx → file map.
 >
-> Owns CONFIG-001..CONFIG-009. Cross-cutting requirements that also touch this module are listed at the bottom of this file.
+> Owns CONFIG-001..CONFIG-008. (CONFIG-009 is superseded by VFS-004 + VFS-009; see [`src/app/vfs/SPEC.md`](../../app/vfs/SPEC.md).) Cross-cutting requirements that also touch this module are listed at the bottom of this file.
 
 ## Scope
 
@@ -52,12 +52,12 @@ models:
 
 ### Virtual File System
 
-* [CONFIG-009] Virtual Path Resolution: The system shall support a virtual file system. The virtual paths are composed of the library name, then the files and directories present at the configured root_folder. Path traversal (`..` components) shall be rejected. Virtual path resolution shall reject paths containing parent directory (`..`) components and validate the library name exists.
+> Virtual path resolution rules: see [`src/app/vfs/SPEC.md`](../../app/vfs/SPEC.md) (VFS-004, VFS-009). CONFIG-009 is superseded.
 
 ## Cross-cutting references
 
-- CONFIG-001 / CONFIG-002 — UI behaviour of the inline editor lives in [`src/ui/SPEC.md`](../ui/SPEC.md#inline-text-editor) (REQ-250/251 equivalent).
+- CONFIG-001 / CONFIG-002 — UI behaviour of the inline editor lives in [`src/ui/SPEC.md`](../ui/SPEC.md#inline-text-editor) (UI-035/UI-036 equivalent).
 - CONFIG-003 — PDF converter execution lives in [`src/background/SPEC.md`](../background/SPEC.md) (REQ-454 equivalent).
 - CONFIG-006 / CONFIG-008 — Behaviour (use-case routing, cost-based selection) lives in [`src/agent/SPEC.md`](../agent/SPEC.md) (AGENT-005 / AGENT-018 equivalent). This module owns the schema definition.
 - CONFIG-007 — Consumed by [`src/agent/SPEC.md`](../agent/SPEC.md) (AGENT-007 equivalent).
-- CONFIG-009 — Library enumeration used by tools in [`src/tools/SPEC.md`](../tools/SPEC.md) (REQ-700..708 equivalent).
+- CONFIG-009 — Superseded; see [`src/app/vfs/SPEC.md`](../../app/vfs/SPEC.md) (VFS-001..VFS-009) and the cross-cutting references in [`src/tools/SPEC.md`](../tools/SPEC.md).
