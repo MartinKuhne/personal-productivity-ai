@@ -141,9 +141,11 @@ pub struct ColumnWidths {
 ///
 /// Panics if `available` is not finite (NaN or +/-infinity), if any element
 /// of `max_content` or `min_content` is not finite, or if any
-/// `max_content[j] < min_content[j]` (the FTWA invariant). Callers that
-/// receive measurements from external sources should validate finiteness
-/// first.
+/// `max_content[j] + MAX_MIN_DRIFT_TOLERANCE < min_content[j]` — i.e. the
+/// `max >= min` invariant is violated by more than the sub-pixel drift
+/// tolerance (see the assertion below for the rationale and the constant
+/// for the value). Callers that receive measurements from external sources
+/// should validate finiteness first.
 ///
 /// # Examples
 ///
@@ -224,11 +226,40 @@ pub fn ftwa(
     // Without this check, a corrupted measurement (e.g. min longer than
     // max) silently triggers the §3.6 fallback ("can't fit") instead of
     // surfacing the data error to the caller.
-    for (j, (&mx, &mn)) in max_content.iter().zip(min_content.iter()).enumerate() {
-        assert!(
-            mx >= mn,
-            "ftwa: max_content[{j}] = {mx} < min_content[{j}] = {mn} (invariant violation)"
-        );
+    //
+    // Sub-pixel drift tolerance. egui's `layout_no_wrap` can return
+    // `layout_no_wrap("A" + "B")` slightly different from
+    // `layout_no_wrap("A") + layout_no_wrap("B")` (kerning and
+    // sub-pixel rounding in the font shaper). The upstream
+    // `measure_cell` builds `min_content` from the merged string when
+    // no whitespace separates consecutive `InlineElem`s, while
+    // `max_content` is the sum of per-fragment widths — the two can
+    // differ by ~0.0625 px (= 1/16 px) on real fonts even though the
+    // logical invariant holds. Real measurement errors (e.g. swap of
+    // max and min) produce gaps orders of magnitude larger (>1 px);
+    // 1 logical pixel is the smallest visually distinguishable unit at
+    // 1x DPI, so anything above the tolerance is treated as a
+    // programmer error and panics. A sub-tolerance violation is
+    // absorbed by snapping `min` down to `max` so the deficit branch's
+    // `slack = max_content[j] - min_content[j]` and
+    // `widths[j].max(min_content[j])` floor stay well-defined.
+    const MAX_MIN_DRIFT_TOLERANCE: f32 = 1.0;
+    let mut min_content: Vec<f32> = min_content.to_vec();
+    for j in 0..n {
+        let mx = max_content[j];
+        let mn = min_content[j];
+        if mn > mx {
+            let drift = mn - mx;
+            assert!(
+                drift <= MAX_MIN_DRIFT_TOLERANCE,
+                "ftwa: max_content[{j}] = {mx} < min_content[{j}] = {mn} \
+                 (invariant violation, drift {drift} > tolerance {MAX_MIN_DRIFT_TOLERANCE})"
+            );
+            // Snap `min` down to `max`: absorbs the sub-pixel drift so
+            // the deficit branch sees a non-negative slack and the
+            // never-break-token floor equals the rendered cell width.
+            min_content[j] = mx;
+        }
     }
 
     let sum_max: f32 = max_content.iter().copied().sum();
@@ -315,7 +346,7 @@ pub fn ftwa(
                 &wrap_set,
                 &mut widths,
                 max_content,
-                min_content,
+                &min_content,
                 deficit,
                 total_slack,
             );
@@ -325,7 +356,7 @@ pub fn ftwa(
                 &wrap_set,
                 &mut widths,
                 max_content,
-                min_content,
+                &min_content,
                 breakpoints,
                 deficit,
             );
@@ -927,6 +958,37 @@ mod tests {
             result.is_err(),
             "max_content[j] < min_content[j] must panic; got {result:?}"
         );
+    }
+
+    /// Sub-pixel drift from egui's font shaping (kerning, sub-pixel
+    /// rounding) can make `layout_no_wrap("A" + "B")` differ from
+    /// `layout_no_wrap("A") + layout_no_wrap("B")` by a fraction of a
+    /// pixel even though the rendered cell *is* the sum of fragments.
+    /// The upstream `measure_cell` accumulates a token across
+    /// `InlineElem` boundaries when no whitespace separates them; the
+    /// `max` for that column is the sum of per-fragment widths, the
+    /// `min` is the layout of the merged string. The two can differ
+    /// by ~0.0625 px (= 1/16 px) on a real font. The function must
+    /// tolerate this sub-pixel drift instead of panicking.
+    ///
+    /// Regression for the production panic
+    /// `max_content[0] = 322.6875 < min_content[0] = 322.75`.
+    #[test]
+    fn max_geq_min_subpixel_drift_does_not_panic() {
+        let max = [322.6875_f32, 100.0];
+        let min = [322.75_f32, 50.0]; // col 0: min > max by 0.0625 (sub-pixel)
+        let d = ftwa_v1(&max, &min, 400.0);
+        assert!(!d.needs_horizontal_scroll);
+        // The drift was absorbed: col 0 ends up at its max content
+        // width (no negative slack to give).
+        assert_eq!(d.widths.len(), 2);
+        // Sum equals available (G3 in deficit).
+        assert!((d.widths.iter().sum::<f32>() - 400.0).abs() < 1e-3);
+        // No column ever below max_content (deficit only shrinks, never
+        // grows a column past max).
+        for (j, (&w, &mx)) in d.widths.iter().zip(max.iter()).enumerate() {
+            assert!(w <= mx + 1e-3, "col {j}: width {w} above max {mx}");
+        }
     }
 
     #[test]
