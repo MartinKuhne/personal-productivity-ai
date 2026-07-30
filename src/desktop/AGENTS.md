@@ -71,7 +71,7 @@ Stable `push_id` salts (rules above) are still required for sibling loops — th
 - Every tool implements `tools::Tool` and is registered in `tools/registry.rs::ToolRegistry::register_all`.
 - `Tool::execute` takes a **single** `ToolContext<'a>` (config + `&Bus<FileEvent>`) — do not add extra parameters (REQ-609).
 - Filesystem tools must resolve paths through `ToolContext::resolve_virtual_path(vpath, allow_write)`; never accept raw filesystem paths from LLM input (REQ-700..708).
-- Tools surface conditional availability via `Tool::is_enabled(config, prompt)`; do not branch inside `execute` on prompt keywords (CSV DB gating, REQ-650, is the canonical pattern).
+- Tools surface conditional availability via `Tool::is_enabled(config, prompt)`; do not branch inside `execute` on prompt keywords (CSV DB gating, TOOL-001, is the canonical pattern).
 - Safe tools may be dispatched in parallel; unsafe (mutating) tools must be sequential. `agent::tool_executor::ToolExecutor` already enforces this — do not bypass it.
 - When adding a tool, also update `Tools.md` and the tool table in `SPEC.md`.
 

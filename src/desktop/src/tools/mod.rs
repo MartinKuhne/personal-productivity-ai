@@ -1,4 +1,6 @@
 //! LLM-callable tools — the `Tool` trait, tool registry, and implementations for filesystem, web, calendar, contacts, email, CSV, and weather.
+//!
+//! Requirements: see [`SPEC.md`](SPEC.md) (TOOL-001..TOOL-010) for the full specification.
 
 pub mod blocking;
 pub mod caldav;

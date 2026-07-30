@@ -94,24 +94,7 @@ The requirements below have been formatted using the **Easy Approach to Requirem
 
 ### Markdown
 
-* [REQ-201] GFM Parsing: The Markdown parser shall support the GitHub Flavored Markdown (GFM) tables extension. The parser shall enable the `ENABLE_TABLES`, `ENABLE_FOOTNOTES`, `ENABLE_STRIKETHROUGH`, and `ENABLE_TASKLISTS` options. The `ENABLE_HARD_BREAKS` option is NOT enabled by default.
-* [REQ-202] Heading Sizing: The FastMD Viewer shall render H1 through H6 headings at 32px, 24px, 18px, 14px, 12px, and 12px respectively.
-* [REQ-203] Break Semantics:
-    * [REQ-204]: When a single carriage return (newline) is encountered, the Markdown parser shall render it as a single space character (soft break).
-    * [REQ-205]: Hard breaks (two trailing spaces followed by a newline, or backslash-newline) require the `ENABLE_HARD_BREAKS` parser option which is disabled by default. With the option enabled, the parser shall force a line split.
-* [REQ-206] Bullet Lists: The FastMD Viewer shall render list items with indentation and bullet points (`•`).
-    * [REQ-207]: If a list item contains hard breaks, then the FastMD Viewer shall render the bullet only on the first line; subsequent wrapped lines shall be indented without a bullet. [Note: Current implementation renders bullet on each Item start; this is a known gap.]
-* [REQ-208] Table Layout:
-    * [REQ-209]: The FastMD Viewer shall render tables inside a horizontally scrollable container with striped rows and column spacing.
-    * [REQ-210]: The FastMD Viewer shall arrange cells using egui layout primitives with striped rows and column spacing.
-    * [REQ-211]: The FastMD Viewer shall render header row cells with a bold font weight.
-    * [REQ-211b]: Tables shall be rendered with a distinct visual frame (rounded corners, background color) to separate from body text. [Gap: Not yet implemented.]
-* [REQ-211c] Off-Viewport Text Guarantees: Where a markdown document contains a table that cannot fit the available content width even at the table's min-content width per column, the FastMD Viewer shall render the table inside a horizontally scrollable container so that no cell text is permanently clipped from the user's viewport. Where a heading, paragraph, code block, list item, or any other text-bearing surface would otherwise place its `Shape::Text` rect outside its containing `ClippedShape.clip_rect` with no scrollable ancestor that could bring it into view, the FastMD Viewer shall instead wrap, wrap-into-scroll, or otherwise guarantee the text is reachable. Test coverage: `src/desktop/src/ui/render.rs::tests::render_markdown_no_offscreen_text_at_narrow_viewport` and the helpers in `src/desktop/src/ui/test_helpers/offscreen.rs`.
-* [REQ-212] YAML Front-Matter: Where a document contains a YAML front-matter header, the FastMD Viewer shall parse the metadata into key-value pairs and render them inside a dedicated container table.
-* [REQ-213] Table of Contents (ToC) Navigation:
-    * [REQ-214]: The ToC panel shall display H1–H6 headers indented by header depth.
-    * [REQ-215]: When a ToC element is clicked, the FastMD Viewer shall invoke a viewport scroll event to the selected heading.
-* [REQ-216] Markdown Cheatsheet Conformance: The FastMD Viewer shall conform to the [Markdown Cheatsheet](https://github.com/adam-p/markdown-here/wiki/markdown-cheatsheet) specification for all core Markdown features including: Headers (H1–H6, setext-style), Emphasis (bold, italic, strikethrough), Lists (ordered, unordered, nested), Links (inline, reference, auto-links), Images (inline, reference), Code (inline, fenced blocks with syntax highlighting), Footnotes, Tables (with alignment), Blockquotes, Inline HTML, Horizontal Rules, and Line Breaks (soft and hard).
+> Markdown requirements moved to [`src/markdown/SPEC.md`](src/markdown/SPEC.md) (MD-001..MD-018). See that file for the full specification of GFM parsing, rendering, table layout, ToC navigation, and YAML front-matter template.
 
 ### 3. Concurrent Workspace Indexer Pipeline
 * [REQ-301] Parallel Startup Indexer: When the application starts, the FastMD Viewer shall initialize a background directory crawler thread to recursively scan the workspace directory and populate a shared work queue with Markdown file paths.
@@ -240,70 +223,13 @@ models:
 * [REQ-812] While processing is underway, the [batch prompt processing dialog] shall disable the 'Process'
 * [REQ-813] While processing is underway, the [batch prompt processing dialog] shall stop processing new prompts when the user clicks the 'Cancel' button
 
-### LLM tools
+### LLM Tools
 
-| Tool | Description |
-|---|---|
-| `grep` | Search for a specific pattern within files across all libraries. |
-| `read_tags` | Read all unique tags from markdown front-matter across all libraries. |
-| `list_files_by_tag` | List files that contain a specific tag in their front-matter. |
-| `list_files` | List markdown files in a directory (non-recursive). With "/" or "." returns library names. |
-| `read_file` | Read the entire text contents of a file. |
-| `read_file_lines` | Read specific line numbers or ranges from a file (1-indexed). |
-| `create_file` | Create a new markdown file with the specified content. |
-| `insert_lines` | Insert new lines of text into an existing file at a specific 1-indexed position. |
-| `delete_lines` | Delete specific lines from a file (1-indexed, inclusive). |
-| `replace_text` | Replace exact occurrences of old_string with new_string in a file. |
-| `web_fetch` | Fetch content from a URL and convert HTML to Markdown. Supports pagination via `limit`/`offset`, optional response `headers`, and a 5-minute cache. |
-| `web_search` | Search the web using SearXNG. Requires searxng_url config. |
-| `web_delegate` | Delegate complex web research to a sub-agent with web_fetch/web_search tools. |
-| `read_yaml_header` | Parse a YAML header from a markdown file and return its content. |
-| `write_yaml_header` | Write or update data in a YAML header to a markdown file. |
-| `search_calendar` | Search calendar events by keyword. Requires CalDAV config. |
-| `get_calendar` | Get calendar items by date range. Requires CalDAV config. |
-| `get_calendar_item` | Get a specific calendar item by its full href. Requires CalDAV config. |
-| `add_calendar_item` | Add a new calendar item. Requires CalDAV config. |
-| `update_calendar_item` | Update a calendar item. Requires CalDAV config. |
-| `delete_calendar_item` | Delete a calendar item. Requires CalDAV config. |
-| `search_email` | Search email by keyword, folder, date range, sender, recipient, unread, or flagged status. Results are paginated (default page size 10); every response includes total for follow-up page requests. Requires JMAP config. |
-| `get_email_by_id` | Get email by id. Requires JMAP config. |
-| `get_email` | Get email by date range, sender, recipient, unread, or flagged status. Requires JMAP config. |
-| `send_email` | Send an email. Requires JMAP config. |
-| `search_contact` | Search contacts by keyword. Requires JMAP config. |
-| `get_contact` | Get contact by id. Requires JMAP config. |
-| `add_contact` | Add a new contact. Requires JMAP config. |
-| `add_rows` | Add rows to a CSV file database. |
-| `delete_rows` | Delete rows from a CSV file database based on a predicate. |
-| `create_csv` | Create a new CSV file database with specified headers. |
-| `list_csv` | List all CSV file databases. |
-| `query` | Query a CSV file database using an evalexpr predicate, supporting sum and average aggregates. |
-
-### CSV Database Tools
-
-* [REQ-650] Tool Availability: The CSV database tools (`add_rows`, `delete_rows`, `create_csv`, `list_csv`, `query`) shall only be offered to the LLM if the user's query contains any of the tool names, "table", "csv", or "database".
-* [REQ-651] Query Evaluation: The `query` tool shall use the `evalexpr` crate to parse and execute query predicates as dynamic expressions against CSV rows.
-* [REQ-652] Aggregate Functions: The query system shall allow `sum` and `average` as aggregate functions over a specified column.
-* [REQ-653] The system shall store all csv databases in a user specified location. Default to %APPDATA%\fastmd\db\ if not configured.
-
-### Web Fetch Pagination & Caching
-
-* [REQ-660] Web Fetch Headers: The `web_fetch` tool shall accept an optional `headers` boolean parameter (default: `false`). When `true`, the response shall include the HTTP response headers as a JSON object alongside the content.
-* [REQ-661] Web Fetch Pagination: The `web_fetch` tool shall accept optional `limit` (integer) and `offset` (integer, default 0) parameters. The `limit` parameter shall restrict the number of lines returned. The `offset` parameter shall skip the specified number of lines from the start of the content.
-* [REQ-662] Web Fetch Total Lines: The `web_fetch` response shall include a `total_lines` integer indicating the total number of lines in the full fetched content, enabling the caller to paginate through the content.
-* [REQ-663] Web Fetch Cache: The system shall cache fetched Markdown content for 5 minutes. Subsequent calls to `web_fetch` with the same URL and `force_refetch` set to `false` (default) shall return the cached content without making a network request.
-* [REQ-664] Web Fetch Force Refetch: The `web_fetch` tool shall accept an optional `force_refetch` boolean parameter (default: `false`). When `true`, the system shall bypass the cache and fetch fresh content from the URL, replacing the cached entry.
-* [REQ-665] Web Fetch Context Efficiency: The tool description shall encourage the LLM to save context by fetching a page once and issuing partial reads via `limit` and `offset` to paginate through the content, rather than re-fetching the full page multiple times.
+> Tool table and requirements moved to [`src/tools/SPEC.md`](src/tools/SPEC.md) (TOOL-001..TOOL-010). See that file for the full tool catalog, CSV Database tools (TOOL-001..TOOL-004), and Web Fetch pagination/caching (TOOL-005..TOOL-010).
 
 ### YAML frontmatter template
 
-```yaml
----
-title: A brief title
-summary: A three sentence summary of the contents
-tags: ["tag1","tag2"]
-header-date: <RFC 3339 timestamp>
----
-```
+> Moved to [`src/markdown/SPEC.md`](src/markdown/SPEC.md#yaml-frontmatter-template).
 
 ## Sources
 - RFC 2119 Key Words Reference: [ietf.org/rfc/rfc2119.txt](https://www.ietf.org/rfc/rfc2119.txt)

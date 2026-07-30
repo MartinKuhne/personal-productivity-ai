@@ -34,7 +34,7 @@ C4Context
   Rel(fastmd, llm, "Chat completions / vision (REQ-601, 470..478)")
   Rel(fastmd, jmap, "JMAP (email/calendar/contacts)")
   Rel(fastmd, cald, "CalDAV/CardDAV")
-  Rel(fastmd, searxng, "web_search (REQ-665)")
+  Rel(fastmd, searxng, "web_search (TOOL-010)")
   Rel(fastmd, nominatim, "weather tool (geocode + forecast)")
   Rel(fastmd, playwright, "browser_* tools (browser.rs)")
   Rel(fastmd, pdf, "PDF rendering worker (REQ-450..458)")
@@ -82,7 +82,7 @@ C4Component fastmd
 
   Component(app, "FastMdApp", "ui/app.rs", "eframe::App root; owns AgentSessionManager, BackgroundProcessManager, Task, DirectoryTracker, FileEventProcessor, TagManager, DialogManager, PanelLayout, SelectionManager, TabManager, bus")
   Component(panels, "PanelLayout + panels", "ui/panel_layout.rs, ui/panels/{top,bottom,left,right,center}.rs", "5-pane layout REQ-101")
-  Component(render, "render", "ui/render.rs", "build_toc, render_markdown (GFM pulldown-cmark REQ-201/216), render_yaml_table (REQ-212)")
+  Component(render, "render", "ui/render.rs", "build_toc, render_markdown (GFM pulldown-cmark MD-001/MD-018), render_yaml_table (MD-014)")
   Component(tree, "tree", "ui/tree.rs", "flatten_tree, draw_tree_node, FlatRow, TREE_ROW_HEIGHT, TreeNodeContext, render_flat_row")
   Component(tabs, "TabManager", "ui/tab_manager.rs", "Tabbed docs REQ-190..198, 619")
   Component(sel, "SelectionManager", "ui/selection_manager.rs", "Multi-select REQ-180..183")
@@ -155,8 +155,8 @@ C4Component fastmd
   Component(tctx, "ToolContext", "tools/context.rs (268)", "{config, file_event_bus}; resolve_virtual_path(vpath, allow_write) -> Option<(PathBuf,bool)>")
   Component(fs, "filesystem tools", "tools/filesystem.rs", "grep, read_file, read_file_lines, create_file, insert_lines, delete_lines, replace_text, list_files")
   Component(yaml, "yaml_header", "tools/yaml_header.rs", "read_yaml_header, write_yaml_header")
-  Component(web, "web", "tools/web.rs", "web_fetch (pagination/headers/5-min cache REQ-660..665), web_search (SearXNG), web_delegate sub-agent")
-  Component(csv, "csv_db", "tools/csv_db/", "{mod, operations, query (evalexpr REQ-651/652), schema}; add_rows, delete_rows, create_csv, list_csv, query; gated by prompt keywords (REQ-650)")
+  Component(web, "web", "tools/web.rs", "web_fetch (pagination/headers/5-min cache TOOL-005..010), web_search (SearXNG), web_delegate sub-agent")
+  Component(csv, "csv_db", "tools/csv_db/", "{mod, operations, query (evalexpr TOOL-002/003), schema}; add_rows, delete_rows, create_csv, list_csv, query; gated by prompt keywords (TOOL-001)")
   Component(jmap, "jmap", "tools/jmap/", "{client, calendar, contacts, email, tests}; search/get/add/update/delete calendar/email/contact")
   Component(caldav, "caldav", "tools/caldav.rs", "CalDAV calendar tools")
   Component(carddav, "carddav", "tools/carddav.rs", "CardDAV contact tools")
@@ -186,7 +186,7 @@ Tool inventory (matches `Tools.md` + conditional tools):
   `delete_calendar_item`, `search_email`, `get_email_by_id`, `send_email`,
   `search_contact`, `get_contact`, `add_contact`.
 - **Conditional / extra (6):** `add_rows`, `delete_rows`, `create_csv`,
-  `list_csv`, `query` (CSV DB, prompt-keyword gated, REQ-650..653),
+  `list_csv`, `query` (CSV DB, prompt-keyword gated, TOOL-001..TOOL-004),
   `weather` (not in SPEC tool table).
 
 > `tools/Spotify.md` is a **proposal** for 25+ `spotify_*` tools via OAuth2
