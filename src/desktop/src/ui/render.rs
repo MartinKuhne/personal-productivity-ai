@@ -378,13 +378,14 @@ fn render_table_cell(
 
         let unconstrained_text_h = content_res.response.rect.height();
 
-        // Expand border frame height AFTER text rendering so border box fills row height
-        // without stretching or centering text.
-        if let Some(h) = pinned_height.filter(|h| h.is_finite() && *h > 0.0) {
-            let inner_target = (h - pad_v).max(unconstrained_text_h);
-            ui.set_min_height(inner_target);
-            ui.set_max_height(inner_target);
-        }
+        // `pinned_height` is reserved up front by the caller on the *cell* Ui
+        // (see `cell_size.y` in `render_table_with_config`), so the cell frame
+        // here is already inside a `pinned_height`-tall cell. No inner
+        // `set_min_height`/`set_max_height` is needed: those calls would
+        // cause the cell's `min_rect` to be remembered by every ancestor
+        // `push_id`, which would double-count the cell height when advancing
+        // the row cursor and inflate the inter-row gutter to ~17 px (the
+        // "row gutter too large" bug).
 
         unconstrained_text_h + pad_v
     });
@@ -479,9 +480,14 @@ fn render_table_with_config(
                             }
                             let w = w.filter(|w| w.is_finite() && *w > 0.0);
                             let cell_res = ui.push_id(("col", j), |ui| {
+                                // If we know the row's target height from a previous
+                                // frame, reserve it up front so the cell's natural
+                                // content sits at the top and the cell UI doesn't
+                                // double-expand to 2× the target height (the bug
+                                // that produced a ~17 px "phantom" gutter).
                                 let cell_size = egui::vec2(
                                     w.unwrap_or_else(|| ui.available_width()),
-                                    0.0,
+                                    target_h.unwrap_or(0.0),
                                 );
                                 ui.allocate_ui_with_layout(
                                     cell_size,
