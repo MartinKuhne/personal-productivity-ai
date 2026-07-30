@@ -321,9 +321,15 @@ fn render_table_cell(
         let min_h = ui.text_style_height(&egui::TextStyle::Body);
 
         if cell.is_empty() {
-            let target_h = pinned_height.unwrap_or(min_h);
-            let inner_target = (target_h - pad_v).max(min_h);
-            ui.set_min_size(egui::vec2(inner_w, inner_target));
+            // Use `allocate_space` rather than `set_min_size` so we reserve
+            // pixels without inflating the frame's `min_rect` (which every
+            // ancestor `push_id` accumulates). `set_min_size` propagates
+            // upward and double-counts cell height in `row_max_h`, producing
+            // a phantom ~17 px gutter per row in tables with many empty cells
+            // (e.g. the sports-car comparison table). Pinned by
+            // `test_table_empty_cells_no_phantom_row_height`.
+            let inner_target = (pinned_height.unwrap_or(min_h) - pad_v).max(min_h);
+            let _ = ui.allocate_space(egui::vec2(inner_w, inner_target));
             return min_h + pad_v;
         }
 
@@ -366,10 +372,18 @@ fn render_table_cell(
         };
 
         // Render text content tightly packed at top of cell without min_height constraint.
-        // `TBL-030`/`TBL-031`: `left_to_right(Align::Min)` is LEFT aligned,
-        // `top_down(Align::Min)` (outer scope) is TOP aligned.
+        // `TBL-030`/`TBL-031`: `top_down(Align::Min)` anchors Y at the cursor top
+        // (Align::Min is the cross-axis = horizontal → LEFT aligned rows);
+        // `with_main_wrap(true)` lets individual label widgets wrap within `inner_w`.
+        //
+        // Previously `left_to_right(Align::Min).with_main_wrap(true)` was used.
+        // In egui a `left_to_right` layout places Align::Min on the *cross* axis
+        // (vertical), but the cursor is not re-anchored to the cell top when the
+        // outer `allocate_ui_with_layout` reserves a height larger than the content
+        // — short cells appeared vertically centred when sharing a row with a
+        // taller cell. Pinned by `test_table_single_line_cell_text_at_row_top`.
         let content_res = ui.with_layout(
-            egui::Layout::left_to_right(egui::Align::Min).with_main_wrap(true),
+            egui::Layout::top_down(egui::Align::Min).with_main_wrap(true),
             |ui| {
                 ui.spacing_mut().item_spacing = egui::Vec2::ZERO;
                 ui.set_min_width(inner_w);
@@ -457,7 +471,10 @@ fn render_table_with_config(
         let mut new_row_heights = Vec::with_capacity(table_cells.len());
 
         ui.vertical(|ui| {
-            ui.spacing_mut().item_spacing = egui::vec2(10.0, 4.0);
+            // Row gap: 2 px is sufficient visual separation; 4 px produced
+            // visually excessive whitespace in tables with many rows.
+            // Pinned by `test_table_empty_cells_no_phantom_row_height`.
+            ui.spacing_mut().item_spacing = egui::vec2(10.0, 2.0);
             for (row_idx, row) in table_cells.iter().enumerate() {
                 let is_striped = row_idx % 2 == 1;
                 let bg_idx = if is_striped {
@@ -514,7 +531,12 @@ fn render_table_with_config(
                     })
                 });
 
-                new_row_heights.push(row_max_h);
+                // Clamp the cached row height to at least one body-line so a
+                // pathological all-empty row never caches 0.0 and then
+                // defaults back to `min_h` on the next frame (which would
+                // double-count via the empty-cell branch).
+                let body_line_h = ui.text_style_height(&egui::TextStyle::Body);
+                new_row_heights.push(row_max_h.max(body_line_h));
 
                 if let Some(idx) = bg_idx {
                     ui.painter().set(
@@ -4236,6 +4258,176 @@ def foo():
                 }
             }
         }
+    }
+
+    /// Regression test: empty cells must not inflate `row_max_h` via
+    /// `set_min_size` — two round-trip frames must produce stable, compact
+    /// row heights for a table that is mostly empty cells (mirrors the
+    /// `2022 sports car.md` fixture that triggered the phantom-whitespace
+    /// bug). Pinned by the `allocate_space` fix in `render_table_cell`.
+    #[test]
+    fn test_table_empty_cells_no_phantom_row_height() {
+        // A 3-column table: header row all-empty, one data row with text
+        // only in the first column and empty in the other two.
+        let empty: Vec<InlineElem> = vec![];
+        let make = |t: &str| {
+            vec![InlineElem::Text(
+                t.to_string(),
+                crate::ui::render::TextStyle::default(),
+            )]
+        };
+        let table: Vec<Vec<Vec<InlineElem>>> = vec![
+            // row 0: all-empty header
+            vec![empty.clone(), empty.clone(), empty.clone()],
+            // row 1: text in col 0, empty in cols 1 and 2
+            vec![make("BRZ/GR86"), empty.clone(), empty.clone()],
+            // row 2: text only in col 0
+            vec![make("Camaro 1SS"), empty.clone(), empty.clone()],
+        ];
+
+        // Two-pass render (mirrors production): first pass measures,
+        // second pass uses cached row heights.
+        let strategy = crate::ui::table_width::DeficitStrategy::ProportionalToSlack;
+        let config = crate::ui::table_width::TableRenderConfig::default();
+        let ctx = egui::Context::default();
+        let raw = egui::RawInput {
+            screen_rect: Some(egui::Rect::from_min_size(
+                egui::Pos2::ZERO,
+                egui::vec2(800.0, 1600.0),
+            )),
+            ..egui::RawInput::default()
+        };
+
+        // Pass 1
+        let _ = ctx.run_ui(raw.clone(), |ui| {
+            egui::CentralPanel::default().show(ui, |ui| {
+                render_table_with_config(ui, &table, 0, strategy, &config);
+            });
+        });
+        // Pass 2 — row heights now come from the cache.
+        let output2 = ctx.run_ui(raw, |ui| {
+            egui::CentralPanel::default().show(ui, |ui| {
+                render_table_with_config(ui, &table, 0, strategy, &config);
+            });
+        });
+
+        // Collect cell-frame rects (TRANSPARENT fill, NONE stroke)
+        let rects: Vec<egui::Rect> = output2
+            .shapes
+            .iter()
+            .filter_map(|cs| match &cs.shape {
+                egui::Shape::Rect(r)
+                    if r.fill == egui::Color32::TRANSPARENT && r.stroke == egui::Stroke::NONE =>
+                {
+                    Some(r.rect)
+                }
+                _ => None,
+            })
+            .collect();
+
+        assert_eq!(rects.len(), 9, "Expected 9 cell rects for 3x3 table");
+
+        // Every row's height should be compact — no more than 2× the body
+        // line height. Excessive whitespace would show as >34 px rows.
+        let body_h = 14.0_f32; // approximate body font size
+        let max_allowed = body_h * 2.5;
+        for (i, r) in rects.iter().enumerate() {
+            assert!(
+                r.height() <= max_allowed,
+                "Cell rect {i} height {:.1} exceeds {max_allowed:.1} — phantom whitespace detected",
+                r.height()
+            );
+        }
+    }
+
+    /// Regression test: after the cached-height round-trip, single-line cells
+    /// in a row that also contains a multi-line cell must start at the row's
+    /// top Y coordinate (not centred). Mirrors the sports-car table where
+    /// the Camaro row has `<br>` content making it 2 lines tall while other
+    /// cells in the same row are single-line. Pinned by the `top_down` layout
+    /// fix in `render_table_cell`.
+    #[test]
+    fn test_table_single_line_cell_text_at_row_top() {
+        let make = |t: &str| {
+            vec![InlineElem::Text(
+                t.to_string(),
+                crate::ui::render::TextStyle::default(),
+            )]
+        };
+        // Row 0: header (short)
+        // Row 1: col 0 has two lines (SoftBreak forces height ≈ 2 × line_h),
+        //        col 1 is single-line short text.
+        let tall_cell = vec![
+            InlineElem::Text(
+                "Line one".to_string(),
+                crate::ui::render::TextStyle::default(),
+            ),
+            InlineElem::SoftBreak,
+            InlineElem::Text(
+                "Line two".to_string(),
+                crate::ui::render::TextStyle::default(),
+            ),
+        ];
+        let table: Vec<Vec<Vec<InlineElem>>> = vec![
+            vec![make("Header A"), make("Header B")],
+            vec![tall_cell, make("Short")],
+        ];
+
+        let strategy = crate::ui::table_width::DeficitStrategy::ProportionalToSlack;
+        let config = crate::ui::table_width::TableRenderConfig::default();
+        let ctx = egui::Context::default();
+        let raw = egui::RawInput {
+            screen_rect: Some(egui::Rect::from_min_size(
+                egui::Pos2::ZERO,
+                egui::vec2(800.0, 1600.0),
+            )),
+            ..egui::RawInput::default()
+        };
+
+        // Pass 1: measure
+        let _ = ctx.run_ui(raw.clone(), |ui| {
+            egui::CentralPanel::default().show(ui, |ui| {
+                render_table_with_config(ui, &table, 0, strategy, &config);
+            });
+        });
+        // Pass 2: paint with cached heights
+        let output2 = ctx.run_ui(raw, |ui| {
+            egui::CentralPanel::default().show(ui, |ui| {
+                render_table_with_config(ui, &table, 0, strategy, &config);
+            });
+        });
+
+        // Collect cell-frame rects sorted by (row-bucket Y, X)
+        let mut rects: Vec<egui::Rect> = output2
+            .shapes
+            .iter()
+            .filter_map(|cs| match &cs.shape {
+                egui::Shape::Rect(r)
+                    if r.fill == egui::Color32::TRANSPARENT && r.stroke == egui::Stroke::NONE =>
+                {
+                    Some(r.rect)
+                }
+                _ => None,
+            })
+            .collect();
+
+        assert_eq!(rects.len(), 4, "Expected 4 cell rects (2×2 table)");
+
+        rects.sort_by(|a, b| {
+            let ya = (a.min.y / 10.0).round() as i32;
+            let yb = (b.min.y / 10.0).round() as i32;
+            ya.cmp(&yb)
+                .then_with(|| a.min.x.partial_cmp(&b.min.x).unwrap())
+        });
+
+        // Row 1 rects: rects[2] = tall cell (col 0), rects[3] = short cell (col 1).
+        // Both must share the same top Y (top-aligned, not centred).
+        let tall_top = rects[2].min.y;
+        let short_top = rects[3].min.y;
+        assert!(
+            (tall_top - short_top).abs() < 1.0,
+            "Row 1 top-Y mismatch: tall cell y={tall_top:.1}, short cell y={short_top:.1} — text not top-aligned"
+        );
     }
 
     /// Regression test: Verify that cell text in tall rows starts top-aligned

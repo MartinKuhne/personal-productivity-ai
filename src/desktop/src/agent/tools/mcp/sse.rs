@@ -154,20 +154,20 @@ pub fn walk_for_response(
         let id = value.get("id");
         let method = value.get("method").and_then(|v| v.as_str());
 
-        if id.is_none() {
-            if let Some(m) = method {
-                let params = value
-                    .get("params")
-                    .cloned()
-                    .unwrap_or(serde_json::Value::Null);
-                let note = SseNotification {
-                    method: m.to_owned(),
-                    params,
-                };
-                on_notification(&note);
-                notifications.push(note);
-                continue;
-            }
+        if id.is_none()
+            && let Some(m) = method
+        {
+            let params = value
+                .get("params")
+                .cloned()
+                .unwrap_or(serde_json::Value::Null);
+            let note = SseNotification {
+                method: m.to_owned(),
+                params,
+            };
+            on_notification(&note);
+            notifications.push(note);
+            continue;
         }
 
         // Match by id (string or number per spec).
