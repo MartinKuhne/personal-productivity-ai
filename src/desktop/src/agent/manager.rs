@@ -3,8 +3,8 @@
 use crate::agent::AgentContext;
 use crate::app::background_events::AgentEvent;
 use crate::app::messages::{BackgroundMessage, TokenUsageInfo};
-use crate::app::watcher::events::Bus;
-use crate::config::AppConfig;
+use crate::app::watcher::events::{Bus, BusReader};
+use crate::config::{AppConfig, ConfigArrived};
 use serde_json::Value;
 use std::collections::HashSet;
 use std::path::PathBuf;
@@ -33,6 +33,10 @@ pub struct AgentState {
 ///
 /// Responsibilities:
 /// - Owns agent state (status, thinking, response, history, token usage)
+/// - Subscribes to the [`crate::config::ConfigArrived`] bus so the
+///   [`AppConfig`] used by `start_session` and `initialize_mcp` is
+///   the one published at startup, not a value captured at
+///   construction time.
 /// - Provides `start_session` to launch a new agent thread
 /// - Handles incoming `BackgroundMessage::Agent*` messages to update state
 /// - Supports cancellation via cancel flag
@@ -41,19 +45,55 @@ pub struct AgentSessionManager {
     state: AgentState,
     cancel_flag: Option<Arc<AtomicBool>>,
     config: AppConfig,
+    /// Reader for the configuration-arrival bus. Subscribed during
+    /// `new` so the publish that happens after construction is
+    /// observed. Drained on every UI frame by
+    /// [`Self::drain_config`].
+    config_reader: Option<BusReader<ConfigArrived>>,
+    /// Tracks whether `initialize_mcp` has observed the config yet
+    /// so the first-frame init uses the right `AppConfig` instead
+    /// of the default placeholder.
+    config_arrived: bool,
     pub command_input: String,
     show_results: bool,
 }
 
 impl AgentSessionManager {
-    /// Create a new, empty manager (no active session).
-    ///
-    /// This is a pure constructor — it initialises state from the
-    /// supplied config and returns immediately without performing
-    /// any network I/O.  MCP server initialisation is deferred to
-    /// [`Self::initialize_mcp`], which the UI calls once after it
-    /// is ready so that startup latency does not block construction.
-    pub fn new(config: AppConfig) -> Self {
+    /// Subscribe to the configuration-arrival bus and return an
+    /// empty manager. The bus is the source of truth for the
+    /// [`AppConfig`] used by `start_session` and `initialize_mcp`;
+    /// until the bus delivers its event those calls fall back to
+    /// [`AppConfig::default`].
+    pub fn new(config_bus: Bus<ConfigArrived>) -> Self {
+        Self {
+            state: AgentState {
+                running: false,
+                status: String::new(),
+                thinking: String::new(),
+                response: String::new(),
+                scroll_to_id: None,
+                history: None,
+                token_usage: None,
+                total_usage: TokenUsageInfo::default(),
+            },
+            cancel_flag: None,
+            config: AppConfig::default(),
+            // Subscribe before returning so the publish that
+            // happens immediately afterwards (in main / tests) is
+            // observed by this reader.
+            config_reader: Some(config_bus.subscribe()),
+            config_arrived: false,
+            command_input: String::new(),
+            show_results: false,
+        }
+    }
+
+    /// Test helper: build a manager whose [`AppConfig`] is set
+    /// immediately, without going through the bus. Mirrors the old
+    /// `new(config)` signature for callers that just want a
+    /// populated manager (existing test fixtures).
+    #[doc(hidden)]
+    pub fn new_for_test(config: AppConfig) -> Self {
         Self {
             state: AgentState {
                 running: false,
@@ -67,9 +107,61 @@ impl AgentSessionManager {
             },
             cancel_flag: None,
             config,
+            config_reader: None,
+            config_arrived: true,
             command_input: String::new(),
             show_results: false,
         }
+    }
+
+    /// Drain one event from the configuration bus (non-blocking
+    /// `try_recv`). If a [`ConfigArrived`] event is observed, the
+    /// stored [`AppConfig`] is updated. Returns `true` if the
+    /// config was updated by this call.
+    ///
+    /// Called once per frame from the UI's
+    /// [`FastMdApp::update_ui`](crate::ui::FastMdApp::update_ui)
+    /// path. The reader is taken on the first success so the
+    /// per-frame cost is a single `Option::None` check after the
+    /// initial delivery.
+    pub fn drain_config(&mut self) -> bool {
+        let Some(reader) = self.config_reader.as_ref() else {
+            return false;
+        };
+        match reader.try_recv() {
+            Ok(event) => {
+                self.config = event.config;
+                self.config_arrived = true;
+                tracing::info!(
+                    name = "config.arrived",
+                    "AgentSessionManager received configuration"
+                );
+                // Drop the reader — we only care about the first
+                // arrival (no hot reload).
+                self.config_reader = None;
+                true
+            }
+            Err(std::sync::mpsc::TryRecvError::Empty) => false,
+            Err(std::sync::mpsc::TryRecvError::Disconnected) => {
+                // Bus is gone; stop trying to drain.
+                self.config_reader = None;
+                false
+            }
+        }
+    }
+
+    /// `true` once the bus has delivered (or the test path bypassed
+    /// it). Used by the UI to know when to call `initialize_mcp`.
+    pub fn config_arrived(&self) -> bool {
+        self.config_arrived
+    }
+
+    /// Update the stored config directly. Bypasses the bus — used
+    /// by the UI to keep the agent's config in sync with the
+    /// app-wide config that was set during the bus drain.
+    pub fn set_config(&mut self, config: AppConfig) {
+        self.config = config;
+        self.config_arrived = true;
     }
 
     /// Perform the one-time MCP startup ping.
@@ -330,7 +422,7 @@ mod tests {
     #[test]
     fn test_new_manager_is_empty() {
         let config = AppConfig::default();
-        let mgr = AgentSessionManager::new(config);
+        let mgr = AgentSessionManager::new_for_test(config);
         let state = mgr.state();
         assert!(!state.running);
         assert!(state.status.is_empty());
@@ -340,7 +432,7 @@ mod tests {
     #[test]
     fn test_cancel_sets_running_false() {
         let config = AppConfig::default();
-        let mut mgr = AgentSessionManager::new(config);
+        let mut mgr = AgentSessionManager::new_for_test(config);
         mgr.state_mut().running = true;
         mgr.cancel_flag = Some(Arc::new(AtomicBool::new(false)));
         mgr.cancel();
@@ -351,7 +443,7 @@ mod tests {
     #[test]
     fn test_clear_history_resets_fields() {
         let config = AppConfig::default();
-        let mut mgr = AgentSessionManager::new(config);
+        let mut mgr = AgentSessionManager::new_for_test(config);
         mgr.state.history = Some(vec![Value::String("old".to_string())]);
         mgr.state.token_usage = Some(TokenUsageInfo {
             prompt_tokens: 100,
@@ -362,5 +454,91 @@ mod tests {
         mgr.clear_history();
         assert!(mgr.state.history.is_none());
         assert!(mgr.state.token_usage.is_none());
+    }
+
+    /// Regression: the bus-driven constructor must observe the
+    /// first published `ConfigArrived` and store it. The second
+    /// `drain_config` call (after the reader is dropped) is a
+    /// no-op.
+    #[test]
+    fn test_drain_config_observes_first_event() {
+        use crate::config::{ConfigArrived, config_bus};
+
+        let bus = config_bus();
+        let mut mgr = AgentSessionManager::new(bus.clone());
+
+        // Before any event: not arrived, default config in use.
+        assert!(!mgr.config_arrived());
+
+        let cfg = AppConfig {
+            csv_db_path: Some("/tmp/foo".to_string()),
+            ..AppConfig::default()
+        };
+        bus.publish(ConfigArrived::new(cfg.clone()));
+
+        assert!(mgr.drain_config());
+        assert!(mgr.config_arrived());
+        assert_eq!(mgr.config.csv_db_path, cfg.csv_db_path);
+
+        // Subsequent drain is a no-op (reader dropped after first).
+        assert!(!mgr.drain_config());
+    }
+
+    /// Regression: `drain_config` returns false when no event has
+    /// been published yet, and does not flip the `config_arrived`
+    /// flag.
+    #[test]
+    fn test_drain_config_returns_false_when_empty() {
+        let bus = crate::config::config_bus();
+        let mut mgr = AgentSessionManager::new(bus);
+
+        assert!(!mgr.drain_config());
+        assert!(!mgr.config_arrived());
+    }
+
+    /// Regression: the production startup order in `main.rs`
+    /// must be "construct subscribers first, then publish" —
+    /// `tokio::sync::broadcast` only delivers an event to
+    /// subscribers that exist at publish time. Reversing the
+    /// order silently drops the event and the agent never sees
+    /// the loaded config. This test pins that contract: build
+    /// the manager (which subscribes), then publish, then drain.
+    #[test]
+    fn test_construct_then_publish_order_drains_config() {
+        let bus = crate::config::config_bus();
+        // 1. Construct first — this is the `AgentSessionManager::new`
+        //    call inside `FastMdApp::new`. It subscribes here.
+        let mut mgr = AgentSessionManager::new(bus.clone());
+
+        // 2. Publish second — this is the line in `main.rs` that
+        //    fires `config_bus.publish(...)` after construction.
+        //    Because the subscription is already in place, the
+        //    broadcast channel delivers the event to this reader.
+        let cfg = AppConfig {
+            csv_db_path: Some("/tmp/regression".to_string()),
+            ..AppConfig::default()
+        };
+        bus.publish(ConfigArrived::new(cfg.clone()));
+
+        // 3. Drain on the first UI frame.
+        assert!(mgr.drain_config());
+        assert!(mgr.config_arrived());
+        assert_eq!(mgr.config.csv_db_path, cfg.csv_db_path);
+    }
+
+    /// Regression: the *reverse* order (publish, then construct)
+    /// silently drops the event. We assert this so any future
+    /// refactor that flips the order is caught immediately.
+    #[test]
+    fn test_publish_then_construct_order_drops_event() {
+        let bus = crate::config::config_bus();
+        bus.publish(ConfigArrived::new(AppConfig::default()));
+
+        // Subscribing after the publish means the broadcast
+        // channel won't deliver the event to this reader.
+        let mut mgr = AgentSessionManager::new(bus);
+
+        assert!(!mgr.drain_config());
+        assert!(!mgr.config_arrived());
     }
 }

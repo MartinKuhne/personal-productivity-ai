@@ -33,7 +33,7 @@ pub use app::{
     SelectionManager, TabManager, TagManager, TextBuffer, TokenUsageInfo, UndoStack, VirtualPath,
     VirtualPathError,
 };
-pub use config::{AppConfig, get_config_path, load_config};
+pub use config::{AppConfig, ConfigArrived, config_bus, get_config_path, load_config};
 pub use error::AgentError;
 pub use markdown::ToCEntry;
 pub use tools::{execute_tool, get_tools_schema};

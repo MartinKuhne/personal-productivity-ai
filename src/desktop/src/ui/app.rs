@@ -1,4 +1,4 @@
-//! Root egui `App` struct Ã¢â‚¬â€ owns all application state and wires together background tasks, panels, agent, and dialogs.
+//! Root egui `App` struct — owns all application state and wires together background tasks, panels, agent, and dialogs.
 
 use crate::agent::AgentSessionManager;
 use crate::app::background_events::BackgroundEvent;
@@ -13,6 +13,7 @@ use crate::background::BackgroundLogEntry;
 use crate::background::LogCategory;
 use crate::background::{BackgroundProcessManager, SharedProcessManager};
 use crate::background_task::Task;
+use crate::config::AppConfig;
 use crate::markdown::parse_front_matter;
 use crate::ui::panels::{
     show_bottom_panel, show_center_panel, show_left_panel, show_right_panel, show_top_panel,
@@ -69,7 +70,15 @@ pub struct FastMdApp {
     pub text_buffer: TextBuffer,
     pub inline_editor_enabled: bool,
     pub background_manager: SharedProcessManager,
+    /// The currently-loaded application configuration. Starts as
+    /// [`AppConfig::default`] and is replaced on the first frame
+    /// that observes a [`crate::config::ConfigArrived`] event on
+    /// the configuration bus.
     pub config: crate::config::AppConfig,
+    /// Reader for the configuration-arrival bus. Subscribed during
+    /// construction; dropped after the first successful drain so
+    /// subsequent frames do not touch the bus.
+    config_reader: Option<crate::app::watcher::events::BusReader<crate::config::ConfigArrived>>,
     pub persisted_ui_state: PersistedUiState,
     pub pending_file_load: Option<PathBuf>,
     pub repaint_interval: Duration,
@@ -307,7 +316,10 @@ impl FastMdApp {
         ctx.set_visuals_of(egui::Theme::Dark, visuals);
     }
 
-    pub fn new(cc: &eframe::CreationContext<'_>, mut config: crate::config::AppConfig) -> Self {
+    pub fn new(
+        cc: &eframe::CreationContext<'_>,
+        config_bus: crate::app::watcher::events::Bus<crate::config::ConfigArrived>,
+    ) -> Self {
         // egui 0.35 split the global style into a Dark and a Light
         // theme, picked at runtime by `ThemePreference` (default
         // `System`). `set_visuals` writes to the *currently active*
@@ -318,74 +330,19 @@ impl FastMdApp {
         // our custom visuals to the dark theme explicitly.
         Self::configure_dark_theme(&cc.egui_ctx);
 
-        let args: Vec<String> = std::env::args().collect();
-        if args.len() > 1 {
-            let path = PathBuf::from(&args[1]);
-            if path.exists() && path.is_dir() {
-                let mut path_str = path
-                    .canonicalize()
-                    .unwrap_or(path)
-                    .to_string_lossy()
-                    .to_string();
-                if path_str.starts_with(r"\\?\") {
-                    path_str = path_str[4..].to_string();
-                }
-                let mut found = false;
-                for lib in &config.content_libraries {
-                    if lib.root_folder == path_str {
-                        found = true;
-                        break;
-                    }
-                }
-                if !found {
-                    config
-                        .content_libraries
-                        .push(crate::config::ContentLibrary {
-                            root_folder: path_str,
-                            name: "Workspace".to_string(),
-                            kind: "text".to_string(),
-                            readonly: false,
-                            priority: 0,
-                        });
-                }
-            }
-        }
+        // Subscribe before any worker is spawned so the first
+        // `ConfigArrived` publish reaches every reader.
+        let config_reader = config_bus.subscribe();
 
-        if config.content_libraries.is_empty() {
-            let mut current_dir = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
-            if let Ok(canon) = std::fs::canonicalize(&current_dir) {
-                current_dir = canon;
-            }
-            let mut path_str = current_dir.to_string_lossy().to_string();
-            if path_str.starts_with(r"\\?\") {
-                path_str = path_str[4..].to_string();
-            }
-            config
-                .content_libraries
-                .push(crate::config::ContentLibrary {
-                    root_folder: path_str,
-                    name: "Workspace".to_string(),
-                    kind: "text".to_string(),
-                    readonly: false,
-                    priority: 0,
-                });
-        }
-
-        let background_task = Task::new(config.clone());
+        // `Task::new` and `AgentSessionManager::new` each subscribe
+        // to the same bus, then defer their own work until the
+        // event arrives. The background `Task` spawns a thread that
+        // waits on its own reader; the agent's reader is drained on
+        // the UI thread in `update_ui`.
+        let background_task = Task::new(config_bus.clone());
         let file_processor = FileEventProcessor::new(background_task.file_event_bus.subscribe());
         let background_manager = Arc::new(Mutex::new(BackgroundProcessManager::new()));
-        let inline_editor_enabled = config.inline_editor_enabled;
-
-        let batch_dialog_config = crate::batch::types::BatchDialogConfig {
-            available_dirs: config
-                .content_libraries
-                .iter()
-                .map(|lib| PathBuf::from(&lib.root_folder))
-                .collect(),
-            ..Default::default()
-        };
-        let mut dialogs = DialogManager::new();
-        dialogs.batch_dialog_config = batch_dialog_config;
+        let agent = AgentSessionManager::new(config_bus);
 
         let event_bus = background_task.file_event_bus;
         let dir_tracker = DirectoryTracker::new(event_bus.subscribe());
@@ -411,8 +368,15 @@ impl FastMdApp {
             selection.expanded_dirs.insert(dir.clone());
         }
 
+        let dialogs = DialogManager::new();
+        // `batch_dialog_config.available_dirs` is populated from
+        // the published config in `drain_config_bus` on the first
+        // frame.
+
         Self {
-            content_libraries: config.content_libraries.clone(),
+            // Populated from the bus on the first frame; the
+            // default keeps the early frame compilable and stable.
+            content_libraries: Vec::new(),
             rx: background_task.rx,
             tx: background_task.tx,
             file_event_reader: Some(event_bus.subscribe()),
@@ -424,13 +388,14 @@ impl FastMdApp {
             selection,
             tab_manager: TabManager::new(),
             _watcher: None,
-            agent: AgentSessionManager::new(config.clone()),
+            agent,
             dialogs,
             submit_prompt: None,
             text_buffer: TextBuffer::new(),
-            inline_editor_enabled,
+            inline_editor_enabled: false,
             background_manager,
-            config,
+            config: AppConfig::default(),
+            config_reader: Some(config_reader),
             persisted_ui_state,
             pending_file_load: None,
             repaint_interval: Duration::from_millis(16),
@@ -445,31 +410,68 @@ impl FastMdApp {
     /// Preconditions: None.
     /// Postconditions: Caller still owns a usable `Sender<BackgroundMessage>` paired with `rx`.
     pub fn empty_state(config: crate::config::AppConfig) -> Self {
+        // Publish the supplied config into a private bus and let
+        // `empty_state_via_bus` build the struct through the same
+        // bus-driven init path. This keeps a single code path for
+        // tests that don't need a real `CreationContext`.
+        let bus = crate::config::config_bus();
+        bus.publish(crate::config::ConfigArrived::new(config.clone()));
+        Self::empty_state_via_bus(bus, config)
+    }
+
+    /// Build an `empty_state` `FastMdApp` by publishing `config` into
+    /// a private bus and draining it synchronously. This is the test
+    /// counterpart of [`Self::new`]: no `CreationContext` is needed
+    /// because we don't apply egui visuals.
+    fn empty_state_via_bus(
+        bus: crate::app::watcher::events::Bus<crate::config::ConfigArrived>,
+        config: crate::config::AppConfig,
+    ) -> Self {
         let (tx, rx) = std::sync::mpsc::channel();
+        let background_task = Task::new(bus.clone());
+        let file_processor = FileEventProcessor::new(background_task.file_event_bus.subscribe());
+        let background_manager = Arc::new(Mutex::new(BackgroundProcessManager::new()));
+        let mut agent = AgentSessionManager::new(bus.clone());
+        agent.set_config(config.clone());
+
+        let event_bus = background_task.file_event_bus;
+        let dir_tracker = DirectoryTracker::new(event_bus.subscribe());
+
+        let mut dialogs = DialogManager::new();
+        let batch_dialog_config = crate::batch::types::BatchDialogConfig {
+            available_dirs: config
+                .content_libraries
+                .iter()
+                .map(|lib| PathBuf::from(&lib.root_folder))
+                .collect(),
+            ..Default::default()
+        };
+        dialogs.batch_dialog_config = batch_dialog_config;
+
+        let content_libraries = config.content_libraries.clone();
+        let inline_editor_enabled = config.inline_editor_enabled;
+
         Self {
-            content_libraries: Vec::new(),
+            content_libraries,
             rx,
             tx,
-            file_event_bus: crate::app::watcher::events::Bus::new(),
-            file_event_reader: None,
-            file_processor: FileEventProcessor::new(
-                crate::app::watcher::events::BusReader::detached(),
-            ),
+            file_event_bus: event_bus.clone(),
+            file_event_reader: Some(event_bus.subscribe()),
+            file_processor,
             tag_manager: TagManager::new(),
             layout: PanelLayout::new(),
             selection: SelectionManager::new(),
             tab_manager: TabManager::new(),
             _watcher: None,
-            agent: AgentSessionManager::new(config.clone()),
-            dialogs: DialogManager::new(),
+            agent,
+            dialogs,
             submit_prompt: None,
             text_buffer: TextBuffer::new(),
-            inline_editor_enabled: true,
-            background_manager: Arc::new(Mutex::new(BackgroundProcessManager::new())),
-            directory_tracker: DirectoryTracker::new(
-                crate::app::watcher::events::BusReader::detached(),
-            ),
+            inline_editor_enabled,
+            background_manager,
+            directory_tracker: dir_tracker,
             config,
+            config_reader: None,
             persisted_ui_state: PersistedUiState::default(),
             pending_file_load: None,
             repaint_interval: Duration::from_millis(16),
@@ -550,6 +552,7 @@ impl FastMdApp {
     /// scheduling, etc).
     pub fn update_ui(&mut self, ui: &mut egui::Ui) {
         let ctx = ui.ctx();
+        self.drain_config_bus();
         self.process_file_events_and_repaint(ctx);
         self.drain_background_channel();
         self.initialize_mcp_on_first_frame();
@@ -558,6 +561,131 @@ impl FastMdApp {
         self.show_modals(ui);
         self.render_panels(ui);
         self.handle_deferred_actions();
+    }
+
+    /// Drain the configuration-arrival bus on the first frame and
+    /// populate every config-derived field (`self.config`,
+    /// `self.content_libraries`, `self.inline_editor_enabled`,
+    /// `self.dialogs.batch_dialog_config.available_dirs`). The
+    /// reader is dropped after the first frame so subsequent
+    /// frames do not touch the bus.
+    fn drain_config_bus(&mut self) {
+        // Snapshot the reader out of `self` so we can do a
+        // non-borrowing drain (we also need to mutate other fields).
+        let mut config: Option<crate::config::ConfigArrived> = None;
+        if let Some(reader) = self.config_reader.as_ref() {
+            match reader.try_recv() {
+                Ok(event) => config = Some(event),
+                Err(std::sync::mpsc::TryRecvError::Empty) => {
+                    // The publish happened *after* this subscriber
+                    // registered, which means the broadcast channel
+                    // will not deliver the event to us. Surface this
+                    // in the log so the operator can find the wiring
+                    // bug.
+                    tracing::error!(
+                        name = "config.arrived.missed",
+                        "FastMdApp reader was registered after the publish; \
+                         broadcasting only delivers to pre-existing subscribers. \
+                         The app will use AppConfig::default() and content \
+                         libraries will be empty until the next startup."
+                    );
+                    self.config_reader = None;
+                    return;
+                }
+                Err(std::sync::mpsc::TryRecvError::Disconnected) => {
+                    // Bus is gone; fall through and clear the reader.
+                }
+            }
+        }
+        // We either have a config or the bus is disconnected;
+        // either way, drop the reader so we don't poll again.
+        self.config_reader = None;
+
+        let Some(event) = config else {
+            return;
+        };
+
+        let mut config = event.config;
+        // Apply CLI argument / cwd fallback to the content libraries
+        // list. Kept here (rather than in `new`) so the fallback only
+        // runs once the published config has arrived.
+        let args: Vec<String> = std::env::args().collect();
+        if args.len() > 1 {
+            let path = PathBuf::from(&args[1]);
+            if path.exists() && path.is_dir() {
+                let mut path_str = path
+                    .canonicalize()
+                    .unwrap_or(path)
+                    .to_string_lossy()
+                    .to_string();
+                if path_str.starts_with(r"\\?\") {
+                    path_str = path_str[4..].to_string();
+                }
+                let found = config
+                    .content_libraries
+                    .iter()
+                    .any(|lib| lib.root_folder == path_str);
+                if !found {
+                    config
+                        .content_libraries
+                        .push(crate::config::ContentLibrary {
+                            root_folder: path_str,
+                            name: "Workspace".to_string(),
+                            kind: "text".to_string(),
+                            readonly: false,
+                            priority: 0,
+                        });
+                }
+            }
+        }
+        if config.content_libraries.is_empty() {
+            let mut current_dir = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
+            if let Ok(canon) = std::fs::canonicalize(&current_dir) {
+                current_dir = canon;
+            }
+            let mut path_str = current_dir.to_string_lossy().to_string();
+            if path_str.starts_with(r"\\?\") {
+                path_str = path_str[4..].to_string();
+            }
+            config
+                .content_libraries
+                .push(crate::config::ContentLibrary {
+                    root_folder: path_str,
+                    name: "Workspace".to_string(),
+                    kind: "text".to_string(),
+                    readonly: false,
+                    priority: 0,
+                });
+        }
+
+        // Mirror the config into the agent so any session started
+        // after the first frame uses the published config.
+        self.agent.set_config(config.clone());
+
+        // Build the system prompt now that we have the config.
+        // Previously this happened in `main.rs` before the egui
+        // loop; moving it here keeps the prompt-build path on the
+        // same "config has arrived" trigger that the rest of the
+        // init uses.
+        let prompt = crate::agent::prompt_builder::SystemPromptBuilder::new(&config).build(&config);
+        tracing::info!(
+            name = "app.startup",
+            system_prompt = %prompt,
+            "Application started successfully. Emitted system prompt for diagnostics."
+        );
+
+        self.content_libraries = config.content_libraries.clone();
+        self.inline_editor_enabled = config.inline_editor_enabled;
+        self.dialogs.batch_dialog_config.available_dirs = config
+            .content_libraries
+            .iter()
+            .map(|lib| PathBuf::from(&lib.root_folder))
+            .collect();
+        self.config = config;
+        tracing::info!(
+            name = "config.arrived",
+            "FastMdApp populated from ConfigArrived event"
+        );
     }
 
     fn process_file_events_and_repaint(&mut self, ctx: &egui::Context) {
@@ -1188,7 +1316,7 @@ mod tests {
         // file that is currently loaded into the renderer, the
         // next frame must reload it from disk. We model "currently
         // loaded" by setting `loaded_path = Some(path)` while
-        // leaving `selected_file` alone Ã¢â‚¬â€ `load_selected_file`
+        // leaving `selected_file` alone — `load_selected_file`
         // (the actual reload driver) only fires when
         // `selected_file.is_some() && loaded_path != selected_file`.
         let mut app = create_test_app();
@@ -1252,7 +1380,7 @@ mod tests {
         // Sanity check: a Removed event still clears `loaded_path`
         // regardless of whether the editor is open. (We accept
         // losing unsaved edits in the editor if the file was
-        // deleted out from under us Ã¢â‚¬â€ that's the user's action.)
+        // deleted out from under us — that's the user's action.)
         let mut app = create_test_app();
         let path = PathBuf::from("/tmp/gone.md");
 
@@ -1395,7 +1523,7 @@ mod tests {
         let _ = app.process_file_events();
         assert!(
             !app.layout.left_panel_dirty,
-            "process_file_events must not set left_panel_dirty Ã¢â‚¬â€ the width is \
+            "process_file_events must not set left_panel_dirty — the width is \
              calculated once when indexing finishes, not per bus event"
         );
     }
@@ -1442,7 +1570,7 @@ mod tests {
         let _ = app.process_file_events();
         assert!(
             app.tag_manager.all_tags().contains("keep"),
-            "Discovered events must NOT call rebuild Ã¢â‚¬â€ the FileParsed path \
+            "Discovered events must NOT call rebuild — the FileParsed path \
              updates all_tags incrementally"
         );
     }

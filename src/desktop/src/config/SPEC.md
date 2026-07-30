@@ -53,5 +53,9 @@ models:
 
 > Virtual path resolution rules: see [`src/app/vfs/SPEC.md`](../../app/vfs/SPEC.md) (VFS-004, VFS-009). CONFIG-009 is superseded.
 
+### Configuration Arrival
+
+* [CONFIG-010] Configuration Arrival Bus: The application shall publish the loaded [`AppConfig`] on a `Bus<ConfigArrived>` (defined in `config/bus.rs`, backed by `tokio::sync::broadcast`) at startup. Subscribers — the background `Task` (so the indexer / PDF converter / vision / file-watcher workers are deferred until the config is known), `AgentSessionManager` (so the model and prompt configuration are taken from the published value), and `FastMdApp` (so panels, the dialog manager, and the inline-editor flag are populated from the published value) — register their subscription during construction; `main` publishes the event before the egui loop starts. Subscribers that observe no event within `CONFIG_ARRIVAL_TIMEOUT` (100 ms) fall back to `AppConfig::default`. Hot reload is out of scope: subscribers drop their reader after the first successful drain.
+
 ## Cross-cutting references
 

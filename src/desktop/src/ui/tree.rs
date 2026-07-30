@@ -1651,7 +1651,7 @@ mod tests {
     /// `render_flat_row` and `draw_tree_node` helpers must use
     /// BMP-only glyphs (U+25BC / U+25B6 / two spaces) so the
     /// labels come out as "▼ name" / "▶ name" / "  name",
-    /// not "Ã°Å¸â€œâ€š name". This test pins the exact glyphs
+    /// not "📁 name". This test pins the exact glyphs
     /// (which are the only place the dir-tree icons are defined)
     /// so a future encoding mishap or emoji swap is caught at
     /// test time, not at runtime.

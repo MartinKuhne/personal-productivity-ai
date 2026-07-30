@@ -7,6 +7,7 @@ use crate::background::bus_router::BusRouter;
 use crate::background::indexer::Indexer;
 use crate::background::pdf_converter::PdfConverterWorker;
 use crate::background::vision_processor::ImageVisionWorker;
+use crate::config::{AppConfig, CONFIG_ARRIVAL_TIMEOUT, ConfigArrived};
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::{Receiver, Sender, channel};
@@ -23,17 +24,44 @@ pub struct Task {
 }
 
 impl Task {
-    pub fn new(config: crate::config::AppConfig) -> Self {
+    /// Build a background task that waits for a [`ConfigArrived`] event
+    /// on `config_bus` before spawning its worker threads. The
+    /// subscription is registered before this returns, so callers may
+    /// publish any time afterwards and the spawned thread will
+    /// observe the first arrival (or fall back to
+    /// [`AppConfig::default`] if no event arrives within
+    /// [`CONFIG_ARRIVAL_TIMEOUT`]).
+    pub fn new(config_bus: Bus<ConfigArrived>) -> Self {
         let (tx, rx) = channel();
         let tx_clone = tx.clone();
         let file_event_bus = Bus::new();
-        let config_clone = config.clone();
         let bus_clone = file_event_bus.clone();
         let cancel = Arc::new(AtomicBool::new(false));
         let cancel_clone = cancel.clone();
 
+        // Subscribe before spawning so the thread's reader is in place
+        // by the time the caller publishes.
+        let config_reader = config_bus.subscribe();
+
         std::thread::spawn(move || {
-            Self::run_indexing(config_clone, tx_clone, bus_clone, cancel_clone);
+            let config = match config_reader.recv_timeout(CONFIG_ARRIVAL_TIMEOUT) {
+                Ok(event) => {
+                    tracing::info!(
+                        name = "config.arrived",
+                        "Background task received configuration, spawning workers"
+                    );
+                    event.config
+                }
+                Err(_) => {
+                    tracing::error!(
+                        name = "config.arrived.timeout",
+                        timeout_ms = CONFIG_ARRIVAL_TIMEOUT.as_millis() as u64,
+                        "No ConfigArrived event observed within timeout; using default configuration"
+                    );
+                    AppConfig::default()
+                }
+            };
+            Self::run_indexing(config, tx_clone, bus_clone, cancel_clone);
         });
 
         Self {
@@ -43,6 +71,20 @@ impl Task {
             _watcher: None,
             cancel,
         }
+    }
+
+    /// Build a background task whose workers start immediately, using
+    /// the supplied configuration. This is a convenience for tests
+    /// that do not need the bus-driven init path.
+    #[doc(hidden)]
+    pub fn new_for_test(config: AppConfig) -> Self {
+        // Subscribe before publishing so the broadcast delivery
+        // matches the event. `Task::new` registers the subscription
+        // during construction; we publish after it returns.
+        let bus = Bus::new();
+        let task = Self::new(bus.clone());
+        bus.publish(ConfigArrived::new(config));
+        task
     }
 
     /// Signal the initial library scan to stop. The watcher and the
@@ -101,7 +143,7 @@ mod tests {
     #[test]
     fn test_background_task_new_no_libraries() {
         let config = AppConfig::default();
-        let task = Task::new(config);
+        let task = Task::new_for_test(config);
 
         let mut got_finished = false;
         let start = std::time::Instant::now();
@@ -125,7 +167,7 @@ mod tests {
         // method must store into the shared `Arc<AtomicBool>` and not
         // panic on repeated or out-of-order calls.
         let config = AppConfig::default();
-        let task = Task::new(config);
+        let task = Task::new_for_test(config);
         task.cancel();
         task.cancel(); // second call must also be safe
         // Drive the background to completion so the test exits cleanly.
@@ -159,7 +201,7 @@ mod tests {
             priority: 0,
         });
 
-        let task = Task::new(config);
+        let task = Task::new_for_test(config);
 
         let mut got_finished = false;
         let start = std::time::Instant::now();
@@ -193,7 +235,7 @@ mod tests {
             priority: 0,
         });
 
-        let task = Task::new(config);
+        let task = Task::new_for_test(config);
         let reader = task.file_event_bus.subscribe();
 
         let mut got_finished = false;
@@ -248,7 +290,7 @@ mod tests {
             priority: 0,
         });
 
-        let task = Task::new(config);
+        let task = Task::new_for_test(config);
         let tag_reader = task.file_event_bus.subscribe();
         let tree_reader = task.file_event_bus.subscribe();
 
@@ -296,7 +338,7 @@ mod tests {
             priority: 0,
         });
 
-        let task = Task::new(config);
+        let task = Task::new_for_test(config);
         let reader = task.file_event_bus.subscribe();
 
         let start = std::time::Instant::now();
@@ -351,7 +393,7 @@ mod tests {
             priority: 0,
         });
 
-        let task = Task::new(config);
+        let task = Task::new_for_test(config);
 
         let start = std::time::Instant::now();
         while start.elapsed().as_secs() < 5 {
@@ -428,7 +470,7 @@ mod tests {
             priority: 0,
         });
 
-        let task = Task::new(config);
+        let task = Task::new_for_test(config);
 
         let start = std::time::Instant::now();
         while start.elapsed().as_secs() < 5 {
@@ -506,7 +548,7 @@ mod tests {
             priority: 0,
         });
 
-        let task = Task::new(config);
+        let task = Task::new_for_test(config);
 
         let start = std::time::Instant::now();
         while start.elapsed().as_secs() < 5 {
@@ -552,5 +594,60 @@ mod tests {
             saw_analyzing,
             "Bus-published image Discovered event should reach the image-vision worker"
         );
+    }
+
+    /// Regression: `Task::new(bus)` must not start any background work
+    /// until the first [`ConfigArrived`] event is observed. The
+    /// observable signal is the file-event bus subscriber count:
+    /// workers (which subscribe) have not been spawned yet, so the
+    /// count is zero.
+    ///
+    /// Note: the task falls back to [`AppConfig::default`] after
+    /// [`crate::config::CONFIG_ARRIVAL_TIMEOUT`] if no event
+    /// arrives, so the absence of a `Finished` message is *not*
+    /// a reliable assertion. The subscriber count is.
+    #[test]
+    fn test_task_does_not_spawn_workers_before_publish() {
+        let bus = crate::config::config_bus();
+        let task = Task::new(bus.clone());
+
+        assert_eq!(
+            task.file_event_bus.subscriber_count(),
+            0,
+            "no worker should be subscribed to the file-event bus before config arrives"
+        );
+    }
+
+    /// Regression: after `publish(ConfigArrived { .. })` the workers
+    /// spin up and the scan completes within a reasonable timeout.
+    /// (`BusRouter` is spawned *after* the scan sends `Finished`,
+    /// so we cannot rely on `subscriber_count() > 0` immediately
+    /// after observing the message — the assertion is intentionally
+    /// on the `Finished` delivery, which is the user-visible
+    /// signal that the workers have done their first pass.)
+    #[test]
+    fn test_task_spawns_workers_after_publish() {
+        let bus = crate::config::config_bus();
+        let task = Task::new(bus.clone());
+
+        // Publish before the worker thread has a chance to poll.
+        bus.publish(ConfigArrived::new(AppConfig::default()));
+
+        // Wait for the scan to finish so we know all workers are
+        // alive and subscribed.
+        let start = std::time::Instant::now();
+        let mut finished = false;
+        while start.elapsed() < std::time::Duration::from_secs(5) {
+            if let Ok(msg) = task.rx.recv_timeout(std::time::Duration::from_millis(100))
+                && matches!(
+                    msg,
+                    BackgroundMessage::Finished(_) | BackgroundMessage::FinishedWithoutWatcher
+                )
+            {
+                finished = true;
+                break;
+            }
+        }
+        assert!(finished, "task should finish after config arrives");
     }
 }

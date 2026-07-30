@@ -1,4 +1,4 @@
-//! Modal dialog UIs Ã¢â‚¬â€ move-file, create-directory, rename, delete confirmation, and batch prompt-processing dialogs.
+//! Modal dialog UIs — move-file, create-directory, rename, delete confirmation, and batch prompt-processing dialogs.
 
 use crate::app::dialog_manager::DialogManager;
 use crate::app::watcher::events::{Bus, FileEventProducer};

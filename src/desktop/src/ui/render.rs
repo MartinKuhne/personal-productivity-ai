@@ -899,7 +899,7 @@ mod tests {
         );
 
         // A FlushInline carrying "Some " (not italic) followed by "text"
-        // (italic) Ã¢â‚¬â€ this is the paragraph that mixes emphasis.
+        // (italic) — this is the paragraph that mixes emphasis.
         let paragraph = events.iter().find_map(|e| match e {
             RenderEvent::FlushInline {
                 elems,
@@ -1278,7 +1278,7 @@ mod tests {
         }
 
         // A table where the separator has fewer columns than the header
-        // must still produce a rectangular table Ã¢â‚¬â€ pulldown-cmark normalizes
+        // must still produce a rectangular table — pulldown-cmark normalizes
         // this. If the parser blindly concatenates, the row would be ragged.
         let events = parse_markdown_to_events("| a | b | c |\n|---|---|\n| 1 | 2 | 3 |");
         for ev in &events {
@@ -1293,7 +1293,7 @@ mod tests {
             }
         }
 
-        // Nested lists: every FlushInline must have `indent` Ã¢â€°Â¤ the input's
+        // Nested lists: every FlushInline must have `indent` ≤ the input's
         // list depth. A 3-deep nested list should produce indents up to 3.
         let events = parse_markdown_to_events("- a\n  - b\n    - c\n- d");
         for ev in &events {
@@ -1342,7 +1342,7 @@ mod tests {
             "empty code block lost: {events:?}"
         );
 
-        // Image in heading: `# ![alt](url)` Ã¢â‚¬â€ image must not be dropped.
+        // Image in heading: `# ![alt](url)` — image must not be dropped.
         let events = parse_markdown_to_events("# ![alt text](https://x/y.png)");
         assert!(
             events.iter().any(|e| matches!(
@@ -1370,7 +1370,7 @@ mod tests {
         // An empty list `- ` (item with no text). The parser should still
         // emit a FlushInline (with empty elems but bullet) so the bullet
         // gets rendered. The current `push_inline` helper skips when
-        // `elems.is_empty() && !needs_bullet && task_checked.is_none()` Ã¢â‚¬â€
+        // `elems.is_empty() && !needs_bullet && task_checked.is_none()` —
         // but `needs_bullet` is true here, so the bullet *should* render.
         let events = parse_markdown_to_events("- ");
         assert!(
@@ -1504,7 +1504,7 @@ mod tests {
                 .current();
             let events = parse_markdown_to_events(&input);
 
-            // Output must be bounded Ã¢â‚¬â€ no input of this size can produce
+            // Output must be bounded — no input of this size can produce
             // more than a small constant multiple of its byte count in events.
             assert!(
                 events.len() < 1_000,
@@ -1521,7 +1521,7 @@ mod tests {
                         );
                     }
                     RenderEvent::Table(rows) => {
-                        // Tables must be rectangular Ã¢â‚¬â€ pulldown-cmark emits
+                        // Tables must be rectangular — pulldown-cmark emits
                         // them as a sequence of `TableRow` / `TableCell`
                         // events; the parser concatenates them and a
                         // non-rectangular result is a parser bug.
@@ -1991,8 +1991,8 @@ def foo():
         let ctx = egui::Context::default();
         let md = r#"| Plan Name | Monthly Premium | Annual Deductible | Max Out-of-Pocket | Quality Rating | Notes/Evaluation |
 |-----------|-----------------|-------------------|---------------------|----------------|-----------------------|
-| Gold Insurance Plan | $891.55 | $1,000 Individual / $2,000 Family | $7,000 Indiv. / $14,000 Fam. | Ã¢Ëœâ€¦Ã¢Ëœâ€¦Ã¢Ëœâ€¦Ã¢Ëœâ€  | Good balance of low deductible and moderate premium. |
-| Bronze Insurance Plan | $1,103.11 | $1,000 Individual / $2,000 Family | $7,000 Indiv. / $14,000 Fam. | Ã¢Ëœâ€¦Ã¢Ëœâ€¦Ã¢Ëœâ€¦Ã¢Ëœâ€¦ | Excellent reputation and high quality rating. |
+| Gold Insurance Plan | $891.55 | $1,000 Individual / $2,000 Family | $7,000 Indiv. / $14,000 Fam. | ★★★☆ | Good balance of low deductible and moderate premium. |
+| Bronze Insurance Plan | $1,103.11 | $1,000 Individual / $2,000 Family | $7,000 Indiv. / $14,000 Fam. | ★★★★ | Excellent reputation and high quality rating. |
 "#;
         let events = parse_markdown_to_events(md);
         let cells = match events.iter().find(|e| matches!(e, RenderEvent::Table(_))) {
@@ -2036,7 +2036,7 @@ def foo():
                     for &w in &decision.widths {
                         assert!(w > 0.0, "avail={a}: each column must have positive width");
                     }
-                    // Ã‚Â§3.6 flag must match the strict `<` condition.
+                    // §3.6 flag must match the strict `<` condition.
                     assert_eq!(
                         decision.needs_horizontal_scroll,
                         a < sum_min,
@@ -2131,8 +2131,8 @@ def foo():
         let ctx = egui::Context::default();
         let md = r#"| Plan Name | Monthly Premium | Annual Deductible | Max Out-of-Pocket | Quality Rating | Notes/Evaluation |
 |-----------|-----------------|-------------------|---------------------|----------------|-----------------------|
-| Gold Insurance Plan | $891.55 | $1,000 Individual / $2,000 Family | $7,000 Indiv. / $14,000 Fam. | Ã¢Ëœâ€¦Ã¢Ëœâ€¦Ã¢Ëœâ€¦Ã¢Ëœâ€  | Good balance of low deductible and moderate premium. |
-| Bronze Insurance Plan | $1,103.11 | $1,000 Individual / $2,000 Family | $7,000 Indiv. / $14,000 Fam. | Ã¢Ëœâ€¦Ã¢Ëœâ€¦Ã¢Ëœâ€¦Ã¢Ëœâ€¦ | Excellent reputation and high quality rating. |
+| Gold Insurance Plan | $891.55 | $1,000 Individual / $2,000 Family | $7,000 Indiv. / $14,000 Fam. | ★★★☆ | Good balance of low deductible and moderate premium. |
+| Bronze Insurance Plan | $1,103.11 | $1,000 Individual / $2,000 Family | $7,000 Indiv. / $14,000 Fam. | ★★★★ | Excellent reputation and high quality rating. |
 "#;
         let _ = ctx.run_ui(egui::RawInput::default(), |ui| {
             egui::CentralPanel::default().show(ui, |ui| {
@@ -2186,7 +2186,7 @@ def foo():
     /// Renders `table_cells` inside a CentralPanel with `viewport_width`
     /// and returns the `ColumnWidths` decision the renderer used.
     ///
-    /// This wires the full `measure Ã¢â€ â€™ ftwa Ã¢â€ â€™ render` path; tests assert
+    /// This wires the full `measure → ftwa → render` path; tests assert
     /// on the returned decision rather than on pixels (since this project
     /// is on eframe 0.27 and `egui_kittest` requires egui 0.31+).
     fn render_table_with_viewport(
@@ -2334,7 +2334,7 @@ def foo():
 
     #[test]
     fn test_render_table_similar_columns_fit_viewport() {
-        // 3 identical-text columns, 800px viewport Ã¢â€ â€™ surplus regime.
+        // 3 identical-text columns, 800px viewport → surplus regime.
         // All columns have identical text, so identical max/min widths;
         // FTWA distributes the spare equally.
         let table = build_uniform_table("name", 3);
@@ -2351,7 +2351,7 @@ def foo():
 
     #[test]
     fn test_render_table_dissimilar_columns_fit_viewport() {
-        // 1 wide + 2 narrow, 1000px viewport Ã¢â€ â€™ surplus, wide column gets
+        // 1 wide + 2 narrow, 1000px viewport → surplus, wide column gets
         // the largest share of the spare.
         let table = build_dissimilar_table("a", "a much wider middle column");
         let d = render_table_with_viewport(&table, 1000.0);
@@ -2367,7 +2367,7 @@ def foo():
             "the wide column should be the widest; widths = {:?}",
             d.widths
         );
-        // Wide column should be at least 2Ãƒâ€” either narrow column.
+        // Wide column should be at least 2× either narrow column.
         assert!(d.widths[1] >= 2.0 * d.widths[0]);
         assert!(d.widths[1] >= 2.0 * d.widths[2]);
     }
@@ -2377,14 +2377,14 @@ def foo():
         // 3 columns of space-separated words. The longest single token
         // (a single word) is much smaller than the full line, so
         // min_content < max_content. With a small viewport we get
-        // sum_min < available < sum_max Ã¢â€ â€™ deficit regime (word wrap),
-        // not Ã‚Â§3.6 (which would only trigger if sum_min itself
+        // sum_min < available < sum_max → deficit regime (word wrap),
+        // not §3.6 (which would only trigger if sum_min itself
         // exceeded available).
         let table = build_uniform_table("alpha beta gamma delta epsilon zeta", 3);
         let d = render_table_with_viewport(&table, 300.0);
         assert!(
             !d.needs_horizontal_scroll,
-            "300px must trigger deficit, not Ã‚Â§3.6; got {:?}",
+            "300px must trigger deficit, not §3.6; got {:?}",
             d.widths
         );
         // Deficit invariant: G3 sum == available.
@@ -2395,21 +2395,21 @@ def foo():
 
     #[test]
     fn test_render_table_similar_columns_exceed_viewport() {
-        // 3 identical wide columns, very small viewport Ã¢â€ â€™ Ã‚Â§3.6 fallback.
+        // 3 identical wide columns, very small viewport → §3.6 fallback.
         let table = build_uniform_table("a_long_column_header_text_here_now", 3);
-        // 30px viewport Ã¢â‚¬â€ far below sum_min for a 3-col table with
-        // multi-char tokens. Forces the Ã‚Â§3.6 fallback path.
+        // 30px viewport — far below sum_min for a 3-col table with
+        // multi-char tokens. Forces the §3.6 fallback path.
         let d = render_table_with_viewport(&table, 30.0);
         assert!(
             d.needs_horizontal_scroll,
-            "tiny viewport must trigger Ã‚Â§3.6 fallback; got {:?}",
+            "tiny viewport must trigger §3.6 fallback; got {:?}",
             d.widths
         );
     }
 
     #[test]
     fn test_render_table_dissimilar_columns_exceed_viewport() {
-        // One column with very long content + tiny viewport Ã¢â€ â€™ Ã‚Â§3.6.
+        // One column with very long content + tiny viewport → §3.6.
         let long = "this_is_a_very_very_very_very_long_column_header_that_will_not_fit";
         let table = build_dissimilar_table("a", long);
         let d = render_table_with_viewport(&table, 100.0);
@@ -3678,7 +3678,7 @@ def foo():
     }
 
     /// Tier 2 smoke test: a code block renders without panic and the
-    /// copy-code button is on screen. The actual click Ã¢â€ â€™ output
+    /// copy-code button is on screen. The actual click → output
     /// transition is exercised by `test_copy_code_button_click_copies_to_output`
     /// (currently `#[ignore]`d pending the `egui_kittest` upgrade).
     #[test]
@@ -3699,7 +3699,7 @@ def foo():
         assert_eq!(captured, "");
     }
 
-    /// Tier 1 test for the copy-code side effect. The Tier 4 click â†’
+    /// Tier 1 test for the copy-code side effect. The Tier 4 click →
     /// output version is `test_copy_code_button_click_copies_to_output`
     /// below.
     #[test]
@@ -3715,7 +3715,7 @@ def foo():
         assert_eq!(captured, "let x = 1;");
     }
 
-    /// Tier 4 click Ã¢â€ â€™ output integration. Re-enabled after the
+    /// Tier 4 click → output integration. Re-enabled after the
     /// egui 0.27 → 0.35 upgrade landed `egui_kittest` as a
     /// dev-dependency (see `doc/planning/egui-testing.md` §"Q7
     /// Resolved" for the rollout context).
@@ -3768,7 +3768,7 @@ def foo():
     }
 
     /// Tier 2 smoke test: a hyperlink renders without panic. The
-    /// Tier 4 click Ã¢â€ â€™ open_url test is `#[ignore]`d.
+    /// Tier 4 click → open_url test is `#[ignore]`d.
     #[test]
     fn test_render_hyperlink_smoke() {
         let ctx = egui::Context::default();
@@ -3779,7 +3779,7 @@ def foo():
         // egui 0.35: read post-frame output from `FullOutput`.
         let output = ctx.run_ui(egui::RawInput::default(), |ui| {
             egui::CentralPanel::default().show(ui, |ui| {
-                // task_checked=None, needs_bullet=false â†’ not a list
+                // task_checked=None, needs_bullet=false → not a list
                 // item; renders the link inline.
                 render_inline(ui, &elems, false, None, 0, None, 0, &mut Vec::new());
             });
@@ -3857,7 +3857,7 @@ def foo():
 
     /// Tier 2 smoke test: a task list renders without panic. The
     /// checkbox's `checked` state survives the render. The Tier 4
-    /// click Ã¢â€ â€™ state-toggle test is `#[ignore]`d.
+    /// click → state-toggle test is `#[ignore]`d.
     #[test]
     fn test_render_task_checkbox_initial_state() {
         let ctx = egui::Context::default();

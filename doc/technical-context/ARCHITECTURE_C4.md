@@ -220,7 +220,7 @@ which owns the `mpsc` channels and the `notify::RecommendedWatcher`. A
 C4Component fastmd
   title FastMD — Background Workers
 
-  Component(task, "Task", "background_task.rs (518)", "Owns rx/tx (std::sync::mpsc), file_event_bus: Bus<FileEvent>, watcher: Option<notify::RecommendedWatcher>; spawns indexing thread; run_indexing wires all workers")
+  Component(task, "Task", "background_task.rs (518)", "Owns rx/tx (std::sync::mpsc), file_event_bus: Bus<FileEvent>, watcher: Option<notify::RecommendedWatcher>; subscribes to Bus<ConfigArrived> at construction and only spawns the indexing thread after the first ConfigArrived (or the CONFIG_ARRIVAL_TIMEOUT fallback); run_indexing wires all workers")
   Component(indexer, "Indexer", "background/indexer.rs", "Worker pool up to 4 threads (REQ-301/302)")
   Component(watcher, "FileWatcher", "background/watcher.rs", "notify 6.0; recursive; auto-watch new dirs (REQ-401/407)")
   Component(pdf, "PdfConverterWorker", "background/pdf_converter.rs", "PdfConversionJob queue; pdf_converter_command (REQ-450..458)")
@@ -247,7 +247,7 @@ Cross-cutting modules that the UI, Agent, Tools and Background all depend on.
 C4Component fastmd
   title FastMD — Supporting Modules
 
-  Component(cfg, "config", "config.rs (data shapes only; VFS moved to app/vfs/)", "AppConfig, LlmConfig{model,api_url,api_key,cost,use_case}, JmapClient, CalDavClient, CardDavClient, content_libraries: Vec<ContentLibrary>; load_config, get_config_path; Debug redacts secrets. VFS types re-exported from app::vfs for backwards compat. CONFIG-001..008 (CONFIG-009 superseded by VFS-004/009)")
+  Component(cfg, "config", "config.rs + bus.rs (data shapes only; VFS moved to app/vfs/)", "AppConfig, LlmConfig{model,api_url,api_key,cost,use_case}, JmapClient, CalDavClient, CardDavClient, content_libraries: Vec<ContentLibrary>; load_config, get_config_path; Debug redacts secrets; config_bus / ConfigArrived (tokio broadcast) used to fan out the loaded config to Task, AgentSessionManager, and FastMdApp on startup. VFS types re-exported from app::vfs for backwards compat. CONFIG-001..008 (CONFIG-009 superseded by VFS-004/009)")
   Component(ev, "file_events", "file_events.rs (554)", "Bus<T> (tokio::sync::broadcast, BUS_CAPACITY=8192); FileEvent; FileEventKind{Discovered,Updated,Removed,DirDiscovered,DirRemoved}; FileEventProducer; BusReader. Multi-producer/multi-consumer")
   Component(fp, "file_processor", "file_processor.rs (186)", "FileEventProcessor{reader, all_files, all_files_set, all_dirs, all_dirs_set, indexing_finished, indexing_finished_handled}")
   Component(dt, "directory_tracker", "directory_tracker.rs (267)", "Single source of truth for known dirs; consumes DirDiscovered/DirRemoved + file Discovered")
@@ -286,8 +286,19 @@ C4Component fastmd
 
 1. **Startup** (`main.rs`): mimalloc global allocator → panic hook →
    `tracing_subscriber::fmt::init()` → install rustls ring provider →
-   `load_config()` → `SystemPromptBuilder::new(&config).build(&config)` →
-   `eframe::run_native` with 1000x700 viewport titled "⚡ FastMD Viewer".
+   `load_config()` → `config_bus()` → `eframe::run_native` with 1000x700
+   viewport titled "⚡ FastMD Viewer". The `ConfigArrived` event is
+   published inside the egui creation callback (before the first frame)
+   so every subscriber sees it. Subscribers fan out independently:
+   - `FastMdApp::drain_config_bus` populates `self.config`,
+     `content_libraries`, `inline_editor_enabled`, the batch dialog's
+     `available_dirs`, and forwards the config to the agent
+     (`AgentSessionManager::set_config`).
+   - `Task::new(bus)` subscribes; the spawned thread waits for the
+     first `ConfigArrived` (`CONFIG_ARRIVAL_TIMEOUT`, then falls back
+     to `AppConfig::default`) before running `run_indexing`.
+   - `AgentSessionManager::new(bus)` subscribes; its `drain_config`
+     is called on the UI thread and stores the published config.
 2. **Indexing** (`background_task::Task::run_indexing`): spawns indexer thread
    that wires `Indexer`, `FileWatcher`, `PdfConverterWorker`,
    `ImageVisionWorker`, `BusRouter`; emits `FileEvent`s on the `Bus`.
@@ -301,3 +312,24 @@ C4Component fastmd
    (🤔...🤔 thinking delimiters, AGENT-022).
 5. **Batch processing** (`batch/`): discoverer selects files/dirs, executor
    runs prompts with concurrency 1-8 (BATCH-001..BATCH-014).
+
+### Configuration Arrival Bus
+
+`config/bus.rs` defines `Bus<ConfigArrived>` and the `config_bus()`
+factory. The bus is a `tokio::sync::broadcast` channel (same
+backing primitive as `Bus<FileEvent>`, in `app/watcher/events.rs`).
+Subscribers must register before the publish (the channel does not
+buffer events for future subscribers), so the canonical order is:
+
+1. `main` creates the bus.
+2. Subscribers register during construction (`Task::new(bus)`,
+   `AgentSessionManager::new(bus)`, `FastMdApp::new(cc, bus)`).
+3. `main` publishes `ConfigArrived { config }` before the egui loop
+   starts running, ensuring every subscriber observes the first
+   arrival on its first `try_recv`.
+
+Subscribers that miss the publish (no longer possible in the
+canonical flow) fall back to `AppConfig::default` after
+`CONFIG_ARRIVAL_TIMEOUT` (100 ms). Hot reload is intentionally out
+of scope: subscribers drop their readers after the first successful
+drain.

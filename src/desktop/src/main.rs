@@ -45,12 +45,12 @@ fn main() -> eframe::Result<()> {
 
     let config = fastmd::config::load_config();
 
-    let prompt = fastmd::agent::prompt_builder::SystemPromptBuilder::new(&config).build(&config);
-    tracing::info!(
-        name = "app.startup",
-        system_prompt = %prompt,
-        "Application started successfully. Emitted system prompt for diagnostics."
-    );
+    // The configuration-arrival bus is the fan-out channel that
+    // each subsystem (background workers, agent, UI) subscribes to
+    // and uses to perform its own initialization work. We create it
+    // here, hand it to the app, and publish the loaded config so
+    // every subscriber observes the same first-arrival event.
+    let config_bus = fastmd::config::config_bus();
 
     eframe::run_native(
         "fastmd",
@@ -60,6 +60,19 @@ fn main() -> eframe::Result<()> {
         // during setup instead of panicking. We don't currently
         // have any fallible setup work to do, so we always return
         // `Ok`.
-        Box::new(move |cc| Ok(Box::new(FastMdApp::new(cc, config)))),
+        Box::new(move |cc| {
+            // Build the app first so its internal subscribers
+            // (`Task::new`, `AgentSessionManager::new`, and the UI
+            // reader in `FastMdApp::new`) register *before* we
+            // publish. `tokio::sync::broadcast` only delivers an
+            // event to subscribers that exist at publish time —
+            // publishing before construction would silently drop
+            // the event on the floor and the background workers
+            // would fall back to the default (empty) config and
+            // never start scanning.
+            let app = FastMdApp::new(cc, config_bus.clone());
+            config_bus.publish(fastmd::ConfigArrived::new(config.clone()));
+            Ok(Box::new(app))
+        }),
     )
 }

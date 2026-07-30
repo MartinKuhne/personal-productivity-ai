@@ -1,4 +1,4 @@
-//! Batch prompt-processing dialog UI Ã¢â‚¬â€ directory/prompt/concurrency selection, progress display, and results summary.
+//! Batch prompt-processing dialog UI — directory/prompt/concurrency selection, progress display, and results summary.
 
 use crate::batch::types::{
     BatchConfig, BatchDialogConfig, BatchDialogResult, BatchMode, validate_batch_params,

@@ -1,4 +1,4 @@
-//! Background-logs viewer panel Ã¢â‚¬â€ category filter, text search, auto-scroll, and copy-to-clipboard.
+//! Background-logs viewer panel — category filter, text search, auto-scroll, and copy-to-clipboard.
 
 use crate::background::{BackgroundLogEntry, LogCategory};
 use crate::ui::FastMdApp;

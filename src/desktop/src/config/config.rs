@@ -11,6 +11,9 @@
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 
+pub mod bus;
+pub use bus::{CONFIG_ARRIVAL_TIMEOUT, ConfigArrived, config_bus};
+
 #[deprecated(note = "import directly from crate::app::vfs")]
 pub use crate::app::vfs::{
     ContentLibraryExt, VirtualPath, VirtualPathError, library_display_label,
