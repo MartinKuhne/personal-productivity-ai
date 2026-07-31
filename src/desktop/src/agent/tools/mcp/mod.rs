@@ -16,13 +16,21 @@
 //! | Headers — `Accept`            | Implemented                                                  |
 //! | Headers — `MCP-Protocol-Ver.` | Implemented                                                  |
 //! | Headers — `MCP-Session-Id`    | Implemented (captured from init, 404 triggers re-init)       |
+//! | Headers — `Authorization`     | Implemented (Bearer token attached when no static header)    |
 //! | Cancellation                  | Implemented (timeout → `notifications/cancelled`)            |
 //! | Ping                          | Implemented (manager + session, with `{}` validation)        |
 //! | Progress                      | Partial (server→client notifications logged via tracing)    |
-//! | Authorization                 | Header pass-through only (no OAuth 2.1 dynamic flow yet)     |
+//! | Authorization — Discovery     | Implemented (PRM RFC 9728 + AS Metadata RFC 8414)            |
+//! | Authorization — Registration  | Implemented (pre-registered + Dynamic RFC 7591)              |
+//! | Authorization — PKCE          | Implemented (S256, 32-byte verifier, ring CSPRNG)            |
+//! | Authorization — State         | Implemented (32-byte, validated on callback)                 |
+//! | Authorization — Resource param| Implemented (RFC 8707, on auth + token requests)             |
+//! | Authorization — Step-up       | Implemented (403 insufficient_scope → re-flow with scope)    |
+//! | Authorization — Token cache   | Implemented ([`TokenStore`] with file-level permissions)    |
 //! | JSON-RPC envelope             | `jsonrpc: "2.0"` validated; per-session monotonic `id`      |
 
 mod error;
+pub mod oauth;
 mod session;
 mod sse;
 pub mod tool_source;
@@ -35,6 +43,12 @@ use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 
 pub use error::McpError;
+pub use oauth::{
+    AuthorizationServerMetadata, ClientRegistrationRequest, ClientRegistrationResponse,
+    LoopbackServer, OAuthClient, OAuthError, OAuthFlowInputs, OAuthFlowOutput, PreRegisteredClient,
+    ProtectedResourceMetadata, StoredToken, TokenResponse, TokenStore, WwwAuthenticateChallenge,
+    parse_bearer_challenge, run_flow as run_oauth_flow,
+};
 pub use session::{
     CLIENT_NAME, CLIENT_VERSION, DEFAULT_REQUEST_TIMEOUT, MAX_REQUEST_TIMEOUT, McpClientSession,
     McpToolDescriptor, PROTOCOL_VERSION, is_valid_session_id,
@@ -156,6 +170,14 @@ impl Tool for McpToolAdapter {
 /// configured servers are created lazily on first
 /// [`McpClientManager::call_tool`]. Removed servers are shut down on
 /// the next `update_config`.
+///
+/// OAuth 2.1 authorization (MCP spec §4) is optional and turned on
+/// by installing a [`TokenStore`] via
+/// [`McpClientManager::set_token_store`]. When a store is installed
+/// and the configured server has no static `Authorization` header,
+/// the session triggers the OAuth flow on a 401 with
+/// `WWW-Authenticate` and caches the resulting access token in the
+/// store.
 pub struct McpClientManager {
     state: Mutex<ManagerState>,
 }
@@ -163,6 +185,10 @@ pub struct McpClientManager {
 struct ManagerState {
     servers: HashMap<String, McpServerConfig>,
     sessions: HashMap<String, Arc<McpClientSession>>,
+    /// Optional OAuth 2.1 token store. When `None`, OAuth is
+    /// disabled: the client will not run the authorization flow,
+    /// even if the server returns 401 with `WWW-Authenticate`.
+    token_store: Option<Arc<TokenStore>>,
 }
 
 impl Default for McpClientManager {
@@ -172,14 +198,37 @@ impl Default for McpClientManager {
 }
 
 impl McpClientManager {
-    /// Creates a new [`McpClientManager`].
+    /// Creates a new [`McpClientManager`] with no OAuth support.
+    /// Call [`McpClientManager::set_token_store`] before the first
+    /// call to enable the OAuth 2.1 flow.
     pub fn new() -> Self {
         Self {
             state: Mutex::new(ManagerState {
                 servers: HashMap::new(),
                 sessions: HashMap::new(),
+                token_store: None,
             }),
         }
+    }
+
+    /// Install (or replace) the OAuth 2.1 token store used by HTTP
+    /// sessions. New sessions pick up the store on creation;
+    /// existing sessions get a reference at the time of their next
+    /// HTTP call. Passing `None` disables OAuth.
+    pub fn set_token_store(&self, store: Option<Arc<TokenStore>>) {
+        if let Ok(mut state) = self.state.lock() {
+            state.token_store = store;
+        }
+    }
+
+    /// Snapshot of the currently-installed token store, if any.
+    /// Exposed for tests and for code that wants to pre-warm a
+    /// token by running the flow outside the session.
+    pub fn token_store(&self) -> Option<Arc<TokenStore>> {
+        self.state
+            .lock()
+            .ok()
+            .and_then(|s| s.token_store.clone())
     }
 
     /// Update manager configuration with active MCP servers. Any
@@ -389,7 +438,8 @@ impl McpClientManager {
             .get(server_name)
             .cloned()
             .ok_or_else(|| format!("MCP server '{server_name}' is not configured."))?;
-        let session = Arc::new(McpClientSession::new(cfg));
+        let store = state.token_store.clone();
+        let session = Arc::new(McpClientSession::new(cfg, store));
         state
             .sessions
             .insert(server_name.to_owned(), session.clone());
@@ -499,6 +549,7 @@ mod tests {
             McpServerConfig::Sse {
                 url: "".to_string(),
                 headers: HashMap::new(),
+                oauth: None,
             },
         );
         manager.update_config(&config);

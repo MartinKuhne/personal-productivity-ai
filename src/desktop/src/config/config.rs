@@ -190,6 +190,57 @@ impl Default for ToolGroupsConfig {
     }
 }
 
+/// Optional OAuth 2.1 configuration for an HTTP MCP server. Used by
+/// the MCP client to perform the authorization code flow (with
+/// PKCE) per `doc/distill/mcp.md` §4.
+///
+/// If this block is absent, the client still attempts the OAuth
+/// flow on a 401 with `WWW-Authenticate`; the difference is that
+/// without a pre-registered `client_id`, the client will register
+/// dynamically (RFC 7591) or surface an error if the server
+/// doesn't advertise a `registration_endpoint`. Supplying a
+/// `client_id` short-circuits the discovery + registration steps
+/// and lets the client sign in immediately.
+#[derive(serde::Serialize, serde::Deserialize, Clone, Default, PartialEq, Eq)]
+pub struct McpOAuthConfig {
+    /// Pre-registered client identifier. If set, the client
+    /// skips Dynamic Client Registration (RFC 7591) and uses
+    /// this value as `client_id` on the authorization and token
+    /// requests.
+    #[serde(default)]
+    pub client_id: Option<String>,
+    /// Pre-registered client secret. Only required for
+    /// confidential clients (when the AS metadata lists
+    /// `client_secret_basic` or `client_secret_post` in
+    /// `token_endpoint_auth_methods_supported`). Public clients
+    /// (`token_endpoint_auth_method = "none"`) do not get a
+    /// secret.
+    #[serde(default)]
+    pub client_secret: Option<String>,
+    /// Scopes the client will request. Per spec §4.5 the client
+    /// SHOULD use the `scope` from the initial `WWW-Authenticate`
+    /// header, falling back to `scopes_supported` from the
+    /// resource metadata. Explicitly listing scopes here forces
+    /// the client to request them in addition to the discovered
+    /// set; the union is requested.
+    #[serde(default)]
+    pub scopes: Vec<String>,
+}
+
+impl std::fmt::Debug for McpOAuthConfig {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("McpOAuthConfig")
+            .field("client_id", &self.client_id)
+            // The secret is sensitive; we never log it.
+            .field(
+                "client_secret",
+                &self.client_secret.as_ref().map(|_| "[REDACTED]"),
+            )
+            .field("scopes", &self.scopes)
+            .finish()
+    }
+}
+
 /// Configuration for an external MCP (Model Context Protocol) server connection.
 #[derive(serde::Serialize, serde::Deserialize, Clone, PartialEq, Eq)]
 #[serde(tag = "transport", rename_all = "snake_case")]
@@ -210,8 +261,19 @@ pub enum McpServerConfig {
         /// HTTP/HTTPS URL for the SSE endpoint.
         url: String,
         /// Optional HTTP headers (e.g. authorization tokens).
+        /// If this map contains an `Authorization` entry, the
+        /// client uses it verbatim and does NOT run the OAuth
+        /// flow — useful for static API keys, internal servers,
+        /// or pre-obtained bearer tokens. If absent or empty,
+        /// the client runs the OAuth 2.1 flow on a 401 with
+        /// `WWW-Authenticate` per `doc/distill/mcp.md` §4.
         #[serde(default)]
         headers: HashMap<String, String>,
+        /// OAuth 2.1 client configuration. Optional; see
+        /// [`McpOAuthConfig`]. Only consulted if the static
+        /// `Authorization` header is absent.
+        #[serde(default)]
+        oauth: Option<McpOAuthConfig>,
     },
 }
 
@@ -224,7 +286,7 @@ impl std::fmt::Debug for McpServerConfig {
                 .field("args", args)
                 .field("env", env)
                 .finish(),
-            Self::Sse { url, headers } => {
+            Self::Sse { url, headers, oauth } => {
                 let redacted_headers: HashMap<_, _> = headers
                     .keys()
                     .map(|k| (k.clone(), "[REDACTED]".to_string()))
@@ -232,6 +294,7 @@ impl std::fmt::Debug for McpServerConfig {
                 f.debug_struct("McpServerConfig::Sse")
                     .field("url", url)
                     .field("headers", &redacted_headers)
+                    .field("oauth", oauth)
                     .finish()
             }
         }

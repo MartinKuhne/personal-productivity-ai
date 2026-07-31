@@ -121,7 +121,7 @@ flag. AGENT-001..AGENT-023.
 C4Component fastmd
   title FastMD — Agent Core
 
-  Component(mgr, "AgentSessionManager", "agent/manager.rs (278)", "AgentState{running,status,thinking,response,scroll_to_id,history,token_usage,total_usage}; start_session; handles BackgroundMessage::Agent*; cancel via AtomicBool")
+  Component(mgr, "AgentSessionManager", "agent/manager.rs (278)", "AgentState{running,status,thinking,response,scroll_to_id,history,token_usage,total_usage}; start_session; handle_agent_event; cancel via AtomicBool")
   Component(impl, "run_agent / run_agent_inner", "agent/agent_impl.rs (212)", "Resolves LLM client, builds messages, get_tools_schema, ToolExecutor::new, turn loop")
   Component(ctx, "AgentContext", "agent/context.rs", "config, prompt, history, active_file, active_dir, selected_files, cancel_flag, channels")
   Component(llm, "LLMClient", "agent/llm_client.rs", "parse_usage_block; OpenAI-compatible HTTP")
@@ -252,7 +252,7 @@ C4Component fastmd
   Component(fp, "file_processor", "file_processor.rs (186)", "FileEventProcessor{reader, all_files, all_files_set, all_dirs, all_dirs_set, indexing_finished, indexing_finished_handled}")
   Component(dt, "directory_tracker", "directory_tracker.rs (267)", "Single source of truth for known dirs; consumes DirDiscovered/DirRemoved + file Discovered")
   Component(tm, "tag_manager", "tag_manager.rs (220)", "TagManager{file_tags:BTreeMap<PathBuf,Vec<String>>, all_tags:BTreeSet<String>, prompt_paths:BTreeSet<PathBuf>, selected_tag}")
-  Component(msg, "messages", "messages.rs (69)", "BackgroundMessage enum; TokenUsageInfo{prompt_tokens,completion_tokens,total_tokens,cached_tokens,reasoning_tokens}")
+  Component(msg, "messages", "messages.rs (44)", "TokenUsageInfo{prompt_tokens,completion_tokens,total_tokens,cached_tokens,reasoning_tokens}")
   Component(doc, "document", "document.rs (179)", "DocumentContent{front_matter: Option<String>, body: String}; parse via utils::markdown::parse_front_matter")
   Component(ed, "editor", "editor.rs (512)", "Inline editor; EditorColors inverted white-on-black (REQ-261); validation via pulldown-cmark (REQ-258); undo/redo >=100 (REQ-257); clipboard (REQ-255); cursor nav (REQ-256); save combines body + original front-matter (REQ-259)")
   Component(print, "print", "print.rs (206)", "PrintJob{markdown_path, markdown_content, title}; markdown->HTML via pulldown-cmark; execute_print_blocking")
@@ -308,7 +308,7 @@ C4Component fastmd
 4. **Agent session** (`AgentSessionManager::start_session`): spawns
    `run_agent(AgentContext)`; turn loop runs safe tools in parallel and unsafe
    tools sequentially (`ToolExecutor`, AGENT-012); responses flow back via
-   `BackgroundMessage::Agent*` and are formatted by `ResponseFormatter`
+   `BackgroundEvent::Agent(AgentEvent)` and are formatted by `ResponseFormatter`
    (🤔...🤔 thinking delimiters, AGENT-022).
 5. **Batch processing** (`batch/`): discoverer selects files/dirs, executor
    runs prompts with concurrency 1-8 (BATCH-001..BATCH-014).

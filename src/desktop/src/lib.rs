@@ -29,5 +29,6 @@ pub use config::{AppConfig, get_config_path, load_config};
 pub use agent::error::AgentError;
 pub use markdown::ToCEntry;
 pub use agent::tools::{execute_tool, get_tools_schema};
+pub use agent::tools::mcp as mcp;
 pub use ui::FastMdApp;
 pub use utils::extract_tags_from_file;

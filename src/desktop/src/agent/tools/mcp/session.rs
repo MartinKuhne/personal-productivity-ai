@@ -33,6 +33,9 @@
 //!   [`super`] for the full compliance matrix.
 
 use super::error::McpError;
+use super::oauth::{
+    OAuthFlowInputs, PreRegisteredClient, TokenStore, parse_bearer_challenge, run_flow,
+};
 use crate::config::McpServerConfig;
 use std::io::Write;
 use std::process::{Child, ChildStdin, Stdio};
@@ -91,6 +94,12 @@ const SUPPORTED_PROTOCOL_VERSIONS: &[&str] = &[PROTOCOL_VERSION];
 pub struct McpClientSession {
     config: McpServerConfig,
     state: Mutex<SessionState>,
+    /// OAuth 2.1 token store. When `Some`, the session attaches a
+    /// bearer token to every HTTP request (unless the config
+    /// supplies a static `Authorization` header) and runs the
+    /// authorization flow on a 401 with `WWW-Authenticate`.
+    /// `None` disables OAuth entirely.
+    token_store: Option<Arc<TokenStore>>,
 }
 
 struct SessionState {
@@ -173,7 +182,11 @@ impl McpClientSession {
     /// Build a new session bound to a given server config. No I/O
     /// happens until [`McpClientSession::ensure_initialized`] (or
     /// [`McpClientSession::call_request`]) is called.
-    pub fn new(config: McpServerConfig) -> Self {
+    ///
+    /// `token_store` is `Some` for HTTP servers that should run
+    /// the OAuth 2.1 authorization flow. Pass `None` to disable
+    /// OAuth (stdio transport always uses `None`).
+    pub fn new(config: McpServerConfig, token_store: Option<Arc<TokenStore>>) -> Self {
         Self {
             config,
             state: Mutex::new(SessionState {
@@ -187,6 +200,36 @@ impl McpClientSession {
                 progress_tokens: std::collections::HashMap::new(),
                 last_event_id: None,
             }),
+            token_store,
+        }
+    }
+
+    /// Replace the OAuth token store on this session. Used by
+    /// tests; production code wires the store at construction.
+    pub fn set_token_store(&mut self, store: Option<Arc<TokenStore>>) {
+        self.token_store = store;
+    }
+
+    /// Returns the resource URI used as the `resource` parameter
+    /// on the OAuth authorization and token requests. For HTTP
+    /// servers this is the URL from the config; for stdio it's
+    /// not applicable.
+    fn resource_uri(&self) -> Option<String> {
+        match &self.config {
+            McpServerConfig::Sse { url, .. } => Some(url.clone()),
+            McpServerConfig::Stdio { .. } => None,
+        }
+    }
+
+    /// True if the configured server supplies a static
+    /// `Authorization` header. In that case the session uses it
+    /// verbatim and does NOT run the OAuth flow.
+    fn has_static_authorization(&self) -> bool {
+        match &self.config {
+            McpServerConfig::Sse { headers, .. } => {
+                headers.keys().any(|k| k.eq_ignore_ascii_case("authorization"))
+            }
+            McpServerConfig::Stdio { .. } => false,
         }
     }
 
@@ -261,7 +304,7 @@ impl McpClientSession {
     ) -> Option<(String, std::collections::HashMap<String, String>, String)> {
         let state = self.state.lock().ok()?;
         match &self.config {
-            McpServerConfig::Sse { url, headers } => {
+            McpServerConfig::Sse { url, headers, .. } => {
                 let sid = state.session_id.clone()?;
                 Some((url.clone(), headers.clone(), sid))
             }
@@ -1084,8 +1127,30 @@ impl McpClientSession {
         payload: serde_json::Value,
         timeout: std::time::Duration,
     ) -> Result<serde_json::Value, McpError> {
+        // The HTTP request may need to be retried after an OAuth
+        // 401 / step-up 403. We track a per-request retry budget
+        // here: at most one OAuth flow per top-level call. A
+        // second 401 from the same call surfaces as an error
+        // rather than another flow.
+        self.http_request_with_oauth(id, payload, timeout, Vec::new(), 0)
+    }
+
+    /// Core HTTP request with optional OAuth retry. `initial_bearer`
+    /// is the bearer token to send on the first attempt (typically
+    /// the cached token from the store); `extra_scopes` is non-empty
+    /// when this is a step-up retry driven by a previous 403.
+    /// `oauth_attempts` counts how many OAuth flows have already
+    /// been run for this call; we cap at 1 to prevent loops.
+    fn http_request_with_oauth(
+        &self,
+        id: u64,
+        payload: serde_json::Value,
+        timeout: std::time::Duration,
+        extra_scopes: Vec<String>,
+        oauth_attempts: u32,
+    ) -> Result<serde_json::Value, McpError> {
         let (url, headers) = match &self.config {
-            McpServerConfig::Sse { url, headers } => (url.clone(), headers.clone()),
+            McpServerConfig::Sse { url, headers, .. } => (url.clone(), headers.clone()),
             McpServerConfig::Stdio { .. } => {
                 return Err(McpError::transport(
                     "http transport requested for non-http server",
@@ -1100,6 +1165,30 @@ impl McpClientSession {
             ));
         }
 
+        // Decide which Bearer token (if any) to attach. We use
+        // the cached token unless (a) the config supplies a
+        // static `Authorization` header, in which case we leave
+        // the user-supplied auth alone, or (b) the caller passed
+        // `extra_scopes`, in which case this is a step-up retry
+        // and we want the fresh token the OAuth flow just minted.
+        let bearer = if self.has_static_authorization() {
+            None
+        } else if let Some(store) = &self.token_store {
+            match store.get(self.resource_uri().as_deref().unwrap_or(&url)) {
+                Some(t) if !extra_scopes.is_empty() => Some(t.access_token.clone()),
+                Some(t) if t.is_expired(std::time::SystemTime::now(), super::oauth::DEFAULT_EXPIRY_SKEW) => {
+                    // Cached token is past its skew; let the OAuth
+                    // flow run by sending no bearer on the first
+                    // attempt (the 401 will trigger refresh).
+                    None
+                }
+                Some(t) => Some(t.access_token.clone()),
+                None => None,
+            }
+        } else {
+            None
+        };
+
         // Spec: client MUST include both `application/json` and
         // `text/event-stream` in Accept. Spec: client MUST send
         // `MCP-Protocol-Version` on every request after init. Spec:
@@ -1113,6 +1202,9 @@ impl McpClientSession {
         for (k, v) in &headers {
             req = req.set(k.as_str(), v.as_str());
         }
+        if let Some(token) = &bearer {
+            req = req.set("Authorization", &format!("Bearer {token}"));
+        }
         {
             let state = self.lock_state()?;
             if let Some(v) = &state.protocol_version {
@@ -1123,11 +1215,95 @@ impl McpClientSession {
             }
         }
 
-        let response = req.send_json(payload);
+        let response = req.send_json(&payload);
         let resp = match response {
             Ok(r) => r,
             Err(ureq::Error::Status(code, r)) => {
+                // Read the WWW-Authenticate header before consuming
+                // the response body. We need it on 401/403 to drive
+                // the OAuth flow.
+                let www_authenticate_header = r.header("WWW-Authenticate").map(str::to_owned);
                 let body = r.into_string().unwrap_or_default();
+                // OAuth integration: on 401 with WWW-Authenticate,
+                // run the authorization flow once and retry. On 403
+                // with insufficient_scope, run a step-up flow once
+                // and retry. Both retry paths are gated on (a) no
+                // static Authorization (the user opted into OAuth
+                // implicitly by omitting the header), (b) a token
+                // store is installed, and (c) this call hasn't
+                // already retried (oauth_attempts < 1).
+                if (code == 401 || code == 403)
+                    && !self.has_static_authorization()
+                    && self.token_store.is_some()
+                    && oauth_attempts < 1
+                {
+                    let challenge = www_authenticate_header
+                        .as_deref()
+                        .and_then(parse_bearer_challenge);
+                    if let Some(store) = &self.token_store {
+                        let resource = self
+                            .resource_uri()
+                            .ok_or_else(|| McpError::transport("missing resource URI", ""))?;
+                        let scopes_for_step_up = if code == 403 {
+                            let required = challenge
+                                .as_ref()
+                                .and_then(|c| c.get("scope"))
+                                .map(|s| {
+                                    s.split_whitespace().map(str::to_owned).collect::<Vec<_>>()
+                                })
+                                .unwrap_or_default();
+                            // Combine the required scopes with any
+                            // the caller asked for.
+                            let mut combined = extra_scopes.clone();
+                            for s in &required {
+                                if !combined.iter().any(|x| x == s) {
+                                    combined.push(s.clone());
+                                }
+                            }
+                            combined
+                        } else {
+                            extra_scopes.clone()
+                        };
+                        let pre_registered = self.pre_registered_client();
+                        let inputs = OAuthFlowInputs {
+                            mcp_server_url: resource.clone(),
+                            www_authenticate: challenge,
+                            extra_scopes: scopes_for_step_up.clone(),
+                            timeout: None,
+                            pre_registered_client: pre_registered,
+                            loopback_override: None,
+                        };
+                        match run_flow(&inputs, store) {
+                            Ok(_output) => {
+                                // Retry once with the fresh token
+                                // (and the step-up scopes if any).
+                                return self.http_request_with_oauth(
+                                    id,
+                                    payload,
+                                    timeout,
+                                    scopes_for_step_up,
+                                    oauth_attempts + 1,
+                                );
+                            }
+                            Err(e) => {
+                                let label = if code == 401 {
+                                    "OAuth flow failed after 401"
+                                } else {
+                                    "OAuth step-up failed after 403"
+                                };
+                                tracing::warn!(
+                                    server = %self.config_label(),
+                                    error = %e,
+                                    "{label}"
+                                );
+                                return Err(McpError::transport(
+                                    format!("HTTP server '{}'", self.config_label()),
+                                    format!("{label}: {e}"),
+                                ));
+                            }
+                        }
+                    }
+                }
                 if code == 404 {
                     // Spec: server indicates the session has been
                     // terminated. Drop the cached session id and
@@ -1235,6 +1411,23 @@ impl McpClientSession {
                     format!("invalid JSON-RPC response: {e}; body: {body}"),
                 )
             })
+        }
+    }
+
+    /// Build a [`PreRegisteredClient`] from the static OAuth
+    /// config block, if any. Returns `None` for stdio transport
+    /// or for HTTP servers without an explicit OAuth block.
+    fn pre_registered_client(&self) -> Option<PreRegisteredClient> {
+        match &self.config {
+            McpServerConfig::Sse { oauth, .. } => {
+                let cfg = oauth.as_ref()?;
+                let client_id = cfg.client_id.clone()?;
+                Some(PreRegisteredClient {
+                    client_id,
+                    client_secret: cfg.client_secret.clone(),
+                })
+            }
+            McpServerConfig::Stdio { .. } => None,
         }
     }
 
@@ -1363,7 +1556,7 @@ impl McpClientSession {
         // body. We don't bother inspecting the response; we only
         // surface network errors.
         let (url, headers) = match &self.config {
-            McpServerConfig::Sse { url, headers } => (url.clone(), headers.clone()),
+            McpServerConfig::Sse { url, headers, .. } => (url.clone(), headers.clone()),
             McpServerConfig::Stdio { .. } => {
                 return Err(McpError::transport(
                     "http transport requested for non-http server",

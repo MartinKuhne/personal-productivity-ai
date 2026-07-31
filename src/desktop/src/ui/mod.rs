@@ -17,7 +17,9 @@ pub mod test_helpers;
 pub use crate::markdown::ToCEntry;
 pub use app::{FastMdApp, TreeNode, generate_format_prompt};
 pub use os_shell::{open_in_system_editor, show_in_file_explorer};
-pub use render::{build_toc, render_markdown, render_yaml_table};
+pub use render::{build_toc, render_markdown};
 pub use tree::{
-    FlatRow, TREE_ROW_HEIGHT, TreeNodeContext, draw_tree_node, flatten_tree, render_flat_row,
+    FlatRow, TREE_ROW_HEIGHT, TreeNodeContext, TreeOpsContext, draw_tree_node, flatten_tree,
+    render_flat_row,
 };
+
