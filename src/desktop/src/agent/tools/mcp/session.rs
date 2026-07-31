@@ -240,10 +240,9 @@ impl McpClientSession {
     /// and for HTTP servers without an OAuth block.
     fn oauth_config_scopes(&self) -> Vec<String> {
         match &self.config {
-            McpServerConfig::Sse { oauth, .. } => oauth
-                .as_ref()
-                .map(|c| c.scopes.clone())
-                .unwrap_or_default(),
+            McpServerConfig::Sse { oauth, .. } => {
+                oauth.as_ref().map(|c| c.scopes.clone()).unwrap_or_default()
+            }
             McpServerConfig::Stdio { .. } => Vec::new(),
         }
     }

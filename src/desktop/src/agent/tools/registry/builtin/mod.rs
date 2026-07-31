@@ -5,6 +5,7 @@ pub(crate) mod carddav;
 pub(crate) mod csv;
 pub(crate) mod fs;
 pub(crate) mod jmap;
+pub(crate) mod weather;
 pub(crate) mod web;
 pub(crate) mod yaml;
 
@@ -49,4 +50,5 @@ pub(crate) fn register_all_builtins(registry: &mut ToolRegistry) {
     registry.register(Box::new(csv::CsvAddRowsTool));
     registry.register(Box::new(csv::CsvDeleteRowsTool));
     registry.register(Box::new(csv::CsvQueryTool));
+    registry.register(Box::new(weather::GetWeatherTool));
 }

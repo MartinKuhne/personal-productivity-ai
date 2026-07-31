@@ -1,8 +1,8 @@
 //! Filesystem tool implementations for the tool registry.
 
+use crate::agent::tools::Tool;
 use crate::agent::tools::context::ToolContext;
 use crate::agent::tools::dtos;
-use crate::agent::tools::Tool;
 use crate::app::vfs::library::ContentLibraryExt;
 use crate::config::AppConfig;
 use std::any::TypeId;

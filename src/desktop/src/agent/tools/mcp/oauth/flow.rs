@@ -623,9 +623,7 @@ mod tests {
         // MCP-013: the `resource` parameter must be present on the
         // token request, pointing at the MCP server URL.
         assert!(
-            token_req
-                .body
-                .contains("resource=http%3A%2F%2F127.0.0.1"),
+            token_req.body.contains("resource=http%3A%2F%2F127.0.0.1"),
             "token request must carry the resource param, got body: {}",
             token_req.body
         );

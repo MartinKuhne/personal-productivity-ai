@@ -188,9 +188,9 @@ fn format_grep_result(func_name: &str, data: &serde_json::Value) -> String {
         total
     );
     if truncated {
-        msg.push_str(&format!(
-            "> **Note:** the result was truncated to 200 matches. Refine the query with narrower terms or delegate to a sub-agent to analyse a specific file.\n\n"
-        ));
+        msg.push_str(
+            "> **Note:** the result was truncated to 200 matches. Refine the query with narrower terms or delegate to a sub-agent to analyse a specific file.\n\n",
+        );
     }
     msg
 }

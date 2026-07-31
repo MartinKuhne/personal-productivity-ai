@@ -128,19 +128,23 @@ fn test_tool_invalid_args_returns_error() {
 #[test]
 fn test_tool_call_debug_mode_feature_flag() {
     let mut config = AppConfig::default();
-    assert!(!config
-        .feature_flags
-        .get("toolCallDebugMode")
-        .copied()
-        .unwrap_or(false));
+    assert!(
+        !config
+            .feature_flags
+            .get("toolCallDebugMode")
+            .copied()
+            .unwrap_or(false)
+    );
     config
         .feature_flags
         .insert("toolCallDebugMode".to_string(), true);
-    assert!(config
-        .feature_flags
-        .get("toolCallDebugMode")
-        .copied()
-        .unwrap_or(false));
+    assert!(
+        config
+            .feature_flags
+            .get("toolCallDebugMode")
+            .copied()
+            .unwrap_or(false)
+    );
     let ctx = test_ctx(&config);
     let res = execute_tool(&ctx, "unknown_tool", "{}");
     assert!(res.contains("not found") || res.contains("error"));
@@ -374,9 +378,11 @@ fn test_list_files_default_page_size_is_20() {
     assert_eq!(data["total"], 5);
     let files = files_array(data);
     assert_eq!(files.len(), 5);
-    assert!(files
-        .iter()
-        .all(|p| p.starts_with("Lib") && p.contains("note_")));
+    assert!(
+        files
+            .iter()
+            .all(|p| p.starts_with("Lib") && p.contains("note_"))
+    );
 }
 
 #[test]
@@ -610,4 +616,29 @@ fn test_csv_tools_excluded() {
         .collect();
     assert!(!names.contains(&"create_csv"));
     assert!(!names.contains(&"list_csv"));
+}
+
+#[test]
+fn test_get_weather_tool_in_schema() {
+    let config = AppConfig::default();
+    let schema = get_tools_schema(&config, "what is the weather today");
+    let tools = schema.as_array().unwrap();
+    let names: Vec<&str> = tools
+        .iter()
+        .filter_map(|t| t["function"]["name"].as_str())
+        .collect();
+    assert!(names.contains(&"get_weather"));
+}
+
+#[test]
+fn test_get_weather_tool_excluded_when_disabled() {
+    let mut config = AppConfig::default();
+    config.tool_groups.weather = false;
+    let schema = get_tools_schema(&config, "what is the weather today");
+    let tools = schema.as_array().unwrap();
+    let names: Vec<&str> = tools
+        .iter()
+        .filter_map(|t| t["function"]["name"].as_str())
+        .collect();
+    assert!(!names.contains(&"get_weather"));
 }

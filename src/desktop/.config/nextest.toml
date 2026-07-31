@@ -24,6 +24,7 @@ retries = 2
 # Default test threads is auto, but pin it here so behaviour is
 # reproducible across machines.
 test-threads = "num-cpus"
+slow-timeout = "30s"
 
 # Profile used by CI (`cargo nextest run --profile ci`).
 [profile.ci]
@@ -36,3 +37,4 @@ retries = 0
 # need the per-test pass/warn noise in the action log.
 status-level = "fail"
 final-status-level = "fail"
+slow-timeout = { period = "30s", terminate-after = 2 }
