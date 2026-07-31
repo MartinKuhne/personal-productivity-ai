@@ -28,8 +28,8 @@ mod sse;
 pub mod tool_source;
 
 use crate::config::{AppConfig, McpServerConfig};
-use crate::tools::context::ToolContext;
-use crate::tools::{Safety, Tool};
+use crate::agent::tools::context::ToolContext;
+use crate::agent::tools::{Safety, Tool};
 use std::any::TypeId;
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};

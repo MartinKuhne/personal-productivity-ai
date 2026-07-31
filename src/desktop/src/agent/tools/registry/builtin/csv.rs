@@ -1,8 +1,8 @@
 //! CSV database tool implementations for the tool registry.
 
 use crate::config::AppConfig;
-use crate::tools::Tool;
-use crate::tools::context::ToolContext;
+use crate::agent::tools::Tool;
+use crate::agent::tools::context::ToolContext;
 use std::any::TypeId;
 
 use super::json_schema;
@@ -29,18 +29,18 @@ impl Tool for CsvCreateTool {
         "Create a new CSV file database with specified headers."
     }
     fn input_type(&self) -> TypeId {
-        TypeId::of::<crate::tools::csv_db::schema::CreateCsvInput>()
+        TypeId::of::<crate::agent::tools::csv_db::schema::CreateCsvInput>()
     }
     fn parameters_schema(&self) -> serde_json::Value {
-        json_schema::<crate::tools::csv_db::schema::CreateCsvInput>()
+        json_schema::<crate::agent::tools::csv_db::schema::CreateCsvInput>()
     }
     fn is_enabled(&self, config: &AppConfig, prompt: &str) -> bool {
         config.tool_groups.csv_db && csv_tools_enabled(prompt)
     }
     fn execute(&self, ctx: &ToolContext, args: &str) -> Result<serde_json::Value, String> {
-        let input: crate::tools::csv_db::schema::CreateCsvInput =
+        let input: crate::agent::tools::csv_db::schema::CreateCsvInput =
             serde_json::from_str(args).map_err(|e| format!("Invalid args: {}", e))?;
-        crate::tools::csv_db::operations::create_csv(ctx.config, input).map(|r| {
+        crate::agent::tools::csv_db::operations::create_csv(ctx.config, input).map(|r| {
             serde_json::to_value(r).unwrap_or_else(|e| serde_json::json!({"error": e.to_string()}))
         })
     }
@@ -56,21 +56,21 @@ impl Tool for CsvListTool {
         "List all CSV file databases."
     }
     fn input_type(&self) -> TypeId {
-        TypeId::of::<crate::tools::csv_db::schema::ListCsvInput>()
+        TypeId::of::<crate::agent::tools::csv_db::schema::ListCsvInput>()
     }
     fn parameters_schema(&self) -> serde_json::Value {
-        json_schema::<crate::tools::csv_db::schema::ListCsvInput>()
+        json_schema::<crate::agent::tools::csv_db::schema::ListCsvInput>()
     }
     fn is_enabled(&self, config: &AppConfig, prompt: &str) -> bool {
         config.tool_groups.csv_db && csv_tools_enabled(prompt)
     }
-    fn safety(&self) -> crate::tools::Safety {
-        crate::tools::Safety::ReadOnly
+    fn safety(&self) -> crate::agent::tools::Safety {
+        crate::agent::tools::Safety::ReadOnly
     }
     fn execute(&self, ctx: &ToolContext, args: &str) -> Result<serde_json::Value, String> {
-        let input: crate::tools::csv_db::schema::ListCsvInput =
+        let input: crate::agent::tools::csv_db::schema::ListCsvInput =
             serde_json::from_str(args).map_err(|e| format!("Invalid args: {}", e))?;
-        crate::tools::csv_db::operations::list_csv(ctx.config, input).map(|r| {
+        crate::agent::tools::csv_db::operations::list_csv(ctx.config, input).map(|r| {
             serde_json::to_value(r).unwrap_or_else(|e| serde_json::json!({"error": e.to_string()}))
         })
     }
@@ -86,18 +86,18 @@ impl Tool for CsvAddRowsTool {
         "Add rows to a CSV file database."
     }
     fn input_type(&self) -> TypeId {
-        TypeId::of::<crate::tools::csv_db::schema::AddRowsInput>()
+        TypeId::of::<crate::agent::tools::csv_db::schema::AddRowsInput>()
     }
     fn parameters_schema(&self) -> serde_json::Value {
-        json_schema::<crate::tools::csv_db::schema::AddRowsInput>()
+        json_schema::<crate::agent::tools::csv_db::schema::AddRowsInput>()
     }
     fn is_enabled(&self, config: &AppConfig, prompt: &str) -> bool {
         config.tool_groups.csv_db && csv_tools_enabled(prompt)
     }
     fn execute(&self, ctx: &ToolContext, args: &str) -> Result<serde_json::Value, String> {
-        let input: crate::tools::csv_db::schema::AddRowsInput =
+        let input: crate::agent::tools::csv_db::schema::AddRowsInput =
             serde_json::from_str(args).map_err(|e| format!("Invalid args: {}", e))?;
-        crate::tools::csv_db::operations::add_rows(ctx.config, input).map(|r| {
+        crate::agent::tools::csv_db::operations::add_rows(ctx.config, input).map(|r| {
             serde_json::to_value(r).unwrap_or_else(|e| serde_json::json!({"error": e.to_string()}))
         })
     }
@@ -113,18 +113,18 @@ impl Tool for CsvDeleteRowsTool {
         "Delete rows from a CSV file database based on a predicate."
     }
     fn input_type(&self) -> TypeId {
-        TypeId::of::<crate::tools::csv_db::schema::DeleteRowsInput>()
+        TypeId::of::<crate::agent::tools::csv_db::schema::DeleteRowsInput>()
     }
     fn parameters_schema(&self) -> serde_json::Value {
-        json_schema::<crate::tools::csv_db::schema::DeleteRowsInput>()
+        json_schema::<crate::agent::tools::csv_db::schema::DeleteRowsInput>()
     }
     fn is_enabled(&self, config: &AppConfig, prompt: &str) -> bool {
         config.tool_groups.csv_db && csv_tools_enabled(prompt)
     }
     fn execute(&self, ctx: &ToolContext, args: &str) -> Result<serde_json::Value, String> {
-        let input: crate::tools::csv_db::schema::DeleteRowsInput =
+        let input: crate::agent::tools::csv_db::schema::DeleteRowsInput =
             serde_json::from_str(args).map_err(|e| format!("Invalid args: {}", e))?;
-        crate::tools::csv_db::query::delete_rows(ctx.config, input).map(|r| {
+        crate::agent::tools::csv_db::query::delete_rows(ctx.config, input).map(|r| {
             serde_json::to_value(r).unwrap_or_else(|e| serde_json::json!({"error": e.to_string()}))
         })
     }
@@ -140,21 +140,21 @@ impl Tool for CsvQueryTool {
         "Query a CSV file database using an evalexpr predicate, supporting sum and average aggregates."
     }
     fn input_type(&self) -> TypeId {
-        TypeId::of::<crate::tools::csv_db::schema::QueryRequest>()
+        TypeId::of::<crate::agent::tools::csv_db::schema::QueryRequest>()
     }
     fn parameters_schema(&self) -> serde_json::Value {
-        json_schema::<crate::tools::csv_db::schema::QueryRequest>()
+        json_schema::<crate::agent::tools::csv_db::schema::QueryRequest>()
     }
     fn is_enabled(&self, config: &AppConfig, prompt: &str) -> bool {
         config.tool_groups.csv_db && csv_tools_enabled(prompt)
     }
-    fn safety(&self) -> crate::tools::Safety {
-        crate::tools::Safety::ReadOnly
+    fn safety(&self) -> crate::agent::tools::Safety {
+        crate::agent::tools::Safety::ReadOnly
     }
     fn execute(&self, ctx: &ToolContext, args: &str) -> Result<serde_json::Value, String> {
-        let input: crate::tools::csv_db::schema::QueryRequest =
+        let input: crate::agent::tools::csv_db::schema::QueryRequest =
             serde_json::from_str(args).map_err(|e| format!("Invalid args: {}", e))?;
-        crate::tools::csv_db::query::query_csv(ctx.config, input).map(|r| {
+        crate::agent::tools::csv_db::query::query_csv(ctx.config, input).map(|r| {
             serde_json::to_value(r).unwrap_or_else(|e| serde_json::json!({"error": e.to_string()}))
         })
     }

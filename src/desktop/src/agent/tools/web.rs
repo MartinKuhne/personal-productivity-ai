@@ -17,8 +17,8 @@ static WEB_FETCH_CACHE: std::sync::LazyLock<Mutex<HashMap<String, CacheEntry>>> 
 const CACHE_TTL: std::time::Duration = std::time::Duration::from_secs(300);
 
 pub fn tool_web_fetch(
-    input: &crate::tools::dtos::WebFetchInput,
-) -> Result<crate::tools::dtos::WebFetchResponse, String> {
+    input: &crate::agent::tools::dtos::WebFetchInput,
+) -> Result<crate::agent::tools::dtos::WebFetchResponse, String> {
     let url = &input.url;
 
     if !input.force_refetch
@@ -28,7 +28,7 @@ pub fn tool_web_fetch(
     {
         let total_lines = entry.content.lines().count();
         let content = apply_pagination(&entry.content, input.offset, input.limit);
-        return Ok(crate::tools::dtos::WebFetchResponse {
+        return Ok(crate::agent::tools::dtos::WebFetchResponse {
             content,
             total_lines,
             response_headers: if input.headers {
@@ -68,7 +68,7 @@ pub fn tool_web_fetch(
                                 fetched_at: std::time::Instant::now(),
                             });
                         }
-                        Ok(crate::tools::dtos::WebFetchResponse {
+                        Ok(crate::agent::tools::dtos::WebFetchResponse {
                             content,
                             total_lines,
                             response_headers: if input.headers {
@@ -109,7 +109,7 @@ fn apply_pagination(content: &str, offset: Option<usize>, limit: Option<usize>) 
 pub fn tool_web_search(
     url: &str,
     query: &str,
-) -> Result<crate::tools::dtos::WebSearchResponse, String> {
+) -> Result<crate::agent::tools::dtos::WebSearchResponse, String> {
     let endpoint = format!("{}/search", url);
     match ureq::get(&endpoint)
         .set("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36")
@@ -144,9 +144,9 @@ pub fn tool_web_search(
                             ));
                         }
                         if output.is_empty() {
-                            Ok(crate::tools::dtos::WebSearchResponse { results: "No results found.".to_string() })
+                            Ok(crate::agent::tools::dtos::WebSearchResponse { results: "No results found.".to_string() })
                         } else {
-                            Ok(crate::tools::dtos::WebSearchResponse { results: output })
+                            Ok(crate::agent::tools::dtos::WebSearchResponse { results: output })
                         }
                     } else {
                         tracing::error!(name = "tool.web_search.parse_results_failed", url = %endpoint, "Search API returned JSON without a 'results' array. Operator should verify search provider compatibility.");
@@ -172,7 +172,7 @@ pub fn tool_web_search(
 pub fn tool_web_delegate(
     config: &AppConfig,
     instruction: &str,
-) -> Result<crate::tools::dtos::WebDelegateResponse, String> {
+) -> Result<crate::agent::tools::dtos::WebDelegateResponse, String> {
     let mut api_key = String::new();
     let mut api_url = String::new();
     let mut model_name = String::new();
@@ -213,7 +213,7 @@ pub fn tool_web_delegate(
         "function": {
             "name": "web_fetch",
             "description": "Fetch content from a URL and convert to Markdown. Use limit/offset to paginate through content and save context. Cache lasts 5 minutes; use force_refetch=true to bypass.",
-            "parameters": schemars::schema_for!(crate::tools::dtos::WebFetchInput)
+            "parameters": schemars::schema_for!(crate::agent::tools::dtos::WebFetchInput)
         }
     })];
 
@@ -223,7 +223,7 @@ pub fn tool_web_delegate(
             "function": {
                 "name": "web_search",
                 "description": "Search the web using SearXNG.",
-                "parameters": schemars::schema_for!(crate::tools::dtos::WebSearchInput)
+                "parameters": schemars::schema_for!(crate::agent::tools::dtos::WebSearchInput)
             }
         }));
     }
@@ -313,17 +313,17 @@ pub fn tool_web_delegate(
 
                 let result = if func_name == "web_fetch" {
                     if let Ok(input) =
-                        serde_json::from_str::<crate::tools::dtos::WebFetchInput>(func_args_str)
+                        serde_json::from_str::<crate::agent::tools::dtos::WebFetchInput>(func_args_str)
                     {
                         match tool_web_fetch(&input) {
                             Ok(res) => {
-                                serde_json::to_string(&crate::tools::dtos::ToolResponse::Success {
+                                serde_json::to_string(&crate::agent::tools::dtos::ToolResponse::Success {
                                     data: res,
                                 })
                                 .unwrap_or_default()
                             }
-                            Err(e) => serde_json::to_string(&crate::tools::dtos::ToolResponse::<
-                                crate::tools::dtos::WebFetchResponse,
+                            Err(e) => serde_json::to_string(&crate::agent::tools::dtos::ToolResponse::<
+                                crate::agent::tools::dtos::WebFetchResponse,
                             >::Error {
                                 message: e,
                             })
@@ -334,17 +334,17 @@ pub fn tool_web_delegate(
                     }
                 } else if func_name == "web_search" {
                     if let Ok(input) =
-                        serde_json::from_str::<crate::tools::dtos::WebSearchInput>(func_args_str)
+                        serde_json::from_str::<crate::agent::tools::dtos::WebSearchInput>(func_args_str)
                     {
                         if let Some(url) = &config.searxng_url {
                             match tool_web_search(url, &input.query) {
                                 Ok(res) => serde_json::to_string(
-                                    &crate::tools::dtos::ToolResponse::Success { data: res },
+                                    &crate::agent::tools::dtos::ToolResponse::Success { data: res },
                                 )
                                 .unwrap_or_default(),
                                 Err(e) => {
-                                    serde_json::to_string(&crate::tools::dtos::ToolResponse::<
-                                        crate::tools::dtos::WebSearchResponse,
+                                    serde_json::to_string(&crate::agent::tools::dtos::ToolResponse::<
+                                        crate::agent::tools::dtos::WebSearchResponse,
                                     >::Error {
                                         message: e,
                                     })
@@ -372,7 +372,7 @@ pub fn tool_web_delegate(
         }
     }
 
-    Ok(crate::tools::dtos::WebDelegateResponse {
+    Ok(crate::agent::tools::dtos::WebDelegateResponse {
         result: final_content,
     })
 }
@@ -409,7 +409,7 @@ mod tests {
             .install_default()
             .ok();
         let server_url = spawn_mock_server("<html><body><h1>Hello World</h1></body></html>");
-        let input = crate::tools::dtos::WebFetchInput {
+        let input = crate::agent::tools::dtos::WebFetchInput {
             url: server_url.clone(),
             headers: false,
             force_refetch: true,
@@ -425,7 +425,7 @@ mod tests {
         rustls::crypto::ring::default_provider()
             .install_default()
             .ok();
-        let input = crate::tools::dtos::WebFetchInput {
+        let input = crate::agent::tools::dtos::WebFetchInput {
             url: "http://127.0.0.1:1".to_string(),
             headers: false,
             force_refetch: true,
@@ -443,7 +443,7 @@ mod tests {
             .ok();
         let html = "<html><body><p>line1</p><p>line2</p><p>line3</p><p>line4</p><p>line5</p></body></html>";
         let server_url = spawn_mock_server(html);
-        let input = crate::tools::dtos::WebFetchInput {
+        let input = crate::agent::tools::dtos::WebFetchInput {
             url: server_url.clone(),
             headers: false,
             force_refetch: true,
@@ -462,7 +462,7 @@ mod tests {
             .install_default()
             .ok();
         let server_url = spawn_mock_server("<html><body><h1>Test</h1></body></html>");
-        let input = crate::tools::dtos::WebFetchInput {
+        let input = crate::agent::tools::dtos::WebFetchInput {
             url: server_url.clone(),
             headers: true,
             force_refetch: true,
@@ -481,7 +481,7 @@ mod tests {
             .install_default()
             .ok();
         let server_url = spawn_mock_server("<html><body><h1>Cached</h1></body></html>");
-        let input = crate::tools::dtos::WebFetchInput {
+        let input = crate::agent::tools::dtos::WebFetchInput {
             url: server_url.clone(),
             headers: false,
             force_refetch: false,
@@ -501,7 +501,7 @@ mod tests {
             .install_default()
             .ok();
         let server_url = spawn_mock_server("<html><body><h1>Force</h1></body></html>");
-        let input = crate::tools::dtos::WebFetchInput {
+        let input = crate::agent::tools::dtos::WebFetchInput {
             url: server_url.clone(),
             headers: false,
             force_refetch: false,
@@ -509,7 +509,7 @@ mod tests {
             offset: None,
         };
         let _first = tool_web_fetch(&input).unwrap();
-        let force_input = crate::tools::dtos::WebFetchInput {
+        let force_input = crate::agent::tools::dtos::WebFetchInput {
             url: server_url.clone(),
             headers: false,
             force_refetch: true,

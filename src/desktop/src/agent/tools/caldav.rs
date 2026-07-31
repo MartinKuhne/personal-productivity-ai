@@ -1,7 +1,7 @@
 //! CalDAV agent tools — search, retrieve, create, update, and delete calendar events across configured CalDAV servers.
 
 use crate::config::AppConfig;
-use crate::tools::blocking::block_on;
+use crate::agent::tools::blocking::block_on;
 use fast_dav_rs::CalDavClient;
 
 #[derive(serde::Serialize)]
@@ -156,7 +156,7 @@ async fn get_all_calendars(
 pub fn tool_search_calendar(
     config: &AppConfig,
     keyword: &str,
-) -> Result<crate::tools::dtos::SearchCalendarResponse, String> {
+) -> Result<crate::agent::tools::dtos::SearchCalendarResponse, String> {
     let mut results = Vec::new();
     let mut errors = Vec::new();
     let kw = keyword.to_lowercase();
@@ -197,7 +197,7 @@ pub fn tool_search_calendar(
     }
 
     let resp = CalDavResponse { results, errors };
-    Ok(crate::tools::dtos::SearchCalendarResponse {
+    Ok(crate::agent::tools::dtos::SearchCalendarResponse {
         results: serde_json::to_string_pretty(&resp).unwrap_or_else(|_| "{}".to_string()),
     })
 }
@@ -206,7 +206,7 @@ pub fn tool_get_calendar(
     config: &AppConfig,
     start: &str,
     end: &str,
-) -> Result<crate::tools::dtos::GetCalendarResponse, String> {
+) -> Result<crate::agent::tools::dtos::GetCalendarResponse, String> {
     let mut results = Vec::new();
     let mut errors = Vec::new();
 
@@ -263,7 +263,7 @@ pub fn tool_get_calendar(
     }
 
     let resp = CalDavResponse { results, errors };
-    Ok(crate::tools::dtos::GetCalendarResponse {
+    Ok(crate::agent::tools::dtos::GetCalendarResponse {
         results: serde_json::to_string_pretty(&resp).unwrap_or_else(|_| "{}".to_string()),
     })
 }
@@ -271,7 +271,7 @@ pub fn tool_get_calendar(
 pub fn tool_get_calendar_item(
     config: &AppConfig,
     id: &str,
-) -> Result<crate::tools::dtos::GetCalendarItemResponse, String> {
+) -> Result<crate::agent::tools::dtos::GetCalendarItemResponse, String> {
     let mut results = Vec::new();
     let mut errors = Vec::new();
 
@@ -302,7 +302,7 @@ pub fn tool_get_calendar_item(
     }
 
     let resp = CalDavResponse { results, errors };
-    Ok(crate::tools::dtos::GetCalendarItemResponse {
+    Ok(crate::agent::tools::dtos::GetCalendarItemResponse {
         result: serde_json::to_string_pretty(&resp).unwrap_or_else(|_| "{}".to_string()),
     })
 }
@@ -451,7 +451,7 @@ pub fn update_ical_string(original: &str, updates: &serde_json::Value) -> String
 pub fn tool_add_calendar_item(
     config: &AppConfig,
     item_json: &str,
-) -> Result<crate::tools::dtos::AddCalendarItemResponse, String> {
+) -> Result<crate::agent::tools::dtos::AddCalendarItemResponse, String> {
     let mut all_results = Vec::new();
     if let Some((name, client_config)) = config.caldav_clients.iter().next() {
         let res = block_on(async {
@@ -474,7 +474,7 @@ pub fn tool_add_calendar_item(
                     .as_millis()
             );
             let path = format!("{}{}.ics", default_cal, uid);
-            let ical_data = crate::tools::caldav::json_to_ical(item_json, Some(&uid));
+            let ical_data = crate::agent::tools::caldav::json_to_ical(item_json, Some(&uid));
             let resp = client.put(&path, ical_data.into_bytes().into()).await?;
             if !resp.status().is_success() {
                 let status = resp.status();
@@ -495,7 +495,7 @@ pub fn tool_add_calendar_item(
     if all_results.is_empty() {
         Err("No CalDAV clients configured.".to_string())
     } else {
-        Ok(crate::tools::dtos::AddCalendarItemResponse {
+        Ok(crate::agent::tools::dtos::AddCalendarItemResponse {
             result: all_results.join("\n\n"),
         })
     }
@@ -505,7 +505,7 @@ pub fn tool_update_calendar_item(
     config: &AppConfig,
     id: &str,
     update_json: &str,
-) -> Result<crate::tools::dtos::UpdateCalendarItemResponse, String> {
+) -> Result<crate::agent::tools::dtos::UpdateCalendarItemResponse, String> {
     let mut all_results = Vec::new();
     for (name, client_config) in &config.caldav_clients {
         let res = block_on(async {
@@ -531,7 +531,7 @@ pub fn tool_update_calendar_item(
 
             let update_parsed: serde_json::Value =
                 serde_json::from_str(update_json).unwrap_or_else(|_| serde_json::json!({}));
-            let ical_data = crate::tools::caldav::update_ical_string(&body, &update_parsed);
+            let ical_data = crate::agent::tools::caldav::update_ical_string(&body, &update_parsed);
 
             let resp = client.put(id, ical_data.into_bytes().into()).await?;
             if !resp.status().is_success() {
@@ -553,7 +553,7 @@ pub fn tool_update_calendar_item(
     if all_results.is_empty() {
         Err("No CalDAV clients configured.".to_string())
     } else {
-        Ok(crate::tools::dtos::UpdateCalendarItemResponse {
+        Ok(crate::agent::tools::dtos::UpdateCalendarItemResponse {
             result: all_results.join("\n\n"),
         })
     }
@@ -562,7 +562,7 @@ pub fn tool_update_calendar_item(
 pub fn tool_delete_calendar_item(
     config: &AppConfig,
     id: &str,
-) -> Result<crate::tools::dtos::DeleteCalendarItemResponse, String> {
+) -> Result<crate::agent::tools::dtos::DeleteCalendarItemResponse, String> {
     let mut all_results = Vec::new();
     for (name, client_config) in &config.caldav_clients {
         let res = block_on(async {
@@ -592,7 +592,7 @@ pub fn tool_delete_calendar_item(
     if all_results.is_empty() {
         Err("No CalDAV clients configured.".to_string())
     } else {
-        Ok(crate::tools::dtos::DeleteCalendarItemResponse {
+        Ok(crate::agent::tools::dtos::DeleteCalendarItemResponse {
             result: all_results.join("\n\n"),
         })
     }
@@ -1202,7 +1202,7 @@ END:VCALENDAR</c:calendar-data>
     /// fail with `connection closed before message completed`.
     #[test]
     fn test_caldav_tools_mock_server_single_client_reuse() {
-        use crate::tools::blocking::block_on;
+        use crate::agent::tools::blocking::block_on;
 
         let _ = rustls::crypto::ring::default_provider().install_default();
         let server_url = spawn_mock_caldav_server();

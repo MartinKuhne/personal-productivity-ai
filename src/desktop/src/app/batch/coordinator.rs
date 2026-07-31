@@ -1,13 +1,13 @@
 //! Batch coordinator — discovers targets, spawns the executor on a background thread, polls progress, and reports results.
 
-use crate::batch::discoverer::JobDiscoverer;
-use crate::batch::executor::BatchJobExecutor;
-use crate::batch::types::{
+use crate::app::batch::discoverer::JobDiscoverer;
+use crate::app::batch::executor::BatchJobExecutor;
+use crate::app::batch::types::{
     BatchConfig, BatchHandle, BatchJob, BatchJobStatus, BatchMode, BatchResult,
 };
 use crate::bus::core::Bus;
 use crate::bus::events::file::FileEvent;
-use crate::bus::events::messages::BackgroundMessage;
+use crate::bus::events::typed::BackgroundEvent;
 use crate::config::AppConfig;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, mpsc};
@@ -17,7 +17,7 @@ use std::time::Instant;
 pub struct BatchCoordinator {
     config: BatchConfig,
     app_config: AppConfig,
-    tx_gui: mpsc::Sender<BackgroundMessage>,
+    tx_gui: mpsc::Sender<BackgroundEvent>,
     file_event_bus: Bus<FileEvent>,
     prompt_text: String,
     cancel_flag: Arc<AtomicBool>,
@@ -27,7 +27,7 @@ impl BatchCoordinator {
     pub fn new(
         config: BatchConfig,
         app_config: AppConfig,
-        tx_gui: mpsc::Sender<BackgroundMessage>,
+        tx_gui: mpsc::Sender<BackgroundEvent>,
         file_event_bus: Bus<FileEvent>,
         prompt_text: String,
     ) -> (Self, Arc<AtomicBool>) {

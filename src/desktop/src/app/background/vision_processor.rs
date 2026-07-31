@@ -1,9 +1,9 @@
 //! Vision-model inference worker — generates markdown descriptions for discovered images using an LLM.
 
-use crate::background::models::{BackgroundLogEntry, ImageJob, LogCategory};
+use crate::app::background::models::{BackgroundLogEntry, ImageJob, LogCategory};
 use crate::bus::core::Bus;
 use crate::bus::events::file::{FileEvent, FileEventProducer};
-use crate::bus::events::messages::BackgroundMessage;
+use crate::bus::events::typed::BackgroundEvent;
 use crate::config::AppConfig;
 use base64::{Engine as _, engine::general_purpose::STANDARD as b64};
 use serde_json::json;
@@ -14,7 +14,7 @@ use std::sync::mpsc::{Receiver, Sender};
 pub async fn process_image<'a>(
     job: ImageJob,
     config: AppConfig,
-    tx: Sender<BackgroundMessage>,
+    tx: Sender<BackgroundEvent>,
     producer: &FileEventProducer<'a>,
 ) -> Result<(), String> {
     // Find vision model
@@ -87,10 +87,10 @@ pub async fn process_image<'a>(
         .to_string_lossy()
         .into_owned();
 
-    let _ = tx.send(BackgroundMessage::LogEntry(BackgroundLogEntry::new(
+    let _ = tx.send(BackgroundLogEntry::new(
         LogCategory::ImageVision,
         format!("Analyzing image {:?}", img_name),
-    )));
+    ).into());
 
     // Perform blocking HTTP request
     let response = tokio::task::spawn_blocking(move || {
@@ -115,10 +115,10 @@ pub async fn process_image<'a>(
                 if let Err(e) = std::fs::write(&job.md_path, content) {
                     tracing::error!(name = "vision.output.write_failed", path = %job.md_path.display(), error = %e, "Failed to write markdown output from vision analysis. Operator should verify disk space and write permissions.");
                     let msg = format!("Failed to write markdown for {:?}: {}", img_name, e);
-                    let _ = tx.send(BackgroundMessage::LogEntry(BackgroundLogEntry::new(
+                    let _ = tx.send(BackgroundLogEntry::new(
                         LogCategory::ImageVision,
                         msg.clone(),
-                    )));
+                    ).into());
                     return Err(msg);
                 }
 
@@ -128,18 +128,18 @@ pub async fn process_image<'a>(
                 // Same pattern as `tool_create_file` and `editor.save`.
                 producer.publish_discovered(&job.md_path);
 
-                let _ = tx.send(BackgroundMessage::LogEntry(BackgroundLogEntry::new(
+                let _ = tx.send(BackgroundLogEntry::new(
                     LogCategory::ImageVision,
                     format!("Successfully analyzed {:?}", img_name),
-                )));
+                ).into());
                 Ok(())
             } else {
                 tracing::error!(name = "vision.api.no_content", image = %img_name, response = ?json, "Vision API returned no content in choices. Operator should check model compatibility.");
                 let msg = format!("No content in response for {:?}", img_name);
-                let _ = tx.send(BackgroundMessage::LogEntry(BackgroundLogEntry::new(
+                let _ = tx.send(BackgroundLogEntry::new(
                     LogCategory::ImageVision,
                     msg.clone(),
-                )));
+                ).into());
                 Err(msg)
             }
         }
@@ -152,10 +152,10 @@ pub async fn process_image<'a>(
             } else {
                 tracing::error!(name = "vision.api.network_error", image = %img_name, error = %e, "Vision API request failed completely. Operator should check network connectivity.");
             }
-            let _ = tx.send(BackgroundMessage::LogEntry(BackgroundLogEntry::new(
+            let _ = tx.send(BackgroundLogEntry::new(
                 LogCategory::ImageVision,
                 err_msg.clone(),
-            )));
+            ).into());
             Err(err_msg)
         }
     }
@@ -163,7 +163,7 @@ pub async fn process_image<'a>(
 
 pub struct ImageVisionWorker {
     rx: Receiver<PathBuf>,
-    tx: Sender<BackgroundMessage>,
+    tx: Sender<BackgroundEvent>,
     config: AppConfig,
     bus: Bus<FileEvent>,
 }
@@ -171,7 +171,7 @@ pub struct ImageVisionWorker {
 impl ImageVisionWorker {
     pub fn new(
         rx: Receiver<PathBuf>,
-        tx: Sender<BackgroundMessage>,
+        tx: Sender<BackgroundEvent>,
         config: AppConfig,
         bus: Bus<FileEvent>,
     ) -> Self {

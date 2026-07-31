@@ -1,9 +1,9 @@
 //! PDF-to-markdown converter worker — invokes an external tool to produce a sibling `.md` file for each PDF.
 
-use crate::background::models::{BackgroundLogEntry, LogCategory};
+use crate::app::background::models::{BackgroundLogEntry, LogCategory};
 use crate::bus::core::Bus;
 use crate::bus::events::file::FileEvent;
-use crate::bus::events::messages::BackgroundMessage;
+use crate::bus::events::typed::BackgroundEvent;
 use std::path::PathBuf;
 #[cfg(test)]
 use std::sync::mpsc::channel;
@@ -42,7 +42,7 @@ impl PdfConversionJob {
     pub async fn execute(
         self,
         cmd_template: Option<Vec<String>>,
-        tx: Sender<BackgroundMessage>,
+        tx: Sender<BackgroundEvent>,
     ) -> Result<(), String> {
         if let Some(template) = cmd_template {
             if template.is_empty() {
@@ -91,13 +91,13 @@ impl PdfConversionJob {
                 args.push(arg);
             }
 
-            let _ = tx.send(BackgroundMessage::LogEntry(BackgroundLogEntry::new(
+            let _ = tx.send(BackgroundLogEntry::new(
                 LogCategory::PdfConverter,
                 format!(
                     "Converting {:?}",
                     self.input_pdf.file_name().unwrap_or_default()
                 ),
-            )));
+            ).into());
 
             let output = Command::new(&exe)
                 .args(&args)
@@ -136,23 +136,23 @@ impl PdfConversionJob {
                     let _ = std::fs::remove_dir_all(&temp);
 
                     if !md_found {
-                        let _ = tx.send(BackgroundMessage::LogEntry(BackgroundLogEntry::new(
+                        let _ = tx.send(BackgroundLogEntry::new(
                             LogCategory::PdfConverter,
                             format!(
                                 "Warning: Could not find output markdown from marker for {:?}",
                                 self.input_pdf.file_name().unwrap_or_default()
                             ),
-                        )));
+                        ).into());
                     }
                 }
 
-                let _ = tx.send(BackgroundMessage::LogEntry(BackgroundLogEntry::new(
+                let _ = tx.send(BackgroundLogEntry::new(
                     LogCategory::PdfConverter,
                     format!(
                         "Successfully converted {:?}",
                         self.input_pdf.file_name().unwrap_or_default()
                     ),
-                )));
+                ).into());
                 Ok(())
             } else {
                 let err_msg = String::from_utf8_lossy(&output.stderr).to_string();
@@ -162,10 +162,10 @@ impl PdfConversionJob {
                     err_msg
                 );
                 tracing::error!(name = "pdf_converter.process.failed", path = %self.input_pdf.display(), exit_code = ?output.status.code(), stderr = %err_msg, "PDF conversion process returned a non-zero exit status. Operator should check the stderr output for details.");
-                let _ = tx.send(BackgroundMessage::LogEntry(BackgroundLogEntry::new(
+                let _ = tx.send(BackgroundLogEntry::new(
                     LogCategory::PdfConverter,
                     msg.clone(),
-                )));
+                ).into());
                 Err(msg)
             }
         } else {
@@ -180,7 +180,7 @@ impl PdfConversionJob {
 
 pub struct PdfConverterWorker {
     rx: Receiver<PathBuf>,
-    tx: Sender<BackgroundMessage>,
+    tx: Sender<BackgroundEvent>,
     bus: Bus<FileEvent>,
     cmd: Option<Vec<String>>,
 }
@@ -188,7 +188,7 @@ pub struct PdfConverterWorker {
 impl PdfConverterWorker {
     pub fn new(
         rx: Receiver<PathBuf>,
-        tx: Sender<BackgroundMessage>,
+        tx: Sender<BackgroundEvent>,
         bus: Bus<FileEvent>,
         cmd: Option<Vec<String>>,
     ) -> Self {

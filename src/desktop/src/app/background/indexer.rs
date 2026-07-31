@@ -1,10 +1,10 @@
 //! Initial recursive scanner — walks content-library directories emitting `FileEvent::Discovered` for each entry.
 
-use crate::background::PdfConversionJob;
-use crate::background::models::{BackgroundLogEntry, LogCategory};
+use crate::app::background::PdfConversionJob;
+use crate::app::background::models::{BackgroundLogEntry, LogCategory};
 use crate::bus::core::Bus;
 use crate::bus::events::file::FileEvent;
-use crate::bus::events::messages::BackgroundMessage;
+use crate::bus::events::typed::{BackgroundEvent, FsEvent};
 use crate::config::AppConfig;
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -13,7 +13,7 @@ use std::sync::{Arc, Mutex};
 
 pub struct Indexer {
     config: AppConfig,
-    tx: Sender<BackgroundMessage>,
+    tx: Sender<BackgroundEvent>,
     bus: Bus<FileEvent>,
     cancel: Arc<AtomicBool>,
 }
@@ -21,7 +21,7 @@ pub struct Indexer {
 impl Indexer {
     pub fn new(
         config: AppConfig,
-        tx: Sender<BackgroundMessage>,
+        tx: Sender<BackgroundEvent>,
         bus: Bus<FileEvent>,
         cancel: Arc<AtomicBool>,
     ) -> Self {
@@ -36,7 +36,7 @@ impl Indexer {
     pub fn spawn_workers(
         num: usize,
         rx_work: Arc<Mutex<Receiver<PathBuf>>>,
-        tx_gui: Sender<BackgroundMessage>,
+        tx_gui: Sender<BackgroundEvent>,
     ) -> Vec<std::thread::JoinHandle<()>> {
         let mut workers = Vec::new();
         for _ in 0..num {
@@ -62,7 +62,7 @@ impl Indexer {
                         }
                     };
                     let tags = crate::utils::tags::extract_tags_from_file(&path);
-                    let _ = tx_clone.send(BackgroundMessage::FileParsed { path, tags });
+                    let _ = tx_clone.send(FsEvent::FileParsed { path, tags }.into());
                     std::thread::yield_now();
                 }
             });
@@ -137,7 +137,7 @@ impl Indexer {
                             "jpg" | "jpeg" | "png" | "gif" | "webp" | "bmp" | "tiff" | "avif"
                         ) && is_image_lib
                         {
-                            let job = crate::background::models::ImageJob::new(path.to_path_buf());
+                            let job = crate::app::background::models::ImageJob::new(path.to_path_buf());
                             if job.should_process() {
                                 images_queued += 1;
                                 let _ = tx_img.send(path.to_path_buf());
@@ -145,21 +145,21 @@ impl Indexer {
                         }
                     }
                 } else if path.is_dir() {
-                    let _ = self.tx.send(BackgroundMessage::DirParsed {
+                    let _ = self.tx.send(FsEvent::DirParsed {
                         path: path.to_path_buf(),
-                    });
+                    }.into());
                 }
 
                 if files_scanned % 500 == 0 || last_log_time.elapsed().as_secs() >= 5 {
                     let _ = self
                         .tx
-                        .send(BackgroundMessage::LogEntry(BackgroundLogEntry::new(
+                        .send(BackgroundLogEntry::new(
                             LogCategory::Indexer,
                             format!(
                                 "Scanned {} files, queued {} PDFs, queued {} images",
                                 files_scanned, pdfs_queued, images_queued
                             ),
-                        )));
+                        ).into());
                     last_log_time = std::time::Instant::now();
                 }
                 if files_scanned % 50 == 0 {
@@ -172,13 +172,13 @@ impl Indexer {
 
         let _ = self
             .tx
-            .send(BackgroundMessage::LogEntry(BackgroundLogEntry::new(
+            .send(BackgroundLogEntry::new(
                 LogCategory::Indexer,
                 format!(
                 "Initial indexing complete. Scanned {} files, queued {} PDFs, queued {} images.",
                 files_scanned, pdfs_queued, images_queued
             ),
-            )));
+            ).into());
     }
 }
 
@@ -333,8 +333,8 @@ mod tests {
         drop(tx_work);
 
         let mut parsed_paths: std::collections::HashSet<PathBuf> = std::collections::HashSet::new();
-        while let Ok(msg) = rx_gui.recv_timeout(std::time::Duration::from_secs(5)) {
-            if let BackgroundMessage::FileParsed { path, .. } = msg {
+        while let Ok(ev) = rx_gui.recv_timeout(std::time::Duration::from_secs(5)) {
+            if let BackgroundEvent::Fs(FsEvent::FileParsed { path, .. }) = ev {
                 parsed_paths.insert(path);
             }
         }
@@ -398,7 +398,7 @@ mod tests {
         let mut got_file_parsed = false;
         let start = std::time::Instant::now();
         while start.elapsed() < std::time::Duration::from_secs(2) {
-            if let Ok(BackgroundMessage::FileParsed { path, tags }) =
+            if let Ok(BackgroundEvent::Fs(FsEvent::FileParsed { path, tags })) =
                 rx_gui.recv_timeout(std::time::Duration::from_millis(100))
             {
                 assert_eq!(path, missing);

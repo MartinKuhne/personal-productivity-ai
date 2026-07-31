@@ -1,7 +1,7 @@
 //! CardDAV agent tools — search, retrieve, create, update, and delete contacts across configured CardDAV servers.
 
 use crate::config::AppConfig;
-use crate::tools::blocking::block_on;
+use crate::agent::tools::blocking::block_on;
 use fast_dav_rs::CardDavClient;
 
 #[derive(serde::Serialize)]
@@ -181,7 +181,7 @@ fn json_to_vcard(json_str: &str, uid_override: Option<&str>) -> String {
 pub fn tool_search_contact(
     config: &AppConfig,
     keyword: &str,
-) -> Result<crate::tools::dtos::SearchContactResponse, String> {
+) -> Result<crate::agent::tools::dtos::SearchContactResponse, String> {
     let mut results = Vec::new();
     let mut errors = Vec::new();
     let kw = keyword.to_lowercase();
@@ -216,7 +216,7 @@ pub fn tool_search_contact(
     }
 
     let resp = CardDavResponse { results, errors };
-    Ok(crate::tools::dtos::SearchContactResponse {
+    Ok(crate::agent::tools::dtos::SearchContactResponse {
         results: serde_json::to_string_pretty(&resp).unwrap_or_else(|_| "{}".to_string()),
     })
 }
@@ -224,7 +224,7 @@ pub fn tool_search_contact(
 pub fn tool_get_contact(
     config: &AppConfig,
     id: &str,
-) -> Result<crate::tools::dtos::GetContactResponse, String> {
+) -> Result<crate::agent::tools::dtos::GetContactResponse, String> {
     let mut results = Vec::new();
     let mut errors = Vec::new();
 
@@ -256,7 +256,7 @@ pub fn tool_get_contact(
     }
 
     let resp = CardDavResponse { results, errors };
-    Ok(crate::tools::dtos::GetContactResponse {
+    Ok(crate::agent::tools::dtos::GetContactResponse {
         result: serde_json::to_string_pretty(&resp).unwrap_or_else(|_| "{}".to_string()),
     })
 }
@@ -264,7 +264,7 @@ pub fn tool_get_contact(
 pub fn tool_add_contact(
     config: &AppConfig,
     contact_json: &str,
-) -> Result<crate::tools::dtos::AddContactResponse, String> {
+) -> Result<crate::agent::tools::dtos::AddContactResponse, String> {
     let mut all_results = Vec::new();
     if let Some((name, client_config)) = config.caldav_clients.iter().next() {
         let res = block_on(async {
@@ -313,7 +313,7 @@ pub fn tool_add_contact(
     if all_results.is_empty() {
         Err("No CardDAV clients configured.".to_string())
     } else {
-        Ok(crate::tools::dtos::AddContactResponse {
+        Ok(crate::agent::tools::dtos::AddContactResponse {
             result: all_results.join("\n\n"),
         })
     }

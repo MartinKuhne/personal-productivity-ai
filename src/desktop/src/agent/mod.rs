@@ -10,6 +10,7 @@ pub mod manager;
 pub mod prompt_builder;
 pub mod response_formatter;
 pub mod tool_executor;
+pub mod tools;
 
 #[cfg(test)]
 #[path = "agent_impl_tests.rs"]

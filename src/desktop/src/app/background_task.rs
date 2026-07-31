@@ -1,14 +1,14 @@
 //! Background task orchestrator — spawns and owns all worker threads (watcher, indexer, PDF converter, vision processor, bus router).
 
 use crate::app::watcher::file_watcher::FileWatcher;
-use crate::background::indexer::Indexer;
-use crate::background::pdf_converter::PdfConverterWorker;
-use crate::background::vision_processor::ImageVisionWorker;
+use crate::app::background::indexer::Indexer;
+use crate::app::background::pdf_converter::PdfConverterWorker;
+use crate::app::background::vision_processor::ImageVisionWorker;
 use crate::bus::config::CONFIG_ARRIVAL_TIMEOUT;
 use crate::bus::core::Bus;
 use crate::bus::events::config::ConfigArrived;
 use crate::bus::events::file::FileEvent;
-use crate::bus::events::messages::BackgroundMessage;
+use crate::bus::events::typed::BackgroundEvent;
 use crate::bus::router::BusRouter;
 use crate::config::AppConfig;
 use std::path::PathBuf;
@@ -17,10 +17,22 @@ use std::sync::mpsc::{Receiver, Sender, channel};
 use std::sync::{Arc, Mutex};
 
 pub struct Task {
-    pub rx: Receiver<BackgroundMessage>,
-    pub tx: Sender<BackgroundMessage>,
+    /// Receiver for typed background events. The UI drains this on
+    /// every frame and dispatches by domain (Agent / Fs / Process).
+    pub rx: Receiver<BackgroundEvent>,
+    /// Sender handed to every background worker. Producers send
+    /// typed [`BackgroundEvent`] values directly.
+    pub tx: Sender<BackgroundEvent>,
+    /// File-event bus shared with the watcher, indexer, PDF/vision
+    /// workers, and the UI.
     pub file_event_bus: Bus<FileEvent>,
-    pub _watcher: Option<notify::RecommendedWatcher>,
+    /// Slot for the `notify::RecommendedWatcher` handle. The
+    /// file-watcher thread writes the handle here when initial
+    /// scan completes, then sends [`crate::bus::events::typed::FsEvent::Finished`]
+    /// on the typed channel. The UI calls
+    /// [`Task::take_finished_watcher`] after observing that event to
+    /// take ownership.
+    pub finished_watcher: Arc<Mutex<Option<notify::RecommendedWatcher>>>,
     /// Cancellation signal shared with the indexer. Set to `true` via
     /// [`Task::cancel`] to ask the initial library scan to stop early.
     cancel: Arc<AtomicBool>,
@@ -41,6 +53,7 @@ impl Task {
         let bus_clone = file_event_bus.clone();
         let cancel = Arc::new(AtomicBool::new(false));
         let cancel_clone = cancel.clone();
+        let finished_watcher = Arc::new(Mutex::new(None));
 
         // Subscribe before spawning so the thread's reader is in place
         // by the time the caller publishes.
@@ -64,14 +77,14 @@ impl Task {
                     AppConfig::default()
                 }
             };
-            Self::run_indexing(config, tx_clone, bus_clone, cancel_clone);
+            Self::run_indexing(config, tx_clone, bus_clone, cancel_clone, finished_watcher);
         });
 
         Self {
             rx,
             tx,
             file_event_bus,
-            _watcher: None,
+            finished_watcher: Arc::new(Mutex::new(None)),
             cancel,
         }
     }
@@ -98,11 +111,25 @@ impl Task {
         self.cancel.store(true, Ordering::SeqCst);
     }
 
+    /// Take the `notify::RecommendedWatcher` handle, if one was
+    /// written by the file-watcher thread. Returns `None` if the
+    /// watcher has not initialized yet, or if it has already been
+    /// taken. The UI calls this after observing
+    /// [`crate::bus::events::typed::FsEvent::Finished`] on the typed
+    /// background-event channel.
+    pub fn take_finished_watcher(&self) -> Option<notify::RecommendedWatcher> {
+        self.finished_watcher
+            .lock()
+            .ok()
+            .and_then(|mut slot| slot.take())
+    }
+
     fn run_indexing(
         config: crate::config::AppConfig,
-        tx: Sender<BackgroundMessage>,
+        tx: Sender<BackgroundEvent>,
         file_event_bus: Bus<FileEvent>,
         cancel: Arc<AtomicBool>,
+        finished_watcher: Arc<Mutex<Option<notify::RecommendedWatcher>>>,
     ) {
         let (tx_work, rx_work) = channel::<PathBuf>();
         let rx_work = Arc::new(Mutex::new(rx_work));
@@ -130,6 +157,7 @@ impl Task {
             file_event_bus.clone(),
             tx_pdf.clone(),
             tx_img.clone(),
+            finished_watcher,
         );
         file_watcher.start();
 
@@ -141,28 +169,36 @@ impl Task {
 mod tests {
     use super::*;
     use crate::bus::events::file::FileEventKind;
+    use crate::bus::events::typed::{FsEvent, ProcessEvent};
     use crate::config::{AppConfig, ContentLibrary};
     use tempfile::tempdir;
+
+    /// Helper: pump the typed channel until the file watcher signals
+    /// completion (either with or without a real `RecommendedWatcher`
+    /// handle), or the deadline elapses. Returns the matched event so
+    /// callers can also assert on the variant.
+    fn wait_for_finished(task: &Task, timeout_secs: u64) -> Option<BackgroundEvent> {
+        let start = std::time::Instant::now();
+        while start.elapsed().as_secs() < timeout_secs {
+            if let Ok(ev) = task.rx.recv_timeout(std::time::Duration::from_millis(100))
+                && matches!(
+                    ev,
+                    BackgroundEvent::Fs(FsEvent::Finished | FsEvent::FinishedWithoutWatcher)
+                )
+            {
+                return Some(ev);
+            }
+        }
+        None
+    }
 
     #[test]
     fn test_background_task_new_no_libraries() {
         let config = AppConfig::default();
         let task = Task::new_for_test(config);
 
-        let mut got_finished = false;
-        let start = std::time::Instant::now();
-        while start.elapsed().as_secs() < 5 {
-            if let Ok(msg) = task.rx.recv_timeout(std::time::Duration::from_millis(100))
-                && matches!(
-                    msg,
-                    BackgroundMessage::Finished(_) | BackgroundMessage::FinishedWithoutWatcher
-                )
-            {
-                got_finished = true;
-                break;
-            }
-        }
-        assert!(got_finished, "Should complete initialization");
+        let got = wait_for_finished(&task, 5);
+        assert!(got.is_some(), "Should complete initialization");
     }
 
     #[test]
@@ -175,17 +211,7 @@ mod tests {
         task.cancel();
         task.cancel(); // second call must also be safe
         // Drive the background to completion so the test exits cleanly.
-        let start = std::time::Instant::now();
-        while start.elapsed().as_secs() < 5 {
-            if let Ok(msg) = task.rx.recv_timeout(std::time::Duration::from_millis(100))
-                && matches!(
-                    msg,
-                    BackgroundMessage::Finished(_) | BackgroundMessage::FinishedWithoutWatcher
-                )
-            {
-                break;
-            }
-        }
+        let _ = wait_for_finished(&task, 5);
     }
 
     #[test]
@@ -207,20 +233,8 @@ mod tests {
 
         let task = Task::new_for_test(config);
 
-        let mut got_finished = false;
-        let start = std::time::Instant::now();
-        while start.elapsed().as_secs() < 5 {
-            if let Ok(msg) = task.rx.recv_timeout(std::time::Duration::from_millis(100))
-                && matches!(
-                    msg,
-                    BackgroundMessage::Finished(_) | BackgroundMessage::FinishedWithoutWatcher
-                )
-            {
-                got_finished = true;
-                break;
-            }
-        }
-        assert!(got_finished, "Should complete indexing");
+        let got = wait_for_finished(&task, 5);
+        assert!(got.is_some(), "Should complete indexing");
     }
 
     #[test]
@@ -242,20 +256,8 @@ mod tests {
         let task = Task::new_for_test(config);
         let reader = task.file_event_bus.subscribe();
 
-        let mut got_finished = false;
-        let start = std::time::Instant::now();
-        while start.elapsed().as_secs() < 5 {
-            if let Ok(msg) = task.rx.recv_timeout(std::time::Duration::from_millis(100))
-                && matches!(
-                    msg,
-                    BackgroundMessage::Finished(_) | BackgroundMessage::FinishedWithoutWatcher
-                )
-            {
-                got_finished = true;
-                break;
-            }
-        }
-        assert!(got_finished, "Should complete initialization");
+        let got = wait_for_finished(&task, 5);
+        assert!(got.is_some(), "Should complete initialization");
 
         let mut events = Vec::new();
         while let Ok(ev) = reader.recv_timeout(std::time::Duration::from_millis(100)) {
@@ -298,17 +300,7 @@ mod tests {
         let tag_reader = task.file_event_bus.subscribe();
         let tree_reader = task.file_event_bus.subscribe();
 
-        let start = std::time::Instant::now();
-        while start.elapsed().as_secs() < 5 {
-            if let Ok(msg) = task.rx.recv_timeout(std::time::Duration::from_millis(100))
-                && matches!(
-                    msg,
-                    BackgroundMessage::Finished(_) | BackgroundMessage::FinishedWithoutWatcher
-                )
-            {
-                break;
-            }
-        }
+        let _ = wait_for_finished(&task, 5);
 
         let mut tag_events = Vec::new();
         while let Ok(ev) = tag_reader.recv_timeout(std::time::Duration::from_millis(100)) {
@@ -342,17 +334,7 @@ mod tests {
         let task = Task::new_for_test(config);
         let reader = task.file_event_bus.subscribe();
 
-        let start = std::time::Instant::now();
-        while start.elapsed().as_secs() < 5 {
-            if let Ok(msg) = task.rx.recv_timeout(std::time::Duration::from_millis(100))
-                && matches!(
-                    msg,
-                    BackgroundMessage::Finished(_) | BackgroundMessage::FinishedWithoutWatcher
-                )
-            {
-                break;
-            }
-        }
+        let _ = wait_for_finished(&task, 5);
 
         let mut events = Vec::new();
         while let Ok(ev) = reader.recv_timeout(std::time::Duration::from_millis(100)) {
@@ -371,7 +353,8 @@ mod tests {
 
     #[test]
     fn test_bus_published_pdf_triggers_conversion_via_subscriber() {
-        use crate::background::LogCategory;
+        use crate::app::background::LogCategory;
+        use crate::bus::events::typed::ProcessEvent;
 
         let mut config = AppConfig::default();
         let dir = tempdir().unwrap();
@@ -396,17 +379,7 @@ mod tests {
 
         let task = Task::new_for_test(config);
 
-        let start = std::time::Instant::now();
-        while start.elapsed().as_secs() < 5 {
-            if let Ok(msg) = task.rx.recv_timeout(std::time::Duration::from_millis(100))
-                && matches!(
-                    msg,
-                    BackgroundMessage::Finished(_) | BackgroundMessage::FinishedWithoutWatcher
-                )
-            {
-                break;
-            }
-        }
+        let _ = wait_for_finished(&task, 5);
 
         std::thread::sleep(std::time::Duration::from_millis(200));
 
@@ -419,11 +392,11 @@ mod tests {
         let start = std::time::Instant::now();
         let mut all_messages: Vec<String> = Vec::new();
         while start.elapsed().as_secs() < 5 {
-            let Ok(msg) = task.rx.recv_timeout(std::time::Duration::from_millis(100)) else {
+            let Ok(ev) = task.rx.recv_timeout(std::time::Duration::from_millis(100)) else {
                 continue;
             };
-            match msg {
-                BackgroundMessage::LogEntry(entry) => {
+            match ev {
+                BackgroundEvent::Process(ProcessEvent::LogEntry(entry)) => {
                     all_messages.push(format!("{:?}: {}", entry.category, entry.message));
                     if entry.category == LogCategory::PdfConverter
                         && entry.message.contains("Successfully converted")
@@ -471,17 +444,7 @@ mod tests {
 
         let task = Task::new_for_test(config);
 
-        let start = std::time::Instant::now();
-        while start.elapsed().as_secs() < 5 {
-            if let Ok(msg) = task.rx.recv_timeout(std::time::Duration::from_millis(100))
-                && matches!(
-                    msg,
-                    BackgroundMessage::Finished(_) | BackgroundMessage::FinishedWithoutWatcher
-                )
-            {
-                break;
-            }
-        }
+        let _ = wait_for_finished(&task, 5);
 
         let bus_reader = task.file_event_bus.subscribe();
         std::thread::sleep(std::time::Duration::from_millis(200));
@@ -519,7 +482,7 @@ mod tests {
 
     #[test]
     fn test_bus_published_image_triggers_vision_via_subscriber() {
-        use crate::background::LogCategory;
+        use crate::app::background::LogCategory;
         use crate::config::LlmConfig;
 
         let mut config = AppConfig::default();
@@ -546,17 +509,7 @@ mod tests {
 
         let task = Task::new_for_test(config);
 
-        let start = std::time::Instant::now();
-        while start.elapsed().as_secs() < 5 {
-            if let Ok(msg) = task.rx.recv_timeout(std::time::Duration::from_millis(100))
-                && matches!(
-                    msg,
-                    BackgroundMessage::Finished(_) | BackgroundMessage::FinishedWithoutWatcher
-                )
-            {
-                break;
-            }
-        }
+        let _ = wait_for_finished(&task, 5);
 
         std::thread::sleep(std::time::Duration::from_millis(200));
 
@@ -569,8 +522,8 @@ mod tests {
         let mut all_messages: Vec<String> = Vec::new();
         let mut saw_analyzing = false;
         while start.elapsed().as_secs() < 10 {
-            if let Ok(msg) = task.rx.recv_timeout(std::time::Duration::from_millis(100))
-                && let BackgroundMessage::LogEntry(entry) = msg
+            if let Ok(ev) = task.rx.recv_timeout(std::time::Duration::from_millis(100))
+                && let BackgroundEvent::Process(ProcessEvent::LogEntry(entry)) = ev
             {
                 all_messages.push(format!("{:?}: {}", entry.category, entry.message));
                 if entry.category == LogCategory::ImageVision
@@ -629,19 +582,7 @@ mod tests {
 
         // Wait for the scan to finish so we know all workers are
         // alive and subscribed.
-        let start = std::time::Instant::now();
-        let mut finished = false;
-        while start.elapsed() < std::time::Duration::from_secs(5) {
-            if let Ok(msg) = task.rx.recv_timeout(std::time::Duration::from_millis(100))
-                && matches!(
-                    msg,
-                    BackgroundMessage::Finished(_) | BackgroundMessage::FinishedWithoutWatcher
-                )
-            {
-                finished = true;
-                break;
-            }
-        }
+        let finished = wait_for_finished(&task, 5).is_some();
         assert!(finished, "task should finish after config arrives");
     }
 }

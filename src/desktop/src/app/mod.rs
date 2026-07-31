@@ -13,6 +13,7 @@
 //! messaging primitives (event buses, message types, bus routing) live
 //! in [`crate::bus`].
 
+pub mod background;
 pub mod background_task;
 pub mod batch;
 pub mod dialog_manager;

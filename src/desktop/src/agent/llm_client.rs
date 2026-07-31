@@ -2,7 +2,7 @@
 
 use crate::bus::events::messages::TokenUsageInfo;
 use crate::config::AppConfig;
-use crate::error::AgentError;
+use crate::agent::error::AgentError;
 use backoff::ExponentialBackoff;
 use backoff::retry;
 

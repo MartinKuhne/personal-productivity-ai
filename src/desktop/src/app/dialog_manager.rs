@@ -29,8 +29,8 @@ pub struct DialogManager {
 
     // Batch processing dialog
     pub batch_dialog_open: bool,
-    pub batch_dialog_config: crate::batch::types::BatchDialogConfig,
-    pub batch_handle: Option<crate::batch::BatchHandle>,
+    pub batch_dialog_config: crate::app::batch::types::BatchDialogConfig,
+    pub batch_handle: Option<crate::app::batch::BatchHandle>,
     pub batch_cancel_flag: Option<std::sync::Arc<std::sync::atomic::AtomicBool>>,
 }
 
@@ -51,7 +51,7 @@ impl DialogManager {
             rename_new_name: String::new(),
 
             batch_dialog_open: false,
-            batch_dialog_config: crate::batch::types::BatchDialogConfig::default(),
+            batch_dialog_config: crate::app::batch::types::BatchDialogConfig::default(),
             batch_handle: None,
             batch_cancel_flag: None,
         }

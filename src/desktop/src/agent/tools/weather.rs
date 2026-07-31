@@ -67,7 +67,7 @@ fn geocode(location: &str) -> Result<(f64, f64), String> {
 pub fn tool_get_weather(
     location: &str,
     date_range: Option<&str>,
-) -> Result<crate::tools::dtos::GetWeatherResponse, String> {
+) -> Result<crate::agent::tools::dtos::GetWeatherResponse, String> {
     // Reference: https://www.weather.gov/documentation/services-web-api
 
     let (lat, lon) = geocode(location)?;
@@ -186,7 +186,7 @@ pub fn tool_get_weather(
         return Err(err_msg);
     }
 
-    Ok(crate::tools::dtos::GetWeatherResponse {
+    Ok(crate::agent::tools::dtos::GetWeatherResponse {
         result: serde_json::to_string(&results).unwrap_or_default(),
     })
 }

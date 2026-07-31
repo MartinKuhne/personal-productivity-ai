@@ -7,12 +7,12 @@ use std::path::Path;
 
 pub fn tool_read_yaml_header(
     path_str: &str,
-) -> Result<crate::tools::dtos::ReadYamlHeaderResponse, String> {
+) -> Result<crate::agent::tools::dtos::ReadYamlHeaderResponse, String> {
     match std::fs::read_to_string(path_str) {
         Ok(content) => {
             if let Some(fm) = parse_front_matter(&content) {
                 let yaml_val = &fm.yaml;
-                Ok(crate::tools::dtos::ReadYamlHeaderResponse {
+                Ok(crate::agent::tools::dtos::ReadYamlHeaderResponse {
                     content: format!("{:#?}", yaml_val),
                 })
             } else {
@@ -34,7 +34,7 @@ pub fn tool_write_yaml_header(
     tags: Option<Vec<String>>,
     header_date: Option<&str>,
     producer: &FileEventProducer,
-) -> Result<crate::tools::dtos::WriteYamlHeaderResponse, String> {
+) -> Result<crate::agent::tools::dtos::WriteYamlHeaderResponse, String> {
     let existed = Path::new(path_str).exists();
     let current_content = std::fs::read_to_string(path_str).unwrap_or_else(|_| "".to_string());
 
@@ -82,7 +82,7 @@ pub fn tool_write_yaml_header(
                     } else {
                         producer.publish_discovered(path);
                     }
-                    Ok(crate::tools::dtos::WriteYamlHeaderResponse {
+                    Ok(crate::agent::tools::dtos::WriteYamlHeaderResponse {
                         result: "YAML header written successfully.".to_string(),
                     })
                 }

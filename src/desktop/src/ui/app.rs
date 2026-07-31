@@ -7,14 +7,13 @@ use crate::app::{
     DialogManager, PanelLayout, PersistedUiState, SelectionManager, TabManager, TagManager,
     TextBuffer,
 };
-use crate::background::BackgroundLogEntry;
-use crate::background::LogCategory;
-use crate::background::{BackgroundProcessManager, SharedProcessManager};
-use crate::background_task::Task;
+use crate::app::background::BackgroundLogEntry;
+use crate::app::background::LogCategory;
+use crate::app::background::{BackgroundProcessManager, SharedProcessManager};
+use crate::app::background_task::Task;
 use crate::bus::core::{Bus, BusReader};
 use crate::bus::events::config::ConfigArrived;
 use crate::bus::events::file::{FileEvent, FileEventProducer};
-use crate::bus::events::messages::BackgroundMessage;
 use crate::bus::events::typed::{BackgroundEvent, FsEvent, ProcessEvent};
 use crate::config::AppConfig;
 use crate::markdown::parse_front_matter;
@@ -51,8 +50,8 @@ const PERSISTED_UI_STATE_KEY: &str = "ppai_ui_state";
 
 pub struct FastMdApp {
     pub content_libraries: Vec<crate::config::ContentLibrary>,
-    pub rx: Receiver<BackgroundMessage>,
-    pub tx: std::sync::mpsc::Sender<BackgroundMessage>,
+    pub rx: Receiver<BackgroundEvent>,
+    pub tx: std::sync::mpsc::Sender<BackgroundEvent>,
     pub file_event_bus: Bus<FileEvent>,
     pub file_event_reader: Option<BusReader<FileEvent>>,
     pub file_processor: FileEventProcessor,
@@ -92,6 +91,13 @@ pub struct FastMdApp {
     /// UI frame and run it on a background thread.  This keeps the
     /// UI responsive and lets progress appear in the log panel.
     mcp_initialized: bool,
+    /// Slot for the `notify::RecommendedWatcher` handle, shared
+    /// with the file-watcher thread. The watcher writes the live
+    /// handle here just before sending [`FsEvent::Finished`]; the
+    /// UI calls [`Self::task_take_finished_watcher`] from
+    /// `handle_fs_event` to take ownership so the watcher stays
+    /// alive for the rest of the app lifetime.
+    finished_watcher_slot: Arc<Mutex<Option<notify::RecommendedWatcher>>>,
 }
 
 impl FastMdApp {
@@ -339,6 +345,11 @@ impl FastMdApp {
         // waits on its own reader; the agent's reader is drained on
         // the UI thread in `update_ui`.
         let background_task = Task::new(config_bus.clone());
+        // The file-watcher thread writes the `RecommendedWatcher`
+        // handle into this slot before sending `FsEvent::Finished`;
+        // the UI takes ownership from `task_take_finished_watcher`
+        // in `handle_fs_event`.
+        let finished_watcher_slot = background_task.finished_watcher.clone();
         let file_processor = FileEventProcessor::new(background_task.file_event_bus.subscribe());
         let background_manager = Arc::new(Mutex::new(BackgroundProcessManager::new()));
         let agent = AgentSessionManager::new(config_bus);
@@ -399,6 +410,7 @@ impl FastMdApp {
             pending_file_load: None,
             repaint_interval: Duration::from_millis(16),
             mcp_initialized: false,
+            finished_watcher_slot,
         }
     }
 
@@ -407,7 +419,7 @@ impl FastMdApp {
     /// Outputs: `FastMdApp` with every collection empty and every optional set to `None`.
     /// Purity: Constructs a new value; no side effects.
     /// Preconditions: None.
-    /// Postconditions: Caller still owns a usable `Sender<BackgroundMessage>` paired with `rx`.
+    /// Postconditions: Caller still owns a usable `Sender<BackgroundEvent>` paired with `rx`.
     pub fn empty_state(config: crate::config::AppConfig) -> Self {
         // Publish the supplied config into a private bus and let
         // `empty_state_via_bus` build the struct through the same
@@ -425,6 +437,13 @@ impl FastMdApp {
     fn empty_state_via_bus(bus: Bus<ConfigArrived>, config: crate::config::AppConfig) -> Self {
         let (tx, rx) = std::sync::mpsc::channel();
         let background_task = Task::new(bus.clone());
+        // The `empty_state` test path creates the background `Task`
+        // (so it subscribes to the config bus) but uses its own
+        // fresh `tx`/`rx` channel for the UI side. As a result the
+        // file-watcher thread never has a chance to deposit a
+        // `RecommendedWatcher` into the slot the UI knows about, so
+        // we point the slot at a fresh empty one.
+        let finished_watcher_slot = background_task.finished_watcher.clone();
         let file_processor = FileEventProcessor::new(background_task.file_event_bus.subscribe());
         let background_manager = Arc::new(Mutex::new(BackgroundProcessManager::new()));
         let mut agent = AgentSessionManager::new(bus.clone());
@@ -434,7 +453,7 @@ impl FastMdApp {
         let dir_tracker = DirectoryTracker::new(event_bus.subscribe());
 
         let mut dialogs = DialogManager::new();
-        let batch_dialog_config = crate::batch::types::BatchDialogConfig {
+        let batch_dialog_config = crate::app::batch::types::BatchDialogConfig {
             available_dirs: config
                 .content_libraries
                 .iter()
@@ -472,6 +491,7 @@ impl FastMdApp {
             pending_file_load: None,
             repaint_interval: Duration::from_millis(16),
             mcp_initialized: false,
+            finished_watcher_slot,
         }
     }
 
@@ -491,6 +511,17 @@ impl FastMdApp {
             self.file_event_bus.clone(),
         );
         self.agent.set_show_results(true);
+    }
+
+    /// Take the `RecommendedWatcher` handle that the file-watcher
+    /// thread deposits just before sending `FsEvent::Finished`.
+    /// Returns `None` if the slot is empty (watcher init failed, or
+    /// the handle has already been taken).
+    fn task_take_finished_watcher(&self) -> Option<notify::RecommendedWatcher> {
+        self.finished_watcher_slot
+            .lock()
+            .ok()
+            .and_then(|mut slot| slot.take())
     }
 }
 
@@ -696,34 +727,24 @@ impl FastMdApp {
     }
 
     fn drain_background_channel(&mut self) {
-        while let Ok(msg) = self.rx.try_recv() {
-            // Route through the typed BackgroundEvent layer. The
-            // `from_legacy` converter maps each BackgroundMessage
-            // variant to a domain-specific typed event. The handler
-            // below dispatches by domain (Agent / Fs / Process),
-            // replacing the flat match-on-enum pattern.
-            let event = BackgroundEvent::from_legacy(&msg);
+        while let Ok(event) = self.rx.try_recv() {
+            // Dispatch the typed event directly by domain
+            // (Agent / Fs / Process).
             match event {
-                Some(BackgroundEvent::Agent(agent_ev)) => {
+                BackgroundEvent::Agent(agent_ev) => {
                     self.agent.handle_agent_event(agent_ev);
                 }
-                Some(BackgroundEvent::Fs(fs_ev)) => {
-                    self.handle_fs_event(fs_ev, &msg);
+                BackgroundEvent::Fs(fs_ev) => {
+                    self.handle_fs_event(fs_ev);
                 }
-                Some(BackgroundEvent::Process(proc_ev)) => {
-                    self.handle_process_event(proc_ev, &msg);
-                }
-                None => {
-                    // Variants that carry non-cloneable handles
-                    // (e.g. Finished(RecommendedWatcher)) fall
-                    // through to the legacy handler.
-                    self.handle_legacy_message(msg);
+                BackgroundEvent::Process(proc_ev) => {
+                    self.handle_process_event(proc_ev);
                 }
             }
         }
     }
 
-    fn handle_fs_event(&mut self, ev: FsEvent, _msg: &BackgroundMessage) {
+    fn handle_fs_event(&mut self, ev: FsEvent) {
         use FsEvent;
         match ev {
             FsEvent::FileParsed { path, tags } => {
@@ -734,8 +755,13 @@ impl FastMdApp {
                 self.file_processor.add_dir(path);
             }
             FsEvent::Finished => {
-                // Should not arrive here — Finished carries a non-cloneable
-                // RecommendedWatcher and is handled via the legacy path.
+                // The file-watcher thread has finished its initial
+                // scan and the watcher handle has been moved into
+                // the `Task::finished_watcher` slot. Take it now so
+                // it stays alive for the rest of the app lifetime.
+                if let Some(watcher) = self.task_take_finished_watcher() {
+                    self._watcher = Some(watcher);
+                }
                 self.file_processor.indexing_finished = true;
                 self.tag_manager.rebuild();
             }
@@ -769,7 +795,7 @@ impl FastMdApp {
         }
     }
 
-    fn handle_process_event(&mut self, ev: ProcessEvent, _msg: &BackgroundMessage) {
+    fn handle_process_event(&mut self, ev: ProcessEvent) {
         use ProcessEvent;
         match ev {
             ProcessEvent::LogEntry(entry) => {
@@ -796,25 +822,6 @@ impl FastMdApp {
         }
     }
 
-    /// Fallback handler for `BackgroundMessage` variants that cannot
-    /// be converted to `BackgroundEvent` (e.g. those carrying a
-    /// non-cloneable `RecommendedWatcher` handle).
-    fn handle_legacy_message(&mut self, msg: BackgroundMessage) {
-        match msg {
-            BackgroundMessage::Finished(watcher) => {
-                self._watcher = Some(watcher);
-                self.file_processor.indexing_finished = true;
-                self.tag_manager.rebuild();
-            }
-            _ => {
-                // All other variants are handled via typed events.
-                // If we reach here, the `from_legacy` mapping is
-                // incomplete and should be updated.
-                tracing::warn!("unhandled legacy BackgroundMessage in handle_legacy_message");
-            }
-        }
-    }
-
     /// Runs the one-time MCP startup ping on the first call.
     ///
     /// We deliberately defer network I/O from construction (where it
@@ -831,10 +838,10 @@ impl FastMdApp {
 
         let tx = self.tx.clone();
         let servers_ok = self.agent.initialize_mcp();
-        let _ = tx.send(BackgroundMessage::LogEntry(BackgroundLogEntry::new(
+        let _ = tx.send(BackgroundLogEntry::new(
             LogCategory::Indexer,
             format!("MCP startup ping complete: {servers_ok} server(s) responded"),
-        )));
+        ).into());
     }
 
     fn handle_file_selection(&mut self, _ctx: &egui::Context) {
@@ -848,7 +855,7 @@ impl FastMdApp {
             std::thread::spawn(move || {
                 let content = std::fs::read_to_string(&path).map_err(|e| e.to_string());
                 if tx
-                    .send(BackgroundMessage::FileLoaded { path, content })
+                    .send(ProcessEvent::FileLoaded { path, content }.into())
                     .is_err()
                 {
                     tracing::warn!("Background channel closed, file load result dropped");
@@ -866,7 +873,7 @@ impl FastMdApp {
         // loaded path so the centre panel reloads the file on
         // the next frame.
         let was_open = self.text_buffer.is_open;
-        let _ = crate::editor_egui::show_text_editor(ui, &mut self.text_buffer, &producer);
+        let _ = crate::ui::editor_egui::show_text_editor(ui, &mut self.text_buffer, &producer);
         if was_open && !self.text_buffer.is_open {
             self.tab_manager.loaded_path = None;
         }
@@ -926,10 +933,10 @@ impl FastMdApp {
                 .and_then(|p| dialog_config.available_dirs.iter().position(|d| d == p));
 
             if let Some(result) =
-                crate::batch::dialog::show_batch_modal(self, ctx, &mut dialog_config)
+                crate::app::batch::dialog::show_batch_modal(self, ctx, &mut dialog_config)
             {
                 match result {
-                    crate::batch::types::BatchDialogResult::Process(config) => {
+                    crate::app::batch::types::BatchDialogResult::Process(config) => {
                         if self.dialogs.batch_handle.is_none() {
                             let prompt_text = dialog_config
                                 .available_prompts
@@ -938,7 +945,7 @@ impl FastMdApp {
                                 .unwrap_or_default();
 
                             let (coordinator, cancel_flag) =
-                                crate::batch::coordinator::BatchCoordinator::new(
+                                crate::app::batch::coordinator::BatchCoordinator::new(
                                     config,
                                     self.config.clone(),
                                     self.tx.clone(),
@@ -950,7 +957,7 @@ impl FastMdApp {
                             self.dialogs.batch_cancel_flag = Some(cancel_flag);
                         }
                     }
-                    crate::batch::types::BatchDialogResult::Cancel => {
+                    crate::app::batch::types::BatchDialogResult::Cancel => {
                         self.dialogs.batch_dialog_open = false;
                         dialog_config.available_prompts.clear();
                         dialog_config.selected_prompt_idx = None;
@@ -995,6 +1002,7 @@ impl FastMdApp {
 mod tests {
     use super::*;
     use crate::bus::events::messages::TokenUsageInfo;
+    use crate::bus::events::typed::AgentEvent;
     use crate::ui::test_helpers::assert::assert_no_id_change_in_shapes;
     use std::path::PathBuf;
 
@@ -1084,35 +1092,35 @@ mod tests {
 
         // 1. FileParsed
         app.tx
-            .send(BackgroundMessage::FileParsed {
+            .send(FsEvent::FileParsed {
                 path: test_file.clone(),
                 tags: vec!["tag1".to_string()],
-            })
+            }
+            .into())
             .unwrap();
 
         // 2. DirParsed
         app.tx
-            .send(BackgroundMessage::DirParsed {
+            .send(FsEvent::DirParsed {
                 path: test_dir.clone(),
-            })
+            }
+            .into())
             .unwrap();
 
         // 3. FinishedWithoutWatcher
         app.tx
-            .send(BackgroundMessage::FinishedWithoutWatcher)
+            .send(FsEvent::FinishedWithoutWatcher.into())
             .unwrap();
 
         // 4. Agent Status & Response
         app.tx
-            .send(BackgroundMessage::AgentStatus("Processing...".to_string()))
+            .send(AgentEvent::Status("Processing...".to_string()).into())
             .unwrap();
         app.tx
-            .send(BackgroundMessage::AgentThinking(
-                "Thinking step".to_string(),
-            ))
+            .send(AgentEvent::Thinking("Thinking step".to_string()).into())
             .unwrap();
         app.tx
-            .send(BackgroundMessage::AgentResponse("Done result".to_string()))
+            .send(AgentEvent::Response("Done result".to_string()).into())
             .unwrap();
 
         let _ = ctx.run_ui(Default::default(), |ui| {
@@ -1140,10 +1148,11 @@ mod tests {
 
         // File modified message
         app.tx
-            .send(BackgroundMessage::FileModified {
+            .send(FsEvent::FileModified {
                 path: file_path.clone(),
                 tags: vec!["updated".to_string()],
-            })
+            }
+            .into())
             .unwrap();
 
         let _ = ctx.run_ui(Default::default(), |ui| {
@@ -1154,9 +1163,10 @@ mod tests {
 
         // File deleted message
         app.tx
-            .send(BackgroundMessage::FileDeleted {
+            .send(FsEvent::FileDeleted {
                 path: file_path.clone(),
-            })
+            }
+            .into())
             .unwrap();
 
         let _ = ctx.run_ui(Default::default(), |ui| {
@@ -1174,9 +1184,7 @@ mod tests {
         let mut app = create_test_app();
 
         app.tx
-            .send(BackgroundMessage::AgentFailed(
-                "Network timeout".to_string(),
-            ))
+            .send(AgentEvent::Failed("Network timeout".to_string()).into())
             .unwrap();
 
         let _ = ctx.run_ui(Default::default(), |ui| {
@@ -1187,9 +1195,7 @@ mod tests {
         assert!(!app.agent.state().running);
 
         app.tx
-            .send(BackgroundMessage::AgentFinished(vec![
-                serde_json::json!({"ok": true}),
-            ]))
+            .send(AgentEvent::Finished(vec![serde_json::json!({"ok": true})]).into())
             .unwrap();
 
         let _ = ctx.run_ui(Default::default(), |ui| {
@@ -1207,12 +1213,13 @@ mod tests {
 
         // First turn: small context, no cached or reasoning tokens.
         app.tx
-            .send(BackgroundMessage::AgentTokenUsage(TokenUsageInfo {
+            .send(AgentEvent::TokenUsage(TokenUsageInfo {
                 prompt_tokens: 100,
                 completion_tokens: 20,
                 total_tokens: 120,
                 ..Default::default()
-            }))
+            })
+            .into())
             .unwrap();
 
         let _ = ctx.run_ui(Default::default(), |ui| {
@@ -1240,13 +1247,14 @@ mod tests {
 
         // Second turn: context grew, completion + reasoning added.
         app.tx
-            .send(BackgroundMessage::AgentTokenUsage(TokenUsageInfo {
+            .send(AgentEvent::TokenUsage(TokenUsageInfo {
                 prompt_tokens: 250,
                 completion_tokens: 30,
                 total_tokens: 280,
                 cached_tokens: Some(50),
                 reasoning_tokens: Some(5),
-            }))
+            })
+            .into())
             .unwrap();
 
         let _ = ctx.run_ui(Default::default(), |ui| {
@@ -1274,12 +1282,13 @@ mod tests {
 
         // Third turn: smaller context — peak should NOT shrink.
         app.tx
-            .send(BackgroundMessage::AgentTokenUsage(TokenUsageInfo {
+            .send(AgentEvent::TokenUsage(TokenUsageInfo {
                 prompt_tokens: 80,
                 completion_tokens: 10,
                 total_tokens: 90,
                 ..Default::default()
-            }))
+            })
+            .into())
             .unwrap();
 
         let _ = ctx.run_ui(Default::default(), |ui| {

@@ -7,20 +7,8 @@ pub mod markdown;
 pub mod ui;
 pub mod utils;
 
-#[path = "app/background/mod.rs"]
-pub mod background;
-
 #[path = "config/config.rs"]
 pub mod config;
-
-#[path = "agent/tools/mod.rs"]
-pub mod tools;
-
-pub use agent::error;
-pub use app::background_task;
-pub use app::batch;
-pub use app::document;
-pub use ui::editor_egui;
 
 pub use agent::run_agent;
 pub use app::background_task::Task;
@@ -33,13 +21,13 @@ pub use app::{
 pub use bus::config::{CONFIG_ARRIVAL_TIMEOUT, config_bus};
 pub use bus::core::{Bus, BusReader};
 pub use bus::events::{
-    AgentEvent, BackgroundEvent, BackgroundMessage, ConfigArrived, FileEvent, FileEventKind,
-    FileEventProducer, FsEvent, ProcessEvent, TokenUsageInfo,
+    AgentEvent, BackgroundEvent, ConfigArrived, FileEvent, FileEventKind, FileEventProducer,
+    FsEvent, ProcessEvent, TokenUsageInfo,
 };
 pub use bus::router::{BusRouter, ChannelWorker, spawn_path_worker};
 pub use config::{AppConfig, get_config_path, load_config};
-pub use error::AgentError;
+pub use agent::error::AgentError;
 pub use markdown::ToCEntry;
-pub use tools::{execute_tool, get_tools_schema};
+pub use agent::tools::{execute_tool, get_tools_schema};
 pub use ui::FastMdApp;
 pub use utils::extract_tags_from_file;

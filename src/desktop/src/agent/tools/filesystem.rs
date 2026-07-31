@@ -10,7 +10,7 @@ pub fn tool_grep(
     root_path: &Path,
     virtual_prefix: &str,
     query: &str,
-) -> Result<crate::tools::dtos::GrepResponse, String> {
+) -> Result<crate::agent::tools::dtos::GrepResponse, String> {
     let mut results = Vec::new();
     let query_lower = query.to_lowercase();
     for entry in WalkDir::new(root_path).into_iter().filter_map(|e| e.ok()) {
@@ -29,17 +29,17 @@ pub fn tool_grep(
         }
     }
     if results.is_empty() {
-        Ok(crate::tools::dtos::GrepResponse {
+        Ok(crate::agent::tools::dtos::GrepResponse {
             matches: "No matches found.".to_string(),
         })
     } else {
-        Ok(crate::tools::dtos::GrepResponse {
+        Ok(crate::agent::tools::dtos::GrepResponse {
             matches: results.join("\n"),
         })
     }
 }
 
-pub fn tool_read_tags(root_path: &Path) -> Result<crate::tools::dtos::ReadTagsResponse, String> {
+pub fn tool_read_tags(root_path: &Path) -> Result<crate::agent::tools::dtos::ReadTagsResponse, String> {
     let mut all_tags = std::collections::BTreeSet::new();
     for entry in WalkDir::new(root_path).into_iter().filter_map(|e| e.ok()) {
         if entry.path().is_file()
@@ -52,7 +52,7 @@ pub fn tool_read_tags(root_path: &Path) -> Result<crate::tools::dtos::ReadTagsRe
             }
         }
     }
-    Ok(crate::tools::dtos::ReadTagsResponse {
+    Ok(crate::agent::tools::dtos::ReadTagsResponse {
         tags: all_tags.into_iter().collect(),
     })
 }
@@ -125,9 +125,9 @@ pub fn tool_list_files(target_dir: &Path, virtual_prefix: &str) -> Result<Vec<St
     Ok(files)
 }
 
-pub fn tool_read_file(path_str: &str) -> Result<crate::tools::dtos::ReadFileResponse, String> {
+pub fn tool_read_file(path_str: &str) -> Result<crate::agent::tools::dtos::ReadFileResponse, String> {
     match std::fs::read_to_string(path_str) {
-        Ok(content) => Ok(crate::tools::dtos::ReadFileResponse { content }),
+        Ok(content) => Ok(crate::agent::tools::dtos::ReadFileResponse { content }),
         Err(e) => Err(format!("Failed to read file: {}", e)),
     }
 }
@@ -136,12 +136,12 @@ pub fn tool_read_file_lines(
     path_str: &str,
     start_line: usize,
     end_line: usize,
-) -> Result<crate::tools::dtos::ReadFileLinesResponse, String> {
+) -> Result<crate::agent::tools::dtos::ReadFileLinesResponse, String> {
     match std::fs::read_to_string(path_str) {
         Ok(content) => {
             let lines: Vec<&str> = content.lines().collect();
             if lines.is_empty() && start_line == 1 {
-                return Ok(crate::tools::dtos::ReadFileLinesResponse {
+                return Ok(crate::agent::tools::dtos::ReadFileLinesResponse {
                     content: "".to_string(),
                 });
             }
@@ -153,7 +153,7 @@ pub fn tool_read_file_lines(
                 return Err("Start line greater than end line.".to_string());
             }
             let selected_lines = &lines[start_line - 1..end];
-            Ok(crate::tools::dtos::ReadFileLinesResponse {
+            Ok(crate::agent::tools::dtos::ReadFileLinesResponse {
                 content: selected_lines.join("\n"),
             })
         }
@@ -165,7 +165,7 @@ pub fn tool_create_file(
     path_str: &str,
     content: &str,
     producer: &FileEventProducer,
-) -> Result<crate::tools::dtos::CreateFileResponse, String> {
+) -> Result<crate::agent::tools::dtos::CreateFileResponse, String> {
     if !path_str.to_lowercase().ends_with(".md") {
         return Err("Only markdown files (.md) are allowed.".to_string());
     }
@@ -190,7 +190,7 @@ pub fn tool_create_file(
             // directory tree, tag manager, etc. can pick it up without
             // waiting for an OS-level notify event.
             producer.publish_discovered(path);
-            Ok(crate::tools::dtos::CreateFileResponse {
+            Ok(crate::agent::tools::dtos::CreateFileResponse {
                 result: "File created successfully.".to_string(),
                 size_bytes,
             })
@@ -204,7 +204,7 @@ pub fn tool_insert_lines(
     line_index: usize,
     lines_to_insert: &[String],
     producer: &FileEventProducer,
-) -> Result<crate::tools::dtos::InsertLinesResponse, String> {
+) -> Result<crate::agent::tools::dtos::InsertLinesResponse, String> {
     match std::fs::read_to_string(path_str) {
         Ok(content) => {
             let mut lines: Vec<String> = content.lines().map(|s| s.to_string()).collect();
@@ -219,7 +219,7 @@ pub fn tool_insert_lines(
             match std::fs::write(path_str, new_content) {
                 Ok(_) => {
                     producer.publish_updated(Path::new(path_str));
-                    Ok(crate::tools::dtos::InsertLinesResponse {
+                    Ok(crate::agent::tools::dtos::InsertLinesResponse {
                         result: "Lines inserted successfully.".to_string(),
                     })
                 }
@@ -235,7 +235,7 @@ pub fn tool_delete_lines(
     start_line: usize,
     end_line: usize,
     producer: &FileEventProducer,
-) -> Result<crate::tools::dtos::DeleteLinesResponse, String> {
+) -> Result<crate::agent::tools::dtos::DeleteLinesResponse, String> {
     match std::fs::read_to_string(path_str) {
         Ok(content) => {
             let mut lines: Vec<String> = content.lines().map(|s| s.to_string()).collect();
@@ -251,7 +251,7 @@ pub fn tool_delete_lines(
             match std::fs::write(path_str, new_content) {
                 Ok(_) => {
                     producer.publish_updated(Path::new(path_str));
-                    Ok(crate::tools::dtos::DeleteLinesResponse {
+                    Ok(crate::agent::tools::dtos::DeleteLinesResponse {
                         result: "Lines deleted successfully.".to_string(),
                     })
                 }
@@ -267,7 +267,7 @@ pub fn tool_replace_text(
     old_string: &str,
     new_string: &str,
     producer: &FileEventProducer,
-) -> Result<crate::tools::dtos::ReplaceTextResponse, String> {
+) -> Result<crate::agent::tools::dtos::ReplaceTextResponse, String> {
     match std::fs::read_to_string(path_str) {
         Ok(content) => {
             if !content.contains(old_string) {
@@ -278,7 +278,7 @@ pub fn tool_replace_text(
             match std::fs::write(path_str, new_content) {
                 Ok(_) => {
                     producer.publish_updated(Path::new(path_str));
-                    Ok(crate::tools::dtos::ReplaceTextResponse {
+                    Ok(crate::agent::tools::dtos::ReplaceTextResponse {
                         result: format!("Successfully replaced {} occurrence(s).", count),
                     })
                 }

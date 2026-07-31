@@ -3,8 +3,8 @@
 use crate::agent::AgentContext;
 use crate::bus::core::{Bus, BusReader};
 use crate::bus::events::config::ConfigArrived;
-use crate::bus::events::messages::{BackgroundMessage, TokenUsageInfo};
-use crate::bus::events::typed::AgentEvent;
+use crate::bus::events::messages::TokenUsageInfo;
+use crate::bus::events::typed::{AgentEvent, BackgroundEvent};
 use crate::config::AppConfig;
 use serde_json::Value;
 use std::collections::HashSet;
@@ -39,7 +39,7 @@ pub struct AgentState {
 ///   the one published at startup, not a value captured at
 ///   construction time.
 /// - Provides `start_session` to launch a new agent thread
-/// - Handles incoming `BackgroundMessage::Agent*` messages to update state
+/// - Handles incoming [`BackgroundEvent::Agent`] events to update state
 /// - Supports cancellation via cancel flag
 /// - Exposes read-only `AgentState` for UI rendering
 pub struct AgentSessionManager {
@@ -175,7 +175,7 @@ impl AgentSessionManager {
     ///
     /// Returns the number of servers that responded to the ping.
     pub fn initialize_mcp(&self) -> usize {
-        crate::tools::registry::init_mcp_on_startup(&self.config)
+        crate::agent::tools::registry::init_mcp_on_startup(&self.config)
     }
 
     /// Get a read-only view of the current agent state.
@@ -251,7 +251,7 @@ impl AgentSessionManager {
     /// main channel (the same channel used for background messages).
     pub fn start_session(
         &mut self,
-        gui_tx: std::sync::mpsc::Sender<BackgroundMessage>,
+        gui_tx: std::sync::mpsc::Sender<BackgroundEvent>,
         prompt: String,
         active_file: Option<PathBuf>,
         active_dir: Option<PathBuf>,
@@ -286,74 +286,8 @@ impl AgentSessionManager {
         });
     }
 
-    /// Consume and handle a single background message from the agent thread.
-    /// Returns `true` if the UI should repaint.
-    pub fn handle_background_message(&mut self, msg: BackgroundMessage) -> bool {
-        match msg {
-            BackgroundMessage::AgentStatus(status) => {
-                self.state.status = status;
-                true
-            }
-            BackgroundMessage::AgentThinking(thinking) => {
-                self.state.thinking = thinking;
-                true
-            }
-            BackgroundMessage::AgentResponse(resp) => {
-                self.state.response = resp.clone();
-                true
-            }
-            BackgroundMessage::AgentFinished(history) => {
-                self.state.running = false;
-                self.state.history = Some(history);
-                true
-            }
-            BackgroundMessage::AgentFailed(err) => {
-                self.state.running = false;
-                self.state.status = format!("Error: {}", err);
-                true
-            }
-            BackgroundMessage::AgentTokenUsage(info) => {
-                // Track peak prompt size across session
-                if info.prompt_tokens > self.state.total_usage.prompt_tokens {
-                    self.state.total_usage.prompt_tokens = info.prompt_tokens;
-                }
-                self.state.total_usage.completion_tokens = self
-                    .state
-                    .total_usage
-                    .completion_tokens
-                    .saturating_add(info.completion_tokens);
-                self.state.total_usage.total_tokens = self
-                    .state
-                    .total_usage
-                    .total_tokens
-                    .saturating_add(info.total_tokens);
-                self.state.total_usage.cached_tokens = Some(
-                    self.state
-                        .total_usage
-                        .cached_tokens
-                        .unwrap_or(0)
-                        .saturating_add(info.cached_tokens.unwrap_or(0)),
-                );
-                self.state.total_usage.reasoning_tokens = Some(
-                    self.state
-                        .total_usage
-                        .reasoning_tokens
-                        .unwrap_or(0)
-                        .saturating_add(info.reasoning_tokens.unwrap_or(0)),
-                );
-                self.state.token_usage = Some(info);
-                true
-            }
-            _ => false,
-        }
-    }
-
-    /// Consume and handle a single typed [`AgentEvent`].
-    ///
-    /// This is the typed-channel counterpart to
-    /// [`Self::handle_background_message`]. It performs the same state
-    /// updates but accepts the domain-specific [`AgentEvent`] enum
-    /// introduced by the P1-6 architecture review pilot.
+    /// Consume and handle a single typed [`AgentEvent`] from the
+    /// background event channel.
     ///
     /// Returns `true` if the UI should repaint.
     pub fn handle_agent_event(&mut self, event: AgentEvent) -> bool {

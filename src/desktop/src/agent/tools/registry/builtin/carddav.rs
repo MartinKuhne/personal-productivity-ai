@@ -1,9 +1,9 @@
 //! CardDAV contact tool implementations for the tool registry.
 
 use crate::config::AppConfig;
-use crate::tools::Tool;
-use crate::tools::context::ToolContext;
-use crate::tools::dtos;
+use crate::agent::tools::Tool;
+use crate::agent::tools::context::ToolContext;
+use crate::agent::tools::dtos;
 use std::any::TypeId;
 
 use super::json_schema;
@@ -38,13 +38,13 @@ impl Tool for SearchContactTool {
             !config.jmap_clients.is_empty()
         }
     }
-    fn safety(&self) -> crate::tools::Safety {
-        crate::tools::Safety::ReadOnly
+    fn safety(&self) -> crate::agent::tools::Safety {
+        crate::agent::tools::Safety::ReadOnly
     }
     fn execute(&self, ctx: &ToolContext, args: &str) -> Result<serde_json::Value, String> {
         let input: dtos::SearchContactInput =
             serde_json::from_str(args).map_err(|e| format!("Invalid args: {}", e))?;
-        crate::tools::carddav::tool_search_contact(ctx.config, &input.keyword).map(|r| {
+        crate::agent::tools::carddav::tool_search_contact(ctx.config, &input.keyword).map(|r| {
             serde_json::to_value(r).unwrap_or_else(|e| serde_json::json!({"error": e.to_string()}))
         })
     }
@@ -83,7 +83,7 @@ impl Tool for AddContactTool {
     fn execute(&self, ctx: &ToolContext, args: &str) -> Result<serde_json::Value, String> {
         let input: dtos::AddContactInput =
             serde_json::from_str(args).map_err(|e| format!("Invalid args: {}", e))?;
-        crate::tools::carddav::tool_add_contact(ctx.config, &input.contact_json).map(|r| {
+        crate::agent::tools::carddav::tool_add_contact(ctx.config, &input.contact_json).map(|r| {
             serde_json::to_value(r).unwrap_or_else(|e| serde_json::json!({"error": e.to_string()}))
         })
     }
@@ -119,13 +119,13 @@ impl Tool for GetContactTool {
             !config.jmap_clients.is_empty()
         }
     }
-    fn safety(&self) -> crate::tools::Safety {
-        crate::tools::Safety::ReadOnly
+    fn safety(&self) -> crate::agent::tools::Safety {
+        crate::agent::tools::Safety::ReadOnly
     }
     fn execute(&self, ctx: &ToolContext, args: &str) -> Result<serde_json::Value, String> {
         let input: dtos::GetContactInput =
             serde_json::from_str(args).map_err(|e| format!("Invalid args: {}", e))?;
-        crate::tools::carddav::tool_get_contact(ctx.config, &input.id).map(|r| {
+        crate::agent::tools::carddav::tool_get_contact(ctx.config, &input.id).map(|r| {
             serde_json::to_value(r).unwrap_or_else(|e| serde_json::json!({"error": e.to_string()}))
         })
     }

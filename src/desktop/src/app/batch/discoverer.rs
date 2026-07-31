@@ -1,6 +1,6 @@
 //! Job discoverer trait and implementations — resolves which paths a batch job should process (files or directories).
 
-use crate::batch::types::{BatchConfig, BatchMode};
+use crate::app::batch::types::{BatchConfig, BatchMode};
 use std::path::PathBuf;
 
 pub trait JobDiscoverer: Send {
@@ -14,7 +14,7 @@ pub struct FileMatcherDiscoverer {
 
 impl JobDiscoverer for FileMatcherDiscoverer {
     fn discover(&self) -> Result<Vec<PathBuf>, String> {
-        crate::batch::file_matcher::find_matching_files(&self.directory, &self.pattern)
+        crate::app::batch::file_matcher::find_matching_files(&self.directory, &self.pattern)
     }
 }
 
@@ -24,7 +24,7 @@ pub struct DirectoryDiscoverer {
 
 impl JobDiscoverer for DirectoryDiscoverer {
     fn discover(&self) -> Result<Vec<PathBuf>, String> {
-        Ok(crate::batch::file_matcher::find_subdirectories(
+        Ok(crate::app::batch::file_matcher::find_subdirectories(
             &self.directory,
         ))
     }

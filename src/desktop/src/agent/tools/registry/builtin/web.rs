@@ -1,9 +1,9 @@
 //! Web tool implementations for the tool registry.
 
 use crate::config::AppConfig;
-use crate::tools::Tool;
-use crate::tools::context::ToolContext;
-use crate::tools::dtos;
+use crate::agent::tools::Tool;
+use crate::agent::tools::context::ToolContext;
+use crate::agent::tools::dtos;
 use std::any::TypeId;
 
 use super::json_schema;
@@ -29,7 +29,7 @@ impl Tool for WebDelegateTool {
     fn execute(&self, ctx: &ToolContext, args: &str) -> Result<serde_json::Value, String> {
         let input: dtos::WebDelegateInput =
             serde_json::from_str(args).map_err(|e| format!("Invalid args: {}", e))?;
-        crate::tools::web::tool_web_delegate(ctx.config, &input.instruction).map(|r| {
+        crate::agent::tools::web::tool_web_delegate(ctx.config, &input.instruction).map(|r| {
             serde_json::to_value(r).unwrap_or_else(|e| serde_json::json!({"error": e.to_string()}))
         })
     }
@@ -53,13 +53,13 @@ impl Tool for WebFetchTool {
     fn is_enabled(&self, config: &AppConfig, _: &str) -> bool {
         config.tool_groups.web
     }
-    fn safety(&self) -> crate::tools::Safety {
-        crate::tools::Safety::ReadOnly
+    fn safety(&self) -> crate::agent::tools::Safety {
+        crate::agent::tools::Safety::ReadOnly
     }
     fn execute(&self, _ctx: &ToolContext, args: &str) -> Result<serde_json::Value, String> {
         let input: dtos::WebFetchInput =
             serde_json::from_str(args).map_err(|e| format!("Invalid args: {}", e))?;
-        crate::tools::web::tool_web_fetch(&input).map(|r| {
+        crate::agent::tools::web::tool_web_fetch(&input).map(|r| {
             serde_json::to_value(r).unwrap_or_else(|e| serde_json::json!({"error": e.to_string()}))
         })
     }
@@ -83,14 +83,14 @@ impl Tool for WebSearchTool {
     fn is_enabled(&self, config: &AppConfig, _: &str) -> bool {
         config.tool_groups.web && config.searxng_url.is_some()
     }
-    fn safety(&self) -> crate::tools::Safety {
-        crate::tools::Safety::ReadOnly
+    fn safety(&self) -> crate::agent::tools::Safety {
+        crate::agent::tools::Safety::ReadOnly
     }
     fn execute(&self, ctx: &ToolContext, args: &str) -> Result<serde_json::Value, String> {
         let input: dtos::WebSearchInput =
             serde_json::from_str(args).map_err(|e| format!("Invalid args: {}", e))?;
         if let Some(url) = &ctx.config.searxng_url {
-            crate::tools::web::tool_web_search(url, &input.query).map(|r| {
+            crate::agent::tools::web::tool_web_search(url, &input.query).map(|r| {
                 serde_json::to_value(r)
                     .unwrap_or_else(|e| serde_json::json!({"error": e.to_string()}))
             })

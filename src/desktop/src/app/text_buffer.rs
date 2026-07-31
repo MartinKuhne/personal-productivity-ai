@@ -4,7 +4,7 @@
 //! file content, the front matter (preserved verbatim across saves), the
 //! cursor / selection state, and the undo history. Nothing in this module
 //! imports `eframe::egui`; the rendering layer in
-//! [`crate::editor_egui`] adapts the buffer to egui's immediate-mode
+//! [`crate::ui::editor_egui`] adapts the buffer to egui's immediate-mode
 //! widgets and writes the resulting cursor position back here.
 //!
 //! ## Why a dedicated `TextBuffer`?
@@ -234,7 +234,7 @@ impl UndoStack {
 /// The text buffer that backs the inline markdown editor.
 ///
 /// `TextBuffer` is plain Rust data: it does not know about egui. The
-/// rendering layer in [`crate::editor_egui`] reads the buffer's
+/// rendering layer in [`crate::ui::editor_egui`] reads the buffer's
 /// content, displays it, and writes the resulting cursor position back
 /// via [`set_cursor`](Self::set_cursor) before returning.
 #[derive(Debug, Default)]

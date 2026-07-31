@@ -217,7 +217,7 @@ pub fn tool_search_email(
     config: &AppConfig,
     filters: SearchEmailFilters<'_>,
     pagination: SearchEmailPagination,
-) -> Result<crate::tools::dtos::SearchEmailResponse, String> {
+) -> Result<crate::agent::tools::dtos::SearchEmailResponse, String> {
     let keyword = filters.keyword;
     let folder = filters.folder;
     let start_date = filters.start_date;
@@ -437,7 +437,7 @@ pub fn tool_search_email(
         );
         Err("No JMAP clients configured.".to_string())
     } else {
-        Ok(crate::tools::dtos::SearchEmailResponse {
+        Ok(crate::agent::tools::dtos::SearchEmailResponse {
             results: result_parts.join("\n\n"),
             total,
             hint,
@@ -449,7 +449,7 @@ pub fn tool_search_email(
 pub fn tool_get_email_by_id(
     config: &AppConfig,
     id: &str,
-) -> Result<crate::tools::dtos::GetEmailByIdResponse, String> {
+) -> Result<crate::agent::tools::dtos::GetEmailByIdResponse, String> {
     for (name, client) in &config.jmap_clients {
         let session = match JmapSession::connect(client) {
             Ok(s) => s,
@@ -465,7 +465,7 @@ pub fn tool_get_email_by_id(
         {
             Ok(Some(mut email)) => {
                 let email_json = convert_html_in_jmap(simplify_email(&mut email, None));
-                return Ok(crate::tools::dtos::GetEmailByIdResponse {
+                return Ok(crate::agent::tools::dtos::GetEmailByIdResponse {
                     result: serde_json::to_string_pretty(&email_json).unwrap_or_default(),
                 });
             }
@@ -491,7 +491,7 @@ pub fn tool_send_email(
     to: &str,
     subject: &str,
     body: &str,
-) -> Result<crate::tools::dtos::SendEmailResponse, String> {
+) -> Result<crate::agent::tools::dtos::SendEmailResponse, String> {
     let mut all_results = Vec::new();
     if let Some((name, client)) = config.jmap_clients.iter().next() {
         let mut session = match JmapSession::connect(client) {
@@ -572,7 +572,7 @@ pub fn tool_send_email(
         );
         Err("No JMAP clients configured.".to_string())
     } else {
-        Ok(crate::tools::dtos::SendEmailResponse {
+        Ok(crate::agent::tools::dtos::SendEmailResponse {
             result: all_results.join("\n\n"),
         })
     }
@@ -1237,7 +1237,7 @@ mod tests {
         tool_send_email,
     };
     use crate::config::{AppConfig, JmapClient};
-    use crate::tools::jmap::spawn_mock_server;
+    use crate::agent::tools::jmap::spawn_mock_server;
     #[test]
     fn test_tool_search_email_no_clients() {
         let config = AppConfig::default();

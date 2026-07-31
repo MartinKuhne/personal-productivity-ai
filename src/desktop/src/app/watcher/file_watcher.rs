@@ -1,30 +1,38 @@
 //! Filesystem watcher — observes content-library directories and routes changes to PDF converter and vision processor queues.
 
-use crate::background::PdfConversionJob;
-use crate::background::models::{BackgroundLogEntry, LogCategory};
+use crate::app::background::PdfConversionJob;
+use crate::app::background::models::{BackgroundLogEntry, LogCategory};
 use crate::bus::core::Bus;
 use crate::bus::events::file::FileEvent;
-use crate::bus::events::messages::BackgroundMessage;
+use crate::bus::events::typed::{BackgroundEvent, FsEvent};
 use crate::config::AppConfig;
 use notify::Watcher;
 use std::path::PathBuf;
 use std::sync::mpsc::Sender;
+use std::sync::{Arc, Mutex};
 
 pub struct FileWatcher {
     config: AppConfig,
-    tx: Sender<BackgroundMessage>,
+    tx: Sender<BackgroundEvent>,
     bus: Bus<FileEvent>,
     tx_pdf: Sender<PathBuf>,
     tx_img: Sender<PathBuf>,
+    /// Slot for the `notify::RecommendedWatcher` handle. The
+    /// watcher is moved into this slot by [`FileWatcher::start`]
+    /// before [`FsEvent::Finished`] is sent on the typed channel,
+    /// so the UI can take ownership via
+    /// [`crate::app::background_task::Task::take_finished_watcher`].
+    finished_watcher: Arc<Mutex<Option<notify::RecommendedWatcher>>>,
 }
 
 impl FileWatcher {
     pub fn new(
         config: AppConfig,
-        tx: Sender<BackgroundMessage>,
+        tx: Sender<BackgroundEvent>,
         bus: Bus<FileEvent>,
         tx_pdf: Sender<PathBuf>,
         tx_img: Sender<PathBuf>,
+        finished_watcher: Arc<Mutex<Option<notify::RecommendedWatcher>>>,
     ) -> Self {
         Self {
             config,
@@ -32,6 +40,7 @@ impl FileWatcher {
             bus,
             tx_pdf,
             tx_img,
+            finished_watcher,
         }
     }
 
@@ -41,6 +50,7 @@ impl FileWatcher {
         let tx_pdf_watcher = self.tx_pdf.clone();
         let tx_img_watcher = self.tx_img.clone();
         let bus_watcher = self.bus.clone();
+        let watcher_slot = self.finished_watcher.clone();
 
         let watcher_result =
             notify::recommended_watcher(move |res: Result<notify::Event, notify::Error>| {
@@ -85,16 +95,14 @@ impl FileWatcher {
                         }
 
                         if is_md || is_pdf || is_img {
-                            let _ = tx_notify.send(BackgroundMessage::LogEntry(
-                                BackgroundLogEntry::new(
-                                    LogCategory::Watcher,
-                                    format!(
-                                        "File {} {:?}",
-                                        event_type,
-                                        path.file_name().unwrap_or_default()
-                                    ),
+                            let _ = tx_notify.send(BackgroundLogEntry::new(
+                                LogCategory::Watcher,
+                                format!(
+                                    "File {} {:?}",
+                                    event_type,
+                                    path.file_name().unwrap_or_default()
                                 ),
-                            ));
+                            ).into());
                         }
 
                         if is_md {
@@ -103,17 +111,17 @@ impl FileWatcher {
                                     if path.is_file() {
                                         let tags =
                                             crate::utils::tags::extract_tags_from_file(&path);
-                                        let _ = tx_notify.send(BackgroundMessage::FileModified {
+                                        let _ = tx_notify.send(FsEvent::FileModified {
                                             path: path.clone(),
                                             tags,
-                                        });
+                                        }.into());
                                         bus_watcher.publish(FileEvent::updated_one(path.clone()));
                                     }
                                 }
                                 notify::EventKind::Remove(_) => {
-                                    let _ = tx_notify.send(BackgroundMessage::FileDeleted {
+                                    let _ = tx_notify.send(FsEvent::FileDeleted {
                                         path: path.clone(),
-                                    });
+                                    }.into());
                                     bus_watcher.publish(FileEvent::removed_one(path.clone()));
                                 }
                                 _ => {}
@@ -133,7 +141,7 @@ impl FileWatcher {
                             match event.kind {
                                 notify::EventKind::Create(_) | notify::EventKind::Modify(_) => {
                                     let job =
-                                        crate::background::models::ImageJob::new(path.clone());
+                                        crate::app::background::models::ImageJob::new(path.clone());
                                     if job.should_process() {
                                         let _ = tx_img_watcher.send(path.clone());
                                     }
@@ -142,7 +150,7 @@ impl FileWatcher {
                             }
                         } else if !path.exists() {
                             let _ = tx_notify
-                                .send(BackgroundMessage::FileDeleted { path: path.clone() });
+                                .send(FsEvent::FileDeleted { path: path.clone() }.into());
                             bus_watcher.publish(FileEvent::removed_one(path.clone()));
                         }
                     }
@@ -161,14 +169,22 @@ impl FileWatcher {
                     );
                 }
             }
-            let _ = self.tx.send(BackgroundMessage::Finished(watcher));
-        } else if let Err(e) = watcher_result {
+            // Hand the live watcher over to the UI thread before
+            // announcing that we are finished. The slot is the only
+            // safe way to transfer a non-`Clone` handle across
+            // threads; the typed channel only carries the
+            // notification, not the handle.
+            if let Ok(mut slot) = watcher_slot.lock() {
+                *slot = Some(watcher);
+            }
+            let _ = self.tx.send(FsEvent::Finished.into());
+        } else {
             tracing::error!(
                 name = "background_task.watcher_init_failed",
-                error = %e,
+                error = ?watcher_result.err(),
                 "Failed to initialize file system watcher. Changes will not be detected. Likely cause: OS limits on open files or permissions."
             );
-            let _ = self.tx.send(BackgroundMessage::FinishedWithoutWatcher);
+            let _ = self.tx.send(FsEvent::FinishedWithoutWatcher.into());
         }
     }
 }
@@ -186,8 +202,9 @@ mod tests {
         let bus = Bus::new();
         let (tx_pdf, _rx_pdf) = std::sync::mpsc::channel();
         let (tx_img, _rx_img) = std::sync::mpsc::channel();
+        let slot = Arc::new(Mutex::new(None));
 
-        let _watcher = FileWatcher::new(config, tx, bus, tx_pdf, tx_img);
+        let _watcher = FileWatcher::new(config, tx, bus, tx_pdf, tx_img, slot);
     }
 
     #[test]
@@ -206,18 +223,23 @@ mod tests {
         let bus = Bus::new();
         let (tx_pdf, _rx_pdf) = std::sync::mpsc::channel();
         let (tx_img, _rx_img) = std::sync::mpsc::channel();
+        let slot = Arc::new(Mutex::new(None));
 
-        let mut watcher = FileWatcher::new(config, tx, bus, tx_pdf, tx_img);
+        let mut watcher = FileWatcher::new(config, tx, bus, tx_pdf, tx_img, slot.clone());
         watcher.start();
 
-        let msg = rx.recv_timeout(std::time::Duration::from_millis(1000));
-        assert!(msg.is_ok());
-        match msg.unwrap() {
-            BackgroundMessage::Finished(_) | BackgroundMessage::FinishedWithoutWatcher => {}
-            other => panic!(
-                "Expected Finished or FinishedWithoutWatcher, got {:?}",
-                other
-            ),
+        let event = rx.recv_timeout(std::time::Duration::from_millis(1000));
+        assert!(event.is_ok());
+        match event.unwrap() {
+            BackgroundEvent::Fs(FsEvent::Finished) => {
+                // The watcher handle should now be in the slot.
+                assert!(slot.lock().unwrap().is_some());
+            }
+            BackgroundEvent::Fs(FsEvent::FinishedWithoutWatcher) => {
+                // Slot stays empty when watcher init failed.
+                assert!(slot.lock().unwrap().is_none());
+            }
+            other => panic!("Expected Finished or FinishedWithoutWatcher, got {:?}", other),
         }
     }
 }

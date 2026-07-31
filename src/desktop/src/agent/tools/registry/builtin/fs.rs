@@ -2,9 +2,9 @@
 
 use crate::app::vfs::library::ContentLibraryExt;
 use crate::config::AppConfig;
-use crate::tools::Tool;
-use crate::tools::context::ToolContext;
-use crate::tools::dtos;
+use crate::agent::tools::Tool;
+use crate::agent::tools::context::ToolContext;
+use crate::agent::tools::dtos;
 use std::any::TypeId;
 
 use super::super::pagination::paginate_in_range;
@@ -33,7 +33,7 @@ impl Tool for ReplaceTextTool {
             serde_json::from_str(args).map_err(|e| format!("Invalid args: {}", e))?;
         let path = ctx.resolve_writable(&input.path)?;
         let producer = ctx.file_event_producer();
-        crate::tools::filesystem::tool_replace_text(
+        crate::agent::tools::filesystem::tool_replace_text(
             &path.to_string_lossy(),
             &input.old_string,
             &input.new_string,
@@ -63,8 +63,8 @@ impl Tool for GrepTool {
     fn is_enabled(&self, config: &AppConfig, _: &str) -> bool {
         config.tool_groups.filesystem
     }
-    fn safety(&self) -> crate::tools::Safety {
-        crate::tools::Safety::ReadOnly
+    fn safety(&self) -> crate::agent::tools::Safety {
+        crate::agent::tools::Safety::ReadOnly
     }
     fn execute(&self, ctx: &ToolContext, args: &str) -> Result<serde_json::Value, String> {
         let input: dtos::GrepInput =
@@ -74,7 +74,7 @@ impl Tool for GrepTool {
         libs.sort_by_key(|b| std::cmp::Reverse(b.priority));
         for lib in libs {
             if let Ok(res) =
-                crate::tools::filesystem::tool_grep(&lib.root_path(), &lib.name, &input.query)
+                crate::agent::tools::filesystem::tool_grep(&lib.root_path(), &lib.name, &input.query)
                 && res.matches != "No matches found."
             {
                 all_results.push(res.matches);
@@ -112,15 +112,15 @@ impl Tool for ReadTagsTool {
     fn is_enabled(&self, config: &AppConfig, _: &str) -> bool {
         config.tool_groups.filesystem
     }
-    fn safety(&self) -> crate::tools::Safety {
-        crate::tools::Safety::ReadOnly
+    fn safety(&self) -> crate::agent::tools::Safety {
+        crate::agent::tools::Safety::ReadOnly
     }
     fn execute(&self, ctx: &ToolContext, args: &str) -> Result<serde_json::Value, String> {
         let _: dtos::ReadTagsInput =
             serde_json::from_str(args).map_err(|e| format!("Invalid args: {}", e))?;
         let mut all_tags = std::collections::BTreeSet::new();
         for lib in &ctx.config.content_libraries {
-            if let Ok(res) = crate::tools::filesystem::tool_read_tags(&lib.root_path()) {
+            if let Ok(res) = crate::agent::tools::filesystem::tool_read_tags(&lib.root_path()) {
                 for tag in res.tags {
                     all_tags.insert(tag);
                 }
@@ -151,8 +151,8 @@ impl Tool for ListFilesByTagTool {
     fn is_enabled(&self, config: &AppConfig, _: &str) -> bool {
         config.tool_groups.filesystem
     }
-    fn safety(&self) -> crate::tools::Safety {
-        crate::tools::Safety::ReadOnly
+    fn safety(&self) -> crate::agent::tools::Safety {
+        crate::agent::tools::Safety::ReadOnly
     }
     fn execute(&self, ctx: &ToolContext, args: &str) -> Result<serde_json::Value, String> {
         let input: dtos::ListFilesByTagInput =
@@ -160,11 +160,11 @@ impl Tool for ListFilesByTagTool {
         let page = input.page.unwrap_or(1).max(1);
         let page_size = input
             .page_size
-            .unwrap_or(crate::tools::filesystem::DEFAULT_LIST_FILES_BY_TAG_PAGE_SIZE)
+            .unwrap_or(crate::agent::tools::filesystem::DEFAULT_LIST_FILES_BY_TAG_PAGE_SIZE)
             .max(1);
         let mut all_matches: Vec<String> = Vec::new();
         for lib in &ctx.config.content_libraries {
-            match crate::tools::filesystem::tool_list_files_by_tag(
+            match crate::agent::tools::filesystem::tool_list_files_by_tag(
                 &lib.root_path(),
                 &lib.name,
                 &input.tag,
@@ -207,8 +207,8 @@ impl Tool for ListFilesTool {
     fn is_enabled(&self, config: &AppConfig, _: &str) -> bool {
         config.tool_groups.filesystem
     }
-    fn safety(&self) -> crate::tools::Safety {
-        crate::tools::Safety::ReadOnly
+    fn safety(&self) -> crate::agent::tools::Safety {
+        crate::agent::tools::Safety::ReadOnly
     }
     fn execute(&self, ctx: &ToolContext, args: &str) -> Result<serde_json::Value, String> {
         let input: dtos::ListFilesInput =
@@ -216,10 +216,10 @@ impl Tool for ListFilesTool {
         let page = input.page.unwrap_or(1).max(1);
         let page_size = input
             .page_size
-            .unwrap_or(crate::tools::filesystem::DEFAULT_LIST_FILES_BY_TAG_PAGE_SIZE)
+            .unwrap_or(crate::agent::tools::filesystem::DEFAULT_LIST_FILES_BY_TAG_PAGE_SIZE)
             .max(1);
         let all_matches: Vec<String> = match ctx.resolve_virtual_path(&input.path, false)? {
-            Some((path, _)) => crate::tools::filesystem::tool_list_files(&path, &input.path)?,
+            Some((path, _)) => crate::agent::tools::filesystem::tool_list_files(&path, &input.path)?,
             None => {
                 let mut libs: Vec<String> = ctx
                     .config
@@ -265,8 +265,8 @@ impl Tool for ReadFileTool {
     fn is_enabled(&self, config: &AppConfig, _: &str) -> bool {
         config.tool_groups.filesystem
     }
-    fn safety(&self) -> crate::tools::Safety {
-        crate::tools::Safety::ReadOnly
+    fn safety(&self) -> crate::agent::tools::Safety {
+        crate::agent::tools::Safety::ReadOnly
     }
     fn execute(&self, ctx: &ToolContext, args: &str) -> Result<serde_json::Value, String> {
         let input: dtos::ReadFileInput =
@@ -274,7 +274,7 @@ impl Tool for ReadFileTool {
         let (path, _) = ctx
             .resolve_virtual_path(&input.path, false)?
             .ok_or_else(|| "Cannot perform this operation on the virtual root".to_string())?;
-        crate::tools::filesystem::tool_read_file(&path.to_string_lossy()).map(|r| {
+        crate::agent::tools::filesystem::tool_read_file(&path.to_string_lossy()).map(|r| {
             serde_json::to_value(r).unwrap_or_else(|e| serde_json::json!({"error": e.to_string()}))
         })
     }
@@ -298,8 +298,8 @@ impl Tool for ReadFileLinesTool {
     fn is_enabled(&self, config: &AppConfig, _: &str) -> bool {
         config.tool_groups.filesystem
     }
-    fn safety(&self) -> crate::tools::Safety {
-        crate::tools::Safety::ReadOnly
+    fn safety(&self) -> crate::agent::tools::Safety {
+        crate::agent::tools::Safety::ReadOnly
     }
     fn execute(&self, ctx: &ToolContext, args: &str) -> Result<serde_json::Value, String> {
         let input: dtos::ReadFileLinesInput =
@@ -307,7 +307,7 @@ impl Tool for ReadFileLinesTool {
         let (path, _) = ctx
             .resolve_virtual_path(&input.path, false)?
             .ok_or_else(|| "Cannot perform this operation on the virtual root".to_string())?;
-        crate::tools::filesystem::tool_read_file_lines(
+        crate::agent::tools::filesystem::tool_read_file_lines(
             &path.to_string_lossy(),
             input.start_line,
             input.end_line,
@@ -341,7 +341,7 @@ impl Tool for CreateFileTool {
             serde_json::from_str(args).map_err(|e| format!("Invalid args: {}", e))?;
         let path = ctx.resolve_writable(&input.path)?;
         let producer = ctx.file_event_producer();
-        crate::tools::filesystem::tool_create_file(
+        crate::agent::tools::filesystem::tool_create_file(
             &path.to_string_lossy(),
             &input.content,
             &producer,
@@ -375,7 +375,7 @@ impl Tool for InsertLinesTool {
             serde_json::from_str(args).map_err(|e| format!("Invalid args: {}", e))?;
         let path = ctx.resolve_writable(&input.path)?;
         let producer = ctx.file_event_producer();
-        crate::tools::filesystem::tool_insert_lines(
+        crate::agent::tools::filesystem::tool_insert_lines(
             &path.to_string_lossy(),
             input.line_index,
             &input.lines,
@@ -410,7 +410,7 @@ impl Tool for DeleteLinesTool {
             serde_json::from_str(args).map_err(|e| format!("Invalid args: {}", e))?;
         let path = ctx.resolve_writable(&input.path)?;
         let producer = ctx.file_event_producer();
-        crate::tools::filesystem::tool_delete_lines(
+        crate::agent::tools::filesystem::tool_delete_lines(
             &path.to_string_lossy(),
             input.start_line,
             input.end_line,

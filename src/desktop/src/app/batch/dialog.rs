@@ -1,6 +1,6 @@
 //! Batch prompt-processing dialog UI — directory/prompt/concurrency selection, progress display, and results summary.
 
-use crate::batch::types::{
+use crate::app::batch::types::{
     BatchConfig, BatchDialogConfig, BatchDialogResult, BatchMode, validate_batch_params,
 };
 use eframe::egui;
@@ -17,7 +17,7 @@ pub fn show_batch_modal(
     let mut dialog_open = app.dialogs().batch_dialog_open;
 
     if dialog_open {
-        config.available_prompts = crate::batch::prompts::resolve_prompts(
+        config.available_prompts = crate::app::batch::prompts::resolve_prompts(
             app.tags().prompt_paths(),
             &app.config().content_libraries,
         );

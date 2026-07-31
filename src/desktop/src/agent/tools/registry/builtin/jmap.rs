@@ -1,9 +1,9 @@
 //! JMAP email tool implementations for the tool registry.
 
 use crate::config::AppConfig;
-use crate::tools::Tool;
-use crate::tools::context::ToolContext;
-use crate::tools::dtos;
+use crate::agent::tools::Tool;
+use crate::agent::tools::context::ToolContext;
+use crate::agent::tools::dtos;
 use std::any::TypeId;
 
 use super::json_schema;
@@ -26,17 +26,17 @@ impl Tool for SearchEmailTool {
     fn is_enabled(&self, config: &AppConfig, _: &str) -> bool {
         config.tool_groups.email && !config.jmap_clients.is_empty()
     }
-    fn safety(&self) -> crate::tools::Safety {
-        crate::tools::Safety::ReadOnly
+    fn safety(&self) -> crate::agent::tools::Safety {
+        crate::agent::tools::Safety::ReadOnly
     }
     fn execute(&self, ctx: &ToolContext, args: &str) -> Result<serde_json::Value, String> {
         let input: dtos::SearchEmailInput =
             serde_json::from_str(args).map_err(|e| format!("Invalid args: {}", e))?;
         let page = input.page.unwrap_or(1).max(1);
         let page_size = input.page_size.unwrap_or(10).max(1);
-        crate::tools::jmap::tool_search_email(
+        crate::agent::tools::jmap::tool_search_email(
             ctx.config,
-            crate::tools::jmap::SearchEmailFilters {
+            crate::agent::tools::jmap::SearchEmailFilters {
                 keyword: input.keyword.as_deref(),
                 folder: input.folder.as_deref(),
                 start_date: input.start_date.as_deref(),
@@ -46,7 +46,7 @@ impl Tool for SearchEmailTool {
                 is_unread: input.is_unread,
                 is_flagged: input.is_flagged,
             },
-            crate::tools::jmap::SearchEmailPagination { page, page_size },
+            crate::agent::tools::jmap::SearchEmailPagination { page, page_size },
         )
         .map(|r| {
             serde_json::to_value(r).unwrap_or_else(|e| serde_json::json!({"error": e.to_string()}))
@@ -72,13 +72,13 @@ impl Tool for GetEmailByIdTool {
     fn is_enabled(&self, config: &AppConfig, _: &str) -> bool {
         config.tool_groups.email && !config.jmap_clients.is_empty()
     }
-    fn safety(&self) -> crate::tools::Safety {
-        crate::tools::Safety::ReadOnly
+    fn safety(&self) -> crate::agent::tools::Safety {
+        crate::agent::tools::Safety::ReadOnly
     }
     fn execute(&self, ctx: &ToolContext, args: &str) -> Result<serde_json::Value, String> {
         let input: dtos::GetEmailByIdInput =
             serde_json::from_str(args).map_err(|e| format!("Invalid args: {}", e))?;
-        crate::tools::jmap::tool_get_email_by_id(ctx.config, &input.id).map(|r| {
+        crate::agent::tools::jmap::tool_get_email_by_id(ctx.config, &input.id).map(|r| {
             serde_json::to_value(r).unwrap_or_else(|e| serde_json::json!({"error": e.to_string()}))
         })
     }
@@ -105,7 +105,7 @@ impl Tool for SendEmailTool {
     fn execute(&self, ctx: &ToolContext, args: &str) -> Result<serde_json::Value, String> {
         let input: dtos::SendEmailInput =
             serde_json::from_str(args).map_err(|e| format!("Invalid args: {}", e))?;
-        crate::tools::jmap::tool_send_email(ctx.config, &input.to, &input.subject, &input.body).map(
+        crate::agent::tools::jmap::tool_send_email(ctx.config, &input.to, &input.subject, &input.body).map(
             |r| {
                 serde_json::to_value(r)
                     .unwrap_or_else(|e| serde_json::json!({"error": e.to_string()}))

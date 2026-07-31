@@ -3,7 +3,7 @@
 use crate::app::panel_layout::PanelLayout;
 use crate::app::print::{PrintJob, execute_print_blocking};
 use crate::bus::events::file::FileEventProducer;
-use crate::bus::events::messages::BackgroundMessage;
+use crate::bus::events::typed::BackgroundEvent;
 use crate::ui::TreeNode;
 use eframe::egui;
 use std::collections::HashSet;
@@ -60,8 +60,8 @@ pub struct AppIntegrationContext<'a> {
     pub modifiers: egui::Modifiers,
     /// Whether inline editor is enabled.
     pub inline_editor_enabled: bool,
-    /// Background message sender (for print jobs, etc.).
-    pub bg_tx: &'a Option<Sender<BackgroundMessage>>,
+    /// Background event sender (for print jobs, etc.).
+    pub bg_tx: &'a Option<Sender<BackgroundEvent>>,
     /// Optional file-event producer for immediate UI updates.
     pub file_event_producer: Option<FileEventProducer<'a>>,
 }
@@ -174,7 +174,7 @@ impl<'a> TreeNodeContext<'a> {
     }
 
     /// Access background sender.
-    pub fn bg_tx(&self) -> &Option<Sender<BackgroundMessage>> {
+    pub fn bg_tx(&self) -> &Option<Sender<BackgroundEvent>> {
         self.app.bg_tx
     }
 

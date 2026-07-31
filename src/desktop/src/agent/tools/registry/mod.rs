@@ -8,9 +8,9 @@ mod tests;
 pub use pagination::paginate_in_range;
 
 use crate::config::AppConfig;
-use crate::tools::Tool;
-use crate::tools::context::ToolContext;
-use crate::tools::mcp::DynamicToolSource;
+use crate::agent::tools::Tool;
+use crate::agent::tools::context::ToolContext;
+use crate::agent::tools::mcp::DynamicToolSource;
 use std::collections::HashMap;
 use std::sync::Arc;
 
@@ -35,7 +35,7 @@ impl ToolRegistry {
         let mut registry = Self {
             tools: HashMap::new(),
             auto_mcp_tools: HashMap::new(),
-            mcp_manager: Arc::new(crate::tools::mcp::McpClientManager::new()),
+            mcp_manager: Arc::new(crate::agent::tools::mcp::McpClientManager::new()),
         };
         registry.register_all();
         registry
@@ -55,7 +55,7 @@ impl ToolRegistry {
         description: impl Into<String>,
         parameters: serde_json::Value,
     ) {
-        let adapter = crate::tools::mcp::McpToolAdapter::from_dynamic_source(
+        let adapter = crate::agent::tools::mcp::McpToolAdapter::from_dynamic_source(
             server_name,
             tool_name,
             description,
@@ -79,12 +79,12 @@ impl ToolRegistry {
         tool.execute(ctx, args)
     }
 
-    /// Look up a tool by name and return its [`crate::tools::Safety`] classification.
-    pub fn safety_of(&self, name: &str) -> crate::tools::Safety {
+    /// Look up a tool by name and return its [`crate::agent::tools::Safety`] classification.
+    pub fn safety_of(&self, name: &str) -> crate::agent::tools::Safety {
         self.tools
             .get(name)
             .map(|t| t.safety())
-            .unwrap_or(crate::tools::Safety::Mutating)
+            .unwrap_or(crate::agent::tools::Safety::Mutating)
     }
 
     /// Build the JSON Schema tool list for enabled tools given the application config and prompt.
@@ -169,8 +169,8 @@ pub fn get_tools_schema(config: &AppConfig, prompt: &str) -> serde_json::Value {
     registry.get_schema(config, prompt)
 }
 
-/// Look up a tool's [`crate::tools::Safety`] classification by name.
-pub fn safety_of(name: &str) -> crate::tools::Safety {
+/// Look up a tool's [`crate::agent::tools::Safety`] classification by name.
+pub fn safety_of(name: &str) -> crate::agent::tools::Safety {
     let registry = TOOL_REGISTRY.read().unwrap();
     registry.safety_of(name)
 }
@@ -186,7 +186,7 @@ pub fn init_mcp_on_startup(config: &AppConfig) -> usize {
     ok
 }
 
-/// Execute a named tool with JSON arguments and return a serialized [`crate::tools::dtos::ToolResponse`].
+/// Execute a named tool with JSON arguments and return a serialized [`crate::agent::tools::dtos::ToolResponse`].
 pub fn execute_tool(ctx: &ToolContext, name: &str, args_str: &str) -> String {
     rustls::crypto::ring::default_provider()
         .install_default()
@@ -229,11 +229,11 @@ pub fn execute_tool(ctx: &ToolContext, name: &str, args_str: &str) -> String {
             } else {
                 tracing::info!(name = "tool.registry.success", tool_name = %name, elapsed = ?elapsed, "Tool execution succeeded");
             }
-            crate::tools::dtos::ToolResponse::Success { data }
+            crate::agent::tools::dtos::ToolResponse::Success { data }
         }
         Err(err) => {
             tracing::error!(name = "tool.registry.failed", tool_name = %name, elapsed = ?elapsed, error = %err, "Tool execution failed. Operator should verify tool inputs.");
-            crate::tools::dtos::ToolResponse::Error { message: err }
+            crate::agent::tools::dtos::ToolResponse::Error { message: err }
         }
     };
 

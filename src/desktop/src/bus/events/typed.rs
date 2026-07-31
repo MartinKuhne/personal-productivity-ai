@@ -1,22 +1,24 @@
-//! Typed background events — the per-domain replacement for the legacy
-//! [`crate::bus::events::messages::BackgroundMessage`] god enum.
+//! Typed background events — the per-domain event payloads that flow
+//! over the single `mpsc::Sender<BackgroundEvent>` channel owned by
+//! [`crate::app::background_task::Task`].
 //!
-//! ## Migration strategy
+//! Each variant of [`BackgroundEvent`] wraps a domain-specific
+//! sub-enum: [`AgentEvent`] for the LLM agent loop, [`FsEvent`] for
+//! the file watcher and indexer, [`ProcessEvent`] for background
+//! workers (PDF converter, image-vision, log entries, file-load
+//! results). The UI consumer matches on [`BackgroundEvent`] and
+//! dispatches to the per-domain handler.
 //!
-//! 1. **Phase 1 (this code):** define `AgentEvent` and `BackgroundEvent`.
-//!    Producers may optionally send `BackgroundEvent` alongside
-//!    `BackgroundMessage`. The UI consumer handles both via a single
-//!    `match` on the newtype.
-//! 2. **Phase 2:** producers switch to sending only `BackgroundEvent`;
-//!    `BackgroundMessage` gains `#[deprecated]`.
-//! 3. **Phase 3:** `BackgroundMessage` is removed; each domain owns its
-//!    own broadcast channel.
+//! The non-cloneable `notify::RecommendedWatcher` handle that the
+//! file-watcher owns is moved through the
+//! [`crate::app::background_task::Task::finished_watcher`] slot
+//! instead of the message bus.
 
-use crate::background::BackgroundLogEntry;
+use crate::app::background::BackgroundLogEntry;
 use crate::bus::events::messages::TokenUsageInfo;
 use serde_json::Value;
 
-/// Agent-domain events — replaces `BackgroundMessage::Agent*` variants.
+/// Agent-domain events emitted by the LLM agent loop.
 #[derive(Debug, Clone)]
 pub enum AgentEvent {
     Status(String),
@@ -28,7 +30,8 @@ pub enum AgentEvent {
     TokenUsage(TokenUsageInfo),
 }
 
-/// Filesystem-watcher-domain events — replaces `BackgroundMessage::{FileParsed, DirParsed, FileModified, FileDeleted, Finished, FinishedWithoutWatcher}`.
+/// Filesystem-watcher-domain events emitted by the file watcher,
+/// indexer, and tool executor.
 #[derive(Debug, Clone)]
 pub enum FsEvent {
     FileParsed {
@@ -45,11 +48,17 @@ pub enum FsEvent {
     FileDeleted {
         path: std::path::PathBuf,
     },
+    /// Initial scan completed and the [`notify::RecommendedWatcher`]
+    /// handle is now available in
+    /// [`crate::app::background_task::Task::finished_watcher`].
     Finished,
+    /// Initial scan completed but no watcher was created (e.g. the
+    /// library root is empty).
     FinishedWithoutWatcher,
 }
 
-/// Background-process-domain events — replaces `BackgroundMessage::LogEntry` and `BackgroundMessage::FileLoaded`.
+/// Background-process-domain events emitted by the PDF converter,
+/// image-vision worker, file loader, and ad-hoc log producers.
 #[derive(Debug, Clone)]
 pub enum ProcessEvent {
     LogEntry(BackgroundLogEntry),
@@ -59,11 +68,9 @@ pub enum ProcessEvent {
     },
 }
 
-/// Typed replacement for [`crate::bus::events::messages::BackgroundMessage`].
-///
-/// Each variant wraps a domain-specific event enum. The UI consumer
-/// matches on `BackgroundEvent` and dispatches to domain handlers,
-/// replacing the flat `BackgroundMessage` `match` arms.
+/// Typed event that the UI drains on every frame. Each variant
+/// wraps a per-domain sub-enum; the consumer matches here and
+/// forwards to the appropriate handler.
 #[derive(Debug, Clone)]
 pub enum BackgroundEvent {
     Agent(AgentEvent),
@@ -71,124 +78,76 @@ pub enum BackgroundEvent {
     Process(ProcessEvent),
 }
 
-impl BackgroundEvent {
-    /// Convert a legacy [`crate::bus::events::messages::BackgroundMessage`] into
-    /// the typed [`BackgroundEvent`]. Returns `None` for variants that
-    /// carry a non-cloneable `RecommendedWatcher` handle (the caller
-    /// must deal with those separately).
-    pub fn from_legacy(msg: &crate::bus::events::messages::BackgroundMessage) -> Option<Self> {
-        use crate::bus::events::messages::BackgroundMessage;
-        match msg {
-            BackgroundMessage::AgentStatus(s) => Some(Self::Agent(AgentEvent::Status(s.clone()))),
-            BackgroundMessage::AgentThinking(s) => {
-                Some(Self::Agent(AgentEvent::Thinking(s.clone())))
-            }
-            BackgroundMessage::AgentResponse(s) => {
-                Some(Self::Agent(AgentEvent::Response(s.clone())))
-            }
-            BackgroundMessage::AgentFinished(v) => {
-                Some(Self::Agent(AgentEvent::Finished(v.clone())))
-            }
-            BackgroundMessage::AgentFailed(s) => Some(Self::Agent(AgentEvent::Failed(s.clone()))),
-            BackgroundMessage::AgentTokenUsage(t) => {
-                Some(Self::Agent(AgentEvent::TokenUsage(t.clone())))
-            }
-            BackgroundMessage::FileParsed { path, tags } => Some(Self::Fs(FsEvent::FileParsed {
-                path: path.clone(),
-                tags: tags.clone(),
-            })),
-            BackgroundMessage::DirParsed { path } => {
-                Some(Self::Fs(FsEvent::DirParsed { path: path.clone() }))
-            }
-            BackgroundMessage::FileModified { path, tags } => {
-                Some(Self::Fs(FsEvent::FileModified {
-                    path: path.clone(),
-                    tags: tags.clone(),
-                }))
-            }
-            BackgroundMessage::FileDeleted { path } => {
-                Some(Self::Fs(FsEvent::FileDeleted { path: path.clone() }))
-            }
-            BackgroundMessage::FinishedWithoutWatcher => {
-                Some(Self::Fs(FsEvent::FinishedWithoutWatcher))
-            }
-            BackgroundMessage::Finished(_) => None,
-            BackgroundMessage::LogEntry(e) => {
-                Some(Self::Process(ProcessEvent::LogEntry(e.clone())))
-            }
-            BackgroundMessage::FileLoaded { path, content } => {
-                Some(Self::Process(ProcessEvent::FileLoaded {
-                    path: path.clone(),
-                    content: content.clone(),
-                }))
-            }
-        }
+// ---------------------------------------------------------------------------
+// Conversion impls — make the producer side ergonomic.
+//
+// The most common producer pattern is:
+//
+// ```ignore
+// tx.send(BackgroundEvent::Process(ProcessEvent::LogEntry(
+//     BackgroundLogEntry::new(category, message),
+// )));
+// ```
+//
+// With the `From` impls below that becomes:
+//
+// ```ignore
+// tx.send(BackgroundLogEntry::new(category, message).into());
+// ```
+//
+// All four domain sub-enums have a `From` impl, plus a `From` for the
+// common `BackgroundLogEntry` so `tx.send(entry.into())` is the
+// shortest path for log-only producers.
+// ---------------------------------------------------------------------------
+
+impl From<AgentEvent> for BackgroundEvent {
+    fn from(event: AgentEvent) -> Self {
+        Self::Agent(event)
+    }
+}
+
+impl From<FsEvent> for BackgroundEvent {
+    fn from(event: FsEvent) -> Self {
+        Self::Fs(event)
+    }
+}
+
+impl From<ProcessEvent> for BackgroundEvent {
+    fn from(event: ProcessEvent) -> Self {
+        Self::Process(event)
+    }
+}
+
+impl From<BackgroundLogEntry> for BackgroundEvent {
+    fn from(entry: BackgroundLogEntry) -> Self {
+        Self::Process(ProcessEvent::LogEntry(entry))
     }
 }
 
 #[cfg(test)]
 mod tests {
+    //! Smoke tests for the blanket `From` conversions on
+    //! [`BackgroundEvent`]. Producer ergonomics are covered by the
+    //! call-site tests in `app/background/*` and `agent/*`.
+
     use super::*;
-    use crate::bus::events::messages::TokenUsageInfo;
-    use std::path::PathBuf;
+    use crate::app::background::LogCategory;
 
     #[test]
-    fn test_agent_status_from_legacy() {
-        let msg = crate::bus::events::messages::BackgroundMessage::AgentStatus("Running".into());
-        let ev = BackgroundEvent::from_legacy(&msg).unwrap();
+    fn from_log_entry_wraps_process_variant() {
+        let entry = BackgroundLogEntry::new(LogCategory::PdfConverter, "msg".into());
+        let ev: BackgroundEvent = entry.into();
         match ev {
-            BackgroundEvent::Agent(AgentEvent::Status(s)) => assert_eq!(s, "Running"),
-            _ => panic!("expected AgentEvent::Status"),
-        }
-    }
-
-    #[test]
-    fn test_agent_token_usage_from_legacy() {
-        let usage = TokenUsageInfo {
-            prompt_tokens: 10,
-            completion_tokens: 20,
-            total_tokens: 30,
-            cached_tokens: Some(5),
-            reasoning_tokens: None,
-        };
-        let msg = crate::bus::events::messages::BackgroundMessage::AgentTokenUsage(usage);
-        let ev = BackgroundEvent::from_legacy(&msg).unwrap();
-        match ev {
-            BackgroundEvent::Agent(AgentEvent::TokenUsage(u)) => {
-                assert_eq!(u.prompt_tokens, 10);
-                assert_eq!(u.completion_tokens, 20);
-                assert_eq!(u.total_tokens, 30);
-                assert_eq!(u.cached_tokens, Some(5));
+            BackgroundEvent::Process(ProcessEvent::LogEntry(e)) => {
+                assert_eq!(e.message, "msg");
             }
-            _ => panic!("expected AgentEvent::TokenUsage"),
+            other => panic!("expected ProcessEvent::LogEntry, got {:?}", other),
         }
     }
 
     #[test]
-    fn test_fs_file_parsed_from_legacy() {
-        let msg = crate::bus::events::messages::BackgroundMessage::FileParsed {
-            path: PathBuf::from("/a/b.md"),
-            tags: vec!["x".into()],
-        };
-        let ev = BackgroundEvent::from_legacy(&msg).unwrap();
-        match ev {
-            BackgroundEvent::Fs(FsEvent::FileParsed { path, tags }) => {
-                assert_eq!(path, PathBuf::from("/a/b.md"));
-                assert_eq!(tags, vec!["x".to_string()]);
-            }
-            _ => panic!("expected FsEvent::FileParsed"),
-        }
-    }
-
-    #[test]
-    fn test_process_log_entry_from_legacy() {
-        let entry =
-            BackgroundLogEntry::new(crate::background::LogCategory::PdfConverter, "msg".into());
-        let msg = crate::bus::events::messages::BackgroundMessage::LogEntry(entry);
-        let ev = BackgroundEvent::from_legacy(&msg).unwrap();
-        match ev {
-            BackgroundEvent::Process(ProcessEvent::LogEntry(_)) => {}
-            _ => panic!("expected ProcessEvent::LogEntry"),
-        }
+    fn from_agent_event_wraps_agent_variant() {
+        let ev: BackgroundEvent = AgentEvent::Failed("boom".into()).into();
+        assert!(matches!(ev, BackgroundEvent::Agent(AgentEvent::Failed(_))));
     }
 }

@@ -1,7 +1,7 @@
 //! Renders markdown to HTML and drives physical printing (or PDF export) via an embedded web-view pipeline.
 
-use crate::background::{BackgroundLogEntry, LogCategory};
-use crate::bus::events::messages::BackgroundMessage as MsgBackgroundMessage;
+use crate::app::background::{BackgroundLogEntry, LogCategory};
+use crate::bus::events::typed::BackgroundEvent;
 use std::io::Write;
 use std::path::PathBuf;
 use std::sync::mpsc::Sender;
@@ -111,7 +111,7 @@ fn build_html_document(title: &str, content: &str) -> String {
 /// Opens the rendered HTML in the default browser for printing.
 pub fn execute_print_blocking(
     job: PrintJob,
-    tx: Option<Sender<MsgBackgroundMessage>>,
+    tx: Option<Sender<BackgroundEvent>>,
 ) -> Result<(), String> {
     let html_content = markdown_to_html(&job.markdown_content);
     let html_document = build_html_document(&job.title, &html_content);
@@ -124,10 +124,10 @@ pub fn execute_print_blocking(
     );
 
     let _ = tx.as_ref().map(|sender| {
-        let _ = sender.send(MsgBackgroundMessage::LogEntry(BackgroundLogEntry::new(
+        let _ = sender.send(BackgroundLogEntry::new(
             LogCategory::Print,
             format!("Opening browser for printing: {}", job.title),
-        )));
+        ).into());
     });
 
     let temp_dir = std::env::temp_dir();
@@ -145,10 +145,10 @@ pub fn execute_print_blocking(
     webbrowser::open(&path_str).map_err(|e| format!("Failed to open browser: {}", e))?;
 
     let _ = tx.as_ref().map(|sender| {
-        let _ = sender.send(MsgBackgroundMessage::LogEntry(BackgroundLogEntry::new(
+        let _ = sender.send(BackgroundLogEntry::new(
             LogCategory::Print,
             format!("Browser opened for printing: {}", job.title),
-        )));
+        ).into());
     });
 
     tracing::info!(

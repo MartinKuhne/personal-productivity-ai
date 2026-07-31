@@ -1,16 +1,14 @@
-//! Legacy `BackgroundMessage` enum — the monolithic background-to-UI event type.
+//! Cross-cutting value types that do not belong to a single event
+//! channel.
 //!
-//! This is the god-enum that the architecture review (P1-6) flagged for
-//! replacement. Producers across the background subsystem still send
-//! these; the UI matches on the flat enum. A typed replacement lives in
-//! [`crate::bus::events::typed`] (`BackgroundEvent` + per-domain
-//! sub-enums) and is being migrated to. Until that migration is
-//! complete, every variant defined here remains load-bearing.
-
-use crate::background::BackgroundLogEntry;
-use notify::RecommendedWatcher;
-use serde_json::Value;
-use std::path::PathBuf;
+//! The per-domain event payloads (`BackgroundEvent`, `AgentEvent`,
+//! `FsEvent`, `ProcessEvent`, `FileEvent`, `ConfigArrived`) live in
+//! their respective modules under [`super`]. This module is reserved
+//! for types shared across channels or independent of any single
+//! event domain — currently only [`TokenUsageInfo`], the LLM
+//! token-usage record attached to [`super::AgentEvent::TokenUsage`].
+//!
+//! See [`crate::bus::core`] for the transport primitive.
 
 /// Token usage statistics returned by the LLM API.
 ///
@@ -36,45 +34,4 @@ pub struct TokenUsageInfo {
     /// Subset of `completion_tokens` spent on internal reasoning, if the
     /// provider reports it (OpenAI `completion_tokens_details.reasoning_tokens`).
     pub reasoning_tokens: Option<u64>,
-}
-
-/// Monolithic background-to-UI message. Replaced piecemeal by
-/// [`crate::bus::events::typed::BackgroundEvent`]; see the architecture
-/// review (P1-6) and the migration comment in that module.
-#[derive(Debug)]
-pub enum BackgroundMessage {
-    FileParsed {
-        path: PathBuf,
-        tags: Vec<String>,
-    },
-    DirParsed {
-        path: PathBuf,
-    },
-    Finished(RecommendedWatcher),
-    FinishedWithoutWatcher,
-    FileModified {
-        path: PathBuf,
-        tags: Vec<String>,
-    },
-    FileDeleted {
-        path: PathBuf,
-    },
-
-    AgentStatus(String),
-    AgentThinking(String),
-    AgentResponse(String),
-    AgentFinished(Vec<Value>),
-    AgentFailed(String),
-    /// Emitted after every LLM turn that returns a `usage` block. The UI can
-    /// use `prompt_tokens` as the current context-window occupancy for that
-    /// turn, and accumulate the other fields to track spend.
-    AgentTokenUsage(TokenUsageInfo),
-
-    LogEntry(BackgroundLogEntry),
-
-    /// File content loaded from a background thread.
-    FileLoaded {
-        path: PathBuf,
-        content: Result<String, String>,
-    },
 }

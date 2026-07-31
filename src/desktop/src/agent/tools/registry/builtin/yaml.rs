@@ -1,9 +1,9 @@
 //! YAML front-matter header tool implementations for the tool registry.
 
 use crate::config::AppConfig;
-use crate::tools::Tool;
-use crate::tools::context::ToolContext;
-use crate::tools::dtos;
+use crate::agent::tools::Tool;
+use crate::agent::tools::context::ToolContext;
+use crate::agent::tools::dtos;
 use std::any::TypeId;
 
 use super::json_schema;
@@ -26,8 +26,8 @@ impl Tool for ReadYamlHeaderTool {
     fn is_enabled(&self, config: &AppConfig, _: &str) -> bool {
         config.tool_groups.filesystem
     }
-    fn safety(&self) -> crate::tools::Safety {
-        crate::tools::Safety::ReadOnly
+    fn safety(&self) -> crate::agent::tools::Safety {
+        crate::agent::tools::Safety::ReadOnly
     }
     fn execute(&self, ctx: &ToolContext, args: &str) -> Result<serde_json::Value, String> {
         let input: dtos::ReadYamlHeaderInput =
@@ -35,7 +35,7 @@ impl Tool for ReadYamlHeaderTool {
         let (path, _) = ctx
             .resolve_virtual_path(&input.path, false)?
             .ok_or_else(|| "Cannot perform this operation on the virtual root".to_string())?;
-        crate::tools::yaml_header::tool_read_yaml_header(&path.to_string_lossy()).map(|r| {
+        crate::agent::tools::yaml_header::tool_read_yaml_header(&path.to_string_lossy()).map(|r| {
             serde_json::to_value(r).unwrap_or_else(|e| serde_json::json!({"error": e.to_string()}))
         })
     }
@@ -64,7 +64,7 @@ impl Tool for WriteYamlHeaderTool {
             serde_json::from_str(args).map_err(|e| format!("Invalid args: {}", e))?;
         let path = ctx.resolve_writable(&input.path)?;
         let producer = ctx.file_event_producer();
-        crate::tools::yaml_header::tool_write_yaml_header(
+        crate::agent::tools::yaml_header::tool_write_yaml_header(
             &path.to_string_lossy(),
             input.title.as_deref(),
             input.summary.as_deref(),

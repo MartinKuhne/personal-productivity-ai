@@ -142,7 +142,7 @@ pub fn query_csv(config: &AppConfig, input: QueryRequest) -> Result<QueryRespons
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::tools::csv_db::schema::{AddRowsInput, CreateCsvInput};
+    use crate::agent::tools::csv_db::schema::{AddRowsInput, CreateCsvInput};
     use tempfile::tempdir;
 
     #[test]

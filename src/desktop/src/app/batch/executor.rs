@@ -1,9 +1,9 @@
 //! Batch job executor — runs the LLM agent against each discovered unit (file or directory) with configurable concurrency.
 
-use crate::batch::types::{BatchJob, BatchJobStatus, BatchResult};
+use crate::app::batch::types::{BatchJob, BatchJobStatus, BatchResult};
 use crate::bus::core::Bus;
 use crate::bus::events::file::FileEvent;
-use crate::bus::events::messages::BackgroundMessage;
+use crate::bus::events::typed::BackgroundEvent;
 use crate::config::AppConfig;
 use chrono::Local;
 use std::path::PathBuf;
@@ -15,7 +15,7 @@ use tokio::sync::Semaphore;
 pub struct BatchJobExecutor {
     app_config: AppConfig,
     file_event_bus: Bus<FileEvent>,
-    tx_gui: mpsc::Sender<BackgroundMessage>,
+    tx_gui: mpsc::Sender<BackgroundEvent>,
     cancel_flag: Arc<AtomicBool>,
 }
 
@@ -23,7 +23,7 @@ impl BatchJobExecutor {
     pub fn new(
         app_config: AppConfig,
         file_event_bus: Bus<FileEvent>,
-        tx_gui: mpsc::Sender<BackgroundMessage>,
+        tx_gui: mpsc::Sender<BackgroundEvent>,
         _prompt: String,
         cancel_flag: Arc<AtomicBool>,
     ) -> Self {
@@ -159,9 +159,9 @@ impl BatchJobExecutor {
                 }
                 Err(_) => {
                     failed += 1;
-                    let _ = self.tx_gui.send(BackgroundMessage::LogEntry(
-                        crate::background::models::BackgroundLogEntry::new(
-                            crate::background::models::LogCategory::Batch,
+                    let _ = self.tx_gui.send(BackgroundEvent::from(
+                        crate::app::background::models::BackgroundLogEntry::new(
+                            crate::app::background::models::LogCategory::Batch,
                             "A batch job panicked and was terminated".to_string(),
                         ),
                     ));
@@ -215,13 +215,13 @@ pub fn run_agent_blocking(
     let mut status = BatchJobStatus::Completed;
     let mut error = None;
 
-    while let Ok(msg) = rx.recv() {
-        match msg {
-            BackgroundMessage::AgentFailed(err) => {
+    while let Ok(ev) = rx.recv() {
+        match ev {
+            BackgroundEvent::Agent(crate::bus::events::typed::AgentEvent::Failed(err)) => {
                 status = BatchJobStatus::Failed;
                 error = Some(err);
             }
-            BackgroundMessage::AgentFinished(_) => {}
+            BackgroundEvent::Agent(crate::bus::events::typed::AgentEvent::Finished(_)) => {}
             _ => {}
         }
     }

@@ -11,16 +11,16 @@
 //!
 //! - [`core`] — the transport primitive: `Bus<T>` / `BusReader<T>`.
 //! - [`events`] — every event payload that flows over a bus or
-//!   channel (`FileEvent`, `BackgroundMessage`, `BackgroundEvent`,
-//!   `ConfigArrived`, …).
+//!   channel (`FileEvent`, `BackgroundEvent`, `ConfigArrived`, …).
 //! - [`router`] — bus-side plumbing (per-format fan-out, generic
 //!   channel-drain workers).
 //! - [`config`] — the configuration-arrival bus constructor and
 //!   subscriber timeout.
 //!
 //! See the architecture review (`doc/planning/application-architecture-review.md`,
-//! P1-6) for why the `BackgroundMessage` god-enum is split across
-//! `events/messages.rs` (legacy) and `events/typed.rs` (replacement).
+//! P1-6) for the background-event migration that split the legacy
+//! `BackgroundMessage` god-enum into per-domain sub-enums
+//! (`AgentEvent`, `FsEvent`, `ProcessEvent`) under [`events::typed`].
 
 pub mod config;
 pub mod core;

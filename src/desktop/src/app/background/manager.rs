@@ -1,6 +1,6 @@
 //! Background log manager — bounded ring buffer of log entries with filtering/search state for the UI panel.
 
-use crate::background::models::{BackgroundLogEntry, LogCategory};
+use crate::app::background::models::{BackgroundLogEntry, LogCategory};
 use std::collections::VecDeque;
 use std::fs::File;
 use std::io::Write;
