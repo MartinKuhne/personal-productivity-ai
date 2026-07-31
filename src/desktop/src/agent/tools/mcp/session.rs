@@ -34,7 +34,8 @@
 
 use super::error::McpError;
 use super::oauth::{
-    OAuthFlowInputs, PreRegisteredClient, TokenStore, parse_bearer_challenge, run_flow,
+    OAuthFlowInputs, PreRegisteredClient, TokenStore, WwwAuthenticateChallenge,
+    parse_bearer_challenge, refresh, run_flow,
 };
 use crate::config::McpServerConfig;
 use std::io::Write;
@@ -230,6 +231,47 @@ impl McpClientSession {
                 .keys()
                 .any(|k| k.eq_ignore_ascii_case("authorization")),
             McpServerConfig::Stdio { .. } => false,
+        }
+    }
+
+    /// Scopes declared in the server's explicit OAuth config block
+    /// (MCP-012, spec §4.5). These are always requested in addition
+    /// to whatever the server discovers. Empty for stdio transport
+    /// and for HTTP servers without an OAuth block.
+    fn oauth_config_scopes(&self) -> Vec<String> {
+        match &self.config {
+            McpServerConfig::Sse { oauth, .. } => oauth
+                .as_ref()
+                .map(|c| c.scopes.clone())
+                .unwrap_or_default(),
+            McpServerConfig::Stdio { .. } => Vec::new(),
+        }
+    }
+
+    /// Build the [`OAuthFlowInputs`] for a (re-)authorization
+    /// attempt. Config scopes are merged with the caller-supplied
+    /// `extra_scopes` (deduplicated) so the flow always requests the
+    /// union per spec §4.5, and the pre-registered client from the
+    /// config is attached so refresh skips re-registration.
+    fn oauth_flow_inputs(
+        &self,
+        resource: String,
+        challenge: Option<WwwAuthenticateChallenge>,
+        extra_scopes: Vec<String>,
+    ) -> OAuthFlowInputs {
+        let mut scopes = self.oauth_config_scopes();
+        for s in &extra_scopes {
+            if !scopes.iter().any(|x| x == s) {
+                scopes.push(s.clone());
+            }
+        }
+        OAuthFlowInputs {
+            mcp_server_url: resource,
+            www_authenticate: challenge,
+            extra_scopes: scopes,
+            timeout: None,
+            pre_registered_client: self.pre_registered_client(),
+            loopback_override: None,
         }
     }
 
@@ -1011,7 +1053,8 @@ impl McpClientSession {
                 "empty command path",
             ));
         }
-        let mut cmd = std::process::Command::new(&command);
+        let executable = crate::utils::path::resolve_executable_path(&command);
+        let mut cmd = std::process::Command::new(executable.as_ref());
         cmd.args(&args);
         for (k, v) in &env {
             cmd.env(k, v);
@@ -1020,9 +1063,16 @@ impl McpClientSession {
             .stdout(Stdio::piped())
             .stderr(Stdio::piped());
         let mut child = cmd.spawn().map_err(|e| {
+            let hint = if e.kind() == std::io::ErrorKind::NotFound {
+                format!(
+                    "failed to spawn '{command}': {e}. Check that '{command}' is installed and reachable on PATH"
+                )
+            } else {
+                format!("failed to spawn '{command}': {e}")
+            };
             McpError::transport(
                 format!("stdio server '{}'", self.config_label()),
-                format!("failed to spawn '{command}': {e}"),
+                hint,
             )
         })?;
         let stdin = child
@@ -1067,6 +1117,7 @@ impl McpClientSession {
         tracing::info!(
             server = %self.config_label(),
             command = %command,
+            executable = %executable,
             pid = pid,
             "spawned stdio MCP subprocess"
         );
@@ -1175,7 +1226,11 @@ impl McpClientSession {
             None
         } else if let Some(store) = &self.token_store {
             match store.get(self.resource_uri().as_deref().unwrap_or(&url)) {
-                Some(t) if !extra_scopes.is_empty() => Some(t.access_token.clone()),
+                // On an OAuth retry we must attach whatever the store
+                // now holds — the fresh token just minted by the flow
+                // or refresh — regardless of scope arguments (the flow
+                // may have run for an empty scope set).
+                Some(t) if oauth_attempts > 0 => Some(t.access_token.clone()),
                 Some(t)
                     if t.is_expired(
                         std::time::SystemTime::now(),
@@ -1269,15 +1324,49 @@ impl McpClientSession {
                         } else {
                             extra_scopes.clone()
                         };
-                        let pre_registered = self.pre_registered_client();
-                        let inputs = OAuthFlowInputs {
-                            mcp_server_url: resource.clone(),
-                            www_authenticate: challenge,
-                            extra_scopes: scopes_for_step_up.clone(),
-                            timeout: None,
-                            pre_registered_client: pre_registered,
-                            loopback_override: None,
+                        let inputs = self.oauth_flow_inputs(
+                            resource.clone(),
+                            challenge,
+                            scopes_for_step_up.clone(),
+                        );
+                        // On 401, try a silent refresh with the stored
+                        // refresh token before falling back to the full
+                        // interactive flow. This covers the common
+                        // expired-token case without a browser
+                        // round-trip (MCP-018). A 403 step-up always
+                        // re-runs the interactive flow.
+                        let refreshed = if code == 401 {
+                            store.get(&resource).filter(|t| t.refresh_token.is_some()).and_then(
+                                |existing| match refresh(&inputs, store, &existing) {
+                                    Ok(_output) => {
+                                        tracing::info!(
+                                            server = %self.config_label(),
+                                            "OAuth refresh succeeded after 401"
+                                        );
+                                        Some(())
+                                    }
+                                    Err(e) => {
+                                        tracing::warn!(
+                                            server = %self.config_label(),
+                                            error = %e,
+                                            "OAuth refresh failed after 401; falling back to interactive flow"
+                                        );
+                                        None
+                                    }
+                                },
+                            )
+                        } else {
+                            None
                         };
+                        if refreshed.is_some() {
+                            return self.http_request_with_oauth(
+                                id,
+                                payload,
+                                timeout,
+                                scopes_for_step_up,
+                                oauth_attempts + 1,
+                            );
+                        }
                         match run_flow(&inputs, store) {
                             Ok(_output) => {
                                 // Retry once with the fresh token

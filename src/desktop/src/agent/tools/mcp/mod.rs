@@ -483,6 +483,7 @@ mod tests {
     use super::McpClientSession;
     use super::is_valid_session_id;
     use super::*;
+    use crate::config::McpOAuthConfig;
     use std::collections::HashMap;
 
     #[test]
@@ -2160,6 +2161,164 @@ while True:
         );
 
         let _ = std::fs::remove_file(&tmp);
+    }
+
+    /// End-to-end Streamable HTTP test of the OAuth refresh path.
+    ///
+    /// A mock MCP server 401s the `initialize` handshake (the exact
+    /// failure the startup ping surfaces for a server with a stale
+    /// token). The session must recover by silently refreshing the
+    /// stored refresh token — no browser flow — and retry the request
+    /// with the fresh bearer. Also asserts the config scopes reach
+    /// the token request (MCP-012) and the `resource` parameter is
+    /// present (MCP-013).
+    #[test]
+    fn test_sse_oauth_refresh_after_401_without_browser_flow() {
+        let server = mock_mcp_oauth_server();
+        let origin = server.origin.clone();
+        let mcp_url = format!("{origin}/mcp");
+
+        let store = Arc::new(TokenStore::in_memory());
+        store.put(
+            &mcp_url,
+            StoredToken {
+                access_token: "stale".to_owned(),
+                token_type: "Bearer".to_owned(),
+                expires_at: Some(0),
+                refresh_token: Some("rt-1".to_owned()),
+                scope: vec!["read".to_owned()],
+                client_id: Some("client-1".to_owned()),
+                issuer: Some(origin.clone()),
+            },
+        );
+
+        let manager = McpClientManager::new();
+        manager.set_token_store(Some(store));
+        let mut config = AppConfig::default();
+        config.mcp_servers.insert(
+            "mock".to_owned(),
+            McpServerConfig::Sse {
+                url: mcp_url.clone(),
+                headers: HashMap::new(),
+                oauth: Some(McpOAuthConfig {
+                    client_id: Some("client-1".to_owned()),
+                    client_secret: None,
+                    scopes: vec!["read".to_owned()],
+                }),
+            },
+        );
+        manager.update_config(&config);
+
+        let result = manager
+            .call_tool("mock", "my_tool", serde_json::json!({}))
+            .expect("call should succeed after an automatic refresh");
+        assert_eq!(result["content"][0]["text"], "ok");
+
+        let recorded = server.recorded.lock().expect("lock recorded");
+
+        // The first initialize attempt carried no bearer (the stale
+        // token is past its skew), the server 401'd it, and the
+        // retried request carried the freshly-refreshed bearer.
+        let first_init = recorded
+            .iter()
+            .find(|r| r.method == "POST" && r.path == "/mcp" && r.body.contains("\"initialize\""))
+            .expect("an initialize request must have been recorded");
+        assert!(
+            first_init.header("authorization").is_none(),
+            "the first initialize must not carry the stale bearer"
+        );
+
+        let retried_init = recorded
+            .iter()
+            .filter(|r| r.method == "POST" && r.path == "/mcp" && r.body.contains("\"initialize\""))
+            .find(|r| r.header("authorization") == Some("Bearer fresh-access"));
+        assert!(
+            retried_init.is_some(),
+            "the retried initialize must carry the refreshed bearer"
+        );
+
+        // The token endpoint was hit with a refresh grant — proving
+        // no interactive browser flow ran — and the config scopes
+        // reached the token request (MCP-012).
+        let token_req = recorded
+            .iter()
+            .find(|r| r.method == "POST" && r.path == "/token")
+            .expect("a token request must have been recorded");
+        assert!(token_req.body.contains("grant_type=refresh_token"));
+        assert!(token_req.body.contains("refresh_token=rt-1"));
+        assert!(token_req.body.contains("scope=read"));
+        assert!(token_req.body.contains("resource=http%3A%2F%2F127.0.0.1"));
+    }
+
+    /// Mock HTTP server: OAuth discovery/token endpoints plus an MCP
+    /// endpoint at `/mcp` that requires a fresh bearer on any request
+    /// with an `id` (notifications are accepted unauthenticated).
+    fn mock_mcp_oauth_server() -> super::oauth::test_support::MockHttpServer {
+        use super::oauth::test_support::{MockHttpServer, MockResponse, RecordedRequest};
+        MockHttpServer::start(move |req: &RecordedRequest, origin: &str| {
+            if req.method == "POST" && req.path == "/mcp" {
+                if !req.body.contains("\"id\"") {
+                    return MockResponse::json("HTTP/1.1 200 OK", "{}");
+                }
+                if req.header("authorization") == Some("Bearer fresh-access") {
+                    let id = serde_json::from_str::<serde_json::Value>(&req.body)
+                        .ok()
+                        .map(|v| v.get("id").and_then(|x| x.as_u64()).unwrap_or(1))
+                        .unwrap_or(1);
+                    let result = if req.body.contains("\"initialize\"") {
+                        serde_json::json!({
+                            "protocolVersion": "2025-11-25",
+                            "capabilities": {"tools": {"listChanged": false}},
+                            "serverInfo": {"name": "mock", "version": "0.0.1"},
+                        })
+                    } else if req.body.contains("\"tools/call\"") {
+                        serde_json::json!({"content": [{"type": "text", "text": "ok"}]})
+                    } else {
+                        serde_json::json!({})
+                    };
+                    MockResponse::json(
+                        "HTTP/1.1 200 OK",
+                        serde_json::json!({"jsonrpc": "2.0", "id": id, "result": result})
+                            .to_string(),
+                    )
+                } else {
+                    MockResponse::json("HTTP/1.1 401 Unauthorized", r#"{"error":"invalid_token"}"#)
+                        .with_header(
+                            "WWW-Authenticate",
+                            &format!(
+                                "Bearer error=\"invalid_token\", resource_metadata=\"{origin}/.well-known/oauth-protected-resource/mcp\""
+                            ),
+                        )
+                }
+            } else if req.method == "GET"
+                && (req.path == "/.well-known/oauth-protected-resource"
+                    || req.path == "/.well-known/oauth-protected-resource/mcp")
+            {
+                MockResponse::json(
+                    "HTTP/1.1 200 OK",
+                    format!(
+                        r#"{{"resource":"{origin}/mcp","authorization_servers":["{origin}"],"scopes_supported":["read"]}}"#
+                    ),
+                )
+            } else if req.method == "GET"
+                && (req.path == "/.well-known/oauth-authorization-server"
+                    || req.path == "/.well-known/openid-configuration")
+            {
+                MockResponse::json(
+                    "HTTP/1.1 200 OK",
+                    format!(
+                        r#"{{"issuer":"{origin}","authorization_endpoint":"{origin}/auth","token_endpoint":"{origin}/token","code_challenge_methods_supported":["S256"],"token_endpoint_auth_methods_supported":["none"]}}"#
+                    ),
+                )
+            } else if req.method == "POST" && req.path == "/token" {
+                MockResponse::json(
+                    "HTTP/1.1 200 OK",
+                    r#"{"access_token":"fresh-access","token_type":"Bearer","expires_in":3600,"refresh_token":"rt-2","scope":"read"}"#,
+                )
+            } else {
+                MockResponse::json("HTTP/1.1 404 Not Found", "{}")
+            }
+        })
     }
 
     // --- helpers ---

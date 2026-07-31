@@ -15,7 +15,7 @@ The requirements below have been formatted using the **Easy Approach to Requirem
 
 | Tool | Description |
 |---|---|
-| `grep` | Search for a specific pattern within files across all libraries. |
+| `grep` | Search for a specific pattern within Markdown files across all libraries. Returns at most 200 matching lines; when the result is truncated, the response directs the caller to refine the query with narrower terms or delegate to a sub-agent to analyse a specific file. |
 | `read_tags` | Read all unique tags from markdown front-matter across all libraries. |
 | `list_files_by_tag` | List files that contain a specific tag in their front-matter. |
 | `list_files` | List markdown files in a directory (non-recursive). With "/" or "." returns library names. |
@@ -64,3 +64,9 @@ The requirements below have been formatted using the **Easy Approach to Requirem
 * [TOOL-008] Web Fetch Cache: The system shall cache fetched Markdown content for 5 minutes. Subsequent calls to `web_fetch` with the same URL and `force_refetch` set to `false` (default) shall return the cached content without making a network request.
 * [TOOL-009] Web Fetch Force Refetch: The `web_fetch` tool shall accept an optional `force_refetch` boolean parameter (default: `false`). When `true`, the system shall bypass the cache and fetch fresh content from the URL, replacing the cached entry.
 * [TOOL-010] Web Fetch Context Efficiency: The tool description shall encourage the LLM to save context by fetching a page once and issuing partial reads via `limit` and `offset` to paginate through the content, rather than re-fetching the full page multiple times.
+
+### Grep Tool
+
+* [TOOL-011] Grep Result Cap: The `grep` tool shall return at most 200 matching lines in a single response, capped across all configured content libraries.
+* [TOOL-012] Grep Truncation Guidance: When the `grep` result is truncated by the 200-line cap, the response shall indicate the truncation and instruct the caller to refine the query with narrower terms or delegate to a sub-agent to analyse a specific file.
+* [TOOL-013] Grep Scope: The `grep` tool shall only search Markdown files with a `.md` extension within configured content libraries, and shall not return matches outside a library's root folder.

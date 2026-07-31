@@ -128,23 +128,19 @@ fn test_tool_invalid_args_returns_error() {
 #[test]
 fn test_tool_call_debug_mode_feature_flag() {
     let mut config = AppConfig::default();
-    assert!(
-        !config
-            .feature_flags
-            .get("toolCallDebugMode")
-            .copied()
-            .unwrap_or(false)
-    );
+    assert!(!config
+        .feature_flags
+        .get("toolCallDebugMode")
+        .copied()
+        .unwrap_or(false));
     config
         .feature_flags
         .insert("toolCallDebugMode".to_string(), true);
-    assert!(
-        config
-            .feature_flags
-            .get("toolCallDebugMode")
-            .copied()
-            .unwrap_or(false)
-    );
+    assert!(config
+        .feature_flags
+        .get("toolCallDebugMode")
+        .copied()
+        .unwrap_or(false));
     let ctx = test_ctx(&config);
     let res = execute_tool(&ctx, "unknown_tool", "{}");
     assert!(res.contains("not found") || res.contains("error"));
@@ -378,11 +374,9 @@ fn test_list_files_default_page_size_is_20() {
     assert_eq!(data["total"], 5);
     let files = files_array(data);
     assert_eq!(files.len(), 5);
-    assert!(
-        files
-            .iter()
-            .all(|p| p.starts_with("Lib") && p.contains("note_"))
-    );
+    assert!(files
+        .iter()
+        .all(|p| p.starts_with("Lib") && p.contains("note_")));
 }
 
 #[test]
@@ -477,6 +471,116 @@ fn test_list_files_returns_json_array_not_string() {
     let raw = execute_tool(&ctx, "list_files", r#"{"path":"Lib"}"#);
     let parsed: Value = serde_json::from_str(&raw).unwrap();
     assert!(parsed["data"]["files"].is_array());
+}
+
+fn run_grep(config: &AppConfig, args: &str) -> Value {
+    let ctx = test_ctx(config);
+    let raw = execute_tool(&ctx, "grep", args);
+    serde_json::from_str(&raw)
+        .unwrap_or_else(|e| panic!("could not parse tool response `{}`: {}", raw, e))
+}
+
+fn single_lib_with_files(files: &[(&str, &str)]) -> (AppConfig, TempDir) {
+    let dir = tempfile::tempdir().unwrap();
+    for (name, content) in files {
+        fs::write(dir.path().join(name), content).unwrap();
+    }
+    let mut config = AppConfig::default();
+    config
+        .content_libraries
+        .push(crate::config::ContentLibrary {
+            name: "Lib".to_string(),
+            root_folder: dir.path().to_string_lossy().into_owned(),
+            kind: "text".to_string(),
+            readonly: false,
+            priority: 0,
+        });
+    (config, dir)
+}
+
+#[test]
+fn test_grep_no_matches_keeps_sentinel() {
+    let (config, _dir) = single_lib_with_files(&[("note.md", "# Doc")]);
+    let envelope = run_grep(&config, r#"{"query":"needle"}"#);
+    assert_eq!(envelope["status"], "success");
+    let data = &envelope["data"];
+    assert_eq!(data["matches"], "No matches found.");
+    assert_eq!(data["total"], 0);
+    assert_eq!(data["truncated"], false);
+}
+
+#[test]
+fn test_grep_returns_matches_within_limit() {
+    let (config, _dir) = single_lib_with_files(&[("note.md", "needle one\nother\nneedle two")]);
+    let envelope = run_grep(&config, r#"{"query":"needle"}"#);
+    assert_eq!(envelope["status"], "success");
+    let data = &envelope["data"];
+    assert_eq!(data["total"], 2);
+    assert_eq!(data["truncated"], false);
+    let matches = data["matches"].as_str().unwrap();
+    assert!(matches.starts_with("Lib"));
+    assert!(matches.contains("note.md"));
+    assert!(!matches.contains("truncated"));
+}
+
+#[test]
+fn test_grep_truncates_at_default_max_results() {
+    let content = (0..250)
+        .map(|i| format!("needle line {}", i))
+        .collect::<Vec<_>>()
+        .join("\n");
+    let (config, _dir) = single_lib_with_files(&[("big.md", &content)]);
+    let envelope = run_grep(&config, r#"{"query":"needle"}"#);
+    assert_eq!(envelope["status"], "success");
+    let data = &envelope["data"];
+    assert_eq!(data["total"], 250);
+    assert_eq!(data["truncated"], true);
+    let matches = data["matches"].as_str().unwrap();
+    // 200 matching lines plus the truncation notice.
+    assert_eq!(matches.lines().count(), 201);
+    assert!(matches.contains("results truncated at 200 matches"));
+    assert!(matches.contains("narrower terms"));
+}
+
+#[test]
+fn test_grep_only_matches_md_files() {
+    let (config, _dir) = single_lib_with_files(&[
+        ("note.md", "needle in md"),
+        ("note.markdown", "needle in markdown"),
+        ("note.txt", "needle in txt"),
+    ]);
+    let envelope = run_grep(&config, r#"{"query":"needle"}"#);
+    let data = &envelope["data"];
+    assert_eq!(data["total"], 1);
+    let matches = data["matches"].as_str().unwrap();
+    assert!(matches.contains("note.md"));
+    assert!(!matches.contains("note.markdown"));
+    assert!(!matches.contains("note.txt"));
+}
+
+#[test]
+fn test_grep_truncation_does_not_count_non_markdown_matches() {
+    // Non-markdown files must never consume the 200-match cap: a large
+    // `.txt` with many matches must not appear in, or crowd out, the
+    // Markdown results.
+    let md_content = (0..250)
+        .map(|i| format!("needle line {}", i))
+        .collect::<Vec<_>>()
+        .join("\n");
+    let txt_content = (0..1000)
+        .map(|i| format!("needle txt {}", i))
+        .collect::<Vec<_>>()
+        .join("\n");
+    let (config, _dir) =
+        single_lib_with_files(&[("big.md", &md_content), ("noise.txt", &txt_content)]);
+    let envelope = run_grep(&config, r#"{"query":"needle"}"#);
+    let data = &envelope["data"];
+    assert_eq!(data["total"], 250);
+    assert_eq!(data["truncated"], true);
+    let matches = data["matches"].as_str().unwrap();
+    assert_eq!(matches.lines().count(), 201);
+    assert!(matches.contains("results truncated at 200 matches"));
+    assert!(!matches.contains("needle txt"));
 }
 
 #[test]

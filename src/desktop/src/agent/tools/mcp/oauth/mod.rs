@@ -36,6 +36,9 @@ mod redirect;
 mod store;
 pub mod types;
 
+#[cfg(test)]
+pub mod test_support;
+
 pub use client::OAuthClient;
 pub use flow::{
     OAuthFlowInputs, OAuthFlowOutput, PreRegisteredClient, build_resource_uri, refresh, run_flow,

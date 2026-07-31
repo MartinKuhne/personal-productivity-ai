@@ -173,11 +173,26 @@ fn format_grep_result(func_name: &str, data: &serde_json::Value) -> String {
             files.insert(&line[..idx]);
         }
     }
-    format!(
-        "> **Result (`{}`):** {} file(s) match\n\n",
+    let total = data
+        .get("total")
+        .and_then(|f| f.as_u64())
+        .unwrap_or(files.len() as u64);
+    let truncated = data
+        .get("truncated")
+        .and_then(|f| f.as_bool())
+        .unwrap_or(false);
+    let mut msg = format!(
+        "> **Result (`{}`):** {} file(s) match ({} match(es) total)\n\n",
         func_name,
-        files.len()
-    )
+        files.len(),
+        total
+    );
+    if truncated {
+        msg.push_str(&format!(
+            "> **Note:** the result was truncated to 200 matches. Refine the query with narrower terms or delegate to a sub-agent to analyse a specific file.\n\n"
+        ));
+    }
+    msg
 }
 
 fn format_email_by_id_result(func_name: &str, data: &serde_json::Value) -> String {

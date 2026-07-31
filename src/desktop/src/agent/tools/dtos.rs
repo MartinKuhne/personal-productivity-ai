@@ -17,7 +17,17 @@ pub struct GrepInput {
 }
 #[derive(Serialize, Debug, JsonSchema)]
 pub struct GrepResponse {
+    /// Match lines (`virtual/path:line - content`), capped at
+    /// `DEFAULT_GREP_MAX_RESULTS` matches. Set to `"No matches found."`
+    /// when the query matched nothing.
     pub matches: String,
+    /// Total number of matches found across all libraries, including
+    /// any beyond the result cap. Lets the caller tell when `matches`
+    /// was truncated.
+    pub total: usize,
+    /// True when `matches` was truncated because the query matched more
+    /// than `DEFAULT_GREP_MAX_RESULTS` lines.
+    pub truncated: bool,
 }
 
 #[derive(Deserialize, Debug, JsonSchema)]

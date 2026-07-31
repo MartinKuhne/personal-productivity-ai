@@ -487,6 +487,7 @@ fn send_token_request(
 
 #[cfg(test)]
 mod tests {
+    use super::super::test_support::{MockHttpServer, MockResponse, RecordedRequest};
     use super::*;
 
     #[test]
@@ -560,5 +561,135 @@ mod tests {
             resource_tos_uri: None,
         };
         assert!(pick_scope(None, &rm, &[]).is_none());
+    }
+
+    /// `refresh` must exchange the stored refresh token at the token
+    /// endpoint (no browser round-trip) and update the store. The
+    /// token request must carry the `resource` param (MCP-013) and
+    /// the caller's scopes.
+    #[test]
+    fn refresh_exchanges_stored_refresh_token_without_browser() {
+        let server = mock_oauth_server();
+        let origin = server.origin.clone();
+        let resource = format!("{origin}/mcp");
+
+        let store = TokenStore::in_memory();
+        let existing = StoredToken {
+            access_token: "expired".to_owned(),
+            token_type: "Bearer".to_owned(),
+            expires_at: Some(0),
+            refresh_token: Some("rt-1".to_owned()),
+            scope: vec!["read".to_owned()],
+            client_id: Some("client-1".to_owned()),
+            issuer: Some(origin.clone()),
+        };
+        store.put(&resource, existing.clone());
+
+        let inputs = OAuthFlowInputs {
+            mcp_server_url: resource.clone(),
+            www_authenticate: None,
+            extra_scopes: vec!["read".to_owned()],
+            timeout: None,
+            pre_registered_client: Some(PreRegisteredClient {
+                client_id: "client-1".to_owned(),
+                client_secret: None,
+            }),
+            loopback_override: None,
+        };
+
+        let output = refresh(&inputs, &store, &existing).expect("refresh should succeed");
+        assert_eq!(output.token.access_token, "fresh-access");
+
+        let stored = store
+            .get(&resource)
+            .expect("store should hold the refreshed token");
+        assert_eq!(stored.access_token, "fresh-access");
+        assert_eq!(stored.refresh_token.as_deref(), Some("rt-2"));
+        assert_eq!(stored.client_id.as_deref(), Some("client-1"));
+
+        let recorded = server.recorded.lock().expect("lock recorded");
+        let token_req = recorded
+            .iter()
+            .find(|r| r.method == "POST" && r.path == "/token")
+            .expect("a token request must have been recorded");
+        assert!(
+            token_req.body.contains("grant_type=refresh_token"),
+            "must use the refresh grant, got body: {}",
+            token_req.body
+        );
+        assert!(token_req.body.contains("refresh_token=rt-1"));
+        assert!(token_req.body.contains("client_id=client-1"));
+        assert!(token_req.body.contains("scope=read"));
+        // MCP-013: the `resource` parameter must be present on the
+        // token request, pointing at the MCP server URL.
+        assert!(
+            token_req
+                .body
+                .contains("resource=http%3A%2F%2F127.0.0.1"),
+            "token request must carry the resource param, got body: {}",
+            token_req.body
+        );
+    }
+
+    /// A stored token without a refresh token cannot be refreshed;
+    /// `refresh` must report that rather than starting a browser
+    /// flow.
+    #[test]
+    fn refresh_requires_stored_refresh_token() {
+        let store = TokenStore::in_memory();
+        let existing = StoredToken {
+            access_token: "expired".to_owned(),
+            token_type: "Bearer".to_owned(),
+            expires_at: Some(0),
+            refresh_token: None,
+            scope: vec![],
+            client_id: Some("client-1".to_owned()),
+            issuer: Some("https://auth.example.com".to_owned()),
+        };
+        let inputs = OAuthFlowInputs {
+            mcp_server_url: "https://mcp.example.com/mcp".to_owned(),
+            www_authenticate: None,
+            extra_scopes: vec![],
+            timeout: None,
+            pre_registered_client: None,
+            loopback_override: None,
+        };
+        let err = refresh(&inputs, &store, &existing).expect_err("refresh must fail");
+        assert!(matches!(err, OAuthError::RefreshFailed(_)));
+    }
+
+    /// Minimal OAuth server double: PRM discovery, AS metadata, and
+    /// a token endpoint that mints `fresh-access`.
+    fn mock_oauth_server() -> MockHttpServer {
+        MockHttpServer::start(move |req: &RecordedRequest, origin: &str| {
+            if req.method == "GET"
+                && (req.path == "/.well-known/oauth-protected-resource"
+                    || req.path == "/.well-known/oauth-protected-resource/mcp")
+            {
+                MockResponse::json(
+                    "HTTP/1.1 200 OK",
+                    format!(
+                        r#"{{"resource":"{origin}/mcp","authorization_servers":["{origin}"],"scopes_supported":["read"]}}"#
+                    ),
+                )
+            } else if req.method == "GET"
+                && (req.path == "/.well-known/oauth-authorization-server"
+                    || req.path == "/.well-known/openid-configuration")
+            {
+                MockResponse::json(
+                    "HTTP/1.1 200 OK",
+                    format!(
+                        r#"{{"issuer":"{origin}","authorization_endpoint":"{origin}/auth","token_endpoint":"{origin}/token","code_challenge_methods_supported":["S256"],"token_endpoint_auth_methods_supported":["none"]}}"#
+                    ),
+                )
+            } else if req.method == "POST" && req.path == "/token" {
+                MockResponse::json(
+                    "HTTP/1.1 200 OK",
+                    r#"{"access_token":"fresh-access","token_type":"Bearer","expires_in":3600,"refresh_token":"rt-2","scope":"read"}"#,
+                )
+            } else {
+                MockResponse::json("HTTP/1.1 404 Not Found", "{}")
+            }
+        })
     }
 }

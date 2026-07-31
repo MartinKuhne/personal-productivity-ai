@@ -6,37 +6,39 @@ use crate::utils::tags::extract_tags_from_file;
 use std::path::Path;
 use walkdir::WalkDir;
 
+/// Default maximum number of match lines the `grep` tool returns in
+/// a single response. Kept here (rather than inlined at the call site)
+/// so the constant has one canonical home and tests can reference it.
+pub const DEFAULT_GREP_MAX_RESULTS: usize = 200;
+
+/// Grep a single content library for a query string, case-insensitively.
+/// Returns every matching line as `virtual/path:line - content`, scoped
+/// strictly to Markdown (`.md`) files under `root_path`. The caller
+/// (the tool registry) is responsible for applying the result cap
+/// across libraries, so this function returns all matches unfiltered.
 pub fn tool_grep(
     root_path: &Path,
     virtual_prefix: &str,
     query: &str,
-) -> Result<crate::agent::tools::dtos::GrepResponse, String> {
+) -> Result<Vec<String>, String> {
     let mut results = Vec::new();
     let query_lower = query.to_lowercase();
     for entry in WalkDir::new(root_path).into_iter().filter_map(|e| e.ok()) {
         if entry.path().is_file()
             && let Some(ext) = entry.path().extension()
-            && (ext == "md" || ext == "markdown")
+            && ext == "md"
+            && let Some(rel_path) = entry.path().strip_prefix(root_path).ok()
             && let Ok(content) = std::fs::read_to_string(entry.path())
         {
+            let virtual_path = Path::new(virtual_prefix).join(rel_path);
             for (idx, line) in content.lines().enumerate() {
                 if line.to_lowercase().contains(&query_lower) {
-                    let rel_path = entry.path().strip_prefix(root_path).unwrap_or(entry.path());
-                    let virtual_path = Path::new(virtual_prefix).join(rel_path);
                     results.push(format!("{}:{} - {}", virtual_path.display(), idx + 1, line));
                 }
             }
         }
     }
-    if results.is_empty() {
-        Ok(crate::agent::tools::dtos::GrepResponse {
-            matches: "No matches found.".to_string(),
-        })
-    } else {
-        Ok(crate::agent::tools::dtos::GrepResponse {
-            matches: results.join("\n"),
-        })
-    }
+    Ok(results)
 }
 
 pub fn tool_read_tags(
@@ -359,10 +361,10 @@ mod tests {
         let file_path = dir.path().join("test.md");
         fs::write(&file_path, "# Hello\nWorld content\nAnother line").unwrap();
 
-        let result = tool_grep(dir.path(), "Workspace", "World").unwrap().matches;
-        assert!(result.contains("World content"));
-        assert!(result.contains("Workspace"));
-        assert!(result.contains("test.md"));
+        let result = tool_grep(dir.path(), "Workspace", "World").unwrap();
+        assert!(result.iter().any(|m| m.contains("World content")));
+        assert!(result.iter().any(|m| m.contains("Workspace")));
+        assert!(result.iter().any(|m| m.contains("test.md")));
     }
 
     #[test]
@@ -617,24 +619,28 @@ mod tests {
 
     #[test]
     fn test_tool_grep_ignores_non_markdown_files() {
-        // NEGATIVE ASSERTION: Files without .md or .markdown extension
-        // must NOT be searched, even if they contain matching text.
+        // NEGATIVE ASSERTION: Files without a `.md` extension must NOT
+        // be searched, even if they contain matching text. This includes
+        // `.markdown` files, which the grep tool does not match.
         let dir = tempdir().unwrap();
         let md_file = dir.path().join("test.md");
+        let md2_file = dir.path().join("doc.markdown");
         let txt_file = dir.path().join("secret.txt");
         let pdf_file = dir.path().join("notes.pdf");
 
         fs::write(&md_file, "# Project\nContains search term here").unwrap();
+        fs::write(&md2_file, "Also contains search term").unwrap();
         fs::write(&txt_file, "This also contains search term").unwrap();
         fs::write(&pdf_file, "Search term in PDF").unwrap();
 
         let result = tool_grep(dir.path(), "Workspace", "search term").unwrap();
         // Only the .md file should be found
-        assert!(result.matches.contains("test.md"));
-        assert!(result.matches.contains("Contains search term"));
-        // txt and pdf must NOT appear in results
-        assert!(!result.matches.contains("secret.txt"));
-        assert!(!result.matches.contains("notes.pdf"));
+        assert!(result.iter().any(|m| m.contains("test.md")));
+        assert!(result.iter().any(|m| m.contains("Contains search term")));
+        // txt, pdf, and .markdown must NOT appear in results
+        assert!(!result.iter().any(|m| m.contains("secret.txt")));
+        assert!(!result.iter().any(|m| m.contains("notes.pdf")));
+        assert!(!result.iter().any(|m| m.contains("doc.markdown")));
     }
 
     #[test]
@@ -650,15 +656,13 @@ mod tests {
         .unwrap();
 
         let result = tool_grep(dir.path(), "Workspace", "foo").unwrap();
-        let matches_text = result.matches;
-        let lines: Vec<&str> = matches_text.lines().collect();
 
         // Should find 3 matches at lines 1, 3, 5
-        assert_eq!(lines.len(), 3, "Expected 3 matches, got: {}", matches_text);
+        assert_eq!(result.len(), 3, "Expected 3 matches, got: {:?}", result);
 
         // Verify line numbers are in ascending order by extracting from the format "path:line - content"
         // The format is: "path:line_number - content"
-        let line_nums: Vec<usize> = lines
+        let line_nums: Vec<usize> = result
             .iter()
             .filter_map(|l| {
                 // Find the first colon that's followed by digits (the line number)
@@ -673,11 +677,6 @@ mod tests {
             })
             .collect();
         assert_eq!(line_nums, vec![1, 3, 5], "Line numbers should be in order");
-
-        // Verify the matches are in the correct positions
-        assert!(lines[0].contains("Line 1"));
-        assert!(lines[1].contains("Line 3"));
-        assert!(lines[2].contains("Line 5"));
     }
 
     #[test]
@@ -688,11 +687,30 @@ mod tests {
         fs::write(&file_path, "Hello WORLD hello World HELLO").unwrap();
 
         let result = tool_grep(dir.path(), "Workspace", "hello").unwrap();
-        assert!(result.matches.contains("Hello"));
-        assert!(result.matches.contains("WORLD"));
-        assert!(result.matches.contains("hello"));
-        assert!(result.matches.contains("World"));
-        assert!(result.matches.contains("HELLO"));
+        let matches_text = result.join("\n");
+        assert!(matches_text.contains("Hello"));
+        assert!(matches_text.contains("WORLD"));
+        assert!(matches_text.contains("hello"));
+        assert!(matches_text.contains("World"));
+        assert!(matches_text.contains("HELLO"));
+    }
+
+    #[test]
+    fn test_tool_grep_no_matches_returns_empty_vec() {
+        // NEGATIVE ASSERTION: A query with no matches yields an empty
+        // Vec; the "No matches found." sentinel is added by the tool
+        // registry call site, not the low-level scan.
+        let dir = tempdir().unwrap();
+        fs::write(dir.path().join("test.md"), "# Project\nNothing here").unwrap();
+        let result = tool_grep(dir.path(), "Workspace", "nonexistent").unwrap();
+        assert!(result.is_empty());
+    }
+
+    #[test]
+    fn test_grep_default_max_results_constant_is_200() {
+        // The documented result cap. A regression here would silently
+        // change the number of matches the LLM sees by default.
+        assert_eq!(DEFAULT_GREP_MAX_RESULTS, 200);
     }
 
     #[test]

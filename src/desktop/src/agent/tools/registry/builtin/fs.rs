@@ -1,8 +1,8 @@
 //! Filesystem tool implementations for the tool registry.
 
-use crate::agent::tools::Tool;
 use crate::agent::tools::context::ToolContext;
 use crate::agent::tools::dtos;
+use crate::agent::tools::Tool;
 use crate::app::vfs::library::ContentLibraryExt;
 use crate::config::AppConfig;
 use std::any::TypeId;
@@ -52,7 +52,7 @@ impl Tool for GrepTool {
         "grep"
     }
     fn description(&self) -> &'static str {
-        "Search for a query string case-insensitively across all Markdown files in the workspace."
+        "Search for a query string case-insensitively across all Markdown files in the workspace. Returns at most 200 matching lines; when the result is truncated, refine the query with narrower terms or delegate to a sub-agent to analyse a specific file."
     }
     fn input_type(&self) -> TypeId {
         TypeId::of::<dtos::GrepInput>()
@@ -69,30 +69,39 @@ impl Tool for GrepTool {
     fn execute(&self, ctx: &ToolContext, args: &str) -> Result<serde_json::Value, String> {
         let input: dtos::GrepInput =
             serde_json::from_str(args).map_err(|e| format!("Invalid args: {}", e))?;
-        let mut all_results = Vec::new();
+        let mut all_matches: Vec<String> = Vec::new();
         let mut libs: Vec<_> = ctx.config.content_libraries.iter().collect();
         libs.sort_by_key(|b| std::cmp::Reverse(b.priority));
         for lib in libs {
-            if let Ok(res) = crate::agent::tools::filesystem::tool_grep(
+            if let Ok(mut matches) = crate::agent::tools::filesystem::tool_grep(
                 &lib.root_path(),
                 &lib.name,
                 &input.query,
-            ) && res.matches != "No matches found."
-            {
-                all_results.push(res.matches);
+            ) {
+                all_matches.append(&mut matches);
             }
         }
-        if all_results.is_empty() {
-            Ok(serde_json::to_value(dtos::GrepResponse {
-                matches: "No matches found.".to_string(),
-            })
-            .unwrap())
-        } else {
-            Ok(serde_json::to_value(dtos::GrepResponse {
-                matches: all_results.join("\n"),
-            })
-            .unwrap())
+        let total = all_matches.len();
+        let limit = crate::agent::tools::filesystem::DEFAULT_GREP_MAX_RESULTS;
+        let truncated = total > limit;
+        all_matches.truncate(limit);
+        if truncated {
+            all_matches.push(format!(
+                "... (results truncated at {} matches; refine the query with narrower terms or delegate to a sub-agent to analyse a specific file)",
+                limit
+            ));
         }
+        let matches = if all_matches.is_empty() {
+            "No matches found.".to_string()
+        } else {
+            all_matches.join("\n")
+        };
+        Ok(serde_json::to_value(dtos::GrepResponse {
+            matches,
+            total,
+            truncated,
+        })
+        .unwrap())
     }
 }
 
