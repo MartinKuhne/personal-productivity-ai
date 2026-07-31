@@ -1,11 +1,12 @@
 //! Tool-call dispatcher — receives tool-call JSON from the LLM, dispatches through the registry, and feeds results back.
 
+use crate::agent::tools::Safety;
+use crate::agent::tools::context::ToolContext;
+use crate::agent::tools::execute_tool;
+use crate::bus::core::Bus;
+use crate::bus::events::file::FileEvent;
+use crate::bus::events::typed::{BackgroundEvent, FsEvent};
 use crate::config::AppConfig;
-use crate::file_events::{Bus, FileEvent};
-use crate::messages::BackgroundMessage;
-use crate::tools::Safety;
-use crate::tools::context::ToolContext;
-use crate::tools::execute_tool;
 use std::path::Path;
 use std::sync::mpsc::Sender;
 
@@ -25,7 +26,7 @@ impl ToolExecutor {
     pub fn execute_all(
         &self,
         tool_calls: &[serde_json::Value],
-        tx_gui: &Sender<BackgroundMessage>,
+        tx_gui: &Sender<BackgroundEvent>,
     ) -> Vec<(String, String, String, String)> {
         let mut safe_calls = Vec::new();
         let mut unsafe_calls = Vec::new();
@@ -54,7 +55,7 @@ impl ToolExecutor {
     /// of in parallel, and the registry returns its normal "tool not
     /// found" error.
     fn classify(name: &str) -> Safety {
-        crate::tools::registry::safety_of(name)
+        crate::agent::tools::registry::safety_of(name)
     }
 
     fn execute_parallel(
@@ -115,7 +116,7 @@ impl ToolExecutor {
     fn notify_file_creations(
         &self,
         results: &[(String, String, String, String)],
-        tx_gui: &Sender<BackgroundMessage>,
+        tx_gui: &Sender<BackgroundEvent>,
     ) {
         for (_call_id, func_name, func_args_str, result) in results {
             if func_name != "create_file" {
@@ -154,10 +155,13 @@ impl ToolExecutor {
                             let rest: std::path::PathBuf = comps.collect();
                             let abs_path = Path::new(&lib.root_folder).join(rest);
                             let tags = crate::utils::tags::extract_tags_from_file(&abs_path);
-                            let _ = tx_gui.send(BackgroundMessage::FileModified {
-                                path: abs_path,
-                                tags,
-                            });
+                            let _ = tx_gui.send(
+                                FsEvent::FileModified {
+                                    path: abs_path,
+                                    tags,
+                                }
+                                .into(),
+                            );
                             break;
                         }
                     }
@@ -188,17 +192,20 @@ mod tests {
         // exposes a single `safety_of(name)` lookup that returns
         // Safety::ReadOnly / Safety::Mutating.
         assert_eq!(
-            crate::tools::registry::safety_of("read_file"),
+            crate::agent::tools::registry::safety_of("read_file"),
             Safety::ReadOnly
         );
-        assert_eq!(crate::tools::registry::safety_of("grep"), Safety::ReadOnly);
         assert_eq!(
-            crate::tools::registry::safety_of("create_file"),
+            crate::agent::tools::registry::safety_of("grep"),
+            Safety::ReadOnly
+        );
+        assert_eq!(
+            crate::agent::tools::registry::safety_of("create_file"),
             Safety::Mutating
         );
         // Unknown tools fall back to Mutating (the conservative choice).
         assert_eq!(
-            crate::tools::registry::safety_of("nonexistent"),
+            crate::agent::tools::registry::safety_of("nonexistent"),
             Safety::Mutating
         );
     }

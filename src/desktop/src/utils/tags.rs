@@ -1,6 +1,6 @@
 //! Extracts and normalises (to lowercase) the `tags` field from a markdown file's YAML front matter.
 
-use crate::utils::markdown::parse_front_matter;
+use crate::markdown::parse_front_matter;
 use std::path::Path;
 
 /// Extract tags from a markdown file's YAML front matter.

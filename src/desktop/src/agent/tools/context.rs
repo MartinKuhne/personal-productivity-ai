@@ -1,0 +1,112 @@
+//! Tool context — provides tools with access to `AppConfig` and the file event bus, plus safe virtual-path resolution.
+
+use crate::app::vfs;
+use crate::bus::core::Bus;
+use crate::bus::events::file::{FileEvent, FileEventKind, FileEventProducer};
+use std::path::{Path, PathBuf};
+
+/// Read-only VFS path resolver wrapping `AppConfig`.
+#[derive(Clone, Copy)]
+pub struct VfsResolver<'a> {
+    pub config: &'a crate::config::AppConfig,
+}
+
+impl<'a> VfsResolver<'a> {
+    /// Create a new `VfsResolver`.
+    pub fn new(config: &'a crate::config::AppConfig) -> Self {
+        Self { config }
+    }
+
+    /// Resolve a virtual path to an absolute filesystem path. Thin shim
+    /// over [`vfs::resolve::resolve`] that pulls the library list from
+    /// the active config. Spec: [`app/vfs/SPEC.md`](../../app/vfs/SPEC.md) (VFS-004, VFS-009).
+    pub fn resolve_virtual_path(
+        &self,
+        vpath: &str,
+        allow_write: bool,
+    ) -> Result<Option<(PathBuf, bool)>, String> {
+        vfs::resolve::resolve(vpath, allow_write, &self.config.content_libraries)
+    }
+
+    /// Resolve a virtual path for a mutating tool. Thin shim over
+    /// [`vfs::resolve::resolve_writable`]. Returns the absolute
+    /// filesystem path on success.
+    pub fn resolve_writable(&self, vpath: &str) -> Result<PathBuf, String> {
+        vfs::resolve::resolve_writable(vpath, &self.config.content_libraries)
+    }
+}
+
+/// Event publisher wrapping the file event bus for side-effecting tools.
+#[derive(Clone, Copy)]
+pub struct EventPublisher<'a> {
+    pub file_event_bus: &'a Bus<FileEvent>,
+}
+
+impl<'a> EventPublisher<'a> {
+    /// Create a new `EventPublisher`.
+    pub fn new(file_event_bus: &'a Bus<FileEvent>) -> Self {
+        Self { file_event_bus }
+    }
+
+    /// Publish a file event to the bus.
+    pub fn publish_file_event(&self, kind: FileEventKind, path: &Path) {
+        let producer = FileEventProducer::new(self.file_event_bus);
+        match kind {
+            FileEventKind::Discovered => producer.publish_discovered(path),
+            FileEventKind::Updated => producer.publish_updated(path),
+            FileEventKind::Removed => producer.publish_removed(path),
+            FileEventKind::DirDiscovered => producer.publish_dir_discovered(path),
+            FileEventKind::DirRemoved => producer.publish_dir_removed(path),
+        }
+    }
+
+    /// Obtain a [`FileEventProducer`] handle.
+    pub fn file_event_producer(&self) -> FileEventProducer<'a> {
+        FileEventProducer::new(self.file_event_bus)
+    }
+}
+
+/// Tool context — composite providing tools with access to `AppConfig` and the file event bus,
+/// plus safe virtual-path resolution via [`VfsResolver`] and event publishing via [`EventPublisher`].
+pub struct ToolContext<'a> {
+    pub config: &'a crate::config::AppConfig,
+    pub file_event_bus: &'a Bus<FileEvent>,
+    pub resolver: VfsResolver<'a>,
+    pub publisher: EventPublisher<'a>,
+}
+
+impl<'a> ToolContext<'a> {
+    /// Create a new `ToolContext`.
+    pub fn new(config: &'a crate::config::AppConfig, file_event_bus: &'a Bus<FileEvent>) -> Self {
+        Self {
+            config,
+            file_event_bus,
+            resolver: VfsResolver::new(config),
+            publisher: EventPublisher::new(file_event_bus),
+        }
+    }
+
+    /// Resolve a virtual path to an absolute filesystem path.
+    pub fn resolve_virtual_path(
+        &self,
+        vpath: &str,
+        allow_write: bool,
+    ) -> Result<Option<(PathBuf, bool)>, String> {
+        self.resolver.resolve_virtual_path(vpath, allow_write)
+    }
+
+    /// Resolve a virtual path for a mutating tool.
+    pub fn resolve_writable(&self, vpath: &str) -> Result<PathBuf, String> {
+        self.resolver.resolve_writable(vpath)
+    }
+
+    /// Publish a file event to the file event bus.
+    pub fn publish_file_event(&self, kind: FileEventKind, path: &Path) {
+        self.publisher.publish_file_event(kind, path);
+    }
+
+    /// Obtain a [`FileEventProducer`] handle.
+    pub fn file_event_producer(&self) -> FileEventProducer<'a> {
+        self.publisher.file_event_producer()
+    }
+}

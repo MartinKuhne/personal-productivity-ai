@@ -2,7 +2,7 @@
 
 use crate::markdown::ast::heading_plain_text;
 use crate::markdown::parser::parse_markdown_to_events;
-use crate::ui::ToCEntry;
+use crate::markdown::toc_entry::ToCEntry;
 
 /// Builds a Table of Contents from markdown.
 pub fn build_toc(markdown_text: &str) -> Vec<ToCEntry> {
@@ -19,10 +19,12 @@ pub fn build_toc(markdown_text: &str) -> Vec<ToCEntry> {
                 continue;
             }
             let occurrence = seen.entry(trimmed.clone()).or_insert(0);
+            // Stable string identifier — the UI layer converts
+            // this to an `egui::Id` at render time.
             let id = if *occurrence == 0 {
-                eframe::egui::Id::new(&trimmed)
+                trimmed.clone()
             } else {
-                eframe::egui::Id::new(&trimmed).with(*occurrence)
+                format!("{}#{}", trimmed, *occurrence)
             };
             *occurrence += 1;
             toc.push(ToCEntry {
@@ -46,7 +48,21 @@ mod tests {
         assert_eq!(toc.len(), 2);
         assert_eq!(toc[0].title, "Title");
         assert_eq!(toc[0].level, 1);
+        assert_eq!(toc[0].id, "Title");
         assert_eq!(toc[1].title, "Subtitle");
         assert_eq!(toc[1].level, 2);
+        assert_eq!(toc[1].id, "Subtitle");
+    }
+
+    #[test]
+    fn test_build_toc_disambiguates_duplicate_headings() {
+        // Two headings with the same text must get unique ids
+        // so the right panel can scroll to the second one.
+        let md = "# Intro\nfoo\n# Intro\nbar\n# Intro\nbaz";
+        let toc = build_toc(md);
+        assert_eq!(toc.len(), 3);
+        assert_eq!(toc[0].id, "Intro");
+        assert_eq!(toc[1].id, "Intro#1");
+        assert_eq!(toc[2].id, "Intro#2");
     }
 }

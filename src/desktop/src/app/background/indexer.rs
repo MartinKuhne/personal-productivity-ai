@@ -1,0 +1,426 @@
+//! Initial recursive scanner — walks content-library directories emitting `FileEvent::Discovered` for each entry.
+
+use crate::app::background::PdfConversionJob;
+use crate::app::background::models::{BackgroundLogEntry, LogCategory};
+use crate::bus::core::Bus;
+use crate::bus::events::file::FileEvent;
+use crate::bus::events::typed::{BackgroundEvent, FsEvent};
+use crate::config::AppConfig;
+use std::path::PathBuf;
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::mpsc::{Receiver, Sender};
+use std::sync::{Arc, Mutex};
+
+pub struct Indexer {
+    config: AppConfig,
+    tx: Sender<BackgroundEvent>,
+    bus: Bus<FileEvent>,
+    cancel: Arc<AtomicBool>,
+}
+
+impl Indexer {
+    pub fn new(
+        config: AppConfig,
+        tx: Sender<BackgroundEvent>,
+        bus: Bus<FileEvent>,
+        cancel: Arc<AtomicBool>,
+    ) -> Self {
+        Self {
+            config,
+            tx,
+            bus,
+            cancel,
+        }
+    }
+
+    pub fn spawn_workers(
+        num: usize,
+        rx_work: Arc<Mutex<Receiver<PathBuf>>>,
+        tx_gui: Sender<BackgroundEvent>,
+    ) -> Vec<std::thread::JoinHandle<()>> {
+        let mut workers = Vec::new();
+        for _ in 0..num {
+            let rx = rx_work.clone();
+            let tx_clone = tx_gui.clone();
+            let handle = std::thread::spawn(move || {
+                loop {
+                    let path = {
+                        let rx = match rx.lock() {
+                            Ok(guard) => guard,
+                            Err(_) => break,
+                        };
+                        match rx.recv() {
+                            Ok(p) => p,
+                            Err(e) => {
+                                tracing::info!(
+                                    name = "background_task.worker_shutdown",
+                                    error = %e,
+                                    "Worker channel closed. Shutting down worker thread."
+                                );
+                                break;
+                            }
+                        }
+                    };
+                    let tags = crate::utils::tags::extract_tags_from_file(&path);
+                    let _ = tx_clone.send(FsEvent::FileParsed { path, tags }.into());
+                    std::thread::yield_now();
+                }
+            });
+            workers.push(handle);
+        }
+        workers
+    }
+
+    /// Walk every content library and emit a single `FileEvent::Discovered`
+    /// per directory containing **all** files found inside it (Markdown,
+    /// PDF, image, etc.), batching them into the `paths` vec.  This keeps
+    /// the event count low during the initial scan — downstream consumers
+    /// iterate `event.paths` regardless, so the behaviour is identical.
+    ///
+    /// Each library is walked independently with its own batch; PDF and
+    /// image files are also forwarded on their respective channels for
+    /// background conversion / vision processing.
+    pub fn scan_libraries(
+        &self,
+        tx_work: &Sender<PathBuf>,
+        tx_pdf: &Sender<PathBuf>,
+        tx_img: &Sender<PathBuf>,
+    ) {
+        let mut files_scanned = 0;
+        let mut pdfs_queued = 0;
+        let mut images_queued = 0;
+        let mut last_log_time = std::time::Instant::now();
+
+        for lib in &self.config.content_libraries {
+            let is_image_lib = lib.kind == "image";
+            let root_path = PathBuf::from(&lib.root_folder);
+            let walker = walkdir::WalkDir::new(&root_path)
+                .into_iter()
+                .filter_entry(|e| e.file_name() != ".git");
+
+            let mut batch_paths: Vec<PathBuf> = Vec::new();
+            let mut current_parent: Option<PathBuf> = None;
+
+            let flush_batch = |batch: &mut Vec<PathBuf>, bus: &Bus<FileEvent>| {
+                if !batch.is_empty() {
+                    bus.publish(FileEvent::discovered(std::mem::take(batch)));
+                }
+            };
+
+            for entry in walker.filter_map(|e| e.ok()) {
+                if self.cancel.load(Ordering::SeqCst) {
+                    flush_batch(&mut batch_paths, &self.bus);
+                    return;
+                }
+                files_scanned += 1;
+                let path = entry.path();
+                if path.is_file() {
+                    let parent = path.parent().map(|p| p.to_path_buf());
+                    if parent != current_parent {
+                        flush_batch(&mut batch_paths, &self.bus);
+                        current_parent = parent;
+                    }
+                    if let Some(ext) = path.extension() {
+                        let ext_str = ext.to_string_lossy().to_lowercase();
+                        if ext_str == "md" || ext_str == "markdown" || ext_str == "txt" {
+                            batch_paths.push(path.to_path_buf());
+                            let _ = tx_work.send(path.to_path_buf());
+                        } else if ext_str == "pdf" {
+                            batch_paths.push(path.to_path_buf());
+                            let job = PdfConversionJob::new(path.to_path_buf());
+                            if job.should_convert() {
+                                pdfs_queued += 1;
+                                let _ = tx_pdf.send(path.to_path_buf());
+                            }
+                        } else if matches!(
+                            ext_str.as_str(),
+                            "jpg" | "jpeg" | "png" | "gif" | "webp" | "bmp" | "tiff" | "avif"
+                        ) && is_image_lib
+                        {
+                            let job =
+                                crate::app::background::models::ImageJob::new(path.to_path_buf());
+                            if job.should_process() {
+                                images_queued += 1;
+                                let _ = tx_img.send(path.to_path_buf());
+                            }
+                        }
+                    }
+                } else if path.is_dir() {
+                    let _ = self.tx.send(
+                        FsEvent::DirParsed {
+                            path: path.to_path_buf(),
+                        }
+                        .into(),
+                    );
+                }
+
+                if files_scanned % 500 == 0 || last_log_time.elapsed().as_secs() >= 5 {
+                    let _ = self.tx.send(
+                        BackgroundLogEntry::new(
+                            LogCategory::Indexer,
+                            format!(
+                                "Scanned {} files, queued {} PDFs, queued {} images",
+                                files_scanned, pdfs_queued, images_queued
+                            ),
+                        )
+                        .into(),
+                    );
+                    last_log_time = std::time::Instant::now();
+                }
+                if files_scanned % 50 == 0 {
+                    std::thread::yield_now();
+                }
+            }
+
+            flush_batch(&mut batch_paths, &self.bus);
+        }
+
+        let _ = self
+            .tx
+            .send(BackgroundLogEntry::new(
+                LogCategory::Indexer,
+                format!(
+                "Initial indexing complete. Scanned {} files, queued {} PDFs, queued {} images.",
+                files_scanned, pdfs_queued, images_queued
+            ),
+            ).into());
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::bus::events::file::FileEventKind;
+    use crate::config::{AppConfig, ContentLibrary};
+    use tempfile::tempdir;
+
+    #[test]
+    fn test_scan_libraries_discovers_md() {
+        let mut config = AppConfig::default();
+        let dir = tempdir().unwrap();
+        std::fs::write(dir.path().join("a.md"), "test").unwrap();
+        std::fs::write(dir.path().join("b.md"), "test").unwrap();
+
+        config.content_libraries.push(ContentLibrary {
+            name: "test".to_string(),
+            kind: "text".to_string(),
+            root_folder: dir.path().to_string_lossy().to_string(),
+            readonly: true,
+            priority: 0,
+        });
+
+        let (tx, _rx) = std::sync::mpsc::channel();
+        let bus = Bus::new();
+        let reader = bus.subscribe();
+        let cancel = Arc::new(AtomicBool::new(false));
+        let indexer = Indexer::new(config, tx, bus.clone(), cancel);
+
+        let (tx_work, _rx_work) = std::sync::mpsc::channel();
+        let (tx_pdf, _rx_pdf) = std::sync::mpsc::channel();
+        let (tx_img, _rx_img) = std::sync::mpsc::channel();
+
+        indexer.scan_libraries(&tx_work, &tx_pdf, &tx_img);
+
+        let mut discovered = Vec::new();
+        while let Ok(ev) = reader.recv_timeout(std::time::Duration::from_millis(100)) {
+            if ev.kind == FileEventKind::Discovered {
+                discovered.extend(ev.paths);
+            }
+        }
+        assert_eq!(discovered.len(), 2);
+    }
+
+    #[test]
+    fn test_scan_libraries_skips_git() {
+        let mut config = AppConfig::default();
+        let dir = tempdir().unwrap();
+        let git_dir = dir.path().join(".git");
+        std::fs::create_dir_all(&git_dir).unwrap();
+        std::fs::write(git_dir.join("secret.md"), "secret").unwrap();
+        std::fs::write(dir.path().join("visible.md"), "visible").unwrap();
+
+        config.content_libraries.push(ContentLibrary {
+            name: "test".to_string(),
+            kind: "text".to_string(),
+            root_folder: dir.path().to_string_lossy().to_string(),
+            readonly: true,
+            priority: 0,
+        });
+
+        let (tx, _rx) = std::sync::mpsc::channel();
+        let bus = Bus::new();
+        let reader = bus.subscribe();
+        let cancel = Arc::new(AtomicBool::new(false));
+        let indexer = Indexer::new(config, tx, bus, cancel);
+
+        let (tx_work, _rx_work) = std::sync::mpsc::channel();
+        let (tx_pdf, _rx_pdf) = std::sync::mpsc::channel();
+        let (tx_img, _rx_img) = std::sync::mpsc::channel();
+
+        indexer.scan_libraries(&tx_work, &tx_pdf, &tx_img);
+
+        let mut discovered = Vec::new();
+        while let Ok(ev) = reader.recv_timeout(std::time::Duration::from_millis(100)) {
+            if ev.kind == FileEventKind::Discovered {
+                discovered.extend(ev.paths);
+            }
+        }
+        assert_eq!(discovered.len(), 1);
+        assert!(discovered[0].ends_with("visible.md"));
+    }
+
+    #[test]
+    fn test_scan_libraries_queues_pdf() {
+        let mut config = AppConfig::default();
+        let dir = tempdir().unwrap();
+        std::fs::write(dir.path().join("report.pdf"), b"pdf").unwrap();
+
+        config.content_libraries.push(ContentLibrary {
+            name: "test".to_string(),
+            kind: "text".to_string(),
+            root_folder: dir.path().to_string_lossy().to_string(),
+            readonly: true,
+            priority: 0,
+        });
+
+        let (tx, _rx) = std::sync::mpsc::channel();
+        let bus = Bus::new();
+        let cancel = Arc::new(AtomicBool::new(false));
+        let indexer = Indexer::new(config, tx, bus, cancel);
+
+        let (tx_work, _rx_work) = std::sync::mpsc::channel();
+        let (tx_pdf, rx_pdf) = std::sync::mpsc::channel();
+        let (tx_img, _rx_img) = std::sync::mpsc::channel();
+
+        indexer.scan_libraries(&tx_work, &tx_pdf, &tx_img);
+
+        let pdf = rx_pdf.recv_timeout(std::time::Duration::from_millis(500));
+        assert!(pdf.is_ok());
+    }
+
+    #[test]
+    fn test_spawn_workers_creates_correct_number() {
+        let (tx_work, rx_work) = std::sync::mpsc::channel();
+        let rx_work = Arc::new(Mutex::new(rx_work));
+        let (tx_gui, _rx_gui) = std::sync::mpsc::channel();
+        let workers = Indexer::spawn_workers(4, rx_work, tx_gui);
+        assert_eq!(workers.len(), 4);
+        drop(tx_work);
+        for w in workers {
+            let _ = w.join();
+        }
+    }
+
+    #[test]
+    fn test_spawn_workers_processes_all_items() {
+        // Functional correctness: every item pushed into the work
+        // channel must produce a matching `FileParsed` message.
+        // The existing `test_spawn_workers_creates_correct_number`
+        // only checked the handle count, not the actual work.
+        let dir = tempdir().unwrap();
+        let mut paths = Vec::new();
+        for i in 0..16 {
+            let p = dir.path().join(format!("file_{}.md", i));
+            std::fs::write(&p, "---\ntags: [a]\n---\nbody").unwrap();
+            paths.push(p);
+        }
+
+        let (tx_work, rx_work) = std::sync::mpsc::channel();
+        let rx_work = Arc::new(Mutex::new(rx_work));
+        let (tx_gui, rx_gui) = std::sync::mpsc::channel();
+
+        let workers = Indexer::spawn_workers(4, rx_work, tx_gui);
+        for p in &paths {
+            tx_work.send(p.clone()).unwrap();
+        }
+        // Closing the sender signals workers to exit once the queue
+        // is drained.
+        drop(tx_work);
+
+        let mut parsed_paths: std::collections::HashSet<PathBuf> = std::collections::HashSet::new();
+        while let Ok(ev) = rx_gui.recv_timeout(std::time::Duration::from_secs(5)) {
+            if let BackgroundEvent::Fs(FsEvent::FileParsed { path, .. }) = ev {
+                parsed_paths.insert(path);
+            }
+        }
+        for w in workers {
+            let _ = w.join();
+        }
+
+        let expected: std::collections::HashSet<PathBuf> = paths.into_iter().collect();
+        assert_eq!(parsed_paths, expected);
+    }
+
+    /// Drop-shutdown: workers must terminate promptly when the
+    /// sender is dropped with no pending work. The previous tests
+    /// always sent work before dropping the sender; a regression
+    /// that breaks the channel-close signal would still pass
+    /// those tests because the queue is non-empty at shutdown.
+    /// Here we drop with an empty queue and assert every worker
+    /// join completes within a short budget.
+    #[test]
+    fn test_spawn_workers_terminates_when_sender_dropped_with_empty_queue() {
+        let (_tx_work, rx_work) = std::sync::mpsc::channel();
+        let rx_work = Arc::new(Mutex::new(rx_work));
+        let (tx_gui, _rx_gui) = std::sync::mpsc::channel();
+
+        let workers = Indexer::spawn_workers(4, rx_work, tx_gui);
+        // Sender is in scope, but no items are sent. Drop the
+        // sender now; workers must see the channel close and exit.
+        drop(_tx_work);
+
+        let start = std::time::Instant::now();
+        for w in workers {
+            // join timeout: workers should exit in well under a
+            // second on a quiet queue. If a worker hangs, this
+            // surfaces as a hang rather than a silent infinite loop.
+            let join_budget = std::time::Duration::from_secs(2);
+            assert!(
+                start.elapsed() < join_budget,
+                "workers did not shut down within {join_budget:?}"
+            );
+            let _ = w.join();
+        }
+    }
+
+    /// A path that points at a non-existent file must not panic;
+    /// the worker should produce a `FileParsed` message with an
+    /// empty tag vector and move on. The existing tests only
+    /// cover happy paths where the file exists; a missing-file
+    /// path would surface as a panic that crashes the worker
+    /// thread and the channel goes silent.
+    #[test]
+    fn test_spawn_workers_handles_missing_file() {
+        let (tx_work, rx_work) = std::sync::mpsc::channel();
+        let rx_work = Arc::new(Mutex::new(rx_work));
+        let (tx_gui, rx_gui) = std::sync::mpsc::channel();
+
+        let workers = Indexer::spawn_workers(1, rx_work, tx_gui);
+        let missing = PathBuf::from("definitely/does/not/exist/note.md");
+        tx_work.send(missing.clone()).unwrap();
+        drop(tx_work);
+
+        let mut got_file_parsed = false;
+        let start = std::time::Instant::now();
+        while start.elapsed() < std::time::Duration::from_secs(2) {
+            if let Ok(BackgroundEvent::Fs(FsEvent::FileParsed { path, tags })) =
+                rx_gui.recv_timeout(std::time::Duration::from_millis(100))
+            {
+                assert_eq!(path, missing);
+                assert!(
+                    tags.is_empty(),
+                    "missing file must produce an empty tag list, got {tags:?}"
+                );
+                got_file_parsed = true;
+                break;
+            }
+        }
+        assert!(
+            got_file_parsed,
+            "worker must produce a FileParsed message for a missing file"
+        );
+        for w in workers {
+            let _ = w.join();
+        }
+    }
+}

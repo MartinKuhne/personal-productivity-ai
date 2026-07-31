@@ -7,9 +7,9 @@ use crate::agent::response_formatter::{
     format_tool_call_message, format_tool_result_message, split_thinking_and_content,
 };
 use crate::agent::tool_executor::ToolExecutor;
+use crate::agent::tools::get_tools_schema;
+use crate::bus::events::typed::{AgentEvent, BackgroundEvent};
 use crate::config::get_config_path;
-use crate::messages::BackgroundMessage;
-use crate::tools::get_tools_schema;
 use std::sync::atomic::Ordering;
 use std::sync::mpsc::Sender;
 
@@ -50,9 +50,11 @@ fn run_agent_inner(ctx: AgentContext) {
     if !ctx.cancel_flag.load(Ordering::SeqCst) {
         let _ = ctx
             .tx_gui
-            .send(BackgroundMessage::AgentStatus("Done".into()));
+            .send(BackgroundEvent::from(AgentEvent::Status("Done".into())));
     }
-    let _ = ctx.tx_gui.send(BackgroundMessage::AgentFinished(messages));
+    let _ = ctx
+        .tx_gui
+        .send(BackgroundEvent::from(AgentEvent::Finished(messages)));
 }
 enum Turn {
     Continue,
@@ -67,15 +69,15 @@ fn process_turn(
     full_response: &mut String,
     executor: &ToolExecutor,
 ) -> Turn {
-    let _ = ctx.tx_gui.send(BackgroundMessage::AgentStatus(
+    let _ = ctx.tx_gui.send(BackgroundEvent::from(AgentEvent::Status(
         "Waiting for LLM completions...".into(),
-    ));
+    )));
     let resp_val = match llm.chat_completion(messages, tools_json) {
         Ok(v) => v,
         Err(e) => {
             let _ = ctx
                 .tx_gui
-                .send(BackgroundMessage::AgentFailed(e.user_message()));
+                .send(BackgroundEvent::from(AgentEvent::Failed(e.user_message())));
             return Turn::Failed;
         }
     };
@@ -83,9 +85,9 @@ fn process_turn(
     let message = match extract_message(&resp_val) {
         Some(m) => m,
         None => {
-            let _ = ctx.tx_gui.send(BackgroundMessage::AgentFailed(
+            let _ = ctx.tx_gui.send(BackgroundEvent::from(AgentEvent::Failed(
                 "Invalid response schema".into(),
-            ));
+            )));
             return Turn::Failed;
         }
     };
@@ -107,13 +109,13 @@ fn process_turn(
                     .unwrap_or("");
                 full_response.push_str(&format_tool_call_message(fn_name, args));
                 full_response.push_str("\n\n");
-                let _ = ctx
-                    .tx_gui
-                    .send(BackgroundMessage::AgentResponse(full_response.clone()));
+                let _ = ctx.tx_gui.send(BackgroundEvent::from(AgentEvent::Response(
+                    full_response.clone(),
+                )));
             }
-            let _ = ctx
-                .tx_gui
-                .send(BackgroundMessage::AgentStatus("Executing tools...".into()));
+            let _ = ctx.tx_gui.send(BackgroundEvent::from(AgentEvent::Status(
+                "Executing tools...".into(),
+            )));
             let results = executor.execute_all(tc, &ctx.tx_gui);
             process_tool_results(&results, tc, messages, full_response, &ctx.tx_gui);
             Turn::Continue
@@ -125,10 +127,12 @@ fn resolve_ll_client(ctx: &AgentContext) -> Option<LLMClient> {
     let client = LLMClient::from_config(&ctx.config, ctx.model_name.as_deref())?;
     if !client.api_key_valid() {
         tracing::warn!(name = "agent.api_key.missing", "Agent run skipped.");
-        let _ = ctx.tx_gui.send(BackgroundMessage::AgentFailed(format!(
-            "API key not set. Configure in {} or use `/models`.",
-            get_config_path().display()
-        )));
+        let _ = ctx
+            .tx_gui
+            .send(BackgroundEvent::from(AgentEvent::Failed(format!(
+                "API key not set. Configure in {} or use `/models`.",
+                get_config_path().display()
+            ))));
         return None;
     }
     Some(client)
@@ -148,7 +152,7 @@ fn build_messages(
         ]
     }
 }
-fn emit_usage(resp: &serde_json::Value, tx: &Sender<BackgroundMessage>) {
+fn emit_usage(resp: &serde_json::Value, tx: &Sender<BackgroundEvent>) {
     if let Some(info) = resp.get("usage").and_then(parse_usage_block) {
         tracing::info!(
             name = "agent.usage",
@@ -157,21 +161,21 @@ fn emit_usage(resp: &serde_json::Value, tx: &Sender<BackgroundMessage>) {
             total_tokens = info.total_tokens,
             "LLM usage."
         );
-        let _ = tx.send(BackgroundMessage::AgentTokenUsage(info));
+        let _ = tx.send(BackgroundEvent::from(AgentEvent::TokenUsage(info)));
     }
 }
 fn extract_message(resp: &serde_json::Value) -> Option<serde_json::Value> {
     resp.get("choices")?.get(0)?.get("message").cloned()
 }
-fn handle_reasoning(message: &serde_json::Value, tx: &Sender<BackgroundMessage>) {
+fn handle_reasoning(message: &serde_json::Value, tx: &Sender<BackgroundEvent>) {
     if let Some(r) = message.get("reasoning_content").and_then(|r| r.as_str()) {
-        let _ = tx.send(BackgroundMessage::AgentThinking(r.to_string()));
+        let _ = tx.send(BackgroundEvent::from(AgentEvent::Thinking(r.to_string())));
     }
 }
 fn handle_content(
     message: &serde_json::Value,
     full_response: &mut String,
-    tx: &Sender<BackgroundMessage>,
+    tx: &Sender<BackgroundEvent>,
 ) {
     let content_str = message
         .get("content")
@@ -179,12 +183,14 @@ fn handle_content(
         .unwrap_or("");
     let (thinking, content) = split_thinking_and_content(content_str);
     if !thinking.is_empty() {
-        let _ = tx.send(BackgroundMessage::AgentThinking(thinking));
+        let _ = tx.send(BackgroundEvent::from(AgentEvent::Thinking(thinking)));
     }
     if !content.is_empty() {
         full_response.push_str(&content);
         full_response.push_str("\n\n");
-        let _ = tx.send(BackgroundMessage::AgentResponse(full_response.clone()));
+        let _ = tx.send(BackgroundEvent::from(AgentEvent::Response(
+            full_response.clone(),
+        )));
     }
 }
 fn process_tool_results(
@@ -192,7 +198,7 @@ fn process_tool_results(
     tool_calls: &[serde_json::Value],
     messages: &mut Vec<serde_json::Value>,
     full_response: &mut String,
-    tx: &Sender<BackgroundMessage>,
+    tx: &Sender<BackgroundEvent>,
 ) {
     let mut map: std::collections::HashMap<String, (String, String, String)> =
         std::collections::HashMap::new();
@@ -208,7 +214,9 @@ fn process_tool_results(
         if let Some((fn_name, _args, result)) = map.remove(&cid) {
             log_tool_result(&fn_name, &result);
             full_response.push_str(&format_tool_result_message(&fn_name, &result));
-            let _ = tx.send(BackgroundMessage::AgentResponse(full_response.clone()));
+            let _ = tx.send(BackgroundEvent::from(AgentEvent::Response(
+                full_response.clone(),
+            )));
             messages
                 .push(serde_json::json!({"role": "tool", "tool_call_id": cid, "content": result}));
         }

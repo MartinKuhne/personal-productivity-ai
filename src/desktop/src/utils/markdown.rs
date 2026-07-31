@@ -1,3 +1,4 @@
+#[deprecated(note = "import directly from crate::markdown")]
 pub use crate::markdown::{FrontMatter, parse_front_matter};
 
 #[cfg(test)]

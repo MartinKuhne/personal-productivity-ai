@@ -1,4 +1,4 @@
-//! Center content panel Ã¢â‚¬â€ tab bar, markdown preview, YAML front-matter editor, agent chat output, and inline editor.
+//! Center content panel — tab bar, markdown preview, YAML front-matter editor, agent chat output, and inline editor.
 
 use crate::ui::render::{render_markdown, render_yaml_table};
 use crate::ui::{FastMdApp, generate_format_prompt, open_in_system_editor, show_in_file_explorer};
@@ -269,7 +269,7 @@ pub fn render_tabs_and_content_capture(
                 if ui.button(crate::ui::strings::EDIT_BUTTON).clicked() {
                     if app.inline_editor_enabled {
                         if let Ok(content) = std::fs::read_to_string(tab_path) {
-                            app.editor_state.open(tab_path, &content);
+                            app.text_buffer.open(tab_path, &content);
                         }
                     } else {
                         open_in_system_editor(tab_path);

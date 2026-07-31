@@ -90,7 +90,7 @@ impl PartialOrd for ShrinkStep {
 /// Outcome of an FTWA computation: per-column pixel widths plus a flag telling
 /// the caller that the available width is below the sum of min-content widths,
 /// in which case the table physically cannot fit and horizontal scrolling must
-/// be enabled (doc Â§3.6 fallback).
+/// be enabled (doc §3.6 fallback).
 ///
 /// `widths.len()` matches the input column count. In the fallback case the
 /// widths equal the min-content widths so any wrapping layout still respects
@@ -99,7 +99,7 @@ impl PartialOrd for ShrinkStep {
 pub struct ColumnWidths {
     /// Per-column assigned pixel width, in input order.
     pub widths: Vec<f32>,
-    /// `true` when `available < ÃŽÂ£ min_content` Ã¢â'¬â€ caller must enable horizontal scroll.
+    /// `true` when `available < Σ min_content` — caller must enable horizontal scroll.
     pub needs_horizontal_scroll: bool,
 }
 
@@ -118,7 +118,7 @@ pub struct ColumnWidths {
 ///   width when content is narrow; this matches browser/spreadsheet auto-fit
 ///   behavior and avoids the "infinite-width column" visual defect that
 ///   proportional spare distribution produced. G3 ("use all space") is
-///   intentionally relaxed in the surplus regime (see doc Â§3.5).
+///   intentionally relaxed in the surplus regime (see doc §3.5).
 /// * **Deficit** (`sum of min_content <= available < sum of max_content`):
 ///   build a **minimum-cardinality wrap set** by sorting positive-slack
 ///   columns by slack descending and greedily adding them until their
@@ -131,7 +131,7 @@ pub struct ColumnWidths {
 ///   the deepest-slack wrap column so the sum of `widths` equals
 ///   `available` exactly.
 /// * **Fallback** (`available < sum of min_content`): return `min_content`
-///   and set `needs_horizontal_scroll = true` (doc Â§3.6). The strongest
+///   and set `needs_horizontal_scroll = true` (doc §3.6). The strongest
 ///   invariant (tokens never break) holds by construction.
 ///
 /// Returns `widths.len() == max_content.len()`. Empty input returns empty
@@ -141,9 +141,11 @@ pub struct ColumnWidths {
 ///
 /// Panics if `available` is not finite (NaN or +/-infinity), if any element
 /// of `max_content` or `min_content` is not finite, or if any
-/// `max_content[j] < min_content[j]` (the FTWA invariant). Callers that
-/// receive measurements from external sources should validate finiteness
-/// first.
+/// `max_content[j] + MAX_MIN_DRIFT_TOLERANCE < min_content[j]` — i.e. the
+/// `max >= min` invariant is violated by more than the sub-pixel drift
+/// tolerance (see the assertion below for the rationale and the constant
+/// for the value). Callers that receive measurements from external sources
+/// should validate finiteness first.
 ///
 /// # Examples
 ///
@@ -222,19 +224,48 @@ pub fn ftwa(
     // max_content[j] >= min_content[j] is an invariant (max-content is
     // always at least the width of the longest unbreakable token).
     // Without this check, a corrupted measurement (e.g. min longer than
-    // max) silently triggers the Ã'Â§3.6 fallback ("can't fit") instead of
+    // max) silently triggers the §3.6 fallback ("can't fit") instead of
     // surfacing the data error to the caller.
-    for (j, (&mx, &mn)) in max_content.iter().zip(min_content.iter()).enumerate() {
-        assert!(
-            mx >= mn,
-            "ftwa: max_content[{j}] = {mx} < min_content[{j}] = {mn} (invariant violation)"
-        );
+    //
+    // Sub-pixel drift tolerance. egui's `layout_no_wrap` can return
+    // `layout_no_wrap("A" + "B")` slightly different from
+    // `layout_no_wrap("A") + layout_no_wrap("B")` (kerning and
+    // sub-pixel rounding in the font shaper). The upstream
+    // `measure_cell` builds `min_content` from the merged string when
+    // no whitespace separates consecutive `InlineElem`s, while
+    // `max_content` is the sum of per-fragment widths — the two can
+    // differ by ~0.0625 px (= 1/16 px) on real fonts even though the
+    // logical invariant holds. Real measurement errors (e.g. swap of
+    // max and min) produce gaps orders of magnitude larger (>1 px);
+    // 1 logical pixel is the smallest visually distinguishable unit at
+    // 1x DPI, so anything above the tolerance is treated as a
+    // programmer error and panics. A sub-tolerance violation is
+    // absorbed by snapping `min` down to `max` so the deficit branch's
+    // `slack = max_content[j] - min_content[j]` and
+    // `widths[j].max(min_content[j])` floor stay well-defined.
+    const MAX_MIN_DRIFT_TOLERANCE: f32 = 1.0;
+    let mut min_content: Vec<f32> = min_content.to_vec();
+    for j in 0..n {
+        let mx = max_content[j];
+        let mn = min_content[j];
+        if mn > mx {
+            let drift = mn - mx;
+            assert!(
+                drift <= MAX_MIN_DRIFT_TOLERANCE,
+                "ftwa: max_content[{j}] = {mx} < min_content[{j}] = {mn} \
+                 (invariant violation, drift {drift} > tolerance {MAX_MIN_DRIFT_TOLERANCE})"
+            );
+            // Snap `min` down to `max`: absorbs the sub-pixel drift so
+            // the deficit branch sees a non-negative slack and the
+            // never-break-token floor equals the rendered cell width.
+            min_content[j] = mx;
+        }
     }
 
     let sum_max: f32 = max_content.iter().copied().sum();
     let sum_min: f32 = min_content.iter().copied().sum();
 
-    // Ã'Â§3.6 fallback: even at min-content the table cannot fit.
+    // §3.6 fallback: even at min-content the table cannot fit.
     if available < sum_min {
         return ColumnWidths {
             widths: min_content.to_vec(),
@@ -242,7 +273,7 @@ pub fn ftwa(
         };
     }
 
-    // Â§3.2 surplus regime: every column fits at its max-content width.
+    // §3.2 surplus regime: every column fits at its max-content width.
     // Columns are pinned at `max_content` (not stretched). Stretching
     // columns beyond their content to fill the available width produced
     // the "infinite-width column" visual defect (e.g. a narrow Cost
@@ -251,7 +282,7 @@ pub fn ftwa(
     // way: a table whose content is narrower than the viewport simply
     // does not use the full width. G3 ("use all space") is intentionally
     // relaxed in the surplus regime in favor of not distorting column
-    // widths (see doc Â§3.5).
+    // widths (see doc §3.5).
     if available >= sum_max {
         return ColumnWidths {
             widths: max_content.to_vec(),
@@ -259,7 +290,7 @@ pub fn ftwa(
         };
     }
 
-    // Ã'Â§3.3 deficit regime.
+    // §3.3 deficit regime.
     let deficit = sum_max - available;
 
     // §3.3 deficit regime. **G2 is back**: the wrap set is the
@@ -315,7 +346,7 @@ pub fn ftwa(
                 &wrap_set,
                 &mut widths,
                 max_content,
-                min_content,
+                &min_content,
                 deficit,
                 total_slack,
             );
@@ -325,14 +356,14 @@ pub fn ftwa(
                 &wrap_set,
                 &mut widths,
                 max_content,
-                min_content,
+                &min_content,
                 breakpoints,
                 deficit,
             );
         }
     }
 
-    // Fix float drift: ensure `ÃŽÂ£ widths == available` exactly by dumping any
+    // Fix float drift: ensure `Σ widths == available` exactly by dumping any
     // rounding residual into the deepest-slack wrap column (still above
     // min-content since the residual is sub-pixel). This satisfies G3 precisely.
     let drift = available - widths.iter().copied().sum::<f32>();
@@ -348,7 +379,7 @@ pub fn ftwa(
                 let sb = max_content[b] - min_content[b];
                 sa.partial_cmp(&sb)
                     .unwrap_or(std::cmp::Ordering::Equal)
-                    .then(b.cmp(&a)) // lower index = "greater" â†' max_by picks it on tie
+                    .then(b.cmp(&a)) // lower index = "greater" → max_by picks it on tie
             })
             .expect("wrap_set is non-empty (checked above)");
         widths[target] = (widths[target] + drift).max(min_content[target]);
@@ -521,7 +552,7 @@ pub struct CellTokens {
 ///
 /// Each cell's breakpoints represent its wrap-cost curve. The column's
 /// breakpoints are the sum of extra_lines across all cells at each width
-/// (Decision 1: Î£ across all cells). The result is sorted by width ascending.
+/// (Decision 1: Σ across all cells). The result is sorted by width ascending.
 pub fn compute_column_breakpoints(cell_tokens: &[CellTokens], space_width: f32) -> Vec<Breakpoint> {
     if cell_tokens.is_empty() {
         return Vec::new();
@@ -562,8 +593,8 @@ pub fn compute_column_breakpoints(cell_tokens: &[CellTokens], space_width: f32) 
 
 /// Compute breakpoints for a single cell from its token widths.
 ///
-/// Uses O(kÂ3) approach: for each of O(kÂ2) candidate line widths, simulate
-/// greedy left-to-right packing to get line count. With k â‰¤ 15 tokens per
+/// Uses O(k³) approach: for each of O(k²) candidate line widths, simulate
+/// greedy left-to-right packing to get line count. With k ≤ 15 tokens per
 /// cell, this is fast enough.
 fn cell_breakpoints(token_widths: &[f32], space_width: f32) -> Vec<Breakpoint> {
     if token_widths.is_empty() {
@@ -687,7 +718,7 @@ mod tests {
 
     #[test]
     fn surplus_regime_pins_columns_at_max_content() {
-        // max = [20, 80], sum = 100. available = 150 > sum_max â†' surplus.
+        // max = [20, 80], sum = 100. available = 150 > sum_max → surplus.
         // Columns are pinned at max_content (not stretched to fill 150).
         let max = [20.0, 80.0];
         let min = [10.0, 40.0];
@@ -783,7 +814,7 @@ mod tests {
     fn single_token_column_never_wraps() {
         // Column 1 is single-token: max == min, slack == 0. With equal-slack
         // tie-break it sorts last and is never admitted to the wrap set.
-        // max = [100, 100], min = [10, 100] Ã¢â€ â€TM col 1 has zero slack.
+        // max = [100, 100], min = [10, 100] → col 1 has zero slack.
         // available = 150, deficit = 50. Wrap set = {0}; col 1 pinned at 100.
         let max = [100.0, 100.0];
         let min = [10.0, 100.0];
@@ -796,7 +827,7 @@ mod tests {
 
     #[test]
     fn fallback_when_below_sum_min() {
-        // available < ÃŽÂ£ min Ã¢â€ â€TM return min widths, flag horizontal scroll.
+        // available < Σ min → return min widths, flag horizontal scroll.
         let max = [200.0, 200.0];
         let min = [80.0, 80.0];
         let d = ftwa_v1(&max, &min, 100.0);
@@ -860,7 +891,7 @@ mod tests {
         let max = [50.0, 50.0];
         let min = [50.0, 50.0];
         let d = ftwa_v1(&max, &min, 100.0);
-        // sum_max == sum_min == 100, available == 100 Ã¢â€ â€TM surplus branch (>=).
+        // sum_max == sum_min == 100, available == 100 → surplus branch (>=).
         assert!(!d.needs_horizontal_scroll);
         assert_eq!(round_vec(&d.widths), vec![50.0, 50.0]);
     }
@@ -929,6 +960,37 @@ mod tests {
         );
     }
 
+    /// Sub-pixel drift from egui's font shaping (kerning, sub-pixel
+    /// rounding) can make `layout_no_wrap("A" + "B")` differ from
+    /// `layout_no_wrap("A") + layout_no_wrap("B")` by a fraction of a
+    /// pixel even though the rendered cell *is* the sum of fragments.
+    /// The upstream `measure_cell` accumulates a token across
+    /// `InlineElem` boundaries when no whitespace separates them; the
+    /// `max` for that column is the sum of per-fragment widths, the
+    /// `min` is the layout of the merged string. The two can differ
+    /// by ~0.0625 px (= 1/16 px) on a real font. The function must
+    /// tolerate this sub-pixel drift instead of panicking.
+    ///
+    /// Regression for the production panic
+    /// `max_content[0] = 322.6875 < min_content[0] = 322.75`.
+    #[test]
+    fn max_geq_min_subpixel_drift_does_not_panic() {
+        let max = [322.6875_f32, 100.0];
+        let min = [322.75_f32, 50.0]; // col 0: min > max by 0.0625 (sub-pixel)
+        let d = ftwa_v1(&max, &min, 400.0);
+        assert!(!d.needs_horizontal_scroll);
+        // The drift was absorbed: col 0 ends up at its max content
+        // width (no negative slack to give).
+        assert_eq!(d.widths.len(), 2);
+        // Sum equals available (G3 in deficit).
+        assert!((d.widths.iter().sum::<f32>() - 400.0).abs() < 1e-3);
+        // No column ever below max_content (deficit only shrinks, never
+        // grows a column past max).
+        for (j, (&w, &mx)) in d.widths.iter().zip(max.iter()).enumerate() {
+            assert!(w <= mx + 1e-3, "col {j}: width {w} above max {mx}");
+        }
+    }
+
     #[test]
     fn infinity_available_panics() {
         // `f32::INFINITY` as `available` is a programmer error: it
@@ -944,7 +1006,7 @@ mod tests {
             "available = INFINITY must panic; got {result:?}"
         );
 
-        // NEG_INFINITY is also non-finite and must panic Ã¢â'¬â€ it would
+        // NEG_INFINITY is also non-finite and must panic — it would
         // also break the surplus/deficit comparison logic.
         let result_neg = std::panic::catch_unwind(|| ftwa_v1(&max, &min, f32::NEG_INFINITY));
         assert!(
@@ -988,7 +1050,7 @@ mod tests {
         let min: Vec<f32> = (0..n).map(|i| 10.0 + (i % 5) as f32).collect();
         let sum_max: f32 = max.iter().sum();
 
-        // Surplus: 2x sum_max â†' columns pinned at max_content.
+        // Surplus: 2x sum_max → columns pinned at max_content.
         let d = ftwa_v1(&max, &min, sum_max * 2.0);
         assert!(!d.needs_horizontal_scroll);
         assert_eq!(d.widths.len(), n);
@@ -1045,7 +1107,7 @@ mod tests {
         }
     }
 
-    // --- Permutation matrix: similar vs dissimilar columns Ãƒâ€"
+    // --- Permutation matrix: similar vs dissimilar columns —"
     //     fits viewport / requires word wrap / exceeds viewport ------
 
     /// Helper: assert a `ColumnWidths` decision respects the actual FTWA contract:
@@ -1153,7 +1215,7 @@ mod tests {
         }
     }
 
-    /// 3 columns of similar width, viewport below sum_min Ã¢â€ â€TM Ã'Â§3.6 fallback.
+    /// 3 columns of similar width, viewport below sum_min → §3.6 fallback.
     /// Even at min-content, the table cannot fit; render must use ScrollArea.
     #[test]
     fn permutation_similar_columns_exceed_viewport() {
@@ -1163,7 +1225,7 @@ mod tests {
         let d = ftwa_v1(&max, &min, available);
         assert_decision_invariants(&d, &max, &min, available);
         assert!(d.needs_horizontal_scroll);
-        // Ã'Â§3.6 returns min-content widths exactly Ã¢â'¬â€ never break a token.
+        // §3.6 returns min-content widths exactly — never break a token.
         assert_eq!(d.widths, vec![300.0, 300.0, 300.0]);
     }
 
@@ -1215,7 +1277,7 @@ mod tests {
         assert!((d.widths.iter().sum::<f32>() - 700.0).abs() < 1e-3);
     }
     /// Dissimilar widths where even the wide column's min-content alone
-    /// exceeds the available viewport Ã¢â€ â€TM Ã'Â§3.6 fallback.
+    /// exceeds the available viewport → §3.6 fallback.
     #[test]
     fn permutation_dissimilar_columns_exceed_viewport() {
         let max = [300.0, 600.0];
@@ -1304,7 +1366,7 @@ mod tests {
         let min = [10.0, 10.0];
         let avail = 25.0;
         let d = ftwa_v1(&max, &min, avail);
-        // With equal slacks, share_j = 15*10/20 = 7.5 each â†' widths =
+        // With equal slacks, share_j = 15*10/20 = 7.5 each → widths =
         // [12.5, 12.5]. Either index is fine for the actual value; the
         // point is the algorithm is deterministic and the sum is exact.
         let s: f32 = d.widths.iter().copied().sum();
@@ -1345,7 +1407,7 @@ mod tests {
 
     /// Boundary: `available == sum_min` lands in deficit (not fallback)
     /// because the strict `<` is used. All wrap columns shrink to their
-    /// min, producing the Â§3.6-equivalent layout but without the scroll
+    /// min, producing the §3.6-equivalent layout but without the scroll
     /// flag.
     #[test]
     fn audit_observation_available_equals_sum_min() {
@@ -1355,7 +1417,7 @@ mod tests {
     }
 
     /// Every-column-wraps path: `deficit = total_slack`, all columns
-    /// shrink to their min. Î£ = sum_min = avail. Equivalent to Â§3.6
+    /// shrink to their min. Σ = sum_min = avail. Equivalent to §3.6
     /// fallback *without* the scroll flag.
     #[test]
     fn audit_observation_every_column_wraps_to_min() {
@@ -1422,12 +1484,12 @@ mod tests {
         // G2: the only column in the wrap set is the Summary column
         // (index 6, slack 747.88 >= deficit 660.69). Every other
         // column stays at max_content.
-        for j in 0..6 {
+        for (j, (w, &m)) in d.widths.iter().zip(max.iter()).enumerate().take(6) {
             assert!(
-                (d.widths[j] - max[j]).abs() < 1e-3,
+                (w - m).abs() < 1e-3,
                 "col {j} must be pinned at max {} (G2); got {}",
-                max[j],
-                d.widths[j]
+                m,
+                w
             );
         }
         // Summary absorbs the full deficit and shrinks accordingly.
@@ -1491,7 +1553,7 @@ mod tests {
         ///         G3 intentionally relaxed in surplus â€" see `ftwa` doc).
         ///       - deficit (`sum_min <= available < sum_max`):
         ///         `sum(widths) == available` (G3 exact).
-        ///   (2) `âˆ€j. widths[j] >= min_content[j]` (never break a token).
+        ///   (2) `∀j. widths[j] >= min_content[j]` (never break a token).
         ///   (3) `widths.len() == max_content.len()`, no NaN.
         #[test]
         fn proptest_regimes_never_break_token(

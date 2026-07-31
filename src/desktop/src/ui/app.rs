@@ -1,22 +1,26 @@
-//! Root egui `App` struct Ã¢â‚¬â€ owns all application state and wires together background tasks, panels, agent, and dialogs.
+//! Root egui `App` struct — owns all application state and wires together background tasks, panels, agent, and dialogs.
 
 use crate::agent::AgentSessionManager;
-use crate::background::{BackgroundProcessManager, SharedProcessManager};
-use crate::background_task::Task;
-use crate::directory_tracker::DirectoryTracker;
-use crate::file_processor::FileEventProcessor;
-use crate::messages::BackgroundMessage;
-use crate::tag_manager::TagManager;
-use crate::ui::dialog_manager::DialogManager;
-use crate::ui::panel_layout::PanelLayout;
+use crate::app::background::BackgroundLogEntry;
+use crate::app::background::LogCategory;
+use crate::app::background::{BackgroundProcessManager, SharedProcessManager};
+use crate::app::background_task::Task;
+use crate::app::watcher::directory_tracker::DirectoryTracker;
+use crate::app::watcher::file_processor::FileEventProcessor;
+use crate::app::{
+    DialogManager, PanelLayout, PersistedUiState, SelectionManager, TabManager, TagManager,
+    TextBuffer,
+};
+use crate::bus::core::{Bus, BusReader};
+use crate::bus::events::config::ConfigArrived;
+use crate::bus::events::file::{FileEvent, FileEventProducer};
+use crate::bus::events::typed::{BackgroundEvent, FsEvent, ProcessEvent};
+use crate::config::AppConfig;
+use crate::markdown::parse_front_matter;
 use crate::ui::panels::{
     show_bottom_panel, show_center_panel, show_left_panel, show_right_panel, show_top_panel,
 };
-use crate::ui::selection_manager::SelectionManager;
-use crate::ui::tab_manager::TabManager;
-use crate::utils::markdown::parse_front_matter;
 use eframe::egui;
-use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, HashSet};
 use std::path::PathBuf;
 use std::sync::mpsc::Receiver;
@@ -42,30 +46,14 @@ impl TreeNode {
     }
 }
 
-#[derive(Clone)]
-pub struct ToCEntry {
-    pub title: String,
-    pub level: u32,
-    pub id: egui::Id,
-}
-
-/// UI state persisted across application restarts via `eframe::Storage`.
-#[derive(Serialize, Deserialize, Clone, Debug, Default)]
-pub struct PersistedUiState {
-    #[serde(default)]
-    pub left_panel_width: Option<f32>,
-    #[serde(default)]
-    pub expanded_dirs: HashSet<PathBuf>,
-}
-
 const PERSISTED_UI_STATE_KEY: &str = "ppai_ui_state";
 
 pub struct FastMdApp {
     pub content_libraries: Vec<crate::config::ContentLibrary>,
-    pub rx: Receiver<BackgroundMessage>,
-    pub tx: std::sync::mpsc::Sender<BackgroundMessage>,
-    pub file_event_bus: crate::file_events::Bus<crate::file_events::FileEvent>,
-    pub file_event_reader: Option<crate::file_events::BusReader<crate::file_events::FileEvent>>,
+    pub rx: Receiver<BackgroundEvent>,
+    pub tx: std::sync::mpsc::Sender<BackgroundEvent>,
+    pub file_event_bus: Bus<FileEvent>,
+    pub file_event_reader: Option<BusReader<FileEvent>>,
     pub file_processor: FileEventProcessor,
     pub tag_manager: TagManager,
     pub directory_tracker: DirectoryTracker,
@@ -80,13 +68,36 @@ pub struct FastMdApp {
     /// Dialog manager - owns all modal state and rendering.
     pub dialogs: DialogManager,
     pub submit_prompt: Option<String>,
-    pub editor_state: crate::editor::EditorState,
+    pub text_buffer: TextBuffer,
     pub inline_editor_enabled: bool,
     pub background_manager: SharedProcessManager,
+    /// The currently-loaded application configuration. Starts as
+    /// [`AppConfig::default`] and is replaced on the first frame
+    /// that observes a [`crate::bus::events::config::ConfigArrived`] event on
+    /// the configuration bus.
     pub config: crate::config::AppConfig,
+    /// Reader for the configuration-arrival bus. Subscribed during
+    /// construction; dropped after the first successful drain so
+    /// subsequent frames do not touch the bus.
+    config_reader: Option<BusReader<ConfigArrived>>,
     pub persisted_ui_state: PersistedUiState,
     pub pending_file_load: Option<PathBuf>,
     pub repaint_interval: Duration,
+    /// Tracks whether the one-time MCP startup ping has run.
+    ///
+    /// The ping performs network I/O (contacts each configured MCP
+    /// server and warms the tool-discovery cache), so we defer it
+    /// from construction (`AgentSessionManager::new`) to the first
+    /// UI frame and run it on a background thread.  This keeps the
+    /// UI responsive and lets progress appear in the log panel.
+    mcp_initialized: bool,
+    /// Slot for the `notify::RecommendedWatcher` handle, shared
+    /// with the file-watcher thread. The watcher writes the live
+    /// handle here just before sending [`FsEvent::Finished`]; the
+    /// UI calls [`Self::task_take_finished_watcher`] from
+    /// `handle_fs_event` to take ownership so the watcher stays
+    /// alive for the rest of the app lifetime.
+    finished_watcher_slot: Arc<Mutex<Option<notify::RecommendedWatcher>>>,
 }
 
 impl FastMdApp {
@@ -154,12 +165,12 @@ impl FastMdApp {
         &mut self.dialogs
     }
 
-    pub fn editor(&self) -> &crate::editor::EditorState {
-        &self.editor_state
+    pub fn editor(&self) -> &TextBuffer {
+        &self.text_buffer
     }
 
-    pub fn editor_mut(&mut self) -> &mut crate::editor::EditorState {
-        &mut self.editor_state
+    pub fn editor_mut(&mut self) -> &mut TextBuffer {
+        &mut self.text_buffer
     }
 
     pub fn config(&self) -> &crate::config::AppConfig {
@@ -187,7 +198,7 @@ impl FastMdApp {
     /// Returns `true` if any event was processed, so callers can
     /// schedule a follow-up UI repaint.
     fn process_file_events(&mut self) -> bool {
-        use crate::file_events::FileEventKind;
+        use crate::bus::events::file::FileEventKind;
 
         let mut changed = false;
         let mut needs_rebuild = false;
@@ -215,7 +226,7 @@ impl FastMdApp {
                     FileEventKind::Updated => {
                         for p in &event.paths {
                             if self.tab_manager.loaded_path.as_ref() == Some(p)
-                                && !self.editor_state.is_open
+                                && !self.text_buffer.is_open
                             {
                                 self.tab_manager.loaded_path = None;
                             }
@@ -278,7 +289,7 @@ impl FastMdApp {
     /// Purity: Impure (mutates the egui context's options).
     /// Preconditions: `ctx` is a valid egui context.
     /// Postconditions: The dark theme is the active theme, and the dark
-    /// theme's visuals match the FastMD palette so REQ-102 (dark color
+    /// theme's visuals match the FastMD palette so UI-002 (dark color
     /// scheme) holds even if the system preference reports light mode.
     ///
     /// egui 0.35 split the global style into a Dark and a Light theme,
@@ -313,7 +324,7 @@ impl FastMdApp {
         ctx.set_visuals_of(egui::Theme::Dark, visuals);
     }
 
-    pub fn new(cc: &eframe::CreationContext<'_>, mut config: crate::config::AppConfig) -> Self {
+    pub fn new(cc: &eframe::CreationContext<'_>, config_bus: Bus<ConfigArrived>) -> Self {
         // egui 0.35 split the global style into a Dark and a Light
         // theme, picked at runtime by `ThemePreference` (default
         // `System`). `set_visuals` writes to the *currently active*
@@ -324,74 +335,24 @@ impl FastMdApp {
         // our custom visuals to the dark theme explicitly.
         Self::configure_dark_theme(&cc.egui_ctx);
 
-        let args: Vec<String> = std::env::args().collect();
-        if args.len() > 1 {
-            let path = PathBuf::from(&args[1]);
-            if path.exists() && path.is_dir() {
-                let mut path_str = path
-                    .canonicalize()
-                    .unwrap_or(path)
-                    .to_string_lossy()
-                    .to_string();
-                if path_str.starts_with(r"\\?\") {
-                    path_str = path_str[4..].to_string();
-                }
-                let mut found = false;
-                for lib in &config.content_libraries {
-                    if lib.root_folder == path_str {
-                        found = true;
-                        break;
-                    }
-                }
-                if !found {
-                    config
-                        .content_libraries
-                        .push(crate::config::ContentLibrary {
-                            root_folder: path_str,
-                            name: "Workspace".to_string(),
-                            kind: "text".to_string(),
-                            readonly: false,
-                            priority: 0,
-                        });
-                }
-            }
-        }
+        // Subscribe before any worker is spawned so the first
+        // `ConfigArrived` publish reaches every reader.
+        let config_reader = config_bus.subscribe();
 
-        if config.content_libraries.is_empty() {
-            let mut current_dir = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
-            if let Ok(canon) = std::fs::canonicalize(&current_dir) {
-                current_dir = canon;
-            }
-            let mut path_str = current_dir.to_string_lossy().to_string();
-            if path_str.starts_with(r"\\?\") {
-                path_str = path_str[4..].to_string();
-            }
-            config
-                .content_libraries
-                .push(crate::config::ContentLibrary {
-                    root_folder: path_str,
-                    name: "Workspace".to_string(),
-                    kind: "text".to_string(),
-                    readonly: false,
-                    priority: 0,
-                });
-        }
-
-        let background_task = Task::new(config.clone());
+        // `Task::new` and `AgentSessionManager::new` each subscribe
+        // to the same bus, then defer their own work until the
+        // event arrives. The background `Task` spawns a thread that
+        // waits on its own reader; the agent's reader is drained on
+        // the UI thread in `update_ui`.
+        let background_task = Task::new(config_bus.clone());
+        // The file-watcher thread writes the `RecommendedWatcher`
+        // handle into this slot before sending `FsEvent::Finished`;
+        // the UI takes ownership from `task_take_finished_watcher`
+        // in `handle_fs_event`.
+        let finished_watcher_slot = background_task.finished_watcher.clone();
         let file_processor = FileEventProcessor::new(background_task.file_event_bus.subscribe());
         let background_manager = Arc::new(Mutex::new(BackgroundProcessManager::new()));
-        let inline_editor_enabled = config.inline_editor_enabled;
-
-        let batch_dialog_config = crate::batch::types::BatchDialogConfig {
-            available_dirs: config
-                .content_libraries
-                .iter()
-                .map(|lib| PathBuf::from(&lib.root_folder))
-                .collect(),
-            ..Default::default()
-        };
-        let mut dialogs = DialogManager::new();
-        dialogs.batch_dialog_config = batch_dialog_config;
+        let agent = AgentSessionManager::new(config_bus);
 
         let event_bus = background_task.file_event_bus;
         let dir_tracker = DirectoryTracker::new(event_bus.subscribe());
@@ -417,8 +378,15 @@ impl FastMdApp {
             selection.expanded_dirs.insert(dir.clone());
         }
 
+        let dialogs = DialogManager::new();
+        // `batch_dialog_config.available_dirs` is populated from
+        // the published config in `drain_config_bus` on the first
+        // frame.
+
         Self {
-            content_libraries: config.content_libraries.clone(),
+            // Populated from the bus on the first frame; the
+            // default keeps the early frame compilable and stable.
+            content_libraries: Vec::new(),
             rx: background_task.rx,
             tx: background_task.tx,
             file_event_reader: Some(event_bus.subscribe()),
@@ -430,16 +398,19 @@ impl FastMdApp {
             selection,
             tab_manager: TabManager::new(),
             _watcher: None,
-            agent: AgentSessionManager::new(config.clone()),
+            agent,
             dialogs,
             submit_prompt: None,
-            editor_state: crate::editor::EditorState::default(),
-            inline_editor_enabled,
+            text_buffer: TextBuffer::new(),
+            inline_editor_enabled: false,
             background_manager,
-            config,
+            config: AppConfig::default(),
+            config_reader: Some(config_reader),
             persisted_ui_state,
             pending_file_load: None,
             repaint_interval: Duration::from_millis(16),
+            mcp_initialized: false,
+            finished_watcher_slot,
         }
     }
 
@@ -448,32 +419,79 @@ impl FastMdApp {
     /// Outputs: `FastMdApp` with every collection empty and every optional set to `None`.
     /// Purity: Constructs a new value; no side effects.
     /// Preconditions: None.
-    /// Postconditions: Caller still owns a usable `Sender<BackgroundMessage>` paired with `rx`.
+    /// Postconditions: Caller still owns a usable `Sender<BackgroundEvent>` paired with `rx`.
     pub fn empty_state(config: crate::config::AppConfig) -> Self {
+        // Publish the supplied config into a private bus and let
+        // `empty_state_via_bus` build the struct through the same
+        // bus-driven init path. This keeps a single code path for
+        // tests that don't need a real `CreationContext`.
+        let bus = crate::bus::config::config_bus();
+        bus.publish(ConfigArrived::new(config.clone()));
+        Self::empty_state_via_bus(bus, config)
+    }
+
+    /// Build an `empty_state` `FastMdApp` by publishing `config` into
+    /// a private bus and draining it synchronously. This is the test
+    /// counterpart of [`Self::new`]: no `CreationContext` is needed
+    /// because we don't apply egui visuals.
+    fn empty_state_via_bus(bus: Bus<ConfigArrived>, config: crate::config::AppConfig) -> Self {
         let (tx, rx) = std::sync::mpsc::channel();
+        let background_task = Task::new(bus.clone());
+        // The `empty_state` test path creates the background `Task`
+        // (so it subscribes to the config bus) but uses its own
+        // fresh `tx`/`rx` channel for the UI side. As a result the
+        // file-watcher thread never has a chance to deposit a
+        // `RecommendedWatcher` into the slot the UI knows about, so
+        // we point the slot at a fresh empty one.
+        let finished_watcher_slot = background_task.finished_watcher.clone();
+        let file_processor = FileEventProcessor::new(background_task.file_event_bus.subscribe());
+        let background_manager = Arc::new(Mutex::new(BackgroundProcessManager::new()));
+        let mut agent = AgentSessionManager::new(bus.clone());
+        agent.set_config(config.clone());
+
+        let event_bus = background_task.file_event_bus;
+        let dir_tracker = DirectoryTracker::new(event_bus.subscribe());
+
+        let mut dialogs = DialogManager::new();
+        let batch_dialog_config = crate::app::batch::types::BatchDialogConfig {
+            available_dirs: config
+                .content_libraries
+                .iter()
+                .map(|lib| PathBuf::from(&lib.root_folder))
+                .collect(),
+            ..Default::default()
+        };
+        dialogs.batch_dialog_config = batch_dialog_config;
+
+        let content_libraries = config.content_libraries.clone();
+        let inline_editor_enabled = config.inline_editor_enabled;
+
         Self {
-            content_libraries: Vec::new(),
+            content_libraries,
             rx,
             tx,
-            file_event_bus: crate::file_events::Bus::new(),
-            file_event_reader: None,
-            file_processor: FileEventProcessor::new(crate::file_events::BusReader::detached()),
+            file_event_bus: event_bus.clone(),
+            file_event_reader: Some(event_bus.subscribe()),
+            file_processor,
             tag_manager: TagManager::new(),
             layout: PanelLayout::new(),
             selection: SelectionManager::new(),
             tab_manager: TabManager::new(),
             _watcher: None,
-            agent: AgentSessionManager::new(config.clone()),
-            dialogs: DialogManager::new(),
+            agent,
+            dialogs,
             submit_prompt: None,
-            editor_state: crate::editor::EditorState::default(),
-            inline_editor_enabled: true,
-            background_manager: Arc::new(Mutex::new(BackgroundProcessManager::new())),
-            directory_tracker: DirectoryTracker::new(crate::file_events::BusReader::detached()),
+            text_buffer: TextBuffer::new(),
+            inline_editor_enabled,
+            background_manager,
+            directory_tracker: dir_tracker,
             config,
+            config_reader: None,
             persisted_ui_state: PersistedUiState::default(),
             pending_file_load: None,
             repaint_interval: Duration::from_millis(16),
+            mcp_initialized: false,
+            finished_watcher_slot,
         }
     }
 
@@ -493,6 +511,17 @@ impl FastMdApp {
             self.file_event_bus.clone(),
         );
         self.agent.set_show_results(true);
+    }
+
+    /// Take the `RecommendedWatcher` handle that the file-watcher
+    /// thread deposits just before sending `FsEvent::Finished`.
+    /// Returns `None` if the slot is empty (watcher init failed, or
+    /// the handle has already been taken).
+    fn task_take_finished_watcher(&self) -> Option<notify::RecommendedWatcher> {
+        self.finished_watcher_slot
+            .lock()
+            .ok()
+            .and_then(|mut slot| slot.take())
     }
 }
 
@@ -550,13 +579,140 @@ impl FastMdApp {
     /// scheduling, etc).
     pub fn update_ui(&mut self, ui: &mut egui::Ui) {
         let ctx = ui.ctx();
+        self.drain_config_bus();
         self.process_file_events_and_repaint(ctx);
         self.drain_background_channel();
+        self.initialize_mcp_on_first_frame();
         self.handle_file_selection(ctx);
-        self.show_editor_overlay(ctx);
+        self.show_editor_overlay(ui);
         self.show_modals(ui);
         self.render_panels(ui);
         self.handle_deferred_actions();
+    }
+
+    /// Drain the configuration-arrival bus on the first frame and
+    /// populate every config-derived field (`self.config`,
+    /// `self.content_libraries`, `self.inline_editor_enabled`,
+    /// `self.dialogs.batch_dialog_config.available_dirs`). The
+    /// reader is dropped after the first frame so subsequent
+    /// frames do not touch the bus.
+    fn drain_config_bus(&mut self) {
+        // Snapshot the reader out of `self` so we can do a
+        // non-borrowing drain (we also need to mutate other fields).
+        let mut config: Option<ConfigArrived> = None;
+        if let Some(reader) = self.config_reader.as_ref() {
+            match reader.try_recv() {
+                Ok(event) => config = Some(event),
+                Err(std::sync::mpsc::TryRecvError::Empty) => {
+                    // The publish happened *after* this subscriber
+                    // registered, which means the broadcast channel
+                    // will not deliver the event to us. Surface this
+                    // in the log so the operator can find the wiring
+                    // bug.
+                    tracing::error!(
+                        name = "config.arrived.missed",
+                        "FastMdApp reader was registered after the publish; \
+                         broadcasting only delivers to pre-existing subscribers. \
+                         The app will use AppConfig::default() and content \
+                         libraries will be empty until the next startup."
+                    );
+                    self.config_reader = None;
+                    return;
+                }
+                Err(std::sync::mpsc::TryRecvError::Disconnected) => {
+                    // Bus is gone; fall through and clear the reader.
+                }
+            }
+        }
+        // We either have a config or the bus is disconnected;
+        // either way, drop the reader so we don't poll again.
+        self.config_reader = None;
+
+        let Some(event) = config else {
+            return;
+        };
+
+        let mut config = event.config;
+        // Apply CLI argument / cwd fallback to the content libraries
+        // list. Kept here (rather than in `new`) so the fallback only
+        // runs once the published config has arrived.
+        let args: Vec<String> = std::env::args().collect();
+        if args.len() > 1 {
+            let path = PathBuf::from(&args[1]);
+            if path.exists() && path.is_dir() {
+                let mut path_str = path
+                    .canonicalize()
+                    .unwrap_or(path)
+                    .to_string_lossy()
+                    .to_string();
+                if path_str.starts_with(r"\\?\") {
+                    path_str = path_str[4..].to_string();
+                }
+                let found = config
+                    .content_libraries
+                    .iter()
+                    .any(|lib| lib.root_folder == path_str);
+                if !found {
+                    config
+                        .content_libraries
+                        .push(crate::config::ContentLibrary {
+                            root_folder: path_str,
+                            name: "Workspace".to_string(),
+                            kind: "text".to_string(),
+                            readonly: false,
+                            priority: 0,
+                        });
+                }
+            }
+        }
+        if config.content_libraries.is_empty() {
+            let mut current_dir = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
+            if let Ok(canon) = std::fs::canonicalize(&current_dir) {
+                current_dir = canon;
+            }
+            let mut path_str = current_dir.to_string_lossy().to_string();
+            if path_str.starts_with(r"\\?\") {
+                path_str = path_str[4..].to_string();
+            }
+            config
+                .content_libraries
+                .push(crate::config::ContentLibrary {
+                    root_folder: path_str,
+                    name: "Workspace".to_string(),
+                    kind: "text".to_string(),
+                    readonly: false,
+                    priority: 0,
+                });
+        }
+
+        // Mirror the config into the agent so any session started
+        // after the first frame uses the published config.
+        self.agent.set_config(config.clone());
+
+        // Build the system prompt now that we have the config.
+        // Previously this happened in `main.rs` before the egui
+        // loop; moving it here keeps the prompt-build path on the
+        // same "config has arrived" trigger that the rest of the
+        // init uses.
+        let prompt = crate::agent::prompt_builder::SystemPromptBuilder::new(&config).build(&config);
+        tracing::info!(
+            name = "app.startup",
+            system_prompt = %prompt,
+            "Application started successfully. Emitted system prompt for diagnostics."
+        );
+
+        self.content_libraries = config.content_libraries.clone();
+        self.inline_editor_enabled = config.inline_editor_enabled;
+        self.dialogs.batch_dialog_config.available_dirs = config
+            .content_libraries
+            .iter()
+            .map(|lib| PathBuf::from(&lib.root_folder))
+            .collect();
+        self.config = config;
+        tracing::info!(
+            name = "config.arrived",
+            "FastMdApp populated from ConfigArrived event"
+        );
     }
 
     fn process_file_events_and_repaint(&mut self, ctx: &egui::Context) {
@@ -571,78 +727,124 @@ impl FastMdApp {
     }
 
     fn drain_background_channel(&mut self) {
-        while let Ok(msg) = self.rx.try_recv() {
-            match msg {
-                BackgroundMessage::FileParsed { path, tags } => {
-                    self.tag_manager.add_tags(path.clone(), tags);
-                    self.file_processor.add_file(path);
+        while let Ok(event) = self.rx.try_recv() {
+            // Dispatch the typed event directly by domain
+            // (Agent / Fs / Process).
+            match event {
+                BackgroundEvent::Agent(agent_ev) => {
+                    self.agent.handle_agent_event(agent_ev);
                 }
-                BackgroundMessage::DirParsed { path } => {
-                    self.file_processor.add_dir(path);
+                BackgroundEvent::Fs(fs_ev) => {
+                    self.handle_fs_event(fs_ev);
                 }
-                BackgroundMessage::Finished(watcher) => {
-                    self._watcher = Some(watcher);
-                    self.file_processor.indexing_finished = true;
-                    self.tag_manager.rebuild();
-                }
-                BackgroundMessage::FinishedWithoutWatcher => {
-                    self.file_processor.indexing_finished = true;
-                    self.tag_manager.rebuild();
-                }
-                BackgroundMessage::FileModified { path, tags } => {
-                    self.tag_manager.add_tags(path.clone(), tags);
-                    self.file_processor.add_file(path.clone());
-                    self.tag_manager.rebuild();
-                    if self.tab_manager.loaded_path.as_ref() == Some(&path) {
-                        self.tab_manager.loaded_path = None;
-                    }
-                }
-                BackgroundMessage::FileDeleted { path } => {
-                    self.file_processor.remove_file(&path);
-                    self.tag_manager.remove_file(&path);
-                    self.tag_manager.rebuild();
-                    if self.selection.selected_file().is_some_and(|p| p == &path) {
-                        *self.selection.selected_file_mut() = None;
-                        self.tab_manager.current_yaml = None;
-                        self.tab_manager.current_markdown = String::new();
-                        self.tab_manager.toc.clear();
-                    }
-                    self.selection.selected_files_mut().remove(&path);
-                    if self.tab_manager.loaded_path.as_ref() == Some(&path) {
-                        self.tab_manager.loaded_path = None;
-                    }
-                }
-                BackgroundMessage::AgentStatus(_)
-                | BackgroundMessage::AgentThinking(_)
-                | BackgroundMessage::AgentResponse(_)
-                | BackgroundMessage::AgentFinished(_)
-                | BackgroundMessage::AgentFailed(_)
-                | BackgroundMessage::AgentTokenUsage(_) => {
-                    self.agent.handle_background_message(msg);
-                }
-                BackgroundMessage::LogEntry(entry) => {
-                    if let Ok(mut mgr) = self.background_manager.lock() {
-                        mgr.push_log(entry);
-                    }
-                }
-                BackgroundMessage::FileLoaded { path, content } => {
-                    self.pending_file_load = None;
-                    if let Ok(content) = content {
-                        if let Some(fm) = parse_front_matter(&content) {
-                            self.tab_manager.current_yaml = Some(fm.yaml);
-                            self.tab_manager.current_markdown = fm.body.to_string();
-                        } else {
-                            self.tab_manager.current_yaml = None;
-                            self.tab_manager.current_markdown = content;
-                        }
-                        self.tab_manager.loaded_path = Some(path.clone());
-                        self.tab_manager.toc =
-                            crate::ui::render::build_toc(&self.tab_manager.current_markdown);
-                        self.tab_manager.scroll_to_header_id = None;
-                    }
+                BackgroundEvent::Process(proc_ev) => {
+                    self.handle_process_event(proc_ev);
                 }
             }
         }
+    }
+
+    fn handle_fs_event(&mut self, ev: FsEvent) {
+        use FsEvent;
+        match ev {
+            FsEvent::FileParsed { path, tags } => {
+                self.tag_manager.add_tags(path.clone(), tags);
+                self.file_processor.add_file(path);
+            }
+            FsEvent::DirParsed { path } => {
+                self.file_processor.add_dir(path);
+            }
+            FsEvent::Finished => {
+                // The file-watcher thread has finished its initial
+                // scan and the watcher handle has been moved into
+                // the `Task::finished_watcher` slot. Take it now so
+                // it stays alive for the rest of the app lifetime.
+                if let Some(watcher) = self.task_take_finished_watcher() {
+                    self._watcher = Some(watcher);
+                }
+                self.file_processor.indexing_finished = true;
+                self.tag_manager.rebuild();
+            }
+            FsEvent::FinishedWithoutWatcher => {
+                self.file_processor.indexing_finished = true;
+                self.tag_manager.rebuild();
+            }
+            FsEvent::FileModified { path, tags } => {
+                self.tag_manager.add_tags(path.clone(), tags);
+                self.file_processor.add_file(path.clone());
+                self.tag_manager.rebuild();
+                if self.tab_manager.loaded_path.as_ref() == Some(&path) {
+                    self.tab_manager.loaded_path = None;
+                }
+            }
+            FsEvent::FileDeleted { path } => {
+                self.file_processor.remove_file(&path);
+                self.tag_manager.remove_file(&path);
+                self.tag_manager.rebuild();
+                if self.selection.selected_file().is_some_and(|p| p == &path) {
+                    *self.selection.selected_file_mut() = None;
+                    self.tab_manager.current_yaml = None;
+                    self.tab_manager.current_markdown = String::new();
+                    self.tab_manager.toc.clear();
+                }
+                self.selection.selected_files_mut().remove(&path);
+                if self.tab_manager.loaded_path.as_ref() == Some(&path) {
+                    self.tab_manager.loaded_path = None;
+                }
+            }
+        }
+    }
+
+    fn handle_process_event(&mut self, ev: ProcessEvent) {
+        use ProcessEvent;
+        match ev {
+            ProcessEvent::LogEntry(entry) => {
+                if let Ok(mut mgr) = self.background_manager.lock() {
+                    mgr.push_log(entry);
+                }
+            }
+            ProcessEvent::FileLoaded { path, content } => {
+                self.pending_file_load = None;
+                if let Ok(content) = content {
+                    if let Some(fm) = parse_front_matter(&content) {
+                        self.tab_manager.current_yaml = Some(fm.yaml);
+                        self.tab_manager.current_markdown = fm.body.to_string();
+                    } else {
+                        self.tab_manager.current_yaml = None;
+                        self.tab_manager.current_markdown = content;
+                    }
+                    self.tab_manager.loaded_path = Some(path.clone());
+                    self.tab_manager.toc =
+                        crate::ui::render::build_toc(&self.tab_manager.current_markdown);
+                    self.tab_manager.scroll_to_header_id = None;
+                }
+            }
+        }
+    }
+
+    /// Runs the one-time MCP startup ping on the first call.
+    ///
+    /// We deliberately defer network I/O from construction (where it
+    /// could delay startup) to here, where the UI is already running.
+    /// The ping is dispatched on a background thread (`std::thread::spawn`)
+    /// so the egui UI thread never blocks; progress is posted into the
+    /// background log channel so it appears in the log panel alongside
+    /// other startup messages.
+    fn initialize_mcp_on_first_frame(&mut self) {
+        if self.mcp_initialized {
+            return;
+        }
+        self.mcp_initialized = true;
+
+        let tx = self.tx.clone();
+        let servers_ok = self.agent.initialize_mcp();
+        let _ = tx.send(
+            BackgroundLogEntry::new(
+                LogCategory::Indexer,
+                format!("MCP startup ping complete: {servers_ok} server(s) responded"),
+            )
+            .into(),
+        );
     }
 
     fn handle_file_selection(&mut self, _ctx: &egui::Context) {
@@ -656,7 +858,7 @@ impl FastMdApp {
             std::thread::spawn(move || {
                 let content = std::fs::read_to_string(&path).map_err(|e| e.to_string());
                 if tx
-                    .send(BackgroundMessage::FileLoaded { path, content })
+                    .send(ProcessEvent::FileLoaded { path, content }.into())
                     .is_err()
                 {
                     tracing::warn!("Background channel closed, file load result dropped");
@@ -665,9 +867,17 @@ impl FastMdApp {
         }
     }
 
-    fn show_editor_overlay(&mut self, ctx: &egui::Context) {
-        let producer = crate::file_events::FileEventProducer::new(&self.file_event_bus);
-        if self.editor_state.show(ctx, &producer) {
+    fn show_editor_overlay(&mut self, ui: &mut egui::Ui) {
+        let producer = FileEventProducer::new(&self.file_event_bus);
+        // The editor opens its own top-level `egui::Window` from
+        // the context pulled out of `ui`. After it returns we
+        // check whether the buffer was closed (either by a
+        // successful save or a manual cancel) and clear the
+        // loaded path so the centre panel reloads the file on
+        // the next frame.
+        let was_open = self.text_buffer.is_open;
+        let _ = crate::ui::editor_egui::show_text_editor(ui, &mut self.text_buffer, &producer);
+        if was_open && !self.text_buffer.is_open {
             self.tab_manager.loaded_path = None;
         }
     }
@@ -726,10 +936,10 @@ impl FastMdApp {
                 .and_then(|p| dialog_config.available_dirs.iter().position(|d| d == p));
 
             if let Some(result) =
-                crate::batch::dialog::show_batch_modal(self, ctx, &mut dialog_config)
+                crate::app::batch::dialog::show_batch_modal(self, ctx, &mut dialog_config)
             {
                 match result {
-                    crate::batch::types::BatchDialogResult::Process(config) => {
+                    crate::app::batch::types::BatchDialogResult::Process(config) => {
                         if self.dialogs.batch_handle.is_none() {
                             let prompt_text = dialog_config
                                 .available_prompts
@@ -738,7 +948,7 @@ impl FastMdApp {
                                 .unwrap_or_default();
 
                             let (coordinator, cancel_flag) =
-                                crate::batch::coordinator::BatchCoordinator::new(
+                                crate::app::batch::coordinator::BatchCoordinator::new(
                                     config,
                                     self.config.clone(),
                                     self.tx.clone(),
@@ -750,7 +960,7 @@ impl FastMdApp {
                             self.dialogs.batch_cancel_flag = Some(cancel_flag);
                         }
                     }
-                    crate::batch::types::BatchDialogResult::Cancel => {
+                    crate::app::batch::types::BatchDialogResult::Cancel => {
                         self.dialogs.batch_dialog_open = false;
                         dialog_config.available_prompts.clear();
                         dialog_config.selected_prompt_idx = None;
@@ -794,7 +1004,8 @@ impl FastMdApp {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::messages::TokenUsageInfo;
+    use crate::bus::events::messages::TokenUsageInfo;
+    use crate::bus::events::typed::AgentEvent;
     use crate::ui::test_helpers::assert::assert_no_id_change_in_shapes;
     use std::path::PathBuf;
 
@@ -802,7 +1013,7 @@ mod tests {
         FastMdApp::empty_state(crate::config::AppConfig::default())
     }
 
-    /// REQ-102 (dark color scheme): `configure_dark_theme` must pin the
+    /// UI-002 (dark color scheme): `configure_dark_theme` must pin the
     /// active theme to Dark and apply the FastMD brand palette
     /// (RGB(9, 9, 11) surface, indigo selection) to the dark theme.
     /// Regression guard: the egui 0.27 → 0.35 upgrade silently fell
@@ -884,35 +1095,37 @@ mod tests {
 
         // 1. FileParsed
         app.tx
-            .send(BackgroundMessage::FileParsed {
-                path: test_file.clone(),
-                tags: vec!["tag1".to_string()],
-            })
+            .send(
+                FsEvent::FileParsed {
+                    path: test_file.clone(),
+                    tags: vec!["tag1".to_string()],
+                }
+                .into(),
+            )
             .unwrap();
 
         // 2. DirParsed
         app.tx
-            .send(BackgroundMessage::DirParsed {
-                path: test_dir.clone(),
-            })
+            .send(
+                FsEvent::DirParsed {
+                    path: test_dir.clone(),
+                }
+                .into(),
+            )
             .unwrap();
 
         // 3. FinishedWithoutWatcher
-        app.tx
-            .send(BackgroundMessage::FinishedWithoutWatcher)
-            .unwrap();
+        app.tx.send(FsEvent::FinishedWithoutWatcher.into()).unwrap();
 
         // 4. Agent Status & Response
         app.tx
-            .send(BackgroundMessage::AgentStatus("Processing...".to_string()))
+            .send(AgentEvent::Status("Processing...".to_string()).into())
             .unwrap();
         app.tx
-            .send(BackgroundMessage::AgentThinking(
-                "Thinking step".to_string(),
-            ))
+            .send(AgentEvent::Thinking("Thinking step".to_string()).into())
             .unwrap();
         app.tx
-            .send(BackgroundMessage::AgentResponse("Done result".to_string()))
+            .send(AgentEvent::Response("Done result".to_string()).into())
             .unwrap();
 
         let _ = ctx.run_ui(Default::default(), |ui| {
@@ -940,10 +1153,13 @@ mod tests {
 
         // File modified message
         app.tx
-            .send(BackgroundMessage::FileModified {
-                path: file_path.clone(),
-                tags: vec!["updated".to_string()],
-            })
+            .send(
+                FsEvent::FileModified {
+                    path: file_path.clone(),
+                    tags: vec!["updated".to_string()],
+                }
+                .into(),
+            )
             .unwrap();
 
         let _ = ctx.run_ui(Default::default(), |ui| {
@@ -954,9 +1170,12 @@ mod tests {
 
         // File deleted message
         app.tx
-            .send(BackgroundMessage::FileDeleted {
-                path: file_path.clone(),
-            })
+            .send(
+                FsEvent::FileDeleted {
+                    path: file_path.clone(),
+                }
+                .into(),
+            )
             .unwrap();
 
         let _ = ctx.run_ui(Default::default(), |ui| {
@@ -974,9 +1193,7 @@ mod tests {
         let mut app = create_test_app();
 
         app.tx
-            .send(BackgroundMessage::AgentFailed(
-                "Network timeout".to_string(),
-            ))
+            .send(AgentEvent::Failed("Network timeout".to_string()).into())
             .unwrap();
 
         let _ = ctx.run_ui(Default::default(), |ui| {
@@ -987,9 +1204,7 @@ mod tests {
         assert!(!app.agent.state().running);
 
         app.tx
-            .send(BackgroundMessage::AgentFinished(vec![
-                serde_json::json!({"ok": true}),
-            ]))
+            .send(AgentEvent::Finished(vec![serde_json::json!({"ok": true})]).into())
             .unwrap();
 
         let _ = ctx.run_ui(Default::default(), |ui| {
@@ -1007,12 +1222,15 @@ mod tests {
 
         // First turn: small context, no cached or reasoning tokens.
         app.tx
-            .send(BackgroundMessage::AgentTokenUsage(TokenUsageInfo {
-                prompt_tokens: 100,
-                completion_tokens: 20,
-                total_tokens: 120,
-                ..Default::default()
-            }))
+            .send(
+                AgentEvent::TokenUsage(TokenUsageInfo {
+                    prompt_tokens: 100,
+                    completion_tokens: 20,
+                    total_tokens: 120,
+                    ..Default::default()
+                })
+                .into(),
+            )
             .unwrap();
 
         let _ = ctx.run_ui(Default::default(), |ui| {
@@ -1040,13 +1258,16 @@ mod tests {
 
         // Second turn: context grew, completion + reasoning added.
         app.tx
-            .send(BackgroundMessage::AgentTokenUsage(TokenUsageInfo {
-                prompt_tokens: 250,
-                completion_tokens: 30,
-                total_tokens: 280,
-                cached_tokens: Some(50),
-                reasoning_tokens: Some(5),
-            }))
+            .send(
+                AgentEvent::TokenUsage(TokenUsageInfo {
+                    prompt_tokens: 250,
+                    completion_tokens: 30,
+                    total_tokens: 280,
+                    cached_tokens: Some(50),
+                    reasoning_tokens: Some(5),
+                })
+                .into(),
+            )
             .unwrap();
 
         let _ = ctx.run_ui(Default::default(), |ui| {
@@ -1074,12 +1295,15 @@ mod tests {
 
         // Third turn: smaller context — peak should NOT shrink.
         app.tx
-            .send(BackgroundMessage::AgentTokenUsage(TokenUsageInfo {
-                prompt_tokens: 80,
-                completion_tokens: 10,
-                total_tokens: 90,
-                ..Default::default()
-            }))
+            .send(
+                AgentEvent::TokenUsage(TokenUsageInfo {
+                    prompt_tokens: 80,
+                    completion_tokens: 10,
+                    total_tokens: 90,
+                    ..Default::default()
+                })
+                .into(),
+            )
             .unwrap();
 
         let _ = ctx.run_ui(Default::default(), |ui| {
@@ -1104,7 +1328,7 @@ mod tests {
         // file that is currently loaded into the renderer, the
         // next frame must reload it from disk. We model "currently
         // loaded" by setting `loaded_path = Some(path)` while
-        // leaving `selected_file` alone Ã¢â‚¬â€ `load_selected_file`
+        // leaving `selected_file` alone — `load_selected_file`
         // (the actual reload driver) only fires when
         // `selected_file.is_some() && loaded_path != selected_file`.
         let mut app = create_test_app();
@@ -1121,7 +1345,7 @@ mod tests {
         // Use a separate clone of the bus to publish; both clones
         // share the same subscriber list.
         let publisher = app.file_event_bus.clone();
-        publisher.publish(crate::file_events::FileEvent::updated_one(path.clone()));
+        publisher.publish(FileEvent::updated_one(path.clone()));
 
         let changed = app.process_file_events();
         assert!(changed, "process_file_events should report a change");
@@ -1145,12 +1369,12 @@ mod tests {
         *app.selection.selected_file_mut() = Some(path.clone());
         app.tab_manager.loaded_path = Some(path.clone());
         app.file_processor.all_files.push(path.clone());
-        app.editor_state.open(&path, "old content");
-        assert!(app.editor_state.is_open);
+        app.text_buffer.open(&path, "old content");
+        assert!(app.text_buffer.is_open);
 
         app.file_event_reader = Some(app.file_event_bus.subscribe());
         let publisher = app.file_event_bus.clone();
-        publisher.publish(crate::file_events::FileEvent::updated_one(path.clone()));
+        publisher.publish(FileEvent::updated_one(path.clone()));
 
         let _ = app.process_file_events();
         assert!(
@@ -1164,7 +1388,7 @@ mod tests {
         // Sanity check: a Removed event still clears `loaded_path`
         // regardless of whether the editor is open. (We accept
         // losing unsaved edits in the editor if the file was
-        // deleted out from under us Ã¢â‚¬â€ that's the user's action.)
+        // deleted out from under us — that's the user's action.)
         let mut app = create_test_app();
         let path = PathBuf::from("/tmp/gone.md");
 
@@ -1174,7 +1398,7 @@ mod tests {
 
         app.file_event_reader = Some(app.file_event_bus.subscribe());
         let publisher = app.file_event_bus.clone();
-        publisher.publish(crate::file_events::FileEvent::removed_one(path.clone()));
+        publisher.publish(FileEvent::removed_one(path.clone()));
 
         let _ = app.process_file_events();
         assert!(app.tab_manager.loaded_path.is_none());
@@ -1198,12 +1422,10 @@ mod tests {
 
         app.file_event_reader = Some(app.file_event_bus.subscribe());
         let publisher = app.file_event_bus.clone();
-        publisher.publish(crate::file_events::FileEvent::discovered_one(pdf.clone()));
-        publisher.publish(crate::file_events::FileEvent::discovered_one(img.clone()));
-        publisher.publish(crate::file_events::FileEvent::discovered_one(md.clone()));
-        publisher.publish(crate::file_events::FileEvent::discovered_one(
-            pdf_in_pdf_only_dir.clone(),
-        ));
+        publisher.publish(FileEvent::discovered_one(pdf.clone()));
+        publisher.publish(FileEvent::discovered_one(img.clone()));
+        publisher.publish(FileEvent::discovered_one(md.clone()));
+        publisher.publish(FileEvent::discovered_one(pdf_in_pdf_only_dir.clone()));
 
         let _ = app.process_file_events();
 
@@ -1286,20 +1508,14 @@ mod tests {
 
         app.file_event_reader = Some(app.file_event_bus.subscribe());
         let publisher = app.file_event_bus.clone();
-        publisher.publish(crate::file_events::FileEvent::discovered_one(
-            PathBuf::from("/lib/notes.md"),
-        ));
-        publisher.publish(crate::file_events::FileEvent::discovered_one(
-            PathBuf::from("/lib/extra.md"),
-        ));
-        publisher.publish(crate::file_events::FileEvent::updated_one(PathBuf::from(
-            "/lib/notes.md",
-        )));
+        publisher.publish(FileEvent::discovered_one(PathBuf::from("/lib/notes.md")));
+        publisher.publish(FileEvent::discovered_one(PathBuf::from("/lib/extra.md")));
+        publisher.publish(FileEvent::updated_one(PathBuf::from("/lib/notes.md")));
 
         let _ = app.process_file_events();
         assert!(
             !app.layout.left_panel_dirty,
-            "process_file_events must not set left_panel_dirty Ã¢â‚¬â€ the width is \
+            "process_file_events must not set left_panel_dirty — the width is \
              calculated once when indexing finishes, not per bus event"
         );
     }
@@ -1325,9 +1541,7 @@ mod tests {
         // evicts the file's tags.
         app.file_event_reader = Some(app.file_event_bus.subscribe());
         app.file_event_bus
-            .publish(crate::file_events::FileEvent::removed_one(PathBuf::from(
-                "/lib/notes.md",
-            )));
+            .publish(FileEvent::removed_one(PathBuf::from("/lib/notes.md")));
         let _ = app.process_file_events();
         assert!(
             !app.tag_manager.all_tags().contains("work"),
@@ -1340,13 +1554,11 @@ mod tests {
         app.tag_manager
             .add_tags(PathBuf::from("/lib/other.md"), vec!["keep".to_string()]);
         app.file_event_bus
-            .publish(crate::file_events::FileEvent::discovered_one(
-                PathBuf::from("/lib/other.md"),
-            ));
+            .publish(FileEvent::discovered_one(PathBuf::from("/lib/other.md")));
         let _ = app.process_file_events();
         assert!(
             app.tag_manager.all_tags().contains("keep"),
-            "Discovered events must NOT call rebuild Ã¢â‚¬â€ the FileParsed path \
+            "Discovered events must NOT call rebuild — the FileParsed path \
              updates all_tags incrementally"
         );
     }
@@ -1371,12 +1583,12 @@ mod tests {
             crate::ui::ToCEntry {
                 title: "Introduction".to_string(),
                 level: 1,
-                id: egui::Id::new("intro"),
+                id: "intro".to_string(),
             },
             crate::ui::ToCEntry {
                 title: "Specifications".to_string(),
                 level: 2,
-                id: egui::Id::new("specs"),
+                id: "specs".to_string(),
             },
         ];
 
@@ -1416,7 +1628,7 @@ mod tests {
         app.tab_manager.toc = vec![crate::ui::ToCEntry {
             title: "Laptop Specifications".to_string(),
             level: 1,
-            id: egui::Id::new("laptop_specs"),
+            id: "laptop_specs".to_string(),
         }];
 
         let raw_input = egui::RawInput {

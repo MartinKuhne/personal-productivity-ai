@@ -2,8 +2,8 @@
 
 use crate::agent::agent_impl::run_agent;
 use crate::agent::context::AgentContext;
+use crate::bus::events::typed::{AgentEvent, BackgroundEvent};
 use crate::config::AppConfig;
-use crate::messages::BackgroundMessage;
 use std::collections::HashSet;
 use std::sync::Arc;
 use std::sync::atomic::AtomicBool;
@@ -23,12 +23,12 @@ fn make_config(port: u16) -> AppConfig {
     config
 }
 
-fn make_ctx(config: AppConfig) -> (AgentContext, std::sync::mpsc::Receiver<BackgroundMessage>) {
+fn make_ctx(config: AppConfig) -> (AgentContext, std::sync::mpsc::Receiver<BackgroundEvent>) {
     let (tx, rx) = std::sync::mpsc::channel();
     let ctx = AgentContext {
         config,
         tx_gui: tx,
-        file_event_bus: crate::file_events::Bus::new(),
+        file_event_bus: crate::bus::core::Bus::new(),
         active_file: None,
         active_dir: None,
         selected_files: HashSet::new(),
@@ -57,8 +57,10 @@ fn test_run_agent_missing_api_key() {
     let (ctx, rx) = make_ctx(config);
     run_agent(ctx);
     match rx.recv().unwrap() {
-        BackgroundMessage::AgentFailed(err) => assert!(err.contains("API key not set")),
-        _ => panic!("Expected AgentFailed"),
+        BackgroundEvent::Agent(AgentEvent::Failed(err)) => {
+            assert!(err.contains("API key not set"))
+        }
+        _ => panic!("Expected AgentEvent::Failed"),
     }
 }
 
@@ -78,8 +80,8 @@ fn test_run_agent_network_error() {
     let (ctx, rx) = make_ctx(config);
     run_agent(ctx);
     let mut got = false;
-    while let Ok(msg) = rx.recv() {
-        if let BackgroundMessage::AgentFailed(err) = msg {
+    while let Ok(ev) = rx.recv() {
+        if let BackgroundEvent::Agent(AgentEvent::Failed(err)) = ev {
             assert!(err.contains("Network error") || err.contains("timed out"));
             got = true;
             break;
@@ -105,8 +107,8 @@ fn test_run_agent_invalid_json_response() {
     let (ctx, rx) = make_ctx(make_config(port));
     run_agent(ctx);
     let mut got = false;
-    while let Ok(msg) = rx.recv() {
-        if let BackgroundMessage::AgentFailed(err) = msg {
+    while let Ok(ev) = rx.recv() {
+        if let BackgroundEvent::Agent(AgentEvent::Failed(err)) = ev {
             assert!(err.contains("Failed to parse"));
             got = true;
             break;
@@ -133,8 +135,8 @@ fn test_run_agent_http_status_error() {
     let (ctx, rx) = make_ctx(make_config(port));
     run_agent(ctx);
     let mut got = false;
-    while let Ok(msg) = rx.recv() {
-        if let BackgroundMessage::AgentFailed(err) = msg {
+    while let Ok(ev) = rx.recv() {
+        if let BackgroundEvent::Agent(AgentEvent::Failed(err)) = ev {
             assert!(err.contains("HTTP 400 error"));
             got = true;
             break;
@@ -166,8 +168,8 @@ fn test_run_agent_missing_choices() {
     let (ctx, rx) = make_ctx(make_config(port));
     run_agent(ctx);
     let mut got = false;
-    while let Ok(msg) = rx.recv() {
-        if let BackgroundMessage::AgentFailed(err) = msg {
+    while let Ok(ev) = rx.recv() {
+        if let BackgroundEvent::Agent(AgentEvent::Failed(err)) = ev {
             assert!(err.contains("Invalid response schema"));
             got = true;
             break;
@@ -204,14 +206,14 @@ fn test_run_agent_emits_done_status_on_natural_completion() {
     run_agent(ctx);
     let mut statuses = Vec::new();
     let mut saw_finished = false;
-    while let Ok(msg) = rx.recv() {
-        match msg {
-            BackgroundMessage::AgentStatus(s) => statuses.push(s),
-            BackgroundMessage::AgentFinished(_) => {
+    while let Ok(ev) = rx.recv() {
+        match ev {
+            BackgroundEvent::Agent(AgentEvent::Status(s)) => statuses.push(s),
+            BackgroundEvent::Agent(AgentEvent::Finished(_)) => {
                 saw_finished = true;
                 break;
             }
-            BackgroundMessage::AgentFailed(err) => panic!("agent failed: {}", err),
+            BackgroundEvent::Agent(AgentEvent::Failed(err)) => panic!("agent failed: {}", err),
             _ => {}
         }
     }
@@ -247,7 +249,7 @@ fn test_run_agent_skips_done_status_when_cancelled() {
     let ctx = AgentContext {
         config: make_config(port),
         tx_gui: tx,
-        file_event_bus: crate::file_events::Bus::new(),
+        file_event_bus: crate::bus::core::Bus::new(),
         active_file: None,
         active_dir: None,
         selected_files: HashSet::new(),
@@ -260,10 +262,10 @@ fn test_run_agent_skips_done_status_when_cancelled() {
     run_agent(ctx);
     let mut saw_done = false;
     let mut saw_finished = false;
-    while let Ok(msg) = rx.recv() {
-        match msg {
-            BackgroundMessage::AgentStatus(s) if s == "Done" => saw_done = true,
-            BackgroundMessage::AgentFinished(_) => saw_finished = true,
+    while let Ok(ev) = rx.recv() {
+        match ev {
+            BackgroundEvent::Agent(AgentEvent::Status(s)) if s == "Done" => saw_done = true,
+            BackgroundEvent::Agent(AgentEvent::Finished(_)) => saw_finished = true,
             _ => {}
         }
     }
@@ -330,11 +332,11 @@ fn test_run_agent_emits_executing_tool_message_immediately() {
     let (ctx, rx) = make_ctx(make_config(port));
     run_agent(ctx);
     let mut responses = Vec::new();
-    while let Ok(msg) = rx.recv() {
-        match msg {
-            BackgroundMessage::AgentResponse(resp) => responses.push(resp),
-            BackgroundMessage::AgentFinished(_) => break,
-            BackgroundMessage::AgentFailed(err) => panic!("agent failed: {}", err),
+    while let Ok(ev) = rx.recv() {
+        match ev {
+            BackgroundEvent::Agent(AgentEvent::Response(resp)) => responses.push(resp),
+            BackgroundEvent::Agent(AgentEvent::Finished(_)) => break,
+            BackgroundEvent::Agent(AgentEvent::Failed(err)) => panic!("agent failed: {}", err),
             _ => {}
         }
     }

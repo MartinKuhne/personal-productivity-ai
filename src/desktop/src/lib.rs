@@ -1,33 +1,34 @@
 //! Desktop application library for FastMd — a markdown knowledge-base manager with agent, tooling, and UI.
 
 pub mod agent;
-pub mod background;
-pub mod background_task;
-pub mod batch;
-pub mod browser;
-pub mod config;
-pub mod directory_tracker;
-pub mod document;
-pub mod editor;
-pub mod error;
-pub mod file_events;
-pub mod file_processor;
+pub mod app;
+pub mod bus;
 pub mod markdown;
-pub mod messages;
-pub mod print;
-pub mod tag_manager;
-pub mod tools;
 pub mod ui;
 pub mod utils;
 
-pub use error::AgentError;
+#[path = "config/config.rs"]
+pub mod config;
 
+pub use agent::error::AgentError;
 pub use agent::run_agent;
-pub use background_task::Task;
-pub use config::{AppConfig, VirtualPath, VirtualPathError, get_config_path, load_config};
-pub use messages::BackgroundMessage;
-pub use print::{PrintJob, execute_print_blocking};
-pub use tag_manager::TagManager;
-pub use tools::{execute_tool, get_tools_schema};
+pub use agent::tools::mcp;
+pub use agent::tools::{execute_tool, get_tools_schema};
+pub use app::background_task::Task;
+pub use app::print::{PrintJob, execute_print_blocking};
+pub use app::watcher::{DirectoryTracker, FileEventProcessor, FileWatcher};
+pub use app::{
+    Cursor, DialogManager, PanelLayout, PersistedUiState, Selection, SelectionManager, TabManager,
+    TagManager, TextBuffer, UndoStack, VirtualPath, VirtualPathError,
+};
+pub use bus::config::{CONFIG_ARRIVAL_TIMEOUT, config_bus};
+pub use bus::core::{Bus, BusReader};
+pub use bus::events::{
+    AgentEvent, BackgroundEvent, ConfigArrived, FileEvent, FileEventKind, FileEventProducer,
+    FsEvent, ProcessEvent, TokenUsageInfo,
+};
+pub use bus::router::{BusRouter, ChannelWorker, spawn_path_worker};
+pub use config::{AppConfig, get_config_path, load_config};
+pub use markdown::ToCEntry;
 pub use ui::FastMdApp;
 pub use utils::extract_tags_from_file;

@@ -1,6 +1,6 @@
-//! Background-logs viewer panel Ã¢â‚¬â€ category filter, text search, auto-scroll, and copy-to-clipboard.
+//! Background-logs viewer panel — category filter, text search, auto-scroll, and copy-to-clipboard.
 
-use crate::background::{BackgroundLogEntry, LogCategory};
+use crate::app::background::{BackgroundLogEntry, LogCategory};
 use crate::ui::FastMdApp;
 use eframe::egui;
 
@@ -282,11 +282,11 @@ mod tests {
 
         {
             let mut mgr = app.background_manager.lock().unwrap();
-            mgr.push_log(crate::background::BackgroundLogEntry::new(
+            mgr.push_log(crate::app::background::BackgroundLogEntry::new(
                 LogCategory::Indexer,
                 "Indexing workspace...".to_string(),
             ));
-            mgr.push_log(crate::background::BackgroundLogEntry::new(
+            mgr.push_log(crate::app::background::BackgroundLogEntry::new(
                 LogCategory::Watcher,
                 "File modified".to_string(),
             ));

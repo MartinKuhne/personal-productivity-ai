@@ -1,4 +1,4 @@
-//! Bottom command/agent panel Ã¢â‚¬â€ prompt intent parsing (`/models`, agent prompt), agent status, response, and token-usage stats.
+//! Bottom command/agent panel — prompt intent parsing (`/models`, agent prompt), agent status, response, and token-usage stats.
 
 use crate::ui::FastMdApp;
 use eframe::egui;
