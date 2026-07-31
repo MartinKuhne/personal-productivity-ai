@@ -7,7 +7,7 @@
 >
 > Part of [`SPEC.md`](../../SPEC.md) (FastMD crate). See the [Requirements Index](../../SPEC.md#requirements-index) for the full REQ-xxx → file map.
 >
-> Owns UI-001..UI-047, TBL-001..TBL-051. Cross-cutting requirements that also touch this module are listed at the bottom of this file.
+> Owns UI-001..UI-050, TBL-001..TBL-051. Cross-cutting requirements that also touch this module are listed at the bottom of this file.
 
 ## Scope
 
@@ -51,6 +51,7 @@ This module owns the user interface layer: pane layout and styling, directory tr
 * [UI-023] When the user has selected multiple documents, and they right click on one of the selected documents, the [multi select context menu] is shown.
 * [UI-024] When the user selects [Merge] from the [multi select context menu], the system shall run a new LLM prompt instructing the LLM to merge the content into a new document and consolidate the content.
 * [UI-025] When the user selects [Delete] from the [multi select context menu], the system shall move all the selected files to the recycle bin.
+* [UI-050] Content Search: The left column shall provide a search box at the bottom of the directory tree pane. When the user enters a term and presses the Enter key or clicks the magnifier icon, the system shall filter the directory tree to show only files whose content contains the search term (case-insensitive). While a filter is active, the system shall replace the magnifier icon with a clear (×) icon. When the user clicks the clear icon, the system shall restore the directory tree to show all files. Directories that do not contain any matching files shall not be displayed while the filter is active.
 
 ### Middle Column / File Viewer Area
 
@@ -151,4 +152,5 @@ This module owns the user interface layer: pane layout and styling, directory tr
 - UI-047 — Background log tab UI in [`src/ui/background_logs.rs`](../ui/background_logs.rs); log buffer owned by [`src/background/`](../background/) (see REQ-460..465 in `src/background/SPEC.md`).
 - UI-048 — Thinking delimiter rendering in [`src/ui/panels/center.rs`](../ui/panels/center.rs); delimiter extraction in [`src/agent/response_formatter.rs`](../agent/response_formatter.rs) (AGENT-022).
 - UI-049 — Tab management in [`src/app/tab_manager.rs`](../../app/tab_manager.rs).
+- UI-050 — Tree content-search state in [`src/app/tree_search.rs`](../../app/tree_search.rs); search box UI in [`src/ui/panels/left.rs`](../ui/panels/left.rs).
 - UI-004 / UI-026..UI-034 — Tab context menu and file actions in [`src/ui/panels/center.rs`](../ui/panels/center.rs).

@@ -12,6 +12,22 @@ this file adds Rust/egui-specific conventions and the quality gate.
 - Include examples in doc comments where they clarify usage.
 - Run `cargo doc --no-deps` to verify documentation builds without warnings.
 
+## 2. Distilled SDK reference docs
+
+`doc/distill/` holds distilled reference docs for the third-party SDKs this
+crate depends on. Consult them before writing or reviewing code that touches
+these areas; they are the in-repo source of truth for the pinned versions.
+
+- `doc/distill/egui.md` — egui/eframe 0.35 reference (immediate-mode core,
+  `Context`/`Ui`/`Response` API, widgets, containers, `emath`/`ecolor`/`epaint`).
+  Consult when writing or modifying egui UI code (`ui/`, `editor.rs`, `main.rs`).
+- `doc/distill/egui-kittest.md` — egui_kittest / kittest reference
+  (AccessKit-based `Harness`, `Queryable`, `By` filters, `NodeT`). Consult when
+  writing or maintaining egui UI tests.
+- `doc/distill/mcp.md` — Model Context Protocol client-side spec (lifecycle,
+  transports, OAuth 2.1 authorization, cancellation, ping, progress). Consult
+  when working on the MCP client (`agent/tools/mcp/`).
+
 ## 4. Spec traceability
 - Every user-facing behaviour maps to requirement in `SPEC.md`. When adding a feature, add the requirement first; when changing behaviour, prompt to update the requirement.
 - Code may cite `REQ-xxx` / `MD-xxx` / `TOOL-xxx` / `AGENT-xxx` in `//!`/`///` comments where it aids review (e.g. `(AGENT-012)` next to the safe/unsafe split). Do not sprinkle citations inline in business logic.
