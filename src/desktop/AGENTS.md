@@ -36,8 +36,8 @@ src/
 │   ├── core.rs             # Bus<T>, BusReader<T>  (tokio::sync::broadcast wrapper)
 │   ├── events/             # every event payload that flows over a bus or channel
 │   │   ├── file.rs         # FileEvent, FileEventKind, FileEventProducer
-│   │   ├── messages.rs     # BackgroundMessage (legacy god-enum), TokenUsageInfo
-│   │   ├── typed.rs        # BackgroundEvent, AgentEvent, FsEvent, ProcessEvent (typed pilot)
+│   │   ├── messages.rs     # TokenUsageInfo (shared value type)
+│   │   ├── typed.rs        # BackgroundEvent, AgentEvent, FsEvent, ProcessEvent (per-domain)
 │   │   └── config.rs       # ConfigArrived
 │   ├── router/             # bus-side plumbing
 │   │   ├── bus_router.rs   # BusRouter (per-extension fan-out to PDF/vision channels)
@@ -109,14 +109,14 @@ When adding or moving code, place files by **concern**, not by type:
 - **Generic, domain-free helpers** (path utilities, file-walk tag extraction)
   go in `utils/`. If a helper knows about Markdown, it belongs in `markdown/`,
   not `utils/`.
-- **Cross-cutting value types** with no single home (e.g. `BackgroundMessage`,
-  `TokenUsageInfo`) live in `bus::events::messages` (legacy god-enum and
-  its `TokenUsageInfo` companion) or `bus::events::typed` (per-domain
+- **Cross-cutting value types** with no single home (e.g.
+  `TokenUsageInfo`) live in `bus::events::messages` (value-type home)
+  or `bus::events::typed` (per-domain
   replacement). The `app/` module no longer hosts these.
 
 ### Module size and splitting
 
-- Target **≤ 400 lines** per `.rs` file. When a file exceeds this, split by
+- Target **≤ 1024 lines** per `.rs` file. When a file exceeds this, split by
   concern into a submodule directory (cf. `config/`, `tools/registry/`,
   `ui/app/`). Keep the original file as a `mod.rs` that re-exports the pieces
   so public paths are unchanged.
