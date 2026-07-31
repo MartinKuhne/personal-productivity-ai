@@ -26,8 +26,7 @@ fn test_parse_yaml_to_pairs_non_mapping() {
     let string_val = serde_yml::Value::String("just string".to_string());
     assert_eq!(parse_yaml_to_pairs(&string_val), None);
 
-    let seq_val =
-        serde_yml::Value::Sequence(vec![serde_yml::Value::String("item".to_string())]);
+    let seq_val = serde_yml::Value::Sequence(vec![serde_yml::Value::String("item".to_string())]);
     assert_eq!(parse_yaml_to_pairs(&seq_val), None);
 
     let null_val = serde_yml::Value::Null;

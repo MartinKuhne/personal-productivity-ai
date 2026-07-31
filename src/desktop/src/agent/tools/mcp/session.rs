@@ -226,9 +226,9 @@ impl McpClientSession {
     /// verbatim and does NOT run the OAuth flow.
     fn has_static_authorization(&self) -> bool {
         match &self.config {
-            McpServerConfig::Sse { headers, .. } => {
-                headers.keys().any(|k| k.eq_ignore_ascii_case("authorization"))
-            }
+            McpServerConfig::Sse { headers, .. } => headers
+                .keys()
+                .any(|k| k.eq_ignore_ascii_case("authorization")),
             McpServerConfig::Stdio { .. } => false,
         }
     }
@@ -1176,7 +1176,12 @@ impl McpClientSession {
         } else if let Some(store) = &self.token_store {
             match store.get(self.resource_uri().as_deref().unwrap_or(&url)) {
                 Some(t) if !extra_scopes.is_empty() => Some(t.access_token.clone()),
-                Some(t) if t.is_expired(std::time::SystemTime::now(), super::oauth::DEFAULT_EXPIRY_SKEW) => {
+                Some(t)
+                    if t.is_expired(
+                        std::time::SystemTime::now(),
+                        super::oauth::DEFAULT_EXPIRY_SKEW,
+                    ) =>
+                {
                     // Cached token is past its skew; let the OAuth
                     // flow run by sending no bearer on the first
                     // attempt (the 401 will trigger refresh).

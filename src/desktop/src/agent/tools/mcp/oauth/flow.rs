@@ -26,7 +26,9 @@ use super::client::OAuthClient;
 use super::discovery::{
     DISCOVERY_TIMEOUT, discover_authorization_server_metadata, discover_resource_metadata,
 };
-use super::pkce::{AuthorizationUrlInputs, PkcePair, State, build_authorization_url, percent_encode};
+use super::pkce::{
+    AuthorizationUrlInputs, PkcePair, State, build_authorization_url, percent_encode,
+};
 use super::redirect::{LoopbackServer, open_browser, start};
 use super::store::{StoredToken, TokenStore};
 use super::types::{
@@ -104,7 +106,8 @@ pub fn run_flow(
 ) -> Result<OAuthFlowOutput, OAuthError> {
     // Step 1: discovery.
     let resource = build_resource_uri(&inputs.mcp_server_url)?;
-    let resource_metadata = discover_resource_metadata(&resource, inputs.www_authenticate.as_ref())?;
+    let resource_metadata =
+        discover_resource_metadata(&resource, inputs.www_authenticate.as_ref())?;
     let as_url = resource_metadata
         .authorization_servers
         .first()
@@ -125,8 +128,12 @@ pub fn run_flow(
     }
     // Spec §4.9: "Use only `localhost` or HTTPS redirect URIs."
     if !as_metadata.authorization_endpoint.starts_with("https://")
-        && !as_metadata.authorization_endpoint.starts_with("http://127.0.0.1:")
-        && !as_metadata.authorization_endpoint.starts_with("http://localhost:")
+        && !as_metadata
+            .authorization_endpoint
+            .starts_with("http://127.0.0.1:")
+        && !as_metadata
+            .authorization_endpoint
+            .starts_with("http://localhost:")
     {
         return Err(OAuthError::SpecViolation(format!(
             "authorization endpoint {} is not https://",
@@ -246,11 +253,13 @@ pub fn refresh(
     store: &TokenStore,
     existing: &StoredToken,
 ) -> Result<OAuthFlowOutput, OAuthError> {
-    let refresh_token = existing.refresh_token.as_ref().ok_or_else(|| {
-        OAuthError::RefreshFailed("stored token has no refresh_token".to_owned())
-    })?;
+    let refresh_token = existing
+        .refresh_token
+        .as_ref()
+        .ok_or_else(|| OAuthError::RefreshFailed("stored token has no refresh_token".to_owned()))?;
     let resource = build_resource_uri(&inputs.mcp_server_url)?;
-    let resource_metadata = discover_resource_metadata(&resource, inputs.www_authenticate.as_ref())?;
+    let resource_metadata =
+        discover_resource_metadata(&resource, inputs.www_authenticate.as_ref())?;
     let as_url = resource_metadata
         .authorization_servers
         .first()
@@ -316,7 +325,10 @@ pub fn build_resource_uri(mcp_server_url: &str) -> Result<String, OAuthError> {
     }
     // Drop the fragment and query string.
     let without_fragment = trimmed.split('#').next().unwrap_or(trimmed);
-    let without_query = without_fragment.split('?').next().unwrap_or(without_fragment);
+    let without_query = without_fragment
+        .split('?')
+        .next()
+        .unwrap_or(without_fragment);
     Ok(without_query.to_owned())
 }
 
@@ -439,17 +451,17 @@ fn send_token_request(
             let body = r
                 .into_string()
                 .map_err(|e| OAuthError::Transport(format!("token response read: {e}")))?;
-            let value: serde_json::Value = serde_json::from_str(&body)
-                .map_err(|e| OAuthError::Protocol(format!("token response json: {e}; body: {body}")))?;
+            let value: serde_json::Value = serde_json::from_str(&body).map_err(|e| {
+                OAuthError::Protocol(format!("token response json: {e}; body: {body}"))
+            })?;
             if let Some(err) = super::types::OAuthErrorBody::from_json(&value) {
                 return Err(OAuthError::OAuth {
                     endpoint: "token",
                     body: err,
                 });
             }
-            serde_json::from_value::<TokenResponse>(value).map_err(|e| {
-                OAuthError::Protocol(format!("token response shape: {e}"))
-            })
+            serde_json::from_value::<TokenResponse>(value)
+                .map_err(|e| OAuthError::Protocol(format!("token response shape: {e}")))
         }
         Err(ureq::Error::Status(_code, r)) => {
             let body = r.into_string().unwrap_or_default();
@@ -511,8 +523,8 @@ mod tests {
             scheme: "Bearer".to_owned(),
             params: vec![("scope".to_owned(), "read".to_owned())],
         };
-        let scope = pick_scope(Some(&ch), &rm, &["write".to_owned(), "admin".to_owned()])
-            .expect("scope");
+        let scope =
+            pick_scope(Some(&ch), &rm, &["write".to_owned(), "admin".to_owned()]).expect("scope");
         let parts: Vec<&str> = scope.split_whitespace().collect();
         assert!(parts.contains(&"read"));
         assert!(parts.contains(&"write"));

@@ -1,9 +1,9 @@
 //! YAML front-matter header tool implementations for the tool registry.
 
-use crate::config::AppConfig;
 use crate::agent::tools::Tool;
 use crate::agent::tools::context::ToolContext;
 use crate::agent::tools::dtos;
+use crate::config::AppConfig;
 use std::any::TypeId;
 
 use super::json_schema;

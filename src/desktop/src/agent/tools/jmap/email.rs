@@ -1236,8 +1236,8 @@ mod tests {
         SearchEmailFilters, SearchEmailPagination, tool_get_email_by_id, tool_search_email,
         tool_send_email,
     };
-    use crate::config::{AppConfig, JmapClient};
     use crate::agent::tools::jmap::spawn_mock_server;
+    use crate::config::{AppConfig, JmapClient};
     #[test]
     fn test_tool_search_email_no_clients() {
         let config = AppConfig::default();

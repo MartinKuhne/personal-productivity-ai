@@ -149,10 +149,10 @@ fn authorization_params<'a>(input: &'a AuthorizationUrlInputs<'a>) -> Vec<(&'a s
     params.push(("code_challenge", input.pkce.challenge.clone()));
     params.push(("code_challenge_method", input.pkce.method.to_owned()));
     params.push(("resource", input.resource.to_owned()));
-    if let Some(scope) = input.scope {
-        if !scope.trim().is_empty() {
-            params.push(("scope", scope.to_owned()));
-        }
+    if let Some(scope) = input.scope
+        && !scope.trim().is_empty()
+    {
+        params.push(("scope", scope.to_owned()));
     }
     params
 }
@@ -182,7 +182,7 @@ pub fn percent_encode(s: &str) -> String {
 fn hex_nibble(b: u8) -> char {
     match b & 0x0f {
         0..=9 => (b'0' + (b & 0x0f)) as char,
-        10..=15 => (b'a' + ((b & 0x0f) - 10)) as char,
+        10..=15 => (b'A' + ((b & 0x0f) - 10)) as char,
         _ => '0',
     }
 }

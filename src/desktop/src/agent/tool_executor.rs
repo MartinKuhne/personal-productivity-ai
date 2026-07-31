@@ -1,12 +1,12 @@
 //! Tool-call dispatcher — receives tool-call JSON from the LLM, dispatches through the registry, and feeds results back.
 
+use crate::agent::tools::Safety;
+use crate::agent::tools::context::ToolContext;
+use crate::agent::tools::execute_tool;
 use crate::bus::core::Bus;
 use crate::bus::events::file::FileEvent;
 use crate::bus::events::typed::{BackgroundEvent, FsEvent};
 use crate::config::AppConfig;
-use crate::agent::tools::Safety;
-use crate::agent::tools::context::ToolContext;
-use crate::agent::tools::execute_tool;
 use std::path::Path;
 use std::sync::mpsc::Sender;
 
@@ -155,10 +155,13 @@ impl ToolExecutor {
                             let rest: std::path::PathBuf = comps.collect();
                             let abs_path = Path::new(&lib.root_folder).join(rest);
                             let tags = crate::utils::tags::extract_tags_from_file(&abs_path);
-                            let _ = tx_gui.send(FsEvent::FileModified {
-                                path: abs_path,
-                                tags,
-                            }.into());
+                            let _ = tx_gui.send(
+                                FsEvent::FileModified {
+                                    path: abs_path,
+                                    tags,
+                                }
+                                .into(),
+                            );
                             break;
                         }
                     }
@@ -192,7 +195,10 @@ mod tests {
             crate::agent::tools::registry::safety_of("read_file"),
             Safety::ReadOnly
         );
-        assert_eq!(crate::agent::tools::registry::safety_of("grep"), Safety::ReadOnly);
+        assert_eq!(
+            crate::agent::tools::registry::safety_of("grep"),
+            Safety::ReadOnly
+        );
         assert_eq!(
             crate::agent::tools::registry::safety_of("create_file"),
             Safety::Mutating

@@ -22,8 +22,7 @@
 //! URL that returns a parseable `application/json` body is used.
 
 use super::types::{
-    AuthorizationServerMetadata, OAuthError, ProtectedResourceMetadata,
-    WwwAuthenticateChallenge,
+    AuthorizationServerMetadata, OAuthError, ProtectedResourceMetadata, WwwAuthenticateChallenge,
 };
 use std::time::Duration;
 
@@ -157,7 +156,9 @@ fn fetch_resource_metadata(url: &str) -> Option<ProtectedResourceMetadata> {
     serde_json::from_str::<ProtectedResourceMetadata>(&body).ok()
 }
 
-fn fetch_authorization_server_metadata(url: &str) -> Result<Option<AuthorizationServerMetadata>, OAuthError> {
+fn fetch_authorization_server_metadata(
+    url: &str,
+) -> Result<Option<AuthorizationServerMetadata>, OAuthError> {
     match http_get_json(url) {
         Ok(body) => match serde_json::from_str::<AuthorizationServerMetadata>(&body) {
             Ok(doc) => Ok(Some(doc)),
@@ -206,7 +207,8 @@ fn http_get_json(url: &str) -> Result<String, HttpError> {
                     "metadata at {url} returned unexpected Content-Type '{ct}'"
                 )));
             }
-            resp.into_string().map_err(|e| HttpError::Other(e.to_string()))
+            resp.into_string()
+                .map_err(|e| HttpError::Other(e.to_string()))
         }
         Err(ureq::Error::Status(404, _)) => Err(HttpError::NotFound),
         Err(ureq::Error::Status(code, resp)) => {
@@ -241,11 +243,7 @@ fn url_parse(s: &str) -> Result<ParsedUrl, OAuthError> {
     // Split scheme://rest
     let (scheme, rest) = match s.split_once("://") {
         Some(parts) => parts,
-        None => {
-            return Err(OAuthError::Protocol(format!(
-                "URL '{s}' missing scheme"
-            )))
-        }
+        None => return Err(OAuthError::Protocol(format!("URL '{s}' missing scheme"))),
     };
     let (authority, path) = match rest.find('/') {
         Some(idx) => (&rest[..idx], &rest[idx..]),
@@ -332,7 +330,10 @@ mod tests {
     #[test]
     fn well_known_resource_metadata_candidates_with_port() {
         let v = well_known_resource_metadata_candidates("https://mcp.example.com:8443/mcp");
-        assert_eq!(v[0], "https://mcp.example.com:8443/.well-known/oauth-protected-resource/mcp");
+        assert_eq!(
+            v[0],
+            "https://mcp.example.com:8443/.well-known/oauth-protected-resource/mcp"
+        );
     }
 
     #[test]
@@ -341,7 +342,8 @@ mod tests {
         assert_eq!(
             v,
             vec![
-                "https://auth.example.com/.well-known/oauth-authorization-server/tenant1".to_owned(),
+                "https://auth.example.com/.well-known/oauth-authorization-server/tenant1"
+                    .to_owned(),
                 "https://auth.example.com/.well-known/openid-configuration/tenant1".to_owned(),
                 "https://auth.example.com/tenant1/.well-known/openid-configuration".to_owned(),
             ]
@@ -379,7 +381,8 @@ mod tests {
         assert_eq!(
             v,
             vec![
-                "https://auth.example.com/.well-known/oauth-authorization-server/tenants/a".to_owned(),
+                "https://auth.example.com/.well-known/oauth-authorization-server/tenants/a"
+                    .to_owned(),
                 "https://auth.example.com/.well-known/openid-configuration/tenants/a".to_owned(),
                 "https://auth.example.com/tenants/a/.well-known/openid-configuration".to_owned(),
             ]
@@ -398,7 +401,10 @@ mod tests {
     #[test]
     fn parse_url_with_port() {
         let p = url_parse("https://mcp.example.com:8443/mcp").unwrap();
-        assert_eq!(origin_of(&p).as_deref(), Some("https://mcp.example.com:8443"));
+        assert_eq!(
+            origin_of(&p).as_deref(),
+            Some("https://mcp.example.com:8443")
+        );
     }
 
     #[test]

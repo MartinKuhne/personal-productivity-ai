@@ -191,7 +191,7 @@ impl TokenStore {
         }
     }
 
-    /// Set the expiry skew used by [`Self::is_expired`]. Default
+    /// Set the expiry skew used by [`StoredToken::is_expired`]. Default
     /// is [`DEFAULT_EXPIRY_SKEW`]. Tests can shorten it.
     pub fn set_skew(&mut self, skew: Duration) {
         self.skew = skew;
@@ -228,21 +228,21 @@ impl TokenStore {
     /// MCP call against that resource will re-trigger the OAuth
     /// flow.
     pub fn invalidate(&self, resource: &str) {
-        if let Ok(mut inner) = self.inner.lock() {
-            if inner.tokens.remove(resource).is_some() {
-                inner.dirty = true;
-            }
+        if let Ok(mut inner) = self.inner.lock()
+            && inner.tokens.remove(resource).is_some()
+        {
+            inner.dirty = true;
         }
     }
 
     /// Forget every token. Used when the user signs out or the
     /// app is reset.
     pub fn clear(&self) {
-        if let Ok(mut inner) = self.inner.lock() {
-            if !inner.tokens.is_empty() {
-                inner.tokens.clear();
-                inner.dirty = true;
-            }
+        if let Ok(mut inner) = self.inner.lock()
+            && !inner.tokens.is_empty()
+        {
+            inner.tokens.clear();
+            inner.dirty = true;
         }
     }
 
@@ -381,14 +381,8 @@ mod tests {
         // Expiry = now + 3600 = 1_001_000. With a 30s skew the
         // token is "expired" once wall-clock >= 1_000_970.
         assert!(!t.is_expired(now, DEFAULT_EXPIRY_SKEW));
-        assert!(!t.is_expired(
-            now + Duration::from_secs(3_000),
-            DEFAULT_EXPIRY_SKEW
-        ));
-        assert!(t.is_expired(
-            now + Duration::from_secs(4_000),
-            DEFAULT_EXPIRY_SKEW
-        ));
+        assert!(!t.is_expired(now + Duration::from_secs(3_000), DEFAULT_EXPIRY_SKEW));
+        assert!(t.is_expired(now + Duration::from_secs(4_000), DEFAULT_EXPIRY_SKEW));
     }
 
     #[test]
@@ -483,11 +477,7 @@ mod tests {
         let dir = tempfile::tempdir().expect("tempdir");
         let path = dir.path().join(TOKEN_STORE_FILE_NAME);
         std::fs::create_dir_all(dir.path()).unwrap();
-        std::fs::write(
-            &path,
-            r#"{"schema_version":9999,"tokens":{}}"#,
-        )
-        .unwrap();
+        std::fs::write(&path, r#"{"schema_version":9999,"tokens":{}}"#).unwrap();
         // The store treats a corrupt version as empty (logs a
         // warning) rather than failing open. Both behaviors are
         // defensible; today's spec is "log and continue with no

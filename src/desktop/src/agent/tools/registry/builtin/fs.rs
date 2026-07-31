@@ -1,10 +1,10 @@
 //! Filesystem tool implementations for the tool registry.
 
-use crate::app::vfs::library::ContentLibraryExt;
-use crate::config::AppConfig;
 use crate::agent::tools::Tool;
 use crate::agent::tools::context::ToolContext;
 use crate::agent::tools::dtos;
+use crate::app::vfs::library::ContentLibraryExt;
+use crate::config::AppConfig;
 use std::any::TypeId;
 
 use super::super::pagination::paginate_in_range;
@@ -73,9 +73,11 @@ impl Tool for GrepTool {
         let mut libs: Vec<_> = ctx.config.content_libraries.iter().collect();
         libs.sort_by_key(|b| std::cmp::Reverse(b.priority));
         for lib in libs {
-            if let Ok(res) =
-                crate::agent::tools::filesystem::tool_grep(&lib.root_path(), &lib.name, &input.query)
-                && res.matches != "No matches found."
+            if let Ok(res) = crate::agent::tools::filesystem::tool_grep(
+                &lib.root_path(),
+                &lib.name,
+                &input.query,
+            ) && res.matches != "No matches found."
             {
                 all_results.push(res.matches);
             }
@@ -219,7 +221,9 @@ impl Tool for ListFilesTool {
             .unwrap_or(crate::agent::tools::filesystem::DEFAULT_LIST_FILES_BY_TAG_PAGE_SIZE)
             .max(1);
         let all_matches: Vec<String> = match ctx.resolve_virtual_path(&input.path, false)? {
-            Some((path, _)) => crate::agent::tools::filesystem::tool_list_files(&path, &input.path)?,
+            Some((path, _)) => {
+                crate::agent::tools::filesystem::tool_list_files(&path, &input.path)?
+            }
             None => {
                 let mut libs: Vec<String> = ctx
                     .config

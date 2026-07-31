@@ -257,9 +257,9 @@ mod tests {
             content_libraries: &[],
             open_editor: &mut None,
             modifiers: egui::Modifiers {
-                    shift: true,
-                    ..Default::default()
-                },
+                shift: true,
+                ..Default::default()
+            },
             inline_editor_enabled: false,
             bg_tx: &None,
             file_event_producer: None,
@@ -313,9 +313,9 @@ mod tests {
             content_libraries: &[],
             open_editor: &mut None,
             modifiers: egui::Modifiers {
-                    shift: true,
-                    ..Default::default()
-                },
+                shift: true,
+                ..Default::default()
+            },
             inline_editor_enabled: false,
             bg_tx: &None,
             file_event_producer: None,
@@ -482,9 +482,9 @@ mod tests {
             content_libraries: &[],
             open_editor: &mut None,
             modifiers: egui::Modifiers {
-                    shift: true,
-                    ..Default::default()
-                },
+                shift: true,
+                ..Default::default()
+            },
             inline_editor_enabled: false,
             bg_tx: &None,
             file_event_producer: None,

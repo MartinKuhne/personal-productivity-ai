@@ -7,10 +7,10 @@ mod tests;
 
 pub use pagination::paginate_in_range;
 
-use crate::config::AppConfig;
 use crate::agent::tools::Tool;
 use crate::agent::tools::context::ToolContext;
 use crate::agent::tools::mcp::DynamicToolSource;
+use crate::config::AppConfig;
 use std::collections::HashMap;
 use std::sync::Arc;
 

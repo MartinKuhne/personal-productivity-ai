@@ -39,10 +39,10 @@
 
 #![cfg(test)]
 
+mod ftwa;
 mod helpers;
 mod interactions;
 mod render_smoke;
-mod ftwa;
 mod table_alignment;
 mod table_regressions;
 
@@ -52,14 +52,21 @@ mod table_regressions;
 // submodule can pick them up with `use super::*;`.
 pub(super) use super::{
     // Markdown re-exports (these were `pub use` in the old `render.rs`).
-    InlineElem, RenderEvent, TextStyle, apply_task_toggle,
-    parse_markdown_to_events,
-    // Public functions defined in `render/mod.rs`.
-    render_markdown, render_yaml_table,
+    InlineElem,
+    RenderEvent,
+    TextStyle,
+    apply_task_toggle,
     // Sibling-submodule re-exports widened by `render/mod.rs` to
     // `pub(crate)` so the e2e_tests tree can reach them.
-    copy_code_to_output, render_code_block, render_heading, render_inline,
+    copy_code_to_output,
+    parse_markdown_to_events,
+    render_code_block,
+    render_heading,
+    render_inline,
+    // Public functions defined in `render/mod.rs`.
+    render_markdown,
     render_table_with_config,
+    render_yaml_table,
 };
 
 // Test-only `render_table` wrapper (gated by `#[cfg(test)]` in

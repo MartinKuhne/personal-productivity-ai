@@ -286,7 +286,11 @@ impl std::fmt::Debug for McpServerConfig {
                 .field("args", args)
                 .field("env", env)
                 .finish(),
-            Self::Sse { url, headers, oauth } => {
+            Self::Sse {
+                url,
+                headers,
+                oauth,
+            } => {
                 let redacted_headers: HashMap<_, _> = headers
                     .keys()
                     .map(|k| (k.clone(), "[REDACTED]".to_string()))

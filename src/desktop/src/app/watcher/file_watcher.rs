@@ -95,14 +95,17 @@ impl FileWatcher {
                         }
 
                         if is_md || is_pdf || is_img {
-                            let _ = tx_notify.send(BackgroundLogEntry::new(
-                                LogCategory::Watcher,
-                                format!(
-                                    "File {} {:?}",
-                                    event_type,
-                                    path.file_name().unwrap_or_default()
-                                ),
-                            ).into());
+                            let _ = tx_notify.send(
+                                BackgroundLogEntry::new(
+                                    LogCategory::Watcher,
+                                    format!(
+                                        "File {} {:?}",
+                                        event_type,
+                                        path.file_name().unwrap_or_default()
+                                    ),
+                                )
+                                .into(),
+                            );
                         }
 
                         if is_md {
@@ -111,17 +114,19 @@ impl FileWatcher {
                                     if path.is_file() {
                                         let tags =
                                             crate::utils::tags::extract_tags_from_file(&path);
-                                        let _ = tx_notify.send(FsEvent::FileModified {
-                                            path: path.clone(),
-                                            tags,
-                                        }.into());
+                                        let _ = tx_notify.send(
+                                            FsEvent::FileModified {
+                                                path: path.clone(),
+                                                tags,
+                                            }
+                                            .into(),
+                                        );
                                         bus_watcher.publish(FileEvent::updated_one(path.clone()));
                                     }
                                 }
                                 notify::EventKind::Remove(_) => {
-                                    let _ = tx_notify.send(FsEvent::FileDeleted {
-                                        path: path.clone(),
-                                    }.into());
+                                    let _ = tx_notify
+                                        .send(FsEvent::FileDeleted { path: path.clone() }.into());
                                     bus_watcher.publish(FileEvent::removed_one(path.clone()));
                                 }
                                 _ => {}
@@ -149,8 +154,8 @@ impl FileWatcher {
                                 _ => {}
                             }
                         } else if !path.exists() {
-                            let _ = tx_notify
-                                .send(FsEvent::FileDeleted { path: path.clone() }.into());
+                            let _ =
+                                tx_notify.send(FsEvent::FileDeleted { path: path.clone() }.into());
                             bus_watcher.publish(FileEvent::removed_one(path.clone()));
                         }
                     }
@@ -239,7 +244,10 @@ mod tests {
                 // Slot stays empty when watcher init failed.
                 assert!(slot.lock().unwrap().is_none());
             }
-            other => panic!("Expected Finished or FinishedWithoutWatcher, got {:?}", other),
+            other => panic!(
+                "Expected Finished or FinishedWithoutWatcher, got {:?}",
+                other
+            ),
         }
     }
 }

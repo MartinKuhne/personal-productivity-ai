@@ -1,8 +1,8 @@
 //! CSV database tool implementations for the tool registry.
 
-use crate::config::AppConfig;
 use crate::agent::tools::Tool;
 use crate::agent::tools::context::ToolContext;
+use crate::config::AppConfig;
 use std::any::TypeId;
 
 use super::json_schema;

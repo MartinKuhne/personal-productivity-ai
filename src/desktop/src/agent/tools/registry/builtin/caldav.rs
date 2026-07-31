@@ -1,9 +1,9 @@
 //! CalDAV calendar tool implementations for the tool registry.
 
-use crate::config::AppConfig;
 use crate::agent::tools::Tool;
 use crate::agent::tools::context::ToolContext;
 use crate::agent::tools::dtos;
+use crate::config::AppConfig;
 use std::any::TypeId;
 
 use super::json_schema;
@@ -62,12 +62,14 @@ impl Tool for GetCalendarTool {
     fn execute(&self, ctx: &ToolContext, args: &str) -> Result<serde_json::Value, String> {
         let input: dtos::GetCalendarInput =
             serde_json::from_str(args).map_err(|e| format!("Invalid args: {}", e))?;
-        crate::agent::tools::caldav::tool_get_calendar(ctx.config, &input.start_date, &input.end_date).map(
-            |r| {
-                serde_json::to_value(r)
-                    .unwrap_or_else(|e| serde_json::json!({"error": e.to_string()}))
-            },
+        crate::agent::tools::caldav::tool_get_calendar(
+            ctx.config,
+            &input.start_date,
+            &input.end_date,
         )
+        .map(|r| {
+            serde_json::to_value(r).unwrap_or_else(|e| serde_json::json!({"error": e.to_string()}))
+        })
     }
 }
 
@@ -149,11 +151,14 @@ impl Tool for UpdateCalendarItemTool {
     fn execute(&self, ctx: &ToolContext, args: &str) -> Result<serde_json::Value, String> {
         let input: dtos::UpdateCalendarItemInput =
             serde_json::from_str(args).map_err(|e| format!("Invalid args: {}", e))?;
-        crate::agent::tools::caldav::tool_update_calendar_item(ctx.config, &input.id, &input.update_json)
-            .map(|r| {
-                serde_json::to_value(r)
-                    .unwrap_or_else(|e| serde_json::json!({"error": e.to_string()}))
-            })
+        crate::agent::tools::caldav::tool_update_calendar_item(
+            ctx.config,
+            &input.id,
+            &input.update_json,
+        )
+        .map(|r| {
+            serde_json::to_value(r).unwrap_or_else(|e| serde_json::json!({"error": e.to_string()}))
+        })
     }
 }
 

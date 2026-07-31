@@ -312,29 +312,31 @@ pub fn tool_web_delegate(
                     .unwrap_or("{}");
 
                 let result = if func_name == "web_fetch" {
-                    if let Ok(input) =
-                        serde_json::from_str::<crate::agent::tools::dtos::WebFetchInput>(func_args_str)
+                    if let Ok(input) = serde_json::from_str::<
+                        crate::agent::tools::dtos::WebFetchInput,
+                    >(func_args_str)
                     {
                         match tool_web_fetch(&input) {
-                            Ok(res) => {
-                                serde_json::to_string(&crate::agent::tools::dtos::ToolResponse::Success {
-                                    data: res,
+                            Ok(res) => serde_json::to_string(
+                                &crate::agent::tools::dtos::ToolResponse::Success { data: res },
+                            )
+                            .unwrap_or_default(),
+                            Err(e) => {
+                                serde_json::to_string(&crate::agent::tools::dtos::ToolResponse::<
+                                    crate::agent::tools::dtos::WebFetchResponse,
+                                >::Error {
+                                    message: e,
                                 })
                                 .unwrap_or_default()
                             }
-                            Err(e) => serde_json::to_string(&crate::agent::tools::dtos::ToolResponse::<
-                                crate::agent::tools::dtos::WebFetchResponse,
-                            >::Error {
-                                message: e,
-                            })
-                            .unwrap_or_default(),
                         }
                     } else {
                         r#"{"status":"error","message":"Invalid input"}"#.to_string()
                     }
                 } else if func_name == "web_search" {
-                    if let Ok(input) =
-                        serde_json::from_str::<crate::agent::tools::dtos::WebSearchInput>(func_args_str)
+                    if let Ok(input) = serde_json::from_str::<
+                        crate::agent::tools::dtos::WebSearchInput,
+                    >(func_args_str)
                     {
                         if let Some(url) = &config.searxng_url {
                             match tool_web_search(url, &input.query) {
@@ -342,14 +344,14 @@ pub fn tool_web_delegate(
                                     &crate::agent::tools::dtos::ToolResponse::Success { data: res },
                                 )
                                 .unwrap_or_default(),
-                                Err(e) => {
-                                    serde_json::to_string(&crate::agent::tools::dtos::ToolResponse::<
+                                Err(e) => serde_json::to_string(
+                                    &crate::agent::tools::dtos::ToolResponse::<
                                         crate::agent::tools::dtos::WebSearchResponse,
                                     >::Error {
                                         message: e,
-                                    })
-                                    .unwrap_or_default()
-                                }
+                                    },
+                                )
+                                .unwrap_or_default(),
                             }
                         } else {
                             r#"{"status":"error","message":"web_search disabled"}"#.to_string()

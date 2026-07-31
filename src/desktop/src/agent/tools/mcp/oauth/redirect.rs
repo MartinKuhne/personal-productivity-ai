@@ -90,15 +90,14 @@ pub fn start(
 ) -> Result<LoopbackServer, OAuthError> {
     let callback_path = callback_path.unwrap_or(DEFAULT_CALLBACK_PATH).to_owned();
     let timeout = timeout.unwrap_or(DEFAULT_CALLBACK_TIMEOUT);
-    let listener = TcpListener::bind(SocketAddrV4::new(Ipv4Addr::LOCALHOST, 0)).map_err(|e| {
-        OAuthError::Transport(format!("could not bind loopback server: {e}"))
-    })?;
+    let listener = TcpListener::bind(SocketAddrV4::new(Ipv4Addr::LOCALHOST, 0))
+        .map_err(|e| OAuthError::Transport(format!("could not bind loopback server: {e}")))?;
     let port = match listener.local_addr() {
         Ok(addr) => addr.port(),
         Err(e) => {
             return Err(OAuthError::Transport(format!(
                 "could not read loopback local_addr: {e}"
-            )))
+            )));
         }
     };
     // Restrict the listener to 127.0.0.1 explicitly even though we
@@ -124,7 +123,7 @@ pub fn start(
 
 impl LoopbackServer {
     /// Block until the browser hits the callback, or until the
-    /// timeout elapses. Returns the parsed [`CallbackParams`] on
+    /// timeout elapses. Returns the parsed `CallbackParams` on
     /// success.
     pub fn wait_for_code(&self) -> Result<CallbackParams, OAuthError> {
         let rx = self
@@ -208,13 +207,16 @@ fn handle_connection(
 ) -> Result<Option<CallbackParams>, OAuthError> {
     // Cap the read so a misbehaving client can't tie us up.
     let _ = stream.set_read_timeout(Some(Duration::from_secs(5)));
-    let mut reader = BufReader::new(stream.try_clone().map_err(|e| {
-        OAuthError::Transport(format!("loopback clone failed: {e}"))
-    })?);
+    let mut reader = BufReader::new(
+        stream
+            .try_clone()
+            .map_err(|e| OAuthError::Transport(format!("loopback clone failed: {e}")))?,
+    );
     let mut request_line = String::new();
-    if reader.read_line(&mut request_line).map_err(|e| {
-        OAuthError::Transport(format!("loopback read failed: {e}"))
-    })? == 0
+    if reader
+        .read_line(&mut request_line)
+        .map_err(|e| OAuthError::Transport(format!("loopback read failed: {e}")))?
+        == 0
     {
         return Err(OAuthError::Transport(
             "loopback got empty request".to_owned(),
@@ -235,10 +237,7 @@ fn handle_connection(
         if trimmed.is_empty() {
             break;
         }
-        if let Some(rest) = trimmed
-            .to_ascii_lowercase()
-            .strip_prefix("content-length:")
-        {
+        if let Some(rest) = trimmed.to_ascii_lowercase().strip_prefix("content-length:") {
             content_length = rest.trim().parse().unwrap_or(0);
         }
     }
@@ -266,11 +265,19 @@ fn handle_connection(
     if method != "GET" && method != "POST" {
         // RFC 6749 §3.1.2.3 only requires GET; some servers POST
         // the response. We accept both.
-        send_response(&mut stream, 405, "Method Not Allowed", "GET or POST required")?;
+        send_response(
+            &mut stream,
+            405,
+            "Method Not Allowed",
+            "GET or POST required",
+        )?;
         return Ok(None);
     }
     // Split the target into path and query string.
-    let target = if let Some(rest) = target.strip_prefix("http://").or_else(|| target.strip_prefix("https://")) {
+    let target = if let Some(rest) = target
+        .strip_prefix("http://")
+        .or_else(|| target.strip_prefix("https://"))
+    {
         match rest.split_once('/') {
             Some((_host, path)) => format!("/{path}"),
             None => "/".to_owned(),
@@ -303,9 +310,7 @@ fn handle_connection(
                     "Bad Request",
                     &format!("Authorization server returned error='{err}'; description='{desc}'"),
                 )?;
-                return Err(OAuthError::AuthorizationDenied(format!(
-                    "{err}: {desc}"
-                )));
+                return Err(OAuthError::AuthorizationDenied(format!("{err}: {desc}")));
             }
             send_response(
                 &mut stream,
@@ -429,9 +434,8 @@ fn send_response(
 /// failure here doesn't fail the OAuth flow (the user can still
 /// copy/paste the URL into a browser), but it IS logged at warn.
 pub fn open_browser(url: &str) -> Result<(), OAuthError> {
-    webbrowser::open(url).map_err(|e| {
-        OAuthError::Transport(format!("failed to open system browser: {e}"))
-    })
+    webbrowser::open(url)
+        .map_err(|e| OAuthError::Transport(format!("failed to open system browser: {e}")))
 }
 
 // ---------------------------------------------------------------------------

@@ -23,8 +23,8 @@ use std::thread;
 use std::time::Duration;
 
 use fastmd::mcp::oauth::{
-    OAuthFlowInputs, PreRegisteredClient, TokenStore, WwwAuthenticateChallenge,
-    run_oauth_flow, start_loopback,
+    OAuthFlowInputs, PreRegisteredClient, TokenStore, WwwAuthenticateChallenge, run_oauth_flow,
+    start_loopback,
 };
 
 /// A recorded HTTP request.
@@ -81,48 +81,50 @@ fn start_mock() -> (u16, Arc<MockState>) {
     let port = listener.local_addr().unwrap().port();
     let state = MockState::new();
     let state_clone = state.clone();
-    thread::spawn(move || loop {
-        let (mut stream, _) = match listener.accept() {
-            Ok(p) => p,
-            Err(_) => return,
-        };
-        let mut buf = [0u8; 4096];
-        let mut total = String::new();
-        let _ = stream.set_read_timeout(Some(Duration::from_millis(200)));
+    thread::spawn(move || {
         loop {
-            match stream.read(&mut buf) {
-                Ok(0) => break,
-                Ok(n) => {
-                    total.push_str(&String::from_utf8_lossy(&buf[..n]));
-                    if total.contains("\r\n\r\n") {
-                        break;
+            let (mut stream, _) = match listener.accept() {
+                Ok(p) => p,
+                Err(_) => return,
+            };
+            let mut buf = [0u8; 4096];
+            let mut total = String::new();
+            let _ = stream.set_read_timeout(Some(Duration::from_millis(200)));
+            loop {
+                match stream.read(&mut buf) {
+                    Ok(0) => break,
+                    Ok(n) => {
+                        total.push_str(&String::from_utf8_lossy(&buf[..n]));
+                        if total.contains("\r\n\r\n") {
+                            break;
+                        }
                     }
+                    Err(_) => break,
                 }
-                Err(_) => break,
             }
+            // Parse request line + Authorization header.
+            let mut lines = total.split("\r\n");
+            let request_line = lines.next().unwrap_or("");
+            let mut parts = request_line.split_whitespace();
+            let method = parts.next().unwrap_or("").to_owned();
+            let path = parts.next().unwrap_or("").to_owned();
+            let mut auth = None;
+            for line in lines {
+                if let Some(rest) = line.strip_prefix("Authorization:") {
+                    auth = Some(rest.trim().to_owned());
+                }
+                if line.is_empty() {
+                    break;
+                }
+            }
+            state_clone.recorded.lock().unwrap().push(RecordedRequest {
+                path,
+                _method: method,
+                _auth_header: auth,
+            });
+            let response = state_clone.take_next();
+            let _ = stream.write_all(response.as_bytes());
         }
-        // Parse request line + Authorization header.
-        let mut lines = total.split("\r\n");
-        let request_line = lines.next().unwrap_or("");
-        let mut parts = request_line.split_whitespace();
-        let method = parts.next().unwrap_or("").to_owned();
-        let path = parts.next().unwrap_or("").to_owned();
-        let mut auth = None;
-        for line in lines {
-            if let Some(rest) = line.strip_prefix("Authorization:") {
-                auth = Some(rest.trim().to_owned());
-            }
-            if line.is_empty() {
-                break;
-            }
-        }
-        state_clone.recorded.lock().unwrap().push(RecordedRequest {
-            path,
-            _method: method,
-            _auth_header: auth,
-        });
-        let response = state_clone.take_next();
-        let _ = stream.write_all(response.as_bytes());
     });
     (port, state)
 }
@@ -228,7 +230,10 @@ fn full_flow_succeeds_with_preregistered_client() {
         Err(fastmd::mcp::oauth::OAuthError::StateMismatch) => {
             // Discovery requests landed on the mock:
             let recs = state.record();
-            assert!(recs.iter().any(|r| r.path.contains("/.well-known/oauth-protected-resource")));
+            assert!(
+                recs.iter()
+                    .any(|r| r.path.contains("/.well-known/oauth-protected-resource"))
+            );
         }
         Err(other) => panic!("expected StateMismatch, got: {other}"),
     }

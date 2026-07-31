@@ -137,7 +137,8 @@ impl Indexer {
                             "jpg" | "jpeg" | "png" | "gif" | "webp" | "bmp" | "tiff" | "avif"
                         ) && is_image_lib
                         {
-                            let job = crate::app::background::models::ImageJob::new(path.to_path_buf());
+                            let job =
+                                crate::app::background::models::ImageJob::new(path.to_path_buf());
                             if job.should_process() {
                                 images_queued += 1;
                                 let _ = tx_img.send(path.to_path_buf());
@@ -145,21 +146,25 @@ impl Indexer {
                         }
                     }
                 } else if path.is_dir() {
-                    let _ = self.tx.send(FsEvent::DirParsed {
-                        path: path.to_path_buf(),
-                    }.into());
+                    let _ = self.tx.send(
+                        FsEvent::DirParsed {
+                            path: path.to_path_buf(),
+                        }
+                        .into(),
+                    );
                 }
 
                 if files_scanned % 500 == 0 || last_log_time.elapsed().as_secs() >= 5 {
-                    let _ = self
-                        .tx
-                        .send(BackgroundLogEntry::new(
+                    let _ = self.tx.send(
+                        BackgroundLogEntry::new(
                             LogCategory::Indexer,
                             format!(
                                 "Scanned {} files, queued {} PDFs, queued {} images",
                                 files_scanned, pdfs_queued, images_queued
                             ),
-                        ).into());
+                        )
+                        .into(),
+                    );
                     last_log_time = std::time::Instant::now();
                 }
                 if files_scanned % 50 == 0 {

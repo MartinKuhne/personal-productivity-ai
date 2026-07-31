@@ -23,9 +23,7 @@ fn make_config(port: u16) -> AppConfig {
     config
 }
 
-fn make_ctx(
-    config: AppConfig,
-) -> (AgentContext, std::sync::mpsc::Receiver<BackgroundEvent>) {
+fn make_ctx(config: AppConfig) -> (AgentContext, std::sync::mpsc::Receiver<BackgroundEvent>) {
     let (tx, rx) = std::sync::mpsc::channel();
     let ctx = AgentContext {
         config,

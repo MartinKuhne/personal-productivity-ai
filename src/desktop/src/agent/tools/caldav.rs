@@ -1,7 +1,7 @@
 //! CalDAV agent tools — search, retrieve, create, update, and delete calendar events across configured CalDAV servers.
 
-use crate::config::AppConfig;
 use crate::agent::tools::blocking::block_on;
+use crate::config::AppConfig;
 use fast_dav_rs::CalDavClient;
 
 #[derive(serde::Serialize)]

@@ -1,9 +1,9 @@
 //! JMAP email tool implementations for the tool registry.
 
-use crate::config::AppConfig;
 use crate::agent::tools::Tool;
 use crate::agent::tools::context::ToolContext;
 use crate::agent::tools::dtos;
+use crate::config::AppConfig;
 use std::any::TypeId;
 
 use super::json_schema;
@@ -105,11 +105,14 @@ impl Tool for SendEmailTool {
     fn execute(&self, ctx: &ToolContext, args: &str) -> Result<serde_json::Value, String> {
         let input: dtos::SendEmailInput =
             serde_json::from_str(args).map_err(|e| format!("Invalid args: {}", e))?;
-        crate::agent::tools::jmap::tool_send_email(ctx.config, &input.to, &input.subject, &input.body).map(
-            |r| {
-                serde_json::to_value(r)
-                    .unwrap_or_else(|e| serde_json::json!({"error": e.to_string()}))
-            },
+        crate::agent::tools::jmap::tool_send_email(
+            ctx.config,
+            &input.to,
+            &input.subject,
+            &input.body,
         )
+        .map(|r| {
+            serde_json::to_value(r).unwrap_or_else(|e| serde_json::json!({"error": e.to_string()}))
+        })
     }
 }

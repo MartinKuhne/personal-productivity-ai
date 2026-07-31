@@ -1,10 +1,10 @@
 //! Unit tests for ToolRegistry.
 
 use super::*;
+use crate::agent::tools::context::ToolContext;
 use crate::bus::core::Bus;
 use crate::bus::events::file::FileEvent;
 use crate::config::AppConfig;
-use crate::agent::tools::context::ToolContext;
 use serde_json::Value;
 use std::fs;
 use tempfile::TempDir;

@@ -141,9 +141,8 @@ fn register_dynamic(
         software_id: Some(CLIENT_NAME.to_owned()),
         software_version: Some(CLIENT_VERSION.to_owned()),
     };
-    let body = serde_json::to_string(&request).map_err(|e| {
-        OAuthError::Internal(format!("serialize registration request: {e}"))
-    })?;
+    let body = serde_json::to_string(&request)
+        .map_err(|e| OAuthError::Internal(format!("serialize registration request: {e}")))?;
     let resp = ureq::post(endpoint)
         .set("Accept", "application/json")
         .set("Content-Type", "application/json")
@@ -154,17 +153,17 @@ fn register_dynamic(
             let body = r
                 .into_string()
                 .map_err(|e| OAuthError::Transport(format!("registration response read: {e}")))?;
-            let value: serde_json::Value = serde_json::from_str(&body)
-                .map_err(|e| OAuthError::Protocol(format!("registration response json: {e}; body: {body}")))?;
+            let value: serde_json::Value = serde_json::from_str(&body).map_err(|e| {
+                OAuthError::Protocol(format!("registration response json: {e}; body: {body}"))
+            })?;
             if let Some(err) = super::types::OAuthErrorBody::from_json(&value) {
                 return Err(OAuthError::OAuth {
                     endpoint: "registration",
                     body: err,
                 });
             }
-            serde_json::from_value(value).map_err(|e| {
-                OAuthError::Protocol(format!("registration response shape: {e}"))
-            })?
+            serde_json::from_value(value)
+                .map_err(|e| OAuthError::Protocol(format!("registration response shape: {e}")))?
         }
         Err(ureq::Error::Status(_code, r)) => {
             let body = r.into_string().unwrap_or_default();
@@ -183,7 +182,7 @@ fn register_dynamic(
         Err(e) => {
             return Err(OAuthError::ClientRegistration(format!(
                 "registration request failed: {e}"
-            )))
+            )));
         }
     };
     if response.client_id.is_empty() {

@@ -135,10 +135,7 @@ pub(crate) fn render_table_with_paint_output_and_padding(
 /// in both the header and the (single) data row. Used to make
 /// column-width measurements identical so the FTWA widths reflect
 /// the algorithm's own distribution rather than font-metric noise.
-pub(crate) fn build_uniform_table(
-    cell_text: &str,
-    n_columns: usize,
-) -> Vec<Vec<Vec<InlineElem>>> {
+pub(crate) fn build_uniform_table(cell_text: &str, n_columns: usize) -> Vec<Vec<Vec<InlineElem>>> {
     let make_cell = || {
         vec![InlineElem::Text(
             cell_text.to_string(),

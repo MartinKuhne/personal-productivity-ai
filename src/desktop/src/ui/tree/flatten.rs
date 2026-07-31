@@ -42,7 +42,7 @@ pub struct FlatRow {
 /// Sans-spacing slot height passed to `ScrollArea::show_rows`. egui
 /// adds `ui.spacing().item_spacing.y` (default 3.0) on top of this
 /// to compute the actual per-row slot height. The row content
-/// rendered by [`render_flat_row`] is a `ui.horizontal` block whose
+/// rendered by [`crate::ui::tree::render_flat_row`] is a `ui.horizontal` block whose
 /// height is the max of its children: a `selectable_label`, which
 /// in egui 0.35 is `interact_size.y` (18) — `button_padding.y`
 /// (1 top + 1 bottom) is added inside the frame, but the text is

@@ -227,7 +227,7 @@ pub struct ClientRegistrationResponse {
 
 /// RFC 6749 §5.1 successful token response. RFC 6749 §5.1 also
 /// defines an `error` envelope; we surface that via
-/// [`OAuthFlowError::TokenEndpoint`].
+/// [`OAuthError::OAuth`].
 #[derive(Debug, Clone, Deserialize, Serialize, PartialEq, Eq)]
 pub struct TokenResponse {
     /// The access token issued by the authorization server.
@@ -320,7 +320,11 @@ impl fmt::Display for WwwAuthenticateChallenge {
             if Self::is_token(v) {
                 write!(f, "{k}={v}")?;
             } else {
-                write!(f, "{k}=\"{}\"", v.replace('\\', r"\\").replace('"', r#"\""#))?;
+                write!(
+                    f,
+                    "{k}=\"{}\"",
+                    v.replace('\\', r"\\").replace('"', r#"\""#)
+                )?;
             }
         }
         Ok(())
@@ -388,7 +392,11 @@ fn find_next_challenge_start(s: &str) -> Option<usize> {
             // A new challenge starts with a scheme name followed by space/equals, e.g. "Basic " or "Digest "
             if let Some(space_idx) = after.find(char::is_whitespace) {
                 let token = &after[..space_idx];
-                if !token.contains('=') && token.chars().all(|ch| ch.is_ascii_alphanumeric() || ch == '_' || ch == '-') {
+                if !token.contains('=')
+                    && token
+                        .chars()
+                        .all(|ch| ch.is_ascii_alphanumeric() || ch == '_' || ch == '-')
+                {
                     return Some(i);
                 }
             }
@@ -556,10 +564,9 @@ impl fmt::Display for OAuthError {
             OAuthError::ResourceMetadata(s) => {
                 write!(f, "Protected Resource Metadata discovery failed: {s}")
             }
-            OAuthError::AuthorizationServerMetadata(s) => write!(
-                f,
-                "Authorization Server Metadata discovery failed: {s}"
-            ),
+            OAuthError::AuthorizationServerMetadata(s) => {
+                write!(f, "Authorization Server Metadata discovery failed: {s}")
+            }
             OAuthError::ClientRegistration(s) => {
                 write!(f, "Dynamic Client Registration failed: {s}")
             }
@@ -609,11 +616,7 @@ mod tests {
         let header = r#"Bearer realm="example", resource_metadata="https://mcp.example.com/.well-known/oauth-protected-resource""#;
         let ch = parse_bearer_challenge(header).expect("must parse");
         assert_eq!(ch.scheme, "Bearer");
-        assert_eq!(
-            ch.get("realm"),
-            Some("https://mcp.example.com/.well-known/oauth-protected-resource")
-                .or_else(|| ch.get("resource_metadata"))
-        );
+        assert_eq!(ch.get("realm"), Some("example"));
         assert_eq!(
             ch.get("resource_metadata"),
             Some("https://mcp.example.com/.well-known/oauth-protected-resource")

@@ -7,9 +7,9 @@ use crate::agent::response_formatter::{
     format_tool_call_message, format_tool_result_message, split_thinking_and_content,
 };
 use crate::agent::tool_executor::ToolExecutor;
+use crate::agent::tools::get_tools_schema;
 use crate::bus::events::typed::{AgentEvent, BackgroundEvent};
 use crate::config::get_config_path;
-use crate::agent::tools::get_tools_schema;
 use std::sync::atomic::Ordering;
 use std::sync::mpsc::Sender;
 
@@ -52,7 +52,9 @@ fn run_agent_inner(ctx: AgentContext) {
             .tx_gui
             .send(BackgroundEvent::from(AgentEvent::Status("Done".into())));
     }
-    let _ = ctx.tx_gui.send(BackgroundEvent::from(AgentEvent::Finished(messages)));
+    let _ = ctx
+        .tx_gui
+        .send(BackgroundEvent::from(AgentEvent::Finished(messages)));
 }
 enum Turn {
     Continue,
@@ -67,9 +69,9 @@ fn process_turn(
     full_response: &mut String,
     executor: &ToolExecutor,
 ) -> Turn {
-    let _ = ctx
-        .tx_gui
-        .send(BackgroundEvent::from(AgentEvent::Status("Waiting for LLM completions...".into())));
+    let _ = ctx.tx_gui.send(BackgroundEvent::from(AgentEvent::Status(
+        "Waiting for LLM completions...".into(),
+    )));
     let resp_val = match llm.chat_completion(messages, tools_json) {
         Ok(v) => v,
         Err(e) => {
@@ -83,9 +85,9 @@ fn process_turn(
     let message = match extract_message(&resp_val) {
         Some(m) => m,
         None => {
-            let _ = ctx
-                .tx_gui
-                .send(BackgroundEvent::from(AgentEvent::Failed("Invalid response schema".into())));
+            let _ = ctx.tx_gui.send(BackgroundEvent::from(AgentEvent::Failed(
+                "Invalid response schema".into(),
+            )));
             return Turn::Failed;
         }
     };
@@ -107,13 +109,13 @@ fn process_turn(
                     .unwrap_or("");
                 full_response.push_str(&format_tool_call_message(fn_name, args));
                 full_response.push_str("\n\n");
-                let _ = ctx
-                    .tx_gui
-                    .send(BackgroundEvent::from(AgentEvent::Response(full_response.clone())));
+                let _ = ctx.tx_gui.send(BackgroundEvent::from(AgentEvent::Response(
+                    full_response.clone(),
+                )));
             }
-            let _ = ctx
-                .tx_gui
-                .send(BackgroundEvent::from(AgentEvent::Status("Executing tools...".into())));
+            let _ = ctx.tx_gui.send(BackgroundEvent::from(AgentEvent::Status(
+                "Executing tools...".into(),
+            )));
             let results = executor.execute_all(tc, &ctx.tx_gui);
             process_tool_results(&results, tc, messages, full_response, &ctx.tx_gui);
             Turn::Continue
@@ -186,7 +188,9 @@ fn handle_content(
     if !content.is_empty() {
         full_response.push_str(&content);
         full_response.push_str("\n\n");
-        let _ = tx.send(BackgroundEvent::from(AgentEvent::Response(full_response.clone())));
+        let _ = tx.send(BackgroundEvent::from(AgentEvent::Response(
+            full_response.clone(),
+        )));
     }
 }
 fn process_tool_results(
@@ -210,7 +214,9 @@ fn process_tool_results(
         if let Some((fn_name, _args, result)) = map.remove(&cid) {
             log_tool_result(&fn_name, &result);
             full_response.push_str(&format_tool_result_message(&fn_name, &result));
-            let _ = tx.send(BackgroundEvent::from(AgentEvent::Response(full_response.clone())));
+            let _ = tx.send(BackgroundEvent::from(AgentEvent::Response(
+                full_response.clone(),
+            )));
             messages
                 .push(serde_json::json!({"role": "tool", "tool_call_id": cid, "content": result}));
         }

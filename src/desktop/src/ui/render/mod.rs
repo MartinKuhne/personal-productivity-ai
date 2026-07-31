@@ -7,16 +7,16 @@
 //! - [`code`]      — fenced code blocks with copy-to-clipboard button
 //! - [`heading`]   — heading widgets and the scroll-to-me side effect
 //! - [`yaml_table`] — YAML front-matter key/value table
-//! - [`table::cell`]        — single table cell at a known pinned width
-//! - [`table::configured`]  — table dispatcher with explicit `TableRenderConfig`
-//! - [`table::dispatch`]    — test-only default-config wrapper
+//! - `table::cell`        — single table cell at a known pinned width
+//! - `table::configured`  — table dispatcher with explicit `TableRenderConfig`
+//! - `table::dispatch`    — test-only default-config wrapper
 //!
 //! The top-level [`render_markdown`] function is the only entry point
 //! used by the UI; it walks the `RenderEvent` stream and dispatches
 //! each event to the appropriate submodule. Each submodule is
 //! independently testable: the leaf functions are stateless apart
 //! from the `pending_toggles` sink that `render_markdown` plumbs
-//! through to [`inline::render_inline`] for the task-checkbox case.
+//! through to `inline::render_inline` for the task-checkbox case.
 
 pub mod code;
 pub mod heading;
@@ -40,9 +40,9 @@ pub use crate::markdown::{
 // own test submodules. The original monolithic `render.rs` had them all
 // in one module; after the split we have to widen visibility to
 // `pub(crate)` so the re-exports don't cause E0364.
-pub(crate) use code::render_code_block;
 #[cfg(test)]
 pub(crate) use code::copy_code_to_output;
+pub(crate) use code::render_code_block;
 pub(crate) use heading::render_heading;
 pub(crate) use inline::render_inline;
 pub(crate) use table::render_table_with_config;

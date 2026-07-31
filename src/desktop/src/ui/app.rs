@@ -1,16 +1,16 @@
 //! Root egui `App` struct — owns all application state and wires together background tasks, panels, agent, and dialogs.
 
 use crate::agent::AgentSessionManager;
+use crate::app::background::BackgroundLogEntry;
+use crate::app::background::LogCategory;
+use crate::app::background::{BackgroundProcessManager, SharedProcessManager};
+use crate::app::background_task::Task;
 use crate::app::watcher::directory_tracker::DirectoryTracker;
 use crate::app::watcher::file_processor::FileEventProcessor;
 use crate::app::{
     DialogManager, PanelLayout, PersistedUiState, SelectionManager, TabManager, TagManager,
     TextBuffer,
 };
-use crate::app::background::BackgroundLogEntry;
-use crate::app::background::LogCategory;
-use crate::app::background::{BackgroundProcessManager, SharedProcessManager};
-use crate::app::background_task::Task;
 use crate::bus::core::{Bus, BusReader};
 use crate::bus::events::config::ConfigArrived;
 use crate::bus::events::file::{FileEvent, FileEventProducer};
@@ -838,10 +838,13 @@ impl FastMdApp {
 
         let tx = self.tx.clone();
         let servers_ok = self.agent.initialize_mcp();
-        let _ = tx.send(BackgroundLogEntry::new(
-            LogCategory::Indexer,
-            format!("MCP startup ping complete: {servers_ok} server(s) responded"),
-        ).into());
+        let _ = tx.send(
+            BackgroundLogEntry::new(
+                LogCategory::Indexer,
+                format!("MCP startup ping complete: {servers_ok} server(s) responded"),
+            )
+            .into(),
+        );
     }
 
     fn handle_file_selection(&mut self, _ctx: &egui::Context) {
@@ -1092,25 +1095,27 @@ mod tests {
 
         // 1. FileParsed
         app.tx
-            .send(FsEvent::FileParsed {
-                path: test_file.clone(),
-                tags: vec!["tag1".to_string()],
-            }
-            .into())
+            .send(
+                FsEvent::FileParsed {
+                    path: test_file.clone(),
+                    tags: vec!["tag1".to_string()],
+                }
+                .into(),
+            )
             .unwrap();
 
         // 2. DirParsed
         app.tx
-            .send(FsEvent::DirParsed {
-                path: test_dir.clone(),
-            }
-            .into())
+            .send(
+                FsEvent::DirParsed {
+                    path: test_dir.clone(),
+                }
+                .into(),
+            )
             .unwrap();
 
         // 3. FinishedWithoutWatcher
-        app.tx
-            .send(FsEvent::FinishedWithoutWatcher.into())
-            .unwrap();
+        app.tx.send(FsEvent::FinishedWithoutWatcher.into()).unwrap();
 
         // 4. Agent Status & Response
         app.tx
@@ -1148,11 +1153,13 @@ mod tests {
 
         // File modified message
         app.tx
-            .send(FsEvent::FileModified {
-                path: file_path.clone(),
-                tags: vec!["updated".to_string()],
-            }
-            .into())
+            .send(
+                FsEvent::FileModified {
+                    path: file_path.clone(),
+                    tags: vec!["updated".to_string()],
+                }
+                .into(),
+            )
             .unwrap();
 
         let _ = ctx.run_ui(Default::default(), |ui| {
@@ -1163,10 +1170,12 @@ mod tests {
 
         // File deleted message
         app.tx
-            .send(FsEvent::FileDeleted {
-                path: file_path.clone(),
-            }
-            .into())
+            .send(
+                FsEvent::FileDeleted {
+                    path: file_path.clone(),
+                }
+                .into(),
+            )
             .unwrap();
 
         let _ = ctx.run_ui(Default::default(), |ui| {
@@ -1213,13 +1222,15 @@ mod tests {
 
         // First turn: small context, no cached or reasoning tokens.
         app.tx
-            .send(AgentEvent::TokenUsage(TokenUsageInfo {
-                prompt_tokens: 100,
-                completion_tokens: 20,
-                total_tokens: 120,
-                ..Default::default()
-            })
-            .into())
+            .send(
+                AgentEvent::TokenUsage(TokenUsageInfo {
+                    prompt_tokens: 100,
+                    completion_tokens: 20,
+                    total_tokens: 120,
+                    ..Default::default()
+                })
+                .into(),
+            )
             .unwrap();
 
         let _ = ctx.run_ui(Default::default(), |ui| {
@@ -1247,14 +1258,16 @@ mod tests {
 
         // Second turn: context grew, completion + reasoning added.
         app.tx
-            .send(AgentEvent::TokenUsage(TokenUsageInfo {
-                prompt_tokens: 250,
-                completion_tokens: 30,
-                total_tokens: 280,
-                cached_tokens: Some(50),
-                reasoning_tokens: Some(5),
-            })
-            .into())
+            .send(
+                AgentEvent::TokenUsage(TokenUsageInfo {
+                    prompt_tokens: 250,
+                    completion_tokens: 30,
+                    total_tokens: 280,
+                    cached_tokens: Some(50),
+                    reasoning_tokens: Some(5),
+                })
+                .into(),
+            )
             .unwrap();
 
         let _ = ctx.run_ui(Default::default(), |ui| {
@@ -1282,13 +1295,15 @@ mod tests {
 
         // Third turn: smaller context — peak should NOT shrink.
         app.tx
-            .send(AgentEvent::TokenUsage(TokenUsageInfo {
-                prompt_tokens: 80,
-                completion_tokens: 10,
-                total_tokens: 90,
-                ..Default::default()
-            })
-            .into())
+            .send(
+                AgentEvent::TokenUsage(TokenUsageInfo {
+                    prompt_tokens: 80,
+                    completion_tokens: 10,
+                    total_tokens: 90,
+                    ..Default::default()
+                })
+                .into(),
+            )
             .unwrap();
 
         let _ = ctx.run_ui(Default::default(), |ui| {

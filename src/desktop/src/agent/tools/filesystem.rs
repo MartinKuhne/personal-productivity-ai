@@ -39,7 +39,9 @@ pub fn tool_grep(
     }
 }
 
-pub fn tool_read_tags(root_path: &Path) -> Result<crate::agent::tools::dtos::ReadTagsResponse, String> {
+pub fn tool_read_tags(
+    root_path: &Path,
+) -> Result<crate::agent::tools::dtos::ReadTagsResponse, String> {
     let mut all_tags = std::collections::BTreeSet::new();
     for entry in WalkDir::new(root_path).into_iter().filter_map(|e| e.ok()) {
         if entry.path().is_file()
@@ -125,7 +127,9 @@ pub fn tool_list_files(target_dir: &Path, virtual_prefix: &str) -> Result<Vec<St
     Ok(files)
 }
 
-pub fn tool_read_file(path_str: &str) -> Result<crate::agent::tools::dtos::ReadFileResponse, String> {
+pub fn tool_read_file(
+    path_str: &str,
+) -> Result<crate::agent::tools::dtos::ReadFileResponse, String> {
     match std::fs::read_to_string(path_str) {
         Ok(content) => Ok(crate::agent::tools::dtos::ReadFileResponse { content }),
         Err(e) => Err(format!("Failed to read file: {}", e)),

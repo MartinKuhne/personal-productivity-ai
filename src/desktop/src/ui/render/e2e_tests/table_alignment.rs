@@ -272,9 +272,8 @@ fn test_render_table_short_cells_unwrap_long_cell_wraps() {
     };
     let free_text = find_text("free");
     let beer_text = find_text("beer");
-    let long_text = find_text(
-        "Amber Pale Ale Imperial IPA Lager Pilsner Helles Poster Stout Blond Hefeweizen",
-    );
+    let long_text =
+        find_text("Amber Pale Ale Imperial IPA Lager Pilsner Helles Poster Stout Blond Hefeweizen");
 
     // Short, single-token cells must not word-wrap. Their width is
     // pinned at `max_content` (no slack → not in the wrap set), so

@@ -110,7 +110,8 @@ fn test_render_table_surplus_does_not_stretch_columns_e2e() {
     // NOT stretch either column beyond its max_content width.
     // The Trailers.md table (Model | Cost) is the motivating case.
     let ctx = egui::Context::default();
-    let md = "| Model | Cost |\n|-------|------|\n| NuCamp T@B 320 / 400 | $42,000 |\n| Wolf Pup | |\n";
+    let md =
+        "| Model | Cost |\n|-------|------|\n| NuCamp T@B 320 / 400 | $42,000 |\n| Wolf Pup | |\n";
     let events = parse_markdown_to_events(md);
     let cells = match events.iter().find(|e| matches!(e, RenderEvent::Table(_))) {
         Some(RenderEvent::Table(c)) => c.clone(),
@@ -132,9 +133,8 @@ fn test_render_table_surplus_does_not_stretch_columns_e2e() {
                     ui,
                 );
                 let gutter = 10.0_f32;
-                let avail = (ui.available_width()
-                    - (max_w.len() as f32 - 1.0).max(0.0) * gutter)
-                    .max(0.0);
+                let avail =
+                    (ui.available_width() - (max_w.len() as f32 - 1.0).max(0.0) * gutter).max(0.0);
                 let decision = crate::ui::table_width::ftwa(
                     &max_w,
                     &min_w,
@@ -330,9 +330,7 @@ fn test_render_table_surplus_deficit_fallback_visible_end_to_end() {
 
     // Available width inside CentralPanel for an n-col table, mirroring
     // render_table's gutter math (16.0 outer margin + (n-1)*10.0 gutters).
-    let avail_for = |vw: f32, n_cols: usize| -> f32 {
-        (vw - 16.0) - (n_cols as f32 - 1.0) * 10.0
-    };
+    let avail_for = |vw: f32, n_cols: usize| -> f32 { (vw - 16.0) - (n_cols as f32 - 1.0) * 10.0 };
 
     // Count non-empty text cells in a table (each contributes a galley).
     let non_empty_text_cells = |table: &[Vec<Vec<InlineElem>>]| -> usize {
@@ -609,8 +607,7 @@ fn test_render_table_padding_factored_into_width_and_height() {
     // Height assertion: pick the painted galley bounding rows and
     // sum heights across text shapes. With padding, every row must
     // be taller by at least `padding.vertical()` than without.
-    let paint_zero =
-        render_table_with_paint_output_and_padding(&table, 800.0, TablePadding::ZERO);
+    let paint_zero = render_table_with_paint_output_and_padding(&table, 800.0, TablePadding::ZERO);
     let paint_pad = render_table_with_paint_output_and_padding(&table, 800.0, pad);
     let total_height = |out: &egui::FullOutput| -> f32 {
         use eframe::epaint::Shape;
@@ -646,8 +643,7 @@ fn test_render_table_cell_alignment_left_top() {
     use eframe::epaint::Shape;
 
     let table = build_uniform_table("cell", 2);
-    let paint_zero =
-        render_table_with_paint_output_and_padding(&table, 800.0, TablePadding::ZERO);
+    let paint_zero = render_table_with_paint_output_and_padding(&table, 800.0, TablePadding::ZERO);
     let pad = TablePadding {
         top: 8.0,
         bottom: 8.0,
@@ -668,8 +664,8 @@ fn test_render_table_cell_alignment_left_top() {
         })
     };
 
-    let pos_zero = first_text_pos(&paint_zero)
-        .expect("painted table must produce at least one text shape");
+    let pos_zero =
+        first_text_pos(&paint_zero).expect("painted table must produce at least one text shape");
     let pos_pad = first_text_pos(&paint_pad)
         .expect("painted table (padded) must produce at least one text shape");
 

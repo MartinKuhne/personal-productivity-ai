@@ -41,13 +41,14 @@ pub use flow::{
     OAuthFlowInputs, OAuthFlowOutput, PreRegisteredClient, build_resource_uri, refresh, run_flow,
     run_flow as run_oauth_flow,
 };
-pub use pkce::{AuthorizationUrlInputs, PkcePair, State, build_authorization_url, percent_encode, s256};
+pub use pkce::{
+    AuthorizationUrlInputs, PkcePair, State, build_authorization_url, percent_encode, s256,
+};
 pub use redirect::{
-    DEFAULT_CALLBACK_PATH, DEFAULT_CALLBACK_TIMEOUT, LoopbackServer, open_browser, start as start_loopback,
+    DEFAULT_CALLBACK_PATH, DEFAULT_CALLBACK_TIMEOUT, LoopbackServer, open_browser,
+    start as start_loopback,
 };
-pub use store::{
-    DEFAULT_EXPIRY_SKEW, StoredToken, TOKEN_STORE_FILE_NAME, TokenStore,
-};
+pub use store::{DEFAULT_EXPIRY_SKEW, StoredToken, TOKEN_STORE_FILE_NAME, TokenStore};
 pub use types::{
     AuthorizationServerMetadata, ClientRegistrationRequest, ClientRegistrationResponse, OAuthError,
     OAuthErrorBody, ProtectedResourceMetadata, TokenResponse, WwwAuthenticateChallenge,
