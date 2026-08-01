@@ -42,6 +42,56 @@ use std::io::Write;
 use std::process::{Child, ChildStdin, Stdio};
 use std::sync::{Arc, Mutex};
 
+/// Win32 `CREATE_NO_WINDOW` flag for [`CreateProcessW`].
+///
+/// Passed to [`std::os::windows::process::CommandExt::creation_flags`]
+/// to prevent a console-subsystem child from popping a visible
+/// console window when launched from a GUI-subsystem parent. The
+/// child still receives a (hidden) console buffer so stdout/stderr
+/// redirection to pipes keeps working — only the visible window is
+/// suppressed. See `doc/adr/cmd-substitution.md` for the rationale.
+///
+/// [`CreateProcessW`]: https://learn.microsoft.com/en-us/windows/win32/api/processthreadsapi/nf-processthreadsapi-createprocessw
+#[cfg(windows)]
+const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+
+/// Build the [`std::process::Command`] used to spawn a stdio MCP
+/// server.
+///
+/// On Windows the helper applies [`CREATE_NO_WINDOW`] so the child
+/// process does not flash a console window when our release binary
+/// is launched as a GUI-subsystem application
+/// (`#![windows_subsystem = "windows"]` in `src/main.rs`). Stdin /
+/// stdout / stderr are still piped — only the visible window is
+/// suppressed. On non-Windows platforms the helper is a no-op
+/// beyond the stdio wiring; the `creation_flags` call is gated
+/// `#[cfg(windows)]`.
+///
+/// Extracted from [`McpClientSession::ensure_stdio_transport_locked`]
+/// as a free function so it can be unit-tested without spinning up a
+/// full session. See `doc/adr/cmd-substitution.md` for the full
+/// decision record.
+fn build_stdio_command(
+    program: &str,
+    args: &[String],
+    env: &std::collections::HashMap<String, String>,
+) -> std::process::Command {
+    let mut cmd = std::process::Command::new(program);
+    cmd.args(args);
+    for (k, v) in env {
+        cmd.env(k, v);
+    }
+    cmd.stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped());
+    #[cfg(windows)]
+    {
+        use std::os::windows::process::CommandExt;
+        cmd.creation_flags(CREATE_NO_WINDOW);
+    }
+    cmd
+}
+
 /// Protocol version this client advertises. Pinned to the spec version
 /// the rest of this module targets. Bump together with the spec.
 pub const PROTOCOL_VERSION: &str = "2025-11-25";
@@ -1078,14 +1128,7 @@ impl McpClientSession {
             ));
         }
         let executable = crate::utils::path::resolve_executable_path(&command);
-        let mut cmd = std::process::Command::new(executable.as_ref());
-        cmd.args(&args);
-        for (k, v) in &env {
-            cmd.env(k, v);
-        }
-        cmd.stdin(Stdio::piped())
-            .stdout(Stdio::piped())
-            .stderr(Stdio::piped());
+        let mut cmd = build_stdio_command(executable.as_ref(), &args, &env);
         let mut child = cmd.spawn().map_err(|e| {
             let hint = if e.kind() == std::io::ErrorKind::NotFound {
                 format!(
@@ -1943,6 +1986,100 @@ fn spawn_stdio_reader_thread(
         }
     });
     Arc::new(Mutex::new(rx))
+}
+
+#[cfg(test)]
+mod tests {
+    //! Unit tests for the stdio MCP subprocess transport.
+    //!
+    //! The "no visible console window" assertion cannot be observed
+    //! programmatically without Win32 FFI (the std API exposes a
+    //! [`CommandExt::creation_flags`] setter but no public getter).
+    //! Per `AGENTS.md` §10 ("If the issue cannot be reproduced at
+    //! the unit or integration level ... document why ... and add
+    //! the closest possible deterministic test"), we cover the
+    //! helper's contract — program/args/env/stdio set correctly and
+    //! the command is spawnable — and rely on a manual visual check
+    //! on Windows for the actual no-window behaviour. The
+    //! `cmd.creation_flags(CREATE_NO_WINDOW)` line itself is the
+    //! contract; see `doc/adr/cmd-substitution.md` for rationale.
+
+    use super::*;
+    use std::collections::HashMap;
+
+    #[test]
+    fn build_stdio_command_sets_program_args_env_and_pipes_stdio() {
+        let env: HashMap<String, String> =
+            std::iter::once(("FASTMD_MCP_TEST_VAR".to_string(), "hello".to_string())).collect();
+        let args = vec!["--version".to_string()];
+        let cmd = build_stdio_command("cargo", &args, &env);
+
+        assert_eq!(cmd.get_program(), "cargo");
+        let got_args: Vec<std::ffi::OsString> =
+            cmd.get_args().map(std::ffi::OsString::from).collect();
+        assert_eq!(
+            got_args,
+            vec![std::ffi::OsString::from("--version")],
+            "args should pass through verbatim",
+        );
+
+        // The env we explicitly set must be present. Other entries
+        // from the inherited environment are also expected and we
+        // don't enumerate them.
+        let envs: Vec<(String, String)> = cmd
+            .get_envs()
+            .filter_map(|(k, v)| {
+                // `Command::get_envs` yields `(&OsStr, Option<&OsStr>)`;
+                // `v` is `None` for an explicit unset. Apply `?` only
+                // to the outer Option so the closure returns
+                // `Option<(String, String)>` and `filter_map` drops
+                // entries with non-UTF-8 keys or unset values.
+                let key = k.to_str()?.to_owned();
+                let val = v?.to_str()?.to_owned();
+                Some((key, val))
+            })
+            .collect();
+        assert!(
+            envs.iter()
+                .any(|(k, v)| k == "FASTMD_MCP_TEST_VAR" && v == "hello"),
+            "env override should be present, got {envs:?}",
+        );
+    }
+
+    #[test]
+    fn build_stdio_command_produces_a_spawnable_command() {
+        // `cargo --version` is available on every CI/dev environment
+        // for this Rust project and exits quickly with a known banner.
+        // It is the closest portable "long-lived enough to spawn and
+        // reap" smoke target without taking a hard dependency on a
+        // particular shell.
+        let mut cmd = build_stdio_command("cargo", &["--version".to_string()], &HashMap::new());
+        let output = cmd
+            .output()
+            .expect("cargo --version should spawn successfully");
+        assert!(
+            output.status.success(),
+            "cargo --version should exit 0; got {:?}",
+            output.status,
+        );
+        let stdout = String::from_utf8_lossy(&output.stdout);
+        assert!(
+            stdout.contains("cargo"),
+            "cargo --version should print a 'cargo' banner; got: {stdout}",
+        );
+    }
+
+    #[test]
+    fn build_stdio_command_is_idempotent_under_repeated_calls() {
+        // Defends against a future refactor that accidentally caches
+        // or mutates a shared Command between calls. Each call must
+        // return a fresh Command with the requested program/args.
+        let env = HashMap::new();
+        let cmd_a = build_stdio_command("cargo", &["--version".to_string()], &env);
+        let cmd_b = build_stdio_command("node", &[], &env);
+        assert_eq!(cmd_a.get_program(), "cargo");
+        assert_eq!(cmd_b.get_program(), "node");
+    }
 }
 
 /// A tool advertised by an MCP server. Returned by

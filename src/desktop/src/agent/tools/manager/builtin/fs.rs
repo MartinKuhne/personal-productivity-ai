@@ -88,8 +88,7 @@ impl Tool for GrepTool {
         all_matches.truncate(limit);
         if truncated {
             all_matches.push(format!(
-                "... (results truncated at {} matches; refine the query with narrower terms or delegate to a sub-agent to analyse a specific file)",
-                limit
+                "... (results truncated at {limit} matches; refine the query with narrower terms or delegate to a sub-agent to analyse a specific file)"
             ));
         }
         let matches = if all_matches.is_empty() {
@@ -169,11 +168,10 @@ impl Tool for ListFilesByTagTool {
     fn execute(&self, ctx: &ToolContext, args: &str) -> Result<serde_json::Value, String> {
         let input: dtos::ListFilesByTagInput =
             serde_json::from_str(args).map_err(|e| format!("Invalid args: {}", e))?;
-        let page = input.page.unwrap_or(1).max(1);
-        let page_size = input
-            .page_size
-            .unwrap_or(crate::agent::tools::filesystem::DEFAULT_LIST_FILES_BY_TAG_PAGE_SIZE)
-            .max(1);
+        let offset = input.offset.unwrap_or(0);
+        let limit = input
+            .limit
+            .unwrap_or(super::super::pagination::DEFAULT_LIST_FILES_BY_TAG_LIMIT);
         let mut all_matches: Vec<String> = Vec::new();
         for lib in &ctx.config.content_libraries {
             match crate::agent::tools::filesystem::tool_list_files_by_tag(
@@ -191,7 +189,7 @@ impl Tool for ListFilesByTagTool {
         all_matches.dedup();
         let total = all_matches.len();
         let (page_files, hint) =
-            paginate_in_range(&all_matches, page, page_size, total, "tagged files");
+            paginate_in_range(&all_matches, offset, limit, total, "tagged files");
         Ok(serde_json::to_value(dtos::ListFilesByTagResponse {
             files: page_files,
             total,
@@ -225,11 +223,10 @@ impl Tool for ListFilesTool {
     fn execute(&self, ctx: &ToolContext, args: &str) -> Result<serde_json::Value, String> {
         let input: dtos::ListFilesInput =
             serde_json::from_str(args).map_err(|e| format!("Invalid args: {}", e))?;
-        let page = input.page.unwrap_or(1).max(1);
-        let page_size = input
-            .page_size
-            .unwrap_or(crate::agent::tools::filesystem::DEFAULT_LIST_FILES_BY_TAG_PAGE_SIZE)
-            .max(1);
+        let offset = input.offset.unwrap_or(0);
+        let limit = input
+            .limit
+            .unwrap_or(super::super::pagination::DEFAULT_LIST_FILES_BY_TAG_LIMIT);
         let all_matches: Vec<String> = match ctx.resolve_virtual_path(&input.path, false)? {
             Some((path, _)) => {
                 crate::agent::tools::filesystem::tool_list_files(&path, &input.path)?
@@ -251,7 +248,7 @@ impl Tool for ListFilesTool {
         } else {
             "files"
         };
-        let (page_files, hint) = paginate_in_range(&all_matches, page, page_size, total, plural);
+        let (page_files, hint) = paginate_in_range(&all_matches, offset, limit, total, plural);
         Ok(serde_json::to_value(dtos::ListFilesResponse {
             files: page_files,
             total,

@@ -21,6 +21,7 @@ use jmap_client::core::set::SetObject;
 use jmap_client::email::query::Filter;
 
 use super::client::JmapSession;
+use crate::agent::tools::manager::cache::{SearchEmailCacheEntry, SearchEmailItem};
 
 /// Maximum number of bytes the JMAP server should inline for a single body
 /// part in `bodyValues` (RFC 8621 §6.1.2 `maxBodyValueBytes`).
@@ -232,28 +233,28 @@ pub struct SearchEmailFilters<'a> {
     pub is_flagged: Option<bool>,
 }
 
-/// Pagination for `tool_search_email`.
-#[derive(Debug, Clone, Copy)]
-pub struct SearchEmailPagination {
-    pub page: usize,
-    pub page_size: usize,
+/// Page size for `tool_search_email` (cursor mode). 100 per the
+/// `doc/planning/tool-paging-audit-and-migration.md` plan.
+pub const SEARCH_EMAIL_PAGE_SIZE: usize = 100;
+
+/// Hint string emitted on the final page of a `search_email` cursor
+/// walk.
+pub const SEARCH_EMAIL_FINAL_PAGE_HINT: &str = "Final page.";
+
+/// Generate a new opaque cursor string (UUID v4). The cursor is the
+/// cache key in the shared `ToolCache`; the LLM treats it as opaque.
+pub fn new_search_email_cursor() -> String {
+    uuid::Uuid::new_v4().to_string()
 }
 
-impl Default for SearchEmailPagination {
-    fn default() -> Self {
-        Self {
-            page: 1,
-            page_size: 10,
-        }
-    }
-}
-
-/// Search emails across all configured JMAP clients.
-pub fn tool_search_email(
+/// Fetch the full server result set for a search. Used by the
+/// cursor flow when the caller has not supplied a cursor (or when
+/// the cache lookup misses). The result is cached in the shared
+/// `ToolCache` under a fresh UUID cursor.
+fn fetch_full_search_result(
     config: &AppConfig,
-    filters: SearchEmailFilters<'_>,
-    pagination: SearchEmailPagination,
-) -> Result<crate::agent::tools::dtos::SearchEmailResponse, String> {
+    filters: &SearchEmailFilters<'_>,
+) -> Result<SearchEmailCacheEntry, String> {
     let keyword = filters.keyword;
     let folder = filters.folder;
     let start_date = filters.start_date;
@@ -262,8 +263,6 @@ pub fn tool_search_email(
     let to = filters.to;
     let is_unread = filters.is_unread;
     let is_flagged = filters.is_flagged;
-    let page = pagination.page.max(1);
-    let page_size = pagination.page_size.max(1);
 
     // Build non-folder filter conditions using typed Filter enum
     let mut conditions: Vec<Filter> = Vec::new();
@@ -323,7 +322,11 @@ pub fn tool_search_email(
             .to_string());
     }
 
-    let mut all_items: Vec<(String, serde_json::Value)> = Vec::new();
+    if config.jmap_clients.is_empty() {
+        return Err("No JMAP clients configured.".to_string());
+    }
+
+    let mut all_items: Vec<SearchEmailItem> = Vec::new();
     let mut error_messages: Vec<String> = Vec::new();
 
     for (name, client) in &config.jmap_clients {
@@ -384,7 +387,6 @@ pub fn tool_search_email(
             continue;
         }
 
-        let mut emails_json = Vec::new();
         for email_id in &email_ids {
             match email_get_full(&session, email_id) {
                 Ok(Some(mut email)) => {
@@ -395,7 +397,10 @@ pub fn tool_search_email(
                         email_id
                     );
                     let email_json = convert_html_in_jmap(simplify_email(&mut email, Some(10)));
-                    emails_json.push(email_json);
+                    all_items.push(SearchEmailItem {
+                        client: name.clone(),
+                        email: email_json,
+                    });
                 }
                 Ok(None) => {
                     tracing::warn!(
@@ -417,40 +422,29 @@ pub fn tool_search_email(
                 }
             }
         }
-
-        for email_json in emails_json {
-            all_items.push((name.clone(), email_json));
-        }
     }
 
     let total = all_items.len();
+    Ok(SearchEmailCacheEntry {
+        items: all_items,
+        cursor_offset: 0,
+        total,
+        fetched_at: std::time::Instant::now(),
+        errors: error_messages,
+    })
+}
 
-    let (page_items, hint) = if total == 0 {
-        let hint = if error_messages.is_empty() {
-            Some("No matching emails found.".to_string())
-        } else {
-            None
-        };
-        (Vec::new(), hint)
-    } else {
-        let start = page.saturating_sub(1).saturating_mul(page_size);
-        if start >= total {
-            (
-                Vec::new(),
-                Some(format!(
-                    "No emails on page {page} (showing 0 of {total} total, page_size: {page_size})."
-                )),
-            )
-        } else {
-            let end = (start + page_size).min(total);
-            (all_items[start..end].to_vec(), None)
-        }
-    };
-
+/// Format a slice of cached search-email items as the
+/// `SearchEmailResponse.results` payload: a `--- Client: X ---`
+/// block per client, followed by per-client error messages.
+fn format_search_page(page_items: &[&SearchEmailItem], errors: &[String]) -> String {
     use std::collections::BTreeMap;
     let mut client_items: BTreeMap<&str, Vec<&serde_json::Value>> = BTreeMap::new();
-    for (client, item) in &page_items {
-        client_items.entry(client.as_str()).or_default().push(item);
+    for item in page_items {
+        client_items
+            .entry(item.client.as_str())
+            .or_default()
+            .push(&item.email);
     }
 
     let mut result_parts: Vec<String> = Vec::new();
@@ -461,21 +455,145 @@ pub fn tool_search_email(
             serde_json::to_string_pretty(items).unwrap_or_default()
         ));
     }
-    result_parts.extend(error_messages);
+    result_parts.extend(errors.iter().cloned());
+    result_parts.join("\n\n")
+}
 
-    if config.jmap_clients.is_empty() {
-        tracing::warn!(
-            name = "tool.email.search.no_clients",
-            "No JMAP clients configured."
-        );
-        Err("No JMAP clients configured.".to_string())
-    } else {
-        Ok(crate::agent::tools::dtos::SearchEmailResponse {
-            results: result_parts.join("\n\n"),
+/// Search emails across all configured JMAP clients using a
+/// cursor-based paging model backed by the shared `ToolCache`. The
+/// first call (no cursor) queries JMAP once, caches the full result
+/// set under a fresh UUID cursor, and returns the first page. Each
+/// subsequent call with the same cursor slices the next page from
+/// the cache without re-querying JMAP. On an unknown or expired
+/// cursor, the helper returns an error instructing the LLM to
+/// re-run the search with no cursor.
+pub fn tool_search_email(
+    config: &AppConfig,
+    filters: SearchEmailFilters<'_>,
+    cursor: Option<String>,
+) -> Result<crate::agent::tools::dtos::SearchEmailResponse, String> {
+    use crate::agent::tools::manager::cache::{
+        CacheEntry, SearchEmailCacheEntry, SearchEmailItem, cache,
+    };
+
+    // First call: query JMAP, populate the cache, return first page + cursor.
+    let Some(cursor) = cursor else {
+        let entry = fetch_full_search_result(config, &filters)?;
+        let total = entry.total;
+        let first_page: Vec<SearchEmailItem> = entry
+            .items
+            .iter()
+            .take(SEARCH_EMAIL_PAGE_SIZE)
+            .cloned()
+            .collect();
+        let next_offset = first_page.len();
+        let new_cursor = new_search_email_cursor();
+
+        // Store the cache entry (a clone of the items we will keep
+        // serving from). The cursor_offset is set so the next call
+        // returns the items immediately after this batch.
+        let cache_entry = SearchEmailCacheEntry {
+            items: entry.items,
+            cursor_offset: next_offset,
             total,
-            hint,
-        })
+            fetched_at: entry.fetched_at,
+            errors: entry.errors.clone(),
+        };
+        cache().put(new_cursor.clone(), CacheEntry::SearchEmail(cache_entry));
+
+        // Empty result set: no cursor, hint says "no matches". We
+        // do not need to keep the cache entry we just inserted, so
+        // invalidate it before returning.
+        if total == 0 {
+            cache().invalidate(&new_cursor);
+            return Ok(crate::agent::tools::dtos::SearchEmailResponse {
+                results: "No matching emails found.".to_string(),
+                total: 0,
+                cursor: None,
+                hint: Some("No matching emails found.".to_string()),
+            });
+        }
+
+        // If we served every item in this batch, the cursor is
+        // final: emit a hint instead of a cursor so the LLM stops
+        // walking. If there are more, the LLM gets the cursor and
+        // makes a follow-up call.
+        let (cursor_out, hint_out) = if next_offset >= total {
+            // All items already returned in this first page; remove
+            // the cache entry since there will be no follow-up.
+            cache().invalidate(&new_cursor);
+            (None, Some(SEARCH_EMAIL_FINAL_PAGE_HINT.to_string()))
+        } else {
+            (Some(new_cursor), None)
+        };
+
+        let first_refs: Vec<&SearchEmailItem> = first_page.iter().collect();
+        let results = format_search_page(&first_refs, &entry.errors);
+
+        return Ok(crate::agent::tools::dtos::SearchEmailResponse {
+            results,
+            total,
+            cursor: cursor_out,
+            hint: hint_out,
+        });
+    };
+
+    // Subsequent call: look up the cache, slice, return next page.
+    let entry = match cache().get(&cursor) {
+        Some(CacheEntry::SearchEmail(e)) => e,
+        _ => {
+            return Err("Cursor expired or unknown; re-run the search with no cursor.".to_string());
+        }
+    };
+
+    let total = entry.total;
+    let start = entry.cursor_offset;
+    if start >= total {
+        // No more items. Should not normally happen because the
+        // first call would have omitted the cursor in this case,
+        // but report it cleanly anyway.
+        return Ok(crate::agent::tools::dtos::SearchEmailResponse {
+            results: String::new(),
+            total,
+            cursor: None,
+            hint: Some(SEARCH_EMAIL_FINAL_PAGE_HINT.to_string()),
+        });
     }
+
+    let end = (start + SEARCH_EMAIL_PAGE_SIZE).min(total);
+    let page_refs: Vec<&SearchEmailItem> = entry.items[start..end].iter().collect();
+    let results = format_search_page(&page_refs, &entry.errors);
+
+    // Advance the cached offset for the next call.
+    let new_offset = end;
+    let (cursor_out, hint_out) = if new_offset >= total {
+        // Final page.
+        (None, Some(SEARCH_EMAIL_FINAL_PAGE_HINT.to_string()))
+    } else {
+        // More pages exist: same cursor, advanced offset.
+        (Some(cursor.clone()), None)
+    };
+
+    // Update the cached entry with the new offset. Re-put is the
+    // simplest way; the cache key is unchanged so the entry stays
+    // in the same slot.
+    cache().put(
+        cursor,
+        CacheEntry::SearchEmail(SearchEmailCacheEntry {
+            items: entry.items,
+            cursor_offset: new_offset,
+            total,
+            fetched_at: entry.fetched_at,
+            errors: entry.errors,
+        }),
+    );
+
+    Ok(crate::agent::tools::dtos::SearchEmailResponse {
+        results,
+        total,
+        cursor: cursor_out,
+        hint: hint_out,
+    })
 }
 
 /// Get a single email by its JMAP ID.
@@ -1262,10 +1380,7 @@ mod tests {
         assert_eq!(result[0]["bcc"][0]["email"], "bcc@t.com");
     }
 
-    use super::{
-        SearchEmailFilters, SearchEmailPagination, tool_get_email_by_id, tool_search_email,
-        tool_send_email,
-    };
+    use super::{SearchEmailFilters, tool_get_email_by_id, tool_search_email, tool_send_email};
     use crate::agent::tools::jmap::{spawn_mock_server, spawn_recording_mock_server};
     use crate::config::{AppConfig, JmapClient};
     #[test]
@@ -1277,10 +1392,7 @@ mod tests {
                 keyword: Some("test"),
                 ..Default::default()
             },
-            SearchEmailPagination {
-                page: 1,
-                page_size: 10,
-            },
+            None,
         );
         assert!(res.is_err());
     }
@@ -1313,10 +1425,7 @@ mod tests {
                 keyword: Some("test"),
                 ..Default::default()
             },
-            SearchEmailPagination {
-                page: 1,
-                page_size: 10,
-            },
+            None,
         );
         assert!(res.is_ok());
     }
@@ -1467,10 +1576,7 @@ mod tests {
                 is_unread: Some(true),
                 is_flagged: Some(false),
             },
-            SearchEmailPagination {
-                page: 1,
-                page_size: 10,
-            },
+            None,
         );
         assert!(res.is_ok());
     }
@@ -1517,10 +1623,7 @@ mod tests {
             SearchEmailFilters {
                 ..Default::default()
             },
-            SearchEmailPagination {
-                page: 1,
-                page_size: 10,
-            },
+            None,
         );
         assert!(res.is_err());
         let msg = res.unwrap_err();
@@ -1547,10 +1650,7 @@ mod tests {
             SearchEmailFilters {
                 ..Default::default()
             },
-            SearchEmailPagination {
-                page: 1,
-                page_size: 10,
-            },
+            None,
         );
         assert!(res.is_err());
         assert!(
@@ -1560,7 +1660,7 @@ mod tests {
     }
 
     #[test]
-    fn test_tool_search_email_pagination_default_page_size_is_10() {
+    fn test_tool_search_email_first_call_small_set_returns_final_page_hint() {
         rustls::crypto::ring::default_provider()
             .install_default()
             .ok();
@@ -1595,20 +1695,28 @@ mod tests {
                 keyword: Some("test"),
                 ..Default::default()
             },
-            SearchEmailPagination {
-                page: 1,
-                page_size: 10,
-            },
+            None,
         );
         assert!(res.is_ok());
         let response = res.unwrap();
         assert_eq!(response.total, 3);
-        assert!(response.hint.is_none());
+        // In cursor mode, a result set that fits entirely on one
+        // page emits the `Final page.` hint and omits `cursor`. The
+        // 3-item result set is smaller than the page size (100),
+        // so this is the final page.
+        assert!(
+            response.cursor.is_none(),
+            "single-page result must omit cursor"
+        );
+        assert_eq!(
+            response.hint.as_deref(),
+            Some(super::SEARCH_EMAIL_FINAL_PAGE_HINT)
+        );
         assert!(!response.results.is_empty());
     }
 
     #[test]
-    fn test_tool_search_email_pagination_second_page() {
+    fn test_tool_search_email_cursor_unknown_returns_error() {
         rustls::crypto::ring::default_provider()
             .install_default()
             .ok();
@@ -1616,14 +1724,10 @@ mod tests {
                 "apiUrl": "{API_URL}",
                 "primaryAccounts": {"urn:ietf:params:jmap:mail": "acc1"},
                 "methodResponses": [
-                    ["Email/query", {"ids": ["e1","e2","e3","e4","e5"]}, "0"],
+                    ["Email/query", {"ids": ["e1"]}, "0"],
                     ["Email/get", {
                         "list": [
-                            {"id": "e1", "subject": "S1", "receivedAt": "2026-07-19T10:00:00Z", "from": [{"email":"a@t.com"}], "to": [{"email":"b@t.com"}], "htmlBody": [{"partId":"p1"}], "bodyValues": {"p1": {"value":"B1","isTruncated":false}}},
-                            {"id": "e2", "subject": "S2", "receivedAt": "2026-07-19T11:00:00Z", "from": [{"email":"c@t.com"}], "to": [{"email":"d@t.com"}], "htmlBody": [{"partId":"p2"}], "bodyValues": {"p2": {"value":"B2","isTruncated":false}}},
-                            {"id": "e3", "subject": "S3", "receivedAt": "2026-07-19T12:00:00Z", "from": [{"email":"e@t.com"}], "to": [{"email":"f@t.com"}], "htmlBody": [{"partId":"p3"}], "bodyValues": {"p3": {"value":"B3","isTruncated":false}}},
-                            {"id": "e4", "subject": "S4", "receivedAt": "2026-07-19T13:00:00Z", "from": [{"email":"g@t.com"}], "to": [{"email":"h@t.com"}], "htmlBody": [{"partId":"p4"}], "bodyValues": {"p4": {"value":"B4","isTruncated":false}}},
-                            {"id": "e5", "subject": "S5", "receivedAt": "2026-07-19T14:00:00Z", "from": [{"email":"i@t.com"}], "to": [{"email":"j@t.com"}], "htmlBody": [{"partId":"p5"}], "bodyValues": {"p5": {"value":"B5","isTruncated":false}}}
+                            {"id": "e1", "subject": "Only", "receivedAt": "2026-07-19T10:00:00Z", "from": [{"email":"a@t.com"}], "to": [{"email":"b@t.com"}], "htmlBody": [{"partId":"p1"}], "bodyValues": {"p1": {"value":"Body","isTruncated":false}}}
                         ],
                         "notFound": []
                     }, "1"]
@@ -1639,25 +1743,33 @@ mod tests {
                 token: "tok".to_string(),
             },
         );
+        // A bogus cursor that does not match any live cache entry
+        // must return the documented "expired or unknown" error.
         let res = tool_search_email(
             &config,
             SearchEmailFilters {
                 keyword: Some("test"),
                 ..Default::default()
             },
-            SearchEmailPagination {
-                page: 2,
-                page_size: 2,
-            },
+            Some("00000000-0000-0000-0000-000000000000".to_string()),
         );
-        assert!(res.is_ok());
-        let response = res.unwrap();
-        assert_eq!(response.total, 5);
-        assert!(response.results.contains("S3") || response.results.contains("S4"));
+        assert!(res.is_err());
+        let err = res.unwrap_err();
+        assert!(
+            err.contains("Cursor expired or unknown"),
+            "unexpected error: {err}"
+        );
     }
 
     #[test]
-    fn test_tool_search_email_page_beyond_total() {
+    fn test_tool_search_email_pagination_hint_on_final_page() {
+        // When the first call returns a result set that fits entirely
+        // on one page (here, total = 1, page size = 100), the
+        // response omits `cursor` and sets `hint` to
+        // `SEARCH_EMAIL_FINAL_PAGE_HINT`. There is no separate
+        // "page-beyond-total" test because the cursor model makes
+        // that scenario impossible: the LLM only ever holds a
+        // valid cursor or no cursor at all.
         rustls::crypto::ring::default_provider()
             .install_default()
             .ok();
@@ -1690,16 +1802,19 @@ mod tests {
                 keyword: Some("test"),
                 ..Default::default()
             },
-            SearchEmailPagination {
-                page: 5,
-                page_size: 2,
-            },
+            None,
         );
         assert!(res.is_ok());
         let response = res.unwrap();
         assert_eq!(response.total, 1);
-        assert!(response.hint.is_some());
-        assert!(response.hint.unwrap().contains("No emails on page 5"));
+        assert!(
+            response.cursor.is_none(),
+            "single-page result must omit cursor"
+        );
+        assert_eq!(
+            response.hint.as_deref(),
+            Some(super::SEARCH_EMAIL_FINAL_PAGE_HINT)
+        );
     }
 
     #[test]
@@ -1743,10 +1858,7 @@ mod tests {
                 keyword: Some("test"),
                 ..Default::default()
             },
-            SearchEmailPagination {
-                page: 1,
-                page_size: 10,
-            },
+            None,
         );
         assert!(res.is_ok());
         let response = res.unwrap();
@@ -1790,10 +1902,7 @@ mod tests {
                 keyword: Some("fastmail"),
                 ..Default::default()
             },
-            SearchEmailPagination {
-                page: 1,
-                page_size: 10,
-            },
+            None,
         );
         assert!(res.is_ok());
         let response = res.unwrap();

@@ -43,6 +43,7 @@ reqwest = { version = "0.12", features = ["blocking"] }
 opener = { version = "0.7", features = ["reveal"] }
 webbrowser = "1"
 backoff = { version = "0.4", features = ["tokio"] }
+uuid = { version = "1", features = ["v4"] }
 csv = "1.4.0"
 evalexpr = "13.1.0"
 html-escape = "0.2"

@@ -1,20 +1,10 @@
 //! Web-fetching tools — fetch a URL and convert HTML to markdown, and search via a SearXNG instance.
 
+use crate::agent::tools::manager::cache::{CacheEntry, cache};
 use crate::config::AppConfig;
 use fast_h2m::convert;
 use std::collections::HashMap;
-use std::sync::Mutex;
-
-struct CacheEntry {
-    content: String,
-    response_headers: HashMap<String, String>,
-    fetched_at: std::time::Instant,
-}
-
-static WEB_FETCH_CACHE: std::sync::LazyLock<Mutex<HashMap<String, CacheEntry>>> =
-    std::sync::LazyLock::new(|| Mutex::new(HashMap::new()));
-
-const CACHE_TTL: std::time::Duration = std::time::Duration::from_secs(300);
+use std::time::Instant;
 
 pub fn tool_web_fetch(
     input: &crate::agent::tools::dtos::WebFetchInput,
@@ -22,22 +12,29 @@ pub fn tool_web_fetch(
     let url = &input.url;
 
     if !input.force_refetch
-        && let Ok(cache) = WEB_FETCH_CACHE.lock()
-        && let Some(entry) = cache.get(url)
-        && entry.fetched_at.elapsed() < CACHE_TTL
+        && let Some(CacheEntry::WebFetch {
+            content,
+            response_headers,
+            ..
+        }) = cache().get(url)
     {
-        let total_lines = entry.content.lines().count();
-        let content = apply_pagination(&entry.content, input.offset, input.limit);
+        let total_lines = content.lines().count();
+        let content = apply_pagination(&content, input.offset, input.limit);
         return Ok(crate::agent::tools::dtos::WebFetchResponse {
             content,
             total_lines,
             response_headers: if input.headers {
-                Some(entry.response_headers.clone())
+                Some(response_headers.clone())
             } else {
                 None
             },
             from_cache: true,
         });
+    }
+
+    if input.force_refetch {
+        // Caller asked for a fresh fetch; clear any existing entry first.
+        cache().invalidate(url);
     }
 
     match ureq::get(url)
@@ -61,13 +58,14 @@ pub fn tool_web_fetch(
                         let md_content = res.content.unwrap_or_default();
                         let total_lines = md_content.lines().count();
                         let content = apply_pagination(&md_content, input.offset, input.limit);
-                        if let Ok(mut cache) = WEB_FETCH_CACHE.lock() {
-                            cache.insert(url.clone(), CacheEntry {
+                        cache().put(
+                            url.clone(),
+                            CacheEntry::WebFetch {
                                 content: md_content,
                                 response_headers: response_headers.clone(),
-                                fetched_at: std::time::Instant::now(),
-                            });
-                        }
+                                fetched_at: Instant::now(),
+                            },
+                        );
                         Ok(crate::agent::tools::dtos::WebFetchResponse {
                             content,
                             total_lines,

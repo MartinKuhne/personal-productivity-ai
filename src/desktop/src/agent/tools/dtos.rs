@@ -41,19 +41,19 @@ pub struct ReadTagsResponse {
 #[derive(Deserialize, Debug, JsonSchema)]
 pub struct ListFilesByTagInput {
     pub tag: String,
-    #[schemars(description = strings::fs::FIELD_LIST_FILES_BY_TAG_INPUT_PAGE)]
-    pub page: Option<usize>,
-    #[schemars(description = strings::fs::FIELD_LIST_FILES_BY_TAG_INPUT_PAGE_SIZE)]
-    pub page_size: Option<usize>,
+    #[schemars(description = strings::paging::FIELD_OFFSET_DESCRIPTION)]
+    pub offset: Option<usize>,
+    #[schemars(description = strings::paging::FIELD_LIMIT_DESCRIPTION)]
+    pub limit: Option<usize>,
 }
 #[derive(Serialize, Debug, JsonSchema)]
 pub struct ListFilesByTagResponse {
     #[schemars(description = strings::fs::FIELD_LIST_FILES_BY_TAG_RESPONSE_FILES)]
     #[serde(default)]
     pub files: Vec<String>,
-    #[schemars(description = strings::fs::FIELD_LIST_FILES_BY_TAG_RESPONSE_TOTAL)]
+    #[schemars(description = strings::paging::FIELD_TOTAL_DESCRIPTION)]
     pub total: usize,
-    #[schemars(description = strings::fs::FIELD_LIST_FILES_BY_TAG_RESPONSE_HINT)]
+    #[schemars(description = strings::paging::FIELD_HINT_DESCRIPTION)]
     #[serde(skip_serializing_if = "Option::is_none")]
     pub hint: Option<String>,
 }
@@ -61,19 +61,19 @@ pub struct ListFilesByTagResponse {
 #[derive(Deserialize, Debug, JsonSchema)]
 pub struct ListFilesInput {
     pub path: String,
-    #[schemars(description = strings::fs::FIELD_LIST_FILES_INPUT_PAGE)]
-    pub page: Option<usize>,
-    #[schemars(description = strings::fs::FIELD_LIST_FILES_INPUT_PAGE_SIZE)]
-    pub page_size: Option<usize>,
+    #[schemars(description = strings::paging::FIELD_OFFSET_DESCRIPTION)]
+    pub offset: Option<usize>,
+    #[schemars(description = strings::paging::FIELD_LIMIT_DESCRIPTION)]
+    pub limit: Option<usize>,
 }
 #[derive(Serialize, Debug, JsonSchema)]
 pub struct ListFilesResponse {
     #[schemars(description = strings::fs::FIELD_LIST_FILES_RESPONSE_FILES)]
     #[serde(default)]
     pub files: Vec<String>,
-    #[schemars(description = strings::fs::FIELD_LIST_FILES_RESPONSE_TOTAL)]
+    #[schemars(description = strings::paging::FIELD_TOTAL_DESCRIPTION)]
     pub total: usize,
-    #[schemars(description = strings::fs::FIELD_LIST_FILES_RESPONSE_HINT)]
+    #[schemars(description = strings::paging::FIELD_HINT_DESCRIPTION)]
     #[serde(skip_serializing_if = "Option::is_none")]
     pub hint: Option<String>,
 }
@@ -138,17 +138,21 @@ pub struct WebFetchInput {
     pub headers: bool,
     #[serde(default)]
     pub force_refetch: bool,
-    #[serde(default)]
-    pub limit: Option<usize>,
+    #[schemars(description = strings::paging::FIELD_OFFSET_DESCRIPTION)]
     #[serde(default)]
     pub offset: Option<usize>,
+    #[schemars(description = strings::paging::FIELD_LIMIT_DESCRIPTION)]
+    #[serde(default)]
+    pub limit: Option<usize>,
 }
 #[derive(Serialize, Debug, JsonSchema)]
 pub struct WebFetchResponse {
     pub content: String,
+    #[schemars(description = strings::web::FIELD_WEB_FETCH_RESPONSE_TOTAL_LINES)]
     pub total_lines: usize,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub response_headers: Option<std::collections::HashMap<String, String>>,
+    #[schemars(description = strings::web::FIELD_WEB_FETCH_RESPONSE_FROM_CACHE)]
     pub from_cache: bool,
 }
 
@@ -259,17 +263,18 @@ pub struct SearchEmailInput {
     pub is_unread: Option<bool>,
     #[schemars(description = strings::jmap::FIELD_SEARCH_EMAIL_INPUT_IS_FLAGGED)]
     pub is_flagged: Option<bool>,
-    #[schemars(description = strings::jmap::FIELD_SEARCH_EMAIL_INPUT_PAGE)]
-    pub page: Option<usize>,
-    #[schemars(description = strings::jmap::FIELD_SEARCH_EMAIL_INPUT_PAGE_SIZE)]
-    pub page_size: Option<usize>,
+    #[schemars(description = strings::cursor::FIELD_CURSOR_DESCRIPTION)]
+    pub cursor: Option<String>,
 }
 #[derive(Serialize, Debug, JsonSchema)]
 pub struct SearchEmailResponse {
     pub results: String,
-    #[schemars(description = strings::jmap::FIELD_SEARCH_EMAIL_RESPONSE_TOTAL)]
+    #[schemars(description = strings::paging::FIELD_TOTAL_DESCRIPTION)]
     pub total: usize,
-    #[schemars(description = strings::jmap::FIELD_SEARCH_EMAIL_RESPONSE_HINT)]
+    #[schemars(description = strings::cursor::FIELD_CURSOR_DESCRIPTION)]
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub cursor: Option<String>,
+    #[schemars(description = strings::paging::FIELD_HINT_DESCRIPTION)]
     #[serde(skip_serializing_if = "Option::is_none")]
     pub hint: Option<String>,
 }

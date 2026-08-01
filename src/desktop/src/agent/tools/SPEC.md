@@ -17,15 +17,15 @@ The requirements below have been formatted using the **Easy Approach to Requirem
 |---|---|
 | `grep` | Search for a specific pattern within Markdown files across all libraries. Returns at most 200 matching lines; when the result is truncated, the response directs the caller to refine the query with narrower terms or delegate to a sub-agent to analyse a specific file. |
 | `read_tags` | Read all unique tags from markdown front-matter across all libraries. |
-| `list_files_by_tag` | List files that contain a specific tag in their front-matter. |
-| `list_files` | List markdown files in a directory (non-recursive). With "/" or "." returns library names. |
+| `list_files_by_tag` | List files that contain a specific tag in their front-matter. Paginated via `offset`/`limit` (0-indexed; default `offset=0`, `limit=100`); the response carries `total` and an optional `hint`. |
+| `list_files` | List markdown files in a directory (non-recursive). With "/" or "." returns library names. Paginated via `offset`/`limit` (0-indexed; default `offset=0`, `limit=100`); the response carries `total` and an optional `hint`. |
 | `read_file` | Read the entire text contents of a file. |
 | `read_file_lines` | Read specific line numbers or ranges from a file (1-indexed). |
 | `create_file` | Create a new markdown file with the specified content. |
 | `insert_lines` | Insert new lines of text into an existing file at a specific 1-indexed position. |
 | `delete_lines` | Delete specific lines from a file (1-indexed, inclusive). |
 | `replace_text` | Replace exact occurrences of old_string with new_string in a file. |
-| `web_fetch` | Fetch content from a URL and convert HTML to Markdown. Supports pagination via `limit`/`offset`, optional response `headers`, and a 5-minute cache. |
+| `web_fetch` | Fetch content from a URL and convert HTML to Markdown. Paginated by Markdown line via `offset`/`limit` (default `offset=0`, `limit=100` lines); the response carries `total_lines`. Cached for 5 minutes in the shared `ToolCache`; pass `force_refetch=true` to bypass. |
 | `web_search` | Search the web using SearXNG. Requires searxng_url config. |
 | `web_delegate` | Delegate complex web research to a sub-agent with web_fetch/web_search tools. |
 | `read_yaml_header` | Parse a YAML header from a markdown file and return its content. |
@@ -36,7 +36,7 @@ The requirements below have been formatted using the **Easy Approach to Requirem
 | `add_calendar_item` | Add a new calendar item. Requires CalDAV config. |
 | `update_calendar_item` | Update a calendar item. Requires CalDAV config. |
 | `delete_calendar_item` | Delete a calendar item. Requires CalDAV config. |
-| `search_email` | Search email by keyword, folder, date range, sender, recipient, unread, or flagged status. Results are paginated (default page size 10); every response includes total for follow-up page requests. Requires JMAP config. |
+| `search_email` | Search email by keyword, folder, date range, sender, recipient, unread, or flagged status. The first call returns up to 100 matching emails plus a `cursor`; pass the `cursor` back unchanged to get the next page. The full server result set is cached for 5 minutes. When the result set is exhausted the response includes a `hint` and no `cursor`. Requires JMAP config. |
 | `get_email_by_id` | Get email by id. Requires JMAP config. |
 | `get_email` | Get email by date range, sender, recipient, unread, or flagged status. Requires JMAP config. |
 | `send_email` | Send an email. Requires JMAP config. |
@@ -59,11 +59,11 @@ The requirements below have been formatted using the **Easy Approach to Requirem
 ### Web Fetch Pagination & Caching
 
 * [TOOL-005] Web Fetch Headers: The `web_fetch` tool shall accept an optional `headers` boolean parameter (default: `false`). When `true`, the response shall include the HTTP response headers as a JSON object alongside the content.
-* [TOOL-006] Web Fetch Pagination: The `web_fetch` tool shall accept optional `limit` (integer) and `offset` (integer, default 0) parameters. The `limit` parameter shall restrict the number of lines returned. The `offset` parameter shall skip the specified number of lines from the start of the content.
-* [TOOL-007] Web Fetch Total Lines: The `web_fetch` response shall include a `total_lines` integer indicating the total number of lines in the full fetched content, enabling the caller to paginate through the content.
-* [TOOL-008] Web Fetch Cache: The system shall cache fetched Markdown content for 5 minutes. Subsequent calls to `web_fetch` with the same URL and `force_refetch` set to `false` (default) shall return the cached content without making a network request.
-* [TOOL-009] Web Fetch Force Refetch: The `web_fetch` tool shall accept an optional `force_refetch` boolean parameter (default: `false`). When `true`, the system shall bypass the cache and fetch fresh content from the URL, replacing the cached entry.
-* [TOOL-010] Web Fetch Context Efficiency: The tool description shall encourage the LLM to save context by fetching a page once and issuing partial reads via `limit` and `offset` to paginate through the content, rather than re-fetching the full page multiple times.
+* [TOOL-006] Web Fetch Pagination: The `web_fetch` tool shall accept `offset` (default 0) and `limit` (default 100) integer parameters. `offset` is the number of Markdown lines to skip. `limit` is the number of Markdown lines to return. The helper that slices the body MUST NOT cap `limit`; the LLM owns the page-size choice (TOOL-027).
+* [TOOL-007] Pagination Total: Every list-paginated tool (`list_files`, `list_files_by_tag`, `web_fetch`) MUST return a `total` field on its response. The value MUST be the item count across all pages. `search_email` MUST also return `total`; the value MUST be the item count across all pages of the same search and MUST be identical across all pages.
+* [TOOL-008] Web Fetch Cache: The system shall cache fetched Markdown content for 5 minutes. Subsequent calls to `web_fetch` with the same URL and `force_refetch` set to `false` (default) shall return the cached content without making a network request. The cache is the shared `ToolCache` defined in TOOL-030.
+* [TOOL-009] Web Fetch Force Refetch: The `web_fetch` tool shall accept an optional `force_refetch` boolean parameter (default: `false`). When `true`, the system shall invalidate the shared `ToolCache` entry for the URL and fetch fresh content, replacing the cached entry.
+* [TOOL-010] Web Fetch Context Efficiency: The `web_fetch` tool description shall state that the LLM can save context by fetching a URL once and then issuing partial reads via `offset` and `limit` to paginate through the Markdown body, rather than re-fetching the same URL. The description MUST use the canonical vocabulary of TOOL-028.
 
 ### Grep Tool
 
@@ -86,3 +86,16 @@ The system shall maintain a single `ToolManager` type that owns the tool catalog
 * [TOOL-022] Catalog Refresh: The `ToolManager` shall provide `refresh_state(&AppConfig)` that recomputes the per-group view (enabled flag, tool names, parallel-safety, preserved `last_error`) without performing I/O. The agent loop and the UI dialog shall call `refresh_state` after every config change and on every dialog open.
 * [TOOL-023] MCP Refresh: The `ToolManager` shall provide `refresh_mcp_tools(&AppConfig)` that re-runs `tools/list` against every configured MCP server, registers the discovered tools into the catalog, and records `Discovery` errors on the affected group when a server fails. On success, any prior `Discovery` error on the group shall be cleared.
 * [TOOL-024] Single Manager Type: The system shall maintain a single `ToolManager` type that owns the tool catalog, the per-group state, the error tracking, the parallel-safety classification, and the MCP client manager. There shall be no separate `ToolRegistry` type.
+
+### Tool Pagination (offset/limit, cursor, shared cache)
+
+The four paginated tools split into two classes. The list-paginated tools (`list_files`, `list_files_by_tag`, `web_fetch`) use a stateless `offset`/`limit` model. The search tool (`search_email`) uses a stateful cursor model backed by the shared `ToolCache`. The split is deliberate — see TOOL-029 for the rationale.
+
+* [TOOL-025] Pagination Hint: Every paginated tool MUST return a `hint` field on its response. For list-paginated tools, `hint` MUST be set to a human-readable message when `total == 0` or `offset >= total`. For `search_email`, `hint` MUST be set to `"Final page."` when the response has no `cursor`. `hint` MUST be absent (or `null`) otherwise and MUST be `skip_serializing_if = "Option::is_none"`.
+* [TOOL-026] Pagination Defaults: `list_files` and `list_files_by_tag` MUST default `offset=0`, `limit=100`. `web_fetch` MUST default `offset=0` (lines), `limit=100` (lines). `search_email` does not use `offset`/`limit`; the page size is fixed by the tool (TOOL-029).
+* [TOOL-027] No Pagination Cap: List-paginated tools MUST NOT cap `limit`. If the LLM requests more items than exist, the tool returns all remaining items starting at `offset` and reports the true `total` on the response. The LLM is responsible for choosing a `limit` that fits its context window; the tool's job is to honor the request and report the truth. `search_email` is not subject to this requirement because the LLM does not control the page size.
+* [TOOL-028] Pagination Vocabulary: List-paginated tools MUST use the parameter names `offset` and `limit` and the response field names `total` and `hint`. The names `page` and `page_size` MUST NOT appear in any list-paginated tool's schema. `search_email` is exempt from this rule; it uses the cursor parameter and response field per TOOL-029. The LLM-facing description of every list-paginated tool MUST include the canonical paragraph defined in the per-family strings module (`builtin/strings/paging::CANONICAL_DESCRIPTION`).
+* [TOOL-029] Search Email Cursor: The `search_email` tool MUST accept a `cursor: Option<String>` input parameter and return a `cursor: Option<String>` output field. The first call (no cursor in input) returns up to 100 matching emails plus a new cursor. Subsequent calls with the same cursor return the next 100 emails (or fewer on the final page). The cursor is opaque and MUST be passed back unchanged. When the result set is exhausted, the response includes a `hint` and no `cursor`. The page size is fixed at 100; the LLM does not control it.
+* [TOOL-030] Shared Tool Cache: A process-local `ToolCache` MUST be shared by `search_email` and `web_fetch`. The cache MUST be `Mutex<HashMap<String, CacheEntry>>` wrapped in `LazyLock`. Cache entries MUST be evicted lazily on access after `CACHE_TTL` (5 minutes). A soft cap of `MAX_CACHE_ENTRIES` (1024) MUST be enforced with FIFO eviction once exceeded. The cache MUST NOT be persisted across process restarts. The cache is the single source of truth for both tools' per-URL / per-search result set state.
+* [TOOL-031] Search Email Cache Population: The first `search_email` call with a given filter set MUST populate the cache with the full server result set. Subsequent calls with the matching cursor MUST slice from the cache without re-fetching. A `search_email` call with a cursor that does not match a live cache entry MUST return the error `"Cursor expired or unknown; re-run the search with no cursor."`
+* [TOOL-032] Web Fetch Cache Migration: The `web_fetch` tool MUST move its cache from a process-local `LazyLock<Mutex<HashMap<String, _>>>` to the shared `ToolCache` (TOOL-030). The URL MUST be the cache key. The `force_refetch` parameter MUST invalidate the cache entry before re-fetching. The 5-minute TTL MUST match the shared cache's TTL exactly.

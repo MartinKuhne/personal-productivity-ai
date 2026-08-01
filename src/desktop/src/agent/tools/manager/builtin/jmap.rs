@@ -33,8 +33,6 @@ impl Tool for SearchEmailTool {
     fn execute(&self, ctx: &ToolContext, args: &str) -> Result<serde_json::Value, String> {
         let input: dtos::SearchEmailInput =
             serde_json::from_str(args).map_err(|e| format!("Invalid args: {}", e))?;
-        let page = input.page.unwrap_or(1).max(1);
-        let page_size = input.page_size.unwrap_or(10).max(1);
         crate::agent::tools::jmap::tool_search_email(
             ctx.config,
             crate::agent::tools::jmap::SearchEmailFilters {
@@ -47,7 +45,7 @@ impl Tool for SearchEmailTool {
                 is_unread: input.is_unread,
                 is_flagged: input.is_flagged,
             },
-            crate::agent::tools::jmap::SearchEmailPagination { page, page_size },
+            input.cursor,
         )
         .map(|r| {
             serde_json::to_value(r).unwrap_or_else(|e| serde_json::json!({"error": e.to_string()}))

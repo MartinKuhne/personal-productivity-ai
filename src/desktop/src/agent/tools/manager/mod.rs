@@ -13,6 +13,7 @@
 //! and tests don't notice the refactor.
 
 pub mod builtin;
+pub mod cache;
 pub mod errors;
 pub mod groups;
 pub mod pagination;

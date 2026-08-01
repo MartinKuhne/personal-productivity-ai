@@ -1,12 +1,14 @@
 # Tool Paging: Audit & Migration Plan
 
-Status: proposal
+Status: implementation complete
 Date: 2026-07-31
 Reviewer: Mavis
 
 This document merges the read-only paging audit (Part I) with the migration plan that standardizes the four already-paginated tools on `offset`/`limit` (Part II). Part I establishes the findings; Part II is the plan of record that resolves finding F-6 and, along the way, F-3 and F-4.
 
-Scope: `src/desktop/src/agent/tools/` (built-in tools, registry, executor) and the LLM-facing strings in `registry/builtin/strings/`.
+Scope: `src/desktop/src/agent/tools/` (built-in tools, manager, executor) and the LLM-facing strings in `manager/builtin/strings/`.
+
+> **Implementation note (2026-08-01).** The migration is implemented on branch `feature/tools-improvements`. A few paths in this document were written when the tools lived under `registry/`; the code now lives under `manager/` (`ToolManager` replaces the previous `ToolRegistry`). Path references in this doc are stale in that respect; the file path appendix at the bottom has been updated. New requirement IDs in `src/desktop/src/agent/tools/SPEC.md` are renumbered to TOOL-025-032 because TOOL-014-024 are taken by the `ToolManager` requirements introduced in the same branch. See "Spec changes (post-implementation)" at the end of Part II.
 
 ---
 
@@ -322,18 +324,26 @@ Ordered by impact. This list is the audit's original proposal. Status indicates 
 
 ## Appendix: file locations
 
+> **Note (2026-08-01).** The `registry/` directory has been renamed to `manager/`. The `ToolRegistry` type has been replaced by `ToolManager`. File paths below reflect the post-rename state.
+
 | Concern | File |
 |---------|------|
-| Tool trait + registry | `src/desktop/src/agent/tools/mod.rs`, `src/desktop/src/agent/tools/registry/mod.rs` |
-| Pagination helper | `src/desktop/src/agent/tools/registry/pagination.rs` |
-| Built-in tool impls | `src/desktop/src/agent/tools/registry/builtin/*.rs` |
-| LLM-facing strings (single source of truth) | `src/desktop/src/agent/tools/registry/builtin/strings/*.rs` |
+| Tool trait + manager | `src/desktop/src/agent/tools/mod.rs`, `src/desktop/src/agent/tools/manager/mod.rs` |
+| Pagination helper | `src/desktop/src/agent/tools/manager/pagination.rs` |
+| Shared `ToolCache` | `src/desktop/src/agent/tools/manager/cache.rs` |
+| Built-in tool impls | `src/desktop/src/agent/tools/manager/builtin/*.rs` |
+| LLM-facing strings (single source of truth) | `src/desktop/src/agent/tools/manager/builtin/strings/*.rs` |
+| Canonical pagination strings | `src/desktop/src/agent/tools/manager/builtin/strings/paging.rs` |
+| Canonical cursor strings | `src/desktop/src/agent/tools/manager/builtin/strings/cursor.rs` |
 | Tool input/output DTOs | `src/desktop/src/agent/tools/dtos.rs`, `src/desktop/src/agent/tools/csv_db/schema.rs` |
-| Paging tests | `src/desktop/src/agent/tools/registry/tests.rs` |
+| Paging tests | `src/desktop/src/agent/tools/manager/tests.rs` |
+| Cache tests | `src/desktop/src/agent/tools/manager/cache.rs` (inline `#[cfg(test)]` mod) |
+| `search_email` body / cursor | `src/desktop/src/agent/tools/jmap/email.rs` |
+| `web_fetch` body | `src/desktop/src/agent/tools/web.rs` |
 | Tool executor (parallel/sequential) | `src/desktop/src/agent/tool_executor.rs` |
 | System prompt | `src/desktop/src/agent/prompt_builder.rs` |
 | Result presentation to the UI | `src/desktop/src/agent/response_formatter.rs` |
-| Spec requirements (TOOL-001..013) | `src/desktop/src/agent/tools/SPEC.md` |
+| Spec requirements (TOOL-001..032) | `src/desktop/src/agent/tools/SPEC.md` |
 
 ---
 
@@ -832,21 +842,26 @@ Notes:
 
 ## Spec changes (`src/desktop/src/agent/tools/SPEC.md`)
 
-| Existing ID | Action | New text |
-|-------------|--------|----------|
-| TOOL-006 | REPLACE | "Web Fetch Pagination: The `web_fetch` tool MUST accept `offset` (default 0) and `limit` (default 100) integer parameters. `offset` is the number of Markdown lines to skip. `limit` is the number of Markdown lines to return." |
-| TOOL-007 | REPLACE | "Pagination Total: Every list-paginated tool (`list_files`, `list_files_by_tag`, `web_fetch`) MUST return a `total` field on its response. The value MUST be the item count across all pages. `search_email` MUST also return `total`; the value MUST be the item count across all pages of the same search and MUST be identical across all pages." |
-| — | ADD (TOOL-014) | "Pagination Hint: Every paginated tool MUST return a `hint` field on its response. For list-paginated tools, `hint` MUST be set to a human-readable message when `total == 0` or `offset >= total`. For `search_email`, `hint` MUST be set to `'Final page.'` when the response has no `cursor`. `hint` MUST be absent (or `null`) otherwise." |
-| — | ADD (TOOL-015) | "Pagination Defaults: `list_files` and `list_files_by_tag` MUST default `offset=0`, `limit=100`. `web_fetch` MUST default `offset=0` (lines), `limit=100` (lines). `search_email` does not use `offset`/`limit`; see TOOL-018." |
-| — | ADD (TOOL-016) | "No Pagination Cap: List-paginated tools MUST NOT cap `limit`. If the LLM requests more items than exist, the tool returns all remaining items starting at `offset` and reports the true `total` on the response. The LLM is responsible for choosing a `limit` that fits its context window; the tool's job is to honor the request and report the truth. `search_email` is not subject to this requirement because the LLM does not control the page size." |
-| — | ADD (TOOL-017) | "Pagination Vocabulary: List-paginated tools MUST use the parameter names `offset` and `limit` and the response field names `total` and `hint`. The names `page` and `page_size` MUST NOT appear in any tool schema. `search_email` is exempt from this rule; it uses the cursor parameter and response field per TOOL-018." |
-| — | ADD (TOOL-018) | "Search Email Cursor: The `search_email` tool MUST accept a `cursor: Option<String>` input parameter and return a `cursor: Option<String>` output field. The first call (no cursor in input) returns up to 100 matching emails plus a new cursor. Subsequent calls with the same cursor return the next 100 emails (or fewer on the final page). The cursor is opaque and MUST be passed back unchanged. When the result set is exhausted, the response includes a `hint` and no `cursor`. The page size is fixed at 100; the LLM does not control it." |
-| — | ADD (TOOL-019) | "Shared Tool Cache: A process-local `ToolCache` MUST be shared by `search_email` and `web_fetch`. The cache MUST be `Mutex<HashMap<String, CacheEntry>>` wrapped in `LazyLock`. Cache entries MUST be evicted lazily on access after 5 minutes. A soft cap of 1024 entries MUST be enforced with FIFO eviction once exceeded. The cache MUST NOT be persisted across process restarts." |
-| — | ADD (TOOL-020) | "Search Email Cache Population: The first `search_email` call with a given filter set MUST populate the cache with the full server result set. Subsequent calls with the matching cursor MUST slice from the cache without re-fetching. A `search_email` call with a cursor that does not match a live cache entry MUST return the error `'Cursor expired or unknown; re-run the search with no cursor.'`" |
-| — | ADD (TOOL-021) | "Web Fetch Cache Migration: The `web_fetch` tool MUST move its cache from a process-local `LazyLock<Mutex<HashMap<String, _>>>` in `web.rs` to the shared `ToolCache`. The URL MUST be the cache key. The `force_refetch` parameter MUST clear the cache entry before re-fetching. The 5-minute TTL MUST match the shared cache's TTL." |
-| TOOL-010 | UPDATE | Replace "fetching a page once and issuing partial reads via `limit` and `offset` to paginate through the content" with wording that uses the canonical vocabulary block. (Functionally identical, but the description must use the same words.) |
+> **Implementation note (2026-08-01).** The new requirement IDs in the table below were originally proposed as TOOL-014 through TOOL-021 (the `n` column on the left below). They are renumbered to TOOL-025 through TOOL-032 in the live spec because TOOL-014-024 are taken by the `ToolManager` requirements introduced in the same branch. The text of each requirement is unchanged.
+
+| Existing ID | Proposed ID (renumbered) | Action | New text |
+|-------------|--------------------------|--------|----------|
+| TOOL-006 | TOOL-006 | REPLACE | "Web Fetch Pagination: The `web_fetch` tool MUST accept `offset` (default 0) and `limit` (default 100) integer parameters. `offset` is the number of Markdown lines to skip. `limit` is the number of Markdown lines to return." |
+| TOOL-007 | TOOL-007 | REPLACE | "Pagination Total: Every list-paginated tool (`list_files`, `list_files_by_tag`, `web_fetch`) MUST return a `total` field on its response. The value MUST be the item count across all pages. `search_email` MUST also return `total`; the value MUST be the item count across all pages of the same search and MUST be identical across all pages." |
+| — | TOOL-014 → **TOOL-025** | ADD | "Pagination Hint: Every paginated tool MUST return a `hint` field on its response. For list-paginated tools, `hint` MUST be set to a human-readable message when `total == 0` or `offset >= total`. For `search_email`, `hint` MUST be set to `'Final page.'` when the response has no `cursor`. `hint` MUST be absent (or `null`) otherwise." |
+| — | TOOL-015 → **TOOL-026** | ADD | "Pagination Defaults: `list_files` and `list_files_by_tag` MUST default `offset=0`, `limit=100`. `web_fetch` MUST default `offset=0` (lines), `limit=100` (lines). `search_email` does not use `offset`/`limit`; see TOOL-029." |
+| — | TOOL-016 → **TOOL-027** | ADD | "No Pagination Cap: List-paginated tools MUST NOT cap `limit`. If the LLM requests more items than exist, the tool returns all remaining items starting at `offset` and reports the true `total` on the response. The LLM is responsible for choosing a `limit` that fits its context window; the tool's job is to honor the request and report the truth. `search_email` is not subject to this requirement because the LLM does not control the page size." |
+| — | TOOL-017 → **TOOL-028** | ADD | "Pagination Vocabulary: List-paginated tools MUST use the parameter names `offset` and `limit` and the response field names `total` and `hint`. The names `page` and `page_size` MUST NOT appear in any list-paginated tool's schema. `search_email` is exempt from this rule; it uses the cursor parameter and response field per TOOL-029." |
+| — | TOOL-018 → **TOOL-029** | ADD | "Search Email Cursor: The `search_email` tool MUST accept a `cursor: Option<String>` input parameter and return a `cursor: Option<String>` output field. The first call (no cursor in input) returns up to 100 matching emails plus a new cursor. Subsequent calls with the same cursor return the next 100 emails (or fewer on the final page). The cursor is opaque and MUST be passed back unchanged. When the result set is exhausted, the response includes a `hint` and no `cursor`. The page size is fixed at 100; the LLM does not control it." |
+| — | TOOL-019 → **TOOL-030** | ADD | "Shared Tool Cache: A process-local `ToolCache` MUST be shared by `search_email` and `web_fetch`. The cache MUST be `Mutex<HashMap<String, CacheEntry>>` wrapped in `LazyLock`. Cache entries MUST be evicted lazily on access after 5 minutes. A soft cap of 1024 entries MUST be enforced with FIFO eviction once exceeded. The cache MUST NOT be persisted across process restarts." |
+| — | TOOL-020 → **TOOL-031** | ADD | "Search Email Cache Population: The first `search_email` call with a given filter set MUST populate the cache with the full server result set. Subsequent calls with the matching cursor MUST slice from the cache without re-fetching. A `search_email` call with a cursor that does not match a live cache entry MUST return the error `'Cursor expired or unknown; re-run the search with no cursor.'`" |
+| — | TOOL-021 → **TOOL-032** | ADD | "Web Fetch Cache Migration: The `web_fetch` tool MUST move its cache from a process-local `LazyLock<Mutex<HashMap<String, _>>>` in `web.rs` to the shared `ToolCache`. The URL MUST be the cache key. The `force_refetch` parameter MUST clear the cache entry before re-fetching. The 5-minute TTL MUST match the shared cache's TTL." |
+| TOOL-008 | TOOL-008 | UPDATE | Add a sentence noting the cache is the shared `ToolCache` (TOOL-030), not the old `WEB_FETCH_CACHE` static. (Functionally identical otherwise.) |
+| TOOL-010 | TOOL-010 | UPDATE | Replace "fetching a page once and issuing partial reads via `limit` and `offset` to paginate through the content" with wording that uses the canonical vocabulary block. (Functionally identical, but the description must use the same words.) |
 
 The LLM Tools Table at the top of the SPEC MUST be updated to use `offset`/`limit` for the four paginated tools.
+
+> **Implementation note (2026-08-01).** All entries in the table above are now in the live `src/desktop/src/agent/tools/SPEC.md` under their renumbered IDs. The LLM Tools Table at the top has been updated. The page-size choice in the description text is `offset=0, limit=100` for `list_files` / `list_files_by_tag` / `web_fetch` (lines for `web_fetch`). `search_email` uses the cursor description. `cargo nextest run -p fastmd --lib` passes (909 tests, 8 skipped). `cargo clippy -- -D warnings`, `cargo fmt --check`, and `cargo doc --no-deps` are clean.
 
 ## Test changes
 

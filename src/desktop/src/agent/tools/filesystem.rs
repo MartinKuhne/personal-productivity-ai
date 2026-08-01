@@ -61,12 +61,6 @@ pub fn tool_read_tags(
     })
 }
 
-/// Default page size for the paginated `list_files` family of tools
-/// (`list_files`, `list_files_by_tag`). Kept here (rather than
-/// inlined in the call site) so the constant has one canonical home
-/// and tests can reference it.
-pub const DEFAULT_LIST_FILES_BY_TAG_PAGE_SIZE: usize = 20;
-
 /// Scan a single content library and return every Markdown file whose
 /// front-matter contains the given tag, as a sorted list of virtual
 /// paths.
@@ -564,13 +558,6 @@ mod tests {
             fs::write(dir.path().join(name), body).unwrap();
         }
         dir
-    }
-
-    #[test]
-    fn test_list_files_by_tag_default_page_size_constant_is_20() {
-        // The documented default. A regression here would silently
-        // change the page size the LLM sees by default.
-        assert_eq!(DEFAULT_LIST_FILES_BY_TAG_PAGE_SIZE, 20);
     }
 
     #[test]
