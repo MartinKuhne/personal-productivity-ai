@@ -866,4 +866,179 @@ mod tests {
             diff,
         );
     }
+
+    /// Tier 4 end-to-end test: right-clicking a directory row and
+    /// choosing [New document] from the context menu must open the
+    /// create-document dialog with that directory as its parent; when
+    /// the dialog is submitted, the new file must be created *inside*
+    /// the right-clicked directory (UI-015).
+    ///
+    /// The harness mirrors the production wiring (`left.rs` passes the
+    /// `DialogManager`'s create-document fields into the
+    /// `TreeNodeContext`; `app.rs` renders the dialog from those same
+    /// fields): the flat row and the create-document dialog are drawn
+    /// in the same frame, driven by shared state.
+    #[test]
+    fn test_new_document_on_directory_opens_dialog_with_dir_parent() {
+        use crate::app::dialog_manager::DialogManager;
+        use crate::bus::core::Bus;
+        use crate::bus::events::file::FileEvent;
+        use crate::ui::modals::show_create_document_dialog;
+        use crate::ui::test_helpers::interact::stateful_harness;
+        use egui_kittest::kittest::Queryable;
+        use std::fs;
+        use std::path::Path;
+        use std::sync::{Mutex, OnceLock};
+
+        struct StaticFixture {
+            ctx: Mutex<Option<TreeNodeContext<'static>>>,
+            dm: Mutex<Option<DialogManager>>,
+            bus: Bus<FileEvent>,
+            temp_dir: &'static Path,
+            row: FlatRow,
+        }
+        static FIXTURE: OnceLock<StaticFixture> = OnceLock::new();
+        let fixture = FIXTURE.get_or_init(|| {
+            let leaked = Box::leak(Box::new(
+                std::env::temp_dir().join(format!("fastmd_new_doc_dir_{}", std::process::id())),
+            ));
+            let temp_dir: &'static Path = leaked;
+            let _ = fs::create_dir_all(temp_dir);
+
+            let selected_file = Box::leak(Box::new(None::<PathBuf>));
+            let selected_files = Box::leak(Box::new(HashSet::<PathBuf>::new()));
+            let expanded_dirs = Box::leak(Box::new(HashSet::<PathBuf>::new()));
+            let tabs = Box::leak(Box::new(Vec::<PathBuf>::new()));
+            let selected_dir = Box::leak(Box::new(None::<PathBuf>));
+            let create_dir_dialog_open = Box::leak(Box::new(false));
+            let create_dir_parent = Box::leak(Box::new(None::<PathBuf>));
+            let file_to_move = Box::leak(Box::new(None::<PathBuf>));
+            let move_dialog_open = Box::leak(Box::new(false));
+            let file_to_rename = Box::leak(Box::new(None::<PathBuf>));
+            let rename_dialog_open = Box::leak(Box::new(false));
+            let rename_new_name = Box::leak(Box::new(String::new()));
+            let create_document_dialog_open = Box::leak(Box::new(false));
+            let create_document_parent = Box::leak(Box::new(None::<PathBuf>));
+            let layout = Box::leak(Box::new(PanelLayout::default()));
+            let submit_prompt = Box::leak(Box::new(None::<String>));
+            let open_editor = Box::leak(Box::new(None::<PathBuf>));
+            let content_libraries = Box::leak(Box::new(Vec::new()));
+
+            let ctx = TreeNodeContext {
+                selected_file,
+                selected_files,
+                expanded_dirs,
+                tabs,
+                selected_dir,
+                create_dir_dialog_open,
+                create_dir_parent,
+                file_to_move,
+                move_dialog_open,
+                file_to_rename,
+                rename_dialog_open,
+                rename_new_name,
+                create_document_dialog_open,
+                create_document_parent,
+                layout,
+                submit_prompt,
+                content_libraries,
+                open_editor,
+                modifiers: egui::Modifiers::default(),
+                inline_editor_enabled: false,
+                bg_tx: &None,
+                file_event_producer: None,
+            };
+
+            let row = FlatRow {
+                depth: 0,
+                name: "notes".to_string(),
+                path: temp_dir.to_path_buf(),
+                is_dir: true,
+                is_expanded: false,
+            };
+            StaticFixture {
+                ctx: Mutex::new(Some(ctx)),
+                dm: Mutex::new(Some(DialogManager::new())),
+                bus: Bus::new(),
+                temp_dir,
+                row,
+            }
+        });
+
+        let mut harness = stateful_harness((), |ui, _| {
+            let mut guard = fixture.ctx.lock().unwrap();
+            let ctx = guard.as_mut().expect("context not initialized");
+            render_flat_row(ui, &fixture.row, ctx);
+
+            // Mirror the tree → dialog wiring (left.rs + app.rs): the
+            // context menu writes the dialog-open flag and parent into
+            // the tree context; the dialog renders from those fields.
+            if *ctx.create_document_dialog_open() {
+                let mut dguard = fixture.dm.lock().unwrap();
+                if let Some(dm) = dguard.as_mut() {
+                    dm.create_document_dialog_open = true;
+                    dm.create_document_parent = ctx.create_document_parent().clone();
+                    show_create_document_dialog(dm, &fixture.bus, ui.ctx());
+                }
+            }
+        });
+        harness.fit_contents();
+
+        // Right-click the directory row to open its context menu.
+        let dir_nodes: Vec<_> = harness.query_all_by_label_contains("notes").collect();
+        assert!(
+            !dir_nodes.is_empty(),
+            "expected the directory row to be present"
+        );
+        dir_nodes[0].click_secondary();
+        harness.run_steps(2);
+        harness.run_steps(2);
+
+        // Choose [New document]; the dialog opens with the directory as
+        // its parent.
+        harness
+            .get_by_label(crate::ui::strings::NEW_DOCUMENT_ACTION)
+            .click_accesskit();
+        harness.run_steps(2);
+        harness.run_steps(2);
+
+        {
+            let mut guard = fixture.ctx.lock().unwrap();
+            let ctx = guard.as_mut().expect("context not initialized");
+            assert!(
+                *ctx.create_document_dialog_open(),
+                "choosing [New document] must open the create-document dialog"
+            );
+            assert_eq!(
+                *ctx.create_document_parent(),
+                Some(fixture.temp_dir.to_path_buf()),
+                "the create-document dialog's parent must be the right-clicked directory"
+            );
+        }
+
+        // Type a name and submit; the file must be created inside the
+        // right-clicked directory.
+        {
+            let mut dguard = fixture.dm.lock().unwrap();
+            if let Some(dm) = dguard.as_mut() {
+                dm.create_document_name = "notes".to_string();
+            }
+        }
+        harness.run_steps(2);
+        harness
+            .get_by_label(crate::ui::strings::OK_BUTTON)
+            .click_accesskit();
+        harness.run_steps(2);
+        harness.run_steps(2);
+
+        let created = fixture.temp_dir.join("notes.md");
+        assert!(
+            created.exists(),
+            "submitting the dialog must create the document inside the right-clicked directory"
+        );
+        let content = fs::read_to_string(&created).unwrap();
+        assert_eq!(content, "---\ntitle: notes\n---\n\n");
+
+        let _ = fs::remove_dir_all(fixture.temp_dir);
+    }
 }

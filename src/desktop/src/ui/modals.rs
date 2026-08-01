@@ -358,109 +358,107 @@ pub struct RenameDialogCtx<'a> {
 }
 
 pub fn show_rename_dialog(ctx: RenameDialogCtx<'_>) {
-    let mut close_rename_modal = false;
-    if ctx.dialog_manager.rename_dialog_open {
-        let RenameDialogCtx {
-            dialog_manager: dm,
-            file_event_bus,
-            loaded_path,
-            selected_file,
-            selected_dir,
-            tabs,
-            file_processor,
-            tag_manager,
-            expanded_dirs,
-            ctx,
-        } = ctx;
-        egui::Window::new(crate::ui::strings::RENAME_WINDOW)
-            .collapsible(false)
-            .resizable(false)
-            .show(ctx, |ui| {
-                ui.label(crate::ui::strings::ENTER_NEW_NAME);
-                let response = ui.text_edit_singleline(&mut dm.rename_new_name);
-                response.request_focus();
-
-                let submit = ctx.input_mut(|i| i.consume_key(egui::Modifiers::NONE, egui::Key::Enter));
-
-                ui.horizontal(|ui| {
-                    if ui.button(crate::ui::strings::OK_BUTTON).clicked() || submit {
-                        if let Some(file) = &dm.file_to_rename
-                            && !dm.rename_new_name.trim().is_empty() {
-                                let new_name = dm.rename_new_name.trim();
-                                if !crate::utils::path::is_safe_basename(new_name) {
-                                    tracing::warn!(
-                                        name = "ui.file.invalid_rename",
-                                        name_input = %new_name,
-                                        "User attempted to rename file with invalid characters. Operation skipped. Operator should advise user of valid names."
-                                    );
-                                } else {
-                                    let ext = file.extension()
-                                        .and_then(|e| e.to_str())
-                                        .map(|e| format!(".{}", e))
-                                        .unwrap_or_default();
-                                    let new_name_with_ext = format!("{}{}", new_name, ext);
-                                    let mut new_path = file.clone();
-                                    new_path.set_file_name(&new_name_with_ext);
-                                    if let Err(e) = std::fs::rename(file, &new_path) {
-                                        tracing::error!(
-                                            name = "ui.file.rename_failed",
-                                            source = %file.display(),
-                                            destination = %new_path.display(),
-                                            error = %e,
-                                            "Failed to rename file. Likely cause: permission denied or file in use. Operator should check file locks."
-                                        );
-                                    } else {
-                                        let producer = FileEventProducer::new(file_event_bus);
-                                        producer.publish_rename(file, &new_path);
-                                        if loaded_path.as_ref() == Some(file) {
-                                            *loaded_path = Some(new_path.clone());
-                                        }
-                                        if selected_file.as_ref() == Some(file) {
-                                            *selected_file = Some(new_path.clone());
-                                        }
-                                        if selected_dir.as_ref() == Some(file) {
-                                            *selected_dir = Some(new_path.clone());
-                                        }
-                                        for tab in tabs.iter_mut() {
-                                            if *tab == *file {
-                                                *tab = new_path.clone();
-                                            }
-                                        }
-                                        file_processor.remove_file(file);
-                                        if file_processor.contains_dir(file) {
-                                            file_processor.remove_dir(file);
-                                            file_processor.add_dir(new_path.clone());
-                                        }
-                                        let ext = new_path
-                                            .extension()
-                                            .and_then(|e| e.to_str())
-                                            .unwrap_or("");
-                                        if ext == "md" || ext == "markdown" {
-                                            file_processor.add_file(new_path.clone());
-                                        }
-                                        let tags =
-                                            crate::utils::tags::extract_tags_from_file(&new_path);
-                                        tag_manager.remove_file(file);
-                                        tag_manager.add_tags(new_path.clone(), tags);
-                                        if expanded_dirs.remove(file) {
-                                            expanded_dirs.insert(new_path.clone());
-                                        }
-                                    }
-                                }
+    if !ctx.dialog_manager.rename_dialog_open {
+        return;
+    }
+    let RenameDialogCtx {
+        dialog_manager: dm,
+        file_event_bus,
+        loaded_path,
+        selected_file,
+        selected_dir,
+        tabs,
+        file_processor,
+        tag_manager,
+        expanded_dirs,
+        ctx,
+    } = ctx;
+    let action = show_name_entry_window(
+        ctx,
+        crate::ui::strings::RENAME_WINDOW,
+        crate::ui::strings::ENTER_NEW_NAME,
+        &mut dm.rename_new_name,
+    );
+    match action {
+        Some(NameEntryAction::Submit) => {
+            if let Some(file) = &dm.file_to_rename
+                && !dm.rename_new_name.trim().is_empty()
+            {
+                let new_name = dm.rename_new_name.trim();
+                if !crate::utils::path::is_safe_basename(new_name) {
+                    tracing::warn!(
+                        name = "ui.file.invalid_rename",
+                        name_input = %new_name,
+                        "User attempted to rename file with invalid characters. Operation skipped. Operator should advise user of valid names."
+                    );
+                } else {
+                    let ext = file
+                        .extension()
+                        .and_then(|e| e.to_str())
+                        .map(|e| format!(".{}", e))
+                        .unwrap_or_default();
+                    let new_name_with_ext = format!("{}{}", new_name, ext);
+                    let mut new_path = file.clone();
+                    new_path.set_file_name(&new_name_with_ext);
+                    if let Err(e) = std::fs::rename(file, &new_path) {
+                        tracing::error!(
+                            name = "ui.file.rename_failed",
+                            source = %file.display(),
+                            destination = %new_path.display(),
+                            error = %e,
+                            "Failed to rename file. Likely cause: permission denied or file in use. Operator should check file locks."
+                        );
+                    } else {
+                        let producer = FileEventProducer::new(file_event_bus);
+                        producer.publish_rename(file, &new_path);
+                        if loaded_path.as_ref() == Some(file) {
+                            *loaded_path = Some(new_path.clone());
+                        }
+                        if selected_file.as_ref() == Some(file) {
+                            *selected_file = Some(new_path.clone());
+                        }
+                        if selected_dir.as_ref() == Some(file) {
+                            *selected_dir = Some(new_path.clone());
+                        }
+                        for tab in tabs.iter_mut() {
+                            if *tab == *file {
+                                *tab = new_path.clone();
                             }
-                        close_rename_modal = true;
+                        }
+                        file_processor.remove_file(file);
+                        if file_processor.contains_dir(file) {
+                            file_processor.remove_dir(file);
+                            file_processor.add_dir(new_path.clone());
+                        }
+                        let ext = new_path.extension().and_then(|e| e.to_str()).unwrap_or("");
+                        if ext == "md" || ext == "markdown" {
+                            file_processor.add_file(new_path.clone());
+                        }
+                        let tags = crate::utils::tags::extract_tags_from_file(&new_path);
+                        tag_manager.remove_file(file);
+                        tag_manager.add_tags(new_path.clone(), tags);
+                        if expanded_dirs.remove(file) {
+                            expanded_dirs.insert(new_path.clone());
+                        }
                     }
-                    if ui.button(crate::ui::strings::CANCEL_BUTTON).clicked() {
-                        close_rename_modal = true;
-                    }
-                });
-            });
-
-        if close_rename_modal {
+                }
+            }
             dm.rename_dialog_open = false;
             dm.file_to_rename = None;
             dm.rename_new_name.clear();
+            ctx.data_mut(|data| {
+                data.remove_temp::<egui::Pos2>(egui::Id::new(crate::ui::strings::RENAME_WINDOW));
+            });
         }
+        Some(NameEntryAction::Cancel) => {
+            dm.rename_dialog_open = false;
+            dm.file_to_rename = None;
+            dm.rename_new_name.clear();
+            ctx.data_mut(|data| {
+                data.remove_temp::<egui::Pos2>(egui::Id::new(crate::ui::strings::RENAME_WINDOW));
+            });
+        }
+        None => {}
     }
 }
 
@@ -811,6 +809,73 @@ mod tests {
         assert!(created.exists(), "Ok must create the document file");
         let content = fs::read_to_string(&created).unwrap();
         assert_eq!(content, "---\ntitle: from dialog\n---\n\n");
+
+        let _ = fs::remove_dir_all(fixture.temp_dir);
+    }
+
+    /// Tier 4 functional test: opening the rename dialog with a file
+    /// queued and pressing Ok must rename the file on disk (preserving
+    /// its extension) and update the `selected_file` binding.
+    #[test]
+    fn test_rename_dialog_renames_file_on_submit() {
+        use crate::ui::test_helpers::interact::stateful_harness;
+        use egui_kittest::kittest::Queryable;
+        use std::sync::{Mutex, OnceLock};
+
+        struct StaticFixture {
+            app: Mutex<Option<crate::ui::FastMdApp>>,
+            temp_dir: &'static Path,
+        }
+        static FIXTURE: OnceLock<StaticFixture> = OnceLock::new();
+        let fixture = FIXTURE.get_or_init(|| {
+            let leaked = Box::leak(Box::new(
+                std::env::temp_dir()
+                    .join(format!("fastmd_rename_dialog_click_{}", std::process::id())),
+            ));
+            let temp_dir: &'static Path = leaked;
+            let _ = fs::create_dir_all(temp_dir);
+            let file_path = temp_dir.join("original.txt");
+            let _ = fs::write(&file_path, "content");
+            let mut app = crate::ui::FastMdApp::empty_state(crate::config::AppConfig::default());
+            app.dialogs.rename_dialog_open = true;
+            app.dialogs.file_to_rename = Some(file_path.clone());
+            app.dialogs.rename_new_name = "renamed".to_string();
+            *app.selection.selected_file_mut() = Some(file_path.clone());
+            StaticFixture {
+                app: Mutex::new(Some(app)),
+                temp_dir,
+            }
+        });
+
+        let mut harness = stateful_harness((), |ui, _| {
+            let mut guard = fixture.app.lock().unwrap();
+            if let Some(app) = guard.as_mut() {
+                let sel = &mut app.selection;
+                show_rename_dialog(RenameDialogCtx {
+                    dialog_manager: &mut app.dialogs,
+                    file_event_bus: &app.file_event_bus,
+                    loaded_path: &mut app.tab_manager.loaded_path,
+                    selected_file: &mut sel.selected_file,
+                    selected_dir: &mut sel.selected_dir,
+                    tabs: &mut app.tab_manager.tabs,
+                    file_processor: &mut app.file_processor,
+                    tag_manager: &mut app.tag_manager,
+                    expanded_dirs: &mut sel.expanded_dirs,
+                    ctx: ui.ctx(),
+                });
+            }
+        });
+        harness.fit_contents();
+        harness.get_by_label(crate::ui::strings::OK_BUTTON).click();
+        harness.run_steps(2);
+        harness.run_steps(2);
+
+        let renamed = fixture.temp_dir.join("renamed.txt");
+        assert!(
+            renamed.exists(),
+            "Ok must rename the file (preserving extension)"
+        );
+        assert!(!fixture.temp_dir.join("original.txt").exists());
 
         let _ = fs::remove_dir_all(fixture.temp_dir);
     }

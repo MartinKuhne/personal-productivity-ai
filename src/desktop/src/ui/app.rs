@@ -200,6 +200,7 @@ impl FastMdApp {
         }
 
         if let Some(reader) = &self.file_event_reader {
+            let mut removed_paths: Vec<PathBuf> = Vec::new();
             while let Ok(event) = reader.try_recv() {
                 changed = true;
                 match event.kind {
@@ -231,6 +232,7 @@ impl FastMdApp {
                             }
                             self.tag_manager.remove_file(p);
                         }
+                        removed_paths.extend(event.paths);
                         needs_rebuild = true;
                     }
                     FileEventKind::DirDiscovered => {
@@ -245,6 +247,9 @@ impl FastMdApp {
                     }
                 }
             }
+            if !removed_paths.is_empty() {
+                self.close_tabs_for_removed_files(&removed_paths);
+            }
         }
 
         if needs_rebuild {
@@ -252,6 +257,46 @@ impl FastMdApp {
         }
 
         changed
+    }
+
+    /// Close the tab for every file in `paths` that is currently open
+    /// (UI-051), then repair the selection so it never points at a
+    /// closed tab: if the active document was deleted, the viewer
+    /// falls back to the last remaining tab (or shows the empty state
+    /// when no tabs remain).
+    ///
+    /// Both deletion paths funnel through here — the [Delete]
+    /// context-menu action publishes a `Removed` file event on the bus
+    /// (drained in [`Self::process_file_events`]), and the filesystem
+    /// watcher reports external deletions both as an `FsEvent::FileDeleted`
+    /// on the typed channel (handled in [`Self::handle_fs_event`]) and
+    /// as a `Removed` bus event. Because both paths can observe the
+    /// same deletion, this helper is idempotent: removing a tab that is
+    /// already gone is a no-op.
+    fn close_tabs_for_removed_files(&mut self, paths: &[PathBuf]) {
+        let mut closed_any = false;
+        for path in paths {
+            if self.tab_manager.tabs.contains(path) {
+                self.tab_manager.tabs.retain(|p| p != path);
+                closed_any = true;
+            }
+        }
+        if !closed_any {
+            return;
+        }
+        // Mirror `apply_tab_action`'s selection repair: a selection
+        // that no longer corresponds to an open tab falls back to the
+        // last remaining tab (or None when the strip is empty).
+        if let Some(selected) = self.selection.selected_file().cloned() {
+            if !self.tab_manager.tabs.contains(&selected) {
+                *self.selection.selected_file_mut() = self.tab_manager.tabs.last().cloned();
+            }
+        } else if !self.tab_manager.tabs.is_empty() {
+            *self.selection.selected_file_mut() = self.tab_manager.tabs.last().cloned();
+        }
+        if self.selection.selected_file().is_none() {
+            self.tab_manager.clear_content();
+        }
     }
 
     /// Returns `true` if `path` is a user-editable workspace file
@@ -780,6 +825,7 @@ impl FastMdApp {
                 self.file_processor.remove_file(&path);
                 self.tag_manager.remove_file(&path);
                 self.tag_manager.rebuild();
+                self.close_tabs_for_removed_files(std::slice::from_ref(&path));
                 if self.selection.selected_file().is_some_and(|p| p == &path) {
                     *self.selection.selected_file_mut() = None;
                     self.tab_manager.current_yaml = None;
@@ -1805,6 +1851,98 @@ mod tests {
             all_text.contains("Indexing finished") || all_text.contains("files"),
             "Bottom/Top status bar content must be rendered, text: {}",
             all_text
+        );
+    }
+
+    /// UI-051: closing a tab when its file is deleted via the bus
+    /// `Removed` event must fall the selection back to the last
+    /// remaining tab (or to `None` when no tabs remain).
+    #[test]
+    fn test_process_file_events_removed_closes_open_tab() {
+        let mut app = create_test_app();
+        let gone = PathBuf::from("/tmp/gone.md");
+        let keep = PathBuf::from("/tmp/keep.md");
+        app.tab_manager.tabs = vec![gone.clone(), keep.clone()];
+        app.tab_manager.loaded_path = Some(gone.clone());
+        *app.selection.selected_file_mut() = Some(gone.clone());
+
+        app.file_event_reader = Some(app.file_event_bus.subscribe());
+        app.file_event_bus
+            .publish(FileEvent::removed_one(gone.clone()));
+        let _ = app.process_file_events();
+
+        assert!(
+            !app.tab_manager.tabs.contains(&gone),
+            "tab for deleted file must be closed"
+        );
+        assert!(
+            app.tab_manager.tabs.contains(&keep),
+            "tab for remaining file must stay open"
+        );
+        assert_eq!(
+            app.selection.selected_file(),
+            Some(&keep),
+            "selection must fall back to the last remaining tab"
+        );
+        assert!(
+            app.tab_manager.loaded_path.is_none(),
+            "loaded_path must be cleared"
+        );
+    }
+
+    /// UI-051: closing the last tab when its file is deleted must
+    /// clear the selection and the displayed content.
+    #[test]
+    fn test_process_file_events_removed_closes_last_tab_clears_content() {
+        let mut app = create_test_app();
+        let gone = PathBuf::from("/tmp/gone.md");
+        app.tab_manager.tabs = vec![gone.clone()];
+        app.tab_manager.loaded_path = Some(gone.clone());
+        app.tab_manager.current_markdown = "some content".to_string();
+        *app.selection.selected_file_mut() = Some(gone.clone());
+
+        app.file_event_reader = Some(app.file_event_bus.subscribe());
+        app.file_event_bus
+            .publish(FileEvent::removed_one(gone.clone()));
+        let _ = app.process_file_events();
+
+        assert!(app.tab_manager.tabs.is_empty(), "all tabs must be closed");
+        assert!(
+            app.selection.selected_file().is_none(),
+            "selection must be None when no tabs remain"
+        );
+        assert!(
+            app.tab_manager.loaded_path.is_none(),
+            "loaded_path must be cleared"
+        );
+        assert!(
+            app.tab_manager.current_markdown.is_empty(),
+            "content must be cleared when no tab remains"
+        );
+    }
+
+    /// UI-051: closing a tab when its file is deleted via the typed
+    /// `FsEvent::FileDeleted` event must fall the selection back to
+    /// the last remaining tab.
+    #[test]
+    fn test_handle_fs_event_file_deleted_closes_open_tab() {
+        let mut app = create_test_app();
+        let gone = PathBuf::from("gone.md");
+        let keep = PathBuf::from("keep.md");
+        app.tab_manager.tabs = vec![gone.clone(), keep.clone()];
+        app.tab_manager.loaded_path = Some(gone.clone());
+        *app.selection.selected_file_mut() = Some(gone.clone());
+
+        app.handle_fs_event(FsEvent::FileDeleted { path: gone.clone() });
+
+        assert!(
+            !app.tab_manager.tabs.contains(&gone),
+            "tab for deleted file must be closed"
+        );
+        assert_eq!(
+            app.selection.selected_file(),
+            Some(&keep),
+            "selection must fall back to the last remaining tab"
         );
     }
 }
