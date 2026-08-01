@@ -699,7 +699,7 @@ mod tests {
         app.tabs_mut().tabs = vec![PathBuf::from("doc1.md"), PathBuf::from("doc2.md")];
         *app.selection_mut().selected_file_mut() = Some(PathBuf::from("doc1.md"));
         app.tabs_mut().current_markdown = "# Document 1 Header".to_string();
-        app.tabs_mut().current_yaml = Some(serde_yml::from_str("title: Doc 1").unwrap());
+        app.tabs_mut().current_yaml = Some(serde_norway::from_str("title: Doc 1").unwrap());
 
         // Mode 2: a tab is open with markdown + YAML. The center panel
         // has no stable canonical string for this mode (the tab labels

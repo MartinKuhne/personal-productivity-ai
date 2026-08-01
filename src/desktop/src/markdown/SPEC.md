@@ -6,7 +6,7 @@
 > this spec and the actual code behavior, notify the user immediately.
 >
 > Part of [`SPEC.md`](../../SPEC.md) (FastMD crate). This subsystem is the single
-> import point for `pulldown-cmark`, `serde_yml` front-matter/table parsing, and
+> import point for `pulldown-cmark`, `serde_norway` front-matter/table parsing, and
 > Markdown AST types. `ui/`, `tools/`, `print.rs`, and `editor.rs` call into
 > `markdown::` rather than handling Markdown directly.
 

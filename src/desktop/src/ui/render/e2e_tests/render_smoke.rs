@@ -91,7 +91,7 @@ fn test_render_markdown_e2e() {
             );
 
             let yaml_str = "a: 1\nb: 2";
-            let val: serde_yml::Value = serde_yml::from_str(yaml_str).unwrap();
+            let val: serde_norway::Value = serde_norway::from_str(yaml_str).unwrap();
             render_yaml_table(ui, &val);
         });
     });
@@ -137,7 +137,7 @@ def foo():
             );
 
             // Render non-mapping YAML table
-            let non_map = serde_yml::Value::String("test".to_string());
+            let non_map = serde_norway::Value::String("test".to_string());
             render_yaml_table(ui, &non_map);
         });
     });
@@ -188,7 +188,7 @@ fn test_long_text_surfaces_wrap_within_viewport() {
          tags: [invoice, receipt, technology, documents]\n\
          header-date: 2026-07-22T19:32:47Z\n"
     );
-    let yaml: serde_yml::Value = serde_yml::from_str(&yaml_str).unwrap();
+    let yaml: serde_norway::Value = serde_norway::from_str(&yaml_str).unwrap();
 
     // Markdown case: long German paragraph mirroring the user's
     // `Mythical man-month.md` body (~570 chars).
@@ -253,7 +253,7 @@ fn test_render_yaml_table_row_height_prevents_text_overlap() {
          summary: \"{long_summary}\"\n\
          tags: [professional, career, linkedin, architect]\n"
     );
-    let yaml: serde_yml::Value = serde_yml::from_str(&yaml_str).unwrap();
+    let yaml: serde_norway::Value = serde_norway::from_str(&yaml_str).unwrap();
 
     let output = ctx.run_ui(raw, |ui| {
         egui::CentralPanel::default().show(ui, |ui| {
