@@ -1,5 +1,6 @@
 //! Web-fetching tools — fetch a URL and convert HTML to markdown, and search via a SearXNG instance.
 
+use crate::agent::datamark::{self, SECURITY_HEADER};
 use crate::agent::tools::manager::cache::{CacheEntry, cache};
 use crate::config::AppConfig;
 use fast_h2m::convert;
@@ -198,7 +199,17 @@ pub fn tool_web_delegate(
     let mut messages = vec![
         serde_json::json!({
             "role": "system",
-            "content": "You are a web research delegate. Use the web_search and web_fetch tools to execute the user's instruction. Gather information and return a concise, accurate summary. Do not converse, just output the final summarized answer."
+            // R1 (Spotlighting): the sub-agent's system prompt must
+            // include the same security header the parent uses, plus
+            // a delegate-specific role line. The header teaches the
+            // sub-agent to refuse instructions it sees inside
+            // datamarked tool results — which is critical because
+            // `web_delegate` is exactly the surface an indirect
+            // injection can drive (it runs many fetches in one
+            // session).
+            "content": format!(
+                "{SECURITY_HEADER}\n\nYou are a web research delegate. Use the web_search and web_fetch tools to execute the user's instruction. Gather information and return a concise, accurate summary. Do not converse, just output the final summarized answer."
+            )
         }),
         serde_json::json!({
             "role": "user",
@@ -361,10 +372,21 @@ pub fn tool_web_delegate(
                     r#"{"status":"error","message":"Unknown tool"}"#.to_string()
                 };
 
+                // R1 (Spotlighting): wrap every tool result the
+                // sub-agent sees in a datamark envelope so the
+                // LLM treats it as data, not instructions. This
+                // is the sub-agent counterpart of the parent
+                // loop's wrap in `agent_impl::process_tool_results`.
+                // The `func_name` is the literal LLM-facing tool
+                // name (`web_fetch` or `web_search`) so the
+                // provenance line in the envelope tells the LLM
+                // which tool produced the content.
+                let wrapped = datamark::wrap_tool_result(func_name, &result);
+
                 messages.push(serde_json::json!({
                     "role": "tool",
                     "tool_call_id": call_id,
-                    "content": result
+                    "content": wrapped
                 }));
             }
         } else {

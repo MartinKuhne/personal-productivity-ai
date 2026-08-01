@@ -1,6 +1,7 @@
 //! Top-level agent orchestration — builds the system prompt, sends requests, executes tool calls, and streams results back to the UI.
 
 use crate::agent::context::AgentContext;
+use crate::agent::datamark;
 use crate::agent::llm_client::{LLMClient, parse_usage_block};
 use crate::agent::prompt_builder::SystemPromptBuilder;
 use crate::agent::response_formatter::{
@@ -221,8 +222,18 @@ fn process_tool_results(
             let _ = tx.send(BackgroundEvent::from(AgentEvent::Response(
                 full_response.clone(),
             )));
-            messages
-                .push(serde_json::json!({"role": "tool", "tool_call_id": cid, "content": result}));
+            // R1 (Spotlighting): wrap the tool result in a
+            // datamark envelope so the LLM treats it as data, not
+            // instructions. The user-facing response above is built
+            // from the raw `result` (so the chat panel still shows
+            // the real content); only the message we push into the
+            // conversation history is wrapped.
+            let wrapped = datamark::wrap_tool_result(&fn_name, &result);
+            messages.push(serde_json::json!({
+                "role": "tool",
+                "tool_call_id": cid,
+                "content": wrapped
+            }));
         }
     }
 }

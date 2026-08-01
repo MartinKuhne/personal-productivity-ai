@@ -25,6 +25,9 @@ pub const TOOLS_KIND_MCP_STDIO: &str = "MCP (stdio)";
 /// Kind label for an MCP remote (SSE/HTTP) server tool group row.
 pub const TOOLS_KIND_MCP_REMOTE: &str = "MCP (remote)";
 
+/// Caption for the per-group tools list column header.
+pub const TOOLS_LIST_COLUMN: &str = "Tools";
+
 /// Caption for the per-group prompt char count column header.
 pub const TOOLS_CHAR_COUNT_COLUMN: &str = "Prompt";
 

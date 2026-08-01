@@ -20,7 +20,7 @@ impl DocumentContent {
     /// # Examples
     ///
     /// ```
-    /// use fastmd::document::DocumentContent;
+    /// use fastmd::app::document::DocumentContent;
     ///
     /// let doc = DocumentContent::parse("---\ntitle: T\n---\nbody");
     /// assert_eq!(doc.front_matter.as_deref(), Some("---\ntitle: T\n---"));

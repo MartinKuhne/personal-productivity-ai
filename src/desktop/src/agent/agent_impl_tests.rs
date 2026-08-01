@@ -319,3 +319,151 @@ fn test_run_agent_emits_executing_tool_message_immediately() {
     );
     assert!(responses.iter().any(|r| r.contains("Result (`read_tags`)")));
 }
+
+/// R1 (Spotlighting) regression: every `role:tool` message that
+/// joins the conversation history must be wrapped in the
+/// `EXTERNAL_DATA` datamark envelope. The user-facing chat-panel
+/// response (the `Result (...)` line emitted above) is NOT wrapped
+/// — that string goes to the UI, not to the LLM. Only the
+/// `messages` array that gets sent on the next LLM call is
+/// wrapped.
+///
+/// This test sends a tool-call → final assistant flow, then
+/// inspects the `Finished(messages)` payload that `run_agent`
+/// emits and asserts that the `role:tool` entry is wrapped.
+#[test]
+fn test_run_agent_datamarks_tool_results_in_conversation_history() {
+    use crate::agent::datamark::{EXTERNAL_DATA_END, EXTERNAL_DATA_START};
+
+    let tool_call_body = serde_json::json!({
+        "id": "chatcmpl-tool", "object": "chat.completion", "created": 0, "model": "test",
+        "choices": [{
+            "index": 0,
+            "message": {
+                "role": "assistant",
+                "content": null,
+                "tool_calls": [{
+                    "id": "call_1",
+                    "type": "function",
+                    "function": {
+                        "name": "read_tags",
+                        "arguments": "{}"
+                    }
+                }]
+            },
+            "finish_reason": "tool_calls"
+        }]
+    })
+    .to_string();
+    let final_body = serde_json::json!({
+        "id": "chatcmpl-final", "object": "chat.completion", "created": 0, "model": "test",
+        "choices": [{"index": 0, "message": {"role": "assistant", "content": "Done with tools."}, "finish_reason": "stop"}]
+    })
+    .to_string();
+
+    use std::io::{Read, Write};
+    use std::net::TcpListener;
+    let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+    let port = listener.local_addr().unwrap().port();
+    std::thread::spawn(move || {
+        for body in [tool_call_body, final_body] {
+            if let Ok((mut stream, _)) = listener.accept() {
+                let mut buf = [0; 8192];
+                let _ = stream.read(&mut buf);
+                let resp = format!(
+                    "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
+                    body.len(),
+                    body
+                );
+                let _ = stream.write_all(resp.as_bytes());
+                let _ = stream.flush();
+                std::thread::sleep(std::time::Duration::from_millis(100));
+            }
+        }
+    });
+    let (ctx, rx) = make_ctx(make_config(port));
+    run_agent(ctx);
+
+    // Drain the event stream, capturing the Finished history.
+    let mut history: Option<Vec<serde_json::Value>> = None;
+    while let Ok(ev) = rx.recv() {
+        if let BackgroundEvent::Agent(AgentEvent::Finished(messages)) = ev {
+            history = Some(messages);
+            break;
+        }
+    }
+    let history = history.expect("agent must emit Finished with history");
+
+    // Find the role:tool entry.
+    let tool_entry = history
+        .iter()
+        .find(|m| m.get("role").and_then(|r| r.as_str()) == Some("tool"))
+        .expect("history must contain a role:tool entry");
+    let content = tool_entry
+        .get("content")
+        .and_then(|c| c.as_str())
+        .expect("tool entry must have string content");
+
+    assert!(
+        content.contains(EXTERNAL_DATA_START),
+        "role:tool content must be wrapped in the EXTERNAL_DATA envelope; got: {content}"
+    );
+    assert!(
+        content.contains(EXTERNAL_DATA_END),
+        "role:tool content must end with the EXTERNAL_DATA envelope; got: {content}"
+    );
+    assert!(
+        content.contains("provenance=tool:read_tags"),
+        "envelope must carry the tool name as provenance; got: {content}"
+    );
+    assert!(
+        content.contains("trust=untrusted"),
+        "envelope must carry the trust=untrusted marker; got: {content}"
+    );
+}
+
+/// R1 (Spotlighting) regression: the system prompt sent on the
+/// first LLM call must begin with the security header. We assert
+/// this by checking that the *first* message in the history is
+/// the system prompt and that it contains the canonical header
+/// text. If a future edit accidentally reorders the prompt so
+/// the header lands below the role definition, the LLM no longer
+/// follows it under adversarial pressure and the test fires.
+#[test]
+fn test_run_agent_system_prompt_starts_with_security_header() {
+    let body = serde_json::json!({
+        "id": "chatcmpl-test", "object": "chat.completion", "created": 0, "model": "test",
+        "choices": [{"index": 0, "message": {"role": "assistant", "content": "All done."}, "finish_reason": "stop"}]
+    })
+    .to_string();
+    let port = spawn_one_shot_http_server(&http_response("HTTP/1.1 200 OK", &body));
+    let (ctx, rx) = make_ctx(make_config(port));
+    run_agent(ctx);
+
+    let mut history: Option<Vec<serde_json::Value>> = None;
+    while let Ok(ev) = rx.recv() {
+        if let BackgroundEvent::Agent(AgentEvent::Finished(messages)) = ev {
+            history = Some(messages);
+            break;
+        }
+    }
+    let history = history.expect("agent must emit Finished with history");
+
+    let system = history
+        .first()
+        .expect("history must start with a system message");
+    assert_eq!(
+        system.get("role").and_then(|r| r.as_str()),
+        Some("system"),
+        "first message must be the system prompt"
+    );
+    let content = system
+        .get("content")
+        .and_then(|c| c.as_str())
+        .expect("system message must have string content");
+    assert!(
+        content.starts_with(crate::agent::datamark::SECURITY_HEADER),
+        "system prompt must start with the security header; got first 200 chars: {:?}",
+        &content[..content.len().min(200)]
+    );
+}
