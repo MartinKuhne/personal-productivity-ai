@@ -27,9 +27,11 @@ these areas; they are the in-repo source of truth for the pinned versions.
 - `doc/distill/mcp.md` — Model Context Protocol client-side spec (lifecycle,
   transports, OAuth 2.1 authorization, cancellation, ping, progress). Consult
   when working on the MCP client (`agent/tools/mcp/`).
+- https://docs.discord.com/llms.txt for discord changes. You MUST retrieve the current copy of that document when making discord related changes.
 
 ## 4. Spec traceability
 - Every user-facing behaviour maps to requirement in `SPEC.md`. When adding a feature, add the requirement first; when changing behaviour, prompt to update the requirement.
+- Keep requirements goal oriented and user facing. Avoid leaking implementation specifics.
 - Code may cite `REQ-xxx` / `MD-xxx` / `TOOL-xxx` / `AGENT-xxx` in `//!`/`///` comments where it aids review (e.g. `(AGENT-012)` next to the safe/unsafe split). Do not sprinkle citations inline in business logic.
 - `ARCHITECTURE_C4.md` (in `doc/technical-context/`) is the authoritative architecture picture; update it when module boundaries change.
 
@@ -51,13 +53,7 @@ src/
 │   │                       # bus-side routing (see `doc/planning/.../bus-folder-consolidation.md`)
 │   ├── core.rs             # Bus<T>, BusReader<T>  (tokio::sync::broadcast wrapper)
 │   ├── events/             # every event payload that flows over a bus or channel
-│   │   ├── file.rs         # FileEvent, FileEventKind, FileEventProducer
-│   │   ├── messages.rs     # TokenUsageInfo (shared value type)
-│   │   ├── typed.rs        # BackgroundEvent, AgentEvent, FsEvent, ProcessEvent (per-domain)
-│   │   └── config.rs       # ConfigArrived
 │   ├── router/             # bus-side plumbing
-│   │   ├── bus_router.rs   # BusRouter (per-extension fan-out to PDF/vision channels)
-│   │   └── worker.rs       # spawn_path_worker, ChannelWorker (generic channel drainers)
 │   └── config.rs           # config_bus() constructor, CONFIG_ARRIVAL_TIMEOUT
 ├── config/                 # AppConfig + client structs, loader, secrets (data shapes only)
 ├── app/                    # egui-free application domain (managers, watcher, vfs)
@@ -157,9 +153,7 @@ request/response binding:
 - `lib.rs` is a **facade only** — no logic, only `pub use` of subsystem
   public APIs. Do not grow it when adding features; add to the relevant
   subsystem and let `lib.rs` re-export.
-- When extracting a submodule, preserve the existing public import path via
-  `pub use` in the parent `mod.rs`. External callers (and `main.rs`) must not
-  see path changes.
+- When extracting a submodule, refactor and update all external callers.
 
 ### `app/` is egui-free
 
@@ -196,9 +190,9 @@ The `Bus<T>` transport and all event payload types live in
 ## 6. Quality Gate (Rust)
 
 Before marking any task as complete, run the following from `src/desktop/` and ensure they all pass cleanly:
-- `cargo check` — no errors or warnings
-- `cargo nextest run` — all tests pass (the `default` profile in `.config/nextest.toml` retries flaky tier-4 click tests twice; CI uses the `ci` profile which is strict)
-- `cargo clippy -- -D warnings` — no lint warnings (deny all)
+- `cargo check --quiet` — no errors or warnings
+- `cargo nextest run ---status-level fail --no-progress` — all tests pass (the `default` profile in `.config/nextest.toml` retries flaky tier-4 click tests twice; CI uses the `ci` profile which is strict)
+- `cargo clippy -- --quiet -D warnings` — no lint warnings (deny all)
 - `cargo fmt --check` — code is properly formatted
 - `cargo doc --no-deps --quiet` — documentation builds without warnings
 
