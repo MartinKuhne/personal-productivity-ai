@@ -557,7 +557,7 @@ pub fn save_config_to_path(config: &AppConfig, path: &Path) -> Result<PathBuf, S
             )
         })?;
     }
-    let yaml = serde_yml::to_string(config)
+    let yaml = serde_norway::to_string(config)
         .map_err(|e| format!("failed to serialise AppConfig to YAML: {e}"))?;
     std::fs::write(path, yaml)
         .map_err(|e| format!("failed to write config to {}: {e}", path.display()))?;
@@ -580,7 +580,7 @@ pub fn save_config_to_path(config: &AppConfig, path: &Path) -> Result<PathBuf, S
 pub(crate) fn load_config_from_path(config_path: &Path) -> AppConfig {
     if config_path.exists() {
         if let Ok(content) = std::fs::read_to_string(config_path) {
-            match serde_yml::from_str::<AppConfig>(&content) {
+            match serde_norway::from_str::<AppConfig>(&content) {
                 Ok(config) => return config,
                 Err(err) => {
                     tracing::error!(
@@ -603,7 +603,7 @@ pub(crate) fn load_config_from_path(config_path: &Path) -> AppConfig {
             let _ = std::fs::create_dir_all(parent);
         }
         let default_config = AppConfig::default();
-        if let Ok(yaml_str) = serde_yml::to_string(&default_config) {
+        if let Ok(yaml_str) = serde_norway::to_string(&default_config) {
             let _ = std::fs::write(config_path, yaml_str);
         }
     }
@@ -779,7 +779,7 @@ models:
     api_key: "old-key"
     capabilities: "chat"
 "#;
-        let config: AppConfig = serde_yml::from_str(yaml).unwrap();
+        let config: AppConfig = serde_norway::from_str(yaml).unwrap();
         let m = config.models.get("legacy_model").unwrap();
         // Old field names should deserialize without issues
         assert_eq!(m.model, "old-model-name");
@@ -800,7 +800,7 @@ models:
       - chat
       - vision
 "#;
-        let config: AppConfig = serde_yml::from_str(yaml).unwrap();
+        let config: AppConfig = serde_norway::from_str(yaml).unwrap();
         let m = config.models.get("new_model").unwrap();
         assert_eq!(m.model, "new-model-name");
         assert_eq!(m.api_url, "http://new-endpoint");
@@ -822,7 +822,7 @@ pdf_converter_command:
   - "{input}"
 inline_editor_enabled: true
 "#;
-        let config: AppConfig = serde_yml::from_str(yaml).unwrap();
+        let config: AppConfig = serde_norway::from_str(yaml).unwrap();
         assert!(config.pdf_converter_command.is_some());
         let cmd = config.pdf_converter_command.unwrap();
         assert_eq!(cmd[0], "pandoc");
@@ -940,7 +940,7 @@ user_name: "TestUser"
     #[test]
     fn test_tool_groups_config_defaults() {
         let yaml = "{}";
-        let cfg: ToolGroupsConfig = serde_yml::from_str(yaml).unwrap();
+        let cfg: ToolGroupsConfig = serde_norway::from_str(yaml).unwrap();
         assert!(cfg.filesystem);
         assert!(cfg.web);
         assert!(cfg.email);
@@ -962,7 +962,7 @@ args: ["-y", "@modelcontextprotocol/server-memory"]
 env:
   API_KEY: "secret"
 "#;
-        let stdio_cfg: McpServerConfig = serde_yml::from_str(stdio_yaml).unwrap();
+        let stdio_cfg: McpServerConfig = serde_norway::from_str(stdio_yaml).unwrap();
         let debug_stdio = format!("{:?}", stdio_cfg);
         assert!(debug_stdio.contains("McpServerConfig::Stdio"));
         assert!(debug_stdio.contains("npx"));
@@ -973,7 +973,7 @@ url: https://mcp.example.com/sse
 headers:
   Authorization: Bearer supersecrettoken
 "#;
-        let sse_cfg: McpServerConfig = serde_yml::from_str(sse_yaml).unwrap();
+        let sse_cfg: McpServerConfig = serde_norway::from_str(sse_yaml).unwrap();
         let debug_sse = format!("{:?}", sse_cfg);
         assert!(debug_sse.contains("McpServerConfig::Sse"));
         assert!(debug_sse.contains("[REDACTED]"));
@@ -998,7 +998,7 @@ headers:
 transport: stdio
 command: npx
 "#;
-        let entry: McpServerEntry = serde_yml::from_str(yaml).unwrap();
+        let entry: McpServerEntry = serde_norway::from_str(yaml).unwrap();
         assert!(entry.is_enabled(), "legacy YAML must default to enabled");
         match entry.config() {
             McpServerConfig::Stdio { command, .. } => assert_eq!(command, "npx"),
@@ -1014,15 +1014,15 @@ transport: sse
 url: https://mcp.example.com/sse
 headers: {}
 "#;
-        let entry: McpServerEntry = serde_yml::from_str(yaml).unwrap();
+        let entry: McpServerEntry = serde_norway::from_str(yaml).unwrap();
         assert!(!entry.is_enabled());
         match entry.config() {
             McpServerConfig::Sse { url, .. } => assert_eq!(url, "https://mcp.example.com/sse"),
             other => panic!("expected Sse, got {other:?}"),
         }
         // Round-trip: re-serialise and re-parse, expect same shape.
-        let serialised = serde_yml::to_string(&entry).unwrap();
-        let re: McpServerEntry = serde_yml::from_str(&serialised).unwrap();
+        let serialised = serde_norway::to_string(&entry).unwrap();
+        let re: McpServerEntry = serde_norway::from_str(&serialised).unwrap();
         assert!(!re.is_enabled());
     }
 
@@ -1044,7 +1044,7 @@ headers: {}
 transport: stdio
 command: npx
 "#;
-        let entry: McpServerEntry = serde_yml::from_str(yaml).unwrap();
+        let entry: McpServerEntry = serde_norway::from_str(yaml).unwrap();
         assert!(entry.enabled);
     }
 

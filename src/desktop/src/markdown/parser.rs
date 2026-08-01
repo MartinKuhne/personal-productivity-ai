@@ -428,18 +428,18 @@ pub fn parse_markdown_to_events(markdown_text: &str) -> Vec<RenderEvent> {
 }
 
 /// Parses a YAML mapping into a list of key-value string pairs.
-pub fn parse_yaml_to_pairs(yaml: &serde_yml::Value) -> Option<Vec<(String, String)>> {
+pub fn parse_yaml_to_pairs(yaml: &serde_norway::Value) -> Option<Vec<(String, String)>> {
     let mapping = yaml.as_mapping()?;
     let mut pairs = Vec::new();
     for (key, value) in mapping {
         let val_str = match value {
-            serde_yml::Value::String(s) => s.clone(),
-            serde_yml::Value::Sequence(seq) => {
+            serde_norway::Value::String(s) => s.clone(),
+            serde_norway::Value::Sequence(seq) => {
                 let items: Vec<String> = seq
                     .iter()
                     .map(|v| match v {
-                        serde_yml::Value::String(s) => s.clone(),
-                        _ => serde_yml::to_string(v)
+                        serde_norway::Value::String(s) => s.clone(),
+                        _ => serde_norway::to_string(v)
                             .unwrap_or_default()
                             .trim()
                             .to_string(),
@@ -447,12 +447,18 @@ pub fn parse_yaml_to_pairs(yaml: &serde_yml::Value) -> Option<Vec<(String, Strin
                     .collect();
                 items.join(", ")
             }
-            _ => serde_yml::to_string(value)
+            _ => serde_norway::to_string(value)
                 .unwrap_or_default()
                 .trim()
                 .to_string(),
         };
-        pairs.push((key.to_string(), val_str));
+        pairs.push((
+            serde_norway::to_string(key)
+                .unwrap_or_default()
+                .trim()
+                .to_string(),
+            val_str,
+        ));
     }
     Some(pairs)
 }
@@ -471,7 +477,7 @@ mod tests {
 
     #[test]
     fn test_parse_yaml_to_pairs() {
-        let yaml: serde_yml::Value = serde_yml::from_str("key: val\nlist: [a, b]").unwrap();
+        let yaml: serde_norway::Value = serde_norway::from_str("key: val\nlist: [a, b]").unwrap();
         let pairs = parse_yaml_to_pairs(&yaml).unwrap();
         assert_eq!(pairs[0], ("key".to_string(), ("val").to_string()));
         assert_eq!(pairs[1], ("list".to_string(), ("a, b").to_string()));
