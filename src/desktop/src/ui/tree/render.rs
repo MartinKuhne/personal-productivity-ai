@@ -91,23 +91,8 @@ pub fn render_flat_row_capture(
                         ui.close();
                     }
                     if ui.button(crate::ui::strings::NEW_DOCUMENT_ACTION).clicked() {
-                        let mut new_path = row.path.join("New document.md");
-                        if new_path.exists() {
-                            let now = chrono::Local::now();
-                            let date_str = now.format("%Y-%m-%d %H-%M-%S");
-                            new_path = row.path.join(format!("New document {}.md", date_str));
-                        }
-                        let yaml_header = "---\ntitle: New document\n---\n\n";
-                        if let Err(e) = std::fs::write(&new_path, yaml_header) {
-                            tracing::error!(
-                                name = "ui.file.create_failed",
-                                path = %new_path.display(),
-                                error = %e,
-                                "Failed to create new document."
-                            );
-                        } else if let Some(producer) = ctx.file_event_producer().as_ref() {
-                            producer.publish_discovered(&new_path);
-                        }
+                        *ctx.create_document_parent() = Some(row.path.clone());
+                        *ctx.create_document_dialog_open() = true;
                         ui.close();
                     }
                     if ui.button(crate::ui::strings::DELETE_ACTION).clicked() {
@@ -318,26 +303,8 @@ pub fn draw_tree_node(ui: &mut egui::Ui, node: &TreeNode, ctx: &mut TreeNodeCont
                 ui.close();
             }
             if ui.button(crate::ui::strings::NEW_DOCUMENT_ACTION).clicked() {
-                let mut new_path = node.path.join("New document.md");
-                if new_path.exists() {
-                    let now = chrono::Local::now();
-                    let date_str = now.format("%Y-%m-%d %H-%M-%S");
-                    new_path = node.path.join(format!("New document {}.md", date_str));
-                }
-                let yaml_header = "---\ntitle: New document\n---\n\n";
-                if let Err(e) = std::fs::write(&new_path, yaml_header) {
-                    tracing::error!(
-                        name = "ui.file.create_failed",
-                        path = %new_path.display(),
-                        error = %e,
-                        "Failed to create new document. Likely cause: permission denied or disk full. Operator should verify directory permissions."
-                    );
-                } else if let Some(producer) = ctx.file_event_producer().as_ref() {
-                    // Tell the rest of the app this file now exists
-                    // so the directory tree and tag manager refresh
-                    // immediately.
-                    producer.publish_discovered(&new_path);
-                }
+                *ctx.create_document_parent() = Some(node.path.clone());
+                *ctx.create_document_dialog_open() = true;
                 ui.close();
             }
             if ui.button(crate::ui::strings::DELETE_ACTION).clicked() {
@@ -553,6 +520,8 @@ mod tests {
             let file_to_rename = Box::leak(Box::new(None::<PathBuf>));
             let rename_dialog_open = Box::leak(Box::new(false));
             let rename_new_name = Box::leak(Box::new(String::new()));
+            let create_document_dialog_open = Box::leak(Box::new(false));
+            let create_document_parent = Box::leak(Box::new(None::<PathBuf>));
             let layout = Box::leak(Box::new(PanelLayout::default()));
             let submit_prompt = Box::leak(Box::new(None::<String>));
             let open_editor = Box::leak(Box::new(None::<PathBuf>));
@@ -571,6 +540,8 @@ mod tests {
                 file_to_rename,
                 rename_dialog_open,
                 rename_new_name,
+                create_document_dialog_open,
+                create_document_parent,
                 layout,
                 submit_prompt,
                 content_libraries,
@@ -652,6 +623,8 @@ mod tests {
         let mut rename_dialog_open = false;
         let mut file_to_rename = None;
         let mut rename_new_name = String::new();
+        let mut create_document_dialog_open = false;
+        let mut create_document_parent = None;
         let mut submit_prompt = None;
         let mut open_editor = None;
 
@@ -670,6 +643,8 @@ mod tests {
                     file_to_rename: &mut file_to_rename,
                     rename_dialog_open: &mut rename_dialog_open,
                     rename_new_name: &mut rename_new_name,
+                    create_document_dialog_open: &mut create_document_dialog_open,
+                    create_document_parent: &mut create_document_parent,
                     layout: &mut layout,
                     submit_prompt: &mut submit_prompt,
                     content_libraries: &[],
@@ -765,6 +740,8 @@ mod tests {
         let mut rename_dialog_open = false;
         let mut file_to_rename = None;
         let mut rename_new_name = String::new();
+        let mut create_document_dialog_open = false;
+        let mut create_document_parent = None;
         let mut submit_prompt = None;
         let mut open_editor = None;
 
@@ -784,6 +761,8 @@ mod tests {
                     file_to_rename: &mut file_to_rename,
                     rename_dialog_open: &mut rename_dialog_open,
                     rename_new_name: &mut rename_new_name,
+                    create_document_dialog_open: &mut create_document_dialog_open,
+                    create_document_parent: &mut create_document_parent,
                     layout: &mut layout,
                     submit_prompt: &mut submit_prompt,
                     content_libraries: &[],

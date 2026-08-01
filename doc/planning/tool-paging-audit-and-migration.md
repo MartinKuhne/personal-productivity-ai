@@ -35,7 +35,7 @@ MCP-discovered tools are out of scope for the per-tool review (their schema come
 | F-7 | `get_weather` returns a JSON array of NWS forecast periods but has **no paging** and no documented cap; NWS provides ~7 days × 2 periods/day = ~14 items but the value is hard-coded inside `weather.rs` and the LLM has no way to ask for fewer | **Medium** | `get_weather` |
 | F-8 | `read_tags` returns the full de-duped set with no cap; a workspace with thousands of unique tags will blow context on a single call | **Low** | `read_tags` |
 | F-9 | `csv` `query` returns the full matched set with no cap; the only saving grace is the spec says TOOL-003 covers aggregates, not paging | **Low** | `query` (csv) |
-| F-10 | `list_files`/`list_files_by_tag` accept a `page_size` with **no documented upper bound**; the LLM can ask for 10,000 rows in a single page | **Low** | `list_files`, `list_files_by_tag` |
+| F-10 | `list_files`/`list_files_by_tag` accept a `page_size` with **no documented upper bound**; the LLM can ask for 10,000 rows in a single page. The audit originally called this a gap; Part II decided the LLM owns the page-size choice, so this is now a non-issue. | **Low (closed)** | `list_files`, `list_files_by_tag` |
 | F-11 | `DeleteEmailInput`/`DeleteEmailResponse` DTOs exist in `dtos.rs` but no `delete_email` tool is registered in `register_all_builtins` — dead code | **Low** | `delete_email` (absent) |
 | F-12 | Pagination instructions in `prompt_builder.rs` are absent — the only "context bloat" hint is `read_file`/`read_yaml_header`; nothing about `page`/`offset`/`limit`/truncation handling | **Low** | all paginated tools |
 | F-13 | LLM-facing `description` fields mix conventions: some embed the default in prose, some reference the constant name (`DEFAULT_GREP_MAX_RESULTS`), one (weather) embeds the API fact "NWS only provides ~7 days of forecast" in the wrong place (the error string instead of the description) | **Low** | `grep`, `weather` |
@@ -264,8 +264,8 @@ All defaults are defensible. The gaps are around (a) what the LLM is told about 
 
 ## Paging semantics summary (the matrix the LLM needs)
 
-| Tool | Schema params | Indexing | Default | Cap / Total field | Hint when past end |
-|------|---------------|----------|---------|-------------------|---------------------|
+| Tool | Schema params | Indexing | Default | Total field | Hint when past end |
+|------|---------------|----------|---------|-------------|---------------------|
 | `grep` | none (cap only) | n/a | first 200 matches | `total: usize` (count of all matches) + `truncated: bool` | n/a (no paging) |
 | `list_files` | `page: Option<usize>`, `page_size: Option<usize>` | 1-indexed | 20 | `total: usize` (cross-library) | `hint: Option<String>` |
 | `list_files_by_tag` | `page: Option<usize>`, `page_size: Option<usize>` | 1-indexed | 20 | `total: usize` (cross-library) | `hint: Option<String>` |
@@ -307,7 +307,7 @@ Ordered by impact. This list is the audit's original proposal. Status indicates 
 ## What is *not* in scope for this audit
 
 - MCP server-side paging contracts (depends on each server).
-- Internal pagination inside `csv_db::query::query_csv` (single-shot is fine; the cap belongs on the tool layer).
+- Internal pagination inside `csv_db::query::query_csv` (single-shot is fine; per-tool slicing lives in the tool layer, not the implementation).
 - LLM-side heuristics for "stop after N pages" (a separate concern, lives in the agent loop / `process_turn`).
 - Performance of `search_email` fetching every email body up front (a `find_n+1` problem worth a separate ticket).
 
@@ -652,7 +652,7 @@ New tests to add:
 - `test_list_files_offset_past_end_returns_hint` — pass `offset: 999`, expect empty `files` and a `hint` containing the word "offset".
 - `test_list_files_offset_zero_is_not_normalised` — pass `offset: 0`, expect the first `limit` items (this is the natural meaning; the old "page 0 normalises to page 1" rule goes away).
 
-For the `SearchEmailInput` path, the email body tests at `jmap/email.rs:1130+` are integration-style and use `simplify_jmap_emails`, which does not touch pagination. No test changes are required there, but a new unit test in `email.rs` SHOULD cover the offset/limit math on the inline `paginate_in_range` call (now a real call, not inline math). Add `test_tool_search_email_paging_clamps_limit` and `test_tool_search_email_paging_offset_past_end`.
+For the `SearchEmailInput` path, the email body tests at `jmap/email.rs:1130+` are integration-style and use `simplify_jmap_emails`, which does not touch pagination. No test changes are required there, but a new unit test in `email.rs` SHOULD cover the offset/limit math on the inline `paginate_in_range` call (now a real call, not inline math). Add `test_tool_search_email_paging_honors_large_limit` and `test_tool_search_email_paging_offset_past_end`.
 
 The hard-coded "200" in the grep truncation footer (audit F-3) MUST also be fixed in the same PR: the literal MUST become `format!("...at {} matches...", DEFAULT_GREP_MAX_RESULTS)`. Add a test that asserts the constant and the footer text agree.
 
@@ -678,6 +678,7 @@ Additional checks specific to this change:
 - **MCP tool confusion.** MCP-sourced tools (via `McpToolAdapter`) keep whatever schema the upstream server advertises. A server that uses `page`/`page_size` will look different from our built-ins. This is a known consequence of MCP's "be the server's schema" contract and is out of scope.
 - **Test count.** `registry/tests.rs` has ~25 tests touching `list_files` / `list_files_by_tag`. A mass rename is a one-shot risk; reviewers SHOULD skim the diff to confirm only param names changed.
 - **Stale docs.** Any external doc that references `page`/`page_size` (user-facing help, blog posts, `wiki/architecture/architecture-summary.md`) MUST be updated. The PR description MUST list a "docs to update" section.
+- **No cap means the LLM owns the context-bloat tradeoff.** If the LLM asks for `limit: 100_000` and the result has 100_000 items, the tool returns all of them. The `total` field on every response lets the LLM size follow-up requests based on what it has seen. The recommended pattern is: start with the default `limit`, then re-page using the returned `total` to choose a `limit` that fits the context. The system prompt SHOULD NOT need to remind the LLM of this — the canonical description tells it.
 
 ## Out of scope
 
@@ -690,5 +691,4 @@ Additional checks specific to this change:
 ## Open questions
 
 1. Should `paginate_in_range` clamp `offset` to `total` (current proposal) or pass it through and let the LLM see an empty result with no hint? The current proposal is "clamp and emit a hint." Reviewer: please confirm.
-2. Should the `web_fetch` `MAX_PAGE_SIZE` cap be 1000 lines or 500? 1000 is the current proposal. Reviewer: please confirm.
-3. Should we land the dual-accept `page`/`offset` shim for one release? Reviewer: please confirm.
+2. Should we land the dual-accept `page`/`offset` shim for one release? Reviewer: please confirm.

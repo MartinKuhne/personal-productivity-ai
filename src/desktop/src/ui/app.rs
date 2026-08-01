@@ -934,6 +934,13 @@ impl FastMdApp {
                 ctx,
             });
         }
+        if self.dialogs.create_document_dialog_open {
+            crate::ui::modals::show_create_document_dialog(
+                &mut self.dialogs,
+                &self.file_event_bus,
+                ctx,
+            );
+        }
 
         crate::ui::background_logs::show_background_logs_window(self, ctx);
 

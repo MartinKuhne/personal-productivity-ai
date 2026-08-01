@@ -262,6 +262,8 @@ pub fn show_left_panel(app: &mut FastMdApp, parent_ui: &mut egui::Ui) {
                         file_to_rename: &mut dialogs.file_to_rename,
                         rename_dialog_open: &mut dialogs.rename_dialog_open,
                         rename_new_name: &mut dialogs.rename_new_name,
+                        create_document_dialog_open: &mut dialogs.create_document_dialog_open,
+                        create_document_parent: &mut dialogs.create_document_parent,
                         layout,
                         submit_prompt,
                         content_libraries,

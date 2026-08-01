@@ -195,6 +195,12 @@ pub const CREATE_DIRECTORY_WINDOW: &str = "Create Directory";
 /// Label prompt in create directory dialog.
 pub const ENTER_DIRECTORY_NAME: &str = "Enter directory name:";
 
+/// Window title for create document dialog.
+pub const CREATE_DOCUMENT_WINDOW: &str = "New Document";
+
+/// Label prompt in create document dialog.
+pub const ENTER_DOCUMENT_NAME: &str = "Enter document name:";
+
 /// Window title for rename dialog.
 pub const RENAME_WINDOW: &str = "Rename";
 
@@ -292,5 +298,11 @@ mod tests {
             build_indexing_progress_text(12),
             "Indexing workspace (found 12 files)..."
         );
+    }
+
+    #[test]
+    fn test_create_document_dialog_strings() {
+        assert_eq!(CREATE_DOCUMENT_WINDOW, "New Document");
+        assert_eq!(ENTER_DOCUMENT_NAME, "Enter document name:");
     }
 }

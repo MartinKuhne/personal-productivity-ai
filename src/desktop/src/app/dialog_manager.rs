@@ -32,6 +32,11 @@ pub struct DialogManager {
     pub create_dir_parent: Option<PathBuf>,
     pub create_dir_name: String,
 
+    // Create document dialog
+    pub create_document_dialog_open: bool,
+    pub create_document_parent: Option<PathBuf>,
+    pub create_document_name: String,
+
     // Rename dialog
     pub rename_dialog_open: bool,
     pub file_to_rename: Option<PathBuf>,
@@ -69,6 +74,10 @@ impl DialogManager {
             create_dir_dialog_open: false,
             create_dir_parent: None,
             create_dir_name: String::new(),
+
+            create_document_dialog_open: false,
+            create_document_parent: None,
+            create_document_name: String::new(),
 
             rename_dialog_open: false,
             file_to_rename: None,
@@ -126,6 +135,9 @@ mod tests {
         assert!(dm.file_to_move.is_none());
         assert!(!dm.create_dir_dialog_open);
         assert!(dm.create_dir_parent.is_none());
+        assert!(!dm.create_document_dialog_open);
+        assert!(dm.create_document_parent.is_none());
+        assert!(dm.create_document_name.is_empty());
         assert!(!dm.rename_dialog_open);
         assert!(dm.file_to_rename.is_none());
         assert!(!dm.batch_dialog_open);
