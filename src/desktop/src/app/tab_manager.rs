@@ -7,7 +7,7 @@ use crate::markdown::toc_entry::ToCEntry;
 
 pub struct TabManager {
     pub loaded_path: Option<PathBuf>,
-    pub current_yaml: Option<serde_yml::Value>,
+    pub current_yaml: Option<serde_norway::Value>,
     pub current_markdown: String,
     pub tabs: Vec<PathBuf>,
     tabs_set: HashSet<PathBuf>,

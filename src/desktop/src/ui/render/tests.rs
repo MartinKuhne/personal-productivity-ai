@@ -13,7 +13,7 @@ use super::*;
 #[test]
 fn test_parse_yaml_to_pairs() {
     let yaml_str = "key1: value1\nkey2: [item1, item2]\nkey3: 100\nkey4: true";
-    let val: serde_yml::Value = serde_yml::from_str(yaml_str).unwrap();
+    let val: serde_norway::Value = serde_norway::from_str(yaml_str).unwrap();
     let pairs = parse_yaml_to_pairs(&val).unwrap();
     assert_eq!(pairs[0], ("key1".to_string(), "value1".to_string()));
     assert_eq!(pairs[1], ("key2".to_string(), "item1, item2".to_string()));
@@ -23,13 +23,14 @@ fn test_parse_yaml_to_pairs() {
 
 #[test]
 fn test_parse_yaml_to_pairs_non_mapping() {
-    let string_val = serde_yml::Value::String("just string".to_string());
+    let string_val = serde_norway::Value::String("just string".to_string());
     assert_eq!(parse_yaml_to_pairs(&string_val), None);
 
-    let seq_val = serde_yml::Value::Sequence(vec![serde_yml::Value::String("item".to_string())]);
+    let seq_val =
+        serde_norway::Value::Sequence(vec![serde_norway::Value::String("item".to_string())]);
     assert_eq!(parse_yaml_to_pairs(&seq_val), None);
 
-    let null_val = serde_yml::Value::Null;
+    let null_val = serde_norway::Value::Null;
     assert_eq!(parse_yaml_to_pairs(&null_val), None);
 }
 
