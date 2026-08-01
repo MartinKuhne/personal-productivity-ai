@@ -12,6 +12,22 @@ this file adds Rust/egui-specific conventions and the quality gate.
 - Include examples in doc comments where they clarify usage.
 - Run `cargo doc --no-deps` to verify documentation builds without warnings.
 
+## 2. Distilled SDK reference docs
+
+`doc/distill/` holds distilled reference docs for the third-party SDKs this
+crate depends on. Consult them before writing or reviewing code that touches
+these areas; they are the in-repo source of truth for the pinned versions.
+
+- `doc/distill/egui.md` — egui/eframe 0.35 reference (immediate-mode core,
+  `Context`/`Ui`/`Response` API, widgets, containers, `emath`/`ecolor`/`epaint`).
+  Consult when writing or modifying egui UI code (`ui/`, `editor.rs`, `main.rs`).
+- `doc/distill/egui-kittest.md` — egui_kittest / kittest reference
+  (AccessKit-based `Harness`, `Queryable`, `By` filters, `NodeT`). Consult when
+  writing or maintaining egui UI tests.
+- `doc/distill/mcp.md` — Model Context Protocol client-side spec (lifecycle,
+  transports, OAuth 2.1 authorization, cancellation, ping, progress). Consult
+  when working on the MCP client (`agent/tools/mcp/`).
+
 ## 4. Spec traceability
 - Every user-facing behaviour maps to requirement in `SPEC.md`. When adding a feature, add the requirement first; when changing behaviour, prompt to update the requirement.
 - Code may cite `REQ-xxx` / `MD-xxx` / `TOOL-xxx` / `AGENT-xxx` in `//!`/`///` comments where it aids review (e.g. `(AGENT-012)` next to the safe/unsafe split). Do not sprinkle citations inline in business logic.
@@ -113,6 +129,24 @@ When adding or moving code, place files by **concern**, not by type:
   `TokenUsageInfo`) live in `bus::events::messages` (value-type home)
   or `bus::events::typed` (per-domain
   replacement). The `app/` module no longer hosts these.
+
+### Event-driven fan-out
+
+Background work reaches the UI through **event-driven fan-out** on
+`Bus<T>` broadcast buses (`bus::core`), never through per-widget
+request/response binding:
+
+- Long-running or background work runs on its own thread or worker and
+  publishes results as events onto a `Bus<T>` bus; the UI never awaits a
+  background future directly.
+- The UI subscribes as a `BusReader` and drains events each frame with
+  `try_recv()` (see `ui/app.rs`), calling `ctx.request_repaint()` when a
+  frame needs to be drawn.
+- One-off operations (e.g. an OAuth flow) may use a dedicated channel plus
+  `ctx.request_repaint()` after sending, but still produce on a background
+  thread and consume on the UI thread.
+- Keep the bus contract as the single path for results flowing into the UI;
+  do not add a parallel per-widget async-binding mechanism alongside it.
 
 ### Module size and splitting
 

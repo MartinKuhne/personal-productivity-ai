@@ -55,7 +55,7 @@ impl ToolExecutor {
     /// of in parallel, and the registry returns its normal "tool not
     /// found" error.
     fn classify(name: &str) -> Safety {
-        crate::agent::tools::registry::safety_of(name)
+        crate::agent::tools::manager::safety_of(name)
     }
 
     fn execute_parallel(
@@ -192,20 +192,20 @@ mod tests {
         // exposes a single `safety_of(name)` lookup that returns
         // Safety::ReadOnly / Safety::Mutating.
         assert_eq!(
-            crate::agent::tools::registry::safety_of("read_file"),
+            crate::agent::tools::manager::safety_of("read_file"),
             Safety::ReadOnly
         );
         assert_eq!(
-            crate::agent::tools::registry::safety_of("grep"),
+            crate::agent::tools::manager::safety_of("grep"),
             Safety::ReadOnly
         );
         assert_eq!(
-            crate::agent::tools::registry::safety_of("create_file"),
+            crate::agent::tools::manager::safety_of("create_file"),
             Safety::Mutating
         );
         // Unknown tools fall back to Mutating (the conservative choice).
         assert_eq!(
-            crate::agent::tools::registry::safety_of("nonexistent"),
+            crate::agent::tools::manager::safety_of("nonexistent"),
             Safety::Mutating
         );
     }

@@ -35,9 +35,8 @@ pub struct AgentState {
 /// Responsibilities:
 /// - Owns agent state (status, thinking, response, history, token usage)
 /// - Subscribes to the [`crate::bus::events::config::ConfigArrived`] bus so the
-///   [`AppConfig`] used by `start_session` and `initialize_mcp` is
-///   the one published at startup, not a value captured at
-///   construction time.
+///   [`AppConfig`] used by `start_session` is the one published at
+///   startup, not a value captured at construction time.
 /// - Provides `start_session` to launch a new agent thread
 /// - Handles incoming [`BackgroundEvent::Agent`] events to update state
 /// - Supports cancellation via cancel flag
@@ -51,8 +50,8 @@ pub struct AgentSessionManager {
     /// observed. Drained on every UI frame by
     /// [`Self::drain_config`].
     config_reader: Option<BusReader<ConfigArrived>>,
-    /// Tracks whether `initialize_mcp` has observed the config yet
-    /// so the first-frame init uses the right `AppConfig` instead
+    /// Tracks whether the bus has delivered the config yet so
+    /// config-derived work uses the published `AppConfig` instead
     /// of the default placeholder.
     config_arrived: bool,
     pub command_input: String,
@@ -62,8 +61,8 @@ pub struct AgentSessionManager {
 impl AgentSessionManager {
     /// Subscribe to the configuration-arrival bus and return an
     /// empty manager. The bus is the source of truth for the
-    /// [`AppConfig`] used by `start_session` and `initialize_mcp`;
-    /// until the bus delivers its event those calls fall back to
+    /// [`AppConfig`] used by `start_session`; until the bus
+    /// delivers its event that call falls back to
     /// [`AppConfig::default`].
     pub fn new(config_bus: Bus<ConfigArrived>) -> Self {
         Self {
@@ -152,7 +151,7 @@ impl AgentSessionManager {
     }
 
     /// `true` once the bus has delivered (or the test path bypassed
-    /// it). Used by the UI to know when to call `initialize_mcp`.
+    /// it).
     pub fn config_arrived(&self) -> bool {
         self.config_arrived
     }
@@ -163,19 +162,6 @@ impl AgentSessionManager {
     pub fn set_config(&mut self, config: AppConfig) {
         self.config = config;
         self.config_arrived = true;
-    }
-
-    /// Perform the one-time MCP startup ping.
-    ///
-    /// This **does** perform network I/O: it pushes the current
-    /// config into the MCP manager, pings every configured server,
-    /// and warms the tool-discovery cache.  It should be called
-    /// exactly once after the UI is running (e.g. on the first
-    /// frame) so that progress is visible in the background log.
-    ///
-    /// Returns the number of servers that responded to the ping.
-    pub fn initialize_mcp(&self) -> usize {
-        crate::agent::tools::registry::init_mcp_on_startup(&self.config)
     }
 
     /// Get a read-only view of the current agent state.

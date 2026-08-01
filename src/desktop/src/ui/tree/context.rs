@@ -47,6 +47,10 @@ pub struct TreeOpsContext<'a> {
     pub rename_dialog_open: &'a mut bool,
     /// New name input for rename dialog.
     pub rename_new_name: &'a mut String,
+    /// Whether create-document dialog is open.
+    pub create_document_dialog_open: &'a mut bool,
+    /// Parent directory for new document creation.
+    pub create_document_parent: &'a mut Option<PathBuf>,
 
     // ---- Application integration ---------------------------------------
     /// Panel layout state (widths, dirty flags).
@@ -138,6 +142,16 @@ impl<'a> TreeOpsContext<'a> {
     /// Access rename new name.
     pub fn rename_new_name(&mut self) -> &mut String {
         self.rename_new_name
+    }
+
+    /// Access create-document dialog open flag.
+    pub fn create_document_dialog_open(&mut self) -> &mut bool {
+        self.create_document_dialog_open
+    }
+
+    /// Access create-document parent directory.
+    pub fn create_document_parent(&mut self) -> &mut Option<PathBuf> {
+        self.create_document_parent
     }
 
     /// Access modifiers.

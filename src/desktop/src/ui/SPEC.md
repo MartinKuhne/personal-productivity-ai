@@ -7,7 +7,7 @@
 >
 > Part of [`SPEC.md`](../../SPEC.md) (FastMD crate). See the [Requirements Index](../../SPEC.md#requirements-index) for the full REQ-xxx → file map.
 >
-> Owns UI-001..UI-047, TBL-001..TBL-051. Cross-cutting requirements that also touch this module are listed at the bottom of this file.
+> Owns UI-001..UI-050, TBL-001..TBL-051. Cross-cutting requirements that also touch this module are listed at the bottom of this file.
 
 ## Scope
 
@@ -36,11 +36,11 @@ This module owns the user interface layer: pane layout and styling, directory tr
 * [UI-008] When the user selects [Delete] from the context menu, the file or folder gets moved to the recycle bin.
 * [UI-009] When the user selects [Show in File Explorer] from the context menu, the system opens the system file explorer with the directory that contains the file.
 * [UI-010] When the user selects [Move] from the context menu, the system shows a modal dialog containing all the known folders as well as 'Ok' and 'Cancel' buttons. When the user selects a folder and then 'Ok' the system moves the file to that folder, then closes the dialog. When the user selects 'Cancel' the dialog closes and the file is not moved or changed.
-* [UI-011] When the user selects [Create Directory ...] from the context menu, the system opens a modal dialog for the user to enter a directory name, as well as 'Ok' and 'Cancel' buttons. When the user enters a valid folder name and then clicks 'Ok' the system creates the directory, then closes the dialog. When the user selects 'Cancel' the dialog closes and no side effects occur.
-* [UI-012] When the user selects [Rename] from the context menu, the system shows a modal dialog containing the current file name as well as 'Ok' and 'Cancel' buttons. When the user makes changes to the file name and then clicks 'Ok' or presses the enter key, the system renames the file or folder, then closes the dialog. When the user selects 'Cancel' the dialog closes and the file is not moved or changed.
+* [UI-011] When the user selects [Create Directory ...] from the context menu, the system opens a modal dialog for the user to enter a directory name, as well as 'Ok' and 'Cancel' buttons. The dialog appears next to the mouse cursor when it fits within the window; otherwise it is clamped onto the viewport. When the user enters a valid folder name and then clicks 'Ok' the system creates the directory, then closes the dialog. When the user selects 'Cancel' the dialog closes and no side effects occur.
+* [UI-012] When the user selects [Rename] from the context menu, the system shows a modal dialog containing the current file name as well as 'Ok' and 'Cancel' buttons. The dialog appears next to the mouse cursor when it fits within the window; otherwise it is clamped onto the viewport. When the user makes changes to the file name and then clicks 'Ok' or presses the enter key, the system renames the file or folder, then closes the dialog. When the user selects 'Cancel' the dialog closes and the file is not moved or changed.
 * [UI-013] When the user selects [Copy path] from the context menu, the system copies the fully qualified file or directory name to the clipboard.
 * [UI-014] When the user selects [Print] from the context menu, and the item under the mouse cursor is a file, the system prints the page using the windows system print dialog (implemented via ShellExecute "print" verb).
-* [UI-015] When the user selects [New document] from the context menu, and the item under the mouse cursor is a directory, the system creates a document containing the yaml markdown header and the name 'New document.md'. If a file with that name exists, add the current date and time to the document name until a unique file name is generated.
+* [UI-015] When the user selects [New document] from the context menu, and the item under the mouse cursor is a directory, the system opens a modal dialog for the user to enter a document name, as well as 'Ok' and 'Cancel' buttons. The dialog appears next to the mouse cursor when it fits within the window; otherwise it is clamped onto the viewport. When the user enters a valid document name and then clicks 'Ok' or presses Enter, the system creates a document with a yaml markdown header (titled with the entered name) and the file name as entered, appending `.md` when the entered name has no extension. If a file with that name exists, the system adds the current date and time to the document name until a unique file name is generated, then closes the dialog. When the user selects 'Cancel' the dialog closes and no side effects occur.
 * [UI-016] The left column shall increase in size to display any one item without line breaks, to use up to 20% of the available width. The system shall re-evaluate the width needed when the user navigates to a new directory.
 * [UI-017] On every level of the directory tree, directories appear before files.
 * [UI-018] The directory tree should not display folders that contain no markdown files.
@@ -51,6 +51,7 @@ This module owns the user interface layer: pane layout and styling, directory tr
 * [UI-023] When the user has selected multiple documents, and they right click on one of the selected documents, the [multi select context menu] is shown.
 * [UI-024] When the user selects [Merge] from the [multi select context menu], the system shall run a new LLM prompt instructing the LLM to merge the content into a new document and consolidate the content.
 * [UI-025] When the user selects [Delete] from the [multi select context menu], the system shall move all the selected files to the recycle bin.
+* [UI-050] Content Search: The left column shall provide a search box at the bottom of the directory tree pane. When the user enters a term and presses the Enter key or clicks the magnifier icon, the system shall filter the directory tree to show only files whose content contains the search term (case-insensitive). While a filter is active, the system shall replace the magnifier icon with a clear (×) icon. When the user clicks the clear icon, the system shall restore the directory tree to show all files. Directories that do not contain any matching files shall not be displayed while the filter is active.
 
 ### Middle Column / File Viewer Area
 
@@ -63,6 +64,7 @@ This module owns the user interface layer: pane layout and styling, directory tr
     * [UI-032] [Open in Editor] - Opens the tab's file in the system default editor (same behavior as double-click in directory tree).
     * [UI-033] [Format Markdown] - Executes the Format Markdown quick task on the tab's file.
 * [UI-034] The tab context menu items [Copy Path], [Show in File Explorer], [Open in Editor], [Format Markdown] shall also be available when right-clicking on a file in the directory tree (see UI-007 through UI-019), providing consistent behavior across both UI locations.
+* [UI-051] When a file with an open tab is deleted — either via [Delete] from a directory-tree context menu or from outside the application (e.g. through the file system) — the system shall close that file's tab automatically in response to the removal event. If the closed tab was the active document, the viewer shall select the last remaining open tab, or show the empty state if no tabs remain.
 
 ### Inline Text Editor
 
@@ -90,6 +92,19 @@ This module owns the user interface layer: pane layout and styling, directory tr
 ### Tabbed Document Interface
 
 * [UI-049] Tabbed Document Interface: The center panel shall support multiple open documents as tabs. Clicking a file opens it in a new tab; middle-click or close button closes tabs.
+
+### Tools Dialog
+
+* [UI-051] Dialog Trigger: When the user clicks the "Tools..." button on the top toolbar (AGENT-024), the system shall open the Tools dialog as a modal window centered over the main window.
+* [UI-052] Row Layout: For every tool group (built-in and MCP server) currently known to the system, the dialog shall display a row containing: an enable checkbox, the group's display name, a kind label ("Internal" or "MCP"), the group's prompt char count (TOOL-015/016), a parallel-safe chip when the group is fully `ReadOnly` (TOOL-020), and an `Authenticate` button when MCP-020 returns `true` for that group.
+* [UI-053] Toggle Behaviour: Toggling a row's checkbox shall update `AppConfig` per TOOL-017 / TOOL-018 and persist the change to `config.yaml` immediately via `config::save_config`.
+* [UI-054] Authenticate Action: When the user clicks the `Authenticate` button for an eligible MCP server, the system shall invoke `McpClientManager::authenticate(server_name)` on a background thread. The button shall display a disabled "Authenticating..." state until the task completes or fails. A status line shall report success or failure; failure shall not close the dialog.
+* [UI-055] Character Count Recomputation: The dialog shall recompute the char count for every row on every open and whenever the underlying tool set changes (e.g. after a successful MCP discovery). Char counts are informational; their exact value is not part of the user contract.
+* [UI-056] Close: The dialog shall provide a `Close` action (button and `Esc` keypress via the `Window::open` flag) that hides the dialog without persisting further state.
+* [UI-057] Error Indicator: When a group's `last_error` is `Some`, the row shall display a warning indicator (⚠ icon) whose tooltip shows the error kind and message.
+* [UI-058] Parallel-Safe Chip: When a group's `parallel_safe` is `true`, the row shall display a "✓ parallel" chip alongside the char count. The chip is informational; its absence does not imply the group is unsafe.
+* [UI-059] Authenticate Error State: When an `Authenticate` call fails, the row's status line shall show the error message until the next successful authentication attempt or until the user closes the dialog.
+* [UI-060] Clear Error: Each row with a `last_error` shall provide a "Restart" link that calls `ToolManager::clear_error(group)`.
 
 ---
 
@@ -151,4 +166,5 @@ This module owns the user interface layer: pane layout and styling, directory tr
 - UI-047 — Background log tab UI in [`src/ui/background_logs.rs`](../ui/background_logs.rs); log buffer owned by [`src/background/`](../background/) (see REQ-460..465 in `src/background/SPEC.md`).
 - UI-048 — Thinking delimiter rendering in [`src/ui/panels/center.rs`](../ui/panels/center.rs); delimiter extraction in [`src/agent/response_formatter.rs`](../agent/response_formatter.rs) (AGENT-022).
 - UI-049 — Tab management in [`src/app/tab_manager.rs`](../../app/tab_manager.rs).
+- UI-050 — Tree content-search state in [`src/app/tree_search.rs`](../../app/tree_search.rs); search box UI in [`src/ui/panels/left.rs`](../ui/panels/left.rs).
 - UI-004 / UI-026..UI-034 — Tab context menu and file actions in [`src/ui/panels/center.rs`](../ui/panels/center.rs).

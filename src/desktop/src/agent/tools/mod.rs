@@ -1,6 +1,8 @@
-//! LLM-callable tools — the `Tool` trait, tool registry, and implementations for filesystem, web, calendar, contacts, email, CSV, and weather.
+//! LLM-callable tools — the `Tool` trait, the `ToolManager` (catalog +
+//! per-group state + error tracking), and implementations for
+//! filesystem, web, calendar, contacts, email, CSV, and weather.
 //!
-//! Requirements: see [`SPEC.md`](SPEC.md) (TOOL-001..TOOL-010) for the full specification.
+//! Requirements: see [`SPEC.md`](SPEC.md) (TOOL-001..TOOL-010, TOOL-014..024) for the full specification.
 
 pub mod blocking;
 pub mod caldav;
@@ -10,8 +12,8 @@ pub mod csv_db;
 pub mod dtos;
 pub mod filesystem;
 pub mod jmap;
+pub mod manager;
 pub mod mcp;
-pub mod registry;
 pub mod weather;
 pub mod web;
 pub mod yaml_header;
@@ -54,4 +56,4 @@ pub trait Tool: Send + Sync {
 }
 
 pub use context::ToolContext as ToolContextType;
-pub use registry::{execute_tool, get_tools_schema};
+pub use manager::{execute_tool, get_tools_schema};

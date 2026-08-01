@@ -41,6 +41,45 @@ fn make_ctx(config: AppConfig) -> (AgentContext, std::sync::mpsc::Receiver<Backg
     (ctx, rx)
 }
 
+/// Spawn a one-shot HTTP server on a random localhost port and bind
+/// the given `body` as the response to the first incoming request.
+/// Returns the bound port. The server thread sleeps for 200 ms after
+/// writing the response so the client has time to read it before the
+/// thread exits.
+///
+/// Consolidated from 5 inline `TcpListener::bind` + `thread::spawn`
+/// blocks that all did the same `accept` + `read` + `write_all` +
+/// `sleep` pattern. The bodies they served were the only thing that
+/// varied.
+fn spawn_one_shot_http_server(body: &[u8]) -> u16 {
+    use std::io::{Read, Write};
+    use std::net::TcpListener;
+    let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+    let port = listener.local_addr().unwrap().port();
+    let body = body.to_vec();
+    std::thread::spawn(move || {
+        if let Ok((mut stream, _)) = listener.accept() {
+            let mut buf = [0; 8192];
+            let _ = stream.read(&mut buf);
+            let _ = stream.write_all(&body);
+            let _ = stream.flush();
+            std::thread::sleep(std::time::Duration::from_millis(200));
+        }
+    });
+    port
+}
+
+/// Build a minimal HTTP/1.1 response with the given status line and
+/// body. Centralises the `Content-Length` math so individual tests
+/// don't have to repeat the `format!` boilerplate.
+fn http_response(status_line: &str, body: &str) -> Vec<u8> {
+    format!(
+        "{status_line}\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
+        body.len()
+    )
+    .into_bytes()
+}
+
 #[test]
 fn test_run_agent_missing_api_key() {
     let mut config = AppConfig::default();
@@ -92,18 +131,7 @@ fn test_run_agent_network_error() {
 
 #[test]
 fn test_run_agent_invalid_json_response() {
-    use std::io::{Read, Write};
-    use std::net::TcpListener;
-    let listener = TcpListener::bind("127.0.0.1:0").unwrap();
-    let port = listener.local_addr().unwrap().port();
-    std::thread::spawn(move || {
-        if let Ok((mut stream, _)) = listener.accept() {
-            let mut buf = [0; 2048];
-            let _ = stream.read(&mut buf);
-            let _ = stream.write_all(b"HTTP/1.1 200 OK\r\nContent-Length: 1\r\n\r\n{");
-            std::thread::sleep(std::time::Duration::from_millis(200));
-        }
-    });
+    let port = spawn_one_shot_http_server(b"HTTP/1.1 200 OK\r\nContent-Length: 1\r\n\r\n{");
     let (ctx, rx) = make_ctx(make_config(port));
     run_agent(ctx);
     let mut got = false;
@@ -119,19 +147,9 @@ fn test_run_agent_invalid_json_response() {
 
 #[test]
 fn test_run_agent_http_status_error() {
-    use std::io::{Read, Write};
-    use std::net::TcpListener;
-    let listener = TcpListener::bind("127.0.0.1:0").unwrap();
-    let port = listener.local_addr().unwrap().port();
-    std::thread::spawn(move || {
-        if let Ok((mut stream, _)) = listener.accept() {
-            let mut buf = [0; 2048];
-            let _ = stream.read(&mut buf);
-            let _ = stream
-                .write_all(b"HTTP/1.1 400 Bad Request\r\nContent-Length: 11\r\n\r\nbad request");
-            std::thread::sleep(std::time::Duration::from_millis(200));
-        }
-    });
+    let port = spawn_one_shot_http_server(
+        b"HTTP/1.1 400 Bad Request\r\nContent-Length: 11\r\n\r\nbad request",
+    );
     let (ctx, rx) = make_ctx(make_config(port));
     run_agent(ctx);
     let mut got = false;
@@ -147,24 +165,7 @@ fn test_run_agent_http_status_error() {
 
 #[test]
 fn test_run_agent_missing_choices() {
-    use std::io::{Read, Write};
-    use std::net::TcpListener;
-    let listener = TcpListener::bind("127.0.0.1:0").unwrap();
-    let port = listener.local_addr().unwrap().port();
-    std::thread::spawn(move || {
-        if let Ok((mut stream, _)) = listener.accept() {
-            let mut buf = [0; 2048];
-            let _ = stream.read(&mut buf);
-            let body = "{}";
-            let resp = format!(
-                "HTTP/1.1 200 OK\r\nContent-Length: {}\r\n\r\n{}",
-                body.len(),
-                body
-            );
-            let _ = stream.write_all(resp.as_bytes());
-            std::thread::sleep(std::time::Duration::from_millis(200));
-        }
-    });
+    let port = spawn_one_shot_http_server(&http_response("HTTP/1.1 200 OK", "{}"));
     let (ctx, rx) = make_ctx(make_config(port));
     run_agent(ctx);
     let mut got = false;
@@ -180,28 +181,12 @@ fn test_run_agent_missing_choices() {
 
 #[test]
 fn test_run_agent_emits_done_status_on_natural_completion() {
-    use std::io::{Read, Write};
-    use std::net::TcpListener;
     let body = serde_json::json!({
         "id": "chatcmpl-test", "object": "chat.completion", "created": 0, "model": "test",
         "choices": [{"index": 0, "message": {"role": "assistant", "content": "All done."}, "finish_reason": "stop"}]
-    }).to_string();
-    let listener = TcpListener::bind("127.0.0.1:0").unwrap();
-    let port = listener.local_addr().unwrap().port();
-    std::thread::spawn(move || {
-        if let Ok((mut stream, _)) = listener.accept() {
-            let mut buf = [0; 8192];
-            let _ = stream.read(&mut buf);
-            let resp = format!(
-                "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
-                body.len(),
-                body
-            );
-            let _ = stream.write_all(resp.as_bytes());
-            let _ = stream.flush();
-            std::thread::sleep(std::time::Duration::from_millis(200));
-        }
-    });
+    })
+    .to_string();
+    let port = spawn_one_shot_http_server(&http_response("HTTP/1.1 200 OK", &body));
     let (ctx, rx) = make_ctx(make_config(port));
     run_agent(ctx);
     let mut statuses = Vec::new();
@@ -223,28 +208,12 @@ fn test_run_agent_emits_done_status_on_natural_completion() {
 
 #[test]
 fn test_run_agent_skips_done_status_when_cancelled() {
-    use std::io::{Read, Write};
-    use std::net::TcpListener;
     let body = serde_json::json!({
         "id": "chatcmpl-test", "object": "chat.completion", "created": 0, "model": "test",
         "choices": [{"index": 0, "message": {"role": "assistant", "content": "All done."}, "finish_reason": "stop"}]
-    }).to_string();
-    let listener = TcpListener::bind("127.0.0.1:0").unwrap();
-    let port = listener.local_addr().unwrap().port();
-    std::thread::spawn(move || {
-        if let Ok((mut stream, _)) = listener.accept() {
-            let mut buf = [0; 8192];
-            let _ = stream.read(&mut buf);
-            let resp = format!(
-                "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
-                body.len(),
-                body
-            );
-            let _ = stream.write_all(resp.as_bytes());
-            let _ = stream.flush();
-            std::thread::sleep(std::time::Duration::from_millis(200));
-        }
-    });
+    })
+    .to_string();
+    let port = spawn_one_shot_http_server(&http_response("HTTP/1.1 200 OK", &body));
     let (tx, rx) = std::sync::mpsc::channel();
     let ctx = AgentContext {
         config: make_config(port),
@@ -275,8 +244,6 @@ fn test_run_agent_skips_done_status_when_cancelled() {
 
 #[test]
 fn test_run_agent_emits_executing_tool_message_immediately() {
-    use std::io::{Read, Write};
-    use std::net::TcpListener;
     let tool_call_body = serde_json::json!({
         "id": "chatcmpl-tool", "object": "chat.completion", "created": 0, "model": "test",
         "choices": [{
@@ -300,33 +267,30 @@ fn test_run_agent_emits_executing_tool_message_immediately() {
     let final_body = serde_json::json!({
         "id": "chatcmpl-final", "object": "chat.completion", "created": 0, "model": "test",
         "choices": [{"index": 0, "message": {"role": "assistant", "content": "Done with tools."}, "finish_reason": "stop"}]
-    }).to_string();
+    })
+    .to_string();
+
+    // Tool-call flow needs a 2-request server (tool_calls response, then
+    // a final assistant response). We use a dedicated helper rather than
+    // `spawn_one_shot_http_server` because the latter is single-request.
+    use std::io::{Read, Write};
+    use std::net::TcpListener;
     let listener = TcpListener::bind("127.0.0.1:0").unwrap();
     let port = listener.local_addr().unwrap().port();
     std::thread::spawn(move || {
-        if let Ok((mut stream, _)) = listener.accept() {
-            let mut buf = [0; 8192];
-            let _ = stream.read(&mut buf);
-            let resp = format!(
-                "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
-                tool_call_body.len(),
-                tool_call_body
-            );
-            let _ = stream.write_all(resp.as_bytes());
-            let _ = stream.flush();
-            std::thread::sleep(std::time::Duration::from_millis(100));
-        }
-        if let Ok((mut stream, _)) = listener.accept() {
-            let mut buf = [0; 8192];
-            let _ = stream.read(&mut buf);
-            let resp = format!(
-                "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
-                final_body.len(),
-                final_body
-            );
-            let _ = stream.write_all(resp.as_bytes());
-            let _ = stream.flush();
-            std::thread::sleep(std::time::Duration::from_millis(100));
+        for body in [tool_call_body, final_body] {
+            if let Ok((mut stream, _)) = listener.accept() {
+                let mut buf = [0; 8192];
+                let _ = stream.read(&mut buf);
+                let resp = format!(
+                    "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
+                    body.len(),
+                    body
+                );
+                let _ = stream.write_all(resp.as_bytes());
+                let _ = stream.flush();
+                std::thread::sleep(std::time::Duration::from_millis(100));
+            }
         }
     });
     let (ctx, rx) = make_ctx(make_config(port));

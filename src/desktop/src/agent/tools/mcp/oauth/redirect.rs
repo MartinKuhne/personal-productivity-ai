@@ -30,6 +30,7 @@ use std::thread;
 use std::time::Duration;
 
 use super::types::OAuthError;
+use url::Url;
 
 /// Default path on the loopback server. RFC 8252 §7.3 says any path
 /// is fine; the client picks one and the redirect URI uses the same.
@@ -118,6 +119,85 @@ pub fn start(
         callback_path,
         receiver: Arc::new(Mutex::new(rx)),
         timeout,
+    })
+}
+
+/// Parse a redirect URI and create a LoopbackServer bound to the
+/// specified port and path. The URI must be of the form
+/// `http://127.0.0.1:<port>/<path>` or `http://localhost:<port>/<path>`.
+pub fn parse_redirect_uri(uri: &str) -> Result<LoopbackServer, OAuthError> {
+    let parsed = Url::parse(uri)
+        .map_err(|e| OAuthError::Internal(format!("invalid redirect URI '{uri}': {e}")))?;
+
+    if parsed.scheme() != "http" {
+        return Err(OAuthError::Internal(format!(
+            "redirect URI must use http scheme, got '{}'",
+            parsed.scheme()
+        )));
+    }
+
+    let host = parsed
+        .host_str()
+        .ok_or_else(|| OAuthError::Internal(format!("redirect URI missing host: {uri}")))?;
+
+    if host != "127.0.0.1" && host != "localhost" {
+        return Err(OAuthError::Internal(format!(
+            "redirect URI host must be 127.0.0.1 or localhost, got '{host}'"
+        )));
+    }
+
+    let port = parsed
+        .port()
+        .ok_or_else(|| OAuthError::Internal(format!("redirect URI missing port: {uri}")))?;
+
+    let path = parsed.path().to_owned();
+    if path.is_empty() || path == "/" {
+        return Err(OAuthError::Internal(format!(
+            "redirect URI must have a path component (e.g. /callback): {uri}"
+        )));
+    }
+
+    // Bind to the specified port
+    let listener =
+        TcpListener::bind(SocketAddrV4::new(Ipv4Addr::LOCALHOST, port)).map_err(|e| {
+            OAuthError::Transport(format!("could not bind loopback server to {port}: {e}"))
+        })?;
+
+    // Verify we got the expected port
+    let actual_port = match listener.local_addr() {
+        Ok(addr) => addr.port(),
+        Err(e) => {
+            return Err(OAuthError::Transport(format!(
+                "could not read loopback local_addr: {e}"
+            )));
+        }
+    };
+
+    if actual_port != port {
+        return Err(OAuthError::Internal(format!(
+            "bound to port {} but expected {port}",
+            actual_port
+        )));
+    }
+
+    listener.set_nonblocking(false).ok();
+
+    let redirect_uri = format!("http://127.0.0.1:{port}{path}");
+
+    let (tx, rx) = mpsc::channel();
+    let path_for_thread = path.clone();
+    thread::spawn(move || {
+        if let Err(e) = run_loop(listener, &path_for_thread, tx.clone()) {
+            let _ = tx.send(Err(e));
+        }
+    });
+
+    Ok(LoopbackServer {
+        redirect_uri,
+        port,
+        callback_path: path,
+        receiver: Arc::new(Mutex::new(rx)),
+        timeout: DEFAULT_CALLBACK_TIMEOUT,
     })
 }
 
@@ -434,6 +514,7 @@ fn send_response(
 /// failure here doesn't fail the OAuth flow (the user can still
 /// copy/paste the URL into a browser), but it IS logged at warn.
 pub fn open_browser(url: &str) -> Result<(), OAuthError> {
+    tracing::info!(authorization_url = %url, "opening browser for OAuth authorization");
     webbrowser::open(url)
         .map_err(|e| OAuthError::Transport(format!("failed to open system browser: {e}")))
 }

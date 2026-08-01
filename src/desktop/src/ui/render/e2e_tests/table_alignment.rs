@@ -484,177 +484,137 @@ fn test_render_table_cells_top_aligned_within_row() {
     }
 }
 
-/// Regression: single-line cell text in a tall row must top-align (match top Y of multi-line neighbor cell),
-/// not center vertically across multi-pass Grid layouts.
+/// TBL-031: a short (single-line) cell in a row that also contains a
+/// multi-line cell must top-align — `pos.y` for the short cell's
+/// text shape must match the tall cell's first-text-shape `pos.y`
+/// within 2 px. The cell renderer is expected to use `top_down`
+/// layout; without it `egui::Grid` would center cells vertically
+/// and the short cell would drift down by half the row-height
+/// delta. This test covers two distinct table shapes that
+/// historically triggered this regression:
+///
+/// * 2×2 table with a 4-line multi-line `Processor` cell and a
+///   single-word `Dell` cell (3 render passes — measure + paint +
+///   paint, the path that originally surfaced the bug).
+/// * 2×2 table with a long `Summary` cell and a `PassMark` value
+///   cell (2 render passes — measure + paint).
+///
+/// Consolidated from 2 formerly-separate tests
+/// (`test_render_table_cell_text_is_top_aligned_in_tall_row` and
+/// `..._no_internal_vertical_gap_or_centering`) that both asserted
+/// the same `|short.y - tall.y| ≤ 2.0` invariant on different
+/// fixtures. The 2 px tolerance is intentional: the Grid two-pass
+/// measure-paint path can drift by 1-2 px on the first paint pass
+/// before settling on the second.
 #[test]
-fn test_render_table_cell_text_is_top_aligned_in_tall_row() {
+fn test_render_table_cell_text_top_aligned_with_tall_neighbor() {
     let make = |t: &str| {
         vec![InlineElem::Text(
             t.to_string(),
             crate::ui::render::TextStyle::default(),
         )]
     };
-    let long_summary = "Intel Core Ultra 7 256V (8C/8T Lunar Lake) high performance mobile processor with dedicated NPU for artificial intelligence workloads.";
-    let table: Vec<Vec<Vec<InlineElem>>> = vec![
+    let long_processor = "Intel Core Ultra 7 256V (8C/8T Lunar Lake) high performance mobile processor \
+         with dedicated NPU for artificial intelligence workloads.";
+    let long_summary = "Premium build, excellent keyboard, great 4K OLED option, \
+         Thunderbolt 3. Now aging with 8th gen Intel. Shows the value of modern efficiency.";
+
+    let processor_table: Vec<Vec<Vec<InlineElem>>> = vec![
         vec![make("Make"), make("Processor")],
-        vec![make("Dell"), make(long_summary)],
+        vec![make("Dell"), make(long_processor)],
+    ];
+    let summary_table: Vec<Vec<Vec<InlineElem>>> = vec![
+        vec![make("PassMark"), make("Summary")],
+        vec![make("2,271 / 7,545"), make(long_summary)],
     ];
 
-    let ctx = egui::Context::default();
-    let viewport_width: f32 = 300.0;
-    let raw = egui::RawInput {
-        screen_rect: Some(egui::Rect::from_min_size(
-            egui::Pos2::ZERO,
-            egui::vec2(viewport_width, 800.0),
-        )),
-        ..egui::RawInput::default()
-    };
+    struct Case {
+        label: &'static str,
+        table: Vec<Vec<Vec<InlineElem>>>,
+        viewport: f32,
+        passes: usize,
+        short_needle: &'static str,
+        tall_needle: &'static str,
+    }
+    let cases: &[Case] = &[
+        Case {
+            label: "3-pass: Dell vs long Processor cell",
+            table: processor_table,
+            viewport: 300.0,
+            passes: 3,
+            short_needle: "Dell",
+            tall_needle: "Intel Core",
+        },
+        Case {
+            label: "2-pass: PassMark vs long Summary cell",
+            table: summary_table,
+            viewport: 200.0,
+            passes: 2,
+            short_needle: "2,271 / 7,545",
+            tall_needle: "Premium build",
+        },
+    ];
 
-    // Pass 1: measure row heights in Grid
-    let _ = ctx.run_ui(raw.clone(), |ui| {
-        egui::CentralPanel::default().show(ui, |ui| {
-            render_table(
-                ui,
-                &table,
-                0,
-                crate::ui::table_width::DeficitStrategy::BreakpointWaterFill,
-            );
-        });
-    });
+    for case in cases {
+        let ctx = egui::Context::default();
+        let raw = egui::RawInput {
+            screen_rect: Some(egui::Rect::from_min_size(
+                egui::Pos2::ZERO,
+                egui::vec2(case.viewport, 800.0),
+            )),
+            ..egui::RawInput::default()
+        };
 
-    // Pass 2: paint with resolved row heights stored in Grid memory
-    let _ = ctx.run_ui(raw.clone(), |ui| {
-        egui::CentralPanel::default().show(ui, |ui| {
-            render_table(
-                ui,
-                &table,
-                0,
-                crate::ui::table_width::DeficitStrategy::BreakpointWaterFill,
-            );
-        });
-    });
+        // Drive the same `n passes` pattern the production renderer
+        // uses. The first pass measures row heights in Grid memory;
+        // subsequent passes paint with the cached heights. We
+        // capture the last pass's output for assertions.
+        let mut last_output = None;
+        for _ in 0..case.passes {
+            last_output = Some(ctx.run_ui(raw.clone(), |ui| {
+                egui::CentralPanel::default().show(ui, |ui| {
+                    render_table(
+                        ui,
+                        &case.table,
+                        0,
+                        crate::ui::table_width::DeficitStrategy::BreakpointWaterFill,
+                    );
+                });
+            }));
+        }
+        let output = last_output.expect("at least one render pass");
 
-    // Pass 3: paint again
-    let output = ctx.run_ui(raw, |ui| {
-        egui::CentralPanel::default().show(ui, |ui| {
-            render_table(
-                ui,
-                &table,
-                0,
-                crate::ui::table_width::DeficitStrategy::BreakpointWaterFill,
-            );
-        });
-    });
+        let find_text = |needle: &str| -> egui::Pos2 {
+            output
+                .shapes
+                .iter()
+                .find_map(|cs| match &cs.shape {
+                    egui::Shape::Text(t)
+                        if t.galley.text() == needle || t.galley.text().contains(needle) =>
+                    {
+                        Some(t.pos)
+                    }
+                    _ => None,
+                })
+                .unwrap_or_else(|| {
+                    panic!(
+                        "[{label}] expected a text shape for {needle:?}",
+                        label = case.label
+                    )
+                })
+        };
 
-    let text_shapes: Vec<_> = output
-        .shapes
-        .iter()
-        .filter_map(|cs| match &cs.shape {
-            egui::Shape::Text(t) => Some(t),
-            _ => None,
-        })
-        .collect();
-
-    for (i, t) in text_shapes.iter().enumerate() {
-        println!(
-            "Shape {i}: text={:?}, pos={:?}, galley_h={:.1}",
-            t.galley.text(),
-            t.pos,
-            t.galley.rect.height()
+        let short_y = find_text(case.short_needle);
+        let tall_y = find_text(case.tall_needle);
+        let delta = (short_y.y - tall_y.y).abs();
+        assert!(
+            delta <= 2.0,
+            "[{label}] expected short cell top-y ({short_y_y:.1}) to match tall cell top-y \
+             ({tall_y_y:.1}); delta={delta:.1}px (Grid centered the short cell instead of \
+             top-aligning — TBL-031 / `top_down` layout regression)",
+            label = case.label,
+            short_y_y = short_y.y,
+            tall_y_y = tall_y.y,
         );
     }
-
-    let short_text = text_shapes
-        .iter()
-        .find(|t| t.galley.text() == "Dell")
-        .expect("expected Dell text shape");
-    let tall_text = text_shapes
-        .iter()
-        .find(|t| t.galley.text().contains("Intel Core"))
-        .expect("expected Intel Core text shape");
-
-    assert!(
-        (short_text.pos.y - tall_text.pos.y).abs() <= 2.0,
-        "expected short cell text top y ({:.1}) to match tall cell text top y ({:.1}), but short cell text was vertically misaligned/centered on pass 2! (diff={:.1}px)",
-        short_text.pos.y,
-        tall_text.pos.y,
-        (short_text.pos.y - tall_text.pos.y).abs()
-    );
-}
-
-/// Regression: multi-item cell text in a tall row must render tightly packed at top
-/// without internal vertical gaps between items or vertical centering of single items.
-#[test]
-fn test_render_table_cell_no_internal_vertical_gap_or_centering() {
-    let make = |t: &str| {
-        vec![InlineElem::Text(
-            t.to_string(),
-            crate::ui::render::TextStyle::default(),
-        )]
-    };
-    let summary_text = "Premium build, excellent keyboard, great 4K OLED option, Thunderbolt 3. Now aging with 8th gen Intel. Shows the value of modern efficiency.";
-    let table: Vec<Vec<Vec<InlineElem>>> = vec![
-        vec![make("PassMark"), make("Summary")],
-        vec![make("2,271 / 7,545"), make(summary_text)],
-    ];
-
-    let ctx = egui::Context::default();
-    let viewport_width: f32 = 200.0;
-    let raw = egui::RawInput {
-        screen_rect: Some(egui::Rect::from_min_size(
-            egui::Pos2::ZERO,
-            egui::vec2(viewport_width, 800.0),
-        )),
-        ..egui::RawInput::default()
-    };
-
-    // Pass 1: measure row heights
-    let _ = ctx.run_ui(raw.clone(), |ui| {
-        egui::CentralPanel::default().show(ui, |ui| {
-            render_table(
-                ui,
-                &table,
-                0,
-                crate::ui::table_width::DeficitStrategy::BreakpointWaterFill,
-            );
-        });
-    });
-
-    // Pass 2: paint with resolved row heights
-    let output = ctx.run_ui(raw, |ui| {
-        egui::CentralPanel::default().show(ui, |ui| {
-            render_table(
-                ui,
-                &table,
-                0,
-                crate::ui::table_width::DeficitStrategy::BreakpointWaterFill,
-            );
-        });
-    });
-
-    let passmark_text = output
-        .shapes
-        .iter()
-        .find_map(|cs| match &cs.shape {
-            egui::Shape::Text(t) if t.galley.text() == "2,271 / 7,545" => Some(t),
-            _ => None,
-        })
-        .expect("expected PassMark text shape");
-
-    let summary_part1 = output
-        .shapes
-        .iter()
-        .find_map(|cs| match &cs.shape {
-            egui::Shape::Text(t) if t.galley.text().contains("Premium build") => Some(t),
-            _ => None,
-        })
-        .expect("expected summary part 1 text shape");
-
-    // PassMark single line must top-align with Summary part 1
-    assert!(
-        (passmark_text.pos.y - summary_part1.pos.y).abs() <= 2.0,
-        "PassMark text (y={:.1}) was vertically centered instead of top-aligned with Summary (y={:.1})",
-        passmark_text.pos.y,
-        summary_part1.pos.y
-    );
 }

@@ -225,6 +225,15 @@ pub struct McpOAuthConfig {
     /// set; the union is requested.
     #[serde(default)]
     pub scopes: Vec<String>,
+    /// Optional redirect URI for the OAuth 2.1 flow. If set, this
+    /// URI will be used instead of the default loopback redirect
+    /// (`http://127.0.0.1:<random_port>/callback`). This is
+    /// required for providers like Atlassian that require the
+    /// redirect URI to be pre-registered in the app settings.
+    /// The URI must use `http://127.0.0.1` or `http://localhost`
+    /// with a specific port and path (e.g. `http://127.0.0.1:8080/callback`).
+    #[serde(default)]
+    pub redirect_uri: Option<String>,
 }
 
 impl std::fmt::Debug for McpOAuthConfig {
@@ -237,7 +246,52 @@ impl std::fmt::Debug for McpOAuthConfig {
                 &self.client_secret.as_ref().map(|_| "[REDACTED]"),
             )
             .field("scopes", &self.scopes)
+            .field("redirect_uri", &self.redirect_uri)
             .finish()
+    }
+}
+
+/// Single source of truth for a configured MCP server: the per-server
+/// `enabled` flag plus the transport/auth config, flattened into one
+/// YAML block per server.
+///
+/// `enabled` defaults to `true` so existing YAMLs that omit the key
+/// keep the previous behaviour (CONFIG-012). Toggling the flag in
+/// the UI flips the bool in place; the transport and auth fields of
+/// the same entry are preserved.
+#[derive(serde::Serialize, serde::Deserialize, Clone, PartialEq, Eq, Debug)]
+pub struct McpServerEntry {
+    /// Whether this server's tools are offered to the LLM.
+    #[serde(default = "default_true")]
+    pub enabled: bool,
+    /// Transport + auth config (stdio or sse), flattened into the
+    /// same YAML block as `enabled`.
+    #[serde(flatten)]
+    pub config: McpServerConfig,
+}
+
+impl McpServerEntry {
+    /// Whether the server is currently enabled.
+    pub fn is_enabled(&self) -> bool {
+        self.enabled
+    }
+
+    /// The server's transport + auth config.
+    pub fn config(&self) -> &McpServerConfig {
+        &self.config
+    }
+}
+
+/// Ergonomic conversion so existing test sites that construct a
+/// `McpServerConfig` directly can pass it into the new
+/// `HashMap<String, McpServerEntry>` field with a one-character
+/// `.into()`. Newly-built entries default to `enabled: true`.
+impl From<McpServerConfig> for McpServerEntry {
+    fn from(config: McpServerConfig) -> Self {
+        Self {
+            enabled: true,
+            config,
+        }
     }
 }
 
@@ -346,9 +400,11 @@ pub struct AppConfig {
     /// Configuration for enabling/disabling tool groups.
     #[serde(default)]
     pub tool_groups: ToolGroupsConfig,
-    /// Configured external MCP servers by server name.
+    /// Configured external MCP servers by server name. Each entry
+    /// carries its own `enabled` flag (CONFIG-012) plus the
+    /// transport/auth config flattened underneath.
     #[serde(default)]
-    pub mcp_servers: HashMap<String, McpServerConfig>,
+    pub mcp_servers: HashMap<String, McpServerEntry>,
     /// Table width algorithm for deficit regime. Default: "proportional".
     /// Options: "proportional" (fast, O(|S|)), "waterfill" (better G1, O(K log |S|)).
     #[serde(default = "default_table_width_strategy")]
@@ -481,6 +537,31 @@ pub fn get_config_path() -> PathBuf {
 /// loader for production callers.
 pub fn load_config() -> AppConfig {
     load_config_from_path(&get_config_path())
+}
+
+/// Persist the supplied configuration to the platform-default
+/// location. Returns the path written on success. The parent
+/// directory is created if it does not exist.
+pub fn save_config(config: &AppConfig) -> Result<PathBuf, String> {
+    save_config_to_path(config, &get_config_path())
+}
+
+/// Persist the supplied configuration to an explicit path. See
+/// [`save_config`] for the platform-default wrapper.
+pub fn save_config_to_path(config: &AppConfig, path: &Path) -> Result<PathBuf, String> {
+    if let Some(parent) = path.parent() {
+        std::fs::create_dir_all(parent).map_err(|e| {
+            format!(
+                "failed to create config parent dir {}: {e}",
+                parent.display()
+            )
+        })?;
+    }
+    let yaml = serde_yml::to_string(config)
+        .map_err(|e| format!("failed to serialise AppConfig to YAML: {e}"))?;
+    std::fs::write(path, yaml)
+        .map_err(|e| format!("failed to write config to {}: {e}", path.display()))?;
+    Ok(path.to_path_buf())
 }
 
 /// Load the application configuration from an explicit file path.
@@ -905,6 +986,90 @@ headers:
         assert_eq!(
             config.deficit_strategy(),
             crate::ui::table_width::DeficitStrategy::BreakpointWaterFill
+        );
+    }
+
+    // ---- McpServerEntry wrapper (CONFIG-012) ----
+
+    #[test]
+    fn test_mcp_server_entry_defaults_enabled_to_true() {
+        // Legacy YAML without the `enabled` key must parse as enabled.
+        let yaml = r#"
+transport: stdio
+command: npx
+"#;
+        let entry: McpServerEntry = serde_yml::from_str(yaml).unwrap();
+        assert!(entry.is_enabled(), "legacy YAML must default to enabled");
+        match entry.config() {
+            McpServerConfig::Stdio { command, .. } => assert_eq!(command, "npx"),
+            other => panic!("expected Stdio, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn test_mcp_server_entry_round_trips_enabled_false() {
+        let yaml = r#"
+enabled: false
+transport: sse
+url: https://mcp.example.com/sse
+headers: {}
+"#;
+        let entry: McpServerEntry = serde_yml::from_str(yaml).unwrap();
+        assert!(!entry.is_enabled());
+        match entry.config() {
+            McpServerConfig::Sse { url, .. } => assert_eq!(url, "https://mcp.example.com/sse"),
+            other => panic!("expected Sse, got {other:?}"),
+        }
+        // Round-trip: re-serialise and re-parse, expect same shape.
+        let serialised = serde_yml::to_string(&entry).unwrap();
+        let re: McpServerEntry = serde_yml::from_str(&serialised).unwrap();
+        assert!(!re.is_enabled());
+    }
+
+    #[test]
+    fn test_mcp_server_entry_from_config_defaults_enabled_true() {
+        let entry: McpServerEntry = McpServerConfig::Stdio {
+            command: "echo".to_string(),
+            args: vec![],
+            env: HashMap::new(),
+        }
+        .into();
+        assert!(entry.is_enabled());
+    }
+
+    #[test]
+    fn test_mcp_server_entry_legacy_yaml_parses() {
+        // Legacy YAML without `needs_auth` must parse correctly.
+        let yaml = r#"
+transport: stdio
+command: npx
+"#;
+        let entry: McpServerEntry = serde_yml::from_str(yaml).unwrap();
+        assert!(entry.enabled);
+    }
+
+    #[test]
+    fn test_mcp_server_entry_redacts_headers_in_debug() {
+        // The wrapper inherits the redaction contract from
+        // `McpServerConfig::Debug`. Regression guard: a future refactor
+        // that adds a new field to `McpServerEntry` must not leak
+        // header values via Debug.
+        let entry: McpServerEntry = McpServerConfig::Sse {
+            url: "https://mcp.example.com/sse".to_string(),
+            headers: [(
+                "Authorization".to_string(),
+                "Bearer supersecrettoken".to_string(),
+            )]
+            .into_iter()
+            .collect(),
+            oauth: None,
+        }
+        .into();
+        let debug = format!("{entry:?}");
+        assert!(debug.contains("[REDACTED]"), "Debug must redact headers");
+        assert!(
+            !debug.contains("supersecrettoken"),
+            "Debug must not leak tokens"
         );
     }
 

@@ -1,5 +1,11 @@
 //! Input/output data-transfer objects for every tool — `serde` and `JsonSchema` derives for LLM argument serialisation.
+//!
+//! Every user-visible string (tool description, per-field description) lives
+//! in the per-family `strings` submodule under `registry/builtin/`. The DTOs
+//! here reference those consts via `#[schemars(description = ...)]` so the
+//! JSON schema the LLM sees is generated from a single source of truth.
 
+use crate::agent::tools::manager::builtin::strings;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
@@ -12,21 +18,16 @@ pub enum ToolResponse<T> {
 
 #[derive(Deserialize, Debug, JsonSchema)]
 pub struct GrepInput {
-    /// The search term.
+    #[schemars(description = strings::fs::FIELD_GREP_INPUT_QUERY)]
     pub query: String,
 }
 #[derive(Serialize, Debug, JsonSchema)]
 pub struct GrepResponse {
-    /// Match lines (`virtual/path:line - content`), capped at
-    /// `DEFAULT_GREP_MAX_RESULTS` matches. Set to `"No matches found."`
-    /// when the query matched nothing.
+    #[schemars(description = strings::fs::FIELD_GREP_RESPONSE_MATCHES)]
     pub matches: String,
-    /// Total number of matches found across all libraries, including
-    /// any beyond the result cap. Lets the caller tell when `matches`
-    /// was truncated.
+    #[schemars(description = strings::fs::FIELD_GREP_RESPONSE_TOTAL)]
     pub total: usize,
-    /// True when `matches` was truncated because the query matched more
-    /// than `DEFAULT_GREP_MAX_RESULTS` lines.
+    #[schemars(description = strings::fs::FIELD_GREP_RESPONSE_TRUNCATED)]
     pub truncated: bool,
 }
 
@@ -40,24 +41,19 @@ pub struct ReadTagsResponse {
 #[derive(Deserialize, Debug, JsonSchema)]
 pub struct ListFilesByTagInput {
     pub tag: String,
-    /// 1-indexed page number. Defaults to `1` if omitted.
+    #[schemars(description = strings::fs::FIELD_LIST_FILES_BY_TAG_INPUT_PAGE)]
     pub page: Option<usize>,
-    /// Number of files to return per page. Defaults to `20` if omitted.
+    #[schemars(description = strings::fs::FIELD_LIST_FILES_BY_TAG_INPUT_PAGE_SIZE)]
     pub page_size: Option<usize>,
 }
 #[derive(Serialize, Debug, JsonSchema)]
 pub struct ListFilesByTagResponse {
-    /// JSON array of virtual file paths for the requested page (no
-    /// library prefix is applied when the result is empty).
+    #[schemars(description = strings::fs::FIELD_LIST_FILES_BY_TAG_RESPONSE_FILES)]
     #[serde(default)]
     pub files: Vec<String>,
-    /// Total number of files matching the tag, across all pages. This
-    /// is returned on every response so the caller can size follow-up
-    /// page requests without having to read the whole library.
+    #[schemars(description = strings::fs::FIELD_LIST_FILES_BY_TAG_RESPONSE_TOTAL)]
     pub total: usize,
-    /// When the requested `page` is past the end, this field is set
-    /// to a human-readable hint explaining why `files` is empty. When
-    /// the page is in range, the field is `None`.
+    #[schemars(description = strings::fs::FIELD_LIST_FILES_BY_TAG_RESPONSE_HINT)]
     #[serde(skip_serializing_if = "Option::is_none")]
     pub hint: Option<String>,
 }
@@ -65,22 +61,19 @@ pub struct ListFilesByTagResponse {
 #[derive(Deserialize, Debug, JsonSchema)]
 pub struct ListFilesInput {
     pub path: String,
-    /// 1-indexed page number. Defaults to `1` if omitted.
+    #[schemars(description = strings::fs::FIELD_LIST_FILES_INPUT_PAGE)]
     pub page: Option<usize>,
-    /// Number of files to return per page. Defaults to `20` if omitted.
+    #[schemars(description = strings::fs::FIELD_LIST_FILES_INPUT_PAGE_SIZE)]
     pub page_size: Option<usize>,
 }
 #[derive(Serialize, Debug, JsonSchema)]
 pub struct ListFilesResponse {
-    /// JSON array of virtual file paths for the requested page.
+    #[schemars(description = strings::fs::FIELD_LIST_FILES_RESPONSE_FILES)]
     #[serde(default)]
     pub files: Vec<String>,
-    /// Total number of files in the requested directory (non-recursive),
-    /// across all pages. Returned on every response so the caller can
-    /// size follow-up page requests.
+    #[schemars(description = strings::fs::FIELD_LIST_FILES_RESPONSE_TOTAL)]
     pub total: usize,
-    /// When the requested `page` is past the end, this field is set
-    /// to a human-readable hint. `None` when the page is in range.
+    #[schemars(description = strings::fs::FIELD_LIST_FILES_RESPONSE_HINT)]
     #[serde(skip_serializing_if = "Option::is_none")]
     pub hint: Option<String>,
 }
@@ -161,7 +154,7 @@ pub struct WebFetchResponse {
 
 #[derive(Deserialize, Debug, JsonSchema)]
 pub struct WebSearchInput {
-    /// The search term.
+    #[schemars(description = strings::web::FIELD_WEB_SEARCH_INPUT_QUERY)]
     pub query: String,
 }
 #[derive(Serialize, Debug, JsonSchema)]
@@ -250,44 +243,33 @@ pub struct DeleteCalendarItemResponse {
 
 #[derive(Deserialize, Debug, JsonSchema)]
 pub struct SearchEmailInput {
-    /// Full-text search keyword. Matches against subject, body, and
-    /// common headers (From, To, Cc, etc.) per JMAP `text` filter rules.
+    #[schemars(description = strings::jmap::FIELD_SEARCH_EMAIL_INPUT_KEYWORD)]
     pub keyword: Option<String>,
-    /// Optional mailbox/folder name (e.g. "Inbox", "Sent"). Looked up
-    /// case-insensitively against the server's mailbox list.
+    #[schemars(description = strings::jmap::FIELD_SEARCH_EMAIL_INPUT_FOLDER)]
     pub folder: Option<String>,
-    /// Inclusive lower bound on `receivedAt` (ISO `YYYY-MM-DD` or full
-    /// RFC 3339 timestamp).
+    #[schemars(description = strings::jmap::FIELD_SEARCH_EMAIL_INPUT_START_DATE)]
     pub start_date: Option<String>,
-    /// Inclusive upper bound on `receivedAt` (ISO `YYYY-MM-DD` or full
-    /// RFC 3339 timestamp).
+    #[schemars(description = strings::jmap::FIELD_SEARCH_EMAIL_INPUT_END_DATE)]
     pub end_date: Option<String>,
-    /// Filter by the `From` header (substring match per JMAP).
+    #[schemars(description = strings::jmap::FIELD_SEARCH_EMAIL_INPUT_FROM)]
     pub from: Option<String>,
-    /// Filter by the `To` header (substring match per JMAP).
+    #[schemars(description = strings::jmap::FIELD_SEARCH_EMAIL_INPUT_TO)]
     pub to: Option<String>,
-    /// If `Some(true)`, only return unread email. If `Some(false)`, only
-    /// return email that has been read.
+    #[schemars(description = strings::jmap::FIELD_SEARCH_EMAIL_INPUT_IS_UNREAD)]
     pub is_unread: Option<bool>,
-    /// If `Some(true)`, only return flagged/starred email. If
-    /// `Some(false)`, only return email that is not flagged.
+    #[schemars(description = strings::jmap::FIELD_SEARCH_EMAIL_INPUT_IS_FLAGGED)]
     pub is_flagged: Option<bool>,
-    /// 1-indexed page number. Defaults to `1` if omitted.
+    #[schemars(description = strings::jmap::FIELD_SEARCH_EMAIL_INPUT_PAGE)]
     pub page: Option<usize>,
-    /// Number of results per page. Defaults to `10` if omitted. The
-    /// total number of matching emails across all pages is returned
-    /// in the `total` field.
+    #[schemars(description = strings::jmap::FIELD_SEARCH_EMAIL_INPUT_PAGE_SIZE)]
     pub page_size: Option<usize>,
 }
 #[derive(Serialize, Debug, JsonSchema)]
 pub struct SearchEmailResponse {
     pub results: String,
-    /// Total number of matching emails across all pages. Use this
-    /// together with `page` / `page_size` to drive follow-up page
-    /// requests.
+    #[schemars(description = strings::jmap::FIELD_SEARCH_EMAIL_RESPONSE_TOTAL)]
     pub total: usize,
-    /// When the requested page is past the end, this field is set
-    /// to a human-readable hint. `None` when the page is in range.
+    #[schemars(description = strings::jmap::FIELD_SEARCH_EMAIL_RESPONSE_HINT)]
     #[serde(skip_serializing_if = "Option::is_none")]
     pub hint: Option<String>,
 }

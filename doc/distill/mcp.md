@@ -5,6 +5,7 @@
 - Lifecycle: https://modelcontextprotocol.io/specification/2025-11-25/basic/lifecycle
 - Transports: https://modelcontextprotocol.io/specification/2025-11-25/basic/transports
 - Authorization: https://modelcontextprotocol.io/specification/2025-11-25/basic/authorization
+- Authorization Tutorial: https://modelcontextprotocol.io/docs/2026-07-28/tutorials/security/authorization
 - Cancellation: https://modelcontextprotocol.io/specification/2025-11-25/basic/utilities/cancellation
 - Ping: https://modelcontextprotocol.io/specification/2025-11-25/basic/utilities/ping
 - Progress: https://modelcontextprotocol.io/specification/2025-11-25/basic/utilities/progress
@@ -14,6 +15,9 @@
 This specification defines the Model Context Protocol (MCP) from a **client-side** perspective.
 It describes what an MCP client MUST, SHOULD, and MAY do to connect to an MCP server,
 negotiate capabilities, and exchange messages.
+
+The keywords MUST, MUST NOT, REQUIRED, SHALL, SHALL NOT, SHOULD, SHOULD NOT,
+RECOMMENDED, MAY, and OPTIONAL in this document follow [RFC 2119](https://www.rfc-editor.org/rfc/rfc2119.html).
 
 All message exchange MUST follow [JSON-RPC 2.0](https://www.jsonrpc.org/specification).
 All JSON-RPC messages MUST be UTF-8 encoded.
@@ -313,6 +317,13 @@ Authorization is OPTIONAL for MCP implementations.
 HTTP-based clients SHOULD conform to this specification.
 Alternative transport clients MUST follow established security best practices for their protocol.
 
+Authorization is RECOMMENDED when:
+- The server handles user-specific data (emails, documents, databases)
+- The server MUST audit who performed which actions
+- The server grants access to APIs that require user consent
+- The server runs in an enterprise environment with strict access controls
+- The server limits usage or tracks usage per user
+
 ### 4.3 Discovery
 
 The client MUST implement RFC 9728 OAuth 2.0 Protected Resource Metadata discovery.
@@ -436,6 +447,47 @@ The client MUST:
 
 The client SHOULD use short-lived tokens when supported.
 
+### 4.10 Walkthrough
+
+This is the end-to-end flow against a protected MCP server:
+
+1. **Send an unauthenticated request** to the MCP server
+2. **Expect a `401 Unauthorized` response** with a `WWW-Authenticate` header
+3. **Read the `resource_metadata` parameter** from the header. This URL points to a Protected Resource Metadata (PRM) document (RFC 9728)
+4. **Fetch the PRM document** to learn the authorization server(s), supported scopes, and resource URI
+5. **Fetch the authorization server metadata** (OIDC Discovery or RFC 8414) to learn the authorize, token, and registration endpoints
+6. **Register the client** with pre-registered credentials, or dynamic client registration (RFC 7591), or fall back to manual user entry
+7. **Open a browser to the `/authorize` endpoint**; the user logs in and grants consent
+8. **Exchange the authorization code** for an access token. Optionally request a refresh token. Use the authorization code + PKCE flow
+9. **Send the access token** in the `Authorization: Bearer` header on all subsequent requests
+
+### 4.11 Common Pitfalls
+
+This security guidance comes from the authorization tutorial:
+
+- **Token validation** – Do not implement token validation or authorization logic by hand. Use well-tested libraries.
+- **Short-lived tokens** – Use short-lived access tokens to limit exposure if stolen.
+- **Always validate** – A received token is not automatically valid or intended for the server. Validate all token constraints.
+- **Secure token storage** – Store tokens in secure, encrypted storage. Apply strict access controls and cache-eviction policies.
+- **HTTPS enforcement** – Enforce HTTPS in production. Do not accept tokens or redirect callbacks over plain HTTP. Allow `localhost` only during development.
+- **Least-privilege scopes** – Avoid catch-all scopes. Split access per tool or capability where possible.
+- **No credential logging** – Never log `Authorization` headers, tokens, codes, or secrets. Scrub query strings and headers.
+- **Separate credentials** – Do not reuse a server's client secret for end-user flows. Store secrets in a secret manager.
+- **Proper challenges** – On `401`, include `WWW-Authenticate` with `Bearer`, `realm`, and `resource_metadata`. This lets clients discover how to authenticate.
+- **DCR controls** – Unauthenticated dynamic client registration lets anyone register a client. Apply trusted-host and vetting constraints.
+- **Multi-tenant/realm mix-ups** – Pin to a single issuer or tenant unless explicitly multi-tenant. Reject tokens from other realms.
+- **Audience/resource indicator misuse** – Do not accept generic audiences. Require the audience or resource to match the configured server.
+- **Error detail leakage** – Return generic messages to clients. Log detailed reasons with correlation IDs internally.
+- **Session identifier hardening** – Treat `MCP-Session-Id` as untrusted input. Do not tie authorization to it. Regenerate it on auth changes.
+
+### 4.12 Related Standards
+
+- OAuth 2.1 – core authorization framework (draft-ietf-oauth-v2-1-13)
+- RFC 8414 – Authorization Server Metadata discovery
+- RFC 7591 – Dynamic Client Registration
+- RFC 9728 – Protected Resource Metadata
+- RFC 8707 – Resource Indicators
+
 ---
 
 ## 5. Utilities
@@ -470,7 +522,7 @@ The client MAY cancel an in-progress request using a notification.
 
 #### Race Conditions
 
-Cancellation notifications may arrive after the server has already completed the request.
+Cancellation notifications MAY arrive after the server has already completed the request.
 The sender MUST handle these race conditions gracefully.
 
 ### 5.2 Ping

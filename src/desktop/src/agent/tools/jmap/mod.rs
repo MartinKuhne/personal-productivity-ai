@@ -13,7 +13,7 @@ mod mock_server;
 
 #[cfg(test)]
 #[allow(unused_imports)]
-pub(crate) use mock_server::spawn_mock_server;
+pub(crate) use mock_server::{spawn_mock_server, spawn_recording_mock_server};
 
 pub use email::{
     SearchEmailFilters, SearchEmailPagination, tool_get_email_by_id, tool_search_email,

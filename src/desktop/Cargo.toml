@@ -18,6 +18,7 @@ base64 = "0.22.1"
 bytes = "1"
 chrono = "0.4.45"
 eframe = { version = "0.35", default-features = false, features = ["default_fonts", "glow", "wayland", "x11", "accesskit"] }
+egui_extras = { version = "0.35", default-features = false }
 fast-dav-rs = "0.4.3"
 fast_h2m = "*"
 jmap-client = { version = "=0.4.1", default-features = false, features = ["blocking", "rustls"] }
@@ -45,6 +46,7 @@ backoff = { version = "0.4", features = ["tokio"] }
 csv = "1.4.0"
 evalexpr = "13.1.0"
 html-escape = "0.2"
+url = "2.5"
 
 [dev-dependencies]
 tempfile = "3.8"

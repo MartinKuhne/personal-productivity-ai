@@ -7,6 +7,7 @@ use crate::config::AppConfig;
 use std::any::TypeId;
 
 use super::json_schema;
+use super::strings::jmap as jmap_strings;
 
 /// Tool that searches email by keyword, folder, date range, etc.
 pub(crate) struct SearchEmailTool;
@@ -15,7 +16,7 @@ impl Tool for SearchEmailTool {
         "search_email"
     }
     fn description(&self) -> &'static str {
-        "Search email by any combination of keyword, folder (mailbox), date range, sender, recipient, unread status, or flagged status. All filters are combined with AND. At least one filter must be provided. Results are paginated (default page size 10); every response includes the total number of matching emails so the caller can drive follow-up page requests."
+        jmap_strings::SEARCH_EMAIL_DESCRIPTION
     }
     fn input_type(&self) -> TypeId {
         TypeId::of::<dtos::SearchEmailInput>()
@@ -61,7 +62,7 @@ impl Tool for GetEmailByIdTool {
         "get_email_by_id"
     }
     fn description(&self) -> &'static str {
-        "Get email by id."
+        jmap_strings::GET_EMAIL_BY_ID_DESCRIPTION
     }
     fn input_type(&self) -> TypeId {
         TypeId::of::<dtos::GetEmailByIdInput>()
@@ -91,7 +92,7 @@ impl Tool for SendEmailTool {
         "send_email"
     }
     fn description(&self) -> &'static str {
-        "Send an email."
+        jmap_strings::SEND_EMAIL_DESCRIPTION
     }
     fn input_type(&self) -> TypeId {
         TypeId::of::<dtos::SendEmailInput>()

@@ -142,8 +142,10 @@ C4Component fastmd
 
 ## Component Diagram (Level 3) — Tool System
 
-`tools/` defines the `Tool` trait and a `ToolRegistry` holding
-`HashMap<&'static str, Box<dyn Tool>>`. `ToolContext<'a>` is the single
+`tools/` defines the `Tool` trait and a `ToolManager` (formerly
+`ToolRegistry`) that owns the catalog of built-in and MCP-discovered
+tools, the per-group enable/parallel-safe/error state, and the
+[`McpClientManager`](agent/tools/mcp/mod.rs). `ToolContext<'a>` is the single
 parameter passed to every `Tool::execute`, carrying `&AppConfig` and
 `&Bus<FileEvent>` (AGENT-012).
 
@@ -151,7 +153,7 @@ parameter passed to every `Tool::execute`, carrying `&AppConfig` and
 C4Component fastmd
   title FastMD — Tool System
 
-  Component(reg, "ToolRegistry", "tools/registry.rs (1810)", "register_all, execute, get_tools_schema; paginate_in_range helper")
+  Component(reg, "ToolManager", "agent/tools/manager/mod.rs", "catalog + per-group state + error tracking + parallel-safety; register_builtin, register_mcp_tool, execute, get_schema, safety_of, parallel_safe_tools, set_group_enabled, record_error, clear_error, refresh_state, refresh_mcp_tools (TOOL-014..024)")
   Component(tctx, "ToolContext", "tools/context.rs (~80)", "{config, file_event_bus}; thin shim over app::vfs::resolve::resolve(vpath, allow_write, libraries) -> Option<(PathBuf,bool)>")
   Component(fs, "filesystem tools", "tools/filesystem.rs", "grep, read_file, read_file_lines, create_file, insert_lines, delete_lines, replace_text, list_files")
   Component(yaml, "yaml_header", "tools/yaml_header.rs", "read_yaml_header, write_yaml_header")

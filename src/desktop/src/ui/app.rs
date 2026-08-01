@@ -1,8 +1,6 @@
 //! Root egui `App` struct — owns all application state and wires together background tasks, panels, agent, and dialogs.
 
 use crate::agent::AgentSessionManager;
-use crate::app::background::BackgroundLogEntry;
-use crate::app::background::LogCategory;
 use crate::app::background::{BackgroundProcessManager, SharedProcessManager};
 use crate::app::background_task::Task;
 use crate::app::watcher::directory_tracker::DirectoryTracker;
@@ -14,7 +12,8 @@ use crate::app::{
 use crate::bus::core::{Bus, BusReader};
 use crate::bus::events::config::ConfigArrived;
 use crate::bus::events::file::{FileEvent, FileEventProducer};
-use crate::bus::events::typed::{BackgroundEvent, FsEvent, ProcessEvent};
+use crate::bus::events::typed::{BackgroundEvent, FsEvent, McpAuthEvent, ProcessEvent};
+
 use crate::config::AppConfig;
 use crate::markdown::parse_front_matter;
 use crate::ui::panels::{
@@ -83,14 +82,6 @@ pub struct FastMdApp {
     pub persisted_ui_state: PersistedUiState,
     pub pending_file_load: Option<PathBuf>,
     pub repaint_interval: Duration,
-    /// Tracks whether the one-time MCP startup ping has run.
-    ///
-    /// The ping performs network I/O (contacts each configured MCP
-    /// server and warms the tool-discovery cache), so we defer it
-    /// from construction (`AgentSessionManager::new`) to the first
-    /// UI frame and run it on a background thread.  This keeps the
-    /// UI responsive and lets progress appear in the log panel.
-    mcp_initialized: bool,
     /// Slot for the `notify::RecommendedWatcher` handle, shared
     /// with the file-watcher thread. The watcher writes the live
     /// handle here just before sending [`FsEvent::Finished`]; the
@@ -209,6 +200,7 @@ impl FastMdApp {
         }
 
         if let Some(reader) = &self.file_event_reader {
+            let mut removed_paths: Vec<PathBuf> = Vec::new();
             while let Ok(event) = reader.try_recv() {
                 changed = true;
                 match event.kind {
@@ -240,6 +232,7 @@ impl FastMdApp {
                             }
                             self.tag_manager.remove_file(p);
                         }
+                        removed_paths.extend(event.paths);
                         needs_rebuild = true;
                     }
                     FileEventKind::DirDiscovered => {
@@ -254,6 +247,9 @@ impl FastMdApp {
                     }
                 }
             }
+            if !removed_paths.is_empty() {
+                self.close_tabs_for_removed_files(&removed_paths);
+            }
         }
 
         if needs_rebuild {
@@ -261,6 +257,46 @@ impl FastMdApp {
         }
 
         changed
+    }
+
+    /// Close the tab for every file in `paths` that is currently open
+    /// (UI-051), then repair the selection so it never points at a
+    /// closed tab: if the active document was deleted, the viewer
+    /// falls back to the last remaining tab (or shows the empty state
+    /// when no tabs remain).
+    ///
+    /// Both deletion paths funnel through here — the [Delete]
+    /// context-menu action publishes a `Removed` file event on the bus
+    /// (drained in [`Self::process_file_events`]), and the filesystem
+    /// watcher reports external deletions both as an `FsEvent::FileDeleted`
+    /// on the typed channel (handled in [`Self::handle_fs_event`]) and
+    /// as a `Removed` bus event. Because both paths can observe the
+    /// same deletion, this helper is idempotent: removing a tab that is
+    /// already gone is a no-op.
+    fn close_tabs_for_removed_files(&mut self, paths: &[PathBuf]) {
+        let mut closed_any = false;
+        for path in paths {
+            if self.tab_manager.tabs.contains(path) {
+                self.tab_manager.tabs.retain(|p| p != path);
+                closed_any = true;
+            }
+        }
+        if !closed_any {
+            return;
+        }
+        // Mirror `apply_tab_action`'s selection repair: a selection
+        // that no longer corresponds to an open tab falls back to the
+        // last remaining tab (or None when the strip is empty).
+        if let Some(selected) = self.selection.selected_file().cloned() {
+            if !self.tab_manager.tabs.contains(&selected) {
+                *self.selection.selected_file_mut() = self.tab_manager.tabs.last().cloned();
+            }
+        } else if !self.tab_manager.tabs.is_empty() {
+            *self.selection.selected_file_mut() = self.tab_manager.tabs.last().cloned();
+        }
+        if self.selection.selected_file().is_none() {
+            self.tab_manager.clear_content();
+        }
     }
 
     /// Returns `true` if `path` is a user-editable workspace file
@@ -345,6 +381,14 @@ impl FastMdApp {
         // waits on its own reader; the agent's reader is drained on
         // the UI thread in `update_ui`.
         let background_task = Task::new(config_bus.clone());
+        // The tools manager subscribes to the same bus and performs
+        // the one-time MCP startup ping / tool discovery on its own
+        // background thread, so the UI thread never blocks on MCP
+        // network I/O at startup.
+        crate::agent::tools::manager::spawn_config_subscription(
+            config_bus.clone(),
+            background_task.tx.clone(),
+        );
         // The file-watcher thread writes the `RecommendedWatcher`
         // handle into this slot before sending `FsEvent::Finished`;
         // the UI takes ownership from `task_take_finished_watcher`
@@ -409,7 +453,6 @@ impl FastMdApp {
             persisted_ui_state,
             pending_file_load: None,
             repaint_interval: Duration::from_millis(16),
-            mcp_initialized: false,
             finished_watcher_slot,
         }
     }
@@ -490,7 +533,6 @@ impl FastMdApp {
             persisted_ui_state: PersistedUiState::default(),
             pending_file_load: None,
             repaint_interval: Duration::from_millis(16),
-            mcp_initialized: false,
             finished_watcher_slot,
         }
     }
@@ -582,7 +624,6 @@ impl FastMdApp {
         self.drain_config_bus();
         self.process_file_events_and_repaint(ctx);
         self.drain_background_channel();
-        self.initialize_mcp_on_first_frame();
         self.handle_file_selection(ctx);
         self.show_editor_overlay(ui);
         self.show_modals(ui);
@@ -729,7 +770,7 @@ impl FastMdApp {
     fn drain_background_channel(&mut self) {
         while let Ok(event) = self.rx.try_recv() {
             // Dispatch the typed event directly by domain
-            // (Agent / Fs / Process).
+            // (Agent / Fs / Process / McpAuth).
             match event {
                 BackgroundEvent::Agent(agent_ev) => {
                     self.agent.handle_agent_event(agent_ev);
@@ -739,6 +780,9 @@ impl FastMdApp {
                 }
                 BackgroundEvent::Process(proc_ev) => {
                     self.handle_process_event(proc_ev);
+                }
+                BackgroundEvent::McpAuth(mcp_ev) => {
+                    self.handle_mcp_auth_event(mcp_ev);
                 }
             }
         }
@@ -781,6 +825,7 @@ impl FastMdApp {
                 self.file_processor.remove_file(&path);
                 self.tag_manager.remove_file(&path);
                 self.tag_manager.rebuild();
+                self.close_tabs_for_removed_files(std::slice::from_ref(&path));
                 if self.selection.selected_file().is_some_and(|p| p == &path) {
                     *self.selection.selected_file_mut() = None;
                     self.tab_manager.current_yaml = None;
@@ -822,29 +867,43 @@ impl FastMdApp {
         }
     }
 
-    /// Runs the one-time MCP startup ping on the first call.
-    ///
-    /// We deliberately defer network I/O from construction (where it
-    /// could delay startup) to here, where the UI is already running.
-    /// The ping is dispatched on a background thread (`std::thread::spawn`)
-    /// so the egui UI thread never blocks; progress is posted into the
-    /// background log channel so it appears in the log panel alongside
-    /// other startup messages.
-    fn initialize_mcp_on_first_frame(&mut self) {
-        if self.mcp_initialized {
-            return;
-        }
-        self.mcp_initialized = true;
+    fn handle_mcp_auth_event(&mut self, ev: McpAuthEvent) {
+        use crate::agent::tools::manager::{
+            self as tool_manager, ToolErrorKind, ToolGroupError, ToolGroupId,
+        };
+        match ev {
+            McpAuthEvent::Completed { server_name, error } => {
+                // Always clear the in-progress flag first so the button
+                // becomes interactive again regardless of outcome.
+                self.dialogs_mut().set_oauth_idle(&server_name);
 
-        let tx = self.tx.clone();
-        let servers_ok = self.agent.initialize_mcp();
-        let _ = tx.send(
-            BackgroundLogEntry::new(
-                LogCategory::Indexer,
-                format!("MCP startup ping complete: {servers_ok} server(s) responded"),
-            )
-            .into(),
-        );
+                match error {
+                    None => {
+                        // Success: authenticate() already cleared the
+                        // needs_auth flag inside McpClientManager, so
+                        // the "Authenticate" button will disappear on
+                        // the next render without any extra work.
+                        tracing::info!(
+                            server = %server_name,
+                            "OAuth flow completed; clearing in-progress flag"
+                        );
+                    }
+                    Some(msg) => {
+                        // Failure: surface the error through the existing
+                        // ToolGroupError path so the row shows ⚠ + Restart.
+                        tracing::warn!(
+                            server = %server_name,
+                            error = %msg,
+                            "OAuth flow failed; recording error on group row"
+                        );
+                        tool_manager::record_mcp_error(
+                            &ToolGroupId::Mcp(server_name),
+                            ToolGroupError::now(ToolErrorKind::Authentication, msg),
+                        );
+                    }
+                }
+            }
+        }
     }
 
     fn handle_file_selection(&mut self, _ctx: &egui::Context) {
@@ -921,8 +980,19 @@ impl FastMdApp {
                 ctx,
             });
         }
+        if self.dialogs.create_document_dialog_open {
+            crate::ui::modals::show_create_document_dialog(
+                &mut self.dialogs,
+                &self.file_event_bus,
+                ctx,
+            );
+        }
 
         crate::ui::background_logs::show_background_logs_window(self, ctx);
+
+        if self.dialogs.tools_dialog_open {
+            crate::ui::tools_dialog::show_tools_dialog(ctx, self);
+        }
 
         if self.dialogs.batch_dialog_open {
             let mut dialog_config = self.dialogs.batch_dialog_config.clone();
@@ -1781,6 +1851,98 @@ mod tests {
             all_text.contains("Indexing finished") || all_text.contains("files"),
             "Bottom/Top status bar content must be rendered, text: {}",
             all_text
+        );
+    }
+
+    /// UI-051: closing a tab when its file is deleted via the bus
+    /// `Removed` event must fall the selection back to the last
+    /// remaining tab (or to `None` when no tabs remain).
+    #[test]
+    fn test_process_file_events_removed_closes_open_tab() {
+        let mut app = create_test_app();
+        let gone = PathBuf::from("/tmp/gone.md");
+        let keep = PathBuf::from("/tmp/keep.md");
+        app.tab_manager.tabs = vec![gone.clone(), keep.clone()];
+        app.tab_manager.loaded_path = Some(gone.clone());
+        *app.selection.selected_file_mut() = Some(gone.clone());
+
+        app.file_event_reader = Some(app.file_event_bus.subscribe());
+        app.file_event_bus
+            .publish(FileEvent::removed_one(gone.clone()));
+        let _ = app.process_file_events();
+
+        assert!(
+            !app.tab_manager.tabs.contains(&gone),
+            "tab for deleted file must be closed"
+        );
+        assert!(
+            app.tab_manager.tabs.contains(&keep),
+            "tab for remaining file must stay open"
+        );
+        assert_eq!(
+            app.selection.selected_file(),
+            Some(&keep),
+            "selection must fall back to the last remaining tab"
+        );
+        assert!(
+            app.tab_manager.loaded_path.is_none(),
+            "loaded_path must be cleared"
+        );
+    }
+
+    /// UI-051: closing the last tab when its file is deleted must
+    /// clear the selection and the displayed content.
+    #[test]
+    fn test_process_file_events_removed_closes_last_tab_clears_content() {
+        let mut app = create_test_app();
+        let gone = PathBuf::from("/tmp/gone.md");
+        app.tab_manager.tabs = vec![gone.clone()];
+        app.tab_manager.loaded_path = Some(gone.clone());
+        app.tab_manager.current_markdown = "some content".to_string();
+        *app.selection.selected_file_mut() = Some(gone.clone());
+
+        app.file_event_reader = Some(app.file_event_bus.subscribe());
+        app.file_event_bus
+            .publish(FileEvent::removed_one(gone.clone()));
+        let _ = app.process_file_events();
+
+        assert!(app.tab_manager.tabs.is_empty(), "all tabs must be closed");
+        assert!(
+            app.selection.selected_file().is_none(),
+            "selection must be None when no tabs remain"
+        );
+        assert!(
+            app.tab_manager.loaded_path.is_none(),
+            "loaded_path must be cleared"
+        );
+        assert!(
+            app.tab_manager.current_markdown.is_empty(),
+            "content must be cleared when no tab remains"
+        );
+    }
+
+    /// UI-051: closing a tab when its file is deleted via the typed
+    /// `FsEvent::FileDeleted` event must fall the selection back to
+    /// the last remaining tab.
+    #[test]
+    fn test_handle_fs_event_file_deleted_closes_open_tab() {
+        let mut app = create_test_app();
+        let gone = PathBuf::from("gone.md");
+        let keep = PathBuf::from("keep.md");
+        app.tab_manager.tabs = vec![gone.clone(), keep.clone()];
+        app.tab_manager.loaded_path = Some(gone.clone());
+        *app.selection.selected_file_mut() = Some(gone.clone());
+
+        app.handle_fs_event(FsEvent::FileDeleted { path: gone.clone() });
+
+        assert!(
+            !app.tab_manager.tabs.contains(&gone),
+            "tab for deleted file must be closed"
+        );
+        assert_eq!(
+            app.selection.selected_file(),
+            Some(&keep),
+            "selection must fall back to the last remaining tab"
         );
     }
 }

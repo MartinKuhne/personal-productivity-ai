@@ -9,6 +9,9 @@ mod panels;
 pub mod render;
 pub mod strings;
 pub mod table_width;
+mod tools_dialog;
+#[cfg(test)]
+mod tools_dialog_tests;
 mod tree;
 
 #[cfg(test)]

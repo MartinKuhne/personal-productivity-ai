@@ -128,19 +128,23 @@ fn test_tool_invalid_args_returns_error() {
 #[test]
 fn test_tool_call_debug_mode_feature_flag() {
     let mut config = AppConfig::default();
-    assert!(!config
-        .feature_flags
-        .get("toolCallDebugMode")
-        .copied()
-        .unwrap_or(false));
+    assert!(
+        !config
+            .feature_flags
+            .get("toolCallDebugMode")
+            .copied()
+            .unwrap_or(false)
+    );
     config
         .feature_flags
         .insert("toolCallDebugMode".to_string(), true);
-    assert!(config
-        .feature_flags
-        .get("toolCallDebugMode")
-        .copied()
-        .unwrap_or(false));
+    assert!(
+        config
+            .feature_flags
+            .get("toolCallDebugMode")
+            .copied()
+            .unwrap_or(false)
+    );
     let ctx = test_ctx(&config);
     let res = execute_tool(&ctx, "unknown_tool", "{}");
     assert!(res.contains("not found") || res.contains("error"));
@@ -236,64 +240,117 @@ fn test_list_by_tag_default_page_size_is_20() {
 }
 
 #[test]
-fn test_list_by_tag_pagination_first_page() {
-    let (config, _dir) = single_lib_with_n_tagged_files(50);
-    let envelope = run_list_by_tag(&config, r#"{"tag":"meeting","page":1,"page_size":20}"#);
-    let data = &envelope["data"];
-    assert_eq!(data["total"], 50);
-    let files = files_array(data);
-    assert_eq!(files.len(), 20);
-    assert!(files[0].ends_with("file_000.md"));
-    assert!(files[19].ends_with("file_019.md"));
-}
+fn test_list_by_tag_pagination_dispatch() {
+    // Each case: (label, n_files, page, page_size, expected_len, expected_first_idx, expected_last_idx)
+    // `expected_len == None` means the response should be empty (past-end).
+    // `expected_hint_starts_with` is checked when the page is past the end.
+    struct Case {
+        label: &'static str,
+        n_files: usize,
+        page: u32,
+        page_size: u32,
+        expected_len: usize,
+        expected_first_idx: Option<usize>,
+        expected_last_idx: Option<usize>,
+    }
+    let cases: &[Case] = &[
+        Case {
+            label: "first page (50 files, page 1, size 20)",
+            n_files: 50,
+            page: 1,
+            page_size: 20,
+            expected_len: 20,
+            expected_first_idx: Some(0),
+            expected_last_idx: Some(19),
+        },
+        Case {
+            label: "second page (50 files, page 2, size 20)",
+            n_files: 50,
+            page: 2,
+            page_size: 20,
+            expected_len: 20,
+            expected_first_idx: Some(20),
+            expected_last_idx: Some(39),
+        },
+        Case {
+            label: "last partial page (50 files, page 3, size 20)",
+            n_files: 50,
+            page: 3,
+            page_size: 20,
+            expected_len: 10,
+            expected_first_idx: Some(40),
+            expected_last_idx: Some(49),
+        },
+        Case {
+            label: "page past end (5 files, page 99, size 20)",
+            n_files: 5,
+            page: 99,
+            page_size: 20,
+            expected_len: 0,
+            expected_first_idx: None,
+            expected_last_idx: None,
+        },
+        Case {
+            label: "page_size one (3 files, page 2, size 1)",
+            n_files: 3,
+            page: 2,
+            page_size: 1,
+            expected_len: 1,
+            expected_first_idx: Some(1),
+            expected_last_idx: Some(1),
+        },
+    ];
 
-#[test]
-fn test_list_by_tag_pagination_second_page() {
-    let (config, _dir) = single_lib_with_n_tagged_files(50);
-    let envelope = run_list_by_tag(&config, r#"{"tag":"meeting","page":2,"page_size":20}"#);
-    let data = &envelope["data"];
-    assert_eq!(data["total"], 50);
-    let files = files_array(data);
-    assert_eq!(files.len(), 20);
-    assert!(files[0].ends_with("file_020.md"));
-    assert!(files[19].ends_with("file_039.md"));
-}
-
-#[test]
-fn test_list_by_tag_pagination_last_partial_page() {
-    let (config, _dir) = single_lib_with_n_tagged_files(50);
-    let envelope = run_list_by_tag(&config, r#"{"tag":"meeting","page":3,"page_size":20}"#);
-    let data = &envelope["data"];
-    assert_eq!(data["total"], 50);
-    let files = files_array(data);
-    assert_eq!(files.len(), 10);
-    assert!(files[0].ends_with("file_040.md"));
-    assert!(files[9].ends_with("file_049.md"));
-}
-
-#[test]
-fn test_list_by_tag_page_past_end_returns_hint() {
-    let (config, _dir) = single_lib_with_n_tagged_files(5);
-    let envelope = run_list_by_tag(&config, r#"{"tag":"meeting","page":99,"page_size":20}"#);
-    let data = &envelope["data"];
-    assert_eq!(data["total"], 5);
-    assert!(files_array(data).is_empty());
-    let hint = data["hint"]
-        .as_str()
-        .expect("hint should be set on past-end");
-    assert!(hint.starts_with("No tagged files on page 99"));
-    assert!(hint.contains("5 total"));
-}
-
-#[test]
-fn test_list_by_tag_page_size_one() {
-    let (config, _dir) = single_lib_with_n_tagged_files(3);
-    let envelope = run_list_by_tag(&config, r#"{"tag":"meeting","page":2,"page_size":1}"#);
-    let data = &envelope["data"];
-    assert_eq!(data["total"], 3);
-    let files = files_array(data);
-    assert_eq!(files.len(), 1);
-    assert!(files[0].ends_with("file_001.md"));
+    for case in cases {
+        let (config, _dir) = single_lib_with_n_tagged_files(case.n_files);
+        let envelope = run_list_by_tag(
+            &config,
+            &format!(
+                r#"{{"tag":"meeting","page":{},"page_size":{}}}"#,
+                case.page, case.page_size
+            ),
+        );
+        let data = &envelope["data"];
+        let files = files_array(data);
+        assert_eq!(
+            files.len(),
+            case.expected_len,
+            "[{}] page count mismatch (total={}, got {} files)",
+            case.label,
+            data["total"],
+            files.len()
+        );
+        if let (Some(first), Some(last)) = (case.expected_first_idx, case.expected_last_idx) {
+            assert!(
+                files
+                    .first()
+                    .is_some_and(|p| p.ends_with(&format!("file_{first:03}.md"))),
+                "[{}] first file mismatch; got {:?}",
+                case.label,
+                files.first()
+            );
+            assert!(
+                files
+                    .last()
+                    .is_some_and(|p| p.ends_with(&format!("file_{last:03}.md"))),
+                "[{}] last file mismatch; got {:?}",
+                case.label,
+                files.last()
+            );
+        }
+        if case.expected_len == 0 {
+            // Past-end case: a `hint` field with a useful message.
+            let hint = data["hint"]
+                .as_str()
+                .unwrap_or_else(|| panic!("[{}] expected hint on past-end page", case.label));
+            assert!(
+                hint.contains(&format!("page {}", case.page))
+                    && hint.contains(&format!("{} total", case.n_files)),
+                "[{}] hint text mismatch: {hint}",
+                case.label
+            );
+        }
+    }
 }
 
 #[test]
@@ -374,47 +431,104 @@ fn test_list_files_default_page_size_is_20() {
     assert_eq!(data["total"], 5);
     let files = files_array(data);
     assert_eq!(files.len(), 5);
-    assert!(files
-        .iter()
-        .all(|p| p.starts_with("Lib") && p.contains("note_")));
+    assert!(
+        files
+            .iter()
+            .all(|p| p.starts_with("Lib") && p.contains("note_"))
+    );
 }
 
 #[test]
-fn test_list_files_pagination_first_page() {
-    let (config, _fix) = single_lib_with_n_md_files(50);
-    let envelope = run_list_files(&config, r#"{"path":"Lib","page":1,"page_size":20}"#);
-    let data = &envelope["data"];
-    assert_eq!(data["total"], 50);
-    let files = files_array(data);
-    assert_eq!(files.len(), 20);
-    assert!(files[0].ends_with("note_000.md"));
-    assert!(files[19].ends_with("note_019.md"));
-}
+fn test_list_files_pagination_dispatch() {
+    // Each case: (label, n_files, page, page_size, expected_len, expected_first_idx, expected_last_idx)
+    struct Case {
+        label: &'static str,
+        n_files: usize,
+        page: u32,
+        page_size: u32,
+        expected_len: usize,
+        expected_first_idx: Option<usize>,
+        expected_last_idx: Option<usize>,
+    }
+    let cases: &[Case] = &[
+        Case {
+            label: "first page (50 files, page 1, size 20)",
+            n_files: 50,
+            page: 1,
+            page_size: 20,
+            expected_len: 20,
+            expected_first_idx: Some(0),
+            expected_last_idx: Some(19),
+        },
+        Case {
+            label: "last partial page (50 files, page 3, size 20)",
+            n_files: 50,
+            page: 3,
+            page_size: 20,
+            expected_len: 10,
+            expected_first_idx: Some(40),
+            expected_last_idx: Some(49),
+        },
+        Case {
+            label: "page past end (5 files, page 99, size 20)",
+            n_files: 5,
+            page: 99,
+            page_size: 20,
+            expected_len: 0,
+            expected_first_idx: None,
+            expected_last_idx: None,
+        },
+    ];
 
-#[test]
-fn test_list_files_pagination_last_partial_page() {
-    let (config, _fix) = single_lib_with_n_md_files(50);
-    let envelope = run_list_files(&config, r#"{"path":"Lib","page":3,"page_size":20}"#);
-    let data = &envelope["data"];
-    assert_eq!(data["total"], 50);
-    let files = files_array(data);
-    assert_eq!(files.len(), 10);
-    assert!(files[0].ends_with("note_040.md"));
-    assert!(files[9].ends_with("note_049.md"));
-}
-
-#[test]
-fn test_list_files_page_past_end_returns_hint() {
-    let (config, _fix) = single_lib_with_n_md_files(5);
-    let envelope = run_list_files(&config, r#"{"path":"Lib","page":99,"page_size":20}"#);
-    let data = &envelope["data"];
-    assert_eq!(data["total"], 5);
-    assert!(files_array(data).is_empty());
-    let hint = data["hint"]
-        .as_str()
-        .expect("hint should be set on past-end");
-    assert!(hint.contains("page 99"));
-    assert!(hint.contains("5 total"));
+    for case in cases {
+        let (config, _fix) = single_lib_with_n_md_files(case.n_files);
+        let envelope = run_list_files(
+            &config,
+            &format!(
+                r#"{{"path":"Lib","page":{},"page_size":{}}}"#,
+                case.page, case.page_size
+            ),
+        );
+        let data = &envelope["data"];
+        let files = files_array(data);
+        assert_eq!(
+            files.len(),
+            case.expected_len,
+            "[{}] page count mismatch (total={}, got {} files)",
+            case.label,
+            data["total"],
+            files.len()
+        );
+        if let (Some(first), Some(last)) = (case.expected_first_idx, case.expected_last_idx) {
+            assert!(
+                files
+                    .first()
+                    .is_some_and(|p| p.ends_with(&format!("note_{first:03}.md"))),
+                "[{}] first file mismatch; got {:?}",
+                case.label,
+                files.first()
+            );
+            assert!(
+                files
+                    .last()
+                    .is_some_and(|p| p.ends_with(&format!("note_{last:03}.md"))),
+                "[{}] last file mismatch; got {:?}",
+                case.label,
+                files.last()
+            );
+        }
+        if case.expected_len == 0 {
+            let hint = data["hint"]
+                .as_str()
+                .unwrap_or_else(|| panic!("[{}] expected hint on past-end page", case.label));
+            assert!(
+                hint.contains(&format!("page {}", case.page))
+                    && hint.contains(&format!("{} total", case.n_files)),
+                "[{}] hint text mismatch: {hint}",
+                case.label
+            );
+        }
+    }
 }
 
 #[test]
@@ -610,4 +724,63 @@ fn test_csv_tools_excluded() {
         .collect();
     assert!(!names.contains(&"create_csv"));
     assert!(!names.contains(&"list_csv"));
+}
+
+#[test]
+fn test_get_weather_tool_in_schema() {
+    let config = AppConfig::default();
+    let schema = get_tools_schema(&config, "what is the weather today");
+    let tools = schema.as_array().unwrap();
+    let names: Vec<&str> = tools
+        .iter()
+        .filter_map(|t| t["function"]["name"].as_str())
+        .collect();
+    assert!(names.contains(&"get_weather"));
+}
+
+#[test]
+fn test_get_weather_tool_excluded_when_disabled() {
+    let mut config = AppConfig::default();
+    config.tool_groups.weather = false;
+    let schema = get_tools_schema(&config, "what is the weather today");
+    let tools = schema.as_array().unwrap();
+    let names: Vec<&str> = tools
+        .iter()
+        .filter_map(|t| t["function"]["name"].as_str())
+        .collect();
+    assert!(!names.contains(&"get_weather"));
+}
+
+/// The tools-manager config-bus subscription must run the MCP
+/// startup init on a background thread (never the caller's thread)
+/// and post a completion log entry. The default config has no MCP
+/// servers, so the init is a fast, offline no-op and the test is
+/// deterministic.
+#[test]
+fn test_spawn_config_subscription_runs_init_in_background() {
+    use crate::bus::events::config::ConfigArrived;
+    use crate::bus::events::typed::{BackgroundEvent, ProcessEvent};
+
+    let bus = crate::bus::config::config_bus();
+    let (tx, rx) = std::sync::mpsc::channel::<BackgroundEvent>();
+
+    spawn_config_subscription(bus.clone(), tx);
+
+    bus.publish(ConfigArrived::new(AppConfig::default()));
+
+    let start = std::time::Instant::now();
+    while start.elapsed().as_secs() < 5 {
+        match rx.recv_timeout(std::time::Duration::from_millis(100)) {
+            Ok(BackgroundEvent::Process(ProcessEvent::LogEntry(entry))) => {
+                assert!(
+                    entry.message.starts_with("MCP startup ping complete:"),
+                    "unexpected log entry: {}",
+                    entry.message
+                );
+                return;
+            }
+            Ok(_) | Err(_) => continue,
+        }
+    }
+    panic!("no MCP startup log entry observed within timeout");
 }

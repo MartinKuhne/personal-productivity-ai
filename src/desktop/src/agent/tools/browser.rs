@@ -72,45 +72,43 @@ pub async fn browser_evaluate_js(
     Ok(serde_json::to_string(&val)?)
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use playwright_rs::{Browser, Playwright};
-
-    // A helper to initialize Playwright.
-    // In CI or environments without browsers, this might fail, so we ignore it by default.
-    // Run with `cargo test -- --ignored` if browsers are installed.
-    async fn setup_page() -> Result<(Playwright, Browser, Page), Box<dyn std::error::Error>> {
-        let playwright = Playwright::launch().await?;
-        let chromium = playwright.chromium();
-        let browser = chromium.launch().await?;
-        let page = browser.new_page().await?;
-        Ok((playwright, browser, page))
-    }
-
-    #[tokio::test]
-    #[ignore = "Requires playwright browsers installed locally"]
-    async fn test_browser_navigate_and_state() -> Result<(), Box<dyn std::error::Error>> {
-        let (_playwright, _browser, page) = setup_page().await?;
-
-        browser_navigate(&page, "https://example.com").await?;
-
-        let state = browser_get_page_state(&page).await?;
-        assert!(state.contains("a")); // example.com has an <a> link
-
-        Ok(())
-    }
-
-    #[tokio::test]
-    #[ignore = "Requires playwright browsers installed locally"]
-    async fn test_browser_evaluate() -> Result<(), Box<dyn std::error::Error>> {
-        let (_playwright, _browser, page) = setup_page().await?;
-
-        browser_navigate(&page, "https://example.com").await?;
-
-        let result = browser_evaluate_js(&page, "() => 2 + 2").await?;
-        assert_eq!(result, "4");
-
-        Ok(())
-    }
-}
+// Tests in this module launch a local Chromium via Playwright
+// (`Playwright::launch` → `chromium.launch()` → `browser.new_page()`).
+// They are disabled because they require Playwright browsers installed
+// locally and a working display/launcher environment, which is not
+// available in CI. To re-enable: restore the `#[cfg(test)] mod tests`
+// block below and run with `cargo test -- --ignored` (or
+// `cargo nextest run --run-ignored all`).
+//
+// Original tests (kept here for reference when re-enabling):
+//
+//     use super::*;
+//     use playwright_rs::{Browser, Playwright};
+//
+//     async fn setup_page() -> Result<(Playwright, Browser, Page), Box<dyn std::error::Error>> {
+//         let playwright = Playwright::launch().await?;
+//         let chromium = playwright.chromium();
+//         let browser = chromium.launch().await?;
+//         let page = browser.new_page().await?;
+//         Ok((playwright, browser, page))
+//     }
+//
+//     #[tokio::test]
+//     #[ignore = "Requires playwright browsers installed locally"]
+//     async fn test_browser_navigate_and_state() -> Result<(), Box<dyn std::error::Error>> {
+//         let (_playwright, _browser, page) = setup_page().await?;
+//         browser_navigate(&page, "https://example.com").await?;
+//         let state = browser_get_page_state(&page).await?;
+//         assert!(state.contains("a"));
+//         Ok(())
+//     }
+//
+//     #[tokio::test]
+//     #[ignore = "Requires playwright browsers installed locally"]
+//     async fn test_browser_evaluate() -> Result<(), Box<dyn std::error::Error>> {
+//         let (_playwright, _browser, page) = setup_page().await?;
+//         browser_navigate(&page, "https://example.com").await?;
+//         let result = browser_evaluate_js(&page, "() => 2 + 2").await?;
+//         assert_eq!(result, "4");
+//         Ok(())
+//     }

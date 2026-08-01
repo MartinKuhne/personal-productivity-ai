@@ -7,6 +7,7 @@ use crate::config::AppConfig;
 use std::any::TypeId;
 
 use super::json_schema;
+use super::strings::carddav as carddav_strings;
 
 /// Tool that searches contacts by keyword.
 pub(crate) struct SearchContactTool;
@@ -15,7 +16,7 @@ impl Tool for SearchContactTool {
         "search_contact"
     }
     fn description(&self) -> &'static str {
-        "Search contacts by keyword."
+        carddav_strings::SEARCH_CONTACT_DESCRIPTION
     }
     fn input_type(&self) -> TypeId {
         TypeId::of::<dtos::SearchContactInput>()
@@ -57,7 +58,7 @@ impl Tool for AddContactTool {
         "add_contact"
     }
     fn description(&self) -> &'static str {
-        "Add a new contact."
+        carddav_strings::ADD_CONTACT_DESCRIPTION
     }
     fn input_type(&self) -> TypeId {
         TypeId::of::<dtos::AddContactInput>()
@@ -96,7 +97,7 @@ impl Tool for GetContactTool {
         "get_contact"
     }
     fn description(&self) -> &'static str {
-        "Get contact by id."
+        carddav_strings::GET_CONTACT_DESCRIPTION
     }
     fn input_type(&self) -> TypeId {
         TypeId::of::<dtos::GetContactInput>()

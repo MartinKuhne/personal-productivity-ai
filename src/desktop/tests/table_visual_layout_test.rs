@@ -121,6 +121,49 @@ fn collect_text_rects(shapes: &[eframe::epaint::ClippedShape]) -> Vec<(String, e
     out
 }
 
+/// Find the `y` coordinate of the first text shape whose text contains
+/// `needle` as a substring. Panics with a helpful diagnostic if the
+/// needle is missing from the rendered output.
+fn y_of_text_containing(
+    text_positions: &[(String, egui::Pos2)],
+    needle: &str,
+    context: &str,
+) -> f32 {
+    text_positions
+        .iter()
+        .find(|(txt, _)| txt.contains(needle))
+        .map(|(_, pos)| pos.y)
+        .unwrap_or_else(|| {
+            panic!(
+                "expected to find a text shape containing {needle:?} in {context}; \
+                 rendered texts: {text_positions:?}"
+            )
+        })
+}
+
+/// Assert that a `short` text shape and a `tall` text shape in the
+/// same table row share the same `y` coordinate. The cell-renderer
+/// is expected to top-align content within a row, so a short cell
+/// (single-line) must start at the same y as its multi-line neighbor.
+/// `tol` is the sub-pixel tolerance (1.0 is the historical threshold).
+fn assert_top_aligned_in_row(
+    output: &egui::FullOutput,
+    short_needle: &str,
+    tall_needle: &str,
+    label: &str,
+    tol: f32,
+) {
+    let positions = collect_text_positions(&output.shapes);
+    let short_y = y_of_text_containing(&positions, short_needle, label);
+    let tall_y = y_of_text_containing(&positions, tall_needle, label);
+    let delta = (short_y - tall_y).abs();
+    assert!(
+        delta < tol,
+        "[{label}] TBL-031: short cell {short_needle:?} top-y ({short_y:.2}) must match \
+         multi-line cell {tall_needle:?} top-y ({tall_y:.2}); delta={delta:.2}px"
+    );
+}
+
 #[test]
 fn test_integration_table_header_columns_aligned_at_top_y() {
     let output = render_table_markdown_to_shapes(LAPTOP_TABLE_MARKDOWN, 2000.0);
@@ -174,166 +217,101 @@ fn test_integration_table_header_columns_aligned_at_top_y() {
     }
 }
 
+/// TBL-031: every short cell in a row must share the same `y`
+/// coordinate as the row's tallest cell. The cell renderer uses
+/// `top_down` layout; without it `egui::Grid` would center cells
+/// vertically and the short cell would drift down by half the
+/// row-height delta. This test covers the 5 distinct table shapes
+/// that historically triggered this regression:
+///
+/// * Plain multi-column laptop table (real fixture, FTWA path).
+/// * Single narrow two-column table that wraps to many lines.
+/// * Mixed-formatted table with link + bold + code + italic.
+/// * Wide table that hits the §3.6 horizontal-scroll fallback path.
+/// * 7-column "laptop spec" with one long summary column.
+///
+/// Consolidated from 5 formerly-separate tests that all asserted
+/// the same `|short.y - tall.y| < 1.0` invariant. Each case pins
+/// a different real-world shape so a regression in any of the
+/// 5 paths still surfaces individually.
 #[test]
-fn test_integration_table_multi_line_row_cells_top_aligned() {
-    let output = render_table_markdown_to_shapes(LAPTOP_TABLE_MARKDOWN, 2000.0);
-    let text_positions = collect_text_positions(&output.shapes);
-
-    let dell_pos = text_positions
-        .iter()
-        .find(|(txt, _)| txt.contains("Dell"))
-        .map(|(_, pos)| *pos)
-        .unwrap_or_else(|| {
-            panic!("cell 'Dell' must be rendered; rendered texts: {text_positions:?}")
-        });
-
-    let xps_pos = text_positions
-        .iter()
-        .find(|(txt, _)| txt.contains("XPS"))
-        .map(|(_, pos)| *pos)
-        .unwrap_or_else(|| {
-            panic!("cell 'XPS' must be rendered; rendered texts: {text_positions:?}")
-        });
-
-    let delta = (dell_pos.y - xps_pos.y).abs();
-    assert!(
-        delta < 1.0,
-        "TBL-031: short cell 'Dell' top-y ({}) must match adjacent cell 'XPS 15' top-y ({}); delta={delta}px",
-        dell_pos.y,
-        xps_pos.y
-    );
-}
-
-#[test]
-fn test_integration_table_short_cell_vs_multiline_cell_top_alignment() {
+fn test_table_row_top_alignment_across_shapes() {
     const TALL_ROW_MARKDOWN: &str = r#"
 | Col A | Col B |
 | --- | --- |
 | Short | This is a very long paragraph of text that contains many words in sequence. When rendered in a narrow table column of width 100 pixels, it will automatically wrap into a very tall multi-line block of text with a total height exceeding 350 pixels. This ensures that the cell height is larger than 300px and tests top alignment. |
 "#;
-
-    let output = render_table_markdown_to_shapes(TALL_ROW_MARKDOWN, 180.0);
-    let text_positions = collect_text_positions(&output.shapes);
-
-    let short_pos = text_positions
-        .iter()
-        .find(|(txt, _)| txt.contains("Short"))
-        .map(|(_, pos)| *pos)
-        .expect("cell 'Short' must be rendered");
-
-    let tall_pos = text_positions
-        .iter()
-        .find(|(txt, _)| txt.contains("This is a very long paragraph"))
-        .map(|(_, pos)| *pos)
-        .expect("cell 'This is a very long paragraph' must be rendered");
-
-    println!("SHORT POS: {short_pos:?}, TALL POS: {tall_pos:?}");
-    let delta = (short_pos.y - tall_pos.y).abs();
-    assert!(
-        delta < 1.0,
-        "TBL-031: short cell 'Short' top-y ({}) must match multi-line cell top-y ({}); delta={delta}px",
-        short_pos.y,
-        tall_pos.y
-    );
-}
-
-#[test]
-fn test_integration_table_cell_with_link_and_formatted_text_top_alignment() {
     const FORMATTED_TABLE_MARKDOWN: &str = r#"
 | Make | Description |
 | --- | --- |
 | [Dell](https://dell.com) | **Dell XPS 16** featuring `Intel Core Ultra 7` with a *gorgeous* 3.2K OLED display and long battery life. This text wraps across multiple lines in the cell. |
 "#;
-
-    let output = render_table_markdown_to_shapes(FORMATTED_TABLE_MARKDOWN, 400.0);
-    let text_positions = collect_text_positions(&output.shapes);
-
-    let link_pos = text_positions
-        .iter()
-        .find(|(txt, _)| txt.contains("Dell"))
-        .map(|(_, pos)| *pos)
-        .expect("link cell 'Dell' must be rendered");
-
-    let desc_pos = text_positions
-        .iter()
-        .find(|(txt, _)| txt.contains("Dell XPS 16"))
-        .map(|(_, pos)| *pos)
-        .expect("desc cell 'Dell XPS 16' must be rendered");
-
-    let delta = (link_pos.y - desc_pos.y).abs();
-    assert!(
-        delta < 1.0,
-        "TBL-031: link cell 'Dell' top-y ({}) must match description cell top-y ({}); delta={delta}px",
-        link_pos.y,
-        desc_pos.y
-    );
-}
-
-#[test]
-fn test_integration_table_horizontal_scroll_multiline_top_alignment() {
     const WIDE_TABLE_MARKDOWN: &str = r#"
 | Col 1 | Col 2 | Col 3 | Col 4 | Col 5 | Col 6 | Summary |
 | --- | --- | --- | --- | --- | --- | --- |
 | Dell | XPS 15 | $2499 | OLED | Intel i9 | 3800 | Premium build with a very long summary description that wraps onto 5 lines when rendered in the table cell. |
 "#;
-
-    let output = render_table_markdown_to_shapes(WIDE_TABLE_MARKDOWN, 600.0);
-    let text_positions = collect_text_positions(&output.shapes);
-
-    let dell_pos = text_positions
-        .iter()
-        .find(|(txt, _)| txt.contains("Dell"))
-        .map(|(_, pos)| *pos)
-        .expect("cell 'Dell' must be rendered");
-
-    let summary_pos = text_positions
-        .iter()
-        .find(|(txt, _)| txt.contains("Premium build"))
-        .map(|(_, pos)| *pos)
-        .expect("cell 'Premium build' must be rendered");
-
-    let delta = (dell_pos.y - summary_pos.y).abs();
-    assert!(
-        delta < 1.0,
-        "TBL-031: short cell 'Dell' top-y ({}) must match multi-line cell top-y ({}); delta={delta}px",
-        dell_pos.y,
-        summary_pos.y
-    );
-}
-
-#[test]
-fn test_integration_table_cell_vertical_cross_align_min() {
-    // 7-column table with short cells in cols 0-5 and a 5-line summary in col 6.
-    // In a narrow viewport, col 6 wraps onto 5 lines (row height = ~90px).
-    // Short cell "Dell" in col 0 must align to the top of the 90px cell, NOT be centered at y = top + 36px.
     const LAPTOP_STYLE_MARKDOWN: &str = r#"
 | Make | Model | Price | Display | CPU | Score | Summary |
 | --- | --- | --- | --- | --- | --- | --- |
 | Dell | XPS 15 9570 | $1500 | 15.6" OLED | i5-8300H | 2271 | Premium build quality with an excellent 4K OLED display option, Thunderbolt 3, and solid aluminum chassis. Now aging with 8th gen Intel CPU. |
 "#;
 
-    let output = render_table_markdown_to_shapes(LAPTOP_STYLE_MARKDOWN, 1000.0);
-    let text_positions = collect_text_positions(&output.shapes);
+    struct Case {
+        label: &'static str,
+        markdown: &'static str,
+        viewport: f32,
+        short_needle: &'static str,
+        tall_needle: &'static str,
+    }
+    let cases: &[Case] = &[
+        Case {
+            label: "plain multi-column (Dell vs XPS 15)",
+            markdown: LAPTOP_TABLE_MARKDOWN,
+            viewport: 2000.0,
+            short_needle: "Dell",
+            tall_needle: "XPS",
+        },
+        Case {
+            label: "narrow two-column (Short vs long paragraph)",
+            markdown: TALL_ROW_MARKDOWN,
+            viewport: 180.0,
+            short_needle: "Short",
+            tall_needle: "This is a very long paragraph",
+        },
+        Case {
+            label: "link + formatted text (Dell link vs Dell XPS 16)",
+            markdown: FORMATTED_TABLE_MARKDOWN,
+            viewport: 400.0,
+            short_needle: "Dell",
+            tall_needle: "Dell XPS 16",
+        },
+        Case {
+            label: "§3.6 horizontal-scroll fallback (Dell vs Premium build)",
+            markdown: WIDE_TABLE_MARKDOWN,
+            viewport: 600.0,
+            short_needle: "Dell",
+            tall_needle: "Premium build",
+        },
+        Case {
+            label: "7-column laptop spec (Dell vs Premium build)",
+            markdown: LAPTOP_STYLE_MARKDOWN,
+            viewport: 1000.0,
+            short_needle: "Dell",
+            tall_needle: "Premium build",
+        },
+    ];
 
-    let dell_pos = text_positions
-        .iter()
-        .find(|(txt, _)| txt == "Dell")
-        .map(|(_, pos)| *pos)
-        .expect("cell 'Dell' must be rendered");
-
-    let summary_pos = text_positions
-        .iter()
-        .find(|(txt, _)| txt.contains("Premium build"))
-        .map(|(_, pos)| *pos)
-        .expect("summary cell text must be rendered");
-
-    let delta = (dell_pos.y - summary_pos.y).abs();
-    assert!(
-        delta < 1.0,
-        "TBL-031: Short cell 'Dell' top-y ({}) must match summary top-y ({}); delta={delta}px (vertical cross_align must be Align::Min)",
-        dell_pos.y,
-        summary_pos.y
-    );
+    for case in cases {
+        let output = render_table_markdown_to_shapes(case.markdown, case.viewport);
+        assert_top_aligned_in_row(
+            &output,
+            case.short_needle,
+            case.tall_needle,
+            case.label,
+            1.0,
+        );
+    }
 }
 
 #[test]
