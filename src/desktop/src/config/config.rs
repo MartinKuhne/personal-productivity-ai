@@ -13,7 +13,7 @@ use std::path::{Path, PathBuf};
 
 #[deprecated(note = "import directly from crate::app::vfs")]
 pub use crate::app::vfs::{
-    library_display_label, ContentLibraryExt, VirtualPath, VirtualPathError,
+    ContentLibraryExt, VirtualPath, VirtualPathError, library_display_label,
 };
 
 #[derive(serde::Serialize, serde::Deserialize, Clone)]
@@ -931,9 +931,11 @@ mod tests {
             },
         );
         let warnings = config.validate();
-        assert!(warnings
-            .iter()
-            .any(|w| w.contains("No model configured with 'chat'")));
+        assert!(
+            warnings
+                .iter()
+                .any(|w| w.contains("No model configured with 'chat'"))
+        );
     }
 
     #[test]
