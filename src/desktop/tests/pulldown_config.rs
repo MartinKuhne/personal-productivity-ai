@@ -46,44 +46,62 @@ fn has_task_marker(events: &[RenderEvent]) -> bool {
     })
 }
 
+/// Pin the parser's `Options` set end-to-end. Each case is a small
+/// markdown snippet whose effective parse result is observable only
+/// when the corresponding `Options::ENABLE_*` flag is set. A
+/// regression in the parser setup (or a `pulldown-cmark` upgrade
+/// that changes option defaults) will surface here with a
+/// diagnostic naming the option that needs to be re-enabled.
+///
+/// Consolidated from 4 formerly-separate tests
+/// (`gfm_tables_are_recognized`, `footnotes_are_recognized`,
+/// `strikethrough_is_recognized`, `task_lists_are_recognized`) —
+/// each was a 7-line `parse_markdown_to_events` + `assert!` pair
+/// with no shared logic beyond the `events.iter().any(...)` shape.
 #[test]
-fn gfm_tables_are_recognized() {
-    let md = "| A | B |\n|---|---|\n| 1 | 2 |";
-    let events = parse_markdown_to_events(md);
-    assert!(
-        has_table(&events),
-        "GFM table not recognized — Options::ENABLE_TABLES may be unset: {events:?}"
-    );
-}
+fn parse_markdown_to_events_uses_required_pulldown_options() {
+    struct Case {
+        label: &'static str,
+        md: &'static str,
+        predicate: fn(&[RenderEvent]) -> bool,
+        failure_msg: &'static str,
+    }
+    let cases: &[Case] = &[
+        Case {
+            label: "GFM table",
+            md: "| A | B |\n|---|---|\n| 1 | 2 |",
+            predicate: has_table,
+            failure_msg: "Options::ENABLE_TABLES may be unset",
+        },
+        Case {
+            label: "footnote reference",
+            md: "Footnote[^1]\n\n[^1]: details",
+            predicate: has_footnote_ref,
+            failure_msg: "Options::ENABLE_FOOTNOTES may be unset",
+        },
+        Case {
+            label: "strikethrough",
+            md: "~~struck~~",
+            predicate: has_strikethrough,
+            failure_msg: "Options::ENABLE_STRIKETHROUGH may be unset",
+        },
+        Case {
+            label: "task list",
+            md: "- [ ] todo\n- [x] done",
+            predicate: has_task_marker,
+            failure_msg: "Options::ENABLE_TASKLISTS may be unset",
+        },
+    ];
 
-#[test]
-fn footnotes_are_recognized() {
-    let md = "Footnote[^1]\n\n[^1]: details";
-    let events = parse_markdown_to_events(md);
-    assert!(
-        has_footnote_ref(&events),
-        "footnote reference not recognized — Options::ENABLE_FOOTNOTES may be unset: {events:?}"
-    );
-}
-
-#[test]
-fn strikethrough_is_recognized() {
-    let md = "~~struck~~";
-    let events = parse_markdown_to_events(md);
-    assert!(
-        has_strikethrough(&events),
-        "strikethrough not recognized — Options::ENABLE_STRIKETHROUGH may be unset: {events:?}"
-    );
-}
-
-#[test]
-fn task_lists_are_recognized() {
-    let md = "- [ ] todo\n- [x] done";
-    let events = parse_markdown_to_events(md);
-    assert!(
-        has_task_marker(&events),
-        "task list not recognized — Options::ENABLE_TASKLISTS may be unset: {events:?}"
-    );
+    for case in cases {
+        let events = parse_markdown_to_events(case.md);
+        assert!(
+            (case.predicate)(&events),
+            "[{}] {} — events: {events:?}",
+            case.label,
+            case.failure_msg
+        );
+    }
 }
 
 #[test]
@@ -100,6 +118,11 @@ fn parse_emits_flush_inline_for_newline_separated_text() {
     // path is the only legal one. If a future refactor adds a
     // `HardBreak` variant or enables the option, this test will
     // catch the event-stream change.
+    //
+    // This case is kept separate from
+    // `parse_markdown_to_events_uses_required_pulldown_options` because
+    // it asserts a different invariant (the soft-break collapse
+    // contract), not a `Options::ENABLE_*` flag.
     let md = "line1\nline2";
     let events = parse_markdown_to_events(md);
     let inline_texts: Vec<String> = events

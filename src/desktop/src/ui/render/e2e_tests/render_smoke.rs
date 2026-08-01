@@ -10,6 +10,72 @@
 
 use super::*;
 
+/// Render the given closure in a 320px-wide viewport and assert that
+/// a text shape containing `needle` has a galley with more than one
+/// row (i.e. it wrapped) and a width that does not exceed the
+/// viewport + 1 px tolerance. This is the canonical "long text must
+/// wrap inside the panel, not overflow" assertion used by the YAML
+/// table and the long-paragraph regression tests below.
+fn assert_long_text_wraps_in_viewport(render: impl FnMut(&mut egui::Ui), needle: &str) {
+    use crate::ui::test_helpers::text::extract_text;
+
+    let viewport_width: f32 = 320.0;
+    let raw = egui::RawInput {
+        screen_rect: Some(egui::Rect::from_min_size(
+            egui::Pos2::ZERO,
+            egui::vec2(viewport_width, 800.0),
+        )),
+        ..egui::RawInput::default()
+    };
+    let ctx = egui::Context::default();
+    let mut render = render;
+    let output = ctx.run_ui(raw, |ui| {
+        egui::CentralPanel::default().show(ui, |ui| {
+            render(ui);
+        });
+    });
+
+    // Sanity: the long text must actually have been rendered.
+    let texts = extract_text(&output.shapes);
+    assert!(
+        texts.iter().any(|t| t.contains(needle)),
+        "expected text containing {needle:?} to be rendered; got {} text shape(s): {:?}",
+        texts.len(),
+        texts,
+    );
+
+    // Locate the Text shape whose galley carries the long text.
+    let shape = output
+        .shapes
+        .iter()
+        .find_map(|cs| match &cs.shape {
+            egui::Shape::Text(t) if t.galley.text().contains(needle) => Some(t),
+            _ => None,
+        })
+        .unwrap_or_else(|| panic!("expected a Text shape for needle {needle:?}"));
+    let galley = &shape.galley;
+
+    // 1. The text must wrap: more than one row in the galley.
+    assert!(
+        galley.rows.len() > 1,
+        "expected text containing {needle:?} to word-wrap; got galley with {} row(s) and \
+         rect width={:.1}px (viewport={viewport_width:.0}px) — the text is overflowing \
+         instead of wrapping",
+        galley.rows.len(),
+        galley.rect.width(),
+    );
+
+    // 2. The wrapped text must fit inside the viewport.
+    let max_allowed = viewport_width;
+    assert!(
+        galley.rect.width() <= max_allowed + 1.0,
+        "expected wrapped text width <= {max_allowed:.0}px; got {:.1}px \
+         (the value is overflowing the panel — the inner horizontal ScrollArea \
+         is clipping it)",
+        galley.rect.width(),
+    );
+}
+
 #[test]
 fn test_render_markdown_e2e() {
     let ctx = egui::Context::default();
@@ -95,95 +161,75 @@ fn test_render_table_with_empty_cells_e2e() {
     });
 }
 
-/// Regression: a long YAML value must word-wrap inside the YAML
-/// metadata table rather than overflow the panel's content rect
-/// and get clipped by the inner horizontal `ScrollArea`.
+/// Regression: long text surfaces in the renderer must word-wrap
+/// inside the panel rather than overflow and get clipped by the
+/// inner horizontal `ScrollArea`.
 ///
-/// Before the fix, `render_yaml_table` rendered both columns with
-/// `ui.label(...)` inside an unconstrained `Grid`, so the value
-/// column expanded to the natural width of the longest text. The
-/// value text therefore ran off the right edge of the viewport
-/// and the user saw the value truncated mid-word (e.g.
-/// "Microsoft in Re…").
-///
-/// The test pins the symptom by:
-/// 1. Rendering the YAML table in a deliberately narrow 320px
-///    viewport so a long value cannot fit on a single line.
-/// 2. Locating the `Shape::Text` that carries the long summary
-///    text (uniquely identified by its leading "Heise Invoice"
-///    substring).
-/// 3. Asserting the underlying `Galley` has more than one row
-///    (the text wrapped) and that the rendered rect's width fits
-///    within the available content area (no horizontal overflow).
+/// The two formerly-separate tests
+/// (`test_render_yaml_table_wraps_long_values_within_viewport` and
+/// `test_render_markdown_long_paragraph_wraps_in_preview`) were
+/// 95% identical — same viewport, same needle-based shape lookup,
+/// same `galley.rows.len() > 1` + `width <= viewport + 1 px`
+/// assertions. The only real difference was the markdown source:
+/// a long YAML summary value vs. a long German paragraph. Both
+/// regressions were caused by the same egui 0.35 wrap-mode
+/// default change, so they belong together.
 #[test]
-fn test_render_yaml_table_wraps_long_values_within_viewport() {
-    use crate::ui::test_helpers::text::extract_text;
-
-    let ctx = egui::Context::default();
-    let viewport_width: f32 = 320.0;
-    let raw = egui::RawInput {
-        screen_rect: Some(egui::Rect::from_min_size(
-            egui::Pos2::ZERO,
-            egui::vec2(viewport_width, 800.0),
-        )),
-        ..egui::RawInput::default()
-    };
+fn test_long_text_surfaces_wrap_within_viewport() {
+    // YAML case: render_yaml_table with a long summary value.
     // The exact string the user reported in the screenshot.
-    let long_summary = "January 2005 invoice from Heise Zeitschriften Verlag for \
+    let long_yaml_summary = "January 2005 invoice from Heise Zeitschriften Verlag for \
         Microsoft half-year archive CD-ROMs, shipped tax-free to Martin Kühne at \
         Microsoft in Redmond, WA, USA, for archive and product-evaluation purposes \
         under Microsoft product license terms.";
     let yaml_str = format!(
         "title: Heise Invoice for Microsoft Product — Tax-Free Export Delivery\n\
-         summary: \"{long_summary}\"\n\
+         summary: \"{long_yaml_summary}\"\n\
          tags: [invoice, receipt, technology, documents]\n\
          header-date: 2026-07-22T19:32:47Z\n"
     );
     let yaml: serde_yml::Value = serde_yml::from_str(&yaml_str).unwrap();
 
-    let output = ctx.run_ui(raw, |ui| {
-        egui::CentralPanel::default().show(ui, |ui| {
-            render_yaml_table(ui, &yaml);
-        });
-    });
+    // Markdown case: long German paragraph mirroring the user's
+    // `Mythical man-month.md` body (~570 chars).
+    let long_paragraph = "Es ist ein Mix an Methoden im Einsatz. \
+        Einerseits soll im traditionellen Projektmanagement in Voraus \
+        der Funktionsumfang und die Projektdauer feststehen. Die zur \
+        Planung notwendige Dokumentation der Anforderungen, Technologien \
+        und Risken findet aber nicht statt. Daraufhin trägt das \
+        ausführende Team ein erhebliches Risiko, wenn sich die \
+        Anforderungen ändern oder die Arbeit komplexer ist als erwartet.";
+    let md = format!("\n{long_paragraph}\n");
 
-    // Sanity: the long value must actually have been rendered.
-    let texts = extract_text(&output.shapes);
-    let needle = "Heise Zeitschriften Verlag";
-    assert!(
-        texts.iter().any(|t| t.contains(needle)),
-        "expected the long summary to be rendered; got {} text shape(s)",
-        texts.len()
-    );
+    type WrapCase = (&'static str, &'static str, Box<dyn FnMut(&mut egui::Ui)>);
+    let cases: Vec<WrapCase> = vec![
+        (
+            "YAML table long summary",
+            "Heise Zeitschriften Verlag",
+            Box::new(move |ui| {
+                render_yaml_table(ui, &yaml);
+            }),
+        ),
+        (
+            "Markdown long paragraph",
+            "erhebliches Risiko, wenn sich",
+            Box::new(move |ui| {
+                let mut scroll_id = None;
+                render_markdown(
+                    ui,
+                    &md,
+                    &mut scroll_id,
+                    &mut Vec::new(),
+                    crate::ui::table_width::DeficitStrategy::ProportionalToSlack,
+                );
+            }),
+        ),
+    ];
 
-    // Locate the `Shape::Text` whose galley carries the long
-    // summary (matched by an unambiguous substring that cannot
-    // appear in any other YAML key in the fixture).
-    let summary_shape = output.shapes.iter().find_map(|cs| match &cs.shape {
-        egui::Shape::Text(t) if t.galley.text().contains(needle) => Some(t),
-        _ => None,
-    });
-    let shape = summary_shape.expect("expected a Text shape for the long summary");
-    let galley = &shape.galley;
-    let rendered_width = galley.rect.width();
-
-    // 1. The long value must wrap: more than one row in the galley.
-    assert!(
-        galley.rows.len() > 1,
-        "expected the long summary to word-wrap; got galley with {} row(s) and rect width={:.1}px (viewport={viewport_width:.0}px)",
-        galley.rows.len(),
-        rendered_width,
-    );
-
-    // 2. The wrapped text must fit inside the viewport — the
-    //    rect width should never exceed the viewport. Use a small
-    //    tolerance for the CentralPanel's outer margins.
-    let max_allowed = viewport_width;
-    assert!(
-        rendered_width <= max_allowed + 1.0,
-        "expected wrapped text width <= {max_allowed:.0}px; got {rendered_width:.1}px \
-         (the value is overflowing the panel — the horizontal ScrollArea is clipping it)",
-    );
+    for (label, needle, render) in cases {
+        assert_long_text_wraps_in_viewport(render, needle);
+        let _ = label; // surfaces via the per-assertion diagnostic
+    }
 }
 
 /// Regression: multi-line YAML front-matter values must expand grid row height
@@ -321,105 +367,6 @@ fn test_render_table_multiline_cells_fit_panel_and_expand_row_height() {
     assert!(
         dell_top_y >= summary_bottom_y,
         "expected dell row (y={dell_top_y:.1}) to start below summary wrapped content (bottom y={summary_bottom_y:.1}), but it overlapped!",
-    );
-}
-
-/// Regression: long body paragraphs must word-wrap inside the preview.
-///
-/// `render_inline_inner` renders each `InlineElem::Text` via
-/// `ui.add(egui::Label::new(rt).wrap())`. In egui 0.35, `Label::new`
-/// defaults `wrap_mode` to `None` and only wraps if the parent
-/// layout is vertical or horizontal+main_wrap AND the available
-/// width is finite — a fragile contract that already broke for
-/// `render_yaml_table` (see
-/// `test_render_yaml_table_wraps_long_values_within_viewport`),
-/// `render_code_block`, and `render_table_cell`, each of which
-/// had to be patched with an explicit `.wrap()`. This test pins
-/// the same invariant for the paragraph path so a future
-/// refactor (e.g. swapping the `horizontal_wrapped` parent for a
-/// `Grid` or removing the explicit `.wrap()`) cannot silently
-/// regress long-paragraph wrapping.
-///
-/// Mirrors the shape of
-/// `test_render_yaml_table_wraps_long_values_within_viewport` above:
-/// render in a deliberately narrow 320px viewport, locate the
-/// `Shape::Text` that carries the long paragraph (matched by an
-/// unambiguous substring that cannot appear in the table or header
-/// text), and assert the underlying `Galley` wraps to multiple
-/// rows and stays within the viewport.
-#[test]
-fn test_render_markdown_long_paragraph_wraps_in_preview() {
-    use crate::ui::test_helpers::text::extract_text;
-
-    let ctx = egui::Context::default();
-    let viewport_width: f32 = 320.0;
-    let raw = egui::RawInput {
-        screen_rect: Some(egui::Rect::from_min_size(
-            egui::Pos2::ZERO,
-            egui::vec2(viewport_width, 800.0),
-        )),
-        ..egui::RawInput::default()
-    };
-    // Same shape as the user's `Mythical man-month.md` body: one
-    // long German sentence with normal whitespace, ~570 chars.
-    let long_paragraph = "Es ist ein Mix an Methoden im Einsatz. \
-        Einerseits soll im traditionellen Projektmanagement in Voraus \
-        der Funktionsumfang und die Projektdauer feststehen. Die zur \
-        Planung notwendige Dokumentation der Anforderungen, Technologien \
-        und Risken findet aber nicht statt. Daraufhin trägt das \
-        ausführende Team ein erhebliches Risiko, wenn sich die \
-        Anforderungen ändern oder die Arbeit komplexer ist als erwartet.";
-    let md = format!("\n{long_paragraph}\n");
-
-    let output = ctx.run_ui(raw, |ui| {
-        egui::CentralPanel::default().show(ui, |ui| {
-            let mut scroll_id = None;
-            render_markdown(
-                ui,
-                &md,
-                &mut scroll_id,
-                &mut Vec::new(),
-                crate::ui::table_width::DeficitStrategy::ProportionalToSlack,
-            );
-        });
-    });
-
-    // Sanity: the long paragraph must have been rendered.
-    let texts = extract_text(&output.shapes);
-    let needle = "erhebliches Risiko, wenn sich";
-    assert!(
-        texts.iter().any(|t| t.contains(needle)),
-        "expected the long paragraph to be rendered; got {} text shape(s): {:?}",
-        texts.len(),
-        texts,
-    );
-
-    // Locate the Text shape whose galley carries the long paragraph.
-    let paragraph_shape = output.shapes.iter().find_map(|cs| match &cs.shape {
-        egui::Shape::Text(t) if t.galley.text().contains(needle) => Some(t),
-        _ => None,
-    });
-    let shape = paragraph_shape.expect("expected a Text shape for the long paragraph");
-    let galley = &shape.galley;
-
-    // 1. The paragraph must wrap: more than one row.
-    assert!(
-        galley.rows.len() > 1,
-        "expected the long paragraph to word-wrap; got galley with {} row(s) \
-         and rect width={:.1}px (viewport={viewport_width:.0}px) — \
-         the text is overflowing instead of wrapping",
-        galley.rows.len(),
-        galley.rect.width(),
-    );
-
-    // 2. The wrapped text must fit inside the viewport.
-    let max_allowed = viewport_width;
-    assert!(
-        galley.rect.width() <= max_allowed + 1.0,
-        "expected wrapped paragraph width <= {max_allowed:.0}px; got {:.1}px \
-         (the paragraph is overflowing the panel — the preview will \
-         horizontal-scroll the long line instead of wrapping it)",
-        galley.rect.width(),
     );
 }
 

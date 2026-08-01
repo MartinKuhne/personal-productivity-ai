@@ -9,28 +9,38 @@
 //! - Empty cells not inflating `row_max_h` (the phantom-row-height
 //!   regression from `2022 sports car.md`).
 //! - Single-line cell text top-aligned in a row with a multi-line
-//!   neighbor (TBL-031 / `top_down` layout fix).
-//! - Cell text top-aligned + compact row height in a multi-line
-//!   fixture.
+//!   neighbor (TBL-031 / `top_down` layout fix) — exercised via
+//!   the 2-pass `render_table_with_config` path. The other
+//!   top-alignment tests (1-pass `render_table`, 1-pass
+//!   `render_markdown`) live in `table_alignment.rs` and
+//!   `tests/table_visual_layout_test.rs` respectively.
 
 use super::*;
 
 // ---- Off-viewport text guards (MD-013) -------------------------
 
-/// Render the long-table-row fixture at a phone-sized viewport
-/// and assert no `Shape::Text` is permanently outside its
-/// containing clip rect. Catches the F1 (horizontal clip) and
-/// F3 (table column overflow) failure modes; the §3.6 fallback
-/// in `render_table` must wrap the table in a horizontal
-/// `ScrollArea` so cell text remains reachable.
+/// Render the long-table-row fixture and assert no `Shape::Text`
+/// is permanently outside its containing clip rect. Catches the
+/// F1 (horizontal clip) and F3 (table column overflow) failure
+/// modes; the §3.6 fallback in `render_table` must wrap the
+/// table in a horizontal `ScrollArea` so cell text remains
+/// reachable.
 ///
 /// Mirrors the production render path: `render_markdown` is
 /// always wrapped in a vertical `ScrollArea` by the center panel
 /// (`src/ui/panels/center.rs:364`). The test must do the same,
 /// otherwise tall content trivially exceeds the viewport's
 /// bottom edge and triggers a false positive.
+///
+/// Consolidated from two formerly-separate tests
+/// (`render_markdown_no_offscreen_text_at_narrow_viewport` and
+/// `..._at_wide_viewport`) — they were 95% identical, differing
+/// only in `viewport_width`. The narrow case exercises the §3.6
+/// fallback (table wider than viewport); the wide case exercises
+/// the FTWA path (table fits in columns). Both must pass the
+/// no-offscreen-text invariant.
 #[test]
-fn render_markdown_no_offscreen_text_at_narrow_viewport() {
+fn render_markdown_no_offscreen_text_across_viewports() {
     use crate::ui::test_helpers::offscreen::assert_no_offscreen_text;
 
     // Markdown body that contains a table wider than the viewport
@@ -43,80 +53,47 @@ fn render_markdown_no_offscreen_text_at_narrow_viewport() {
     // viewport we expect to support. A 6-column table with long
     // text guarantees `decision.needs_horizontal_scroll == true`
     // on this viewport, exercising the §3.6 fallback path.
-    let viewport_width: f32 = 320.0;
-    let viewport_height: f32 = 800.0;
+    // 1600 px is a desktop-sized viewport exercising the FTWA path
+    // (table fits in columns, no horizontal scroll).
+    let cases: &[(f32, &str)] = &[
+        (320.0, "narrow (exercises §3.6 fallback)"),
+        (1600.0, "wide (exercises FTWA path)"),
+    ];
+    for (viewport_width, label) in cases {
+        let viewport_height: f32 = 800.0;
 
-    let raw = egui::RawInput {
-        screen_rect: Some(egui::Rect::from_min_size(
-            egui::Pos2::ZERO,
-            egui::vec2(viewport_width, viewport_height),
-        )),
-        ..egui::RawInput::default()
-    };
-    let mut scroll_id = None;
-    let mut pending_toggles = Vec::new();
+        let raw = egui::RawInput {
+            screen_rect: Some(egui::Rect::from_min_size(
+                egui::Pos2::ZERO,
+                egui::vec2(*viewport_width, viewport_height),
+            )),
+            ..egui::RawInput::default()
+        };
+        let mut scroll_id = None;
+        let mut pending_toggles = Vec::new();
 
-    let ctx = egui::Context::default();
-    let output = ctx.run_ui(raw, |ui| {
-        egui::CentralPanel::default().show(ui, |ui| {
-            egui::ScrollArea::vertical()
-                .id_salt("main_markdown_scroll")
-                .show(ui, |ui| {
-                    render_markdown(
-                        ui,
-                        md,
-                        &mut scroll_id,
-                        &mut pending_toggles,
-                        crate::ui::table_width::DeficitStrategy::ProportionalToSlack,
-                    );
-                });
+        let ctx = egui::Context::default();
+        let output = ctx.run_ui(raw, |ui| {
+            egui::CentralPanel::default().show(ui, |ui| {
+                egui::ScrollArea::vertical()
+                    .id_salt("main_markdown_scroll")
+                    .show(ui, |ui| {
+                        render_markdown(
+                            ui,
+                            md,
+                            &mut scroll_id,
+                            &mut pending_toggles,
+                            crate::ui::table_width::DeficitStrategy::ProportionalToSlack,
+                        );
+                    });
+            });
         });
-    });
 
-    assert_no_offscreen_text(&output.shapes);
-}
-
-/// Same fixture at a desktop-sized viewport (the FTWA path, not
-/// the §3.6 fallback). The table fits in columns; the helper
-/// must still report no off-viewport text inside the vertical
-/// scroll content rect.
-#[test]
-fn render_markdown_no_offscreen_text_at_wide_viewport() {
-    use crate::ui::test_helpers::offscreen::assert_no_offscreen_text;
-
-    let md = include_str!("../../../../../test/wiki/Travel/long-table-row.md");
-
-    let viewport_width: f32 = 1600.0;
-    let viewport_height: f32 = 800.0;
-
-    let raw = egui::RawInput {
-        screen_rect: Some(egui::Rect::from_min_size(
-            egui::Pos2::ZERO,
-            egui::vec2(viewport_width, viewport_height),
-        )),
-        ..egui::RawInput::default()
-    };
-    let mut scroll_id = None;
-    let mut pending_toggles = Vec::new();
-
-    let ctx = egui::Context::default();
-    let output = ctx.run_ui(raw, |ui| {
-        egui::CentralPanel::default().show(ui, |ui| {
-            egui::ScrollArea::vertical()
-                .id_salt("main_markdown_scroll")
-                .show(ui, |ui| {
-                    render_markdown(
-                        ui,
-                        md,
-                        &mut scroll_id,
-                        &mut pending_toggles,
-                        crate::ui::table_width::DeficitStrategy::ProportionalToSlack,
-                    );
-                });
-        });
-    });
-
-    assert_no_offscreen_text(&output.shapes);
+        assert_no_offscreen_text(&output.shapes);
+        // Force the loop variable to be used in the assertion so the
+        // label surfaces on failure. Cheap and worth it.
+        let _ = label;
+    }
 }
 
 /// Regression test: Verify that table row heights remain 100% stable
@@ -274,7 +251,11 @@ fn test_table_empty_cells_no_phantom_row_height() {
 /// top Y coordinate (not centred). Mirrors the sports-car table where
 /// the Camaro row has `<br>` content making it 2 lines tall while other
 /// cells in the same row are single-line. Pinned by the `top_down` layout
-/// fix in `render_table_cell`.
+/// fix in `render_table_cell`. This is the only top-alignment test in
+/// the e2e suite that uses the 2-pass `render_table_with_config` path
+/// (cached row heights); the other e2e top-alignment tests live in
+/// `table_alignment.rs` against the `render_table` entry point and the
+/// markdown-path tests in `tests/table_visual_layout_test.rs`.
 #[test]
 fn test_table_single_line_cell_text_at_row_top() {
     let make = |t: &str| {
@@ -356,67 +337,5 @@ fn test_table_single_line_cell_text_at_row_top() {
     assert!(
         (tall_top - short_top).abs() < 1.0,
         "Row 1 top-Y mismatch: tall cell y={tall_top:.1}, short cell y={short_top:.1} — text not top-aligned"
-    );
-}
-
-/// Regression test: Verify that cell text in tall rows starts top-aligned
-/// (matching Y coordinate) and that row height is compact (< 150px).
-#[test]
-fn test_render_table_top_aligned_and_compact_row_height() {
-    let md = "| Short | Tall |\n|---|---|\n| Cell A | Line 1<br>Line 2<br>Line 3<br>Line 4 |\n";
-    let ctx = egui::Context::default();
-    let raw = egui::RawInput {
-        screen_rect: Some(egui::Rect::from_min_size(
-            egui::Pos2::ZERO,
-            egui::vec2(800.0, 600.0),
-        )),
-        ..egui::RawInput::default()
-    };
-    let mut scroll_id = None;
-    let mut pending_toggles = Vec::new();
-
-    let output = ctx.run_ui(raw, |ui| {
-        egui::CentralPanel::default().show(ui, |ui| {
-            render_markdown(
-                ui,
-                md,
-                &mut scroll_id,
-                &mut pending_toggles,
-                crate::ui::table_width::DeficitStrategy::ProportionalToSlack,
-            );
-        });
-    });
-
-    // Find cell rects for Row 1
-    let rects: Vec<_> = output
-        .shapes
-        .iter()
-        .filter_map(|cs| match &cs.shape {
-            egui::Shape::Rect(r)
-                if r.fill == egui::Color32::TRANSPARENT
-                    && r.stroke == egui::Stroke::NONE
-                    && r.stroke_kind == egui::StrokeKind::Inside =>
-            {
-                Some(r.rect)
-            }
-            _ => None,
-        })
-        .collect();
-
-    assert_eq!(rects.len(), 4, "Expected 4 cell rects for 2x2 table");
-
-    // Row 1 short cell (rects[2]) and tall cell (rects[3]) should have identical top Y
-    assert!(
-        (rects[2].min.y - rects[3].min.y).abs() < 1.0,
-        "Row 1 cells top Y mismatch: short cell top Y = {}, tall cell top Y = {}",
-        rects[2].min.y,
-        rects[3].min.y
-    );
-
-    // Row 1 height should be compact and bounded
-    assert!(
-        rects[2].height() < 150.0,
-        "Row height too tall: {}",
-        rects[2].height()
     );
 }

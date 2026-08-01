@@ -1504,33 +1504,48 @@ mod tests {
 
     // -------------------------------------------------------------------
     //  OBS-3, OBS-4: negative `available` / negative input widths panic.
+    //  Consolidated from 3 separate audit_observation_negative_*_panics
+    //  tests — they all assert the same panic-on-bad-input contract,
+    //  just with the bad value in a different position. The
+    //  `std::panic::catch_unwind` + `assert!(result.is_err())` body
+    //  was identical.
     // -------------------------------------------------------------------
 
+    /// Pin the contract: feeding a negative `available`, a negative
+    /// `max_content[j]`, or a negative `min_content[j]` is a programmer
+    /// error and must panic. Each case below corresponds to a historical
+    /// audit item (OBS-3, OBS-4). Keeping them as named cases in one
+    /// test preserves the diagnostic on failure.
     #[test]
-    fn audit_observation_negative_available_panics() {
-        let result = std::panic::catch_unwind(|| ftwa_v1(&[10.0, 20.0], &[5.0, 5.0], -1.0));
-        assert!(
-            result.is_err(),
-            "OBS-3 regression: negative available must panic"
-        );
-    }
-
-    #[test]
-    fn audit_observation_negative_max_panics() {
-        let result = std::panic::catch_unwind(|| ftwa_v1(&[-5.0, 20.0], &[5.0, 5.0], 50.0));
-        assert!(
-            result.is_err(),
-            "OBS-4 regression: negative max_content must panic"
-        );
-    }
-
-    #[test]
-    fn audit_observation_negative_min_panics() {
-        let result = std::panic::catch_unwind(|| ftwa_v1(&[10.0, 20.0], &[-1.0, 5.0], 50.0));
-        assert!(
-            result.is_err(),
-            "OBS-4 regression: negative min_content must panic"
-        );
+    fn audit_observation_negative_inputs_panic() {
+        type NegativeInputCase<'a> = (&'a str, &'a [f32], &'a [f32], f32, &'a str);
+        let cases: &[NegativeInputCase<'_>] = &[
+            (
+                "negative available",
+                &[10.0, 20.0],
+                &[5.0, 5.0],
+                -1.0,
+                "OBS-3 regression: negative available must panic",
+            ),
+            (
+                "negative max_content",
+                &[-5.0, 20.0],
+                &[5.0, 5.0],
+                50.0,
+                "OBS-4 regression: negative max_content must panic",
+            ),
+            (
+                "negative min_content",
+                &[10.0, 20.0],
+                &[-1.0, 5.0],
+                50.0,
+                "OBS-4 regression: negative min_content must panic",
+            ),
+        ];
+        for (label, max, min, avail, msg) in cases {
+            let result = std::panic::catch_unwind(|| ftwa_v1(max, min, *avail));
+            assert!(result.is_err(), "{msg} (case: {label}, avail={avail})");
+        }
     }
 
     // -------------------------------------------------------------------
