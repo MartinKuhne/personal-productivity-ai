@@ -7,44 +7,68 @@
 //! the largest single rendering function in the module and the
 //! most layout-sensitive (regression tests for word-wrap, row
 //! height, and viewport overflow all live in `super`'s `e2e_tests`).
+//!
+//! Caching: the parsed key/value pairs and row heights are memoized
+//! in egui's temp data keyed by a hash of the YAML content, so
+//! re-rendering the same front matter on subsequent frames is nearly free.
 
 use crate::markdown::parse_yaml_to_pairs;
 use eframe::egui;
 use egui::RichText;
+use std::hash::{Hash, Hasher};
 
 /// Width of the key column in the YAML metadata table. The value
 /// column takes whatever's left over, with a 12px inter-column gap.
 const YAML_KEY_COLUMN_WIDTH: f32 = 110.0;
 
+/// Cached YAML table data to avoid re-parsing and re-measuring on every frame.
+#[derive(Clone, Debug)]
+struct YamlTableCache {
+    /// Hash of the YAML content.
+    content_hash: u64,
+    /// Parsed key/value pairs.
+    pairs: Vec<(String, String)>,
+    /// Cached row heights.
+    row_heights: Vec<f32>,
+}
+
 pub fn render_yaml_table(ui: &mut egui::Ui, yaml: &serde_norway::Value) {
     if let Some(pairs) = parse_yaml_to_pairs(yaml) {
+        // Compute hash of YAML content for cache invalidation.
+        let mut hasher = std::collections::hash_map::DefaultHasher::new();
+        pairs.hash(&mut hasher);
+        let content_hash = hasher.finish();
+
         let table_id = ui.make_persistent_id("yaml_table");
+        let cache_id = table_id.with("cache");
+
+        // Try to get cached data.
+        let cached: Option<YamlTableCache> = ui
+            .data(|d| d.get_temp(cache_id))
+            .filter(|c: &YamlTableCache| c.content_hash == content_hash);
+
+        let (pairs, _cached_row_heights) = if let Some(cache) = cached {
+            (cache.pairs, Some(cache.row_heights))
+        } else {
+            // No valid cache — we'll measure row heights during render.
+            (pairs, None)
+        };
+
         egui::Frame::NONE
             .fill(egui::Color32::from_rgb(24, 24, 27))
             .stroke(egui::Stroke::new(1.0_f32, egui::Color32::from_gray(40)))
             .inner_margin(8.0)
             .corner_radius(4.0)
             .show(ui, |ui| {
-                // Capture available width *inside* the frame so it accounts
-                // for the inner_margin. The previous code captured it
-                // before entering the frame, making set_min_width exceed
-                // the content rect by ~16px and forcing a permanent
-                // horizontal scrollbar.
                 let available_width = ui.available_width();
-                // Reserve a fixed width for the key column and let the
-                // value column take the remainder. Without explicit widths, a
-                // cell might expand past the panel width.
-                // By giving each cell an explicit width, the value cell knows its
-                // wrap budget and the total table width matches
-                // `available_width` exactly, so no horizontal scrolling
-                // is needed.
                 let key_col_width = YAML_KEY_COLUMN_WIDTH.min((available_width - 20.0).max(40.0));
-                // `12.0` matches the column spacing `12.0` below.
                 let value_col_width = (available_width - key_col_width - 12.0).max(40.0);
+
+                let mut new_row_heights = Vec::with_capacity(pairs.len());
 
                 ui.vertical(|ui| {
                     ui.spacing_mut().item_spacing = egui::vec2(12.0, 4.0);
-                    for (row_idx, (k, v)) in pairs.into_iter().enumerate() {
+                    for (row_idx, (k, v)) in pairs.iter().enumerate() {
                         let is_striped = row_idx % 2 == 1;
                         let bg_idx = if is_striped {
                             Some(ui.painter().add(egui::Shape::Noop))
@@ -99,8 +123,19 @@ pub fn render_yaml_table(ui: &mut egui::Ui, yaml: &serde_norway::Value) {
                                 ),
                             );
                         }
+
+                        // Cache row height for next frame.
+                        new_row_heights.push(row_response.response.rect.height());
                     }
                 });
+
+                // Store cache for next frame.
+                let cache = YamlTableCache {
+                    content_hash,
+                    pairs: pairs.clone(),
+                    row_heights: new_row_heights,
+                };
+                ui.data_mut(|d| d.insert_temp(cache_id, cache));
             });
         ui.add_space(8.0);
     }

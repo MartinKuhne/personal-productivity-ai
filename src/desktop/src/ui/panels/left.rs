@@ -3,7 +3,7 @@
 use crate::ui::FastMdApp;
 use crate::ui::TreeNode;
 use crate::ui::TreeNodeContext;
-use crate::ui::tree::{TREE_ROW_HEIGHT, flatten_tree, render_flat_row};
+use crate::ui::tree::{FlatRow, TREE_ROW_HEIGHT, flatten_tree, render_flat_row};
 use eframe::egui;
 use egui::RichText;
 use egui::containers::Panel;
@@ -197,6 +197,28 @@ pub fn show_left_panel(app: &mut FastMdApp, parent_ui: &mut egui::Ui) {
         .max(180.0)
         .min(max_w);
 
+    // Rebuild tree rows only when dirty
+    let tree_rows: Vec<FlatRow> = if app.selection().tree_dirty() {
+        let mut rows = Vec::new();
+        if !root_node.children.is_empty() {
+            flatten_tree(&root_node, 0, &app.selection().expanded_dirs, &mut rows);
+        }
+        app.cached_tree_rows = Some(rows.clone());
+        *app.selection_mut().tree_dirty_mut() = false;
+        rows
+    } else if let Some(cached) = app.cached_tree_rows.take() {
+        let rows = cached.clone();
+        app.cached_tree_rows = Some(cached);
+        rows
+    } else {
+        let mut rows = Vec::new();
+        if !root_node.children.is_empty() {
+            flatten_tree(&root_node, 0, &app.selection().expanded_dirs, &mut rows);
+        }
+        app.cached_tree_rows = Some(rows.clone());
+        rows
+    };
+
     // egui 0.35 unified `SidePanel`/`TopBottomPanel` into `Panel`,
     // and panels now allocate within a parent `&mut Ui`.
     // `default_width` / `max_width` are now `default_size` / `max_size`.
@@ -240,15 +262,10 @@ pub fn show_left_panel(app: &mut FastMdApp, parent_ui: &mut egui::Ui) {
             let file_event_bus = &app.file_event_bus;
             let tx = app.tx.clone();
 
-            let mut rows = Vec::new();
-            if !root_node.children.is_empty() {
-                flatten_tree(&root_node, 0, &selection.expanded_dirs, &mut rows);
-            }
-
             egui::ScrollArea::vertical()
                 .id_salt("virtual_tree_rows")
                 .auto_shrink([false, false])
-                .show_rows(ui, TREE_ROW_HEIGHT, rows.len(), |ui, row_range| {
+                .show_rows(ui, TREE_ROW_HEIGHT, tree_rows.len(), |ui, row_range| {
                     let mut ctx = TreeNodeContext {
                         selected_file: &mut selection.selected_file,
                         selected_files: &mut selection.selected_files,
@@ -277,7 +294,7 @@ pub fn show_left_panel(app: &mut FastMdApp, parent_ui: &mut egui::Ui) {
                     };
 
                     for i in row_range {
-                        let row = &rows[i];
+                        let row = &tree_rows[i];
                         render_flat_row(ui, row, &mut ctx);
                     }
                 });
@@ -288,7 +305,7 @@ pub fn show_left_panel(app: &mut FastMdApp, parent_ui: &mut egui::Ui) {
             // that would add/remove a widget at the same rect on
             // successive passes — that conditional was itself a
             // source of id-clash warnings before the fix.
-            if rows.is_empty() {
+            if tree_rows.is_empty() {
                 ui.add_space(8.0);
                 ui.label(
                     RichText::new(crate::ui::strings::NO_MARKDOWN_FILES)

@@ -213,6 +213,7 @@ pub fn show_top_panel_capture(
                                 app.tags().file_tags(),
                             );
                             *app.selection_mut().selected_file_mut() = next;
+                            app.selection_mut().tree_dirty = true;
                         }
                     });
             });

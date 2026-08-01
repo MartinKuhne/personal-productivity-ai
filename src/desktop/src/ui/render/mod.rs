@@ -145,7 +145,32 @@ pub fn render_markdown(
                     ui.add_space(est_h);
                     continue;
                 }
-                _ => {}
+                RenderEvent::Heading { level, .. } => {
+                    let size = match level {
+                        1 => 32.0,
+                        2 => 24.0,
+                        3 => 18.0,
+                        4 => 14.0,
+                        _ => 12.0,
+                    };
+                    ui.add_space(size + 8.0);
+                    continue;
+                }
+                RenderEvent::Table(cells) => {
+                    // Estimate table height: header + rows
+                    let row_count = cells.len().max(1) as f32;
+                    let est_h = row_count * 22.0 + 20.0;
+                    ui.add_space(est_h);
+                    continue;
+                }
+                RenderEvent::Space(amount) => {
+                    ui.add_space(*amount);
+                    continue;
+                }
+                RenderEvent::Separator => {
+                    ui.add_space(4.0);
+                    continue;
+                }
             }
         }
         match event {

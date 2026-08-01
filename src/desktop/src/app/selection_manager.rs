@@ -8,6 +8,7 @@ pub struct SelectionManager {
     pub selected_files: HashSet<PathBuf>,
     pub selected_dir: Option<PathBuf>,
     pub expanded_dirs: HashSet<PathBuf>,
+    pub tree_dirty: bool,
 }
 
 impl Default for SelectionManager {
@@ -23,6 +24,7 @@ impl SelectionManager {
             selected_files: HashSet::new(),
             selected_dir: None,
             expanded_dirs: HashSet::new(),
+            tree_dirty: true,
         }
     }
 
@@ -48,6 +50,7 @@ impl SelectionManager {
         } else {
             self.expanded_dirs.insert(path);
         }
+        self.tree_dirty = true;
     }
 
     pub fn clear(&mut self) {
@@ -95,6 +98,14 @@ impl SelectionManager {
 
     pub fn expanded_dirs_mut(&mut self) -> &mut HashSet<PathBuf> {
         &mut self.expanded_dirs
+    }
+
+    pub fn tree_dirty(&self) -> bool {
+        self.tree_dirty
+    }
+
+    pub fn tree_dirty_mut(&mut self) -> &mut bool {
+        &mut self.tree_dirty
     }
 }
 

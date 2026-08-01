@@ -60,6 +60,10 @@ pub struct FastMdApp {
     pub selection: SelectionManager,
     pub tab_manager: TabManager,
 
+    /// Cached flattened tree rows to avoid rebuilding the file tree every frame.
+    /// Invalidated when `selection.tree_dirty` is true.
+    pub cached_tree_rows: Option<Vec<crate::ui::tree::FlatRow>>,
+
     pub _watcher: Option<notify::RecommendedWatcher>,
 
     /// Agent session manager - encapsulates all agent state and lifecycle.
@@ -193,10 +197,12 @@ impl FastMdApp {
 
         let mut changed = false;
         let mut needs_rebuild = false;
+        let mut tree_dirty = false;
 
         // Let DirectoryTracker consume directory events from its own subscriber.
         if self.directory_tracker.process_events() {
             changed = true;
+            tree_dirty = true;
         }
 
         if let Some(reader) = &self.file_event_reader {
@@ -214,6 +220,7 @@ impl FastMdApp {
                                 }
                             }
                         }
+                        tree_dirty = true;
                     }
                     FileEventKind::Updated => {
                         for p in &event.paths {
@@ -234,16 +241,19 @@ impl FastMdApp {
                         }
                         removed_paths.extend(event.paths);
                         needs_rebuild = true;
+                        tree_dirty = true;
                     }
                     FileEventKind::DirDiscovered => {
                         for p in &event.paths {
                             self.file_processor.add_dir(p.clone());
                         }
+                        tree_dirty = true;
                     }
                     FileEventKind::DirRemoved => {
                         for p in &event.paths {
                             self.file_processor.remove_dir(p);
                         }
+                        tree_dirty = true;
                     }
                 }
             }
@@ -254,6 +264,10 @@ impl FastMdApp {
 
         if needs_rebuild {
             self.tag_manager.rebuild();
+        }
+
+        if tree_dirty {
+            self.selection.tree_dirty = true;
         }
 
         changed
@@ -448,6 +462,7 @@ impl FastMdApp {
             layout,
             selection,
             tab_manager: TabManager::new(),
+            cached_tree_rows: None,
             _watcher: None,
             agent,
             dialogs,
@@ -530,6 +545,7 @@ impl FastMdApp {
             layout: PanelLayout::new(),
             selection: SelectionManager::new(),
             tab_manager: TabManager::new(),
+            cached_tree_rows: None,
             _watcher: None,
             agent,
             dialogs,
@@ -770,6 +786,7 @@ impl FastMdApp {
         );
 
         self.content_libraries = config.content_libraries.clone();
+        self.selection.tree_dirty = true;
         self.inline_editor_enabled = config.inline_editor_enabled;
         self.dialogs.batch_dialog_config.available_dirs = config
             .content_libraries
@@ -821,9 +838,11 @@ impl FastMdApp {
             FsEvent::FileParsed { path, tags } => {
                 self.tag_manager.add_tags(path.clone(), tags);
                 self.file_processor.add_file(path);
+                self.selection.tree_dirty = true;
             }
             FsEvent::DirParsed { path } => {
                 self.file_processor.add_dir(path);
+                self.selection.tree_dirty = true;
             }
             FsEvent::Finished => {
                 // The file-watcher thread has finished its initial
@@ -835,10 +854,12 @@ impl FastMdApp {
                 }
                 self.file_processor.indexing_finished = true;
                 self.tag_manager.rebuild();
+                self.selection.tree_dirty = true;
             }
             FsEvent::FinishedWithoutWatcher => {
                 self.file_processor.indexing_finished = true;
                 self.tag_manager.rebuild();
+                self.selection.tree_dirty = true;
             }
             FsEvent::FileModified { path, tags } => {
                 self.tag_manager.add_tags(path.clone(), tags);
@@ -847,6 +868,7 @@ impl FastMdApp {
                 if self.tab_manager.loaded_path.as_ref() == Some(&path) {
                     self.tab_manager.loaded_path = None;
                 }
+                self.selection.tree_dirty = true;
             }
             FsEvent::FileDeleted { path } => {
                 self.file_processor.remove_file(&path);
@@ -863,6 +885,7 @@ impl FastMdApp {
                 if self.tab_manager.loaded_path.as_ref() == Some(&path) {
                     self.tab_manager.loaded_path = None;
                 }
+                self.selection.tree_dirty = true;
             }
         }
     }

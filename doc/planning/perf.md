@@ -1,4 +1,137 @@
-# Performance Profiling Tooling
+# Rendering Performance Improvement Plan
+
+**Status:** accepted
+**Date:** 2026-08-01
+**Reviewer:** AI Agent
+
+---
+
+## Context
+
+The `fastmd` crate (~43.6K LOC) is an egui-based markdown knowledge-base viewer. Current CPU load is 3.1% on a powerful system (AMD 7950X / Intel XPS 15), but frame-time profiling reveals redundant work every frame even when nothing changes. The immediate-mode egui architecture rebuilds the entire widget tree each frame; without caching, stable content incurs O(N) work per frame where N = files in workspace or lines in document.
+
+### What Changes vs. Stays Stable Per Frame
+
+| Component | Stability | Current Cache Status |
+|-----------|-----------|---------------------|
+| Markdown text content | Stable until file reload/edit | ✅ Parsed events cached via text hash |
+| Markdown AST / RenderEvents | Stable | ✅ Cached in `ui.ctx().data_temp` |
+| Table cell content & token widths | Stable | ✅ `measure_cached` with cell_hash + font_hash |
+| Table column max/min/breakpoints | Stable | ✅ `measure_cached` |
+| Table FTWA decision | Stable if available_width same | ✅ `ftwa_cached` with input_hash + avail + strategy |
+| Table row heights | Stable | ✅ Cached per-row in egui temp data |
+| YAML front matter | Stable until file reload | ❌ Re-rendered every frame |
+| File tree structure | Stable until file add/remove | ❌ `build_workspace_tree` runs every frame |
+| TOC entries | Stable until file reload | ✅ Built once on file load, re-rendered each frame |
+| Panel sizes | Stable until user resizes | ✅ Cached in `PanelLayout` |
+| Font metrics / text shaping | Stable | ✅ Cached via measure/ftwa caches |
+
+### Redundant Work Every Frame (Performance Targets)
+
+1. **`build_workspace_tree()`** (`left.rs:148`) — Rebuilds entire `TreeNode` hierarchy from `all_files` every frame — **expensive for large workspaces**
+2. **`flatten_tree()`** — Converts tree to flat rows every frame
+3. **`render_markdown` full iteration** — Walks all `RenderEvent`s even when only scroll position changed
+4. **YAML table re-render** — Full layout every frame
+4. **Tab strip rebuild** — Recreates all tab buttons every frame
+5. **TOC rebuild** — Full re-layout each frame despite stable data
+
+---
+
+## Decision: Prioritized Optimization Plan
+
+### 🔴 P0 — High Impact, Low Risk (Implement First)
+
+| # | Optimization | Location | Expected Gain |
+|---|--------------|----------|---------------|
+| **P0-1** | **Cache `TreeNode` hierarchy** — Only rebuild when `all_files`/`all_dirs`/`tags`/library list changes. Add `tree_dirty` flag like `left_panel_dirty`. | `left.rs:build_workspace_tree` | **Eliminates O(files) tree rebuild every frame** — biggest win for large workspaces |
+| **P0-2** | **Cache flattened rows** — Store `Vec<FlatRow>` in `SelectionManager` or `PanelLayout`, invalidate only on tree structure change. | `left.rs:243-246` | Avoids `flatten_tree` + `push_id` allocation every frame |
+| **P0-3** | **Extend viewport culling to all event types** — Currently skips only `FlushInline` and `CodeBlock` off-screen. Extend to skip `Heading`, `Table`, `Space`, `Separator` when off-screen. | `render/mod.rs:123-150` | Reduces widget allocation for long documents; already has clip_rect logic |
+| **P0-4** | **Cache YAML table render** — Store rendered row layout data; only re-render when YAML content changes. | `yaml_table.rs` | Avoids full table layout every frame for documents with front matter |
+
+### 🟠 P1 — Medium Impact, Medium Effort
+
+| # | Optimization | Location | Expected Gain |
+|---|--------------|----------|---------------|
+| **P1-1** | **Memoize tab strip** — Cache tab button widgets; only rebuild when tabs vector changes. | `center.rs:247-338` | Eliminates per-frame tab button allocation |
+| **P1-2** | **Virtualize TOC rendering** — Use `ScrollArea::show_rows` for TOC like left panel does. | `right.rs:158-185` | Scales to documents with hundreds of headings |
+| **P1-3** | **Pre-compute heading IDs once** — `render_markdown` builds `heading_seen` HashMap every frame. Move to `TabManager` with markdown content hash. | `render/mod.rs:110-121` | Avoids HashMap allocation + string ops every frame |
+
+### 🟡 P2 — Lower Impact / Higher Risk
+
+| # | Optimization | Location | Risk / Effort |
+|---|--------------|----------|---------------|
+| **P2-1** | Persistent egui widget IDs for static content | `render/mod.rs` | High: stable IDs across frames challenge |
+| **P2-2** | Separate "layout" vs "paint" passes | Architecture | Very High: fundamental egui model change |
+| **P2-3** | GPU-accelerated text rendering | Architecture | High: major refactor, diminishing returns at 3.1% CPU |
+
+### 🟢 P3 — Profiling & Validation Infrastructure
+
+| # | Task | Purpose |
+|---|------|---------|
+| **P3-1** | Add frame-time profiling — Integrate `puffin` scopes around each panel + `render_markdown` + `build_workspace_tree` | Quantify actual bottlenecks |
+| **P3-2** | Benchmark harness — Render large markdown file (10k lines) + large workspace (10k files) in headless mode | Regression detection |
+| **P3-3** | Cache hit/miss metrics — Instrument `measure_cached` / `ftwa_cached` / markdown parse cache | Validate caching effectiveness |
+
+---
+
+## Implementation Order (P0 Focus)
+
+```
+Week 1:  P0-1 → P0-2  (Tree caching - highest ROI)
+Week 2:  P0-3 → P0-4  (Markdown culling + YAML cache)
+Week 3:  P1-1 → P1-2  (Tab strip + TOC virtualization)
+Week 4:  P1-3 → P3-1  (Heading IDs + profiling)
+```
+
+---
+
+## Expected Results
+
+| Metric | Current | Target (after P0+P1) |
+|--------|---------|---------------------|
+| Frame time (10k file workspace) | ~8-12ms | **<2ms** |
+| Frame time (10k line markdown) | ~5-8ms | **<1ms** |
+| Tree rebuilds per second | 60 (every frame) | **0 (only on change)** |
+| Markdown events processed/frame | All | **~10-20% (visible only)** |
+
+---
+
+## Key Implementation Patterns (Already Established in Codebase)
+
+### Tree caching pattern (`left_panel_dirty` precedent)
+```rust
+// In SelectionManager or PanelLayout - add dirty flag
+if app.selection.tree_dirty {
+    root_node = build_workspace_tree(app);
+    app.selection.flattened_rows = flatten_tree(&root_node, ...);
+    app.selection.tree_dirty = false;
+}
+```
+
+### Viewport culling extension (minimal change)
+```rust
+// In render/mod.rs - extend the clip check to ALL event types
+if clip.is_positive() && top_y > clip.max.y + viewport_margin {
+    // Skip rendering this event entirely, just add estimated space
+    ui.add_space(estimated_height_for_event(event));
+    continue;
+}
+```
+
+### Tab strip memoization
+The tab strip is stable except when tabs added/removed/closed. Cache the `Vec<PathBuf>` snapshot and only rebuild on change.
+
+---
+
+## Related
+
+- Profiling tooling ADR: [`doc/planning/perf.md`](../planning/perf.md) (this document — profiling tooling section preserved below)
+- egui documentation: [`doc/distill/egui.md`](../distill/egui.md)
+- Architecture: [`doc/technical-context/ARCHITECTURE_C4.md`](../technical-context/ARCHITECTURE_C4.md)
+
+---
+
+# Profiling Tooling (Preserved from Original Proposal)
 
 **Status:** proposal
 **Date:** 2026-08-01
@@ -26,43 +159,43 @@ Add `puffin` + `puffin_egui` as conditional dependencies gated behind a `profili
 
 1. **`Cargo.toml`** — Add puffin dependencies under a `profiling` feature:
 
-   ```toml
-   [features]
-   default = []
-   profiling = ["puffin", "puffin_egui"]
-   puffin = { version = "0.19", optional = true }
-   puffin_egui = { version = "0.30", optional = true, default-features = false }
-   ```
+    ```toml
+    [features]
+    default = []
+    profiling = ["puffin", "puffin_egui"]
+    puffin = { version = "0.19", optional = true }
+    puffin_egui = { version = "0.30", optional = true, default-features = false }
+    ```
 
 2. **`src/main.rs`** — Initialize `puffin` profiler at startup:
 
-   ```rust
-   #[cfg(feature = "profiling")]
-   static PROFILER: puffin::Profiler = puffin::Profiler {};
-   ```
+    ```rust
+    #[cfg(feature = "profiling")]
+    static PROFILER: puffin::Profiler = puffin::Profiler {};
+    ```
 
 3. **`ui/app.rs` — `FastMdApp::update`** — Instrument the egui frame loop:
 
-   ```rust
-   #[cfg(feature = "profiling")]
-   puffin::GlobalProfiler::lock().new_frame();
+    ```rust
+    #[cfg(feature = "profiling")]
+    puffin::GlobalProfiler::lock().new_frame();
 
-   #[cfg(feature = "profiling")]
-   puffin::profile_function!();
-   ```
+    #[cfg(feature = "profiling")]
+    puffin::profile_function!();
+    ```
 
 4. **`ui/app.rs`** — Add a conditional "Profiler" window (toggleable via a menu bar item or keyboard shortcut):
 
-   ```rust
-   #[cfg(feature = "profiling")]
-   puffin_egui::profiler_ui(ctx);
-   ```
+    ```rust
+    #[cfg(feature = "profiling")]
+    puffin_egui::profiler_ui(ctx);
+    ```
 
 5. **Hot-path instrumentation** — Add `puffin::profile_scope!` to the most expensive known paths:
-   - `ui/render.rs` — `render_markdown` (4,152 LOC, known hot path)
-   - `markdown/document.rs` — front-matter parsing and markdown parsing
-   - `agent/tool_executor.rs` — tool execution loops
-   - `ui/tree.rs` — tree rendering and flattening
+    - `ui/render.rs` — `render_markdown` (4,152 LOC, known hot path)
+    - `markdown/document.rs` — front-matter parsing and markdown parsing
+    - `agent/tool_executor.rs` — tool execution loops
+    - `ui/tree.rs` — tree rendering and flattening
 
 **Why puffin first:**
 - Zero external dependencies (no Tracy server to install).
@@ -79,21 +212,21 @@ Add `tracing-tracy` (or `tracy-client`) as an optional dependency gated behind t
 
 1. **`Cargo.toml`** — Add tracy under the `profiling` feature:
 
-   ```toml
-   tracy-client = { version = "0.17", optional = true }
-   # or: tracing-tracy = { version = "0.11", optional = true }
-   ```
+    ```toml
+    tracy-client = { version = "0.17", optional = true }
+    # or: tracing-tracy = { version = "0.11", optional = true }
+    ```
 
 2. **`src/main.rs`** — Initialize Tracy subscriber:
 
-   ```rust
-   #[cfg(all(feature = "profiling", feature = "tracy"))]
-   fn init_tracy() {
-       tracing_subscriber::registry()
-           .with(tracing_tracy::TracyLayer::default())
-           .init();
-   }
-   ```
+    ```rust
+    #[cfg(all(feature = "profiling", feature = "tracy"))]
+    fn init_tracy() {
+        tracing_subscriber::registry()
+            .with(tracing_tracy::TracyLayer::default())
+            .init();
+    }
+    ```
 
 3. **Existing `tracing` usage** — The crate already uses `tracing` and `tracing-subscriber`. Tracy integration piggybacks on this — no `tracing` import changes needed. All existing `tracing::info!`, `tracing::debug!` calls automatically route through Tracy when the layer is active.
 
