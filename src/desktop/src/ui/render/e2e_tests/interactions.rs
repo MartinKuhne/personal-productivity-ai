@@ -238,6 +238,7 @@ fn test_render_task_checkbox_initial_state() {
                 &mut scroll_id,
                 &mut Vec::new(),
                 crate::ui::table_width::DeficitStrategy::ProportionalToSlack,
+                None,
             );
         });
     });

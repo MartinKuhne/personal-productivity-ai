@@ -879,6 +879,7 @@ impl FastMdApp {
                     *self.selection.selected_file_mut() = None;
                     self.tab_manager.current_yaml = None;
                     self.tab_manager.current_markdown = String::new();
+                    self.tab_manager.invalidate_heading_ids_cache();
                     self.tab_manager.toc.clear();
                 }
                 self.selection.selected_files_mut().remove(&path);
@@ -908,6 +909,7 @@ impl FastMdApp {
                         self.tab_manager.current_yaml = None;
                         self.tab_manager.current_markdown = content;
                     }
+                    self.tab_manager.invalidate_heading_ids_cache();
                     self.tab_manager.loaded_path = Some(path.clone());
                     self.tab_manager.toc =
                         crate::ui::render::build_toc(&self.tab_manager.current_markdown);

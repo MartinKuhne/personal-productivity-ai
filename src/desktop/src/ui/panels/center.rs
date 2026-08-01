@@ -203,6 +203,7 @@ fn render_agent_session(ui: &mut egui::Ui, app: &mut FastMdApp) {
                     &mut agent.state_mut().scroll_to_id,
                     &mut toggles,
                     strategy,
+                    None,
                 );
                 // P0-2: Apply task checkbox toggles to the response source.
                 if !toggles.is_empty() {
@@ -246,17 +247,13 @@ pub fn render_tabs_and_content_capture(
 ) {
     ui.horizontal(|ui| {
         let tabs_snapshot: Vec<PathBuf> = app.tab_manager.tabs.clone();
+        let tab_titles = app.tab_manager.tab_titles().to_vec();
 
-        for (i, tab_path) in tabs_snapshot.iter().enumerate() {
+        for (i, (tab_path, title)) in tabs_snapshot.iter().zip(tab_titles.iter()).enumerate() {
             let is_selected = app.selection.selected_file() == Some(tab_path);
-            let title: String = tab_path
-                .file_name()
-                .unwrap_or_default()
-                .to_string_lossy()
-                .into();
 
             let response = ui.push_id((i, tab_path, "tab_label"), |ui| {
-                ui.selectable_label(is_selected, &title)
+                ui.selectable_label(is_selected, title)
             });
             if response.inner.clicked() {
                 *app.selection_mut().selected_file_mut() = Some(tab_path.clone());
@@ -367,12 +364,14 @@ pub fn render_tabs_and_content_capture(
                 if let Some(yaml) = &app.tab_manager.current_yaml {
                     render_yaml_table(ui, yaml);
                 }
+                let heading_ids = app.tab_manager.heading_ids().to_vec();
                 render_markdown(
                     ui,
                     &app.tab_manager.current_markdown,
                     &mut app.tab_manager.scroll_to_header_id,
                     &mut app.tab_manager.pending_task_toggles,
                     app.config.deficit_strategy(),
+                    Some(&heading_ids),
                 );
                 // P0-2: Apply task checkbox toggles to the markdown source.
                 if !app.tab_manager.pending_task_toggles.is_empty() {

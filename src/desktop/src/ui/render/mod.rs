@@ -67,12 +67,17 @@ use eframe::egui;
 /// Option<String>`, converts it to an `egui::Id` for the inner
 /// scroll-to-me comparison, and clears the field when the matching
 /// heading has been scrolled to.
+///
+/// `heading_ids` is an optional pre-computed slice of heading IDs
+/// (with duplicate disambiguation). If provided, avoids re-parsing
+/// headings and re-computing IDs on every frame.
 pub fn render_markdown(
     ui: &mut egui::Ui,
     markdown_text: &str,
     scroll_to_id_str: &mut Option<String>,
     pending_toggles: &mut Vec<(usize, bool)>,
     strategy: crate::ui::table_width::DeficitStrategy,
+    heading_ids: Option<&[String]>,
 ) {
     #[cfg(feature = "profiling")]
     puffin::profile_scope!("render_markdown");
@@ -119,6 +124,9 @@ pub fn render_markdown(
         *occurrence += 1;
         id
     };
+
+    // Iterator over pre-computed heading IDs if provided.
+    let mut heading_ids_iter = heading_ids.map(|ids| ids.iter().peekable());
 
     let clip = ui.clip_rect();
     let viewport_margin = 400.0_f32;
@@ -206,7 +214,11 @@ pub fn render_markdown(
                 if trimmed.is_empty() {
                     continue;
                 }
-                let heading_id_str = heading_id_for(trimmed);
+                let heading_id_str = if let Some(iter) = &mut heading_ids_iter {
+                    iter.next().unwrap().clone()
+                } else {
+                    heading_id_for(trimmed)
+                };
                 render_heading(ui, elems, *level, scroll_to_id_str, &heading_id_str);
             }
             RenderEvent::Table(cells) => {
