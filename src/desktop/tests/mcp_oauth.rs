@@ -8,9 +8,13 @@
 //! * The authorization server (Protected Resource Metadata,
 //!   Authorization Server Metadata, token endpoint).
 //!
-//! The browser is not actually launched — we pre-supply a
-//! `loopback_override` whose callback we control directly. This
-//! keeps the test hermetic and free of any user interaction.
+//! The `open_browser` step inside `run_oauth_flow` is NOT short-circuited
+//! by `loopback_override` — the override only replaces the loopback
+//! listener, not the `webbrowser::open(auth_url)` call. As a result,
+//! any test that drives the real flow pops a real browser window at the
+//! mock server's `/authorize` URL. The two tests below are therefore
+//! marked `#[ignore]` so `cargo test` stays hermetic. Re-enable a single
+//! test locally with `cargo nextest run -E 'test(/full_flow/)'` etc.
 //!
 //! Each test owns its own mock server with a script of canned
 //! responses. Responses are queued in REVERSE order on a shared
@@ -130,6 +134,7 @@ fn start_mock() -> (u16, Arc<MockState>) {
 }
 
 #[test]
+#[ignore = "drives the real OAuth flow, which calls webbrowser::open(auth_url) and pops a browser window at the mock server's /authorize URL — not hermetic; see module docstring"]
 fn full_flow_succeeds_with_preregistered_client() {
     // Canned responses (in reverse — handler pops the last):
     //   5. Token endpoint → token response
@@ -240,6 +245,7 @@ fn full_flow_succeeds_with_preregistered_client() {
 }
 
 #[test]
+#[ignore = "drives the real OAuth flow, which calls webbrowser::open(auth_url) and pops a browser window at the mock server's /authorize URL — not hermetic; see module docstring"]
 fn flow_uses_challenge_resource_metadata_url() {
     let (port, state) = start_mock();
     state.push(canned(
