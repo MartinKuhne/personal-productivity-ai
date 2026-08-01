@@ -19,6 +19,14 @@ The following table summarizes all 27 tools available to the LLM agent, categori
 | **Web Integration** | `web_fetch` | Fetch a URL and convert its HTML body to markdown. | None |
 | **Web Integration** | `web_search` | Search the web using SearXNG. | `searxng_url` |
 | **Web Integration** | `web_delegate` | Delegate complex web research to a sub-agent with web_search/web_fetch tools. | None |
+| **Browser Automation** | `browser_navigate` | Drive the persistent headless Firefox page to a URL. | `tool_groups.browser` |
+| **Browser Automation** | `browser_get_page_state` | Return interactable elements (a/button/input/select/textarea) plus current `url` and `title`; ReadOnly, parallel-safe. | `tool_groups.browser` |
+| **Browser Automation** | `browser_click` | Click a single element by CSS selector. | `tool_groups.browser` |
+| **Browser Automation** | `browser_fill_input` | Fill a single `<input>` or `<textarea>`. | `tool_groups.browser` |
+| **Browser Automation** | `browser_select_dropdown` | Pick a `<select>` option by its `value` attribute. | `tool_groups.browser` |
+| **Browser Automation** | `browser_press_key` | Press a single keyboard key (`Enter`, `Tab`, `Escape`, `ArrowDown`, ...). | `tool_groups.browser` |
+| **Browser Automation** | `browser_evaluate_js` | Evaluate an arbitrary JavaScript expression; true escape hatch. | `tool_groups.browser` |
+| **Browser Automation** | `browser_screenshot` | Save a PNG to `browser.screenshot_dir` (filename is sanitised; no `..`, no path separators). | `tool_groups.browser` |
 | **JMAP Productivity**| `search_calendar` | Search calendar events by keyword. | `jmap_url`, `jmap_token` |
 | **JMAP Productivity**| `get_calendar` | Retrieve calendar events by ISO date range. | `jmap_url`, `jmap_token` |
 | **JMAP Productivity**| `get_calendar_item`| Retrieve a specific calendar event by ID. | `jmap_url`, `jmap_token` |
@@ -237,6 +245,105 @@ All tool responses follow the same envelope:
 * **Response (`data`):**
   ```json
   { "result": "Summarized research findings..." }
+  ```
+
+#### 2b. Browser Automation Tools
+
+*Conditionally available — only offered to the LLM when `tool_groups.browser == true` in `config.yaml`. The tools drive a long-lived headless Firefox instance shared across every mutating call, so login state and JS state survive across tool calls inside a single agent turn. Cookies / local storage are persisted to `browser.storage_state_path` (default `%APPDATA%\fastmd\browser-storage.json`) and reloaded on the next launch — the user stays logged in across app restarts.*
+
+*First-time setup:* run `playwright install firefox` once. The Tools dialog surfaces a `Discovery` error if the browser binary is missing.
+
+##### `browser_navigate`
+* **Description:** Drive the persistent page to a URL. State (cookies, JS, scroll) is preserved across calls.
+* **Request:**
+  ```json
+  { "url": "https://example.com/login" }
+  ```
+* **Response (`data`):**
+  ```json
+  { "url": "https://example.com/login", "title": "Sign in — Example" }
+  ```
+
+##### `browser_get_page_state`
+* **Description:** Return interactable elements (a / button / input / select / textarea) with stable `agent_id`s, plus the current `url` and `title`. ReadOnly; safe to call alongside other read-only tools.
+* **Request:**
+  ```json
+  {}
+  ```
+* **Response (`data`):**
+  ```json
+  {
+    "url": "https://example.com/login",
+    "title": "Sign in — Example",
+    "elements": "[{\"agent_id\":0,\"tag\":\"INPUT\",\"text\":\"\",\"placeholder\":\"Username\",\"name\":\"user\",\"type\":\"text\",\"href\":null}, ...]",
+    "total": 17
+  }
+  ```
+
+##### `browser_click`
+* **Description:** Click a single element by CSS selector. Page state changes.
+* **Request:**
+  ```json
+  { "selector": "button.submit" }
+  ```
+* **Response (`data`):**
+  ```json
+  { "result": "clicked" }
+  ```
+
+##### `browser_fill_input`
+* **Description:** Fill a single `<input>` or `<textarea>`. Replaces existing value.
+* **Request:**
+  ```json
+  { "selector": "input[name=password]", "text": "correct horse battery staple" }
+  ```
+* **Response (`data`):**
+  ```json
+  { "result": "filled" }
+  ```
+
+##### `browser_select_dropdown`
+* **Description:** Pick a `<select>` option by its `value` attribute.
+* **Request:**
+  ```json
+  { "selector": "select#country", "value": "US" }
+  ```
+* **Response (`data`):**
+  ```json
+  { "result": "selected" }
+  ```
+
+##### `browser_press_key`
+* **Description:** Press a single keyboard key on the page (`Enter`, `Tab`, `Escape`, `ArrowDown`, ...).
+* **Request:**
+  ```json
+  { "key": "Enter" }
+  ```
+* **Response (`data`):**
+  ```json
+  { "result": "pressed" }
+  ```
+
+##### `browser_evaluate_js`
+* **Description:** Evaluate an arbitrary JavaScript expression in the page context. True escape hatch — any side effect the page can do, this tool can do. Return value is serialised to JSON.
+* **Request:**
+  ```json
+  { "script": "() => document.querySelectorAll('a').length" }
+  ```
+* **Response (`data`):**
+  ```json
+  { "result": "42" }
+  ```
+
+##### `browser_screenshot`
+* **Description:** Save a PNG of the current page to `browser.screenshot_dir`. The `filename` is sanitised: only `[A-Za-z0-9._-]`, no `..`, no path separators, ≤ 128 chars, must not start with `.`. The screenshot is always written inside the configured directory — the LLM cannot escape it.
+* **Request:**
+  ```json
+  { "filename": "login.png", "full_page": false }
+  ```
+* **Response (`data`):**
+  ```json
+  { "path": "C:\\Users\\me\\Documents\\MyLib\\browser-screenshots\\login.png", "bytes": 84123 }
   ```
 
 ---

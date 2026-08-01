@@ -174,6 +174,13 @@ pub struct ToolGroupsConfig {
     /// Enable or disable weather tools.
     #[serde(default = "default_true")]
     pub weather: bool,
+    /// Enable or disable the headless-browser automation tools
+    /// (`browser_navigate`, `browser_click`, ...). Off by default
+    /// for the "no system access" posture described in the README;
+    /// the user must opt in to launch a Firefox subprocess
+    /// (BRWS-CONF-001).
+    #[serde(default)]
+    pub browser: bool,
 }
 
 impl Default for ToolGroupsConfig {
@@ -186,8 +193,165 @@ impl Default for ToolGroupsConfig {
             calendar: true,
             csv_db: true,
             weather: true,
+            browser: false,
         }
     }
+}
+
+/// Per-tool-group settings for the browser tool family.
+///
+/// Lives under `config.browser`. All fields are optional so an
+/// empty `browser: {}` block (or a missing one entirely) is a
+/// valid configuration — sensible defaults are filled in by
+/// [`BrowserConfig::resolve`] and used by the
+/// [`crate::app::browser::BrowserSession`].
+#[derive(serde::Serialize, serde::Deserialize, Clone, Debug, PartialEq, Eq)]
+pub struct BrowserConfig {
+    /// Directory the LLM is allowed to write screenshots to. An
+    /// empty string means "use the first content library's
+    /// `browser-screenshots/` subfolder" (BRWS-CONF-002). The
+    /// directory is created on first write.
+    #[serde(default)]
+    pub screenshot_dir: String,
+    /// `true` (default) runs Firefox headlessly. Set to `false`
+    /// to debug the browser visually — the user will see the
+    /// Firefox window open.
+    #[serde(default = "default_true")]
+    pub headless: bool,
+    /// Browser channel. Only `firefox` is wired up in this
+    /// revision; other values fail at session launch with a
+    /// `Discovery` error (BRWS-CONF-003).
+    #[serde(default = "default_browser_type")]
+    pub browser_type: String,
+    /// Close the Firefox subprocess after this many seconds of
+    /// tool-call silence. `0` disables the idle timeout. The
+    /// persisted cookie file is reloaded on the next launch, so
+    /// the user stays logged in across idle periods
+    /// (BRWS-CONF-004).
+    #[serde(default = "default_browser_idle_timeout")]
+    pub idle_timeout_seconds: u64,
+    /// Per-page navigation timeout. Defaults to 30 seconds.
+    #[serde(default = "default_browser_page_load_timeout")]
+    pub page_load_timeout_ms: u64,
+    /// Path to the Playwright `storage_state` JSON file. The
+    /// default is `%APPDATA%\fastmd\browser-storage.json` on
+    /// Windows and the XDG `~/.config/fastmd/` equivalent
+    /// elsewhere. Cookies and local storage are saved here on
+    /// every mutating tool call (debounced) and reloaded on the
+    /// next session launch (BRWS-CONF-005).
+    #[serde(default)]
+    pub storage_state_path: String,
+}
+
+/// Default browser channel. Firefox-only for v1; `browser_type`
+/// is kept as a string so we can add others without a schema
+/// change.
+fn default_browser_type() -> String {
+    "firefox".to_string()
+}
+
+fn default_browser_idle_timeout() -> u64 {
+    300
+}
+
+fn default_browser_page_load_timeout() -> u64 {
+    30_000
+}
+
+impl Default for BrowserConfig {
+    fn default() -> Self {
+        Self {
+            screenshot_dir: String::new(),
+            headless: true,
+            browser_type: default_browser_type(),
+            idle_timeout_seconds: default_browser_idle_timeout(),
+            page_load_timeout_ms: default_browser_page_load_timeout(),
+            storage_state_path: String::new(),
+        }
+    }
+}
+
+impl BrowserConfig {
+    /// Fill in any empty fields with defaults that depend on
+    /// environment (e.g. `%APPDATA%`) or on the content library
+    /// list. Called by [`crate::app::browser::BrowserSession`]
+    /// right before the first launch so we don't pay the
+    /// environment lookup at config-load time.
+    pub fn resolve(&self, content_libraries: &[ContentLibrary]) -> ResolvedBrowserConfig {
+        let screenshot_dir = if self.screenshot_dir.is_empty() {
+            default_screenshot_dir(content_libraries)
+        } else {
+            std::path::PathBuf::from(&self.screenshot_dir)
+        };
+        let storage_state_path = if self.storage_state_path.is_empty() {
+            default_storage_state_path()
+        } else {
+            std::path::PathBuf::from(&self.storage_state_path)
+        };
+        ResolvedBrowserConfig {
+            screenshot_dir,
+            headless: self.headless,
+            browser_type: self.browser_type.clone(),
+            idle_timeout_seconds: self.idle_timeout_seconds,
+            page_load_timeout_ms: self.page_load_timeout_ms,
+            storage_state_path,
+        }
+    }
+}
+
+/// [`BrowserConfig`] with every empty string filled in with a
+/// concrete path. Pass this to the session so the rest of the
+/// code never has to think about "is this a default?".
+#[derive(Clone, Debug)]
+pub struct ResolvedBrowserConfig {
+    /// Absolute path; created on first write.
+    pub screenshot_dir: std::path::PathBuf,
+    /// `true` for headless.
+    pub headless: bool,
+    /// `"firefox"` today; future values surface as a
+    /// `Discovery` error at launch.
+    pub browser_type: String,
+    /// Idle timeout in seconds (`0` = never).
+    pub idle_timeout_seconds: u64,
+    /// Per-page navigation timeout in milliseconds.
+    pub page_load_timeout_ms: u64,
+    /// Absolute path to the Playwright `storage_state` JSON.
+    pub storage_state_path: std::path::PathBuf,
+}
+
+fn default_screenshot_dir(content_libraries: &[ContentLibrary]) -> std::path::PathBuf {
+    content_libraries
+        .first()
+        .map(|lib| std::path::PathBuf::from(&lib.root_folder).join("browser-screenshots"))
+        .unwrap_or_else(|| std::path::PathBuf::from("browser-screenshots"))
+}
+
+fn default_storage_state_path() -> std::path::PathBuf {
+    // %APPDATA% on Windows, $XDG_CONFIG_HOME or ~/.config on
+    // Unix. Failing that, the current working directory.
+    #[cfg(windows)]
+    {
+        if let Ok(roaming) = std::env::var("APPDATA") {
+            return std::path::PathBuf::from(roaming)
+                .join("fastmd")
+                .join("browser-storage.json");
+        }
+    }
+    #[cfg(not(windows))]
+    {
+        if let Ok(xdg) = std::env::var("XDG_CONFIG_HOME") {
+            return std::path::PathBuf::from(xdg)
+                .join("fastmd")
+                .join("browser-storage.json");
+        }
+        if let Ok(home) = std::env::var("HOME") {
+            return std::path::PathBuf::from(home)
+                .join(".config")
+                .join("fastmd")
+                .join("browser-storage.json");
+        }
+    }
+    std::path::PathBuf::from("browser-storage.json")
 }
 
 /// Optional OAuth 2.1 configuration for an HTTP MCP server. Used by
@@ -409,6 +573,11 @@ pub struct AppConfig {
     /// Options: "proportional" (fast, O(|S|)), "waterfill" (better G1, O(K log |S|)).
     #[serde(default = "default_table_width_strategy")]
     pub table_width_strategy: String,
+    /// Browser automation settings (BRWS-CONF-001..005). Ignored
+    /// unless `tool_groups.browser == true`. Default fields are
+    /// filled in by [`BrowserConfig::resolve`] at session launch.
+    #[serde(default)]
+    pub browser: BrowserConfig,
 }
 
 impl std::fmt::Debug for AppConfig {
@@ -457,6 +626,7 @@ impl Default for AppConfig {
             tool_groups: ToolGroupsConfig::default(),
             mcp_servers: HashMap::new(),
             table_width_strategy: default_table_width_strategy(),
+            browser: BrowserConfig::default(),
         }
     }
 }
@@ -948,9 +1118,54 @@ user_name: "TestUser"
         assert!(cfg.calendar);
         assert!(cfg.csv_db);
         assert!(cfg.weather);
+        // Browser defaults to OFF (opt-in, BRWS-CONF-001).
+        assert!(!cfg.browser);
 
         let default_cfg = ToolGroupsConfig::default();
         assert_eq!(cfg, default_cfg);
+    }
+
+    #[test]
+    fn test_browser_config_defaults() {
+        let yaml = "{}";
+        let cfg: BrowserConfig = serde_yml::from_str(yaml).unwrap();
+        assert!(cfg.headless);
+        assert_eq!(cfg.browser_type, "firefox");
+        assert_eq!(cfg.idle_timeout_seconds, 300);
+        assert_eq!(cfg.page_load_timeout_ms, 30_000);
+        assert!(cfg.screenshot_dir.is_empty());
+        assert!(cfg.storage_state_path.is_empty());
+    }
+
+    #[test]
+    fn test_browser_config_resolve_fills_defaults() {
+        let cfg = BrowserConfig::default();
+        let resolved = cfg.resolve(&[]);
+        assert!(resolved.headless);
+        assert_eq!(resolved.browser_type, "firefox");
+        assert_eq!(resolved.idle_timeout_seconds, 300);
+        // The screenshot_dir and storage_state_path come from the
+        // environment, so we only check that they are non-empty.
+        assert!(!resolved.screenshot_dir.as_os_str().is_empty());
+        assert!(!resolved.storage_state_path.as_os_str().is_empty());
+    }
+
+    #[test]
+    fn test_browser_config_resolve_uses_content_library() {
+        let dir = tempdir().unwrap();
+        let cfg = BrowserConfig::default();
+        let libs = vec![ContentLibrary {
+            root_folder: dir.path().to_string_lossy().to_string(),
+            name: "MyLib".to_string(),
+            kind: "markdown".to_string(),
+            readonly: false,
+            priority: 0,
+        }];
+        let resolved = cfg.resolve(&libs);
+        assert_eq!(
+            resolved.screenshot_dir,
+            dir.path().join("browser-screenshots")
+        );
     }
 
     #[test]

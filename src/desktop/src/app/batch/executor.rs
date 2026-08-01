@@ -209,6 +209,9 @@ pub fn run_agent_blocking(
         history,
         current_response,
         model_name,
+        browser_session: std::sync::Arc::new(crate::app::browser::BrowserSession::new(
+            &crate::config::AppConfig::default(),
+        )),
     };
     run_agent(ctx);
 

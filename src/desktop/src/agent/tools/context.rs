@@ -1,9 +1,11 @@
 //! Tool context — provides tools with access to `AppConfig` and the file event bus, plus safe virtual-path resolution.
 
+use crate::app::browser::BrowserSession;
 use crate::app::vfs;
 use crate::bus::core::Bus;
 use crate::bus::events::file::{FileEvent, FileEventKind, FileEventProducer};
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
 
 /// Read-only VFS path resolver wrapping `AppConfig`.
 #[derive(Clone, Copy)]
@@ -73,16 +75,26 @@ pub struct ToolContext<'a> {
     pub file_event_bus: &'a Bus<FileEvent>,
     pub resolver: VfsResolver<'a>,
     pub publisher: EventPublisher<'a>,
+    /// Long-lived headless Firefox session, shared across every
+    /// mutating browser tool call. `None` only in early-startup
+    /// tests that don't care about the browser. Tools that
+    /// don't use the browser ignore this field.
+    pub browser_session: Arc<BrowserSession>,
 }
 
 impl<'a> ToolContext<'a> {
     /// Create a new `ToolContext`.
-    pub fn new(config: &'a crate::config::AppConfig, file_event_bus: &'a Bus<FileEvent>) -> Self {
+    pub fn new(
+        config: &'a crate::config::AppConfig,
+        file_event_bus: &'a Bus<FileEvent>,
+        browser_session: Arc<BrowserSession>,
+    ) -> Self {
         Self {
             config,
             file_event_bus,
             resolver: VfsResolver::new(config),
             publisher: EventPublisher::new(file_event_bus),
+            browser_session,
         }
     }
 

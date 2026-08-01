@@ -442,6 +442,7 @@ fn is_internal_group_enabled(config: &AppConfig, g: InternalToolGroup) -> bool {
     match g {
         Filesystem => config.tool_groups.filesystem,
         Web => config.tool_groups.web,
+        Browser => config.tool_groups.browser,
         Email => config.tool_groups.email,
         Contacts => config.tool_groups.contacts,
         Calendar => config.tool_groups.calendar,
@@ -455,6 +456,7 @@ fn set_internal_group_enabled(config: &mut AppConfig, g: InternalToolGroup, on: 
     match g {
         Filesystem => config.tool_groups.filesystem = on,
         Web => config.tool_groups.web = on,
+        Browser => config.tool_groups.browser = on,
         Email => config.tool_groups.email = on,
         Contacts => config.tool_groups.contacts = on,
         Calendar => config.tool_groups.calendar = on,

@@ -1,5 +1,6 @@
 //! Agent context — bundles all inputs (config, channels, file bus, active file/dir, prompt, cancel flag, history) for an agent session.
 
+use crate::app::browser::BrowserSession;
 use crate::bus::core::Bus;
 use crate::bus::events::file::FileEvent;
 use crate::bus::events::typed::BackgroundEvent;
@@ -30,6 +31,11 @@ pub struct AgentContext {
     /// Optional model name override. When set, `LLMClient::from_config` uses this model
     /// directly instead of selecting the cheapest available model.
     pub model_name: Option<String>,
+    /// Long-lived headless Firefox session shared with every
+    /// mutating browser tool call. Owned by the application
+    /// (one instance per app) and handed to the agent thread
+    /// via this field.
+    pub browser_session: Arc<BrowserSession>,
 }
 
 #[cfg(test)]
@@ -45,6 +51,7 @@ mod tests {
         let (tx, _rx) = channel();
         let config = AppConfig::default();
         let bus = Bus::new();
+        let browser = Arc::new(crate::app::browser::BrowserSession::new(&config));
         let ctx = AgentContext {
             config: config.clone(),
             tx_gui: tx,
@@ -57,6 +64,7 @@ mod tests {
             history: None,
             current_response: String::new(),
             model_name: None,
+            browser_session: browser,
         };
         assert_eq!(ctx.config.models, config.models);
         assert!(ctx.active_file.as_deref() == Some(Path::new("test.md")));

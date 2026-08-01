@@ -25,6 +25,9 @@ fn make_config(port: u16) -> AppConfig {
 
 fn make_ctx(config: AppConfig) -> (AgentContext, std::sync::mpsc::Receiver<BackgroundEvent>) {
     let (tx, rx) = std::sync::mpsc::channel();
+    let browser_session = std::sync::Arc::new(crate::app::browser::BrowserSession::new(
+        &crate::config::AppConfig::default(),
+    ));
     let ctx = AgentContext {
         config,
         tx_gui: tx,
@@ -37,6 +40,7 @@ fn make_ctx(config: AppConfig) -> (AgentContext, std::sync::mpsc::Receiver<Backg
         history: None,
         current_response: String::new(),
         model_name: None,
+        browser_session,
     };
     (ctx, rx)
 }
@@ -215,6 +219,9 @@ fn test_run_agent_skips_done_status_when_cancelled() {
     .to_string();
     let port = spawn_one_shot_http_server(&http_response("HTTP/1.1 200 OK", &body));
     let (tx, rx) = std::sync::mpsc::channel();
+    let browser_session = std::sync::Arc::new(crate::app::browser::BrowserSession::new(
+        &crate::config::AppConfig::default(),
+    ));
     let ctx = AgentContext {
         config: make_config(port),
         tx_gui: tx,
@@ -227,6 +234,7 @@ fn test_run_agent_skips_done_status_when_cancelled() {
         history: None,
         current_response: String::new(),
         model_name: None,
+        browser_session,
     };
     run_agent(ctx);
     let mut saw_done = false;

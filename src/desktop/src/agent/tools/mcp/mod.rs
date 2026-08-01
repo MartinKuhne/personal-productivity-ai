@@ -1275,10 +1275,10 @@ while True:
     }
 
     /// Stand up a minimal HTTP server on a free port that accepts
-    /// one connection, drains the request, and replies with a 401
-    /// + JSON body. Returns the port and a join handle. The server
-    /// closes the connection after responding so the client never
-    /// sees a keep-alive timeout.
+    /// one connection, drains the request, and replies with a
+    /// 401 and a JSON body. Returns the port and a join handle.
+    /// The server then closes the connection after responding so
+    /// the client never sees a keep-alive timeout.
     fn spawn_401_server(body: &'static str) -> (u16, std::thread::JoinHandle<()>) {
         let listener = std::net::TcpListener::bind("127.0.0.1:0").expect("bind");
         let port = listener.local_addr().expect("addr").port();

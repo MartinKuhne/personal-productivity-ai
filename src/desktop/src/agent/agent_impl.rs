@@ -29,7 +29,11 @@ fn run_agent_inner(ctx: AgentContext) {
     let mut messages = build_messages(system_prompt, &ctx.prompt, ctx.history.clone());
     let tools_json = get_tools_schema(&ctx.config, &ctx.prompt);
     let mut full_response = ctx.current_response.clone();
-    let executor = ToolExecutor::new(ctx.config.clone(), ctx.file_event_bus.clone());
+    let executor = ToolExecutor::new(
+        ctx.config.clone(),
+        ctx.file_event_bus.clone(),
+        ctx.browser_session.clone(),
+    );
     loop {
         if ctx.cancel_flag.load(Ordering::SeqCst) {
             break;

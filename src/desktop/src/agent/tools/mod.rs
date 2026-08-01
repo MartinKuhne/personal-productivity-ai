@@ -5,6 +5,7 @@
 //! Requirements: see [`SPEC.md`](SPEC.md) (TOOL-001..TOOL-010, TOOL-014..024) for the full specification.
 
 pub mod blocking;
+pub mod browser;
 pub mod caldav;
 pub mod carddav;
 pub mod context;
@@ -17,6 +18,9 @@ pub mod mcp;
 pub mod weather;
 pub mod web;
 pub mod yaml_header;
+
+#[cfg(test)]
+mod browser_tests;
 
 use crate::config::AppConfig;
 use context::ToolContext;

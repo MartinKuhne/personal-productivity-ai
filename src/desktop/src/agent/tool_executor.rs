@@ -3,23 +3,31 @@
 use crate::agent::tools::Safety;
 use crate::agent::tools::context::ToolContext;
 use crate::agent::tools::execute_tool;
+use crate::app::browser::BrowserSession;
 use crate::bus::core::Bus;
 use crate::bus::events::file::FileEvent;
 use crate::bus::events::typed::{BackgroundEvent, FsEvent};
 use crate::config::AppConfig;
 use std::path::Path;
+use std::sync::Arc;
 use std::sync::mpsc::Sender;
 
 pub struct ToolExecutor {
     config: AppConfig,
     file_event_bus: Bus<FileEvent>,
+    browser_session: Arc<BrowserSession>,
 }
 
 impl ToolExecutor {
-    pub fn new(config: AppConfig, file_event_bus: Bus<FileEvent>) -> Self {
+    pub fn new(
+        config: AppConfig,
+        file_event_bus: Bus<FileEvent>,
+        browser_session: Arc<BrowserSession>,
+    ) -> Self {
         Self {
             config,
             file_event_bus,
+            browser_session,
         }
     }
 
@@ -82,8 +90,9 @@ impl ToolExecutor {
                 let func_args = extract_str(tc, &["function", "arguments"]).to_string();
                 let cfg = config_arc.clone();
                 let bus = self.file_event_bus.clone();
+                let browser = self.browser_session.clone();
                 join_set.spawn_blocking(move || {
-                    let ctx = ToolContext::new(&cfg, &bus);
+                    let ctx = ToolContext::new(&cfg, &bus, browser);
                     let result = execute_tool(&ctx, &func_name, &func_args);
                     (call_id, func_name, func_args, result)
                 });
@@ -106,7 +115,11 @@ impl ToolExecutor {
             let call_id = extract_str(tc, &["id"]).to_string();
             let func_name = extract_str(tc, &["function", "name"]).to_string();
             let func_args = extract_str(tc, &["function", "arguments"]).to_string();
-            let ctx = ToolContext::new(&self.config, &self.file_event_bus);
+            let ctx = ToolContext::new(
+                &self.config,
+                &self.file_event_bus,
+                self.browser_session.clone(),
+            );
             let result = execute_tool(&ctx, &func_name, &func_args);
             results.push((call_id, func_name, func_args, result));
         }
@@ -225,7 +238,10 @@ mod tests {
     fn test_tool_executor_new() {
         let config = AppConfig::default();
         let bus = Bus::new();
-        let executor = ToolExecutor::new(config, bus);
+        let browser_session = std::sync::Arc::new(crate::app::browser::BrowserSession::new(
+            &crate::config::AppConfig::default(),
+        ));
+        let executor = ToolExecutor::new(config, bus, browser_session);
         assert!(executor.config.models.is_empty());
     }
 }

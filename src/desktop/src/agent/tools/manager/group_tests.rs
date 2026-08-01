@@ -162,6 +162,101 @@ fn set_mcp_group_enabled_preserves_server_config() {
     }
 }
 
+// ---------------------------------------------------------------------------
+// Browser group (BRWS-001..008)
+// ---------------------------------------------------------------------------
+
+/// Contract: the Browser group is one of the eight built-in
+/// groups and is OFF by default (BRWS-CONF-001).
+#[test]
+fn browser_group_defaults_to_disabled() {
+    let mut mgr = ToolManager::new();
+    let config = AppConfig::default();
+    mgr.refresh_state(&config);
+    let id = ToolGroupId::Internal(InternalToolGroup::Browser);
+    let state = mgr.group(&id).expect("Browser group missing");
+    assert!(!state.enabled, "Browser group should default to OFF");
+}
+
+/// Contract: the eight BRWS-001..008 tool names are all
+/// registered under the Browser group when the group is enabled.
+#[test]
+fn browser_group_lists_all_eight_tools() {
+    let _mgr = ToolManager::new();
+    let mut config = AppConfig::default();
+    config.tool_groups.browser = true;
+    let snapshot = super::groups_snapshot(&config);
+    let browser = snapshot
+        .iter()
+        .find(|g| g.id == ToolGroupId::Internal(InternalToolGroup::Browser))
+        .expect("Browser group missing from snapshot");
+    let mut names: Vec<&str> = browser.tool_names.iter().map(String::as_str).collect();
+    names.sort_unstable();
+    assert_eq!(
+        names,
+        vec![
+            "browser_click",
+            "browser_evaluate_js",
+            "browser_fill_input",
+            "browser_get_page_state",
+            "browser_navigate",
+            "browser_press_key",
+            "browser_screenshot",
+            "browser_select_dropdown",
+        ]
+    );
+}
+
+/// Contract: `set_group_enabled` flips the new `tool_groups.browser`
+/// field on `AppConfig` (BRWS-CONF-001).
+#[test]
+fn set_browser_group_enabled_persists_to_config() {
+    let mgr = ToolManager::new();
+    let mut config = AppConfig::default();
+    assert!(!config.tool_groups.browser);
+    mgr.set_group_enabled(
+        &mut config,
+        &ToolGroupId::Internal(InternalToolGroup::Browser),
+        true,
+    );
+    assert!(config.tool_groups.browser);
+    mgr.set_group_enabled(
+        &mut config,
+        &ToolGroupId::Internal(InternalToolGroup::Browser),
+        false,
+    );
+    assert!(!config.tool_groups.browser);
+}
+
+/// Contract: every browser tool is `Mutating` except
+/// `browser_get_page_state`, which is the only parallel-safe one
+/// (BRWS-002).
+#[test]
+fn browser_only_get_page_state_is_parallel_safe() {
+    use crate::agent::tools::Safety;
+    use crate::agent::tools::manager::safety_of;
+    for name in [
+        "browser_navigate",
+        "browser_click",
+        "browser_fill_input",
+        "browser_select_dropdown",
+        "browser_press_key",
+        "browser_evaluate_js",
+        "browser_screenshot",
+    ] {
+        assert_eq!(
+            safety_of(name),
+            Safety::Mutating,
+            "{name} should be Mutating"
+        );
+    }
+    assert_eq!(
+        safety_of("browser_get_page_state"),
+        Safety::ReadOnly,
+        "browser_get_page_state should be the only ReadOnly browser tool"
+    );
+}
+
 /// `mcp_needs_auth_now` returns the manager's per-server `needs_auth`
 /// flag. The flag defaults to `false` and is set by the MCP client
 /// when a 401 is observed.

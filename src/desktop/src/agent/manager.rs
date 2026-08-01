@@ -1,6 +1,7 @@
 //! Agent session manager — lifecycle and UI-visible state for a single LLM agent session (status, response, thinking, history, token usage).
 
 use crate::agent::AgentContext;
+use crate::app::browser::BrowserSession;
 use crate::bus::core::{Bus, BusReader};
 use crate::bus::events::config::ConfigArrived;
 use crate::bus::events::messages::TokenUsageInfo;
@@ -56,6 +57,11 @@ pub struct AgentSessionManager {
     config_arrived: bool,
     pub command_input: String,
     show_results: bool,
+    /// Long-lived headless Firefox session, shared with the
+    /// tool executor. Lazily launches a browser on first use.
+    /// Owned by the application, not the agent — sessions
+    /// survive across agent turns so cookies persist (BRWS-001).
+    browser_session: Arc<BrowserSession>,
 }
 
 impl AgentSessionManager {
@@ -64,7 +70,7 @@ impl AgentSessionManager {
     /// [`AppConfig`] used by `start_session`; until the bus
     /// delivers its event that call falls back to
     /// [`AppConfig::default`].
-    pub fn new(config_bus: Bus<ConfigArrived>) -> Self {
+    pub fn new(config_bus: Bus<ConfigArrived>, browser_session: Arc<BrowserSession>) -> Self {
         Self {
             state: AgentState {
                 running: false,
@@ -85,6 +91,7 @@ impl AgentSessionManager {
             config_arrived: false,
             command_input: String::new(),
             show_results: false,
+            browser_session,
         }
     }
 
@@ -93,7 +100,7 @@ impl AgentSessionManager {
     /// `new(config)` signature for callers that just want a
     /// populated manager (existing test fixtures).
     #[doc(hidden)]
-    pub fn new_for_test(config: AppConfig) -> Self {
+    pub fn new_for_test(config: AppConfig, browser_session: Arc<BrowserSession>) -> Self {
         Self {
             state: AgentState {
                 running: false,
@@ -111,6 +118,7 @@ impl AgentSessionManager {
             config_arrived: true,
             command_input: String::new(),
             show_results: false,
+            browser_session,
         }
     }
 
@@ -162,6 +170,14 @@ impl AgentSessionManager {
     pub fn set_config(&mut self, config: AppConfig) {
         self.config = config;
         self.config_arrived = true;
+    }
+
+    /// Hand out an `Arc` clone of the headless-browser session
+    /// so the UI layer can call [`BrowserSession::tick`]
+    /// (idle-timeout) and [`BrowserSession::forget`]
+    /// (clean logout) without going through the agent.
+    pub fn browser_session(&self) -> Arc<BrowserSession> {
+        self.browser_session.clone()
     }
 
     /// Get a read-only view of the current agent state.
@@ -265,6 +281,7 @@ impl AgentSessionManager {
             history: self.state.history.clone(),
             current_response: self.state.response.clone(),
             model_name: None,
+            browser_session: self.browser_session.clone(),
         };
 
         std::thread::spawn(move || {
@@ -343,7 +360,12 @@ mod tests {
     #[test]
     fn test_new_manager_is_empty() {
         let config = AppConfig::default();
-        let mgr = AgentSessionManager::new_for_test(config);
+        let mgr = AgentSessionManager::new_for_test(
+            config,
+            Arc::new(crate::app::browser::BrowserSession::new(
+                &AppConfig::default(),
+            )),
+        );
         let state = mgr.state();
         assert!(!state.running);
         assert!(state.status.is_empty());
@@ -353,7 +375,12 @@ mod tests {
     #[test]
     fn test_cancel_sets_running_false() {
         let config = AppConfig::default();
-        let mut mgr = AgentSessionManager::new_for_test(config);
+        let mut mgr = AgentSessionManager::new_for_test(
+            config,
+            Arc::new(crate::app::browser::BrowserSession::new(
+                &AppConfig::default(),
+            )),
+        );
         mgr.state_mut().running = true;
         mgr.cancel_flag = Some(Arc::new(AtomicBool::new(false)));
         mgr.cancel();
@@ -364,7 +391,12 @@ mod tests {
     #[test]
     fn test_clear_history_resets_fields() {
         let config = AppConfig::default();
-        let mut mgr = AgentSessionManager::new_for_test(config);
+        let mut mgr = AgentSessionManager::new_for_test(
+            config,
+            Arc::new(crate::app::browser::BrowserSession::new(
+                &AppConfig::default(),
+            )),
+        );
         mgr.state.history = Some(vec![Value::String("old".to_string())]);
         mgr.state.token_usage = Some(TokenUsageInfo {
             prompt_tokens: 100,
@@ -387,7 +419,12 @@ mod tests {
         use crate::bus::events::config::ConfigArrived;
 
         let bus = config_bus();
-        let mut mgr = AgentSessionManager::new(bus.clone());
+        let mut mgr = AgentSessionManager::new(
+            bus.clone(),
+            Arc::new(crate::app::browser::BrowserSession::new(
+                &AppConfig::default(),
+            )),
+        );
 
         // Before any event: not arrived, default config in use.
         assert!(!mgr.config_arrived());
@@ -412,7 +449,12 @@ mod tests {
     #[test]
     fn test_drain_config_returns_false_when_empty() {
         let bus = crate::bus::config::config_bus();
-        let mut mgr = AgentSessionManager::new(bus);
+        let mut mgr = AgentSessionManager::new(
+            bus,
+            Arc::new(crate::app::browser::BrowserSession::new(
+                &AppConfig::default(),
+            )),
+        );
 
         assert!(!mgr.drain_config());
         assert!(!mgr.config_arrived());
@@ -430,7 +472,12 @@ mod tests {
         let bus = crate::bus::config::config_bus();
         // 1. Construct first — this is the `AgentSessionManager::new`
         //    call inside `FastMdApp::new`. It subscribes here.
-        let mut mgr = AgentSessionManager::new(bus.clone());
+        let mut mgr = AgentSessionManager::new(
+            bus.clone(),
+            Arc::new(crate::app::browser::BrowserSession::new(
+                &AppConfig::default(),
+            )),
+        );
 
         // 2. Publish second — this is the line in `main.rs` that
         //    fires `config_bus.publish(...)` after construction.
@@ -458,7 +505,12 @@ mod tests {
 
         // Subscribing after the publish means the broadcast
         // channel won't deliver the event to this reader.
-        let mut mgr = AgentSessionManager::new(bus);
+        let mut mgr = AgentSessionManager::new(
+            bus,
+            Arc::new(crate::app::browser::BrowserSession::new(
+                &AppConfig::default(),
+            )),
+        );
 
         assert!(!mgr.drain_config());
         assert!(!mgr.config_arrived());

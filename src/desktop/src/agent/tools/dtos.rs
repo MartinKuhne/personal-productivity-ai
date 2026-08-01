@@ -364,3 +364,113 @@ pub struct WebDelegateInput {
 pub struct WebDelegateResponse {
     pub result: String,
 }
+
+// ---------------------------------------------------------------------------
+// Browser automation tools (BRWS-001..008)
+// ---------------------------------------------------------------------------
+
+/// `browser_navigate` input — drive the persistent page to a URL.
+#[derive(Deserialize, Debug, JsonSchema)]
+pub struct BrowserNavigateInput {
+    #[schemars(description = strings::browser::FIELD_BROWSER_NAVIGATE_INPUT_URL)]
+    pub url: String,
+}
+#[derive(Serialize, Debug, JsonSchema)]
+pub struct BrowserNavigateResponse {
+    #[schemars(description = strings::browser::FIELD_BROWSER_NAVIGATE_RESPONSE_URL)]
+    pub url: String,
+    #[schemars(description = strings::browser::FIELD_BROWSER_NAVIGATE_RESPONSE_TITLE)]
+    pub title: String,
+}
+
+/// `browser_get_page_state` input — no parameters.
+#[derive(Deserialize, Debug, JsonSchema)]
+pub struct BrowserGetPageStateInput {}
+#[derive(Serialize, Debug, JsonSchema)]
+pub struct BrowserGetPageStateResponse {
+    #[schemars(description = strings::browser::FIELD_BROWSER_GET_PAGE_STATE_RESPONSE_URL)]
+    pub url: String,
+    #[schemars(description = strings::browser::FIELD_BROWSER_GET_PAGE_STATE_RESPONSE_TITLE)]
+    pub title: String,
+    #[schemars(description = strings::browser::FIELD_BROWSER_GET_PAGE_STATE_RESPONSE_ELEMENTS)]
+    pub elements: String,
+    #[schemars(description = strings::browser::FIELD_BROWSER_GET_PAGE_STATE_RESPONSE_TOTAL)]
+    pub total: usize,
+}
+
+/// `browser_click` input — CSS selector for a single element.
+#[derive(Deserialize, Debug, JsonSchema)]
+pub struct BrowserClickInput {
+    #[schemars(description = strings::browser::FIELD_BROWSER_CLICK_INPUT_SELECTOR)]
+    pub selector: String,
+}
+#[derive(Serialize, Debug, JsonSchema)]
+pub struct BrowserClickResponse {
+    pub result: String,
+}
+
+/// `browser_fill_input` input — selector + text.
+#[derive(Deserialize, Debug, JsonSchema)]
+pub struct BrowserFillInputInput {
+    #[schemars(description = strings::browser::FIELD_BROWSER_FILL_INPUT_INPUT_SELECTOR)]
+    pub selector: String,
+    #[schemars(description = strings::browser::FIELD_BROWSER_FILL_INPUT_INPUT_TEXT)]
+    pub text: String,
+}
+#[derive(Serialize, Debug, JsonSchema)]
+pub struct BrowserFillInputResponse {
+    pub result: String,
+}
+
+/// `browser_select_dropdown` input — selector + option value.
+#[derive(Deserialize, Debug, JsonSchema)]
+pub struct BrowserSelectDropdownInput {
+    #[schemars(description = strings::browser::FIELD_BROWSER_SELECT_DROPDOWN_INPUT_SELECTOR)]
+    pub selector: String,
+    #[schemars(description = strings::browser::FIELD_BROWSER_SELECT_DROPDOWN_INPUT_VALUE)]
+    pub value: String,
+}
+#[derive(Serialize, Debug, JsonSchema)]
+pub struct BrowserSelectDropdownResponse {
+    pub result: String,
+}
+
+/// `browser_press_key` input — keyboard key.
+#[derive(Deserialize, Debug, JsonSchema)]
+pub struct BrowserPressKeyInput {
+    #[schemars(description = strings::browser::FIELD_BROWSER_PRESS_KEY_INPUT_KEY)]
+    pub key: String,
+}
+#[derive(Serialize, Debug, JsonSchema)]
+pub struct BrowserPressKeyResponse {
+    pub result: String,
+}
+
+/// `browser_evaluate_js` input — arbitrary JS expression.
+#[derive(Deserialize, Debug, JsonSchema)]
+pub struct BrowserEvaluateJsInput {
+    #[schemars(description = strings::browser::FIELD_BROWSER_EVALUATE_JS_INPUT_SCRIPT)]
+    pub script: String,
+}
+#[derive(Serialize, Debug, JsonSchema)]
+pub struct BrowserEvaluateJsResponse {
+    /// JSON-encoded result of the script. May be `null`.
+    pub result: String,
+}
+
+/// `browser_screenshot` input — restricted filename.
+#[derive(Deserialize, Debug, JsonSchema)]
+pub struct BrowserScreenshotInput {
+    #[schemars(description = strings::browser::FIELD_BROWSER_SCREENSHOT_INPUT_FILENAME)]
+    pub filename: String,
+    #[serde(default)]
+    #[schemars(description = strings::browser::FIELD_BROWSER_SCREENSHOT_INPUT_FULL_PAGE)]
+    pub full_page: bool,
+}
+#[derive(Serialize, Debug, JsonSchema)]
+pub struct BrowserScreenshotResponse {
+    #[schemars(description = strings::browser::FIELD_BROWSER_SCREENSHOT_RESPONSE_PATH)]
+    pub path: String,
+    #[schemars(description = strings::browser::FIELD_BROWSER_SCREENSHOT_RESPONSE_BYTES)]
+    pub bytes: usize,
+}
