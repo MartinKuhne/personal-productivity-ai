@@ -1,8 +1,6 @@
 //! Root egui `App` struct — owns all application state and wires together background tasks, panels, agent, and dialogs.
 
 use crate::agent::AgentSessionManager;
-use crate::app::background::BackgroundLogEntry;
-use crate::app::background::LogCategory;
 use crate::app::background::{BackgroundProcessManager, SharedProcessManager};
 use crate::app::background_task::Task;
 use crate::app::watcher::directory_tracker::DirectoryTracker;
@@ -84,14 +82,6 @@ pub struct FastMdApp {
     pub persisted_ui_state: PersistedUiState,
     pub pending_file_load: Option<PathBuf>,
     pub repaint_interval: Duration,
-    /// Tracks whether the one-time MCP startup ping has run.
-    ///
-    /// The ping performs network I/O (contacts each configured MCP
-    /// server and warms the tool-discovery cache), so we defer it
-    /// from construction (`AgentSessionManager::new`) to the first
-    /// UI frame and run it on a background thread.  This keeps the
-    /// UI responsive and lets progress appear in the log panel.
-    mcp_initialized: bool,
     /// Slot for the `notify::RecommendedWatcher` handle, shared
     /// with the file-watcher thread. The watcher writes the live
     /// handle here just before sending [`FsEvent::Finished`]; the
@@ -346,6 +336,14 @@ impl FastMdApp {
         // waits on its own reader; the agent's reader is drained on
         // the UI thread in `update_ui`.
         let background_task = Task::new(config_bus.clone());
+        // The tools manager subscribes to the same bus and performs
+        // the one-time MCP startup ping / tool discovery on its own
+        // background thread, so the UI thread never blocks on MCP
+        // network I/O at startup.
+        crate::agent::tools::manager::spawn_config_subscription(
+            config_bus.clone(),
+            background_task.tx.clone(),
+        );
         // The file-watcher thread writes the `RecommendedWatcher`
         // handle into this slot before sending `FsEvent::Finished`;
         // the UI takes ownership from `task_take_finished_watcher`
@@ -410,7 +408,6 @@ impl FastMdApp {
             persisted_ui_state,
             pending_file_load: None,
             repaint_interval: Duration::from_millis(16),
-            mcp_initialized: false,
             finished_watcher_slot,
         }
     }
@@ -491,7 +488,6 @@ impl FastMdApp {
             persisted_ui_state: PersistedUiState::default(),
             pending_file_load: None,
             repaint_interval: Duration::from_millis(16),
-            mcp_initialized: false,
             finished_watcher_slot,
         }
     }
@@ -583,7 +579,6 @@ impl FastMdApp {
         self.drain_config_bus();
         self.process_file_events_and_repaint(ctx);
         self.drain_background_channel();
-        self.initialize_mcp_on_first_frame();
         self.handle_file_selection(ctx);
         self.show_editor_overlay(ui);
         self.show_modals(ui);
@@ -863,31 +858,6 @@ impl FastMdApp {
                 }
             }
         }
-    }
-
-    /// Runs the one-time MCP startup ping on the first call.
-    ///
-    /// We deliberately defer network I/O from construction (where it
-    /// could delay startup) to here, where the UI is already running.
-    /// The ping is dispatched on a background thread (`std::thread::spawn`)
-    /// so the egui UI thread never blocks; progress is posted into the
-    /// background log channel so it appears in the log panel alongside
-    /// other startup messages.
-    fn initialize_mcp_on_first_frame(&mut self) {
-        if self.mcp_initialized {
-            return;
-        }
-        self.mcp_initialized = true;
-
-        let tx = self.tx.clone();
-        let servers_ok = self.agent.initialize_mcp();
-        let _ = tx.send(
-            BackgroundLogEntry::new(
-                LogCategory::Indexer,
-                format!("MCP startup ping complete: {servers_ok} server(s) responded"),
-            )
-            .into(),
-        );
     }
 
     fn handle_file_selection(&mut self, _ctx: &egui::Context) {

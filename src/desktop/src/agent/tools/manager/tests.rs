@@ -750,3 +750,37 @@ fn test_get_weather_tool_excluded_when_disabled() {
         .collect();
     assert!(!names.contains(&"get_weather"));
 }
+
+/// The tools-manager config-bus subscription must run the MCP
+/// startup init on a background thread (never the caller's thread)
+/// and post a completion log entry. The default config has no MCP
+/// servers, so the init is a fast, offline no-op and the test is
+/// deterministic.
+#[test]
+fn test_spawn_config_subscription_runs_init_in_background() {
+    use crate::bus::events::config::ConfigArrived;
+    use crate::bus::events::typed::{BackgroundEvent, ProcessEvent};
+
+    let bus = crate::bus::config::config_bus();
+    let (tx, rx) = std::sync::mpsc::channel::<BackgroundEvent>();
+
+    spawn_config_subscription(bus.clone(), tx);
+
+    bus.publish(ConfigArrived::new(AppConfig::default()));
+
+    let start = std::time::Instant::now();
+    while start.elapsed().as_secs() < 5 {
+        match rx.recv_timeout(std::time::Duration::from_millis(100)) {
+            Ok(BackgroundEvent::Process(ProcessEvent::LogEntry(entry))) => {
+                assert!(
+                    entry.message.starts_with("MCP startup ping complete:"),
+                    "unexpected log entry: {}",
+                    entry.message
+                );
+                return;
+            }
+            Ok(_) | Err(_) => continue,
+        }
+    }
+    panic!("no MCP startup log entry observed within timeout");
+}

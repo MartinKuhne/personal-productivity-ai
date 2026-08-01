@@ -160,14 +160,37 @@ fn test_compute_dialog_size_fits_few_rows_on_large_screen() {
         "default height must be large enough to fit 7 rows; got {}",
         default_size[1]
     );
-    // Capped at screen height * 0.85 = 918, but also at the hard
-    // cap of 720. So max_height should be 720.
+    // Capped at screen height * 0.85 = 918; the hard cap (1200)
+    // no longer truncates on a 1080-tall screen. So max_height
+    // should be 918.
     assert!(
-        (max_height - 720.0).abs() < 1.0,
-        "max_height should be 720 on a 1080-tall screen; got {max_height}"
+        (max_height - 918.0).abs() < 1.0,
+        "max_height should be 918 on a 1080-tall screen; got {max_height}"
     );
     // min_size height <= default_size height.
     assert!(min_size[1] <= default_size[1]);
+}
+
+/// On a large screen the dialog must grow to fit many rows when
+/// the screen has room, rather than truncating at the hard cap.
+/// Regression test for: "the tools window does not show all the
+/// content although there is room on the screen."
+#[test]
+fn test_compute_dialog_size_fits_many_rows_on_large_screen() {
+    let viewport = egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(1920.0, 1080.0));
+    // 30 rows; preferred = 56 + 20 + 30*24 + 8 = 804, which fits
+    // within the 85% screen cap (918) on this viewport.
+    let (default_size, _min_size, max_height) = compute_dialog_size(viewport, 30);
+    assert!(
+        default_size[1] >= 804.0,
+        "default height must fit all 30 rows when the screen has room; got {}",
+        default_size[1]
+    );
+    assert!(
+        max_height >= default_size[1],
+        "max_height must not truncate the preferred height; got {max_height} vs default {}",
+        default_size[1]
+    );
 }
 
 /// On a small screen, the dialog must cap the height at the

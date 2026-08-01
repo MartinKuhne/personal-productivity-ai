@@ -29,9 +29,15 @@ pub use pagination::paginate_in_range;
 use crate::agent::tools::context::ToolContext;
 use crate::agent::tools::mcp::{McpClientManager, McpToolDescriptor};
 use crate::agent::tools::{Safety, Tool};
+use crate::app::background::{BackgroundLogEntry, LogCategory};
+use crate::bus::config::CONFIG_ARRIVAL_TIMEOUT;
+use crate::bus::core::Bus;
+use crate::bus::events::config::ConfigArrived;
+use crate::bus::events::typed::BackgroundEvent;
 use crate::config::{AppConfig, McpServerConfig};
 use std::collections::BTreeMap;
 use std::sync::Arc;
+use std::sync::mpsc::Sender;
 
 /// Central catalog of agent tools, both built-in and dynamic MCP tools,
 /// plus per-group state for the UI.
@@ -571,6 +577,46 @@ pub fn init_mcp_on_startup(config: &AppConfig) -> usize {
     let ok = mgr.mcp_manager.ping_all_servers();
     mgr.refresh_mcp_tools(config);
     ok
+}
+
+/// Subscribe to the configuration-arrival bus and perform the
+/// one-time MCP startup init on a background thread.
+///
+/// The subscription is registered before this returns, so callers may
+/// publish the [`ConfigArrived`] event any time afterwards; the
+/// spawned thread observes the first arrival (or falls back to
+/// [`AppConfig::default`] if no event arrives within
+/// [`CONFIG_ARRIVAL_TIMEOUT`]) and then runs the same startup path as
+/// [`init_mcp_on_startup`]: it pushes the config into the MCP manager,
+/// pings every configured server, and discovers each server's tools.
+///
+/// All network I/O happens off the UI thread so the window never
+/// blocks on MCP servers at startup. A completion log entry is posted
+/// to `tx` (the background-event channel) so the result shows up in
+/// the UI's background log panel.
+pub fn spawn_config_subscription(config_bus: Bus<ConfigArrived>, tx: Sender<BackgroundEvent>) {
+    let config_reader = config_bus.subscribe();
+    std::thread::spawn(move || {
+        let config = match config_reader.recv_timeout(CONFIG_ARRIVAL_TIMEOUT) {
+            Ok(event) => event.config,
+            Err(_) => {
+                tracing::error!(
+                    name = "config.arrived.timeout",
+                    timeout_ms = CONFIG_ARRIVAL_TIMEOUT.as_millis() as u64,
+                    "No ConfigArrived event observed within timeout; using default configuration"
+                );
+                AppConfig::default()
+            }
+        };
+        let servers_ok = init_mcp_on_startup(&config);
+        let _ = tx.send(
+            BackgroundLogEntry::new(
+                LogCategory::Indexer,
+                format!("MCP startup ping complete: {servers_ok} server(s) responded"),
+            )
+            .into(),
+        );
+    });
 }
 
 /// Look up a tool's [`Safety`] classification by name.

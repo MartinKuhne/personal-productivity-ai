@@ -130,6 +130,24 @@ When adding or moving code, place files by **concern**, not by type:
   or `bus::events::typed` (per-domain
   replacement). The `app/` module no longer hosts these.
 
+### Event-driven fan-out
+
+Background work reaches the UI through **event-driven fan-out** on
+`Bus<T>` broadcast buses (`bus::core`), never through per-widget
+request/response binding:
+
+- Long-running or background work runs on its own thread or worker and
+  publishes results as events onto a `Bus<T>` bus; the UI never awaits a
+  background future directly.
+- The UI subscribes as a `BusReader` and drains events each frame with
+  `try_recv()` (see `ui/app.rs`), calling `ctx.request_repaint()` when a
+  frame needs to be drawn.
+- One-off operations (e.g. an OAuth flow) may use a dedicated channel plus
+  `ctx.request_repaint()` after sending, but still produce on a background
+  thread and consume on the UI thread.
+- Keep the bus contract as the single path for results flowing into the UI;
+  do not add a parallel per-widget async-binding mechanism alongside it.
+
 ### Module size and splitting
 
 - Target **≤ 1024 lines** per `.rs` file. When a file exceeds this, split by

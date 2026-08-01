@@ -86,9 +86,12 @@ pub(crate) fn compute_dialog_size(
     const EXTRA_PADDING: f32 = 8.0;
     const MIN_HEIGHT: f32 = 200.0;
     /// Hard cap so a 4K monitor doesn't produce a 2000-px-tall
-    /// dialog. Beyond this, scrolling inside the window is the
-    /// right behaviour.
-    const MAX_HEIGHT_HARD_CAP: f32 = 720.0;
+    /// dialog. Kept well above the 85%-of-screen cap on common
+    /// monitors (918px on 1080p, 1224px on 1440p) so the dialog
+    /// grows to fit every row whenever the screen has room; only
+    /// genuinely huge screens hit this and fall back to scrolling
+    /// inside the window.
+    const MAX_HEIGHT_HARD_CAP: f32 = 1200.0;
     const MIN_WIDTH: f32 = 520.0;
     const DEFAULT_WIDTH: f32 = 720.0;
 
