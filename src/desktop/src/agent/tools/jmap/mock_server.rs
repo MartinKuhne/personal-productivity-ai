@@ -14,6 +14,7 @@
 use serde_json::json;
 use std::io::{Read, Write};
 use std::net::TcpListener;
+use std::sync::{Arc, Mutex};
 use std::thread;
 
 /// JMAP capability URI for the core protocol (RFC 8620).
@@ -90,6 +91,29 @@ fn account_capabilities() -> serde_json::Value {
 ///
 /// Returns the base URL of the mock server.
 pub fn spawn_mock_server(body: impl Into<String>) -> String {
+    spawn_mock_server_inner(body, None)
+}
+
+/// Spawn a mock JMAP server that records the raw bytes of every POST body
+/// it receives into a shared recorder.
+///
+/// Returns `(url, recorder)`. Each POST to the server appends its body bytes
+/// to `recorder`; tests can `lock()` and inspect the bodies in arrival order
+/// to assert on the outgoing JMAP method-call arguments.
+///
+/// Use this when the test needs to verify *what the client sent* (e.g. that
+/// `Email/get` requests include `maxBodyValueBytes`); [`spawn_mock_server`]
+/// is enough when the test only cares about return-value behaviour.
+pub fn spawn_recording_mock_server(body: impl Into<String>) -> (String, Arc<Mutex<Vec<Vec<u8>>>>) {
+    let recorder: Arc<Mutex<Vec<Vec<u8>>>> = Arc::new(Mutex::new(Vec::new()));
+    let url = spawn_mock_server_inner(body, Some(recorder.clone()));
+    (url, recorder)
+}
+
+fn spawn_mock_server_inner(
+    body: impl Into<String>,
+    recorder: Option<Arc<Mutex<Vec<Vec<u8>>>>>,
+) -> String {
     let listener = TcpListener::bind("127.0.0.1:0").unwrap();
     let port = listener.local_addr().unwrap().port();
     let api_url = format!("http://127.0.0.1:{port}");
@@ -115,7 +139,7 @@ pub fn spawn_mock_server(body: impl Into<String>) -> String {
         let mut request_count = 0u32;
         for mut stream in listener.incoming().flatten() {
             request_count += 1;
-            let mut buf = [0; 8192];
+            let mut buf = [0; 65536];
             let n = stream.read(&mut buf).unwrap_or(0);
             let request = String::from_utf8_lossy(&buf[..n]);
             eprintln!(
@@ -142,6 +166,11 @@ pub fn spawn_mock_server(body: impl Into<String>) -> String {
                     "[mock_server] POST body: {}",
                     &body_text[..body_text.len().min(500)]
                 );
+                if let Some(rec) = recorder.as_ref() {
+                    rec.lock()
+                        .expect("mock recorder poisoned")
+                        .push(body_text.as_bytes().to_vec());
+                }
                 let response = handle_jmap_post(body_text, &method_responses);
 
                 let resp_str = serde_json::to_string(&response).unwrap();

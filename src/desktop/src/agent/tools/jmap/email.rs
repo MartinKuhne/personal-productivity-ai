@@ -22,6 +22,42 @@ use jmap_client::email::query::Filter;
 
 use super::client::JmapSession;
 
+/// Maximum number of bytes the JMAP server should inline for a single body
+/// part in `bodyValues` (RFC 8621 §6.1.2 `maxBodyValueBytes`).
+///
+/// The RFC default of `0` makes servers return **no** body values at all, so
+/// `email.body_value(part_id)` is `None` and `simplify_email` produces an
+/// empty `body` field — which is what the LLM has been seeing. Setting a
+/// non-zero cap is mandatory; we pick 10 MiB as a generous upper bound for a
+/// single MIME part while still bounded enough to avoid pathological emails
+/// inflating the agent's tool response.
+pub const MAX_BODY_VALUE_BYTES: usize = 10 * 1024 * 1024;
+
+/// Fetch a single email by ID with body content inlined.
+///
+/// Wraps `jmap_client::Client::email_get` but explicitly sets the
+/// `fetchTextBodyValues` / `fetchHTMLBodyValues` / `maxBodyValueBytes`
+/// arguments on the `Email/get` request (see [`MAX_BODY_VALUE_BYTES`]).
+/// Without these, RFC 8621 §6.1.2 defaults `maxBodyValueBytes` to `0` and
+/// the server returns an empty `bodyValues` map, so callers see an empty
+/// body regardless of the actual message content.
+fn email_get_full(
+    session: &JmapSession,
+    id: &str,
+) -> Result<Option<jmap_client::email::Email<jmap_client::Get>>, String> {
+    let mut request = session.inner().build();
+    let get_request = request.get_email().ids([id]);
+    get_request
+        .arguments()
+        .fetch_text_body_values(true)
+        .fetch_html_body_values(true)
+        .max_body_value_bytes(MAX_BODY_VALUE_BYTES);
+    let mut response = request
+        .send_get_email()
+        .map_err(|e| format!("Email/get request failed: {e}"))?;
+    Ok(response.take_list().into_iter().next())
+}
+
 /// Convert HTML body values in a JMAP response to Markdown using `fast_h2m`.
 fn convert_html_in_jmap(mut res: serde_json::Value) -> serde_json::Value {
     fn process(val: &mut serde_json::Value) {
@@ -350,10 +386,7 @@ pub fn tool_search_email(
 
         let mut emails_json = Vec::new();
         for email_id in &email_ids {
-            match session
-                .inner()
-                .email_get(email_id, None::<Vec<jmap_client::email::Property>>)
-            {
+            match email_get_full(&session, email_id) {
                 Ok(Some(mut email)) => {
                     tracing::debug!(
                         client = %name,
@@ -459,10 +492,7 @@ pub fn tool_get_email_by_id(
             }
         };
 
-        match session
-            .inner()
-            .email_get(id, None::<Vec<jmap_client::email::Property>>)
-        {
+        match email_get_full(&session, id) {
             Ok(Some(mut email)) => {
                 let email_json = convert_html_in_jmap(simplify_email(&mut email, None));
                 return Ok(crate::agent::tools::dtos::GetEmailByIdResponse {
@@ -1236,7 +1266,7 @@ mod tests {
         SearchEmailFilters, SearchEmailPagination, tool_get_email_by_id, tool_search_email,
         tool_send_email,
     };
-    use crate::agent::tools::jmap::spawn_mock_server;
+    use crate::agent::tools::jmap::{spawn_mock_server, spawn_recording_mock_server};
     use crate::config::{AppConfig, JmapClient};
     #[test]
     fn test_tool_search_email_no_clients() {
@@ -1314,6 +1344,93 @@ mod tests {
         );
         let res = tool_get_email_by_id(&config, "e1");
         assert!(res.is_ok(), "Error: {}", res.unwrap_err());
+    }
+
+    /// Regression: `Email/get` MUST be sent with the body-fetching arguments
+    /// (`fetchTextBodyValues`, `fetchHTMLBodyValues`, `maxBodyValueBytes`)
+    /// per RFC 8621 §6.1.2, otherwise a real JMAP server returns empty
+    /// `bodyValues` (default `maxBodyValueBytes` is 0).
+    #[test]
+    fn test_tool_get_email_by_id_sends_body_value_args() {
+        rustls::crypto::ring::default_provider()
+            .install_default()
+            .ok();
+        let body = "{\
+            \"apiUrl\": \"{API_URL}\",\
+            \"primaryAccounts\": {\"urn:ietf:params:jmap:mail\": \"acc1\"},\
+            \"methodResponses\": [\
+                [\"Email/get\", {\"list\": [{\"id\": \"e1\", \"subject\": \"Test\"}]}, \"0\"]\
+            ]\
+        }";
+        let (url, recorder) = spawn_recording_mock_server(body);
+        let mut config = AppConfig::default();
+        config.jmap_clients.insert(
+            "test".to_string(),
+            JmapClient {
+                url,
+                token: "tok".to_string(),
+            },
+        );
+        let res = tool_get_email_by_id(&config, "e1");
+        assert!(res.is_ok(), "Error: {}", res.unwrap_err());
+
+        let recorded = recorder.lock().expect("mock recorder poisoned");
+        let last_post = recorded
+            .last()
+            .expect("no POST was recorded by the mock server");
+        let last_post_str =
+            std::str::from_utf8(last_post).expect("mock recorded non-UTF8 POST body");
+        assert!(
+            last_post_str.contains("maxBodyValueBytes"),
+            "Email/get request must include maxBodyValueBytes so the server \
+             returns body content; got: {last_post_str}"
+        );
+        assert!(
+            last_post_str.contains("\"fetchTextBodyValues\":true"),
+            "Email/get request must opt in to text body values; got: {last_post_str}"
+        );
+        assert!(
+            last_post_str.contains("\"fetchHTMLBodyValues\":true"),
+            "Email/get request must opt in to HTML body values; got: {last_post_str}"
+        );
+    }
+
+    /// Defence-in-depth: when the server returns `bodyValues`, `tool_get_email_by_id`
+    /// must surface the body content (not a silently empty string).
+    #[test]
+    fn test_tool_get_email_by_id_returns_body_content() {
+        rustls::crypto::ring::default_provider()
+            .install_default()
+            .ok();
+        let body = "{\
+            \"apiUrl\": \"{API_URL}\",\
+            \"primaryAccounts\": {\"urn:ietf:params:jmap:mail\": \"acc1\"},\
+            \"methodResponses\": [\
+                [\"Email/get\", {\
+                    \"list\": [{\
+                        \"id\": \"e1\",\
+                        \"subject\": \"Hi\",\
+                        \"htmlBody\": [{\"partId\": \"p1\"}],\
+                        \"bodyValues\": {\"p1\": {\"value\": \"Hello, world!\", \"isTruncated\": false}}\
+                    }]\
+                }, \"0\"]\
+            ]\
+        }";
+        let url = spawn_mock_server(body);
+        let mut config = AppConfig::default();
+        config.jmap_clients.insert(
+            "test".to_string(),
+            JmapClient {
+                url,
+                token: "tok".to_string(),
+            },
+        );
+        let res = tool_get_email_by_id(&config, "e1").expect("tool call should succeed");
+        assert!(
+            res.result.contains("Hello, world!"),
+            "tool_get_email_by_id should surface body content; got: {}",
+            res.result
+        );
     }
 
     #[test]
