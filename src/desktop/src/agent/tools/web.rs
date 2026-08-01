@@ -1,20 +1,11 @@
 //! Web-fetching tools — fetch a URL and convert HTML to markdown, and search via a SearXNG instance.
 
+use crate::agent::datamark::{self, SECURITY_HEADER};
+use crate::agent::tools::manager::cache::{CacheEntry, cache};
 use crate::config::AppConfig;
 use fast_h2m::convert;
 use std::collections::HashMap;
-use std::sync::Mutex;
-
-struct CacheEntry {
-    content: String,
-    response_headers: HashMap<String, String>,
-    fetched_at: std::time::Instant,
-}
-
-static WEB_FETCH_CACHE: std::sync::LazyLock<Mutex<HashMap<String, CacheEntry>>> =
-    std::sync::LazyLock::new(|| Mutex::new(HashMap::new()));
-
-const CACHE_TTL: std::time::Duration = std::time::Duration::from_secs(300);
+use std::time::Instant;
 
 pub fn tool_web_fetch(
     input: &crate::agent::tools::dtos::WebFetchInput,
@@ -22,22 +13,29 @@ pub fn tool_web_fetch(
     let url = &input.url;
 
     if !input.force_refetch
-        && let Ok(cache) = WEB_FETCH_CACHE.lock()
-        && let Some(entry) = cache.get(url)
-        && entry.fetched_at.elapsed() < CACHE_TTL
+        && let Some(CacheEntry::WebFetch {
+            content,
+            response_headers,
+            ..
+        }) = cache().get(url)
     {
-        let total_lines = entry.content.lines().count();
-        let content = apply_pagination(&entry.content, input.offset, input.limit);
+        let total_lines = content.lines().count();
+        let content = apply_pagination(&content, input.offset, input.limit);
         return Ok(crate::agent::tools::dtos::WebFetchResponse {
             content,
             total_lines,
             response_headers: if input.headers {
-                Some(entry.response_headers.clone())
+                Some(response_headers.clone())
             } else {
                 None
             },
             from_cache: true,
         });
+    }
+
+    if input.force_refetch {
+        // Caller asked for a fresh fetch; clear any existing entry first.
+        cache().invalidate(url);
     }
 
     match ureq::get(url)
@@ -61,13 +59,14 @@ pub fn tool_web_fetch(
                         let md_content = res.content.unwrap_or_default();
                         let total_lines = md_content.lines().count();
                         let content = apply_pagination(&md_content, input.offset, input.limit);
-                        if let Ok(mut cache) = WEB_FETCH_CACHE.lock() {
-                            cache.insert(url.clone(), CacheEntry {
+                        cache().put(
+                            url.clone(),
+                            CacheEntry::WebFetch {
                                 content: md_content,
                                 response_headers: response_headers.clone(),
-                                fetched_at: std::time::Instant::now(),
-                            });
-                        }
+                                fetched_at: Instant::now(),
+                            },
+                        );
                         Ok(crate::agent::tools::dtos::WebFetchResponse {
                             content,
                             total_lines,
@@ -200,7 +199,17 @@ pub fn tool_web_delegate(
     let mut messages = vec![
         serde_json::json!({
             "role": "system",
-            "content": "You are a web research delegate. Use the web_search and web_fetch tools to execute the user's instruction. Gather information and return a concise, accurate summary. Do not converse, just output the final summarized answer."
+            // R1 (Spotlighting): the sub-agent's system prompt must
+            // include the same security header the parent uses, plus
+            // a delegate-specific role line. The header teaches the
+            // sub-agent to refuse instructions it sees inside
+            // datamarked tool results — which is critical because
+            // `web_delegate` is exactly the surface an indirect
+            // injection can drive (it runs many fetches in one
+            // session).
+            "content": format!(
+                "{SECURITY_HEADER}\n\nYou are a web research delegate. Use the web_search and web_fetch tools to execute the user's instruction. Gather information and return a concise, accurate summary. Do not converse, just output the final summarized answer."
+            )
         }),
         serde_json::json!({
             "role": "user",
@@ -363,10 +372,21 @@ pub fn tool_web_delegate(
                     r#"{"status":"error","message":"Unknown tool"}"#.to_string()
                 };
 
+                // R1 (Spotlighting): wrap every tool result the
+                // sub-agent sees in a datamark envelope so the
+                // LLM treats it as data, not instructions. This
+                // is the sub-agent counterpart of the parent
+                // loop's wrap in `agent_impl::process_tool_results`.
+                // The `func_name` is the literal LLM-facing tool
+                // name (`web_fetch` or `web_search`) so the
+                // provenance line in the envelope tells the LLM
+                // which tool produced the content.
+                let wrapped = datamark::wrap_tool_result(func_name, &result);
+
                 messages.push(serde_json::json!({
                     "role": "tool",
                     "tool_call_id": call_id,
-                    "content": result
+                    "content": wrapped
                 }));
             }
         } else {

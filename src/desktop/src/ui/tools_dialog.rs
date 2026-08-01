@@ -1,7 +1,7 @@
 //! Tools dialog — modal window that enumerates every tool group as
 //! a proper table (UI-051..060).
 //!
-//! Columns: checkbox, group, kind, prompt char count, actions
+//! Columns: checkbox, group, kind, tools, prompt char count, actions
 //! (⚠ error indicator + Restart link, Authenticate button when
 //! applicable).
 //!
@@ -16,7 +16,8 @@ use crate::config::{McpServerConfig, save_config};
 use crate::ui::FastMdApp;
 use crate::ui::strings::{
     TOOLS_AUTH_BUTTON, TOOLS_AUTH_RUNNING, TOOLS_CHAR_COUNT_COLUMN, TOOLS_DIALOG_TITLE,
-    TOOLS_FORGET, TOOLS_KIND_INTERNAL, TOOLS_KIND_MCP_REMOTE, TOOLS_KIND_MCP_STDIO, TOOLS_RESTART,
+    TOOLS_FORGET, TOOLS_KIND_INTERNAL, TOOLS_KIND_MCP_REMOTE, TOOLS_KIND_MCP_STDIO,
+    TOOLS_LIST_COLUMN, TOOLS_RESTART,
 };
 
 use eframe::egui;
@@ -135,6 +136,7 @@ pub fn render_contents(ui: &mut eframe::egui::Ui, app: &mut FastMdApp) {
                 .column(Column::auto().at_least(28.0)) // checkbox
                 .column(Column::remainder().at_least(140.0).clip(true)) // group
                 .column(Column::auto().at_least(72.0)) // kind
+                .column(Column::auto().at_least(120.0)) // tools
                 .column(Column::auto().at_least(80.0)) // prompt char count
                 .column(Column::remainder().at_least(140.0)) // actions
                 .header(22.0, |mut header| {
@@ -146,6 +148,9 @@ pub fn render_contents(ui: &mut eframe::egui::Ui, app: &mut FastMdApp) {
                     });
                     header.col(|ui| {
                         ui.strong("Kind");
+                    });
+                    header.col(|ui| {
+                        ui.strong(TOOLS_LIST_COLUMN);
                     });
                     header.col(|ui| {
                         ui.strong(TOOLS_CHAR_COUNT_COLUMN);
@@ -216,7 +221,12 @@ fn render_row(
         ui.label(text);
     });
 
-    // Column 4 — prompt char count + parallel-safe chip
+    // Column 4 — comma-separated tool names
+    row.col(|ui| {
+        ui.label(group.tool_names.join(", "));
+    });
+
+    // Column 5 — prompt char count + parallel-safe chip
     row.col(|ui| {
         let char_count: usize = group
             .tool_names

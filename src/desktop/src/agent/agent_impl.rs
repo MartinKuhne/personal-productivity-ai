@@ -1,6 +1,7 @@
 //! Top-level agent orchestration — builds the system prompt, sends requests, executes tool calls, and streams results back to the UI.
 
 use crate::agent::context::AgentContext;
+use crate::agent::datamark;
 use crate::agent::llm_client::{LLMClient, parse_usage_block};
 use crate::agent::prompt_builder::SystemPromptBuilder;
 use crate::agent::response_formatter::{
@@ -29,7 +30,11 @@ fn run_agent_inner(ctx: AgentContext) {
     let mut messages = build_messages(system_prompt, &ctx.prompt, ctx.history.clone());
     let tools_json = get_tools_schema(&ctx.config, &ctx.prompt);
     let mut full_response = ctx.current_response.clone();
-    let executor = ToolExecutor::new(ctx.config.clone(), ctx.file_event_bus.clone());
+    let executor = ToolExecutor::new(
+        ctx.config.clone(),
+        ctx.file_event_bus.clone(),
+        ctx.browser_session.clone(),
+    );
     loop {
         if ctx.cancel_flag.load(Ordering::SeqCst) {
             break;
@@ -217,8 +222,18 @@ fn process_tool_results(
             let _ = tx.send(BackgroundEvent::from(AgentEvent::Response(
                 full_response.clone(),
             )));
-            messages
-                .push(serde_json::json!({"role": "tool", "tool_call_id": cid, "content": result}));
+            // R1 (Spotlighting): wrap the tool result in a
+            // datamark envelope so the LLM treats it as data, not
+            // instructions. The user-facing response above is built
+            // from the raw `result` (so the chat panel still shows
+            // the real content); only the message we push into the
+            // conversation history is wrapped.
+            let wrapped = datamark::wrap_tool_result(&fn_name, &result);
+            messages.push(serde_json::json!({
+                "role": "tool",
+                "tool_call_id": cid,
+                "content": wrapped
+            }));
         }
     }
 }

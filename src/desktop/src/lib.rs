@@ -15,6 +15,7 @@ pub use agent::run_agent;
 pub use agent::tools::mcp;
 pub use agent::tools::{execute_tool, get_tools_schema};
 pub use app::background_task::Task;
+pub use app::browser::{BrowserSession, PageHandle, SessionError};
 pub use app::print::{PrintJob, execute_print_blocking};
 pub use app::watcher::{DirectoryTracker, FileEventProcessor, FileWatcher};
 pub use app::{
@@ -28,7 +29,7 @@ pub use bus::events::{
     FsEvent, ProcessEvent, TokenUsageInfo,
 };
 pub use bus::router::{BusRouter, ChannelWorker, spawn_path_worker};
-pub use config::{AppConfig, get_config_path, load_config};
+pub use config::{AppConfig, BrowserConfig, ResolvedBrowserConfig, get_config_path, load_config};
 pub use markdown::ToCEntry;
 pub use ui::FastMdApp;
 pub use utils::extract_tags_from_file;

@@ -16,6 +16,6 @@ mod mock_server;
 pub(crate) use mock_server::{spawn_mock_server, spawn_recording_mock_server};
 
 pub use email::{
-    SearchEmailFilters, SearchEmailPagination, tool_get_email_by_id, tool_search_email,
+    SearchEmailFilters, new_search_email_cursor, tool_get_email_by_id, tool_search_email,
     tool_send_email,
 };

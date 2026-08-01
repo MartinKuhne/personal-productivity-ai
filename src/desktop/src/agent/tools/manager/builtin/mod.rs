@@ -1,5 +1,6 @@
 //! Built-in tool implementations and registration logic.
 
+pub(crate) mod browser;
 pub(crate) mod caldav;
 pub(crate) mod carddav;
 pub(crate) mod csv;
@@ -25,6 +26,40 @@ pub(crate) fn register_all_builtins(mgr: &mut ToolManager) {
     mgr.register_builtin(InternalToolGroup::Web, Box::new(web::WebDelegateTool));
     mgr.register_builtin(InternalToolGroup::Web, Box::new(web::WebFetchTool));
     mgr.register_builtin(InternalToolGroup::Web, Box::new(web::WebSearchTool));
+
+    // Browser automation (BRWS-001..008)
+    mgr.register_builtin(
+        InternalToolGroup::Browser,
+        Box::new(browser::BrowserNavigateTool),
+    );
+    mgr.register_builtin(
+        InternalToolGroup::Browser,
+        Box::new(browser::BrowserGetPageStateTool),
+    );
+    mgr.register_builtin(
+        InternalToolGroup::Browser,
+        Box::new(browser::BrowserClickTool),
+    );
+    mgr.register_builtin(
+        InternalToolGroup::Browser,
+        Box::new(browser::BrowserFillInputTool),
+    );
+    mgr.register_builtin(
+        InternalToolGroup::Browser,
+        Box::new(browser::BrowserSelectDropdownTool),
+    );
+    mgr.register_builtin(
+        InternalToolGroup::Browser,
+        Box::new(browser::BrowserPressKeyTool),
+    );
+    mgr.register_builtin(
+        InternalToolGroup::Browser,
+        Box::new(browser::BrowserEvaluateJsTool),
+    );
+    mgr.register_builtin(
+        InternalToolGroup::Browser,
+        Box::new(browser::BrowserScreenshotTool),
+    );
 
     // Filesystem
     mgr.register_builtin(InternalToolGroup::Filesystem, Box::new(fs::ReplaceTextTool));

@@ -206,18 +206,38 @@ fn format_email_by_id_result(func_name: &str, data: &serde_json::Value) -> Strin
 
 fn format_search_email_result(func_name: &str, data: &serde_json::Value) -> String {
     let total = data.get("total").and_then(|t| t.as_u64()).unwrap_or(0);
+    let cursor = data.get("cursor").and_then(|c| c.as_str()).unwrap_or("");
     let hint = data.get("hint").and_then(|h| h.as_str()).unwrap_or("");
-    if !hint.is_empty() {
-        format!(
-            "> **Result (`{}`):** {} item(s) found. {}\n\n",
-            func_name, total, hint
-        )
+    // Count items on this page by parsing the JSON-serialized
+    // `results` array. If parsing fails (e.g. the "No matching
+    // emails found." sentinel on empty results), fall back to 0.
+    let page_items = data
+        .get("results")
+        .and_then(|r| r.as_str())
+        .and_then(|s| serde_json::from_str::<serde_json::Value>(s).ok())
+        .and_then(|v| v.as_array().map(|a| a.len()))
+        .unwrap_or(0);
+
+    let mut msg = format!(
+        "> **Result (`{}`):** {} item(s) found. Page: {} item(s).",
+        func_name, total, page_items
+    );
+
+    if !cursor.is_empty() {
+        // More pages remain. Surface the cursor so the LLM (and a
+        // human operator inspecting the transcript) can see what to
+        // pass back.
+        msg.push_str(&format!(" More pages remain. Cursor: `{cursor}`."));
+    } else if !hint.is_empty() {
+        // Final page or empty result; the hint already ends with a
+        // period ("Final page." / "No matching emails found.").
+        msg.push_str(&format!(" {hint}"));
     } else {
-        format!(
-            "> **Result (`{}`):** {} item(s) found\n\n",
-            func_name, total
-        )
+        // No cursor, no hint: all items fit on a single page.
+        msg.push_str(" All results on this page.");
     }
+    msg.push_str("\n\n");
+    msg
 }
 
 fn format_generic_search_result(func_name: &str, data: &serde_json::Value) -> String {
@@ -381,5 +401,100 @@ mod tests {
         let msg = format_tool_result_message("get_email_by_id", result);
         assert!(msg.contains("get_email_by_id"));
         assert!(msg.contains("3 line(s) read"));
+    }
+
+    // `search_email` paging display: the result header should
+    // show the cross-page total, the items on this page, and either
+    // the cursor (more pages) or the "Final page." hint (last page).
+    // See `format_search_email_result`.
+
+    fn search_email_page(items: usize) -> String {
+        // Build a synthetic `results` JSON array of N empty objects.
+        let entries: Vec<serde_json::Value> = (0..items).map(|_| serde_json::json!({})).collect();
+        serde_json::Value::Array(entries).to_string()
+    }
+
+    #[test]
+    fn test_format_result_search_email_first_page_with_cursor() {
+        // 189 total, 100 items on this page, cursor present.
+        let result = serde_json::json!({
+            "status": "success",
+            "data": {
+                "results": search_email_page(100),
+                "total": 189,
+                "cursor": "550e8400-e29b-41d4-a716-446655440000"
+            }
+        })
+        .to_string();
+        let msg = format_tool_result_message("search_email", &result);
+        assert!(msg.contains("search_email"));
+        assert!(msg.contains("189 item(s) found"));
+        assert!(msg.contains("Page: 100 item(s)"));
+        assert!(msg.contains("More pages remain"));
+        assert!(msg.contains("550e8400-e29b-41d4-a716-446655440000"));
+        // No "Final page." on a non-final page.
+        assert!(!msg.contains("Final page"));
+    }
+
+    #[test]
+    fn test_format_result_search_email_final_page_with_hint() {
+        // 189 total, 89 items on this page, no cursor, final-page hint.
+        let result = serde_json::json!({
+            "status": "success",
+            "data": {
+                "results": search_email_page(89),
+                "total": 189,
+                "cursor": null,
+                "hint": "Final page."
+            }
+        })
+        .to_string();
+        let msg = format_tool_result_message("search_email", &result);
+        assert!(msg.contains("search_email"));
+        assert!(msg.contains("189 item(s) found"));
+        assert!(msg.contains("Page: 89 item(s)"));
+        assert!(msg.contains("Final page"));
+        // No "More pages remain" on the final page.
+        assert!(!msg.contains("More pages remain"));
+    }
+
+    #[test]
+    fn test_format_result_search_email_single_page_no_paging() {
+        // 5 total, 5 items on this page, no cursor, no hint.
+        let result = serde_json::json!({
+            "status": "success",
+            "data": {
+                "results": search_email_page(5),
+                "total": 5
+            }
+        })
+        .to_string();
+        let msg = format_tool_result_message("search_email", &result);
+        assert!(msg.contains("5 item(s) found"));
+        assert!(msg.contains("Page: 5 item(s)"));
+        assert!(msg.contains("All results on this page"));
+        assert!(!msg.contains("More pages remain"));
+        assert!(!msg.contains("Final page"));
+    }
+
+    #[test]
+    fn test_format_result_search_email_empty_result() {
+        // Empty result: hint carries the human-readable message.
+        let result = serde_json::json!({
+            "status": "success",
+            "data": {
+                "results": "No matching emails found.",
+                "total": 0,
+                "cursor": null,
+                "hint": "No matching emails found."
+            }
+        })
+        .to_string();
+        let msg = format_tool_result_message("search_email", &result);
+        assert!(msg.contains("0 item(s) found"));
+        // The page count falls back to 0 when `results` is not a
+        // JSON array (it's the "No matching emails found." sentinel).
+        assert!(msg.contains("Page: 0 item(s)"));
+        assert!(msg.contains("No matching emails found"));
     }
 }

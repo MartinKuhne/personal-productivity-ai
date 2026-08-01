@@ -10,7 +10,7 @@ always read the nearest one before editing. See
 ## 1. Small Iterations
 - Work in small, manageable iterations.
 - Do not attempt sweeping, massive refactors in a single pass.
-- Break tasks into logical steps, implement a change, and verify it before moving to the next step.
+- Break tasks into logical, contained and testable steps, implement a change, and verify it before moving to the next step.
 
 ## 2. Test-Driven Changes
 - Create unit and functional tests for any new features or changes.
@@ -23,13 +23,13 @@ always read the nearest one before editing. See
 ## 4. Warnings and Compilation
 - **Fix all warnings:** You must fix all new and existing compile or test warnings before considering a task "done."
 - Never leave dangling unused variables, imports, or future-incompatibilities if they are within your control to fix.
-- Ensure the component's build and test commands run perfectly clean (e.g. `cargo check` / `cargo test` for Rust crates — see the component's own `AGENTS.md`).
+- Ensure the component's build and test commands run perfectly clean (e.g. `cargo check` / `cargo nextest` for Rust crates — see the component's own `AGENTS.md`).
 
 ## 5. Clarification
 - Always refuse a task or ask for clarification if the requirements or context are unclear.
 
 ## 6. Code Quality
-- Write modular code with minimal side effects.
+- Write modular code with minimal side effects. Small, pure/honest functions are the goal.
 
 ## 7. String Constants and Reuse
 - Use string constants (e.g. `const` items) for repeat strings or user-facing literals rather than duplicating them inline.
@@ -60,9 +60,8 @@ takes precedence for tooling, conventions, and quality gates.
 |------------------------------|----------------------------------------------------------------------------------------|
 | [`src/desktop/AGENTS.md`](src/desktop/AGENTS.md)               | Rust `fastmd` crate: documentation, egui, quality gate, tool/UI contracts. |
 | [`src/android/AGENTS.md`](src/android/AGENTS.md)               | Android Kotlin/Gradle companion app.                                                  |
-| [`doc/technical-context/AGENTS.md`](doc/technical-context/AGENTS.md) | Maintenance of `ARCHITECTURE_C4.md`, `RUST.md`, `SPEC.md`.                |
+| [`doc/technical-context/AGENTS.md`](doc/technical-context/AGENTS.md) | Maintenance of architecture documentation.                |
 | [`doc/planning/AGENTS.md`](doc/planning/AGENTS.md)             | Planning / design-record documents.                                                   |
 | [`src/test/wiki/AGENTS.md`](src/test/wiki/AGENTS.md)           | Test wiki fixtures.                                                                   |
-| [`.agents/AGENTS.md`](.agents/AGENTS.md)                       | Speckit skills workflow.                                                              |
 
-If a directory does not have its own `AGENTS.md`, fall back to this file.
+

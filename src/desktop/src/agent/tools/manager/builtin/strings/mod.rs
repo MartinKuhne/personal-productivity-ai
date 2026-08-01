@@ -8,11 +8,14 @@
 //! here. Editing a string in this module is the only place to change what
 //! the LLM sees for that tool.
 
+pub(crate) mod browser;
 pub(crate) mod caldav;
 pub(crate) mod carddav;
 pub(crate) mod csv;
+pub(crate) mod cursor;
 pub(crate) mod fs;
 pub(crate) mod jmap;
+pub(crate) mod paging;
 pub(crate) mod weather;
 pub(crate) mod web;
 pub(crate) mod yaml;

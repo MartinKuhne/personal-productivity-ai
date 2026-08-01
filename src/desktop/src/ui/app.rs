@@ -396,7 +396,14 @@ impl FastMdApp {
         let finished_watcher_slot = background_task.finished_watcher.clone();
         let file_processor = FileEventProcessor::new(background_task.file_event_bus.subscribe());
         let background_manager = Arc::new(Mutex::new(BackgroundProcessManager::new()));
-        let agent = AgentSessionManager::new(config_bus);
+        // One BrowserSession for the whole app lifetime; shared
+        // with the agent and (read-only) with the Tools dialog
+        // so the UI can call `tick()` / `forget()`. Lazily
+        // launches a Firefox process on first browser tool call.
+        let browser_session = std::sync::Arc::new(crate::app::browser::BrowserSession::new(
+            &crate::config::AppConfig::default(),
+        ));
+        let agent = AgentSessionManager::new(config_bus, browser_session.clone());
 
         let event_bus = background_task.file_event_bus;
         let dir_tracker = DirectoryTracker::new(event_bus.subscribe());
@@ -489,7 +496,10 @@ impl FastMdApp {
         let finished_watcher_slot = background_task.finished_watcher.clone();
         let file_processor = FileEventProcessor::new(background_task.file_event_bus.subscribe());
         let background_manager = Arc::new(Mutex::new(BackgroundProcessManager::new()));
-        let mut agent = AgentSessionManager::new(bus.clone());
+        let test_browser_session = std::sync::Arc::new(crate::app::browser::BrowserSession::new(
+            &crate::config::AppConfig::default(),
+        ));
+        let mut agent = AgentSessionManager::new(bus.clone(), test_browser_session);
         agent.set_config(config.clone());
 
         let event_bus = background_task.file_event_bus;

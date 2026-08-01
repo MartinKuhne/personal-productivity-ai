@@ -32,9 +32,10 @@ fn show_dialog_once(app: &mut crate::ui::FastMdApp) -> egui::FullOutput {
 fn test_tools_dialog_renders_table_headers() {
     let mut app = crate::ui::FastMdApp::empty_state(crate::config::AppConfig::default());
     let output = render_dialog_once(&mut app);
-    // The four visible column headers.
+    // The six visible column headers.
     assert_text_contains(&output.shapes, "Group");
     assert_text_contains(&output.shapes, "Kind");
+    assert_text_contains(&output.shapes, "Tools");
     assert_text_contains(&output.shapes, "Prompt");
     assert_text_contains(&output.shapes, "Actions");
 }

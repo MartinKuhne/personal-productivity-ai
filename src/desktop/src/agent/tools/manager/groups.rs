@@ -14,12 +14,13 @@ pub enum ToolGroupId {
     Mcp(String),
 }
 
-/// The seven built-in tool families. Mirrors
+/// The eight built-in tool families. Mirrors
 /// [`ToolGroupsConfig`](crate::config::ToolGroupsConfig).
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub enum InternalToolGroup {
     Filesystem,
     Web,
+    Browser,
     Email,
     Contacts,
     Calendar,
@@ -33,6 +34,7 @@ impl InternalToolGroup {
         match self {
             Self::Filesystem => "Filesystem",
             Self::Web => "Web",
+            Self::Browser => "Browser",
             Self::Email => "Email",
             Self::Contacts => "Contacts",
             Self::Calendar => "Calendar",

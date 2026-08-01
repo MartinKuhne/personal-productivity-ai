@@ -2,19 +2,29 @@
 
 use super::*;
 use crate::agent::tools::context::ToolContext;
+use crate::app::browser::BrowserSession;
 use crate::bus::core::Bus;
 use crate::bus::events::file::FileEvent;
 use crate::config::AppConfig;
 use serde_json::Value;
 use std::fs;
+use std::sync::Arc;
 use tempfile::TempDir;
 
 fn test_bus() -> &'static Bus<FileEvent> {
     Box::leak(Box::new(Bus::new()))
 }
 
+fn test_browser_session() -> Arc<BrowserSession> {
+    Arc::new(BrowserSession::new(&AppConfig::default()))
+}
+
 fn test_ctx(config: &AppConfig) -> ToolContext<'static> {
-    ToolContext::new(unsafe { &*(config as *const AppConfig) }, test_bus())
+    ToolContext::new(
+        unsafe { &*(config as *const AppConfig) },
+        test_bus(),
+        test_browser_session(),
+    )
 }
 
 #[test]
@@ -226,75 +236,76 @@ fn files_array(data: &Value) -> Vec<String> {
 }
 
 #[test]
-fn test_list_by_tag_default_page_size_is_20() {
-    let (config, _dir) = single_lib_with_n_tagged_files(5);
+fn test_list_by_tag_default_limit_is_100() {
+    // Create 150 files so the default limit of 100 actually clips
+    // the response.
+    let (config, _dir) = single_lib_with_n_tagged_files(150);
     let envelope = run_list_by_tag(&config, r#"{"tag":"meeting"}"#);
     assert_eq!(envelope["status"], "success");
     let data = &envelope["data"];
-    assert_eq!(data["total"], 5);
+    assert_eq!(data["total"], 150);
     let files = files_array(data);
-    assert_eq!(files.len(), 5);
+    assert_eq!(files.len(), 100);
     assert!(files.iter().any(|p| p.ends_with("file_000.md")));
-    assert!(files.iter().any(|p| p.ends_with("file_004.md")));
+    assert!(files.iter().any(|p| p.ends_with("file_099.md")));
     assert!(data.get("hint").is_none() || data["hint"].is_null());
 }
 
 #[test]
-fn test_list_by_tag_pagination_dispatch() {
-    // Each case: (label, n_files, page, page_size, expected_len, expected_first_idx, expected_last_idx)
-    // `expected_len == None` means the response should be empty (past-end).
-    // `expected_hint_starts_with` is checked when the page is past the end.
+fn test_list_by_tag_paging_dispatch() {
+    // Each case: (label, n_files, offset, limit, expected_len, expected_first_idx, expected_last_idx)
+    // `expected_len == 0` means the response should be empty (past-end).
     struct Case {
         label: &'static str,
         n_files: usize,
-        page: u32,
-        page_size: u32,
+        offset: u32,
+        limit: u32,
         expected_len: usize,
         expected_first_idx: Option<usize>,
         expected_last_idx: Option<usize>,
     }
     let cases: &[Case] = &[
         Case {
-            label: "first page (50 files, page 1, size 20)",
+            label: "first slice (50 files, offset 0, limit 20)",
             n_files: 50,
-            page: 1,
-            page_size: 20,
+            offset: 0,
+            limit: 20,
             expected_len: 20,
             expected_first_idx: Some(0),
             expected_last_idx: Some(19),
         },
         Case {
-            label: "second page (50 files, page 2, size 20)",
+            label: "second slice (50 files, offset 20, limit 20)",
             n_files: 50,
-            page: 2,
-            page_size: 20,
+            offset: 20,
+            limit: 20,
             expected_len: 20,
             expected_first_idx: Some(20),
             expected_last_idx: Some(39),
         },
         Case {
-            label: "last partial page (50 files, page 3, size 20)",
+            label: "last partial slice (50 files, offset 40, limit 20)",
             n_files: 50,
-            page: 3,
-            page_size: 20,
+            offset: 40,
+            limit: 20,
             expected_len: 10,
             expected_first_idx: Some(40),
             expected_last_idx: Some(49),
         },
         Case {
-            label: "page past end (5 files, page 99, size 20)",
+            label: "offset past end (5 files, offset 999, limit 20)",
             n_files: 5,
-            page: 99,
-            page_size: 20,
+            offset: 999,
+            limit: 20,
             expected_len: 0,
             expected_first_idx: None,
             expected_last_idx: None,
         },
         Case {
-            label: "page_size one (3 files, page 2, size 1)",
+            label: "limit one (3 files, offset 1, limit 1)",
             n_files: 3,
-            page: 2,
-            page_size: 1,
+            offset: 1,
+            limit: 1,
             expected_len: 1,
             expected_first_idx: Some(1),
             expected_last_idx: Some(1),
@@ -306,8 +317,8 @@ fn test_list_by_tag_pagination_dispatch() {
         let envelope = run_list_by_tag(
             &config,
             &format!(
-                r#"{{"tag":"meeting","page":{},"page_size":{}}}"#,
-                case.page, case.page_size
+                r#"{{"tag":"meeting","offset":{},"limit":{}}}"#,
+                case.offset, case.limit
             ),
         );
         let data = &envelope["data"];
@@ -344,7 +355,7 @@ fn test_list_by_tag_pagination_dispatch() {
                 .as_str()
                 .unwrap_or_else(|| panic!("[{}] expected hint on past-end page", case.label));
             assert!(
-                hint.contains(&format!("page {}", case.page))
+                hint.contains(&format!("offset {}", case.offset))
                     && hint.contains(&format!("{} total", case.n_files)),
                 "[{}] hint text mismatch: {hint}",
                 case.label
@@ -354,9 +365,9 @@ fn test_list_by_tag_pagination_dispatch() {
 }
 
 #[test]
-fn test_list_by_tag_pagination_is_global_across_libraries() {
+fn test_list_by_tag_paging_is_global_across_libraries() {
     let (config, _fixture) = two_libs_with_n_tagged_files_each(25);
-    let envelope = run_list_by_tag(&config, r#"{"tag":"meeting","page":1,"page_size":20}"#);
+    let envelope = run_list_by_tag(&config, r#"{"tag":"meeting","offset":0,"limit":20}"#);
     let data = &envelope["data"];
     assert_eq!(data["total"], 50);
     assert_eq!(files_array(data).len(), 20);
@@ -386,9 +397,12 @@ fn test_list_by_tag_no_matches_reports_zero_total() {
 }
 
 #[test]
-fn test_list_by_tag_page_zero_is_normalised_to_page_one() {
+fn test_list_by_tag_offset_zero_returns_first_slice() {
+    // With the new offset model, offset 0 is a literal "first slice"
+    // request; no normalisation is needed. The response is the same
+    // as omitting the offset entirely.
     let (config, _dir) = single_lib_with_n_tagged_files(5);
-    let envelope = run_list_by_tag(&config, r#"{"tag":"meeting","page":0,"page_size":3}"#);
+    let envelope = run_list_by_tag(&config, r#"{"tag":"meeting","offset":0,"limit":3}"#);
     let data = &envelope["data"];
     assert_eq!(data["total"], 5);
     let files = files_array(data);
@@ -424,13 +438,15 @@ fn single_lib_with_n_md_files(n: usize) -> (AppConfig, LibFixture) {
 }
 
 #[test]
-fn test_list_files_default_page_size_is_20() {
-    let (config, _fix) = single_lib_with_n_md_files(5);
+fn test_list_files_default_limit_is_100() {
+    // Create 150 files so the default limit of 100 actually clips
+    // the response.
+    let (config, _fix) = single_lib_with_n_md_files(150);
     let envelope = run_list_files(&config, r#"{"path":"Lib"}"#);
     let data = &envelope["data"];
-    assert_eq!(data["total"], 5);
+    assert_eq!(data["total"], 150);
     let files = files_array(data);
-    assert_eq!(files.len(), 5);
+    assert_eq!(files.len(), 100);
     assert!(
         files
             .iter()
@@ -439,41 +455,41 @@ fn test_list_files_default_page_size_is_20() {
 }
 
 #[test]
-fn test_list_files_pagination_dispatch() {
-    // Each case: (label, n_files, page, page_size, expected_len, expected_first_idx, expected_last_idx)
+fn test_list_files_paging_dispatch() {
+    // Each case: (label, n_files, offset, limit, expected_len, expected_first_idx, expected_last_idx)
     struct Case {
         label: &'static str,
         n_files: usize,
-        page: u32,
-        page_size: u32,
+        offset: u32,
+        limit: u32,
         expected_len: usize,
         expected_first_idx: Option<usize>,
         expected_last_idx: Option<usize>,
     }
     let cases: &[Case] = &[
         Case {
-            label: "first page (50 files, page 1, size 20)",
+            label: "first slice (50 files, offset 0, limit 20)",
             n_files: 50,
-            page: 1,
-            page_size: 20,
+            offset: 0,
+            limit: 20,
             expected_len: 20,
             expected_first_idx: Some(0),
             expected_last_idx: Some(19),
         },
         Case {
-            label: "last partial page (50 files, page 3, size 20)",
+            label: "last partial slice (50 files, offset 40, limit 20)",
             n_files: 50,
-            page: 3,
-            page_size: 20,
+            offset: 40,
+            limit: 20,
             expected_len: 10,
             expected_first_idx: Some(40),
             expected_last_idx: Some(49),
         },
         Case {
-            label: "page past end (5 files, page 99, size 20)",
+            label: "offset past end (5 files, offset 999, limit 20)",
             n_files: 5,
-            page: 99,
-            page_size: 20,
+            offset: 999,
+            limit: 20,
             expected_len: 0,
             expected_first_idx: None,
             expected_last_idx: None,
@@ -485,8 +501,8 @@ fn test_list_files_pagination_dispatch() {
         let envelope = run_list_files(
             &config,
             &format!(
-                r#"{{"path":"Lib","page":{},"page_size":{}}}"#,
-                case.page, case.page_size
+                r#"{{"path":"Lib","offset":{},"limit":{}}}"#,
+                case.offset, case.limit
             ),
         );
         let data = &envelope["data"];
@@ -522,7 +538,7 @@ fn test_list_files_pagination_dispatch() {
                 .as_str()
                 .unwrap_or_else(|| panic!("[{}] expected hint on past-end page", case.label));
             assert!(
-                hint.contains(&format!("page {}", case.page))
+                hint.contains(&format!("offset {}", case.offset))
                     && hint.contains(&format!("{} total", case.n_files)),
                 "[{}] hint text mismatch: {hint}",
                 case.label
@@ -542,7 +558,7 @@ fn test_list_files_root_path_returns_libraries() {
 }
 
 #[test]
-fn test_list_files_multiple_libraries_paginated_globally() {
+fn test_list_files_multiple_libraries_paging_global() {
     let dir_a = tempfile::tempdir().unwrap();
     let dir_b = tempfile::tempdir().unwrap();
     for i in 0..30 {
@@ -572,7 +588,7 @@ fn test_list_files_multiple_libraries_paginated_globally() {
         _a: dir_a,
         _b: Some(dir_b),
     };
-    let envelope = run_list_files(&config, r#"{"path":"LibA","page":1,"page_size":20}"#);
+    let envelope = run_list_files(&config, r#"{"path":"LibA","offset":0,"limit":20}"#);
     let data = &envelope["data"];
     assert_eq!(data["total"], 30);
     assert_eq!(files_array(data).len(), 20);
