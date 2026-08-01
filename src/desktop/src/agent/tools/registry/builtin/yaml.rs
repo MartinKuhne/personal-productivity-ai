@@ -7,6 +7,7 @@ use crate::config::AppConfig;
 use std::any::TypeId;
 
 use super::json_schema;
+use super::strings::yaml as yaml_strings;
 
 /// Tool that parses a YAML front-matter header from a Markdown file.
 pub(crate) struct ReadYamlHeaderTool;
@@ -15,7 +16,7 @@ impl Tool for ReadYamlHeaderTool {
         "read_yaml_header"
     }
     fn description(&self) -> &'static str {
-        "Parse a YAML header from a markdown file and return its content representation. Tip: Use this to read a document's summary before reading the full file if you are not sure the full contents are needed, to protect context."
+        yaml_strings::READ_YAML_HEADER_DESCRIPTION
     }
     fn input_type(&self) -> TypeId {
         TypeId::of::<dtos::ReadYamlHeaderInput>()
@@ -48,7 +49,7 @@ impl Tool for WriteYamlHeaderTool {
         "write_yaml_header"
     }
     fn description(&self) -> &'static str {
-        "Write or update data in a YAML header to a markdown file."
+        yaml_strings::WRITE_YAML_HEADER_DESCRIPTION
     }
     fn input_type(&self) -> TypeId {
         TypeId::of::<dtos::WriteYamlHeaderInput>()

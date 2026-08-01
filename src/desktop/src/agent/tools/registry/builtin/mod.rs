@@ -5,6 +5,7 @@ pub(crate) mod carddav;
 pub(crate) mod csv;
 pub(crate) mod fs;
 pub(crate) mod jmap;
+pub(crate) mod strings;
 pub(crate) mod weather;
 pub(crate) mod web;
 pub(crate) mod yaml;

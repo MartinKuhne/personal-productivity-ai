@@ -9,6 +9,7 @@ use std::any::TypeId;
 
 use super::super::pagination::paginate_in_range;
 use super::json_schema;
+use super::strings::fs as fs_strings;
 
 /// Tool that replaces exact text occurrences in a file.
 pub(crate) struct ReplaceTextTool;
@@ -17,7 +18,7 @@ impl Tool for ReplaceTextTool {
         "replace_text"
     }
     fn description(&self) -> &'static str {
-        "Replace exact occurrences of old_string with new_string in a file."
+        fs_strings::REPLACE_TEXT_DESCRIPTION
     }
     fn input_type(&self) -> TypeId {
         TypeId::of::<dtos::ReplaceTextInput>()
@@ -52,7 +53,7 @@ impl Tool for GrepTool {
         "grep"
     }
     fn description(&self) -> &'static str {
-        "Search for a query string case-insensitively across all Markdown files in the workspace. Returns at most 200 matching lines; when the result is truncated, refine the query with narrower terms or delegate to a sub-agent to analyse a specific file."
+        fs_strings::GREP_DESCRIPTION
     }
     fn input_type(&self) -> TypeId {
         TypeId::of::<dtos::GrepInput>()
@@ -112,7 +113,7 @@ impl Tool for ReadTagsTool {
         "read_tags"
     }
     fn description(&self) -> &'static str {
-        "Get all unique tags defined in front-matter headers of all Markdown files in the workspace."
+        fs_strings::READ_TAGS_DESCRIPTION
     }
     fn input_type(&self) -> TypeId {
         TypeId::of::<dtos::ReadTagsInput>()
@@ -151,7 +152,7 @@ impl Tool for ListFilesByTagTool {
         "list_files_by_tag"
     }
     fn description(&self) -> &'static str {
-        "List Markdown files that contain a specific tag in their front-matter. Results are returned as a JSON array, paginated across all configured libraries (default page size 20); every response includes the total number of matching files so the caller can drive follow-up page requests."
+        fs_strings::LIST_FILES_BY_TAG_DESCRIPTION
     }
     fn input_type(&self) -> TypeId {
         TypeId::of::<dtos::ListFilesByTagInput>()
@@ -207,7 +208,7 @@ impl Tool for ListFilesTool {
         "list_files"
     }
     fn description(&self) -> &'static str {
-        "List Markdown files in a directory (not recursive). Results are returned as a JSON array, paginated (default page size 20); every response includes the total number of files in the directory so the caller can drive follow-up page requests. With `path` set to \"/\" or \".\" returns the configured content libraries."
+        fs_strings::LIST_FILES_DESCRIPTION
     }
     fn input_type(&self) -> TypeId {
         TypeId::of::<dtos::ListFilesInput>()
@@ -267,7 +268,7 @@ impl Tool for ReadFileTool {
         "read_file"
     }
     fn description(&self) -> &'static str {
-        "Read the entire text contents of a file at the specified path. Prefer using the read_yaml_header tool if just a document summary is needed."
+        fs_strings::READ_FILE_DESCRIPTION
     }
     fn input_type(&self) -> TypeId {
         TypeId::of::<dtos::ReadFileInput>()
@@ -300,7 +301,7 @@ impl Tool for ReadFileLinesTool {
         "read_file_lines"
     }
     fn description(&self) -> &'static str {
-        "Read specific lines from a file (1-indexed)."
+        fs_strings::READ_FILE_LINES_DESCRIPTION
     }
     fn input_type(&self) -> TypeId {
         TypeId::of::<dtos::ReadFileLinesInput>()
@@ -338,7 +339,7 @@ impl Tool for CreateFileTool {
         "create_file"
     }
     fn description(&self) -> &'static str {
-        "Create a new file at the specified path with the provided content."
+        fs_strings::CREATE_FILE_DESCRIPTION
     }
     fn input_type(&self) -> TypeId {
         TypeId::of::<dtos::CreateFileInput>()
@@ -372,7 +373,7 @@ impl Tool for InsertLinesTool {
         "insert_lines"
     }
     fn description(&self) -> &'static str {
-        "Insert lines into a file at a specific 1-indexed line index."
+        fs_strings::INSERT_LINES_DESCRIPTION
     }
     fn input_type(&self) -> TypeId {
         TypeId::of::<dtos::InsertLinesInput>()
@@ -407,7 +408,7 @@ impl Tool for DeleteLinesTool {
         "delete_lines"
     }
     fn description(&self) -> &'static str {
-        "Delete specific lines from a file (1-indexed, inclusive)."
+        fs_strings::DELETE_LINES_DESCRIPTION
     }
     fn input_type(&self) -> TypeId {
         TypeId::of::<dtos::DeleteLinesInput>()

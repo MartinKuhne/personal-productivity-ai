@@ -7,6 +7,7 @@ use crate::config::AppConfig;
 use std::any::TypeId;
 
 use super::json_schema;
+use super::strings::weather as weather_strings;
 
 /// Tool that fetches current weather conditions and forecasts for a location.
 pub(crate) struct GetWeatherTool;
@@ -15,7 +16,7 @@ impl Tool for GetWeatherTool {
         "get_weather"
     }
     fn description(&self) -> &'static str {
-        "Get current weather conditions and forecast for a location. Geocodes the location via Nominatim and fetches the NWS forecast (~7 days). Optionally filter by a date (YYYY-MM-DD)."
+        weather_strings::GET_WEATHER_DESCRIPTION
     }
     fn input_type(&self) -> TypeId {
         TypeId::of::<dtos::GetWeatherInput>()

@@ -6,6 +6,7 @@ use crate::config::AppConfig;
 use std::any::TypeId;
 
 use super::json_schema;
+use super::strings::csv as csv_strings;
 
 fn csv_tools_enabled(prompt: &str) -> bool {
     let p = prompt.to_lowercase();
@@ -26,7 +27,7 @@ impl Tool for CsvCreateTool {
         "create_csv"
     }
     fn description(&self) -> &'static str {
-        "Create a new CSV file database with specified headers."
+        csv_strings::CREATE_CSV_DESCRIPTION
     }
     fn input_type(&self) -> TypeId {
         TypeId::of::<crate::agent::tools::csv_db::schema::CreateCsvInput>()
@@ -53,7 +54,7 @@ impl Tool for CsvListTool {
         "list_csv"
     }
     fn description(&self) -> &'static str {
-        "List all CSV file databases."
+        csv_strings::LIST_CSV_DESCRIPTION
     }
     fn input_type(&self) -> TypeId {
         TypeId::of::<crate::agent::tools::csv_db::schema::ListCsvInput>()
@@ -83,7 +84,7 @@ impl Tool for CsvAddRowsTool {
         "add_rows"
     }
     fn description(&self) -> &'static str {
-        "Add rows to a CSV file database."
+        csv_strings::ADD_ROWS_DESCRIPTION
     }
     fn input_type(&self) -> TypeId {
         TypeId::of::<crate::agent::tools::csv_db::schema::AddRowsInput>()
@@ -110,7 +111,7 @@ impl Tool for CsvDeleteRowsTool {
         "delete_rows"
     }
     fn description(&self) -> &'static str {
-        "Delete rows from a CSV file database based on a predicate."
+        csv_strings::DELETE_ROWS_DESCRIPTION
     }
     fn input_type(&self) -> TypeId {
         TypeId::of::<crate::agent::tools::csv_db::schema::DeleteRowsInput>()
@@ -137,7 +138,7 @@ impl Tool for CsvQueryTool {
         "query"
     }
     fn description(&self) -> &'static str {
-        "Query a CSV file database using an evalexpr predicate, supporting sum and average aggregates."
+        csv_strings::QUERY_DESCRIPTION
     }
     fn input_type(&self) -> TypeId {
         TypeId::of::<crate::agent::tools::csv_db::schema::QueryRequest>()

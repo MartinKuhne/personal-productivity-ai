@@ -7,6 +7,7 @@ use crate::config::AppConfig;
 use std::any::TypeId;
 
 use super::json_schema;
+use super::strings::web as web_strings;
 
 /// Tool that delegates web searches and fetches to a sub-agent.
 pub(crate) struct WebDelegateTool;
@@ -15,7 +16,7 @@ impl Tool for WebDelegateTool {
         "web_delegate"
     }
     fn description(&self) -> &'static str {
-        "Delegate web searches and web fetches to a sub-agent. This protects your context window. Give clear instructions and it will return summarized information."
+        web_strings::WEB_DELEGATE_DESCRIPTION
     }
     fn input_type(&self) -> TypeId {
         TypeId::of::<dtos::WebDelegateInput>()
@@ -42,7 +43,7 @@ impl Tool for WebFetchTool {
         "web_fetch"
     }
     fn description(&self) -> &'static str {
-        "Fetch content from a URL and convert to Markdown. Supports pagination via limit/offset to save context — fetch once, then read sections. Response includes total_lines for pagination. Content is cached for 5 minutes; use force_refetch=true to bypass cache."
+        web_strings::WEB_FETCH_DESCRIPTION
     }
     fn input_type(&self) -> TypeId {
         TypeId::of::<dtos::WebFetchInput>()
@@ -72,7 +73,7 @@ impl Tool for WebSearchTool {
         "web_search"
     }
     fn description(&self) -> &'static str {
-        "Search the web using SearXNG."
+        web_strings::WEB_SEARCH_DESCRIPTION
     }
     fn input_type(&self) -> TypeId {
         TypeId::of::<dtos::WebSearchInput>()
