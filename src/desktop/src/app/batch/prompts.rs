@@ -3,7 +3,7 @@
 use crate::app::batch::types::PromptInfo;
 use crate::config::{AppConfig, ContentLibrary};
 use crate::markdown::parse_front_matter;
-use serde_yml::Value;
+use serde_norway::Value;
 use std::collections::BTreeSet;
 use std::path::{Path, PathBuf};
 use walkdir::WalkDir;

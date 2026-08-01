@@ -190,9 +190,9 @@ The `Bus<T>` transport and all event payload types live in
 ## 6. Quality Gate (Rust)
 
 Before marking any task as complete, run the following from `src/desktop/` and ensure they all pass cleanly:
-- `cargo check --quiet` — no errors or warnings
-- `cargo nextest run ---status-level fail --no-progress` — all tests pass (the `default` profile in `.config/nextest.toml` retries flaky tier-4 click tests twice; CI uses the `ci` profile which is strict)
-- `cargo clippy -- --quiet -D warnings` — no lint warnings (deny all)
+- `cargo check` — no errors or warnings
+- `cargo nextest run --status-level fail --show-progress none` — all tests pass (the `default` profile in `.config/nextest.toml` retries flaky tier-4 click tests twice; CI uses the `ci` profile which is strict)
+- `cargo clippy -- -D warnings` — no lint warnings (deny all)
 - `cargo fmt --check` — code is properly formatted
 - `cargo doc --no-deps --quiet` — documentation builds without warnings
 

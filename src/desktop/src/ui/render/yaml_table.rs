@@ -16,7 +16,7 @@ use egui::RichText;
 /// column takes whatever's left over, with a 12px inter-column gap.
 const YAML_KEY_COLUMN_WIDTH: f32 = 110.0;
 
-pub fn render_yaml_table(ui: &mut egui::Ui, yaml: &serde_yml::Value) {
+pub fn render_yaml_table(ui: &mut egui::Ui, yaml: &serde_norway::Value) {
     if let Some(pairs) = parse_yaml_to_pairs(yaml) {
         let table_id = ui.make_persistent_id("yaml_table");
         egui::Frame::NONE

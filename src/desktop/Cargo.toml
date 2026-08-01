@@ -33,7 +33,7 @@ rustls = { version = "0.23", features = ["ring"] }
 schemars = "1.2.1"
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
-serde_yml = "0.0.13"
+serde_norway = "0.9"
 tokio = { version = "1.53.0", features = ["rt-multi-thread", "macros", "sync"] }
 trash = "5.2.6"
 ureq = { version = "2.9", features = ["json"] }
@@ -46,7 +46,7 @@ glob = "0.3"
 reqwest = { version = "0.12", features = ["blocking"] }
 opener = { version = "0.7", features = ["reveal"] }
 webbrowser = "1"
-backoff = { version = "0.4", features = ["tokio"] }
+backon = "1.6"
 uuid = { version = "1", features = ["v4"] }
 csv = "1.4.0"
 evalexpr = "13.1.0"

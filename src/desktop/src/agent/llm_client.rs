@@ -3,8 +3,8 @@
 use crate::agent::error::AgentError;
 use crate::bus::events::messages::TokenUsageInfo;
 use crate::config::AppConfig;
-use backoff::ExponentialBackoff;
-use backoff::retry;
+use backon::BlockingRetryable;
+use backon::ExponentialBuilder;
 
 pub fn parse_usage_block(usage: &serde_json::Value) -> Option<TokenUsageInfo> {
     let prompt_tokens = usage
@@ -94,15 +94,7 @@ impl LLMClient {
             "max_tokens": self.max_tokens
         });
 
-        let backoff = ExponentialBackoff {
-            initial_interval: std::time::Duration::from_secs(1),
-            multiplier: 2.0,
-            max_interval: std::time::Duration::from_secs(8),
-            max_elapsed_time: Some(std::time::Duration::from_secs(10)),
-            ..Default::default()
-        };
-
-        let response = retry(backoff, || {
+        let response = (|| {
             let result = agent
                 .post(&url)
                 .set("Authorization", &format!("Bearer {}", self.api_key))
@@ -121,12 +113,9 @@ impl LLMClient {
                             status = code,
                             "Retryable HTTP error, will retry"
                         );
-                        Err(backoff::Error::Transient {
-                            err: AgentError::HttpError {
-                                status: code,
-                                body: body_str,
-                            },
-                            retry_after: None,
+                        Err(AgentError::HttpError {
+                            status: code,
+                            body: body_str,
                         })
                     } else {
                         tracing::error!(
@@ -135,10 +124,10 @@ impl LLMClient {
                             response = %body_str,
                             "Non-retryable HTTP error."
                         );
-                        Err(backoff::Error::Permanent(AgentError::HttpError {
+                        Err(AgentError::HttpError {
                             status: code,
                             body: body_str,
-                        }))
+                        })
                     }
                 }
                 Err(ureq::Error::Transport(e)) => {
@@ -152,21 +141,26 @@ impl LLMClient {
                             error = %err_str,
                             "Timeout, will retry"
                         );
-                        Err(backoff::Error::Transient {
-                            err: AgentError::Timeout,
-                            retry_after: None,
-                        })
+                        Err(AgentError::Timeout)
                     } else {
-                        Err(backoff::Error::Permanent(AgentError::NetworkError(err_str)))
+                        Err(AgentError::NetworkError(err_str))
                     }
                 }
             }
-        });
-
-        let response = response.map_err(|e| match e {
-            backoff::Error::Permanent(e) => e,
-            backoff::Error::Transient { err: e, .. } => e,
-        })?;
+        })
+        .retry(
+            ExponentialBuilder::default()
+                .with_factor(2.0)
+                .with_min_delay(std::time::Duration::from_secs(1))
+                .with_max_delay(std::time::Duration::from_secs(8))
+                .with_total_delay(Some(std::time::Duration::from_secs(10))),
+        )
+        .when(|e: &AgentError| match e {
+            AgentError::Timeout => true,
+            AgentError::HttpError { status, .. } => *status >= 500 || *status == 429,
+            _ => false,
+        })
+        .call()?;
 
         response.into_json().map_err(|e| {
             tracing::error!(
