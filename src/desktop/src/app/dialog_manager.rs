@@ -1,6 +1,16 @@
 //! Centralised modal-dialog state — open/closed flags and temporary inputs for every dialog in the application.
 
+use std::collections::HashMap;
 use std::path::PathBuf;
+
+/// Tracks the OAuth 2.1 authorization-flow state for a single MCP
+/// server. Rendered in the Tools dialog to prevent double-spawning
+/// and to show an in-progress label on the row.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum OAuthFlowStatus {
+    /// A background thread is running the flow.
+    InProgress,
+}
 
 /// Manager for all modal dialogs in the application.
 ///
@@ -32,6 +42,20 @@ pub struct DialogManager {
     pub batch_dialog_config: crate::app::batch::types::BatchDialogConfig,
     pub batch_handle: Option<crate::app::batch::BatchHandle>,
     pub batch_cancel_flag: Option<std::sync::Arc<std::sync::atomic::AtomicBool>>,
+
+    // Tools dialog (UI-051)
+    pub tools_dialog_open: bool,
+    /// `true` for the first frame after the dialog is opened.
+    /// The dialog uses this to force one MCP tool discovery
+    /// refresh so MCP groups show their tools and prompt char
+    /// count. Cleared by the dialog on its first render.
+    pub tools_dialog_just_opened: bool,
+
+    // OAuth in-flight state (MCP-021)
+    /// Per-server OAuth flow status. Present (InProgress) while the
+    /// background thread running `McpClientManager::authenticate` is
+    /// alive. Removed when the thread sends `McpAuthEvent::Completed`.
+    pub oauth_status: HashMap<String, OAuthFlowStatus>,
 }
 
 impl DialogManager {
@@ -54,7 +78,34 @@ impl DialogManager {
             batch_dialog_config: crate::app::batch::types::BatchDialogConfig::default(),
             batch_handle: None,
             batch_cancel_flag: None,
+
+            tools_dialog_open: false,
+            tools_dialog_just_opened: false,
+
+            oauth_status: HashMap::new(),
         }
+    }
+
+    /// Mark the OAuth flow for `server` as in-progress. Called just
+    /// before the background thread is spawned.
+    pub fn set_oauth_in_progress(&mut self, server: &str) {
+        self.oauth_status
+            .insert(server.to_owned(), OAuthFlowStatus::InProgress);
+    }
+
+    /// Clear the in-progress flag for `server`. Called when the
+    /// background thread sends `McpAuthEvent::Completed`.
+    pub fn set_oauth_idle(&mut self, server: &str) {
+        self.oauth_status.remove(server);
+    }
+
+    /// Returns `true` while the OAuth background thread for `server`
+    /// is still running.
+    pub fn is_oauth_in_progress(&self, server: &str) -> bool {
+        matches!(
+            self.oauth_status.get(server),
+            Some(OAuthFlowStatus::InProgress)
+        )
     }
 }
 
@@ -78,5 +129,23 @@ mod tests {
         assert!(!dm.rename_dialog_open);
         assert!(dm.file_to_rename.is_none());
         assert!(!dm.batch_dialog_open);
+    }
+
+    #[test]
+    fn oauth_status_starts_idle() {
+        let dm = DialogManager::new();
+        assert!(!dm.is_oauth_in_progress("my-server"));
+        assert!(dm.oauth_status.is_empty());
+    }
+
+    #[test]
+    fn set_in_progress_and_back_to_idle() {
+        let mut dm = DialogManager::new();
+        dm.set_oauth_in_progress("srv");
+        assert!(dm.is_oauth_in_progress("srv"));
+        assert!(!dm.is_oauth_in_progress("other"));
+        dm.set_oauth_idle("srv");
+        assert!(!dm.is_oauth_in_progress("srv"));
+        assert!(dm.oauth_status.is_empty());
     }
 }

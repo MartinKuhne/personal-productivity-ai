@@ -25,7 +25,7 @@ The requirements below have been formatted using the **Easy Approach to Requirem
 | Local LLM Interface & Tool Call Agent | [`src/agent/SPEC.md`](src/agent/SPEC.md) | OpenAI-compatible client, agent loop, model routing, context injection, tool execution, thinking delimiters, and quick tasks. |
 | Libraries | [`src/app/vfs/SPEC.md`](src/app/vfs/SPEC.md) | Libraries and Virtual File System |
 | Batch processing | [`src/batch/SPEC.md`](src/batch/SPEC.md) | batch prompt processing dialog, modes, concurrency, and lifecycle |
-| LLM Tools | [`src/tools/SPEC.md`](src/tools/SPEC.md) | All LLM tools |
+| LLM Tools | [`src/agent/tools/SPEC.md`](src/agent/tools/SPEC.md) | All LLM tools + ToolManager (TOOL-014..024) |
 | Application logic | [`src/app/SPEC.md`](src/app/SPEC.md) | PDF support, image support, panel logic |
 
 ## Sources

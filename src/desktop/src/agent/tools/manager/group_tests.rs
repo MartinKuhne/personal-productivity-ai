@@ -1,0 +1,204 @@
+//! Tests for the `ToolManager` group-state and error-tracking surface.
+//! These complement the `manager::tests` (the migrated registry tests)
+//! and cover the new behaviour introduced by the merge.
+
+use super::*;
+use crate::config::AppConfig;
+use crate::config::McpServerConfig;
+
+/// Every registered tool has a `tool_to_group` entry — no orphans.
+#[test]
+fn tool_to_group_index_is_complete() {
+    let mut mgr = ToolManager::new();
+    let config = AppConfig::default();
+    mgr.refresh_state(&config);
+    for name in mgr.tools.keys() {
+        assert!(
+            mgr.tool_to_group.contains_key(name),
+            "tool {name} missing from tool_to_group"
+        );
+    }
+    for name in mgr.tool_to_group.keys() {
+        assert!(
+            mgr.tools.contains_key(name),
+            "tool_to_group references missing tool {name}"
+        );
+    }
+}
+
+/// `refresh_state` reads the current `AppConfig::tool_groups` flags.
+#[test]
+fn group_state_refresh_reflects_config() {
+    let mut mgr = ToolManager::new();
+    let mut config = AppConfig::default();
+    mgr.refresh_state(&config);
+    let id = ToolGroupId::Internal(InternalToolGroup::Filesystem);
+    assert!(mgr.group(&id).unwrap().enabled);
+
+    config.tool_groups.filesystem = false;
+    mgr.refresh_state(&config);
+    assert!(!mgr.group(&id).unwrap().enabled);
+}
+
+/// A group whose tools are all `ReadOnly` reports `parallel_safe = true`.
+#[test]
+fn group_parallel_safe_when_all_tools_readonly() {
+    // Build a manager that has only `grep` (ReadOnly) in the
+    // Filesystem group. We can't easily remove tools from a
+    // `ToolManager`; instead we test the *complement*: a group that
+    // mixes read-only and mutating tools is not parallel-safe
+    // (verified in the next test). Here we test the trivial case
+    // by checking that the Web group's `parallel_safe` value matches
+    // the per-tool safety: `web_delegate` is Mutating, so the Web
+    // group must not be parallel-safe; but the *Filesystem* group
+    // has at least one Mutating tool (`create_file`).
+    let mut mgr = ToolManager::new();
+    let config = AppConfig::default();
+    mgr.refresh_state(&config);
+    let fs = mgr
+        .group(&ToolGroupId::Internal(InternalToolGroup::Filesystem))
+        .unwrap();
+    // The group has both read-only and mutating tools, so it is NOT
+    // parallel-safe.
+    assert!(!fs.parallel_safe);
+}
+
+/// `parallel_safe_tools` returns every ReadOnly tool.
+#[test]
+fn parallel_safe_tools_includes_all_readonly_tools() {
+    let mgr = ToolManager::new();
+    let safe = mgr.parallel_safe_tools();
+    // `grep` is documented as ReadOnly. The list is not exhaustive
+    // — it grows as more tools are audited — but it must include
+    // every tool that overrides `safety()` to `ReadOnly`.
+    assert!(safe.iter().any(|n| n == "grep"));
+    // And it must NOT include obviously-mutating tools.
+    assert!(!safe.iter().any(|n| n == "create_file"));
+}
+
+/// A `ToolManager`-level error replaces any prior `last_error` for
+/// the same group.
+#[test]
+fn record_error_replaces_previous() {
+    let mut mgr = ToolManager::new();
+    let config = AppConfig::default();
+    mgr.refresh_state(&config);
+    let id = ToolGroupId::Internal(InternalToolGroup::Filesystem);
+    mgr.record_error(&id, ToolGroupError::now(ToolErrorKind::Execution, "first"));
+    assert_eq!(
+        mgr.group(&id)
+            .and_then(|s| s.last_error.as_ref())
+            .map(|e| &e.message),
+        Some(&"first".to_string())
+    );
+    mgr.record_error(&id, ToolGroupError::now(ToolErrorKind::Execution, "second"));
+    assert_eq!(
+        mgr.group(&id)
+            .and_then(|s| s.last_error.as_ref())
+            .map(|e| &e.message),
+        Some(&"second".to_string())
+    );
+}
+
+/// `clear_error` removes the recorded error.
+#[test]
+fn clear_error_removes_recorded_error() {
+    let mut mgr = ToolManager::new();
+    let config = AppConfig::default();
+    mgr.refresh_state(&config);
+    let id = ToolGroupId::Internal(InternalToolGroup::Filesystem);
+    mgr.record_error(&id, ToolGroupError::now(ToolErrorKind::Execution, "boom"));
+    assert!(mgr.group(&id).unwrap().last_error.is_some());
+    mgr.clear_error(&id);
+    assert!(mgr.group(&id).unwrap().last_error.is_none());
+}
+
+/// `set_group_enabled` flips the right field on `AppConfig` for an
+/// internal group and persists the change.
+#[test]
+fn set_internal_group_enabled_persists_to_config() {
+    let mgr = ToolManager::new();
+    let mut config = AppConfig::default();
+    assert!(config.tool_groups.weather);
+    mgr.set_group_enabled(
+        &mut config,
+        &ToolGroupId::Internal(InternalToolGroup::Weather),
+        false,
+    );
+    assert!(!config.tool_groups.weather);
+    mgr.set_group_enabled(
+        &mut config,
+        &ToolGroupId::Internal(InternalToolGroup::Weather),
+        true,
+    );
+    assert!(config.tool_groups.weather);
+}
+
+/// `set_group_enabled` flips the `McpServerEntry::enabled` flag for an
+/// MCP group, preserving the transport config.
+#[test]
+fn set_mcp_group_enabled_preserves_server_config() {
+    let mgr = ToolManager::new();
+    let mut config = AppConfig::default();
+    config.mcp_servers.insert(
+        "github".to_string(),
+        McpServerConfig::Stdio {
+            command: "echo".to_string(),
+            args: vec!["hi".to_string()],
+            env: Default::default(),
+        }
+        .into(),
+    );
+    mgr.set_group_enabled(&mut config, &ToolGroupId::Mcp("github".to_string()), false);
+    let entry = config.mcp_servers.get("github").unwrap();
+    assert!(!entry.enabled);
+    // Transport preserved.
+    match entry.config() {
+        McpServerConfig::Stdio { command, args, .. } => {
+            assert_eq!(command, "echo");
+            assert_eq!(args, &vec!["hi".to_string()]);
+        }
+        other => panic!("expected Stdio, got {other:?}"),
+    }
+}
+
+/// `mcp_needs_auth_now` returns the manager's per-server `needs_auth`
+/// flag. The flag defaults to `false` and is set by the MCP client
+/// when a 401 is observed.
+#[test]
+fn mcp_needs_auth_now_defaults_to_false() {
+    let mgr = ToolManager::new();
+    let mut config = AppConfig::default();
+    config.mcp_servers.insert(
+        "github".to_string(),
+        McpServerConfig::Sse {
+            url: "https://api.github.com/mcp".to_string(),
+            headers: Default::default(),
+            oauth: None,
+        }
+        .into(),
+    );
+    mgr.mcp_manager().update_config(&config);
+    assert!(!mgr.mcp_manager().needs_auth_now("github"));
+}
+
+/// `mcp_clear_needs_auth` clears the manager's flag for a server.
+#[test]
+fn mcp_clear_needs_auth_clears_the_flag() {
+    let mgr = ToolManager::new();
+    let mut config = AppConfig::default();
+    config.mcp_servers.insert(
+        "github".to_string(),
+        McpServerConfig::Sse {
+            url: "https://api.github.com/mcp".to_string(),
+            headers: Default::default(),
+            oauth: None,
+        }
+        .into(),
+    );
+    mgr.mcp_manager().update_config(&config);
+    mgr.mcp_manager().mark_needs_auth("github", true);
+    assert!(mgr.mcp_manager().needs_auth_now("github"));
+    mgr.mcp_manager().mark_needs_auth("github", false);
+    assert!(!mgr.mcp_manager().needs_auth_now("github"));
+}

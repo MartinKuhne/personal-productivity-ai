@@ -51,10 +51,25 @@ pub fn discover_resource_metadata(
     if let Some(challenge) = www_authenticate
         && let Some(rm_url) = challenge.get("resource_metadata")
     {
+        tracing::debug!(
+            mcp_server = %mcp_server_url,
+            url = %rm_url,
+            "trying resource_metadata from WWW-Authenticate header"
+        );
         tried.push(rm_url.to_owned());
         if let Some(doc) = fetch_resource_metadata(rm_url) {
+            tracing::info!(
+                mcp_server = %mcp_server_url,
+                url = %rm_url,
+                "successfully fetched Protected Resource Metadata from challenge"
+            );
             return Ok(doc);
         }
+        tracing::warn!(
+            mcp_server = %mcp_server_url,
+            url = %rm_url,
+            "failed to fetch Protected Resource Metadata from challenge"
+        );
     }
     // The two well-known probes per spec §4.3 (the "no header present" fallback).
     let candidates = well_known_resource_metadata_candidates(mcp_server_url);
@@ -62,10 +77,25 @@ pub fn discover_resource_metadata(
         if tried.iter().any(|t| t == url) {
             continue;
         }
+        tracing::debug!(
+            mcp_server = %mcp_server_url,
+            url = %url,
+            "trying well-known Protected Resource Metadata"
+        );
         tried.push(url.clone());
         if let Some(doc) = fetch_resource_metadata(url) {
+            tracing::info!(
+                mcp_server = %mcp_server_url,
+                url = %url,
+                "successfully fetched Protected Resource Metadata"
+            );
             return Ok(doc);
         }
+        tracing::warn!(
+            mcp_server = %mcp_server_url,
+            url = %url,
+            "failed to fetch Protected Resource Metadata"
+        );
     }
     Err(OAuthError::ResourceMetadata(format!(
         "could not fetch Protected Resource Metadata for server '{mcp_server_url}'; \
@@ -104,10 +134,36 @@ pub fn discover_authorization_server_metadata(
     let candidates = well_known_as_metadata_candidates(issuer_url);
     let mut last_error: Option<String> = None;
     for url in &candidates {
+        tracing::debug!(
+            issuer = %issuer_url,
+            url = %url,
+            "trying well-known Authorization Server Metadata"
+        );
         match fetch_authorization_server_metadata(url) {
-            Ok(Some(doc)) => return Ok(doc),
-            Ok(None) => { /* 404 or non-JSON; keep trying */ }
-            Err(e) => last_error = Some(e.to_string()),
+            Ok(Some(doc)) => {
+                tracing::info!(
+                    issuer = %issuer_url,
+                    url = %url,
+                    "successfully fetched Authorization Server Metadata"
+                );
+                return Ok(doc);
+            }
+            Ok(None) => {
+                tracing::warn!(
+                    issuer = %issuer_url,
+                    url = %url,
+                    "Authorization Server Metadata not found (404 or non-JSON)"
+                );
+            }
+            Err(e) => {
+                last_error = Some(e.to_string());
+                tracing::warn!(
+                    issuer = %issuer_url,
+                    url = %url,
+                    error = %e,
+                    "failed to fetch Authorization Server Metadata"
+                );
+            }
         }
     }
     Err(OAuthError::AuthorizationServerMetadata(format!(

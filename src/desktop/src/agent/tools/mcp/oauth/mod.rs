@@ -49,7 +49,7 @@ pub use pkce::{
 };
 pub use redirect::{
     DEFAULT_CALLBACK_PATH, DEFAULT_CALLBACK_TIMEOUT, LoopbackServer, open_browser,
-    start as start_loopback,
+    parse_redirect_uri, start as start_loopback,
 };
 pub use store::{DEFAULT_EXPIRY_SKEW, StoredToken, TOKEN_STORE_FILE_NAME, TokenStore};
 pub use types::{

@@ -175,7 +175,7 @@ impl AgentSessionManager {
     ///
     /// Returns the number of servers that responded to the ping.
     pub fn initialize_mcp(&self) -> usize {
-        crate::agent::tools::registry::init_mcp_on_startup(&self.config)
+        crate::agent::tools::manager::init_mcp_on_startup(&self.config)
     }
 
     /// Get a read-only view of the current agent state.

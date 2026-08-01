@@ -74,6 +74,28 @@ pub fn apply_batch_button_click(app: &mut FastMdApp) {
     app.dialogs_mut().batch_dialog_open = true;
 }
 
+/// Purpose: Applies the side effect of clicking the
+/// "Tools..." button in the top toolbar.
+///
+/// Inputs: app (the application state)
+/// Outputs: ()
+/// Purity: Impure (mutates `app.dialogs.tools_dialog_open`).
+/// Preconditions: None.
+/// Postconditions: `app.dialogs.tools_dialog_open` is `true` after
+/// the call. The dialog itself resets the flag to `false` when it
+/// closes.
+///
+/// The button click in `show_top_panel` calls this function. It is
+/// extracted so the side effect can be unit-tested without driving
+/// the egui harness.
+pub fn apply_tools_button_click(app: &mut FastMdApp) {
+    app.dialogs_mut().tools_dialog_open = true;
+    // Flag the dialog to do a one-time MCP tool discovery on
+    // its first frame so MCP groups show their tools and
+    // prompt char count immediately.
+    app.dialogs_mut().tools_dialog_just_opened = true;
+}
+
 pub fn show_top_panel(app: &mut FastMdApp, parent_ui: &mut egui::Ui) {
     show_top_panel_capture(app, parent_ui, |_| {});
 }
@@ -123,6 +145,10 @@ pub fn show_top_panel_capture(
             if ui.button(crate::ui::strings::BATCH_BUTTON).clicked() {
                 apply_batch_button_click(app);
                 on_click("batch_button");
+            }
+            if ui.button(crate::ui::strings::TOOLS_BUTTON).clicked() {
+                apply_tools_button_click(app);
+                on_click("tools_button");
             }
             ui.separator();
 
@@ -256,6 +282,40 @@ mod tests {
         );
     }
 
+    /// Tier 4 click test: clicking the "Tools..." button in the top
+    /// toolbar must open the tools dialog (sets
+    /// `app.dialogs.tools_dialog_open = true`) and fire the
+    /// `on_click("tools_button")` callback. Mirrors the batch
+    /// button test above.
+    #[test]
+    fn test_tools_button_click_opens_dialog() {
+        use crate::ui::test_helpers::interact::stateful_harness;
+        use egui_kittest::kittest::Queryable;
+
+        let mut harness = stateful_harness(Vec::<&'static str>::new(), |ui, captured| {
+            let mut app = create_test_app();
+            assert!(!app.dialogs.tools_dialog_open);
+            show_top_panel_capture(&mut app, ui, |event| {
+                captured.push(event);
+            });
+        });
+        harness.fit_contents();
+        harness.run_steps(2);
+        harness
+            .get_by_label(crate::ui::strings::TOOLS_BUTTON)
+            .click();
+        harness.run_steps(2);
+        harness.run_steps(2);
+
+        let captured = harness.state();
+        assert!(
+            captured.contains(&"tools_button"),
+            "clicking the tools button must fire the `tools_button` \
+             on_click event; got: {:?}",
+            captured
+        );
+    }
+
     /// Tier 1 test for the batch button click effect. The click sets
     /// `app.dialogs.batch_dialog_open` to `true`; the dialog itself
     /// resets the flag to `false` when it closes. We verify the
@@ -268,6 +328,20 @@ mod tests {
         assert!(
             app.dialogs.batch_dialog_open,
             "batch button click must open the batch dialog"
+        );
+    }
+
+    /// Tier 1 test for the tools button click effect. The click sets
+    /// `app.dialogs.tools_dialog_open` to `true`; the dialog itself
+    /// resets the flag to `false` when it closes.
+    #[test]
+    fn test_apply_tools_button_click_sets_dialog_open() {
+        let mut app = create_test_app();
+        assert!(!app.dialogs.tools_dialog_open, "dialog must start closed");
+        apply_tools_button_click(&mut app);
+        assert!(
+            app.dialogs.tools_dialog_open,
+            "tools button click must open the tools dialog"
         );
     }
 
@@ -365,10 +439,12 @@ mod tests {
             show_top_panel(&mut app, ui);
         });
         // R-2 / Q12: the top panel always renders the app title, the log
-        // checkbox, and the batch button — those are stable across states.
+        // checkbox, the batch button, and the new tools button — those
+        // are stable across states.
         assert_text_contains(&output.shapes, APP_TITLE);
         assert_text_contains(&output.shapes, SHOW_LOG_CHECKBOX);
         assert_text_contains(&output.shapes, BATCH_BUTTON);
+        assert_text_contains(&output.shapes, crate::ui::strings::TOOLS_BUTTON);
         assert!(!app.file_processor().indexing_finished);
     }
 

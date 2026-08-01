@@ -92,6 +92,19 @@ This module owns the user interface layer: pane layout and styling, directory tr
 
 * [UI-049] Tabbed Document Interface: The center panel shall support multiple open documents as tabs. Clicking a file opens it in a new tab; middle-click or close button closes tabs.
 
+### Tools Dialog
+
+* [UI-051] Dialog Trigger: When the user clicks the "Tools..." button on the top toolbar (AGENT-024), the system shall open the Tools dialog as a modal window centered over the main window.
+* [UI-052] Row Layout: For every tool group (built-in and MCP server) currently known to the system, the dialog shall display a row containing: an enable checkbox, the group's display name, a kind label ("Internal" or "MCP"), the group's prompt char count (TOOL-015/016), a parallel-safe chip when the group is fully `ReadOnly` (TOOL-020), and an `Authenticate` button when MCP-020 returns `true` for that group.
+* [UI-053] Toggle Behaviour: Toggling a row's checkbox shall update `AppConfig` per TOOL-017 / TOOL-018 and persist the change to `config.yaml` immediately via `config::save_config`.
+* [UI-054] Authenticate Action: When the user clicks the `Authenticate` button for an eligible MCP server, the system shall invoke `McpClientManager::authenticate(server_name)` on a background thread. The button shall display a disabled "Authenticating..." state until the task completes or fails. A status line shall report success or failure; failure shall not close the dialog.
+* [UI-055] Character Count Recomputation: The dialog shall recompute the char count for every row on every open and whenever the underlying tool set changes (e.g. after a successful MCP discovery). Char counts are informational; their exact value is not part of the user contract.
+* [UI-056] Close: The dialog shall provide a `Close` action (button and `Esc` keypress via the `Window::open` flag) that hides the dialog without persisting further state.
+* [UI-057] Error Indicator: When a group's `last_error` is `Some`, the row shall display a warning indicator (⚠ icon) whose tooltip shows the error kind and message.
+* [UI-058] Parallel-Safe Chip: When a group's `parallel_safe` is `true`, the row shall display a "✓ parallel" chip alongside the char count. The chip is informational; its absence does not imply the group is unsafe.
+* [UI-059] Authenticate Error State: When an `Authenticate` call fails, the row's status line shall show the error message until the next successful authentication attempt or until the user closes the dialog.
+* [UI-060] Clear Error: Each row with a `last_error` shall provide a "Restart" link that calls `ToolManager::clear_error(group)`.
+
 ---
 
 ## Existing Table Layout Renderer Requirements (TBL-xxx)

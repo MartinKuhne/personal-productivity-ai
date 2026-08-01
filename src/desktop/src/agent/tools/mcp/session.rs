@@ -114,6 +114,13 @@ struct SessionState {
     server_info: Option<serde_json::Value>,
     /// `MCP-Session-Id` returned in the init response (HTTP only).
     session_id: Option<String>,
+    /// Set to `true` when the most recent HTTP call observed a 401
+    /// (or 403 step-up challenge). The manager reads this via
+    /// [`McpClientSession::take_unauthorized_flag`] after every
+    /// call so it can update the
+    /// [`McpServerEntry::needs_auth`](crate::config::McpServerEntry::needs_auth)
+    /// flag and surface the `Authenticate` button in the Tools dialog.
+    last_call_saw_unauthorized: bool,
     /// Monotonic per-session JSON-RPC id. Spec allows string or
     /// integer; we use `u64` starting at 1.
     next_id: u64,
@@ -200,9 +207,22 @@ impl McpClientSession {
                 stdio: None,
                 progress_tokens: std::collections::HashMap::new(),
                 last_event_id: None,
+                last_call_saw_unauthorized: false,
             }),
             token_store,
         }
+    }
+
+    /// Returns the previous value of the internal `last_call_saw_unauthorized`
+    /// flag, resetting it to `false`. The manager calls this after every
+    /// MCP call so it can update the in-memory `needs_auth` flag
+    /// (see [`crate::agent::tools::mcp::McpClientManager::mark_needs_auth`]).
+    /// Returns `false` if the lock is poisoned.
+    pub fn take_unauthorized_flag(&self) -> bool {
+        let Ok(mut state) = self.state.lock() else {
+            return false;
+        };
+        std::mem::replace(&mut state.last_call_saw_unauthorized, false)
     }
 
     /// Replace the OAuth token store on this session. Used by
@@ -264,13 +284,18 @@ impl McpClientSession {
                 scopes.push(s.clone());
             }
         }
+        let redirect_uri = self.oauth_redirect_uri();
+        let loopback_override = redirect_uri.as_ref().and_then(|uri| {
+            // Parse the redirect URI to extract the port and path for the loopback server
+            crate::agent::tools::mcp::parse_redirect_uri(uri).ok()
+        });
         OAuthFlowInputs {
             mcp_server_url: resource,
             www_authenticate: challenge,
             extra_scopes: scopes,
             timeout: None,
             pre_registered_client: self.pre_registered_client(),
-            loopback_override: None,
+            loopback_override,
         }
     }
 
@@ -1283,10 +1308,30 @@ impl McpClientSession {
                 // the OAuth flow.
                 let www_authenticate_header = r.header("WWW-Authenticate").map(str::to_owned);
                 let body = r.into_string().unwrap_or_default();
+                // The server has indicated it requires auth.
+                // Mark the session so the manager can update
+                // McpServerEntry::needs_auth on its way out.
+                // This is independent of the OAuth retry below: the
+                // flag must latch on every 401/403 from a server
+                // without a static `Authorization` header, even if
+                // no token store is installed (e.g. during the
+                // cold-start ping where the manager hasn't wired
+                // OAuth yet). Without this, the Tools dialog
+                // wouldn't show the `Authenticate` button for a
+                // server that returned 401 before the token store
+                // was attached. The OAuth retry itself still
+                // requires a token store — gating that on
+                // `token_store.is_some()` is intentional.
+                if (code == 401 || code == 403)
+                    && !self.has_static_authorization()
+                    && let Ok(mut state) = self.state.lock()
+                {
+                    state.last_call_saw_unauthorized = true;
+                }
                 // OAuth integration: on 401 with WWW-Authenticate,
                 // run the authorization flow once and retry. On 403
                 // with insufficient_scope, run a step-up flow once
-                // and retry. Both retry paths are gated on (a) no
+                // and retry. The retry path is gated on (a) no
                 // static Authorization (the user opted into OAuth
                 // implicitly by omitting the header), (b) a token
                 // store is installed, and (c) this call hasn't
@@ -1520,6 +1565,15 @@ impl McpClientSession {
                     client_secret: cfg.client_secret.clone(),
                 })
             }
+            McpServerConfig::Stdio { .. } => None,
+        }
+    }
+
+    /// Get the configured redirect URI from the OAuth config, if any.
+    /// Returns `None` if not configured or for stdio transport.
+    fn oauth_redirect_uri(&self) -> Option<String> {
+        match &self.config {
+            McpServerConfig::Sse { oauth, .. } => oauth.as_ref()?.redirect_uri.clone(),
             McpServerConfig::Stdio { .. } => None,
         }
     }

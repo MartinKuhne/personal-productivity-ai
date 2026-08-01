@@ -68,6 +68,19 @@ pub enum ProcessEvent {
     },
 }
 
+/// MCP OAuth authorization events emitted by the background thread
+/// that runs the authorization flow triggered by the Tools dialog
+/// "Authenticate" button.
+#[derive(Debug, Clone)]
+pub enum McpAuthEvent {
+    /// The OAuth flow for a server completed (success or failure).
+    /// `error` is `None` on success, `Some(message)` on failure.
+    Completed {
+        server_name: String,
+        error: Option<String>,
+    },
+}
+
 /// Typed event that the UI drains on every frame. Each variant
 /// wraps a per-domain sub-enum; the consumer matches here and
 /// forwards to the appropriate handler.
@@ -76,6 +89,8 @@ pub enum BackgroundEvent {
     Agent(AgentEvent),
     Fs(FsEvent),
     Process(ProcessEvent),
+    /// OAuth authorization-flow completion for a single MCP server.
+    McpAuth(McpAuthEvent),
 }
 
 // ---------------------------------------------------------------------------
@@ -118,6 +133,12 @@ impl From<ProcessEvent> for BackgroundEvent {
     }
 }
 
+impl From<McpAuthEvent> for BackgroundEvent {
+    fn from(event: McpAuthEvent) -> Self {
+        Self::McpAuth(event)
+    }
+}
+
 impl From<BackgroundLogEntry> for BackgroundEvent {
     fn from(entry: BackgroundLogEntry) -> Self {
         Self::Process(ProcessEvent::LogEntry(entry))
@@ -149,5 +170,18 @@ mod tests {
     fn from_agent_event_wraps_agent_variant() {
         let ev: BackgroundEvent = AgentEvent::Failed("boom".into()).into();
         assert!(matches!(ev, BackgroundEvent::Agent(AgentEvent::Failed(_))));
+    }
+
+    #[test]
+    fn from_mcp_auth_event_wraps_variant() {
+        let ev: BackgroundEvent = McpAuthEvent::Completed {
+            server_name: "srv".to_owned(),
+            error: None,
+        }
+        .into();
+        assert!(matches!(
+            ev,
+            BackgroundEvent::McpAuth(McpAuthEvent::Completed { error: None, .. })
+        ));
     }
 }

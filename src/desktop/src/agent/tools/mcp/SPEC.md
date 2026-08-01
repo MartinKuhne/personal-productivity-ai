@@ -40,4 +40,10 @@ environment and never enter the OAuth path.
 * [MCP-017] The MCP client shall limit OAuth retries to one per top-level call to prevent infinite loops on a misconfigured server
 * [MCP-018] While the bearer access token is past its expiry skew, the MCP client shall omit the token on the next request and let the 401 / refresh path handle re-authorization
 
+### Tools Dialog Authenticate Action
+
+* [MCP-019] Authentication Entry Point: The system shall expose a public `McpClientManager::authenticate(server_name)` method that, for an `Sse` server with no static `Authorization` header, triggers a probe request and runs the existing OAuth 2.1 authorization code flow on a `401 Unauthorized` with `WWW-Authenticate`. For ineligible servers (stdio, or `Sse` with a static `Authorization` header), the method shall return an error indicating that authentication is not required.
+* [MCP-020] Authentication Eligibility: The system shall expose a public `McpClientManager::needs_authentication(&McpServerConfig) -> bool` predicate, returning `true` only for `McpServerConfig::Sse` servers with no `Authorization` entry in `headers`. The predicate is the single source of truth for whether the `Authenticate` button is rendered in the UI.
+* [MCP-021] Authentication Error Propagation: When `McpClientManager::authenticate(server_name)` fails (loopback startup, AS discovery, token exchange, or step-up), it shall return a structured error containing the OAuth step that failed. The dialog caller shall translate the error into a `ToolGroupError { kind: Authentication, ... }` and call `ToolManager::record_error(Mcp(server_name), err)`.
+
 

@@ -14,7 +14,8 @@ use crate::app::{
 use crate::bus::core::{Bus, BusReader};
 use crate::bus::events::config::ConfigArrived;
 use crate::bus::events::file::{FileEvent, FileEventProducer};
-use crate::bus::events::typed::{BackgroundEvent, FsEvent, ProcessEvent};
+use crate::bus::events::typed::{BackgroundEvent, FsEvent, McpAuthEvent, ProcessEvent};
+
 use crate::config::AppConfig;
 use crate::markdown::parse_front_matter;
 use crate::ui::panels::{
@@ -729,7 +730,7 @@ impl FastMdApp {
     fn drain_background_channel(&mut self) {
         while let Ok(event) = self.rx.try_recv() {
             // Dispatch the typed event directly by domain
-            // (Agent / Fs / Process).
+            // (Agent / Fs / Process / McpAuth).
             match event {
                 BackgroundEvent::Agent(agent_ev) => {
                     self.agent.handle_agent_event(agent_ev);
@@ -739,6 +740,9 @@ impl FastMdApp {
                 }
                 BackgroundEvent::Process(proc_ev) => {
                     self.handle_process_event(proc_ev);
+                }
+                BackgroundEvent::McpAuth(mcp_ev) => {
+                    self.handle_mcp_auth_event(mcp_ev);
                 }
             }
         }
@@ -817,6 +821,45 @@ impl FastMdApp {
                     self.tab_manager.toc =
                         crate::ui::render::build_toc(&self.tab_manager.current_markdown);
                     self.tab_manager.scroll_to_header_id = None;
+                }
+            }
+        }
+    }
+
+    fn handle_mcp_auth_event(&mut self, ev: McpAuthEvent) {
+        use crate::agent::tools::manager::{
+            self as tool_manager, ToolErrorKind, ToolGroupError, ToolGroupId,
+        };
+        match ev {
+            McpAuthEvent::Completed { server_name, error } => {
+                // Always clear the in-progress flag first so the button
+                // becomes interactive again regardless of outcome.
+                self.dialogs_mut().set_oauth_idle(&server_name);
+
+                match error {
+                    None => {
+                        // Success: authenticate() already cleared the
+                        // needs_auth flag inside McpClientManager, so
+                        // the "Authenticate" button will disappear on
+                        // the next render without any extra work.
+                        tracing::info!(
+                            server = %server_name,
+                            "OAuth flow completed; clearing in-progress flag"
+                        );
+                    }
+                    Some(msg) => {
+                        // Failure: surface the error through the existing
+                        // ToolGroupError path so the row shows ⚠ + Restart.
+                        tracing::warn!(
+                            server = %server_name,
+                            error = %msg,
+                            "OAuth flow failed; recording error on group row"
+                        );
+                        tool_manager::record_mcp_error(
+                            &ToolGroupId::Mcp(server_name),
+                            ToolGroupError::now(ToolErrorKind::Authentication, msg),
+                        );
+                    }
                 }
             }
         }
@@ -923,6 +966,10 @@ impl FastMdApp {
         }
 
         crate::ui::background_logs::show_background_logs_window(self, ctx);
+
+        if self.dialogs.tools_dialog_open {
+            crate::ui::tools_dialog::show_tools_dialog(ctx, self);
+        }
 
         if self.dialogs.batch_dialog_open {
             let mut dialog_config = self.dialogs.batch_dialog_config.clone();

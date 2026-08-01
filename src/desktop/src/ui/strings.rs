@@ -10,6 +10,37 @@ pub const SHOW_LOG_CHECKBOX: &str = "Show log";
 /// Label for the batch prompt processing button in the top toolbar.
 pub const BATCH_BUTTON: &str = "Batch...";
 
+/// Label for the tools dialog button in the top toolbar.
+pub const TOOLS_BUTTON: &str = "Tools...";
+
+/// Title of the tools dialog modal.
+pub const TOOLS_DIALOG_TITLE: &str = "Tools";
+
+/// Kind label for an internal (built-in) tool group row.
+pub const TOOLS_KIND_INTERNAL: &str = "Internal";
+
+/// Kind label for an MCP stdio (local subprocess) server tool group row.
+pub const TOOLS_KIND_MCP_STDIO: &str = "MCP (stdio)";
+
+/// Kind label for an MCP remote (SSE/HTTP) server tool group row.
+pub const TOOLS_KIND_MCP_REMOTE: &str = "MCP (remote)";
+
+/// Caption for the per-group prompt char count column header.
+pub const TOOLS_CHAR_COUNT_COLUMN: &str = "Prompt";
+
+/// Button label that triggers the OAuth flow for an eligible MCP server.
+pub const TOOLS_AUTH_BUTTON: &str = "Authenticate";
+
+/// Button label while the OAuth flow is in flight.
+pub const TOOLS_AUTH_RUNNING: &str = "Authenticating...";
+
+/// Link on a group row to clear the recorded `last_error`.
+pub const TOOLS_RESTART: &str = "Restart";
+
+/// Link on an MCP group row to clear the `needs_auth` flag (i.e.
+/// tell the manager to forget that the server once required auth).
+pub const TOOLS_FORGET: &str = "Forget";
+
 /// Label for selecting all tags in the tag filter combobox.
 pub const TAG_FILTER_ALL: &str = "All";
 

@@ -57,6 +57,8 @@ models:
 * [AGENT-021] Agent Conversation History: The agent shall maintain conversation history across prompts within a session. History is reset when the user clicks "Close" or starts a new session.
 * [AGENT-022] Thinking Delimiter: Model reasoning/thinking content wrapped in `🤔...🤔` delimiters shall be extracted and displayed in a collapsible "Thinking Process" section separate from the main response.
 * [AGENT-023] Quick Tasks Menu: The bottom panel shall provide a "Quick Tasks" menu with predefined prompts (e.g., "Format Markdown") that inject a structured prompt with YAML front-matter template.
+* [AGENT-024] Tools Toolbar Button: The top toolbar shall provide a "Tools..." button alongside the existing "Batch..." button. Clicking the button shall open the Tools dialog (UI-051).
+* [AGENT-025] Agent Loop Safety Source: The agent loop's parallel/sequential dispatch (per AGENT-012) shall source its safety classification from `ToolManager::safety_of(name)` rather than from the legacy `ToolRegistry::safety_of`. The two shall return identical values for every tool name.
 
 ## Cross-cutting references
 
