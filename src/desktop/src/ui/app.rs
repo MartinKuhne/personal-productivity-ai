@@ -630,6 +630,12 @@ impl FastMdApp {
     /// non-rendering bookkeeping (file-event drain, repaint
     /// scheduling, etc).
     pub fn update_ui(&mut self, ui: &mut egui::Ui) {
+        #[cfg(feature = "profiling")]
+        puffin::GlobalProfiler::lock().new_frame();
+
+        #[cfg(feature = "profiling")]
+        puffin::profile_function!();
+
         let ctx = ui.ctx();
         self.drain_config_bus();
         self.process_file_events_and_repaint(ctx);
@@ -639,6 +645,17 @@ impl FastMdApp {
         self.show_modals(ui);
         self.render_panels(ui);
         self.handle_deferred_actions();
+
+        #[cfg(feature = "profiling")]
+        {
+            egui::Window::new("Profiler")
+                .vscroll(true)
+                .resizable(true)
+                .default_size([400.0, 300.0])
+                .show(ui.ctx(), |ui| {
+                    puffin_egui::profiler_ui(ui);
+                });
+        }
     }
 
     /// Drain the configuration-arrival bus on the first frame and

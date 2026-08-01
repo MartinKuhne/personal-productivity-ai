@@ -74,6 +74,9 @@ pub fn render_markdown(
     pending_toggles: &mut Vec<(usize, bool)>,
     strategy: crate::ui::table_width::DeficitStrategy,
 ) {
+    #[cfg(feature = "profiling")]
+    puffin::profile_scope!("render_markdown");
+
     use std::sync::Arc;
     let text_hash = egui::Id::new(markdown_text);
     let cache_key = egui::Id::new("md_events_cache");
