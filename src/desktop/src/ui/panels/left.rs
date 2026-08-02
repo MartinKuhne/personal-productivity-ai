@@ -199,6 +199,9 @@ pub fn show_left_panel(app: &mut FastMdApp, parent_ui: &mut egui::Ui) {
 
     // Rebuild tree rows only when dirty
     let tree_rows: Vec<FlatRow> = if app.selection().tree_dirty() {
+        #[cfg(feature = "profiling")]
+        puffin::profile_scope!("build_workspace_tree");
+        let root_node = build_workspace_tree(app);
         let mut rows = Vec::new();
         if !root_node.children.is_empty() {
             flatten_tree(&root_node, 0, &app.selection().expanded_dirs, &mut rows);
@@ -211,6 +214,9 @@ pub fn show_left_panel(app: &mut FastMdApp, parent_ui: &mut egui::Ui) {
         app.cached_tree_rows = Some(cached);
         rows
     } else {
+        #[cfg(feature = "profiling")]
+        puffin::profile_scope!("build_workspace_tree");
+        let root_node = build_workspace_tree(app);
         let mut rows = Vec::new();
         if !root_node.children.is_empty() {
             flatten_tree(&root_node, 0, &app.selection().expanded_dirs, &mut rows);
