@@ -40,35 +40,9 @@ C4Context
   Rel(fastmd, pdf, "PDF rendering worker (REQ-450..458)")
   Rel(fastmd, fs, "Reads/writes content libraries (app/vfs/SPEC.md, VFS-001..VFS-009)")
 ```
-
----
-
 ## Container Diagram (Level 2)
 
-The `fastmd` crate produces two binaries and one library. The library is the
-shared core; the desktop binary wires it into an `eframe` runtime; the `deploy`
-binary is currently an empty placeholder (`src/bin/deploy.rs`).
-
-```mermaid
-C4Container
-  title FastMD Container Diagram
-
-  Container_Boundary(app, "fastmd crate") {
-    Component(bin_fastmd, "fastmd bin", "src/main.rs", "mimalloc + tracing + rustls init; eframe::run_native 'FastMD Viewer' 1000x700 (REQ-501)")
-    Component(bin_deploy, "deploy bin", "src/bin/deploy.rs", "Placeholder, empty")
-    Component(lib, "fastmd lib", "src/lib.rs", "Re-exports public API: run_agent, Task, AppConfig, FastMdApp, tools::execute_tool, ...")
-  }
-
-  Rel(bin_fastmd, lib, "links")
-  Rel(bin_deploy, lib, "links (future)")
-```
-
-Top-level public modules exposed by `lib.rs`:
-`agent`, `background`, `background_task`, `batch`, `browser`, `config`,
-`directory_tracker`, `document`, `editor`, `error`, `file_events`,
-`file_processor`, `messages`, `print`, `tag_manager`, `tools`, `ui`, `utils`.
-
----
+The `fastmd` crate produces a single desktop application
 
 ## Component Diagram (Level 3) — UI Layer
 
@@ -108,8 +82,6 @@ C4Component
 Supporting UI types: `TreeNode{name,path,is_dir,children:BTreeMap}`,
 `ToCEntry{title,level,id}`, `PersistedUiState{left_panel_width,collapsed_dirs}`.
 
----
-
 ## Component Diagram (Level 3) — Agent Core
 
 `agent/` implements the LLM tool-loop. `run_agent` spawns a dedicated thread,
@@ -137,8 +109,6 @@ C4Component
   Rel(impl, rf, "format responses")
   Rel(mgr, rf, "surface to UI")
 ```
-
----
 
 ## Component Diagram (Level 3) — Tool System
 
@@ -210,8 +180,6 @@ Tool inventory (matches `Tools.md` + conditional tools):
 > `tools/Spotify.md` is a **proposal** for 25+ `spotify_*` tools via OAuth2
 > PKCE; not implemented.
 
----
-
 ## Component Diagram (Level 3) — Background Workers
 
 `background/` hosts long-running workers, coordinated by `background_task::Task`
@@ -238,8 +206,6 @@ C4Component
   Rel(task, router, "wires")
   Rel(bgmgr, bgmodels, "stores entries")
 ```
-
----
 
 ## Component Diagram (Level 3) — Supporting Modules
 
@@ -284,37 +250,6 @@ C4Component
 
 ---
 
-## Key Runtime Flows
-
-1. **Startup** (`main.rs`): mimalloc global allocator → panic hook →
-   `tracing_subscriber::fmt::init()` → install rustls ring provider →
-   `load_config()` → `config_bus()` → `eframe::run_native` with 1000x700
-   viewport titled "⚡ FastMD Viewer". The `ConfigArrived` event is
-   published inside the egui creation callback (before the first frame)
-   so every subscriber sees it. Subscribers fan out independently:
-   - `FastMdApp::drain_config_bus` populates `self.config`,
-     `content_libraries`, `inline_editor_enabled`, the batch dialog's
-     `available_dirs`, and forwards the config to the agent
-     (`AgentSessionManager::set_config`).
-   - `Task::new(bus)` subscribes; the spawned thread waits for the
-     first `ConfigArrived` (`CONFIG_ARRIVAL_TIMEOUT`, then falls back
-     to `AppConfig::default`) before running `run_indexing`.
-   - `AgentSessionManager::new(bus)` subscribes; its `drain_config`
-     is called on the UI thread and stores the published config.
-2. **Indexing** (`background_task::Task::run_indexing`): spawns indexer thread
-   that wires `Indexer`, `FileWatcher`, `PdfConverterWorker`,
-   `ImageVisionWorker`, `BusRouter`; emits `FileEvent`s on the `Bus`.
-3. **UI update** (`FastMdApp::update`): `FileEventProcessor` drains the bus,
-   `DirectoryTracker` reconciles known dirs, `TagManager` updates tags,
-   `PanelLayout` draws 5 panes.
-4. **Agent session** (`AgentSessionManager::start_session`): spawns
-   `run_agent(AgentContext)`; turn loop runs safe tools in parallel and unsafe
-   tools sequentially (`ToolExecutor`, AGENT-012); responses flow back via
-   `BackgroundEvent::Agent(AgentEvent)` and are formatted by `ResponseFormatter`
-   (🤔...🤔 thinking delimiters, AGENT-022).
-5. **Batch processing** (`batch/`): discoverer selects files/dirs, executor
-   runs prompts with concurrency 1-8 (BATCH-001..BATCH-014).
-
 ### Configuration Arrival Bus
 
 `config/bus.rs` defines `Bus<ConfigArrived>` and the `config_bus()`
@@ -330,8 +265,5 @@ buffer events for future subscribers), so the canonical order is:
    starts running, ensuring every subscriber observes the first
    arrival on its first `try_recv`.
 
-Subscribers that miss the publish (no longer possible in the
-canonical flow) fall back to `AppConfig::default` after
-`CONFIG_ARRIVAL_TIMEOUT` (100 ms). Hot reload is intentionally out
 of scope: subscribers drop their readers after the first successful
 drain.
