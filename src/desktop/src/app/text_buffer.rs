@@ -269,7 +269,19 @@ impl TextBuffer {
     /// Splits the raw file into front matter (preserved verbatim) and
     /// body (placed in `content`), resets the cursor to the start, and
     /// clears the undo history.
+    ///
+    /// PDF-backed Markdown files (those with a same-stem `.pdf` sibling)
+    /// are blocked from editing — `is_open` remains `false` and
+    /// `error_message` is set to explain the restriction.
     pub fn open(&mut self, file_path: &Path, raw_content: &str) {
+        if crate::utils::path::has_pdf_backing(file_path) {
+            self.error_message = Some(
+                "This file is auto-generated from a PDF and cannot be edited \
+                 directly. Use write_yaml_header to modify front-matter."
+                    .to_string(),
+            );
+            return;
+        }
         self.is_open = true;
         self.file_path = file_path.to_path_buf();
         self.error_message = None;
@@ -748,5 +760,32 @@ mod tests {
         assert_eq!(buf.cursor.line, 2);
         assert_eq!(buf.cursor.column, 5);
         assert_eq!(buf.cursor.char_index, 17);
+    }
+
+    #[test]
+    fn test_text_buffer_blocks_open_for_pdf_backed_files() {
+        let dir = tempdir().unwrap();
+        let md_path = dir.path().join("doc.md");
+        let pdf_path = dir.path().join("doc.pdf");
+        fs::write(&md_path, "# Hello").unwrap();
+        fs::write(&pdf_path, "%PDF-1.4").unwrap();
+
+        let mut buf = TextBuffer::new();
+        buf.open(&md_path, "# Hello");
+
+        assert!(!buf.is_open, "editor should not open for PDF-backed files");
+        assert!(
+            buf.error_message.is_some(),
+            "error_message should be set for PDF-backed files"
+        );
+        assert!(
+            buf.error_message
+                .as_ref()
+                .unwrap()
+                .to_lowercase()
+                .contains("pdf"),
+            "error should mention PDF; got: {:?}",
+            buf.error_message
+        );
     }
 }

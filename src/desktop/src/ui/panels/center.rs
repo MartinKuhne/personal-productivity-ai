@@ -358,32 +358,65 @@ pub fn render_tabs_and_content_capture(
         });
         ui.separator();
 
-        egui::ScrollArea::vertical()
-            .id_salt("main_markdown_scroll")
-            .show(ui, |ui| {
-                if let Some(yaml) = &app.tab_manager.current_yaml {
-                    render_yaml_table(ui, yaml);
-                }
-                let heading_ids = app.tab_manager.heading_ids().to_vec();
-                render_markdown(
-                    ui,
-                    &app.tab_manager.current_markdown,
-                    &mut app.tab_manager.scroll_to_header_id,
-                    &mut app.tab_manager.pending_task_toggles,
-                    app.config.deficit_strategy(),
-                    Some(&heading_ids),
-                );
-                // P0-2: Apply task checkbox toggles to the markdown source.
-                if !app.tab_manager.pending_task_toggles.is_empty() {
-                    for (idx, checked) in app.tab_manager.pending_task_toggles.drain(..) {
-                        crate::ui::render::apply_task_toggle(
-                            &mut app.tab_manager.current_markdown,
-                            idx,
-                            checked,
+        let pdf_backed = crate::utils::path::has_pdf_backing(selected_path);
+        if pdf_backed {
+            let sepia_tint = egui::Color32::from_rgb(35, 30, 20);
+            egui::Frame::new().fill(sepia_tint).show(ui, |ui| {
+                egui::ScrollArea::vertical()
+                    .id_salt("main_markdown_scroll")
+                    .show(ui, |ui| {
+                        if let Some(yaml) = &app.tab_manager.current_yaml {
+                            render_yaml_table(ui, yaml);
+                        }
+                        let heading_ids = app.tab_manager.heading_ids().to_vec();
+                        render_markdown(
+                            ui,
+                            &app.tab_manager.current_markdown,
+                            &mut app.tab_manager.scroll_to_header_id,
+                            &mut app.tab_manager.pending_task_toggles,
+                            app.config.deficit_strategy(),
+                            Some(&heading_ids),
                         );
-                    }
-                }
+                        // P0-2: Apply task checkbox toggles to the markdown source.
+                        if !app.tab_manager.pending_task_toggles.is_empty() {
+                            for (idx, checked) in app.tab_manager.pending_task_toggles.drain(..) {
+                                crate::ui::render::apply_task_toggle(
+                                    &mut app.tab_manager.current_markdown,
+                                    idx,
+                                    checked,
+                                );
+                            }
+                        }
+                    });
             });
+        } else {
+            egui::ScrollArea::vertical()
+                .id_salt("main_markdown_scroll")
+                .show(ui, |ui| {
+                    if let Some(yaml) = &app.tab_manager.current_yaml {
+                        render_yaml_table(ui, yaml);
+                    }
+                    let heading_ids = app.tab_manager.heading_ids().to_vec();
+                    render_markdown(
+                        ui,
+                        &app.tab_manager.current_markdown,
+                        &mut app.tab_manager.scroll_to_header_id,
+                        &mut app.tab_manager.pending_task_toggles,
+                        app.config.deficit_strategy(),
+                        Some(&heading_ids),
+                    );
+                    // P0-2: Apply task checkbox toggles to the markdown source.
+                    if !app.tab_manager.pending_task_toggles.is_empty() {
+                        for (idx, checked) in app.tab_manager.pending_task_toggles.drain(..) {
+                            crate::ui::render::apply_task_toggle(
+                                &mut app.tab_manager.current_markdown,
+                                idx,
+                                checked,
+                            );
+                        }
+                    }
+                });
+        }
     }
 }
 
