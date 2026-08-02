@@ -212,6 +212,9 @@ pub fn run_agent_blocking(
         browser_session: std::sync::Arc::new(crate::app::browser::BrowserSession::new(
             &crate::config::AppConfig::default(),
         )),
+        pdf_backing: std::sync::Arc::new(
+            crate::app::watcher::pdf_backing_tracker::PdfBackingTracker::new(),
+        ),
     };
     run_agent(ctx);
 

@@ -5,7 +5,7 @@ use crate::app::watcher::file_processor::FileEventProcessor;
 use crate::app::{DialogManager, SelectionManager, TabManager, TagManager, TextBuffer};
 use crate::bus::core::{Bus, BusReader};
 use crate::bus::events::config::ConfigArrived;
-use crate::bus::events::file::{FileEvent, FileEventProducer};
+use crate::bus::events::file::FileEvent;
 use crate::bus::events::typed::{BackgroundEvent, FsEvent, McpAuthEvent, ProcessEvent};
 use crate::markdown::parse_front_matter;
 use std::path::PathBuf;
@@ -20,6 +20,7 @@ pub struct AppOrchestrator {
     pub file_event_bus: Bus<FileEvent>,
     pub file_event_reader: Option<BusReader<FileEvent>>,
     pub file_processor: FileEventProcessor,
+    pub pdf_backing_tracker: crate::app::watcher::PdfBackingTracker,
     pub tag_manager: TagManager,
     pub directory_tracker: DirectoryTracker,
     pub selection: SelectionManager,
@@ -58,6 +59,7 @@ impl AppOrchestrator {
                 changed = true;
                 match event.kind {
                     FileEventKind::Discovered => {
+                        self.pdf_backing_tracker.process_discovered(&event.paths);
                         for p in &event.paths {
                             if Self::is_workspace_file(p) {
                                 self.file_processor.add_file(p.clone());
@@ -79,6 +81,7 @@ impl AppOrchestrator {
                         }
                     }
                     FileEventKind::Removed => {
+                        self.pdf_backing_tracker.process_removed(&event.paths);
                         for p in &event.paths {
                             self.file_processor.remove_file(p);
                             if self.tab_manager.loaded_path.as_ref() == Some(p) {

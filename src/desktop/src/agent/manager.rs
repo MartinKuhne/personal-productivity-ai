@@ -62,6 +62,8 @@ pub struct AgentSessionManager {
     /// Owned by the application, not the agent — sessions
     /// survive across agent turns so cookies persist (BRWS-001).
     browser_session: Arc<BrowserSession>,
+    /// Shared PDF-backing tracker, handed to the tool executor.
+    pdf_backing: Arc<crate::app::watcher::pdf_backing_tracker::PdfBackingTracker>,
 }
 
 impl AgentSessionManager {
@@ -70,7 +72,11 @@ impl AgentSessionManager {
     /// [`AppConfig`] used by `start_session`; until the bus
     /// delivers its event that call falls back to
     /// [`AppConfig::default`].
-    pub fn new(config_bus: Bus<ConfigArrived>, browser_session: Arc<BrowserSession>) -> Self {
+    pub fn new(
+        config_bus: Bus<ConfigArrived>,
+        browser_session: Arc<BrowserSession>,
+        pdf_backing: Arc<crate::app::watcher::pdf_backing_tracker::PdfBackingTracker>,
+    ) -> Self {
         Self {
             state: AgentState {
                 running: false,
@@ -92,6 +98,7 @@ impl AgentSessionManager {
             command_input: String::new(),
             show_results: false,
             browser_session,
+            pdf_backing,
         }
     }
 
@@ -119,6 +126,9 @@ impl AgentSessionManager {
             command_input: String::new(),
             show_results: false,
             browser_session,
+            pdf_backing: Arc::new(
+                crate::app::watcher::pdf_backing_tracker::PdfBackingTracker::new(),
+            ),
         }
     }
 
@@ -282,6 +292,7 @@ impl AgentSessionManager {
             current_response: self.state.response.clone(),
             model_name: None,
             browser_session: self.browser_session.clone(),
+            pdf_backing: self.pdf_backing.clone(),
         };
 
         std::thread::spawn(move || {
@@ -424,6 +435,7 @@ mod tests {
             Arc::new(crate::app::browser::BrowserSession::new(
                 &AppConfig::default(),
             )),
+            Arc::new(crate::app::watcher::pdf_backing_tracker::PdfBackingTracker::new()),
         );
 
         // Before any event: not arrived, default config in use.
@@ -454,6 +466,7 @@ mod tests {
             Arc::new(crate::app::browser::BrowserSession::new(
                 &AppConfig::default(),
             )),
+            Arc::new(crate::app::watcher::pdf_backing_tracker::PdfBackingTracker::new()),
         );
 
         assert!(!mgr.drain_config());
@@ -477,6 +490,7 @@ mod tests {
             Arc::new(crate::app::browser::BrowserSession::new(
                 &AppConfig::default(),
             )),
+            Arc::new(crate::app::watcher::pdf_backing_tracker::PdfBackingTracker::new()),
         );
 
         // 2. Publish second — this is the line in `main.rs` that
@@ -510,6 +524,7 @@ mod tests {
             Arc::new(crate::app::browser::BrowserSession::new(
                 &AppConfig::default(),
             )),
+            Arc::new(crate::app::watcher::pdf_backing_tracker::PdfBackingTracker::new()),
         );
 
         assert!(!mgr.drain_config());

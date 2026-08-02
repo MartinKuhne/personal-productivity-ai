@@ -1,7 +1,7 @@
 //! Root egui `App` struct — owns all application state and wires together background tasks, panels, agent, and dialogs.
 
 use crate::agent::AgentSessionManager;
-use crate::app::background::{BackgroundProcessManager, SharedProcessManager};
+use crate::app::background::BackgroundProcessManager;
 use crate::app::background_task::Task;
 use crate::app::watcher::directory_tracker::DirectoryTracker;
 use crate::app::watcher::file_processor::FileEventProcessor;
@@ -10,20 +10,20 @@ use crate::app::{
     DialogManager, PanelLayout, PersistedUiState, SelectionManager, TabManager, TagManager,
     TextBuffer,
 };
-use crate::bus::core::{Bus, BusReader};
+use crate::bus::core::Bus;
 use crate::bus::events::config::ConfigArrived;
-use crate::bus::events::file::{FileEvent, FileEventProducer};
-use crate::bus::events::typed::{BackgroundEvent, FsEvent, McpAuthEvent, ProcessEvent};
+use crate::bus::events::file::FileEventProducer;
+
 
 use crate::config::AppConfig;
-use crate::markdown::parse_front_matter;
+
 use crate::ui::panels::{
     show_bottom_panel, show_center_panel, show_left_panel, show_right_panel, show_top_panel,
 };
 use eframe::egui;
 use std::collections::{BTreeMap, HashSet};
 use std::path::PathBuf;
-use std::sync::mpsc::Receiver;
+
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
@@ -72,6 +72,10 @@ impl FastMdApp {
 
     pub fn file_processor_mut(&mut self) -> &mut FileEventProcessor {
         &mut self.orchestrator.file_processor
+    }
+
+    pub fn pdf_backing_tracker(&self) -> &crate::app::watcher::PdfBackingTracker {
+        &self.orchestrator.pdf_backing_tracker
     }
 
     pub fn tags(&self) -> &TagManager {
@@ -268,7 +272,12 @@ impl FastMdApp {
         let browser_session = std::sync::Arc::new(crate::app::browser::BrowserSession::new(
             &crate::config::AppConfig::default(),
         ));
-        let agent = AgentSessionManager::new(config_bus, browser_session.clone());
+        let pdf_backing_tracker = crate::app::watcher::PdfBackingTracker::new();
+        let agent = AgentSessionManager::new(
+            config_bus,
+            browser_session.clone(),
+            Arc::new(pdf_backing_tracker.clone()),
+        );
 
         let event_bus = background_task.file_event_bus;
         let dir_tracker = DirectoryTracker::new(event_bus.subscribe());
@@ -307,6 +316,7 @@ impl FastMdApp {
                 file_event_reader: Some(event_bus.subscribe()),
                 file_event_bus: event_bus,
                 file_processor,
+                pdf_backing_tracker,
                 directory_tracker: dir_tracker,
                 tag_manager: TagManager::new(),
                 selection,
@@ -365,7 +375,12 @@ impl FastMdApp {
         let test_browser_session = std::sync::Arc::new(crate::app::browser::BrowserSession::new(
             &crate::config::AppConfig::default(),
         ));
-        let mut agent = AgentSessionManager::new(bus.clone(), test_browser_session);
+        let pdf_backing_tracker = crate::app::watcher::PdfBackingTracker::new();
+        let mut agent = AgentSessionManager::new(
+            bus.clone(),
+            test_browser_session,
+            Arc::new(pdf_backing_tracker.clone()),
+        );
         agent.set_config(config.clone());
 
         let event_bus = background_task.file_event_bus;
@@ -394,6 +409,7 @@ impl FastMdApp {
                 file_event_bus: event_bus.clone(),
                 file_event_reader: Some(event_bus.subscribe()),
                 file_processor,
+                pdf_backing_tracker,
                 tag_manager: TagManager::new(),
                 selection,
                 tab_manager: TabManager::new(),
@@ -691,6 +707,8 @@ impl FastMdApp {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::bus::events::file::FileEvent;
+    use crate::bus::events::typed::FsEvent;
     use crate::bus::events::messages::TokenUsageInfo;
     use crate::bus::events::typed::AgentEvent;
     use crate::ui::test_helpers::assert::assert_no_id_change_in_shapes;
@@ -1056,7 +1074,7 @@ mod tests {
         *app.orchestrator.selection.selected_file_mut() = Some(path.clone());
         app.orchestrator.tab_manager.loaded_path = Some(path.clone());
         app.orchestrator.file_processor.all_files.push(path.clone());
-        app.orchestrator.text_buffer.open(&path, "old content");
+        app.orchestrator.text_buffer.open(&path, "old content", None);
         assert!(app.orchestrator.text_buffer.is_open);
 
         app.orchestrator.file_event_reader = Some(app.orchestrator.file_event_bus.subscribe());

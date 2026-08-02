@@ -36,6 +36,9 @@ pub struct AgentContext {
     /// (one instance per app) and handed to the agent thread
     /// via this field.
     pub browser_session: Arc<BrowserSession>,
+    /// Shared PDF-backing tracker — gives tools access to
+    /// the set of Markdown files that have a `.pdf` sibling.
+    pub pdf_backing: Arc<crate::app::watcher::pdf_backing_tracker::PdfBackingTracker>,
 }
 
 #[cfg(test)]
@@ -65,6 +68,9 @@ mod tests {
             current_response: String::new(),
             model_name: None,
             browser_session: browser,
+            pdf_backing: Arc::new(
+                crate::app::watcher::pdf_backing_tracker::PdfBackingTracker::new(),
+            ),
         };
         assert_eq!(ctx.config.models, config.models);
         assert!(ctx.active_file.as_deref() == Some(Path::new("test.md")));
