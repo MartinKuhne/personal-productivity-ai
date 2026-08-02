@@ -58,9 +58,9 @@ pub fn calculate_font_size(level: usize) -> f32 {
 /// Inputs: app (the application state), entry_id (the
 /// `egui::Id` of the clicked TOC entry)
 /// Outputs: ()
-/// Purity: Impure (mutates `app.tab_manager.scroll_to_header_id`).
+/// Purity: Impure (mutates `app.orchestrator.tab_manager.scroll_to_header_id`).
 /// Preconditions: None.
-/// Postconditions: `app.tab_manager.scroll_to_header_id == Some(entry_id_str)`
+/// Postconditions: `app.orchestrator.tab_manager.scroll_to_header_id == Some(entry_id_str)`
 /// after the call. The center panel reads this field on the next
 /// frame, converts it to an `egui::Id` at render time, and scrolls
 /// the markdown to the heading with that id.
@@ -69,7 +69,7 @@ pub fn calculate_font_size(level: usize) -> f32 {
 /// is extracted so the side effect can be unit-tested without
 /// driving the egui harness.
 pub fn apply_toc_row_click(app: &mut FastMdApp, entry_id: &str) {
-    app.tab_manager.scroll_to_header_id = Some(entry_id.to_string());
+    app.orchestrator.tab_manager.scroll_to_header_id = Some(entry_id.to_string());
 }
 
 pub fn show_right_panel(app: &mut FastMdApp, parent_ui: &mut egui::Ui) {
@@ -155,32 +155,34 @@ pub fn show_right_panel_capture(
                 // narrow, resizable panel) instead of drifting the
                 // origin and clipping on the left.
                 .auto_shrink([false, true])
-                .show(ui, |ui| {
-                    let toc_snapshot = app.tab_manager.toc.clone();
-                    for (i, entry) in toc_snapshot.iter().enumerate() {
-                        ui.push_id((i, &entry.id, "toc_item"), |ui| {
-                            let font_size = calculate_font_size(entry.level as usize);
-                            let indent = calculate_indent(entry.level as usize);
-                            ui.horizontal(|ui| {
-                                ui.add_space(indent);
-                                // Cap the label's layout width to the remaining
-                                // available space. Without this, a non-wrapping
-                                // label's allocation grows the placer's min_rect
-                                // past the panel right edge even when truncate()
-                                // clips the visual rendering — left-side text then
-                                // disappears behind the panel's clip_rect.
-                                let max_label_w = (ui.available_width()).max(0.0);
-                                ui.set_max_width(max_label_w);
-                                let label = egui::Label::new(
-                                    egui::RichText::new(&entry.title).size(font_size),
-                                )
-                                .truncate();
-                                if ui.add(label).clicked() {
-                                    apply_toc_row_click(app, &entry.id);
-                                    on_click("toc_row");
-                                }
+                .show_rows(ui, 18.0, app.orchestrator.tab_manager.toc.len(), |ui, row_range| {
+                    let toc_snapshot = app.orchestrator.tab_manager.toc.clone();
+                    for i in row_range {
+                        if let Some(entry) = toc_snapshot.get(i) {
+                            ui.push_id((i, &entry.id, "toc_item"), |ui| {
+                                let font_size = calculate_font_size(entry.level as usize);
+                                let indent = calculate_indent(entry.level as usize);
+                                ui.horizontal(|ui| {
+                                    ui.add_space(indent);
+                                    // Cap the label's layout width to the remaining
+                                    // available space. Without this, a non-wrapping
+                                    // label's allocation grows the placer's min_rect
+                                    // past the panel right edge even when truncate()
+                                    // clips the visual rendering — left-side text then
+                                    // disappears behind the panel's clip_rect.
+                                    let max_label_w = (ui.available_width()).max(0.0);
+                                    ui.set_max_width(max_label_w);
+                                    let label = egui::Label::new(
+                                        egui::RichText::new(&entry.title).size(font_size),
+                                    )
+                                    .truncate();
+                                    if ui.add(label).clicked() {
+                                        apply_toc_row_click(app, &entry.id);
+                                        on_click("toc_row");
+                                    }
+                                });
                             });
-                        });
+                        }
                     }
                 });
         });
@@ -214,7 +216,7 @@ mod tests {
     }
 
     /// Tier 1 test for the TOC row click effect. The click sets
-    /// `app.tab_manager.scroll_to_header_id` to `Some(entry_id_str)`;
+    /// `app.orchestrator.tab_manager.scroll_to_header_id` to `Some(entry_id_str)`;
     /// the center panel reads this on the next frame, converts it
     /// to an `egui::Id`, and scrolls the markdown to the heading
     /// with that id. We verify the effect without driving the
@@ -224,12 +226,12 @@ mod tests {
         let mut app = create_test_app();
         let id = "intro".to_string();
         assert!(
-            app.tab_manager.scroll_to_header_id.is_none(),
+            app.orchestrator.tab_manager.scroll_to_header_id.is_none(),
             "scroll_to_header_id must start as None"
         );
         apply_toc_row_click(&mut app, &id);
         assert_eq!(
-            app.tab_manager.scroll_to_header_id,
+            app.orchestrator.tab_manager.scroll_to_header_id,
             Some(id),
             "TOC row click must set scroll_to_header_id to the clicked entry's id"
         );
@@ -247,14 +249,14 @@ mod tests {
         let id_b = "b".to_string();
         apply_toc_row_click(&mut app, &id_a);
         apply_toc_row_click(&mut app, &id_b);
-        assert_eq!(app.tab_manager.scroll_to_header_id, Some(id_b));
+        assert_eq!(app.orchestrator.tab_manager.scroll_to_header_id, Some(id_b));
     }
 
     /// Tier 4 click test: clicking a TOC row in the right panel
     /// must fire the `on_click("toc_row")` callback. Same pattern
     /// as `test_batch_button_click_opens_dialog` in
     /// `panels/top.rs`. The click handler also sets
-    /// `app.tab_manager.scroll_to_header_id`, but the harness
+    /// `app.orchestrator.tab_manager.scroll_to_header_id`, but the harness
     /// owns `&mut app` for its lifetime, so the side effect is
     /// observed via the captured `&'static str` event name.
     #[test]
@@ -275,7 +277,7 @@ mod tests {
             });
         });
         harness.fit_contents();
-        // The right panel renders rows from `app.tab_manager.toc`.
+        // The right panel renders rows from `app.orchestrator.tab_manager.toc`.
         // Locate the row by its title (a substring match is
         // sufficient).
         harness.get_by_label("Introduction").click();

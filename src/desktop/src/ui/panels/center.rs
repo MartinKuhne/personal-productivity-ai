@@ -19,7 +19,7 @@ pub enum TabAction {
 /// Inputs: `app` - A mutable reference to the `FastMdApp` state.
 /// Outputs: None
 /// Purity: Impure (mutates application state).
-/// Preconditions: `app.agent.show_results()` must be true.
+/// Preconditions: `app.orchestrator.agent.show_results()` must be true.
 /// Postconditions: Agent results are hidden, history and text buffers are cleared, and any running agent is flagged for cancellation.
 pub fn clear_agent_session_state(app: &mut FastMdApp) {
     app.agent_mut().set_show_results(false);
@@ -77,8 +77,8 @@ pub fn apply_tab_action(
 /// close, as it appeared in the tab strip on the frame the button
 /// was clicked)
 /// Outputs: ()
-/// Purity: Impure (mutates `app.tab_manager.tabs` and
-/// `app.selection.selected_file`).
+/// Purity: Impure (mutates `app.orchestrator.tab_manager.tabs` and
+/// `app.orchestrator.selection.selected_file`).
 /// Preconditions: None — `i` is bounds-checked inside
 /// `apply_tab_action`; an out-of-range index is a silent no-op.
 /// Postconditions: If `i` was in range, the tab at that index is
@@ -93,8 +93,8 @@ pub fn apply_tab_action(
 /// API.
 pub fn apply_tab_close_click(app: &mut FastMdApp, i: usize) {
     apply_tab_action(
-        &mut app.tab_manager.tabs,
-        app.selection.selected_file_mut(),
+        &mut app.orchestrator.tab_manager.tabs,
+        app.orchestrator.selection.selected_file_mut(),
         TabAction::Close(i),
     );
 }
@@ -105,17 +105,17 @@ pub fn apply_tab_close_click(app: &mut FastMdApp, i: usize) {
 /// keep, as it appeared in the tab strip on the frame the menu
 /// item was clicked)
 /// Outputs: ()
-/// Purity: Impure (mutates `app.tab_manager.tabs` and
-/// `app.selection.selected_file`).
+/// Purity: Impure (mutates `app.orchestrator.tab_manager.tabs` and
+/// `app.orchestrator.selection.selected_file`).
 /// Preconditions: None — `i` is bounds-checked inside
 /// `apply_tab_action`.
 /// Postconditions: All tabs except the one at index `i` are
-/// removed. The kept tab is `app.tab_manager.tabs[0]` after the
+/// removed. The kept tab is `app.orchestrator.tab_manager.tabs[0]` after the
 /// call. `selected_file` is updated if it was a closed tab.
 pub fn apply_tab_close_others_click(app: &mut FastMdApp, i: usize) {
     apply_tab_action(
-        &mut app.tab_manager.tabs,
-        app.selection.selected_file_mut(),
+        &mut app.orchestrator.tab_manager.tabs,
+        app.orchestrator.selection.selected_file_mut(),
         TabAction::CloseOthers(i),
     );
 }
@@ -124,14 +124,14 @@ pub fn apply_tab_close_others_click(app: &mut FastMdApp, i: usize) {
 /// "Close All Tabs" item.
 /// Inputs: app (the application state)
 /// Outputs: ()
-/// Purity: Impure (mutates `app.tab_manager.tabs` and
-/// `app.selection.selected_file`).
+/// Purity: Impure (mutates `app.orchestrator.tab_manager.tabs` and
+/// `app.orchestrator.selection.selected_file`).
 /// Preconditions: None.
 /// Postconditions: All tabs are removed. `selected_file` is `None`.
 pub fn apply_tab_close_all_click(app: &mut FastMdApp) {
     apply_tab_action(
-        &mut app.tab_manager.tabs,
-        app.selection.selected_file_mut(),
+        &mut app.orchestrator.tab_manager.tabs,
+        app.orchestrator.selection.selected_file_mut(),
         TabAction::CloseAll,
     );
 }
@@ -140,7 +140,7 @@ pub fn apply_tab_close_all_click(app: &mut FastMdApp) {
 /// Inputs: `ui` - Egui UI context, `app` - FastMdApp state.
 /// Outputs: None.
 /// Purity: Impure (performs UI rendering).
-/// Preconditions: `app.agent.show_results()` is true.
+/// Preconditions: `app.orchestrator.agent.show_results()` is true.
 /// Postconditions: Rendered agent session. State might be mutated if "Close" is clicked.
 fn render_agent_session(ui: &mut egui::Ui, app: &mut FastMdApp) {
     ui.horizontal_wrapped(|ui| {
@@ -193,7 +193,7 @@ fn render_agent_session(ui: &mut egui::Ui, app: &mut FastMdApp) {
             if !app.agent().state().response.is_empty() {
                 ui.heading(crate::ui::strings::AGENT_RESPONSE);
                 ui.separator();
-                let strategy = app.config.deficit_strategy();
+                let strategy = app.orchestrator.config.deficit_strategy();
                 let agent = app.agent_mut();
                 let response = agent.state().response.clone();
                 let mut toggles = Vec::new();
@@ -246,11 +246,11 @@ pub fn render_tabs_and_content_capture(
     mut on_click: impl FnMut(&'static str),
 ) {
     ui.horizontal(|ui| {
-        let tabs_snapshot: Vec<PathBuf> = app.tab_manager.tabs.clone();
-        let tab_titles = app.tab_manager.tab_titles().to_vec();
+        let tabs_snapshot: Vec<PathBuf> = app.orchestrator.tab_manager.tabs.clone();
+        let tab_titles = app.orchestrator.tab_manager.tab_titles().to_vec();
 
         for (i, (tab_path, title)) in tabs_snapshot.iter().zip(tab_titles.iter()).enumerate() {
-            let is_selected = app.selection.selected_file() == Some(tab_path);
+            let is_selected = app.orchestrator.selection.selected_file() == Some(tab_path);
 
             let response = ui.push_id((i, tab_path, "tab_label"), |ui| {
                 ui.selectable_label(is_selected, title)
@@ -264,9 +264,9 @@ pub fn render_tabs_and_content_capture(
             }
             response.inner.context_menu(|ui| {
                 if ui.button(crate::ui::strings::EDIT_BUTTON).clicked() {
-                    if app.inline_editor_enabled {
+                    if app.orchestrator.inline_editor_enabled {
                         if let Ok(content) = std::fs::read_to_string(tab_path) {
-                            app.text_buffer.open(tab_path, &content);
+                            app.orchestrator.text_buffer.open(tab_path, &content);
                         }
                     } else {
                         open_in_system_editor(tab_path);
@@ -316,8 +316,8 @@ pub fn render_tabs_and_content_capture(
                 {
                     let now = chrono::Local::now();
                     let date_str = now.to_rfc3339();
-                    app.submit_prompt = Some(generate_format_prompt(&date_str));
-                    *app.selection.selected_file_mut() = Some(tab_path.clone());
+                    *app.submit_prompt_mut() = Some(generate_format_prompt(&date_str));
+                    *app.orchestrator.selection.selected_file_mut() = Some(tab_path.clone());
                     ui.close();
                 }
             });
@@ -361,23 +361,23 @@ pub fn render_tabs_and_content_capture(
         egui::ScrollArea::vertical()
             .id_salt("main_markdown_scroll")
             .show(ui, |ui| {
-                if let Some(yaml) = &app.tab_manager.current_yaml {
+                if let Some(yaml) = &app.orchestrator.tab_manager.current_yaml {
                     render_yaml_table(ui, yaml);
                 }
-                let heading_ids = app.tab_manager.heading_ids().to_vec();
+                let heading_ids = app.orchestrator.tab_manager.heading_ids().to_vec();
                 render_markdown(
                     ui,
-                    &app.tab_manager.current_markdown,
-                    &mut app.tab_manager.scroll_to_header_id,
-                    &mut app.tab_manager.pending_task_toggles,
-                    app.config.deficit_strategy(),
+                    &app.orchestrator.tab_manager.current_markdown,
+                    &mut app.orchestrator.tab_manager.scroll_to_header_id,
+                    &mut app.orchestrator.tab_manager.pending_task_toggles,
+                    app.orchestrator.config.deficit_strategy(),
                     Some(&heading_ids),
                 );
                 // P0-2: Apply task checkbox toggles to the markdown source.
-                if !app.tab_manager.pending_task_toggles.is_empty() {
-                    for (idx, checked) in app.tab_manager.pending_task_toggles.drain(..) {
+                if !app.orchestrator.tab_manager.pending_task_toggles.is_empty() {
+                    for (idx, checked) in app.orchestrator.tab_manager.pending_task_toggles.drain(..) {
                         crate::ui::render::apply_task_toggle(
-                            &mut app.tab_manager.current_markdown,
+                            &mut app.orchestrator.tab_manager.current_markdown,
                             idx,
                             checked,
                         );
@@ -436,29 +436,29 @@ mod tests {
     }
 
     /// Tier 1 test for the `×` tab close button click effect. The
-    /// click removes the tab at `i` from `app.tab_manager.tabs`.
+    /// click removes the tab at `i` from `app.orchestrator.tab_manager.tabs`.
     /// We verify the effect without driving the egui harness.
     #[test]
     fn test_apply_tab_close_click_removes_tab_at_index() {
         let mut app = create_test_app();
-        app.tab_manager.tabs = vec![
+        app.orchestrator.tab_manager.tabs = vec![
             PathBuf::from("a.md"),
             PathBuf::from("b.md"),
             PathBuf::from("c.md"),
         ];
-        *app.selection.selected_file_mut() = Some(PathBuf::from("b.md"));
+        *app.orchestrator.selection.selected_file_mut() = Some(PathBuf::from("b.md"));
 
         apply_tab_close_click(&mut app, 1);
 
         assert_eq!(
-            app.tab_manager.tabs,
+            app.orchestrator.tab_manager.tabs,
             vec![PathBuf::from("a.md"), PathBuf::from("c.md")],
             "tab at i=1 must be removed"
         );
         // `b.md` was the selected file and is now closed, so
         // selection falls back to the last remaining tab.
         assert_eq!(
-            app.selection.selected_file(),
+            app.orchestrator.selection.selected_file(),
             Some(&PathBuf::from("c.md")),
             "selected_file must fall back to the last tab after the selected tab is closed"
         );
@@ -470,13 +470,13 @@ mod tests {
     #[test]
     fn test_apply_tab_close_click_out_of_range_is_noop() {
         let mut app = create_test_app();
-        app.tab_manager.tabs = vec![PathBuf::from("a.md")];
-        *app.selection.selected_file_mut() = Some(PathBuf::from("a.md"));
+        app.orchestrator.tab_manager.tabs = vec![PathBuf::from("a.md")];
+        *app.orchestrator.selection.selected_file_mut() = Some(PathBuf::from("a.md"));
 
         apply_tab_close_click(&mut app, 5);
 
-        assert_eq!(app.tab_manager.tabs, vec![PathBuf::from("a.md")]);
-        assert_eq!(app.selection.selected_file(), Some(&PathBuf::from("a.md")));
+        assert_eq!(app.orchestrator.tab_manager.tabs, vec![PathBuf::from("a.md")]);
+        assert_eq!(app.orchestrator.selection.selected_file(), Some(&PathBuf::from("a.md")));
     }
 
     /// Tier 1 test for the context-menu "Close Others" item.
@@ -485,17 +485,17 @@ mod tests {
     #[test]
     fn test_apply_tab_close_others_click_keeps_only_target_tab() {
         let mut app = create_test_app();
-        app.tab_manager.tabs = vec![
+        app.orchestrator.tab_manager.tabs = vec![
             PathBuf::from("a.md"),
             PathBuf::from("b.md"),
             PathBuf::from("c.md"),
         ];
-        *app.selection.selected_file_mut() = Some(PathBuf::from("a.md"));
+        *app.orchestrator.selection.selected_file_mut() = Some(PathBuf::from("a.md"));
 
         apply_tab_close_others_click(&mut app, 1);
 
-        assert_eq!(app.tab_manager.tabs, vec![PathBuf::from("b.md")]);
-        assert_eq!(app.selection.selected_file(), Some(&PathBuf::from("b.md")));
+        assert_eq!(app.orchestrator.tab_manager.tabs, vec![PathBuf::from("b.md")]);
+        assert_eq!(app.orchestrator.selection.selected_file(), Some(&PathBuf::from("b.md")));
     }
 
     /// Tier 1 test for the context-menu "Close All Tabs" item.
@@ -503,18 +503,18 @@ mod tests {
     #[test]
     fn test_apply_tab_close_all_click_clears_all_tabs() {
         let mut app = create_test_app();
-        app.tab_manager.tabs = vec![
+        app.orchestrator.tab_manager.tabs = vec![
             PathBuf::from("a.md"),
             PathBuf::from("b.md"),
             PathBuf::from("c.md"),
         ];
-        *app.selection.selected_file_mut() = Some(PathBuf::from("b.md"));
+        *app.orchestrator.selection.selected_file_mut() = Some(PathBuf::from("b.md"));
 
         apply_tab_close_all_click(&mut app);
 
-        assert!(app.tab_manager.tabs.is_empty());
+        assert!(app.orchestrator.tab_manager.tabs.is_empty());
         assert!(
-            app.selection.selected_file().is_none(),
+            app.orchestrator.selection.selected_file().is_none(),
             "selected_file must be None when all tabs are closed"
         );
     }
@@ -524,7 +524,7 @@ mod tests {
     /// callback. Renders `render_tabs_and_content_capture` (not the
     /// full `show_center_panel`) so the test stays focused on the
     /// tab-strip click. The click handler also removes the tab
-    /// from `app.tab_manager.tabs`, but the harness owns `&mut app`
+    /// from `app.orchestrator.tab_manager.tabs`, but the harness owns `&mut app`
     /// so the side effect is observed via the captured event.
     #[test]
     fn test_tab_close_button_captures_event() {
@@ -533,8 +533,8 @@ mod tests {
 
         let mut harness = stateful_harness(Vec::<&'static str>::new(), |ui, captured| {
             let mut app = create_test_app();
-            app.tab_manager.tabs = vec![PathBuf::from("a.md"), PathBuf::from("b.md")];
-            *app.selection.selected_file_mut() = Some(PathBuf::from("a.md"));
+            app.orchestrator.tab_manager.tabs = vec![PathBuf::from("a.md"), PathBuf::from("b.md")];
+            *app.orchestrator.selection.selected_file_mut() = Some(PathBuf::from("a.md"));
             render_tabs_and_content_capture(ui, &mut app, |event| {
                 captured.push(event);
             });

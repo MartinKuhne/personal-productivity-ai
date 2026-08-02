@@ -73,16 +73,16 @@ fn test_tools_dialog_renders_char_count() {
 #[test]
 fn test_show_tools_dialog_clears_just_opened_on_first_render() {
     let mut app = crate::ui::FastMdApp::empty_state(crate::config::AppConfig::default());
-    app.dialogs.tools_dialog_open = true;
-    app.dialogs.tools_dialog_just_opened = true;
+    app.orchestrator.dialogs.tools_dialog_open = true;
+    app.orchestrator.dialogs.tools_dialog_just_opened = true;
     let _ = show_dialog_once(&mut app);
     assert!(
-        !app.dialogs.tools_dialog_just_opened,
+        !app.orchestrator.dialogs.tools_dialog_just_opened,
         "show_tools_dialog must clear tools_dialog_just_opened on first frame"
     );
     // The second frame must not re-trigger MCP discovery.
     let _ = show_dialog_once(&mut app);
-    assert!(!app.dialogs.tools_dialog_just_opened);
+    assert!(!app.orchestrator.dialogs.tools_dialog_just_opened);
 }
 
 /// The dialog must NOT render a bottom Close button anymore —

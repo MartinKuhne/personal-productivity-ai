@@ -180,7 +180,7 @@ fn show_running_view(
     result: &mut Option<BatchDialogResult>,
 ) {
     let is_finished = app
-        .dialogs
+        .dialogs()
         .batch_handle
         .as_ref()
         .map(|h| h.thread.is_finished())

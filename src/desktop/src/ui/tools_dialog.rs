@@ -23,7 +23,7 @@ use crate::ui::strings::{
 use eframe::egui;
 
 /// Render the tools dialog. Called every frame while
-/// `app.dialogs.tools_dialog_open == true`. The dialog owns its
+/// `app.orchestrator.dialogs.tools_dialog_open == true`. The dialog owns its
 /// lifecycle: closing sets the flag to `false`. The title-bar
 /// `X` button is the primary close affordance; no extra Close
 /// button is rendered at the bottom.
@@ -40,7 +40,7 @@ pub fn show_tools_dialog(ctx: &eframe::egui::Context, app: &mut FastMdApp) {
     // First-frame MCP tool discovery. Without this the MCP
     // groups show empty tool lists until something else
     // triggers `tools/list`.
-    if app.dialogs.tools_dialog_just_opened {
+    if app.orchestrator.dialogs.tools_dialog_just_opened {
         manager::mcp_refresh_for_dialog(app.config());
         app.dialogs_mut().tools_dialog_just_opened = false;
     }
@@ -253,7 +253,7 @@ fn render_row(
                 && let Some(entry) = app.config().mcp_servers.get(name)
                 && needs_authentication(entry.config())
             {
-                let in_progress = app.dialogs.is_oauth_in_progress(name);
+                let in_progress = app.orchestrator.dialogs.is_oauth_in_progress(name);
                 if in_progress {
                     // Flow is running — show a disabled label so the
                     // user knows we are working. Button is not
@@ -262,7 +262,7 @@ fn render_row(
                 } else {
                     if ui.button(TOOLS_AUTH_BUTTON).clicked() {
                         app.dialogs_mut().set_oauth_in_progress(name);
-                        spawn_auth_flow(name.clone(), app.tx.clone(), ui.ctx().clone());
+                        spawn_auth_flow(name.clone(), app.orchestrator.tx.clone(), ui.ctx().clone());
                     }
                 }
                 if ui.small_button(TOOLS_FORGET).clicked() {
