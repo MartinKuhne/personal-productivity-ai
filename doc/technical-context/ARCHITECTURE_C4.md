@@ -33,7 +33,7 @@ C4Context
   Rel(user, fastmd, "Uses")
   Rel(fastmd, llm, "Chat completions / vision (AGENT-001, 470..478)")
   Rel(fastmd, jmap, "JMAP (email/calendar/contacts)")
-  Rel(fastmd, cald, "CalDAV/CardDAV")
+  Rel(fastmd, caldav, "CalDAV/CardDAV")
   Rel(fastmd, searxng, "web_search (TOOL-010)")
   Rel(fastmd, nominatim, "weather tool (geocode + forecast)")
   Rel(fastmd, playwright, "browser_* tools (browser.rs)")
@@ -50,7 +50,7 @@ shared core; the desktop binary wires it into an `eframe` runtime; the `deploy`
 binary is currently an empty placeholder (`src/bin/deploy.rs`).
 
 ```mermaid
-C4Container fastmd
+C4Container
   title FastMD Container Diagram
 
   Container_Boundary(app, "fastmd crate") {
@@ -77,7 +77,7 @@ Top-level public modules exposed by `lib.rs`:
 `PanelLayout` driving per-pane render functions in `ui/panels/*` (REQ-101).
 
 ```mermaid
-C4Component fastmd
+C4Component
   title FastMD — UI Layer
 
   Component(app, "FastMdApp", "ui/app.rs", "eframe::App root; owns AgentSessionManager, BackgroundProcessManager, Task, DirectoryTracker, FileEventProcessor, TagManager, DialogManager, PanelLayout, SelectionManager, TabManager, bus")
@@ -118,7 +118,7 @@ endpoint, and loops turns (`Continue` / `Done` / `Failed`) honouring a cancel
 flag. AGENT-001..AGENT-023.
 
 ```mermaid
-C4Component fastmd
+C4Component
   title FastMD — Agent Core
 
   Component(mgr, "AgentSessionManager", "agent/manager.rs (278)", "AgentState{running,status,thinking,response,scroll_to_id,history,token_usage,total_usage}; start_session; handle_agent_event; cancel via AtomicBool")
@@ -150,7 +150,7 @@ parameter passed to every `Tool::execute`, carrying `&AppConfig` and
 `&Bus<FileEvent>` (AGENT-012).
 
 ```mermaid
-C4Component fastmd
+C4Component
   title FastMD — Tool System
 
   Component(reg, "ToolManager", "agent/tools/manager/mod.rs", "catalog + per-group state + error tracking + parallel-safety; register_builtin, register_mcp_tool, execute, get_schema, safety_of, parallel_safe_tools, set_group_enabled, record_error, clear_error, refresh_state, refresh_mcp_tools (TOOL-014..024)")
@@ -178,7 +178,7 @@ C4Component fastmd
 ```
 
 ```mermaid
-C4Component fastmd
+C4Component
   title FastMD — Virtual File System (app/vfs/)
 
   Component(vp, "virtual_path", "app/vfs/virtual_path.rs", "VirtualPath, VirtualPathError{EmptyPath,TraversalDetected,InvalidFormat,LibraryNotFound,LibraryNotWritable}; parse/resolve/is_writable; rejects '..' traversal (VFS-004, VFS-009)")
@@ -219,7 +219,7 @@ which owns the `mpsc` channels and the `notify::RecommendedWatcher`. A
 `Bus<FileEvent>` (see Event Bus below) feeds producers and consumers.
 
 ```mermaid
-C4Component fastmd
+C4Component
   title FastMD — Background Workers
 
   Component(task, "Task", "background_task.rs (518)", "Owns rx/tx (std::sync::mpsc), file_event_bus: Bus<FileEvent>, watcher: Option<notify::RecommendedWatcher>; subscribes to Bus<ConfigArrived> at construction and only spawns the indexing thread after the first ConfigArrived (or the CONFIG_ARRIVAL_TIMEOUT fallback); run_indexing wires all workers")
@@ -246,7 +246,7 @@ C4Component fastmd
 Cross-cutting modules that the UI, Agent, Tools and Background all depend on.
 
 ```mermaid
-C4Component fastmd
+C4Component
   title FastMD — Supporting Modules
 
   Component(cfg, "config", "config.rs + bus.rs (data shapes only; VFS moved to app/vfs/)", "AppConfig, LlmConfig{model,api_url,api_key,cost,use_case}, JmapClient, CalDavClient, CardDavClient, content_libraries: Vec<ContentLibrary>; load_config, get_config_path; Debug redacts secrets; config_bus / ConfigArrived (tokio broadcast) used to fan out the loaded config to Task, AgentSessionManager, and FastMdApp on startup. VFS types re-exported from app::vfs for backwards compat. CONFIG-001..008 (CONFIG-009 superseded by VFS-004/009)")
