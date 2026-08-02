@@ -67,13 +67,21 @@ use eframe::egui;
 /// Option<String>`, converts it to an `egui::Id` for the inner
 /// scroll-to-me comparison, and clears the field when the matching
 /// heading has been scrolled to.
+///
+/// `heading_ids` is an optional pre-computed slice of heading IDs
+/// (with duplicate disambiguation). If provided, avoids re-parsing
+/// headings and re-computing IDs on every frame.
 pub fn render_markdown(
     ui: &mut egui::Ui,
     markdown_text: &str,
     scroll_to_id_str: &mut Option<String>,
     pending_toggles: &mut Vec<(usize, bool)>,
     strategy: crate::ui::table_width::DeficitStrategy,
+    heading_ids: Option<&[String]>,
 ) {
+    #[cfg(feature = "profiling")]
+    puffin::profile_scope!("render_markdown");
+
     use std::sync::Arc;
     let text_hash = egui::Id::new(markdown_text);
     let cache_key = egui::Id::new("md_events_cache");
@@ -117,6 +125,9 @@ pub fn render_markdown(
         id
     };
 
+    // Iterator over pre-computed heading IDs if provided.
+    let mut heading_ids_iter = heading_ids.map(|ids| ids.iter().peekable());
+
     let clip = ui.clip_rect();
     let viewport_margin = 400.0_f32;
 
@@ -142,7 +153,32 @@ pub fn render_markdown(
                     ui.add_space(est_h);
                     continue;
                 }
-                _ => {}
+                RenderEvent::Heading { level, .. } => {
+                    let size = match level {
+                        1 => 32.0,
+                        2 => 24.0,
+                        3 => 18.0,
+                        4 => 14.0,
+                        _ => 12.0,
+                    };
+                    ui.add_space(size + 8.0);
+                    continue;
+                }
+                RenderEvent::Table(cells) => {
+                    // Estimate table height: header + rows
+                    let row_count = cells.len().max(1) as f32;
+                    let est_h = row_count * 22.0 + 20.0;
+                    ui.add_space(est_h);
+                    continue;
+                }
+                RenderEvent::Space(amount) => {
+                    ui.add_space(*amount);
+                    continue;
+                }
+                RenderEvent::Separator => {
+                    ui.add_space(4.0);
+                    continue;
+                }
             }
         }
         match event {
@@ -178,7 +214,11 @@ pub fn render_markdown(
                 if trimmed.is_empty() {
                     continue;
                 }
-                let heading_id_str = heading_id_for(trimmed);
+                let heading_id_str = if let Some(iter) = &mut heading_ids_iter {
+                    iter.next().unwrap().clone()
+                } else {
+                    heading_id_for(trimmed)
+                };
                 render_heading(ui, elems, *level, scroll_to_id_str, &heading_id_str);
             }
             RenderEvent::Table(cells) => {

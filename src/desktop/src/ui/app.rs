@@ -60,6 +60,10 @@ pub struct FastMdApp {
     pub selection: SelectionManager,
     pub tab_manager: TabManager,
 
+    /// Cached flattened tree rows to avoid rebuilding the file tree every frame.
+    /// Invalidated when `selection.tree_dirty` is true.
+    pub cached_tree_rows: Option<Vec<crate::ui::tree::FlatRow>>,
+
     pub _watcher: Option<notify::RecommendedWatcher>,
 
     /// Agent session manager - encapsulates all agent state and lifecycle.
@@ -193,10 +197,12 @@ impl FastMdApp {
 
         let mut changed = false;
         let mut needs_rebuild = false;
+        let mut tree_dirty = false;
 
         // Let DirectoryTracker consume directory events from its own subscriber.
         if self.directory_tracker.process_events() {
             changed = true;
+            tree_dirty = true;
         }
 
         if let Some(reader) = &self.file_event_reader {
@@ -214,6 +220,7 @@ impl FastMdApp {
                                 }
                             }
                         }
+                        tree_dirty = true;
                     }
                     FileEventKind::Updated => {
                         for p in &event.paths {
@@ -234,16 +241,19 @@ impl FastMdApp {
                         }
                         removed_paths.extend(event.paths);
                         needs_rebuild = true;
+                        tree_dirty = true;
                     }
                     FileEventKind::DirDiscovered => {
                         for p in &event.paths {
                             self.file_processor.add_dir(p.clone());
                         }
+                        tree_dirty = true;
                     }
                     FileEventKind::DirRemoved => {
                         for p in &event.paths {
                             self.file_processor.remove_dir(p);
                         }
+                        tree_dirty = true;
                     }
                 }
             }
@@ -254,6 +264,10 @@ impl FastMdApp {
 
         if needs_rebuild {
             self.tag_manager.rebuild();
+        }
+
+        if tree_dirty {
+            self.selection.tree_dirty = true;
         }
 
         changed
@@ -448,6 +462,7 @@ impl FastMdApp {
             layout,
             selection,
             tab_manager: TabManager::new(),
+            cached_tree_rows: None,
             _watcher: None,
             agent,
             dialogs,
@@ -530,6 +545,7 @@ impl FastMdApp {
             layout: PanelLayout::new(),
             selection: SelectionManager::new(),
             tab_manager: TabManager::new(),
+            cached_tree_rows: None,
             _watcher: None,
             agent,
             dialogs,
@@ -630,6 +646,12 @@ impl FastMdApp {
     /// non-rendering bookkeeping (file-event drain, repaint
     /// scheduling, etc).
     pub fn update_ui(&mut self, ui: &mut egui::Ui) {
+        #[cfg(feature = "profiling")]
+        puffin::GlobalProfiler::lock().new_frame();
+
+        #[cfg(feature = "profiling")]
+        puffin::profile_function!();
+
         let ctx = ui.ctx();
         self.drain_config_bus();
         self.process_file_events_and_repaint(ctx);
@@ -639,6 +661,17 @@ impl FastMdApp {
         self.show_modals(ui);
         self.render_panels(ui);
         self.handle_deferred_actions();
+
+        #[cfg(feature = "profiling")]
+        {
+            egui::Window::new("Profiler")
+                .vscroll(true)
+                .resizable(true)
+                .default_size([400.0, 300.0])
+                .show(ui.ctx(), |ui| {
+                    puffin_egui::profiler_ui(ui);
+                });
+        }
     }
 
     /// Drain the configuration-arrival bus on the first frame and
@@ -753,6 +786,7 @@ impl FastMdApp {
         );
 
         self.content_libraries = config.content_libraries.clone();
+        self.selection.tree_dirty = true;
         self.inline_editor_enabled = config.inline_editor_enabled;
         self.dialogs.batch_dialog_config.available_dirs = config
             .content_libraries
@@ -804,9 +838,11 @@ impl FastMdApp {
             FsEvent::FileParsed { path, tags } => {
                 self.tag_manager.add_tags(path.clone(), tags);
                 self.file_processor.add_file(path);
+                self.selection.tree_dirty = true;
             }
             FsEvent::DirParsed { path } => {
                 self.file_processor.add_dir(path);
+                self.selection.tree_dirty = true;
             }
             FsEvent::Finished => {
                 // The file-watcher thread has finished its initial
@@ -818,10 +854,12 @@ impl FastMdApp {
                 }
                 self.file_processor.indexing_finished = true;
                 self.tag_manager.rebuild();
+                self.selection.tree_dirty = true;
             }
             FsEvent::FinishedWithoutWatcher => {
                 self.file_processor.indexing_finished = true;
                 self.tag_manager.rebuild();
+                self.selection.tree_dirty = true;
             }
             FsEvent::FileModified { path, tags } => {
                 self.tag_manager.add_tags(path.clone(), tags);
@@ -830,6 +868,7 @@ impl FastMdApp {
                 if self.tab_manager.loaded_path.as_ref() == Some(&path) {
                     self.tab_manager.loaded_path = None;
                 }
+                self.selection.tree_dirty = true;
             }
             FsEvent::FileDeleted { path } => {
                 self.file_processor.remove_file(&path);
@@ -840,12 +879,14 @@ impl FastMdApp {
                     *self.selection.selected_file_mut() = None;
                     self.tab_manager.current_yaml = None;
                     self.tab_manager.current_markdown = String::new();
+                    self.tab_manager.invalidate_heading_ids_cache();
                     self.tab_manager.toc.clear();
                 }
                 self.selection.selected_files_mut().remove(&path);
                 if self.tab_manager.loaded_path.as_ref() == Some(&path) {
                     self.tab_manager.loaded_path = None;
                 }
+                self.selection.tree_dirty = true;
             }
         }
     }
@@ -868,6 +909,7 @@ impl FastMdApp {
                         self.tab_manager.current_yaml = None;
                         self.tab_manager.current_markdown = content;
                     }
+                    self.tab_manager.invalidate_heading_ids_cache();
                     self.tab_manager.loaded_path = Some(path.clone());
                     self.tab_manager.toc =
                         crate::ui::render::build_toc(&self.tab_manager.current_markdown);
@@ -1057,10 +1099,20 @@ impl FastMdApp {
         // through. The order is preserved from 0.27: top → bottom →
         // right → left → center. Panels must be allocated directly from
         // the parent_ui container, not nested within child_ui scopes.
+        #[cfg(feature = "profiling")]
+        puffin::profile_scope!("panel_top");
         show_top_panel(self, parent_ui);
+        #[cfg(feature = "profiling")]
+        puffin::profile_scope!("panel_bottom");
         show_bottom_panel(self, parent_ui);
+        #[cfg(feature = "profiling")]
+        puffin::profile_scope!("panel_right");
         show_right_panel(self, parent_ui);
+        #[cfg(feature = "profiling")]
+        puffin::profile_scope!("panel_left");
         show_left_panel(self, parent_ui);
+        #[cfg(feature = "profiling")]
+        puffin::profile_scope!("panel_center");
         show_center_panel(self, parent_ui);
     }
 

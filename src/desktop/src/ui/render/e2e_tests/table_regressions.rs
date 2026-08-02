@@ -84,6 +84,7 @@ fn render_markdown_no_offscreen_text_across_viewports() {
                             &mut scroll_id,
                             &mut pending_toggles,
                             crate::ui::table_width::DeficitStrategy::ProportionalToSlack,
+                            None,
                         );
                     });
             });
@@ -124,6 +125,7 @@ fn test_render_table_multi_frame_height_stability() {
                     &mut scroll_id,
                     &mut pending_toggles,
                     crate::ui::table_width::DeficitStrategy::ProportionalToSlack,
+                    None,
                 );
             });
         });

@@ -174,6 +174,7 @@ fn test_render_table_with_stars_and_long_cells_e2e() {
                 &mut scroll_id,
                 &mut Vec::new(),
                 crate::ui::table_width::DeficitStrategy::ProportionalToSlack,
+                None,
             );
         });
     });

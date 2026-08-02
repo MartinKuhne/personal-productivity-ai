@@ -526,6 +526,7 @@ mod tests {
             let submit_prompt = Box::leak(Box::new(None::<String>));
             let open_editor = Box::leak(Box::new(None::<PathBuf>));
             let content_libraries = Box::leak(Box::new(Vec::new()));
+            let tree_dirty = Box::leak(Box::new(false));
 
             let ctx = TreeNodeContext {
                 selected_file,
@@ -550,6 +551,7 @@ mod tests {
                 inline_editor_enabled: false,
                 bg_tx: &None,
                 file_event_producer: None,
+                tree_dirty,
             };
 
             let row = FlatRow {
@@ -630,6 +632,7 @@ mod tests {
 
         let _ = ctx_egui.run_ui(Default::default(), |ui| {
             egui::CentralPanel::default().show(ui, |ui| {
+                let mut tree_dirty = false;
                 let mut tree_ctx = TreeNodeContext {
                     selected_file: &mut selected_file,
                     selected_files: &mut selected_files,
@@ -653,6 +656,7 @@ mod tests {
                     inline_editor_enabled: true,
                     bg_tx: &None,
                     file_event_producer: None,
+                    tree_dirty: &mut tree_dirty,
                 };
 
                 // Render collapsed directory
@@ -748,6 +752,7 @@ mod tests {
         let _ = ctx_egui.run_ui(Default::default(), |ui| {
             egui::CentralPanel::default().show(ui, |ui| {
                 // Test ctrl multi-select simulation
+                let mut tree_dirty = false;
                 let mut tree_ctx = TreeNodeContext {
                     selected_file: &mut selected_file,
                     selected_files: &mut selected_files,
@@ -774,6 +779,7 @@ mod tests {
                     inline_editor_enabled: true,
                     bg_tx: &None,
                     file_event_producer: None,
+                    tree_dirty: &mut tree_dirty,
                 };
 
                 draw_tree_node(ui, &file1, &mut tree_ctx);
@@ -923,6 +929,7 @@ mod tests {
             let submit_prompt = Box::leak(Box::new(None::<String>));
             let open_editor = Box::leak(Box::new(None::<PathBuf>));
             let content_libraries = Box::leak(Box::new(Vec::new()));
+            let tree_dirty = Box::leak(Box::new(false));
 
             let ctx = TreeNodeContext {
                 selected_file,
@@ -947,6 +954,7 @@ mod tests {
                 inline_editor_enabled: false,
                 bg_tx: &None,
                 file_event_producer: None,
+                tree_dirty,
             };
 
             let row = FlatRow {

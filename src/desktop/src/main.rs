@@ -1,5 +1,5 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
-//! FastMd desktop application entry point â€” initialises tracing, panic hooks, and launches the egui app.
+//! FastMd desktop application entry point — initialises tracing, panic hooks, and launches the egui app.
 
 use eframe::egui;
 use fastmd::ui::FastMdApp;

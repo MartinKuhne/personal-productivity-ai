@@ -47,6 +47,7 @@ fn render_table_markdown_to_shapes(markdown: &'static str, viewport_w: f32) -> e
                         &mut scroll_to_id,
                         &mut pending_toggles,
                         DeficitStrategy::ProportionalToSlack,
+                        None,
                     );
                 });
         });
@@ -65,6 +66,7 @@ fn render_table_markdown_to_shapes(markdown: &'static str, viewport_w: f32) -> e
                         &mut scroll_to_id,
                         &mut pending_toggles,
                         DeficitStrategy::ProportionalToSlack,
+                        None,
                     );
                 });
         });
@@ -345,6 +347,7 @@ fn test_integration_table_snapshot_harness_harness_setup() {
                 &mut scroll_to_id,
                 &mut pending_toggles,
                 DeficitStrategy::ProportionalToSlack,
+                None,
             );
         });
 

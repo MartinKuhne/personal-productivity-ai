@@ -88,6 +88,7 @@ fn test_render_markdown_e2e() {
                 &mut scroll_id,
                 &mut Vec::new(),
                 crate::ui::table_width::DeficitStrategy::ProportionalToSlack,
+                None,
             );
 
             let yaml_str = "a: 1\nb: 2";
@@ -134,6 +135,7 @@ def foo():
                 &mut scroll_id,
                 &mut Vec::new(),
                 crate::ui::table_width::DeficitStrategy::ProportionalToSlack,
+                None,
             );
 
             // Render non-mapping YAML table
@@ -156,6 +158,7 @@ fn test_render_table_with_empty_cells_e2e() {
                 &mut scroll_id,
                 &mut Vec::new(),
                 crate::ui::table_width::DeficitStrategy::ProportionalToSlack,
+                None,
             );
         });
     });
@@ -221,6 +224,7 @@ fn test_long_text_surfaces_wrap_within_viewport() {
                     &mut scroll_id,
                     &mut Vec::new(),
                     crate::ui::table_width::DeficitStrategy::ProportionalToSlack,
+                    None,
                 );
             }),
         ),
@@ -383,6 +387,7 @@ fn test_render_table_with_bold_and_special_chars_e2e() {
                 &mut scroll_id,
                 &mut Vec::new(),
                 crate::ui::table_width::DeficitStrategy::ProportionalToSlack,
+                None,
             );
         });
     });

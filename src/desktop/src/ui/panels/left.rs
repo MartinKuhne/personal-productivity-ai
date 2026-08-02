@@ -3,7 +3,7 @@
 use crate::ui::FastMdApp;
 use crate::ui::TreeNode;
 use crate::ui::TreeNodeContext;
-use crate::ui::tree::{TREE_ROW_HEIGHT, flatten_tree, render_flat_row};
+use crate::ui::tree::{FlatRow, TREE_ROW_HEIGHT, flatten_tree, render_flat_row};
 use eframe::egui;
 use egui::RichText;
 use egui::containers::Panel;
@@ -197,6 +197,34 @@ pub fn show_left_panel(app: &mut FastMdApp, parent_ui: &mut egui::Ui) {
         .max(180.0)
         .min(max_w);
 
+    // Rebuild tree rows only when dirty
+    let tree_rows: Vec<FlatRow> = if app.selection().tree_dirty() {
+        #[cfg(feature = "profiling")]
+        puffin::profile_scope!("build_workspace_tree");
+        let root_node = build_workspace_tree(app);
+        let mut rows = Vec::new();
+        if !root_node.children.is_empty() {
+            flatten_tree(&root_node, 0, &app.selection().expanded_dirs, &mut rows);
+        }
+        app.cached_tree_rows = Some(rows.clone());
+        *app.selection_mut().tree_dirty_mut() = false;
+        rows
+    } else if let Some(cached) = app.cached_tree_rows.take() {
+        let rows = cached.clone();
+        app.cached_tree_rows = Some(cached);
+        rows
+    } else {
+        #[cfg(feature = "profiling")]
+        puffin::profile_scope!("build_workspace_tree");
+        let root_node = build_workspace_tree(app);
+        let mut rows = Vec::new();
+        if !root_node.children.is_empty() {
+            flatten_tree(&root_node, 0, &app.selection().expanded_dirs, &mut rows);
+        }
+        app.cached_tree_rows = Some(rows.clone());
+        rows
+    };
+
     // egui 0.35 unified `SidePanel`/`TopBottomPanel` into `Panel`,
     // and panels now allocate within a parent `&mut Ui`.
     // `default_width` / `max_width` are now `default_size` / `max_size`.
@@ -240,15 +268,10 @@ pub fn show_left_panel(app: &mut FastMdApp, parent_ui: &mut egui::Ui) {
             let file_event_bus = &app.file_event_bus;
             let tx = app.tx.clone();
 
-            let mut rows = Vec::new();
-            if !root_node.children.is_empty() {
-                flatten_tree(&root_node, 0, &selection.expanded_dirs, &mut rows);
-            }
-
             egui::ScrollArea::vertical()
                 .id_salt("virtual_tree_rows")
                 .auto_shrink([false, false])
-                .show_rows(ui, TREE_ROW_HEIGHT, rows.len(), |ui, row_range| {
+                .show_rows(ui, TREE_ROW_HEIGHT, tree_rows.len(), |ui, row_range| {
                     let mut ctx = TreeNodeContext {
                         selected_file: &mut selection.selected_file,
                         selected_files: &mut selection.selected_files,
@@ -274,10 +297,11 @@ pub fn show_left_panel(app: &mut FastMdApp, parent_ui: &mut egui::Ui) {
                         file_event_producer: Some(
                             crate::bus::events::file::FileEventProducer::new(file_event_bus),
                         ),
+                        tree_dirty: &mut selection.tree_dirty,
                     };
 
                     for i in row_range {
-                        let row = &rows[i];
+                        let row = &tree_rows[i];
                         render_flat_row(ui, row, &mut ctx);
                     }
                 });
@@ -288,7 +312,7 @@ pub fn show_left_panel(app: &mut FastMdApp, parent_ui: &mut egui::Ui) {
             // that would add/remove a widget at the same rect on
             // successive passes — that conditional was itself a
             // source of id-clash warnings before the fix.
-            if rows.is_empty() {
+            if tree_rows.is_empty() {
                 ui.add_space(8.0);
                 ui.label(
                     RichText::new(crate::ui::strings::NO_MARKDOWN_FILES)
@@ -387,6 +411,184 @@ mod tests {
 
         assert!(app.file_processor().indexing_finished_handled);
         assert!(app.layout().left_panel_width.is_some());
+    }
+
+    /// TDD regression: clicking a directory row in the left panel
+    /// must expand the folder and reveal its children. Before the
+    /// P0 perf optimization (P0-1 / P0-2) `show_left_panel` rebuilt
+    /// the flat row list on every frame, so the new `expanded_dirs`
+    /// membership was reflected immediately. After P0 the flat rows
+    /// are cached in `FastMdApp::cached_tree_rows` and only rebuilt
+    /// when `SelectionManager::tree_dirty` is `true`. The directory
+    /// click handler (`apply_directory_row_click`) mutates
+    /// `expanded_dirs` but did not set `tree_dirty`, so the cache
+    /// kept returning the *previous* flat rows and the click looked
+    /// like a no-op — the folder triangle toggled in `expanded_dirs`
+    /// but its children never appeared.
+    ///
+    /// The fix is in `apply_directory_row_click` (handlers.rs):
+    /// it now sets `*ctx.tree_dirty() = true` so the next
+    /// `show_left_panel` pass rebuilds the flat rows. This test
+    /// pins the user-visible invariant: after a directory click,
+    /// the directory's children must appear in the rendered output.
+    #[test]
+    fn test_directory_click_invalidates_tree_cache() {
+        use crate::ui::test_helpers::text::assert_text_contains;
+        use crate::ui::tree::context::TreeNodeContext;
+
+        let ctx = egui::Context::default();
+        let mut app = create_test_app();
+        let lib_dir = std::env::temp_dir().join("fastmd_left_test_dir_click_cache");
+        let sub_dir = lib_dir.join("subdir");
+        let inner_file = sub_dir.join("inner_note.md");
+        let top_file = lib_dir.join("top_note.md");
+
+        app.content_libraries_mut()
+            .push(crate::config::ContentLibrary {
+                root_folder: lib_dir.to_string_lossy().to_string(),
+                name: "ClickLib".to_string(),
+                kind: "text".to_string(),
+                readonly: false,
+                priority: 0,
+            });
+        app.file_processor_mut().all_files = vec![inner_file.clone(), top_file.clone()];
+        app.file_processor_mut().all_dirs = vec![sub_dir.clone()];
+        app.file_processor_mut().indexing_finished = true;
+        app.file_processor_mut().indexing_finished_handled = true;
+        // Pin the panel width so the only thing that can change
+        // between renders is the inner widget tree.
+        app.layout_mut().left_panel_width = Some(240.0);
+        app.layout_mut().left_panel_dirty = false;
+        // Expand the library so the files inside it are visible
+        // at all. The library is a child of the root tree node and
+        // is not auto-expanded; this mirrors a user clicking the
+        // library name once. We only want to test the subdirectory
+        // click behavior, not the library click.
+        app.selection_mut().expanded_dirs.insert(lib_dir.clone());
+
+        // Pass 1: prime the cache with the collapsed tree. The
+        // subdirectory starts collapsed, so the inner file must
+        // not be in the rendered output yet.
+        let output_collapsed = ctx.run_ui(Default::default(), |ui| {
+            show_left_panel(&mut app, ui);
+        });
+        assert!(
+            app.cached_tree_rows.is_some(),
+            "first render should populate the cached flat rows"
+        );
+        assert!(
+            !app.selection().tree_dirty(),
+            "first render should clear the tree_dirty flag"
+        );
+        let collapsed_rows = app
+            .cached_tree_rows
+            .as_ref()
+            .expect("cache populated by pass 1")
+            .clone();
+        assert!(
+            !collapsed_rows.iter().any(|r| r.path == inner_file),
+            "inner file must be hidden when the subdirectory is collapsed ({} cached rows)",
+            collapsed_rows.len()
+        );
+        assert_text_contains(&output_collapsed.shapes, "top_note.md");
+        // The collapsed render must NOT show the inner file.
+        let collapsed_texts: Vec<String> = output_collapsed
+            .shapes
+            .iter()
+            .filter_map(|cs| match &cs.shape {
+                egui::Shape::Text(t) => Some(t.galley.text().to_string()),
+                _ => None,
+            })
+            .collect();
+        assert!(
+            !collapsed_texts.iter().any(|t| t.contains("inner_note.md")),
+            "inner_note.md must not appear while the subdir is collapsed, got: {:?}",
+            collapsed_texts
+        );
+
+        // Simulate a user click on the subdirectory row. We build a
+        // `TreeNodeContext` from the app's state and call
+        // `apply_directory_row_click` directly — this is the same
+        // function `render_flat_row` invokes from its `if
+        // response.clicked()` branch. The context borrows from
+        // `app`, so we wrap the click in a block scope to release
+        // the borrows before re-rendering.
+        let dir_row = crate::ui::tree::flatten::FlatRow {
+            depth: 0,
+            name: "subdir".to_string(),
+            path: sub_dir.clone(),
+            is_dir: true,
+            is_expanded: false,
+        };
+        {
+            let mut open_editor = None;
+            let tx = app.tx.clone();
+            let file_event_bus = &app.file_event_bus;
+            let mut ctx = TreeNodeContext {
+                selected_file: &mut app.selection.selected_file,
+                selected_files: &mut app.selection.selected_files,
+                expanded_dirs: &mut app.selection.expanded_dirs,
+                tabs: &mut app.tab_manager.tabs,
+                selected_dir: &mut app.selection.selected_dir,
+                create_dir_dialog_open: &mut app.dialogs.create_dir_dialog_open,
+                create_dir_parent: &mut app.dialogs.create_dir_parent,
+                file_to_move: &mut app.dialogs.file_to_move,
+                move_dialog_open: &mut app.dialogs.move_dialog_open,
+                file_to_rename: &mut app.dialogs.file_to_rename,
+                rename_dialog_open: &mut app.dialogs.rename_dialog_open,
+                rename_new_name: &mut app.dialogs.rename_new_name,
+                create_document_dialog_open: &mut app.dialogs.create_document_dialog_open,
+                create_document_parent: &mut app.dialogs.create_document_parent,
+                layout: &mut app.layout,
+                submit_prompt: &mut app.submit_prompt,
+                content_libraries: &app.content_libraries,
+                open_editor: &mut open_editor,
+                modifiers: egui::Modifiers::default(),
+                inline_editor_enabled: app.inline_editor_enabled,
+                bg_tx: &Some(tx),
+                file_event_producer: Some(crate::bus::events::file::FileEventProducer::new(
+                    file_event_bus,
+                )),
+                tree_dirty: &mut app.selection.tree_dirty,
+            };
+            crate::ui::tree::handlers::apply_directory_row_click(&mut ctx, &dir_row);
+        }
+
+        // The click must invalidate the cached flat rows.
+        assert!(
+            app.selection().tree_dirty(),
+            "directory click must mark the tree cache dirty so the next render rebuilds the flat rows"
+        );
+        assert!(
+            app.selection().expanded_dirs().contains(&sub_dir),
+            "directory click must add the folder to expanded_dirs"
+        );
+
+        // Pass 2: re-render. The cache must have been rebuilt, so
+        // the inner file is now visible.
+        let output_expanded = ctx.run_ui(Default::default(), |ui| {
+            show_left_panel(&mut app, ui);
+        });
+        let expanded_texts: Vec<String> = output_expanded
+            .shapes
+            .iter()
+            .filter_map(|cs| match &cs.shape {
+                egui::Shape::Text(t) => Some(t.galley.text().to_string()),
+                _ => None,
+            })
+            .collect();
+        assert!(
+            expanded_texts.iter().any(|t| t.contains("inner_note.md")),
+            "inner_note.md must appear after the subdir is expanded; rendered texts: {:?}",
+            expanded_texts
+        );
+        assert_text_contains(&output_expanded.shapes, "top_note.md");
+        // The click must NOT touch the left panel width — directory
+        // expansion is a tree-only concern.
+        assert!(
+            !app.layout().left_panel_dirty,
+            "directory click must not trigger a panel-width recalc"
+        );
     }
 
     #[test]
