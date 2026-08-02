@@ -236,7 +236,7 @@ pub struct SearchEmailFilters<'a> {
 
 /// Page size for `tool_search_email` (cursor mode). 100 per the
 /// `doc/planning/tool-paging-audit-and-migration.md` plan.
-pub const SEARCH_EMAIL_PAGE_SIZE: usize = 100;
+pub const SEARCH_EMAIL_PAGE_SIZE: usize = 25;
 
 /// Hint string emitted on the final page of a `search_email` cursor
 /// walk.
