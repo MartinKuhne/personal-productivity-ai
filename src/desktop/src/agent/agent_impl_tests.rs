@@ -41,6 +41,9 @@ fn make_ctx(config: AppConfig) -> (AgentContext, std::sync::mpsc::Receiver<Backg
         current_response: String::new(),
         model_name: None,
         browser_session,
+        pdf_backing: std::sync::Arc::new(
+            crate::app::watcher::pdf_backing_tracker::PdfBackingTracker::new(),
+        ),
     };
     (ctx, rx)
 }
@@ -235,6 +238,9 @@ fn test_run_agent_skips_done_status_when_cancelled() {
         current_response: String::new(),
         model_name: None,
         browser_session,
+        pdf_backing: std::sync::Arc::new(
+            crate::app::watcher::pdf_backing_tracker::PdfBackingTracker::new(),
+        ),
     };
     run_agent(ctx);
     let mut saw_done = false;

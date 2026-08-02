@@ -273,8 +273,19 @@ impl TextBuffer {
     /// PDF-backed Markdown files (those with a same-stem `.pdf` sibling)
     /// are blocked from editing — `is_open` remains `false` and
     /// `error_message` is set to explain the restriction.
-    pub fn open(&mut self, file_path: &Path, raw_content: &str) {
-        if crate::utils::path::has_pdf_backing(file_path) {
+    ///
+    /// When `pdf_backing` is provided, it is used for the PDF-backing check
+    /// instead of the per-access filesystem stat.
+    pub fn open(
+        &mut self,
+        file_path: &Path,
+        raw_content: &str,
+        pdf_backing: Option<&crate::app::watcher::pdf_backing_tracker::PdfBackingTracker>,
+    ) {
+        let is_pdf_backed = pdf_backing
+            .map(|t| t.is_pdf_backed(file_path))
+            .unwrap_or_else(|| crate::utils::path::has_pdf_backing(file_path));
+        if is_pdf_backed {
             self.error_message = Some(
                 "This file is auto-generated from a PDF and cannot be edited \
                  directly. Use write_yaml_header to modify front-matter."
@@ -552,7 +563,7 @@ mod tests {
 
         let mut buf = TextBuffer::new();
         let raw = fs::read_to_string(&path).unwrap();
-        buf.open(&path, &raw);
+        buf.open(&path, &raw, None);
 
         assert!(buf.is_open);
         // DocumentContent::parse returns body with leading newline after --- delimiter
@@ -571,7 +582,7 @@ mod tests {
 
         let mut buf = TextBuffer::new();
         let raw = fs::read_to_string(&path).unwrap();
-        buf.open(&path, &raw);
+        buf.open(&path, &raw, None);
 
         assert!(buf.is_open);
         assert_eq!(buf.content, "Just body content");
@@ -586,7 +597,7 @@ mod tests {
 
         let mut buf = TextBuffer::new();
         let raw = fs::read_to_string(&path).unwrap();
-        buf.open(&path, &raw);
+        buf.open(&path, &raw, None);
         buf.close();
 
         assert!(!buf.is_open);
@@ -618,7 +629,7 @@ mod tests {
 
         let mut buf = TextBuffer::new();
         let raw = fs::read_to_string(&path).unwrap();
-        buf.open(&path, &raw);
+        buf.open(&path, &raw, None);
         buf.content = "\nModified body".to_string();
 
         buf.save(&noop_producer()).unwrap();
@@ -635,7 +646,7 @@ mod tests {
 
         let mut buf = TextBuffer::new();
         let raw = fs::read_to_string(&path).unwrap();
-        buf.open(&path, &raw);
+        buf.open(&path, &raw, None);
         buf.content = "Modified body".to_string();
 
         buf.save(&noop_producer()).unwrap();
@@ -652,7 +663,7 @@ mod tests {
 
         let mut buf = TextBuffer::new();
         let raw = fs::read_to_string(&path).unwrap();
-        buf.open(&path, &raw);
+        buf.open(&path, &raw, None);
         buf.content = "Unsaved changes".to_string();
         buf.close();
 
@@ -706,7 +717,7 @@ mod tests {
         fs::write(&path, "body").unwrap();
 
         let mut buf = TextBuffer::new();
-        buf.open(&path, "body");
+        buf.open(&path, "body", None);
         buf.content = "modified".to_string();
         buf.save(&noop_producer()).unwrap();
         assert!(!buf.is_open, "successful save should close the buffer");
@@ -771,7 +782,7 @@ mod tests {
         fs::write(&pdf_path, "%PDF-1.4").unwrap();
 
         let mut buf = TextBuffer::new();
-        buf.open(&md_path, "# Hello");
+        buf.open(&md_path, "# Hello", None);
 
         assert!(!buf.is_open, "editor should not open for PDF-backed files");
         assert!(

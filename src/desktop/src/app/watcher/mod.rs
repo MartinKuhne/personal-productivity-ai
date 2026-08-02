@@ -9,7 +9,9 @@
 pub mod directory_tracker;
 pub mod file_processor;
 pub mod file_watcher;
+pub mod pdf_backing_tracker;
 
 pub use directory_tracker::DirectoryTracker;
 pub use file_processor::FileEventProcessor;
 pub use file_watcher::FileWatcher;
+pub use pdf_backing_tracker::PdfBackingTracker;

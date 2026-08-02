@@ -266,7 +266,10 @@ pub fn render_tabs_and_content_capture(
                 if ui.button(crate::ui::strings::EDIT_BUTTON).clicked() {
                     if app.inline_editor_enabled {
                         if let Ok(content) = std::fs::read_to_string(tab_path) {
-                            app.text_buffer.open(tab_path, &content);
+                            let is_pdf_backed = app.pdf_backing_tracker().is_pdf_backed(tab_path);
+                            if !is_pdf_backed {
+                                app.text_buffer.open(tab_path, &content, None);
+                            }
                         }
                     } else {
                         open_in_system_editor(tab_path);
@@ -358,7 +361,7 @@ pub fn render_tabs_and_content_capture(
         });
         ui.separator();
 
-        let pdf_backed = crate::utils::path::has_pdf_backing(selected_path);
+        let pdf_backed = app.pdf_backing_tracker().is_pdf_backed(selected_path);
         if pdf_backed {
             let sepia_tint = egui::Color32::from_rgb(35, 30, 20);
             egui::Frame::new().fill(sepia_tint).show(ui, |ui| {

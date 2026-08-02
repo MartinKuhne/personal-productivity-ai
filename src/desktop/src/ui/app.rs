@@ -5,6 +5,7 @@ use crate::app::background::{BackgroundProcessManager, SharedProcessManager};
 use crate::app::background_task::Task;
 use crate::app::watcher::directory_tracker::DirectoryTracker;
 use crate::app::watcher::file_processor::FileEventProcessor;
+use crate::app::watcher::pdf_backing_tracker::PdfBackingTracker;
 use crate::app::{
     DialogManager, PanelLayout, PersistedUiState, SelectionManager, TabManager, TagManager,
     TextBuffer,
@@ -54,6 +55,7 @@ pub struct FastMdApp {
     pub file_event_bus: Bus<FileEvent>,
     pub file_event_reader: Option<BusReader<FileEvent>>,
     pub file_processor: FileEventProcessor,
+    pub pdf_backing_tracker: crate::app::watcher::PdfBackingTracker,
     pub tag_manager: TagManager,
     pub directory_tracker: DirectoryTracker,
     pub layout: PanelLayout,
@@ -110,6 +112,10 @@ impl FastMdApp {
 
     pub fn file_processor_mut(&mut self) -> &mut FileEventProcessor {
         &mut self.file_processor
+    }
+
+    pub fn pdf_backing_tracker(&self) -> &crate::app::watcher::PdfBackingTracker {
+        &self.pdf_backing_tracker
     }
 
     pub fn tags(&self) -> &TagManager {
@@ -211,6 +217,7 @@ impl FastMdApp {
                 changed = true;
                 match event.kind {
                     FileEventKind::Discovered => {
+                        self.pdf_backing_tracker.process_discovered(&event.paths);
                         for p in &event.paths {
                             if Self::is_workspace_file(p) {
                                 self.file_processor.add_file(p.clone());
@@ -232,6 +239,7 @@ impl FastMdApp {
                         }
                     }
                     FileEventKind::Removed => {
+                        self.pdf_backing_tracker.process_removed(&event.paths);
                         for p in &event.paths {
                             self.file_processor.remove_file(p);
                             if self.tab_manager.loaded_path.as_ref() == Some(p) {
@@ -417,10 +425,14 @@ impl FastMdApp {
         let browser_session = std::sync::Arc::new(crate::app::browser::BrowserSession::new(
             &crate::config::AppConfig::default(),
         ));
-        let agent = AgentSessionManager::new(config_bus, browser_session.clone());
-
         let event_bus = background_task.file_event_bus;
         let dir_tracker = DirectoryTracker::new(event_bus.subscribe());
+        let pdf_backing_tracker = PdfBackingTracker::new();
+        let agent = AgentSessionManager::new(
+            config_bus,
+            browser_session.clone(),
+            Arc::new(pdf_backing_tracker.clone()),
+        );
 
         let persisted_ui_state: PersistedUiState = cc
             .storage
@@ -457,6 +469,7 @@ impl FastMdApp {
             file_event_reader: Some(event_bus.subscribe()),
             file_event_bus: event_bus,
             file_processor,
+            pdf_backing_tracker: PdfBackingTracker::new(),
             directory_tracker: dir_tracker,
             tag_manager: TagManager::new(),
             layout,
@@ -514,11 +527,15 @@ impl FastMdApp {
         let test_browser_session = std::sync::Arc::new(crate::app::browser::BrowserSession::new(
             &crate::config::AppConfig::default(),
         ));
-        let mut agent = AgentSessionManager::new(bus.clone(), test_browser_session);
-        agent.set_config(config.clone());
-
         let event_bus = background_task.file_event_bus;
         let dir_tracker = DirectoryTracker::new(event_bus.subscribe());
+        let pdf_backing_tracker = PdfBackingTracker::new();
+        let mut agent = AgentSessionManager::new(
+            bus.clone(),
+            test_browser_session,
+            Arc::new(pdf_backing_tracker.clone()),
+        );
+        agent.set_config(config.clone());
 
         let mut dialogs = DialogManager::new();
         let batch_dialog_config = crate::app::batch::types::BatchDialogConfig {
@@ -553,6 +570,7 @@ impl FastMdApp {
             text_buffer: TextBuffer::new(),
             inline_editor_enabled,
             background_manager,
+            pdf_backing_tracker: PdfBackingTracker::new(),
             directory_tracker: dir_tracker,
             config,
             config_reader: None,
@@ -1501,7 +1519,7 @@ mod tests {
         *app.selection.selected_file_mut() = Some(path.clone());
         app.tab_manager.loaded_path = Some(path.clone());
         app.file_processor.all_files.push(path.clone());
-        app.text_buffer.open(&path, "old content");
+        app.text_buffer.open(&path, "old content", None);
         assert!(app.text_buffer.is_open);
 
         app.file_event_reader = Some(app.file_event_bus.subscribe());

@@ -321,10 +321,13 @@ pub fn show_left_panel(app: &mut FastMdApp, parent_ui: &mut egui::Ui) {
                 );
             }
 
-            if let Some(path) = open_editor
-                && let Ok(content) = std::fs::read_to_string(&path)
+            if let Some(ref path) = open_editor
+                && let Ok(content) = std::fs::read_to_string(path)
             {
-                app.editor_mut().open(&path, &content);
+                let is_pdf_backed = app.pdf_backing_tracker().is_pdf_backed(path);
+                if !is_pdf_backed {
+                    app.editor_mut().open(path, &content, None);
+                }
             }
         });
 }
