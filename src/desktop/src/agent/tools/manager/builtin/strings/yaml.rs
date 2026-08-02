@@ -2,9 +2,9 @@
 
 // --- read_yaml_header ---
 
-pub const READ_YAML_HEADER_DESCRIPTION: &str = "Parse a YAML header from a markdown file and return its content representation. Tip: Use this to read a document's summary before reading the full file if you are not sure the full contents are needed, to protect context.";
+pub const READ_YAML_HEADER_DESCRIPTION: &str = "Read the YAML header from a Markdown file. Use this tool to inspect a document summary before reading the full file.";
 
 // --- write_yaml_header ---
 
 pub const WRITE_YAML_HEADER_DESCRIPTION: &str =
-    "Write or update data in a YAML header to a markdown file.";
+    "Write or update YAML header data in a Markdown file.";

@@ -489,7 +489,7 @@ All tool responses follow the same envelope:
 *Conditionally available — only offered to the LLM when the user prompt contains "table", "csv", "database", or a CSV tool name.*
 
 ##### `create_csv`
-* **Description:** Create a new CSV file database with specified headers.
+* **Description:** Create a CSV database with specified column headers.
 * **Request:**
   ```json
   { "db_name": "users", "headers": ["id", "name", "age"] }
@@ -500,7 +500,7 @@ All tool responses follow the same envelope:
   ```
 
 ##### `list_csv`
-* **Description:** List all CSV file databases.
+* **Description:** List all CSV databases.
 * **Request:**
   ```json
   {}
@@ -514,7 +514,7 @@ All tool responses follow the same envelope:
   ```
 
 ##### `add_rows`
-* **Description:** Add rows to a CSV file database.
+* **Description:** Add rows to a CSV database.
 * **Request:**
   ```json
   {
@@ -531,7 +531,7 @@ All tool responses follow the same envelope:
   ```
 
 ##### `delete_rows`
-* **Description:** Delete rows from a CSV file database based on a predicate.
+* **Description:** Delete rows from a CSV database using an expression.
 * **Request:**
   ```json
   { "db_name": "users", "predicate": "name == \"Bob\"" }
@@ -542,7 +542,7 @@ All tool responses follow the same envelope:
   ```
 
 ##### `query`
-* **Description:** Query a CSV file database using an evalexpr predicate, supporting sum and average aggregates.
+* **Description:** Query a CSV database using an expression or aggregate function.
 * **Request:**
   ```json
   { "db_name": "users", "predicate": "age > 20" }

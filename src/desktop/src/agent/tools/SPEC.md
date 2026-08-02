@@ -51,11 +51,11 @@ The requirements below have been formatted using the **Easy Approach to Requirem
 | `search_contact` | Search contacts by keyword. Requires JMAP config. |
 | `get_contact` | Get contact by id. Requires JMAP config. |
 | `add_contact` | Add a new contact. Requires JMAP config. |
-| `add_rows` | Add rows to a CSV file database. |
-| `delete_rows` | Delete rows from a CSV file database based on a predicate. |
-| `create_csv` | Create a new CSV file database with specified headers. |
-| `list_csv` | List all CSV file databases. |
-| `query` | Query a CSV file database using a predicate, supporting sum and average aggregates. |
+| `add_rows` | Add rows to a CSV database. |
+| `delete_rows` | Delete rows from a CSV database using an expression. |
+| `create_csv` | Create a CSV database with specified column headers. |
+| `list_csv` | List all CSV databases. |
+| `query` | Query a CSV database using an expression or aggregate function. |
 
 #### CSV Database Tools
 
