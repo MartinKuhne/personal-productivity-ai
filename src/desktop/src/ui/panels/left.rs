@@ -541,7 +541,10 @@ mod tests {
                 file_to_rename: &mut app.orchestrator.dialogs.file_to_rename,
                 rename_dialog_open: &mut app.orchestrator.dialogs.rename_dialog_open,
                 rename_new_name: &mut app.orchestrator.dialogs.rename_new_name,
-                create_document_dialog_open: &mut app.orchestrator.dialogs.create_document_dialog_open,
+                create_document_dialog_open: &mut app
+                    .orchestrator
+                    .dialogs
+                    .create_document_dialog_open,
                 create_document_parent: &mut app.orchestrator.dialogs.create_document_parent,
                 layout: &mut app.layout,
                 submit_prompt: &mut app.orchestrator.submit_prompt,

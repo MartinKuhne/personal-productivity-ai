@@ -324,7 +324,10 @@ mod tests {
     #[test]
     fn test_apply_batch_button_click_sets_dialog_open() {
         let mut app = create_test_app();
-        assert!(!app.orchestrator.dialogs.batch_dialog_open, "dialog must start closed");
+        assert!(
+            !app.orchestrator.dialogs.batch_dialog_open,
+            "dialog must start closed"
+        );
         apply_batch_button_click(&mut app);
         assert!(
             app.orchestrator.dialogs.batch_dialog_open,
@@ -338,7 +341,10 @@ mod tests {
     #[test]
     fn test_apply_tools_button_click_sets_dialog_open() {
         let mut app = create_test_app();
-        assert!(!app.orchestrator.dialogs.tools_dialog_open, "dialog must start closed");
+        assert!(
+            !app.orchestrator.dialogs.tools_dialog_open,
+            "dialog must start closed"
+        );
         apply_tools_button_click(&mut app);
         assert!(
             app.orchestrator.dialogs.tools_dialog_open,

@@ -155,36 +155,41 @@ pub fn show_right_panel_capture(
                 // narrow, resizable panel) instead of drifting the
                 // origin and clipping on the left.
                 .auto_shrink([false, true])
-                .show_rows(ui, 18.0, app.orchestrator.tab_manager.toc.len(), |ui, row_range| {
-                    let toc_snapshot = app.orchestrator.tab_manager.toc.clone();
-                    for i in row_range {
-                        if let Some(entry) = toc_snapshot.get(i) {
-                            ui.push_id((i, &entry.id, "toc_item"), |ui| {
-                                let font_size = calculate_font_size(entry.level as usize);
-                                let indent = calculate_indent(entry.level as usize);
-                                ui.horizontal(|ui| {
-                                    ui.add_space(indent);
-                                    // Cap the label's layout width to the remaining
-                                    // available space. Without this, a non-wrapping
-                                    // label's allocation grows the placer's min_rect
-                                    // past the panel right edge even when truncate()
-                                    // clips the visual rendering — left-side text then
-                                    // disappears behind the panel's clip_rect.
-                                    let max_label_w = (ui.available_width()).max(0.0);
-                                    ui.set_max_width(max_label_w);
-                                    let label = egui::Label::new(
-                                        egui::RichText::new(&entry.title).size(font_size),
-                                    )
-                                    .truncate();
-                                    if ui.add(label).clicked() {
-                                        apply_toc_row_click(app, &entry.id);
-                                        on_click("toc_row");
-                                    }
+                .show_rows(
+                    ui,
+                    18.0,
+                    app.orchestrator.tab_manager.toc.len(),
+                    |ui, row_range| {
+                        let toc_snapshot = app.orchestrator.tab_manager.toc.clone();
+                        for i in row_range {
+                            if let Some(entry) = toc_snapshot.get(i) {
+                                ui.push_id((i, &entry.id, "toc_item"), |ui| {
+                                    let font_size = calculate_font_size(entry.level as usize);
+                                    let indent = calculate_indent(entry.level as usize);
+                                    ui.horizontal(|ui| {
+                                        ui.add_space(indent);
+                                        // Cap the label's layout width to the remaining
+                                        // available space. Without this, a non-wrapping
+                                        // label's allocation grows the placer's min_rect
+                                        // past the panel right edge even when truncate()
+                                        // clips the visual rendering — left-side text then
+                                        // disappears behind the panel's clip_rect.
+                                        let max_label_w = (ui.available_width()).max(0.0);
+                                        ui.set_max_width(max_label_w);
+                                        let label = egui::Label::new(
+                                            egui::RichText::new(&entry.title).size(font_size),
+                                        )
+                                        .truncate();
+                                        if ui.add(label).clicked() {
+                                            apply_toc_row_click(app, &entry.id);
+                                            on_click("toc_row");
+                                        }
+                                    });
                                 });
-                            });
+                            }
                         }
-                    }
-                });
+                    },
+                );
         });
 }
 

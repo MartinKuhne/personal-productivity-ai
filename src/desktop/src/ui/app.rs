@@ -3,9 +3,9 @@
 use crate::agent::AgentSessionManager;
 use crate::app::background::BackgroundProcessManager;
 use crate::app::background_task::Task;
+use crate::app::orchestrator::AppOrchestrator;
 use crate::app::watcher::directory_tracker::DirectoryTracker;
 use crate::app::watcher::file_processor::FileEventProcessor;
-use crate::app::orchestrator::AppOrchestrator;
 use crate::app::{
     DialogManager, PanelLayout, PersistedUiState, SelectionManager, TabManager, TagManager,
     TextBuffer,
@@ -13,7 +13,6 @@ use crate::app::{
 use crate::bus::core::Bus;
 use crate::bus::events::config::ConfigArrived;
 use crate::bus::events::file::FileEventProducer;
-
 
 use crate::config::AppConfig;
 
@@ -153,38 +152,6 @@ impl FastMdApp {
     pub fn inline_editor_enabled(&self) -> bool {
         self.orchestrator.inline_editor_enabled
     }
-
-    /// Drain pending `FileEvent`s from the bus and update.
-    ///
-    /// Returns `true` if any event was processed, so callers can
-    /// schedule a follow-up UI repaint.
-
-
-    /// Close the tab for every file in `paths` that is currently open
-    /// (UI-051), then repair the selection so it never points at a
-    /// closed tab: if the active document was deleted, the viewer
-    /// falls back to the last remaining tab (or shows the empty state
-    /// when no tabs remain).
-    ///
-    /// Both deletion paths funnel through here — the [Delete]
-    /// context-menu action publishes a `Removed` file event on the bus
-    /// (drained in [`Self::process_file_events`]), and the filesystem
-    /// watcher reports external deletions both as an `FsEvent::FileDeleted`
-    /// on the typed channel (handled in [`Self::handle_fs_event`]) and
-    /// as a `Removed` bus event. Because both paths can observe the
-    /// same deletion, this helper is idempotent: removing a tab that is
-    /// already gone is a no-op.
-
-
-    /// Returns `true` if `path` is a user-editable workspace file
-    /// (i.e. one that should appear in the directory tree).
-    ///
-    /// The current rule is: markdown (`.md` / `.markdown`) and
-    /// plain-text (`.txt`). PDFs and images are inputs to the
-    /// PDF-converter and image-vision workers and stay out of the
-    /// tree. If we ever want to surface other text types
-    /// (e.g. `.org`, `.adoc`), add them here.
-
 
     /// Purpose: Pin the egui context to the dark theme with the FastMD brand
     /// palette (RGB(9, 9, 11) surfaces, indigo selection, 8px window corners,
@@ -432,8 +399,6 @@ impl FastMdApp {
             persisted_ui_state: PersistedUiState::default(),
         }
     }
-
-
 }
 
 /// Purpose: Generates the markdown formatting prompt with a dynamic date.
@@ -462,7 +427,13 @@ impl eframe::App for FastMdApp {
 
     fn save(&mut self, storage: &mut dyn eframe::Storage) {
         self.persisted_ui_state.left_panel_width = self.layout.left_panel_width;
-        let all_dirs: HashSet<PathBuf> = self.orchestrator.selection.expanded_dirs.iter().cloned().collect();
+        let all_dirs: HashSet<PathBuf> = self
+            .orchestrator
+            .selection
+            .expanded_dirs
+            .iter()
+            .cloned()
+            .collect();
         self.persisted_ui_state.expanded_dirs = all_dirs;
         if let Ok(json) = serde_json::to_string(&self.persisted_ui_state) {
             storage.set_string(PERSISTED_UI_STATE_KEY, json);
@@ -517,26 +488,6 @@ impl FastMdApp {
         }
     }
 
-    /// Drain the configuration-arrival bus on the first frame and
-    /// populate every config-derived field (`self.config`,
-    /// `self.content_libraries`, `self.inline_editor_enabled`,
-    /// `self.orchestrator.dialogs.batch_dialog_config.available_dirs`). The
-    /// reader is dropped after the first frame so subsequent
-    /// frames do not touch the bus.
-
-
-
-
-
-
-
-
-
-
-
-
-
-
     fn show_editor_overlay(&mut self, ui: &mut egui::Ui) {
         let producer = FileEventProducer::new(&self.orchestrator.file_event_bus);
         // The editor opens its own top-level `egui::Window` from
@@ -546,7 +497,11 @@ impl FastMdApp {
         // loaded path so the centre panel reloads the file on
         // the next frame.
         let was_open = self.orchestrator.text_buffer.is_open;
-        let _ = crate::ui::editor_egui::show_text_editor(ui, &mut self.orchestrator.text_buffer, &producer);
+        let _ = crate::ui::editor_egui::show_text_editor(
+            ui,
+            &mut self.orchestrator.text_buffer,
+            &producer,
+        );
         if was_open && !self.orchestrator.text_buffer.is_open {
             self.orchestrator.tab_manager.loaded_path = None;
         }
@@ -675,7 +630,6 @@ impl FastMdApp {
         show_center_panel(self, parent_ui);
     }
 
-
     fn process_file_events_and_repaint(&mut self, ctx: &egui::Context) {
         if self.orchestrator.process_file_events()
             || !self.orchestrator.file_processor.indexing_finished
@@ -708,9 +662,9 @@ impl FastMdApp {
 mod tests {
     use super::*;
     use crate::bus::events::file::FileEvent;
-    use crate::bus::events::typed::FsEvent;
     use crate::bus::events::messages::TokenUsageInfo;
     use crate::bus::events::typed::AgentEvent;
+    use crate::bus::events::typed::FsEvent;
     use crate::ui::test_helpers::assert::assert_no_id_change_in_shapes;
     use std::path::PathBuf;
 
@@ -799,7 +753,8 @@ mod tests {
         let test_dir = PathBuf::from("test_dir");
 
         // 1. FileParsed
-        app.orchestrator.tx
+        app.orchestrator
+            .tx
             .send(
                 FsEvent::FileParsed {
                     path: test_file.clone(),
@@ -810,7 +765,8 @@ mod tests {
             .unwrap();
 
         // 2. DirParsed
-        app.orchestrator.tx
+        app.orchestrator
+            .tx
             .send(
                 FsEvent::DirParsed {
                     path: test_dir.clone(),
@@ -820,16 +776,22 @@ mod tests {
             .unwrap();
 
         // 3. FinishedWithoutWatcher
-        app.orchestrator.tx.send(FsEvent::FinishedWithoutWatcher.into()).unwrap();
+        app.orchestrator
+            .tx
+            .send(FsEvent::FinishedWithoutWatcher.into())
+            .unwrap();
 
         // 4. Agent Status & Response
-        app.orchestrator.tx
+        app.orchestrator
+            .tx
             .send(AgentEvent::Status("Processing...".to_string()).into())
             .unwrap();
-        app.orchestrator.tx
+        app.orchestrator
+            .tx
             .send(AgentEvent::Thinking("Thinking step".to_string()).into())
             .unwrap();
-        app.orchestrator.tx
+        app.orchestrator
+            .tx
             .send(AgentEvent::Response("Done result".to_string()).into())
             .unwrap();
 
@@ -837,7 +799,12 @@ mod tests {
             app.update_ui(ui);
         });
 
-        assert!(app.orchestrator.file_processor.all_files.contains(&test_file));
+        assert!(
+            app.orchestrator
+                .file_processor
+                .all_files
+                .contains(&test_file)
+        );
         assert!(app.orchestrator.file_processor.all_dirs.contains(&test_dir));
         assert!(app.orchestrator.file_processor.indexing_finished);
         assert_eq!(app.orchestrator.agent.state().status, "Processing...");
@@ -851,13 +818,20 @@ mod tests {
         let mut app = create_test_app();
         let file_path = PathBuf::from("modified_file.md");
 
-        app.orchestrator.file_processor.all_files.push(file_path.clone());
+        app.orchestrator
+            .file_processor
+            .all_files
+            .push(file_path.clone());
         *app.orchestrator.selection.selected_file_mut() = Some(file_path.clone());
-        app.orchestrator.selection.selected_files_mut().insert(file_path.clone());
+        app.orchestrator
+            .selection
+            .selected_files_mut()
+            .insert(file_path.clone());
         app.orchestrator.tab_manager.loaded_path = Some(file_path.clone());
 
         // File modified message
-        app.orchestrator.tx
+        app.orchestrator
+            .tx
             .send(
                 FsEvent::FileModified {
                     path: file_path.clone(),
@@ -874,7 +848,8 @@ mod tests {
         assert!(app.orchestrator.tab_manager.loaded_path.is_none()); // Trigger reload
 
         // File deleted message
-        app.orchestrator.tx
+        app.orchestrator
+            .tx
             .send(
                 FsEvent::FileDeleted {
                     path: file_path.clone(),
@@ -887,9 +862,19 @@ mod tests {
             app.update_ui(ui);
         });
 
-        assert!(!app.orchestrator.file_processor.all_files.contains(&file_path));
+        assert!(
+            !app.orchestrator
+                .file_processor
+                .all_files
+                .contains(&file_path)
+        );
         assert!(app.orchestrator.selection.selected_file().is_none());
-        assert!(!app.orchestrator.selection.selected_files().contains(&file_path));
+        assert!(
+            !app.orchestrator
+                .selection
+                .selected_files()
+                .contains(&file_path)
+        );
     }
 
     #[test]
@@ -897,7 +882,8 @@ mod tests {
         let ctx = egui::Context::default();
         let mut app = create_test_app();
 
-        app.orchestrator.tx
+        app.orchestrator
+            .tx
             .send(AgentEvent::Failed("Network timeout".to_string()).into())
             .unwrap();
 
@@ -905,10 +891,14 @@ mod tests {
             app.update_ui(ui);
         });
 
-        assert_eq!(app.orchestrator.agent.state().status, "Error: Network timeout");
+        assert_eq!(
+            app.orchestrator.agent.state().status,
+            "Error: Network timeout"
+        );
         assert!(!app.orchestrator.agent.state().running);
 
-        app.orchestrator.tx
+        app.orchestrator
+            .tx
             .send(AgentEvent::Finished(vec![serde_json::json!({"ok": true})]).into())
             .unwrap();
 
@@ -926,7 +916,8 @@ mod tests {
         let mut app = create_test_app();
 
         // First turn: small context, no cached or reasoning tokens.
-        app.orchestrator.tx
+        app.orchestrator
+            .tx
             .send(
                 AgentEvent::TokenUsage(TokenUsageInfo {
                     prompt_tokens: 100,
@@ -943,7 +934,8 @@ mod tests {
         });
 
         assert_eq!(
-            app.orchestrator.agent
+            app.orchestrator
+                .agent
                 .state()
                 .token_usage
                 .as_ref()
@@ -956,13 +948,23 @@ mod tests {
             100,
             "prompt_tokens should track the peak seen so far"
         );
-        assert_eq!(app.orchestrator.agent.state().total_usage.completion_tokens, 20);
+        assert_eq!(
+            app.orchestrator.agent.state().total_usage.completion_tokens,
+            20
+        );
         assert_eq!(app.orchestrator.agent.state().total_usage.total_tokens, 120);
-        assert_eq!(app.orchestrator.agent.state().total_usage.cached_tokens, Some(0));
-        assert_eq!(app.orchestrator.agent.state().total_usage.reasoning_tokens, Some(0));
+        assert_eq!(
+            app.orchestrator.agent.state().total_usage.cached_tokens,
+            Some(0)
+        );
+        assert_eq!(
+            app.orchestrator.agent.state().total_usage.reasoning_tokens,
+            Some(0)
+        );
 
         // Second turn: context grew, completion + reasoning added.
-        app.orchestrator.tx
+        app.orchestrator
+            .tx
             .send(
                 AgentEvent::TokenUsage(TokenUsageInfo {
                     prompt_tokens: 250,
@@ -980,7 +982,8 @@ mod tests {
         });
 
         assert_eq!(
-            app.orchestrator.agent
+            app.orchestrator
+                .agent
                 .state()
                 .token_usage
                 .as_ref()
@@ -993,13 +996,23 @@ mod tests {
             250,
             "peak should rise with the larger turn"
         );
-        assert_eq!(app.orchestrator.agent.state().total_usage.completion_tokens, 50);
+        assert_eq!(
+            app.orchestrator.agent.state().total_usage.completion_tokens,
+            50
+        );
         assert_eq!(app.orchestrator.agent.state().total_usage.total_tokens, 400);
-        assert_eq!(app.orchestrator.agent.state().total_usage.cached_tokens, Some(50));
-        assert_eq!(app.orchestrator.agent.state().total_usage.reasoning_tokens, Some(5));
+        assert_eq!(
+            app.orchestrator.agent.state().total_usage.cached_tokens,
+            Some(50)
+        );
+        assert_eq!(
+            app.orchestrator.agent.state().total_usage.reasoning_tokens,
+            Some(5)
+        );
 
         // Third turn: smaller context — peak should NOT shrink.
-        app.orchestrator.tx
+        app.orchestrator
+            .tx
             .send(
                 AgentEvent::TokenUsage(TokenUsageInfo {
                     prompt_tokens: 80,
@@ -1020,9 +1033,18 @@ mod tests {
             250,
             "peak prompt size must not regress"
         );
-        assert_eq!(app.orchestrator.agent.state().total_usage.completion_tokens, 60);
-        assert_eq!(app.orchestrator.agent.state().total_usage.cached_tokens, Some(50));
-        assert_eq!(app.orchestrator.agent.state().total_usage.reasoning_tokens, Some(5));
+        assert_eq!(
+            app.orchestrator.agent.state().total_usage.completion_tokens,
+            60
+        );
+        assert_eq!(
+            app.orchestrator.agent.state().total_usage.cached_tokens,
+            Some(50)
+        );
+        assert_eq!(
+            app.orchestrator.agent.state().total_usage.reasoning_tokens,
+            Some(5)
+        );
     }
 
     // -- process_file_events: tab reload on file Updated --
@@ -1074,7 +1096,9 @@ mod tests {
         *app.orchestrator.selection.selected_file_mut() = Some(path.clone());
         app.orchestrator.tab_manager.loaded_path = Some(path.clone());
         app.orchestrator.file_processor.all_files.push(path.clone());
-        app.orchestrator.text_buffer.open(&path, "old content", None);
+        app.orchestrator
+            .text_buffer
+            .open(&path, "old content", None);
         assert!(app.orchestrator.text_buffer.is_open);
 
         app.orchestrator.file_event_reader = Some(app.orchestrator.file_event_bus.subscribe());
@@ -1141,7 +1165,8 @@ mod tests {
             "markdown files must appear in the workspace tree"
         );
         assert!(
-            app.orchestrator.file_processor
+            app.orchestrator
+                .file_processor
                 .all_dirs
                 .contains(&PathBuf::from("/tmp/lib")),
             "directories containing workspace files must appear in the tree"
@@ -1162,7 +1187,10 @@ mod tests {
         // A directory that contains only a PDF must not be added
         // to `all_dirs`.
         assert!(
-            !app.orchestrator.file_processor.all_dirs.contains(&pdf_only_dir),
+            !app.orchestrator
+                .file_processor
+                .all_dirs
+                .contains(&pdf_only_dir),
             "directories that contain only non-workspace files must not appear in the tree"
         );
     }
@@ -1173,8 +1201,12 @@ mod tests {
         // filter. Markdown (case-insensitive) and plain text
         // are workspace files; everything else (PDFs, images,
         // no extension) is not.
-        assert!(AppOrchestrator::is_workspace_file(&PathBuf::from("/a/b/note.md")));
-        assert!(AppOrchestrator::is_workspace_file(&PathBuf::from("/a/b/note.MD")));
+        assert!(AppOrchestrator::is_workspace_file(&PathBuf::from(
+            "/a/b/note.md"
+        )));
+        assert!(AppOrchestrator::is_workspace_file(&PathBuf::from(
+            "/a/b/note.MD"
+        )));
         assert!(AppOrchestrator::is_workspace_file(&PathBuf::from(
             "/a/b/note.markdown"
         )));
@@ -1236,16 +1268,19 @@ mod tests {
         let mut app = create_test_app();
 
         // Pre-populate tag manager so the tag exists.
-        app.orchestrator.tag_manager
+        app.orchestrator
+            .tag_manager
             .add_tags(PathBuf::from("/lib/notes.md"), vec!["work".to_string()]);
-        app.orchestrator.file_processor
+        app.orchestrator
+            .file_processor
             .all_files
             .push(PathBuf::from("/lib/notes.md"));
 
         // A `Removed` event must trigger `rebuid`, which
         // evicts the file's tags.
         app.orchestrator.file_event_reader = Some(app.orchestrator.file_event_bus.subscribe());
-        app.orchestrator.file_event_bus
+        app.orchestrator
+            .file_event_bus
             .publish(FileEvent::removed_one(PathBuf::from("/lib/notes.md")));
         let _ = app.orchestrator.process_file_events();
         assert!(
@@ -1256,9 +1291,11 @@ mod tests {
         // A `Discovered` event must NOT call rebuild (which
         // would clear all_tags and lose the tag we just
         // added).
-        app.orchestrator.tag_manager
+        app.orchestrator
+            .tag_manager
             .add_tags(PathBuf::from("/lib/other.md"), vec!["keep".to_string()]);
-        app.orchestrator.file_event_bus
+        app.orchestrator
+            .file_event_bus
             .publish(FileEvent::discovered_one(PathBuf::from("/lib/other.md")));
         let _ = app.orchestrator.process_file_events();
         assert!(
@@ -1502,7 +1539,8 @@ mod tests {
         *app.orchestrator.selection.selected_file_mut() = Some(gone.clone());
 
         app.orchestrator.file_event_reader = Some(app.orchestrator.file_event_bus.subscribe());
-        app.orchestrator.file_event_bus
+        app.orchestrator
+            .file_event_bus
             .publish(FileEvent::removed_one(gone.clone()));
         let _ = app.orchestrator.process_file_events();
 
@@ -1537,11 +1575,15 @@ mod tests {
         *app.orchestrator.selection.selected_file_mut() = Some(gone.clone());
 
         app.orchestrator.file_event_reader = Some(app.orchestrator.file_event_bus.subscribe());
-        app.orchestrator.file_event_bus
+        app.orchestrator
+            .file_event_bus
             .publish(FileEvent::removed_one(gone.clone()));
         let _ = app.orchestrator.process_file_events();
 
-        assert!(app.orchestrator.tab_manager.tabs.is_empty(), "all tabs must be closed");
+        assert!(
+            app.orchestrator.tab_manager.tabs.is_empty(),
+            "all tabs must be closed"
+        );
         assert!(
             app.orchestrator.selection.selected_file().is_none(),
             "selection must be None when no tabs remain"
@@ -1568,7 +1610,8 @@ mod tests {
         app.orchestrator.tab_manager.loaded_path = Some(gone.clone());
         *app.orchestrator.selection.selected_file_mut() = Some(gone.clone());
 
-        app.orchestrator.handle_fs_event(FsEvent::FileDeleted { path: gone.clone() });
+        app.orchestrator
+            .handle_fs_event(FsEvent::FileDeleted { path: gone.clone() });
 
         assert!(
             !app.orchestrator.tab_manager.tabs.contains(&gone),
