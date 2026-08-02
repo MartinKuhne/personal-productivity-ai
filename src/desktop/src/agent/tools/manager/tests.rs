@@ -19,11 +19,16 @@ fn test_browser_session() -> Arc<BrowserSession> {
     Arc::new(BrowserSession::new(&AppConfig::default()))
 }
 
+fn test_pdf_backing() -> Arc<crate::app::watcher::pdf_backing_tracker::PdfBackingTracker> {
+    Arc::new(crate::app::watcher::pdf_backing_tracker::PdfBackingTracker::new())
+}
+
 fn test_ctx(config: &AppConfig) -> ToolContext<'static> {
     ToolContext::new(
         unsafe { &*(config as *const AppConfig) },
         test_bus(),
         test_browser_session(),
+        test_pdf_backing(),
     )
 }
 

@@ -99,7 +99,9 @@ fn test_browser_navigate_tool_round_trip() {
     >::new()));
     let config = Box::leak(Box::new(AppConfig::default()));
     config.tool_groups.browser = true;
-    let ctx = ToolContext::new(config, bus, session);
+    let pdf_backing =
+        std::sync::Arc::new(crate::app::watcher::pdf_backing_tracker::PdfBackingTracker::new());
+    let ctx = ToolContext::new(config, bus, session, pdf_backing);
 
     let tool = crate::agent::tools::manager::builtin::browser::BrowserNavigateTool;
     let args = r#"{"url":"about:blank"}"#;
@@ -118,7 +120,9 @@ fn test_browser_get_page_state_tool_is_readonly() {
     >::new()));
     let config = Box::leak(Box::new(AppConfig::default()));
     config.tool_groups.browser = true;
-    let _ctx = ToolContext::new(config, bus, session);
+    let pdf_backing =
+        std::sync::Arc::new(crate::app::watcher::pdf_backing_tracker::PdfBackingTracker::new());
+    let _ctx = ToolContext::new(config, bus, session, pdf_backing);
 
     let tool = crate::agent::tools::manager::builtin::browser::BrowserGetPageStateTool;
     assert_eq!(tool.safety(), Safety::ReadOnly);

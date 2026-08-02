@@ -1,4 +1,5 @@
-//! Path helpers — safe-basename validation and Windows `PATH` executable resolution.
+//! Path helpers — safe-basename validation, Windows `PATH` executable resolution, and
+//! PDF-backing detection for Markdown files.
 
 use std::borrow::Cow;
 use std::path::{Component, Path};
@@ -23,6 +24,47 @@ pub fn is_safe_basename(name: &str) -> bool {
         return false;
     }
     true
+}
+
+/// Returns `true` if the given path is a Markdown file with a same-stem
+/// `.pdf` sibling in the same directory.
+///
+/// This is used to mark Markdown files that are auto-generated from a PDF
+/// source (see REQ-450 — PDF derivation). PDF-backed files are rendered
+/// with a sepia tint and write operations are blocked (except
+/// the `write_yaml_header` tool, which is exempt).
+///
+/// Returns `false` for non-`.md` files, missing files, and when no
+/// `.pdf` sibling exists.
+///
+/// # Examples
+/// ```
+/// use std::path::Path;
+/// use std::fs;
+/// use tempfile::tempdir;
+///
+/// let dir = tempdir().unwrap();
+/// let md = dir.path().join("doc.md");
+/// let pdf = dir.path().join("doc.pdf");
+///
+/// // No PDF sibling → false
+/// fs::write(&md, "# Hello").unwrap();
+/// assert!(!fastmd::utils::path::has_pdf_backing(&md));
+///
+/// // PDF sibling exists → true
+/// fs::write(&pdf, "%PDF-1.4").unwrap();
+/// assert!(fastmd::utils::path::has_pdf_backing(&md));
+/// ```
+pub fn has_pdf_backing(path: &Path) -> bool {
+    if path
+        .extension()
+        .is_some_and(|e| e.eq_ignore_ascii_case("md"))
+    {
+        let pdf_path = path.with_extension("pdf");
+        pdf_path.exists()
+    } else {
+        false
+    }
 }
 
 /// Default `PATHEXT` used when the environment variable is unset.
@@ -204,6 +246,51 @@ mod tests {
         );
         let resolved = resolve_executable_path(&unique);
         assert_eq!(resolved.as_ref(), unique.as_str());
+    }
+
+    // ---- has_pdf_backing ----
+
+    #[test]
+    fn test_has_pdf_backing_returns_true_when_pdf_sibling_exists() {
+        let dir = tempfile::tempdir().unwrap();
+        let md_path = dir.path().join("doc.md");
+        let pdf_path = dir.path().join("doc.pdf");
+        std::fs::write(&md_path, "# Hello").unwrap();
+        std::fs::write(&pdf_path, "%PDF-1.4").unwrap();
+        assert!(has_pdf_backing(&md_path));
+    }
+
+    #[test]
+    fn test_has_pdf_backing_returns_false_when_no_pdf_sibling() {
+        let dir = tempfile::tempdir().unwrap();
+        let md_path = dir.path().join("doc.md");
+        std::fs::write(&md_path, "# Hello").unwrap();
+        assert!(!has_pdf_backing(&md_path));
+    }
+
+    #[test]
+    fn test_has_pdf_backing_returns_false_for_non_md_file() {
+        let dir = tempfile::tempdir().unwrap();
+        let pdf_path = dir.path().join("doc.pdf");
+        std::fs::write(&pdf_path, "%PDF-1.4").unwrap();
+        assert!(!has_pdf_backing(&pdf_path));
+    }
+
+    #[test]
+    fn test_has_pdf_backing_returns_false_for_nonexistent_file() {
+        let dir = tempfile::tempdir().unwrap();
+        let md_path = dir.path().join("nonexistent.md");
+        assert!(!has_pdf_backing(&md_path));
+    }
+
+    #[test]
+    fn test_has_pdf_backing_is_case_insensitive() {
+        let dir = tempfile::tempdir().unwrap();
+        let md_path = dir.path().join("doc.MD");
+        let pdf_path = dir.path().join("doc.pdf");
+        std::fs::write(&md_path, "# Hello").unwrap();
+        std::fs::write(&pdf_path, "%PDF-1.4").unwrap();
+        assert!(has_pdf_backing(&md_path));
     }
 
     #[cfg(windows)]

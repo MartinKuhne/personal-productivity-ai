@@ -33,6 +33,9 @@ impl Tool for ReplaceTextTool {
         let input: dtos::ReplaceTextInput =
             serde_json::from_str(args).map_err(|e| format!("Invalid args: {}", e))?;
         let path = ctx.resolve_writable(&input.path)?;
+        if ctx.is_pdf_backed(&path) {
+            return Err(crate::ui::strings::PDF_BACKED_TOOL_ERROR.to_string());
+        }
         let producer = ctx.file_event_producer();
         crate::agent::tools::filesystem::tool_replace_text(
             &path.to_string_lossy(),
@@ -351,6 +354,9 @@ impl Tool for CreateFileTool {
         let input: dtos::CreateFileInput =
             serde_json::from_str(args).map_err(|e| format!("Invalid args: {}", e))?;
         let path = ctx.resolve_writable(&input.path)?;
+        if ctx.is_pdf_backed(&path) {
+            return Err(crate::ui::strings::PDF_BACKED_TOOL_ERROR.to_string());
+        }
         let producer = ctx.file_event_producer();
         crate::agent::tools::filesystem::tool_create_file(
             &path.to_string_lossy(),
@@ -385,6 +391,9 @@ impl Tool for InsertLinesTool {
         let input: dtos::InsertLinesInput =
             serde_json::from_str(args).map_err(|e| format!("Invalid args: {}", e))?;
         let path = ctx.resolve_writable(&input.path)?;
+        if ctx.is_pdf_backed(&path) {
+            return Err(crate::ui::strings::PDF_BACKED_TOOL_ERROR.to_string());
+        }
         let producer = ctx.file_event_producer();
         crate::agent::tools::filesystem::tool_insert_lines(
             &path.to_string_lossy(),
@@ -420,6 +429,9 @@ impl Tool for DeleteLinesTool {
         let input: dtos::DeleteLinesInput =
             serde_json::from_str(args).map_err(|e| format!("Invalid args: {}", e))?;
         let path = ctx.resolve_writable(&input.path)?;
+        if ctx.is_pdf_backed(&path) {
+            return Err(crate::ui::strings::PDF_BACKED_TOOL_ERROR.to_string());
+        }
         let producer = ctx.file_event_producer();
         crate::agent::tools::filesystem::tool_delete_lines(
             &path.to_string_lossy(),
