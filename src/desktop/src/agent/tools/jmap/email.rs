@@ -172,12 +172,11 @@ fn simplify_email(
         && let Some(body_val) = email.body_value(part_id)
     {
         let mut raw = body_val.value().to_string();
-        if raw.contains('<') && raw.contains('>') {
-            if let Ok(conv) = convert(&raw, None)
-                && let Some(md) = conv.content
-            {
-                raw = md;
-            }
+        if raw.contains('<') && raw.contains('>')
+            && let Ok(conv) = convert(&raw, None)
+            && let Some(md) = conv.content
+        {
+            raw = md;
         }
         body_str = raw;
         is_truncated = body_val.is_truncated();
@@ -190,12 +189,11 @@ fn simplify_email(
         && let Some(body_val) = email.body_value(part_id)
     {
         let mut raw = body_val.value().to_string();
-        if raw.contains('<') && raw.contains('>') {
-            if let Ok(conv) = convert(&raw, None)
-                && let Some(md) = conv.content
-            {
-                raw = md;
-            }
+        if raw.contains('<') && raw.contains('>')
+            && let Ok(conv) = convert(&raw, None)
+            && let Some(md) = conv.content
+        {
+            raw = md;
         }
         body_str = raw;
         is_truncated = body_val.is_truncated();

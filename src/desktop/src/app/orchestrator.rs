@@ -5,7 +5,7 @@ use crate::app::watcher::file_processor::FileEventProcessor;
 use crate::app::{DialogManager, SelectionManager, TabManager, TagManager, TextBuffer};
 use crate::bus::core::{Bus, BusReader};
 use crate::bus::events::config::ConfigArrived;
-use crate::bus::events::file::{FileEvent, FileEventProducer};
+use crate::bus::events::file::FileEvent;
 use crate::bus::events::typed::{BackgroundEvent, FsEvent, McpAuthEvent, ProcessEvent};
 use crate::markdown::parse_front_matter;
 use std::path::PathBuf;

@@ -262,7 +262,11 @@ fn render_row(
                 } else {
                     if ui.button(TOOLS_AUTH_BUTTON).clicked() {
                         app.dialogs_mut().set_oauth_in_progress(name);
-                        spawn_auth_flow(name.clone(), app.orchestrator.tx.clone(), ui.ctx().clone());
+                        spawn_auth_flow(
+                            name.clone(),
+                            app.orchestrator.tx.clone(),
+                            ui.ctx().clone(),
+                        );
                     }
                 }
                 if ui.small_button(TOOLS_FORGET).clicked() {

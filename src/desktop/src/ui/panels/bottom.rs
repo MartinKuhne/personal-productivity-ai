@@ -238,7 +238,10 @@ mod tests {
             },
         );
         app.orchestrator.agent.command_input = "/models".to_string();
-        assert!(!app.orchestrator.agent.show_results(), "show_results must start false");
+        assert!(
+            !app.orchestrator.agent.show_results(),
+            "show_results must start false"
+        );
 
         apply_send_click(&mut app);
 
@@ -248,7 +251,11 @@ mod tests {
             "ShowModels dispatch must set show_results"
         );
         assert!(
-            app.orchestrator.agent.state().response.contains("test-model"),
+            app.orchestrator
+                .agent
+                .state()
+                .response
+                .contains("test-model"),
             "ShowModels dispatch must put the model list into the response, got: {}",
             app.orchestrator.agent.state().response
         );
