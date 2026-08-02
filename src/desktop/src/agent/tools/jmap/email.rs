@@ -60,6 +60,7 @@ fn email_get_full(
 }
 
 /// Convert HTML body values in a JMAP response to Markdown using `fast_h2m`.
+#[allow(dead_code)]
 fn convert_html_in_jmap(mut res: serde_json::Value) -> serde_json::Value {
     fn process(val: &mut serde_json::Value) {
         match val {
@@ -170,7 +171,15 @@ fn simplify_email(
         && let Some(part_id) = first.part_id()
         && let Some(body_val) = email.body_value(part_id)
     {
-        body_str = body_val.value().to_string();
+        let mut raw = body_val.value().to_string();
+        if raw.contains('<') && raw.contains('>') {
+            if let Ok(conv) = convert(&raw, None)
+                && let Some(md) = conv.content
+            {
+                raw = md;
+            }
+        }
+        body_str = raw;
         is_truncated = body_val.is_truncated();
     }
 
@@ -180,7 +189,15 @@ fn simplify_email(
         && let Some(part_id) = first.part_id()
         && let Some(body_val) = email.body_value(part_id)
     {
-        body_str = body_val.value().to_string();
+        let mut raw = body_val.value().to_string();
+        if raw.contains('<') && raw.contains('>') {
+            if let Ok(conv) = convert(&raw, None)
+                && let Some(md) = conv.content
+            {
+                raw = md;
+            }
+        }
+        body_str = raw;
         is_truncated = body_val.is_truncated();
     }
 
@@ -397,7 +414,7 @@ fn fetch_full_search_result(
                         "[email] email_get succeeded for id={}",
                         email_id
                     );
-                    let email_json = convert_html_in_jmap(simplify_email(&mut email, Some(10)));
+                    let email_json = simplify_email(&mut email, Some(10));
                     all_items.push(SearchEmailItem {
                         client: name.clone(),
                         email: email_json,
@@ -613,7 +630,7 @@ pub fn tool_get_email_by_id(
 
         match email_get_full(&session, id) {
             Ok(Some(mut email)) => {
-                let email_json = convert_html_in_jmap(simplify_email(&mut email, None));
+                let email_json = simplify_email(&mut email, None);
                 return Ok(crate::agent::tools::dtos::GetEmailByIdResponse {
                     result: serde_json::to_string_pretty(&email_json).unwrap_or_default(),
                 });
