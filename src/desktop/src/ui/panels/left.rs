@@ -298,6 +298,7 @@ pub fn show_left_panel(app: &mut FastMdApp, parent_ui: &mut egui::Ui) {
                             crate::bus::events::file::FileEventProducer::new(file_event_bus),
                         ),
                         tree_dirty: &mut selection.tree_dirty,
+                        pdf_backing_tracker: app.pdf_backing_tracker.clone(),
                     };
 
                     for i in row_range {
@@ -553,6 +554,7 @@ mod tests {
                     file_event_bus,
                 )),
                 tree_dirty: &mut app.selection.tree_dirty,
+                pdf_backing_tracker: crate::app::watcher::PdfBackingTracker::new(),
             };
             crate::ui::tree::handlers::apply_directory_row_click(&mut ctx, &dir_row);
         }
