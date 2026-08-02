@@ -69,6 +69,16 @@ pub struct TreeOpsContext<'a> {
     pub bg_tx: &'a Option<Sender<BackgroundEvent>>,
     /// Optional file-event producer for immediate UI updates.
     pub file_event_producer: Option<FileEventProducer<'a>>,
+
+    // ---- Cache invalidation ---------------------------------------------
+    /// Tree-rows cache invalidation flag. Borrowed from
+    /// `SelectionManager::tree_dirty`. Click handlers that change
+    /// which rows are visible (e.g. directory expand/collapse) must
+    /// set this to `true` so the next `show_left_panel` pass rebuilds
+    /// the cached `Vec<FlatRow>`. Click handlers that only change
+    /// *which* row is selected but not *which* rows are visible (e.g.
+    /// file row click) leave this flag alone.
+    pub tree_dirty: &'a mut bool,
 }
 
 /// Type alias for backward compatibility.
@@ -187,5 +197,10 @@ impl<'a> TreeOpsContext<'a> {
     /// Access file event producer.
     pub fn file_event_producer(&self) -> &Option<FileEventProducer<'a>> {
         &self.file_event_producer
+    }
+
+    /// Access tree-rows cache invalidation flag.
+    pub fn tree_dirty(&mut self) -> &mut bool {
+        self.tree_dirty
     }
 }

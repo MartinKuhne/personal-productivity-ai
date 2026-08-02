@@ -131,6 +131,7 @@ pub fn apply_directory_row_click(ctx: &mut TreeNodeContext<'_>, row: &FlatRow) {
     let TreeOpsContext {
         selected_dir,
         expanded_dirs,
+        tree_dirty,
         ..
     } = ctx;
     if expanded_dirs.contains(&row.path) {
@@ -139,6 +140,16 @@ pub fn apply_directory_row_click(ctx: &mut TreeNodeContext<'_>, row: &FlatRow) {
         expanded_dirs.insert(row.path.clone());
     }
     **selected_dir = Some(row.path.clone());
+    // Toggling `expanded_dirs` changes which rows are visible in the
+    // tree, so the cached `Vec<FlatRow>` in `FastMdApp` (the P0
+    // perf-optimization cache) is now stale. Mark it dirty so the
+    // next `show_left_panel` pass rebuilds the flat rows. This is
+    // independent of `left_panel_dirty` (the panel-width recalc
+    // flag): a directory click does NOT need to recompute the panel
+    // width, only the flat row cache. See the regression test
+    // `test_directory_click_invalidates_tree_cache` in
+    // `ui/panels/left.rs` for the user-visible invariant.
+    **tree_dirty = true;
 }
 
 pub fn build_merge_prompt(
@@ -182,6 +193,7 @@ mod tests {
             is_dir: false,
             is_expanded: false,
         };
+        let mut tree_dirty = false;
         let mut ctx = TreeNodeContext {
             selected_file: &mut selected_file,
             selected_files: &mut selected_files,
@@ -205,6 +217,7 @@ mod tests {
             inline_editor_enabled: false,
             bg_tx: &None,
             file_event_producer: None,
+            tree_dirty: &mut tree_dirty,
         };
 
         apply_file_row_click(&mut ctx, &row);
@@ -241,6 +254,7 @@ mod tests {
             is_dir: false,
             is_expanded: false,
         };
+        let mut tree_dirty = false;
         let mut ctx = TreeNodeContext {
             selected_file: &mut selected_file,
             selected_files: &mut selected_files,
@@ -267,6 +281,7 @@ mod tests {
             inline_editor_enabled: false,
             bg_tx: &None,
             file_event_producer: None,
+            tree_dirty: &mut tree_dirty,
         };
 
         apply_file_row_click(&mut ctx, &row);
@@ -299,6 +314,7 @@ mod tests {
             is_dir: false,
             is_expanded: false,
         };
+        let mut tree_dirty = false;
         let mut ctx = TreeNodeContext {
             selected_file: &mut selected_file,
             selected_files: &mut selected_files,
@@ -325,6 +341,7 @@ mod tests {
             inline_editor_enabled: false,
             bg_tx: &None,
             file_event_producer: None,
+            tree_dirty: &mut tree_dirty,
         };
 
         apply_file_row_click(&mut ctx, &row);
@@ -358,6 +375,7 @@ mod tests {
             is_dir: false,
             is_expanded: false,
         };
+        let mut tree_dirty = false;
         let mut ctx = TreeNodeContext {
             selected_file: &mut selected_file,
             selected_files: &mut selected_files,
@@ -381,6 +399,7 @@ mod tests {
             inline_editor_enabled: false,
             bg_tx: &None,
             file_event_producer: None,
+            tree_dirty: &mut tree_dirty,
         };
 
         apply_file_row_click(&mut ctx, &row);
@@ -420,6 +439,7 @@ mod tests {
             is_dir: false,
             is_expanded: false,
         };
+        let mut tree_dirty = false;
         let mut ctx = TreeNodeContext {
             selected_file: &mut selected_file,
             selected_files: &mut selected_files,
@@ -443,6 +463,7 @@ mod tests {
             inline_editor_enabled: false,
             bg_tx: &None,
             file_event_producer: None,
+            tree_dirty: &mut tree_dirty,
         };
 
         apply_file_row_click(&mut ctx, &row);
@@ -474,6 +495,7 @@ mod tests {
             is_dir: false,
             is_expanded: false,
         };
+        let mut tree_dirty = false;
         let mut ctx = TreeNodeContext {
             selected_file: &mut selected_file,
             selected_files: &mut selected_files,
@@ -500,6 +522,7 @@ mod tests {
             inline_editor_enabled: false,
             bg_tx: &None,
             file_event_producer: None,
+            tree_dirty: &mut tree_dirty,
         };
 
         apply_file_row_click(&mut ctx, &row);
@@ -533,6 +556,7 @@ mod tests {
             is_dir: false,
             is_expanded: false,
         };
+        let mut tree_dirty = false;
         let mut ctx = TreeNodeContext {
             selected_file: &mut selected_file,
             selected_files: &mut selected_files,
@@ -556,6 +580,7 @@ mod tests {
             inline_editor_enabled: false,
             bg_tx: &None,
             file_event_producer: None,
+            tree_dirty: &mut tree_dirty,
         };
 
         apply_file_row_click(&mut ctx, &row);
@@ -631,6 +656,7 @@ mod tests {
             is_dir: true,
             is_expanded: false,
         };
+        let mut tree_dirty = false;
         let mut ctx = TreeNodeContext {
             selected_file: &mut selected_file,
             selected_files: &mut selected_files,
@@ -654,6 +680,7 @@ mod tests {
             inline_editor_enabled: false,
             bg_tx: &None,
             file_event_producer: None,
+            tree_dirty: &mut tree_dirty,
         };
 
         apply_directory_row_click(&mut ctx, &row);
@@ -715,6 +742,7 @@ mod tests {
             is_dir: true,
             is_expanded: true,
         };
+        let mut tree_dirty = false;
         let mut ctx = TreeNodeContext {
             selected_file: &mut selected_file,
             selected_files: &mut selected_files,
@@ -738,6 +766,7 @@ mod tests {
             inline_editor_enabled: false,
             bg_tx: &None,
             file_event_producer: None,
+            tree_dirty: &mut tree_dirty,
         };
 
         apply_directory_row_click(&mut ctx, &row);
@@ -769,6 +798,178 @@ mod tests {
             selected_dir,
             Some(dir_path),
             "collapsing a directory must still update selected_dir to its path"
+        );
+    }
+
+    /// TDD regression (companion to the
+    /// `test_directory_click_invalidates_tree_cache` integration test
+    /// in `ui/panels/left.rs`): the directory-row click handler must
+    /// set the tree-rows cache invalidation flag (`tree_dirty`) so
+    /// the next `show_left_panel` pass rebuilds the flat row list.
+    /// Without this, the P0 perf-optimization cache keeps returning
+    /// the *previous* flat rows and the click looks like a no-op.
+    ///
+    /// This unit test pins the contract at the handler level; the
+    /// integration test in `ui/panels/left.rs` pins the
+    /// user-visible outcome.
+    #[test]
+    fn test_apply_directory_row_click_marks_tree_dirty() {
+        let mut tabs: Vec<PathBuf> = vec![];
+        let mut selected_file: Option<PathBuf> = None;
+        let mut selected_files: HashSet<PathBuf> = HashSet::new();
+        let mut expanded_dirs: HashSet<PathBuf> = HashSet::new();
+        let mut selected_dir: Option<PathBuf> = None;
+        let dir_path = PathBuf::from("C:/notes/folder");
+        let row = FlatRow {
+            depth: 0,
+            name: "folder".to_string(),
+            path: dir_path.clone(),
+            is_dir: true,
+            is_expanded: false,
+        };
+        let mut tree_dirty = false;
+        let mut ctx = TreeNodeContext {
+            selected_file: &mut selected_file,
+            selected_files: &mut selected_files,
+            expanded_dirs: &mut expanded_dirs,
+            tabs: &mut tabs,
+            selected_dir: &mut selected_dir,
+            create_dir_dialog_open: &mut false,
+            create_dir_parent: &mut None,
+            file_to_move: &mut None,
+            move_dialog_open: &mut false,
+            file_to_rename: &mut None,
+            rename_dialog_open: &mut false,
+            rename_new_name: &mut String::new(),
+            create_document_dialog_open: &mut false,
+            create_document_parent: &mut None,
+            layout: &mut PanelLayout::default(),
+            submit_prompt: &mut None,
+            content_libraries: &[],
+            open_editor: &mut None,
+            modifiers: egui::Modifiers::default(),
+            inline_editor_enabled: false,
+            bg_tx: &None,
+            file_event_producer: None,
+            tree_dirty: &mut tree_dirty,
+        };
+
+        // Expanding a directory (the path is not in `expanded_dirs`).
+        apply_directory_row_click(&mut ctx, &row);
+        assert!(
+            *ctx.tree_dirty(),
+            "expanding a directory click must mark the tree cache dirty so the next render rebuilds the flat rows"
+        );
+
+        // The second click collapses it. The cache must still be
+        // invalidated because the visible rows change either way.
+        *ctx.tree_dirty() = false;
+        let row_expanded = FlatRow {
+            depth: 0,
+            name: "folder".to_string(),
+            path: dir_path.clone(),
+            is_dir: true,
+            is_expanded: true,
+        };
+        apply_directory_row_click(&mut ctx, &row_expanded);
+        assert!(
+            *ctx.tree_dirty(),
+            "collapsing a directory click must also mark the tree cache dirty"
+        );
+    }
+
+    /// TDD regression (companion to
+    /// `test_apply_directory_row_click_marks_tree_dirty`): the
+    /// file-row click handler must NOT mark the tree cache dirty.
+    /// File clicks only change which file is selected; the visible
+    /// rows are unchanged, so the P0 cache stays valid. Marking
+    /// the cache dirty here would force an unnecessary
+    /// `flatten_tree` rebuild on every file click, defeating the
+    /// perf optimization.
+    #[test]
+    fn test_apply_file_row_click_does_not_mark_tree_dirty() {
+        let mut tabs: Vec<PathBuf> = vec![];
+        let mut selected_file: Option<PathBuf> = None;
+        let mut selected_files: HashSet<PathBuf> = HashSet::new();
+        let mut expanded_dirs: HashSet<PathBuf> = HashSet::new();
+        let mut selected_dir: Option<PathBuf> = None;
+        let row = FlatRow {
+            depth: 0,
+            name: "b.md".to_string(),
+            path: PathBuf::from("b.md"),
+            is_dir: false,
+            is_expanded: false,
+        };
+        let mut tree_dirty = false;
+        let mut ctx = TreeNodeContext {
+            selected_file: &mut selected_file,
+            selected_files: &mut selected_files,
+            expanded_dirs: &mut expanded_dirs,
+            tabs: &mut tabs,
+            selected_dir: &mut selected_dir,
+            create_dir_dialog_open: &mut false,
+            create_dir_parent: &mut None,
+            file_to_move: &mut None,
+            move_dialog_open: &mut false,
+            file_to_rename: &mut None,
+            rename_dialog_open: &mut false,
+            rename_new_name: &mut String::new(),
+            create_document_dialog_open: &mut false,
+            create_document_parent: &mut None,
+            layout: &mut PanelLayout::default(),
+            submit_prompt: &mut None,
+            content_libraries: &[],
+            open_editor: &mut None,
+            modifiers: egui::Modifiers::default(),
+            inline_editor_enabled: false,
+            bg_tx: &None,
+            file_event_producer: None,
+            tree_dirty: &mut tree_dirty,
+        };
+
+        // No-modifier click: opens the file in a tab. The cache
+        // must NOT be invalidated.
+        apply_file_row_click(&mut ctx, &row);
+        assert!(
+            !*ctx.tree_dirty(),
+            "a no-modifier file click must NOT mark the tree cache dirty (visible rows are unchanged)"
+        );
+
+        // Shift-click: toggles the multi-select. The cache must
+        // still NOT be invalidated.
+        *ctx.tree_dirty() = false;
+        let mut shift_ctx = TreeNodeContext {
+            selected_file: &mut selected_file,
+            selected_files: &mut selected_files,
+            expanded_dirs: &mut expanded_dirs,
+            tabs: &mut tabs,
+            selected_dir: &mut selected_dir,
+            create_dir_dialog_open: &mut false,
+            create_dir_parent: &mut None,
+            file_to_move: &mut None,
+            move_dialog_open: &mut false,
+            file_to_rename: &mut None,
+            rename_dialog_open: &mut false,
+            rename_new_name: &mut String::new(),
+            create_document_dialog_open: &mut false,
+            create_document_parent: &mut None,
+            layout: &mut PanelLayout::default(),
+            submit_prompt: &mut None,
+            content_libraries: &[],
+            open_editor: &mut None,
+            modifiers: egui::Modifiers {
+                shift: true,
+                ..Default::default()
+            },
+            inline_editor_enabled: false,
+            bg_tx: &None,
+            file_event_producer: None,
+            tree_dirty: &mut false,
+        };
+        apply_file_row_click(&mut shift_ctx, &row);
+        assert!(
+            !*shift_ctx.tree_dirty(),
+            "a shift-click file row click must NOT mark the tree cache dirty (visible rows are unchanged)"
         );
     }
 
