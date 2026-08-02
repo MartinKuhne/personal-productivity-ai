@@ -55,12 +55,12 @@ models:
 
 ### Configuration Arrival
 
-* [CONFIG-010] Configuration Arrival Bus: The application shall publish the loaded [`AppConfig`] on a `Bus<ConfigArrived>` (defined in `config/bus.rs`, backed by `tokio::sync::broadcast`) at startup. Subscribers — the background `Task` (so the indexer / PDF converter / vision / file-watcher workers are deferred until the config is known), `AgentSessionManager` (so the model and prompt configuration are taken from the published value), and `FastMdApp` (so panels, the dialog manager, and the inline-editor flag are populated from the published value) — register their subscription during construction; `main` publishes the event before the egui loop starts. Subscribers that observe no event within `CONFIG_ARRIVAL_TIMEOUT` (100 ms) fall back to `AppConfig::default`. Hot reload is out of scope: subscribers drop their reader after the first successful drain.
+* [CONFIG-010] Configuration Arrival Bus: The application shall publish the loaded application configuration to all dependent background and UI subsystems at startup before beginning normal operation. Subsystems (including background indexing workers, agent session managers, and UI panels) shall receive the configuration event upon startup; if no configuration arrival is observed within 100 ms, subsystems shall fall back to default configuration settings.
 
 ### Tool Group State
 
 * [CONFIG-011] Tool Group State: The system shall persist the enabled/disabled state of every built-in tool group in `config.yaml` under `tool_groups` (filesystem, web, email, contacts, calendar, csv_db, weather). Each group shall default to `true` when the key is absent.
-* [CONFIG-012] MCP Server Enabled Flag: The system shall persist an `enabled` boolean on every entry of the `mcp_servers` map in `config.yaml` (see [`McpServerEntry`](../config.rs)). The flag shall default to `true` when absent, preserving backwards compatibility with existing configurations. The flag shall not be reset when toggled in the UI; the corresponding `transport`, `command`, `url`, `headers`, and `oauth` fields of the same server entry shall remain intact.
+* [CONFIG-012] MCP Server Enabled Flag: The system shall persist an `enabled` boolean on every entry of the `mcp_servers` map in `config.yaml`. The flag shall default to `true` when absent, preserving backwards compatibility with existing configurations. Toggling the enabled state shall preserve the server's configured `transport`, `command`, `url`, `headers`, and `oauth` settings intact.
 
 ## Cross-cutting references
 

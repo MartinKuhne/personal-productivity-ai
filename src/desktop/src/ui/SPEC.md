@@ -18,13 +18,12 @@ This module owns the user interface layer: pane layout and styling, directory tr
 ### User Interface Layout & Styling
 
 * [UI-001] Pane Structure: The FastMD Viewer shall display a multi-pane layout consisting of a Left Pane (directory tree and tag filter), Central Pane (Markdown document), Right Pane (Table of Contents), and Bottom Pane (command prompt).
-* [UI-002] Dark Color Scheme: The FastMD Viewer shall pin egui to its `Theme::Dark` at startup and apply the FastMD brand palette to the dark theme's visuals so the dark surface is the source of truth regardless of the host system's reported theme preference. The brand palette is:
+* [UI-002] Dark Color Scheme: The FastMD Viewer shall enforce a dark theme at startup and apply the FastMD brand palette to the dark visuals so the dark surface is the source of truth regardless of the host system's reported theme preference. The brand palette is:
     * Window and panel surface: `RGB(9, 9, 11)` (a near-black neutral with a 1-unit cool bias so the surface reads as a black panel, not a brown one).
     * Selection background: `RGB(99, 102, 241)` (indigo-500; the FastMD primary accent).
     * Window corner radius: 8 px. Widget (noninteractive / inactive / hovered / active) corner radius: 4 px.
     * Body text: `RGB(210, 210, 210)` (off-white) for non-interactive and inactive widgets; pure white for hovered and active widgets.
-    * The egui "default dark" palette (`RGB(27, 27, 27)` panel fill) shall NOT be used; the FastMD palette above is the only acceptable dark surface.
-    * The palette is applied via `FastMdApp::configure_dark_theme`, which is the single point of truth for the dark color scheme.
+    * Default dark panel fill (`RGB(27, 27, 27)`) shall NOT be used; the FastMD palette above is the only acceptable dark surface.
 * [UI-003] UI Responsiveness: While executing disk I/O, compilation, or file system crawls, the FastMD Viewer shall maintain an unblocked, responsive UI thread.
 
 ### Left Column / Directory Tree
@@ -97,14 +96,14 @@ This module owns the user interface layer: pane layout and styling, directory tr
 
 * [UI-051] Dialog Trigger: When the user clicks the "Tools..." button on the top toolbar (AGENT-024), the system shall open the Tools dialog as a modal window centered over the main window.
 * [UI-052] Row Layout: For every tool group (built-in and MCP server) currently known to the system, the dialog shall display a row containing: an enable checkbox, the group's display name, a kind label ("Internal" or "MCP"), the group's prompt char count (TOOL-015/016), a parallel-safe chip when the group is fully `ReadOnly` (TOOL-020), and an `Authenticate` button when MCP-020 returns `true` for that group.
-* [UI-053] Toggle Behaviour: Toggling a row's checkbox shall update `AppConfig` per TOOL-017 / TOOL-018 and persist the change to `config.yaml` immediately via `config::save_config`.
-* [UI-054] Authenticate Action: When the user clicks the `Authenticate` button for an eligible MCP server, the system shall invoke `McpClientManager::authenticate(server_name)` on a background thread. The button shall display a disabled "Authenticating..." state until the task completes or fails. A status line shall report success or failure; failure shall not close the dialog.
+* [UI-053] Toggle Behaviour: Toggling a row's checkbox shall update application configuration per TOOL-017 / TOOL-018 and persist the change to `config.yaml` immediately.
+* [UI-054] Authenticate Action: When the user clicks the `Authenticate` button for an eligible MCP server, the system shall execute authentication on a background thread. The button shall display a disabled "Authenticating..." state until the task completes or fails. A status line shall report success or failure; failure shall not close the dialog.
 * [UI-055] Character Count Recomputation: The dialog shall recompute the char count for every row on every open and whenever the underlying tool set changes (e.g. after a successful MCP discovery). Char counts are informational; their exact value is not part of the user contract.
 * [UI-056] Close: The dialog shall provide a `Close` action (button and `Esc` keypress via the `Window::open` flag) that hides the dialog without persisting further state.
 * [UI-057] Error Indicator: When a group's `last_error` is `Some`, the row shall display a warning indicator (⚠ icon) whose tooltip shows the error kind and message.
 * [UI-058] Parallel-Safe Chip: When a group's `parallel_safe` is `true`, the row shall display a "✓ parallel" chip alongside the char count. The chip is informational; its absence does not imply the group is unsafe.
 * [UI-059] Authenticate Error State: When an `Authenticate` call fails, the row's status line shall show the error message until the next successful authentication attempt or until the user closes the dialog.
-* [UI-060] Clear Error: Each row with a `last_error` shall provide a "Restart" link that calls `ToolManager::clear_error(group)`.
+* [UI-060] Clear Error: Each row with an error indicator shall provide a "Restart" action to clear the error state and retry.
 
 ---
 
@@ -144,7 +143,7 @@ This module owns the user interface layer: pane layout and styling, directory tr
 
 ### 5. Rendering & Decoration
 
-* [TBL-045] The System MUST render a medium-gray border around the outer perimeter of every markdown table — Width 1 px, color ≈ `Color32::from_gray(120)`.
+* [TBL-045] The System MUST render a medium-gray border (1 px width, color approximately RGB 120, 120, 120) around the outer perimeter of every markdown table.
 * [TBL-044] The Renderer SHOULD NOT perform redundant re-layout passes if neither table data nor target viewport dimensions have changed.
 
 ---
