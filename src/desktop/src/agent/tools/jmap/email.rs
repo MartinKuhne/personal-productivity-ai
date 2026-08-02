@@ -146,14 +146,20 @@ fn simplify_email(
                     .unwrap_or_else(|| ts.to_string()),
             ),
         );
-    } else {
-        simplified.insert("date".to_string(), serde_json::Value::Null);
     }
 
-    simplified.insert("from".to_string(), serialize_address_list(email.from()));
-    simplified.insert("to".to_string(), serialize_address_list(email.to()));
-    simplified.insert("cc".to_string(), serialize_address_list(email.cc()));
-    simplified.insert("bcc".to_string(), serialize_address_list(email.bcc()));
+    if let Some(val) = serialize_address_list(email.from()) {
+        simplified.insert("from".to_string(), val);
+    }
+    if let Some(val) = serialize_address_list(email.to()) {
+        simplified.insert("to".to_string(), val);
+    }
+    if let Some(val) = serialize_address_list(email.cc()) {
+        simplified.insert("cc".to_string(), val);
+    }
+    if let Some(val) = serialize_address_list(email.bcc()) {
+        simplified.insert("bcc".to_string(), val);
+    }
 
     // Extract body: prefer htmlBody, fall back to textBody
     let mut body_str = String::new();
@@ -196,28 +202,23 @@ fn simplify_email(
 
 fn serialize_address_list(
     addrs: Option<&[jmap_client::email::EmailAddress<jmap_client::Get>]>,
-) -> serde_json::Value {
-    match addrs {
-        Some(list) => {
-            let json: Vec<serde_json::Value> = list
-                .iter()
-                .map(|addr| {
-                    let mut obj = serde_json::Map::new();
-                    obj.insert(
-                        "name".to_string(),
-                        serde_json::Value::String(addr.name().unwrap_or("").to_string()),
-                    );
-                    obj.insert(
-                        "email".to_string(),
-                        serde_json::Value::String(addr.email().to_string()),
-                    );
-                    serde_json::Value::Object(obj)
-                })
-                .collect();
-            serde_json::Value::Array(json)
-        }
-        None => serde_json::Value::Null,
+) -> Option<serde_json::Value> {
+    let list = addrs?;
+    if list.is_empty() {
+        return None;
     }
+    let json: Vec<serde_json::Value> = list
+        .iter()
+        .map(|addr| {
+            let email = addr.email();
+            let val = match addr.name() {
+                Some(name) if !name.trim().is_empty() => format!("{} <{}>", name, email),
+                _ => email.to_string(),
+            };
+            serde_json::Value::String(val)
+        })
+        .collect();
+    Some(serde_json::Value::Array(json))
 }
 
 /// Optional filters an LLM can pass to `tool_search_email`.
