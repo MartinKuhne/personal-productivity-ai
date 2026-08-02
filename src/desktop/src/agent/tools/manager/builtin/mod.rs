@@ -10,6 +10,7 @@ pub(crate) mod strings;
 pub(crate) mod weather;
 pub(crate) mod web;
 pub(crate) mod yaml;
+pub(crate) mod trello;
 
 use super::ToolManager;
 use super::groups::InternalToolGroup;
@@ -144,4 +145,13 @@ pub(crate) fn register_all_builtins(mgr: &mut ToolManager) {
         InternalToolGroup::Weather,
         Box::new(weather::GetWeatherTool),
     );
+
+    // Trello
+    mgr.register_builtin(InternalToolGroup::Trello, Box::new(trello::TrelloGetBoardsTool));
+    mgr.register_builtin(InternalToolGroup::Trello, Box::new(trello::TrelloGetBoardTool));
+    mgr.register_builtin(InternalToolGroup::Trello, Box::new(trello::TrelloGetListsTool));
+    mgr.register_builtin(InternalToolGroup::Trello, Box::new(trello::TrelloGetCardsTool));
+    mgr.register_builtin(InternalToolGroup::Trello, Box::new(trello::TrelloCreateCardTool));
+    mgr.register_builtin(InternalToolGroup::Trello, Box::new(trello::TrelloUpdateCardTool));
+    mgr.register_builtin(InternalToolGroup::Trello, Box::new(trello::TrelloDeleteCardTool));
 }

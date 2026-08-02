@@ -19,3 +19,4 @@ pub(crate) mod paging;
 pub(crate) mod weather;
 pub(crate) mod web;
 pub(crate) mod yaml;
+pub mod trello;
