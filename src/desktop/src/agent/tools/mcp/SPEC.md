@@ -27,11 +27,11 @@ transports only; stdio servers retrieve credentials from the
 environment and never enter the OAuth path.
 
 * [MCP-006] The MCP client shall implement the OAuth 2.1 authorization code flow with PKCE (`S256`) per `/doc/distill/mcp.md` §4.6
-* [MCP-007] When the configured server has no static `Authorization` header, the MCP client shall attach a bearer access token to every request, sourced from the [`TokenStore`](src/agent/tools/mcp/oauth/store.rs)
+* [MCP-007] When the configured server has no static `Authorization` header, the MCP client shall attach a bearer access token to every request, sourced from persistent token storage.
 * [MCP-008] When the MCP server returns `401 Unauthorized` with a `WWW-Authenticate` header, the MCP client shall discover the authorization server per RFC 9728 (Protected Resource Metadata) and RFC 8414 (Authorization Server Metadata), obtain a token via the authorization code flow, and retry the original request
 * [MCP-009] When the MCP server returns `403 Forbidden` with `WWW-Authenticate: Bearer error="insufficient_scope"`, the MCP client shall run a step-up authorization flow that includes the required scopes and retry the original request once
-* [MCP-010] The MCP client shall cache access and refresh tokens in a [`TokenStore`](src/agent/tools/mcp/oauth/store.rs) keyed by the canonical MCP server resource URI, with file-level read/write restricted to the current user
-* [MCP-011] The MCP client shall register the OAuth client in the priority order: pre-registered (`McpOAuthConfig.client_id`) → Client ID Metadata Document (scaffolded) → Dynamic Client Registration (RFC 7591) → error
+* [MCP-010] The MCP client shall cache access and refresh tokens in secure token storage keyed by the canonical MCP server resource URI, with file-level read/write restricted to the current user
+* [MCP-011] The MCP client shall register the OAuth client in the priority order: pre-registered client configuration → Client ID Metadata Document (scaffolded) → Dynamic Client Registration (RFC 7591) → error
 * [MCP-012] The MCP client shall select scopes per spec §4.5: prefer the `scope` parameter from the initial `WWW-Authenticate` header, falling back to `scopes_supported` from the resource metadata; the client shall not request scopes beyond the union of those sources plus any explicit `McpOAuthConfig.scopes`
 * [MCP-013] The MCP client shall include the `resource` parameter (RFC 8707) on both the authorization and token requests, set to the canonical MCP server URI
 * [MCP-014] The MCP client shall use a loopback HTTP server bound to `127.0.0.1` on a random port to receive the authorization code redirect (RFC 8252 §7.3)
@@ -42,8 +42,8 @@ environment and never enter the OAuth path.
 
 ### Tools Dialog Authenticate Action
 
-* [MCP-019] Authentication Entry Point: The system shall expose a public `McpClientManager::authenticate(server_name)` method that, for an `Sse` server with no static `Authorization` header, triggers a probe request and runs the existing OAuth 2.1 authorization code flow on a `401 Unauthorized` with `WWW-Authenticate`. For ineligible servers (stdio, or `Sse` with a static `Authorization` header), the method shall return an error indicating that authentication is not required.
-* [MCP-020] Authentication Eligibility: The system shall expose a public `McpClientManager::needs_authentication(&McpServerConfig) -> bool` predicate, returning `true` only for `McpServerConfig::Sse` servers with no `Authorization` entry in `headers`. The predicate is the single source of truth for whether the `Authenticate` button is rendered in the UI.
-* [MCP-021] Authentication Error Propagation: When `McpClientManager::authenticate(server_name)` fails (loopback startup, AS discovery, token exchange, or step-up), it shall return a structured error containing the OAuth step that failed. The dialog caller shall translate the error into a `ToolGroupError { kind: Authentication, ... }` and call `ToolManager::record_error(Mcp(server_name), err)`.
+* [MCP-019] Authentication Entry Point: The system shall provide an authentication flow that, for an SSE server with no static `Authorization` header, triggers a probe request and runs the OAuth 2.1 authorization code flow on a `401 Unauthorized` with `WWW-Authenticate`. For ineligible servers (stdio, or SSE with a static `Authorization` header), authentication shall be reported as not required.
+* [MCP-020] Authentication Eligibility: The system shall evaluate authentication eligibility, returning true only for SSE servers with no `Authorization` header. This eligibility rule determines whether the `Authenticate` action is rendered in the UI.
+* [MCP-021] Authentication Error Propagation: When server authentication fails (loopback startup, discovery, token exchange, or step-up), the system shall return a structured error containing the OAuth step that failed and record the authentication error on the server group.
 
 

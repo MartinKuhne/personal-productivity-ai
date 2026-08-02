@@ -23,7 +23,7 @@ This module owns the Local LLM Interface, Tool-Call Agent Loop, and Agent Behavi
 * [AGENT-005] Multi-Use Model Configuration: The configuration shall support a `models` list where each entry defines `model`, `api_url`, `api_key` (optional, inherits global), `use_case` (array: `chat`, `embeddings`, `vision`), and `cost` (optional integer, default 0, lower = cheaper). The system shall route requests to the appropriate model based on use_case. When multiple models match a use_case, the system shall prefer the model with the lowest `cost`.
 * [AGENT-006] PDF Converter Configuration: The configuration shall support `pdf_converter_command` as an array of command and arguments with `{input}` and `{output}` placeholders.
 * [AGENT-007] Max Tokens Configuration: The configuration shall support a `max_tokens` field (default: 32768) in `config.yaml` to prevent runaway token generation. The system shall include this value in all LLM API requests as the `max_tokens` parameter.
-* [AGENT-008] Monospace Command Prompt: When the bottom panel command entry field is submitted, the FastMD Viewer shall execute the command through the Local LLM completions thread.
+* [AGENT-008] Monospace Command Prompt: When the bottom panel command entry field is submitted, the FastMD Viewer shall process and execute the command through the Local LLM asynchronously without stalling the user interface.
 * [AGENT-009] LLM Tools Library: The LLM Agent shall utilize functional tools as per the [LLM Tools] section in `src/tools/SPEC.md`.
 * [AGENT-010] Real-time Stream Output: The FastMD Viewer shall display the LLM's active thinking sequence and render the final Markdown response in real-time inside the Central Panel.
 * [AGENT-011] Tool Invocation Logging: The system shall print tool call invocations with their significant parameters to the response window. Tool arguments shall be formatted as pretty-printed JSON.
@@ -58,7 +58,7 @@ models:
 * [AGENT-022] Thinking Delimiter: Model reasoning/thinking content wrapped in `🤔...🤔` delimiters shall be extracted and displayed in a collapsible "Thinking Process" section separate from the main response.
 * [AGENT-023] Quick Tasks Menu: The bottom panel shall provide a "Quick Tasks" menu with predefined prompts (e.g., "Format Markdown") that inject a structured prompt with YAML front-matter template.
 * [AGENT-024] Tools Toolbar Button: The top toolbar shall provide a "Tools..." button alongside the existing "Batch..." button. Clicking the button shall open the Tools dialog (UI-051).
-* [AGENT-025] Agent Loop Safety Source: The agent loop's parallel/sequential dispatch (per AGENT-012) shall source its safety classification from `ToolManager::safety_of(name)` rather than from the legacy `ToolRegistry::safety_of`. The two shall return identical values for every tool name.
+* [AGENT-025] Agent Loop Safety Source: The agent loop's parallel/sequential dispatch (per AGENT-012) shall source tool safety classification uniformly from the centralized tool safety manager for all registered tool names.
 
 ## Cross-cutting references
 

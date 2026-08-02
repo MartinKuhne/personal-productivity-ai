@@ -195,7 +195,7 @@ C4Component
   Component(watcher, "FileWatcher", "background/watcher.rs", "notify 6.0; recursive; auto-watch new dirs (REQ-401/407)")
   Component(pdf, "PdfConverterWorker", "background/pdf_converter.rs", "PdfConversionJob queue; pdf_converter_command (REQ-450..458)")
   Component(vision, "ImageVisionWorker", "background/vision_processor.rs", "process_image: base64 data URL -> vision use_case model (REQ-470..478)")
-  Component(router, "BusRouter", "background/bus_router.rs", "Routes FileEvents between producers and consumers")
+  Component(router, "BusRouter", "bus/router/bus_router.rs (169)", "Routes FileEvents between producers and consumers")
   Component(bgmgr, "BackgroundProcessManager", "background/manager.rs (239)", "VecDeque ring buffer MAX_LOG_ENTRIES=10_000; filter/search/auto_scroll/show_background_logs; log persistence to logs/background-process.log (REQ-464); SharedProcessManager = Arc<Mutex<...>>")
   Component(bgmodels, "models", "background/models.rs", "BackgroundLogEntry, LogCategory{Indexer,Watcher,PDF Converter,Image Vision,LLM Tools}")
 
@@ -207,6 +207,78 @@ C4Component
   Rel(bgmgr, bgmodels, "stores entries")
 ```
 
+## Component Diagram (Level 3) — Messaging Architecture (`bus/`)
+
+The `bus/` subsystem provides explicit, type-safe event transportation across thread
+boundaries in `fastmd`. All cross-thread updates (file modifications, background indexing
+progress, agent turn streaming, worker log entries, MCP authentication) flow through either
+multi-producer/multi-consumer broadcast buses (`Bus<T>`) or domain-specific typed `mpsc` channels.
+
+```mermaid
+C4Component
+  title FastMD — Messaging & Event Bus Subsystem
+
+  Component(core, "Bus<T> / BusReader<T>", "bus/core.rs (262)", "Thread-safe MPMC broadcast channel backed by tokio::sync::broadcast (capacity 8192)")
+  Component(fev, "FileEvent & FileEventProducer", "bus/events/file.rs (296)", "FileEventKind{Discovered, Updated, Removed, DirDiscovered, DirRemoved}; FileEventProducer convenience wrapper")
+  Component(bev, "BackgroundEvent & Sub-Enums", "bus/events/typed.rs (188)", "Typed UI event wrapper: AgentEvent, FsEvent, ProcessEvent, McpAuthEvent")
+  Component(cfg_bus, "ConfigArrived & config_bus", "bus/events/config.rs, bus/config.rs", "Startup config broadcast; CONFIG_ARRIVAL_TIMEOUT (100ms) fallback")
+  Component(router, "BusRouter", "bus/router/bus_router.rs (169)", "Subscribes to Bus<FileEvent>; routes .pdf to tx_pdf and images to tx_img MPSC queues")
+  Component(task, "Task", "app/background_task.rs (589)", "Owns rx/tx: mpsc::channel<BackgroundEvent> and file_event_bus: Bus<FileEvent>")
+  Component(ui, "FastMdApp", "ui/app.rs", "UI thread loop; drains Task.rx (BackgroundEvent) on every frame pass")
+
+  Rel(fev, core, "uses Bus<FileEvent>")
+  Rel(cfg_bus, core, "uses Bus<ConfigArrived>")
+  Rel(router, core, "subscribes to Bus<FileEvent>")
+  Rel(task, core, "owns Bus<FileEvent>")
+  Rel(ui, task, "drains rx: Receiver<BackgroundEvent>")
+  Rel(router, task, "forwards PDF/image paths to worker channels")
+```
+
+### Overview & Design Principles
+
+1. **Explicit Thread Communication**: Shared mutable state across thread boundaries is strictly avoided. Subsystems communicate exclusively via event channels.
+2. **MPMC Broadcast vs MPSC Channels**:
+   - **Multi-Producer Multi-Consumer (`Bus<T>`)**: Used when multiple consumers must independently observe the same event (e.g., file changes observed by Indexer, DirectoryTracker, FileEventProcessor, and BusRouter).
+   - **Multi-Producer Single-Consumer (`mpsc::channel`)**: Used when events target a single aggregator (e.g., UI frame loop draining `BackgroundEvent` or worker task queues).
+3. **Non-Blocking UI Integration**: `BusReader` provides non-blocking `try_recv()` and `recv_timeout()` methods wrapped in a `Mutex`, allowing the single-threaded `egui` UI loop to poll events without stalling rendering.
+
+### Message Types & Payloads
+
+- **`FileEvent`** (`bus/events/file.rs`): Published whenever content libraries change on disk or in memory.
+  - Variants (`FileEventKind`): `Discovered`, `Updated`, `Removed`, `DirDiscovered`, `DirRemoved`.
+  - Content: `paths: Vec<PathBuf>`.
+  - Helpers: `FileEventProducer` simplifies publishing single or batch file/dir operations, including rename semantics (`Removed` + `Discovered`).
+- **`BackgroundEvent`** (`bus/events/typed.rs`): Top-level enum carrying domain-specific asynchronous updates to the UI loop:
+  - **`AgentEvent`**: `Status(String)`, `Thinking(String)`, `Response(String)`, `Finished(Vec<Value>)`, `Failed(String)`, `TokenUsage(TokenUsageInfo)`.
+  - **`FsEvent`**: `FileParsed { path, tags }`, `DirParsed { path }`, `FileModified { path, tags }`, `FileDeleted { path }`, `Finished`, `FinishedWithoutWatcher`.
+  - **`ProcessEvent`**: `LogEntry(BackgroundLogEntry)`, `FileLoaded { path, content }`.
+  - **`McpAuthEvent`**: `Completed { server_name, error }`.
+- **`ConfigArrived`** (`bus/events/config.rs`): Published once at startup carrying `config: AppConfig`. Enables lazy component initialization and prevents race conditions during startup.
+- **`TokenUsageInfo`** (`bus/events/messages.rs`): Detailed LLM token consumption metrics (`prompt_tokens`, `completion_tokens`, `total_tokens`, `cached_tokens`, `reasoning_tokens`).
+
+### Event Routing & Dispatch
+
+1. **`BusRouter` (`bus/router/bus_router.rs`)**:
+   - Subscribes to `Bus<FileEvent>`.
+   - Filters for `Discovered` and `Updated` events.
+   - Inspects file extensions:
+     - `.pdf` paths -> forwarded to `tx_pdf: Sender<PathBuf>` (`PdfConverterWorker`).
+     - Image paths (`.jpg`, `.jpeg`, `.png`, `.gif`, `.webp`, `.bmp`, `.tiff`, `.avif`) -> forwarded to `tx_img: Sender<PathBuf>` (`ImageVisionWorker`).
+2. **UI Frame Drain (`ui/app.rs`)**:
+   - The UI thread invokes `try_recv()` on `Task.rx` inside `FastMdApp::update`.
+   - Dispatches `AgentEvent` to `AgentSessionManager`, `FsEvent` to `FileEventProcessor` and `TagManager`, `ProcessEvent::LogEntry` to `BackgroundProcessManager`, and `McpAuthEvent` to the tools dialog state.
+
+### Messaging Actors & Recipients Summary
+
+| Channel / Bus | Transport Primitive | Payload Type | Producers (Actors) | Consumers (Recipients) |
+|---|---|---|---|---|
+| `Bus<FileEvent>` | `tokio::sync::broadcast` (8192 cap) via `Bus<T>` | `FileEvent` | `FileWatcher`, `Indexer`, UI Dialogs (`FileEventProducer`), Tool Executors | `DirectoryTracker`, `FileEventProcessor`, `Indexer`, `BusRouter` |
+| `BackgroundEvent` | `std::sync::mpsc::channel` | `BackgroundEvent` (`Agent`, `Fs`, `Process`, `McpAuth`) | Agent Thread, Indexer Pool, `PdfConverterWorker`, `ImageVisionWorker`, MCP Auth Flow | `FastMdApp` (UI thread loop) |
+| `Bus<ConfigArrived>` | `tokio::sync::broadcast` (8192 cap) via `Bus<T>` | `ConfigArrived` | `main()` | `Task`, `AgentSessionManager`, `FastMdApp` |
+| PDF Worker Queue | `std::sync::mpsc::channel` | `PathBuf` | `BusRouter` (for `.pdf` files) | `PdfConverterWorker` |
+| Image Vision Queue | `std::sync::mpsc::channel` | `PathBuf` | `BusRouter` (for image files) | `ImageVisionWorker` |
+| Agent Cancel | `std::sync::atomic::AtomicBool` | `bool` | `AgentSessionManager` (UI Stop button) | `run_agent_inner` turn loop |
+
 ## Component Diagram (Level 3) — Supporting Modules
 
 Cross-cutting modules that the UI, Agent, Tools and Background all depend on.
@@ -215,17 +287,17 @@ Cross-cutting modules that the UI, Agent, Tools and Background all depend on.
 C4Component
   title FastMD — Supporting Modules
 
-  Component(cfg, "config", "config.rs + bus.rs (data shapes only; VFS moved to app/vfs/)", "AppConfig, LlmConfig{model,api_url,api_key,cost,use_case}, JmapClient, CalDavClient, CardDavClient, content_libraries: Vec<ContentLibrary>; load_config, get_config_path; Debug redacts secrets; config_bus / ConfigArrived (tokio broadcast) used to fan out the loaded config to Task, AgentSessionManager, and FastMdApp on startup. VFS types re-exported from app::vfs for backwards compat. CONFIG-001..008 (CONFIG-009 superseded by VFS-004/009)")
-  Component(ev, "file_events", "file_events.rs (554)", "Bus<T> (tokio::sync::broadcast, BUS_CAPACITY=8192); FileEvent; FileEventKind{Discovered,Updated,Removed,DirDiscovered,DirRemoved}; FileEventProducer; BusReader. Multi-producer/multi-consumer")
-  Component(fp, "file_processor", "file_processor.rs (186)", "FileEventProcessor{reader, all_files, all_files_set, all_dirs, all_dirs_set, indexing_finished, indexing_finished_handled}")
-  Component(dt, "directory_tracker", "directory_tracker.rs (267)", "Single source of truth for known dirs; consumes DirDiscovered/DirRemoved + file Discovered")
-  Component(tm, "tag_manager", "tag_manager.rs (220)", "TagManager{file_tags:BTreeMap<PathBuf,Vec<String>>, all_tags:BTreeSet<String>, prompt_paths:BTreeSet<PathBuf>, selected_tag}")
-  Component(msg, "messages", "messages.rs (44)", "TokenUsageInfo{prompt_tokens,completion_tokens,total_tokens,cached_tokens,reasoning_tokens}")
-  Component(doc, "document", "document.rs (179)", "DocumentContent{front_matter: Option<String>, body: String}; parse via utils::markdown::parse_front_matter")
-  Component(ed, "editor", "editor.rs (512)", "Inline editor; EditorColors inverted white-on-black (REQ-261); validation via pulldown-cmark (REQ-258); undo/redo >=100 (REQ-257); clipboard (REQ-255); cursor nav (REQ-256); save combines body + original front-matter (REQ-259)")
-  Component(print, "print", "print.rs (206)", "PrintJob{markdown_path, markdown_content, title}; markdown->HTML via pulldown-cmark; execute_print_blocking")
-  Component(browser, "browser", "browser.rs (116)", "Playwright async: browser_navigate, browser_get_page_state, click, type, screenshot")
-  Component(batch, "batch", "batch/", "{coordinator, dialog, discoverer, executor, file_matcher, prompts, types}; batch prompt processing BATCH-001..BATCH-014; concurrency 1-8; File vs Directory modes")
+  Component(cfg, "config", "config.rs + bus/config.rs", "AppConfig, LlmConfig{model,api_url,api_key,cost,use_case}, JmapClient, CalDavClient, CardDavClient, content_libraries: Vec<ContentLibrary>; load_config, get_config_path; Debug redacts secrets; config_bus / ConfigArrived (tokio broadcast) used to fan out the loaded config to Task, AgentSessionManager, and FastMdApp on startup. VFS types re-exported from app::vfs for backwards compat. CONFIG-001..008 (CONFIG-009 superseded by VFS-004/009)")
+  Component(ev, "file_events", "bus/events/file.rs (296)", "Bus<T> (tokio::sync::broadcast, BUS_CAPACITY=8192); FileEvent; FileEventKind{Discovered,Updated,Removed,DirDiscovered,DirRemoved}; FileEventProducer; BusReader. Multi-producer/multi-consumer")
+  Component(fp, "file_processor", "app/watcher/file_processor.rs (186)", "FileEventProcessor{reader, all_files, all_files_set, all_dirs, all_dirs_set, indexing_finished, indexing_finished_handled}")
+  Component(dt, "directory_tracker", "app/watcher/directory_tracker.rs (267)", "Single source of truth for known dirs; consumes DirDiscovered/DirRemoved + file Discovered")
+  Component(tm, "tag_manager", "app/tag_manager.rs (220)", "TagManager{file_tags:BTreeMap<PathBuf,Vec<String>>, all_tags:BTreeSet<String>, prompt_paths:BTreeSet<PathBuf>, selected_tag}")
+  Component(msg, "messages", "bus/events/messages.rs (38)", "TokenUsageInfo{prompt_tokens,completion_tokens,total_tokens,cached_tokens,reasoning_tokens}")
+  Component(doc, "document", "app/document.rs (179)", "DocumentContent{front_matter: Option<String>, body: String}; parse via utils::markdown::parse_front_matter")
+  Component(ed, "editor", "app/text_buffer.rs (512)", "Inline editor; EditorColors inverted white-on-black (REQ-261); validation via pulldown-cmark (REQ-258); undo/redo >=100 (REQ-257); clipboard (REQ-255); cursor nav (REQ-256); save combines body + original front-matter (REQ-259)")
+  Component(print, "print", "app/print.rs (206)", "PrintJob{markdown_path, markdown_content, title}; markdown->HTML via pulldown-cmark; execute_print_blocking")
+  Component(browser, "browser", "app/browser/mod.rs (116)", "Playwright async: browser_navigate, browser_get_page_state, click, type, screenshot")
+  Component(batch, "batch", "app/batch/", "{coordinator, dialog, discoverer, executor, file_matcher, prompts, types}; batch prompt processing BATCH-001..BATCH-014; concurrency 1-8; File vs Directory modes")
   Component(utils, "utils", "utils/", "markdown (parse_front_matter), path, tags (extract_tags_from_file)")
   Component(err, "error", "error.rs", "AgentError")
 
@@ -242,28 +314,9 @@ C4Component
   document, editor, log persistence, PDF converter, pulldown config, table
   layout.
 - **Inline `#[cfg(test)]` modules:** `agent/agent_impl_tests.rs`,
-  `tools/jmap/tests.rs`.
+  `tools/jmap/tests.rs`, `bus/core.rs`, `bus/events/file.rs`, `bus/events/typed.rs`, `bus/config.rs`, `bus/router/bus_router.rs`.
 - **UI tests:** `egui_kittest` 0.35 (eframe + snapshot) harnesses following the
   egui `__run_test_ctx` / `State::test_ctx` pattern mandated by `AGENTS.md`
   §10. Dev-deps also include `accesskit 0.24`, `proptest`, `filetime`,
   `tempfile`, `tokio`.
 
----
-
-### Configuration Arrival Bus
-
-`config/bus.rs` defines `Bus<ConfigArrived>` and the `config_bus()`
-factory. The bus is a `tokio::sync::broadcast` channel (same
-backing primitive as `Bus<FileEvent>`, in `app/watcher/events.rs`).
-Subscribers must register before the publish (the channel does not
-buffer events for future subscribers), so the canonical order is:
-
-1. `main` creates the bus.
-2. Subscribers register during construction (`Task::new(bus)`,
-   `AgentSessionManager::new(bus)`, `FastMdApp::new(cc, bus)`).
-3. `main` publishes `ConfigArrived { config }` before the egui loop
-   starts running, ensuring every subscriber observes the first
-   arrival on its first `try_recv`.
-
-of scope: subscribers drop their readers after the first successful
-drain.
