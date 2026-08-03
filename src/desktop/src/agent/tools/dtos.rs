@@ -121,17 +121,6 @@ pub struct InsertLinesResponse {
 }
 
 #[derive(Deserialize, Debug, JsonSchema)]
-pub struct DeleteLinesInput {
-    pub path: String,
-    pub start_line: usize,
-    pub end_line: usize,
-}
-#[derive(Serialize, Debug, JsonSchema)]
-pub struct DeleteLinesResponse {
-    pub result: String,
-}
-
-#[derive(Deserialize, Debug, JsonSchema)]
 pub struct WebFetchInput {
     pub url: String,
     #[serde(default)]

@@ -23,7 +23,6 @@ The requirements below have been formatted using the **Easy Approach to Requirem
 | `read_file_lines` | Read specific line numbers or ranges from a file (1-indexed). |
 | `create_file` | Create a new markdown file with the specified content. |
 | `insert_lines` | Insert new lines of text into an existing file at a specific 1-indexed position. |
-| `delete_lines` | Delete specific lines from a file (1-indexed, inclusive). |
 | `replace_text` | Replace exact occurrences of old_string with new_string in a file. |
 | `web_fetch` | Fetch content from a URL and convert HTML to Markdown. Paginated by Markdown line via `offset`/`limit` (default `offset=0`, `limit=100` lines); the response carries `total_lines`. Cached for 5 minutes in the shared `ToolCache`; pass `force_refetch=true` to bypass. |
 | `web_search` | Search the web using SearXNG. Requires searxng_url config. |

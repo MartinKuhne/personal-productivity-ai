@@ -230,38 +230,6 @@ pub fn tool_insert_lines(
     }
 }
 
-pub fn tool_delete_lines(
-    path_str: &str,
-    start_line: usize,
-    end_line: usize,
-    producer: &FileEventProducer,
-) -> Result<crate::agent::tools::dtos::DeleteLinesResponse, String> {
-    match std::fs::read_to_string(path_str) {
-        Ok(content) => {
-            let mut lines: Vec<String> = content.lines().map(|s| s.to_string()).collect();
-            if start_line == 0 || start_line > lines.len() {
-                return Err("Start line out of range.".to_string());
-            }
-            let end = std::cmp::min(end_line, lines.len());
-            if start_line > end {
-                return Err("Start line greater than end line.".to_string());
-            }
-            lines.drain((start_line - 1)..end);
-            let new_content = lines.join("\n");
-            match std::fs::write(path_str, new_content) {
-                Ok(_) => {
-                    producer.publish_updated(Path::new(path_str));
-                    Ok(crate::agent::tools::dtos::DeleteLinesResponse {
-                        result: "Lines deleted successfully.".to_string(),
-                    })
-                }
-                Err(e) => Err(format!("Failed to write file: {}", e)),
-            }
-        }
-        Err(e) => Err(format!("Failed to read file: {}", e)),
-    }
-}
-
 pub fn tool_replace_text(
     path_str: &str,
     old_string: &str,
@@ -508,33 +476,6 @@ mod tests {
     }
 
     #[test]
-    fn test_tool_delete_lines() {
-        let dir = tempdir().unwrap();
-        let file_path = dir.path().join("test.md");
-        fs::write(&file_path, "Line 1\nLine 2\nLine 3\nLine 4").unwrap();
-
-        let producer = noop_producer();
-        let result = tool_delete_lines(file_path.to_str().unwrap(), 2, 3, &producer)
-            .unwrap()
-            .result;
-        assert_eq!(result, "Lines deleted successfully.");
-
-        let content = fs::read_to_string(&file_path).unwrap();
-        assert_eq!(content, "Line 1\nLine 4");
-    }
-
-    #[test]
-    fn test_tool_delete_lines_out_of_range() {
-        let dir = tempdir().unwrap();
-        let file_path = dir.path().join("test.md");
-        fs::write(&file_path, "Line 1\nLine 2").unwrap();
-
-        let producer = noop_producer();
-        let result = tool_delete_lines(file_path.to_str().unwrap(), 5, 6, &producer);
-        assert_eq!(result.unwrap_err(), "Start line out of range.");
-    }
-
-    #[test]
     fn test_tool_read_tags() {
         let dir = tempdir().unwrap();
         let file_path = dir.path().join("test.md");
@@ -750,35 +691,6 @@ mod tests {
             "Only markdown files (.md) are allowed."
         );
         assert!(!file_path.exists());
-    }
-
-    #[test]
-    fn test_tool_delete_lines_boundary_start_equals_end() {
-        // BOUNDARY: deleting single line (start == end) should work
-        let dir = tempdir().unwrap();
-        let file_path = dir.path().join("test.md");
-        fs::write(&file_path, "Line 1\nLine 2\nLine 3").unwrap();
-
-        let producer = noop_producer();
-        let result = tool_delete_lines(file_path.to_str().unwrap(), 2, 2, &producer)
-            .unwrap()
-            .result;
-        assert_eq!(result, "Lines deleted successfully.");
-
-        let content = fs::read_to_string(&file_path).unwrap();
-        assert_eq!(content, "Line 1\nLine 3");
-    }
-
-    #[test]
-    fn test_tool_delete_lines_start_beyond_content() {
-        // BOUNDARY: start_line beyond content should error
-        let dir = tempdir().unwrap();
-        let file_path = dir.path().join("test.md");
-        fs::write(&file_path, "Line 1\nLine 2").unwrap();
-
-        let producer = noop_producer();
-        let result = tool_delete_lines(file_path.to_str().unwrap(), 5, 10, &producer);
-        assert_eq!(result.unwrap_err(), "Start line out of range.");
     }
 
     #[test]

@@ -78,7 +78,6 @@ pub(crate) fn register_all_builtins(mgr: &mut ToolManager) {
     );
     mgr.register_builtin(InternalToolGroup::Filesystem, Box::new(fs::CreateFileTool));
     mgr.register_builtin(InternalToolGroup::Filesystem, Box::new(fs::InsertLinesTool));
-    mgr.register_builtin(InternalToolGroup::Filesystem, Box::new(fs::DeleteLinesTool));
     mgr.register_builtin(
         InternalToolGroup::Filesystem,
         Box::new(yaml::ReadYamlHeaderTool),

@@ -339,8 +339,7 @@ pub const PDF_BACKED_EDITOR_ERROR: &str = "This file is auto-generated from a PD
      Use write_yaml_header to modify front-matter.";
 
 /// Error message returned by mutating write tools (`replace_text`,
-/// `insert_lines`, `delete_lines`) when the target file is a PDF-backed
-/// Markdown file.
+/// `insert_lines`) when the target file is a PDF-backed Markdown file.
 pub const PDF_BACKED_TOOL_ERROR: &str = "Cannot modify this file — it is auto-generated from a PDF. Use \
      write_yaml_header for front-matter edits.";
 

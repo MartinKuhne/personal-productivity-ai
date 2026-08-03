@@ -1,6 +1,6 @@
 # FastMD Agent Tools Reference
 
-The following table summarizes all 27 tools available to the LLM agent, categorized by functionality:
+The following table summarizes all 26 tools available to the LLM agent, categorized by functionality:
 
 | Category | Tool Name | Description | Configuration Required |
 | --- | --- | --- | --- |
@@ -12,7 +12,6 @@ The following table summarizes all 27 tools available to the LLM agent, categori
 | **Core Workspace** | `read_file_lines` | Read specific lines from a file (1-indexed). | None |
 | **Core Workspace** | `create_file` | Create a new file with specified content. | None |
 | **Core Workspace** | `insert_lines` | Insert lines at a specific 1-indexed position. | None |
-| **Core Workspace** | `delete_lines` | Delete specific lines from a file. | None |
 | **Core Workspace** | `replace_text` | Replace exact occurrences of old_string with new_string in a file. | None |
 | **Core Workspace** | `read_yaml_header` | Parse a YAML header from a markdown file and return its content representation. | None |
 | **Core Workspace** | `write_yaml_header` | Write or update data in a YAML header to a markdown file. | None |
@@ -158,17 +157,6 @@ All tool responses follow the same envelope:
 * **Response (`data`):**
   ```json
   { "result": "Lines inserted successfully." }
-  ```
-
-##### `delete_lines`
-* **Description:** Delete specific lines from a file (1-indexed, inclusive).
-* **Request:**
-  ```json
-  { "path": "MyLib/doc.md", "start_line": 5, "end_line": 7 }
-  ```
-* **Response (`data`):**
-  ```json
-  { "result": "Lines deleted successfully." }
   ```
 
 ##### `replace_text`

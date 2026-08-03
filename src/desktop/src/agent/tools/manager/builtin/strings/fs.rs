@@ -59,11 +59,6 @@ pub const CREATE_FILE_DESCRIPTION: &str =
 pub const INSERT_LINES_DESCRIPTION: &str =
     "Insert lines into a file at a specified 1-indexed line index.";
 
-// --- delete_lines ---
-
-pub const DELETE_LINES_DESCRIPTION: &str =
-    "Delete specific lines from a file using 1-indexed line numbers.";
-
 // Suppress the unused-import warning when the binary is built
 // without any caller needing the `paging` module — the description
 // strings above already inline its `CANONICAL_DESCRIPTION` text.
