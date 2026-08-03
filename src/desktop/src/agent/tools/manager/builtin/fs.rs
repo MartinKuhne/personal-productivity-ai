@@ -34,7 +34,7 @@ impl Tool for ReplaceTextTool {
             serde_json::from_str(args).map_err(|e| format!("Invalid args: {}", e))?;
         let path = ctx.resolve_writable(&input.path)?;
         if ctx.is_pdf_backed(&path) {
-            return Err(crate::ui::strings::PDF_BACKED_TOOL_ERROR.to_string());
+            return Err(crate::ui::strings::PDF_BACKED_ERROR.to_string());
         }
         let producer = ctx.file_event_producer();
         crate::agent::tools::filesystem::tool_replace_text(
@@ -355,7 +355,7 @@ impl Tool for CreateFileTool {
             serde_json::from_str(args).map_err(|e| format!("Invalid args: {}", e))?;
         let path = ctx.resolve_writable(&input.path)?;
         if ctx.is_pdf_backed(&path) {
-            return Err(crate::ui::strings::PDF_BACKED_TOOL_ERROR.to_string());
+            return Err(crate::ui::strings::PDF_BACKED_ERROR.to_string());
         }
         let producer = ctx.file_event_producer();
         crate::agent::tools::filesystem::tool_create_file(
@@ -392,7 +392,7 @@ impl Tool for InsertLinesTool {
             serde_json::from_str(args).map_err(|e| format!("Invalid args: {}", e))?;
         let path = ctx.resolve_writable(&input.path)?;
         if ctx.is_pdf_backed(&path) {
-            return Err(crate::ui::strings::PDF_BACKED_TOOL_ERROR.to_string());
+            return Err(crate::ui::strings::PDF_BACKED_ERROR.to_string());
         }
         let producer = ctx.file_event_producer();
         crate::agent::tools::filesystem::tool_insert_lines(
