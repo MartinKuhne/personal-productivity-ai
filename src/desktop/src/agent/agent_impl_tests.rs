@@ -473,3 +473,51 @@ fn test_run_agent_system_prompt_starts_with_security_header() {
         &content[..content.len().min(200)]
     );
 }
+
+/// AGENT-026 regression: when no file, directory, or selected-files
+/// context is handed to the agent (all tabs closed), the system
+/// prompt sent to the LLM must not mention any file or directory
+/// context. This guards the whole chain: the context computed at
+/// prompt start is the only thing the LLM sees.
+#[test]
+fn test_run_agent_system_prompt_without_context_has_no_file_context() {
+    let body = serde_json::json!({
+        "id": "chatcmpl-test", "object": "chat.completion", "created": 0, "model": "test",
+        "choices": [{"index": 0, "message": {"role": "assistant", "content": "All done."}, "finish_reason": "stop"}]
+    })
+    .to_string();
+    let port = spawn_one_shot_http_server(&http_response("HTTP/1.1 200 OK", &body));
+
+    // make_ctx already passes active_file=None, active_dir=None,
+    // selected_files empty — the state the interactive entry points
+    // hand over when all tabs are closed.
+    let (ctx, rx) = make_ctx(make_config(port));
+    run_agent(ctx);
+
+    let mut history: Option<Vec<serde_json::Value>> = None;
+    while let Ok(ev) = rx.recv() {
+        if let BackgroundEvent::Agent(AgentEvent::Finished(messages)) = ev {
+            history = Some(messages);
+            break;
+        }
+    }
+    let history = history.expect("agent must emit Finished with history");
+
+    let system = history
+        .first()
+        .expect("history must start with a system message");
+    let content = system
+        .get("content")
+        .and_then(|c| c.as_str())
+        .expect("system message must have string content");
+    for marker in [
+        "viewing the file",
+        "directory context",
+        "selected the following files",
+    ] {
+        assert!(
+            !content.contains(marker),
+            "system prompt must not contain {marker:?} when no context is handed over; got: {content}"
+        );
+    }
+}

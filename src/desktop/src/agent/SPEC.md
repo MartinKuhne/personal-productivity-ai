@@ -59,6 +59,7 @@ models:
 * [AGENT-023] Format Markdown Quick Action: The system shall provide a "Format Markdown" quick action that injects a structured prompt with YAML front-matter template. The quick action shall be available from the file context menu in the directory tree (UI-019) and the tab context menu (UI-033); the bottom panel shall not host a separate "Quick Tasks" menu button.
 * [AGENT-024] Tools Toolbar Button: The top toolbar shall provide a "Tools..." button alongside the existing "Batch..." button. Clicking the button shall open the Tools dialog (UI-051).
 * [AGENT-025] Agent Loop Safety Source: The agent loop's parallel/sequential dispatch (per AGENT-012) shall source tool safety classification uniformly from the centralized tool safety manager for all registered tool names.
+* [AGENT-026] Empty Tab Workspace Context Suppression: When the user closes all open tabs and then sends an AI prompt, the system shall not pass any file or directory context (active file, active directory, or selected files) to the LLM system prompt. The presence of at least one open tab is required for file/directory context to be handed over.
 
 ## Cross-cutting references
 

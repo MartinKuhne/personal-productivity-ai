@@ -100,6 +100,32 @@ impl SelectionManager {
         &mut self.expanded_dirs
     }
 
+    /// Compute the file/directory context to hand to the LLM for a
+    /// new agent prompt: `(active file, active directory, selected
+    /// files)`.
+    ///
+    /// When no document tabs are open there is no working context,
+    /// so every component is suppressed — the LLM is handed no file
+    /// or directory context (AGENT-026). When at least one tab is
+    /// open, the current selection (single file, directory, and any
+    /// multi-selected files) is returned. Open tabs are the source
+    /// of truth because closing all tabs must clear stale directory
+    /// and multi-selection state left behind by tree navigation.
+    pub fn agent_context(
+        &self,
+        open_tabs: &[PathBuf],
+    ) -> (Option<PathBuf>, Option<PathBuf>, HashSet<PathBuf>) {
+        if open_tabs.is_empty() {
+            (None, None, HashSet::new())
+        } else {
+            (
+                self.selected_file.clone(),
+                self.selected_dir.clone(),
+                self.selected_files.clone(),
+            )
+        }
+    }
+
     pub fn tree_dirty(&self) -> bool {
         self.tree_dirty
     }
@@ -179,5 +205,39 @@ mod tests {
         let path = PathBuf::from("dir");
         manager.select_dir(path.clone());
         assert_eq!(manager.selected_dir(), Some(&path));
+    }
+
+    /// AGENT-026: closing all tabs must suppress every piece of
+    /// file/directory context, even when stale tree-selection state
+    /// (directory, multi-select) is still present.
+    #[test]
+    fn test_agent_context_suppressed_when_no_tabs() {
+        let mut manager = SelectionManager::new();
+        manager.select_file(PathBuf::from("a.md"));
+        manager.select_dir(PathBuf::from("stale_dir"));
+        manager.toggle_file(PathBuf::from("b.md"));
+
+        let (file, dir, files) = manager.agent_context(&[]);
+        assert!(file.is_none(), "no active file when tabs are closed");
+        assert!(dir.is_none(), "no directory context when tabs are closed");
+        assert!(files.is_empty(), "no selected files when tabs are closed");
+    }
+
+    /// With at least one tab open, the selection is handed over
+    /// unchanged (AGENT-013/AGENT-014).
+    #[test]
+    fn test_agent_context_returned_when_tabs_open() {
+        let mut manager = SelectionManager::new();
+        let file = PathBuf::from("a.md");
+        let dir = PathBuf::from("lib");
+        let multi = PathBuf::from("b.md");
+        manager.select_file(file.clone());
+        manager.select_dir(dir.clone());
+        manager.toggle_file(multi.clone());
+
+        let (got_file, got_dir, got_files) = manager.agent_context(std::slice::from_ref(&file));
+        assert_eq!(got_file, Some(file));
+        assert_eq!(got_dir, Some(dir));
+        assert!(got_files.contains(&multi));
     }
 }

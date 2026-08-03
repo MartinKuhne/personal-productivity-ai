@@ -110,9 +110,9 @@ pub fn apply_send_click(app: &mut FastMdApp) {
         }
         CommandIntent::RunAgent(agent_prompt) => {
             let tx = app.orchestrator.tx.clone();
-            let file = app.selection().selected_file().cloned();
-            let dir = app.selection().selected_dir().cloned();
-            let files = app.selection().selected_files().clone();
+            let (file, dir, files) = app
+                .selection()
+                .agent_context(&app.orchestrator.tab_manager.tabs);
             let bus = app.orchestrator.file_event_bus.clone();
             app.agent_mut()
                 .start_session(tx, agent_prompt, file, dir, files, bus);

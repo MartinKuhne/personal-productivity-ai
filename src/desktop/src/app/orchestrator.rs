@@ -157,12 +157,14 @@ impl AppOrchestrator {
     }
 
     pub fn start_agent_session(&mut self, prompt: String) {
+        let (active_file, active_dir, selected_files) =
+            self.selection.agent_context(&self.tab_manager.tabs);
         self.agent.start_session(
             self.tx.clone(),
             prompt,
-            self.selection.selected_file().cloned(),
-            self.selection.selected_dir().cloned(),
-            self.selection.selected_files().clone(),
+            active_file,
+            active_dir,
+            selected_files,
             self.file_event_bus.clone(),
         );
         self.agent.set_show_results(true);

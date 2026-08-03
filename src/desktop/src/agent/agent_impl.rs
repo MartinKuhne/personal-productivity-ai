@@ -11,6 +11,8 @@ use crate::agent::tool_executor::ToolExecutor;
 use crate::agent::tools::get_tools_schema;
 use crate::bus::events::typed::{AgentEvent, BackgroundEvent};
 use crate::config::get_config_path;
+use std::collections::HashSet;
+use std::path::PathBuf;
 use std::sync::atomic::Ordering;
 use std::sync::mpsc::Sender;
 
@@ -27,6 +29,7 @@ fn run_agent_inner(ctx: AgentContext) {
         .with_active_dir(ctx.active_dir.clone())
         .with_selected_files(ctx.selected_files.clone())
         .build(&ctx.config);
+    log_prompt_context(&ctx.active_file, &ctx.active_dir, &ctx.selected_files);
     let mut messages = build_messages(system_prompt, &ctx.prompt, ctx.history.clone());
     let tools_json = get_tools_schema(&ctx.config, &ctx.prompt);
     let mut full_response = ctx.current_response.clone();
@@ -238,6 +241,24 @@ fn process_tool_results(
         }
     }
 }
+/// Log the file and directory context handed to the LLM when a new
+/// prompt starts. Emitted once per prompt, from the point where the
+/// system prompt is assembled, so the log always reflects what the
+/// LLM actually received (AGENT-026).
+fn log_prompt_context(
+    active_file: &Option<PathBuf>,
+    active_dir: &Option<PathBuf>,
+    selected_files: &HashSet<PathBuf>,
+) {
+    tracing::info!(
+        name = "agent.prompt.started",
+        active_file = ?active_file,
+        active_dir = ?active_dir,
+        selected_files = ?selected_files,
+        "Starting new agent prompt; file and directory context handed to the LLM"
+    );
+}
+
 fn log_tool_result(func_name: &str, result: &str) {
     if let Ok(parsed) = serde_json::from_str::<serde_json::Value>(result) {
         if parsed.get("status").and_then(|s| s.as_str()) == Some("error") {
@@ -249,5 +270,89 @@ fn log_tool_result(func_name: &str, result: &str) {
         } else {
             tracing::info!(name = "agent.tool.success", tool = %func_name);
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::io::Write;
+    use std::sync::{Arc, Mutex};
+
+    /// `MakeWriter` that appends formatted tracing output into a
+    /// shared byte buffer so tests can assert on it.
+    #[derive(Clone)]
+    struct BufferWriter(Arc<Mutex<Vec<u8>>>);
+
+    impl Write for BufferWriter {
+        fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
+            self.0.lock().unwrap().extend_from_slice(buf);
+            Ok(buf.len())
+        }
+        fn flush(&mut self) -> std::io::Result<()> {
+            Ok(())
+        }
+    }
+
+    impl<'writer> tracing_subscriber::fmt::MakeWriter<'writer> for BufferWriter {
+        type Writer = BufferWriter;
+
+        fn make_writer(&'writer self) -> Self::Writer {
+            self.clone()
+        }
+    }
+
+    /// Run `body` under a `fmt` subscriber whose output is captured
+    /// into a `String`. Returns everything logged at `INFO` or above
+    /// during the call.
+    fn capture_log(body: impl FnOnce()) -> String {
+        let buf = Arc::new(Mutex::new(Vec::new()));
+        let subscriber = tracing_subscriber::fmt()
+            .with_writer(BufferWriter(buf.clone()))
+            .with_ansi(false)
+            .with_max_level(tracing::level_filters::LevelFilter::INFO)
+            .finish();
+        tracing::subscriber::with_default(subscriber, body);
+        String::from_utf8(buf.lock().unwrap().clone()).unwrap_or_default()
+    }
+
+    /// AGENT-026: starting a new prompt must log the file and
+    /// directory context handed to the LLM, so operators can see what
+    /// context each prompt carried.
+    #[test]
+    fn test_log_prompt_context_emits_file_and_directory_context() {
+        let mut files = HashSet::new();
+        files.insert(PathBuf::from("notes.md"));
+        let out = capture_log(|| {
+            log_prompt_context(
+                &Some(PathBuf::from("doc.md")),
+                &Some(PathBuf::from("lib")),
+                &files,
+            );
+        });
+        assert!(out.contains("agent.prompt.started"), "log: {out}");
+        assert!(out.contains("doc.md"), "active file must be logged: {out}");
+        assert!(
+            out.contains("lib"),
+            "active directory must be logged: {out}"
+        );
+        assert!(
+            out.contains("notes.md"),
+            "selected files must be logged: {out}"
+        );
+    }
+
+    /// AGENT-026: with no file or directory context, the log must
+    /// still fire and record that the context was empty.
+    #[test]
+    fn test_log_prompt_context_emits_empty_context() {
+        let out = capture_log(|| {
+            log_prompt_context(&None, &None, &HashSet::new());
+        });
+        assert!(out.contains("agent.prompt.started"), "log: {out}");
+        assert!(
+            out.contains("active_file=None") && out.contains("active_dir=None"),
+            "empty context must be logged as None: {out}"
+        );
     }
 }
