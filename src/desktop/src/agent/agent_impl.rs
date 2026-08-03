@@ -34,6 +34,7 @@ fn run_agent_inner(ctx: AgentContext) {
         ctx.config.clone(),
         ctx.file_event_bus.clone(),
         ctx.browser_session.clone(),
+        ctx.pdf_backing.clone(),
     );
     loop {
         if ctx.cancel_flag.load(Ordering::SeqCst) {

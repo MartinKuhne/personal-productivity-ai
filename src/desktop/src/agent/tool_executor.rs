@@ -16,6 +16,7 @@ pub struct ToolExecutor {
     config: AppConfig,
     file_event_bus: Bus<FileEvent>,
     browser_session: Arc<BrowserSession>,
+    pdf_backing: std::sync::Arc<crate::app::watcher::pdf_backing_tracker::PdfBackingTracker>,
 }
 
 impl ToolExecutor {
@@ -23,11 +24,13 @@ impl ToolExecutor {
         config: AppConfig,
         file_event_bus: Bus<FileEvent>,
         browser_session: Arc<BrowserSession>,
+        pdf_backing: std::sync::Arc<crate::app::watcher::pdf_backing_tracker::PdfBackingTracker>,
     ) -> Self {
         Self {
             config,
             file_event_bus,
             browser_session,
+            pdf_backing,
         }
     }
 
@@ -81,6 +84,7 @@ impl ToolExecutor {
             }
         };
         let config_arc = std::sync::Arc::new(self.config.clone());
+        let pdf_backing = self.pdf_backing.clone();
         let mut completed = Vec::new();
         rt.block_on(async {
             let mut join_set = tokio::task::JoinSet::new();
@@ -91,8 +95,9 @@ impl ToolExecutor {
                 let cfg = config_arc.clone();
                 let bus = self.file_event_bus.clone();
                 let browser = self.browser_session.clone();
+                let pdf = pdf_backing.clone();
                 join_set.spawn_blocking(move || {
-                    let ctx = ToolContext::new(&cfg, &bus, browser);
+                    let ctx = ToolContext::new(&cfg, &bus, browser, pdf);
                     let result = execute_tool(&ctx, &func_name, &func_args);
                     (call_id, func_name, func_args, result)
                 });
@@ -119,6 +124,7 @@ impl ToolExecutor {
                 &self.config,
                 &self.file_event_bus,
                 self.browser_session.clone(),
+                self.pdf_backing.clone(),
             );
             let result = execute_tool(&ctx, &func_name, &func_args);
             results.push((call_id, func_name, func_args, result));
@@ -241,7 +247,9 @@ mod tests {
         let browser_session = std::sync::Arc::new(crate::app::browser::BrowserSession::new(
             &crate::config::AppConfig::default(),
         ));
-        let executor = ToolExecutor::new(config, bus, browser_session);
+        let pdf_backing =
+            std::sync::Arc::new(crate::app::watcher::pdf_backing_tracker::PdfBackingTracker::new());
+        let executor = ToolExecutor::new(config, bus, browser_session, pdf_backing);
         assert!(executor.config.models.is_empty());
     }
 }

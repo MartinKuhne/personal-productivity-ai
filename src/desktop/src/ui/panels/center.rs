@@ -266,7 +266,10 @@ pub fn render_tabs_and_content_capture(
                 if ui.button(crate::ui::strings::EDIT_BUTTON).clicked() {
                     if app.orchestrator.inline_editor_enabled {
                         if let Ok(content) = std::fs::read_to_string(tab_path) {
-                            app.orchestrator.text_buffer.open(tab_path, &content);
+                            let is_pdf_backed = app.pdf_backing_tracker().is_pdf_backed(tab_path);
+                            if !is_pdf_backed {
+                                app.orchestrator.text_buffer.open(tab_path, &content, None);
+                            }
                         }
                     } else {
                         open_in_system_editor(tab_path);
@@ -358,34 +361,65 @@ pub fn render_tabs_and_content_capture(
         });
         ui.separator();
 
-        egui::ScrollArea::vertical()
-            .id_salt("main_markdown_scroll")
-            .show(ui, |ui| {
-                if let Some(yaml) = &app.orchestrator.tab_manager.current_yaml {
-                    render_yaml_table(ui, yaml);
-                }
-                let heading_ids = app.orchestrator.tab_manager.heading_ids().to_vec();
-                render_markdown(
-                    ui,
-                    &app.orchestrator.tab_manager.current_markdown,
-                    &mut app.orchestrator.tab_manager.scroll_to_header_id,
-                    &mut app.orchestrator.tab_manager.pending_task_toggles,
-                    app.orchestrator.config.deficit_strategy(),
-                    Some(&heading_ids),
-                );
-                // P0-2: Apply task checkbox toggles to the markdown source.
-                if !app.orchestrator.tab_manager.pending_task_toggles.is_empty() {
-                    for (idx, checked) in
-                        app.orchestrator.tab_manager.pending_task_toggles.drain(..)
-                    {
-                        crate::ui::render::apply_task_toggle(
-                            &mut app.orchestrator.tab_manager.current_markdown,
-                            idx,
-                            checked,
+        let pdf_backed = app.pdf_backing_tracker().is_pdf_backed(selected_path);
+        if pdf_backed {
+            let sepia_tint = egui::Color32::from_rgb(35, 30, 20);
+            egui::Frame::new().fill(sepia_tint).show(ui, |ui| {
+                egui::ScrollArea::vertical()
+                    .id_salt("main_markdown_scroll")
+                    .show(ui, |ui| {
+                        if let Some(yaml) = &app.orchestrator.tab_manager.current_yaml {
+                            render_yaml_table(ui, yaml);
+                        }
+                        let heading_ids = app.orchestrator.tab_manager.heading_ids().to_vec();
+                        render_markdown(
+                            ui,
+                            &app.orchestrator.tab_manager.current_markdown,
+                            &mut app.orchestrator.tab_manager.scroll_to_header_id,
+                            &mut app.orchestrator.tab_manager.pending_task_toggles,
+                            app.orchestrator.config.deficit_strategy(),
+                            Some(&heading_ids),
                         );
-                    }
-                }
+                        // P0-2: Apply task checkbox toggles to the markdown source.
+                        if !app.orchestrator.tab_manager.pending_task_toggles.is_empty() {
+                            for (idx, checked) in app.orchestrator.tab_manager.pending_task_toggles.drain(..) {
+                                crate::ui::render::apply_task_toggle(
+                                    &mut app.orchestrator.tab_manager.current_markdown,
+                                    idx,
+                                    checked,
+                                );
+                            }
+                        }
+                    });
             });
+        } else {
+            egui::ScrollArea::vertical()
+                .id_salt("main_markdown_scroll")
+                .show(ui, |ui| {
+                    if let Some(yaml) = &app.orchestrator.tab_manager.current_yaml {
+                        render_yaml_table(ui, yaml);
+                    }
+                    let heading_ids = app.orchestrator.tab_manager.heading_ids().to_vec();
+                    render_markdown(
+                        ui,
+                        &app.orchestrator.tab_manager.current_markdown,
+                        &mut app.orchestrator.tab_manager.scroll_to_header_id,
+                        &mut app.orchestrator.tab_manager.pending_task_toggles,
+                        app.orchestrator.config.deficit_strategy(),
+                        Some(&heading_ids),
+                    );
+                    // P0-2: Apply task checkbox toggles to the markdown source.
+                    if !app.orchestrator.tab_manager.pending_task_toggles.is_empty() {
+                        for (idx, checked) in app.orchestrator.tab_manager.pending_task_toggles.drain(..) {
+                            crate::ui::render::apply_task_toggle(
+                                &mut app.orchestrator.tab_manager.current_markdown,
+                                idx,
+                                checked,
+                            );
+                        }
+                    }
+                });
+        }
     }
 }
 
@@ -477,14 +511,8 @@ mod tests {
 
         apply_tab_close_click(&mut app, 5);
 
-        assert_eq!(
-            app.orchestrator.tab_manager.tabs,
-            vec![PathBuf::from("a.md")]
-        );
-        assert_eq!(
-            app.orchestrator.selection.selected_file(),
-            Some(&PathBuf::from("a.md"))
-        );
+        assert_eq!(app.orchestrator.tab_manager.tabs, vec![PathBuf::from("a.md")]);
+        assert_eq!(app.orchestrator.selection.selected_file(), Some(&PathBuf::from("a.md")));
     }
 
     /// Tier 1 test for the context-menu "Close Others" item.
@@ -502,14 +530,8 @@ mod tests {
 
         apply_tab_close_others_click(&mut app, 1);
 
-        assert_eq!(
-            app.orchestrator.tab_manager.tabs,
-            vec![PathBuf::from("b.md")]
-        );
-        assert_eq!(
-            app.orchestrator.selection.selected_file(),
-            Some(&PathBuf::from("b.md"))
-        );
+        assert_eq!(app.orchestrator.tab_manager.tabs, vec![PathBuf::from("b.md")]);
+        assert_eq!(app.orchestrator.selection.selected_file(), Some(&PathBuf::from("b.md")));
     }
 
     /// Tier 1 test for the context-menu "Close All Tabs" item.

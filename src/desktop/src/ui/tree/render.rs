@@ -118,7 +118,12 @@ pub fn render_flat_row_capture(
                 // Clamp depth to prevent visual overflow on deeply nested paths
                 let clamped_depth = row.depth.min(50);
                 ui.add_space(clamped_depth as f32 * 18.0);
-                let response = ui.selectable_label(is_selected, label);
+                let mut text = egui::RichText::new(label);
+                if ctx.pdf_backing_tracker.is_pdf_backed(&row.path) {
+                    text = text.color(egui::Color32::from_rgb(244, 15, 2));
+                }
+
+                let response = ui.selectable_label(is_selected, text);
 
                 if response.clicked() {
                     apply_file_row_click(ctx, row);
@@ -334,7 +339,12 @@ pub fn draw_tree_node(ui: &mut egui::Ui, node: &TreeNode, ctx: &mut TreeNodeCont
         let is_selected = ctx.selected_files().contains(&node.path)
             || ctx.selected_file().as_ref() == Some(&node.path);
         let label = format!("  {}", node.name);
-        let response = ui.selectable_label(is_selected, label);
+        let mut text = egui::RichText::new(label);
+        if ctx.pdf_backing_tracker.is_pdf_backed(&node.path) {
+            text = text.color(egui::Color32::from_rgb(244, 15, 2));
+        }
+
+        let response = ui.selectable_label(is_selected, text);
 
         if response.clicked() {
             if ctx.modifiers().shift || ctx.modifiers().ctrl || ctx.modifiers().command {
@@ -552,6 +562,7 @@ mod tests {
                 bg_tx: &None,
                 file_event_producer: None,
                 tree_dirty,
+                pdf_backing_tracker: crate::app::watcher::PdfBackingTracker::new(),
             };
 
             let row = FlatRow {
@@ -657,6 +668,7 @@ mod tests {
                     bg_tx: &None,
                     file_event_producer: None,
                     tree_dirty: &mut tree_dirty,
+                    pdf_backing_tracker: crate::app::watcher::PdfBackingTracker::new(),
                 };
 
                 // Render collapsed directory
@@ -780,6 +792,7 @@ mod tests {
                     bg_tx: &None,
                     file_event_producer: None,
                     tree_dirty: &mut tree_dirty,
+                    pdf_backing_tracker: crate::app::watcher::PdfBackingTracker::new(),
                 };
 
                 draw_tree_node(ui, &file1, &mut tree_ctx);
@@ -955,6 +968,7 @@ mod tests {
                 bg_tx: &None,
                 file_event_producer: None,
                 tree_dirty,
+                pdf_backing_tracker: crate::app::watcher::PdfBackingTracker::new(),
             };
 
             let row = FlatRow {

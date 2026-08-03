@@ -80,6 +80,8 @@ pub struct ToolContext<'a> {
     /// tests that don't care about the browser. Tools that
     /// don't use the browser ignore this field.
     pub browser_session: Arc<BrowserSession>,
+    /// PDF-backing tracker for checking if a file has a `.pdf` sibling.
+    pub pdf_backing: std::sync::Arc<crate::app::watcher::pdf_backing_tracker::PdfBackingTracker>,
 }
 
 impl<'a> ToolContext<'a> {
@@ -88,6 +90,7 @@ impl<'a> ToolContext<'a> {
         config: &'a crate::config::AppConfig,
         file_event_bus: &'a Bus<FileEvent>,
         browser_session: Arc<BrowserSession>,
+        pdf_backing: std::sync::Arc<crate::app::watcher::pdf_backing_tracker::PdfBackingTracker>,
     ) -> Self {
         Self {
             config,
@@ -95,6 +98,7 @@ impl<'a> ToolContext<'a> {
             resolver: VfsResolver::new(config),
             publisher: EventPublisher::new(file_event_bus),
             browser_session,
+            pdf_backing,
         }
     }
 
@@ -120,5 +124,10 @@ impl<'a> ToolContext<'a> {
     /// Obtain a [`FileEventProducer`] handle.
     pub fn file_event_producer(&self) -> FileEventProducer<'a> {
         self.publisher.file_event_producer()
+    }
+
+    /// Check whether the given path is a Markdown file with a PDF sibling.
+    pub fn is_pdf_backed(&self, path: &Path) -> bool {
+        self.pdf_backing.is_pdf_backed(path)
     }
 }

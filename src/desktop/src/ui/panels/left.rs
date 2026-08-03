@@ -257,6 +257,7 @@ pub fn show_left_panel(app: &mut FastMdApp, parent_ui: &mut egui::Ui) {
             // are stable across passes.
             let mut open_editor = None;
             let modifiers = ui.input(|i| i.modifiers);
+            let pdf_backing_tracker = app.pdf_backing_tracker().clone();
             let selection = &mut app.orchestrator.selection;
             let tab_manager = &mut app.orchestrator.tab_manager;
             let dialogs = &mut app.orchestrator.dialogs;
@@ -297,6 +298,7 @@ pub fn show_left_panel(app: &mut FastMdApp, parent_ui: &mut egui::Ui) {
                             crate::bus::events::file::FileEventProducer::new(file_event_bus),
                         ),
                         tree_dirty: &mut selection.tree_dirty,
+                        pdf_backing_tracker: pdf_backing_tracker.clone(),
                     };
 
                     for i in row_range {
@@ -320,10 +322,13 @@ pub fn show_left_panel(app: &mut FastMdApp, parent_ui: &mut egui::Ui) {
                 );
             }
 
-            if let Some(path) = open_editor
-                && let Ok(content) = std::fs::read_to_string(&path)
+            if let Some(ref path) = open_editor
+                && let Ok(content) = std::fs::read_to_string(path)
             {
-                app.editor_mut().open(&path, &content);
+                let is_pdf_backed = app.pdf_backing_tracker().is_pdf_backed(path);
+                if !is_pdf_backed {
+                    app.editor_mut().open(path, &content, None);
+                }
             }
         });
 }
@@ -552,6 +557,7 @@ mod tests {
                     file_event_bus,
                 )),
                 tree_dirty: &mut app.orchestrator.selection.tree_dirty,
+                pdf_backing_tracker: crate::app::watcher::PdfBackingTracker::new(),
             };
             crate::ui::tree::handlers::apply_directory_row_click(&mut ctx, &dir_row);
         }
