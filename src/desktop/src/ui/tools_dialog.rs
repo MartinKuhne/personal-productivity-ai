@@ -136,7 +136,7 @@ pub fn render_contents(ui: &mut eframe::egui::Ui, app: &mut FastMdApp) {
                 .column(Column::auto().at_least(28.0)) // checkbox
                 .column(Column::remainder().at_least(140.0).clip(true)) // group
                 .column(Column::auto().at_least(72.0)) // kind
-                .column(Column::auto().at_least(120.0)) // tools
+                .column(Column::remainder().at_least(120.0)) // tools
                 .column(Column::auto().at_least(80.0)) // prompt char count
                 .column(Column::remainder().at_least(140.0)) // actions
                 .header(22.0, |mut header| {
@@ -223,7 +223,7 @@ fn render_row(
 
     // Column 4 — comma-separated tool names
     row.col(|ui| {
-        ui.label(group.tool_names.join(", "));
+        ui.add(egui::Label::new(group.tool_names.join(", ")).wrap());
     });
 
     // Column 5 — prompt char count + parallel-safe chip
