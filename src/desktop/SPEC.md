@@ -22,7 +22,7 @@ The requirements below have been formatted using the **Easy Approach to Requirem
 | User Interface Layout & Styling | [`src/ui/SPEC.md`](src/ui/SPEC.md) | pane layout, directory tree, file viewer area, inline editor, background process log, thinking process, tabbed interface, and table layout renderer |
 | Configuration | [`src/config/SPEC.md`](src/config/SPEC.md) | YAML config file schema, model configuration, virtual path resolution, and default template generation |
 | Markdown | [`src/markdown/SPEC.md`](src/markdown/SPEC.md) | GFM parsing, rendering, table layout, ToC navigation, and YAML front-matter template |
-| Local LLM Interface & Tool Call Agent | [`src/agent/SPEC.md`](src/agent/SPEC.md) | OpenAI-compatible client, agent loop, model routing, context injection, tool execution, thinking delimiters, and quick tasks. |
+| Local LLM Interface & Tool Call Agent | [`src/agent/SPEC.md`](src/agent/SPEC.md) | OpenAI-compatible client, agent loop, model routing, context injection, tool execution, and thinking delimiters. |
 | Libraries | [`src/app/vfs/SPEC.md`](src/app/vfs/SPEC.md) | Libraries and Virtual File System |
 | Batch processing | [`src/batch/SPEC.md`](src/batch/SPEC.md) | batch prompt processing dialog, modes, concurrency, and lifecycle |
 | LLM Tools | [`src/agent/tools/SPEC.md`](src/agent/tools/SPEC.md) | All LLM tools + ToolManager (TOOL-014..024) |
