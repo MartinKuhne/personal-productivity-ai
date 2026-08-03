@@ -26,6 +26,15 @@ pub fn show_batch_modal(
     if dialog_open {
         config.available_prompts =
             resolve_prompts(app.tags().prompt_paths(), &app.config().content_libraries);
+        // Clamp the previously-selected prompt index to the new list length.
+        // When the prompt list shrinks or is reordered the stale index would
+        // otherwise be out-of-bounds (see issue: selected_prompt_idx not
+        // adjusted after resolve_prompts replaces the list).
+        if let Some(idx) = config.selected_prompt_idx
+            && idx >= config.available_prompts.len()
+        {
+            config.selected_prompt_idx = None;
+        }
     }
 
     egui::Window::new(strings::BATCH_DIALOG_WINDOW)
