@@ -34,7 +34,7 @@ impl std::fmt::Debug for JmapClient {
 #[derive(serde::Serialize, serde::Deserialize, Clone)]
 pub struct TrelloClient {
     pub token: String,
-    #[serde(alias = "apiKey", alias = "api_key")]
+    #[serde(alias = "apiKey", alias = "api_key", alias = "key")]
     pub api_key: String,
 }
 

@@ -50,11 +50,6 @@ pub struct DialogManager {
 
     // Tools dialog (UI-051)
     pub tools_dialog_open: bool,
-    /// `true` for the first frame after the dialog is opened.
-    /// The dialog uses this to force one MCP tool discovery
-    /// refresh so MCP groups show their tools and prompt char
-    /// count. Cleared by the dialog on its first render.
-    pub tools_dialog_just_opened: bool,
 
     // OAuth in-flight state (MCP-021)
     /// Per-server OAuth flow status. Present (InProgress) while the
@@ -89,7 +84,6 @@ impl DialogManager {
             batch_cancel_flag: None,
 
             tools_dialog_open: false,
-            tools_dialog_just_opened: false,
 
             oauth_status: HashMap::new(),
         }

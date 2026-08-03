@@ -794,7 +794,7 @@ fn test_spawn_config_subscription_runs_init_in_background() {
         match rx.recv_timeout(std::time::Duration::from_millis(100)) {
             Ok(BackgroundEvent::Process(ProcessEvent::LogEntry(entry))) => {
                 assert!(
-                    entry.message.starts_with("MCP startup ping complete:"),
+                    entry.message.starts_with("MCP startup initialization complete"),
                     "unexpected log entry: {}",
                     entry.message
                 );

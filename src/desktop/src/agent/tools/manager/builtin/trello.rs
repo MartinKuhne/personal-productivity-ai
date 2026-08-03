@@ -37,7 +37,9 @@ pub struct TrelloUpdateCardInput {
 }
 
 fn trello_tools_enabled(config: &AppConfig) -> bool {
-    config.tool_groups.trello && config.trello_client.is_some()
+    let enabled = config.tool_groups.trello && config.trello_client.is_some();
+    tracing::info!("TRELLO_TOOLS_ENABLED: config.tool_groups.trello={}, config.trello_client.is_some()={}, result={}", config.tool_groups.trello, config.trello_client.is_some(), enabled);
+    enabled
 }
 
 fn trello_request(

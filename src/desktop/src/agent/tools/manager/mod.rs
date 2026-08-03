@@ -545,20 +545,6 @@ pub fn mcp_clear_needs_auth(server_name: &str) {
     }
 }
 
-/// Force a one-time MCP tool discovery for every configured
-/// server. Used by the Tools dialog on its first frame so MCP
-/// groups show their tools and prompt char count immediately
-/// (without this, the MCP catalog is empty until the first
-/// `get_tools_schema` call from the agent loop). Do NOT call
-/// this on every frame — each call does a `tools/list` per
-/// server, which is expensive over the network.
-pub fn mcp_refresh_for_dialog(config: &AppConfig) {
-    if let Ok(mut mgr) = TOOL_MANAGER.write() {
-        mgr.mcp_manager.update_config(config);
-        mgr.refresh_mcp_tools(config);
-    }
-}
-
 /// Direct access to the global MCP client manager. The UI dialog
 /// uses this to invoke [`crate::agent::tools::mcp::McpClientManager::authenticate`].
 pub fn mcp_manager() -> Arc<McpClientManager> {
@@ -568,20 +554,16 @@ pub fn mcp_manager() -> Arc<McpClientManager> {
         .unwrap_or_default()
 }
 
-/// Initialize the MCP subsystem on app start. Pings every configured
-/// server and refreshes the MCP tool catalog. Returns the number of
-/// servers that responded successfully.
+/// Initialize the MCP subsystem on app start. Refreshes the MCP tool catalog.
 ///
 /// OAuth token store is NOT installed here — it will be installed
 /// lazily when the user clicks "Authenticate" for a server.
-pub fn init_mcp_on_startup(config: &AppConfig) -> usize {
+pub fn init_mcp_on_startup(config: &AppConfig) {
     let Ok(mut mgr) = TOOL_MANAGER.write() else {
-        return 0;
+        return;
     };
     mgr.mcp_manager.update_config(config);
-    let ok = mgr.mcp_manager.ping_all_servers();
     mgr.refresh_mcp_tools(config);
-    ok
 }
 
 /// Subscribe to the configuration-arrival bus and perform the
@@ -592,8 +574,8 @@ pub fn init_mcp_on_startup(config: &AppConfig) -> usize {
 /// spawned thread observes the first arrival (or falls back to
 /// [`AppConfig::default`] if no event arrives within
 /// [`CONFIG_ARRIVAL_TIMEOUT`]) and then runs the same startup path as
-/// [`init_mcp_on_startup`]: it pushes the config into the MCP manager,
-/// pings every configured server, and discovers each server's tools.
+/// [`init_mcp_on_startup`]: it pushes the config into the MCP manager
+/// and discovers each server's tools.
 ///
 /// All network I/O happens off the UI thread so the window never
 /// blocks on MCP servers at startup. A completion log entry is posted
@@ -613,11 +595,11 @@ pub fn spawn_config_subscription(config_bus: Bus<ConfigArrived>, tx: Sender<Back
                 AppConfig::default()
             }
         };
-        let servers_ok = init_mcp_on_startup(&config);
+        init_mcp_on_startup(&config);
         let _ = tx.send(
             BackgroundLogEntry::new(
                 LogCategory::Indexer,
-                format!("MCP startup ping complete: {servers_ok} server(s) responded"),
+                "MCP startup initialization complete".to_string(),
             )
             .into(),
         );

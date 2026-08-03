@@ -37,13 +37,6 @@ pub fn show_tools_dialog(ctx: &eframe::egui::Context, app: &mut FastMdApp) {
     let mut open = true;
     let title = TOOLS_DIALOG_TITLE;
 
-    // First-frame MCP tool discovery. Without this the MCP
-    // groups show empty tool lists until something else
-    // triggers `tools/list`.
-    if app.orchestrator.dialogs.tools_dialog_just_opened {
-        manager::mcp_refresh_for_dialog(app.config());
-        app.dialogs_mut().tools_dialog_just_opened = false;
-    }
 
     let groups = manager::groups_snapshot(app.config());
     let (default_size, min_size, max_height) =

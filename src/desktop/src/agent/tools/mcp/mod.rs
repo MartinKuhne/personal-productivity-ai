@@ -391,31 +391,7 @@ impl McpClientManager {
         }
     }
 
-    /// Ping every currently-configured server. Returns the number
-    /// of servers that responded successfully. Failures are logged
-    /// at `warn` level but do not short-circuit the iteration; one
-    /// broken server must not stop the rest from being checked.
-    /// Used by the registry on app start to satisfy MCP-002.
-    pub fn ping_all_servers(&self) -> usize {
-        let server_names = self.configured_servers();
-        let mut ok = 0;
-        for name in &server_names {
-            match self.ping(name) {
-                Ok(()) => {
-                    tracing::info!(server = %name, "MCP startup ping ok");
-                    ok += 1;
-                }
-                Err(e) => {
-                    tracing::warn!(
-                        server = %name,
-                        error = %e,
-                        "MCP startup ping failed; server will be retried lazily on first tool call"
-                    );
-                }
-            }
-        }
-        ok
-    }
+
 
     /// Gracefully shut down all active sessions. Safe to call
     /// multiple times.
@@ -580,9 +556,6 @@ impl DynamicToolSource for McpClientManager {
     }
     fn update_config(&self, config: &AppConfig) {
         McpClientManager::update_config(self, config);
-    }
-    fn ping_all_servers(&self) -> usize {
-        McpClientManager::ping_all_servers(self)
     }
     fn call_tool(
         &self,
@@ -1169,87 +1142,6 @@ with open(r"{cap_path}", "w") as f:
         let _ = std::fs::remove_file(&captured);
     }
 
-    /// `ping_all_servers` should iterate the configured servers,
-    /// call each one's `ping`, count the successes, and never
-    /// panic on a broken entry. Here we register one healthy
-    /// server (mock that responds to ping with `{}`) and one
-    /// pointing at a bogus command. The healthy one should
-    /// succeed; the bogus one should be silently skipped.
-    #[test]
-    fn test_ping_all_servers_mixed_health() {
-        let Some(python) = locate_python() else {
-            eprintln!("python not found; skipping ping-all test");
-            return;
-        };
-
-        // Mock: handle initialize + notifications/initialized,
-        // then reply to ping with an empty result.
-        let script = r#"
-import json, sys
-def send(obj):
-    sys.stdout.write(json.dumps(obj) + "\n")
-    sys.stdout.flush()
-line = sys.stdin.readline()
-req = json.loads(line)
-assert req.get("method") == "initialize", f"expected initialize, got {req}"
-send({
-    "jsonrpc": "2.0",
-    "id": req["id"],
-    "result": {
-        "protocolVersion": "2025-11-25",
-        "capabilities": {"tools": {"listChanged": False}},
-        "serverInfo": {"name": "ok", "version": "0.0.1"},
-    },
-})
-line = sys.stdin.readline()  # notifications/initialized
-while True:
-    line = sys.stdin.readline()
-    if not line:
-        break
-    req = json.loads(line)
-    if req.get("method") == "ping":
-        send({"jsonrpc": "2.0", "id": req["id"], "result": {}})
-"#;
-        let tmp = tempfile_in_target("mock_mcp_pingall.py");
-        std::fs::write(&tmp, script).expect("write mock script");
-
-        let mut config = AppConfig::default();
-        config.mcp_servers.insert(
-            "healthy".to_string(),
-            McpServerConfig::Stdio {
-                command: python,
-                args: vec![tmp.to_string_lossy().into_owned()],
-                env: HashMap::new(),
-            }
-            .into(),
-        );
-        config.mcp_servers.insert(
-            "broken".to_string(),
-            McpServerConfig::Stdio {
-                // Intentionally bogus command — spawn will fail
-                // immediately, which `ping` will surface as an
-                // error and `ping_all_servers` will skip.
-                command: format!(
-                    "{}.into()_definitely_not_a_real_binary_{}",
-                    std::env::temp_dir().to_string_lossy(),
-                    std::time::SystemTime::now()
-                        .duration_since(std::time::UNIX_EPOCH)
-                        .unwrap()
-                        .as_nanos()
-                ),
-                args: vec![],
-                env: HashMap::new(),
-            }
-            .into(),
-        );
-
-        let manager = McpClientManager::new();
-        manager.update_config(&config);
-        let ok = manager.ping_all_servers();
-        assert_eq!(ok, 1, "expected 1 healthy server, got {ok}");
-
-        let _ = std::fs::remove_file(&tmp);
-    }
 
     /// `http_session_delete` must treat 405 Method Not Allowed as
     /// a server-managed-lifetime acknowledgement (spec §3.4). We

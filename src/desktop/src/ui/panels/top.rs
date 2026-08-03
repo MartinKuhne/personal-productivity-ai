@@ -90,10 +90,6 @@ pub fn apply_batch_button_click(app: &mut FastMdApp) {
 /// the egui harness.
 pub fn apply_tools_button_click(app: &mut FastMdApp) {
     app.dialogs_mut().tools_dialog_open = true;
-    // Flag the dialog to do a one-time MCP tool discovery on
-    // its first frame so MCP groups show their tools and
-    // prompt char count immediately.
-    app.dialogs_mut().tools_dialog_just_opened = true;
 }
 
 pub fn show_top_panel(app: &mut FastMdApp, parent_ui: &mut egui::Ui) {

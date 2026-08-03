@@ -22,9 +22,6 @@ pub trait DynamicToolSource: Send + Sync {
     /// servers that were removed or changed.
     fn update_config(&self, config: &AppConfig);
 
-    /// Ping every configured server; returns the count that
-    /// responded without error.
-    fn ping_all_servers(&self) -> usize;
 
     /// Execute a tool call (`tools/call`) against the named server.
     fn call_tool(
