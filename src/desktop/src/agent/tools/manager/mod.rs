@@ -448,6 +448,7 @@ fn is_internal_group_enabled(config: &AppConfig, g: InternalToolGroup) -> bool {
         Calendar => config.tool_groups.calendar,
         CsvDb => config.tool_groups.csv_db,
         Weather => config.tool_groups.weather,
+        Trello => config.tool_groups.trello,
     }
 }
 
@@ -462,6 +463,7 @@ fn set_internal_group_enabled(config: &mut AppConfig, g: InternalToolGroup, on: 
         Calendar => config.tool_groups.calendar = on,
         CsvDb => config.tool_groups.csv_db = on,
         Weather => config.tool_groups.weather = on,
+        Trello => config.tool_groups.trello = on,
     }
 }
 

@@ -16,6 +16,7 @@ pub(crate) mod cursor;
 pub(crate) mod fs;
 pub(crate) mod jmap;
 pub(crate) mod paging;
+pub mod trello;
 pub(crate) mod weather;
 pub(crate) mod web;
 pub(crate) mod yaml;

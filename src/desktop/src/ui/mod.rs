@@ -2,6 +2,7 @@
 
 pub mod app;
 pub mod background_logs;
+pub mod batch_dialog;
 pub mod editor_egui;
 mod modals;
 pub mod os_shell;

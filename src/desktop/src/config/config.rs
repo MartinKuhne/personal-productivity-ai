@@ -32,6 +32,22 @@ impl std::fmt::Debug for JmapClient {
 }
 
 #[derive(serde::Serialize, serde::Deserialize, Clone)]
+pub struct TrelloClient {
+    pub token: String,
+    #[serde(rename = "apiKey")]
+    pub api_key: String,
+}
+
+impl std::fmt::Debug for TrelloClient {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("TrelloClient")
+            .field("token", &"[REDACTED]")
+            .field("apiKey", &"[REDACTED]")
+            .finish()
+    }
+}
+
+#[derive(serde::Serialize, serde::Deserialize, Clone)]
 pub struct CalDavClient {
     pub url: String,
     pub username: String,
@@ -181,6 +197,9 @@ pub struct ToolGroupsConfig {
     /// (BRWS-CONF-001).
     #[serde(default)]
     pub browser: bool,
+    /// Enable or disable Trello agent tools.
+    #[serde(default = "default_true")]
+    pub trello: bool,
 }
 
 impl Default for ToolGroupsConfig {
@@ -194,6 +213,7 @@ impl Default for ToolGroupsConfig {
             csv_db: true,
             weather: true,
             browser: false,
+            trello: true,
         }
     }
 }
@@ -578,6 +598,9 @@ pub struct AppConfig {
     /// filled in by [`BrowserConfig::resolve`] at session launch.
     #[serde(default)]
     pub browser: BrowserConfig,
+    /// Trello client configuration (token and secret).
+    #[serde(default)]
+    pub trello_client: Option<TrelloClient>,
 }
 
 impl std::fmt::Debug for AppConfig {
@@ -601,6 +624,7 @@ impl std::fmt::Debug for AppConfig {
             .field("tool_groups", &self.tool_groups)
             .field("mcp_servers", &self.mcp_servers)
             .field("table_width_strategy", &self.table_width_strategy)
+            .field("trello_client", &self.trello_client)
             .finish()
     }
 }
@@ -627,6 +651,7 @@ impl Default for AppConfig {
             mcp_servers: HashMap::new(),
             table_width_strategy: default_table_width_strategy(),
             browser: BrowserConfig::default(),
+            trello_client: None,
         }
     }
 }

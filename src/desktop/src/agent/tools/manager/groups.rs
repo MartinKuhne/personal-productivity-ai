@@ -26,6 +26,7 @@ pub enum InternalToolGroup {
     Calendar,
     CsvDb,
     Weather,
+    Trello,
 }
 
 impl InternalToolGroup {
@@ -40,6 +41,7 @@ impl InternalToolGroup {
             Self::Calendar => "Calendar",
             Self::CsvDb => "CSV Database",
             Self::Weather => "Weather",
+            Self::Trello => "Trello",
         }
     }
 }

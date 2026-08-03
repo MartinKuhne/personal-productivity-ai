@@ -56,6 +56,19 @@ The requirements below have been formatted using the **Easy Approach to Requirem
 | `create_csv` | Create a CSV database with specified column headers. |
 | `list_csv` | List all CSV databases. |
 | `query` | Query a CSV database using an expression or aggregate function. |
+| `trello_get_boards` | Fetch all Trello boards for the authenticated user. Requires Trello config. |
+| `trello_get_board` | Fetch details of a Trello board by its ID. Requires Trello config. |
+| `trello_get_lists` | Fetch all lists in a Trello board by its ID. Requires Trello config. |
+| `trello_get_cards` | Fetch all cards in a Trello list by its ID. Requires Trello config. |
+| `trello_create_card` | Create a new card in a specific Trello list. Instructs the LLM to include detailed requirements, priority, and links. Requires Trello config. |
+| `trello_update_card` | Update an existing Trello card (e.g. name, description, move to list). Requires Trello config. |
+| `trello_delete_card` | Delete a Trello card by its ID. Requires Trello config. |
+
+#### Trello Tools
+
+* [TOOL-033] Tool Availability: The Trello tools shall only be offered to the LLM if the user configures the `trello_client` with `token` and `apiKey` fields, and the `trello` group is enabled.
+* [TOOL-034] FastMD Label: When creating a new card using `trello_create_card`, the system shall automatically attempt to attach a "FastMD" label (in blue) to the card, creating the label on the parent board if it does not already exist.
+* [TOOL-035] Detailed Card Creation: The `trello_create_card` tool description shall instruct the LLM to specify what needs to be accomplished, when, how, and by whom, as well as an estimated priority and relevant context/links.
 
 #### CSV Database Tools
 

@@ -210,6 +210,59 @@ pub const RENAME_WINDOW: &str = "Rename";
 /// Label prompt in rename dialog.
 pub const ENTER_NEW_NAME: &str = "Enter new name:";
 
+// Batch Dialog
+/// Window title for the batch prompt processing dialog.
+pub const BATCH_DIALOG_WINDOW: &str = "Batch Prompt Processing";
+
+/// Label for the directory selector in the batch dialog.
+pub const BATCH_DIALOG_DIRECTORY_LABEL: &str = "Directory:";
+
+/// Placeholder text for the directory selector when none is selected.
+pub const BATCH_DIALOG_SELECT_DIRECTORY: &str = "Select directory...";
+
+/// Label for the file pattern input in the batch dialog.
+pub const BATCH_DIALOG_PATTERN_LABEL: &str = "Pattern:";
+
+/// Label for the prompt selector in the batch dialog.
+pub const BATCH_DIALOG_PROMPT_LABEL: &str = "Prompt:";
+
+/// Placeholder text for the prompt selector when none is selected.
+pub const BATCH_DIALOG_SELECT_PROMPT: &str = "Select prompt...";
+
+/// Label for the batch mode selector in the batch dialog.
+pub const BATCH_DIALOG_MODE_LABEL: &str = "Mode:";
+
+/// Batch mode option label for processing files matching a pattern.
+pub const BATCH_MODE_FILE: &str = "File";
+
+/// Batch mode option label for processing all files in a directory.
+pub const BATCH_MODE_DIRECTORY: &str = "Directory";
+
+/// Label for the concurrency selector in the batch dialog.
+pub const BATCH_DIALOG_CONCURRENCY_LABEL: &str = "Concurrency:";
+
+/// Button label to start batch processing.
+pub const BATCH_PROCESS_BUTTON: &str = "Process";
+
+/// Heading shown in the batch dialog while processing is running.
+pub const BATCH_RUNNING_HEADING: &str = "Batch Processing";
+
+/// Status text shown when batch processing has completed.
+pub const BATCH_COMPLETED_TEXT: &str = "Batch processing completed.";
+
+/// Status text shown when batch processing was cancelled by the user.
+pub const BATCH_CANCELLED_TEXT: &str = "Batch was cancelled by user.";
+
+/// Status text shown while batch processing is running.
+pub const BATCH_PROCESSING_TEXT: &str = "Processing...";
+
+/// Hint text shown while batch processing is running.
+pub const BATCH_RUNNING_CANCEL_HINT: &str =
+    "Click Cancel to stop processing. In-flight jobs will finish.";
+
+/// Button label to close the batch dialog after processing completes.
+pub const BATCH_CLOSE_BUTTON: &str = "Close";
+
 // Tree Widget Actions
 /// Context menu item to open file location in OS file explorer.
 pub const SHOW_IN_EXPLORER_ACTION: &str = "Show in File Explorer";
@@ -319,5 +372,29 @@ mod tests {
     fn test_create_document_dialog_strings() {
         assert_eq!(CREATE_DOCUMENT_WINDOW, "New Document");
         assert_eq!(ENTER_DOCUMENT_NAME, "Enter document name:");
+    }
+
+    #[test]
+    fn test_batch_dialog_strings() {
+        assert_eq!(BATCH_DIALOG_WINDOW, "Batch Prompt Processing");
+        assert_eq!(BATCH_DIALOG_DIRECTORY_LABEL, "Directory:");
+        assert_eq!(BATCH_DIALOG_SELECT_DIRECTORY, "Select directory...");
+        assert_eq!(BATCH_DIALOG_PATTERN_LABEL, "Pattern:");
+        assert_eq!(BATCH_DIALOG_PROMPT_LABEL, "Prompt:");
+        assert_eq!(BATCH_DIALOG_SELECT_PROMPT, "Select prompt...");
+        assert_eq!(BATCH_DIALOG_MODE_LABEL, "Mode:");
+        assert_eq!(BATCH_MODE_FILE, "File");
+        assert_eq!(BATCH_MODE_DIRECTORY, "Directory");
+        assert_eq!(BATCH_DIALOG_CONCURRENCY_LABEL, "Concurrency:");
+        assert_eq!(BATCH_PROCESS_BUTTON, "Process");
+        assert_eq!(BATCH_RUNNING_HEADING, "Batch Processing");
+        assert_eq!(BATCH_COMPLETED_TEXT, "Batch processing completed.");
+        assert_eq!(BATCH_CANCELLED_TEXT, "Batch was cancelled by user.");
+        assert_eq!(BATCH_PROCESSING_TEXT, "Processing...");
+        assert_eq!(BATCH_CLOSE_BUTTON, "Close");
+        assert_eq!(
+            BATCH_RUNNING_CANCEL_HINT,
+            "Click Cancel to stop processing. In-flight jobs will finish."
+        );
     }
 }
