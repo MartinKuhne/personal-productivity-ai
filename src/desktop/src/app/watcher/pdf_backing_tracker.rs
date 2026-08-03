@@ -115,7 +115,7 @@ mod tests {
         fs::write(&pdf_path, "%PDF-1.4").unwrap();
 
         let tracker = PdfBackingTracker::new();
-        assert!(tracker.process_discovered(&[md_path.clone()]));
+        assert!(tracker.process_discovered(std::slice::from_ref(&md_path)));
         assert!(tracker.is_pdf_backed(&md_path));
         assert_eq!(tracker.len(), 1);
     }
@@ -127,7 +127,7 @@ mod tests {
         fs::write(&md_path, "# Hello").unwrap();
 
         let tracker = PdfBackingTracker::new();
-        assert!(!tracker.process_discovered(&[md_path.clone()]));
+        assert!(!tracker.process_discovered(std::slice::from_ref(&md_path)));
         assert!(!tracker.is_pdf_backed(&md_path));
         assert!(tracker.is_empty());
     }
@@ -139,7 +139,7 @@ mod tests {
         fs::write(&pdf_path, "%PDF-1.4").unwrap();
 
         let tracker = PdfBackingTracker::new();
-        assert!(!tracker.process_discovered(&[pdf_path.clone()]));
+        assert!(!tracker.process_discovered(std::slice::from_ref(&pdf_path)));
         assert!(tracker.is_empty());
     }
 
@@ -152,10 +152,10 @@ mod tests {
         fs::write(&pdf_path, "%PDF-1.4").unwrap();
 
         let tracker = PdfBackingTracker::new();
-        tracker.process_discovered(&[md_path.clone()]);
+        tracker.process_discovered(std::slice::from_ref(&md_path));
         assert!(tracker.is_pdf_backed(&md_path));
 
-        tracker.process_removed(&[md_path.clone()]);
+        tracker.process_removed(std::slice::from_ref(&md_path));
         assert!(!tracker.is_pdf_backed(&md_path));
         assert!(tracker.is_empty());
     }
@@ -194,8 +194,8 @@ mod tests {
         fs::write(&pdf_path, "%PDF-1.4").unwrap();
 
         let tracker = PdfBackingTracker::new();
-        tracker.process_discovered(&[md_path.clone()]);
-        let changed2 = tracker.process_discovered(&[md_path.clone()]);
+        tracker.process_discovered(std::slice::from_ref(&md_path));
+        let changed2 = tracker.process_discovered(std::slice::from_ref(&md_path));
         assert!(
             !changed2,
             "second process_discovered should return false for no changes"
@@ -210,7 +210,7 @@ mod tests {
         fs::write(&pdf_path, "%PDF-1.4").unwrap();
 
         let tracker = PdfBackingTracker::new();
-        tracker.process_discovered(&[pdf_path.clone()]);
+        tracker.process_discovered(std::slice::from_ref(&pdf_path));
         assert!(!tracker.is_pdf_backed(&pdf_path));
     }
 
@@ -223,7 +223,7 @@ mod tests {
         fs::write(&pdf_path, "%PDF-1.4").unwrap();
 
         let tracker = PdfBackingTracker::new();
-        tracker.process_discovered(&[md_path.clone()]);
+        tracker.process_discovered(std::slice::from_ref(&md_path));
         assert!(tracker.is_pdf_backed(&md_path));
     }
 }

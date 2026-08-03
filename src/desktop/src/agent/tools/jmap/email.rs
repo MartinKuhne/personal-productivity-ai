@@ -172,7 +172,8 @@ fn simplify_email(
         && let Some(body_val) = email.body_value(part_id)
     {
         let mut raw = body_val.value().to_string();
-        if raw.contains('<') && raw.contains('>')
+        if raw.contains('<')
+            && raw.contains('>')
             && let Ok(conv) = convert(&raw, None)
             && let Some(md) = conv.content
         {
@@ -189,7 +190,8 @@ fn simplify_email(
         && let Some(body_val) = email.body_value(part_id)
     {
         let mut raw = body_val.value().to_string();
-        if raw.contains('<') && raw.contains('>')
+        if raw.contains('<')
+            && raw.contains('>')
             && let Ok(conv) = convert(&raw, None)
             && let Some(md) = conv.content
         {
