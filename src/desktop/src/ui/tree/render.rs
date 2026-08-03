@@ -334,24 +334,17 @@ pub fn draw_tree_node(ui: &mut egui::Ui, node: &TreeNode, ctx: &mut TreeNodeCont
         let response = ui.selectable_label(is_selected, text);
 
         if response.clicked() {
-            if ctx.modifiers().shift || ctx.modifiers().ctrl || ctx.modifiers().command {
-                if ctx.selected_files().contains(&node.path) {
-                    ctx.selected_files().remove(&node.path);
-                    if ctx.selected_file().as_ref() == Some(&node.path) {
-                        *ctx.selected_file() = None;
-                    }
-                } else {
-                    ctx.selected_files().insert(node.path.clone());
-                    *ctx.selected_file() = Some(node.path.clone());
-                }
-            } else {
-                ctx.selected_files().clear();
-                ctx.selected_files().insert(node.path.clone());
-                *ctx.selected_file() = Some(node.path.clone());
-                if !ctx.tabs().contains(&node.path) {
-                    ctx.tabs().push(node.path.clone());
-                }
-            }
+            let is_expanded = ctx.expanded_dirs().contains(&node.path);
+            apply_file_row_click(
+                ctx,
+                &FlatRow {
+                    depth: 0,
+                    name: node.name.clone(),
+                    path: node.path.clone(),
+                    is_dir: false,
+                    is_expanded,
+                },
+            );
         }
 
         if response.double_clicked() {
