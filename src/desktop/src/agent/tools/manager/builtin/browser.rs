@@ -427,7 +427,9 @@ mod tests {
             crate::bus::events::file::FileEvent,
         >::new()));
         let session = Arc::new(BrowserSession::new(config));
-        crate::agent::tools::context::ToolContext::new(config, bus, session)
+        let pdf_backing =
+            Arc::new(crate::app::watcher::pdf_backing_tracker::PdfBackingTracker::new());
+        crate::agent::tools::context::ToolContext::new(config, bus, session, pdf_backing)
     }
 
     #[test]

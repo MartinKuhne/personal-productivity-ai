@@ -79,6 +79,8 @@ pub struct TreeOpsContext<'a> {
     /// *which* row is selected but not *which* rows are visible (e.g.
     /// file row click) leave this flag alone.
     pub tree_dirty: &'a mut bool,
+    /// Tracker for PDF backed files
+    pub pdf_backing_tracker: crate::app::watcher::PdfBackingTracker,
 }
 
 /// Type alias for backward compatibility.

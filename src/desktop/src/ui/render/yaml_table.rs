@@ -68,7 +68,27 @@ pub fn render_yaml_table(ui: &mut egui::Ui, yaml: &serde_norway::Value) {
 
                 ui.vertical(|ui| {
                     ui.spacing_mut().item_spacing = egui::vec2(12.0, 4.0);
+                    let clip = ui.clip_rect();
+                    let viewport_margin = 400.0_f32;
+
                     for (row_idx, (k, v)) in pairs.iter().enumerate() {
+                        let cached_h = _cached_row_heights
+                            .as_ref()
+                            .and_then(|h| h.get(row_idx))
+                            .copied();
+                        let top_y = ui.cursor().min.y;
+
+                        // If we have a cached height and it's off-screen, skip layout
+                        if let Some(h) = cached_h
+                            && clip.is_positive()
+                            && (top_y > clip.max.y + viewport_margin
+                                || top_y + h < clip.min.y - viewport_margin)
+                        {
+                            ui.add_space(h);
+                            new_row_heights.push(h);
+                            continue;
+                        }
+
                         let is_striped = row_idx % 2 == 1;
                         let bg_idx = if is_striped {
                             Some(ui.painter().add(egui::Shape::Noop))

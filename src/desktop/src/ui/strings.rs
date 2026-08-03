@@ -282,6 +282,18 @@ pub const BACKGROUND_MGR_ACCESS_ERROR: &str = "Error: could not access backgroun
 /// Save button label in inline text editor.
 pub const SAVE_BUTTON: &str = "Save";
 
+/// Message shown when the inline editor is opened for a PDF-backed markdown
+/// file. The file is auto-generated from a PDF and cannot be edited directly;
+/// YAML front-matter edits remain permitted via `write_yaml_header`.
+pub const PDF_BACKED_EDITOR_ERROR: &str = "This file is auto-generated from a PDF and cannot be edited directly. \
+     Use write_yaml_header to modify front-matter.";
+
+/// Error message returned by mutating write tools (`replace_text`,
+/// `insert_lines`, `delete_lines`) when the target file is a PDF-backed
+/// Markdown file.
+pub const PDF_BACKED_TOOL_ERROR: &str = "Cannot modify this file — it is auto-generated from a PDF. Use \
+     write_yaml_header for front-matter edits.";
+
 #[cfg(test)]
 mod tests {
     use super::*;

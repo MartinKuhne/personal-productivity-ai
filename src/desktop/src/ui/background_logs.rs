@@ -44,11 +44,22 @@ pub fn filter_logs<'a>(
 }
 
 pub fn show_background_logs_window(app: &mut FastMdApp, ctx: &egui::Context) {
-    if !app.background_manager.lock().unwrap().show_background_logs {
+    if !app
+        .orchestrator
+        .background_manager
+        .lock()
+        .unwrap()
+        .show_background_logs
+    {
         return;
     }
 
-    let mut open = app.background_manager.lock().unwrap().show_background_logs;
+    let mut open = app
+        .orchestrator
+        .background_manager
+        .lock()
+        .unwrap()
+        .show_background_logs;
 
     egui::Window::new(crate::ui::strings::BACKGROUND_PROCESSES_WINDOW)
         .open(&mut open)
@@ -56,7 +67,7 @@ pub fn show_background_logs_window(app: &mut FastMdApp, ctx: &egui::Context) {
         .collapsible(true)
         .default_size([600.0, 400.0])
         .show(ctx, |ui| {
-            let Ok(mut mgr) = app.background_manager.lock() else {
+            let Ok(mut mgr) = app.orchestrator.background_manager.lock() else {
                 ui.label(crate::ui::strings::BACKGROUND_MGR_ACCESS_ERROR);
                 return;
             };
@@ -145,7 +156,11 @@ pub fn show_background_logs_window(app: &mut FastMdApp, ctx: &egui::Context) {
                 });
         });
 
-    app.background_manager.lock().unwrap().show_background_logs = open;
+    app.orchestrator
+        .background_manager
+        .lock()
+        .unwrap()
+        .show_background_logs = open;
 }
 
 #[cfg(test)]
@@ -170,9 +185,13 @@ mod tests {
         use crate::ui::test_helpers::assert::assert_no_id_change_in_shapes;
         let ctx = egui::Context::default();
         let mut app = create_test_app();
-        app.background_manager.lock().unwrap().show_background_logs = true;
+        app.orchestrator
+            .background_manager
+            .lock()
+            .unwrap()
+            .show_background_logs = true;
         {
-            let mut mgr = app.background_manager.lock().unwrap();
+            let mut mgr = app.orchestrator.background_manager.lock().unwrap();
             for i in 0..60 {
                 mgr.push_log(BackgroundLogEntry::new(
                     LogCategory::Indexer,
@@ -266,22 +285,36 @@ mod tests {
     fn test_show_background_logs_window_closed() {
         let ctx = egui::Context::default();
         let mut app = create_test_app();
-        app.background_manager.lock().unwrap().show_background_logs = false;
+        app.orchestrator
+            .background_manager
+            .lock()
+            .unwrap()
+            .show_background_logs = false;
 
         let _ = ctx.run_ui(egui::RawInput::default(), |ui| {
             show_background_logs_window(&mut app, ui.ctx());
         });
-        assert!(!app.background_manager.lock().unwrap().show_background_logs);
+        assert!(
+            !app.orchestrator
+                .background_manager
+                .lock()
+                .unwrap()
+                .show_background_logs
+        );
     }
 
     #[test]
     fn test_show_background_logs_window_open_with_logs() {
         let ctx = egui::Context::default();
         let mut app = create_test_app();
-        app.background_manager.lock().unwrap().show_background_logs = true;
+        app.orchestrator
+            .background_manager
+            .lock()
+            .unwrap()
+            .show_background_logs = true;
 
         {
-            let mut mgr = app.background_manager.lock().unwrap();
+            let mut mgr = app.orchestrator.background_manager.lock().unwrap();
             mgr.push_log(crate::app::background::BackgroundLogEntry::new(
                 LogCategory::Indexer,
                 "Indexing workspace...".to_string(),
@@ -295,6 +328,12 @@ mod tests {
         let _ = ctx.run_ui(egui::RawInput::default(), |ui| {
             show_background_logs_window(&mut app, ui.ctx());
         });
-        assert!(app.background_manager.lock().unwrap().show_background_logs);
+        assert!(
+            app.orchestrator
+                .background_manager
+                .lock()
+                .unwrap()
+                .show_background_logs
+        );
     }
 }

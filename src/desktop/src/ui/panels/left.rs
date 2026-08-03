@@ -145,14 +145,13 @@ pub fn build_workspace_tree(app: &FastMdApp) -> TreeNode {
 
 pub fn show_left_panel(app: &mut FastMdApp, parent_ui: &mut egui::Ui) {
     let ctx = parent_ui.ctx();
-    let root_node = build_workspace_tree(app);
-
     let panel_id = parent_ui.make_persistent_id("left_panel");
     let indexing_just_finished =
         app.file_processor().indexing_finished && !app.file_processor().indexing_finished_handled;
     if indexing_just_finished || app.layout().left_panel_dirty {
         ctx.data_mut(|d| d.remove::<PanelState>(panel_id));
         app.file_processor_mut().indexing_finished_handled = true;
+        let root_node = build_workspace_tree(app);
         fn calc_max_width(node: &TreeNode, depth: usize, ctx: &egui::Context) -> f32 {
             let mut max_w = 0.0_f32;
             for child in node.children.values() {
@@ -258,15 +257,16 @@ pub fn show_left_panel(app: &mut FastMdApp, parent_ui: &mut egui::Ui) {
             // are stable across passes.
             let mut open_editor = None;
             let modifiers = ui.input(|i| i.modifiers);
-            let selection = &mut app.selection;
-            let tab_manager = &mut app.tab_manager;
-            let dialogs = &mut app.dialogs;
+            let pdf_backing_tracker = app.pdf_backing_tracker().clone();
+            let selection = &mut app.orchestrator.selection;
+            let tab_manager = &mut app.orchestrator.tab_manager;
+            let dialogs = &mut app.orchestrator.dialogs;
             let layout = &mut app.layout;
-            let submit_prompt = &mut app.submit_prompt;
-            let content_libraries = &app.content_libraries;
-            let inline_editor_enabled = app.inline_editor_enabled;
-            let file_event_bus = &app.file_event_bus;
-            let tx = app.tx.clone();
+            let submit_prompt = &mut app.orchestrator.submit_prompt;
+            let content_libraries = &app.orchestrator.content_libraries;
+            let inline_editor_enabled = app.orchestrator.inline_editor_enabled;
+            let file_event_bus = &app.orchestrator.file_event_bus;
+            let tx = app.orchestrator.tx.clone();
 
             egui::ScrollArea::vertical()
                 .id_salt("virtual_tree_rows")
@@ -298,6 +298,7 @@ pub fn show_left_panel(app: &mut FastMdApp, parent_ui: &mut egui::Ui) {
                             crate::bus::events::file::FileEventProducer::new(file_event_bus),
                         ),
                         tree_dirty: &mut selection.tree_dirty,
+                        pdf_backing_tracker: pdf_backing_tracker.clone(),
                     };
 
                     for i in row_range {
@@ -321,10 +322,13 @@ pub fn show_left_panel(app: &mut FastMdApp, parent_ui: &mut egui::Ui) {
                 );
             }
 
-            if let Some(path) = open_editor
-                && let Ok(content) = std::fs::read_to_string(&path)
+            if let Some(ref path) = open_editor
+                && let Ok(content) = std::fs::read_to_string(path)
             {
-                app.editor_mut().open(&path, &content);
+                let is_pdf_backed = app.pdf_backing_tracker().is_pdf_backed(path);
+                if !is_pdf_backed {
+                    app.editor_mut().open(path, &content, None);
+                }
             }
         });
 }
@@ -522,34 +526,38 @@ mod tests {
         };
         {
             let mut open_editor = None;
-            let tx = app.tx.clone();
-            let file_event_bus = &app.file_event_bus;
+            let tx = app.orchestrator.tx.clone();
+            let file_event_bus = &app.orchestrator.file_event_bus;
             let mut ctx = TreeNodeContext {
-                selected_file: &mut app.selection.selected_file,
-                selected_files: &mut app.selection.selected_files,
-                expanded_dirs: &mut app.selection.expanded_dirs,
-                tabs: &mut app.tab_manager.tabs,
-                selected_dir: &mut app.selection.selected_dir,
-                create_dir_dialog_open: &mut app.dialogs.create_dir_dialog_open,
-                create_dir_parent: &mut app.dialogs.create_dir_parent,
-                file_to_move: &mut app.dialogs.file_to_move,
-                move_dialog_open: &mut app.dialogs.move_dialog_open,
-                file_to_rename: &mut app.dialogs.file_to_rename,
-                rename_dialog_open: &mut app.dialogs.rename_dialog_open,
-                rename_new_name: &mut app.dialogs.rename_new_name,
-                create_document_dialog_open: &mut app.dialogs.create_document_dialog_open,
-                create_document_parent: &mut app.dialogs.create_document_parent,
+                selected_file: &mut app.orchestrator.selection.selected_file,
+                selected_files: &mut app.orchestrator.selection.selected_files,
+                expanded_dirs: &mut app.orchestrator.selection.expanded_dirs,
+                tabs: &mut app.orchestrator.tab_manager.tabs,
+                selected_dir: &mut app.orchestrator.selection.selected_dir,
+                create_dir_dialog_open: &mut app.orchestrator.dialogs.create_dir_dialog_open,
+                create_dir_parent: &mut app.orchestrator.dialogs.create_dir_parent,
+                file_to_move: &mut app.orchestrator.dialogs.file_to_move,
+                move_dialog_open: &mut app.orchestrator.dialogs.move_dialog_open,
+                file_to_rename: &mut app.orchestrator.dialogs.file_to_rename,
+                rename_dialog_open: &mut app.orchestrator.dialogs.rename_dialog_open,
+                rename_new_name: &mut app.orchestrator.dialogs.rename_new_name,
+                create_document_dialog_open: &mut app
+                    .orchestrator
+                    .dialogs
+                    .create_document_dialog_open,
+                create_document_parent: &mut app.orchestrator.dialogs.create_document_parent,
                 layout: &mut app.layout,
-                submit_prompt: &mut app.submit_prompt,
-                content_libraries: &app.content_libraries,
+                submit_prompt: &mut app.orchestrator.submit_prompt,
+                content_libraries: &app.orchestrator.content_libraries,
                 open_editor: &mut open_editor,
                 modifiers: egui::Modifiers::default(),
-                inline_editor_enabled: app.inline_editor_enabled,
+                inline_editor_enabled: app.orchestrator.inline_editor_enabled,
                 bg_tx: &Some(tx),
                 file_event_producer: Some(crate::bus::events::file::FileEventProducer::new(
                     file_event_bus,
                 )),
-                tree_dirty: &mut app.selection.tree_dirty,
+                tree_dirty: &mut app.orchestrator.selection.tree_dirty,
+                pdf_backing_tracker: crate::app::watcher::PdfBackingTracker::new(),
             };
             crate::ui::tree::handlers::apply_directory_row_click(&mut ctx, &dir_row);
         }

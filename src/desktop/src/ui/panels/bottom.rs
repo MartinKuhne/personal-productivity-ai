@@ -73,8 +73,8 @@ pub fn format_models_list(
 /// command input (or clicking an equivalent submit trigger).
 /// Inputs: app (the application state)
 /// Outputs: ()
-/// Purity: Impure (mutates `app.agent`, `app.config`,
-/// `app.selection`).
+/// Purity: Impure (mutates `app.orchestrator.agent`, `app.orchestrator.config`,
+/// `app.orchestrator.selection`).
 /// Preconditions: `app.agent().command_input` contains the user's
 /// prompt. The `command_input` is consumed and cleared as part of
 /// the call.
@@ -100,7 +100,7 @@ pub fn apply_send_click(app: &mut FastMdApp) {
     match parse_command_intent(&prompt) {
         CommandIntent::ShowModels => {
             app.agent_mut().set_status("Done".to_string());
-            let models_response = format_models_list(&app.config.models);
+            let models_response = format_models_list(&app.orchestrator.config.models);
             app.agent_mut().set_response(models_response);
             app.agent_mut().set_show_results(true);
         }
@@ -111,11 +111,11 @@ pub fn apply_send_click(app: &mut FastMdApp) {
             app.agent_mut().set_show_results(true);
         }
         CommandIntent::RunAgent(agent_prompt) => {
-            let tx = app.tx.clone();
+            let tx = app.orchestrator.tx.clone();
             let file = app.selection().selected_file().cloned();
             let dir = app.selection().selected_dir().cloned();
             let files = app.selection().selected_files().clone();
-            let bus = app.file_event_bus.clone();
+            let bus = app.orchestrator.file_event_bus.clone();
             app.agent_mut()
                 .start_session(tx, agent_prompt, file, dir, files, bus);
             app.agent_mut().set_show_results(true);
@@ -227,7 +227,7 @@ mod tests {
         // Populate at least one model so `format_models_list` is
         // non-empty and the test can assert the response contains
         // the model name.
-        app.config.models.insert(
+        app.orchestrator.config.models.insert(
             "test-model".to_string(),
             LlmConfig {
                 api_key: String::new(),
@@ -237,23 +237,30 @@ mod tests {
                 use_case: Vec::new(),
             },
         );
-        app.agent.command_input = "/models".to_string();
-        assert!(!app.agent.show_results(), "show_results must start false");
+        app.orchestrator.agent.command_input = "/models".to_string();
+        assert!(
+            !app.orchestrator.agent.show_results(),
+            "show_results must start false"
+        );
 
         apply_send_click(&mut app);
 
-        assert_eq!(app.agent.state().status, "Done");
+        assert_eq!(app.orchestrator.agent.state().status, "Done");
         assert!(
-            app.agent.show_results(),
+            app.orchestrator.agent.show_results(),
             "ShowModels dispatch must set show_results"
         );
         assert!(
-            app.agent.state().response.contains("test-model"),
+            app.orchestrator
+                .agent
+                .state()
+                .response
+                .contains("test-model"),
             "ShowModels dispatch must put the model list into the response, got: {}",
-            app.agent.state().response
+            app.orchestrator.agent.state().response
         );
         assert!(
-            app.agent.command_input.is_empty(),
+            app.orchestrator.agent.command_input.is_empty(),
             "command_input must be cleared after dispatch"
         );
     }
@@ -264,16 +271,16 @@ mod tests {
     #[test]
     fn test_apply_send_click_empty_prompt_is_noop() {
         let mut app = create_test_app();
-        app.agent.command_input = "   ".to_string();
+        app.orchestrator.agent.command_input = "   ".to_string();
 
         apply_send_click(&mut app);
 
         assert!(
-            !app.agent.show_results(),
+            !app.orchestrator.agent.show_results(),
             "Empty intent must not toggle show_results"
         );
         assert!(
-            app.agent.command_input.is_empty(),
+            app.orchestrator.agent.command_input.is_empty(),
             "command_input is still cleared (the .clear() runs before the match)"
         );
     }
@@ -286,16 +293,16 @@ mod tests {
     #[test]
     fn test_apply_send_click_run_agent_dispatches_with_prompt() {
         let mut app = create_test_app();
-        app.agent.command_input = "hello world".to_string();
+        app.orchestrator.agent.command_input = "hello world".to_string();
 
         apply_send_click(&mut app);
 
         assert!(
-            app.agent.show_results(),
+            app.orchestrator.agent.show_results(),
             "RunAgent dispatch must set show_results"
         );
         assert!(
-            app.agent.command_input.is_empty(),
+            app.orchestrator.agent.command_input.is_empty(),
             "command_input must be cleared after dispatch"
         );
     }
@@ -308,7 +315,7 @@ mod tests {
     /// post-click observation goes through the captured
     /// `&'static str` event name (per the state-capture pattern
     /// in `test_helpers::interact`). The dispatch's effect on
-    /// `app.agent` is verified separately in the Tier 1 tests
+    /// `app.orchestrator.agent` is verified separately in the Tier 1 tests
     /// above.
     #[test]
     fn test_send_enter_key_captures_event() {
@@ -316,7 +323,7 @@ mod tests {
 
         let mut harness = stateful_harness(Vec::<&'static str>::new(), |ui, captured| {
             let mut app = create_test_app();
-            app.agent.command_input = "/models".to_string();
+            app.orchestrator.agent.command_input = "/models".to_string();
             show_bottom_panel_capture(&mut app, ui, |event| {
                 captured.push(event);
             });

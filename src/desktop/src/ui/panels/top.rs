@@ -61,9 +61,9 @@ pub fn compute_next_selected_file(
 /// button in the top toolbar.
 /// Inputs: app (the application state)
 /// Outputs: ()
-/// Purity: Impure (mutates `app.dialogs.batch_dialog_open`).
+/// Purity: Impure (mutates `app.orchestrator.dialogs.batch_dialog_open`).
 /// Preconditions: None.
-/// Postconditions: `app.dialogs.batch_dialog_open` is `true` after
+/// Postconditions: `app.orchestrator.dialogs.batch_dialog_open` is `true` after
 /// the call. The flag is sticky; the batch dialog itself resets the
 /// flag to `false` when it closes (`ui/app.rs:749`).
 ///
@@ -79,9 +79,9 @@ pub fn apply_batch_button_click(app: &mut FastMdApp) {
 ///
 /// Inputs: app (the application state)
 /// Outputs: ()
-/// Purity: Impure (mutates `app.dialogs.tools_dialog_open`).
+/// Purity: Impure (mutates `app.orchestrator.dialogs.tools_dialog_open`).
 /// Preconditions: None.
-/// Postconditions: `app.dialogs.tools_dialog_open` is `true` after
+/// Postconditions: `app.orchestrator.dialogs.tools_dialog_open` is `true` after
 /// the call. The dialog itself resets the flag to `false` when it
 /// closes.
 ///
@@ -131,7 +131,7 @@ pub fn show_top_panel_capture(
             // panic-on-poison sites per frame plus a lost-update
             // window between the locks (render-audit P1-8).
             {
-                let mut bg = app.background_manager.lock().unwrap();
+                let mut bg = app.orchestrator.background_manager.lock().unwrap();
                 let mut show_bg = bg.show_background_logs;
                 if ui
                     .checkbox(&mut show_bg, crate::ui::strings::SHOW_LOG_CHECKBOX)
@@ -227,7 +227,7 @@ mod tests {
 
     /// Tier 4 click test: clicking the batch-processing button in
     /// the top toolbar must open the batch dialog (sets
-    /// `app.dialogs.batch_dialog_open = true`) and fire the
+    /// `app.orchestrator.dialogs.batch_dialog_open = true`) and fire the
     /// `on_click("batch_button")` callback that the test
     /// harness captures into its persistent state.
     ///
@@ -250,7 +250,7 @@ mod tests {
             // capture pattern documented in
             // `test_helpers::interact`).
             let mut app = create_test_app();
-            assert!(!app.dialogs.batch_dialog_open);
+            assert!(!app.orchestrator.dialogs.batch_dialog_open);
             show_top_panel_capture(&mut app, ui, |event| {
                 captured.push(event);
             });
@@ -285,7 +285,7 @@ mod tests {
 
     /// Tier 4 click test: clicking the "Tools..." button in the top
     /// toolbar must open the tools dialog (sets
-    /// `app.dialogs.tools_dialog_open = true`) and fire the
+    /// `app.orchestrator.dialogs.tools_dialog_open = true`) and fire the
     /// `on_click("tools_button")` callback. Mirrors the batch
     /// button test above.
     #[test]
@@ -295,7 +295,7 @@ mod tests {
 
         let mut harness = stateful_harness(Vec::<&'static str>::new(), |ui, captured| {
             let mut app = create_test_app();
-            assert!(!app.dialogs.tools_dialog_open);
+            assert!(!app.orchestrator.dialogs.tools_dialog_open);
             show_top_panel_capture(&mut app, ui, |event| {
                 captured.push(event);
             });
@@ -318,30 +318,36 @@ mod tests {
     }
 
     /// Tier 1 test for the batch button click effect. The click sets
-    /// `app.dialogs.batch_dialog_open` to `true`; the dialog itself
+    /// `app.orchestrator.dialogs.batch_dialog_open` to `true`; the dialog itself
     /// resets the flag to `false` when it closes. We verify the
     /// effect without driving the egui harness.
     #[test]
     fn test_apply_batch_button_click_sets_dialog_open() {
         let mut app = create_test_app();
-        assert!(!app.dialogs.batch_dialog_open, "dialog must start closed");
+        assert!(
+            !app.orchestrator.dialogs.batch_dialog_open,
+            "dialog must start closed"
+        );
         apply_batch_button_click(&mut app);
         assert!(
-            app.dialogs.batch_dialog_open,
+            app.orchestrator.dialogs.batch_dialog_open,
             "batch button click must open the batch dialog"
         );
     }
 
     /// Tier 1 test for the tools button click effect. The click sets
-    /// `app.dialogs.tools_dialog_open` to `true`; the dialog itself
+    /// `app.orchestrator.dialogs.tools_dialog_open` to `true`; the dialog itself
     /// resets the flag to `false` when it closes.
     #[test]
     fn test_apply_tools_button_click_sets_dialog_open() {
         let mut app = create_test_app();
-        assert!(!app.dialogs.tools_dialog_open, "dialog must start closed");
+        assert!(
+            !app.orchestrator.dialogs.tools_dialog_open,
+            "dialog must start closed"
+        );
         apply_tools_button_click(&mut app);
         assert!(
-            app.dialogs.tools_dialog_open,
+            app.orchestrator.dialogs.tools_dialog_open,
             "tools button click must open the tools dialog"
         );
     }

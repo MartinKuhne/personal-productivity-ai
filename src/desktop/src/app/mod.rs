@@ -19,6 +19,7 @@ pub mod batch;
 pub mod browser;
 pub mod dialog_manager;
 pub mod document;
+pub mod orchestrator;
 pub mod panel_layout;
 pub mod persisted;
 pub mod print;
