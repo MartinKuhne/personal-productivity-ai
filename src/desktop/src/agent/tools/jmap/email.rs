@@ -648,7 +648,7 @@ pub fn tool_get_email_by_id(
 }
 
 /// Footer appended to all emails sent by the AI agent.
-pub const AI_AGENT_FOOTER: &str = "\n---\nSent by an AI agent";
+pub const AI_AGENT_FOOTER: &str = "\n---\nSent by FastMD on behalf of the user";
 
 /// Send an email using `Email/set` to create the message and `EmailSubmission/set`
 /// to submit it for delivery via the typed crate API.
