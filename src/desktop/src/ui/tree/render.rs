@@ -8,6 +8,183 @@ use crate::ui::TreeNode;
 use eframe::egui;
 use std::collections::HashSet;
 
+/// Show context menu for a directory row.
+/// Used by both `render_flat_row` and `draw_tree_node`.
+fn show_dir_context_menu(
+    ui: &mut egui::Ui,
+    path: &std::path::Path,
+    name: &str,
+    ctx: &mut TreeNodeContext<'_>,
+) {
+    if ui
+        .button(crate::ui::strings::SHOW_IN_EXPLORER_ACTION)
+        .clicked()
+    {
+        crate::ui::show_in_file_explorer(path);
+        ui.close();
+    }
+    if ui.button(crate::ui::strings::COPY_PATH_ACTION).clicked() {
+        ui.copy_text(path.to_string_lossy().to_string());
+        ui.close();
+    }
+    if ui.button(crate::ui::strings::RENAME_ACTION).clicked() {
+        *ctx.file_to_rename() = Some(path.to_path_buf());
+        *ctx.rename_new_name() = initial_rename_value(path, name);
+        *ctx.rename_dialog_open() = true;
+        ui.close();
+    }
+    if ui.button(crate::ui::strings::MOVE_ACTION).clicked() {
+        *ctx.file_to_move() = Some(path.to_path_buf());
+        *ctx.move_dialog_open() = true;
+        ui.close();
+    }
+    if ui
+        .button(crate::ui::strings::CREATE_DIRECTORY_ACTION)
+        .clicked()
+    {
+        *ctx.create_dir_parent() = Some(path.to_path_buf());
+        *ctx.create_dir_dialog_open() = true;
+        ui.close();
+    }
+    if ui.button(crate::ui::strings::NEW_DOCUMENT_ACTION).clicked() {
+        *ctx.create_document_parent() = Some(path.to_path_buf());
+        *ctx.create_document_dialog_open() = true;
+        ui.close();
+    }
+    if ui.button(crate::ui::strings::DELETE_ACTION).clicked() {
+        let path = path.to_path_buf();
+        if let Err(e) = trash::delete(&path) {
+            tracing::error!(
+                name = "ui.directory.delete_failed",
+                path = %path.display(),
+                error = %e,
+                "Failed to delete directory to trash. Likely cause: directory in use or permission denied. Operator should check file locks."
+            );
+        }
+        ui.close();
+    }
+}
+
+/// Show multi-select file context menu (merge, delete).
+/// Used by both `render_flat_row` and `draw_tree_node`.
+fn show_multi_select_file_context_menu(ui: &mut egui::Ui, ctx: &mut TreeNodeContext<'_>) {
+    if ui.button(crate::ui::strings::MERGE_ACTION).clicked() {
+        let files: HashSet<_> = ctx.selected_files().iter().cloned().collect();
+        let prompt = build_merge_prompt(ctx.content_libraries(), &files);
+        *ctx.submit_prompt() = Some(prompt);
+        ui.close();
+    }
+    if ui.button(crate::ui::strings::DELETE_ACTION).clicked() {
+        let files: Vec<_> = ctx.selected_files().iter().cloned().collect();
+        for file in files.iter() {
+            if let Err(e) = trash::delete(file) {
+                tracing::error!(
+                    name = "ui.file.multi_delete_failed",
+                    path = %file.display(),
+                    error = %e,
+                    "Failed to delete file to trash during multi-selection. Likely cause: file in use or permission denied. Operator should check file locks."
+                );
+            } else if let Some(producer) = ctx.file_event_producer().as_ref() {
+                producer.publish_removed(file);
+            }
+        }
+        ctx.selected_files().clear();
+        ui.close();
+    }
+}
+
+/// Show single-select file context menu.
+/// Used by both `render_flat_row` and `draw_tree_node`.
+fn show_file_context_menu(
+    ui: &mut egui::Ui,
+    path: &std::path::Path,
+    name: &str,
+    ctx: &mut TreeNodeContext<'_>,
+) {
+    if ui.button(crate::ui::strings::EDIT_BUTTON).clicked() {
+        if ctx.inline_editor_enabled() {
+            *ctx.open_editor() = Some(path.to_path_buf());
+        } else {
+            crate::ui::open_in_system_editor(path);
+        }
+        ui.close();
+    }
+    if ui
+        .button(crate::ui::strings::SHOW_IN_EXPLORER_ACTION)
+        .clicked()
+    {
+        crate::ui::show_in_file_explorer(path);
+        ui.close();
+    }
+    if ui.button(crate::ui::strings::COPY_PATH_ACTION).clicked() {
+        ui.copy_text(path.to_string_lossy().to_string());
+        ui.close();
+    }
+    if ui
+        .button(crate::ui::strings::FORMAT_MARKDOWN_ACTION)
+        .clicked()
+    {
+        let now = chrono::Local::now();
+        let date_str = now.to_rfc3339();
+        *ctx.submit_prompt() = Some(crate::ui::generate_format_prompt(&date_str));
+        ui.close();
+    }
+    if ui
+        .button(crate::ui::strings::RUN_AS_PROMPT_ACTION)
+        .clicked()
+    {
+        if let Ok(content) = std::fs::read_to_string(path) {
+            *ctx.submit_prompt() = Some(content);
+        } else {
+            tracing::error!(
+                name = "ui.file.run_as_prompt_failed",
+                path = %path.display(),
+                "Failed to read file content to run as prompt."
+            );
+        }
+        ui.close();
+    }
+    if ui.button(crate::ui::strings::PRINT_ACTION).clicked() {
+        let path_to_print = path.to_path_buf();
+        if let Some(tx) = ctx.bg_tx().clone() {
+            let job = PrintJob::new(path_to_print.clone());
+            let _ = execute_print_blocking(job, Some(tx));
+        } else {
+            tracing::warn!(
+                name = "ui.file.print_no_channel",
+                path = %path_to_print.display(),
+                "Print requested but no background channel available"
+            );
+        }
+        ui.close();
+    }
+    if ui.button(crate::ui::strings::RENAME_ACTION).clicked() {
+        *ctx.file_to_rename() = Some(path.to_path_buf());
+        *ctx.rename_new_name() = initial_rename_value(path, name);
+        *ctx.rename_dialog_open() = true;
+        ui.close();
+    }
+    if ui.button(crate::ui::strings::MOVE_ACTION).clicked() {
+        *ctx.file_to_move() = Some(path.to_path_buf());
+        *ctx.move_dialog_open() = true;
+        ui.close();
+    }
+    if ui.button(crate::ui::strings::DELETE_ACTION).clicked() {
+        let path = path.to_path_buf();
+        if let Err(e) = trash::delete(&path) {
+            tracing::error!(
+                name = "ui.file.delete_failed",
+                path = %path.display(),
+                error = %e,
+                "Failed to delete file to trash. Likely cause: file in use or permission denied. Operator should check file locks."
+            );
+        } else if let Some(producer) = ctx.file_event_producer().as_ref() {
+            producer.publish_removed(&path);
+        }
+        ui.close();
+    }
+}
+
 /// Render a single flat row with the same interaction logic as `draw_tree_node`
 /// but without recursion.
 pub fn render_flat_row(ui: &mut egui::Ui, row: &FlatRow, ctx: &mut TreeNodeContext<'_>) {
@@ -60,53 +237,7 @@ pub fn render_flat_row_capture(
                 }
 
                 response.context_menu(|ui| {
-                    if ui
-                        .button(crate::ui::strings::SHOW_IN_EXPLORER_ACTION)
-                        .clicked()
-                    {
-                        crate::ui::show_in_file_explorer(&row.path);
-                        ui.close();
-                    }
-                    if ui.button(crate::ui::strings::COPY_PATH_ACTION).clicked() {
-                        ui.copy_text(row.path.to_string_lossy().to_string());
-                        ui.close();
-                    }
-                    if ui.button(crate::ui::strings::RENAME_ACTION).clicked() {
-                        *ctx.file_to_rename() = Some(row.path.clone());
-                        *ctx.rename_new_name() = initial_rename_value(&row.path, &row.name);
-                        *ctx.rename_dialog_open() = true;
-                        ui.close();
-                    }
-                    if ui.button(crate::ui::strings::MOVE_ACTION).clicked() {
-                        *ctx.file_to_move() = Some(row.path.clone());
-                        *ctx.move_dialog_open() = true;
-                        ui.close();
-                    }
-                    if ui
-                        .button(crate::ui::strings::CREATE_DIRECTORY_ACTION)
-                        .clicked()
-                    {
-                        *ctx.create_dir_parent() = Some(row.path.clone());
-                        *ctx.create_dir_dialog_open() = true;
-                        ui.close();
-                    }
-                    if ui.button(crate::ui::strings::NEW_DOCUMENT_ACTION).clicked() {
-                        *ctx.create_document_parent() = Some(row.path.clone());
-                        *ctx.create_document_dialog_open() = true;
-                        ui.close();
-                    }
-                    if ui.button(crate::ui::strings::DELETE_ACTION).clicked() {
-                        let path = row.path.clone();
-                        if let Err(e) = trash::delete(&path) {
-                            tracing::error!(
-                                name = "ui.directory.delete_failed",
-                                path = %path.display(),
-                                error = %e,
-                                "Failed to delete directory to trash."
-                            );
-                        }
-                        ui.close();
-                    }
+                    show_dir_context_menu(ui, &row.path, &row.name, ctx);
                 });
             });
         } else {
@@ -140,113 +271,9 @@ pub fn render_flat_row_capture(
 
                 response.context_menu(|ui| {
                     if ctx.selected_files().len() > 1 && ctx.selected_files().contains(&row.path) {
-                        if ui.button(crate::ui::strings::MERGE_ACTION).clicked() {
-                            let files: HashSet<_> = ctx.selected_files().iter().cloned().collect();
-                            let prompt = build_merge_prompt(ctx.content_libraries(), &files);
-                            *ctx.submit_prompt() = Some(prompt);
-                            ui.close();
-                        }
-                        if ui.button(crate::ui::strings::DELETE_ACTION).clicked() {
-                            let files: Vec<_> = ctx.selected_files().iter().cloned().collect();
-                            for file in files.iter() {
-                                if let Err(e) = trash::delete(file) {
-                                    tracing::error!(
-                                        name = "ui.file.multi_delete_failed",
-                                        path = %file.display(),
-                                        error = %e,
-                                        "Failed to delete file to trash during multi-selection."
-                                    );
-                                } else if let Some(producer) = ctx.file_event_producer().as_ref() {
-                                    producer.publish_removed(file);
-                                }
-                            }
-                            ctx.selected_files().clear();
-                            ui.close();
-                        }
+                        show_multi_select_file_context_menu(ui, ctx);
                     } else {
-                        if ui.button(crate::ui::strings::EDIT_BUTTON).clicked() {
-                            if ctx.inline_editor_enabled() {
-                                *ctx.open_editor() = Some(row.path.clone());
-                            } else {
-                                crate::ui::open_in_system_editor(&row.path);
-                            }
-                            ui.close();
-                        }
-                        if ui
-                            .button(crate::ui::strings::SHOW_IN_EXPLORER_ACTION)
-                            .clicked()
-                        {
-                            crate::ui::show_in_file_explorer(&row.path);
-                            ui.close();
-                        }
-                        if ui.button(crate::ui::strings::COPY_PATH_ACTION).clicked() {
-                            ui.copy_text(row.path.to_string_lossy().to_string());
-                            ui.close();
-                        }
-                        if ui
-                            .button(crate::ui::strings::FORMAT_MARKDOWN_ACTION)
-                            .clicked()
-                        {
-                            let now = chrono::Local::now();
-                            let date_str = now.to_rfc3339();
-                            *ctx.submit_prompt() =
-                                Some(crate::ui::generate_format_prompt(&date_str));
-                            ui.close();
-                        }
-                        if ui
-                            .button(crate::ui::strings::RUN_AS_PROMPT_ACTION)
-                            .clicked()
-                        {
-                            if let Ok(content) = std::fs::read_to_string(&row.path) {
-                                *ctx.submit_prompt() = Some(content);
-                            } else {
-                                tracing::error!(
-                                    name = "ui.file.run_as_prompt_failed",
-                                    path = %row.path.display(),
-                                    "Failed to read file content to run as prompt."
-                                );
-                            }
-                            ui.close();
-                        }
-                        if ui.button(crate::ui::strings::PRINT_ACTION).clicked() {
-                            let path_to_print = row.path.clone();
-                            if let Some(tx) = ctx.bg_tx().clone() {
-                                let job = PrintJob::new(path_to_print.clone());
-                                let _ = execute_print_blocking(job, Some(tx));
-                            } else {
-                                tracing::warn!(
-                                    name = "ui.file.print_no_channel",
-                                    path = %path_to_print.display(),
-                                    "Print requested but no background channel available"
-                                );
-                            }
-                            ui.close();
-                        }
-                        if ui.button(crate::ui::strings::RENAME_ACTION).clicked() {
-                            *ctx.file_to_rename() = Some(row.path.clone());
-                            *ctx.rename_new_name() = initial_rename_value(&row.path, &row.name);
-                            *ctx.rename_dialog_open() = true;
-                            ui.close();
-                        }
-                        if ui.button(crate::ui::strings::MOVE_ACTION).clicked() {
-                            *ctx.file_to_move() = Some(row.path.clone());
-                            *ctx.move_dialog_open() = true;
-                            ui.close();
-                        }
-                        if ui.button(crate::ui::strings::DELETE_ACTION).clicked() {
-                            let path = row.path.clone();
-                            if let Err(e) = trash::delete(&path) {
-                                tracing::error!(
-                                    name = "ui.file.delete_failed",
-                                    path = %path.display(),
-                                    error = %e,
-                                    "Failed to delete file to trash."
-                                );
-                            } else if let Some(producer) = ctx.file_event_producer().as_ref() {
-                                producer.publish_removed(&path);
-                            }
-                            ui.close();
-                        }
+                        show_file_context_menu(ui, &row.path, &row.name, ctx);
                     }
                 });
             });
@@ -283,47 +310,7 @@ pub fn draw_tree_node(ui: &mut egui::Ui, node: &TreeNode, ctx: &mut TreeNodeCont
         }
 
         response.context_menu(|ui| {
-            if ui.button(crate::ui::strings::SHOW_IN_EXPLORER_ACTION).clicked() {
-                crate::ui::show_in_file_explorer(&node.path);
-                ui.close();
-            }
-            if ui.button(crate::ui::strings::COPY_PATH_ACTION).clicked() {
-                ui.copy_text(node.path.to_string_lossy().to_string());
-                ui.close();
-            }
-            if ui.button(crate::ui::strings::RENAME_ACTION).clicked() {
-                *ctx.file_to_rename() = Some(node.path.clone());
-                *ctx.rename_new_name() = initial_rename_value(&node.path, &node.name);
-                *ctx.rename_dialog_open() = true;
-                ui.close();
-            }
-            if ui.button(crate::ui::strings::MOVE_ACTION).clicked() {
-                *ctx.file_to_move() = Some(node.path.clone());
-                *ctx.move_dialog_open() = true;
-                ui.close();
-            }
-            if ui.button(crate::ui::strings::CREATE_DIRECTORY_ACTION).clicked() {
-                *ctx.create_dir_parent() = Some(node.path.clone());
-                *ctx.create_dir_dialog_open() = true;
-                ui.close();
-            }
-            if ui.button(crate::ui::strings::NEW_DOCUMENT_ACTION).clicked() {
-                *ctx.create_document_parent() = Some(node.path.clone());
-                *ctx.create_document_dialog_open() = true;
-                ui.close();
-            }
-            if ui.button(crate::ui::strings::DELETE_ACTION).clicked() {
-                let path = node.path.clone();
-                if let Err(e) = trash::delete(&path) {
-                    tracing::error!(
-                        name = "ui.directory.delete_failed",
-                        path = %path.display(),
-                        error = %e,
-                        "Failed to delete directory to trash. Likely cause: directory in use or permission denied. Operator should check file locks."
-                    );
-                }
-                ui.close();
-            }
+            show_dir_context_menu(ui, &node.path, &node.name, ctx);
         });
 
         if is_expanded {
@@ -377,105 +364,9 @@ pub fn draw_tree_node(ui: &mut egui::Ui, node: &TreeNode, ctx: &mut TreeNodeCont
 
         response.context_menu(|ui| {
             if ctx.selected_files().len() > 1 && ctx.selected_files().contains(&node.path) {
-                // Multi-select context menu
-                if ui.button(crate::ui::strings::MERGE_ACTION).clicked() {
-                    let files: HashSet<_> = ctx.selected_files().iter().cloned().collect();
-                    let prompt = build_merge_prompt(ctx.content_libraries(), &files);
-                    *ctx.submit_prompt() = Some(prompt);
-                    ui.close();
-                }
-                if ui.button(crate::ui::strings::DELETE_ACTION).clicked() {
-                    let files: Vec<_> = ctx.selected_files().iter().cloned().collect();
-                    for file in files.iter() {
-                        if let Err(e) = trash::delete(file) {
-                            tracing::error!(
-                                name = "ui.file.multi_delete_failed",
-                                path = %file.display(),
-                                error = %e,
-                                "Failed to delete file to trash during multi-selection. Likely cause: file in use or permission denied. Operator should check file locks."
-                            );
-                        } else if let Some(producer) = ctx.file_event_producer().as_ref() {
-                            producer.publish_removed(file);
-                        }
-                    }
-                    ctx.selected_files().clear();
-                    ui.close();
-                }
+                show_multi_select_file_context_menu(ui, ctx);
             } else {
-                // Single-select context menu
-                if ui.button(crate::ui::strings::EDIT_BUTTON).clicked() {
-                    if ctx.inline_editor_enabled() {
-                        *ctx.open_editor() = Some(node.path.clone());
-                    } else {
-                        crate::ui::open_in_system_editor(&node.path);
-                    }
-                    ui.close();
-                }
-                if ui.button(crate::ui::strings::SHOW_IN_EXPLORER_ACTION).clicked() {
-                    crate::ui::show_in_file_explorer(&node.path);
-                    ui.close();
-                }
-                if ui.button(crate::ui::strings::COPY_PATH_ACTION).clicked() {
-                    ui.copy_text(node.path.to_string_lossy().to_string());
-                    ui.close();
-                }
-                if ui.button(crate::ui::strings::FORMAT_MARKDOWN_ACTION).clicked() {
-                    let now = chrono::Local::now();
-                    let date_str = now.to_rfc3339();
-                    *ctx.submit_prompt() = Some(crate::ui::generate_format_prompt(&date_str));
-                    ui.close();
-                }
-                if ui.button(crate::ui::strings::RUN_AS_PROMPT_ACTION).clicked() {
-                    if let Ok(content) = std::fs::read_to_string(&node.path) {
-                        *ctx.submit_prompt() = Some(content);
-                    } else {
-                        tracing::error!(
-                            name = "ui.file.run_as_prompt_failed",
-                            path = %node.path.display(),
-                            "Failed to read file content to run as prompt."
-                        );
-                    }
-                    ui.close();
-                }
-                if ui.button(crate::ui::strings::PRINT_ACTION).clicked() {
-                    let path_to_print = node.path.clone();
-                    if let Some(tx) = ctx.bg_tx().clone() {
-                        let job = PrintJob::new(path_to_print.clone());
-                        let _ = execute_print_blocking(job, Some(tx));
-                    } else {
-                        tracing::warn!(
-                            name = "ui.file.print_no_channel",
-                            path = %path_to_print.display(),
-                            "Print requested but no background channel available"
-                        );
-                    }
-                    ui.close();
-                }
-                if ui.button(crate::ui::strings::RENAME_ACTION).clicked() {
-                    *ctx.file_to_rename() = Some(node.path.clone());
-                    *ctx.rename_new_name() = initial_rename_value(&node.path, &node.name);
-                    *ctx.rename_dialog_open() = true;
-                    ui.close();
-                }
-                if ui.button(crate::ui::strings::MOVE_ACTION).clicked() {
-                    *ctx.file_to_move() = Some(node.path.clone());
-                    *ctx.move_dialog_open() = true;
-                    ui.close();
-                }
-                if ui.button(crate::ui::strings::DELETE_ACTION).clicked() {
-                    let path = node.path.clone();
-                    if let Err(e) = trash::delete(&path) {
-                        tracing::error!(
-                            name = "ui.file.delete_failed",
-                            path = %path.display(),
-                            error = %e,
-                            "Failed to delete file to trash. Likely cause: file in use or permission denied. Operator should check file locks."
-                        );
-                    } else if let Some(producer) = ctx.file_event_producer().as_ref() {
-                        producer.publish_removed(&path);
-                    }
-                    ui.close();
-                }
+                show_file_context_menu(ui, &node.path, &node.name, ctx);
             }
         });
     }
