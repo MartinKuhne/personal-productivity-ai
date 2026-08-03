@@ -51,8 +51,7 @@ pub const READ_FILE_LINES_DESCRIPTION: &str =
 
 // --- create_file ---
 
-pub const CREATE_FILE_DESCRIPTION: &str =
-    "Create a file at the specified path with provided content.";
+pub const CREATE_FILE_DESCRIPTION: &str = "Create a new file at the specified path with provided content. Fails if the file already exists — this tool can only create new files.";
 
 // --- insert_lines ---
 

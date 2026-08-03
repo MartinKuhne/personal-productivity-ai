@@ -127,18 +127,20 @@ pub struct WebFetchInput {
     pub headers: bool,
     #[serde(default)]
     pub force_refetch: bool,
-    #[schemars(description = strings::paging::FIELD_OFFSET_DESCRIPTION)]
+    #[schemars(description = strings::cursor::FIELD_CURSOR_DESCRIPTION)]
     #[serde(default)]
-    pub offset: Option<usize>,
-    #[schemars(description = strings::paging::FIELD_LIMIT_DESCRIPTION)]
-    #[serde(default)]
-    pub limit: Option<usize>,
+    pub cursor: Option<String>,
 }
 #[derive(Serialize, Debug, JsonSchema)]
 pub struct WebFetchResponse {
     pub content: String,
     #[schemars(description = strings::web::FIELD_WEB_FETCH_RESPONSE_TOTAL_LINES)]
     pub total_lines: usize,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub cursor: Option<String>,
+    #[schemars(description = strings::paging::FIELD_HINT_DESCRIPTION)]
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub hint: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub response_headers: Option<std::collections::HashMap<String, String>>,
     #[schemars(description = strings::web::FIELD_WEB_FETCH_RESPONSE_FROM_CACHE)]

@@ -28,11 +28,15 @@ pub const MAX_CACHE_ENTRIES: usize = 1024;
 /// in the shared cache.
 #[derive(Clone)]
 pub enum CacheEntry {
-    /// `web_fetch` result. The URL is the cache key.
-    WebFetch {
+    /// `web_fetch` result. The URL is the cache key, storing the cursor UUID.
+    WebFetch { cursor: String },
+    /// `web_fetch` full content stored under cursor UUID.
+    WebFetchContent {
         content: String,
         response_headers: HashMap<String, String>,
         fetched_at: Instant,
+        cursor_offset: usize,
+        total_lines: usize,
     },
     /// `search_email` result. The cursor is the cache key.
     SearchEmail(SearchEmailCacheEntry),
@@ -88,7 +92,7 @@ impl ToolCache {
         let mut state = self.state.lock().expect("cache mutex poisoned");
         state.evict_expired_locked();
         if let Some(entry) = state.entries.get(key).cloned() {
-            if !is_expired(&entry) {
+            if !is_expired(&entry, &state.entries) {
                 return Some(entry);
             }
             // Expired: remove and report miss.
@@ -141,7 +145,7 @@ impl CacheState {
         let expired: Vec<String> = self
             .entries
             .iter()
-            .filter(|(_, e)| is_expired(e))
+            .filter(|(_, e)| is_expired(e, &self.entries))
             .map(|(k, _)| k.clone())
             .collect();
         for k in expired {
@@ -151,9 +155,19 @@ impl CacheState {
     }
 }
 
-fn is_expired(entry: &CacheEntry) -> bool {
+fn is_expired(entry: &CacheEntry, entries: &std::collections::HashMap<String, CacheEntry>) -> bool {
     match entry {
-        CacheEntry::WebFetch { fetched_at, .. } => fetched_at.elapsed() >= CACHE_TTL,
+        CacheEntry::WebFetch { cursor } => {
+            // Only check content expiration if the content exists
+            if let Some(CacheEntry::WebFetchContent { fetched_at, .. }) = entries.get(cursor) {
+                fetched_at.elapsed() >= CACHE_TTL
+            } else {
+                // Content doesn't exist yet, don't expire the WebFetch entry
+                // The content will be populated on first fetch
+                false
+            }
+        }
+        CacheEntry::WebFetchContent { fetched_at, .. } => fetched_at.elapsed() >= CACHE_TTL,
         CacheEntry::SearchEmail(e) => e.fetched_at.elapsed() >= CACHE_TTL,
     }
 }
@@ -168,11 +182,9 @@ mod tests {
     use super::*;
     use std::collections::HashMap;
 
-    fn web_entry(content: &str) -> CacheEntry {
+    fn web_entry(cursor: &str) -> CacheEntry {
         CacheEntry::WebFetch {
-            content: content.to_string(),
-            response_headers: HashMap::new(),
-            fetched_at: Instant::now(),
+            cursor: cursor.to_string(),
         }
     }
 
@@ -180,10 +192,10 @@ mod tests {
     fn put_and_get_round_trip() {
         let cache = cache();
         cache.invalidate("test:put_and_get");
-        cache.put("test:put_and_get".to_string(), web_entry("hello"));
+        cache.put("test:put_and_get".to_string(), web_entry("test-cursor"));
         let entry = cache.get("test:put_and_get");
         match entry {
-            Some(CacheEntry::WebFetch { content, .. }) => assert_eq!(content, "hello"),
+            Some(CacheEntry::WebFetch { cursor }) => assert_eq!(cursor, "test-cursor"),
             _ => panic!("expected WebFetch entry"),
         }
         cache.invalidate("test:put_and_get");
@@ -201,15 +213,25 @@ mod tests {
     fn get_after_ttl_returns_none() {
         let cache = cache();
         // Construct an entry whose fetched_at is well past CACHE_TTL.
-        let stale = CacheEntry::WebFetch {
+        let stale = CacheEntry::WebFetchContent {
             content: "stale".to_string(),
             response_headers: HashMap::new(),
             fetched_at: Instant::now() - CACHE_TTL - Duration::from_secs(10),
+            cursor_offset: 0,
+            total_lines: 1,
         };
-        cache.put("test:stale".to_string(), stale);
-        assert!(cache.get("test:stale").is_none());
-        // And the eviction sweep removed it from the map.
-        assert!(cache.get("test:stale").is_none());
+        cache.put("test:stale_content".to_string(), stale);
+        // Put the WebFetch entry pointing to the stale content
+        cache.put(
+            "test:stale".to_string(),
+            CacheEntry::WebFetch {
+                cursor: "test:stale_content".to_string(),
+            },
+        );
+        // After TTL, the content is expired, so the content entry should be None
+        assert!(cache.get("test:stale_content").is_none());
+        // And the eviction sweep removed the content from the map.
+        assert!(cache.get("test:stale_content").is_none());
     }
 
     #[test]
@@ -217,10 +239,20 @@ mod tests {
         let cache = cache();
         // Pre-fill to MAX_CACHE_ENTRIES with sentinel keys we can recognize.
         for i in 0..MAX_CACHE_ENTRIES {
-            cache.put(format!("test:cap:{i}"), web_entry("fill"));
+            cache.put(
+                format!("test:cap:{i}"),
+                CacheEntry::WebFetch {
+                    cursor: format!("cursor{i}"),
+                },
+            );
         }
         // One more insert should evict the oldest (the first sentinel).
-        cache.put("test:cap:overflow".to_string(), web_entry("overflow"));
+        cache.put(
+            "test:cap:overflow".to_string(),
+            CacheEntry::WebFetch {
+                cursor: "overflow".to_string(),
+            },
+        );
         assert_eq!(cache.len(), MAX_CACHE_ENTRIES);
         assert!(cache.get("test:cap:0").is_none());
         assert!(cache.get("test:cap:overflow").is_some());
@@ -235,11 +267,21 @@ mod tests {
     fn replace_existing_key_does_not_grow() {
         let cache = cache();
         cache.invalidate("test:replace");
-        cache.put("test:replace".to_string(), web_entry("v1"));
-        cache.put("test:replace".to_string(), web_entry("v2"));
+        cache.put(
+            "test:replace".to_string(),
+            CacheEntry::WebFetch {
+                cursor: "v1".to_string(),
+            },
+        );
+        cache.put(
+            "test:replace".to_string(),
+            CacheEntry::WebFetch {
+                cursor: "v2".to_string(),
+            },
+        );
         let entry = cache.get("test:replace");
         match entry {
-            Some(CacheEntry::WebFetch { content, .. }) => assert_eq!(content, "v2"),
+            Some(CacheEntry::WebFetch { cursor }) => assert_eq!(cursor, "v2"),
             _ => panic!("expected WebFetch entry"),
         }
         cache.invalidate("test:replace");

@@ -114,16 +114,41 @@ pub fn format_tool_result_message(func_name: &str, result: &str) -> String {
                 .get("total_lines")
                 .and_then(|f| f.as_u64())
                 .unwrap_or(0);
+            let cursor = result_data
+                .get("cursor")
+                .and_then(|c| c.as_str())
+                .unwrap_or("");
+            let hint = result_data
+                .get("hint")
+                .and_then(|h| h.as_str())
+                .unwrap_or("");
             let from_cache = result_data
                 .get("from_cache")
                 .and_then(|f| f.as_bool())
                 .unwrap_or(false);
             let cache_tag = if from_cache { " (cached)" } else { "" };
             let returned = content.lines().count();
-            format!(
-                "> **Result (`{}`):** {} of {} markdown lines returned{}. To read other sections, set offset to the number of lines already retrieved (e.g., if you received 100 lines starting at offset 0, next use offset=100). Track cumulative coverage to avoid gaps.\n\n",
+
+            let mut msg = format!(
+                "> **Result (`{}`):** {} of {} markdown lines returned{}.",
                 func_name, returned, total_lines, cache_tag
-            )
+            );
+
+            if !cursor.is_empty() {
+                // More pages remain. Surface the cursor so the LLM (and a
+                // human operator inspecting the transcript) can see what to
+                // pass back.
+                msg.push_str(&format!(" More pages remain. Cursor: `{cursor}`."));
+            } else if !hint.is_empty() {
+                // Final page or empty result; the hint already ends with a
+                // period ("Final page.").
+                msg.push_str(&format!(" {hint}"));
+            } else {
+                // No cursor, no hint: all content fits on a single page.
+                msg.push_str(" All content on this page.");
+            }
+            msg.push_str("\n\n");
+            msg
         }
         "web_search" => {
             let content = result_data
@@ -496,5 +521,77 @@ mod tests {
         // JSON array (it's the "No matching emails found." sentinel).
         assert!(msg.contains("Page: 0 item(s)"));
         assert!(msg.contains("No matching emails found"));
+    }
+
+    // `web_fetch` cursor paging display: the result header should
+    // show the total lines, lines on this page, and either
+    // the cursor (more pages) or the "Final page." hint (last page).
+    // See `format_tool_result_message` for "web_fetch" branch.
+
+    #[test]
+    fn test_format_result_web_fetch_first_page_with_cursor() {
+        // 500 total lines, 100 lines on this page, cursor present.
+        let result = serde_json::json!({
+            "status": "success",
+            "data": {
+                "content": "line1\nline2\nline3",
+                "total_lines": 500,
+                "cursor": "550e8400-e29b-41d4-a716-446655440000",
+                "hint": null,
+                "from_cache": false
+            }
+        })
+        .to_string();
+        let msg = format_tool_result_message("web_fetch", &result);
+        assert!(msg.contains("web_fetch"));
+        assert!(msg.contains("3 of 500 markdown lines returned"));
+        assert!(msg.contains("More pages remain"));
+        assert!(msg.contains("550e8400-e29b-41d4-a716-446655440000"));
+        // No "Final page." on a non-final page.
+        assert!(!msg.contains("Final page"));
+    }
+
+    #[test]
+    fn test_format_result_web_fetch_final_page_with_hint() {
+        // 150 total lines, 50 lines on this page, no cursor, final-page hint.
+        let result = serde_json::json!({
+            "status": "success",
+            "data": {
+                "content": "line1\nline2",
+                "total_lines": 150,
+                "cursor": null,
+                "hint": "Final page.",
+                "from_cache": true
+            }
+        })
+        .to_string();
+        let msg = format_tool_result_message("web_fetch", &result);
+        assert!(msg.contains("web_fetch"));
+        assert!(msg.contains("2 of 150 markdown lines returned"));
+        assert!(msg.contains("(cached)"));
+        assert!(msg.contains("Final page"));
+        // No "More pages remain" on the final page.
+        assert!(!msg.contains("More pages remain"));
+    }
+
+    #[test]
+    fn test_format_result_web_fetch_single_page_no_paging() {
+        // 5 total lines, 5 lines on this page, no cursor, no hint.
+        let result = serde_json::json!({
+            "status": "success",
+            "data": {
+                "content": "line1\nline2\nline3\nline4\nline5",
+                "total_lines": 5,
+                "cursor": null,
+                "hint": null,
+                "from_cache": false
+            }
+        })
+        .to_string();
+        let msg = format_tool_result_message("web_fetch", &result);
+        assert!(msg.contains("5 of 5 markdown lines returned"));
+        assert!(msg.contains("All content on this page"));
+        assert!(!msg.contains("More pages remain"));
+        assert!(!msg.contains("Final page"));
     }
 }

@@ -21,10 +21,10 @@ The requirements below have been formatted using the **Easy Approach to Requirem
 | `list_files` | List markdown files in a directory (non-recursive). With "/" or "." returns library names. Paginated via `offset`/`limit` (0-indexed; default `offset=0`, `limit=100`); the response carries `total` and an optional `hint`. |
 | `read_file` | Read the entire text contents of a file. |
 | `read_file_lines` | Read specific line numbers or ranges from a file (1-indexed). |
-| `create_file` | Create a new markdown file with the specified content. |
+| `create_file` | Create a new markdown file with the specified content. Fails if the file already exists — this tool can only create new files. |
 | `insert_lines` | Insert new lines of text into an existing file at a specific 1-indexed position. |
 | `replace_text` | Replace exact occurrences of old_string with new_string in a file. |
-| `web_fetch` | Fetch content from a URL and convert HTML to Markdown. Paginated by Markdown line via `offset`/`limit` (default `offset=0`, `limit=100` lines); the response carries `total_lines`. Cached for 5 minutes in the shared `ToolCache`; pass `force_refetch=true` to bypass. |
+| `web_fetch` | Fetch content from a URL and convert HTML to Markdown. Cursor-based pagination: returns up to 100 lines and a `cursor` token; pass the `cursor` back unchanged to get the next page. The full content is cached for 5 minutes in the shared `ToolCache`; pass `force_refetch=true` to bypass. |
 | `web_search` | Search the web using SearXNG. Requires searxng_url config. |
 | `web_delegate` | Delegate complex web research to a sub-agent with web_fetch/web_search tools. |
 | `browser_navigate` | Drive the persistent headless Firefox page to a URL. State (cookies, JS, scroll) is preserved across calls (BRWS-001). Requires `tool_groups.browser`. |
@@ -79,11 +79,11 @@ The requirements below have been formatted using the **Easy Approach to Requirem
 ### Web Fetch Pagination & Caching
 
 * [TOOL-005] Web Fetch Headers: The `web_fetch` tool shall accept an optional `headers` boolean parameter (default: `false`). When `true`, the response shall include the HTTP response headers as a JSON object alongside the content.
-* [TOOL-006] Web Fetch Pagination: The `web_fetch` tool shall accept `offset` (default 0) and `limit` (default 100) integer parameters. `offset` is the number of Markdown lines to skip. `limit` is the number of Markdown lines to return. The helper that slices the body MUST NOT cap `limit`; the LLM owns the page-size choice (TOOL-027).
-* [TOOL-007] Pagination Total: Every list-paginated tool (`list_files`, `list_files_by_tag`, `web_fetch`) MUST return a `total` field on its response. The value MUST be the item count across all pages. `search_email` MUST also return `total`; the value MUST be the item count across all pages of the same search and MUST be identical across all pages.
+* [TOOL-006] Web Fetch Pagination: The `web_fetch` tool shall use cursor-based pagination. It accepts an optional `cursor: Option<String>` input parameter and returns a `cursor: Option<String>` output field. The first call (no cursor in input) returns up to 100 Markdown lines plus a new cursor. Subsequent calls with the same cursor return the next 100 lines (or fewer on the final page). The cursor is opaque and MUST be passed back unchanged. When the result set is exhausted, the response includes a `hint` and no `cursor`. The page size is fixed at 100 lines; the LLM does not control it.
+* [TOOL-007] Pagination Total: Every cursor-paginated tool (`web_fetch`, `search_email`) MUST return a `total_lines` / `total` field on its response. The value MUST be the item count across all pages and MUST be identical across all pages.
 * [TOOL-008] Web Fetch Cache: The system shall cache fetched Markdown content for 5 minutes. Subsequent calls to `web_fetch` with the same URL and `force_refetch` set to `false` (default) shall return the cached content without making a network request.
 * [TOOL-009] Web Fetch Force Refetch: The `web_fetch` tool shall accept an optional `force_refetch` boolean parameter (default: `false`). When `true`, the system shall invalidate the shared cache entry for the URL and fetch fresh content, replacing the cached entry.
-* [TOOL-010] Web Fetch Context Efficiency: The `web_fetch` tool description shall state that the LLM can save context by fetching a URL once and then issuing partial reads via `offset` and `limit` to paginate through the Markdown body, rather than re-fetching the same URL.
+* [TOOL-010] Web Fetch Context Efficiency: The `web_fetch` tool description shall state that the LLM can save context by fetching a URL once and then using the cursor token to paginate through the Markdown body, rather than re-fetching the same URL.
 
 ### Grep Tool
 
@@ -107,18 +107,18 @@ The system shall maintain a single tool manager that owns the tool catalog, the 
 * [TOOL-023] MCP Refresh: The tool manager shall provide an MCP refresh capability that re-runs tool discovery against every configured MCP server, registers discovered tools into the catalog, and records discovery errors on affected groups when a server fails.
 * [TOOL-024] Single Manager Type: The system shall maintain a single unified tool manager that owns the tool catalog, per-group state, error tracking, parallel-safety classification, and MCP client manager.
 
-### Tool Pagination (offset/limit, cursor, shared cache)
+### Tool Pagination (cursor, shared cache)
 
-The four paginated tools split into two classes. The list-paginated tools (`list_files`, `list_files_by_tag`, `web_fetch`) use a stateless `offset`/`limit` model. The search tool (`search_email`) uses a stateful cursor model backed by the shared tool cache. The split is deliberate — see TOOL-029 for the rationale.
+The cursor-paginated tools (`search_email`, `web_fetch`) use a stateful cursor model backed by the shared tool cache.
 
-* [TOOL-025] Pagination Hint: Every paginated tool MUST return a `hint` field on its response. For list-paginated tools, `hint` MUST be set to a human-readable message when `total == 0` or `offset >= total`. For `search_email`, `hint` MUST be set to `"Final page."` when the response has no `cursor`. `hint` MUST be absent (or `null`) otherwise and MUST be `skip_serializing_if = "Option::is_none"`.
-* [TOOL-026] Pagination Defaults: `list_files` and `list_files_by_tag` MUST default `offset=0`, `limit=100`. `web_fetch` MUST default `offset=0` (lines), `limit=100` (lines). `search_email` does not use `offset`/`limit`; the page size is fixed by the tool (TOOL-029).
-* [TOOL-027] No Pagination Cap: List-paginated tools MUST NOT cap `limit`. If the LLM requests more items than exist, the tool returns all remaining items starting at `offset` and reports the true `total` on the response. The LLM is responsible for choosing a `limit` that fits its context window; the tool's job is to honor the request and report the truth. `search_email` is not subject to this requirement because the LLM does not control the page size.
-* [TOOL-028] Pagination Vocabulary: List-paginated tools MUST use the parameter names `offset` and `limit` and the response field names `total` and `hint`. The names `page` and `page_size` MUST NOT appear in any list-paginated tool's schema. `search_email` is exempt from this rule; it uses the cursor parameter and response field per TOOL-029. The LLM-facing description of every list-paginated tool MUST include the standardized paging description paragraph.
+* [TOOL-025] Pagination Hint: Every paginated tool MUST return a `hint` field on its response. For cursor-paginated tools (`search_email`, `web_fetch`), `hint` MUST be set to `"Final page."` when the response has no `cursor`. `hint` MUST be absent (or `null`) otherwise and MUST be `skip_serializing_if = "Option::is_none"`.
+* [TOOL-026] Pagination Defaults: The page size is fixed at 100 for both `search_email` (emails) and `web_fetch` (Markdown lines). The LLM does not control the page size.
+* [TOOL-027] No Pagination Cap: Cursor-paginated tools are not subject to limit caps because the LLM does not control the page size.
+* [TOOL-028] Pagination Vocabulary: Cursor-paginated tools MUST use the parameter name `cursor` and the response field names `cursor`, `total`/`total_lines`, and `hint`. The names `page`, `page_size`, `offset`, and `limit` MUST NOT appear in any cursor-paginated tool's schema. The LLM-facing description of every cursor-paginated tool MUST include the standardized cursor-based paging description paragraph.
 * [TOOL-029] Search Email Cursor: The `search_email` tool MUST accept a `cursor: Option<String>` input parameter and return a `cursor: Option<String>` output field. The first call (no cursor in input) returns up to 100 matching emails plus a new cursor. Subsequent calls with the same cursor return the next 100 emails (or fewer on the final page). The cursor is opaque and MUST be passed back unchanged. When the result set is exhausted, the response includes a `hint` and no `cursor`. The page size is fixed at 100; the LLM does not control it.
 * [TOOL-030] Shared Tool Cache: An in-memory process-local cache MUST be shared by `search_email` and `web_fetch`. Cache entries MUST be evicted lazily on access after 5 minutes. A capacity cap of 1024 entries MUST be enforced with FIFO eviction once exceeded. The cache MUST NOT be persisted across process restarts. The cache is the single source of truth for both tools' per-URL / per-search result set state.
 * [TOOL-031] Search Email Cache Population: The first `search_email` call with a given filter set MUST populate the cache with the full server result set. Subsequent calls with the matching cursor MUST slice from the cache without re-fetching. A `search_email` call with a cursor that does not match a live cache entry MUST return the error `"Cursor expired or unknown; re-run the search with no cursor."`
-* [TOOL-032] Web Fetch Cache Shared Integration: The `web_fetch` tool MUST utilize the shared tool cache (TOOL-030) for fetched content. The URL MUST be the cache key. The `force_refetch` parameter MUST invalidate the cache entry before re-fetching. The 5-minute TTL MUST match the shared cache's TTL exactly.
+* [TOOL-032] Web Fetch Cache Shared Integration: The `web_fetch` tool MUST utilize the shared tool cache (TOOL-030) for fetched content. The URL maps to a cursor UUID which maps to the full content. The `force_refetch` parameter MUST invalidate the cache entry before re-fetching. The 5-minute TTL MUST match the shared cache's TTL exactly.
 
 ### Browser Automation Tools
 

@@ -178,6 +178,10 @@ pub fn tool_create_file(
     let _events = crate::markdown::parse_markdown_to_events(content);
 
     let path = Path::new(path_str);
+    if path.exists() {
+        return Err("File already exists. This tool can only create new files.".to_string());
+    }
+
     if let Some(parent) = path.parent()
         && let Err(e) = std::fs::create_dir_all(parent)
     {
@@ -436,6 +440,27 @@ mod tests {
             result.unwrap_err(),
             "Invalid YAML front-matter in markdown."
         );
+    }
+
+    #[test]
+    fn test_tool_create_file_fails_if_exists() {
+        let dir = tempdir().unwrap();
+        let file_path = dir.path().join("existing.md");
+        fs::write(&file_path, "existing content").unwrap();
+
+        let producer = noop_producer();
+        let result = tool_create_file(
+            file_path.to_str().unwrap(),
+            "---\ntitle: Test\n---\n# Hello",
+            &producer,
+        );
+        assert_eq!(
+            result.unwrap_err(),
+            "File already exists. This tool can only create new files."
+        );
+        // Original content should be unchanged
+        let content = fs::read_to_string(&file_path).unwrap();
+        assert_eq!(content, "existing content");
     }
 
     #[test]

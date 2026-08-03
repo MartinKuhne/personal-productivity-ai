@@ -29,6 +29,9 @@ pub struct AgentState {
     pub history: Option<Vec<Value>>,
     pub token_usage: Option<TokenUsageInfo>,
     pub total_usage: TokenUsageInfo,
+    /// Queue of prompts submitted while the agent is running.
+    /// These will be processed sequentially after the current prompt finishes.
+    pub pending_prompts: Vec<String>,
 }
 
 /// Manages the lifecycle and state of a single LLM agent session.
@@ -87,6 +90,7 @@ impl AgentSessionManager {
                 history: None,
                 token_usage: None,
                 total_usage: TokenUsageInfo::default(),
+                pending_prompts: Vec::new(),
             },
             cancel_flag: None,
             config: AppConfig::default(),
@@ -118,6 +122,7 @@ impl AgentSessionManager {
                 history: None,
                 token_usage: None,
                 total_usage: TokenUsageInfo::default(),
+                pending_prompts: Vec::new(),
             },
             cancel_flag: None,
             config,
@@ -240,6 +245,25 @@ impl AgentSessionManager {
         self.state.history = history;
     }
 
+    /// Queue a prompt to be processed after the current one finishes.
+    pub fn queue_prompt(&mut self, prompt: String) {
+        self.state.pending_prompts.push(prompt);
+    }
+
+    /// Take the next queued prompt, if any.
+    pub fn take_next_queued_prompt(&mut self) -> Option<String> {
+        if self.state.pending_prompts.is_empty() {
+            None
+        } else {
+            Some(self.state.pending_prompts.remove(0))
+        }
+    }
+
+    /// Get the number of queued prompts.
+    pub fn queued_prompt_count(&self) -> usize {
+        self.state.pending_prompts.len()
+    }
+
     /// Clear the response and history (for new session).
     pub fn clear_history(&mut self) {
         self.state.history = None;
@@ -303,30 +327,36 @@ impl AgentSessionManager {
     /// Consume and handle a single typed [`AgentEvent`] from the
     /// background event channel.
     ///
-    /// Returns `true` if the UI should repaint.
-    pub fn handle_agent_event(&mut self, event: AgentEvent) -> bool {
+    /// Returns the next queued prompt if the agent just finished and there
+    /// are prompts waiting in the queue. The caller is responsible for
+    /// starting the next session with that prompt.
+    pub fn handle_agent_event(&mut self, event: AgentEvent) -> Option<String> {
         match event {
             AgentEvent::Status(status) => {
                 self.state.status = status;
-                true
+                None
             }
             AgentEvent::Thinking(thinking) => {
                 self.state.thinking = thinking;
-                true
+                None
             }
             AgentEvent::Response(resp) => {
                 self.state.response = resp.clone();
-                true
+                None
             }
             AgentEvent::Finished(history) => {
                 self.state.running = false;
                 self.state.history = Some(history);
-                true
+                // Check for queued prompts
+                self.take_next_queued_prompt()
             }
             AgentEvent::Failed(err) => {
                 self.state.running = false;
                 self.state.status = format!("Error: {}", err);
-                true
+                // On failure, also check for queued prompts (or clear them?)
+                // For now, we'll clear the queue on failure to avoid cascading errors
+                self.state.pending_prompts.clear();
+                None
             }
             AgentEvent::TokenUsage(info) => {
                 if info.prompt_tokens > self.state.total_usage.prompt_tokens {
@@ -357,7 +387,7 @@ impl AgentSessionManager {
                         .saturating_add(info.reasoning_tokens.unwrap_or(0)),
                 );
                 self.state.token_usage = Some(info);
-                true
+                None
             }
         }
     }
@@ -529,5 +559,106 @@ mod tests {
 
         assert!(!mgr.drain_config());
         assert!(!mgr.config_arrived());
+    }
+
+    #[test]
+    fn test_queue_prompt_and_take_next() {
+        let config = AppConfig::default();
+        let mut mgr = AgentSessionManager::new_for_test(
+            config,
+            Arc::new(crate::app::browser::BrowserSession::new(
+                &AppConfig::default(),
+            )),
+        );
+
+        // Initially no queued prompts
+        assert_eq!(mgr.queued_prompt_count(), 0);
+        assert!(mgr.take_next_queued_prompt().is_none());
+
+        // Queue a prompt
+        mgr.queue_prompt("first prompt".to_string());
+        assert_eq!(mgr.queued_prompt_count(), 1);
+
+        // Queue another
+        mgr.queue_prompt("second prompt".to_string());
+        assert_eq!(mgr.queued_prompt_count(), 2);
+
+        // Take first
+        let first = mgr.take_next_queued_prompt();
+        assert_eq!(first, Some("first prompt".to_string()));
+        assert_eq!(mgr.queued_prompt_count(), 1);
+
+        // Take second
+        let second = mgr.take_next_queued_prompt();
+        assert_eq!(second, Some("second prompt".to_string()));
+        assert_eq!(mgr.queued_prompt_count(), 0);
+
+        // Empty now
+        assert!(mgr.take_next_queued_prompt().is_none());
+    }
+
+    #[test]
+    fn test_handle_agent_event_finished_returns_queued_prompt() {
+        use crate::bus::events::typed::AgentEvent;
+        let config = AppConfig::default();
+        let mut mgr = AgentSessionManager::new_for_test(
+            config,
+            Arc::new(crate::app::browser::BrowserSession::new(
+                &AppConfig::default(),
+            )),
+        );
+
+        // Queue a prompt
+        mgr.queue_prompt("queued prompt".to_string());
+        mgr.state.running = true;
+
+        // Handle Finished event - should return the queued prompt
+        let result = mgr.handle_agent_event(AgentEvent::Finished(vec![]));
+        assert_eq!(result, Some("queued prompt".to_string()));
+        assert!(!mgr.state.running);
+        assert_eq!(mgr.queued_prompt_count(), 0);
+    }
+
+    #[test]
+    fn test_handle_agent_event_finished_no_queued_prompt() {
+        use crate::bus::events::typed::AgentEvent;
+        let config = AppConfig::default();
+        let mut mgr = AgentSessionManager::new_for_test(
+            config,
+            Arc::new(crate::app::browser::BrowserSession::new(
+                &AppConfig::default(),
+            )),
+        );
+
+        mgr.state.running = true;
+
+        // Handle Finished event with no queued prompts
+        let result = mgr.handle_agent_event(AgentEvent::Finished(vec![]));
+        assert!(result.is_none());
+        assert!(!mgr.state.running);
+    }
+
+    #[test]
+    fn test_handle_agent_event_failed_clears_queue() {
+        use crate::bus::events::typed::AgentEvent;
+        let config = AppConfig::default();
+        let mut mgr = AgentSessionManager::new_for_test(
+            config,
+            Arc::new(crate::app::browser::BrowserSession::new(
+                &AppConfig::default(),
+            )),
+        );
+
+        // Queue some prompts
+        mgr.queue_prompt("prompt 1".to_string());
+        mgr.queue_prompt("prompt 2".to_string());
+        mgr.state.running = true;
+
+        // Handle Failed event - should clear the queue
+        let result = mgr.handle_agent_event(AgentEvent::Failed("test error".to_string()));
+        assert!(result.is_none());
+        assert!(!mgr.state.running);
+        assert_eq!(mgr.queued_prompt_count(), 0);
+        assert!(mgr.state.status.contains("Error"));
     }
 }

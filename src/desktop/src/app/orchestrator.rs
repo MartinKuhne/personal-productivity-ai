@@ -280,7 +280,10 @@ impl AppOrchestrator {
         while let Ok(event) = self.rx.try_recv() {
             match event {
                 BackgroundEvent::Agent(agent_ev) => {
-                    self.agent.handle_agent_event(agent_ev);
+                    if let Some(next_prompt) = self.agent.handle_agent_event(agent_ev) {
+                        // There's a queued prompt - start the next session
+                        self.start_agent_session(next_prompt);
+                    }
                 }
                 BackgroundEvent::Fs(fs_ev) => {
                     self.handle_fs_event(fs_ev);
