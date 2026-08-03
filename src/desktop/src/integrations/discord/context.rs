@@ -69,25 +69,34 @@ impl ContextManager {
         ctx
     }
 
-    /// Add a message to the conversation.
+    /// Add a message to the conversation, creating the context if it does
+    /// not yet exist (so the first message in a channel is never dropped).
     pub async fn add_message(&self, scope_id: &str, role: Role, content: String) {
         let mut contexts = self.contexts.write().await;
-        if let Some(ctx) = contexts.get_mut(scope_id) {
-            ctx.messages.push(Message {
-                role,
-                content,
-                timestamp: Instant::now(),
+        let ctx = contexts
+            .entry(scope_id.to_string())
+            .or_insert_with(|| ConversationContext {
+                id: Uuid::new_v4(),
+                scope_id: scope_id.to_string(),
+                messages: Vec::new(),
+                created_at: Instant::now(),
+                last_accessed: Instant::now(),
+                token_count: 0,
             });
-            ctx.last_accessed = Instant::now();
-            // Trim to max_history
-            if ctx.messages.len() > self.max_history {
-                ctx.messages = ctx
-                    .messages
-                    .split_off(ctx.messages.len() - self.max_history);
-            }
-            // Rough token count estimate
-            ctx.token_count = ctx.messages.iter().map(|m| m.content.len() / 4).sum();
+        ctx.messages.push(Message {
+            role,
+            content,
+            timestamp: Instant::now(),
+        });
+        ctx.last_accessed = Instant::now();
+        // Trim to max_history
+        if ctx.messages.len() > self.max_history {
+            ctx.messages = ctx
+                .messages
+                .split_off(ctx.messages.len() - self.max_history);
         }
+        // Rough token count estimate (bytes / 4)
+        ctx.token_count = ctx.messages.iter().map(|m| m.content.len() / 4).sum();
     }
 
     /// Get messages for LLM context (with system prompt).
@@ -126,6 +135,26 @@ impl ContextManager {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Regression: adding a message to a brand-new scope (no prior
+    /// `get_or_create`) must create the context instead of silently
+    /// dropping the message.
+    #[tokio::test]
+    async fn test_add_message_creates_context_if_missing() {
+        let manager = ContextManager::new(20, 3600);
+
+        manager
+            .add_message("fresh-channel", Role::User, "first message".to_string())
+            .await;
+
+        let messages = manager.get_messages_for_llm("fresh-channel", None).await;
+        assert_eq!(messages.len(), 1);
+        assert_eq!(messages[0].0, Role::User);
+        assert_eq!(messages[0].1, "first message");
+
+        let scopes = manager.active_scopes().await;
+        assert!(scopes.contains(&"fresh-channel".to_string()));
+    }
 
     #[tokio::test]
     async fn test_context_manager_creates_new_context() {

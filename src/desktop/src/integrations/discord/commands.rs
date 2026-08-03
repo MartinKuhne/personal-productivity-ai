@@ -1,8 +1,14 @@
-//! Slash command handling for Discord bot.
+//! Slash command definitions and interaction-response helpers for the Discord bot.
+//!
+//! Command *handling* (LLM wiring) lives on [`crate::integrations::discord::bot::DiscordBot`];
+//! this module owns the static command definitions and the response shapes
+//! used to talk to Discord's interaction callback endpoint.
 
-use crate::config::DiscordConfig;
-use anyhow::Result;
 use serde::{Deserialize, Serialize};
+
+/// Interaction type for an application command (slash command).
+/// See <https://docs.discord.com/developers/docs/interactions/receiving-and-responding#interaction-object>.
+pub const APPLICATION_COMMAND: u8 = 2;
 
 /// Slash command definition.
 #[derive(Debug, Serialize, Deserialize, Clone)]
@@ -151,221 +157,12 @@ pub fn deferred_response() -> InteractionResponse {
     InteractionResponse::DeferredChannelMessageWithSource { data: None }
 }
 
-/// Handle a slash command interaction.
-pub async fn handle_slash_command(
-    interaction: &crate::integrations::discord::gateway::InteractionCreate,
-    _config: &DiscordConfig,
-) -> Result<InteractionResponse> {
-    let data = interaction
-        .data
-        .as_ref()
-        .ok_or_else(|| anyhow::anyhow!("No interaction data"))?;
-
-    match data.name.as_str() {
-        "chat" => {
-            let message = data
-                .options
-                .as_ref()
-                .and_then(|opts| opts.iter().find(|o| o.name == "message"))
-                .and_then(|o| o.value.as_ref())
-                .and_then(|v| v.as_str())
-                .unwrap_or("");
-
-            // This would forward to the LLM - for now return a placeholder
-            Ok(ephemeral_response(format!("Chat: {}", message)))
-        }
-        "summarize" => {
-            let text = data
-                .options
-                .as_ref()
-                .and_then(|opts| opts.iter().find(|o| o.name == "text"))
-                .and_then(|o| o.value.as_ref())
-                .and_then(|v| v.as_str())
-                .unwrap_or("");
-
-            Ok(ephemeral_response(format!("Summary: {}", text)))
-        }
-        "code" => {
-            let prompt = data
-                .options
-                .as_ref()
-                .and_then(|opts| opts.iter().find(|o| o.name == "prompt"))
-                .and_then(|o| o.value.as_ref())
-                .and_then(|v| v.as_str())
-                .unwrap_or("");
-
-            let language = data
-                .options
-                .as_ref()
-                .and_then(|opts| opts.iter().find(|o| o.name == "language"))
-                .and_then(|o| o.value.as_ref())
-                .and_then(|v| v.as_str())
-                .unwrap_or("rust");
-
-            Ok(ephemeral_response(format!(
-                "```{}\n// Code for: {}\n```",
-                language, prompt
-            )))
-        }
-        "analyze" => {
-            let content = data
-                .options
-                .as_ref()
-                .and_then(|opts| opts.iter().find(|o| o.name == "content"))
-                .and_then(|o| o.value.as_ref())
-                .and_then(|v| v.as_str())
-                .unwrap_or("");
-
-            Ok(ephemeral_response(format!("Analysis: {}", content)))
-        }
-        _ => Ok(ephemeral_response("Unknown command".to_string())),
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::integrations::discord::gateway::{
-        InteractionCreate, InteractionData, InteractionOption,
-    };
 
-    fn create_mock_interaction(
-        command_name: &str,
-        options: Vec<(&str, &str)>,
-    ) -> InteractionCreate {
-        InteractionCreate {
-            id: "interaction-123".to_string(),
-            application_id: "app-123".to_string(),
-            interaction_type: 2, // APPLICATION_COMMAND
-            data: Some(InteractionData {
-                id: "cmd-123".to_string(),
-                name: command_name.to_string(),
-                options: Some(
-                    options
-                        .into_iter()
-                        .map(|(name, value)| InteractionOption {
-                            name: name.to_string(),
-                            option_type: 3, // STRING
-                            value: Some(serde_json::Value::String(value.to_string())),
-                        })
-                        .collect(),
-                ),
-            }),
-            guild_id: None,
-            channel_id: "channel-123".to_string(),
-            token: "token-123".to_string(),
-            version: 1,
-        }
-    }
-
-    #[tokio::test]
-    async fn test_handle_chat_command() {
-        let interaction = create_mock_interaction("chat", vec![("message", "Hello, world!")]);
-        let config = DiscordConfig::default();
-
-        let response = handle_slash_command(&interaction, &config).await.unwrap();
-
-        match response {
-            InteractionResponse::ChannelMessageWithSource { data } => {
-                assert_eq!(data.flags, EPHEMERAL_FLAG);
-                assert!(data.content.unwrap().contains("Chat: Hello, world!"));
-            }
-            _ => panic!("Expected ChannelMessageWithSource"),
-        }
-    }
-
-    #[tokio::test]
-    async fn test_handle_summarize_command() {
-        let interaction =
-            create_mock_interaction("summarize", vec![("text", "Long text to summarize")]);
-        let config = DiscordConfig::default();
-
-        let response = handle_slash_command(&interaction, &config).await.unwrap();
-
-        match response {
-            InteractionResponse::ChannelMessageWithSource { data } => {
-                assert_eq!(data.flags, EPHEMERAL_FLAG);
-                assert!(
-                    data.content
-                        .unwrap()
-                        .contains("Summary: Long text to summarize")
-                );
-            }
-            _ => panic!("Expected ChannelMessageWithSource"),
-        }
-    }
-
-    #[tokio::test]
-    async fn test_handle_code_command_with_language() {
-        let interaction = create_mock_interaction(
-            "code",
-            vec![("prompt", "Create a hello world"), ("language", "python")],
-        );
-        let config = DiscordConfig::default();
-
-        let response = handle_slash_command(&interaction, &config).await.unwrap();
-
-        match response {
-            InteractionResponse::ChannelMessageWithSource { data } => {
-                assert_eq!(data.flags, EPHEMERAL_FLAG);
-                let content = data.content.unwrap();
-                assert!(content.contains("python"));
-                assert!(content.contains("Create a hello world"));
-            }
-            _ => panic!("Expected ChannelMessageWithSource"),
-        }
-    }
-
-    #[tokio::test]
-    async fn test_handle_code_command_defaults_to_rust() {
-        let interaction = create_mock_interaction("code", vec![("prompt", "Create a hello world")]);
-        let config = DiscordConfig::default();
-
-        let response = handle_slash_command(&interaction, &config).await.unwrap();
-
-        match response {
-            InteractionResponse::ChannelMessageWithSource { data } => {
-                let content = data.content.unwrap();
-                assert!(content.contains("rust"));
-            }
-            _ => panic!("Expected ChannelMessageWithSource"),
-        }
-    }
-
-    #[tokio::test]
-    async fn test_handle_analyze_command() {
-        let interaction = create_mock_interaction("analyze", vec![("content", "Code to analyze")]);
-        let config = DiscordConfig::default();
-
-        let response = handle_slash_command(&interaction, &config).await.unwrap();
-
-        match response {
-            InteractionResponse::ChannelMessageWithSource { data } => {
-                assert_eq!(data.flags, EPHEMERAL_FLAG);
-                assert!(data.content.unwrap().contains("Analysis: Code to analyze"));
-            }
-            _ => panic!("Expected ChannelMessageWithSource"),
-        }
-    }
-
-    #[tokio::test]
-    async fn test_handle_unknown_command() {
-        let interaction = create_mock_interaction("unknown", vec![]);
-        let config = DiscordConfig::default();
-
-        let response = handle_slash_command(&interaction, &config).await.unwrap();
-
-        match response {
-            InteractionResponse::ChannelMessageWithSource { data } => {
-                assert_eq!(data.flags, EPHEMERAL_FLAG);
-                assert_eq!(data.content.unwrap(), "Unknown command");
-            }
-            _ => panic!("Expected ChannelMessageWithSource"),
-        }
-    }
-
-    #[tokio::test]
-    async fn test_ephemeral_response_has_correct_flag() {
+    #[test]
+    fn test_ephemeral_response_has_correct_flag() {
         let response = ephemeral_response("Test".to_string());
 
         match response {
@@ -377,16 +174,16 @@ mod tests {
         }
     }
 
-    #[tokio::test]
-    async fn test_get_default_commands_returns_all_commands() {
+    #[test]
+    fn test_get_default_commands_returns_all_commands() {
         let commands = get_default_commands();
 
         let names: Vec<&str> = commands.iter().map(|c| c.name.as_str()).collect();
         assert_eq!(names, vec!["chat", "summarize", "code", "analyze"]);
     }
 
-    #[tokio::test]
-    async fn test_code_command_has_language_choices() {
+    #[test]
+    fn test_code_command_has_language_choices() {
         let commands = get_default_commands();
         let code_cmd = commands.iter().find(|c| c.name == "code").unwrap();
 

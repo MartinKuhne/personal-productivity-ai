@@ -4,17 +4,28 @@ use std::sync::Arc;
 use tokio::sync::RwLock;
 
 /// Safety filter for input and output content.
+///
+/// Patterns are matched as case-insensitive substrings. Patterns are
+/// typically loaded from `DiscordConfig::blocked_patterns` at startup
+/// (see [`SafetyFilter::with_patterns`]); [`SafetyFilter::add_pattern`]
+/// can be used for runtime additions.
 #[derive(Debug)]
 pub struct SafetyFilter {
     blocked_patterns: Arc<RwLock<Vec<String>>>,
 }
 
 impl SafetyFilter {
+    /// Create an empty filter (blocks nothing).
     pub fn new() -> Self {
         Self {
-            blocked_patterns: Arc::new(RwLock::new(vec![
-                // Add default blocked patterns here
-            ])),
+            blocked_patterns: Arc::new(RwLock::new(Vec::new())),
+        }
+    }
+
+    /// Create a filter pre-populated with the given patterns.
+    pub fn with_patterns(patterns: Vec<String>) -> Self {
+        Self {
+            blocked_patterns: Arc::new(RwLock::new(patterns)),
         }
     }
 }
@@ -29,8 +40,9 @@ impl SafetyFilter {
     /// Check if content is safe.
     pub async fn is_safe(&self, content: &str) -> SafetyResult {
         let patterns = self.blocked_patterns.read().await;
+        let content_lower = content.to_lowercase();
         for pattern in patterns.iter() {
-            if content.to_lowercase().contains(&pattern.to_lowercase()) {
+            if content_lower.contains(&pattern.to_lowercase()) {
                 return SafetyResult::Blocked {
                     reason: format!("Content matches blocked pattern: {}", pattern),
                 };
@@ -39,9 +51,14 @@ impl SafetyFilter {
         SafetyResult::Safe
     }
 
-    /// Add a blocked pattern.
+    /// Add a blocked pattern at runtime.
     pub async fn add_pattern(&self, pattern: String) {
         self.blocked_patterns.write().await.push(pattern);
+    }
+
+    /// Replace all blocked patterns.
+    pub async fn set_patterns(&self, patterns: Vec<String>) {
+        *self.blocked_patterns.write().await = patterns;
     }
 }
 
@@ -55,6 +72,22 @@ pub enum SafetyResult {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[tokio::test]
+    async fn test_with_patterns_blocks_matching_content() {
+        let filter = SafetyFilter::with_patterns(vec!["badword".to_string()]);
+
+        let blocked = filter.is_safe("this contains badword").await;
+        assert_eq!(
+            blocked,
+            SafetyResult::Blocked {
+                reason: "Content matches blocked pattern: badword".to_string()
+            }
+        );
+
+        let clean = filter.is_safe("totally clean").await;
+        assert_eq!(clean, SafetyResult::Safe);
+    }
 
     #[tokio::test]
     async fn test_safety_filter_allows_clean_content() {

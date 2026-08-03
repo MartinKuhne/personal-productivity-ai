@@ -26,6 +26,10 @@ pub struct DiscordConfig {
     /// Per-user rate limit (requests per minute).
     #[serde(default = "default_discord_rate_limit")]
     pub rate_limit_per_minute: u32,
+    /// Substrings blocked on both inbound (user) and outbound (LLM) content.
+    /// Matching is case-insensitive. Empty by default.
+    #[serde(default)]
+    pub blocked_patterns: Vec<String>,
 }
 
 fn default_true() -> bool {
