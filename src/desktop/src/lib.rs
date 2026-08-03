@@ -3,6 +3,7 @@
 pub mod agent;
 pub mod app;
 pub mod bus;
+pub mod integrations;
 pub mod markdown;
 pub mod ui;
 pub mod utils;
@@ -29,7 +30,9 @@ pub use bus::events::{
     FsEvent, ProcessEvent, TokenUsageInfo,
 };
 pub use bus::router::{BusRouter, ChannelWorker, spawn_path_worker};
-pub use config::{AppConfig, BrowserConfig, ResolvedBrowserConfig, get_config_path, load_config};
+pub use config::{
+    AppConfig, BrowserConfig, DiscordConfig, ResolvedBrowserConfig, get_config_path, load_config,
+};
 pub use markdown::ToCEntry;
 pub use ui::FastMdApp;
 pub use utils::extract_tags_from_file;

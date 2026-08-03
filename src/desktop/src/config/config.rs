@@ -218,6 +218,40 @@ impl Default for ToolGroupsConfig {
     }
 }
 
+/// Discord bot configuration.
+#[derive(serde::Serialize, serde::Deserialize, Clone, Debug, Default, PartialEq, Eq)]
+pub struct DiscordConfig {
+    /// Bot token from the Discord Developer Portal.
+    #[serde(default)]
+    pub bot_token: Option<String>,
+    /// Channel IDs where the bot should respond (empty = all channels where mentioned).
+    #[serde(default)]
+    pub allowed_channels: Vec<String>,
+    /// Guild IDs where the bot is active (empty = all guilds).
+    #[serde(default)]
+    pub allowed_guilds: Vec<String>,
+    /// Enable slash command registration.
+    #[serde(default = "default_true")]
+    pub register_commands: bool,
+    /// Default system prompt for the LLM.
+    #[serde(default)]
+    pub system_prompt: Option<String>,
+    /// Maximum conversation history length (number of messages).
+    #[serde(default = "default_discord_history_len")]
+    pub max_history: usize,
+    /// Per-user rate limit (requests per minute).
+    #[serde(default = "default_discord_rate_limit")]
+    pub rate_limit_per_minute: u32,
+}
+
+fn default_discord_history_len() -> usize {
+    20
+}
+
+fn default_discord_rate_limit() -> u32 {
+    10
+}
+
 /// Per-tool-group settings for the browser tool family.
 ///
 /// Lives under `config.browser`. All fields are optional so an
@@ -601,6 +635,10 @@ pub struct AppConfig {
     /// Trello client configuration (token and secret).
     #[serde(default)]
     pub trello_client: Option<TrelloClient>,
+
+    /// Discord bot configuration.
+    #[serde(default)]
+    pub discord: Option<DiscordConfig>,
 }
 
 impl std::fmt::Debug for AppConfig {
@@ -625,6 +663,7 @@ impl std::fmt::Debug for AppConfig {
             .field("mcp_servers", &self.mcp_servers)
             .field("table_width_strategy", &self.table_width_strategy)
             .field("trello_client", &self.trello_client)
+            .field("discord", &self.discord)
             .finish()
     }
 }
@@ -652,6 +691,7 @@ impl Default for AppConfig {
             table_width_strategy: default_table_width_strategy(),
             browser: BrowserConfig::default(),
             trello_client: None,
+            discord: None,
         }
     }
 }
