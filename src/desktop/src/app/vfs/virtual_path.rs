@@ -66,7 +66,9 @@ impl VirtualPath {
             return Err(VirtualPathError::EmptyPath);
         }
 
-        let path = Path::new(vpath);
+        let vpath_normalized = vpath.replace('\\', "/");
+
+        let path = Path::new(&vpath_normalized);
         if path
             .components()
             .any(|c| c == std::path::Component::ParentDir)
@@ -74,7 +76,6 @@ impl VirtualPath {
             return Err(VirtualPathError::TraversalDetected);
         }
 
-        let vpath_normalized = vpath.replace('\\', "/");
         let slash_pos = vpath_normalized.find('/');
 
         match slash_pos {
@@ -94,12 +95,6 @@ impl VirtualPath {
                 }
 
                 let sub_path = PathBuf::from(sub);
-                if sub_path
-                    .components()
-                    .any(|c| c == std::path::Component::ParentDir)
-                {
-                    return Err(VirtualPathError::TraversalDetected);
-                }
 
                 Ok(VirtualPath {
                     library: lib.to_string(),
@@ -210,6 +205,22 @@ mod tests {
         let vp = VirtualPath::parse("Lib\\sub\\file.md").unwrap();
         assert_eq!(vp.library, "Lib");
         assert_eq!(vp.sub_path, PathBuf::from("sub/file.md"));
+    }
+
+    #[test]
+    fn test_parse_backslash_traversal_rejected() {
+        assert_eq!(
+            VirtualPath::parse("Lib\\..\\outside"),
+            Err(VirtualPathError::TraversalDetected)
+        );
+    }
+
+    #[test]
+    fn test_parse_backslash_traversal_deep() {
+        assert_eq!(
+            VirtualPath::parse("Lib\\a\\b\\..\\..\\outside"),
+            Err(VirtualPathError::TraversalDetected)
+        );
     }
 
     #[test]
