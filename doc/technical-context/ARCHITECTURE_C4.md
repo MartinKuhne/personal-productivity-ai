@@ -297,7 +297,7 @@ C4Component
   Component(ed, "editor", "app/text_buffer.rs (512)", "Inline editor; EditorColors inverted white-on-black (REQ-261); validation via pulldown-cmark (REQ-258); undo/redo >=100 (REQ-257); clipboard (REQ-255); cursor nav (REQ-256); save combines body + original front-matter (REQ-259)")
   Component(print, "print", "app/print.rs (206)", "PrintJob{markdown_path, markdown_content, title}; markdown->HTML via pulldown-cmark; execute_print_blocking")
   Component(browser, "browser", "app/browser/mod.rs (116)", "Playwright async: browser_navigate, browser_get_page_state, click, type, screenshot")
-  Component(batch, "batch", "app/batch/", "{coordinator, dialog, discoverer, executor, file_matcher, prompts, types}; batch prompt processing BATCH-001..BATCH-014; concurrency 1-8; File vs Directory modes")
+  Component(batch, "batch", "app/batch/", "{coordinator, discoverer, executor, file_matcher, prompts, types}; batch prompt processing BATCH-001..BATCH-014; concurrency 1-8; File vs Directory modes; dialog UI in ui/batch_dialog.rs")
   Component(utils, "utils", "utils/", "markdown (parse_front_matter), path, tags (extract_tags_from_file)")
   Component(err, "error", "error.rs", "AgentError")
 

@@ -572,7 +572,7 @@ impl FastMdApp {
                 .and_then(|p| dialog_config.available_dirs.iter().position(|d| d == p));
 
             if let Some(result) =
-                crate::app::batch::dialog::show_batch_modal(self, ctx, &mut dialog_config)
+                crate::ui::batch_dialog::show_batch_modal(self, ctx, &mut dialog_config)
             {
                 match result {
                     crate::app::batch::types::BatchDialogResult::Process(config) => {
