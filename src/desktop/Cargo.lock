@@ -1499,6 +1499,7 @@ dependencies = [
  "eframe",
  "egui_extras",
  "egui_kittest",
+ "encoding_rs",
  "evalexpr",
  "fast-dav-rs",
  "fast_h2m",

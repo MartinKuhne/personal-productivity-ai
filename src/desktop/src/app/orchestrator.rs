@@ -1,5 +1,5 @@
 use crate::agent::AgentSessionManager;
-use crate::app::background::SharedProcessManager;
+use crate::app::background::{BackgroundLogEntry, LogCategory, SharedProcessManager};
 use crate::app::watcher::directory_tracker::DirectoryTracker;
 use crate::app::watcher::file_processor::FileEventProcessor;
 use crate::app::{DialogManager, SelectionManager, TabManager, TagManager, TextBuffer};
@@ -360,19 +360,42 @@ impl AppOrchestrator {
             }
             ProcessEvent::FileLoaded { path, content } => {
                 self.pending_file_load = None;
-                if let Ok(content) = content {
-                    if let Some(fm) = parse_front_matter(&content) {
-                        self.tab_manager.current_yaml = Some(fm.yaml);
-                        self.tab_manager.current_markdown = fm.body.to_string();
-                    } else {
-                        self.tab_manager.current_yaml = None;
-                        self.tab_manager.current_markdown = content;
+                match content {
+                    Ok(content) => {
+                        if let Some(fm) = parse_front_matter(&content) {
+                            self.tab_manager.current_yaml = Some(fm.yaml);
+                            self.tab_manager.current_markdown = fm.body.to_string();
+                        } else {
+                            self.tab_manager.current_yaml = None;
+                            self.tab_manager.current_markdown = content;
+                        }
+                        self.tab_manager.invalidate_heading_ids_cache();
+                        self.tab_manager.loaded_path = Some(path.clone());
+                        self.tab_manager.toc =
+                            crate::ui::render::build_toc(&self.tab_manager.current_markdown);
+                        self.tab_manager.scroll_to_header_id = None;
                     }
-                    self.tab_manager.invalidate_heading_ids_cache();
-                    self.tab_manager.loaded_path = Some(path.clone());
-                    self.tab_manager.toc =
-                        crate::ui::render::build_toc(&self.tab_manager.current_markdown);
-                    self.tab_manager.scroll_to_header_id = None;
+                    Err(err) => {
+                        // Load failed — do not leave stale content or an open tab.
+                        self.tab_manager.close_tab(&path);
+                        if self.selection.selected_file() == Some(&path) {
+                            *self.selection.selected_file_mut() = None;
+                        }
+                        self.selection.selected_files_mut().remove(&path);
+                        self.tab_manager.current_yaml = None;
+                        self.tab_manager.current_markdown = String::new();
+                        self.tab_manager.invalidate_heading_ids_cache();
+                        self.tab_manager.toc.clear();
+                        self.tab_manager.scroll_to_header_id = None;
+
+                        // Log the failure to the background log.
+                        if let Ok(mut mgr) = self.background_manager.lock() {
+                            mgr.push_log(BackgroundLogEntry::new(
+                                LogCategory::Watcher,
+                                format!("Failed to load file {}: {}", path.display(), err),
+                            ));
+                        }
+                    }
                 }
             }
         }
@@ -417,7 +440,7 @@ impl AppOrchestrator {
             let tx = self.tx.clone();
             let path = selected_path.clone();
             std::thread::spawn(move || {
-                let content = std::fs::read_to_string(&path).map_err(|e| e.to_string());
+                let content = crate::utils::read_text_file(&path).map_err(|e| e.to_string());
                 if tx
                     .send(ProcessEvent::FileLoaded { path, content }.into())
                     .is_err()
