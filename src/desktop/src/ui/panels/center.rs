@@ -382,7 +382,9 @@ pub fn render_tabs_and_content_capture(
                         );
                         // P0-2: Apply task checkbox toggles to the markdown source.
                         if !app.orchestrator.tab_manager.pending_task_toggles.is_empty() {
-                            for (idx, checked) in app.orchestrator.tab_manager.pending_task_toggles.drain(..) {
+                            for (idx, checked) in
+                                app.orchestrator.tab_manager.pending_task_toggles.drain(..)
+                            {
                                 crate::ui::render::apply_task_toggle(
                                     &mut app.orchestrator.tab_manager.current_markdown,
                                     idx,
@@ -410,7 +412,9 @@ pub fn render_tabs_and_content_capture(
                     );
                     // P0-2: Apply task checkbox toggles to the markdown source.
                     if !app.orchestrator.tab_manager.pending_task_toggles.is_empty() {
-                        for (idx, checked) in app.orchestrator.tab_manager.pending_task_toggles.drain(..) {
+                        for (idx, checked) in
+                            app.orchestrator.tab_manager.pending_task_toggles.drain(..)
+                        {
                             crate::ui::render::apply_task_toggle(
                                 &mut app.orchestrator.tab_manager.current_markdown,
                                 idx,
@@ -511,8 +515,14 @@ mod tests {
 
         apply_tab_close_click(&mut app, 5);
 
-        assert_eq!(app.orchestrator.tab_manager.tabs, vec![PathBuf::from("a.md")]);
-        assert_eq!(app.orchestrator.selection.selected_file(), Some(&PathBuf::from("a.md")));
+        assert_eq!(
+            app.orchestrator.tab_manager.tabs,
+            vec![PathBuf::from("a.md")]
+        );
+        assert_eq!(
+            app.orchestrator.selection.selected_file(),
+            Some(&PathBuf::from("a.md"))
+        );
     }
 
     /// Tier 1 test for the context-menu "Close Others" item.
@@ -530,8 +540,14 @@ mod tests {
 
         apply_tab_close_others_click(&mut app, 1);
 
-        assert_eq!(app.orchestrator.tab_manager.tabs, vec![PathBuf::from("b.md")]);
-        assert_eq!(app.orchestrator.selection.selected_file(), Some(&PathBuf::from("b.md")));
+        assert_eq!(
+            app.orchestrator.tab_manager.tabs,
+            vec![PathBuf::from("b.md")]
+        );
+        assert_eq!(
+            app.orchestrator.selection.selected_file(),
+            Some(&PathBuf::from("b.md"))
+        );
     }
 
     /// Tier 1 test for the context-menu "Close All Tabs" item.

@@ -513,7 +513,10 @@ mod tests {
 
         app.orchestrator.dialogs.move_dialog_open = true;
         app.orchestrator.dialogs.file_to_move = Some(src_file.clone());
-        app.orchestrator.file_processor.all_dirs.push(dest_dir.clone());
+        app.orchestrator
+            .file_processor
+            .all_dirs
+            .push(dest_dir.clone());
         app.orchestrator.dialogs.selected_move_folder = Some(dest_dir.clone());
 
         // R-2 / Q12: the `Window::show` rendering path used by the modals
