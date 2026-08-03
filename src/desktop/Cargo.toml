@@ -56,9 +56,9 @@ quick-xml = "0.41.0"
 puffin = { version = "0.20", optional = true, default-features = false }
 puffin_egui = { git = "https://github.com/EmbarkStudios/puffin", optional = true, default-features = false }
 encoding_rs = "0.8.35"
+tempfile = "3.8"
 
 [dev-dependencies]
-tempfile = "3.8"
 tokio = { version = "1.53.0", features = ["rt", "rt-multi-thread", "macros", "sync"] }
 filetime = "0.2"
 proptest = "1.4"

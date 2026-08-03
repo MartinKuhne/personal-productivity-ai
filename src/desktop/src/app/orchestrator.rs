@@ -183,17 +183,12 @@ impl AppOrchestrator {
             match reader.try_recv() {
                 Ok(event) => config = Some(event),
                 Err(std::sync::mpsc::TryRecvError::Empty) => {
-                    tracing::error!(
-                        name = "config.arrived.missed",
-                        "FastMdApp reader was registered after the publish; \
-                         broadcasting only delivers to pre-existing subscribers. \
-                         The app will use AppConfig::default() and content \
-                         libraries will be empty until the next startup."
-                    );
+                    return;
+                }
+                Err(std::sync::mpsc::TryRecvError::Disconnected) => {
                     self.config_reader = None;
                     return;
                 }
-                Err(std::sync::mpsc::TryRecvError::Disconnected) => {}
             }
         }
         self.config_reader = None;

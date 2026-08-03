@@ -133,17 +133,16 @@ pub fn execute_print_blocking(
         );
     });
 
-    let temp_dir = std::env::temp_dir();
-    let file_name = format!("fastmd_print_{}.html", job.title.replace([' ', '.'], "_"));
-    let file_path = temp_dir.join(&file_name);
-
-    let mut file = std::fs::File::create(&file_path)
+    let mut temp_file = tempfile::Builder::new()
+        .prefix("fastmd_print_")
+        .suffix(".html")
+        .rand_bytes(8)
+        .tempfile()
         .map_err(|e| format!("Failed to create temp file: {}", e))?;
-    file.write_all(html_document.as_bytes())
+    temp_file
+        .write_all(html_document.as_bytes())
         .map_err(|e| format!("Failed to write temp file: {}", e))?;
-    drop(file);
-
-    let path_str = file_path.to_string_lossy().to_string();
+    let path_str = temp_file.path().to_string_lossy().to_string();
 
     webbrowser::open(&path_str).map_err(|e| format!("Failed to open browser: {}", e))?;
 

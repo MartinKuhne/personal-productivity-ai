@@ -15,7 +15,10 @@ pub struct FrontMatter {
     pub body: String,
 }
 
-/// Parse YAML front matter from markdown content.
+/// Parse YAML front matter from markdown content. The returned [`FrontMatter`]
+/// gives access to the parsed YAML value, the original YAML source text
+/// (preserved verbatim for round-tripping on save), and the body content
+/// that follows the closing `---` delimiter.
 pub fn parse_front_matter(content: &str) -> Option<FrontMatter> {
     let content = content.strip_prefix('\u{feff}').unwrap_or(content);
     let parts: Vec<&str> = content.splitn(3, "---").collect();
