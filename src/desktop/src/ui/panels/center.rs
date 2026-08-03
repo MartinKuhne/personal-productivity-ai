@@ -362,69 +362,77 @@ pub fn render_tabs_and_content_capture(
         ui.separator();
 
         let pdf_backed = app.pdf_backing_tracker().is_pdf_backed(selected_path);
-        if pdf_backed {
-            let sepia_tint = egui::Color32::from_rgb(35, 30, 20);
-            egui::Frame::new().fill(sepia_tint).show(ui, |ui| {
-                egui::ScrollArea::vertical()
-                    .id_salt("main_markdown_scroll")
-                    .show(ui, |ui| {
-                        if let Some(yaml) = &app.orchestrator.tab_manager.current_yaml {
-                            render_yaml_table(ui, yaml);
-                        }
-                        let heading_ids = app.orchestrator.tab_manager.heading_ids().to_vec();
-                        render_markdown(
-                            ui,
-                            &app.orchestrator.tab_manager.current_markdown,
-                            &mut app.orchestrator.tab_manager.scroll_to_header_id,
-                            &mut app.orchestrator.tab_manager.pending_task_toggles,
-                            app.orchestrator.config.deficit_strategy(),
-                            Some(&heading_ids),
-                        );
-                        // P0-2: Apply task checkbox toggles to the markdown source.
-                        if !app.orchestrator.tab_manager.pending_task_toggles.is_empty() {
-                            for (idx, checked) in
-                                app.orchestrator.tab_manager.pending_task_toggles.drain(..)
-                            {
-                                crate::ui::render::apply_task_toggle(
-                                    &mut app.orchestrator.tab_manager.current_markdown,
-                                    idx,
-                                    checked,
-                                );
-                            }
-                        }
-                    });
-            });
-        } else {
-            egui::ScrollArea::vertical()
-                .id_salt("main_markdown_scroll")
-                .show(ui, |ui| {
-                    if let Some(yaml) = &app.orchestrator.tab_manager.current_yaml {
-                        render_yaml_table(ui, yaml);
-                    }
-                    let heading_ids = app.orchestrator.tab_manager.heading_ids().to_vec();
-                    render_markdown(
-                        ui,
-                        &app.orchestrator.tab_manager.current_markdown,
-                        &mut app.orchestrator.tab_manager.scroll_to_header_id,
-                        &mut app.orchestrator.tab_manager.pending_task_toggles,
-                        app.orchestrator.config.deficit_strategy(),
-                        Some(&heading_ids),
-                    );
-                    // P0-2: Apply task checkbox toggles to the markdown source.
-                    if !app.orchestrator.tab_manager.pending_task_toggles.is_empty() {
-                        for (idx, checked) in
-                            app.orchestrator.tab_manager.pending_task_toggles.drain(..)
-                        {
-                            crate::ui::render::apply_task_toggle(
-                                &mut app.orchestrator.tab_manager.current_markdown,
-                                idx,
-                                checked,
-                            );
-                        }
-                    }
-                });
-        }
+        let frame_fill = pdf_backed.then_some(egui::Color32::from_rgb(35, 30, 20));
+        let deficit_strategy = app.orchestrator.config.deficit_strategy();
+        render_markdown_content(
+            ui,
+            &mut app.orchestrator.tab_manager,
+            frame_fill,
+            deficit_strategy,
+        );
     }
+}
+
+/// Purpose: Renders the shared markdown preview content (YAML table, rendered
+/// markdown, task toggles) inside an optional sepia frame and a vertical
+/// scroll area.
+/// Inputs: `ui` - Egui UI context, `tab_manager` - The tab manager holding the
+///   current markdown, YAML, and scroll state, `frame_fill` - Optional frame
+///   background color (sepia tint for PDF-backed files, `None` otherwise),
+///   `deficit_strategy` - The table width deficit strategy for rendering.
+/// Outputs: None.
+/// Purity: Impure (performs UI rendering and mutates pending_task_toggles).
+/// Preconditions: None.
+/// Postconditions: Renders the markdown preview with YAML front-matter table
+///   (if present) and applies any pending task-checkbox toggles to the markdown
+///   source.
+fn render_markdown_content(
+    ui: &mut egui::Ui,
+    tab_manager: &mut crate::app::TabManager,
+    frame_fill: Option<egui::Color32>,
+    deficit_strategy: crate::ui::table_width::DeficitStrategy,
+) {
+    if let Some(fill) = frame_fill {
+        egui::Frame::new().fill(fill).show(ui, |ui| {
+            show_markdown_scroll_area(ui, tab_manager, deficit_strategy);
+        });
+    } else {
+        show_markdown_scroll_area(ui, tab_manager, deficit_strategy);
+    }
+}
+
+/// Renders the scroll area containing YAML table, markdown, and task toggles.
+fn show_markdown_scroll_area(
+    ui: &mut egui::Ui,
+    tab_manager: &mut crate::app::TabManager,
+    deficit_strategy: crate::ui::table_width::DeficitStrategy,
+) {
+    egui::ScrollArea::vertical()
+        .id_salt("main_markdown_scroll")
+        .show(ui, |ui| {
+            if let Some(yaml) = &tab_manager.current_yaml {
+                render_yaml_table(ui, yaml);
+            }
+            let heading_ids = tab_manager.heading_ids().to_vec();
+            render_markdown(
+                ui,
+                &tab_manager.current_markdown,
+                &mut tab_manager.scroll_to_header_id,
+                &mut tab_manager.pending_task_toggles,
+                deficit_strategy,
+                Some(&heading_ids),
+            );
+            // P0-2: Apply task checkbox toggles to the markdown source.
+            if !tab_manager.pending_task_toggles.is_empty() {
+                for (idx, checked) in tab_manager.pending_task_toggles.drain(..) {
+                    crate::ui::render::apply_task_toggle(
+                        &mut tab_manager.current_markdown,
+                        idx,
+                        checked,
+                    );
+                }
+            }
+        });
 }
 
 /// Purpose: Renders the empty state when no files are open.
