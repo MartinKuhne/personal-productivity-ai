@@ -157,9 +157,31 @@ pub fn show_bottom_panel_capture(
                 );
                 ui.label(RichText::new(prompt_prefix).monospace().strong());
 
-                let text_width = (ui.available_width() - 130.0).max(0.0);
-                let response = ui.add_sized(
-                    egui::vec2(text_width, ui.available_height()),
+                // Lay the Stop button out right-to-left first so it hugs
+                // the panel's right edge, then measure where it ends to
+                // give the prompt every remaining pixel. This replaces the
+                // old fixed 130px reserve, which left dead space between
+                // the prompt and the button.
+                let row = ui.available_rect_before_wrap();
+                let mut stop_clicked = false;
+                let mut prompt_right = row.max.x;
+                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                    if app.agent().state().running {
+                        let response = ui.button(
+                            RichText::new(crate::ui::strings::STOP_AGENT_BUTTON)
+                                .color(egui::Color32::RED),
+                        );
+                        stop_clicked = response.clicked();
+                        prompt_right = response.rect.left();
+                    }
+                });
+
+                let prompt_rect = egui::Rect::from_min_max(
+                    row.min,
+                    egui::pos2(prompt_right.max(row.min.x), row.max.y),
+                );
+                let response = ui.put(
+                    prompt_rect,
                     egui::TextEdit::multiline(&mut app.agent_mut().command_input)
                         .desired_width(f32::INFINITY)
                         .hint_text(crate::ui::strings::COMMAND_INPUT_HINT),
@@ -172,26 +194,17 @@ pub fn show_bottom_panel_capture(
                     submit = true;
                 }
 
-                ui.vertical(|ui| {
-                    // The bottom panel used to host a `⚡ Quick Tasks`
-                    // menu button whose only item was `Format Markdown`.
-                    // That entry point duplicated the file context
-                    // menu's [Format Markdown] action, so the button
-                    // was removed. Quick Actions now live in the
-                    // file context menu — see
-                    // `doc/planning/quick-actions-into-context-menu.md`.
+                // The bottom panel used to host a `⚡ Quick Tasks`
+                // menu button whose only item was `Format Markdown`.
+                // That entry point duplicated the file context
+                // menu's [Format Markdown] action, so the button
+                // was removed. Quick Actions now live in the
+                // file context menu — see
+                // `doc/planning/quick-actions-into-context-menu.md`.
 
-                    if app.agent().state().running
-                        && ui
-                            .button(
-                                RichText::new(crate::ui::strings::STOP_AGENT_BUTTON)
-                                    .color(egui::Color32::RED),
-                            )
-                            .clicked()
-                    {
-                        app.agent_mut().cancel();
-                    }
-                });
+                if stop_clicked {
+                    app.agent_mut().cancel();
+                }
 
                 if submit {
                     apply_send_click(app);
@@ -535,5 +548,87 @@ mod tests {
         // rendered while running, so the label is in the output.
         assert_text_contains(&output.shapes, STOP_AGENT_BUTTON);
         assert!(app.agent().state().running);
+    }
+
+    /// Regression guard for the Stop button layout: the button must hug
+    /// the panel's right edge and the prompt must extend right up to the
+    /// button, leaving no dead space between them. The old layout
+    /// reserved a fixed 130px strip to the right of the prompt, so the
+    /// button floated ~40px short of the right edge with dead space
+    /// beyond it.
+    ///
+    /// Two fixed-size harnesses are compared: one with the agent idle
+    /// (the prompt spans the full row, calibrating the panel's content
+    /// right edge) and one with the agent running (the Stop button is
+    /// visible). A fixed window size is required so both harnesses share
+    /// identical geometry.
+    #[test]
+    fn test_show_bottom_panel_stop_button_right_aligned() {
+        use egui_kittest::Harness;
+        use egui_kittest::kittest::Queryable;
+
+        const WINDOW_SIZE: egui::Vec2 = egui::Vec2::new(800.0, 600.0);
+        const PIXEL_TOLERANCE: f32 = 2.0;
+
+        // The prompt is the only multiline text input in the bottom
+        // panel (per the role-query pattern in
+        // `test_send_enter_key_captures_event`), so any TextInput /
+        // MultilineTextInput node is the command input.
+        let prompt_rect = |running: bool| {
+            let mut app = create_test_app();
+            app.agent_mut().state_mut().running = running;
+            let mut harness = Harness::builder().with_size(WINDOW_SIZE).build_ui(|ui| {
+                show_bottom_panel(&mut app, ui);
+            });
+            harness.run();
+            let candidates: Vec<_> = harness
+                .query_all_by_role(accesskit::Role::TextInput)
+                .chain(harness.query_all_by_role(accesskit::Role::MultilineTextInput))
+                .collect();
+            assert!(
+                !candidates.is_empty(),
+                "expected the prompt TextEdit in the bottom panel"
+            );
+            candidates[0].rect()
+        };
+
+        // Idle: no Stop button, so the prompt spans the whole row and
+        // its right edge marks the panel's content right edge.
+        let idle_prompt = prompt_rect(false);
+
+        // Running: the Stop button is present; its right edge must sit
+        // at the panel's right edge (right-aligned), and the prompt
+        // must end where the button begins — no dead gap.
+        let mut app = create_test_app();
+        app.agent_mut().state_mut().running = true;
+        let mut harness = Harness::builder().with_size(WINDOW_SIZE).build_ui(|ui| {
+            show_bottom_panel(&mut app, ui);
+        });
+        harness.run();
+
+        let button = harness.get_by_role_and_label(accesskit::Role::Button, STOP_AGENT_BUTTON);
+        let running_prompt = harness
+            .query_all_by_role(accesskit::Role::TextInput)
+            .chain(harness.query_all_by_role(accesskit::Role::MultilineTextInput))
+            .next()
+            .expect("expected the prompt TextEdit in the bottom panel")
+            .rect();
+
+        assert!(
+            (button.rect().max.x - idle_prompt.max.x).abs() <= PIXEL_TOLERANCE,
+            "Stop button must be right-aligned to the panel's right edge: \
+             button right = {:.2}, panel right = {:.2}",
+            button.rect().max.x,
+            idle_prompt.max.x
+        );
+
+        let gap = button.rect().min.x - running_prompt.max.x;
+        assert!(
+            (-PIXEL_TOLERANCE..=3.0 * PIXEL_TOLERANCE).contains(&gap),
+            "the prompt must extend up to the Stop button with no dead gap: \
+             gap = {gap:.2}, prompt right = {:.2}, button left = {:.2}",
+            running_prompt.max.x,
+            button.rect().min.x
+        );
     }
 }
