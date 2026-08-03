@@ -1630,7 +1630,10 @@ mod tests {
     #[test]
     fn test_tool_send_email_ai_agent_footer() {
         use super::AI_AGENT_FOOTER;
-        assert_eq!(AI_AGENT_FOOTER, "\n---\nSent by FastMD on behalf of the user");
+        assert_eq!(
+            AI_AGENT_FOOTER,
+            "\n---\nSent by FastMD on behalf of the user"
+        );
     }
 
     #[test]
