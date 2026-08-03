@@ -56,7 +56,7 @@ models:
 * [AGENT-020] USER.md Context Injection: For each configured content library, if a USER.md file exists at the library root, its contents shall be appended to the system prompt as user context.
 * [AGENT-021] Agent Conversation History: The agent shall maintain conversation history across prompts within a session. History is reset when the user clicks "Close" or starts a new session.
 * [AGENT-022] Thinking Delimiter: Model reasoning/thinking content wrapped in `🤔...🤔` delimiters shall be extracted and displayed in a collapsible "Thinking Process" section separate from the main response.
-* [AGENT-023] Quick Tasks Menu: The bottom panel shall provide a "Quick Tasks" menu with predefined prompts (e.g., "Format Markdown") that inject a structured prompt with YAML front-matter template.
+* [AGENT-023] Format Markdown Quick Action: The system shall provide a "Format Markdown" quick action that injects a structured prompt with YAML front-matter template. The quick action shall be available from the file context menu in the directory tree (UI-019) and the tab context menu (UI-033); the bottom panel shall not host a separate "Quick Tasks" menu button.
 * [AGENT-024] Tools Toolbar Button: The top toolbar shall provide a "Tools..." button alongside the existing "Batch..." button. Clicking the button shall open the Tools dialog (UI-051).
 * [AGENT-025] Agent Loop Safety Source: The agent loop's parallel/sequential dispatch (per AGENT-012) shall source tool safety classification uniformly from the centralized tool safety manager for all registered tool names.
 

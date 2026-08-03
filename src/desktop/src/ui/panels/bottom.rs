@@ -88,11 +88,9 @@ pub fn format_models_list(
 ///     show_results to `true`.
 ///   * `Empty` — no-op.
 ///
-/// The Enter-key handler and the Quick-Tasks format menu item in
-/// `show_bottom_panel` both ultimately call this function (the
-/// format menu pre-loads `command_input` with
-/// `generate_format_prompt(...)` first). It is extracted so the
-/// dispatch can be unit-tested without driving the egui harness.
+/// The Enter-key handler in `show_bottom_panel` calls this
+/// function. It is extracted so the dispatch can be unit-tested
+/// without driving the egui harness.
 pub fn apply_send_click(app: &mut FastMdApp) {
     let prompt = app.agent_mut().command_input.trim_end().to_string();
     app.agent_mut().command_input.clear();
@@ -130,11 +128,11 @@ pub fn show_bottom_panel(app: &mut FastMdApp, parent_ui: &mut egui::Ui) {
 
 /// Tier 4 test variant of [`show_bottom_panel`]. The `on_click`
 /// callback is invoked after every dispatch trigger (Enter key on
-/// the command input, or the Quick-Tasks format menu item) with a
-/// stable event name. The production caller
-/// ([`show_bottom_panel`]) passes a no-op closure; the test caller
-/// in `tests::test_send_enter_key_captures_event` passes a closure
-/// that pushes the event into the harness's persistent state.
+/// the command input) with a stable event name. The production
+/// caller ([`show_bottom_panel`]) passes a no-op closure; the
+/// test caller in `tests::test_send_enter_key_captures_event`
+/// passes a closure that pushes the event into the harness's
+/// persistent state.
 pub fn show_bottom_panel_capture(
     app: &mut FastMdApp,
     parent_ui: &mut egui::Ui,
@@ -175,19 +173,13 @@ pub fn show_bottom_panel_capture(
                 }
 
                 ui.vertical(|ui| {
-                    ui.menu_button(crate::ui::strings::QUICK_TASKS_MENU, |ui| {
-                        if ui
-                            .button(crate::ui::strings::FORMAT_MARKDOWN_ACTION)
-                            .clicked()
-                        {
-                            let now = chrono::Local::now();
-                            let date_str = now.to_rfc3339();
-                            app.agent_mut().command_input =
-                                crate::ui::generate_format_prompt(&date_str);
-                            submit = true;
-                            ui.close();
-                        }
-                    });
+                    // The bottom panel used to host a `⚡ Quick Tasks`
+                    // menu button whose only item was `Format Markdown`.
+                    // That entry point duplicated the file context
+                    // menu's [Format Markdown] action, so the button
+                    // was removed. Quick Actions now live in the
+                    // file context menu — see
+                    // `doc/planning/quick-actions-into-context-menu.md`.
 
                     if app.agent().state().running
                         && ui
@@ -481,31 +473,52 @@ mod tests {
 
     // --- UI / window tests (R-7: merged from `mod ui_tests`) ---
 
-    use crate::ui::strings::{QUICK_TASKS_MENU, STOP_AGENT_BUTTON};
-    use crate::ui::test_helpers::text::assert_text_contains;
+    use crate::ui::strings::{COMMAND_INPUT_HINT, STOP_AGENT_BUTTON};
+    use crate::ui::test_helpers::text::{assert_text_contains, extract_text};
 
     fn create_test_app() -> FastMdApp {
         FastMdApp::empty_state(crate::config::AppConfig::default())
     }
 
+    /// R-2 / Q12: rendered-content assertion for the bottom panel.
+    /// Asserts the command input's hint is visible (the panel was
+    /// previously locked in by asserting on `QUICK_TASKS_MENU`; that
+    /// menu has since been removed and relocated to the file context
+    /// menu, see `doc/planning/quick-actions-into-context-menu.md`).
     #[test]
     fn test_show_bottom_panel_render() {
         let ctx = egui::Context::default();
         let mut app = create_test_app();
-        app.agent_mut().command_input = "test input".to_string();
+        // Leave `command_input` empty so `TextEdit::hint_text` is
+        // visible — egui hides the hint as soon as the field has any
+        // text.
         let output = ctx.run_ui(egui::RawInput::default(), |ui| {
             show_bottom_panel(&mut app, ui);
         });
-        // R-2 / Q12: replace the tautological state check with a
-        // rendered-content assertion. The Quick Tasks menu is the
-        // stable header for the bottom panel.
-        //
-        // Note: we do not assert on COMMAND_INPUT_HINT because
-        // `TextEdit::hint_text` is hidden once the user has typed
-        // anything (egui's standard behavior). The hint is only
-        // visible when the field is empty; an empty-field test
-        // would catch a regression there.
-        assert_text_contains(&output.shapes, QUICK_TASKS_MENU);
+        assert_text_contains(&output.shapes, COMMAND_INPUT_HINT);
+    }
+
+    /// Regression guard: the `Quick Tasks` menu button has been
+    /// removed from the bottom panel. Quick Actions now live in the
+    /// file context menu (see
+    /// `doc/planning/quick-actions-into-context-menu.md`). If the
+    /// `menu_button(QUICK_TASKS_MENU, ...)` wrapper is reintroduced
+    /// by accident, this test fails.
+    #[test]
+    fn test_show_bottom_panel_does_not_render_quick_tasks_menu() {
+        let ctx = egui::Context::default();
+        let mut app = create_test_app();
+        let output = ctx.run_ui(egui::RawInput::default(), |ui| {
+            show_bottom_panel(&mut app, ui);
+        });
+        let texts = extract_text(&output.shapes);
+        let rendered = texts.join("\n");
+        assert!(
+            !rendered.contains("⚡ Quick Tasks"),
+            "the bottom panel must not render the `⚡ Quick Tasks` menu; \
+             Quick Actions now live in the file context menu. \
+             Rendered text: {rendered:?}"
+        );
     }
 
     #[test]

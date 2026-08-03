@@ -67,9 +67,6 @@ pub fn build_indexing_progress_text(file_count: usize) -> String {
 /// Hint text for the command input multiline text field.
 pub const COMMAND_INPUT_HINT: &str = "Type command (Enter to submit, Shift+Enter for new line)";
 
-/// Header label for the quick tasks menu.
-pub const QUICK_TASKS_MENU: &str = "⚡ Quick Tasks";
-
 /// Menu item label for markdown formatting prompt generation.
 pub const FORMAT_MARKDOWN_ACTION: &str = "Format Markdown";
 
