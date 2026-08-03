@@ -1,5 +1,6 @@
 //! Left file-tree panel — builds `TreeNode` hierarchy from content libraries and discovered files, renders with tag filtering.
 
+use crate::bus::events::file::FileEventProducer;
 use crate::ui::FastMdApp;
 use crate::ui::TreeNode;
 use crate::ui::TreeNodeContext;
@@ -227,7 +228,7 @@ pub fn show_left_panel(app: &mut FastMdApp, parent_ui: &mut egui::Ui) {
     // egui 0.35 unified `SidePanel`/`TopBottomPanel` into `Panel`,
     // and panels now allocate within a parent `&mut Ui`.
     // `default_width` / `max_width` are now `default_size` / `max_size`.
-    Panel::left("left_panel")
+    let panel_response = Panel::left("left_panel")
         .resizable(true)
         .default_size(default_w)
         .max_size(max_w)
@@ -256,7 +257,7 @@ pub fn show_left_panel(app: &mut FastMdApp, parent_ui: &mut egui::Ui) {
             // itself to the panel's available height, so the rects
             // are stable across passes.
             let mut open_editor = None;
-            let modifiers = ui.input(|i| i.modifiers);
+            let _modifiers = ui.input(|i| i.modifiers);
             let pdf_backing_tracker = app.pdf_backing_tracker().clone();
             let selection = &mut app.orchestrator.selection;
             let tab_manager = &mut app.orchestrator.tab_manager;
@@ -291,12 +292,10 @@ pub fn show_left_panel(app: &mut FastMdApp, parent_ui: &mut egui::Ui) {
                         submit_prompt,
                         content_libraries,
                         open_editor: &mut open_editor,
-                        modifiers,
+                        modifiers: ui.input(|i| i.modifiers),
                         inline_editor_enabled,
-                        bg_tx: &Some(tx),
-                        file_event_producer: Some(
-                            crate::bus::events::file::FileEventProducer::new(file_event_bus),
-                        ),
+                        bg_tx: &Some(tx.clone()),
+                        file_event_producer: Some(FileEventProducer::new(file_event_bus)),
                         tree_dirty: &mut selection.tree_dirty,
                         pdf_backing_tracker: pdf_backing_tracker.clone(),
                     };
@@ -331,6 +330,9 @@ pub fn show_left_panel(app: &mut FastMdApp, parent_ui: &mut egui::Ui) {
                 }
             }
         });
+    // Capture the panel's actual width after user interaction
+    let rect = panel_response.response.rect;
+    app.layout_mut().left_panel_width = Some(rect.width());
 }
 
 #[cfg(test)]
@@ -364,8 +366,8 @@ mod tests {
         // covers the empty-state widget tree separately. Header-only
         // assertion is correct per the Q12 borderline policy.
         assert_text_contains(&output.shapes, WORKSPACE_HEADER);
-        // Panel renders without crashing; width is unset because the dirty flag is false.
-        assert!(app.layout().left_panel_width.is_none());
+        // Panel renders without crashing; width is now captured from panel response.
+        assert!(app.layout().left_panel_width.is_some());
     }
 
     #[test]

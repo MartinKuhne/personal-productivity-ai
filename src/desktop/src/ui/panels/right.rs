@@ -111,16 +111,26 @@ pub fn show_right_panel_capture(
     // strip becomes a UX issue, the next step is to give
     // `Panel::right` a custom rect allocation that collapses to
     // zero width when invisible.
+    let ctx = parent_ui.ctx();
     let toc_visible = should_show_panel(
         !app.tabs().toc.is_empty(),
         app.selection().selected_file().is_some(),
     );
+
+    let max_w = ctx.viewport_rect().width() * 0.3;
+    let default_w = app
+        .layout()
+        .right_panel_width
+        .unwrap_or(200.0)
+        .max(150.0)
+        .min(max_w);
+
     // egui 0.35 unified `SidePanel`/`TopBottomPanel` into `Panel`,
     // and panels now allocate within a parent `&mut Ui`.
     // `width_range` is now `size_range`.
-    Panel::right("toc_panel")
-        .default_size(200.0)
-        .size_range(150.0..=250.0)
+    let panel_response = Panel::right("toc_panel")
+        .default_size(default_w)
+        .size_range(150.0..=max_w)
         .resizable(true)
         .show(parent_ui, |ui| {
             if !toc_visible {
@@ -191,6 +201,10 @@ pub fn show_right_panel_capture(
                     },
                 );
         });
+
+    // Capture the panel's actual width after user interaction
+    let rect = panel_response.response.rect;
+    app.layout_mut().right_panel_width = Some(rect.width());
 }
 
 #[cfg(test)]
@@ -404,24 +418,12 @@ mod tests {
         use egui_kittest::Harness;
         use egui_kittest::kittest::Queryable;
 
-        // 400px window with a 200px right panel (Panel::right's
-        // default `default_outer_size` is 200.0 for left/right
-        // sides, see `egui-0.35/src/containers/panel.rs:255-257`).
-        // The production code calls `default_size(200.0)` and
-        // `size_range(150.0..=250.0)`, so without a stored
-        // PanelState the panel takes 200px and starts at
-        // x = 400 - 200 = 200.
+        // 400px window. The panel's max_size is 30% of viewport width = 120px.
+        // default_size is clamped to max_size, so panel will be 120px wide.
         const WINDOW_WIDTH: f32 = 400.0;
         const WINDOW_HEIGHT: f32 = 600.0;
-        // The actual panel width in a fresh harness (no stored
-        // PanelState). 200.0 = `default_outer_size` for right
-        // panels; see comment above. The test's
-        // `expected_left` is derived from this so the assertion
-        // is robust to a future `default_size(...)` change in
-        // the production code: a regression in the fix would
-        // show up as a `left` value far to the right of the
-        // panel's left edge, not as a 4px margin-fudge.
-        const PANEL_WIDTH: f32 = 200.0;
+        const MAX_PANEL_WIDTH: f32 = WINDOW_WIDTH * 0.3; // 120px
+        const PANEL_WIDTH: f32 = MAX_PANEL_WIDTH; // default_size clamped to max_size
         const PIXEL_TOLERANCE: f32 = 2.0;
 
         // A title deliberately wider than the entire 400px window, so

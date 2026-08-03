@@ -54,6 +54,10 @@ pub struct FastMdApp {
     /// Invalidated when selection.tree_dirty is true.
     pub cached_tree_rows: Option<Vec<crate::ui::tree::FlatRow>>,
     pub persisted_ui_state: PersistedUiState,
+    /// Track whether we've applied persisted window state on first frame.
+    persisted_window_applied: bool,
+    /// Track whether we've applied persisted font scale on first frame.
+    persisted_font_applied: bool,
 }
 
 impl FastMdApp {
@@ -264,6 +268,9 @@ impl FastMdApp {
         if let Some(w) = persisted_ui_state.left_panel_width {
             layout.left_panel_width = Some(w);
         }
+        if let Some(w) = persisted_ui_state.right_panel_width {
+            layout.right_panel_width = Some(w);
+        }
 
         let mut selection = SelectionManager::new();
         for dir in &persisted_ui_state.expanded_dirs {
@@ -304,6 +311,8 @@ impl FastMdApp {
             layout,
             cached_tree_rows: None,
             persisted_ui_state,
+            persisted_window_applied: false,
+            persisted_font_applied: false,
         }
     }
 
@@ -397,6 +406,8 @@ impl FastMdApp {
             layout: PanelLayout::new(),
             cached_tree_rows: None,
             persisted_ui_state: PersistedUiState::default(),
+            persisted_window_applied: false,
+            persisted_font_applied: false,
         }
     }
 }
@@ -427,6 +438,12 @@ impl eframe::App for FastMdApp {
 
     fn save(&mut self, storage: &mut dyn eframe::Storage) {
         self.persisted_ui_state.left_panel_width = self.layout.left_panel_width;
+        self.persisted_ui_state.right_panel_width = self.layout.right_panel_width;
+
+        // Get window size and position from egui context
+        // Note: This is called from the egui App trait, so we don't have direct access to ctx here.
+        // The window state will be saved via the viewport commands in update_ui.
+
         let all_dirs: HashSet<PathBuf> = self
             .orchestrator
             .selection
@@ -467,6 +484,32 @@ impl FastMdApp {
         puffin::profile_function!();
 
         let ctx = ui.ctx();
+
+        // Apply persisted window size/position on first frame
+        if !self.persisted_window_applied {
+            if let (Some(w), Some(h)) = (
+                self.persisted_ui_state.window_width,
+                self.persisted_ui_state.window_height,
+            ) {
+                ctx.send_viewport_cmd(egui::ViewportCommand::InnerSize(egui::vec2(w, h)));
+            }
+            if let (Some(x), Some(y)) = (
+                self.persisted_ui_state.window_x,
+                self.persisted_ui_state.window_y,
+            ) {
+                ctx.send_viewport_cmd(egui::ViewportCommand::OuterPosition(egui::pos2(x, y)));
+            }
+            self.persisted_window_applied = true;
+        }
+
+        // Apply persisted font size scale on first frame
+        if !self.persisted_font_applied {
+            if let Some(scale) = self.persisted_ui_state.font_size_scale {
+                ctx.set_pixels_per_point(ctx.pixels_per_point() * scale);
+            }
+            self.persisted_font_applied = true;
+        }
+
         self.orchestrator.drain_config_bus();
         self.process_file_events_and_repaint(ctx);
         self.orchestrator.drain_background_channel();
@@ -475,6 +518,9 @@ impl FastMdApp {
         self.show_modals(ui);
         self.render_panels(ui);
         self.handle_deferred_actions();
+
+        // Update persisted UI state with current values for saving on exit
+        self.update_persisted_ui_state(ui.ctx());
 
         #[cfg(feature = "profiling")]
         {
@@ -654,6 +700,37 @@ impl FastMdApp {
             } else {
                 self.orchestrator.dialogs.batch_handle = Some(handle);
             }
+        }
+    }
+
+    /// Update persisted UI state with current window size, position, font scale, and panel widths.
+    fn update_persisted_ui_state(&mut self, ctx: &egui::Context) {
+        // Update panel widths from layout
+        self.persisted_ui_state.left_panel_width = self.layout.left_panel_width;
+        self.persisted_ui_state.right_panel_width = self.layout.right_panel_width;
+
+        // Update window size and position from viewport
+        ctx.input(|i| {
+            let viewport = i.viewport();
+            // Use inner_rect for window size
+            if let Some(inner_rect) = viewport.inner_rect {
+                self.persisted_ui_state.window_width = Some(inner_rect.width());
+                self.persisted_ui_state.window_height = Some(inner_rect.height());
+            }
+            // Use outer_rect for window position
+            if let Some(outer_rect) = viewport.outer_rect {
+                self.persisted_ui_state.window_x = Some(outer_rect.min.x);
+                self.persisted_ui_state.window_y = Some(outer_rect.min.y);
+            }
+        });
+
+        // Update font size scale (relative to default)
+        let current_ppp = ctx.pixels_per_point();
+        let default_ppp = 1.0; // Default pixels per point
+        if (current_ppp - default_ppp).abs() > f32::EPSILON {
+            self.persisted_ui_state.font_size_scale = Some(current_ppp / default_ppp);
+        } else {
+            self.persisted_ui_state.font_size_scale = None;
         }
     }
 }
