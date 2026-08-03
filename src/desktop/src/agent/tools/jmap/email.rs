@@ -567,15 +567,10 @@ pub fn tool_search_email(
     let total = entry.total;
     let start = entry.cursor_offset;
     if start >= total {
-        // No more items. Should not normally happen because the
-        // first call would have omitted the cursor in this case,
-        // but report it cleanly anyway.
-        return Ok(crate::agent::tools::dtos::SearchEmailResponse {
-            results: String::new(),
-            total,
-            cursor: None,
-            hint: Some(SEARCH_EMAIL_FINAL_PAGE_HINT.to_string()),
-        });
+        // Cursor used after final page was already returned.
+        // This indicates the LLM incorrectly reused a cursor.
+        // Return the same error as for an unknown/expired cursor.
+        return Err("Cursor expired or unknown; re-run the search with no cursor.".to_string());
     }
 
     let end = (start + SEARCH_EMAIL_PAGE_SIZE).min(total);
