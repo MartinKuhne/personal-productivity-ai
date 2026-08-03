@@ -104,26 +104,51 @@ impl SelectionManager {
     /// new agent prompt: `(active file, active directory, selected
     /// files)`.
     ///
-    /// When no document tabs are open there is no working context,
-    /// so every component is suppressed — the LLM is handed no file
-    /// or directory context (AGENT-026). When at least one tab is
-    /// open, the current selection (single file, directory, and any
-    /// multi-selected files) is returned. Open tabs are the source
-    /// of truth because closing all tabs must clear stale directory
-    /// and multi-selection state left behind by tree navigation.
+    /// File-level context (the active file and the multi-selected
+    /// files) is only handed over when at least one document tab is
+    /// open (AGENT-026). The directory context is always derived via
+    /// [`Self::prompt_dir`]: the parent of the file selected in the
+    /// tabs panel when one is selected, otherwise the last directory
+    /// the user selected from the directory tree (AGENT-014).
     pub fn agent_context(
         &self,
         open_tabs: &[PathBuf],
     ) -> (Option<PathBuf>, Option<PathBuf>, HashSet<PathBuf>) {
-        if open_tabs.is_empty() {
-            (None, None, HashSet::new())
+        let active_file = if open_tabs.is_empty() {
+            None
         } else {
-            (
-                self.selected_file.clone(),
-                self.selected_dir.clone(),
-                self.selected_files.clone(),
-            )
+            self.selected_file.clone()
+        };
+        let selected_files = if open_tabs.is_empty() {
+            HashSet::new()
+        } else {
+            self.selected_files.clone()
+        };
+        (active_file, self.prompt_dir(open_tabs), selected_files)
+    }
+
+    /// Derive the directory context for the LLM prompt and the
+    /// bottom-panel prompt prefix: the parent of the file selected in
+    /// the tabs panel when one is active, otherwise the last
+    /// directory the user selected from the directory tree.
+    ///
+    /// A file counts as "selected in the tabs panel" only if it is
+    /// among `open_tabs`; a tree-selected file that was never opened
+    /// as a tab (e.g. a shift-click multi-select) does not qualify,
+    /// so it falls through to the tree-selected directory.
+    ///
+    /// This is the single source of truth shared by the agent-session
+    /// dispatch (`agent_context`/`orchestrator.rs`) and the bottom
+    /// panel's prompt prefix (`ui/panels/bottom.rs`), so the
+    /// displayed prefix always matches the directory handed to the
+    /// LLM (AGENT-015).
+    pub fn prompt_dir(&self, open_tabs: &[PathBuf]) -> Option<PathBuf> {
+        if let Some(file) = self.selected_file.as_ref()
+            && open_tabs.contains(file)
+        {
+            return file.parent().map(|p| p.to_path_buf());
         }
+        self.selected_dir.clone()
     }
 
     pub fn tree_dirty(&self) -> bool {
@@ -207,11 +232,13 @@ mod tests {
         assert_eq!(manager.selected_dir(), Some(&path));
     }
 
-    /// AGENT-026: closing all tabs must suppress every piece of
-    /// file/directory context, even when stale tree-selection state
-    /// (directory, multi-select) is still present.
+    /// AGENT-026: closing all tabs must suppress the file-level
+    /// context (active file and selected files), even when stale
+    /// tree-selection state is still present. The directory context
+    /// is still handed over: when no file is selected in the tabs
+    /// panel, the last tree-selected directory is used (AGENT-014).
     #[test]
-    fn test_agent_context_suppressed_when_no_tabs() {
+    fn test_agent_context_suppresses_file_context_when_no_tabs() {
         let mut manager = SelectionManager::new();
         manager.select_file(PathBuf::from("a.md"));
         manager.select_dir(PathBuf::from("stale_dir"));
@@ -219,25 +246,78 @@ mod tests {
 
         let (file, dir, files) = manager.agent_context(&[]);
         assert!(file.is_none(), "no active file when tabs are closed");
-        assert!(dir.is_none(), "no directory context when tabs are closed");
+        assert_eq!(
+            dir,
+            Some(PathBuf::from("stale_dir")),
+            "directory context falls back to the last tree-selected directory"
+        );
         assert!(files.is_empty(), "no selected files when tabs are closed");
     }
 
-    /// With at least one tab open, the selection is handed over
-    /// unchanged (AGENT-013/AGENT-014).
+    /// With at least one tab open, the active file and selected files
+    /// are handed over unchanged, and the directory context is the
+    /// active tab file's parent (AGENT-013/AGENT-014).
     #[test]
     fn test_agent_context_returned_when_tabs_open() {
         let mut manager = SelectionManager::new();
-        let file = PathBuf::from("a.md");
-        let dir = PathBuf::from("lib");
-        let multi = PathBuf::from("b.md");
+        let file = PathBuf::from("C:/notes/folder/a.md");
+        let multi = PathBuf::from("C:/notes/other/b.md");
         manager.select_file(file.clone());
-        manager.select_dir(dir.clone());
+        manager.select_dir(PathBuf::from("stale_tree_dir"));
         manager.toggle_file(multi.clone());
 
         let (got_file, got_dir, got_files) = manager.agent_context(std::slice::from_ref(&file));
         assert_eq!(got_file, Some(file));
-        assert_eq!(got_dir, Some(dir));
+        assert_eq!(
+            got_dir,
+            Some(PathBuf::from("C:/notes/folder")),
+            "with an active tab, the directory context is the tab file's parent"
+        );
         assert!(got_files.contains(&multi));
+    }
+
+    /// AGENT-014: when a file is selected in the tabs panel, the
+    /// directory context is that file's parent, not the last
+    /// tree-selected directory.
+    #[test]
+    fn test_prompt_dir_uses_active_tab_file_parent() {
+        let mut manager = SelectionManager::new();
+        manager.select_dir(PathBuf::from("stale_tree_dir"));
+        let tab = PathBuf::from("C:/notes/folder/file.md");
+        manager.select_file(tab.clone());
+        let expected = Some(PathBuf::from("C:/notes/folder"));
+        assert_eq!(manager.prompt_dir(std::slice::from_ref(&tab)), expected);
+    }
+
+    /// AGENT-014: a tree-selected file that was never opened as a tab
+    /// (e.g. a shift-click multi-select) does not change the
+    /// directory context; the last tree-selected directory is used.
+    #[test]
+    fn test_prompt_dir_ignores_non_tab_selected_file() {
+        let mut manager = SelectionManager::new();
+        manager.select_dir(PathBuf::from("tree_dir"));
+        manager.select_file(PathBuf::from("C:/other/selected.md"));
+        assert_eq!(
+            manager.prompt_dir(&[]),
+            Some(PathBuf::from("tree_dir")),
+            "a selected file not open in a tab must not override the tree-selected directory"
+        );
+    }
+
+    /// AGENT-014: with no active tab file, the directory context is
+    /// the last directory selected from the directory tree.
+    #[test]
+    fn test_prompt_dir_falls_back_to_tree_selected_dir() {
+        let mut manager = SelectionManager::new();
+        manager.select_dir(PathBuf::from("tree_dir"));
+        assert_eq!(manager.prompt_dir(&[]), Some(PathBuf::from("tree_dir")));
+    }
+
+    /// AGENT-014: when neither a tab file nor a tree-selected
+    /// directory exists, the directory context is `None`.
+    #[test]
+    fn test_prompt_dir_none_when_no_context() {
+        let manager = SelectionManager::new();
+        assert_eq!(manager.prompt_dir(&[]), None);
     }
 }

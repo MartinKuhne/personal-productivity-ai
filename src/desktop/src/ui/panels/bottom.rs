@@ -152,7 +152,9 @@ pub fn show_bottom_panel_capture(
             let ctx = ui.ctx().clone();
             ui.horizontal(|ui| {
                 let prompt_prefix = compute_prompt_prefix(
-                    app.selection().selected_dir().map(|p| p.as_path()),
+                    app.selection()
+                        .prompt_dir(&app.orchestrator.tab_manager.tabs)
+                        .as_deref(),
                     app.content_libraries(),
                 );
                 ui.label(RichText::new(prompt_prefix).monospace().strong());
