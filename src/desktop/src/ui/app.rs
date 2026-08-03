@@ -1,29 +1,28 @@
 //! Root egui `App` struct — owns all application state and wires together background tasks, panels, agent, and dialogs.
 
 use crate::agent::AgentSessionManager;
-use crate::app::background::{BackgroundProcessManager, SharedProcessManager};
+use crate::app::background::BackgroundProcessManager;
 use crate::app::background_task::Task;
+use crate::app::orchestrator::AppOrchestrator;
 use crate::app::watcher::directory_tracker::DirectoryTracker;
 use crate::app::watcher::file_processor::FileEventProcessor;
-use crate::app::watcher::pdf_backing_tracker::PdfBackingTracker;
 use crate::app::{
     DialogManager, PanelLayout, PersistedUiState, SelectionManager, TabManager, TagManager,
     TextBuffer,
 };
-use crate::bus::core::{Bus, BusReader};
+use crate::bus::core::Bus;
 use crate::bus::events::config::ConfigArrived;
-use crate::bus::events::file::{FileEvent, FileEventProducer};
-use crate::bus::events::typed::{BackgroundEvent, FsEvent, McpAuthEvent, ProcessEvent};
+use crate::bus::events::file::FileEventProducer;
 
 use crate::config::AppConfig;
-use crate::markdown::parse_front_matter;
+
 use crate::ui::panels::{
     show_bottom_panel, show_center_panel, show_left_panel, show_right_panel, show_top_panel,
 };
 use eframe::egui;
 use std::collections::{BTreeMap, HashSet};
 use std::path::PathBuf;
-use std::sync::mpsc::Receiver;
+
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
@@ -49,81 +48,41 @@ impl TreeNode {
 const PERSISTED_UI_STATE_KEY: &str = "ppai_ui_state";
 
 pub struct FastMdApp {
-    pub content_libraries: Vec<crate::config::ContentLibrary>,
-    pub rx: Receiver<BackgroundEvent>,
-    pub tx: std::sync::mpsc::Sender<BackgroundEvent>,
-    pub file_event_bus: Bus<FileEvent>,
-    pub file_event_reader: Option<BusReader<FileEvent>>,
-    pub file_processor: FileEventProcessor,
-    pub pdf_backing_tracker: crate::app::watcher::PdfBackingTracker,
-    pub tag_manager: TagManager,
-    pub directory_tracker: DirectoryTracker,
+    pub orchestrator: AppOrchestrator,
     pub layout: PanelLayout,
-    pub selection: SelectionManager,
-    pub tab_manager: TabManager,
-
     /// Cached flattened tree rows to avoid rebuilding the file tree every frame.
-    /// Invalidated when `selection.tree_dirty` is true.
+    /// Invalidated when selection.tree_dirty is true.
     pub cached_tree_rows: Option<Vec<crate::ui::tree::FlatRow>>,
-
-    pub _watcher: Option<notify::RecommendedWatcher>,
-
-    /// Agent session manager - encapsulates all agent state and lifecycle.
-    pub agent: AgentSessionManager,
-    /// Dialog manager - owns all modal state and rendering.
-    pub dialogs: DialogManager,
-    pub submit_prompt: Option<String>,
-    pub text_buffer: TextBuffer,
-    pub inline_editor_enabled: bool,
-    pub background_manager: SharedProcessManager,
-    /// The currently-loaded application configuration. Starts as
-    /// [`AppConfig::default`] and is replaced on the first frame
-    /// that observes a [`crate::bus::events::config::ConfigArrived`] event on
-    /// the configuration bus.
-    pub config: crate::config::AppConfig,
-    /// Reader for the configuration-arrival bus. Subscribed during
-    /// construction; dropped after the first successful drain so
-    /// subsequent frames do not touch the bus.
-    config_reader: Option<BusReader<ConfigArrived>>,
     pub persisted_ui_state: PersistedUiState,
-    pub pending_file_load: Option<PathBuf>,
-    pub repaint_interval: Duration,
-    /// Slot for the `notify::RecommendedWatcher` handle, shared
-    /// with the file-watcher thread. The watcher writes the live
-    /// handle here just before sending [`FsEvent::Finished`]; the
-    /// UI calls [`Self::task_take_finished_watcher`] from
-    /// `handle_fs_event` to take ownership so the watcher stays
-    /// alive for the rest of the app lifetime.
-    finished_watcher_slot: Arc<Mutex<Option<notify::RecommendedWatcher>>>,
 }
 
 impl FastMdApp {
     pub fn content_libraries(&self) -> &[crate::config::ContentLibrary] {
-        &self.content_libraries
+        &self.orchestrator.content_libraries
     }
 
     pub fn content_libraries_mut(&mut self) -> &mut Vec<crate::config::ContentLibrary> {
-        &mut self.content_libraries
+        &mut self.orchestrator.content_libraries
     }
 
     pub fn file_processor(&self) -> &FileEventProcessor {
-        &self.file_processor
+        &self.orchestrator.file_processor
     }
 
     pub fn file_processor_mut(&mut self) -> &mut FileEventProcessor {
-        &mut self.file_processor
+        &mut self.orchestrator.file_processor
     }
 
     pub fn pdf_backing_tracker(&self) -> &crate::app::watcher::PdfBackingTracker {
-        &self.pdf_backing_tracker
+        &self.orchestrator.pdf_backing_tracker
     }
 
     pub fn tags(&self) -> &TagManager {
-        &self.tag_manager
+        &self.orchestrator.tag_manager
     }
 
     pub fn tags_mut(&mut self) -> &mut TagManager {
-        &mut self.tag_manager
+        &mut self.orchestrator.tag_manager
     }
 
     pub fn layout(&self) -> &PanelLayout {
@@ -135,208 +94,63 @@ impl FastMdApp {
     }
 
     pub fn selection(&self) -> &SelectionManager {
-        &self.selection
+        &self.orchestrator.selection
     }
 
     pub fn selection_mut(&mut self) -> &mut SelectionManager {
-        &mut self.selection
+        &mut self.orchestrator.selection
     }
 
     pub fn tabs(&self) -> &TabManager {
-        &self.tab_manager
+        &self.orchestrator.tab_manager
     }
 
     pub fn tabs_mut(&mut self) -> &mut TabManager {
-        &mut self.tab_manager
+        &mut self.orchestrator.tab_manager
     }
 
     pub fn agent(&self) -> &AgentSessionManager {
-        &self.agent
+        &self.orchestrator.agent
     }
 
     pub fn agent_mut(&mut self) -> &mut AgentSessionManager {
-        &mut self.agent
+        &mut self.orchestrator.agent
     }
 
     pub fn dialogs(&self) -> &DialogManager {
-        &self.dialogs
+        &self.orchestrator.dialogs
     }
 
     pub fn dialogs_mut(&mut self) -> &mut DialogManager {
-        &mut self.dialogs
+        &mut self.orchestrator.dialogs
     }
 
     pub fn editor(&self) -> &TextBuffer {
-        &self.text_buffer
+        &self.orchestrator.text_buffer
     }
 
     pub fn editor_mut(&mut self) -> &mut TextBuffer {
-        &mut self.text_buffer
+        &mut self.orchestrator.text_buffer
     }
 
     pub fn config(&self) -> &crate::config::AppConfig {
-        &self.config
+        &self.orchestrator.config
     }
 
     pub fn config_mut(&mut self) -> &mut crate::config::AppConfig {
-        &mut self.config
+        &mut self.orchestrator.config
     }
 
     pub fn submit_prompt(&self) -> &Option<String> {
-        &self.submit_prompt
+        &self.orchestrator.submit_prompt
     }
 
     pub fn submit_prompt_mut(&mut self) -> &mut Option<String> {
-        &mut self.submit_prompt
+        &mut self.orchestrator.submit_prompt
     }
 
     pub fn inline_editor_enabled(&self) -> bool {
-        self.inline_editor_enabled
-    }
-
-    /// Drain pending `FileEvent`s from the bus and update.
-    ///
-    /// Returns `true` if any event was processed, so callers can
-    /// schedule a follow-up UI repaint.
-    fn process_file_events(&mut self) -> bool {
-        use crate::bus::events::file::FileEventKind;
-
-        let mut changed = false;
-        let mut needs_rebuild = false;
-        let mut tree_dirty = false;
-
-        // Let DirectoryTracker consume directory events from its own subscriber.
-        if self.directory_tracker.process_events() {
-            changed = true;
-            tree_dirty = true;
-        }
-
-        if let Some(reader) = &self.file_event_reader {
-            let mut removed_paths: Vec<PathBuf> = Vec::new();
-            while let Ok(event) = reader.try_recv() {
-                changed = true;
-                match event.kind {
-                    FileEventKind::Discovered => {
-                        self.pdf_backing_tracker.process_discovered(&event.paths);
-                        for p in &event.paths {
-                            if Self::is_workspace_file(p) {
-                                self.file_processor.add_file(p.clone());
-                                if let Some(parent) = p.parent() {
-                                    let parent = parent.to_path_buf();
-                                    self.file_processor.add_dir(parent);
-                                }
-                            }
-                        }
-                        tree_dirty = true;
-                    }
-                    FileEventKind::Updated => {
-                        for p in &event.paths {
-                            if self.tab_manager.loaded_path.as_ref() == Some(p)
-                                && !self.text_buffer.is_open
-                            {
-                                self.tab_manager.loaded_path = None;
-                            }
-                        }
-                    }
-                    FileEventKind::Removed => {
-                        self.pdf_backing_tracker.process_removed(&event.paths);
-                        for p in &event.paths {
-                            self.file_processor.remove_file(p);
-                            if self.tab_manager.loaded_path.as_ref() == Some(p) {
-                                self.tab_manager.loaded_path = None;
-                            }
-                            self.tag_manager.remove_file(p);
-                        }
-                        removed_paths.extend(event.paths);
-                        needs_rebuild = true;
-                        tree_dirty = true;
-                    }
-                    FileEventKind::DirDiscovered => {
-                        for p in &event.paths {
-                            self.file_processor.add_dir(p.clone());
-                        }
-                        tree_dirty = true;
-                    }
-                    FileEventKind::DirRemoved => {
-                        for p in &event.paths {
-                            self.file_processor.remove_dir(p);
-                        }
-                        tree_dirty = true;
-                    }
-                }
-            }
-            if !removed_paths.is_empty() {
-                self.close_tabs_for_removed_files(&removed_paths);
-            }
-        }
-
-        if needs_rebuild {
-            self.tag_manager.rebuild();
-        }
-
-        if tree_dirty {
-            self.selection.tree_dirty = true;
-        }
-
-        changed
-    }
-
-    /// Close the tab for every file in `paths` that is currently open
-    /// (UI-051), then repair the selection so it never points at a
-    /// closed tab: if the active document was deleted, the viewer
-    /// falls back to the last remaining tab (or shows the empty state
-    /// when no tabs remain).
-    ///
-    /// Both deletion paths funnel through here — the [Delete]
-    /// context-menu action publishes a `Removed` file event on the bus
-    /// (drained in [`Self::process_file_events`]), and the filesystem
-    /// watcher reports external deletions both as an `FsEvent::FileDeleted`
-    /// on the typed channel (handled in [`Self::handle_fs_event`]) and
-    /// as a `Removed` bus event. Because both paths can observe the
-    /// same deletion, this helper is idempotent: removing a tab that is
-    /// already gone is a no-op.
-    fn close_tabs_for_removed_files(&mut self, paths: &[PathBuf]) {
-        let mut closed_any = false;
-        for path in paths {
-            if self.tab_manager.tabs.contains(path) {
-                self.tab_manager.tabs.retain(|p| p != path);
-                closed_any = true;
-            }
-        }
-        if !closed_any {
-            return;
-        }
-        // Mirror `apply_tab_action`'s selection repair: a selection
-        // that no longer corresponds to an open tab falls back to the
-        // last remaining tab (or None when the strip is empty).
-        if let Some(selected) = self.selection.selected_file().cloned() {
-            if !self.tab_manager.tabs.contains(&selected) {
-                *self.selection.selected_file_mut() = self.tab_manager.tabs.last().cloned();
-            }
-        } else if !self.tab_manager.tabs.is_empty() {
-            *self.selection.selected_file_mut() = self.tab_manager.tabs.last().cloned();
-        }
-        if self.selection.selected_file().is_none() {
-            self.tab_manager.clear_content();
-        }
-    }
-
-    /// Returns `true` if `path` is a user-editable workspace file
-    /// (i.e. one that should appear in the directory tree).
-    ///
-    /// The current rule is: markdown (`.md` / `.markdown`) and
-    /// plain-text (`.txt`). PDFs and images are inputs to the
-    /// PDF-converter and image-vision workers and stay out of the
-    /// tree. If we ever want to surface other text types
-    /// (e.g. `.org`, `.adoc`), add them here.
-    fn is_workspace_file(path: &std::path::Path) -> bool {
-        path.extension()
-            .and_then(|e| e.to_str())
-            .map(|e| {
-                let lower = e.to_lowercase();
-                lower == "md" || lower == "markdown" || lower == "txt"
-            })
-            .unwrap_or(false)
+        self.orchestrator.inline_editor_enabled
     }
 
     /// Purpose: Pin the egui context to the dark theme with the FastMD brand
@@ -425,14 +239,15 @@ impl FastMdApp {
         let browser_session = std::sync::Arc::new(crate::app::browser::BrowserSession::new(
             &crate::config::AppConfig::default(),
         ));
-        let event_bus = background_task.file_event_bus;
-        let dir_tracker = DirectoryTracker::new(event_bus.subscribe());
-        let pdf_backing_tracker = PdfBackingTracker::new();
+        let pdf_backing_tracker = crate::app::watcher::PdfBackingTracker::new();
         let agent = AgentSessionManager::new(
             config_bus,
             browser_session.clone(),
             Arc::new(pdf_backing_tracker.clone()),
         );
+
+        let event_bus = background_task.file_event_bus;
+        let dir_tracker = DirectoryTracker::new(event_bus.subscribe());
 
         let persisted_ui_state: PersistedUiState = cc
             .storage
@@ -461,34 +276,34 @@ impl FastMdApp {
         // frame.
 
         Self {
-            // Populated from the bus on the first frame; the
-            // default keeps the early frame compilable and stable.
-            content_libraries: Vec::new(),
-            rx: background_task.rx,
-            tx: background_task.tx,
-            file_event_reader: Some(event_bus.subscribe()),
-            file_event_bus: event_bus,
-            file_processor,
-            pdf_backing_tracker: PdfBackingTracker::new(),
-            directory_tracker: dir_tracker,
-            tag_manager: TagManager::new(),
+            orchestrator: AppOrchestrator {
+                content_libraries: Vec::new(),
+                rx: background_task.rx,
+                tx: background_task.tx,
+                file_event_reader: Some(event_bus.subscribe()),
+                file_event_bus: event_bus,
+                file_processor,
+                pdf_backing_tracker,
+                directory_tracker: dir_tracker,
+                tag_manager: TagManager::new(),
+                selection,
+                tab_manager: TabManager::new(),
+                _watcher: None,
+                agent,
+                dialogs,
+                submit_prompt: None,
+                text_buffer: TextBuffer::new(),
+                inline_editor_enabled: false,
+                background_manager,
+                config: AppConfig::default(),
+                config_reader: Some(config_reader),
+                pending_file_load: None,
+                repaint_interval: Duration::from_millis(16),
+                finished_watcher_slot,
+            },
             layout,
-            selection,
-            tab_manager: TabManager::new(),
             cached_tree_rows: None,
-            _watcher: None,
-            agent,
-            dialogs,
-            submit_prompt: None,
-            text_buffer: TextBuffer::new(),
-            inline_editor_enabled: false,
-            background_manager,
-            config: AppConfig::default(),
-            config_reader: Some(config_reader),
             persisted_ui_state,
-            pending_file_load: None,
-            repaint_interval: Duration::from_millis(16),
-            finished_watcher_slot,
         }
     }
 
@@ -527,9 +342,7 @@ impl FastMdApp {
         let test_browser_session = std::sync::Arc::new(crate::app::browser::BrowserSession::new(
             &crate::config::AppConfig::default(),
         ));
-        let event_bus = background_task.file_event_bus;
-        let dir_tracker = DirectoryTracker::new(event_bus.subscribe());
-        let pdf_backing_tracker = PdfBackingTracker::new();
+        let pdf_backing_tracker = crate::app::watcher::PdfBackingTracker::new();
         let mut agent = AgentSessionManager::new(
             bus.clone(),
             test_browser_session,
@@ -537,6 +350,10 @@ impl FastMdApp {
         );
         agent.set_config(config.clone());
 
+        let event_bus = background_task.file_event_bus;
+        let dir_tracker = DirectoryTracker::new(event_bus.subscribe());
+
+        let selection = SelectionManager::new();
         let mut dialogs = DialogManager::new();
         let batch_dialog_config = crate::app::batch::types::BatchDialogConfig {
             available_dirs: config
@@ -552,62 +369,35 @@ impl FastMdApp {
         let inline_editor_enabled = config.inline_editor_enabled;
 
         Self {
-            content_libraries,
-            rx,
-            tx,
-            file_event_bus: event_bus.clone(),
-            file_event_reader: Some(event_bus.subscribe()),
-            file_processor,
-            tag_manager: TagManager::new(),
+            orchestrator: AppOrchestrator {
+                content_libraries,
+                rx,
+                tx,
+                file_event_bus: event_bus.clone(),
+                file_event_reader: Some(event_bus.subscribe()),
+                file_processor,
+                pdf_backing_tracker,
+                tag_manager: TagManager::new(),
+                selection,
+                tab_manager: TabManager::new(),
+                _watcher: None,
+                agent,
+                dialogs,
+                submit_prompt: None,
+                text_buffer: TextBuffer::new(),
+                inline_editor_enabled,
+                background_manager,
+                directory_tracker: dir_tracker,
+                config,
+                config_reader: None,
+                pending_file_load: None,
+                repaint_interval: Duration::from_millis(16),
+                finished_watcher_slot,
+            },
             layout: PanelLayout::new(),
-            selection: SelectionManager::new(),
-            tab_manager: TabManager::new(),
             cached_tree_rows: None,
-            _watcher: None,
-            agent,
-            dialogs,
-            submit_prompt: None,
-            text_buffer: TextBuffer::new(),
-            inline_editor_enabled,
-            background_manager,
-            pdf_backing_tracker: PdfBackingTracker::new(),
-            directory_tracker: dir_tracker,
-            config,
-            config_reader: None,
             persisted_ui_state: PersistedUiState::default(),
-            pending_file_load: None,
-            repaint_interval: Duration::from_millis(16),
-            finished_watcher_slot,
         }
-    }
-
-    /// Purpose: Submits a prompt to the agent and starts a new session, taking ownership of all relevant state.
-    /// Inputs: `prompt` - the prompt text to send to the agent.
-    /// Outputs: None.
-    /// Purity: Impure (mutates self, spawns the agent thread).
-    /// Preconditions: `prompt` should be non-empty.
-    /// Postconditions: agent state reflects running, cancel flag is set, agent thread launched.
-    pub fn start_agent_session(&mut self, prompt: String) {
-        self.agent.start_session(
-            self.tx.clone(),
-            prompt,
-            self.selection.selected_file().cloned(),
-            self.selection.selected_dir().cloned(),
-            self.selection.selected_files().clone(),
-            self.file_event_bus.clone(),
-        );
-        self.agent.set_show_results(true);
-    }
-
-    /// Take the `RecommendedWatcher` handle that the file-watcher
-    /// thread deposits just before sending `FsEvent::Finished`.
-    /// Returns `None` if the slot is empty (watcher init failed, or
-    /// the handle has already been taken).
-    fn task_take_finished_watcher(&self) -> Option<notify::RecommendedWatcher> {
-        self.finished_watcher_slot
-            .lock()
-            .ok()
-            .and_then(|mut slot| slot.take())
     }
 }
 
@@ -626,7 +416,7 @@ pub fn generate_format_prompt(date_str: &str) -> String {
 
 impl eframe::App for FastMdApp {
     fn on_exit(&mut self, _gl: Option<&eframe::glow::Context>) {
-        if let Ok(mgr) = self.background_manager.lock() {
+        if let Ok(mgr) = self.orchestrator.background_manager.lock() {
             let log_path = crate::config::get_config_path()
                 .parent()
                 .unwrap_or(std::path::Path::new("."))
@@ -637,7 +427,13 @@ impl eframe::App for FastMdApp {
 
     fn save(&mut self, storage: &mut dyn eframe::Storage) {
         self.persisted_ui_state.left_panel_width = self.layout.left_panel_width;
-        let all_dirs: HashSet<PathBuf> = self.selection.expanded_dirs.iter().cloned().collect();
+        let all_dirs: HashSet<PathBuf> = self
+            .orchestrator
+            .selection
+            .expanded_dirs
+            .iter()
+            .cloned()
+            .collect();
         self.persisted_ui_state.expanded_dirs = all_dirs;
         if let Ok(json) = serde_json::to_string(&self.persisted_ui_state) {
             storage.set_string(PERSISTED_UI_STATE_KEY, json);
@@ -671,10 +467,10 @@ impl FastMdApp {
         puffin::profile_function!();
 
         let ctx = ui.ctx();
-        self.drain_config_bus();
+        self.orchestrator.drain_config_bus();
         self.process_file_events_and_repaint(ctx);
-        self.drain_background_channel();
-        self.handle_file_selection(ctx);
+        self.orchestrator.drain_background_channel();
+        self.orchestrator.handle_file_selection();
         self.show_editor_overlay(ui);
         self.show_modals(ui);
         self.render_panels(ui);
@@ -692,322 +488,22 @@ impl FastMdApp {
         }
     }
 
-    /// Drain the configuration-arrival bus on the first frame and
-    /// populate every config-derived field (`self.config`,
-    /// `self.content_libraries`, `self.inline_editor_enabled`,
-    /// `self.dialogs.batch_dialog_config.available_dirs`). The
-    /// reader is dropped after the first frame so subsequent
-    /// frames do not touch the bus.
-    fn drain_config_bus(&mut self) {
-        // Snapshot the reader out of `self` so we can do a
-        // non-borrowing drain (we also need to mutate other fields).
-        let mut config: Option<ConfigArrived> = None;
-        if let Some(reader) = self.config_reader.as_ref() {
-            match reader.try_recv() {
-                Ok(event) => config = Some(event),
-                Err(std::sync::mpsc::TryRecvError::Empty) => {
-                    // The publish happened *after* this subscriber
-                    // registered, which means the broadcast channel
-                    // will not deliver the event to us. Surface this
-                    // in the log so the operator can find the wiring
-                    // bug.
-                    tracing::error!(
-                        name = "config.arrived.missed",
-                        "FastMdApp reader was registered after the publish; \
-                         broadcasting only delivers to pre-existing subscribers. \
-                         The app will use AppConfig::default() and content \
-                         libraries will be empty until the next startup."
-                    );
-                    self.config_reader = None;
-                    return;
-                }
-                Err(std::sync::mpsc::TryRecvError::Disconnected) => {
-                    // Bus is gone; fall through and clear the reader.
-                }
-            }
-        }
-        // We either have a config or the bus is disconnected;
-        // either way, drop the reader so we don't poll again.
-        self.config_reader = None;
-
-        let Some(event) = config else {
-            return;
-        };
-
-        let mut config = event.config;
-        // Apply CLI argument / cwd fallback to the content libraries
-        // list. Kept here (rather than in `new`) so the fallback only
-        // runs once the published config has arrived.
-        let args: Vec<String> = std::env::args().collect();
-        if args.len() > 1 {
-            let path = PathBuf::from(&args[1]);
-            if path.exists() && path.is_dir() {
-                let mut path_str = path
-                    .canonicalize()
-                    .unwrap_or(path)
-                    .to_string_lossy()
-                    .to_string();
-                if path_str.starts_with(r"\\?\") {
-                    path_str = path_str[4..].to_string();
-                }
-                let found = config
-                    .content_libraries
-                    .iter()
-                    .any(|lib| lib.root_folder == path_str);
-                if !found {
-                    config
-                        .content_libraries
-                        .push(crate::config::ContentLibrary {
-                            root_folder: path_str,
-                            name: "Workspace".to_string(),
-                            kind: "text".to_string(),
-                            readonly: false,
-                            priority: 0,
-                        });
-                }
-            }
-        }
-        if config.content_libraries.is_empty() {
-            let mut current_dir = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
-            if let Ok(canon) = std::fs::canonicalize(&current_dir) {
-                current_dir = canon;
-            }
-            let mut path_str = current_dir.to_string_lossy().to_string();
-            if path_str.starts_with(r"\\?\") {
-                path_str = path_str[4..].to_string();
-            }
-            config
-                .content_libraries
-                .push(crate::config::ContentLibrary {
-                    root_folder: path_str,
-                    name: "Workspace".to_string(),
-                    kind: "text".to_string(),
-                    readonly: false,
-                    priority: 0,
-                });
-        }
-
-        // Mirror the config into the agent so any session started
-        // after the first frame uses the published config.
-        self.agent.set_config(config.clone());
-
-        // Build the system prompt now that we have the config.
-        // Previously this happened in `main.rs` before the egui
-        // loop; moving it here keeps the prompt-build path on the
-        // same "config has arrived" trigger that the rest of the
-        // init uses.
-        let prompt = crate::agent::prompt_builder::SystemPromptBuilder::new(&config).build(&config);
-        tracing::info!(
-            name = "app.startup",
-            system_prompt = %prompt,
-            "Application started successfully. Emitted system prompt for diagnostics."
-        );
-
-        self.content_libraries = config.content_libraries.clone();
-        self.selection.tree_dirty = true;
-        self.inline_editor_enabled = config.inline_editor_enabled;
-        self.dialogs.batch_dialog_config.available_dirs = config
-            .content_libraries
-            .iter()
-            .map(|lib| PathBuf::from(&lib.root_folder))
-            .collect();
-        self.config = config;
-        tracing::info!(
-            name = "config.arrived",
-            "FastMdApp populated from ConfigArrived event"
-        );
-    }
-
-    fn process_file_events_and_repaint(&mut self, ctx: &egui::Context) {
-        if self.process_file_events()
-            || !self.file_processor.indexing_finished
-            || !ctx.input(|i| i.raw.events.is_empty())
-        {
-            ctx.request_repaint();
-        } else {
-            ctx.request_repaint_after(self.repaint_interval);
-        }
-    }
-
-    fn drain_background_channel(&mut self) {
-        while let Ok(event) = self.rx.try_recv() {
-            // Dispatch the typed event directly by domain
-            // (Agent / Fs / Process / McpAuth).
-            match event {
-                BackgroundEvent::Agent(agent_ev) => {
-                    self.agent.handle_agent_event(agent_ev);
-                }
-                BackgroundEvent::Fs(fs_ev) => {
-                    self.handle_fs_event(fs_ev);
-                }
-                BackgroundEvent::Process(proc_ev) => {
-                    self.handle_process_event(proc_ev);
-                }
-                BackgroundEvent::McpAuth(mcp_ev) => {
-                    self.handle_mcp_auth_event(mcp_ev);
-                }
-            }
-        }
-    }
-
-    fn handle_fs_event(&mut self, ev: FsEvent) {
-        use FsEvent;
-        match ev {
-            FsEvent::FileParsed { path, tags } => {
-                self.tag_manager.add_tags(path.clone(), tags);
-                self.file_processor.add_file(path);
-                self.selection.tree_dirty = true;
-            }
-            FsEvent::DirParsed { path } => {
-                self.file_processor.add_dir(path);
-                self.selection.tree_dirty = true;
-            }
-            FsEvent::Finished => {
-                // The file-watcher thread has finished its initial
-                // scan and the watcher handle has been moved into
-                // the `Task::finished_watcher` slot. Take it now so
-                // it stays alive for the rest of the app lifetime.
-                if let Some(watcher) = self.task_take_finished_watcher() {
-                    self._watcher = Some(watcher);
-                }
-                self.file_processor.indexing_finished = true;
-                self.tag_manager.rebuild();
-                self.selection.tree_dirty = true;
-            }
-            FsEvent::FinishedWithoutWatcher => {
-                self.file_processor.indexing_finished = true;
-                self.tag_manager.rebuild();
-                self.selection.tree_dirty = true;
-            }
-            FsEvent::FileModified { path, tags } => {
-                self.tag_manager.add_tags(path.clone(), tags);
-                self.file_processor.add_file(path.clone());
-                self.tag_manager.rebuild();
-                if self.tab_manager.loaded_path.as_ref() == Some(&path) {
-                    self.tab_manager.loaded_path = None;
-                }
-                self.selection.tree_dirty = true;
-            }
-            FsEvent::FileDeleted { path } => {
-                self.file_processor.remove_file(&path);
-                self.tag_manager.remove_file(&path);
-                self.tag_manager.rebuild();
-                self.close_tabs_for_removed_files(std::slice::from_ref(&path));
-                if self.selection.selected_file().is_some_and(|p| p == &path) {
-                    *self.selection.selected_file_mut() = None;
-                    self.tab_manager.current_yaml = None;
-                    self.tab_manager.current_markdown = String::new();
-                    self.tab_manager.invalidate_heading_ids_cache();
-                    self.tab_manager.toc.clear();
-                }
-                self.selection.selected_files_mut().remove(&path);
-                if self.tab_manager.loaded_path.as_ref() == Some(&path) {
-                    self.tab_manager.loaded_path = None;
-                }
-                self.selection.tree_dirty = true;
-            }
-        }
-    }
-
-    fn handle_process_event(&mut self, ev: ProcessEvent) {
-        use ProcessEvent;
-        match ev {
-            ProcessEvent::LogEntry(entry) => {
-                if let Ok(mut mgr) = self.background_manager.lock() {
-                    mgr.push_log(entry);
-                }
-            }
-            ProcessEvent::FileLoaded { path, content } => {
-                self.pending_file_load = None;
-                if let Ok(content) = content {
-                    if let Some(fm) = parse_front_matter(&content) {
-                        self.tab_manager.current_yaml = Some(fm.yaml);
-                        self.tab_manager.current_markdown = fm.body.to_string();
-                    } else {
-                        self.tab_manager.current_yaml = None;
-                        self.tab_manager.current_markdown = content;
-                    }
-                    self.tab_manager.invalidate_heading_ids_cache();
-                    self.tab_manager.loaded_path = Some(path.clone());
-                    self.tab_manager.toc =
-                        crate::ui::render::build_toc(&self.tab_manager.current_markdown);
-                    self.tab_manager.scroll_to_header_id = None;
-                }
-            }
-        }
-    }
-
-    fn handle_mcp_auth_event(&mut self, ev: McpAuthEvent) {
-        use crate::agent::tools::manager::{
-            self as tool_manager, ToolErrorKind, ToolGroupError, ToolGroupId,
-        };
-        match ev {
-            McpAuthEvent::Completed { server_name, error } => {
-                // Always clear the in-progress flag first so the button
-                // becomes interactive again regardless of outcome.
-                self.dialogs_mut().set_oauth_idle(&server_name);
-
-                match error {
-                    None => {
-                        // Success: authenticate() already cleared the
-                        // needs_auth flag inside McpClientManager, so
-                        // the "Authenticate" button will disappear on
-                        // the next render without any extra work.
-                        tracing::info!(
-                            server = %server_name,
-                            "OAuth flow completed; clearing in-progress flag"
-                        );
-                    }
-                    Some(msg) => {
-                        // Failure: surface the error through the existing
-                        // ToolGroupError path so the row shows ⚠ + Restart.
-                        tracing::warn!(
-                            server = %server_name,
-                            error = %msg,
-                            "OAuth flow failed; recording error on group row"
-                        );
-                        tool_manager::record_mcp_error(
-                            &ToolGroupId::Mcp(server_name),
-                            ToolGroupError::now(ToolErrorKind::Authentication, msg),
-                        );
-                    }
-                }
-            }
-        }
-    }
-
-    fn handle_file_selection(&mut self, _ctx: &egui::Context) {
-        if let Some(selected_path) = self.selection.selected_file()
-            && self.tab_manager.loaded_path.as_ref() != Some(selected_path)
-            && self.pending_file_load.as_ref() != Some(selected_path)
-        {
-            self.pending_file_load = Some(selected_path.clone());
-            let tx = self.tx.clone();
-            let path = selected_path.clone();
-            std::thread::spawn(move || {
-                let content = std::fs::read_to_string(&path).map_err(|e| e.to_string());
-                if tx
-                    .send(ProcessEvent::FileLoaded { path, content }.into())
-                    .is_err()
-                {
-                    tracing::warn!("Background channel closed, file load result dropped");
-                }
-            });
-        }
-    }
-
     fn show_editor_overlay(&mut self, ui: &mut egui::Ui) {
-        let producer = FileEventProducer::new(&self.file_event_bus);
+        let producer = FileEventProducer::new(&self.orchestrator.file_event_bus);
         // The editor opens its own top-level `egui::Window` from
         // the context pulled out of `ui`. After it returns we
         // check whether the buffer was closed (either by a
         // successful save or a manual cancel) and clear the
         // loaded path so the centre panel reloads the file on
         // the next frame.
-        let was_open = self.text_buffer.is_open;
-        let _ = crate::ui::editor_egui::show_text_editor(ui, &mut self.text_buffer, &producer);
-        if was_open && !self.text_buffer.is_open {
-            self.tab_manager.loaded_path = None;
+        let was_open = self.orchestrator.text_buffer.is_open;
+        let _ = crate::ui::editor_egui::show_text_editor(
+            ui,
+            &mut self.orchestrator.text_buffer,
+            &producer,
+        );
+        if was_open && !self.orchestrator.text_buffer.is_open {
+            self.orchestrator.tab_manager.loaded_path = None;
         }
     }
 
@@ -1017,60 +513,60 @@ impl FastMdApp {
         // pull the `Context` off the root `Ui` so the existing
         // `show_*_modal` helpers (which take `&Context`) keep working.
         let ctx = parent_ui.ctx();
-        if self.dialogs.move_dialog_open {
+        if self.orchestrator.dialogs.move_dialog_open {
             crate::ui::modals::show_move_modal_dialog(
-                &mut self.dialogs,
-                &self.content_libraries,
-                &self.file_processor,
-                &self.file_event_bus,
+                &mut self.orchestrator.dialogs,
+                &self.orchestrator.content_libraries,
+                &self.orchestrator.file_processor,
+                &self.orchestrator.file_event_bus,
                 ctx,
             );
         }
-        if self.dialogs.create_dir_dialog_open {
+        if self.orchestrator.dialogs.create_dir_dialog_open {
             crate::ui::modals::show_create_dir_dialog(
-                &mut self.dialogs,
-                &mut self.file_processor,
-                &mut self._watcher,
-                &self.file_event_bus,
+                &mut self.orchestrator.dialogs,
+                &mut self.orchestrator.file_processor,
+                &mut self.orchestrator._watcher,
+                &self.orchestrator.file_event_bus,
                 ctx,
             );
         }
-        if self.dialogs.rename_dialog_open {
-            let selection = &mut self.selection;
+        if self.orchestrator.dialogs.rename_dialog_open {
+            let selection = &mut self.orchestrator.selection;
             crate::ui::modals::show_rename_dialog(crate::ui::modals::RenameDialogCtx {
-                dialog_manager: &mut self.dialogs,
-                file_event_bus: &self.file_event_bus,
-                loaded_path: &mut self.tab_manager.loaded_path,
+                dialog_manager: &mut self.orchestrator.dialogs,
+                file_event_bus: &self.orchestrator.file_event_bus,
+                loaded_path: &mut self.orchestrator.tab_manager.loaded_path,
                 selected_file: &mut selection.selected_file,
                 selected_dir: &mut selection.selected_dir,
-                tabs: &mut self.tab_manager.tabs,
-                file_processor: &mut self.file_processor,
-                tag_manager: &mut self.tag_manager,
+                tabs: &mut self.orchestrator.tab_manager.tabs,
+                file_processor: &mut self.orchestrator.file_processor,
+                tag_manager: &mut self.orchestrator.tag_manager,
                 expanded_dirs: &mut selection.expanded_dirs,
                 ctx,
             });
         }
-        if self.dialogs.create_document_dialog_open {
+        if self.orchestrator.dialogs.create_document_dialog_open {
             crate::ui::modals::show_create_document_dialog(
-                &mut self.dialogs,
-                &self.file_event_bus,
+                &mut self.orchestrator.dialogs,
+                &self.orchestrator.file_event_bus,
                 ctx,
             );
         }
 
         crate::ui::background_logs::show_background_logs_window(self, ctx);
 
-        if self.dialogs.tools_dialog_open {
+        if self.orchestrator.dialogs.tools_dialog_open {
             crate::ui::tools_dialog::show_tools_dialog(ctx, self);
         }
 
-        if self.dialogs.batch_dialog_open {
-            let mut dialog_config = self.dialogs.batch_dialog_config.clone();
+        if self.orchestrator.dialogs.batch_dialog_open {
+            let mut dialog_config = self.orchestrator.dialogs.batch_dialog_config.clone();
 
             let prev_selected = dialog_config
                 .selected_dir_idx
                 .and_then(|i| dialog_config.available_dirs.get(i).cloned());
-            dialog_config.available_dirs = self.directory_tracker.dirs_sorted();
+            dialog_config.available_dirs = self.orchestrator.directory_tracker.dirs_sorted();
             dialog_config.selected_dir_idx = prev_selected
                 .as_ref()
                 .and_then(|p| dialog_config.available_dirs.iter().position(|d| d == p));
@@ -1080,7 +576,7 @@ impl FastMdApp {
             {
                 match result {
                     crate::app::batch::types::BatchDialogResult::Process(config) => {
-                        if self.dialogs.batch_handle.is_none() {
+                        if self.orchestrator.dialogs.batch_handle.is_none() {
                             let prompt_text = dialog_config
                                 .available_prompts
                                 .get(dialog_config.selected_prompt_idx.unwrap_or(0))
@@ -1090,24 +586,24 @@ impl FastMdApp {
                             let (coordinator, cancel_flag) =
                                 crate::app::batch::coordinator::BatchCoordinator::new(
                                     config,
-                                    self.config.clone(),
-                                    self.tx.clone(),
-                                    self.file_event_bus.clone(),
+                                    self.orchestrator.config.clone(),
+                                    self.orchestrator.tx.clone(),
+                                    self.orchestrator.file_event_bus.clone(),
                                     prompt_text,
                                 );
                             let handle = coordinator.execute();
-                            self.dialogs.batch_handle = Some(handle);
-                            self.dialogs.batch_cancel_flag = Some(cancel_flag);
+                            self.orchestrator.dialogs.batch_handle = Some(handle);
+                            self.orchestrator.dialogs.batch_cancel_flag = Some(cancel_flag);
                         }
                     }
                     crate::app::batch::types::BatchDialogResult::Cancel => {
-                        self.dialogs.batch_dialog_open = false;
+                        self.orchestrator.dialogs.batch_dialog_open = false;
                         dialog_config.available_prompts.clear();
                         dialog_config.selected_prompt_idx = None;
                     }
                 }
             }
-            self.dialogs.batch_dialog_config = dialog_config;
+            self.orchestrator.dialogs.batch_dialog_config = dialog_config;
         }
     }
 
@@ -1134,18 +630,29 @@ impl FastMdApp {
         show_center_panel(self, parent_ui);
     }
 
+    fn process_file_events_and_repaint(&mut self, ctx: &egui::Context) {
+        if self.orchestrator.process_file_events()
+            || !self.orchestrator.file_processor.indexing_finished
+            || !ctx.input(|i| i.raw.events.is_empty())
+        {
+            ctx.request_repaint();
+        } else {
+            ctx.request_repaint_after(self.orchestrator.repaint_interval);
+        }
+    }
+
     fn handle_deferred_actions(&mut self) {
-        if let Some(prompt) = self.submit_prompt.take() {
-            self.start_agent_session(prompt);
+        if let Some(prompt) = self.orchestrator.submit_prompt.take() {
+            self.orchestrator.start_agent_session(prompt);
         }
 
-        if let Some(handle) = self.dialogs.batch_handle.take() {
+        if let Some(handle) = self.orchestrator.dialogs.batch_handle.take() {
             if handle.thread.is_finished() {
                 let result = handle.join();
-                self.dialogs.batch_cancel_flag = None;
+                self.orchestrator.dialogs.batch_cancel_flag = None;
                 tracing::info!("Batch completed: {:?}", result);
             } else {
-                self.dialogs.batch_handle = Some(handle);
+                self.orchestrator.dialogs.batch_handle = Some(handle);
             }
         }
     }
@@ -1154,8 +661,10 @@ impl FastMdApp {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::bus::events::file::FileEvent;
     use crate::bus::events::messages::TokenUsageInfo;
     use crate::bus::events::typed::AgentEvent;
+    use crate::bus::events::typed::FsEvent;
     use crate::ui::test_helpers::assert::assert_no_id_change_in_shapes;
     use std::path::PathBuf;
 
@@ -1221,19 +730,19 @@ mod tests {
     #[test]
     fn test_tag_manager_tracks_tags_correctly() {
         let mut app = create_test_app();
-        app.tag_manager.add_tags(
+        app.orchestrator.tag_manager.add_tags(
             PathBuf::from("file1.md"),
             vec!["rust".to_string(), "ui".to_string()],
         );
-        app.tag_manager.add_tags(
+        app.orchestrator.tag_manager.add_tags(
             PathBuf::from("file2.md"),
             vec!["rust".to_string(), "testing".to_string()],
         );
 
-        assert_eq!(app.tag_manager.all_tags().len(), 3);
-        assert!(app.tag_manager.all_tags().contains("rust"));
-        assert!(app.tag_manager.all_tags().contains("ui"));
-        assert!(app.tag_manager.all_tags().contains("testing"));
+        assert_eq!(app.orchestrator.tag_manager.all_tags().len(), 3);
+        assert!(app.orchestrator.tag_manager.all_tags().contains("rust"));
+        assert!(app.orchestrator.tag_manager.all_tags().contains("ui"));
+        assert!(app.orchestrator.tag_manager.all_tags().contains("testing"));
     }
 
     #[test]
@@ -1244,7 +753,8 @@ mod tests {
         let test_dir = PathBuf::from("test_dir");
 
         // 1. FileParsed
-        app.tx
+        app.orchestrator
+            .tx
             .send(
                 FsEvent::FileParsed {
                     path: test_file.clone(),
@@ -1255,7 +765,8 @@ mod tests {
             .unwrap();
 
         // 2. DirParsed
-        app.tx
+        app.orchestrator
+            .tx
             .send(
                 FsEvent::DirParsed {
                     path: test_dir.clone(),
@@ -1265,16 +776,22 @@ mod tests {
             .unwrap();
 
         // 3. FinishedWithoutWatcher
-        app.tx.send(FsEvent::FinishedWithoutWatcher.into()).unwrap();
+        app.orchestrator
+            .tx
+            .send(FsEvent::FinishedWithoutWatcher.into())
+            .unwrap();
 
         // 4. Agent Status & Response
-        app.tx
+        app.orchestrator
+            .tx
             .send(AgentEvent::Status("Processing...".to_string()).into())
             .unwrap();
-        app.tx
+        app.orchestrator
+            .tx
             .send(AgentEvent::Thinking("Thinking step".to_string()).into())
             .unwrap();
-        app.tx
+        app.orchestrator
+            .tx
             .send(AgentEvent::Response("Done result".to_string()).into())
             .unwrap();
 
@@ -1282,12 +799,17 @@ mod tests {
             app.update_ui(ui);
         });
 
-        assert!(app.file_processor.all_files.contains(&test_file));
-        assert!(app.file_processor.all_dirs.contains(&test_dir));
-        assert!(app.file_processor.indexing_finished);
-        assert_eq!(app.agent.state().status, "Processing...");
-        assert_eq!(app.agent.state().thinking, "Thinking step");
-        assert_eq!(app.agent.state().response, "Done result");
+        assert!(
+            app.orchestrator
+                .file_processor
+                .all_files
+                .contains(&test_file)
+        );
+        assert!(app.orchestrator.file_processor.all_dirs.contains(&test_dir));
+        assert!(app.orchestrator.file_processor.indexing_finished);
+        assert_eq!(app.orchestrator.agent.state().status, "Processing...");
+        assert_eq!(app.orchestrator.agent.state().thinking, "Thinking step");
+        assert_eq!(app.orchestrator.agent.state().response, "Done result");
     }
 
     #[test]
@@ -1296,13 +818,20 @@ mod tests {
         let mut app = create_test_app();
         let file_path = PathBuf::from("modified_file.md");
 
-        app.file_processor.all_files.push(file_path.clone());
-        *app.selection.selected_file_mut() = Some(file_path.clone());
-        app.selection.selected_files_mut().insert(file_path.clone());
-        app.tab_manager.loaded_path = Some(file_path.clone());
+        app.orchestrator
+            .file_processor
+            .all_files
+            .push(file_path.clone());
+        *app.orchestrator.selection.selected_file_mut() = Some(file_path.clone());
+        app.orchestrator
+            .selection
+            .selected_files_mut()
+            .insert(file_path.clone());
+        app.orchestrator.tab_manager.loaded_path = Some(file_path.clone());
 
         // File modified message
-        app.tx
+        app.orchestrator
+            .tx
             .send(
                 FsEvent::FileModified {
                     path: file_path.clone(),
@@ -1316,10 +845,11 @@ mod tests {
             app.update_ui(ui);
         });
 
-        assert!(app.tab_manager.loaded_path.is_none()); // Trigger reload
+        assert!(app.orchestrator.tab_manager.loaded_path.is_none()); // Trigger reload
 
         // File deleted message
-        app.tx
+        app.orchestrator
+            .tx
             .send(
                 FsEvent::FileDeleted {
                     path: file_path.clone(),
@@ -1332,9 +862,19 @@ mod tests {
             app.update_ui(ui);
         });
 
-        assert!(!app.file_processor.all_files.contains(&file_path));
-        assert!(app.selection.selected_file().is_none());
-        assert!(!app.selection.selected_files().contains(&file_path));
+        assert!(
+            !app.orchestrator
+                .file_processor
+                .all_files
+                .contains(&file_path)
+        );
+        assert!(app.orchestrator.selection.selected_file().is_none());
+        assert!(
+            !app.orchestrator
+                .selection
+                .selected_files()
+                .contains(&file_path)
+        );
     }
 
     #[test]
@@ -1342,7 +882,8 @@ mod tests {
         let ctx = egui::Context::default();
         let mut app = create_test_app();
 
-        app.tx
+        app.orchestrator
+            .tx
             .send(AgentEvent::Failed("Network timeout".to_string()).into())
             .unwrap();
 
@@ -1350,10 +891,14 @@ mod tests {
             app.update_ui(ui);
         });
 
-        assert_eq!(app.agent.state().status, "Error: Network timeout");
-        assert!(!app.agent.state().running);
+        assert_eq!(
+            app.orchestrator.agent.state().status,
+            "Error: Network timeout"
+        );
+        assert!(!app.orchestrator.agent.state().running);
 
-        app.tx
+        app.orchestrator
+            .tx
             .send(AgentEvent::Finished(vec![serde_json::json!({"ok": true})]).into())
             .unwrap();
 
@@ -1361,8 +906,8 @@ mod tests {
             app.update_ui(ui);
         });
 
-        assert!(!app.agent.state().running);
-        assert!(app.agent.state().history.is_some());
+        assert!(!app.orchestrator.agent.state().running);
+        assert!(app.orchestrator.agent.state().history.is_some());
     }
 
     #[test]
@@ -1371,7 +916,8 @@ mod tests {
         let mut app = create_test_app();
 
         // First turn: small context, no cached or reasoning tokens.
-        app.tx
+        app.orchestrator
+            .tx
             .send(
                 AgentEvent::TokenUsage(TokenUsageInfo {
                     prompt_tokens: 100,
@@ -1388,7 +934,8 @@ mod tests {
         });
 
         assert_eq!(
-            app.agent
+            app.orchestrator
+                .agent
                 .state()
                 .token_usage
                 .as_ref()
@@ -1397,17 +944,27 @@ mod tests {
             100
         );
         assert_eq!(
-            app.agent.state().total_usage.prompt_tokens,
+            app.orchestrator.agent.state().total_usage.prompt_tokens,
             100,
             "prompt_tokens should track the peak seen so far"
         );
-        assert_eq!(app.agent.state().total_usage.completion_tokens, 20);
-        assert_eq!(app.agent.state().total_usage.total_tokens, 120);
-        assert_eq!(app.agent.state().total_usage.cached_tokens, Some(0));
-        assert_eq!(app.agent.state().total_usage.reasoning_tokens, Some(0));
+        assert_eq!(
+            app.orchestrator.agent.state().total_usage.completion_tokens,
+            20
+        );
+        assert_eq!(app.orchestrator.agent.state().total_usage.total_tokens, 120);
+        assert_eq!(
+            app.orchestrator.agent.state().total_usage.cached_tokens,
+            Some(0)
+        );
+        assert_eq!(
+            app.orchestrator.agent.state().total_usage.reasoning_tokens,
+            Some(0)
+        );
 
         // Second turn: context grew, completion + reasoning added.
-        app.tx
+        app.orchestrator
+            .tx
             .send(
                 AgentEvent::TokenUsage(TokenUsageInfo {
                     prompt_tokens: 250,
@@ -1425,7 +982,8 @@ mod tests {
         });
 
         assert_eq!(
-            app.agent
+            app.orchestrator
+                .agent
                 .state()
                 .token_usage
                 .as_ref()
@@ -1434,17 +992,27 @@ mod tests {
             250
         );
         assert_eq!(
-            app.agent.state().total_usage.prompt_tokens,
+            app.orchestrator.agent.state().total_usage.prompt_tokens,
             250,
             "peak should rise with the larger turn"
         );
-        assert_eq!(app.agent.state().total_usage.completion_tokens, 50);
-        assert_eq!(app.agent.state().total_usage.total_tokens, 400);
-        assert_eq!(app.agent.state().total_usage.cached_tokens, Some(50));
-        assert_eq!(app.agent.state().total_usage.reasoning_tokens, Some(5));
+        assert_eq!(
+            app.orchestrator.agent.state().total_usage.completion_tokens,
+            50
+        );
+        assert_eq!(app.orchestrator.agent.state().total_usage.total_tokens, 400);
+        assert_eq!(
+            app.orchestrator.agent.state().total_usage.cached_tokens,
+            Some(50)
+        );
+        assert_eq!(
+            app.orchestrator.agent.state().total_usage.reasoning_tokens,
+            Some(5)
+        );
 
         // Third turn: smaller context — peak should NOT shrink.
-        app.tx
+        app.orchestrator
+            .tx
             .send(
                 AgentEvent::TokenUsage(TokenUsageInfo {
                     prompt_tokens: 80,
@@ -1461,13 +1029,22 @@ mod tests {
         });
 
         assert_eq!(
-            app.agent.state().total_usage.prompt_tokens,
+            app.orchestrator.agent.state().total_usage.prompt_tokens,
             250,
             "peak prompt size must not regress"
         );
-        assert_eq!(app.agent.state().total_usage.completion_tokens, 60);
-        assert_eq!(app.agent.state().total_usage.cached_tokens, Some(50));
-        assert_eq!(app.agent.state().total_usage.reasoning_tokens, Some(5));
+        assert_eq!(
+            app.orchestrator.agent.state().total_usage.completion_tokens,
+            60
+        );
+        assert_eq!(
+            app.orchestrator.agent.state().total_usage.cached_tokens,
+            Some(50)
+        );
+        assert_eq!(
+            app.orchestrator.agent.state().total_usage.reasoning_tokens,
+            Some(5)
+        );
     }
 
     // -- process_file_events: tab reload on file Updated --
@@ -1484,28 +1061,28 @@ mod tests {
         let mut app = create_test_app();
         let path = PathBuf::from("/tmp/active_doc.md");
 
-        *app.selection.selected_file_mut() = Some(path.clone());
-        app.tab_manager.loaded_path = Some(path.clone());
-        app.file_processor.all_files.push(path.clone());
+        *app.orchestrator.selection.selected_file_mut() = Some(path.clone());
+        app.orchestrator.tab_manager.loaded_path = Some(path.clone());
+        app.orchestrator.file_processor.all_files.push(path.clone());
 
         // Subscribe a reader to the bus so we can publish into it
         // and have process_file_events pick up the event.
-        app.file_event_reader = Some(app.file_event_bus.subscribe());
+        app.orchestrator.file_event_reader = Some(app.orchestrator.file_event_bus.subscribe());
 
         // Use a separate clone of the bus to publish; both clones
         // share the same subscriber list.
-        let publisher = app.file_event_bus.clone();
+        let publisher = app.orchestrator.file_event_bus.clone();
         publisher.publish(FileEvent::updated_one(path.clone()));
 
-        let changed = app.process_file_events();
+        let changed = app.orchestrator.process_file_events();
         assert!(changed, "process_file_events should report a change");
         assert!(
-            app.tab_manager.loaded_path.is_none(),
+            app.orchestrator.tab_manager.loaded_path.is_none(),
             "loaded_path must be cleared so the renderer reloads on the next frame"
         );
         // selected_file must be preserved so the renderer knows
         // what to render.
-        assert_eq!(app.selection.selected_file(), Some(&path));
+        assert_eq!(app.orchestrator.selection.selected_file(), Some(&path));
     }
 
     #[test]
@@ -1516,19 +1093,21 @@ mod tests {
         let mut app = create_test_app();
         let path = PathBuf::from("/tmp/being_edited.md");
 
-        *app.selection.selected_file_mut() = Some(path.clone());
-        app.tab_manager.loaded_path = Some(path.clone());
-        app.file_processor.all_files.push(path.clone());
-        app.text_buffer.open(&path, "old content", None);
-        assert!(app.text_buffer.is_open);
+        *app.orchestrator.selection.selected_file_mut() = Some(path.clone());
+        app.orchestrator.tab_manager.loaded_path = Some(path.clone());
+        app.orchestrator.file_processor.all_files.push(path.clone());
+        app.orchestrator
+            .text_buffer
+            .open(&path, "old content", None);
+        assert!(app.orchestrator.text_buffer.is_open);
 
-        app.file_event_reader = Some(app.file_event_bus.subscribe());
-        let publisher = app.file_event_bus.clone();
+        app.orchestrator.file_event_reader = Some(app.orchestrator.file_event_bus.subscribe());
+        let publisher = app.orchestrator.file_event_bus.clone();
         publisher.publish(FileEvent::updated_one(path.clone()));
 
-        let _ = app.process_file_events();
+        let _ = app.orchestrator.process_file_events();
         assert!(
-            app.tab_manager.loaded_path.is_some(),
+            app.orchestrator.tab_manager.loaded_path.is_some(),
             "loaded_path must NOT be cleared while the inline editor is open"
         );
     }
@@ -1542,16 +1121,16 @@ mod tests {
         let mut app = create_test_app();
         let path = PathBuf::from("/tmp/gone.md");
 
-        *app.selection.selected_file_mut() = Some(path.clone());
-        app.tab_manager.loaded_path = Some(path.clone());
-        app.file_processor.all_files.push(path.clone());
+        *app.orchestrator.selection.selected_file_mut() = Some(path.clone());
+        app.orchestrator.tab_manager.loaded_path = Some(path.clone());
+        app.orchestrator.file_processor.all_files.push(path.clone());
 
-        app.file_event_reader = Some(app.file_event_bus.subscribe());
-        let publisher = app.file_event_bus.clone();
+        app.orchestrator.file_event_reader = Some(app.orchestrator.file_event_bus.subscribe());
+        let publisher = app.orchestrator.file_event_bus.clone();
         publisher.publish(FileEvent::removed_one(path.clone()));
 
-        let _ = app.process_file_events();
-        assert!(app.tab_manager.loaded_path.is_none());
+        let _ = app.orchestrator.process_file_events();
+        assert!(app.orchestrator.tab_manager.loaded_path.is_none());
     }
 
     #[test]
@@ -1570,23 +1149,24 @@ mod tests {
         let pdf_only_dir = PathBuf::from("/tmp/pdf_only");
         let pdf_in_pdf_only_dir = PathBuf::from("/tmp/pdf_only/thing.pdf");
 
-        app.file_event_reader = Some(app.file_event_bus.subscribe());
-        let publisher = app.file_event_bus.clone();
+        app.orchestrator.file_event_reader = Some(app.orchestrator.file_event_bus.subscribe());
+        let publisher = app.orchestrator.file_event_bus.clone();
         publisher.publish(FileEvent::discovered_one(pdf.clone()));
         publisher.publish(FileEvent::discovered_one(img.clone()));
         publisher.publish(FileEvent::discovered_one(md.clone()));
         publisher.publish(FileEvent::discovered_one(pdf_in_pdf_only_dir.clone()));
 
-        let _ = app.process_file_events();
+        let _ = app.orchestrator.process_file_events();
 
         // The markdown file should be in the tree and its
         // parent should be in `all_dirs`.
         assert!(
-            app.file_processor.all_files.contains(&md),
+            app.orchestrator.file_processor.all_files.contains(&md),
             "markdown files must appear in the workspace tree"
         );
         assert!(
-            app.file_processor
+            app.orchestrator
+                .file_processor
                 .all_dirs
                 .contains(&PathBuf::from("/tmp/lib")),
             "directories containing workspace files must appear in the tree"
@@ -1596,18 +1176,21 @@ mod tests {
         // they were published to the bus (the converters need
         // them).
         assert!(
-            !app.file_processor.all_files.contains(&pdf),
+            !app.orchestrator.file_processor.all_files.contains(&pdf),
             "PDFs must not appear in the workspace tree"
         );
         assert!(
-            !app.file_processor.all_files.contains(&img),
+            !app.orchestrator.file_processor.all_files.contains(&img),
             "images must not appear in the workspace tree"
         );
 
         // A directory that contains only a PDF must not be added
         // to `all_dirs`.
         assert!(
-            !app.file_processor.all_dirs.contains(&pdf_only_dir),
+            !app.orchestrator
+                .file_processor
+                .all_dirs
+                .contains(&pdf_only_dir),
             "directories that contain only non-workspace files must not appear in the tree"
         );
     }
@@ -1618,24 +1201,28 @@ mod tests {
         // filter. Markdown (case-insensitive) and plain text
         // are workspace files; everything else (PDFs, images,
         // no extension) is not.
-        assert!(FastMdApp::is_workspace_file(&PathBuf::from("/a/b/note.md")));
-        assert!(FastMdApp::is_workspace_file(&PathBuf::from("/a/b/note.MD")));
-        assert!(FastMdApp::is_workspace_file(&PathBuf::from(
+        assert!(AppOrchestrator::is_workspace_file(&PathBuf::from(
+            "/a/b/note.md"
+        )));
+        assert!(AppOrchestrator::is_workspace_file(&PathBuf::from(
+            "/a/b/note.MD"
+        )));
+        assert!(AppOrchestrator::is_workspace_file(&PathBuf::from(
             "/a/b/note.markdown"
         )));
-        assert!(FastMdApp::is_workspace_file(&PathBuf::from(
+        assert!(AppOrchestrator::is_workspace_file(&PathBuf::from(
             "/a/b/note.txt"
         )));
-        assert!(!FastMdApp::is_workspace_file(&PathBuf::from(
+        assert!(!AppOrchestrator::is_workspace_file(&PathBuf::from(
             "/a/b/doc.pdf"
         )));
-        assert!(!FastMdApp::is_workspace_file(&PathBuf::from(
+        assert!(!AppOrchestrator::is_workspace_file(&PathBuf::from(
             "/a/b/photo.png"
         )));
-        assert!(!FastMdApp::is_workspace_file(&PathBuf::from(
+        assert!(!AppOrchestrator::is_workspace_file(&PathBuf::from(
             "/a/b/photo.jpg"
         )));
-        assert!(!FastMdApp::is_workspace_file(&PathBuf::from(
+        assert!(!AppOrchestrator::is_workspace_file(&PathBuf::from(
             "/a/b/no_extension"
         )));
     }
@@ -1656,13 +1243,13 @@ mod tests {
         let mut app = create_test_app();
         assert!(!app.layout.left_panel_dirty);
 
-        app.file_event_reader = Some(app.file_event_bus.subscribe());
-        let publisher = app.file_event_bus.clone();
+        app.orchestrator.file_event_reader = Some(app.orchestrator.file_event_bus.subscribe());
+        let publisher = app.orchestrator.file_event_bus.clone();
         publisher.publish(FileEvent::discovered_one(PathBuf::from("/lib/notes.md")));
         publisher.publish(FileEvent::discovered_one(PathBuf::from("/lib/extra.md")));
         publisher.publish(FileEvent::updated_one(PathBuf::from("/lib/notes.md")));
 
-        let _ = app.process_file_events();
+        let _ = app.orchestrator.process_file_events();
         assert!(
             !app.layout.left_panel_dirty,
             "process_file_events must not set left_panel_dirty — the width is \
@@ -1681,33 +1268,38 @@ mod tests {
         let mut app = create_test_app();
 
         // Pre-populate tag manager so the tag exists.
-        app.tag_manager
+        app.orchestrator
+            .tag_manager
             .add_tags(PathBuf::from("/lib/notes.md"), vec!["work".to_string()]);
-        app.file_processor
+        app.orchestrator
+            .file_processor
             .all_files
             .push(PathBuf::from("/lib/notes.md"));
 
         // A `Removed` event must trigger `rebuid`, which
         // evicts the file's tags.
-        app.file_event_reader = Some(app.file_event_bus.subscribe());
-        app.file_event_bus
+        app.orchestrator.file_event_reader = Some(app.orchestrator.file_event_bus.subscribe());
+        app.orchestrator
+            .file_event_bus
             .publish(FileEvent::removed_one(PathBuf::from("/lib/notes.md")));
-        let _ = app.process_file_events();
+        let _ = app.orchestrator.process_file_events();
         assert!(
-            !app.tag_manager.all_tags().contains("work"),
+            !app.orchestrator.tag_manager.all_tags().contains("work"),
             "Removed events must trigger rebuild so stale tags are evicted"
         );
 
         // A `Discovered` event must NOT call rebuild (which
         // would clear all_tags and lose the tag we just
         // added).
-        app.tag_manager
+        app.orchestrator
+            .tag_manager
             .add_tags(PathBuf::from("/lib/other.md"), vec!["keep".to_string()]);
-        app.file_event_bus
+        app.orchestrator
+            .file_event_bus
             .publish(FileEvent::discovered_one(PathBuf::from("/lib/other.md")));
-        let _ = app.process_file_events();
+        let _ = app.orchestrator.process_file_events();
         assert!(
-            app.tag_manager.all_tags().contains("keep"),
+            app.orchestrator.tag_manager.all_tags().contains("keep"),
             "Discovered events must NOT call rebuild — the FileParsed path \
              updates all_tags incrementally"
         );
@@ -1723,13 +1315,13 @@ mod tests {
         let mut app = create_test_app();
         let file = PathBuf::from("Laptop.md");
 
-        app.tab_manager.tabs = vec![file.clone()];
-        *app.selection.selected_file_mut() = Some(file.clone());
+        app.orchestrator.tab_manager.tabs = vec![file.clone()];
+        *app.orchestrator.selection.selected_file_mut() = Some(file.clone());
         app.layout.left_panel_width = Some(200.0);
         app.layout.left_panel_dirty = false;
 
         // Populate TOC (simulating rendering a document with headings like Laptop.md).
-        app.tab_manager.toc = vec![
+        app.orchestrator.tab_manager.toc = vec![
             crate::ui::ToCEntry {
                 title: "Introduction".to_string(),
                 level: 1,
@@ -1766,16 +1358,16 @@ mod tests {
         let mut app = create_test_app();
         let file = PathBuf::from("Laptop.md");
 
-        app.tab_manager.tabs = vec![file.clone()];
-        *app.selection.selected_file_mut() = Some(file.clone());
+        app.orchestrator.tab_manager.tabs = vec![file.clone()];
+        *app.orchestrator.selection.selected_file_mut() = Some(file.clone());
         app.layout.left_panel_width = Some(200.0);
         app.layout.left_panel_dirty = false;
         app.file_processor_mut().indexing_finished = true;
-        app.tab_manager.current_markdown =
+        app.orchestrator.tab_manager.current_markdown =
             "# Laptop Specifications\n\n- CPU: 8 Cores\n- RAM: 32GB".to_string();
 
         // Populate TOC so the right panel is active.
-        app.tab_manager.toc = vec![crate::ui::ToCEntry {
+        app.orchestrator.tab_manager.toc = vec![crate::ui::ToCEntry {
             title: "Laptop Specifications".to_string(),
             level: 1,
             id: "laptop_specs".to_string(),
@@ -1942,30 +1534,31 @@ mod tests {
         let mut app = create_test_app();
         let gone = PathBuf::from("/tmp/gone.md");
         let keep = PathBuf::from("/tmp/keep.md");
-        app.tab_manager.tabs = vec![gone.clone(), keep.clone()];
-        app.tab_manager.loaded_path = Some(gone.clone());
-        *app.selection.selected_file_mut() = Some(gone.clone());
+        app.orchestrator.tab_manager.tabs = vec![gone.clone(), keep.clone()];
+        app.orchestrator.tab_manager.loaded_path = Some(gone.clone());
+        *app.orchestrator.selection.selected_file_mut() = Some(gone.clone());
 
-        app.file_event_reader = Some(app.file_event_bus.subscribe());
-        app.file_event_bus
+        app.orchestrator.file_event_reader = Some(app.orchestrator.file_event_bus.subscribe());
+        app.orchestrator
+            .file_event_bus
             .publish(FileEvent::removed_one(gone.clone()));
-        let _ = app.process_file_events();
+        let _ = app.orchestrator.process_file_events();
 
         assert!(
-            !app.tab_manager.tabs.contains(&gone),
+            !app.orchestrator.tab_manager.tabs.contains(&gone),
             "tab for deleted file must be closed"
         );
         assert!(
-            app.tab_manager.tabs.contains(&keep),
+            app.orchestrator.tab_manager.tabs.contains(&keep),
             "tab for remaining file must stay open"
         );
         assert_eq!(
-            app.selection.selected_file(),
+            app.orchestrator.selection.selected_file(),
             Some(&keep),
             "selection must fall back to the last remaining tab"
         );
         assert!(
-            app.tab_manager.loaded_path.is_none(),
+            app.orchestrator.tab_manager.loaded_path.is_none(),
             "loaded_path must be cleared"
         );
     }
@@ -1976,27 +1569,31 @@ mod tests {
     fn test_process_file_events_removed_closes_last_tab_clears_content() {
         let mut app = create_test_app();
         let gone = PathBuf::from("/tmp/gone.md");
-        app.tab_manager.tabs = vec![gone.clone()];
-        app.tab_manager.loaded_path = Some(gone.clone());
-        app.tab_manager.current_markdown = "some content".to_string();
-        *app.selection.selected_file_mut() = Some(gone.clone());
+        app.orchestrator.tab_manager.tabs = vec![gone.clone()];
+        app.orchestrator.tab_manager.loaded_path = Some(gone.clone());
+        app.orchestrator.tab_manager.current_markdown = "some content".to_string();
+        *app.orchestrator.selection.selected_file_mut() = Some(gone.clone());
 
-        app.file_event_reader = Some(app.file_event_bus.subscribe());
-        app.file_event_bus
+        app.orchestrator.file_event_reader = Some(app.orchestrator.file_event_bus.subscribe());
+        app.orchestrator
+            .file_event_bus
             .publish(FileEvent::removed_one(gone.clone()));
-        let _ = app.process_file_events();
+        let _ = app.orchestrator.process_file_events();
 
-        assert!(app.tab_manager.tabs.is_empty(), "all tabs must be closed");
         assert!(
-            app.selection.selected_file().is_none(),
+            app.orchestrator.tab_manager.tabs.is_empty(),
+            "all tabs must be closed"
+        );
+        assert!(
+            app.orchestrator.selection.selected_file().is_none(),
             "selection must be None when no tabs remain"
         );
         assert!(
-            app.tab_manager.loaded_path.is_none(),
+            app.orchestrator.tab_manager.loaded_path.is_none(),
             "loaded_path must be cleared"
         );
         assert!(
-            app.tab_manager.current_markdown.is_empty(),
+            app.orchestrator.tab_manager.current_markdown.is_empty(),
             "content must be cleared when no tab remains"
         );
     }
@@ -2009,18 +1606,19 @@ mod tests {
         let mut app = create_test_app();
         let gone = PathBuf::from("gone.md");
         let keep = PathBuf::from("keep.md");
-        app.tab_manager.tabs = vec![gone.clone(), keep.clone()];
-        app.tab_manager.loaded_path = Some(gone.clone());
-        *app.selection.selected_file_mut() = Some(gone.clone());
+        app.orchestrator.tab_manager.tabs = vec![gone.clone(), keep.clone()];
+        app.orchestrator.tab_manager.loaded_path = Some(gone.clone());
+        *app.orchestrator.selection.selected_file_mut() = Some(gone.clone());
 
-        app.handle_fs_event(FsEvent::FileDeleted { path: gone.clone() });
+        app.orchestrator
+            .handle_fs_event(FsEvent::FileDeleted { path: gone.clone() });
 
         assert!(
-            !app.tab_manager.tabs.contains(&gone),
+            !app.orchestrator.tab_manager.tabs.contains(&gone),
             "tab for deleted file must be closed"
         );
         assert_eq!(
-            app.selection.selected_file(),
+            app.orchestrator.selection.selected_file(),
             Some(&keep),
             "selection must fall back to the last remaining tab"
         );

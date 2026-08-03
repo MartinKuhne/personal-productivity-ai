@@ -118,7 +118,6 @@ pub fn render_flat_row_capture(
                 // Clamp depth to prevent visual overflow on deeply nested paths
                 let clamped_depth = row.depth.min(50);
                 ui.add_space(clamped_depth as f32 * 18.0);
-
                 let mut text = egui::RichText::new(label);
                 if ctx.pdf_backing_tracker.is_pdf_backed(&row.path) {
                     text = text.color(egui::Color32::from_rgb(244, 15, 2));
@@ -340,7 +339,6 @@ pub fn draw_tree_node(ui: &mut egui::Ui, node: &TreeNode, ctx: &mut TreeNodeCont
         let is_selected = ctx.selected_files().contains(&node.path)
             || ctx.selected_file().as_ref() == Some(&node.path);
         let label = format!("  {}", node.name);
-
         let mut text = egui::RichText::new(label);
         if ctx.pdf_backing_tracker.is_pdf_backed(&node.path) {
             text = text.color(egui::Color32::from_rgb(244, 15, 2));
