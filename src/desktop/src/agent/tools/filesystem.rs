@@ -126,7 +126,7 @@ pub fn tool_list_files(target_dir: &Path, virtual_prefix: &str) -> Result<Vec<St
 pub fn tool_read_file(
     path_str: &str,
 ) -> Result<crate::agent::tools::dtos::ReadFileResponse, String> {
-    match std::fs::read_to_string(path_str) {
+    match crate::utils::read_text_file(Path::new(path_str)) {
         Ok(content) => Ok(crate::agent::tools::dtos::ReadFileResponse { content }),
         Err(e) => Err(format!("Failed to read file: {}", e)),
     }
@@ -137,7 +137,7 @@ pub fn tool_read_file_lines(
     start_line: usize,
     end_line: usize,
 ) -> Result<crate::agent::tools::dtos::ReadFileLinesResponse, String> {
-    match std::fs::read_to_string(path_str) {
+    match crate::utils::read_text_file(Path::new(path_str)) {
         Ok(content) => {
             let lines: Vec<&str> = content.lines().collect();
             if lines.is_empty() && start_line == 1 {
@@ -205,7 +205,7 @@ pub fn tool_insert_lines(
     lines_to_insert: &[String],
     producer: &FileEventProducer,
 ) -> Result<crate::agent::tools::dtos::InsertLinesResponse, String> {
-    match std::fs::read_to_string(path_str) {
+    match crate::utils::read_text_file(Path::new(path_str)) {
         Ok(content) => {
             let mut lines: Vec<String> = content.lines().map(|s| s.to_string()).collect();
             if line_index == 0 || line_index > lines.len() + 1 {
@@ -236,7 +236,7 @@ pub fn tool_replace_text(
     new_string: &str,
     producer: &FileEventProducer,
 ) -> Result<crate::agent::tools::dtos::ReplaceTextResponse, String> {
-    match std::fs::read_to_string(path_str) {
+    match crate::utils::read_text_file(Path::new(path_str)) {
         Ok(content) => {
             if !content.contains(old_string) {
                 return Err("The specified old_string was not found in the file.".to_string());
