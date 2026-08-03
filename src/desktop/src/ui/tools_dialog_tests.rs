@@ -4,27 +4,13 @@
 //! the rendered output.
 
 use crate::ui::test_helpers::text::{assert_text_contains, extract_text};
-use crate::ui::tools_dialog::{compute_dialog_size, render_contents, show_tools_dialog};
+use crate::ui::tools_dialog::{compute_dialog_size, render_contents};
 use eframe::egui;
 
 fn render_dialog_once(app: &mut crate::ui::FastMdApp) -> egui::FullOutput {
     let ctx = egui::Context::default();
     ctx.run_ui(egui::RawInput::default(), |ui| {
         render_contents(ui, app);
-    })
-}
-
-fn show_dialog_once(app: &mut crate::ui::FastMdApp) -> egui::FullOutput {
-    let raw = egui::RawInput {
-        screen_rect: Some(egui::Rect::from_min_size(
-            egui::Pos2::ZERO,
-            egui::vec2(800.0, 600.0),
-        )),
-        ..Default::default()
-    };
-    let ctx = egui::Context::default();
-    ctx.run_ui(raw, |ctx| {
-        show_tools_dialog(ctx, app);
     })
 }
 
@@ -66,7 +52,6 @@ fn test_tools_dialog_renders_char_count() {
         texts
     );
 }
-
 
 /// The dialog must NOT render a bottom Close button anymore —
 /// the title-bar X is the only close affordance (UI-056).

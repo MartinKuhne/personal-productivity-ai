@@ -37,7 +37,6 @@ pub fn show_tools_dialog(ctx: &eframe::egui::Context, app: &mut FastMdApp) {
     let mut open = true;
     let title = TOOLS_DIALOG_TITLE;
 
-
     let groups = manager::groups_snapshot(app.config());
     let (default_size, min_size, max_height) =
         compute_dialog_size(ctx.viewport_rect(), groups.len());

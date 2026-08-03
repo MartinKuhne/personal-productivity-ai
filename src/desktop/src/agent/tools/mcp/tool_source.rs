@@ -22,7 +22,6 @@ pub trait DynamicToolSource: Send + Sync {
     /// servers that were removed or changed.
     fn update_config(&self, config: &AppConfig);
 
-
     /// Execute a tool call (`tools/call`) against the named server.
     fn call_tool(
         &self,

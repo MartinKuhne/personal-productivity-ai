@@ -43,11 +43,11 @@ ureq = { version = "2.9", features = ["json"] }
 ring = "0.17"
 walkdir = "2.4"
 glob = "0.3"
-reqwest = { version = "0.12", features = ["blocking"] }
+reqwest = { version = "0.12", features = ["blocking", "json"] }
 opener = { version = "0.7", features = ["reveal"] }
 webbrowser = "1"
 backon = "1.6"
-uuid = { version = "1", features = ["v4"] }
+uuid = { version = "1", features = ["v4", "serde"] }
 csv = "1.4.0"
 evalexpr = "13.1.0"
 html-escape = "0.2"
@@ -57,8 +57,11 @@ puffin = { version = "0.20", optional = true, default-features = false }
 puffin_egui = { git = "https://github.com/EmbarkStudios/puffin", optional = true, default-features = false }
 encoding_rs = "0.8.35"
 tempfile = "3.8"
+tokio-tungstenite = { version = "0.23", features = ["rustls"] }
+futures = "0.3"
 
 [dev-dependencies]
+tempfile = "3.8"
 tokio = { version = "1.53.0", features = ["rt", "rt-multi-thread", "macros", "sync"] }
 filetime = "0.2"
 proptest = "1.4"
@@ -84,4 +87,3 @@ path = "src/main.rs"
 [[bin]]
 name = "deploy"
 path = "src/bin/deploy.rs"
-

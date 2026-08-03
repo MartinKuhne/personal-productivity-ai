@@ -391,8 +391,6 @@ impl McpClientManager {
         }
     }
 
-
-
     /// Gracefully shut down all active sessions. Safe to call
     /// multiple times.
     pub fn shutdown(&self) {
@@ -1141,7 +1139,6 @@ with open(r"{cap_path}", "w") as f:
         let _ = std::fs::remove_file(&tmp);
         let _ = std::fs::remove_file(&captured);
     }
-
 
     /// `http_session_delete` must treat 405 Method Not Allowed as
     /// a server-managed-lifetime acknowledgement (spec §3.4). We

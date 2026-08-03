@@ -2,6 +2,7 @@
 //! FastMd desktop application entry point — initialises tracing, panic hooks, and launches the egui app.
 
 use eframe::egui;
+use fastmd::integrations::discord::run_discord_bot;
 use fastmd::ui::FastMdApp;
 
 use mimalloc::MiMalloc;
@@ -51,6 +52,18 @@ fn main() -> eframe::Result<()> {
     // here, hand it to the app, and publish the loaded config so
     // every subscriber observes the same first-arrival event.
     let config_bus = fastmd::bus::config::config_bus();
+
+    // Start Discord bot if configured
+    if let Some(discord_config) = config.discord.as_ref()
+        && discord_config.bot_token.is_some()
+    {
+        let app_config = config.clone();
+        tokio::spawn(async move {
+            if let Err(e) = run_discord_bot(&app_config).await {
+                tracing::error!(name = "discord.bot.error", error = %e, "Discord bot error");
+            }
+        });
+    }
 
     eframe::run_native(
         "fastmd",

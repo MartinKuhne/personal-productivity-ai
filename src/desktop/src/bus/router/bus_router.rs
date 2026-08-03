@@ -27,7 +27,7 @@ impl BusRouter {
         let bus = self.bus.clone();
         let tx_pdf = self.tx_pdf;
         let tx_img = self.tx_img;
-        
+
         std::thread::spawn(move || {
             let reader = bus.subscribe();
             let mut pdf_open = true;
@@ -46,30 +46,35 @@ impl BusRouter {
                 }
 
                 for p in &event.paths {
-                    let ext = p.extension().and_then(|e| e.to_str()).map(|e| e.to_lowercase());
+                    let ext = p
+                        .extension()
+                        .and_then(|e| e.to_str())
+                        .map(|e| e.to_lowercase());
                     let ext_str = ext.as_deref().unwrap_or("");
 
-                    if pdf_open && ext_str == "pdf" {
-                        if let Err(e) = tx_pdf.send(p.clone()) {
-                            tracing::warn!(
-                                name = "background_task.pdf_bus.tx_closed",
-                                error = %e,
-                                "PDF bus subscriber could not deliver to tx_pdf. Channel is closed."
-                            );
-                            pdf_open = false;
-                        }
-                    } else if img_open && matches!(
-                        ext_str,
-                        "jpg" | "jpeg" | "png" | "gif" | "webp" | "bmp" | "tiff" | "avif"
-                    ) {
-                        if let Err(e) = tx_img.send(p.clone()) {
-                            tracing::warn!(
-                                name = "background_task.img_bus.tx_closed",
-                                error = %e,
-                                "Image bus subscriber could not deliver to tx_img. Channel is closed."
-                            );
-                            img_open = false;
-                        }
+                    if pdf_open
+                        && ext_str == "pdf"
+                        && let Err(e) = tx_pdf.send(p.clone())
+                    {
+                        tracing::warn!(
+                            name = "background_task.pdf_bus.tx_closed",
+                            error = %e,
+                            "PDF bus subscriber could not deliver to tx_pdf. Channel is closed."
+                        );
+                        pdf_open = false;
+                    } else if img_open
+                        && matches!(
+                            ext_str,
+                            "jpg" | "jpeg" | "png" | "gif" | "webp" | "bmp" | "tiff" | "avif"
+                        )
+                        && let Err(e) = tx_img.send(p.clone())
+                    {
+                        tracing::warn!(
+                            name = "background_task.img_bus.tx_closed",
+                            error = %e,
+                            "Image bus subscriber could not deliver to tx_img. Channel is closed."
+                        );
+                        img_open = false;
                     }
                 }
             }
