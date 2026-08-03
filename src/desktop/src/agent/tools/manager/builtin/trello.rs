@@ -3,8 +3,8 @@
 use crate::agent::tools::Tool;
 use crate::agent::tools::context::ToolContext;
 use crate::config::AppConfig;
-use std::any::TypeId;
 use serde::{Deserialize, Serialize};
+use std::any::TypeId;
 
 use super::json_schema;
 use super::strings::trello as trello_strings;
@@ -72,7 +72,7 @@ fn trello_request(
         tracing::error!(name = "trello.request.error", error = %e, url = %safe_url, "Trello request failed");
         e.to_string()
     })?;
-    
+
     let status = res.status();
     tracing::debug!(name = "trello.response", status = %status, url = %safe_url, "Received response from Trello API");
 
@@ -140,7 +140,12 @@ impl Tool for TrelloGetBoardTool {
     }
     fn execute(&self, ctx: &ToolContext, args: &str) -> Result<serde_json::Value, String> {
         let input: TrelloIdInput = serde_json::from_str(args).map_err(|e| e.to_string())?;
-        trello_request(ctx, reqwest::Method::GET, &format!("/boards/{}", input.id), None)
+        trello_request(
+            ctx,
+            reqwest::Method::GET,
+            &format!("/boards/{}", input.id),
+            None,
+        )
     }
 }
 
@@ -166,7 +171,12 @@ impl Tool for TrelloGetListsTool {
     }
     fn execute(&self, ctx: &ToolContext, args: &str) -> Result<serde_json::Value, String> {
         let input: TrelloIdInput = serde_json::from_str(args).map_err(|e| e.to_string())?;
-        trello_request(ctx, reqwest::Method::GET, &format!("/boards/{}/lists", input.id), None)
+        trello_request(
+            ctx,
+            reqwest::Method::GET,
+            &format!("/boards/{}/lists", input.id),
+            None,
+        )
     }
 }
 
@@ -192,7 +202,12 @@ impl Tool for TrelloGetCardsTool {
     }
     fn execute(&self, ctx: &ToolContext, args: &str) -> Result<serde_json::Value, String> {
         let input: TrelloIdInput = serde_json::from_str(args).map_err(|e| e.to_string())?;
-        trello_request(ctx, reqwest::Method::GET, &format!("/lists/{}/cards", input.id), None)
+        trello_request(
+            ctx,
+            reqwest::Method::GET,
+            &format!("/lists/{}/cards", input.id),
+            None,
+        )
     }
 }
 
@@ -214,43 +229,58 @@ impl Tool for TrelloCreateCardTool {
         trello_tools_enabled(config)
     }
     fn execute(&self, ctx: &ToolContext, args: &str) -> Result<serde_json::Value, String> {
-        let mut input: TrelloCreateCardInput = serde_json::from_str(args).map_err(|e| e.to_string())?;
+        let mut input: TrelloCreateCardInput =
+            serde_json::from_str(args).map_err(|e| e.to_string())?;
 
         // Try to attach 'FastMD' label
-        if let Ok(list_val) = trello_request(ctx, reqwest::Method::GET, &format!("/lists/{}", input.id_list), None) {
-            if let Some(id_board) = list_val.get("idBoard").and_then(|v| v.as_str()) {
-                if let Ok(labels_val) = trello_request(ctx, reqwest::Method::GET, &format!("/boards/{}/labels", id_board), None) {
-                    let mut fastmd_label_id = None;
-                    if let Some(labels) = labels_val.as_array() {
-                        for label in labels {
-                            if let (Some(name), Some(id)) = (label.get("name").and_then(|v| v.as_str()), label.get("id").and_then(|v| v.as_str())) {
-                                if name == "FastMD" {
-                                    fastmd_label_id = Some(id.to_string());
-                                    break;
-                                }
-                            }
-                        }
-                    }
-
-                    if fastmd_label_id.is_none() {
-                        let create_label_body = serde_json::json!({
-                            "name": "FastMD",
-                            "color": "blue",
-                            "idBoard": id_board
-                        });
-                        if let Ok(new_label_val) = trello_request(ctx, reqwest::Method::POST, "/labels", Some(&create_label_body)) {
-                            if let Some(id) = new_label_val.get("id").and_then(|v| v.as_str()) {
-                                fastmd_label_id = Some(id.to_string());
-                            }
-                        }
-                    }
-
-                    if let Some(label_id) = fastmd_label_id {
-                        let mut labels = input.id_labels.unwrap_or_default();
-                        labels.push(label_id);
-                        input.id_labels = Some(labels);
+        if let Ok(list_val) = trello_request(
+            ctx,
+            reqwest::Method::GET,
+            &format!("/lists/{}", input.id_list),
+            None,
+        ) && let Some(id_board) = list_val.get("idBoard").and_then(|v| v.as_str())
+            && let Ok(labels_val) = trello_request(
+                ctx,
+                reqwest::Method::GET,
+                &format!("/boards/{}/labels", id_board),
+                None,
+            )
+        {
+            let mut fastmd_label_id = None;
+            if let Some(labels) = labels_val.as_array() {
+                for label in labels {
+                    if let (Some(name), Some(id)) = (
+                        label.get("name").and_then(|v| v.as_str()),
+                        label.get("id").and_then(|v| v.as_str()),
+                    ) && name == "FastMD"
+                    {
+                        fastmd_label_id = Some(id.to_string());
+                        break;
                     }
                 }
+            }
+
+            if fastmd_label_id.is_none() {
+                let create_label_body = serde_json::json!({
+                    "name": "FastMD",
+                    "color": "blue",
+                    "idBoard": id_board
+                });
+                if let Ok(new_label_val) = trello_request(
+                    ctx,
+                    reqwest::Method::POST,
+                    "/labels",
+                    Some(&create_label_body),
+                ) && let Some(id) = new_label_val.get("id").and_then(|v| v.as_str())
+                {
+                    fastmd_label_id = Some(id.to_string());
+                }
+            }
+
+            if let Some(label_id) = fastmd_label_id {
+                let mut labels = input.id_labels.unwrap_or_default();
+                labels.push(label_id);
+                input.id_labels = Some(labels);
             }
         }
 
@@ -280,7 +310,12 @@ impl Tool for TrelloUpdateCardTool {
         let input: TrelloUpdateCardInput = serde_json::from_str(args).map_err(|e| e.to_string())?;
         let id = input.id.clone();
         let body = serde_json::to_value(input).unwrap();
-        trello_request(ctx, reqwest::Method::PUT, &format!("/cards/{}", id), Some(&body))
+        trello_request(
+            ctx,
+            reqwest::Method::PUT,
+            &format!("/cards/{}", id),
+            Some(&body),
+        )
     }
 }
 
@@ -303,24 +338,36 @@ impl Tool for TrelloDeleteCardTool {
     }
     fn execute(&self, ctx: &ToolContext, args: &str) -> Result<serde_json::Value, String> {
         let input: TrelloIdInput = serde_json::from_str(args).map_err(|e| e.to_string())?;
-        trello_request(ctx, reqwest::Method::DELETE, &format!("/cards/{}", input.id), None)
+        trello_request(
+            ctx,
+            reqwest::Method::DELETE,
+            &format!("/cards/{}", input.id),
+            None,
+        )
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::config::{AppConfig, TrelloClient, ToolGroupsConfig};
+    use crate::config::{AppConfig, ToolGroupsConfig, TrelloClient};
 
     #[test]
     fn test_trello_tools_enabled() {
-        let mut config = AppConfig::default();
-        config.tool_groups = ToolGroupsConfig::default();
-        config.tool_groups.trello = true;
+        let mut config = AppConfig {
+            tool_groups: ToolGroupsConfig {
+                trello: true,
+                ..Default::default()
+            },
+            ..Default::default()
+        };
         config.trello_client = None;
         assert!(!trello_tools_enabled(&config));
 
-        config.trello_client = Some(TrelloClient { token: "t".to_string(), api_key: "s".to_string() });
+        config.trello_client = Some(TrelloClient {
+            token: "t".to_string(),
+            api_key: "s".to_string(),
+        });
         assert!(trello_tools_enabled(&config));
 
         config.tool_groups.trello = false;
