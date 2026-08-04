@@ -3,7 +3,7 @@
 use crate::agent::tools::Tool;
 use crate::agent::tools::context::ToolContext;
 use crate::agent::tools::dtos;
-use crate::app::vfs::library::ContentLibraryExt;
+use crate::app::vfs::behaviour::ContentLibraryExt;
 use crate::config::AppConfig;
 use std::any::TypeId;
 

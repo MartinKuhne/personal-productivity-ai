@@ -20,21 +20,21 @@ impl<'a> VfsResolver<'a> {
     }
 
     /// Resolve a virtual path to an absolute filesystem path. Thin shim
-    /// over [`vfs::resolve::resolve`] that pulls the library list from
+    /// over [`vfs::behaviour::resolve`] that pulls the library list from
     /// the active config. Spec: [`app/vfs/SPEC.md`](../../app/vfs/SPEC.md) (VFS-004, VFS-009).
     pub fn resolve_virtual_path(
         &self,
         vpath: &str,
         allow_write: bool,
     ) -> Result<Option<(PathBuf, bool)>, String> {
-        vfs::resolve::resolve(vpath, allow_write, &self.config.content_libraries)
+        vfs::behaviour::resolve(vpath, allow_write, &self.config.content_libraries)
     }
 
     /// Resolve a virtual path for a mutating tool. Thin shim over
-    /// [`vfs::resolve::resolve_writable`]. Returns the absolute
+    /// [`vfs::behaviour::resolve_writable`]. Returns the absolute
     /// filesystem path on success.
     pub fn resolve_writable(&self, vpath: &str) -> Result<PathBuf, String> {
-        vfs::resolve::resolve_writable(vpath, &self.config.content_libraries)
+        vfs::behaviour::resolve_writable(vpath, &self.config.content_libraries)
     }
 }
 

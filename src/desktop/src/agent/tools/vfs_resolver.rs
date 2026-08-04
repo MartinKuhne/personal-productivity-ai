@@ -6,7 +6,7 @@
 use crate::app::vfs;
 use crate::config::AppConfig;
 
-/// Thin resolver over [`vfs::resolve::resolve`].
+/// Thin resolver over [`vfs::behaviour::resolve`].
 #[derive(Debug, Clone, Copy)]
 pub struct VfsResolver<'a> {
     pub config: &'a AppConfig,
@@ -23,11 +23,11 @@ impl<'a> VfsResolver<'a> {
         vpath: &str,
         allow_write: bool,
     ) -> Result<Option<(std::path::PathBuf, bool)>, String> {
-        vfs::resolve::resolve(vpath, allow_write, &self.config.content_libraries)
+        vfs::behaviour::resolve(vpath, allow_write, &self.config.content_libraries)
     }
 
     /// Resolve a virtual path for a mutating tool.
     pub fn resolve_writable(&self, vpath: &str) -> Result<std::path::PathBuf, String> {
-        vfs::resolve::resolve_writable(vpath, &self.config.content_libraries)
+        vfs::behaviour::resolve_writable(vpath, &self.config.content_libraries)
     }
 }

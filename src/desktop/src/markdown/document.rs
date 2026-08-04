@@ -17,7 +17,7 @@
 //!   and the post-`---` body when there is. This is what tools and
 //!   renderers should pass to a pure markdown parser.
 
-use crate::markdown::ast::RenderEvent;
+use crate::markdown::model::RenderEvent;
 use crate::markdown::parser::parse_markdown_to_events;
 use serde_norway::Value;
 

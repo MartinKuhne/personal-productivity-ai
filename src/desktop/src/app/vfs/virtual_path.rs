@@ -4,7 +4,7 @@
 
 use std::path::{Path, PathBuf};
 
-use crate::app::vfs::library::ContentLibraryExt;
+use crate::app::vfs::behaviour::ContentLibraryExt;
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum VirtualPathError {
