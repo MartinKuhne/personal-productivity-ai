@@ -100,7 +100,6 @@ image = { version = "0.25", default-features = false, features = ["png"] }
 [[bin]]
 name = "fastmd"
 path = "src/main.rs"
-required-features = ["browser"]
 
 [[bin]]
 name = "deploy"
