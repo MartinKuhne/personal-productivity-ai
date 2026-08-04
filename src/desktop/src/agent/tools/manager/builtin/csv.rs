@@ -1,4 +1,4 @@
-//! CSV database tool implementations for the tool registry.
+﻿//! CSV database tool implementations for the tool registry.
 
 use crate::agent::tools::Tool;
 use crate::agent::tools::context::ToolContext;
@@ -6,7 +6,7 @@ use crate::config::AppConfig;
 use std::any::TypeId;
 
 use super::json_schema;
-use super::strings::csv as csv_strings;
+use super::strings;
 
 fn csv_tools_enabled(prompt: &str) -> bool {
     let p = prompt.to_lowercase();
@@ -27,7 +27,7 @@ impl Tool for CsvCreateTool {
         "create_csv"
     }
     fn description(&self) -> &'static str {
-        csv_strings::CREATE_CSV_DESCRIPTION
+        strings::CREATE_CSV_DESCRIPTION
     }
     fn input_type(&self) -> TypeId {
         TypeId::of::<crate::agent::tools::csv_db::schema::CreateCsvInput>()
@@ -54,7 +54,7 @@ impl Tool for CsvListTool {
         "list_csv"
     }
     fn description(&self) -> &'static str {
-        csv_strings::LIST_CSV_DESCRIPTION
+        strings::LIST_CSV_DESCRIPTION
     }
     fn input_type(&self) -> TypeId {
         TypeId::of::<crate::agent::tools::csv_db::schema::ListCsvInput>()
@@ -84,7 +84,7 @@ impl Tool for CsvAddRowsTool {
         "add_rows"
     }
     fn description(&self) -> &'static str {
-        csv_strings::ADD_ROWS_DESCRIPTION
+        strings::ADD_ROWS_DESCRIPTION
     }
     fn input_type(&self) -> TypeId {
         TypeId::of::<crate::agent::tools::csv_db::schema::AddRowsInput>()
@@ -111,7 +111,7 @@ impl Tool for CsvDeleteRowsTool {
         "delete_rows"
     }
     fn description(&self) -> &'static str {
-        csv_strings::DELETE_ROWS_DESCRIPTION
+        strings::DELETE_ROWS_DESCRIPTION
     }
     fn input_type(&self) -> TypeId {
         TypeId::of::<crate::agent::tools::csv_db::schema::DeleteRowsInput>()
@@ -138,7 +138,7 @@ impl Tool for CsvQueryTool {
         "query"
     }
     fn description(&self) -> &'static str {
-        csv_strings::QUERY_DESCRIPTION
+        strings::QUERY_DESCRIPTION
     }
     fn input_type(&self) -> TypeId {
         TypeId::of::<crate::agent::tools::csv_db::schema::QueryRequest>()

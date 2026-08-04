@@ -1,4 +1,4 @@
-//! Trello API tools for the tool registry.
+﻿//! Trello API tools for the tool registry.
 
 use crate::agent::tools::Tool;
 use crate::agent::tools::context::ToolContext;
@@ -7,7 +7,7 @@ use serde::{Deserialize, Serialize};
 use std::any::TypeId;
 
 use super::json_schema;
-use super::strings::trello as trello_strings;
+use super::strings;
 
 #[derive(Serialize, Deserialize, Clone, schemars::JsonSchema)]
 pub struct TrelloEmptyInput {}
@@ -105,7 +105,7 @@ impl Tool for TrelloGetBoardsTool {
         "trello_get_boards"
     }
     fn description(&self) -> &'static str {
-        trello_strings::GET_BOARDS_DESCRIPTION
+        strings::GET_BOARDS_DESCRIPTION
     }
     fn input_type(&self) -> TypeId {
         TypeId::of::<TrelloEmptyInput>()
@@ -131,7 +131,7 @@ impl Tool for TrelloGetBoardTool {
         "trello_get_board"
     }
     fn description(&self) -> &'static str {
-        trello_strings::GET_BOARD_DESCRIPTION
+        strings::GET_BOARD_DESCRIPTION
     }
     fn input_type(&self) -> TypeId {
         TypeId::of::<TrelloIdInput>()
@@ -162,7 +162,7 @@ impl Tool for TrelloGetListsTool {
         "trello_get_lists"
     }
     fn description(&self) -> &'static str {
-        trello_strings::GET_LISTS_DESCRIPTION
+        strings::GET_LISTS_DESCRIPTION
     }
     fn input_type(&self) -> TypeId {
         TypeId::of::<TrelloIdInput>()
@@ -193,7 +193,7 @@ impl Tool for TrelloGetCardsTool {
         "trello_get_cards"
     }
     fn description(&self) -> &'static str {
-        trello_strings::GET_CARDS_DESCRIPTION
+        strings::GET_CARDS_DESCRIPTION
     }
     fn input_type(&self) -> TypeId {
         TypeId::of::<TrelloIdInput>()
@@ -224,7 +224,7 @@ impl Tool for TrelloCreateCardTool {
         "trello_create_card"
     }
     fn description(&self) -> &'static str {
-        trello_strings::CREATE_CARD_DESCRIPTION
+        strings::CREATE_CARD_DESCRIPTION
     }
     fn input_type(&self) -> TypeId {
         TypeId::of::<TrelloCreateCardInput>()
@@ -302,7 +302,7 @@ impl Tool for TrelloUpdateCardTool {
         "trello_update_card"
     }
     fn description(&self) -> &'static str {
-        trello_strings::UPDATE_CARD_DESCRIPTION
+        strings::UPDATE_CARD_DESCRIPTION
     }
     fn input_type(&self) -> TypeId {
         TypeId::of::<TrelloUpdateCardInput>()
@@ -332,7 +332,7 @@ impl Tool for TrelloDeleteCardTool {
         "trello_delete_card"
     }
     fn description(&self) -> &'static str {
-        trello_strings::DELETE_CARD_DESCRIPTION
+        strings::DELETE_CARD_DESCRIPTION
     }
     fn input_type(&self) -> TypeId {
         TypeId::of::<TrelloIdInput>()

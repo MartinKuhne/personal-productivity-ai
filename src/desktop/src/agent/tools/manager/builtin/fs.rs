@@ -1,4 +1,4 @@
-//! Filesystem tool implementations for the tool registry.
+﻿//! Filesystem tool implementations for the tool registry.
 
 use crate::agent::tools::Tool;
 use crate::agent::tools::context::ToolContext;
@@ -9,7 +9,7 @@ use std::any::TypeId;
 
 use super::super::pagination::paginate_in_range;
 use super::json_schema;
-use super::strings::fs as fs_strings;
+use super::strings;
 
 /// Tool that replaces exact text occurrences in a file.
 pub(crate) struct ReplaceTextTool;
@@ -18,7 +18,7 @@ impl Tool for ReplaceTextTool {
         "replace_text"
     }
     fn description(&self) -> &'static str {
-        fs_strings::REPLACE_TEXT_DESCRIPTION
+        strings::REPLACE_TEXT_DESCRIPTION
     }
     fn input_type(&self) -> TypeId {
         TypeId::of::<dtos::ReplaceTextInput>()
@@ -56,7 +56,7 @@ impl Tool for GrepTool {
         "grep"
     }
     fn description(&self) -> &'static str {
-        fs_strings::GREP_DESCRIPTION
+        strings::GREP_DESCRIPTION
     }
     fn input_type(&self) -> TypeId {
         TypeId::of::<dtos::GrepInput>()
@@ -115,7 +115,7 @@ impl Tool for ReadTagsTool {
         "read_tags"
     }
     fn description(&self) -> &'static str {
-        fs_strings::READ_TAGS_DESCRIPTION
+        strings::READ_TAGS_DESCRIPTION
     }
     fn input_type(&self) -> TypeId {
         TypeId::of::<dtos::ReadTagsInput>()
@@ -154,7 +154,7 @@ impl Tool for ListFilesByTagTool {
         "list_files_by_tag"
     }
     fn description(&self) -> &'static str {
-        fs_strings::LIST_FILES_BY_TAG_DESCRIPTION
+        strings::LIST_FILES_BY_TAG_DESCRIPTION
     }
     fn input_type(&self) -> TypeId {
         TypeId::of::<dtos::ListFilesByTagInput>()
@@ -209,7 +209,7 @@ impl Tool for ListFilesTool {
         "list_files"
     }
     fn description(&self) -> &'static str {
-        fs_strings::LIST_FILES_DESCRIPTION
+        strings::LIST_FILES_DESCRIPTION
     }
     fn input_type(&self) -> TypeId {
         TypeId::of::<dtos::ListFilesInput>()
@@ -268,7 +268,7 @@ impl Tool for ReadFileTool {
         "read_file"
     }
     fn description(&self) -> &'static str {
-        fs_strings::READ_FILE_DESCRIPTION
+        strings::READ_FILE_DESCRIPTION
     }
     fn input_type(&self) -> TypeId {
         TypeId::of::<dtos::ReadFileInput>()
@@ -301,7 +301,7 @@ impl Tool for ReadFileLinesTool {
         "read_file_lines"
     }
     fn description(&self) -> &'static str {
-        fs_strings::READ_FILE_LINES_DESCRIPTION
+        strings::READ_FILE_LINES_DESCRIPTION
     }
     fn input_type(&self) -> TypeId {
         TypeId::of::<dtos::ReadFileLinesInput>()
@@ -339,7 +339,7 @@ impl Tool for CreateFileTool {
         "create_file"
     }
     fn description(&self) -> &'static str {
-        fs_strings::CREATE_FILE_DESCRIPTION
+        strings::CREATE_FILE_DESCRIPTION
     }
     fn input_type(&self) -> TypeId {
         TypeId::of::<dtos::CreateFileInput>()
@@ -376,7 +376,7 @@ impl Tool for InsertLinesTool {
         "insert_lines"
     }
     fn description(&self) -> &'static str {
-        fs_strings::INSERT_LINES_DESCRIPTION
+        strings::INSERT_LINES_DESCRIPTION
     }
     fn input_type(&self) -> TypeId {
         TypeId::of::<dtos::InsertLinesInput>()

@@ -1,7 +1,7 @@
 //! Web-fetching tools — fetch a URL and convert HTML to markdown, and search via a SearXNG instance.
 
 use crate::agent::datamark::{self, SECURITY_HEADER};
-use crate::agent::tools::manager::builtin::strings::cursor::WEB_FETCH_FINAL_PAGE_HINT;
+use crate::agent::tools::manager::builtin::strings::WEB_FETCH_FINAL_PAGE_HINT;
 use crate::agent::tools::manager::cache::{CacheEntry, cache};
 use crate::config::AppConfig;
 use fast_h2m::convert;

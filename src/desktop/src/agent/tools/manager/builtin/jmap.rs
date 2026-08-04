@@ -1,4 +1,4 @@
-//! JMAP email tool implementations for the tool registry.
+﻿//! JMAP email tool implementations for the tool registry.
 
 use crate::agent::tools::Tool;
 use crate::agent::tools::context::ToolContext;
@@ -7,7 +7,7 @@ use crate::config::AppConfig;
 use std::any::TypeId;
 
 use super::json_schema;
-use super::strings::jmap as jmap_strings;
+use super::strings;
 
 /// Tool that searches email by keyword, folder, date range, etc.
 pub(crate) struct SearchEmailTool;
@@ -16,7 +16,7 @@ impl Tool for SearchEmailTool {
         "search_email"
     }
     fn description(&self) -> &'static str {
-        jmap_strings::SEARCH_EMAIL_DESCRIPTION
+        strings::SEARCH_EMAIL_DESCRIPTION
     }
     fn input_type(&self) -> TypeId {
         TypeId::of::<dtos::SearchEmailInput>()
@@ -60,7 +60,7 @@ impl Tool for GetEmailByIdTool {
         "get_email_by_id"
     }
     fn description(&self) -> &'static str {
-        jmap_strings::GET_EMAIL_BY_ID_DESCRIPTION
+        strings::GET_EMAIL_BY_ID_DESCRIPTION
     }
     fn input_type(&self) -> TypeId {
         TypeId::of::<dtos::GetEmailByIdInput>()
@@ -90,7 +90,7 @@ impl Tool for SendEmailTool {
         "send_email"
     }
     fn description(&self) -> &'static str {
-        jmap_strings::SEND_EMAIL_DESCRIPTION
+        strings::SEND_EMAIL_DESCRIPTION
     }
     fn input_type(&self) -> TypeId {
         TypeId::of::<dtos::SendEmailInput>()

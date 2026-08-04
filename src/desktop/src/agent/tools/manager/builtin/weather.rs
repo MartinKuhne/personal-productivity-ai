@@ -1,4 +1,4 @@
-//! Weather tool implementation for the tool registry.
+﻿//! Weather tool implementation for the tool registry.
 
 use crate::agent::tools::Tool;
 use crate::agent::tools::context::ToolContext;
@@ -7,7 +7,7 @@ use crate::config::AppConfig;
 use std::any::TypeId;
 
 use super::json_schema;
-use super::strings::weather as weather_strings;
+use super::strings;
 
 /// Tool that fetches current weather conditions and forecasts for a location.
 pub(crate) struct GetWeatherTool;
@@ -16,7 +16,7 @@ impl Tool for GetWeatherTool {
         "get_weather"
     }
     fn description(&self) -> &'static str {
-        weather_strings::GET_WEATHER_DESCRIPTION
+        strings::GET_WEATHER_DESCRIPTION
     }
     fn input_type(&self) -> TypeId {
         TypeId::of::<dtos::GetWeatherInput>()

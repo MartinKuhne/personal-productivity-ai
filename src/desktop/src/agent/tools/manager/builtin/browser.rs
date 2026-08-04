@@ -1,8 +1,8 @@
-//! LLM tool wrappers for the headless browser (`BRWS-001..008`).
+﻿//! LLM tool wrappers for the headless browser (`BRWS-001..008`).
 //!
 //! Each tool's `Tool::execute` runs the underlying Playwright
 //! future on the process-wide Tokio runtime via
-//! [`crate::agent::tools::blocking::block_on`] — the same
+//! [`crate::agent::tools::blocking::block_on`] â€” the same
 //! sync-to-async bridge the CalDAV / CardDAV tools use. Mutating
 //! tools trigger a `save_storage()` on the
 //! [`crate::app::browser::BrowserSession`] so cookies / local
@@ -11,7 +11,7 @@
 //! `src/desktop/Tools.md` for the user-facing catalog.
 
 use super::json_schema;
-use super::strings::browser as browser_strings;
+use super::strings;
 use crate::agent::tools::Safety;
 use crate::agent::tools::Tool;
 use crate::agent::tools::context::ToolContext;
@@ -36,7 +36,7 @@ impl Tool for BrowserNavigateTool {
         "browser_navigate"
     }
     fn description(&self) -> &'static str {
-        browser_strings::BROWSER_NAVIGATE_DESCRIPTION
+        strings::BROWSER_NAVIGATE_DESCRIPTION
     }
     fn input_type(&self) -> TypeId {
         TypeId::of::<dtos::BrowserNavigateInput>()
@@ -80,7 +80,7 @@ impl Tool for BrowserGetPageStateTool {
         "browser_get_page_state"
     }
     fn description(&self) -> &'static str {
-        browser_strings::BROWSER_GET_PAGE_STATE_DESCRIPTION
+        strings::BROWSER_GET_PAGE_STATE_DESCRIPTION
     }
     fn input_type(&self) -> TypeId {
         TypeId::of::<dtos::BrowserGetPageStateInput>()
@@ -145,7 +145,7 @@ impl Tool for BrowserClickTool {
         "browser_click"
     }
     fn description(&self) -> &'static str {
-        browser_strings::BROWSER_CLICK_DESCRIPTION
+        strings::BROWSER_CLICK_DESCRIPTION
     }
     fn input_type(&self) -> TypeId {
         TypeId::of::<dtos::BrowserClickInput>()
@@ -187,7 +187,7 @@ impl Tool for BrowserFillInputTool {
         "browser_fill_input"
     }
     fn description(&self) -> &'static str {
-        browser_strings::BROWSER_FILL_INPUT_DESCRIPTION
+        strings::BROWSER_FILL_INPUT_DESCRIPTION
     }
     fn input_type(&self) -> TypeId {
         TypeId::of::<dtos::BrowserFillInputInput>()
@@ -230,7 +230,7 @@ impl Tool for BrowserSelectDropdownTool {
         "browser_select_dropdown"
     }
     fn description(&self) -> &'static str {
-        browser_strings::BROWSER_SELECT_DROPDOWN_DESCRIPTION
+        strings::BROWSER_SELECT_DROPDOWN_DESCRIPTION
     }
     fn input_type(&self) -> TypeId {
         TypeId::of::<dtos::BrowserSelectDropdownInput>()
@@ -277,7 +277,7 @@ impl Tool for BrowserPressKeyTool {
         "browser_press_key"
     }
     fn description(&self) -> &'static str {
-        browser_strings::BROWSER_PRESS_KEY_DESCRIPTION
+        strings::BROWSER_PRESS_KEY_DESCRIPTION
     }
     fn input_type(&self) -> TypeId {
         TypeId::of::<dtos::BrowserPressKeyInput>()
@@ -310,7 +310,7 @@ impl Tool for BrowserPressKeyTool {
 }
 
 // ---------------------------------------------------------------------------
-// browser_evaluate_js (BRWS-007, Mutating — true escape hatch)
+// browser_evaluate_js (BRWS-007, Mutating â€” true escape hatch)
 // ---------------------------------------------------------------------------
 
 pub(crate) struct BrowserEvaluateJsTool;
@@ -319,7 +319,7 @@ impl Tool for BrowserEvaluateJsTool {
         "browser_evaluate_js"
     }
     fn description(&self) -> &'static str {
-        browser_strings::BROWSER_EVALUATE_JS_DESCRIPTION
+        strings::BROWSER_EVALUATE_JS_DESCRIPTION
     }
     fn input_type(&self) -> TypeId {
         TypeId::of::<dtos::BrowserEvaluateJsInput>()
@@ -351,7 +351,7 @@ impl Tool for BrowserEvaluateJsTool {
 }
 
 // ---------------------------------------------------------------------------
-// browser_screenshot (BRWS-008, Mutating — writes to a sandbox dir)
+// browser_screenshot (BRWS-008, Mutating â€” writes to a sandbox dir)
 // ---------------------------------------------------------------------------
 
 pub(crate) struct BrowserScreenshotTool;
@@ -360,7 +360,7 @@ impl Tool for BrowserScreenshotTool {
         "browser_screenshot"
     }
     fn description(&self) -> &'static str {
-        browser_strings::BROWSER_SCREENSHOT_DESCRIPTION
+        strings::BROWSER_SCREENSHOT_DESCRIPTION
     }
     fn input_type(&self) -> TypeId {
         TypeId::of::<dtos::BrowserScreenshotInput>()
@@ -378,7 +378,7 @@ impl Tool for BrowserScreenshotTool {
         let input: dtos::BrowserScreenshotInput =
             serde_json::from_str(args).map_err(|e| err(format!("Invalid args: {}", e)))?;
         // Sanitise the filename against the session's policy
-        // before doing any Playwright work — fail fast on bad
+        // before doing any Playwright work â€” fail fast on bad
         // input.
         let out_path = ctx
             .browser_session
@@ -417,7 +417,7 @@ mod tests {
 
     fn ctx_with_session() -> crate::agent::tools::context::ToolContext<'static> {
         // We can't build a full ToolContext<'static> without
-        // leaking — instead, this helper verifies the schema
+        // leaking â€” instead, this helper verifies the schema
         // and DTO round-trip. The actual execute paths are
         // covered by the integration tests in
         // `app/browser/session.rs` (and the gated Playwright
