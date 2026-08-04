@@ -56,7 +56,7 @@ fn test_apply_file_row_click_no_modifier_replaces_selection_and_opens_tab() {
         bg_tx: &None,
         file_event_producer: None,
         tree_dirty: &mut tree_dirty,
-        pdf_backing_tracker: crate::app::watcher::PdfBackingTracker::new(),
+        pdf_backing_tracker: crate::app::session::PdfBackingTracker::new(),
     };
 
     apply_file_row_click(&mut ctx, &row);
@@ -121,7 +121,7 @@ fn test_apply_file_row_click_shift_toggles_off() {
         bg_tx: &None,
         file_event_producer: None,
         tree_dirty: &mut tree_dirty,
-        pdf_backing_tracker: crate::app::watcher::PdfBackingTracker::new(),
+        pdf_backing_tracker: crate::app::session::PdfBackingTracker::new(),
     };
 
     apply_file_row_click(&mut ctx, &row);
@@ -182,7 +182,7 @@ fn test_apply_file_row_click_shift_adds_to_selection_without_opening_tab() {
         bg_tx: &None,
         file_event_producer: None,
         tree_dirty: &mut tree_dirty,
-        pdf_backing_tracker: crate::app::watcher::PdfBackingTracker::new(),
+        pdf_backing_tracker: crate::app::session::PdfBackingTracker::new(),
     };
 
     apply_file_row_click(&mut ctx, &row);
@@ -241,7 +241,7 @@ fn test_apply_file_row_click_no_duplicate_tab() {
         bg_tx: &None,
         file_event_producer: None,
         tree_dirty: &mut tree_dirty,
-        pdf_backing_tracker: crate::app::watcher::PdfBackingTracker::new(),
+        pdf_backing_tracker: crate::app::session::PdfBackingTracker::new(),
     };
 
     apply_file_row_click(&mut ctx, &row);
@@ -306,7 +306,7 @@ fn test_apply_file_row_click_updates_selected_dir_to_parent() {
         bg_tx: &None,
         file_event_producer: None,
         tree_dirty: &mut tree_dirty,
-        pdf_backing_tracker: crate::app::watcher::PdfBackingTracker::new(),
+        pdf_backing_tracker: crate::app::session::PdfBackingTracker::new(),
     };
 
     apply_file_row_click(&mut ctx, &row);
@@ -366,7 +366,7 @@ fn test_apply_file_row_click_shift_updates_selected_dir_to_parent() {
         bg_tx: &None,
         file_event_producer: None,
         tree_dirty: &mut tree_dirty,
-        pdf_backing_tracker: crate::app::watcher::PdfBackingTracker::new(),
+        pdf_backing_tracker: crate::app::session::PdfBackingTracker::new(),
     };
 
     apply_file_row_click(&mut ctx, &row);
@@ -425,7 +425,7 @@ fn test_apply_file_row_click_bare_filename_sets_empty_parent() {
         bg_tx: &None,
         file_event_producer: None,
         tree_dirty: &mut tree_dirty,
-        pdf_backing_tracker: crate::app::watcher::PdfBackingTracker::new(),
+        pdf_backing_tracker: crate::app::session::PdfBackingTracker::new(),
     };
 
     apply_file_row_click(&mut ctx, &row);
@@ -526,7 +526,7 @@ fn test_apply_directory_row_click_preserves_selected_file() {
         bg_tx: &None,
         file_event_producer: None,
         tree_dirty: &mut tree_dirty,
-        pdf_backing_tracker: crate::app::watcher::PdfBackingTracker::new(),
+        pdf_backing_tracker: crate::app::session::PdfBackingTracker::new(),
     };
 
     apply_directory_row_click(&mut ctx, &row);
@@ -613,7 +613,7 @@ fn test_apply_directory_row_click_collapses_expanded_folder_preserves_selection(
         bg_tx: &None,
         file_event_producer: None,
         tree_dirty: &mut tree_dirty,
-        pdf_backing_tracker: crate::app::watcher::PdfBackingTracker::new(),
+        pdf_backing_tracker: crate::app::session::PdfBackingTracker::new(),
     };
 
     apply_directory_row_click(&mut ctx, &row);
@@ -699,7 +699,7 @@ fn test_apply_directory_row_click_marks_tree_dirty() {
         bg_tx: &None,
         file_event_producer: None,
         tree_dirty: &mut tree_dirty,
-        pdf_backing_tracker: crate::app::watcher::PdfBackingTracker::new(),
+        pdf_backing_tracker: crate::app::session::PdfBackingTracker::new(),
     };
 
     // Expanding a directory (the path is not in `expanded_dirs`).
@@ -773,7 +773,7 @@ fn test_apply_file_row_click_does_not_mark_tree_dirty() {
         bg_tx: &None,
         file_event_producer: None,
         tree_dirty: &mut tree_dirty,
-        pdf_backing_tracker: crate::app::watcher::PdfBackingTracker::new(),
+        pdf_backing_tracker: crate::app::session::PdfBackingTracker::new(),
     };
 
     // No-modifier click: opens the file in a tab. The cache
@@ -814,7 +814,7 @@ fn test_apply_file_row_click_does_not_mark_tree_dirty() {
         bg_tx: &None,
         file_event_producer: None,
         tree_dirty: &mut false,
-        pdf_backing_tracker: crate::app::watcher::PdfBackingTracker::new(),
+        pdf_backing_tracker: crate::app::session::PdfBackingTracker::new(),
     };
     apply_file_row_click(&mut shift_ctx, &row);
     assert!(

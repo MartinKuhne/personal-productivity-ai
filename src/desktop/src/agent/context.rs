@@ -1,6 +1,6 @@
 //! Agent context — bundles all inputs (config, channels, file bus, active file/dir, prompt, cancel flag, history) for an agent session.
 
-use crate::app::browser::BrowserSession;
+use crate::app::session::BrowserSession;
 use crate::bus::core::Bus;
 use crate::bus::events::file::FileEvent;
 use crate::bus::events::typed::BackgroundEvent;
@@ -38,7 +38,7 @@ pub struct AgentContext {
     pub browser_session: Arc<BrowserSession>,
     /// Shared PDF-backing tracker — gives tools access to
     /// the set of Markdown files that have a `.pdf` sibling.
-    pub pdf_backing: Arc<crate::app::watcher::pdf_backing_tracker::PdfBackingTracker>,
+    pub pdf_backing: Arc<crate::app::session::PdfBackingTracker>,
 }
 
 #[cfg(test)]
@@ -54,7 +54,7 @@ mod tests {
         let (tx, _rx) = channel();
         let config = AppConfig::default();
         let bus = Bus::new();
-        let browser = Arc::new(crate::app::browser::BrowserSession::new(&config));
+        let browser = Arc::new(crate::app::session::BrowserSession::new(&config));
         let ctx = AgentContext {
             config: config.clone(),
             tx_gui: tx,
@@ -68,9 +68,7 @@ mod tests {
             current_response: String::new(),
             model_name: None,
             browser_session: browser,
-            pdf_backing: Arc::new(
-                crate::app::watcher::pdf_backing_tracker::PdfBackingTracker::new(),
-            ),
+            pdf_backing: Arc::new(crate::app::session::PdfBackingTracker::new()),
         };
         assert_eq!(ctx.config.models, config.models);
         assert!(ctx.active_file.as_deref() == Some(Path::new("test.md")));

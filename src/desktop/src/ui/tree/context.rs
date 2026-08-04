@@ -80,7 +80,7 @@ pub struct TreeOpsContext<'a> {
     /// file row click) leave this flag alone.
     pub tree_dirty: &'a mut bool,
     /// Tracker for PDF backed files
-    pub pdf_backing_tracker: crate::app::watcher::PdfBackingTracker,
+    pub pdf_backing_tracker: crate::app::session::PdfBackingTracker,
 }
 
 /// Type alias for backward compatibility.

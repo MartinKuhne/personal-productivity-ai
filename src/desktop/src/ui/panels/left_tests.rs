@@ -226,7 +226,7 @@ fn test_directory_click_invalidates_tree_cache() {
                 file_event_bus,
             )),
             tree_dirty: &mut app.orchestrator.selection.tree_dirty,
-            pdf_backing_tracker: crate::app::watcher::PdfBackingTracker::new(),
+            pdf_backing_tracker: crate::app::session::PdfBackingTracker::new(),
         };
         crate::ui::tree::handlers::apply_directory_row_click(&mut ctx, &dir_row);
     }

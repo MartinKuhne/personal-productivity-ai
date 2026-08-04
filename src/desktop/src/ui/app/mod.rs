@@ -92,7 +92,7 @@ impl FastMdApp {
         &mut self.orchestrator.file_processor
     }
 
-    pub fn pdf_backing_tracker(&self) -> &crate::app::watcher::PdfBackingTracker {
+    pub fn pdf_backing_tracker(&self) -> &crate::app::session::PdfBackingTracker {
         &self.orchestrator.pdf_backing_tracker
     }
 

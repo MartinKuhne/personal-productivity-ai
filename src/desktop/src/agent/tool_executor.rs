@@ -3,7 +3,7 @@
 use crate::agent::tools::Safety;
 use crate::agent::tools::context::ToolContext;
 use crate::agent::tools::execute_tool;
-use crate::app::browser::BrowserSession;
+use crate::app::session::BrowserSession;
 use crate::bus::core::Bus;
 use crate::bus::events::file::FileEvent;
 use crate::bus::events::typed::{BackgroundEvent, FsEvent};
@@ -16,7 +16,7 @@ pub struct ToolExecutor {
     config: AppConfig,
     file_event_bus: Bus<FileEvent>,
     browser_session: Arc<BrowserSession>,
-    pdf_backing: std::sync::Arc<crate::app::watcher::pdf_backing_tracker::PdfBackingTracker>,
+    pdf_backing: std::sync::Arc<crate::app::session::PdfBackingTracker>,
 }
 
 impl ToolExecutor {
@@ -24,7 +24,7 @@ impl ToolExecutor {
         config: AppConfig,
         file_event_bus: Bus<FileEvent>,
         browser_session: Arc<BrowserSession>,
-        pdf_backing: std::sync::Arc<crate::app::watcher::pdf_backing_tracker::PdfBackingTracker>,
+        pdf_backing: std::sync::Arc<crate::app::session::PdfBackingTracker>,
     ) -> Self {
         Self {
             config,
@@ -244,11 +244,10 @@ mod tests {
     fn test_tool_executor_new() {
         let config = AppConfig::default();
         let bus = Bus::new();
-        let browser_session = std::sync::Arc::new(crate::app::browser::BrowserSession::new(
+        let browser_session = std::sync::Arc::new(crate::app::session::BrowserSession::new(
             &crate::config::AppConfig::default(),
         ));
-        let pdf_backing =
-            std::sync::Arc::new(crate::app::watcher::pdf_backing_tracker::PdfBackingTracker::new());
+        let pdf_backing = std::sync::Arc::new(crate::app::session::PdfBackingTracker::new());
         let executor = ToolExecutor::new(config, bus, browser_session, pdf_backing);
         assert!(executor.config.models.is_empty());
     }

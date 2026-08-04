@@ -86,7 +86,7 @@ fn test_file_row_click_captures_event() {
             bg_tx: &None,
             file_event_producer: None,
             tree_dirty,
-            pdf_backing_tracker: crate::app::watcher::PdfBackingTracker::new(),
+            pdf_backing_tracker: crate::app::session::PdfBackingTracker::new(),
         };
 
         let row = FlatRow {
@@ -192,7 +192,7 @@ fn test_draw_tree_node_directory_and_file() {
                 bg_tx: &None,
                 file_event_producer: None,
                 tree_dirty: &mut tree_dirty,
-                pdf_backing_tracker: crate::app::watcher::PdfBackingTracker::new(),
+                pdf_backing_tracker: crate::app::session::PdfBackingTracker::new(),
             };
 
             // Render collapsed directory
@@ -316,7 +316,7 @@ fn test_tree_node_selection_state_modifiers() {
                 bg_tx: &None,
                 file_event_producer: None,
                 tree_dirty: &mut tree_dirty,
-                pdf_backing_tracker: crate::app::watcher::PdfBackingTracker::new(),
+                pdf_backing_tracker: crate::app::session::PdfBackingTracker::new(),
             };
 
             draw_tree_node(ui, &file1, &mut tree_ctx);
@@ -492,7 +492,7 @@ fn test_new_document_on_directory_opens_dialog_with_dir_parent() {
             bg_tx: &None,
             file_event_producer: None,
             tree_dirty,
-            pdf_backing_tracker: crate::app::watcher::PdfBackingTracker::new(),
+            pdf_backing_tracker: crate::app::session::PdfBackingTracker::new(),
         };
 
         let row = FlatRow {

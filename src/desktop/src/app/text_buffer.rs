@@ -282,7 +282,7 @@ impl TextBuffer {
         &mut self,
         file_path: &Path,
         raw_content: &str,
-        pdf_backing: Option<&crate::app::watcher::pdf_backing_tracker::PdfBackingTracker>,
+        pdf_backing: Option<&crate::app::session::PdfBackingTracker>,
     ) {
         let is_pdf_backed = pdf_backing
             .map(|t| t.is_pdf_backed(file_path))

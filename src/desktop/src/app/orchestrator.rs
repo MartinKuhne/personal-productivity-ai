@@ -20,7 +20,7 @@ pub struct AppOrchestrator {
     pub file_event_bus: Bus<FileEvent>,
     pub file_event_reader: Option<BusReader<FileEvent>>,
     pub file_processor: FileEventProcessor,
-    pub pdf_backing_tracker: crate::app::watcher::PdfBackingTracker,
+    pub pdf_backing_tracker: crate::app::session::PdfBackingTracker,
     pub tag_manager: TagManager,
     pub directory_tracker: DirectoryTracker,
     pub selection: SelectionManager,

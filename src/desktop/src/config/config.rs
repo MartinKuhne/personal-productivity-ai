@@ -264,7 +264,7 @@ fn default_discord_rate_limit() -> u32 {
 /// empty `browser: {}` block (or a missing one entirely) is a
 /// valid configuration — sensible defaults are filled in by
 /// [`BrowserConfig::resolve`] and used by the
-/// [`crate::app::browser::BrowserSession`].
+/// [`crate::app::session::BrowserSession`].
 #[derive(serde::Serialize, serde::Deserialize, Clone, Debug, PartialEq, Eq)]
 pub struct BrowserConfig {
     /// Directory the LLM is allowed to write screenshots to. An
@@ -334,7 +334,7 @@ impl Default for BrowserConfig {
 impl BrowserConfig {
     /// Fill in any empty fields with defaults that depend on
     /// environment (e.g. `%APPDATA%`) or on the content library
-    /// list. Called by [`crate::app::browser::BrowserSession`]
+    /// list. Called by [`crate::app::session::BrowserSession`]
     /// right before the first launch so we don't pay the
     /// environment lookup at config-load time.
     pub fn resolve(&self, content_libraries: &[ContentLibrary]) -> ResolvedBrowserConfig {

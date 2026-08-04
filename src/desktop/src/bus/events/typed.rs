@@ -14,8 +14,7 @@
 //! [`crate::app::background_task::Task::finished_watcher`] slot
 //! instead of the message bus.
 
-use crate::app::background::BackgroundLogEntry;
-use crate::bus::events::messages::TokenUsageInfo;
+use crate::bus::events::messages::{BackgroundLogEntry, TokenUsageInfo};
 use serde_json::Value;
 
 /// Agent-domain events emitted by the LLM agent loop.

@@ -59,6 +59,8 @@ src/
 ├── app/                    # egui-free application domain (managers, watcher, vfs)
 │   ├── vfs/                # Virtual File System — parser, library behaviour, resolver (app/vfs/SPEC.md)
 │   ├── watcher/            # FileWatcher (notify), FileEventProcessor, DirectoryTracker
+│   ├── session/            # Shared runtime — BrowserSession (Playwright) and PdfBackingTracker,
+│   │                       # the long-lived handles the orchestrator hands to the agent
 │   └── (managers)          # TabManager, SelectionManager, DialogManager, PanelLayout, TagManager, TextBuffer
 ├── agent/                  # LLM tool-loop: manager, llm_client, prompt_builder,
 │                           #   response_formatter, tool_executor, context, agent_impl
@@ -118,13 +120,24 @@ When adding or moving code, place files by **concern**, not by type:
   `src/app/vfs/SPEC.md`); `config.rs` re-exports the public types for
   backwards compatibility, but new code should import from
   `crate::app::vfs`.
+- **Cross-cutting value types** with no single home (e.g.
+  `TokenUsageInfo`, `BackgroundLogEntry`, `LogCategory`) live in
+  `bus::events::messages` (value-type home) or `bus::events::typed`
+  (per-domain replacement). The `app/` module no longer hosts these.
+- **Shared runtime infrastructure** that both the application
+  orchestrator and the LLM agent depend on (the long-lived headless
+  browser session and the PDF-backing tracker) lives in
+  `app/session/`. Putting them here is what makes the dependency
+  graph one-way: `app/orchestrator` constructs the shared handles
+  and hands them to the agent via `AgentContext`; the agent no longer
+  reaches into `app::browser` or `app::watcher` for these types.
+  The old paths (`crate::app::browser::BrowserSession`,
+  `crate::app::watcher::PdfBackingTracker`) still re-export from
+  `app::session` for backwards compatibility and will be removed
+  in a follow-up.
 - **Generic, domain-free helpers** (path utilities, file-walk tag extraction)
   go in `utils/`. If a helper knows about Markdown, it belongs in `markdown/`,
   not `utils/`.
-- **Cross-cutting value types** with no single home (e.g.
-  `TokenUsageInfo`) live in `bus::events::messages` (value-type home)
-  or `bus::events::typed` (per-domain
-  replacement). The `app/` module no longer hosts these.
 
 ### Event-driven fan-out
 

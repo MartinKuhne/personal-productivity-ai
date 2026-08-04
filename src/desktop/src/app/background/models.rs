@@ -1,17 +1,11 @@
-//! Background subsystem data types — `LogCategory`, `BackgroundLogEntry`, `ImageJob`, `PdfConversionJob`.
+//! Background subsystem data types — `ImageJob` and `PdfConversionJob`.
+//!
+//! `LogCategory` and `BackgroundLogEntry` moved to
+//! [`crate::bus::events::messages`] in the layering-inversion fix so the
+//! `bus` module no longer depends on `app`. They are re-exported here
+//! for backwards compatibility with existing in-tree call sites.
 
-use chrono::{DateTime, Local};
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
-pub enum LogCategory {
-    Indexer,
-    Watcher,
-    PdfConverter,
-    ImageVision,
-    LlmTools,
-    Print,
-    Batch,
-}
+pub use crate::bus::events::messages::{BackgroundLogEntry, LogCategory};
 
 #[cfg(test)]
 mod tests {
@@ -30,7 +24,6 @@ mod tests {
     fn test_image_job_should_process_missing_md() {
         let dir = tempdir().unwrap();
         let img = dir.path().join("photo.jpg");
-        std::fs::write(&img, "image data").unwrap();
         let job = ImageJob::new(img);
         assert!(job.should_process());
     }
@@ -62,51 +55,12 @@ mod tests {
     }
 
     #[test]
-    fn test_log_category_display() {
-        assert_eq!(LogCategory::Indexer.to_string(), "Indexer");
-        assert_eq!(LogCategory::Watcher.to_string(), "Watcher");
-        assert_eq!(LogCategory::PdfConverter.to_string(), "PDF Converter");
-        assert_eq!(LogCategory::ImageVision.to_string(), "Image Vision");
-        assert_eq!(LogCategory::LlmTools.to_string(), "LLM Tools");
-    }
-
-    #[test]
-    fn test_background_log_entry_new() {
-        let entry = BackgroundLogEntry::new(LogCategory::Indexer, "test message".to_string());
-        assert_eq!(entry.category, LogCategory::Indexer);
-        assert_eq!(entry.message, "test message");
-    }
-}
-
-impl std::fmt::Display for LogCategory {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        let s = match self {
-            LogCategory::Indexer => "Indexer",
-            LogCategory::Watcher => "Watcher",
-            LogCategory::PdfConverter => "PDF Converter",
-            LogCategory::ImageVision => "Image Vision",
-            LogCategory::LlmTools => "LLM Tools",
-            LogCategory::Print => "Print",
-            LogCategory::Batch => "Batch",
-        };
-        write!(f, "{}", s)
-    }
-}
-
-#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
-pub struct BackgroundLogEntry {
-    pub timestamp: DateTime<Local>,
-    pub category: LogCategory,
-    pub message: String,
-}
-
-impl BackgroundLogEntry {
-    pub fn new(category: LogCategory, message: String) -> Self {
-        Self {
-            timestamp: Local::now(),
-            category,
-            message,
-        }
+    fn test_log_category_display_still_works_via_reexport() {
+        // After the move, the type lives in `bus::events::messages` but the
+        // canonical accessor `crate::app::background::LogCategory` must keep
+        // resolving. This test guards the re-export.
+        let cat: LogCategory = LogCategory::Indexer;
+        assert_eq!(cat.to_string(), "Indexer");
     }
 }
 

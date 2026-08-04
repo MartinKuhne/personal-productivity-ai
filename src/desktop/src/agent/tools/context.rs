@@ -1,6 +1,6 @@
 //! Tool context — provides tools with access to `AppConfig` and the file event bus, plus safe virtual-path resolution.
 
-use crate::app::browser::BrowserSession;
+use crate::app::session::BrowserSession;
 use crate::app::vfs;
 use crate::bus::core::Bus;
 use crate::bus::events::file::{FileEvent, FileEventKind, FileEventProducer};
@@ -81,7 +81,7 @@ pub struct ToolContext<'a> {
     /// don't use the browser ignore this field.
     pub browser_session: Arc<BrowserSession>,
     /// PDF-backing tracker for checking if a file has a `.pdf` sibling.
-    pub pdf_backing: std::sync::Arc<crate::app::watcher::pdf_backing_tracker::PdfBackingTracker>,
+    pub pdf_backing: std::sync::Arc<crate::app::session::PdfBackingTracker>,
 }
 
 impl<'a> ToolContext<'a> {
@@ -90,7 +90,7 @@ impl<'a> ToolContext<'a> {
         config: &'a crate::config::AppConfig,
         file_event_bus: &'a Bus<FileEvent>,
         browser_session: Arc<BrowserSession>,
-        pdf_backing: std::sync::Arc<crate::app::watcher::pdf_backing_tracker::PdfBackingTracker>,
+        pdf_backing: std::sync::Arc<crate::app::session::PdfBackingTracker>,
     ) -> Self {
         Self {
             config,

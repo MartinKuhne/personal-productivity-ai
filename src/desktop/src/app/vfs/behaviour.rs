@@ -1,7 +1,7 @@
 //! VFS behaviour — content-library helpers and the virtual-path resolver.
 //!
 //! Three things live here, all behaviour over the VFS data types in
-//! [`virtual_path`]: crate::app::vfs::virtual_path
+//! [`crate::app::vfs::virtual_path`]:
 //!
 //! - [`ContentLibraryExt`] — the trait that gives
 //!   [`crate::config::ContentLibrary`] the methods callers need to

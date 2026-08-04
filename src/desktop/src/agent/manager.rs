@@ -3,7 +3,7 @@
 //! Unit tests live in the sibling `manager_tests.rs` sidecar.
 
 use crate::agent::AgentContext;
-use crate::app::browser::BrowserSession;
+use crate::app::session::BrowserSession;
 use crate::bus::core::{Bus, BusReader};
 use crate::bus::events::config::ConfigArrived;
 use crate::bus::events::messages::TokenUsageInfo;
@@ -68,7 +68,7 @@ pub struct AgentSessionManager {
     /// survive across agent turns so cookies persist (BRWS-001).
     browser_session: Arc<BrowserSession>,
     /// Shared PDF-backing tracker, handed to the tool executor.
-    pdf_backing: Arc<crate::app::watcher::pdf_backing_tracker::PdfBackingTracker>,
+    pdf_backing: Arc<crate::app::session::PdfBackingTracker>,
 }
 
 impl AgentSessionManager {
@@ -80,7 +80,7 @@ impl AgentSessionManager {
     pub fn new(
         config_bus: Bus<ConfigArrived>,
         browser_session: Arc<BrowserSession>,
-        pdf_backing: Arc<crate::app::watcher::pdf_backing_tracker::PdfBackingTracker>,
+        pdf_backing: Arc<crate::app::session::PdfBackingTracker>,
     ) -> Self {
         Self {
             state: AgentState {
@@ -133,9 +133,7 @@ impl AgentSessionManager {
             command_input: String::new(),
             show_results: false,
             browser_session,
-            pdf_backing: Arc::new(
-                crate::app::watcher::pdf_backing_tracker::PdfBackingTracker::new(),
-            ),
+            pdf_backing: Arc::new(crate::app::session::PdfBackingTracker::new()),
         }
     }
 

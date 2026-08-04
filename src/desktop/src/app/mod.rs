@@ -24,6 +24,7 @@ pub mod panel_layout;
 pub mod persisted;
 pub mod print;
 pub mod selection_manager;
+pub mod session;
 pub mod tab_manager;
 pub mod tag_manager;
 pub mod text_buffer;

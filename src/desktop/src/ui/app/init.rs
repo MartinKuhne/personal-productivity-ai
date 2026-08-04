@@ -109,10 +109,10 @@ impl FastMdApp {
         // with the agent and (read-only) with the Tools dialog
         // so the UI can call `tick()` / `forget()`. Lazily
         // launches a Firefox process on first browser tool call.
-        let browser_session = std::sync::Arc::new(crate::app::browser::BrowserSession::new(
+        let browser_session = std::sync::Arc::new(crate::app::session::BrowserSession::new(
             &crate::config::AppConfig::default(),
         ));
-        let pdf_backing_tracker = crate::app::watcher::PdfBackingTracker::new();
+        let pdf_backing_tracker = crate::app::session::PdfBackingTracker::new();
         let agent = AgentSessionManager::new(
             config_bus,
             browser_session.clone(),
@@ -217,10 +217,10 @@ impl FastMdApp {
         let finished_watcher_slot = background_task.finished_watcher.clone();
         let file_processor = FileEventProcessor::new(background_task.file_event_bus.subscribe());
         let background_manager = Arc::new(Mutex::new(BackgroundProcessManager::new()));
-        let test_browser_session = std::sync::Arc::new(crate::app::browser::BrowserSession::new(
+        let test_browser_session = std::sync::Arc::new(crate::app::session::BrowserSession::new(
             &crate::config::AppConfig::default(),
         ));
-        let pdf_backing_tracker = crate::app::watcher::PdfBackingTracker::new();
+        let pdf_backing_tracker = crate::app::session::PdfBackingTracker::new();
         let mut agent = AgentSessionManager::new(
             bus.clone(),
             test_browser_session,

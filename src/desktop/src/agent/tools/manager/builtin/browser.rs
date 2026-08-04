@@ -1,11 +1,11 @@
-﻿//! LLM tool wrappers for the headless browser (`BRWS-001..008`).
+//! LLM tool wrappers for the headless browser (`BRWS-001..008`).
 //!
 //! Each tool's `Tool::execute` runs the underlying Playwright
 //! future on the process-wide Tokio runtime via
 //! [`crate::agent::tools::blocking::block_on`] â€” the same
 //! sync-to-async bridge the CalDAV / CardDAV tools use. Mutating
 //! tools trigger a `save_storage()` on the
-//! [`crate::app::browser::BrowserSession`] so cookies / local
+//! [`crate::app::session::BrowserSession`] so cookies / local
 //! storage survive an app restart. See
 //! `doc/planning/browser_tools.md` for the design record and
 //! `src/desktop/Tools.md` for the user-facing catalog.
@@ -411,7 +411,7 @@ impl Tool for BrowserScreenshotTool {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::app::browser::BrowserSession;
+    use crate::app::session::BrowserSession;
     use crate::config::AppConfig;
     use std::sync::Arc;
 
@@ -427,8 +427,7 @@ mod tests {
             crate::bus::events::file::FileEvent,
         >::new()));
         let session = Arc::new(BrowserSession::new(config));
-        let pdf_backing =
-            Arc::new(crate::app::watcher::pdf_backing_tracker::PdfBackingTracker::new());
+        let pdf_backing = Arc::new(crate::app::session::PdfBackingTracker::new());
         crate::agent::tools::context::ToolContext::new(config, bus, session, pdf_backing)
     }
 
