@@ -142,7 +142,12 @@ pub fn execute_print_blocking(
     temp_file
         .write_all(html_document.as_bytes())
         .map_err(|e| format!("Failed to write temp file: {}", e))?;
-    let path_str = temp_file.path().to_string_lossy().to_string();
+    
+    let (_, path) = temp_file
+        .keep()
+        .map_err(|e| format!("Failed to keep temp file: {}", e))?;
+    
+    let path_str = path.to_string_lossy().to_string();
 
     webbrowser::open(&path_str).map_err(|e| format!("Failed to open browser: {}", e))?;
 
