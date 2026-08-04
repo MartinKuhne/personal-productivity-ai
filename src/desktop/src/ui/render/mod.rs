@@ -48,12 +48,6 @@ pub(crate) use inline::render_inline;
 pub(crate) use table::render_table_with_config;
 pub(crate) use yaml_table::render_yaml_table;
 
-// Test-only `render_table` wrapper that lives in `table::dispatch` and
-// is gated by `#[cfg(test)]`. Re-export it here under the same gate so
-// the e2e_tests submodules can call it through `super::render_table`.
-#[cfg(test)]
-pub(crate) use table::dispatch::render_table;
-
 use eframe::egui;
 
 /// Purpose: Renders markdown text to UI.

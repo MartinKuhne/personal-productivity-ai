@@ -19,6 +19,7 @@ always read the nearest one before editing. See
 ## 3. Keep Tests Updated
 - Always update relevant tests after making code changes or bug fixes.
 - If a bug is fixed, a test must be added or updated to cover the regression and prevent it from recurring.
+- When a test block becomes large enough to impair readability of the implementation file, move it to a sidecar test file (sibling or `tests/*.rs`) and add a one-line note in the implementation's module doc pointing to it. See the component's own `AGENTS.md` for the sidecar pattern detail.
 
 ## 4. Warnings and Compilation
 - **Fix all warnings:** You must fix all new and existing compile or test warnings before considering a task "done."

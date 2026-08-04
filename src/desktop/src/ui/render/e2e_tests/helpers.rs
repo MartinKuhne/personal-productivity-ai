@@ -237,3 +237,33 @@ pub(crate) fn commands_capture(platform: &egui::PlatformOutput) -> String {
         })
         .unwrap_or_default()
 }
+
+// ---------------------------------------------------------------------------
+// Default-config dispatch wrapper (test-only).
+//
+// Was previously in ui/render/table/dispatch.rs as a pub(crate) fn
+// with a 3-hop visibility chain (dispatch::render_table ->
+// ui::render::render_table re-export -> e2e_tests::render_table re-export).
+// Moved here so it lives next to the other test helpers; the original
+// dispatch.rs and the two re-exports were deleted.
+// ---------------------------------------------------------------------------
+
+/// Render a markdown table with the default [crate::ui::table_width::TableRenderConfig].
+///
+/// Equivalent to calling ender_table_with_config with
+/// &TableRenderConfig::default() (global padding = ZERO).
+/// Production dispatch uses ender_table_with_config directly.
+pub(crate) fn render_table(
+    ui: &mut egui::Ui,
+    table_cells: &[Vec<Vec<InlineElem>>],
+    table_ordinal: usize,
+    strategy: crate::ui::table_width::DeficitStrategy,
+) {
+    super::render_table_with_config(
+        ui,
+        table_cells,
+        table_ordinal,
+        strategy,
+        &crate::ui::table_width::TableRenderConfig::default(),
+    )
+}
