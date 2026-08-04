@@ -84,6 +84,3 @@ image = { version = "0.25", default-features = false, features = ["png"] }
 name = "fastmd"
 path = "src/main.rs"
 
-[[bin]]
-name = "deploy"
-path = "src/bin/deploy.rs"
