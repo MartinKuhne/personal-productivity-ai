@@ -392,3 +392,190 @@ fn test_render_table_with_bold_and_special_chars_e2e() {
         });
     });
 }
+
+/// Regression: in the agent response window, long lines that wrap had
+/// their continuation lines centered within the line width because
+/// `ui.horizontal_wrapped` defaults `main_align` to `Align::Center`.
+/// For a wrapped continuation row narrower than the line width, the
+/// centered placement landed the row at a positive x offset, causing
+/// the leftmost characters to fall outside the visible left edge of
+/// the scroll viewport — the "text cut off on the left on subsequent
+/// lines" symptom.
+///
+/// The fix in `render_inline` pins `main_align: Min` via
+/// `Layout::left_to_right(egui::Align::Min).with_main_wrap(true)`, so
+/// every wrapped row starts at the galley's left edge (offset = 0 px
+/// from the first row's `x`).
+///
+/// Mirrors the production render path: the agent response is rendered
+/// inside a vertical `ScrollArea` by
+/// `src/ui/panels/center.rs:180-224`, so the test must do the same.
+#[test]
+fn test_render_inline_wrapped_rows_left_aligned() {
+    use eframe::epaint::Shape;
+
+    // 50 short space-separated tokens — wide enough to force several
+    // wraps at a 200 px viewport, with clear word-boundary break
+    // points so cosmic_text doesn't overflow a single token.
+    let long_text: String = "alpha ".repeat(50);
+    let elems = vec![InlineElem::Text(long_text.clone(), TextStyle::default())];
+
+    let viewport_width: f32 = 200.0;
+    let raw = egui::RawInput {
+        screen_rect: Some(egui::Rect::from_min_size(
+            egui::Pos2::ZERO,
+            egui::vec2(viewport_width, 600.0),
+        )),
+        ..egui::RawInput::default()
+    };
+    let mut pending_toggles = Vec::new();
+    let ctx = egui::Context::default();
+    let output = ctx.run_ui(raw, |ui| {
+        egui::CentralPanel::default().show(ui, |ui| {
+            // Mirror the production render path in
+            // `src/ui/panels/center.rs:200-209`: response is rendered
+            // inside a vertical ScrollArea.
+            egui::ScrollArea::vertical()
+                .id_salt("test_inline_wrap_scroll")
+                .show(ui, |ui| {
+                    render_inline(ui, &elems, false, None, 0, None, 0, &mut pending_toggles);
+                });
+        });
+    });
+
+    // Locate the text shape for our long text.
+    let shape = output
+        .shapes
+        .iter()
+        .find_map(|cs| match &cs.shape {
+            Shape::Text(t) if t.galley.text().trim_end() == long_text.trim_end() => Some(t),
+            _ => None,
+        })
+        .unwrap_or_else(|| panic!("expected a Text shape whose galley carries the long text"));
+    let galley = &shape.galley;
+
+    // 1. Sanity: the text must actually have wrapped to multiple rows.
+    //    If it didn't, the rest of the assertions are meaningless.
+    assert!(
+        galley.rows.len() > 1,
+        "expected long text to wrap to multiple rows; got {} row(s) — \
+         the wrap layout isn't engaging at viewport_width={viewport_width:.0}px",
+        galley.rows.len(),
+    );
+
+    // 2. Every wrapped row must start at (or within sub-pixel
+    //    tolerance of) the first row's x position. A positive offset
+    //    on continuation rows means the row was centered, which is
+    //    exactly the "left clip" regression.
+    let first_row_x = galley.rows[0].rect().min.x;
+    let tolerance = 1.0; // 1 px tolerance for sub-pixel rounding
+    for (i, row) in galley.rows.iter().enumerate() {
+        let offset = row.rect().min.x - first_row_x;
+        assert!(
+            offset.abs() <= tolerance,
+            "row {i} starts at x={:.2} but first row starts at x={first_row_x:.2} \
+             (offset={offset:.2}px) — wrapped continuation rows must be left-aligned \
+             (offset=0), not centered. This is the 'text cut off on the left on \
+             subsequent lines' regression. Ensure render_inline uses \
+             Layout::left_to_right(Align::Min).with_main_wrap(true), not \
+             ui.horizontal_wrapped (which defaults main_align to Center).",
+            row.rect().min.x,
+        );
+    }
+}
+
+/// Regression: same "left clip on subsequent wrapped lines" symptom, but
+/// exercised through the full `render_markdown` path (the production
+/// entry point used by the agent response window). This catches the
+/// bug at the level the user actually sees it, rather than at the
+/// `render_inline` unit level. Pinned to the
+/// `Layout::left_to_right(Align::Min).with_main_wrap(true)` fix in
+/// `render_inline` — if anyone regresses that fix, this test fails
+/// because the continuation row's `x` is no longer pinned to the first
+/// row's `x`.
+#[test]
+fn test_render_markdown_wrapped_paragraph_left_aligned() {
+    use eframe::epaint::Shape;
+
+    // A long, plain paragraph that will wrap to multiple lines at a
+    // narrow viewport. The final line is intentionally shorter than
+    // the line width — that's exactly the case where
+    // `horizontal_wrapped`'s default `main_align: Center` would shift
+    // the text right.
+    let md = "\
+This is a long paragraph that will wrap to multiple lines at a \
+narrow viewport width and the final line will be shorter than the \
+line width which is the case that triggers the left alignment \
+regression when the placer centers children along the main axis.
+";
+    assert!(
+        md.split_whitespace().count() > 20,
+        "test fixture should be long enough to force multiple wraps",
+    );
+
+    let viewport_width: f32 = 240.0;
+    let raw = egui::RawInput {
+        screen_rect: Some(egui::Rect::from_min_size(
+            egui::Pos2::ZERO,
+            egui::vec2(viewport_width, 800.0),
+        )),
+        ..egui::RawInput::default()
+    };
+    let mut scroll_id = None;
+    let mut pending_toggles = Vec::new();
+    let ctx = egui::Context::default();
+    let output = ctx.run_ui(raw, |ui| {
+        egui::CentralPanel::default().show(ui, |ui| {
+            egui::ScrollArea::vertical()
+                .id_salt("test_md_wrap_scroll")
+                .show(ui, |ui| {
+                    render_markdown(
+                        ui,
+                        md,
+                        &mut scroll_id,
+                        &mut pending_toggles,
+                        crate::ui::table_width::DeficitStrategy::ProportionalToSlack,
+                        None,
+                    );
+                });
+        });
+    });
+
+    // Find the text shape that carries the long paragraph.
+    let shape = output
+        .shapes
+        .iter()
+        .find_map(|cs| match &cs.shape {
+            Shape::Text(t) if t.galley.text().trim() == md.trim() => Some(t),
+            _ => None,
+        })
+        .unwrap_or_else(|| panic!("expected a Text shape whose galley carries the long paragraph"));
+    let galley = &shape.galley;
+
+    // 1. Sanity: the paragraph must actually have wrapped.
+    assert!(
+        galley.rows.len() > 1,
+        "expected paragraph to wrap to multiple rows; got {} row(s) — \
+         the wrap layout isn't engaging at viewport_width={viewport_width:.0}px",
+        galley.rows.len(),
+    );
+
+    // 2. Every wrapped row must start at the first row's x position
+    //    (within 1 px tolerance). The "left clip" regression shifts
+    //    continuation rows right by the centered-placement offset.
+    let first_row_x = galley.rows[0].rect().min.x;
+    let tolerance = 1.0;
+    for (i, row) in galley.rows.iter().enumerate() {
+        let offset = row.rect().min.x - first_row_x;
+        assert!(
+            offset.abs() <= tolerance,
+            "row {i} starts at x={:.2} but first row starts at x={first_row_x:.2} \
+             (offset={offset:.2}px) — wrapped continuation rows must be left-aligned \
+             (offset=0), not centered. This is the 'text cut off on the left on \
+             subsequent lines' regression in the agent response window. Ensure \
+             render_inline uses Layout::left_to_right(Align::Min).with_main_wrap(true), \
+             not ui.horizontal_wrapped (which defaults main_align to Center).",
+            row.rect().min.x,
+        );
+    }
+}
