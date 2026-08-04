@@ -79,10 +79,7 @@ pub(crate) fn register_all_builtins(mgr: &mut ToolManager) {
     );
     mgr.register_builtin(InternalToolGroup::Filesystem, Box::new(fs::ListFilesTool));
     mgr.register_builtin(InternalToolGroup::Filesystem, Box::new(fs::ReadFileTool));
-    mgr.register_builtin(
-        InternalToolGroup::Filesystem,
-        Box::new(fs::ReadFileLinesTool),
-    );
+    mgr.register_builtin(InternalToolGroup::Filesystem, Box::new(fs::ReadLinesTool));
     mgr.register_builtin(InternalToolGroup::Filesystem, Box::new(fs::CreateFileTool));
     mgr.register_builtin(InternalToolGroup::Filesystem, Box::new(fs::InsertLinesTool));
     mgr.register_builtin(

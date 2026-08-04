@@ -96,7 +96,7 @@ pub fn format_tool_result_message(func_name: &str, result: &str) -> String {
                 func_name, count
             )
         }
-        "read_file" | "read_file_lines" => {
+        "read_file" | "read_lines" => {
             let content = result_data
                 .get("content")
                 .and_then(|f| f.as_str())

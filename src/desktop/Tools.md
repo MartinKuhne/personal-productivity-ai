@@ -9,7 +9,7 @@ The following table summarizes all 26 tools available to the LLM agent, categori
 | **Core Workspace** | `list_files_by_tag` | List markdown files containing a specific tag (paginated; default page size 20; returns a JSON array; every response includes total). | None |
 | **Core Workspace** | `list_files` | List all markdown files in a directory (paginated; default page size 20; returns a JSON array; every response includes total). | None |
 | **Core Workspace** | `read_file` | Read the entire text contents of a file at the specified path. | None |
-| **Core Workspace** | `read_file_lines` | Read a contiguous slice of lines from a file (0-indexed; default `offset=0`, `limit=100`). | None |
+| **Core Workspace** | `read_lines` | Read a contiguous slice of lines from a file (0-indexed; default `offset=0`, `limit=100`). | None |
 | **Core Workspace** | `create_file` | Create a new file with specified content. | None |
 | **Core Workspace** | `insert_lines` | Insert lines at a specific 0-indexed offset. | None |
 | **Core Workspace** | `replace_text` | Replace exact occurrences of old_string with new_string in a file. | None |
@@ -126,7 +126,7 @@ All tool responses follow the same envelope:
   { "content": "# Title\n\nFull file content..." }
   ```
 
-##### `read_file_lines`
+##### `read_lines`
 * **Description:** Read a contiguous slice of lines from a file. `offset` is 0-indexed (`0` is the first line); `limit` is the maximum number of lines to return. Default parameters: `offset=0`, `limit=100`. An `offset` past the end of the file returns an empty `content`; a `limit` that would overflow is clamped to the remainder.
 * **Request:**
   ```json

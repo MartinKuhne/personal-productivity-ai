@@ -91,9 +91,9 @@ pub const FIELD_LIST_FILES_RESPONSE_FILES: &str =
 
 pub const READ_FILE_DESCRIPTION: &str = "Read the full text of a file at a path. Use `read_yaml_header` if you only need a document summary.";
 
-// --- read_file_lines ---
+// --- read_lines ---
 
-pub const READ_FILE_LINES_DESCRIPTION: &str = "Read a contiguous slice of lines from a file. `offset` is 0-indexed (`0` is the first line); `limit` is the maximum number of lines to return. An `offset` past the end of the file returns an empty `content`. A `limit` that would overflow the file's line count is clamped to the remainder. Default parameters: `offset=0`, `limit=100`. Pairs with `read_file` when you need the whole file.";
+pub const READ_LINES_DESCRIPTION: &str = "Read a contiguous slice of lines from a file. `offset` is 0-indexed (`0` is the first line); `limit` is the maximum number of lines to return. An `offset` past the end of the file returns an empty `content`. A `limit` that would overflow the file's line count is clamped to the remainder. Default parameters: `offset=0`, `limit=100`. Pairs with `read_file` when you need the whole file.";
 
 // --- create_file ---
 

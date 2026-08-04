@@ -140,11 +140,11 @@ pub fn tool_read_file(
 /// maximum number of lines to return. The slice is clamped to the
 /// file's line count, so a `limit` that overflows returns the
 /// remainder; an `offset` past the end returns an empty `content`.
-pub fn tool_read_file_lines(
+pub fn tool_read_lines(
     path_str: &str,
     offset: usize,
     limit: usize,
-) -> Result<crate::agent::tools::dtos::ReadFileLinesResponse, String> {
+) -> Result<crate::agent::tools::dtos::ReadLinesResponse, String> {
     match crate::utils::read_text_file(Path::new(path_str)) {
         Ok(content) => {
             let lines: Vec<&str> = content.lines().collect();
@@ -154,7 +154,7 @@ pub fn tool_read_file_lines(
                 let end = (offset + limit).min(lines.len());
                 &lines[offset..end]
             };
-            Ok(crate::agent::tools::dtos::ReadFileLinesResponse {
+            Ok(crate::agent::tools::dtos::ReadLinesResponse {
                 content: slice.join("\n"),
             })
         }

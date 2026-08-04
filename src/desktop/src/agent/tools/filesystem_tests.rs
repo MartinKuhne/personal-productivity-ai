@@ -112,38 +112,38 @@ fn test_tool_read_file_not_found() {
 }
 
 #[test]
-fn test_tool_read_file_lines() {
+fn test_tool_read_lines() {
     let dir = tempdir().unwrap();
     let file_path = dir.path().join("test.md");
     fs::write(&file_path, "Line 1\nLine 2\nLine 3\nLine 4").unwrap();
 
     // 0-indexed: skip "Line 1", return the next 2 lines.
-    let result = tool_read_file_lines(file_path.to_str().unwrap(), 1, 2)
+    let result = tool_read_lines(file_path.to_str().unwrap(), 1, 2)
         .unwrap()
         .content;
     assert_eq!(result, "Line 2\nLine 3");
 }
 
 #[test]
-fn test_tool_read_file_lines_offset_zero() {
+fn test_tool_read_lines_offset_zero() {
     // BOUNDARY: offset=0 is the first line (was an error pre-migration).
     let dir = tempdir().unwrap();
     let file_path = dir.path().join("test.md");
     fs::write(&file_path, "Line 1\nLine 2").unwrap();
 
-    let result = tool_read_file_lines(file_path.to_str().unwrap(), 0, 1)
+    let result = tool_read_lines(file_path.to_str().unwrap(), 0, 1)
         .unwrap()
         .content;
     assert_eq!(result, "Line 1");
 }
 
 #[test]
-fn test_tool_read_file_lines_empty_file() {
+fn test_tool_read_lines_empty_file() {
     let dir = tempdir().unwrap();
     let file_path = dir.path().join("empty.md");
     fs::write(&file_path, "").unwrap();
 
-    let result = tool_read_file_lines(file_path.to_str().unwrap(), 0, 50)
+    let result = tool_read_lines(file_path.to_str().unwrap(), 0, 50)
         .unwrap()
         .content;
     assert_eq!(result, "");
@@ -467,7 +467,7 @@ fn test_grep_default_max_results_constant_is_200() {
 }
 
 #[test]
-fn test_tool_read_file_lines_offset_past_end() {
+fn test_tool_read_lines_offset_past_end() {
     // BOUNDARY: offset past the end of the file returns empty content
     // (was an error in the 1-indexed variant; the offset/limit model is
     // forgiving so the LLM can walk forward without computing lengths).
@@ -475,34 +475,34 @@ fn test_tool_read_file_lines_offset_past_end() {
     let file_path = dir.path().join("test.md");
     fs::write(&file_path, "Line 1\nLine 2\nLine 3").unwrap();
 
-    let result = tool_read_file_lines(file_path.to_str().unwrap(), 999, 100)
+    let result = tool_read_lines(file_path.to_str().unwrap(), 999, 100)
         .unwrap()
         .content;
     assert_eq!(result, "");
 }
 
 #[test]
-fn test_tool_read_file_lines_limit_zero() {
+fn test_tool_read_lines_limit_zero() {
     // BOUNDARY: limit=0 returns empty content without erroring.
     let dir = tempdir().unwrap();
     let file_path = dir.path().join("test.md");
     fs::write(&file_path, "Line 1\nLine 2").unwrap();
 
-    let result = tool_read_file_lines(file_path.to_str().unwrap(), 0, 0)
+    let result = tool_read_lines(file_path.to_str().unwrap(), 0, 0)
         .unwrap()
         .content;
     assert_eq!(result, "");
 }
 
 #[test]
-fn test_tool_read_file_lines_limit_beyond_file() {
+fn test_tool_read_lines_limit_beyond_file() {
     // BOUNDARY: limit that would overflow the file is clamped to the
     // remainder. Mirrors the pre-migration "end beyond file" behavior.
     let dir = tempdir().unwrap();
     let file_path = dir.path().join("test.md");
     fs::write(&file_path, "Line 1\nLine 2\nLine 3").unwrap();
 
-    let content = tool_read_file_lines(file_path.to_str().unwrap(), 0, 100)
+    let content = tool_read_lines(file_path.to_str().unwrap(), 0, 100)
         .unwrap()
         .content;
     assert!(content.contains("Line 1"));

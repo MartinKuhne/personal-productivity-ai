@@ -88,7 +88,7 @@ pub struct ReadFileResponse {
 }
 
 #[derive(Deserialize, Debug, JsonSchema)]
-pub struct ReadFileLinesInput {
+pub struct ReadLinesInput {
     pub path: String,
     #[schemars(description = strings::FIELD_OFFSET_DESCRIPTION)]
     pub offset: Option<usize>,
@@ -96,7 +96,7 @@ pub struct ReadFileLinesInput {
     pub limit: Option<usize>,
 }
 #[derive(Serialize, Debug, JsonSchema)]
-pub struct ReadFileLinesResponse {
+pub struct ReadLinesResponse {
     pub content: String,
 }
 
