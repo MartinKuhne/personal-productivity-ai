@@ -1,30 +1,45 @@
-//! Root egui `App` struct — owns all application state and wires together background tasks, panels, agent, and dialogs.
+//! Root egui `App` struct — owns all application state and wires together
+//! background tasks, panels, agent, and dialogs.
+//!
+//! The lifecycle is split across three sibling files (one phase each):
+//!
+//! - `init`   — `FastMdApp::new`, `FastMdApp::empty_state`, and the
+//!   dark-theme pinning. Runs once at app start (or once per test).
+//! - `update` — `FastMdApp::update_ui` and the helpers it drives
+//!   (`process_file_events_and_repaint`, `handle_deferred_actions`,
+//!   `update_persisted_ui_state`). Runs every frame before paint.
+//! - `render` — `show_editor_overlay`, `show_modals`, `render_panels`.
+//!   Runs every frame to paint the editor window, dialogs, and the
+//!   five top-level panels in the order top → bottom → right → left
+//!   → center.
+//!
+//! This file holds the data definitions (`FastMdApp`, `TreeNode`, the
+//! persisted-UI-state key) plus the cross-cutting concerns that don't
+//! fit a single phase: the pass-through accessors used by every panel
+//! and modal, the `eframe::App` trait impl (`on_exit` / `save` / `ui`),
+//! the `generate_format_prompt` helper, and the test module.
+//!
+//! This is the same split the `tools/manager/` directory uses:
+//! `mod.rs` is a thin facade that re-exports the public types and
+//! declares the submodules; each submodule owns a single concern.
+
+mod init;
+mod render;
+mod update;
+
+use std::collections::{BTreeMap, HashSet};
+use std::path::PathBuf;
+
+use eframe::egui;
 
 use crate::agent::AgentSessionManager;
-use crate::app::background::BackgroundProcessManager;
-use crate::app::background_task::Task;
-use crate::app::orchestrator::AppOrchestrator;
-use crate::app::watcher::directory_tracker::DirectoryTracker;
 use crate::app::watcher::file_processor::FileEventProcessor;
 use crate::app::{
     DialogManager, PanelLayout, PersistedUiState, SelectionManager, TabManager, TagManager,
     TextBuffer,
 };
-use crate::bus::core::Bus;
-use crate::bus::events::config::ConfigArrived;
-use crate::bus::events::file::FileEventProducer;
 
-use crate::config::AppConfig;
-
-use crate::ui::panels::{
-    show_bottom_panel, show_center_panel, show_left_panel, show_right_panel, show_top_panel,
-};
-use eframe::egui;
-use std::collections::{BTreeMap, HashSet};
-use std::path::PathBuf;
-
-use std::sync::{Arc, Mutex};
-use std::time::Duration;
+const PERSISTED_UI_STATE_KEY: &str = "ppai_ui_state";
 
 #[derive(Clone)]
 pub struct TreeNode {
@@ -45,10 +60,8 @@ impl TreeNode {
     }
 }
 
-const PERSISTED_UI_STATE_KEY: &str = "ppai_ui_state";
-
 pub struct FastMdApp {
-    pub orchestrator: AppOrchestrator,
+    pub orchestrator: crate::app::orchestrator::AppOrchestrator,
     pub layout: PanelLayout,
     /// Cached flattened tree rows to avoid rebuilding the file tree every frame.
     /// Invalidated when selection.tree_dirty is true.
@@ -156,260 +169,6 @@ impl FastMdApp {
     pub fn inline_editor_enabled(&self) -> bool {
         self.orchestrator.inline_editor_enabled
     }
-
-    /// Purpose: Pin the egui context to the dark theme with the FastMD brand
-    /// palette (RGB(9, 9, 11) surfaces, indigo selection, 8px window corners,
-    /// 4px widget corners, bright off-white text).
-    /// Inputs: `ctx` - The egui context whose theme is to be configured.
-    /// Outputs: None.
-    /// Purity: Impure (mutates the egui context's options).
-    /// Preconditions: `ctx` is a valid egui context.
-    /// Postconditions: The dark theme is the active theme, and the dark
-    /// theme's visuals match the FastMD palette so UI-002 (dark color
-    /// scheme) holds even if the system preference reports light mode.
-    ///
-    /// egui 0.35 split the global style into a Dark and a Light theme,
-    /// picked at runtime by `ThemePreference` (default `System`).
-    /// `set_visuals` writes to the *currently active* theme only, so on
-    /// systems that report a light-mode preference the next frame can
-    /// flip the active theme back to the default light visuals and the
-    /// carefully tuned dark background is lost. Forcing the dark theme
-    /// and applying the visuals to the dark theme explicitly makes the
-    /// dark color scheme the source of truth.
-    pub fn configure_dark_theme(ctx: &egui::Context) {
-        ctx.set_theme(egui::Theme::Dark);
-
-        let mut visuals = egui::Visuals::dark();
-        visuals.window_fill = egui::Color32::from_rgb(9, 9, 11);
-        visuals.panel_fill = egui::Color32::from_rgb(9, 9, 11);
-        visuals.selection.bg_fill = egui::Color32::from_rgb(99, 102, 241);
-        visuals.window_corner_radius = 8.0.into();
-        visuals.widgets.noninteractive.corner_radius = 4.0.into();
-        visuals.widgets.inactive.corner_radius = 4.0.into();
-        visuals.widgets.hovered.corner_radius = 4.0.into();
-        visuals.widgets.active.corner_radius = 4.0.into();
-
-        let bright_text = egui::Color32::from_gray(210);
-        visuals.widgets.noninteractive.fg_stroke.color = bright_text;
-        visuals.widgets.inactive.fg_stroke.color = bright_text;
-        visuals.widgets.active.fg_stroke.color = egui::Color32::WHITE;
-        visuals.widgets.hovered.fg_stroke.color = egui::Color32::WHITE;
-
-        // Apply to the dark theme explicitly so the visuals persist
-        // even if the active theme ever flips to Light.
-        ctx.set_visuals_of(egui::Theme::Dark, visuals);
-    }
-
-    pub fn new(cc: &eframe::CreationContext<'_>, config_bus: Bus<ConfigArrived>) -> Self {
-        // egui 0.35 split the global style into a Dark and a Light
-        // theme, picked at runtime by `ThemePreference` (default
-        // `System`). `set_visuals` writes to the *currently active*
-        // theme only, so on systems that report a light-mode
-        // preference the next frame can flip the active theme back
-        // to the default light visuals and the carefully tuned
-        // dark background is lost. Force the dark theme and apply
-        // our custom visuals to the dark theme explicitly.
-        Self::configure_dark_theme(&cc.egui_ctx);
-
-        // Subscribe before any worker is spawned so the first
-        // `ConfigArrived` publish reaches every reader.
-        let config_reader = config_bus.subscribe();
-
-        // `Task::new` and `AgentSessionManager::new` each subscribe
-        // to the same bus, then defer their own work until the
-        // event arrives. The background `Task` spawns a thread that
-        // waits on its own reader; the agent's reader is drained on
-        // the UI thread in `update_ui`.
-        let background_task = Task::new(config_bus.clone());
-        // The tools manager subscribes to the same bus and performs
-        // the one-time MCP startup ping / tool discovery on its own
-        // background thread, so the UI thread never blocks on MCP
-        // network I/O at startup.
-        crate::agent::tools::manager::spawn_config_subscription(
-            config_bus.clone(),
-            background_task.tx.clone(),
-        );
-        // The file-watcher thread writes the `RecommendedWatcher`
-        // handle into this slot before sending `FsEvent::Finished`;
-        // the UI takes ownership from `task_take_finished_watcher`
-        // in `handle_fs_event`.
-        let finished_watcher_slot = background_task.finished_watcher.clone();
-        let file_processor = FileEventProcessor::new(background_task.file_event_bus.subscribe());
-        let background_manager = Arc::new(Mutex::new(BackgroundProcessManager::new()));
-        // One BrowserSession for the whole app lifetime; shared
-        // with the agent and (read-only) with the Tools dialog
-        // so the UI can call `tick()` / `forget()`. Lazily
-        // launches a Firefox process on first browser tool call.
-        let browser_session = std::sync::Arc::new(crate::app::browser::BrowserSession::new(
-            &crate::config::AppConfig::default(),
-        ));
-        let pdf_backing_tracker = crate::app::watcher::PdfBackingTracker::new();
-        let agent = AgentSessionManager::new(
-            config_bus,
-            browser_session.clone(),
-            Arc::new(pdf_backing_tracker.clone()),
-        );
-
-        let event_bus = background_task.file_event_bus;
-        let dir_tracker = DirectoryTracker::new(event_bus.subscribe());
-
-        let persisted_ui_state: PersistedUiState = cc
-            .storage
-            .and_then(|s| s.get_string(PERSISTED_UI_STATE_KEY))
-            .map(|json| {
-                serde_json::from_str(&json).unwrap_or_else(|e| {
-                    tracing::warn!(error = %e, "Failed to parse persisted UI state, using defaults");
-                    PersistedUiState::default()
-                })
-            })
-            .unwrap_or_default();
-
-        let mut layout = PanelLayout::new();
-        if let Some(w) = persisted_ui_state.left_panel_width {
-            layout.left_panel_width = Some(w);
-        }
-        if let Some(w) = persisted_ui_state.right_panel_width {
-            layout.right_panel_width = Some(w);
-        }
-
-        let mut selection = SelectionManager::new();
-        for dir in &persisted_ui_state.expanded_dirs {
-            selection.expanded_dirs.insert(dir.clone());
-        }
-
-        let dialogs = DialogManager::new();
-        // `batch_dialog_config.available_dirs` is populated from
-        // the published config in `drain_config_bus` on the first
-        // frame.
-
-        Self {
-            orchestrator: AppOrchestrator {
-                content_libraries: Vec::new(),
-                rx: background_task.rx,
-                tx: background_task.tx,
-                file_event_reader: Some(event_bus.subscribe()),
-                file_event_bus: event_bus,
-                file_processor,
-                pdf_backing_tracker,
-                directory_tracker: dir_tracker,
-                tag_manager: TagManager::new(),
-                selection,
-                tab_manager: TabManager::new(),
-                _watcher: None,
-                agent,
-                dialogs,
-                submit_prompt: None,
-                text_buffer: TextBuffer::new(),
-                inline_editor_enabled: false,
-                background_manager,
-                config: AppConfig::default(),
-                config_reader: Some(config_reader),
-                pending_file_load: None,
-                repaint_interval: Duration::from_millis(16),
-                finished_watcher_slot,
-            },
-            layout,
-            cached_tree_rows: None,
-            persisted_ui_state,
-            persisted_window_applied: false,
-            persisted_font_applied: false,
-        }
-    }
-
-    /// Purpose: Build a `FastMdApp` with all UI state cleared and no background channels.
-    /// Inputs: None.
-    /// Outputs: `FastMdApp` with every collection empty and every optional set to `None`.
-    /// Purity: Constructs a new value; no side effects.
-    /// Preconditions: None.
-    /// Postconditions: Caller still owns a usable `Sender<BackgroundEvent>` paired with `rx`.
-    pub fn empty_state(config: crate::config::AppConfig) -> Self {
-        // Publish the supplied config into a private bus and let
-        // `empty_state_via_bus` build the struct through the same
-        // bus-driven init path. This keeps a single code path for
-        // tests that don't need a real `CreationContext`.
-        let bus = crate::bus::config::config_bus();
-        bus.publish(ConfigArrived::new(config.clone()));
-        Self::empty_state_via_bus(bus, config)
-    }
-
-    /// Build an `empty_state` `FastMdApp` by publishing `config` into
-    /// a private bus and draining it synchronously. This is the test
-    /// counterpart of [`Self::new`]: no `CreationContext` is needed
-    /// because we don't apply egui visuals.
-    fn empty_state_via_bus(bus: Bus<ConfigArrived>, config: crate::config::AppConfig) -> Self {
-        let (tx, rx) = std::sync::mpsc::channel();
-        let background_task = Task::new(bus.clone());
-        // The `empty_state` test path creates the background `Task`
-        // (so it subscribes to the config bus) but uses its own
-        // fresh `tx`/`rx` channel for the UI side. As a result the
-        // file-watcher thread never has a chance to deposit a
-        // `RecommendedWatcher` into the slot the UI knows about, so
-        // we point the slot at a fresh empty one.
-        let finished_watcher_slot = background_task.finished_watcher.clone();
-        let file_processor = FileEventProcessor::new(background_task.file_event_bus.subscribe());
-        let background_manager = Arc::new(Mutex::new(BackgroundProcessManager::new()));
-        let test_browser_session = std::sync::Arc::new(crate::app::browser::BrowserSession::new(
-            &crate::config::AppConfig::default(),
-        ));
-        let pdf_backing_tracker = crate::app::watcher::PdfBackingTracker::new();
-        let mut agent = AgentSessionManager::new(
-            bus.clone(),
-            test_browser_session,
-            Arc::new(pdf_backing_tracker.clone()),
-        );
-        agent.set_config(config.clone());
-
-        let event_bus = background_task.file_event_bus;
-        let dir_tracker = DirectoryTracker::new(event_bus.subscribe());
-
-        let selection = SelectionManager::new();
-        let mut dialogs = DialogManager::new();
-        let batch_dialog_config = crate::app::batch::types::BatchDialogConfig {
-            available_dirs: config
-                .content_libraries
-                .iter()
-                .map(|lib| PathBuf::from(&lib.root_folder))
-                .collect(),
-            ..Default::default()
-        };
-        dialogs.batch_dialog_config = batch_dialog_config;
-
-        let content_libraries = config.content_libraries.clone();
-        let inline_editor_enabled = config.inline_editor_enabled;
-
-        Self {
-            orchestrator: AppOrchestrator {
-                content_libraries,
-                rx,
-                tx,
-                file_event_bus: event_bus.clone(),
-                file_event_reader: Some(event_bus.subscribe()),
-                file_processor,
-                pdf_backing_tracker,
-                tag_manager: TagManager::new(),
-                selection,
-                tab_manager: TabManager::new(),
-                _watcher: None,
-                agent,
-                dialogs,
-                submit_prompt: None,
-                text_buffer: TextBuffer::new(),
-                inline_editor_enabled,
-                background_manager,
-                directory_tracker: dir_tracker,
-                config,
-                config_reader: None,
-                pending_file_load: None,
-                repaint_interval: Duration::from_millis(16),
-                finished_watcher_slot,
-            },
-            layout: PanelLayout::new(),
-            cached_tree_rows: None,
-            persisted_ui_state: PersistedUiState::default(),
-            persisted_window_applied: false,
-            persisted_font_applied: false,
-        }
-    }
 }
 
 /// Purpose: Generates the markdown formatting prompt with a dynamic date.
@@ -463,282 +222,10 @@ impl eframe::App for FastMdApp {
     }
 }
 
-impl FastMdApp {
-    /// Purpose: Drive one frame of the app.
-    /// Inputs: `ui` - The root [`egui::Ui`] supplied by eframe.
-    /// Outputs: None.
-    /// Purity: Impure (mutates `self`, paints to `ui`).
-    /// Preconditions: None.
-    /// Postconditions: The root view has been rendered for this frame.
-    ///
-    /// egui 0.35 changed `App::update` to `App::ui`, and the
-    /// `eframe::App` entry point now hands us a `&mut egui::Ui`
-    /// rather than a `&Context`. We use the inner `Ui` to draw
-    /// all panels, and pluck out the [`egui::Context`] for the
-    /// non-rendering bookkeeping (file-event drain, repaint
-    /// scheduling, etc).
-    pub fn update_ui(&mut self, ui: &mut egui::Ui) {
-        #[cfg(feature = "profiling")]
-        puffin::GlobalProfiler::lock().new_frame();
-
-        #[cfg(feature = "profiling")]
-        puffin::profile_function!();
-
-        let ctx = ui.ctx();
-
-        // Apply persisted window size/position on first frame
-        if !self.persisted_window_applied {
-            if let (Some(w), Some(h)) = (
-                self.persisted_ui_state.window_width,
-                self.persisted_ui_state.window_height,
-            ) {
-                ctx.send_viewport_cmd(egui::ViewportCommand::InnerSize(egui::vec2(w, h)));
-            }
-            if let (Some(x), Some(y)) = (
-                self.persisted_ui_state.window_x,
-                self.persisted_ui_state.window_y,
-            ) {
-                ctx.send_viewport_cmd(egui::ViewportCommand::OuterPosition(egui::pos2(x, y)));
-            }
-            self.persisted_window_applied = true;
-        }
-
-        // Apply persisted font size scale on first frame
-        if !self.persisted_font_applied {
-            if let Some(scale) = self.persisted_ui_state.font_size_scale {
-                ctx.set_pixels_per_point(ctx.pixels_per_point() * scale);
-            }
-            self.persisted_font_applied = true;
-        }
-
-        self.orchestrator.drain_config_bus();
-        self.process_file_events_and_repaint(ctx);
-        self.orchestrator.drain_background_channel();
-        self.orchestrator.handle_file_selection();
-        self.show_editor_overlay(ui);
-        self.show_modals(ui);
-        self.render_panels(ui);
-        self.handle_deferred_actions();
-
-        // Update persisted UI state with current values for saving on exit
-        self.update_persisted_ui_state(ui.ctx());
-
-        #[cfg(feature = "profiling")]
-        {
-            egui::Window::new("Profiler")
-                .vscroll(true)
-                .resizable(true)
-                .default_size([400.0, 300.0])
-                .show(ui.ctx(), |ui| {
-                    puffin_egui::profiler_ui(ui);
-                });
-        }
-    }
-
-    fn show_editor_overlay(&mut self, ui: &mut egui::Ui) {
-        let producer = FileEventProducer::new(&self.orchestrator.file_event_bus);
-        // The editor opens its own top-level `egui::Window` from
-        // the context pulled out of `ui`. After it returns we
-        // check whether the buffer was closed (either by a
-        // successful save or a manual cancel) and clear the
-        // loaded path so the centre panel reloads the file on
-        // the next frame.
-        let was_open = self.orchestrator.text_buffer.is_open;
-        let _ = crate::ui::editor_egui::show_text_editor(
-            ui,
-            &mut self.orchestrator.text_buffer,
-            &producer,
-        );
-        if was_open && !self.orchestrator.text_buffer.is_open {
-            self.orchestrator.tab_manager.loaded_path = None;
-        }
-    }
-
-    fn show_modals(&mut self, parent_ui: &mut egui::Ui) {
-        // egui 0.35: modal dialogs are still rendered through
-        // `egui::Window`, which can take the context directly. We
-        // pull the `Context` off the root `Ui` so the existing
-        // `show_*_modal` helpers (which take `&Context`) keep working.
-        let ctx = parent_ui.ctx();
-        if self.orchestrator.dialogs.move_dialog_open {
-            crate::ui::modals::show_move_modal_dialog(
-                &mut self.orchestrator.dialogs,
-                &self.orchestrator.content_libraries,
-                &self.orchestrator.file_processor,
-                &self.orchestrator.file_event_bus,
-                ctx,
-            );
-        }
-        if self.orchestrator.dialogs.create_dir_dialog_open {
-            crate::ui::modals::show_create_dir_dialog(
-                &mut self.orchestrator.dialogs,
-                &mut self.orchestrator.file_processor,
-                &mut self.orchestrator._watcher,
-                &self.orchestrator.file_event_bus,
-                ctx,
-            );
-        }
-        if self.orchestrator.dialogs.rename_dialog_open {
-            let selection = &mut self.orchestrator.selection;
-            crate::ui::modals::show_rename_dialog(crate::ui::modals::RenameDialogCtx {
-                dialog_manager: &mut self.orchestrator.dialogs,
-                file_event_bus: &self.orchestrator.file_event_bus,
-                loaded_path: &mut self.orchestrator.tab_manager.loaded_path,
-                selected_file: &mut selection.selected_file,
-                selected_dir: &mut selection.selected_dir,
-                tabs: &mut self.orchestrator.tab_manager.tabs,
-                file_processor: &mut self.orchestrator.file_processor,
-                tag_manager: &mut self.orchestrator.tag_manager,
-                expanded_dirs: &mut selection.expanded_dirs,
-                ctx,
-            });
-        }
-        if self.orchestrator.dialogs.create_document_dialog_open {
-            crate::ui::modals::show_create_document_dialog(
-                &mut self.orchestrator.dialogs,
-                &self.orchestrator.file_event_bus,
-                ctx,
-            );
-        }
-
-        crate::ui::background_logs::show_background_logs_window(self, ctx);
-
-        if self.orchestrator.dialogs.tools_dialog_open {
-            crate::ui::tools_dialog::show_tools_dialog(ctx, self);
-        }
-
-        if self.orchestrator.dialogs.batch_dialog_open {
-            let mut dialog_config = self.orchestrator.dialogs.batch_dialog_config.clone();
-
-            let prev_selected = dialog_config
-                .selected_dir_idx
-                .and_then(|i| dialog_config.available_dirs.get(i).cloned());
-            dialog_config.available_dirs = self.orchestrator.directory_tracker.dirs_sorted();
-            dialog_config.selected_dir_idx = prev_selected
-                .as_ref()
-                .and_then(|p| dialog_config.available_dirs.iter().position(|d| d == p));
-
-            if let Some(result) =
-                crate::ui::batch_dialog::show_batch_modal(self, ctx, &mut dialog_config)
-            {
-                match result {
-                    crate::app::batch::types::BatchDialogResult::Process(config) => {
-                        if self.orchestrator.dialogs.batch_handle.is_none() {
-                            let prompt_text = dialog_config
-                                .available_prompts
-                                .get(dialog_config.selected_prompt_idx.unwrap_or(0))
-                                .map(|p| p.content.clone())
-                                .unwrap_or_default();
-
-                            let (coordinator, cancel_flag) =
-                                crate::app::batch::coordinator::BatchCoordinator::new(
-                                    config,
-                                    self.orchestrator.config.clone(),
-                                    self.orchestrator.tx.clone(),
-                                    self.orchestrator.file_event_bus.clone(),
-                                    prompt_text,
-                                );
-                            let handle = coordinator.execute();
-                            self.orchestrator.dialogs.batch_handle = Some(handle);
-                            self.orchestrator.dialogs.batch_cancel_flag = Some(cancel_flag);
-                        }
-                    }
-                    crate::app::batch::types::BatchDialogResult::Cancel => {
-                        self.orchestrator.dialogs.batch_dialog_open = false;
-                        dialog_config.available_prompts.clear();
-                        dialog_config.selected_prompt_idx = None;
-                    }
-                }
-            }
-            self.orchestrator.dialogs.batch_dialog_config = dialog_config;
-        }
-    }
-
-    fn render_panels(&mut self, parent_ui: &mut egui::Ui) {
-        // egui 0.35: each `*Panel` allocates itself from a parent
-        // `&mut Ui`; pass the root `Ui` from `App::ui` straight
-        // through. The order is preserved from 0.27: top → bottom →
-        // right → left → center. Panels must be allocated directly from
-        // the parent_ui container, not nested within child_ui scopes.
-        #[cfg(feature = "profiling")]
-        puffin::profile_scope!("panel_top");
-        show_top_panel(self, parent_ui);
-        #[cfg(feature = "profiling")]
-        puffin::profile_scope!("panel_bottom");
-        show_bottom_panel(self, parent_ui);
-        #[cfg(feature = "profiling")]
-        puffin::profile_scope!("panel_right");
-        show_right_panel(self, parent_ui);
-        #[cfg(feature = "profiling")]
-        puffin::profile_scope!("panel_left");
-        show_left_panel(self, parent_ui);
-        #[cfg(feature = "profiling")]
-        puffin::profile_scope!("panel_center");
-        show_center_panel(self, parent_ui);
-    }
-
-    fn process_file_events_and_repaint(&mut self, ctx: &egui::Context) {
-        if self.orchestrator.process_file_events()
-            || !self.orchestrator.file_processor.indexing_finished
-            || !ctx.input(|i| i.raw.events.is_empty())
-        {
-            ctx.request_repaint();
-        } else {
-            ctx.request_repaint_after(self.orchestrator.repaint_interval);
-        }
-    }
-
-    fn handle_deferred_actions(&mut self) {
-        if let Some(prompt) = self.orchestrator.submit_prompt.take() {
-            self.orchestrator.start_agent_session(prompt);
-        }
-
-        if let Some(handle) = self.orchestrator.dialogs.batch_handle.take() {
-            if handle.thread.is_finished() {
-                let result = handle.join();
-                self.orchestrator.dialogs.batch_cancel_flag = None;
-                tracing::info!("Batch completed: {:?}", result);
-            } else {
-                self.orchestrator.dialogs.batch_handle = Some(handle);
-            }
-        }
-    }
-
-    /// Update persisted UI state with current window size, position, font scale, and panel widths.
-    fn update_persisted_ui_state(&mut self, ctx: &egui::Context) {
-        // Update panel widths from layout
-        self.persisted_ui_state.left_panel_width = self.layout.left_panel_width;
-        self.persisted_ui_state.right_panel_width = self.layout.right_panel_width;
-
-        // Update window size and position from viewport
-        ctx.input(|i| {
-            let viewport = i.viewport();
-            // Use inner_rect for window size
-            if let Some(inner_rect) = viewport.inner_rect {
-                self.persisted_ui_state.window_width = Some(inner_rect.width());
-                self.persisted_ui_state.window_height = Some(inner_rect.height());
-            }
-            // Use outer_rect for window position
-            if let Some(outer_rect) = viewport.outer_rect {
-                self.persisted_ui_state.window_x = Some(outer_rect.min.x);
-                self.persisted_ui_state.window_y = Some(outer_rect.min.y);
-            }
-        });
-
-        // Update font size scale (relative to default)
-        let current_ppp = ctx.pixels_per_point();
-        let default_ppp = 1.0; // Default pixels per point
-        if (current_ppp - default_ppp).abs() > f32::EPSILON {
-            self.persisted_ui_state.font_size_scale = Some(current_ppp / default_ppp);
-        } else {
-            self.persisted_ui_state.font_size_scale = None;
-        }
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::app::orchestrator::AppOrchestrator;
     use crate::bus::events::file::FileEvent;
     use crate::bus::events::messages::TokenUsageInfo;
     use crate::bus::events::typed::AgentEvent;
