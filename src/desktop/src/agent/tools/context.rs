@@ -78,7 +78,10 @@ pub struct ToolContext<'a> {
     /// Long-lived headless Firefox session, shared across every
     /// mutating browser tool call. `None` only in early-startup
     /// tests that don't care about the browser. Tools that
-    /// don't use the browser ignore this field.
+    /// don't use the browser ignore this field. When the
+    /// `browser` Cargo feature is off the session is a stub;
+    /// the `browser_*` tools are not registered and the field
+    /// stays unused.
     pub browser_session: Arc<BrowserSession>,
     /// PDF-backing tracker for checking if a file has a `.pdf` sibling.
     pub pdf_backing: std::sync::Arc<crate::app::session::PdfBackingTracker>,

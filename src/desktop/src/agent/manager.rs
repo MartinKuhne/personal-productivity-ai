@@ -66,6 +66,10 @@ pub struct AgentSessionManager {
     /// tool executor. Lazily launches a browser on first use.
     /// Owned by the application, not the agent — sessions
     /// survive across agent turns so cookies persist (BRWS-001).
+    /// When the `browser` Cargo feature is off the session is
+    /// a stub that returns [`crate::app::session::SessionError::Disabled`]
+    /// on every page-handle request; the `browser_*` tools are
+    /// not registered.
     browser_session: Arc<BrowserSession>,
     /// Shared PDF-backing tracker, handed to the tool executor.
     pdf_backing: Arc<crate::app::session::PdfBackingTracker>,

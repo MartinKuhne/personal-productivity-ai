@@ -15,6 +15,9 @@ use std::sync::mpsc::Sender;
 pub struct ToolExecutor {
     config: AppConfig,
     file_event_bus: Bus<FileEvent>,
+    /// When the `browser` Cargo feature is off the session is a
+    /// stub that returns
+    /// [`crate::app::session::SessionError::Disabled`].
     browser_session: Arc<BrowserSession>,
     pdf_backing: std::sync::Arc<crate::app::session::PdfBackingTracker>,
 }

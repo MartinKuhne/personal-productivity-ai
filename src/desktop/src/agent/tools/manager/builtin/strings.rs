@@ -1,4 +1,4 @@
-//! User-visible description strings for every built-in tool — the single source of truth for the LLM-facing tool description and per-field schema description.
+﻿//! User-visible description strings for every built-in tool â€” the single source of truth for the LLM-facing tool description and per-field schema description.
 //!
 //! Every const lives at the top level of this module. The `Tool::description()` impls in the
 //! sibling `builtin/*.rs` files and the `#[schemars(description = ...)]` attributes on the
@@ -12,7 +12,7 @@
 //! references, so no submodule is needed and adding a new tool no longer requires
 //! creating a new file.
 
-// --- paging (offset/limit) — canonical across list-paginated tools ---
+// --- paging (offset/limit) â€” canonical across list-paginated tools ---
 
 /// `offset` parameter description. Used on every list-paginated tool's `offset` field.
 pub const FIELD_OFFSET_DESCRIPTION: &str =
@@ -29,7 +29,7 @@ pub const FIELD_TOTAL_DESCRIPTION: &str = "The total number of items across all 
 pub const FIELD_HINT_DESCRIPTION: &str =
     "Displays a message when the offset exceeds total results or when no matches exist.";
 
-// --- cursor — canonical for cursor-paginated tools ---
+// --- cursor â€” canonical for cursor-paginated tools ---
 
 /// `cursor` field description. Used on both the input and output `cursor` fields of
 /// `search_email` and `web_fetch` because the LLM passes back whatever the tool returned.
@@ -98,7 +98,7 @@ pub const READ_FILE_LINES_DESCRIPTION: &str =
 
 // --- create_file ---
 
-pub const CREATE_FILE_DESCRIPTION: &str = "Create a new file at the specified path with provided content. Fails if the file already exists — this tool can only create new files.";
+pub const CREATE_FILE_DESCRIPTION: &str = "Create a new file at the specified path with provided content. Fails if the file already exists â€” this tool can only create new files.";
 
 // --- insert_lines ---
 
@@ -245,84 +245,110 @@ pub const DELETE_CARD_DESCRIPTION: &str = "Delete a Trello card by its ID.";
 
 // --- browser_navigate ---
 
+#[cfg(feature = "browser")]
 pub const BROWSER_NAVIGATE_DESCRIPTION: &str = "Navigate the headless browser to a URL. The system preserves page state across calls for multi-step flows. The response returns the final URL and page title.";
 
 // --- browser_get_page_state ---
 
+#[cfg(feature = "browser")]
 pub const BROWSER_GET_PAGE_STATE_DESCRIPTION: &str = "Get interactable elements (a, button, input, select, textarea), current URL, and page title. Each element includes a stable agent_id for action tools.";
 
 // --- browser_click ---
 
+#[cfg(feature = "browser")]
 pub const BROWSER_CLICK_DESCRIPTION: &str = "Click an element on the page using a CSS selector. Subsequent page state calls reflect the updated DOM.";
 
 // --- browser_fill_input ---
 
+#[cfg(feature = "browser")]
 pub const BROWSER_FILL_INPUT_DESCRIPTION: &str = "Fill an input or textarea element with text. This action replaces any existing value. Press Enter using browser_press_key to submit forms.";
 
 // --- browser_select_dropdown ---
 
+#[cfg(feature = "browser")]
 pub const BROWSER_SELECT_DROPDOWN_DESCRIPTION: &str =
     "Select an option in a dropdown element using its value attribute.";
 
 // --- browser_press_key ---
 
+#[cfg(feature = "browser")]
 pub const BROWSER_PRESS_KEY_DESCRIPTION: &str =
     "Press a keyboard key on the page (such as Enter, Tab, Escape, or ArrowDown).";
 
 // --- browser_evaluate_js ---
 
+#[cfg(feature = "browser")]
 pub const BROWSER_EVALUATE_JS_DESCRIPTION: &str = "Evaluate a JavaScript expression in the page context. The tool serializes the return value to JSON.";
 
 // --- browser_screenshot ---
 
+#[cfg(feature = "browser")]
 pub const BROWSER_SCREENSHOT_DESCRIPTION: &str = "Save a PNG screenshot of the page to the configured directory. The tool restricts filenames to valid alphanumeric characters (up to 128 characters).";
 
 // --- Field descriptions ---
 
+#[cfg(feature = "browser")]
 pub const FIELD_BROWSER_NAVIGATE_INPUT_URL: &str =
     "Specify the absolute URL to navigate to (such as `https://example.com/login`).";
 
+#[cfg(feature = "browser")]
 pub const FIELD_BROWSER_NAVIGATE_RESPONSE_URL: &str =
     "The final URL after navigation. This URL changes if the server redirects the request.";
 
+#[cfg(feature = "browser")]
 pub const FIELD_BROWSER_NAVIGATE_RESPONSE_TITLE: &str =
     "The page `<title>` after navigation. Returns an empty string if the page has no title.";
 
+#[cfg(feature = "browser")]
 pub const FIELD_BROWSER_GET_PAGE_STATE_RESPONSE_URL: &str = "The current page URL.";
 
+#[cfg(feature = "browser")]
 pub const FIELD_BROWSER_GET_PAGE_STATE_RESPONSE_TITLE: &str =
     "The current page `<title>`. Returns an empty string if the page has no title.";
 
+#[cfg(feature = "browser")]
 pub const FIELD_BROWSER_GET_PAGE_STATE_RESPONSE_ELEMENTS: &str = "JSON array of interactable elements. Each entry contains `agent_id`, `tag`, `text`, `placeholder`, `name`, and `type`. Use `agent_id` to target specific elements.";
 
+#[cfg(feature = "browser")]
 pub const FIELD_BROWSER_GET_PAGE_STATE_RESPONSE_TOTAL: &str =
     "Total number of interactable elements on the page.";
 
+#[cfg(feature = "browser")]
 pub const FIELD_BROWSER_CLICK_INPUT_SELECTOR: &str = "Specify the CSS selector for the element to click. Use `agent_id` to build a `:nth-of-type(...)` selector if needed.";
 
+#[cfg(feature = "browser")]
 pub const FIELD_BROWSER_FILL_INPUT_INPUT_SELECTOR: &str =
     "Specify the CSS selector for the input or textarea to fill.";
 
+#[cfg(feature = "browser")]
 pub const FIELD_BROWSER_FILL_INPUT_INPUT_TEXT: &str =
     "Provide the text to insert. Replaces any existing text.";
 
+#[cfg(feature = "browser")]
 pub const FIELD_BROWSER_SELECT_DROPDOWN_INPUT_SELECTOR: &str =
     "Specify the CSS selector for the `<select>` element.";
 
+#[cfg(feature = "browser")]
 pub const FIELD_BROWSER_SELECT_DROPDOWN_INPUT_VALUE: &str =
     "Specify the `value` attribute of the `<option>` to select.";
 
+#[cfg(feature = "browser")]
 pub const FIELD_BROWSER_PRESS_KEY_INPUT_KEY: &str =
     "Specify the key to press (such as `Enter`, `Tab`, `Escape`, or `ArrowDown`).";
 
+#[cfg(feature = "browser")]
 pub const FIELD_BROWSER_EVALUATE_JS_INPUT_SCRIPT: &str = "Provide a JavaScript expression to evaluate in the page context. The tool serializes the return value to JSON.";
 
+#[cfg(feature = "browser")]
 pub const FIELD_BROWSER_SCREENSHOT_INPUT_FILENAME: &str = "Specify the filename for the PNG. Must match `[A-Za-z0-9._-]{1,128}` without path separators or leading dots.";
 
+#[cfg(feature = "browser")]
 pub const FIELD_BROWSER_SCREENSHOT_INPUT_FULL_PAGE: &str = "Set to `true` to capture the entire scrollable page, or `false` to capture only the current viewport. Default: `false`.";
 
+#[cfg(feature = "browser")]
 pub const FIELD_BROWSER_SCREENSHOT_RESPONSE_PATH: &str =
     "Absolute path of the saved PNG screenshot file.";
 
+#[cfg(feature = "browser")]
 pub const FIELD_BROWSER_SCREENSHOT_RESPONSE_BYTES: &str =
     "Size of the saved PNG screenshot file in bytes.";

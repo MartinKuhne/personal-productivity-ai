@@ -16,6 +16,18 @@
 //! from the storage file, so persistent login survives idle
 //! timeouts.
 //!
+//! ## Always-compiled, conditional internals
+//!
+//! The session and its types ([`BrowserSession`], [`PageHandle`],
+//! [`SessionError`]) are always compiled so the `agent` and `ui`
+//! modules can hold an `Arc<BrowserSession>` without sprinkling
+//! `#[cfg(feature = "browser")]` across every consumer. The
+//! Playwright-backed internals are gated: when the `browser`
+//! feature is off, the session is a stub and every operation that
+//! requires a live browser returns
+//! [`SessionError::Disabled`]. The `playwright-rs` dependency is
+//! only pulled in when the `browser` feature is enabled.
+//!
 //! **Home:** this type lives in `crate::app::session` so that
 //! the LLM agent and the application orchestrator can share it
 //! without either having to reach into the Playwright wrapper
@@ -24,34 +36,17 @@
 //! re-export this module for backwards compatibility.
 
 use crate::config::{AppConfig, ResolvedBrowserConfig};
+use std::path::PathBuf;
+use std::sync::Mutex;
+#[cfg(feature = "browser")]
+use std::time::{Duration, Instant};
+
+#[cfg(feature = "browser")]
 use playwright_rs::LaunchOptions;
+#[cfg(feature = "browser")]
 use playwright_rs::protocol::{
     Browser, BrowserContext, BrowserContextOptions, Page, Playwright, StorageState,
 };
-use std::path::PathBuf;
-use std::sync::Mutex;
-use std::time::{Duration, Instant};
-
-/// Convenience alias for the long-lived browser triple. Returned
-/// by [`BrowserSession::page`] and passed to every `Tool::execute`
-/// that needs to drive the browser.
-pub struct PageHandle {
-    /// Persistent page. Same instance across calls in a single
-    /// session; new instance after an idle-timeout close.
-    pub page: Page,
-    /// The owning context, kept so storage can be saved without
-    /// keeping a separate handle.
-    pub context: BrowserContext,
-    /// The owning browser, kept so the session can be closed
-    /// without losing the context first.
-    pub browser: Browser,
-}
-
-impl std::fmt::Debug for PageHandle {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("PageHandle").finish_non_exhaustive()
-    }
-}
 
 /// Errors that can surface from the session. We keep a small
 /// enum instead of leaking `playwright_rs::Error` everywhere so
@@ -60,7 +55,9 @@ impl std::fmt::Debug for PageHandle {
 #[derive(Debug)]
 pub enum SessionError {
     /// User has the Browser tool group disabled. Tools that need
-    /// the session should check this first.
+    /// the session should check this first. Returned by the
+    /// stub implementations of the session methods when the
+    /// `browser` Cargo feature is off.
     Disabled,
     /// `BrowserConfig.browser_type` is not one of the supported
     /// channels (currently only `"firefox"`).
@@ -95,22 +92,41 @@ impl std::fmt::Display for SessionError {
 
 impl std::error::Error for SessionError {}
 
-/// Inner state guarded by the session mutex. The mutex is held
-/// for short critical sections only (state construction /
-/// inspection); long Playwright work runs outside the lock.
+/// Convenience alias for the long-lived browser triple. Returned
+/// by [`BrowserSession::page`] and passed to every `Tool::execute`
+/// that needs to drive the browser.
+///
+/// When the `browser` Cargo feature is off the struct is a
+/// zero-sized type; consumers that read the `page` / `context` /
+/// `browser` fields must be gated on the feature too.
+pub struct PageHandle {
+    /// Persistent page. Same instance across calls in a single
+    /// session; new instance after an idle-timeout close.
+    #[cfg(feature = "browser")]
+    pub page: Page,
+    /// The owning context, kept so storage can be saved without
+    /// keeping a separate handle.
+    #[cfg(feature = "browser")]
+    pub context: BrowserContext,
+    /// The owning browser, kept so the session can be closed
+    /// without losing the context first.
+    #[cfg(feature = "browser")]
+    pub browser: Browser,
+}
+
+impl std::fmt::Debug for PageHandle {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("PageHandle").finish_non_exhaustive()
+    }
+}
+
+#[cfg(feature = "browser")]
 struct Inner {
-    /// Lazily launched Playwright triple. `None` until the first
-    /// `page()` call OR the very first config-driven check.
     live: Option<LiveSession>,
-    /// Timestamp of the most recent mutating tool call. `None`
-    /// until the first call. Compared against `now()` in `tick`.
     last_used: Option<Instant>,
 }
 
-/// A live Playwright triple: the top-level `Playwright` driver
-/// (manages the websocket to the playwright-rs server binary), the
-/// `Browser` process, the `BrowserContext` (cookie jar), and the
-/// `Page` (tab).
+#[cfg(feature = "browser")]
 struct LiveSession {
     _playwright: Playwright,
     browser: Browser,
@@ -121,14 +137,10 @@ struct LiveSession {
 /// Long-lived headless browser session. Cheap to construct; the
 /// Playwright triple is built on the first call to
 /// [`BrowserSession::page`].
-///
-/// All mutating methods acquire the internal [`Mutex`] briefly,
-/// then call into Playwright outside the lock. The session is
-/// therefore safe to share across the UI thread and the agent
-/// thread via `Arc<BrowserSession>`.
 pub struct BrowserSession {
-    inner: Mutex<Inner>,
     config: Mutex<ResolvedBrowserConfig>,
+    #[cfg(feature = "browser")]
+    inner: Mutex<Inner>,
 }
 
 impl BrowserSession {
@@ -137,11 +149,12 @@ impl BrowserSession {
     pub fn new(config: &AppConfig) -> Self {
         let resolved = config.browser.resolve(&config.content_libraries);
         Self {
+            config: Mutex::new(resolved),
+            #[cfg(feature = "browser")]
             inner: Mutex::new(Inner {
                 live: None,
                 last_used: None,
             }),
-            config: Mutex::new(resolved),
         }
     }
 
@@ -150,11 +163,12 @@ impl BrowserSession {
     /// of [`crate::config::BrowserConfig::resolve`].
     pub fn with_resolved(resolved: ResolvedBrowserConfig) -> Self {
         Self {
+            config: Mutex::new(resolved),
+            #[cfg(feature = "browser")]
             inner: Mutex::new(Inner {
                 live: None,
                 last_used: None,
             }),
-            config: Mutex::new(resolved),
         }
     }
 
@@ -163,110 +177,26 @@ impl BrowserSession {
         self.config.lock().expect("config mutex poisoned").clone()
     }
 
-    /// Return a live [`PageHandle`], launching the browser on
-    /// first use. Updates `last_used` so the idle-timeout clock
-    /// is reset on every call.
-    ///
-    /// Blocks the caller on a process-wide Tokio runtime (the
-    /// same one the CalDAV / CardDAV tools use via
-    /// `tools::blocking::block_on`). The lock is held only across
-    /// the live-session check; the actual launch + page creation
-    /// happens on the Tokio runtime.
-    pub fn page(&self) -> Result<PageHandle, SessionError> {
-        // Fast path: already live, just touch the timestamp.
-        {
-            let inner = self.inner.lock().expect("inner mutex poisoned");
-            if let Some(live) = &inner.live {
-                // We can't return a reference into the lock; the
-                // caller needs an owned PageHandle. Clone the
-                // inner types — they're cheap to clone (Arc
-                // handles inside playwright-rs).
-                let handle = PageHandle {
-                    page: live.page.clone(),
-                    context: live.context.clone(),
-                    browser: live.browser.clone(),
-                };
-                return Ok(handle);
-            }
-        }
-
-        // Slow path: need to launch. Drop the lock first so a
-        // concurrent second call doesn't try to launch twice.
-        self.launch_and_return()
+    /// True if a live Firefox process is currently held.
+    #[cfg(feature = "browser")]
+    pub fn is_live(&self) -> bool {
+        self.inner
+            .lock()
+            .expect("inner mutex poisoned")
+            .live
+            .is_some()
     }
 
-    /// Persist the current cookie jar + local storage to the
-    /// configured `storage_state_path`. Called from the tool
-    /// impls after every mutating call. Silent on `Inner` lock
-    /// contention so it never blocks the agent.
-    ///
-    /// TODO (post-merge polish): debounce this so we only write
-    /// once per N seconds even on bursty sessions. For v1 a
-    /// write per call is fine; the JSON is small and the file
-    /// is overwritten atomically.
-    pub fn save_storage(&self) -> Result<(), SessionError> {
-        let live = {
-            let inner = self.inner.lock().expect("inner mutex poisoned");
-            match &inner.live {
-                Some(live) => (live.context.clone(), live._playwright.clone()),
-                None => return Ok(()), // no live session; nothing to save
-            }
-        };
-        let (context, _playwright) = live;
-        let state =
-            crate::agent::tools::blocking::block_on(async { context.storage_state().await })
-                .map_err(|e| SessionError::Other(format!("storage_state: {}", e)))?;
-
-        let path = self
-            .config
-            .lock()
-            .expect("config mutex poisoned")
-            .storage_state_path
-            .clone();
-        if let Some(parent) = path.parent() {
-            std::fs::create_dir_all(parent).map_err(|e| SessionError::Io(e.to_string()))?;
-        }
-        let json = serde_json::to_string_pretty(&state)
-            .map_err(|e| SessionError::Other(format!("serialize storage_state: {}", e)))?;
-        std::fs::write(&path, json).map_err(|e| SessionError::Io(e.to_string()))?;
-        Ok(())
-    }
-
-    /// Close the live browser (if any) and delete the persisted
-    /// storage file. Invoked from the UI's "Forget Browser
-    /// Session" action — gives the user a clean logout.
-    pub fn forget(&self) -> Result<(), SessionError> {
-        // Drop the live session if any. The Playwright types are
-        // not `Send`-droppable from arbitrary contexts, so we
-        // hand the close-off to the Tokio runtime explicitly.
-        let to_close = {
-            let mut inner = self.inner.lock().expect("inner mutex poisoned");
-            inner.last_used = None;
-            inner.live.take()
-        };
-        if let Some(live) = to_close {
-            crate::agent::tools::blocking::block_on(async {
-                let _ = live.context.close().await;
-                let _ = live.browser.close().await;
-            });
-        }
-
-        let path = self
-            .config
-            .lock()
-            .expect("config mutex poisoned")
-            .storage_state_path
-            .clone();
-        match std::fs::remove_file(&path) {
-            Ok(()) => {}
-            Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
-            Err(e) => return Err(SessionError::Io(e.to_string())),
-        }
-        Ok(())
+    /// Stub for the no-`browser`-feature build; always reports
+    /// no live session.
+    #[cfg(not(feature = "browser"))]
+    pub fn is_live(&self) -> bool {
+        false
     }
 
     /// Enforce the idle timeout. Called once per UI frame.
     /// Returns `true` if the session was closed by this call.
+    #[cfg(feature = "browser")]
     pub fn tick(&self) -> bool {
         let cfg = self.config.lock().expect("config mutex poisoned").clone();
         if cfg.idle_timeout_seconds == 0 {
@@ -293,13 +223,11 @@ impl BrowserSession {
         }
     }
 
-    /// True if a live Firefox process is currently held.
-    pub fn is_live(&self) -> bool {
-        self.inner
-            .lock()
-            .expect("inner mutex poisoned")
-            .live
-            .is_some()
+    /// Stub for the no-`browser`-feature build; idle-timeout is
+    /// a no-op without Playwright.
+    #[cfg(not(feature = "browser"))]
+    pub fn tick(&self) -> bool {
+        false
     }
 
     /// Validate and join a user-supplied screenshot filename
@@ -345,18 +273,114 @@ impl BrowserSession {
         Ok(dir.join(filename))
     }
 
+    /// Return a live [`PageHandle`], launching the browser on
+    /// first use. Updates `last_used` so the idle-timeout clock
+    /// is reset on every call.
+    #[cfg(feature = "browser")]
+    pub fn page(&self) -> Result<PageHandle, SessionError> {
+        {
+            let inner = self.inner.lock().expect("inner mutex poisoned");
+            if let Some(live) = &inner.live {
+                let handle = PageHandle {
+                    page: live.page.clone(),
+                    context: live.context.clone(),
+                    browser: live.browser.clone(),
+                };
+                return Ok(handle);
+            }
+        }
+        self.launch_and_return()
+    }
+
+    /// Stub for the no-`browser`-feature build; reports the
+    /// browser tool group as disabled.
+    #[cfg(not(feature = "browser"))]
+    pub fn page(&self) -> Result<PageHandle, SessionError> {
+        Err(SessionError::Disabled)
+    }
+
+    /// Persist the current cookie jar + local storage to the
+    /// configured `storage_state_path`. Called from the tool
+    /// impls after every mutating call.
+    #[cfg(feature = "browser")]
+    pub fn save_storage(&self) -> Result<(), SessionError> {
+        let live = {
+            let inner = self.inner.lock().expect("inner mutex poisoned");
+            match &inner.live {
+                Some(live) => (live.context.clone(), live._playwright.clone()),
+                None => return Ok(()),
+            }
+        };
+        let (context, _playwright) = live;
+        let state =
+            crate::agent::tools::blocking::block_on(async { context.storage_state().await })
+                .map_err(|e| SessionError::Other(format!("storage_state: {}", e)))?;
+
+        let path = self
+            .config
+            .lock()
+            .expect("config mutex poisoned")
+            .storage_state_path
+            .clone();
+        if let Some(parent) = path.parent() {
+            std::fs::create_dir_all(parent).map_err(|e| SessionError::Io(e.to_string()))?;
+        }
+        let json = serde_json::to_string_pretty(&state)
+            .map_err(|e| SessionError::Other(format!("serialize storage_state: {}", e)))?;
+        std::fs::write(&path, json).map_err(|e| SessionError::Io(e.to_string()))?;
+        Ok(())
+    }
+
+    /// Stub for the no-`browser`-feature build; nothing to save.
+    #[cfg(not(feature = "browser"))]
+    pub fn save_storage(&self) -> Result<(), SessionError> {
+        Ok(())
+    }
+
+    /// Close the live browser (if any) and delete the persisted
+    /// storage file. Invoked from the UI's "Forget Browser
+    /// Session" action — gives the user a clean logout.
+    #[cfg(feature = "browser")]
+    pub fn forget(&self) -> Result<(), SessionError> {
+        let to_close = {
+            let mut inner = self.inner.lock().expect("inner mutex poisoned");
+            inner.last_used = None;
+            inner.live.take()
+        };
+        if let Some(live) = to_close {
+            crate::agent::tools::blocking::block_on(async {
+                let _ = live.context.close().await;
+                let _ = live.browser.close().await;
+            });
+        }
+
+        let path = self
+            .config
+            .lock()
+            .expect("config mutex poisoned")
+            .storage_state_path
+            .clone();
+        match std::fs::remove_file(&path) {
+            Ok(()) => {}
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
+            Err(e) => return Err(SessionError::Io(e.to_string())),
+        }
+        Ok(())
+    }
+
+    /// Stub for the no-`browser`-feature build; nothing to
+    /// forget and no storage file to remove.
+    #[cfg(not(feature = "browser"))]
+    pub fn forget(&self) -> Result<(), SessionError> {
+        Ok(())
+    }
+
     /// Launch the browser, create a context + page, and stash
-    /// the triple. Called on the slow path of `page()`. Drops
-    /// the inner lock before doing the I/O so a concurrent
-    /// second call sees a consistent "launching" state.
+    /// the triple. Called on the slow path of `page()`.
+    #[cfg(feature = "browser")]
     fn launch_and_return(&self) -> Result<PageHandle, SessionError> {
-        // Mark that we are about to launch by setting last_used
-        // — the tick logic already considers a recently-active
-        // session as "not yet idle", which is what we want
-        // during a slow launch.
         {
             let mut inner = self.inner.lock().expect("inner mutex poisoned");
-            // Double-check: another thread may have raced us.
             if let Some(live) = &inner.live {
                 return Ok(PageHandle {
                     page: live.page.clone(),
@@ -378,8 +402,6 @@ impl BrowserSession {
             storage_state_path: cfg.storage_state_path.clone(),
         };
 
-        // Run the entire launch on the Tokio runtime so we
-        // never block the UI thread on a Playwright future.
         let live =
             crate::agent::tools::blocking::block_on(async move { launch_firefox(resolved).await })
                 .map_err(SessionError::Launch)?;
@@ -399,15 +421,14 @@ impl BrowserSession {
     }
 }
 
-/// Launch-time config snapshot — extracted from
-/// [`ResolvedBrowserConfig`] so we can move it into the async
-/// block without holding the config mutex.
+#[cfg(feature = "browser")]
 struct ResolvedLaunch {
     headless: bool,
     page_load_timeout_ms: u64,
     storage_state_path: PathBuf,
 }
 
+#[cfg(feature = "browser")]
 async fn launch_firefox(cfg: ResolvedLaunch) -> Result<LiveSession, String> {
     let playwright = Playwright::launch().await.map_err(|e| e.to_string())?;
     let firefox = playwright.firefox();
@@ -417,9 +438,6 @@ async fn launch_firefox(cfg: ResolvedLaunch) -> Result<LiveSession, String> {
         .await
         .map_err(|e| e.to_string())?;
 
-    // Build the BrowserContextOptions via its builder. If a
-    // storage_state file exists from a previous run, pass it as
-    // the initial state so the user's cookies are restored.
     let mut builder = BrowserContextOptions::builder();
     if cfg.storage_state_path.exists() {
         match std::fs::read_to_string(&cfg.storage_state_path) {
@@ -454,8 +472,6 @@ async fn launch_firefox(cfg: ResolvedLaunch) -> Result<LiveSession, String> {
         .map_err(|e| e.to_string())?;
     let page = context.new_page().await.map_err(|e| e.to_string())?;
 
-    // Apply the per-page load timeout by default. Tools that
-    // need a different timeout can override per-call.
     let _ = page
         .set_default_timeout(cfg.page_load_timeout_ms as f64)
         .await;
@@ -468,7 +484,7 @@ async fn launch_firefox(cfg: ResolvedLaunch) -> Result<LiveSession, String> {
     })
 }
 
-#[cfg(test)]
+#[cfg(all(test, feature = "browser"))]
 mod tests {
     use super::*;
     use crate::config::{BrowserConfig, ContentLibrary};
@@ -558,8 +574,6 @@ mod tests {
 
     #[test]
     fn test_browser_config_resolve_uses_appdata_on_windows() {
-        // Sanity check that resolve() does not panic and
-        // returns a non-empty storage_state_path.
         let cfg = BrowserConfig::default();
         let libs: Vec<ContentLibrary> = vec![];
         let resolved = cfg.resolve(&libs);

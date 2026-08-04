@@ -5,6 +5,7 @@
 //! Requirements: see [`SPEC.md`](SPEC.md) (TOOL-001..TOOL-010, TOOL-014..024) for the full specification.
 
 pub mod blocking;
+#[cfg(feature = "browser")]
 pub mod browser;
 pub mod caldav;
 pub mod carddav;
@@ -19,7 +20,7 @@ pub mod weather;
 pub mod web;
 pub mod yaml_header;
 
-#[cfg(test)]
+#[cfg(all(test, feature = "browser"))]
 mod browser_tests;
 
 use crate::config::AppConfig;

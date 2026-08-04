@@ -16,6 +16,7 @@
 pub mod background;
 pub mod background_task;
 pub mod batch;
+#[cfg(feature = "browser")]
 pub mod browser;
 pub mod dialog_manager;
 pub mod document;

@@ -34,7 +34,9 @@ pub struct AgentContext {
     /// Long-lived headless Firefox session shared with every
     /// mutating browser tool call. Owned by the application
     /// (one instance per app) and handed to the agent thread
-    /// via this field.
+    /// via this field. When the `browser` Cargo feature is off
+    /// the session is a stub; the `browser_*` tools are not
+    /// registered and the field stays unused.
     pub browser_session: Arc<BrowserSession>,
     /// Shared PDF-backing tracker — gives tools access to
     /// the set of Markdown files that have a `.pdf` sibling.

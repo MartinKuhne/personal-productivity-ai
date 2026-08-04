@@ -18,6 +18,18 @@
 //! The agent sees a single `crate::app::session` dependency
 //! instead of two unrelated submodules.
 //!
+//! ## Browser session and the `browser` Cargo feature
+//!
+//! The browser session and its types are always compiled so the
+//! `agent` and `ui` modules can hold an `Arc<BrowserSession>` without
+//! sprinkling `#[cfg(feature = "browser")]` across every consumer.
+//! The Playwright-backed internals (the [`page`](BrowserSession::page)
+//! method, the [`PageHandle`] fields) are gated: when the
+//! `browser` feature is off, the session is a zero-sized stub and
+//! every operation returns [`SessionError::Disabled`]. The
+//! `playwright-rs` dependency is only pulled in when the
+//! `browser` feature is enabled.
+//!
 //! See the layering-inversion review in
 //! `doc/planning/desktop-module-boundaries-review.md` for the
 //! rationale.
