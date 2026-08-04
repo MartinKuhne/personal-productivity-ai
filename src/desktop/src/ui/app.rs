@@ -47,6 +47,29 @@ impl TreeNode {
 
 const PERSISTED_UI_STATE_KEY: &str = "ppai_ui_state";
 
+/// Sanity bounds for the user-chosen font scale multiplier.
+///
+/// The persisted `font_size_scale` is meant to be a multiplier on
+/// top of the OS-reported `pixels_per_point` (e.g. `1.2` for "20%
+/// larger than the system default"). Values outside this range are
+/// almost certainly the residue of the historical compounding bug
+/// (where the absolute ppp was saved as a "scale" and re-applied on
+/// top of the OS baseline, multiplying by 1.25×/1.5×/... every
+/// launch) or outright corruption. We clamp them on apply and
+/// self-heal them to `None` on the next save.
+const FONT_SCALE_MIN: f32 = 0.5;
+const FONT_SCALE_MAX: f32 = 3.0;
+
+/// Validate that a candidate font scale is a finite, in-range
+/// multiplier. Returns `Some(scale)` when valid, `None` otherwise.
+fn sanitise_font_scale(scale: f32) -> Option<f32> {
+    if !scale.is_finite() || !(FONT_SCALE_MIN..=FONT_SCALE_MAX).contains(&scale) {
+        None
+    } else {
+        Some(scale)
+    }
+}
+
 pub struct FastMdApp {
     pub orchestrator: AppOrchestrator,
     pub layout: PanelLayout,
@@ -56,6 +79,27 @@ pub struct FastMdApp {
     pub persisted_ui_state: PersistedUiState,
     /// Track whether we've applied persisted font scale on first frame.
     persisted_font_applied: bool,
+    /// The OS-reported `pixels_per_point` at the start of the
+    /// session, captured on the first frame **before** any
+    /// persisted scale is applied. Used as the baseline for
+    /// computing the user-chosen scale multiplier on save and is
+    /// deliberately not persisted — the OS re-reports it on every
+    /// launch (and may change if the window moves between monitors
+    /// with different DPI).
+    os_baseline_ppp: Option<f32>,
+    /// The font scale that was applied to the OS baseline on the
+    /// first frame. `1.0` means "no user-chosen scale was
+    /// applied" (either because `persisted_ui_state.font_size_scale`
+    /// was `None` or because it was rejected by
+    /// [`sanitise_font_scale`]). This is the value the persist
+    /// helper writes back to storage — **not** a fresh
+    /// `current_ppp / baseline_ppp` computation — so the persisted
+    /// state is stable across frames and across sessions even
+    /// though egui 0.35 defers `set_pixels_per_point` until the
+    /// next `begin_pass` (so within a single frame
+    /// `ctx.pixels_per_point()` still returns the pre-apply
+    /// value).
+    applied_font_scale: f32,
 }
 
 impl FastMdApp {
@@ -251,7 +295,7 @@ impl FastMdApp {
         let event_bus = background_task.file_event_bus;
         let dir_tracker = DirectoryTracker::new(event_bus.subscribe());
 
-        let persisted_ui_state: PersistedUiState = cc
+        let mut persisted_ui_state: PersistedUiState = cc
             .storage
             .and_then(|s| s.get_string(PERSISTED_UI_STATE_KEY))
             .map(|json| {
@@ -261,6 +305,24 @@ impl FastMdApp {
                 })
             })
             .unwrap_or_default();
+
+        // Schema migration: state written by the pre-fix build
+        // has no `schema_version` field (deserialises to 0) and
+        // its `font_size_scale` actually holds the absolute
+        // OS-reported ppp — treating it as a multiplier on top
+        // of the same ppp was the historical compounding bug.
+        // Clear the field on the first launch after the fix so
+        // the user starts at the OS default; other fields
+        // (panel widths, expanded dirs) are preserved.
+        if persisted_ui_state.schema_version < crate::app::persisted::CURRENT_SCHEMA_VERSION {
+            tracing::info!(
+                from = persisted_ui_state.schema_version,
+                to = crate::app::persisted::CURRENT_SCHEMA_VERSION,
+                "migrating persisted UI state: clearing legacy font_size_scale"
+            );
+            persisted_ui_state.font_size_scale = None;
+            persisted_ui_state.schema_version = crate::app::persisted::CURRENT_SCHEMA_VERSION;
+        }
 
         let mut layout = PanelLayout::new();
         if let Some(w) = persisted_ui_state.left_panel_width {
@@ -310,6 +372,8 @@ impl FastMdApp {
             cached_tree_rows: None,
             persisted_ui_state,
             persisted_font_applied: false,
+            os_baseline_ppp: None,
+            applied_font_scale: 1.0,
         }
     }
 
@@ -404,6 +468,8 @@ impl FastMdApp {
             cached_tree_rows: None,
             persisted_ui_state: PersistedUiState::default(),
             persisted_font_applied: false,
+            os_baseline_ppp: None,
+            applied_font_scale: 1.0,
         }
     }
 }
@@ -483,12 +549,7 @@ impl FastMdApp {
         let ctx = ui.ctx();
 
         // Apply persisted font size scale on first frame
-        if !self.persisted_font_applied {
-            if let Some(scale) = self.persisted_ui_state.font_size_scale {
-                ctx.set_pixels_per_point(ctx.pixels_per_point() * scale);
-            }
-            self.persisted_font_applied = true;
-        }
+        self.apply_persisted_font_scale(ctx);
 
         self.orchestrator.drain_config_bus();
         self.process_file_events_and_repaint(ctx);
@@ -689,13 +750,76 @@ impl FastMdApp {
         self.persisted_ui_state.left_panel_width = self.layout.left_panel_width;
         self.persisted_ui_state.right_panel_width = self.layout.right_panel_width;
 
-        // Update font size scale (relative to default)
-        let current_ppp = ctx.pixels_per_point();
-        let default_ppp = 1.0; // Default pixels per point
-        if (current_ppp - default_ppp).abs() > f32::EPSILON {
-            self.persisted_ui_state.font_size_scale = Some(current_ppp / default_ppp);
-        } else {
+        // Update font size scale (relative to the OS-reported
+        // baseline captured on the first frame — see
+        // [`Self::apply_persisted_font_scale`]).
+        self.persist_font_scale(ctx);
+    }
+
+    /// Capture the OS-reported `pixels_per_point` as the baseline
+    /// and apply any persisted user-chosen scale on top of it.
+    ///
+    /// Must run on the first frame of the session, **before** any
+    /// widget paints, so the rest of the UI sees the scaled ppp.
+    /// After this call the persisted scale is treated as a
+    /// multiplier on top of the baseline; never as the absolute
+    /// ppp.
+    ///
+    /// The baseline is the OS-reported value at the start of the
+    /// session and is **not persisted** — the OS re-reports it on
+    /// every launch (and may differ between monitors on a
+    /// multi-DPI Windows setup).
+    ///
+    /// Records the chosen scale into [`Self::applied_font_scale`]
+    /// so [`Self::persist_font_scale`] can write a stable value
+    /// even though egui 0.35 defers `set_pixels_per_point` until
+    /// the next `begin_pass` (so `ctx.pixels_per_point()` still
+    /// returns the pre-apply value within the same frame).
+    fn apply_persisted_font_scale(&mut self, ctx: &egui::Context) {
+        if self.persisted_font_applied {
+            return;
+        }
+        let baseline = ctx.pixels_per_point();
+        self.os_baseline_ppp = Some(baseline);
+        let scale = self
+            .persisted_ui_state
+            .font_size_scale
+            .and_then(sanitise_font_scale)
+            .unwrap_or(1.0);
+        self.applied_font_scale = scale;
+        if scale != 1.0 {
+            ctx.set_pixels_per_point(baseline * scale);
+        }
+        self.persisted_font_applied = true;
+    }
+
+    /// Persist the font scale that was actually applied on the
+    /// first frame (see [`Self::applied_font_scale`]) back into
+    /// [`Self::persisted_ui_state`]. This is a pure
+    /// "remember what we did" write — it does **not** re-read
+    /// `ctx.pixels_per_point()` to recompute the multiplier,
+    /// because egui 0.35 defers `set_pixels_per_point` until the
+    /// next `begin_pass` and recomputing from the still-old ppp
+    /// would silently reset the persisted value to `None` on the
+    /// same frame the scale was applied.
+    ///
+    /// A near-unity applied scale (≈ 1.0) is stored as `None` so
+    /// a fresh install doesn't carry a redundant `1.0` and risk
+    /// a future bug misinterpreting it. Out-of-range or
+    /// non-finite applied scales are also stored as `None` so a
+    /// single corrupt entry self-heals on the next launch.
+    fn persist_font_scale(&mut self, _ctx: &egui::Context) {
+        if !self.applied_font_scale.is_finite()
+            || self.applied_font_scale < FONT_SCALE_MIN
+            || self.applied_font_scale > FONT_SCALE_MAX
+        {
             self.persisted_ui_state.font_size_scale = None;
+            return;
+        }
+        if (self.applied_font_scale - 1.0).abs() < 1e-3 {
+            self.persisted_ui_state.font_size_scale = None;
+        } else {
+            self.persisted_ui_state.font_size_scale = Some(self.applied_font_scale);
         }
     }
 }
@@ -1664,5 +1788,234 @@ mod tests {
             Some(&keep),
             "selection must fall back to the last remaining tab"
         );
+    }
+
+    /// REGRESSION (font scale compounding): `pixels_per_point` is the
+    /// OS-reported device pixel ratio (e.g. 1.5 on a 150% DPI display).
+    /// The persisted `font_size_scale` must be a user-chosen
+    /// **multiplier** relative to that baseline — not the absolute
+    /// ppp. The pre-fix code divided the current ppp by a hard-coded
+    /// 1.0 to compute the scale, so a 150% DPI display saved
+    /// `Some(1.5)`, then on the next launch multiplied the OS-reported
+    /// 1.5 by that "scale" 1.5 → 2.25, then saved `Some(2.25)`, then
+    /// 3.375, 5.06, ... The font visibly grew every launch.
+    ///
+    /// This test exercises the **real per-frame order** used by
+    /// `update_ui`: `apply_persisted_font_scale` and
+    /// `persist_font_scale` run in the same frame, **before**
+    /// egui 0.35's deferred `set_pixels_per_point` update takes
+    /// effect. The earlier version of this test masked a bug by
+    /// inserting a `run_ui` between apply and persist.
+    #[test]
+    fn test_font_scale_does_not_compound_across_launches() {
+        // === Session 1: simulated 150% DPI display, user has chosen 1.2x zoom ===
+        let mut app1 = create_test_app();
+        app1.persisted_ui_state.font_size_scale = Some(1.2);
+
+        let (ctx1, _raw1) = ctx_with_native_ppp(1.5);
+        app1.apply_persisted_font_scale(&ctx1);
+        // Persist in the SAME frame as apply — the real app's
+        // `update_ui` does this. The deferred zoom-factor update
+        // from `set_pixels_per_point` has not been applied yet
+        // (it only takes effect on the next `begin_pass`), so
+        // `ctx.pixels_per_point()` still reports the OS baseline
+        // (1.5), not the target 1.8. The persist must NOT
+        // recompute the scale from this stale ppp or it would
+        // silently reset the stored value to `None`.
+        app1.persist_font_scale(&ctx1);
+        assert_eq!(
+            app1.persisted_ui_state.font_size_scale,
+            Some(1.2),
+            "session 1 persist (same frame as apply): must store the user's \
+             1.2 multiplier, not the pre-apply ppp / baseline ratio"
+        );
+
+        // After a follow-up frame, the deferred zoom-factor is
+        // applied and the on-screen ppp matches the user's choice.
+        let (ctx1_after, _) = ctx_with_native_ppp(1.5);
+        let _ = ctx1_after.run_ui(egui::RawInput::default(), |_ui| {});
+        let _ = ctx1_after; // not asserted — we only care about persistence here.
+
+        // === Session 2: restart, reload persisted state, same OS baseline ===
+        let persisted_json = serde_json::to_string(&app1.persisted_ui_state).unwrap();
+        let mut app2 = create_test_app();
+        app2.persisted_ui_state = serde_json::from_str(&persisted_json).unwrap();
+
+        let (ctx2, _raw2) = ctx_with_native_ppp(1.5);
+        app2.apply_persisted_font_scale(&ctx2);
+        app2.persist_font_scale(&ctx2);
+        assert_eq!(
+            app2.persisted_ui_state.font_size_scale,
+            Some(1.2),
+            "session 2 persist: must remain 1.2, not 1.8 or higher"
+        );
+
+        // === Session 3..N: the value must stay stable for any number of restarts ===
+        for _ in 0..5 {
+            let json = serde_json::to_string(&app2.persisted_ui_state).unwrap();
+            let mut next = create_test_app();
+            next.persisted_ui_state = serde_json::from_str(&json).unwrap();
+            let (ctx, _raw) = ctx_with_native_ppp(1.5);
+            next.apply_persisted_font_scale(&ctx);
+            next.persist_font_scale(&ctx);
+            assert_eq!(
+                next.persisted_ui_state.font_size_scale,
+                Some(1.2),
+                "loop: persisted scale drifted after multiple restarts"
+            );
+            app2 = next;
+        }
+    }
+
+    /// REGRESSION (same-frame persist under a non-trivial OS
+    /// baseline): the persist must store the *applied* scale,
+    /// not a freshly-computed `current_ppp / baseline_ppp`. With
+    /// the old logic, running apply + persist in the same frame
+    /// on a 150% DPI display with `Some(1.2)` would compute
+    /// `scale = 1.5 / 1.5 = 1.0` and silently reset the
+    /// persisted value to `None`. The user's font would then
+    /// snap back to the OS default on every restart, shrinking
+    /// the UI each time.
+    #[test]
+    fn test_font_scale_persist_in_same_frame_as_apply_keeps_value() {
+        let mut app = create_test_app();
+        app.persisted_ui_state.font_size_scale = Some(1.2);
+
+        let (ctx, _raw) = ctx_with_native_ppp(1.5);
+        app.apply_persisted_font_scale(&ctx);
+        // Same-frame persist: ctx.pixels_per_point() is still 1.5
+        // (the OS baseline) because the deferred zoom-factor from
+        // `set_pixels_per_point(1.8)` has not been applied yet.
+        app.persist_font_scale(&ctx);
+
+        assert_eq!(
+            app.persisted_ui_state.font_size_scale,
+            Some(1.2),
+            "same-frame persist must not silently reset the scale to None"
+        );
+    }
+
+    /// REGRESSION (legacy corruption): A user who upgraded from the
+    /// buggy build may have a pre-fix persisted scale that is the
+    /// absolute ppp (e.g., `Some(1.5)` on a 1.0 DPI display, or
+    /// worse — `Some(5.0)` after several compounding launches).
+    /// The apply helper must clamp out-of-range values to a no-op
+    /// and the next persist must self-heal the stored value back
+    /// to `None`.
+    #[test]
+    fn test_font_scale_clamps_legacy_corrupt_value() {
+        let mut app = create_test_app();
+        // Pretend the old buggy code persisted the absolute ppp
+        // (or a compounded value) as a "scale".
+        app.persisted_ui_state.font_size_scale = Some(5.0);
+
+        let (ctx, _raw) = ctx_with_native_ppp(1.5);
+        app.apply_persisted_font_scale(&ctx);
+        app.persist_font_scale(&ctx);
+
+        // The corrupt 5.0 must NOT be applied on top of the OS
+        // baseline (that would yield 7.5 ppp). The baseline is
+        // left untouched, and the next persist self-heals the
+        // stored value to None (the user has not actually
+        // chosen a zoom).
+        assert_eq!(
+            app.persisted_ui_state.font_size_scale, None,
+            "corrupt scale must self-heal to None after one save"
+        );
+    }
+
+    /// REGRESSION (NaN / infinity guard): a corrupt persisted scale
+    /// that is not finite must also be ignored, not propagated into
+    /// `set_pixels_per_point`, which would otherwise produce a
+    /// runtime panic in egui.
+    #[test]
+    fn test_font_scale_rejects_non_finite_value() {
+        let mut app = create_test_app();
+        app.persisted_ui_state.font_size_scale = Some(f32::NAN);
+
+        let (ctx, _raw) = ctx_with_native_ppp(1.5);
+        app.apply_persisted_font_scale(&ctx);
+        app.persist_font_scale(&ctx);
+
+        // The NaN must not be applied; the persist self-heals to None.
+        assert_eq!(
+            app.persisted_ui_state.font_size_scale, None,
+            "NaN scale must self-heal to None"
+        );
+    }
+
+    /// REGRESSION (schema migration): a persisted state written by
+    /// the pre-fix build (no `schema_version` field) must be
+    /// migrated to the current schema on load — specifically,
+    /// `font_size_scale` is cleared so the absolute-ppp value
+    /// that the old bug used to compound is not carried forward
+    /// as a multiplier.
+    #[test]
+    fn test_persisted_state_migration_clears_legacy_font_size_scale() {
+        // Hand-written JSON mimicking the pre-fix on-disk shape:
+        // no `schema_version` field; `font_size_scale` holds the
+        // absolute ppp from a 150% DPI display.
+        let legacy_json = r#"{
+            "left_panel_width": null,
+            "right_panel_width": null,
+            "window_width": null,
+            "window_height": null,
+            "window_x": null,
+            "window_y": null,
+            "font_size_scale": 1.5,
+            "expanded_dirs": []
+        }"#;
+        let mut state: PersistedUiState = serde_json::from_str(legacy_json).unwrap();
+        assert_eq!(state.schema_version, 0);
+        assert_eq!(state.font_size_scale, Some(1.5));
+
+        // Apply the same migration the production `FastMdApp::new`
+        // runs. (We do it inline here because the helper would
+        // require an eframe::CreationContext.)
+        if state.schema_version < crate::app::persisted::CURRENT_SCHEMA_VERSION {
+            state.font_size_scale = None;
+            state.schema_version = crate::app::persisted::CURRENT_SCHEMA_VERSION;
+        }
+
+        assert_eq!(
+            state.font_size_scale, None,
+            "migration must clear the legacy font_size_scale"
+        );
+        assert_eq!(
+            state.schema_version,
+            crate::app::persisted::CURRENT_SCHEMA_VERSION,
+            "migration must bump schema_version to the current value"
+        );
+    }
+
+    /// Build an `egui::Context` whose input state reports
+    /// `native_pixels_per_point = Some(ppp)`, so
+    /// `ctx.pixels_per_point()` returns `ppp` before any zoom
+    /// change is applied. Returns the context together with the
+    /// matching `RawInput` so the caller can drive a follow-up
+    /// `run_ui` that preserves the high-DPI viewport info.
+    fn ctx_with_native_ppp(ppp: f32) -> (egui::Context, egui::RawInput) {
+        let ctx = egui::Context::default();
+        let viewports = std::iter::once((
+            egui::ViewportId::ROOT,
+            egui::ViewportInfo {
+                native_pixels_per_point: Some(ppp),
+                ..Default::default()
+            },
+        ))
+        .collect();
+        let raw_input = egui::RawInput {
+            viewports,
+            ..Default::default()
+        };
+        // Drive a single empty pass to seed the input state. We
+        // immediately call `end_pass` to leave the viewport
+        // stack balanced, so the next `begin_pass` (driven by
+        // `run_ui`) is the "outermost" pass and the deferred
+        // `new_zoom_factor` written by `set_pixels_per_point` is
+        // actually applied.
+        ctx.begin_pass(raw_input.clone());
+        let _ = ctx.end_pass();
+        (ctx, raw_input)
     }
 }
