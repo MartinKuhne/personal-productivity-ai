@@ -5,6 +5,20 @@ use crate::bus::events::typed::BackgroundEvent;
 use std::io::Write;
 use std::path::PathBuf;
 use std::sync::mpsc::Sender;
+use std::sync::{Mutex, OnceLock};
+
+fn temp_print_files() -> &'static Mutex<Vec<PathBuf>> {
+    static TEMP_FILES: OnceLock<Mutex<Vec<PathBuf>>> = OnceLock::new();
+    TEMP_FILES.get_or_init(|| Mutex::new(Vec::new()))
+}
+
+pub fn cleanup_temp_files() {
+    if let Ok(mut files) = temp_print_files().lock() {
+        for path in files.drain(..) {
+            let _ = std::fs::remove_file(path);
+        }
+    }
+}
 
 #[derive(Debug, Clone)]
 pub struct PrintJob {
@@ -142,7 +156,16 @@ pub fn execute_print_blocking(
     temp_file
         .write_all(html_document.as_bytes())
         .map_err(|e| format!("Failed to write temp file: {}", e))?;
-    let path_str = temp_file.path().to_string_lossy().to_string();
+
+    let (_, path) = temp_file
+        .keep()
+        .map_err(|e| format!("Failed to keep temp file: {}", e))?;
+
+    if let Ok(mut files) = temp_print_files().lock() {
+        files.push(path.clone());
+    }
+
+    let path_str = path.to_string_lossy().to_string();
 
     webbrowser::open(&path_str).map_err(|e| format!("Failed to open browser: {}", e))?;
 
