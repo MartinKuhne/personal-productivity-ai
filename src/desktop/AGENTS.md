@@ -1,7 +1,7 @@
 # AI Agent Instructions — `src/desktop/` (`fastmd` crate)
 
-These rules apply **only** to the `fastmd` Rust crate (the desktop app and its
-`deploy` binary). The repo-root `AGENTS.md` provides the shared principles;
+These rules apply **only** to the `fastmd` Rust crate (the desktop app).
+The repo-root `AGENTS.md` provides the shared principles;
 this file adds Rust/egui-specific conventions and the quality gate.
 
 ## 1. Documentation
@@ -47,7 +47,6 @@ src/
 ├── lib.rs                  # facade: re-exports public API, no logic
 ├── main.rs                 # fastmd binary entry; eframe::run_native
 ├── error.rs                # AgentError
-├── bin/deploy.rs           # deploy binary target
 │
 ├── bus/                    # Messaging subsystem — transports, event payloads,
 │   │                       # bus-side routing (see `doc/planning/.../bus-folder-consolidation.md`)
