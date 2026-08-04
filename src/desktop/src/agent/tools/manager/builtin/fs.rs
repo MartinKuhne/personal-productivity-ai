@@ -1,4 +1,4 @@
-﻿//! Filesystem tool implementations for the tool registry.
+//! Filesystem tool implementations for the tool registry.
 
 use crate::agent::tools::Tool;
 use crate::agent::tools::context::ToolContext;
@@ -10,6 +10,12 @@ use std::any::TypeId;
 use super::super::pagination::paginate_in_range;
 use super::json_schema;
 use super::strings;
+
+/// Default `limit` for the `read_file_lines` tool. 0-indexed line
+/// slice; the first call without args returns the first 100 lines of
+/// the file. Matches the list-paginated tools' default for vocabulary
+/// consistency.
+const DEFAULT_READ_FILE_LINES_LIMIT: usize = 100;
 
 /// Tool that replaces exact text occurrences in a file.
 pub(crate) struct ReplaceTextTool;
@@ -294,7 +300,7 @@ impl Tool for ReadFileTool {
     }
 }
 
-/// Tool that reads specific lines from a file.
+/// Tool that reads a contiguous slice of lines from a file.
 pub(crate) struct ReadFileLinesTool;
 impl Tool for ReadFileLinesTool {
     fn name(&self) -> &'static str {
@@ -321,10 +327,12 @@ impl Tool for ReadFileLinesTool {
         let (path, _) = ctx
             .resolve_virtual_path(&input.path, false)?
             .ok_or_else(|| "Cannot perform this operation on the virtual root".to_string())?;
+        let offset = input.offset.unwrap_or(0);
+        let limit = input.limit.unwrap_or(DEFAULT_READ_FILE_LINES_LIMIT);
         crate::agent::tools::filesystem::tool_read_file_lines(
             &path.to_string_lossy(),
-            input.start_line,
-            input.end_line,
+            offset,
+            limit,
         )
         .map(|r| {
             serde_json::to_value(r).unwrap_or_else(|e| serde_json::json!({"error": e.to_string()}))
@@ -369,7 +377,7 @@ impl Tool for CreateFileTool {
     }
 }
 
-/// Tool that inserts lines into a file at a specific index.
+/// Tool that inserts lines into a file at a 0-indexed offset.
 pub(crate) struct InsertLinesTool;
 impl Tool for InsertLinesTool {
     fn name(&self) -> &'static str {
@@ -397,7 +405,7 @@ impl Tool for InsertLinesTool {
         let producer = ctx.file_event_producer();
         crate::agent::tools::filesystem::tool_insert_lines(
             &path.to_string_lossy(),
-            input.line_index,
+            input.offset,
             &input.lines,
             &producer,
         )

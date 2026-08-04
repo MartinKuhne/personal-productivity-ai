@@ -20,9 +20,9 @@ The requirements below have been formatted using the **Easy Approach to Requirem
 | `list_files_by_tag` | List files that contain a specific tag in their front-matter. Paginated via `offset`/`limit` (0-indexed; default `offset=0`, `limit=100`); the response carries `total` and an optional `hint`. |
 | `list_files` | List markdown files in a directory (non-recursive). With "/" or "." returns library names. Paginated via `offset`/`limit` (0-indexed; default `offset=0`, `limit=100`); the response carries `total` and an optional `hint`. |
 | `read_file` | Read the entire text contents of a file. |
-| `read_file_lines` | Read specific line numbers or ranges from a file (1-indexed). |
+| `read_file_lines` | Read a contiguous slice of lines from a file. Paginated via `offset`/`limit` (0-indexed; default `offset=0`, `limit=100`). An `offset` past the end of the file returns an empty `content`; a `limit` that would overflow is clamped to the remainder. |
 | `create_file` | Create a new markdown file with the specified content. Fails if the file already exists — this tool can only create new files. |
-| `insert_lines` | Insert new lines of text into an existing file at a specific 1-indexed position. |
+| `insert_lines` | Insert new lines of text into an existing file at a specific 0-indexed `offset` (default-constructed; required input). `offset=0` inserts at the top; `offset=lines.len()` appends to the end. |
 | `replace_text` | Replace exact occurrences of old_string with new_string in a file. |
 | `web_fetch` | Fetch content from a URL and convert HTML to Markdown. Cursor-based pagination: returns up to 100 lines and a `cursor` token; pass the `cursor` back unchanged to get the next page. The full content is cached for 30 minutes in the shared `ToolCache`; pass `force_refetch=true` to bypass. |
 | `web_search` | Search the web using SearXNG. Requires searxng_url config. |
@@ -119,6 +119,13 @@ The cursor-paginated tools (`search_email`, `web_fetch`) use a stateful cursor m
 * [TOOL-030] Shared Tool Cache: An in-memory process-local cache MUST be shared by `search_email` and `web_fetch`. Cache entries MUST be evicted lazily on access after 30 minutes. A capacity cap of 1024 entries MUST be enforced with FIFO eviction once exceeded. The cache MUST NOT be persisted across process restarts. The cache is the single source of truth for both tools' per-URL / per-search result set state.
 * [TOOL-031] Search Email Cache Population: The first `search_email` call with a given filter set MUST populate the cache with the full server result set. Subsequent calls with the matching cursor MUST slice from the cache without re-fetching. A `search_email` call with a cursor that does not match a live cache entry MUST return the error `"Cursor expired or unknown; re-run the search with no cursor."`
 * [TOOL-032] Web Fetch Cache Shared Integration: The `web_fetch` tool MUST utilize the shared tool cache (TOOL-030) for fetched content. The URL maps to a cursor UUID which maps to the full content. The `force_refetch` parameter MUST invalidate the cache entry before re-fetching. The 30-minute TTL MUST match the shared cache's TTL exactly.
+
+### Filesystem Line Tools
+
+The `read_file_lines` and `insert_lines` tools operate on contiguous line ranges inside a file. Both use 0-indexed offsets for vocabulary consistency with the list-paginated tools (`list_files`, `list_files_by_tag`).
+
+* [TOOL-036] Read File Lines Paging: The `read_file_lines` tool shall accept `offset: Option<usize>` (0-indexed; default 0) and `limit: Option<usize>` (default 100) input parameters. The response shall contain the requested slice of lines joined with newlines. An `offset` past the end of the file shall return an empty `content`; a `limit` that would overflow the file's line count shall be clamped to the remainder. The tool shall not expose a `start_line` or `end_line` parameter.
+* [TOOL-037] Insert Lines Offset: The `insert_lines` tool shall accept a required `offset: usize` (0-indexed) input parameter. `offset=0` shall insert at the top of the file; `offset=lines.len()` shall append to the end. `offset > lines.len()` shall return the error `"Offset out of range."`. The tool shall not expose a `line_index` parameter.
 
 ### Browser Automation Tools
 

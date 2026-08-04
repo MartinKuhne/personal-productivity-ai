@@ -90,8 +90,10 @@ pub struct ReadFileResponse {
 #[derive(Deserialize, Debug, JsonSchema)]
 pub struct ReadFileLinesInput {
     pub path: String,
-    pub start_line: usize,
-    pub end_line: usize,
+    #[schemars(description = strings::FIELD_OFFSET_DESCRIPTION)]
+    pub offset: Option<usize>,
+    #[schemars(description = strings::FIELD_LIMIT_DESCRIPTION)]
+    pub limit: Option<usize>,
 }
 #[derive(Serialize, Debug, JsonSchema)]
 pub struct ReadFileLinesResponse {
@@ -112,7 +114,9 @@ pub struct CreateFileResponse {
 #[derive(Deserialize, Debug, JsonSchema)]
 pub struct InsertLinesInput {
     pub path: String,
-    pub line_index: usize,
+    /// 0-indexed position in the file at which to insert `lines`.
+    /// `offset == 0` inserts at the top; `offset == lines.len()` appends.
+    pub offset: usize,
     pub lines: Vec<String>,
 }
 #[derive(Serialize, Debug, JsonSchema)]

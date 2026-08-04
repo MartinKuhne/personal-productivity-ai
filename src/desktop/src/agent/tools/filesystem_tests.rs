@@ -117,10 +117,24 @@ fn test_tool_read_file_lines() {
     let file_path = dir.path().join("test.md");
     fs::write(&file_path, "Line 1\nLine 2\nLine 3\nLine 4").unwrap();
 
-    let result = tool_read_file_lines(file_path.to_str().unwrap(), 2, 3)
+    // 0-indexed: skip "Line 1", return the next 2 lines.
+    let result = tool_read_file_lines(file_path.to_str().unwrap(), 1, 2)
         .unwrap()
         .content;
     assert_eq!(result, "Line 2\nLine 3");
+}
+
+#[test]
+fn test_tool_read_file_lines_offset_zero() {
+    // BOUNDARY: offset=0 is the first line (was an error pre-migration).
+    let dir = tempdir().unwrap();
+    let file_path = dir.path().join("test.md");
+    fs::write(&file_path, "Line 1\nLine 2").unwrap();
+
+    let result = tool_read_file_lines(file_path.to_str().unwrap(), 0, 1)
+        .unwrap()
+        .content;
+    assert_eq!(result, "Line 1");
 }
 
 #[test]
@@ -129,7 +143,7 @@ fn test_tool_read_file_lines_empty_file() {
     let file_path = dir.path().join("empty.md");
     fs::write(&file_path, "").unwrap();
 
-    let result = tool_read_file_lines(file_path.to_str().unwrap(), 1, 50)
+    let result = tool_read_file_lines(file_path.to_str().unwrap(), 0, 50)
         .unwrap()
         .content;
     assert_eq!(result, "");
@@ -214,9 +228,10 @@ fn test_tool_insert_lines() {
     fs::write(&file_path, "Line 1\nLine 2\nLine 3").unwrap();
 
     let producer = noop_producer();
+    // 0-indexed: insert at position 1 (between "Line 1" and "Line 2").
     let result = tool_insert_lines(
         file_path.to_str().unwrap(),
-        2,
+        1,
         &["New Line".to_string()],
         &producer,
     )
@@ -229,7 +244,8 @@ fn test_tool_insert_lines() {
 }
 
 #[test]
-fn test_tool_insert_lines_out_of_range() {
+fn test_tool_insert_lines_at_top() {
+    // BOUNDARY: offset=0 inserts at the top of the file.
     let dir = tempdir().unwrap();
     let file_path = dir.path().join("test.md");
     fs::write(&file_path, "Line 1\nLine 2").unwrap();
@@ -237,11 +253,51 @@ fn test_tool_insert_lines_out_of_range() {
     let producer = noop_producer();
     let result = tool_insert_lines(
         file_path.to_str().unwrap(),
+        0,
+        &["New".to_string()],
+        &producer,
+    );
+    assert!(result.is_ok());
+
+    let content = fs::read_to_string(&file_path).unwrap();
+    assert_eq!(content, "New\nLine 1\nLine 2");
+}
+
+#[test]
+fn test_tool_insert_lines_at_end() {
+    // BOUNDARY: offset == lines.len() appends to the end.
+    let dir = tempdir().unwrap();
+    let file_path = dir.path().join("test.md");
+    fs::write(&file_path, "Line 1\nLine 2").unwrap();
+
+    let producer = noop_producer();
+    let result = tool_insert_lines(
+        file_path.to_str().unwrap(),
+        2,
+        &["New".to_string()],
+        &producer,
+    );
+    assert!(result.is_ok());
+
+    let content = fs::read_to_string(&file_path).unwrap();
+    assert_eq!(content, "Line 1\nLine 2\nNew");
+}
+
+#[test]
+fn test_tool_insert_lines_out_of_range() {
+    let dir = tempdir().unwrap();
+    let file_path = dir.path().join("test.md");
+    fs::write(&file_path, "Line 1\nLine 2").unwrap();
+
+    let producer = noop_producer();
+    // 2-line file accepts offset in [0, 2]; offset 5 is out of range.
+    let result = tool_insert_lines(
+        file_path.to_str().unwrap(),
         5,
         &["New".to_string()],
         &producer,
     );
-    assert_eq!(result.unwrap_err(), "Line index out of range.");
+    assert_eq!(result.unwrap_err(), "Offset out of range.");
 }
 
 #[test]
@@ -411,38 +467,46 @@ fn test_grep_default_max_results_constant_is_200() {
 }
 
 #[test]
-fn test_tool_read_file_lines_start_greater_than_end() {
-    // BOUNDARY: start_line > end_line should error
+fn test_tool_read_file_lines_offset_past_end() {
+    // BOUNDARY: offset past the end of the file returns empty content
+    // (was an error in the 1-indexed variant; the offset/limit model is
+    // forgiving so the LLM can walk forward without computing lengths).
     let dir = tempdir().unwrap();
     let file_path = dir.path().join("test.md");
     fs::write(&file_path, "Line 1\nLine 2\nLine 3").unwrap();
 
-    let result = tool_read_file_lines(file_path.to_str().unwrap(), 3, 1);
-    assert_eq!(result.unwrap_err(), "Start line greater than end line.");
+    let result = tool_read_file_lines(file_path.to_str().unwrap(), 999, 100)
+        .unwrap()
+        .content;
+    assert_eq!(result, "");
 }
 
 #[test]
-fn test_tool_read_file_lines_boundary_zero() {
-    // BOUNDARY: start_line=0 should error (1-indexed)
+fn test_tool_read_file_lines_limit_zero() {
+    // BOUNDARY: limit=0 returns empty content without erroring.
     let dir = tempdir().unwrap();
     let file_path = dir.path().join("test.md");
     fs::write(&file_path, "Line 1\nLine 2").unwrap();
 
-    let result = tool_read_file_lines(file_path.to_str().unwrap(), 0, 2);
-    assert_eq!(result.unwrap_err(), "Start line out of range.");
+    let result = tool_read_file_lines(file_path.to_str().unwrap(), 0, 0)
+        .unwrap()
+        .content;
+    assert_eq!(result, "");
 }
 
 #[test]
-fn test_tool_read_file_lines_end_beyond_file() {
-    // BOUNDARY: end_line beyond file length should return available content
+fn test_tool_read_file_lines_limit_beyond_file() {
+    // BOUNDARY: limit that would overflow the file is clamped to the
+    // remainder. Mirrors the pre-migration "end beyond file" behavior.
     let dir = tempdir().unwrap();
     let file_path = dir.path().join("test.md");
     fs::write(&file_path, "Line 1\nLine 2\nLine 3").unwrap();
 
-    let result = tool_read_file_lines(file_path.to_str().unwrap(), 1, 100);
-    // Should return all lines up to end of file
-    let content = result.unwrap().content;
+    let content = tool_read_file_lines(file_path.to_str().unwrap(), 0, 100)
+        .unwrap()
+        .content;
     assert!(content.contains("Line 1"));
+    assert!(content.contains("Line 2"));
     assert!(content.contains("Line 3"));
 }
 

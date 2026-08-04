@@ -134,29 +134,28 @@ pub fn tool_read_file(
     }
 }
 
+/// Read a contiguous slice of lines from a file.
+///
+/// `offset` is 0-indexed (`0` is the first line). `limit` is the
+/// maximum number of lines to return. The slice is clamped to the
+/// file's line count, so a `limit` that overflows returns the
+/// remainder; an `offset` past the end returns an empty `content`.
 pub fn tool_read_file_lines(
     path_str: &str,
-    start_line: usize,
-    end_line: usize,
+    offset: usize,
+    limit: usize,
 ) -> Result<crate::agent::tools::dtos::ReadFileLinesResponse, String> {
     match crate::utils::read_text_file(Path::new(path_str)) {
         Ok(content) => {
             let lines: Vec<&str> = content.lines().collect();
-            if lines.is_empty() && start_line == 1 {
-                return Ok(crate::agent::tools::dtos::ReadFileLinesResponse {
-                    content: "".to_string(),
-                });
-            }
-            if start_line == 0 || start_line > lines.len() {
-                return Err("Start line out of range.".to_string());
-            }
-            let end = std::cmp::min(end_line, lines.len());
-            if start_line > end {
-                return Err("Start line greater than end line.".to_string());
-            }
-            let selected_lines = &lines[start_line - 1..end];
+            let slice = if offset >= lines.len() {
+                &[][..]
+            } else {
+                let end = (offset + limit).min(lines.len());
+                &lines[offset..end]
+            };
             Ok(crate::agent::tools::dtos::ReadFileLinesResponse {
-                content: selected_lines.join("\n"),
+                content: slice.join("\n"),
             })
         }
         Err(e) => Err(format!("Failed to read file: {}", e)),
@@ -210,21 +209,24 @@ pub fn tool_create_file(
     }
 }
 
+/// Insert `lines_to_insert` into the file at 0-indexed position `offset`.
+///
+/// `offset == 0` inserts at the top; `offset == lines.len()` appends
+/// to the end. `offset > lines.len()` returns an error.
 pub fn tool_insert_lines(
     path_str: &str,
-    line_index: usize,
+    offset: usize,
     lines_to_insert: &[String],
     producer: &FileEventProducer,
 ) -> Result<crate::agent::tools::dtos::InsertLinesResponse, String> {
     match crate::utils::read_text_file(Path::new(path_str)) {
         Ok(content) => {
             let mut lines: Vec<String> = content.lines().map(|s| s.to_string()).collect();
-            if line_index == 0 || line_index > lines.len() + 1 {
-                return Err("Line index out of range.".to_string());
+            if offset > lines.len() {
+                return Err("Offset out of range.".to_string());
             }
-            let idx = line_index - 1;
-            for (offset, line) in lines_to_insert.iter().enumerate() {
-                lines.insert(idx + offset, line.clone());
+            for (delta, line) in lines_to_insert.iter().enumerate() {
+                lines.insert(offset + delta, line.clone());
             }
             let new_content = lines.join("\n");
             match std::fs::write(path_str, new_content) {
