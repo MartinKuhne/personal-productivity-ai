@@ -8,7 +8,9 @@
 //! `measure_cell`, and the per-UI caches - lives in `crate::ui::table_width`
 //! and re-exports the pure API via `pub use`.
 //!
-//! Unit tests live in the sibling `tests.rs` sidecar.
+//!
+//! Public-API tests live in `tests/table_width_algorithm_test.rs`.
+//! Internal-helper tests live in the sibling `internal_tests.rs` sidecar.
 
 use std::cmp::Reverse;
 use std::collections::BinaryHeap;
@@ -683,8 +685,10 @@ fn extra_lines_at_width(bps: &[Breakpoint], w: f32) -> i32 {
 }
 
 // ---------------------------------------------------------------------------
-// Tests live in the sibling `tests.rs` sidecar.
+// Internal-helper tests live in the sibling `internal_tests.rs` sidecar.
+// Public-API tests live in `tests/table_width_algorithm_test.rs`.
 // ---------------------------------------------------------------------------
 
 #[cfg(test)]
+#[path = "internal_tests.rs"]
 mod tests;
