@@ -1,7 +1,7 @@
 //! Filesystem agent tools — grep/search, read file, list files by tag, create/update/delete files, and directory listing.
 
 use crate::bus::events::file::FileEventProducer;
-use crate::markdown::parse_front_matter;
+use crate::markdown::Document;
 use crate::utils::tags::extract_tags_from_file;
 use std::path::Path;
 use walkdir::WalkDir;
@@ -170,12 +170,17 @@ pub fn tool_create_file(
         return Err("Only markdown files (.md) are allowed.".to_string());
     }
 
-    if content.starts_with("---\n") && parse_front_matter(content).is_none() {
+    // One `Document` call parses both the optional YAML
+    // front-matter and the markdown body. If the content claims
+    // to start with a front-matter block, the parse must succeed
+    // there; if it doesn't, the YAML check passes by construction
+    // (the front-matter is just absent).
+    let doc = Document::new(content.to_string());
+    if content.starts_with("---\n") && doc.front_matter().is_none() {
         return Err("Invalid YAML front-matter in markdown.".to_string());
     }
-
-    // Validate the markdown by ensuring it parses successfully
-    let _events = crate::markdown::parse_markdown_to_events(content);
+    // Validate the markdown body by ensuring it parses cleanly.
+    let _events = doc.events();
 
     let path = Path::new(path_str);
     if path.exists() {

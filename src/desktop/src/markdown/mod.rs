@@ -8,7 +8,7 @@
 //!
 //! Submodules:
 //! - `ast` — inline AST types (`InlineElem`, `RenderEvent`, `TextStyle`).
-//! - `document` — `DocumentModel`, front-matter read/write, task-toggle.
+//! - `document` — `Document` parsed-document newtype, front-matter read/write, task-toggle.
 //! - `parser` — `pulldown-cmark`-backed parsing and HTML rendering.
 //! - `table_width` — pure Fair Table Width Algorithm (no egui, no Markdown types).
 //! - `toc` — table-of-contents builder.
@@ -21,7 +21,7 @@ pub mod toc;
 pub mod toc_entry;
 
 pub use ast::{InlineElem, RenderEvent, TextStyle, heading_plain_text};
-pub use document::{DocumentModel, FrontMatter, apply_task_toggle, parse_front_matter};
+pub use document::{Document, FrontMatter, apply_task_toggle, parse_front_matter};
 pub use parser::{parse_markdown_to_events, parse_yaml_to_pairs, render_markdown_to_html};
 pub use table_width::{
     Breakpoint, CellTokens, ColumnWidths, DeficitStrategy, compute_column_breakpoints, ftwa,
