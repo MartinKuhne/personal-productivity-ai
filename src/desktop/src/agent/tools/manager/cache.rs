@@ -15,10 +15,12 @@ use std::collections::{HashMap, VecDeque};
 use std::sync::{LazyLock, Mutex};
 use std::time::{Duration, Instant};
 
-/// TTL for cache entries. Matches the prior `web_fetch` cache TTL of
-/// 5 minutes. Reviewed in `doc/planning/tool-paging-audit-and-migration.md`
-/// as part of the cursor-based `search_email` migration.
-pub const CACHE_TTL: Duration = Duration::from_secs(300);
+/// TTL for cache entries shared by `web_fetch` and `search_email`.
+/// 30 minutes. Reviewed in `doc/planning/tool-paging-audit-and-migration.md`
+/// as part of the cursor-based `search_email` migration; extended from the
+/// original 5-minute value to reduce spurious "Cursor expired or unknown"
+/// errors in long-running agent turns.
+pub const CACHE_TTL: Duration = Duration::from_secs(1800);
 
 /// Soft cap on the number of cache entries. When exceeded, the
 /// oldest-inserted entry is evicted (FIFO) on the next insert.

@@ -382,7 +382,7 @@ pub fn tool_web_delegate(
         "type": "function",
         "function": {
             "name": "web_fetch",
-            "description": "Fetch a URL and convert the content to Markdown. Returns up to 100 lines and a cursor token for pagination. Use the cursor to fetch the next page. Cache lasts 5 minutes; use force_refetch=true to bypass.",
+            "description": "Fetch a URL and convert the content to Markdown. Returns up to 100 lines and a cursor token for pagination. Use the cursor to fetch the next page. Use force_refetch=true to bypass.",
             "parameters": schemars::schema_for!(crate::agent::tools::dtos::WebFetchInput)
         }
     })];
