@@ -35,18 +35,54 @@ pub(crate) fn render_inline(
         return;
     }
 
-    ui.horizontal_wrapped(|ui| {
-        render_inline_inner(
-            ui,
-            elems,
-            needs_bullet,
-            task_checked,
-            indent,
-            list_ordinal,
-            task_index,
-            pending_toggles,
-        );
-    });
+    // P1-2: Pin `main_align: Min` so wrapped continuation lines are
+    // left-aligned, not centered. egui 0.35's `ui.horizontal_wrapped`
+    // is implemented as
+    //   `allocate_ui_with_layout_dyn(
+    //      vec2(available_width, interact_size.y),
+    //      Layout::left_to_right(Align::Center).with_main_wrap(true),
+    //      ...,
+    //   )`
+    // where `Align::Center` is the `cross_align` (vertical) and
+    // `main_align` is hardcoded to `Align::Center` (horizontal). The
+    // hardcoded `main_align: Center` centers children along the main
+    // axis within each line — for a wrapped continuation line narrower
+    // than the line width, the centered placement can land the text at
+    // a positive x offset, making the leftmost characters fall outside
+    // the visible left edge of the scroll viewport (the "text cut off
+    // on the left on subsequent lines" symptom in the agent response
+    // window). This block reproduces the exact `ui.horizontal_wrapped`
+    // allocation (same `initial_size`, same layout fields) but with
+    // `main_align: Min` via `.with_main_align(Align::Min)`. The
+    // `initial_size` must match `horizontal_wrapped`'s exactly — a
+    // smaller allocation causes the test
+    // `render_markdown_no_offscreen_text_across_viewports` to
+    // regress by 2 px (the off-viewport text moves down by `interact_size.y`).
+    // Pinned by `test_render_inline_wrapped_rows_left_aligned` and
+    // `test_render_markdown_wrapped_paragraph_left_aligned` in
+    // `render/e2e_tests/render_smoke.rs`.
+    let initial_size = egui::vec2(
+        ui.available_size_before_wrap().x,
+        ui.spacing().interact_size.y,
+    );
+    ui.allocate_ui_with_layout(
+        initial_size,
+        egui::Layout::left_to_right(egui::Align::Center)
+            .with_main_align(egui::Align::Min)
+            .with_main_wrap(true),
+        |ui| {
+            render_inline_inner(
+                ui,
+                elems,
+                needs_bullet,
+                task_checked,
+                indent,
+                list_ordinal,
+                task_index,
+                pending_toggles,
+            );
+        },
+    );
 }
 
 /// Inner inline rendering — actually paints the styled `InlineElem` runs.
