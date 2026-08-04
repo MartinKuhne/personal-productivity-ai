@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<testsuite name="com.fastmd.android.AppTest" tests="4" skipped="0" failures="0" errors="0" timestamp="2026-07-19T05:57:17.067Z" hostname="7950X" time="0.02">
+  <properties/>
+  <testcase name="testFileTreeProcessor_returnsNullIfRootIsEmptyDirectory" classname="com.fastmd.android.AppTest" time="0.008"/>
+  <testcase name="testFileTreeProcessor_filtersOutNonMarkdownFiles" classname="com.fastmd.android.AppTest" time="0.006"/>
+  <testcase name="testFileTreeProcessor_sortsDirectoriesBeforeFiles" classname="com.fastmd.android.AppTest" time="0.001"/>
+  <testcase name="testFileTreeProcessor_filtersOutEmptyDirectories" classname="com.fastmd.android.AppTest" time="0.0"/>
+  <system-out><![CDATA[]]></system-out>
+  <system-err><![CDATA[]]></system-err>
+</testsuite>

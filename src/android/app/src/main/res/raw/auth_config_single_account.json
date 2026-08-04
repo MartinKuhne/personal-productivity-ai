@@ -1,0 +1,14 @@
+{
+  "client_id" : "YOUR_CLIENT_ID_HERE",
+  "authorization_user_agent" : "DEFAULT",
+  "redirect_uri" : "msauth://com.fastmd.android/signature_hash_here",
+  "authorities" : [
+    {
+      "type": "AAD",
+      "audience": {
+        "type": "AzureADandPersonalMicrosoftAccount",
+        "tenant_id": "common"
+      }
+    }
+  ]
+}

@@ -1,0 +1,255 @@
+//! Tool-call dispatcher — receives tool-call JSON from the LLM, dispatches through the registry, and feeds results back.
+
+use crate::agent::tools::Safety;
+use crate::agent::tools::context::ToolContext;
+use crate::agent::tools::execute_tool;
+use crate::app::browser::BrowserSession;
+use crate::bus::core::Bus;
+use crate::bus::events::file::FileEvent;
+use crate::bus::events::typed::{BackgroundEvent, FsEvent};
+use crate::config::AppConfig;
+use std::path::Path;
+use std::sync::Arc;
+use std::sync::mpsc::Sender;
+
+pub struct ToolExecutor {
+    config: AppConfig,
+    file_event_bus: Bus<FileEvent>,
+    browser_session: Arc<BrowserSession>,
+    pdf_backing: std::sync::Arc<crate::app::watcher::pdf_backing_tracker::PdfBackingTracker>,
+}
+
+impl ToolExecutor {
+    pub fn new(
+        config: AppConfig,
+        file_event_bus: Bus<FileEvent>,
+        browser_session: Arc<BrowserSession>,
+        pdf_backing: std::sync::Arc<crate::app::watcher::pdf_backing_tracker::PdfBackingTracker>,
+    ) -> Self {
+        Self {
+            config,
+            file_event_bus,
+            browser_session,
+            pdf_backing,
+        }
+    }
+
+    pub fn execute_all(
+        &self,
+        tool_calls: &[serde_json::Value],
+        tx_gui: &Sender<BackgroundEvent>,
+    ) -> Vec<(String, String, String, String)> {
+        let mut safe_calls = Vec::new();
+        let mut unsafe_calls = Vec::new();
+        for tc in tool_calls {
+            let func_name = tc
+                .get("function")
+                .and_then(|f| f.get("name"))
+                .and_then(|n| n.as_str())
+                .unwrap_or("");
+            if Self::classify(func_name) == Safety::ReadOnly {
+                safe_calls.push(tc.clone());
+            } else {
+                unsafe_calls.push(tc.clone());
+            }
+        }
+        let mut results = self.execute_parallel(&safe_calls);
+        results.extend(self.execute_sequential(&unsafe_calls));
+        self.notify_file_creations(&results, tx_gui);
+        results
+    }
+
+    /// Look up a tool by name through the registry and ask it for its
+    /// [`Safety`] classification. Falls back to [`Safety::Mutating`]
+    /// (the conservative choice) when the name is unknown — that way
+    /// an LLM-emitted call to a missing tool runs sequentially instead
+    /// of in parallel, and the registry returns its normal "tool not
+    /// found" error.
+    fn classify(name: &str) -> Safety {
+        crate::agent::tools::manager::safety_of(name)
+    }
+
+    fn execute_parallel(
+        &self,
+        calls: &[serde_json::Value],
+    ) -> Vec<(String, String, String, String)> {
+        let rt = match tokio::runtime::Builder::new_multi_thread()
+            .enable_all()
+            .build()
+        {
+            Ok(rt) => rt,
+            Err(e) => {
+                tracing::error!(name = "agent.runtime.build_failed", error = %e);
+                return Vec::new();
+            }
+        };
+        let config_arc = std::sync::Arc::new(self.config.clone());
+        let pdf_backing = self.pdf_backing.clone();
+        let mut completed = Vec::new();
+        rt.block_on(async {
+            let mut join_set = tokio::task::JoinSet::new();
+            for tc in calls {
+                let call_id = extract_str(tc, &["id"]).to_string();
+                let func_name = extract_str(tc, &["function", "name"]).to_string();
+                let func_args = extract_str(tc, &["function", "arguments"]).to_string();
+                let cfg = config_arc.clone();
+                let bus = self.file_event_bus.clone();
+                let browser = self.browser_session.clone();
+                let pdf = pdf_backing.clone();
+                join_set.spawn_blocking(move || {
+                    let ctx = ToolContext::new(&cfg, &bus, browser, pdf);
+                    let result = execute_tool(&ctx, &func_name, &func_args);
+                    (call_id, func_name, func_args, result)
+                });
+            }
+            while let Some(res) = join_set.join_next().await {
+                if let Ok(data) = res {
+                    completed.push(data);
+                }
+            }
+        });
+        completed
+    }
+
+    fn execute_sequential(
+        &self,
+        calls: &[serde_json::Value],
+    ) -> Vec<(String, String, String, String)> {
+        let mut results = Vec::new();
+        for tc in calls {
+            let call_id = extract_str(tc, &["id"]).to_string();
+            let func_name = extract_str(tc, &["function", "name"]).to_string();
+            let func_args = extract_str(tc, &["function", "arguments"]).to_string();
+            let ctx = ToolContext::new(
+                &self.config,
+                &self.file_event_bus,
+                self.browser_session.clone(),
+                self.pdf_backing.clone(),
+            );
+            let result = execute_tool(&ctx, &func_name, &func_args);
+            results.push((call_id, func_name, func_args, result));
+        }
+        results
+    }
+
+    fn notify_file_creations(
+        &self,
+        results: &[(String, String, String, String)],
+        tx_gui: &Sender<BackgroundEvent>,
+    ) {
+        for (_call_id, func_name, func_args_str, result) in results {
+            if func_name != "create_file" {
+                continue;
+            }
+            if let Ok(parsed) = serde_json::from_str::<serde_json::Value>(result) {
+                if parsed.get("status").and_then(|s| s.as_str()) != Some("success") {
+                    continue;
+                }
+                let path_owned: String =
+                    match serde_json::from_str::<serde_json::Value>(func_args_str) {
+                        Ok(v) => match v
+                            .get("path")
+                            .and_then(|p| p.as_str())
+                            .map(|s| s.to_string())
+                        {
+                            Some(s) => s,
+                            None => continue,
+                        },
+                        Err(_) => continue,
+                    };
+                let vpath = Path::new(&path_owned);
+                let mut comps = vpath.components().peekable();
+                while let Some(c) = comps.peek() {
+                    match c {
+                        std::path::Component::RootDir | std::path::Component::CurDir => {
+                            comps.next();
+                        }
+                        _ => break,
+                    }
+                }
+                if let Some(std::path::Component::Normal(first)) = comps.next() {
+                    let lib_name = first.to_string_lossy();
+                    for lib in &self.config.content_libraries {
+                        if lib.name == lib_name {
+                            let rest: std::path::PathBuf = comps.collect();
+                            let abs_path = Path::new(&lib.root_folder).join(rest);
+                            let tags = crate::utils::tags::extract_tags_from_file(&abs_path);
+                            let _ = tx_gui.send(
+                                FsEvent::FileModified {
+                                    path: abs_path,
+                                    tags,
+                                }
+                                .into(),
+                            );
+                            break;
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+fn extract_str<'a>(val: &'a serde_json::Value, path: &[&str]) -> &'a str {
+    let mut current = val;
+    for key in path {
+        match current.get(key) {
+            Some(v) => current = v,
+            None => return "",
+        }
+    }
+    current.as_str().unwrap_or("")
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_safety_of_classifies_known_tools() {
+        // Regression for the is_safe_tool string-list: the registry now
+        // exposes a single `safety_of(name)` lookup that returns
+        // Safety::ReadOnly / Safety::Mutating.
+        assert_eq!(
+            crate::agent::tools::manager::safety_of("read_file"),
+            Safety::ReadOnly
+        );
+        assert_eq!(
+            crate::agent::tools::manager::safety_of("grep"),
+            Safety::ReadOnly
+        );
+        assert_eq!(
+            crate::agent::tools::manager::safety_of("create_file"),
+            Safety::Mutating
+        );
+        // Unknown tools fall back to Mutating (the conservative choice).
+        assert_eq!(
+            crate::agent::tools::manager::safety_of("nonexistent"),
+            Safety::Mutating
+        );
+    }
+
+    #[test]
+    fn test_extract_str_nested() {
+        let val = serde_json::json!({
+            "function": { "name": "test", "arguments": "{}" },
+            "id": "call_1"
+        });
+        assert_eq!(extract_str(&val, &["id"]), "call_1");
+        assert_eq!(extract_str(&val, &["function", "name"]), "test");
+        assert_eq!(extract_str(&val, &["missing"]), "");
+    }
+
+    #[test]
+    fn test_tool_executor_new() {
+        let config = AppConfig::default();
+        let bus = Bus::new();
+        let browser_session = std::sync::Arc::new(crate::app::browser::BrowserSession::new(
+            &crate::config::AppConfig::default(),
+        ));
+        let pdf_backing =
+            std::sync::Arc::new(crate::app::watcher::pdf_backing_tracker::PdfBackingTracker::new());
+        let executor = ToolExecutor::new(config, bus, browser_session, pdf_backing);
+        assert!(executor.config.models.is_empty());
+    }
+}

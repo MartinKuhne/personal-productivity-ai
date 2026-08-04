@@ -1,0 +1,467 @@
+//! Input/output data-transfer objects for every tool — `serde` and `JsonSchema` derives for LLM argument serialisation.
+//!
+//! Every user-visible string (tool description, per-field description) lives
+//! in the per-family `strings` submodule under `registry/builtin/`. The DTOs
+//! here reference those consts via `#[schemars(description = ...)]` so the
+//! JSON schema the LLM sees is generated from a single source of truth.
+
+use crate::agent::tools::manager::builtin::strings;
+use schemars::JsonSchema;
+use serde::{Deserialize, Serialize};
+
+#[derive(Serialize, Deserialize, Debug)]
+#[serde(tag = "status", rename_all = "lowercase")]
+pub enum ToolResponse<T> {
+    Success { data: T },
+    Error { message: String },
+}
+
+#[derive(Deserialize, Debug, JsonSchema)]
+pub struct GrepInput {
+    #[schemars(description = strings::fs::FIELD_GREP_INPUT_QUERY)]
+    pub query: String,
+}
+#[derive(Serialize, Debug, JsonSchema)]
+pub struct GrepResponse {
+    #[schemars(description = strings::fs::FIELD_GREP_RESPONSE_MATCHES)]
+    pub matches: String,
+    #[schemars(description = strings::fs::FIELD_GREP_RESPONSE_TOTAL)]
+    pub total: usize,
+    #[schemars(description = strings::fs::FIELD_GREP_RESPONSE_TRUNCATED)]
+    pub truncated: bool,
+}
+
+#[derive(Deserialize, Debug, JsonSchema)]
+pub struct ReadTagsInput {}
+#[derive(Serialize, Debug, JsonSchema)]
+pub struct ReadTagsResponse {
+    pub tags: Vec<String>,
+}
+
+#[derive(Deserialize, Debug, JsonSchema)]
+pub struct ListFilesByTagInput {
+    pub tag: String,
+    #[schemars(description = strings::paging::FIELD_OFFSET_DESCRIPTION)]
+    pub offset: Option<usize>,
+    #[schemars(description = strings::paging::FIELD_LIMIT_DESCRIPTION)]
+    pub limit: Option<usize>,
+}
+#[derive(Serialize, Debug, JsonSchema)]
+pub struct ListFilesByTagResponse {
+    #[schemars(description = strings::fs::FIELD_LIST_FILES_BY_TAG_RESPONSE_FILES)]
+    #[serde(default)]
+    pub files: Vec<String>,
+    #[schemars(description = strings::paging::FIELD_TOTAL_DESCRIPTION)]
+    pub total: usize,
+    #[schemars(description = strings::paging::FIELD_HINT_DESCRIPTION)]
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub hint: Option<String>,
+}
+
+#[derive(Deserialize, Debug, JsonSchema)]
+pub struct ListFilesInput {
+    pub path: String,
+    #[schemars(description = strings::paging::FIELD_OFFSET_DESCRIPTION)]
+    pub offset: Option<usize>,
+    #[schemars(description = strings::paging::FIELD_LIMIT_DESCRIPTION)]
+    pub limit: Option<usize>,
+}
+#[derive(Serialize, Debug, JsonSchema)]
+pub struct ListFilesResponse {
+    #[schemars(description = strings::fs::FIELD_LIST_FILES_RESPONSE_FILES)]
+    #[serde(default)]
+    pub files: Vec<String>,
+    #[schemars(description = strings::paging::FIELD_TOTAL_DESCRIPTION)]
+    pub total: usize,
+    #[schemars(description = strings::paging::FIELD_HINT_DESCRIPTION)]
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub hint: Option<String>,
+}
+
+#[derive(Deserialize, Debug, JsonSchema)]
+pub struct ReadFileInput {
+    pub path: String,
+}
+#[derive(Serialize, Debug, JsonSchema)]
+pub struct ReadFileResponse {
+    pub content: String,
+}
+
+#[derive(Deserialize, Debug, JsonSchema)]
+pub struct ReadFileLinesInput {
+    pub path: String,
+    pub start_line: usize,
+    pub end_line: usize,
+}
+#[derive(Serialize, Debug, JsonSchema)]
+pub struct ReadFileLinesResponse {
+    pub content: String,
+}
+
+#[derive(Deserialize, Debug, JsonSchema)]
+pub struct CreateFileInput {
+    pub path: String,
+    pub content: String,
+}
+#[derive(Serialize, Debug, JsonSchema)]
+pub struct CreateFileResponse {
+    pub result: String,
+    pub size_bytes: u64,
+}
+
+#[derive(Deserialize, Debug, JsonSchema)]
+pub struct InsertLinesInput {
+    pub path: String,
+    pub line_index: usize,
+    pub lines: Vec<String>,
+}
+#[derive(Serialize, Debug, JsonSchema)]
+pub struct InsertLinesResponse {
+    pub result: String,
+}
+
+#[derive(Deserialize, Debug, JsonSchema)]
+pub struct WebFetchInput {
+    pub url: String,
+    #[serde(default)]
+    pub headers: bool,
+    #[serde(default)]
+    pub force_refetch: bool,
+    #[schemars(description = strings::cursor::FIELD_CURSOR_DESCRIPTION)]
+    #[serde(default)]
+    pub cursor: Option<String>,
+}
+#[derive(Serialize, Debug, JsonSchema)]
+pub struct WebFetchResponse {
+    pub content: String,
+    #[schemars(description = strings::web::FIELD_WEB_FETCH_RESPONSE_TOTAL_LINES)]
+    pub total_lines: usize,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub cursor: Option<String>,
+    #[schemars(description = strings::paging::FIELD_HINT_DESCRIPTION)]
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub hint: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub response_headers: Option<std::collections::HashMap<String, String>>,
+    #[schemars(description = strings::web::FIELD_WEB_FETCH_RESPONSE_FROM_CACHE)]
+    pub from_cache: bool,
+}
+
+#[derive(Deserialize, Debug, JsonSchema)]
+pub struct WebSearchInput {
+    #[schemars(description = strings::web::FIELD_WEB_SEARCH_INPUT_QUERY)]
+    pub query: String,
+}
+#[derive(Serialize, Debug, JsonSchema)]
+pub struct WebSearchResponse {
+    pub results: String,
+}
+
+#[derive(Deserialize, Debug, JsonSchema)]
+pub struct ReadYamlHeaderInput {
+    pub path: String,
+}
+#[derive(Serialize, Debug, JsonSchema)]
+pub struct ReadYamlHeaderResponse {
+    pub content: String,
+}
+
+#[derive(Deserialize, Debug, JsonSchema)]
+pub struct WriteYamlHeaderInput {
+    pub path: String,
+    pub title: Option<String>,
+    pub summary: Option<String>,
+    pub tags: Option<Vec<String>>,
+    #[serde(rename = "header-date")]
+    pub header_date: Option<String>,
+}
+#[derive(Serialize, Debug, JsonSchema)]
+pub struct WriteYamlHeaderResponse {
+    pub result: String,
+}
+
+#[derive(Deserialize, Debug, JsonSchema)]
+pub struct SearchCalendarInput {
+    pub keyword: String,
+}
+#[derive(Serialize, Debug, JsonSchema)]
+pub struct SearchCalendarResponse {
+    pub results: String,
+}
+
+#[derive(Deserialize, Debug, JsonSchema)]
+pub struct GetCalendarInput {
+    pub start_date: String,
+    pub end_date: String,
+}
+#[derive(Serialize, Debug, JsonSchema)]
+pub struct GetCalendarResponse {
+    pub results: String,
+}
+
+#[derive(Deserialize, Debug, JsonSchema)]
+pub struct GetCalendarItemInput {
+    pub href: String,
+}
+#[derive(Serialize, Debug, JsonSchema)]
+pub struct GetCalendarItemResponse {
+    pub result: String,
+}
+
+#[derive(Deserialize, Debug, JsonSchema)]
+pub struct AddCalendarItemInput {
+    pub item_json: String,
+}
+#[derive(Serialize, Debug, JsonSchema, PartialEq)]
+pub struct AddCalendarItemResponse {
+    pub result: String,
+}
+
+#[derive(Deserialize, Debug, JsonSchema)]
+pub struct UpdateCalendarItemInput {
+    pub id: String,
+    pub update_json: String,
+}
+#[derive(Serialize, Debug, JsonSchema, PartialEq)]
+pub struct UpdateCalendarItemResponse {
+    pub result: String,
+}
+
+#[derive(Deserialize, Debug, JsonSchema)]
+pub struct DeleteCalendarItemInput {
+    pub id: String,
+}
+#[derive(Serialize, Debug, JsonSchema, PartialEq)]
+pub struct DeleteCalendarItemResponse {
+    pub result: String,
+}
+
+#[derive(Deserialize, Debug, JsonSchema)]
+pub struct SearchEmailInput {
+    #[schemars(description = strings::jmap::FIELD_SEARCH_EMAIL_INPUT_KEYWORD)]
+    pub keyword: Option<String>,
+    #[schemars(description = strings::jmap::FIELD_SEARCH_EMAIL_INPUT_FOLDER)]
+    pub folder: Option<String>,
+    #[schemars(description = strings::jmap::FIELD_SEARCH_EMAIL_INPUT_START_DATE)]
+    pub start_date: Option<String>,
+    #[schemars(description = strings::jmap::FIELD_SEARCH_EMAIL_INPUT_END_DATE)]
+    pub end_date: Option<String>,
+    #[schemars(description = strings::jmap::FIELD_SEARCH_EMAIL_INPUT_FROM)]
+    pub from: Option<String>,
+    #[schemars(description = strings::jmap::FIELD_SEARCH_EMAIL_INPUT_TO)]
+    pub to: Option<String>,
+    #[schemars(description = strings::jmap::FIELD_SEARCH_EMAIL_INPUT_IS_UNREAD)]
+    pub is_unread: Option<bool>,
+    #[schemars(description = strings::jmap::FIELD_SEARCH_EMAIL_INPUT_IS_FLAGGED)]
+    pub is_flagged: Option<bool>,
+    #[schemars(description = strings::cursor::FIELD_CURSOR_DESCRIPTION)]
+    pub cursor: Option<String>,
+}
+#[derive(Serialize, Debug, JsonSchema)]
+pub struct SearchEmailResponse {
+    pub results: String,
+    #[schemars(description = strings::paging::FIELD_TOTAL_DESCRIPTION)]
+    pub total: usize,
+    #[schemars(description = strings::cursor::FIELD_CURSOR_DESCRIPTION)]
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub cursor: Option<String>,
+    #[schemars(description = strings::paging::FIELD_HINT_DESCRIPTION)]
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub hint: Option<String>,
+}
+
+#[derive(Deserialize, Debug, JsonSchema)]
+pub struct GetEmailByIdInput {
+    pub id: String,
+}
+#[derive(Serialize, Debug, JsonSchema)]
+pub struct GetEmailByIdResponse {
+    pub result: String,
+}
+
+#[derive(Deserialize, Debug, JsonSchema)]
+pub struct SendEmailInput {
+    pub to: String,
+    pub subject: String,
+    pub body: String,
+}
+#[derive(Serialize, Debug, JsonSchema)]
+pub struct SendEmailResponse {
+    pub result: String,
+}
+
+#[derive(Deserialize, Debug, JsonSchema)]
+pub struct DeleteEmailInput {
+    pub id: String,
+}
+#[derive(Serialize, Debug, JsonSchema)]
+pub struct DeleteEmailResponse {
+    pub result: String,
+}
+
+#[derive(Deserialize, Debug, JsonSchema)]
+pub struct SearchContactInput {
+    pub keyword: String,
+}
+#[derive(Serialize, Debug, JsonSchema)]
+pub struct SearchContactResponse {
+    pub results: String,
+}
+
+#[derive(Deserialize, Debug, JsonSchema)]
+pub struct GetContactInput {
+    pub id: String,
+}
+#[derive(Serialize, Debug, JsonSchema)]
+pub struct GetContactResponse {
+    pub result: String,
+}
+
+#[derive(Deserialize, Debug, JsonSchema)]
+pub struct AddContactInput {
+    pub contact_json: String,
+}
+#[derive(Serialize, Debug, JsonSchema)]
+pub struct AddContactResponse {
+    pub result: String,
+}
+
+#[derive(Deserialize, Debug, JsonSchema)]
+pub struct GetWeatherInput {
+    pub location: String,
+    pub date_range: Option<String>,
+}
+#[derive(Serialize, Debug, JsonSchema)]
+pub struct GetWeatherResponse {
+    pub result: String,
+}
+
+#[derive(Deserialize, Debug, JsonSchema)]
+pub struct ReplaceTextInput {
+    pub path: String,
+    pub old_string: String,
+    pub new_string: String,
+}
+#[derive(Serialize, Debug, JsonSchema)]
+pub struct ReplaceTextResponse {
+    pub result: String,
+}
+
+#[derive(Deserialize, Debug, JsonSchema)]
+pub struct WebDelegateInput {
+    pub instruction: String,
+}
+#[derive(Serialize, Debug, JsonSchema)]
+pub struct WebDelegateResponse {
+    pub result: String,
+}
+
+// ---------------------------------------------------------------------------
+// Browser automation tools (BRWS-001..008)
+// ---------------------------------------------------------------------------
+
+/// `browser_navigate` input — drive the persistent page to a URL.
+#[derive(Deserialize, Debug, JsonSchema)]
+pub struct BrowserNavigateInput {
+    #[schemars(description = strings::browser::FIELD_BROWSER_NAVIGATE_INPUT_URL)]
+    pub url: String,
+}
+#[derive(Serialize, Debug, JsonSchema)]
+pub struct BrowserNavigateResponse {
+    #[schemars(description = strings::browser::FIELD_BROWSER_NAVIGATE_RESPONSE_URL)]
+    pub url: String,
+    #[schemars(description = strings::browser::FIELD_BROWSER_NAVIGATE_RESPONSE_TITLE)]
+    pub title: String,
+}
+
+/// `browser_get_page_state` input — no parameters.
+#[derive(Deserialize, Debug, JsonSchema)]
+pub struct BrowserGetPageStateInput {}
+#[derive(Serialize, Debug, JsonSchema)]
+pub struct BrowserGetPageStateResponse {
+    #[schemars(description = strings::browser::FIELD_BROWSER_GET_PAGE_STATE_RESPONSE_URL)]
+    pub url: String,
+    #[schemars(description = strings::browser::FIELD_BROWSER_GET_PAGE_STATE_RESPONSE_TITLE)]
+    pub title: String,
+    #[schemars(description = strings::browser::FIELD_BROWSER_GET_PAGE_STATE_RESPONSE_ELEMENTS)]
+    pub elements: String,
+    #[schemars(description = strings::browser::FIELD_BROWSER_GET_PAGE_STATE_RESPONSE_TOTAL)]
+    pub total: usize,
+}
+
+/// `browser_click` input — CSS selector for a single element.
+#[derive(Deserialize, Debug, JsonSchema)]
+pub struct BrowserClickInput {
+    #[schemars(description = strings::browser::FIELD_BROWSER_CLICK_INPUT_SELECTOR)]
+    pub selector: String,
+}
+#[derive(Serialize, Debug, JsonSchema)]
+pub struct BrowserClickResponse {
+    pub result: String,
+}
+
+/// `browser_fill_input` input — selector + text.
+#[derive(Deserialize, Debug, JsonSchema)]
+pub struct BrowserFillInputInput {
+    #[schemars(description = strings::browser::FIELD_BROWSER_FILL_INPUT_INPUT_SELECTOR)]
+    pub selector: String,
+    #[schemars(description = strings::browser::FIELD_BROWSER_FILL_INPUT_INPUT_TEXT)]
+    pub text: String,
+}
+#[derive(Serialize, Debug, JsonSchema)]
+pub struct BrowserFillInputResponse {
+    pub result: String,
+}
+
+/// `browser_select_dropdown` input — selector + option value.
+#[derive(Deserialize, Debug, JsonSchema)]
+pub struct BrowserSelectDropdownInput {
+    #[schemars(description = strings::browser::FIELD_BROWSER_SELECT_DROPDOWN_INPUT_SELECTOR)]
+    pub selector: String,
+    #[schemars(description = strings::browser::FIELD_BROWSER_SELECT_DROPDOWN_INPUT_VALUE)]
+    pub value: String,
+}
+#[derive(Serialize, Debug, JsonSchema)]
+pub struct BrowserSelectDropdownResponse {
+    pub result: String,
+}
+
+/// `browser_press_key` input — keyboard key.
+#[derive(Deserialize, Debug, JsonSchema)]
+pub struct BrowserPressKeyInput {
+    #[schemars(description = strings::browser::FIELD_BROWSER_PRESS_KEY_INPUT_KEY)]
+    pub key: String,
+}
+#[derive(Serialize, Debug, JsonSchema)]
+pub struct BrowserPressKeyResponse {
+    pub result: String,
+}
+
+/// `browser_evaluate_js` input — arbitrary JS expression.
+#[derive(Deserialize, Debug, JsonSchema)]
+pub struct BrowserEvaluateJsInput {
+    #[schemars(description = strings::browser::FIELD_BROWSER_EVALUATE_JS_INPUT_SCRIPT)]
+    pub script: String,
+}
+#[derive(Serialize, Debug, JsonSchema)]
+pub struct BrowserEvaluateJsResponse {
+    /// JSON-encoded result of the script. May be `null`.
+    pub result: String,
+}
+
+/// `browser_screenshot` input — restricted filename.
+#[derive(Deserialize, Debug, JsonSchema)]
+pub struct BrowserScreenshotInput {
+    #[schemars(description = strings::browser::FIELD_BROWSER_SCREENSHOT_INPUT_FILENAME)]
+    pub filename: String,
+    #[serde(default)]
+    #[schemars(description = strings::browser::FIELD_BROWSER_SCREENSHOT_INPUT_FULL_PAGE)]
+    pub full_page: bool,
+}
+#[derive(Serialize, Debug, JsonSchema)]
+pub struct BrowserScreenshotResponse {
+    #[schemars(description = strings::browser::FIELD_BROWSER_SCREENSHOT_RESPONSE_PATH)]
+    pub path: String,
+    #[schemars(description = strings::browser::FIELD_BROWSER_SCREENSHOT_RESPONSE_BYTES)]
+    pub bytes: usize,
+}
