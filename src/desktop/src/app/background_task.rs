@@ -4,6 +4,7 @@
 
 use crate::app::background::indexer::Indexer;
 use crate::app::background::pdf_converter::PdfConverterWorker;
+#[cfg(feature = "image-library")]
 use crate::app::background::vision_processor::ImageVisionWorker;
 use crate::app::watcher::file_watcher::FileWatcher;
 use crate::bus::config::CONFIG_ARRIVAL_TIMEOUT;
@@ -136,17 +137,27 @@ impl Task {
         let (tx_work, rx_work) = channel::<PathBuf>();
         let rx_work = Arc::new(Mutex::new(rx_work));
         let (tx_pdf, rx_pdf) = channel::<PathBuf>();
+        // Image-vision channel + worker are only spun up when the
+        // `image-library` Cargo feature is enabled. Without it the
+        // channel is dropped immediately and the `BusRouter`'s
+        // image-routing branch is a no-op (the field is gated in
+        // `bus/router/bus_router.rs`).
+        #[cfg(feature = "image-library")]
         let (tx_img, rx_img) = channel::<PathBuf>();
 
         let cmd_template = config.pdf_converter_command.clone();
         PdfConverterWorker::new(rx_pdf, tx.clone(), file_event_bus.clone(), cmd_template).spawn();
 
+        #[cfg(feature = "image-library")]
         ImageVisionWorker::new(rx_img, tx.clone(), config.clone(), file_event_bus.clone()).spawn();
 
         let workers = Indexer::spawn_workers(4, rx_work, tx.clone());
 
         let indexer = Indexer::new(config.clone(), tx.clone(), file_event_bus.clone(), cancel);
+        #[cfg(feature = "image-library")]
         indexer.scan_libraries(&tx_work, &tx_pdf, &tx_img);
+        #[cfg(not(feature = "image-library"))]
+        indexer.scan_libraries(&tx_work, &tx_pdf);
 
         drop(tx_work);
         for worker in workers {
@@ -158,12 +169,16 @@ impl Task {
             tx.clone(),
             file_event_bus.clone(),
             tx_pdf.clone(),
+            #[cfg(feature = "image-library")]
             tx_img.clone(),
             finished_watcher,
         );
         file_watcher.start();
 
+        #[cfg(feature = "image-library")]
         BusRouter::new(file_event_bus.clone(), tx_pdf, tx_img).spawn();
+        #[cfg(not(feature = "image-library"))]
+        BusRouter::new(file_event_bus.clone(), tx_pdf).spawn();
     }
 }
 

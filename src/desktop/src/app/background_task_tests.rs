@@ -9,7 +9,9 @@
 
 use super::*;
 use crate::bus::events::file::FileEventKind;
-use crate::bus::events::typed::{FsEvent, ProcessEvent};
+use crate::bus::events::typed::FsEvent;
+#[cfg(feature = "image-library")]
+use crate::bus::events::typed::ProcessEvent;
 use crate::config::{AppConfig, ContentLibrary};
 use tempfile::tempdir;
 
@@ -319,6 +321,7 @@ fn test_pdf_worker_publishes_discovered_for_output_md() {
     );
 }
 
+#[cfg(feature = "image-library")]
 #[test]
 fn test_bus_published_image_triggers_vision_via_subscriber() {
     use crate::app::background::LogCategory;

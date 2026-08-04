@@ -20,6 +20,14 @@ discord = []
 # the `browser_*` agent tools. Heavy dependency (~6 MB compiled
 # output for the Playwright client + macros); off by default.
 browser = ["dep:playwright-rs"]
+# Image-library / image-vision worker. Adds the [`ImageJob`]
+# type, the `ImageVisionWorker` background processor, the
+# image-routing branch in the file-event bus router, and the
+# `tx_img` worker channel. Off by default — the image-vision
+# pipeline talks to a vision-capable LLM and the `LogCategory::ImageVision`
+# log category stays compiled (so the UI filter chip still
+# renders) but no worker ever emits into it.
+image-library = []
 
 [dependencies]
 anyhow = "1.0.104"

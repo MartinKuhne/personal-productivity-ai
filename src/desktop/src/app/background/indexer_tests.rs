@@ -35,9 +35,13 @@ fn test_scan_libraries_discovers_md() {
 
     let (tx_work, _rx_work) = std::sync::mpsc::channel();
     let (tx_pdf, _rx_pdf) = std::sync::mpsc::channel();
+    #[cfg(feature = "image-library")]
     let (tx_img, _rx_img) = std::sync::mpsc::channel();
 
+    #[cfg(feature = "image-library")]
     indexer.scan_libraries(&tx_work, &tx_pdf, &tx_img);
+    #[cfg(not(feature = "image-library"))]
+    indexer.scan_libraries(&tx_work, &tx_pdf);
 
     let mut discovered = Vec::new();
     while let Ok(ev) = reader.recv_timeout(std::time::Duration::from_millis(100)) {
@@ -73,9 +77,13 @@ fn test_scan_libraries_skips_git() {
 
     let (tx_work, _rx_work) = std::sync::mpsc::channel();
     let (tx_pdf, _rx_pdf) = std::sync::mpsc::channel();
+    #[cfg(feature = "image-library")]
     let (tx_img, _rx_img) = std::sync::mpsc::channel();
 
+    #[cfg(feature = "image-library")]
     indexer.scan_libraries(&tx_work, &tx_pdf, &tx_img);
+    #[cfg(not(feature = "image-library"))]
+    indexer.scan_libraries(&tx_work, &tx_pdf);
 
     let mut discovered = Vec::new();
     while let Ok(ev) = reader.recv_timeout(std::time::Duration::from_millis(100)) {
@@ -108,9 +116,13 @@ fn test_scan_libraries_queues_pdf() {
 
     let (tx_work, _rx_work) = std::sync::mpsc::channel();
     let (tx_pdf, rx_pdf) = std::sync::mpsc::channel();
+    #[cfg(feature = "image-library")]
     let (tx_img, _rx_img) = std::sync::mpsc::channel();
 
+    #[cfg(feature = "image-library")]
     indexer.scan_libraries(&tx_work, &tx_pdf, &tx_img);
+    #[cfg(not(feature = "image-library"))]
+    indexer.scan_libraries(&tx_work, &tx_pdf);
 
     let pdf = rx_pdf.recv_timeout(std::time::Duration::from_millis(500));
     assert!(pdf.is_ok());

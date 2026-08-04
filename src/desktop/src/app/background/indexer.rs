@@ -81,15 +81,17 @@ impl Indexer {
     ///
     /// Each library is walked independently with its own batch; PDF and
     /// image files are also forwarded on their respective channels for
-    /// background conversion / vision processing.
+    /// background conversion / vision processing. The `tx_img` parameter
+    /// is only present when the `image-library` Cargo feature is enabled.
     pub fn scan_libraries(
         &self,
         tx_work: &Sender<PathBuf>,
         tx_pdf: &Sender<PathBuf>,
-        tx_img: &Sender<PathBuf>,
+        #[cfg(feature = "image-library")] tx_img: &Sender<PathBuf>,
     ) {
         let mut files_scanned = 0;
         let mut pdfs_queued = 0;
+        #[cfg(feature = "image-library")]
         let mut images_queued = 0;
         let mut last_log_time = std::time::Instant::now();
 
@@ -139,11 +141,21 @@ impl Indexer {
                             "jpg" | "jpeg" | "png" | "gif" | "webp" | "bmp" | "tiff" | "avif"
                         ) && is_image_lib
                         {
-                            let job =
-                                crate::app::background::models::ImageJob::new(path.to_path_buf());
-                            if job.should_process() {
-                                images_queued += 1;
-                                let _ = tx_img.send(path.to_path_buf());
+                            // Image-vision branch. Only compiled when
+                            // the `image-library` Cargo feature is on;
+                            // without it, image files still appear on
+                            // the `FileEvent` bus (via `batch_paths`
+                            // above) but never get processed for
+                            // vision.
+                            #[cfg(feature = "image-library")]
+                            {
+                                let job = crate::app::background::models::ImageJob::new(
+                                    path.to_path_buf(),
+                                );
+                                if job.should_process() {
+                                    images_queued += 1;
+                                    let _ = tx_img.send(path.to_path_buf());
+                                }
                             }
                         }
                     }
@@ -157,16 +169,19 @@ impl Indexer {
                 }
 
                 if files_scanned % 500 == 0 || last_log_time.elapsed().as_secs() >= 5 {
-                    let _ = self.tx.send(
-                        BackgroundLogEntry::new(
-                            LogCategory::Indexer,
-                            format!(
-                                "Scanned {} files, queued {} PDFs, queued {} images",
-                                files_scanned, pdfs_queued, images_queued
-                            ),
-                        )
-                        .into(),
+                    #[cfg(feature = "image-library")]
+                    let msg = format!(
+                        "Scanned {} files, queued {} PDFs, queued {} images",
+                        files_scanned, pdfs_queued, images_queued
                     );
+                    #[cfg(not(feature = "image-library"))]
+                    let msg = format!(
+                        "Scanned {} files, queued {} PDFs",
+                        files_scanned, pdfs_queued
+                    );
+                    let _ = self
+                        .tx
+                        .send(BackgroundLogEntry::new(LogCategory::Indexer, msg).into());
                     last_log_time = std::time::Instant::now();
                 }
                 if files_scanned % 50 == 0 {
@@ -177,15 +192,19 @@ impl Indexer {
             flush_batch(&mut batch_paths, &self.bus);
         }
 
+        #[cfg(feature = "image-library")]
+        let final_msg = format!(
+            "Initial indexing complete. Scanned {} files, queued {} PDFs, queued {} images.",
+            files_scanned, pdfs_queued, images_queued
+        );
+        #[cfg(not(feature = "image-library"))]
+        let final_msg = format!(
+            "Initial indexing complete. Scanned {} files, queued {} PDFs.",
+            files_scanned, pdfs_queued
+        );
         let _ = self
             .tx
-            .send(BackgroundLogEntry::new(
-                LogCategory::Indexer,
-                format!(
-                "Initial indexing complete. Scanned {} files, queued {} PDFs, queued {} images.",
-                files_scanned, pdfs_queued, images_queued
-            ),
-            ).into());
+            .send(BackgroundLogEntry::new(LogCategory::Indexer, final_msg).into());
     }
 }
 

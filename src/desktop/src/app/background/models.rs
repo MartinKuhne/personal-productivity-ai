@@ -4,14 +4,27 @@
 //! [`crate::bus::events::messages`] in the layering-inversion fix so the
 //! `bus` module no longer depends on `app`. They are re-exported here
 //! for backwards compatibility with existing in-tree call sites.
+//!
+//! ## `image-library` feature
+//!
+//! `ImageJob` is gated behind the `image-library` Cargo feature so
+//! builds that opt out of the image-vision worker don't pull in the
+//! type. The image-vision worker itself lives in
+//! `crate::app::background::vision_processor`. `LogCategory`
+//! (including the `ImageVision` variant) and
+//! `crate::app::background::PdfConversionJob`
+//! stay always compiled — the log filter chip for `Image Vision`
+//! still renders in the UI even when no worker is emitting into it.
 
 pub use crate::bus::events::messages::{BackgroundLogEntry, LogCategory};
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[cfg(feature = "image-library")]
     use tempfile::tempdir;
 
+    #[cfg(feature = "image-library")]
     #[test]
     fn test_image_job_new_swaps_extension() {
         let img = std::path::PathBuf::from("/test/photo.jpg");
@@ -20,6 +33,7 @@ mod tests {
         assert_eq!(job.md_path.to_string_lossy(), "/test/photo.md");
     }
 
+    #[cfg(feature = "image-library")]
     #[test]
     fn test_image_job_should_process_missing_md() {
         let dir = tempdir().unwrap();
@@ -28,6 +42,7 @@ mod tests {
         assert!(job.should_process());
     }
 
+    #[cfg(feature = "image-library")]
     #[test]
     fn test_image_job_should_process_md_older_than_image() {
         let dir = tempdir().unwrap();
@@ -41,6 +56,7 @@ mod tests {
         assert!(job.should_process());
     }
 
+    #[cfg(feature = "image-library")]
     #[test]
     fn test_image_job_should_not_process_md_newer() {
         let dir = tempdir().unwrap();
@@ -64,12 +80,14 @@ mod tests {
     }
 }
 
+#[cfg(feature = "image-library")]
 #[derive(Debug, Clone)]
 pub struct ImageJob {
     pub image_path: std::path::PathBuf,
     pub md_path: std::path::PathBuf,
 }
 
+#[cfg(feature = "image-library")]
 impl ImageJob {
     pub fn new(image_path: std::path::PathBuf) -> Self {
         let mut md_path = image_path.clone();
