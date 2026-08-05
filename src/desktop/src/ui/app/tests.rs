@@ -23,7 +23,7 @@ fn create_test_app() -> FastMdApp {
 /// UI-002 (dark color scheme): `configure_dark_theme` must pin the
 /// active theme to Dark and apply the FastMD brand palette
 /// (RGB(9, 9, 11) surface, indigo selection) to the dark theme.
-/// Regression guard: the egui 0.27 → 0.35 upgrade silently fell
+/// Regression guard: the egui 0.27 â†’ 0.35 upgrade silently fell
 /// back to the active theme's default visuals on systems reporting
 /// light mode, losing the black background.
 #[test]
@@ -358,7 +358,7 @@ fn test_agent_token_usage_message_accumulates() {
         Some(5)
     );
 
-    // Third turn: smaller context — peak should NOT shrink.
+    // Third turn: smaller context â€” peak should NOT shrink.
     app.orchestrator
         .tx
         .send(
@@ -403,7 +403,7 @@ fn test_process_file_events_updated_resets_loaded_path() {
     // file that is currently loaded into the renderer, the
     // next frame must reload it from disk. We model "currently
     // loaded" by setting `loaded_path = Some(path)` while
-    // leaving `selected_file` alone — `load_selected_file`
+    // leaving `selected_file` alone â€” `load_selected_file`
     // (the actual reload driver) only fires when
     // `selected_file.is_some() && loaded_path != selected_file`.
     let mut app = create_test_app();
@@ -465,7 +465,7 @@ fn test_process_file_events_removed_clears_loaded_path() {
     // Sanity check: a Removed event still clears `loaded_path`
     // regardless of whether the editor is open. (We accept
     // losing unsaved edits in the editor if the file was
-    // deleted out from under us — that's the user's action.)
+    // deleted out from under us â€” that's the user's action.)
     let mut app = create_test_app();
     let path = PathBuf::from("/tmp/gone.md");
 
@@ -600,7 +600,7 @@ fn test_process_file_events_does_not_set_left_panel_dirty() {
     let _ = app.orchestrator.process_file_events();
     assert!(
         !app.layout.left_panel_dirty,
-        "process_file_events must not set left_panel_dirty — the width is \
+        "process_file_events must not set left_panel_dirty â€” the width is \
              calculated once when indexing finishes, not per bus event"
     );
 }
@@ -648,7 +648,7 @@ fn test_process_file_events_rebuild_only_on_removal() {
     let _ = app.orchestrator.process_file_events();
     assert!(
         app.orchestrator.tag_manager.all_tags().contains("keep"),
-        "Discovered events must NOT call rebuild — the FileParsed path \
+        "Discovered events must NOT call rebuild â€” the FileParsed path \
              updates all_tags incrementally"
     );
 }
@@ -687,7 +687,7 @@ fn test_render_panels_no_id_change_warnings_on_toc_transition() {
         app.render_panels(ui);
     });
 
-    // Pass 2: Second render pass with TOC active — must produce 0 ID change warnings.
+    // Pass 2: Second render pass with TOC active â€” must produce 0 ID change warnings.
     let output = ctx.run_ui(Default::default(), |ui| {
         app.render_panels(ui);
     });
@@ -970,4 +970,239 @@ fn test_handle_fs_event_file_deleted_closes_open_tab() {
         Some(&keep),
         "selection must fall back to the last remaining tab"
     );
+}
+
+// ---------------------------------------------------------------------------
+// Font-scale persistence regression tests (PR #63 ported to the
+// `app/{mod,init,update}.rs` split).
+// ---------------------------------------------------------------------------
+
+/// REGRESSION (font scale compounding): `pixels_per_point` is the
+/// OS-reported device pixel ratio (e.g. 1.5 on a 150% DPI display).
+/// The persisted `font_size_scale` must be a user-chosen
+/// **multiplier** relative to that baseline — not the absolute
+/// ppp. The pre-fix code divided the current ppp by a hard-coded
+/// 1.0 to compute the scale, so a 150% DPI display saved
+/// `Some(1.5)`, then on the next launch multiplied the OS-reported
+/// 1.5 by that "scale" 1.5 → 2.25, then saved `Some(2.25)`, then
+/// 3.375, 5.06, ... The font visibly grew every launch.
+///
+/// This test exercises the **real per-frame order** used by
+/// `update_ui`: `apply_persisted_font_scale` and
+/// `persist_font_scale` run in the same frame, **before**
+/// egui 0.35's deferred `set_pixels_per_point` update takes
+/// effect. The earlier version of this test masked a bug by
+/// inserting a `run_ui` between apply and persist.
+#[test]
+fn test_font_scale_does_not_compound_across_launches() {
+    // === Session 1: simulated 150% DPI display, user has chosen 1.2x zoom ===
+    let mut app1 = create_test_app();
+    app1.persisted_ui_state.font_size_scale = Some(1.2);
+
+    let (ctx1, _raw1) = ctx_with_native_ppp(1.5);
+    app1.apply_persisted_font_scale(&ctx1);
+    // Persist in the SAME frame as apply — the real app's
+    // `update_ui` does this. The deferred zoom-factor update
+    // from `set_pixels_per_point` has not been applied yet
+    // (it only takes effect on the next `begin_pass`), so
+    // `ctx.pixels_per_point()` still reports the OS baseline
+    // (1.5), not the target 1.8. The persist must NOT
+    // recompute the scale from this stale ppp or it would
+    // silently reset the stored value to `None`.
+    app1.persist_font_scale(&ctx1);
+    assert_eq!(
+        app1.persisted_ui_state.font_size_scale,
+        Some(1.2),
+        "session 1 persist (same frame as apply): must store the user's \
+         1.2 multiplier, not the pre-apply ppp / baseline ratio"
+    );
+
+    // After a follow-up frame, the deferred zoom-factor is
+    // applied and the on-screen ppp matches the user's choice.
+    let (ctx1_after, _) = ctx_with_native_ppp(1.5);
+    let _ = ctx1_after.run_ui(egui::RawInput::default(), |_ui| {});
+    let _ = ctx1_after; // not asserted — we only care about persistence here.
+
+    // === Session 2: restart, reload persisted state, same OS baseline ===
+    let persisted_json = serde_json::to_string(&app1.persisted_ui_state).unwrap();
+    let mut app2 = create_test_app();
+    app2.persisted_ui_state = serde_json::from_str(&persisted_json).unwrap();
+
+    let (ctx2, _raw2) = ctx_with_native_ppp(1.5);
+    app2.apply_persisted_font_scale(&ctx2);
+    app2.persist_font_scale(&ctx2);
+    assert_eq!(
+        app2.persisted_ui_state.font_size_scale,
+        Some(1.2),
+        "session 2 persist: must remain 1.2, not 1.8 or higher"
+    );
+
+    // === Session 3..N: the value must stay stable for any number of restarts ===
+    for _ in 0..5 {
+        let json = serde_json::to_string(&app2.persisted_ui_state).unwrap();
+        let mut next = create_test_app();
+        next.persisted_ui_state = serde_json::from_str(&json).unwrap();
+        let (ctx, _raw) = ctx_with_native_ppp(1.5);
+        next.apply_persisted_font_scale(&ctx);
+        next.persist_font_scale(&ctx);
+        assert_eq!(
+            next.persisted_ui_state.font_size_scale,
+            Some(1.2),
+            "loop: persisted scale drifted after multiple restarts"
+        );
+        app2 = next;
+    }
+}
+
+/// REGRESSION (same-frame persist under a non-trivial OS
+/// baseline): the persist must store the *applied* scale,
+/// not a freshly-computed `current_ppp / baseline_ppp`. With
+/// the old logic, running apply + persist in the same frame
+/// on a 150% DPI display with `Some(1.2)` would compute
+/// `scale = 1.5 / 1.5 = 1.0` and silently reset the
+/// persisted value to `None`. The user's font would then
+/// snap back to the OS default on every restart, shrinking
+/// the UI each time.
+#[test]
+fn test_font_scale_persist_in_same_frame_as_apply_keeps_value() {
+    let mut app = create_test_app();
+    app.persisted_ui_state.font_size_scale = Some(1.2);
+
+    let (ctx, _raw) = ctx_with_native_ppp(1.5);
+    app.apply_persisted_font_scale(&ctx);
+    // Same-frame persist: ctx.pixels_per_point() is still 1.5
+    // (the OS baseline) because the deferred zoom-factor from
+    // `set_pixels_per_point(1.8)` has not been applied yet.
+    app.persist_font_scale(&ctx);
+
+    assert_eq!(
+        app.persisted_ui_state.font_size_scale,
+        Some(1.2),
+        "same-frame persist must not silently reset the scale to None"
+    );
+}
+
+/// REGRESSION (legacy corruption): A user who upgraded from the
+/// buggy build may have a pre-fix persisted scale that is the
+/// absolute ppp (e.g., `Some(1.5)` on a 1.0 DPI display, or
+/// worse — `Some(5.0)` after several compounding launches).
+/// The apply helper must clamp out-of-range values to a no-op
+/// and the next persist must self-heal the stored value back
+/// to `None`.
+#[test]
+fn test_font_scale_clamps_legacy_corrupt_value() {
+    let mut app = create_test_app();
+    // Pretend the old buggy code persisted the absolute ppp
+    // (or a compounded value) as a "scale".
+    app.persisted_ui_state.font_size_scale = Some(5.0);
+
+    let (ctx, _raw) = ctx_with_native_ppp(1.5);
+    app.apply_persisted_font_scale(&ctx);
+    app.persist_font_scale(&ctx);
+
+    // The corrupt 5.0 must NOT be applied on top of the OS
+    // baseline (that would yield 7.5 ppp). The baseline is
+    // left untouched, and the next persist self-heals the
+    // stored value to None (the user has not actually
+    // chosen a zoom).
+    assert_eq!(
+        app.persisted_ui_state.font_size_scale, None,
+        "corrupt scale must self-heal to None after one save"
+    );
+}
+
+/// REGRESSION (NaN / infinity guard): a corrupt persisted scale
+/// that is not finite must also be ignored, not propagated into
+/// `set_pixels_per_point`, which would otherwise produce a
+/// runtime panic in egui.
+#[test]
+fn test_font_scale_rejects_non_finite_value() {
+    let mut app = create_test_app();
+    app.persisted_ui_state.font_size_scale = Some(f32::NAN);
+
+    let (ctx, _raw) = ctx_with_native_ppp(1.5);
+    app.apply_persisted_font_scale(&ctx);
+    app.persist_font_scale(&ctx);
+
+    // The NaN must not be applied; the persist self-heals to None.
+    assert_eq!(
+        app.persisted_ui_state.font_size_scale, None,
+        "NaN scale must self-heal to None"
+    );
+}
+
+/// REGRESSION (schema migration): a persisted state written by
+/// the pre-fix build (no `schema_version` field) must be
+/// migrated to the current schema on load — specifically,
+/// `font_size_scale` is cleared so the absolute-ppp value
+/// that the old bug used to compound is not carried forward
+/// as a multiplier.
+#[test]
+fn test_persisted_state_migration_clears_legacy_font_size_scale() {
+    use crate::app::persisted::{CURRENT_SCHEMA_VERSION, PersistedUiState};
+
+    // Hand-written JSON mimicking the pre-fix on-disk shape:
+    // no `schema_version` field; `font_size_scale` holds the
+    // absolute ppp from a 150% DPI display.
+    let legacy_json = r#"{
+        "left_panel_width": null,
+        "right_panel_width": null,
+        "window_width": null,
+        "window_height": null,
+        "window_x": null,
+        "window_y": null,
+        "font_size_scale": 1.5,
+        "expanded_dirs": []
+    }"#;
+    let mut state: PersistedUiState = serde_json::from_str(legacy_json).unwrap();
+    assert_eq!(state.schema_version, 0);
+    assert_eq!(state.font_size_scale, Some(1.5));
+
+    // Apply the same migration the production `FastMdApp::new`
+    // runs. (We do it inline here because the helper would
+    // require an eframe::CreationContext.)
+    if state.schema_version < CURRENT_SCHEMA_VERSION {
+        state.font_size_scale = None;
+        state.schema_version = CURRENT_SCHEMA_VERSION;
+    }
+
+    assert_eq!(
+        state.font_size_scale, None,
+        "migration must clear the legacy font_size_scale"
+    );
+    assert_eq!(
+        state.schema_version, CURRENT_SCHEMA_VERSION,
+        "migration must bump schema_version to the current value"
+    );
+}
+
+/// Build an `egui::Context` whose input state reports
+/// `native_pixels_per_point = Some(ppp)`, so
+/// `ctx.pixels_per_point()` returns `ppp` before any zoom
+/// change is applied. Returns the context together with the
+/// matching `RawInput` so the caller can drive a follow-up
+/// `run_ui` that preserves the high-DPI viewport info.
+fn ctx_with_native_ppp(ppp: f32) -> (egui::Context, egui::RawInput) {
+    let ctx = egui::Context::default();
+    let viewports = std::iter::once((
+        egui::ViewportId::ROOT,
+        egui::ViewportInfo {
+            native_pixels_per_point: Some(ppp),
+            ..Default::default()
+        },
+    ))
+    .collect();
+    let raw_input = egui::RawInput {
+        viewports,
+        ..Default::default()
+    };
+    // Drive a single empty pass to seed the input state. We
+    // immediately call `end_pass` to leave the viewport
+    // stack balanced, so the next `begin_pass` (driven by
+    // `run_ui`) is the "outermost" pass and the deferred
+    // `new_zoom_factor` written by `set_pixels_per_point` is
+    // actually applied.
+    ctx.begin_pass(raw_input.clone());
+    let _ = ctx.end_pass();
+    (ctx, raw_input)
 }

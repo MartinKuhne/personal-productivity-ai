@@ -1,8 +1,8 @@
 //! Per-frame update for `FastMdApp` — the work that runs every frame
-//! before the panels are drawn: apply persisted window/font on the first
-//! frame, drain the config bus and the background `Task` channel, process
-//! file events, drive the editor overlay / modals / panels, and snapshot
-//! the current persisted-UI state for the next `save`.
+//! before the panels are drawn: apply persisted font on the first frame,
+//! drain the config bus and the background `Task` channel, process file
+//! events, drive the editor overlay / modals / panels, and snapshot the
+//! current persisted-UI state for the next `save`.
 //!
 //! The flow is:
 //! 1. [`FastMdApp::update_ui`] orchestrates one frame.
@@ -14,12 +14,13 @@
 //!    panel callbacks asked to happen on the next frame — e.g. starting
 //!    a queued agent session, joining a finished batch.
 //! 4. [`FastMdApp::update_persisted_ui_state`] snapshots the current
-//!    window rect, font scale, and panel widths so the next
-//!    `eframe::App::save` can persist them.
+//!    font scale and panel widths so the next `eframe::App::save` can
+//!    persist them. Window rect is handled by eframe's built-in
+//!    `persistence` feature.
 
 use eframe::egui;
 
-use super::FastMdApp;
+use super::{FONT_SCALE_MAX, FONT_SCALE_MIN, FastMdApp, sanitise_font_scale};
 
 impl FastMdApp {
     /// Purpose: Drive one frame of the app.
@@ -44,30 +45,12 @@ impl FastMdApp {
 
         let ctx = ui.ctx();
 
-        // Apply persisted window size/position on first frame
-        if !self.persisted_window_applied {
-            if let (Some(w), Some(h)) = (
-                self.persisted_ui_state.window_width,
-                self.persisted_ui_state.window_height,
-            ) {
-                ctx.send_viewport_cmd(egui::ViewportCommand::InnerSize(egui::vec2(w, h)));
-            }
-            if let (Some(x), Some(y)) = (
-                self.persisted_ui_state.window_x,
-                self.persisted_ui_state.window_y,
-            ) {
-                ctx.send_viewport_cmd(egui::ViewportCommand::OuterPosition(egui::pos2(x, y)));
-            }
-            self.persisted_window_applied = true;
-        }
-
-        // Apply persisted font size scale on first frame
-        if !self.persisted_font_applied {
-            if let Some(scale) = self.persisted_ui_state.font_size_scale {
-                ctx.set_pixels_per_point(ctx.pixels_per_point() * scale);
-            }
-            self.persisted_font_applied = true;
-        }
+        // Apply persisted font size scale on the first frame. The
+        // window rect is handled by eframe's built-in `persistence`
+        // feature (see `with_app_id` in `main.rs` and the
+        // `persistence` feature on the `eframe` dep in
+        // `Cargo.toml`).
+        self.apply_persisted_font_scale(ctx);
 
         self.orchestrator.drain_config_bus();
         self.process_file_events_and_repaint(ctx);
@@ -120,34 +103,92 @@ impl FastMdApp {
         }
     }
 
-    /// Update persisted UI state with current window size, position, font scale, and panel widths.
+    /// Update persisted UI state with current font scale and panel widths.
+    ///
+    /// Window size/position are persisted by eframe's built-in
+    /// `persistence` feature — we do not duplicate that here.
     fn update_persisted_ui_state(&mut self, ctx: &egui::Context) {
         // Update panel widths from layout
         self.persisted_ui_state.left_panel_width = self.layout.left_panel_width;
         self.persisted_ui_state.right_panel_width = self.layout.right_panel_width;
 
-        // Update window size and position from viewport
-        ctx.input(|i| {
-            let viewport = i.viewport();
-            // Use inner_rect for window size
-            if let Some(inner_rect) = viewport.inner_rect {
-                self.persisted_ui_state.window_width = Some(inner_rect.width());
-                self.persisted_ui_state.window_height = Some(inner_rect.height());
-            }
-            // Use outer_rect for window position
-            if let Some(outer_rect) = viewport.outer_rect {
-                self.persisted_ui_state.window_x = Some(outer_rect.min.x);
-                self.persisted_ui_state.window_y = Some(outer_rect.min.y);
-            }
-        });
+        // Update font size scale (relative to the OS-reported
+        // baseline captured on the first frame — see
+        // [`Self::apply_persisted_font_scale`]).
+        self.persist_font_scale(ctx);
+    }
 
-        // Update font size scale (relative to default)
-        let current_ppp = ctx.pixels_per_point();
-        let default_ppp = 1.0; // Default pixels per point
-        if (current_ppp - default_ppp).abs() > f32::EPSILON {
-            self.persisted_ui_state.font_size_scale = Some(current_ppp / default_ppp);
-        } else {
+    /// Capture the OS-reported `pixels_per_point` as the baseline
+    /// and apply any persisted user-chosen scale on top of it.
+    ///
+    /// Must run on the first frame of the session, **before** any
+    /// widget paints, so the rest of the UI sees the scaled ppp.
+    /// After this call the persisted scale is treated as a
+    /// multiplier on top of the baseline; never as the absolute
+    /// ppp.
+    ///
+    /// The baseline is the OS-reported value at the start of the
+    /// session and is **not persisted** — the OS re-reports it on
+    /// every launch (and may differ between monitors on a
+    /// multi-DPI Windows setup).
+    ///
+    /// Records the chosen scale into [`Self::applied_font_scale`]
+    /// so [`Self::persist_font_scale`] can write a stable value
+    /// even though egui 0.35 defers `set_pixels_per_point` until
+    /// the next `begin_pass` (so `ctx.pixels_per_point()` still
+    /// returns the pre-apply value within the same frame).
+    ///
+    /// `pub(in crate::ui::app)` so the regression tests in the
+    /// sibling `tests` submodule can drive the same first-frame
+    /// apply + persist pair that `update_ui` runs in production.
+    pub(in crate::ui::app) fn apply_persisted_font_scale(&mut self, ctx: &egui::Context) {
+        if self.persisted_font_applied {
+            return;
+        }
+        let baseline = ctx.pixels_per_point();
+        self.os_baseline_ppp = Some(baseline);
+        let scale = self
+            .persisted_ui_state
+            .font_size_scale
+            .and_then(sanitise_font_scale)
+            .unwrap_or(1.0);
+        self.applied_font_scale = scale;
+        if scale != 1.0 {
+            ctx.set_pixels_per_point(baseline * scale);
+        }
+        self.persisted_font_applied = true;
+    }
+
+    /// Persist the font scale that was actually applied on the
+    /// first frame (see [`Self::applied_font_scale`]) back into
+    /// [`Self::persisted_ui_state`]. This is a pure
+    /// "remember what we did" write — it does **not** re-read
+    /// `ctx.pixels_per_point()` to recompute the multiplier,
+    /// because egui 0.35 defers `set_pixels_per_point` until the
+    /// next `begin_pass` and recomputing from the still-old ppp
+    /// would silently reset the persisted value to `None` on the
+    /// same frame the scale was applied.
+    ///
+    /// A near-unity applied scale (≈ 1.0) is stored as `None` so
+    /// a fresh install doesn't carry a redundant `1.0` and risk
+    /// a future bug misinterpreting it. Out-of-range or
+    /// non-finite applied scales are also stored as `None` so a
+    /// single corrupt entry self-heals on the next launch.
+    ///
+    /// `pub(in crate::ui::app)` so the regression tests in the
+    /// sibling `tests` submodule can call persist directly.
+    pub(in crate::ui::app) fn persist_font_scale(&mut self, _ctx: &egui::Context) {
+        if !self.applied_font_scale.is_finite()
+            || self.applied_font_scale < FONT_SCALE_MIN
+            || self.applied_font_scale > FONT_SCALE_MAX
+        {
             self.persisted_ui_state.font_size_scale = None;
+            return;
+        }
+        if (self.applied_font_scale - 1.0).abs() < 1e-3 {
+            self.persisted_ui_state.font_size_scale = None;
+        } else {
+            self.persisted_ui_state.font_size_scale = Some(self.applied_font_scale);
         }
     }
 }

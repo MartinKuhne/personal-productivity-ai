@@ -43,6 +43,29 @@ use crate::app::{
 
 const PERSISTED_UI_STATE_KEY: &str = "ppai_ui_state";
 
+/// Sanity bounds for the user-chosen font scale multiplier.
+///
+/// The persisted `font_size_scale` is meant to be a multiplier on
+/// top of the OS-reported `pixels_per_point` (e.g. `1.2` for "20%
+/// larger than the system default"). Values outside this range are
+/// almost certainly the residue of the historical compounding bug
+/// (where the absolute ppp was saved as a "scale" and re-applied on
+/// top of the OS baseline, multiplying by 1.25×/1.5×/... every
+/// launch) or outright corruption. We clamp them on apply and
+/// self-heal them to `None` on the next save.
+const FONT_SCALE_MIN: f32 = 0.5;
+const FONT_SCALE_MAX: f32 = 3.0;
+
+/// Validate that a candidate font scale is a finite, in-range
+/// multiplier. Returns `Some(scale)` when valid, `None` otherwise.
+fn sanitise_font_scale(scale: f32) -> Option<f32> {
+    if !scale.is_finite() || !(FONT_SCALE_MIN..=FONT_SCALE_MAX).contains(&scale) {
+        None
+    } else {
+        Some(scale)
+    }
+}
+
 #[derive(Clone)]
 pub struct TreeNode {
     pub name: String,
@@ -69,10 +92,29 @@ pub struct FastMdApp {
     /// Invalidated when selection.tree_dirty is true.
     pub cached_tree_rows: Option<Vec<crate::ui::tree::FlatRow>>,
     pub persisted_ui_state: PersistedUiState,
-    /// Track whether we've applied persisted window state on first frame.
-    persisted_window_applied: bool,
     /// Track whether we've applied persisted font scale on first frame.
     persisted_font_applied: bool,
+    /// The OS-reported `pixels_per_point` at the start of the
+    /// session, captured on the first frame **before** any
+    /// persisted scale is applied. Used as the baseline for
+    /// computing the user-chosen scale multiplier on save and is
+    /// deliberately not persisted — the OS re-reports it on every
+    /// launch (and may change if the window moves between monitors
+    /// with different DPI).
+    os_baseline_ppp: Option<f32>,
+    /// The font scale that was applied to the OS baseline on the
+    /// first frame. `1.0` means "no user-chosen scale was
+    /// applied" (either because `persisted_ui_state.font_size_scale`
+    /// was `None` or because it was rejected by
+    /// [`sanitise_font_scale`]). This is the value the persist
+    /// helper writes back to storage — **not** a fresh
+    /// `current_ppp / baseline_ppp` computation — so the persisted
+    /// state is stable across frames and across sessions even
+    /// though egui 0.35 defers `set_pixels_per_point` until the
+    /// next `begin_pass` (so within a single frame
+    /// `ctx.pixels_per_point()` still returns the pre-apply
+    /// value).
+    applied_font_scale: f32,
 }
 
 impl FastMdApp {
@@ -202,9 +244,9 @@ impl eframe::App for FastMdApp {
         self.persisted_ui_state.left_panel_width = self.layout.left_panel_width;
         self.persisted_ui_state.right_panel_width = self.layout.right_panel_width;
 
-        // Get window size and position from egui context
-        // Note: This is called from the egui App trait, so we don't have direct access to ctx here.
-        // The window state will be saved via the viewport commands in update_ui.
+        // Window size/position are persisted by eframe's built-in
+        // `persistence` feature (enabled on the `eframe` dep in
+        // `Cargo.toml`) — we do not duplicate that here.
 
         let all_dirs: HashSet<PathBuf> = self
             .orchestrator

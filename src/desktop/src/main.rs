@@ -40,6 +40,7 @@ fn main() -> eframe::Result<()> {
 
     let options = eframe::NativeOptions {
         viewport: egui::ViewportBuilder::default()
+            .with_app_id("fastmd")
             .with_inner_size([1000.0, 700.0])
             .with_title("⚡ FastMD Viewer"),
         ..Default::default()

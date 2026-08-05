@@ -38,7 +38,7 @@ tracing-subscriber = "0.3"
 base64 = "0.22.1"
 bytes = "1"
 chrono = "0.4.45"
-eframe = { version = "0.35", default-features = false, features = ["default_fonts", "glow", "wayland", "x11", "accesskit"] }
+eframe = { version = "0.35", default-features = false, features = ["default_fonts", "glow", "wayland", "x11", "accesskit", "persistence"] }
 egui_extras = { version = "0.35", default-features = false }
 fast-dav-rs = "0.4.4"
 fast_h2m = "*"

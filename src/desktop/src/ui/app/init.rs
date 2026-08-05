@@ -122,7 +122,7 @@ impl FastMdApp {
         let event_bus = background_task.file_event_bus;
         let dir_tracker = DirectoryTracker::new(event_bus.subscribe());
 
-        let persisted_ui_state: PersistedUiState = cc
+        let mut persisted_ui_state: PersistedUiState = cc
             .storage
             .and_then(|s| s.get_string(PERSISTED_UI_STATE_KEY))
             .map(|json| {
@@ -132,6 +132,24 @@ impl FastMdApp {
                 })
             })
             .unwrap_or_default();
+
+        // Schema migration: state written by the pre-fix build
+        // has no `schema_version` field (deserialises to 0) and
+        // its `font_size_scale` actually holds the absolute
+        // OS-reported ppp — treating it as a multiplier on top
+        // of the same ppp was the historical compounding bug.
+        // Clear the field on the first launch after the fix so
+        // the user starts at the OS default; other fields
+        // (panel widths, expanded dirs) are preserved.
+        if persisted_ui_state.schema_version < crate::app::persisted::CURRENT_SCHEMA_VERSION {
+            tracing::info!(
+                from = persisted_ui_state.schema_version,
+                to = crate::app::persisted::CURRENT_SCHEMA_VERSION,
+                "migrating persisted UI state: clearing legacy font_size_scale"
+            );
+            persisted_ui_state.font_size_scale = None;
+            persisted_ui_state.schema_version = crate::app::persisted::CURRENT_SCHEMA_VERSION;
+        }
 
         let mut layout = PanelLayout::new();
         if let Some(w) = persisted_ui_state.left_panel_width {
@@ -180,8 +198,9 @@ impl FastMdApp {
             layout,
             cached_tree_rows: None,
             persisted_ui_state,
-            persisted_window_applied: false,
             persisted_font_applied: false,
+            os_baseline_ppp: None,
+            applied_font_scale: 1.0,
         }
     }
 
@@ -275,8 +294,9 @@ impl FastMdApp {
             layout: PanelLayout::new(),
             cached_tree_rows: None,
             persisted_ui_state: PersistedUiState::default(),
-            persisted_window_applied: false,
             persisted_font_applied: false,
+            os_baseline_ppp: None,
+            applied_font_scale: 1.0,
         }
     }
 }
