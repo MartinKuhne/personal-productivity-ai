@@ -5,8 +5,9 @@
 
 ## Trust and Safety
 - Virtualize file writes
-  - Backups
-  - Approvals
+  - Behind the scenes pre-write backups
+  - File write approvals
+  - Approvals for any other side effect (send e-mail etc)
 
 ## User interface
 - Search bar (yes!)
@@ -14,6 +15,9 @@
 
 ## Library
 - Create a default library under %appdata%\fastmd\notes
+- Virtual Toc.md for agents to read / tool to read
+- Could also show as a meta page in the middle pane
+- Index.md for each folder as the default document
 
 ## Agent
 - Make the agent window a real tab, allow multiple
@@ -23,6 +27,7 @@
 - Change file commands to protect / tune out the yaml front matter
 - Integrate with a web search provider directly
 - Add a generic delegate subtask agent
+- Simplify Trello tool to use a /Workspace/Collection/List/Card path format
 
 ## Integrations
 
