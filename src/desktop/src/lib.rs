@@ -1,4 +1,22 @@
 //! Desktop application library for FastMd — a markdown knowledge-base manager with agent, tooling, and UI.
+//!
+//! The crate exposes its subsystems as `pub mod` so internal code and
+//! external binaries can reach every type through its full module path
+//! (`fastmd::agent::tools::mcp`, `fastmd::ui::render`, etc.). The
+//! `pub use` re-exports at the bottom of this file are the only items
+//! that are also reachable through a shorter root-level path; every
+//! other name must be reached through its subsystem module.
+//!
+//! The re-exports are the externally consumed API surface — the only
+//! names used by the bundled `main.rs` and integration `tests/` via
+//! the short `fastmd::Name` path. Every other type is one module hop
+//! away, which is the documented convention for new code (see
+//! `src/desktop/AGENTS.md §5`).
+//!
+//! Adding a new subsystem re-export: prefer the full module path. Only
+//! add a root-level `pub use` when an external consumer actually uses
+//! the short path and the type is conceptually a top-level entry point
+//! (e.g. the `App` impl, the configuration bus's first event).
 
 pub mod agent;
 pub mod app;
@@ -11,28 +29,27 @@ pub mod utils;
 #[path = "config/config.rs"]
 pub mod config;
 
-pub use agent::error::AgentError;
-pub use agent::run_agent;
+// ---------------------------------------------------------------------------
+// Re-exports
+// ---------------------------------------------------------------------------
+//
+// The list below is the entire root-level short-path surface. Every entry
+// has at least one external consumer (a binary in `src/bin/`, the main
+// `src/main.rs`, or a file in `tests/`) that uses the short
+// `fastmd::Name` form. Types that are only used inside the crate are
+// reachable through their `pub mod` path only — see the module-level docs
+// above.
+
+/// Re-export the `mcp` subsystem module under the crate root so
+/// `fastmd::mcp::oauth::...` works in `tests/mcp_oauth.rs` (and any
+/// future external consumer of the MCP OAuth flow).
 pub use agent::tools::mcp;
-pub use agent::tools::{execute_tool, get_tools_schema};
-pub use app::background_task::Task;
-pub use app::browser::{BrowserSession, PageHandle, SessionError};
-pub use app::print::{PrintJob, execute_print_blocking};
-pub use app::watcher::{DirectoryTracker, FileEventProcessor, FileWatcher};
-pub use app::{
-    Cursor, DialogManager, PanelLayout, PersistedUiState, Selection, SelectionManager, TabManager,
-    TagManager, TextBuffer, UndoStack, VirtualPath, VirtualPathError,
-};
-pub use bus::config::{CONFIG_ARRIVAL_TIMEOUT, config_bus};
-pub use bus::core::{Bus, BusReader};
-pub use bus::events::{
-    AgentEvent, BackgroundEvent, ConfigArrived, FileEvent, FileEventKind, FileEventProducer,
-    FsEvent, ProcessEvent, TokenUsageInfo,
-};
-pub use bus::router::{BusRouter, ChannelWorker, spawn_path_worker};
-pub use config::{
-    AppConfig, BrowserConfig, DiscordConfig, ResolvedBrowserConfig, get_config_path, load_config,
-};
-pub use markdown::ToCEntry;
+
+/// The `ConfigArrived` event is the first event the main binary
+/// publishes onto the configuration bus after constructing the
+/// `FastMdApp`, so it is the only bus payload type exposed at the
+/// crate root.
+pub use bus::events::ConfigArrived;
+
+/// The `eframe::App` impl that `main.rs` hands to `eframe::run_native`.
 pub use ui::FastMdApp;
-pub use utils::extract_tags_from_file;

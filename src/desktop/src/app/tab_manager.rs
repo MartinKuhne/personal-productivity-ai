@@ -4,7 +4,7 @@ use std::collections::HashSet;
 use std::hash::{Hash, Hasher};
 use std::path::PathBuf;
 
-use crate::markdown::toc_entry::ToCEntry;
+use crate::markdown::model::ToCEntry;
 
 /// Cached tab strip data to avoid rebuilding the tab bar every frame.
 #[derive(Clone, Debug, Default)]

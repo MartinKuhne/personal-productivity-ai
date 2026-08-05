@@ -1,4 +1,4 @@
-//! CalDAV calendar tool implementations for the tool registry.
+﻿//! CalDAV calendar tool implementations for the tool registry.
 
 use crate::agent::tools::Tool;
 use crate::agent::tools::context::ToolContext;
@@ -7,7 +7,7 @@ use crate::config::AppConfig;
 use std::any::TypeId;
 
 use super::json_schema;
-use super::strings::caldav as caldav_strings;
+use super::strings;
 
 /// Tool that searches calendar items by keyword.
 pub(crate) struct SearchCalendarTool;
@@ -16,7 +16,7 @@ impl Tool for SearchCalendarTool {
         "search_calendar"
     }
     fn description(&self) -> &'static str {
-        caldav_strings::SEARCH_CALENDAR_DESCRIPTION
+        strings::SEARCH_CALENDAR_DESCRIPTION
     }
     fn input_type(&self) -> TypeId {
         TypeId::of::<dtos::SearchCalendarInput>()
@@ -46,7 +46,7 @@ impl Tool for GetCalendarTool {
         "get_calendar"
     }
     fn description(&self) -> &'static str {
-        caldav_strings::GET_CALENDAR_DESCRIPTION
+        strings::GET_CALENDAR_DESCRIPTION
     }
     fn input_type(&self) -> TypeId {
         TypeId::of::<dtos::GetCalendarInput>()
@@ -81,7 +81,7 @@ impl Tool for GetCalendarItemTool {
         "get_calendar_item"
     }
     fn description(&self) -> &'static str {
-        caldav_strings::GET_CALENDAR_ITEM_DESCRIPTION
+        strings::GET_CALENDAR_ITEM_DESCRIPTION
     }
     fn input_type(&self) -> TypeId {
         TypeId::of::<dtos::GetCalendarItemInput>()
@@ -111,7 +111,7 @@ impl Tool for AddCalendarItemTool {
         "add_calendar_item"
     }
     fn description(&self) -> &'static str {
-        caldav_strings::ADD_CALENDAR_ITEM_DESCRIPTION
+        strings::ADD_CALENDAR_ITEM_DESCRIPTION
     }
     fn input_type(&self) -> TypeId {
         TypeId::of::<dtos::AddCalendarItemInput>()
@@ -138,7 +138,7 @@ impl Tool for UpdateCalendarItemTool {
         "update_calendar_item"
     }
     fn description(&self) -> &'static str {
-        caldav_strings::UPDATE_CALENDAR_ITEM_DESCRIPTION
+        strings::UPDATE_CALENDAR_ITEM_DESCRIPTION
     }
     fn input_type(&self) -> TypeId {
         TypeId::of::<dtos::UpdateCalendarItemInput>()
@@ -170,7 +170,7 @@ impl Tool for DeleteCalendarItemTool {
         "delete_calendar_item"
     }
     fn description(&self) -> &'static str {
-        caldav_strings::DELETE_CALENDAR_ITEM_DESCRIPTION
+        strings::DELETE_CALENDAR_ITEM_DESCRIPTION
     }
     fn input_type(&self) -> TypeId {
         TypeId::of::<dtos::DeleteCalendarItemInput>()

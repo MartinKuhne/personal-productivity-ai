@@ -49,36 +49,31 @@ the YAML schema) but its behaviour lives here.
 
 ```
                   ┌──────────────────────────┐
-   AppConfig ────►│  app::vfs::resolve       │
-                  │  (pure function)         │
+   AppConfig ────►│  app::vfs::behaviour      │
+                  │  (resolve + display       │
+                  │   label + library ext)    │
                   └─────────────┬────────────┘
                                 │
                   ┌─────────────▼────────────┐
                   │  app::vfs::virtual_path   │
                   │  (parser + errors)        │
-                  └─────────────┬────────────┘
-                                │
-                  ┌─────────────▼────────────┐
-   ContentLibrary►│  app::vfs::library       │
-   (from config)  │  (ContentLibraryExt +    │
-                  │   library_display_label) │
                   └──────────────────────────┘
 ```
 
 `ToolContext::resolve_virtual_path` in
 [`src/tools/context.rs`](../../tools/context.rs) is a one-line shim over
-`app::vfs::resolve::resolve`. Callers that need a VFS resolution
+`app::vfs::behaviour::resolve`. Callers that need a VFS resolution
 without a `ToolContext` (e.g. background indexing, the prompt builder)
-call `app::vfs::resolve::resolve` directly with
+call `app::vfs::behaviour::resolve` directly with
 `&config.content_libraries`.
 
 ## Cross-cutting references
 
 - **VFS-005** — UI tree rendering lives in [`src/ui/SPEC.md`](../../ui/SPEC.md).
-- **VFS-006** — Tool contract: filesystem tools implement `tools::Tool` and call `app::vfs::resolve::resolve` via `ToolContext`. See [`src/tools/SPEC.md`](../../tools/SPEC.md).
+- **VFS-006** — Tool contract: filesystem tools implement `tools::Tool` and call `app::vfs::behaviour::resolve` via `ToolContext`. See [`src/tools/SPEC.md`](../../tools/SPEC.md).
 - **VFS-007** — Grep ordering and list-files enumeration are implemented in [`src/tools/filesystem.rs`](../../tools/filesystem.rs) and registered in [`src/tools/registry.rs`](../../tools/registry.rs).
 - **VFS-008** — The priority field is read by the indexer in [`src/background/SPEC.md`](../../background/SPEC.md) and by the tool registry's `grep` dispatch.
-- **VFS-004, VFS-009** — Path-traversal protection is implemented in [`src/app/vfs/virtual_path.rs`](virtual_path.rs) and applied uniformly by [`src/app/vfs/resolve.rs`](resolve.rs).
+- **VFS-004, VFS-009** — Path-traversal protection is implemented in [`src/app/vfs/virtual_path.rs`](virtual_path.rs) and applied uniformly by `behaviour::resolve`.
 
 ## Superseded requirements
 

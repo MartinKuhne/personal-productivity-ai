@@ -11,6 +11,23 @@ keywords = ["markdown", "viewer", "ai", "agent"]
 [features]
 default = []
 profiling = ["dep:puffin", "dep:puffin_egui"]
+# Discord bot integration. Adds the `integrations::discord` module and
+# the `run_discord_bot` entry point. Off by default — the bot is not
+# wired into `main.rs` and ships as opt-in.
+discord = []
+# Browser-automation + image-capture tooling (Playwright). Adds
+# `app::browser`, the `BrowserSession` runtime in `app::session`, and
+# the `browser_*` agent tools. Heavy dependency (~6 MB compiled
+# output for the Playwright client + macros); off by default.
+browser = ["dep:playwright-rs"]
+# Image-library / image-vision worker. Adds the [`ImageJob`]
+# type, the `ImageVisionWorker` background processor, the
+# image-routing branch in the file-event bus router, and the
+# `tx_img` worker channel. Off by default — the image-vision
+# pipeline talks to a vision-capable LLM and the `LogCategory::ImageVision`
+# log category stays compiled (so the UI filter chip still
+# renders) but no worker ever emits into it.
+image-library = []
 
 [dependencies]
 anyhow = "1.0.104"
@@ -27,14 +44,14 @@ fast-dav-rs = "0.4.4"
 fast_h2m = "*"
 jmap-client = { version = "=0.4.1", default-features = false, features = ["blocking", "rustls"] }
 notify = "6.0"
-playwright-rs = "0.14.1"
+playwright-rs = { version = "0.14.1", optional = true }
 pulldown-cmark = { version = "0.13", features = ["html"] }
 rustls = { version = "0.23", features = ["ring"] }
 schemars = "1.2.1"
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
 serde_norway = "0.9"
-tokio = { version = "1.53.0", features = ["rt-multi-thread", "macros", "sync"] }
+tokio = { version = "1.53.0", features = ["rt-multi-thread", "macros", "sync", "process"] }
 trash = "5.2.6"
 ureq = { version = "2.9", features = ["json"] }
 # `ring` is already a transitive dep through `rustls` (ring crypto

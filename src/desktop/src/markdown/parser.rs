@@ -1,6 +1,6 @@
 //! Pure Markdown and YAML parsing logic isolated from egui rendering.
 
-use crate::markdown::ast::{InlineElem, RenderEvent, TextStyle};
+use crate::markdown::model::{InlineElem, RenderEvent, TextStyle};
 
 /// Renders markdown source to an HTML string.
 pub fn render_markdown_to_html(markdown: &str) -> String {

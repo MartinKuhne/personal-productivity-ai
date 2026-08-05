@@ -59,6 +59,8 @@ src/
 ├── app/                    # egui-free application domain (managers, watcher, vfs)
 │   ├── vfs/                # Virtual File System — parser, library behaviour, resolver (app/vfs/SPEC.md)
 │   ├── watcher/            # FileWatcher (notify), FileEventProcessor, DirectoryTracker
+│   ├── session/            # Shared runtime — BrowserSession (Playwright) and PdfBackingTracker,
+│   │                       # the long-lived handles the orchestrator hands to the agent
 │   └── (managers)          # TabManager, SelectionManager, DialogManager, PanelLayout, TagManager, TextBuffer
 ├── agent/                  # LLM tool-loop: manager, llm_client, prompt_builder,
 │                           #   response_formatter, tool_executor, context, agent_impl
@@ -118,13 +120,24 @@ When adding or moving code, place files by **concern**, not by type:
   `src/app/vfs/SPEC.md`); `config.rs` re-exports the public types for
   backwards compatibility, but new code should import from
   `crate::app::vfs`.
+- **Cross-cutting value types** with no single home (e.g.
+  `TokenUsageInfo`, `BackgroundLogEntry`, `LogCategory`) live in
+  `bus::events::messages` (value-type home) or `bus::events::typed`
+  (per-domain replacement). The `app/` module no longer hosts these.
+- **Shared runtime infrastructure** that both the application
+  orchestrator and the LLM agent depend on (the long-lived headless
+  browser session and the PDF-backing tracker) lives in
+  `app/session/`. Putting them here is what makes the dependency
+  graph one-way: `app/orchestrator` constructs the shared handles
+  and hands them to the agent via `AgentContext`; the agent no longer
+  reaches into `app::browser` or `app::watcher` for these types.
+  The old paths (`crate::app::browser::BrowserSession`,
+  `crate::app::watcher::PdfBackingTracker`) still re-export from
+  `app::session` for backwards compatibility and will be removed
+  in a follow-up.
 - **Generic, domain-free helpers** (path utilities, file-walk tag extraction)
   go in `utils/`. If a helper knows about Markdown, it belongs in `markdown/`,
   not `utils/`.
-- **Cross-cutting value types** with no single home (e.g.
-  `TokenUsageInfo`) live in `bus::events::messages` (value-type home)
-  or `bus::events::typed` (per-domain
-  replacement). The `app/` module no longer hosts these.
 
 ### Event-driven fan-out
 
@@ -146,7 +159,7 @@ request/response binding:
 
 ### Module size and splitting
 
-- Target **≤ 1024 lines** per `.rs` file. When a file exceeds this, split by
+- Target **≤ 4096 lines** per `.rs` file. When a file exceeds this, split by
   concern into a submodule directory (cf. `config/`, `tools/registry/`,
   `ui/app/`). Keep the original file as a `mod.rs` that re-exports the pieces
   so public paths are unchanged.
@@ -154,6 +167,61 @@ request/response binding:
   public APIs. Do not grow it when adding features; add to the relevant
   subsystem and let `lib.rs` re-export.
 - When extracting a submodule, refactor and update all external callers.
+
+### Test sidecar files
+
+When a source file's `#[cfg(test)] mod tests { ... }` block grows large enough
+to materially affect cognitive load (rough rule: more than ~150 test lines, or
+when the test block is more than half the file), extract the test body into a
+sibling sidecar file and declare it from the source file:
+
+```rust
+// In <area>/foo.rs:
+#[cfg(test)]
+mod tests;  // sibling file: <area>/tests.rs (or <area>/foo_tests.rs)
+
+// In <area>/tests.rs (or <area>/foo_tests.rs):
+//! Tests for [`crate::area::foo`].
+//! Lives in a sidecar so the implementation file stays focused.
+
+use super::*;
+```
+
+The `mod tests;` declaration (no `#[path]` needed) makes the test file a child
+of the implementation module, so `use super::*;` keeps working and private
+items stay in scope. This is the **unit-test sidecar** pattern. It is
+mechanical, preserves visibility, and is preferred over the alternatives below
+whenever tests need to touch internal state.
+
+Use **`tests/<name>.rs` (integration test)** instead of a sidecar when the test
+should be exercised against the public API only — typically for algorithm
+tests, public-contract regression tests, and black-box behaviour checks. The
+sibling pattern is wrong in that case because it is too forgiving: a test that
+only uses public items should be proven to do so.
+
+**Header note requirement.** Whenever an implementation file has a test
+sidecar, the implementation file's `//!` module doc comment must end with a
+one-line pointer to the sidecar, in this form:
+
+```rust
+//! ...existing module doc...
+//!
+//! Unit tests live in the sibling `tests.rs` sidecar.
+```
+
+(If the sidecar is named `<foo>_tests.rs` rather than `tests.rs`, substitute
+the actual filename.) This keeps the sidecar discoverable from the
+implementation file and from any `cargo doc` output.
+
+Existing examples to follow:
+
+- `agent/agent_impl.rs` ↔ `agent/agent_impl_tests.rs`
+- `agent/tools/manager/mod.rs` ↔ `agent/tools/manager/tests.rs` and
+  `agent/tools/manager/group_tests.rs`
+- `ui/tools_dialog.rs` ↔ `ui/tools_dialog_tests.rs`
+- `agent/tools/browser.rs` ↔ `agent/tools/browser_tests.rs`
+- `markdown/table_width/mod.rs` ↔ `tests/table_layout_test.rs` and
+  `tests/table_visual_layout_test.rs` (integration-test variant)
 
 ### `app/` is egui-free
 

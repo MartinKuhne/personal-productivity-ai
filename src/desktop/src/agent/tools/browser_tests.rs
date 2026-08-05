@@ -17,7 +17,7 @@
 #![cfg(test)]
 
 use crate::agent::tools::Tool;
-use crate::app::browser::BrowserSession;
+use crate::app::session::BrowserSession;
 use crate::config::AppConfig;
 use std::sync::Arc;
 use tempfile::TempDir;
@@ -99,8 +99,7 @@ fn test_browser_navigate_tool_round_trip() {
     >::new()));
     let config = Box::leak(Box::new(AppConfig::default()));
     config.tool_groups.browser = true;
-    let pdf_backing =
-        std::sync::Arc::new(crate::app::watcher::pdf_backing_tracker::PdfBackingTracker::new());
+    let pdf_backing = std::sync::Arc::new(crate::app::session::PdfBackingTracker::new());
     let ctx = ToolContext::new(config, bus, session, pdf_backing);
 
     let tool = crate::agent::tools::manager::builtin::browser::BrowserNavigateTool;
@@ -120,8 +119,7 @@ fn test_browser_get_page_state_tool_is_readonly() {
     >::new()));
     let config = Box::leak(Box::new(AppConfig::default()));
     config.tool_groups.browser = true;
-    let pdf_backing =
-        std::sync::Arc::new(crate::app::watcher::pdf_backing_tracker::PdfBackingTracker::new());
+    let pdf_backing = std::sync::Arc::new(crate::app::session::PdfBackingTracker::new());
     let _ctx = ToolContext::new(config, bus, session, pdf_backing);
 
     let tool = crate::agent::tools::manager::builtin::browser::BrowserGetPageStateTool;

@@ -1,7 +1,7 @@
 //! YAML front-matter tools — `read_yaml_header` and `write_yaml_header` for title, summary, tags, date, etc.
 
 use crate::bus::events::file::FileEventProducer;
-use crate::markdown::parse_front_matter;
+use crate::markdown::Document;
 use serde_norway::{Mapping, Value};
 use std::path::Path;
 
@@ -10,10 +10,12 @@ pub fn tool_read_yaml_header(
 ) -> Result<crate::agent::tools::dtos::ReadYamlHeaderResponse, String> {
     match std::fs::read_to_string(path_str) {
         Ok(content) => {
-            if let Some(fm) = parse_front_matter(&content) {
-                let yaml_val = &fm.yaml;
+            // `Document` parses the front matter (if any) in one
+            // pass; reaching `front_matter()` is the same call the
+            // editor and the orchestrator use.
+            if let Some(fm) = Document::new(content).front_matter() {
                 Ok(crate::agent::tools::dtos::ReadYamlHeaderResponse {
-                    content: format!("{:#?}", yaml_val),
+                    content: format!("{:#?}", fm.yaml),
                 })
             } else {
                 tracing::warn!(name = "tool.yaml.read_no_header", path = %path_str, "No YAML header found in this file. Operator should check if the file is expected to have one.");
@@ -38,11 +40,11 @@ pub fn tool_write_yaml_header(
     let existed = Path::new(path_str).exists();
     let current_content = std::fs::read_to_string(path_str).unwrap_or_else(|_| "".to_string());
 
-    let markdown_body = if let Some(fm) = parse_front_matter(&current_content) {
-        fm.body.to_string()
-    } else {
-        current_content
-    };
+    // `Document::body()` returns the source with the front-matter
+    // block stripped when one is present, or the full source
+    // otherwise — exactly the slice we want to preserve verbatim
+    // when rewriting the header.
+    let markdown_body = Document::new(current_content).body().to_string();
 
     let mut map = Mapping::new();
     if let Some(t) = title {
@@ -182,11 +184,12 @@ mod tests {
                 || content.contains("header-date: \"2024-01-01T00:00:00Z\""),
             "header-date not present in expected form: {content}"
         );
-        // `parse_front_matter` extracts only the YAML block between the
-        // `---` delimiters, mirroring how the app reads headers. Parsing the
-        // full file (front matter + body) would be multi-document YAML,
-        // which `serde_norway` rejects.
-        let fm = parse_front_matter(&content).expect("front matter should parse");
+        // `Document::front_matter()` extracts only the YAML block
+        // between the `---` delimiters, mirroring how the app reads
+        // headers. Parsing the full file (front matter + body)
+        // would be multi-document YAML, which `serde_norway` rejects.
+        let doc = crate::markdown::Document::new(content);
+        let fm = doc.front_matter().expect("front matter should parse");
         assert_eq!(
             fm.yaml.get("header-date").and_then(|v| v.as_str()),
             Some("2024-01-01T00:00:00Z")

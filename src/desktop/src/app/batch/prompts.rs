@@ -2,7 +2,7 @@
 
 use crate::app::batch::types::PromptInfo;
 use crate::config::{AppConfig, ContentLibrary};
-use crate::markdown::parse_front_matter;
+use crate::markdown::Document;
 use serde_norway::Value;
 use std::collections::BTreeSet;
 use std::path::{Path, PathBuf};
@@ -38,13 +38,15 @@ pub fn discover_prompts(config: &AppConfig) -> Vec<PromptInfo> {
                 }
             };
 
-            let Some(fm) = parse_front_matter(&content) else {
+            // `Document` pairs the front-matter and body in one
+            // value, so the prompt tag check and the body
+            // extraction no longer re-split the content via
+            // `parse_front_matter` separately.
+            let doc = Document::new(content);
+            let Some(fm) = doc.front_matter() else {
                 continue;
             };
-            let yaml_val = &fm.yaml;
-            let body = fm.body;
-
-            if !has_prompt_tag(yaml_val) {
+            if !has_prompt_tag(&fm.yaml) {
                 continue;
             }
 
@@ -55,7 +57,7 @@ pub fn discover_prompts(config: &AppConfig) -> Vec<PromptInfo> {
                 path: path.to_path_buf(),
                 display_name,
                 library_name: library.name.clone(),
-                content: body.trim().to_string(),
+                content: doc.body().trim().to_string(),
             });
         }
     }
@@ -86,10 +88,7 @@ pub fn resolve_prompts(
                     return None;
                 }
             };
-            let body = match parse_front_matter(&content) {
-                Some(fm) => fm.body.trim().to_string(),
-                None => content.trim().to_string(),
-            };
+            let body = Document::new(content).body().trim().to_string();
             // Find the library this path belongs to.
             let mut library_name = String::new();
             let mut display_name = path
@@ -139,11 +138,10 @@ fn has_prompt_tag(yaml_val: &Value) -> bool {
 /// Reads prompt content from file (body only, excluding YAML front matter).
 pub fn read_prompt_content(path: &Path) -> Result<String, std::io::Error> {
     let content = std::fs::read_to_string(path)?;
-    let Some(fm) = crate::markdown::parse_front_matter(&content) else {
-        return Ok(content); // No front matter, return whole content
-    };
-    let body = fm.body;
-    Ok(body.trim().to_string())
+    // `Document` already strips the front-matter when computing
+    // the body, so no separate `parse_front_matter` call is
+    // needed.
+    Ok(Document::new(content).body().trim().to_string())
 }
 
 #[cfg(test)]

@@ -1,4 +1,4 @@
-//! Tests for the `ToolManager` group-state and error-tracking surface.
+﻿//! Tests for the `ToolManager` group-state and error-tracking surface.
 //! These complement the `manager::tests` (the migrated registry tests)
 //! and cover the new behaviour introduced by the merge.
 
@@ -6,7 +6,7 @@ use super::*;
 use crate::config::AppConfig;
 use crate::config::McpServerConfig;
 
-/// Every registered tool has a `tool_to_group` entry — no orphans.
+/// Every registered tool has a `tool_to_group` entry â€” no orphans.
 #[test]
 fn tool_to_group_index_is_complete() {
     let mut mgr = ToolManager::new();
@@ -69,7 +69,7 @@ fn parallel_safe_tools_includes_all_readonly_tools() {
     let mgr = ToolManager::new();
     let safe = mgr.parallel_safe_tools();
     // `grep` is documented as ReadOnly. The list is not exhaustive
-    // — it grows as more tools are audited — but it must include
+    // â€” it grows as more tools are audited â€” but it must include
     // every tool that overrides `safety()` to `ReadOnly`.
     assert!(safe.iter().any(|n| n == "grep"));
     // And it must NOT include obviously-mutating tools.
@@ -169,6 +169,7 @@ fn set_mcp_group_enabled_preserves_server_config() {
 /// Contract: the Browser group is one of the eight built-in
 /// groups and is OFF by default (BRWS-CONF-001).
 #[test]
+#[cfg(feature = "browser")]
 fn browser_group_defaults_to_disabled() {
     let mut mgr = ToolManager::new();
     let config = AppConfig::default();
@@ -181,6 +182,7 @@ fn browser_group_defaults_to_disabled() {
 /// Contract: the eight BRWS-001..008 tool names are all
 /// registered under the Browser group when the group is enabled.
 #[test]
+#[cfg(feature = "browser")]
 fn browser_group_lists_all_eight_tools() {
     let _mgr = ToolManager::new();
     let mut config = AppConfig::default();
@@ -210,6 +212,7 @@ fn browser_group_lists_all_eight_tools() {
 /// Contract: `set_group_enabled` flips the new `tool_groups.browser`
 /// field on `AppConfig` (BRWS-CONF-001).
 #[test]
+#[cfg(feature = "browser")]
 fn set_browser_group_enabled_persists_to_config() {
     let mgr = ToolManager::new();
     let mut config = AppConfig::default();
@@ -232,6 +235,7 @@ fn set_browser_group_enabled_persists_to_config() {
 /// `browser_get_page_state`, which is the only parallel-safe one
 /// (BRWS-002).
 #[test]
+#[cfg(feature = "browser")]
 fn browser_only_get_page_state_is_parallel_safe() {
     use crate::agent::tools::Safety;
     use crate::agent::tools::manager::safety_of;

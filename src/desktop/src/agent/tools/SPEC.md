@@ -20,11 +20,11 @@ The requirements below have been formatted using the **Easy Approach to Requirem
 | `list_files_by_tag` | List files that contain a specific tag in their front-matter. Paginated via `offset`/`limit` (0-indexed; default `offset=0`, `limit=100`); the response carries `total` and an optional `hint`. |
 | `list_files` | List markdown files in a directory (non-recursive). With "/" or "." returns library names. Paginated via `offset`/`limit` (0-indexed; default `offset=0`, `limit=100`); the response carries `total` and an optional `hint`. |
 | `read_file` | Read the entire text contents of a file. |
-| `read_file_lines` | Read specific line numbers or ranges from a file (1-indexed). |
+| `read_lines` | Read a contiguous slice of lines from a file. Paginated via `offset`/`limit` (0-indexed; default `offset=0`, `limit=100`). An `offset` past the end of the file returns an empty `content`; a `limit` that would overflow is clamped to the remainder. |
 | `create_file` | Create a new markdown file with the specified content. Fails if the file already exists — this tool can only create new files. |
-| `insert_lines` | Insert new lines of text into an existing file at a specific 1-indexed position. |
+| `insert_lines` | Insert new lines of text into an existing file at a specific 0-indexed `offset` (default-constructed; required input). `offset=0` inserts at the top; `offset=lines.len()` appends to the end. |
 | `replace_text` | Replace exact occurrences of old_string with new_string in a file. |
-| `web_fetch` | Fetch content from a URL and convert HTML to Markdown. Cursor-based pagination: returns up to 100 lines and a `cursor` token; pass the `cursor` back unchanged to get the next page. The full content is cached for 5 minutes in the shared `ToolCache`; pass `force_refetch=true` to bypass. |
+| `web_fetch` | Fetch content from a URL and convert HTML to Markdown. Cursor-based pagination: returns up to 100 lines and a `cursor` token; pass the `cursor` back unchanged to get the next page. The full content is cached for 30 minutes in the shared `ToolCache`; pass `force_refetch=true` to bypass. |
 | `web_search` | Search the web using SearXNG. Requires searxng_url config. |
 | `web_delegate` | Delegate complex web research to a sub-agent with web_fetch/web_search tools. |
 | `browser_navigate` | Drive the persistent headless Firefox page to a URL. State (cookies, JS, scroll) is preserved across calls (BRWS-001). Requires `tool_groups.browser`. |
@@ -43,7 +43,7 @@ The requirements below have been formatted using the **Easy Approach to Requirem
 | `add_calendar_item` | Add a new calendar item. Requires CalDAV config. |
 | `update_calendar_item` | Update a calendar item. Requires CalDAV config. |
 | `delete_calendar_item` | Delete a calendar item. Requires CalDAV config. |
-| `search_email` | Search email by keyword, folder, date range, sender, recipient, unread, or flagged status. The first call returns up to 100 matching emails plus a `cursor`; pass the `cursor` back unchanged to get the next page. The full server result set is cached for 5 minutes. When the result set is exhausted the response includes a `hint` and no `cursor`. Requires JMAP config. |
+| `search_email` | Search email by keyword, folder, date range, sender, recipient, unread, or flagged status. The first call returns up to 100 matching emails plus a `cursor`; pass the `cursor` back unchanged to get the next page. The full server result set is cached for 30 minutes. When the result set is exhausted the response includes a `hint` and no `cursor`. Requires JMAP config. |
 | `get_email_by_id` | Get email by id. Requires JMAP config. |
 | `get_email` | Get email by date range, sender, recipient, unread, or flagged status. Requires JMAP config. |
 | `send_email` | Send an email. Requires JMAP config. |
@@ -81,7 +81,7 @@ The requirements below have been formatted using the **Easy Approach to Requirem
 * [TOOL-005] Web Fetch Headers: The `web_fetch` tool shall accept an optional `headers` boolean parameter (default: `false`). When `true`, the response shall include the HTTP response headers as a JSON object alongside the content.
 * [TOOL-006] Web Fetch Pagination: The `web_fetch` tool shall use cursor-based pagination. It accepts an optional `cursor: Option<String>` input parameter and returns a `cursor: Option<String>` output field. The first call (no cursor in input) returns up to 100 Markdown lines plus a new cursor. Subsequent calls with the same cursor return the next 100 lines (or fewer on the final page). The cursor is opaque and MUST be passed back unchanged. When the result set is exhausted, the response includes a `hint` and no `cursor`. The page size is fixed at 100 lines; the LLM does not control it.
 * [TOOL-007] Pagination Total: Every cursor-paginated tool (`web_fetch`, `search_email`) MUST return a `total_lines` / `total` field on its response. The value MUST be the item count across all pages and MUST be identical across all pages.
-* [TOOL-008] Web Fetch Cache: The system shall cache fetched Markdown content for 5 minutes. Subsequent calls to `web_fetch` with the same URL and `force_refetch` set to `false` (default) shall return the cached content without making a network request.
+* [TOOL-008] Web Fetch Cache: The system shall cache fetched Markdown content for 30 minutes. Subsequent calls to `web_fetch` with the same URL and `force_refetch` set to `false` (default) shall return the cached content without making a network request.
 * [TOOL-009] Web Fetch Force Refetch: The `web_fetch` tool shall accept an optional `force_refetch` boolean parameter (default: `false`). When `true`, the system shall invalidate the shared cache entry for the URL and fetch fresh content, replacing the cached entry.
 * [TOOL-010] Web Fetch Context Efficiency: The `web_fetch` tool description shall state that the LLM can save context by fetching a URL once and then using the cursor token to paginate through the Markdown body, rather than re-fetching the same URL.
 
@@ -116,9 +116,16 @@ The cursor-paginated tools (`search_email`, `web_fetch`) use a stateful cursor m
 * [TOOL-027] No Pagination Cap: Cursor-paginated tools are not subject to limit caps because the LLM does not control the page size.
 * [TOOL-028] Pagination Vocabulary: Cursor-paginated tools MUST use the parameter name `cursor` and the response field names `cursor`, `total`/`total_lines`, and `hint`. The names `page`, `page_size`, `offset`, and `limit` MUST NOT appear in any cursor-paginated tool's schema. The LLM-facing description of every cursor-paginated tool MUST include the standardized cursor-based paging description paragraph.
 * [TOOL-029] Search Email Cursor: The `search_email` tool MUST accept a `cursor: Option<String>` input parameter and return a `cursor: Option<String>` output field. The first call (no cursor in input) returns up to 100 matching emails plus a new cursor. Subsequent calls with the same cursor return the next 100 emails (or fewer on the final page). The cursor is opaque and MUST be passed back unchanged. When the result set is exhausted, the response includes a `hint` and no `cursor`. The page size is fixed at 100; the LLM does not control it.
-* [TOOL-030] Shared Tool Cache: An in-memory process-local cache MUST be shared by `search_email` and `web_fetch`. Cache entries MUST be evicted lazily on access after 5 minutes. A capacity cap of 1024 entries MUST be enforced with FIFO eviction once exceeded. The cache MUST NOT be persisted across process restarts. The cache is the single source of truth for both tools' per-URL / per-search result set state.
+* [TOOL-030] Shared Tool Cache: An in-memory process-local cache MUST be shared by `search_email` and `web_fetch`. Cache entries MUST be evicted lazily on access after 30 minutes. A capacity cap of 1024 entries MUST be enforced with FIFO eviction once exceeded. The cache MUST NOT be persisted across process restarts. The cache is the single source of truth for both tools' per-URL / per-search result set state.
 * [TOOL-031] Search Email Cache Population: The first `search_email` call with a given filter set MUST populate the cache with the full server result set. Subsequent calls with the matching cursor MUST slice from the cache without re-fetching. A `search_email` call with a cursor that does not match a live cache entry MUST return the error `"Cursor expired or unknown; re-run the search with no cursor."`
-* [TOOL-032] Web Fetch Cache Shared Integration: The `web_fetch` tool MUST utilize the shared tool cache (TOOL-030) for fetched content. The URL maps to a cursor UUID which maps to the full content. The `force_refetch` parameter MUST invalidate the cache entry before re-fetching. The 5-minute TTL MUST match the shared cache's TTL exactly.
+* [TOOL-032] Web Fetch Cache Shared Integration: The `web_fetch` tool MUST utilize the shared tool cache (TOOL-030) for fetched content. The URL maps to a cursor UUID which maps to the full content. The `force_refetch` parameter MUST invalidate the cache entry before re-fetching. The 30-minute TTL MUST match the shared cache's TTL exactly.
+
+### Filesystem Line Tools
+
+The `read_lines` and `insert_lines` tools operate on contiguous line ranges inside a file. Both use 0-indexed offsets for vocabulary consistency with the list-paginated tools (`list_files`, `list_files_by_tag`).
+
+* [TOOL-036] Read Lines Paging: The `read_lines` tool shall accept `offset: Option<usize>` (0-indexed; default 0) and `limit: Option<usize>` (default 100) input parameters. The response shall contain the requested slice of lines joined with newlines. An `offset` past the end of the file shall return an empty `content`; a `limit` that would overflow the file's line count shall be clamped to the remainder. The tool shall not expose a `start_line` or `end_line` parameter, and shall not be exposed to the LLM under any other name (e.g. `read_file_lines`).
+* [TOOL-037] Insert Lines Offset: The `insert_lines` tool shall accept a required `offset: usize` (0-indexed) input parameter. `offset=0` shall insert at the top of the file; `offset=lines.len()` shall append to the end. `offset > lines.len()` shall return the error `"Offset out of range."`. The tool shall not expose a `line_index` parameter.
 
 ### Browser Automation Tools
 

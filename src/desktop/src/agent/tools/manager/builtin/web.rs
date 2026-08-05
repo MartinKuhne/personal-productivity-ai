@@ -1,4 +1,4 @@
-//! Web tool implementations for the tool registry.
+﻿//! Web tool implementations for the tool registry.
 
 use crate::agent::tools::Tool;
 use crate::agent::tools::context::ToolContext;
@@ -7,7 +7,7 @@ use crate::config::AppConfig;
 use std::any::TypeId;
 
 use super::json_schema;
-use super::strings::web as web_strings;
+use super::strings;
 
 /// Tool that delegates web searches and fetches to a sub-agent.
 pub(crate) struct WebDelegateTool;
@@ -16,7 +16,7 @@ impl Tool for WebDelegateTool {
         "web_delegate"
     }
     fn description(&self) -> &'static str {
-        web_strings::WEB_DELEGATE_DESCRIPTION
+        strings::WEB_DELEGATE_DESCRIPTION
     }
     fn input_type(&self) -> TypeId {
         TypeId::of::<dtos::WebDelegateInput>()
@@ -43,7 +43,7 @@ impl Tool for WebFetchTool {
         "web_fetch"
     }
     fn description(&self) -> &'static str {
-        web_strings::WEB_FETCH_DESCRIPTION
+        strings::WEB_FETCH_DESCRIPTION
     }
     fn input_type(&self) -> TypeId {
         TypeId::of::<dtos::WebFetchInput>()
@@ -73,7 +73,7 @@ impl Tool for WebSearchTool {
         "web_search"
     }
     fn description(&self) -> &'static str {
-        web_strings::WEB_SEARCH_DESCRIPTION
+        strings::WEB_SEARCH_DESCRIPTION
     }
     fn input_type(&self) -> TypeId {
         TypeId::of::<dtos::WebSearchInput>()

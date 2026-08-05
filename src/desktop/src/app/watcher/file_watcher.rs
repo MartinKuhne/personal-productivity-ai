@@ -16,6 +16,10 @@ pub struct FileWatcher {
     tx: Sender<BackgroundEvent>,
     bus: Bus<FileEvent>,
     tx_pdf: Sender<PathBuf>,
+    /// Image-vision sender. Only present when the `image-library`
+    /// Cargo feature is enabled; the `is_img` detection below
+    /// compiles out without the feature.
+    #[cfg(feature = "image-library")]
     tx_img: Sender<PathBuf>,
     /// Slot for the `notify::RecommendedWatcher` handle. The
     /// watcher is moved into this slot by [`FileWatcher::start`]
@@ -26,12 +30,14 @@ pub struct FileWatcher {
 }
 
 impl FileWatcher {
+    /// The `tx_img` parameter is only present when the
+    /// `image-library` Cargo feature is enabled.
     pub fn new(
         config: AppConfig,
         tx: Sender<BackgroundEvent>,
         bus: Bus<FileEvent>,
         tx_pdf: Sender<PathBuf>,
-        tx_img: Sender<PathBuf>,
+        #[cfg(feature = "image-library")] tx_img: Sender<PathBuf>,
         finished_watcher: Arc<Mutex<Option<notify::RecommendedWatcher>>>,
     ) -> Self {
         Self {
@@ -39,6 +45,7 @@ impl FileWatcher {
             tx,
             bus,
             tx_pdf,
+            #[cfg(feature = "image-library")]
             tx_img,
             finished_watcher,
         }
@@ -46,8 +53,10 @@ impl FileWatcher {
 
     pub fn start(&mut self) {
         let tx_notify = self.tx.clone();
+        #[cfg(feature = "image-library")]
         let config_watcher = self.config.clone();
         let tx_pdf_watcher = self.tx_pdf.clone();
+        #[cfg(feature = "image-library")]
         let tx_img_watcher = self.tx_img.clone();
         let bus_watcher = self.bus.clone();
         let watcher_slot = self.finished_watcher.clone();
@@ -67,17 +76,22 @@ impl FileWatcher {
                             _ => "changed",
                         };
 
-                        let mut is_image_lib = false;
-                        for lib in &config_watcher.content_libraries {
-                            let lib_path = PathBuf::from(&lib.root_folder);
-                            if lib.kind == "image" && path.starts_with(&lib_path) {
-                                is_image_lib = true;
-                                break;
+                        #[cfg(feature = "image-library")]
+                        let is_image_lib = {
+                            let mut flag = false;
+                            for lib in &config_watcher.content_libraries {
+                                let lib_path = PathBuf::from(&lib.root_folder);
+                                if lib.kind == "image" && path.starts_with(&lib_path) {
+                                    flag = true;
+                                    break;
+                                }
                             }
-                        }
+                            flag
+                        };
 
                         let mut is_md = false;
                         let mut is_pdf = false;
+                        #[cfg(feature = "image-library")]
                         let mut is_img = false;
                         if let Some(ext) = path.extension() {
                             let ext_str = ext.to_string_lossy().to_lowercase();
@@ -85,16 +99,41 @@ impl FileWatcher {
                                 is_md = true;
                             } else if ext_str == "pdf" {
                                 is_pdf = true;
-                            } else if matches!(
-                                ext_str.as_str(),
-                                "jpg" | "jpeg" | "png" | "gif" | "webp" | "bmp" | "tiff" | "avif"
-                            ) && is_image_lib
-                            {
-                                is_img = true;
+                            } else {
+                                #[cfg(feature = "image-library")]
+                                if matches!(
+                                    ext_str.as_str(),
+                                    "jpg"
+                                        | "jpeg"
+                                        | "png"
+                                        | "gif"
+                                        | "webp"
+                                        | "bmp"
+                                        | "tiff"
+                                        | "avif"
+                                ) && is_image_lib
+                                {
+                                    is_img = true;
+                                }
                             }
                         }
 
+                        #[cfg(feature = "image-library")]
                         if is_md || is_pdf || is_img {
+                            let _ = tx_notify.send(
+                                BackgroundLogEntry::new(
+                                    LogCategory::Watcher,
+                                    format!(
+                                        "File {} {:?}",
+                                        event_type,
+                                        path.file_name().unwrap_or_default()
+                                    ),
+                                )
+                                .into(),
+                            );
+                        }
+                        #[cfg(not(feature = "image-library"))]
+                        if is_md || is_pdf {
                             let _ = tx_notify.send(
                                 BackgroundLogEntry::new(
                                     LogCategory::Watcher,
@@ -142,21 +181,42 @@ impl FileWatcher {
                                 }
                                 _ => {}
                             }
-                        } else if is_img {
-                            match event.kind {
-                                notify::EventKind::Create(_) | notify::EventKind::Modify(_) => {
-                                    let job =
-                                        crate::app::background::models::ImageJob::new(path.clone());
-                                    if job.should_process() {
-                                        let _ = tx_img_watcher.send(path.clone());
+                        } else {
+                            // Image-vision dispatch. Only compiled
+                            // when the `image-library` Cargo feature
+                            // is enabled; without it, image files
+                            // still reach the FileEvent bus (above)
+                            // but never wake the (absent) vision
+                            // worker.
+                            #[cfg(feature = "image-library")]
+                            {
+                                if is_img {
+                                    match event.kind {
+                                        notify::EventKind::Create(_)
+                                        | notify::EventKind::Modify(_) => {
+                                            let job = crate::app::background::models::ImageJob::new(
+                                                path.clone(),
+                                            );
+                                            if job.should_process() {
+                                                let _ = tx_img_watcher.send(path.clone());
+                                            }
+                                        }
+                                        _ => {}
                                     }
+                                } else if !path.exists() {
+                                    let _ = tx_notify
+                                        .send(FsEvent::FileDeleted { path: path.clone() }.into());
+                                    bus_watcher.publish(FileEvent::removed_one(path.clone()));
                                 }
-                                _ => {}
                             }
-                        } else if !path.exists() {
-                            let _ =
-                                tx_notify.send(FsEvent::FileDeleted { path: path.clone() }.into());
-                            bus_watcher.publish(FileEvent::removed_one(path.clone()));
+                            #[cfg(not(feature = "image-library"))]
+                            {
+                                if !path.exists() {
+                                    let _ = tx_notify
+                                        .send(FsEvent::FileDeleted { path: path.clone() }.into());
+                                    bus_watcher.publish(FileEvent::removed_one(path.clone()));
+                                }
+                            }
                         }
                     }
                 }
@@ -206,10 +266,14 @@ mod tests {
         let (tx, _rx) = std::sync::mpsc::channel();
         let bus = Bus::new();
         let (tx_pdf, _rx_pdf) = std::sync::mpsc::channel();
+        #[cfg(feature = "image-library")]
         let (tx_img, _rx_img) = std::sync::mpsc::channel();
         let slot = Arc::new(Mutex::new(None));
 
+        #[cfg(feature = "image-library")]
         let _watcher = FileWatcher::new(config, tx, bus, tx_pdf, tx_img, slot);
+        #[cfg(not(feature = "image-library"))]
+        let _watcher = FileWatcher::new(config, tx, bus, tx_pdf, slot);
     }
 
     #[test]
@@ -227,10 +291,14 @@ mod tests {
         let (tx, rx) = std::sync::mpsc::channel();
         let bus = Bus::new();
         let (tx_pdf, _rx_pdf) = std::sync::mpsc::channel();
+        #[cfg(feature = "image-library")]
         let (tx_img, _rx_img) = std::sync::mpsc::channel();
         let slot = Arc::new(Mutex::new(None));
 
+        #[cfg(feature = "image-library")]
         let mut watcher = FileWatcher::new(config, tx, bus, tx_pdf, tx_img, slot.clone());
+        #[cfg(not(feature = "image-library"))]
+        let mut watcher = FileWatcher::new(config, tx, bus, tx_pdf, slot.clone());
         watcher.start();
 
         let event = rx.recv_timeout(std::time::Duration::from_millis(1000));

@@ -1,4 +1,4 @@
-//! CardDAV contact tool implementations for the tool registry.
+﻿//! CardDAV contact tool implementations for the tool registry.
 
 use crate::agent::tools::Tool;
 use crate::agent::tools::context::ToolContext;
@@ -7,7 +7,7 @@ use crate::config::AppConfig;
 use std::any::TypeId;
 
 use super::json_schema;
-use super::strings::carddav as carddav_strings;
+use super::strings;
 
 /// Tool that searches contacts by keyword.
 pub(crate) struct SearchContactTool;
@@ -16,7 +16,7 @@ impl Tool for SearchContactTool {
         "search_contact"
     }
     fn description(&self) -> &'static str {
-        carddav_strings::SEARCH_CONTACT_DESCRIPTION
+        strings::SEARCH_CONTACT_DESCRIPTION
     }
     fn input_type(&self) -> TypeId {
         TypeId::of::<dtos::SearchContactInput>()
@@ -58,7 +58,7 @@ impl Tool for AddContactTool {
         "add_contact"
     }
     fn description(&self) -> &'static str {
-        carddav_strings::ADD_CONTACT_DESCRIPTION
+        strings::ADD_CONTACT_DESCRIPTION
     }
     fn input_type(&self) -> TypeId {
         TypeId::of::<dtos::AddContactInput>()
@@ -97,7 +97,7 @@ impl Tool for GetContactTool {
         "get_contact"
     }
     fn description(&self) -> &'static str {
-        carddav_strings::GET_CONTACT_DESCRIPTION
+        strings::GET_CONTACT_DESCRIPTION
     }
     fn input_type(&self) -> TypeId {
         TypeId::of::<dtos::GetContactInput>()

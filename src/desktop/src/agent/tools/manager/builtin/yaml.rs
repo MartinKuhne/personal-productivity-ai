@@ -1,4 +1,4 @@
-//! YAML front-matter header tool implementations for the tool registry.
+﻿//! YAML front-matter header tool implementations for the tool registry.
 
 use crate::agent::tools::Tool;
 use crate::agent::tools::context::ToolContext;
@@ -7,7 +7,7 @@ use crate::config::AppConfig;
 use std::any::TypeId;
 
 use super::json_schema;
-use super::strings::yaml as yaml_strings;
+use super::strings;
 
 /// Tool that parses a YAML front-matter header from a Markdown file.
 pub(crate) struct ReadYamlHeaderTool;
@@ -16,7 +16,7 @@ impl Tool for ReadYamlHeaderTool {
         "read_yaml_header"
     }
     fn description(&self) -> &'static str {
-        yaml_strings::READ_YAML_HEADER_DESCRIPTION
+        strings::READ_YAML_HEADER_DESCRIPTION
     }
     fn input_type(&self) -> TypeId {
         TypeId::of::<dtos::ReadYamlHeaderInput>()
@@ -49,7 +49,7 @@ impl Tool for WriteYamlHeaderTool {
         "write_yaml_header"
     }
     fn description(&self) -> &'static str {
-        yaml_strings::WRITE_YAML_HEADER_DESCRIPTION
+        strings::WRITE_YAML_HEADER_DESCRIPTION
     }
     fn input_type(&self) -> TypeId {
         TypeId::of::<dtos::WriteYamlHeaderInput>()

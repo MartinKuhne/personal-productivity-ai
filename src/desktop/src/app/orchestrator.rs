@@ -7,7 +7,7 @@ use crate::bus::core::{Bus, BusReader};
 use crate::bus::events::config::ConfigArrived;
 use crate::bus::events::file::FileEvent;
 use crate::bus::events::typed::{BackgroundEvent, FsEvent, McpAuthEvent, ProcessEvent};
-use crate::markdown::parse_front_matter;
+use crate::markdown::Document;
 use std::path::PathBuf;
 use std::sync::mpsc::Receiver;
 use std::sync::{Arc, Mutex};
@@ -20,7 +20,7 @@ pub struct AppOrchestrator {
     pub file_event_bus: Bus<FileEvent>,
     pub file_event_reader: Option<BusReader<FileEvent>>,
     pub file_processor: FileEventProcessor,
-    pub pdf_backing_tracker: crate::app::watcher::PdfBackingTracker,
+    pub pdf_backing_tracker: crate::app::session::PdfBackingTracker,
     pub tag_manager: TagManager,
     pub directory_tracker: DirectoryTracker,
     pub selection: SelectionManager,
@@ -360,13 +360,13 @@ impl AppOrchestrator {
                 self.pending_file_load = None;
                 match content {
                     Ok(content) => {
-                        if let Some(fm) = parse_front_matter(&content) {
-                            self.tab_manager.current_yaml = Some(fm.yaml);
-                            self.tab_manager.current_markdown = fm.body.to_string();
-                        } else {
-                            self.tab_manager.current_yaml = None;
-                            self.tab_manager.current_markdown = content;
-                        }
+                        // Parse the file once into a `Document` and
+                        // pull both the front matter and the body
+                        // from it. Avoids the previous two-step
+                        // `parse_front_matter` + manual body copy.
+                        let doc = Document::new(content);
+                        self.tab_manager.current_yaml = doc.yaml().cloned();
+                        self.tab_manager.current_markdown = doc.body().to_string();
                         self.tab_manager.invalidate_heading_ids_cache();
                         self.tab_manager.loaded_path = Some(path.clone());
                         self.tab_manager.toc =

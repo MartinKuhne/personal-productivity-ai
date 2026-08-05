@@ -3,13 +3,19 @@
 use crate::agent::tools::Tool;
 use crate::agent::tools::context::ToolContext;
 use crate::agent::tools::dtos;
-use crate::app::vfs::library::ContentLibraryExt;
+use crate::app::vfs::behaviour::ContentLibraryExt;
 use crate::config::AppConfig;
 use std::any::TypeId;
 
 use super::super::pagination::paginate_in_range;
 use super::json_schema;
-use super::strings::fs as fs_strings;
+use super::strings;
+
+/// Default `limit` for the `read_lines` tool. 0-indexed line slice;
+/// the first call without args returns the first 100 lines of the
+/// file. Matches the list-paginated tools' default for vocabulary
+/// consistency.
+const DEFAULT_READ_LINES_LIMIT: usize = 100;
 
 /// Tool that replaces exact text occurrences in a file.
 pub(crate) struct ReplaceTextTool;
@@ -18,7 +24,7 @@ impl Tool for ReplaceTextTool {
         "replace_text"
     }
     fn description(&self) -> &'static str {
-        fs_strings::REPLACE_TEXT_DESCRIPTION
+        strings::REPLACE_TEXT_DESCRIPTION
     }
     fn input_type(&self) -> TypeId {
         TypeId::of::<dtos::ReplaceTextInput>()
@@ -56,7 +62,7 @@ impl Tool for GrepTool {
         "grep"
     }
     fn description(&self) -> &'static str {
-        fs_strings::GREP_DESCRIPTION
+        strings::GREP_DESCRIPTION
     }
     fn input_type(&self) -> TypeId {
         TypeId::of::<dtos::GrepInput>()
@@ -115,7 +121,7 @@ impl Tool for ReadTagsTool {
         "read_tags"
     }
     fn description(&self) -> &'static str {
-        fs_strings::READ_TAGS_DESCRIPTION
+        strings::READ_TAGS_DESCRIPTION
     }
     fn input_type(&self) -> TypeId {
         TypeId::of::<dtos::ReadTagsInput>()
@@ -154,7 +160,7 @@ impl Tool for ListFilesByTagTool {
         "list_files_by_tag"
     }
     fn description(&self) -> &'static str {
-        fs_strings::LIST_FILES_BY_TAG_DESCRIPTION
+        strings::LIST_FILES_BY_TAG_DESCRIPTION
     }
     fn input_type(&self) -> TypeId {
         TypeId::of::<dtos::ListFilesByTagInput>()
@@ -209,7 +215,7 @@ impl Tool for ListFilesTool {
         "list_files"
     }
     fn description(&self) -> &'static str {
-        fs_strings::LIST_FILES_DESCRIPTION
+        strings::LIST_FILES_DESCRIPTION
     }
     fn input_type(&self) -> TypeId {
         TypeId::of::<dtos::ListFilesInput>()
@@ -268,7 +274,7 @@ impl Tool for ReadFileTool {
         "read_file"
     }
     fn description(&self) -> &'static str {
-        fs_strings::READ_FILE_DESCRIPTION
+        strings::READ_FILE_DESCRIPTION
     }
     fn input_type(&self) -> TypeId {
         TypeId::of::<dtos::ReadFileInput>()
@@ -294,20 +300,20 @@ impl Tool for ReadFileTool {
     }
 }
 
-/// Tool that reads specific lines from a file.
-pub(crate) struct ReadFileLinesTool;
-impl Tool for ReadFileLinesTool {
+/// Tool that reads a contiguous slice of lines from a file.
+pub(crate) struct ReadLinesTool;
+impl Tool for ReadLinesTool {
     fn name(&self) -> &'static str {
-        "read_file_lines"
+        "read_lines"
     }
     fn description(&self) -> &'static str {
-        fs_strings::READ_FILE_LINES_DESCRIPTION
+        strings::READ_LINES_DESCRIPTION
     }
     fn input_type(&self) -> TypeId {
-        TypeId::of::<dtos::ReadFileLinesInput>()
+        TypeId::of::<dtos::ReadLinesInput>()
     }
     fn parameters_schema(&self) -> serde_json::Value {
-        json_schema::<dtos::ReadFileLinesInput>()
+        json_schema::<dtos::ReadLinesInput>()
     }
     fn is_enabled(&self, config: &AppConfig, _: &str) -> bool {
         config.tool_groups.filesystem
@@ -316,19 +322,18 @@ impl Tool for ReadFileLinesTool {
         crate::agent::tools::Safety::ReadOnly
     }
     fn execute(&self, ctx: &ToolContext, args: &str) -> Result<serde_json::Value, String> {
-        let input: dtos::ReadFileLinesInput =
+        let input: dtos::ReadLinesInput =
             serde_json::from_str(args).map_err(|e| format!("Invalid args: {}", e))?;
         let (path, _) = ctx
             .resolve_virtual_path(&input.path, false)?
             .ok_or_else(|| "Cannot perform this operation on the virtual root".to_string())?;
-        crate::agent::tools::filesystem::tool_read_file_lines(
-            &path.to_string_lossy(),
-            input.start_line,
-            input.end_line,
-        )
-        .map(|r| {
-            serde_json::to_value(r).unwrap_or_else(|e| serde_json::json!({"error": e.to_string()}))
-        })
+        let offset = input.offset.unwrap_or(0);
+        let limit = input.limit.unwrap_or(DEFAULT_READ_LINES_LIMIT);
+        crate::agent::tools::filesystem::tool_read_lines(&path.to_string_lossy(), offset, limit)
+            .map(|r| {
+                serde_json::to_value(r)
+                    .unwrap_or_else(|e| serde_json::json!({"error": e.to_string()}))
+            })
     }
 }
 
@@ -339,7 +344,7 @@ impl Tool for CreateFileTool {
         "create_file"
     }
     fn description(&self) -> &'static str {
-        fs_strings::CREATE_FILE_DESCRIPTION
+        strings::CREATE_FILE_DESCRIPTION
     }
     fn input_type(&self) -> TypeId {
         TypeId::of::<dtos::CreateFileInput>()
@@ -369,14 +374,14 @@ impl Tool for CreateFileTool {
     }
 }
 
-/// Tool that inserts lines into a file at a specific index.
+/// Tool that inserts lines into a file at a 0-indexed offset.
 pub(crate) struct InsertLinesTool;
 impl Tool for InsertLinesTool {
     fn name(&self) -> &'static str {
         "insert_lines"
     }
     fn description(&self) -> &'static str {
-        fs_strings::INSERT_LINES_DESCRIPTION
+        strings::INSERT_LINES_DESCRIPTION
     }
     fn input_type(&self) -> TypeId {
         TypeId::of::<dtos::InsertLinesInput>()
@@ -397,7 +402,7 @@ impl Tool for InsertLinesTool {
         let producer = ctx.file_event_producer();
         crate::agent::tools::filesystem::tool_insert_lines(
             &path.to_string_lossy(),
-            input.line_index,
+            input.offset,
             &input.lines,
             &producer,
         )

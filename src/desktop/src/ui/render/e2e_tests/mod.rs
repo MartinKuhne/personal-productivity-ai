@@ -69,11 +69,6 @@ pub(super) use super::{
     render_yaml_table,
 };
 
-// Test-only `render_table` wrapper (gated by `#[cfg(test)]` in
-// `table::dispatch` and re-exported as `pub(super)` by `render/mod.rs`
-// under the same gate).
-pub(super) use super::render_table;
-
 // Re-export `eframe` and `egui` so test files can write
 // `egui::Context::default()` and `eframe::epaint::Shape` after
 // `use super::*;`. These crates are not directly in scope of the

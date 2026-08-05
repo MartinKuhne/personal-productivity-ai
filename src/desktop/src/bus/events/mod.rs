@@ -4,7 +4,7 @@
 //! | Module | Payload(s) | Channel |
 //! | --- | --- | --- |
 //! | [`mod@file`] | `FileEvent`, `FileEventKind`, `FileEventProducer` | `Bus<FileEvent>` |
-//! | [`messages`] | `TokenUsageInfo` | shared with [`typed`] |
+//! | [`messages`] | `TokenUsageInfo`, `BackgroundLogEntry`, `LogCategory` | shared with [`typed`] |
 //! | [`typed`] | `BackgroundEvent`, `AgentEvent`, `FsEvent`, `ProcessEvent` | `mpsc::Sender<BackgroundEvent>` (one channel, three sub-enums) |
 //! | [`config`] | `ConfigArrived` | `Bus<ConfigArrived>` |
 //!
@@ -22,5 +22,5 @@ pub mod typed;
 
 pub use config::ConfigArrived;
 pub use file::{FileEvent, FileEventKind, FileEventProducer};
-pub use messages::TokenUsageInfo;
+pub use messages::{BackgroundLogEntry, LogCategory, TokenUsageInfo};
 pub use typed::{AgentEvent, BackgroundEvent, FsEvent, ProcessEvent};

@@ -125,7 +125,7 @@ C4Component
 
   Component(reg, "ToolManager", "agent/tools/manager/mod.rs", "catalog + per-group state + error tracking + parallel-safety; register_builtin, register_mcp_tool, execute, get_schema, safety_of, parallel_safe_tools, set_group_enabled, record_error, clear_error, refresh_state, refresh_mcp_tools (TOOL-014..024)")
   Component(tctx, "ToolContext", "tools/context.rs (~80)", "{config, file_event_bus}; thin shim over app::vfs::resolve::resolve(vpath, allow_write, libraries) -> Option<(PathBuf,bool)>")
-  Component(fs, "filesystem tools", "tools/filesystem.rs", "grep, read_file, read_file_lines, create_file, insert_lines, replace_text, list_files")
+  Component(fs, "filesystem tools", "tools/filesystem.rs", "grep, read_file, read_lines, create_file, insert_lines, replace_text, list_files")
   Component(yaml, "yaml_header", "tools/yaml_header.rs", "read_yaml_header, write_yaml_header")
   Component(web, "web", "tools/web.rs", "web_fetch (pagination/headers/5-min cache TOOL-005..010), web_search (SearXNG), web_delegate sub-agent")
   Component(csv, "csv_db", "tools/csv_db/", "{mod, operations, query (evalexpr TOOL-002/003), schema}; add_rows, delete_rows, create_csv, list_csv, query; gated by prompt keywords (TOOL-001)")
@@ -165,7 +165,7 @@ C4Component
 
 Tool inventory (matches `Tools.md` + conditional tools):
 - **Core Workspace (11):** `grep`, `read_tags`, `list_files_by_tag`,
-  `list_files`, `read_file`, `read_file_lines`, `create_file`,
+  `list_files`, `read_file`, `read_lines`, `create_file`,
   `insert_lines`, `replace_text`, `read_yaml_header`,
   `write_yaml_header`.
 - **Web Integration (3):** `web_fetch`, `web_search`, `web_delegate`.

@@ -2,6 +2,7 @@
 //! FastMd desktop application entry point — initialises tracing, panic hooks, and launches the egui app.
 
 use eframe::egui;
+#[cfg(feature = "discord")]
 use fastmd::integrations::discord::run_discord_bot;
 use fastmd::ui::FastMdApp;
 
@@ -54,7 +55,11 @@ fn main() -> eframe::Result<()> {
     // every subscriber observes the same first-arrival event.
     let config_bus = fastmd::bus::config::config_bus();
 
-    // Start Discord bot if configured
+    // Start Discord bot if configured. The bot integration
+    // lives behind the `discord` Cargo feature; without it
+    // the `discord` config field is parsed but never
+    // dispatched (and `run_discord_bot` doesn't exist).
+    #[cfg(feature = "discord")]
     if let Some(discord_config) = config.discord.as_ref()
         && discord_config.bot_token.is_some()
     {

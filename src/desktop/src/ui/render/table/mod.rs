@@ -1,4 +1,4 @@
-//! Markdown table rendering — three sub-concerns, each its own file.
+//! Markdown table rendering — two sub-concerns, each its own file.
 //!
 //! - [`cell::render_table_cell`] paints a single cell at a known
 //!   pinned width and height. Returns the cell's actual height so the
@@ -7,10 +7,12 @@
 //!   used in production: it runs FTWA, falls back to the §3.6
 //!   horizontal-scroll path when the table physically cannot fit, and
 //!   calls `render_table_cell` for each cell.
-//! - [`dispatch::render_table`] is the `#[cfg(test)]` thin wrapper
-//!   around `render_table_with_config` that uses the default
-//!   `TableRenderConfig`. Production dispatch goes through
-//!   `render_table_with_config` directly.
+//!
+//! A test-only `render_table` thin wrapper (using the default
+//! `TableRenderConfig`) previously lived in `table/dispatch.rs` and
+//! required a 3-hop `pub(crate) use` re-export chain to reach the
+//! e2e_tests. It has been moved into `e2e_tests/helpers.rs` next to
+//! the other test helpers, and the re-export chain deleted.
 //!
 //! `render_table_with_config` is re-exported here so that
 //! `super::render_markdown` can call it via `table::render_table_with_config`
@@ -18,6 +20,5 @@
 
 pub mod cell;
 pub mod configured;
-pub mod dispatch;
 
 pub(crate) use configured::render_table_with_config;

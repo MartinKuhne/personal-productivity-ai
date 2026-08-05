@@ -2,7 +2,7 @@
 
 use super::*;
 use crate::agent::tools::context::ToolContext;
-use crate::app::browser::BrowserSession;
+use crate::app::session::BrowserSession;
 use crate::bus::core::Bus;
 use crate::bus::events::file::FileEvent;
 use crate::config::AppConfig;
@@ -19,8 +19,8 @@ fn test_browser_session() -> Arc<BrowserSession> {
     Arc::new(BrowserSession::new(&AppConfig::default()))
 }
 
-fn test_pdf_backing() -> Arc<crate::app::watcher::pdf_backing_tracker::PdfBackingTracker> {
-    Arc::new(crate::app::watcher::pdf_backing_tracker::PdfBackingTracker::new())
+fn test_pdf_backing() -> Arc<crate::app::session::PdfBackingTracker> {
+    Arc::new(crate::app::session::PdfBackingTracker::new())
 }
 
 fn test_ctx(config: &AppConfig) -> ToolContext<'static> {

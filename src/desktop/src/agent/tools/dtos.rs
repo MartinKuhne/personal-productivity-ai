@@ -1,4 +1,4 @@
-//! Input/output data-transfer objects for every tool — `serde` and `JsonSchema` derives for LLM argument serialisation.
+﻿//! Input/output data-transfer objects for every tool â€” `serde` and `JsonSchema` derives for LLM argument serialisation.
 //!
 //! Every user-visible string (tool description, per-field description) lives
 //! in the per-family `strings` submodule under `registry/builtin/`. The DTOs
@@ -18,16 +18,16 @@ pub enum ToolResponse<T> {
 
 #[derive(Deserialize, Debug, JsonSchema)]
 pub struct GrepInput {
-    #[schemars(description = strings::fs::FIELD_GREP_INPUT_QUERY)]
+    #[schemars(description = strings::FIELD_GREP_INPUT_QUERY)]
     pub query: String,
 }
 #[derive(Serialize, Debug, JsonSchema)]
 pub struct GrepResponse {
-    #[schemars(description = strings::fs::FIELD_GREP_RESPONSE_MATCHES)]
+    #[schemars(description = strings::FIELD_GREP_RESPONSE_MATCHES)]
     pub matches: String,
-    #[schemars(description = strings::fs::FIELD_GREP_RESPONSE_TOTAL)]
+    #[schemars(description = strings::FIELD_GREP_RESPONSE_TOTAL)]
     pub total: usize,
-    #[schemars(description = strings::fs::FIELD_GREP_RESPONSE_TRUNCATED)]
+    #[schemars(description = strings::FIELD_GREP_RESPONSE_TRUNCATED)]
     pub truncated: bool,
 }
 
@@ -41,19 +41,19 @@ pub struct ReadTagsResponse {
 #[derive(Deserialize, Debug, JsonSchema)]
 pub struct ListFilesByTagInput {
     pub tag: String,
-    #[schemars(description = strings::paging::FIELD_OFFSET_DESCRIPTION)]
+    #[schemars(description = strings::FIELD_OFFSET_DESCRIPTION)]
     pub offset: Option<usize>,
-    #[schemars(description = strings::paging::FIELD_LIMIT_DESCRIPTION)]
+    #[schemars(description = strings::FIELD_LIMIT_DESCRIPTION)]
     pub limit: Option<usize>,
 }
 #[derive(Serialize, Debug, JsonSchema)]
 pub struct ListFilesByTagResponse {
-    #[schemars(description = strings::fs::FIELD_LIST_FILES_BY_TAG_RESPONSE_FILES)]
+    #[schemars(description = strings::FIELD_LIST_FILES_BY_TAG_RESPONSE_FILES)]
     #[serde(default)]
     pub files: Vec<String>,
-    #[schemars(description = strings::paging::FIELD_TOTAL_DESCRIPTION)]
+    #[schemars(description = strings::FIELD_TOTAL_DESCRIPTION)]
     pub total: usize,
-    #[schemars(description = strings::paging::FIELD_HINT_DESCRIPTION)]
+    #[schemars(description = strings::FIELD_HINT_DESCRIPTION)]
     #[serde(skip_serializing_if = "Option::is_none")]
     pub hint: Option<String>,
 }
@@ -61,19 +61,19 @@ pub struct ListFilesByTagResponse {
 #[derive(Deserialize, Debug, JsonSchema)]
 pub struct ListFilesInput {
     pub path: String,
-    #[schemars(description = strings::paging::FIELD_OFFSET_DESCRIPTION)]
+    #[schemars(description = strings::FIELD_OFFSET_DESCRIPTION)]
     pub offset: Option<usize>,
-    #[schemars(description = strings::paging::FIELD_LIMIT_DESCRIPTION)]
+    #[schemars(description = strings::FIELD_LIMIT_DESCRIPTION)]
     pub limit: Option<usize>,
 }
 #[derive(Serialize, Debug, JsonSchema)]
 pub struct ListFilesResponse {
-    #[schemars(description = strings::fs::FIELD_LIST_FILES_RESPONSE_FILES)]
+    #[schemars(description = strings::FIELD_LIST_FILES_RESPONSE_FILES)]
     #[serde(default)]
     pub files: Vec<String>,
-    #[schemars(description = strings::paging::FIELD_TOTAL_DESCRIPTION)]
+    #[schemars(description = strings::FIELD_TOTAL_DESCRIPTION)]
     pub total: usize,
-    #[schemars(description = strings::paging::FIELD_HINT_DESCRIPTION)]
+    #[schemars(description = strings::FIELD_HINT_DESCRIPTION)]
     #[serde(skip_serializing_if = "Option::is_none")]
     pub hint: Option<String>,
 }
@@ -88,13 +88,15 @@ pub struct ReadFileResponse {
 }
 
 #[derive(Deserialize, Debug, JsonSchema)]
-pub struct ReadFileLinesInput {
+pub struct ReadLinesInput {
     pub path: String,
-    pub start_line: usize,
-    pub end_line: usize,
+    #[schemars(description = strings::FIELD_OFFSET_DESCRIPTION)]
+    pub offset: Option<usize>,
+    #[schemars(description = strings::FIELD_LIMIT_DESCRIPTION)]
+    pub limit: Option<usize>,
 }
 #[derive(Serialize, Debug, JsonSchema)]
-pub struct ReadFileLinesResponse {
+pub struct ReadLinesResponse {
     pub content: String,
 }
 
@@ -112,7 +114,9 @@ pub struct CreateFileResponse {
 #[derive(Deserialize, Debug, JsonSchema)]
 pub struct InsertLinesInput {
     pub path: String,
-    pub line_index: usize,
+    /// 0-indexed position in the file at which to insert `lines`.
+    /// `offset == 0` inserts at the top; `offset == lines.len()` appends.
+    pub offset: usize,
     pub lines: Vec<String>,
 }
 #[derive(Serialize, Debug, JsonSchema)]
@@ -127,29 +131,29 @@ pub struct WebFetchInput {
     pub headers: bool,
     #[serde(default)]
     pub force_refetch: bool,
-    #[schemars(description = strings::cursor::FIELD_CURSOR_DESCRIPTION)]
+    #[schemars(description = strings::FIELD_CURSOR_DESCRIPTION)]
     #[serde(default)]
     pub cursor: Option<String>,
 }
 #[derive(Serialize, Debug, JsonSchema)]
 pub struct WebFetchResponse {
     pub content: String,
-    #[schemars(description = strings::web::FIELD_WEB_FETCH_RESPONSE_TOTAL_LINES)]
+    #[schemars(description = strings::FIELD_WEB_FETCH_RESPONSE_TOTAL_LINES)]
     pub total_lines: usize,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub cursor: Option<String>,
-    #[schemars(description = strings::paging::FIELD_HINT_DESCRIPTION)]
+    #[schemars(description = strings::FIELD_HINT_DESCRIPTION)]
     #[serde(skip_serializing_if = "Option::is_none")]
     pub hint: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub response_headers: Option<std::collections::HashMap<String, String>>,
-    #[schemars(description = strings::web::FIELD_WEB_FETCH_RESPONSE_FROM_CACHE)]
+    #[schemars(description = strings::FIELD_WEB_FETCH_RESPONSE_FROM_CACHE)]
     pub from_cache: bool,
 }
 
 #[derive(Deserialize, Debug, JsonSchema)]
 pub struct WebSearchInput {
-    #[schemars(description = strings::web::FIELD_WEB_SEARCH_INPUT_QUERY)]
+    #[schemars(description = strings::FIELD_WEB_SEARCH_INPUT_QUERY)]
     pub query: String,
 }
 #[derive(Serialize, Debug, JsonSchema)]
@@ -238,34 +242,34 @@ pub struct DeleteCalendarItemResponse {
 
 #[derive(Deserialize, Debug, JsonSchema)]
 pub struct SearchEmailInput {
-    #[schemars(description = strings::jmap::FIELD_SEARCH_EMAIL_INPUT_KEYWORD)]
+    #[schemars(description = strings::FIELD_SEARCH_EMAIL_INPUT_KEYWORD)]
     pub keyword: Option<String>,
-    #[schemars(description = strings::jmap::FIELD_SEARCH_EMAIL_INPUT_FOLDER)]
+    #[schemars(description = strings::FIELD_SEARCH_EMAIL_INPUT_FOLDER)]
     pub folder: Option<String>,
-    #[schemars(description = strings::jmap::FIELD_SEARCH_EMAIL_INPUT_START_DATE)]
+    #[schemars(description = strings::FIELD_SEARCH_EMAIL_INPUT_START_DATE)]
     pub start_date: Option<String>,
-    #[schemars(description = strings::jmap::FIELD_SEARCH_EMAIL_INPUT_END_DATE)]
+    #[schemars(description = strings::FIELD_SEARCH_EMAIL_INPUT_END_DATE)]
     pub end_date: Option<String>,
-    #[schemars(description = strings::jmap::FIELD_SEARCH_EMAIL_INPUT_FROM)]
+    #[schemars(description = strings::FIELD_SEARCH_EMAIL_INPUT_FROM)]
     pub from: Option<String>,
-    #[schemars(description = strings::jmap::FIELD_SEARCH_EMAIL_INPUT_TO)]
+    #[schemars(description = strings::FIELD_SEARCH_EMAIL_INPUT_TO)]
     pub to: Option<String>,
-    #[schemars(description = strings::jmap::FIELD_SEARCH_EMAIL_INPUT_IS_UNREAD)]
+    #[schemars(description = strings::FIELD_SEARCH_EMAIL_INPUT_IS_UNREAD)]
     pub is_unread: Option<bool>,
-    #[schemars(description = strings::jmap::FIELD_SEARCH_EMAIL_INPUT_IS_FLAGGED)]
+    #[schemars(description = strings::FIELD_SEARCH_EMAIL_INPUT_IS_FLAGGED)]
     pub is_flagged: Option<bool>,
-    #[schemars(description = strings::cursor::FIELD_CURSOR_DESCRIPTION)]
+    #[schemars(description = strings::FIELD_CURSOR_DESCRIPTION)]
     pub cursor: Option<String>,
 }
 #[derive(Serialize, Debug, JsonSchema)]
 pub struct SearchEmailResponse {
     pub results: String,
-    #[schemars(description = strings::paging::FIELD_TOTAL_DESCRIPTION)]
+    #[schemars(description = strings::FIELD_TOTAL_DESCRIPTION)]
     pub total: usize,
-    #[schemars(description = strings::cursor::FIELD_CURSOR_DESCRIPTION)]
+    #[schemars(description = strings::FIELD_CURSOR_DESCRIPTION)]
     #[serde(skip_serializing_if = "Option::is_none")]
     pub cursor: Option<String>,
-    #[schemars(description = strings::paging::FIELD_HINT_DESCRIPTION)]
+    #[schemars(description = strings::FIELD_HINT_DESCRIPTION)]
     #[serde(skip_serializing_if = "Option::is_none")]
     pub hint: Option<String>,
 }
@@ -360,108 +364,124 @@ pub struct WebDelegateResponse {
 // Browser automation tools (BRWS-001..008)
 // ---------------------------------------------------------------------------
 
-/// `browser_navigate` input — drive the persistent page to a URL.
+/// `browser_navigate` input â€” drive the persistent page to a URL.
 #[derive(Deserialize, Debug, JsonSchema)]
+#[cfg(feature = "browser")]
 pub struct BrowserNavigateInput {
-    #[schemars(description = strings::browser::FIELD_BROWSER_NAVIGATE_INPUT_URL)]
+    #[schemars(description = strings::FIELD_BROWSER_NAVIGATE_INPUT_URL)]
     pub url: String,
 }
 #[derive(Serialize, Debug, JsonSchema)]
+#[cfg(feature = "browser")]
 pub struct BrowserNavigateResponse {
-    #[schemars(description = strings::browser::FIELD_BROWSER_NAVIGATE_RESPONSE_URL)]
+    #[schemars(description = strings::FIELD_BROWSER_NAVIGATE_RESPONSE_URL)]
     pub url: String,
-    #[schemars(description = strings::browser::FIELD_BROWSER_NAVIGATE_RESPONSE_TITLE)]
+    #[schemars(description = strings::FIELD_BROWSER_NAVIGATE_RESPONSE_TITLE)]
     pub title: String,
 }
 
-/// `browser_get_page_state` input — no parameters.
+/// `browser_get_page_state` input â€” no parameters.
 #[derive(Deserialize, Debug, JsonSchema)]
+#[cfg(feature = "browser")]
 pub struct BrowserGetPageStateInput {}
 #[derive(Serialize, Debug, JsonSchema)]
+#[cfg(feature = "browser")]
 pub struct BrowserGetPageStateResponse {
-    #[schemars(description = strings::browser::FIELD_BROWSER_GET_PAGE_STATE_RESPONSE_URL)]
+    #[schemars(description = strings::FIELD_BROWSER_GET_PAGE_STATE_RESPONSE_URL)]
     pub url: String,
-    #[schemars(description = strings::browser::FIELD_BROWSER_GET_PAGE_STATE_RESPONSE_TITLE)]
+    #[schemars(description = strings::FIELD_BROWSER_GET_PAGE_STATE_RESPONSE_TITLE)]
     pub title: String,
-    #[schemars(description = strings::browser::FIELD_BROWSER_GET_PAGE_STATE_RESPONSE_ELEMENTS)]
+    #[schemars(description = strings::FIELD_BROWSER_GET_PAGE_STATE_RESPONSE_ELEMENTS)]
     pub elements: String,
-    #[schemars(description = strings::browser::FIELD_BROWSER_GET_PAGE_STATE_RESPONSE_TOTAL)]
+    #[schemars(description = strings::FIELD_BROWSER_GET_PAGE_STATE_RESPONSE_TOTAL)]
     pub total: usize,
 }
 
-/// `browser_click` input — CSS selector for a single element.
+/// `browser_click` input â€” CSS selector for a single element.
 #[derive(Deserialize, Debug, JsonSchema)]
+#[cfg(feature = "browser")]
 pub struct BrowserClickInput {
-    #[schemars(description = strings::browser::FIELD_BROWSER_CLICK_INPUT_SELECTOR)]
+    #[schemars(description = strings::FIELD_BROWSER_CLICK_INPUT_SELECTOR)]
     pub selector: String,
 }
 #[derive(Serialize, Debug, JsonSchema)]
+#[cfg(feature = "browser")]
 pub struct BrowserClickResponse {
     pub result: String,
 }
 
-/// `browser_fill_input` input — selector + text.
+/// `browser_fill_input` input â€” selector + text.
 #[derive(Deserialize, Debug, JsonSchema)]
+#[cfg(feature = "browser")]
 pub struct BrowserFillInputInput {
-    #[schemars(description = strings::browser::FIELD_BROWSER_FILL_INPUT_INPUT_SELECTOR)]
+    #[schemars(description = strings::FIELD_BROWSER_FILL_INPUT_INPUT_SELECTOR)]
     pub selector: String,
-    #[schemars(description = strings::browser::FIELD_BROWSER_FILL_INPUT_INPUT_TEXT)]
+    #[schemars(description = strings::FIELD_BROWSER_FILL_INPUT_INPUT_TEXT)]
     pub text: String,
 }
 #[derive(Serialize, Debug, JsonSchema)]
+#[cfg(feature = "browser")]
 pub struct BrowserFillInputResponse {
     pub result: String,
 }
 
-/// `browser_select_dropdown` input — selector + option value.
+/// `browser_select_dropdown` input â€” selector + option value.
 #[derive(Deserialize, Debug, JsonSchema)]
+#[cfg(feature = "browser")]
 pub struct BrowserSelectDropdownInput {
-    #[schemars(description = strings::browser::FIELD_BROWSER_SELECT_DROPDOWN_INPUT_SELECTOR)]
+    #[schemars(description = strings::FIELD_BROWSER_SELECT_DROPDOWN_INPUT_SELECTOR)]
     pub selector: String,
-    #[schemars(description = strings::browser::FIELD_BROWSER_SELECT_DROPDOWN_INPUT_VALUE)]
+    #[schemars(description = strings::FIELD_BROWSER_SELECT_DROPDOWN_INPUT_VALUE)]
     pub value: String,
 }
 #[derive(Serialize, Debug, JsonSchema)]
+#[cfg(feature = "browser")]
 pub struct BrowserSelectDropdownResponse {
     pub result: String,
 }
 
-/// `browser_press_key` input — keyboard key.
+/// `browser_press_key` input â€” keyboard key.
 #[derive(Deserialize, Debug, JsonSchema)]
+#[cfg(feature = "browser")]
 pub struct BrowserPressKeyInput {
-    #[schemars(description = strings::browser::FIELD_BROWSER_PRESS_KEY_INPUT_KEY)]
+    #[schemars(description = strings::FIELD_BROWSER_PRESS_KEY_INPUT_KEY)]
     pub key: String,
 }
 #[derive(Serialize, Debug, JsonSchema)]
+#[cfg(feature = "browser")]
 pub struct BrowserPressKeyResponse {
     pub result: String,
 }
 
-/// `browser_evaluate_js` input — arbitrary JS expression.
+/// `browser_evaluate_js` input â€” arbitrary JS expression.
 #[derive(Deserialize, Debug, JsonSchema)]
+#[cfg(feature = "browser")]
 pub struct BrowserEvaluateJsInput {
-    #[schemars(description = strings::browser::FIELD_BROWSER_EVALUATE_JS_INPUT_SCRIPT)]
+    #[schemars(description = strings::FIELD_BROWSER_EVALUATE_JS_INPUT_SCRIPT)]
     pub script: String,
 }
 #[derive(Serialize, Debug, JsonSchema)]
+#[cfg(feature = "browser")]
 pub struct BrowserEvaluateJsResponse {
     /// JSON-encoded result of the script. May be `null`.
     pub result: String,
 }
 
-/// `browser_screenshot` input — restricted filename.
+/// `browser_screenshot` input â€” restricted filename.
 #[derive(Deserialize, Debug, JsonSchema)]
+#[cfg(feature = "browser")]
 pub struct BrowserScreenshotInput {
-    #[schemars(description = strings::browser::FIELD_BROWSER_SCREENSHOT_INPUT_FILENAME)]
+    #[schemars(description = strings::FIELD_BROWSER_SCREENSHOT_INPUT_FILENAME)]
     pub filename: String,
     #[serde(default)]
-    #[schemars(description = strings::browser::FIELD_BROWSER_SCREENSHOT_INPUT_FULL_PAGE)]
+    #[schemars(description = strings::FIELD_BROWSER_SCREENSHOT_INPUT_FULL_PAGE)]
     pub full_page: bool,
 }
 #[derive(Serialize, Debug, JsonSchema)]
+#[cfg(feature = "browser")]
 pub struct BrowserScreenshotResponse {
-    #[schemars(description = strings::browser::FIELD_BROWSER_SCREENSHOT_RESPONSE_PATH)]
+    #[schemars(description = strings::FIELD_BROWSER_SCREENSHOT_RESPONSE_PATH)]
     pub path: String,
-    #[schemars(description = strings::browser::FIELD_BROWSER_SCREENSHOT_RESPONSE_BYTES)]
+    #[schemars(description = strings::FIELD_BROWSER_SCREENSHOT_RESPONSE_BYTES)]
     pub bytes: usize,
 }

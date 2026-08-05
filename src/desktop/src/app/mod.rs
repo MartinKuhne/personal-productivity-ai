@@ -16,6 +16,7 @@
 pub mod background;
 pub mod background_task;
 pub mod batch;
+#[cfg(feature = "browser")]
 pub mod browser;
 pub mod dialog_manager;
 pub mod document;
@@ -24,6 +25,7 @@ pub mod panel_layout;
 pub mod persisted;
 pub mod print;
 pub mod selection_manager;
+pub mod session;
 pub mod tab_manager;
 pub mod tag_manager;
 pub mod text_buffer;

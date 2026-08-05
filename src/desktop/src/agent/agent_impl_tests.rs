@@ -25,7 +25,7 @@ fn make_config(port: u16) -> AppConfig {
 
 fn make_ctx(config: AppConfig) -> (AgentContext, std::sync::mpsc::Receiver<BackgroundEvent>) {
     let (tx, rx) = std::sync::mpsc::channel();
-    let browser_session = std::sync::Arc::new(crate::app::browser::BrowserSession::new(
+    let browser_session = std::sync::Arc::new(crate::app::session::BrowserSession::new(
         &crate::config::AppConfig::default(),
     ));
     let ctx = AgentContext {
@@ -41,9 +41,7 @@ fn make_ctx(config: AppConfig) -> (AgentContext, std::sync::mpsc::Receiver<Backg
         current_response: String::new(),
         model_name: None,
         browser_session,
-        pdf_backing: std::sync::Arc::new(
-            crate::app::watcher::pdf_backing_tracker::PdfBackingTracker::new(),
-        ),
+        pdf_backing: std::sync::Arc::new(crate::app::session::PdfBackingTracker::new()),
     };
     (ctx, rx)
 }
@@ -222,7 +220,7 @@ fn test_run_agent_skips_done_status_when_cancelled() {
     .to_string();
     let port = spawn_one_shot_http_server(&http_response("HTTP/1.1 200 OK", &body));
     let (tx, rx) = std::sync::mpsc::channel();
-    let browser_session = std::sync::Arc::new(crate::app::browser::BrowserSession::new(
+    let browser_session = std::sync::Arc::new(crate::app::session::BrowserSession::new(
         &crate::config::AppConfig::default(),
     ));
     let ctx = AgentContext {
@@ -238,9 +236,7 @@ fn test_run_agent_skips_done_status_when_cancelled() {
         current_response: String::new(),
         model_name: None,
         browser_session,
-        pdf_backing: std::sync::Arc::new(
-            crate::app::watcher::pdf_backing_tracker::PdfBackingTracker::new(),
-        ),
+        pdf_backing: std::sync::Arc::new(crate::app::session::PdfBackingTracker::new()),
     };
     run_agent(ctx);
     let mut saw_done = false;
