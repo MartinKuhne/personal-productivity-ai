@@ -440,7 +440,6 @@ fn merge_vcard_update(existing: &[VcardProp], contact_json: &str, uid: Option<&s
     out.push_str("END:VCARD\r\n");
     out
 }
-
 #[derive(serde::Serialize)]
 struct CardDavContactDetails {
     client: String,
@@ -1333,7 +1332,6 @@ pub fn tool_delete_contact(
         })
     }
 }
-
 // ---------------------------------------------------------------------------
 // Tests live in the sibling `carddav_tests.rs` sidecar.
 // ---------------------------------------------------------------------------
