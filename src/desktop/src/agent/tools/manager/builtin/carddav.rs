@@ -131,3 +131,86 @@ impl Tool for GetContactTool {
         })
     }
 }
+
+/// Tool that updates an existing contact.
+pub(crate) struct UpdateContactTool;
+impl Tool for UpdateContactTool {
+    fn name(&self) -> &'static str {
+        "update_contact"
+    }
+    fn description(&self) -> &'static str {
+        strings::UPDATE_CONTACT_DESCRIPTION
+    }
+    fn input_type(&self) -> TypeId {
+        TypeId::of::<dtos::UpdateContactInput>()
+    }
+    fn parameters_schema(&self) -> serde_json::Value {
+        json_schema::<dtos::UpdateContactInput>()
+    }
+    fn is_enabled(&self, config: &AppConfig, _: &str) -> bool {
+        if !config.tool_groups.contacts {
+            return false;
+        }
+        if config
+            .feature_flags
+            .get("useDAVForContacts")
+            .copied()
+            .unwrap_or(false)
+        {
+            !config.caldav_clients.is_empty()
+        } else {
+            !config.jmap_clients.is_empty()
+        }
+    }
+    fn execute(&self, ctx: &ToolContext, args: &str) -> Result<serde_json::Value, String> {
+        let input: dtos::UpdateContactInput =
+            serde_json::from_str(args).map_err(|e| format!("Invalid args: {}", e))?;
+        crate::agent::tools::carddav::tool_update_contact(
+            ctx.config,
+            &input.id,
+            &input.contact_json,
+        )
+        .map(|r| {
+            serde_json::to_value(r).unwrap_or_else(|e| serde_json::json!({"error": e.to_string()}))
+        })
+    }
+}
+
+/// Tool that deletes a contact by ID.
+pub(crate) struct DeleteContactTool;
+impl Tool for DeleteContactTool {
+    fn name(&self) -> &'static str {
+        "delete_contact"
+    }
+    fn description(&self) -> &'static str {
+        strings::DELETE_CONTACT_DESCRIPTION
+    }
+    fn input_type(&self) -> TypeId {
+        TypeId::of::<dtos::DeleteContactInput>()
+    }
+    fn parameters_schema(&self) -> serde_json::Value {
+        json_schema::<dtos::DeleteContactInput>()
+    }
+    fn is_enabled(&self, config: &AppConfig, _: &str) -> bool {
+        if !config.tool_groups.contacts {
+            return false;
+        }
+        if config
+            .feature_flags
+            .get("useDAVForContacts")
+            .copied()
+            .unwrap_or(false)
+        {
+            !config.caldav_clients.is_empty()
+        } else {
+            !config.jmap_clients.is_empty()
+        }
+    }
+    fn execute(&self, ctx: &ToolContext, args: &str) -> Result<serde_json::Value, String> {
+        let input: dtos::DeleteContactInput =
+            serde_json::from_str(args).map_err(|e| format!("Invalid args: {}", e))?;
+        crate::agent::tools::carddav::tool_delete_contact(ctx.config, &input.id).map(|r| {
+            serde_json::to_value(r).unwrap_or_else(|e| serde_json::json!({"error": e.to_string()}))
+        })
+    }
+}
