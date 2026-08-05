@@ -164,6 +164,153 @@ fn test_send_enter_key_captures_event() {
     );
 }
 
+/// Regression guard: pasting text into the command input must not
+/// break the Enter-to-submit path. Pasting multiline text, then
+/// pressing Enter, must still dispatch the prompt via
+/// `apply_send_click` and fire the `on_click("send")` callback.
+#[test]
+fn test_paste_then_enter_still_submits() {
+    use crate::ui::test_helpers::interact::stateful_harness;
+
+    let mut harness = stateful_harness(Vec::<&'static str>::new(), |ui, captured| {
+        let mut app = create_test_app();
+        show_bottom_panel_capture(&mut app, ui, |event| {
+            captured.push(event);
+        });
+    });
+    harness.fit_contents();
+
+    use accesskit::Role;
+    use egui_kittest::kittest::Queryable;
+    let candidates: Vec<_> = harness
+        .query_all_by_role(Role::TextInput)
+        .chain(harness.query_all_by_role(Role::MultilineTextInput))
+        .collect();
+    assert!(
+        !candidates.is_empty(),
+        "expected at least one TextInput node in the bottom panel"
+    );
+    candidates[0].click();
+    harness.run_steps(2);
+
+    // Paste multiline text (with a trailing newline, as copied text
+    // often carries).
+    harness.event(egui::Event::Paste("summarize this\n".to_owned()));
+    harness.run_steps(2);
+
+    // Enter must still submit the prompt.
+    harness.key_press(egui::Key::Enter);
+    harness.run_steps(2);
+    harness.run_steps(2);
+
+    let captured = harness.state();
+    assert!(
+        captured.contains(&"send"),
+        "pressing Enter after pasting text must fire the `send` \
+             on_click event; got: {:?}",
+        captured
+    );
+}
+
+/// Regression guard: on Windows, when an IME is active the Enter key
+/// is swallowed by the IME (winit reports `VK_PROCESSKEY`; egui-winit
+/// filters it out) and only `Event::Ime(ImeEvent::Commit("\n"))`
+/// reaches the app. The bottom panel must still treat that as a
+/// submit trigger, otherwise pasting text followed by Enter silently
+/// does nothing.
+#[test]
+fn test_ime_commit_enter_still_submits() {
+    use crate::ui::test_helpers::interact::stateful_harness;
+
+    let mut harness = stateful_harness(Vec::<&'static str>::new(), |ui, captured| {
+        let mut app = create_test_app();
+        app.orchestrator.agent.command_input = "summarize the doc".to_string();
+        show_bottom_panel_capture(&mut app, ui, |event| {
+            captured.push(event);
+        });
+    });
+    harness.fit_contents();
+
+    use accesskit::Role;
+    use egui_kittest::kittest::Queryable;
+    let candidates: Vec<_> = harness
+        .query_all_by_role(Role::TextInput)
+        .chain(harness.query_all_by_role(Role::MultilineTextInput))
+        .collect();
+    assert!(
+        !candidates.is_empty(),
+        "expected at least one TextInput node in the bottom panel"
+    );
+    candidates[0].click();
+    harness.run_steps(2);
+
+    // Simulate Windows delivering the Enter key as an IME commit
+    // (the raw Key event was consumed by the IME).
+    harness.event(egui::Event::Ime(egui::ImeEvent::Commit("\n".to_owned())));
+    harness.run_steps(2);
+    harness.run_steps(2);
+
+    let captured = harness.state();
+    assert!(
+        captured.contains(&"send"),
+        "an IME commit of Enter must fire the `send` on_click event; got: {:?}",
+        captured
+    );
+}
+
+/// Full-app reproduction: drive the whole `FastMdApp::update_ui`
+/// panel stack, focus the prompt, paste multiline text, then press
+/// Enter. The agent session must actually start (`running` flips).
+#[test]
+fn test_full_app_paste_then_enter_starts_agent() {
+    use egui_kittest::kittest::Queryable;
+
+    let app = create_test_app();
+    let mut harness = egui_kittest::Harness::builder()
+        .with_size(egui::Vec2::new(900.0, 700.0))
+        .with_max_steps(200)
+        .build_ui_state(
+            |ui, app: &mut FastMdApp| {
+                app.update_ui(ui);
+            },
+            app,
+        );
+    harness.run_steps(5);
+
+    let candidates: Vec<_> = harness
+        .query_all_by_role(accesskit::Role::TextInput)
+        .chain(harness.query_all_by_role(accesskit::Role::MultilineTextInput))
+        .collect();
+    assert!(
+        !candidates.is_empty(),
+        "expected the command input TextEdit in the full app"
+    );
+    candidates[0].click();
+    harness.run_steps(2);
+
+    harness.event(egui::Event::Paste("summarize the doc\n".to_owned()));
+    harness.run_steps(2);
+
+    harness.key_press(egui::Key::Enter);
+    harness.run_steps(2);
+    harness.run_steps(2);
+
+    let app = harness.state();
+    assert!(
+        app.agent().state().running,
+        "pressing Enter after pasting must start the agent session; \
+             command_input={:?}, status={:?}",
+        app.agent().command_input,
+        app.agent().state().status
+    );
+    assert!(
+        app.agent().command_input.is_empty(),
+        "the pasted prompt must have been consumed by the dispatch; \
+             command_input={:?}",
+        app.agent().command_input
+    );
+}
+
 /// Tier 4 click test: pressing Enter in the bottom-panel
 /// command input while the agent is running must queue the
 /// prompt instead of dispatching it immediately.
@@ -264,6 +411,72 @@ fn test_parse_command_intent() {
         parse_command_intent("hello world"),
         CommandIntent::RunAgent("hello world".to_string())
     );
+}
+
+#[test]
+fn test_is_enter_pressed_not_triggered() {
+    let ctx = egui::Context::default();
+    let _ = ctx.run_ui(egui::RawInput::default(), |ui| {
+        let _ = ui;
+        assert!(
+            !ctx.input(is_enter_pressed),
+            "a frame with no Enter key or IME commit must not report Enter"
+        );
+    });
+}
+
+#[test]
+fn test_is_enter_pressed_raw_key() {
+    let ctx = egui::Context::default();
+    let raw_input = egui::RawInput {
+        events: vec![egui::Event::Key {
+            key: egui::Key::Enter,
+            pressed: true,
+            repeat: false,
+            modifiers: egui::Modifiers::NONE,
+            physical_key: None,
+        }],
+        ..Default::default()
+    };
+    let _ = ctx.run_ui(raw_input, |ui| {
+        let _ = ui;
+        assert!(
+            ctx.input(is_enter_pressed),
+            "a raw Enter key event must register as Enter pressed"
+        );
+    });
+}
+#[test]
+fn test_is_enter_pressed_ime_commit() {
+    let ctx = egui::Context::default();
+    let raw_input = egui::RawInput {
+        events: vec![egui::Event::Ime(egui::ImeEvent::Commit("\n".to_owned()))],
+        ..Default::default()
+    };
+    let _ = ctx.run_ui(raw_input, |ui| {
+        let _ = ui;
+        assert!(
+            ctx.input(is_enter_pressed),
+            "an IME commit of a newline (Windows swallowing the raw Enter key) \
+                 must register as Enter pressed"
+        );
+    });
+}
+
+#[test]
+fn test_is_enter_pressed_ime_commit_other_text_ignored() {
+    let ctx = egui::Context::default();
+    let raw_input = egui::RawInput {
+        events: vec![egui::Event::Ime(egui::ImeEvent::Commit("你好".to_owned()))],
+        ..Default::default()
+    };
+    let _ = ctx.run_ui(raw_input, |ui| {
+        let _ = ui;
+        assert!(
+            !ctx.input(is_enter_pressed),
+            "an IME commit of actual text must not register as Enter pressed"
+        );
+    });
 }
 
 #[test]

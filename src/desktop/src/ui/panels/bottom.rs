@@ -16,6 +16,33 @@ pub enum CommandIntent {
     Empty,
 }
 
+/// Purpose: Detects whether the current frame carries an Enter key
+/// press, whether it arrives as a regular `Key::Enter` event or as an
+/// IME commit of a newline.
+/// Inputs: `input` — the egui input state for the current frame.
+/// Outputs: `true` if an Enter press is present.
+/// Purity: Pure.
+/// Preconditions: None.
+/// Postconditions: None.
+///
+/// On Windows, when an IME processes the Enter key the raw
+/// `Key::Enter` event is swallowed (winit reports `VK_PROCESSKEY`,
+/// which `egui-winit` filters out) and only an `Event::Ime` newline
+/// commit reaches the app. The Enter-to-submit path in the bottom
+/// panel must recognise both deliveries, otherwise pressing Enter
+/// after an IME interaction (e.g. pasting text) silently does nothing.
+pub fn is_enter_pressed(input: &egui::InputState) -> bool {
+    input.key_pressed(egui::Key::Enter)
+        || input.events.iter().any(|event| match event {
+            egui::Event::Ime(egui::ImeEvent::Commit(text))
+            | egui::Event::Ime(egui::ImeEvent::Preedit {
+                text,
+                active_range_chars: _,
+            }) => text == "\n" || text == "\r",
+            _ => false,
+        })
+}
+
 /// Parses the user prompt to determine the intended command.
 pub fn parse_command_intent(prompt: &str) -> CommandIntent {
     let trimmed = prompt.trim();
@@ -193,7 +220,8 @@ pub fn show_bottom_panel_capture(
 
                 let mut submit = false;
                 if response.has_focus()
-                    && ctx.input(|i| i.key_pressed(egui::Key::Enter) && !i.modifiers.shift)
+                    && ctx.input(is_enter_pressed)
+                    && !ctx.input(|i| i.modifiers.shift)
                 {
                     submit = true;
                 }
