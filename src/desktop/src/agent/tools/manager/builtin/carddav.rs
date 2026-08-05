@@ -177,6 +177,14 @@ impl Tool for UpdateContactTool {
 }
 
 /// Tool that deletes a contact by ID.
+///
+/// **Currently disabled.** The function, DTO, and registration are
+/// kept so the tool can be re-enabled in a future release; until then
+/// `is_enabled` returns `false` so the LLM never sees the tool. To
+/// re-enable, replace the `false` literal below with the same
+/// backend-presence check used by the other contact tools
+/// (`useDAVForContacts` flag → `caldav_clients`; otherwise
+/// `jmap_clients`).
 pub(crate) struct DeleteContactTool;
 impl Tool for DeleteContactTool {
     fn name(&self) -> &'static str {
@@ -191,20 +199,9 @@ impl Tool for DeleteContactTool {
     fn parameters_schema(&self) -> serde_json::Value {
         json_schema::<dtos::DeleteContactInput>()
     }
-    fn is_enabled(&self, config: &AppConfig, _: &str) -> bool {
-        if !config.tool_groups.contacts {
-            return false;
-        }
-        if config
-            .feature_flags
-            .get("useDAVForContacts")
-            .copied()
-            .unwrap_or(false)
-        {
-            !config.caldav_clients.is_empty()
-        } else {
-            !config.jmap_clients.is_empty()
-        }
+    fn is_enabled(&self, _config: &AppConfig, _: &str) -> bool {
+        // See struct doc comment — disabled until explicitly re-enabled.
+        false
     }
     fn execute(&self, ctx: &ToolContext, args: &str) -> Result<serde_json::Value, String> {
         let input: dtos::DeleteContactInput =
