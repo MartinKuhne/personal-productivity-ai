@@ -31,6 +31,8 @@ pub enum CommandIntent {
 /// commit reaches the app. The Enter-to-submit path in the bottom
 /// panel must recognise both deliveries, otherwise pressing Enter
 /// after an IME interaction (e.g. pasting text) silently does nothing.
+/// Windows newlines are often CRLF (`\r\n`), so we accept `\n`, `\r`,
+/// or `\r\n` as the IME commit text.
 pub fn is_enter_pressed(input: &egui::InputState) -> bool {
     input.key_pressed(egui::Key::Enter)
         || input.events.iter().any(|event| match event {
@@ -38,7 +40,7 @@ pub fn is_enter_pressed(input: &egui::InputState) -> bool {
             | egui::Event::Ime(egui::ImeEvent::Preedit {
                 text,
                 active_range_chars: _,
-            }) => text == "\n" || text == "\r",
+            }) => matches!(text.as_str(), "\n" | "\r" | "\r\n"),
             _ => false,
         })
 }

@@ -258,6 +258,55 @@ fn test_ime_commit_enter_still_submits() {
     );
 }
 
+/// Regression guard: the real Windows failure mode is Paste (which
+/// may activate IME) followed by Enter key being swallowed by IME
+/// and delivered as IME Commit("\n"), NOT as a raw Key::Enter.
+/// This test simulates that exact sequence.
+#[test]
+fn test_paste_then_ime_commit_enter_still_submits() {
+    use crate::ui::test_helpers::interact::stateful_harness;
+
+    let mut harness = stateful_harness(Vec::<&'static str>::new(), |ui, captured| {
+        let mut app = create_test_app();
+        show_bottom_panel_capture(&mut app, ui, |event| {
+            captured.push(event);
+        });
+    });
+    harness.fit_contents();
+
+    use accesskit::Role;
+    use egui_kittest::kittest::Queryable;
+    let candidates: Vec<_> = harness
+        .query_all_by_role(Role::TextInput)
+        .chain(harness.query_all_by_role(Role::MultilineTextInput))
+        .collect();
+    assert!(
+        !candidates.is_empty(),
+        "expected at least one TextInput node in the bottom panel"
+    );
+    candidates[0].click();
+    harness.run_steps(2);
+
+    // Paste text (simulating user Ctrl+V)
+    harness.event(egui::Event::Paste("summarize this\n".to_owned()));
+    harness.run_steps(2);
+
+    // On Windows with IME active, Enter is NOT delivered as Key::Enter.
+    // It's swallowed (VK_PROCESSKEY filtered by egui-winit) and only
+    // an IME Commit("\n") reaches the app.
+    harness.event(egui::Event::Ime(egui::ImeEvent::Commit("\n".to_owned())));
+    harness.run_steps(2);
+    harness.run_steps(2);
+
+    let captured = harness.state();
+    assert!(
+        captured.contains(&"send"),
+        "pressing Enter (delivered as IME commit) after pasting must fire the `send` \
+             on_click event; got: {:?}",
+        captured
+    );
+}
+
 /// Full-app reproduction: drive the whole `FastMdApp::update_ui`
 /// panel stack, focus the prompt, paste multiline text, then press
 /// Enter. The agent session must actually start (`running` flips).
@@ -475,6 +524,22 @@ fn test_is_enter_pressed_ime_commit_other_text_ignored() {
         assert!(
             !ctx.input(is_enter_pressed),
             "an IME commit of actual text must not register as Enter pressed"
+        );
+    });
+}
+
+#[test]
+fn test_is_enter_pressed_ime_commit_crlf() {
+    let ctx = egui::Context::default();
+    let raw_input = egui::RawInput {
+        events: vec![egui::Event::Ime(egui::ImeEvent::Commit("\r\n".to_owned()))],
+        ..Default::default()
+    };
+    let _ = ctx.run_ui(raw_input, |ui| {
+        let _ = ui;
+        assert!(
+            ctx.input(is_enter_pressed),
+            "an IME commit of CRLF (Windows newline) must register as Enter pressed"
         );
     });
 }
