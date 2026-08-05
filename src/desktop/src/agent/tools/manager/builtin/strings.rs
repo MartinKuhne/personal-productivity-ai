@@ -173,7 +173,18 @@ pub const DELETE_CALENDAR_ITEM_DESCRIPTION: &str = "Delete a calendar item.";
 
 pub const SEARCH_CONTACT_DESCRIPTION: &str = "Search contacts by keyword.";
 
-pub const ADD_CONTACT_DESCRIPTION: &str = "Add a new contact.";
+pub const ADD_CONTACT_DESCRIPTION: &str = "Add a new contact to the configured CardDAV addressbook. \
+The `contact_json` argument is a JSON object describing the contact. \
+Use these canonical field names (the listed aliases are also accepted): \
+`name` (aliases: `fn`, `full_name`) — the contact's display name, REQUIRED; \
+`email` (aliases: `email_address`, `mail`); \
+`phone` (aliases: `tel`, `telephone`, `mobile`, `phone_number`); \
+`company` (aliases: `org`, `organization`, `organisation`); \
+`title` (aliases: `job_title`, `role`) — job title; \
+`notes` (aliases: `note`, `comment`) — free-form notes. \
+Only fields you actually know should be included. Empty strings and \
+missing fields are ignored. The created resource is returned with its \
+href, Location, and ETag.";
 
 pub const GET_CONTACT_DESCRIPTION: &str = "Get a contact by its unique ID.";
 
