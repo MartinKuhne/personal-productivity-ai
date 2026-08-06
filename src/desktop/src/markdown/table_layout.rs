@@ -268,7 +268,7 @@ mod tests {
         // "Hello World" is 11 chars * 10 = 110 max width
         // "Foo" is 3 chars * 10 = 30 max width
         // Total max = 140, available = 500. So surplus regime.
-        assert_eq!(layout.needs_horizontal_scroll, false);
+        assert!(!layout.needs_horizontal_scroll);
         assert_eq!(layout.rows[0][0].width, 110.0);
         assert_eq!(layout.rows[0][1].width, 30.0);
         assert_eq!(layout.rows[0][0].height, 20.0); // 1 line height
@@ -297,7 +297,7 @@ mod tests {
                 .with_spacing(10.0, 2.0);
         let layout = builder.build(&ast);
 
-        assert_eq!(layout.needs_horizontal_scroll, false);
+        assert!(!layout.needs_horizontal_scroll);
 
         // "Short" has 0 slack, stays at 50.
         // "A very long sentence" has 120 slack. It shrinks from 200 to 90 to fit the 140 remaining content width.
@@ -334,7 +334,7 @@ mod tests {
                 .with_spacing(10.0, 2.0);
         let layout = builder.build(&ast);
 
-        assert_eq!(layout.needs_horizontal_scroll, true);
+        assert!(layout.needs_horizontal_scroll);
 
         // Should fallback to max content widths (which equal min widths here)
         assert_eq!(layout.rows[0][0].width, 110.0);

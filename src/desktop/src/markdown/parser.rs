@@ -32,13 +32,14 @@
 //! as 3 runs, and the FTWA pipeline would produce wrong widths
 //! (the production bug fixed by the coalescer).
 //!
-//! The fix lives in [`push_text_coalesce`] and [`push_link_coalesce`]
-//! (defined below) — helpers that fold consecutive same-style
-//! `Text` events (or same-URL `Link` events) into a single
-//! `InlineElem` at the push site. See those functions' doc comments
-//! for the exact rules. The test `cmark_strikethrough_fragments_single_tilde`
-//! in this module pins the cmark event count so a future upgrade /
-//! option change that shifts the count surfaces immediately.
+//! The fix lives in the two helpers `push_text_coalesce` and
+//! `push_link_coalesce` (defined below) — helpers that fold
+//! consecutive same-style `Text` events (or same-URL `Link` events)
+//! into a single `InlineElem` at the push site. See those functions'
+//! doc comments for the exact rules. The test
+//! `cmark_strikethrough_fragments_single_tilde` in this module pins
+//! the cmark event count so a future upgrade / option change that
+//! shifts the count surfaces immediately.
 //!
 //! This is a workaround, not a fix at the source. The cleaner
 //! long-term options (none of which we've done) are:
@@ -775,8 +776,10 @@ mod tests {
     #[test]
     fn push_text_coalesce_starts_new_element_on_style_change() {
         let mut buf: Vec<InlineElem> = Vec::new();
-        let mut s_bold = TextStyle::default();
-        s_bold.bold = true;
+        let s_bold = TextStyle {
+            bold: true,
+            ..TextStyle::default()
+        };
         push_text_coalesce(&mut buf, "plain", &TextStyle::default());
         push_text_coalesce(&mut buf, "bold", &s_bold);
         assert_eq!(buf.len(), 2, "style change must start a new element");

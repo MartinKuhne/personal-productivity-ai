@@ -394,7 +394,7 @@ fn test_parse_laptops_table_ast_shape() {
         "Summary",
     ];
     for (j, expected) in expected_header.iter().enumerate() {
-        check_cell(&rows[0][j], *expected, "header", j, &mut errors);
+        check_cell(&rows[0][j], expected, "header", j, &mut errors);
     }
 
     // Data row — each cell is a single plain-text InlineElem. The
@@ -411,7 +411,7 @@ fn test_parse_laptops_table_ast_shape() {
         "Excellent value. Vibrant OLED display, exceptional battery life for a 16\" laptop, lightweight at ~3.3 lbs. Two Thunderbolt 4 ports. Praised by ZDNet, PCMag, and Notebookcheck. Great everyday performance and portability.",
     ];
     for (j, expected) in expected_data.iter().enumerate() {
-        check_cell(&rows[1][j], *expected, "data", j, &mut errors);
+        check_cell(&rows[1][j], expected, "data", j, &mut errors);
     }
 
     if !errors.is_empty() {
