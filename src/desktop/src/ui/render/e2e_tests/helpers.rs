@@ -169,6 +169,25 @@ pub(crate) fn render_table_with_paint_output_viewport(
     table_cells: &[Vec<Vec<InlineElem>>],
     viewport_width: f32,
 ) -> egui::FullOutput {
+    render_table_with_paint_output_viewport_and_strategy(
+        table_cells,
+        viewport_width,
+        crate::ui::table_width::DeficitStrategy::ProportionalToSlack,
+    )
+}
+
+/// Strategy-parameterized variant of
+/// [`render_table_with_paint_output_viewport`]. The
+/// `ProportionalToSlack`-hard-coded helper above is the historical
+/// API; this one exists so shape-inspection tests can drive the
+/// same fixture through every [`crate::ui::table_width::DeficitStrategy`]
+/// variant and assert the rect count + alignment are preserved
+/// regardless of which algorithm picked the column widths.
+pub(crate) fn render_table_with_paint_output_viewport_and_strategy(
+    table_cells: &[Vec<Vec<InlineElem>>],
+    viewport_width: f32,
+    strategy: crate::ui::table_width::DeficitStrategy,
+) -> egui::FullOutput {
     let ctx = egui::Context::default();
     let raw = egui::RawInput {
         screen_rect: Some(egui::Rect::from_min_size(
@@ -180,23 +199,13 @@ pub(crate) fn render_table_with_paint_output_viewport(
     // Pass 1: measure row heights in Grid
     let _ = ctx.run_ui(raw.clone(), |ui| {
         egui::CentralPanel::default().show(ui, |ui| {
-            render_table(
-                ui,
-                table_cells,
-                0,
-                crate::ui::table_width::DeficitStrategy::ProportionalToSlack,
-            );
+            render_table(ui, table_cells, 0, strategy);
         });
     });
     // Pass 2: paint with resolved Grid row heights stored in memory
     ctx.run_ui(raw, |ui| {
         egui::CentralPanel::default().show(ui, |ui| {
-            render_table(
-                ui,
-                table_cells,
-                0,
-                crate::ui::table_width::DeficitStrategy::ProportionalToSlack,
-            );
+            render_table(ui, table_cells, 0, strategy);
         });
     })
 }
