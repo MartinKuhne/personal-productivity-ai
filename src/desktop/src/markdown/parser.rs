@@ -1,4 +1,61 @@
 //! Pure Markdown and YAML parsing logic isolated from egui rendering.
+//!
+//! # Implementation note: pulldown-cmark inline-parser fragmentation
+//!
+//! Pulldown-cmark's inline parser builds a *tree of items*, not a
+//! stream of inline text. Every delimiter run (`*`, `_`, `~`, `=`, `^`)
+//! becomes a separate `ItemBody::Text` item in the internal tree
+//! even when the delimiter fails to form a valid emphasis /
+//! strikethrough / superscript / subscript pair. When the tree is
+//! flattened to events, each `ItemBody::Text` becomes a separate
+//! `Event::Text` (see pulldown-cmark `parse.rs::item_to_event`,
+//! which returns `Event::Text(text[item.start..item.end])` per
+//! `Text` item).
+//!
+//! The practical consequence for this codebase: a plain-text
+//! fragment that *happens* to contain a delimiter run is split
+//! into multiple `Event::Text` events at every delimiter. Examples:
+//!
+//!   - `~4,031 / ~19,000` with `ENABLE_STRIKETHROUGH` → 4 events
+//!     (`~`, `4,031 / `, `~`, `19,000`). No `Strikethrough`
+//!     Start/End pair fires — the single-`~` form isn't a valid
+//!     GFM strikethrough — but cmark still fragments the text.
+//!     (See cmark 0.13.4 `parse.rs:1063-1106`.)
+//!   - `*bold*` with emphasis disabled → 3 events (`*`, `bold`, `*`).
+//!   - `_em_` with emphasis disabled → 3 events.
+//!   - `^super^` / `=highlight=` with those options disabled → 3 events each.
+//!
+//! Faithfully mapping each cmark `Event::Text` to its own
+//! `InlineElem::Text` would produce ASTs that don't match the
+//! table-renderer's contract: a cell containing `~text~` would
+//! fragment into 3 elements, the text-measurer would tokenize it
+//! as 3 runs, and the FTWA pipeline would produce wrong widths
+//! (the production bug fixed by the coalescer).
+//!
+//! The fix lives in [`push_text_coalesce`] and [`push_link_coalesce`]
+//! (defined below) — helpers that fold consecutive same-style
+//! `Text` events (or same-URL `Link` events) into a single
+//! `InlineElem` at the push site. See those functions' doc comments
+//! for the exact rules. The test `cmark_strikethrough_fragments_single_tilde`
+//! in this module pins the cmark event count so a future upgrade /
+//! option change that shifts the count surfaces immediately.
+//!
+//! This is a workaround, not a fix at the source. The cleaner
+//! long-term options (none of which we've done) are:
+//!   1. Upgrade to a pulldown-cmark version that emits a single
+//!      `Text` event for un-delimited fragments (if / when such a
+//!      version exists). At the time of writing (0.13.4), none
+//!      does.
+//!   2. Switch markdown parsers (e.g. comrak). Heavy change,
+//!      unjustified for this single quirk.
+//!   3. Disable `ENABLE_STRIKETHROUGH` and accept the loss of
+//!      GFM strikethrough. The right answer *only* if strikethrough
+//!      isn't actually used in any user-facing document.
+//!
+//! Until any of those land, the coalescer is the right balance:
+//! keeps the parser's surface tiny (two ~10-line helpers), keeps
+//! GFM strikethrough working, and locks the upstream-fragmentation
+//! count in a regression test.
 
 use crate::markdown::model::{InlineElem, RenderEvent, TextStyle};
 
@@ -12,17 +69,49 @@ pub fn render_markdown_to_html(markdown: &str) -> String {
 }
 
 /// Append a plain-text run to `buffer`, coalescing with the previous
-/// `InlineElem::Text` when the style matches. Pulldown-cmark's inline
-/// parser builds a tree of items where each delimiter run (`*`, `_`,
-/// `~`, `=`, `^`) creates a separate `Text` item for the text on
-/// either side, even when the delimiter fails to form a valid
-/// emphasis/strikethrough pair. Without coalescing, plain content
-/// like `~4,031 / ~19,000` becomes four `InlineElem::Text` entries
-/// instead of one. This helper folds consecutive same-style text
-/// fragments back into a single element while preserving style
-/// transitions (different `TextStyle`s still produce separate
-/// elements, as do `Link` / `Code` / `Html` / `SoftBreak` /
-/// `Image` boundaries).
+/// `InlineElem::Text` when the style matches.
+///
+/// # Why this exists
+///
+/// Pulldown-cmark's inline parser fragments plain text at every
+/// delimiter run (`*`, `_`, `~`, `=`, `^`), even when the
+/// delimiter fails to form a valid emphasis / strikethrough /
+/// superscript / subscript pair. See the module-level doc comment
+/// for the full explanation and the upstream behavior we work
+/// around. The short version: without this helper, plain content
+/// like `~4,031 / ~19,000` becomes four `InlineElem::Text`
+/// entries instead of one, the cell text-measurer tokenizes it
+/// as four runs, and the FTWA pipeline produces wrong column
+/// widths.
+///
+/// # Coalesce rules
+///
+/// - **Same `TextStyle`**: append to the previous `Text` element
+///   (its string is mutated in place; no new allocation).
+/// - **Different `TextStyle`**: push a new `Text` element. Bold /
+///   italic / code / strikethrough transitions are preserved as
+///   separate elements so the renderer can apply distinct styling
+///   to each run.
+/// - **Previous element is not `Text`** (e.g. `Link`, `Image`,
+///   `Code`, `Html`, `SoftBreak`): push a new `Text` element.
+///   The `Text` → non-`Text` → `Text` boundary always produces
+///   two elements; only consecutive `Text` elements of the same
+///   style coalesce.
+///
+/// # Where to call this
+///
+/// Anywhere a cmark `Event::Text` (or `Event::Code` with the same
+/// style) is pushed to `buffered_inline` or `heading_elems`. The
+/// parser's main `Event::Text` handler routes through this helper
+/// for both the main inline path and the heading path.
+///
+/// # Testing
+///
+/// Unit tests for the four coalesce branches live in
+/// `push_text_coalesce_*` and `push_link_coalesce_*` in this
+/// module's test submodule. The end-to-end regression
+/// (`parses_laptops_table_cells_to_single_text_element`) verifies
+/// the production case.
 fn push_text_coalesce(buffer: &mut Vec<InlineElem>, text: &str, style: &TextStyle) {
     if let Some(InlineElem::Text(existing, existing_style)) = buffer.last_mut()
         && existing_style == style
@@ -33,10 +122,33 @@ fn push_text_coalesce(buffer: &mut Vec<InlineElem>, text: &str, style: &TextStyl
     buffer.push(InlineElem::Text(text.to_string(), style.clone()));
 }
 
-/// Like [`push_text_coalesce`] but for `Link` elements. Multiple
-/// consecutive `Text` events inside a single `[…](url)` link would
-/// otherwise become multiple `Link(url, …)` elements with the same
-/// URL but disjoint text fragments. Folds them into one.
+/// Like [`push_text_coalesce`] but for `Link` elements.
+///
+/// # Why this exists
+///
+/// Inside a `[display text](url)` link, cmark emits one `Event::Text`
+/// per delimiter run in the display text (same fragmentation as
+/// for plain text). Without coalescing, multiple `Text` events
+/// inside a single link become multiple `Link(url, ...)` elements
+/// with the same URL but disjoint text fragments — a link to
+/// `https://x.com` containing `a *b* c` (with emphasis on) would
+/// come out as `Link("https://x.com", "a ")`, `Text("b", bold)`,
+/// `Link("https://x.com", " c")` instead of a single
+/// `Link("https://x.com", "a b c")` with a nested `Text("b", bold)`.
+/// (The latter is what the link-renderer expects: a single
+/// `InlineElem::Link` whose text is the flat concatenation of the
+/// display content, with nested styles as separate `Text` elements
+/// inside that link — but our `InlineElem::Link` carries a single
+/// `String` for the text, so the inner style nuance is lost
+/// either way; the practical concern is just the URL/text split.)
+///
+/// # Coalesce rules
+///
+/// Same as [`push_text_coalesce`] but keying on the URL instead of
+/// the style: consecutive `Text` events with the same link URL
+/// fold into a single `Link(url, concatenated_text)` element. A
+/// URL change starts a new element; a different `InlineElem`
+/// variant on the buffer also starts a new element.
 fn push_link_coalesce(buffer: &mut Vec<InlineElem>, url: &str, text: &str) {
     if let Some(InlineElem::Link(existing_url, existing_text)) = buffer.last_mut()
         && existing_url == url
@@ -57,6 +169,13 @@ pub fn parse_markdown_to_events(markdown_text: &str) -> Vec<RenderEvent> {
     let mut options = Options::empty();
     options.insert(Options::ENABLE_TABLES);
     options.insert(Options::ENABLE_FOOTNOTES);
+    // ENABLE_STRIKETHROUGH enables GFM `~~text~~` (double tilde)
+    // and `~text~` (single tilde) strikethrough. Required for
+    // strikethrough support in user documents. Trade-off (managed
+    // by the `push_text_coalesce` helper above): with this option
+    // on, cmark also fragments plain text at every `~` delimiter
+    // run — see the module-level doc comment for the full
+    // explanation and the regression test for the fix.
     options.insert(Options::ENABLE_STRIKETHROUGH);
     options.insert(Options::ENABLE_TASKLISTS);
 
@@ -326,6 +445,15 @@ pub fn parse_markdown_to_events(markdown_text: &str) -> Vec<RenderEvent> {
             Event::End(TagEnd::Strong) => current_style.bold = false,
             Event::Start(Tag::Strikethrough) => current_style.strikethrough = true,
             Event::End(TagEnd::Strikethrough) => current_style.strikethrough = false,
+            // Text events must route through the coalescer helpers
+            // (not a direct `push` to the buffer). See the
+            // module-level doc comment and the `push_text_coalesce` /
+            // `push_link_coalesce` doc comments for why. The short
+            // version: cmark fragments plain text at every delimiter
+            // run (see cmark 0.13.4 `parse.rs:1063-1106`), and a
+            // direct push would propagate the fragmentation to the
+            // AST the table-renderer consumes, producing wrong
+            // column widths.
             Event::Text(text) => {
                 if in_code_block {
                     code_block_content.push_str(&text);
@@ -539,8 +667,8 @@ mod tests {
         assert_eq!(pairs[1], ("list".to_string(), ("a, b").to_string()));
     }
 
-    /// **Pulldown-cmark 0.13.4 inline-parser design note** (not a
-    /// bug per se, but a property the consumer has to handle):
+    /// **Pulldown-cmark 0.13.4 inline-parser design property** (not a
+    /// bug per se, but a behavior the consumer has to handle):
     /// with `Options::ENABLE_STRIKETHROUGH` enabled, cmark emits
     /// one `Text` event per delimiter run — so the input
     /// `~4,031 / ~19,000` becomes 4 separate `Text` events
@@ -548,16 +676,31 @@ mod tests {
     /// no actual `Strikethrough` Start/End pair fires. This is
     /// the inline parser's "tree of items" model: every delimiter
     /// run gets its own item, whether or not it forms a valid
-    /// pair.
+    /// pair. See the module-level doc comment for the full
+    /// design discussion and the long-term options.
     ///
     /// Our parser works around it by coalescing consecutive
     /// `Text` events with the same `TextStyle` (see
-    /// `push_text_coalesce` in `parse.rs`), so the AST emitted
+    /// `push_text_coalesce` in this module), so the AST emitted
     /// to the rest of the renderer is a single `InlineElem::Text`
     /// per coalesced run. This test pins the cmark behavior so
     /// future upgrades to pulldown-cmark (or changes to the
     /// option set) that change the fragment count don't silently
     /// regress the coalescing.
+    ///
+    /// **If this test fails**, the most likely cause is a
+    /// pulldown-cmark upgrade. The fix is one of:
+    ///   1. Re-tune `push_text_coalesce` to match the new fragment
+    ///      count (and add a test for the new case).
+    ///   2. Drop `ENABLE_STRIKETHROUGH` from the options set if
+    ///      GFM strikethrough isn't needed (see module doc).
+    ///   3. Switch to a different markdown parser.
+    ///
+    /// **What this test does NOT do:** assert that the coalesced
+    /// AST is correct. That's the responsibility of
+    /// `parses_laptops_table_cells_to_single_text_element` and
+    /// the integration test `test_parse_laptops_table_ast_shape`.
+    /// This test is purely the upstream-behavior pin.
     #[test]
     fn cmark_strikethrough_fragments_single_tilde() {
         use pulldown_cmark::{Event, Options, Parser, Tag, TagEnd};
