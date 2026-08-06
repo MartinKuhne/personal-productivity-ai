@@ -277,16 +277,17 @@ fn deficit_strategy_from_config() {
         DeficitStrategy::from_config("hybrid-min-penalty"),
         DeficitStrategy::HybridMinPenaltyWaterFill
     );
-    // Unknown / empty values fall back to the historical default
+    // Unknown / empty values fall back to the current default
     // (`default_table_width_strategy` in `config.rs` returns
-    // `"waterfill"` → `BreakpointWaterFill`).
+    // `"hybrid"` → `HybridMinPenaltyWaterFill`). The two are kept in
+    // sync; if either side changes, this test will fail loudly.
     assert_eq!(
         DeficitStrategy::from_config("unknown"),
-        DeficitStrategy::BreakpointWaterFill
+        DeficitStrategy::HybridMinPenaltyWaterFill
     );
     assert_eq!(
         DeficitStrategy::from_config(""),
-        DeficitStrategy::BreakpointWaterFill
+        DeficitStrategy::HybridMinPenaltyWaterFill
     );
 }
 

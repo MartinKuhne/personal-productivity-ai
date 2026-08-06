@@ -421,11 +421,25 @@ headers:
 }
 
 #[test]
-fn deficit_strategy_default_is_waterfill() {
+fn deficit_strategy_default_is_hybrid() {
+    // `default_table_width_strategy` in `config.rs` returns "hybrid",
+    // and `DeficitStrategy::from_config`'s fallback is the same
+    // variant, so a fresh `AppConfig::default()` resolves to
+    // HybridMinPenaltyWaterFill. Kept in sync; if either side
+    // changes, this test will fail loudly.
     let config = AppConfig::default();
     assert_eq!(
         config.deficit_strategy(),
-        crate::ui::table_width::DeficitStrategy::BreakpointWaterFill
+        crate::ui::table_width::DeficitStrategy::HybridMinPenaltyWaterFill
+    );
+    // Round-trip: to_config and from_config compose back to the same
+    // variant, so a persisted config with the default value
+    // deserialises to the same strategy.
+    let s = crate::ui::table_width::DeficitStrategy::HybridMinPenaltyWaterFill.to_config();
+    assert_eq!(s, "hybrid");
+    assert_eq!(
+        crate::ui::table_width::DeficitStrategy::from_config(s),
+        crate::ui::table_width::DeficitStrategy::HybridMinPenaltyWaterFill
     );
 }
 

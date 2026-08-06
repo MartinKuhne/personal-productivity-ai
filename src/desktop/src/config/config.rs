@@ -165,7 +165,7 @@ fn default_true() -> bool {
 }
 
 fn default_table_width_strategy() -> String {
-    "waterfill".to_string()
+    "hybrid".to_string()
 }
 
 /// Configuration options for enabling or disabling specific tool groups.
@@ -629,8 +629,16 @@ pub struct AppConfig {
     /// transport/auth config flattened underneath.
     #[serde(default)]
     pub mcp_servers: HashMap<String, McpServerEntry>,
-    /// Table width algorithm for deficit regime. Default: "proportional".
-    /// Options: "proportional" (fast, O(|S|)), "waterfill" (better G1, O(K log |S|)).
+    /// Table width algorithm for deficit regime. Default: "hybrid".
+    /// Options:
+    /// * "proportional" — fast, O(|S|); FTWA v1.
+    /// * "waterfill" — better G1, O(K log |S|); FTWA v2.
+    /// * "ratio" — water-filling by `max_j / w_j` (doc §2.10).
+    /// * "lagrange" — `Σ extraLines_j(w_j)` minimised via Lagrange bisection
+    ///   on a per-column penalty (doc §2.13).
+    /// * "hybrid" — min-content floor + per-column penalty + slack
+    ///   water-fill (doc §2.14). Best G1/G2 trade-off on degenerate
+    ///   cell distributions; recommended default.
     #[serde(default = "default_table_width_strategy")]
     pub table_width_strategy: String,
     /// Browser automation settings (BRWS-CONF-001..005). Ignored
@@ -704,8 +712,8 @@ impl Default for AppConfig {
 
 impl AppConfig {
     /// Parse `table_width_strategy` into the enum used by the FTWA algorithm.
-    /// Returns `DeficitStrategy::BreakpointWaterFill` for "waterfill",
-    /// `DeficitStrategy::ProportionalToSlack` for everything else.
+    /// Unknown values fall back to `DeficitStrategy::HybridMinPenaltyWaterFill`
+    /// (the default set by `default_table_width_strategy` in `config.rs`).
     pub fn deficit_strategy(&self) -> crate::ui::table_width::DeficitStrategy {
         crate::ui::table_width::DeficitStrategy::from_config(&self.table_width_strategy)
     }

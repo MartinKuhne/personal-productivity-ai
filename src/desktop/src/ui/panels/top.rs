@@ -328,15 +328,19 @@ pub fn show_top_panel_capture(
             egui::ComboBox::from_id_salt(crate::ui::strings::TABLE_WIDTH_STRATEGY_ID_SALT)
                 .selected_text(strategy_label(current_strategy))
                 .show_ui(ui, |ui| {
-                    // Order matters: the existing FTWA strategies first
-                    // (no surprise for users who haven't discovered the
-                    // new ones), then the three survey algorithms.
+                    // Order matters: default first (HybridMinPenaltyWaterFill,
+                    // best G1/G2 trade-off), then the two original FTWA
+                    // strategies, then the three survey algorithms from
+                    // `doc/planning/table-column-width-algorithm.md` §2.10
+                    // / §2.13 / §2.14. Future strategies should be appended
+                    // here AND in `DeficitStrategy` in
+                    // `src/markdown/table_width/mod.rs` (exhaustive match).
                     for variant in [
+                        DeficitStrategy::HybridMinPenaltyWaterFill,
                         DeficitStrategy::ProportionalToSlack,
                         DeficitStrategy::BreakpointWaterFill,
                         DeficitStrategy::WaterFillRatio,
                         DeficitStrategy::LagrangePenalty,
-                        DeficitStrategy::HybridMinPenaltyWaterFill,
                     ] {
                         if ui
                             .selectable_label(

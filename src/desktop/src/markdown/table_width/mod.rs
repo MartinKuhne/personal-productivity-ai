@@ -69,12 +69,23 @@ pub enum DeficitStrategy {
     /// starts to wrap, or `max_j` for single-line columns). The
     /// residual `(available − Σ target)` is distributed by water-fill
     /// proportional to headroom `max_j − target_j`.
+    ///
+    /// **Default strategy** — set by `default_table_width_strategy` in
+    /// `config.rs` and the `from_config` fallback below. The hybrid
+    /// gives the best G1/G2 trade-off on degenerate cell
+    /// distributions (a few very wide cells with many breakpoints
+    /// alongside many short cells with no slack); the pure
+    /// breakpoint water-fill tends to over-allocate the
+    /// already-wide columns when the wrap set's combined slack is
+    /// only slightly more than the deficit, while the pure
+    /// ratio-equalising strategies don't respect the wrap-set
+    /// cardinality minimum.
     HybridMinPenaltyWaterFill,
 }
 
 impl DeficitStrategy {
     /// Parse from the config string. Unknown values fall back to
-    /// [`Self::BreakpointWaterFill`], the historical default
+    /// [`Self::HybridMinPenaltyWaterFill`], the current default
     /// (`default_table_width_strategy` in `config.rs`).
     pub fn from_config(s: &str) -> Self {
         match s {
@@ -85,8 +96,10 @@ impl DeficitStrategy {
             "hybrid" | "hybrid-min-penalty" | "hybrid_min_penalty" | "hmp" => {
                 Self::HybridMinPenaltyWaterFill
             }
-            // Historical default before the new variants existed.
-            _ => Self::BreakpointWaterFill,
+            // Default. Matches `default_table_width_strategy` in
+            // `config.rs` so an empty/unknown config string produces
+            // the same strategy as a fresh install.
+            _ => Self::HybridMinPenaltyWaterFill,
         }
     }
 

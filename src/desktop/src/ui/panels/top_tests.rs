@@ -381,12 +381,14 @@ fn test_show_top_panel_indexing_unfinished() {
         &output.shapes,
         crate::ui::strings::TABLE_WIDTH_STRATEGY_LABEL,
     );
-    // Default config's deficit strategy is BreakpointWaterFill
+    // Default config's deficit strategy is HybridMinPenaltyWaterFill
     // (see `default_table_width_strategy` in `config.rs`); the
-    // combobox's `selected_text` must reflect that.
+    // combobox's `selected_text` must reflect that. Kept in sync
+    // with `default_table_width_strategy` and the
+    // `DeficitStrategy::from_config` fallback.
     assert_text_contains(
         &output.shapes,
-        strategy_label(crate::ui::table_width::DeficitStrategy::BreakpointWaterFill),
+        strategy_label(crate::ui::table_width::DeficitStrategy::HybridMinPenaltyWaterFill),
     );
     assert!(!app.file_processor().indexing_finished);
 }
