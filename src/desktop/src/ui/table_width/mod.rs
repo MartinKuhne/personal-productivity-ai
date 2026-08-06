@@ -14,6 +14,9 @@
 //! existing call sites (`crate::ui::table_width::ftwa_cached`) keep resolving
 //! unchanged.
 
+pub use crate::markdown::table_layout::{
+    LayoutCell, TableLayout, TableLayoutBuilder, TextMeasurer,
+};
 pub use crate::markdown::table_width::{
     Breakpoint, CellTokens, ColumnWidths, DeficitStrategy, compute_column_breakpoints, ftwa,
 };
@@ -231,12 +234,120 @@ pub struct TableMeasureCache {
 pub struct TableDecisionCache {
     /// Hash of input max_content and min_content widths.
     pub input_hash: u64,
+    /// Hash of the egui font style parameters.
+    pub font_hash: u64,
     /// Available width during solver pass.
     pub avail: f32,
     /// Strategy used for solver pass.
     pub strategy: DeficitStrategy,
-    /// Resulting column widths decision.
-    pub decision: ColumnWidths,
+    /// Resulting layout decision.
+    pub layout: TableLayout,
+}
+
+pub struct EguiTextMeasurer<'a> {
+    ui: &'a mut egui::Ui,
+    body_font: egui::FontId,
+    mono_font: egui::FontId,
+    color: egui::Color32,
+    space_width: f32,
+    line_height: f32,
+}
+
+impl<'a> EguiTextMeasurer<'a> {
+    pub fn new(ui: &'a mut egui::Ui) -> Self {
+        let body_font = ui
+            .style()
+            .text_styles
+            .get(&egui::TextStyle::Body)
+            .cloned()
+            .unwrap_or_else(|| egui::FontId::proportional(14.0));
+        let mono_font = egui::FontId::new(body_font.size, egui::FontFamily::Monospace);
+        let color = egui::Color32::WHITE;
+        let space_width = {
+            let g = ui.fonts_mut(|f| f.layout_no_wrap(" ".to_string(), body_font.clone(), color));
+            g.size().x
+        };
+        let line_height = ui.text_style_height(&egui::TextStyle::Body);
+
+        Self {
+            ui,
+            body_font,
+            mono_font,
+            color,
+            space_width,
+            line_height,
+        }
+    }
+}
+
+impl<'a> TextMeasurer for EguiTextMeasurer<'a> {
+    fn measure_cell(&self, cell: &[InlineElem]) -> (f32, f32, CellTokens) {
+        measure_cell(cell, self.ui, &self.body_font, &self.mono_font, self.color)
+    }
+
+    fn space_width(&self) -> f32 {
+        self.space_width
+    }
+
+    fn line_height(&self) -> f32 {
+        self.line_height
+    }
+}
+
+/// Computes the table layout with decision memoization via egui memory.
+pub fn table_layout_cached(
+    table_id: egui::Id,
+    cells: &[Vec<Vec<InlineElem>>],
+    padding: TablePadding,
+    available_width: f32,
+    strategy: DeficitStrategy,
+    ui: &mut egui::Ui,
+) -> TableLayout {
+    use std::hash::{Hash, Hasher};
+
+    let pad_h = padding.sanitised().horizontal();
+    let pad_v = padding.sanitised().vertical();
+
+    let mut cell_hasher = std::collections::hash_map::DefaultHasher::new();
+    cells.hash(&mut cell_hasher);
+    pad_h.to_bits().hash(&mut cell_hasher);
+    pad_v.to_bits().hash(&mut cell_hasher);
+    let cell_hash = cell_hasher.finish();
+
+    let font_hash = {
+        let mut hasher = std::collections::hash_map::DefaultHasher::new();
+        ui.style().text_styles.hash(&mut hasher);
+        hasher.finish()
+    };
+
+    let cache_id = table_id.with("layout_cache");
+    if let Some(cached) = ui
+        .data(|d| d.get_temp::<TableDecisionCache>(cache_id))
+        .filter(|c| {
+            c.input_hash == cell_hash
+                && c.font_hash == font_hash
+                && c.strategy == strategy
+                && (c.avail - available_width).abs() < 1e-3
+        })
+    {
+        return cached.layout;
+    }
+
+    let measurer = EguiTextMeasurer::new(ui);
+    let layout = TableLayoutBuilder::new(&measurer, available_width, strategy)
+        .with_padding(pad_h, pad_v)
+        .build(cells);
+
+    let cache = TableDecisionCache {
+        input_hash: cell_hash,
+        font_hash,
+        avail: available_width,
+        strategy,
+        layout: layout.clone(),
+    };
+    ui.data_mut(|d| d.insert_temp(cache_id, cache));
+
+    layout
 }
 
 /// Measure table column widths and breakpoints with result memoization via egui memory.
@@ -294,56 +405,6 @@ pub fn measure_cached(
     ui.data_mut(|d| d.insert_temp(cache_id, cache));
 
     (max_w, min_w, breakpoints)
-}
-
-/// Solve FTWA table column widths with decision memoization via egui memory.
-///
-/// Prevents re-executing the deficit solver on every frame when input measurements, available width,
-/// and deficit strategy remain unchanged.
-pub fn ftwa_cached(
-    table_id: egui::Id,
-    max_content: &[f32],
-    min_content: &[f32],
-    breakpoints: &[Vec<Breakpoint>],
-    available: f32,
-    strategy: DeficitStrategy,
-    ui: &egui::Ui,
-) -> ColumnWidths {
-    use std::hash::{Hash, Hasher};
-
-    let mut input_hasher = std::collections::hash_map::DefaultHasher::new();
-    max_content.len().hash(&mut input_hasher);
-    for &w in max_content {
-        w.to_bits().hash(&mut input_hasher);
-    }
-    for &w in min_content {
-        w.to_bits().hash(&mut input_hasher);
-    }
-    let input_hash = input_hasher.finish();
-
-    let cache_id = table_id.with("decision_cache");
-    if let Some(cached) = ui
-        .data(|d| d.get_temp::<TableDecisionCache>(cache_id))
-        .filter(|c| {
-            c.input_hash == input_hash
-                && c.strategy == strategy
-                && (c.avail - available).abs() < 1e-3
-        })
-    {
-        return cached.decision;
-    }
-
-    let decision = ftwa(max_content, min_content, breakpoints, available, strategy);
-
-    let cache = TableDecisionCache {
-        input_hash,
-        avail: available,
-        strategy,
-        decision: decision.clone(),
-    };
-    ui.data_mut(|d| d.insert_temp(cache_id, cache));
-
-    decision
 }
 
 /// Measure one cell's `(max_content, min_content)` width and collect token data.
@@ -590,47 +651,86 @@ mod tests {
     }
 
     #[test]
-    fn test_ftwa_cached_memoizes_and_invalidates_correctly() {
+    fn test_table_layout_cached_memoizes_and_invalidates_correctly() {
         let ctx = egui::Context::default();
         let _ = ctx.run_ui(egui::RawInput::default(), |ctx| {
             egui::CentralPanel::default().show(ctx, |ui| {
                 let table_id = egui::Id::new("test_cache_table");
-                let max = [100.0, 200.0];
-                let min = [50.0, 100.0];
-                let bps = vec![vec![], vec![]];
+                let cells = vec![vec![vec![InlineElem::Text(
+                    "Hello world this is a very long string that will wrap".to_string(),
+                    Default::default(),
+                )]]];
 
-                let d1 = ftwa_cached(
+                let l1 = table_layout_cached(
                     table_id,
-                    &max,
-                    &min,
-                    &bps,
+                    &cells,
+                    TablePadding::ZERO,
                     250.0,
                     DeficitStrategy::ProportionalToSlack,
                     ui,
                 );
-                // Second call with same parameters should return from cache
-                let d2 = ftwa_cached(
+
+                let l2 = table_layout_cached(
                     table_id,
-                    &max,
-                    &min,
-                    &bps,
+                    &cells,
+                    TablePadding::ZERO,
                     250.0,
                     DeficitStrategy::ProportionalToSlack,
                     ui,
                 );
-                assert_eq!(d1, d2);
+                assert_eq!(l1, l2);
 
-                // Changing available width invalidates solver cache
-                let d3 = ftwa_cached(
+                let l3 = table_layout_cached(
                     table_id,
-                    &max,
-                    &min,
-                    &bps,
+                    &cells,
+                    TablePadding::ZERO,
                     200.0,
                     DeficitStrategy::ProportionalToSlack,
                     ui,
                 );
-                assert_ne!(d1.widths, d3.widths);
+                assert_ne!(l1.total_width, l3.total_width);
+            });
+        });
+    }
+
+    #[test]
+    fn test_table_layout_cached_invalidates_on_font_change() {
+        let ctx = egui::Context::default();
+        let _ = ctx.run_ui(egui::RawInput::default(), |ctx| {
+            egui::CentralPanel::default().show(ctx, |ui| {
+                let table_id = egui::Id::new("test_cache_font");
+                let cells = vec![vec![vec![InlineElem::Text(
+                    "Hello".to_string(),
+                    Default::default(),
+                )]]];
+
+                let l1 = table_layout_cached(
+                    table_id,
+                    &cells,
+                    TablePadding::ZERO,
+                    250.0,
+                    DeficitStrategy::ProportionalToSlack,
+                    ui,
+                );
+
+                // Mutate font styles to simulate zoom
+                if let Some(font_id) = ui.style_mut().text_styles.get_mut(&egui::TextStyle::Body) {
+                    font_id.size += 10.0;
+                }
+
+                let l2 = table_layout_cached(
+                    table_id,
+                    &cells,
+                    TablePadding::ZERO,
+                    250.0,
+                    DeficitStrategy::ProportionalToSlack,
+                    ui,
+                );
+
+                assert_ne!(
+                    l1.total_width, l2.total_width,
+                    "Cache should invalidate and recalculate layout upon font size change"
+                );
             });
         });
     }

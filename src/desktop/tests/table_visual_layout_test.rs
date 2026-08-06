@@ -522,3 +522,52 @@ fn test_integration_table_column_gutter_is_configured_value() {
         col1.min.x,
     );
 }
+
+#[test]
+fn test_problematic_table() {
+    let md = r#"| Retailer | Price | Link |
+|----------|-------|------|
+| Amazon | ~$200–$250 (on sale ~$180–$200) | [Amazon](https://www.amazon.com/LG-32GN650-B-Ultragear-Reduction-FreeSync/dp/B08LLF9NS1) |
+| Best Buy | ~$200–$250 | [Best Buy](https://www.bestbuy.com/product/lg-ultragear-32-led-qhd-5-ms-amd-freesync-premium-with-hdr-10-displayport-hdmi-black/JJ8VPZS3LS) |
+| Costco | Check membership deals | [Costco](https://www.costco.com/p/-/lg-ultragear-32-class-qhd-gaming-monitor/100793191) |"#;
+    let events = fastmd::markdown::parser::parse_markdown_to_events(md);
+    println!("Parsed events: {:#?}", events);
+    let out = render_table_markdown_to_shapes(md, 500.0);
+    assert!(!out.shapes.is_empty());
+}
+
+#[test]
+fn test_wide_table_fuzz_widths() {
+    let md = r#"| Make | Model and Model Number | Market Price | Display | Processor | PassMark Single / Multi | Summary |
+|------|----------------------|-------------|---------|-----------|------------------------|---------|
+| Acer | Swift 16 AI (SF16-71T) | $1,249-$1,799 | 16" 3K (2880x1800) 120Hz OLED Touch | Intel Core Ultra 7 256V (8C/8T Lunar Lake) | ~4,031 / ~19,000 | Excellent value. Vibrant OLED display, exceptional battery life for a 16" laptop, lightweight at ~3.3 lbs. Two Thunderbolt 4 ports. Praised by ZDNet, PCMag, and Notebookcheck. Great everyday performance and portability. |"#;
+    
+    // Test the table rendering at all widths from 400 to 3000 in 10px increments
+    for width in (400..=3000).step_by(10) {
+        let out = render_table_markdown_to_shapes(md, width as f32);
+        
+        // Assert that the layout engine successfully produced shapes without panicking
+        assert!(
+            !out.shapes.is_empty(),
+            "Table failed to produce shapes at width {width}"
+        );
+        
+        // Basic correctness: extract text positions to ensure all cells rendered
+        let text_positions = collect_text_positions(&out.shapes);
+        let has_acer = text_positions.iter().any(|(txt, _)| txt.contains("Acer"));
+        
+        assert!(
+            has_acer,
+            "Table dropped content 'Acer' at width {width}"
+        );
+        
+        // At wider widths, horizontal scrolling doesn't cull the rightmost columns
+        if width > 1500 {
+            let has_excellent = text_positions.iter().any(|(txt, _)| txt.contains("Excellent"));
+            assert!(
+                has_excellent,
+                "Table dropped rightmost content 'Excellent' at width {width} (should not be culled)"
+            );
+        }
+    }
+}
