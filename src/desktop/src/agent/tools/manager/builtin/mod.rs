@@ -135,6 +135,14 @@ pub(crate) fn register_all_builtins(mgr: &mut ToolManager) {
         InternalToolGroup::Contacts,
         Box::new(carddav::GetContactTool),
     );
+    mgr.register_builtin(
+        InternalToolGroup::Contacts,
+        Box::new(carddav::UpdateContactTool),
+    );
+    mgr.register_builtin(
+        InternalToolGroup::Contacts,
+        Box::new(carddav::DeleteContactTool),
+    );
 
     // CSV database
     mgr.register_builtin(InternalToolGroup::CsvDb, Box::new(csv::CsvCreateTool));

@@ -331,6 +331,32 @@ pub struct AddContactResponse {
 }
 
 #[derive(Deserialize, Debug, JsonSchema)]
+pub struct UpdateContactInput {
+    /// The href of the existing contact to update. Use the value returned
+    /// by `get_contact` or `search_contact`.
+    pub id: String,
+    /// The full new contact data, in the same JSON schema as
+    /// `add_contact.contact_json`. Missing fields are kept from the
+    /// existing vCard; provided fields overwrite.
+    pub contact_json: String,
+}
+#[derive(Serialize, Debug, JsonSchema)]
+pub struct UpdateContactResponse {
+    pub result: String,
+}
+
+#[derive(Deserialize, Debug, JsonSchema)]
+pub struct DeleteContactInput {
+    /// The href of the contact to delete. Use the value returned by
+    /// `get_contact` or `search_contact`.
+    pub id: String,
+}
+#[derive(Serialize, Debug, JsonSchema)]
+pub struct DeleteContactResponse {
+    pub result: String,
+}
+
+#[derive(Deserialize, Debug, JsonSchema)]
 pub struct GetWeatherInput {
     pub location: String,
     pub date_range: Option<String>,

@@ -181,12 +181,42 @@ Use these canonical field names (the listed aliases are also accepted): \
 `phone` (aliases: `tel`, `telephone`, `mobile`, `phone_number`); \
 `company` (aliases: `org`, `organization`, `organisation`); \
 `title` (aliases: `job_title`, `role`) — job title; \
-`notes` (aliases: `note`, `comment`) — free-form notes. \
-Only fields you actually know should be included. Empty strings and \
-missing fields are ignored. The created resource is returned with its \
-href, Location, and ETag.";
+`notes` (aliases: `note`, `comment`) — free-form notes; \
+`birthday` (aliases: `bday`, `dob`, `date_of_birth`) — ISO date `YYYY-MM-DD`; \
+`addresses` — JSON array of postal-address objects (see below). \
+For convenience, a single address may also be sent as `address` (object \
+or single-line string). Only fields you actually know should be included. \
+Empty strings and missing fields are ignored. The created resource is \
+returned with its href, Location, and ETag.\n\n\
+Address object shape: `{\"type\": \"home|work|…\", \"street\": \"…\", \
+\"city\": \"…\", \"region\": \"…\", \"postal_code\": \"…\", \"country\": \"…\", \
+\"po_box\": \"…\", \"ext\": \"…\"}`. All fields are optional; components \
+you don't know should be omitted. The `type` becomes the vCard `TYPE=` \
+parameter. Multiple addresses per contact are supported (e.g. a HOME and \
+a WORK).";
 
-pub const GET_CONTACT_DESCRIPTION: &str = "Get a contact by its unique ID.";
+pub const GET_CONTACT_DESCRIPTION: &str = "Get a contact by its unique ID. The response includes the \
+raw vCard plus structured fields: `fn_name`, `email`, `tel`, `org`, \
+`bday` (ISO `YYYY-MM-DD`), and `addresses` (array of postal-address \
+objects with the same shape as `add_contact`).";
+
+pub const UPDATE_CONTACT_DESCRIPTION: &str = "Update an existing contact at the given `id` (the href \
+returned by `get_contact` or `search_contact`). The `contact_json` argument \
+uses the same schema as `add_contact` (canonical names: `name`, `email`, \
+`phone`, `company`, `title`, `notes`, `birthday`, `addresses`; aliases are \
+also accepted). Only the canonical fields the JSON provides are touched; \
+every other vCard property on the contact (N, NICKNAME, URL, X-*, …) is \
+preserved verbatim, so this is safe to call with a partial payload. The \
+contact's vCard `UID` is preserved across the update so the addressbook \
+href stays stable. `addresses` is list-valued: when provided, the new \
+list replaces every existing ADR on the contact. The update is performed \
+with `If-Match` so concurrent edits are detected — if the server returns \
+412 the caller should re-`get_contact` and retry.";
+
+pub const DELETE_CONTACT_DESCRIPTION: &str = "Delete the contact at the given `id` (the href returned by \
+`get_contact` or `search_contact`). A 404 (already absent) is treated as a \
+successful no-op so the call is idempotent. Other non-2xx responses are \
+propagated as errors with the truncated response body for diagnosis.";
 
 // --- csv (database) ---
 
