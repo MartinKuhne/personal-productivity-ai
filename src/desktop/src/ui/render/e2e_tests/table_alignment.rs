@@ -618,3 +618,652 @@ fn test_render_table_cell_text_top_aligned_with_tall_neighbor() {
         );
     }
 }
+
+/// The 2x7 laptops-spec table that originally surfaced the
+/// pulldown-cmark fragmentation bug
+/// (`~4,031 / ~19,000` → four `InlineElem::Text` entries instead of
+/// one). The structural counterpart is
+/// `test_parse_laptops_table_ast_shape` in `src/ui/render/tests.rs`;
+/// this test pins the same fixture at the **e2e** level so a future
+/// regression in the table renderer / FTWA pipeline that breaks
+/// the rect count or column alignment on this specific table
+/// surfaces immediately.
+///
+/// Assertions:
+///
+/// 1. The renderer emits **exactly 14 cell border rects** for a
+///    2-row × 7-column table (no per-row over- or under-allocation).
+/// 2. After sorting by row then column, every row contains
+///    **exactly 7 rects** — "right count of rectangles produced for
+///    each row" in the user-requested sense.
+/// 3. Every cell in column `j` shares the same `min.x` and `width`
+///    across both rows (column alignment, sub-pixel tolerance).
+/// 4. All cells in the same row share the same `min.y` (row
+///    alignment, top-aligned, sub-pixel tolerance).
+/// 5. Inter-column gutter is 10 px on every row.
+/// 6. The Summary cell wraps to ≥ 2 lines (deficit regime exercised
+///    on a wide viewport, proving the 1×7 long-cell wrap behaviour
+///    holds on the 2×7 form too).
+#[test]
+fn test_render_laptops_table_rect_count_and_alignment() {
+    use eframe::epaint::{Shape, StrokeKind};
+
+    let make = |t: &str| {
+        vec![InlineElem::Text(
+            t.to_string(),
+            crate::ui::render::TextStyle::default(),
+        )]
+    };
+    // Fixture mirrors the markdown the integration test in
+    // `src/ui/render/tests.rs::test_parse_laptops_table_ast_shape`
+    // parses: 1 header row + 1 data row, 7 columns. The data row's
+    // `~4,031 / ~19,000` cell is the regression — without the
+    // parser coalescer the cell fragments into 4 inline elements
+    // and the FTWA pipeline produces wrong widths.
+    let table: Vec<Vec<Vec<InlineElem>>> = vec![
+        vec![
+            make("Make"),
+            make("Model and Model Number"),
+            make("Market Price"),
+            make("Display"),
+            make("Processor"),
+            make("PassMark Single / Multi"),
+            make("Summary"),
+        ],
+        vec![
+            make("Acer"),
+            make("Swift 16 AI (SF16-71T)"),
+            make("$1,249-$1,799"),
+            make("16\" 3K (2880x1800) 120Hz OLED Touch"),
+            make("Intel Core Ultra 7 256V (8C/8T Lunar Lake)"),
+            make("~4,031 / ~19,000"),
+            make(
+                "Excellent value. Vibrant OLED display, exceptional \
+                 battery life for a 16\" laptop, lightweight at ~3.3 \
+                 lbs. Two Thunderbolt 4 ports. Praised by ZDNet, PCMag, \
+                 and Notebookcheck. Great everyday performance and \
+                 portability.",
+            ),
+        ],
+    ];
+
+    // 1000 px viewport: 7 columns + 6 gutters × 10 px = 60 px
+    // gutters, so 940 px of content. Wide enough that the FTWA
+    // pipeline runs (not §3.6 horizontal scroll), narrow enough to
+    // force word-wrap in the Summary cell.
+    let output = render_table_with_paint_output_viewport(&table, 1000.0);
+
+    let mut rects: Vec<_> = output
+        .shapes
+        .iter()
+        .filter_map(|cs| match &cs.shape {
+            Shape::Rect(r)
+                if r.fill == egui::Color32::TRANSPARENT
+                    && r.stroke == egui::Stroke::NONE
+                    && r.stroke_kind == StrokeKind::Inside =>
+            {
+                Some(r.rect)
+            }
+            _ => None,
+        })
+        .collect();
+
+    // (1) Total rect count: 2 rows × 7 columns = 14.
+    assert_eq!(
+        rects.len(),
+        14,
+        "Expected 14 cell borders for 2x7 laptops table; got {}: {:?}",
+        rects.len(),
+        rects
+    );
+
+    // Sort by row (Y) then column (X) so we can group by row
+    // deterministically regardless of shape emission order.
+    rects.sort_by(|a, b| {
+        a.min
+            .y
+            .partial_cmp(&b.min.y)
+            .unwrap()
+            .then(a.min.x.partial_cmp(&b.min.x).unwrap())
+    });
+
+    // (2) Per-row count: 2 rows of exactly 7 rects each.
+    let header_row = &rects[0..7];
+    let data_row = &rects[7..14];
+    assert_eq!(
+        header_row.len(),
+        7,
+        "header row must have 7 cell rects, got {}",
+        header_row.len()
+    );
+    assert_eq!(
+        data_row.len(),
+        7,
+        "data row must have 7 cell rects, got {}",
+        data_row.len()
+    );
+
+    // (3) Column alignment: for each column j, the header and data
+    // cells share the same min.x and width. Sub-pixel tolerance
+    // because FTWA may distribute fractional pixels across the
+    // wrap set; 0.5 px still catches real misalignments.
+    for j in 0..7 {
+        let h_min_x = header_row[j].min.x;
+        let h_width = header_row[j].width();
+        let d_min_x = data_row[j].min.x;
+        let d_width = data_row[j].width();
+        assert!(
+            (h_min_x - d_min_x).abs() < 0.5,
+            "column {j} min.x mismatch: header={h_min_x:.2}, data={d_min_x:.2}"
+        );
+        assert!(
+            (h_width - d_width).abs() < 0.5,
+            "column {j} width mismatch: header={h_width:.2}, data={d_width:.2}"
+        );
+    }
+
+    // (4) Row alignment: every cell in the header row shares
+    // header_row[0].min.y; same for the data row. Top-aligned
+    // within a row (TBL-031 invariant — `top_down` layout in
+    // `render_table_cell`).
+    let header_y = header_row[0].min.y;
+    for (j, rect) in header_row.iter().enumerate() {
+        assert!(
+            (rect.min.y - header_y).abs() < 1.0,
+            "header row col {j} top misaligned: expected {header_y:.2}, got {:.2}",
+            rect.min.y
+        );
+    }
+    let data_y = data_row[0].min.y;
+    for (j, rect) in data_row.iter().enumerate() {
+        assert!(
+            (rect.min.y - data_y).abs() < 1.0,
+            "data row col {j} top misaligned: expected {data_y:.2}, got {:.2}",
+            rect.min.y
+        );
+    }
+    // The data row sits strictly below the header row.
+    assert!(
+        data_y > header_y,
+        "data row must be below header row: header_y={header_y:.2}, data_y={data_y:.2}"
+    );
+
+    // (5) Inter-column gutter is 10 px on both rows.
+    for (row_label, row) in [("header", header_row), ("data", data_row)] {
+        for j in 0..6 {
+            let left_rect_right = row[j].max.x;
+            let right_rect_left = row[j + 1].min.x;
+            let gutter = right_rect_left - left_rect_right;
+            assert!(
+                (gutter - 10.0).abs() < 0.5,
+                "{row_label} row gutter between col {j} and col {} should be ~10 px, got {gutter:.2}",
+                j + 1
+            );
+        }
+    }
+
+    // (6) The Summary cell wraps. The FTWA pipeline runs at this
+    // viewport (not §3.6 fallback), so the long Summary cell is
+    // the natural place for the deficit to land. The cell is
+    // identified by its exact galley text to avoid matching the
+    // ~3.3 lbs substring inside a different shape.
+    let summary_text = "Excellent value. Vibrant OLED display, exceptional \
+                        battery life for a 16\" laptop, lightweight at ~3.3 \
+                        lbs. Two Thunderbolt 4 ports. Praised by ZDNet, PCMag, \
+                        and Notebookcheck. Great everyday performance and \
+                        portability.";
+    let summary_shape = output
+        .shapes
+        .iter()
+        .find_map(|cs| match &cs.shape {
+            Shape::Text(t) if t.galley.text() == summary_text => Some(t),
+            _ => None,
+        })
+        .expect("expected a text shape for the Summary cell");
+    assert!(
+        summary_shape.galley.rows.len() > 1,
+        "Summary cell must wrap on a 1000px viewport; got {} row(s)",
+        summary_shape.galley.rows.len()
+    );
+}
+
+/// Same 2x7 laptops fixture as
+/// [`test_render_laptops_table_rect_count_and_alignment`], but
+/// driven through **every** [`crate::ui::table_width::DeficitStrategy`]
+/// variant. The structural assertions (14 cell rects, 2 rows of 7,
+/// x-aligned per column, y-aligned per row, 10 px gutters) are
+/// re-checked per strategy.
+///
+/// Why this matters: the three new strategies
+/// (`WaterFillRatio`, `LagrangePenalty`,
+/// `HybridMinPenaltyWaterFill`) choose their per-column widths
+/// through different objectives (equalize `max/w` ratio, minimize
+/// `Σ extraLines_j` via Lagrange bisection, per-column target +
+/// water-fill residual). The deficit distribution — and therefore
+/// the exact column widths — can differ between strategies on the
+/// same input, but the **structural** correctness invariants
+/// (rect count per row, column alignment across rows, gutter
+/// width, top-alignment within a row) are independent of which
+/// strategy ran. This test locks those invariants in across all
+/// five strategies so adding a future strategy (or breaking one)
+/// surfaces here before it ships.
+#[test]
+fn test_render_laptops_table_all_five_strategies_aligned_rects() {
+    use crate::ui::table_width::DeficitStrategy;
+    use eframe::epaint::{Shape, StrokeKind};
+
+    let make = |t: &str| {
+        vec![InlineElem::Text(
+            t.to_string(),
+            crate::ui::render::TextStyle::default(),
+        )]
+    };
+    let table: Vec<Vec<Vec<InlineElem>>> = vec![
+        vec![
+            make("Make"),
+            make("Model and Model Number"),
+            make("Market Price"),
+            make("Display"),
+            make("Processor"),
+            make("PassMark Single / Multi"),
+            make("Summary"),
+        ],
+        vec![
+            make("Acer"),
+            make("Swift 16 AI (SF16-71T)"),
+            make("$1,249-$1,799"),
+            make("16\" 3K (2880x1800) 120Hz OLED Touch"),
+            make("Intel Core Ultra 7 256V (8C/8T Lunar Lake)"),
+            make("~4,031 / ~19,000"),
+            make(
+                "Excellent value. Vibrant OLED display, exceptional \
+                 battery life for a 16\" laptop, lightweight at ~3.3 \
+                 lbs. Two Thunderbolt 4 ports. Praised by ZDNet, PCMag, \
+                 and Notebookcheck. Great everyday performance and \
+                 portability.",
+            ),
+        ],
+    ];
+
+    // Order matches the top-bar combobox so a future addition
+    // (e.g. a 6th strategy) is added in both places.
+    let strategies = [
+        DeficitStrategy::ProportionalToSlack,
+        DeficitStrategy::BreakpointWaterFill,
+        DeficitStrategy::WaterFillRatio,
+        DeficitStrategy::LagrangePenalty,
+        DeficitStrategy::HybridMinPenaltyWaterFill,
+    ];
+
+    for strategy in strategies {
+        let output = render_table_with_paint_output_viewport_and_strategy(&table, 1000.0, strategy);
+
+        let mut rects: Vec<_> = output
+            .shapes
+            .iter()
+            .filter_map(|cs| match &cs.shape {
+                Shape::Rect(r)
+                    if r.fill == egui::Color32::TRANSPARENT
+                        && r.stroke == egui::Stroke::NONE
+                        && r.stroke_kind == StrokeKind::Inside =>
+                {
+                    Some(r.rect)
+                }
+                _ => None,
+            })
+            .collect();
+
+        assert_eq!(
+            rects.len(),
+            14,
+            "[{strategy:?}] expected 14 cell borders for 2x7 laptops table; got {}",
+            rects.len()
+        );
+
+        rects.sort_by(|a, b| {
+            a.min
+                .y
+                .partial_cmp(&b.min.y)
+                .unwrap()
+                .then(a.min.x.partial_cmp(&b.min.x).unwrap())
+        });
+
+        let header_row = &rects[0..7];
+        let data_row = &rects[7..14];
+
+        for (row_label, row) in [("header", header_row), ("data", data_row)] {
+            for j in 0..6 {
+                let gutter = row[j + 1].min.x - row[j].max.x;
+                assert!(
+                    (gutter - 10.0).abs() < 0.5,
+                    "[{strategy:?}] {row_label} row gutter between col {j} and col {} \
+                     should be ~10 px, got {gutter:.2}",
+                    j + 1
+                );
+            }
+        }
+
+        for j in 0..7 {
+            let h_min_x = header_row[j].min.x;
+            let h_width = header_row[j].width();
+            let d_min_x = data_row[j].min.x;
+            let d_width = data_row[j].width();
+            assert!(
+                (h_min_x - d_min_x).abs() < 0.5,
+                "[{strategy:?}] column {j} min.x mismatch: header={h_min_x:.2}, data={d_min_x:.2}"
+            );
+            assert!(
+                (h_width - d_width).abs() < 0.5,
+                "[{strategy:?}] column {j} width mismatch: header={h_width:.2}, data={d_width:.2}"
+            );
+        }
+
+        // Top-alignment within each row.
+        let header_y = header_row[0].min.y;
+        for (j, rect) in header_row.iter().enumerate() {
+            assert!(
+                (rect.min.y - header_y).abs() < 1.0,
+                "[{strategy:?}] header row col {j} top misaligned: expected {header_y:.2}, got {:.2}",
+                rect.min.y
+            );
+        }
+        let data_y = data_row[0].min.y;
+        for (j, rect) in data_row.iter().enumerate() {
+            assert!(
+                (rect.min.y - data_y).abs() < 1.0,
+                "[{strategy:?}] data row col {j} top misaligned: expected {data_y:.2}, got {:.2}",
+                rect.min.y
+            );
+        }
+        assert!(
+            data_y > header_y,
+            "[{strategy:?}] data row must be below header row: header_y={header_y:.2}, data_y={data_y:.2}"
+        );
+    }
+}
+
+/// The WiFi-routers spec table that the user reported as
+/// "not rendering correctly". 1 header + 5 data rows, 7 columns.
+/// The cells exercise a wide spread of the parser's
+/// delimiter-fragmentation surface:
+///
+/// * **Bold model names** in every data row — `**TP-Link Archer
+///   BE550**` and friends. Without the `*`-run coalescer the
+///   cells would split into 3 `Text` elements (the two `**`s
+///   plus the run) and the FTWA pipeline would tokenize the
+///   model as 3 widths.
+/// * **A `~~strikethrough~~ **bold**`** price cell on the
+///   GL.iNet row — exercises both `~` and `*` delimiter
+///   handling in the same cell, with a literal space between
+///   the two styled spans.
+/// * **A single-tilde `~$180`** price cell on the ASUS RT-BE59
+///   row. The single-`~` form is not a valid GFM strikethrough
+///   (per the cmark 0.13.4 `find_match` `run_length` rule)
+///   but cmark still fragments the text at the `~` delimiter
+///   run. The coalescer must fold it back into a single
+///   plain `Text` element so the FTWA pipeline sees one run,
+///   not two.
+/// * **Emoji cells** (`✅`, `❌`) in the boolean columns —
+///   the per-codepoint boundary is the kind of thing that
+///   makes naive text-walkers split; the parser must keep
+///   them as single `Text` elements.
+/// * **Plain cells with non-ASCII punctuation** (`$170–$200`,
+///   `5x`, `10G + Merlin`) that must not be mis-tokenised as
+///   markdown syntax (`$`, `+`, `–`).
+///
+/// Structural assertions:
+///
+/// 1. Exactly 42 cell border rects (6 rows × 7 columns).
+/// 2. After sorting by row then column, every row contains
+///    exactly 7 rects — the per-row count that the
+///    table-renderer contract depends on.
+/// 3. Every cell in column j shares min.x and width across
+///    all 6 rows (column alignment, sub-pixel tolerance).
+/// 4. All cells in the same row share min.y (top-aligned).
+/// 5. Data rows sit strictly below the header.
+/// 6. Inter-column gutter is 10 px on every row.
+/// 7. The `~$180` cell's text shape is present and on a
+///    single line (proves the coalescer actually folded the
+///    `~` + `$180` fragments into one text shape — a
+///    fragmented cell would render as two side-by-side text
+///    shapes and the cell would be wider than its column
+///    width).
+#[test]
+fn test_render_routers_table_rect_count_and_alignment() {
+    use eframe::epaint::{Shape, StrokeKind};
+
+    let plain = crate::ui::render::TextStyle::default();
+    let bold = crate::ui::render::TextStyle {
+        bold: true,
+        ..crate::ui::render::TextStyle::default()
+    };
+    let make_plain = |t: &str| vec![InlineElem::Text(t.to_string(), plain.clone())];
+    let make_bold = |t: &str| vec![InlineElem::Text(t.to_string(), bold.clone())];
+    let make_mixed = |strikethrough: &str, bold_text: &str| {
+        let st = crate::ui::render::TextStyle {
+            strikethrough: true,
+            ..crate::ui::render::TextStyle::default()
+        };
+        vec![
+            InlineElem::Text(strikethrough.to_string(), st),
+            InlineElem::Text(" ".to_string(), plain.clone()),
+            InlineElem::Text(bold_text.to_string(), bold.clone()),
+        ]
+    };
+
+    // 1 header + 5 data rows, 7 columns. The cell content matches
+    // the user's reported fixture verbatim.
+    let table: Vec<Vec<Vec<InlineElem>>> = vec![
+        vec![
+            make_plain("Model"),
+            make_plain("Price"),
+            make_plain("Bands"),
+            make_plain("6 GHz"),
+            make_plain("2.5G Ports"),
+            make_plain("10G Port"),
+            make_plain("Key Strength"),
+        ],
+        vec![
+            make_bold("TP-Link Archer BE550"),
+            make_plain("$170–$200"),
+            make_plain("Tri"),
+            make_plain("✅"),
+            make_plain("5x"),
+            make_plain("❌"),
+            make_plain("Best overall value"),
+        ],
+        vec![
+            make_bold("ASUS RT-BE92U"),
+            make_plain("$190–$200"),
+            make_plain("Tri"),
+            make_plain("✅"),
+            make_plain("4x"),
+            make_plain("✅ (1)"),
+            make_plain("10G + Merlin"),
+        ],
+        vec![
+            make_bold("TP-Link Archer BE230"),
+            make_plain("$80–$100"),
+            make_plain("Dual"),
+            make_plain("❌"),
+            make_plain("1x"),
+            make_plain("❌"),
+            make_plain("Budget entry"),
+        ],
+        vec![
+            make_bold("GL.iNet Flint 3"),
+            make_mixed("$180–$210", "$125"),
+            make_plain("Tri"),
+            make_plain("✅"),
+            make_plain("5x"),
+            make_plain("❌"),
+            make_plain("OpenWrt + VPN"),
+        ],
+        vec![
+            make_bold("ASUS RT-BE59"),
+            make_plain("~$180"),
+            make_plain("Dual"),
+            make_plain("❌"),
+            make_plain("1x"),
+            make_plain("❌"),
+            make_plain("ASUS budget"),
+        ],
+    ];
+
+    // 1000 px viewport: 7 columns + 6 gutters × 10 px = 60 px
+    // gutters, so 940 px of content. Wide enough that the FTWA
+    // pipeline runs (not §3.6 horizontal scroll) but narrow
+    // enough that the `Key Strength` column wraps on the long
+    // "10G + Merlin" / "OpenWrt + VPN" / "Best overall value"
+    // rows. The 1000 px viewport matches the laptops fixture
+    // so the structural assertions are directly comparable.
+    let output = render_table_with_paint_output_viewport(&table, 1000.0);
+
+    let mut rects: Vec<_> = output
+        .shapes
+        .iter()
+        .filter_map(|cs| match &cs.shape {
+            Shape::Rect(r)
+                if r.fill == egui::Color32::TRANSPARENT
+                    && r.stroke == egui::Stroke::NONE
+                    && r.stroke_kind == StrokeKind::Inside =>
+            {
+                Some(r.rect)
+            }
+            _ => None,
+        })
+        .collect();
+
+    // (1) Total rect count: 6 rows × 7 columns = 42.
+    assert_eq!(
+        rects.len(),
+        42,
+        "Expected 42 cell borders for 6x7 routers table; got {}: {:?}",
+        rects.len(),
+        rects
+    );
+
+    // Sort by row (Y) then column (X) so we can group by row
+    // deterministically regardless of shape emission order.
+    rects.sort_by(|a, b| {
+        a.min
+            .y
+            .partial_cmp(&b.min.y)
+            .unwrap()
+            .then(a.min.x.partial_cmp(&b.min.x).unwrap())
+    });
+
+    // (2) Per-row count: 6 rows of exactly 7 rects each.
+    for r in 0..6 {
+        let row = &rects[r * 7..(r + 1) * 7];
+        assert_eq!(row.len(), 7, "row {r} must have 7 cell rects");
+    }
+    let header_row = &rects[0..7];
+    let data_rows: Vec<&[egui::Rect]> = (1..6).map(|r| &rects[r * 7..(r + 1) * 7]).collect();
+
+    // Multi-element cell note. The `~~$180–$210~~ **$125**`
+    // Price cell on row 4 (GL.iNet Flint 3) is the test's
+    // multi-element stress case: the parser emits three
+    // `InlineElem::Text` elements (strikethrough, space, bold).
+    // A previous version of `render_table_cell` rendered each
+    // element as a separate `Label` under `top_down(Align::Min)`,
+    // which let the widest single token (`$180–$210` at ~107 px)
+    // overflow the FTWA-assigned 97.38 px column and push every
+    // subsequent column in the row right by ~10 px. The current
+    // renderer builds a single inline `LayoutJob` for text-only
+    // cells (see `is_text_only` + `build_text_layout_job` in
+    // `src/ui/render/table/cell.rs`), so the three runs flow
+    // inline and the line wraps within the column. This
+    // assertion now holds for *all* 6 rows.
+
+    // (3) Column alignment: for each column j, the header and
+    // all 5 data cells share min.x and width. Sub-pixel 0.5 px
+    // tolerance (FTWA may distribute fractional pixels across
+    // the wrap set).
+    for j in 0..7 {
+        let ref_min_x = header_row[j].min.x;
+        let ref_width = header_row[j].width();
+        for r in 0..6 {
+            let row = &rects[r * 7..(r + 1) * 7];
+            let min_x = row[j].min.x;
+            let width = row[j].width();
+            assert!(
+                (min_x - ref_min_x).abs() < 0.5,
+                "column {j} min.x mismatch at row {r}: ref={ref_min_x:.2}, got={min_x:.2}"
+            );
+            assert!(
+                (width - ref_width).abs() < 0.5,
+                "column {j} width mismatch at row {r}: ref={ref_width:.2}, got={width:.2}"
+            );
+        }
+    }
+
+    // (4) Row alignment: every cell in a given row shares that
+    // row's first cell's min.y. 1.0 px tolerance.
+    for (r, row) in std::iter::once(header_row)
+        .chain(data_rows.iter().copied())
+        .enumerate()
+    {
+        let row_y = row[0].min.y;
+        for (j, rect) in row.iter().enumerate() {
+            assert!(
+                (rect.min.y - row_y).abs() < 1.0,
+                "row {r} col {j} top misaligned: expected {row_y:.2}, got {:.2}",
+                rect.min.y
+            );
+        }
+    }
+    // (5) Data rows sit strictly below the header.
+    for (r, row) in data_rows.iter().enumerate() {
+        let row_y = row[0].min.y;
+        assert!(
+            row_y > header_row[0].min.y,
+            "data row {r} must be below header: header_y={:.2}, data_y={row_y:.2}",
+            header_row[0].min.y
+        );
+    }
+
+    // (6) Inter-column gutter is 10 px on every row.
+    for (r, row) in std::iter::once(header_row)
+        .chain(data_rows.iter().copied())
+        .enumerate()
+    {
+        for j in 0..6 {
+            let gutter = row[j + 1].min.x - row[j].max.x;
+            assert!(
+                (gutter - 10.0).abs() < 0.5,
+                "row {r} gutter between col {j} and col {} should be ~10 px, got {gutter:.2}",
+                j + 1
+            );
+        }
+    }
+
+    // (7) The `~$180` cell renders as a single text shape (not
+    // two side-by-side text shapes from a fragmented
+    // `~` + `$180` parse). The find-by-exact-text lookup is
+    // robust to leading/trailing whitespace and to the cell
+    // being word-wrapped (the lookup matches the cell's full
+    // galley text, which is what egui stores when a single
+    // `Text` is wrapped to multiple visual rows).
+    let tilde_shape = output.shapes.iter().find_map(|cs| match &cs.shape {
+        Shape::Text(t) if t.galley.text() == "~$180" => Some(t),
+        _ => None,
+    });
+    assert!(
+        tilde_shape.is_some(),
+        "expected a single text shape with content \"~$180\"; \
+         fragmentation of `~$180` into `~` + `$180` would have \
+         produced two separate text shapes and broken the column width"
+    );
+    let tilde_shape = tilde_shape.expect("checked above");
+    // Sanity: the galley must have at least one visual row
+    // (the lookup `t.galley.text() == "~$180"` only matches a
+    // shape whose text is exactly that string, so the galley
+    // is necessarily non-empty). This guards against a future
+    // change that, e.g., makes the coalescer emit the text
+    // shape with an empty galley.
+    assert!(
+        !tilde_shape.galley.rows.is_empty(),
+        "the coalesced `~$180` cell must render with at least 1 visual row"
+    );
+}

@@ -10,7 +10,9 @@
 //! even with every column at its longest-token floor and we fall back to
 //! the prior behaviour: a wrapping `ScrollArea` over max-content columns
 //! (doc §3.6) so the strongest invariant — never split a token — is
-//! preserved.
+//! preserved. The horizontal scrollbar is forced visible in that path
+//! so the overflow is discoverable instead of looking like a silently-
+//! clipped rightmost cell.
 //!
 //! Column spacing is 10.0 px and row spacing is 4.0 px. The available content
 //! width passed to FTWA subtracts `(N - 1) * 10.0` for those gutters so the
@@ -56,92 +58,51 @@ pub(crate) fn render_table_with_config(
     let table_id = egui::Id::new("md_table").with(table_ordinal);
     let global_padding = config.global_padding.sanitised();
 
-    let (max_w, min_w, breakpoints) =
-        crate::ui::table_width::measure_cached(table_id, table_cells, global_padding, ui);
-    let gutter = 10.0_f32;
-    let avail = (ui.available_width() - (n as f32 - 1.0) * gutter).max(0.0);
-    let decision = crate::ui::table_width::ftwa_cached(
+    let avail = ui.available_width().max(0.0);
+
+    let layout = crate::ui::table_width::table_layout_cached(
         table_id,
-        &max_w,
-        &min_w,
-        &breakpoints,
+        table_cells,
+        global_padding,
         avail,
         strategy,
         ui,
     );
 
-    let render_rows = |ui: &mut egui::Ui, decision_widths: &[f32]| {
-        let cached_heights_id = table_id.with("row_heights");
-        let cached_row_heights: Option<Vec<f32>> = ui.ctx().data(|d| d.get_temp(cached_heights_id));
-        let mut new_row_heights = Vec::with_capacity(table_cells.len());
-
+    let render_rows = |ui: &mut egui::Ui| {
         ui.vertical(|ui| {
-            // Row gap: 2 px is sufficient visual separation; 4 px produced
-            // visually excessive whitespace in tables with many rows.
-            // Pinned by `test_table_empty_cells_no_phantom_row_height`.
             ui.spacing_mut().item_spacing = egui::vec2(10.0, 2.0);
-            for (row_idx, row) in table_cells.iter().enumerate() {
+            for (row_idx, row_cells) in layout.rows.iter().enumerate() {
                 let is_striped = row_idx % 2 == 1;
                 let bg_idx = if is_striped {
                     Some(ui.painter().add(egui::Shape::Noop))
                 } else {
                     None
                 };
-                let target_h = cached_row_heights.as_ref().and_then(|h| h.get(row_idx).copied());
 
-                let mut row_max_h: f32 = 0.0;
                 let row_response = ui.push_id((table_id, "row", row_idx), |ui| {
                     ui.with_layout(egui::Layout::left_to_right(egui::Align::Min), |ui| {
                         ui.spacing_mut().item_spacing = egui::vec2(10.0, 0.0);
-                        for j in 0..n {
-                            let cell = row.get(j).map(|v| v.as_slice()).unwrap_or(&[]);
-                            let w = decision_widths.get(j).copied();
-                            if !decision.needs_horizontal_scroll {
-                                debug_assert!(
-                                    w.is_some_and(|w| w.is_finite() && w > 0.0),
-                                    "FTWA invariant violated: table {table_ordinal} column {j} width = {w:?}"
-                                );
-                            }
-                            let w = w.filter(|w| w.is_finite() && *w > 0.0);
-                            let cell_res = ui.push_id(("col", j), |ui| {
-                                // If we know the row's target height from a previous
-                                // frame, reserve it up front so the cell's natural
-                                // content sits at the top and the cell UI doesn't
-                                // double-expand to 2× the target height (the bug
-                                // that produced a ~17 px "phantom" gutter).
-                                let cell_size = egui::vec2(
-                                    w.unwrap_or_else(|| ui.available_width()),
-                                    target_h.unwrap_or(0.0),
-                                );
+                        for (col_idx, cell_layout) in row_cells.iter().enumerate() {
+                            let cell_size = egui::vec2(cell_layout.width, cell_layout.height);
+                            ui.push_id(("col", col_idx), |ui| {
                                 ui.allocate_ui_with_layout(
                                     cell_size,
                                     egui::Layout::top_down(egui::Align::Min),
                                     |ui| {
                                         render_table_cell(
                                             ui,
-                                            cell,
-                                            w,
-                                            target_h,
+                                            &cell_layout.content,
+                                            Some(cell_layout.width),
+                                            Some(cell_layout.height),
                                             global_padding,
                                         )
                                     },
                                 )
-                                .inner
                             });
-                            let h = cell_res.inner;
-                            if h.is_finite() {
-                                row_max_h = row_max_h.max(h);
-                            }
                         }
                     })
                 });
-
-                // Clamp the cached row height to at least one body-line so a
-                // pathological all-empty row never caches 0.0 and then
-                // defaults back to `min_h` on the next frame (which would
-                // double-count via the empty-cell branch).
-                let body_line_h = ui.text_style_height(&egui::TextStyle::Body);
-                new_row_heights.push(row_max_h.max(body_line_h));
 
                 if let Some(idx) = bg_idx {
                     ui.painter().set(
@@ -155,32 +116,36 @@ pub(crate) fn render_table_with_config(
                 }
             }
         });
-
-        ui.ctx()
-            .data_mut(|d| d.insert_temp(cached_heights_id, new_row_heights));
     };
 
-    if decision.needs_horizontal_scroll {
-        // §3.6 fallback: nothing can fit; preserve the never-break-token
-        // invariant by letting content overflow into a horizontal ScrollArea.
+    if layout.needs_horizontal_scroll {
         egui::Frame::NONE
             .stroke(TABLE_PERIMETER_STROKE)
             .inner_margin(egui::Margin::ZERO)
             .show(ui, |ui| {
+                // Always show the horizontal scrollbar in the fallback
+                // path. The default `VisibleWhenNeeded` policy only paints
+                // a scrollbar when the user has interacted (scroll wheel
+                // / drag) — for a narrow viewport the table overflows from
+                // the very first frame and the user has no visual cue
+                // that the rightmost columns are reachable by scrolling.
+                // Forcing the scrollbar visible makes the overflow
+                // discoverable instead of looking like a render bug where
+                // the rightmost cell is silently clipped.
                 egui::ScrollArea::horizontal()
                     .id_salt(table_id.with("scroll"))
+                    .scroll_bar_visibility(egui::scroll_area::ScrollBarVisibility::AlwaysVisible)
                     .show(ui, |ui| {
-                        render_rows(ui, &max_w);
+                        render_rows(ui);
                     });
             });
         return;
     }
 
-    // FTWA path: pin every cell to its assigned column width.
     egui::Frame::NONE
         .stroke(TABLE_PERIMETER_STROKE)
         .inner_margin(egui::Margin::ZERO)
         .show(ui, |ui| {
-            render_rows(ui, &decision.widths);
+            render_rows(ui);
         });
 }

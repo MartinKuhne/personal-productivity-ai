@@ -522,3 +522,95 @@ fn test_integration_table_column_gutter_is_configured_value() {
         col1.min.x,
     );
 }
+
+#[test]
+fn test_problematic_table() {
+    let md = r#"| Retailer | Price | Link |
+|----------|-------|------|
+| Amazon | ~$200–$250 (on sale ~$180–$200) | [Amazon](https://www.amazon.com/LG-32GN650-B-Ultragear-Reduction-FreeSync/dp/B08LLF9NS1) |
+| Best Buy | ~$200–$250 | [Best Buy](https://www.bestbuy.com/product/lg-ultragear-32-led-qhd-5-ms-amd-freesync-premium-with-hdr-10-displayport-hdmi-black/JJ8VPZS3LS) |
+| Costco | Check membership deals | [Costco](https://www.costco.com/p/-/lg-ultragear-32-class-qhd-gaming-monitor/100793191) |"#;
+    let events = fastmd::markdown::parser::parse_markdown_to_events(md);
+    println!("Parsed events: {:#?}", events);
+    let out = render_table_markdown_to_shapes(md, 500.0);
+    assert!(!out.shapes.is_empty());
+}
+
+#[test]
+fn test_wide_table_fuzz_widths() {
+    let md = r#"| Make | Model and Model Number | Market Price | Display | Processor | PassMark Single / Multi | Summary |
+|------|----------------------|-------------|---------|-----------|------------------------|---------|
+| Acer | Swift 16 AI (SF16-71T) | $1,249-$1,799 | 16" 3K (2880x1800) 120Hz OLED Touch | Intel Core Ultra 7 256V (8C/8T Lunar Lake) | ~4,031 / ~19,000 | Excellent value. Vibrant OLED display, exceptional battery life for a 16" laptop, lightweight at ~3.3 lbs. Two Thunderbolt 4 ports. Praised by ZDNet, PCMag, and Notebookcheck. Great everyday performance and portability. |"#;
+
+    // Test the table rendering at all widths from 400 to 3000 in 10px increments
+    for width in (400..=3000).step_by(10) {
+        let out = render_table_markdown_to_shapes(md, width as f32);
+
+        // Assert that the layout engine successfully produced shapes without panicking
+        assert!(
+            !out.shapes.is_empty(),
+            "Table failed to produce shapes at width {width}"
+        );
+
+        // Basic correctness: extract text positions to ensure all cells rendered
+        let text_positions = collect_text_positions(&out.shapes);
+        let has_acer = text_positions.iter().any(|(txt, _)| txt.contains("Acer"));
+
+        assert!(has_acer, "Table dropped content 'Acer' at width {width}");
+
+        // At wider widths, horizontal scrolling doesn't cull the rightmost columns
+        if width > 1500 {
+            let has_excellent = text_positions
+                .iter()
+                .any(|(txt, _)| txt.contains("Excellent"));
+            assert!(
+                has_excellent,
+                "Table dropped rightmost content 'Excellent' at width {width} (should not be culled)"
+            );
+        }
+
+        // Regression guard for the "rightmost column silently clipped" bug.
+        //
+        // At widths above the §3.6 fallback threshold the FTWA deficit
+        // branch must produce column widths that sum to `avail` (so the
+        // table fits exactly in the viewport). A previous bug let the
+        // post-drift `Σ widths` exceed `available` when the wrap set
+        // was fully clamped to `min_content`, causing the rightmost
+        // column to overflow the viewport silently. Asserting the
+        // rightmost-column text x-position stays within `[0, width]`
+        // at "comfortable" widths catches any future regression of
+        // that arithmetic. Narrower widths (below the fallback
+        // threshold) legitimately scroll, so we skip the check there.
+        //
+        // Threshold: 700 px is safely above the estimated
+        // `sum_min + (N-1)*10 ≈ 510` for this 7-column table and gives
+        // the deficit branch enough room to keep the wrap set from
+        // being fully clamped.
+        if width >= 700 {
+            let viewport_right = width as f32;
+            // The rightmost column is the Summary column; its first
+            // data token is "Excellent" and the header is "Summary".
+            // Both should sit fully within the viewport at widths
+            // where the deficit branch is supposed to fit the table.
+            for needle in ["Summary", "Excellent"] {
+                let positions: Vec<_> = text_positions
+                    .iter()
+                    .filter(|(txt, _)| txt.contains(needle))
+                    .map(|(_, pos)| pos.x)
+                    .collect();
+                assert!(
+                    !positions.is_empty(),
+                    "rightmost-column text {needle:?} not rendered at width {width}"
+                );
+                for x in positions {
+                    assert!(
+                        x >= 0.0 && x <= viewport_right,
+                        "rightmost-column text {needle:?} at x={x} is outside the \
+                         [0, {viewport_right}] viewport at width {width} — the table \
+                         overflowed the viewport (FTWA drift-fix regression?)"
+                    );
+                }
+            }
+        }
+    }
+}

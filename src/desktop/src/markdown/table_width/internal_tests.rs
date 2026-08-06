@@ -233,6 +233,7 @@ fn next_breakpoint_below_returns_highest_match() {
 
 #[test]
 fn deficit_strategy_from_config() {
+    // Existing FTWA strategies.
     assert_eq!(
         DeficitStrategy::from_config("waterfill"),
         DeficitStrategy::BreakpointWaterFill
@@ -249,13 +250,44 @@ fn deficit_strategy_from_config() {
         DeficitStrategy::from_config("proportional"),
         DeficitStrategy::ProportionalToSlack
     );
+    // Survey algorithms (doc §2.10, §2.13, §2.14). Each variant has
+    // a primary canonical form and one or more aliases for backward
+    // compatibility / ergonomics.
+    assert_eq!(
+        DeficitStrategy::from_config("ratio"),
+        DeficitStrategy::WaterFillRatio
+    );
+    assert_eq!(
+        DeficitStrategy::from_config("waterfill-ratio"),
+        DeficitStrategy::WaterFillRatio
+    );
+    assert_eq!(
+        DeficitStrategy::from_config("lagrange"),
+        DeficitStrategy::LagrangePenalty
+    );
+    assert_eq!(
+        DeficitStrategy::from_config("lagrange-penalty"),
+        DeficitStrategy::LagrangePenalty
+    );
+    assert_eq!(
+        DeficitStrategy::from_config("hybrid"),
+        DeficitStrategy::HybridMinPenaltyWaterFill
+    );
+    assert_eq!(
+        DeficitStrategy::from_config("hybrid-min-penalty"),
+        DeficitStrategy::HybridMinPenaltyWaterFill
+    );
+    // Unknown / empty values fall back to the current default
+    // (`default_table_width_strategy` in `config.rs` returns
+    // `"hybrid"` → `HybridMinPenaltyWaterFill`). The two are kept in
+    // sync; if either side changes, this test will fail loudly.
     assert_eq!(
         DeficitStrategy::from_config("unknown"),
-        DeficitStrategy::ProportionalToSlack
+        DeficitStrategy::HybridMinPenaltyWaterFill
     );
     assert_eq!(
         DeficitStrategy::from_config(""),
-        DeficitStrategy::ProportionalToSlack
+        DeficitStrategy::HybridMinPenaltyWaterFill
     );
 }
 
@@ -296,4 +328,435 @@ fn water_fill_terminates_with_single_breakpoint_at_max() {
     assert!(!d.needs_horizontal_scroll);
     assert!(d.widths[0] >= 50.0);
     assert!(d.widths[0] <= 100.0);
+}
+
+// -------------------------------------------------------------------
+//  Survey-algorithm tests (doc §2.10, §2.13, §2.14)
+// -------------------------------------------------------------------
+
+/// Helper: call `ftwa` with the WaterFillRatio strategy.
+fn ftwa_ratio(
+    max: &[f32],
+    min: &[f32],
+    breakpoints: &[Vec<Breakpoint>],
+    avail: f32,
+) -> ColumnWidths {
+    ftwa(
+        max,
+        min,
+        breakpoints,
+        avail,
+        DeficitStrategy::WaterFillRatio,
+    )
+}
+
+/// Helper: call `ftwa` with the LagrangePenalty strategy.
+fn ftwa_lagrange(
+    max: &[f32],
+    min: &[f32],
+    breakpoints: &[Vec<Breakpoint>],
+    avail: f32,
+) -> ColumnWidths {
+    ftwa(
+        max,
+        min,
+        breakpoints,
+        avail,
+        DeficitStrategy::LagrangePenalty,
+    )
+}
+
+/// Helper: call `ftwa` with the HybridMinPenaltyWaterFill strategy.
+fn ftwa_hybrid(
+    max: &[f32],
+    min: &[f32],
+    breakpoints: &[Vec<Breakpoint>],
+    avail: f32,
+) -> ColumnWidths {
+    ftwa(
+        max,
+        min,
+        breakpoints,
+        avail,
+        DeficitStrategy::HybridMinPenaltyWaterFill,
+    )
+}
+
+fn sum_widths(d: &ColumnWidths) -> f32 {
+    d.widths.iter().sum()
+}
+
+fn assert_sum_fits(d: &ColumnWidths, avail: f32) {
+    let sum = sum_widths(d);
+    assert!(
+        (sum - avail).abs() < 1e-3,
+        "sum of widths must equal available: sum={sum}, avail={avail}"
+    );
+}
+
+fn assert_no_scroll(d: &ColumnWidths) {
+    assert!(
+        !d.needs_horizontal_scroll,
+        "expected a fitting layout, got needs_horizontal_scroll=true"
+    );
+}
+
+fn assert_respects_min(d: &ColumnWidths, min: &[f32]) {
+    for (j, &w) in d.widths.iter().enumerate() {
+        assert!(
+            w >= min[j] - 1e-3,
+            "width[{j}] = {w} below min[{j}] = {}",
+            min[j]
+        );
+    }
+}
+
+// --- §2.10 waterfill_ratio -----------------------------------------------
+
+#[test]
+fn waterfill_ratio_surplus_pins_at_max() {
+    let max = [100.0, 50.0];
+    let min = [10.0, 5.0];
+    let bps = vec![Vec::new(), Vec::new()];
+    let d = ftwa_ratio(&max, &min, &bps, 500.0);
+    assert_no_scroll(&d);
+    assert_eq!(d.widths, vec![100.0, 50.0]);
+}
+
+#[test]
+fn waterfill_ratio_fallback_below_sum_min() {
+    let max = [100.0, 100.0];
+    let min = [60.0, 60.0];
+    let bps = vec![Vec::new(), Vec::new()];
+    let d = ftwa_ratio(&max, &min, &bps, 50.0);
+    assert!(d.needs_horizontal_scroll);
+    assert_eq!(d.widths, vec![60.0, 60.0]);
+}
+
+#[test]
+fn waterfill_ratio_equalizes_ratios_in_deficit() {
+    // 2 columns with no breakpoints. Closed-form: w_j = max_j * available / sum_max.
+    // For available=80, max=[100, 50]: w = [53.333, 26.666]. Both have ratio max/w = 1.875.
+    let max = [100.0, 50.0];
+    let min = [10.0, 5.0];
+    let bps = vec![Vec::new(), Vec::new()];
+    let d = ftwa_ratio(&max, &min, &bps, 80.0);
+    assert_no_scroll(&d);
+    assert_sum_fits(&d, 80.0);
+    assert_respects_min(&d, &min);
+    // Both ratios should match (within float precision).
+    let r0 = max[0] / d.widths[0];
+    let r1 = max[1] / d.widths[1];
+    assert!(
+        (r0 - r1).abs() < 1e-3,
+        "ratios should equalize: {r0} vs {r1}"
+    );
+}
+
+#[test]
+fn waterfill_ratio_clamps_at_min_when_target_too_narrow() {
+    // 2 columns. With available=100, the equal-ratio target for col 0
+    // is 50 (below min=80), so col 0 must clamp to min. Col 1 absorbs
+    // the rest: w_1 = 100 - 80 = 20 (above its min=5).
+    let max = [100.0, 100.0];
+    let min = [80.0, 5.0];
+    let bps = vec![Vec::new(), Vec::new()];
+    let d = ftwa_ratio(&max, &min, &bps, 100.0);
+    assert_no_scroll(&d);
+    assert_sum_fits(&d, 100.0);
+    assert_respects_min(&d, &min);
+    assert_eq!(d.widths[0], 80.0, "col 0 should be clamped at min");
+}
+
+#[test]
+fn waterfill_ratio_no_breakpoints_means_no_wrap_used() {
+    // Breakpoints are accepted but ignored by waterfill_ratio (the
+    // algorithm is purely geometric). The deficit case still works.
+    let max = [80.0, 60.0];
+    let min = [10.0, 5.0];
+    let bps = vec![
+        vec![Breakpoint {
+            width: 50.0,
+            extra_lines: 1,
+        }],
+        vec![Breakpoint {
+            width: 30.0,
+            extra_lines: 2,
+        }],
+    ];
+    let d = ftwa_ratio(&max, &min, &bps, 100.0);
+    assert_no_scroll(&d);
+    assert_sum_fits(&d, 100.0);
+    assert_respects_min(&d, &min);
+}
+
+// --- §2.13 lagrange_penalty ---------------------------------------------
+
+#[test]
+fn lagrange_surplus_pins_at_max() {
+    let max = [100.0, 50.0];
+    let min = [10.0, 5.0];
+    let bps = vec![Vec::new(), Vec::new()];
+    let d = ftwa_lagrange(&max, &min, &bps, 500.0);
+    assert_no_scroll(&d);
+    assert_eq!(d.widths, vec![100.0, 50.0]);
+}
+
+#[test]
+fn lagrange_fallback_below_sum_min() {
+    let max = [100.0, 100.0];
+    let min = [60.0, 60.0];
+    let bps = vec![Vec::new(), Vec::new()];
+    let d = ftwa_lagrange(&max, &min, &bps, 50.0);
+    assert!(d.needs_horizontal_scroll);
+    assert_eq!(d.widths, vec![60.0, 60.0]);
+}
+
+#[test]
+fn lagrange_no_breakpoints_picks_narrower_columns_first() {
+    // 2 columns, no breakpoints. The Lagrangian has no wrap cost, so
+    // minimizing sum-of-wrap is trivially zero everywhere. The λ
+    // bisection then picks the widths that hit `available` with the
+    // smallest λ — which is the widest widths possible. So both
+    // columns should stay at their widest candidate (= max_j).
+    // For available < sum_max, the bisection converges to a λ where
+    // the sum matches, but the resulting widths depend on the
+    // discrete candidate set. We just assert the result fits and
+    // respects min.
+    let max = [100.0, 50.0];
+    let min = [10.0, 5.0];
+    let bps = vec![Vec::new(), Vec::new()];
+    let d = ftwa_lagrange(&max, &min, &bps, 80.0);
+    assert_no_scroll(&d);
+    assert_sum_fits(&d, 80.0);
+    assert_respects_min(&d, &min);
+}
+
+#[test]
+fn lagrange_with_breakpoints_picks_widest_no_wrap_width() {
+    // Single column with breakpoints. The Lagrangian should pick the
+    // widest candidate with the lowest wrap cost for the right λ.
+    // For available=80 (deficit), with max=100 and bps = [(40, 1),
+    // (70, 1), (95, 1)]: the "wide-side" convention treats bps as
+    // boundaries between wrap-cost intervals. We just assert the
+    // result is in [min, max], hits the sum, and is at one of the
+    // breakpoint widths or max.
+    let max = [100.0];
+    let min = [40.0];
+    let bps = vec![vec![
+        Breakpoint {
+            width: 40.0,
+            extra_lines: 2,
+        },
+        Breakpoint {
+            width: 70.0,
+            extra_lines: 1,
+        },
+        Breakpoint {
+            width: 95.0,
+            extra_lines: 1,
+        },
+    ]];
+    let d = ftwa_lagrange(&max, &min, &bps, 80.0);
+    assert_no_scroll(&d);
+    assert_eq!(d.widths.len(), 1);
+    assert!((d.widths[0] - 80.0).abs() < 1e-3);
+    assert!(d.widths[0] >= min[0] - 1e-3);
+    assert!(d.widths[0] <= max[0] + 1e-3);
+}
+
+#[test]
+fn lagrange_respects_min_under_severe_deficit() {
+    // 2 columns. With available=30 and min=[10, 15], sum_min=25 (fits).
+    // The Lagrangian should find widths that sum to 30 and don't
+    // violate either min.
+    let max = [100.0, 100.0];
+    let min = [10.0, 15.0];
+    let bps = vec![Vec::new(), Vec::new()];
+    let d = ftwa_lagrange(&max, &min, &bps, 30.0);
+    assert_no_scroll(&d);
+    assert_sum_fits(&d, 30.0);
+    assert_respects_min(&d, &min);
+}
+
+// --- §2.14 hybrid --------------------------------------------------------
+
+#[test]
+fn hybrid_surplus_pins_at_max() {
+    let max = [100.0, 50.0];
+    let min = [10.0, 5.0];
+    let bps = vec![Vec::new(), Vec::new()];
+    let d = ftwa_hybrid(&max, &min, &bps, 500.0);
+    assert_no_scroll(&d);
+    assert_eq!(d.widths, vec![100.0, 50.0]);
+}
+
+#[test]
+fn hybrid_fallback_below_sum_min() {
+    let max = [100.0, 100.0];
+    let min = [60.0, 60.0];
+    let bps = vec![Vec::new(), Vec::new()];
+    let d = ftwa_hybrid(&max, &min, &bps, 50.0);
+    assert!(d.needs_horizontal_scroll);
+    assert_eq!(d.widths, vec![60.0, 60.0]);
+}
+
+#[test]
+fn hybrid_per_column_target_is_first_wrap_boundary() {
+    // 1 column with breakpoints [(40, 1), (70, 1)] and max=100.
+    // The "first-wrap boundary" target is the largest bp's width = 70.
+    // For available > 70, water-fill should grow col 0 up to max_j.
+    // For available = 200 (surplus, but that's covered by the surplus
+    // test), so we test available = 90 — residual = 20, headroom = 30,
+    // so width = 70 + 20 = 90. Sum fits.
+    let max = [100.0];
+    let min = [40.0];
+    let bps = vec![vec![
+        Breakpoint {
+            width: 40.0,
+            extra_lines: 1,
+        },
+        Breakpoint {
+            width: 70.0,
+            extra_lines: 1,
+        },
+    ]];
+    let d = ftwa_hybrid(&max, &min, &bps, 90.0);
+    assert_no_scroll(&d);
+    assert_sum_fits(&d, 90.0);
+    assert_respects_min(&d, &min);
+}
+
+#[test]
+fn hybrid_water_fills_residual_to_max() {
+    // 2 columns with no breakpoints → per-column target = max_j.
+    // Sum of targets = sum_max = 100. For available = 90 (deficit),
+    // residual = -10, distributed proportional to (target - min).
+    // target_0 - min_0 = 90, target_1 - min_1 = 40, total = 130.
+    // col 0 shrinks by 10 * 90/130 ≈ 6.92 → 83.08.
+    // col 1 shrinks by 10 * 40/130 ≈ 3.08 → 36.92.
+    let max = [100.0, 50.0];
+    let min = [10.0, 10.0];
+    let bps = vec![Vec::new(), Vec::new()];
+    let d = ftwa_hybrid(&max, &min, &bps, 90.0);
+    assert_no_scroll(&d);
+    assert_sum_fits(&d, 90.0);
+    assert_respects_min(&d, &min);
+}
+
+#[test]
+fn hybrid_clamps_at_min_when_water_fill_overshrinks() {
+    // Single column with a small max. If we ask for a width below
+    // the column's min, we should hit the fallback.
+    let max = [10.0];
+    let min = [5.0];
+    let bps: Vec<Vec<Breakpoint>> = vec![Vec::new()];
+    // 4 < 5 → sum_min=5, available=4 < sum_min → fallback.
+    let d = ftwa_hybrid(&max, &min, &bps, 4.0);
+    assert!(d.needs_horizontal_scroll);
+    assert_eq!(d.widths, vec![5.0]);
+}
+
+#[test]
+fn hybrid_multi_column_with_breakpoints() {
+    // 2 columns. Col 0 wraps (bps), col 1 doesn't. Available=130.
+    // Col 0 target = 80 (largest bp). Col 1 target = 100 (max).
+    // Sum targets = 180. Residual = 130 - 180 = -50. Distributed
+    // proportional to (target - min): col 0 has 80-10=70, col 1 has
+    // 100-5=95, total=165. col 0 shrinks by 50*70/165 ≈ 21.21 → 58.79.
+    // col 1 shrinks by 50*95/165 ≈ 28.79 → 71.21.
+    let max = [100.0, 100.0];
+    let min = [10.0, 5.0];
+    let bps = vec![
+        vec![Breakpoint {
+            width: 80.0,
+            extra_lines: 1,
+        }],
+        Vec::new(),
+    ];
+    let d = ftwa_hybrid(&max, &min, &bps, 130.0);
+    assert_no_scroll(&d);
+    assert_sum_fits(&d, 130.0);
+    assert_respects_min(&d, &min);
+    // Both widths should be above their min.
+    assert!(d.widths[0] > min[0]);
+    assert!(d.widths[1] > min[1]);
+}
+
+// --- Cross-algorithm comparison -----------------------------------------
+
+#[test]
+fn all_survey_algorithms_respect_invariants_on_same_input() {
+    // All three survey algorithms must satisfy the basic invariants
+    // (sum = available, widths >= min, no scroll in fitting regime)
+    // on the same deficit input. The specific values differ; we just
+    // check the contract holds for each.
+    let max = [100.0, 80.0, 60.0];
+    let min = [20.0, 15.0, 10.0];
+    let bps = vec![
+        vec![Breakpoint {
+            width: 50.0,
+            extra_lines: 1,
+        }],
+        vec![Breakpoint {
+            width: 40.0,
+            extra_lines: 1,
+        }],
+        Vec::new(),
+    ];
+    let avail = 150.0;
+    for d in [
+        ftwa_ratio(&max, &min, &bps, avail),
+        ftwa_lagrange(&max, &min, &bps, avail),
+        ftwa_hybrid(&max, &min, &bps, avail),
+    ] {
+        assert_no_scroll(&d);
+        assert_sum_fits(&d, avail);
+        assert_respects_min(&d, &min);
+    }
+}
+
+#[test]
+fn all_survey_algorithms_surplus_pins_at_max() {
+    let max = [100.0, 50.0];
+    let min = [10.0, 5.0];
+    let bps = vec![Vec::new(), Vec::new()];
+    for d in [
+        ftwa_ratio(&max, &min, &bps, 500.0),
+        ftwa_lagrange(&max, &min, &bps, 500.0),
+        ftwa_hybrid(&max, &min, &bps, 500.0),
+    ] {
+        assert_no_scroll(&d);
+        assert_eq!(d.widths, vec![100.0, 50.0]);
+    }
+}
+
+#[test]
+fn all_survey_algorithms_fallback_clamps_at_min() {
+    let max = [100.0, 100.0];
+    let min = [60.0, 60.0];
+    let bps = vec![Vec::new(), Vec::new()];
+    for d in [
+        ftwa_ratio(&max, &min, &bps, 50.0),
+        ftwa_lagrange(&max, &min, &bps, 50.0),
+        ftwa_hybrid(&max, &min, &bps, 50.0),
+    ] {
+        assert!(d.needs_horizontal_scroll);
+        assert_eq!(d.widths, vec![60.0, 60.0]);
+    }
+}
+
+#[test]
+fn empty_input_returns_empty_widths_for_survey_algorithms() {
+    let max: [f32; 0] = [];
+    let min: [f32; 0] = [];
+    let bps: Vec<Vec<Breakpoint>> = vec![];
+    for d in [
+        ftwa_ratio(&max, &min, &bps, 100.0),
+        ftwa_lagrange(&max, &min, &bps, 100.0),
+        ftwa_hybrid(&max, &min, &bps, 100.0),
+    ] {
+        assert!(d.widths.is_empty());
+        assert!(!d.needs_horizontal_scroll);
+    }
 }

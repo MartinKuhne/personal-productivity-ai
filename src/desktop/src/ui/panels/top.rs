@@ -2,7 +2,9 @@
 //!
 //! Unit tests live in the sibling `top_tests.rs` sidecar.
 
+use crate::config::AppConfig;
 use crate::ui::FastMdApp;
+use crate::ui::table_width::DeficitStrategy;
 use eframe::egui;
 use egui::RichText;
 use egui::containers::Panel;
@@ -92,6 +94,101 @@ pub fn apply_batch_button_click(app: &mut FastMdApp) {
 /// the egui harness.
 pub fn apply_tools_button_click(app: &mut FastMdApp) {
     app.dialogs_mut().tools_dialog_open = true;
+}
+
+/// Human-readable label for a [`DeficitStrategy`] variant, used as the
+/// `selected_text` of the top-bar table-width-strategy combobox and as
+/// the row label inside the dropdown. The match is intentionally
+/// exhaustive over every variant of `DeficitStrategy` so adding a new
+/// strategy in the future is a compile error here until the label is
+/// supplied.
+pub fn strategy_label(strategy: DeficitStrategy) -> &'static str {
+    match strategy {
+        DeficitStrategy::ProportionalToSlack => {
+            crate::ui::strings::TABLE_WIDTH_STRATEGY_PROPORTIONAL
+        }
+        DeficitStrategy::BreakpointWaterFill => crate::ui::strings::TABLE_WIDTH_STRATEGY_WATERFILL,
+        DeficitStrategy::WaterFillRatio => crate::ui::strings::TABLE_WIDTH_STRATEGY_RATIO,
+        DeficitStrategy::LagrangePenalty => crate::ui::strings::TABLE_WIDTH_STRATEGY_LAGRANGE,
+        DeficitStrategy::HybridMinPenaltyWaterFill => {
+            crate::ui::strings::TABLE_WIDTH_STRATEGY_HYBRID
+        }
+    }
+}
+
+/// Purpose: Applies the side effect of picking a new table-width
+/// deficit strategy in the top toolbar's combobox.
+///
+/// Inputs:
+///   - `app`: the application state
+///   - `strategy`: the newly selected [`DeficitStrategy`]
+///   - `persist`: a callback invoked exactly once when the strategy
+///     actually changes. Receives a reference to the post-mutation
+///     `AppConfig` (with the new `table_width_strategy` set) and is
+///     expected to persist it. The signature matches
+///     [`crate::config::save_config`] / [`crate::config::save_config_to_path`]
+///     so production can pass those as function pointers without an
+///     extra closure wrapper. A `Result::Err` is logged via
+///     `tracing::error!` but does not propagate — the in-memory
+///     config is still updated (matches the `tools_dialog::render_row`
+///     policy).
+///
+/// Outputs: ()
+///
+/// Purity: Impure. Clones `app.orchestrator.config`, mutates
+///   `table_width_strategy`, invokes `persist` on the new config, and
+///   replaces the in-memory config. The markdown renderer reads
+///   `deficit_strategy()` on every frame so the change takes effect
+///   on the very next paint without any invalidation hook.
+///
+/// Preconditions: None.
+///
+/// Postconditions:
+///   - `app.config().table_width_strategy == strategy.to_config()`
+///   - `app.config().deficit_strategy() == strategy`
+///   - `persist` is called exactly once with the post-mutation config
+///     iff the value actually changed; otherwise it is not called at
+///     all (so a no-op re-pick from egui's re-fired dropdown events
+///     does not trigger a redundant write).
+///
+/// # Why a callback
+///
+/// Decoupling persistence from the in-memory mutation keeps the
+/// function testable without a filesystem: tests pass a closure that
+/// captures the saved config (or panics, to assert it wasn't called).
+/// Production passes `crate::config::save_config` directly. An
+/// earlier version hard-coded `save_config` (the APPDATA-path
+/// version) and a test was silently overwriting the user's real
+/// `config.yaml` at `%APPDATA%\fastmd\config.yaml` on every test run.
+/// A previous attempt split the function into a `_to_path` variant;
+/// the callback form is cleaner because the persistence choice lives
+/// at the call site (production = "write to APPDATA", test = "do
+/// nothing" or "write to a tempdir").
+pub fn apply_table_width_strategy_change<F>(
+    app: &mut FastMdApp,
+    strategy: DeficitStrategy,
+    persist: F,
+) where
+    F: FnOnce(&AppConfig) -> Result<PathBuf, String>,
+{
+    let new_value = strategy.to_config();
+    let mut new_config = app.config().clone();
+    if new_config.table_width_strategy == new_value {
+        // No-op: the persisted value already matches the pick.
+        // Skipping the persist call avoids redundant disk writes when
+        // egui re-fires the dropdown's selected-value event across
+        // frames.
+        return;
+    }
+    new_config.table_width_strategy = new_value.to_string();
+    if let Err(e) = persist(&new_config) {
+        tracing::error!(
+            error = %e,
+            strategy = new_value,
+            "failed to persist AppConfig after table-width-strategy change"
+        );
+    }
+    *app.config_mut() = new_config;
 }
 
 pub fn show_top_panel(app: &mut FastMdApp, parent_ui: &mut egui::Ui) {
@@ -215,6 +312,52 @@ pub fn show_top_panel_capture(
                         }
                     });
             });
+
+            // Table-width deficit-strategy combobox. Always visible
+            // (not gated on `indexing_finished` — the strategy is a
+            // user preference unrelated to the indexer). Picked
+            // strategy is persisted to `AppConfig::table_width_strategy`
+            // on change; the markdown renderer re-reads it every
+            // frame via `app.orchestrator.config.deficit_strategy()`,
+            // so the next paint uses the new algorithm without any
+            // explicit invalidation hook.
+            ui.separator();
+            ui.label(crate::ui::strings::TABLE_WIDTH_STRATEGY_LABEL);
+            let current_strategy = app.orchestrator.config.deficit_strategy();
+            let mut pending: Option<DeficitStrategy> = None;
+            egui::ComboBox::from_id_salt(crate::ui::strings::TABLE_WIDTH_STRATEGY_ID_SALT)
+                .selected_text(strategy_label(current_strategy))
+                .show_ui(ui, |ui| {
+                    // Order matters: default first (HybridMinPenaltyWaterFill,
+                    // best G1/G2 trade-off), then the two original FTWA
+                    // strategies, then the three survey algorithms from
+                    // `doc/planning/table-column-width-algorithm.md` §2.10
+                    // / §2.13 / §2.14. Future strategies should be appended
+                    // here AND in `DeficitStrategy` in
+                    // `src/markdown/table_width/mod.rs` (exhaustive match).
+                    for variant in [
+                        DeficitStrategy::HybridMinPenaltyWaterFill,
+                        DeficitStrategy::ProportionalToSlack,
+                        DeficitStrategy::BreakpointWaterFill,
+                        DeficitStrategy::WaterFillRatio,
+                        DeficitStrategy::LagrangePenalty,
+                    ] {
+                        if ui
+                            .selectable_label(
+                                strategy_label(variant) == strategy_label(current_strategy),
+                                strategy_label(variant),
+                            )
+                            .clicked()
+                            && variant != current_strategy
+                        {
+                            pending = Some(variant);
+                        }
+                    }
+                });
+            if let Some(picked) = pending {
+                apply_table_width_strategy_change(app, picked, crate::config::save_config);
+                on_click(crate::ui::strings::TABLE_WIDTH_STRATEGY_EVENT);
+            }
         });
     });
 }

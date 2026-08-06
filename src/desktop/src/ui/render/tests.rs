@@ -296,6 +296,191 @@ fn test_parse_markdown_table_with_bold_and_special_chars() {
     assert!(found_table, "Expected Table event");
 }
 
+/// Regression test for the "Laptops" table that drives the FTWA pipeline
+/// at production width. This test pins down the *parser's* output for
+/// the exact markdown source so any regression in `parse_markdown_to_events`
+/// surfaces here instead of as a layout failure in the table-width
+/// algorithm. The downstream layout passes this AST to `ftwa`; if the
+/// AST is wrong, every algorithm (FTWA + the three survey ones) fails
+/// on the same root cause, so the bug needs to be caught at the
+/// parser boundary.
+///
+/// Markdown source (the production table that previously broke every
+/// algorithm — all of them point at the pipeline rather than the math):
+///
+/// ```text
+/// | Make | Model and Model Number | Market Price | Display | Processor | PassMark Single / Multi | Summary |
+/// |------|----------------------|-------------|---------|-----------|------------------------|---------|
+/// | Acer | Swift 16 AI (SF16-71T) | $1,249-$1,799 | 16" 3K (2880x1800) 120Hz OLED Touch | Intel Core Ultra 7 256V (8C/8T Lunar Lake) | ~4,031 / ~19,000 | Excellent value. ... |
+/// ```
+///
+/// Expected AST shape: 2 rows (header + 1 data row), 7 cells per row,
+/// each cell is a single plain-text `InlineElem::Text(_, TextStyle::default())`.
+/// The 7th column ("Summary") is a long prose cell; the parser must
+/// not break, split, or wrap it.
+///
+/// Note: the test asserts structural shape (row/cell counts) AND
+/// content. The content assertion is the contract — if the parser
+/// drops a cell, miscounts a column, or splits a cell on a special
+/// character (`"`, `(`, `/`, `~`, `$`), this test fails with a clear
+/// diff. The downstream algorithms can then be debugged separately.
+///
+/// **Known bug at the time of writing**: the parser's interpretation
+/// of GFM strikethrough (`~text~`) interacts with table cells: cells
+/// 5 (`~4,031 / ~19,000`) and 6 (`...lightweight at ~3.3 lbs...`) get
+/// fragmented into multiple `InlineElem::Text` entries at each `~`.
+/// This test fails on those cells today, which is the regression
+/// signal we want. Fix the parser to preserve cell content as a
+/// single text element (either by treating `~` as literal text inside
+/// table cells, or by coalescing strikethrough spans into one element
+/// with the style flag set) and this test goes green.
+#[test]
+fn test_parse_laptops_table_ast_shape() {
+    let md = "| Make | Model and Model Number | Market Price | Display | Processor | PassMark Single / Multi | Summary |\n\
+              |------|----------------------|-------------|---------|-----------|------------------------|---------|\n\
+              | Acer | Swift 16 AI (SF16-71T) | $1,249-$1,799 | 16\" 3K (2880x1800) 120Hz OLED Touch | Intel Core Ultra 7 256V (8C/8T Lunar Lake) | ~4,031 / ~19,000 | Excellent value. Vibrant OLED display, exceptional battery life for a 16\" laptop, lightweight at ~3.3 lbs. Two Thunderbolt 4 ports. Praised by ZDNet, PCMag, and Notebookcheck. Great everyday performance and portability. |";
+    let events = parse_markdown_to_events(md);
+
+    // Find the table. There is exactly one in the source.
+    let mut found_table: Option<Vec<Vec<Vec<InlineElem>>>> = None;
+    for ev in &events {
+        if let RenderEvent::Table(rows) = ev {
+            assert!(
+                found_table.is_none(),
+                "expected exactly one table in the source; got a second with {} rows",
+                rows.len()
+            );
+            found_table = Some(rows.clone());
+        }
+    }
+    let rows = found_table.expect("Expected Table event for the laptops table");
+
+    // Collect every per-cell failure into a single report so a future
+    // bug doesn't get masked by the first panic. The expected bug at
+    // the time of writing is cells 5 and 6 (the `~` characters get
+    // interpreted as strikethrough delimiters by pulldown-cmark and
+    // fragment the cell into multiple `InlineElem::Text` entries).
+    let mut errors: Vec<String> = Vec::new();
+
+    // Shape: 2 rows × 7 cells. The separator row is consumed by the
+    // parser and does not appear in the AST (pulldown-cmark strips it
+    // before the TableCell/TableRow events fire), so we expect header
+    // + 1 data row = 2 rows.
+    if rows.len() != 2 {
+        errors.push(format!(
+            "shape: expected 2 rows (header + 1 data); got {}",
+            rows.len()
+        ));
+    }
+    for (i, row) in rows.iter().enumerate() {
+        if row.len() != 7 {
+            let cell_texts: Vec<String> = row.iter().map(|c| cell_text(c)).collect();
+            errors.push(format!(
+                "shape: row {i} expected 7 cells; got {} (cells: {:?})",
+                row.len(),
+                cell_texts
+            ));
+        }
+    }
+
+    // Header row — each cell is a single plain-text InlineElem.
+    let expected_header = [
+        "Make",
+        "Model and Model Number",
+        "Market Price",
+        "Display",
+        "Processor",
+        "PassMark Single / Multi",
+        "Summary",
+    ];
+    for (j, expected) in expected_header.iter().enumerate() {
+        check_cell(&rows[0][j], expected, "header", j, &mut errors);
+    }
+
+    // Data row — each cell is a single plain-text InlineElem. The
+    // special characters (`"`, `(`, `/`, `~`, `$`) inside individual
+    // cells must NOT split the cell, must NOT be interpreted as
+    // markdown syntax, and must be preserved verbatim.
+    let expected_data = [
+        "Acer",
+        "Swift 16 AI (SF16-71T)",
+        "$1,249-$1,799",
+        "16\" 3K (2880x1800) 120Hz OLED Touch",
+        "Intel Core Ultra 7 256V (8C/8T Lunar Lake)",
+        "~4,031 / ~19,000",
+        "Excellent value. Vibrant OLED display, exceptional battery life for a 16\" laptop, lightweight at ~3.3 lbs. Two Thunderbolt 4 ports. Praised by ZDNet, PCMag, and Notebookcheck. Great everyday performance and portability.",
+    ];
+    for (j, expected) in expected_data.iter().enumerate() {
+        check_cell(&rows[1][j], expected, "data", j, &mut errors);
+    }
+
+    if !errors.is_empty() {
+        panic!(
+            "laptops table AST does not match expected shape/content ({} issue{}):\n  - {}",
+            errors.len(),
+            if errors.len() == 1 { "" } else { "s" },
+            errors.join("\n  - ")
+        );
+    }
+}
+
+/// Assert a single cell's content and shape. Pushes a descriptive
+/// error message into `errors` on mismatch (does not panic) so the
+/// outer test can report all failures together.
+fn check_cell(
+    cell: &[InlineElem],
+    expected_text: &str,
+    row_label: &str,
+    j: usize,
+    errors: &mut Vec<String>,
+) {
+    let actual = cell_text(cell);
+    if actual != expected_text {
+        errors.push(format!(
+            "{row_label} cell {j}: expected text {expected_text:?}, got {actual:?}"
+        ));
+    }
+    if cell.len() != 1 {
+        errors.push(format!(
+            "{row_label} cell {j}: expected 1 InlineElem (single plain-text cell); \
+             got {} elems: {cell:?}",
+            cell.len()
+        ));
+        // Don't return — we still want to assert the type of the
+        // first elem below (which is the most likely "real" value).
+    }
+    if let Some(first) = cell.first() {
+        match first {
+            InlineElem::Text(_, style) => {
+                if style != &TextStyle::default() {
+                    errors.push(format!(
+                        "{row_label} cell {j}: expected default TextStyle on first elem; got {style:?}"
+                    ));
+                }
+            }
+            other => errors.push(format!(
+                "{row_label} cell {j}: first elem should be InlineElem::Text; got {other:?}"
+            )),
+        }
+    }
+}
+
+/// Concatenate the plain-text content of a cell's inlines. Used by
+/// the laptops-table test for readable failure messages.
+fn cell_text(cell: &[InlineElem]) -> String {
+    let mut s = String::new();
+    for e in cell {
+        match e {
+            InlineElem::Text(t, _) => s.push_str(t),
+            InlineElem::Link(_, t) => s.push_str(t),
+            InlineElem::Image(url) => s.push_str(&format!("[Image: {url}]")),
+            InlineElem::Html(h) => s.push_str(h),
+            InlineElem::SoftBreak => s.push(' '),
+        }
+    }
+    s
+}
+
 #[test]
 fn test_parse_markdown_rule_and_blockquote() {
     let md = "---\n\n> Quote text";

@@ -53,6 +53,48 @@ pub const TAG_FILTER_ID_SALT: &str = "tag_combobox";
 /// Default label shown when no tag is selected in the tag filter.
 pub const TAG_FILTER_DEFAULT: &str = "Filter by Tag: All";
 
+/// Label preceding the table-width-strategy dropdown in the top toolbar.
+pub const TABLE_WIDTH_STRATEGY_LABEL: &str = "Table wrap:";
+
+/// ID salt for the table-width-strategy combobox in egui. Kept stable
+/// across releases so the widget's persistent id and any open/closed
+/// state survive a config save round-trip.
+pub const TABLE_WIDTH_STRATEGY_ID_SALT: &str = "table_width_strategy_combobox";
+
+/// Display label for the [`ProportionalToSlack`](crate::ui::table_width::DeficitStrategy::ProportionalToSlack)
+/// deficit strategy in the top-bar dropdown. Fast (O(|S|)) but may
+/// produce suboptimal G1 (total wrapped lines) on very wide tables.
+pub const TABLE_WIDTH_STRATEGY_PROPORTIONAL: &str = "Proportional";
+
+/// Display label for the [`BreakpointWaterFill`](crate::ui::table_width::DeficitStrategy::BreakpointWaterFill)
+/// deficit strategy in the top-bar dropdown. Greedy marginal-cost
+/// water-fill (O(K log |S|)) — minimizes G1 more aggressively.
+pub const TABLE_WIDTH_STRATEGY_WATERFILL: &str = "Water-fill";
+
+/// Display label for the [`WaterFillRatio`](crate::ui::table_width::DeficitStrategy::WaterFillRatio)
+/// survey algorithm (doc §2.10) in the top-bar dropdown. Equalizes the
+/// `max_j / w_j` ratio across columns — the "fair" baseline that
+/// equalizes wrap pressure.
+pub const TABLE_WIDTH_STRATEGY_RATIO: &str = "Ratio-equalize";
+
+/// Display label for the [`LagrangePenalty`](crate::ui::table_width::DeficitStrategy::LagrangePenalty)
+/// survey algorithm (doc §2.13) in the top-bar dropdown. Minimizes
+/// total wrap via a global Lagrange-multiplier bisection on per-column
+/// wrap cost.
+pub const TABLE_WIDTH_STRATEGY_LAGRANGE: &str = "Lagrange-penalty";
+
+/// Display label for the [`HybridMinPenaltyWaterFill`](crate::ui::table_width::DeficitStrategy::HybridMinPenaltyWaterFill)
+/// survey algorithm (doc §2.14) in the top-bar dropdown. Per-column
+/// "first-wrap boundary" target plus residual water-fill — the
+/// production pattern.
+pub const TABLE_WIDTH_STRATEGY_HYBRID: &str = "Hybrid (penalty + fill)";
+
+/// `on_click` event name fired by the top-bar table-width-strategy
+/// dropdown when the user picks a new strategy. Mirrors the
+/// `"batch_button"` / `"tools_button"` event names already used by
+/// the top toolbar so the test harness can capture it the same way.
+pub const TABLE_WIDTH_STRATEGY_EVENT: &str = "table_width_strategy";
+
 /// Format string builder for indexing status when finished.
 pub fn build_indexing_finished_text(file_count: usize) -> String {
     format!("Indexing finished ({} files)", file_count)

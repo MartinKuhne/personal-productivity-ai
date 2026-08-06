@@ -899,12 +899,19 @@ proptest! {
     /// three core invariants:
     ///   (1) Regime contract:
     ///       - fallback (`available < sum_min`): `widths == min_content`
-    ///         and `needs_horizontal_scroll`.
+    ///         and `needs_horizontal_scroll`. (Standard §3.6 fallback.)
+    ///       - fallback (wrap-set-saturation: `sum_min <= available <
+    ///         sum_max` but the deficit can't be absorbed without
+    ///         clamping every wrap-set column to `min_content` and the
+    ///         drift fix is one-sided): `widths == min_content` and
+    ///         `needs_horizontal_scroll`. (Newly possible after the
+    ///         wrap-set-saturation overflow guard landed.)
     ///       - surplus (`available >= sum_max`): `widths == max_content`
     ///         (columns pinned, table may not fill the full width;
-    ///         G3 intentionally relaxed in surplus â€" see `ftwa` doc).
-    ///       - deficit (`sum_min <= available < sum_max`):
-    ///         `sum(widths) == available` (G3 exact).
+    ///         G3 intentionally relaxed in surplus — see `ftwa` doc).
+    ///       - deficit (`sum_min <= available < sum_max`, wrap set
+    ///         absorbs deficit without saturating): `sum(widths) ==
+    ///         available` (G3 exact) and `!needs_horizontal_scroll`.
     ///   (2) `∀j. widths[j] >= min_content[j]` (never break a token).
     ///   (3) `widths.len() == max_content.len()`, no NaN.
     #[test]
@@ -943,15 +950,18 @@ proptest! {
         let sum_min: f32 = min.iter().copied().sum();
         let sum_max: f32 = max.iter().copied().sum();
         if d.needs_horizontal_scroll {
+            // Either standard fallback (`available < sum_min`) or
+            // wrap-set-saturation fallback (deficit branch couldn't
+            // shrink the wrap set enough to fit `available`). Both
+            // branches return `widths == min_content` so the renderer
+            // can wrap each cell at its longest-token floor and the
+            // horizontal `ScrollArea` carries the overflow.
             let widths_snapshot = d.widths.clone();
             let min_snapshot = min.clone();
             prop_assert!(
                 d.widths == min,
-                "fallback must return min_content exactly; got {widths_snapshot:?}, expected {min_snapshot:?}"
-            );
-            prop_assert_eq!(
-                d.needs_horizontal_scroll, available < sum_min,
-                "needs_horizontal_scroll must match (available < sum_min)"
+                "needs_horizontal_scroll must return min_content exactly; \
+                 got {widths_snapshot:?}, expected {min_snapshot:?}"
             );
         } else if available >= sum_max {
             // Surplus: columns pinned at max_content; sum may be < available.
@@ -967,9 +977,12 @@ proptest! {
                 (sum - available).abs() < 1e-3,
                 "deficit: sum widths ({sum}) must equal available ({available})"
             );
-            prop_assert_eq!(
-                d.needs_horizontal_scroll, available < sum_min,
-                "needs_horizontal_scroll must match (available < sum_min)"
+            // Reaching the deficit branch implies the wrap set
+            // absorbed the deficit and the drift fix closed the
+            // residual — so we should *not* be in the fallback path.
+            prop_assert!(
+                available >= sum_min,
+                "deficit branch reached with available < sum_min ({available} < {sum_min})"
             );
         }
 
@@ -1025,4 +1038,190 @@ fn edge_empty_inputs() {
     let d = ftwa_v1(&[], &[], 100.0);
     assert!(!d.needs_horizontal_scroll);
     assert!(d.widths.is_empty());
+}
+
+// -------------------------------------------------------------------
+//  Public-API tests for the survey algorithms (doc §2.10, §2.13, §2.14)
+// -------------------------------------------------------------------
+//
+// These exercise `ftwa` with the three new `DeficitStrategy` variants
+// through the public surface only. The internal-helper tests in
+// `internal_tests.rs` cover the more granular scenarios; this section
+// is the contract test that locks in the public API behavior.
+
+/// Helper: call `ftwa` with the WaterFillRatio strategy and no
+/// breakpoints.
+fn ftwa_ratio_pub(max: &[f32], min: &[f32], avail: f32) -> ColumnWidths {
+    ftwa(
+        max,
+        min,
+        &vec![Vec::new(); max.len()],
+        avail,
+        DeficitStrategy::WaterFillRatio,
+    )
+}
+
+/// Helper: call `ftwa` with the LagrangePenalty strategy and no
+/// breakpoints.
+fn ftwa_lagrange_pub(max: &[f32], min: &[f32], avail: f32) -> ColumnWidths {
+    ftwa(
+        max,
+        min,
+        &vec![Vec::new(); max.len()],
+        avail,
+        DeficitStrategy::LagrangePenalty,
+    )
+}
+
+/// Helper: call `ftwa` with the HybridMinPenaltyWaterFill strategy and
+/// no breakpoints.
+fn ftwa_hybrid_pub(max: &[f32], min: &[f32], avail: f32) -> ColumnWidths {
+    ftwa(
+        max,
+        min,
+        &vec![Vec::new(); max.len()],
+        avail,
+        DeficitStrategy::HybridMinPenaltyWaterFill,
+    )
+}
+
+fn assert_survey_invariants(d: &ColumnWidths, min: &[f32], avail: f32) {
+    assert!(!d.needs_horizontal_scroll, "expected a fitting layout");
+    let sum: f32 = d.widths.iter().sum();
+    assert!(
+        (sum - avail).abs() < 1e-3,
+        "sum of widths must equal available: sum={sum}, avail={avail}"
+    );
+    for (j, &w) in d.widths.iter().enumerate() {
+        assert!(
+            w >= min[j] - 1e-3,
+            "width[{j}] = {w} below min[{j}] = {}",
+            min[j]
+        );
+    }
+}
+
+#[test]
+fn pub_ratio_surplus_pins_at_max() {
+    let max = [20.0, 80.0];
+    let min = [10.0, 40.0];
+    let d = ftwa_ratio_pub(&max, &min, 150.0);
+    assert_eq!(round_vec(&d.widths), vec![20.0, 80.0]);
+}
+
+#[test]
+fn pub_ratio_deficit_equalizes_ratios() {
+    // 2 columns, no breakpoints. Closed form: w_j = max_j * avail / sum_max.
+    // avail=80, max=[100, 50], sum_max=150 → w = [53.33, 26.67].
+    let max = [100.0, 50.0];
+    let min = [10.0, 5.0];
+    let d = ftwa_ratio_pub(&max, &min, 80.0);
+    assert_survey_invariants(&d, &min, 80.0);
+    let r0 = max[0] / d.widths[0];
+    let r1 = max[1] / d.widths[1];
+    assert!(
+        (r0 - r1).abs() < 1e-3,
+        "ratios should equalize: r0={r0}, r1={r1}"
+    );
+}
+
+#[test]
+fn pub_ratio_fallback_below_sum_min() {
+    let max = [100.0, 100.0];
+    let min = [60.0, 60.0];
+    let d = ftwa_ratio_pub(&max, &min, 50.0);
+    assert!(d.needs_horizontal_scroll);
+    assert_eq!(d.widths, vec![60.0, 60.0]);
+}
+
+#[test]
+fn pub_lagrange_surplus_pins_at_max() {
+    let max = [20.0, 80.0];
+    let min = [10.0, 40.0];
+    let d = ftwa_lagrange_pub(&max, &min, 150.0);
+    assert_eq!(round_vec(&d.widths), vec![20.0, 80.0]);
+}
+
+#[test]
+fn pub_lagrange_deficit_respects_min() {
+    let max = [100.0, 100.0];
+    let min = [30.0, 50.0];
+    let d = ftwa_lagrange_pub(&max, &min, 100.0);
+    assert_survey_invariants(&d, &min, 100.0);
+}
+
+#[test]
+fn pub_lagrange_fallback_below_sum_min() {
+    let max = [100.0, 100.0];
+    let min = [60.0, 60.0];
+    let d = ftwa_lagrange_pub(&max, &min, 50.0);
+    assert!(d.needs_horizontal_scroll);
+    assert_eq!(d.widths, vec![60.0, 60.0]);
+}
+
+#[test]
+fn pub_hybrid_surplus_pins_at_max() {
+    let max = [20.0, 80.0];
+    let min = [10.0, 40.0];
+    let d = ftwa_hybrid_pub(&max, &min, 150.0);
+    assert_eq!(round_vec(&d.widths), vec![20.0, 80.0]);
+}
+
+#[test]
+fn pub_hybrid_deficit_respects_min() {
+    let max = [100.0, 100.0];
+    let min = [30.0, 50.0];
+    let d = ftwa_hybrid_pub(&max, &min, 100.0);
+    assert_survey_invariants(&d, &min, 100.0);
+}
+
+#[test]
+fn pub_hybrid_fallback_below_sum_min() {
+    let max = [100.0, 100.0];
+    let min = [60.0, 60.0];
+    let d = ftwa_hybrid_pub(&max, &min, 50.0);
+    assert!(d.needs_horizontal_scroll);
+    assert_eq!(d.widths, vec![60.0, 60.0]);
+}
+
+#[test]
+fn pub_survey_algorithms_round_trip_through_to_config() {
+    // The full set of `DeficitStrategy` variants round-trip through
+    // `to_config` → `from_config` without losing information. This
+    // guards the persistence contract used by the top-bar combobox
+    // (see `apply_table_width_strategy_change`).
+    for strategy in [
+        DeficitStrategy::ProportionalToSlack,
+        DeficitStrategy::BreakpointWaterFill,
+        DeficitStrategy::WaterFillRatio,
+        DeficitStrategy::LagrangePenalty,
+        DeficitStrategy::HybridMinPenaltyWaterFill,
+    ] {
+        assert_eq!(
+            DeficitStrategy::from_config(strategy.to_config()),
+            strategy,
+            "round-trip failed for {strategy:?}"
+        );
+    }
+}
+
+#[test]
+fn pub_survey_algorithms_have_distinct_config_strings() {
+    // Every variant must serialize to a distinct config string so a
+    // persisted value can be unambiguously decoded.
+    let strategies = [
+        DeficitStrategy::ProportionalToSlack,
+        DeficitStrategy::BreakpointWaterFill,
+        DeficitStrategy::WaterFillRatio,
+        DeficitStrategy::LagrangePenalty,
+        DeficitStrategy::HybridMinPenaltyWaterFill,
+    ];
+    let mut strings: Vec<&'static str> = strategies.iter().map(|s| s.to_config()).collect();
+    strings.sort();
+    strings.dedup();
+    assert_eq!(
+        strings.len(),
+        strategies.len(),
+        "to_config() must produce distinct strings for all variants"
+    );
 }

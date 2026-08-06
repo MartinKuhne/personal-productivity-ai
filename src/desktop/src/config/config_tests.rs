@@ -421,11 +421,25 @@ headers:
 }
 
 #[test]
-fn deficit_strategy_default_is_waterfill() {
+fn deficit_strategy_default_is_hybrid() {
+    // `default_table_width_strategy` in `config.rs` returns "hybrid",
+    // and `DeficitStrategy::from_config`'s fallback is the same
+    // variant, so a fresh `AppConfig::default()` resolves to
+    // HybridMinPenaltyWaterFill. Kept in sync; if either side
+    // changes, this test will fail loudly.
     let config = AppConfig::default();
     assert_eq!(
         config.deficit_strategy(),
-        crate::ui::table_width::DeficitStrategy::BreakpointWaterFill
+        crate::ui::table_width::DeficitStrategy::HybridMinPenaltyWaterFill
+    );
+    // Round-trip: to_config and from_config compose back to the same
+    // variant, so a persisted config with the default value
+    // deserialises to the same strategy.
+    let s = crate::ui::table_width::DeficitStrategy::HybridMinPenaltyWaterFill.to_config();
+    assert_eq!(s, "hybrid");
+    assert_eq!(
+        crate::ui::table_width::DeficitStrategy::from_config(s),
+        crate::ui::table_width::DeficitStrategy::HybridMinPenaltyWaterFill
     );
 }
 
@@ -523,4 +537,35 @@ fn deficit_strategy_respects_config_value() {
         config.deficit_strategy(),
         crate::ui::table_width::DeficitStrategy::ProportionalToSlack
     );
+}
+
+#[test]
+fn deficit_strategy_parses_survey_algorithm_strings() {
+    // Each of the three survey algorithms (doc §2.10, §2.13, §2.14)
+    // must parse from its canonical config string. This guards the
+    // round-trip with the top-bar combobox.
+    use crate::ui::table_width::DeficitStrategy;
+    for (raw, expected) in [
+        ("ratio", DeficitStrategy::WaterFillRatio),
+        ("lagrange", DeficitStrategy::LagrangePenalty),
+        ("hybrid", DeficitStrategy::HybridMinPenaltyWaterFill),
+        // Aliases for ergonomics — the combobox writes the canonical
+        // form, but a user editing the YAML may use any of these.
+        ("waterfill-ratio", DeficitStrategy::WaterFillRatio),
+        ("lagrange-penalty", DeficitStrategy::LagrangePenalty),
+        (
+            "hybrid-min-penalty",
+            DeficitStrategy::HybridMinPenaltyWaterFill,
+        ),
+    ] {
+        let config = AppConfig {
+            table_width_strategy: raw.to_string(),
+            ..AppConfig::default()
+        };
+        assert_eq!(
+            config.deficit_strategy(),
+            expected,
+            "config string {raw:?} must parse to {expected:?}"
+        );
+    }
 }

@@ -1,4 +1,62 @@
 //! Pure Markdown and YAML parsing logic isolated from egui rendering.
+//!
+//! # Implementation note: pulldown-cmark inline-parser fragmentation
+//!
+//! Pulldown-cmark's inline parser builds a *tree of items*, not a
+//! stream of inline text. Every delimiter run (`*`, `_`, `~`, `=`, `^`)
+//! becomes a separate `ItemBody::Text` item in the internal tree
+//! even when the delimiter fails to form a valid emphasis /
+//! strikethrough / superscript / subscript pair. When the tree is
+//! flattened to events, each `ItemBody::Text` becomes a separate
+//! `Event::Text` (see pulldown-cmark `parse.rs::item_to_event`,
+//! which returns `Event::Text(text[item.start..item.end])` per
+//! `Text` item).
+//!
+//! The practical consequence for this codebase: a plain-text
+//! fragment that *happens* to contain a delimiter run is split
+//! into multiple `Event::Text` events at every delimiter. Examples:
+//!
+//!   - `~4,031 / ~19,000` with `ENABLE_STRIKETHROUGH` → 4 events
+//!     (`~`, `4,031 / `, `~`, `19,000`). No `Strikethrough`
+//!     Start/End pair fires — the single-`~` form isn't a valid
+//!     GFM strikethrough — but cmark still fragments the text.
+//!     (See cmark 0.13.4 `parse.rs:1063-1106`.)
+//!   - `*bold*` with emphasis disabled → 3 events (`*`, `bold`, `*`).
+//!   - `_em_` with emphasis disabled → 3 events.
+//!   - `^super^` / `=highlight=` with those options disabled → 3 events each.
+//!
+//! Faithfully mapping each cmark `Event::Text` to its own
+//! `InlineElem::Text` would produce ASTs that don't match the
+//! table-renderer's contract: a cell containing `~text~` would
+//! fragment into 3 elements, the text-measurer would tokenize it
+//! as 3 runs, and the FTWA pipeline would produce wrong widths
+//! (the production bug fixed by the coalescer).
+//!
+//! The fix lives in the two helpers `push_text_coalesce` and
+//! `push_link_coalesce` (defined below) — helpers that fold
+//! consecutive same-style `Text` events (or same-URL `Link` events)
+//! into a single `InlineElem` at the push site. See those functions'
+//! doc comments for the exact rules. The test
+//! `cmark_strikethrough_fragments_single_tilde` in this module pins
+//! the cmark event count so a future upgrade / option change that
+//! shifts the count surfaces immediately.
+//!
+//! This is a workaround, not a fix at the source. The cleaner
+//! long-term options (none of which we've done) are:
+//!   1. Upgrade to a pulldown-cmark version that emits a single
+//!      `Text` event for un-delimited fragments (if / when such a
+//!      version exists). At the time of writing (0.13.4), none
+//!      does.
+//!   2. Switch markdown parsers (e.g. comrak). Heavy change,
+//!      unjustified for this single quirk.
+//!   3. Disable `ENABLE_STRIKETHROUGH` and accept the loss of
+//!      GFM strikethrough. The right answer *only* if strikethrough
+//!      isn't actually used in any user-facing document.
+//!
+//! Until any of those land, the coalescer is the right balance:
+//! keeps the parser's surface tiny (two ~10-line helpers), keeps
+//! GFM strikethrough working, and locks the upstream-fragmentation
+//! count in a regression test.
 
 use crate::markdown::model::{InlineElem, RenderEvent, TextStyle};
 
@@ -11,6 +69,97 @@ pub fn render_markdown_to_html(markdown: &str) -> String {
     html_output
 }
 
+/// Append a plain-text run to `buffer`, coalescing with the previous
+/// `InlineElem::Text` when the style matches.
+///
+/// # Why this exists
+///
+/// Pulldown-cmark's inline parser fragments plain text at every
+/// delimiter run (`*`, `_`, `~`, `=`, `^`), even when the
+/// delimiter fails to form a valid emphasis / strikethrough /
+/// superscript / subscript pair. See the module-level doc comment
+/// for the full explanation and the upstream behavior we work
+/// around. The short version: without this helper, plain content
+/// like `~4,031 / ~19,000` becomes four `InlineElem::Text`
+/// entries instead of one, the cell text-measurer tokenizes it
+/// as four runs, and the FTWA pipeline produces wrong column
+/// widths.
+///
+/// # Coalesce rules
+///
+/// - **Same `TextStyle`**: append to the previous `Text` element
+///   (its string is mutated in place; no new allocation).
+/// - **Different `TextStyle`**: push a new `Text` element. Bold /
+///   italic / code / strikethrough transitions are preserved as
+///   separate elements so the renderer can apply distinct styling
+///   to each run.
+/// - **Previous element is not `Text`** (e.g. `Link`, `Image`,
+///   `Code`, `Html`, `SoftBreak`): push a new `Text` element.
+///   The `Text` → non-`Text` → `Text` boundary always produces
+///   two elements; only consecutive `Text` elements of the same
+///   style coalesce.
+///
+/// # Where to call this
+///
+/// Anywhere a cmark `Event::Text` (or `Event::Code` with the same
+/// style) is pushed to `buffered_inline` or `heading_elems`. The
+/// parser's main `Event::Text` handler routes through this helper
+/// for both the main inline path and the heading path.
+///
+/// # Testing
+///
+/// Unit tests for the four coalesce branches live in
+/// `push_text_coalesce_*` and `push_link_coalesce_*` in this
+/// module's test submodule. The end-to-end regression
+/// (`parses_laptops_table_cells_to_single_text_element`) verifies
+/// the production case.
+fn push_text_coalesce(buffer: &mut Vec<InlineElem>, text: &str, style: &TextStyle) {
+    if let Some(InlineElem::Text(existing, existing_style)) = buffer.last_mut()
+        && existing_style == style
+    {
+        existing.push_str(text);
+        return;
+    }
+    buffer.push(InlineElem::Text(text.to_string(), style.clone()));
+}
+
+/// Like [`push_text_coalesce`] but for `Link` elements.
+///
+/// # Why this exists
+///
+/// Inside a `[display text](url)` link, cmark emits one `Event::Text`
+/// per delimiter run in the display text (same fragmentation as
+/// for plain text). Without coalescing, multiple `Text` events
+/// inside a single link become multiple `Link(url, ...)` elements
+/// with the same URL but disjoint text fragments — a link to
+/// `https://x.com` containing `a *b* c` (with emphasis on) would
+/// come out as `Link("https://x.com", "a ")`, `Text("b", bold)`,
+/// `Link("https://x.com", " c")` instead of a single
+/// `Link("https://x.com", "a b c")` with a nested `Text("b", bold)`.
+/// (The latter is what the link-renderer expects: a single
+/// `InlineElem::Link` whose text is the flat concatenation of the
+/// display content, with nested styles as separate `Text` elements
+/// inside that link — but our `InlineElem::Link` carries a single
+/// `String` for the text, so the inner style nuance is lost
+/// either way; the practical concern is just the URL/text split.)
+///
+/// # Coalesce rules
+///
+/// Same as [`push_text_coalesce`] but keying on the URL instead of
+/// the style: consecutive `Text` events with the same link URL
+/// fold into a single `Link(url, concatenated_text)` element. A
+/// URL change starts a new element; a different `InlineElem`
+/// variant on the buffer also starts a new element.
+fn push_link_coalesce(buffer: &mut Vec<InlineElem>, url: &str, text: &str) {
+    if let Some(InlineElem::Link(existing_url, existing_text)) = buffer.last_mut()
+        && existing_url == url
+    {
+        existing_text.push_str(text);
+        return;
+    }
+    buffer.push(InlineElem::Link(url.to_string(), text.to_string()));
+}
+
 /// Parses markdown text into a sequence of render events.
 pub fn parse_markdown_to_events(markdown_text: &str) -> Vec<RenderEvent> {
     #[cfg(feature = "profiling")]
@@ -21,6 +170,13 @@ pub fn parse_markdown_to_events(markdown_text: &str) -> Vec<RenderEvent> {
     let mut options = Options::empty();
     options.insert(Options::ENABLE_TABLES);
     options.insert(Options::ENABLE_FOOTNOTES);
+    // ENABLE_STRIKETHROUGH enables GFM `~~text~~` (double tilde)
+    // and `~text~` (single tilde) strikethrough. Required for
+    // strikethrough support in user documents. Trade-off (managed
+    // by the `push_text_coalesce` helper above): with this option
+    // on, cmark also fragments plain text at every `~` delimiter
+    // run — see the module-level doc comment for the full
+    // explanation and the regression test for the fix.
     options.insert(Options::ENABLE_STRIKETHROUGH);
     options.insert(Options::ENABLE_TASKLISTS);
 
@@ -290,19 +446,28 @@ pub fn parse_markdown_to_events(markdown_text: &str) -> Vec<RenderEvent> {
             Event::End(TagEnd::Strong) => current_style.bold = false,
             Event::Start(Tag::Strikethrough) => current_style.strikethrough = true,
             Event::End(TagEnd::Strikethrough) => current_style.strikethrough = false,
+            // Text events must route through the coalescer helpers
+            // (not a direct `push` to the buffer). See the
+            // module-level doc comment and the `push_text_coalesce` /
+            // `push_link_coalesce` doc comments for why. The short
+            // version: cmark fragments plain text at every delimiter
+            // run (see cmark 0.13.4 `parse.rs:1063-1106`), and a
+            // direct push would propagate the fragmentation to the
+            // AST the table-renderer consumes, producing wrong
+            // column widths.
             Event::Text(text) => {
                 if in_code_block {
                     code_block_content.push_str(&text);
                 } else if in_link {
                     if in_heading {
-                        heading_elems.push(InlineElem::Link(link_url.clone(), text.to_string()));
+                        push_link_coalesce(&mut heading_elems, &link_url, &text);
                     } else {
-                        buffered_inline.push(InlineElem::Link(link_url.clone(), text.to_string()));
+                        push_link_coalesce(&mut buffered_inline, &link_url, &text);
                     }
                 } else if in_heading {
-                    heading_elems.push(InlineElem::Text(text.to_string(), current_style.clone()));
+                    push_text_coalesce(&mut heading_elems, &text, &current_style);
                 } else {
-                    buffered_inline.push(InlineElem::Text(text.to_string(), current_style.clone()));
+                    push_text_coalesce(&mut buffered_inline, &text, &current_style);
                 }
             }
             Event::Code(code) => {
@@ -470,6 +635,23 @@ pub fn parse_yaml_to_pairs(yaml: &serde_norway::Value) -> Option<Vec<(String, St
 mod tests {
     use super::*;
 
+    /// Local helper for tests: concatenate the plain-text content of
+    /// a cell's inlines. Mirrors `ui::render::tests::cell_text` but
+    /// kept local so the parser tests don't depend on UI internals.
+    fn cell_text(cell: &[InlineElem]) -> String {
+        let mut s = String::new();
+        for e in cell {
+            match e {
+                InlineElem::Text(t, _) => s.push_str(t),
+                InlineElem::Link(_, t) => s.push_str(t),
+                InlineElem::Image(url) => s.push_str(&format!("[Image: {url}]")),
+                InlineElem::Html(h) => s.push_str(h),
+                InlineElem::SoftBreak => s.push(' '),
+            }
+        }
+        s
+    }
+
     #[test]
     fn test_render_markdown_to_html() {
         let md = "# Title\n\nHello *world*";
@@ -484,5 +666,393 @@ mod tests {
         let pairs = parse_yaml_to_pairs(&yaml).unwrap();
         assert_eq!(pairs[0], ("key".to_string(), ("val").to_string()));
         assert_eq!(pairs[1], ("list".to_string(), ("a, b").to_string()));
+    }
+
+    /// **Pulldown-cmark 0.13.4 inline-parser design property** (not a
+    /// bug per se, but a behavior the consumer has to handle):
+    /// with `Options::ENABLE_STRIKETHROUGH` enabled, cmark emits
+    /// one `Text` event per delimiter run — so the input
+    /// `~4,031 / ~19,000` becomes 4 separate `Text` events
+    /// (one for each `~`, one for the text between) even though
+    /// no actual `Strikethrough` Start/End pair fires. This is
+    /// the inline parser's "tree of items" model: every delimiter
+    /// run gets its own item, whether or not it forms a valid
+    /// pair. See the module-level doc comment for the full
+    /// design discussion and the long-term options.
+    ///
+    /// Our parser works around it by coalescing consecutive
+    /// `Text` events with the same `TextStyle` (see
+    /// `push_text_coalesce` in this module), so the AST emitted
+    /// to the rest of the renderer is a single `InlineElem::Text`
+    /// per coalesced run. This test pins the cmark behavior so
+    /// future upgrades to pulldown-cmark (or changes to the
+    /// option set) that change the fragment count don't silently
+    /// regress the coalescing.
+    ///
+    /// **If this test fails**, the most likely cause is a
+    /// pulldown-cmark upgrade. The fix is one of:
+    ///   1. Re-tune `push_text_coalesce` to match the new fragment
+    ///      count (and add a test for the new case).
+    ///   2. Drop `ENABLE_STRIKETHROUGH` from the options set if
+    ///      GFM strikethrough isn't needed (see module doc).
+    ///   3. Switch to a different markdown parser.
+    ///
+    /// **What this test does NOT do:** assert that the coalesced
+    /// AST is correct. That's the responsibility of
+    /// `parses_laptops_table_cells_to_single_text_element` and
+    /// the integration test `test_parse_laptops_table_ast_shape`.
+    /// This test is purely the upstream-behavior pin.
+    #[test]
+    fn cmark_strikethrough_fragments_single_tilde() {
+        use pulldown_cmark::{Event, Options, Parser, Tag, TagEnd};
+
+        let mut options = Options::empty();
+        options.insert(Options::ENABLE_TABLES);
+        options.insert(Options::ENABLE_FOOTNOTES);
+        options.insert(Options::ENABLE_STRIKETHROUGH);
+        options.insert(Options::ENABLE_TASKLISTS);
+
+        let md = "~4,031 / ~19,000";
+        let events: Vec<Event> = Parser::new_ext(md, options).collect();
+
+        // Cmark emits 6 events for this input:
+        //   Start(Paragraph), Text("~"), Text("4,031 / "),
+        //   Text("~"), Text("19,000"), End(Paragraph).
+        // The 4 Text events are the per-delimiter-run fragments
+        // our coalescer folds back together. If a future cmark
+        // version changes the count (e.g. by skipping the bare `~`
+        // runs entirely), this test will fail and the coalescer
+        // can be re-tuned.
+        assert_eq!(
+            events.len(),
+            6,
+            "expected 6 cmark events (Paragraph+4 Text+End) for {md:?}; got {} events: {:?}",
+            events.len(),
+            events
+        );
+        assert!(
+            matches!(events[0], Event::Start(Tag::Paragraph)),
+            "expected Paragraph Start at index 0; got {:?}",
+            events[0]
+        );
+        for (i, expected_text) in ["~", "4,031 / ", "~", "19,000"].iter().enumerate() {
+            let actual = match &events[i + 1] {
+                Event::Text(s) => s.as_ref(),
+                other => panic!(
+                    "event at index {idx} (cell {i}) should be Text({expected_text:?}); got {other:?}",
+                    idx = i + 1
+                ),
+            };
+            assert_eq!(
+                actual,
+                *expected_text,
+                "Text event at cell {i} (events[{idx}]) should be {expected_text:?}; got {actual:?}",
+                idx = i + 1
+            );
+        }
+        assert!(
+            matches!(events[5], Event::End(TagEnd::Paragraph)),
+            "expected Paragraph End at index 5; got {:?}",
+            events[5]
+        );
+    }
+
+    /// Unit tests for [`push_text_coalesce`] and [`push_link_coalesce`].
+    /// These helpers fold consecutive same-style `Text` / same-URL
+    /// `Link` fragments into a single `InlineElem` to undo
+    /// pulldown-cmark's per-delimiter-run `Text` splitting.
+    /// See the module-level `cmark_strikethrough_fragments_single_tilde`
+    /// test for the upstream behavior they defend against.
+    #[test]
+    fn push_text_coalesce_appends_to_previous_same_style() {
+        let mut buf: Vec<InlineElem> = Vec::new();
+        let s = TextStyle::default();
+        push_text_coalesce(&mut buf, "hello ", &s);
+        push_text_coalesce(&mut buf, "world", &s);
+        assert_eq!(buf.len(), 1, "two same-style pushes should coalesce to one");
+        assert_eq!(cell_text(&buf), "hello world");
+    }
+
+    #[test]
+    fn push_text_coalesce_starts_new_element_on_style_change() {
+        let mut buf: Vec<InlineElem> = Vec::new();
+        let s_bold = TextStyle {
+            bold: true,
+            ..TextStyle::default()
+        };
+        push_text_coalesce(&mut buf, "plain", &TextStyle::default());
+        push_text_coalesce(&mut buf, "bold", &s_bold);
+        assert_eq!(buf.len(), 2, "style change must start a new element");
+        assert_eq!(cell_text(&buf), "plainbold");
+        assert!(
+            matches!(&buf[0], InlineElem::Text(t, s) if t == "plain" && s == &TextStyle::default())
+        );
+        assert!(matches!(&buf[1], InlineElem::Text(t, s) if t == "bold" && s == &s_bold));
+    }
+
+    #[test]
+    fn push_text_coalesce_handles_empty_buffer() {
+        let mut buf: Vec<InlineElem> = Vec::new();
+        push_text_coalesce(&mut buf, "first", &TextStyle::default());
+        assert_eq!(buf.len(), 1);
+        assert_eq!(cell_text(&buf), "first");
+    }
+
+    #[test]
+    fn push_text_coalesce_starts_new_element_after_non_text() {
+        let mut buf: Vec<InlineElem> = Vec::new();
+        // Seed with a non-Text variant (Image). Coalesce must
+        // NOT merge into it even if the style happens to match.
+        buf.push(InlineElem::Image("pic.png".to_string()));
+        push_text_coalesce(&mut buf, "after image", &TextStyle::default());
+        assert_eq!(
+            buf.len(),
+            2,
+            "non-Text variant must not coalesce with a Text push"
+        );
+        assert!(matches!(&buf[0], InlineElem::Image(url) if url == "pic.png"));
+        assert!(matches!(&buf[1], InlineElem::Text(t, _) if t == "after image"));
+    }
+
+    #[test]
+    fn push_link_coalesce_appends_to_previous_same_url() {
+        let mut buf: Vec<InlineElem> = Vec::new();
+        push_link_coalesce(&mut buf, "https://example.com", "hello ");
+        push_link_coalesce(&mut buf, "https://example.com", "world");
+        assert_eq!(buf.len(), 1, "two same-URL link pushes should coalesce");
+        assert!(matches!(
+            &buf[0],
+            InlineElem::Link(url, text) if url == "https://example.com" && text == "hello world"
+        ));
+    }
+
+    #[test]
+    fn push_link_coalesce_starts_new_element_on_url_change() {
+        let mut buf: Vec<InlineElem> = Vec::new();
+        push_link_coalesce(&mut buf, "https://a.example", "x");
+        push_link_coalesce(&mut buf, "https://b.example", "y");
+        assert_eq!(buf.len(), 2, "URL change must start a new element");
+    }
+
+    /// The user-visible regression: the laptops table from the
+    /// `test_parse_laptops_table_ast_shape` integration test is
+    /// fixed end-to-end by the coalescer. This unit test pins the
+    /// same fix at the parser level so the behavior is locked in
+    /// even if the integration test moves or is deleted.
+    #[test]
+    fn parses_laptops_table_cells_to_single_text_element() {
+        let md = "| Make | Model and Model Number | Market Price | Display | Processor | PassMark Single / Multi | Summary |\n\
+                  |------|----------------------|-------------|---------|-----------|------------------------|---------|\n\
+                  | Acer | Swift 16 AI (SF16-71T) | $1,249-$1,799 | 16\" 3K (2880x1800) 120Hz OLED Touch | Intel Core Ultra 7 256V (8C/8T Lunar Lake) | ~4,031 / ~19,000 | Excellent value. Vibrant OLED display, exceptional battery life for a 16\" laptop, lightweight at ~3.3 lbs. Two Thunderbolt 4 ports. Praised by ZDNet, PCMag, and Notebookcheck. Great everyday performance and portability. |";
+        let events = parse_markdown_to_events(md);
+        let table = events
+            .iter()
+            .find_map(|e| {
+                if let RenderEvent::Table(rows) = e {
+                    Some(rows)
+                } else {
+                    None
+                }
+            })
+            .expect("expected a Table event");
+        assert_eq!(table.len(), 2, "header + 1 data row");
+        // Cell 5 is the PassMark cell with `~4,031 / ~19,000` —
+        // the case that used to fragment into 4 InlineElems.
+        let cell5 = &table[1][5];
+        assert_eq!(
+            cell5.len(),
+            1,
+            "PassMark cell must coalesce to 1 element, got {cell5:?}"
+        );
+        assert!(matches!(
+            &cell5[0],
+            InlineElem::Text(t, s) if t == "~4,031 / ~19,000" && s == &TextStyle::default()
+        ));
+        // Cell 6 is the Summary cell with `~3.3 lbs` mid-sentence.
+        let cell6 = &table[1][6];
+        assert_eq!(
+            cell6.len(),
+            1,
+            "Summary cell must coalesce to 1 element, got {cell6:?}"
+        );
+        assert!(matches!(
+            &cell6[0],
+            InlineElem::Text(t, s) if t.contains("~3.3 lbs") && s == &TextStyle::default()
+        ));
+    }
+
+    /// The routers-spec table that surfaces the same pulldown-cmark
+    /// fragmentation class as the laptops table, plus bold model
+    /// names and a `~~strikethrough~~ **bold**` mid-cell. Per the
+    /// module-level doc comment, every delimiter run (`*`, `_`,
+    /// `~`, `=`, `^`) becomes its own `ItemBody::Text` even when
+    /// the delimiter fails to form a valid emphasis /
+    /// strikethrough / etc. pair — so:
+    ///
+    /// * `**TP-Link Archer BE550**` would fragment into 3 events
+    ///   (`**`, `TP-Link Archer BE550`, `**`) without the
+    ///   coalescer.
+    /// * `~~$180–$210~~ **$125**` would fragment the `~~` runs
+    ///   plus the `**` runs.
+    /// * `~$180` (single tilde, invalid GFM strikethrough) would
+    ///   fragment into `~` + `$180`.
+    ///
+    /// This test pins the parser's output for all three. The
+    /// companion integration test
+    /// `test_parse_routers_table_ast_shape` in
+    /// `src/ui/render/tests.rs` walks the same fixture at the
+    /// caller-facing level.
+    #[test]
+    fn parses_routers_table_cells_with_mixed_styling() {
+        let md = "| Model | Price | Bands | 6 GHz | 2.5G Ports | 10G Port | Key Strength |\n\
+                  |-------|-------|-------|-------|------------|----------|--------------|\n\
+                  | **TP-Link Archer BE550** | $170–$200 | Tri | ✅ | 5x | ❌ | Best overall value |\n\
+                  | **ASUS RT-BE92U** | $190–$200 | Tri | ✅ | 4x | ✅ (1) | 10G + Merlin |\n\
+                  | **TP-Link Archer BE230** | $80–$100 | Dual | ❌ | 1x | ❌ | Budget entry |\n\
+                  | **GL.iNet Flint 3** | ~~$180–$210~~ **$125** | Tri | ✅ | 5x | ❌ | OpenWrt + VPN |\n\
+                  | **ASUS RT-BE59** | ~$180 | Dual | ❌ | 1x | ❌ | ASUS budget |";
+        let events = parse_markdown_to_events(md);
+        let table = events
+            .iter()
+            .find_map(|e| {
+                if let RenderEvent::Table(rows) = e {
+                    Some(rows)
+                } else {
+                    None
+                }
+            })
+            .expect("expected a Table event");
+        assert_eq!(table.len(), 6, "1 header + 5 data rows");
+        assert_eq!(table[0].len(), 7, "7 columns per row");
+        for (r, row) in table.iter().enumerate() {
+            assert_eq!(row.len(), 7, "row {r} must have 7 cells");
+        }
+
+        // Header cells are plain text.
+        let plain = TextStyle::default();
+        for (j, expected) in [
+            "Model",
+            "Price",
+            "Bands",
+            "6 GHz",
+            "2.5G Ports",
+            "10G Port",
+            "Key Strength",
+        ]
+        .iter()
+        .enumerate()
+        {
+            let cell = &table[0][j];
+            assert_eq!(
+                cell.len(),
+                1,
+                "header cell {j} must be 1 element, got {cell:?}"
+            );
+            assert!(matches!(
+                &cell[0],
+                InlineElem::Text(t, s) if t == *expected && s == &plain
+            ));
+        }
+
+        // Row 1: bold model, plain price, plain tri/✅/5x/❌/text.
+        // `**TP-Link Archer BE550**` must coalesce to a single bold
+        // Text element (the `*` runs collapse).
+        let bold = TextStyle {
+            bold: true,
+            ..TextStyle::default()
+        };
+        let cell00 = &table[1][0];
+        assert_eq!(
+            cell00.len(),
+            1,
+            "Model cell (bold) must coalesce to 1 element, got {cell00:?}"
+        );
+        assert!(matches!(
+            &cell00[0],
+            InlineElem::Text(t, s) if t == "TP-Link Archer BE550" && s == &bold
+        ));
+        // Price cell: plain text (no delimiters).
+        let cell01 = &table[1][1];
+        assert_eq!(
+            cell01.len(),
+            1,
+            "Price cell must be 1 element, got {cell01:?}"
+        );
+        assert!(matches!(
+            &cell01[0],
+            InlineElem::Text(t, s) if t == "$170–$200" && s == &plain
+        ));
+        // Emoji cells (✅, ❌) must be single text elements, not
+        // split on the Unicode code point boundary.
+        for j in [3, 5] {
+            let cell = &table[1][j];
+            assert_eq!(
+                cell.len(),
+                1,
+                "row 1 col {j} emoji cell must be 1 element, got {cell:?}"
+            );
+            assert!(matches!(&cell[0], InlineElem::Text(_, s) if s == &plain));
+        }
+        // Key Strength: `10G + Merlin` is a `+` in plain text, must
+        // not be parsed as anything other than text.
+        let cell16 = &table[1][6];
+        assert_eq!(
+            cell16.len(),
+            1,
+            "Key Strength cell must be 1 element, got {cell16:?}"
+        );
+        assert!(matches!(
+            &cell16[0],
+            InlineElem::Text(t, s) if t == "Best overall value" && s == &plain
+        ));
+
+        // Row 4 (GL.iNet Flint 3): the `~~$180–$210~~ **$125**`
+        // cell. This must produce THREE Text elements: one
+        // strikethrough (the `~~…~~` span), the literal space
+        // between the spans, and one bold (the `**…**` span).
+        // The coalescer must not split the strikethrough into 3
+        // events (`~~`, `$180–$210`, `~~`) or the bold into 3
+        // (`**`, `$125`, `**`); different `TextStyle`s must
+        // remain as separate elements (so the renderer can apply
+        // distinct styling) but each style's own delimiters must
+        // be absorbed.
+        let strikethrough = TextStyle {
+            strikethrough: true,
+            ..TextStyle::default()
+        };
+        let cell41 = &table[4][1];
+        assert_eq!(
+            cell41.len(),
+            3,
+            "GL.iNet Price cell must be 3 elements (strikethrough + space + bold), got {cell41:?}"
+        );
+        assert!(matches!(
+            &cell41[0],
+            InlineElem::Text(t, s) if t == "$180–$210" && s == &strikethrough
+        ));
+        assert!(matches!(
+            &cell41[1],
+            InlineElem::Text(t, s) if t == " " && s == &plain
+        ));
+        assert!(matches!(
+            &cell41[2],
+            InlineElem::Text(t, s) if t == "$125" && s == &bold
+        ));
+
+        // Row 5 (ASUS RT-BE59): the `~$180` cell. Single tilde is
+        // not a valid GFM strikethrough, so cmark should not emit
+        // a Strikethrough Start/End pair — but it does still
+        // fragment into `~` + `$180` events. The coalescer must
+        // fold them back into a single plain Text element.
+        let cell51 = &table[5][1];
+        assert_eq!(
+            cell51.len(),
+            1,
+            "ASUS RT-BE59 Price cell (single ~) must coalesce to 1 element, got {cell51:?}"
+        );
+        assert!(matches!(
+            &cell51[0],
+            InlineElem::Text(t, s) if t == "~$180" && s == &plain
+        ));
     }
 }
