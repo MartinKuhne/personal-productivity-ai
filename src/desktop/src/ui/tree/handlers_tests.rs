@@ -477,14 +477,15 @@ fn test_apply_file_row_click_bare_filename_sets_empty_parent() {
 /// **The contract pinned by this test.** After
 /// `apply_directory_row_click`:
 ///   * `selected_file` is unchanged.
-///   * `selected_files` is unchanged.
+///   * `selected_file` is cleared.
+///   * `selected_files` is cleared.
 ///   * `tabs` is unchanged.
 ///   * `expanded_dirs` is toggled for `row.path`.
 ///   * `selected_dir` is set to `Some(row.path.clone())`
 ///     (the "current directory context" used by the
 ///     bottom-panel prompt prefix and the agent session).
 #[test]
-fn test_apply_directory_row_click_preserves_selected_file() {
+fn test_apply_directory_row_click_clears_selected_file() {
     let mut tabs: Vec<PathBuf> = vec![PathBuf::from("doc.md")];
     let mut selected_file: Option<PathBuf> = Some(PathBuf::from("doc.md"));
     let mut selected_files: HashSet<PathBuf> = HashSet::new();
@@ -531,16 +532,14 @@ fn test_apply_directory_row_click_preserves_selected_file() {
 
     apply_directory_row_click(&mut ctx, &row);
 
-    // The contract: file selection and tabs are preserved.
-    assert_eq!(
-        selected_file,
-        Some(PathBuf::from("doc.md")),
-        "directory row click must NOT clear selected_file; clearing it \
-             hides the center panel body and the right (TOC) panel"
+    // The contract: file selection is cleared when navigating directories.
+    assert!(
+        selected_file.is_none(),
+        "directory row click must clear selected_file"
     );
     assert!(
-        selected_files.contains(&PathBuf::from("doc.md")),
-        "directory row click must NOT clear selected_files"
+        selected_files.is_empty(),
+        "directory row click must clear selected_files"
     );
     assert_eq!(
         tabs,
@@ -561,10 +560,10 @@ fn test_apply_directory_row_click_preserves_selected_file() {
 }
 
 /// TDD regression (companion to
-/// `test_apply_directory_row_click_preserves_selected_file`):
+/// `test_apply_directory_row_click_clears_selected_file`):
 /// the second click on an already-expanded directory must
-/// collapse it. The same invariant holds — the open file
-/// selection and the open tabs are NOT touched.
+/// collapse it. The same invariant holds — the file
+/// selection is cleared.
 ///
 /// This is a separate test rather than a follow-up call in
 /// the previous test, because the borrow checker treats two
@@ -572,7 +571,7 @@ fn test_apply_directory_row_click_preserves_selected_file() {
 /// `ctx`'s inner fields; splitting the test lets each
 /// assertion set live independently of the next call.
 #[test]
-fn test_apply_directory_row_click_collapses_expanded_folder_preserves_selection() {
+fn test_apply_directory_row_click_collapses_expanded_folder_clears_selection() {
     let mut tabs: Vec<PathBuf> = vec![PathBuf::from("doc.md")];
     let mut selected_file: Option<PathBuf> = Some(PathBuf::from("doc.md"));
     let mut selected_files: HashSet<PathBuf> = HashSet::new();
@@ -623,16 +622,14 @@ fn test_apply_directory_row_click_collapses_expanded_folder_preserves_selection(
         !expanded_dirs.contains(&dir_path),
         "clicking an already-expanded directory must collapse it"
     );
-    // Same invariant as the expand test: file selection and
-    // tabs are untouched.
-    assert_eq!(
-        selected_file,
-        Some(PathBuf::from("doc.md")),
-        "collapsing a directory must NOT clear selected_file"
+    // File selection is cleared when navigating directories.
+    assert!(
+        selected_file.is_none(),
+        "collapsing a directory must clear selected_file"
     );
     assert!(
-        selected_files.contains(&PathBuf::from("doc.md")),
-        "collapsing a directory must NOT clear selected_files"
+        selected_files.is_empty(),
+        "collapsing a directory must clear selected_files"
     );
     assert_eq!(
         tabs,

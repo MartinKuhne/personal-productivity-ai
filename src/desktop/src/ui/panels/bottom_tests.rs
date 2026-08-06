@@ -462,6 +462,63 @@ fn test_parse_command_intent() {
     );
 }
 
+/// Tests for `compute_file_context` function.
+#[test]
+fn test_compute_file_context_none_when_no_file() {
+    let result = compute_file_context(None, "dir >");
+    assert!(result.is_none());
+}
+
+#[test]
+fn test_compute_file_context_none_when_empty_file_name() {
+    let path = std::path::Path::new("/");
+    let result = compute_file_context(Some(path), "dir >");
+    assert!(result.is_none());
+}
+
+#[test]
+fn test_compute_file_context_returns_file_name_and_base_size() {
+    // File name shorter than dir -> no shrink
+    let path = std::path::Path::new("/home/user/file.md");
+    let result = compute_file_context(Some(path), "very_long_directory_name >");
+    assert!(result.is_some());
+    let (name, size) = result.unwrap();
+    assert_eq!(name, "file.md");
+    assert_eq!(size, 12.0); // base size when file is shorter than dir
+}
+
+#[test]
+fn test_compute_file_context_shrinks_when_file_longer_than_dir() {
+    let path = std::path::Path::new("/home/user/very_long_file_name_that_exceeds_dir.md");
+    let result = compute_file_context(Some(path), "short >");
+    assert!(result.is_some());
+    let (name, size) = result.unwrap();
+    assert_eq!(name, "very_long_file_name_that_exceeds_dir.md");
+    assert!(size < 12.0);
+    assert!(size >= 8.0); // minimum size
+}
+
+#[test]
+fn test_compute_file_context_minimum_size_clamped() {
+    // File name much longer than dir (1 char after trim)
+    let path = std::path::Path::new(
+        "/home/user/extremely_long_file_name_that_is_much_longer_than_directory.md",
+    );
+    let result = compute_file_context(Some(path), "x >"); // dir_display is "x" (1 char)
+    assert!(result.is_some());
+    let (_, size) = result.unwrap();
+    assert_eq!(size, 8.0); // clamped to minimum
+}
+
+#[test]
+fn test_compute_file_context_no_shrink_when_dir_empty() {
+    let path = std::path::Path::new("/home/user/file.md");
+    let result = compute_file_context(Some(path), ">");
+    assert!(result.is_some());
+    let (_, size) = result.unwrap();
+    assert_eq!(size, 12.0); // no shrink when dir is empty
+}
+
 #[test]
 fn test_is_enter_pressed_not_triggered() {
     let ctx = egui::Context::default();

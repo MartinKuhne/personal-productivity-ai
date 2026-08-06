@@ -92,12 +92,12 @@ pub fn apply_file_row_click(ctx: &mut TreeNodeContext<'_>, row: &FlatRow) {
 
 /// Purpose: Applies the side effect of clicking a directory row in
 /// the left panel's tree view.
-/// Inputs: ctx (the `TreeNodeContext`; its `expanded_dirs` and
-/// `selected_dir` are mutated), row (the clicked `FlatRow`;
-/// `row.is_dir` is `true`).
+/// Inputs: ctx (the `TreeNodeContext`; its `expanded_dirs`,
+/// `selected_dir`, `selected_file`, and `selected_files` are
+/// mutated), row (the clicked `FlatRow`; `row.is_dir` is `true`).
 /// Outputs: ()
-/// Purity: Impure (mutates the tree's expand/collapse state and the
-/// current-directory context).
+/// Purity: Impure (mutates the tree's expand/collapse state, the
+/// current-directory context, and clears file selection).
 /// Preconditions: `row.is_dir` is `true`.
 /// Postconditions:
 ///   * Toggles `ctx.expanded_dirs()` for `row.path` — adds it if
@@ -106,25 +106,9 @@ pub fn apply_file_row_click(ctx: &mut TreeNodeContext<'_>, row: &FlatRow) {
 ///   * Updates `ctx.selected_dir()` to `Some(row.path.clone())`
 ///     so the bottom-panel prompt prefix and the agent session
 ///     reflect the folder the user just browsed to.
-///   * **Does NOT touch** `ctx.selected_file()`, `ctx.selected_files()`,
-///     or `ctx.tabs()`. Expanding/collapsing a folder is a
-///     tree-navigation action, orthogonal to which file is open
-///     in the editor. Clearing the file selection here would
-///     hide the center panel body (the file header, YAML table,
-///     and rendered markdown inside `ScrollArea`, all guarded by
-///     `if let Some(selected_path) = app.selection().selected_file()`)
-///     and the right (TOC) panel (`should_show_panel` requires a
-///     selected file), even though `tab_manager.current_markdown`
-///     and `loaded_path` are still set. The user would have to
-///     click the file again to restore the preview. The unit
-///     test `test_apply_directory_row_click_preserves_selected_file`
-///     pins this invariant.
-///
-/// The directory-row click in `render_flat_row` and
-/// `draw_tree_node` (legacy recursive path) calls this function.
-/// It is extracted so the state mutation can be unit-tested
-/// without driving the egui harness, mirroring the
-/// `apply_file_row_click` pattern.
+///   * Clears `ctx.selected_file()` and `ctx.selected_files()` so
+///     the file context in the agent prompt clears when the user
+///     navigates to a different directory.
 pub fn apply_directory_row_click(ctx: &mut TreeNodeContext<'_>, row: &FlatRow) {
     // Split-borrow through the flat struct fields rather than
     // calling the accessor methods: direct field access on the flat
@@ -132,6 +116,8 @@ pub fn apply_directory_row_click(ctx: &mut TreeNodeContext<'_>, row: &FlatRow) {
     // seeing through method boundaries.
     let TreeOpsContext {
         selected_dir,
+        selected_file,
+        selected_files,
         expanded_dirs,
         tree_dirty,
         ..
@@ -142,6 +128,9 @@ pub fn apply_directory_row_click(ctx: &mut TreeNodeContext<'_>, row: &FlatRow) {
         expanded_dirs.insert(row.path.clone());
     }
     **selected_dir = Some(row.path.clone());
+    // Clear file selection when user navigates to a directory
+    **selected_file = None;
+    selected_files.clear();
     // Toggling `expanded_dirs` changes which rows are visible in the
     // tree, so the cached `Vec<FlatRow>` in `FastMdApp` (the P0
     // perf-optimization cache) is now stale. Mark it dirty so the
