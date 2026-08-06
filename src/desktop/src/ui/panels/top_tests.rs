@@ -136,6 +136,91 @@ fn test_apply_tools_button_click_sets_dialog_open() {
     );
 }
 
+/// Tier 1 test for the table-width-strategy apply function. Picking a
+/// new strategy must:
+///   1. Update `app.config().table_width_strategy` to the new value's
+///      `to_config()` form.
+///   2. Make `app.config().deficit_strategy()` return the new variant
+///      (the markdown renderer reads this on every frame, so the
+///      change is live the next paint).
+///   3. Be a no-op when called with the *current* strategy (so egui's
+///      re-fired selected-value events don't trigger redundant disk
+///      writes via `save_config`).
+///
+/// `save_config` is called as a side effect but the test does not
+/// assert on it — failures are logged via `tracing::error!` and the
+/// function continues, mirroring the `tools_dialog::render_row`
+/// policy.
+#[test]
+fn test_apply_table_width_strategy_change_updates_config() {
+    use crate::ui::table_width::DeficitStrategy;
+
+    let mut app = create_test_app();
+    let initial = app.orchestrator.config.deficit_strategy();
+    let target = match initial {
+        DeficitStrategy::ProportionalToSlack => DeficitStrategy::BreakpointWaterFill,
+        DeficitStrategy::BreakpointWaterFill => DeficitStrategy::ProportionalToSlack,
+    };
+
+    // (1) and (2): config string and parsed enum both update.
+    apply_table_width_strategy_change(&mut app, target);
+    assert_eq!(
+        app.orchestrator.config.deficit_strategy(),
+        target,
+        "deficit_strategy() must reflect the picked variant after the apply"
+    );
+    assert_eq!(
+        app.orchestrator.config.table_width_strategy,
+        target.to_config(),
+        "persisted config string must equal target.to_config()"
+    );
+
+    // (3): no-op when called with the *current* strategy. We assert
+    // by capturing the config string before/after — it must stay
+    // identical (and the function short-circuits before
+    // `save_config`, but we don't observe that side effect here).
+    let before = app.orchestrator.config.table_width_strategy.clone();
+    apply_table_width_strategy_change(&mut app, target);
+    let after = app.orchestrator.config.table_width_strategy.clone();
+    assert_eq!(
+        before, after,
+        "re-applying the current strategy must be a no-op (config string unchanged)"
+    );
+}
+
+/// Tier 1 test for the `strategy_label` mapping. Every `DeficitStrategy`
+/// variant must map to a distinct, non-empty label so the dropdown
+/// `selected_text` is always defined and the row labels inside the
+/// dropdown don't collide.
+#[test]
+fn test_strategy_label_maps_every_variant() {
+    use crate::ui::table_width::DeficitStrategy;
+
+    let proportional = strategy_label(DeficitStrategy::ProportionalToSlack);
+    let waterfill = strategy_label(DeficitStrategy::BreakpointWaterFill);
+    assert!(
+        !proportional.is_empty(),
+        "ProportionalToSlack label must not be empty"
+    );
+    assert!(
+        !waterfill.is_empty(),
+        "BreakpointWaterFill label must not be empty"
+    );
+    assert_ne!(
+        proportional, waterfill,
+        "strategy labels for distinct variants must differ"
+    );
+    // Sanity: the labels are the documented user-facing strings.
+    assert_eq!(
+        proportional,
+        crate::ui::strings::TABLE_WIDTH_STRATEGY_PROPORTIONAL
+    );
+    assert_eq!(
+        waterfill,
+        crate::ui::strings::TABLE_WIDTH_STRATEGY_WATERFILL
+    );
+}
+
 #[test]
 fn test_build_indexing_status_text_finished() {
     let text = build_indexing_status_text(true, 42);
@@ -231,11 +316,24 @@ fn test_show_top_panel_indexing_unfinished() {
     });
     // R-2 / Q12: the top panel always renders the app title, the log
     // checkbox, the batch button, and the new tools button — those
-    // are stable across states.
+    // are stable across states. The table-width-strategy combobox
+    // is also unconditionally visible (it's a user preference, not
+    // gated on indexing).
     assert_text_contains(&output.shapes, APP_TITLE);
     assert_text_contains(&output.shapes, SHOW_LOG_CHECKBOX);
     assert_text_contains(&output.shapes, BATCH_BUTTON);
     assert_text_contains(&output.shapes, crate::ui::strings::TOOLS_BUTTON);
+    assert_text_contains(
+        &output.shapes,
+        crate::ui::strings::TABLE_WIDTH_STRATEGY_LABEL,
+    );
+    // Default config's deficit strategy is BreakpointWaterFill
+    // (see `default_table_width_strategy` in `config.rs`); the
+    // combobox's `selected_text` must reflect that.
+    assert_text_contains(
+        &output.shapes,
+        strategy_label(crate::ui::table_width::DeficitStrategy::BreakpointWaterFill),
+    );
     assert!(!app.file_processor().indexing_finished);
 }
 

@@ -57,6 +57,16 @@ impl DeficitStrategy {
             _ => Self::ProportionalToSlack,
         }
     }
+
+    /// Serialize to the config string form. Inverse of
+    /// [`Self::from_config`]. Used by the top-panel strategy combobox
+    /// when persisting a user choice back to `AppConfig::table_width_strategy`.
+    pub fn to_config(self) -> &'static str {
+        match self {
+            Self::ProportionalToSlack => "proportional",
+            Self::BreakpointWaterFill => "waterfill",
+        }
+    }
 }
 
 /// Marginal cost entry for the water-fill min-heap.

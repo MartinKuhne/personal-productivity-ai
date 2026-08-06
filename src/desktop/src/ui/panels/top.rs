@@ -3,6 +3,7 @@
 //! Unit tests live in the sibling `top_tests.rs` sidecar.
 
 use crate::ui::FastMdApp;
+use crate::ui::table_width::DeficitStrategy;
 use eframe::egui;
 use egui::RichText;
 use egui::containers::Panel;
@@ -92,6 +93,62 @@ pub fn apply_batch_button_click(app: &mut FastMdApp) {
 /// the egui harness.
 pub fn apply_tools_button_click(app: &mut FastMdApp) {
     app.dialogs_mut().tools_dialog_open = true;
+}
+
+/// Human-readable label for a [`DeficitStrategy`] variant, used as the
+/// `selected_text` of the top-bar table-width-strategy combobox and as
+/// the row label inside the dropdown. The match is intentionally
+/// exhaustive over every variant of `DeficitStrategy` so adding a new
+/// strategy in the future is a compile error here until the label is
+/// supplied.
+pub fn strategy_label(strategy: DeficitStrategy) -> &'static str {
+    match strategy {
+        DeficitStrategy::ProportionalToSlack => {
+            crate::ui::strings::TABLE_WIDTH_STRATEGY_PROPORTIONAL
+        }
+        DeficitStrategy::BreakpointWaterFill => crate::ui::strings::TABLE_WIDTH_STRATEGY_WATERFILL,
+    }
+}
+
+/// Purpose: Applies the side effect of picking a new table-width
+/// deficit strategy in the top toolbar's combobox.
+///
+/// Inputs: app (the application state), strategy (the newly selected
+///   [`DeficitStrategy`])
+/// Outputs: ()
+/// Purity: Impure. Clones `app.orchestrator.config`, mutates
+///   `table_width_strategy`, persists the new config to disk via
+///   `save_config`, and replaces the in-memory config. The
+///   markdown renderer reads `deficit_strategy()` on every frame so
+///   the change takes effect on the very next paint without any
+///   invalidation hook.
+/// Preconditions: None.
+/// Postconditions:
+///   - `app.config().table_width_strategy == strategy.to_config()`
+///   - `app.config().deficit_strategy() == strategy`
+///   - The config file at `crate::config::get_config_path()` reflects
+///     the new value (best-effort: a `save_config` failure is logged
+///     via `tracing::error!` but does not panic, matching the
+///     `tools_dialog::render_row` policy).
+pub fn apply_table_width_strategy_change(app: &mut FastMdApp, strategy: DeficitStrategy) {
+    let new_value = strategy.to_config();
+    let mut new_config = app.config().clone();
+    if new_config.table_width_strategy == new_value {
+        // No-op: the persisted value already matches the pick.
+        // Skipping the clone/save avoids redundant disk writes when
+        // egui re-fires the dropdown's selected-value event across
+        // frames.
+        return;
+    }
+    new_config.table_width_strategy = new_value.to_string();
+    if let Err(e) = crate::config::save_config(&new_config) {
+        tracing::error!(
+            error = %e,
+            strategy = new_value,
+            "failed to persist AppConfig after table-width-strategy change"
+        );
+    }
+    *app.config_mut() = new_config;
 }
 
 pub fn show_top_panel(app: &mut FastMdApp, parent_ui: &mut egui::Ui) {
@@ -215,6 +272,42 @@ pub fn show_top_panel_capture(
                         }
                     });
             });
+
+            // Table-width deficit-strategy combobox. Always visible
+            // (not gated on `indexing_finished` — the strategy is a
+            // user preference unrelated to the indexer). Picked
+            // strategy is persisted to `AppConfig::table_width_strategy`
+            // on change; the markdown renderer re-reads it every
+            // frame via `app.orchestrator.config.deficit_strategy()`,
+            // so the next paint uses the new algorithm without any
+            // explicit invalidation hook.
+            ui.separator();
+            ui.label(crate::ui::strings::TABLE_WIDTH_STRATEGY_LABEL);
+            let current_strategy = app.orchestrator.config.deficit_strategy();
+            let mut pending: Option<DeficitStrategy> = None;
+            egui::ComboBox::from_id_salt(crate::ui::strings::TABLE_WIDTH_STRATEGY_ID_SALT)
+                .selected_text(strategy_label(current_strategy))
+                .show_ui(ui, |ui| {
+                    for variant in [
+                        DeficitStrategy::ProportionalToSlack,
+                        DeficitStrategy::BreakpointWaterFill,
+                    ] {
+                        if ui
+                            .selectable_label(
+                                strategy_label(variant) == strategy_label(current_strategy),
+                                strategy_label(variant),
+                            )
+                            .clicked()
+                            && variant != current_strategy
+                        {
+                            pending = Some(variant);
+                        }
+                    }
+                });
+            if let Some(picked) = pending {
+                apply_table_width_strategy_change(app, picked);
+                on_click(crate::ui::strings::TABLE_WIDTH_STRATEGY_EVENT);
+            }
         });
     });
 }
