@@ -48,6 +48,34 @@ pub fn compute_prompt_prefix(
     }
 }
 
+/// Computes the file name context display from the active file.
+/// Returns `None` when there is no active file context.
+pub fn compute_file_context(
+    active_file: Option<&std::path::Path>,
+    prompt_prefix: &str,
+) -> Option<(String, f32)> {
+    let file_name = active_file?.file_name()?.to_string_lossy().to_string();
+    if file_name.is_empty() {
+        return None;
+    }
+
+    let dir_display = prompt_prefix.trim_end_matches(" >").trim_end_matches('>');
+    let dir_len = dir_display.chars().count();
+    let file_len = file_name.chars().count();
+
+    let base_size = 12.0;
+    let min_size = 8.0;
+
+    let font_size = if file_len > dir_len && dir_len > 0 {
+        let ratio = dir_len as f32 / file_len as f32;
+        (base_size * ratio).max(min_size)
+    } else {
+        base_size
+    };
+
+    Some((file_name, font_size))
+}
+
 pub fn format_models_list(
     models: &std::collections::HashMap<String, crate::config::LlmConfig>,
 ) -> String {
@@ -152,78 +180,96 @@ pub fn show_bottom_panel_capture(
             // Some branches below still need the context for input
             // polling — pull it from the inner Ui.
             let ctx = ui.ctx().clone();
-            ui.horizontal(|ui| {
-                let prompt_prefix = compute_prompt_prefix(
-                    app.selection()
-                        .prompt_dir(&app.orchestrator.tab_manager.tabs)
-                        .as_deref(),
-                    app.content_libraries(),
-                );
-                ui.label(RichText::new(prompt_prefix).monospace().strong());
 
-                // Lay the Stop button out right-to-left first so it hugs
-                // the panel's right edge, then measure where it ends to
-                // give the prompt every remaining pixel. This replaces the
-                // old fixed 130px reserve, which left dead space between
-                // the prompt and the button.
-                let row = ui.available_rect_before_wrap();
-                let mut stop_clicked = false;
-                let mut prompt_right = row.max.x;
-                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                    if app.agent().state().running {
-                        let response = ui.button(
-                            RichText::new(crate::ui::strings::STOP_AGENT_BUTTON)
-                                .color(egui::Color32::RED),
-                        );
-                        stop_clicked = response.clicked();
-                        prompt_right = response.rect.left();
+            // Get the file context (active file) for display
+            let (active_file, _, _) = app
+                .selection()
+                .agent_context(&app.orchestrator.tab_manager.tabs);
+
+            let prompt_prefix = compute_prompt_prefix(
+                app.selection()
+                    .prompt_dir(&app.orchestrator.tab_manager.tabs)
+                    .as_deref(),
+                app.content_libraries(),
+            );
+
+            let file_context = compute_file_context(active_file.as_deref(), &prompt_prefix);
+
+            // Get the full available rect for the panel row BEFORE any horizontal layout
+            let full_row = ui.available_rect_before_wrap();
+
+            // === RIGHT COLUMN: Stop button (laid out first at far right of panel) ===
+            let mut stop_clicked = false;
+            let mut stop_button_width = 0.0;
+            if app.agent().state().running {
+                let button_text = crate::ui::strings::STOP_AGENT_BUTTON;
+                let button_response = ui.put(
+                    egui::Rect::from_min_max(
+                        egui::pos2(full_row.max.x - 100.0, full_row.min.y), // approximate width
+                        full_row.max,
+                    ),
+                    egui::Button::new(RichText::new(button_text).color(egui::Color32::RED)),
+                );
+                stop_clicked = button_response.clicked();
+                stop_button_width = button_response.rect.width();
+            }
+
+            // Now do horizontal layout for left column + prompt in remaining space
+            let remaining_rect = egui::Rect::from_min_max(
+                full_row.min,
+                egui::pos2(full_row.max.x - stop_button_width, full_row.max.y),
+            );
+
+            ui.scope_builder(egui::UiBuilder::new().max_rect(remaining_rect), |ui| {
+                ui.horizontal(|ui| {
+                    // === LEFT COLUMN: Directory + File context (vertical stack) ===
+                    ui.vertical(|ui| {
+                        ui.label(RichText::new(&prompt_prefix).monospace().strong());
+                        if let Some((file_name, font_size)) = file_context {
+                            ui.label(
+                                RichText::new(&file_name)
+                                    .monospace()
+                                    .size(font_size)
+                                    .color(egui::Color32::GRAY),
+                            );
+                        }
+                    });
+
+                    // === MIDDLE COLUMN: Prompt input (takes all remaining space) ===
+                    let prompt_rect = ui.available_rect_before_wrap();
+                    let response = ui.put(
+                        prompt_rect,
+                        egui::TextEdit::multiline(&mut app.agent_mut().command_input)
+                            .desired_width(f32::INFINITY)
+                            .hint_text(crate::ui::strings::COMMAND_INPUT_HINT),
+                    );
+
+                    let mut submit = false;
+                    if response.has_focus()
+                        && ctx.input(|i| i.key_pressed(egui::Key::Enter) && !i.modifiers.shift)
+                    {
+                        submit = true;
+                    }
+
+                    if stop_clicked {
+                        app.agent_mut().cancel();
+                    }
+
+                    if submit {
+                        if app.agent().state().running {
+                            // Agent is running - queue the prompt
+                            let prompt = app.agent_mut().command_input.trim_end().to_string();
+                            if !prompt.is_empty() {
+                                app.agent_mut().queue_prompt(prompt);
+                                app.agent_mut().command_input.clear();
+                            }
+                        } else {
+                            // Agent is idle - submit normally
+                            apply_send_click(app);
+                            on_click("send");
+                        }
                     }
                 });
-
-                let prompt_rect = egui::Rect::from_min_max(
-                    row.min,
-                    egui::pos2(prompt_right.max(row.min.x), row.max.y),
-                );
-                let response = ui.put(
-                    prompt_rect,
-                    egui::TextEdit::multiline(&mut app.agent_mut().command_input)
-                        .desired_width(f32::INFINITY)
-                        .hint_text(crate::ui::strings::COMMAND_INPUT_HINT),
-                );
-
-                let mut submit = false;
-                if response.has_focus()
-                    && ctx.input(|i| i.key_pressed(egui::Key::Enter) && !i.modifiers.shift)
-                {
-                    submit = true;
-                }
-
-                // The bottom panel used to host a `⚡ Quick Tasks`
-                // menu button whose only item was `Format Markdown`.
-                // That entry point duplicated the file context
-                // menu's [Format Markdown] action, so the button
-                // was removed. Quick Actions now live in the
-                // file context menu — see
-                // `doc/planning/quick-actions-into-context-menu.md`.
-
-                if stop_clicked {
-                    app.agent_mut().cancel();
-                }
-
-                if submit {
-                    if app.agent().state().running {
-                        // Agent is running - queue the prompt
-                        let prompt = app.agent_mut().command_input.trim_end().to_string();
-                        if !prompt.is_empty() {
-                            app.agent_mut().queue_prompt(prompt);
-                            app.agent_mut().command_input.clear();
-                        }
-                    } else {
-                        // Agent is idle - submit normally
-                        apply_send_click(app);
-                        on_click("send");
-                    }
-                }
             });
         });
 }
