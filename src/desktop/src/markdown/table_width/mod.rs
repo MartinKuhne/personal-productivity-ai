@@ -92,9 +92,10 @@ impl PartialOrd for ShrinkStep {
 }
 
 /// Outcome of an FTWA computation: per-column pixel widths plus a flag telling
-/// the caller that the available width is below the sum of min-content widths,
-/// in which case the table physically cannot fit and horizontal scrolling must
-/// be enabled (doc §3.6 fallback).
+/// the caller that the available width is below the sum of min-content widths
+/// (or that the deficit cannot be absorbed by the wrap set without exceeding
+/// `available` after the B2 distribution), in which case the table physically
+/// cannot fit and horizontal scrolling must be enabled (doc §3.6 fallback).
 ///
 /// `widths.len()` matches the input column count. In the fallback case the
 /// widths equal the min-content widths so any wrapping layout still respects
@@ -103,7 +104,11 @@ impl PartialOrd for ShrinkStep {
 pub struct ColumnWidths {
     /// Per-column assigned pixel width, in input order.
     pub widths: Vec<f32>,
-    /// `true` when `available < Σ min_content` — caller must enable horizontal scroll.
+    /// `true` when the assigned widths do not fit within `available` — the
+    /// caller must enable horizontal scroll. Set when `available < Σ
+    /// min_content` (the standard §3.6 fallback) or when the B2 distribution
+    /// fully clamps the wrap set to `min_content` and the post-drift `Σ
+    /// widths` still exceeds `available` (the wrap-set-saturation case).
     pub needs_horizontal_scroll: bool,
 }
 
@@ -336,9 +341,20 @@ pub fn ftwa(
             break;
         }
     }
-    // `acc_slack` is the total slack of the minimum-cardinality wrap
-    // set. It is always `>= deficit` (loop termination), and the B2
-    // distribution is normalised against it.
+    // `acc_slack` is the total slack accumulated by the greedy loop.
+    // Normally `acc_slack >= deficit` (the loop terminates as soon as
+    // the running sum covers the deficit, building the
+    // *minimum-cardinality* wrap set). It can be `< deficit` only when
+    // the loop exhausts `positives` before the deficit is covered — in
+    // that case the wrap set is the full set of positive-slack columns
+    // and B2 will end up clamping every wrap-set column to
+    // `min_content`. The drift fix below cannot absorb a *negative*
+    // drift (the `(widths[target] + drift).max(min_content[target])`
+    // clamp prevents widths from going below min-content), so the
+    // post-drift `Σ widths` may still exceed `available`. The trailing
+    // overflow guard handles that case by escalating to the §3.6
+    // horizontal-scroll fallback rather than letting the renderer
+    // overflow the viewport.
     let total_slack: f32 = acc_slack;
 
     // B2: shrink wrap-set columns according to the chosen strategy,
@@ -387,6 +403,21 @@ pub fn ftwa(
             })
             .expect("wrap_set is non-empty (checked above)");
         widths[target] = (widths[target] + drift).max(min_content[target]);
+    }
+
+    // Overflow guard: when the wrap set is fully clamped to `min_content`
+    // (every B2 share exceeded its column's slack), the drift fix above
+    // can only widen the target — it cannot shrink it below
+    // `min_content`. The result is `Σ widths > available` and the
+    // renderer would lay out cells wider than the viewport, clipping
+    // the rightmost column silently. Escalate to the §3.6 horizontal-
+    // scroll fallback in that case so the `ScrollArea` is applied and
+    // the user can reach every column by scrolling.
+    if widths.iter().copied().sum::<f32>() > available {
+        return ColumnWidths {
+            widths: min_content.to_vec(),
+            needs_horizontal_scroll: true,
+        };
     }
 
     ColumnWidths {

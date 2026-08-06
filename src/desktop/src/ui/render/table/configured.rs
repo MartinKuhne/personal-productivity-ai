@@ -10,7 +10,9 @@
 //! even with every column at its longest-token floor and we fall back to
 //! the prior behaviour: a wrapping `ScrollArea` over max-content columns
 //! (doc §3.6) so the strongest invariant — never split a token — is
-//! preserved.
+//! preserved. The horizontal scrollbar is forced visible in that path
+//! so the overflow is discoverable instead of looking like a silently-
+//! clipped rightmost cell.
 //!
 //! Column spacing is 10.0 px and row spacing is 4.0 px. The available content
 //! width passed to FTWA subtracts `(N - 1) * 10.0` for those gutters so the
@@ -121,8 +123,18 @@ pub(crate) fn render_table_with_config(
             .stroke(TABLE_PERIMETER_STROKE)
             .inner_margin(egui::Margin::ZERO)
             .show(ui, |ui| {
+                // Always show the horizontal scrollbar in the fallback
+                // path. The default `VisibleWhenNeeded` policy only paints
+                // a scrollbar when the user has interacted (scroll wheel
+                // / drag) — for a narrow viewport the table overflows from
+                // the very first frame and the user has no visual cue
+                // that the rightmost columns are reachable by scrolling.
+                // Forcing the scrollbar visible makes the overflow
+                // discoverable instead of looking like a render bug where
+                // the rightmost cell is silently clipped.
                 egui::ScrollArea::horizontal()
                     .id_salt(table_id.with("scroll"))
+                    .scroll_bar_visibility(egui::scroll_area::ScrollBarVisibility::AlwaysVisible)
                     .show(ui, |ui| {
                         render_rows(ui);
                     });

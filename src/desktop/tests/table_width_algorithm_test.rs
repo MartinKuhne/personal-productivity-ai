@@ -899,12 +899,19 @@ proptest! {
     /// three core invariants:
     ///   (1) Regime contract:
     ///       - fallback (`available < sum_min`): `widths == min_content`
-    ///         and `needs_horizontal_scroll`.
+    ///         and `needs_horizontal_scroll`. (Standard §3.6 fallback.)
+    ///       - fallback (wrap-set-saturation: `sum_min <= available <
+    ///         sum_max` but the deficit can't be absorbed without
+    ///         clamping every wrap-set column to `min_content` and the
+    ///         drift fix is one-sided): `widths == min_content` and
+    ///         `needs_horizontal_scroll`. (Newly possible after the
+    ///         wrap-set-saturation overflow guard landed.)
     ///       - surplus (`available >= sum_max`): `widths == max_content`
     ///         (columns pinned, table may not fill the full width;
-    ///         G3 intentionally relaxed in surplus â€" see `ftwa` doc).
-    ///       - deficit (`sum_min <= available < sum_max`):
-    ///         `sum(widths) == available` (G3 exact).
+    ///         G3 intentionally relaxed in surplus — see `ftwa` doc).
+    ///       - deficit (`sum_min <= available < sum_max`, wrap set
+    ///         absorbs deficit without saturating): `sum(widths) ==
+    ///         available` (G3 exact) and `!needs_horizontal_scroll`.
     ///   (2) `∀j. widths[j] >= min_content[j]` (never break a token).
     ///   (3) `widths.len() == max_content.len()`, no NaN.
     #[test]
@@ -943,15 +950,18 @@ proptest! {
         let sum_min: f32 = min.iter().copied().sum();
         let sum_max: f32 = max.iter().copied().sum();
         if d.needs_horizontal_scroll {
+            // Either standard fallback (`available < sum_min`) or
+            // wrap-set-saturation fallback (deficit branch couldn't
+            // shrink the wrap set enough to fit `available`). Both
+            // branches return `widths == min_content` so the renderer
+            // can wrap each cell at its longest-token floor and the
+            // horizontal `ScrollArea` carries the overflow.
             let widths_snapshot = d.widths.clone();
             let min_snapshot = min.clone();
             prop_assert!(
                 d.widths == min,
-                "fallback must return min_content exactly; got {widths_snapshot:?}, expected {min_snapshot:?}"
-            );
-            prop_assert_eq!(
-                d.needs_horizontal_scroll, available < sum_min,
-                "needs_horizontal_scroll must match (available < sum_min)"
+                "needs_horizontal_scroll must return min_content exactly; \
+                 got {widths_snapshot:?}, expected {min_snapshot:?}"
             );
         } else if available >= sum_max {
             // Surplus: columns pinned at max_content; sum may be < available.
@@ -967,9 +977,12 @@ proptest! {
                 (sum - available).abs() < 1e-3,
                 "deficit: sum widths ({sum}) must equal available ({available})"
             );
-            prop_assert_eq!(
-                d.needs_horizontal_scroll, available < sum_min,
-                "needs_horizontal_scroll must match (available < sum_min)"
+            // Reaching the deficit branch implies the wrap set
+            // absorbed the deficit and the drift fix closed the
+            // residual — so we should *not* be in the fallback path.
+            prop_assert!(
+                available >= sum_min,
+                "deficit branch reached with available < sum_min ({available} < {sum_min})"
             );
         }
 
