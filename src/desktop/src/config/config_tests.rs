@@ -524,3 +524,34 @@ fn deficit_strategy_respects_config_value() {
         crate::ui::table_width::DeficitStrategy::ProportionalToSlack
     );
 }
+
+#[test]
+fn deficit_strategy_parses_survey_algorithm_strings() {
+    // Each of the three survey algorithms (doc §2.10, §2.13, §2.14)
+    // must parse from its canonical config string. This guards the
+    // round-trip with the top-bar combobox.
+    use crate::ui::table_width::DeficitStrategy;
+    for (raw, expected) in [
+        ("ratio", DeficitStrategy::WaterFillRatio),
+        ("lagrange", DeficitStrategy::LagrangePenalty),
+        ("hybrid", DeficitStrategy::HybridMinPenaltyWaterFill),
+        // Aliases for ergonomics — the combobox writes the canonical
+        // form, but a user editing the YAML may use any of these.
+        ("waterfill-ratio", DeficitStrategy::WaterFillRatio),
+        ("lagrange-penalty", DeficitStrategy::LagrangePenalty),
+        (
+            "hybrid-min-penalty",
+            DeficitStrategy::HybridMinPenaltyWaterFill,
+        ),
+    ] {
+        let config = AppConfig {
+            table_width_strategy: raw.to_string(),
+            ..AppConfig::default()
+        };
+        assert_eq!(
+            config.deficit_strategy(),
+            expected,
+            "config string {raw:?} must parse to {expected:?}"
+        );
+    }
+}

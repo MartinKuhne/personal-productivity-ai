@@ -2,6 +2,7 @@
 //!
 //! Unit tests live in the sibling `top_tests.rs` sidecar.
 
+use crate::config::AppConfig;
 use crate::ui::FastMdApp;
 use crate::ui::table_width::DeficitStrategy;
 use eframe::egui;
@@ -107,41 +108,80 @@ pub fn strategy_label(strategy: DeficitStrategy) -> &'static str {
             crate::ui::strings::TABLE_WIDTH_STRATEGY_PROPORTIONAL
         }
         DeficitStrategy::BreakpointWaterFill => crate::ui::strings::TABLE_WIDTH_STRATEGY_WATERFILL,
+        DeficitStrategy::WaterFillRatio => crate::ui::strings::TABLE_WIDTH_STRATEGY_RATIO,
+        DeficitStrategy::LagrangePenalty => crate::ui::strings::TABLE_WIDTH_STRATEGY_LAGRANGE,
+        DeficitStrategy::HybridMinPenaltyWaterFill => {
+            crate::ui::strings::TABLE_WIDTH_STRATEGY_HYBRID
+        }
     }
 }
 
 /// Purpose: Applies the side effect of picking a new table-width
 /// deficit strategy in the top toolbar's combobox.
 ///
-/// Inputs: app (the application state), strategy (the newly selected
-///   [`DeficitStrategy`])
+/// Inputs:
+///   - `app`: the application state
+///   - `strategy`: the newly selected [`DeficitStrategy`]
+///   - `persist`: a callback invoked exactly once when the strategy
+///     actually changes. Receives a reference to the post-mutation
+///     `AppConfig` (with the new `table_width_strategy` set) and is
+///     expected to persist it. The signature matches
+///     [`crate::config::save_config`] / [`crate::config::save_config_to_path`]
+///     so production can pass those as function pointers without an
+///     extra closure wrapper. A `Result::Err` is logged via
+///     `tracing::error!` but does not propagate — the in-memory
+///     config is still updated (matches the `tools_dialog::render_row`
+///     policy).
+///
 /// Outputs: ()
+///
 /// Purity: Impure. Clones `app.orchestrator.config`, mutates
-///   `table_width_strategy`, persists the new config to disk via
-///   `save_config`, and replaces the in-memory config. The
-///   markdown renderer reads `deficit_strategy()` on every frame so
-///   the change takes effect on the very next paint without any
-///   invalidation hook.
+///   `table_width_strategy`, invokes `persist` on the new config, and
+///   replaces the in-memory config. The markdown renderer reads
+///   `deficit_strategy()` on every frame so the change takes effect
+///   on the very next paint without any invalidation hook.
+///
 /// Preconditions: None.
+///
 /// Postconditions:
 ///   - `app.config().table_width_strategy == strategy.to_config()`
 ///   - `app.config().deficit_strategy() == strategy`
-///   - The config file at `crate::config::get_config_path()` reflects
-///     the new value (best-effort: a `save_config` failure is logged
-///     via `tracing::error!` but does not panic, matching the
-///     `tools_dialog::render_row` policy).
-pub fn apply_table_width_strategy_change(app: &mut FastMdApp, strategy: DeficitStrategy) {
+///   - `persist` is called exactly once with the post-mutation config
+///     iff the value actually changed; otherwise it is not called at
+///     all (so a no-op re-pick from egui's re-fired dropdown events
+///     does not trigger a redundant write).
+///
+/// # Why a callback
+///
+/// Decoupling persistence from the in-memory mutation keeps the
+/// function testable without a filesystem: tests pass a closure that
+/// captures the saved config (or panics, to assert it wasn't called).
+/// Production passes `crate::config::save_config` directly. An
+/// earlier version hard-coded `save_config` (the APPDATA-path
+/// version) and a test was silently overwriting the user's real
+/// `config.yaml` at `%APPDATA%\fastmd\config.yaml` on every test run.
+/// A previous attempt split the function into a `_to_path` variant;
+/// the callback form is cleaner because the persistence choice lives
+/// at the call site (production = "write to APPDATA", test = "do
+/// nothing" or "write to a tempdir").
+pub fn apply_table_width_strategy_change<F>(
+    app: &mut FastMdApp,
+    strategy: DeficitStrategy,
+    persist: F,
+) where
+    F: FnOnce(&AppConfig) -> Result<PathBuf, String>,
+{
     let new_value = strategy.to_config();
     let mut new_config = app.config().clone();
     if new_config.table_width_strategy == new_value {
         // No-op: the persisted value already matches the pick.
-        // Skipping the clone/save avoids redundant disk writes when
+        // Skipping the persist call avoids redundant disk writes when
         // egui re-fires the dropdown's selected-value event across
         // frames.
         return;
     }
     new_config.table_width_strategy = new_value.to_string();
-    if let Err(e) = crate::config::save_config(&new_config) {
+    if let Err(e) = persist(&new_config) {
         tracing::error!(
             error = %e,
             strategy = new_value,
@@ -288,9 +328,15 @@ pub fn show_top_panel_capture(
             egui::ComboBox::from_id_salt(crate::ui::strings::TABLE_WIDTH_STRATEGY_ID_SALT)
                 .selected_text(strategy_label(current_strategy))
                 .show_ui(ui, |ui| {
+                    // Order matters: the existing FTWA strategies first
+                    // (no surprise for users who haven't discovered the
+                    // new ones), then the three survey algorithms.
                     for variant in [
                         DeficitStrategy::ProportionalToSlack,
                         DeficitStrategy::BreakpointWaterFill,
+                        DeficitStrategy::WaterFillRatio,
+                        DeficitStrategy::LagrangePenalty,
+                        DeficitStrategy::HybridMinPenaltyWaterFill,
                     ] {
                         if ui
                             .selectable_label(
@@ -305,7 +351,7 @@ pub fn show_top_panel_capture(
                     }
                 });
             if let Some(picked) = pending {
-                apply_table_width_strategy_change(app, picked);
+                apply_table_width_strategy_change(app, picked, crate::config::save_config);
                 on_click(crate::ui::strings::TABLE_WIDTH_STRATEGY_EVENT);
             }
         });

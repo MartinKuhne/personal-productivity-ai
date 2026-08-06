@@ -71,6 +71,24 @@ pub const TABLE_WIDTH_STRATEGY_PROPORTIONAL: &str = "Proportional";
 /// water-fill (O(K log |S|)) — minimizes G1 more aggressively.
 pub const TABLE_WIDTH_STRATEGY_WATERFILL: &str = "Water-fill";
 
+/// Display label for the [`WaterFillRatio`](crate::ui::table_width::DeficitStrategy::WaterFillRatio)
+/// survey algorithm (doc §2.10) in the top-bar dropdown. Equalizes the
+/// `max_j / w_j` ratio across columns — the "fair" baseline that
+/// equalizes wrap pressure.
+pub const TABLE_WIDTH_STRATEGY_RATIO: &str = "Ratio-equalize";
+
+/// Display label for the [`LagrangePenalty`](crate::ui::table_width::DeficitStrategy::LagrangePenalty)
+/// survey algorithm (doc §2.13) in the top-bar dropdown. Minimizes
+/// total wrap via a global Lagrange-multiplier bisection on per-column
+/// wrap cost.
+pub const TABLE_WIDTH_STRATEGY_LAGRANGE: &str = "Lagrange-penalty";
+
+/// Display label for the [`HybridMinPenaltyWaterFill`](crate::ui::table_width::DeficitStrategy::HybridMinPenaltyWaterFill)
+/// survey algorithm (doc §2.14) in the top-bar dropdown. Per-column
+/// "first-wrap boundary" target plus residual water-fill — the
+/// production pattern.
+pub const TABLE_WIDTH_STRATEGY_HYBRID: &str = "Hybrid (penalty + fill)";
+
 /// `on_click` event name fired by the top-bar table-width-strategy
 /// dropdown when the user picks a new strategy. Mirrors the
 /// `"batch_button"` / `"tools_button"` event names already used by

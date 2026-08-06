@@ -212,7 +212,13 @@ mod tests {
             }
 
             if text.is_empty() {
-                return (0.0, 0.0, CellTokens { token_widths: vec![] });
+                return (
+                    0.0,
+                    0.0,
+                    CellTokens {
+                        token_widths: vec![],
+                    },
+                );
             }
 
             let max_w = (text.chars().count() as f32) * self.char_width;
@@ -252,10 +258,7 @@ mod tests {
             line_height: 20.0,
         };
 
-        let ast = vec![vec![
-            vec![text_elem("Hello World")],
-            vec![text_elem("Foo")],
-        ]];
+        let ast = vec![vec![vec![text_elem("Hello World")], vec![text_elem("Foo")]]];
 
         let builder =
             TableLayoutBuilder::new(&measurer, 500.0, DeficitStrategy::ProportionalToSlack)

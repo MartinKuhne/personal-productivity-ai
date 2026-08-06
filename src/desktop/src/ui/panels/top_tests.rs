@@ -151,19 +151,42 @@ fn test_apply_tools_button_click_sets_dialog_open() {
 /// assert on it — failures are logged via `tracing::error!` and the
 /// function continues, mirroring the `tools_dialog::render_row`
 /// policy.
+///
+/// **IMPORTANT**: the persist callback is supplied by the test, not
+/// hard-coded inside the function. Earlier versions of this test
+/// called `apply_table_width_strategy_change` (no path), which
+/// internally invoked `crate::config::save_config` and wrote to
+/// `%APPDATA%\fastmd\config.yaml`, silently clobbering the user's
+/// real config on every test run (the original two-arm swap wrote
+/// `"proportional"`; a later five-arm cycle wrote `"ratio"` /
+/// `"lagrange"` / `"hybrid"`). The current callback-based API lets
+/// the test capture the persist call for inspection without touching
+/// the real filesystem.
 #[test]
 fn test_apply_table_width_strategy_change_updates_config() {
     use crate::ui::table_width::DeficitStrategy;
 
     let mut app = create_test_app();
     let initial = app.orchestrator.config.deficit_strategy();
+    // Pick *any* variant that differs from the current one. With five
+    // strategies now, a simple two-arm swap is no longer exhaustive —
+    // cycle deterministically through the list and pick the next one.
     let target = match initial {
         DeficitStrategy::ProportionalToSlack => DeficitStrategy::BreakpointWaterFill,
-        DeficitStrategy::BreakpointWaterFill => DeficitStrategy::ProportionalToSlack,
+        DeficitStrategy::BreakpointWaterFill => DeficitStrategy::WaterFillRatio,
+        DeficitStrategy::WaterFillRatio => DeficitStrategy::LagrangePenalty,
+        DeficitStrategy::LagrangePenalty => DeficitStrategy::HybridMinPenaltyWaterFill,
+        DeficitStrategy::HybridMinPenaltyWaterFill => DeficitStrategy::ProportionalToSlack,
     };
 
-    // (1) and (2): config string and parsed enum both update.
-    apply_table_width_strategy_change(&mut app, target);
+    // (1) and (2): config string and parsed enum both update, and
+    // the persist callback receives the post-mutation config. We
+    // capture it for inspection rather than writing to disk.
+    let mut persisted: Option<crate::config::AppConfig> = None;
+    apply_table_width_strategy_change(&mut app, target, |cfg| {
+        persisted = Some(cfg.clone());
+        Ok(PathBuf::new())
+    });
     assert_eq!(
         app.orchestrator.config.deficit_strategy(),
         target,
@@ -172,15 +195,22 @@ fn test_apply_table_width_strategy_change_updates_config() {
     assert_eq!(
         app.orchestrator.config.table_width_strategy,
         target.to_config(),
-        "persisted config string must equal target.to_config()"
+        "in-memory config string must equal target.to_config()"
+    );
+    let persisted_cfg = persisted.expect("persist must be called when value changes");
+    assert_eq!(
+        persisted_cfg.table_width_strategy,
+        target.to_config(),
+        "persisted callback must receive the post-mutation config"
     );
 
-    // (3): no-op when called with the *current* strategy. We assert
-    // by capturing the config string before/after — it must stay
-    // identical (and the function short-circuits before
-    // `save_config`, but we don't observe that side effect here).
+    // (3): no-op when called with the *current* strategy. The persist
+    // callback must NOT be called — supply a closure that panics if
+    // it is, to assert the short-circuit.
     let before = app.orchestrator.config.table_width_strategy.clone();
-    apply_table_width_strategy_change(&mut app, target);
+    apply_table_width_strategy_change(&mut app, target, |_cfg| {
+        panic!("persist must not be called when the value is unchanged");
+    });
     let after = app.orchestrator.config.table_width_strategy.clone();
     assert_eq!(
         before, after,
@@ -198,6 +228,9 @@ fn test_strategy_label_maps_every_variant() {
 
     let proportional = strategy_label(DeficitStrategy::ProportionalToSlack);
     let waterfill = strategy_label(DeficitStrategy::BreakpointWaterFill);
+    let ratio = strategy_label(DeficitStrategy::WaterFillRatio);
+    let lagrange = strategy_label(DeficitStrategy::LagrangePenalty);
+    let hybrid = strategy_label(DeficitStrategy::HybridMinPenaltyWaterFill);
     assert!(
         !proportional.is_empty(),
         "ProportionalToSlack label must not be empty"
@@ -206,10 +239,28 @@ fn test_strategy_label_maps_every_variant() {
         !waterfill.is_empty(),
         "BreakpointWaterFill label must not be empty"
     );
-    assert_ne!(
-        proportional, waterfill,
-        "strategy labels for distinct variants must differ"
+    assert!(!ratio.is_empty(), "WaterFillRatio label must not be empty");
+    assert!(
+        !lagrange.is_empty(),
+        "LagrangePenalty label must not be empty"
     );
+    assert!(
+        !hybrid.is_empty(),
+        "HybridMinPenaltyWaterFill label must not be empty"
+    );
+    // All five labels must be pairwise distinct so the dropdown can
+    // show them without collisions.
+    let labels = [proportional, waterfill, ratio, lagrange, hybrid];
+    for (i, a) in labels.iter().enumerate() {
+        for (j, b) in labels.iter().enumerate() {
+            if i != j {
+                assert_ne!(
+                    a, b,
+                    "strategy labels for distinct variants must differ (i={i}, j={j})"
+                );
+            }
+        }
+    }
     // Sanity: the labels are the documented user-facing strings.
     assert_eq!(
         proportional,
@@ -219,6 +270,9 @@ fn test_strategy_label_maps_every_variant() {
         waterfill,
         crate::ui::strings::TABLE_WIDTH_STRATEGY_WATERFILL
     );
+    assert_eq!(ratio, crate::ui::strings::TABLE_WIDTH_STRATEGY_RATIO);
+    assert_eq!(lagrange, crate::ui::strings::TABLE_WIDTH_STRATEGY_LAGRANGE);
+    assert_eq!(hybrid, crate::ui::strings::TABLE_WIDTH_STRATEGY_HYBRID);
 }
 
 #[test]
