@@ -880,4 +880,179 @@ mod tests {
             InlineElem::Text(t, s) if t.contains("~3.3 lbs") && s == &TextStyle::default()
         ));
     }
+
+    /// The routers-spec table that surfaces the same pulldown-cmark
+    /// fragmentation class as the laptops table, plus bold model
+    /// names and a `~~strikethrough~~ **bold**` mid-cell. Per the
+    /// module-level doc comment, every delimiter run (`*`, `_`,
+    /// `~`, `=`, `^`) becomes its own `ItemBody::Text` even when
+    /// the delimiter fails to form a valid emphasis /
+    /// strikethrough / etc. pair — so:
+    ///
+    /// * `**TP-Link Archer BE550**` would fragment into 3 events
+    ///   (`**`, `TP-Link Archer BE550`, `**`) without the
+    ///   coalescer.
+    /// * `~~$180–$210~~ **$125**` would fragment the `~~` runs
+    ///   plus the `**` runs.
+    /// * `~$180` (single tilde, invalid GFM strikethrough) would
+    ///   fragment into `~` + `$180`.
+    ///
+    /// This test pins the parser's output for all three. The
+    /// companion integration test
+    /// `test_parse_routers_table_ast_shape` in
+    /// `src/ui/render/tests.rs` walks the same fixture at the
+    /// caller-facing level.
+    #[test]
+    fn parses_routers_table_cells_with_mixed_styling() {
+        let md = "| Model | Price | Bands | 6 GHz | 2.5G Ports | 10G Port | Key Strength |\n\
+                  |-------|-------|-------|-------|------------|----------|--------------|\n\
+                  | **TP-Link Archer BE550** | $170–$200 | Tri | ✅ | 5x | ❌ | Best overall value |\n\
+                  | **ASUS RT-BE92U** | $190–$200 | Tri | ✅ | 4x | ✅ (1) | 10G + Merlin |\n\
+                  | **TP-Link Archer BE230** | $80–$100 | Dual | ❌ | 1x | ❌ | Budget entry |\n\
+                  | **GL.iNet Flint 3** | ~~$180–$210~~ **$125** | Tri | ✅ | 5x | ❌ | OpenWrt + VPN |\n\
+                  | **ASUS RT-BE59** | ~$180 | Dual | ❌ | 1x | ❌ | ASUS budget |";
+        let events = parse_markdown_to_events(md);
+        let table = events
+            .iter()
+            .find_map(|e| {
+                if let RenderEvent::Table(rows) = e {
+                    Some(rows)
+                } else {
+                    None
+                }
+            })
+            .expect("expected a Table event");
+        assert_eq!(table.len(), 6, "1 header + 5 data rows");
+        assert_eq!(table[0].len(), 7, "7 columns per row");
+        for (r, row) in table.iter().enumerate() {
+            assert_eq!(row.len(), 7, "row {r} must have 7 cells");
+        }
+
+        // Header cells are plain text.
+        let plain = TextStyle::default();
+        for (j, expected) in [
+            "Model",
+            "Price",
+            "Bands",
+            "6 GHz",
+            "2.5G Ports",
+            "10G Port",
+            "Key Strength",
+        ]
+        .iter()
+        .enumerate()
+        {
+            let cell = &table[0][j];
+            assert_eq!(
+                cell.len(),
+                1,
+                "header cell {j} must be 1 element, got {cell:?}"
+            );
+            assert!(matches!(
+                &cell[0],
+                InlineElem::Text(t, s) if t == *expected && s == &plain
+            ));
+        }
+
+        // Row 1: bold model, plain price, plain tri/✅/5x/❌/text.
+        // `**TP-Link Archer BE550**` must coalesce to a single bold
+        // Text element (the `*` runs collapse).
+        let bold = TextStyle {
+            bold: true,
+            ..TextStyle::default()
+        };
+        let cell00 = &table[1][0];
+        assert_eq!(
+            cell00.len(),
+            1,
+            "Model cell (bold) must coalesce to 1 element, got {cell00:?}"
+        );
+        assert!(matches!(
+            &cell00[0],
+            InlineElem::Text(t, s) if t == "TP-Link Archer BE550" && s == &bold
+        ));
+        // Price cell: plain text (no delimiters).
+        let cell01 = &table[1][1];
+        assert_eq!(
+            cell01.len(),
+            1,
+            "Price cell must be 1 element, got {cell01:?}"
+        );
+        assert!(matches!(
+            &cell01[0],
+            InlineElem::Text(t, s) if t == "$170–$200" && s == &plain
+        ));
+        // Emoji cells (✅, ❌) must be single text elements, not
+        // split on the Unicode code point boundary.
+        for j in [3, 5] {
+            let cell = &table[1][j];
+            assert_eq!(
+                cell.len(),
+                1,
+                "row 1 col {j} emoji cell must be 1 element, got {cell:?}"
+            );
+            assert!(matches!(&cell[0], InlineElem::Text(_, s) if s == &plain));
+        }
+        // Key Strength: `10G + Merlin` is a `+` in plain text, must
+        // not be parsed as anything other than text.
+        let cell16 = &table[1][6];
+        assert_eq!(
+            cell16.len(),
+            1,
+            "Key Strength cell must be 1 element, got {cell16:?}"
+        );
+        assert!(matches!(
+            &cell16[0],
+            InlineElem::Text(t, s) if t == "Best overall value" && s == &plain
+        ));
+
+        // Row 4 (GL.iNet Flint 3): the `~~$180–$210~~ **$125**`
+        // cell. This must produce THREE Text elements: one
+        // strikethrough (the `~~…~~` span), the literal space
+        // between the spans, and one bold (the `**…**` span).
+        // The coalescer must not split the strikethrough into 3
+        // events (`~~`, `$180–$210`, `~~`) or the bold into 3
+        // (`**`, `$125`, `**`); different `TextStyle`s must
+        // remain as separate elements (so the renderer can apply
+        // distinct styling) but each style's own delimiters must
+        // be absorbed.
+        let strikethrough = TextStyle {
+            strikethrough: true,
+            ..TextStyle::default()
+        };
+        let cell41 = &table[4][1];
+        assert_eq!(
+            cell41.len(),
+            3,
+            "GL.iNet Price cell must be 3 elements (strikethrough + space + bold), got {cell41:?}"
+        );
+        assert!(matches!(
+            &cell41[0],
+            InlineElem::Text(t, s) if t == "$180–$210" && s == &strikethrough
+        ));
+        assert!(matches!(
+            &cell41[1],
+            InlineElem::Text(t, s) if t == " " && s == &plain
+        ));
+        assert!(matches!(
+            &cell41[2],
+            InlineElem::Text(t, s) if t == "$125" && s == &bold
+        ));
+
+        // Row 5 (ASUS RT-BE59): the `~$180` cell. Single tilde is
+        // not a valid GFM strikethrough, so cmark should not emit
+        // a Strikethrough Start/End pair — but it does still
+        // fragment into `~` + `$180` events. The coalescer must
+        // fold them back into a single plain Text element.
+        let cell51 = &table[5][1];
+        assert_eq!(
+            cell51.len(),
+            1,
+            "ASUS RT-BE59 Price cell (single ~) must coalesce to 1 element, got {cell51:?}"
+        );
+        assert!(matches!(
+            &cell51[0],
+            InlineElem::Text(t, s) if t == "~$180" && s == &plain
+        ));
+    }
 }
