@@ -14,6 +14,9 @@ on:
 env:
   CARGO_TERM_COLOR: always
 
+permissions:
+  contents: read
+
 jobs:
   check:
     name: cargo check
@@ -33,6 +36,9 @@ jobs:
     name: cargo nextest
     runs-on: ubuntu-latest
     needs: check
+    permissions:
+      contents: read
+      actions: write
     defaults:
       run:
         working-directory: src/desktop
