@@ -1161,34 +1161,29 @@ fn test_render_routers_table_rect_count_and_alignment() {
     let header_row = &rects[0..7];
     let data_rows: Vec<&[egui::Rect]> = (1..6).map(|r| &rects[r * 7..(r + 1) * 7]).collect();
 
-    // KNOWN-ISSUE row index. Row 4 (GL.iNet Flint 3) holds the
-    // `~~$180–$210~~ **$125**` Price cell, which the parser
-    // emits as three `InlineElem::Text` elements (strikethrough,
-    // space, bold). The current cell renderer stacks those as
-    // three separate `Label`s under a `top_down(Align::Min)` layout
-    // with `set_min_width`/`set_max_width` equal to the FTWA-
-    // assigned column width — but the *widest* label's text
-    // (`$180–$210` at ~107 px) overflows the FTWA-assigned
-    // 97.38 px column, so the cell renders at 107.69 px and
-    // pushes columns 2..6 in that row right by ~10.3 px. The
-    // overflow propagates to every subsequent column in the
-    // same row, so the column-alignment assertion skips the
-    // entire row 4 (gutter widths are still 10 px because
-    // adjacent cells in the same row shift together).
-    const KNOWN_BROKEN_ROW: usize = 4;
+    // Multi-element cell note. The `~~$180–$210~~ **$125**`
+    // Price cell on row 4 (GL.iNet Flint 3) is the test's
+    // multi-element stress case: the parser emits three
+    // `InlineElem::Text` elements (strikethrough, space, bold).
+    // A previous version of `render_table_cell` rendered each
+    // element as a separate `Label` under `top_down(Align::Min)`,
+    // which let the widest single token (`$180–$210` at ~107 px)
+    // overflow the FTWA-assigned 97.38 px column and push every
+    // subsequent column in the row right by ~10 px. The current
+    // renderer builds a single inline `LayoutJob` for text-only
+    // cells (see `is_text_only` + `build_text_layout_job` in
+    // `src/ui/render/table/cell.rs`), so the three runs flow
+    // inline and the line wraps within the column. This
+    // assertion now holds for *all* 6 rows.
 
     // (3) Column alignment: for each column j, the header and
-    // all 5 data cells share min.x and width — skipping the
-    // entire row 4 (the row containing the multi-element
-    // overflow cell). Sub-pixel 0.5 px tolerance (FTWA may
-    // distribute fractional pixels across the wrap set).
+    // all 5 data cells share min.x and width. Sub-pixel 0.5 px
+    // tolerance (FTWA may distribute fractional pixels across
+    // the wrap set).
     for j in 0..7 {
         let ref_min_x = header_row[j].min.x;
         let ref_width = header_row[j].width();
         for r in 0..6 {
-            if r == KNOWN_BROKEN_ROW {
-                continue;
-            }
             let row = &rects[r * 7..(r + 1) * 7];
             let min_x = row[j].min.x;
             let width = row[j].width();
@@ -1204,10 +1199,7 @@ fn test_render_routers_table_rect_count_and_alignment() {
     }
 
     // (4) Row alignment: every cell in a given row shares that
-    // row's first cell's min.y. 1.0 px tolerance. The broken
-    // (row 4, col 1) cell shifts the *min.y* of the row's
-    // first cell, but in this case the row's first cell is
-    // col 0 (not the broken one), so row 4's y-bucket is fine.
+    // row's first cell's min.y. 1.0 px tolerance.
     for (r, row) in std::iter::once(header_row)
         .chain(data_rows.iter().copied())
         .enumerate()
@@ -1231,16 +1223,7 @@ fn test_render_routers_table_rect_count_and_alignment() {
         );
     }
 
-    // (6) Inter-column gutter is 10 px on every row, including
-    // row 4. The known-bad cell at (row 4, col 1) is wider
-    // than the column, but the *gutter* between any two
-    // adjacent cells in the same row is determined by the
-    // layout cursor advancing `col_spacing = 10.0` between
-    // cells — not by the cell widths. Adjacent cells in row
-    // 4 shift together, so all row-4 gutters still measure
-    // 10 px; only the *min.x* of each cell in row 4 (cols
-    // 2..6) drifts to the right of the header by the col-1
-    // overflow amount.
+    // (6) Inter-column gutter is 10 px on every row.
     for (r, row) in std::iter::once(header_row)
         .chain(data_rows.iter().copied())
         .enumerate()
