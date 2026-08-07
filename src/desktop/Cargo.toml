@@ -37,8 +37,8 @@ tracing-subscriber = "0.3"
 base64 = "0.22.1"
 bytes = "1"
 chrono = "0.4.45"
-eframe = { version = "0.35", default-features = false, features = ["default_fonts", "glow", "wayland", "x11", "accesskit", "persistence"] }
-egui_extras = { version = "0.35", default-features = false }
+eframe = { version = "0.36", default-features = false, features = ["default_fonts", "glow", "wayland", "x11", "accesskit", "persistence"] }
+egui_extras = { version = "0.36", default-features = false }
 fast-dav-rs = "0.4.4"
 fast_h2m = "^0.4"
 jmap-client = { version = "=0.4.1", default-features = false, features = ["blocking", "rustls"] }
@@ -82,7 +82,7 @@ tempfile = "3.8"
 tokio = { version = "1.53.0", features = ["rt", "rt-multi-thread", "macros", "sync"] }
 filetime = "0.2"
 proptest = "1.4"
-egui_kittest = { version = "0.35", features = ["eframe", "snapshot"] }
+egui_kittest = { version = "0.36", features = ["eframe", "snapshot"] }
 # `accesskit::Role` is the type used by `egui_kittest::Role` /
 # `kittest::Queryable::get_by_role`; pull it in as a direct
 # dev-dep so the tests can `use accesskit::Role` without having
