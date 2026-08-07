@@ -1,0 +1,73 @@
+﻿fast_h2m v0.4.2
+├── base64 v0.22.1
+├── bitflags v2.13.1
+│   └── serde_core v1.0.229
+├── html-escape v0.2.15
+├── html5ever v0.39.0
+│   ├── log v0.4.33
+│   └── markup5ever v0.39.0
+│       ├── log v0.4.33
+│       ├── tendril v0.5.1
+│       │   └── new_debug_unreachable v1.0.6
+│       └── web_atoms v0.2.5
+│           ├── phf v0.13.1
+│           │   ├── phf_macros v0.13.1 (proc-macro)
+│           │   │   ├── phf_generator v0.13.1
+│           │   │   │   ├── fastrand v2.5.0
+│           │   │   │   └── phf_shared v0.13.1
+│           │   │   │       └── siphasher v1.0.3
+│           │   │   ├── phf_shared v0.13.1 (*)
+│           │   │   ├── proc-macro2 v1.0.107
+│           │   │   │   └── unicode-ident v1.0.24
+│           │   │   ├── quote v1.0.47
+│           │   │   │   └── proc-macro2 v1.0.107 (*)
+│           │   │   └── syn v2.0.119
+│           │   │       ├── proc-macro2 v1.0.107 (*)
+│           │   │       ├── quote v1.0.47 (*)
+│           │   │       └── unicode-ident v1.0.24
+│           │   └── phf_shared v0.13.1 (*)
+│           └── string_cache v0.9.0
+│               ├── new_debug_unreachable v1.0.6
+│               ├── parking_lot v0.12.5
+│               │   ├── lock_api v0.4.14
+│               │   │   └── scopeguard v1.2.0
+│               │   └── parking_lot_core v0.9.12
+│               │       ├── cfg-if v1.0.4
+│               │       ├── smallvec v1.15.2
+│               │       │   └── serde v1.0.229
+│               │       │       ├── serde_core v1.0.229
+│               │       │       └── serde_derive v1.0.229 (proc-macro)
+│               │       │           ├── proc-macro2 v1.0.107 (*)
+│               │       │           ├── quote v1.0.47 (*)
+│               │       │           └── syn v3.0.3
+│               │       │               ├── proc-macro2 v1.0.107 (*)
+│               │       │               ├── quote v1.0.47 (*)
+│               │       │               └── unicode-ident v1.0.24
+│               │       └── windows-link v0.2.1
+│               ├── phf_shared v0.13.1 (*)
+│               └── precomputed-hash v0.1.1
+│           [build-dependencies]
+│           ├── phf_codegen v0.13.1
+│           │   ├── phf_generator v0.13.1 (*)
+│           │   └── phf_shared v0.13.1 (*)
+│           └── string_cache_codegen v0.6.1
+│               ├── phf_generator v0.13.1 (*)
+│               ├── phf_shared v0.13.1 (*)
+│               ├── proc-macro2 v1.0.107 (*)
+│               └── quote v1.0.47 (*)
+├── mdream v1.5.9
+├── memchr v2.8.3
+├── phf v0.13.1 (*)
+├── rustedbytes-tl v0.2.0
+│   └── memchr v2.8.3
+├── serde v1.0.229 (*)
+├── serde_json v1.0.151
+│   ├── itoa v1.0.18
+│   ├── memchr v2.8.3
+│   ├── serde_core v1.0.229
+│   └── zmij v1.0.23
+└── thiserror v2.0.19
+    └── thiserror-impl v2.0.19 (proc-macro)
+        ├── proc-macro2 v1.0.107 (*)
+        ├── quote v1.0.47 (*)
+        └── syn v3.0.3 (*)

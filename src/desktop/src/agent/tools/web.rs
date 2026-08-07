@@ -4,7 +4,7 @@
 
 use crate::agent::datamark::{self, SECURITY_HEADER};
 use crate::agent::tools::manager::builtin::strings::WEB_FETCH_FINAL_PAGE_HINT;
-use crate::agent::tools::manager::cache::{CacheEntry, cache};
+use crate::agent::tools::manager::cache::CacheEntry;
 use crate::config::AppConfig;
 use fast_h2m::convert;
 use std::collections::HashMap;
@@ -16,6 +16,8 @@ const WEB_FETCH_PAGE_SIZE: usize = 100;
 
 pub fn tool_web_fetch(
     input: &crate::agent::tools::dtos::WebFetchInput,
+    cache: &crate::agent::tools::manager::cache::ToolCache,
+    uuid_gen: &dyn crate::utils::uuid::UuidGenerator,
 ) -> Result<crate::agent::tools::dtos::WebFetchResponse, String> {
     let url = &input.url;
 
@@ -23,7 +25,7 @@ pub fn tool_web_fetch(
     // The cursor is a UUID that points to the full content in the cache.
     if let Some(cursor) = &input.cursor {
         // First get the cursor entry to find the content UUID
-        let content_uuid = match cache().get(cursor) {
+        let content_uuid = match cache.get(cursor) {
             Some(CacheEntry::WebFetch { cursor: uuid }) => uuid,
             _ => {
                 return Err(
@@ -33,7 +35,7 @@ pub fn tool_web_fetch(
         };
 
         // Now get the actual content
-        let entry = match cache().get(&content_uuid) {
+        let entry = match cache.get(&content_uuid) {
             Some(CacheEntry::WebFetchContent {
                 content,
                 response_headers,
@@ -86,7 +88,7 @@ pub fn tool_web_fetch(
         };
 
         // Update the cached entry with the new cursor offset
-        cache().put(
+        cache.put(
             content_uuid,
             CacheEntry::WebFetchContent {
                 content: content.clone(),
@@ -115,10 +117,10 @@ pub fn tool_web_fetch(
     if !input.force_refetch
         && let Some(CacheEntry::WebFetch {
             cursor: content_uuid,
-        }) = cache().get(url)
+        }) = cache.get(url)
     {
         // Get the content
-        let entry = match cache().get(&content_uuid) {
+        let entry = match cache.get(&content_uuid) {
             Some(CacheEntry::WebFetchContent {
                 content,
                 response_headers,
@@ -154,7 +156,7 @@ pub fn tool_web_fetch(
 
             // Update the cached entry with cursor_offset = 0 (first page)
             // so subsequent calls without cursor also get the first page.
-            cache().put(
+            cache.put(
                 content_uuid.clone(),
                 CacheEntry::WebFetchContent {
                     content: content.clone(),
@@ -182,7 +184,7 @@ pub fn tool_web_fetch(
 
     if input.force_refetch {
         // Caller asked for a fresh fetch; clear any existing entry first.
-        cache().invalidate(url);
+        cache.invalidate(url);
     }
 
     match reqwest::blocking::Client::new()
@@ -206,7 +208,7 @@ pub fn tool_web_fetch(
                     let lines: Vec<&str> = md_content.lines().collect();
                     let page_content = lines[..WEB_FETCH_PAGE_SIZE.min(total_lines)].join("\n");
 
-                    let content_uuid = uuid::Uuid::new_v4().to_string();
+                    let content_uuid = uuid_gen.new_v4().to_string();
                     let (cursor_out, hint_out) = if total_lines <= WEB_FETCH_PAGE_SIZE {
                         // All content fits on one page
                         (None, Some(WEB_FETCH_FINAL_PAGE_HINT.to_string()))
@@ -216,7 +218,7 @@ pub fn tool_web_fetch(
                     };
 
                     // Store URL -> cursor UUID mapping
-                    cache().put(
+                    cache.put(
                         url.clone(),
                         CacheEntry::WebFetch {
                             cursor: content_uuid.clone(),
@@ -224,7 +226,7 @@ pub fn tool_web_fetch(
                     );
 
                     // Store full content under cursor UUID
-                    cache().put(
+                    cache.put(
                         content_uuid.clone(),
                         CacheEntry::WebFetchContent {
                             content: md_content.clone(),
@@ -333,30 +335,16 @@ pub fn tool_web_search(
 pub fn tool_web_delegate(
     config: &AppConfig,
     instruction: &str,
+    cache: &crate::agent::tools::manager::cache::ToolCache,
 ) -> Result<crate::agent::tools::dtos::WebDelegateResponse, String> {
-    let mut api_key = String::new();
-    let mut api_url = String::new();
-    let mut model_name = String::new();
+    let model_cfg = config.select_chat_model().map_err(|e| {
+        tracing::warn!(name = "tool.web_delegate.missing_api_key", "{}", e);
+        e
+    })?;
 
-    if let Some((_key, model_cfg)) = config.model_for_use_case("chat") {
-        api_key = model_cfg.api_key.clone();
-        api_url = model_cfg.api_url.clone();
-        model_name = model_cfg.model.clone();
-    } else if !config.models.is_empty()
-        && let Some(model_cfg) = config.models.values().next()
-    {
-        api_key = model_cfg.api_key.clone();
-        api_url = model_cfg.api_url.clone();
-        model_name = model_cfg.model.clone();
-    }
-
-    if api_key == "your-api-key-here" || api_key.is_empty() {
-        tracing::warn!(
-            name = "tool.web_delegate.missing_api_key",
-            "API key not set. Cannot use web_delegate. Operator should configure a valid API key in settings."
-        );
-        return Err("API key not set. Cannot use web_delegate.".to_string());
-    }
+    let api_key = model_cfg.api_key.clone();
+    let api_url = model_cfg.api_url.clone();
+    let model_name = model_cfg.model.clone();
 
     let mut messages = vec![
         serde_json::json!({
@@ -491,7 +479,11 @@ pub fn tool_web_delegate(
                         crate::agent::tools::dtos::WebFetchInput,
                     >(func_args_str)
                     {
-                        match tool_web_fetch(&input) {
+                        match tool_web_fetch(
+                            &input,
+                            cache,
+                            &crate::utils::uuid::SystemUuidGenerator,
+                        ) {
                             Ok(res) => serde_json::to_string(
                                 &crate::agent::tools::dtos::ToolResponse::Success { data: res },
                             )

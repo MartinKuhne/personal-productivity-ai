@@ -95,17 +95,20 @@ fn test_tools_dialog_renders_restart_button_on_error() {
     let mut app = crate::ui::FastMdApp::empty_state(crate::config::AppConfig::default());
     // Populate the global manager's group state so `record_error`
     // has a row to attach the error to, then record it.
-    crate::agent::tools::manager::groups_snapshot(app.config());
-    let id = crate::agent::tools::manager::ToolGroupId::Internal(
-        crate::agent::tools::manager::InternalToolGroup::Filesystem,
-    );
-    crate::agent::tools::manager::record_mcp_error(
-        &id,
-        crate::agent::tools::manager::ToolGroupError::now(
-            crate::agent::tools::manager::ToolErrorKind::Execution,
-            "boom".to_owned(),
-        ),
-    );
+    {
+        let mut tm = app.orchestrator.tool_manager.write().unwrap();
+        tm.groups_snapshot(app.config());
+        let id = crate::agent::tools::manager::ToolGroupId::Internal(
+            crate::agent::tools::manager::InternalToolGroup::Filesystem,
+        );
+        tm.record_error(
+            &id,
+            crate::agent::tools::manager::ToolGroupError::now(
+                crate::agent::tools::manager::ToolErrorKind::Execution,
+                "Permission denied".to_string(),
+            ),
+        );
+    }
     let output = render_dialog_once(&mut app);
     let texts = extract_text(&output.shapes);
     let has_restart_button = texts.iter().any(|t| t.trim() == "Restart");

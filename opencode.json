@@ -15,6 +15,12 @@
             "--mcp"
           ],
           "enabled": true
+        },
+        "egui_mcp": {
+            "type": "local",
+            "command": [
+                "egui-mcp"
+            ]
         }
     }
 }

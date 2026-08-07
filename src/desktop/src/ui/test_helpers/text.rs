@@ -31,6 +31,8 @@
 //!     crate::ui::strings::NO_MARKDOWN_FILES,
 //! ]);
 //! ```
+//!
+//! Unit tests live in the sibling `text_tests.rs` sidecar.
 
 use eframe::egui;
 
@@ -103,3 +105,7 @@ fn debug_summary(texts: &[String]) -> String {
         format!("[{}]", preview.join(" | "))
     }
 }
+
+#[cfg(test)]
+#[path = "text_tests.rs"]
+mod text_tests;

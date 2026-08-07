@@ -83,8 +83,10 @@ pub struct ToolContext<'a> {
     /// the `browser_*` tools are not registered and the field
     /// stays unused.
     pub browser_session: Arc<BrowserSession>,
-    /// PDF-backing tracker for checking if a file has a `.pdf` sibling.
     pub pdf_backing: std::sync::Arc<crate::app::session::PdfBackingTracker>,
+    pub cache: &'a crate::agent::tools::manager::cache::ToolCache,
+    pub tool_manager: std::sync::Arc<std::sync::RwLock<crate::agent::tools::manager::ToolManager>>,
+    pub uuid_gen: std::sync::Arc<dyn crate::utils::uuid::UuidGenerator>,
 }
 
 impl<'a> ToolContext<'a> {
@@ -94,6 +96,9 @@ impl<'a> ToolContext<'a> {
         file_event_bus: &'a Bus<FileEvent>,
         browser_session: Arc<BrowserSession>,
         pdf_backing: std::sync::Arc<crate::app::session::PdfBackingTracker>,
+        cache: &'a crate::agent::tools::manager::cache::ToolCache,
+        tool_manager: std::sync::Arc<std::sync::RwLock<crate::agent::tools::manager::ToolManager>>,
+        uuid_gen: std::sync::Arc<dyn crate::utils::uuid::UuidGenerator>,
     ) -> Self {
         Self {
             config,
@@ -102,6 +107,9 @@ impl<'a> ToolContext<'a> {
             publisher: EventPublisher::new(file_event_bus),
             browser_session,
             pdf_backing,
+            cache,
+            tool_manager,
+            uuid_gen,
         }
     }
 

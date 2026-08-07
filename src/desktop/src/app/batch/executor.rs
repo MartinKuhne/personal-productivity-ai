@@ -5,11 +5,10 @@ use crate::bus::core::Bus;
 use crate::bus::events::file::FileEvent;
 use crate::bus::events::typed::BackgroundEvent;
 use crate::config::AppConfig;
-use chrono::Local;
+use crate::utils::clock::Clock;
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::{Arc, mpsc};
-use std::time::Instant;
 use tokio::sync::Semaphore;
 
 pub struct BatchJobExecutor {
@@ -17,6 +16,7 @@ pub struct BatchJobExecutor {
     file_event_bus: Bus<FileEvent>,
     tx_gui: mpsc::Sender<BackgroundEvent>,
     cancel_flag: Arc<AtomicBool>,
+    clock: Arc<dyn Clock>,
 }
 
 impl BatchJobExecutor {
@@ -26,17 +26,19 @@ impl BatchJobExecutor {
         tx_gui: mpsc::Sender<BackgroundEvent>,
         _prompt: String,
         cancel_flag: Arc<AtomicBool>,
+        clock: Arc<dyn Clock>,
     ) -> Self {
         Self {
             app_config,
             file_event_bus,
             tx_gui,
             cancel_flag,
+            clock,
         }
     }
 
     pub fn execute_concurrent(&self, mut jobs: Vec<BatchJob>, concurrency: u8) -> BatchResult {
-        let start_time = Instant::now();
+        let start_time = self.clock.now();
         let total_jobs = jobs.len();
 
         let Ok(rt) = tokio::runtime::Builder::new_multi_thread()
@@ -49,7 +51,7 @@ impl BatchJobExecutor {
                 completed: 0,
                 failed: 0,
                 cancelled: 0,
-                duration: start_time.elapsed(),
+                duration: (self.clock.now() - start_time).to_std().unwrap_or_default(),
             };
         };
 
@@ -103,7 +105,7 @@ impl BatchJobExecutor {
                 };
 
                 job.status = BatchJobStatus::Running;
-                job.start_time = Some(Local::now());
+                job.start_time = Some(self.clock.now());
 
                 tracing::info!(target: "batch", job_id, path = ?target_path, "Starting batch job");
 
@@ -137,7 +139,7 @@ impl BatchJobExecutor {
                 Ok((job_id, target_path, status, error)) => {
                     if let Some(job) = jobs.iter_mut().find(|j| j.id == job_id) {
                         job.status = status;
-                        job.end_time = Some(Local::now());
+                        job.end_time = Some(self.clock.now());
                         if let Some(ref err) = error {
                             job.error = Some(err.clone());
                         }
@@ -174,7 +176,7 @@ impl BatchJobExecutor {
             completed,
             failed,
             cancelled,
-            duration: start_time.elapsed(),
+            duration: (self.clock.now() - start_time).to_std().unwrap_or_default(),
         }
     }
 }
@@ -213,6 +215,10 @@ pub fn run_agent_blocking(
             &crate::config::AppConfig::default(),
         )),
         pdf_backing: std::sync::Arc::new(crate::app::session::PdfBackingTracker::new()),
+        tool_manager: std::sync::Arc::new(std::sync::RwLock::new(
+            crate::agent::tools::manager::ToolManager::new(),
+        )),
+        uuid_gen: std::sync::Arc::new(crate::utils::uuid::SystemUuidGenerator),
     };
     run_agent(ctx);
 
@@ -250,6 +256,7 @@ mod tests {
             tx,
             "test prompt".to_string(),
             cancel_flag,
+            Arc::new(crate::utils::clock::SystemClock),
         );
 
         let result = executor.execute_concurrent(vec![], 4);
@@ -271,6 +278,7 @@ mod tests {
             tx,
             "test prompt".to_string(),
             cancel_flag,
+            Arc::new(crate::utils::clock::SystemClock),
         );
 
         let jobs = vec![BatchJob {

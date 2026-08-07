@@ -51,3 +51,7 @@ impl<F> Default for ChannelWorker<F> {
         Self::new()
     }
 }
+
+#[cfg(test)]
+#[path = "worker_tests.rs"]
+mod tests;

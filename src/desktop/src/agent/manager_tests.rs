@@ -78,6 +78,9 @@ fn test_drain_config_observes_first_event() {
             &AppConfig::default(),
         )),
         Arc::new(crate::app::session::PdfBackingTracker::new()),
+        Arc::new(std::sync::RwLock::new(
+            crate::agent::tools::manager::ToolManager::new(),
+        )),
     );
 
     // Before any event: not arrived, default config in use.
@@ -109,6 +112,9 @@ fn test_drain_config_returns_false_when_empty() {
             &AppConfig::default(),
         )),
         Arc::new(crate::app::session::PdfBackingTracker::new()),
+        Arc::new(std::sync::RwLock::new(
+            crate::agent::tools::manager::ToolManager::new(),
+        )),
     );
 
     assert!(!mgr.drain_config());
@@ -133,6 +139,9 @@ fn test_construct_then_publish_order_drains_config() {
             &AppConfig::default(),
         )),
         Arc::new(crate::app::session::PdfBackingTracker::new()),
+        Arc::new(std::sync::RwLock::new(
+            crate::agent::tools::manager::ToolManager::new(),
+        )),
     );
 
     // 2. Publish second — this is the line in `main.rs` that
@@ -167,6 +176,9 @@ fn test_publish_then_construct_order_drops_event() {
             &AppConfig::default(),
         )),
         Arc::new(crate::app::session::PdfBackingTracker::new()),
+        Arc::new(std::sync::RwLock::new(
+            crate::agent::tools::manager::ToolManager::new(),
+        )),
     );
 
     assert!(!mgr.drain_config());

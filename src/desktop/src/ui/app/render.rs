@@ -127,6 +127,7 @@ impl FastMdApp {
                                     self.orchestrator.tx.clone(),
                                     self.orchestrator.file_event_bus.clone(),
                                     prompt_text,
+                                    std::sync::Arc::new(crate::utils::clock::SystemClock),
                                 );
                             let handle = coordinator.execute();
                             self.orchestrator.dialogs.batch_handle = Some(handle);

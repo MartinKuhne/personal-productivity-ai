@@ -738,14 +738,36 @@ impl AppConfig {
             .iter()
             .filter(|(_, cfg)| cfg.has_use_case(uc_ref))
             .collect();
-        let min_cost = match candidates.iter().map(|(_, cfg)| cfg.get_cost()).min() {
-            Some(c) => c,
-            None => return Vec::new(),
-        };
+        if candidates.is_empty() {
+            return vec![];
+        }
+        let min_cost = candidates
+            .iter()
+            .map(|(_, cfg)| cfg.get_cost())
+            .min()
+            .unwrap();
         candidates
             .into_iter()
             .filter(|(_, cfg)| cfg.get_cost() == min_cost)
             .collect()
+    }
+
+    /// Select a chat model, preferring one configured for the "chat" use case,
+    /// falling back to the first available model, and rejecting default/empty keys.
+    pub fn select_chat_model(&self) -> Result<&LlmConfig, String> {
+        let model_cfg = if let Some((_key, model_cfg)) = self.model_for_use_case("chat") {
+            model_cfg
+        } else if let Some(model_cfg) = self.models.values().next() {
+            model_cfg
+        } else {
+            return Err("No LLM models are configured.".to_string());
+        };
+
+        if model_cfg.api_key == "your-api-key-here" || model_cfg.api_key.is_empty() {
+            return Err("API key not set or invalid.".to_string());
+        }
+
+        Ok(model_cfg)
     }
 
     /// Validate configuration, returning a list of warnings.
