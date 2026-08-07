@@ -91,8 +91,10 @@ impl FastMdApp {
         // the UI thread in `update_ui`.
         let background_task = Task::new(config_bus.clone());
         // The tools manager subscribes to the same bus and performs
-        // the one-time 
-        let tool_manager = std::sync::Arc::new(std::sync::RwLock::new(crate::agent::tools::manager::ToolManager::new()));
+        // the one-time
+        let tool_manager = std::sync::Arc::new(std::sync::RwLock::new(
+            crate::agent::tools::manager::ToolManager::new(),
+        ));
         // Start MCP initialization immediately on the app's initial
         // background thread, so the UI thread never blocks on MCP
         // network I/O at startup.
@@ -198,7 +200,9 @@ impl FastMdApp {
                 pending_file_load: None,
                 repaint_interval: Duration::from_millis(16),
                 finished_watcher_slot,
-                tool_manager: std::sync::Arc::new(std::sync::RwLock::new(crate::agent::tools::manager::ToolManager::new())),
+                tool_manager: std::sync::Arc::new(std::sync::RwLock::new(
+                    crate::agent::tools::manager::ToolManager::new(),
+                )),
             },
             layout,
             cached_tree_rows: None,
@@ -249,7 +253,9 @@ impl FastMdApp {
             bus.clone(),
             test_browser_session,
             Arc::new(pdf_backing_tracker.clone()),
-            Arc::new(std::sync::RwLock::new(crate::agent::tools::manager::ToolManager::new())),
+            Arc::new(std::sync::RwLock::new(
+                crate::agent::tools::manager::ToolManager::new(),
+            )),
         );
         agent.set_config(config.clone());
 
@@ -296,7 +302,9 @@ impl FastMdApp {
                 pending_file_load: None,
                 repaint_interval: Duration::from_millis(16),
                 finished_watcher_slot,
-                tool_manager: std::sync::Arc::new(std::sync::RwLock::new(crate::agent::tools::manager::ToolManager::new())),
+                tool_manager: std::sync::Arc::new(std::sync::RwLock::new(
+                    crate::agent::tools::manager::ToolManager::new(),
+                )),
             },
             layout: PanelLayout::new(),
             cached_tree_rows: None,

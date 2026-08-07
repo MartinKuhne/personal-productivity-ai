@@ -741,8 +741,15 @@ impl AppConfig {
         if candidates.is_empty() {
             return vec![];
         }
-        let min_cost = candidates.iter().map(|(_, cfg)| cfg.get_cost()).min().unwrap();
-        candidates.into_iter().filter(|(_, cfg)| cfg.get_cost() == min_cost).collect()
+        let min_cost = candidates
+            .iter()
+            .map(|(_, cfg)| cfg.get_cost())
+            .min()
+            .unwrap();
+        candidates
+            .into_iter()
+            .filter(|(_, cfg)| cfg.get_cost() == min_cost)
+            .collect()
     }
 
     /// Select a chat model, preferring one configured for the "chat" use case,

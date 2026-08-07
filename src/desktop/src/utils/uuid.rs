@@ -24,9 +24,7 @@ impl FixedUuidGenerator {
 
 impl Default for FixedUuidGenerator {
     fn default() -> Self {
-        Self {
-            value: Uuid::nil(),
-        }
+        Self { value: Uuid::nil() }
     }
 }
 

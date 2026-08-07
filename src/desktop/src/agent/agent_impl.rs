@@ -31,7 +31,11 @@ fn run_agent_inner(ctx: AgentContext) {
         .build(&ctx.config);
     log_prompt_context(&ctx.active_file, &ctx.active_dir, &ctx.selected_files);
     let mut messages = build_messages(system_prompt, &ctx.prompt, ctx.history.clone());
-    let tools_json = ctx.tool_manager.write().unwrap().get_tools_schema(&ctx.config, &ctx.prompt);
+    let tools_json = ctx
+        .tool_manager
+        .write()
+        .unwrap()
+        .get_tools_schema(&ctx.config, &ctx.prompt);
     let mut full_response = ctx.current_response.clone();
     let executor = ToolExecutor::new(
         ctx.config.clone(),

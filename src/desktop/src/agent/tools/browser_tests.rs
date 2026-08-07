@@ -103,7 +103,15 @@ fn test_browser_navigate_tool_round_trip() {
     let tm = Arc::new(std::sync::RwLock::new(
         crate::agent::tools::manager::ToolManager::new(),
     ));
-    let ctx = ToolContext::new(config, bus, session, pdf_backing, crate::agent::tools::manager::cache::cache(), tm, Arc::new(crate::utils::uuid::SystemUuidGenerator));
+    let ctx = ToolContext::new(
+        config,
+        bus,
+        session,
+        pdf_backing,
+        crate::agent::tools::manager::cache::cache(),
+        tm,
+        Arc::new(crate::utils::uuid::SystemUuidGenerator),
+    );
 
     let tool = crate::agent::tools::manager::builtin::browser::BrowserNavigateTool;
     let args = r#"{"url":"about:blank"}"#;
@@ -126,7 +134,15 @@ fn test_browser_get_page_state_tool_is_readonly() {
     let tm = Arc::new(std::sync::RwLock::new(
         crate::agent::tools::manager::ToolManager::new(),
     ));
-    let _ctx = ToolContext::new(config, bus, session, pdf_backing, crate::agent::tools::manager::cache::cache(), tm, Arc::new(crate::utils::uuid::SystemUuidGenerator));
+    let _ctx = ToolContext::new(
+        config,
+        bus,
+        session,
+        pdf_backing,
+        crate::agent::tools::manager::cache::cache(),
+        tm,
+        Arc::new(crate::utils::uuid::SystemUuidGenerator),
+    );
 
     let tool = crate::agent::tools::manager::builtin::browser::BrowserGetPageStateTool;
     assert_eq!(tool.safety(), Safety::ReadOnly);

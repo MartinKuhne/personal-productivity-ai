@@ -117,7 +117,9 @@ impl AgentSessionManager {
     /// populated manager (existing test fixtures).
     #[doc(hidden)]
     pub fn new_for_test(config: AppConfig, browser_session: Arc<BrowserSession>) -> Self {
-        let tool_manager = Arc::new(std::sync::RwLock::new(crate::agent::tools::manager::ToolManager::new()));
+        let tool_manager = Arc::new(std::sync::RwLock::new(
+            crate::agent::tools::manager::ToolManager::new(),
+        ));
         Self {
             state: AgentState {
                 running: false,

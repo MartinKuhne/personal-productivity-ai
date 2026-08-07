@@ -9,10 +9,10 @@ use crate::bus::core::Bus;
 use crate::bus::events::file::FileEvent;
 use crate::bus::events::typed::BackgroundEvent;
 use crate::config::AppConfig;
+use crate::utils::clock::Clock;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, mpsc};
 use std::thread;
-use crate::utils::clock::Clock;
 
 pub struct BatchCoordinator {
     config: BatchConfig,
@@ -164,8 +164,14 @@ mod tests {
         };
 
         let app_config = AppConfig::default();
-        let (coordinator, cancel_flag) =
-            BatchCoordinator::new(config, app_config, tx, bus, "test prompt".to_string(), Arc::new(crate::utils::clock::SystemClock));
+        let (coordinator, cancel_flag) = BatchCoordinator::new(
+            config,
+            app_config,
+            tx,
+            bus,
+            "test prompt".to_string(),
+            Arc::new(crate::utils::clock::SystemClock),
+        );
 
         assert!(!cancel_flag.load(Ordering::SeqCst));
         let handle = coordinator.execute();
@@ -190,8 +196,14 @@ mod tests {
         };
 
         let app_config = AppConfig::default();
-        let (coordinator, _cancel_flag) =
-            BatchCoordinator::new(config, app_config, tx, bus, "test prompt".to_string(), Arc::new(crate::utils::clock::SystemClock));
+        let (coordinator, _cancel_flag) = BatchCoordinator::new(
+            config,
+            app_config,
+            tx,
+            bus,
+            "test prompt".to_string(),
+            Arc::new(crate::utils::clock::SystemClock),
+        );
 
         let handle = coordinator.execute();
         let result = handle.join();
@@ -219,8 +231,14 @@ mod tests {
         };
 
         let app_config = AppConfig::default();
-        let (coordinator, _) =
-            BatchCoordinator::new(config, app_config, tx, bus, "test prompt".to_string(), Arc::new(crate::utils::clock::SystemClock));
+        let (coordinator, _) = BatchCoordinator::new(
+            config,
+            app_config,
+            tx,
+            bus,
+            "test prompt".to_string(),
+            Arc::new(crate::utils::clock::SystemClock),
+        );
 
         let handle = coordinator.execute();
         let result = handle.join();

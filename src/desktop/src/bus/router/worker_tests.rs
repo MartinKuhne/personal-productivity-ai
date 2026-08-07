@@ -1,7 +1,7 @@
 use super::*;
-use std::sync::atomic::{AtomicUsize, Ordering};
-use std::sync::Arc;
 use std::path::PathBuf;
+use std::sync::Arc;
+use std::sync::atomic::{AtomicUsize, Ordering};
 
 #[test]
 fn test_spawn_path_worker_processes_items() {

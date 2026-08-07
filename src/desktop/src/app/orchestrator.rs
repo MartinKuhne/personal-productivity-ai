@@ -401,9 +401,7 @@ impl AppOrchestrator {
     }
 
     pub fn handle_mcp_auth_event(&mut self, ev: McpAuthEvent) {
-        use crate::agent::tools::manager::{
-            ToolErrorKind, ToolGroupError,
-        };
+        use crate::agent::tools::manager::{ToolErrorKind, ToolGroupError};
         match ev {
             McpAuthEvent::Completed { server_name, error } => {
                 self.dialogs.set_oauth_idle(&server_name);

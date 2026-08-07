@@ -478,7 +478,10 @@ fn test_tool_search_email_no_clients() {
             keyword: Some("test"),
             ..Default::default()
         },
-        None, &cache, &crate::utils::uuid::SystemUuidGenerator);
+        None,
+        &cache,
+        &crate::utils::uuid::SystemUuidGenerator,
+    );
     assert!(res.is_err());
 }
 
@@ -511,7 +514,10 @@ fn test_tool_search_email_success() {
             keyword: Some("test"),
             ..Default::default()
         },
-        None, &cache, &crate::utils::uuid::SystemUuidGenerator);
+        None,
+        &cache,
+        &crate::utils::uuid::SystemUuidGenerator,
+    );
     assert!(res.is_ok());
 }
 
@@ -664,7 +670,10 @@ fn test_tool_search_email_with_status_filters_success() {
             is_unread: Some(true),
             is_flagged: Some(false),
         },
-        None, &cache, &crate::utils::uuid::SystemUuidGenerator);
+        None,
+        &cache,
+        &crate::utils::uuid::SystemUuidGenerator,
+    );
     assert!(res.is_ok());
 }
 
@@ -716,7 +725,10 @@ fn test_tool_search_email_empty_filters_errors() {
         SearchEmailFilters {
             ..Default::default()
         },
-        None, &cache, &crate::utils::uuid::SystemUuidGenerator);
+        None,
+        &cache,
+        &crate::utils::uuid::SystemUuidGenerator,
+    );
     assert!(res.is_err());
     let msg = res.unwrap_err();
     assert!(msg.contains("At least one filter field must be provided"));
@@ -743,7 +755,10 @@ fn test_tool_search_email_empty_filters_with_client_errors() {
         SearchEmailFilters {
             ..Default::default()
         },
-        None, &cache, &crate::utils::uuid::SystemUuidGenerator);
+        None,
+        &cache,
+        &crate::utils::uuid::SystemUuidGenerator,
+    );
     assert!(res.is_err());
     assert!(
         res.unwrap_err()
@@ -788,7 +803,10 @@ fn test_tool_search_email_first_call_small_set_returns_final_page_hint() {
             keyword: Some("test"),
             ..Default::default()
         },
-        None, &cache, &crate::utils::uuid::SystemUuidGenerator);
+        None,
+        &cache,
+        &crate::utils::uuid::SystemUuidGenerator,
+    );
     assert!(res.is_ok());
     let response = res.unwrap();
     assert_eq!(response.total, 3);
@@ -844,7 +862,10 @@ fn test_tool_search_email_cursor_unknown_returns_error() {
             keyword: Some("test"),
             ..Default::default()
         },
-        Some("00000000-0000-0000-0000-000000000000".to_string()), &cache, &crate::utils::uuid::SystemUuidGenerator);
+        Some("00000000-0000-0000-0000-000000000000".to_string()),
+        &cache,
+        &crate::utils::uuid::SystemUuidGenerator,
+    );
     assert!(res.is_err());
     let err = res.unwrap_err();
     assert!(
@@ -895,7 +916,10 @@ fn test_tool_search_email_pagination_hint_on_final_page() {
             keyword: Some("test"),
             ..Default::default()
         },
-        None, &cache, &crate::utils::uuid::SystemUuidGenerator);
+        None,
+        &cache,
+        &crate::utils::uuid::SystemUuidGenerator,
+    );
     assert!(res.is_ok());
     let response = res.unwrap();
     assert_eq!(response.total, 1);
@@ -951,7 +975,10 @@ fn test_tool_search_email_multiple_clients() {
             keyword: Some("test"),
             ..Default::default()
         },
-        None, &cache, &crate::utils::uuid::SystemUuidGenerator);
+        None,
+        &cache,
+        &crate::utils::uuid::SystemUuidGenerator,
+    );
     assert!(res.is_ok());
     let response = res.unwrap();
     assert_eq!(response.total, 2);
@@ -995,7 +1022,10 @@ fn test_tool_search_email_logs_tracing() {
             keyword: Some("fastmail"),
             ..Default::default()
         },
-        None, &cache, &crate::utils::uuid::SystemUuidGenerator);
+        None,
+        &cache,
+        &crate::utils::uuid::SystemUuidGenerator,
+    );
     assert!(res.is_ok());
     let response = res.unwrap();
     assert_eq!(response.total, 2);

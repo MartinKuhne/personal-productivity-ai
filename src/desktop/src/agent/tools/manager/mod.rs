@@ -328,8 +328,6 @@ impl ToolManager {
         self.get_schema(config, prompt)
     }
 
-
-
     /// All groups, sorted deterministically by id.
     pub fn groups(&self) -> Vec<ToolGroupState> {
         self.group_state.values().cloned().collect()
@@ -434,8 +432,6 @@ impl ToolManager {
         }
         self.refresh_state(config);
     }
-
-
 
     /// Snapshot of the tool descriptors the manager currently knows
     /// about, useful for tests and the debug overlay.

@@ -431,7 +431,15 @@ mod tests {
         let tm = std::sync::Arc::new(std::sync::RwLock::new(
             crate::agent::tools::manager::ToolManager::new(),
         ));
-        crate::agent::tools::context::ToolContext::new(config, bus, session, pdf_backing, crate::agent::tools::manager::cache::cache(), tm, std::sync::Arc::new(crate::utils::uuid::SystemUuidGenerator))
+        crate::agent::tools::context::ToolContext::new(
+            config,
+            bus,
+            session,
+            pdf_backing,
+            crate::agent::tools::manager::cache::cache(),
+            tm,
+            std::sync::Arc::new(crate::utils::uuid::SystemUuidGenerator),
+        )
     }
 
     #[test]

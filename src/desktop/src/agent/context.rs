@@ -77,7 +77,8 @@ mod tests {
                 crate::agent::tools::manager::ToolManager::new(),
             )),
             uuid_gen: Arc::new(crate::utils::uuid::SystemUuidGenerator),
-        };assert_eq!(ctx.config.models, config.models);
+        };
+        assert_eq!(ctx.config.models, config.models);
         assert!(ctx.active_file.as_deref() == Some(Path::new("test.md")));
         assert_eq!(ctx.prompt, "hello");
     }

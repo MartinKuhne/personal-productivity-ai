@@ -23,13 +23,25 @@ fn test_render_heading_styles() {
     let ctx = egui::Context::default();
     let output = ctx.run_ui(egui::RawInput::default(), |ui| {
         let mut scroll = None;
-        let style_bold = TextStyle { bold: true, ..Default::default() };
-        
-        let style_italic = TextStyle { italic: true, ..Default::default() };
-        
-        let style_code = TextStyle { code: true, ..Default::default() };
-        
-        let style_strike = TextStyle { strikethrough: true, ..Default::default() };
+        let style_bold = TextStyle {
+            bold: true,
+            ..Default::default()
+        };
+
+        let style_italic = TextStyle {
+            italic: true,
+            ..Default::default()
+        };
+
+        let style_code = TextStyle {
+            code: true,
+            ..Default::default()
+        };
+
+        let style_strike = TextStyle {
+            strikethrough: true,
+            ..Default::default()
+        };
 
         let elems = vec![
             InlineElem::Text("bold".to_string(), style_bold),

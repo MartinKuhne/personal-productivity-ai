@@ -45,12 +45,19 @@ fn test_tool_web_fetch_mock() {
         cursor: None,
     };
     let mock_uuid = uuid::Uuid::nil();
-    let result = tool_web_fetch(&input, &cache, &crate::utils::uuid::FixedUuidGenerator::new(mock_uuid)).unwrap();
+    let result = tool_web_fetch(
+        &input,
+        &cache,
+        &crate::utils::uuid::FixedUuidGenerator::new(mock_uuid),
+    )
+    .unwrap();
     assert!(result.content.contains("Hello") || result.content.contains("World"));
     assert!(result.total_lines > 0);
-    
+
     // Verify the mock generator was used to create the cache entry
-    if let Some(crate::agent::tools::manager::cache::CacheEntry::WebFetch { cursor }) = cache.get(&server_url) {
+    if let Some(crate::agent::tools::manager::cache::CacheEntry::WebFetch { cursor }) =
+        cache.get(&server_url)
+    {
         assert_eq!(cursor, mock_uuid.to_string());
     } else {
         panic!("Cache missing WebFetch entry for url");
@@ -154,7 +161,12 @@ fn test_tool_web_fetch_force_refetch() {
         force_refetch: true,
         cursor: None,
     };
-    let second = tool_web_fetch(&force_input, &cache, &crate::utils::uuid::SystemUuidGenerator).unwrap();
+    let second = tool_web_fetch(
+        &force_input,
+        &cache,
+        &crate::utils::uuid::SystemUuidGenerator,
+    )
+    .unwrap();
     assert!(!second.from_cache);
 }
 
@@ -279,10 +291,7 @@ fn test_tool_web_delegate_missing_api_key() {
 
     let result = tool_web_delegate(&config, "do something", &cache);
     assert!(result.is_err());
-    assert_eq!(
-        result.unwrap_err(),
-        "API key not set or invalid."
-    );
+    assert_eq!(result.unwrap_err(), "API key not set or invalid.");
 }
 
 #[test]

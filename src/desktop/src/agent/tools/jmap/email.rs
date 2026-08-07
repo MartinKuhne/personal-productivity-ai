@@ -494,9 +494,7 @@ pub fn tool_search_email(
     cache: &crate::agent::tools::manager::cache::ToolCache,
     uuid_gen: &dyn crate::utils::uuid::UuidGenerator,
 ) -> Result<crate::agent::tools::dtos::SearchEmailResponse, String> {
-    use crate::agent::tools::manager::cache::{
-        CacheEntry, SearchEmailCacheEntry, SearchEmailItem,
-    };
+    use crate::agent::tools::manager::cache::{CacheEntry, SearchEmailCacheEntry, SearchEmailItem};
 
     // First call: query JMAP, populate the cache, return first page + cursor.
     let Some(cursor) = cursor else {

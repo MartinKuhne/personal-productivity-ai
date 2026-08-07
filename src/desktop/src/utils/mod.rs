@@ -1,10 +1,10 @@
 //! Shared utility functions for markdown parsing, path validation, and tag extraction.
 
+pub mod clock;
 pub mod encoding;
 pub mod markdown;
 pub mod path;
 pub mod tags;
-pub mod clock;
 pub mod uuid;
 
 pub use encoding::read_text_file;

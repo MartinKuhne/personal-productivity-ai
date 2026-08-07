@@ -337,10 +337,7 @@ pub fn tool_web_delegate(
     cache: &crate::agent::tools::manager::cache::ToolCache,
 ) -> Result<crate::agent::tools::dtos::WebDelegateResponse, String> {
     let model_cfg = config.select_chat_model().map_err(|e| {
-        tracing::warn!(
-            name = "tool.web_delegate.missing_api_key",
-            "{}", e
-        );
+        tracing::warn!(name = "tool.web_delegate.missing_api_key", "{}", e);
         e
     })?;
 
@@ -477,7 +474,11 @@ pub fn tool_web_delegate(
                         crate::agent::tools::dtos::WebFetchInput,
                     >(func_args_str)
                     {
-                        match tool_web_fetch(&input, cache, &crate::utils::uuid::SystemUuidGenerator) {
+                        match tool_web_fetch(
+                            &input,
+                            cache,
+                            &crate::utils::uuid::SystemUuidGenerator,
+                        ) {
                             Ok(res) => serde_json::to_string(
                                 &crate::agent::tools::dtos::ToolResponse::Success { data: res },
                             )

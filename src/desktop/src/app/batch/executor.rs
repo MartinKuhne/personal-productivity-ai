@@ -5,11 +5,11 @@ use crate::bus::core::Bus;
 use crate::bus::events::file::FileEvent;
 use crate::bus::events::typed::BackgroundEvent;
 use crate::config::AppConfig;
+use crate::utils::clock::Clock;
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::{Arc, mpsc};
 use tokio::sync::Semaphore;
-use crate::utils::clock::Clock;
 
 pub struct BatchJobExecutor {
     app_config: AppConfig,
@@ -215,7 +215,9 @@ pub fn run_agent_blocking(
             &crate::config::AppConfig::default(),
         )),
         pdf_backing: std::sync::Arc::new(crate::app::session::PdfBackingTracker::new()),
-        tool_manager: std::sync::Arc::new(std::sync::RwLock::new(crate::agent::tools::manager::ToolManager::new())),
+        tool_manager: std::sync::Arc::new(std::sync::RwLock::new(
+            crate::agent::tools::manager::ToolManager::new(),
+        )),
         uuid_gen: std::sync::Arc::new(crate::utils::uuid::SystemUuidGenerator),
     };
     run_agent(ctx);

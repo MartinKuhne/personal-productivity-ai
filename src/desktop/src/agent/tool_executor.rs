@@ -108,7 +108,15 @@ impl ToolExecutor {
                 let tm = self.tool_manager.clone();
                 let uuid_gen = self.uuid_gen.clone();
                 join_set.spawn_blocking(move || {
-                    let ctx = ToolContext::new(&cfg, &bus, browser, pdf, crate::agent::tools::manager::cache::cache(), tm, uuid_gen);
+                    let ctx = ToolContext::new(
+                        &cfg,
+                        &bus,
+                        browser,
+                        pdf,
+                        crate::agent::tools::manager::cache::cache(),
+                        tm,
+                        uuid_gen,
+                    );
                     let result = execute_tool(&ctx, &func_name, &func_args);
                     (call_id, func_name, func_args, result)
                 });
@@ -228,23 +236,11 @@ mod tests {
         // The registry doesn't exist anymore as a global, but the manager
         // exposes a single `safety_of(name)` lookup that returns
         // Safety::ReadOnly / Safety::Mutating.
-        assert_eq!(
-            tm.safety_of("read_file"),
-            Safety::ReadOnly
-        );
-        assert_eq!(
-            tm.safety_of("grep"),
-            Safety::ReadOnly
-        );
-        assert_eq!(
-            tm.safety_of("create_file"),
-            Safety::Mutating
-        );
+        assert_eq!(tm.safety_of("read_file"), Safety::ReadOnly);
+        assert_eq!(tm.safety_of("grep"), Safety::ReadOnly);
+        assert_eq!(tm.safety_of("create_file"), Safety::Mutating);
         // Unknown tools fall back to Mutating (the conservative choice).
-        assert_eq!(
-            tm.safety_of("nonexistent"),
-            Safety::Mutating
-        );
+        assert_eq!(tm.safety_of("nonexistent"), Safety::Mutating);
     }
 
     #[test]

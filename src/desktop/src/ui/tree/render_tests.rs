@@ -669,7 +669,10 @@ fn test_rename_action_on_directory_opens_rename_dialog() {
 
     // Right-click the directory row to open its context menu.
     let dir_nodes: Vec<_> = harness.query_all_by_label_contains("test_dir").collect();
-    assert!(!dir_nodes.is_empty(), "expected the directory row to be present");
+    assert!(
+        !dir_nodes.is_empty(),
+        "expected the directory row to be present"
+    );
     dir_nodes[0].click_secondary();
     harness.run_steps(2);
     harness.run_steps(2);
@@ -781,8 +784,13 @@ fn test_move_action_on_file_opens_move_dialog() {
     harness.fit_contents();
 
     // Right-click the file row to open its context menu.
-    let file_nodes: Vec<_> = harness.query_all_by_label_contains("test_file.md").collect();
-    assert!(!file_nodes.is_empty(), "expected the file row to be present");
+    let file_nodes: Vec<_> = harness
+        .query_all_by_label_contains("test_file.md")
+        .collect();
+    assert!(
+        !file_nodes.is_empty(),
+        "expected the file row to be present"
+    );
     file_nodes[0].click_secondary();
     harness.run_steps(2);
     harness.run_steps(2);
@@ -825,7 +833,7 @@ fn test_multi_select_merge_action_generates_prompt() {
         let mut initial_selected = HashSet::new();
         initial_selected.insert(PathBuf::from("/test/test_file_1.md"));
         initial_selected.insert(PathBuf::from("/test/test_file_2.md"));
-        
+
         let selected_files = Box::leak(Box::new(initial_selected));
         let expanded_dirs = Box::leak(Box::new(HashSet::<PathBuf>::new()));
         let tabs = Box::leak(Box::new(Vec::<PathBuf>::new()));
@@ -893,8 +901,13 @@ fn test_multi_select_merge_action_generates_prompt() {
     harness.fit_contents();
 
     // Right-click the file row to open its context menu.
-    let file_nodes: Vec<_> = harness.query_all_by_label_contains("test_file_1.md").collect();
-    assert!(!file_nodes.is_empty(), "expected the file row to be present");
+    let file_nodes: Vec<_> = harness
+        .query_all_by_label_contains("test_file_1.md")
+        .collect();
+    assert!(
+        !file_nodes.is_empty(),
+        "expected the file row to be present"
+    );
     file_nodes[0].click_secondary();
     harness.run_steps(2);
     harness.run_steps(2);

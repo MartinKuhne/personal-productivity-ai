@@ -81,12 +81,15 @@ fn test_show_text_editor_renders_when_open() {
 
     let ctx = egui::Context::default();
     let producer = noop_producer();
-    
+
     let raw_input = egui::RawInput {
-        screen_rect: Some(egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(800.0, 600.0))),
+        screen_rect: Some(egui::Rect::from_min_size(
+            egui::Pos2::ZERO,
+            egui::vec2(800.0, 600.0),
+        )),
         ..Default::default()
     };
-    
+
     // First frame initializes the window
     let _ = ctx.run_ui(raw_input.clone(), |ui| {
         let _ = show_text_editor(ui, &mut buf, &producer);
@@ -98,20 +101,28 @@ fn test_show_text_editor_renders_when_open() {
     });
 
     let texts = extract_text(&output.shapes);
-    
+
     let has_content = texts.iter().any(|t| t.contains("Hello World"));
-    assert!(has_content, "Editor must render the file content. Texts: {:?}", texts);
-    
-    let has_save = texts.iter().any(|t| t.contains(crate::ui::strings::SAVE_BUTTON));
+    assert!(
+        has_content,
+        "Editor must render the file content. Texts: {:?}",
+        texts
+    );
+
+    let has_save = texts
+        .iter()
+        .any(|t| t.contains(crate::ui::strings::SAVE_BUTTON));
     assert!(has_save, "Editor must render the Save button");
 
-    let has_cancel = texts.iter().any(|t| t.contains(crate::ui::strings::CANCEL_BUTTON));
+    let has_cancel = texts
+        .iter()
+        .any(|t| t.contains(crate::ui::strings::CANCEL_BUTTON));
     assert!(has_cancel, "Editor must render the Cancel button");
-    
+
     // Check for "Line: 0 | Col: 0" initially (since no cursor is explicitly set, it defaults to 0)
     let has_cursor_info = texts.iter().any(|t| t.contains("Line: 0 | Col: 0"));
     assert!(has_cursor_info, "Editor must render cursor tracking info");
-    
+
     // Clean up
     let _ = std::fs::remove_file(&path);
 }

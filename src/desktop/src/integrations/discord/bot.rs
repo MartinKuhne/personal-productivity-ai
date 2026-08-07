@@ -60,7 +60,11 @@ impl DiscordBot {
         let http_client = HttpClient::new();
         let (event_sender, event_receiver) = mpsc::unbounded_channel();
         let gateway = GatewayClient::new(bot_token.clone(), event_sender);
-        let context_manager = Arc::new(ContextManager::new(config.max_history, 3600, Arc::new(crate::utils::uuid::SystemUuidGenerator))); // 1 hour TTL
+        let context_manager = Arc::new(ContextManager::new(
+            config.max_history,
+            3600,
+            Arc::new(crate::utils::uuid::SystemUuidGenerator),
+        )); // 1 hour TTL
         let rate_limiter = Arc::new(RateLimiter::new(config.rate_limit_per_minute));
         let safety_filter = Arc::new(SafetyFilter::with_patterns(config.blocked_patterns.clone()));
         let llm_client = LLMClient::from_config(&app_config, None);
