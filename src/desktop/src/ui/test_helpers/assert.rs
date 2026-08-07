@@ -53,6 +53,8 @@
 //! });
 //! assert_no_id_change_warnings(&captured_log_msgs, &output.shapes);
 //! ```
+//!
+//! Unit tests live in the sibling `assert_tests.rs` sidecar.
 
 use eframe::egui;
 
@@ -129,3 +131,7 @@ pub fn assert_no_id_change_in_log(log_msgs: &[String]) {
          AGENTS.md §\"Conditional rendering\" for the fix pattern."
     );
 }
+
+#[cfg(test)]
+#[path = "assert_tests.rs"]
+mod assert_tests;
