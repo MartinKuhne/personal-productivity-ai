@@ -8,6 +8,7 @@
 //! `super::*` keeps working.
 
 use super::*;
+use crate::ui::test_helpers::run_ui_test;
 
 #[test]
 fn test_should_show_panel() {
@@ -152,7 +153,7 @@ fn test_show_right_panel_hidden_when_no_file() {
     });
     *app.selection_mut().selected_file_mut() = None;
 
-    let _ = ctx.run_ui(egui::RawInput::default(), |ui| {
+    let _ = run_ui_test(&ctx, egui::RawInput::default(), |ui| {
         show_right_panel(&mut app, ui);
     });
 }
@@ -173,7 +174,7 @@ fn test_show_right_panel_shown_with_toc() {
     });
     *app.selection_mut().selected_file_mut() = Some(PathBuf::from("doc.md"));
 
-    let _ = ctx.run_ui(egui::RawInput::default(), |ui| {
+    let _ = run_ui_test(&ctx, egui::RawInput::default(), |ui| {
         show_right_panel(&mut app, ui);
     });
 }

@@ -9,6 +9,7 @@
 
 use super::*;
 use crate::ui::generate_format_prompt;
+use crate::ui::test_helpers::run_ui_test;
 use std::path::PathBuf;
 
 fn create_test_app() -> FastMdApp {
@@ -282,7 +283,7 @@ fn test_show_center_panel_render_modes() {
 
     // Mode 1: no tab open. Assert the empty-state prompt is present
     // (Q12 borderline case — the prompt is the only stable string).
-    let output = ctx.run_ui(raw_input(), |ui| {
+    let output = run_ui_test(&ctx, raw_input(), |ui| {
         show_center_panel(&mut app, ui);
     });
     assert_text_contains(&output.shapes, NO_FILE_SELECTED_PROMPT);
@@ -308,7 +309,7 @@ fn test_show_center_panel_render_modes() {
     // output. Full pixel-level visual coverage of the
     // markdown + YAML view comes from the Tier 3 snapshot in
     // R-1c; this test is the deterministic safety net.
-    let output = ctx.run_ui(raw_input(), |ui| {
+    let output = run_ui_test(&ctx, raw_input(), |ui| {
         show_center_panel(&mut app, ui);
     });
     assert_text_contains(&output.shapes, "Document 1 Header");
@@ -323,7 +324,7 @@ fn test_show_center_panel_render_modes() {
 
     // Mode 3: agent session active. The agent session header is the
     // stable string for this mode.
-    let output = ctx.run_ui(raw_input(), |ui| {
+    let output = run_ui_test(&ctx, raw_input(), |ui| {
         show_center_panel(&mut app, ui);
     });
     assert_text_contains(&output.shapes, AGENT_SESSION_HEADER);

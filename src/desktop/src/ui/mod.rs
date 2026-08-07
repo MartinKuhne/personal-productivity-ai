@@ -10,13 +10,9 @@ mod panels;
 pub mod render;
 pub mod strings;
 pub mod table_width;
-mod tools_dialog;
-#[cfg(test)]
-mod tools_dialog_tests;
-mod tree;
-
-#[cfg(test)]
 pub mod test_helpers;
+mod tools_dialog;
+mod tree;
 
 pub use crate::markdown::ToCEntry;
 pub use app::{FastMdApp, TreeNode, generate_format_prompt};

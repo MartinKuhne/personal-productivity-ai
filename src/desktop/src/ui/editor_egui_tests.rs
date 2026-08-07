@@ -3,6 +3,7 @@
 use super::*;
 use crate::bus::core::Bus;
 use crate::bus::events::file::FileEvent;
+use crate::ui::test_helpers::run_ui_test;
 use crate::ui::test_helpers::text::extract_text;
 
 /// A producer that publishes to a throwaway bus. Editor tests
@@ -21,7 +22,7 @@ fn test_show_text_editor_is_a_noop_when_buffer_closed() {
     // Should return false and do nothing when the buffer is
     // closed.
     let raw_input = egui::RawInput::default();
-    let _ = ctx.run_ui(raw_input, |ui| {
+    let _ = run_ui_test(&ctx, raw_input, |ui| {
         let _ = show_text_editor(ui, &mut buf, &producer);
     });
 }
@@ -37,7 +38,7 @@ fn test_show_text_editor_with_colors_is_a_noop_when_buffer_closed() {
     let ctx = egui::Context::default();
     let producer = noop_producer();
     let raw_input = egui::RawInput::default();
-    let _ = ctx.run_ui(raw_input, |ui| {
+    let _ = run_ui_test(&ctx, raw_input, |ui| {
         let _ = show_text_editor_with_colors(ui, &mut buf, EditorColors::inverted(), &producer);
     });
 }
@@ -91,12 +92,12 @@ fn test_show_text_editor_renders_when_open() {
     };
 
     // First frame initializes the window
-    let _ = ctx.run_ui(raw_input.clone(), |ui| {
+    let _ = run_ui_test(&ctx, raw_input.clone(), |ui| {
         let _ = show_text_editor(ui, &mut buf, &producer);
     });
 
     // Second frame renders content
-    let output = ctx.run_ui(raw_input, |ui| {
+    let output = run_ui_test(&ctx, raw_input, |ui| {
         let _ = show_text_editor(ui, &mut buf, &producer);
     });
 

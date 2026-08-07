@@ -9,6 +9,7 @@
 
 use super::*;
 use crate::ui::test_helpers::assert::assert_no_id_change_in_shapes;
+use crate::ui::test_helpers::run_ui_test;
 
 fn create_test_app() -> FastMdApp {
     FastMdApp::empty_state(crate::config::AppConfig::default())
@@ -23,7 +24,7 @@ fn test_show_left_panel_empty() {
     let mut app = create_test_app();
     app.layout_mut().left_panel_dirty = false;
 
-    let output = ctx.run_ui(Default::default(), |ui| {
+    let output = run_ui_test(&ctx, Default::default(), |ui| {
         show_left_panel(&mut app, ui);
     });
 
@@ -67,7 +68,7 @@ fn test_show_left_panel_with_libraries_and_files() {
     app.tags_mut()
         .add_tags(file2.clone(), vec!["archive".to_string()]);
 
-    let output = ctx.run_ui(Default::default(), |ui| {
+    let output = run_ui_test(&ctx, Default::default(), |ui| {
         show_left_panel(&mut app, ui);
     });
     // Header assertion (Q12 borderline case): the library name and
@@ -75,13 +76,13 @@ fn test_show_left_panel_with_libraries_and_files() {
     assert_text_contains(&output.shapes, WORKSPACE_HEADER);
 
     app.tags_mut().selected_tag = Some("work".to_string());
-    let _ = ctx.run_ui(Default::default(), |ui| {
+    let _ = run_ui_test(&ctx, Default::default(), |ui| {
         show_left_panel(&mut app, ui);
     });
 
     app.file_processor_mut().indexing_finished = true;
     app.file_processor_mut().indexing_finished_handled = false;
-    let _ = ctx.run_ui(Default::default(), |ui| {
+    let _ = run_ui_test(&ctx, Default::default(), |ui| {
         show_left_panel(&mut app, ui);
     });
 
@@ -145,7 +146,7 @@ fn test_directory_click_invalidates_tree_cache() {
     // Pass 1: prime the cache with the collapsed tree. The
     // subdirectory starts collapsed, so the inner file must
     // not be in the rendered output yet.
-    let output_collapsed = ctx.run_ui(Default::default(), |ui| {
+    let output_collapsed = run_ui_test(&ctx, Default::default(), |ui| {
         show_left_panel(&mut app, ui);
     });
     assert!(
@@ -243,7 +244,7 @@ fn test_directory_click_invalidates_tree_cache() {
 
     // Pass 2: re-render. The cache must have been rebuilt, so
     // the inner file is now visible.
-    let output_expanded = ctx.run_ui(Default::default(), |ui| {
+    let output_expanded = run_ui_test(&ctx, Default::default(), |ui| {
         show_left_panel(&mut app, ui);
     });
     let expanded_texts: Vec<String> = output_expanded
@@ -284,13 +285,13 @@ fn test_show_left_panel_dirty_flag_triggers_recalc() {
     app.file_processor_mut().all_files = vec![lib_dir.join("doc.md")];
     app.layout_mut().left_panel_dirty = false;
 
-    let _ = ctx.run_ui(Default::default(), |ui| {
+    let _ = run_ui_test(&ctx, Default::default(), |ui| {
         show_left_panel(&mut app, ui);
     });
     assert!(!app.layout().left_panel_dirty);
 
     app.layout_mut().left_panel_dirty = true;
-    let _ = ctx.run_ui(Default::default(), |ui| {
+    let _ = run_ui_test(&ctx, Default::default(), |ui| {
         show_left_panel(&mut app, ui);
     });
     assert!(!app.layout().left_panel_dirty);
@@ -317,7 +318,7 @@ fn test_show_left_panel_width_capped_at_twenty_percent() {
     app.file_processor_mut().indexing_finished_handled = false;
 
     let mut inside_available: f32 = 0.0;
-    let _ = ctx.run_ui(Default::default(), |ui| {
+    let _ = run_ui_test(&ctx, Default::default(), |ui| {
         inside_available = ui.ctx().viewport_rect().width();
         show_left_panel(&mut app, ui);
     });
@@ -344,10 +345,10 @@ fn test_show_left_panel_width_capped_at_twenty_percent() {
 /// Tests then call `assert_no_id_change_in_shapes` to assert the
 /// panel produces a stable widget tree across passes.
 fn render_left_panel_twice(ctx: &egui::Context, app: &mut FastMdApp) -> Vec<egui::Shape> {
-    let _ = ctx.run_ui(Default::default(), |ui| {
+    run_ui_test(ctx, Default::default(), |ui| {
         show_left_panel(app, ui);
     });
-    let output = ctx.run_ui(Default::default(), |ui| {
+    let output = run_ui_test(ctx, Default::default(), |ui| {
         show_left_panel(app, ui);
     });
     output.shapes.into_iter().map(|cs| cs.shape).collect()
@@ -477,7 +478,7 @@ fn test_left_panel_clamped_width_pass_stability() {
     });
 
     // Pass 1: Run panel layout directly on primed state
-    let output = ctx.run_ui(raw_input, |ui| {
+    let output = run_ui_test(&ctx, raw_input, |ui| {
         show_left_panel(&mut app, ui);
     });
 

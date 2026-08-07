@@ -9,6 +9,7 @@
 #![cfg(test)]
 
 use super::*;
+use crate::ui::test_helpers::run_ui_test;
 
 // ---------------------------------------------------------------------------
 // Table-rendering helpers (wires the full measure → ftwa → render path so
@@ -48,7 +49,7 @@ pub(crate) fn render_table_with_viewport_and_strategy(
         ..egui::RawInput::default()
     };
     let mut captured: Option<crate::ui::table_width::ColumnWidths> = None;
-    let _ = ctx.run_ui(raw, |ui| {
+    let mut output = run_ui_test(&ctx, raw, |ui| {
         egui::CentralPanel::default().show(ui, |ui| {
             let (max_w, min_w, breakpoints) = crate::ui::table_width::measure(
                 table_cells,
@@ -64,6 +65,7 @@ pub(crate) fn render_table_with_viewport_and_strategy(
             render_table(ui, table_cells, 0, strategy);
         });
     });
+    output.textures_delta.clear();
     captured.expect("ctx.run should have populated `captured`")
 }
 
@@ -85,7 +87,7 @@ pub(crate) fn render_table_with_viewport_and_padding(
         ..egui::RawInput::default()
     };
     let mut captured: Option<crate::ui::table_width::ColumnWidths> = None;
-    let _ = ctx.run_ui(raw, |ui| {
+    let mut output = run_ui_test(&ctx, raw, |ui| {
         egui::CentralPanel::default().show(ui, |ui| {
             let (max_w, min_w, breakpoints) =
                 crate::ui::table_width::measure(table_cells, padding, ui);
@@ -97,6 +99,7 @@ pub(crate) fn render_table_with_viewport_and_padding(
             captured = Some(decision.clone());
         });
     });
+    output.textures_delta.clear();
     captured.expect("ctx.run should have populated `captured`")
 }
 
@@ -119,16 +122,18 @@ pub(crate) fn render_table_with_paint_output_and_padding(
         )),
         ..egui::RawInput::default()
     };
-    let _ = ctx.run_ui(raw.clone(), |ui| {
+    let _ = run_ui_test(&ctx, raw.clone(), |ui| {
         egui::CentralPanel::default().show(ui, |ui| {
             render_table_with_config(ui, table_cells, 0, strategy, &config);
         });
     });
-    ctx.run_ui(raw, |ui| {
+    let mut output = run_ui_test(&ctx, raw, |ui| {
         egui::CentralPanel::default().show(ui, |ui| {
             render_table_with_config(ui, table_cells, 0, strategy, &config);
         });
-    })
+    });
+    output.textures_delta.clear();
+    output
 }
 
 /// Helper: build a table where every column has the same `cell_text`
@@ -197,17 +202,20 @@ pub(crate) fn render_table_with_paint_output_viewport_and_strategy(
         ..egui::RawInput::default()
     };
     // Pass 1: measure row heights in Grid
-    let _ = ctx.run_ui(raw.clone(), |ui| {
+    let mut output1 = run_ui_test(&ctx, raw.clone(), |ui| {
         egui::CentralPanel::default().show(ui, |ui| {
             render_table(ui, table_cells, 0, strategy);
         });
     });
+    output1.textures_delta.clear();
     // Pass 2: paint with resolved Grid row heights stored in memory
-    ctx.run_ui(raw, |ui| {
+    let mut output2 = run_ui_test(&ctx, raw, |ui| {
         egui::CentralPanel::default().show(ui, |ui| {
             render_table(ui, table_cells, 0, strategy);
         });
-    })
+    });
+    output2.textures_delta.clear();
+    output2
 }
 
 /// Renders `table_cells` in a wide viewport so the FTWA path runs

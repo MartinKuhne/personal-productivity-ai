@@ -8,6 +8,8 @@
 //! `super::*` keeps working.
 
 use super::*;
+use crate::ui::test_helpers::run_ui_test;
+use crate::ui::test_helpers::text::{assert_text_contains, extract_text};
 
 /// Tier 4 click test: clicking the batch-processing button in
 /// the top toolbar must open the batch dialog (sets
@@ -354,7 +356,6 @@ fn test_compute_next_selected_file_file_not_in_tags() {
 
 use crate::ui::strings::{APP_TITLE, BATCH_BUTTON, SHOW_LOG_CHECKBOX};
 use crate::ui::test_helpers::assert::assert_no_id_change_in_log;
-use crate::ui::test_helpers::text::assert_text_contains;
 
 fn create_test_app() -> FastMdApp {
     FastMdApp::empty_state(crate::config::AppConfig::default())
@@ -365,7 +366,7 @@ fn test_show_top_panel_indexing_unfinished() {
     let ctx = egui::Context::default();
     let mut app = create_test_app();
     app.file_processor_mut().indexing_finished = false;
-    let output = ctx.run_ui(egui::RawInput::default(), |ui| {
+    let output = run_ui_test(&ctx, egui::RawInput::default(), |ui| {
         show_top_panel(&mut app, ui);
     });
     // R-2 / Q12: the top panel always renders the app title, the log
@@ -403,7 +404,7 @@ fn test_show_top_panel_indexing_finished_with_tags() {
         vec!["Rust".to_string(), "Docs".to_string()],
     );
 
-    let output = ctx.run_ui(egui::RawInput::default(), |ui| {
+    let output = run_ui_test(&ctx, egui::RawInput::default(), |ui| {
         show_top_panel(&mut app, ui);
     });
     // Header assertion (Q12 borderline case): the toolbar chrome is
@@ -465,18 +466,18 @@ fn test_show_top_panel_no_id_change_warnings_on_indexing_finished_transition() {
 
     // Pre-finish: spinner is visible, combobox is hidden but
     // still allocated.
-    let _ = ctx.run_ui(egui::RawInput::default(), |ui| {
+    let _ = run_ui_test(&ctx, egui::RawInput::default(), |ui| {
         show_top_panel(&mut app, ui);
     });
     // Flip the bool and render again — the rects the spinner
     // and combobox live at must stay the same; only their
     // visibility changes.
     app.file_processor_mut().indexing_finished = true;
-    let _ = ctx.run_ui(egui::RawInput::default(), |ui| {
+    let _ = run_ui_test(&ctx, egui::RawInput::default(), |ui| {
         show_top_panel(&mut app, ui);
     });
     // Stabilise on the finished side.
-    let _ = ctx.run_ui(egui::RawInput::default(), |ui| {
+    let _ = run_ui_test(&ctx, egui::RawInput::default(), |ui| {
         show_top_panel(&mut app, ui);
     });
 

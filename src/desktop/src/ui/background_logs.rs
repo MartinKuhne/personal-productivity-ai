@@ -166,6 +166,7 @@ pub fn show_background_logs_window(app: &mut FastMdApp, ctx: &egui::Context) {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::ui::test_helpers::run_ui_test;
 
     fn make_log(category: LogCategory, message: &str) -> BackgroundLogEntry {
         BackgroundLogEntry::new(category, message.to_string())
@@ -201,11 +202,11 @@ mod tests {
         }
 
         // Pass 1: prime previous-pass state.
-        let _ = ctx.run_ui(egui::RawInput::default(), |ui| {
+        let _ = run_ui_test(&ctx, egui::RawInput::default(), |ui| {
             show_background_logs_window(&mut app, ui.ctx());
         });
         // Pass 2: surface red-stroke rect if the widget tree shifted.
-        let output = ctx.run_ui(egui::RawInput::default(), |ui| {
+        let output = run_ui_test(&ctx, egui::RawInput::default(), |ui| {
             show_background_logs_window(&mut app, ui.ctx());
         });
 
@@ -291,7 +292,7 @@ mod tests {
             .unwrap()
             .show_background_logs = false;
 
-        let _ = ctx.run_ui(egui::RawInput::default(), |ui| {
+        let _ = run_ui_test(&ctx, egui::RawInput::default(), |ui| {
             show_background_logs_window(&mut app, ui.ctx());
         });
         assert!(
@@ -325,7 +326,7 @@ mod tests {
             ));
         }
 
-        let _ = ctx.run_ui(egui::RawInput::default(), |ui| {
+        let _output = run_ui_test(&ctx, egui::RawInput::default(), |ui| {
             show_background_logs_window(&mut app, ui.ctx());
         });
         assert!(

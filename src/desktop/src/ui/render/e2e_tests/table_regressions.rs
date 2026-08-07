@@ -16,6 +16,7 @@
 //!   `tests/table_visual_layout_test.rs` respectively.
 
 use super::*;
+use crate::ui::test_helpers::run_ui_test;
 
 // ---- Off-viewport text guards (MD-013) -------------------------
 
@@ -73,7 +74,7 @@ fn render_markdown_no_offscreen_text_across_viewports() {
         let mut pending_toggles = Vec::new();
 
         let ctx = egui::Context::default();
-        let output = ctx.run_ui(raw, |ui| {
+        let output = run_ui_test(&ctx, raw, |ui| {
             egui::CentralPanel::default().show(ui, |ui| {
                 egui::ScrollArea::vertical()
                     .id_salt("main_markdown_scroll")
@@ -117,7 +118,7 @@ fn test_render_table_multi_frame_height_stability() {
         let mut scroll_id = None;
         let mut pending_toggles = Vec::new();
 
-        let output = ctx.run_ui(raw, |ui| {
+        let output = run_ui_test(&ctx, raw, |ui| {
             egui::CentralPanel::default().show(ui, |ui| {
                 render_markdown(
                     ui,
@@ -207,13 +208,13 @@ fn test_table_empty_cells_no_phantom_row_height() {
     };
 
     // Pass 1
-    let _ = ctx.run_ui(raw.clone(), |ui| {
+    let _ = run_ui_test(&ctx, raw.clone(), |ui| {
         egui::CentralPanel::default().show(ui, |ui| {
             render_table_with_config(ui, &table, 0, strategy, &config);
         });
     });
     // Pass 2 — row heights now come from the cache.
-    let output2 = ctx.run_ui(raw, |ui| {
+    let output2 = run_ui_test(&ctx, raw, |ui| {
         egui::CentralPanel::default().show(ui, |ui| {
             render_table_with_config(ui, &table, 0, strategy, &config);
         });
@@ -297,13 +298,13 @@ fn test_table_single_line_cell_text_at_row_top() {
     };
 
     // Pass 1: measure
-    let _ = ctx.run_ui(raw.clone(), |ui| {
+    let _ = run_ui_test(&ctx, raw.clone(), |ui| {
         egui::CentralPanel::default().show(ui, |ui| {
             render_table_with_config(ui, &table, 0, strategy, &config);
         });
     });
     // Pass 2: paint with cached heights
-    let output2 = ctx.run_ui(raw, |ui| {
+    let output2 = run_ui_test(&ctx, raw, |ui| {
         egui::CentralPanel::default().show(ui, |ui| {
             render_table_with_config(ui, &table, 0, strategy, &config);
         });

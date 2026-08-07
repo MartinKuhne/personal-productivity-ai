@@ -1,0 +1,7 @@
+# cargo-apk output
+target/
+# cargo-apk emits a debug keystore under the crate root; never commit it.
+*.keystore
+debug.keystore
+# Standard Rust ignore.
+**/*.rs.bk

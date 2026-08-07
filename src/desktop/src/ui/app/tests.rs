@@ -14,6 +14,7 @@ use crate::bus::events::messages::TokenUsageInfo;
 use crate::bus::events::typed::AgentEvent;
 use crate::bus::events::typed::FsEvent;
 use crate::ui::test_helpers::assert::assert_no_id_change_in_shapes;
+use crate::ui::test_helpers::run_ui_test;
 use std::path::PathBuf;
 
 fn create_test_app() -> FastMdApp {
@@ -143,9 +144,10 @@ fn test_background_messages_handling() {
         .send(AgentEvent::Response("Done result".to_string()).into())
         .unwrap();
 
-    let _ = ctx.run_ui(Default::default(), |ui| {
+    let mut output = run_ui_test(&ctx, Default::default(), |ui| {
         app.update_ui(ui);
     });
+    output.textures_delta.clear();
 
     assert!(
         app.orchestrator
@@ -189,9 +191,10 @@ fn test_background_message_file_modified_and_deleted() {
         )
         .unwrap();
 
-    let _ = ctx.run_ui(Default::default(), |ui| {
+    let mut output = run_ui_test(&ctx, Default::default(), |ui| {
         app.update_ui(ui);
     });
+    output.textures_delta.clear();
 
     assert!(app.orchestrator.tab_manager.loaded_path.is_none()); // Trigger reload
 
@@ -206,9 +209,10 @@ fn test_background_message_file_modified_and_deleted() {
         )
         .unwrap();
 
-    let _ = ctx.run_ui(Default::default(), |ui| {
+    let mut output = run_ui_test(&ctx, Default::default(), |ui| {
         app.update_ui(ui);
     });
+    output.textures_delta.clear();
 
     assert!(
         !app.orchestrator
@@ -235,9 +239,10 @@ fn test_agent_failure_and_finish_messages() {
         .send(AgentEvent::Failed("Network timeout".to_string()).into())
         .unwrap();
 
-    let _ = ctx.run_ui(Default::default(), |ui| {
+    let mut output = run_ui_test(&ctx, Default::default(), |ui| {
         app.update_ui(ui);
     });
+    output.textures_delta.clear();
 
     assert_eq!(
         app.orchestrator.agent.state().status,
@@ -250,9 +255,10 @@ fn test_agent_failure_and_finish_messages() {
         .send(AgentEvent::Finished(vec![serde_json::json!({"ok": true})]).into())
         .unwrap();
 
-    let _ = ctx.run_ui(Default::default(), |ui| {
+    let mut output = run_ui_test(&ctx, Default::default(), |ui| {
         app.update_ui(ui);
     });
+    output.textures_delta.clear();
 
     assert!(!app.orchestrator.agent.state().running);
     assert!(app.orchestrator.agent.state().history.is_some());
@@ -277,9 +283,10 @@ fn test_agent_token_usage_message_accumulates() {
         )
         .unwrap();
 
-    let _ = ctx.run_ui(Default::default(), |ui| {
+    let mut output = run_ui_test(&ctx, Default::default(), |ui| {
         app.update_ui(ui);
     });
+    output.textures_delta.clear();
 
     assert_eq!(
         app.orchestrator
@@ -325,9 +332,10 @@ fn test_agent_token_usage_message_accumulates() {
         )
         .unwrap();
 
-    let _ = ctx.run_ui(Default::default(), |ui| {
+    let mut output = run_ui_test(&ctx, Default::default(), |ui| {
         app.update_ui(ui);
     });
+    output.textures_delta.clear();
 
     assert_eq!(
         app.orchestrator
@@ -372,9 +380,10 @@ fn test_agent_token_usage_message_accumulates() {
         )
         .unwrap();
 
-    let _ = ctx.run_ui(Default::default(), |ui| {
+    let mut output = run_ui_test(&ctx, Default::default(), |ui| {
         app.update_ui(ui);
     });
+    output.textures_delta.clear();
 
     assert_eq!(
         app.orchestrator.agent.state().total_usage.prompt_tokens,
@@ -683,14 +692,16 @@ fn test_render_panels_no_id_change_warnings_on_toc_transition() {
     ];
 
     // Pass 1: Initial render pass with TOC active.
-    let _ = ctx.run_ui(Default::default(), |ui| {
+    let mut output1 = run_ui_test(&ctx, Default::default(), |ui| {
         app.render_panels(ui);
     });
+    output1.textures_delta.clear();
 
-    // Pass 2: Second render pass with TOC active â€” must produce 0 ID change warnings.
-    let output = ctx.run_ui(Default::default(), |ui| {
+    // Pass 2: Second render pass with TOC active — must produce 0 ID change warnings.
+    let mut output = run_ui_test(&ctx, Default::default(), |ui| {
         app.render_panels(ui);
     });
+    output.textures_delta.clear();
 
     let shapes: Vec<egui::Shape> = output.shapes.into_iter().map(|cs| cs.shape).collect();
     assert_no_id_change_in_shapes(&shapes);
@@ -730,9 +741,10 @@ fn test_all_top_level_panels_visible_and_rendered() {
     };
 
     // Execute render_panels
-    let output = ctx.run_ui(raw_input, |ui| {
+    let mut output = run_ui_test(&ctx, raw_input, |ui| {
         app.render_panels(ui);
     });
+    output.textures_delta.clear();
 
     // Extract (text, rect) for every text shape, plus the
     // overall bounding rect of the rendered output. The positional
@@ -1020,7 +1032,8 @@ fn test_font_scale_does_not_compound_across_launches() {
     // After a follow-up frame, the deferred zoom-factor is
     // applied and the on-screen ppp matches the user's choice.
     let (ctx1_after, _) = ctx_with_native_ppp(1.5);
-    let _ = ctx1_after.run_ui(egui::RawInput::default(), |_ui| {});
+    let mut output = ctx1_after.run_ui(egui::RawInput::default(), |_ui| {});
+    output.textures_delta.clear();
     let _ = ctx1_after; // not asserted — we only care about persistence here.
 
     // === Session 2: restart, reload persisted state, same OS baseline ===
@@ -1203,6 +1216,7 @@ fn ctx_with_native_ppp(ppp: f32) -> (egui::Context, egui::RawInput) {
     // `new_zoom_factor` written by `set_pixels_per_point` is
     // actually applied.
     ctx.begin_pass(raw_input.clone());
-    let _ = ctx.end_pass();
+    let mut output = ctx.end_pass();
+    output.textures_delta.clear();
     (ctx, raw_input)
 }

@@ -16,6 +16,7 @@
 //! Helpers (table-rendering closures, cell builders) live in [`super::helpers`].
 
 use super::*;
+use crate::ui::test_helpers::run_ui_test;
 
 #[test]
 fn test_ftwa_measure_user_table() {
@@ -32,7 +33,7 @@ fn test_ftwa_measure_user_table() {
     };
     assert_eq!(cells.len(), 3); // header + 2 data rows
     assert_eq!(cells[0].len(), 6);
-    let _ = ctx.run_ui(egui::RawInput::default(), |ui| {
+    let _ = run_ui_test(&ctx, egui::RawInput::default(), |ui| {
         egui::CentralPanel::default().show(ui, |ui| {
             let (max_w, min_w, breakpoints) = crate::ui::table_width::measure(
                 &cells,
@@ -117,7 +118,8 @@ fn test_render_table_surplus_does_not_stretch_columns_e2e() {
         Some(RenderEvent::Table(c)) => c.clone(),
         _ => panic!("No table found"),
     };
-    let _ = ctx.run_ui(
+    let _ = run_ui_test(
+        &ctx,
         egui::RawInput {
             screen_rect: Some(egui::Rect::from_min_size(
                 egui::Pos2::ZERO,
@@ -165,7 +167,7 @@ fn test_render_table_with_stars_and_long_cells_e2e() {
 | Gold Insurance Plan | $891.55 | $1,000 Individual / $2,000 Family | $7,000 Indiv. / $14,000 Fam. | ★★★☆ | Good balance of low deductible and moderate premium. |
 | Bronze Insurance Plan | $1,103.11 | $1,000 Individual / $2,000 Family | $7,000 Indiv. / $14,000 Fam. | ★★★★ | Excellent reputation and high quality rating. |
 "#;
-    let _ = ctx.run_ui(egui::RawInput::default(), |ui| {
+    let _ = run_ui_test(&ctx, egui::RawInput::default(), |ui| {
         egui::CentralPanel::default().show(ui, |ui| {
             let mut scroll_id = None;
             render_markdown(
@@ -192,7 +194,7 @@ fn test_render_heading_scroll_to_id() {
     let mut scroll_id: Option<String> = Some(target_id_str.clone());
     let mut dummy_scroll: Option<String> = Some(target_id_str.clone());
 
-    let _ = ctx.run_ui(egui::RawInput::default(), |ui| {
+    let _ = run_ui_test(&ctx, egui::RawInput::default(), |ui| {
         egui::CentralPanel::default().show(ui, |ui| {
             let elems = vec![InlineElem::Text(
                 "Target Heading".to_string(),
@@ -815,7 +817,7 @@ fn test_render_table_horizontal_scroll_fallback_no_clip() {
         )),
         ..egui::RawInput::default()
     };
-    let _ = ctx.run_ui(raw.clone(), |ui| {
+    let _ = run_ui_test(&ctx, raw.clone(), |ui| {
         egui::CentralPanel::default().show(ui, |ui| {
             render_table_with_config(
                 ui,
@@ -826,7 +828,7 @@ fn test_render_table_horizontal_scroll_fallback_no_clip() {
             );
         });
     });
-    let output = ctx.run_ui(raw, |ui| {
+    let output = run_ui_test(&ctx, raw, |ui| {
         egui::CentralPanel::default().show(ui, |ui| {
             render_table_with_config(
                 ui,

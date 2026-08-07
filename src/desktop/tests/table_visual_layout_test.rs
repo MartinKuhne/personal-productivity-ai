@@ -7,6 +7,7 @@
 use eframe::egui;
 use fastmd::markdown::table_width::DeficitStrategy;
 use fastmd::ui::render::render_markdown;
+use fastmd::ui::test_helpers::run_ui_test;
 
 /// Markdown document fixture containing a multi-column table with varying text
 /// lengths and multi-line content (similar to `c:\temp\top.png`).
@@ -36,7 +37,7 @@ fn render_table_markdown_to_shapes(markdown: &'static str, viewport_w: f32) -> e
 
     let mut scroll_to_id = None;
     let mut pending_toggles = Vec::new();
-    let _ = ctx.run_ui(raw.clone(), |ui| {
+    let _ = run_ui_test(&ctx, raw.clone(), |ui| {
         egui::CentralPanel::default().show(ui, |ui| {
             egui::ScrollArea::vertical()
                 .id_salt("test_scroll")
@@ -55,7 +56,7 @@ fn render_table_markdown_to_shapes(markdown: &'static str, viewport_w: f32) -> e
 
     let mut scroll_to_id = None;
     let mut pending_toggles = Vec::new();
-    ctx.run_ui(raw, |ui| {
+    run_ui_test(&ctx, raw, |ui| {
         egui::CentralPanel::default().show(ui, |ui| {
             egui::ScrollArea::vertical()
                 .id_salt("test_scroll")

@@ -3,13 +3,14 @@
 //! headers and at least one known internal group row appear in
 //! the rendered output.
 
+use crate::ui::test_helpers::run_ui_test;
 use crate::ui::test_helpers::text::{assert_text_contains, extract_text};
 use crate::ui::tools_dialog::{compute_dialog_size, render_contents};
 use eframe::egui;
 
 fn render_dialog_once(app: &mut crate::ui::FastMdApp) -> egui::FullOutput {
     let ctx = egui::Context::default();
-    ctx.run_ui(egui::RawInput::default(), |ui| {
+    run_ui_test(&ctx, egui::RawInput::default(), |ui| {
         render_contents(ui, app);
     })
 }
