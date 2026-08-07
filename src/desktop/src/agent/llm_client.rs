@@ -96,11 +96,9 @@ impl LLMClient {
         });
 
         // reqwest's blocking client does not raise on 4xx/5xx by
-        // default, so 2xx/4xx/5xx all land in `Ok(_)` and we branch on
-        // the status code. This is *better* than the previous ureq
-        // setup because the body is now available for diagnostic
-        // logging on 5xx/429 retries (ureq 3.x's `StatusCode` error
-        // dropped the body).
+        // default, so 2xx/4xx/5xx all land in `Ok(_)` and we branch
+        // on the status code. The body is then available for
+        // diagnostic logging on 5xx/429 retries.
         let response = (|| {
             let result = client
                 .post(&url)
@@ -142,9 +140,9 @@ impl LLMClient {
                     let err_str = e.to_string();
                     // `reqwest::Error::is_timeout()` is the canonical
                     // check; we also match on substrings of the display
-                    // form to keep behaviour aligned with the previous
-                    // ureq-based classifier for cases that surface as
-                    // connection-level errors (connect, read).
+                    // form to keep behaviour aligned with the
+                    // connection-level classifier for cases that
+                    // surface as connect/read errors.
                     let is_timeout = e.is_timeout()
                         || e.is_connect()
                         || err_str.contains("timed out")

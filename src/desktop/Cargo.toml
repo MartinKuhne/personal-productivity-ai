@@ -52,7 +52,6 @@ serde_json = "1.0"
 serde_norway = "0.9"
 tokio = { version = "1.53.0", features = ["rt-multi-thread", "macros", "sync", "process"] }
 trash = "5.2.6"
-ureq = { version = "3.3", features = ["json"] }
 # `ring` is already a transitive dep through `rustls` (ring crypto
 # provider). We depend on it directly for the OAuth 2.1 flow
 # (PKCE SHA256 + CSPRNG for verifier/state).

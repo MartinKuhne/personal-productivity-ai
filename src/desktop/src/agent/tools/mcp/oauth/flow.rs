@@ -399,12 +399,12 @@ fn exchange_code(
         form.push(("client_id", client.client_id.clone()));
     }
     let body = encode_form(&form);
-    // The shared `token_agent()` below applies `DISCOVERY_TIMEOUT`
+    // The shared `token_client()` below applies `DISCOVERY_TIMEOUT`
     // globally on the blocking client. We add the per-request
     // headers (Accept, Content-Type, and any per-client extras)
     // inside `send_token_request`.
     send_token_request(
-        &token_agent(),
+        &token_client(),
         &as_metadata.token_endpoint,
         &client.extra_headers,
         &body,
@@ -435,7 +435,7 @@ fn refresh_with_token(
     }
     let body = encode_form(&form);
     send_token_request(
-        &token_agent(),
+        &token_client(),
         &as_metadata.token_endpoint,
         &client.extra_headers,
         &body,
@@ -450,44 +450,41 @@ fn encode_form(form: &[(impl AsRef<str>, String)]) -> String {
         .join("&")
 }
 
-/// Build the shared ureq 3.x [`ureq::Agent`] used for OAuth
+/// Build the shared `reqwest::blocking::Client` used for OAuth
 /// token requests.
 ///
-/// * `http_status_as_error(false)` — 4xx/5xx still land in `Ok(_)`,
-///   so we can parse the OAuth error body out of the response.
-/// * `timeout_global(DISCOVERY_TIMEOUT)` — replaces the per-request
-///   `.timeout()` that existed in ureq 2.x.
-fn token_agent() -> ureq::Agent {
-    ureq::Agent::config_builder()
-        .http_status_as_error(false)
-        .timeout_global(Some(DISCOVERY_TIMEOUT))
+/// * Default 4xx/5xx handling — reqwest's blocking client does not
+///   raise on 4xx/5xx by default, so the response body is available
+///   for parsing the OAuth error envelope.
+/// * `DISCOVERY_TIMEOUT` — global request timeout. The same client
+///   serves both the `authorization_code` and `refresh_token` grants.
+fn token_client() -> reqwest::blocking::Client {
+    reqwest::blocking::Client::builder()
+        .timeout(DISCOVERY_TIMEOUT)
         .build()
-        .new_agent()
+        .expect("reqwest::blocking::Client builder should not fail with default configuration")
 }
 
 fn send_token_request(
-    agent: &ureq::Agent,
+    client: &reqwest::blocking::Client,
     url: &str,
     extra_headers: &std::collections::HashMap<String, String>,
     body: &str,
     grant: &str,
 ) -> Result<TokenResponse, OAuthError> {
-    let mut req = agent
+    let mut req = client
         .post(url)
         .header("Accept", "application/json")
         .header("Content-Type", "application/x-www-form-urlencoded");
     for (k, v) in extra_headers {
         req = req.header(k.as_str(), v.as_str());
     }
-    let resp = req.send(body);
+    let resp = req.body(body.to_string()).send();
     match resp {
-        Ok(mut r) => {
-            // ureq 3.x: 4xx/5xx land here because we set
-            // `http_status_as_error(false)` on the agent. Branch on
-            // the status so the OAuth error body can still be parsed.
+        Ok(r) => {
             if r.status().as_u16() >= 400 {
                 let code = r.status().as_u16();
-                let err_body = r.body_mut().read_to_string().unwrap_or_default();
+                let err_body = r.text().unwrap_or_default();
                 if let Ok(value) = serde_json::from_str::<serde_json::Value>(&err_body)
                     && let Some(err) = super::types::OAuthErrorBody::from_json(&value)
                 {
@@ -501,8 +498,7 @@ fn send_token_request(
                 )));
             }
             let body = r
-                .body_mut()
-                .read_to_string()
+                .text()
                 .map_err(|e| OAuthError::Transport(format!("token response read: {e}")))?;
             let value: serde_json::Value = serde_json::from_str(&body).map_err(|e| {
                 OAuthError::Protocol(format!("token response json: {e}; body: {body}"))
