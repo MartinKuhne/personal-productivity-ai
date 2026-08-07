@@ -10,7 +10,6 @@ keywords = ["markdown", "viewer", "ai", "agent"]
 
 [features]
 default = []
-profiling = ["dep:puffin", "dep:puffin_egui"]
 # Discord bot integration. Adds the `integrations::discord` module and
 # the `run_discord_bot` entry point. Off by default — the bot is not
 # wired into `main.rs` and ships as opt-in.
@@ -41,10 +40,10 @@ chrono = "0.4.45"
 eframe = { version = "0.35", default-features = false, features = ["default_fonts", "glow", "wayland", "x11", "accesskit", "persistence"] }
 egui_extras = { version = "0.35", default-features = false }
 fast-dav-rs = "0.4.4"
-fast_h2m = "*"
+fast_h2m = "^0.4"
 jmap-client = { version = "=0.4.1", default-features = false, features = ["blocking", "rustls"] }
-notify = "6.0"
-playwright-rs = { version = "0.14.1", optional = true }
+notify = "8"
+playwright-rs = { version = "0.15.1", optional = true }
 pulldown-cmark = { version = "0.13", features = ["html"] }
 rustls = { version = "0.23", features = ["ring"] }
 schemars = "1.2.1"
@@ -53,15 +52,18 @@ serde_json = "1.0"
 serde_norway = "0.9"
 tokio = { version = "1.53.0", features = ["rt-multi-thread", "macros", "sync", "process"] }
 trash = "5.2.6"
-ureq = { version = "2.9", features = ["json"] }
 # `ring` is already a transitive dep through `rustls` (ring crypto
 # provider). We depend on it directly for the OAuth 2.1 flow
 # (PKCE SHA256 + CSPRNG for verifier/state).
 ring = "0.17"
 walkdir = "2.4"
 glob = "0.3"
-reqwest = { version = "0.12", features = ["blocking", "json"] }
-opener = { version = "0.7", features = ["reveal"] }
+# `rustls` (not the default `default-tls` / native-tls) matches the
+# rest of the crate: `jmap-client` uses rustls, and we depend on
+# `rustls` directly for OAuth 2.1. Picking rustls everywhere keeps a
+# single TLS stack in the binary.
+reqwest = { version = "0.13", default-features = false, features = ["blocking", "json", "query", "rustls"] }
+opener = { version = "0.8", features = ["reveal"] }
 webbrowser = "1"
 backon = "1.6"
 uuid = { version = "1", features = ["v4", "serde"] }
@@ -70,11 +72,9 @@ evalexpr = "13.1.0"
 html-escape = "0.2"
 url = "2.5"
 quick-xml = "0.41.0"
-puffin = { version = "0.20", optional = true, default-features = false }
-puffin_egui = { git = "https://github.com/EmbarkStudios/puffin", optional = true, default-features = false }
 encoding_rs = "0.8.35"
 tempfile = "3.8"
-tokio-tungstenite = { version = "0.23", features = ["rustls"] }
+tokio-tungstenite = { version = "0.30", features = ["rustls"] }
 futures = "0.3"
 
 [dev-dependencies]

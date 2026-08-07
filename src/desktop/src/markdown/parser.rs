@@ -162,9 +162,6 @@ fn push_link_coalesce(buffer: &mut Vec<InlineElem>, url: &str, text: &str) {
 
 /// Parses markdown text into a sequence of render events.
 pub fn parse_markdown_to_events(markdown_text: &str) -> Vec<RenderEvent> {
-    #[cfg(feature = "profiling")]
-    puffin::profile_scope!("parse_markdown_to_events");
-
     use pulldown_cmark::{Event, HeadingLevel, Options, Parser, Tag, TagEnd};
 
     let mut options = Options::empty();

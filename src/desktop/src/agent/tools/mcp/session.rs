@@ -42,6 +42,25 @@ use std::io::Write;
 use std::process::{Child, ChildStdin, Stdio};
 use std::sync::{Arc, Mutex};
 
+/// Build a [`reqwest::blocking::Client`] for MCP HTTP requests.
+///
+/// * Default 4xx/5xx handling — reqwest's blocking client does not
+///   raise on 4xx/5xx by default, so the response is always
+///   available for body inspection. This is what drives the OAuth
+///   retry path on 401/403 and the body-content diagnostic
+///   messages.
+/// * `timeout(timeout)` — global request timeout. Per-request
+///   overrides can still be set on the [`RequestBuilder`][rb]
+///   via `RequestBuilder::timeout`.
+///
+/// [rb]: reqwest::RequestBuilder
+fn mcp_client(timeout: std::time::Duration) -> reqwest::blocking::Client {
+    reqwest::blocking::Client::builder()
+        .timeout(timeout)
+        .build()
+        .expect("reqwest::blocking::Client builder should not fail with default configuration")
+}
+
 /// Win32 `CREATE_NO_WINDOW` flag for [`CreateProcessW`].
 ///
 /// Passed to [`std::os::windows::process::CommandExt::creation_flags`]
@@ -444,13 +463,15 @@ impl McpClientSession {
         post_code: u16,
         post_body: &str,
     ) -> McpError {
-        let mut req = ureq::get(url)
-            .set("Accept", "text/event-stream")
-            .timeout(DEFAULT_REQUEST_TIMEOUT);
+        // reqwest's blocking client does not raise on 4xx/5xx by
+        // default, so the response body is always available for
+        // diagnostic messages. The timeout is on the client.
+        let client = mcp_client(DEFAULT_REQUEST_TIMEOUT);
+        let mut req = client.get(url).header("Accept", "text/event-stream");
         for (k, v) in headers {
-            req = req.set(k, v);
+            req = req.header(k.as_str(), v.as_str());
         }
-        let resp = match req.call() {
+        let resp = match req.send() {
             Ok(r) => r,
             Err(e) => {
                 return McpError::transport(
@@ -461,9 +482,9 @@ impl McpClientSession {
                 );
             }
         };
-        let get_code = resp.status();
+        let get_code = resp.status().as_u16();
         if get_code >= 400 {
-            let body = resp.into_string().unwrap_or_default();
+            let body = resp.text().unwrap_or_default();
             return McpError::transport(
                 format!("HTTP server '{url}'"),
                 format!(
@@ -472,7 +493,9 @@ impl McpClientSession {
             );
         }
         let content_type = resp
-            .header("Content-Type")
+            .headers()
+            .get("Content-Type")
+            .and_then(|v| v.to_str().ok())
             .unwrap_or("")
             .to_ascii_lowercase();
         if !content_type.contains("text/event-stream") {
@@ -483,7 +506,7 @@ impl McpClientSession {
                 ),
             );
         }
-        let body = resp.into_string().unwrap_or_default();
+        let body = resp.text().unwrap_or_default();
         let events = super::sse::parse_sse_body(&body);
         for event in events {
             if event.event.as_deref() == Some("endpoint") && !event.data.is_empty() {
@@ -517,37 +540,40 @@ impl McpClientSession {
         headers: &std::collections::HashMap<String, String>,
         session_id: &str,
     ) -> Result<(), McpError> {
-        let mut req = ureq::delete(url)
-            .set("MCP-Session-Id", session_id)
-            .set("Accept", "application/json, text/event-stream")
-            // Cap the DELETE at the default request timeout; it's
-            // just a session-end notification.
-            .timeout(DEFAULT_REQUEST_TIMEOUT);
+        // reqwest's blocking client does not raise on 4xx/5xx by
+        // default. The 405 acknowledgement path is therefore
+        // expressed as a status-code check on the response.
+        let client = mcp_client(DEFAULT_REQUEST_TIMEOUT);
+        let mut req = client
+            .delete(url)
+            .header("MCP-Session-Id", session_id)
+            .header("Accept", "application/json, text/event-stream");
         for (k, v) in headers {
-            req = req.set(k, v);
+            req = req.header(k.as_str(), v.as_str());
         }
-        match req.call() {
-            Ok(_resp) => {
+        match req.send() {
+            Ok(resp) => {
+                let code = resp.status().as_u16();
+                if code == 405 {
+                    // Spec: server MAY respond with 405 to indicate it
+                    // manages session lifetime. That's an acknowledgement,
+                    // not an error.
+                    tracing::debug!(url = %url, "MCP server acknowledged DELETE with 405 (server-managed lifetime)");
+                    return Ok(());
+                }
+                if code >= 400 {
+                    let body = resp.text().unwrap_or_default();
+                    return Err(McpError::transport(
+                        format!("HTTP server '{url}'"),
+                        format!("DELETE on shutdown returned HTTP {code}: {body}"),
+                    ));
+                }
                 tracing::debug!(
                     url = %url,
                     session_id = %redact_session_id(session_id),
                     "sent MCP session DELETE on shutdown"
                 );
                 Ok(())
-            }
-            Err(ureq::Error::Status(405, _resp)) => {
-                // Spec: server MAY respond with 405 to indicate it
-                // manages session lifetime. That's an acknowledgement,
-                // not an error.
-                tracing::debug!(url = %url, "MCP server acknowledged DELETE with 405 (server-managed lifetime)");
-                Ok(())
-            }
-            Err(ureq::Error::Status(code, resp)) => {
-                let body = resp.into_string().unwrap_or_default();
-                Err(McpError::transport(
-                    format!("HTTP server '{url}'"),
-                    format!("DELETE on shutdown returned HTTP {code}: {body}"),
-                ))
             }
             Err(e) => Err(McpError::transport(
                 format!("HTTP server '{url}'"),
@@ -1322,35 +1348,48 @@ impl McpClientSession {
         // if the server returned an `MCP-Session-Id` during init,
         // client MUST include it on every subsequent request. Spec
         // (timeouts): client SHOULD establish per-request timeouts.
-        let mut req = ureq::post(&url)
-            .set("Content-Type", "application/json")
-            .set("Accept", "application/json, text/event-stream")
-            .timeout(timeout);
+        //
+        // reqwest's blocking client does not raise on 4xx/5xx by
+        // default, so the response is always available for body
+        // inspection. We branch on the status code so the OAuth retry
+        // logic still has access to the WWW-Authenticate header and
+        // the response body.
+        let client = mcp_client(timeout);
+        let mut req = client
+            .post(&url)
+            .header("Content-Type", "application/json")
+            .header("Accept", "application/json, text/event-stream");
         for (k, v) in &headers {
-            req = req.set(k.as_str(), v.as_str());
+            req = req.header(k.as_str(), v.as_str());
         }
         if let Some(token) = &bearer {
-            req = req.set("Authorization", &format!("Bearer {token}"));
+            req = req.header("Authorization", &format!("Bearer {token}"));
         }
         {
             let state = self.lock_state()?;
             if let Some(v) = &state.protocol_version {
-                req = req.set("MCP-Protocol-Version", v);
+                req = req.header("MCP-Protocol-Version", v);
             }
             if let Some(sid) = &state.session_id {
-                req = req.set("MCP-Session-Id", sid);
+                req = req.header("MCP-Session-Id", sid);
             }
         }
 
-        let response = req.send_json(&payload);
+        let response = req.json(&payload).send();
+        // reqwest does not raise on 4xx/5xx by default, so the
+        // response is always available. We branch on the status code
+        // so the OAuth retry logic still has access to the
+        // WWW-Authenticate header and the response body.
         let resp = match response {
-            Ok(r) => r,
-            Err(ureq::Error::Status(code, r)) => {
-                // Read the WWW-Authenticate header before consuming
-                // the response body. We need it on 401/403 to drive
-                // the OAuth flow.
-                let www_authenticate_header = r.header("WWW-Authenticate").map(str::to_owned);
-                let body = r.into_string().unwrap_or_default();
+            Ok(r) if r.status().as_u16() < 400 => r,
+            Ok(r) => {
+                let code = r.status().as_u16();
+                let www_authenticate_header = r
+                    .headers()
+                    .get("WWW-Authenticate")
+                    .and_then(|v| v.to_str().ok())
+                    .map(str::to_owned);
+                let body = r.text().unwrap_or_default();
                 // The server has indicated it requires auth.
                 // Mark the session so the manager can update
                 // McpServerEntry::needs_auth on its way out.
@@ -1529,7 +1568,11 @@ impl McpClientSession {
         // characters (0x21 through 0x7E)." We validate and drop
         // non-conforming ids rather than risk sending junk on
         // subsequent requests.
-        if let Some(sid) = resp.header("MCP-Session-Id") {
+        if let Some(sid) = resp
+            .headers()
+            .get("MCP-Session-Id")
+            .and_then(|v| v.to_str().ok())
+        {
             if is_valid_session_id(sid) {
                 tracing::info!(
                     server = %self.config_label(),
@@ -1555,11 +1598,13 @@ impl McpClientSession {
         // the server didn't set one. The check has to happen
         // BEFORE we consume `resp` via `into_string()`.
         let content_type = resp
-            .header("Content-Type")
+            .headers()
+            .get("Content-Type")
+            .and_then(|v| v.to_str().ok())
             .unwrap_or("")
             .to_ascii_lowercase();
 
-        let body = resp.into_string().map_err(|e| {
+        let body = resp.text().map_err(|e| {
             McpError::transport(
                 format!("HTTP server '{}'", self.config_label()),
                 format!("failed to read response body: {e}"),
@@ -1754,27 +1799,31 @@ impl McpClientSession {
                 ));
             }
         };
-        let mut req = ureq::post(&url)
-            .set("Content-Type", "application/json")
-            .set("Accept", "application/json, text/event-stream");
+        // Notifications are fire-and-forget per spec: 2xx (typically
+        // 202 Accepted) is success, but 4xx/5xx is also swallowed
+        // because the spec says clients SHOULD ignore the response.
+        // reqwest's blocking client does not raise on 4xx/5xx by
+        // default, so anything that gets an HTTP response lands in
+        // `Ok(_)`; only network-level errors produce `Err(_)`.
+        let client = mcp_client(DEFAULT_REQUEST_TIMEOUT);
+        let mut req = client
+            .post(&url)
+            .header("Content-Type", "application/json")
+            .header("Accept", "application/json, text/event-stream");
         for (k, v) in &headers {
-            req = req.set(k.as_str(), v.as_str());
+            req = req.header(k.as_str(), v.as_str());
         }
         {
             let state = self.lock_state()?;
             if let Some(v) = &state.protocol_version {
-                req = req.set("MCP-Protocol-Version", v);
+                req = req.header("MCP-Protocol-Version", v);
             }
             if let Some(sid) = &state.session_id {
-                req = req.set("MCP-Session-Id", sid);
+                req = req.header("MCP-Session-Id", sid);
             }
         }
-        match req.send_json(payload) {
+        match req.json(payload).send() {
             Ok(_resp) => Ok(()),
-            // 2xx (including 202) is success. We don't enforce the
-            // specific 202 status — ureq would only return Err here
-            // for 4xx/5xx.
-            Err(ureq::Error::Status(_code, _r)) => Ok(()),
             Err(e) => Err(McpError::transport(
                 format!("HTTP server '{}'", self.config_label()),
                 format!("failed to send notification: {e}"),

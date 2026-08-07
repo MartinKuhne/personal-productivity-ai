@@ -399,14 +399,17 @@ fn exchange_code(
         form.push(("client_id", client.client_id.clone()));
     }
     let body = encode_form(&form);
-    let mut req = ureq::post(&as_metadata.token_endpoint)
-        .set("Accept", "application/json")
-        .set("Content-Type", "application/x-www-form-urlencoded")
-        .timeout(DISCOVERY_TIMEOUT);
-    for (k, v) in &client.extra_headers {
-        req = req.set(k.as_str(), v.as_str());
-    }
-    send_token_request(req, &body, "authorization_code")
+    // The shared `token_client()` below applies `DISCOVERY_TIMEOUT`
+    // globally on the blocking client. We add the per-request
+    // headers (Accept, Content-Type, and any per-client extras)
+    // inside `send_token_request`.
+    send_token_request(
+        &token_client(),
+        &as_metadata.token_endpoint,
+        &client.extra_headers,
+        &body,
+        "authorization_code",
+    )
 }
 
 fn refresh_with_token(
@@ -431,14 +434,13 @@ fn refresh_with_token(
         form.push(("client_id", client.client_id.clone()));
     }
     let body = encode_form(&form);
-    let mut req = ureq::post(&as_metadata.token_endpoint)
-        .set("Accept", "application/json")
-        .set("Content-Type", "application/x-www-form-urlencoded")
-        .timeout(DISCOVERY_TIMEOUT);
-    for (k, v) in &client.extra_headers {
-        req = req.set(k.as_str(), v.as_str());
-    }
-    send_token_request(req, &body, "refresh_token")
+    send_token_request(
+        &token_client(),
+        &as_metadata.token_endpoint,
+        &client.extra_headers,
+        &body,
+        "refresh_token",
+    )
 }
 
 fn encode_form(form: &[(impl AsRef<str>, String)]) -> String {
@@ -448,16 +450,55 @@ fn encode_form(form: &[(impl AsRef<str>, String)]) -> String {
         .join("&")
 }
 
+/// Build the shared `reqwest::blocking::Client` used for OAuth
+/// token requests.
+///
+/// * Default 4xx/5xx handling — reqwest's blocking client does not
+///   raise on 4xx/5xx by default, so the response body is available
+///   for parsing the OAuth error envelope.
+/// * `DISCOVERY_TIMEOUT` — global request timeout. The same client
+///   serves both the `authorization_code` and `refresh_token` grants.
+fn token_client() -> reqwest::blocking::Client {
+    reqwest::blocking::Client::builder()
+        .timeout(DISCOVERY_TIMEOUT)
+        .build()
+        .expect("reqwest::blocking::Client builder should not fail with default configuration")
+}
+
 fn send_token_request(
-    req: ureq::Request,
+    client: &reqwest::blocking::Client,
+    url: &str,
+    extra_headers: &std::collections::HashMap<String, String>,
     body: &str,
-    _grant: &str,
+    grant: &str,
 ) -> Result<TokenResponse, OAuthError> {
-    let resp = req.send_string(body);
+    let mut req = client
+        .post(url)
+        .header("Accept", "application/json")
+        .header("Content-Type", "application/x-www-form-urlencoded");
+    for (k, v) in extra_headers {
+        req = req.header(k.as_str(), v.as_str());
+    }
+    let resp = req.body(body.to_string()).send();
     match resp {
         Ok(r) => {
+            if r.status().as_u16() >= 400 {
+                let code = r.status().as_u16();
+                let err_body = r.text().unwrap_or_default();
+                if let Ok(value) = serde_json::from_str::<serde_json::Value>(&err_body)
+                    && let Some(err) = super::types::OAuthErrorBody::from_json(&value)
+                {
+                    return Err(OAuthError::OAuth {
+                        endpoint: "token",
+                        body: err,
+                    });
+                }
+                return Err(OAuthError::Transport(format!(
+                    "token endpoint returned HTTP {code}: {err_body}; grant={grant}"
+                )));
+            }
             let body = r
-                .into_string()
+                .text()
                 .map_err(|e| OAuthError::Transport(format!("token response read: {e}")))?;
             let value: serde_json::Value = serde_json::from_str(&body).map_err(|e| {
                 OAuthError::Protocol(format!("token response json: {e}; body: {body}"))
@@ -470,20 +511,6 @@ fn send_token_request(
             }
             serde_json::from_value::<TokenResponse>(value)
                 .map_err(|e| OAuthError::Protocol(format!("token response shape: {e}")))
-        }
-        Err(ureq::Error::Status(_code, r)) => {
-            let body = r.into_string().unwrap_or_default();
-            if let Ok(value) = serde_json::from_str::<serde_json::Value>(&body)
-                && let Some(err) = super::types::OAuthErrorBody::from_json(&value)
-            {
-                return Err(OAuthError::OAuth {
-                    endpoint: "token",
-                    body: err,
-                });
-            }
-            Err(OAuthError::Transport(format!(
-                "token endpoint returned error: {body}"
-            )))
         }
         Err(e) => Err(OAuthError::Transport(format!("token request: {e}"))),
     }

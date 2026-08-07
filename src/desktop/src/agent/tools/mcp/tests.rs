@@ -578,7 +578,7 @@ with open(r"{cap_path}", "w") as f:
 
 /// `http_session_delete` must treat 405 Method Not Allowed as
 /// a server-managed-lifetime acknowledgement (spec §3.4). We
-/// point at a port that nothing is listening on; ureq returns
+/// point at a port that nothing is listening on; reqwest returns
 /// a transport error, which we expect to bubble up as a
 /// non-OK `Result`. (We can't easily stand up a mock HTTP
 /// server in this test harness, so we exercise the negative

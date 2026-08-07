@@ -185,19 +185,20 @@ pub fn tool_web_fetch(
         cache().invalidate(url);
     }
 
-    match ureq::get(url)
-    .set("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36")
-    .set("Accept", "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8")
-    .set("Accept-Language", "en-US,en;q=0.9")
-    .call() {
+    match reqwest::blocking::Client::new()
+    .get(url)
+    .header("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36")
+    .header("Accept", "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8")
+    .header("Accept-Language", "en-US,en;q=0.9")
+    .send() {
     Ok(response) => {
         let mut response_headers = HashMap::new();
-        for name in response.headers_names() {
-            if let Some(val) = response.header(&name) {
-                response_headers.insert(name, val.to_string());
+        for (name, value) in response.headers() {
+            if let Ok(val) = value.to_str() {
+                response_headers.insert(name.as_str().to_string(), val.to_string());
             }
         }
-        match response.into_string() {
+        match response.text() {
             Ok(body) => match convert(&body, None) {
                 Ok(res) => {
                     let md_content = res.content.unwrap_or_default();
@@ -271,17 +272,17 @@ pub fn tool_web_search(
     query: &str,
 ) -> Result<crate::agent::tools::dtos::WebSearchResponse, String> {
     let endpoint = format!("{}/search", url);
-    match ureq::get(&endpoint)
-        .set("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36")
-        .set("Accept", "application/json")
-        .set("Accept-Language", "en-US,en;q=0.9")
-        .set("X-Forwarded-For", "127.0.0.1")
-        .set("X-Real-IP", "127.0.0.1")
-        .query("q", query)
-        .query("format", "json")
-        .call()
+    match reqwest::blocking::Client::new()
+        .get(&endpoint)
+        .header("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36")
+        .header("Accept", "application/json")
+        .header("Accept-Language", "en-US,en;q=0.9")
+        .header("X-Forwarded-For", "127.0.0.1")
+        .header("X-Real-IP", "127.0.0.1")
+        .query(&[("q", query), ("format", "json")])
+        .send()
     {
-        Ok(response) => match response.into_string() {
+        Ok(response) => match response.text() {
             Ok(body) => {
                 if let Ok(json) = serde_json::from_str::<serde_json::Value>(&body) {
                     if let Some(results) = json.get("results").and_then(|r| r.as_array()) {
@@ -398,10 +399,14 @@ pub fn tool_web_delegate(
         }));
     }
 
-    let agent = ureq::AgentBuilder::new()
-        .timeout_connect(std::time::Duration::from_secs(30))
-        .timeout_read(std::time::Duration::from_secs(120))
-        .build();
+    let agent = reqwest::blocking::Client::builder()
+        .connect_timeout(std::time::Duration::from_secs(30))
+        .timeout(std::time::Duration::from_secs(120))
+        .build()
+        .map_err(|e| {
+            tracing::error!(name = "tool.web_delegate.client_build_failed", error = %e, "Failed to build reqwest client for delegate");
+            format!("Failed to build HTTP client: {}", e)
+        })?;
 
     let mut loop_count = 0;
     let max_loops = 10;
@@ -417,13 +422,13 @@ pub fn tool_web_delegate(
         });
 
         let response = match agent
-            .post(&format!(
+            .post(format!(
                 "{}/chat/completions",
                 api_url.trim_matches('"').trim_end_matches('/')
             ))
-            .set("Authorization", &format!("Bearer {}", api_key))
-            .set("Content-Type", "application/json")
-            .send_json(request_body)
+            .bearer_auth(&api_key)
+            .json(&request_body)
+            .send()
         {
             Ok(resp) => resp,
             Err(e) => {
@@ -432,7 +437,7 @@ pub fn tool_web_delegate(
             }
         };
 
-        let resp_val: serde_json::Value = match response.into_json() {
+        let resp_val: serde_json::Value = match response.json() {
             Ok(v) => v,
             Err(e) => {
                 tracing::error!(name = "tool.web_delegate.invalid_json", error = %e, "Delegate API returned invalid JSON. Operator should verify API provider.");

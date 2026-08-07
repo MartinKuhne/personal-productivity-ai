@@ -150,20 +150,10 @@ impl FastMdApp {
         // through. The order is preserved from 0.27: top → bottom →
         // right → left → center. Panels must be allocated directly from
         // the parent_ui container, not nested within child_ui scopes.
-        #[cfg(feature = "profiling")]
-        puffin::profile_scope!("panel_top");
         show_top_panel(self, parent_ui);
-        #[cfg(feature = "profiling")]
-        puffin::profile_scope!("panel_bottom");
         show_bottom_panel(self, parent_ui);
-        #[cfg(feature = "profiling")]
-        puffin::profile_scope!("panel_right");
         show_right_panel(self, parent_ui);
-        #[cfg(feature = "profiling")]
-        puffin::profile_scope!("panel_left");
         show_left_panel(self, parent_ui);
-        #[cfg(feature = "profiling")]
-        puffin::profile_scope!("panel_center");
         show_center_panel(self, parent_ui);
     }
 }

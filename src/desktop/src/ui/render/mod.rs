@@ -73,9 +73,6 @@ pub fn render_markdown(
     strategy: crate::ui::table_width::DeficitStrategy,
     heading_ids: Option<&[String]>,
 ) {
-    #[cfg(feature = "profiling")]
-    puffin::profile_scope!("render_markdown");
-
     use std::sync::Arc;
     let text_hash = egui::Id::new(markdown_text);
     let cache_key = egui::Id::new("md_events_cache");

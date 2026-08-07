@@ -99,10 +99,11 @@ pub async fn process_image<'a>(
 
     // Perform blocking HTTP request
     let response = tokio::task::spawn_blocking(move || {
-        ureq::post(&format!("{}/chat/completions", api_url.trim_end_matches('/')))
-            .set("Authorization", &format!("Bearer {}", api_key))
-            .set("Content-Type", "application/json")
-            .send_json(payload)
+        reqwest::blocking::Client::new()
+            .post(&format!("{}/chat/completions", api_url.trim_end_matches('/')))
+            .bearer_auth(&api_key)
+            .json(&payload)
+            .send()
     })
     .await
     .map_err(|e| {
@@ -112,7 +113,7 @@ pub async fn process_image<'a>(
 
     match response {
         Ok(resp) => {
-            let json: serde_json::Value = resp.into_json().map_err(|e| {
+            let json: serde_json::Value = resp.json().map_err(|e| {
                 tracing::error!(name = "vision.api.invalid_json", error = %e, image = %img_name, "Failed to parse JSON response from vision API. Operator should check model provider.");
                 format!("Invalid JSON response: {}", e)
             })?;
@@ -150,10 +151,13 @@ pub async fn process_image<'a>(
         }
         Err(e) => {
             let mut err_msg = format!("API request failed for {:?}: {}", img_name, e);
-            if let ureq::Error::Status(code, r) = e {
-                let text = r.into_string().unwrap_or_default();
-                err_msg = format!("{} - {}", err_msg, text);
-                tracing::error!(name = "vision.api.request_failed", image = %img_name, status = code, response = %text, "Vision API request failed with HTTP error. Operator should verify API key and model limits.");
+            // reqwest's `reqwest::Error` does not carry the response
+            // body on its own (the body lives on the response, which
+            // is dropped by `send()` on error). The status is
+            // available via `e.status()` when the failure was an
+            // HTTP status; transport errors return `None`.
+            if let Some(status) = e.status() {
+                tracing::error!(name = "vision.api.request_failed", image = %img_name, status = %status, "Vision API request failed with HTTP error. Operator should verify API key and model limits.");
             } else {
                 tracing::error!(name = "vision.api.network_error", image = %img_name, error = %e, "Vision API request failed completely. Operator should check network connectivity.");
             }

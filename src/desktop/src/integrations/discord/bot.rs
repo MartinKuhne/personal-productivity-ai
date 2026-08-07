@@ -318,7 +318,7 @@ impl DiscordBot {
 
 impl BotHandles {
     /// Run the LLM to completion off the async runtime (the underlying
-    /// `LLMClient::chat_completion` uses blocking `ureq`). Returns a
+    /// `LLMClient::chat_completion` uses blocking `reqwest`). Returns a
     /// user-facing string (either the LLM content or an error message).
     async fn llm_complete(&self, messages: Vec<(Role, String)>) -> String {
         let Some(llm) = &self.llm_client else {
