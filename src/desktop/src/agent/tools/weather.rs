@@ -26,9 +26,10 @@ fn geocode(location: &str) -> Result<(f64, f64), String> {
     #[cfg(test)]
     let url = std::env::var("MOCK_NOMINATIM_URL").unwrap_or(url);
 
-    let req = match ureq::get(&url)
-        .set("User-Agent", "FastMD Weather Tool/1.0")
-        .call()
+    let req = match reqwest::blocking::Client::new()
+        .get(&url)
+        .header("User-Agent", "FastMD Weather Tool/1.0")
+        .send()
     {
         Ok(r) => r,
         Err(e) => {
@@ -37,7 +38,7 @@ fn geocode(location: &str) -> Result<(f64, f64), String> {
         }
     };
 
-    let json: Value = match req.into_json() {
+    let json: Value = match req.json() {
         Ok(j) => j,
         Err(e) => {
             tracing::error!(name = "tool.weather.geocode.json_failed", error = %e, "Nominatim geocoding API returned invalid JSON. Operator should verify API response.");
@@ -76,9 +77,10 @@ pub fn tool_get_weather(
     #[cfg(test)]
     let points_url = std::env::var("MOCK_NWS_POINTS_URL").unwrap_or(points_url);
 
-    let req = match ureq::get(&points_url)
-        .set("User-Agent", "FastMD Weather Tool/1.0")
-        .call()
+    let req = match reqwest::blocking::Client::new()
+        .get(&points_url)
+        .header("User-Agent", "FastMD Weather Tool/1.0")
+        .send()
     {
         Ok(r) => r,
         Err(e) => {
@@ -87,7 +89,7 @@ pub fn tool_get_weather(
         }
     };
 
-    let json: Value = match req.into_json() {
+    let json: Value = match req.json() {
         Ok(j) => j,
         Err(e) => {
             tracing::error!(name = "tool.weather.nws.points_json_failed", error = %e, "NWS Points API returned invalid JSON. Operator should verify API status.");
@@ -108,9 +110,10 @@ pub fn tool_get_weather(
     #[cfg(test)]
     let forecast_url = std::env::var("MOCK_NWS_FORECAST_URL").unwrap_or(forecast_url);
 
-    let req = match ureq::get(&forecast_url)
-        .set("User-Agent", "FastMD Weather Tool/1.0")
-        .call()
+    let req = match reqwest::blocking::Client::new()
+        .get(&forecast_url)
+        .header("User-Agent", "FastMD Weather Tool/1.0")
+        .send()
     {
         Ok(r) => r,
         Err(e) => {
@@ -119,7 +122,7 @@ pub fn tool_get_weather(
         }
     };
 
-    let forecast_json: Value = match req.into_json() {
+    let forecast_json: Value = match req.json() {
         Ok(j) => j,
         Err(e) => {
             tracing::error!(name = "tool.weather.nws.forecast_json_failed", error = %e, "NWS Forecast API returned invalid JSON. Operator should verify API status.");

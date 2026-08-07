@@ -399,14 +399,17 @@ fn exchange_code(
         form.push(("client_id", client.client_id.clone()));
     }
     let body = encode_form(&form);
-    let mut req = ureq::post(&as_metadata.token_endpoint)
-        .set("Accept", "application/json")
-        .set("Content-Type", "application/x-www-form-urlencoded")
-        .timeout(DISCOVERY_TIMEOUT);
-    for (k, v) in &client.extra_headers {
-        req = req.set(k.as_str(), v.as_str());
-    }
-    send_token_request(req, &body, "authorization_code")
+    // The shared `token_agent()` below applies `DISCOVERY_TIMEOUT`
+    // globally on the blocking client. We add the per-request
+    // headers (Accept, Content-Type, and any per-client extras)
+    // inside `send_token_request`.
+    send_token_request(
+        &token_agent(),
+        &as_metadata.token_endpoint,
+        &client.extra_headers,
+        &body,
+        "authorization_code",
+    )
 }
 
 fn refresh_with_token(
@@ -431,14 +434,13 @@ fn refresh_with_token(
         form.push(("client_id", client.client_id.clone()));
     }
     let body = encode_form(&form);
-    let mut req = ureq::post(&as_metadata.token_endpoint)
-        .set("Accept", "application/json")
-        .set("Content-Type", "application/x-www-form-urlencoded")
-        .timeout(DISCOVERY_TIMEOUT);
-    for (k, v) in &client.extra_headers {
-        req = req.set(k.as_str(), v.as_str());
-    }
-    send_token_request(req, &body, "refresh_token")
+    send_token_request(
+        &token_agent(),
+        &as_metadata.token_endpoint,
+        &client.extra_headers,
+        &body,
+        "refresh_token",
+    )
 }
 
 fn encode_form(form: &[(impl AsRef<str>, String)]) -> String {
@@ -448,16 +450,59 @@ fn encode_form(form: &[(impl AsRef<str>, String)]) -> String {
         .join("&")
 }
 
+/// Build the shared ureq 3.x [`ureq::Agent`] used for OAuth
+/// token requests.
+///
+/// * `http_status_as_error(false)` — 4xx/5xx still land in `Ok(_)`,
+///   so we can parse the OAuth error body out of the response.
+/// * `timeout_global(DISCOVERY_TIMEOUT)` — replaces the per-request
+///   `.timeout()` that existed in ureq 2.x.
+fn token_agent() -> ureq::Agent {
+    ureq::Agent::config_builder()
+        .http_status_as_error(false)
+        .timeout_global(Some(DISCOVERY_TIMEOUT))
+        .build()
+        .new_agent()
+}
+
 fn send_token_request(
-    req: ureq::Request,
+    agent: &ureq::Agent,
+    url: &str,
+    extra_headers: &std::collections::HashMap<String, String>,
     body: &str,
-    _grant: &str,
+    grant: &str,
 ) -> Result<TokenResponse, OAuthError> {
-    let resp = req.send_string(body);
+    let mut req = agent
+        .post(url)
+        .header("Accept", "application/json")
+        .header("Content-Type", "application/x-www-form-urlencoded");
+    for (k, v) in extra_headers {
+        req = req.header(k.as_str(), v.as_str());
+    }
+    let resp = req.send(body);
     match resp {
-        Ok(r) => {
+        Ok(mut r) => {
+            // ureq 3.x: 4xx/5xx land here because we set
+            // `http_status_as_error(false)` on the agent. Branch on
+            // the status so the OAuth error body can still be parsed.
+            if r.status().as_u16() >= 400 {
+                let code = r.status().as_u16();
+                let err_body = r.body_mut().read_to_string().unwrap_or_default();
+                if let Ok(value) = serde_json::from_str::<serde_json::Value>(&err_body)
+                    && let Some(err) = super::types::OAuthErrorBody::from_json(&value)
+                {
+                    return Err(OAuthError::OAuth {
+                        endpoint: "token",
+                        body: err,
+                    });
+                }
+                return Err(OAuthError::Transport(format!(
+                    "token endpoint returned HTTP {code}: {err_body}; grant={grant}"
+                )));
+            }
             let body = r
-                .into_string()
+                .body_mut()
+                .read_to_string()
                 .map_err(|e| OAuthError::Transport(format!("token response read: {e}")))?;
             let value: serde_json::Value = serde_json::from_str(&body).map_err(|e| {
                 OAuthError::Protocol(format!("token response json: {e}; body: {body}"))
@@ -470,20 +515,6 @@ fn send_token_request(
             }
             serde_json::from_value::<TokenResponse>(value)
                 .map_err(|e| OAuthError::Protocol(format!("token response shape: {e}")))
-        }
-        Err(ureq::Error::Status(_code, r)) => {
-            let body = r.into_string().unwrap_or_default();
-            if let Ok(value) = serde_json::from_str::<serde_json::Value>(&body)
-                && let Some(err) = super::types::OAuthErrorBody::from_json(&value)
-            {
-                return Err(OAuthError::OAuth {
-                    endpoint: "token",
-                    body: err,
-                });
-            }
-            Err(OAuthError::Transport(format!(
-                "token endpoint returned error: {body}"
-            )))
         }
         Err(e) => Err(OAuthError::Transport(format!("token request: {e}"))),
     }

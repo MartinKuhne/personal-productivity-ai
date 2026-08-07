@@ -228,9 +228,9 @@ fn fetch_authorization_server_metadata(
 }
 
 // ---------------------------------------------------------------------------
-// Lightweight HTTP GET (JSON body) — the codebase already uses `ureq`
-// everywhere; we re-use it for the metadata fetches so the project
-// stays on a single HTTP stack.
+// Lightweight HTTP GET (JSON body) — uses the same `reqwest::blocking`
+// client the rest of the crate uses for OAuth and MCP traffic, so
+// the project stays on a single HTTP stack.
 // ---------------------------------------------------------------------------
 
 #[derive(Debug)]
@@ -249,13 +249,27 @@ impl std::fmt::Display for HttpError {
 }
 
 fn http_get_json(url: &str) -> Result<String, HttpError> {
-    let req = ureq::get(url)
-        .set("Accept", "application/json")
+    // reqwest's blocking client does not raise on 4xx/5xx by
+    // default — `response.status()` reflects the code, and we read
+    // the body for diagnostics.
+    let req = reqwest::blocking::Client::new()
+        .get(url)
+        .header("Accept", "application/json")
         .timeout(DISCOVERY_TIMEOUT);
-    match req.call() {
+    match req.send() {
         Ok(resp) => {
+            if resp.status().as_u16() == 404 {
+                return Err(HttpError::NotFound);
+            }
+            if resp.status().as_u16() >= 400 {
+                let code = resp.status().as_u16();
+                let body = resp.text().unwrap_or_default();
+                return Err(HttpError::Other(format!("HTTP {code}: {body}")));
+            }
             let ct = resp
-                .header("Content-Type")
+                .headers()
+                .get("Content-Type")
+                .and_then(|v| v.to_str().ok())
                 .unwrap_or("")
                 .to_ascii_lowercase();
             if !ct.contains("application/json") {
@@ -263,13 +277,7 @@ fn http_get_json(url: &str) -> Result<String, HttpError> {
                     "metadata at {url} returned unexpected Content-Type '{ct}'"
                 )));
             }
-            resp.into_string()
-                .map_err(|e| HttpError::Other(e.to_string()))
-        }
-        Err(ureq::Error::Status(404, _)) => Err(HttpError::NotFound),
-        Err(ureq::Error::Status(code, resp)) => {
-            let body = resp.into_string().unwrap_or_default();
-            Err(HttpError::Other(format!("HTTP {code}: {body}")))
+            resp.text().map_err(|e| HttpError::Other(e.to_string()))
         }
         Err(e) => Err(HttpError::Other(e.to_string())),
     }

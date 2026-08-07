@@ -77,11 +77,11 @@ impl LLMClient {
         messages: &[serde_json::Value],
         tools: &serde_json::Value,
     ) -> Result<serde_json::Value, AgentError> {
-        let agent = ureq::AgentBuilder::new()
-            .timeout_connect(std::time::Duration::from_secs(60))
-            .timeout_read(std::time::Duration::from_secs(1800))
+        let client = reqwest::blocking::Client::builder()
+            .connect_timeout(std::time::Duration::from_secs(60))
             .timeout(std::time::Duration::from_secs(1800))
-            .build();
+            .build()
+            .map_err(|e| AgentError::NetworkError(e.to_string()))?;
 
         let url = format!(
             "{}/chat/completions",
@@ -95,45 +95,59 @@ impl LLMClient {
             "max_tokens": self.max_tokens
         });
 
+        // reqwest's blocking client does not raise on 4xx/5xx by
+        // default, so 2xx/4xx/5xx all land in `Ok(_)` and we branch on
+        // the status code. This is *better* than the previous ureq
+        // setup because the body is now available for diagnostic
+        // logging on 5xx/429 retries (ureq 3.x's `StatusCode` error
+        // dropped the body).
         let response = (|| {
-            let result = agent
+            let result = client
                 .post(&url)
-                .set("Authorization", &format!("Bearer {}", self.api_key))
-                .set("Content-Type", "application/json")
-                .send_json(body.clone());
+                .bearer_auth(&self.api_key)
+                .json(&body)
+                .send();
 
             match result {
-                Ok(resp) => Ok(resp),
-                Err(ureq::Error::Status(code, resp)) => {
-                    let body_str = resp
-                        .into_string()
-                        .unwrap_or_else(|_| "[Could not read body]".to_string());
-                    if code >= 500 || code == 429 {
-                        tracing::warn!(
-                            name = "agent.api.retry",
-                            status = code,
-                            "Retryable HTTP error, will retry"
-                        );
-                        Err(AgentError::HttpError {
-                            status: code,
-                            body: body_str,
-                        })
+                Ok(resp) => {
+                    let status = resp.status();
+                    if status.is_success() {
+                        Ok(resp)
                     } else {
-                        tracing::error!(
-                            name = "agent.api.failed",
-                            status = code,
-                            response = %body_str,
-                            "Non-retryable HTTP error."
-                        );
+                        let code = status.as_u16();
+                        let body_str = resp
+                            .text()
+                            .unwrap_or_else(|_| "[Could not read body]".to_string());
+                        if code >= 500 || code == 429 {
+                            tracing::warn!(
+                                name = "agent.api.retry",
+                                status = code,
+                                "Retryable HTTP error, will retry"
+                            );
+                        } else {
+                            tracing::error!(
+                                name = "agent.api.failed",
+                                status = code,
+                                response = %body_str,
+                                "Non-retryable HTTP error."
+                            );
+                        }
                         Err(AgentError::HttpError {
                             status: code,
                             body: body_str,
                         })
                     }
                 }
-                Err(ureq::Error::Transport(e)) => {
+                Err(e) => {
                     let err_str = e.to_string();
-                    let is_timeout = err_str.contains("timed out")
+                    // `reqwest::Error::is_timeout()` is the canonical
+                    // check; we also match on substrings of the display
+                    // form to keep behaviour aligned with the previous
+                    // ureq-based classifier for cases that surface as
+                    // connection-level errors (connect, read).
+                    let is_timeout = e.is_timeout()
+                        || e.is_connect()
+                        || err_str.contains("timed out")
                         || err_str.contains("Timeout")
                         || err_str.contains("Network is unreachable");
                     if is_timeout {
@@ -163,7 +177,7 @@ impl LLMClient {
         })
         .call()?;
 
-        response.into_json().map_err(|e| {
+        response.json().map_err(|e| {
             tracing::error!(
                 name = "agent.api.invalid_json",
                 error = %e,

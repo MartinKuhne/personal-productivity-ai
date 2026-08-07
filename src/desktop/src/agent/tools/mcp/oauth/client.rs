@@ -31,7 +31,6 @@ use super::types::{
     AuthorizationServerMetadata, ClientRegistrationRequest, ClientRegistrationResponse, OAuthError,
 };
 
-use super::discovery::DISCOVERY_TIMEOUT;
 use super::flow::PreRegisteredClient;
 
 /// Resolved OAuth client ready to use. `client_id` is what we
@@ -143,15 +142,34 @@ fn register_dynamic(
     };
     let body = serde_json::to_string(&request)
         .map_err(|e| OAuthError::Internal(format!("serialize registration request: {e}")))?;
-    let resp = ureq::post(endpoint)
-        .set("Accept", "application/json")
-        .set("Content-Type", "application/json")
-        .timeout(DISCOVERY_TIMEOUT)
-        .send_string(&body);
+    // reqwest's blocking client does not raise on 4xx/5xx by default,
+    // so the response is always available for body inspection. We
+    // branch on the status code so the OAuth error body can still
+    // be parsed out of a 4xx response.
+    let resp = reqwest::blocking::Client::new()
+        .post(endpoint)
+        .header("Accept", "application/json")
+        .header("Content-Type", "application/json")
+        .body(body)
+        .send();
     let response: ClientRegistrationResponse = match resp {
         Ok(r) => {
+            if r.status().as_u16() >= 400 {
+                let body = r.text().unwrap_or_default();
+                if let Ok(value) = serde_json::from_str::<serde_json::Value>(&body)
+                    && let Some(err) = super::types::OAuthErrorBody::from_json(&value)
+                {
+                    return Err(OAuthError::OAuth {
+                        endpoint: "registration",
+                        body: err,
+                    });
+                }
+                return Err(OAuthError::ClientRegistration(format!(
+                    "registration endpoint returned error: {body}"
+                )));
+            }
             let body = r
-                .into_string()
+                .text()
                 .map_err(|e| OAuthError::Transport(format!("registration response read: {e}")))?;
             let value: serde_json::Value = serde_json::from_str(&body).map_err(|e| {
                 OAuthError::Protocol(format!("registration response json: {e}; body: {body}"))
@@ -164,20 +182,6 @@ fn register_dynamic(
             }
             serde_json::from_value(value)
                 .map_err(|e| OAuthError::Protocol(format!("registration response shape: {e}")))?
-        }
-        Err(ureq::Error::Status(_code, r)) => {
-            let body = r.into_string().unwrap_or_default();
-            if let Ok(value) = serde_json::from_str::<serde_json::Value>(&body)
-                && let Some(err) = super::types::OAuthErrorBody::from_json(&value)
-            {
-                return Err(OAuthError::OAuth {
-                    endpoint: "registration",
-                    body: err,
-                });
-            }
-            return Err(OAuthError::ClientRegistration(format!(
-                "registration endpoint returned error: {body}"
-            )));
         }
         Err(e) => {
             return Err(OAuthError::ClientRegistration(format!(
