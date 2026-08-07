@@ -12,7 +12,7 @@ use crate::config::AppConfig;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, mpsc};
 use std::thread;
-use std::time::Instant;
+use crate::utils::clock::Clock;
 
 pub struct BatchCoordinator {
     config: BatchConfig,
@@ -21,6 +21,7 @@ pub struct BatchCoordinator {
     file_event_bus: Bus<FileEvent>,
     prompt_text: String,
     cancel_flag: Arc<AtomicBool>,
+    clock: Arc<dyn Clock>,
 }
 
 impl BatchCoordinator {
@@ -30,6 +31,7 @@ impl BatchCoordinator {
         tx_gui: mpsc::Sender<BackgroundEvent>,
         file_event_bus: Bus<FileEvent>,
         prompt_text: String,
+        clock: Arc<dyn Clock>,
     ) -> (Self, Arc<AtomicBool>) {
         let cancel_flag = Arc::new(AtomicBool::new(false));
         let coordinator = Self {
@@ -39,6 +41,7 @@ impl BatchCoordinator {
             file_event_bus,
             prompt_text,
             cancel_flag: cancel_flag.clone(),
+            clock,
         };
         (coordinator, cancel_flag)
     }
@@ -53,7 +56,7 @@ impl BatchCoordinator {
     }
 
     fn run(self) -> BatchResult {
-        let start_time = Instant::now();
+        let start_time = self.clock.now();
         let discoverer: Box<dyn JobDiscoverer> = <dyn JobDiscoverer>::from_config(&self.config);
         let targets = match discoverer.discover() {
             Ok(t) => t,
@@ -64,7 +67,7 @@ impl BatchCoordinator {
                     completed: 0,
                     failed: 0,
                     cancelled: 0,
-                    duration: start_time.elapsed(),
+                    duration: (self.clock.now() - start_time).to_std().unwrap_or_default(),
                 };
             }
         };
@@ -76,7 +79,7 @@ impl BatchCoordinator {
                 completed: 0,
                 failed: 0,
                 cancelled: 0,
-                duration: start_time.elapsed(),
+                duration: (self.clock.now() - start_time).to_std().unwrap_or_default(),
             };
         }
 
@@ -115,9 +118,10 @@ impl BatchCoordinator {
             self.tx_gui,
             self.prompt_text,
             self.cancel_flag.clone(),
+            self.clock.clone(),
         );
         let mut result = executor.execute_concurrent(jobs, self.config.concurrency);
-        result.duration = start_time.elapsed();
+        result.duration = (self.clock.now() - start_time).to_std().unwrap_or_default();
 
         if self.cancel_flag.load(Ordering::SeqCst) {
             tracing::info!(
@@ -161,7 +165,7 @@ mod tests {
 
         let app_config = AppConfig::default();
         let (coordinator, cancel_flag) =
-            BatchCoordinator::new(config, app_config, tx, bus, "test prompt".to_string());
+            BatchCoordinator::new(config, app_config, tx, bus, "test prompt".to_string(), Arc::new(crate::utils::clock::SystemClock));
 
         assert!(!cancel_flag.load(Ordering::SeqCst));
         let handle = coordinator.execute();
@@ -187,7 +191,7 @@ mod tests {
 
         let app_config = AppConfig::default();
         let (coordinator, _cancel_flag) =
-            BatchCoordinator::new(config, app_config, tx, bus, "test prompt".to_string());
+            BatchCoordinator::new(config, app_config, tx, bus, "test prompt".to_string(), Arc::new(crate::utils::clock::SystemClock));
 
         let handle = coordinator.execute();
         let result = handle.join();
@@ -216,7 +220,7 @@ mod tests {
 
         let app_config = AppConfig::default();
         let (coordinator, _) =
-            BatchCoordinator::new(config, app_config, tx, bus, "test prompt".to_string());
+            BatchCoordinator::new(config, app_config, tx, bus, "test prompt".to_string(), Arc::new(crate::utils::clock::SystemClock));
 
         let handle = coordinator.execute();
         let result = handle.join();
