@@ -37,162 +37,52 @@ concern and expose its public API through a `mod.rs` that re-exports symbols.
 
 ```
 src/
-├── lib.rs                  # facade: re-exports public API, no logic
-├── main.rs                 # fastmd binary entry; eframe::run_native
-├── error.rs                # AgentError
-├── bin/deploy.rs           # deploy binary target
-│
+├── bin/                    # Binary targets (deploy, etc.)
 ├── bus/                    # Messaging subsystem — transports, event payloads,
-│   │                       # bus-side routing (see `doc/planning/.../bus-folder-consolidation.md`)
-│   ├── core.rs             # Bus<T>, BusReader<T>  (tokio::sync::broadcast wrapper)
-│   ├── events/             # every event payload that flows over a bus or channel
-│   ├── router/             # bus-side plumbing
-│   └── config.rs           # config_bus() constructor, CONFIG_ARRIVAL_TIMEOUT
+│                           # bus-side routing
+│   ├── events/             # Event payloads that flow over a bus or channel
+│   └── router/             # Bus-side plumbing
 ├── config/                 # AppConfig + client structs, loader, secrets (data shapes only)
 ├── app/                    # egui-free application domain (managers, watcher, vfs)
-│   ├── vfs/                # Virtual File System — parser, library behaviour, resolver (app/vfs/SPEC.md)
+│   ├── vfs/                # Virtual File System — parser, library behaviour, resolver
 │   ├── watcher/            # FileWatcher (notify), FileEventProcessor, DirectoryTracker
-│   ├── session/            # Shared runtime — BrowserSession (Playwright) and PdfBackingTracker,
-│   │                       # the long-lived handles the orchestrator hands to the agent
-│   └── (managers)          # TabManager, SelectionManager, DialogManager, PanelLayout, TagManager, TextBuffer
+│   ├── session/            # Shared runtime — BrowserSession (Playwright) and PdfBackingTracker
+│   ├── browser/            # Playwright wrapper
+│   ├── background/         # Worker pool — Indexer, PdfConverterWorker,
+│   │                       # ImageVisionWorker, ProcessManager
+│   └── batch/              # Batch prompt processing (coordinator, discoverer,
+│                           # executor, file_matcher, prompts, types)
 ├── agent/                  # LLM tool-loop: manager, llm_client, prompt_builder,
-│                           #   response_formatter, tool_executor, context, agent_impl
-├── tools/                  # Tool trait, ToolContext, ToolRegistry, and every tool
-│                           #   family (filesystem, web, jmap, csv_db, caldav,
-│                           #   carddav, weather, yaml_header)
+│                           # response_formatter, tool_executor, context, agent_impl
+│   └── tools/              # Tool trait, ToolContext, ToolRegistry, and every tool
+│       ├── csv_db/         # CSV database tool family
+│       ├── jmap/           # JMAP email client tool family
+│       ├── manager/        # Tool manager and registry
+│       └── mcp/            # Model Context Protocol client tool family
+├── integrations/           # External service integrations (e.g., Discord)
 ├── markdown/               # THE Markdown subsystem: parsing, rendering, document
-│                           #   model, front-matter R/W, table-width algorithm
+│                           # model, front-matter R/W, table-width algorithm
+│   └── table_width/        # Table width calculation algorithm
 ├── ui/                     # egui layer only: FastMdApp, PanelLayout, panels/,
-│                           #   tree, tab/selection/dialog managers, modals,
-│                           #   background_logs, os_shell
-├── background/             # Worker pool — Indexer, PdfConverterWorker,
-│                           #   ImageVisionWorker, ProcessManager
-├── batch/                  # Batch prompt processing (coordinator, discoverer,
-│                           #   executor, file_matcher, prompts, types)
-├── editor.rs               # Inline egui text editor widget (calls markdown::)
-├── tag_manager.rs          # TagManager (file_tags, all_tags, prompt_paths)
-├── print.rs                # PrintJob (calls markdown::render for HTML)
-├── browser.rs              # Playwright wrapper
+│                           # tree, tab/selection/dialog managers, modals,
+│                           # background_logs, os_shell
+│   ├── app/                # Main app UI logic
+│   ├── panels/             # UI panels
+│   ├── render/             # Rendering utilities
+│   ├── table_width/        # Table width UI components
+│   ├── test_helpers/       # UI test helpers
+│   └── tree/               # Tree view components
 └── utils/                  # Generic helpers only (path, tags) — NO Markdown knowledge
 ```
 
 - [RUST-051] When adding or moving code, place files by **concern**, not by type
-
-### Event-driven fan-out
-
-Background work reaches the UI through **event-driven fan-out** on
-`Bus<T>` broadcast buses (`bus::core`), never through per-widget
-request/response binding:
-
-- Long-running or background work runs on its own thread or worker and
-  publishes results as events onto a `Bus<T>` bus; the UI never awaits a
-  background future directly.
-- The UI subscribes as a `BusReader` and drains events each frame with
-  `try_recv()` (see `ui/app.rs`), calling `ctx.request_repaint()` when a
-  frame needs to be drawn.
-- One-off operations (e.g. an OAuth flow) may use a dedicated channel plus
-  `ctx.request_repaint()` after sending, but still produce on a background
-  thread and consume on the UI thread.
-- Keep the bus contract as the single path for results flowing into the UI;
-  do not add a parallel per-widget async-binding mechanism alongside it.
-
-### Module size and splitting
-
-- Target **≤ 4096 lines** per `.rs` file. When a file exceeds this, split by
-  concern into a submodule directory (cf. `config/`, `tools/registry/`,
-  `ui/app/`). Keep the original file as a `mod.rs` that re-exports the pieces
-  so public paths are unchanged.
-- `lib.rs` is a **facade only** — no logic, only `pub use` of subsystem
-  public APIs. Do not grow it when adding features; add to the relevant
-  subsystem and let `lib.rs` re-export.
-- When extracting a submodule, refactor and update all external callers.
-
-### Test sidecar files
-
-When a source file's `#[cfg(test)] mod tests { ... }` block grows large enough
-to materially affect cognitive load (rough rule: more than ~150 test lines, or
-when the test block is more than half the file), extract the test body into a
-sibling sidecar file and declare it from the source file:
-
-```rust
-// In <area>/foo.rs:
-#[cfg(test)]
-mod tests;  // sibling file: <area>/tests.rs (or <area>/foo_tests.rs)
-
-// In <area>/tests.rs (or <area>/foo_tests.rs):
-//! Tests for [`crate::area::foo`].
-//! Lives in a sidecar so the implementation file stays focused.
-
-use super::*;
-```
-
-The `mod tests;` declaration (no `#[path]` needed) makes the test file a child
-of the implementation module, so `use super::*;` keeps working and private
-items stay in scope. This is the **unit-test sidecar** pattern. It is
-mechanical, preserves visibility, and is preferred over the alternatives below
-whenever tests need to touch internal state.
-
-Use **`tests/<name>.rs` (integration test)** instead of a sidecar when the test
-should be exercised against the public API only — typically for algorithm
-tests, public-contract regression tests, and black-box behaviour checks. The
-sibling pattern is wrong in that case because it is too forgiving: a test that
-only uses public items should be proven to do so.
-
-**Header note requirement.** Whenever an implementation file has a test
-sidecar, the implementation file's `//!` module doc comment must end with a
-one-line pointer to the sidecar, in this form:
-
-```rust
-//! ...existing module doc...
-//!
-//! Unit tests live in the sibling `tests.rs` sidecar.
-```
-
-(If the sidecar is named `<foo>_tests.rs` rather than `tests.rs`, substitute
-the actual filename.) This keeps the sidecar discoverable from the
-implementation file and from any `cargo doc` output.
-
-Existing examples to follow:
-
-- `agent/agent_impl.rs` ↔ `agent/agent_impl_tests.rs`
-- `agent/tools/manager/mod.rs` ↔ `agent/tools/manager/tests.rs` and
-  `agent/tools/manager/group_tests.rs`
-- `ui/tools_dialog.rs` ↔ `ui/tools_dialog_tests.rs`
-- `agent/tools/browser.rs` ↔ `agent/tools/browser_tests.rs`
-- `markdown/table_width/mod.rs` ↔ `tests/table_layout_test.rs` and
-  `tests/table_visual_layout_test.rs` (integration-test variant)
-
-### `app/` is egui-free
-
-The `app/` module owns the application-domain types: managers
-(`TabManager`, `SelectionManager`, `DialogManager`, `PanelLayout`,
-`TagManager`), the file-watcher plumbing (`FileEventProcessor`,
-`DirectoryTracker`, `FileWatcher`), the `ToCEntry`
-data type, and the persisted UI struct (`PersistedUiState`).
-
-The `Bus<T>` transport and all event payload types live in
-[`crate::bus`]; `app/` does not define or re-export them.
-
-- **No `egui` references.** No `.rs` file under `app/` may import
-  `eframe::egui`, `egui`, or any other UI crate. Doc comments may
-  mention `egui::Id` (e.g. to document how a stable string id
-  maps to one at render time), but `use` statements must not.
-  The module is unit-tested without driving the UI harness, so an
-  `egui` dependency would couple those tests to the framework.
-- **Stable identifiers are `String`s.** Anything the UI layer needs
-  to address by id (`ToCEntry::id`, `TabManager::scroll_to_header_id`,
-  `AgentState::scroll_to_id`) is stored as a `String` (or
-  `Option<String>`). The UI layer converts to `egui::Id::new(&s)`
-  at the boundary.
-- **The UI layer adapts, the app layer doesn't.** `app/` exposes
-  plain Rust types and behaviour; `ui/` is the only consumer that
-  knows about `eframe::egui`. New application-domain types belong in
-  `app/`; new rendering concerns belong in `ui/`.
-- **Verification.** `cargo clippy --all-targets` does not catch
-  accidental `egui` imports in `app/` (clippy is framework-agnostic).
-  When adding code under `app/`, run
-  `rg -n '^\s*use .*egui|^\s*use eframe' src/desktop/src/app` and
-  confirm it returns nothing.
+- [RUST-052] **Event-driven fan-out.** Background work MUST reach the UI through event-driven fan-out on `Bus<T>` broadcast buses (`bus::core`). Long-running work MUST run on its own thread or worker and publish results as events onto a `Bus<T>` bus. The UI MUST NOT await a background future directly. The UI MUST subscribe as a `BusReader` and drain events each frame with `try_recv()` (see `ui/app.rs`), calling `ctx.request_repaint()` when a frame needs to be drawn. One-off operations MAY use a dedicated channel plus `ctx.request_repaint()` after sending, but MUST still produce on a background thread and consume on the UI thread. The bus contract MUST remain the single path for results flowing into the UI. Do not add a parallel per-widget async-binding mechanism.
+- [RUST-053] **Module size limit.** Each `.rs` file MUST NOT exceed 4096 lines. When a file exceeds this limit, split by concern into a submodule directory (cf. `config/`, `tools/registry/`, `ui/app/`). Keep the original file as a `mod.rs` that re-exports the pieces so public paths are unchanged.
+- [RUST-054] **Facade-only `lib.rs`.** `lib.rs` MUST be a facade only — no logic, only `pub use` of subsystem public APIs. Do not grow `lib.rs` when adding features; add to the relevant subsystem and let `lib.rs` re-export.
+- [RUST-055] **Submodule extraction.** When extracting a submodule, you MUST refactor and update all external callers.
+- [RUST-056] **Test sidecar extraction.** When a source file's `#[cfg(test)] mod tests { ... }` block exceeds ~150 lines or more than half the file, extract the test body into a sibling sidecar file. Declare it from the source file with `#[cfg(test)] mod tests;`. The sidecar file MUST be named `tests.rs` or `<foo>_tests.rs`. Use `tests/<name>.rs` (integration test) instead of a sidecar when the test should exercise only the public API.
+- [RUST-057] **Sidecar header note.** When an implementation file has a test sidecar, the implementation file's `//!` module doc comment MUST end with a one-line pointer: `//! Unit tests live in the sibling \`tests.rs\` sidecar.` (substitute actual filename if different).
+- [RUST-058] **`app/` is egui-free.** No `.rs` file under `app/` MUST import `eframe::egui`, `egui`, or any other UI crate. Doc comments MAY mention `egui::Id` but `use` statements MUST NOT. Stable identifiers that the UI layer addresses by id MUST be stored as `String` (or `Option<String>`). The UI layer converts to `egui::Id::new(&s)` at the boundary. New application-domain types MUST go in `app/`; new rendering concerns MUST go in `ui/`. When adding code under `app/`, run `rg -n '^\s*use .*egui|^\s*use eframe' src/desktop/src/app` and confirm it returns nothing.
 
 ## 6. Quality Gate (Rust)
 
