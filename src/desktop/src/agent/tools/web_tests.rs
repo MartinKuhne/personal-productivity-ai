@@ -33,6 +33,7 @@ fn spawn_mock_server(body: impl Into<String>) -> String {
 
 #[test]
 fn test_tool_web_fetch_mock() {
+    let cache = crate::agent::tools::manager::cache::ToolCache::new();
     rustls::crypto::ring::default_provider()
         .install_default()
         .ok();
@@ -43,13 +44,14 @@ fn test_tool_web_fetch_mock() {
         force_refetch: true,
         cursor: None,
     };
-    let result = tool_web_fetch(&input).unwrap();
+    let result = tool_web_fetch(&input, &cache).unwrap();
     assert!(result.content.contains("Hello") || result.content.contains("World"));
     assert!(result.total_lines > 0);
 }
 
 #[test]
 fn test_tool_web_fetch_error() {
+    let cache = crate::agent::tools::manager::cache::ToolCache::new();
     rustls::crypto::ring::default_provider()
         .install_default()
         .ok();
@@ -59,12 +61,13 @@ fn test_tool_web_fetch_error() {
         force_refetch: true,
         cursor: None,
     };
-    let result = tool_web_fetch(&input);
+    let result = tool_web_fetch(&input, &cache);
     assert!(result.is_err());
 }
 
 #[test]
 fn test_tool_web_fetch_pagination() {
+    let cache = crate::agent::tools::manager::cache::ToolCache::new();
     rustls::crypto::ring::default_provider()
         .install_default()
         .ok();
@@ -77,7 +80,7 @@ fn test_tool_web_fetch_pagination() {
         force_refetch: true,
         cursor: None,
     };
-    let result = tool_web_fetch(&input).unwrap();
+    let result = tool_web_fetch(&input, &cache).unwrap();
     assert!(result.total_lines >= 3);
     assert!(result.content.lines().count() > 0);
     assert!(result.cursor.is_some() || result.hint.is_some());
@@ -86,6 +89,7 @@ fn test_tool_web_fetch_pagination() {
 
 #[test]
 fn test_tool_web_fetch_headers() {
+    let cache = crate::agent::tools::manager::cache::ToolCache::new();
     rustls::crypto::ring::default_provider()
         .install_default()
         .ok();
@@ -96,7 +100,7 @@ fn test_tool_web_fetch_headers() {
         force_refetch: true,
         cursor: None,
     };
-    let result = tool_web_fetch(&input).unwrap();
+    let result = tool_web_fetch(&input, &cache).unwrap();
     assert!(result.response_headers.is_some());
     let headers = result.response_headers.unwrap();
     assert!(headers.contains_key("content-type") || headers.contains_key("Content-Type"));
@@ -104,6 +108,7 @@ fn test_tool_web_fetch_headers() {
 
 #[test]
 fn test_tool_web_fetch_cache_hit() {
+    let cache = crate::agent::tools::manager::cache::ToolCache::new();
     rustls::crypto::ring::default_provider()
         .install_default()
         .ok();
@@ -114,15 +119,16 @@ fn test_tool_web_fetch_cache_hit() {
         force_refetch: false,
         cursor: None,
     };
-    let first = tool_web_fetch(&input).unwrap();
+    let first = tool_web_fetch(&input, &cache).unwrap();
     assert!(!first.from_cache);
-    let second = tool_web_fetch(&input).unwrap();
+    let second = tool_web_fetch(&input, &cache).unwrap();
     assert!(second.from_cache);
     assert_eq!(first.content, second.content);
 }
 
 #[test]
 fn test_tool_web_fetch_force_refetch() {
+    let cache = crate::agent::tools::manager::cache::ToolCache::new();
     rustls::crypto::ring::default_provider()
         .install_default()
         .ok();
@@ -133,14 +139,14 @@ fn test_tool_web_fetch_force_refetch() {
         force_refetch: false,
         cursor: None,
     };
-    let _first = tool_web_fetch(&input).unwrap();
+    let _first = tool_web_fetch(&input, &cache).unwrap();
     let force_input = crate::agent::tools::dtos::WebFetchInput {
         url: server_url.clone(),
         headers: false,
         force_refetch: true,
         cursor: None,
     };
-    let second = tool_web_fetch(&force_input).unwrap();
+    let second = tool_web_fetch(&force_input, &cache).unwrap();
     assert!(!second.from_cache);
 }
 
@@ -250,6 +256,7 @@ fn test_tool_web_search_invalid_json() {
 
 #[test]
 fn test_tool_web_delegate_missing_api_key() {
+    let cache = crate::agent::tools::manager::cache::ToolCache::new();
     let mut config = AppConfig::default();
     config.models.insert(
         "chat".to_string(),
@@ -262,7 +269,7 @@ fn test_tool_web_delegate_missing_api_key() {
         },
     );
 
-    let result = tool_web_delegate(&config, "do something");
+    let result = tool_web_delegate(&config, "do something", &cache);
     assert!(result.is_err());
     assert_eq!(
         result.unwrap_err(),
@@ -272,6 +279,7 @@ fn test_tool_web_delegate_missing_api_key() {
 
 #[test]
 fn test_tool_web_delegate_mock() {
+    let cache = crate::agent::tools::manager::cache::ToolCache::new();
     rustls::crypto::ring::default_provider()
         .install_default()
         .ok();
@@ -300,12 +308,13 @@ fn test_tool_web_delegate_mock() {
         },
     );
 
-    let result = tool_web_delegate(&config, "search for tests").unwrap();
+    let result = tool_web_delegate(&config, "search for tests", &cache).unwrap();
     assert_eq!(result.result, "Final summarized answer");
 }
 
 #[test]
 fn test_tool_web_delegate_with_unknown_tool_handled_gracefully() {
+    let cache = crate::agent::tools::manager::cache::ToolCache::new();
     rustls::crypto::ring::default_provider()
         .install_default()
         .ok();
@@ -343,13 +352,14 @@ fn test_tool_web_delegate_with_unknown_tool_handled_gracefully() {
     config.searxng_url = None;
 
     // Should not panic - handles unknown tool gracefully
-    let result = tool_web_delegate(&config, "do something");
+    let result = tool_web_delegate(&config, "do something", &cache);
     // Either succeeds or returns an error we can handle
     assert!(result.is_ok() || result.is_err());
 }
 
 #[test]
 fn test_tool_web_delegate_handles_api_error_gracefully() {
+    let cache = crate::agent::tools::manager::cache::ToolCache::new();
     rustls::crypto::ring::default_provider()
         .install_default()
         .ok();
@@ -379,7 +389,7 @@ fn test_tool_web_delegate_handles_api_error_gracefully() {
         },
     );
 
-    let result = tool_web_delegate(&config, "test");
+    let result = tool_web_delegate(&config, "test", &cache);
     // Should return an error, not panic
     assert!(result.is_err() || result.is_ok());
 }

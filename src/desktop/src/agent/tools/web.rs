@@ -4,7 +4,7 @@
 
 use crate::agent::datamark::{self, SECURITY_HEADER};
 use crate::agent::tools::manager::builtin::strings::WEB_FETCH_FINAL_PAGE_HINT;
-use crate::agent::tools::manager::cache::{CacheEntry, cache};
+use crate::agent::tools::manager::cache::CacheEntry;
 use crate::config::AppConfig;
 use fast_h2m::convert;
 use std::collections::HashMap;
@@ -16,6 +16,7 @@ const WEB_FETCH_PAGE_SIZE: usize = 100;
 
 pub fn tool_web_fetch(
     input: &crate::agent::tools::dtos::WebFetchInput,
+    cache: &crate::agent::tools::manager::cache::ToolCache,
 ) -> Result<crate::agent::tools::dtos::WebFetchResponse, String> {
     let url = &input.url;
 
@@ -23,7 +24,7 @@ pub fn tool_web_fetch(
     // The cursor is a UUID that points to the full content in the cache.
     if let Some(cursor) = &input.cursor {
         // First get the cursor entry to find the content UUID
-        let content_uuid = match cache().get(cursor) {
+        let content_uuid = match cache.get(cursor) {
             Some(CacheEntry::WebFetch { cursor: uuid }) => uuid,
             _ => {
                 return Err(
@@ -33,7 +34,7 @@ pub fn tool_web_fetch(
         };
 
         // Now get the actual content
-        let entry = match cache().get(&content_uuid) {
+        let entry = match cache.get(&content_uuid) {
             Some(CacheEntry::WebFetchContent {
                 content,
                 response_headers,
@@ -86,7 +87,7 @@ pub fn tool_web_fetch(
         };
 
         // Update the cached entry with the new cursor offset
-        cache().put(
+        cache.put(
             content_uuid,
             CacheEntry::WebFetchContent {
                 content: content.clone(),
@@ -115,10 +116,10 @@ pub fn tool_web_fetch(
     if !input.force_refetch
         && let Some(CacheEntry::WebFetch {
             cursor: content_uuid,
-        }) = cache().get(url)
+        }) = cache.get(url)
     {
         // Get the content
-        let entry = match cache().get(&content_uuid) {
+        let entry = match cache.get(&content_uuid) {
             Some(CacheEntry::WebFetchContent {
                 content,
                 response_headers,
@@ -154,7 +155,7 @@ pub fn tool_web_fetch(
 
             // Update the cached entry with cursor_offset = 0 (first page)
             // so subsequent calls without cursor also get the first page.
-            cache().put(
+            cache.put(
                 content_uuid.clone(),
                 CacheEntry::WebFetchContent {
                     content: content.clone(),
@@ -182,7 +183,7 @@ pub fn tool_web_fetch(
 
     if input.force_refetch {
         // Caller asked for a fresh fetch; clear any existing entry first.
-        cache().invalidate(url);
+        cache.invalidate(url);
     }
 
     match ureq::get(url)
@@ -215,7 +216,7 @@ pub fn tool_web_fetch(
                     };
 
                     // Store URL -> cursor UUID mapping
-                    cache().put(
+                    cache.put(
                         url.clone(),
                         CacheEntry::WebFetch {
                             cursor: content_uuid.clone(),
@@ -223,7 +224,7 @@ pub fn tool_web_fetch(
                     );
 
                     // Store full content under cursor UUID
-                    cache().put(
+                    cache.put(
                         content_uuid.clone(),
                         CacheEntry::WebFetchContent {
                             content: md_content.clone(),
@@ -332,6 +333,7 @@ pub fn tool_web_search(
 pub fn tool_web_delegate(
     config: &AppConfig,
     instruction: &str,
+    cache: &crate::agent::tools::manager::cache::ToolCache,
 ) -> Result<crate::agent::tools::dtos::WebDelegateResponse, String> {
     let mut api_key = String::new();
     let mut api_url = String::new();
@@ -486,7 +488,7 @@ pub fn tool_web_delegate(
                         crate::agent::tools::dtos::WebFetchInput,
                     >(func_args_str)
                     {
-                        match tool_web_fetch(&input) {
+                        match tool_web_fetch(&input, cache) {
                             Ok(res) => serde_json::to_string(
                                 &crate::agent::tools::dtos::ToolResponse::Success { data: res },
                             )

@@ -29,6 +29,7 @@ fn test_ctx(config: &AppConfig) -> ToolContext<'static> {
         test_bus(),
         test_browser_session(),
         test_pdf_backing(),
+        crate::agent::tools::manager::cache::cache(),
     )
 }
 

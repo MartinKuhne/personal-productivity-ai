@@ -13,6 +13,7 @@ use super::{convert_html_in_jmap, simplify_jmap_emails};
 
 #[test]
 fn test_convert_html_plain_text_unchanged() {
+    let cache = crate::agent::tools::manager::cache::ToolCache::new();
     let res = json!({
         "methodResponses": [[
             "Email/get",
@@ -36,6 +37,7 @@ fn test_convert_html_plain_text_unchanged() {
 
 #[test]
 fn test_convert_html_converts_simple_html() {
+    let cache = crate::agent::tools::manager::cache::ToolCache::new();
     let res = json!({
         "methodResponses": [[
             "Email/get",
@@ -60,6 +62,7 @@ fn test_convert_html_converts_simple_html() {
 
 #[test]
 fn test_convert_html_multiple_body_parts() {
+    let cache = crate::agent::tools::manager::cache::ToolCache::new();
     let res = json!({
         "methodResponses": [[
             "Email/get",
@@ -85,6 +88,7 @@ fn test_convert_html_multiple_body_parts() {
 
 #[test]
 fn test_convert_html_no_body_values() {
+    let cache = crate::agent::tools::manager::cache::ToolCache::new();
     let res = json!({
         "methodResponses": [[
             "Email/get",
@@ -104,6 +108,7 @@ fn test_convert_html_no_body_values() {
 
 #[test]
 fn test_convert_html_empty_body_values() {
+    let cache = crate::agent::tools::manager::cache::ToolCache::new();
     let res = json!({
         "methodResponses": [[
             "Email/get",
@@ -118,6 +123,7 @@ fn test_convert_html_empty_body_values() {
 
 #[test]
 fn test_convert_html_value_missing_angle_brackets_not_converted() {
+    let cache = crate::agent::tools::manager::cache::ToolCache::new();
     let res = json!({
         "methodResponses": [[
             "Email/get",
@@ -141,6 +147,7 @@ fn test_convert_html_value_missing_angle_brackets_not_converted() {
 
 #[test]
 fn test_convert_html_non_string_value_not_converted() {
+    let cache = crate::agent::tools::manager::cache::ToolCache::new();
     let res = json!({
         "methodResponses": [[
             "Email/get",
@@ -160,6 +167,7 @@ fn test_convert_html_non_string_value_not_converted() {
 
 #[test]
 fn test_simplify_empty_method_responses() {
+    let cache = crate::agent::tools::manager::cache::ToolCache::new();
     let res = json!({ "methodResponses": [] });
     let result = simplify_jmap_emails(res, None);
     assert_eq!(result, json!([]));
@@ -167,6 +175,7 @@ fn test_simplify_empty_method_responses() {
 
 #[test]
 fn test_simplify_no_email_get_method() {
+    let cache = crate::agent::tools::manager::cache::ToolCache::new();
     let res = json!({
         "methodResponses": [[
             "Contact/query", { "ids": [] }, "0"
@@ -178,6 +187,7 @@ fn test_simplify_no_email_get_method() {
 
 #[test]
 fn test_simplify_email_get_empty_list() {
+    let cache = crate::agent::tools::manager::cache::ToolCache::new();
     let res = json!({
         "methodResponses": [[
             "Email/get",
@@ -191,6 +201,7 @@ fn test_simplify_email_get_empty_list() {
 
 #[test]
 fn test_simplify_single_email_html_body() {
+    let cache = crate::agent::tools::manager::cache::ToolCache::new();
     let res = json!({
         "methodResponses": [[
             "Email/get",
@@ -224,6 +235,7 @@ fn test_simplify_single_email_html_body() {
 
 #[test]
 fn test_simplify_email_text_body_fallback() {
+    let cache = crate::agent::tools::manager::cache::ToolCache::new();
     let res = json!({
         "methodResponses": [[
             "Email/get",
@@ -253,6 +265,7 @@ fn test_simplify_email_text_body_fallback() {
 
 #[test]
 fn test_simplify_multiple_emails() {
+    let cache = crate::agent::tools::manager::cache::ToolCache::new();
     let res = json!({
         "methodResponses": [[
             "Email/get",
@@ -292,6 +305,7 @@ fn test_simplify_multiple_emails() {
 
 #[test]
 fn test_simplify_truncates_body_to_max_lines() {
+    let cache = crate::agent::tools::manager::cache::ToolCache::new();
     let res = json!({
         "methodResponses": [[
             "Email/get",
@@ -319,6 +333,7 @@ fn test_simplify_truncates_body_to_max_lines() {
 
 #[test]
 fn test_simplify_truncated_body_appends_hint() {
+    let cache = crate::agent::tools::manager::cache::ToolCache::new();
     let res = json!({
         "methodResponses": [[
             "Email/get",
@@ -345,6 +360,7 @@ fn test_simplify_truncated_body_appends_hint() {
 
 #[test]
 fn test_simplify_body_not_truncated_if_under_limit() {
+    let cache = crate::agent::tools::manager::cache::ToolCache::new();
     let res = json!({
         "methodResponses": [[
             "Email/get",
@@ -372,6 +388,7 @@ fn test_simplify_body_not_truncated_if_under_limit() {
 
 #[test]
 fn test_simplify_handles_missing_optional_fields() {
+    let cache = crate::agent::tools::manager::cache::ToolCache::new();
     let res = json!({
         "methodResponses": [[
             "Email/get",
@@ -394,6 +411,7 @@ fn test_simplify_handles_missing_optional_fields() {
 
 #[test]
 fn test_simplify_handles_server_truncated_body() {
+    let cache = crate::agent::tools::manager::cache::ToolCache::new();
     let res = json!({
         "methodResponses": [[
             "Email/get",
@@ -420,6 +438,7 @@ fn test_simplify_handles_server_truncated_body() {
 
 #[test]
 fn test_simplify_cc_and_bcc_preserved() {
+    let cache = crate::agent::tools::manager::cache::ToolCache::new();
     let res = json!({
         "methodResponses": [[
             "Email/get",
@@ -451,6 +470,7 @@ use crate::agent::tools::jmap::mock_server::{spawn_mock_server, spawn_recording_
 use crate::config::{AppConfig, JmapClient};
 #[test]
 fn test_tool_search_email_no_clients() {
+    let cache = crate::agent::tools::manager::cache::ToolCache::new();
     let config = AppConfig::default();
     let res = tool_search_email(
         &config,
@@ -458,13 +478,13 @@ fn test_tool_search_email_no_clients() {
             keyword: Some("test"),
             ..Default::default()
         },
-        None,
-    );
+        None, &cache);
     assert!(res.is_err());
 }
 
 #[test]
 fn test_tool_search_email_success() {
+    let cache = crate::agent::tools::manager::cache::ToolCache::new();
     rustls::crypto::ring::default_provider()
         .install_default()
         .ok();
@@ -491,13 +511,13 @@ fn test_tool_search_email_success() {
             keyword: Some("test"),
             ..Default::default()
         },
-        None,
-    );
+        None, &cache);
     assert!(res.is_ok());
 }
 
 #[test]
 fn test_tool_get_email_by_id_success() {
+    let cache = crate::agent::tools::manager::cache::ToolCache::new();
     rustls::crypto::ring::default_provider()
         .install_default()
         .ok();
@@ -527,6 +547,7 @@ fn test_tool_get_email_by_id_success() {
 /// `bodyValues` (default `maxBodyValueBytes` is 0).
 #[test]
 fn test_tool_get_email_by_id_sends_body_value_args() {
+    let cache = crate::agent::tools::manager::cache::ToolCache::new();
     rustls::crypto::ring::default_provider()
         .install_default()
         .ok();
@@ -573,6 +594,7 @@ fn test_tool_get_email_by_id_sends_body_value_args() {
 /// must surface the body content (not a silently empty string).
 #[test]
 fn test_tool_get_email_by_id_returns_body_content() {
+    let cache = crate::agent::tools::manager::cache::ToolCache::new();
     rustls::crypto::ring::default_provider()
         .install_default()
         .ok();
@@ -609,6 +631,7 @@ fn test_tool_get_email_by_id_returns_body_content() {
 
 #[test]
 fn test_tool_search_email_with_status_filters_success() {
+    let cache = crate::agent::tools::manager::cache::ToolCache::new();
     rustls::crypto::ring::default_provider()
         .install_default()
         .ok();
@@ -641,13 +664,13 @@ fn test_tool_search_email_with_status_filters_success() {
             is_unread: Some(true),
             is_flagged: Some(false),
         },
-        None,
-    );
+        None, &cache);
     assert!(res.is_ok());
 }
 
 #[test]
 fn test_tool_send_email_success() {
+    let cache = crate::agent::tools::manager::cache::ToolCache::new();
     rustls::crypto::ring::default_provider()
         .install_default()
         .ok();
@@ -676,6 +699,7 @@ fn test_tool_send_email_success() {
 
 #[test]
 fn test_tool_send_email_ai_agent_footer() {
+    let cache = crate::agent::tools::manager::cache::ToolCache::new();
     use super::AI_AGENT_FOOTER;
     assert_eq!(
         AI_AGENT_FOOTER,
@@ -685,14 +709,14 @@ fn test_tool_send_email_ai_agent_footer() {
 
 #[test]
 fn test_tool_search_email_empty_filters_errors() {
+    let cache = crate::agent::tools::manager::cache::ToolCache::new();
     let config = AppConfig::default();
     let res = tool_search_email(
         &config,
         SearchEmailFilters {
             ..Default::default()
         },
-        None,
-    );
+        None, &cache);
     assert!(res.is_err());
     let msg = res.unwrap_err();
     assert!(msg.contains("At least one filter field must be provided"));
@@ -700,6 +724,7 @@ fn test_tool_search_email_empty_filters_errors() {
 
 #[test]
 fn test_tool_search_email_empty_filters_with_client_errors() {
+    let cache = crate::agent::tools::manager::cache::ToolCache::new();
     rustls::crypto::ring::default_provider()
         .install_default()
         .ok();
@@ -718,8 +743,7 @@ fn test_tool_search_email_empty_filters_with_client_errors() {
         SearchEmailFilters {
             ..Default::default()
         },
-        None,
-    );
+        None, &cache);
     assert!(res.is_err());
     assert!(
         res.unwrap_err()
@@ -729,6 +753,7 @@ fn test_tool_search_email_empty_filters_with_client_errors() {
 
 #[test]
 fn test_tool_search_email_first_call_small_set_returns_final_page_hint() {
+    let cache = crate::agent::tools::manager::cache::ToolCache::new();
     rustls::crypto::ring::default_provider()
         .install_default()
         .ok();
@@ -763,8 +788,7 @@ fn test_tool_search_email_first_call_small_set_returns_final_page_hint() {
             keyword: Some("test"),
             ..Default::default()
         },
-        None,
-    );
+        None, &cache);
     assert!(res.is_ok());
     let response = res.unwrap();
     assert_eq!(response.total, 3);
@@ -785,6 +809,7 @@ fn test_tool_search_email_first_call_small_set_returns_final_page_hint() {
 
 #[test]
 fn test_tool_search_email_cursor_unknown_returns_error() {
+    let cache = crate::agent::tools::manager::cache::ToolCache::new();
     rustls::crypto::ring::default_provider()
         .install_default()
         .ok();
@@ -819,8 +844,7 @@ fn test_tool_search_email_cursor_unknown_returns_error() {
             keyword: Some("test"),
             ..Default::default()
         },
-        Some("00000000-0000-0000-0000-000000000000".to_string()),
-    );
+        Some("00000000-0000-0000-0000-000000000000".to_string()), &cache);
     assert!(res.is_err());
     let err = res.unwrap_err();
     assert!(
@@ -831,6 +855,7 @@ fn test_tool_search_email_cursor_unknown_returns_error() {
 
 #[test]
 fn test_tool_search_email_pagination_hint_on_final_page() {
+    let cache = crate::agent::tools::manager::cache::ToolCache::new();
     // When the first call returns a result set that fits entirely
     // on one page (here, total = 1, page size = 100), the
     // response omits `cursor` and sets `hint` to
@@ -870,8 +895,7 @@ fn test_tool_search_email_pagination_hint_on_final_page() {
             keyword: Some("test"),
             ..Default::default()
         },
-        None,
-    );
+        None, &cache);
     assert!(res.is_ok());
     let response = res.unwrap();
     assert_eq!(response.total, 1);
@@ -887,6 +911,7 @@ fn test_tool_search_email_pagination_hint_on_final_page() {
 
 #[test]
 fn test_tool_search_email_multiple_clients() {
+    let cache = crate::agent::tools::manager::cache::ToolCache::new();
     rustls::crypto::ring::default_provider()
         .install_default()
         .ok();
@@ -926,8 +951,7 @@ fn test_tool_search_email_multiple_clients() {
             keyword: Some("test"),
             ..Default::default()
         },
-        None,
-    );
+        None, &cache);
     assert!(res.is_ok());
     let response = res.unwrap();
     assert_eq!(response.total, 2);
@@ -937,6 +961,7 @@ fn test_tool_search_email_multiple_clients() {
 
 #[test]
 fn test_tool_search_email_logs_tracing() {
+    let cache = crate::agent::tools::manager::cache::ToolCache::new();
     rustls::crypto::ring::default_provider()
         .install_default()
         .ok();
@@ -970,8 +995,7 @@ fn test_tool_search_email_logs_tracing() {
             keyword: Some("fastmail"),
             ..Default::default()
         },
-        None,
-    );
+        None, &cache);
     assert!(res.is_ok());
     let response = res.unwrap();
     assert_eq!(response.total, 2);

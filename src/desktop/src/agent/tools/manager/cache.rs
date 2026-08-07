@@ -80,14 +80,25 @@ struct CacheState {
     insertion_order: VecDeque<String>,
 }
 
-static TOOL_CACHE: LazyLock<ToolCache> = LazyLock::new(|| ToolCache {
-    state: Mutex::new(CacheState {
-        entries: HashMap::new(),
-        insertion_order: VecDeque::new(),
-    }),
-});
+static TOOL_CACHE: LazyLock<ToolCache> = LazyLock::new(ToolCache::new);
+
+impl Default for ToolCache {
+    fn default() -> Self {
+        Self::new()
+    }
+}
 
 impl ToolCache {
+    /// Create a new empty cache.
+    pub fn new() -> Self {
+        Self {
+            state: Mutex::new(CacheState {
+                entries: HashMap::new(),
+                insertion_order: VecDeque::new(),
+            }),
+        }
+    }
+
     /// Get a clone of the entry if it exists and is not expired. Triggers
     /// lazy eviction of any expired entries.
     pub fn get(&self, key: &str) -> Option<CacheEntry> {
@@ -192,20 +203,18 @@ mod tests {
 
     #[test]
     fn put_and_get_round_trip() {
-        let cache = cache();
-        cache.invalidate("test:put_and_get");
+        let cache = ToolCache::new();
         cache.put("test:put_and_get".to_string(), web_entry("test-cursor"));
         let entry = cache.get("test:put_and_get");
         match entry {
             Some(CacheEntry::WebFetch { cursor }) => assert_eq!(cursor, "test-cursor"),
             _ => panic!("expected WebFetch entry"),
         }
-        cache.invalidate("test:put_and_get");
     }
 
     #[test]
     fn invalidate_removes_entry() {
-        let cache = cache();
+        let cache = ToolCache::new();
         cache.put("test:invalidate".to_string(), web_entry("x"));
         cache.invalidate("test:invalidate");
         assert!(cache.get("test:invalidate").is_none());
@@ -213,7 +222,7 @@ mod tests {
 
     #[test]
     fn get_after_ttl_returns_none() {
-        let cache = cache();
+        let cache = ToolCache::new();
         // Construct an entry whose fetched_at is well past CACHE_TTL.
         let stale = CacheEntry::WebFetchContent {
             content: "stale".to_string(),
@@ -238,7 +247,7 @@ mod tests {
 
     #[test]
     fn put_at_cap_evicts_oldest() {
-        let cache = cache();
+        let cache = ToolCache::new();
         // Pre-fill to MAX_CACHE_ENTRIES with sentinel keys we can recognize.
         for i in 0..MAX_CACHE_ENTRIES {
             cache.put(
@@ -258,17 +267,11 @@ mod tests {
         assert_eq!(cache.len(), MAX_CACHE_ENTRIES);
         assert!(cache.get("test:cap:0").is_none());
         assert!(cache.get("test:cap:overflow").is_some());
-        // Clean up so we don't pollute the global cache for other tests.
-        for i in 0..MAX_CACHE_ENTRIES {
-            cache.invalidate(&format!("test:cap:{i}"));
-        }
-        cache.invalidate("test:cap:overflow");
     }
 
     #[test]
     fn replace_existing_key_does_not_grow() {
-        let cache = cache();
-        cache.invalidate("test:replace");
+        let cache = ToolCache::new();
         cache.put(
             "test:replace".to_string(),
             CacheEntry::WebFetch {
@@ -286,6 +289,5 @@ mod tests {
             Some(CacheEntry::WebFetch { cursor }) => assert_eq!(cursor, "v2"),
             _ => panic!("expected WebFetch entry"),
         }
-        cache.invalidate("test:replace");
     }
 }

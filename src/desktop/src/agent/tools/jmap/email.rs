@@ -491,9 +491,10 @@ pub fn tool_search_email(
     config: &AppConfig,
     filters: SearchEmailFilters<'_>,
     cursor: Option<String>,
+    cache: &crate::agent::tools::manager::cache::ToolCache,
 ) -> Result<crate::agent::tools::dtos::SearchEmailResponse, String> {
     use crate::agent::tools::manager::cache::{
-        CacheEntry, SearchEmailCacheEntry, SearchEmailItem, cache,
+        CacheEntry, SearchEmailCacheEntry, SearchEmailItem,
     };
 
     // First call: query JMAP, populate the cache, return first page + cursor.
@@ -519,13 +520,13 @@ pub fn tool_search_email(
             fetched_at: entry.fetched_at,
             errors: entry.errors.clone(),
         };
-        cache().put(new_cursor.clone(), CacheEntry::SearchEmail(cache_entry));
+        cache.put(new_cursor.clone(), CacheEntry::SearchEmail(cache_entry));
 
         // Empty result set: no cursor, hint says "no matches". We
         // do not need to keep the cache entry we just inserted, so
         // invalidate it before returning.
         if total == 0 {
-            cache().invalidate(&new_cursor);
+            cache.invalidate(&new_cursor);
             return Ok(crate::agent::tools::dtos::SearchEmailResponse {
                 results: "No matching emails found.".to_string(),
                 total: 0,
@@ -541,7 +542,7 @@ pub fn tool_search_email(
         let (cursor_out, hint_out) = if next_offset >= total {
             // All items already returned in this first page; remove
             // the cache entry since there will be no follow-up.
-            cache().invalidate(&new_cursor);
+            cache.invalidate(&new_cursor);
             (None, Some(SEARCH_EMAIL_FINAL_PAGE_HINT.to_string()))
         } else {
             (Some(new_cursor), None)
@@ -559,7 +560,7 @@ pub fn tool_search_email(
     };
 
     // Subsequent call: look up the cache, slice, return next page.
-    let entry = match cache().get(&cursor) {
+    let entry = match cache.get(&cursor) {
         Some(CacheEntry::SearchEmail(e)) => e,
         _ => {
             return Err("Cursor expired or unknown; re-run the search with no cursor.".to_string());
@@ -592,7 +593,7 @@ pub fn tool_search_email(
     // Update the cached entry with the new offset. Re-put is the
     // simplest way; the cache key is unchanged so the entry stays
     // in the same slot.
-    cache().put(
+    cache.put(
         cursor,
         CacheEntry::SearchEmail(SearchEmailCacheEntry {
             items: entry.items,
