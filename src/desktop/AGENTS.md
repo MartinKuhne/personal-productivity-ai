@@ -29,6 +29,15 @@ these areas; they are the in-repo source of truth for the pinned versions.
   when working on the MCP client (`agent/tools/mcp/`).
 - https://docs.discord.com/llms.txt for discord changes. You MUST retrieve the current copy of that document when making discord related changes.
 
+## 3. Egui inspection and egui_mcp
+
+This release includes a new inspection protocol for egui. It allows reading the accesskit tree of a running app, as well as sending events to control it. It's implemented via a new InspectionPlugin in the egui_inspection crate.
+Eframe includes a new inspection feature. When enabled, you can enable inspection by launching the app with `EGUI_INSPECTION=1`. This will cause the app to listen on port 5719.
+
+The first inspection protocol consumer is egui_mcp.
+It's a mcp server that allows your agent to see and use egui apps. It can be used to have the agent use the app, reproduce bugs and verify its changes.
+Install it via `cargo install --git https://github.com/rerun-io/kittest_inspector egui_mcp` and then add it to your agent via `claude mcp add egui egui-mcp`.
+
 ## 4. Spec traceability
 - Every user-facing behaviour maps to requirement in `SPEC.md`. When adding a feature, add the requirement first; when changing behaviour, prompt to update the requirement.
 - Keep requirements goal oriented and user facing. Avoid leaking implementation specifics.
