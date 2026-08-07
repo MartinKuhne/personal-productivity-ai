@@ -273,7 +273,7 @@ fn test_tool_web_delegate_missing_api_key() {
     assert!(result.is_err());
     assert_eq!(
         result.unwrap_err(),
-        "API key not set. Cannot use web_delegate."
+        "API key not set or invalid."
     );
 }
 

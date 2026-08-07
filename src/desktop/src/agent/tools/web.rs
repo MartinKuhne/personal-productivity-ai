@@ -335,29 +335,17 @@ pub fn tool_web_delegate(
     instruction: &str,
     cache: &crate::agent::tools::manager::cache::ToolCache,
 ) -> Result<crate::agent::tools::dtos::WebDelegateResponse, String> {
-    let mut api_key = String::new();
-    let mut api_url = String::new();
-    let mut model_name = String::new();
-
-    if let Some((_key, model_cfg)) = config.model_for_use_case("chat") {
-        api_key = model_cfg.api_key.clone();
-        api_url = model_cfg.api_url.clone();
-        model_name = model_cfg.model.clone();
-    } else if !config.models.is_empty()
-        && let Some(model_cfg) = config.models.values().next()
-    {
-        api_key = model_cfg.api_key.clone();
-        api_url = model_cfg.api_url.clone();
-        model_name = model_cfg.model.clone();
-    }
-
-    if api_key == "your-api-key-here" || api_key.is_empty() {
+    let model_cfg = config.select_chat_model().map_err(|e| {
         tracing::warn!(
             name = "tool.web_delegate.missing_api_key",
-            "API key not set. Cannot use web_delegate. Operator should configure a valid API key in settings."
+            "{}", e
         );
-        return Err("API key not set. Cannot use web_delegate.".to_string());
-    }
+        e
+    })?;
+
+    let api_key = model_cfg.api_key.clone();
+    let api_url = model_cfg.api_url.clone();
+    let model_name = model_cfg.model.clone();
 
     let mut messages = vec![
         serde_json::json!({

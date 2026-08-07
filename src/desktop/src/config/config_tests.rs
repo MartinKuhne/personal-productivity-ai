@@ -569,3 +569,81 @@ fn deficit_strategy_parses_survey_algorithm_strings() {
         );
     }
 }
+
+#[test]
+fn test_select_chat_model_preferred() {
+    let mut config = AppConfig::default();
+    config.models.insert(
+        "other".to_string(),
+        LlmConfig {
+            model: "other".to_string(),
+            api_url: "http://a".to_string(),
+            api_key: "valid-key".to_string(),
+            cost: Some(10),
+            use_case: vec!["code".to_string()],
+        },
+    );
+    config.models.insert(
+        "chat_model".to_string(),
+        LlmConfig {
+            model: "chat-preferred".to_string(),
+            api_url: "http://a".to_string(),
+            api_key: "valid-key".to_string(),
+            cost: Some(5),
+            use_case: vec!["chat".to_string()],
+        },
+    );
+
+    let selected = config.select_chat_model().unwrap();
+    assert_eq!(selected.model, "chat-preferred");
+}
+
+#[test]
+fn test_select_chat_model_fallback() {
+    let mut config = AppConfig::default();
+    config.models.insert(
+        "only_model".to_string(),
+        LlmConfig {
+            model: "fallback-model".to_string(),
+            api_url: "http://a".to_string(),
+            api_key: "valid-key".to_string(),
+            cost: Some(10),
+            use_case: vec![], // no "chat"
+        },
+    );
+
+    let selected = config.select_chat_model().unwrap();
+    assert_eq!(selected.model, "fallback-model");
+}
+
+#[test]
+fn test_select_chat_model_empty() {
+    let config = AppConfig::default(); // models is empty by default
+    let res = config.select_chat_model();
+    assert!(res.is_err());
+    assert!(res.unwrap_err().contains("No LLM models"));
+}
+
+#[test]
+fn test_select_chat_model_default_key_rejected() {
+    let mut config = AppConfig::default();
+    config.models.insert(
+        "chat_model".to_string(),
+        LlmConfig {
+            model: "chat-model".to_string(),
+            api_url: "http://a".to_string(),
+            api_key: "your-api-key-here".to_string(),
+            cost: Some(5),
+            use_case: vec!["chat".to_string()],
+        },
+    );
+
+    let res = config.select_chat_model();
+    assert!(res.is_err());
+    assert!(res.unwrap_err().contains("API key not set"));
+
+    config.models.get_mut("chat_model").unwrap().api_key = "".to_string();
+    let res2 = config.select_chat_model();
+    assert!(res2.is_err());
+    assert!(res2.unwrap_err().contains("API key not set"));
+}
