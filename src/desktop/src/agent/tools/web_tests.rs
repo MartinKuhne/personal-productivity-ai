@@ -44,9 +44,17 @@ fn test_tool_web_fetch_mock() {
         force_refetch: true,
         cursor: None,
     };
-    let result = tool_web_fetch(&input, &cache).unwrap();
+    let mock_uuid = uuid::Uuid::nil();
+    let result = tool_web_fetch(&input, &cache, &crate::utils::uuid::FixedUuidGenerator::new(mock_uuid)).unwrap();
     assert!(result.content.contains("Hello") || result.content.contains("World"));
     assert!(result.total_lines > 0);
+    
+    // Verify the mock generator was used to create the cache entry
+    if let Some(crate::agent::tools::manager::cache::CacheEntry::WebFetch { cursor }) = cache.get(&server_url) {
+        assert_eq!(cursor, mock_uuid.to_string());
+    } else {
+        panic!("Cache missing WebFetch entry for url");
+    }
 }
 
 #[test]
@@ -61,7 +69,7 @@ fn test_tool_web_fetch_error() {
         force_refetch: true,
         cursor: None,
     };
-    let result = tool_web_fetch(&input, &cache);
+    let result = tool_web_fetch(&input, &cache, &crate::utils::uuid::SystemUuidGenerator);
     assert!(result.is_err());
 }
 
@@ -80,7 +88,7 @@ fn test_tool_web_fetch_pagination() {
         force_refetch: true,
         cursor: None,
     };
-    let result = tool_web_fetch(&input, &cache).unwrap();
+    let result = tool_web_fetch(&input, &cache, &crate::utils::uuid::SystemUuidGenerator).unwrap();
     assert!(result.total_lines >= 3);
     assert!(result.content.lines().count() > 0);
     assert!(result.cursor.is_some() || result.hint.is_some());
@@ -100,7 +108,7 @@ fn test_tool_web_fetch_headers() {
         force_refetch: true,
         cursor: None,
     };
-    let result = tool_web_fetch(&input, &cache).unwrap();
+    let result = tool_web_fetch(&input, &cache, &crate::utils::uuid::SystemUuidGenerator).unwrap();
     assert!(result.response_headers.is_some());
     let headers = result.response_headers.unwrap();
     assert!(headers.contains_key("content-type") || headers.contains_key("Content-Type"));
@@ -119,9 +127,9 @@ fn test_tool_web_fetch_cache_hit() {
         force_refetch: false,
         cursor: None,
     };
-    let first = tool_web_fetch(&input, &cache).unwrap();
+    let first = tool_web_fetch(&input, &cache, &crate::utils::uuid::SystemUuidGenerator).unwrap();
     assert!(!first.from_cache);
-    let second = tool_web_fetch(&input, &cache).unwrap();
+    let second = tool_web_fetch(&input, &cache, &crate::utils::uuid::SystemUuidGenerator).unwrap();
     assert!(second.from_cache);
     assert_eq!(first.content, second.content);
 }
@@ -139,14 +147,14 @@ fn test_tool_web_fetch_force_refetch() {
         force_refetch: false,
         cursor: None,
     };
-    let _first = tool_web_fetch(&input, &cache).unwrap();
+    let _first = tool_web_fetch(&input, &cache, &crate::utils::uuid::SystemUuidGenerator).unwrap();
     let force_input = crate::agent::tools::dtos::WebFetchInput {
         url: server_url.clone(),
         headers: false,
         force_refetch: true,
         cursor: None,
     };
-    let second = tool_web_fetch(&force_input, &cache).unwrap();
+    let second = tool_web_fetch(&force_input, &cache, &crate::utils::uuid::SystemUuidGenerator).unwrap();
     assert!(!second.from_cache);
 }
 

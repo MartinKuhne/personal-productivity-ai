@@ -33,7 +33,7 @@ fn test_spawn_path_worker_processes_items() {
 
 #[test]
 fn test_channel_worker_marker_struct() {
-    let worker = ChannelWorker::<fn()>::new();
+    let _worker = ChannelWorker::<fn()>::new();
     let _worker2 = ChannelWorker::<fn()>::default();
     // Mostly just verifying it compiles and can be constructed
 }

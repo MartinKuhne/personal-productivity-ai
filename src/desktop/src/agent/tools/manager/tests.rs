@@ -31,6 +31,7 @@ fn test_ctx(config: &AppConfig) -> ToolContext<'static> {
         Arc::new(crate::app::session::PdfBackingTracker::new()),
         crate::agent::tools::manager::cache::cache(),
         Arc::new(std::sync::RwLock::new(ToolManager::new())),
+        Arc::new(crate::utils::uuid::SystemUuidGenerator),
     )
 }
 

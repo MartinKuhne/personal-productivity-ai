@@ -263,8 +263,8 @@ pub const SEARCH_EMAIL_FINAL_PAGE_HINT: &str = "Final page.";
 
 /// Generate a new opaque cursor string (UUID v4). The cursor is the
 /// cache key in the shared `ToolCache`; the LLM treats it as opaque.
-pub fn new_search_email_cursor() -> String {
-    uuid::Uuid::new_v4().to_string()
+pub fn new_search_email_cursor(uuid_gen: &dyn crate::utils::uuid::UuidGenerator) -> String {
+    uuid_gen.new_v4().to_string()
 }
 
 /// Fetch the full server result set for a search. Used by the
@@ -492,6 +492,7 @@ pub fn tool_search_email(
     filters: SearchEmailFilters<'_>,
     cursor: Option<String>,
     cache: &crate::agent::tools::manager::cache::ToolCache,
+    uuid_gen: &dyn crate::utils::uuid::UuidGenerator,
 ) -> Result<crate::agent::tools::dtos::SearchEmailResponse, String> {
     use crate::agent::tools::manager::cache::{
         CacheEntry, SearchEmailCacheEntry, SearchEmailItem,
@@ -508,7 +509,7 @@ pub fn tool_search_email(
             .cloned()
             .collect();
         let next_offset = first_page.len();
-        let new_cursor = new_search_email_cursor();
+        let new_cursor = new_search_email_cursor(uuid_gen);
 
         // Store the cache entry (a clone of the items we will keep
         // serving from). The cursor_offset is set so the next call

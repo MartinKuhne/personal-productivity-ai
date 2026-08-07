@@ -17,6 +17,7 @@ const WEB_FETCH_PAGE_SIZE: usize = 100;
 pub fn tool_web_fetch(
     input: &crate::agent::tools::dtos::WebFetchInput,
     cache: &crate::agent::tools::manager::cache::ToolCache,
+    uuid_gen: &dyn crate::utils::uuid::UuidGenerator,
 ) -> Result<crate::agent::tools::dtos::WebFetchResponse, String> {
     let url = &input.url;
 
@@ -206,7 +207,7 @@ pub fn tool_web_fetch(
                     let lines: Vec<&str> = md_content.lines().collect();
                     let page_content = lines[..WEB_FETCH_PAGE_SIZE.min(total_lines)].join("\n");
 
-                    let content_uuid = uuid::Uuid::new_v4().to_string();
+                    let content_uuid = uuid_gen.new_v4().to_string();
                     let (cursor_out, hint_out) = if total_lines <= WEB_FETCH_PAGE_SIZE {
                         // All content fits on one page
                         (None, Some(WEB_FETCH_FINAL_PAGE_HINT.to_string()))
@@ -476,7 +477,7 @@ pub fn tool_web_delegate(
                         crate::agent::tools::dtos::WebFetchInput,
                     >(func_args_str)
                     {
-                        match tool_web_fetch(&input, cache) {
+                        match tool_web_fetch(&input, cache, &crate::utils::uuid::SystemUuidGenerator) {
                             Ok(res) => serde_json::to_string(
                                 &crate::agent::tools::dtos::ToolResponse::Success { data: res },
                             )

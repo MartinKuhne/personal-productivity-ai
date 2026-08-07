@@ -402,7 +402,7 @@ impl AppOrchestrator {
 
     pub fn handle_mcp_auth_event(&mut self, ev: McpAuthEvent) {
         use crate::agent::tools::manager::{
-            self as tool_manager, ToolErrorKind, ToolGroupError, ToolGroupId,
+            ToolErrorKind, ToolGroupError,
         };
         match ev {
             McpAuthEvent::Completed { server_name, error } => {

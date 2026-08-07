@@ -86,6 +86,7 @@ pub struct ToolContext<'a> {
     pub pdf_backing: std::sync::Arc<crate::app::session::PdfBackingTracker>,
     pub cache: &'a crate::agent::tools::manager::cache::ToolCache,
     pub tool_manager: std::sync::Arc<std::sync::RwLock<crate::agent::tools::manager::ToolManager>>,
+    pub uuid_gen: std::sync::Arc<dyn crate::utils::uuid::UuidGenerator>,
 }
 
 impl<'a> ToolContext<'a> {
@@ -97,6 +98,7 @@ impl<'a> ToolContext<'a> {
         pdf_backing: std::sync::Arc<crate::app::session::PdfBackingTracker>,
         cache: &'a crate::agent::tools::manager::cache::ToolCache,
         tool_manager: std::sync::Arc<std::sync::RwLock<crate::agent::tools::manager::ToolManager>>,
+        uuid_gen: std::sync::Arc<dyn crate::utils::uuid::UuidGenerator>,
     ) -> Self {
         Self {
             config,
@@ -107,6 +109,7 @@ impl<'a> ToolContext<'a> {
             pdf_backing,
             cache,
             tool_manager,
+            uuid_gen,
         }
     }
 

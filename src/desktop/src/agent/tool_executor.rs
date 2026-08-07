@@ -21,6 +21,7 @@ pub struct ToolExecutor {
     browser_session: Arc<BrowserSession>,
     pdf_backing: std::sync::Arc<crate::app::session::PdfBackingTracker>,
     tool_manager: std::sync::Arc<std::sync::RwLock<crate::agent::tools::manager::ToolManager>>,
+    uuid_gen: std::sync::Arc<dyn crate::utils::uuid::UuidGenerator>,
 }
 
 impl ToolExecutor {
@@ -30,6 +31,7 @@ impl ToolExecutor {
         browser_session: Arc<BrowserSession>,
         pdf_backing: std::sync::Arc<crate::app::session::PdfBackingTracker>,
         tool_manager: std::sync::Arc<std::sync::RwLock<crate::agent::tools::manager::ToolManager>>,
+        uuid_gen: std::sync::Arc<dyn crate::utils::uuid::UuidGenerator>,
     ) -> Self {
         Self {
             config,
@@ -37,6 +39,7 @@ impl ToolExecutor {
             browser_session,
             pdf_backing,
             tool_manager,
+            uuid_gen,
         }
     }
 
@@ -103,8 +106,9 @@ impl ToolExecutor {
                 let browser = self.browser_session.clone();
                 let pdf = pdf_backing.clone();
                 let tm = self.tool_manager.clone();
+                let uuid_gen = self.uuid_gen.clone();
                 join_set.spawn_blocking(move || {
-                    let ctx = ToolContext::new(&cfg, &bus, browser, pdf, crate::agent::tools::manager::cache::cache(), tm);
+                    let ctx = ToolContext::new(&cfg, &bus, browser, pdf, crate::agent::tools::manager::cache::cache(), tm, uuid_gen);
                     let result = execute_tool(&ctx, &func_name, &func_args);
                     (call_id, func_name, func_args, result)
                 });
@@ -137,6 +141,7 @@ impl ToolExecutor {
                 pdf,
                 crate::agent::tools::manager::cache::cache(),
                 tm,
+                self.uuid_gen.clone(),
             );
             let result = execute_tool(&ctx, &func_name, &func_args);
             results.push((call_id, func_name, func_args, result));
@@ -261,8 +266,11 @@ mod tests {
             &crate::config::AppConfig::default(),
         ));
         let pdf_backing = std::sync::Arc::new(crate::app::session::PdfBackingTracker::new());
-        let tm = std::sync::Arc::new(std::sync::RwLock::new(crate::agent::tools::manager::ToolManager::new()));
-        let executor = ToolExecutor::new(config, bus, browser_session, pdf_backing, tm);
+        let tm = std::sync::Arc::new(std::sync::RwLock::new(
+            crate::agent::tools::manager::ToolManager::new(),
+        ));
+        let uuid_gen = std::sync::Arc::new(crate::utils::uuid::SystemUuidGenerator);
+        let executor = ToolExecutor::new(config, bus, browser_session, pdf_backing, tm, uuid_gen);
         assert!(executor.config.models.is_empty());
     }
 }

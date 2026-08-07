@@ -323,6 +323,7 @@ impl AgentSessionManager {
             browser_session: self.browser_session.clone(),
             pdf_backing: self.pdf_backing.clone(),
             tool_manager: self.tool_manager.clone(),
+            uuid_gen: std::sync::Arc::new(crate::utils::uuid::SystemUuidGenerator),
         };
 
         std::thread::spawn(move || {

@@ -43,6 +43,7 @@ fn make_ctx(config: AppConfig) -> (AgentContext, std::sync::mpsc::Receiver<Backg
         browser_session,
         pdf_backing: std::sync::Arc::new(crate::app::session::PdfBackingTracker::new()),
         tool_manager: std::sync::Arc::new(std::sync::RwLock::new(crate::agent::tools::manager::ToolManager::new())),
+        uuid_gen: std::sync::Arc::new(crate::utils::uuid::SystemUuidGenerator),
     };
     (ctx, rx)
 }
@@ -239,6 +240,7 @@ fn test_run_agent_skips_done_status_when_cancelled() {
         browser_session,
         pdf_backing: std::sync::Arc::new(crate::app::session::PdfBackingTracker::new()),
         tool_manager: std::sync::Arc::new(std::sync::RwLock::new(crate::agent::tools::manager::ToolManager::new())),
+        uuid_gen: std::sync::Arc::new(crate::utils::uuid::SystemUuidGenerator),
     };
     run_agent(ctx);
     let mut saw_done = false;
