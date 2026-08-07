@@ -71,20 +71,18 @@ pub struct AgentSessionManager {
     /// on every page-handle request; the `browser_*` tools are
     /// not registered.
     browser_session: Arc<BrowserSession>,
-    /// Shared PDF-backing tracker, handed to the tool executor.
     pdf_backing: Arc<crate::app::session::PdfBackingTracker>,
+    tool_manager: Arc<std::sync::RwLock<crate::agent::tools::manager::ToolManager>>,
 }
 
 impl AgentSessionManager {
     /// Subscribe to the configuration-arrival bus and return an
     /// empty manager. The bus is the source of truth for the
-    /// [`AppConfig`] used by `start_session`; until the bus
-    /// delivers its event that call falls back to
-    /// [`AppConfig::default`].
     pub fn new(
         config_bus: Bus<ConfigArrived>,
         browser_session: Arc<BrowserSession>,
         pdf_backing: Arc<crate::app::session::PdfBackingTracker>,
+        tool_manager: Arc<std::sync::RwLock<crate::agent::tools::manager::ToolManager>>,
     ) -> Self {
         Self {
             state: AgentState {
@@ -109,6 +107,7 @@ impl AgentSessionManager {
             show_results: false,
             browser_session,
             pdf_backing,
+            tool_manager,
         }
     }
 
@@ -118,6 +117,7 @@ impl AgentSessionManager {
     /// populated manager (existing test fixtures).
     #[doc(hidden)]
     pub fn new_for_test(config: AppConfig, browser_session: Arc<BrowserSession>) -> Self {
+        let tool_manager = Arc::new(std::sync::RwLock::new(crate::agent::tools::manager::ToolManager::new()));
         Self {
             state: AgentState {
                 running: false,
@@ -138,6 +138,7 @@ impl AgentSessionManager {
             show_results: false,
             browser_session,
             pdf_backing: Arc::new(crate::app::session::PdfBackingTracker::new()),
+            tool_manager,
         }
     }
 
@@ -321,6 +322,7 @@ impl AgentSessionManager {
             model_name: None,
             browser_session: self.browser_session.clone(),
             pdf_backing: self.pdf_backing.clone(),
+            tool_manager: self.tool_manager.clone(),
         };
 
         std::thread::spawn(move || {

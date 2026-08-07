@@ -213,6 +213,7 @@ pub fn run_agent_blocking(
             &crate::config::AppConfig::default(),
         )),
         pdf_backing: std::sync::Arc::new(crate::app::session::PdfBackingTracker::new()),
+        tool_manager: std::sync::Arc::new(std::sync::RwLock::new(crate::agent::tools::manager::ToolManager::new())),
     };
     run_agent(ctx);
 

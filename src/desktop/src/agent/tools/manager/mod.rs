@@ -307,6 +307,29 @@ impl ToolManager {
         self.group_state = next;
     }
 
+    pub fn groups_snapshot(&mut self, config: &AppConfig) -> Vec<ToolGroupState> {
+        self.refresh_state(config);
+        self.groups()
+    }
+
+    pub fn mcp_manager(&self) -> Arc<McpClientManager> {
+        self.mcp_manager.clone()
+    }
+
+    pub fn init_mcp_on_startup(&mut self, config: &AppConfig) {
+        self.mcp_manager.update_config(config);
+        self.refresh_mcp_tools(config);
+    }
+
+    pub fn get_tools_schema(&mut self, config: &AppConfig, prompt: &str) -> serde_json::Value {
+        self.mcp_manager.update_config(config);
+        self.refresh_mcp_tools(config);
+        self.refresh_state(config);
+        self.get_schema(config, prompt)
+    }
+
+
+
     /// All groups, sorted deterministically by id.
     pub fn groups(&self) -> Vec<ToolGroupState> {
         self.group_state.values().cloned().collect()
@@ -412,11 +435,7 @@ impl ToolManager {
         self.refresh_state(config);
     }
 
-    /// Direct access to the MCP client manager for callers that need
-    /// to invoke OAuth flows or inspect session state.
-    pub fn mcp_manager(&self) -> &Arc<McpClientManager> {
-        &self.mcp_manager
-    }
+
 
     /// Snapshot of the tool descriptors the manager currently knows
     /// about, useful for tests and the debug overlay.
@@ -467,121 +486,11 @@ fn set_internal_group_enabled(config: &mut AppConfig, g: InternalToolGroup, on: 
     }
 }
 
-// ---------------------------------------------------------------------------
-// Global ToolManager + free functions. These keep the same signatures as
-// the previous `registry::mod` free functions so the agent loop and
-// `tool_executor` callers don't change at the call site — only the
-// import path does.
-// ---------------------------------------------------------------------------
-
-static TOOL_MANAGER: std::sync::LazyLock<std::sync::RwLock<ToolManager>> =
-    std::sync::LazyLock::new(|| std::sync::RwLock::new(ToolManager::new()));
-
-/// Snapshot the manager's group view for the UI dialog. Refreshes the
-/// view from the supplied `config` first so the snapshot is in sync.
-pub fn groups_snapshot(config: &AppConfig) -> Vec<ToolGroupState> {
-    if let Ok(mut mgr) = TOOL_MANAGER.write() {
-        mgr.refresh_state(config);
-        mgr.groups()
-    } else {
-        Vec::new()
-    }
-}
-
-/// Per-tool char count helper used by the UI dialog. Returns `None`
-/// if the tool is not registered or not currently enabled.
-pub fn tool_char_count_for(name: &str, config: &AppConfig, prompt: &str) -> Option<usize> {
-    TOOL_MANAGER
-        .read()
-        .ok()
-        .and_then(|m| m.tool_char_count(name, config, prompt))
-}
-
-/// Toggle a group's enabled flag in the supplied `AppConfig`. Does
-/// not persist to disk — the UI dialog calls
-/// [`crate::config::save_config`] after invoking this.
-pub fn set_group_enabled(config: &mut AppConfig, id: &ToolGroupId, on: bool) {
-    if let Ok(mgr) = TOOL_MANAGER.read() {
-        mgr.set_group_enabled(config, id, on);
-    }
-}
-
-/// Clear the recorded `last_error` for a group. Used by the UI
-/// "Restart" link (UI-060).
-pub fn clear_error(id: &ToolGroupId) {
-    if let Ok(mut mgr) = TOOL_MANAGER.write() {
-        mgr.clear_error(id);
-    }
-}
-
-/// Record an `Authentication`-kind [`ToolGroupError`] on a group.
-/// Called by the UI event handler when `McpAuthEvent::Completed`
-/// arrives with an error so the Tools dialog row shows ⚠ + Clear.
-pub fn record_mcp_error(id: &ToolGroupId, err: ToolGroupError) {
-    if let Ok(mut mgr) = TOOL_MANAGER.write() {
-        mgr.record_error(id, err);
-    }
-}
-
-/// Read the entry's `needs_auth` flag. The dialog uses this to
-/// decide whether to render the `Authenticate` button. The flag
-/// lives in the manager's own state and is set when a 401 is
-/// observed on the server.
-pub fn mcp_needs_auth_now(server_name: &str) -> bool {
-    TOOL_MANAGER
-        .read()
-        .ok()
-        .map(|m| m.mcp_manager.needs_auth_now(server_name))
-        .unwrap_or(false)
-}
-
-/// Clear the entry's `needs_auth` flag. Used by the dialog's
-/// `Forget` link to tell the manager "we no longer need to
-/// remember that this server required auth" (e.g. because the
-/// user added a static `Authorization` header to the YAML).
-pub fn mcp_clear_needs_auth(server_name: &str) {
-    if let Ok(mgr) = TOOL_MANAGER.read() {
-        mgr.mcp_manager.mark_needs_auth(server_name, false);
-    }
-}
-
-/// Direct access to the global MCP client manager. The UI dialog
-/// uses this to invoke [`crate::agent::tools::mcp::McpClientManager::authenticate`].
-pub fn mcp_manager() -> Arc<McpClientManager> {
-    TOOL_MANAGER
-        .read()
-        .map(|m| m.mcp_manager().clone())
-        .unwrap_or_default()
-}
-
-/// Initialize the MCP subsystem on app start. Refreshes the MCP tool catalog.
-///
-/// OAuth token store is NOT installed here — it will be installed
-/// lazily when the user clicks "Authenticate" for a server.
-pub fn init_mcp_on_startup(config: &AppConfig) {
-    let Ok(mut mgr) = TOOL_MANAGER.write() else {
-        return;
-    };
-    mgr.mcp_manager.update_config(config);
-    mgr.refresh_mcp_tools(config);
-}
-
-/// Subscribe to the configuration-arrival bus and perform the
-/// one-time MCP startup init on a background thread.
-///
-/// The subscription is registered before this returns, so callers may
-/// publish the [`ConfigArrived`] event any time afterwards; the
-/// spawned thread observes the first arrival (or falls back to
-/// [`AppConfig::default`] if no event arrives within
-/// [`CONFIG_ARRIVAL_TIMEOUT`]) and then runs the same startup path as
-/// [`init_mcp_on_startup`]: it pushes the config into the MCP manager
-/// and discovers each server's tools.
-///
-/// All network I/O happens off the UI thread so the window never
-/// blocks on MCP servers at startup. A completion log entry is posted
-/// to `tx` (the background-event channel) so the result shows up in
-/// the UI's background log panel.
-pub fn spawn_config_subscription(config_bus: Bus<ConfigArrived>, tx: Sender<BackgroundEvent>) {
+pub fn spawn_config_subscription(
+    tool_manager: Arc<std::sync::RwLock<ToolManager>>,
+    config_bus: Bus<ConfigArrived>,
+    tx: Sender<BackgroundEvent>,
+) {
     let config_reader = config_bus.subscribe();
     std::thread::spawn(move || {
         let config = match config_reader.recv_timeout(CONFIG_ARRIVAL_TIMEOUT) {
@@ -595,7 +504,7 @@ pub fn spawn_config_subscription(config_bus: Bus<ConfigArrived>, tx: Sender<Back
                 AppConfig::default()
             }
         };
-        init_mcp_on_startup(&config);
+        tool_manager.write().unwrap().init_mcp_on_startup(&config);
         let _ = tx.send(
             BackgroundLogEntry::new(
                 LogCategory::Indexer,
@@ -606,29 +515,6 @@ pub fn spawn_config_subscription(config_bus: Bus<ConfigArrived>, tx: Sender<Back
     });
 }
 
-/// Look up a tool's [`Safety`] classification by name.
-pub fn safety_of(name: &str) -> Safety {
-    TOOL_MANAGER.read().unwrap().safety_of(name)
-}
-
-/// Retrieve the JSON Schema for all active tools.
-pub fn get_tools_schema(config: &AppConfig, prompt: &str) -> serde_json::Value {
-    let mut mgr = TOOL_MANAGER.write().unwrap_or_else(|e| e.into_inner());
-    mgr.mcp_manager.update_config(config);
-    mgr.refresh_mcp_tools(config);
-    mgr.refresh_state(config);
-    mgr.get_schema(config, prompt)
-}
-
-/// Execute a named tool with JSON arguments and return a serialized
-/// [`ToolResponse`](crate::agent::tools::dtos::ToolResponse).
-///
-/// Per TOOL-021, the manager records an `Execution`-kind
-/// [`ToolGroupError`] on the tool's group when the call returns
-/// `Err`, and clears any prior `Execution` error on success. The
-/// record/clear step uses a *separate* write lock from the call
-/// itself, so MCP tool calls (which may do network I/O) don't hold
-/// the write lock across the network round-trip.
 pub fn execute_tool(ctx: &ToolContext, name: &str, args_str: &str) -> String {
     #[cfg(feature = "profiling")]
     puffin::profile_scope!("execute_tool");
@@ -650,7 +536,7 @@ pub fn execute_tool(ctx: &ToolContext, name: &str, args_str: &str) -> String {
     // Phase 1: read-locked — do the I/O and snapshot the tool's group.
     let (result_raw, tool_group): (Result<serde_json::Value, String>, Option<ToolGroupId>) =
         std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-            let mgr = TOOL_MANAGER.read().unwrap();
+            let mgr = ctx.tool_manager.read().unwrap();
             mgr.mcp_manager.update_config(ctx.config);
             let group = mgr.tool_group(name);
             let result = mgr.execute(ctx, name, args_str);
@@ -669,7 +555,7 @@ pub fn execute_tool(ctx: &ToolContext, name: &str, args_str: &str) -> String {
 
     // Phase 2: write-locked — record/clear the Execution error.
     if let Some(group) = &tool_group {
-        let mut mgr = TOOL_MANAGER.write().unwrap_or_else(|e| e.into_inner());
+        let mut mgr = ctx.tool_manager.write().unwrap();
         match &result_raw {
             Ok(_) => mgr.clear_error(group),
             Err(msg) => mgr.record_error(

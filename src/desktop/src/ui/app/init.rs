@@ -91,10 +91,13 @@ impl FastMdApp {
         // the UI thread in `update_ui`.
         let background_task = Task::new(config_bus.clone());
         // The tools manager subscribes to the same bus and performs
-        // the one-time MCP startup ping / tool discovery on its own
+        // the one-time 
+        let tool_manager = std::sync::Arc::new(std::sync::RwLock::new(crate::agent::tools::manager::ToolManager::new()));
+        // Start MCP initialization immediately on the app's initial
         // background thread, so the UI thread never blocks on MCP
         // network I/O at startup.
         crate::agent::tools::manager::spawn_config_subscription(
+            tool_manager.clone(),
             config_bus.clone(),
             background_task.tx.clone(),
         );
@@ -117,6 +120,7 @@ impl FastMdApp {
             config_bus,
             browser_session.clone(),
             Arc::new(pdf_backing_tracker.clone()),
+            tool_manager.clone(),
         );
 
         let event_bus = background_task.file_event_bus;
@@ -194,6 +198,7 @@ impl FastMdApp {
                 pending_file_load: None,
                 repaint_interval: Duration::from_millis(16),
                 finished_watcher_slot,
+                tool_manager: std::sync::Arc::new(std::sync::RwLock::new(crate::agent::tools::manager::ToolManager::new())),
             },
             layout,
             cached_tree_rows: None,
@@ -244,6 +249,7 @@ impl FastMdApp {
             bus.clone(),
             test_browser_session,
             Arc::new(pdf_backing_tracker.clone()),
+            Arc::new(std::sync::RwLock::new(crate::agent::tools::manager::ToolManager::new())),
         );
         agent.set_config(config.clone());
 
@@ -290,6 +296,7 @@ impl FastMdApp {
                 pending_file_load: None,
                 repaint_interval: Duration::from_millis(16),
                 finished_watcher_slot,
+                tool_manager: std::sync::Arc::new(std::sync::RwLock::new(crate::agent::tools::manager::ToolManager::new())),
             },
             layout: PanelLayout::new(),
             cached_tree_rows: None,

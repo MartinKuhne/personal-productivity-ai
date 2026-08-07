@@ -37,6 +37,7 @@ pub struct AppOrchestrator {
     pub pending_file_load: Option<PathBuf>,
     pub repaint_interval: Duration,
     pub finished_watcher_slot: Arc<Mutex<Option<notify::RecommendedWatcher>>>,
+    pub tool_manager: std::sync::Arc<std::sync::RwLock<crate::agent::tools::manager::ToolManager>>,
 }
 
 impl AppOrchestrator {
@@ -419,8 +420,8 @@ impl AppOrchestrator {
                             error = %msg,
                             "OAuth flow failed; recording error on group row"
                         );
-                        tool_manager::record_mcp_error(
-                            &ToolGroupId::Mcp(server_name),
+                        self.tool_manager.write().unwrap().record_error(
+                            &crate::agent::tools::manager::ToolGroupId::Mcp(server_name.clone()),
                             ToolGroupError::now(ToolErrorKind::Authentication, msg),
                         );
                     }

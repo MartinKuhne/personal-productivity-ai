@@ -28,8 +28,9 @@ fn test_ctx(config: &AppConfig) -> ToolContext<'static> {
         unsafe { &*(config as *const AppConfig) },
         test_bus(),
         test_browser_session(),
-        test_pdf_backing(),
+        Arc::new(crate::app::session::PdfBackingTracker::new()),
         crate::agent::tools::manager::cache::cache(),
+        Arc::new(std::sync::RwLock::new(ToolManager::new())),
     )
 }
 
@@ -722,7 +723,8 @@ fn test_grep_truncation_does_not_count_non_markdown_matches() {
 #[test]
 fn test_csv_tools_in_schema() {
     let config = AppConfig::default();
-    let schema = get_tools_schema(&config, "create a csv database");
+    let mut mgr = ToolManager::new();
+    let schema = mgr.get_tools_schema(&config, "create a csv database");
     let tools = schema.as_array().unwrap();
     let names: Vec<&str> = tools
         .iter()
@@ -738,7 +740,8 @@ fn test_csv_tools_in_schema() {
 #[test]
 fn test_csv_tools_excluded() {
     let config = AppConfig::default();
-    let schema = get_tools_schema(&config, "just a normal message");
+    let mut mgr = ToolManager::new();
+    let schema = mgr.get_tools_schema(&config, "just a normal message");
     let tools = schema.as_array().unwrap();
     let names: Vec<&str> = tools
         .iter()
@@ -751,7 +754,8 @@ fn test_csv_tools_excluded() {
 #[test]
 fn test_get_weather_tool_in_schema() {
     let config = AppConfig::default();
-    let schema = get_tools_schema(&config, "what is the weather today");
+    let mut mgr = ToolManager::new();
+    let schema = mgr.get_tools_schema(&config, "what is the weather today");
     let tools = schema.as_array().unwrap();
     let names: Vec<&str> = tools
         .iter()
@@ -764,7 +768,8 @@ fn test_get_weather_tool_in_schema() {
 fn test_get_weather_tool_excluded_when_disabled() {
     let mut config = AppConfig::default();
     config.tool_groups.weather = false;
-    let schema = get_tools_schema(&config, "what is the weather today");
+    let mut mgr = ToolManager::new();
+    let schema = mgr.get_tools_schema(&config, "what is the weather today");
     let tools = schema.as_array().unwrap();
     let names: Vec<&str> = tools
         .iter()
@@ -786,7 +791,8 @@ fn test_spawn_config_subscription_runs_init_in_background() {
     let bus = crate::bus::config::config_bus();
     let (tx, rx) = std::sync::mpsc::channel::<BackgroundEvent>();
 
-    spawn_config_subscription(bus.clone(), tx);
+    let tm = Arc::new(std::sync::RwLock::new(ToolManager::new()));
+    spawn_config_subscription(tm, bus.clone(), tx);
 
     bus.publish(ConfigArrived::new(AppConfig::default()));
 

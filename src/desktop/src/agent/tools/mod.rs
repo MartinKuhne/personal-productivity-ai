@@ -61,4 +61,4 @@ pub trait Tool: Send + Sync {
 }
 
 pub use context::ToolContext as ToolContextType;
-pub use manager::{execute_tool, get_tools_schema};
+pub use manager::execute_tool;
