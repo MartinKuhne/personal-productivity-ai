@@ -630,9 +630,6 @@ pub fn get_tools_schema(config: &AppConfig, prompt: &str) -> serde_json::Value {
 /// itself, so MCP tool calls (which may do network I/O) don't hold
 /// the write lock across the network round-trip.
 pub fn execute_tool(ctx: &ToolContext, name: &str, args_str: &str) -> String {
-    #[cfg(feature = "profiling")]
-    puffin::profile_scope!("execute_tool");
-
     rustls::crypto::ring::default_provider()
         .install_default()
         .ok();

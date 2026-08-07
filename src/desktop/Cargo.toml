@@ -10,7 +10,6 @@ keywords = ["markdown", "viewer", "ai", "agent"]
 
 [features]
 default = []
-profiling = ["dep:puffin", "dep:puffin_egui"]
 # Discord bot integration. Adds the `integrations::discord` module and
 # the `run_discord_bot` entry point. Off by default — the bot is not
 # wired into `main.rs` and ships as opt-in.
@@ -70,8 +69,6 @@ evalexpr = "13.1.0"
 html-escape = "0.2"
 url = "2.5"
 quick-xml = "0.41.0"
-puffin = { version = "0.20", optional = true, default-features = false }
-puffin_egui = { git = "https://github.com/EmbarkStudios/puffin", optional = true, default-features = false }
 encoding_rs = "0.8.35"
 tempfile = "3.8"
 tokio-tungstenite = { version = "0.23", features = ["rustls"] }

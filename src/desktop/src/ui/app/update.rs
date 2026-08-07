@@ -37,12 +37,6 @@ impl FastMdApp {
     /// non-rendering bookkeeping (file-event drain, repaint
     /// scheduling, etc).
     pub fn update_ui(&mut self, ui: &mut egui::Ui) {
-        #[cfg(feature = "profiling")]
-        puffin::GlobalProfiler::lock().new_frame();
-
-        #[cfg(feature = "profiling")]
-        puffin::profile_function!();
-
         let ctx = ui.ctx();
 
         // Apply persisted font size scale on the first frame. The
@@ -63,17 +57,6 @@ impl FastMdApp {
 
         // Update persisted UI state with current values for saving on exit
         self.update_persisted_ui_state(ui.ctx());
-
-        #[cfg(feature = "profiling")]
-        {
-            egui::Window::new("Profiler")
-                .vscroll(true)
-                .resizable(true)
-                .default_size([400.0, 300.0])
-                .show(ui.ctx(), |ui| {
-                    puffin_egui::profiler_ui(ui);
-                });
-        }
     }
 
     fn process_file_events_and_repaint(&mut self, ctx: &egui::Context) {

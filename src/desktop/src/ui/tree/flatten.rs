@@ -64,9 +64,6 @@ pub fn flatten_tree(
     expanded: &HashSet<PathBuf>,
     rows: &mut Vec<FlatRow>,
 ) {
-    #[cfg(feature = "profiling")]
-    puffin::profile_scope!("flatten_tree");
-
     // Prevent stack overflow on maliciously deep directory structures.
     if depth > MAX_TREE_DEPTH {
         return;
