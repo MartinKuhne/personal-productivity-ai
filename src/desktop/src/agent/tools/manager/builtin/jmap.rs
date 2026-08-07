@@ -1,4 +1,4 @@
-﻿//! JMAP email tool implementations for the tool registry.
+//! JMAP email tool implementations for the tool registry.
 
 use crate::agent::tools::Tool;
 use crate::agent::tools::context::ToolContext;
@@ -46,6 +46,8 @@ impl Tool for SearchEmailTool {
                 is_flagged: input.is_flagged,
             },
             input.cursor,
+            ctx.cache,
+            ctx.uuid_gen.as_ref(),
         )
         .map(|r| {
             serde_json::to_value(r).unwrap_or_else(|e| serde_json::json!({"error": e.to_string()}))

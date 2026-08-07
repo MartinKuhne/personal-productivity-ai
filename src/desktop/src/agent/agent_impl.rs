@@ -8,7 +8,7 @@ use crate::agent::response_formatter::{
     format_tool_call_message, format_tool_result_message, split_thinking_and_content,
 };
 use crate::agent::tool_executor::ToolExecutor;
-use crate::agent::tools::get_tools_schema;
+
 use crate::bus::events::typed::{AgentEvent, BackgroundEvent};
 use crate::config::get_config_path;
 use std::collections::HashSet;
@@ -31,13 +31,19 @@ fn run_agent_inner(ctx: AgentContext) {
         .build(&ctx.config);
     log_prompt_context(&ctx.active_file, &ctx.active_dir, &ctx.selected_files);
     let mut messages = build_messages(system_prompt, &ctx.prompt, ctx.history.clone());
-    let tools_json = get_tools_schema(&ctx.config, &ctx.prompt);
+    let tools_json = ctx
+        .tool_manager
+        .write()
+        .unwrap()
+        .get_tools_schema(&ctx.config, &ctx.prompt);
     let mut full_response = ctx.current_response.clone();
     let executor = ToolExecutor::new(
         ctx.config.clone(),
         ctx.file_event_bus.clone(),
         ctx.browser_session.clone(),
         ctx.pdf_backing.clone(),
+        ctx.tool_manager.clone(),
+        ctx.uuid_gen.clone(),
     );
     loop {
         if ctx.cancel_flag.load(Ordering::SeqCst) {

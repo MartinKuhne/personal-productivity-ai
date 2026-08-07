@@ -8,6 +8,8 @@
 //! `render_markdown` (in `mod.rs`) because it needs the
 //! `HashMap<String, usize>` occurrence counter that is also used by
 //! `build_toc`.
+//!
+//! Unit tests live in the sibling `heading_tests.rs` sidecar.
 
 use crate::markdown::{InlineElem, heading_plain_text};
 use eframe::egui;
@@ -94,3 +96,7 @@ pub(crate) fn render_heading(
     }
     ui.add_space(4.0);
 }
+
+#[cfg(test)]
+#[path = "heading_tests.rs"]
+mod heading_tests;

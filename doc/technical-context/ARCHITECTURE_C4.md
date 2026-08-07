@@ -1,14 +1,5 @@
 # FastMD C4 Architecture Diagram
 
-This document describes the **actual** structure of the `fastmd` Rust crate
-(`src/desktop/`), mapped to the C4 model. It is kept in sync with
-`src/desktop/SPEC.md` (EARS-formatted requirements) and the module tree under
-`src/desktop/src/`. When the code changes, update this document alongside it.
-
-Legend: REQ-xxx references are requirement IDs from `SPEC.md`.
-
----
-
 ## Context Diagram (Level 1)
 
 ```mermaid
@@ -21,24 +12,24 @@ C4Context
     System(fastmd, "FastMD Desktop", "Rust + egui native Windows app (crate 'fastmd')")
   }
 
-  System_Ext(llm, "OpenAI-compatible LLM", "OpenRouter / any compatible endpoint (AGENT-001)")
+  System_Ext(llm, "OpenAI-compatible LLM", "OpenRouter / any compatible endpoint")
   System_Ext(jmap, "JMAP Server", "Email, calendar, contacts (Rustave Stork AG)")
   System_Ext(caldav, "CalDAV/CardDAV", "Calendar + address-book servers")
   System_Ext(searxng, "SearXNG", "Web search backend (self-hosted)")
-  System_Ext(nominatim, "Nominatim / Open-Meteo", "Geocoding + weather (REQ extras)")
-  System_Ext(playwright, "Chromium via Playwright", "Browser automation sub-system (browser.rs)")
+  System_Ext(nominatim, "Nominatim / Open-Meteo", "Geocoding + weather")
+  System_Ext(playwright, "Chromium via Playwright", "Browser automation sub-system")
   System_Ext(pdf, "PDF Converter CLI", "External command (pdf_converter_command)")
   System_Ext(fs, "Local Filesystem", "Content libraries on disk")
 
   Rel(user, fastmd, "Uses")
-  Rel(fastmd, llm, "Chat completions / vision (AGENT-001, 470..478)")
+  Rel(fastmd, llm, "Chat completions / vision")
   Rel(fastmd, jmap, "JMAP (email/calendar/contacts)")
   Rel(fastmd, caldav, "CalDAV/CardDAV")
-  Rel(fastmd, searxng, "web_search (TOOL-010)")
+  Rel(fastmd, searxng, "web_search")
   Rel(fastmd, nominatim, "weather tool (geocode + forecast)")
-  Rel(fastmd, playwright, "browser_* tools (browser.rs)")
-  Rel(fastmd, pdf, "PDF rendering worker (REQ-450..458)")
-  Rel(fastmd, fs, "Reads/writes content libraries (app/vfs/SPEC.md, VFS-001..VFS-009)")
+  Rel(fastmd, playwright, "browser_* tools")
+  Rel(fastmd, pdf, "PDF rendering worker")
+  Rel(fastmd, fs, "Reads/writes content libraries")
 ```
 ## Container Diagram (Level 2)
 
@@ -48,24 +39,24 @@ The `fastmd` crate produces a single desktop application
 
 `ui/` renders the desktop app. `FastMdApp` (`app.rs`, 1346 lines) is the root
 `eframe::App` and owns all cross-cutting state. A 5-pane layout is enforced by
-`PanelLayout` driving per-pane render functions in `ui/panels/*` (REQ-101).
+`PanelLayout` driving per-pane render functions in `ui/panels/*`.
 
 ```mermaid
 C4Component
   title FastMD — UI Layer
 
-  Component(app, "FastMdApp", "ui/app.rs", "eframe::App root; owns AgentSessionManager, BackgroundProcessManager, Task, DirectoryTracker, FileEventProcessor, TagManager, DialogManager, PanelLayout, SelectionManager, TabManager, bus")
-  Component(panels, "PanelLayout + panels", "ui/panel_layout.rs, ui/panels/{top,bottom,left,right,center}.rs", "5-pane layout REQ-101")
-  Component(render, "render", "ui/render.rs", "build_toc, render_markdown (GFM pulldown-cmark MD-001/MD-018), render_yaml_table (MD-014)")
-  Component(tree, "tree", "ui/tree.rs", "flatten_tree, draw_tree_node, FlatRow, TREE_ROW_HEIGHT, TreeNodeContext, render_flat_row")
-  Component(tabs, "TabManager", "ui/tab_manager.rs", "Tabbed docs REQ-190..198, 619")
-  Component(sel, "SelectionManager", "ui/selection_manager.rs", "Multi-select REQ-180..183")
-  Component(dialog, "DialogManager", "ui/dialog_manager.rs", "move/rename/create-dir REQ-155..157")
-  Component(modals, "modals", "ui/modals.rs", "Modal rendering (private module)")
-  Component(bglogs, "background_logs", "ui/background_logs.rs", "Background Processes tab REQ-460..465")
-  Component(osshell, "os_shell", "ui/os_shell.rs", "open_in_system_editor, show_in_file_explorer, ShellExecute 'print' REQ-159")
-  Component(tblw_pure, "table_width (pure core)", "markdown/table_width/mod.rs", "Fair Table Width Algorithm: pure f32 column-width solver (no egui dependency)")
-  Component(tblw_adapter, "table_width (egui adapter)", "ui/table_width/mod.rs", "egui-bridging measure/measure_cached/ftwa_cached + re-exports pure core; TablePadding, TableRenderConfig, resolve_padding")
+  Component(app, "FastMdApp", "Root eframe::App; owns session, tasks, VFS, tags, dialogs, panels, tabs, selection, bus")
+  Component(panels, "PanelLayout + panels", "5-pane layout")
+  Component(render, "render", "build_toc, render_markdown (GFM), render_yaml_table")
+  Component(tree, "tree", "Flattened directory tree rendering")
+  Component(tabs, "TabManager", "Tabbed documents")
+  Component(sel, "SelectionManager", "Multi-select")
+  Component(dialog, "DialogManager", "Move/rename/create-dir")
+  Component(modals, "modals", "Modal rendering (private)")
+  Component(bglogs, "background_logs", "Background Processes tab")
+  Component(osshell, "os_shell", "OS integration: open in editor, show in explorer, print")
+  Component(tblw_pure, "table_width (pure core)", "Fair Table Width Algorithm: pure f32 column-width solver")
+  Component(tblw_adapter, "table_width (egui adapter)", "egui bridging: measure_cached, ftwa_cached, re-exports pure core")
 
   Rel(app, panels, "delegates update()")
   Rel(app, render, "renders markdown")
@@ -87,19 +78,19 @@ Supporting UI types: `TreeNode{name,path,is_dir,children:BTreeMap}`,
 `agent/` implements the LLM tool-loop. `run_agent` spawns a dedicated thread,
 builds messages from `SystemPromptBuilder`, queries an OpenAI-compatible
 endpoint, and loops turns (`Continue` / `Done` / `Failed`) honouring a cancel
-flag. AGENT-001..AGENT-023.
+flag.
 
 ```mermaid
 C4Component
   title FastMD — Agent Core
 
-  Component(mgr, "AgentSessionManager", "agent/manager.rs (278)", "AgentState{running,status,thinking,response,scroll_to_id,history,token_usage,total_usage}; start_session; handle_agent_event; cancel via AtomicBool")
-  Component(impl, "run_agent / run_agent_inner", "agent/agent_impl.rs (212)", "Resolves LLM client, builds messages, get_tools_schema, ToolExecutor::new, turn loop")
-  Component(ctx, "AgentContext", "agent/context.rs", "config, prompt, history, active_file, active_dir, selected_files, cancel_flag, channels")
-  Component(llm, "LLMClient", "agent/llm_client.rs", "parse_usage_block; OpenAI-compatible HTTP")
-  Component(pb, "SystemPromptBuilder", "agent/prompt_builder.rs", "with_active_file/dir/selected_files; USER.md injection per library (AGENT-020)")
-  Component(rf, "ResponseFormatter", "agent/response_formatter.rs", "split_thinking_and_content (🤔...🤔 AGENT-022), format_tool_call_message, format_tool_result_message")
-  Component(te, "ToolExecutor", "agent/tool_executor.rs", "safe tools parallel / unsafe tools sequential (AGENT-012)")
+  Component(mgr, "AgentSessionManager", "AgentState{running,status,thinking,response,scroll_to_id,history,token_usage,total_usage}; start_session; handle_agent_event; cancel via AtomicBool")
+  Component(impl, "run_agent / run_agent_inner", "Resolves LLM client, builds messages, get_tools_schema, ToolExecutor::new, turn loop")
+  Component(ctx, "AgentContext", "config, prompt, history, active_file, active_dir, selected_files, cancel_flag, channels")
+  Component(llm, "LLMClient", "parse_usage_block; OpenAI-compatible HTTP")
+  Component(pb, "SystemPromptBuilder", "with_active_file/dir/selected_files; USER.md injection per library")
+  Component(rf, "ResponseFormatter", "split_thinking_and_content (🤔...🤔), format_tool_call_message, format_tool_result_message")
+  Component(te, "ToolExecutor", "safe tools parallel / unsafe tools sequential")
 
   Rel(mgr, impl, "start_session -> run_agent")
   Rel(impl, ctx, "passes context")
@@ -117,23 +108,23 @@ C4Component
 tools, the per-group enable/parallel-safe/error state, and the
 [`McpClientManager`](agent/tools/mcp/mod.rs). `ToolContext<'a>` is the single
 parameter passed to every `Tool::execute`, carrying `&AppConfig` and
-`&Bus<FileEvent>` (AGENT-012).
+`&Bus<FileEvent>`.
 
 ```mermaid
 C4Component
   title FastMD — Tool System
 
-  Component(reg, "ToolManager", "agent/tools/manager/mod.rs", "catalog + per-group state + error tracking + parallel-safety; register_builtin, register_mcp_tool, execute, get_schema, safety_of, parallel_safe_tools, set_group_enabled, record_error, clear_error, refresh_state, refresh_mcp_tools (TOOL-014..024)")
-  Component(tctx, "ToolContext", "tools/context.rs (~80)", "{config, file_event_bus}; thin shim over app::vfs::resolve::resolve(vpath, allow_write, libraries) -> Option<(PathBuf,bool)>")
-  Component(fs, "filesystem tools", "tools/filesystem.rs", "grep, read_file, read_lines, create_file, insert_lines, replace_text, list_files")
-  Component(yaml, "yaml_header", "tools/yaml_header.rs", "read_yaml_header, write_yaml_header")
-  Component(web, "web", "tools/web.rs", "web_fetch (pagination/headers/5-min cache TOOL-005..010), web_search (SearXNG), web_delegate sub-agent")
-  Component(csv, "csv_db", "tools/csv_db/", "{mod, operations, query (evalexpr TOOL-002/003), schema}; add_rows, delete_rows, create_csv, list_csv, query; gated by prompt keywords (TOOL-001)")
-  Component(jmap, "jmap", "tools/jmap/", "{client, calendar, contacts, email, tests}; search/get/add/update/delete calendar/email/contact")
-  Component(caldav, "caldav", "tools/caldav.rs", "CalDAV calendar tools")
-  Component(carddav, "carddav", "tools/carddav.rs", "CardDAV contact tools")
-  Component(weather, "weather", "tools/weather.rs", "Nominatim geocode + Open-Meteo forecast (not in SPEC tool table)")
-  Component(dtos, "dtos", "tools/dtos.rs", "Shared tool data-transfer objects")
+  Component(reg, "ToolManager", "catalog + per-group state + error tracking + parallel-safety; register_builtin, register_mcp_tool, execute, get_schema, safety_of, parallel_safe_tools, set_group_enabled, record_error, clear_error, refresh_state, refresh_mcp_tools")
+  Component(tctx, "ToolContext", "{config, file_event_bus}; thin shim over app::vfs::resolve::resolve(vpath, allow_write, libraries) -> Option<(PathBuf,bool)>")
+  Component(fs, "filesystem tools", "grep, read_file, read_lines, create_file, insert_lines, replace_text, list_files")
+  Component(yaml, "yaml_header", "read_yaml_header, write_yaml_header")
+  Component(web, "web", "web_fetch (pagination/headers/5-min cache), web_search (SearXNG), web_delegate sub-agent")
+  Component(csv, "csv_db", "{mod, operations, query (evalexpr), schema}; add_rows, delete_rows, create_csv, list_csv, query; gated by prompt keywords")
+  Component(jmap, "jmap", "{client, calendar, contacts, email, tests}; search/get/add/update/delete calendar/email/contact")
+  Component(caldav, "caldav", "CalDAV calendar tools")
+  Component(carddav, "carddav", "CardDAV contact tools")
+  Component(weather, "weather", "Nominatim geocode + Open-Meteo forecast")
+  Component(dtos, "dtos", "Shared tool data-transfer objects")
 
   Rel(reg, tctx, "passes to each Tool::execute")
   Rel(reg, fs, "registers")
@@ -151,11 +142,11 @@ C4Component
 C4Component
   title FastMD — Virtual File System (app/vfs/)
 
-  Component(vp, "virtual_path", "app/vfs/virtual_path.rs", "VirtualPath, VirtualPathError{EmptyPath,TraversalDetected,InvalidFormat,LibraryNotFound,LibraryNotWritable}; parse/resolve/is_writable; rejects '..' traversal (VFS-004, VFS-009)")
-  Component(lib, "library", "app/vfs/library.rs", "ContentLibraryExt trait (display_label_for, contains_path, resolve, is_writable, root_path); library_display_label free function (VFS-001, VFS-002, VFS-008)")
-  Component(res, "resolve", "app/vfs/resolve.rs", "Pure resolve(vpath, allow_write, libraries) -> Result<Option<(PathBuf,bool)>, String>; resolve_writable helper for mutating tools (VFS-004, VFS-007, VFS-009)")
-  Component(tctx, "ToolContext (shim)", "tools/context.rs", "resolve_virtual_path / resolve_writable forward to app::vfs::resolve::resolve")
-  Component(cl, "ContentLibrary (data type)", "config.rs", "struct ContentLibrary{root_folder, name, kind, readonly, priority} — data shape owned by config/, behaviour owned by app::vfs")
+  Component(vp, "virtual_path", "VirtualPath, VirtualPathError{EmptyPath,TraversalDetected,InvalidFormat,LibraryNotFound,LibraryNotWritable}; parse/resolve/is_writable; rejects '..' traversal")
+  Component(lib, "library", "ContentLibraryExt trait (display_label_for, contains_path, resolve, is_writable, root_path); library_display_label free function")
+  Component(res, "resolve", "Pure resolve(vpath, allow_write, libraries) -> Result<Option<(PathBuf,bool)>, String>; resolve_writable helper for mutating tools")
+  Component(tctx, "ToolContext (shim)", "resolve_virtual_path / resolve_writable forward to app::vfs::resolve::resolve")
+  Component(cl, "ContentLibrary (data type)", "struct ContentLibrary{root_folder, name, kind, readonly, priority} — data shape owned by config/, behaviour owned by app::vfs")
 
   Rel(tctx, res, "calls resolve(allow_write, libraries) with self.config.content_libraries")
   Rel(res, vp, "VirtualPath::parse, resolve, is_writable")
@@ -174,7 +165,7 @@ Tool inventory (matches `Tools.md` + conditional tools):
   `delete_calendar_item`, `search_email`, `get_email_by_id`, `send_email`,
   `search_contact`, `get_contact`, `add_contact`.
 - **Conditional / extra (6):** `add_rows`, `delete_rows`, `create_csv`,
-  `list_csv`, `query` (CSV DB, prompt-keyword gated, TOOL-001..TOOL-004),
+  `list_csv`, `query` (CSV DB, prompt-keyword gated),
   `weather` (not in SPEC tool table).
 
 > `tools/Spotify.md` is a **proposal** for 25+ `spotify_*` tools via OAuth2
@@ -190,14 +181,14 @@ which owns the `mpsc` channels and the `notify::RecommendedWatcher`. A
 C4Component
   title FastMD — Background Workers
 
-  Component(task, "Task", "background_task.rs (518)", "Owns rx/tx (std::sync::mpsc), file_event_bus: Bus<FileEvent>, watcher: Option<notify::RecommendedWatcher>; subscribes to Bus<ConfigArrived> at construction and only spawns the indexing thread after the first ConfigArrived (or the CONFIG_ARRIVAL_TIMEOUT fallback); run_indexing wires all workers")
-  Component(indexer, "Indexer", "background/indexer.rs", "Worker pool up to 4 threads (REQ-301/302)")
-  Component(watcher, "FileWatcher", "background/watcher.rs", "notify 6.0; recursive; auto-watch new dirs (REQ-401/407)")
-  Component(pdf, "PdfConverterWorker", "background/pdf_converter.rs", "PdfConversionJob queue; pdf_converter_command (REQ-450..458)")
-  Component(vision, "ImageVisionWorker", "background/vision_processor.rs", "process_image: base64 data URL -> vision use_case model (REQ-470..478)")
-  Component(router, "BusRouter", "bus/router/bus_router.rs (169)", "Routes FileEvents between producers and consumers")
-  Component(bgmgr, "BackgroundProcessManager", "background/manager.rs (239)", "VecDeque ring buffer MAX_LOG_ENTRIES=10_000; filter/search/auto_scroll/show_background_logs; log persistence to logs/background-process.log (REQ-464); SharedProcessManager = Arc<Mutex<...>>")
-  Component(bgmodels, "models", "background/models.rs", "BackgroundLogEntry, LogCategory{Indexer,Watcher,PDF Converter,Image Vision,LLM Tools}")
+  Component(task, "Task", "Owns rx/tx (std::sync::mpsc), file_event_bus: Bus<FileEvent>, watcher: Option<notify::RecommendedWatcher>; subscribes to Bus<ConfigArrived> at construction and only spawns the indexing thread after the first ConfigArrived (or the CONFIG_ARRIVAL_TIMEOUT fallback); run_indexing wires all workers")
+  Component(indexer, "Indexer", "Worker pool up to 4 threads")
+  Component(watcher, "FileWatcher", "notify 6.0; recursive; auto-watch new dirs")
+  Component(pdf, "PdfConverterWorker", "PdfConversionJob queue; pdf_converter_command")
+  Component(vision, "ImageVisionWorker", "process_image: base64 data URL -> vision use_case model")
+  Component(router, "BusRouter", "Routes FileEvents between producers and consumers")
+  Component(bgmgr, "BackgroundProcessManager", "VecDeque ring buffer MAX_LOG_ENTRIES=10_000; filter/search/auto_scroll/show_background_logs; log persistence to logs/background-process.log; SharedProcessManager = Arc<Mutex<...>>")
+  Component(bgmodels, "models", "BackgroundLogEntry, LogCategory{Indexer,Watcher,PDF Converter,Image Vision,LLM Tools}")
 
   Rel(task, indexer, "drives")
   Rel(task, watcher, "owns")
@@ -218,13 +209,13 @@ multi-producer/multi-consumer broadcast buses (`Bus<T>`) or domain-specific type
 C4Component
   title FastMD — Messaging & Event Bus Subsystem
 
-  Component(core, "Bus<T> / BusReader<T>", "bus/core.rs (262)", "Thread-safe MPMC broadcast channel backed by tokio::sync::broadcast (capacity 8192)")
-  Component(fev, "FileEvent & FileEventProducer", "bus/events/file.rs (296)", "FileEventKind{Discovered, Updated, Removed, DirDiscovered, DirRemoved}; FileEventProducer convenience wrapper")
-  Component(bev, "BackgroundEvent & Sub-Enums", "bus/events/typed.rs (188)", "Typed UI event wrapper: AgentEvent, FsEvent, ProcessEvent, McpAuthEvent")
-  Component(cfg_bus, "ConfigArrived & config_bus", "bus/events/config.rs, bus/config.rs", "Startup config broadcast; CONFIG_ARRIVAL_TIMEOUT (100ms) fallback")
-  Component(router, "BusRouter", "bus/router/bus_router.rs (169)", "Subscribes to Bus<FileEvent>; routes .pdf to tx_pdf and images to tx_img MPSC queues")
-  Component(task, "Task", "app/background_task.rs (589)", "Owns rx/tx: mpsc::channel<BackgroundEvent> and file_event_bus: Bus<FileEvent>")
-  Component(ui, "FastMdApp", "ui/app.rs", "UI thread loop; drains Task.rx (BackgroundEvent) on every frame pass")
+  Component(core, "Bus<T> / BusReader<T>", "Thread-safe MPMC broadcast channel backed by tokio::sync::broadcast (capacity 8192)")
+  Component(fev, "FileEvent & FileEventProducer", "FileEventKind{Discovered, Updated, Removed, DirDiscovered, DirRemoved}; FileEventProducer convenience wrapper")
+  Component(bev, "BackgroundEvent & Sub-Enums", "Typed UI event wrapper: AgentEvent, FsEvent, ProcessEvent, McpAuthEvent")
+  Component(cfg_bus, "ConfigArrived & config_bus", "Startup config broadcast; CONFIG_ARRIVAL_TIMEOUT (100ms) fallback")
+  Component(router, "BusRouter", "Subscribes to Bus<FileEvent>; routes .pdf to tx_pdf and images to tx_img MPSC queues")
+  Component(task, "Task", "Owns rx/tx: mpsc::channel<BackgroundEvent> and file_event_bus: Bus<FileEvent>")
+  Component(ui, "FastMdApp", "UI thread loop; drains Task.rx (BackgroundEvent) on every frame pass")
 
   Rel(fev, core, "uses Bus<FileEvent>")
   Rel(cfg_bus, core, "uses Bus<ConfigArrived>")
@@ -287,19 +278,19 @@ Cross-cutting modules that the UI, Agent, Tools and Background all depend on.
 C4Component
   title FastMD — Supporting Modules
 
-  Component(cfg, "config", "config.rs + bus/config.rs", "AppConfig, LlmConfig{model,api_url,api_key,cost,use_case}, JmapClient, CalDavClient, CardDavClient, content_libraries: Vec<ContentLibrary>; load_config, get_config_path; Debug redacts secrets; config_bus / ConfigArrived (tokio broadcast) used to fan out the loaded config to Task, AgentSessionManager, and FastMdApp on startup. VFS types re-exported from app::vfs for backwards compat. CONFIG-001..008 (CONFIG-009 superseded by VFS-004/009)")
-  Component(ev, "file_events", "bus/events/file.rs (296)", "Bus<T> (tokio::sync::broadcast, BUS_CAPACITY=8192); FileEvent; FileEventKind{Discovered,Updated,Removed,DirDiscovered,DirRemoved}; FileEventProducer; BusReader. Multi-producer/multi-consumer")
-  Component(fp, "file_processor", "app/watcher/file_processor.rs (186)", "FileEventProcessor{reader, all_files, all_files_set, all_dirs, all_dirs_set, indexing_finished, indexing_finished_handled}")
-  Component(dt, "directory_tracker", "app/watcher/directory_tracker.rs (267)", "Single source of truth for known dirs; consumes DirDiscovered/DirRemoved + file Discovered")
-  Component(tm, "tag_manager", "app/tag_manager.rs (220)", "TagManager{file_tags:BTreeMap<PathBuf,Vec<String>>, all_tags:BTreeSet<String>, prompt_paths:BTreeSet<PathBuf>, selected_tag}")
-  Component(msg, "messages", "bus/events/messages.rs (38)", "TokenUsageInfo{prompt_tokens,completion_tokens,total_tokens,cached_tokens,reasoning_tokens}")
-  Component(doc, "document", "app/document.rs (179)", "DocumentContent{front_matter: Option<String>, body: String}; parse via utils::markdown::parse_front_matter")
-  Component(ed, "editor", "app/text_buffer.rs (512)", "Inline editor; EditorColors inverted white-on-black (REQ-261); validation via pulldown-cmark (REQ-258); undo/redo >=100 (REQ-257); clipboard (REQ-255); cursor nav (REQ-256); save combines body + original front-matter (REQ-259)")
-  Component(print, "print", "app/print.rs (206)", "PrintJob{markdown_path, markdown_content, title}; markdown->HTML via pulldown-cmark; execute_print_blocking")
-  Component(browser, "browser", "app/browser/mod.rs (116)", "Playwright async: browser_navigate, browser_get_page_state, click, type, screenshot")
-  Component(batch, "batch", "app/batch/", "{coordinator, discoverer, executor, file_matcher, prompts, types}; batch prompt processing BATCH-001..BATCH-014; concurrency 1-8; File vs Directory modes; dialog UI in ui/batch_dialog.rs")
-  Component(utils, "utils", "utils/", "markdown (parse_front_matter), path, tags (extract_tags_from_file)")
-  Component(err, "error", "error.rs", "AgentError")
+  Component(cfg, "config", "AppConfig, LlmConfig{model,api_url,api_key,cost,use_case}, JmapClient, CalDavClient, CardDavClient, content_libraries: Vec<ContentLibrary>; load_config, get_config_path; Debug redacts secrets; config_bus / ConfigArrived (tokio broadcast) used to fan out the loaded config to Task, AgentSessionManager, and FastMdApp on startup. VFS types re-exported from app::vfs for backwards compat.")
+  Component(ev, "file_events", "Bus<T> (tokio::sync::broadcast, BUS_CAPACITY=8192); FileEvent; FileEventKind{Discovered,Updated,Removed,DirDiscovered,DirRemoved}; FileEventProducer; BusReader. Multi-producer/multi-consumer")
+  Component(fp, "file_processor", "FileEventProcessor{reader, all_files, all_files_set, all_dirs, all_dirs_set, indexing_finished, indexing_finished_handled}")
+  Component(dt, "directory_tracker", "Single source of truth for known dirs; consumes DirDiscovered/DirRemoved + file Discovered")
+  Component(tm, "tag_manager", "TagManager{file_tags:BTreeMap<PathBuf,Vec<String>>, all_tags:BTreeSet<String>, prompt_paths:BTreeSet<PathBuf>, selected_tag}")
+  Component(msg, "messages", "TokenUsageInfo{prompt_tokens,completion_tokens,total_tokens,cached_tokens,reasoning_tokens}")
+  Component(doc, "document", "DocumentContent{front_matter: Option<String>, body: String}; parse via utils::markdown::parse_front_matter")
+  Component(ed, "editor", "Inline editor; EditorColors inverted white-on-black; validation via pulldown-cmark; undo/redo >=100; clipboard; cursor nav; save combines body + original front-matter")
+  Component(print, "print", "PrintJob{markdown_path, markdown_content, title}; markdown->HTML via pulldown-cmark; execute_print_blocking")
+  Component(browser, "browser", "Playwright async: browser_navigate, browser_get_page_state, click, type, screenshot")
+  Component(batch, "batch", "{coordinator, discoverer, executor, file_matcher, prompts, types}; batch prompt processing; concurrency 1-8; File vs Directory modes; dialog UI in ui/batch_dialog.rs")
+  Component(utils, "utils", "markdown (parse_front_matter), path, tags (extract_tags_from_file)")
+  Component(err, "error", "AgentError")
 
   Rel(cfg, ev, "ContentLibrary data flows into file events")
   Rel(ev, fp, "feeds")
@@ -316,7 +307,6 @@ C4Component
 - **Inline `#[cfg(test)]` modules:** `agent/agent_impl_tests.rs`,
   `tools/jmap/tests.rs`, `bus/core.rs`, `bus/events/file.rs`, `bus/events/typed.rs`, `bus/config.rs`, `bus/router/bus_router.rs`.
 - **UI tests:** `egui_kittest` 0.35 (eframe + snapshot) harnesses following the
-  egui `__run_test_ctx` / `State::test_ctx` pattern mandated by `AGENTS.md`
-  §10. Dev-deps also include `accesskit 0.24`, `proptest`, `filetime`,
-  `tempfile`, `tokio`.
+  egui `__run_test_ctx` / `State::test_ctx` pattern. Dev-deps also include
+  `accesskit 0.24`, `proptest`, `filetime`, `tempfile`, `tokio`.
 

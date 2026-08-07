@@ -37,6 +37,7 @@ pub struct AppOrchestrator {
     pub pending_file_load: Option<PathBuf>,
     pub repaint_interval: Duration,
     pub finished_watcher_slot: Arc<Mutex<Option<notify::RecommendedWatcher>>>,
+    pub tool_manager: std::sync::Arc<std::sync::RwLock<crate::agent::tools::manager::ToolManager>>,
 }
 
 impl AppOrchestrator {
@@ -400,9 +401,7 @@ impl AppOrchestrator {
     }
 
     pub fn handle_mcp_auth_event(&mut self, ev: McpAuthEvent) {
-        use crate::agent::tools::manager::{
-            self as tool_manager, ToolErrorKind, ToolGroupError, ToolGroupId,
-        };
+        use crate::agent::tools::manager::{ToolErrorKind, ToolGroupError};
         match ev {
             McpAuthEvent::Completed { server_name, error } => {
                 self.dialogs.set_oauth_idle(&server_name);
@@ -419,8 +418,8 @@ impl AppOrchestrator {
                             error = %msg,
                             "OAuth flow failed; recording error on group row"
                         );
-                        tool_manager::record_mcp_error(
-                            &ToolGroupId::Mcp(server_name),
+                        self.tool_manager.write().unwrap().record_error(
+                            &crate::agent::tools::manager::ToolGroupId::Mcp(server_name.clone()),
                             ToolGroupError::now(ToolErrorKind::Authentication, msg),
                         );
                     }

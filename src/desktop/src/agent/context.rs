@@ -41,6 +41,8 @@ pub struct AgentContext {
     /// Shared PDF-backing tracker — gives tools access to
     /// the set of Markdown files that have a `.pdf` sibling.
     pub pdf_backing: Arc<crate::app::session::PdfBackingTracker>,
+    pub tool_manager: Arc<std::sync::RwLock<crate::agent::tools::manager::ToolManager>>,
+    pub uuid_gen: Arc<dyn crate::utils::uuid::UuidGenerator>,
 }
 
 #[cfg(test)]
@@ -71,6 +73,10 @@ mod tests {
             model_name: None,
             browser_session: browser,
             pdf_backing: Arc::new(crate::app::session::PdfBackingTracker::new()),
+            tool_manager: Arc::new(std::sync::RwLock::new(
+                crate::agent::tools::manager::ToolManager::new(),
+            )),
+            uuid_gen: Arc::new(crate::utils::uuid::SystemUuidGenerator),
         };
         assert_eq!(ctx.config.models, config.models);
         assert!(ctx.active_file.as_deref() == Some(Path::new("test.md")));

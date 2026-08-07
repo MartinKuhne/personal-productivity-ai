@@ -37,7 +37,12 @@ pub fn show_tools_dialog(ctx: &eframe::egui::Context, app: &mut FastMdApp) {
     let mut open = true;
     let title = TOOLS_DIALOG_TITLE;
 
-    let groups = manager::groups_snapshot(app.config());
+    let groups = app
+        .orchestrator
+        .tool_manager
+        .write()
+        .unwrap()
+        .groups_snapshot(app.config());
     let (default_size, min_size, max_height) =
         compute_dialog_size(ctx.viewport_rect(), groups.len());
 
@@ -105,7 +110,12 @@ pub(crate) fn compute_dialog_size(
 pub fn render_contents(ui: &mut eframe::egui::Ui, app: &mut FastMdApp) {
     // Snapshot the group view under a fresh refresh so we don't
     // hold any lock across UI rendering.
-    let groups = manager::groups_snapshot(app.config());
+    let groups = app
+        .orchestrator
+        .tool_manager
+        .write()
+        .unwrap()
+        .groups_snapshot(app.config());
 
     if groups.is_empty() {
         ui.label("No tool groups registered.");
@@ -183,7 +193,11 @@ fn render_row(
         let mut enabled = group.enabled;
         if ui.checkbox(&mut enabled, "").changed() {
             let mut new_config = app.config().clone();
-            manager::set_group_enabled(&mut new_config, &id, enabled);
+            app.orchestrator
+                .tool_manager
+                .write()
+                .unwrap()
+                .set_group_enabled(&mut new_config, &id, enabled);
             if let Err(e) = save_config(&new_config) {
                 tracing::error!(
                     error = %e,
@@ -223,7 +237,13 @@ fn render_row(
         let char_count: usize = group
             .tool_names
             .iter()
-            .filter_map(|n| manager::tool_char_count_for(n, app.config(), prompt))
+            .filter_map(|n| {
+                app.orchestrator
+                    .tool_manager
+                    .read()
+                    .unwrap()
+                    .tool_char_count(n, app.config(), prompt)
+            })
             .sum();
         ui.label(format!("{char_count}"));
     });
@@ -236,7 +256,11 @@ fn render_row(
                 ui.label(egui::RichText::new("⚠").color(egui::Color32::from_rgb(220, 130, 0)))
                     .on_hover_text(format!("{:?}: {}", err.kind, err.message));
                 if ui.small_button(TOOLS_RESTART).clicked() {
-                    manager::clear_error(&id);
+                    app.orchestrator
+                        .tool_manager
+                        .write()
+                        .unwrap()
+                        .clear_error(&id);
                 }
             }
 
@@ -258,11 +282,17 @@ fn render_row(
                             name.clone(),
                             app.orchestrator.tx.clone(),
                             ui.ctx().clone(),
+                            app.orchestrator.tool_manager.read().unwrap().mcp_manager(),
                         );
                     }
                 }
                 if ui.small_button(TOOLS_FORGET).clicked() {
-                    manager::mcp_clear_needs_auth(name);
+                    app.orchestrator
+                        .tool_manager
+                        .write()
+                        .unwrap()
+                        .mcp_manager()
+                        .mark_needs_auth(name, false);
                 }
             }
         });
@@ -288,8 +318,8 @@ fn spawn_auth_flow(
     server_name: String,
     tx: std::sync::mpsc::Sender<BackgroundEvent>,
     ctx: eframe::egui::Context,
+    mgr: std::sync::Arc<crate::agent::tools::mcp::McpClientManager>,
 ) {
-    let mgr = manager::mcp_manager();
     std::thread::spawn(move || {
         let error = match mgr.authenticate(&server_name) {
             Ok(()) => {

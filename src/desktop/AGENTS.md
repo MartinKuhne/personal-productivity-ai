@@ -1,24 +1,17 @@
 # AI Agent Instructions — `src/desktop/` (`fastmd` crate)
 
-These rules apply **only** to the `fastmd` Rust crate (the desktop app and its
-`deploy` binary). The repo-root `AGENTS.md` provides the shared principles;
-this file adds Rust/egui-specific conventions and the quality gate.
+## Tests
+- [RUST-001] Unit tests SHOULD be kept in a separate file. The file MUST be named <file>_tests.rs.
 
 ## 1. Documentation
-- Every module must have a `//!` module-level doc comment.
-- Start with a concise one-sentence summary, then add detail if needed.
-- The first line (before any blank line) is used in search results and overviews — keep it short and descriptive.
-- Every `pub` item (struct, enum, function, trait, type alias, const) must have a `///` doc comment.
-- Include examples in doc comments where they clarify usage.
-- Run `cargo doc --no-deps` to verify documentation builds without warnings.
+- [RUST-010] Every module must have a `//!` module-level doc comment containing a concise one-sentence summary of the module's purpose
+- [RUST-011] Every `pub` item (struct, enum, function, trait, type alias, const) must have a `///` doc comment.
 
 ## 2. Distilled SDK reference docs
 
-`doc/distill/` holds distilled reference docs for the third-party SDKs this
-crate depends on. Consult them before writing or reviewing code that touches
-these areas; they are the in-repo source of truth for the pinned versions.
+[RUST-020] You MUST consult this distilled reference documentation before writing or reviewing code 
 
-- `doc/distill/egui.md` — egui/eframe 0.35 reference (immediate-mode core,
+- `doc/distill/egui.md` — egui/eframe reference (immediate-mode core,
   `Context`/`Ui`/`Response` API, widgets, containers, `emath`/`ecolor`/`epaint`).
   Consult when writing or modifying egui UI code (`ui/`, `editor.rs`, `main.rs`).
 - `doc/distill/egui-kittest.md` — egui_kittest / kittest reference
@@ -27,20 +20,20 @@ these areas; they are the in-repo source of truth for the pinned versions.
 - `doc/distill/mcp.md` — Model Context Protocol client-side spec (lifecycle,
   transports, OAuth 2.1 authorization, cancellation, ping, progress). Consult
   when working on the MCP client (`agent/tools/mcp/`).
-- https://docs.discord.com/llms.txt for discord changes. You MUST retrieve the current copy of that document when making discord related changes.
+
+## 3. Egui inspection and egui_mcp
+
+[RUST-030] You MAY inspect a live running instance of the fastmd app by setting the EGUI_INSPECTION=1 environment variable then running the application. You can then use the egui_mcp tool to interact with the application.
 
 ## 4. Spec traceability
-- Every user-facing behaviour maps to requirement in `SPEC.md`. When adding a feature, add the requirement first; when changing behaviour, prompt to update the requirement.
-- Keep requirements goal oriented and user facing. Avoid leaking implementation specifics.
-- Code may cite `REQ-xxx` / `MD-xxx` / `TOOL-xxx` / `AGENT-xxx` in `//!`/`///` comments where it aids review (e.g. `(AGENT-012)` next to the safe/unsafe split). Do not sprinkle citations inline in business logic.
-- `ARCHITECTURE_C4.md` (in `doc/technical-context/`) is the authoritative architecture picture; update it when module boundaries change.
+- [RUST-040] Every user-facing behaviour maps to a requirement in `SPEC.md`. When adding or changing a feature, you MUST point out any drift between implemented behaviour and code. You MUST NOT update the requirement unless asked to do so.
+- [RUST-041] Requirements MUST be high level, goal oriented and user facing. Avoid leaking implementation specifics.
+- [RUST-042] You SHOULD cite `REQ-xxx` in `//!`/`///` comments when making changes to the code.
+- `ARCHITECTURE_C4.md` (in `doc/technical-context/`) is the authoritative architecture picture; You MUST update it when module boundaries or contracts change.
 
 ## 5. Folder structure
-
-The crate is organised by **bounded subsystem**. Each directory owns a cohesive
-concern and exposes its public API through a `mod.rs` that re-exports symbols,
-so `lib.rs` stays a thin facade. The layout (files elided — see
-`doc/technical-context/ARCHITECTURE_C4.md` for the full tree):
+- [RUST-050] The crate is organised by **bounded subsystems**. Each directory SHOULD fully contain a cohesive
+concern and expose its public API through a `mod.rs` that re-exports symbols.
 
 ```
 src/
@@ -83,61 +76,7 @@ src/
 └── utils/                  # Generic helpers only (path, tags) — NO Markdown knowledge
 ```
 
-### Placement guidance for coding agents
-
-When adding or moving code, place files by **concern**, not by type:
-
-- **Anything that knows about Markdown as a format** (parsing, rendering,
-  front-matter, document model, table layout) goes in `markdown/`. That
-  subsystem is the single import point for `pulldown-cmark`, `gray_matter`,
-  and Markdown AST types. `ui/`, `tools/`, `print.rs`, and `editor.rs` call
-  into `markdown::` rather than handling Markdown themselves.
-- **egui-dependent code** goes in `ui/` (or `editor.rs` for the text widget).
-  `ui/` must not import `pulldown-cmark` directly — use `markdown::render`.
-  Pure layout math with no egui dependency lives in `markdown/table_width/`,
-  not `ui/`.
-- **Tools** (anything implementing the `Tool` trait) go in `tools/` and are
-  registered in `tools/registry.rs::register_all`. Group tool families into
-  submodules (`tools/filesystem/`, `tools/jmap/`, `tools/csv_db/`, ...). A tool
-  that wraps a Markdown concern (e.g. `read_yaml_header`) lives as a thin shim
-  in `tools/` that delegates to `markdown/`; the Markdown logic itself does
-  not live in `tools/`.
-- **Agent loop concerns** (LLM client, prompt builder, response formatter,
-  tool executor, session manager) go in `agent/`. Do not put tool
-  implementations or UI code here.
-- **Background workers** and the `Task` orchestrator go in `background/`.
-  Channel/bus plumbing between workers and the UI belongs here, not in `ui/`.
-- **Messaging primitives** (buses, event payload types, bus-side routing,
-  generic channel-drain workers) go in `bus/`. Producers (indexer,
-  watcher) live in `background/`; consumers that drive UI state live in
-  `app/` or `ui/`. The `Bus<T>` transport is in `bus::core`; per-event
-  payload types are in `bus::events::*`; the bus-side router and
-  channel-drain helpers are in `bus::router::*`.
-- **Configuration** (data types, loader, secret-redacting Debug impls)
-  goes in `config/`. Keep `AppConfig` data-only; the `ContentLibrary`
-  data type lives here but its behaviour lives in `app/vfs/`. The VFS
-  parser, errors, and resolver live in `app/vfs/` (see
-  `src/app/vfs/SPEC.md`); `config.rs` re-exports the public types for
-  backwards compatibility, but new code should import from
-  `crate::app::vfs`.
-- **Cross-cutting value types** with no single home (e.g.
-  `TokenUsageInfo`, `BackgroundLogEntry`, `LogCategory`) live in
-  `bus::events::messages` (value-type home) or `bus::events::typed`
-  (per-domain replacement). The `app/` module no longer hosts these.
-- **Shared runtime infrastructure** that both the application
-  orchestrator and the LLM agent depend on (the long-lived headless
-  browser session and the PDF-backing tracker) lives in
-  `app/session/`. Putting them here is what makes the dependency
-  graph one-way: `app/orchestrator` constructs the shared handles
-  and hands them to the agent via `AgentContext`; the agent no longer
-  reaches into `app::browser` or `app::watcher` for these types.
-  The old paths (`crate::app::browser::BrowserSession`,
-  `crate::app::watcher::PdfBackingTracker`) still re-export from
-  `app::session` for backwards compatibility and will be removed
-  in a follow-up.
-- **Generic, domain-free helpers** (path utilities, file-walk tag extraction)
-  go in `utils/`. If a helper knows about Markdown, it belongs in `markdown/`,
-  not `utils/`.
+- [RUST-051] When adding or moving code, place files by **concern**, not by type
 
 ### Event-driven fan-out
 
@@ -264,4 +203,4 @@ Before marking any task as complete, run the following from `src/desktop/` and e
 - `cargo fmt --check` — code is properly formatted
 - `cargo doc --no-deps --quiet` — documentation builds without warnings
 
-The project uses [`cargo-nextest`](https://nexte.st/) for the test runner instead of the built-in `cargo test`. nextest runs each test in its own process, surfaces per-test timing, and gives flaky tier-4 click tests a chance to retry. Install with `cargo install cargo-nextest --locked`; the configuration lives in `src/desktop/.config/nextest.toml`.
+You MUST use [`cargo-nextest`](https://nexte.st/) for the test runner

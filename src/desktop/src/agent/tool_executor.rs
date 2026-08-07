@@ -20,6 +20,8 @@ pub struct ToolExecutor {
     /// [`crate::app::session::SessionError::Disabled`].
     browser_session: Arc<BrowserSession>,
     pdf_backing: std::sync::Arc<crate::app::session::PdfBackingTracker>,
+    tool_manager: std::sync::Arc<std::sync::RwLock<crate::agent::tools::manager::ToolManager>>,
+    uuid_gen: std::sync::Arc<dyn crate::utils::uuid::UuidGenerator>,
 }
 
 impl ToolExecutor {
@@ -28,12 +30,16 @@ impl ToolExecutor {
         file_event_bus: Bus<FileEvent>,
         browser_session: Arc<BrowserSession>,
         pdf_backing: std::sync::Arc<crate::app::session::PdfBackingTracker>,
+        tool_manager: std::sync::Arc<std::sync::RwLock<crate::agent::tools::manager::ToolManager>>,
+        uuid_gen: std::sync::Arc<dyn crate::utils::uuid::UuidGenerator>,
     ) -> Self {
         Self {
             config,
             file_event_bus,
             browser_session,
             pdf_backing,
+            tool_manager,
+            uuid_gen,
         }
     }
 
@@ -50,7 +56,7 @@ impl ToolExecutor {
                 .and_then(|f| f.get("name"))
                 .and_then(|n| n.as_str())
                 .unwrap_or("");
-            if Self::classify(func_name) == Safety::ReadOnly {
+            if self.classify(func_name) == Safety::ReadOnly {
                 safe_calls.push(tc.clone());
             } else {
                 unsafe_calls.push(tc.clone());
@@ -68,8 +74,8 @@ impl ToolExecutor {
     /// an LLM-emitted call to a missing tool runs sequentially instead
     /// of in parallel, and the registry returns its normal "tool not
     /// found" error.
-    fn classify(name: &str) -> Safety {
-        crate::agent::tools::manager::safety_of(name)
+    fn classify(&self, name: &str) -> Safety {
+        self.tool_manager.read().unwrap().safety_of(name)
     }
 
     fn execute_parallel(
@@ -99,8 +105,18 @@ impl ToolExecutor {
                 let bus = self.file_event_bus.clone();
                 let browser = self.browser_session.clone();
                 let pdf = pdf_backing.clone();
+                let tm = self.tool_manager.clone();
+                let uuid_gen = self.uuid_gen.clone();
                 join_set.spawn_blocking(move || {
-                    let ctx = ToolContext::new(&cfg, &bus, browser, pdf);
+                    let ctx = ToolContext::new(
+                        &cfg,
+                        &bus,
+                        browser,
+                        pdf,
+                        crate::agent::tools::manager::cache::cache(),
+                        tm,
+                        uuid_gen,
+                    );
                     let result = execute_tool(&ctx, &func_name, &func_args);
                     (call_id, func_name, func_args, result)
                 });
@@ -123,11 +139,17 @@ impl ToolExecutor {
             let call_id = extract_str(tc, &["id"]).to_string();
             let func_name = extract_str(tc, &["function", "name"]).to_string();
             let func_args = extract_str(tc, &["function", "arguments"]).to_string();
+            let browser = self.browser_session.clone();
+            let pdf = self.pdf_backing.clone();
+            let tm = self.tool_manager.clone();
             let ctx = ToolContext::new(
                 &self.config,
                 &self.file_event_bus,
-                self.browser_session.clone(),
-                self.pdf_backing.clone(),
+                browser,
+                pdf,
+                crate::agent::tools::manager::cache::cache(),
+                tm,
+                self.uuid_gen.clone(),
             );
             let result = execute_tool(&ctx, &func_name, &func_args);
             results.push((call_id, func_name, func_args, result));
@@ -209,27 +231,16 @@ mod tests {
     use super::*;
 
     #[test]
-    fn test_safety_of_classifies_known_tools() {
-        // Regression for the is_safe_tool string-list: the registry now
+    fn test_classify() {
+        let tm = crate::agent::tools::manager::ToolManager::new();
+        // The registry doesn't exist anymore as a global, but the manager
         // exposes a single `safety_of(name)` lookup that returns
         // Safety::ReadOnly / Safety::Mutating.
-        assert_eq!(
-            crate::agent::tools::manager::safety_of("read_file"),
-            Safety::ReadOnly
-        );
-        assert_eq!(
-            crate::agent::tools::manager::safety_of("grep"),
-            Safety::ReadOnly
-        );
-        assert_eq!(
-            crate::agent::tools::manager::safety_of("create_file"),
-            Safety::Mutating
-        );
+        assert_eq!(tm.safety_of("read_file"), Safety::ReadOnly);
+        assert_eq!(tm.safety_of("grep"), Safety::ReadOnly);
+        assert_eq!(tm.safety_of("create_file"), Safety::Mutating);
         // Unknown tools fall back to Mutating (the conservative choice).
-        assert_eq!(
-            crate::agent::tools::manager::safety_of("nonexistent"),
-            Safety::Mutating
-        );
+        assert_eq!(tm.safety_of("nonexistent"), Safety::Mutating);
     }
 
     #[test]
@@ -251,7 +262,11 @@ mod tests {
             &crate::config::AppConfig::default(),
         ));
         let pdf_backing = std::sync::Arc::new(crate::app::session::PdfBackingTracker::new());
-        let executor = ToolExecutor::new(config, bus, browser_session, pdf_backing);
+        let tm = std::sync::Arc::new(std::sync::RwLock::new(
+            crate::agent::tools::manager::ToolManager::new(),
+        ));
+        let uuid_gen = std::sync::Arc::new(crate::utils::uuid::SystemUuidGenerator);
+        let executor = ToolExecutor::new(config, bus, browser_session, pdf_backing, tm, uuid_gen);
         assert!(executor.config.models.is_empty());
     }
 }
