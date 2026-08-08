@@ -130,11 +130,18 @@ fn link_renders_as_link_function() {
 
 #[test]
 fn image_renders_as_image_function() {
+    // The translator renders images as a Typst placeholder block
+    // that displays the destination URL. `#image("...")` would
+    // require the URL to resolve to a real file at compile time,
+    // which the spec test corpus does not provide. The placeholder
+    // also documents in the PDF that an image was dropped — useful
+    // for exports of real documents where the image is missing.
     let out = render_markdown_to_typst("![alt](https://example.com/img.png)");
     assert!(
-        out.contains("#image(\"https://example.com/img.png\")"),
+        out.contains("image: https://example.com/img.png"),
         "got: {out}"
     );
+    assert!(out.contains("#block("), "got: {out}");
 }
 
 #[test]

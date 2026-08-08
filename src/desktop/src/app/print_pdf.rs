@@ -221,21 +221,24 @@ fn compile_typst_document(document: &str) -> Result<Vec<u8>, String> {
     Ok(pdf_bytes)
 }
 
-/// Block the calling thread on saving the markdown content as a
-/// PDF file at `job.resolved_output_path()`. Suitable to be called
-/// from a `std::thread::spawn` background worker (matches the
+/// Compile the markdown content to a PDF file at
+/// `job.resolved_output_path()`. Suitable to be called from a
+/// `std::thread::spawn` background worker (matches the
 /// `execute_print_blocking` pattern in [`super::print`]).
 ///
 /// The `tx` channel is used to push log entries into the Background
 /// Process Log so the user can see "Exported `notes.md` →
 /// `notes.pdf` (12 KB)" without having to check the file system.
 ///
-/// On success, opens the resulting PDF in the user's default
-/// viewer (so the user lands in the same place they'd land after
-/// the existing Print flow).
-pub fn execute_save_as_pdf_blocking(
-    job: SaveAsPdfJob,
-    tx: Option<Sender<BackgroundEvent>>,
+/// **Does not open the resulting PDF in a viewer.** Callers that
+/// want that behaviour (i.e. the UI) should chain a call to
+/// [`open_pdf_in_viewer`] on the returned path. Splitting compile
+/// from open means the test suite can exercise the compile+write
+/// path without popping a PDF viewer on the developer's
+/// desktop during `cargo test`.
+pub fn compile_and_save_pdf(
+    job: &SaveAsPdfJob,
+    tx: Option<&Sender<BackgroundEvent>>,
 ) -> Result<PathBuf, String> {
     if job.markdown_content.is_empty() {
         return Err(format!(
@@ -302,16 +305,47 @@ pub fn execute_save_as_pdf_blocking(
         );
     });
 
+    Ok(output_path)
+}
+
+/// Open an already-saved PDF in the user's default viewer. Best-
+/// effort: a failure here is logged but does not propagate. Kept
+/// separate from [`compile_and_save_pdf`] so the test suite
+/// can exercise the compile+write path without popping a
+/// viewer on the developer's desktop during `cargo test`.
+///
+/// Public so the UI layer can call it independently of
+/// [`execute_save_as_pdf_blocking`] (e.g. a "Reveal in folder"
+/// action that just opens the existing file).
+pub fn open_pdf_in_viewer(path: &Path) -> Result<(), String> {
+    opener::open(path).map_err(|e| {
+        tracing::warn!(
+            name = "print_pdf.open_failed",
+            path = %path.display(),
+            error = %e,
+            "Could not open PDF in the default viewer."
+        );
+        format!("opener::open({}): {}", path.display(), e)
+    })
+}
+
+/// UI-layer composition: compile + save, then open the result
+/// in the user's default PDF viewer. Suitable to be called from
+/// a `std::thread::spawn` background worker (matches the
+/// `execute_print_blocking` pattern in [`super::print`]).
+///
+/// On the test path, call [`compile_and_save_pdf`] directly
+/// instead — that function does not pop a viewer, so the
+/// developer's `cargo test` run is silent.
+pub fn execute_save_as_pdf_blocking(
+    job: SaveAsPdfJob,
+    tx: Option<Sender<BackgroundEvent>>,
+) -> Result<PathBuf, String> {
+    let output_path = compile_and_save_pdf(&job, tx.as_ref())?;
     // Open the resulting PDF in the user's default viewer. Best-effort:
     // the export is already complete and successful, so a failure to
     // open the viewer is logged but does not propagate.
-    if let Err(e) = opener::open(&output_path) {
-        tracing::warn!(
-            name = "print_pdf.open_failed",
-            path = %output_path.display(),
-            error = %e,
-            "Saved PDF but could not open it in the default viewer."
-        );
+    if let Err(e) = open_pdf_in_viewer(&output_path) {
         let _ = tx.as_ref().map(|sender| {
             let _ = sender.send(
                 BackgroundLogEntry::new(
@@ -326,7 +360,6 @@ pub fn execute_save_as_pdf_blocking(
             );
         });
     }
-
     Ok(output_path)
 }
 

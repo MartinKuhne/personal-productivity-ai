@@ -9,7 +9,7 @@
 //! engine wiring simultaneously.
 
 use super::{
-    SaveAsPdfJob, build_typst_document, compile_markdown_to_pdf, execute_save_as_pdf_blocking,
+    SaveAsPdfJob, build_typst_document, compile_and_save_pdf, compile_markdown_to_pdf,
     typst_string_literal,
 };
 use std::path::PathBuf;
@@ -86,7 +86,10 @@ fn save_as_pdf_job_rejects_empty_content() {
     let md = dir.path().join("empty.md");
     std::fs::write(&md, "").unwrap();
     let job = SaveAsPdfJob::from_path(md);
-    let result = execute_save_as_pdf_blocking(job, None);
+    // Use `compile_and_save_pdf` (not the `execute_save_as_pdf_blocking`
+    // wrapper) so the test path doesn't pop a PDF viewer on the
+    // developer's desktop during `cargo test`.
+    let result = compile_and_save_pdf(&job, None);
     assert!(result.is_err(), "expected error on empty content");
 }
 
@@ -99,7 +102,14 @@ fn execute_save_as_pdf_blocking_writes_pdf_file() {
 
     // We don't pass a channel — the log path is non-essential and
     // we don't want to drag in the bus machinery for this test.
-    let output = execute_save_as_pdf_blocking(job, None).expect("export should succeed");
+    //
+    // We call `compile_and_save_pdf` (not the
+    // `execute_save_as_pdf_blocking` wrapper) on purpose: the
+    // wrapper also invokes `opener::open` on the resulting PDF,
+    // which would pop a viewer on the developer's desktop during
+    // `cargo test`. The compile-and-write half is the part we
+    // actually want to exercise here.
+    let output = compile_and_save_pdf(&job, None).expect("export should succeed");
     assert!(output.exists(), "output PDF should exist at {output:?}");
 
     let bytes = std::fs::read(&output).expect("read PDF");
