@@ -6,6 +6,8 @@ use super::context::TreeNodeContext;
 use super::flatten::{FlatRow, initial_rename_value};
 use super::handlers::{apply_directory_row_click, apply_file_row_click, build_merge_prompt};
 use crate::app::print::{PrintJob, execute_print_blocking};
+#[cfg(feature = "pdf-export")]
+use crate::app::print_pdf::{SaveAsPdfJob, execute_save_as_pdf_blocking};
 use crate::ui::TreeNode;
 use eframe::egui;
 use std::collections::HashSet;
@@ -156,6 +158,42 @@ fn show_file_context_menu(
                 name = "ui.file.print_no_channel",
                 path = %path_to_print.display(),
                 "Print requested but no background channel available"
+            );
+        }
+        ui.close();
+    }
+    // "Save as PDF..." — same UX as the existing Print entry: spawn a
+    // background worker via the event channel so the UI thread stays
+    // responsive while the Typst compiler and PDF serialiser run. The
+    // output lands in the same directory as the source `.md` with
+    // `.pdf` extension; the file is opened in the user's default
+    // viewer on success (see `app::print_pdf` for the orchestration).
+    // The whole menu item disappears when the `pdf-export` feature
+    // is off — the compile-time `#[cfg]` here is matched against the
+    // same gate that hides the `app::print_pdf` module itself.
+    #[cfg(feature = "pdf-export")]
+    if ui.button(crate::ui::strings::SAVE_AS_PDF_ACTION).clicked() {
+        let path_to_export = path.to_path_buf();
+        if let Some(tx) = ctx.bg_tx().clone() {
+            let job = SaveAsPdfJob::from_path(path_to_export.clone());
+            // Hand the long-running work to a background thread. The
+            // result and any errors stream back to the UI via the
+            // Background Process Log (LogCategory::Print).
+            std::thread::spawn(move || {
+                if let Err(e) = execute_save_as_pdf_blocking(job, Some(tx)) {
+                    tracing::error!(
+                        name = "ui.file.save_as_pdf_failed",
+                        path = %path_to_export.display(),
+                        error = %e,
+                        "Save as PDF failed."
+                    );
+                }
+            });
+        } else {
+            tracing::warn!(
+                name = "ui.file.save_as_pdf_no_channel",
+                path = %path_to_export.display(),
+                "Save as PDF requested but no background channel available"
             );
         }
         ui.close();

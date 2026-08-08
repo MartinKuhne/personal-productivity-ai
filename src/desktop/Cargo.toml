@@ -9,7 +9,7 @@ categories = ["text-editors"]
 keywords = ["markdown", "viewer", "ai", "agent"]
 
 [features]
-default = []
+default = ["pdf-export"]
 # Discord bot integration. Adds the `integrations::discord` module and
 # the `run_discord_bot` entry point. Off by default — the bot is not
 # wired into `main.rs` and ships as opt-in.
@@ -27,6 +27,13 @@ browser = ["dep:playwright-rs"]
 # log category stays compiled (so the UI filter chip still
 # renders) but no worker ever emits into it.
 image-library = []
+# PDF export via `typst-as-lib` — adds the [`app::print_pdf`]
+# module, the [`markdown::typst`] translator, and the
+# "Save as PDF" right-click context-menu entry. Off by default
+# — the Typst engine adds ~30 MB to the binary and a few
+# minutes to compile time. The user can flip this on when they
+# want print-quality PDF output.
+pdf-export = ["dep:typst-as-lib", "dep:typst-layout", "dep:typst-pdf"]
 
 [dependencies]
 anyhow = "1.0.104"
@@ -76,6 +83,20 @@ encoding_rs = "0.8.35"
 tempfile = "3.8"
 tokio-tungstenite = { version = "0.30", features = ["rustls"] }
 futures = "0.3"
+# `typst-as-lib` — the in-process Typst compiler we use for the
+# "Save as PDF" right-click action. Adds the engine + a small
+# embedded font set from `typst-assets` (~30 MB binary, a few
+# minutes compile time). Behind the `pdf-export` feature; on
+# by default per workspace preferences.
+typst-as-lib = { version = "0.16", optional = true, features = ["typst-kit-embed-fonts"] }
+# `typst-layout` — re-exported by typst-as-lib transitively, but we
+# need the `PagedDocument` type for the compile result. Marked
+# optional with the same gate as `typst-as-lib` so the feature
+# toggle stays in one place.
+typst-layout = { version = "0.15", optional = true }
+# `typst-pdf` — the PDF serialiser that turns a compiled
+# `PagedDocument` into PDF bytes. Same `pdf-export` gate.
+typst-pdf = { version = "0.15", optional = true }
 
 [dev-dependencies]
 tempfile = "3.8"

@@ -18,6 +18,8 @@ pub mod model;
 pub mod parser;
 pub mod table_layout;
 pub mod table_width;
+#[cfg(feature = "pdf-export")]
+pub mod typst;
 
 pub use document::{Document, FrontMatter, apply_task_toggle, parse_front_matter};
 pub use model::{InlineElem, RenderEvent, TextStyle, ToCEntry, build_toc, heading_plain_text};
@@ -26,3 +28,5 @@ pub use table_layout::{LayoutCell, TableLayout, TableLayoutBuilder, TextMeasurer
 pub use table_width::{
     Breakpoint, CellTokens, ColumnWidths, DeficitStrategy, compute_column_breakpoints, ftwa,
 };
+#[cfg(feature = "pdf-export")]
+pub use typst::render_markdown_to_typst;

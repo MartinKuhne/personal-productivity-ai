@@ -78,7 +78,7 @@ fn test_show_text_editor_renders_when_open() {
     let raw_content = "Hello World\nLine 2";
     let _ = std::fs::write(&path, raw_content);
     let pdf_tracker = crate::app::session::PdfBackingTracker::new();
-    let _ = buf.open(&path, raw_content, Some(&pdf_tracker));
+    buf.open(&path, raw_content, Some(&pdf_tracker));
 
     let ctx = egui::Context::default();
     let producer = noop_producer();

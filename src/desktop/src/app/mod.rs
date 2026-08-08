@@ -24,6 +24,8 @@ pub mod orchestrator;
 pub mod panel_layout;
 pub mod persisted;
 pub mod print;
+#[cfg(feature = "pdf-export")]
+pub mod print_pdf;
 pub mod selection_manager;
 pub mod session;
 pub mod tab_manager;
