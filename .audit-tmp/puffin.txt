@@ -1,8 +1,0 @@
-﻿
-Cargo.lock:3681:name = "puffin"
-Cargo.lock:3694:name = "puffin"
-Cargo.lock:3696:source = "git+https://github.com/EmbarkStudios/puffin#ec04e7f6e9f5b420a969ee663b48896362a0eb00"
-Cargo.lock:3709:name = "puffin_egui"
-Cargo.lock:3711:source = "git+https://github.com/EmbarkStudios/puffin#ec04e7f6e9f5b420a969ee663b48896362a0eb00"
-
-
