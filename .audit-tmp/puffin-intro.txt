@@ -1,0 +1,167 @@
+﻿commit 7fe9e879bb1dd37eec21b105d273b100c85acfea
+Author: Martin Kuhne <9038432+MartinKuhne@users.noreply.github.com>
+Date:   Sat Aug 1 13:49:32 2026 -0700
+
+    feat(desktop): add in-app profiling with puffin_egui and Tracy instrumentation
+    
+    Add puffin and puffin_egui as optional dependencies gated behind a
+    'profiling' cargo feature. When enabled, the application instruments
+    the egui frame loop, markdown parsing, tree rendering, and tool
+    execution with puffin profile scopes for live flamegraph viewing.
+    
+    A Profiler window (toggleable via egui::Window) shows the interactive
+    puffin_egui flamegraph. Profile scopes are added to:
+    - FastMdApp::update_ui (frame loop)
+    - render_markdown (UI rendering)
+    - parse_markdown_to_events (markdown parsing)
+    - flatten_tree (directory tree flattening)
+    - execute_tool (tool execution)
+    
+    Also adds doc/planning/perf.md with the profiling tooling plan.
+    
+    Dependencies:
+    - puffin 0.20 (optional, feature-gated)
+    - puffin_egui from git (optional, feature-gated; egui 0.35 compatible)
+    
+    Usage: cargo run --features profiling
+
+ doc/planning/perf.md                       | 169 ++++++++++++++++++++++++++++
+ src/desktop/Cargo.lock                     | 174 ++++++++++++++++++++++++++++-
+ src/desktop/Cargo.toml                     |   6 +
+ src/desktop/src/agent/tools/manager/mod.rs |   3 +
+ src/desktop/src/markdown/parser.rs         |   3 +
+ src/desktop/src/ui/app.rs                  |  17 +++
+ src/desktop/src/ui/render/mod.rs           |   3 +
+ src/desktop/src/ui/tree/flatten.rs         |   3 +
+ 8 files changed, 376 insertions(+), 2 deletions(-)
+commit 7fe9e879bb1dd37eec21b105d273b100c85acfea
+Author: Martin Kuhne <9038432+MartinKuhne@users.noreply.github.com>
+Date:   Sat Aug 1 13:49:32 2026 -0700
+
+    feat(desktop): add in-app profiling with puffin_egui and Tracy instrumentation
+    
+    Add puffin and puffin_egui as optional dependencies gated behind a
+    'profiling' cargo feature. When enabled, the application instruments
+    the egui frame loop, markdown parsing, tree rendering, and tool
+    execution with puffin profile scopes for live flamegraph viewing.
+    
+    A Profiler window (toggleable via egui::Window) shows the interactive
+    puffin_egui flamegraph. Profile scopes are added to:
+    - FastMdApp::update_ui (frame loop)
+    - render_markdown (UI rendering)
+    - parse_markdown_to_events (markdown parsing)
+    - flatten_tree (directory tree flattening)
+    - execute_tool (tool execution)
+    
+    Also adds doc/planning/perf.md with the profiling tooling plan.
+    
+    Dependencies:
+    - puffin 0.20 (optional, feature-gated)
+    - puffin_egui from git (optional, feature-gated; egui 0.35 compatible)
+    
+    Usage: cargo run --features profiling
+
+diff --git a/src/desktop/Cargo.toml b/src/desktop/Cargo.toml
+index 563c9ac..0805fda 100644
+--- a/src/desktop/Cargo.toml
++++ b/src/desktop/Cargo.toml
+@@ -8,6 +8,10 @@ repository = "https://github.com/MartinKuhne/personal-productivity-ai/"
+ categories = ["text-editors"]
+ keywords = ["markdown", "viewer", "ai", "agent"]
+ 
++[features]
++default = []
++profiling = ["dep:puffin", "dep:puffin_egui"]
++
+ [dependencies]
+ anyhow = "1.0.104"
+ thiserror = "2"
+@@ -49,6 +53,8 @@ evalexpr = "13.1.0"
+ html-escape = "0.2"
+ url = "2.5"
+ quick-xml = "0.41.0"
++puffin = { version = "0.20", optional = true, default-features = false }
++puffin_egui = { git = "https://github.com/EmbarkStudios/puffin", optional = true, default-features = false }
+ 
+ [dev-dependencies]
+ tempfile = "3.8"
+commit 271870204066929a26836082cce381ebe92e154f
+Author: Martin Kuhne <9038432+MartinKuhne@users.noreply.github.com>
+Date:   Tue Aug 4 21:38:10 2026 -0700
+
+    Chore/quality pass (#67)
+    
+    * refactor(tools): collapse per-family strings submodule into single localization table
+    * refactor(ui): split FastMdApp's 1,704-line app.rs by lifecycle phase
+    * refactor(lib): trim pub use re-exports to the externally consumed API
+    * feat(markdown): add `Document` newtype, migrate re-parse sites
+    * Extract unit tests into sidecar files to reduce cognitive load
+    * test(markdown/table_width): split into public-API integration test and internal-helper sidecar
+    * refactor: consolidate app/vfs/ behaviour and markdown/ data types
+    * refactor(desktop): break bus->app and agent<->app layering inversions
+    * feat(desktop): gate discord, browser. image-library behind Cargo features; drop batch shim
+    * fix(trello): drop stray is_enabled info log
+    * fix(tools): extend shared tool cache TTL to 30 minutes
+    * refactor(tools): migrate read_file_lines and insert_lines to offset-based paging
+    * refactor(tools): rename read_file_lines to read_lines
+    * fix(carddav): normalise PUT path, accept natural field names, add diagnostic tracing
+
+diff --git a/src/desktop/Cargo.toml b/src/desktop/Cargo.toml
+index 14fde6d..5b4fec3 100644
+--- a/src/desktop/Cargo.toml
++++ b/src/desktop/Cargo.toml
+@@ -11,6 +11,23 @@ keywords = ["markdown", "viewer", "ai", "agent"]
+ [features]
+ default = []
+ profiling = ["dep:puffin", "dep:puffin_egui"]
++# Discord bot integration. Adds the `integrations::discord` module and
++# the `run_discord_bot` entry point. Off by default — the bot is not
++# wired into `main.rs` and ships as opt-in.
++discord = []
++# Browser-automation + image-capture tooling (Playwright). Adds
++# `app::browser`, the `BrowserSession` runtime in `app::session`, and
++# the `browser_*` agent tools. Heavy dependency (~6 MB compiled
++# output for the Playwright client + macros); off by default.
++browser = ["dep:playwright-rs"]
++# Image-library / image-vision worker. Adds the [`ImageJob`]
++# type, the `ImageVisionWorker` background processor, the
++# image-routing branch in the file-event bus router, and the
++# `tx_img` worker channel. Off by default — the image-vision
++# pipeline talks to a vision-capable LLM and the `LogCategory::ImageVision`
++# log category stays compiled (so the UI filter chip still
++# renders) but no worker ever emits into it.
++image-library = []
+ 
+ [dependencies]
+ anyhow = "1.0.104"
+@@ -27,14 +44,14 @@ fast-dav-rs = "0.4.4"
+ fast_h2m = "*"
+ jmap-client = { version = "=0.4.1", default-features = false, features = ["blocking", "rustls"] }
+ notify = "6.0"
+-playwright-rs = "0.14.1"
++playwright-rs = { version = "0.14.1", optional = true }
+ pulldown-cmark = { version = "0.13", features = ["html"] }
+ rustls = { version = "0.23", features = ["ring"] }
+ schemars = "1.2.1"
+ serde = { version = "1.0", features = ["derive"] }
+ serde_json = "1.0"
+ serde_norway = "0.9"
+-tokio = { version = "1.53.0", features = ["rt-multi-thread", "macros", "sync"] }
++tokio = { version = "1.53.0", features = ["rt-multi-thread", "macros", "sync", "process"] }
+ trash = "5.2.6"
+ ureq = { version = "2.9", features = ["json"] }
+ # `ring` is already a transitive dep through `rustls` (ring crypto
+@@ -86,4 +103,4 @@ path = "src/main.rs"
+ 
+ [[bin]]
+ name = "deploy"
+-path = "src/bin/deploy.rs"
++path = "src/bin/deploy.rs"
+7fe9e879bb1dd37eec21b105d273b100c85acfea 2026-08-01 13:49:32 -0700 feat(desktop): add in-app profiling with puffin_egui and Tracy instrumentation
+git.exe : fatal: bad object ec04e7f6e9f5b420a969ee663b48896362a0eb00
+At line:11 char:1
++ & git show -s --format='%H %ai %s' ec04e7f6e9f5b420a969ee663b48896362 ...
++ ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : NotSpecified: (fatal: bad obje...b48896362a0eb00:String) [], RemoteException
+    + FullyQualifiedErrorId : NativeCommandError
+ 
