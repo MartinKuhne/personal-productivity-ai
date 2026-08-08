@@ -20,21 +20,30 @@ pub fn build_trello_url(client_config: &TrelloClient, endpoint: &str) -> String 
     )
 }
 
-/// Send an authenticated request to the Trello REST API and return
-/// the parsed JSON body.
-pub fn trello_request(
-    client_config: &TrelloClient,
+/// Send a Trello REST request to a fully-built URL and return the
+/// parsed JSON body.
+///
+/// `url` is the full request URL including the auth query string. In
+/// production it is built by `build_trello_url`; in tests it is the
+/// URI of a `wiremock::MockServer` plus the path/query the production
+/// code would normally produce.
+///
+/// Split out of `trello_request` so unit tests can drive a real
+/// HTTP round-trip against a mock server without monkey-patching
+/// `https://api.trello.com`.
+pub fn trello_http_call(
     method: reqwest::Method,
-    endpoint: &str,
+    url: &str,
     body: Option<&serde_json::Value>,
 ) -> Result<serde_json::Value, String> {
-    let url = build_trello_url(client_config, endpoint);
-    let safe_url = format!("https://api.trello.com/1{}", endpoint);
+    // Strip the auth query string before logging — keys and tokens
+    // must not end up in the application log.
+    let safe_url = url.split_once('?').map(|(p, _)| p).unwrap_or(url);
 
     tracing::debug!(name = "trello.request", method = %method, url = %safe_url, "Sending request to Trello API");
 
     let client = reqwest::blocking::Client::new();
-    let mut req = client.request(method.clone(), &url);
+    let mut req = client.request(method.clone(), url);
     if let Some(b) = body {
         req = req
             .header("Content-Type", "application/json")
@@ -63,6 +72,21 @@ pub fn trello_request(
         tracing::error!(name = "trello.response.status_error", status = %status, url = %safe_url, response = %error_text, "Trello API returned error status");
         Err(format!("Trello API error: {} - {}", status, error_text))
     }
+}
+
+/// Send an authenticated request to the Trello REST API and return
+/// the parsed JSON body.
+///
+/// Thin wrapper over `trello_http_call` that builds the URL via
+/// `build_trello_url`.
+pub fn trello_request(
+    client_config: &TrelloClient,
+    method: reqwest::Method,
+    endpoint: &str,
+    body: Option<&serde_json::Value>,
+) -> Result<serde_json::Value, String> {
+    let url = build_trello_url(client_config, endpoint);
+    trello_http_call(method, &url, body)
 }
 
 #[cfg(test)]

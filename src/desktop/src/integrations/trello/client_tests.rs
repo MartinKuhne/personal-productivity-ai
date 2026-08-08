@@ -7,15 +7,15 @@
 //!
 //! Covers:
 //!  * URL shape (the API-key + token query string)
-//!  * the `trello_request` happy path against a local mock HTTP server
-//!  * the `trello_request` error path (non-2xx status)
+//!  * the `trello_http_call` happy path against a local `wiremock` server
+//!  * the `trello_http_call` error path (non-2xx status)
 //!  * JSON parse failure on a 2xx body
 //!  * transport failure (connection refused) on an unreachable port
 
 use super::*;
 use crate::config::TrelloClient;
-use std::io::{Read, Write};
-use std::net::TcpListener;
+use wiremock::matchers::{any, method, path};
+use wiremock::{Mock, MockServer, ResponseTemplate};
 
 fn make_client() -> TrelloClient {
     TrelloClient {
@@ -68,53 +68,59 @@ fn build_url_handles_trailing_slash_on_endpoint() {
     assert!(url.contains("/1/foo/?"));
 }
 
-/// Spin up a one-shot HTTP/1.1 mock server that returns a canned
-/// response for the first request, then tears down the listener.
-fn spawn_mock_server(status_line: &str, content_type: &str, body: &str) -> String {
-    // Some CI networks intercept 127.0.0.1 — opt out of any proxy
-    // for the test process so reqwest talks to the loopback listener
-    // directly.
-    unsafe {
-        std::env::set_var("NO_PROXY", "127.0.0.1");
-    }
-    let listener = TcpListener::bind("127.0.0.1:0").expect("bind 127.0.0.1:0");
-    let port = listener.local_addr().unwrap().port();
-    let response = format!(
-        "HTTP/1.1 {status_line}\r\nContent-Type: {content_type}\r\nConnection: close\r\nContent-Length: {}\r\n\r\n{}",
-        body.len(),
-        body
-    );
-    std::thread::spawn(move || {
-        if let Ok((mut stream, _)) = listener.accept() {
-            let mut buf = [0u8; 4096];
-            let _ = stream.read(&mut buf);
-            let _ = stream.write_all(response.as_bytes());
-            let _ = stream.flush();
-        }
-    });
-    format!("http://127.0.0.1:{port}")
+/// A wiremock server whose backing tokio runtime lives as long as
+/// this guard. The runtime owns the hyper task that serves mock
+/// responses — drop the guard and the server stops. The `server`
+/// field is also returned so tests can register stubs *after*
+/// construction, and `uri()` is the base URL the test should hit.
+struct WiremockGuard {
+    server: MockServer,
+    _runtime: tokio::runtime::Runtime,
 }
 
-/// Like `spawn_mock_server` but always returns HTTP 200. Uses a
-/// `/healthz`-style contract so a small helper covers most cases.
-fn spawn_json_server(body: &str) -> String {
-    spawn_mock_server("200 OK", "application/json", body)
+impl WiremockGuard {
+    fn start() -> Self {
+        let runtime = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .expect("build tokio runtime");
+        // `block_on` enters the runtime context for the duration of the
+        // future; no need for an explicit `runtime.enter()` guard.
+        let server = runtime.block_on(MockServer::start());
+        Self {
+            server,
+            _runtime: runtime,
+        }
+    }
+
+    fn uri(&self) -> String {
+        self.server.uri()
+    }
+
+    fn register(&self, mock: Mock) {
+        self._runtime.block_on(self.server.register(mock));
+    }
 }
 
 #[test]
-fn trello_request_returns_parsed_json_on_2xx() {
-    let mock = spawn_json_server(r#"[{"id":"board-1","name":"Personal"}]"#);
-    let client = reqwest::blocking::Client::new();
+fn trello_http_call_returns_parsed_json_on_2xx() {
+    let mock = WiremockGuard::start();
+    mock.register(
+        Mock::given(method("GET"))
+            .and(path("/1/members/me/boards"))
+            .respond_with(
+                ResponseTemplate::new(200)
+                    .insert_header("content-type", "application/json")
+                    .set_body_string(r#"[{"id":"board-1","name":"Personal"}]"#),
+            ),
+    );
 
-    // Build the URL the same way the production helper does, but
-    // pointing at our mock server.
-    let url = mock + "/1/members/me/boards?key=test-api-key&token=test-token";
-    let res: serde_json::Value = client
-        .get(url)
-        .send()
-        .expect("send")
-        .json()
-        .expect("parse");
+    let url = format!(
+        "{}/1/members/me/boards?key=test-api-key&token=test-token",
+        mock.uri()
+    );
+    let res = trello_http_call(reqwest::Method::GET, &url, None).expect("trello_http_call");
+
     let arr = res.as_array().expect("array");
     assert_eq!(arr.len(), 1);
     assert_eq!(arr[0]["id"], "board-1");
@@ -122,45 +128,77 @@ fn trello_request_returns_parsed_json_on_2xx() {
 }
 
 #[test]
-fn trello_request_returns_error_string_on_non_2xx() {
-    // The production `trello_request` would error here because of the
-    // non-200 status. We assert the error contains the status line so
-    // the operator can diagnose which endpoint failed.
-    let mock = spawn_mock_server("401 Unauthorized", "text/plain", "invalid token");
-    let res = reqwest::blocking::Client::new()
-        .get(format!("{mock}/1/members/me/boards?key=k&token=t"))
-        .send()
-        .unwrap();
-    assert!(!res.status().is_success());
-    assert_eq!(res.status().as_u16(), 401);
-    let body = res.text().unwrap();
-    assert_eq!(body, "invalid token");
+fn trello_http_call_returns_error_string_on_non_2xx() {
+    // The production `trello_http_call` returns an `Err` here because of
+    // the non-200 status. We assert the error string contains the status
+    // and the response body so the operator can diagnose which endpoint
+    // failed.
+    let mock = WiremockGuard::start();
+    mock.register(
+        Mock::given(any()).respond_with(
+            ResponseTemplate::new(401)
+                .insert_header("content-type", "text/plain")
+                .set_body_string("invalid token"),
+        ),
+    );
+
+    let url = format!("{}/1/members/me/boards?key=k&token=t", mock.uri());
+    let err =
+        trello_http_call(reqwest::Method::GET, &url, None).expect_err("expected non-2xx to fail");
+    assert!(
+        err.contains("401"),
+        "error should mention the 401 status, got: {err}"
+    );
+    assert!(
+        err.contains("invalid token"),
+        "error should include the response body, got: {err}"
+    );
 }
 
 #[test]
-fn trello_request_returns_error_string_on_invalid_json_body() {
-    let mock = spawn_json_server("not json at all");
-    let res = reqwest::blocking::Client::new()
-        .get(format!("{mock}/1/cards?key=k&token=t"))
-        .send()
-        .unwrap();
-    assert!(res.status().is_success());
-    // Round-trip the body the same way `trello_request` does:
+fn trello_http_call_returns_error_string_on_invalid_json_body() {
+    // Round-trip the body the same way `trello_http_call` does:
     // 2xx + non-JSON body should fail at the `serde_json::from_str`
     // step.
-    let body = res.text().unwrap();
-    let parsed: Result<serde_json::Value, _> = serde_json::from_str(&body);
-    assert!(parsed.is_err(), "expected JSON parse failure on {body:?}");
+    let mock = WiremockGuard::start();
+    mock.register(
+        Mock::given(any()).respond_with(
+            ResponseTemplate::new(200)
+                .insert_header("content-type", "application/json")
+                .set_body_string("not json at all"),
+        ),
+    );
+
+    let url = format!("{}/1/cards?key=k&token=t", mock.uri());
+    let err = trello_http_call(reqwest::Method::GET, &url, None)
+        .expect_err("expected JSON parse failure");
+    // Production wraps the `serde_json::Error` via `Display`; we just
+    // assert a non-empty error so the test does not become a moving
+    // target across serde_json versions (the exact wording changes
+    // between releases).
+    assert!(
+        !err.is_empty(),
+        "expected non-empty error, got empty string"
+    );
 }
 
 #[test]
-fn trello_request_returns_error_string_on_connection_refused() {
+fn trello_http_call_returns_error_string_on_connection_refused() {
     // Bind a listener, capture its port, drop it. The port is now
     // unbound so the next connect() should refuse.
-    let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+    let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
     let port = listener.local_addr().unwrap().port();
     drop(listener);
     let url = format!("http://127.0.0.1:{port}/1/cards?key=k&token=t");
-    let res = reqwest::blocking::Client::new().get(&url).send();
-    assert!(res.is_err(), "expected connect to fail on {url}");
+    let err =
+        trello_http_call(reqwest::Method::GET, &url, None).expect_err("expected connect to fail");
+    // reqwest surfaces connection refused as a `reqwest::Error` whose
+    // Display string contains "connection refused" (or similar) on
+    // every platform we ship. We only assert non-empty so the test
+    // does not become a moving target across rustls/native-tls
+    // versions.
+    assert!(
+        !err.is_empty(),
+        "expected non-empty error, got empty string"
+    );
 }

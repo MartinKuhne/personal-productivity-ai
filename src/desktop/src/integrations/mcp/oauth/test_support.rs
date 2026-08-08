@@ -1,19 +1,27 @@
 //! Test-only HTTP server double for the MCP OAuth integration tests.
 //!
-//! Compiled only under `cfg(test)`. Serves Protected Resource
-//! Metadata, Authorization Server Metadata, and a token endpoint
-//! (plus any caller-supplied routes) and records every request so
-//! tests can assert on the exact bytes the client sent. The server
-//! binds an ephemeral localhost port so tests are deterministic and
-//! need no network access.
+//! Compiled only under `cfg(test)`. Backed by [`wiremock`] but
+//! exposed through a small, sync-friendly API so the existing
+//! `MockHttpServer::start(closure)` shape stays usable from plain
+//! `#[test]` functions. The wiremock library does the actual HTTP
+//! serving, request recording, and content-length handling under
+//! the hood; the wrapper here just translates a closure-style
+//! responder into a wiremock catch-all stub and keeps the request
+//! log accessible without `.await`.
+//!
+//! Every request the mock receives is recorded in
+//! [`MockHttpServer::recorded`]; tests can assert on the exact
+//! bytes the client sent without having to reach for a runtime.
 #![cfg(test)]
 
 use std::collections::HashMap;
-use std::io::{BufRead, BufReader, Read, Write};
-use std::net::{TcpListener, TcpStream};
 use std::sync::{Arc, Mutex};
 
-/// One captured HTTP request.
+use wiremock::http::HeaderMap;
+use wiremock::{Mock, MockServer, ResponseTemplate};
+
+/// One captured HTTP request, recorded by the mock for the test's
+/// own assertions.
 #[derive(Debug, Clone)]
 pub struct RecordedRequest {
     pub method: String,
@@ -59,129 +67,108 @@ impl MockResponse {
     }
 }
 
-/// In-memory mock HTTP server.
-///
-/// Handles one request per accepted connection on a background
-/// thread. `respond` receives each recorded request plus the mock's
-/// `origin` (e.g. `http://127.0.0.1:41234`) and returns the response
-/// to send. Every request is captured in [`MockHttpServer::recorded`]
-/// so tests can assert on the client's behaviour.
+impl MockResponse {
+    /// Convert a [`MockResponse`] into a wiremock [`ResponseTemplate`].
+    /// Parses the standard `HTTP/1.1 <code> <reason>` status line.
+    fn into_response_template(self) -> ResponseTemplate {
+        let code = parse_status_code(self.status).unwrap_or(200);
+        let mut tpl = ResponseTemplate::new(code).set_body_string(self.body);
+        if !self.content_type.is_empty() {
+            tpl = tpl.insert_header("Content-Type", self.content_type);
+        }
+        for (name, value) in self.extra_headers {
+            tpl = tpl.append_header(name, value);
+        }
+        tpl
+    }
+}
+
+/// Parse the integer status code out of a standard HTTP reason
+/// line, e.g. `"HTTP/1.1 401 Unauthorized"` → `401`. Returns `None`
+/// if the line is malformed; callers fall back to 200 in that case.
+fn parse_status_code(status_line: &str) -> Option<u16> {
+    // Either the full `HTTP/1.1 401 Unauthorized` form or just `401`.
+    let digits = status_line
+        .split_whitespace()
+        .find_map(|tok| tok.parse::<u16>().ok())?;
+    Some(digits)
+}
+
+/// In-memory mock HTTP server. The wrapper owns a small tokio
+/// runtime and a wiremock [`MockServer`] that does the actual
+/// serving. `recorded` exposes the captured requests without
+/// `.await`.
 pub struct MockHttpServer {
     /// Base URL of the mock, e.g. `http://127.0.0.1:41234`.
     pub origin: String,
     /// Every request the mock received, in order.
     pub recorded: Arc<Mutex<Vec<RecordedRequest>>>,
-    handle: Option<std::thread::JoinHandle<()>>,
+    _runtime: tokio::runtime::Runtime,
+    _server: MockServer,
 }
 
 impl MockHttpServer {
-    /// Start a mock server with the given responder.
+    /// Start a mock server with the given responder. The responder
+    /// is called for every request and returns the response to send.
     pub fn start<F>(respond: F) -> Self
     where
         F: Fn(&RecordedRequest, &str) -> MockResponse + Send + Sync + 'static,
     {
-        let listener = TcpListener::bind("127.0.0.1:0").expect("bind mock server");
-        let origin = format!(
-            "http://127.0.0.1:{}",
-            listener
-                .local_addr()
-                .expect("mock server local addr")
-                .port()
-        );
+        let runtime = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .expect("build tokio runtime for mock server");
+        let _enter = runtime.enter();
+
         let recorded: Arc<Mutex<Vec<RecordedRequest>>> = Arc::new(Mutex::new(Vec::new()));
-        let respond = Arc::new(respond);
-        let recorded_thread = Arc::clone(&recorded);
-        let respond_thread = Arc::clone(&respond);
-        let origin_thread = origin.clone();
-        let handle = std::thread::spawn(move || {
-            for stream in listener.incoming() {
-                let Ok(mut stream) = stream else {
-                    continue;
-                };
-                let recorded = Arc::clone(&recorded_thread);
-                let respond = Arc::clone(&respond_thread);
-                let origin = origin_thread.clone();
-                std::thread::spawn(move || {
-                    if let Some(req) = read_request(&mut stream) {
-                        recorded.lock().expect("lock recorded").push(req.clone());
-                        let response = respond(&req, &origin);
-                        write_response(&mut stream, &response);
-                    }
-                });
-            }
-        });
+        let server = runtime.block_on(MockServer::start());
+        let origin = server.uri();
+
+        // Catch-all stub: every request is matched, recorded, and
+        // answered by the caller's closure.
+        let recorded_for_stub = Arc::clone(&recorded);
+        let origin_for_stub = origin.clone();
+        let respond_for_stub = Arc::new(respond);
+        let stub =
+            Mock::given(wiremock::matchers::any()).respond_with(move |req: &wiremock::Request| {
+                let recorded = RecordedRequest::from_wiremock(req);
+                recorded_for_stub
+                    .lock()
+                    .expect("lock recorded")
+                    .push(recorded.clone());
+                let response = (respond_for_stub)(&recorded, &origin_for_stub);
+                response.into_response_template()
+            });
+        runtime.block_on(server.register(stub));
+
         Self {
             origin,
             recorded,
-            handle: Some(handle),
+            _runtime: runtime,
+            _server: server,
         }
     }
 }
 
-impl Drop for MockHttpServer {
-    fn drop(&mut self) {
-        if let Some(h) = self.handle.take() {
-            let _ = h.join();
-        }
-    }
-}
-
-fn read_request(stream: &mut TcpStream) -> Option<RecordedRequest> {
-    let mut reader = BufReader::new(stream.try_clone().ok()?);
-    let mut request_line = String::new();
-    reader.read_line(&mut request_line).ok()?;
-    if request_line.trim().is_empty() {
-        return None;
-    }
-    let mut parts = request_line.split_whitespace();
-    let method = parts.next()?.to_owned();
-    let path = parts.next()?.to_owned();
-    let mut headers = HashMap::new();
-    let mut content_length = 0usize;
-    loop {
-        let mut line = String::new();
-        if reader.read_line(&mut line).ok()? == 0 {
-            break;
-        }
-        let trimmed = line.trim_end();
-        if trimmed.is_empty() {
-            break;
-        }
-        if let Some((key, value)) = trimmed.split_once(':') {
-            let key = key.trim().to_ascii_lowercase();
-            let value = value.trim().to_owned();
-            if key == "content-length" {
-                content_length = value.parse().unwrap_or(0);
-            }
+impl RecordedRequest {
+    /// Build a [`RecordedRequest`] from a wiremock request. Header
+    /// keys are lowercased to match the previous hand-rolled helper
+    /// (and HTTP's case-insensitive reality).
+    fn from_wiremock(req: &wiremock::Request) -> Self {
+        let mut headers = HashMap::new();
+        for (name, value) in HeaderMap::iter(&req.headers) {
+            let key = name.as_str().to_ascii_lowercase();
+            let value = value
+                .to_str()
+                .unwrap_or("<non-utf8 header value>")
+                .to_string();
             headers.insert(key, value);
         }
+        Self {
+            method: req.method.as_str().to_string(),
+            path: req.url.path().to_string(),
+            headers,
+            body: String::from_utf8_lossy(&req.body).into_owned(),
+        }
     }
-    let mut body = String::new();
-    if content_length > 0 {
-        let mut buf = vec![0u8; content_length];
-        reader.read_exact(&mut buf).ok()?;
-        body = String::from_utf8_lossy(&buf).into_owned();
-    }
-    Some(RecordedRequest {
-        method,
-        path,
-        headers,
-        body,
-    })
-}
-
-fn write_response(stream: &mut TcpStream, response: &MockResponse) {
-    let mut head = format!(
-        "{}\r\nContent-Type: {}\r\nContent-Length: {}\r\nConnection: close\r\n",
-        response.status,
-        response.content_type,
-        response.body.len()
-    );
-    for (name, value) in &response.extra_headers {
-        head.push_str(&format!("{name}: {value}\r\n"));
-    }
-    head.push_str("\r\n");
-    let _ = stream.write_all(head.as_bytes());
-    let _ = stream.write_all(response.body.as_bytes());
-    let _ = stream.flush();
 }

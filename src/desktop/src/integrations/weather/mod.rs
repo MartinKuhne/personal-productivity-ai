@@ -8,29 +8,114 @@
 
 use serde_json::Value;
 
-fn geocode(location: &str) -> Result<(f64, f64), String> {
+/// Production upstream base URLs. Tests swap in wiremock URIs via
+/// [`WeatherConfig`].
+const NOMINATIM_BASE: &str = "https://nominatim.openstreetmap.org";
+const NWS_BASE: &str = "https://api.weather.gov";
+
+/// Per-call override of the upstream URLs.
+///
+/// `tool_get_weather` (the public entry point) builds one of these
+/// from the production constants so production callers don't see
+/// this type. Tests construct a `WeatherConfig` whose bases point
+/// at a `wiremock::MockServer` and pass it to
+/// [`tool_get_weather_with`].
+#[derive(Debug, Clone)]
+pub struct WeatherConfig {
+    /// Base URL for the Nominatim geocoder (no trailing slash). In
+    /// production this is `https://nominatim.openstreetmap.org`.
+    pub nominatim_base: String,
+    /// Base URL for the NWS `points` and `forecast` endpoints (no
+    /// trailing slash). In production this is
+    /// `https://api.weather.gov`.
+    pub nws_base: String,
+}
+
+impl Default for WeatherConfig {
+    fn default() -> Self {
+        Self {
+            nominatim_base: NOMINATIM_BASE.to_string(),
+            nws_base: NWS_BASE.to_string(),
+        }
+    }
+}
+
+/// Build the URL for a Nominatim geocode search.
+///
+/// `location` is the user-supplied query — either `"lat,lon"` (used
+/// directly), a 5-digit US zip (suffixed with `" US"`), or any free
+/// text. Spaces are percent-encoded; everything else passes through
+/// as-is. Extracted as `pub(crate)` so tests can sanity-check the
+/// URL shape against a wiremock stub.
+pub(crate) fn geocode_url(base: &str, location: &str) -> String {
+    let query = if location.len() == 5 && location.chars().all(|c| c.is_ascii_digit()) {
+        format!("{} US", location)
+    } else {
+        location.to_string()
+    };
+    // We must manually URL encode the query. But since we don't have url-encoding crate imported by default,
+    // let's do a basic replace for spaces.
+    let query_encoded = query.replace(" ", "%20");
+    format!("{}/search?q={}&format=json&limit=1", base, query_encoded)
+}
+
+/// Build the URL for the NWS `points` lookup. Returns the
+/// `{base}/points/{lat},{lon}` form the NWS API expects.
+pub(crate) fn points_url(base: &str, lat: f64, lon: f64) -> String {
+    format!("{}/points/{},{}", base, lat, lon)
+}
+
+/// Parse a `(lat, lon)` from a Nominatim search response body.
+///
+/// `body` is the JSON array Nominatim returns; we take the first
+/// element and extract `lat`/`lon` as strings (Nominatim returns
+/// them as strings, not numbers).
+fn parse_nominatim_first(body: &Value) -> Result<(f64, f64), String> {
+    let first = body.as_array().and_then(|a| a.first()).ok_or_else(|| {
+        tracing::error!(
+            name = "tool.weather.geocode.not_found",
+            "Nominatim geocoding API returned no results. Operator should verify location name."
+        );
+        "Location not found".to_string()
+    })?;
+
+    let lat = first
+        .get("lat")
+        .and_then(|v| v.as_str())
+        .and_then(|s| s.parse::<f64>().ok())
+        .ok_or_else(|| {
+            tracing::error!(
+                name = "tool.weather.geocode.missing_lat",
+                "Nominatim geocoding API response missing latitude."
+            );
+            "Missing lat".to_string()
+        })?;
+    let lon = first
+        .get("lon")
+        .and_then(|v| v.as_str())
+        .and_then(|s| s.parse::<f64>().ok())
+        .ok_or_else(|| {
+            tracing::error!(
+                name = "tool.weather.geocode.missing_lon",
+                "Nominatim geocoding API response missing longitude."
+            );
+            "Missing lon".to_string()
+        })?;
+
+    Ok((lat, lon))
+}
+
+/// Geocode a free-text location string to `(lat, lon)`. If the input
+/// is already `"lat,lon"` it short-circuits; otherwise it hits the
+/// Nominatim search endpoint at `cfg.nominatim_base`.
+fn geocode(cfg: &WeatherConfig, location: &str) -> Result<(f64, f64), String> {
     if let Some((lat_str, lon_str)) = location.split_once(',')
         && let (Ok(lat), Ok(lon)) = (lat_str.trim().parse::<f64>(), lon_str.trim().parse::<f64>())
     {
         return Ok((lat, lon));
     }
 
-    let query = if location.len() == 5 && location.chars().all(|c| c.is_ascii_digit()) {
-        format!("{} US", location)
-    } else {
-        location.to_string()
-    };
-
-    // We must manually URL encode the query. But since we don't have url-encoding crate imported by default,
-    // let's do a basic replace for spaces.
-    let query_encoded = query.replace(" ", "%20");
-    let url = format!(
-        "https://nominatim.openstreetmap.org/search?q={}&format=json&limit=1",
-        query_encoded
-    );
-
-    #[cfg(test)]
-    let url = std::env::var("MOCK_NOMINATIM_URL").unwrap_or(url);
+    let url = geocode_url(&cfg.nominatim_base, location);
 
     let req = match reqwest::blocking::Client::new()
         .get(&url)
@@ -52,36 +137,36 @@ fn geocode(location: &str) -> Result<(f64, f64), String> {
         }
     };
 
-    let first = json.as_array()
-        .and_then(|a| a.first())
-        .ok_or_else(|| {
-            tracing::error!(name = "tool.weather.geocode.not_found", location = %location, "Nominatim geocoding API returned no results. Operator should verify location name.");
-            "Location not found".to_string()
-        })?;
-
-    let lat = first.get("lat").and_then(|v| v.as_str()).and_then(|s| s.parse::<f64>().ok()).ok_or_else(|| {
-        tracing::error!(name = "tool.weather.geocode.missing_lat", location = %location, "Nominatim geocoding API response missing latitude.");
-        "Missing lat".to_string()
-    })?;
-    let lon = first.get("lon").and_then(|v| v.as_str()).and_then(|s| s.parse::<f64>().ok()).ok_or_else(|| {
-        tracing::error!(name = "tool.weather.geocode.missing_lon", location = %location, "Nominatim geocoding API response missing longitude.");
-        "Missing lon".to_string()
-    })?;
-
-    Ok((lat, lon))
+    parse_nominatim_first(&json)
 }
 
+/// Public entry point — geocodes `location`, then walks the NWS
+/// `points` → `forecast` chain, then filters forecast periods by
+/// `date_range`. Returns the DTO consumed by the LLM-tool layer.
+///
+/// Thin wrapper over [`tool_get_weather_with`] that uses the
+/// production upstream URLs.
 pub fn tool_get_weather(
+    location: &str,
+    date_range: Option<&str>,
+) -> Result<crate::agent::tools::dtos::GetWeatherResponse, String> {
+    tool_get_weather_with(&WeatherConfig::default(), location, date_range)
+}
+
+/// Like [`tool_get_weather`] but with a caller-supplied
+/// [`WeatherConfig`]. Lets tests drive the call chain against a
+/// `wiremock::MockServer` without monkey-patching production
+/// constants or env vars.
+pub fn tool_get_weather_with(
+    cfg: &WeatherConfig,
     location: &str,
     date_range: Option<&str>,
 ) -> Result<crate::agent::tools::dtos::GetWeatherResponse, String> {
     // Reference: https://www.weather.gov/documentation/services-web-api
 
-    let (lat, lon) = geocode(location)?;
+    let (lat, lon) = geocode(cfg, location)?;
 
-    let points_url = format!("https://api.weather.gov/points/{},{}", lat, lon);
-    #[cfg(test)]
-    let points_url = std::env::var("MOCK_NWS_POINTS_URL").unwrap_or(points_url);
+    let points_url = points_url(&cfg.nws_base, lat, lon);
 
     let req = match reqwest::blocking::Client::new()
         .get(&points_url)
@@ -103,18 +188,14 @@ pub fn tool_get_weather(
         }
     };
 
-    let forecast_url_str = match json
+    let forecast_url = match json
         .get("properties")
         .and_then(|p| p.get("forecast"))
         .and_then(|f| f.as_str())
     {
-        Some(url) => url,
+        Some(url) => url.to_string(),
         None => return Err("Could not find forecast URL in NWS response".to_string()),
     };
-
-    let forecast_url = forecast_url_str.to_string();
-    #[cfg(test)]
-    let forecast_url = std::env::var("MOCK_NWS_FORECAST_URL").unwrap_or(forecast_url);
 
     let req = match reqwest::blocking::Client::new()
         .get(&forecast_url)
@@ -203,130 +284,215 @@ pub fn tool_get_weather(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use wiremock::matchers::{any, method, path};
+    use wiremock::{Mock, MockServer, ResponseTemplate};
 
-    fn spawn_mock_server(body: impl Into<String>) -> String {
-        unsafe {
-            std::env::set_var("NO_PROXY", "127.0.0.1");
-        }
-        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
-        let port = listener.local_addr().unwrap().port();
-        let body_str = body.into();
-        let response_str = format!(
-            "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nConnection: close\r\nContent-Length: {}\r\n\r\n{}",
-            body_str.len(),
-            body_str
-        );
-        std::thread::spawn(move || {
-            for mut stream in listener.incoming().flatten() {
-                use std::io::{Read, Write};
-                let mut buf = [0; 4096];
-                let _ = stream.read(&mut buf);
-                let _ = stream.write_all(response_str.as_bytes());
-                std::thread::sleep(std::time::Duration::from_millis(200));
+    /// Same shape as the Trello/DAV tests' `WiremockGuard` — a
+    /// tokio runtime that owns the hyper task serving wiremock
+    /// responses. Drop the guard and the server stops.
+    struct WiremockGuard {
+        server: MockServer,
+        _runtime: tokio::runtime::Runtime,
+    }
+
+    impl WiremockGuard {
+        fn start() -> Self {
+            let runtime = tokio::runtime::Builder::new_current_thread()
+                .enable_all()
+                .build()
+                .expect("build tokio runtime");
+            let server = runtime.block_on(MockServer::start());
+            Self {
+                server,
+                _runtime: runtime,
             }
-        });
-        format!("http://127.0.0.1:{}", port)
+        }
+
+        fn uri(&self) -> String {
+            self.server.uri()
+        }
+
+        fn register(&self, mock: Mock) {
+            self._runtime.block_on(self.server.register(mock));
+        }
+    }
+
+    // --- geocode_url tests ---
+
+    #[test]
+    fn geocode_url_uses_search_endpoint() {
+        let url = geocode_url("https://nominatim.example.com", "Seattle, WA");
+        assert!(
+            url.starts_with("https://nominatim.example.com/search?"),
+            "{url}"
+        );
+        assert!(url.contains("format=json"), "{url}");
+        assert!(url.contains("limit=1"), "{url}");
     }
 
     #[test]
-    fn test_weather_module_all() {
-        rustls::crypto::ring::default_provider()
-            .install_default()
-            .ok();
+    fn geocode_url_percent_encodes_spaces() {
+        let url = geocode_url("https://nominatim.example.com", "New York");
+        assert!(url.contains("New%20York"), "{url}");
+    }
 
-        // test_geocode_direct_coords
-        let (lat, lon) = geocode("47.6, -122.3").unwrap();
+    #[test]
+    fn geocode_url_appends_us_for_5_digit_zip() {
+        let url = geocode_url("https://nominatim.example.com", "98101");
+        assert!(url.contains("98101%20US"), "{url}");
+    }
+
+    // --- points_url tests ---
+
+    #[test]
+    fn points_url_includes_lat_lon() {
+        let url = points_url("https://api.weather.example.com", 47.6, -122.3);
+        assert_eq!(url, "https://api.weather.example.com/points/47.6,-122.3");
+    }
+
+    // --- geocode tests ---
+
+    #[test]
+    fn geocode_short_circuits_on_lat_lon_string() {
+        let cfg = WeatherConfig::default();
+        let (lat, lon) = geocode(&cfg, "47.6, -122.3").unwrap();
         assert_eq!(lat, 47.6);
         assert_eq!(lon, -122.3);
+    }
 
-        // test_geocode_success
-        let mock_resp_success = serde_json::json!([{"lat": "47.6062", "lon": "-122.3321"}]);
-        let url_success = spawn_mock_server(mock_resp_success.to_string());
-        unsafe {
-            std::env::set_var("MOCK_NOMINATIM_URL", &url_success);
-        }
-        let (lat, lon) = geocode("Seattle, WA").unwrap();
-        assert_eq!(lat, 47.6062);
-        assert_eq!(lon, -122.3321);
-
-        // test_geocode_empty_results
-        let mock_resp_empty = serde_json::json!([]);
-        let url_empty = spawn_mock_server(mock_resp_empty.to_string());
-        unsafe {
-            std::env::set_var("MOCK_NOMINATIM_URL", &url_empty);
-        }
-        let result_empty = geocode("UnknownPlace");
-        assert!(result_empty.is_err());
-        assert_eq!(result_empty.unwrap_err(), "Location not found");
-
-        // test_geocode_invalid_json
-        let url_invalid = spawn_mock_server("invalid json");
-        unsafe {
-            std::env::set_var("MOCK_NOMINATIM_URL", &url_invalid);
-        }
-        let result_invalid = geocode("Seattle, WA");
-        assert!(result_invalid.is_err());
-        assert!(
-            result_invalid
-                .unwrap_err()
-                .starts_with("Nominatim JSON error")
+    #[test]
+    fn geocode_returns_lat_lon_on_success() {
+        let mock = WiremockGuard::start();
+        mock.register(
+            Mock::given(method("GET"))
+                .and(path("/search"))
+                .respond_with(
+                    ResponseTemplate::new(200)
+                        .insert_header("content-type", "application/json")
+                        .set_body_string(r#"[{"lat": "47.6062", "lon": "-122.3321"}]"#),
+                ),
         );
 
-        // test_tool_get_weather_success
-        let nom_resp = serde_json::json!([{"lat": "47.6062", "lon": "-122.3321"}]);
-        let nom_url = spawn_mock_server(nom_resp.to_string());
-        unsafe {
-            std::env::set_var("MOCK_NOMINATIM_URL", &nom_url);
-        }
+        let cfg = WeatherConfig {
+            nominatim_base: mock.uri(),
+            nws_base: WeatherConfig::default().nws_base,
+        };
+        let (lat, lon) = geocode(&cfg, "Seattle, WA").unwrap();
+        assert_eq!(lat, 47.6062);
+        assert_eq!(lon, -122.3321);
+    }
 
-        let pts_resp = serde_json::json!({
-            "properties": {
-                "forecast": "http://example.com/forecast"
-            }
-        });
-        let pts_url = spawn_mock_server(pts_resp.to_string());
-        unsafe {
-            std::env::set_var("MOCK_NWS_POINTS_URL", &pts_url);
-        }
+    #[test]
+    fn geocode_errors_on_empty_results() {
+        let mock = WiremockGuard::start();
+        mock.register(
+            Mock::given(any()).respond_with(
+                ResponseTemplate::new(200)
+                    .insert_header("content-type", "application/json")
+                    .set_body_string("[]"),
+            ),
+        );
 
-        let fc_resp = serde_json::json!({
-            "properties": {
-                "periods": [
-                    {
-                        "startTime": "2026-07-19T10:00:00Z",
-                        "name": "Today",
-                        "temperature": 75,
-                        "temperatureUnit": "F",
-                        "detailedForecast": "Sunny"
-                    }
-                ]
-            }
-        });
-        let fc_url = spawn_mock_server(fc_resp.to_string());
-        unsafe {
-            std::env::set_var("MOCK_NWS_FORECAST_URL", &fc_url);
-        }
+        let cfg = WeatherConfig {
+            nominatim_base: mock.uri(),
+            nws_base: WeatherConfig::default().nws_base,
+        };
+        let err = geocode(&cfg, "UnknownPlace").unwrap_err();
+        assert_eq!(err, "Location not found");
+    }
 
-        let result = tool_get_weather("Seattle, WA", None).unwrap();
-        assert!(result.result.contains("Today"));
-        assert!(result.result.contains("75 F"));
-        assert!(result.result.contains("Sunny"));
+    #[test]
+    fn geocode_errors_on_invalid_json() {
+        let mock = WiremockGuard::start();
+        mock.register(
+            Mock::given(any()).respond_with(
+                ResponseTemplate::new(200)
+                    .insert_header("content-type", "application/json")
+                    .set_body_string("invalid json"),
+            ),
+        );
 
-        let result2 = tool_get_weather("Seattle, WA", Some("2026-07-19")).unwrap();
-        assert!(result2.result.contains("Today"));
+        let cfg = WeatherConfig {
+            nominatim_base: mock.uri(),
+            nws_base: WeatherConfig::default().nws_base,
+        };
+        let err = geocode(&cfg, "Seattle, WA").unwrap_err();
+        assert!(err.starts_with("Nominatim JSON error"), "got: {err}");
+    }
 
-        let result3 = tool_get_weather("Seattle, WA", Some("2026-07-20"));
-        assert!(result3.is_err());
-        assert!(result3.unwrap_err().contains("No weather data found"));
+    // --- tool_get_weather_with end-to-end test ---
 
-        unsafe {
-            std::env::remove_var("MOCK_NOMINATIM_URL");
-        }
-        unsafe {
-            std::env::remove_var("MOCK_NWS_POINTS_URL");
-        }
-        unsafe {
-            std::env::remove_var("MOCK_NWS_FORECAST_URL");
-        }
+    #[test]
+    fn tool_get_weather_chains_geocode_points_forecast() {
+        let mock = WiremockGuard::start();
+
+        // The NWS points response references the forecast URL — point
+        // that URL at the wiremock server so the next call lands back
+        // here.
+        let points_body = format!(
+            r#"{{"properties": {{"forecast": "{}/forecast"}}}}"#,
+            mock.uri()
+        );
+
+        // 1. Nominatim geocode.
+        mock.register(
+            Mock::given(method("GET"))
+                .and(path("/search"))
+                .respond_with(
+                    ResponseTemplate::new(200)
+                        .insert_header("content-type", "application/json")
+                        .set_body_string(r#"[{"lat": "47.6062", "lon": "-122.3321"}]"#),
+                ),
+        );
+
+        // 2. NWS points — returns the (mocked) forecast URL.
+        mock.register(
+            Mock::given(method("GET"))
+                .and(path("/points/47.6062,-122.3321"))
+                .respond_with(
+                    ResponseTemplate::new(200)
+                        .insert_header("content-type", "application/json")
+                        .set_body_string(points_body),
+                ),
+        );
+
+        // 3. Forecast endpoint.
+        mock.register(
+            Mock::given(method("GET"))
+                .and(path("/forecast"))
+                .respond_with(
+                    ResponseTemplate::new(200)
+                        .insert_header("content-type", "application/json")
+                        .set_body_string(
+                            r#"{"properties": {"periods": [
+                                {
+                                    "startTime": "2026-07-19T10:00:00Z",
+                                    "name": "Today",
+                                    "temperature": 75,
+                                    "temperatureUnit": "F",
+                                    "detailedForecast": "Sunny"
+                                }
+                            ]}}"#,
+                        ),
+                ),
+        );
+
+        let cfg = WeatherConfig {
+            nominatim_base: mock.uri(),
+            nws_base: mock.uri(),
+        };
+
+        let result = tool_get_weather_with(&cfg, "Seattle, WA", None).unwrap();
+        assert!(result.result.contains("Today"), "got: {}", result.result);
+        assert!(result.result.contains("75 F"), "got: {}", result.result);
+        assert!(result.result.contains("Sunny"), "got: {}", result.result);
+
+        // date-range filter — same day should still match.
+        let result2 = tool_get_weather_with(&cfg, "Seattle, WA", Some("2026-07-19")).unwrap();
+        assert!(result2.result.contains("Today"), "got: {}", result2.result);
+
+        // date-range filter — different day returns the "no data" error.
+        let err = tool_get_weather_with(&cfg, "Seattle, WA", Some("2026-07-20")).unwrap_err();
+        assert!(err.contains("No weather data found"), "got: {err}");
     }
 }
