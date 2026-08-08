@@ -2,60 +2,27 @@
 
 When working on this codebase, all AI agents must adhere strictly to the following guidelines.
 
-These are the **repo-wide** principles that apply to every component. Each
-component also has its own `AGENTS.md` with rules specific to that directory;
-always read the nearest one before editing. See
-[Component-specific rules](#component-specific-rules) below for the index.
+## 1. Development process
+- Break tasks into logical, contained and testable steps. Confirm tests pass between steps.
+- When the current branch is 'main' you MUST create a branch before changing ANY files.
+- You MUST name the branch feature/<change>, bugfix/<change> or chore/<change>.
+- Compile and unit test MUST succeed before starting any work.
+- Quality gates MUST pass to call a task complete.
+- You SHOULD assess if the existing codebase is suitable for the modification you are being asked to make. You SHOULD suggest to the user any refactorings needed before implementation can start.
+- You MUST refuse a task if the requirements or context are unclear. You should ask clarifying questions.
 
-## 1. Small Iterations
-- Work in small, manageable iterations.
-- Do not attempt sweeping, massive refactors in a single pass.
-- Break tasks into logical, contained and testable steps, implement a change, and verify it before moving to the next step.
+## 2. Test all changes
+- All changes MUST be covered by unit tests.
+- All changes SHOULD be covered by integration tests.
+- When asked to fix a bug, create a failing test first. The test MUST reproduce the issue. Then make the code change. Then prove the code change works because the test passes.
 
-## 2. Test-Driven Changes
-- Create unit and functional tests for any new features or changes.
-- Ensure that you prove your code works through tests, rather than assumptions.
-
-## 3. Keep Tests Updated
-- Always update relevant tests after making code changes or bug fixes.
-- If a bug is fixed, a test must be added or updated to cover the regression and prevent it from recurring.
-- When a test block becomes large enough to impair readability of the implementation file, move it to a sidecar test file (sibling or `tests/*.rs`) and add a one-line note in the implementation's module doc pointing to it. See the component's own `AGENTS.md` for the sidecar pattern detail.
-
-## 4. Warnings and Compilation
-- **Fix all warnings:** You must fix all new and existing compile or test warnings before considering a task "done."
-- Never leave dangling unused variables, imports, or future-incompatibilities if they are within your control to fix.
-- Ensure the component's build and test commands run perfectly clean (e.g. `cargo check` / `cargo nextest` for Rust crates — see the component's own `AGENTS.md`).
-
-## 5. Clarification
-- Always refuse a task or ask for clarification if the requirements or context are unclear.
-
-## 6. Code Quality
-- Write modular code with minimal side effects. Small, pure/honest functions are the goal.
-
-## 7. String Constants and Reuse
-- Use string constants (e.g. `const` items) for repeat strings or user-facing literals rather than duplicating them inline.
-- Centralize such constants near the module or type they pertain to so they can be updated in one place.
-
-## 8. Prefer Existing Libraries
-- Prefer using available, well-maintained libraries (from `crates.io` or the existing dependency tree) over hand-coding equivalent functions.
-- Before implementing a utility from scratch, check whether an existing dependency already provides it.
-
-## 9. Cyclomatic Complexity
-- Refactor code as required to limit cyclomatic complexity before adding new features on top of it.
+## 6. Code
+- You MUST Write modular code with minimal side effects. Functions SHOULD be pure and honest.
+- You MUST use string constants for repeat strings or user-facing literals.
+- You SHOULD use open source and well-maintained libraries over hand-coding equivalent functions.
 - Prefer splitting large functions, extracting helpers, and reducing nesting over introducing additional branches into already-complex code.
 
-## 10. Issue-Fixing Workflow (Test-First)
-- When asked to fix an issue (bug, defect, or regression), **develop a failing test first** that reproduces the issue before writing the fix.
-- The test must capture the bug's symptom: write it, run it, and confirm it fails for the same reason the issue describes. Only then implement the fix.
-- Use the newly added test to validate the fix: it should now pass. Keep the test in the suite as regression coverage — do not delete or weaken it after the fix lands.
-- If the issue cannot be reproduced at the unit or integration level (e.g. timing-, UI-, or environment-dependent), document why in the task/PR and add the closest possible deterministic test (snapshot, contract, or integration harness) rather than skipping coverage.
-- Sequence: reproduce (failing test) → fix → verify (test passes) → run the component's full quality gate (see the component's own `AGENTS.md`).
-
 ## Component-specific rules
-
-Each subdirectory owns its own `AGENTS.md`. Resolve rules by working directory:
-when editing files under one of these directories, that directory's `AGENTS.md`
-takes precedence for tooling, conventions, and quality gates.
 
 | Directory                    | Scope                                                                                  |
 |------------------------------|----------------------------------------------------------------------------------------|
