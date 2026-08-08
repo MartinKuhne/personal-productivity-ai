@@ -1,4 +1,4 @@
-﻿//! CalDAV calendar tool implementations for the tool registry.
+//! CalDAV calendar tool implementations for the tool registry.
 
 use crate::agent::tools::Tool;
 use crate::agent::tools::context::ToolContext;
@@ -33,7 +33,7 @@ impl Tool for SearchCalendarTool {
     fn execute(&self, ctx: &ToolContext, args: &str) -> Result<serde_json::Value, String> {
         let input: dtos::SearchCalendarInput =
             serde_json::from_str(args).map_err(|e| format!("Invalid args: {}", e))?;
-        crate::agent::tools::caldav::tool_search_calendar(ctx.config, &input.keyword).map(|r| {
+        crate::integrations::dav::cal::tool_search_calendar(ctx.config, &input.keyword).map(|r| {
             serde_json::to_value(r).unwrap_or_else(|e| serde_json::json!({"error": e.to_string()}))
         })
     }
@@ -63,7 +63,7 @@ impl Tool for GetCalendarTool {
     fn execute(&self, ctx: &ToolContext, args: &str) -> Result<serde_json::Value, String> {
         let input: dtos::GetCalendarInput =
             serde_json::from_str(args).map_err(|e| format!("Invalid args: {}", e))?;
-        crate::agent::tools::caldav::tool_get_calendar(
+        crate::integrations::dav::cal::tool_get_calendar(
             ctx.config,
             &input.start_date,
             &input.end_date,
@@ -98,7 +98,7 @@ impl Tool for GetCalendarItemTool {
     fn execute(&self, ctx: &ToolContext, args: &str) -> Result<serde_json::Value, String> {
         let input: dtos::GetCalendarItemInput =
             serde_json::from_str(args).map_err(|e| format!("Invalid args: {}", e))?;
-        crate::agent::tools::caldav::tool_get_calendar_item(ctx.config, &input.href).map(|r| {
+        crate::integrations::dav::cal::tool_get_calendar_item(ctx.config, &input.href).map(|r| {
             serde_json::to_value(r).unwrap_or_else(|e| serde_json::json!({"error": e.to_string()}))
         })
     }
@@ -125,9 +125,12 @@ impl Tool for AddCalendarItemTool {
     fn execute(&self, ctx: &ToolContext, args: &str) -> Result<serde_json::Value, String> {
         let input: dtos::AddCalendarItemInput =
             serde_json::from_str(args).map_err(|e| format!("Invalid args: {}", e))?;
-        crate::agent::tools::caldav::tool_add_calendar_item(ctx.config, &input.item_json).map(|r| {
-            serde_json::to_value(r).unwrap_or_else(|e| serde_json::json!({"error": e.to_string()}))
-        })
+        crate::integrations::dav::cal::tool_add_calendar_item(ctx.config, &input.item_json).map(
+            |r| {
+                serde_json::to_value(r)
+                    .unwrap_or_else(|e| serde_json::json!({"error": e.to_string()}))
+            },
+        )
     }
 }
 
@@ -152,7 +155,7 @@ impl Tool for UpdateCalendarItemTool {
     fn execute(&self, ctx: &ToolContext, args: &str) -> Result<serde_json::Value, String> {
         let input: dtos::UpdateCalendarItemInput =
             serde_json::from_str(args).map_err(|e| format!("Invalid args: {}", e))?;
-        crate::agent::tools::caldav::tool_update_calendar_item(
+        crate::integrations::dav::cal::tool_update_calendar_item(
             ctx.config,
             &input.id,
             &input.update_json,
@@ -184,7 +187,7 @@ impl Tool for DeleteCalendarItemTool {
     fn execute(&self, ctx: &ToolContext, args: &str) -> Result<serde_json::Value, String> {
         let input: dtos::DeleteCalendarItemInput =
             serde_json::from_str(args).map_err(|e| format!("Invalid args: {}", e))?;
-        crate::agent::tools::caldav::tool_delete_calendar_item(ctx.config, &input.id).map(|r| {
+        crate::integrations::dav::cal::tool_delete_calendar_item(ctx.config, &input.id).map(|r| {
             serde_json::to_value(r).unwrap_or_else(|e| serde_json::json!({"error": e.to_string()}))
         })
     }

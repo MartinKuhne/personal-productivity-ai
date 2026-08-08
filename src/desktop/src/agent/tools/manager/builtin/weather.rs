@@ -33,7 +33,7 @@ impl Tool for GetWeatherTool {
     fn execute(&self, _ctx: &ToolContext, args: &str) -> Result<serde_json::Value, String> {
         let input: dtos::GetWeatherInput =
             serde_json::from_str(args).map_err(|e| format!("Invalid args: {}", e))?;
-        crate::agent::tools::weather::tool_get_weather(&input.location, input.date_range.as_deref())
+        crate::integrations::weather::tool_get_weather(&input.location, input.date_range.as_deref())
             .map(|r| {
                 serde_json::to_value(r)
                     .unwrap_or_else(|e| serde_json::json!({"error": e.to_string()}))

@@ -1,4 +1,10 @@
-//! Weather tool — geocodes a location via Nominatim and fetches current conditions and forecasts from Open-Meteo.
+//! Weather integration — geocodes a location via Nominatim and
+//! fetches current conditions and forecasts from the US National
+//! Weather Service (api.weather.gov).
+//!
+//! This is the protocol layer. The LLM-tool-loop adapter that
+//! exposes it as a single `Tool` impl lives in
+//! crate::agent::tools::manager::builtin::weather.
 
 use serde_json::Value;
 

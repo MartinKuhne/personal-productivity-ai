@@ -1,11 +1,13 @@
-//! Tests for `tools/carddav.rs`.
+//! Tests for `integrations/dav/card.rs`.
 //!
-//! Sidecar file. Extracted from `carddav.rs` so the implementation
+//! Sidecar file. Extracted from `card.rs` so the implementation
 //! module stays focused on production code.
 //!
 //! Originally a `#[cfg(test)] mod tests { ... }` block at the bottom of
-//! `carddav.rs`. Lives in a sibling file so private item access via
-//! `super::*` keeps working.
+//! `card.rs` (formerly `agent/tools/carddav.rs`, relocated when the
+//! DAV protocol layer was moved to `crate::integrations::dav`).
+//! Lives in a sibling file so private item access via `super::*`
+//! keeps working.
 
 use super::*;
 

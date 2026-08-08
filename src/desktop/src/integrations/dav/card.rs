@@ -1337,5 +1337,5 @@ pub fn tool_delete_contact(
 // ---------------------------------------------------------------------------
 
 #[cfg(test)]
-#[path = "carddav_tests.rs"]
+#[path = "card_tests.rs"]
 mod tests;

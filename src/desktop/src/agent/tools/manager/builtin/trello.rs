@@ -40,6 +40,8 @@ fn trello_tools_enabled(config: &AppConfig) -> bool {
     config.tool_groups.trello && config.trello_client.is_some()
 }
 
+/// Pull the [`crate::config::TrelloClientConfig`] out of [`ToolContext`] and
+/// delegate the call to the protocol-layer client.
 fn trello_request(
     ctx: &ToolContext,
     method: reqwest::Method,
@@ -51,45 +53,7 @@ fn trello_request(
         .trello_client
         .as_ref()
         .ok_or_else(|| "Trello configuration missing".to_string())?;
-
-    let url = format!(
-        "https://api.trello.com/1{}?key={}&token={}",
-        endpoint, client_config.api_key, client_config.token
-    );
-    let safe_url = format!("https://api.trello.com/1{}", endpoint);
-
-    tracing::debug!(name = "trello.request", method = %method, url = %safe_url, "Sending request to Trello API");
-
-    let client = reqwest::blocking::Client::new();
-    let mut req = client.request(method.clone(), &url);
-    if let Some(b) = body {
-        req = req
-            .header("Content-Type", "application/json")
-            .body(b.to_string());
-    }
-
-    let res = req.send().map_err(|e| {
-        tracing::error!(name = "trello.request.error", error = %e, url = %safe_url, "Trello request failed");
-        e.to_string()
-    })?;
-
-    let status = res.status();
-    tracing::debug!(name = "trello.response", status = %status, url = %safe_url, "Received response from Trello API");
-
-    if status.is_success() {
-        let text = res.text().map_err(|e| {
-            tracing::error!(name = "trello.response.read_error", error = %e, "Failed to read Trello response text");
-            e.to_string()
-        })?;
-        serde_json::from_str(&text).map_err(|e| {
-            tracing::error!(name = "trello.response.parse_error", error = %e, text = %text, "Failed to parse Trello JSON");
-            e.to_string()
-        })
-    } else {
-        let error_text = res.text().unwrap_or_default();
-        tracing::error!(name = "trello.response.status_error", status = %status, url = %safe_url, response = %error_text, "Trello API returned error status");
-        Err(format!("Trello API error: {} - {}", status, error_text))
-    }
+    crate::integrations::trello::trello_request(client_config, method, endpoint, body)
 }
 
 pub(crate) struct TrelloGetBoardsTool;

@@ -476,7 +476,7 @@ pub fn tool_add_calendar_item(
                     .as_millis()
             );
             let path = format!("{}{}.ics", default_cal, uid);
-            let ical_data = crate::agent::tools::caldav::json_to_ical(item_json, Some(&uid));
+            let ical_data = crate::integrations::dav::cal::json_to_ical(item_json, Some(&uid));
             let resp = client.put(&path, ical_data.into_bytes().into()).await?;
             if !resp.status().is_success() {
                 let status = resp.status();
@@ -533,7 +533,8 @@ pub fn tool_update_calendar_item(
 
             let update_parsed: serde_json::Value =
                 serde_json::from_str(update_json).unwrap_or_else(|_| serde_json::json!({}));
-            let ical_data = crate::agent::tools::caldav::update_ical_string(&body, &update_parsed);
+            let ical_data =
+                crate::integrations::dav::cal::update_ical_string(&body, &update_parsed);
 
             let resp = client.put(id, ical_data.into_bytes().into()).await?;
             if !resp.status().is_success() {
@@ -688,5 +689,5 @@ pub fn json_to_ical(json_str: &str, uid_override: Option<&str>) -> String {
 // ---------------------------------------------------------------------------
 
 #[cfg(test)]
-#[path = "caldav_tests.rs"]
+#[path = "cal_tests.rs"]
 mod tests;
