@@ -31,17 +31,56 @@ fn heading_levels_are_emitted() {
 }
 
 #[test]
-fn strong_renders_as_typst_strong() {
-    // Markdown `**bold**` becomes typst `*bold*` (single asterisk).
+fn strong_renders_as_strong_function() {
+    // Markdown `**bold**` becomes the Typst `#strong[bold]`
+    // content-block form. Earlier versions emitted the literal
+    // delimiter form `*bold*`, but that has subtle word-boundary
+    // rules: a `*` is only recognized as an emphasis marker when
+    // it appears at a position where it could start a word. The
+    // spec test caught the adjacent-to-text cases (`**foo**bar`,
+    // `foo**bar**`) failing with "unclosed delimiter" because the
+    // output `*foo*bar` / `foo*bar*` had the trailing asterisk
+    // interpreted as an opener. The function form is unambiguous.
     let out = render_markdown_to_typst("**bold**");
-    assert!(out.contains("*bold*"), "got: {out}");
+    assert!(out.contains("#strong[bold]"), "got: {out}");
 }
 
 #[test]
-fn emphasis_renders_as_typst_emphasis() {
-    // Markdown `*italic*` becomes typst `_italic_`.
+fn emphasis_renders_as_emph_function() {
+    // Markdown `*italic*` becomes the Typst `#emph[italic]`
+    // content-block form. The earlier `_italic_` delimiter form
+    // was valid for word-bounded cases but would silently
+    // disappear (literal underscore) when the emphasis was
+    // adjacent to other text like `foo*bar*`. The function form
+    // is unambiguous and works at any position. See
+    // `strong_renders_as_strong_function` for the full rationale.
     let out = render_markdown_to_typst("*italic*");
-    assert!(out.contains("_italic_"), "got: {out}");
+    assert!(out.contains("#emph[italic]"), "got: {out}");
+}
+
+#[test]
+fn emphasis_adjacent_to_text() {
+    // Regression: emphasis and strong whose boundaries are
+    // immediately adjacent to other text (no whitespace, no
+    // punctuation). The delimiter form `*...*` and `**...**` has
+    // subtle word-boundary rules in Typst that fail in these
+    // positions; the function form `#emph[...]` / `#strong[...]`
+    // works at any position. The five cases below are the spec
+    // failures #311, #326, #337, #352, #371.
+    let cases = [
+        ("foo*bar*", "foo#emph[bar]"),
+        ("*foo*bar", "#emph[foo]bar"),
+        ("foo**bar**", "foo#strong[bar]"),
+        ("**foo**bar", "#strong[foo]bar"),
+        ("*foo**bar***", "#emph[foo#strong[bar]]"),
+    ];
+    for (md, expected) in cases {
+        let out = render_markdown_to_typst(md);
+        assert!(
+            out.contains(expected),
+            "expected {expected:?} in translator output for {md:?}, got: {out}"
+        );
+    }
 }
 
 #[test]
@@ -262,8 +301,8 @@ fn complex_doc_round_trips_all_features() {
     let out = render_markdown_to_typst(md);
     // Spot-check each feature survived.
     assert!(out.contains("= Title"), "missing heading: {out}");
-    assert!(out.contains("*bold*") || out.contains("\\*bold\\*"));
-    assert!(out.contains("_italic_"));
+    assert!(out.contains("#strong[bold]"));
+    assert!(out.contains("#emph[italic]"));
     assert!(
         out.contains("#raw(block: true, lang: \"rust\""),
         "got: {out}"

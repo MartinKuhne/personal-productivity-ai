@@ -479,8 +479,8 @@ fn emit_start(state: &mut TypstEmitState, tag: Tag<'_>) {
             state.push_raw(&escape_typst_string(&dest_url));
             state.push_raw("]\n]");
         }
-        Tag::Emphasis => state.push_raw("_"),
-        Tag::Strong => state.push_raw("*"),
+        Tag::Emphasis => state.push_raw("#emph["),
+        Tag::Strong => state.push_raw("#strong["),
         Tag::Strikethrough => state.push_raw("#strike["),
         Tag::Table(_) => {
             state.block_sep();
@@ -581,8 +581,8 @@ fn emit_end(state: &mut TypstEmitState, tag_end: TagEnd) {
         TagEnd::Image => {
             // The image was fully emitted at Start; End just drops.
         }
-        TagEnd::Emphasis => state.push_raw("_"),
-        TagEnd::Strong => state.push_raw("*"),
+        TagEnd::Emphasis => state.push_raw("]"),
+        TagEnd::Strong => state.push_raw("]"),
         TagEnd::Strikethrough => state.push_raw("]"),
         TagEnd::Table => {
             // Patch the column-count placeholder to the actual count
