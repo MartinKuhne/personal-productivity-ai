@@ -97,11 +97,21 @@ fn unordered_list_renders_bullets() {
 }
 
 #[test]
-fn ordered_list_wraps_in_list_function() {
+fn ordered_list_wraps_in_enum_function() {
+    // Ordered lists are emitted as `#enum(numbering: "1.")[ ... ]`
+    // with the items as `+ Item` markup inside a content block.
+    // (The earlier `#list(marker: ([_],), + Item)` form was
+    // invalid Typst: `+ Item` is a list-item expression, not a
+    // function-call arg, so Typst rejected it. See the translator
+    // source for the full explanation.)
     let out = render_markdown_to_typst("1. one\n2. two\n");
-    assert!(out.contains("#list("), "got: {out}");
-    assert!(out.contains("+ one"));
-    assert!(out.contains("+ two"));
+    assert!(out.contains("#enum(numbering: \"1.\")"), "got: {out}");
+    assert!(out.contains("+ one"), "got: {out}");
+    assert!(out.contains("+ two"), "got: {out}");
+    // Items live inside a content block, not as further function
+    // call args.
+    assert!(out.contains("[\n+ one"), "got: {out}");
+    assert!(out.ends_with("]\n"), "got: {out}");
 }
 
 #[test]

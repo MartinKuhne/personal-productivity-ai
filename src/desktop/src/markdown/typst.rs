@@ -83,7 +83,7 @@ pub fn render_markdown_to_typst(markdown: &str) -> String {
     // emit at least one terminator for each list kind on the stack).
     while let Some(kind) = state.list_stack.pop() {
         if matches!(kind, ListKind::Ordered) {
-            state.output.push_str(")\n");
+            state.output.push_str("]\n");
         }
     }
     state.output
@@ -176,6 +176,37 @@ impl TypstEmitState {
             return;
         }
         self.output.push_str(&escaped);
+    }
+
+    /// Push a chunk of *pre-formed* Typst markup to the current
+    /// inline target. No escaping is applied — the caller is
+    /// responsible for already having the right characters. Used
+    /// for emphasis markers (`*`, `_`), link/image wrappers
+    /// (`#link(...)[`, `]`), and strikethrough wrappers
+    /// (`#strike[`, `]`) where the markup-active characters
+    /// MUST be preserved verbatim for Typst to recognise the
+    /// construct, but which still need to land in the right
+    /// inline target (main output, code buffer, or table cell).
+    ///
+    /// This is the table-cell fix that
+    /// [`render_markdown_to_typst`] needs: a previous version of
+    /// the translator pushed emphasis/link/image markers directly
+    /// to `state.output`, which meant a `**bold**` inside a
+    /// table cell emitted the `**` to the main stream (where it
+    /// was treated as markup) and the cell received just
+    /// `bold` — silently losing the emphasis and breaking
+    /// the surrounding Typst syntax.
+    fn push_raw(&mut self, text: &str) {
+        if let Some(buf) = self.code_buffer.as_mut() {
+            buf.body.push_str(text);
+            return;
+        }
+        if self.in_table_cell() {
+            let last = self.current_row_cells.len() - 1;
+            self.current_row_cells[last].push_str(text);
+            return;
+        }
+        self.output.push_str(text);
     }
 }
 
@@ -273,10 +304,22 @@ fn emit_start(state: &mut TypstEmitState, tag: Tag<'_>) {
             state.list_stack.push(kind);
             match kind {
                 ListKind::Ordered => {
-                    // `+` (with `numbering: "1."`) is the typst form
-                    // for an ordered list. We open a `#list(...)` and
-                    // emit one `+ ` line per item.
-                    state.output.push_str("#list(marker: ([_],),\n");
+                    // Open an ordered list as a Typst `#enum` call
+                    // with auto-numbering. The body of the list is a
+                    // content block that we close at `TagEnd::List`,
+                    // and each item inside is a `+ Item` line in
+                    // markup mode (Typst's list-item marker).
+                    //
+                    // Earlier versions emitted `#list(marker: ([_],),`
+                    // and then `+ Item` lines as further positional
+                    // args to the function call — but `+ Item` is a
+                    // *list-item expression*, not a function-call
+                    // arg, so Typst rejects it with "unclosed
+                    // delimiter" / "unexpected operator `or`"-style
+                    // cascades. The fix: route the items through a
+                    // content block (`[ ... ]`) so Typst parses them
+                    // as markup, not as args to the surrounding call.
+                    state.output.push_str("#enum(numbering: \"1.\")[\n");
                 }
                 ListKind::Bullet => {
                     // Bullet list: typst `-` marker, one line per item.
@@ -323,14 +366,20 @@ fn emit_start(state: &mut TypstEmitState, tag: Tag<'_>) {
             // least syntactically valid. The CommonMark spec says
             // these resolve to a relative link to nothing, which is
             // the closest analogue we have.
+            //
+            // Pushed through `push_raw` (not `push_inline`) so the
+            // `#link("...")[` wrapper lands in the right inline
+            // target — main output, code buffer, or table cell. The
+            // link text and the closing `]` are pushed via the same
+            // mechanism so the whole construct stays together. See
+            // [`TypstEmitState::push_raw`] for the table-cell bug
+            // that this routing fix closed.
             let url: &str = if dest_url.is_empty() {
                 "about:blank"
             } else {
                 dest_url.as_ref()
             };
-            state
-                .output
-                .push_str(&format!("#link(\"{}\")[", escape_typst_string(url)));
+            state.push_raw(&format!("#link(\"{}\")[", escape_typst_string(url)));
         }
         Tag::Image { dest_url, .. } => {
             // Alt text arrives between Start and End; we drop it for
@@ -351,17 +400,21 @@ fn emit_start(state: &mut TypstEmitState, tag: Tag<'_>) {
             // the exported PDF. When the path resolves to a real
             // local file at runtime, this is a regression; revisit
             // when local image support is a requirement.
-            state.output.push_str(
+            //
+            // Pushed through `push_raw` so the placeholder wrapper
+            // lands in the right inline target (see the Link arm
+            // above for the rationale).
+            state.push_raw(
                 "#block(inset: 4pt, stroke: 0.5pt + luma(180), radius: 2pt, \
                  width: 100%)[\n  #set text(size: 0.85em, fill: luma(100))\n  \
                  #emph[image: ",
             );
-            state.output.push_str(&escape_typst_string(&dest_url));
-            state.output.push_str("]\n]");
+            state.push_raw(&escape_typst_string(&dest_url));
+            state.push_raw("]\n]");
         }
-        Tag::Emphasis => state.output.push('_'),
-        Tag::Strong => state.output.push('*'),
-        Tag::Strikethrough => state.output.push_str("#strike["),
+        Tag::Emphasis => state.push_raw("_"),
+        Tag::Strong => state.push_raw("*"),
+        Tag::Strikethrough => state.push_raw("#strike["),
         Tag::Table(_) => {
             state.block_sep();
             // Emit a placeholder for the column count; we patch it
@@ -429,7 +482,11 @@ fn emit_end(state: &mut TypstEmitState, tag_end: TagEnd) {
         TagEnd::List(_) => {
             let kind = state.list_stack.pop();
             if matches!(kind, Some(ListKind::Ordered)) {
-                state.output.push_str(")\n");
+                // Close the content block opened at
+                // `Tag::List(Some(_))` above. See that arm for the
+                // rationale (the items are `+ Item` markup inside a
+                // `[ ... ]` content block, not function-call args).
+                state.output.push_str("]\n");
             }
         }
         TagEnd::Item => {
@@ -439,13 +496,13 @@ fn emit_end(state: &mut TypstEmitState, tag_end: TagEnd) {
             // also terminates on newline.
             state.output.push('\n');
         }
-        TagEnd::Link => state.output.push(']'),
+        TagEnd::Link => state.push_raw("]"),
         TagEnd::Image => {
             // The image was fully emitted at Start; End just drops.
         }
-        TagEnd::Emphasis => state.output.push('_'),
-        TagEnd::Strong => state.output.push('*'),
-        TagEnd::Strikethrough => state.output.push(']'),
+        TagEnd::Emphasis => state.push_raw("_"),
+        TagEnd::Strong => state.push_raw("*"),
+        TagEnd::Strikethrough => state.push_raw("]"),
         TagEnd::Table => {
             // Patch the column-count placeholder to the actual count
             // cached on TableHead end. Fall back to 1 if the table

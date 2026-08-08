@@ -262,3 +262,31 @@ fn combined_special_chars_in_paragraph_compile() {
         compile_markdown_to_pdf(md, "combined").expect("combined special chars must compile");
     assert!(bytes.starts_with(b"%PDF-"));
 }
+
+/// Real-world document that triggered the original bug report
+/// (`2008-Sportsman-500-X2-EFI-Recommissioning-and-Maintenance.md`):
+/// a heading followed by a single-item ordered list used to
+/// emit `#list(marker: ([_],),\n+ Item\n)`, which Typst rejects
+/// because `+ Item` is a list-item expression, not a valid
+/// function-call arg. The fix routes the items through a
+/// `#enum(numbering: "1.")[ ... ]` content block. This test
+/// pins that fix with a representative fragment of the
+/// original failing document.
+#[test]
+fn ordered_list_with_long_item_compiles() {
+    let md = "\
+### Phase 1: Pre-Start Assessment
+
+1. **Battery**: Remove, test voltage. Likely needs replacement after years storage. X2 battery location: under seat, negative cable first. PN 4140006.
+2. **Fuel system**: Drain tank completely.
+";
+    let bytes = compile_markdown_to_pdf(md, "ordered-list-regression")
+        .expect("ordered list after heading with long item must compile to a valid PDF");
+    assert!(bytes.starts_with(b"%PDF-"));
+    assert!(bytes.ends_with(b"%%EOF"));
+    assert!(
+        bytes.len() > 1024,
+        "ordered-list regression PDF too small: {} bytes",
+        bytes.len()
+    );
+}
