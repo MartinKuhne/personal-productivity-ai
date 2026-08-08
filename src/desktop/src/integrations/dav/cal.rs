@@ -1,28 +1,47 @@
 //! CalDAV agent tools — search, retrieve, create, update, and delete calendar events across configured CalDAV servers.
 //!
-//! Unit tests live in the sibling `caldav_tests.rs` sidecar.
+//! Layering:
+//!
+//! 1. [`DavClient`] owns the per-server connection. It wraps
+//!    `fast_dav_rs::CalDavClient` plus the per-server metadata (name,
+//!    base URL, username) needed by the discovery helpers. The
+//!    methods are sync (use [`block_on`] under the hood) so the
+//!    LLM-tool loop can call them without an async runtime.
+//! 2. The `tool_*` functions in this module are the LLM-adapter
+//!    layer. They iterate `config.caldav_clients`, build a
+//!    [`DavClient`] per server, aggregate the per-server results,
+//!    and serialize to the LLM-facing DTO from
+//!    `crate::agent::tools::dtos`.
+//! 3. Pure helpers (`parse_ical_data`, `json_to_ical`,
+//!    `update_ical_string`) are independent of any client.
+//!
+//! Unit tests live in the sibling `cal_tests.rs` sidecar.
 
 use crate::agent::tools::blocking::block_on;
-use crate::config::AppConfig;
+use crate::agent::tools::dtos::{
+    AddCalendarItemResponse, DeleteCalendarItemResponse, GetCalendarItemResponse,
+    GetCalendarResponse, SearchCalendarResponse, UpdateCalendarItemResponse,
+};
+use crate::config::{AppConfig, CalDavClient as CalDavClientConfig};
 use fast_dav_rs::CalDavClient;
 
-#[derive(serde::Serialize)]
-struct CalDavEventDetails {
-    client: String,
-    id: String,
-    href: String,
-    summary: Option<String>,
-    start: Option<String>,
-    end: Option<String>,
-    description: Option<String>,
-    location: Option<String>,
-    organizer: Option<String>,
+#[derive(serde::Serialize, Debug, Clone, PartialEq, Eq)]
+pub struct CalDavEventDetails {
+    pub client: String,
+    pub id: String,
+    pub href: String,
+    pub summary: Option<String>,
+    pub start: Option<String>,
+    pub end: Option<String>,
+    pub description: Option<String>,
+    pub location: Option<String>,
+    pub organizer: Option<String>,
 }
 
-#[derive(serde::Serialize)]
-struct CalDavResponse {
-    results: Vec<CalDavEventDetails>,
-    errors: Vec<String>,
+#[derive(serde::Serialize, Debug, Default)]
+pub struct CalDavResponse {
+    pub results: Vec<CalDavEventDetails>,
+    pub errors: Vec<String>,
 }
 
 fn parse_ical_data(client: &str, href: &str, data: &str) -> CalDavEventDetails {
@@ -110,137 +129,142 @@ fn parse_ical_data(client: &str, href: &str, data: &str) -> CalDavEventDetails {
     event
 }
 
-async fn get_all_calendars(
-    client: &CalDavClient,
-    base_url: &str,
-    username: &str,
-) -> anyhow::Result<Vec<String>> {
-    if let Ok(calendars) = client.list_calendars(base_url).await
-        && !calendars.is_empty()
-    {
-        return Ok(calendars.into_iter().map(|c| c.href).collect());
-    }
-
-    if let Ok(homes) = client.discover_calendar_home_set(base_url).await
-        && let Some(home) = homes.first()
-        && let Ok(calendars) = client.list_calendars(home).await
-        && !calendars.is_empty()
-    {
-        return Ok(calendars.into_iter().map(|c| c.href).collect());
-    }
-
-    let mut principal_opt = client
-        .discover_current_user_principal()
-        .await
-        .ok()
-        .flatten();
-
-    // Fallback for Fastmail or other servers that use /dav/principals/user/username/
-    if principal_opt.is_none() {
-        let base_trimmed = base_url.trim_end_matches('/');
-        let guess = format!("{}/dav/principals/user/{}/", base_trimmed, username);
-        if let Ok(homes) = client.discover_calendar_home_set(&guess).await
-            && !homes.is_empty()
-        {
-            principal_opt = Some(guess);
-        }
-    }
-
-    let principal = principal_opt.ok_or_else(|| anyhow::anyhow!("No principal found"))?;
-    let homes = client.discover_calendar_home_set(&principal).await?;
-    let home = homes
-        .first()
-        .ok_or_else(|| anyhow::anyhow!("No calendar home found"))?;
-    let calendars = client.list_calendars(home).await?;
-    Ok(calendars.into_iter().map(|c| c.href).collect())
+/// A single CalDAV server connection.
+///
+/// Holds the [`CalDavClient`] plus the per-server metadata needed by
+/// the discovery helpers (base URL for the initial PROPFIND, username
+/// for the Fastmail `/dav/principals/user/{username}/` fallback).
+/// Construct one per entry in `config.caldav_clients` and call the
+/// `search_calendar` / `get_calendar` / `get_calendar_item` /
+/// `add_calendar_item` / `update_calendar_item` /
+/// `delete_calendar_item` methods to drive the wire protocol.
+pub struct DavClient {
+    name: String,
+    base_url: String,
+    username: String,
+    client: CalDavClient,
 }
 
-pub fn tool_search_calendar(
-    config: &AppConfig,
-    keyword: &str,
-) -> Result<crate::agent::tools::dtos::SearchCalendarResponse, String> {
-    let mut results = Vec::new();
-    let mut errors = Vec::new();
-    let kw = keyword.to_lowercase();
+impl DavClient {
+    /// Build a `DavClient` from a name and a [`CalDavClientConfig`]
+    /// entry. Returns an error if the underlying `CalDavClient` cannot
+    /// be built (e.g. malformed URL).
+    pub fn new(name: String, config: &CalDavClientConfig) -> Result<Self, String> {
+        let client = CalDavClient::new(&config.url, Some(&config.username), Some(&config.password))
+            .map_err(|e| format!("Client config error: {}", e))?;
+        Ok(Self {
+            name,
+            base_url: config.url.clone(),
+            username: config.username.clone(),
+            client,
+        })
+    }
 
-    for (name, client_config) in &config.caldav_clients {
-        let res = block_on(async {
-            let client = match CalDavClient::new(
-                &client_config.url,
-                Some(&client_config.username),
-                Some(&client_config.password),
-            ) {
-                Ok(c) => c,
-                Err(e) => return Err(anyhow::anyhow!("Client config error: {}", e)),
-            };
+    /// The friendly name from the config map. Returned in every
+    /// [`CalDavEventDetails::client`] field so the LLM can attribute
+    /// results to a server.
+    pub fn name(&self) -> &str {
+        &self.name
+    }
 
-            let cals =
-                get_all_calendars(&client, &client_config.url, &client_config.username).await?;
+    /// Discover every calendar href this server exposes. Tries
+    /// `list_calendars` first; on empty, falls through to
+    /// `discover_calendar_home_set` → `discover_current_user_principal`,
+    /// then a Fastmail-style `/dav/principals/user/{username}/` guess.
+    async fn list_calendar_hrefs(&self) -> anyhow::Result<Vec<String>> {
+        if let Ok(calendars) = self.client.list_calendars(&self.base_url).await
+            && !calendars.is_empty()
+        {
+            return Ok(calendars.into_iter().map(|c| c.href).collect());
+        }
+
+        if let Ok(homes) = self.client.discover_calendar_home_set(&self.base_url).await
+            && let Some(home) = homes.first()
+            && let Ok(calendars) = self.client.list_calendars(home).await
+            && !calendars.is_empty()
+        {
+            return Ok(calendars.into_iter().map(|c| c.href).collect());
+        }
+
+        let mut principal_opt = self
+            .client
+            .discover_current_user_principal()
+            .await
+            .ok()
+            .flatten();
+
+        // Fallback for Fastmail or other servers that use /dav/principals/user/username/
+        if principal_opt.is_none() {
+            let base_trimmed = self.base_url.trim_end_matches('/');
+            let guess = format!("{}/dav/principals/user/{}/", base_trimmed, self.username);
+            if let Ok(homes) = self.client.discover_calendar_home_set(&guess).await
+                && !homes.is_empty()
+            {
+                principal_opt = Some(guess);
+            }
+        }
+
+        let principal = principal_opt.ok_or_else(|| anyhow::anyhow!("No principal found"))?;
+        let homes = self.client.discover_calendar_home_set(&principal).await?;
+        let home = homes
+            .first()
+            .ok_or_else(|| anyhow::anyhow!("No calendar home found"))?;
+        let calendars = self.client.list_calendars(home).await?;
+        Ok(calendars.into_iter().map(|c| c.href).collect())
+    }
+
+    /// Search every calendar on this server for events whose
+    /// `calendar-data` contains `keyword` (case-insensitive).
+    pub fn search_calendar(&self, keyword: &str) -> Result<Vec<CalDavEventDetails>, String> {
+        let kw = keyword.to_lowercase();
+        let name = self.name.clone();
+        block_on(async {
+            let cals = self.list_calendar_hrefs().await?;
             let mut matches = Vec::new();
             for cal_path in cals {
-                let items = client
+                let items = self
+                    .client
                     .calendar_query_timerange(&cal_path, "VEVENT", None, None, true)
                     .await?;
                 for item in items {
                     if let Some(data) = &item.calendar_data
                         && data.to_lowercase().contains(&kw)
                     {
-                        matches.push(parse_ical_data(name, &item.href, data));
+                        matches.push(parse_ical_data(&name, &item.href, data));
                     }
                 }
             }
             anyhow::Result::<Vec<_>>::Ok(matches)
-        });
-
-        match res {
-            Ok(mut matches) => results.append(&mut matches),
-            Err(e) => errors.push(format!("Error on client {}: {}", name, e)),
-        }
+        })
+        .map_err(|e| e.to_string())
     }
 
-    let resp = CalDavResponse { results, errors };
-    Ok(crate::agent::tools::dtos::SearchCalendarResponse {
-        results: serde_json::to_string_pretty(&resp).unwrap_or_else(|_| "{}".to_string()),
-    })
-}
-
-pub fn tool_get_calendar(
-    config: &AppConfig,
-    start: &str,
-    end: &str,
-) -> Result<crate::agent::tools::dtos::GetCalendarResponse, String> {
-    let mut results = Vec::new();
-    let mut errors = Vec::new();
-
-    let format_caldav_date = |d: &str, is_end: bool| -> String {
-        if d.len() == 10 && d.chars().nth(4) == Some('-') && d.chars().nth(7) == Some('-') {
-            let clean = d.replace("-", "");
-            if is_end {
-                format!("{}T235959Z", clean)
+    /// Return every VEVENT in every calendar on this server whose
+    /// `DTSTART` falls between `start` and `end` (inclusive). Dates
+    /// in `YYYY-MM-DD` form are widened to full-day boundaries in UTC.
+    pub fn get_calendar(&self, start: &str, end: &str) -> Result<Vec<CalDavEventDetails>, String> {
+        let format_caldav_date = |d: &str, is_end: bool| -> String {
+            if d.len() == 10 && d.chars().nth(4) == Some('-') && d.chars().nth(7) == Some('-') {
+                let clean = d.replace("-", "");
+                if is_end {
+                    format!("{}T235959Z", clean)
+                } else {
+                    format!("{}T000000Z", clean)
+                }
             } else {
-                format!("{}T000000Z", clean)
+                d.to_string()
             }
-        } else {
-            d.to_string()
-        }
-    };
+        };
 
-    let start_fmt = format_caldav_date(start, false);
-    let end_fmt = format_caldav_date(end, true);
-
-    for (name, client_config) in &config.caldav_clients {
-        let res = block_on(async {
-            let client = CalDavClient::new(
-                &client_config.url,
-                Some(&client_config.username),
-                Some(&client_config.password),
-            )
-            .map_err(|e| anyhow::anyhow!("Client config error: {}", e))?;
-            let cals =
-                get_all_calendars(&client, &client_config.url, &client_config.username).await?;
+        let start_fmt = format_caldav_date(start, false);
+        let end_fmt = format_caldav_date(end, true);
+        let name = self.name.clone();
+        block_on(async {
+            let cals = self.list_calendar_hrefs().await?;
             let mut matches = Vec::new();
             for cal_path in cals {
-                let items = client
+                let items = self
+                    .client
                     .calendar_query_timerange(
                         &cal_path,
                         "VEVENT",
@@ -251,41 +275,23 @@ pub fn tool_get_calendar(
                     .await?;
                 for item in items {
                     if let Some(data) = &item.calendar_data {
-                        matches.push(parse_ical_data(name, &item.href, data));
+                        matches.push(parse_ical_data(&name, &item.href, data));
                     }
                 }
             }
             anyhow::Result::<Vec<_>>::Ok(matches)
-        });
-
-        match res {
-            Ok(mut m) => results.append(&mut m),
-            Err(e) => errors.push(format!("Error on client {}: {}", name, e)),
-        }
+        })
+        .map_err(|e| e.to_string())
     }
 
-    let resp = CalDavResponse { results, errors };
-    Ok(crate::agent::tools::dtos::GetCalendarResponse {
-        results: serde_json::to_string_pretty(&resp).unwrap_or_else(|_| "{}".to_string()),
-    })
-}
-
-pub fn tool_get_calendar_item(
-    config: &AppConfig,
-    id: &str,
-) -> Result<crate::agent::tools::dtos::GetCalendarItemResponse, String> {
-    let mut results = Vec::new();
-    let mut errors = Vec::new();
-
-    for (name, client_config) in &config.caldav_clients {
-        let res = block_on(async {
-            let client = CalDavClient::new(
-                &client_config.url,
-                Some(&client_config.username),
-                Some(&client_config.password),
-            )
-            .map_err(|e| anyhow::anyhow!("Client config error: {}", e))?;
-            let resp = client.get(id).await?;
+    /// Fetch a single calendar item by its href (`id`). The wire
+    /// request is a plain `GET {id}`. Returns an error if the server
+    /// responds non-2xx — the error string includes the status line
+    /// and the body so the operator can diagnose 404 vs auth failure.
+    pub fn get_calendar_item(&self, id: &str) -> Result<CalDavEventDetails, String> {
+        let name = self.name.clone();
+        block_on(async {
+            let resp = self.client.get(id).await?;
             if !resp.status().is_success() {
                 let status = resp.status();
                 let bytes = resp.into_body();
@@ -294,19 +300,103 @@ pub fn tool_get_calendar_item(
             }
             let bytes = resp.into_body();
             let body = String::from_utf8_lossy(&bytes).to_string();
-            anyhow::Result::<CalDavEventDetails>::Ok(parse_ical_data(name, id, &body))
-        });
-
-        match res {
-            Ok(data) => results.push(data),
-            Err(e) => errors.push(format!("Error on client {}: {}", name, e)),
-        }
+            anyhow::Result::<CalDavEventDetails>::Ok(parse_ical_data(&name, id, &body))
+        })
+        .map_err(|e| e.to_string())
     }
 
-    let resp = CalDavResponse { results, errors };
-    Ok(crate::agent::tools::dtos::GetCalendarItemResponse {
-        result: serde_json::to_string_pretty(&resp).unwrap_or_else(|_| "{}".to_string()),
-    })
+    /// Create a new VEVENT on the first calendar this server exposes
+    /// (no "default calendar" concept in CalDAV; the first discovery
+    /// hit is what every other tool does). `item_json` is the same
+    /// LLM-facing JSON the [`json_to_ical`] helper accepts.
+    pub fn add_calendar_item(&self, item_json: &str) -> Result<String, String> {
+        block_on(async {
+            let cals = self.list_calendar_hrefs().await?;
+            let default_cal = cals
+                .first()
+                .ok_or_else(|| anyhow::anyhow!("No calendar found to add to"))?;
+            let uid = format!(
+                "{}",
+                std::time::SystemTime::now()
+                    .duration_since(std::time::UNIX_EPOCH)
+                    .unwrap_or_default()
+                    .as_millis()
+            );
+            let path = format!("{}{}.ics", default_cal, uid);
+            let ical_data = json_to_ical(item_json, Some(&uid));
+            let resp = self
+                .client
+                .put(&path, ical_data.into_bytes().into())
+                .await?;
+            if !resp.status().is_success() {
+                let status = resp.status();
+                let body = String::from_utf8_lossy(&resp.into_body()).to_string();
+                return Err(anyhow::anyhow!(
+                    "Failed to PUT event: {} - {}",
+                    status,
+                    body
+                ));
+            }
+            anyhow::Result::<String>::Ok(format!("Created at {}", path))
+        })
+        .map_err(|e| e.to_string())
+    }
+
+    /// Update an existing VEVENT. GETs the current iCal body, merges
+    /// `update_json` into it via [`update_ical_string`], and PUTs the
+    /// result back. Returns an error if the GET 404s.
+    pub fn update_calendar_item(&self, id: &str, update_json: &str) -> Result<String, String> {
+        block_on(async {
+            let get_resp = self.client.get(id).await?;
+            if !get_resp.status().is_success() {
+                let status = get_resp.status();
+                let body = String::from_utf8_lossy(&get_resp.into_body()).to_string();
+                return Err(anyhow::anyhow!(
+                    "Failed to fetch event for update: {} - {}",
+                    status,
+                    body
+                ));
+            }
+            let bytes = get_resp.into_body();
+            let body = String::from_utf8_lossy(&bytes).to_string();
+
+            let update_parsed: serde_json::Value =
+                serde_json::from_str(update_json).unwrap_or_else(|_| serde_json::json!({}));
+            let ical_data = update_ical_string(&body, &update_parsed);
+
+            let resp = self.client.put(id, ical_data.into_bytes().into()).await?;
+            if !resp.status().is_success() {
+                let status = resp.status();
+                let body = String::from_utf8_lossy(&resp.into_body()).to_string();
+                return Err(anyhow::anyhow!(
+                    "Failed to PUT update event: {} - {}",
+                    status,
+                    body
+                ));
+            }
+            anyhow::Result::<String>::Ok("Updated successfully".to_string())
+        })
+        .map_err(|e| e.to_string())
+    }
+
+    /// DELETE a calendar item by href. Returns the error string from
+    /// the server if the response is non-2xx.
+    pub fn delete_calendar_item(&self, id: &str) -> Result<(), String> {
+        block_on(async {
+            let resp = self.client.delete(id).await?;
+            if !resp.status().is_success() {
+                let status = resp.status();
+                let body = String::from_utf8_lossy(&resp.into_body()).to_string();
+                return Err(anyhow::anyhow!(
+                    "Failed to DELETE event: {} - {}",
+                    status,
+                    body
+                ));
+            }
+            anyhow::Result::<()>::Ok(())
+        })
+        .map_err(|e| e.to_string())
+    }
 }
 
 pub fn update_ical_string(original: &str, updates: &serde_json::Value) -> String {
@@ -450,46 +540,102 @@ pub fn update_ical_string(original: &str, updates: &serde_json::Value) -> String
     out
 }
 
+// ---------------------------------------------------------------------------
+// LLM-adapter layer — the `tool_*` functions. Each one iterates the
+// configured CalDAV clients, delegates to a [`DavClient`] method, and
+// serialises the aggregated results to the LLM-facing DTO from
+// `crate::agent::tools::dtos`.
+// ---------------------------------------------------------------------------
+
+/// Iterate every configured CalDAV client, invoke `f` against each
+/// one, and split the per-server outcomes into a `results` vec and
+/// an `errors` vec. Errors are recorded as `"Error on client {name}: {e}"`
+/// — the same string the previous inline-loop code produced — so the
+/// existing test assertions keep working.
+fn for_each_client<T, F>(config: &AppConfig, mut f: F) -> (Vec<T>, Vec<String>)
+where
+    F: FnMut(&str, &DavClient) -> Result<T, String>,
+{
+    let mut results = Vec::new();
+    let mut errors = Vec::new();
+    for (name, cc) in &config.caldav_clients {
+        match DavClient::new(name.clone(), cc).and_then(|c| f(name, &c)) {
+            Ok(item) => results.push(item),
+            Err(e) => errors.push(format!("Error on client {}: {}", name, e)),
+        }
+    }
+    (results, errors)
+}
+
+/// Like [`for_each_client`] but for methods that return a `Vec` per
+/// server (search, get). The per-server `Vec`s are flattened into the
+/// aggregate `results` vec.
+fn for_each_client_vec<T, F>(config: &AppConfig, mut f: F) -> (Vec<T>, Vec<String>)
+where
+    F: FnMut(&str, &DavClient) -> Result<Vec<T>, String>,
+{
+    let mut results = Vec::new();
+    let mut errors = Vec::new();
+    for (name, cc) in &config.caldav_clients {
+        match DavClient::new(name.clone(), cc).and_then(|c| f(name, &c)) {
+            Ok(mut v) => results.append(&mut v),
+            Err(e) => errors.push(format!("Error on client {}: {}", name, e)),
+        }
+    }
+    (results, errors)
+}
+
+/// Serialize a [`CalDavResponse`] to a pretty JSON string. Falls back
+/// to `"{}"` if the JSON encoder chokes (it shouldn't — the type
+/// fields are all `String` / `Option<String>` — but the inline
+/// fallback matches the previous behaviour so the LLM never sees an
+/// empty error).
+fn serialize_response(resp: &CalDavResponse) -> String {
+    serde_json::to_string_pretty(resp).unwrap_or_else(|_| "{}".to_string())
+}
+
+pub fn tool_search_calendar(
+    config: &AppConfig,
+    keyword: &str,
+) -> Result<SearchCalendarResponse, String> {
+    let (results, errors) = for_each_client_vec(config, |_, c| c.search_calendar(keyword));
+    Ok(SearchCalendarResponse {
+        results: serialize_response(&CalDavResponse { results, errors }),
+    })
+}
+
+pub fn tool_get_calendar(
+    config: &AppConfig,
+    start: &str,
+    end: &str,
+) -> Result<GetCalendarResponse, String> {
+    let (results, errors) = for_each_client_vec(config, |_, c| c.get_calendar(start, end));
+    Ok(GetCalendarResponse {
+        results: serialize_response(&CalDavResponse { results, errors }),
+    })
+}
+
+pub fn tool_get_calendar_item(
+    config: &AppConfig,
+    id: &str,
+) -> Result<GetCalendarItemResponse, String> {
+    let (results, errors) = for_each_client(config, |_, c| c.get_calendar_item(id));
+    Ok(GetCalendarItemResponse {
+        result: serialize_response(&CalDavResponse { results, errors }),
+    })
+}
+
 pub fn tool_add_calendar_item(
     config: &AppConfig,
     item_json: &str,
-) -> Result<crate::agent::tools::dtos::AddCalendarItemResponse, String> {
+) -> Result<AddCalendarItemResponse, String> {
+    // `add_calendar_item` is special: it acts on the *first* configured
+    // CalDAV client (no "default calendar" concept in CalDAV). The
+    // per-server output is a single status string, so the aggregation
+    // shape doesn't fit `for_each_client` cleanly.
     let mut all_results = Vec::new();
-    if let Some((name, client_config)) = config.caldav_clients.iter().next() {
-        let res = block_on(async {
-            let client = CalDavClient::new(
-                &client_config.url,
-                Some(&client_config.username),
-                Some(&client_config.password),
-            )
-            .map_err(|e| anyhow::anyhow!("Client config error: {}", e))?;
-            let cals =
-                get_all_calendars(&client, &client_config.url, &client_config.username).await?;
-            let default_cal = cals
-                .first()
-                .ok_or_else(|| anyhow::anyhow!("No calendar found to add to"))?;
-            let uid = format!(
-                "{}",
-                std::time::SystemTime::now()
-                    .duration_since(std::time::UNIX_EPOCH)
-                    .unwrap_or_default()
-                    .as_millis()
-            );
-            let path = format!("{}{}.ics", default_cal, uid);
-            let ical_data = crate::integrations::dav::cal::json_to_ical(item_json, Some(&uid));
-            let resp = client.put(&path, ical_data.into_bytes().into()).await?;
-            if !resp.status().is_success() {
-                let status = resp.status();
-                let body = String::from_utf8_lossy(&resp.into_body()).to_string();
-                return Err(anyhow::anyhow!(
-                    "Failed to PUT event: {} - {}",
-                    status,
-                    body
-                ));
-            }
-            anyhow::Result::<String>::Ok(format!("Created at {}", path))
-        });
-        match res {
+    if let Some((name, cc)) = config.caldav_clients.iter().next() {
+        match DavClient::new(name.clone(), cc).and_then(|c| c.add_calendar_item(item_json)) {
             Ok(s) => all_results.push(format!("--- Client: {} ---\n{}", name, s)),
             Err(e) => all_results.push(format!("Error on client {}: {}", name, e)),
         }
@@ -497,7 +643,7 @@ pub fn tool_add_calendar_item(
     if all_results.is_empty() {
         Err("No CalDAV clients configured.".to_string())
     } else {
-        Ok(crate::agent::tools::dtos::AddCalendarItemResponse {
+        Ok(AddCalendarItemResponse {
             result: all_results.join("\n\n"),
         })
     }
@@ -507,48 +653,11 @@ pub fn tool_update_calendar_item(
     config: &AppConfig,
     id: &str,
     update_json: &str,
-) -> Result<crate::agent::tools::dtos::UpdateCalendarItemResponse, String> {
+) -> Result<UpdateCalendarItemResponse, String> {
     let mut all_results = Vec::new();
-    for (name, client_config) in &config.caldav_clients {
-        let res = block_on(async {
-            let client = CalDavClient::new(
-                &client_config.url,
-                Some(&client_config.username),
-                Some(&client_config.password),
-            )
-            .map_err(|e| anyhow::anyhow!("Client config error: {}", e))?;
-
-            let get_resp = client.get(id).await?;
-            if !get_resp.status().is_success() {
-                let status = get_resp.status();
-                let body = String::from_utf8_lossy(&get_resp.into_body()).to_string();
-                return Err(anyhow::anyhow!(
-                    "Failed to fetch event for update: {} - {}",
-                    status,
-                    body
-                ));
-            }
-            let bytes = get_resp.into_body();
-            let body = String::from_utf8_lossy(&bytes).to_string();
-
-            let update_parsed: serde_json::Value =
-                serde_json::from_str(update_json).unwrap_or_else(|_| serde_json::json!({}));
-            let ical_data =
-                crate::integrations::dav::cal::update_ical_string(&body, &update_parsed);
-
-            let resp = client.put(id, ical_data.into_bytes().into()).await?;
-            if !resp.status().is_success() {
-                let status = resp.status();
-                let body = String::from_utf8_lossy(&resp.into_body()).to_string();
-                return Err(anyhow::anyhow!(
-                    "Failed to PUT update event: {} - {}",
-                    status,
-                    body
-                ));
-            }
-            anyhow::Result::<String>::Ok("Updated successfully".to_string())
-        });
-        match res {
+    for (name, cc) in &config.caldav_clients {
+        match DavClient::new(name.clone(), cc).and_then(|c| c.update_calendar_item(id, update_json))
+        {
             Ok(s) => all_results.push(format!("--- Client: {} ---\n{}", name, s)),
             Err(e) => all_results.push(format!("Error on client {}: {}", name, e)),
         }
@@ -556,7 +665,7 @@ pub fn tool_update_calendar_item(
     if all_results.is_empty() {
         Err("No CalDAV clients configured.".to_string())
     } else {
-        Ok(crate::agent::tools::dtos::UpdateCalendarItemResponse {
+        Ok(UpdateCalendarItemResponse {
             result: all_results.join("\n\n"),
         })
     }
@@ -565,37 +674,18 @@ pub fn tool_update_calendar_item(
 pub fn tool_delete_calendar_item(
     config: &AppConfig,
     id: &str,
-) -> Result<crate::agent::tools::dtos::DeleteCalendarItemResponse, String> {
+) -> Result<DeleteCalendarItemResponse, String> {
     let mut all_results = Vec::new();
-    for (name, client_config) in &config.caldav_clients {
-        let res = block_on(async {
-            let client = CalDavClient::new(
-                &client_config.url,
-                Some(&client_config.username),
-                Some(&client_config.password),
-            )
-            .map_err(|e| anyhow::anyhow!("Client config error: {}", e))?;
-            let resp = client.delete(id).await?;
-            if !resp.status().is_success() {
-                let status = resp.status();
-                let body = String::from_utf8_lossy(&resp.into_body()).to_string();
-                return Err(anyhow::anyhow!(
-                    "Failed to DELETE event: {} - {}",
-                    status,
-                    body
-                ));
-            }
-            anyhow::Result::<String>::Ok("Deleted successfully".to_string())
-        });
-        match res {
-            Ok(s) => all_results.push(format!("--- Client: {} ---\n{}", name, s)),
+    for (name, cc) in &config.caldav_clients {
+        match DavClient::new(name.clone(), cc).and_then(|c| c.delete_calendar_item(id)) {
+            Ok(()) => all_results.push(format!("--- Client: {} ---\nDeleted successfully", name)),
             Err(e) => all_results.push(format!("Error on client {}: {}", name, e)),
         }
     }
     if all_results.is_empty() {
         Err("No CalDAV clients configured.".to_string())
     } else {
-        Ok(crate::agent::tools::dtos::DeleteCalendarItemResponse {
+        Ok(DeleteCalendarItemResponse {
             result: all_results.join("\n\n"),
         })
     }

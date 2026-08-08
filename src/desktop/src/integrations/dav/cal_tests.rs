@@ -548,3 +548,131 @@ fn test_caldav_tools_mock_server_single_client_reuse() {
         }
     });
 }
+
+// ---------------------------------------------------------------------------
+// DavClient direct tests — exercise the new struct API without going
+// through the `tool_*` LLM-adapter wrappers.
+// ---------------------------------------------------------------------------
+
+fn dav_client_config(uri: String) -> crate::config::CalDavClient {
+    crate::config::CalDavClient {
+        url: uri,
+        username: "user".to_string(),
+        password: "password".to_string(),
+    }
+}
+
+/// All DavClient tests must call this. `CalDavClient::new` (which
+/// `DavClient::new` wraps) initialises the rustls crypto stack the
+/// first time it runs in a process. Under `cargo test` the earlier
+/// `test_caldav_tools_*` tests install the provider before this
+/// one runs; under `cargo nextest` each test runs in its own
+/// process so the init must be repeated.
+fn install_rustls_provider() {
+    let _ = rustls::crypto::ring::default_provider().install_default();
+}
+
+#[test]
+fn dav_client_new_and_name() {
+    install_rustls_provider();
+    let mock = WiremockGuard::start();
+    let cfg = dav_client_config(mock.uri());
+    let client = DavClient::new("primary".to_string(), &cfg).expect("build DavClient");
+    assert_eq!(client.name(), "primary");
+}
+
+#[test]
+fn dav_client_search_calendar_returns_typed_results() {
+    let _ = rustls::crypto::ring::default_provider().install_default();
+    let mock = WiremockGuard::start();
+    register_caldav_stubs(&mock);
+    let cfg = dav_client_config(mock.uri());
+    let client = DavClient::new("primary".to_string(), &cfg).expect("build DavClient");
+
+    let events = client
+        .search_calendar("Bob")
+        .expect("search_calendar should succeed");
+    assert!(
+        events
+            .iter()
+            .any(|e| e.summary.as_deref() == Some("Meeting with Bob")),
+        "expected to find 'Meeting with Bob' in {events:?}"
+    );
+    // Every result must carry the client name so the LLM can attribute
+    // it to a server.
+    assert!(events.iter().all(|e| e.client == "primary"));
+}
+
+#[test]
+fn dav_client_get_calendar_returns_typed_results() {
+    let _ = rustls::crypto::ring::default_provider().install_default();
+    let mock = WiremockGuard::start();
+    register_caldav_stubs(&mock);
+    let cfg = dav_client_config(mock.uri());
+    let client = DavClient::new("primary".to_string(), &cfg).expect("build DavClient");
+
+    let events = client
+        .get_calendar("2024-01-01", "2024-01-02")
+        .expect("get_calendar should succeed");
+    assert!(!events.is_empty(), "expected at least one event");
+    assert!(
+        events[0].summary.as_deref() == Some("Meeting with Bob"),
+        "got: {events:?}"
+    );
+}
+
+#[test]
+fn dav_client_get_calendar_item_404_includes_status() {
+    let _ = rustls::crypto::ring::default_provider().install_default();
+    let mock = WiremockGuard::start();
+    register_caldav_stubs(&mock);
+    let cfg = dav_client_config(mock.uri());
+    let client = DavClient::new("primary".to_string(), &cfg).expect("build DavClient");
+
+    let err = client
+        .get_calendar_item("/notfound")
+        .expect_err("expected 404");
+    assert!(
+        err.contains("Not found by href"),
+        "error should mention the lookup failure, got: {err}"
+    );
+    assert!(
+        err.contains("404"),
+        "error should include the status line, got: {err}"
+    );
+}
+
+#[test]
+fn dav_client_add_calendar_item_returns_created_path() {
+    let _ = rustls::crypto::ring::default_provider().install_default();
+    let mock = WiremockGuard::start();
+    register_caldav_stubs(&mock);
+    let cfg = dav_client_config(mock.uri());
+    let client = DavClient::new("primary".to_string(), &cfg).expect("build DavClient");
+
+    let out = client
+        .add_calendar_item(r#"{"summary":"New Mtg"}"#)
+        .expect("add_calendar_item should succeed");
+    assert!(
+        out.starts_with("Created at /calendars/primary/"),
+        "got: {out}"
+    );
+    assert!(out.ends_with(".ics"), "expected .ics suffix, got: {out}");
+}
+
+#[test]
+fn dav_client_delete_calendar_item_500_carries_error_text() {
+    let _ = rustls::crypto::ring::default_provider().install_default();
+    let mock = WiremockGuard::start();
+    register_caldav_stubs(&mock);
+    let cfg = dav_client_config(mock.uri());
+    let client = DavClient::new("primary".to_string(), &cfg).expect("build DavClient");
+
+    let err = client
+        .delete_calendar_item("/fail")
+        .expect_err("expected 500");
+    assert!(
+        err.contains("Failed to DELETE event"),
+        "error should mention the DELETE failure, got: {err}"
+    );
+}
