@@ -21,6 +21,7 @@
 use eframe::egui;
 
 use super::{FONT_SCALE_MAX, FONT_SCALE_MIN, FastMdApp, sanitise_font_scale};
+use crate::ui::os_shell;
 
 impl FastMdApp {
     /// Purpose: Drive one frame of the app.
@@ -57,6 +58,33 @@ impl FastMdApp {
 
         // Update persisted UI state with current values for saving on exit
         self.update_persisted_ui_state(ui.ctx());
+
+        // Drain egui platform output commands (notably
+        // `OutputCommand::OpenUrl` emitted by `egui::Link`
+        // widget clicks in the markdown viewer) and dispatch
+        // them to the OS shell. eframe 0.36's native (winit)
+        // runtime does **not** process `OutputCommand::OpenUrl`
+        // — only the `web` target handles it (see
+        // `eframe/src/web/{app_runner.rs,mod.rs}`). Without
+        // this drain, hyperlink clicks in the viewer are
+        // silently dropped and the URL never reaches the
+        // system browser. Doing it at the end of `update_ui`
+        // (after `render_panels`) guarantees every click that
+        // landed during the current frame is picked up exactly
+        // once. The `CopyText` / `CopyImage` siblings on the
+        // same `PlatformOutput::commands` list are still
+        // processed by eframe's built-in clipboard handling.
+        //
+        // Re-acquire `ctx` from `ui` here (rather than reusing
+        // the binding from the top of the function) so the
+        // immutable borrow of `ui` ends as soon as
+        // `ctx.output(...)` returns; the earlier `let ctx =
+        // ui.ctx();` binding would otherwise keep `ui`
+        // borrowed immutably for the entire function and
+        // collide with the `&mut ui` reborrow in
+        // `self.render_panels(ui)`.
+        let commands = ui.ctx().output(|o| o.commands.clone());
+        os_shell::dispatch_platform_commands(&commands, os_shell::open_url);
     }
 
     fn process_file_events_and_repaint(&mut self, ctx: &egui::Context) {

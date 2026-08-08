@@ -878,6 +878,120 @@ mod tests {
         ));
     }
 
+    /// Regression: CommonMark angle-bracket autolinks
+    /// (`<https://example.com>`) must surface as a real
+    /// `InlineElem::Link` in the AST, not as raw inline HTML.
+    ///
+    /// The autolink form is part of the CommonMark / Markdown
+    /// Cheatsheet conformance requirement [MD-018] (links: inline,
+    /// reference, **auto-links**). Without the
+    /// `Options::ENABLE_AUTOLINKS` flag on the pulldown-cmark
+    /// parser, cmark treats `<https://example.com>` as raw inline
+    /// HTML and the renderer's `InlineElem::Html` branch paints it
+    /// as a non-interactive gray italic label — the click does
+    /// nothing. This test pins the parser contract so a future
+    /// option-set refactor that drops `ENABLE_AUTOLINKS` fails
+    /// loudly here instead of silently regressing in the UI.
+    ///
+    /// [MD-018]: `src/desktop/src/markdown/SPEC.md`
+    /// Regression: CommonMark angle-bracket autolinks
+    /// (`<https://example.com>`) must surface as a real
+    /// `InlineElem::Link` in the AST, not as raw inline HTML.
+    ///
+    /// Pulldown-cmark 0.13 recognizes the CommonMark
+    /// angle-bracket autolink form as a top-level parser feature
+    /// (not gated on any `Options` flag) and emits it as a
+    /// `Tag::Link` / `Text` pair that our parser coalesces into a
+    /// single `InlineElem::Link(url, url)`. This test pins that
+    /// contract: if a future cmark upgrade or option-set refactor
+    /// changes that behavior, the test fails loudly here instead
+    /// of silently regressing in the UI (where the autolink would
+    /// be demoted to a non-clickable `InlineElem::Html` label).
+    #[test]
+    fn autolink_angle_bracket_becomes_inline_link() {
+        let md = "<https://example.com>";
+        let events = parse_markdown_to_events(md);
+
+        // Find the inline run for the autolink. cmark wraps it in
+        // Start(Paragraph) … End(Paragraph), and our parser emits
+        // a single FlushInline between them.
+        let flush = events
+            .iter()
+            .find_map(|e| {
+                if let RenderEvent::FlushInline { elems, .. } = e {
+                    Some(elems)
+                } else {
+                    None
+                }
+            })
+            .expect("expected a FlushInline event for the autolink paragraph");
+
+        assert_eq!(
+            flush.len(),
+            1,
+            "angle-bracket autolink must surface as a single InlineElem::Link, got {flush:?}"
+        );
+        assert!(
+            matches!(
+                &flush[0],
+                InlineElem::Link(url, text)
+                    if url == "https://example.com" && text == "https://example.com"
+            ),
+            "autolink must become InlineElem::Link with the URL as both dest and display text, got {:?}",
+            flush[0]
+        );
+        // Specifically: NOT raw inline HTML (the buggy pre-fix shape).
+        assert!(
+            !matches!(&flush[0], InlineElem::Html(_)),
+            "autolink must not be silently demoted to InlineElem::Html"
+        );
+    }
+
+    /// Companion to `autolink_angle_bracket_becomes_inline_link`:
+    /// the autolink must coalesce cleanly with surrounding plain
+    /// text. `Visit <https://example.com> for more.` must yield a
+    /// three-element inline run (`Text`, `Link`, `Text`) with no
+    /// spurious `Html` variant — the clickable middle element is
+    /// what the renderer turns into an egui `Link` widget.
+    #[test]
+    fn autolink_mixed_with_plain_text_keeps_text_runs() {
+        let md = "Visit <https://example.com> for more.";
+        let events = parse_markdown_to_events(md);
+
+        let flush = events
+            .iter()
+            .find_map(|e| {
+                if let RenderEvent::FlushInline { elems, .. } = e {
+                    Some(elems)
+                } else {
+                    None
+                }
+            })
+            .expect("expected a FlushInline event");
+
+        // Expected: Text("Visit "), Link(url, url), Text(" for more.")
+        assert_eq!(flush.len(), 3, "got {flush:?}");
+        assert!(
+            matches!(&flush[0], InlineElem::Text(t, _) if t == "Visit "),
+            "leading text run: got {:?}",
+            flush[0]
+        );
+        assert!(
+            matches!(
+                &flush[1],
+                InlineElem::Link(url, text)
+                    if url == "https://example.com" && text == "https://example.com"
+            ),
+            "middle element must be the autolink: got {:?}",
+            flush[1]
+        );
+        assert!(
+            matches!(&flush[2], InlineElem::Text(t, _) if t == " for more."),
+            "trailing text run: got {:?}",
+            flush[2]
+        );
+    }
+
     /// The routers-spec table that surfaces the same pulldown-cmark
     /// fragmentation class as the laptops table, plus bold model
     /// names and a `~~strikethrough~~ **bold**` mid-cell. Per the
