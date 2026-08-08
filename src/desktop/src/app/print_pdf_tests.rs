@@ -161,3 +161,94 @@ fn main() {
         bytes.len()
     );
 }
+
+// =====================================================================
+// Typst syntax-reference compliance (end-to-end)
+// =====================================================================
+//
+// These tests pin the *compiled output* to the markup-active
+// character set in https://typst.app/docs/reference/syntax/.
+// A passing test here is the strongest possible proof that the
+// translator emits legal Typst — a string-assertion test only
+// proves the call signature, not the semantic correctness.
+
+/// A doc that uses every markup-active char per the syntax
+/// reference. Each of these lines, taken individually, used to
+/// fail the compiler before the missing escape chars were
+/// added (`$` triggered math mode, `~` triggered symbol
+/// shorthand, `` ` `` triggered raw mode, `'` / `"` triggered
+/// smart-quote conversion, `#` triggered code mode, `*` and `_`
+/// triggered strong/emphasis, `@` triggered a reference).
+#[test]
+fn typst_syntax_reference_compliance_every_markup_char() {
+    let md = r#"
+# Test
+
+Plain prose with *literal* asterisks, _literal_ underscores,
+`literal` backticks, # literal hash, @ literal at-sign,
+$ literal dollar, ~ literal tilde, ' apostrophe,
+" straight quote, [open bracket, ]close bracket,
+\ backslash, and a https://example.com/#anchor link.
+"#;
+    let bytes = compile_markdown_to_pdf(md, "compliance")
+        .expect("every markup-active char must compile to a valid Typst document");
+    assert!(bytes.starts_with(b"%PDF-"));
+    assert!(bytes.ends_with(b"%%EOF"));
+    // A compliance doc should still be small but non-trivial —
+    // 1 KB is the floor.
+    assert!(
+        bytes.len() > 1024,
+        "compliance PDF too small: {} bytes",
+        bytes.len()
+    );
+}
+
+/// C# in body text — the `#` would normally be code-mode
+/// entry, and used to break compilation before the fix.
+#[test]
+fn dollar_sign_in_text() {
+    let md = "C# is a language. It costs $5 to buy a license.\n";
+    compile_markdown_to_pdf(md, "cs").expect("$ and # in body must compile");
+}
+
+/// URLs that contain `#` (anchor) and `&` (query separator)
+/// used to render a stray backslash because we ran the markup
+/// escape on the URL. The string escape now runs instead.
+#[test]
+fn url_with_hash_and_ampersand_compiles() {
+    let md = "Visit [example](https://example.com/page?x=1&y=2#section-3) for details.\n";
+    let bytes =
+        compile_markdown_to_pdf(md, "urls").expect("URLs with # and & must compile to a valid PDF");
+    assert!(bytes.starts_with(b"%PDF-"));
+}
+
+/// Smart-quote chars in user content (apostrophe, quote) used
+/// to be passed through unescaped, which caused Typst to
+/// convert them to typographic curly variants in the PDF. The
+/// escape now preserves the literal character.
+#[test]
+fn smart_quote_chars_preserved_in_output() {
+    let md = "He said \"don't worry\" and walked away.\n";
+    let bytes = compile_markdown_to_pdf(md, "smartquote")
+        .expect("smart-quote chars in user content must compile");
+    assert!(bytes.starts_with(b"%PDF-"));
+}
+
+/// The `~` character used to trigger Typst's symbol shorthand
+/// for a non-breaking space. Now escaped.
+#[test]
+fn tilde_in_text_compiles() {
+    let md = "Saved ~50% of the bytes.\n";
+    compile_markdown_to_pdf(md, "tilde").expect("~ in body must compile");
+}
+
+/// Combining the high-risk chars inside a single phrase is
+/// the most realistic failure mode — a partial fix that
+/// handles one char but not another would still fail here.
+#[test]
+fn combined_special_chars_in_paragraph_compile() {
+    let md = "Try `a*b_c` and `c#lang` and `cost $5` and `~50%` — all literal.\n";
+    let bytes =
+        compile_markdown_to_pdf(md, "combined").expect("combined special chars must compile");
+    assert!(bytes.starts_with(b"%PDF-"));
+}

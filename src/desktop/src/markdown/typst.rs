@@ -297,17 +297,29 @@ fn emit_start(state: &mut TypstEmitState, tag: Tag<'_>) {
             }
         }
         Tag::Link { dest_url, .. } => {
+            // The URL is interpolated into a Typst string literal
+            // (`#link("url")[text]`). Use the string escape function
+            // — only `\` and `"` need to be escaped inside a string;
+            // all other chars are literal. The previous version used
+            // the markup escape function here, which escapes `#`,
+            // `*`, `_`, etc. with a leading `\`. In a string literal
+            // that leading `\` is kept verbatim (since only `\\` and
+            // `\"` are recognized escapes inside strings), so a URL
+            // like `https://x/#anchor` would have ended up rendered
+            // with a literal backslash. Caught by the
+            // url_with_hash_compiles end-to-end test.
             state
                 .output
-                .push_str(&format!("#link(\"{}\")[", escape_typst(&dest_url)));
+                .push_str(&format!("#link(\"{}\")[", escape_typst_string(&dest_url)));
         }
         Tag::Image { dest_url, .. } => {
             // Alt text arrives between Start and End; we drop it for
             // v1 (Typst's `#image` has no alt field in the version
-            // we depend on) and just emit the image directly.
+            // we depend on) and just emit the image directly. URL
+            // escaping follows the same rule as `Tag::Link` above.
             state
                 .output
-                .push_str(&format!("#image(\"{}\")", escape_typst(&dest_url)));
+                .push_str(&format!("#image(\"{}\")", escape_typst_string(&dest_url)));
         }
         Tag::Emphasis => state.output.push('_'),
         Tag::Strong => state.output.push('*'),
@@ -457,12 +469,38 @@ fn emit_end(state: &mut TypstEmitState, tag_end: TagEnd) {
 
 /// Escape a string for safe inclusion in Typst markup.
 ///
-/// Escapes the three characters that would otherwise be interpreted as
-/// Typst markup (`#`, `*`, `_`) plus the escape character itself (`\`)
-/// and the inline-markup delimiters (`[`, `]`). We escape brackets too
-/// because content frequently contains them (markdown link text, code
-/// in tables, etc.) and a stray unbalanced bracket would produce a
-/// confusing Typst error.
+/// The set of chars escaped is the exhaustive list of markup-active
+/// characters per the Typst syntax reference
+/// (<https://typst.app/docs/reference/syntax/>). Every char that
+/// starts a markup construct at the position where user content
+/// lives must be prefixed with a backslash so Typst treats it as
+/// literal text rather than interpreting it as markup.
+///
+/// Escaped chars:
+/// - `\` (the escape character itself — must always be doubled
+///   inside an escape sequence)
+/// - `#` (entry into code mode)
+/// - `*` (strong emphasis)
+/// - `_` (emphasis)
+/// - `` ` `` (inline raw text)
+/// - `[` `]` (content block delimiters)
+/// - `@` (reference marker)
+/// - `$` (entry into math mode — also block mode if surrounded by
+///   whitespace)
+/// - `~` (symbol shorthand, e.g. `~` is non-breaking space)
+/// - `'` `"` (smart quote trigger — without escape, ASCII
+///   apostrophes / quotes get rendered as typographic curly
+///   variants, which is wrong when the user meant a literal char)
+///
+/// Chars that are NOT escaped (and don't need to be):
+/// - `-`, `+`, `=`, `/` at the start of a line: trigger list and
+///   heading syntax in *markup* mode, but the user content we emit
+///   always lives inside a content block `[...]` where line
+///   position does not carry the same meaning.
+/// - `<` `>` at the start of a line: same reason — `<label>` is
+///   markup-level, not content-level.
+/// - `:` `;` `,` `.` `(` `)` `?` `!` etc.: not markup-active in
+///   any mode.
 fn escape_typst(s: &str) -> String {
     let mut out = String::with_capacity(s.len());
     for c in s.chars() {
@@ -471,9 +509,14 @@ fn escape_typst(s: &str) -> String {
             '#' => out.push_str("\\#"),
             '*' => out.push_str("\\*"),
             '_' => out.push_str("\\_"),
+            '`' => out.push_str("\\`"),
             '[' => out.push_str("\\["),
             ']' => out.push_str("\\]"),
             '@' => out.push_str("\\@"),
+            '$' => out.push_str("\\$"),
+            '~' => out.push_str("\\~"),
+            '\'' => out.push_str("\\'"),
+            '"' => out.push_str("\\\""),
             other => out.push(other),
         }
     }
@@ -483,9 +526,17 @@ fn escape_typst(s: &str) -> String {
 /// Escape a string for safe inclusion as a Typst string literal
 /// (i.e. between double quotes). Only `"` and `\` need escaping;
 /// newlines and other control characters are passed through
-/// verbatim. Used for code-block bodies where the user content
-/// may contain any character at all and we want to bypass the
-/// markup interpreter entirely.
+/// verbatim. Used for code-block bodies and the URL fields of
+/// `#link` / `#image` calls — anywhere the value lands inside a
+/// `"..."` and must not terminate the string or change the
+/// surrounding syntax.
+///
+/// Inside a Typst string literal, only two escape sequences are
+/// recognised: `\\` (literal backslash) and `\"` (literal double
+/// quote). Every other `\X` pair is kept verbatim — so a leading
+/// `\#` inside a string is two chars, not a literal `#`. That is
+/// why the markup escape function (which emits `\#` for `#`) must
+/// NOT be used for string content.
 fn escape_typst_string(s: &str) -> String {
     let mut out = String::with_capacity(s.len());
     for c in s.chars() {

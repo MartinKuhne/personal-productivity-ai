@@ -346,7 +346,18 @@ fn write_pdf(path: &Path, bytes: &[u8]) -> Result<(), String> {
 // (AGENTS.md RUST-056 / RUST-057).
 //
 // see: `src/app/print_pdf_tests.rs`
+//
+// Proptest-based property tests live in
+// `src/app/print_pdf_proptests.rs`. They run the same compile
+// pipeline against random printable-ASCII inputs as the strongest
+// possible "Typst syntax reference compliance" check: any escape
+// the translator is missing will surface as a compile failure
+// somewhere in the random sample.
 
 #[cfg(test)]
 #[path = "print_pdf_tests.rs"]
 mod tests;
+
+#[cfg(test)]
+#[path = "print_pdf_proptests.rs"]
+mod proptests;

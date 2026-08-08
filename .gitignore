@@ -25,3 +25,8 @@ release/
 .idea/
 *.log
 .env*
+
+# Proptest regression cases (auto-generated when a proptest
+# assertion fails; contains a minimal failing input you can
+# replay with `PROPTEST_REGRESSIONS_FILE=...`).
+**/proptest-regressions/
