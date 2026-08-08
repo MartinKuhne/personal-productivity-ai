@@ -5,22 +5,30 @@
 
 use crate::config::TrelloClient;
 
-/// Send an authenticated request to the Trello REST API and return
-/// the parsed JSON body.
+/// Build the authenticated request URL for a Trello REST call.
 ///
 /// `endpoint` is the path *after* `/1` (e.g. `/members/me/boards`).
 /// The API key and OAuth token are appended as query parameters per
 /// Trello's authentication model.
+///
+/// Extracted from [`trello_request`] so the URL shape is unit-testable
+/// without touching the network.
+pub fn build_trello_url(client_config: &TrelloClient, endpoint: &str) -> String {
+    format!(
+        "https://api.trello.com/1{}?key={}&token={}",
+        endpoint, client_config.api_key, client_config.token
+    )
+}
+
+/// Send an authenticated request to the Trello REST API and return
+/// the parsed JSON body.
 pub fn trello_request(
     client_config: &TrelloClient,
     method: reqwest::Method,
     endpoint: &str,
     body: Option<&serde_json::Value>,
 ) -> Result<serde_json::Value, String> {
-    let url = format!(
-        "https://api.trello.com/1{}?key={}&token={}",
-        endpoint, client_config.api_key, client_config.token
-    );
+    let url = build_trello_url(client_config, endpoint);
     let safe_url = format!("https://api.trello.com/1{}", endpoint);
 
     tracing::debug!(name = "trello.request", method = %method, url = %safe_url, "Sending request to Trello API");
@@ -56,3 +64,7 @@ pub fn trello_request(
         Err(format!("Trello API error: {} - {}", status, error_text))
     }
 }
+
+#[cfg(test)]
+#[path = "client_tests.rs"]
+mod tests;
