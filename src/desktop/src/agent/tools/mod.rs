@@ -1,14 +1,17 @@
 //! LLM-callable tools — the `Tool` trait, the `ToolManager` (catalog +
 //! per-group state + error tracking), and implementations for
-//! filesystem, web, calendar, contacts, email, CSV, and weather.
+//! filesystem, web, email, and CSV.
+//!
+//! Protocol-layer code for the external service integrations
+//! (CalDAV, CardDAV, MCP, Trello, Weather) lives under
+//! [`crate::integrations`] and is referenced from the `Tool`
+//! adapters in [`manager::builtin`].
 //!
 //! Requirements: see [`SPEC.md`](SPEC.md) (TOOL-001..TOOL-010, TOOL-014..024) for the full specification.
 
 pub mod blocking;
 #[cfg(feature = "browser")]
 pub mod browser;
-pub mod caldav;
-pub mod carddav;
 pub mod context;
 pub mod csv_db;
 pub mod dtos;
@@ -16,7 +19,6 @@ pub mod filesystem;
 pub mod jmap;
 pub mod manager;
 pub mod mcp;
-pub mod weather;
 pub mod web;
 pub mod yaml_header;
 

@@ -8,7 +8,6 @@
 //!
 //! Unit tests live in the sibling `carddav_tests.rs` sidecar.
 
-use crate::agent::tools::blocking::block_on;
 use crate::config::AppConfig;
 use fast_dav_rs::CardDavClient;
 
@@ -16,10 +15,10 @@ use fast_dav_rs::CardDavClient;
 /// CardDAV error bodies are typically small (XML error envelopes), but
 /// pathological responses can be large; 4 KiB is plenty for diagnosis
 /// without flooding the log.
-const LOG_BODY_LIMIT: usize = 4096;
+pub(super) const LOG_BODY_LIMIT: usize = 4096;
 
 /// Truncate `body` to at most [`LOG_BODY_LIMIT`] bytes for safe logging.
-fn log_truncate(body: &[u8]) -> String {
+pub(super) fn log_truncate(body: &[u8]) -> String {
     if body.len() <= LOG_BODY_LIMIT {
         String::from_utf8_lossy(body).to_string()
     } else {
@@ -36,7 +35,7 @@ fn log_truncate(body: &[u8]) -> String {
 /// a separator, the resulting URL is malformed and the server rejects the
 /// PUT (FastMail responds `403 Forbidden - Mailbox does not exist`).
 /// Strip any trailing `/` from the collection and re-insert a single one.
-fn build_contact_put_path(addressbook_href: &str, uid: &str) -> String {
+pub(super) fn build_contact_put_path(addressbook_href: &str, uid: &str) -> String {
     format!("{}/{}.vcf", addressbook_href.trim_end_matches('/'), uid)
 }
 
@@ -52,7 +51,7 @@ fn build_contact_put_path(addressbook_href: &str, uid: &str) -> String {
 /// round-tripping — the formatter writes them as empty `;`-separated
 /// slots, the parser turns the empty slots back into `None`.
 #[derive(Clone, Debug, PartialEq, Eq)]
-struct StructuredAddress {
+pub struct StructuredAddress {
     /// vCard `TYPE=` value, e.g. `"HOME"`, `"WORK"`. `None` means
     /// no TYPE= parameter (uncommon but valid).
     kind: Option<String>,
@@ -112,7 +111,7 @@ impl serde::Serialize for StructuredAddress {
 /// caller should generate a fresh one. vCard 3.0 doesn't strictly require
 /// a UID but CardDAV servers reject resources without one, so missing
 /// UID is a real-world error worth logging.
-fn extract_vcard_uid(body: &str) -> Option<String> {
+pub(super) fn extract_vcard_uid(body: &str) -> Option<String> {
     let unfolded = unfold_vcard(body);
     for line in unfolded.lines() {
         let (prop, value) = line.split_once(':')?;
@@ -157,7 +156,7 @@ fn unescape_vcard_text(text: &str) -> String {
 /// (space or tab) is removed and the continuation is appended to the
 /// previous line. This is the inverse of what producers do when a value
 /// exceeds 75 octets.
-fn unfold_vcard(body: &str) -> String {
+pub(super) fn unfold_vcard(body: &str) -> String {
     let mut unfolded = String::new();
     for line in body.lines() {
         if line.starts_with(' ') || line.starts_with('\t') {
@@ -182,7 +181,7 @@ fn unfold_vcard(body: &str) -> String {
 /// canonical property is replaced). `line` is the unfolded original
 /// line, re-emitted verbatim for properties the update doesn't touch.
 #[derive(Debug, Clone)]
-struct VcardProp {
+pub(super) struct VcardProp {
     name: String,
     prefix: String,
     line: String,
@@ -205,7 +204,7 @@ const CANONICAL_PROP_NAMES: &[&str] =
 /// `BEGIN`, `END`, `VERSION`, and `UID` are filtered out — `BEGIN`,
 /// `END`, `VERSION` are re-emitted by the merger, and `UID` is supplied
 /// separately by the caller.
-fn parse_vcard_properties(body: &str) -> Vec<VcardProp> {
+pub(super) fn parse_vcard_properties(body: &str) -> Vec<VcardProp> {
     let unfolded = unfold_vcard(body);
     let mut out = Vec::new();
     for line in unfolded.lines() {
@@ -310,7 +309,11 @@ fn parse_single_address_from_json(item: &serde_json::Value) -> Option<Structured
 ///   * Empty strings in the JSON are treated as "not provided"
 ///     (consistent with [`first_str`]) so an LLM that forgets a field
 ///     doesn't wipe it out.
-fn merge_vcard_update(existing: &[VcardProp], contact_json: &str, uid: Option<&str>) -> String {
+pub(super) fn merge_vcard_update(
+    existing: &[VcardProp],
+    contact_json: &str,
+    uid: Option<&str>,
+) -> String {
     let parsed: serde_json::Value =
         serde_json::from_str(contact_json).unwrap_or_else(|_| serde_json::json!({}));
 
@@ -440,29 +443,29 @@ fn merge_vcard_update(existing: &[VcardProp], contact_json: &str, uid: Option<&s
     out.push_str("END:VCARD\r\n");
     out
 }
-#[derive(serde::Serialize)]
-struct CardDavContactDetails {
-    client: String,
-    href: String,
-    fn_name: Option<String>,
-    email: Option<String>,
-    tel: Option<String>,
-    org: Option<String>,
+#[derive(serde::Serialize, Debug, Clone)]
+pub struct CardDavContactDetails {
+    pub client: String,
+    pub href: String,
+    pub fn_name: Option<String>,
+    pub email: Option<String>,
+    pub tel: Option<String>,
+    pub org: Option<String>,
     /// vCard `BDAY` (typically `YYYY-MM-DD`).
-    bday: Option<String>,
+    pub bday: Option<String>,
     /// All vCard `ADR` properties on the contact, in source order.
     /// Empty when the contact has no structured address.
-    addresses: Vec<StructuredAddress>,
-    vcard: String,
+    pub addresses: Vec<StructuredAddress>,
+    pub vcard: String,
 }
 
 #[derive(serde::Serialize)]
-struct CardDavResponse {
+pub struct CardDavResponse {
     results: Vec<CardDavContactDetails>,
     errors: Vec<String>,
 }
 
-async fn get_all_addressbooks(
+pub(super) async fn get_all_addressbooks(
     client: &CardDavClient,
     base_url: &str,
     username: &str,
@@ -548,7 +551,7 @@ async fn get_all_addressbooks(
     Ok(hrefs)
 }
 
-async fn fetch_contacts_from_book(
+pub(super) async fn fetch_contacts_from_book(
     client: &CardDavClient,
     book_path: &str,
 ) -> anyhow::Result<Vec<(String, String)>> {
@@ -567,7 +570,7 @@ async fn fetch_contacts_from_book(
     Ok(contacts)
 }
 
-fn parse_vcard(client: &str, href: &str, data: &str) -> CardDavContactDetails {
+pub(super) fn parse_vcard(client: &str, href: &str, data: &str) -> CardDavContactDetails {
     let mut contact = CardDavContactDetails {
         client: client.to_string(),
         href: href.to_string(),
@@ -744,7 +747,7 @@ fn first_str<'a>(parsed: &'a serde_json::Value, keys: &[&str]) -> Option<&'a str
     None
 }
 
-fn json_to_vcard(json_str: &str, uid_override: Option<&str>) -> String {
+pub(super) fn json_to_vcard(json_str: &str, uid_override: Option<&str>) -> String {
     let parsed: serde_json::Value =
         serde_json::from_str(json_str).unwrap_or_else(|_| serde_json::json!({}));
 
@@ -827,73 +830,71 @@ fn json_to_vcard(json_str: &str, uid_override: Option<&str>) -> String {
     vcard
 }
 
+// ---------------------------------------------------------------------------
+// LLM-adapter layer — the `tool_*` functions. Each one iterates the
+// configured DAV clients (CalDAV and CardDAV share the same config
+// map), builds a [`crate::integrations::dav::client::DavClient`] per
+// server, and aggregates the per-server results into the LLM-facing
+// DTO from `crate::agent::tools::dtos`.
+// ---------------------------------------------------------------------------
+
+/// Iterate every configured DAV client, invoke `f` against each
+/// one, and split the per-server outcomes into a `results` vec and
+/// an `errors` vec. Errors are recorded as
+/// `"Error on client {name}: {e}"` — the same string the previous
+/// inline-loop code produced — so any existing log lines and
+/// downstream tooling keep working.
+fn for_each_card_client<T, F>(config: &AppConfig, mut f: F) -> (Vec<T>, Vec<String>)
+where
+    F: FnMut(&str, &crate::integrations::dav::client::DavClient) -> Result<T, String>,
+{
+    let mut results = Vec::new();
+    let mut errors = Vec::new();
+    for (name, cc) in &config.caldav_clients {
+        match crate::integrations::dav::client::DavClient::new(name.clone(), cc)
+            .and_then(|c| f(name, &c))
+        {
+            Ok(item) => results.push(item),
+            Err(e) => errors.push(format!("Error on client {}: {}", name, e)),
+        }
+    }
+    (results, errors)
+}
+
+/// Like [`for_each_card_client`] but for methods that return a
+/// `Vec` per server (search). The per-server `Vec`s are flattened
+/// into the aggregate `results` vec.
+fn for_each_card_client_vec<T, F>(config: &AppConfig, mut f: F) -> (Vec<T>, Vec<String>)
+where
+    F: FnMut(&str, &crate::integrations::dav::client::DavClient) -> Result<Vec<T>, String>,
+{
+    let mut results = Vec::new();
+    let mut errors = Vec::new();
+    for (name, cc) in &config.caldav_clients {
+        match crate::integrations::dav::client::DavClient::new(name.clone(), cc)
+            .and_then(|c| f(name, &c))
+        {
+            Ok(mut v) => results.append(&mut v),
+            Err(e) => errors.push(format!("Error on client {}: {}", name, e)),
+        }
+    }
+    (results, errors)
+}
+
+/// Serialize a [`CardDavResponse`] to a pretty JSON string. Falls
+/// back to `"{}"` on encoder failure to match the cal side's
+/// `serialize_response` and the pre-refactor inline fallback.
+fn serialize_card_response(resp: &CardDavResponse) -> String {
+    serde_json::to_string_pretty(resp).unwrap_or_else(|_| "{}".to_string())
+}
+
 pub fn tool_search_contact(
     config: &AppConfig,
     keyword: &str,
 ) -> Result<crate::agent::tools::dtos::SearchContactResponse, String> {
-    let mut results = Vec::new();
-    let mut errors = Vec::new();
-    let kw = keyword.to_lowercase();
-
-    for (name, client_config) in &config.caldav_clients {
-        let res = block_on(async {
-            let client = CardDavClient::new(
-                &client_config.url,
-                Some(&client_config.username),
-                Some(&client_config.password),
-            )
-            .map_err(|e| anyhow::anyhow!("Client config error: {}", e))?;
-
-            let books =
-                get_all_addressbooks(&client, &client_config.url, &client_config.username).await?;
-            let mut matches = Vec::new();
-            let mut scanned = 0usize;
-            for book_path in books {
-                match fetch_contacts_from_book(&client, &book_path).await {
-                    Ok(contacts) => {
-                        scanned += contacts.len();
-                        for (href, data) in contacts {
-                            if data.to_lowercase().contains(&kw) {
-                                matches.push(parse_vcard(name, &href, &data));
-                            }
-                        }
-                    }
-                    Err(e) => {
-                        // Fail-fast on the first broken addressbook so the
-                        // operator can see a real server error (e.g. a 403
-                        // from FastMail when a collection has been removed
-                        // or renamed) instead of silently skipping it.
-                        tracing::warn!(
-                            name = "tool.carddav.search.book_failed",
-                            client = %name,
-                            book = %book_path,
-                            error = %e,
-                            "CardDAV sync_collection failed for an addressbook; aborting search"
-                        );
-                        return Err(e);
-                    }
-                }
-            }
-            tracing::info!(
-                name = "tool.carddav.search.summary",
-                client = %name,
-                keyword = %keyword,
-                scanned = scanned,
-                matched = matches.len(),
-                "CardDAV search completed"
-            );
-            anyhow::Result::<Vec<_>>::Ok(matches)
-        });
-
-        match res {
-            Ok(mut matches) => results.append(&mut matches),
-            Err(e) => errors.push(format!("Error on client {}: {}", name, e)),
-        }
-    }
-
-    let resp = CardDavResponse { results, errors };
+    let (results, errors) = for_each_card_client_vec(config, |_, c| c.search_contact(keyword));
     Ok(crate::agent::tools::dtos::SearchContactResponse {
-        results: serde_json::to_string_pretty(&resp).unwrap_or_else(|_| "{}".to_string()),
+        results: serialize_card_response(&CardDavResponse { results, errors }),
     })
 }
 
@@ -901,55 +902,9 @@ pub fn tool_get_contact(
     config: &AppConfig,
     id: &str,
 ) -> Result<crate::agent::tools::dtos::GetContactResponse, String> {
-    let mut results = Vec::new();
-    let mut errors = Vec::new();
-
-    for (name, client_config) in &config.caldav_clients {
-        let res = block_on(async {
-            let client = CardDavClient::new(
-                &client_config.url,
-                Some(&client_config.username),
-                Some(&client_config.password),
-            )
-            .map_err(|e| anyhow::anyhow!("Client config error: {}", e))?;
-
-            tracing::info!(
-                name = "tool.carddav.get.request",
-                client = %name,
-                href = %id,
-                "Fetching CardDAV contact by href"
-            );
-            let resp = client.get(id).await?;
-            let status = resp.status();
-            let body_bytes = resp.into_body();
-            let body_log = log_truncate(&body_bytes);
-            if !status.is_success() {
-                tracing::warn!(
-                    name = "tool.carddav.get.failed",
-                    client = %name,
-                    href = %id,
-                    status = %status,
-                    body = %body_log,
-                    "CardDAV GET returned non-success status"
-                );
-                return Err(anyhow::anyhow!(
-                    "Not found by href: {} - {}",
-                    status,
-                    body_log
-                ));
-            }
-            Ok(parse_vcard(name, id, &body_log))
-        });
-
-        match res {
-            Ok(data) => results.push(data),
-            Err(e) => errors.push(format!("Error on client {}: {}", name, e)),
-        }
-    }
-
-    let resp = CardDavResponse { results, errors };
+    let (results, errors) = for_each_card_client(config, |_, c| c.get_contact(id));
     Ok(crate::agent::tools::dtos::GetContactResponse {
-        result: serde_json::to_string_pretty(&resp).unwrap_or_else(|_| "{}".to_string()),
+        result: serialize_card_response(&CardDavResponse { results, errors }),
     })
 }
 
@@ -957,119 +912,16 @@ pub fn tool_add_contact(
     config: &AppConfig,
     contact_json: &str,
 ) -> Result<crate::agent::tools::dtos::AddContactResponse, String> {
+    // `add_contact` is special: it acts on the *first* configured CalDAV
+    // client (no "default addressbook" concept in CardDAV). The
+    // per-server output is a single status string, so the aggregation
+    // shape doesn't fit `for_each_card_client` cleanly.
     let mut all_results = Vec::new();
-    if let Some((name, client_config)) = config.caldav_clients.iter().next() {
-        let res = block_on(async {
-            let client = CardDavClient::new(
-                &client_config.url,
-                Some(&client_config.username),
-                Some(&client_config.password),
-            )
-            .map_err(|e| anyhow::anyhow!("Client config error: {}", e))?;
-
-            let books =
-                get_all_addressbooks(&client, &client_config.url, &client_config.username).await?;
-            let default_book = books
-                .first()
-                .ok_or_else(|| anyhow::anyhow!("No addressbook found to add to"))?;
-
-            let uid = format!(
-                "{}",
-                std::time::SystemTime::now()
-                    .duration_since(std::time::UNIX_EPOCH)
-                    .unwrap_or_default()
-                    .as_millis()
-            );
-            // Addressbook hrefs from PROPFIND typically end with `/`. The PUT
-            // URL must be `<addressbook>/<uid>.vcf` (with a `/` separator) or
-            // the server concatenates the resource name directly onto the
-            // collection path and rejects the request as malformed
-            // (FastMail responds `403 Forbidden - Mailbox does not exist`).
-            // `build_contact_put_path` normalises the separator.
-            let path = build_contact_put_path(default_book, &uid);
-            let vcard_data = json_to_vcard(contact_json, Some(&uid));
-
-            tracing::info!(
-                name = "tool.carddav.add.request",
-                client = %name,
-                addressbook = %default_book,
-                uid = %uid,
-                path = %path,
-                vcard_bytes = vcard_data.len(),
-                "Sending CardDAV PUT (If-None-Match: *) to create contact"
-            );
-            tracing::debug!(
-                name = "tool.carddav.add.vcard",
-                client = %name,
-                vcard = %vcard_data,
-                "vCard body for contact creation"
-            );
-            let vcard_bytes: bytes::Bytes = vcard_data.into_bytes().into();
-
-            let resp = client.put_if_none_match(&path, vcard_bytes).await?;
-            let status = resp.status();
-            // Capture Location/ETag headers BEFORE consuming the body — they
-            // are critical for diagnosing "server said 2xx but the contact
-            // isn't there" cases. Use string literals so we don't need a
-            // direct `http` crate dependency.
-            let location = resp
-                .headers()
-                .get("location")
-                .and_then(|v| v.to_str().ok())
-                .map(|s| s.to_string());
-            let etag = resp
-                .headers()
-                .get("etag")
-                .and_then(|v| v.to_str().ok())
-                .map(|s| s.to_string());
-            let body_bytes = resp.into_body();
-            let body_log = log_truncate(&body_bytes);
-
-            if !status.is_success() {
-                tracing::error!(
-                    name = "tool.carddav.add.failed",
-                    client = %name,
-                    path = %path,
-                    status = %status,
-                    location = ?location,
-                    etag = ?etag,
-                    body = %body_log,
-                    "CardDAV PUT returned non-success status; contact was NOT created"
-                );
-                return Err(anyhow::anyhow!(
-                    "Failed to PUT contact: {} - {}",
-                    status,
-                    body_log
-                ));
-            }
-
-            // Even on 2xx, log enough detail that the operator can confirm
-            // the server actually accepted the resource. FastMail and other
-            // providers occasionally return 2xx for a no-op or for a put
-            // that landed at a different URL than the one we sent.
-            tracing::info!(
-                name = "tool.carddav.add.success",
-                client = %name,
-                path = %path,
-                status = %status,
-                location = ?location,
-                etag = ?etag,
-                "CardDAV PUT succeeded"
-            );
-            Ok((path, location, etag))
-        });
-
-        match res {
-            Ok((path, location, etag)) => {
-                let mut summary = format!("--- Client: {} ---\nCreated at {}", name, path);
-                if let Some(loc) = location {
-                    summary.push_str(&format!("\nLocation: {}", loc));
-                }
-                if let Some(tag) = etag {
-                    summary.push_str(&format!("\nETag: {}", tag));
-                }
-                all_results.push(summary);
-            }
+    if let Some((name, cc)) = config.caldav_clients.iter().next() {
+        match crate::integrations::dav::client::DavClient::new(name.clone(), cc)
+            .and_then(|c| c.add_contact(contact_json))
+        {
+            Ok(path) => all_results.push(format!("--- Client: {} ---\nCreated at {}", name, path)),
             Err(e) => all_results.push(format!("Error on client {}: {}", name, e)),
         }
     }
@@ -1085,160 +937,24 @@ pub fn tool_add_contact(
 
 /// Update an existing contact at `href` with new data from `contact_json`.
 ///
-/// Flow:
-/// 1. `GET` the current vCard at `href` to capture the existing `UID`
-///    (so the vCard identity is preserved across the update) and the
-///    current `ETag` (so we can do an `If-Match` conditional write).
-/// 2. Build a fresh vCard from `contact_json` (same schema as
-///    [`tool_add_contact`]) using the existing `UID`.
-/// 3. `PUT` the new vCard back to the same `href` with `If-Match: <etag>`.
-///    If the server has a newer ETag (someone else touched the contact),
-///    the PUT fails with 412 and the caller must `GET` again and retry.
-///
-/// If the `GET` returns no ETag header (some CalDAV servers omit it),
-/// we fall back to an unconditional `PUT`. The vCard is still
-/// regenerated, so the worst case is a last-writer-wins race.
+/// Thin wrapper that delegates to
+/// [`crate::integrations::dav::client::DavClient::update_contact`]
+/// per configured DAV server, then aggregates the per-server
+/// results. See that method for the GET → If-Match PUT flow.
 pub fn tool_update_contact(
     config: &AppConfig,
     href: &str,
     contact_json: &str,
 ) -> Result<crate::agent::tools::dtos::UpdateContactResponse, String> {
     let mut all_results = Vec::new();
-    for (name, client_config) in &config.caldav_clients {
-        let res = block_on(async {
-            let client = CardDavClient::new(
-                &client_config.url,
-                Some(&client_config.username),
-                Some(&client_config.password),
-            )
-            .map_err(|e| anyhow::anyhow!("Client config error: {}", e))?;
-
-            tracing::info!(
-                name = "tool.carddav.update.fetch",
-                client = %name,
-                href = %href,
-                "Fetching existing contact for update"
-            );
-            let get_resp = client.get(href).await?;
-            let get_status = get_resp.status();
-            let get_etag = get_resp
-                .headers()
-                .get("etag")
-                .and_then(|v| v.to_str().ok())
-                .map(|s| s.to_string());
-            let get_body = log_truncate(&get_resp.into_body());
-            if !get_status.is_success() {
-                tracing::warn!(
-                    name = "tool.carddav.update.fetch_failed",
-                    client = %name,
-                    href = %href,
-                    status = %get_status,
-                    body = %get_body,
-                    "Failed to fetch existing contact for update"
-                );
-                return Err(anyhow::anyhow!(
-                    "Failed to fetch contact for update: {} - {}",
-                    get_status,
-                    get_body
-                ));
-            }
-
-            let existing_uid = extract_vcard_uid(&get_body);
-            if existing_uid.is_none() {
-                tracing::warn!(
-                    name = "tool.carddav.update.no_uid",
-                    client = %name,
-                    href = %href,
-                    "Existing vCard has no UID; the regenerated vCard will get a fresh one and the href may change"
-                );
-            }
-
-            // Property-preserving merge: every property the LLM doesn't
-            // touch (N, NICKNAME, ADR, BDAY, URL, PHOTO, X-*, …) is kept
-            // verbatim. Only the canonical fields (FN, EMAIL, TEL, ORG,
-            // TITLE, NOTE) get replaced when the LLM provides a value.
-            let existing_props = parse_vcard_properties(&get_body);
-            let new_vcard =
-                merge_vcard_update(&existing_props, contact_json, existing_uid.as_deref());
-            let vcard_bytes: bytes::Bytes = new_vcard.into_bytes().into();
-
-            tracing::info!(
-                name = "tool.carddav.update.request",
-                client = %name,
-                href = %href,
-                if_match = ?get_etag,
-                vcard_bytes = vcard_bytes.len(),
-                preserved_uid = ?existing_uid,
-                "PUT updated contact (If-Match when ETag is present)"
-            );
-
-            let put_resp = if let Some(ref tag) = get_etag {
-                client.put_if_match(href, vcard_bytes, tag).await?
-            } else {
-                // No ETag means no race detection; fall back to a plain PUT.
-                client.put(href, vcard_bytes).await?
-            };
-            let put_status = put_resp.status();
-            let put_location = put_resp
-                .headers()
-                .get("location")
-                .and_then(|v| v.to_str().ok())
-                .map(|s| s.to_string());
-            let put_etag = put_resp
-                .headers()
-                .get("etag")
-                .and_then(|v| v.to_str().ok())
-                .map(|s| s.to_string());
-            let put_body = log_truncate(&put_resp.into_body());
-
-            if !put_status.is_success() {
-                tracing::error!(
-                    name = "tool.carddav.update.failed",
-                    client = %name,
-                    href = %href,
-                    status = %put_status,
-                    location = ?put_location,
-                    etag = ?put_etag,
-                    body = %put_body,
-                    "PUT of updated contact returned non-success status"
-                );
-                return Err(anyhow::anyhow!(
-                    "Failed to PUT updated contact: {} - {}",
-                    put_status,
-                    put_body
-                ));
-            }
-
-            tracing::info!(
-                name = "tool.carddav.update.success",
-                client = %name,
-                href = %href,
-                status = %put_status,
-                location = ?put_location,
-                etag = ?put_etag,
-                "Updated contact"
-            );
-            Ok((put_status, put_location, put_etag))
-        });
-
-        match res {
-            Ok((status, location, etag)) => {
-                let mut summary = format!(
-                    "--- Client: {} ---\nUpdated {} (status {})",
-                    name, href, status
-                );
-                if let Some(loc) = location {
-                    summary.push_str(&format!("\nLocation: {}", loc));
-                }
-                if let Some(tag) = etag {
-                    summary.push_str(&format!("\nETag: {}", tag));
-                }
-                all_results.push(summary);
-            }
+    for (name, cc) in &config.caldav_clients {
+        match crate::integrations::dav::client::DavClient::new(name.clone(), cc)
+            .and_then(|c| c.update_contact(href, contact_json))
+        {
+            Ok(summary) => all_results.push(format!("--- Client: {} ---\n{}", name, summary)),
             Err(e) => all_results.push(format!("Error on client {}: {}", name, e)),
         }
     }
-
     if all_results.is_empty() {
         Err("No CardDAV clients configured.".to_string())
     } else {
@@ -1252,73 +968,18 @@ pub fn tool_update_contact(
 ///
 /// Returns Ok with "Deleted" on 2xx (typically 204 No Content) and 404
 /// (already gone — treat as success so the LLM can retry idempotently).
-/// Other non-success statuses are propagated as errors with the
-/// truncated response body.
+/// Thin wrapper that delegates to
+/// [`crate::integrations::dav::client::DavClient::delete_contact`]
+/// per configured DAV server.
 pub fn tool_delete_contact(
     config: &AppConfig,
     href: &str,
 ) -> Result<crate::agent::tools::dtos::DeleteContactResponse, String> {
     let mut all_results = Vec::new();
-    for (name, client_config) in &config.caldav_clients {
-        let res = block_on(async {
-            let client = CardDavClient::new(
-                &client_config.url,
-                Some(&client_config.username),
-                Some(&client_config.password),
-            )
-            .map_err(|e| anyhow::anyhow!("Client config error: {}", e))?;
-
-            tracing::info!(
-                name = "tool.carddav.delete.request",
-                client = %name,
-                href = %href,
-                "Deleting CardDAV contact"
-            );
-            let resp = client.delete(href).await?;
-            let status = resp.status();
-            let body = log_truncate(&resp.into_body());
-
-            // 404 is treated as a successful no-op so the LLM can call
-            // delete_contact idempotently (e.g. "delete Paul Wayss, then
-            // re-create with the correct data" should not error if the
-            // first delete already succeeded).
-            if status.as_u16() == 404 {
-                tracing::info!(
-                    name = "tool.carddav.delete.already_gone",
-                    client = %name,
-                    href = %href,
-                    "Contact was already absent (404); treating as success"
-                );
-                return Ok::<_, anyhow::Error>("Already absent (404)".to_string());
-            }
-
-            if !status.is_success() {
-                tracing::error!(
-                    name = "tool.carddav.delete.failed",
-                    client = %name,
-                    href = %href,
-                    status = %status,
-                    body = %body,
-                    "DELETE of contact returned non-success status"
-                );
-                return Err(anyhow::anyhow!(
-                    "Failed to DELETE contact: {} - {}",
-                    status,
-                    body
-                ));
-            }
-
-            tracing::info!(
-                name = "tool.carddav.delete.success",
-                client = %name,
-                href = %href,
-                status = %status,
-                "Deleted contact"
-            );
-            Ok(format!("Deleted (status {})", status))
-        });
-
-        match res {
+    for (name, cc) in &config.caldav_clients {
+        match crate::integrations::dav::client::DavClient::new(name.clone(), cc)
+            .and_then(|c| c.delete_contact(href))
+        {
             Ok(s) => all_results.push(format!("--- Client: {} ---\n{}", name, s)),
             Err(e) => all_results.push(format!("Error on client {}: {}", name, e)),
         }
@@ -1337,5 +998,5 @@ pub fn tool_delete_contact(
 // ---------------------------------------------------------------------------
 
 #[cfg(test)]
-#[path = "carddav_tests.rs"]
+#[path = "card_tests.rs"]
 mod tests;

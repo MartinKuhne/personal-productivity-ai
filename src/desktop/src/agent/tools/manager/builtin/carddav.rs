@@ -45,7 +45,7 @@ impl Tool for SearchContactTool {
     fn execute(&self, ctx: &ToolContext, args: &str) -> Result<serde_json::Value, String> {
         let input: dtos::SearchContactInput =
             serde_json::from_str(args).map_err(|e| format!("Invalid args: {}", e))?;
-        crate::agent::tools::carddav::tool_search_contact(ctx.config, &input.keyword).map(|r| {
+        crate::integrations::dav::card::tool_search_contact(ctx.config, &input.keyword).map(|r| {
             serde_json::to_value(r).unwrap_or_else(|e| serde_json::json!({"error": e.to_string()}))
         })
     }
@@ -84,7 +84,7 @@ impl Tool for AddContactTool {
     fn execute(&self, ctx: &ToolContext, args: &str) -> Result<serde_json::Value, String> {
         let input: dtos::AddContactInput =
             serde_json::from_str(args).map_err(|e| format!("Invalid args: {}", e))?;
-        crate::agent::tools::carddav::tool_add_contact(ctx.config, &input.contact_json).map(|r| {
+        crate::integrations::dav::card::tool_add_contact(ctx.config, &input.contact_json).map(|r| {
             serde_json::to_value(r).unwrap_or_else(|e| serde_json::json!({"error": e.to_string()}))
         })
     }
@@ -126,7 +126,7 @@ impl Tool for GetContactTool {
     fn execute(&self, ctx: &ToolContext, args: &str) -> Result<serde_json::Value, String> {
         let input: dtos::GetContactInput =
             serde_json::from_str(args).map_err(|e| format!("Invalid args: {}", e))?;
-        crate::agent::tools::carddav::tool_get_contact(ctx.config, &input.id).map(|r| {
+        crate::integrations::dav::card::tool_get_contact(ctx.config, &input.id).map(|r| {
             serde_json::to_value(r).unwrap_or_else(|e| serde_json::json!({"error": e.to_string()}))
         })
     }
@@ -165,7 +165,7 @@ impl Tool for UpdateContactTool {
     fn execute(&self, ctx: &ToolContext, args: &str) -> Result<serde_json::Value, String> {
         let input: dtos::UpdateContactInput =
             serde_json::from_str(args).map_err(|e| format!("Invalid args: {}", e))?;
-        crate::agent::tools::carddav::tool_update_contact(
+        crate::integrations::dav::card::tool_update_contact(
             ctx.config,
             &input.id,
             &input.contact_json,
@@ -206,7 +206,7 @@ impl Tool for DeleteContactTool {
     fn execute(&self, ctx: &ToolContext, args: &str) -> Result<serde_json::Value, String> {
         let input: dtos::DeleteContactInput =
             serde_json::from_str(args).map_err(|e| format!("Invalid args: {}", e))?;
-        crate::agent::tools::carddav::tool_delete_contact(ctx.config, &input.id).map(|r| {
+        crate::integrations::dav::card::tool_delete_contact(ctx.config, &input.id).map(|r| {
             serde_json::to_value(r).unwrap_or_else(|e| serde_json::json!({"error": e.to_string()}))
         })
     }

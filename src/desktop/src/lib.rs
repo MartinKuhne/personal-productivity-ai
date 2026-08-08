@@ -2,7 +2,7 @@
 //!
 //! The crate exposes its subsystems as `pub mod` so internal code and
 //! external binaries can reach every type through its full module path
-//! (`fastmd::agent::tools::mcp`, `fastmd::ui::render`, etc.). The
+//! (`fastmd::integrations::mcp`, `fastmd::ui::render`, etc.). The
 //! `pub use` re-exports at the bottom of this file are the only items
 //! that are also reachable through a shorter root-level path; every
 //! other name must be reached through its subsystem module.
@@ -41,9 +41,11 @@ pub mod config;
 // above.
 
 /// Re-export the `mcp` subsystem module under the crate root so
-/// `fastmd::mcp::oauth::...` works in `tests/mcp_oauth.rs` (and any
-/// future external consumer of the MCP OAuth flow).
-pub use agent::tools::mcp;
+/// `fastmd::mcp::oauth::...` works for short-path consumers
+/// (e.g. `tests/mcp_oauth.rs` historically reached it that way). The
+/// canonical path is `fastmd::integrations::mcp`; the short alias
+/// stays for backward compatibility.
+pub use integrations::mcp;
 
 /// The `ConfigArrived` event is the first event the main binary
 /// publishes onto the configuration bus after constructing the

@@ -26,7 +26,7 @@ use std::sync::{Arc, Mutex};
 use std::thread;
 use std::time::Duration;
 
-use fastmd::mcp::oauth::{
+use fastmd::integrations::mcp::oauth::{
     OAuthFlowInputs, PreRegisteredClient, TokenStore, WwwAuthenticateChallenge, run_oauth_flow,
     start_loopback,
 };
@@ -232,7 +232,7 @@ fn full_flow_succeeds_with_preregistered_client() {
     let _ = (code, expected_state);
     match result {
         Ok(_) => panic!("expected StateMismatch but flow succeeded"),
-        Err(fastmd::mcp::oauth::OAuthError::StateMismatch) => {
+        Err(fastmd::integrations::mcp::oauth::OAuthError::StateMismatch) => {
             // Discovery requests landed on the mock:
             let recs = state.record();
             assert!(
@@ -309,7 +309,7 @@ fn flow_uses_challenge_resource_metadata_url() {
     t.join().unwrap();
     match result {
         Ok(_) => panic!("expected StateMismatch, got success"),
-        Err(fastmd::mcp::oauth::OAuthError::StateMismatch) => {
+        Err(fastmd::integrations::mcp::oauth::OAuthError::StateMismatch) => {
             // The challenge's URL should have been used for the
             // PRM fetch.
             let recs = state.record();

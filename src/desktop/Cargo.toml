@@ -96,6 +96,13 @@ log = "0.4"
 # PNG snapshots. The `png` feature is required for the snapshot
 # format. Snapshots are saved as PNGs in `src/desktop/tests/snapshots/`.
 image = { version = "0.25", default-features = false, features = ["png"] }
+# `wiremock` is the shared mock-HTTP-server library used by every
+# integration test that needs to fake an external service (Trello,
+# Weather, CalDAV, MCP OAuth). It is the only mock-server crate the
+# crate uses; the previous ad-hoc `TcpListener` helpers in
+# `integrations/*/tests*.rs` were removed in favour of this single
+# dev-dep.
+wiremock = "0.6"
 
 [[bin]]
 name = "fastmd"

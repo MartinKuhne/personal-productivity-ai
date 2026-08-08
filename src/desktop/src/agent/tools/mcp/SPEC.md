@@ -1,4 +1,4 @@
-# MCP Client Tools Specification
+﻿# MCP Client Tools Specification
 
 > **GUARDRAIL**: This specification file is managed by the spec-split workflow. Do not edit
 > this file directly unless explicitly instructed. Any changes to requirements must be
