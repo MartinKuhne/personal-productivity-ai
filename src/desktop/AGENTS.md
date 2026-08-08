@@ -19,7 +19,8 @@
   writing or maintaining egui UI tests.
 - `doc/distill/mcp.md` — Model Context Protocol client-side spec (lifecycle,
   transports, OAuth 2.1 authorization, cancellation, ping, progress). Consult
-  when working on the MCP client (`agent/tools/mcp/`).
+  when working on the MCP client (protocol layer in
+  `integrations/mcp/`, tool-loop adapter in `agent/tools/mcp/`).
 
 ## 3. Egui inspection and egui_mcp
 
@@ -67,8 +68,9 @@ src/
 │       ├── csv_db/         # CSV database tool family
 │       ├── jmap/           # JMAP email client tool family
 │       ├── manager/        # Tool manager and registry
-│       └── mcp/            # Model Context Protocol client tool family
-├── integrations/           # External service integrations (e.g., Discord)
+│       └── mcp/            # MCP tool-loop glue (McpToolAdapter)
+├── integrations/           # External service integrations
+│   └── mcp/                # MCP client protocol (transports, sessions, OAuth 2.1)
 ├── markdown/               # THE Markdown subsystem: parsing, rendering, document
 │                           # model, front-matter R/W, table-width algorithm
 │   └── table_width/        # Table width calculation algorithm

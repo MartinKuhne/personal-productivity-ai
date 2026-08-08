@@ -106,7 +106,7 @@ C4Component
 `tools/` defines the `Tool` trait and a `ToolManager` (formerly
 `ToolRegistry`) that owns the catalog of built-in and MCP-discovered
 tools, the per-group enable/parallel-safe/error state, and the
-[`McpClientManager`](agent/tools/mcp/mod.rs). `ToolContext<'a>` is the single
+[`McpClientManager`](../../src/desktop/src/integrations/mcp/manager.rs). `ToolContext<'a>` is the single
 parameter passed to every `Tool::execute`, carrying `&AppConfig` and
 `&Bus<FileEvent>`.
 
@@ -116,6 +116,7 @@ C4Component
 
   Component(reg, "ToolManager", "catalog + per-group state + error tracking + parallel-safety; register_builtin, register_mcp_tool, execute, get_schema, safety_of, parallel_safe_tools, set_group_enabled, record_error, clear_error, refresh_state, refresh_mcp_tools")
   Component(tctx, "ToolContext", "{config, file_event_bus}; thin shim over app::vfs::resolve::resolve(vpath, allow_write, libraries) -> Option<(PathBuf,bool)>")
+  Component(mcp, "McpToolAdapter", "wraps integrations::mcp::McpClientManager into a Tool impl; LLM-tool-loop glue in agent/tools/mcp/adapter.rs")
   Component(fs, "filesystem tools", "grep, read_file, read_lines, create_file, insert_lines, replace_text, list_files")
   Component(yaml, "yaml_header", "read_yaml_header, write_yaml_header")
   Component(web, "web", "web_fetch (pagination/headers/5-min cache), web_search (SearXNG), web_delegate sub-agent")
@@ -135,6 +136,7 @@ C4Component
   Rel(reg, caldav, "registers")
   Rel(reg, carddav, "registers")
   Rel(reg, weather, "registers (extra)")
+  Rel(reg, mcp, "registers each MCP-discovered tool")
   Rel(tctx, fs, "app::vfs::resolve::resolve for read/write")
 ```
 

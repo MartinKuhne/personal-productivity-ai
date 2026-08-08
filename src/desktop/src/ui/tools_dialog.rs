@@ -318,7 +318,7 @@ fn spawn_auth_flow(
     server_name: String,
     tx: std::sync::mpsc::Sender<BackgroundEvent>,
     ctx: eframe::egui::Context,
-    mgr: std::sync::Arc<crate::agent::tools::mcp::McpClientManager>,
+    mgr: std::sync::Arc<crate::integrations::mcp::McpClientManager>,
 ) {
     std::thread::spawn(move || {
         let error = match mgr.authenticate(&server_name) {

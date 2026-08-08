@@ -1,84 +1,25 @@
-//! Tests for the MCP client integration module.
+//! Tests for the MCP protocol client (transports, sessions, manager,
+//! OAuth 2.1 flow, error type, SSE walker).
 //!
-//! Sidecar file for `crate::agent::tools::mcp`. Extracted from `mod.rs`
+//! Sidecar file for `crate::integrations::mcp`. Extracted from `mod.rs`
 //! so the implementation module stays focused on production code.
 //!
 //! Originally a `#[cfg(test)] mod tests { ... }` block at the bottom of
-//! `mcp/mod.rs`. Lives in a sibling file so private item access via
-//! `super::*` keeps working.
+//! `mcp/mod.rs`; relocated when the protocol layer was moved from
+//! `crate::agent::tools::mcp` to `crate::integrations::mcp`. Lives in
+//! a sibling file so private item access via `super::*` keeps working.
+//!
+//! Tool-adapter tests now live in
+//! `crate::agent::tools::mcp::adapter_tests`.
 
 use super::MAX_REQUEST_TIMEOUT;
 use super::McpClientSession;
 use super::is_valid_session_id;
 use super::*;
-use crate::config::McpOAuthConfig;
+use crate::agent::tools::mcp::McpToolAdapter;
+use crate::config::{AppConfig, McpOAuthConfig, McpServerConfig};
 use std::collections::HashMap;
-
-#[test]
-fn test_mcp_tool_adapter_metadata_and_safety() {
-    let manager = Arc::new(McpClientManager::new());
-    let adapter = McpToolAdapter::new(
-        "test_server",
-        "test_tool",
-        "A test tool",
-        serde_json::json!({
-            "type": "object",
-            "properties": {
-                "query": { "type": "string" }
-            }
-        }),
-        manager,
-    );
-
-    assert_eq!(adapter.server_name(), "test_server");
-    assert_eq!(adapter.name(), "test_tool");
-    assert_eq!(adapter.description(), "A test tool");
-    assert_eq!(adapter.safety(), Safety::Mutating);
-    assert_eq!(adapter.parameters_schema()["type"].as_str(), Some("object"));
-
-    let mut config = AppConfig::default();
-    assert!(!adapter.is_enabled(&config, "prompt"));
-
-    config.mcp_servers.insert(
-        "test_server".to_string(),
-        McpServerConfig::Stdio {
-            command: "echo".to_string(),
-            args: vec![],
-            env: HashMap::new(),
-        }
-        .into(),
-    );
-    assert!(adapter.is_enabled(&config, "prompt"));
-}
-
-#[test]
-fn test_mcp_tool_adapter_disabled_when_entry_disabled() {
-    // Regression for CONFIG-012: an entry with `enabled: false`
-    // must cause the adapter to be disabled even though the
-    // server is present in the config map.
-    let manager = Arc::new(McpClientManager::new());
-    let adapter = McpToolAdapter::new(
-        "test_server",
-        "test_tool",
-        "A test tool",
-        serde_json::json!({"type": "object", "properties": {}}),
-        manager,
-    );
-
-    let mut config = AppConfig::default();
-    config.mcp_servers.insert(
-        "test_server".to_string(),
-        McpServerEntry {
-            enabled: false,
-            config: McpServerConfig::Stdio {
-                command: "echo".to_string(),
-                args: vec![],
-                env: HashMap::new(),
-            },
-        },
-    );
-    assert!(!adapter.is_enabled(&config, "prompt"));
-}
+use std::sync::Arc;
 
 #[test]
 fn test_mcp_client_manager_unconfigured_server_error() {

@@ -12,3 +12,12 @@
 
 #[cfg(feature = "discord")]
 pub mod discord;
+
+/// MCP (Model Context Protocol) client integration.
+///
+/// The wire-protocol client (transports, sessions, OAuth 2.1,
+/// manager) and the [`McpClientManager`](crate::integrations::mcp::McpClientManager)
+/// that owns them. The LLM-tool-loop glue that exposes
+/// MCP-discovered tools to the agent tool registry lives in
+/// [`crate::agent::tools::mcp`].
+pub mod mcp;

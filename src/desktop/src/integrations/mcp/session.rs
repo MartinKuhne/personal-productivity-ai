@@ -285,7 +285,7 @@ impl McpClientSession {
     /// Returns the previous value of the internal `last_call_saw_unauthorized`
     /// flag, resetting it to `false`. The manager calls this after every
     /// MCP call so it can update the in-memory `needs_auth` flag
-    /// (see [`crate::agent::tools::mcp::McpClientManager::mark_needs_auth`]).
+    /// (see [`McpClientManager::mark_needs_auth`](super::McpClientManager::mark_needs_auth)).
     /// Returns `false` if the lock is poisoned.
     pub fn take_unauthorized_flag(&self) -> bool {
         let Ok(mut state) = self.state.lock() else {
@@ -356,7 +356,7 @@ impl McpClientSession {
         let redirect_uri = self.oauth_redirect_uri();
         let loopback_override = redirect_uri.as_ref().and_then(|uri| {
             // Parse the redirect URI to extract the port and path for the loopback server
-            crate::agent::tools::mcp::parse_redirect_uri(uri).ok()
+            super::parse_redirect_uri(uri).ok()
         });
         OAuthFlowInputs {
             mcp_server_url: resource,

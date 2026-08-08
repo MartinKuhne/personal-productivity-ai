@@ -28,7 +28,7 @@ pub use groups::{InternalToolGroup, ToolGroupId, ToolGroupKind, ToolGroupState};
 pub use pagination::paginate_in_range;
 
 use crate::agent::tools::context::ToolContext;
-use crate::agent::tools::mcp::{McpClientManager, McpToolDescriptor};
+use crate::agent::tools::mcp::McpToolAdapter;
 use crate::agent::tools::{Safety, Tool};
 use crate::app::background::{BackgroundLogEntry, LogCategory};
 use crate::bus::config::CONFIG_ARRIVAL_TIMEOUT;
@@ -36,6 +36,7 @@ use crate::bus::core::Bus;
 use crate::bus::events::config::ConfigArrived;
 use crate::bus::events::typed::BackgroundEvent;
 use crate::config::{AppConfig, McpServerConfig};
+use crate::integrations::mcp::{McpClientManager, McpToolDescriptor};
 use std::collections::BTreeMap;
 use std::sync::Arc;
 use std::sync::mpsc::Sender;
@@ -93,7 +94,7 @@ impl ToolManager {
     ) {
         let server_name = server_name.into();
         let tool_name = tool_name.into();
-        let adapter = crate::agent::tools::mcp::McpToolAdapter::from_dynamic_source(
+        let adapter = McpToolAdapter::from_dynamic_source(
             &server_name,
             &tool_name,
             description,
