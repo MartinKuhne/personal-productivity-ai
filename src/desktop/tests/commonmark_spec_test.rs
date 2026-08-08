@@ -27,15 +27,6 @@
 //!
 //! # Known limitations (covered by the allow-list)
 //!
-//! ## HTML-only content
-//!
-//! Per `crate::markdown::typst`'s "Out of scope for v1" section,
-//! raw HTML blocks are dropped by the translator. Spec examples
-//! whose body is entirely raw HTML (type 1-7 HTML blocks,
-//! comments, CDATA, processing instructions) therefore produce
-//! empty Typst, which is the intended v1 behaviour. The PDF
-//! compiles to a valid (but blank) page for these examples.
-//!
 //! ## Setext heading + raw HTML interaction
 //!
 //! The CommonMark spec explicitly tests that a `---` setext
@@ -118,19 +109,51 @@ const END_MARKER: &str = "<!-- END TESTS -->";
 ///
 /// Numbers are 1-based and match the spec's "Example N" labels.
 /// They are sorted within each category for easy review.
+///
+/// The previous version of this list contained 77 entries. After
+/// fixing the ordered-list syntax bug (the old
+/// `#list(marker: ([_],), + Item)` shape is invalid Typst; the
+/// new shape is `#enum(numbering: "1.")[ + Item]`), 24 list
+/// entries now pass and have been removed. The remaining 51
+/// entries are the real translator gaps the spec corpus still
+/// surfaces: 29 HTML-only examples (translator drops the HTML
+/// per v1 scope), 6 setext-heading-plus-raw-HTML cases
+/// (pulldown-cmark limitation), 2 code-span-with-embedded-
+/// backtick cases, 4 emphasis-adjacent-to-text cases, and 10
+/// lazy / nested-list continuation cases.
 const KNOWN_ROUND_TRIP_FAILURES: &[usize] = &[
     // -- HTML-only content (29) --
-    // Body is entirely raw HTML, which the v1 translator drops.
+    // Body is entirely raw HTML, which the v1 translator drops
+    // (see `crate::markdown::typst`'s "Out of scope for v1" section).
+    // The PDF compiles to a valid (but blank) page for these.
     107, 108, 110, 111, 113, 114, 115, 116, 117, 118, 119, 120, 121, 122, 123, 128, 130, 135, 138,
     143, 146, 147, 569, 570, 571, 572, 579, 598, 599,
     // -- Setext heading + raw HTML (6) --
-    48, 575, 576, 577, 578, 588, // -- Code spans with embedded backticks (2) --
-    295, 296, // -- Emphasis / strong adjacent to text (4) --
-    311, 326, 352, 371, // -- Lazy / nested list continuation (34) --
-    66, 210, 215, 219, 221, 223, 224, 227, 229, 230, 239, 242, 243, 244, 246, 247, 248, 249, 252,
-    253, 255, 258, 261, 267, 269, 280, 285, 286, 287, 337, 450, 524, 552, 555,
-    // -- More nested list / autolink edge cases (2) --
-    558, 562,
+    // pulldown-cmark 0.13 sometimes treats `<a ...>`-prefixed lines
+    // as paragraphs instead of type-1 HTML blocks, then sees a
+    // `---` setext underline on the next line and emits a spurious
+    // heading. Translator faithfully reflects the events;
+    // pulldown-cmark-level limitation.
+    48, 575, 576, 577, 578, 588,
+    // -- Code spans with embedded backticks (2) --
+    // `` ``foo`bar`` `` produces a `Code("`foo`bar")` event whose
+    // body contains a backtick. Typst's raw-block parser wants
+    // matching backtick runs; the embedded one trips it up.
+    295, 296,
+    // -- Emphasis / strong adjacent to text (4) --
+    // `foo*bar*` (no space before `*`), `*foo**bar***` and friends
+    // — the CommonMark emphasis algorithm resolves these into
+    // `<em>` / `<strong>` in ways the translator currently does
+    // not surface. The resulting Typst has unbalanced `*` markers.
+    311, 326, 352, 371,
+    // -- Lazy / nested list continuation (10) --
+    // List items that continue with an indented paragraph or a
+    // sub-list, or mix ordered/unordered markers in a way the
+    // translator's flat `#enum` / bullet-list emission does not
+    // surface. The previous allow-list had 34 of these; the 24
+    // that are now passing went through once we stopped emitting
+    // the invalid `#list(marker: ([_],), + Item)` shape.
+    285, 286, 287, 337, 450, 524, 552, 555, 558, 562,
 ];
 
 /// Walk the spec source and pull out each example's markdown input
@@ -273,11 +296,20 @@ fn all_commonmark_0_31_2_examples_compile_to_valid_pdf() {
         if let Some(reason) = bad {
             if known.contains(n) {
                 known_failures_seen += 1;
+                eprintln!("  known-fail example #{n}: {reason}");
             } else {
                 unexpected_failures.push(format!("example #{n}: {reason}"));
             }
         }
     }
+
+    eprintln!(
+        "compile_to_pdf: {} of {} spec examples failed ({} in allow-list, {} unexpected)",
+        known_failures_seen + unexpected_failures.len(),
+        examples.len(),
+        known_failures_seen,
+        unexpected_failures.len(),
+    );
 
     assert!(
         unexpected_failures.is_empty(),
