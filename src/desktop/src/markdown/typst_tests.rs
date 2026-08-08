@@ -53,9 +53,53 @@ fn strikethrough_uses_strike_function() {
 }
 
 #[test]
-fn inline_code_renders_as_backtick() {
+fn inline_code_renders_as_raw_function() {
+    // Inline code spans are emitted as the Typst `#raw("...")` function
+    // call (string argument) rather than backtick-fenced raw text. The
+    // function form is required because the body can contain backticks
+    // — see `inline_code_with_embedded_backticks` below for the
+    // embedded-backtick regression that motivated the switch. The
+    // body is string-escaped (only `\` and `"`) so markup-special
+    // characters in the code body are passed through verbatim.
     let out = render_markdown_to_typst("`x = 1`");
-    assert!(out.contains("`x = 1`"), "got: {out}");
+    assert!(
+        out.contains("#raw(\"x = 1\")"),
+        "expected raw function form, got: {out}"
+    );
+}
+
+#[test]
+fn inline_code_with_embedded_backticks() {
+    // Regression: code spans whose body contains one or more backticks
+    // must still render to a valid Typst document. The backtick-
+    // fenced raw text form was rejected by Typst with "unclosed raw
+    // text" because `escape_typst` backslash-escaped the embedded
+    // backtick to `` \` ``, but the `\` is a literal character inside
+    // raw text (not an escape) and the following `` ` `` was
+    // interpreted as the raw's close delimiter. The fix: switch to
+    // the `#raw("...")` function form, where the body is a string
+    // literal and embedded backticks render literally.
+    //
+    // Each example below is one of the five spec failures
+    // (examples #285, #286, #287, #295, #296) — the translation is
+    // asserted to contain `#raw("...")` with the expected body
+    // content. The full round-trip (translation + PDF compile) is
+    // covered by the spec test in `tests/commonmark_spec_test.rs`.
+    let cases = [
+        ("`` foo ` bar ``", "foo ` bar"),
+        ("` `` `", "``"),
+        ("`  ``  `", " `` "),
+        ("``foo`bar``", "foo`bar"),
+        ("` foo `` bar `", "foo `` bar"),
+    ];
+    for (md, expected_body) in cases {
+        let out = render_markdown_to_typst(md);
+        let expected_call = format!("#raw(\"{}\")", expected_body);
+        assert!(
+            out.contains(&expected_call),
+            "expected {expected_call:?} in translator output for {md:?}, got: {out}"
+        );
+    }
 }
 
 #[test]

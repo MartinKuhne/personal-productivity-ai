@@ -226,12 +226,42 @@ fn emit_event(state: &mut TypstEmitState, event: Event<'_>) {
         Event::Text(text) => state.push_inline(&text),
         Event::Code(code) => {
             if state.in_code() {
+                // Defensive: code spans inside a code block are
+                // unusual but we route to the buffer if they occur.
                 state.push_inline(&code);
-            } else if state.in_table_cell() {
-                let last = state.current_row_cells.len() - 1;
-                state.current_row_cells[last].push_str(&format!("`{}`", escape_typst(&code)));
             } else {
-                state.output.push_str(&format!("`{}`", escape_typst(&code)));
+                // Use the Typst `#raw("...")` function form (string
+                // argument) rather than backtick-fenced raw text, so
+                // embedded backticks in the code span body render
+                // literally. Backtick-fenced raw would be ambiguous
+                // when the body contains a backtick — e.g. the
+                // CommonMark example `` ``foo`bar`` `` produces a
+                // `Code` event with content `foo`bar`, and the
+                // backtick-fenced form would emit `` `foo\`bar` ``.
+                // In Typst the `\` inside raw text is a literal
+                // backslash (not an escape), so the parser sees the
+                // following `` ` `` as the raw's close delimiter,
+                // leaving `bar` outside the raw and the trailing
+                // `` ` `` opening a new unclosed raw. The function
+                // form avoids this entirely: the body lives inside
+                // a `"..."` string literal, where only `\` and `"`
+                // need to be escaped, and embedded backticks are
+                // literal characters in the string.
+                //
+                // Trailing space after the call is the same chain
+                // break used for inline HTML — in Typst, a function
+                // call followed by `(...)` or `[...]` chains
+                // (calling the result on the next group), and
+                // content can't be called. The space forces the
+                // parser to start a new content sequence. See
+                // [`Event::InlineHtml`] for the full rationale.
+                let rendered = format!("#raw(\"{}\") ", escape_typst_string(&code));
+                if state.in_table_cell() {
+                    let last = state.current_row_cells.len() - 1;
+                    state.current_row_cells[last].push_str(&rendered);
+                } else {
+                    state.output.push_str(&rendered);
+                }
             }
         }
         Event::Html(html) => {
