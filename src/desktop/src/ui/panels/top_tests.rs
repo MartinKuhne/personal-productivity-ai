@@ -9,7 +9,7 @@
 
 use super::*;
 use crate::ui::test_helpers::run_ui_test;
-use crate::ui::test_helpers::text::{assert_text_contains, extract_text};
+use crate::ui::test_helpers::text::assert_text_contains;
 
 /// Tier 4 click test: clicking the batch-processing button in
 /// the top toolbar must open the batch dialog (sets

@@ -102,6 +102,97 @@ fn test_tool_web_fetch_pagination() {
     assert!(!result.from_cache);
 }
 
+/// Regression test for the cursor round-trip (TOOL-006, TOOL-032).
+///
+/// The first call must return a cursor; the second call, passing the cursor
+/// back, must serve the next page from the cache. The cache stores the full
+/// content under the cursor UUID (the only value the LLM ever sees as
+/// `cursor`), so the lookup must hit `WebFetchContent` directly.
+#[test]
+fn test_tool_web_fetch_cursor_pagination() {
+    let cache = crate::agent::tools::manager::cache::ToolCache::new();
+    rustls::crypto::ring::default_provider()
+        .install_default()
+        .ok();
+    // 150 <p> tags -> 150 markdown lines, well past the 100-line page size.
+    let mut html = String::from("<html><body>");
+    for i in 0..150 {
+        html.push_str(&format!("<p>line{}</p>", i));
+    }
+    html.push_str("</body></html>");
+    let server_url = spawn_mock_server(html);
+
+    // First call: no cursor, force a fresh fetch.
+    let first_input = crate::agent::tools::dtos::WebFetchInput {
+        url: server_url.clone(),
+        headers: false,
+        force_refetch: true,
+        cursor: None,
+    };
+    let first = tool_web_fetch(
+        &first_input,
+        &cache,
+        &crate::utils::uuid::SystemUuidGenerator,
+    )
+    .unwrap();
+    assert!(!first.from_cache);
+    assert!(first.hint.is_none());
+    assert!(
+        first.cursor.is_some(),
+        "first call must return a cursor for paginated content"
+    );
+    let cursor = first.cursor.clone().unwrap();
+
+    // Second call: pass the cursor back. Prior to the fix this returned
+    // `"Cursor expired or unknown; re-run the fetch with no cursor."`
+    // because the cursor branch looked up `WebFetch { cursor }` at the
+    // cursor key, which actually holds `WebFetchContent`.
+    let second_input = crate::agent::tools::dtos::WebFetchInput {
+        url: server_url.clone(),
+        headers: false,
+        force_refetch: false,
+        cursor: Some(cursor.clone()),
+    };
+    let second = tool_web_fetch(
+        &second_input,
+        &cache,
+        &crate::utils::uuid::SystemUuidGenerator,
+    )
+    .expect("second call with cursor must succeed");
+    assert!(second.from_cache, "second call must be served from cache");
+    assert_eq!(second.total_lines, first.total_lines);
+    assert!(!second.content.is_empty());
+    // The first page's last content line (skipping blank separator lines
+    // emitted by the markdown converter) must come immediately before the
+    // second page's first content line. With WEB_FETCH_PAGE_SIZE=100 lines
+    // and `\n\n` separators, the first page contains line0..line49 and the
+    // second page contains line50..line99.
+    let first_page_lines: Vec<&str> = first.content.lines().filter(|l| !l.is_empty()).collect();
+    let second_page_lines: Vec<&str> = second.content.lines().filter(|l| !l.is_empty()).collect();
+    let last = first_page_lines.last().expect("first page has content");
+    let next = second_page_lines.first().expect("second page has content");
+    let last_n: usize = last
+        .strip_prefix("line")
+        .and_then(|n| n.parse().ok())
+        .expect("first page line should be of the form 'lineN'");
+    let next_n: usize = next
+        .strip_prefix("line")
+        .and_then(|n| n.parse().ok())
+        .expect("second page line should be of the form 'lineN'");
+    assert_eq!(
+        next_n,
+        last_n + 1,
+        "second page should start where the first left off; last={last:?}, next={next:?}"
+    );
+    // And the two pages must not repeat content.
+    let first_set: std::collections::HashSet<&str> = first_page_lines.iter().copied().collect();
+    let second_set: std::collections::HashSet<&str> = second_page_lines.iter().copied().collect();
+    assert!(
+        first_set.is_disjoint(&second_set),
+        "pages must not repeat content lines"
+    );
+}
+
 #[test]
 fn test_tool_web_fetch_headers() {
     let cache = crate::agent::tools::manager::cache::ToolCache::new();

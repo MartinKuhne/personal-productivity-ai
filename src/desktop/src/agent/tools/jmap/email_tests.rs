@@ -874,6 +874,119 @@ fn test_tool_search_email_cursor_unknown_returns_error() {
     );
 }
 
+/// Regression test for the cursor round-trip (TOOL-029, TOOL-031).
+///
+/// The first call must return a cursor; the second call, passing the cursor
+/// back, must serve the next page from the cache without re-querying JMAP.
+/// Mirrors `test_tool_web_fetch_cursor_pagination` in `web_tests.rs` as a
+/// guard against the same shape of bug that broke `web_fetch`.
+#[test]
+fn test_tool_search_email_cursor_pagination() {
+    let cache = crate::agent::tools::manager::cache::ToolCache::new();
+    rustls::crypto::ring::default_provider()
+        .install_default()
+        .ok();
+    // Force pagination: total emails = page size + 5. Using a constant offset
+    // (rather than a hard-coded count) keeps the test correct if the
+    // page-size constant changes.
+    let total_emails = super::SEARCH_EMAIL_PAGE_SIZE + 5;
+    let mut ids: Vec<String> = Vec::with_capacity(total_emails);
+    let mut email_objects: Vec<String> = Vec::with_capacity(total_emails);
+    for i in 1..=total_emails {
+        ids.push(format!("\"e{i}\""));
+        email_objects.push(format!(
+            r#"{{"id": "e{i}", "subject": "Subject {i}", "receivedAt": "2026-07-19T10:00:00Z", "from": [{{"email":"a@t.com"}}], "to": [{{"email":"b@t.com"}}], "htmlBody": [{{"partId":"p{i}"}}], "bodyValues": {{"p{i}": {{"value":"Body {i}","isTruncated":false}}}}}}"#,
+            i = i
+        ));
+    }
+    let body = format!(
+        r#"{{
+            "apiUrl": "{{API_URL}}",
+            "primaryAccounts": {{"urn:ietf:params:jmap:mail": "acc1"}},
+            "methodResponses": [
+                ["Email/query", {{"ids": [{}]}}, "0"],
+                ["Email/get", {{"list": [{}], "notFound": []}}, "1"]
+            ]
+        }}"#,
+        ids.join(","),
+        email_objects.join(",")
+    );
+    let url = spawn_mock_server(body);
+    let mut config = AppConfig::default();
+    config.jmap_clients.insert(
+        "test".to_string(),
+        JmapClient {
+            url,
+            token: "tok".to_string(),
+        },
+    );
+    let filters = SearchEmailFilters {
+        keyword: Some("test"),
+        ..Default::default()
+    };
+    let uuid = crate::utils::uuid::SystemUuidGenerator;
+
+    // First call: no cursor, must return first page + cursor.
+    let first = tool_search_email(&config, filters.clone(), None, &cache, &uuid)
+        .expect("first call must succeed");
+    assert_eq!(first.total, total_emails);
+    assert!(
+        first.cursor.is_some(),
+        "first call must return a cursor when result set exceeds page size"
+    );
+    assert!(first.hint.is_none());
+    let cursor = first.cursor.clone().unwrap();
+    // Count items on the first page by counting unique `"id": "e` markers in
+    // the rendered JSON. The mock server enriches each email with `blobId`
+    // and `threadId` that contain the same `e{n}` token, so the marker must
+    // match the JSON key prefix exactly to count emails.
+    let first_id_count = first.results.matches(r#""id": "e"#).count();
+    assert_eq!(
+        first_id_count,
+        super::SEARCH_EMAIL_PAGE_SIZE,
+        "first page must contain exactly SEARCH_EMAIL_PAGE_SIZE items"
+    );
+    assert!(first.results.contains("Subject 1"));
+    assert!(!first.results.contains(&format!("Subject {total_emails}")));
+
+    // Second call: with cursor, must return remaining items + final hint.
+    let second = tool_search_email(&config, filters, Some(cursor.clone()), &cache, &uuid)
+        .expect("second call with cursor must succeed");
+    assert_eq!(second.total, total_emails);
+    assert!(
+        second.cursor.is_none(),
+        "second call (final page) must omit cursor"
+    );
+    assert_eq!(
+        second.hint.as_deref(),
+        Some(super::SEARCH_EMAIL_FINAL_PAGE_HINT)
+    );
+    let second_id_count = second.results.matches(r#""id": "e"#).count();
+    assert_eq!(
+        second_id_count,
+        total_emails - super::SEARCH_EMAIL_PAGE_SIZE,
+        "second page must contain the remaining items"
+    );
+    assert!(!second.results.contains("Subject 1"));
+    assert!(second.results.contains(&format!("Subject {total_emails}")));
+
+    // Pages must not repeat any content lines (i.e., no email id may appear
+    // on both pages). The first page must contain e1 and the last page must
+    // not; the last page must contain e{total_emails} and the first must not.
+    assert!(first.results.contains(r#""id": "e1""#));
+    assert!(!second.results.contains(r#""id": "e1""#));
+    assert!(
+        !first
+            .results
+            .contains(&format!(r#""id": "e{total_emails}""#))
+    );
+    assert!(
+        second
+            .results
+            .contains(&format!(r#""id": "e{total_emails}""#))
+    );
+}
+
 #[test]
 fn test_tool_search_email_pagination_hint_on_final_page() {
     let cache = crate::agent::tools::manager::cache::ToolCache::new();

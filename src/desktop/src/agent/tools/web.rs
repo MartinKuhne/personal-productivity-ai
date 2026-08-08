@@ -24,39 +24,30 @@ pub fn tool_web_fetch(
     // If a cursor is provided, look up the cached content and slice from it.
     // The cursor is a UUID that points to the full content in the cache.
     if let Some(cursor) = &input.cursor {
-        // First get the cursor entry to find the content UUID
-        let content_uuid = match cache.get(cursor) {
-            Some(CacheEntry::WebFetch { cursor: uuid }) => uuid,
-            _ => {
-                return Err(
-                    "Cursor expired or unknown; re-run the fetch with no cursor.".to_string(),
-                );
-            }
-        };
-
-        // Now get the actual content
-        let entry = match cache.get(&content_uuid) {
-            Some(CacheEntry::WebFetchContent {
-                content,
-                response_headers,
-                fetched_at,
-                cursor_offset,
-                total_lines,
-            }) => (
-                content,
-                response_headers,
-                fetched_at,
-                cursor_offset,
-                total_lines,
-            ),
-            _ => {
-                return Err(
-                    "Cursor expired or unknown; re-run the fetch with no cursor.".to_string(),
-                );
-            }
-        };
-
-        let (content, response_headers, fetched_at, cursor_offset, total_lines) = entry;
+        // The cursor the LLM sends back IS the content UUID we stored on the
+        // first call. The entry at that key is the `WebFetchContent` itself,
+        // not a `WebFetch { cursor }` indirection. Look it up directly.
+        let (content, response_headers, fetched_at, cursor_offset, total_lines) =
+            match cache.get(cursor) {
+                Some(CacheEntry::WebFetchContent {
+                    content,
+                    response_headers,
+                    fetched_at,
+                    cursor_offset,
+                    total_lines,
+                }) => (
+                    content,
+                    response_headers,
+                    fetched_at,
+                    cursor_offset,
+                    total_lines,
+                ),
+                _ => {
+                    return Err(
+                        "Cursor expired or unknown; re-run the fetch with no cursor.".to_string(),
+                    );
+                }
+            };
 
         // If cursor_offset >= total_lines, no more content. Return final page hint.
         if cursor_offset >= total_lines {
@@ -89,7 +80,7 @@ pub fn tool_web_fetch(
 
         // Update the cached entry with the new cursor offset
         cache.put(
-            content_uuid,
+            cursor.clone(),
             CacheEntry::WebFetchContent {
                 content: content.clone(),
                 response_headers: response_headers.clone(),
@@ -154,15 +145,17 @@ pub fn tool_web_fetch(
                 (Some(content_uuid.clone()), None)
             };
 
-            // Update the cached entry with cursor_offset = 0 (first page)
-            // so subsequent calls without cursor also get the first page.
+            // Advance the offset to the start of the next page so the cursor
+            // returned to the LLM points at page 2 (TOOL-006). The slicing
+            // above always serves the first page; a subsequent call with the
+            // cursor reads `cursor_offset` and slices from there.
             cache.put(
                 content_uuid.clone(),
                 CacheEntry::WebFetchContent {
                     content: content.clone(),
                     response_headers: response_headers.clone(),
                     fetched_at,
-                    cursor_offset: 0,
+                    cursor_offset: WEB_FETCH_PAGE_SIZE,
                     total_lines,
                 },
             );
@@ -225,14 +218,16 @@ pub fn tool_web_fetch(
                         },
                     );
 
-                    // Store full content under cursor UUID
+                    // Store full content under cursor UUID. The cursor is
+                    // advanced past the first page (TOOL-006) so a subsequent
+                    // call with the cursor slices from line WEB_FETCH_PAGE_SIZE.
                     cache.put(
                         content_uuid.clone(),
                         CacheEntry::WebFetchContent {
                             content: md_content.clone(),
                             response_headers: response_headers.clone(),
                             fetched_at: Instant::now(),
-                            cursor_offset: 0,
+                            cursor_offset: WEB_FETCH_PAGE_SIZE,
                             total_lines,
                         },
                     );
