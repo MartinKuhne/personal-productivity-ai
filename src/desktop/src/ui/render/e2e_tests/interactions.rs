@@ -13,6 +13,7 @@
 //! accessories, all in one document).
 
 use super::*;
+use crate::ui::test_helpers::run_ui_test;
 
 // --- P0-2: click-handler coverage ---------------------------------
 //
@@ -36,7 +37,7 @@ fn test_render_code_block_smoke() {
     // egui 0.35: `PlatformOutput` is reset between frames, so
     // we read the post-frame output from `FullOutput` rather
     // than from `ctx.output` after `run_ui` returns.
-    let output = ctx.run_ui(egui::RawInput::default(), |ui| {
+    let output = run_ui_test(&ctx, egui::RawInput::default(), |ui| {
         egui::CentralPanel::default().show(ui, |ui| {
             render_code_block(ui, "let x = 1;");
         });
@@ -55,7 +56,7 @@ fn test_render_code_block_smoke() {
 fn test_copy_code_to_output_side_effect() {
     let ctx = egui::Context::default();
     // egui 0.35: read post-frame output from `FullOutput`.
-    let output = ctx.run_ui(egui::RawInput::default(), |ui| {
+    let output = run_ui_test(&ctx, egui::RawInput::default(), |ui| {
         egui::CentralPanel::default().show(ui, |ui| {
             copy_code_to_output(ui, "let x = 1;");
         });
@@ -126,7 +127,7 @@ fn test_render_hyperlink_smoke() {
         "click me".to_string(),
     )];
     // egui 0.35: read post-frame output from `FullOutput`.
-    let output = ctx.run_ui(egui::RawInput::default(), |ui| {
+    let output = run_ui_test(&ctx, egui::RawInput::default(), |ui| {
         egui::CentralPanel::default().show(ui, |ui| {
             // task_checked=None, needs_bullet=false → not a list
             // item; renders the link inline.
@@ -228,7 +229,7 @@ fn test_render_task_checkbox_initial_state() {
     // The render path itself: render all events through render_markdown
     // and verify no panic. The egui Context handles the actual checkbox
     // state mutation; the test confirms the wiring.
-    let _ = ctx.run_ui(egui::RawInput::default(), |ui| {
+    let _ = run_ui_test(&ctx, egui::RawInput::default(), |ui| {
         egui::CentralPanel::default().show(ui, |ui| {
             let mut scroll_id = None;
             let md = String::from("- [ ] todo\n- [x] done");

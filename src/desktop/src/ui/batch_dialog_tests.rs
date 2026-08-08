@@ -1,6 +1,7 @@
 //! Tests for `ui/batch_dialog.rs`
 
 use super::*;
+use crate::ui::test_helpers::run_ui_test;
 use crate::ui::test_helpers::text::extract_text;
 use eframe::egui;
 
@@ -115,15 +116,18 @@ fn render_dialog_once(
     };
 
     // First frame initializes the window
-    let _ = ctx.run_ui(raw_input.clone(), |ui| {
+    let mut output1 = run_ui_test(&ctx, raw_input.clone(), |ui| {
         let _ = show_batch_modal(app, ui.ctx(), config);
     });
+    output1.textures_delta.clear();
 
     // Second frame actually renders the contents
     app.dialogs_mut().batch_dialog_open = true;
-    ctx.run_ui(raw_input, |ui| {
+    let mut output = run_ui_test(&ctx, raw_input, |ui| {
         let _ = show_batch_modal(app, ui.ctx(), config);
-    })
+    });
+    output.textures_delta.clear();
+    output
 }
 
 #[test]

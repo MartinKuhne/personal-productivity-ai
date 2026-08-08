@@ -3,13 +3,14 @@
 
 use super::*;
 use crate::markdown::{InlineElem, TextStyle};
+use crate::ui::test_helpers::run_ui_test;
 use crate::ui::test_helpers::text::assert_text_contains;
 use eframe::egui;
 
 #[test]
 fn test_render_heading_empty_text() {
     let ctx = egui::Context::default();
-    let _ = ctx.run_ui(egui::RawInput::default(), |ui| {
+    let _ = run_ui_test(&ctx, egui::RawInput::default(), |ui| {
         let mut scroll = None;
         let elems = vec![InlineElem::Text("   ".to_string(), TextStyle::default())];
         render_heading(ui, &elems, 1, &mut scroll, "h1-id");
@@ -21,7 +22,7 @@ fn test_render_heading_empty_text() {
 #[test]
 fn test_render_heading_styles() {
     let ctx = egui::Context::default();
-    let output = ctx.run_ui(egui::RawInput::default(), |ui| {
+    let output = run_ui_test(&ctx, egui::RawInput::default(), |ui| {
         let mut scroll = None;
         let style_bold = TextStyle {
             bold: true,
@@ -73,7 +74,7 @@ fn test_render_heading_styles() {
 #[test]
 fn test_render_heading_scroll_to_me() {
     let ctx = egui::Context::default();
-    let _ = ctx.run_ui(egui::RawInput::default(), |ui| {
+    let _ = run_ui_test(&ctx, egui::RawInput::default(), |ui| {
         let mut scroll = Some("target-id".to_string());
         let elems = vec![InlineElem::Text("Target".to_string(), TextStyle::default())];
         render_heading(ui, &elems, 3, &mut scroll, "target-id");

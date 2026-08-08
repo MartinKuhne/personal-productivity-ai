@@ -1,6 +1,7 @@
 #[cfg(test)]
 mod tests {
     use eframe::egui;
+    use fastmd::ui::test_helpers::run_ui_test;
 
     // The previous `old_bug_set_width_ignored` test that lived at
     // the top of this module was a no-assert diagnostic that
@@ -58,7 +59,7 @@ mod tests {
         for iteration in 0..20 {
             let mut rng = SimpleRng::new(SEED.wrapping_add(iteration as u64));
 
-            let _ = ctx.run_ui(egui::RawInput::default(), |ui| {
+            let _ = run_ui_test(&ctx, egui::RawInput::default(), |ui| {
                 egui::CentralPanel::default().show(ui, |ui| {
                     let col_w = rng.gen_f32(80.0, 400.0);
                     ui.vertical(|ui| {

@@ -20,7 +20,7 @@
 //! ```ignore
 //! use crate::ui::test_helpers::offscreen::assert_no_offscreen_text;
 //!
-//! let output = ctx.run_ui(raw_input, |ui| {
+//! let output = run_ui_test(&ctx, raw_input, |ui| {
 //!     render_markdown(&doc, ...);
 //! });
 //! assert_no_offscreen_text(&output.shapes);
@@ -209,6 +209,7 @@ pub fn assert_no_offscreen_text(shapes: &[egui::epaint::ClippedShape]) {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::ui::test_helpers::run_ui_test;
 
     /// Build a `Shape::Text` carrying a real (font-shaped) galley so
     /// `visual_bounding_rect` returns a positive-area rect.
@@ -218,7 +219,8 @@ mod tests {
     /// no-op frame before building the galley.
     fn make_text_shape(text: &str, pos: egui::Pos2) -> egui::Shape {
         let ctx = egui::Context::default();
-        let _ = ctx.run_ui(egui::RawInput::default(), |_ui| {});
+        let mut output = run_ui_test(&ctx, egui::RawInput::default(), |_ui| {});
+        output.textures_delta.clear();
         let galley = ctx.fonts_mut(|f| {
             f.layout_no_wrap(
                 text.to_string(),

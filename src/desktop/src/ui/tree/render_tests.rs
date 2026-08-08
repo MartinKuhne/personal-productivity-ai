@@ -9,6 +9,7 @@
 
 use super::*;
 use crate::app::panel_layout::PanelLayout;
+use crate::ui::test_helpers::run_ui_test;
 use crate::ui::tree::context::TreeNodeContext;
 use crate::ui::tree::flatten::{FlatRow, TREE_ROW_HEIGHT};
 use eframe::egui;
@@ -165,7 +166,7 @@ fn test_draw_tree_node_directory_and_file() {
     let mut submit_prompt = None;
     let mut open_editor = None;
 
-    let _ = ctx_egui.run_ui(Default::default(), |ui| {
+    let _ = run_ui_test(&ctx_egui, Default::default(), |ui| {
         egui::CentralPanel::default().show(ui, |ui| {
             let mut tree_dirty = false;
             let mut tree_ctx = TreeNodeContext {
@@ -285,7 +286,7 @@ fn test_tree_node_selection_state_modifiers() {
     let mut submit_prompt = None;
     let mut open_editor = None;
 
-    let _ = ctx_egui.run_ui(Default::default(), |ui| {
+    let _ = run_ui_test(&ctx_egui, Default::default(), |ui| {
         egui::CentralPanel::default().show(ui, |ui| {
             // Test ctrl multi-select simulation
             let mut tree_dirty = false;
@@ -342,14 +343,14 @@ fn test_tree_row_id_stability_independent_of_slice_index() {
     let mut id_pass2 = None;
 
     // Render pass 1
-    let _ = ctx.run_ui(Default::default(), |ui| {
+    let _ = run_ui_test(&ctx, Default::default(), |ui| {
         ui.push_id((&row.path, row.is_dir), |ui| {
             id_pass1 = Some(ui.id());
         });
     });
 
     // Render pass 2
-    let _ = ctx.run_ui(Default::default(), |ui| {
+    let _ = run_ui_test(&ctx, Default::default(), |ui| {
         ui.push_id((&row.path, row.is_dir), |ui| {
             id_pass2 = Some(ui.id());
         });
@@ -387,7 +388,7 @@ fn test_tree_row_height_matches_selectable_label_height() {
     let ctx = egui::Context::default();
     let mut button_height = 0.0_f32;
     let mut spacing_y = 0.0_f32;
-    let _ = ctx.run_ui(Default::default(), |ui| {
+    let _ = run_ui_test(&ctx, Default::default(), |ui| {
         let response = ui.selectable_label(false, "sample tree row");
         button_height = response.rect.height();
         spacing_y = ui.spacing().item_spacing.y;

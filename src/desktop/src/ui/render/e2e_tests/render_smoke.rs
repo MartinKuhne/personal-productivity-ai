@@ -9,6 +9,7 @@
 //! sibling submodules.
 
 use super::*;
+use crate::ui::test_helpers::run_ui_test;
 
 /// Render the given closure in a 320px-wide viewport and assert that
 /// a text shape containing `needle` has a galley with more than one
@@ -29,7 +30,7 @@ fn assert_long_text_wraps_in_viewport(render: impl FnMut(&mut egui::Ui), needle:
     };
     let ctx = egui::Context::default();
     let mut render = render;
-    let output = ctx.run_ui(raw, |ui| {
+    let output = run_ui_test(&ctx, raw, |ui| {
         egui::CentralPanel::default().show(ui, |ui| {
             render(ui);
         });
@@ -79,7 +80,7 @@ fn assert_long_text_wraps_in_viewport(render: impl FnMut(&mut egui::Ui), needle:
 #[test]
 fn test_render_markdown_e2e() {
     let ctx = egui::Context::default();
-    let _ = ctx.run_ui(egui::RawInput::default(), |ui| {
+    let _ = run_ui_test(&ctx, egui::RawInput::default(), |ui| {
         egui::CentralPanel::default().show(ui, |ui| {
             let mut scroll_id = None;
             render_markdown(
@@ -126,7 +127,7 @@ def foo():
 
 <div>Html block</div>
 "#;
-    let _ = ctx.run_ui(egui::RawInput::default(), |ui| {
+    let _ = run_ui_test(&ctx, egui::RawInput::default(), |ui| {
         egui::CentralPanel::default().show(ui, |ui| {
             let mut scroll_id = None;
             render_markdown(
@@ -149,7 +150,7 @@ def foo():
 fn test_render_table_with_empty_cells_e2e() {
     let ctx = egui::Context::default();
     let md = "| A | | C |\n|---|---|---|\n| | B | |";
-    let _ = ctx.run_ui(egui::RawInput::default(), |ui| {
+    let _ = run_ui_test(&ctx, egui::RawInput::default(), |ui| {
         egui::CentralPanel::default().show(ui, |ui| {
             let mut scroll_id = None;
             render_markdown(
@@ -259,7 +260,7 @@ fn test_render_yaml_table_row_height_prevents_text_overlap() {
     );
     let yaml: serde_norway::Value = serde_norway::from_str(&yaml_str).unwrap();
 
-    let output = ctx.run_ui(raw, |ui| {
+    let output = run_ui_test(&ctx, raw, |ui| {
         egui::CentralPanel::default().show(ui, |ui| {
             render_yaml_table(ui, &yaml);
         });
@@ -328,7 +329,7 @@ fn test_render_table_multiline_cells_fit_panel_and_expand_row_height() {
         ..egui::RawInput::default()
     };
 
-    let output = ctx.run_ui(raw, |ui| {
+    let output = run_ui_test(&ctx, raw, |ui| {
         egui::CentralPanel::default().show(ui, |ui| {
             render_table(
                 ui,
@@ -378,7 +379,7 @@ fn test_render_table_multiline_cells_fit_panel_and_expand_row_height() {
 fn test_render_table_with_bold_and_special_chars_e2e() {
     let ctx = egui::Context::default();
     let md = "| Name | Account | Amount | Type |\n|---|---|---|---|\n| **Vanguard** | #12345678 | $1 | Taxable (investment) |";
-    let _ = ctx.run_ui(egui::RawInput::default(), |ui| {
+    let _ = run_ui_test(&ctx, egui::RawInput::default(), |ui| {
         egui::CentralPanel::default().show(ui, |ui| {
             let mut scroll_id = None;
             render_markdown(
@@ -430,7 +431,7 @@ fn test_render_inline_wrapped_rows_left_aligned() {
     };
     let mut pending_toggles = Vec::new();
     let ctx = egui::Context::default();
-    let output = ctx.run_ui(raw, |ui| {
+    let output = run_ui_test(&ctx, raw, |ui| {
         egui::CentralPanel::default().show(ui, |ui| {
             // Mirror the production render path in
             // `src/ui/panels/center.rs:200-209`: response is rendered
@@ -524,7 +525,7 @@ regression when the placer centers children along the main axis.
     let mut scroll_id = None;
     let mut pending_toggles = Vec::new();
     let ctx = egui::Context::default();
-    let output = ctx.run_ui(raw, |ui| {
+    let output = run_ui_test(&ctx, raw, |ui| {
         egui::CentralPanel::default().show(ui, |ui| {
             egui::ScrollArea::vertical()
                 .id_salt("test_md_wrap_scroll")

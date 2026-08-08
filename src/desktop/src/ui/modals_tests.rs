@@ -10,6 +10,7 @@
 use super::*;
 use crate::config::AppConfig;
 use crate::ui::FastMdApp;
+use crate::ui::test_helpers::run_ui_test;
 use notify::RecommendedWatcher;
 use std::fs;
 
@@ -70,7 +71,7 @@ fn test_move_modal_rendering_and_state() {
     // output. The modal's visual surface is therefore covered by
     // the app-level Tier 3 snapshot (R-1c) rather than this test.
     // This test is kept as a smoke + state-coverage test.
-    let _ = ctx.run_ui(raw_input(), |ui| {
+    let _ = run_ui_test(&ctx, raw_input(), |ui| {
         show_move_modal_dialog(
             &mut app.orchestrator.dialogs,
             &app.orchestrator.content_libraries,
@@ -109,7 +110,7 @@ fn test_create_dir_modal() {
 
     // See `test_move_modal_rendering_and_state` for the rationale
     // on why the modal's rendered text is not asserted here.
-    let _ = ctx.run_ui(raw_input(), |ui| {
+    let _ = run_ui_test(&ctx, raw_input(), |ui| {
         show_create_dir_dialog(
             &mut app.orchestrator.dialogs,
             &mut app.orchestrator.file_processor,
@@ -122,7 +123,7 @@ fn test_create_dir_modal() {
     assert!(app.orchestrator.dialogs.create_dir_dialog_open);
 
     app.orchestrator.dialogs.create_dir_name = "../invalid_traversal".to_string();
-    let _ = ctx.run_ui(raw_input(), |ui| {
+    let _ = run_ui_test(&ctx, raw_input(), |ui| {
         show_create_dir_dialog(
             &mut app.orchestrator.dialogs,
             &mut app.orchestrator.file_processor,
@@ -171,7 +172,7 @@ fn test_rename_modal() {
 
     // See `test_move_modal_rendering_and_state` for the rationale
     // on why the modal's rendered text is not asserted here.
-    let _ = ctx.run_ui(raw_input(), |ui| {
+    let _ = run_ui_test(&ctx, raw_input(), |ui| {
         let sel = &mut app.orchestrator.selection;
         show_rename_dialog(RenameDialogCtx {
             dialog_manager: &mut app.orchestrator.dialogs,
@@ -190,7 +191,7 @@ fn test_rename_modal() {
     assert!(app.orchestrator.dialogs.rename_dialog_open);
 
     app.orchestrator.dialogs.rename_new_name = "invalid/name".to_string();
-    let _ = ctx.run_ui(raw_input(), |ui| {
+    let _ = run_ui_test(&ctx, raw_input(), |ui| {
         let sel = &mut app.orchestrator.selection;
         show_rename_dialog(RenameDialogCtx {
             dialog_manager: &mut app.orchestrator.dialogs,
@@ -224,7 +225,7 @@ fn test_rename_preserves_extension() {
     app.orchestrator.dialogs.file_to_rename = Some(md_file.clone());
     app.orchestrator.dialogs.rename_new_name = "renamed_doc".to_string();
 
-    let _ = ctx.run_ui(Default::default(), |ui| {
+    let _ = run_ui_test(&ctx, Default::default(), |ui| {
         let sel = &mut app.orchestrator.selection;
         show_rename_dialog(RenameDialogCtx {
             dialog_manager: &mut app.orchestrator.dialogs,

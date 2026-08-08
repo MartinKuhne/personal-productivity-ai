@@ -517,6 +517,7 @@ fn measure_cell(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::ui::test_helpers::run_ui_test;
 
     /// US3 (TBL-050, TBL-032): `TablePadding` is the four-sided inner padding
     /// value type. `ZERO` is the no-op identity; `sanitised()` clamps negative
@@ -626,7 +627,7 @@ mod tests {
     #[test]
     fn test_measure_cell_fragmented_tokens() {
         let ctx = egui::Context::default();
-        let _ = ctx.run_ui(egui::RawInput::default(), |ui| {
+        let _ = run_ui_test(&ctx, egui::RawInput::default(), |ui| {
             egui::CentralPanel::default().show(ui, |ui| {
                 let cell_fragmented = vec![
                     InlineElem::Text("super".to_string(), crate::ui::render::TextStyle { bold: true, ..Default::default() }),
@@ -653,7 +654,7 @@ mod tests {
     #[test]
     fn test_table_layout_cached_memoizes_and_invalidates_correctly() {
         let ctx = egui::Context::default();
-        let _ = ctx.run_ui(egui::RawInput::default(), |ctx| {
+        let _ = run_ui_test(&ctx, egui::RawInput::default(), |ctx| {
             egui::CentralPanel::default().show(ctx, |ui| {
                 let table_id = egui::Id::new("test_cache_table");
                 let cells = vec![vec![vec![InlineElem::Text(
@@ -696,7 +697,7 @@ mod tests {
     #[test]
     fn test_table_layout_cached_invalidates_on_font_change() {
         let ctx = egui::Context::default();
-        let _ = ctx.run_ui(egui::RawInput::default(), |ctx| {
+        let _ = run_ui_test(&ctx, egui::RawInput::default(), |ctx| {
             egui::CentralPanel::default().show(ctx, |ui| {
                 let table_id = egui::Id::new("test_cache_font");
                 let cells = vec![vec![vec![InlineElem::Text(
@@ -738,7 +739,7 @@ mod tests {
     #[test]
     fn test_measure_cached_memoizes_and_invalidates_on_cell_change() {
         let ctx = egui::Context::default();
-        let _ = ctx.run_ui(egui::RawInput::default(), |ctx| {
+        let _ = run_ui_test(&ctx, egui::RawInput::default(), |ctx| {
             egui::CentralPanel::default().show(ctx, |ui| {
                 let table_id = egui::Id::new("test_measure_table");
                 let cells1 = vec![vec![vec![InlineElem::Text(

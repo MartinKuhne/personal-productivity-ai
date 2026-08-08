@@ -9,6 +9,7 @@
 
 use super::*;
 use crate::config::{ContentLibrary, LlmConfig};
+use crate::ui::test_helpers::run_ui_test;
 use std::collections::HashMap;
 use std::path::PathBuf;
 
@@ -522,7 +523,7 @@ fn test_compute_file_context_no_shrink_when_dir_empty() {
 #[test]
 fn test_is_enter_pressed_not_triggered() {
     let ctx = egui::Context::default();
-    let _ = ctx.run_ui(egui::RawInput::default(), |ui| {
+    let _ = run_ui_test(&ctx, egui::RawInput::default(), |ui| {
         let _ = ui;
         assert!(
             !ctx.input(is_enter_pressed),
@@ -544,7 +545,7 @@ fn test_is_enter_pressed_raw_key() {
         }],
         ..Default::default()
     };
-    let _ = ctx.run_ui(raw_input, |ui| {
+    let _ = run_ui_test(&ctx, raw_input, |ui| {
         let _ = ui;
         assert!(
             ctx.input(is_enter_pressed),
@@ -559,7 +560,7 @@ fn test_is_enter_pressed_ime_commit() {
         events: vec![egui::Event::Ime(egui::ImeEvent::Commit("\n".to_owned()))],
         ..Default::default()
     };
-    let _ = ctx.run_ui(raw_input, |ui| {
+    let _ = run_ui_test(&ctx, raw_input, |ui| {
         let _ = ui;
         assert!(
             ctx.input(is_enter_pressed),
@@ -576,7 +577,7 @@ fn test_is_enter_pressed_ime_commit_other_text_ignored() {
         events: vec![egui::Event::Ime(egui::ImeEvent::Commit("你好".to_owned()))],
         ..Default::default()
     };
-    let _ = ctx.run_ui(raw_input, |ui| {
+    let _ = run_ui_test(&ctx, raw_input, |ui| {
         let _ = ui;
         assert!(
             !ctx.input(is_enter_pressed),
@@ -592,7 +593,7 @@ fn test_is_enter_pressed_ime_commit_crlf() {
         events: vec![egui::Event::Ime(egui::ImeEvent::Commit("\r\n".to_owned()))],
         ..Default::default()
     };
-    let _ = ctx.run_ui(raw_input, |ui| {
+    let _ = run_ui_test(&ctx, raw_input, |ui| {
         let _ = ui;
         assert!(
             ctx.input(is_enter_pressed),
@@ -669,7 +670,7 @@ fn test_show_bottom_panel_render() {
     // Leave `command_input` empty so `TextEdit::hint_text` is
     // visible — egui hides the hint as soon as the field has any
     // text.
-    let output = ctx.run_ui(egui::RawInput::default(), |ui| {
+    let output = run_ui_test(&ctx, egui::RawInput::default(), |ui| {
         show_bottom_panel(&mut app, ui);
     });
     assert_text_contains(&output.shapes, COMMAND_INPUT_HINT);
@@ -685,7 +686,7 @@ fn test_show_bottom_panel_render() {
 fn test_show_bottom_panel_does_not_render_quick_tasks_menu() {
     let ctx = egui::Context::default();
     let mut app = create_test_app();
-    let output = ctx.run_ui(egui::RawInput::default(), |ui| {
+    let output = run_ui_test(&ctx, egui::RawInput::default(), |ui| {
         show_bottom_panel(&mut app, ui);
     });
     let texts = extract_text(&output.shapes);
@@ -704,7 +705,7 @@ fn test_show_bottom_panel_stop_agent() {
     let mut app = create_test_app();
     app.agent_mut().state_mut().running = true;
 
-    let output = ctx.run_ui(egui::RawInput::default(), |ui| {
+    let output = run_ui_test(&ctx, egui::RawInput::default(), |ui| {
         show_bottom_panel(&mut app, ui);
     });
 

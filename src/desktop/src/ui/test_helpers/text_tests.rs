@@ -6,7 +6,8 @@ use eframe::egui;
 
 fn create_text_clipped_shape(text: &str) -> egui::epaint::ClippedShape {
     let ctx = egui::Context::default();
-    let _ = ctx.run_ui(egui::RawInput::default(), |_| {});
+    let mut output = ctx.run_ui(egui::RawInput::default(), |_| {});
+    output.textures_delta.clear();
     let galley = ctx.fonts_mut(|f| {
         f.layout_no_wrap(
             text.to_string(),

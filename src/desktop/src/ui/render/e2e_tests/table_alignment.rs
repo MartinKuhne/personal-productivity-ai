@@ -15,6 +15,7 @@
 //! - No internal vertical gap or single-item centering in tall cells.
 
 use super::*;
+use crate::ui::test_helpers::run_ui_test;
 
 /// Verifies that column 0 and subsequent columns are properly aligned
 /// across rows and maintain uniform inter-column gutter spacing, even when
@@ -571,7 +572,7 @@ fn test_render_table_cell_text_top_aligned_with_tall_neighbor() {
         // capture the last pass's output for assertions.
         let mut last_output = None;
         for _ in 0..case.passes {
-            last_output = Some(ctx.run_ui(raw.clone(), |ui| {
+            last_output = Some(run_ui_test(&ctx, raw.clone(), |ui| {
                 egui::CentralPanel::default().show(ui, |ui| {
                     render_table(
                         ui,
