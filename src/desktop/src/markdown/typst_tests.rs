@@ -219,6 +219,88 @@ fn link_renders_as_link_function() {
         "got: {out}"
     );
     assert!(out.contains("text"));
+    // Trailing space after the closing `]` is the chain break for
+    // the case where the link is followed by `(args)` or
+    // `[args]` — see the `link_followed_by_paren` test and
+    // `Event::InlineHtml` for the same pattern. The space is
+    // visually invisible in the rendered PDF because the
+    // surrounding paragraph's `par(justify: true)` collapses
+    // adjacent whitespace; in code where the chain break is
+    // unnecessary (no `(args)` follows), the space still doesn't
+    // affect rendering.
+    assert!(
+        out.contains("] "),
+        "expected trailing space after link close, got: {out}"
+    );
+}
+
+#[test]
+fn autolink_text_escapes_url_chars() {
+    // Regression: CommonMark autolinks (`<url>`) emit a
+    // `Link { link_type: Autolink, ... }` event with the URL
+    // itself as the link text. URLs routinely contain `:` and
+    // `//` which Typst treats as markup-active in content mode
+    // (`:` after a word starts a labelled-content item; the
+    // value swallows the surrounding `[...]` and produces
+    // "unclosed delimiter"). The translator routes autolink
+    // text through a stricter escape that backslash-escapes
+    // `:` and `/` in addition to the usual markup-active chars.
+    // Regular `[text](url)` links keep the user's text
+    // verbatim — they may have used their own markup on
+    // purpose.
+    //
+    // The expected escape is built char-by-char so the test
+    // is obviously correct without having to count backslashes
+    // in a string literal (which is notoriously error-prone).
+    fn esc(s: &str) -> String {
+        let mut out = String::new();
+        for c in s.chars() {
+            match c {
+                ':' => out.push_str("\\:"),
+                '/' => out.push_str("\\/"),
+                other => out.push(other),
+            }
+        }
+        out
+    }
+    let cases = [
+        ("<irc://foo.bar:2233/baz>", esc("irc://foo.bar:2233/baz")),
+        ("<http://example.com>", esc("http://example.com")),
+        (
+            "<made-up-scheme://foo,bar>",
+            esc("made-up-scheme://foo,bar"),
+        ),
+    ];
+    for (md, expected_text) in cases {
+        let out = render_markdown_to_typst(md);
+        let needle = format!("[{expected_text}]");
+        assert!(
+            out.contains(&needle),
+            "expected link text {needle:?} in translator output for {md:?}, got: {out}"
+        );
+    }
+}
+
+#[test]
+fn link_followed_by_paren_uses_chain_break() {
+    // Regression: CommonMark example #524
+    // (`[foo](not a link)\n\n[foo]: /url1`) translates to a
+    // link with text `foo` followed by literal `(not a link)`.
+    // The `TagEnd::Link` emits `]` and then the `(not a link)`
+    // text follows. Without a chain break, Typst parses
+    // `#link("...")[foo](not a link)` as
+    // "call `link()`, then call its result on `(not a link)`"
+    // — content can't be called, so the compiler errors with
+    // "expected comma". A single space after `]` forces a new
+    // content sequence.
+    let out = render_markdown_to_typst("[foo](not a link)\n\n[foo]: /url1\n");
+    // The link should be resolved by pulldown-cmark to the
+    // reference URL, and the closing `]` must be followed by
+    // a space.
+    assert!(
+        out.contains("#link(\"/url1\")[foo] (not a link)"),
+        "expected link with chain-break space before '(not a link)', got: {out}"
+    );
 }
 
 #[test]
@@ -362,6 +444,25 @@ fn escape_typst_underscore() {
 fn escape_typst_backtick() {
     assert_eq!(escape_typst("`"), r"\`");
     assert_eq!(escape_typst("a`b"), r"a\`b");
+}
+
+/// Pin: `<` and `>` — Typst label-reference syntax (`<name>`).
+/// Without escape, user text like `<a href="hi">` gets parsed
+/// as a label reference, swallowing the rest of the line and
+/// producing "unclosed label" errors. The earlier version of
+/// this function did NOT escape `<` and `>`, reasoning that
+/// they're only markup-active at line start — but the
+/// CommonMark spec test exposed that they're markup-active at
+/// any position in content mode. (Eight spec failures
+/// collapsed to zero once these chars were added to the
+/// escape set: examples #558, #562, #575, #576, #577, #578,
+/// #588, plus a structural fix to the autolink text escape
+/// that took #552 and #555 along with it.)
+#[test]
+fn escape_typst_angle_brackets() {
+    assert_eq!(escape_typst("<"), "\\<");
+    assert_eq!(escape_typst(">"), "\\>");
+    assert_eq!(escape_typst("<a href=\"hi\">"), "\\<a href=\\\"hi\\\"\\>");
 }
 
 /// Pin: `[` and `]` — content block delimiters. Critical: a stray

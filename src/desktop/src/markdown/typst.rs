@@ -119,6 +119,14 @@ struct TypstEmitState {
     /// accumulated source. Multiple `Event::Html` chunks inside
     /// the same block are concatenated verbatim.
     html_block_buffer: Option<String>,
+    /// True while inside an autolink (`<url>`). Autolink text equals
+    /// the URL and may contain `:` and `//` which Typst interprets
+    /// as markup-active in content mode (label and line-break
+    /// markers). We escape those chars for autolink text only; for
+    /// regular link text the user wrote the content and we trust
+    /// their intent. See [`Event::Text`] for the escape branch and
+    /// [`Tag::Link`] for where the flag is set.
+    in_autolink: bool,
 }
 
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -174,7 +182,18 @@ impl TypstEmitState {
     /// main output stream, the code buffer, or the current table
     /// cell. Escape user content for safe inclusion in Typst markup.
     fn push_inline(&mut self, text: &str) {
-        let escaped = escape_typst(text);
+        // Autolink text equals the URL and may contain `:` and
+        // `//` which Typst treats as markup-active in content mode
+        // (label terminator and line-break marker). Regular user-
+        // written text doesn't have those patterns naturally, so
+        // the stricter escape is autolink-only — escaping `:` in
+        // general text would break labelled content the user
+        // actually wants (e.g. "Step 1: do X" inside a callout).
+        let escaped = if self.in_autolink {
+            escape_typst_autolink(text)
+        } else {
+            escape_typst(text)
+        };
         if let Some(buf) = self.code_buffer.as_mut() {
             buf.body.push_str(&escaped);
             return;
@@ -414,7 +433,11 @@ fn emit_start(state: &mut TypstEmitState, tag: Tag<'_>) {
                 }
             }
         }
-        Tag::Link { dest_url, .. } => {
+        Tag::Link {
+            link_type,
+            dest_url,
+            ..
+        } => {
             // The URL is interpolated into a Typst string literal
             // (`#link("url")[text]`). Use the string escape function
             // — only `\` and `"` need to be escaped inside a string;
@@ -441,11 +464,22 @@ fn emit_start(state: &mut TypstEmitState, tag: Tag<'_>) {
             // mechanism so the whole construct stays together. See
             // [`TypstEmitState::push_raw`] for the table-cell bug
             // that this routing fix closed.
+            //
+            // Autolink detection: CommonMark's `<url>` form sets
+            // `link_type = Autolink` and the link text equals the
+            // URL. The text content in that case will be routed
+            // through a stricter escape (`escape_typst_autolink`)
+            // because URL chars like `:` and `//` are markup-active
+            // in Typst content mode (label and line-break markers).
+            // Regular `[text](url)` links keep the user's text
+            // verbatim — they wrote it and may have used their own
+            // markup intentionally.
             let url: &str = if dest_url.is_empty() {
                 "about:blank"
             } else {
                 dest_url.as_ref()
             };
+            state.in_autolink = matches!(link_type, pulldown_cmark::LinkType::Autolink);
             state.push_raw(&format!("#link(\"{}\")[", escape_typst_string(url)));
         }
         Tag::Image { dest_url, .. } => {
@@ -577,7 +611,25 @@ fn emit_end(state: &mut TypstEmitState, tag_end: TagEnd) {
             // also terminates on newline.
             state.output.push('\n');
         }
-        TagEnd::Link => state.push_raw("]"),
+        TagEnd::Link => {
+            // Trailing space after the link content is a chain
+            // break: `#link("url")[text]` followed by `(args)` is
+            // parsed by Typst as "call `link()`, then call its
+            // result on `(args)`" — content values can't be
+            // called, so this fails with "expected comma" or
+            // similar. The CommonMark spec example #524 hits this
+            // when a link is followed by literal parentheses —
+            // `[foo](not a link)\n\n[foo]: /url1` translates to
+            // `#link("/url1")[foo](not a link)`, and the trailing
+            // `(not a link)` chains off the link. A single space
+            // forces the parser to start a new content sequence.
+            // See [`Event::InlineHtml`] for the same trick.
+            state.push_raw("] ");
+            // Reset the autolink flag set at the corresponding
+            // `Tag::Link` start. We're now outside any link and
+            // text events route through the normal `escape_typst`.
+            state.in_autolink = false;
+        }
         TagEnd::Image => {
             // The image was fully emitted at Start; End just drops.
         }
@@ -678,16 +730,29 @@ fn emit_end(state: &mut TypstEmitState, tag_end: TagEnd) {
 /// - `'` `"` (smart quote trigger — without escape, ASCII
 ///   apostrophes / quotes get rendered as typographic curly
 ///   variants, which is wrong when the user meant a literal char)
+/// - `<` `>` (label-reference syntax — `<name>` is a label
+///   reference. Markup-active in content mode regardless of line
+///   position, despite an earlier assumption in this comment that
+///   it was only line-start. The CommonMark spec test caught this
+///   with the type-1 HTML block examples (#575–#578, #588) where
+///   pulldown-cmark emits the raw `<...>` as plain text and the
+///   unescaped form triggers "unclosed label" errors.)
 ///
 /// Chars that are NOT escaped (and don't need to be):
 /// - `-`, `+`, `=`, `/` at the start of a line: trigger list and
 ///   heading syntax in *markup* mode, but the user content we emit
 ///   always lives inside a content block `[...]` where line
-///   position does not carry the same meaning.
-/// - `<` `>` at the start of a line: same reason — `<label>` is
-///   markup-level, not content-level.
+///   position does not carry the same meaning. `/` mid-line is
+///   also safe in content mode (the line-break `/` is only active
+///   in markup mode between two text runs; inside one run of
+///   regular text it's literal).
 /// - `:` `;` `,` `.` `(` `)` `?` `!` etc.: not markup-active in
-///   any mode.
+///   any mode *for general text*. The autolink path uses a
+///   stricter escape ([`escape_typst_autolink`]) that adds `:` and
+///   `/` because URL patterns like `irc://foo.bar:2233/baz`
+///   would otherwise be parsed as a labelled content item
+///   (`name: value`), with the value swallowing the surrounding
+///   link brackets.
 fn escape_typst(s: &str) -> String {
     let mut out = String::with_capacity(s.len());
     for c in s.chars() {
@@ -704,6 +769,8 @@ fn escape_typst(s: &str) -> String {
             '~' => out.push_str("\\~"),
             '\'' => out.push_str("\\'"),
             '"' => out.push_str("\\\""),
+            '<' => out.push_str("\\<"),
+            '>' => out.push_str("\\>"),
             other => out.push(other),
         }
     }
@@ -731,6 +798,55 @@ fn escape_typst_string(s: &str) -> String {
             '\\' => out.push_str("\\\\"),
             '"' => out.push_str("\\\""),
             _other => out.push(c),
+        }
+    }
+    out
+}
+
+/// Escape a string for safe inclusion in Typst markup when the
+/// string is an autolink URL rendered as the link's text content.
+///
+/// This is a *stricter* version of [`escape_typst`]. The extra
+/// chars escaped are `:` and `/` — both are markup-active in
+/// Typst content mode:
+///
+/// - `:` after a word starts a "labeled content" item
+///   (`name: value` syntax). The text `<irc://foo.bar:2233/baz>`
+///   contains the sequence `irc://foo.bar:2233/baz` which Typst
+///   parses as `irc:` (label) `//foo.bar:2233/baz` (value); the
+///   labelled-item form keeps parsing until the next `,` or
+///   closing paren, swallowing the link's `]` and causing
+///   "unclosed delimiter".
+/// - `//` at the start of a line is a line comment, but in
+///   content mode mid-line the `/` chars themselves are not
+///   markup-active; the problem is the surrounding `:` chars,
+///   not the `/`s. We escape `/` anyway because the
+///   escaping is cheap and the URL is being passed through as
+///   literal text anyway.
+///
+/// This function is only used for autolink text. Regular
+/// `[text](url)` markdown links leave the user's text verbatim
+/// — they wrote it and may want a real `:` to be a label, a
+/// real `/` to be a line break, etc.
+fn escape_typst_autolink(s: &str) -> String {
+    let mut out = String::with_capacity(s.len() + 8);
+    for c in s.chars() {
+        match c {
+            '\\' => out.push_str("\\\\"),
+            '#' => out.push_str("\\#"),
+            '*' => out.push_str("\\*"),
+            '_' => out.push_str("\\_"),
+            '`' => out.push_str("\\`"),
+            '[' => out.push_str("\\["),
+            ']' => out.push_str("\\]"),
+            '@' => out.push_str("\\@"),
+            '$' => out.push_str("\\$"),
+            '~' => out.push_str("\\~"),
+            '\'' => out.push_str("\\'"),
+            '"' => out.push_str("\\\""),
+            ':' => out.push_str("\\:"),
+            '/' => out.push_str("\\/"),
+            other => out.push(other),
         }
     }
     out
