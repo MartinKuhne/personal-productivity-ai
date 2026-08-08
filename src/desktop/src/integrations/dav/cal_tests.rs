@@ -10,6 +10,7 @@
 //! keeps working.
 
 use super::*;
+use fast_dav_rs::CalDavClient;
 
 // --- parse_ical_data tests ---
 
@@ -674,5 +675,135 @@ fn dav_client_delete_calendar_item_500_carries_error_text() {
     assert!(
         err.contains("Failed to DELETE event"),
         "error should mention the DELETE failure, got: {err}"
+    );
+}
+
+// ---------------------------------------------------------------------------
+// Unified `DavClient` CardDAV tests — exercise the new card surface
+// on the same struct that handles CalDAV.
+// ---------------------------------------------------------------------------
+
+/// vCard body returned for `GET /alice.vcf`. The smoke test greps
+/// for the literal `Alice Example` so we make the FN match.
+const CARD_ALICE_VCF: &str = "BEGIN:VCARD\r\nVERSION:3.0\r\nFN:Alice Example\r\nUID:alice-1\r\nEMAIL:alice@example.com\r\nEND:VCARD";
+
+/// Register every stub the card-side DavClient tests need against
+/// `mock`. Centralised so the four tests below share a consistent
+/// CardDAV service.
+fn register_carddav_stubs(mock: &WiremockGuard) {
+    // PROPFIND: any path → 207 with one addressbook.
+    mock.register(
+        Mock::given(method("PROPFIND")).respond_with(
+            ResponseTemplate::new(207)
+                .insert_header("content-type", "application/xml")
+                .set_body_string(
+                    r#"<?xml version="1.0" encoding="utf-8"?>
+<d:multistatus xmlns:d="DAV:" xmlns:c="urn:ietf:params:xml:ns:carddav">
+ <d:response>
+  <d:href>/addressbooks/primary/</d:href>
+  <d:propstat>
+   <d:prop>
+    <d:resourcetype><d:collection/><c:addressbook/></d:resourcetype>
+   </d:prop>
+   <d:status>HTTP/1.1 200 OK</d:status>
+  </d:propstat>
+ </d:response>
+</d:multistatus>"#,
+                ),
+        ),
+    );
+    // GET /alice.vcf → 200 with the vCard body.
+    mock.register(
+        Mock::given(method("GET"))
+            .and(path("/alice.vcf"))
+            .respond_with(
+                ResponseTemplate::new(200)
+                    .insert_header("content-type", "text/vcard")
+                    .set_body_string(CARD_ALICE_VCF),
+            ),
+    );
+    // DELETE /alice.vcf → 204.
+    mock.register(
+        Mock::given(method("DELETE"))
+            .and(path("/alice.vcf"))
+            .respond_with(ResponseTemplate::new(204).set_body_string("")),
+    );
+    // DELETE /missing.vcf → 404 (treated as success in
+    // `delete_contact`).
+    mock.register(
+        Mock::given(method("DELETE"))
+            .and(path("/missing.vcf"))
+            .respond_with(
+                ResponseTemplate::new(404)
+                    .insert_header("content-type", "text/plain")
+                    .set_body_string("Not Found"),
+            ),
+    );
+}
+
+#[test]
+fn dav_client_get_contact_parses_vcard() {
+    install_rustls_provider();
+    let mock = WiremockGuard::start();
+    register_carddav_stubs(&mock);
+    let cfg = dav_client_config(mock.uri());
+    let client = DavClient::new("primary".to_string(), &cfg).expect("build DavClient");
+
+    let contact = client
+        .get_contact("/alice.vcf")
+        .expect("get_contact should succeed");
+    assert_eq!(contact.fn_name.as_deref(), Some("Alice Example"));
+    assert_eq!(contact.email.as_deref(), Some("alice@example.com"));
+    assert_eq!(contact.client, "primary");
+}
+
+#[test]
+fn dav_client_delete_contact_204_returns_status() {
+    install_rustls_provider();
+    let mock = WiremockGuard::start();
+    register_carddav_stubs(&mock);
+    let cfg = dav_client_config(mock.uri());
+    let client = DavClient::new("primary".to_string(), &cfg).expect("build DavClient");
+
+    let out = client
+        .delete_contact("/alice.vcf")
+        .expect("delete_contact should succeed");
+    assert!(
+        out.contains("Deleted"),
+        "expected success message, got: {out}"
+    );
+}
+
+#[test]
+fn dav_client_delete_contact_404_treated_as_success() {
+    install_rustls_provider();
+    let mock = WiremockGuard::start();
+    register_carddav_stubs(&mock);
+    let cfg = dav_client_config(mock.uri());
+    let client = DavClient::new("primary".to_string(), &cfg).expect("build DavClient");
+
+    let out = client
+        .delete_contact("/missing.vcf")
+        .expect("delete_contact should treat 404 as success");
+    assert!(
+        out.contains("Already absent"),
+        "expected idempotent 404 message, got: {out}"
+    );
+}
+
+#[test]
+fn dav_client_get_contact_404_includes_status() {
+    install_rustls_provider();
+    let mock = WiremockGuard::start();
+    register_carddav_stubs(&mock);
+    let cfg = dav_client_config(mock.uri());
+    let client = DavClient::new("primary".to_string(), &cfg).expect("build DavClient");
+
+    let err = client
+        .get_contact("/no-such-contact.vcf")
+        .expect_err("expected 404");
+    assert!(
+        err.contains("Not found by href"),
+        "error should mention the lookup failure, got: {err}"
     );
 }

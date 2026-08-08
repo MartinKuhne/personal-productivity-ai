@@ -1,10 +1,13 @@
 //! DAV integration — CalDAV (RFC 4791) and CardDAV (RFC 6352) over
 //! HTTP, backed by the `fast_dav_rs` SDK.
 //!
-//! `cal` covers the calendar (VEVENT) wire format and the
-//! `search_calendar` / `get_calendar` / `add_calendar_item` / etc.
-//! tool entry points. `card` covers the address book (vCard) wire
-//! format and the matching contact entry points.
+//! `client` is the unified `DavClient` — one struct that owns
+//! both a `CalDavClient` and a `CardDavClient` against the same
+//! DAV server, exposing both protocols' tools.
+//! `cal` and `card` are the protocol-specific helpers
+//! (iCal/vCard parsing, JSON serialisation) and the per-protocol
+//! `tool_*` LLM-adapter wrappers that aggregate per-server
+//! results.
 //!
 //! Both submodules share the same crate::config::caldav_clients
 //! configuration map (DAV servers are usually both CalDAV and
@@ -17,3 +20,6 @@
 
 pub mod cal;
 pub mod card;
+pub mod client;
+
+pub use client::DavClient;
