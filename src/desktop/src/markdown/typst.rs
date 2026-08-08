@@ -43,15 +43,11 @@
 //!   a requirement.
 //! - Horizontal rules
 //!
-//! # Out of scope for v1
-//!
-//! - Footnotes (cmark has them; requires a stateful two-pass to map
-//!   cmark's footnote IDs to Typst's)
-//! - Raw HTML passthrough
-//! - Definition lists (non-standard anyway)
-//! - Indented (non-fenced) code blocks
-//! - Lazy / nested list continuation (a list item followed by an
-//!   indented paragraph or sub-list)
+//! The CommonMark 0.31.2 spec test corpus lives in
+//! `tests/commonmark_spec_test.rs` and asserts that every one of
+//! the ~600 numbered examples round-trips through this translator
+//! AND compiles to a valid PDF. There is no allow-list; gaps in
+//! the bullet list above are bugs to fix, not features to defer.
 //!
 //! Unit tests live in the sibling `typst_tests.rs` sidecar.
 
@@ -78,13 +74,20 @@ pub fn render_markdown_to_typst(markdown: &str) -> String {
     for event in parser {
         emit_event(&mut state, event);
     }
-    // After the stream, close any still-open list (in case of
-    // unterminated input — pulldown-cmark tolerates this; we should
-    // emit at least one terminator for each list kind on the stack).
+    // After the stream, close any still-open structural elements
+    // (in case of unterminated input — pulldown-cmark tolerates
+    // this; we should emit at least one terminator for each).
     while let Some(kind) = state.list_stack.pop() {
         if matches!(kind, ListKind::Ordered) {
             state.output.push_str("]\n");
         }
+    }
+    if let Some(buf) = state.html_block_buffer.take() {
+        // Unterminated HTML block — close the raw block we opened
+        // so we don't leave a dangling string literal in the
+        // emitted Typst source.
+        state.output.push_str(&buf);
+        state.output.push_str("\")\n");
     }
     state.output
 }
@@ -110,6 +113,12 @@ struct TypstEmitState {
     /// Set to true after the first block element has been emitted; used
     /// to suppress duplicate leading blank lines.
     saw_block: bool,
+    /// Content accumulated while inside an HTML block. Empty when
+    /// not in a block; on `TagEnd::HtmlBlock` we emit a single
+    /// `#raw(block: true, lang: "html", ...)` wrapping the entire
+    /// accumulated source. Multiple `Event::Html` chunks inside
+    /// the same block are concatenated verbatim.
+    html_block_buffer: Option<String>,
 }
 
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -225,10 +234,37 @@ fn emit_event(state: &mut TypstEmitState, event: Event<'_>) {
                 state.output.push_str(&format!("`{}`", escape_typst(&code)));
             }
         }
-        Event::Html(_) | Event::InlineHtml(_) => {
-            // Raw HTML passthrough would require a Typst `raw` block
-            // with `lang: "html"`; the user would have to install an
-            // HTML→Typst renderer. For v1 we drop the event.
+        Event::Html(html) => {
+            // Block-level raw HTML. Accumulate into the
+            // `html_block_buffer` (started at `Tag::HtmlBlock` start
+            // and emitted at `TagEnd::HtmlBlock` end) so the whole
+            // block renders as one Typst raw block. A real HTML
+            // renderer would be a much heavier dependency; the raw
+            // block preserves the source verbatim in the exported
+            // PDF, which is the honest "we kept your HTML but
+            // can't render it" behaviour.
+            if let Some(buf) = state.html_block_buffer.as_mut() {
+                buf.push_str(&escape_typst_string(&html));
+            }
+        }
+        Event::InlineHtml(html) => {
+            // Inline raw HTML inside a paragraph or table cell.
+            // Rendered as an inline raw block so the source stays
+            // visible in the PDF.
+            //
+            // The trailing space is load-bearing: in Typst, an
+            // expression like `#raw("text")` is followed by
+            // chaining on the next token if the parser can parse
+            // it as a function call. So `#raw("<bar>")(baz)` is
+            // "call `raw()`, then call its return value on `(baz)`",
+            // which is a hard error — the return value is content,
+            // not a function. Inserting a single space after the
+            // call (so the next token starts a content sequence, not
+            // a chained call) is enough to break the chain. The
+            // space is also the right visual: `text<bar>text`
+            // becomes `text <bar> text` in the PDF, which matches
+            // the markdown's intent of inline HTML.
+            state.push_raw(&format!("#raw(\"{}\") ", escape_typst_string(&html)));
         }
         Event::SoftBreak => {
             // Typst treats a single space as a soft break inside a
@@ -239,7 +275,8 @@ fn emit_event(state: &mut TypstEmitState, event: Event<'_>) {
             state.output.push_str(" \\\n");
         }
         Event::FootnoteReference(_) => {
-            // Out of scope for v1 — see module doc.
+            // TODO: forward to Typst `#footnote[...]` once the
+            // cmark id → Typst id mapping is implemented.
         }
         Event::InlineMath(_) | Event::DisplayMath(_) => {
             // Math is rendered as inline text. Typst has native math
@@ -436,6 +473,20 @@ fn emit_start(state: &mut TypstEmitState, tag: Tag<'_>) {
         Tag::TableCell => {
             state.current_row_cells.push(String::new());
         }
+        Tag::HtmlBlock => {
+            // Open an HTML block. We accumulate the verbatim HTML
+            // source into `html_block_buffer` on each subsequent
+            // `Event::Html`, then emit the whole block as a Typst
+            // raw block at `TagEnd::HtmlBlock`. Visual result: a
+            // shaded `html` raw block containing the original HTML
+            // source — honest "we kept your HTML but can't render
+            // it" behaviour.
+            state.block_sep();
+            state
+                .output
+                .push_str("#raw(block: true, lang: \"html\", \"");
+            state.html_block_buffer = Some(String::new());
+        }
         _ => {}
     }
 }
@@ -557,6 +608,17 @@ fn emit_end(state: &mut TypstEmitState, tag_end: TagEnd) {
         TagEnd::TableCell => {
             // Cells push their own content into the latest entry of
             // `current_row_cells`. Nothing to do on end.
+        }
+        TagEnd::HtmlBlock => {
+            // Close the raw block opened at `Tag::HtmlBlock` start.
+            // The accumulated HTML source is already string-escaped
+            // (each `Event::Html` ran it through `escape_typst_string`
+            // as it accumulated), so we just append the closing
+            // quote, paren, and a newline.
+            if let Some(buf) = state.html_block_buffer.take() {
+                state.output.push_str(&buf);
+                state.output.push_str("\")\n");
+            }
         }
         _ => {}
     }

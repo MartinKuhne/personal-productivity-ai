@@ -19,64 +19,12 @@
 //! 2. `compile_markdown_to_pdf` produces a valid PDF (correct
 //!    `%PDF-` header, `%%EOF` trailer, non-zero length).
 //!
-//! Either failure counts as "this example didn't round-trip". The
-//! allow-list in [`KNOWN_ROUND_TRIP_FAILURES`] covers examples we
-//! *expect* to fail. The test fails on any example that fails and
-//! is NOT in the allow-list — that catches regressions while
-//! letting the documented gaps stand.
-//!
-//! # Known limitations (covered by the allow-list)
-//!
-//! ## Setext heading + raw HTML interaction
-//!
-//! The CommonMark spec explicitly tests that a `---` setext
-//! underline appearing inside what *should* be a raw HTML block
-//! does not turn the HTML into a heading. The test URLs `<a ...>`
-//! trigger pulldown-cmark 0.13's inline-HTML fall-through, which
-//! then *does* see the `---` as a heading underline. The translator
-//! faithfully emits the resulting events as Typst markup, and Typst
-//! rightly rejects the malformed output.
-//!
-//! This is a pulldown-cmark-level limitation, not a translator bug.
-//! Workaround would require a pre-processor that detects type-1 HTML
-//! blocks by hand and routes them around the setext check.
-//!
-//! ## Code spans with embedded backticks
-//!
-//! `` ``foo`bar`` `` produces a `Code("`foo`bar")` event. The
-//! surrounding `\`\`` markers in the source markdown are part of the
-//! span delimiter, not the content. The translator's `\`-escape for
-//! a literal backtick inside the body is correct, but Typst's
-//! raw-block parser also wants the closing backtick to match
-//! the opening run, and the embedded one trips it up.
-//!
-//! ## Emphasis / strong adjacent to text
-//!
-//! `foo*bar*` (no space before `*`), `*foo**bar***` — the CommonMark
-//! emphasis algorithm resolves these into `<em>` and `<strong>` in
-//! ways the translator currently does not surface. The resulting
-//! Typst has unbalanced `*` markers.
-//!
-//! ## Lazy / nested list continuation
-//!
-//! A list item that continues with an indented paragraph (or
-//! another list) is the dominant remaining failure class. The
-//! translator emits `#list(...)` with one `+ ` per item, but Typst
-//! requires every paragraph after the marker to either start with
-//! `+ ` (a new item) or be wrapped in its own content block. Mixed
-//! ordered/unordered markers (`1.` then `-`) and `1)` start markers
-//! are similarly not handled.
-//!
-//! ## Reference link with malformed text / URLs containing `<`
-//!
-//! `[a](<b>c` exercises an autolink-in-link URL that the markdown
-//! parser passes through to our link handler. The translator emits
-//! a Typst string that contains a `<`, which Typst treats as the
-//! start of a label, leading to "unclosed label".
+//! Either failure counts as "this example didn't round-trip" and
+//! fails the test. There is no allow-list. Every spec example is
+//! in scope; every gap in the translator is a real bug to fix, not
+//! a documented limitation to defer.
 
 #![cfg(feature = "pdf-export")]
-
-use std::collections::HashSet;
 
 use fastmd::app::print_pdf::compile_markdown_to_pdf;
 use fastmd::markdown::render_markdown_to_typst;
@@ -99,62 +47,6 @@ const SEPARATOR: &str = "\n.\n";
 /// End of the test-suite portion of the spec; everything after this
 /// marker is the prose-only parsing strategy appendix.
 const END_MARKER: &str = "<!-- END TESTS -->";
-
-/// Spec examples that the translator does not yet round-trip to a
-/// valid PDF, with a short reason for each category. The test
-/// fails on any example that fails to round-trip and is NOT in
-/// this list — that catches regressions while letting the
-/// documented gaps stand. When a gap is fixed, remove its number
-/// from the list and the test starts asserting the case passes.
-///
-/// Numbers are 1-based and match the spec's "Example N" labels.
-/// They are sorted within each category for easy review.
-///
-/// The previous version of this list contained 77 entries. After
-/// fixing the ordered-list syntax bug (the old
-/// `#list(marker: ([_],), + Item)` shape is invalid Typst; the
-/// new shape is `#enum(numbering: "1.")[ + Item]`), 24 list
-/// entries now pass and have been removed. The remaining 51
-/// entries are the real translator gaps the spec corpus still
-/// surfaces: 29 HTML-only examples (translator drops the HTML
-/// per v1 scope), 6 setext-heading-plus-raw-HTML cases
-/// (pulldown-cmark limitation), 2 code-span-with-embedded-
-/// backtick cases, 4 emphasis-adjacent-to-text cases, and 10
-/// lazy / nested-list continuation cases.
-const KNOWN_ROUND_TRIP_FAILURES: &[usize] = &[
-    // -- HTML-only content (29) --
-    // Body is entirely raw HTML, which the v1 translator drops
-    // (see `crate::markdown::typst`'s "Out of scope for v1" section).
-    // The PDF compiles to a valid (but blank) page for these.
-    107, 108, 110, 111, 113, 114, 115, 116, 117, 118, 119, 120, 121, 122, 123, 128, 130, 135, 138,
-    143, 146, 147, 569, 570, 571, 572, 579, 598, 599,
-    // -- Setext heading + raw HTML (6) --
-    // pulldown-cmark 0.13 sometimes treats `<a ...>`-prefixed lines
-    // as paragraphs instead of type-1 HTML blocks, then sees a
-    // `---` setext underline on the next line and emits a spurious
-    // heading. Translator faithfully reflects the events;
-    // pulldown-cmark-level limitation.
-    48, 575, 576, 577, 578, 588,
-    // -- Code spans with embedded backticks (2) --
-    // `` ``foo`bar`` `` produces a `Code("`foo`bar")` event whose
-    // body contains a backtick. Typst's raw-block parser wants
-    // matching backtick runs; the embedded one trips it up.
-    295, 296,
-    // -- Emphasis / strong adjacent to text (4) --
-    // `foo*bar*` (no space before `*`), `*foo**bar***` and friends
-    // — the CommonMark emphasis algorithm resolves these into
-    // `<em>` / `<strong>` in ways the translator currently does
-    // not surface. The resulting Typst has unbalanced `*` markers.
-    311, 326, 352, 371,
-    // -- Lazy / nested list continuation (10) --
-    // List items that continue with an indented paragraph or a
-    // sub-list, or mix ordered/unordered markers in a way the
-    // translator's flat `#enum` / bullet-list emission does not
-    // surface. The previous allow-list had 34 of these; the 24
-    // that are now passing went through once we stopped emitting
-    // the invalid `#list(marker: ([_],), + Item)` shape.
-    285, 286, 287, 337, 450, 524, 552, 555, 558, 562,
-];
 
 /// Walk the spec source and pull out each example's markdown input
 /// (the part before `\n.\n` inside the example block).
@@ -232,24 +124,24 @@ fn all_commonmark_0_31_2_examples_translate_to_non_empty_typst() {
         examples.len()
     );
 
-    let known: HashSet<usize> = KNOWN_ROUND_TRIP_FAILURES.iter().copied().collect();
-
-    let mut unexpected_empty: Vec<String> = Vec::new();
+    let mut failures: Vec<String> = Vec::new();
     for (n, md) in &examples {
         let typst = render_markdown_to_typst(md);
-        if typst.trim().is_empty() && !known.contains(n) {
-            unexpected_empty.push(format!("example #{n}: translator produced empty Typst"));
+        if typst.trim().is_empty() {
+            failures.push(format!("example #{n}: translator produced empty Typst"));
         }
     }
 
     assert!(
-        unexpected_empty.is_empty(),
-        "{} spec examples produced empty Typst unexpectedly. \
-         The {} entries in `KNOWN_ROUND_TRIP_FAILURES` are expected \
-         to be empty; these are not in the allow-list. New failures:\n{}",
-        unexpected_empty.len(),
-        known.len(),
-        unexpected_empty.join("\n")
+        failures.is_empty(),
+        "{} spec examples produced empty Typst:\n{}",
+        failures.len(),
+        failures
+            .iter()
+            .take(20)
+            .cloned()
+            .collect::<Vec<_>>()
+            .join("\n")
     );
 }
 
@@ -268,11 +160,7 @@ fn all_commonmark_0_31_2_examples_compile_to_valid_pdf() {
         examples.len()
     );
 
-    let known: HashSet<usize> = KNOWN_ROUND_TRIP_FAILURES.iter().copied().collect();
-
-    let mut unexpected_failures: Vec<String> = Vec::new();
-    let mut known_failures_seen: usize = 0;
-
+    let mut failures: Vec<String> = Vec::new();
     for (n, md) in &examples {
         let result = compile_markdown_to_pdf(md, "commonmark-spec");
         let bad = match &result {
@@ -294,33 +182,14 @@ fn all_commonmark_0_31_2_examples_compile_to_valid_pdf() {
         };
 
         if let Some(reason) = bad {
-            if known.contains(n) {
-                known_failures_seen += 1;
-                eprintln!("  known-fail example #{n}: {reason}");
-            } else {
-                unexpected_failures.push(format!("example #{n}: {reason}"));
-            }
+            failures.push(format!("example #{n}: {reason}"));
         }
     }
 
-    eprintln!(
-        "compile_to_pdf: {} of {} spec examples failed ({} in allow-list, {} unexpected)",
-        known_failures_seen + unexpected_failures.len(),
-        examples.len(),
-        known_failures_seen,
-        unexpected_failures.len(),
-    );
-
     assert!(
-        unexpected_failures.is_empty(),
-        "{} UNEXPECTED spec-example failures (the {} known \
-         translator gaps in `KNOWN_ROUND_TRIP_FAILURES` are still \
-         expected to fail and are not listed here). \
-         These new failures are regressions — please either fix the \
-         translator or add the new example to the allow-list with a \
-         comment explaining the gap. Unexpected failures:\n{}",
-        unexpected_failures.len(),
-        known_failures_seen,
-        unexpected_failures.join("\n")
+        failures.is_empty(),
+        "{} spec examples failed to compile:\n{}",
+        failures.len(),
+        failures.join("\n")
     );
 }
