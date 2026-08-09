@@ -853,7 +853,7 @@ fn test_render_table_horizontal_scroll_fallback_no_clip() {
     assert!(
         max_glyph_x > 100.0,
         "fallback path must not clip: at least one painted text shape must extend \
-         beyond the 100px viewport; max glyph x = {max_glyph_x}"
+           beyond the 100px viewport; max glyph x = {max_glyph_x}"
     );
 
     // (b) A horizontal ScrollArea shape (Mesh/Noop) is present.
@@ -871,4 +871,175 @@ fn test_render_table_horizontal_scroll_fallback_no_clip() {
             .map(|cs| std::mem::discriminant(&cs.shape))
             .collect::<Vec<_>>()
     );
+}
+
+/// Regression: a table cell containing `[Link](url) · **(555) 123-4567**`
+/// must remain a single column — the phone number must not split into
+/// an extra, unbudgeted column.
+#[test]
+fn test_table_cell_with_link_middle_dot_and_bold_phone() {
+    use crate::markdown::model::RenderEvent;
+    use crate::markdown::parser::parse_markdown_to_events;
+    use crate::ui::table_width::{DeficitStrategy, TableLayoutBuilder};
+    use crate::ui::test_helpers::run_ui_test;
+    use eframe::egui::Context;
+
+    let md = "| Header |\n| --- |\n| [Link](https://example.com/shop/) \u{b7} **(555) 123-4567** |";
+    let events = parse_markdown_to_events(md);
+    let table = events
+        .iter()
+        .find_map(|e| match e {
+            RenderEvent::Table(rows) => Some(rows),
+            _ => None,
+        })
+        .expect("expected a Table event");
+
+    let ctx = Context::default();
+    run_ui_test(&ctx, egui::RawInput::default(), |ui| {
+        let measurer = crate::ui::table_width::EguiTextMeasurer::new(ui);
+        let builder =
+            TableLayoutBuilder::new(&measurer, 800.0, DeficitStrategy::HybridMinPenaltyWaterFill)
+                .with_padding(8.0, 4.0);
+
+        let layout = builder.build(&table);
+
+        eprintln!("Layout: {:?}", layout);
+        eprintln!("Rows: {}", layout.rows.len());
+        for (i, row) in layout.rows.iter().enumerate() {
+            eprintln!("Row {}: {} cells", i, row.len());
+            for (j, cell) in row.iter().enumerate() {
+                eprintln!(
+                    "  Cell ({}, {}): width={}, height={}, content={:?}",
+                    i, j, cell.width, cell.height, cell.content
+                );
+            }
+        }
+
+        assert_eq!(layout.rows.len(), 2, "header + 1 data row");
+        assert_eq!(layout.rows[0].len(), 1, "1 column in header");
+        assert_eq!(layout.rows[1].len(), 1, "1 column in data row");
+    });
+}
+
+/// Regression: a 5-column table where some rows have
+/// `[Link](url) · **(NNN) NNN-NNNN**` in the last column must
+/// render the phone number text glyphs **within** the table's
+/// last-column bounds — not in a phantom column to the right
+/// of the table.
+#[test]
+fn test_render_5col_table_phone_in_last_column_single_line() {
+    use super::helpers::render_table_with_paint_output;
+    use eframe::epaint::Shape;
+
+    let plain = crate::ui::render::TextStyle::default();
+    let bold = crate::ui::render::TextStyle {
+        bold: true,
+        ..crate::ui::render::TextStyle::default()
+    };
+
+    let link_cell = |url: &str| vec![InlineElem::Link(url.to_string(), "Link".to_string())];
+    let link_phone_cell = |url: &str, phone: &str| {
+        vec![
+            InlineElem::Link(url.to_string(), "Link".to_string()),
+            InlineElem::Text(" \u{b7} ".to_string(), plain.clone()),
+            InlineElem::Text(format!("({phone})"), bold.clone()),
+        ]
+    };
+    let text_cell = |t: &str| vec![InlineElem::Text(t.to_string(), plain.clone())];
+
+    let header: Vec<Vec<InlineElem>> = vec![
+        text_cell("Name"),
+        text_cell("Score"),
+        text_cell("Location"),
+        text_cell("Description"),
+        text_cell("Link"),
+    ];
+    let data: Vec<Vec<Vec<InlineElem>>> = vec![
+        vec![
+            text_cell("Shop Alpha"),
+            text_cell("86"),
+            text_cell("City A"),
+            text_cell("Trusted"),
+            link_cell("https://example.com/shop-alpha/"),
+        ],
+        vec![
+            text_cell("Shop Beta"),
+            text_cell("10"),
+            text_cell("City B"),
+            text_cell("Family-owned"),
+            link_phone_cell("https://example.com/shop-beta/", "555 111-2222"),
+        ],
+        vec![
+            text_cell("Shop Gamma"),
+            text_cell("5"),
+            text_cell("City C"),
+            text_cell("Affordable"),
+            link_phone_cell("https://example.com/shop-gamma/", "555 333-4444"),
+        ],
+    ];
+    let mut table: Vec<Vec<Vec<InlineElem>>> = vec![header];
+    table.extend(data);
+
+    // Confirm AST: 5 columns x 4 rows
+    assert_eq!(table.len(), 4);
+    for row in &table {
+        assert_eq!(row.len(), 5);
+    }
+
+    let output = render_table_with_paint_output(&table);
+    let shapes = &output.shapes;
+
+    // Find text shapes containing phone-number fragments
+    let phone_shapes: Vec<&eframe::epaint::ClippedShape> = shapes
+        .iter()
+        .filter(|cs| {
+            matches!(&cs.shape, Shape::Text(t) if t.galley.text().contains("111-2222") || t.galley.text().contains("333-4444"))
+        })
+        .collect();
+
+    assert!(
+        !phone_shapes.is_empty(),
+        "must find at least one phone-number text shape in the output"
+    );
+
+    // Find the rightmost text shape among all to get table bounds
+    let max_text_x: f32 = shapes
+        .iter()
+        .filter_map(|cs| match &cs.shape {
+            Shape::Text(t) => Some(t.pos.x + t.galley.rect.width()),
+            _ => None,
+        })
+        .fold(0.0_f32, f32::max);
+
+    for ps in &phone_shapes {
+        if let Shape::Text(t) = &ps.shape {
+            let phone_right = t.pos.x + t.galley.rect.width();
+            assert!(
+                phone_right <= max_text_x + 2.0,
+                "phone number '{}' at x={:.1}..{:.1} must be within table bound ({:.1}); \
+                 it is outside the last column — this means the phone number rendered \
+                 in a phantom extra column",
+                t.galley.text(),
+                t.pos.x,
+                phone_right,
+                max_text_x,
+            );
+
+            // Phone number must render at a reasonable height (single
+            // line or wrapped at the column width), not at 210px
+            // (one character per line from top_down multi-column wrap).
+            let galley_h = t.galley.rect.height();
+            let line_h = t.galley.rows.len() as f32
+                * t.galley.rows.first().map_or(0.0, |r| r.rect().height());
+            let expected_max = (line_h * 3.0).ceil(); // up to 3 lines is reasonable
+            assert!(
+                galley_h <= expected_max,
+                "phone '{}' galley height={:.1} (expected <= {:.1} for <=3 lines); \
+                 was rendered character-per-line from top_down with wrapping",
+                t.galley.text(),
+                galley_h,
+                expected_max,
+            );
+        }
+    }
 }

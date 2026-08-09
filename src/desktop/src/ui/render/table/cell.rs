@@ -142,18 +142,14 @@ pub(super) fn render_table_cell(
         };
 
         // Render text content tightly packed at top of cell without min_height constraint.
-        // `TBL-030`/`TBL-031`: `top_down(Align::Min)` anchors Y at the cursor top
-        // (Align::Min is the cross-axis = horizontal → LEFT aligned rows);
-        // `with_main_wrap(true)` lets individual label widgets wrap within `inner_w`.
-        //
-        // Previously `left_to_right(Align::Min).with_main_wrap(true)` was used.
-        // In egui a `left_to_right` layout places Align::Min on the *cross* axis
-        // (vertical), but the cursor is not re-anchored to the cell top when the
-        // outer `allocate_ui_with_layout` reserves a height larger than the content
-        // — short cells appeared vertically centred when sharing a row with a
-        // taller cell. Pinned by `test_table_single_line_cell_text_at_row_top`.
+        // `TBL-030`/`TBL-031`: `left_to_right(Align::TOP)` anchors Y at the cursor top
+        // and flows elements inline so Link + Text content (e.g. "[Link](url) · **(555) 123-4567**")
+        // renders on one line with wrap at the column boundary instead of
+        // stacking each element vertically which, with `top_down` +
+        // `main_wrap(true)` + a small cell height, forces a multi-column
+        // wrap that renders each character on its own line at 210 px tall.
         let content_res = ui.with_layout(
-            egui::Layout::top_down(egui::Align::Min).with_main_wrap(true),
+            egui::Layout::left_to_right(egui::Align::TOP).with_main_wrap(true),
             |ui| {
                 ui.spacing_mut().item_spacing = egui::Vec2::ZERO;
                 ui.set_min_width(inner_w);

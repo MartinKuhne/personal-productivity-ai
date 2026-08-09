@@ -235,22 +235,22 @@ fn test_json_to_vcard_natural_field_names_round_trip() {
     // Exactly the payload the LLM sends today: name, email, phone,
     // company, title, notes. Every field must be preserved.
     let input = r#"{
-        "name": "Paul Wayss",
-        "email": "pwayss@sqagroup.com",
-        "phone": "401-709-4153",
-        "company": "SQA Group",
+        "name": "Test User",
+        "email": "test.user@example.com",
+        "phone": "(555) 000-1111",
+        "company": "Example Corp",
         "title": "Controller",
         "notes": "Handles payroll, timesheets, and compensation matters."
     }"#;
     let vcard = json_to_vcard(input, Some("test-uid"));
 
     assert!(
-        vcard.contains("FN:Paul Wayss"),
+        vcard.contains("FN:Test User"),
         "FN must use the name field, got:\n{vcard}"
     );
-    assert!(vcard.contains("EMAIL;TYPE=INTERNET:pwayss@sqagroup.com"));
-    assert!(vcard.contains("TEL;TYPE=CELL:401-709-4153"));
-    assert!(vcard.contains("ORG:SQA Group"));
+    assert!(vcard.contains("EMAIL;TYPE=INTERNET:test.user@example.com"));
+    assert!(vcard.contains("TEL;TYPE=CELL:(555) 000-1111"));
+    assert!(vcard.contains("ORG:Example Corp"));
     assert!(
         vcard.contains("TITLE:Controller"),
         "TITLE line missing, got:\n{vcard}"
@@ -545,7 +545,7 @@ fn test_unescape_vcard_text_trailing_backslash_preserved() {
 
 #[test]
 fn test_json_to_vcard_preserves_explicit_uid() {
-    let input = r#"{"name":"Paul Wayss","email":"p@example.com"}"#;
+    let input = r#"{"name":"Test User","email":"p@example.com"}"#;
     let vcard = json_to_vcard(input, Some("existing-uid-xyz"));
 
     assert!(
@@ -648,18 +648,18 @@ fn test_unfold_vcard_merges_continuation_lines() {
 
 const FIXTURE_PAUL: &str = "BEGIN:VCARD\r\n\
 VERSION:3.0\r\n\
-FN:Paul Wayss\r\n\
-N:Wayss;Paul;;;\r\n\
-NICKNAME:PJ\r\n\
-BDAY:1980-04-15\r\n\
-EMAIL;TYPE=WORK:pwayss@sqagroup.com\r\n\
-TEL;TYPE=CELL:401-709-4153\r\n\
-URL:https://sqagroup.com\r\n\
+FN:Test User\r\n\
+N:User;Test;;;\r\n\
+NICKNAME:TJ\r\n\
+BDAY:1990-01-01\r\n\
+EMAIL;TYPE=WORK:test.user@example.com\r\n\
+TEL;TYPE=CELL:(555) 000-1111\r\n\
+URL:https://example.com\r\n\
 X-SKILLS:payroll;tax;audit\r\n\
-ORG:SQA Group\r\n\
+ORG:Example Corp\r\n\
 TITLE:Controller\r\n\
 NOTE:Handles payroll\\, timesheets\\, and compensation matters.\r\n\
-UID:paul-uid-123\r\n\
+UID:test-uid-456\r\n\
 END:VCARD";
 
 #[test]
@@ -668,23 +668,23 @@ fn test_merge_vcard_update_preserves_unknown_properties() {
     // X-SKILLS, NOTE, the FN, EMAIL, TEL, ORG) must remain untouched.
     let existing = parse_vcard_properties(FIXTURE_PAUL);
     let new_json = r#"{"title":"VP Controller"}"#;
-    let merged = merge_vcard_update(&existing, new_json, Some("paul-uid-123"));
+    let merged = merge_vcard_update(&existing, new_json, Some("test-uid-456"));
 
     // New value applied
     assert!(merged.contains("TITLE:VP Controller"), "got:\n{merged}");
     // Preserved
-    assert!(merged.contains("FN:Paul Wayss"));
-    assert!(merged.contains("N:Wayss;Paul;;;"));
-    assert!(merged.contains("NICKNAME:PJ"));
-    assert!(merged.contains("BDAY:1980-04-15"));
-    assert!(merged.contains("EMAIL;TYPE=WORK:pwayss@sqagroup.com"));
-    assert!(merged.contains("TEL;TYPE=CELL:401-709-4153"));
-    assert!(merged.contains("URL:https://sqagroup.com"));
+    assert!(merged.contains("FN:Test User"));
+    assert!(merged.contains("N:User;Test;;;"));
+    assert!(merged.contains("NICKNAME:TJ"));
+    assert!(merged.contains("BDAY:1990-01-01"));
+    assert!(merged.contains("EMAIL;TYPE=WORK:test.user@example.com"));
+    assert!(merged.contains("TEL;TYPE=CELL:(555) 000-1111"));
+    assert!(merged.contains("URL:https://example.com"));
     assert!(merged.contains("X-SKILLS:payroll;tax;audit"));
-    assert!(merged.contains("ORG:SQA Group"));
+    assert!(merged.contains("ORG:Example Corp"));
     assert!(merged.contains(r"NOTE:Handles payroll\, timesheets\, and compensation matters."));
     // UID
-    assert!(merged.contains("UID:paul-uid-123"));
+    assert!(merged.contains("UID:test-uid-456"));
 }
 
 #[test]
@@ -733,14 +733,14 @@ fn test_merge_vcard_update_partial_json_preserves_other_canonical_fields() {
     // LLM sends only `name` and `phone`. EMAIL, ORG, TITLE, NOTE
     // should all be preserved verbatim.
     let existing = parse_vcard_properties(FIXTURE_PAUL);
-    let new_json = r#"{"name":"Paul J. Wayss","phone":"+1-401-555-0199"}"#;
-    let merged = merge_vcard_update(&existing, new_json, Some("paul-uid-123"));
+    let new_json = r#"{"name":"Test J. User","phone":"+1-555-000-0199"}"#;
+    let merged = merge_vcard_update(&existing, new_json, Some("test-uid-456"));
 
-    assert!(merged.contains("FN:Paul J. Wayss"));
-    assert!(merged.contains("TEL;TYPE=CELL:+1-401-555-0199"));
+    assert!(merged.contains("FN:Test J. User"));
+    assert!(merged.contains("TEL;TYPE=CELL:+1-555-000-0199"));
     // Preserved canonical fields
-    assert!(merged.contains("EMAIL;TYPE=WORK:pwayss@sqagroup.com"));
-    assert!(merged.contains("ORG:SQA Group"));
+    assert!(merged.contains("EMAIL;TYPE=WORK:test.user@example.com"));
+    assert!(merged.contains("ORG:Example Corp"));
     assert!(merged.contains("TITLE:Controller"));
     assert!(merged.contains(r"NOTE:Handles payroll\, timesheets\, and compensation matters."));
 }
@@ -751,9 +751,9 @@ fn test_merge_vcard_update_empty_value_is_treated_as_not_provided() {
     // `"phone": ""` is saying "don't change the phone" — the existing
     // TEL must survive.
     let existing = parse_vcard_properties(FIXTURE_PAUL);
-    let merged = merge_vcard_update(&existing, r#"{"phone":""}"#, Some("paul-uid-123"));
+    let merged = merge_vcard_update(&existing, r#"{"phone":""}"#, Some("test-uid-456"));
     assert!(
-        merged.contains("TEL;TYPE=CELL:401-709-4153"),
+        merged.contains("TEL;TYPE=CELL:(555) 000-1111"),
         "empty phone value must not clear the existing TEL, got:\n{merged}"
     );
 }
@@ -798,14 +798,14 @@ fn test_merge_vcard_update_idempotent_on_no_changes() {
     // produce an equivalent vCard (modulo a possible re-emission of
     // the same lines).
     let existing = parse_vcard_properties(FIXTURE_PAUL);
-    let json = r#"{"name":"Paul Wayss","email":"pwayss@sqagroup.com"}"#;
-    let merged = merge_vcard_update(&existing, json, Some("paul-uid-123"));
+    let json = r#"{"name":"Test User","email":"test.user@example.com"}"#;
+    let merged = merge_vcard_update(&existing, json, Some("test-uid-456"));
     // No fields dropped, no new values introduced.
-    assert!(merged.contains("FN:Paul Wayss"));
-    assert!(merged.contains("EMAIL;TYPE=WORK:pwayss@sqagroup.com"));
-    assert!(merged.contains("TEL;TYPE=CELL:401-709-4153"));
-    assert!(merged.contains("BDAY:1980-04-15"));
-    assert!(merged.contains("URL:https://sqagroup.com"));
+    assert!(merged.contains("FN:Test User"));
+    assert!(merged.contains("EMAIL;TYPE=WORK:test.user@example.com"));
+    assert!(merged.contains("TEL;TYPE=CELL:(555) 000-1111"));
+    assert!(merged.contains("BDAY:1990-01-01"));
+    assert!(merged.contains("URL:https://example.com"));
     assert!(merged.contains("X-SKILLS:payroll;tax;audit"));
 }
 
@@ -828,9 +828,9 @@ fn test_merge_vcard_update_handles_empty_existing() {
 
 #[test]
 fn test_parse_vcard_extracts_bday() {
-    let data = "BEGIN:VCARD\r\nVERSION:3.0\r\nFN:A\r\nBDAY:1980-04-15\r\nEND:VCARD";
+    let data = "BEGIN:VCARD\r\nVERSION:3.0\r\nFN:A\r\nBDAY:1990-01-01\r\nEND:VCARD";
     let contact = parse_vcard("c", "/h", data);
-    assert_eq!(contact.bday, Some("1980-04-15".to_string()));
+    assert_eq!(contact.bday, Some("1990-01-01".to_string()));
 }
 
 #[test]
@@ -865,25 +865,25 @@ fn test_json_to_vcard_no_bday_no_line() {
 
 #[test]
 fn test_merge_vcard_update_replaces_bday_when_provided() {
-    let body = "BEGIN:VCARD\r\nVERSION:3.0\r\nFN:A\r\nBDAY:1980-04-15\r\nEND:VCARD";
+    let body = "BEGIN:VCARD\r\nVERSION:3.0\r\nFN:A\r\nBDAY:1990-01-01\r\nEND:VCARD";
     let existing = parse_vcard_properties(body);
     let merged = merge_vcard_update(&existing, r#"{"birthday":"1990-12-31"}"#, Some("u"));
     assert!(merged.contains("BDAY:1990-12-31"));
-    assert!(!merged.contains("BDAY:1980-04-15"));
+    assert!(!merged.contains("BDAY:1990-01-01"));
 }
 
 #[test]
 fn test_merge_vcard_update_preserves_bday_when_not_provided() {
-    let body = "BEGIN:VCARD\r\nVERSION:3.0\r\nFN:A\r\nBDAY:1980-04-15\r\nEND:VCARD";
+    let body = "BEGIN:VCARD\r\nVERSION:3.0\r\nFN:A\r\nBDAY:1990-01-01\r\nEND:VCARD";
     let existing = parse_vcard_properties(body);
     let merged = merge_vcard_update(&existing, r#"{"name":"A2"}"#, Some("u"));
-    assert!(merged.contains("BDAY:1980-04-15"));
+    assert!(merged.contains("BDAY:1990-01-01"));
 }
 
 #[test]
 fn test_merge_vcard_update_collapses_duplicate_bdays() {
     // BDAY is single-valued; duplicates must collapse like FN/EMAIL/…
-    let body = "BEGIN:VCARD\r\nBDAY:1980-04-15\r\nBDAY:1990-01-01\r\nEND:VCARD";
+    let body = "BEGIN:VCARD\r\nBDAY:1990-01-01\r\nBDAY:1990-01-01\r\nEND:VCARD";
     let existing = parse_vcard_properties(body);
     let merged = merge_vcard_update(&existing, r#"{"birthday":"2000-06-15"}"#, Some("u"));
     let bdays: Vec<&str> = merged.lines().filter(|l| l.starts_with("BDAY:")).collect();
@@ -1098,10 +1098,10 @@ fn test_merge_vcard_update_address_object_alias() {
     let existing = parse_vcard_properties(FIXTURE_PAUL);
     let merged = merge_vcard_update(
         &existing,
-        r#"{"address":{"type":"work","city":"SQA HQ","country":"US"}}"#,
-        Some("paul-uid-123"),
+        r#"{"address":{"type":"work","city":"Example HQ","country":"US"}}"#,
+        Some("test-uid-456"),
     );
-    assert!(merged.contains("ADR;TYPE=WORK:;;;SQA HQ;;;US"));
+    assert!(merged.contains("ADR;TYPE=WORK:;;;Example HQ;;;US"));
 }
 
 #[test]
@@ -1109,14 +1109,14 @@ fn test_merge_vcard_update_address_string_alias() {
     let existing = parse_vcard_properties(FIXTURE_PAUL);
     let merged = merge_vcard_update(
         &existing,
-        r#"{"address":"16999 NE 37th Pl, Bellevue, WA 98004"}"#,
-        Some("paul-uid-123"),
+        r#"{"address":"123 Main St, Springfield, IL 62701"}"#,
+        Some("test-uid-456"),
     );
     // Heuristic split: the 3 non-empty comma-separated parts fill 3
     // of the 7 ADR components; the rest (po_box, ext, postal_code,
     // country) stay empty. vCard 7-component ADR shape:
     // po_box;ext;street;city;region;postal_code;country
-    assert!(merged.contains("ADR:;;16999 NE 37th Pl;Bellevue;WA 98004;;"));
+    assert!(merged.contains("ADR:;;123 Main St;Springfield;IL 62701;;"));
 }
 
 #[test]
