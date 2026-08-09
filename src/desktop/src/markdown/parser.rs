@@ -200,7 +200,6 @@ pub fn parse_markdown_to_events(markdown_text: &str) -> Vec<RenderEvent> {
     let mut current_row: Vec<Vec<InlineElem>> = Vec::new();
 
     let mut list_ordinal_stack: Vec<Option<u64>> = Vec::new();
-    let mut blockquote_depth: usize = 0;
 
     let push_inline = |events: &mut Vec<RenderEvent>,
                        elems: &mut Vec<InlineElem>,
@@ -372,8 +371,6 @@ pub fn parse_markdown_to_events(markdown_text: &str) -> Vec<RenderEvent> {
                         list_ordinal_stack.last().copied().flatten(),
                     );
                 }
-                blockquote_depth += 1;
-                current_style.muted = true;
             }
             Event::End(TagEnd::BlockQuote(_)) => {
                 push_inline(
@@ -384,10 +381,6 @@ pub fn parse_markdown_to_events(markdown_text: &str) -> Vec<RenderEvent> {
                     list_depth,
                     list_ordinal_stack.last().copied().flatten(),
                 );
-                blockquote_depth = blockquote_depth.saturating_sub(1);
-                if blockquote_depth == 0 {
-                    current_style.muted = false;
-                }
             }
             Event::Start(Tag::Table(_)) => {
                 if !buffered_inline.is_empty() {

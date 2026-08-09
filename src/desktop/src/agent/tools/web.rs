@@ -3,7 +3,7 @@
 //! Unit tests live in the sibling `web_tests.rs` sidecar.
 
 use crate::agent::datamark::{self, SECURITY_HEADER};
-use crate::agent::response_formatter::format_tool_call_message;
+use crate::agent::response_formatter::format_delegate_tool_call_message;
 use crate::agent::tools::manager::builtin::strings::WEB_FETCH_FINAL_PAGE_HINT;
 use crate::agent::tools::manager::cache::CacheEntry;
 use crate::bus::events::typed::{AgentEvent, BackgroundEvent};
@@ -473,7 +473,7 @@ pub fn tool_web_delegate(
                     .and_then(|a| a.as_str())
                     .unwrap_or("{}");
 
-                let tool_call_msg = format_tool_call_message(func_name, func_args_str);
+                let tool_call_msg = format_delegate_tool_call_message(func_name, func_args_str);
                 delegate_trace.push_str(&tool_call_msg);
                 delegate_trace.push_str("\n\n");
                 if let Some(tx) = tx_gui {

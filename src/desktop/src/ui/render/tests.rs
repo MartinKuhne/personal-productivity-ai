@@ -501,36 +501,29 @@ fn test_parse_markdown_rule_and_blockquote() {
 }
 
 #[test]
-fn test_blockquote_text_has_muted_style() {
-    let md = "> Blockquote text\n> **Bold in quote**\n\nNormal text";
-    let events = parse_markdown_to_events(md);
-
-    let mut quote_text_found = false;
-    let mut normal_text_found = false;
-    for event in &events {
-        if let RenderEvent::FlushInline { elems, .. } = event {
-            for elem in elems {
-                if let InlineElem::Text(t, style) = elem {
-                    if t.contains("Blockquote text") || t.contains("Bold in quote") {
-                        assert!(
-                            style.muted,
-                            "Blockquote text '{t}' should have muted=true, got {style:?}"
-                        );
-                        quote_text_found = true;
-                    }
-                    if t.contains("Normal text") {
-                        assert!(
-                            !style.muted,
-                            "Normal text '{t}' should have muted=false, got {style:?}"
-                        );
-                        normal_text_found = true;
-                    }
-                }
-            }
+fn test_format_delegate_tool_call_message_uses_html() {
+    let msg = crate::agent::response_formatter::format_delegate_tool_call_message(
+        "web_fetch",
+        r#"{"url":"https://example.com"}"#,
+    );
+    assert!(msg.contains("<span>"), "Expected HTML span, got: {msg}");
+    assert!(msg.contains("</span>"), "Expected closing span, got: {msg}");
+    assert!(
+        !msg.starts_with("> "),
+        "Should not start with blockquote marker"
+    );
+    // After parsing, the HTML span should produce InlineElem::Html
+    let events = parse_markdown_to_events(&msg);
+    let has_html = events.iter().any(|e| match e {
+        RenderEvent::FlushInline { elems, .. } => {
+            elems.iter().any(|elem| matches!(elem, InlineElem::Html(_)))
         }
-    }
-    assert!(quote_text_found, "Expected blockquote text");
-    assert!(normal_text_found, "Expected normal text outside blockquote");
+        _ => false,
+    });
+    assert!(
+        has_html,
+        "Expected Html inline element from delegate message"
+    );
 }
 
 #[test]
