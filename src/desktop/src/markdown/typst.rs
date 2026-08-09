@@ -75,15 +75,47 @@ pub fn render_markdown_to_typst(markdown: &str) -> String {
     // math-bearing markdown document. The translator forwards
     // math to Typst's native `$...$` mode.
     options.insert(Options::ENABLE_MATH);
+    // Footnotes (`[^label]` references + `[^label]: body`
+    // definitions) are gated on this option. The translator
+    // does a two-pass walk: first pass collects all definition
+    // bodies keyed by label, second pass emits the body at each
+    // reference site. Both passes need the option enabled or
+    // the events would never fire.
+    options.insert(Options::ENABLE_FOOTNOTES);
 
-    let parser = Parser::new_ext(markdown, options);
+    // Collect the full event stream up front. The cmark spec
+    // says footnote definitions and references may occur in any
+    // order — a reference can appear before its definition in
+    // the source. To handle this, we need to see the definition
+    // body before emitting at a reference site, which requires
+    // either buffering or a two-pass walk. Buffering into a
+    // `Vec` is the simpler of the two.
+    let events: Vec<Event<'static>> = Parser::new_ext(markdown, options)
+        .map(|e| e.into_static())
+        .collect();
+
+    // First pass: walk the stream, collect each
+    // `Tag::FootnoteDefinition` body's events and translate them
+    // into Typst markup using a fresh state. The bodies are
+    // stored in a `label -> body_typst` map for the second pass.
+    let footnote_bodies = collect_footnote_bodies(&events);
+
+    // Second pass: walk the stream again, skipping footnote
+    // definition bodies (they were translated in the first pass)
+    // and emitting `#footnote[body]` at every `Event::FootnoteReference`
+    // site using the bodies map built in the first pass.
     let mut state = TypstEmitState::default();
-    for event in parser {
-        emit_event(&mut state, event);
-    }
-    // After the stream, close any still-open structural elements
-    // (in case of unterminated input — pulldown-cmark tolerates
-    // this; we should emit at least one terminator for each).
+    translate_event_stream(&mut state, &events, &footnote_bodies);
+    close_state(&mut state);
+    state.output
+}
+
+/// Close any still-open structural elements in `state`. Used as
+/// the post-pass cleanup in both the main translation and the
+/// inner footnote-body translation. Without this, unterminated
+/// input (which pulldown-cmark tolerates) would leave dangling
+/// `]`s in the emitted Typst source.
+fn close_state(state: &mut TypstEmitState) {
     while let Some(kind) = state.list_stack.pop() {
         if matches!(kind, ListKind::Ordered) {
             state.output.push_str("]\n");
@@ -96,6 +128,101 @@ pub fn render_markdown_to_typst(markdown: &str) -> String {
         state.output.push_str(&buf);
         state.output.push_str("\")\n");
     }
+}
+
+/// Walk a pre-collected event stream and emit Typst markup.
+/// Skips footnote definition bodies (their inner events were
+/// already translated in the first pass and stored in
+/// `footnote_bodies`); for footnote references, looks up the
+/// body and emits `#footnote[body]`.
+fn translate_event_stream(
+    state: &mut TypstEmitState,
+    events: &[Event<'static>],
+    footnote_bodies: &std::collections::HashMap<String, String>,
+) {
+    let mut i = 0;
+    while i < events.len() {
+        // Skip footnote definition bodies — their inner events
+        // were translated in the first pass and will be emitted
+        // at reference sites. Walking them again would duplicate
+        // the content.
+        if let Event::Start(Tag::FootnoteDefinition(_)) = &events[i] {
+            let mut depth = 1;
+            i += 1;
+            while i < events.len() && depth > 0 {
+                match &events[i] {
+                    Event::Start(Tag::FootnoteDefinition(_)) => depth += 1,
+                    Event::End(TagEnd::FootnoteDefinition) => depth -= 1,
+                    _ => {}
+                }
+                i += 1;
+            }
+            continue;
+        }
+        emit_event(state, events[i].clone(), footnote_bodies);
+        i += 1;
+    }
+}
+
+/// First pass: collect all footnote definition bodies keyed by
+/// their label. The body for a definition with label `L` is the
+/// sub-stream of events between `Tag::FootnoteDefinition(L)` and
+/// the matching `TagEnd::FootnoteDefinition` (depth-tracked so
+/// nested definitions work). Each body is translated to Typst
+/// using a fresh state, and stored in the map for the second
+/// pass to emit at reference sites.
+fn collect_footnote_bodies(
+    events: &[Event<'static>],
+) -> std::collections::HashMap<String, String> {
+    let mut bodies: std::collections::HashMap<String, String> =
+        std::collections::HashMap::new();
+    let mut i = 0;
+    while i < events.len() {
+        if let Event::Start(Tag::FootnoteDefinition(label)) = &events[i] {
+            let label_str = label.to_string();
+            let body_start = i + 1;
+            let mut depth = 1;
+            let mut j = body_start;
+            while j < events.len() {
+                match &events[j] {
+                    Event::Start(Tag::FootnoteDefinition(_)) => depth += 1,
+                    Event::End(TagEnd::FootnoteDefinition) => {
+                        depth -= 1;
+                        if depth == 0 {
+                            break;
+                        }
+                    }
+                    _ => {}
+                }
+                j += 1;
+            }
+            // events[body_start..j] are the inner events for
+            // this definition. Translate them with a fresh
+            // state. We pass the (still-empty) `bodies` map
+            // so nested footnote references inside the body
+            // also resolve correctly.
+            let inner_events: Vec<Event<'static>> = events[body_start..j].to_vec();
+            let body_typst = translate_inner_events(&inner_events, &bodies);
+            bodies.insert(label_str, body_typst);
+            i = j + 1;
+        } else {
+            i += 1;
+        }
+    }
+    bodies
+}
+
+/// Translate a sub-stream of events (the inner events of a
+/// footnote definition body) to Typst markup. Uses a fresh
+/// state, so the result is self-contained and can be inlined
+/// into a `#footnote[...]` content block at a reference site.
+fn translate_inner_events(
+    events: &[Event<'static>],
+    footnote_bodies: &std::collections::HashMap<String, String>,
+) -> String {
+    let mut state = TypstEmitState::default();
+    translate_event_stream(&mut state, events, footnote_bodies);
+    close_state(&mut state);
     state.output
 }
 
@@ -245,7 +372,11 @@ impl TypstEmitState {
     }
 }
 
-fn emit_event(state: &mut TypstEmitState, event: Event<'_>) {
+fn emit_event(
+    state: &mut TypstEmitState,
+    event: Event<'_>,
+    footnote_bodies: &std::collections::HashMap<String, String>,
+) {
     match event {
         Event::Start(tag) => emit_start(state, tag),
         Event::End(tag_end) => emit_end(state, tag_end),
@@ -330,9 +461,30 @@ fn emit_event(state: &mut TypstEmitState, event: Event<'_>) {
         Event::HardBreak => {
             state.output.push_str(" \\\n");
         }
-        Event::FootnoteReference(_) => {
-            // TODO: forward to Typst `#footnote[...]` once the
-            // cmark id → Typst id mapping is implemented.
+        Event::FootnoteReference(label) => {
+            // Footnote reference: look up the definition body in
+            // `footnote_bodies` (collected in the first pass) and
+            // emit Typst's `#footnote[body]` content block. The
+            // trailing space is the chain-break used everywhere
+            // else (inline code, inline HTML, math) — content
+            // can't be called, so a function-call-form expression
+            // followed by `(...)` or `[...]` would chain and
+            // error out.
+            //
+            // Undefined references (the spec allows references
+            // without a matching definition) emit a visible
+            // placeholder rather than failing. The placeholder
+            // is a `#footnote` with a "missing:" prefix and the
+            // label as inline content, so the user sees the
+            // dangling reference in the PDF.
+            let body = footnote_bodies.get(label.as_ref());
+            match body {
+                Some(b) => state.push_raw(&format!("#footnote[{b}] ")),
+                None => state.push_raw(&format!(
+                    "#footnote[missing: {}] ",
+                    escape_typst(label.as_ref())
+                )),
+            }
         }
         Event::InlineMath(math) => {
             // Inline math in Typst uses the same `$...$` delimiter

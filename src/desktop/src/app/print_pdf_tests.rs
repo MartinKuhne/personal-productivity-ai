@@ -700,3 +700,37 @@ fn math_compiles_to_a_valid_pdf() {
         bytes.len()
     );
 }
+
+/// Footnote events (`Event::FootnoteReference`,
+/// `Tag::FootnoteDefinition`) used to be silently dropped
+/// (ADR gap #6). This is the integration-level proof that
+/// they now emit Typst `#footnote[body]` content blocks AND
+/// compile to a valid PDF.
+///
+/// The test exercises the two-pass translation path: a
+/// reference before the definition, a body with inline
+/// emphasis, and a second reference to the same footnote.
+/// A drop-the-event bug would not crash the spec test (the
+/// surrounding text still compiles); only an explicit
+/// compile check catches it.
+#[test]
+fn footnotes_compile_to_a_valid_pdf() {
+    let md = "\
+First[^1] ref, then later: second[^1] ref.
+
+Footnotes can have **bold** in the body[^2].
+
+[^1]: shared body.
+[^2]: another body with *italic* text.
+";
+    let bytes =
+        compile_markdown_to_pdf(md, "footnotes").expect("footnote markdown must compile");
+    assert!(bytes.starts_with(b"%PDF-"));
+    assert!(bytes.ends_with(b"%%EOF"));
+    // PDF body must be meaningful — not a header-only artifact.
+    assert!(
+        bytes.len() > 6_000,
+        "footnotes PDF suspiciously small: {} bytes",
+        bytes.len()
+    );
+}

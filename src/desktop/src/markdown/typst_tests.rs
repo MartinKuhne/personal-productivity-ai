@@ -812,3 +812,127 @@ fn math_body_is_not_double_escaped() {
 // `print_pdf_tests.rs::math_compiles_to_a_valid_pdf` where the
 // PDF pipeline helpers are in scope. This module is the
 // translator-level string test only.
+
+// =====================================================================
+// Footnotes (`Event::FootnoteReference` / `Tag::FootnoteDefinition`)
+// =====================================================================
+//
+// Footnote events were previously silently dropped (ADR gap #6).
+// The translator now does a two-pass walk: first pass collects
+// all `Tag::FootnoteDefinition` bodies keyed by label, second
+// pass emits `#footnote[body]` at each `Event::FootnoteReference`
+// site using the bodies map. The body is translated with a fresh
+// state, so any markdown structure inside a footnote body
+// (paragraphs, emphasis, code spans) is rendered as a normal
+// Typst content block.
+
+/// Footnote reference is emitted as `#footnote[body]` with the
+/// definition body inlined as a content block.
+#[test]
+fn footnote_reference_emits_footnote_with_body() {
+    let md = "Text[^1] with a footnote.\n\n[^1]: The footnote body.\n";
+    let out = render_markdown_to_typst(md);
+    assert!(
+        out.contains("#footnote[The footnote body.]"),
+        "expected `#footnote[The footnote body.]` in output, got: {out}"
+    );
+}
+
+/// Definitions are NOT emitted at the definition site — they
+/// only appear at reference sites. The translator skips
+/// `Tag::FootnoteDefinition` body events in the second pass.
+#[test]
+fn footnote_definition_body_not_emitted_at_definition_site() {
+    let md = "Text[^1] with a footnote.\n\n[^1]: The body.\n";
+    let out = render_markdown_to_typst(md);
+    // The body should appear inside the footnote call, not as
+    // free-standing content somewhere else.
+    let count = out.matches("The body.").count();
+    assert_eq!(
+        count, 1,
+        "footnote body should appear exactly once (inside the \
+         `#footnote[...]` call), got {count} occurrences in: {out}"
+    );
+}
+
+/// Footnotes that appear in the source BEFORE their definition
+/// (the cmark spec allows this) are still resolved correctly.
+/// The two-pass design (collect all bodies first, then emit at
+/// reference sites) is what makes this work.
+///
+/// Note: pulldown-cmark's GFM footnote mode (the default) only
+/// emits a `FootnoteReference` event when the corresponding
+/// definition has been registered. References without a
+/// matching definition are silently treated as plain text
+/// (e.g. `[^typo]` is just literal `[^typo]` in the output).
+/// This matches GitHub's behaviour. We test the
+/// forward-reference case here because that's the one where
+/// the two-pass design earns its keep.
+#[test]
+fn footnote_reference_before_definition_is_resolved() {
+    let md = "\
+Ref[^a] here.
+
+[^a]: body of a, defined later.
+";
+    let out = render_markdown_to_typst(md);
+    assert!(
+        out.contains("#footnote[body of a, defined later.]"),
+        "reference before definition should still resolve, got: {out}"
+    );
+}
+
+/// A footnote body with emphasis inside should render the
+/// emphasis inside the `#footnote[...]` content block.
+#[test]
+fn footnote_body_with_emphasis_renders_inline() {
+    let md = "Ref[^x]\n\n[^x]: A body with *emphasis* in it.\n";
+    let out = render_markdown_to_typst(md);
+    assert!(
+        out.contains("#footnote[A body with #emph[emphasis] in it.]"),
+        "emphasis inside footnote body should render as `#emph[...]`, got: {out}"
+    );
+}
+
+/// Undefined footnote references (e.g. a typo) are silently
+/// treated as plain text in pulldown-cmark's GFM footnote
+/// mode (the default). This matches GitHub's behaviour —
+/// `[^typo]` without a matching definition is just literal
+/// text. The translator's two-pass design would handle the
+/// case if the events did fire (and emits a `#footnote[missing:
+/// <label>]` placeholder), but in GFM mode the events never
+/// fire so the literal text is what reaches the output.
+///
+/// This test pins the GFM-mode behaviour so a future change
+/// to switch to `ENABLE_OLD_FOOTNOTES` (which would emit
+/// `FootnoteReference` for undefined labels) is a deliberate
+/// decision, not an accident.
+#[test]
+fn undefined_footnote_reference_passes_through_as_text() {
+    let md = "Ref[^typo] with no definition.\n";
+    let out = render_markdown_to_typst(md);
+    // The literal `[^typo]` should be in the output, with the
+    // brackets escaped (the translator's standard content-mode
+    // behaviour for `[]`). The `^` is NOT escaped — it's not
+    // markup-active — so the actual sequence is `\[^typo\]`.
+    assert!(
+        out.contains(r"\[^typo\]"),
+        "undefined reference should pass through as escaped text \
+         (GFM mode silently drops undefined references), got: {out}"
+    );
+}
+
+/// Multiple references to the same footnote each emit their
+/// own `#footnote[body]` call. Typst handles the dedup at
+/// render time; the translator doesn't try to deduplicate.
+#[test]
+fn multiple_references_to_same_footnote_emit_each_time() {
+    let md = "First[^1] and second[^1] ref.\n\n[^1]: shared body.\n";
+    let out = render_markdown_to_typst(md);
+    let count = out.matches("#footnote[shared body.]").count();
+    assert_eq!(
+        count, 2,
+        "expected two `#footnote[shared body.]` calls (one per \
+         reference site), got {count} in: {out}"
+    );
+}
