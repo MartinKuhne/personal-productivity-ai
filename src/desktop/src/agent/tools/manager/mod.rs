@@ -509,6 +509,12 @@ pub fn spawn_config_subscription(
             )
             .into(),
         );
+
+        loop {
+            if let Ok(event) = config_reader.recv() {
+                tool_manager.write().unwrap().refresh_mcp_tools(&event.config);
+            }
+        }
     });
 }
 

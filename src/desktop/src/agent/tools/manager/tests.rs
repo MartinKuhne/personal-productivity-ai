@@ -811,3 +811,20 @@ fn test_spawn_config_subscription_runs_init_in_background() {
     }
     panic!("no MCP startup log entry observed within timeout");
 }
+
+#[test]
+fn test_mcp_char_count_bug() {
+    let mut config = AppConfig::default();
+    config.mcp_servers.insert("test_mcp".into(), crate::config::McpServerConfig::Stdio { command: "".into(), args: vec![], env: Default::default() }.into());
+    let mut mgr = ToolManager::new();
+    mgr.register_mcp_tool("test_mcp", "mcp_test_mcp_test_tool", "desc", serde_json::json!({}));
+    
+    // Simulate what the ui does:
+    let count = mgr.tool_char_count("mcp_test_mcp_test_tool", &config, "");
+    
+    // Also, what happens when mcp tool doesn't have mcp_ prefixed name?
+    mgr.register_mcp_tool("test_mcp", "test_tool", "desc", serde_json::json!({}));
+    let count2 = mgr.tool_char_count("test_tool", &config, "");
+    assert_eq!(count, Some(116));
+    assert_eq!(count2, Some(103));
+}
