@@ -26,9 +26,9 @@ const TEMPLATE: &str = r##"
 // avoids the visual disconnect of a sans body with serif
 // headings.
 #show heading: set text(font: ("Segoe UI", "Helvetica Neue", "Liberation Sans", "Arial"))
-#show heading.where(level: 1): set text(size: 1.6em)
-#show heading.where(level: 2): set text(size: 1.4em)
-#show heading.where(level: 3): set text(size: 1.2em)
+#show heading.where(level: 1): set text(size: 16pt)
+#show heading.where(level: 2): set text(size: 14pt)
+#show heading.where(level: 3): set text(size: 12pt)
 #show raw.where(block: true): block(
   fill: luma(245),
   inset: 8pt,

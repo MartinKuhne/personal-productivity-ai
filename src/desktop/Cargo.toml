@@ -133,16 +133,7 @@ image = { version = "0.25", default-features = false, features = ["png"] }
 # `integrations/*/tests*.rs` were removed in favour of this single
 # dev-dep.
 wiremock = "0.6"
-# `pdf-extract` is used by the print_pdf tests to extract the
-# rendered text from a compiled PDF and assert on it. The previous
-# PDF tests in this crate only checked the binary header/trailer
-# bytes, which silently passed for an empty-document regression
-# (the engine had no fonts loaded, so no glyphs were emitted but
-# the structural decoration still wrote a "valid" PDF). With
-# `pdf-extract` we can assert that specific text from the source
-# markdown actually appears in the output. Dev-only — the
-# production binary does not link this in.
-pdf-extract = "0.12"
+pdf_oxide = "0.3.77"
 
 [[bin]]
 name = "fastmd"

@@ -396,12 +396,16 @@ fn ordered_list_with_long_item_compiles() {
 fn compile_and_extract(md: &str, title: &str) -> String {
     let bytes = compile_markdown_to_pdf(md, title)
         .unwrap_or_else(|e| panic!("compile_markdown_to_pdf failed for {title:?}: {e}"));
-    pdf_extract::extract_text_from_mem(&bytes).unwrap_or_else(|e| {
-        panic!(
-            "pdf-extract failed for {title:?} ({} PDF bytes): {e}",
-            bytes.len()
-        )
-    })
+
+    let doc = pdf_oxide::PdfDocument::from_bytes(bytes).unwrap();
+    let spans = doc.extract_spans(0).unwrap();
+
+    let mut extracted = String::new();
+    for span in spans {
+        extracted.push_str(&span.text);
+        extracted.push(' ');
+    }
+    extracted
 }
 
 /// Helper: assert that a needle appears in the rendered PDF
@@ -703,5 +707,56 @@ Footnotes can have **bold** in the body[^2].
         bytes.len() > 6_000,
         "footnotes PDF suspiciously small: {} bytes",
         bytes.len()
+    );
+}
+
+#[test]
+fn pdf_font_sizes_match_spec() {
+    let md = "# Heading 1\n\n## Heading 2\n\n### Heading 3\n\nBody text.\n";
+    let bytes =
+        compile_markdown_to_pdf(md, "font-sizes").expect("font-sizes markdown must compile");
+
+    let doc = pdf_oxide::PdfDocument::from_bytes(bytes).unwrap();
+    let spans = doc.extract_spans(0).unwrap();
+
+    let mut h1_size = 0.0;
+    let mut h2_size = 0.0;
+    let mut h3_size = 0.0;
+    let mut body_size = 0.0;
+
+    for span in spans {
+        let text = span.text.trim();
+        let size = span.font_size;
+
+        if text.contains("Heading 1") {
+            h1_size = size;
+        } else if text.contains("Heading 2") {
+            h2_size = size;
+        } else if text.contains("Heading 3") {
+            h3_size = size;
+        } else if text.contains("Body text") {
+            body_size = size;
+        }
+    }
+
+    assert!(
+        (body_size - 10.0).abs() < 0.1,
+        "Body text should be 10pt, got {}pt",
+        body_size
+    );
+    assert!(
+        (h1_size - 16.0).abs() < 0.1,
+        "H1 should be 16pt, got {}pt",
+        h1_size
+    );
+    assert!(
+        (h2_size - 14.0).abs() < 0.1,
+        "H2 should be 14pt, got {}pt",
+        h2_size
+    );
+    assert!(
+        (h3_size - 12.0).abs() < 0.1,
+        "H3 should be 12pt, got {}pt",
+        h3_size
     );
 }
