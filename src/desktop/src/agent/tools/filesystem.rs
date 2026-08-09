@@ -140,11 +140,11 @@ pub fn tool_read_note(
 /// maximum number of lines to return. The slice is clamped to the
 /// file's line count, so a `limit` that overflows returns the
 /// remainder; an `offset` past the end returns an empty `content`.
-pub fn tool_read_lines(
+pub fn tool_window_note(
     path_str: &str,
     offset: usize,
     limit: usize,
-) -> Result<crate::agent::tools::dtos::ReadLinesResponse, String> {
+) -> Result<crate::agent::tools::dtos::WindowNoteResponse, String> {
     match crate::utils::read_text_file(Path::new(path_str)) {
         Ok(content) => {
             let lines: Vec<&str> = content.lines().collect();
@@ -154,7 +154,7 @@ pub fn tool_read_lines(
                 let end = (offset + limit).min(lines.len());
                 &lines[offset..end]
             };
-            Ok(crate::agent::tools::dtos::ReadLinesResponse {
+            Ok(crate::agent::tools::dtos::WindowNoteResponse {
                 content: slice.join("\n"),
             })
         }
@@ -213,12 +213,12 @@ pub fn tool_create_note(
 ///
 /// `offset == 0` inserts at the top; `offset == lines.len()` appends
 /// to the end. `offset > lines.len()` returns an error.
-pub fn tool_insert_lines(
+pub fn tool_insert_into_note(
     path_str: &str,
     offset: usize,
     lines_to_insert: &[String],
     producer: &FileEventProducer,
-) -> Result<crate::agent::tools::dtos::InsertLinesResponse, String> {
+) -> Result<crate::agent::tools::dtos::InsertIntoNoteResponse, String> {
     match crate::utils::read_text_file(Path::new(path_str)) {
         Ok(content) => {
             let mut lines: Vec<String> = content.lines().map(|s| s.to_string()).collect();
@@ -232,7 +232,7 @@ pub fn tool_insert_lines(
             match std::fs::write(path_str, new_content) {
                 Ok(_) => {
                     producer.publish_updated(Path::new(path_str));
-                    Ok(crate::agent::tools::dtos::InsertLinesResponse {
+                    Ok(crate::agent::tools::dtos::InsertIntoNoteResponse {
                         result: "Lines inserted successfully.".to_string(),
                     })
                 }
@@ -243,12 +243,12 @@ pub fn tool_insert_lines(
     }
 }
 
-pub fn tool_replace_text(
+pub fn tool_patch_note(
     path_str: &str,
     old_string: &str,
     new_string: &str,
     producer: &FileEventProducer,
-) -> Result<crate::agent::tools::dtos::ReplaceTextResponse, String> {
+) -> Result<crate::agent::tools::dtos::PatchNoteResponse, String> {
     match crate::utils::read_text_file(Path::new(path_str)) {
         Ok(content) => {
             if !content.contains(old_string) {
@@ -259,7 +259,7 @@ pub fn tool_replace_text(
             match std::fs::write(path_str, new_content) {
                 Ok(_) => {
                     producer.publish_updated(Path::new(path_str));
-                    Ok(crate::agent::tools::dtos::ReplaceTextResponse {
+                    Ok(crate::agent::tools::dtos::PatchNoteResponse {
                         result: format!("Successfully replaced {} occurrence(s).", count),
                     })
                 }

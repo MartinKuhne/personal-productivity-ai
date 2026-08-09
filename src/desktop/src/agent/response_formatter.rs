@@ -96,7 +96,7 @@ pub fn format_tool_result_message(func_name: &str, result: &str) -> String {
                 func_name, count
             )
         }
-        "read_note" | "read_lines" => {
+        "read_note" | "window_note" => {
             let content = result_data
                 .get("content")
                 .and_then(|f| f.as_str())

@@ -49,10 +49,9 @@ pub const WEB_FETCH_FINAL_PAGE_HINT: &str = "Final page.";
 
 // --- filesystem (fs) ---
 
-// --- replace_text ---
+// --- patch_note ---
 
-pub const REPLACE_TEXT_DESCRIPTION: &str =
-    "Replace exact occurrences of target text with replacement text in a file.";
+pub const PATCH_NOTE_DESCRIPTION: &str = "Patch a markdown-formatted note by replacing exact occurrences of target text with replacement text.";
 
 // --- search_notes ---
 
@@ -91,17 +90,17 @@ pub const FIELD_LIST_NOTES_RESPONSE_FILES: &str =
 
 pub const READ_NOTE_DESCRIPTION: &str = "Read the full text of a markdown-formatted note at a path. Use `read_yaml_header` if you only need a document summary.";
 
-// --- read_lines ---
+// --- window_note ---
 
-pub const READ_LINES_DESCRIPTION: &str = "Read a contiguous slice of lines from a file. `offset` is 0-indexed (`0` is the first line); `limit` is the maximum number of lines to return. An `offset` past the end of the file returns an empty `content`. A `limit` that would overflow the file's line count is clamped to the remainder. Default parameters: `offset=0`, `limit=100`. Pairs with `read_note` when you need the whole note.";
+pub const WINDOW_NOTE_DESCRIPTION: &str = "Read a contiguous slice of lines from a markdown-formatted note. `offset` is 0-indexed (`0` is the first line); `limit` is the maximum number of lines to return. An `offset` past the end of the note returns an empty `content`. A `limit` that would overflow the note's line count is clamped to the remainder. Default parameters: `offset=0`, `limit=100`. Pairs with `read_note` when you need the whole note.";
 
 // --- create_note ---
 
 pub const CREATE_NOTE_DESCRIPTION: &str = "Create a new file at the specified path with provided content. Fails if the file already exists â€” this tool can only create new files.";
 
-// --- insert_lines ---
+// --- insert_into_note ---
 
-pub const INSERT_LINES_DESCRIPTION: &str = "Insert lines into a file at a specified 0-indexed offset. `offset=0` inserts at the top of the file; `offset=lines.len()` appends to the end. `offset > lines.len()` returns an error.";
+pub const INSERT_INTO_NOTE_DESCRIPTION: &str = "Insert lines into a markdown-formatted note at a specified 0-indexed offset. `offset=0` inserts at the top of the note; `offset=lines.len()` appends to the end. `offset > lines.len()` returns an error.";
 
 // --- web ---
 

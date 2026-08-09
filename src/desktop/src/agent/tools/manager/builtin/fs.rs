@@ -15,35 +15,35 @@ use super::strings;
 /// the first call without args returns the first 100 lines of the
 /// file. Matches the list-paginated tools' default for vocabulary
 /// consistency.
-const DEFAULT_READ_LINES_LIMIT: usize = 100;
+const DEFAULT_WINDOW_NOTE_LIMIT: usize = 100;
 
 /// Tool that replaces exact text occurrences in a file.
-pub(crate) struct ReplaceTextTool;
-impl Tool for ReplaceTextTool {
+pub(crate) struct PatchNoteTool;
+impl Tool for PatchNoteTool {
     fn name(&self) -> &'static str {
-        "replace_text"
+        "patch_note"
     }
     fn description(&self) -> &'static str {
-        strings::REPLACE_TEXT_DESCRIPTION
+        strings::PATCH_NOTE_DESCRIPTION
     }
     fn input_type(&self) -> TypeId {
-        TypeId::of::<dtos::ReplaceTextInput>()
+        TypeId::of::<dtos::PatchNoteInput>()
     }
     fn parameters_schema(&self) -> serde_json::Value {
-        json_schema::<dtos::ReplaceTextInput>()
+        json_schema::<dtos::PatchNoteInput>()
     }
     fn is_enabled(&self, config: &AppConfig, _: &str) -> bool {
         config.tool_groups.filesystem
     }
     fn execute(&self, ctx: &ToolContext, args: &str) -> Result<serde_json::Value, String> {
-        let input: dtos::ReplaceTextInput =
+        let input: dtos::PatchNoteInput =
             serde_json::from_str(args).map_err(|e| format!("Invalid args: {}", e))?;
         let path = ctx.resolve_writable(&input.path)?;
         if ctx.is_pdf_backed(&path) {
             return Err(crate::ui::strings::PDF_BACKED_ERROR.to_string());
         }
         let producer = ctx.file_event_producer();
-        crate::agent::tools::filesystem::tool_replace_text(
+        crate::agent::tools::filesystem::tool_patch_note(
             &path.to_string_lossy(),
             &input.old_string,
             &input.new_string,
@@ -301,19 +301,19 @@ impl Tool for ReadNoteTool {
 }
 
 /// Tool that reads a contiguous slice of lines from a file.
-pub(crate) struct ReadLinesTool;
-impl Tool for ReadLinesTool {
+pub(crate) struct WindowNoteTool;
+impl Tool for WindowNoteTool {
     fn name(&self) -> &'static str {
-        "read_lines"
+        "window_note"
     }
     fn description(&self) -> &'static str {
-        strings::READ_LINES_DESCRIPTION
+        strings::WINDOW_NOTE_DESCRIPTION
     }
     fn input_type(&self) -> TypeId {
-        TypeId::of::<dtos::ReadLinesInput>()
+        TypeId::of::<dtos::WindowNoteInput>()
     }
     fn parameters_schema(&self) -> serde_json::Value {
-        json_schema::<dtos::ReadLinesInput>()
+        json_schema::<dtos::WindowNoteInput>()
     }
     fn is_enabled(&self, config: &AppConfig, _: &str) -> bool {
         config.tool_groups.filesystem
@@ -322,14 +322,14 @@ impl Tool for ReadLinesTool {
         crate::agent::tools::Safety::ReadOnly
     }
     fn execute(&self, ctx: &ToolContext, args: &str) -> Result<serde_json::Value, String> {
-        let input: dtos::ReadLinesInput =
+        let input: dtos::WindowNoteInput =
             serde_json::from_str(args).map_err(|e| format!("Invalid args: {}", e))?;
         let (path, _) = ctx
             .resolve_virtual_path(&input.path, false)?
             .ok_or_else(|| "Cannot perform this operation on the virtual root".to_string())?;
         let offset = input.offset.unwrap_or(0);
-        let limit = input.limit.unwrap_or(DEFAULT_READ_LINES_LIMIT);
-        crate::agent::tools::filesystem::tool_read_lines(&path.to_string_lossy(), offset, limit)
+        let limit = input.limit.unwrap_or(DEFAULT_WINDOW_NOTE_LIMIT);
+        crate::agent::tools::filesystem::tool_window_note(&path.to_string_lossy(), offset, limit)
             .map(|r| {
                 serde_json::to_value(r)
                     .unwrap_or_else(|e| serde_json::json!({"error": e.to_string()}))
@@ -375,32 +375,32 @@ impl Tool for CreateNoteTool {
 }
 
 /// Tool that inserts lines into a file at a 0-indexed offset.
-pub(crate) struct InsertLinesTool;
-impl Tool for InsertLinesTool {
+pub(crate) struct InsertIntoNoteTool;
+impl Tool for InsertIntoNoteTool {
     fn name(&self) -> &'static str {
-        "insert_lines"
+        "insert_into_note"
     }
     fn description(&self) -> &'static str {
-        strings::INSERT_LINES_DESCRIPTION
+        strings::INSERT_INTO_NOTE_DESCRIPTION
     }
     fn input_type(&self) -> TypeId {
-        TypeId::of::<dtos::InsertLinesInput>()
+        TypeId::of::<dtos::InsertIntoNoteInput>()
     }
     fn parameters_schema(&self) -> serde_json::Value {
-        json_schema::<dtos::InsertLinesInput>()
+        json_schema::<dtos::InsertIntoNoteInput>()
     }
     fn is_enabled(&self, config: &AppConfig, _: &str) -> bool {
         config.tool_groups.filesystem
     }
     fn execute(&self, ctx: &ToolContext, args: &str) -> Result<serde_json::Value, String> {
-        let input: dtos::InsertLinesInput =
+        let input: dtos::InsertIntoNoteInput =
             serde_json::from_str(args).map_err(|e| format!("Invalid args: {}", e))?;
         let path = ctx.resolve_writable(&input.path)?;
         if ctx.is_pdf_backed(&path) {
             return Err(crate::ui::strings::PDF_BACKED_ERROR.to_string());
         }
         let producer = ctx.file_event_producer();
-        crate::agent::tools::filesystem::tool_insert_lines(
+        crate::agent::tools::filesystem::tool_insert_into_note(
             &path.to_string_lossy(),
             input.offset,
             &input.lines,

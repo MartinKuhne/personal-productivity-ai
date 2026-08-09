@@ -88,7 +88,7 @@ pub struct ReadNoteResponse {
 }
 
 #[derive(Deserialize, Debug, JsonSchema)]
-pub struct ReadLinesInput {
+pub struct WindowNoteInput {
     pub path: String,
     #[schemars(description = strings::FIELD_OFFSET_DESCRIPTION)]
     pub offset: Option<usize>,
@@ -96,7 +96,7 @@ pub struct ReadLinesInput {
     pub limit: Option<usize>,
 }
 #[derive(Serialize, Debug, JsonSchema)]
-pub struct ReadLinesResponse {
+pub struct WindowNoteResponse {
     pub content: String,
 }
 
@@ -112,7 +112,7 @@ pub struct CreateNoteResponse {
 }
 
 #[derive(Deserialize, Debug, JsonSchema)]
-pub struct InsertLinesInput {
+pub struct InsertIntoNoteInput {
     pub path: String,
     /// 0-indexed position in the file at which to insert `lines`.
     /// `offset == 0` inserts at the top; `offset == lines.len()` appends.
@@ -120,7 +120,7 @@ pub struct InsertLinesInput {
     pub lines: Vec<String>,
 }
 #[derive(Serialize, Debug, JsonSchema)]
-pub struct InsertLinesResponse {
+pub struct InsertIntoNoteResponse {
     pub result: String,
 }
 
@@ -367,13 +367,13 @@ pub struct GetWeatherResponse {
 }
 
 #[derive(Deserialize, Debug, JsonSchema)]
-pub struct ReplaceTextInput {
+pub struct PatchNoteInput {
     pub path: String,
     pub old_string: String,
     pub new_string: String,
 }
 #[derive(Serialize, Debug, JsonSchema)]
-pub struct ReplaceTextResponse {
+pub struct PatchNoteResponse {
     pub result: String,
 }
 

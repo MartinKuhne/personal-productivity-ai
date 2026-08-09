@@ -70,7 +70,7 @@ pub(crate) fn register_all_builtins(mgr: &mut ToolManager) {
     }
 
     // Filesystem
-    mgr.register_builtin(InternalToolGroup::Filesystem, Box::new(fs::ReplaceTextTool));
+    mgr.register_builtin(InternalToolGroup::Filesystem, Box::new(fs::PatchNoteTool));
     mgr.register_builtin(InternalToolGroup::Filesystem, Box::new(fs::SearchNotesTool));
     mgr.register_builtin(InternalToolGroup::Filesystem, Box::new(fs::ReadTagsTool));
     mgr.register_builtin(
@@ -79,9 +79,12 @@ pub(crate) fn register_all_builtins(mgr: &mut ToolManager) {
     );
     mgr.register_builtin(InternalToolGroup::Filesystem, Box::new(fs::ListNotesTool));
     mgr.register_builtin(InternalToolGroup::Filesystem, Box::new(fs::ReadNoteTool));
-    mgr.register_builtin(InternalToolGroup::Filesystem, Box::new(fs::ReadLinesTool));
+    mgr.register_builtin(InternalToolGroup::Filesystem, Box::new(fs::WindowNoteTool));
     mgr.register_builtin(InternalToolGroup::Filesystem, Box::new(fs::CreateNoteTool));
-    mgr.register_builtin(InternalToolGroup::Filesystem, Box::new(fs::InsertLinesTool));
+    mgr.register_builtin(
+        InternalToolGroup::Filesystem,
+        Box::new(fs::InsertIntoNoteTool),
+    );
     mgr.register_builtin(
         InternalToolGroup::Filesystem,
         Box::new(yaml::ReadYamlHeaderTool),

@@ -9,10 +9,10 @@ The following table summarizes all 26 tools available to the LLM agent, categori
 | **Core Workspace** | `list_notes_by_tag` | List markdown files containing a specific tag (paginated; default page size 20; returns a JSON array; every response includes total). | None |
 | **Core Workspace** | `list_notes` | List all markdown files in a directory (paginated; default page size 20; returns a JSON array; every response includes total). | None |
 | **Core Workspace** | `read_note` | Read the entire text contents of a file at the specified path. | None |
-| **Core Workspace** | `read_lines` | Read a contiguous slice of lines from a file (0-indexed; default `offset=0`, `limit=100`). | None |
+| **Core Workspace** | `window_note` | Read a contiguous slice of lines from a file (0-indexed; default `offset=0`, `limit=100`). | None |
 | **Core Workspace** | `create_note` | Create a new file with specified content. | None |
-| **Core Workspace** | `insert_lines` | Insert lines at a specific 0-indexed offset. | None |
-| **Core Workspace** | `replace_text` | Replace exact occurrences of old_string with new_string in a file. | None |
+| **Core Workspace** | `insert_into_note` | Insert lines at a specific 0-indexed offset. | None |
+| **Core Workspace** | `patch_note` | Replace exact occurrences of old_string with new_string in a file. | None |
 | **Core Workspace** | `read_yaml_header` | Parse a YAML header from a markdown file and return its content representation. | None |
 | **Core Workspace** | `write_yaml_header` | Write or update data in a YAML header to a markdown file. | None |
 | **Web Integration** | `web_fetch` | Fetch a URL and convert its HTML body to markdown. | None |
@@ -126,7 +126,7 @@ All tool responses follow the same envelope:
   { "content": "# Title\n\nFull file content..." }
   ```
 
-##### `read_lines`
+##### `window_note`
 * **Description:** Read a contiguous slice of lines from a file. `offset` is 0-indexed (`0` is the first line); `limit` is the maximum number of lines to return. Default parameters: `offset=0`, `limit=100`. An `offset` past the end of the file returns an empty `content`; a `limit` that would overflow is clamped to the remainder.
 * **Request:**
   ```json
@@ -148,7 +148,7 @@ All tool responses follow the same envelope:
   { "result": "File created successfully.", "size_bytes": 52 }
   ```
 
-##### `insert_lines`
+##### `insert_into_note`
 * **Description:** Insert lines into a file at a specific 0-indexed `offset` (lines are inserted before the given offset, so `offset=0` puts them at the top and `offset=lines.len()` appends to the end). `offset > lines.len()` returns an error.
 * **Request:**
   ```json
@@ -159,7 +159,7 @@ All tool responses follow the same envelope:
   { "result": "Lines inserted successfully." }
   ```
 
-##### `replace_text`
+##### `patch_note`
 * **Description:** Replace exact occurrences of `old_string` with `new_string` in a file.
 * **Request:**
   ```json
