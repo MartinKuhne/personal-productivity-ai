@@ -39,7 +39,7 @@ fn test_render_code_block_smoke() {
     // than from `ctx.output` after `run_ui` returns.
     let output = run_ui_test(&ctx, egui::RawInput::default(), |ui| {
         egui::CentralPanel::default().show(ui, |ui| {
-            render_code_block(ui, "let x = 1;");
+            render_code_block(ui, None, "let x = 1;");
         });
     });
     // Without a click, no `CopyText` command should have been

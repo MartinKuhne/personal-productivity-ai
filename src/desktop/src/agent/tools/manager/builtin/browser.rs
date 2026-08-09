@@ -164,8 +164,7 @@ impl Tool for BrowserClickTool {
             serde_json::from_str(args).map_err(|e| err(format!("Invalid args: {}", e)))?;
         let handle = ctx.browser_session.page().map_err(err)?;
         let selector = input.selector;
-        let locator =
-            crate::agent::tools::blocking::block_on(async { handle.page.locator(&selector).await });
+        let locator = handle.page.locator(&selector);
         crate::agent::tools::blocking::block_on(async { locator.click(None).await })
             .map_err(err)?;
         let _ = ctx.browser_session.save_storage();
@@ -207,8 +206,7 @@ impl Tool for BrowserFillInputTool {
         let handle = ctx.browser_session.page().map_err(err)?;
         let selector = input.selector;
         let text = input.text;
-        let locator =
-            crate::agent::tools::blocking::block_on(async { handle.page.locator(&selector).await });
+        let locator = handle.page.locator(&selector);
         crate::agent::tools::blocking::block_on(async { locator.fill(&text, None).await })
             .map_err(err)?;
         let _ = ctx.browser_session.save_storage();
@@ -250,8 +248,7 @@ impl Tool for BrowserSelectDropdownTool {
         let handle = ctx.browser_session.page().map_err(err)?;
         let selector = input.selector;
         let value = input.value;
-        let locator =
-            crate::agent::tools::blocking::block_on(async { handle.page.locator(&selector).await });
+        let locator = handle.page.locator(&selector);
         // `Locator::select_option` expects `impl Into<SelectOption>`;
         // `SelectOption: From<&str>` so pass the str view.
         crate::agent::tools::blocking::block_on(async {

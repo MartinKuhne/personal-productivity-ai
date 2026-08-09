@@ -181,6 +181,7 @@ pub fn parse_markdown_to_events(markdown_text: &str) -> Vec<RenderEvent> {
     let mut events = Vec::new();
 
     let mut in_code_block = false;
+    let mut code_block_lang: Option<String> = None;
     let mut code_block_content = String::new();
     let mut in_heading = false;
     let mut heading_level = 0;
@@ -223,7 +224,7 @@ pub fn parse_markdown_to_events(markdown_text: &str) -> Vec<RenderEvent> {
 
     for event in parser {
         match event {
-            Event::Start(Tag::CodeBlock(_info)) => {
+            Event::Start(Tag::CodeBlock(kind)) => {
                 if !buffered_inline.is_empty() {
                     push_inline(
                         &mut events,
@@ -236,11 +237,20 @@ pub fn parse_markdown_to_events(markdown_text: &str) -> Vec<RenderEvent> {
                 }
                 in_code_block = true;
                 code_block_content.clear();
+                code_block_lang = match kind {
+                    pulldown_cmark::CodeBlockKind::Fenced(lang) if !lang.is_empty() => {
+                        Some(lang.to_string())
+                    }
+                    _ => None,
+                };
             }
             Event::End(TagEnd::CodeBlock) => {
                 if in_code_block {
                     in_code_block = false;
-                    events.push(RenderEvent::CodeBlock(code_block_content.clone()));
+                    events.push(RenderEvent::CodeBlock {
+                        language: code_block_lang.take(),
+                        content: code_block_content.clone(),
+                    });
                 }
             }
             Event::Start(Tag::Heading { level, .. }) => {
@@ -426,9 +436,18 @@ pub fn parse_markdown_to_events(markdown_text: &str) -> Vec<RenderEvent> {
                 current_row.push(buffered_inline.clone());
                 buffered_inline.clear();
             }
-            Event::Start(Tag::Link { dest_url, .. }) => {
+            Event::Start(Tag::Link {
+                link_type,
+                dest_url,
+                ..
+            }) => {
                 in_link = true;
-                link_url = dest_url.to_string();
+                if link_type == pulldown_cmark::LinkType::Email && !dest_url.starts_with("mailto:")
+                {
+                    link_url = format!("mailto:{dest_url}");
+                } else {
+                    link_url = dest_url.to_string();
+                }
             }
             Event::End(TagEnd::Link) => {
                 in_link = false;

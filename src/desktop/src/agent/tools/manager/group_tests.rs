@@ -1,4 +1,4 @@
-﻿//! Tests for the `ToolManager` group-state and error-tracking surface.
+//! Tests for the `ToolManager` group-state and error-tracking surface.
 //! These complement the `manager::tests` (the migrated registry tests)
 //! and cover the new behaviour introduced by the merge.
 
@@ -184,10 +184,10 @@ fn browser_group_defaults_to_disabled() {
 #[test]
 #[cfg(feature = "browser")]
 fn browser_group_lists_all_eight_tools() {
-    let _mgr = ToolManager::new();
+    let mut mgr = ToolManager::new();
     let mut config = AppConfig::default();
     config.tool_groups.browser = true;
-    let snapshot = super::groups_snapshot(&config);
+    let snapshot = mgr.groups_snapshot(&config);
     let browser = snapshot
         .iter()
         .find(|g| g.id == ToolGroupId::Internal(InternalToolGroup::Browser))
@@ -238,7 +238,7 @@ fn set_browser_group_enabled_persists_to_config() {
 #[cfg(feature = "browser")]
 fn browser_only_get_page_state_is_parallel_safe() {
     use crate::agent::tools::Safety;
-    use crate::agent::tools::manager::safety_of;
+    let mgr = ToolManager::new();
     for name in [
         "browser_navigate",
         "browser_click",
@@ -249,13 +249,13 @@ fn browser_only_get_page_state_is_parallel_safe() {
         "browser_screenshot",
     ] {
         assert_eq!(
-            safety_of(name),
+            mgr.safety_of(name),
             Safety::Mutating,
             "{name} should be Mutating"
         );
     }
     assert_eq!(
-        safety_of("browser_get_page_state"),
+        mgr.safety_of("browser_get_page_state"),
         Safety::ReadOnly,
         "browser_get_page_state should be the only ReadOnly browser tool"
     );

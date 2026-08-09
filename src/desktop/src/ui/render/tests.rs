@@ -137,8 +137,9 @@ fn test_parse_markdown_code_block() {
     let events = parse_markdown_to_events(md);
     assert_eq!(events.len(), 1);
     match &events[0] {
-        RenderEvent::CodeBlock(content) => {
+        RenderEvent::CodeBlock { content, language } => {
             assert!(content.contains("fn main()"));
+            assert_eq!(language.as_deref(), Some("rust"));
         }
         _ => panic!("Expected CodeBlock event"),
     }
@@ -676,7 +677,7 @@ fn test_parse_suspicious_paths() {
     assert!(
         events
             .iter()
-            .any(|e| matches!(e, RenderEvent::CodeBlock(c) if c.is_empty())),
+            .any(|e| matches!(e, RenderEvent::CodeBlock { content, .. } if content.is_empty())),
         "empty code block lost: {events:?}"
     );
 

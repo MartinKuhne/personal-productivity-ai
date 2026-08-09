@@ -30,7 +30,7 @@ pub async fn browser_get_page_state(page: &Page) -> Result<String, Box<dyn std::
 
 /// Clicks an element by selector.
 pub async fn browser_click(page: &Page, selector: &str) -> Result<(), Box<dyn std::error::Error>> {
-    let locator = page.locator(selector).await;
+    let locator = page.locator(selector);
     locator.click(None).await?;
     Ok(())
 }
@@ -41,7 +41,7 @@ pub async fn browser_fill_input(
     selector: &str,
     text: &str,
 ) -> Result<(), Box<dyn std::error::Error>> {
-    let locator = page.locator(selector).await;
+    let locator = page.locator(selector);
     locator.fill(text, None).await?;
     Ok(())
 }
@@ -52,7 +52,7 @@ pub async fn browser_select_dropdown(
     selector: &str,
     value: &str,
 ) -> Result<(), Box<dyn std::error::Error>> {
-    let locator = page.locator(selector).await;
+    let locator = page.locator(selector);
     locator.select_option(value, None).await?;
     Ok(())
 }
