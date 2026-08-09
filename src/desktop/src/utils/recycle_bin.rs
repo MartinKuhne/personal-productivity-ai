@@ -71,12 +71,10 @@ mod imp {
 
         // SAFETY: All COM calls are guarded by the `ComGuard` thread-local.
         unsafe {
-            let file_op: IFileOperation =
-                CoCreateInstance(&FileOperation, None, CLSCTX_ALL).map_err(|e| {
-                    RecycleBinError::Com {
-                        step: "CoCreateInstance(FileOperation)",
-                        source: e,
-                    }
+            let file_op: IFileOperation = CoCreateInstance(&FileOperation, None, CLSCTX_ALL)
+                .map_err(|e| RecycleBinError::Com {
+                    step: "CoCreateInstance(FileOperation)",
+                    source: e,
                 })?;
 
             file_op
@@ -102,9 +100,9 @@ mod imp {
 
             let item: IShellItem = SHCreateItemFromParsingName(PCWSTR(wide_slice.as_ptr()), None)
                 .map_err(|e| RecycleBinError::Com {
-                    step: "SHCreateItemFromParsingName",
-                    source: e,
-                })?;
+                step: "SHCreateItemFromParsingName",
+                source: e,
+            })?;
 
             file_op
                 .DeleteItem(&item, None)
@@ -138,8 +136,8 @@ mod imp {
 
 #[cfg(not(windows))]
 mod imp {
-    use std::path::Path;
     use super::RecycleBinError;
+    use std::path::Path;
 
     pub fn delete(path: &Path) -> Result<(), RecycleBinError> {
         let canonical = std::fs::canonicalize(path).map_err(|e| RecycleBinError::Io {
@@ -147,9 +145,7 @@ mod imp {
             source: e,
         })?;
 
-        trash::delete(&canonical).map_err(|e| RecycleBinError::Trash {
-            source: e,
-        })
+        trash::delete(&canonical).map_err(|e| RecycleBinError::Trash { source: e })
     }
 }
 
@@ -186,9 +182,7 @@ pub enum RecycleBinError {
     /// A trash operation failed.
     #[cfg(not(windows))]
     #[error("Trash operation failed: {source}")]
-    Trash {
-        source: trash::Error,
-    },
+    Trash { source: trash::Error },
 
     /// The user (or the system) aborted the operation.
     #[error("Recycle Bin operation was aborted")]
