@@ -143,6 +143,47 @@ fn execute_save_as_pdf_blocking_writes_pdf_file() {
     );
 }
 
+/// Pin the "Save as PDF..." flow: when the user picks a
+/// destination via the native dialog, the PDF must land at
+/// that exact path, NOT next to the source `.md` (the old
+/// default-destination behaviour). The dialog itself is an
+/// OS call that we can't drive from a unit test, so we
+/// exercise the same code path the dialog's `Option<PathBuf>`
+/// result feeds into: setting `job.output_path` explicitly and
+/// calling `compile_and_save_pdf`.
+#[test]
+fn save_as_pdf_honours_user_chosen_destination() {
+    let dir = tempfile::tempdir().unwrap();
+    // The source `.md` lives in `dir/source/`. The old default
+    // destination would be `dir/source/<stem>.pdf` (next to
+    // the source). The user-chosen destination is `dir/elsewhere/
+    // custom-name.pdf` — explicitly NOT the default.
+    let source_dir = dir.path().join("source");
+    std::fs::create_dir(&source_dir).unwrap();
+    let md = source_dir.join("notes.md");
+    std::fs::write(&md, "# Notes\n\nBody.\n").unwrap();
+    let target_dir = dir.path().join("elsewhere");
+    std::fs::create_dir(&target_dir).unwrap();
+    let target = target_dir.join("custom-name.pdf");
+
+    let mut job = SaveAsPdfJob::from_path(md);
+    job.output_path = Some(target.clone());
+    let output = compile_and_save_pdf(&job, None).expect("export should succeed");
+
+    // The returned path is the user-chosen destination, not the
+    // default next-to-source one.
+    assert_eq!(output, target);
+    assert!(output.exists(), "PDF at user-chosen path should exist");
+    // The default next-to-source path must NOT have been written.
+    let default_destination = source_dir.join("notes.pdf");
+    assert!(
+        !default_destination.exists(),
+        "default next-to-source path was written even though the \
+         user picked a custom destination: {}",
+        default_destination.display()
+    );
+}
+
 #[test]
 fn compile_markdown_to_pdf_handles_full_gfm() {
     // A representative Markdown document: heading, paragraph,

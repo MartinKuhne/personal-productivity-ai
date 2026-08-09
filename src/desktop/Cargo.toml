@@ -33,7 +33,7 @@ image-library = []
 # — the Typst engine adds ~30 MB to the binary and a few
 # minutes to compile time. The user can flip this on when they
 # want print-quality PDF output.
-pdf-export = ["dep:typst-as-lib", "dep:typst-layout", "dep:typst-pdf"]
+pdf-export = ["dep:typst-as-lib", "dep:typst-layout", "dep:typst-pdf", "dep:rfd"]
 
 [dependencies]
 anyhow = "1.0.104"
@@ -97,6 +97,13 @@ typst-layout = { version = "0.15", optional = true }
 # `typst-pdf` — the PDF serialiser that turns a compiled
 # `PagedDocument` into PDF bytes. Same `pdf-export` gate.
 typst-pdf = { version = "0.15", optional = true }
+# `rfd` — Rusty File Dialogs. Used by the "Save as PDF..."
+# context-menu entry to show a native "Save as" dialog before
+# writing the PDF (the user picks the destination, we don't
+# silently save next to the source). Gated on the same
+# `pdf-export` feature so the dialog crate isn't pulled in for
+# the markdown-only build.
+rfd = { version = "0.17", optional = true }
 
 [dev-dependencies]
 tempfile = "3.8"

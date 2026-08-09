@@ -162,39 +162,81 @@ fn show_file_context_menu(
         }
         ui.close();
     }
-    // "Save as PDF..." — same UX as the existing Print entry: spawn a
-    // background worker via the event channel so the UI thread stays
-    // responsive while the Typst compiler and PDF serialiser run. The
-    // output lands in the same directory as the source `.md` with
-    // `.pdf` extension; the file is opened in the user's default
-    // viewer on success (see `app::print_pdf` for the orchestration).
+    // "Save as PDF..." — show a native "Save as" dialog first so the
+    // user picks the destination. The previous behaviour was to
+    // silently save next to the source `.md` and open the PDF
+    // immediately, which surprised users who expected the standard
+    // "Save as" prompt. The new flow:
+    //
+    //   1. rfd shows a native file picker, defaulted to the source
+    //      file's directory and stem with a `.pdf` extension, with
+    //      a PDF filter so the platform dialog narrows by type.
+    //   2. The user picks (or cancels). The cancel path is silent
+    //      — no log entry, no error.
+    //   3. The picked path is wrapped in a `SaveAsPdfJob` with an
+    //      explicit `output_path` (not the default next-to-source).
+    //   4. The compile+write runs on a background thread so the UI
+    //      stays responsive. On success the PDF is opened in the
+    //      user's default viewer (matches the prior behaviour for
+    //      the "I just saved a PDF" feedback loop).
+    //
     // The whole menu item disappears when the `pdf-export` feature
     // is off — the compile-time `#[cfg]` here is matched against the
     // same gate that hides the `app::print_pdf` module itself.
     #[cfg(feature = "pdf-export")]
     if ui.button(crate::ui::strings::SAVE_AS_PDF_ACTION).clicked() {
         let path_to_export = path.to_path_buf();
-        if let Some(tx) = ctx.bg_tx().clone() {
-            let job = SaveAsPdfJob::from_path(path_to_export.clone());
-            // Hand the long-running work to a background thread. The
-            // result and any errors stream back to the UI via the
-            // Background Process Log (LogCategory::Print).
-            std::thread::spawn(move || {
-                if let Err(e) = execute_save_as_pdf_blocking(job, Some(tx)) {
-                    tracing::error!(
-                        name = "ui.file.save_as_pdf_failed",
-                        path = %path_to_export.display(),
-                        error = %e,
-                        "Save as PDF failed."
-                    );
-                }
-            });
-        } else {
-            tracing::warn!(
-                name = "ui.file.save_as_pdf_no_channel",
-                path = %path_to_export.display(),
-                "Save as PDF requested but no background channel available"
-            );
+        // Default the dialog to the source file's directory and
+        // stem — most users want to save next to the `.md` they
+        // just exported, just with an explicit name. The `rfd`
+        // API takes a `&Path` for the directory and a `&str` for
+        // the file name separately.
+        let default_dir = path_to_export.parent().map(|p| p.to_path_buf());
+        let default_name = path_to_export
+            .file_stem()
+            .and_then(|s| s.to_str())
+            .map(|s| format!("{s}.pdf"));
+        let mut dialog = rfd::FileDialog::new()
+            .set_title("Save as PDF")
+            .add_filter("PDF document", &["pdf"]);
+        if let Some(dir) = default_dir.as_ref() {
+            dialog = dialog.set_directory(dir);
+        }
+        if let Some(name) = default_name.as_ref() {
+            dialog = dialog.set_file_name(name);
+        }
+        let chosen = dialog.save_file();
+        // User pressed Cancel or closed the dialog — chosen is
+        // `None`. Fall through to menu close without spawning any
+        // background work. We do NOT log this as a failure; cancel
+        // is a valid user choice.
+        if let Some(target) = chosen {
+            if let Some(tx) = ctx.bg_tx().clone() {
+                // Build the job with the chosen `output_path`. The
+                // markdown source path is still the first arg so the
+                // translator reads from the right file; `output_path`
+                // overrides the default next-to-source destination.
+                let mut job = SaveAsPdfJob::from_path(path_to_export.clone());
+                job.output_path = Some(target.clone());
+                let target_for_log = target.clone();
+                std::thread::spawn(move || {
+                    if let Err(e) = execute_save_as_pdf_blocking(job, Some(tx)) {
+                        tracing::error!(
+                            name = "ui.file.save_as_pdf_failed",
+                            source = %path_to_export.display(),
+                            target = %target_for_log.display(),
+                            error = %e,
+                            "Save as PDF failed."
+                        );
+                    }
+                });
+            } else {
+                tracing::warn!(
+                    name = "ui.file.save_as_pdf_no_channel",
+                    path = %path_to_export.display(),
+                    "Save as PDF requested but no background channel available"
+                );
+            }
         }
         ui.close();
     }
