@@ -55,8 +55,8 @@ pub fn open_url(url: &str) {
 ///
 /// The opener is passed as a `FnMut` closure so the function is
 /// pure (no I/O in the function body) and the regression tests
-/// in `os_shell_tests` can record the dispatched URLs without
-/// actually invoking the system browser.
+/// in the sibling `os_shell_tests` sidecar can record the
+/// dispatched URLs without actually invoking the system browser.
 pub fn dispatch_platform_commands<F>(commands: &[egui::OutputCommand], mut open_url_fn: F)
 where
     F: FnMut(&str),

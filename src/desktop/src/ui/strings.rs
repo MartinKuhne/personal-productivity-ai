@@ -330,6 +330,13 @@ pub const RUN_AS_PROMPT_ACTION: &str = "Run as prompt";
 /// Context menu item to print document content.
 pub const PRINT_ACTION: &str = "Print";
 
+/// Context menu item to export the current Markdown file to PDF via
+/// the in-process Typst compiler. Sits next to `PRINT_ACTION` in the
+/// file context menu; the underlying feature is gated by the
+/// `pdf-export` Cargo feature, so the menu entry is only registered
+/// when the feature is on.
+pub const SAVE_AS_PDF_ACTION: &str = "Save as PDF...";
+
 // Background Logs Window
 /// Window title for background logs monitor.
 pub const BACKGROUND_PROCESSES_WINDOW: &str = "Background Processes";

@@ -1,5 +1,5 @@
 use super::*;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
 
@@ -12,7 +12,7 @@ fn test_spawn_path_worker_processes_items() {
     spawn_path_worker(rx, move |path| {
         let c = counter_clone.clone();
         async move {
-            if path == PathBuf::from("test") {
+            if path == Path::new("test") {
                 c.fetch_add(1, Ordering::SeqCst);
             }
         }

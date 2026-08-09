@@ -1757,7 +1757,7 @@ fn cm_task_lists_continuation() {
     assert!(
         task_events
             .iter()
-            .any(|(b, t, i)| *b == false && *t == Some(true) && *i >= 1),
+            .any(|(b, t, i)| !*b && *t == Some(true) && *i >= 1),
         "task checkbox at indent >= 1; got {:?}",
         task_events
     );

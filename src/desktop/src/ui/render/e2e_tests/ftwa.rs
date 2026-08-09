@@ -901,7 +901,7 @@ fn test_table_cell_with_link_middle_dot_and_bold_phone() {
             TableLayoutBuilder::new(&measurer, 800.0, DeficitStrategy::HybridMinPenaltyWaterFill)
                 .with_padding(8.0, 4.0);
 
-        let layout = builder.build(&table);
+        let layout = builder.build(table);
 
         eprintln!("Layout: {:?}", layout);
         eprintln!("Rows: {}", layout.rows.len());
