@@ -29,6 +29,7 @@ pub struct TextStyle {
     pub italic: bool,
     pub code: bool,
     pub strikethrough: bool,
+    pub muted: bool,
 }
 
 #[derive(Clone, Debug, PartialEq)]

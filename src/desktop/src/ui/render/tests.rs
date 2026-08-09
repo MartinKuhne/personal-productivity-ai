@@ -501,6 +501,39 @@ fn test_parse_markdown_rule_and_blockquote() {
 }
 
 #[test]
+fn test_blockquote_text_has_muted_style() {
+    let md = "> Blockquote text\n> **Bold in quote**\n\nNormal text";
+    let events = parse_markdown_to_events(md);
+
+    let mut quote_text_found = false;
+    let mut normal_text_found = false;
+    for event in &events {
+        if let RenderEvent::FlushInline { elems, .. } = event {
+            for elem in elems {
+                if let InlineElem::Text(t, style) = elem {
+                    if t.contains("Blockquote text") || t.contains("Bold in quote") {
+                        assert!(
+                            style.muted,
+                            "Blockquote text '{t}' should have muted=true, got {style:?}"
+                        );
+                        quote_text_found = true;
+                    }
+                    if t.contains("Normal text") {
+                        assert!(
+                            !style.muted,
+                            "Normal text '{t}' should have muted=false, got {style:?}"
+                        );
+                        normal_text_found = true;
+                    }
+                }
+            }
+        }
+    }
+    assert!(quote_text_found, "Expected blockquote text");
+    assert!(normal_text_found, "Expected normal text outside blockquote");
+}
+
+#[test]
 fn test_parse_markdown_html_and_footnotes() {
     let md = "<span>Inline HTML</span>\n\nFootnote[^1]\n\n[^1]: Footnote details";
     let events = parse_markdown_to_events(md);
