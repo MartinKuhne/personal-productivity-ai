@@ -378,7 +378,7 @@ impl GatewayRunner {
             return Err(anyhow::anyhow!("gateway not connected"));
         };
         let text = serde_json::to_string(&payload)?;
-        if sender.send(WsMessage::Text(text)).is_err() {
+        if sender.send(WsMessage::Text(text.into())).is_err() {
             return Err(anyhow::anyhow!("gateway writer channel closed"));
         }
         Ok(())
@@ -466,7 +466,7 @@ impl GatewayRunner {
                 let Ok(text) = serde_json::to_string(&heartbeat) else {
                     continue;
                 };
-                if sender.send(WsMessage::Text(text)).is_err() {
+                if sender.send(WsMessage::Text(text.into())).is_err() {
                     break;
                 }
             }
