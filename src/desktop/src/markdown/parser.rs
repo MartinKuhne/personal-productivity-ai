@@ -1185,4 +1185,144 @@ mod tests {
             InlineElem::Text(t, s) if t == "~$180" && s == &plain
         ));
     }
+
+    #[test]
+    fn parses_table_cell_with_link_and_middle_dot_and_bold_phone() {
+        let md =
+            "| Header |\n| --- |\n| [Link](https://example.com/shop/) \u{b7} **(555) 123-4567** |";
+        let events = parse_markdown_to_events(md);
+        let table = events
+            .iter()
+            .find_map(|e| {
+                if let RenderEvent::Table(rows) = e {
+                    Some(rows)
+                } else {
+                    None
+                }
+            })
+            .expect("expected a Table event");
+
+        assert_eq!(table.len(), 2, "header + 1 data row");
+        assert_eq!(table[0].len(), 1, "1 column in header");
+        assert_eq!(table[1].len(), 1, "1 column in data row");
+
+        let cell = &table[1][0];
+        eprintln!("Cell elements: {:?}", cell);
+
+        // The cell should contain: Link("Link"), Text(" · "), Bold(Text("(555) 123-4567"))
+        assert!(
+            cell.len() >= 2,
+            "cell should have at least 2 elements, got {:?}",
+            cell
+        );
+
+        // Check the link
+        assert!(matches!(
+            &cell[0],
+            InlineElem::Link(url, text)
+                if url == "https://example.com/shop/"
+                    && text == "Link"
+        ));
+
+        // Check the middle dot text (may be combined with space)
+        let has_middle_dot = cell
+            .iter()
+            .any(|e| matches!(e, InlineElem::Text(t, _) if t.contains("\u{b7}")));
+        assert!(
+            has_middle_dot,
+            "cell should contain middle dot, got {:?}",
+            cell
+        );
+
+        // Check the bold phone number
+        let bold = TextStyle {
+            bold: true,
+            ..TextStyle::default()
+        };
+        let has_bold_phone = cell.iter().any(|e| {
+            matches!(
+                e,
+                InlineElem::Text(t, s)
+                    if t.contains("555")
+                        && t.contains("123")
+                        && t.contains("4567")
+                        && s == &bold
+            )
+        });
+        assert!(
+            has_bold_phone,
+            "cell should contain bold phone number, got {:?}",
+            cell
+        );
+    }
+
+    // Regression: 5-column table where rows with
+    // `[Link](url) · **(NNN) NNN-NNNN**` in the last column
+    // must NOT produce an extra (6th) column.
+    #[test]
+    fn five_column_table_with_phone_in_last_cell_keeps_five_columns() {
+        let md = r#"| Name | Score | Location | Description | Link |
+|---|---|---|---|---|
+| **Shop Alpha** | 86 | City A, ST | Trusted community favorite, honest, reliable | [Link](https://example.com/shop-alpha/) |
+| **Shop Beta** | 10 | City B, ST | Family-owned, highly praised | [Link](https://example.com/shop-beta/) \u{b7} **(555) 111-2222** |
+| **Shop Gamma** | 5 | 123 Main St, City C, ST 98000 | Honest, affordable, trustworthy | [Link](https://example.com/shop-gamma/) \u{b7} **(555) 333-4444** |
+| **Shop Delta** | \u{2014} | City D, ST | Highly recommended, friendly service | [Link](https://example.com/shop-delta/) |
+| **Shop Epsilon** | 10 | Area E, City F, ST | Long-established, certified | [Link](https://example.com/shop-epsilon/) |
+| **Shop Zeta** | \u{2014} | 456 Oak Dr, City G, ST 98000 | Newer business | [Link](https://example.com/shop-zeta/) |
+| **Shop Eta** | \u{2014} | 789 Pine Ave, City H, ST 98000 | Newer business | [Link](https://example.com/shop-eta/) |"#;
+        let events = parse_markdown_to_events(md);
+        let table = events
+            .iter()
+            .find_map(|e| {
+                if let RenderEvent::Table(rows) = e {
+                    Some(rows)
+                } else {
+                    None
+                }
+            })
+            .expect("expected a Table event");
+
+        assert_eq!(table.len(), 8, "header + 7 data rows");
+        for (i, row) in table.iter().enumerate() {
+            let label = [
+                "header",
+                "Shop Alpha",
+                "Shop Beta",
+                "Shop Gamma",
+                "Shop Delta",
+                "Shop Epsilon",
+                "Shop Zeta",
+                "Shop Eta",
+            ];
+            assert_eq!(
+                row.len(),
+                5,
+                "row {} ({}) must have 5 columns, got {}: each cell={:?}",
+                i,
+                label[i],
+                row.len(),
+                row.iter()
+                    .map(|c| format!("{} elems: first={:?}", c.len(), c.first()))
+                    .collect::<Vec<_>>()
+            );
+        }
+
+        // Verify Shop Beta last cell (row 2, col 4) has phone
+        let beta_link = &table[2][4];
+        assert!(
+            beta_link
+                .iter()
+                .any(|e| matches!(e, InlineElem::Text(t, _) if t.contains("111-2222"))),
+            "Shop Beta last cell must contain phone number"
+        );
+
+        // Verify Shop Gamma last cell (row 3, col 4) has phone
+        let gamma_link = &table[3][4];
+        assert!(
+            gamma_link
+                .iter()
+                .any(|e| matches!(e, InlineElem::Text(t, _) if t.contains("333-4444"))),
+            "Shop Gamma last cell must contain phone number"
+        );
+    }
 }
