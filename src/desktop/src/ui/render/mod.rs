@@ -138,7 +138,7 @@ pub fn render_markdown(
                     ui.add_space(est_h);
                     continue;
                 }
-                RenderEvent::CodeBlock(content) => {
+                RenderEvent::CodeBlock { content, .. } => {
                     let line_count = content.lines().count().max(1) as f32;
                     let est_h = line_count * 18.0 + 20.0;
                     ui.add_space(est_h);
@@ -196,7 +196,7 @@ pub fn render_markdown(
                     task_index += 1;
                 }
             }
-            RenderEvent::CodeBlock(content) => {
+            RenderEvent::CodeBlock { content, .. } => {
                 render_code_block(ui, content);
             }
             RenderEvent::Heading { level, elems } => {

@@ -91,7 +91,7 @@ fn cm_thematic_breaks_four_spaces_is_code_block() {
     let has_sep = events.iter().any(|e| matches!(e, RenderEvent::Separator));
     let has_code = events
         .iter()
-        .any(|e| matches!(e, RenderEvent::CodeBlock(_)));
+        .any(|e| matches!(e, RenderEvent::CodeBlock { .. }));
     assert!(
         has_code,
         "4-space-indented *** should be a code block, not a thematic break"
@@ -309,7 +309,7 @@ fn cm_atx_headings_indentation_limit() {
         .any(|e| matches!(e, RenderEvent::Heading { .. }));
     let has_code = events_code
         .iter()
-        .any(|e| matches!(e, RenderEvent::CodeBlock(_)));
+        .any(|e| matches!(e, RenderEvent::CodeBlock { .. }));
     assert!(has_code, "4-space-indented # foo should be a code block");
     assert!(
         !has_heading,
@@ -553,7 +553,7 @@ fn cm_setext_headings_indentation() {
     let events_code = parse_markdown_to_events(md_code);
     let code_blocks = events_code
         .iter()
-        .filter(|e| matches!(e, RenderEvent::CodeBlock(_)))
+        .filter(|e| matches!(e, RenderEvent::CodeBlock { .. }))
         .count();
     let has_sep = events_code
         .iter()
@@ -696,7 +696,7 @@ fn cm_code_blocks_indented_simple() {
     let code = events
         .iter()
         .find_map(|e| match e {
-            RenderEvent::CodeBlock(content) => Some(content.clone()),
+            RenderEvent::CodeBlock { content, .. } => Some(content.clone()),
             _ => None,
         })
         .expect("expected a CodeBlock event");
@@ -725,7 +725,7 @@ fn cm_code_blocks_list_precedence() {
         .count();
     let code_blocks = events
         .iter()
-        .filter(|e| matches!(e, RenderEvent::CodeBlock(_)))
+        .filter(|e| matches!(e, RenderEvent::CodeBlock { .. }))
         .count();
     assert_eq!(list_items, 1, "list item should take precedence");
     assert_eq!(
@@ -743,7 +743,7 @@ fn cm_code_blocks_literal_content() {
     let code = events
         .iter()
         .find_map(|e| match e {
-            RenderEvent::CodeBlock(content) => Some(content.clone()),
+            RenderEvent::CodeBlock { content, .. } => Some(content.clone()),
             _ => None,
         })
         .expect("expected a CodeBlock event");
@@ -762,7 +762,7 @@ fn cm_code_blocks_fenced_basic() {
     let code = events
         .iter()
         .find_map(|e| match e {
-            RenderEvent::CodeBlock(content) => Some(content.clone()),
+            RenderEvent::CodeBlock { content, .. } => Some(content.clone()),
             _ => None,
         })
         .expect("expected a CodeBlock event");
@@ -774,7 +774,7 @@ fn cm_code_blocks_fenced_basic() {
     let code = events
         .iter()
         .find_map(|e| match e {
-            RenderEvent::CodeBlock(content) => Some(content.clone()),
+            RenderEvent::CodeBlock { content, .. } => Some(content.clone()),
             _ => None,
         })
         .expect("expected a CodeBlock event");
@@ -785,7 +785,7 @@ fn cm_code_blocks_fenced_basic() {
     let events = parse_markdown_to_events(md_few);
     let has_code = events
         .iter()
-        .any(|e| matches!(e, RenderEvent::CodeBlock(_)));
+        .any(|e| matches!(e, RenderEvent::CodeBlock { .. }));
     assert!(!has_code, "2 backticks must not produce a code block");
 
     // CM-131: 4+ backticks/tildes work
@@ -793,7 +793,7 @@ fn cm_code_blocks_fenced_basic() {
     let events = parse_markdown_to_events(md_many);
     let has_code = events
         .iter()
-        .any(|e| matches!(e, RenderEvent::CodeBlock(_)));
+        .any(|e| matches!(e, RenderEvent::CodeBlock { .. }));
     assert!(has_code, "4+ backticks must produce a code block");
 }
 
@@ -803,16 +803,15 @@ fn cm_code_blocks_info_string_language() {
     let md = "```ruby\ndef foo(x)\n  return 3\nend\n```";
     let events = parse_markdown_to_events(md);
 
-    let code_event = events
-        .iter()
-        .find(|e| matches!(e, RenderEvent::CodeBlock(_)))
-        .expect("expected a CodeBlock event");
+    let lang = events.iter().find_map(|e| match e {
+        RenderEvent::CodeBlock { language, .. } => language.clone(),
+        _ => None,
+    });
 
-    // CM spec § 4.5 requires recording the info string "ruby" for code blocks.
-    assert!(
-        format!("{:?}", code_event).contains("ruby"),
-        "code block event must retain the info string 'ruby' per CM spec 0.31.2; got {:?}",
-        code_event
+    assert_eq!(
+        lang.as_deref(),
+        Some("ruby"),
+        "code block info string 'ruby' must be retained per CM spec 0.31.2; got {events:?}"
     );
 }
 
@@ -824,7 +823,7 @@ fn cm_code_blocks_missing_close() {
     let code = events
         .iter()
         .find_map(|e| match e {
-            RenderEvent::CodeBlock(content) => Some(content.clone()),
+            RenderEvent::CodeBlock { content, .. } => Some(content.clone()),
             _ => None,
         })
         .expect("expected a CodeBlock event for unclosed fence");
@@ -849,7 +848,7 @@ fn cm_code_blocks_paragraph_boundaries() {
         .count();
     let code_count = events
         .iter()
-        .filter(|e| matches!(e, RenderEvent::CodeBlock(_)))
+        .filter(|e| matches!(e, RenderEvent::CodeBlock { .. }))
         .count();
     assert_eq!(flush_count, 1, "Foo + indented bar should be one paragraph");
     assert_eq!(
@@ -862,7 +861,7 @@ fn cm_code_blocks_paragraph_boundaries() {
     let events = parse_markdown_to_events(md_end);
     let code_count = events
         .iter()
-        .filter(|e| matches!(e, RenderEvent::CodeBlock(_)))
+        .filter(|e| matches!(e, RenderEvent::CodeBlock { .. }))
         .count();
     let flush_count = events
         .iter()
@@ -881,7 +880,7 @@ fn cm_code_blocks_trailing_spaces() {
     let code = events
         .iter()
         .find_map(|e| match e {
-            RenderEvent::CodeBlock(content) => Some(content.clone()),
+            RenderEvent::CodeBlock { content, .. } => Some(content.clone()),
             _ => None,
         })
         .expect("expected a CodeBlock event");
@@ -1508,7 +1507,7 @@ fn cm_hard_line_breaks_not_in_code_or_heading() {
     let code = events
         .iter()
         .find_map(|e| match e {
-            RenderEvent::CodeBlock(content) => Some(content.clone()),
+            RenderEvent::CodeBlock { content, .. } => Some(content.clone()),
             _ => None,
         })
         .expect("expected a CodeBlock event");
@@ -1567,7 +1566,7 @@ fn cm_soft_line_breaks_not_in_code_or_heading() {
     let code = events
         .iter()
         .find_map(|e| match e {
-            RenderEvent::CodeBlock(content) => Some(content.clone()),
+            RenderEvent::CodeBlock { content, .. } => Some(content.clone()),
             _ => None,
         })
         .expect("expected a CodeBlock event");
@@ -1891,7 +1890,7 @@ fn cm_tabs_in_code_block() {
     let code = events
         .iter()
         .find_map(|e| match e {
-            RenderEvent::CodeBlock(content) => Some(content.clone()),
+            RenderEvent::CodeBlock { content, .. } => Some(content.clone()),
             _ => None,
         })
         .expect("expected a CodeBlock event");
@@ -1931,7 +1930,7 @@ fn cm_tabs_in_block_quotes() {
     let events = parse_markdown_to_events(md);
 
     let code_or_text = events.iter().any(|e| match e {
-        RenderEvent::CodeBlock(c) => c.contains("foo"),
+        RenderEvent::CodeBlock { content, .. } => content.contains("foo"),
         RenderEvent::FlushInline { elems, .. } => elems.iter().any(|el| match el {
             InlineElem::Text(t, _) => t.contains("foo"),
             _ => false,
