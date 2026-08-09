@@ -454,6 +454,9 @@ pub fn tool_web_delegate(
 
         if let Some(tool_calls) = message.get("tool_calls").and_then(|t| t.as_array()) {
             if tool_calls.is_empty() {
+                if final_content.is_empty() {
+                    tracing::warn!(name = "tool.web_delegate.empty_content_on_break", model = %model_name, loop = loop_count, "Delegate turn returned empty tool_calls and no content — model may not support function calling or refused the instruction.");
+                }
                 break;
             }
             messages.push(message.clone());
@@ -549,8 +552,15 @@ pub fn tool_web_delegate(
                 }));
             }
         } else {
+            if final_content.is_empty() {
+                tracing::warn!(name = "tool.web_delegate.empty_content_on_break", model = %model_name, loop = loop_count, "Delegate turn returned no tool_calls and no content — model may not support function calling or refused the instruction.");
+            }
             break;
         }
+    }
+
+    if final_content.is_empty() {
+        tracing::warn!(name = "tool.web_delegate.empty_result", model = %model_name, loops = loop_count, max_loops = max_loops, instruction_len = instruction.len(), trace_len = delegate_trace.len(), "Delegate completed with empty result after {loop_count} loops.");
     }
 
     Ok(crate::agent::tools::dtos::WebDelegateResponse {
