@@ -5,18 +5,17 @@
 //! This replaces the external `trash` crate to avoid a `windows`-crate
 //! version conflict with `wgpu`.
 
-
 use std::os::windows::ffi::OsStrExt;
 use std::path::Path;
 
-use windows::core::PCWSTR;
 use windows::Win32::System::Com::{
     CLSCTX_ALL, COINIT_APARTMENTTHREADED, CoCreateInstance, CoInitializeEx, CoUninitialize,
 };
 use windows::Win32::UI::Shell::{
-    FileOperation, IFileOperation, IShellItem, SHCreateItemFromParsingName, FOF_ALLOWUNDO, FOF_NO_UI,
-    FOF_WANTNUKEWARNING,
+    FOF_ALLOWUNDO, FOF_NO_UI, FOF_WANTNUKEWARNING, FileOperation, IFileOperation, IShellItem,
+    SHCreateItemFromParsingName,
 };
+use windows::core::PCWSTR;
 
 /// Per-thread COM initialisation guard.
 ///
@@ -103,12 +102,11 @@ pub fn delete(path: impl AsRef<Path>) -> Result<(), RecycleBinError> {
             &wide[..]
         };
 
-        let item: IShellItem = SHCreateItemFromParsingName(PCWSTR(wide_slice.as_ptr()), None).map_err(
-            |e| RecycleBinError::Com {
+        let item: IShellItem = SHCreateItemFromParsingName(PCWSTR(wide_slice.as_ptr()), None)
+            .map_err(|e| RecycleBinError::Com {
                 step: "SHCreateItemFromParsingName",
                 source: e,
-            },
-        )?;
+            })?;
 
         file_op
             .DeleteItem(&item, None)
