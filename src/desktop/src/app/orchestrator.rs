@@ -250,10 +250,11 @@ impl AppOrchestrator {
 
         self.agent.set_config(config.clone());
 
-        let prompt = crate::agent::prompt_builder::SystemPromptBuilder::new(&config).build(&config);
+        let prompts =
+            crate::agent::prompt_builder::SystemPromptBuilder::new(&config).build(&config);
         tracing::info!(
             name = "app.startup",
-            system_prompt = %prompt,
+            system_prompt = ?prompts,
             "Application started successfully. Emitted system prompt for diagnostics."
         );
 

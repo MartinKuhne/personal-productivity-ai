@@ -106,7 +106,7 @@ pub const INSERT_INTO_NOTE_DESCRIPTION: &str = "Insert lines into a markdown-for
 
 // --- web_delegate ---
 
-pub const WEB_DELEGATE_DESCRIPTION: &str = "Delegate web searches and fetches to a sub-agent. Provide clear instructions. The sub-agent returns summarized information.";
+pub const WEB_DELEGATE_DESCRIPTION: &str = "Delegate a specific, unambiguous fact lookup to a sub-agent that searches and fetches the web, then returns a concise answer. Use when the question has a single factual answer — a word, sentence, or short list. Examples: \"What is the full name of the current president of the United States?\" or \"List every compact SUV make and model sold in California in 2026.\" Preferring web_delegate for fact lookups reduces your context usage. Do NOT use web_delegate for open-ended research, ambiguous questions, multi-page crawling, or as a retry after a failed web_search.";
 
 // --- web_fetch ---
 
@@ -120,7 +120,7 @@ pub const FIELD_WEB_FETCH_RESPONSE_FROM_CACHE: &str =
 
 // --- web_search ---
 
-pub const WEB_SEARCH_DESCRIPTION: &str = "Search the web for information using a query string.";
+pub const WEB_SEARCH_DESCRIPTION: &str = "Search the web for information using a query string. Use for ambiguous or open-ended questions, evaluating broad result sets, crawling multiple pages, or when you need to try different search strategies to find what you're looking for.";
 
 pub const FIELD_WEB_SEARCH_INPUT_QUERY: &str = "Specify the search term.";
 
@@ -172,7 +172,8 @@ pub const DELETE_CALENDAR_ITEM_DESCRIPTION: &str = "Delete a calendar item.";
 
 pub const SEARCH_CONTACT_DESCRIPTION: &str = "Search contacts by keyword.";
 
-pub const ADD_CONTACT_DESCRIPTION: &str = "Add a new contact to the configured CardDAV addressbook. \
+pub const ADD_CONTACT_DESCRIPTION: &str =
+    "Add a new contact to the configured CardDAV addressbook. \
 The `contact_json` argument is a JSON object describing the contact. \
 Use these canonical field names (the listed aliases are also accepted): \
 `name` (aliases: `fn`, `full_name`) — the contact's display name, REQUIRED; \
@@ -194,12 +195,14 @@ you don't know should be omitted. The `type` becomes the vCard `TYPE=` \
 parameter. Multiple addresses per contact are supported (e.g. a HOME and \
 a WORK).";
 
-pub const GET_CONTACT_DESCRIPTION: &str = "Get a contact by its unique ID. The response includes the \
+pub const GET_CONTACT_DESCRIPTION: &str =
+    "Get a contact by its unique ID. The response includes the \
 raw vCard plus structured fields: `fn_name`, `email`, `tel`, `org`, \
 `bday` (ISO `YYYY-MM-DD`), and `addresses` (array of postal-address \
 objects with the same shape as `add_contact`).";
 
-pub const UPDATE_CONTACT_DESCRIPTION: &str = "Update an existing contact at the given `id` (the href \
+pub const UPDATE_CONTACT_DESCRIPTION: &str =
+    "Update an existing contact at the given `id` (the href \
 returned by `get_contact` or `search_contact`). The `contact_json` argument \
 uses the same schema as `add_contact` (canonical names: `name`, `email`, \
 `phone`, `company`, `title`, `notes`, `birthday`, `addresses`; aliases are \
@@ -212,7 +215,8 @@ list replaces every existing ADR on the contact. The update is performed \
 with `If-Match` so concurrent edits are detected — if the server returns \
 412 the caller should re-`get_contact` and retry.";
 
-pub const DELETE_CONTACT_DESCRIPTION: &str = "Delete the contact at the given `id` (the href returned by \
+pub const DELETE_CONTACT_DESCRIPTION: &str =
+    "Delete the contact at the given `id` (the href returned by \
 `get_contact` or `search_contact`). A 404 (already absent) is treated as a \
 successful no-op so the call is idempotent. Other non-2xx responses are \
 propagated as errors with the truncated response body for diagnosis.";

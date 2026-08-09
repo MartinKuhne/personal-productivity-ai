@@ -153,7 +153,7 @@ fn resolve_ll_client(ctx: &AgentContext) -> Option<LLMClient> {
     Some(client)
 }
 fn build_messages(
-    system_prompt: String,
+    system_prompts: Vec<String>,
     prompt: &str,
     history: Option<Vec<serde_json::Value>>,
 ) -> Vec<serde_json::Value> {
@@ -161,10 +161,12 @@ fn build_messages(
         existing.push(serde_json::json!({"role": "user", "content": prompt}));
         existing
     } else {
-        vec![
-            serde_json::json!({"role": "system", "content": system_prompt}),
-            serde_json::json!({"role": "user", "content": prompt}),
-        ]
+        let mut messages: Vec<serde_json::Value> = system_prompts
+            .into_iter()
+            .map(|sp| serde_json::json!({"role": "system", "content": sp}))
+            .collect();
+        messages.push(serde_json::json!({"role": "user", "content": prompt}));
+        messages
     }
 }
 fn emit_usage(resp: &serde_json::Value, tx: &Sender<BackgroundEvent>) {
