@@ -8,8 +8,8 @@
 //!
 //! # Pipeline
 //!
-//! 1. [`crate::markdown::render_markdown_to_typst`] — pure markdown
-//!    to Typst markup, see `crate::markdown::typst` for the
+//! 1. [`crate::pdf::typst_translator::render_markdown_to_typst`] — pure markdown
+//!    to Typst markup, see `crate::pdf::typst_translator` for the
 //!    translator.
 //! 2. `TypstEngine::compile` — in-process Typst engine from
 //!    `typst-as-lib`, fed the translated body inside a fixed
@@ -93,8 +93,8 @@ impl SaveAsPdfJob {
 /// wants the PDF bytes directly (e.g. for in-app preview, email
 /// attachment, or non-`fastmd` consumers).
 pub fn compile_markdown_to_pdf(markdown: &str, title: &str) -> Result<Vec<u8>, String> {
-    let body = pdf::typst_translator::render_markdown_to_typst(markdown);
-    pdf::generate(title, &body)
+    let body = crate::pdf::typst_translator::render_markdown_to_typst(markdown);
+    crate::pdf::generate(title, &body)
 }
 
 /// Compile the markdown content to a PDF file at

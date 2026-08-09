@@ -33,7 +33,14 @@ image-library = []
 # — the Typst engine adds ~30 MB to the binary and a few
 # minutes to compile time. The user can flip this on when they
 # want print-quality PDF output.
-pdf-export = ["dep:pdf", "dep:rfd"]
+pdf-export = [
+    "dep:rfd",
+    "dep:typst-as-lib",
+    "dep:typst-layout",
+    "dep:typst-pdf",
+    "dep:typst",
+    "dep:typst-kit"
+]
 
 [dependencies]
 anyhow = "1.0.104"
@@ -87,10 +94,12 @@ futures = "0.3"
 # context-menu entry to show a native "Save as" dialog before
 # writing the PDF (the user picks the destination, we don't
 # silently save next to the source). Gated on the same
-# `pdf-export` feature so the dialog crate isn't pulled in for
-# the markdown-only build.
 rfd = { version = "0.17", optional = true }
-pdf = { path = "../../lib/pdf", optional = true }
+typst-as-lib = { version = "0.16", optional = true, features = ["typst-kit-fonts", "typst-kit-embed-fonts"] }
+typst-layout = { version = "0.15", optional = true }
+typst-pdf = { version = "0.15", optional = true }
+typst = { version = "0.15", optional = true }
+typst-kit = { version = "0.15", optional = true }
 
 [target.'cfg(windows)'.dependencies]
 windows = { version = "0.62", features = ["Win32_System_Com", "Win32_UI_Shell"] }

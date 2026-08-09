@@ -23,6 +23,9 @@ pub mod app;
 pub mod bus;
 pub mod integrations;
 pub mod markdown;
+#[cfg(feature = "pdf-export")]
+#[path = "lib/pdf/mod.rs"]
+pub mod pdf;
 pub mod ui;
 pub mod utils;
 

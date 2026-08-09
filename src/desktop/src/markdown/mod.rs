@@ -19,7 +19,6 @@ pub mod parser;
 pub mod table_layout;
 pub mod table_width;
 
-
 pub use document::{Document, FrontMatter, apply_task_toggle, parse_front_matter};
 pub use model::{InlineElem, RenderEvent, TextStyle, ToCEntry, build_toc, heading_plain_text};
 pub use parser::{parse_markdown_to_events, parse_yaml_to_pairs, render_markdown_to_html};
@@ -27,4 +26,3 @@ pub use table_layout::{LayoutCell, TableLayout, TableLayoutBuilder, TextMeasurer
 pub use table_width::{
     Breakpoint, CellTokens, ColumnWidths, DeficitStrategy, compute_column_breakpoints, ftwa,
 };
-

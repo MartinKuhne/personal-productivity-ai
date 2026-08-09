@@ -27,7 +27,7 @@
 #![cfg(feature = "pdf-export")]
 
 use fastmd::app::print_pdf::compile_markdown_to_pdf;
-use pdf::typst_translator::render_markdown_to_typst;
+use fastmd::pdf::typst_translator::render_markdown_to_typst;
 
 /// Source of the vendored spec. `include_str!` resolves at compile
 /// time, so the test binary carries the spec as a static — the file
