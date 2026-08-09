@@ -199,6 +199,23 @@ pub fn compile_markdown_to_pdf(markdown: &str, title: &str) -> Result<Vec<u8>, S
 /// back through `.output` to pick the right `Doc` for us, even
 /// though the outer `Warned<...>` wrapper type is unnameable from
 /// this crate.
+fn get_cached_fonts() -> &'static [typst::text::Font] {
+    static CACHED_FONTS: std::sync::OnceLock<Vec<typst::text::Font>> = std::sync::OnceLock::new();
+    CACHED_FONTS.get_or_init(|| {
+        let mut fonts = Vec::new();
+        for (font, _) in typst_kit::fonts::embedded() {
+            fonts.push(font);
+        }
+        for (font_path, _) in typst_kit::fonts::system() {
+            use typst_kit::fonts::FontSource; // wait, is this needed for .load()? typst-as-lib uses it.
+            if let Some(font) = font_path.load() {
+                fonts.push(font);
+            }
+        }
+        fonts
+    })
+}
+
 fn compile_typst_document(document: &str) -> Result<Vec<u8>, String> {
     use typst_as_lib::TypstEngine;
     // The `TypstEngine::builder()` default leaves font discovery
@@ -215,9 +232,12 @@ fn compile_typst_document(document: &str) -> Result<Vec<u8>, String> {
     // `typst-assets` fonts ("New Computer Modern" + "Liberation
     // Serif" in the user's template, the former from the
     // embedded set).
+    //
+    // We now cache these fonts globally to avoid scanning the
+    // filesystem on every engine build (a ~300ms overhead).
     let engine = TypstEngine::builder()
         .main_file(document.to_string())
-        .search_fonts_with(typst_as_lib::typst_kit_options::TypstKitFontOptions::default())
+        .fonts(get_cached_fonts().iter().cloned())
         .build();
     let result = engine.compile();
     // Bind the document to a typed local so `Doc = PagedDocument`
