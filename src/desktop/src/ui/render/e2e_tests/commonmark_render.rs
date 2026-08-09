@@ -42,9 +42,7 @@ fn render_cm_ui(md: &str, viewport_size: egui::Vec2) -> egui::FullOutput {
 }
 
 /// Helper to collect all `egui::Shape::Text` shapes recursively from `output.shapes`.
-fn extract_text_shapes(
-    shapes: &[egui::epaint::ClippedShape],
-) -> Vec<&egui::epaint::TextShape> {
+fn extract_text_shapes(shapes: &[egui::epaint::ClippedShape]) -> Vec<&egui::epaint::TextShape> {
     let mut out = Vec::new();
     for cs in shapes {
         collect_text_shapes_from(&cs.shape, &mut out);

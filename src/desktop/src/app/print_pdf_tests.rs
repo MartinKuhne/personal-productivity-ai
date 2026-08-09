@@ -689,7 +689,8 @@ fn pdf_has_font_dictionary() {
 /// translator.
 #[test]
 fn math_compiles_to_a_valid_pdf() {
-    let md = "Pythagoras: $a^2 + b^2 = c^2$.\n\nGreek letter: $alpha$.\n\nFraction: $frac(1, 2)$.\n";
+    let md =
+        "Pythagoras: $a^2 + b^2 = c^2$.\n\nGreek letter: $alpha$.\n\nFraction: $frac(1, 2)$.\n";
     let bytes = compile_markdown_to_pdf(md, "math").expect("math markdown must compile");
     assert!(bytes.starts_with(b"%PDF-"));
     assert!(bytes.ends_with(b"%%EOF"));
@@ -723,8 +724,7 @@ Footnotes can have **bold** in the body[^2].
 [^1]: shared body.
 [^2]: another body with *italic* text.
 ";
-    let bytes =
-        compile_markdown_to_pdf(md, "footnotes").expect("footnote markdown must compile");
+    let bytes = compile_markdown_to_pdf(md, "footnotes").expect("footnote markdown must compile");
     assert!(bytes.starts_with(b"%PDF-"));
     assert!(bytes.ends_with(b"%%EOF"));
     // PDF body must be meaningful — not a header-only artifact.

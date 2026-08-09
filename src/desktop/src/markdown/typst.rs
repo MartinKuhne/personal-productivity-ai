@@ -171,11 +171,8 @@ fn translate_event_stream(
 /// nested definitions work). Each body is translated to Typst
 /// using a fresh state, and stored in the map for the second
 /// pass to emit at reference sites.
-fn collect_footnote_bodies(
-    events: &[Event<'static>],
-) -> std::collections::HashMap<String, String> {
-    let mut bodies: std::collections::HashMap<String, String> =
-        std::collections::HashMap::new();
+fn collect_footnote_bodies(events: &[Event<'static>]) -> std::collections::HashMap<String, String> {
+    let mut bodies: std::collections::HashMap<String, String> = std::collections::HashMap::new();
     let mut i = 0;
     while i < events.len() {
         if let Event::Start(Tag::FootnoteDefinition(label)) = &events[i] {

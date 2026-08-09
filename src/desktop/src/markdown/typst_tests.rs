@@ -770,7 +770,8 @@ fn inline_math_emits_typst_inline_math() {
 /// required by Typst's display-mode syntax.
 #[test]
 fn display_math_emits_typst_display_math() {
-    let out = render_markdown_to_typst("The quadratic:\n\n$$x = (-b +- sqrt(b^2 - 4 a c)) / (2 a)$$\n");
+    let out =
+        render_markdown_to_typst("The quadratic:\n\n$$x = (-b +- sqrt(b^2 - 4 a c)) / (2 a)$$\n");
     assert!(
         out.contains("$ x = (-b +- sqrt(b^2 - 4 a c)) / (2 a)$"),
         "expected display math `$ x = ...$` in output, got: {out}"
