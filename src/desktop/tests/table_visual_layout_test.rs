@@ -16,9 +16,9 @@ const LAPTOP_TABLE_MARKDOWN: &str = r#"
 
 | Make | Model and Model Number | Market Price (Original) | Display | Processor | PassMark Single / Multi |
 | --- | --- | --- | --- | --- | --- |
-| Dell | XPS 15 9530 | 2499 USD | OLED 3.5K Touch Screen | Intel Core i9-13900H 14-Core | 3800 / 28500 |
-| Lenovo | ThinkPad P1 Gen 6 | 2850 USD | WQXGA 165Hz IPS | Intel Core i7-13800H | 3700 / 26000 |
-| Apple | MacBook Pro 16 | 3499 USD | Liquid Retina XDR | Apple M3 Max 16-Core CPU | 4800 / 31000 |
+| BrandA | Model X 15 9530 | 2499 USD | OLED 3.5K Touch Screen | Example i9-13900 Series | 3800 / 28500 |
+| BrandB | Model P1 Gen 6 | 2850 USD | WQXGA 165Hz IPS | Example i7-13800 Series | 3700 / 26000 |
+| BrandC | ProBook 16 | 3499 USD | Liquid Retina XDR | Example M3 Max Series | 4800 / 31000 |
 
 "#;
 
@@ -247,17 +247,17 @@ fn test_table_row_top_alignment_across_shapes() {
     const FORMATTED_TABLE_MARKDOWN: &str = r#"
 | Make | Description |
 | --- | --- |
-| [Dell](https://dell.com) | **Dell XPS 16** featuring `Intel Core Ultra 7` with a *gorgeous* 3.2K OLED display and long battery life. This text wraps across multiple lines in the cell. |
+| [ExampleBrand](https://www.example.com) | **Example Laptop 16** featuring `Example Processor` with a *gorgeous* 3.2K OLED display and long battery life. This text wraps across multiple lines in the cell. |
 "#;
     const WIDE_TABLE_MARKDOWN: &str = r#"
 | Col 1 | Col 2 | Col 3 | Col 4 | Col 5 | Col 6 | Summary |
 | --- | --- | --- | --- | --- | --- | --- |
-| Dell | XPS 15 | $2499 | OLED | Intel i9 | 3800 | Premium build with a very long summary description that wraps onto 5 lines when rendered in the table cell. |
+| BrandA | Model X 15 | $2499 | OLED | Example i9 | 3800 | Premium build with a very long summary description that wraps onto 5 lines when rendered in the table cell. |
 "#;
     const LAPTOP_STYLE_MARKDOWN: &str = r#"
 | Make | Model | Price | Display | CPU | Score | Summary |
 | --- | --- | --- | --- | --- | --- | --- |
-| Dell | XPS 15 9570 | $1500 | 15.6" OLED | i5-8300H | 2271 | Premium build quality with an excellent 4K OLED display option, Thunderbolt 3, and solid aluminum chassis. Now aging with 8th gen Intel CPU. |
+| BrandA | Model X 15 9570 | $1500 | 15.6" OLED | i5-8300H | 2271 | Premium build quality with an excellent 4K OLED display option, Thunderbolt 3, and solid aluminum chassis. Now aging with 8th gen Intel CPU. |
 "#;
 
     struct Case {
@@ -269,11 +269,11 @@ fn test_table_row_top_alignment_across_shapes() {
     }
     let cases: &[Case] = &[
         Case {
-            label: "plain multi-column (Dell vs XPS 15)",
+            label: "plain multi-column (BrandA vs Model X 15)",
             markdown: LAPTOP_TABLE_MARKDOWN,
             viewport: 2000.0,
-            short_needle: "Dell",
-            tall_needle: "XPS",
+            short_needle: "BrandA",
+            tall_needle: "Model X 15",
         },
         Case {
             label: "narrow two-column (Short vs long paragraph)",
@@ -283,24 +283,24 @@ fn test_table_row_top_alignment_across_shapes() {
             tall_needle: "This is a very long paragraph",
         },
         Case {
-            label: "link + formatted text (Dell link vs Dell XPS 16)",
+            label: "link + formatted text (ExampleBrand link vs Example Laptop 16)",
             markdown: FORMATTED_TABLE_MARKDOWN,
             viewport: 400.0,
-            short_needle: "Dell",
-            tall_needle: "Dell XPS 16",
+            short_needle: "ExampleBrand",
+            tall_needle: "Example Laptop 16",
         },
         Case {
-            label: "§3.6 horizontal-scroll fallback (Dell vs Premium build)",
+            label: "§3.6 horizontal-scroll fallback (BrandA vs Premium build)",
             markdown: WIDE_TABLE_MARKDOWN,
             viewport: 600.0,
-            short_needle: "Dell",
+            short_needle: "BrandA",
             tall_needle: "Premium build",
         },
         Case {
-            label: "7-column laptop spec (Dell vs Premium build)",
+            label: "7-column laptop spec (BrandA vs Premium build)",
             markdown: LAPTOP_STYLE_MARKDOWN,
             viewport: 1000.0,
-            short_needle: "Dell",
+            short_needle: "BrandA",
             tall_needle: "Premium build",
         },
     ];
@@ -528,9 +528,9 @@ fn test_integration_table_column_gutter_is_configured_value() {
 fn test_problematic_table() {
     let md = r#"| Retailer | Price | Link |
 |----------|-------|------|
-| Amazon | ~$200–$250 (on sale ~$180–$200) | [Amazon](https://www.amazon.com/LG-32GN650-B-Ultragear-Reduction-FreeSync/dp/B08LLF9NS1) |
-| Best Buy | ~$200–$250 | [Best Buy](https://www.bestbuy.com/product/lg-ultragear-32-led-qhd-5-ms-amd-freesync-premium-with-hdr-10-displayport-hdmi-black/JJ8VPZS3LS) |
-| Costco | Check membership deals | [Costco](https://www.costco.com/p/-/lg-ultragear-32-class-qhd-gaming-monitor/100793191) |"#;
+| ExampleShop | ~$200–$250 (on sale ~$180–$200) | [ExampleShop](https://www.example.com/products/monitor/abc123) |
+| TestStore | ~$200–$250 | [TestStore](https://www.example.com/product/test-monitor-32-xyz) |
+| SampleClub | Check membership deals | [SampleClub](https://www.example.com/p/test-monitor/456789) |"#;
     let events = fastmd::markdown::parser::parse_markdown_to_events(md);
     println!("Parsed events: {:#?}", events);
     let out = render_table_markdown_to_shapes(md, 500.0);
@@ -541,7 +541,7 @@ fn test_problematic_table() {
 fn test_wide_table_fuzz_widths() {
     let md = r#"| Make | Model and Model Number | Market Price | Display | Processor | PassMark Single / Multi | Summary |
 |------|----------------------|-------------|---------|-----------|------------------------|---------|
-| Acer | Swift 16 AI (SF16-71T) | $1,249-$1,799 | 16" 3K (2880x1800) 120Hz OLED Touch | Intel Core Ultra 7 256V (8C/8T Lunar Lake) | ~4,031 / ~19,000 | Excellent value. Vibrant OLED display, exceptional battery life for a 16" laptop, lightweight at ~3.3 lbs. Two Thunderbolt 4 ports. Praised by ZDNet, PCMag, and Notebookcheck. Great everyday performance and portability. |"#;
+| BrandD | Model 16 AI (Example-71T) | $1,249-$1,799 | 16" 3K (2880x1800) 120Hz OLED Touch | Example Core Ultra 7 256V (8C/8T Example Lake) | ~4,031 / ~19,000 | Excellent value. Vibrant OLED display, exceptional battery life for a 16" laptop, lightweight at ~3.3 lbs. Two Thunderbolt 4 ports. Praised by ExampleReview, ExampleMag, and ExampleCheck. Great everyday performance and portability. |"#;
 
     // Test the table rendering at all widths from 400 to 3000 in 10px increments
     for width in (400..=3000).step_by(10) {
@@ -555,9 +555,12 @@ fn test_wide_table_fuzz_widths() {
 
         // Basic correctness: extract text positions to ensure all cells rendered
         let text_positions = collect_text_positions(&out.shapes);
-        let has_acer = text_positions.iter().any(|(txt, _)| txt.contains("Acer"));
+        let has_brandd = text_positions.iter().any(|(txt, _)| txt.contains("BrandD"));
 
-        assert!(has_acer, "Table dropped content 'Acer' at width {width}");
+        assert!(
+            has_brandd,
+            "Table dropped content 'BrandD' at width {width}"
+        );
 
         // At wider widths, horizontal scrolling doesn't cull the rightmost columns
         if width > 1500 {
