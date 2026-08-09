@@ -501,29 +501,17 @@ fn test_parse_markdown_rule_and_blockquote() {
 }
 
 #[test]
-fn test_format_delegate_tool_call_message_uses_html() {
+fn test_format_delegate_tool_call_message_uses_double_angle() {
     let msg = crate::agent::response_formatter::format_delegate_tool_call_message(
         "web_fetch",
         r#"{"url":"https://example.com"}"#,
     );
-    assert!(msg.contains("<span>"), "Expected HTML span, got: {msg}");
-    assert!(msg.contains("</span>"), "Expected closing span, got: {msg}");
+    assert!(msg.starts_with(">> "), "Expected >> prefix, got: {msg}");
     assert!(
-        !msg.starts_with("> "),
-        "Should not start with blockquote marker"
+        msg.contains("**Executing tool `web_fetch`**"),
+        "Expected tool name"
     );
-    // After parsing, the HTML span should produce InlineElem::Html
-    let events = parse_markdown_to_events(&msg);
-    let has_html = events.iter().any(|e| match e {
-        RenderEvent::FlushInline { elems, .. } => {
-            elems.iter().any(|elem| matches!(elem, InlineElem::Html(_)))
-        }
-        _ => false,
-    });
-    assert!(
-        has_html,
-        "Expected Html inline element from delegate message"
-    );
+    assert!(!msg.contains("<span>"), "Should not contain HTML");
 }
 
 #[test]

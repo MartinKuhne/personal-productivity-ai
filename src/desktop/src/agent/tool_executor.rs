@@ -62,8 +62,8 @@ impl ToolExecutor {
                 unsafe_calls.push(tc.clone());
             }
         }
-        let mut results = self.execute_parallel(&safe_calls, tx_gui);
-        results.extend(self.execute_sequential(&unsafe_calls, tx_gui));
+        let mut results = self.execute_parallel(&safe_calls);
+        results.extend(self.execute_sequential(&unsafe_calls));
         self.notify_file_creations(&results, tx_gui);
         results
     }
@@ -81,7 +81,6 @@ impl ToolExecutor {
     fn execute_parallel(
         &self,
         calls: &[serde_json::Value],
-        tx_gui: &Sender<BackgroundEvent>,
     ) -> Vec<(String, String, String, String)> {
         let rt = match tokio::runtime::Builder::new_multi_thread()
             .enable_all()
@@ -108,7 +107,6 @@ impl ToolExecutor {
                 let pdf = pdf_backing.clone();
                 let tm = self.tool_manager.clone();
                 let uuid_gen = self.uuid_gen.clone();
-                let tx = tx_gui.clone();
                 join_set.spawn_blocking(move || {
                     let ctx = ToolContext::new(
                         &cfg,
@@ -118,7 +116,6 @@ impl ToolExecutor {
                         crate::agent::tools::manager::cache::cache(),
                         tm,
                         uuid_gen,
-                        Some(tx),
                     );
                     let result = execute_tool(&ctx, &func_name, &func_args);
                     (call_id, func_name, func_args, result)
@@ -136,7 +133,6 @@ impl ToolExecutor {
     fn execute_sequential(
         &self,
         calls: &[serde_json::Value],
-        tx_gui: &Sender<BackgroundEvent>,
     ) -> Vec<(String, String, String, String)> {
         let mut results = Vec::new();
         for tc in calls {
@@ -154,7 +150,6 @@ impl ToolExecutor {
                 crate::agent::tools::manager::cache::cache(),
                 tm,
                 self.uuid_gen.clone(),
-                Some(tx_gui.clone()),
             );
             let result = execute_tool(&ctx, &func_name, &func_args);
             results.push((call_id, func_name, func_args, result));

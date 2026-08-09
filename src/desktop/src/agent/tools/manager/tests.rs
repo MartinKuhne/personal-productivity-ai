@@ -28,7 +28,6 @@ fn test_ctx(config: &AppConfig) -> ToolContext<'static> {
         crate::agent::tools::manager::cache::cache(),
         Arc::new(std::sync::RwLock::new(ToolManager::new())),
         Arc::new(crate::utils::uuid::SystemUuidGenerator),
-        None,
     )
 }
 

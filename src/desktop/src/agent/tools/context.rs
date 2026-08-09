@@ -4,10 +4,8 @@ use crate::app::session::BrowserSession;
 use crate::app::vfs;
 use crate::bus::core::Bus;
 use crate::bus::events::file::{FileEvent, FileEventKind, FileEventProducer};
-use crate::bus::events::typed::BackgroundEvent;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
-use std::sync::mpsc::Sender;
 
 /// Read-only VFS path resolver wrapping `AppConfig`.
 #[derive(Clone, Copy)]
@@ -89,16 +87,10 @@ pub struct ToolContext<'a> {
     pub cache: &'a crate::agent::tools::manager::cache::ToolCache,
     pub tool_manager: std::sync::Arc<std::sync::RwLock<crate::agent::tools::manager::ToolManager>>,
     pub uuid_gen: std::sync::Arc<dyn crate::utils::uuid::UuidGenerator>,
-    /// Optional GUI event channel — when present, tools may emit
-    /// status updates and tool-call traces to the response window
-    /// (e.g. the `web_delegate` sub-agent). `None` in tests that
-    /// don't wire up the UI bus.
-    pub tx_gui: Option<Sender<BackgroundEvent>>,
 }
 
 impl<'a> ToolContext<'a> {
     /// Create a new `ToolContext`.
-    #[allow(clippy::too_many_arguments)]
     pub fn new(
         config: &'a crate::config::AppConfig,
         file_event_bus: &'a Bus<FileEvent>,
@@ -107,7 +99,6 @@ impl<'a> ToolContext<'a> {
         cache: &'a crate::agent::tools::manager::cache::ToolCache,
         tool_manager: std::sync::Arc<std::sync::RwLock<crate::agent::tools::manager::ToolManager>>,
         uuid_gen: std::sync::Arc<dyn crate::utils::uuid::UuidGenerator>,
-        tx_gui: Option<Sender<BackgroundEvent>>,
     ) -> Self {
         Self {
             config,
@@ -119,7 +110,6 @@ impl<'a> ToolContext<'a> {
             cache,
             tool_manager,
             uuid_gen,
-            tx_gui,
         }
     }
 

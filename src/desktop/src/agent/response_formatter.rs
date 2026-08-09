@@ -37,29 +37,20 @@ pub fn format_tool_call_message(func_name: &str, func_args_str: &str) -> String 
     format!("> **Executing tool `{}`**\n{}\n", func_name, quoted)
 }
 
-/// Like [`format_tool_call_message`] but produces HTML `<span>` blocks
-/// instead of markdown blockquotes. The HTML path renders as muted gray
-/// text via [`InlineElem::Html`], visually distinguishing delegate
-/// sub-agent tool calls from the parent agent's own.
+/// Like [`format_tool_call_message`], but uses `>>` as a prefix to
+/// visually distinguish delegate sub-agent tool calls from the parent
+/// agent's own tool calls in the response window.
 pub fn format_delegate_tool_call_message(func_name: &str, func_args_str: &str) -> String {
-    if func_name == "create_note" {
-        let mut msg = format!("<span>**Executing tool `{}`**", func_name);
-        if let Ok(args_val) = serde_json::from_str::<serde_json::Value>(func_args_str)
-            && let Some(path) = args_val.get("path").and_then(|p| p.as_str())
-        {
-            msg.push_str(&format!(" — Path: `{}`", path));
-        }
-        msg.push_str("</span>\n");
-        return msg;
-    }
     let formatted_args = match serde_json::from_str::<serde_json::Value>(func_args_str) {
         Ok(val) => serde_json::to_string_pretty(&val).unwrap_or_else(|_| func_args_str.to_string()),
         Err(_) => func_args_str.to_string(),
     };
-    format!(
-        "<span>**Executing tool `{}`**\n{}\n</span>\n",
-        func_name, formatted_args
-    )
+    let quoted = formatted_args
+        .lines()
+        .map(|line| format!(">> {}", line))
+        .collect::<Vec<_>>()
+        .join("\n");
+    format!(">> **Executing tool `{}`**\n{}\n", func_name, quoted)
 }
 
 fn count_from_data(data: &serde_json::Value, field: &str) -> usize {

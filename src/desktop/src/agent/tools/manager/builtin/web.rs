@@ -30,15 +30,12 @@ impl Tool for WebDelegateTool {
     fn execute(&self, ctx: &ToolContext, args: &str) -> Result<serde_json::Value, String> {
         let input: dtos::WebDelegateInput =
             serde_json::from_str(args).map_err(|e| format!("Invalid args: {}", e))?;
-        crate::agent::tools::web::tool_web_delegate(
-            ctx.config,
-            &input.instruction,
-            ctx.cache,
-            ctx.tx_gui.as_ref(),
+        crate::agent::tools::web::tool_web_delegate(ctx.config, &input.instruction, ctx.cache).map(
+            |r| {
+                serde_json::to_value(r)
+                    .unwrap_or_else(|e| serde_json::json!({"error": e.to_string()}))
+            },
         )
-        .map(|r| {
-            serde_json::to_value(r).unwrap_or_else(|e| serde_json::json!({"error": e.to_string()}))
-        })
     }
 }
 

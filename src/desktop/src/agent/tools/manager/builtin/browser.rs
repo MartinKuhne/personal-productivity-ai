@@ -436,7 +436,6 @@ mod tests {
             crate::agent::tools::manager::cache::cache(),
             tm,
             std::sync::Arc::new(crate::utils::uuid::SystemUuidGenerator),
-            None,
         )
     }
 

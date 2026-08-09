@@ -6,7 +6,6 @@ use crate::agent::datamark::{self, SECURITY_HEADER};
 use crate::agent::response_formatter::format_delegate_tool_call_message;
 use crate::agent::tools::manager::builtin::strings::WEB_FETCH_FINAL_PAGE_HINT;
 use crate::agent::tools::manager::cache::CacheEntry;
-use crate::bus::events::typed::{AgentEvent, BackgroundEvent};
 use crate::config::AppConfig;
 use fast_h2m::convert;
 use std::collections::HashMap;
@@ -333,7 +332,6 @@ pub fn tool_web_delegate(
     config: &AppConfig,
     instruction: &str,
     cache: &crate::agent::tools::manager::cache::ToolCache,
-    tx_gui: Option<&std::sync::mpsc::Sender<crate::bus::events::typed::BackgroundEvent>>,
 ) -> Result<crate::agent::tools::dtos::WebDelegateResponse, String> {
     let model_cfg = config.select_chat_model().map_err(|e| {
         tracing::warn!(name = "tool.web_delegate.missing_api_key", "{}", e);
@@ -476,11 +474,6 @@ pub fn tool_web_delegate(
                 let tool_call_msg = format_delegate_tool_call_message(func_name, func_args_str);
                 delegate_trace.push_str(&tool_call_msg);
                 delegate_trace.push_str("\n\n");
-                if let Some(tx) = tx_gui {
-                    let _ = tx.send(BackgroundEvent::from(AgentEvent::Response(
-                        delegate_trace.clone(),
-                    )));
-                }
 
                 let result = if func_name == "web_fetch" {
                     if let Ok(input) = serde_json::from_str::<
@@ -562,6 +555,7 @@ pub fn tool_web_delegate(
 
     Ok(crate::agent::tools::dtos::WebDelegateResponse {
         result: final_content,
+        tool_call_trace: delegate_trace,
     })
 }
 
