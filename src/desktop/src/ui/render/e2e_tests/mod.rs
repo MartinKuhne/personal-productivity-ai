@@ -40,6 +40,7 @@
 #![cfg(test)]
 
 mod commonmark_parser;
+mod commonmark_render;
 mod ftwa;
 mod helpers;
 mod interactions;
