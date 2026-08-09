@@ -182,12 +182,12 @@ fn test_render_table_with_empty_cells_e2e() {
 fn test_long_text_surfaces_wrap_within_viewport() {
     // YAML case: render_yaml_table with a long summary value.
     // The exact string the user reported in the screenshot.
-    let long_yaml_summary = "January 2005 invoice from Heise Zeitschriften Verlag for \
-        Microsoft half-year archive CD-ROMs, shipped tax-free to Martin Kühne at \
-        Microsoft in Redmond, WA, USA, for archive and product-evaluation purposes \
-        under Microsoft product license terms.";
+    let long_yaml_summary = "January 2005 invoice from Example Publishing GmbH for \
+        ExampleCorp half-year archive CD-ROMs, shipped tax-free to J. Doe at \
+        ExampleCorp in Springfield, IL, USA, for archive and product-evaluation purposes \
+        under ExampleCorp product license terms.";
     let yaml_str = format!(
-        "title: Heise Invoice for Microsoft Product — Tax-Free Export Delivery\n\
+        "title: Example Publishing Invoice for ExampleCorp Product — Tax-Free Export Delivery\n\
          summary: \"{long_yaml_summary}\"\n\
          tags: [invoice, receipt, technology, documents]\n\
          header-date: 2026-07-22T19:32:47Z\n"
@@ -209,7 +209,7 @@ fn test_long_text_surfaces_wrap_within_viewport() {
     let cases: Vec<WrapCase> = vec![
         (
             "YAML table long summary",
-            "Heise Zeitschriften Verlag",
+            "Example Publishing GmbH",
             Box::new(move |ui| {
                 render_yaml_table(ui, &yaml);
             }),
