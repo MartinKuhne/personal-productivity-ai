@@ -12,13 +12,13 @@ The requirements below have been formatted using the **Easy Approach to Requirem
 
 | Tool | Description |
 |---|---|
-| `grep` | Search for a specific pattern within Markdown files across all libraries. Returns at most 200 matching lines; when the result is truncated, the response directs the caller to refine the query with narrower terms or delegate to a sub-agent to analyse a specific file. |
+| `search_notes` | Search markdown-formatted notes for patterns across all libraries. Returns at most 200 matching lines; when truncated, directs caller to refine the query or delegate to a sub-agent. |
 | `read_tags` | Read all unique tags from markdown front-matter across all libraries. |
-| `list_files_by_tag` | List files that contain a specific tag in their front-matter. Paginated via `offset`/`limit` (0-indexed; default `offset=0`, `limit=100`); the response carries `total` and an optional `hint`. |
-| `list_files` | List markdown files in a directory (non-recursive). With "/" or "." returns library names. Paginated via `offset`/`limit` (0-indexed; default `offset=0`, `limit=100`); the response carries `total` and an optional `hint`. |
-| `read_file` | Read the entire text contents of a file. |
-| `read_lines` | Read a contiguous slice of lines from a file. Paginated via `offset`/`limit` (0-indexed; default `offset=0`, `limit=100`). An `offset` past the end of the file returns an empty `content`; a `limit` that would overflow is clamped to the remainder. |
-| `create_file` | Create a new markdown file with the specified content. Fails if the file already exists — this tool can only create new files. |
+| `list_notes_by_tag` | List notes that contain a specific tag in their front-matter. Paginated via `offset`/`limit` (0-indexed; default `offset=0`, `limit=100`); the response carries `total` and an optional `hint`. |
+| `list_notes` | List markdown-formatted notes in a directory (non-recursive). With "/" or "." returns library names. Paginated via `offset`/`limit` (0-indexed; default `offset=0`, `limit=100`); the response carries `total` and an optional `hint`. |
+| `read_note` | Read the entire text contents of a note. |
+| `read_lines` | Read a contiguous slice of lines from a note. Paginated via `offset`/`limit` (0-indexed; default `offset=0`, `limit=100`). |
+| `create_note` | Create a new markdown-formatted note with the specified content. Fails if the note already exists. |
 | `insert_lines` | Insert new lines of text into an existing file at a specific 0-indexed `offset` (default-constructed; required input). `offset=0` inserts at the top; `offset=lines.len()` appends to the end. |
 | `replace_text` | Replace exact occurrences of old_string with new_string in a file. |
 | `web_fetch` | Fetch content from a URL and convert HTML to Markdown. Cursor-based pagination: returns up to 100 lines and a `cursor` token; pass the `cursor` back unchanged to get the next page. The full content is cached for 30 minutes in the shared `ToolCache`; pass `force_refetch=true` to bypass. |
@@ -84,9 +84,9 @@ The requirements below have been formatted using the **Easy Approach to Requirem
 
 ### Grep Tool
 
-* [TOOL-011] The `grep` tool SHALL return at most 100 matching lines in a single response, capped across all configured content libraries.
-* [TOOL-012] When the `grep` result is truncated by the 100-line cap, the response SHALL indicate the truncation and SHALL instruct the caller to refine the query with narrower terms or delegate to a sub-agent to analyse a specific file.
-* [TOOL-013] The `grep` tool SHALL only search Markdown files with a `.md` extension within configured content libraries, and SHALL NOT return matches outside a library's root folder.
+* [TOOL-011] The search_notes tool SHALL return at most 100 matching lines in a single response, capped across all configured content libraries.
+* [TOOL-012] When the search_notes result is truncated by the 100-line cap, the response SHALL indicate the truncation and SHALL instruct the caller to refine the query with narrower terms or delegate to a sub-agent to analyse a specific file.
+* [TOOL-013] The search_notes tool SHALL only search Markdown files with a `.md` extension within configured content libraries, and SHALL NOT return matches outside a library's root folder.
 
 ### Tool Manager
 
@@ -118,7 +118,7 @@ The cursor-paginated tools (`search_email`, `web_fetch`) use a stateful cursor m
 
 ### Filesystem Line Tools
 
-The `read_lines` and `insert_lines` tools operate on contiguous line ranges inside a file. Both use 0-indexed offsets for vocabulary consistency with the list-paginated tools (`list_files`, `list_files_by_tag`).
+The `read_lines` and `insert_lines` tools operate on contiguous line ranges inside a file. Both use 0-indexed offsets for vocabulary consistency with the list-paginated tools (`list_notes`, `list_notes_by_tag`).
 
 * [TOOL-036] The `read_lines` tool SHALL accept `offset: Option<usize>` (0-indexed; default 0) and `limit: Option<usize>` (default 100) input parameters. The response SHALL contain the requested slice of lines joined with newlines. An `offset` past the end of the file SHALL return an empty `content`; a `limit` that would overflow the file's line count SHALL be clamped to the remainder. The tool SHALL NOT expose a `start_line` or `end_line` parameter, and SHALL NOT be exposed to the LLM under any other name (e.g. `read_file_lines`).
 * [TOOL-037] The `insert_lines` tool SHALL accept a required `offset: usize` (0-indexed) input parameter. `offset=0` SHALL insert at the top of the file; `offset=lines.len()` SHALL append to the end. `offset > lines.len()` SHALL return the error `"Offset out of range."`. The tool SHALL NOT expose a `line_index` parameter.

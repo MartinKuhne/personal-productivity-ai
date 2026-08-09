@@ -1,7 +1,7 @@
 //! Paginator helper for tool results.
 
-/// Default `limit` for `list_files` and `list_files_by_tag`.
-pub const DEFAULT_LIST_FILES_BY_TAG_LIMIT: usize = 100;
+/// Default `limit` for `list_notes` and `list_notes_by_tag`.
+pub const DEFAULT_LIST_NOTES_BY_TAG_LIMIT: usize = 100;
 
 /// Slice `items` by the 0-indexed `offset` and `limit`. Returns the
 /// slice and a human-readable hint (set when the result is empty

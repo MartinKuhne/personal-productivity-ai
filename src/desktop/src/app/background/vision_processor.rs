@@ -135,7 +135,7 @@ pub async fn process_image<'a>(
                 // Tell the rest of the app the new `.md` exists so the
                 // directory tree, tag manager, and render tab pick it
                 // up without waiting for the notify watcher to fire.
-                // Same pattern as `tool_create_file` and `editor.save`.
+                // Same pattern as `tool_create_note` and `editor.save`.
                 producer.publish_discovered(&job.md_path);
 
                 let _ = tx.send(

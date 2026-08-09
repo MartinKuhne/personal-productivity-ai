@@ -54,18 +54,18 @@ pub const WEB_FETCH_FINAL_PAGE_HINT: &str = "Final page.";
 pub const REPLACE_TEXT_DESCRIPTION: &str =
     "Replace exact occurrences of target text with replacement text in a file.";
 
-// --- grep ---
+// --- search_notes ---
 
-pub const GREP_DESCRIPTION: &str = "Search Markdown files for text. The tool returns up to 200 matching lines. If the tool truncates results, refine your query or use a sub-agent.";
+pub const SEARCH_NOTES_DESCRIPTION: &str = "Search markdown-formatted notes for text. The tool returns up to 200 matching lines. If the tool truncates results, refine your query or use a sub-agent.";
 
-pub const FIELD_GREP_INPUT_QUERY: &str = "Specify the search term.";
+pub const FIELD_SEARCH_NOTES_INPUT_QUERY: &str = "Specify the search term.";
 
-pub const FIELD_GREP_RESPONSE_MATCHES: &str = "Contains matching lines up to 200 results. Returns `\"No matches found.\"` when no matches exist.";
+pub const FIELD_SEARCH_NOTES_RESPONSE_MATCHES: &str = "Contains matching lines up to 200 results. Returns `\"No matches found.\"` when no matches exist.";
 
-pub const FIELD_GREP_RESPONSE_TOTAL: &str =
+pub const FIELD_SEARCH_NOTES_RESPONSE_TOTAL: &str =
     "Total number of matching lines found across all libraries.";
 
-pub const FIELD_GREP_RESPONSE_TRUNCATED: &str =
+pub const FIELD_SEARCH_NOTES_RESPONSE_TRUNCATED: &str =
     "Set to `true` when total matches exceed 200 lines.";
 
 // --- read_tags ---
@@ -73,31 +73,31 @@ pub const FIELD_GREP_RESPONSE_TRUNCATED: &str =
 pub const READ_TAGS_DESCRIPTION: &str =
     "Get all unique tags from front-matter headers in workspace Markdown files.";
 
-// --- list_files_by_tag ---
+// --- list_notes_by_tag ---
 
-pub const LIST_FILES_BY_TAG_DESCRIPTION: &str = "Return a paginated list of Markdown files that contain a tag in their front-matter. Default parameters: `offset=0`, `limit=100`.";
+pub const LIST_NOTES_BY_TAG_DESCRIPTION: &str = "Return a paginated list of markdown-formatted notes that contain a tag in their front-matter. Default parameters: `offset=0`, `limit=100`.";
 
-pub const FIELD_LIST_FILES_BY_TAG_RESPONSE_FILES: &str =
+pub const FIELD_LIST_NOTES_BY_TAG_RESPONSE_FILES: &str =
     "JSON array of virtual file paths for the requested page slice.";
 
-// --- list_files ---
+// --- list_notes ---
 
-pub const LIST_FILES_DESCRIPTION: &str = "Return a paginated list of Markdown files in a directory. Use path `/` or `.` to list content libraries. Default parameters: `offset=0`, `limit=100`.";
+pub const LIST_NOTES_DESCRIPTION: &str = "Return a paginated list of markdown-formatted notes in a directory. Use path `/` or `.` to list content libraries. Default parameters: `offset=0`, `limit=100`.";
 
-pub const FIELD_LIST_FILES_RESPONSE_FILES: &str =
+pub const FIELD_LIST_NOTES_RESPONSE_FILES: &str =
     "JSON array of virtual file paths for the requested page slice.";
 
-// --- read_file ---
+// --- read_note ---
 
-pub const READ_FILE_DESCRIPTION: &str = "Read the full text of a file at a path. Use `read_yaml_header` if you only need a document summary.";
+pub const READ_NOTE_DESCRIPTION: &str = "Read the full text of a markdown-formatted note at a path. Use `read_yaml_header` if you only need a document summary.";
 
 // --- read_lines ---
 
-pub const READ_LINES_DESCRIPTION: &str = "Read a contiguous slice of lines from a file. `offset` is 0-indexed (`0` is the first line); `limit` is the maximum number of lines to return. An `offset` past the end of the file returns an empty `content`. A `limit` that would overflow the file's line count is clamped to the remainder. Default parameters: `offset=0`, `limit=100`. Pairs with `read_file` when you need the whole file.";
+pub const READ_LINES_DESCRIPTION: &str = "Read a contiguous slice of lines from a file. `offset` is 0-indexed (`0` is the first line); `limit` is the maximum number of lines to return. An `offset` past the end of the file returns an empty `content`. A `limit` that would overflow the file's line count is clamped to the remainder. Default parameters: `offset=0`, `limit=100`. Pairs with `read_note` when you need the whole note.";
 
-// --- create_file ---
+// --- create_note ---
 
-pub const CREATE_FILE_DESCRIPTION: &str = "Create a new file at the specified path with provided content. Fails if the file already exists â€” this tool can only create new files.";
+pub const CREATE_NOTE_DESCRIPTION: &str = "Create a new file at the specified path with provided content. Fails if the file already exists â€” this tool can only create new files.";
 
 // --- insert_lines ---
 

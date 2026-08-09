@@ -99,7 +99,7 @@ pub fn library_display_label(libraries: &[ContentLibrary], path: &Path) -> Optio
 ///
 /// Outputs:
 /// - `Ok(None)` when `vpath` is the virtual root (`/`, `.`, or empty
-///   after stripping). Used by `list_files` to mean "enumerate the
+///   after stripping). Used by `list_notes` to mean "enumerate the
 ///   libraries".
 /// - `Ok(Some((path, readonly)))` when the path resolves; `path` is the
 ///   absolute filesystem path and `readonly` is the library's write flag.

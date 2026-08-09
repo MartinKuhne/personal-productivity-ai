@@ -67,7 +67,7 @@ impl Trust {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Provenance {
     /// Result from a tool call. `name` is the LLM-facing tool name
-    /// (e.g. `web_fetch`, `read_file`, `mcp:notion/list_pages`).
+    /// (e.g. `web_fetch`, `read_note`, `mcp:notion/list_pages`).
     Tool(String),
     /// Body of a `USER.md` file at a content library root.
     /// `library` is the library name (e.g. `Notes`).
@@ -141,7 +141,7 @@ pub fn wrap(provenance: &Provenance, content: &str) -> String {
 }
 
 /// Convenience: wrap a tool result. The `tool_name` is the LLM-facing
-/// tool name (e.g. `web_fetch`, `read_file`, `mcp:notion/list_pages`).
+/// tool name (e.g. `web_fetch`, `read_note`, `mcp:notion/list_pages`).
 pub fn wrap_tool_result(tool_name: &str, content: &str) -> String {
     wrap(&Provenance::Tool(tool_name.to_string()), content)
 }
@@ -174,7 +174,7 @@ mod tests {
     #[test]
     fn test_wrap_tool_result_preserves_multiline_content() {
         let content = "line1\nline2\nline3\n";
-        let out = wrap_tool_result("read_file", content);
+        let out = wrap_tool_result("read_note", content);
         assert!(out.contains("line1\nline2\nline3"));
     }
 
@@ -182,7 +182,7 @@ mod tests {
     fn test_wrap_tool_result_adds_trailing_newline() {
         // Content without trailing newline must still have the
         // closing marker on its own line.
-        let out = wrap_tool_result("grep", "no-newline");
+        let out = wrap_tool_result("search_notes", "no-newline");
         let end_with_newline = out.ends_with(&format!("\n{EXTERNAL_DATA_END}"));
         assert!(
             end_with_newline,
@@ -194,7 +194,7 @@ mod tests {
     #[test]
     fn test_wrap_tool_result_does_not_double_newline() {
         // Content with trailing newline: don't add another.
-        let out = wrap_tool_result("read_file", "trailing\n");
+        let out = wrap_tool_result("read_note", "trailing\n");
         // Exactly one newline before the closing marker.
         let needle = format!("\n{EXTERNAL_DATA_END}");
         let count = out.matches(&needle).count();
@@ -218,7 +218,7 @@ mod tests {
     fn test_wrap_envelope_contains_markers_around_content() {
         // The content must sit *between* the markers, never overlap.
         let content = "sensitive data";
-        let out = wrap_tool_result("read_file", content);
+        let out = wrap_tool_result("read_note", content);
         let start_idx = out.find(EXTERNAL_DATA_START).expect("start marker");
         let end_idx = out.find(EXTERNAL_DATA_END).expect("end marker");
         let content_idx = out.find(content).expect("content");

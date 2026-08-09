@@ -163,7 +163,7 @@ impl ToolExecutor {
         tx_gui: &Sender<BackgroundEvent>,
     ) {
         for (_call_id, func_name, func_args_str, result) in results {
-            if func_name != "create_file" {
+            if func_name != "create_note" {
                 continue;
             }
             if let Ok(parsed) = serde_json::from_str::<serde_json::Value>(result) {
@@ -236,9 +236,9 @@ mod tests {
         // The registry doesn't exist anymore as a global, but the manager
         // exposes a single `safety_of(name)` lookup that returns
         // Safety::ReadOnly / Safety::Mutating.
-        assert_eq!(tm.safety_of("read_file"), Safety::ReadOnly);
-        assert_eq!(tm.safety_of("grep"), Safety::ReadOnly);
-        assert_eq!(tm.safety_of("create_file"), Safety::Mutating);
+        assert_eq!(tm.safety_of("read_note"), Safety::ReadOnly);
+        assert_eq!(tm.safety_of("search_notes"), Safety::ReadOnly);
+        assert_eq!(tm.safety_of("create_note"), Safety::Mutating);
         // Unknown tools fall back to Mutating (the conservative choice).
         assert_eq!(tm.safety_of("nonexistent"), Safety::Mutating);
     }

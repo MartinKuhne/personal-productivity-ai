@@ -1,4 +1,4 @@
-//! Filesystem agent tools — grep/search, read file, list files by tag, create/update/delete files, and directory listing.
+//! Filesystem agent tools — search notes, read note, list notes by tag, create/update/delete notes, and directory listing.
 //!
 //! Unit tests live in the sibling `filesystem_tests.rs` sidecar.
 
@@ -8,17 +8,17 @@ use crate::utils::tags::extract_tags_from_file;
 use std::path::Path;
 use walkdir::WalkDir;
 
-/// Default maximum number of match lines the `grep` tool returns in
+/// Default maximum number of match lines the `search_notes` tool returns in
 /// a single response. Kept here (rather than inlined at the call site)
 /// so the constant has one canonical home and tests can reference it.
-pub const DEFAULT_GREP_MAX_RESULTS: usize = 200;
+pub const DEFAULT_SEARCH_NOTES_MAX_RESULTS: usize = 200;
 
 /// Grep a single content library for a query string, case-insensitively.
 /// Returns every matching line as `virtual/path:line - content`, scoped
 /// strictly to Markdown (`.md`) files under `root_path`. The caller
 /// (the tool registry) is responsible for applying the result cap
 /// across libraries, so this function returns all matches unfiltered.
-pub fn tool_grep(
+pub fn tool_search_notes(
     root_path: &Path,
     virtual_prefix: &str,
     query: &str,
@@ -71,7 +71,7 @@ pub fn tool_read_tags(
 /// (`registry.rs`) is responsible for slicing the combined
 /// cross-library result, so the page and total fields stay consistent
 /// regardless of how many libraries the user has configured.
-pub fn tool_list_files_by_tag(
+pub fn tool_list_notes_by_tag(
     root_path: &Path,
     virtual_prefix: &str,
     tag: &str,
@@ -102,7 +102,7 @@ pub fn tool_list_files_by_tag(
 /// applied here — the call site (`registry.rs`) is responsible for
 /// slicing the result so the page and total fields stay consistent
 /// regardless of how the call is dispatched.
-pub fn tool_list_files(target_dir: &Path, virtual_prefix: &str) -> Result<Vec<String>, String> {
+pub fn tool_list_notes(target_dir: &Path, virtual_prefix: &str) -> Result<Vec<String>, String> {
     let mut files = Vec::new();
     if let Ok(entries) = std::fs::read_dir(target_dir) {
         for entry in entries.filter_map(|e| e.ok()) {
@@ -125,11 +125,11 @@ pub fn tool_list_files(target_dir: &Path, virtual_prefix: &str) -> Result<Vec<St
     Ok(files)
 }
 
-pub fn tool_read_file(
+pub fn tool_read_note(
     path_str: &str,
-) -> Result<crate::agent::tools::dtos::ReadFileResponse, String> {
+) -> Result<crate::agent::tools::dtos::ReadNoteResponse, String> {
     match crate::utils::read_text_file(Path::new(path_str)) {
-        Ok(content) => Ok(crate::agent::tools::dtos::ReadFileResponse { content }),
+        Ok(content) => Ok(crate::agent::tools::dtos::ReadNoteResponse { content }),
         Err(e) => Err(format!("Failed to read file: {}", e)),
     }
 }
@@ -162,11 +162,11 @@ pub fn tool_read_lines(
     }
 }
 
-pub fn tool_create_file(
+pub fn tool_create_note(
     path_str: &str,
     content: &str,
     producer: &FileEventProducer,
-) -> Result<crate::agent::tools::dtos::CreateFileResponse, String> {
+) -> Result<crate::agent::tools::dtos::CreateNoteResponse, String> {
     if !path_str.to_lowercase().ends_with(".md") {
         return Err("Only markdown files (.md) are allowed.".to_string());
     }
@@ -200,7 +200,7 @@ pub fn tool_create_file(
             // directory tree, tag manager, etc. can pick it up without
             // waiting for an OS-level notify event.
             producer.publish_discovered(path);
-            Ok(crate::agent::tools::dtos::CreateFileResponse {
+            Ok(crate::agent::tools::dtos::CreateNoteResponse {
                 result: "File created successfully.".to_string(),
                 size_bytes,
             })

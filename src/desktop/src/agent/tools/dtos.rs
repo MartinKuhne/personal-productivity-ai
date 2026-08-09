@@ -17,17 +17,17 @@ pub enum ToolResponse<T> {
 }
 
 #[derive(Deserialize, Debug, JsonSchema)]
-pub struct GrepInput {
-    #[schemars(description = strings::FIELD_GREP_INPUT_QUERY)]
+pub struct SearchNotesInput {
+    #[schemars(description = strings::FIELD_SEARCH_NOTES_INPUT_QUERY)]
     pub query: String,
 }
 #[derive(Serialize, Debug, JsonSchema)]
-pub struct GrepResponse {
-    #[schemars(description = strings::FIELD_GREP_RESPONSE_MATCHES)]
+pub struct SearchNotesResponse {
+    #[schemars(description = strings::FIELD_SEARCH_NOTES_RESPONSE_MATCHES)]
     pub matches: String,
-    #[schemars(description = strings::FIELD_GREP_RESPONSE_TOTAL)]
+    #[schemars(description = strings::FIELD_SEARCH_NOTES_RESPONSE_TOTAL)]
     pub total: usize,
-    #[schemars(description = strings::FIELD_GREP_RESPONSE_TRUNCATED)]
+    #[schemars(description = strings::FIELD_SEARCH_NOTES_RESPONSE_TRUNCATED)]
     pub truncated: bool,
 }
 
@@ -39,7 +39,7 @@ pub struct ReadTagsResponse {
 }
 
 #[derive(Deserialize, Debug, JsonSchema)]
-pub struct ListFilesByTagInput {
+pub struct ListNotesByTagInput {
     pub tag: String,
     #[schemars(description = strings::FIELD_OFFSET_DESCRIPTION)]
     pub offset: Option<usize>,
@@ -47,8 +47,8 @@ pub struct ListFilesByTagInput {
     pub limit: Option<usize>,
 }
 #[derive(Serialize, Debug, JsonSchema)]
-pub struct ListFilesByTagResponse {
-    #[schemars(description = strings::FIELD_LIST_FILES_BY_TAG_RESPONSE_FILES)]
+pub struct ListNotesByTagResponse {
+    #[schemars(description = strings::FIELD_LIST_NOTES_BY_TAG_RESPONSE_FILES)]
     #[serde(default)]
     pub files: Vec<String>,
     #[schemars(description = strings::FIELD_TOTAL_DESCRIPTION)]
@@ -59,7 +59,7 @@ pub struct ListFilesByTagResponse {
 }
 
 #[derive(Deserialize, Debug, JsonSchema)]
-pub struct ListFilesInput {
+pub struct ListNotesInput {
     pub path: String,
     #[schemars(description = strings::FIELD_OFFSET_DESCRIPTION)]
     pub offset: Option<usize>,
@@ -67,8 +67,8 @@ pub struct ListFilesInput {
     pub limit: Option<usize>,
 }
 #[derive(Serialize, Debug, JsonSchema)]
-pub struct ListFilesResponse {
-    #[schemars(description = strings::FIELD_LIST_FILES_RESPONSE_FILES)]
+pub struct ListNotesResponse {
+    #[schemars(description = strings::FIELD_LIST_NOTES_RESPONSE_FILES)]
     #[serde(default)]
     pub files: Vec<String>,
     #[schemars(description = strings::FIELD_TOTAL_DESCRIPTION)]
@@ -79,11 +79,11 @@ pub struct ListFilesResponse {
 }
 
 #[derive(Deserialize, Debug, JsonSchema)]
-pub struct ReadFileInput {
+pub struct ReadNoteInput {
     pub path: String,
 }
 #[derive(Serialize, Debug, JsonSchema)]
-pub struct ReadFileResponse {
+pub struct ReadNoteResponse {
     pub content: String,
 }
 
@@ -101,12 +101,12 @@ pub struct ReadLinesResponse {
 }
 
 #[derive(Deserialize, Debug, JsonSchema)]
-pub struct CreateFileInput {
+pub struct CreateNoteInput {
     pub path: String,
     pub content: String,
 }
 #[derive(Serialize, Debug, JsonSchema)]
-pub struct CreateFileResponse {
+pub struct CreateNoteResponse {
     pub result: String,
     pub size_bytes: u64,
 }

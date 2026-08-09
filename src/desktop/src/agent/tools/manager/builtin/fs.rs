@@ -56,19 +56,19 @@ impl Tool for ReplaceTextTool {
 }
 
 /// Tool that greps query strings case-insensitively across Markdown files.
-pub(crate) struct GrepTool;
-impl Tool for GrepTool {
+pub(crate) struct SearchNotesTool;
+impl Tool for SearchNotesTool {
     fn name(&self) -> &'static str {
-        "grep"
+        "search_notes"
     }
     fn description(&self) -> &'static str {
-        strings::GREP_DESCRIPTION
+        strings::SEARCH_NOTES_DESCRIPTION
     }
     fn input_type(&self) -> TypeId {
-        TypeId::of::<dtos::GrepInput>()
+        TypeId::of::<dtos::SearchNotesInput>()
     }
     fn parameters_schema(&self) -> serde_json::Value {
-        json_schema::<dtos::GrepInput>()
+        json_schema::<dtos::SearchNotesInput>()
     }
     fn is_enabled(&self, config: &AppConfig, _: &str) -> bool {
         config.tool_groups.filesystem
@@ -77,13 +77,13 @@ impl Tool for GrepTool {
         crate::agent::tools::Safety::ReadOnly
     }
     fn execute(&self, ctx: &ToolContext, args: &str) -> Result<serde_json::Value, String> {
-        let input: dtos::GrepInput =
+        let input: dtos::SearchNotesInput =
             serde_json::from_str(args).map_err(|e| format!("Invalid args: {}", e))?;
         let mut all_matches: Vec<String> = Vec::new();
         let mut libs: Vec<_> = ctx.config.content_libraries.iter().collect();
         libs.sort_by_key(|b| std::cmp::Reverse(b.priority));
         for lib in libs {
-            if let Ok(mut matches) = crate::agent::tools::filesystem::tool_grep(
+            if let Ok(mut matches) = crate::agent::tools::filesystem::tool_search_notes(
                 &lib.root_path(),
                 &lib.name,
                 &input.query,
@@ -92,7 +92,7 @@ impl Tool for GrepTool {
             }
         }
         let total = all_matches.len();
-        let limit = crate::agent::tools::filesystem::DEFAULT_GREP_MAX_RESULTS;
+        let limit = crate::agent::tools::filesystem::DEFAULT_SEARCH_NOTES_MAX_RESULTS;
         let truncated = total > limit;
         all_matches.truncate(limit);
         if truncated {
@@ -105,7 +105,7 @@ impl Tool for GrepTool {
         } else {
             all_matches.join("\n")
         };
-        Ok(serde_json::to_value(dtos::GrepResponse {
+        Ok(serde_json::to_value(dtos::SearchNotesResponse {
             matches,
             total,
             truncated,
@@ -154,19 +154,19 @@ impl Tool for ReadTagsTool {
 }
 
 /// Tool that lists Markdown files containing a specific front-matter tag.
-pub(crate) struct ListFilesByTagTool;
-impl Tool for ListFilesByTagTool {
+pub(crate) struct ListNotesByTagTool;
+impl Tool for ListNotesByTagTool {
     fn name(&self) -> &'static str {
-        "list_files_by_tag"
+        "list_notes_by_tag"
     }
     fn description(&self) -> &'static str {
-        strings::LIST_FILES_BY_TAG_DESCRIPTION
+        strings::LIST_NOTES_BY_TAG_DESCRIPTION
     }
     fn input_type(&self) -> TypeId {
-        TypeId::of::<dtos::ListFilesByTagInput>()
+        TypeId::of::<dtos::ListNotesByTagInput>()
     }
     fn parameters_schema(&self) -> serde_json::Value {
-        json_schema::<dtos::ListFilesByTagInput>()
+        json_schema::<dtos::ListNotesByTagInput>()
     }
     fn is_enabled(&self, config: &AppConfig, _: &str) -> bool {
         config.tool_groups.filesystem
@@ -175,15 +175,15 @@ impl Tool for ListFilesByTagTool {
         crate::agent::tools::Safety::ReadOnly
     }
     fn execute(&self, ctx: &ToolContext, args: &str) -> Result<serde_json::Value, String> {
-        let input: dtos::ListFilesByTagInput =
+        let input: dtos::ListNotesByTagInput =
             serde_json::from_str(args).map_err(|e| format!("Invalid args: {}", e))?;
         let offset = input.offset.unwrap_or(0);
         let limit = input
             .limit
-            .unwrap_or(super::super::pagination::DEFAULT_LIST_FILES_BY_TAG_LIMIT);
+            .unwrap_or(super::super::pagination::DEFAULT_LIST_NOTES_BY_TAG_LIMIT);
         let mut all_matches: Vec<String> = Vec::new();
         for lib in &ctx.config.content_libraries {
-            match crate::agent::tools::filesystem::tool_list_files_by_tag(
+            match crate::agent::tools::filesystem::tool_list_notes_by_tag(
                 &lib.root_path(),
                 &lib.name,
                 &input.tag,
@@ -199,7 +199,7 @@ impl Tool for ListFilesByTagTool {
         let total = all_matches.len();
         let (page_files, hint) =
             paginate_in_range(&all_matches, offset, limit, total, "tagged files");
-        Ok(serde_json::to_value(dtos::ListFilesByTagResponse {
+        Ok(serde_json::to_value(dtos::ListNotesByTagResponse {
             files: page_files,
             total,
             hint,
@@ -209,19 +209,19 @@ impl Tool for ListFilesByTagTool {
 }
 
 /// Tool that lists Markdown files in a directory.
-pub(crate) struct ListFilesTool;
-impl Tool for ListFilesTool {
+pub(crate) struct ListNotesTool;
+impl Tool for ListNotesTool {
     fn name(&self) -> &'static str {
-        "list_files"
+        "list_notes"
     }
     fn description(&self) -> &'static str {
-        strings::LIST_FILES_DESCRIPTION
+        strings::LIST_NOTES_DESCRIPTION
     }
     fn input_type(&self) -> TypeId {
-        TypeId::of::<dtos::ListFilesInput>()
+        TypeId::of::<dtos::ListNotesInput>()
     }
     fn parameters_schema(&self) -> serde_json::Value {
-        json_schema::<dtos::ListFilesInput>()
+        json_schema::<dtos::ListNotesInput>()
     }
     fn is_enabled(&self, config: &AppConfig, _: &str) -> bool {
         config.tool_groups.filesystem
@@ -230,15 +230,15 @@ impl Tool for ListFilesTool {
         crate::agent::tools::Safety::ReadOnly
     }
     fn execute(&self, ctx: &ToolContext, args: &str) -> Result<serde_json::Value, String> {
-        let input: dtos::ListFilesInput =
+        let input: dtos::ListNotesInput =
             serde_json::from_str(args).map_err(|e| format!("Invalid args: {}", e))?;
         let offset = input.offset.unwrap_or(0);
         let limit = input
             .limit
-            .unwrap_or(super::super::pagination::DEFAULT_LIST_FILES_BY_TAG_LIMIT);
+            .unwrap_or(super::super::pagination::DEFAULT_LIST_NOTES_BY_TAG_LIMIT);
         let all_matches: Vec<String> = match ctx.resolve_virtual_path(&input.path, false)? {
             Some((path, _)) => {
-                crate::agent::tools::filesystem::tool_list_files(&path, &input.path)?
+                crate::agent::tools::filesystem::tool_list_notes(&path, &input.path)?
             }
             None => {
                 let mut libs: Vec<String> = ctx
@@ -258,7 +258,7 @@ impl Tool for ListFilesTool {
             "files"
         };
         let (page_files, hint) = paginate_in_range(&all_matches, offset, limit, total, plural);
-        Ok(serde_json::to_value(dtos::ListFilesResponse {
+        Ok(serde_json::to_value(dtos::ListNotesResponse {
             files: page_files,
             total,
             hint,
@@ -268,19 +268,19 @@ impl Tool for ListFilesTool {
 }
 
 /// Tool that reads the entire content of a file.
-pub(crate) struct ReadFileTool;
-impl Tool for ReadFileTool {
+pub(crate) struct ReadNoteTool;
+impl Tool for ReadNoteTool {
     fn name(&self) -> &'static str {
-        "read_file"
+        "read_note"
     }
     fn description(&self) -> &'static str {
-        strings::READ_FILE_DESCRIPTION
+        strings::READ_NOTE_DESCRIPTION
     }
     fn input_type(&self) -> TypeId {
-        TypeId::of::<dtos::ReadFileInput>()
+        TypeId::of::<dtos::ReadNoteInput>()
     }
     fn parameters_schema(&self) -> serde_json::Value {
-        json_schema::<dtos::ReadFileInput>()
+        json_schema::<dtos::ReadNoteInput>()
     }
     fn is_enabled(&self, config: &AppConfig, _: &str) -> bool {
         config.tool_groups.filesystem
@@ -289,12 +289,12 @@ impl Tool for ReadFileTool {
         crate::agent::tools::Safety::ReadOnly
     }
     fn execute(&self, ctx: &ToolContext, args: &str) -> Result<serde_json::Value, String> {
-        let input: dtos::ReadFileInput =
+        let input: dtos::ReadNoteInput =
             serde_json::from_str(args).map_err(|e| format!("Invalid args: {}", e))?;
         let (path, _) = ctx
             .resolve_virtual_path(&input.path, false)?
             .ok_or_else(|| "Cannot perform this operation on the virtual root".to_string())?;
-        crate::agent::tools::filesystem::tool_read_file(&path.to_string_lossy()).map(|r| {
+        crate::agent::tools::filesystem::tool_read_note(&path.to_string_lossy()).map(|r| {
             serde_json::to_value(r).unwrap_or_else(|e| serde_json::json!({"error": e.to_string()}))
         })
     }
@@ -338,32 +338,32 @@ impl Tool for ReadLinesTool {
 }
 
 /// Tool that creates a new file.
-pub(crate) struct CreateFileTool;
-impl Tool for CreateFileTool {
+pub(crate) struct CreateNoteTool;
+impl Tool for CreateNoteTool {
     fn name(&self) -> &'static str {
-        "create_file"
+        "create_note"
     }
     fn description(&self) -> &'static str {
-        strings::CREATE_FILE_DESCRIPTION
+        strings::CREATE_NOTE_DESCRIPTION
     }
     fn input_type(&self) -> TypeId {
-        TypeId::of::<dtos::CreateFileInput>()
+        TypeId::of::<dtos::CreateNoteInput>()
     }
     fn parameters_schema(&self) -> serde_json::Value {
-        json_schema::<dtos::CreateFileInput>()
+        json_schema::<dtos::CreateNoteInput>()
     }
     fn is_enabled(&self, config: &AppConfig, _: &str) -> bool {
         config.tool_groups.filesystem
     }
     fn execute(&self, ctx: &ToolContext, args: &str) -> Result<serde_json::Value, String> {
-        let input: dtos::CreateFileInput =
+        let input: dtos::CreateNoteInput =
             serde_json::from_str(args).map_err(|e| format!("Invalid args: {}", e))?;
         let path = ctx.resolve_writable(&input.path)?;
         if ctx.is_pdf_backed(&path) {
             return Err(crate::ui::strings::PDF_BACKED_ERROR.to_string());
         }
         let producer = ctx.file_event_producer();
-        crate::agent::tools::filesystem::tool_create_file(
+        crate::agent::tools::filesystem::tool_create_note(
             &path.to_string_lossy(),
             &input.content,
             &producer,

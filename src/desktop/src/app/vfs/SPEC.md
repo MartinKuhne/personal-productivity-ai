@@ -34,7 +34,7 @@ the YAML schema) but its behaviour lives here.
 
 * [VFS-005] The Directory tree pane shall display the content library name for each library as the top-level node. (Replaces REQ-703.)
 * [VFS-006] The file-based tools shall take virtual paths as arguments, and shall resolve these paths to fully qualified file names for the underlying operating system. (Replaces REQ-704.)
-* [VFS-007] The `grep` tool shall search all libraries in priority order (highest first), and return a concatenated result. When the `list_files` tool is invoked with the `/` or `.` argument alone, it shall enumerate the list of libraries, enabling the LLM to continue the folder search for the virtual library subfolders. (Replaces REQ-705 + REQ-706.)
+* [VFS-007] The search_notes tool shall search all libraries in priority order (highest first), and return a concatenated result. When the `list_notes` tool is invoked with the `/` or `.` argument alone, it shall enumerate the list of libraries, enabling the LLM to continue the folder search for the virtual library subfolders. (Replaces REQ-705 + REQ-706.)
 
 ## Architecture
 
