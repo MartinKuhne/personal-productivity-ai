@@ -4,6 +4,7 @@ pub mod clock;
 pub mod encoding;
 pub mod markdown;
 pub mod path;
+pub mod recycle_bin;
 pub mod tags;
 pub mod uuid;
 
