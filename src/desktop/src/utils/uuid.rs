@@ -1,9 +1,11 @@
+use std::fmt::Debug;
 use uuid::Uuid;
 
-pub trait UuidGenerator: Send + Sync {
+pub trait UuidGenerator: Send + Sync + Debug {
     fn new_v4(&self) -> Uuid;
 }
 
+#[derive(Debug)]
 pub struct SystemUuidGenerator;
 
 impl UuidGenerator for SystemUuidGenerator {
@@ -12,6 +14,7 @@ impl UuidGenerator for SystemUuidGenerator {
     }
 }
 
+#[derive(Debug)]
 pub struct FixedUuidGenerator {
     pub value: Uuid,
 }

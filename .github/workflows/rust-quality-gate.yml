@@ -52,6 +52,8 @@ jobs:
       # `src/desktop/.config/nextest.toml`. The repo config is the source
       # of truth; pinning the version here ensures CI matches local runs.
       - run: cargo install cargo-nextest --locked --version ^0.9
+      - name: Install Vulkan software renderer (lavapipe)
+        run: sudo apt-get update && sudo apt-get install -y libvulkan1 mesa-vulkan-drivers
       # Use the `ci` profile (no retries, fail-fast, JUnit output) defined
       # in `src/desktop/.config/nextest.toml`. Local devs use the default
       # profile (2 retries, top-failures summary).

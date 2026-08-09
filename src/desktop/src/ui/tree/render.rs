@@ -55,7 +55,7 @@ fn show_dir_context_menu(
     }
     if ui.button(crate::ui::strings::DELETE_ACTION).clicked() {
         let path = path.to_path_buf();
-        if let Err(e) = trash::delete(&path) {
+        if let Err(e) = crate::utils::recycle_bin::delete(&path) {
             tracing::error!(
                 name = "ui.directory.delete_failed",
                 path = %path.display(),
@@ -79,7 +79,7 @@ fn show_multi_select_file_context_menu(ui: &mut egui::Ui, ctx: &mut TreeNodeCont
     if ui.button(crate::ui::strings::DELETE_ACTION).clicked() {
         let files: Vec<_> = ctx.selected_files().iter().cloned().collect();
         for file in files.iter() {
-            if let Err(e) = trash::delete(file) {
+            if let Err(e) = crate::utils::recycle_bin::delete(file) {
                 tracing::error!(
                     name = "ui.file.multi_delete_failed",
                     path = %file.display(),
@@ -173,7 +173,7 @@ fn show_file_context_menu(
     }
     if ui.button(crate::ui::strings::DELETE_ACTION).clicked() {
         let path = path.to_path_buf();
-        if let Err(e) = trash::delete(&path) {
+        if let Err(e) = crate::utils::recycle_bin::delete(&path) {
             tracing::error!(
                 name = "ui.file.delete_failed",
                 path = %path.display(),

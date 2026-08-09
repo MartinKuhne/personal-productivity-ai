@@ -41,6 +41,7 @@
 
 mod commonmark_parser;
 mod commonmark_render;
+mod commonmark_snapshots;
 mod ftwa;
 mod helpers;
 mod interactions;

@@ -101,6 +101,7 @@ where
 {
     let _ = name; // name is passed to harness.snapshot() by the caller.
     egui_kittest::Harness::builder()
+        .wgpu()
         .with_size(size)
         .build_ui(body)
 }
