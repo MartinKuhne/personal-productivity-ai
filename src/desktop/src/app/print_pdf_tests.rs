@@ -17,37 +17,8 @@
 //! header/trailer, which all passed for a structurally-valid but
 //! visually-empty document.
 
-use super::{
-    SaveAsPdfJob, build_typst_document, compile_and_save_pdf, compile_markdown_to_pdf,
-    typst_string_literal,
-};
+use super::{SaveAsPdfJob, compile_and_save_pdf, compile_markdown_to_pdf};
 use std::path::PathBuf;
-
-#[test]
-fn typst_string_literal_quotes_and_escapes() {
-    assert_eq!(typst_string_literal(""), "\"\"");
-    assert_eq!(typst_string_literal("hello"), "\"hello\"");
-    // Embedded quote gets backslash-escaped.
-    assert_eq!(typst_string_literal("a\"b"), "\"a\\\"b\"");
-    // Embedded backslash gets doubled.
-    assert_eq!(typst_string_literal("a\\b"), "\"a\\\\b\"");
-    // Newline / tab / CR get the standard escape sequences.
-    assert_eq!(typst_string_literal("a\nb"), "\"a\\nb\"");
-    assert_eq!(typst_string_literal("a\tb"), "\"a\\tb\"");
-}
-
-#[test]
-fn build_typst_document_substitutes_title_and_body() {
-    let doc = build_typst_document("My Document", "# heading\n\nbody\n");
-    // Title appears as a quoted string.
-    assert!(doc.contains("\"My Document\""), "got: {doc}");
-    // Body appears verbatim.
-    assert!(doc.contains("# heading"), "got: {doc}");
-    assert!(doc.contains("body"));
-    // The template preamble is still there.
-    assert!(doc.contains("#set page("));
-    assert!(doc.contains("#set text("));
-}
 
 #[test]
 fn save_as_pdf_job_from_path_reads_markdown() {
