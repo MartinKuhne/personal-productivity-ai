@@ -34,7 +34,6 @@
 
 use crate::app::background::{BackgroundLogEntry, LogCategory};
 use crate::bus::events::typed::BackgroundEvent;
-use crate::markdown::render_markdown_to_typst;
 use std::path::{Path, PathBuf};
 use std::sync::mpsc::Sender;
 
@@ -94,7 +93,7 @@ impl SaveAsPdfJob {
 /// wants the PDF bytes directly (e.g. for in-app preview, email
 /// attachment, or non-`fastmd` consumers).
 pub fn compile_markdown_to_pdf(markdown: &str, title: &str) -> Result<Vec<u8>, String> {
-    let body = render_markdown_to_typst(markdown);
+    let body = pdf::typst_translator::render_markdown_to_typst(markdown);
     pdf::generate(title, &body)
 }
 

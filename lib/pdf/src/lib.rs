@@ -114,3 +114,5 @@ pub fn generate(title: &str, typst_body: &str) -> Result<Vec<u8>, String> {
 
     Ok(pdf_bytes)
 }
+
+pub mod typst_translator;

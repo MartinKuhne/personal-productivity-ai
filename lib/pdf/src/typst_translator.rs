@@ -1034,5 +1034,5 @@ fn escape_typst_autolink(s: &str) -> String {
 // see: `src/markdown/typst_tests.rs`
 
 #[cfg(test)]
-#[path = "typst_tests.rs"]
+#[path = "typst_translator_tests.rs"]
 mod tests;
