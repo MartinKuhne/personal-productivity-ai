@@ -672,3 +672,31 @@ fn pdf_has_font_dictionary() {
          print_pdf.rs for the search_fonts_with call"
     );
 }
+
+/// Math events (`Event::InlineMath` / `Event::DisplayMath`) used
+/// to be silently dropped (ADR gap #7). This is the
+/// integration-level proof that they now emit Typst math mode
+/// AND compile to a valid PDF. A drop-the-event bug would not
+/// crash the spec test (the surrounding text still compiles);
+/// only an explicit compile check catches it.
+///
+/// The test uses Typst-native math syntax — `alpha` (no
+/// backslash) and `frac(a, b)` (function call) — because
+/// Typst's math mode is NOT LaTeX-compatible. The `\` is the
+/// markup escape character even inside math, so LaTeX-style
+/// `\alpha` / `\frac{a}{b}` would fail to compile and the
+/// test would be testing Typst's parser instead of the
+/// translator.
+#[test]
+fn math_compiles_to_a_valid_pdf() {
+    let md = "Pythagoras: $a^2 + b^2 = c^2$.\n\nGreek letter: $alpha$.\n\nFraction: $frac(1, 2)$.\n";
+    let bytes = compile_markdown_to_pdf(md, "math").expect("math markdown must compile");
+    assert!(bytes.starts_with(b"%PDF-"));
+    assert!(bytes.ends_with(b"%%EOF"));
+    // PDF body must be meaningful — not a header-only artifact.
+    assert!(
+        bytes.len() > 6_000,
+        "math PDF suspiciously small: {} bytes",
+        bytes.len()
+    );
+}

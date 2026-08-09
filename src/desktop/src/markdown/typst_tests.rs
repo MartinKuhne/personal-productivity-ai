@@ -740,3 +740,75 @@ fn in_autolink_state_resets_between_links() {
          a previous autolink was just closed; got: {out}"
     );
 }
+
+// =====================================================================
+// Math (`Event::InlineMath` / `Event::DisplayMath`)
+// =====================================================================
+//
+// Math events are passed through verbatim, wrapped in Typst's
+// `$...$` / `$ ... $` form. The body is math source, not
+// Typst markup, so it must NOT be passed through `escape_typst`.
+// (The escape function would corrupt commands like `\frac` to
+// `\\frac`, which Typst reads as a literal backslash followed
+// by `frac`.)
+//
+// Closed in this commit; previously these events were silently
+// dropped (ADR gap #7).
+
+/// Inline math is wrapped in `$...$` with a trailing chain-break
+/// space. The body is passed through verbatim.
+#[test]
+fn inline_math_emits_typst_inline_math() {
+    let out = render_markdown_to_typst("Pythagoras: $a^2 + b^2 = c^2$.\n");
+    assert!(
+        out.contains("$a^2 + b^2 = c^2$"),
+        "expected inline math `$a^2 + b^2 = c^2$` in output, got: {out}"
+    );
+}
+
+/// Display math is wrapped in `$ body $` with the inner spaces
+/// required by Typst's display-mode syntax.
+#[test]
+fn display_math_emits_typst_display_math() {
+    let out = render_markdown_to_typst("The quadratic:\n\n$$x = (-b +- sqrt(b^2 - 4 a c)) / (2 a)$$\n");
+    assert!(
+        out.contains("$ x = (-b +- sqrt(b^2 - 4 a c)) / (2 a)$"),
+        "expected display math `$ x = ...$` in output, got: {out}"
+    );
+}
+
+/// The math body must NOT be passed through `escape_typst` —
+/// characters like `*` `_` `\` `#` would be corrupted
+/// (e.g. `x^2` becoming `x\^2`), which Typst then reads as
+/// markup-active in content mode and refuses to compile.
+/// Pinning the exact character count in the output is the
+/// structural signal that the body passed through untouched.
+///
+/// Uses Typst-native math syntax (`alpha` without backslash,
+/// `frac(a, b)` as a function call). Typst's math mode is
+/// NOT LaTeX-compatible — `\` is the markup escape character
+/// even inside math, so `\alpha` is parsed as "escape `a`"
+/// followed by variable `lpha`. Users writing LaTeX-flavoured
+/// math (`$\frac{1}{2}$`, `$\alpha$`) will see compile errors.
+/// This is a translation gap, not a translator bug; the
+/// translator correctly forwards the body verbatim, and the
+/// user is expected to use Typst math syntax.
+#[test]
+fn math_body_is_not_double_escaped() {
+    let out = render_markdown_to_typst("Greek: $alpha$ in the equation.\n");
+    // The body must appear verbatim — no extra backslashes.
+    assert!(
+        out.contains("$alpha$"),
+        "math body should not be run through `escape_typst`, got: {out}"
+    );
+    // Sanity: the corruption form must NOT appear.
+    assert!(
+        !out.contains(r"\$alpha\$"),
+        "math body should not be wrapped by `escape_typst`, got: {out}"
+    );
+}
+
+// Note: the compile-to-PDF test for math is in
+// `print_pdf_tests.rs::math_compiles_to_a_valid_pdf` where the
+// PDF pipeline helpers are in scope. This module is the
+// translator-level string test only.

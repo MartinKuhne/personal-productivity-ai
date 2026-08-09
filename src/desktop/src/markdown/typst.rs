@@ -68,6 +68,13 @@ pub fn render_markdown_to_typst(markdown: &str) -> String {
     options.insert(Options::ENABLE_TABLES);
     options.insert(Options::ENABLE_STRIKETHROUGH);
     options.insert(Options::ENABLE_TASKLISTS);
+    // Math events (`$...$` / `$$...$$`) are gated on this option
+    // in pulldown-cmark 0.13. Without it, `Event::InlineMath` /
+    // `Event::DisplayMath` never fire and the math content is
+    // emitted as plain text, which would silently break every
+    // math-bearing markdown document. The translator forwards
+    // math to Typst's native `$...$` mode.
+    options.insert(Options::ENABLE_MATH);
 
     let parser = Parser::new_ext(markdown, options);
     let mut state = TypstEmitState::default();
@@ -327,14 +334,34 @@ fn emit_event(state: &mut TypstEmitState, event: Event<'_>) {
             // TODO: forward to Typst `#footnote[...]` once the
             // cmark id → Typst id mapping is implemented.
         }
-        Event::InlineMath(_) | Event::DisplayMath(_) => {
-            // Math is rendered as inline text. Typst has native math
-            // mode (`$ ...$`) but mapping cmark's math event to a
-            // Typst math block requires knowing whether the source
-            // was inline or display, which cmark already splits for
-            // us. For v1 we drop the event so the surrounding text
-            // still flows; the next iteration can re-introduce math
-            // rendering with proper Typst `$ ...$` / `$ ... $` form.
+        Event::InlineMath(math) => {
+            // Inline math in Typst uses the same `$...$` delimiter
+            // as markdown. The body is math source, not Typst markup,
+            // so it must NOT be passed through `escape_typst` —
+            // commands like `\frac` would be corrupted to `\\frac`.
+            // The body is passed through verbatim.
+            //
+            // A trailing space is added for the same chain-break
+            // reason as inline code and inline HTML: Typst parses
+            // `$x$(y)` as a call on the math result, which is
+            // content (not callable), producing a syntax error. The
+            // space forces a new content sequence. The space is
+            // also the right visual — math followed by punctuation
+            // renders as math followed by a small gap.
+            state.push_raw(&format!("${math}$ "));
+        }
+        Event::DisplayMath(math) => {
+            // Display math in Typst uses `$ body $` with leading
+            // and trailing whitespace inside the delimiters (the
+            // canonical display form). The inner spaces are
+            // required so the parser can unambiguously tell where
+            // the math body ends — `$x$` (no spaces) is always
+            // parsed as inline math, so `$ body $` is the only
+            // way to get display-mode sizing and centering.
+            //
+            // Same trailing-space rationale as inline math: see
+            // the comment on `Event::InlineMath` above.
+            state.push_raw(&format!("$ {math}$ "));
         }
         Event::Rule => {
             state.block_sep();
