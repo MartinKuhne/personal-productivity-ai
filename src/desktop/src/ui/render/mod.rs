@@ -196,8 +196,8 @@ pub fn render_markdown(
                     task_index += 1;
                 }
             }
-            RenderEvent::CodeBlock { content, .. } => {
-                render_code_block(ui, content);
+            RenderEvent::CodeBlock { language, content } => {
+                render_code_block(ui, language.as_deref(), content);
             }
             RenderEvent::Heading { level, elems } => {
                 let text = heading_plain_text(elems);

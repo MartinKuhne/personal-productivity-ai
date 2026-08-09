@@ -158,7 +158,7 @@ fn cm_render_setext_headings_levels() {
 /// [CM-043] Valid thematic breaks (`***`, `---`, `___`) emit horizontal separator line stroke shapes.
 #[test]
 fn cm_render_thematic_breaks() {
-    let md = "Paragraph 1\n***\nParagraph 2\n---\nParagraph 3\n___\nParagraph 4";
+    let md = "Paragraph 1\n\n***\n\nParagraph 2\n\n---\n\nParagraph 3\n\n___\n\nParagraph 4";
     let output = render_cm_ui(md, egui::vec2(800.0, 600.0));
 
     let texts = extract_text(&output.shapes);
