@@ -2,8 +2,8 @@
 
 use super::*;
 use crate::config::AppConfig;
-use crate::ui::test_helpers::run_ui_test;
 use crate::ui::FastMdApp;
+use crate::ui::test_helpers::run_ui_test;
 use notify::RecommendedWatcher;
 use std::fs;
 

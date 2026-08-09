@@ -1,6 +1,5 @@
 //! Tests for `background/vision_processor.rs`.
 
-
 use super::*;
 use crate::bus::core::Bus;
 use crate::bus::events::file::{FileEvent, FileEventKind};

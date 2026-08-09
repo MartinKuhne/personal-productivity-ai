@@ -621,9 +621,11 @@ fn test_unfold_vcard_merges_continuation_lines() {
     // leading whitespace is consumed as the fold marker).
     assert!(unfolded.contains("NOTE:Line1 Line2Line3"));
     // No orphaned leading-space lines should remain.
-    assert!(!unfolded
-        .lines()
-        .any(|l| l.starts_with(' ') || l.starts_with('\t')));
+    assert!(
+        !unfolded
+            .lines()
+            .any(|l| l.starts_with(' ') || l.starts_with('\t'))
+    );
 }
 
 // =====================================================================

@@ -149,9 +149,11 @@ fn test_validate_no_chat_model() {
         },
     );
     let warnings = config.validate();
-    assert!(warnings
-        .iter()
-        .any(|w| w.contains("No model configured with 'chat'")));
+    assert!(
+        warnings
+            .iter()
+            .any(|w| w.contains("No model configured with 'chat'"))
+    );
 }
 
 #[test]

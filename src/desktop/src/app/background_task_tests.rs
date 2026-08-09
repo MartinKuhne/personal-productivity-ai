@@ -1,6 +1,5 @@
 //! Tests for `app/background_task.rs`.
 
-
 use super::*;
 use crate::bus::events::file::FileEventKind;
 use crate::bus::events::typed::FsEvent;

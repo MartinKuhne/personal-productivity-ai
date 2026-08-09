@@ -1,6 +1,5 @@
 //! Tests for `integrations/dav/cal.rs`.
 
-
 use super::*;
 use fast_dav_rs::CalDavClient;
 

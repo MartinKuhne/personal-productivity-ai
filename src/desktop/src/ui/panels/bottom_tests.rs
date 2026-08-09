@@ -722,8 +722,8 @@ fn test_show_bottom_panel_stop_agent() {
 /// identical geometry.
 #[test]
 fn test_show_bottom_panel_stop_button_right_aligned() {
-    use egui_kittest::kittest::Queryable;
     use egui_kittest::Harness;
+    use egui_kittest::kittest::Queryable;
 
     const WINDOW_SIZE: egui::Vec2 = egui::Vec2::new(800.0, 600.0);
     const PIXEL_TOLERANCE: f32 = 2.0;

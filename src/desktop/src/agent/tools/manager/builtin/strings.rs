@@ -172,8 +172,7 @@ pub const DELETE_CALENDAR_ITEM_DESCRIPTION: &str = "Delete a calendar item.";
 
 pub const SEARCH_CONTACT_DESCRIPTION: &str = "Search contacts by keyword.";
 
-pub const ADD_CONTACT_DESCRIPTION: &str =
-    "Add a new contact to the configured CardDAV addressbook. \
+pub const ADD_CONTACT_DESCRIPTION: &str = "Add a new contact to the configured CardDAV addressbook. \
 The `contact_json` argument is a JSON object describing the contact. \
 Use these canonical field names (the listed aliases are also accepted): \
 `name` (aliases: `fn`, `full_name`) — the contact's display name, REQUIRED; \
@@ -195,14 +194,12 @@ you don't know should be omitted. The `type` becomes the vCard `TYPE=` \
 parameter. Multiple addresses per contact are supported (e.g. a HOME and \
 a WORK).";
 
-pub const GET_CONTACT_DESCRIPTION: &str =
-    "Get a contact by its unique ID. The response includes the \
+pub const GET_CONTACT_DESCRIPTION: &str = "Get a contact by its unique ID. The response includes the \
 raw vCard plus structured fields: `fn_name`, `email`, `tel`, `org`, \
 `bday` (ISO `YYYY-MM-DD`), and `addresses` (array of postal-address \
 objects with the same shape as `add_contact`).";
 
-pub const UPDATE_CONTACT_DESCRIPTION: &str =
-    "Update an existing contact at the given `id` (the href \
+pub const UPDATE_CONTACT_DESCRIPTION: &str = "Update an existing contact at the given `id` (the href \
 returned by `get_contact` or `search_contact`). The `contact_json` argument \
 uses the same schema as `add_contact` (canonical names: `name`, `email`, \
 `phone`, `company`, `title`, `notes`, `birthday`, `addresses`; aliases are \
@@ -215,8 +212,7 @@ list replaces every existing ADR on the contact. The update is performed \
 with `If-Match` so concurrent edits are detected — if the server returns \
 412 the caller should re-`get_contact` and retry.";
 
-pub const DELETE_CONTACT_DESCRIPTION: &str =
-    "Delete the contact at the given `id` (the href returned by \
+pub const DELETE_CONTACT_DESCRIPTION: &str = "Delete the contact at the given `id` (the href returned by \
 `get_contact` or `search_contact`). A 404 (already absent) is treated as a \
 successful no-op so the call is idempotent. Other non-2xx responses are \
 propagated as errors with the truncated response body for diagnosis.";
