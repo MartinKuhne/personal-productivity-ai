@@ -108,10 +108,24 @@ const TEMPLATE: &str = r##"
 #set text(
   size: 11pt,
   lang: "en",
-  font: ("New Computer Modern", "Liberation Serif"),
+  // Modern sans-serif font chain. The default body font. Primary
+  // is `Segoe UI` (the Windows system UI font — modern, designed
+  // for screen reading, ships on every Windows install since
+  // Vista). Fallbacks cover macOS (`Helvetica Neue`, the macOS
+  // UI staple) and Linux (`Liberation Sans`, the most widely
+  // available modern sans on Linux distros). The final fallback
+  // `Arial` is universal but dated; it's the last resort only if
+  // none of the platform-specific faces are present.
+  font: ("Segoe UI", "Helvetica Neue", "Liberation Sans", "Arial"),
 )
 #set par(justify: true, leading: 0.65em)
-#show heading: set text(font: ("New Computer Modern", "Liberation Serif"))
+// Headings inherit the same modern sans chain. The earlier
+// template used `New Computer Modern` (Latin Modern), which is
+// a classic scholarly serif — readable but dated, and a poor
+// match for a modern sans body. Keeping the family in sync
+// avoids the visual disconnect of a sans body with serif
+// headings.
+#show heading: set text(font: ("Segoe UI", "Helvetica Neue", "Liberation Sans", "Arial"))
 #show heading.where(level: 1): set text(size: 1.8em)
 #show heading.where(level: 2): set text(size: 1.4em)
 #show heading.where(level: 3): set text(size: 1.15em)
