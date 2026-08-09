@@ -373,7 +373,7 @@ fn test_tool_web_delegate_missing_api_key() {
         },
     );
 
-    let result = tool_web_delegate(&config, "do something", &cache);
+    let result = tool_web_delegate(&config, "do something", &cache, None);
     assert!(result.is_err());
     assert_eq!(result.unwrap_err(), "API key not set or invalid.");
 }
@@ -409,7 +409,7 @@ fn test_tool_web_delegate_mock() {
         },
     );
 
-    let result = tool_web_delegate(&config, "search for tests", &cache).unwrap();
+    let result = tool_web_delegate(&config, "search for tests", &cache, None).unwrap();
     assert_eq!(result.result, "Final summarized answer");
 }
 
@@ -453,7 +453,7 @@ fn test_tool_web_delegate_with_unknown_tool_handled_gracefully() {
     config.searxng_url = None;
 
     // Should not panic - handles unknown tool gracefully
-    let result = tool_web_delegate(&config, "do something", &cache);
+    let result = tool_web_delegate(&config, "do something", &cache, None);
     // Either succeeds or returns an error we can handle
     assert!(result.is_ok() || result.is_err());
 }
@@ -490,7 +490,7 @@ fn test_tool_web_delegate_handles_api_error_gracefully() {
         },
     );
 
-    let result = tool_web_delegate(&config, "test", &cache);
+    let result = tool_web_delegate(&config, "test", &cache, None);
     // Should return an error, not panic
     assert!(result.is_err() || result.is_ok());
 }

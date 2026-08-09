@@ -111,6 +111,7 @@ fn test_browser_navigate_tool_round_trip() {
         crate::agent::tools::manager::cache::cache(),
         tm,
         Arc::new(crate::utils::uuid::SystemUuidGenerator),
+        None,
     );
 
     let tool = crate::agent::tools::manager::builtin::browser::BrowserNavigateTool;
@@ -142,6 +143,7 @@ fn test_browser_get_page_state_tool_is_readonly() {
         crate::agent::tools::manager::cache::cache(),
         tm,
         Arc::new(crate::utils::uuid::SystemUuidGenerator),
+        None,
     );
 
     let tool = crate::agent::tools::manager::builtin::browser::BrowserGetPageStateTool;
