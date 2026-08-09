@@ -36,6 +36,7 @@
 - [REQ-457]: While initial indexing runs, the FastMD Viewer SHALL emit progress messages at least every 500 files scanned or every 5 seconds, reporting files processed, PDFs found, and conversions queued and completed.
 - [REQ-458]: When the file watcher receives a file system change notification related to PDFs, the FastMD Viewer SHALL log the event type and virtual path to the Background Process Log.
 - [REQ-459]: The FastMD Viewer SHALL support a configuration key `pdf_converter_command` as an array of command and arguments that include `{input}` and `{output}` placeholders.
+- [REQ-459A]: When exporting Markdown to PDF, the FastMD Viewer SHALL use a base text size of 10pt, and heading sizes of 16pt (H1), 14pt (H2), and 12pt (H3).
 
 ### Background Process Log Tab
 - [REQ-460]: The FastMD Viewer SHALL provide a Background Processes tab in the center panel tab bar that displays real-time output from background processes.

@@ -6,7 +6,7 @@ const TEMPLATE: &str = r##"
   numbering: "1 / 1",
 )
 #set text(
-  size: 11pt,
+  size: 10pt,
   lang: "en",
   // Modern sans-serif font chain. The default body font. Primary
   // is `Segoe UI` (the Windows system UI font — modern, designed
@@ -26,9 +26,9 @@ const TEMPLATE: &str = r##"
 // avoids the visual disconnect of a sans body with serif
 // headings.
 #show heading: set text(font: ("Segoe UI", "Helvetica Neue", "Liberation Sans", "Arial"))
-#show heading.where(level: 1): set text(size: 1.8em)
+#show heading.where(level: 1): set text(size: 1.6em)
 #show heading.where(level: 2): set text(size: 1.4em)
-#show heading.where(level: 3): set text(size: 1.15em)
+#show heading.where(level: 3): set text(size: 1.2em)
 #show raw.where(block: true): block(
   fill: luma(245),
   inset: 8pt,
