@@ -267,6 +267,10 @@ Close this gap by: moving both files to `$env:TEMP` (the
 safety policy blocks `Remove-Item`). They are diagnostic-only
 and have no value in the repo.
 
+**Status: Closed** — moved to `$env:TEMP` in commit `b6e678c`
+(Test(typst): add focused unit tests for autolink escape and
+state field). The `tests/` tree is clean.
+
 ### 12. REQ-xxx in `src/app/SPEC.md` for "Save as PDF" not added
 
 Not a test gap per se, but a documentation gap that the test
@@ -285,22 +289,33 @@ that visually reproduces the source markdown's text content,
 opens the PDF in the system's default viewer, and lands at
 a user-chosen destination via the OS-native save dialog."
 
-## What would close each gap (summary table)
+**Status: User decision — skip** — confirmed on 2026-08-08.
+The feature works; the contract is implicit in the code and
+in this ADR. Future spec work can add a REQ when the feature
+gets reviewed for a release.
 
-| # | Gap | Owner | Effort | Blocker |
-|---|---|---|---|---|
-| 1 | Spec test is structural-only | TBD | Medium (runtime + per-example needle) | Mono CMap quirks (#5) |
-| 2 | Dropped inline-code assertion | TBD | Trivial (re-add after #5) | #5 |
-| 3 | Narrowed special-chars set | TBD | Trivial (unit test on escape fn) | None |
-| 4 | Structural-only content check | TBD | Easy (combine with #1) | #1 |
-| 5 | `#[ignore]` fenced code block | TBD | Hard (typst-as-lib internals) | None |
-| 6 | `FootnoteReference` dropped | TBD | Medium (two-pass translate) | None |
-| 7 | `InlineMath` / `DisplayMath` dropped | TBD | Easy (emit `$ ...$` form) | None |
-| 8 | No unit test for `escape_typst_autolink` | TBD | Trivial | None |
-| 9 | No unit test for `in_autolink` field | TBD | Trivial | None |
-| 10 | No per-example content fidelity check | TBD | Medium (runtime) | #5 |
-| 11 | Scratch files in `tests/` | TBD | Trivial (move to `$env:TEMP`) | None |
-| 12 | REQ-xxx for "Save as PDF" | User | Trivial (add or decline) | User decision |
+## Status of each gap (updated 2026-08-08)
+
+| # | Gap | Status | Closed in |
+|---|---|---|---|
+| 1 | Spec test is structural-only | Open | — (blocked by #5) |
+| 2 | Dropped inline-code assertion | Open | — (blocked by #5) |
+| 3 | Narrowed special-chars set | Already covered | The standard `escape_typst` escape set has per-char unit tests (`escape_typst_*`); the narrowing in `pdf_renders_special_chars_verbatim` is a *test-input* choice, not an escape-function coverage gap. No new work needed. |
+| 4 | Structural-only content check | Open | — (related to #1) |
+| 5 | `#[ignore]` fenced code block | Open | — (typst-as-lib 0.16 mono-font bug, upstream) |
+| 6 | `FootnoteReference` dropped | **Closed** | `5b03cfd` (two-pass translate + 7 new tests) |
+| 7 | `InlineMath` / `DisplayMath` dropped | **Closed** | `4cff308` (emit `$ ...$` / `$ ... $` form + 3 new tests) |
+| 8 | No unit test for `escape_typst_autolink` | **Closed** | `b6e678c` (5 per-char + URL pattern tests) |
+| 9 | No unit test for `in_autolink` field | **Closed** | `b6e678c` (routing + state-reset tests) |
+| 10 | No per-example content fidelity check | Open | — (blocked by #5) |
+| 11 | Scratch files in `tests/` | **Closed** | `b6e678c` (moved to `$env:TEMP`) |
+| 12 | REQ-xxx for "Save as PDF" | **Skipped (user)** | — |
+
+**Net change in this pass: 5 of 12 gaps closed** (#6, #7, #8, #9, #11).
+Gap #3 noted as already covered; gap #12 explicitly declined by
+the user. Remaining open gaps (#1, #2, #4, #5, #10) all cascade
+through the typst-as-lib 0.16 mono-font rendering bug (#5) and
+are blocked on that upstream issue.
 
 ## Verification (how to confirm the inventory is current)
 
@@ -332,16 +347,23 @@ lifecycle rules).
 - The `escape_typst` function and its escape set are
   thoroughly tested in
   [`src/desktop/src/markdown/typst_tests.rs`](../../src/desktop/src/markdown/typst_tests.rs).
-  The pre-existing escape tests are not a gap; the gap is the
-  new `escape_typst_autolink` (#8) and the new
-  `in_autolink` state field (#9), both of which were added in
-  `0bc0fa0` without dedicated coverage.
+  The pre-existing per-char unit tests cover the standard
+  escape set; the new `escape_typst_autolink` is now
+  covered by #8's closed tests.
 - The two pre-existing `#[ignore]`s in
   [`tests/mcp_oauth.rs:137, 248`](../../src/desktop/tests/mcp_oauth.rs)
   drive the real OAuth flow and pop a browser at the mock
   server's `/authorize` URL. Not in scope of this ADR; they
   pre-date the PDF work.
 - The `pdf_renders_special_chars_verbatim` test is structurally
-  sound — the char set is intentionally narrowed (gap #3),
-  not a bug. Reading the test alone without this ADR could
-  mislead a future reviewer into "fixing" it.
+  sound — the char set is intentionally narrowed (see gap #3
+  above, already covered by the per-char escape tests).
+  Reading the test alone without this ADR could mislead a
+  future reviewer into "fixing" it.
+- Typst math syntax incompatibility (the translator forwards
+  the body verbatim, so LaTeX-style `\frac{a}{b}` does not
+  compile in Typst). This is a known limitation of the
+  pass-through design, not a translator bug. Documented in
+  the commit message for `4cff308`; tracked in the
+  `[Out of scope]` section of the commit, not as a separate
+  gap here.
