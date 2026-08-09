@@ -88,7 +88,7 @@ futures = "0.3"
 # embedded font set from `typst-assets` (~30 MB binary, a few
 # minutes compile time). Behind the `pdf-export` feature; on
 # by default per workspace preferences.
-typst-as-lib = { version = "0.16", optional = true, features = ["typst-kit-embed-fonts"] }
+typst-as-lib = { version = "0.16", optional = true, features = ["typst-kit-fonts", "typst-kit-embed-fonts"] }
 # `typst-layout` — re-exported by typst-as-lib transitively, but we
 # need the `PagedDocument` type for the compile result. Marked
 # optional with the same gate as `typst-as-lib` so the feature

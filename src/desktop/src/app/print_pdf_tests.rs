@@ -172,6 +172,64 @@ fn main() {
     );
 }
 
+/// Regression: a PDF compiled by the print_pdf path must contain
+/// actual text content, not just structural decoration.
+///
+/// The header/`%%EOF` trailer and the structural stream content
+/// (page borders, page numbers, table grid cells) were always
+/// present, even when the body was silently dropped because the
+/// Typst engine had no fonts loaded. A naive assertion like
+/// `bytes.starts_with(b"%PDF-")` passes for an empty-document
+/// PDF. This test asserts the PDF carries a font dictionary AND
+/// the page-content stream size is consistent with rendered text
+/// glyphs (the empty-PDF version of the same test markdown was
+/// ~3KB with only page numbers + grid cells; the fixed version
+/// is ~12KB with embedded fonts + glyphs).
+///
+/// Triggered by the user reporting that
+/// `Polaris/2008-Sportsman-500-X2-EFI-Recommissioning-and-Maintenance.md`
+/// produced a "mostly empty PDF" — root cause was the default
+/// `TypstEngine::builder()` not enabling `typst-kit` font
+/// discovery, so the engine had an empty font book and the PDF
+/// was generated with no glyphs.
+#[test]
+fn compiled_pdf_contains_text_content() {
+    let md = "Hello world\n\n# Heading 1\n\nA paragraph of body text.\n";
+    let bytes = compile_markdown_to_pdf(md, "text-content").expect("compile");
+    // The PDF is binary data; scan it as bytes to avoid the
+    // lossy UTF-8 conversion munging dictionary keys.
+    // Font dictionary must be present. The empty-PDF regression
+    // produced a PDF with zero font references; the fixed
+    // version has at least one `/Type /Font` entry per embedded
+    // typeface. Asserting on the *presence* of a font dict (not
+    // the absence of glyphs) is the structural signal we want —
+    // if the engine builds with an empty font book, the PDF
+    // would not have any `/Type /Font` entries at all.
+    let needle = b"/Type/Font";
+    assert!(
+        bytes.windows(needle.len()).any(|w| w == needle),
+        "PDF has no /Type/Font entries — the Typst engine was \
+         built with an empty font book, so text would not render. \
+         This is the regression fixed by enabling typst-kit font \
+         discovery on the engine builder; re-check \
+         `compile_typst_document` in `print_pdf.rs`."
+    );
+    // Size sanity: an embedded-font PDF with text is meaningfully
+    // larger than an empty-document PDF. The empty-PDF regression
+    // produced ~3KB for this same input; the fixed version
+    // embeds the Latin Modern fonts (subsetted to the doc's
+    // glyphs) which alone is ~9KB, and the test markdown renders
+    // to several lines of glyphs on top of that. A 6KB floor
+    // leaves headroom for the empty-PDF regression but rejects
+    // any future regression that drops fonts silently.
+    assert!(
+        bytes.len() > 6_000,
+        "PDF body suspiciously small for rendered text: {} bytes. \
+         The empty-PDF regression produced ~3KB for this same input.",
+        bytes.len()
+    );
+}
+
 // =====================================================================
 // Typst syntax-reference compliance (end-to-end)
 // =====================================================================

@@ -187,8 +187,23 @@ pub fn compile_markdown_to_pdf(markdown: &str, title: &str) -> Result<Vec<u8>, S
 /// this crate.
 fn compile_typst_document(document: &str) -> Result<Vec<u8>, String> {
     use typst_as_lib::TypstEngine;
+    // The `TypstEngine::builder()` default leaves font discovery
+    // off — `typst_kit_font_options: None` — so the engine builds
+    // with an empty font book. Typst then accepts the document
+    // (the markup is well-formed) but cannot shape any text, and
+    // the produced PDF contains page numbers, layout lines, and
+    // table grid cells but no actual text content. Discovered
+    // against the user's Polaris wiki file: every spec example
+    // compiled to a "valid" PDF (correct header, correct trailer,
+    // correct page count) but the file opened to a near-empty
+    // document. The default options of `TypstKitFontOptions`
+    // enable both system font discovery and the embedded
+    // `typst-assets` fonts ("New Computer Modern" + "Liberation
+    // Serif" in the user's template, the former from the
+    // embedded set).
     let engine = TypstEngine::builder()
         .main_file(document.to_string())
+        .search_fonts_with(typst_as_lib::typst_kit_options::TypstKitFontOptions::default())
         .build();
     let result = engine.compile();
     // Bind the document to a typed local so `Doc = PagedDocument`
