@@ -5,7 +5,7 @@
 //!
 //! Per AGENTS.md RUST-056 / RUST-057 — extracted to a sidecar.
 
-use super::{escape_typst, escape_typst_string, render_markdown_to_typst};
+use super::{escape_typst, escape_typst_autolink, escape_typst_string, render_markdown_to_typst};
 
 #[test]
 fn empty_input_emits_empty_string() {
@@ -599,5 +599,144 @@ fn escape_typst_string_only_quotes_and_backslashes() {
     assert_eq!(
         escape_typst_string(sample_round_trip_in),
         sample_round_trip_out
+    );
+}
+
+// =====================================================================
+// `escape_typst_autolink` — stricter escape for autolink text
+// =====================================================================
+//
+// Added in `0bc0fa0` (Fix(typst): escape < > in text and tighten
+// link & autolink emission). The function is used only for the
+// autolink path (`<url>`), where the URL itself is also the link
+// text. The contract: it must escape the standard markup-active
+// set PLUS `:` and `/`, because URL patterns like
+// `irc://foo.bar:2233/baz` are otherwise parsed as Typst labelled
+// content (`name: value`), with the value swallowing the
+// surrounding link `]`.
+
+/// Pin: `:` — starts a "labelled content" item in Typst content
+/// mode (`name: value`). A bare `:` in an autolink URL would
+/// otherwise open a label.
+#[test]
+fn escape_typst_autolink_colon() {
+    assert_eq!(escape_typst_autolink(":"), r"\:");
+    assert_eq!(escape_typst_autolink("foo:bar"), r"foo\:bar");
+}
+
+/// Pin: `/` — paired with `:` in URLs (`://`, `host:port/path`).
+/// Mid-line `/` in content mode is not markup-active, but we
+/// escape it anyway in the autolink path so the URL is preserved
+/// literally regardless of where it lands in the rendered output.
+#[test]
+fn escape_typst_autolink_slash() {
+    assert_eq!(escape_typst_autolink("/"), r"\/");
+    assert_eq!(escape_typst_autolink("a/b"), r"a\/b");
+}
+
+/// Pin: the standard escape set is still applied by the
+/// autolink escape. `escape_typst_autolink` is `escape_typst` plus
+/// two extra chars, NOT a different escape function.
+#[test]
+fn escape_typst_autolink_keeps_standard_escape_set() {
+    assert_eq!(escape_typst_autolink("\\"), r"\\");
+    assert_eq!(escape_typst_autolink("C#"), r"C\#");
+    assert_eq!(escape_typst_autolink("a*b"), r"a\*b");
+    assert_eq!(escape_typst_autolink("snake_case"), r"snake\_case");
+    assert_eq!(escape_typst_autolink("`"), r"\`");
+    assert_eq!(escape_typst_autolink("[a][b]"), r"\[a\]\[b\]");
+    assert_eq!(escape_typst_autolink("@"), r"\@");
+    assert_eq!(escape_typst_autolink("$5"), r"\$5");
+    assert_eq!(escape_typst_autolink("~50%"), r"\~50%");
+    assert_eq!(escape_typst_autolink("don't"), r"don\'t");
+    assert_eq!(escape_typst_autolink("\"hi\""), "\\\"hi\\\"");
+}
+
+/// Pin: realistic URL — every `:` and `/` gets a backslash. This
+/// is the primary input the function was added for.
+#[test]
+fn escape_typst_autolink_realistic_irc_url() {
+    assert_eq!(
+        escape_typst_autolink("irc://foo.bar:2233/baz"),
+        r"irc\:\/\/foo.bar\:2233\/baz"
+    );
+}
+
+/// Pin: chars that are not markup-active in any mode pass through.
+/// Pinned so a future "let's be more aggressive" change to the
+/// autolink escape set doesn't accidentally start escaping
+/// harmless chars.
+#[test]
+fn escape_typst_autolink_passes_through_safe_chars() {
+    assert_eq!(escape_typst_autolink("hello world"), "hello world");
+    assert_eq!(escape_typst_autolink("a.b,c;d!e?"), "a.b,c;d!e?");
+    // Unicode passes through.
+    assert_eq!(escape_typst_autolink("café"), "café");
+    assert_eq!(escape_typst_autolink("日本語"), "日本語");
+}
+
+// =====================================================================
+// `in_autolink` state field — routes link text through the right
+// escape function
+// =====================================================================
+//
+// Added in `0bc0fa0`. The state field is set in `emit_start` at
+// the `Tag::Link` arm based on `link_type`: `LinkType::Autolink`
+// turns it on, every other link type leaves it off. The text
+// routing in `Event::Text` reads it to decide between
+// `escape_typst` and `escape_typst_autolink`. The test below
+// pins the negative case: a regular `[text](url)` link must use
+// the standard escape, NOT the autolink escape, even if the
+// text happens to contain `:` and `/`. (The positive case —
+// `<url>` autolink uses the stricter escape — is pinned by
+// `autolink_text_escapes_url_chars` above.)
+//
+// The contract matters because the user's text in a regular
+// link is intentional — they may have written a real `:` as a
+// Typst label on purpose, or a real `/` as a line break. The
+// translator must not silently rewrite that.
+
+/// Regular `[text](url)` links use the standard `escape_typst`
+/// (no backslash before `:` or `/`), even when the text looks
+/// like a URL.
+#[test]
+fn regular_link_text_uses_standard_escape_not_autolink_escape() {
+    let md = "[irc://foo.bar:2233/baz](https://example.com)";
+    let out = render_markdown_to_typst(md);
+    // The text inside the content block must be the unescaped form.
+    assert!(
+        out.contains("[irc://foo.bar:2233/baz]"),
+        "regular link text should pass through `escape_typst` (no \
+         backslash before `:` or `/`), got: {out}"
+    );
+    // The autolink-escaped form must NOT appear.
+    let bad = "[irc\\:\\/\\/foo.bar\\:2233\\/baz]";
+    assert!(
+        !out.contains(bad),
+        "regular link text should NOT use `escape_typst_autolink`, got: {out}"
+    );
+}
+
+/// The `in_autolink` state field is reset to `false` at
+/// `TagEnd::Link`. A second link in the same paragraph must
+/// not inherit a stale `true` from a previous autolink.
+#[test]
+fn in_autolink_state_resets_between_links() {
+    // First link is an autolink (uses stricter escape).
+    // Second link is a regular link with URL-like text.
+    // If the state field doesn't reset, the second link's text
+    // would get the autolink escape applied.
+    let md = "<https://a.com> then [b.com/path](https://b.com)";
+    let out = render_markdown_to_typst(md);
+    // First link: autolink text with strict escape.
+    assert!(
+        out.contains("[https\\:\\/\\/a.com]"),
+        "first link (autolink) should use `escape_typst_autolink`, got: {out}"
+    );
+    // Second link: regular text passes through unchanged.
+    assert!(
+        out.contains("[b.com/path]"),
+        "second link (regular) should use `escape_typst` even though \
+         a previous autolink was just closed; got: {out}"
     );
 }
