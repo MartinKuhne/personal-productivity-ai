@@ -1,11 +1,4 @@
 //! Tests for `panels/bottom.rs`.
-//!
-//! Sidecar file. Extracted from `bottom.rs` so the implementation
-//! module stays focused on production code.
-//!
-//! Originally a `#[cfg(test)] mod tests { ... }` block at the bottom of
-//! `bottom.rs`. Lives in a sibling file so private item access via
-//! `super::*` keeps working.
 
 use super::*;
 use crate::config::{ContentLibrary, LlmConfig};
@@ -729,8 +722,8 @@ fn test_show_bottom_panel_stop_agent() {
 /// identical geometry.
 #[test]
 fn test_show_bottom_panel_stop_button_right_aligned() {
-    use egui_kittest::Harness;
     use egui_kittest::kittest::Queryable;
+    use egui_kittest::Harness;
 
     const WINDOW_SIZE: egui::Vec2 = egui::Vec2::new(800.0, 600.0);
     const PIXEL_TOLERANCE: f32 = 2.0;

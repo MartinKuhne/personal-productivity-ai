@@ -1,11 +1,4 @@
 //! Tests for `panels/right.rs`.
-//!
-//! Sidecar file. Extracted from `right.rs` so the implementation
-//! module stays focused on production code.
-//!
-//! Originally a `#[cfg(test)] mod tests { ... }` block at the bottom of
-//! `right.rs`. Lives in a sibling file so private item access via
-//! `super::*` keeps working.
 
 use super::*;
 use crate::ui::test_helpers::run_ui_test;
@@ -214,8 +207,8 @@ fn test_show_right_panel_shown_with_toc() {
 /// rounding), not a value that has drifted to the right.
 #[test]
 fn test_show_right_panel_long_titles_anchor_at_panel_left_edge() {
-    use egui_kittest::Harness;
     use egui_kittest::kittest::Queryable;
+    use egui_kittest::Harness;
 
     // 400px window. The panel's max_size is 30% of viewport width = 120px.
     // default_size is clamped to max_size, so panel will be 120px wide.

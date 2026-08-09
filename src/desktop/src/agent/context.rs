@@ -13,8 +13,6 @@ use std::sync::{Arc, atomic::AtomicBool};
 
 /// Consolidated context for running an agent session.
 ///
-/// This struct replaces the 11 separate parameters previously passed to `run_agent`.
-/// It groups related data and reduces the interface to a single argument (PSD-002).
 /// Construct with the struct literal `AgentContext { ... }`; the previous
 /// `AgentContext::new` was a pass-through forwarder (PSD-004) and was removed.
 pub struct AgentContext {

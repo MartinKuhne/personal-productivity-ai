@@ -1,11 +1,4 @@
 //! Tests for `config/config.rs`.
-//!
-//! Sidecar file. Extracted from `config.rs` so the implementation
-//! module stays focused on production code.
-//!
-//! Originally a `#[cfg(test)] mod tests { ... }` block at the bottom of
-//! `config.rs`. Lives in a sibling file so private item access via
-//! `super::*` keeps working.
 
 use super::*;
 use tempfile::tempdir;
@@ -156,11 +149,9 @@ fn test_validate_no_chat_model() {
         },
     );
     let warnings = config.validate();
-    assert!(
-        warnings
-            .iter()
-            .any(|w| w.contains("No model configured with 'chat'"))
-    );
+    assert!(warnings
+        .iter()
+        .any(|w| w.contains("No model configured with 'chat'")));
 }
 
 #[test]

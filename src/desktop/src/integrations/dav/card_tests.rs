@@ -1,13 +1,4 @@
 //! Tests for `integrations/dav/card.rs`.
-//!
-//! Sidecar file. Extracted from `card.rs` so the implementation
-//! module stays focused on production code.
-//!
-//! Originally a `#[cfg(test)] mod tests { ... }` block at the bottom of
-//! `card.rs` (formerly `agent/tools/carddav.rs`, relocated when the
-//! DAV protocol layer was moved to `crate::integrations::dav`).
-//! Lives in a sibling file so private item access via `super::*`
-//! keeps working.
 
 use super::*;
 
@@ -630,11 +621,9 @@ fn test_unfold_vcard_merges_continuation_lines() {
     // leading whitespace is consumed as the fold marker).
     assert!(unfolded.contains("NOTE:Line1 Line2Line3"));
     // No orphaned leading-space lines should remain.
-    assert!(
-        !unfolded
-            .lines()
-            .any(|l| l.starts_with(' ') || l.starts_with('\t'))
-    );
+    assert!(!unfolded
+        .lines()
+        .any(|l| l.starts_with(' ') || l.starts_with('\t')));
 }
 
 // =====================================================================

@@ -1,20 +1,12 @@
 //! Tests for the MCP protocol client (transports, sessions, manager,
 //! OAuth 2.1 flow, error type, SSE walker).
-//!
-//! Sidecar file for `crate::integrations::mcp`. Extracted from `mod.rs`
-//! so the implementation module stays focused on production code.
-//!
-//! Originally a `#[cfg(test)] mod tests { ... }` block at the bottom of
-//! `mcp/mod.rs`; relocated when the protocol layer was moved from
-//! `crate::agent::tools::mcp` to `crate::integrations::mcp`. Lives in
-//! a sibling file so private item access via `super::*` keeps working.
-//!
+
 //! Tool-adapter tests now live in
 //! `crate::agent::tools::mcp::adapter_tests`.
 
-use super::MAX_REQUEST_TIMEOUT;
-use super::McpClientSession;
 use super::is_valid_session_id;
+use super::McpClientSession;
+use super::MAX_REQUEST_TIMEOUT;
 use super::*;
 use crate::agent::tools::mcp::McpToolAdapter;
 use crate::config::{AppConfig, McpOAuthConfig, McpServerConfig};
@@ -91,11 +83,10 @@ fn test_extract_result_accepts_result_and_error() {
     });
     let bad = McpClientSession::extract_result("srv", "tools/call", bad_envelope);
     assert!(bad.is_err());
-    assert!(
-        bad.unwrap_err()
-            .message
-            .contains("not a JSON-RPC 2.0 envelope")
-    );
+    assert!(bad
+        .unwrap_err()
+        .message
+        .contains("not a JSON-RPC 2.0 envelope"));
 
     // Neither result nor error is also rejected.
     let neither = serde_json::json!({ "jsonrpc": "2.0", "id": 1 });

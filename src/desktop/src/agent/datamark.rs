@@ -16,17 +16,6 @@
 //! combine the marker with a `provenance=...` header so the model can tell
 //! which tool / library / MCP server produced the content.
 //!
-//! # Where this is called from
-//!
-//! - [`SystemPromptBuilder::build`](crate::agent::prompt_builder::SystemPromptBuilder::build)
-//!   wraps every `USER.md` body before it's appended to the system prompt.
-//! - The parent agent loop's `process_tool_results` (in
-//!   `agent_impl.rs`) wraps every `role:tool` content before it joins
-//!   the conversation history.
-//! - [`tool_web_delegate`](crate::agent::tools::web::tool_web_delegate)
-//!   applies the same wrapping + a security header in its sub-agent
-//!   loop.
-//!
 //! The security header that the LLM uses to interpret these markers lives in
 //! [`SECURITY_HEADER`] and is prepended to every system prompt in the same
 //! trio of call sites.

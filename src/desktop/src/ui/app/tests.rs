@@ -1,11 +1,4 @@
 //! Tests for `app/mod.rs`.
-//!
-//! Sidecar file. Extracted from `mod.rs` so the implementation
-//! module stays focused on production code.
-//!
-//! Originally a `#[cfg(test)] mod tests { ... }` block at the bottom of
-//! `mod.rs`. Lives in a sibling file so private item access via
-//! `super::*` keeps working.
 
 use super::*;
 use crate::app::orchestrator::AppOrchestrator;
@@ -149,12 +142,11 @@ fn test_background_messages_handling() {
     });
     output.textures_delta.clear();
 
-    assert!(
-        app.orchestrator
-            .file_processor
-            .all_files
-            .contains(&test_file)
-    );
+    assert!(app
+        .orchestrator
+        .file_processor
+        .all_files
+        .contains(&test_file));
     assert!(app.orchestrator.file_processor.all_dirs.contains(&test_dir));
     assert!(app.orchestrator.file_processor.indexing_finished);
     assert_eq!(app.orchestrator.agent.state().status, "Processing...");
@@ -214,19 +206,17 @@ fn test_background_message_file_modified_and_deleted() {
     });
     output.textures_delta.clear();
 
-    assert!(
-        !app.orchestrator
-            .file_processor
-            .all_files
-            .contains(&file_path)
-    );
+    assert!(!app
+        .orchestrator
+        .file_processor
+        .all_files
+        .contains(&file_path));
     assert!(app.orchestrator.selection.selected_file().is_none());
-    assert!(
-        !app.orchestrator
-            .selection
-            .selected_files()
-            .contains(&file_path)
-    );
+    assert!(!app
+        .orchestrator
+        .selection
+        .selected_files()
+        .contains(&file_path));
 }
 
 #[test]
@@ -1152,7 +1142,7 @@ fn test_font_scale_rejects_non_finite_value() {
 /// as a multiplier.
 #[test]
 fn test_persisted_state_migration_clears_legacy_font_size_scale() {
-    use crate::app::persisted::{CURRENT_SCHEMA_VERSION, PersistedUiState};
+    use crate::app::persisted::{PersistedUiState, CURRENT_SCHEMA_VERSION};
 
     // Hand-written JSON mimicking the pre-fix on-disk shape:
     // no `schema_version` field; `font_size_scale` holds the

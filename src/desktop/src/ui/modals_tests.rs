@@ -1,16 +1,9 @@
 //! Tests for `ui/modals.rs`.
-//!
-//! Sidecar file. Extracted from `modals.rs` so the implementation
-//! module stays focused on production code.
-//!
-//! Originally a `#[cfg(test)] mod tests { ... }` block at the bottom of
-//! `modals.rs`. Lives in a sibling file so private item access via
-//! `super::*` keeps working.
 
 use super::*;
 use crate::config::AppConfig;
-use crate::ui::FastMdApp;
 use crate::ui::test_helpers::run_ui_test;
+use crate::ui::FastMdApp;
 use notify::RecommendedWatcher;
 use std::fs;
 

@@ -1,11 +1,4 @@
 //! Tests for `jmap/email.rs`.
-//!
-//! Sidecar file. Extracted from `email.rs` so the implementation
-//! module stays focused on production code.
-//!
-//! Originally a `#[cfg(test)] mod tests { ... }` block at the bottom of
-//! `email.rs`. Lives in a sibling file so private item access via
-//! `super::*` keeps working.
 
 use serde_json::json;
 
@@ -99,11 +92,9 @@ fn test_convert_html_no_body_values() {
         ]]
     });
     let result = convert_html_in_jmap(res);
-    assert!(
-        result["methodResponses"][0][1]["list"][0]["subject"]
-            .as_str()
-            .is_some()
-    );
+    assert!(result["methodResponses"][0][1]["list"][0]["subject"]
+        .as_str()
+        .is_some());
 }
 
 #[test]
@@ -465,7 +456,7 @@ fn test_simplify_cc_and_bcc_preserved() {
     assert_eq!(result[0]["bcc"][0]["email"], "bcc@t.com");
 }
 
-use super::{SearchEmailFilters, tool_get_email_by_id, tool_search_email, tool_send_email};
+use super::{tool_get_email_by_id, tool_search_email, tool_send_email, SearchEmailFilters};
 use crate::agent::tools::jmap::mock_server::{spawn_mock_server, spawn_recording_mock_server};
 use crate::config::{AppConfig, JmapClient};
 #[test]
@@ -760,10 +751,9 @@ fn test_tool_search_email_empty_filters_with_client_errors() {
         &crate::utils::uuid::SystemUuidGenerator,
     );
     assert!(res.is_err());
-    assert!(
-        res.unwrap_err()
-            .contains("At least one filter field must be provided")
-    );
+    assert!(res
+        .unwrap_err()
+        .contains("At least one filter field must be provided"));
 }
 
 #[test]
@@ -975,16 +965,12 @@ fn test_tool_search_email_cursor_pagination() {
     // not; the last page must contain e{total_emails} and the first must not.
     assert!(first.results.contains(r#""id": "e1""#));
     assert!(!second.results.contains(r#""id": "e1""#));
-    assert!(
-        !first
-            .results
-            .contains(&format!(r#""id": "e{total_emails}""#))
-    );
-    assert!(
-        second
-            .results
-            .contains(&format!(r#""id": "e{total_emails}""#))
-    );
+    assert!(!first
+        .results
+        .contains(&format!(r#""id": "e{total_emails}""#)));
+    assert!(second
+        .results
+        .contains(&format!(r#""id": "e{total_emails}""#)));
 }
 
 #[test]
