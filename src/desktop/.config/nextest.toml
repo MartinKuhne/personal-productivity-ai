@@ -38,3 +38,22 @@ retries = 0
 status-level = "fail"
 final-status-level = "fail"
 slow-timeout = { period = "30s", terminate-after = 2 }
+
+# Per-test overrides for tests whose runtime legitimately
+# exceeds the profile default. Without an override, the
+# `slow-timeout` above kills any test that has 60 s of
+# cumulative inactivity (30 s period, twice in a row). The
+# spec test compiles 652 CommonMark examples through the
+# embedded Typst engine and the work is sequential (each
+# example spins up its own engine, so this does not benefit
+# from test-threads), so it lands well past the default on
+# the GH Actions Linux runner.
+[[profile.ci.overrides]]
+filter = 'test(/all_commonmark/)'
+slow-timeout = { period = "60s", terminate-after = 30 }
+# Local CI profile mirrors the GH Actions profile so
+# `cargo nextest run --profile ci` on a developer machine
+# catches the same timeout the runner would.
+[[profile.default.overrides]]
+filter = 'test(/all_commonmark/)'
+slow-timeout = { period = "60s", terminate-after = 30 }
