@@ -41,7 +41,10 @@ pub enum RenderEvent {
         /// Ordinal for ordered list items. `None` → bullet, `Some(n)` → `"n. "`.
         list_ordinal: Option<u64>,
     },
-    CodeBlock(String),
+    CodeBlock {
+        language: Option<String>,
+        content: String,
+    },
     Heading {
         level: u32,
         /// Styled inline elements that make up the heading text.

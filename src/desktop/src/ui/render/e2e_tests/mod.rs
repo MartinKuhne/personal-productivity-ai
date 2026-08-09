@@ -39,6 +39,8 @@
 
 #![cfg(test)]
 
+mod commonmark_parser;
+mod commonmark_render;
 mod ftwa;
 mod helpers;
 mod interactions;
@@ -59,6 +61,7 @@ pub(super) use super::{
     // Sibling-submodule re-exports widened by `render/mod.rs` to
     // `pub(crate)` so the e2e_tests tree can reach them.
     copy_code_to_output,
+    heading_plain_text,
     parse_markdown_to_events,
     render_code_block,
     render_heading,

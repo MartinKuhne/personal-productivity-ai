@@ -20,13 +20,18 @@ use egui::RichText;
 /// Inputs: `ui` (mut), `content`
 ///
 /// Purity: Impure (modifies UI state). Thin adapter.
-pub(crate) fn render_code_block(ui: &mut egui::Ui, content: &str) {
+pub(crate) fn render_code_block(ui: &mut egui::Ui, language: Option<&str>, content: &str) {
     egui::Frame::NONE
         .fill(egui::Color32::from_rgb(20, 20, 22))
         .stroke(egui::Stroke::new(1.0_f32, egui::Color32::from_gray(40)))
         .inner_margin(8.0)
         .corner_radius(4.0)
         .show(ui, |ui| {
+            if let Some(lang) = language
+                && !lang.is_empty()
+            {
+                ui.label(RichText::new(lang).weak().small());
+            }
             // Constrain the wrapping label's width so the copy button
             // always has room, while computing content height dynamically.
             ui.horizontal_top(|ui| {
