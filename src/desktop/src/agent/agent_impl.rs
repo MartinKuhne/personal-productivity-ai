@@ -93,6 +93,7 @@ fn run_agent_inner(ctx: AgentContext) {
                     .agent_event_bus
                     .publish(SeamAgentEvent::SessionFinished {
                         session_id: ctx.session_id,
+                        history: Vec::new(),
                     });
                 return;
             }
@@ -107,13 +108,14 @@ fn run_agent_inner(ctx: AgentContext) {
             status: AgentStatus::Done,
         });
     }
-    let _ = ctx
-        .tx_gui
-        .send(BackgroundEvent::from(AgentEvent::Finished(messages)));
+    let _ = ctx.tx_gui.send(BackgroundEvent::from(AgentEvent::Finished(
+        messages.clone(),
+    )));
     let _ = ctx
         .agent_event_bus
         .publish(SeamAgentEvent::SessionFinished {
             session_id: ctx.session_id,
+            history: messages,
         });
 }
 enum Turn {
@@ -260,13 +262,15 @@ fn process_turn(
                 let _ = ctx.tx_gui.send(BackgroundEvent::from(AgentEvent::Response(
                     full_response.clone(),
                 )));
+                let args_value = serde_json::from_str::<serde_json::Value>(args)
+                    .unwrap_or(serde_json::Value::String(args.to_string()));
                 let _ = ctx
                     .agent_event_bus
                     .publish(SeamAgentEvent::ToolCallStarted {
                         session_id: ctx.session_id,
                         id: call_id,
                         name: fn_name.to_string(),
-                        args: serde_json::Value::String(args.to_string()),
+                        args: args_value,
                     });
             }
             let _ = ctx.tx_gui.send(BackgroundEvent::from(AgentEvent::Status(

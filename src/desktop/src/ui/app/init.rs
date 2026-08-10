@@ -22,6 +22,7 @@ use crate::app::{
 use crate::bus::core::Bus;
 use crate::bus::events::config::ConfigArrived;
 use crate::config::AppConfig;
+use crate::ui::agent::transcript::AgentTranscript;
 
 use super::{FastMdApp, PERSISTED_UI_STATE_KEY};
 
@@ -206,6 +207,7 @@ impl FastMdApp {
                 )),
                 agent_event_reader: Some(agent_event_reader),
                 agent_event_lagged: false,
+                agent_transcript: AgentTranscript::new(uuid::Uuid::nil()),
             },
             layout,
             cached_tree_rows: None,
@@ -311,6 +313,7 @@ impl FastMdApp {
                 )),
                 agent_event_reader: Some(agent_event_reader),
                 agent_event_lagged: false,
+                agent_transcript: AgentTranscript::new(uuid::Uuid::nil()),
             },
             layout: PanelLayout::new(),
             cached_tree_rows: None,

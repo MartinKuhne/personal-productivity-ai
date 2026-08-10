@@ -28,6 +28,7 @@ pub fn clear_agent_session_state(app: &mut FastMdApp) {
     app.agent_mut().clear_history();
     app.agent_mut().set_response(String::new());
     app.agent_mut().set_thinking(String::new());
+    app.orchestrator.agent_transcript.reset();
     if app.agent().state().running {
         app.agent_mut().cancel();
     }
@@ -181,10 +182,11 @@ fn render_agent_session(ui: &mut egui::Ui, app: &mut FastMdApp) {
         .id_salt("agent_thinking_scroll")
         .stick_to_bottom(true)
         .show(ui, |ui| {
-            if !app.agent().state().thinking.is_empty() {
+            let thinking = app.orchestrator.agent_transcript.thinking.clone();
+            if !thinking.is_empty() {
                 ui.collapsing(crate::ui::strings::AGENT_THINKING_PROCESS, |ui| {
                     ui.label(
-                        egui::RichText::new(&app.agent().state().thinking)
+                        egui::RichText::new(&thinking)
                             .italics()
                             .color(egui::Color32::from_rgb(160, 160, 160)),
                     );
@@ -192,26 +194,28 @@ fn render_agent_session(ui: &mut egui::Ui, app: &mut FastMdApp) {
                 ui.add_space(8.0);
             }
 
-            if !app.agent().state().response.is_empty() {
+            let content = app.orchestrator.agent_transcript.content.clone();
+            if !content.is_empty() {
                 ui.heading(crate::ui::strings::AGENT_RESPONSE);
                 ui.separator();
                 let strategy = app.orchestrator.config.deficit_strategy();
                 let agent = app.agent_mut();
-                let response = agent.state().response.clone();
                 let mut toggles = Vec::new();
                 render_markdown(
                     ui,
-                    &response,
+                    &content,
                     &mut agent.state_mut().scroll_to_id,
                     &mut toggles,
                     strategy,
                     None,
                 );
-                // P0-2: Apply task checkbox toggles to the response source.
+                // P0-2: Apply task checkbox toggles to the transcript
+                // content (the new render source, replacing
+                // `AgentState::response`).
                 if !toggles.is_empty() {
                     for (idx, checked) in toggles {
                         crate::ui::render::apply_task_toggle(
-                            &mut agent.state_mut().response,
+                            &mut app.orchestrator.agent_transcript.content,
                             idx,
                             checked,
                         );

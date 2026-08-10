@@ -304,6 +304,52 @@ impl AgentSessionManager {
         self.state.pending_prompts.len()
     }
 
+    /// Clear all queued prompts (used on session failure to avoid
+    /// cascading errors).
+    pub fn clear_queued_prompts(&mut self) {
+        self.state.pending_prompts.clear();
+    }
+
+    /// Apply a `TokenUsageInfo` update to the accumulative totals and
+    /// last-turn snapshot (replaces the `TokenUsage` branch of the old
+    /// `handle_agent_event`).
+    pub fn apply_token_usage(&mut self, info: TokenUsageInfo) {
+        if info.prompt_tokens > self.state.total_usage.prompt_tokens {
+            self.state.total_usage.prompt_tokens = info.prompt_tokens;
+        }
+        self.state.total_usage.completion_tokens = self
+            .state
+            .total_usage
+            .completion_tokens
+            .saturating_add(info.completion_tokens);
+        self.state.total_usage.total_tokens = self
+            .state
+            .total_usage
+            .total_tokens
+            .saturating_add(info.total_tokens);
+        self.state.total_usage.cached_tokens = Some(
+            self.state
+                .total_usage
+                .cached_tokens
+                .unwrap_or(0)
+                .saturating_add(info.cached_tokens.unwrap_or(0)),
+        );
+        self.state.total_usage.reasoning_tokens = Some(
+            self.state
+                .total_usage
+                .reasoning_tokens
+                .unwrap_or(0)
+                .saturating_add(info.reasoning_tokens.unwrap_or(0)),
+        );
+        self.state.token_usage = Some(info);
+    }
+
+    /// Push a debug entry to the accumulated list (replaces the
+    /// `DebugEntry` branch of the old `handle_agent_event`).
+    pub fn push_debug_entry(&mut self, entry: crate::bus::events::debug::AgentDebugEntry) {
+        self.state.debug_entries.push(entry);
+    }
+
     /// Clear the response and history (for new session).
     pub fn clear_history(&mut self) {
         self.state.history = None;

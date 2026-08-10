@@ -79,7 +79,15 @@ impl AgentTranscript {
                 }
             }
             AgentEvent::ToolCallStarted { id, name, args, .. } => {
-                let args_str = serde_json::to_string(args).unwrap_or_default();
+                // If the agent wrapped a raw JSON string in Value::String,
+                // extract the inner string directly (matches the old path
+                // which passed the raw `tool_call.function.arguments`
+                // string to `format_tool_call_message`). Otherwise, serialize
+                // the structured value back to a JSON string.
+                let args_str = match args {
+                    serde_json::Value::String(s) => s.clone(),
+                    _ => serde_json::to_string(args).unwrap_or_default(),
+                };
                 let formatted = format_tool_call_message(name, &args_str);
                 self.content.push_str(&formatted);
                 self.blocks.push(TranscriptBlock::ToolCall {
@@ -92,7 +100,10 @@ impl AgentTranscript {
             AgentEvent::ToolResult {
                 id, name, result, ..
             } => {
-                let result_str = serde_json::to_string(result).unwrap_or_default();
+                let result_str = match result {
+                    serde_json::Value::String(s) => s.clone(),
+                    _ => serde_json::to_string(result).unwrap_or_default(),
+                };
                 let formatted = format_tool_result_message(name, &result_str);
                 self.content.push_str(&formatted);
                 // Update the matching ToolCall block's result.

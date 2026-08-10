@@ -815,14 +815,14 @@ fn test_dual_publish_bus_receives_same_lifecycle_events() {
     assert!(
         bus_events
             .iter()
-            .any(|e| matches!(e, crate::agent::events::AgentEvent::SessionFinished { session_id: sid } if *sid == session_id)),
+            .any(|e| matches!(e, crate::agent::events::AgentEvent::SessionFinished { session_id: sid, .. } if *sid == session_id)),
         "Bus must receive SessionFinished with correct session_id"
     );
     // Every bus event carries the same session_id
     for event in &bus_events {
         let sid = match event {
             crate::agent::events::AgentEvent::SessionStarted { session_id } => *session_id,
-            crate::agent::events::AgentEvent::SessionFinished { session_id } => *session_id,
+            crate::agent::events::AgentEvent::SessionFinished { session_id, .. } => *session_id,
             crate::agent::events::AgentEvent::Status { session_id, .. } => *session_id,
             crate::agent::events::AgentEvent::Thinking { session_id, .. } => *session_id,
             crate::agent::events::AgentEvent::ContentDelta { session_id, .. } => *session_id,

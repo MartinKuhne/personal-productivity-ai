@@ -1,14 +1,15 @@
 //! Tests for `app/mod.rs`.
 
 use super::*;
+use crate::agent::events::{AgentEvent as SeamAgentEvent, AgentStatus};
 use crate::app::orchestrator::AppOrchestrator;
 use crate::bus::events::file::FileEvent;
 use crate::bus::events::messages::TokenUsageInfo;
-use crate::bus::events::typed::AgentEvent;
 use crate::bus::events::typed::FsEvent;
 use crate::ui::test_helpers::assert::assert_no_id_change_in_shapes;
 use crate::ui::test_helpers::run_ui_test;
 use std::path::PathBuf;
+use uuid::Uuid;
 
 fn create_test_app() -> FastMdApp {
     FastMdApp::empty_state(crate::config::AppConfig::default())
@@ -123,19 +124,33 @@ fn test_background_messages_handling() {
         .send(FsEvent::FinishedWithoutWatcher.into())
         .unwrap();
 
-    // 4. Agent Status & Response
+    // 4. Agent Status & ContentDelta via Bus<AgentEvent> (T015: new path)
+    let session_id = Uuid::new_v4();
     app.orchestrator
-        .tx
-        .send(AgentEvent::Status("Processing...".to_string()).into())
-        .unwrap();
+        .agent
+        .event_bus()
+        .publish(SeamAgentEvent::SessionStarted { session_id });
     app.orchestrator
-        .tx
-        .send(AgentEvent::Thinking("Thinking step".to_string()).into())
-        .unwrap();
+        .agent
+        .event_bus()
+        .publish(SeamAgentEvent::Status {
+            session_id,
+            status: AgentStatus::AwaitingLlm,
+        });
     app.orchestrator
-        .tx
-        .send(AgentEvent::Response("Done result".to_string()).into())
-        .unwrap();
+        .agent
+        .event_bus()
+        .publish(SeamAgentEvent::Thinking {
+            session_id,
+            text: "Thinking step".to_string(),
+        });
+    app.orchestrator
+        .agent
+        .event_bus()
+        .publish(SeamAgentEvent::ContentDelta {
+            session_id,
+            text: "Done result".to_string(),
+        });
 
     let mut output = run_ui_test(&ctx, Default::default(), |ui| {
         app.update_ui(ui);
@@ -150,9 +165,12 @@ fn test_background_messages_handling() {
     );
     assert!(app.orchestrator.file_processor.all_dirs.contains(&test_dir));
     assert!(app.orchestrator.file_processor.indexing_finished);
-    assert_eq!(app.orchestrator.agent.state().status, "Processing...");
-    assert_eq!(app.orchestrator.agent.state().thinking, "Thinking step");
-    assert_eq!(app.orchestrator.agent.state().response, "Done result");
+    assert_eq!(
+        app.orchestrator.agent.state().status,
+        "Waiting for LLM completions..."
+    );
+    assert_eq!(app.orchestrator.agent_transcript.thinking, "Thinking step");
+    assert_eq!(app.orchestrator.agent_transcript.content, "Done result");
 }
 
 #[test]
@@ -227,10 +245,18 @@ fn test_agent_failure_and_finish_messages() {
     let ctx = egui::Context::default();
     let mut app = create_test_app();
 
+    let session_id = Uuid::new_v4();
     app.orchestrator
-        .tx
-        .send(AgentEvent::Failed("Network timeout".to_string()).into())
-        .unwrap();
+        .agent
+        .event_bus()
+        .publish(SeamAgentEvent::SessionStarted { session_id });
+    app.orchestrator
+        .agent
+        .event_bus()
+        .publish(SeamAgentEvent::Failed {
+            session_id,
+            error: "Network timeout".to_string(),
+        });
 
     let mut output = run_ui_test(&ctx, Default::default(), |ui| {
         app.update_ui(ui);
@@ -243,10 +269,20 @@ fn test_agent_failure_and_finish_messages() {
     );
     assert!(!app.orchestrator.agent.state().running);
 
+    let session_id2 = Uuid::new_v4();
     app.orchestrator
-        .tx
-        .send(AgentEvent::Finished(vec![serde_json::json!({"ok": true})]).into())
-        .unwrap();
+        .agent
+        .event_bus()
+        .publish(SeamAgentEvent::SessionStarted {
+            session_id: session_id2,
+        });
+    app.orchestrator
+        .agent
+        .event_bus()
+        .publish(SeamAgentEvent::SessionFinished {
+            session_id: session_id2,
+            history: vec![serde_json::json!({"ok": true})],
+        });
 
     let mut output = run_ui_test(&ctx, Default::default(), |ui| {
         app.update_ui(ui);
@@ -262,19 +298,25 @@ fn test_agent_token_usage_message_accumulates() {
     let ctx = egui::Context::default();
     let mut app = create_test_app();
 
+    let session_id = Uuid::new_v4();
+    app.orchestrator
+        .agent
+        .event_bus()
+        .publish(SeamAgentEvent::SessionStarted { session_id });
+
     // First turn: small context, no cached or reasoning tokens.
     app.orchestrator
-        .tx
-        .send(
-            AgentEvent::TokenUsage(TokenUsageInfo {
+        .agent
+        .event_bus()
+        .publish(SeamAgentEvent::TokenUsage {
+            session_id,
+            usage: TokenUsageInfo {
                 prompt_tokens: 100,
                 completion_tokens: 20,
                 total_tokens: 120,
                 ..Default::default()
-            })
-            .into(),
-        )
-        .unwrap();
+            },
+        });
 
     let mut output = run_ui_test(&ctx, Default::default(), |ui| {
         app.update_ui(ui);
@@ -312,18 +354,18 @@ fn test_agent_token_usage_message_accumulates() {
 
     // Second turn: context grew, completion + reasoning added.
     app.orchestrator
-        .tx
-        .send(
-            AgentEvent::TokenUsage(TokenUsageInfo {
+        .agent
+        .event_bus()
+        .publish(SeamAgentEvent::TokenUsage {
+            session_id,
+            usage: TokenUsageInfo {
                 prompt_tokens: 250,
                 completion_tokens: 30,
                 total_tokens: 280,
                 cached_tokens: Some(50),
                 reasoning_tokens: Some(5),
-            })
-            .into(),
-        )
-        .unwrap();
+            },
+        });
 
     let mut output = run_ui_test(&ctx, Default::default(), |ui| {
         app.update_ui(ui);
@@ -359,19 +401,19 @@ fn test_agent_token_usage_message_accumulates() {
         Some(5)
     );
 
-    // Third turn: smaller context â€” peak should NOT shrink.
+    // Third turn: smaller context — peak should NOT shrink.
     app.orchestrator
-        .tx
-        .send(
-            AgentEvent::TokenUsage(TokenUsageInfo {
+        .agent
+        .event_bus()
+        .publish(SeamAgentEvent::TokenUsage {
+            session_id,
+            usage: TokenUsageInfo {
                 prompt_tokens: 80,
                 completion_tokens: 10,
                 total_tokens: 90,
                 ..Default::default()
-            })
-            .into(),
-        )
-        .unwrap();
+            },
+        });
 
     let mut output = run_ui_test(&ctx, Default::default(), |ui| {
         app.update_ui(ui);

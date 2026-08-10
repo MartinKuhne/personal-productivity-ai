@@ -45,6 +45,18 @@ pub enum AgentStatus {
     Done,
 }
 
+impl AgentStatus {
+    /// Human-readable status string for the UI status label (replaces
+    /// the old `AgentEvent::Status(String)` free-form strings).
+    pub fn display_string(&self) -> &'static str {
+        match self {
+            AgentStatus::AwaitingLlm => "Waiting for LLM completions...",
+            AgentStatus::ExecutingTools => "Executing tools...",
+            AgentStatus::Done => "Done",
+        }
+    }
+}
+
 /// A side effect produced by a tool execution that the UI must reissue as a
 /// filesystem event. Returned by `ToolExecutor::execute_all` and republished
 /// by the agent as `AgentEvent::ToolSideEffect`.
@@ -81,7 +93,12 @@ pub enum AgentEvent {
     /// Emitted when a new session starts (first event for a `session_id`).
     SessionStarted { session_id: Uuid },
     /// Emitted when a session finishes (last event for a `session_id`).
-    SessionFinished { session_id: Uuid },
+    /// Carries the final conversation history so the UI can store it for
+    /// continuation in the next session (replaces `AgentEvent::Finished`).
+    SessionFinished {
+        session_id: Uuid,
+        history: Vec<serde_json::Value>,
+    },
     /// Typed status update bracketing the phases of a turn.
     Status {
         session_id: Uuid,
@@ -134,7 +151,7 @@ impl AgentEvent {
     pub fn session_id(&self) -> Uuid {
         match self {
             AgentEvent::SessionStarted { session_id }
-            | AgentEvent::SessionFinished { session_id }
+            | AgentEvent::SessionFinished { session_id, .. }
             | AgentEvent::Status { session_id, .. }
             | AgentEvent::Thinking { session_id, .. }
             | AgentEvent::ContentDelta { session_id, .. }

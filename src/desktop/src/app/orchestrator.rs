@@ -9,6 +9,7 @@ use crate::bus::events::config::ConfigArrived;
 use crate::bus::events::file::FileEvent;
 use crate::bus::events::typed::{BackgroundEvent, FsEvent, McpAuthEvent, ProcessEvent};
 use crate::markdown::Document;
+use crate::ui::agent::transcript::AgentTranscript;
 use std::path::PathBuf;
 use std::sync::mpsc::Receiver;
 use std::sync::{Arc, Mutex};
@@ -55,6 +56,10 @@ pub struct AppOrchestrator {
     /// returned `Lagged(n)`. Cleared on the next `SessionStarted` or
     /// `Status` boundary (re-sync point).
     pub agent_event_lagged: bool,
+    /// UI-owned view model accumulating `AgentEvent` deltas into a displayable
+    /// transcript (migration step 5, T015). The UI renders agent response and
+    /// thinking from this buffer instead of `AgentState::response`/`thinking`.
+    pub agent_transcript: AgentTranscript,
 }
 
 impl AppOrchestrator {
@@ -186,6 +191,11 @@ impl AppOrchestrator {
             self.file_event_bus.clone(),
         );
         self.agent.set_show_results(true);
+        // Clear the transcript immediately so the UI shows empty content
+        // between session start and the `SessionStarted` event arrival.
+        // `SessionStarted` will create a fresh transcript with the correct
+        // `session_id`.
+        self.agent_transcript.reset();
     }
 
     pub fn task_take_finished_watcher(&self) -> Option<notify::RecommendedWatcher> {
@@ -293,12 +303,12 @@ impl AppOrchestrator {
     pub fn drain_background_channel(&mut self) {
         while let Ok(event) = self.rx.try_recv() {
             match event {
-                BackgroundEvent::Agent(agent_ev) => {
-                    if let Some(next_prompt) = self.agent.handle_agent_event(agent_ev) {
-                        // There's a queued prompt - start the next session
-                        self.start_agent_session(next_prompt);
-                    }
-                }
+                // Agent events are now drained from `Bus<AgentEvent>` in
+                // [`Self::drain_agent_event_bus`] (migration step 5, T015).
+                // The legacy `BackgroundEvent::Agent` path is still
+                // published (dual-publish, removed in T016) but no longer
+                // routed to the render path.
+                BackgroundEvent::Agent(_) => {}
                 BackgroundEvent::Fs(fs_ev) => {
                     self.handle_fs_event(fs_ev);
                 }
@@ -312,12 +322,16 @@ impl AppOrchestrator {
         }
     }
 
-    /// Drain the new `Bus<AgentEvent>` reader (migration step 2). Shadow
-    /// during steps 2-4: events are drained and counted but NOT routed to
-    /// the render path (the legacy `BackgroundEvent::Agent` path is still
-    /// authoritative). Handles `Lagged(n)` by setting the
-    /// [`Self::agent_event_lagged`] flag and logging a truncation marker
-    /// (research.md §1, quickstart scenario 5).
+    /// Drain the `Bus<AgentEvent>` reader (migration step 5, T015).
+    ///
+    /// Routes all agent events through the new bus: updates
+    /// `AgentState` (lifecycle: `running`, `status`, `history`,
+    /// `token_usage`, `debug_entries`) and builds the `AgentTranscript`
+    /// view model from `ContentDelta`/`Thinking`/`ToolCallStarted`/
+    /// `ToolResult` deltas. Reissues `ToolSideEffect` as
+    /// `FsEvent::FileModified`. Handles `Lagged(n)` by emitting a visible
+    /// truncation marker into the transcript (research.md §1, quickstart
+    /// scenario 5).
     pub fn drain_agent_event_bus(&mut self) {
         let Some(reader) = self.agent_event_reader.as_mut() else {
             return;
@@ -325,6 +339,7 @@ impl AppOrchestrator {
         // Collect events into a buffer so we can release the reader borrow
         // before calling `self.handle_fs_event` (which needs `&mut self`).
         let mut pending_side_effects: Vec<(std::path::PathBuf, Vec<String>)> = Vec::new();
+        let mut next_prompt: Option<String> = None;
         loop {
             match reader.try_recv_exposing_lag() {
                 Ok(event) => {
@@ -338,18 +353,42 @@ impl AppOrchestrator {
                             _ => {}
                         }
                     }
-                    // Shadow: events are drained but not routed to the
-                    // render path yet (step 5, T015 flips this). The
-                    // `ToolSideEffect` branch is active now (step 4, T014):
-                    // it reissues `FsEvent::FileModified` so file reindexing
-                    // works through the typed path even while the legacy
-                    // `tx_gui` path still carries the same event.
-                    if let SeamAgentEvent::ToolSideEffect {
-                        effect: ToolSideEffect::FileCreated { path, tags },
-                        ..
-                    } = &event
-                    {
-                        pending_side_effects.push((path.clone(), tags.clone()));
+                    match &event {
+                        SeamAgentEvent::SessionStarted { session_id } => {
+                            self.agent_transcript = AgentTranscript::new(*session_id);
+                        }
+                        SeamAgentEvent::SessionFinished { history, .. } => {
+                            self.agent.set_running(false);
+                            self.agent.set_history(Some(history.clone()));
+                            next_prompt = self.agent.take_next_queued_prompt();
+                        }
+                        SeamAgentEvent::Status { status, .. } => {
+                            self.agent.set_status(status.display_string().to_string());
+                        }
+                        SeamAgentEvent::Failed { error, .. } => {
+                            self.agent.set_running(false);
+                            self.agent.set_status(format!("Error: {}", error));
+                            self.agent.clear_queued_prompts();
+                        }
+                        SeamAgentEvent::TokenUsage { usage, .. } => {
+                            self.agent.apply_token_usage(usage.clone());
+                        }
+                        SeamAgentEvent::DebugEntry { entry, .. } => {
+                            self.agent.push_debug_entry(entry.clone());
+                        }
+                        SeamAgentEvent::ToolSideEffect {
+                            effect: ToolSideEffect::FileCreated { path, tags },
+                            ..
+                        } => {
+                            pending_side_effects.push((path.clone(), tags.clone()));
+                        }
+                        // Transcript-building events:
+                        SeamAgentEvent::ContentDelta { .. }
+                        | SeamAgentEvent::Thinking { .. }
+                        | SeamAgentEvent::ToolCallStarted { .. }
+                        | SeamAgentEvent::ToolResult { .. } => {
+                            self.agent_transcript.apply_event(&event);
+                        }
                     }
                 }
                 Err(BroadcastRecvError::Empty) => break,
@@ -364,17 +403,21 @@ impl AppOrchestrator {
                         "BusReader<AgentEvent> lagged — UI fell behind the agent; truncating output"
                     );
                     self.agent_event_lagged = true;
-                    // The truncation marker is emitted into the transcript
-                    // once the UI renders from this bus (step 5, T015).
-                    // During shadow drain (steps 2-4) we only log — the
-                    // legacy path is still authoritative.
-                    let _ = LAG_TRUNCATION_MARKER;
+                    // Emit a visible truncation marker into the transcript.
+                    self.agent_transcript.content.push_str("\n\n");
+                    self.agent_transcript
+                        .content
+                        .push_str(LAG_TRUNCATION_MARKER);
+                    self.agent_transcript.content.push_str("\n\n");
                     continue;
                 }
             }
         }
         for (path, tags) in pending_side_effects {
             self.handle_fs_event(FsEvent::FileModified { path, tags });
+        }
+        if let Some(prompt) = next_prompt {
+            self.start_agent_session(prompt);
         }
     }
 
