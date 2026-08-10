@@ -276,7 +276,7 @@ fn process_turn(
                 session_id: ctx.session_id,
                 status: AgentStatus::ExecutingTools,
             });
-            let results = executor.execute_all(tc, &ctx.tx_gui);
+            let (results, _side_effects) = executor.execute_all(tc);
             emit_tool_results_debug(
                 turn,
                 ctx.session_number,

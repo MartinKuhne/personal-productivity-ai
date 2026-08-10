@@ -1,16 +1,15 @@
 //! Tool-call dispatcher — receives tool-call JSON from the LLM, dispatches through the registry, and feeds results back.
 
+use crate::agent::events::ToolSideEffect;
 use crate::agent::tools::Safety;
 use crate::agent::tools::context::ToolContext;
 use crate::agent::tools::execute_tool;
 use crate::app::session::BrowserSession;
 use crate::bus::core::Bus;
 use crate::bus::events::file::FileEvent;
-use crate::bus::events::typed::{BackgroundEvent, FsEvent};
 use crate::config::AppConfig;
 use std::path::Path;
 use std::sync::Arc;
-use std::sync::mpsc::Sender;
 
 pub struct ToolExecutor {
     config: AppConfig,
@@ -43,11 +42,11 @@ impl ToolExecutor {
         }
     }
 
+    #[allow(clippy::type_complexity)]
     pub fn execute_all(
         &self,
         tool_calls: &[serde_json::Value],
-        tx_gui: &Sender<BackgroundEvent>,
-    ) -> Vec<(String, String, String, String)> {
+    ) -> (Vec<(String, String, String, String)>, Vec<ToolSideEffect>) {
         let mut safe_calls = Vec::new();
         let mut unsafe_calls = Vec::new();
         for tc in tool_calls {
@@ -64,8 +63,8 @@ impl ToolExecutor {
         }
         let mut results = self.execute_parallel(&safe_calls);
         results.extend(self.execute_sequential(&unsafe_calls));
-        self.notify_file_creations(&results, tx_gui);
-        results
+        let side_effects = self.extract_side_effects(&results);
+        (results, side_effects)
     }
 
     /// Look up a tool by name through the registry and ask it for its
@@ -157,11 +156,11 @@ impl ToolExecutor {
         results
     }
 
-    fn notify_file_creations(
+    fn extract_side_effects(
         &self,
         results: &[(String, String, String, String)],
-        tx_gui: &Sender<BackgroundEvent>,
-    ) {
+    ) -> Vec<ToolSideEffect> {
+        let mut effects = Vec::new();
         for (_call_id, func_name, func_args_str, result) in results {
             if func_name != "create_note" {
                 continue;
@@ -199,19 +198,17 @@ impl ToolExecutor {
                             let rest: std::path::PathBuf = comps.collect();
                             let abs_path = Path::new(&lib.root_folder).join(rest);
                             let tags = crate::utils::tags::extract_tags_from_file(&abs_path);
-                            let _ = tx_gui.send(
-                                FsEvent::FileModified {
-                                    path: abs_path,
-                                    tags,
-                                }
-                                .into(),
-                            );
+                            effects.push(ToolSideEffect::FileCreated {
+                                path: abs_path,
+                                tags,
+                            });
                             break;
                         }
                     }
                 }
             }
         }
+        effects
     }
 }
 

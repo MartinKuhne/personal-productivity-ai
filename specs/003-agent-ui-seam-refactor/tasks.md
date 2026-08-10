@@ -89,7 +89,7 @@ description: "Task list for Agent Loop / UI Seam Refactor"
 ### Implementation for User Story 1
 
 - [x] T010 [US1] Move `response_formatter.rs` to `src/desktop/src/ui/render/agent_render.rs` — relocate `format_tool_call_message`, `format_tool_result_message`, `format_delegate_tool_call_message`, `split_thinking_and_content`; update all import sites (migration step 3, RUST-055)
-- [ ] T011 [US1] Create `AgentTranscript` view model in `src/desktop/src/ui/agent/transcript.rs` per data-model.md §10 — `blocks: Vec<TranscriptBlock>`, `content: String`, `thinking: String`; accumulates `ContentDelta`/`ToolCallStarted`/`ToolResult`/`Thinking` from `Bus<AgentEvent>` into ordered blocks (migration step 3)
+- [x] T011 [US1] Create `AgentTranscript` view model in `src/desktop/src/ui/agent/transcript.rs` per data-model.md §10 — `blocks: Vec<TranscriptBlock>`, `content: String`, `thinking: String`; accumulates `ContentDelta`/`ToolCallStarted`/`ToolResult`/`Thinking` from `Bus<AgentEvent>` into ordered blocks (migration step 3)
 - [ ] T012 [US1] Return `Vec<ToolSideEffect>` from `ToolExecutor::execute_all` in `src/desktop/src/agent/tool_executor.rs`; drop `tx_gui` parameter; delete `notify_file_creations` function (lines 160-215) (migration step 4, FR-006)
 - [ ] T013 [US1] Publish `AgentEvent::ToolSideEffect` for each side effect from agent loop in `src/desktop/src/agent/agent_impl.rs` after `execute_all` returns (migration step 4)
 - [ ] T014 [US1] Add `AgentEvent::ToolSideEffect(FileCreated { path, tags })` → `FsEvent::FileModified { path, tags }` reissue branch in `src/desktop/src/app/orchestrator.rs` drain loop — call `self.handle_fs_event(FsEvent::FileModified { path, tags })` (migration step 4, FR-007)
