@@ -80,7 +80,7 @@ pub fn show_agent_debug_window(app: &mut FastMdApp, ctx: &egui::Context) {
                             DebugEntryRow::SessionBoundary => {
                                 ui.add_space(4.0);
                                 ui.separator();
-                                ui.centered_and_justified(|ui| {
+                                ui.with_layout(egui::Layout::top_down(egui::Align::Center), |ui| {
                                     ui.label(
                                         egui::RichText::new(&entry.summary)
                                             .color(egui::Color32::GRAY)
