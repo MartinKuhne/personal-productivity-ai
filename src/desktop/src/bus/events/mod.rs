@@ -25,4 +25,4 @@ pub use config::ConfigArrived;
 pub use debug::{AgentDebugEntry, DebugEntryKind, DebugEntryRow};
 pub use file::{FileEvent, FileEventKind, FileEventProducer};
 pub use messages::{BackgroundLogEntry, LogCategory, TokenUsageInfo};
-pub use typed::{AgentEvent, BackgroundEvent, FsEvent, ProcessEvent};
+pub use typed::{AgentEvent, BackgroundEvent, FsEvent, McpAuthEvent, ProcessEvent};

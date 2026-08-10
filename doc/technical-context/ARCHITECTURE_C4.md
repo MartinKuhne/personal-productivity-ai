@@ -80,6 +80,14 @@ builds messages from `SystemPromptBuilder`, queries an OpenAI-compatible
 endpoint, and loops turns (`Continue` / `Done` / `Failed`) honouring a cancel
 flag.
 
+> **Agent↔UI Seam (in progress, feature 003)**: `agent/events.rs` defines the
+> structured seam types — `AgentPrompt` (UI→agent mpsc input), `AgentEvent`
+> (agent→UI `Bus<AgentEvent>` broadcast output, 11 session-tagged variants),
+> `AgentStatus` (typed status), `ToolSideEffect` (file-creation side effect),
+> `DelegateToolCall` (structured web-delegate trace). These types are
+> additive; the migration replaces the old `bus::events::typed::AgentEvent`
+> + `tx_gui: Sender<BackgroundEvent>` path over 10 sequential steps.
+
 ```mermaid
 C4Component
   title FastMD — Agent Core
@@ -87,6 +95,7 @@ C4Component
   Component(mgr, "AgentSessionManager", "AgentState{running,status,thinking,response,scroll_to_id,history,token_usage,total_usage}; start_session; handle_agent_event; cancel via AtomicBool")
   Component(impl, "run_agent / run_agent_inner", "Resolves LLM client, builds messages, get_tools_schema, ToolExecutor::new, turn loop")
   Component(ctx, "AgentContext", "config, prompt, history, active_file, active_dir, selected_files, cancel_flag, channels")
+  Component(ev, "events", "AgentPrompt (UI→agent), AgentEvent (agent→UI Bus), AgentStatus, ToolSideEffect, DelegateToolCall — the agent↔UI seam types")
   Component(llm, "LLMClient", "parse_usage_block; OpenAI-compatible HTTP")
   Component(pb, "SystemPromptBuilder", "with_active_file/dir/selected_files; USER.md injection per library")
   Component(rf, "ResponseFormatter", "split_thinking_and_content (🤔...🤔), format_tool_call_message, format_tool_result_message")
@@ -94,6 +103,7 @@ C4Component
 
   Rel(mgr, impl, "start_session -> run_agent")
   Rel(impl, ctx, "passes context")
+  Rel(impl, ev, "publishes AgentEvent on Bus<AgentEvent>")
   Rel(impl, llm, "chat completions")
   Rel(impl, pb, "system prompt")
   Rel(impl, te, "dispatch tools")

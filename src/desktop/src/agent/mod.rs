@@ -6,6 +6,7 @@ pub mod agent_impl;
 pub mod context;
 pub mod datamark;
 pub mod error;
+pub mod events;
 pub mod llm_client;
 pub mod manager;
 pub mod prompt_builder;
