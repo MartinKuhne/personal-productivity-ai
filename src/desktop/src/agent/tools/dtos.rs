@@ -485,9 +485,10 @@ pub struct WebDelegateInput {
 #[derive(Serialize, Debug, JsonSchema)]
 pub struct WebDelegateResponse {
     pub result: String,
-    /// Markdown-formatted trace of sub-agent tool calls. Prefixed with
-    /// `>>` so the parent's `process_tool_results` can inject them into
-    /// the response window as a separate visual group.
+    /// Markdown-formatted trace of sub-agent tool calls, surfaced in the
+    /// parent agent's response window as a separate visual group. Never
+    /// passed back to the LLM — `process_tool_results` strips this field
+    /// before wrapping the tool result in a datamark envelope.
     #[serde(default)]
     pub tool_call_trace: String,
 }

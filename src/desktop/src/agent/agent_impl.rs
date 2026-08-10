@@ -350,7 +350,14 @@ fn process_tool_results(
             // from the raw `result` (so the chat panel still shows
             // the real content); only the message we push into the
             // conversation history is wrapped.
-            let wrapped = datamark::wrap_tool_result(&fn_name, &result);
+            //
+            // `web_delegate` carries a `tool_call_trace` field that is
+            // purely a UI artefact (already pushed into `full_response`
+            // above). Strip it from the LLM-bound payload so the model
+            // only sees the `status` and `result` fields, avoiding
+            // redundant context bloat.
+            let llm_result = strip_web_delegate_trace(&fn_name, &result);
+            let wrapped = datamark::wrap_tool_result(&fn_name, &llm_result);
             messages.push(serde_json::json!({
                 "role": "tool",
                 "tool_call_id": cid,
@@ -359,6 +366,30 @@ fn process_tool_results(
         }
     }
 }
+/// Strip the `tool_call_trace` field from a `web_delegate` tool result
+/// before the result is handed to the LLM.
+///
+/// `tool_call_trace` is a UI-only artefact (sub-agent tool-call log
+/// formatted for the response window). Returning it to the LLM as part
+/// of the tool result bloats the conversation with redundant content
+/// that the `result` field already summarises. This helper parses the
+/// `ToolResponse::Success { data }` envelope, removes `tool_call_trace`
+/// from `data` when present, and re-serialises. On any parse failure the
+/// original string is returned unchanged so the LLM still gets a result.
+fn strip_web_delegate_trace(fn_name: &str, result: &str) -> String {
+    if fn_name != "web_delegate" {
+        return result.to_string();
+    }
+    let mut parsed = match serde_json::from_str::<serde_json::Value>(result) {
+        Ok(v) => v,
+        Err(_) => return result.to_string(),
+    };
+    if let Some(data) = parsed.get_mut("data").and_then(|d| d.as_object_mut()) {
+        data.remove("tool_call_trace");
+    }
+    serde_json::to_string(&parsed).unwrap_or_else(|_| result.to_string())
+}
+
 /// Log the file and directory context handed to the LLM when a new
 /// prompt starts. Emitted once per prompt, from the point where the
 /// system prompt is assembled, so the log always reflects what the
@@ -550,7 +581,7 @@ mod tests {
         let mut messages: Vec<serde_json::Value> = Vec::new();
         let mut full_response = String::new();
 
-        let trace = ">> **Executing tool `web_fetch`**\n>> {\n>>   \"url\": \"https://example.com\"\n>> }\n";
+        let trace = "**Executing tool `web_fetch`**\n{\n  \"url\": \"https://example.com\"\n}\n";
         let result = serde_json::json!({
             "status": "success",
             "data": {
@@ -594,9 +625,83 @@ mod tests {
         assert!(
             responses
                 .iter()
-                .any(|r| r.contains(">> **Executing tool `web_fetch`**")),
-            "Expected web_delegate trace with >> prefix in responses. Got: {:?}",
+                .any(|r| r.contains("**Executing tool `web_fetch`**")),
+            "Expected web_delegate trace in responses. Got: {:?}",
             responses
+        );
+    }
+
+    /// `strip_web_delegate_trace` must remove the `tool_call_trace` field
+    /// from a `web_delegate` tool result so it is never sent to the LLM,
+    /// while preserving `status` and `result`.
+    #[test]
+    fn test_strip_web_delegate_trace_removes_trace_field() {
+        let result = serde_json::json!({
+            "status": "success",
+            "data": {
+                "result": "Fetched content",
+                "tool_call_trace": "**Executing tool `web_fetch`**\n"
+            }
+        })
+        .to_string();
+        let stripped = strip_web_delegate_trace("web_delegate", &result);
+        let parsed: serde_json::Value =
+            serde_json::from_str(&stripped).expect("stripped result is valid JSON");
+        assert!(
+            parsed
+                .get("data")
+                .and_then(|d| d.get("tool_call_trace"))
+                .is_none(),
+            "tool_call_trace must be removed from LLM-bound payload"
+        );
+        assert_eq!(
+            parsed
+                .get("data")
+                .and_then(|d| d.get("result"))
+                .and_then(|r| r.as_str()),
+            Some("Fetched content")
+        );
+        assert_eq!(
+            parsed.get("status").and_then(|s| s.as_str()),
+            Some("success")
+        );
+    }
+
+    /// Non-`web_delegate` tools must pass through unchanged — the strip
+    /// is scoped to the one tool that carries a `tool_call_trace` field.
+    #[test]
+    fn test_strip_web_delegate_trace_leaves_other_tools_unchanged() {
+        let result = r#"{"status":"success","data":{"bytes":42}}"#.to_string();
+        let stripped = strip_web_delegate_trace("read_file", &result);
+        assert_eq!(stripped, result);
+    }
+
+    /// Malformed JSON must round-trip unchanged rather than panic — the
+    /// LLM still receives the original tool result on a parse failure.
+    #[test]
+    fn test_strip_web_delegate_trace_passthrough_on_parse_error() {
+        let result = "not json at all".to_string();
+        let stripped = strip_web_delegate_trace("web_delegate", &result);
+        assert_eq!(stripped, result);
+    }
+
+    /// `web_delegate` result with no `tool_call_trace` field must round-trip
+    /// unchanged (e.g. when the delegate produced no sub-agent tool calls).
+    #[test]
+    fn test_strip_web_delegate_trace_no_trace_field_unchanged() {
+        let result = serde_json::json!({
+            "status": "success",
+            "data": {"result": "answer"}
+        })
+        .to_string();
+        let stripped = strip_web_delegate_trace("web_delegate", &result);
+        let parsed: serde_json::Value = serde_json::from_str(&stripped).unwrap();
+        assert_eq!(
+            parsed
+                .get("data")
+                .and_then(|d| d.get("result"))
+                .and_then(|r| r.as_str()),
+            Some("answer")
         );
     }
 
