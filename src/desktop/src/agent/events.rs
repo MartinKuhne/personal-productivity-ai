@@ -6,6 +6,8 @@
 //! identity), AGENT-010 (structured deltas), AGENT-011 (no running buffer).
 //! See `specs/003-agent-ui-seam-refactor/contracts/agent-seam.md` for the full
 //! contract.
+//!
+//! Unit tests live in the sibling `events_tests.rs` sidecar.
 
 use crate::bus::events::debug::AgentDebugEntry;
 use crate::bus::events::messages::TokenUsageInfo;
@@ -164,3 +166,11 @@ impl AgentEvent {
         }
     }
 }
+
+// ---------------------------------------------------------------------------
+// Tests live in the sibling `events_tests.rs` sidecar.
+// ---------------------------------------------------------------------------
+
+#[cfg(test)]
+#[path = "events_tests.rs"]
+mod tests;
