@@ -128,3 +128,22 @@ pub enum AgentEvent {
     /// Emitted when an error terminates the session.
     Failed { session_id: Uuid, error: String },
 }
+
+impl AgentEvent {
+    /// Returns the `session_id` carried by this event (every variant has one).
+    pub fn session_id(&self) -> Uuid {
+        match self {
+            AgentEvent::SessionStarted { session_id }
+            | AgentEvent::SessionFinished { session_id }
+            | AgentEvent::Status { session_id, .. }
+            | AgentEvent::Thinking { session_id, .. }
+            | AgentEvent::ContentDelta { session_id, .. }
+            | AgentEvent::ToolCallStarted { session_id, .. }
+            | AgentEvent::ToolResult { session_id, .. }
+            | AgentEvent::ToolSideEffect { session_id, .. }
+            | AgentEvent::DebugEntry { session_id, .. }
+            | AgentEvent::TokenUsage { session_id, .. }
+            | AgentEvent::Failed { session_id, .. } => *session_id,
+        }
+    }
+}
