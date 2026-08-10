@@ -69,6 +69,7 @@ pub struct AgentSessionManager {
     pub show_debug_window: bool,
     pub debug_search_text: String,
     pub debug_auto_scroll: bool,
+    pub debug_json_rows: usize,
     session_counter: usize,
     /// Long-lived headless Firefox session, shared with the
     /// tool executor. Lazily launches a browser on first use.
@@ -117,6 +118,7 @@ impl AgentSessionManager {
             show_debug_window: false,
             debug_search_text: String::new(),
             debug_auto_scroll: true,
+            debug_json_rows: 24,
             session_counter: 0,
             browser_session,
             pdf_backing,
@@ -155,6 +157,7 @@ impl AgentSessionManager {
             show_debug_window: false,
             debug_search_text: String::new(),
             debug_auto_scroll: true,
+            debug_json_rows: 24,
             session_counter: 0,
             browser_session,
             pdf_backing: Arc::new(crate::app::session::PdfBackingTracker::new()),
