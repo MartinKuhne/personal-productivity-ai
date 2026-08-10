@@ -24,12 +24,14 @@ pub enum DebugEntryRow {
 }
 
 /// A single debug log entry capturing the raw content of one part of one turn.
+///
+/// Session identity lives on the enclosing `AgentEvent::DebugEntry { session_id }`
+/// variant — this struct no longer carries its own `session` field (migration
+/// step 10, data-model.md §4).
 #[derive(Debug, Clone, Serialize)]
 pub struct AgentDebugEntry {
     /// Monotonic turn number within the session (1-based; 0 for session boundaries).
     pub turn: usize,
-    /// Monotonic session number (1-based), incremented on each new prompt.
-    pub session: usize,
     /// When the entry was created.
     pub timestamp: DateTime<Local>,
     /// Kind of the entry.

@@ -3,35 +3,19 @@
 //! [`crate::app::background_task::Task`].
 //!
 //! Each variant of [`BackgroundEvent`] wraps a domain-specific
-//! sub-enum: [`AgentEvent`] for the LLM agent loop, [`FsEvent`] for
-//! the file watcher and indexer, [`ProcessEvent`] for background
-//! workers (PDF converter, image-vision, log entries, file-load
-//! results). The UI consumer matches on [`BackgroundEvent`] and
-//! dispatches to the per-domain handler.
+//! sub-enum: [`FsEvent`] for the file watcher and indexer,
+//! [`ProcessEvent`] for background workers (PDF converter, image-vision,
+//! log entries, file-load results). The UI consumer matches on
+//! [`BackgroundEvent`] and dispatches to the per-domain handler.
+//! Agent events flow on a separate `Bus<AgentEvent>` (see
+//! [`crate::agent::events`]).
 //!
 //! The non-cloneable `notify::RecommendedWatcher` handle that the
 //! file-watcher owns is moved through the
 //! [`crate::app::background_task::Task::finished_watcher`] slot
 //! instead of the message bus.
 
-use crate::bus::events::debug::AgentDebugEntry;
-use crate::bus::events::messages::{BackgroundLogEntry, TokenUsageInfo};
-use serde_json::Value;
-
-/// Agent-domain events emitted by the LLM agent loop.
-#[derive(Debug, Clone)]
-pub enum AgentEvent {
-    Status(String),
-    Thinking(String),
-    Response(String),
-    Finished(Vec<Value>),
-    Failed(String),
-    /// Emitted after every LLM turn that returns a `usage` block.
-    TokenUsage(TokenUsageInfo),
-    /// Emitted once per debug entry (up to 3 per turn: outgoing, incoming, tool results)
-    /// plus a session-boundary entry at the start of each new session.
-    DebugEntry(AgentDebugEntry),
-}
+use crate::bus::events::messages::BackgroundLogEntry;
 
 /// Filesystem-watcher-domain events emitted by the file watcher,
 /// indexer, and tool executor.
@@ -89,7 +73,6 @@ pub enum McpAuthEvent {
 /// forwards to the appropriate handler.
 #[derive(Debug, Clone)]
 pub enum BackgroundEvent {
-    Agent(AgentEvent),
     Fs(FsEvent),
     Process(ProcessEvent),
     /// OAuth authorization-flow completion for a single MCP server.
@@ -118,12 +101,6 @@ pub enum BackgroundEvent {
 // shortest path for log-only producers.
 // ---------------------------------------------------------------------------
 
-impl From<AgentEvent> for BackgroundEvent {
-    fn from(event: AgentEvent) -> Self {
-        Self::Agent(event)
-    }
-}
-
 impl From<FsEvent> for BackgroundEvent {
     fn from(event: FsEvent) -> Self {
         Self::Fs(event)
@@ -148,12 +125,6 @@ impl From<BackgroundLogEntry> for BackgroundEvent {
     }
 }
 
-impl From<AgentDebugEntry> for BackgroundEvent {
-    fn from(entry: AgentDebugEntry) -> Self {
-        Self::Agent(AgentEvent::DebugEntry(entry))
-    }
-}
-
 #[cfg(test)]
 mod tests {
     //! Smoke tests for the blanket `From` conversions on
@@ -173,12 +144,6 @@ mod tests {
             }
             other => panic!("expected ProcessEvent::LogEntry, got {:?}", other),
         }
-    }
-
-    #[test]
-    fn from_agent_event_wraps_agent_variant() {
-        let ev: BackgroundEvent = AgentEvent::Failed("boom".into()).into();
-        assert!(matches!(ev, BackgroundEvent::Agent(AgentEvent::Failed(_))));
     }
 
     #[test]

@@ -2,8 +2,9 @@
 
 use crate::agent::agent_impl::run_agent;
 use crate::agent::context::AgentContext;
+use crate::agent::events::AgentEvent as SeamAgentEvent;
+use crate::bus::core::BusReader;
 use crate::bus::events::debug::{AgentDebugEntry, DebugEntryKind, DebugEntryRow};
-use crate::bus::events::typed::{AgentEvent, BackgroundEvent};
 use crate::config::AppConfig;
 use std::collections::HashSet;
 use std::sync::Arc;
@@ -24,24 +25,24 @@ fn make_config(port: u16) -> AppConfig {
     config
 }
 
-fn make_ctx(config: AppConfig) -> (AgentContext, std::sync::mpsc::Receiver<BackgroundEvent>) {
-    let (tx, rx) = std::sync::mpsc::channel();
+fn make_ctx(config: AppConfig) -> (AgentContext, BusReader<SeamAgentEvent>) {
     let browser_session = std::sync::Arc::new(crate::app::session::BrowserSession::new(
         &crate::config::AppConfig::default(),
     ));
+    let agent_event_bus = crate::bus::core::Bus::new();
+    let bus_reader = agent_event_bus.subscribe();
     let ctx = AgentContext {
         config,
-        tx_gui: tx,
         file_event_bus: crate::bus::core::Bus::new(),
+        agent_event_bus,
         active_file: None,
         active_dir: None,
         selected_files: HashSet::new(),
         prompt: "Hello".to_string(),
         cancel_flag: Arc::new(AtomicBool::new(false)),
         history: None,
-        current_response: String::new(),
         model_name: None,
-        session_number: 1,
+        session_id: uuid::Uuid::new_v4(),
         browser_session,
         pdf_backing: std::sync::Arc::new(crate::app::session::PdfBackingTracker::new()),
         tool_manager: std::sync::Arc::new(std::sync::RwLock::new(
@@ -49,7 +50,31 @@ fn make_ctx(config: AppConfig) -> (AgentContext, std::sync::mpsc::Receiver<Backg
         )),
         uuid_gen: std::sync::Arc::new(crate::utils::uuid::SystemUuidGenerator),
     };
-    (ctx, rx)
+    (ctx, bus_reader)
+}
+
+/// Collect bus events until `SessionFinished` is seen or `timeout` elapses.
+/// After `SessionFinished`, drains any remaining buffered events.
+fn collect_bus_events(
+    reader: &mut BusReader<SeamAgentEvent>,
+    timeout: std::time::Duration,
+) -> Vec<SeamAgentEvent> {
+    let mut events = Vec::new();
+    let deadline = std::time::Instant::now() + timeout;
+    while std::time::Instant::now() < deadline {
+        while let Ok(ev) = reader.try_recv() {
+            let is_finished = matches!(ev, SeamAgentEvent::SessionFinished { .. });
+            events.push(ev);
+            if is_finished {
+                while let Ok(ev) = reader.try_recv() {
+                    events.push(ev);
+                }
+                return events;
+            }
+        }
+        std::thread::sleep(std::time::Duration::from_millis(5));
+    }
+    events
 }
 
 /// Spawn a one-shot HTTP server on a random localhost port and bind
@@ -104,14 +129,17 @@ fn test_run_agent_missing_api_key() {
             use_case: vec!["chat".to_string()],
         },
     );
-    let (ctx, rx) = make_ctx(config);
+    let (ctx, mut bus_reader) = make_ctx(config);
     run_agent(ctx);
-    match rx.recv().unwrap() {
-        BackgroundEvent::Agent(AgentEvent::Failed(err)) => {
-            assert!(err.contains("API key not set"))
-        }
-        _ => panic!("Expected AgentEvent::Failed"),
-    }
+    let events = collect_bus_events(&mut bus_reader, std::time::Duration::from_secs(2));
+    assert!(
+        events.iter().any(|e| matches!(
+            e,
+            SeamAgentEvent::Failed { error, .. } if error.contains("API key not set")
+        )),
+        "expected Failed with API key message; got: {:?}",
+        events
+    );
 }
 
 #[test]
@@ -127,33 +155,33 @@ fn test_run_agent_network_error() {
             use_case: vec!["chat".to_string()],
         },
     );
-    let (ctx, rx) = make_ctx(config);
+    let (ctx, mut bus_reader) = make_ctx(config);
     run_agent(ctx);
-    let mut got = false;
-    while let Ok(ev) = rx.recv() {
-        if let BackgroundEvent::Agent(AgentEvent::Failed(err)) = ev {
-            assert!(err.contains("Network error") || err.contains("timed out"));
-            got = true;
-            break;
-        }
-    }
-    assert!(got);
+    let events = collect_bus_events(&mut bus_reader, std::time::Duration::from_secs(30));
+    assert!(
+        events.iter().any(|e| matches!(
+            e,
+            SeamAgentEvent::Failed { error, .. } if error.contains("Network error") || error.contains("timed out")
+        )),
+        "expected Failed with network error; got: {:?}",
+        events
+    );
 }
 
 #[test]
 fn test_run_agent_invalid_json_response() {
     let port = spawn_one_shot_http_server(b"HTTP/1.1 200 OK\r\nContent-Length: 1\r\n\r\n{");
-    let (ctx, rx) = make_ctx(make_config(port));
+    let (ctx, mut bus_reader) = make_ctx(make_config(port));
     run_agent(ctx);
-    let mut got = false;
-    while let Ok(ev) = rx.recv() {
-        if let BackgroundEvent::Agent(AgentEvent::Failed(err)) = ev {
-            assert!(err.contains("Failed to parse"));
-            got = true;
-            break;
-        }
-    }
-    assert!(got);
+    let events = collect_bus_events(&mut bus_reader, std::time::Duration::from_secs(5));
+    assert!(
+        events.iter().any(|e| matches!(
+            e,
+            SeamAgentEvent::Failed { error, .. } if error.contains("Failed to parse")
+        )),
+        "expected Failed with parse error; got: {:?}",
+        events
+    );
 }
 
 #[test]
@@ -161,33 +189,33 @@ fn test_run_agent_http_status_error() {
     let port = spawn_one_shot_http_server(
         b"HTTP/1.1 400 Bad Request\r\nContent-Length: 11\r\n\r\nbad request",
     );
-    let (ctx, rx) = make_ctx(make_config(port));
+    let (ctx, mut bus_reader) = make_ctx(make_config(port));
     run_agent(ctx);
-    let mut got = false;
-    while let Ok(ev) = rx.recv() {
-        if let BackgroundEvent::Agent(AgentEvent::Failed(err)) = ev {
-            assert!(err.contains("HTTP 400 error"));
-            got = true;
-            break;
-        }
-    }
-    assert!(got);
+    let events = collect_bus_events(&mut bus_reader, std::time::Duration::from_secs(5));
+    assert!(
+        events.iter().any(|e| matches!(
+            e,
+            SeamAgentEvent::Failed { error, .. } if error.contains("HTTP 400 error")
+        )),
+        "expected Failed with HTTP 400 error; got: {:?}",
+        events
+    );
 }
 
 #[test]
 fn test_run_agent_missing_choices() {
     let port = spawn_one_shot_http_server(&http_response("HTTP/1.1 200 OK", "{}"));
-    let (ctx, rx) = make_ctx(make_config(port));
+    let (ctx, mut bus_reader) = make_ctx(make_config(port));
     run_agent(ctx);
-    let mut got = false;
-    while let Ok(ev) = rx.recv() {
-        if let BackgroundEvent::Agent(AgentEvent::Failed(err)) = ev {
-            assert!(err.contains("Invalid response schema"));
-            got = true;
-            break;
-        }
-    }
-    assert!(got);
+    let events = collect_bus_events(&mut bus_reader, std::time::Duration::from_secs(5));
+    assert!(
+        events.iter().any(|e| matches!(
+            e,
+            SeamAgentEvent::Failed { error, .. } if error.contains("Invalid response schema")
+        )),
+        "expected Failed with schema error; got: {:?}",
+        events
+    );
 }
 
 #[test]
@@ -198,23 +226,23 @@ fn test_run_agent_emits_done_status_on_natural_completion() {
     })
     .to_string();
     let port = spawn_one_shot_http_server(&http_response("HTTP/1.1 200 OK", &body));
-    let (ctx, rx) = make_ctx(make_config(port));
+    let (ctx, mut bus_reader) = make_ctx(make_config(port));
     run_agent(ctx);
-    let mut statuses = Vec::new();
-    let mut saw_finished = false;
-    while let Ok(ev) = rx.recv() {
-        match ev {
-            BackgroundEvent::Agent(AgentEvent::Status(s)) => statuses.push(s),
-            BackgroundEvent::Agent(AgentEvent::Finished(_)) => {
-                saw_finished = true;
-                break;
+    let events = collect_bus_events(&mut bus_reader, std::time::Duration::from_secs(5));
+    let saw_finished = events
+        .iter()
+        .any(|e| matches!(e, SeamAgentEvent::SessionFinished { .. }));
+    assert!(saw_finished, "must see SessionFinished");
+    let saw_done = events.iter().any(|e| {
+        matches!(
+            e,
+            SeamAgentEvent::Status {
+                status: crate::agent::events::AgentStatus::Done,
+                ..
             }
-            BackgroundEvent::Agent(AgentEvent::Failed(err)) => panic!("agent failed: {}", err),
-            _ => {}
-        }
-    }
-    assert!(saw_finished);
-    assert!(statuses.iter().any(|s| s == "Done"));
+        )
+    });
+    assert!(saw_done, "must see Status(Done); events: {:?}", events);
 }
 
 #[test]
@@ -225,23 +253,23 @@ fn test_run_agent_skips_done_status_when_cancelled() {
     })
     .to_string();
     let port = spawn_one_shot_http_server(&http_response("HTTP/1.1 200 OK", &body));
-    let (tx, rx) = std::sync::mpsc::channel();
     let browser_session = std::sync::Arc::new(crate::app::session::BrowserSession::new(
         &crate::config::AppConfig::default(),
     ));
+    let agent_event_bus = crate::bus::core::Bus::new();
+    let mut bus_reader = agent_event_bus.subscribe();
     let ctx = AgentContext {
         config: make_config(port),
-        tx_gui: tx,
         file_event_bus: crate::bus::core::Bus::new(),
+        agent_event_bus,
         active_file: None,
         active_dir: None,
         selected_files: HashSet::new(),
         prompt: "Hello".to_string(),
         cancel_flag: Arc::new(AtomicBool::new(true)),
         history: None,
-        current_response: String::new(),
         model_name: None,
-        session_number: 1,
+        session_id: uuid::Uuid::new_v4(),
         browser_session,
         pdf_backing: std::sync::Arc::new(crate::app::session::PdfBackingTracker::new()),
         tool_manager: std::sync::Arc::new(std::sync::RwLock::new(
@@ -250,17 +278,21 @@ fn test_run_agent_skips_done_status_when_cancelled() {
         uuid_gen: std::sync::Arc::new(crate::utils::uuid::SystemUuidGenerator),
     };
     run_agent(ctx);
-    let mut saw_done = false;
-    let mut saw_finished = false;
-    while let Ok(ev) = rx.recv() {
-        match ev {
-            BackgroundEvent::Agent(AgentEvent::Status(s)) if s == "Done" => saw_done = true,
-            BackgroundEvent::Agent(AgentEvent::Finished(_)) => saw_finished = true,
-            _ => {}
-        }
-    }
-    assert!(saw_finished);
-    assert!(!saw_done);
+    let events = collect_bus_events(&mut bus_reader, std::time::Duration::from_secs(5));
+    let saw_finished = events
+        .iter()
+        .any(|e| matches!(e, SeamAgentEvent::SessionFinished { .. }));
+    let saw_done = events.iter().any(|e| {
+        matches!(
+            e,
+            SeamAgentEvent::Status {
+                status: crate::agent::events::AgentStatus::Done,
+                ..
+            }
+        )
+    });
+    assert!(saw_finished, "must see SessionFinished");
+    assert!(!saw_done, "must NOT see Status(Done) when cancelled");
 }
 
 #[test]
@@ -314,23 +346,25 @@ fn test_run_agent_emits_executing_tool_message_immediately() {
             }
         }
     });
-    let (ctx, rx) = make_ctx(make_config(port));
+    let (ctx, mut bus_reader) = make_ctx(make_config(port));
     run_agent(ctx);
-    let mut responses = Vec::new();
-    while let Ok(ev) = rx.recv() {
-        match ev {
-            BackgroundEvent::Agent(AgentEvent::Response(resp)) => responses.push(resp),
-            BackgroundEvent::Agent(AgentEvent::Finished(_)) => break,
-            BackgroundEvent::Agent(AgentEvent::Failed(err)) => panic!("agent failed: {}", err),
-            _ => {}
-        }
-    }
+    let events = collect_bus_events(&mut bus_reader, std::time::Duration::from_secs(5));
     assert!(
-        responses
-            .iter()
-            .any(|r| r.contains("Executing tool `read_tags`"))
+        events.iter().any(|e| matches!(
+            e,
+            SeamAgentEvent::ToolCallStarted { name, .. } if name == "read_tags"
+        )),
+        "must see ToolCallStarted for read_tags; events: {:?}",
+        events
     );
-    assert!(responses.iter().any(|r| r.contains("Result (`read_tags`)")));
+    assert!(
+        events.iter().any(|e| matches!(
+            e,
+            SeamAgentEvent::ToolResult { name, .. } if name == "read_tags"
+        )),
+        "must see ToolResult for read_tags; events: {:?}",
+        events
+    );
 }
 
 /// R1 (Spotlighting) regression: every `role:tool` message that
@@ -394,18 +428,18 @@ fn test_run_agent_datamarks_tool_results_in_conversation_history() {
             }
         }
     });
-    let (ctx, rx) = make_ctx(make_config(port));
+    let (ctx, mut bus_reader) = make_ctx(make_config(port));
     run_agent(ctx);
 
-    // Drain the event stream, capturing the Finished history.
-    let mut history: Option<Vec<serde_json::Value>> = None;
-    while let Ok(ev) = rx.recv() {
-        if let BackgroundEvent::Agent(AgentEvent::Finished(messages)) = ev {
-            history = Some(messages);
-            break;
-        }
-    }
-    let history = history.expect("agent must emit Finished with history");
+    // Drain the event stream, capturing the SessionFinished history.
+    let events = collect_bus_events(&mut bus_reader, std::time::Duration::from_secs(5));
+    let history = events
+        .iter()
+        .find_map(|e| match e {
+            SeamAgentEvent::SessionFinished { history, .. } => Some(history.clone()),
+            _ => None,
+        })
+        .expect("agent must emit SessionFinished with history");
 
     // Find the role:tool entry.
     let tool_entry = history
@@ -450,17 +484,17 @@ fn test_run_agent_system_prompt_starts_with_security_header() {
     })
     .to_string();
     let port = spawn_one_shot_http_server(&http_response("HTTP/1.1 200 OK", &body));
-    let (ctx, rx) = make_ctx(make_config(port));
+    let (ctx, mut bus_reader) = make_ctx(make_config(port));
     run_agent(ctx);
 
-    let mut history: Option<Vec<serde_json::Value>> = None;
-    while let Ok(ev) = rx.recv() {
-        if let BackgroundEvent::Agent(AgentEvent::Finished(messages)) = ev {
-            history = Some(messages);
-            break;
-        }
-    }
-    let history = history.expect("agent must emit Finished with history");
+    let events = collect_bus_events(&mut bus_reader, std::time::Duration::from_secs(5));
+    let history = events
+        .iter()
+        .find_map(|e| match e {
+            SeamAgentEvent::SessionFinished { history, .. } => Some(history.clone()),
+            _ => None,
+        })
+        .expect("agent must emit SessionFinished with history");
 
     let system = history
         .first()
@@ -498,17 +532,17 @@ fn test_run_agent_system_prompt_without_context_has_no_file_context() {
     // make_ctx already passes active_file=None, active_dir=None,
     // selected_files empty — the state the interactive entry points
     // hand over when all tabs are closed.
-    let (ctx, rx) = make_ctx(make_config(port));
+    let (ctx, mut bus_reader) = make_ctx(make_config(port));
     run_agent(ctx);
 
-    let mut history: Option<Vec<serde_json::Value>> = None;
-    while let Ok(ev) = rx.recv() {
-        if let BackgroundEvent::Agent(AgentEvent::Finished(messages)) = ev {
-            history = Some(messages);
-            break;
-        }
-    }
-    let history = history.expect("agent must emit Finished with history");
+    let events = collect_bus_events(&mut bus_reader, std::time::Duration::from_secs(5));
+    let history = events
+        .iter()
+        .find_map(|e| match e {
+            SeamAgentEvent::SessionFinished { history, .. } => Some(history.clone()),
+            _ => None,
+        })
+        .expect("agent must emit SessionFinished with history");
 
     let system = history
         .first()
@@ -539,17 +573,17 @@ fn test_run_agent_emits_debug_entries() {
     })
     .to_string();
     let port = spawn_one_shot_http_server(&http_response("HTTP/1.1 200 OK", &body));
-    let (ctx, rx) = make_ctx(make_config(port));
+    let (ctx, mut bus_reader) = make_ctx(make_config(port));
     run_agent(ctx);
 
-    let mut debug_entries: Vec<AgentDebugEntry> = Vec::new();
-    while let Ok(ev) = rx.recv() {
-        match &ev {
-            BackgroundEvent::Agent(AgentEvent::DebugEntry(e)) => debug_entries.push(e.clone()),
-            BackgroundEvent::Agent(AgentEvent::Finished(_)) => break,
-            _ => {}
-        }
-    }
+    let events = collect_bus_events(&mut bus_reader, std::time::Duration::from_secs(5));
+    let debug_entries: Vec<AgentDebugEntry> = events
+        .iter()
+        .filter_map(|e| match e {
+            SeamAgentEvent::DebugEntry { entry, .. } => Some(entry.clone()),
+            _ => None,
+        })
+        .collect();
 
     assert!(
         !debug_entries.is_empty(),
@@ -650,17 +684,17 @@ fn test_run_agent_debug_entries_with_tool_calls() {
             }
         }
     });
-    let (ctx, rx) = make_ctx(make_config(port));
+    let (ctx, mut bus_reader) = make_ctx(make_config(port));
     run_agent(ctx);
 
-    let mut debug_entries: Vec<AgentDebugEntry> = Vec::new();
-    while let Ok(ev) = rx.recv() {
-        match &ev {
-            BackgroundEvent::Agent(AgentEvent::DebugEntry(e)) => debug_entries.push(e.clone()),
-            BackgroundEvent::Agent(AgentEvent::Finished(_)) => break,
-            _ => {}
-        }
-    }
+    let events = collect_bus_events(&mut bus_reader, std::time::Duration::from_secs(5));
+    let debug_entries: Vec<AgentDebugEntry> = events
+        .iter()
+        .filter_map(|e| match e {
+            SeamAgentEvent::DebugEntry { entry, .. } => Some(entry.clone()),
+            _ => None,
+        })
+        .collect();
 
     // Must have a session boundary
     assert!(
@@ -726,23 +760,25 @@ fn test_debug_outgoing_turn1_includes_full_initial_messages() {
     })
     .to_string();
     let port = spawn_one_shot_http_server(&http_response("HTTP/1.1 200 OK", &body));
-    let (ctx, rx) = make_ctx(make_config(port));
+    let (ctx, mut bus_reader) = make_ctx(make_config(port));
     run_agent(ctx);
 
-    let mut outgoing: Vec<AgentDebugEntry> = Vec::new();
-    while let Ok(ev) = rx.recv() {
-        match &ev {
-            BackgroundEvent::Agent(AgentEvent::DebugEntry(e)) => {
-                if matches!(e.kind, DebugEntryKind::Outgoing)
-                    && matches!(e.row_type, DebugEntryRow::Entry)
+    let events = collect_bus_events(&mut bus_reader, std::time::Duration::from_secs(5));
+    let outgoing: Vec<AgentDebugEntry> = events
+        .iter()
+        .filter_map(|e| match e {
+            SeamAgentEvent::DebugEntry { entry, .. } => {
+                if matches!(entry.kind, DebugEntryKind::Outgoing)
+                    && matches!(entry.row_type, DebugEntryRow::Entry)
                 {
-                    outgoing.push(e.clone());
+                    Some(entry.clone())
+                } else {
+                    None
                 }
             }
-            BackgroundEvent::Agent(AgentEvent::Finished(_)) => break,
-            _ => {}
-        }
-    }
+            _ => None,
+        })
+        .collect();
 
     let turn1 = outgoing
         .iter()
@@ -763,4 +799,46 @@ fn test_debug_outgoing_turn1_includes_full_initial_messages() {
         Some("system"),
         "first message in turn 1 delta must be the system prompt"
     );
+}
+
+/// T008: Bus lifecycle test — verifies that `Bus<AgentEvent>` receives
+/// the expected lifecycle events (SessionStarted, Status, SessionFinished)
+/// and every event carries the correct session_id. Quickstart scenario 2.
+#[test]
+fn test_dual_publish_bus_receives_same_lifecycle_events() {
+    let body = serde_json::json!({
+        "id": "chatcmpl-1", "object": "chat.completion", "created": 0, "model": "test",
+        "choices": [{"index": 0, "message": {"role": "assistant", "content": "Hi"}, "finish_reason": "stop"}],
+        "usage": {"prompt_tokens": 1, "completion_tokens": 1, "total_tokens": 2}
+    })
+    .to_string();
+    let port = spawn_one_shot_http_server(&http_response("HTTP/1.1 200 OK", &body));
+    let (ctx, mut bus_reader) = make_ctx(make_config(port));
+    let session_id = ctx.session_id;
+    run_agent(ctx);
+
+    let bus_events = collect_bus_events(&mut bus_reader, std::time::Duration::from_secs(5));
+
+    // Assert SessionStarted is present and carries the correct session_id
+    assert!(
+        bus_events
+            .iter()
+            .any(|e| matches!(e, SeamAgentEvent::SessionStarted { session_id: sid } if *sid == session_id)),
+        "Bus must receive SessionStarted with correct session_id"
+    );
+    // Assert SessionFinished is present and carries the correct session_id
+    assert!(
+        bus_events
+            .iter()
+            .any(|e| matches!(e, SeamAgentEvent::SessionFinished { session_id: sid, .. } if *sid == session_id)),
+        "Bus must receive SessionFinished with correct session_id"
+    );
+    // Every bus event carries the same session_id
+    for event in &bus_events {
+        assert_eq!(
+            event.session_id(),
+            session_id,
+            "every AgentEvent must carry the correct session_id"
+        );
+    }
 }

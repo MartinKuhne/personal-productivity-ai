@@ -1,15 +1,15 @@
 //! Agent context — bundles all inputs (config, channels, file bus, active file/dir, prompt, cancel flag, history) for an agent session.
 
+use crate::agent::events::AgentEvent;
 use crate::app::session::BrowserSession;
 use crate::bus::core::Bus;
 use crate::bus::events::file::FileEvent;
-use crate::bus::events::typed::BackgroundEvent;
 use crate::config::AppConfig;
 use serde_json::Value;
 use std::collections::HashSet;
 use std::path::PathBuf;
-use std::sync::mpsc::Sender;
 use std::sync::{Arc, atomic::AtomicBool};
+use uuid::Uuid;
 
 /// Consolidated context for running an agent session.
 ///
@@ -17,21 +17,22 @@ use std::sync::{Arc, atomic::AtomicBool};
 /// `AgentContext::new` was a pass-through forwarder (PSD-004) and was removed.
 pub struct AgentContext {
     pub config: AppConfig,
-    pub tx_gui: Sender<BackgroundEvent>,
     pub file_event_bus: Bus<FileEvent>,
+    /// Agent→UI structured event bus. The agent publishes structured
+    /// `AgentEvent`s here; the UI subscribes via `BusReader`.
+    pub agent_event_bus: Bus<AgentEvent>,
     pub active_file: Option<PathBuf>,
     pub active_dir: Option<PathBuf>,
     pub selected_files: HashSet<PathBuf>,
     pub prompt: String,
     pub cancel_flag: Arc<AtomicBool>,
     pub history: Option<Vec<Value>>,
-    pub current_response: String,
     /// Optional model name override. When set, `LLMClient::from_config` uses this model
     /// directly instead of selecting the cheapest available model.
     pub model_name: Option<String>,
-    /// Monotonic session counter (1-based), incremented on each new prompt.
-    /// Used by debug entries to group turns by session.
-    pub session_number: usize,
+    /// Uuid identity for the session — tags every `AgentEvent` on the
+    /// `Bus<AgentEvent>` path (FR-008).
+    pub session_id: Uuid,
     /// Long-lived headless Firefox session shared with every
     /// mutating browser tool call. Owned by the application
     /// (one instance per app) and handed to the agent thread
@@ -52,27 +53,24 @@ mod tests {
 
     use crate::config::AppConfig;
     use std::path::Path;
-    use std::sync::mpsc::channel;
 
     #[test]
     fn test_agent_context_creation() {
-        let (tx, _rx) = channel();
         let config = AppConfig::default();
         let bus = Bus::new();
         let browser = Arc::new(crate::app::session::BrowserSession::new(&config));
         let ctx = AgentContext {
             config: config.clone(),
-            tx_gui: tx,
             file_event_bus: bus,
+            agent_event_bus: Bus::new(),
             active_file: Some(PathBuf::from("test.md")),
             active_dir: None,
             selected_files: HashSet::new(),
             prompt: "hello".to_string(),
             cancel_flag: Arc::new(AtomicBool::new(false)),
             history: None,
-            current_response: String::new(),
             model_name: None,
-            session_number: 1,
+            session_id: Uuid::new_v4(),
             browser_session: browser,
             pdf_backing: Arc::new(crate::app::session::PdfBackingTracker::new()),
             tool_manager: Arc::new(std::sync::RwLock::new(

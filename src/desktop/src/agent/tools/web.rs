@@ -3,7 +3,7 @@
 //! Unit tests live in the sibling `web_tests.rs` sidecar.
 
 use crate::agent::datamark::{self, SECURITY_HEADER};
-use crate::agent::response_formatter::format_delegate_tool_call_message;
+use crate::agent::events::DelegateToolCall;
 use crate::agent::tools::manager::builtin::strings::WEB_FETCH_FINAL_PAGE_HINT;
 use crate::agent::tools::manager::cache::CacheEntry;
 use crate::config::AppConfig;
@@ -395,7 +395,7 @@ pub fn tool_web_delegate(
     let mut loop_count = 0;
     let max_loops = 10;
     let mut final_content = String::new();
-    let mut delegate_trace = String::new();
+    let mut delegate_tool_calls: Vec<DelegateToolCall> = Vec::new();
 
     while loop_count < max_loops {
         loop_count += 1;
@@ -474,10 +474,6 @@ pub fn tool_web_delegate(
                     .and_then(|a| a.as_str())
                     .unwrap_or("{}");
 
-                let tool_call_msg = format_delegate_tool_call_message(func_name, func_args_str);
-                delegate_trace.push_str(&tool_call_msg);
-                delegate_trace.push_str("\n\n");
-
                 let result = if func_name == "web_fetch" {
                     if let Ok(input) = serde_json::from_str::<
                         crate::agent::tools::dtos::WebFetchInput,
@@ -545,6 +541,14 @@ pub fn tool_web_delegate(
                 // which tool produced the content.
                 let wrapped = datamark::wrap_tool_result(func_name, &result);
 
+                delegate_tool_calls.push(DelegateToolCall {
+                    name: func_name.to_string(),
+                    args: serde_json::from_str::<serde_json::Value>(func_args_str)
+                        .unwrap_or(serde_json::Value::String(func_args_str.to_string())),
+                    result: serde_json::from_str::<serde_json::Value>(&result)
+                        .unwrap_or(serde_json::Value::String(result.clone())),
+                });
+
                 messages.push(serde_json::json!({
                     "role": "tool",
                     "tool_call_id": call_id,
@@ -560,12 +564,12 @@ pub fn tool_web_delegate(
     }
 
     if final_content.is_empty() {
-        tracing::warn!(name = "tool.web_delegate.empty_result", model = %model_name, loops = loop_count, max_loops = max_loops, instruction_len = instruction.len(), trace_len = delegate_trace.len(), "Delegate completed with empty result after {loop_count} loops.");
+        tracing::warn!(name = "tool.web_delegate.empty_result", model = %model_name, loops = loop_count, max_loops = max_loops, instruction_len = instruction.len(), tool_call_count = delegate_tool_calls.len(), "Delegate completed with empty result after {loop_count} loops.");
     }
 
     Ok(crate::agent::tools::dtos::WebDelegateResponse {
         result: final_content,
-        tool_call_trace: delegate_trace,
+        tool_calls: delegate_tool_calls,
     })
 }
 

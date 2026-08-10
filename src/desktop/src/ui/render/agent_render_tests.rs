@@ -1,4 +1,4 @@
-//! Tests for `agent/response_formatter.rs`.
+//! Tests for `ui/render/agent_render.rs`.
 
 use super::*;
 

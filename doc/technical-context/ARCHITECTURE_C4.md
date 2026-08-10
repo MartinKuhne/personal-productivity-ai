@@ -75,30 +75,42 @@ Supporting UI types: `TreeNode{name,path,is_dir,children:BTreeMap}`,
 
 ## Component Diagram (Level 3) — Agent Core
 
-`agent/` implements the LLM tool-loop. `run_agent` spawns a dedicated thread,
-builds messages from `SystemPromptBuilder`, queries an OpenAI-compatible
-endpoint, and loops turns (`Continue` / `Done` / `Failed`) honouring a cancel
-flag.
+`agent/` implements the LLM tool-loop. A single long-lived driver thread
+(spawned by `AgentSessionManager`) owns a `Receiver<AgentPrompt>` and blocks
+on `recv()`. On each prompt, it builds a per-session `AgentContext` and runs
+`run_agent` directly inline (no double-spawn). The agent publishes
+`AgentEvent`s on a `Bus<AgentEvent>` (tokio broadcast); the UI subscribes
+and drains per frame.
+
+> **Agent↔UI Seam (feature 003, complete)**: `agent/events.rs` defines the
+> structured seam types — `AgentPrompt` (UI→agent mpsc input, carries
+> `session_id: Uuid` + `cancel_flag: Arc<AtomicBool>`), `AgentEvent`
+> (agent→UI `Bus<AgentEvent>` broadcast output, 11 session-tagged variants),
+> `AgentStatus` (typed status), `ToolSideEffect` (file-creation side effect),
+> `DelegateToolCall` (structured web-delegate trace). The old
+> `BackgroundEvent::Agent(LegacyAgentEvent)` variant and the
+> `tx_gui: Sender<BackgroundEvent>` path have been removed. UI formatting
+> lives in `ui/render/agent_render.rs`; the agent has zero `ui::render` imports.
 
 ```mermaid
 C4Component
   title FastMD — Agent Core
 
-  Component(mgr, "AgentSessionManager", "AgentState{running,status,thinking,response,scroll_to_id,history,token_usage,total_usage}; start_session; handle_agent_event; cancel via AtomicBool")
-  Component(impl, "run_agent / run_agent_inner", "Resolves LLM client, builds messages, get_tools_schema, ToolExecutor::new, turn loop")
-  Component(ctx, "AgentContext", "config, prompt, history, active_file, active_dir, selected_files, cancel_flag, channels")
+  Component(mgr, "AgentSessionManager", "AgentState{running,status,thinking,response,history,token_usage,total_usage,debug_entries}; owns prompt_tx (UI→agent mpsc) + event_bus (agent→UI Bus); driver_handle: JoinHandle; current_session_id: Uuid"")
+  Component(impl, "run_agent / run_agent_inner", "Resolves LLM client, builds messages, get_tools_schema, ToolExecutor::new, turn loop; called inline by the driver (no double-spawn)")
+  Component(ctx, "AgentContext", "config, prompt, history, active_file, active_dir, selected_files, cancel_flag, session_id: Uuid, agent_event_bus, file_event_bus; no tx_gui, no current_response, no session_number")
+  Component(ev, "events", "AgentPrompt (UI→agent mpsc, carries cancel_flag), AgentEvent (agent→UI Bus, 11 session-tagged variants), AgentStatus, ToolSideEffect, DelegateToolCall — the agent↔UI seam types")
   Component(llm, "LLMClient", "parse_usage_block; OpenAI-compatible HTTP")
   Component(pb, "SystemPromptBuilder", "with_active_file/dir/selected_files; USER.md injection per library")
-  Component(rf, "ResponseFormatter", "split_thinking_and_content (🤔...🤔), format_tool_call_message, format_tool_result_message")
-  Component(te, "ToolExecutor", "safe tools parallel / unsafe tools sequential")
+  Component(te, "ToolExecutor", "returns (results, Vec<ToolSideEffect>); safe tools parallel / unsafe tools sequential")
 
-  Rel(mgr, impl, "start_session -> run_agent")
-  Rel(impl, ctx, "passes context")
+  Rel(mgr, impl, "submit_prompt -> run_agent")
+  Rel(impl, ctx, "builds per-session context")
+  Rel(impl, ev, "publishes AgentEvent on Bus<AgentEvent>")
+  Rel(mgr, ev, "owns event_bus: Bus<AgentEvent>")
   Rel(impl, llm, "chat completions")
   Rel(impl, pb, "system prompt")
   Rel(impl, te, "dispatch tools")
-  Rel(impl, rf, "format responses")
-  Rel(mgr, rf, "surface to UI")
 ```
 
 ## Component Diagram (Level 3) — Tool System
@@ -213,7 +225,7 @@ C4Component
 
   Component(core, "Bus<T> / BusReader<T>", "Thread-safe MPMC broadcast channel backed by tokio::sync::broadcast (capacity 8192)")
   Component(fev, "FileEvent & FileEventProducer", "FileEventKind{Discovered, Updated, Removed, DirDiscovered, DirRemoved}; FileEventProducer convenience wrapper")
-  Component(bev, "BackgroundEvent & Sub-Enums", "Typed UI event wrapper: AgentEvent, FsEvent, ProcessEvent, McpAuthEvent")
+  Component(bev, "BackgroundEvent & Sub-Enums", "Typed UI event wrapper: FsEvent, ProcessEvent, McpAuthEvent (AgentEvent removed — agent events now on Bus<AgentEvent>)")
   Component(cfg_bus, "ConfigArrived & config_bus", "Startup config broadcast; CONFIG_ARRIVAL_TIMEOUT (100ms) fallback")
   Component(router, "BusRouter", "Subscribes to Bus<FileEvent>; routes .pdf to tx_pdf and images to tx_img MPSC queues")
   Component(task, "Task", "Owns rx/tx: mpsc::channel<BackgroundEvent> and file_event_bus: Bus<FileEvent>")
@@ -242,10 +254,11 @@ C4Component
   - Content: `paths: Vec<PathBuf>`.
   - Helpers: `FileEventProducer` simplifies publishing single or batch file/dir operations, including rename semantics (`Removed` + `Discovered`).
 - **`BackgroundEvent`** (`bus/events/typed.rs`): Top-level enum carrying domain-specific asynchronous updates to the UI loop:
-  - **`AgentEvent`**: `Status(String)`, `Thinking(String)`, `Response(String)`, `Finished(Vec<Value>)`, `Failed(String)`, `TokenUsage(TokenUsageInfo)`.
   - **`FsEvent`**: `FileParsed { path, tags }`, `DirParsed { path }`, `FileModified { path, tags }`, `FileDeleted { path }`, `Finished`, `FinishedWithoutWatcher`.
   - **`ProcessEvent`**: `LogEntry(BackgroundLogEntry)`, `FileLoaded { path, content }`.
   - **`McpAuthEvent`**: `Completed { server_name, error }`.
+- **`AgentEvent`** (`agent/events.rs`): Agent→UI `Bus<AgentEvent>` broadcast (tokio, capacity 8192). 11 session-tagged variants: `SessionStarted`, `SessionFinished{history}`, `Status(status: AgentStatus)`, `Thinking`, `ContentDelta`, `ToolCallStarted{id,name,args}`, `ToolResult{id,name,result}`, `ToolSideEffect`, `DebugEntry`, `TokenUsage`, `Failed`. Every variant carries `session_id: Uuid`.
+- **`AgentPrompt`** (`agent/events.rs`): UI→agent mpsc input carrying `session_id`, `text`, `active_file/dir`, `selected_files`, `cancel_flag: Arc<AtomicBool>`. The long-lived driver thread blocks on `recv()`.
 - **`ConfigArrived`** (`bus/events/config.rs`): Published once at startup carrying `config: AppConfig`. Enables lazy component initialization and prevents race conditions during startup.
 - **`TokenUsageInfo`** (`bus/events/messages.rs`): Detailed LLM token consumption metrics (`prompt_tokens`, `completion_tokens`, `total_tokens`, `cached_tokens`, `reasoning_tokens`).
 
@@ -257,17 +270,20 @@ C4Component
    - Inspects file extensions:
      - `.pdf` paths -> forwarded to `tx_pdf: Sender<PathBuf>` (`PdfConverterWorker`).
      - Image paths (`.jpg`, `.jpeg`, `.png`, `.gif`, `.webp`, `.bmp`, `.tiff`, `.avif`) -> forwarded to `tx_img: Sender<PathBuf>` (`ImageVisionWorker`).
-2. **UI Frame Drain (`ui/app.rs`)**:
-   - The UI thread invokes `try_recv()` on `Task.rx` inside `FastMdApp::update`.
-   - Dispatches `AgentEvent` to `AgentSessionManager`, `FsEvent` to `FileEventProcessor` and `TagManager`, `ProcessEvent::LogEntry` to `BackgroundProcessManager`, and `McpAuthEvent` to the tools dialog state.
+2. **UI Frame Drain (`ui/app/update.rs`)**:
+   - `drain_background_channel()`: Drains `BackgroundEvent` (Fs/Process/McpAuth) from the old mpsc path; dispatches to `FileEventProcessor`, `TagManager`, `BackgroundProcessManager`, tools dialog.
+   - `drain_agent_event_bus()`: Drains `BusReader<AgentEvent>` per frame; routes lifecycle events (`SessionStarted`/`SessionFinished`/`Status`/`Failed`/`TokenUsage`/`DebugEntry`) to `AgentSessionManager`; routes content events (`ContentDelta`/`Thinking`/`ToolCallStarted`/`ToolResult`) to `AgentTranscript` in `ui/agent/transcript.rs`; reissues `ToolSideEffect` as `FsEvent::FileModified`.
+   - UI widget state lives in `AgentPanelState` (`ui/agent/panel_state.rs`): `show_results`, `show_debug_window`, `debug_search_text`, `debug_auto_scroll`, `command_input`, `scroll_to_id`, `active_session_id`.
 
 ### Messaging Actors & Recipients Summary
 
 | Channel / Bus | Transport Primitive | Payload Type | Producers (Actors) | Consumers (Recipients) |
 |---|---|---|---|---|
 | `Bus<FileEvent>` | `tokio::sync::broadcast` (8192 cap) via `Bus<T>` | `FileEvent` | `FileWatcher`, `Indexer`, UI Dialogs (`FileEventProducer`), Tool Executors | `DirectoryTracker`, `FileEventProcessor`, `Indexer`, `BusRouter` |
-| `BackgroundEvent` | `std::sync::mpsc::channel` | `BackgroundEvent` (`Agent`, `Fs`, `Process`, `McpAuth`) | Agent Thread, Indexer Pool, `PdfConverterWorker`, `ImageVisionWorker`, MCP Auth Flow | `FastMdApp` (UI thread loop) |
+| `BackgroundEvent` | `std::sync::mpsc::channel` | `BackgroundEvent` (`Fs`, `Process`, `McpAuth`) | Agent Thread, Indexer Pool, `PdfConverterWorker`, `ImageVisionWorker`, MCP Auth Flow | `FastMdApp` (UI thread loop) |
 | `Bus<ConfigArrived>` | `tokio::sync::broadcast` (8192 cap) via `Bus<T>` | `ConfigArrived` | `main()` | `Task`, `AgentSessionManager`, `FastMdApp` |
+| `Bus<AgentEvent>` | `tokio::sync::broadcast` (8192 cap) via `Bus<T>` | `AgentEvent` (11 variants) | Agent driver thread (`run_agent`) | `FastMdApp` (UI frame drain → `AgentTranscript` + `AgentSessionManager`) |
+| `AgentPrompt` | `std::sync::mpsc::channel` | `AgentPrompt { session_id, text, cancel_flag, ... }` | `AgentSessionManager::submit_prompt` (UI → agent) | Agent driver thread (`recv()` loop) |
 | PDF Worker Queue | `std::sync::mpsc::channel` | `PathBuf` | `BusRouter` (for `.pdf` files) | `PdfConverterWorker` |
 | Image Vision Queue | `std::sync::mpsc::channel` | `PathBuf` | `BusRouter` (for image files) | `ImageVisionWorker` |
 | Agent Cancel | `std::sync::atomic::AtomicBool` | `bool` | `AgentSessionManager` (UI Stop button) | `run_agent_inner` turn loop |

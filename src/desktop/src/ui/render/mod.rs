@@ -18,6 +18,7 @@
 //! from the `pending_toggles` sink that `render_markdown` plumbs
 //! through to `inline::render_inline` for the task-checkbox case.
 
+pub mod agent_render;
 pub mod code;
 pub mod heading;
 pub mod inline;

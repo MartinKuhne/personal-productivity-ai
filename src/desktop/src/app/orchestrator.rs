@@ -1,16 +1,24 @@
 use crate::agent::AgentSessionManager;
+use crate::agent::events::{AgentEvent as SeamAgentEvent, ToolSideEffect};
 use crate::app::background::{BackgroundLogEntry, LogCategory, SharedProcessManager};
 use crate::app::watcher::directory_tracker::DirectoryTracker;
 use crate::app::watcher::file_processor::FileEventProcessor;
 use crate::app::{DialogManager, SelectionManager, TabManager, TagManager, TextBuffer};
-use crate::bus::core::{Bus, BusReader};
+use crate::bus::core::{BroadcastRecvError, Bus, BusReader};
 use crate::bus::events::config::ConfigArrived;
 use crate::bus::events::file::FileEvent;
 use crate::bus::events::typed::{BackgroundEvent, FsEvent, McpAuthEvent, ProcessEvent};
 use crate::markdown::Document;
+use crate::ui::agent::panel_state::AgentPanelState;
+use crate::ui::agent::transcript::AgentTranscript;
 use std::path::PathBuf;
 use std::sync::mpsc::Receiver;
 use std::sync::{Arc, Mutex};
+
+/// Visible truncation marker emitted into the transcript when the UI falls
+/// behind the agent's broadcast bus and `BusReader` reports `Lagged(n)`
+/// (research.md §1, quickstart scenario 5).
+pub const LAG_TRUNCATION_MARKER: &str = "[output truncated — UI fell behind the agent]";
 
 pub struct AppOrchestrator {
     pub content_libraries: Vec<crate::config::ContentLibrary>,
@@ -36,6 +44,22 @@ pub struct AppOrchestrator {
     pub pending_file_load: Option<PathBuf>,
     pub finished_watcher_slot: Arc<Mutex<Option<notify::RecommendedWatcher>>>,
     pub tool_manager: std::sync::Arc<std::sync::RwLock<crate::agent::tools::manager::ToolManager>>,
+    /// Reader for the `Bus<AgentEvent>` agent→UI channel. Subscribed
+    /// once during app init from [`AgentSessionManager::event_bus`].
+    /// Drained each frame in [`Self::drain_agent_event_bus`].
+    pub agent_event_reader: Option<BusReader<SeamAgentEvent>>,
+    /// True when the last `BusReader::try_recv` on `agent_event_reader`
+    /// returned `Lagged(n)`. Cleared on the next `SessionStarted` or
+    /// `Status` boundary (re-sync point).
+    pub agent_event_lagged: bool,
+    /// UI-owned view model accumulating `AgentEvent` deltas into a displayable
+    /// transcript (migration step 5, T015). The UI renders agent response and
+    /// thinking from this buffer instead of `AgentState::response`/`thinking`.
+    pub agent_transcript: AgentTranscript,
+    /// UI-owned panel state (show_results, show_debug_window, scroll_to_id,
+    /// command_input, etc.) — extracted from `AgentSessionManager` in
+    /// migration step 6 (FR-013, SC-007).
+    pub agent_panel_state: AgentPanelState,
 }
 
 impl AppOrchestrator {
@@ -158,15 +182,22 @@ impl AppOrchestrator {
     pub fn start_agent_session(&mut self, prompt: String) {
         let (active_file, active_dir, selected_files) =
             self.selection.agent_context(&self.tab_manager.tabs);
-        self.agent.start_session(
-            self.tx.clone(),
-            prompt,
+        let session_id = uuid::Uuid::new_v4();
+        let agent_prompt = crate::agent::events::AgentPrompt {
+            session_id,
+            text: prompt,
             active_file,
             active_dir,
             selected_files,
-            self.file_event_bus.clone(),
-        );
-        self.agent.set_show_results(true);
+            cancel_flag: std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false)),
+        };
+        self.agent.submit_prompt(agent_prompt);
+        self.agent_panel_state.show_results = true;
+        // Clear the transcript immediately so the UI shows empty content
+        // between session start and the `SessionStarted` event arrival.
+        // `SessionStarted` will create a fresh transcript with the correct
+        // `session_id`.
+        self.agent_transcript.reset();
     }
 
     pub fn task_take_finished_watcher(&self) -> Option<notify::RecommendedWatcher> {
@@ -274,12 +305,6 @@ impl AppOrchestrator {
     pub fn drain_background_channel(&mut self) {
         while let Ok(event) = self.rx.try_recv() {
             match event {
-                BackgroundEvent::Agent(agent_ev) => {
-                    if let Some(next_prompt) = self.agent.handle_agent_event(agent_ev) {
-                        // There's a queued prompt - start the next session
-                        self.start_agent_session(next_prompt);
-                    }
-                }
                 BackgroundEvent::Fs(fs_ev) => {
                     self.handle_fs_event(fs_ev);
                 }
@@ -290,6 +315,105 @@ impl AppOrchestrator {
                     self.handle_mcp_auth_event(mcp_ev);
                 }
             }
+        }
+    }
+
+    /// Drain the `Bus<AgentEvent>` reader (migration step 5, T015).
+    ///
+    /// Routes all agent events through the new bus: updates
+    /// `AgentState` (lifecycle: `running`, `status`, `history`,
+    /// `token_usage`, `debug_entries`) and builds the `AgentTranscript`
+    /// view model from `ContentDelta`/`Thinking`/`ToolCallStarted`/
+    /// `ToolResult` deltas. Reissues `ToolSideEffect` as
+    /// `FsEvent::FileModified`. Handles `Lagged(n)` by emitting a visible
+    /// truncation marker into the transcript (research.md §1, quickstart
+    /// scenario 5).
+    pub fn drain_agent_event_bus(&mut self) {
+        let Some(reader) = self.agent_event_reader.as_mut() else {
+            return;
+        };
+        // Collect events into a buffer so we can release the reader borrow
+        // before calling `self.handle_fs_event` (which needs `&mut self`).
+        let mut pending_side_effects: Vec<(std::path::PathBuf, Vec<String>)> = Vec::new();
+        let mut next_prompt: Option<String> = None;
+        loop {
+            match reader.try_recv_exposing_lag() {
+                Ok(event) => {
+                    // Re-sync on SessionStarted / Status boundary after a lag.
+                    if self.agent_event_lagged {
+                        match &event {
+                            SeamAgentEvent::SessionStarted { .. }
+                            | SeamAgentEvent::Status { .. } => {
+                                self.agent_event_lagged = false;
+                            }
+                            _ => {}
+                        }
+                    }
+                    match &event {
+                        SeamAgentEvent::SessionStarted { session_id } => {
+                            self.agent_transcript = AgentTranscript::new(*session_id);
+                        }
+                        SeamAgentEvent::SessionFinished { history, .. } => {
+                            self.agent.set_running(false);
+                            self.agent.set_history(Some(history.clone()));
+                            next_prompt = self.agent.take_next_queued_prompt();
+                        }
+                        SeamAgentEvent::Status { status, .. } => {
+                            self.agent.set_status(status.display_string().to_string());
+                        }
+                        SeamAgentEvent::Failed { error, .. } => {
+                            self.agent.set_running(false);
+                            self.agent.set_status(format!("Error: {}", error));
+                            self.agent.clear_queued_prompts();
+                        }
+                        SeamAgentEvent::TokenUsage { usage, .. } => {
+                            self.agent.apply_token_usage(usage.clone());
+                        }
+                        SeamAgentEvent::DebugEntry { entry, .. } => {
+                            self.agent.push_debug_entry(entry.clone());
+                        }
+                        SeamAgentEvent::ToolSideEffect {
+                            effect: ToolSideEffect::FileCreated { path, tags },
+                            ..
+                        } => {
+                            pending_side_effects.push((path.clone(), tags.clone()));
+                        }
+                        // Transcript-building events:
+                        SeamAgentEvent::ContentDelta { .. }
+                        | SeamAgentEvent::Thinking { .. }
+                        | SeamAgentEvent::ToolCallStarted { .. }
+                        | SeamAgentEvent::ToolResult { .. } => {
+                            self.agent_transcript.apply_event(&event);
+                        }
+                    }
+                }
+                Err(BroadcastRecvError::Empty) => break,
+                Err(BroadcastRecvError::Closed) => {
+                    self.agent_event_reader = None;
+                    break;
+                }
+                Err(BroadcastRecvError::Lagged(n)) => {
+                    tracing::warn!(
+                        name = "agent.event_bus.lagged",
+                        lagged_events = n,
+                        "BusReader<AgentEvent> lagged — UI fell behind the agent; truncating output"
+                    );
+                    self.agent_event_lagged = true;
+                    // Emit a visible truncation marker into the transcript.
+                    self.agent_transcript.content.push_str("\n\n");
+                    self.agent_transcript
+                        .content
+                        .push_str(LAG_TRUNCATION_MARKER);
+                    self.agent_transcript.content.push_str("\n\n");
+                    continue;
+                }
+            }
+        }
+        for (path, tags) in pending_side_effects {
+            self.handle_fs_event(FsEvent::FileModified { path, tags });
+        }
+        if let Some(prompt) = next_prompt {
+            self.start_agent_session(prompt);
         }
     }
 
