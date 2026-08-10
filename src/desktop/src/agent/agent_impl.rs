@@ -321,7 +321,10 @@ fn process_tool_results(
             log_tool_result(&fn_name, &result);
             if fn_name == "web_delegate"
                 && let Ok(parsed) = serde_json::from_str::<serde_json::Value>(&result)
-                && let Some(trace) = parsed.get("tool_call_trace").and_then(|t| t.as_str())
+                && let Some(trace) = parsed
+                    .get("data")
+                    .and_then(|d| d.get("tool_call_trace"))
+                    .and_then(|t| t.as_str())
                 && !trace.is_empty()
             {
                 full_response.push_str(trace);
@@ -488,6 +491,62 @@ mod tests {
         assert!(
             out.contains("active_file=None") && out.contains("active_dir=None"),
             "empty context must be logged as None: {out}"
+        );
+    }
+
+    #[test]
+    fn test_process_tool_results_injects_web_delegate_trace() {
+        let (tx, rx) = std::sync::mpsc::channel();
+        let mut messages: Vec<serde_json::Value> = Vec::new();
+        let mut full_response = String::new();
+
+        let trace = ">> **Executing tool `web_fetch`**\n>> {\n>>   \"url\": \"https://example.com\"\n>> }\n";
+        let result = serde_json::json!({
+            "status": "success",
+            "data": {
+                "result": "Fetched content",
+                "tool_call_trace": trace
+            }
+        })
+        .to_string();
+
+        let results = vec![(
+            "call_1".to_string(),
+            "web_delegate".to_string(),
+            r#"{"instruction":"search for foo"}"#.to_string(),
+            result,
+        )];
+
+        let tool_calls = vec![serde_json::json!({
+            "id": "call_1",
+            "type": "function",
+            "function": {
+                "name": "web_delegate",
+                "arguments": r#"{"instruction":"search for foo"}"#
+            }
+        })];
+
+        process_tool_results(
+            &results,
+            &tool_calls,
+            &mut messages,
+            &mut full_response,
+            &tx,
+        );
+
+        let mut responses: Vec<String> = Vec::new();
+        while let Ok(ev) = rx.try_recv() {
+            if let BackgroundEvent::Agent(AgentEvent::Response(r)) = ev {
+                responses.push(r);
+            }
+        }
+
+        assert!(
+            responses
+                .iter()
+                .any(|r| r.contains(">> **Executing tool `web_fetch`**")),
+            "Expected web_delegate trace with >> prefix in responses. Got: {:?}",
+            responses
         );
     }
 }
