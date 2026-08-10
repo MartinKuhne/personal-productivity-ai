@@ -45,24 +45,24 @@ fn test_resolve_virtual_path() {
         });
     let ctx = test_ctx(&config);
 
-    let res1 = execute_tool(&ctx, "read_file", r#"{"path": "TestLib\\sub\\file.md"}"#);
+    let res1 = execute_tool(&ctx, "read_note", r#"{"path": "TestLib\\sub\\file.md"}"#);
     assert!(!res1.contains("Invalid virtual path"));
 
     let res3 = execute_tool(
         &ctx,
-        "read_file",
+        "read_note",
         r#"{"path": "TestLib\\..\\Windows\\System32\\cmd.exe"}"#,
     );
     assert!(res3.contains("path traversal"));
 
-    let res4 = execute_tool(&ctx, "read_file", r#"{"path": "UnknownLib\\file.md"}"#);
+    let res4 = execute_tool(&ctx, "read_note", r#"{"path": "UnknownLib\\file.md"}"#);
     assert!(res4.contains("Content library 'UnknownLib' not found"));
 
-    let res5 = execute_tool(&ctx, "list_files", r#"{"path": "."}"#);
+    let res5 = execute_tool(&ctx, "list_notes", r#"{"path": "."}"#);
     assert!(!res5.contains("Invalid virtual path") && !res5.contains("error"));
     assert!(res5.contains("TestLib"));
 
-    let res6 = execute_tool(&ctx, "list_files", r#"{"path": "/"}"#);
+    let res6 = execute_tool(&ctx, "list_notes", r#"{"path": "/"}"#);
     assert!(!res6.contains("Invalid virtual path") && !res6.contains("error"));
     assert!(res6.contains("TestLib"));
 }
@@ -108,10 +108,10 @@ fn test_path_traversal_dotdot_rejected() {
         });
     let ctx = test_ctx(&config);
 
-    let res = execute_tool(&ctx, "read_file", r#"{"path": "Lib/../../etc/passwd"}"#);
+    let res = execute_tool(&ctx, "read_note", r#"{"path": "Lib/../../etc/passwd"}"#);
     assert!(res.contains("path traversal"));
 
-    let res2 = execute_tool(&ctx, "read_file", r#"{"path": "Lib/.."}"#);
+    let res2 = execute_tool(&ctx, "read_note", r#"{"path": "Lib/.."}"#);
     assert!(res2.contains("path traversal"));
 }
 
@@ -119,7 +119,7 @@ fn test_path_traversal_dotdot_rejected() {
 fn test_resolve_path_with_library_missing() {
     let config = AppConfig::default();
     let ctx = test_ctx(&config);
-    let res = execute_tool(&ctx, "list_files", r#"{"path": "NonExistentLib/file.md"}"#);
+    let res = execute_tool(&ctx, "list_notes", r#"{"path": "NonExistentLib/file.md"}"#);
     assert!(res.contains("Content library 'NonExistentLib' not found"));
 }
 
@@ -135,7 +135,7 @@ fn test_unknown_tool_returns_error() {
 fn test_tool_invalid_args_returns_error() {
     let config = AppConfig::default();
     let ctx = test_ctx(&config);
-    let res = execute_tool(&ctx, "list_files", "not valid json");
+    let res = execute_tool(&ctx, "list_notes", "not valid json");
     assert!(res.contains("Invalid args") || res.contains("error"));
 }
 
@@ -221,7 +221,7 @@ fn two_libs_with_n_tagged_files_each(n: usize) -> (AppConfig, LibFixture) {
 
 fn run_list_by_tag(config: &AppConfig, args: &str) -> Value {
     let ctx = test_ctx(config);
-    let raw = execute_tool(&ctx, "list_files_by_tag", args);
+    let raw = execute_tool(&ctx, "list_notes_by_tag", args);
     serde_json::from_str(&raw)
         .unwrap_or_else(|e| panic!("could not parse tool response `{}`: {}", raw, e))
 }
@@ -417,7 +417,7 @@ fn test_list_by_tag_offset_zero_returns_first_slice() {
 
 fn run_list_files(config: &AppConfig, args: &str) -> Value {
     let ctx = test_ctx(config);
-    let raw = execute_tool(&ctx, "list_files", args);
+    let raw = execute_tool(&ctx, "list_notes", args);
     serde_json::from_str(&raw)
         .unwrap_or_else(|e| panic!("could not parse tool response `{}`: {}", raw, e))
 }
@@ -602,14 +602,14 @@ fn test_list_files_multiple_libraries_paging_global() {
 fn test_list_files_returns_json_array_not_string() {
     let (config, _fix) = single_lib_with_n_md_files(3);
     let ctx = test_ctx(&config);
-    let raw = execute_tool(&ctx, "list_files", r#"{"path":"Lib"}"#);
+    let raw = execute_tool(&ctx, "list_notes", r#"{"path":"Lib"}"#);
     let parsed: Value = serde_json::from_str(&raw).unwrap();
     assert!(parsed["data"]["files"].is_array());
 }
 
 fn run_grep(config: &AppConfig, args: &str) -> Value {
     let ctx = test_ctx(config);
-    let raw = execute_tool(&ctx, "grep", args);
+    let raw = execute_tool(&ctx, "search_notes", args);
     serde_json::from_str(&raw)
         .unwrap_or_else(|e| panic!("could not parse tool response `{}`: {}", raw, e))
 }
@@ -810,4 +810,34 @@ fn test_spawn_config_subscription_runs_init_in_background() {
         }
     }
     panic!("no MCP startup log entry observed within timeout");
+}
+
+#[test]
+fn test_mcp_char_count_bug() {
+    let mut config = AppConfig::default();
+    config.mcp_servers.insert(
+        "test_mcp".into(),
+        crate::config::McpServerConfig::Stdio {
+            command: "".into(),
+            args: vec![],
+            env: Default::default(),
+        }
+        .into(),
+    );
+    let mut mgr = ToolManager::new();
+    mgr.register_mcp_tool(
+        "test_mcp",
+        "mcp_test_mcp_test_tool",
+        "desc",
+        serde_json::json!({}),
+    );
+
+    // Simulate what the ui does:
+    let count = mgr.tool_char_count("mcp_test_mcp_test_tool", &config, "");
+
+    // Also, what happens when mcp tool doesn't have mcp_ prefixed name?
+    mgr.register_mcp_tool("test_mcp", "test_tool", "desc", serde_json::json!({}));
+    let count2 = mgr.tool_char_count("test_tool", &config, "");
+    assert_eq!(count, Some(116));
+    assert_eq!(count2, Some(103));
 }

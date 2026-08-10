@@ -8,16 +8,16 @@ use std::collections::HashSet;
 use std::path::PathBuf;
 
 pub struct SystemPromptBuilder {
-    base_prompt: String,
+    static_prompt: String,
     active_file: Option<PathBuf>,
     active_dir: Option<PathBuf>,
     selected_files: HashSet<PathBuf>,
 }
 
 impl SystemPromptBuilder {
-    pub fn new(config: &AppConfig) -> Self {
+    pub fn new(_config: &AppConfig) -> Self {
         Self {
-            base_prompt: build_base_prompt(config),
+            static_prompt: build_static_system_prompt(),
             active_file: None,
             active_dir: None,
             selected_files: HashSet::new(),
@@ -39,33 +39,33 @@ impl SystemPromptBuilder {
         self
     }
 
-    pub fn build(self, config: &AppConfig) -> String {
-        let mut prompt = self.base_prompt;
+    pub fn build(self, config: &AppConfig) -> Vec<String> {
+        let mut dynamic = build_dynamic_system_prompt(config);
         let to_virtual = |path: &PathBuf| -> String {
             crate::config::library_display_label(&config.content_libraries, path)
                 .unwrap_or_else(|| path.to_string_lossy().to_string())
         };
 
         if let Some(active) = &self.active_file {
-            prompt.push_str(&format!(
-                " The user is currently viewing the file: {}",
+            dynamic.push_str(&format!(
+                "\nThe user is currently viewing the file: {}",
                 to_virtual(active)
             ));
         } else if let Some(dir) = &self.active_dir {
-            prompt.push_str(&format!(
-                " The user has selected the directory context: {}",
+            dynamic.push_str(&format!(
+                "\nThe user has selected the directory context: {}",
                 to_virtual(dir)
             ));
         }
 
         if !self.selected_files.is_empty() {
-            prompt.push_str(" The user has also selected the following files:");
+            dynamic.push_str("\nThe user has also selected the following files:");
             let mut sorted_files: Vec<_> = self.selected_files.iter().collect();
             sorted_files.sort();
             for f in sorted_files {
-                prompt.push_str(&format!(" {}", to_virtual(f)));
+                dynamic.push_str(&format!(" {}", to_virtual(f)));
             }
-            prompt.push('.');
+            dynamic.push('.');
         }
 
         for lib in &config.content_libraries {
@@ -73,32 +73,26 @@ impl SystemPromptBuilder {
             if user_md.exists()
                 && let Ok(content) = std::fs::read_to_string(&user_md)
             {
-                // USER.md is user-placed content, not a system
-                // instruction. Wrap it in a datamark envelope so the
-                // LLM treats it as data, not directives. R1 (see
-                // doc/planning/prompt-injection-security.md).
-                prompt.push_str(&format!(
+                dynamic.push_str(&format!(
                     "\n\nUser Context (from {}):\n{}",
                     lib.name,
                     wrap_user_md(&lib.name, &content)
                 ));
             }
         }
-        prompt
+        vec![self.static_prompt, dynamic]
     }
 }
 
-fn build_base_prompt(config: &AppConfig) -> String {
+fn build_static_system_prompt() -> String {
+    format!(
+        "{SECURITY_HEADER}\n\nYou are FastMD Agent, a personal assistant grounded in the user's knowledge base — a library of Markdown notes that captures their information, preferences, and context. You help with everyday tasks by reasoning over these notes and using integrated tools: email, calendar, contacts, web search, to-dos, and file operations. Consult the user's own knowledge before reaching for external information, then take action step by step. Respond using Markdown format.\n\nCRITICAL: Avoid context bloat! Do NOT use the `read_note` tool on multiple notes in a single step. Always prefer `read_yaml_header` to survey notes, or `search_notes` to extract specific information without reading entire notes."
+    )
+}
+
+fn build_dynamic_system_prompt(config: &AppConfig) -> String {
     let date_str = chrono::Local::now().format("%Y-%m-%d").to_string();
-    // Prepend the security header BEFORE the role definition. Research
-    // (Microsoft Spotlighting) shows the LLM follows security
-    // instructions more reliably when they are the first thing in the
-    // system prompt, before any user-placed content like
-    // `system_prompt_extension` or USER.md is appended below.
-    let mut prompt = format!(
-        "{SECURITY_HEADER}\n\nYou are FastMD Agent, an autonomous assistant helper for managing the Markdown workspace. You can read, create, search, and edit files, fetch web pages, and manage tags using your tools. Help the user achieve their goal by using tools step by step. Respond to the user using Markdown format.\n\nCRITICAL: Avoid context bloat! Do NOT use the `read_file` tool on multiple files in a single step. Always prefer `read_yaml_header` to survey documents, or `grep` to extract specific information without reading entire files.\n\nToday's date and time is: {}",
-        date_str
-    );
+    let mut prompt = format!("Today's date and time is: {}", date_str);
     if let Some(name) = &config.user_name {
         prompt.push_str(&format!("\nUser's Name: {}", name));
     }

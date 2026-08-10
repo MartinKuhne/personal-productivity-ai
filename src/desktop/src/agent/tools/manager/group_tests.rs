@@ -71,9 +71,9 @@ fn parallel_safe_tools_includes_all_readonly_tools() {
     // `grep` is documented as ReadOnly. The list is not exhaustive
     // â€” it grows as more tools are audited â€” but it must include
     // every tool that overrides `safety()` to `ReadOnly`.
-    assert!(safe.iter().any(|n| n == "grep"));
+    assert!(safe.iter().any(|n| n == "search_notes"));
     // And it must NOT include obviously-mutating tools.
-    assert!(!safe.iter().any(|n| n == "create_file"));
+    assert!(!safe.iter().any(|n| n == "create_note"));
 }
 
 /// A `ToolManager`-level error replaces any prior `last_error` for

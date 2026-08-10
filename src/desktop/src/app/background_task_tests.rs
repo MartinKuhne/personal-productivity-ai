@@ -1,11 +1,4 @@
 //! Tests for `app/background_task.rs`.
-//!
-//! Sidecar file. Extracted from `background_task.rs` so the implementation
-//! module stays focused on production code.
-//!
-//! Originally a `#[cfg(test)] mod tests { ... }` block at the bottom of
-//! `background_task.rs`. Lives in a sibling file so private item access via
-//! `super::*` keeps working.
 
 use super::*;
 use crate::bus::events::file::FileEventKind;

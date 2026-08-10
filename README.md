@@ -6,13 +6,14 @@ Increase my personal productivity with AI without compromising security or priva
 
 ## Vision
 
-AI centric notes collection, supported by integration with everyday systems such as email, calendar, contacts, todo lists and web search.
+A library of markdown formatted notes as a rich knowledge base to then enable everyday integration with email, calendar, contacts, todo lists and web search.
+Examples: Create tasks for importent e-mail reminders. Research the maintenance schedule for my car.  
 
 ## Solution approach
 
-AI tools are only as powerful as the data they have to work with. I've lived a digital lifestyle for over 15 years, with anything I receive on paper going into searchable PDFs, personal notes taken with OneNote, my schedule lives on Google's calendar, and of course I get a lot of e-mail and I take several thousand pictures every year.
-
 The solution centers around a *markdown document library*. The more information this library contains about you and your history, the more useful AI as a tool is going to be. Information gets into the library by either writing it, or by _distilling_ it from other sources. Everything builds on everything else to provide a rich context.
+
+This is an as-simple-as possible design. There is no RAG, not vector databases, no magical MCP server. The magic is that every interaction, research or data collection becomes a note to be used for future reference. 
 
 All of this in a fast, single binary, with beautifully rendered markdown.
 

@@ -1,11 +1,4 @@
 //! Tests for `jmap/email.rs`.
-//!
-//! Sidecar file. Extracted from `email.rs` so the implementation
-//! module stays focused on production code.
-//!
-//! Originally a `#[cfg(test)] mod tests { ... }` block at the bottom of
-//! `email.rs`. Lives in a sibling file so private item access via
-//! `super::*` keeps working.
 
 use serde_json::json;
 

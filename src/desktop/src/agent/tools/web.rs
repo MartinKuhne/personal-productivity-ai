@@ -3,6 +3,7 @@
 //! Unit tests live in the sibling `web_tests.rs` sidecar.
 
 use crate::agent::datamark::{self, SECURITY_HEADER};
+use crate::agent::response_formatter::format_delegate_tool_call_message;
 use crate::agent::tools::manager::builtin::strings::WEB_FETCH_FINAL_PAGE_HINT;
 use crate::agent::tools::manager::cache::CacheEntry;
 use crate::config::AppConfig;
@@ -394,6 +395,7 @@ pub fn tool_web_delegate(
     let mut loop_count = 0;
     let max_loops = 10;
     let mut final_content = String::new();
+    let mut delegate_trace = String::new();
 
     while loop_count < max_loops {
         loop_count += 1;
@@ -452,6 +454,9 @@ pub fn tool_web_delegate(
 
         if let Some(tool_calls) = message.get("tool_calls").and_then(|t| t.as_array()) {
             if tool_calls.is_empty() {
+                if final_content.is_empty() {
+                    tracing::warn!(name = "tool.web_delegate.empty_content_on_break", model = %model_name, loop = loop_count, "Delegate turn returned empty tool_calls and no content — model may not support function calling or refused the instruction.");
+                }
                 break;
             }
             messages.push(message.clone());
@@ -468,6 +473,10 @@ pub fn tool_web_delegate(
                     .and_then(|f| f.get("arguments"))
                     .and_then(|a| a.as_str())
                     .unwrap_or("{}");
+
+                let tool_call_msg = format_delegate_tool_call_message(func_name, func_args_str);
+                delegate_trace.push_str(&tool_call_msg);
+                delegate_trace.push_str("\n\n");
 
                 let result = if func_name == "web_fetch" {
                     if let Ok(input) = serde_json::from_str::<
@@ -543,12 +552,20 @@ pub fn tool_web_delegate(
                 }));
             }
         } else {
+            if final_content.is_empty() {
+                tracing::warn!(name = "tool.web_delegate.empty_content_on_break", model = %model_name, loop = loop_count, "Delegate turn returned no tool_calls and no content — model may not support function calling or refused the instruction.");
+            }
             break;
         }
     }
 
+    if final_content.is_empty() {
+        tracing::warn!(name = "tool.web_delegate.empty_result", model = %model_name, loops = loop_count, max_loops = max_loops, instruction_len = instruction.len(), trace_len = delegate_trace.len(), "Delegate completed with empty result after {loop_count} loops.");
+    }
+
     Ok(crate::agent::tools::dtos::WebDelegateResponse {
         result: final_content,
+        tool_call_trace: delegate_trace,
     })
 }
 

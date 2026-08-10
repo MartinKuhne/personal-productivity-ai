@@ -13,8 +13,6 @@ use std::sync::{Arc, atomic::AtomicBool};
 
 /// Consolidated context for running an agent session.
 ///
-/// This struct replaces the 11 separate parameters previously passed to `run_agent`.
-/// It groups related data and reduces the interface to a single argument (PSD-002).
 /// Construct with the struct literal `AgentContext { ... }`; the previous
 /// `AgentContext::new` was a pass-through forwarder (PSD-004) and was removed.
 pub struct AgentContext {
@@ -31,6 +29,9 @@ pub struct AgentContext {
     /// Optional model name override. When set, `LLMClient::from_config` uses this model
     /// directly instead of selecting the cheapest available model.
     pub model_name: Option<String>,
+    /// Monotonic session counter (1-based), incremented on each new prompt.
+    /// Used by debug entries to group turns by session.
+    pub session_number: usize,
     /// Long-lived headless Firefox session shared with every
     /// mutating browser tool call. Owned by the application
     /// (one instance per app) and handed to the agent thread
@@ -71,6 +72,7 @@ mod tests {
             history: None,
             current_response: String::new(),
             model_name: None,
+            session_number: 1,
             browser_session: browser,
             pdf_backing: Arc::new(crate::app::session::PdfBackingTracker::new()),
             tool_manager: Arc::new(std::sync::RwLock::new(

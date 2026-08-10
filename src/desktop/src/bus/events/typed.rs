@@ -14,6 +14,7 @@
 //! [`crate::app::background_task::Task::finished_watcher`] slot
 //! instead of the message bus.
 
+use crate::bus::events::debug::AgentDebugEntry;
 use crate::bus::events::messages::{BackgroundLogEntry, TokenUsageInfo};
 use serde_json::Value;
 
@@ -27,6 +28,9 @@ pub enum AgentEvent {
     Failed(String),
     /// Emitted after every LLM turn that returns a `usage` block.
     TokenUsage(TokenUsageInfo),
+    /// Emitted once per debug entry (up to 3 per turn: outgoing, incoming, tool results)
+    /// plus a session-boundary entry at the start of each new session.
+    DebugEntry(AgentDebugEntry),
 }
 
 /// Filesystem-watcher-domain events emitted by the file watcher,
@@ -141,6 +145,12 @@ impl From<McpAuthEvent> for BackgroundEvent {
 impl From<BackgroundLogEntry> for BackgroundEvent {
     fn from(entry: BackgroundLogEntry) -> Self {
         Self::Process(ProcessEvent::LogEntry(entry))
+    }
+}
+
+impl From<AgentDebugEntry> for BackgroundEvent {
+    fn from(entry: AgentDebugEntry) -> Self {
+        Self::Agent(AgentEvent::DebugEntry(entry))
     }
 }
 

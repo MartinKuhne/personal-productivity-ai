@@ -9,6 +9,7 @@ use crate::agent::response_formatter::{
 };
 use crate::agent::tool_executor::ToolExecutor;
 
+use crate::bus::events::debug::{AgentDebugEntry, DebugEntryKind, DebugEntryRow};
 use crate::bus::events::typed::{AgentEvent, BackgroundEvent};
 use crate::config::get_config_path;
 use std::collections::HashSet;
@@ -45,6 +46,22 @@ fn run_agent_inner(ctx: AgentContext) {
         ctx.tool_manager.clone(),
         ctx.uuid_gen.clone(),
     );
+
+    let _ = ctx.tx_gui.send(
+        AgentDebugEntry {
+            turn: 0,
+            session: ctx.session_number,
+            timestamp: chrono::Local::now(),
+            kind: DebugEntryKind::Outgoing,
+            summary: format!("Session {}", ctx.session_number),
+            content: None,
+            row_type: DebugEntryRow::SessionBoundary,
+        }
+        .into(),
+    );
+
+    let mut turn_number: usize = 0;
+    let mut prev_messages_len: usize = 0;
     loop {
         if ctx.cancel_flag.load(Ordering::SeqCst) {
             break;
@@ -56,6 +73,8 @@ fn run_agent_inner(ctx: AgentContext) {
             &tools_json,
             &mut full_response,
             &executor,
+            &mut turn_number,
+            &mut prev_messages_len,
         ) {
             Turn::Continue => {}
             Turn::Done => break,
@@ -76,6 +95,7 @@ enum Turn {
     Done,
     Failed,
 }
+#[allow(clippy::too_many_arguments)]
 fn process_turn(
     llm: &LLMClient,
     ctx: &AgentContext,
@@ -83,10 +103,43 @@ fn process_turn(
     tools_json: &serde_json::Value,
     full_response: &mut String,
     executor: &ToolExecutor,
+    turn_number: &mut usize,
+    prev_messages_len: &mut usize,
 ) -> Turn {
+    *turn_number += 1;
+    let turn = *turn_number;
+
     let _ = ctx.tx_gui.send(BackgroundEvent::from(AgentEvent::Status(
         "Waiting for LLM completions...".into(),
     )));
+
+    let tool_count = tools_json.as_array().map(|a| a.len()).unwrap_or(0);
+    let delta: Vec<serde_json::Value> = messages[*prev_messages_len..].to_vec();
+    let tx = &ctx.tx_gui;
+    let _ = tx.send(
+        AgentDebugEntry {
+            turn,
+            session: ctx.session_number,
+            timestamp: chrono::Local::now(),
+            kind: DebugEntryKind::Outgoing,
+            summary: format!(
+                "Turn {} — Outgoing (+{} messages, {} tools)",
+                turn,
+                delta.len(),
+                tool_count
+            ),
+            content: Some(serde_json::json!({
+                "model": llm.model_name(),
+                "max_tokens": llm.max_tokens(),
+                "tools": tools_json,
+                "new_messages": delta,
+            })),
+            row_type: DebugEntryRow::Entry,
+        }
+        .into(),
+    );
+    *prev_messages_len = messages.len();
+
     let resp_val = match llm.chat_completion(messages, tools_json) {
         Ok(v) => v,
         Err(e) => {
@@ -96,6 +149,41 @@ fn process_turn(
             return Turn::Failed;
         }
     };
+
+    let incoming_tool_call_count = resp_val
+        .get("choices")
+        .and_then(|c| c.get(0))
+        .and_then(|c| c.get("message"))
+        .and_then(|m| m.get("tool_calls"))
+        .and_then(|tc| tc.as_array())
+        .map(|a| a.len())
+        .unwrap_or(0);
+    let _ = tx.send(
+        AgentDebugEntry {
+            turn,
+            session: ctx.session_number,
+            timestamp: chrono::Local::now(),
+            kind: DebugEntryKind::Incoming,
+            summary: format!(
+                "Turn {} — Incoming (assistant{} {})",
+                turn,
+                if incoming_tool_call_count > 0 {
+                    format!(" + {} tool call(s)", incoming_tool_call_count)
+                } else {
+                    String::new()
+                },
+                if resp_val.get("choices").is_some() {
+                    "OK"
+                } else {
+                    "no choices"
+                },
+            ),
+            content: Some(resp_val.clone()),
+            row_type: DebugEntryRow::Entry,
+        }
+        .into(),
+    );
+
     emit_usage(&resp_val, &ctx.tx_gui);
     let message = match extract_message(&resp_val) {
         Some(m) => m,
@@ -132,6 +220,7 @@ fn process_turn(
                 "Executing tools...".into(),
             )));
             let results = executor.execute_all(tc, &ctx.tx_gui);
+            emit_tool_results_debug(turn, ctx.session_number, tx, &results);
             process_tool_results(&results, tc, messages, full_response, &ctx.tx_gui);
             Turn::Continue
         }
@@ -153,7 +242,7 @@ fn resolve_ll_client(ctx: &AgentContext) -> Option<LLMClient> {
     Some(client)
 }
 fn build_messages(
-    system_prompt: String,
+    system_prompts: Vec<String>,
     prompt: &str,
     history: Option<Vec<serde_json::Value>>,
 ) -> Vec<serde_json::Value> {
@@ -161,10 +250,12 @@ fn build_messages(
         existing.push(serde_json::json!({"role": "user", "content": prompt}));
         existing
     } else {
-        vec![
-            serde_json::json!({"role": "system", "content": system_prompt}),
-            serde_json::json!({"role": "user", "content": prompt}),
-        ]
+        let mut messages: Vec<serde_json::Value> = system_prompts
+            .into_iter()
+            .map(|sp| serde_json::json!({"role": "system", "content": sp}))
+            .collect();
+        messages.push(serde_json::json!({"role": "user", "content": prompt}));
+        messages
     }
 }
 fn emit_usage(resp: &serde_json::Value, tx: &Sender<BackgroundEvent>) {
@@ -228,6 +319,13 @@ fn process_tool_results(
             .to_string();
         if let Some((fn_name, _args, result)) = map.remove(&cid) {
             log_tool_result(&fn_name, &result);
+            if fn_name == "web_delegate"
+                && let Ok(parsed) = serde_json::from_str::<serde_json::Value>(&result)
+                && let Some(trace) = parsed.get("tool_call_trace").and_then(|t| t.as_str())
+                && !trace.is_empty()
+            {
+                full_response.push_str(trace);
+            }
             full_response.push_str(&format_tool_result_message(&fn_name, &result));
             let _ = tx.send(BackgroundEvent::from(AgentEvent::Response(
                 full_response.clone(),
@@ -277,6 +375,37 @@ fn log_tool_result(func_name: &str, result: &str) {
             tracing::info!(name = "agent.tool.success", tool = %func_name);
         }
     }
+}
+
+fn emit_tool_results_debug(
+    turn: usize,
+    session: usize,
+    tx: &Sender<BackgroundEvent>,
+    results: &[(String, String, String, String)],
+) {
+    let entries: Vec<serde_json::Value> = results
+        .iter()
+        .map(|(call_id, fn_name, args, result)| {
+            serde_json::json!({
+                "call_id": call_id,
+                "name": fn_name,
+                "arguments": args,
+                "result": result,
+            })
+        })
+        .collect();
+    let _ = tx.send(
+        AgentDebugEntry {
+            turn,
+            session,
+            timestamp: chrono::Local::now(),
+            kind: DebugEntryKind::ToolResults,
+            summary: format!("Turn {} — Tool results ({} tools)", turn, entries.len()),
+            content: Some(serde_json::Value::Array(entries)),
+            row_type: DebugEntryRow::Entry,
+        }
+        .into(),
+    );
 }
 
 #[cfg(test)]

@@ -16,7 +16,7 @@ pub fn split_thinking_and_content(text: &str) -> (String, String) {
 }
 
 pub fn format_tool_call_message(func_name: &str, func_args_str: &str) -> String {
-    if func_name == "create_file" {
+    if func_name == "create_note" {
         let mut msg = format!("> **Executing tool `{}`**\n", func_name);
         if let Ok(args_val) = serde_json::from_str::<serde_json::Value>(func_args_str)
             && let Some(path) = args_val.get("path").and_then(|p| p.as_str())
@@ -35,6 +35,22 @@ pub fn format_tool_call_message(func_name: &str, func_args_str: &str) -> String 
         .collect::<Vec<_>>()
         .join("\n");
     format!("> **Executing tool `{}`**\n{}\n", func_name, quoted)
+}
+
+/// Like [`format_tool_call_message`], but uses `>>` as a prefix to
+/// visually distinguish delegate sub-agent tool calls from the parent
+/// agent's own tool calls in the response window.
+pub fn format_delegate_tool_call_message(func_name: &str, func_args_str: &str) -> String {
+    let formatted_args = match serde_json::from_str::<serde_json::Value>(func_args_str) {
+        Ok(val) => serde_json::to_string_pretty(&val).unwrap_or_else(|_| func_args_str.to_string()),
+        Err(_) => func_args_str.to_string(),
+    };
+    let quoted = formatted_args
+        .lines()
+        .map(|line| format!(">> {}", line))
+        .collect::<Vec<_>>()
+        .join("\n");
+    format!(">> **Executing tool `{}`**\n{}\n", func_name, quoted)
 }
 
 fn count_from_data(data: &serde_json::Value, field: &str) -> usize {
@@ -68,7 +84,7 @@ pub fn format_tool_result_message(func_name: &str, result: &str) -> String {
         return format!("> **Result Error (`{}`):** {}\n\n", func_name, error_msg);
     }
     match func_name {
-        "create_file" => {
+        "create_note" => {
             let size = result_data
                 .get("size_bytes")
                 .and_then(|s| s.as_u64())
@@ -78,14 +94,14 @@ pub fn format_tool_result_message(func_name: &str, result: &str) -> String {
                 func_name, size
             )
         }
-        "list_files" | "list_files_by_tag" => {
+        "list_notes" | "list_notes_by_tag" => {
             let count = count_from_data(&result_data, "files");
             let total = result_data
                 .get("total")
                 .and_then(|t| t.as_u64())
                 .unwrap_or(count as u64);
             format!(
-                "> **Result (`{}`):** {} files returned (total: {}).\n\n",
+                "> **Result (`{}`):** {} notes returned (total: {}).\n\n",
                 func_name, count, total
             )
         }
@@ -96,7 +112,7 @@ pub fn format_tool_result_message(func_name: &str, result: &str) -> String {
                 func_name, count
             )
         }
-        "read_file" | "read_lines" => {
+        "read_note" | "window_note" => {
             let content = result_data
                 .get("content")
                 .and_then(|f| f.as_str())
@@ -166,7 +182,7 @@ pub fn format_tool_result_message(func_name: &str, result: &str) -> String {
                 func_name, count
             )
         }
-        "grep" => format_grep_result(func_name, &result_data),
+        "search_notes" => format_search_notes_result(func_name, &result_data),
         "get_email_by_id" => format_email_by_id_result(func_name, &result_data),
         "search_email" => format_search_email_result(func_name, &result_data),
         name if name.starts_with("search_") => {
@@ -185,7 +201,7 @@ pub fn format_tool_result_message(func_name: &str, result: &str) -> String {
     }
 }
 
-fn format_grep_result(func_name: &str, data: &serde_json::Value) -> String {
+fn format_search_notes_result(func_name: &str, data: &serde_json::Value) -> String {
     let content = data.get("matches").and_then(|f| f.as_str()).unwrap_or("");
     if content == "No matches found." || content.is_empty() {
         return format!("> **Result (`{}`):** 0 file(s) match\n\n", func_name);

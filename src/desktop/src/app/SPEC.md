@@ -25,7 +25,7 @@
 ### PDF Support
 - [REQ-450]: When initial indexing runs or when the file watcher receives a file system change notification, the FastMD Viewer SHALL scan all configured text libraries for files with the `.pdf` extension.
 - [REQ-451]: The FastMD Viewer SHALL NOT display PDF files in the directory tree or tab bar.
-- [REQ-451A]: The FastMD Viewer SHALL NOT expose PDF files to LLM file tools such as `grep`, `list_files`, or `read_file`.
+- [REQ-451A]: The FastMD Viewer SHALL NOT expose PDF files to LLM file tools such as `search_notes`, `list_notes`, or `read_note`.
 - [REQ-452]: When the FastMD Viewer discovers a PDF file, the FastMD Viewer SHALL check whether a Markdown file with the same stem and a `.md` extension exists in the same directory.
 - [REQ-453]: Where a Markdown file with the same stem exists, the FastMD Viewer SHALL render the corresponding Markdown file in a PDF-appropriate color in the tree.
 - [REQ-454]: If no corresponding Markdown file exists, or if the Markdown file's last-modified timestamp is older than the PDF's last-modified timestamp, then the FastMD Viewer SHALL queue the PDF for conversion.
@@ -53,7 +53,7 @@
 ### Image Support (Vision)
 - [REQ-470]: When initial indexing runs or when the file watcher receives a file system change notification, the FastMD Viewer SHALL scan all configured image libraries for files with extensions `.jpg`, `.jpeg`, `.png`, `.gif`, `.webp`, `.bmp`, `.tiff`, and `.avif`.
 - [REQ-471]: The FastMD Viewer SHALL NOT display image files in the directory tree or tab bar.
-- [REQ-471A]: The FastMD Viewer SHALL NOT expose image files to LLM file tools such as `grep`, `list_files`, or `read_file`.
+- [REQ-471A]: The FastMD Viewer SHALL NOT expose image files to LLM file tools such as `search_notes`, `list_notes`, or `read_note`.
 - [REQ-472]: When the FastMD Viewer discovers an image file, the FastMD Viewer SHALL check whether a Markdown file with the same stem and a `.md` extension exists in the same directory.
 - [REQ-473]: If no corresponding Markdown file exists, or if the Markdown file's last-modified timestamp is older than the image's last-modified timestamp, then the FastMD Viewer SHALL queue the image for vision analysis.
 - [REQ-475]: When the FastMD Viewer queues an image for vision analysis, the FastMD Viewer SHALL invoke the model tagged with the `vision` use_case and SHALL send the image as a base64-encoded data URL in the message content.

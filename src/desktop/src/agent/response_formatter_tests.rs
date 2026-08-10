@@ -1,11 +1,4 @@
 //! Tests for `agent/response_formatter.rs`.
-//!
-//! Sidecar file. Extracted from `response_formatter.rs` so the implementation
-//! module stays focused on production code.
-//!
-//! Originally a `#[cfg(test)] mod tests { ... }` block at the bottom of
-//! `response_formatter.rs`. Lives in a sibling file so private item access via
-//! `super::*` keeps working.
 
 use super::*;
 
@@ -39,32 +32,32 @@ fn test_split_thinking_empty_thinking() {
 
 #[test]
 fn test_format_tool_call_create_file() {
-    let msg = format_tool_call_message("create_file", r#"{"path":"lib/test.md"}"#);
-    assert!(msg.contains("create_file"));
+    let msg = format_tool_call_message("create_note", r#"{"path":"lib/test.md"}"#);
+    assert!(msg.contains("create_note"));
     assert!(msg.contains("lib/test.md"));
 }
 
 #[test]
 fn test_format_tool_call_other() {
-    let msg = format_tool_call_message("grep", r#"{"pattern":"hello"}"#);
-    assert!(msg.contains("grep"));
+    let msg = format_tool_call_message("search_notes", r#"{"pattern":"hello"}"#);
+    assert!(msg.contains("search_notes"));
     assert!(msg.contains("hello"));
 }
 
 #[test]
 fn test_format_result_error() {
     let result = r#"{"status":"error","message":"not found"}"#;
-    let msg = format_tool_result_message("read_file", result);
+    let msg = format_tool_result_message("read_note", result);
     assert!(msg.contains("Error"));
-    assert!(msg.contains("read_file"));
+    assert!(msg.contains("read_note"));
     assert!(msg.contains("not found"));
 }
 
 #[test]
 fn test_format_result_create_file() {
     let result = r#"{"status":"success","data":{"size_bytes":42}}"#;
-    let msg = format_tool_result_message("create_file", result);
-    assert!(msg.contains("create_file"));
+    let msg = format_tool_result_message("create_note", result);
+    assert!(msg.contains("create_note"));
     assert!(msg.contains("42 B"));
 }
 
@@ -79,16 +72,16 @@ fn test_format_result_read_tags() {
 #[test]
 fn test_format_result_read_file() {
     let result = r#"{"status":"success","data":{"content":"line1\nline2"}}"#;
-    let msg = format_tool_result_message("read_file", result);
-    assert!(msg.contains("read_file"));
+    let msg = format_tool_result_message("read_note", result);
+    assert!(msg.contains("read_note"));
     assert!(msg.contains("2 line(s)"));
 }
 
 #[test]
 fn test_format_result_grep_no_matches() {
     let result = r#"{"status":"success","data":{"matches":"No matches found."}}"#;
-    let msg = format_tool_result_message("grep", result);
-    assert!(msg.contains("grep"));
+    let msg = format_tool_result_message("search_notes", result);
+    assert!(msg.contains("search_notes"));
     assert!(msg.contains("0 file(s)"));
 }
 

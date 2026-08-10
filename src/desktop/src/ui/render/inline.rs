@@ -138,6 +138,9 @@ pub(super) fn render_inline_inner(
                         .monospace()
                         .background_color(egui::Color32::from_gray(40));
                 }
+                if style.muted {
+                    rt = rt.color(egui::Color32::from_rgb(160, 160, 160));
+                }
                 if style.strikethrough {
                     rt = rt.strikethrough();
                 }

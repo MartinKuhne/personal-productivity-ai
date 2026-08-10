@@ -1,14 +1,6 @@
 //! Tests for the MCP protocol client (transports, sessions, manager,
 //! OAuth 2.1 flow, error type, SSE walker).
-//!
-//! Sidecar file for `crate::integrations::mcp`. Extracted from `mod.rs`
-//! so the implementation module stays focused on production code.
-//!
-//! Originally a `#[cfg(test)] mod tests { ... }` block at the bottom of
-//! `mcp/mod.rs`; relocated when the protocol layer was moved from
-//! `crate::agent::tools::mcp` to `crate::integrations::mcp`. Lives in
-//! a sibling file so private item access via `super::*` keeps working.
-//!
+
 //! Tool-adapter tests now live in
 //! `crate::agent::tools::mcp::adapter_tests`.
 

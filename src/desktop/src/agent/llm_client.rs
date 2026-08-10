@@ -72,6 +72,14 @@ impl LLMClient {
         self.api_key != "your-api-key-here" && !self.api_key.is_empty()
     }
 
+    pub fn model_name(&self) -> &str {
+        &self.model_name
+    }
+
+    pub fn max_tokens(&self) -> u32 {
+        self.max_tokens
+    }
+
     pub fn chat_completion(
         &self,
         messages: &[serde_json::Value],

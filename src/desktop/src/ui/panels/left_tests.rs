@@ -1,11 +1,4 @@
 //! Tests for `panels/left.rs`.
-//!
-//! Sidecar file. Extracted from `left.rs` so the implementation
-//! module stays focused on production code.
-//!
-//! Originally a `#[cfg(test)] mod tests { ... }` block at the bottom of
-//! `left.rs`. Lives in a sibling file so private item access via
-//! `super::*` keeps working.
 
 use super::*;
 use crate::ui::test_helpers::assert::assert_no_id_change_in_shapes;

@@ -1,10 +1,5 @@
 //! Tests for the Trello REST client (`client.rs`).
-//!
-//! Sidecar file. Extracted from `client.rs` per AGENTS.md RUST-056 so
-//! the implementation module stays focused on production code. Lives
-//! in a sibling file so private item access via `super::*` keeps
-//! working.
-//!
+
 //! Covers:
 //!  * URL shape (the API-key + token query string)
 //!  * the `trello_http_call` happy path against a local `wiremock` server

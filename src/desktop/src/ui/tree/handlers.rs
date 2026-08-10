@@ -147,7 +147,7 @@ pub fn build_merge_prompt(
     content_libraries: &[crate::config::ContentLibrary],
     selected_files: &HashSet<PathBuf>,
 ) -> String {
-    let mut prompt = "Please read each of the following documents using the read_file tool and merge their content into a new document. Consolidate overlapping content, deduplicate repeated information, and produce a single unified document that combines all of the source material:\n".to_string();
+    let mut prompt = "Please read each of the following documents using the read_note tool and merge their content into a new document. Consolidate overlapping content, deduplicate repeated information, and produce a single unified document that combines all of the source material:\n".to_string();
     let mut sorted_files: Vec<&PathBuf> = selected_files.iter().collect();
     sorted_files.sort();
     for file in sorted_files {

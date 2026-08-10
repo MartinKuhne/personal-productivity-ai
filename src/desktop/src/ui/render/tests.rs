@@ -501,6 +501,20 @@ fn test_parse_markdown_rule_and_blockquote() {
 }
 
 #[test]
+fn test_format_delegate_tool_call_message_uses_double_angle() {
+    let msg = crate::agent::response_formatter::format_delegate_tool_call_message(
+        "web_fetch",
+        r#"{"url":"https://example.com"}"#,
+    );
+    assert!(msg.starts_with(">> "), "Expected >> prefix, got: {msg}");
+    assert!(
+        msg.contains("**Executing tool `web_fetch`**"),
+        "Expected tool name"
+    );
+    assert!(!msg.contains("<span>"), "Should not contain HTML");
+}
+
+#[test]
 fn test_parse_markdown_html_and_footnotes() {
     let md = "<span>Inline HTML</span>\n\nFootnote[^1]\n\n[^1]: Footnote details";
     let events = parse_markdown_to_events(md);

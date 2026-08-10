@@ -49,23 +49,22 @@ pub const WEB_FETCH_FINAL_PAGE_HINT: &str = "Final page.";
 
 // --- filesystem (fs) ---
 
-// --- replace_text ---
+// --- patch_note ---
 
-pub const REPLACE_TEXT_DESCRIPTION: &str =
-    "Replace exact occurrences of target text with replacement text in a file.";
+pub const PATCH_NOTE_DESCRIPTION: &str = "Patch a markdown-formatted note by replacing exact occurrences of target text with replacement text.";
 
-// --- grep ---
+// --- search_notes ---
 
-pub const GREP_DESCRIPTION: &str = "Search Markdown files for text. The tool returns up to 200 matching lines. If the tool truncates results, refine your query or use a sub-agent.";
+pub const SEARCH_NOTES_DESCRIPTION: &str = "Search markdown-formatted notes for text. The tool returns up to 200 matching lines. If the tool truncates results, refine your query or use a sub-agent.";
 
-pub const FIELD_GREP_INPUT_QUERY: &str = "Specify the search term.";
+pub const FIELD_SEARCH_NOTES_INPUT_QUERY: &str = "Specify the search term.";
 
-pub const FIELD_GREP_RESPONSE_MATCHES: &str = "Contains matching lines up to 200 results. Returns `\"No matches found.\"` when no matches exist.";
+pub const FIELD_SEARCH_NOTES_RESPONSE_MATCHES: &str = "Contains matching lines up to 200 results. Returns `\"No matches found.\"` when no matches exist.";
 
-pub const FIELD_GREP_RESPONSE_TOTAL: &str =
+pub const FIELD_SEARCH_NOTES_RESPONSE_TOTAL: &str =
     "Total number of matching lines found across all libraries.";
 
-pub const FIELD_GREP_RESPONSE_TRUNCATED: &str =
+pub const FIELD_SEARCH_NOTES_RESPONSE_TRUNCATED: &str =
     "Set to `true` when total matches exceed 200 lines.";
 
 // --- read_tags ---
@@ -73,41 +72,41 @@ pub const FIELD_GREP_RESPONSE_TRUNCATED: &str =
 pub const READ_TAGS_DESCRIPTION: &str =
     "Get all unique tags from front-matter headers in workspace Markdown files.";
 
-// --- list_files_by_tag ---
+// --- list_notes_by_tag ---
 
-pub const LIST_FILES_BY_TAG_DESCRIPTION: &str = "Return a paginated list of Markdown files that contain a tag in their front-matter. Default parameters: `offset=0`, `limit=100`.";
+pub const LIST_NOTES_BY_TAG_DESCRIPTION: &str = "Return a paginated list of markdown-formatted notes that contain a tag in their front-matter. Default parameters: `offset=0`, `limit=100`.";
 
-pub const FIELD_LIST_FILES_BY_TAG_RESPONSE_FILES: &str =
+pub const FIELD_LIST_NOTES_BY_TAG_RESPONSE_FILES: &str =
     "JSON array of virtual file paths for the requested page slice.";
 
-// --- list_files ---
+// --- list_notes ---
 
-pub const LIST_FILES_DESCRIPTION: &str = "Return a paginated list of Markdown files in a directory. Use path `/` or `.` to list content libraries. Default parameters: `offset=0`, `limit=100`.";
+pub const LIST_NOTES_DESCRIPTION: &str = "Return a paginated list of markdown-formatted notes in a directory. Use path `/` or `.` to list content libraries. Default parameters: `offset=0`, `limit=100`.";
 
-pub const FIELD_LIST_FILES_RESPONSE_FILES: &str =
+pub const FIELD_LIST_NOTES_RESPONSE_FILES: &str =
     "JSON array of virtual file paths for the requested page slice.";
 
-// --- read_file ---
+// --- read_note ---
 
-pub const READ_FILE_DESCRIPTION: &str = "Read the full text of a file at a path. Use `read_yaml_header` if you only need a document summary.";
+pub const READ_NOTE_DESCRIPTION: &str = "Read the full text of a markdown-formatted note at a path. Use `read_yaml_header` if you only need a document summary.";
 
-// --- read_lines ---
+// --- window_note ---
 
-pub const READ_LINES_DESCRIPTION: &str = "Read a contiguous slice of lines from a file. `offset` is 0-indexed (`0` is the first line); `limit` is the maximum number of lines to return. An `offset` past the end of the file returns an empty `content`. A `limit` that would overflow the file's line count is clamped to the remainder. Default parameters: `offset=0`, `limit=100`. Pairs with `read_file` when you need the whole file.";
+pub const WINDOW_NOTE_DESCRIPTION: &str = "Read a contiguous slice of lines from a markdown-formatted note. `offset` is 0-indexed (`0` is the first line); `limit` is the maximum number of lines to return. An `offset` past the end of the note returns an empty `content`. A `limit` that would overflow the note's line count is clamped to the remainder. Default parameters: `offset=0`, `limit=100`. Pairs with `read_note` when you need the whole note.";
 
-// --- create_file ---
+// --- create_note ---
 
-pub const CREATE_FILE_DESCRIPTION: &str = "Create a new file at the specified path with provided content. Fails if the file already exists â€” this tool can only create new files.";
+pub const CREATE_NOTE_DESCRIPTION: &str = "Create a new file at the specified path with provided content. Fails if the file already exists â€” this tool can only create new files.";
 
-// --- insert_lines ---
+// --- insert_into_note ---
 
-pub const INSERT_LINES_DESCRIPTION: &str = "Insert lines into a file at a specified 0-indexed offset. `offset=0` inserts at the top of the file; `offset=lines.len()` appends to the end. `offset > lines.len()` returns an error.";
+pub const INSERT_INTO_NOTE_DESCRIPTION: &str = "Insert lines into a markdown-formatted note at a specified 0-indexed offset. `offset=0` inserts at the top of the note; `offset=lines.len()` appends to the end. `offset > lines.len()` returns an error.";
 
 // --- web ---
 
 // --- web_delegate ---
 
-pub const WEB_DELEGATE_DESCRIPTION: &str = "Delegate web searches and fetches to a sub-agent. Provide clear instructions. The sub-agent returns summarized information.";
+pub const WEB_DELEGATE_DESCRIPTION: &str = "Delegate a specific, unambiguous fact lookup to a sub-agent that searches and fetches the web, then returns a concise answer. Use when the question has a single factual answer — a word, sentence, or short list. Examples: \"What is the full name of the current president of the United States?\" or \"List every compact SUV make and model sold in California in 2026.\" Preferring web_delegate for fact lookups reduces your context usage. Do NOT use web_delegate for open-ended research, ambiguous questions, multi-page crawling, or as a retry after a failed web_search.";
 
 // --- web_fetch ---
 
@@ -121,7 +120,7 @@ pub const FIELD_WEB_FETCH_RESPONSE_FROM_CACHE: &str =
 
 // --- web_search ---
 
-pub const WEB_SEARCH_DESCRIPTION: &str = "Search the web for information using a query string.";
+pub const WEB_SEARCH_DESCRIPTION: &str = "Search the web for information using a query string. Use for ambiguous or open-ended questions, evaluating broad result sets, crawling multiple pages, or when you need to try different search strategies to find what you're looking for.";
 
 pub const FIELD_WEB_SEARCH_INPUT_QUERY: &str = "Specify the search term.";
 
@@ -163,55 +162,76 @@ pub const GET_CALENDAR_DESCRIPTION: &str = "Get calendar items by date range.";
 
 pub const GET_CALENDAR_ITEM_DESCRIPTION: &str = "Get a calendar item by its full href path. Provide the exact href value returned by search or get tools instead of a UUID.";
 
-pub const ADD_CALENDAR_ITEM_DESCRIPTION: &str = "Add a new calendar item.";
+pub const ADD_CALENDAR_ITEM_DESCRIPTION: &str = "Add a new calendar event to the first configured CalDAV calendar. All fields are optional — only include fields you know. The tool generates a UID automatically.";
 
-pub const UPDATE_CALENDAR_ITEM_DESCRIPTION: &str = "Update an existing calendar item.";
+pub const UPDATE_CALENDAR_ITEM_DESCRIPTION: &str = "Update an existing calendar event identified by `id` (the href returned by search or get tools). Only the fields you provide are changed; all other event properties are preserved.";
 
 pub const DELETE_CALENDAR_ITEM_DESCRIPTION: &str = "Delete a calendar item.";
 
+pub const FIELD_CALENDAR_HREF_DESC: &str =
+    "The full href path of the calendar item, as returned by search or get tools.";
+
+pub const FIELD_CALENDAR_SUMMARY_DESC: &str =
+    "Event title/summary. Defaults to 'New Event' if omitted.";
+
+pub const FIELD_CALENDAR_START_DESC: &str =
+    "Start datetime in ISO 8601 format (e.g. '2025-01-15T09:00:00' or date-only '2025-01-15').";
+
+pub const FIELD_CALENDAR_END_DESC: &str =
+    "End datetime in ISO 8601 format (e.g. '2025-01-15T10:00:00' or date-only '2025-01-15').";
+
+pub const FIELD_CALENDAR_DESCRIPTION_DESC: &str = "Free-text event description or notes.";
+
+pub const FIELD_CALENDAR_LOCATION_DESC: &str = "Event location (e.g. room name, address).";
+
 // --- carddav (contacts) ---
+
+pub const FIELD_CONTACT_HREF_DESC: &str =
+    "The href of the contact, as returned by `get_contact` or `search_contact`.";
+
+pub const FIELD_CONTACT_NAME_DESC: &str = "The contact's display name.";
+
+pub const FIELD_CONTACT_EMAIL_DESC: &str = "Email address.";
+
+pub const FIELD_CONTACT_PHONE_DESC: &str = "Phone number.";
+
+pub const FIELD_CONTACT_COMPANY_DESC: &str = "Company or organization name.";
+
+pub const FIELD_CONTACT_TITLE_DESC: &str = "Job title or role.";
+
+pub const FIELD_CONTACT_NOTES_DESC: &str = "Free-form notes about the contact.";
+
+pub const FIELD_CONTACT_BIRTHDAY_DESC: &str = "Birthday as ISO date YYYY-MM-DD.";
+
+pub const FIELD_CONTACT_ADDRESSES_DESC: &str =
+    "Array of postal address objects. See `AddressInput` schema for field details.";
+
+pub const FIELD_ADDRESS_TYPE_DESC: &str = "Address type: home, work, or another label.";
+
+pub const FIELD_ADDRESS_STREET_DESC: &str = "Street address.";
+
+pub const FIELD_ADDRESS_CITY_DESC: &str = "City.";
+
+pub const FIELD_ADDRESS_REGION_DESC: &str = "State, province, or region.";
+
+pub const FIELD_ADDRESS_POSTAL_CODE_DESC: &str = "Postal or ZIP code.";
+
+pub const FIELD_ADDRESS_COUNTRY_DESC: &str = "Country name.";
+
+pub const FIELD_ADDRESS_PO_BOX_DESC: &str = "P.O. box number.";
+
+pub const FIELD_ADDRESS_EXT_DESC: &str = "Extended address (e.g. apartment or suite).";
 
 pub const SEARCH_CONTACT_DESCRIPTION: &str = "Search contacts by keyword.";
 
-pub const ADD_CONTACT_DESCRIPTION: &str = "Add a new contact to the configured CardDAV addressbook. \
-The `contact_json` argument is a JSON object describing the contact. \
-Use these canonical field names (the listed aliases are also accepted): \
-`name` (aliases: `fn`, `full_name`) — the contact's display name, REQUIRED; \
-`email` (aliases: `email_address`, `mail`); \
-`phone` (aliases: `tel`, `telephone`, `mobile`, `phone_number`); \
-`company` (aliases: `org`, `organization`, `organisation`); \
-`title` (aliases: `job_title`, `role`) — job title; \
-`notes` (aliases: `note`, `comment`) — free-form notes; \
-`birthday` (aliases: `bday`, `dob`, `date_of_birth`) — ISO date `YYYY-MM-DD`; \
-`addresses` — JSON array of postal-address objects (see below). \
-For convenience, a single address may also be sent as `address` (object \
-or single-line string). Only fields you actually know should be included. \
-Empty strings and missing fields are ignored. The created resource is \
-returned with its href, Location, and ETag.\n\n\
-Address object shape: `{\"type\": \"home|work|…\", \"street\": \"…\", \
-\"city\": \"…\", \"region\": \"…\", \"postal_code\": \"…\", \"country\": \"…\", \
-\"po_box\": \"…\", \"ext\": \"…\"}`. All fields are optional; components \
-you don't know should be omitted. The `type` becomes the vCard `TYPE=` \
-parameter. Multiple addresses per contact are supported (e.g. a HOME and \
-a WORK).";
+pub const ADD_CONTACT_DESCRIPTION: &str = "Add a new contact to the configured CardDAV addressbook. All fields are optional — only include fields you know. The created resource is returned with its href, Location, and ETag.";
 
 pub const GET_CONTACT_DESCRIPTION: &str = "Get a contact by its unique ID. The response includes the \
 raw vCard plus structured fields: `fn_name`, `email`, `tel`, `org`, \
 `bday` (ISO `YYYY-MM-DD`), and `addresses` (array of postal-address \
 objects with the same shape as `add_contact`).";
 
-pub const UPDATE_CONTACT_DESCRIPTION: &str = "Update an existing contact at the given `id` (the href \
-returned by `get_contact` or `search_contact`). The `contact_json` argument \
-uses the same schema as `add_contact` (canonical names: `name`, `email`, \
-`phone`, `company`, `title`, `notes`, `birthday`, `addresses`; aliases are \
-also accepted). Only the canonical fields the JSON provides are touched; \
-every other vCard property on the contact (N, NICKNAME, URL, X-*, …) is \
-preserved verbatim, so this is safe to call with a partial payload. The \
-contact's vCard `UID` is preserved across the update so the addressbook \
-href stays stable. `addresses` is list-valued: when provided, the new \
-list replaces every existing ADR on the contact. The update is performed \
-with `If-Match` so concurrent edits are detected — if the server returns \
-412 the caller should re-`get_contact` and retry.";
+pub const UPDATE_CONTACT_DESCRIPTION: &str = "Update an existing contact at the given `id` (the href returned by `get_contact` or `search_contact`). Only the fields you provide are touched; every other vCard property on the contact (N, NICKNAME, URL, X-*, …) is preserved verbatim, so this is safe to call with a partial payload. The contact's vCard `UID` is preserved across the update so the addressbook href stays stable. `addresses` is list-valued: when provided, the new list replaces every existing ADR on the contact. The update is performed with `If-Match` so concurrent edits are detected — if the server returns 412 the caller should re-`get_contact` and retry.";
 
 pub const DELETE_CONTACT_DESCRIPTION: &str = "Delete the contact at the given `id` (the href returned by \
 `get_contact` or `search_contact`). A 404 (already absent) is treated as a \
@@ -220,39 +240,39 @@ propagated as errors with the truncated response body for diagnosis.";
 
 // --- csv (database) ---
 
-pub const CREATE_CSV_DESCRIPTION: &str = "Create a CSV database with specified column headers.";
+pub const CREATE_CSV_DESCRIPTION: &str = "Create a CSV database. Specify the column headers.";
 
 pub const LIST_CSV_DESCRIPTION: &str = "List all CSV databases.";
 
 pub const ADD_ROWS_DESCRIPTION: &str = "Add rows to a CSV database.";
 
-pub const DELETE_ROWS_DESCRIPTION: &str = "Delete rows from a CSV database using an expression.";
+pub const DELETE_ROWS_DESCRIPTION: &str = "Delete rows from a CSV database. Specify an expression.";
 
 pub const QUERY_DESCRIPTION: &str =
-    "Query a CSV database using an expression or aggregate function.";
+    "Query a CSV database. Specify an expression or an aggregate function.";
 
 pub const FIELD_CREATE_CSV_INPUT_DB_NAME: &str = "Specify a unique name for the new CSV database.";
 
 pub const FIELD_CREATE_CSV_INPUT_HEADERS: &str =
-    "Provide column headers for the new CSV database in sequential order.";
+    "Specify the column headers for the new CSV database. Use sequential order.";
 
-pub const FIELD_ADD_ROWS_INPUT_DB_NAME: &str = "Specify the target CSV database name.";
+pub const FIELD_ADD_ROWS_INPUT_DB_NAME: &str = "Specify the name of the target CSV database.";
 
-pub const FIELD_ADD_ROWS_INPUT_ROWS: &str = "Provide rows as JSON objects mapping header names to string values. The system stores missing keys as empty strings.";
+pub const FIELD_ADD_ROWS_INPUT_ROWS: &str = "Specify the rows as JSON objects. Map the header names to the string values. The system saves the missing keys as empty strings.";
 
-pub const FIELD_DELETE_ROWS_INPUT_DB_NAME: &str = "Specify the target CSV database name.";
+pub const FIELD_DELETE_ROWS_INPUT_DB_NAME: &str = "Specify the name of the target CSV database.";
 
-pub const FIELD_DELETE_ROWS_INPUT_PREDICATE: &str = "Specify an expression to evaluate each row. The tool deletes rows where the expression returns true.";
+pub const FIELD_DELETE_ROWS_INPUT_PREDICATE: &str = "Specify an expression to evaluate each row. The tool deletes the rows where the expression returns true.";
 
-pub const FIELD_QUERY_REQUEST_DB_NAME: &str = "Specify the target CSV database name.";
+pub const FIELD_QUERY_REQUEST_DB_NAME: &str = "Specify the name of the target CSV database.";
 
-pub const FIELD_QUERY_REQUEST_PREDICATE: &str = "Specify an optional expression to filter rows. If you omit the expression, the tool evaluates all rows.";
+pub const FIELD_QUERY_REQUEST_PREDICATE: &str = "Specify an expression to filter the rows. If you do not specify the expression, the tool evaluates all rows.";
 
 pub const FIELD_QUERY_REQUEST_AGGREGATE_COL: &str =
-    "Specify the column to aggregate. Provide this value when you set `aggregate_func`.";
+    "Specify the column to aggregate. Specify this value when you set `aggregate_func`.";
 
 pub const FIELD_QUERY_REQUEST_AGGREGATE_FUNC: &str =
-    "Specify the aggregate function: `sum`, `average`, or `count`.";
+    "Specify the aggregate function. Use `sum`, `average`, or `count`.";
 
 // --- yaml (front-matter) ---
 
