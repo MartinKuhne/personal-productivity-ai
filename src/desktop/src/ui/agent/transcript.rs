@@ -90,6 +90,7 @@ impl AgentTranscript {
                 };
                 let formatted = format_tool_call_message(name, &args_str);
                 self.content.push_str(&formatted);
+                self.content.push_str("\n\n");
                 self.blocks.push(TranscriptBlock::ToolCall {
                     id: id.clone(),
                     name: name.clone(),

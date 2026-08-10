@@ -95,9 +95,9 @@ description: "Task list for Agent Loop / UI Seam Refactor"
 - [x] T014 [US1] Add `AgentEvent::ToolSideEffect(FileCreated { path, tags })` → `FsEvent::FileModified { path, tags }` reissue branch in `src/desktop/src/app/orchestrator.rs` drain loop — call `self.handle_fs_event(FsEvent::FileModified { path, tags })` (migration step 4, FR-007)
 - [x] T015 [US1] Switch orchestrator drain from `BackgroundEvent::Agent` to `Bus<AgentEvent>` reader in `src/desktop/src/app/orchestrator.rs` — route all agent events through the new bus; update `AgentState` mutations to use structured events; build `AgentTranscript` from `ContentDelta`/`ToolCallStarted`/`ToolResult` (migration step 5)
 - [x] T016 [US1] Remove dual-publish from `src/desktop/src/agent/agent_impl.rs` — publish on `Bus<AgentEvent>` only; old `tx_gui` sends deleted (migration step 5)
-- [ ] T017 [US1] Write no-regression test: assert rendered transcript matches pre-refactor baseline for a prompt that triggers thinking + content + tool call in `src/desktop/tests/` or `src/desktop/src/ui/render/e2e_tests/` (quickstart scenario 3, SC-002)
-- [ ] T018 [US1] Write file side-effect reissue test in `src/desktop/src/agent/tool_executor_tests.rs` (assert `execute_all` returns `Vec<ToolSideEffect>`, no `FsEvent` sent) and orchestrator drain test (assert `ToolSideEffect` → `FsEvent::FileModified` reissue) (quickstart scenario 4, SC-005)
-- [ ] T019 [US1] Write broadcast lag handling test: flood > 8192 `ContentDelta` events, assert `BusReader` returns `Lagged(n)` and orchestrator emits truncation marker (quickstart scenario 5)
+- [x] T017 [US1] Write no-regression test: assert rendered transcript matches pre-refactor baseline for a prompt that triggers thinking + content + tool call in `src/desktop/tests/` or `src/desktop/src/ui/render/e2e_tests/` (quickstart scenario 3, SC-002)
+- [x] T018 [US1] Write file side-effect reissue test in `src/desktop/src/agent/tool_executor_tests.rs` (assert `execute_all` returns `Vec<ToolSideEffect>`, no `FsEvent` sent) and orchestrator drain test (assert `ToolSideEffect` → `FsEvent::FileModified` reissue) (quickstart scenario 4, SC-005)
+- [x] T019 [US1] Write broadcast lag handling test: flood > 8192 `ContentDelta` events, assert `BusReader` returns `Lagged(n)` and orchestrator emits truncation marker (quickstart scenario 5)
 
 **Checkpoint**: User Story 1 fully functional — UI renders identically from `Bus<AgentEvent>`; file reindex works through typed path. This is the MVP.
 

@@ -194,3 +194,71 @@ fn test_status_events_ignored_by_transcript() {
     assert!(t.content.is_empty());
     assert!(t.blocks.is_empty());
 }
+
+/// T017: No-regression test — verifies that the transcript's `content`
+/// buffer matches the pre-refactor `full_response` accumulation for a
+/// prompt that triggers thinking + content + tool call + tool result +
+/// final content (quickstart scenario 3, SC-002).
+#[test]
+fn test_transcript_matches_pre_refactor_full_response() {
+    use crate::ui::render::agent_render::{format_tool_call_message, format_tool_result_message};
+    let id = test_session_id();
+    let mut t = AgentTranscript::new(id);
+
+    // Simulate the event flow from a typical agent session:
+    // 1. Thinking (reasoning_content)
+    t.apply_event(&AgentEvent::Thinking {
+        session_id: id,
+        text: "Let me analyze the request.\n".into(),
+    });
+    // 2. Content (first response chunk)
+    t.apply_event(&AgentEvent::ContentDelta {
+        session_id: id,
+        text: "Here's what I found:\n\n".into(),
+    });
+    // 3. Tool call started
+    t.apply_event(&AgentEvent::ToolCallStarted {
+        session_id: id,
+        id: "call_1".into(),
+        name: "search_notes".into(),
+        args: json!({"query": "test"}),
+    });
+    // 4. Tool result
+    t.apply_event(&AgentEvent::ToolResult {
+        session_id: id,
+        id: "call_1".into(),
+        name: "search_notes".into(),
+        result: json!({"status": "success", "data": {"matches": 3}}),
+    });
+    // 5. Final content
+    t.apply_event(&AgentEvent::ContentDelta {
+        session_id: id,
+        text: "Based on the search results, here's the answer.\n\n".into(),
+    });
+
+    // Build the expected content the way the old `full_response` would have:
+    let mut expected = String::new();
+    // handle_content pushed content + "\n\n" (ContentDelta includes it)
+    expected.push_str("Here's what I found:\n\n");
+    // process_turn pushed format_tool_call_message + "\n\n"
+    let tc_msg = format_tool_call_message("search_notes", r#"{"query":"test"}"#);
+    expected.push_str(&tc_msg);
+    expected.push_str("\n\n");
+    // process_tool_results pushed format_tool_result_message (no extra "\n\n")
+    let tr_msg = format_tool_result_message(
+        "search_notes",
+        r#"{"status":"success","data":{"matches":3}}"#,
+    );
+    expected.push_str(&tr_msg);
+    // handle_content pushed final content + "\n\n"
+    expected.push_str("Based on the search results, here's the answer.\n\n");
+
+    assert_eq!(
+        t.content, expected,
+        "transcript content must match pre-refactor full_response accumulation"
+    );
+    assert_eq!(
+        t.thinking, "Let me analyze the request.\n",
+        "transcript thinking must match"
+    );
+}

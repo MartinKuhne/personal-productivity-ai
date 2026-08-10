@@ -1255,3 +1255,101 @@ fn ctx_with_native_ppp(ppp: f32) -> (egui::Context, egui::RawInput) {
     output.textures_delta.clear();
     (ctx, raw_input)
 }
+
+/// T018: Verify that a `ToolSideEffect::FileCreated` event on
+/// `Bus<AgentEvent>` is reissued as `FsEvent::FileModified` by the
+/// orchestrator drain, triggering `handle_fs_event` (verified via
+/// `selection.tree_dirty` becoming true). Quickstart scenario 4, SC-005.
+#[test]
+fn test_tool_side_effect_reissues_fs_event() {
+    use crate::agent::events::{AgentEvent as SeamAgentEvent, ToolSideEffect};
+    use std::io::Write;
+
+    let mut app = create_test_app();
+    let bus = app.orchestrator.agent.event_bus();
+
+    // Create a temp file so handle_fs_event can process it without panicking
+    let temp_dir = std::env::temp_dir().join("fastmd_test_side_effect_reissue");
+    let _ = std::fs::create_dir_all(&temp_dir);
+    let temp_file = temp_dir.join("test_note.md");
+    let mut f = std::fs::File::create(&temp_file).unwrap();
+    let _ = f.write_all(b"---\ntags: [test_tag]\n---\n# Test\n");
+    drop(f);
+
+    let session_id = Uuid::new_v4();
+    bus.publish(SeamAgentEvent::ToolSideEffect {
+        session_id,
+        effect: ToolSideEffect::FileCreated {
+            path: temp_file.clone(),
+            tags: vec!["test_tag".to_string()],
+        },
+    });
+
+    // Reset tree_dirty to false so we can detect the reissue
+    app.orchestrator.selection.tree_dirty = false;
+
+    // tree_dirty should be false before drain
+    assert!(
+        !app.orchestrator.selection.tree_dirty,
+        "tree_dirty must be false before drain"
+    );
+
+    app.orchestrator.drain_agent_event_bus();
+
+    // After drain, tree_dirty should be true (handle_fs_event was called)
+    assert!(
+        app.orchestrator.selection.tree_dirty,
+        "tree_dirty must be true after ToolSideEffect reissue — handle_fs_event was not called"
+    );
+
+    // Cleanup
+    let _ = std::fs::remove_file(&temp_file);
+    let _ = std::fs::remove_dir(&temp_dir);
+}
+
+/// T019: Verify broadcast lag handling — flood > 8192 `ContentDelta`
+/// events on `Bus<AgentEvent>`, then drain. The reader should return
+/// `Lagged(n)` and the orchestrator should emit a truncation marker
+/// into the transcript content (quickstart scenario 5).
+#[test]
+fn test_broadcast_lag_handled_with_truncation_marker() {
+    use crate::agent::events::AgentEvent as SeamAgentEvent;
+
+    let mut app = create_test_app();
+    let bus = app.orchestrator.agent.event_bus();
+    let session_id = Uuid::new_v4();
+
+    // Publish SessionStarted to set up the transcript
+    bus.publish(SeamAgentEvent::SessionStarted { session_id });
+
+    // First drain to consume SessionStarted
+    app.orchestrator.drain_agent_event_bus();
+
+    // Now flood the bus with > BUS_CAPACITY (8192) ContentDelta events.
+    // The reader (subscribed during init) will fall behind and the
+    // broadcast channel will drop old messages, returning Lagged(n).
+    for i in 0..9000u32 {
+        bus.publish(SeamAgentEvent::ContentDelta {
+            session_id,
+            text: format!("chunk {}\n", i),
+        });
+    }
+
+    // Drain — the reader should encounter Lagged(n)
+    app.orchestrator.drain_agent_event_bus();
+
+    // The orchestrator should have set agent_event_lagged = true
+    // and pushed the truncation marker into transcript.content
+    assert!(
+        app.orchestrator.agent_event_lagged,
+        "agent_event_lagged must be true after broadcast lag"
+    );
+    assert!(
+        app.orchestrator
+            .agent_transcript
+            .content
+            .contains("[output truncated"),
+        "transcript content must contain truncation marker; got: {:?}",
+        app.orchestrator.agent_transcript.content
+    );
+}
