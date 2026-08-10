@@ -278,3 +278,154 @@ fn test_handle_agent_event_failed_clears_queue() {
     assert_eq!(mgr.queued_prompt_count(), 0);
     assert!(mgr.state.status.contains("Error"));
 }
+
+#[test]
+fn test_handle_agent_event_debug_entry_accumulates() {
+    use crate::bus::events::debug::{AgentDebugEntry, DebugEntryKind, DebugEntryRow};
+    use crate::bus::events::typed::AgentEvent;
+
+    let config = AppConfig::default();
+    let mut mgr = AgentSessionManager::new_for_test(
+        config,
+        Arc::new(crate::app::session::BrowserSession::new(
+            &AppConfig::default(),
+        )),
+    );
+
+    let entry = AgentDebugEntry {
+        turn: 1,
+        session: 1,
+        timestamp: chrono::Local::now(),
+        kind: DebugEntryKind::Outgoing,
+        summary: "Turn 1 — Outgoing".to_string(),
+        content: Some(serde_json::json!({"test": true})),
+        row_type: DebugEntryRow::Entry,
+    };
+
+    let result = mgr.handle_agent_event(AgentEvent::DebugEntry(entry));
+    assert!(result.is_none());
+    assert_eq!(mgr.state.debug_entries.len(), 1);
+    assert_eq!(mgr.state.debug_entries[0].turn, 1);
+    assert_eq!(mgr.state.debug_entries[0].session, 1);
+    assert_eq!(mgr.state.debug_entries[0].kind, DebugEntryKind::Outgoing);
+
+    // Second entry accumulates (no clearing)
+    let entry2 = AgentDebugEntry {
+        turn: 2,
+        session: 1,
+        timestamp: chrono::Local::now(),
+        kind: DebugEntryKind::Incoming,
+        summary: "Turn 2 — Incoming".to_string(),
+        content: Some(serde_json::json!({"choices": []})),
+        row_type: DebugEntryRow::Entry,
+    };
+    mgr.handle_agent_event(AgentEvent::DebugEntry(entry2));
+    assert_eq!(mgr.state.debug_entries.len(), 2);
+}
+
+#[test]
+fn test_debug_entries_never_cleared_on_new_session() {
+    use crate::bus::events::debug::{AgentDebugEntry, DebugEntryKind, DebugEntryRow};
+    use crate::bus::events::typed::AgentEvent;
+
+    let config = AppConfig::default();
+    let mut mgr = AgentSessionManager::new_for_test(
+        config,
+        Arc::new(crate::app::session::BrowserSession::new(
+            &AppConfig::default(),
+        )),
+    );
+
+    let entry = AgentDebugEntry {
+        turn: 1,
+        session: 1,
+        timestamp: chrono::Local::now(),
+        kind: DebugEntryKind::Outgoing,
+        summary: "Turn 1 — Outgoing".to_string(),
+        content: Some(serde_json::json!({"test": true})),
+        row_type: DebugEntryRow::Entry,
+    };
+    mgr.handle_agent_event(AgentEvent::DebugEntry(entry));
+    assert_eq!(mgr.state.debug_entries.len(), 1);
+
+    // Simulate a new session start (clears history but not debug entries)
+    mgr.clear_history();
+    assert_eq!(
+        mgr.state.debug_entries.len(),
+        1,
+        "debug entries must survive clear_history"
+    );
+}
+
+#[test]
+fn test_session_counter_increments_on_start_session() {
+    use crate::bus::core::Bus;
+
+    let mut config = AppConfig::default();
+    config.models.insert(
+        "test".to_string(),
+        crate::config::LlmConfig {
+            model: "test".to_string(),
+            api_url: "http://localhost".to_string(),
+            api_key: "".to_string(),
+            cost: None,
+            use_case: vec!["chat".to_string()],
+        },
+    );
+
+    let mut mgr = AgentSessionManager::new_for_test(
+        config,
+        Arc::new(crate::app::session::BrowserSession::new(
+            &AppConfig::default(),
+        )),
+    );
+    // new_for_test sets session_counter to 0
+
+    let (tx, rx) = std::sync::mpsc::channel();
+    let bus = Bus::new();
+
+    // Start first session — should increment to 1
+    mgr.start_session(
+        tx.clone(),
+        "prompt 1".to_string(),
+        None,
+        None,
+        HashSet::new(),
+        bus.clone(),
+    );
+    // Blocking drain: wait until the spawned agent thread finishes (Failed, no valid API key)
+    while let Ok(ev) = rx.recv() {
+        match &ev {
+            BackgroundEvent::Agent(AgentEvent::DebugEntry(e)) => {
+                assert_eq!(
+                    e.session, 1,
+                    "first session debug entries must have session 1"
+                );
+            }
+            BackgroundEvent::Agent(AgentEvent::Failed(_)) => break,
+            _ => {}
+        }
+    }
+
+    // Start second session — should increment to 2
+    mgr.start_session(
+        tx.clone(),
+        "prompt 2".to_string(),
+        None,
+        None,
+        HashSet::new(),
+        bus.clone(),
+    );
+    while let Ok(ev) = rx.recv() {
+        match &ev {
+            BackgroundEvent::Agent(AgentEvent::DebugEntry(e)) => {
+                assert_eq!(
+                    e.session, 2,
+                    "second session debug entries must have session 2"
+                );
+            }
+            BackgroundEvent::Agent(AgentEvent::Failed(_)) => break,
+            _ => {}
+        }
+    }
+}

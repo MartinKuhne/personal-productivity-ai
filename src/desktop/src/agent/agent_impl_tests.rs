@@ -2,6 +2,7 @@
 
 use crate::agent::agent_impl::run_agent;
 use crate::agent::context::AgentContext;
+use crate::bus::events::debug::{AgentDebugEntry, DebugEntryKind, DebugEntryRow};
 use crate::bus::events::typed::{AgentEvent, BackgroundEvent};
 use crate::config::AppConfig;
 use std::collections::HashSet;
@@ -40,6 +41,7 @@ fn make_ctx(config: AppConfig) -> (AgentContext, std::sync::mpsc::Receiver<Backg
         history: None,
         current_response: String::new(),
         model_name: None,
+        session_number: 1,
         browser_session,
         pdf_backing: std::sync::Arc::new(crate::app::session::PdfBackingTracker::new()),
         tool_manager: std::sync::Arc::new(std::sync::RwLock::new(
@@ -239,6 +241,7 @@ fn test_run_agent_skips_done_status_when_cancelled() {
         history: None,
         current_response: String::new(),
         model_name: None,
+        session_number: 1,
         browser_session,
         pdf_backing: std::sync::Arc::new(crate::app::session::PdfBackingTracker::new()),
         tool_manager: std::sync::Arc::new(std::sync::RwLock::new(
@@ -524,4 +527,240 @@ fn test_run_agent_system_prompt_without_context_has_no_file_context() {
             "system prompt must not contain {marker:?} when no context is handed over; got: {content}"
         );
     }
+}
+
+/// Verify that the agent emits debug entries during a simple
+/// (no tool-call) run: session boundary, outgoing, incoming.
+#[test]
+fn test_run_agent_emits_debug_entries() {
+    let body = serde_json::json!({
+        "id": "chatcmpl-test", "object": "chat.completion", "created": 0, "model": "test",
+        "choices": [{"index": 0, "message": {"role": "assistant", "content": "All done."}, "finish_reason": "stop"}]
+    })
+    .to_string();
+    let port = spawn_one_shot_http_server(&http_response("HTTP/1.1 200 OK", &body));
+    let (ctx, rx) = make_ctx(make_config(port));
+    run_agent(ctx);
+
+    let mut debug_entries: Vec<AgentDebugEntry> = Vec::new();
+    while let Ok(ev) = rx.recv() {
+        match &ev {
+            BackgroundEvent::Agent(AgentEvent::DebugEntry(e)) => debug_entries.push(e.clone()),
+            BackgroundEvent::Agent(AgentEvent::Finished(_)) => break,
+            _ => {}
+        }
+    }
+
+    assert!(
+        !debug_entries.is_empty(),
+        "must emit at least one debug entry"
+    );
+
+    // First entry must be the session boundary
+    let boundary = &debug_entries[0];
+    assert_eq!(boundary.row_type, DebugEntryRow::SessionBoundary);
+    assert_eq!(boundary.turn, 0);
+    assert!(boundary.summary.contains("Session"));
+    assert!(boundary.content.is_none());
+
+    // Find outgoing entry
+    let outgoing = debug_entries
+        .iter()
+        .find(|e| {
+            matches!(e.kind, DebugEntryKind::Outgoing) && matches!(e.row_type, DebugEntryRow::Entry)
+        })
+        .expect("must emit an outgoing debug entry");
+    assert_eq!(outgoing.turn, 1);
+    assert!(outgoing.summary.contains("Outgoing"));
+    assert!(outgoing.summary.contains("Turn 1"));
+    let content = outgoing
+        .content
+        .as_ref()
+        .expect("outgoing must have content");
+    assert!(content.get("model").is_some());
+    assert!(
+        content
+            .get("new_messages")
+            .and_then(|m| m.as_array())
+            .is_some()
+    );
+
+    // Find incoming entry
+    let incoming = debug_entries
+        .iter()
+        .find(|e| {
+            matches!(e.kind, DebugEntryKind::Incoming) && matches!(e.row_type, DebugEntryRow::Entry)
+        })
+        .expect("must emit an incoming debug entry");
+    assert_eq!(incoming.turn, 1);
+    let content = incoming
+        .content
+        .as_ref()
+        .expect("incoming must have content");
+    assert!(content.get("choices").is_some());
+}
+
+/// Verify that debug entries are emitted during a tool-call run,
+/// including ToolResults entries.
+#[test]
+fn test_run_agent_debug_entries_with_tool_calls() {
+    let tool_call_body = serde_json::json!({
+        "id": "chatcmpl-tool", "object": "chat.completion", "created": 0, "model": "test",
+        "choices": [{
+            "index": 0,
+            "message": {
+                "role": "assistant",
+                "content": null,
+                "tool_calls": [{
+                    "id": "call_1",
+                    "type": "function",
+                    "function": {
+                        "name": "read_tags",
+                        "arguments": "{}"
+                    }
+                }]
+            },
+            "finish_reason": "tool_calls"
+        }]
+    })
+    .to_string();
+    let final_body = serde_json::json!({
+        "id": "chatcmpl-final", "object": "chat.completion", "created": 0, "model": "test",
+        "choices": [{"index": 0, "message": {"role": "assistant", "content": "Done with tools."}, "finish_reason": "stop"}]
+    })
+    .to_string();
+
+    use std::io::{Read, Write};
+    use std::net::TcpListener;
+    let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+    let port = listener.local_addr().unwrap().port();
+    std::thread::spawn(move || {
+        for body in [tool_call_body, final_body] {
+            if let Ok((mut stream, _)) = listener.accept() {
+                let mut buf = [0; 8192];
+                let _ = stream.read(&mut buf);
+                let resp = format!(
+                    "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
+                    body.len(),
+                    body
+                );
+                let _ = stream.write_all(resp.as_bytes());
+                let _ = stream.flush();
+                std::thread::sleep(std::time::Duration::from_millis(100));
+            }
+        }
+    });
+    let (ctx, rx) = make_ctx(make_config(port));
+    run_agent(ctx);
+
+    let mut debug_entries: Vec<AgentDebugEntry> = Vec::new();
+    while let Ok(ev) = rx.recv() {
+        match &ev {
+            BackgroundEvent::Agent(AgentEvent::DebugEntry(e)) => debug_entries.push(e.clone()),
+            BackgroundEvent::Agent(AgentEvent::Finished(_)) => break,
+            _ => {}
+        }
+    }
+
+    // Must have a session boundary
+    assert!(
+        debug_entries
+            .iter()
+            .any(|e| matches!(e.row_type, DebugEntryRow::SessionBoundary)),
+        "must emit session boundary"
+    );
+
+    // Must have at least one tool results entry
+    let tool_results: Vec<_> = debug_entries
+        .iter()
+        .filter(|e| matches!(e.kind, DebugEntryKind::ToolResults))
+        .collect();
+    assert!(
+        !tool_results.is_empty(),
+        "must emit tool results debug entries"
+    );
+    let tr = tool_results[0];
+    assert_eq!(tr.turn, 1);
+    assert!(tr.summary.contains("Tool results"));
+    assert!(tr.summary.contains("1 tools"));
+    let content = tr.content.as_ref().expect("tool results must have content");
+    let arr = content
+        .as_array()
+        .expect("tool results content must be an array");
+    assert_eq!(arr.len(), 1);
+    assert_eq!(
+        arr[0].get("name").and_then(|v| v.as_str()),
+        Some("read_tags")
+    );
+
+    // Must have outgoing entries for both turns
+    let outgoing: Vec<_> = debug_entries
+        .iter()
+        .filter(|e| {
+            matches!(e.kind, DebugEntryKind::Outgoing) && matches!(e.row_type, DebugEntryRow::Entry)
+        })
+        .collect();
+    assert_eq!(outgoing.len(), 2, "must have outgoing for both turns");
+
+    // Turn 2 outgoing should contain only the delta (assistant + tool results from turn 1)
+    let turn2_outgoing = outgoing
+        .iter()
+        .find(|e| e.turn == 2)
+        .expect("must have turn 2 outgoing");
+    let delta = turn2_outgoing
+        .content
+        .as_ref()
+        .and_then(|c| c.get("new_messages"))
+        .and_then(|m| m.as_array())
+        .expect("turn 2 outgoing must have new_messages array");
+    assert!(!delta.is_empty(), "turn 2 outgoing delta must not be empty");
+}
+
+/// Verify that the outgoing debug entry for turn 1 contains the full
+/// initial messages (since there is no previous turn to diff against).
+#[test]
+fn test_debug_outgoing_turn1_includes_full_initial_messages() {
+    let body = serde_json::json!({
+        "id": "chatcmpl-test", "object": "chat.completion", "created": 0, "model": "test",
+        "choices": [{"index": 0, "message": {"role": "assistant", "content": "All done."}, "finish_reason": "stop"}]
+    })
+    .to_string();
+    let port = spawn_one_shot_http_server(&http_response("HTTP/1.1 200 OK", &body));
+    let (ctx, rx) = make_ctx(make_config(port));
+    run_agent(ctx);
+
+    let mut outgoing: Vec<AgentDebugEntry> = Vec::new();
+    while let Ok(ev) = rx.recv() {
+        match &ev {
+            BackgroundEvent::Agent(AgentEvent::DebugEntry(e)) => {
+                if matches!(e.kind, DebugEntryKind::Outgoing)
+                    && matches!(e.row_type, DebugEntryRow::Entry)
+                {
+                    outgoing.push(e.clone());
+                }
+            }
+            BackgroundEvent::Agent(AgentEvent::Finished(_)) => break,
+            _ => {}
+        }
+    }
+
+    let turn1 = outgoing
+        .iter()
+        .find(|e| e.turn == 1)
+        .expect("must have turn 1 outgoing");
+    let new_messages = turn1
+        .content
+        .as_ref()
+        .and_then(|c| c.get("new_messages"))
+        .and_then(|m| m.as_array())
+        .expect("turn 1 outgoing must have new_messages");
+    assert!(!new_messages.is_empty());
+
+    // The first message should be the system prompt
+    let first = &new_messages[0];
+    assert_eq!(
+        first.get("role").and_then(|r| r.as_str()),
+        Some("system"),
+        "first message in turn 1 delta must be the system prompt"
+    );
 }

@@ -211,6 +211,7 @@ pub fn run_agent_blocking(
         history,
         current_response,
         model_name,
+        session_number: 0,
         browser_session: std::sync::Arc::new(crate::app::session::BrowserSession::new(
             &crate::config::AppConfig::default(),
         )),

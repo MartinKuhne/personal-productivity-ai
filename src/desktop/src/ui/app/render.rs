@@ -93,6 +93,8 @@ impl FastMdApp {
 
         crate::ui::background_logs::show_background_logs_window(self, ctx);
 
+        crate::ui::agent_debug_window::show_agent_debug_window(self, ctx);
+
         if self.orchestrator.dialogs.tools_dialog_open {
             crate::ui::tools_dialog::show_tools_dialog(ctx, self);
         }

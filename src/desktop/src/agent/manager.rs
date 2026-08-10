@@ -6,6 +6,7 @@ use crate::agent::AgentContext;
 use crate::app::session::BrowserSession;
 use crate::bus::core::{Bus, BusReader};
 use crate::bus::events::config::ConfigArrived;
+use crate::bus::events::debug::AgentDebugEntry;
 use crate::bus::events::messages::TokenUsageInfo;
 use crate::bus::events::typed::{AgentEvent, BackgroundEvent};
 use crate::config::AppConfig;
@@ -34,6 +35,9 @@ pub struct AgentState {
     /// Queue of prompts submitted while the agent is running.
     /// These will be processed sequentially after the current prompt finishes.
     pub pending_prompts: Vec<String>,
+    /// Accumulated debug entries from all agent sessions. Never cleared;
+    /// session-boundary rows delimit sessions.
+    pub debug_entries: Vec<AgentDebugEntry>,
 }
 
 /// Manages the lifecycle and state of a single LLM agent session.
@@ -62,6 +66,10 @@ pub struct AgentSessionManager {
     config_arrived: bool,
     pub command_input: String,
     show_results: bool,
+    pub show_debug_window: bool,
+    pub debug_search_text: String,
+    pub debug_auto_scroll: bool,
+    session_counter: usize,
     /// Long-lived headless Firefox session, shared with the
     /// tool executor. Lazily launches a browser on first use.
     /// Owned by the application, not the agent — sessions
@@ -95,6 +103,7 @@ impl AgentSessionManager {
                 token_usage: None,
                 total_usage: TokenUsageInfo::default(),
                 pending_prompts: Vec::new(),
+                debug_entries: Vec::new(),
             },
             cancel_flag: None,
             config: AppConfig::default(),
@@ -105,6 +114,10 @@ impl AgentSessionManager {
             config_arrived: false,
             command_input: String::new(),
             show_results: false,
+            show_debug_window: false,
+            debug_search_text: String::new(),
+            debug_auto_scroll: true,
+            session_counter: 0,
             browser_session,
             pdf_backing,
             tool_manager,
@@ -131,6 +144,7 @@ impl AgentSessionManager {
                 token_usage: None,
                 total_usage: TokenUsageInfo::default(),
                 pending_prompts: Vec::new(),
+                debug_entries: Vec::new(),
             },
             cancel_flag: None,
             config,
@@ -138,6 +152,10 @@ impl AgentSessionManager {
             config_arrived: true,
             command_input: String::new(),
             show_results: false,
+            show_debug_window: false,
+            debug_search_text: String::new(),
+            debug_auto_scroll: true,
+            session_counter: 0,
             browser_session,
             pdf_backing: Arc::new(crate::app::session::PdfBackingTracker::new()),
             tool_manager,
@@ -308,6 +326,8 @@ impl AgentSessionManager {
         self.state.response.clear();
         self.cancel_flag = Some(Arc::new(AtomicBool::new(false)));
         let cancel_flag = self.cancel_flag.clone().unwrap();
+        self.session_counter += 1;
+        let session_number = self.session_counter;
 
         // Build context
         let ctx = AgentContext {
@@ -322,6 +342,7 @@ impl AgentSessionManager {
             history: self.state.history.clone(),
             current_response: self.state.response.clone(),
             model_name: None,
+            session_number,
             browser_session: self.browser_session.clone(),
             pdf_backing: self.pdf_backing.clone(),
             tool_manager: self.tool_manager.clone(),
@@ -396,6 +417,10 @@ impl AgentSessionManager {
                         .saturating_add(info.reasoning_tokens.unwrap_or(0)),
                 );
                 self.state.token_usage = Some(info);
+                None
+            }
+            AgentEvent::DebugEntry(entry) => {
+                self.state.debug_entries.push(entry);
                 None
             }
         }

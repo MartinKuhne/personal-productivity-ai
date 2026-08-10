@@ -16,11 +16,13 @@
 //! See [`crate::bus::core`] for the transport primitive.
 
 pub mod config;
+pub mod debug;
 pub mod file;
 pub mod messages;
 pub mod typed;
 
 pub use config::ConfigArrived;
+pub use debug::{AgentDebugEntry, DebugEntryKind, DebugEntryRow};
 pub use file::{FileEvent, FileEventKind, FileEventProducer};
 pub use messages::{BackgroundLogEntry, LogCategory, TokenUsageInfo};
 pub use typed::{AgentEvent, BackgroundEvent, FsEvent, ProcessEvent};

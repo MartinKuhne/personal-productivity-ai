@@ -374,6 +374,19 @@ pub const LOG_CATEGORY_LLM_TOOLS: &str = "LLM Tools";
 /// Error label when background manager lock fails.
 pub const BACKGROUND_MGR_ACCESS_ERROR: &str = "Error: could not access background manager";
 
+// Agent Debug Window
+/// Window title for the agent debug window.
+pub const AGENT_DEBUG_WINDOW: &str = "Agent Debug";
+
+/// Label for outgoing debug entries.
+pub const DEBUG_KIND_OUTGOING: &str = "Outgoing";
+
+/// Label for incoming debug entries.
+pub const DEBUG_KIND_INCOMING: &str = "Incoming";
+
+/// Label for tool results debug entries.
+pub const DEBUG_KIND_TOOL_RESULTS: &str = "ToolResults";
+
 // Inline Editor Widget
 /// Save button label in inline text editor.
 pub const SAVE_BUTTON: &str = "Save";
@@ -433,5 +446,13 @@ mod tests {
             BATCH_RUNNING_CANCEL_HINT,
             "Click Cancel to stop processing. In-flight jobs will finish."
         );
+    }
+
+    #[test]
+    fn test_debug_window_strings() {
+        assert_eq!(AGENT_DEBUG_WINDOW, "Agent Debug");
+        assert_eq!(DEBUG_KIND_OUTGOING, "Outgoing");
+        assert_eq!(DEBUG_KIND_INCOMING, "Incoming");
+        assert_eq!(DEBUG_KIND_TOOL_RESULTS, "ToolResults");
     }
 }
