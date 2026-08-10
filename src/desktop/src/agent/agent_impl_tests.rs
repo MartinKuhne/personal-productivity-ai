@@ -26,7 +26,6 @@ fn make_config(port: u16) -> AppConfig {
 }
 
 fn make_ctx(config: AppConfig) -> (AgentContext, BusReader<SeamAgentEvent>) {
-    let (tx, _rx) = std::sync::mpsc::channel();
     let browser_session = std::sync::Arc::new(crate::app::session::BrowserSession::new(
         &crate::config::AppConfig::default(),
     ));
@@ -34,7 +33,6 @@ fn make_ctx(config: AppConfig) -> (AgentContext, BusReader<SeamAgentEvent>) {
     let bus_reader = agent_event_bus.subscribe();
     let ctx = AgentContext {
         config,
-        tx_gui: tx,
         file_event_bus: crate::bus::core::Bus::new(),
         agent_event_bus,
         active_file: None,
@@ -43,9 +41,7 @@ fn make_ctx(config: AppConfig) -> (AgentContext, BusReader<SeamAgentEvent>) {
         prompt: "Hello".to_string(),
         cancel_flag: Arc::new(AtomicBool::new(false)),
         history: None,
-        current_response: String::new(),
         model_name: None,
-        session_number: 1,
         session_id: uuid::Uuid::new_v4(),
         browser_session,
         pdf_backing: std::sync::Arc::new(crate::app::session::PdfBackingTracker::new()),
@@ -257,7 +253,6 @@ fn test_run_agent_skips_done_status_when_cancelled() {
     })
     .to_string();
     let port = spawn_one_shot_http_server(&http_response("HTTP/1.1 200 OK", &body));
-    let (tx, _rx) = std::sync::mpsc::channel();
     let browser_session = std::sync::Arc::new(crate::app::session::BrowserSession::new(
         &crate::config::AppConfig::default(),
     ));
@@ -265,7 +260,6 @@ fn test_run_agent_skips_done_status_when_cancelled() {
     let mut bus_reader = agent_event_bus.subscribe();
     let ctx = AgentContext {
         config: make_config(port),
-        tx_gui: tx,
         file_event_bus: crate::bus::core::Bus::new(),
         agent_event_bus,
         active_file: None,
@@ -274,9 +268,7 @@ fn test_run_agent_skips_done_status_when_cancelled() {
         prompt: "Hello".to_string(),
         cancel_flag: Arc::new(AtomicBool::new(true)),
         history: None,
-        current_response: String::new(),
         model_name: None,
-        session_number: 1,
         session_id: uuid::Uuid::new_v4(),
         browser_session,
         pdf_backing: std::sync::Arc::new(crate::app::session::PdfBackingTracker::new()),

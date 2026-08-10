@@ -9,7 +9,7 @@ use crate::bus::core::{Bus, BusReader};
 use crate::bus::events::config::ConfigArrived;
 use crate::bus::events::debug::AgentDebugEntry;
 use crate::bus::events::messages::TokenUsageInfo;
-use crate::bus::events::typed::{AgentEvent as LegacyAgentEvent, BackgroundEvent};
+use crate::bus::events::typed::AgentEvent as LegacyAgentEvent;
 use crate::config::AppConfig;
 use serde_json::Value;
 use std::collections::HashSet;
@@ -27,10 +27,6 @@ pub struct AgentState {
     pub status: String,
     pub thinking: String,
     pub response: String,
-    /// Stable string id of the heading the agent-results panel
-    /// should scroll to. The UI layer maps it to an
-    /// `egui::Id` at render time.
-    pub scroll_to_id: Option<String>,
     pub history: Option<Vec<Value>>,
     pub token_usage: Option<TokenUsageInfo>,
     pub total_usage: TokenUsageInfo,
@@ -50,7 +46,7 @@ pub struct AgentState {
 ///   [`AppConfig`] used by `start_session` is the one published at
 ///   startup, not a value captured at construction time.
 /// - Provides `start_session` to launch a new agent thread
-/// - Handles incoming [`BackgroundEvent::Agent`] events to update state
+/// - Handles incoming [`crate::bus::events::typed::AgentEvent`] events to update state
 /// - Supports cancellation via cancel flag
 /// - Exposes read-only `AgentState` for UI rendering
 pub struct AgentSessionManager {
@@ -66,11 +62,6 @@ pub struct AgentSessionManager {
     /// config-derived work uses the published `AppConfig` instead
     /// of the default placeholder.
     config_arrived: bool,
-    pub command_input: String,
-    show_results: bool,
-    pub show_debug_window: bool,
-    pub debug_search_text: String,
-    pub debug_auto_scroll: bool,
     session_counter: usize,
     /// Agent→UI structured event bus (new seam path). Cloned into the
     /// agent context on each `start_session`; the UI subscribes via
@@ -104,7 +95,6 @@ impl AgentSessionManager {
                 status: String::new(),
                 thinking: String::new(),
                 response: String::new(),
-                scroll_to_id: None,
                 history: None,
                 token_usage: None,
                 total_usage: TokenUsageInfo::default(),
@@ -118,11 +108,6 @@ impl AgentSessionManager {
             // observed by this reader.
             config_reader: Some(config_bus.subscribe()),
             config_arrived: false,
-            command_input: String::new(),
-            show_results: false,
-            show_debug_window: false,
-            debug_search_text: String::new(),
-            debug_auto_scroll: true,
             session_counter: 0,
             agent_event_bus: Bus::new(),
             browser_session,
@@ -146,7 +131,6 @@ impl AgentSessionManager {
                 status: String::new(),
                 thinking: String::new(),
                 response: String::new(),
-                scroll_to_id: None,
                 history: None,
                 token_usage: None,
                 total_usage: TokenUsageInfo::default(),
@@ -157,11 +141,6 @@ impl AgentSessionManager {
             config,
             config_reader: None,
             config_arrived: true,
-            command_input: String::new(),
-            show_results: false,
-            show_debug_window: false,
-            debug_search_text: String::new(),
-            debug_auto_scroll: true,
             session_counter: 0,
             agent_event_bus: Bus::new(),
             browser_session,
@@ -262,22 +241,9 @@ impl AgentSessionManager {
         // Note: we don't keep a separate current_response buffer; the app doesn't need it.
     }
 
-    /// Set the scroll-to-id for the agent UI.
-    pub fn set_scroll_to_id(&mut self, id: Option<String>) {
-        self.state.scroll_to_id = id;
-    }
-
     /// Set the running flag.
     pub fn set_running(&mut self, running: bool) {
         self.state.running = running;
-    }
-
-    pub fn show_results(&self) -> bool {
-        self.show_results
-    }
-
-    pub fn set_show_results(&mut self, show: bool) {
-        self.show_results = show;
     }
 
     /// Set the conversation history.
@@ -369,11 +335,10 @@ impl AgentSessionManager {
     /// Start a new agent session with the given prompt.
     ///
     /// This spawns a background thread running `crate::agent::run_agent`.
-    /// The agent sends messages to `gui_tx`, which should be the app's
-    /// main channel (the same channel used for background messages).
+    /// The agent publishes structured `AgentEvent`s on the `Bus<AgentEvent>`
+    /// owned by this manager; the UI subscribes via [`Self::event_bus`].
     pub fn start_session(
         &mut self,
-        gui_tx: std::sync::mpsc::Sender<BackgroundEvent>,
         prompt: String,
         active_file: Option<PathBuf>,
         active_dir: Option<PathBuf>,
@@ -388,13 +353,11 @@ impl AgentSessionManager {
         self.cancel_flag = Some(Arc::new(AtomicBool::new(false)));
         let cancel_flag = self.cancel_flag.clone().unwrap();
         self.session_counter += 1;
-        let session_number = self.session_counter;
         let session_id = Uuid::new_v4();
 
         // Build context
         let ctx = AgentContext {
             config: self.config.clone(),
-            tx_gui: gui_tx,
             file_event_bus,
             agent_event_bus: self.agent_event_bus.clone(),
             active_file,
@@ -403,9 +366,7 @@ impl AgentSessionManager {
             prompt: prompt.clone(),
             cancel_flag,
             history: self.state.history.clone(),
-            current_response: self.state.response.clone(),
             model_name: None,
-            session_number,
             session_id,
             browser_session: self.browser_session.clone(),
             pdf_backing: self.pdf_backing.clone(),

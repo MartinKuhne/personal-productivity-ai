@@ -134,7 +134,7 @@ pub fn format_models_list(
 /// Outputs: ()
 /// Purity: Impure (mutates `app.orchestrator.agent`, `app.orchestrator.config`,
 /// `app.orchestrator.selection`).
-/// Preconditions: `app.agent().command_input` contains the user's
+/// Preconditions: `app.orchestrator.agent_panel_state.command_input` contains the user's
 /// prompt. The `command_input` is consumed and cleared as part of
 /// the call.
 /// Postconditions: Dispatches based on `parse_command_intent`:
@@ -151,31 +151,35 @@ pub fn format_models_list(
 /// function. It is extracted so the dispatch can be unit-tested
 /// without driving the egui harness.
 pub fn apply_send_click(app: &mut FastMdApp) {
-    let prompt = app.agent_mut().command_input.trim_end().to_string();
-    app.agent_mut().command_input.clear();
+    let prompt = app
+        .orchestrator
+        .agent_panel_state
+        .command_input
+        .trim_end()
+        .to_string();
+    app.orchestrator.agent_panel_state.command_input.clear();
 
     match parse_command_intent(&prompt) {
         CommandIntent::ShowModels => {
             app.agent_mut().set_status("Done".to_string());
             let models_response = format_models_list(&app.orchestrator.config.models);
             app.agent_mut().set_response(models_response);
-            app.agent_mut().set_show_results(true);
+            app.orchestrator.agent_panel_state.show_results = true;
         }
         CommandIntent::ShowDeprecatedModelMessage => {
             app.agent_mut().set_status("Error".to_string());
             app.agent_mut()
                 .set_response(crate::ui::strings::DEPRECATED_MODEL_MESSAGE.to_string());
-            app.agent_mut().set_show_results(true);
+            app.orchestrator.agent_panel_state.show_results = true;
         }
         CommandIntent::RunAgent(agent_prompt) => {
-            let tx = app.orchestrator.tx.clone();
             let (file, dir, files) = app
                 .selection()
                 .agent_context(&app.orchestrator.tab_manager.tabs);
             let bus = app.orchestrator.file_event_bus.clone();
             app.agent_mut()
-                .start_session(tx, agent_prompt, file, dir, files, bus);
-            app.agent_mut().set_show_results(true);
+                .start_session(agent_prompt, file, dir, files, bus);
+            app.orchestrator.agent_panel_state.show_results = true;
         }
         CommandIntent::Empty => {}
     }
@@ -268,9 +272,11 @@ pub fn show_bottom_panel_capture(
                     let prompt_rect = ui.available_rect_before_wrap();
                     let response = ui.put(
                         prompt_rect,
-                        egui::TextEdit::multiline(&mut app.agent_mut().command_input)
-                            .desired_width(f32::INFINITY)
-                            .hint_text(crate::ui::strings::COMMAND_INPUT_HINT),
+                        egui::TextEdit::multiline(
+                            &mut app.orchestrator.agent_panel_state.command_input,
+                        )
+                        .desired_width(f32::INFINITY)
+                        .hint_text(crate::ui::strings::COMMAND_INPUT_HINT),
                     );
 
                     let mut submit = false;
@@ -296,10 +302,15 @@ pub fn show_bottom_panel_capture(
                     if submit {
                         if app.agent().state().running {
                             // Agent is running - queue the prompt
-                            let prompt = app.agent_mut().command_input.trim_end().to_string();
+                            let prompt = app
+                                .orchestrator
+                                .agent_panel_state
+                                .command_input
+                                .trim_end()
+                                .to_string();
                             if !prompt.is_empty() {
                                 app.agent_mut().queue_prompt(prompt);
-                                app.agent_mut().command_input.clear();
+                                app.orchestrator.agent_panel_state.command_input.clear();
                             }
                         } else {
                             // Agent is idle - submit normally

@@ -385,13 +385,11 @@ fn test_session_counter_increments_on_start_session() {
     );
     // new_for_test sets session_counter to 0
 
-    let (tx, _rx) = std::sync::mpsc::channel();
     let bus = Bus::new();
 
     // Start first session — should increment to 1
     let reader1 = mgr.event_bus().subscribe();
     mgr.start_session(
-        tx.clone(),
         "prompt 1".to_string(),
         None,
         None,
@@ -422,7 +420,6 @@ fn test_session_counter_increments_on_start_session() {
     // Start second session — should increment to 2
     let reader2 = mgr.event_bus().subscribe();
     mgr.start_session(
-        tx.clone(),
         "prompt 2".to_string(),
         None,
         None,

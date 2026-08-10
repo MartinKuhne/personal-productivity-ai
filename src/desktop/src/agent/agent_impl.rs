@@ -38,7 +38,7 @@ fn run_agent_inner(ctx: AgentContext) {
         .write()
         .unwrap()
         .get_tools_schema(&ctx.config, &ctx.prompt);
-    let mut full_response = ctx.current_response.clone();
+    let mut full_response = String::new();
     let executor = ToolExecutor::new(
         ctx.config.clone(),
         ctx.file_event_bus.clone(),
@@ -50,10 +50,10 @@ fn run_agent_inner(ctx: AgentContext) {
 
     let session_boundary = AgentDebugEntry {
         turn: 0,
-        session: ctx.session_number,
+        session: 0,
         timestamp: chrono::Local::now(),
         kind: DebugEntryKind::Outgoing,
-        summary: format!("Session {}", ctx.session_number),
+        summary: format!("Session {:8}", ctx.session_id),
         content: None,
         row_type: DebugEntryRow::SessionBoundary,
     };
@@ -137,7 +137,7 @@ fn process_turn(
     let delta: Vec<serde_json::Value> = messages[*prev_messages_len..].to_vec();
     let outgoing_entry = AgentDebugEntry {
         turn,
-        session: ctx.session_number,
+        session: 0,
         timestamp: chrono::Local::now(),
         kind: DebugEntryKind::Outgoing,
         summary: format!(
@@ -178,7 +178,7 @@ fn process_turn(
         .unwrap_or(0);
     let incoming_entry = AgentDebugEntry {
         turn,
-        session: ctx.session_number,
+        session: 0,
         timestamp: chrono::Local::now(),
         kind: DebugEntryKind::Incoming,
         summary: format!(
@@ -261,13 +261,7 @@ fn process_turn(
                     effect,
                 });
             }
-            emit_tool_results_debug(
-                turn,
-                ctx.session_number,
-                &ctx.agent_event_bus,
-                ctx.session_id,
-                &results,
-            );
+            emit_tool_results_debug(turn, 0, &ctx.agent_event_bus, ctx.session_id, &results);
             process_tool_results(
                 &results,
                 tc,

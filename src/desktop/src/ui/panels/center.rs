@@ -21,10 +21,11 @@ pub enum TabAction {
 /// Inputs: `app` - A mutable reference to the `FastMdApp` state.
 /// Outputs: None
 /// Purity: Impure (mutates application state).
-/// Preconditions: `app.orchestrator.agent.show_results()` must be true.
+/// Preconditions: `app.orchestrator.agent_panel_state.show_results` must be true.
 /// Postconditions: Agent results are hidden, history and text buffers are cleared, and any running agent is flagged for cancellation.
 pub fn clear_agent_session_state(app: &mut FastMdApp) {
-    app.agent_mut().set_show_results(false);
+    app.orchestrator.agent_panel_state.show_results = false;
+    app.orchestrator.agent_panel_state.scroll_to_id = None;
     app.agent_mut().clear_history();
     app.agent_mut().set_response(String::new());
     app.agent_mut().set_thinking(String::new());
@@ -143,7 +144,7 @@ pub fn apply_tab_close_all_click(app: &mut FastMdApp) {
 /// Inputs: `ui` - Egui UI context, `app` - FastMdApp state.
 /// Outputs: None.
 /// Purity: Impure (performs UI rendering).
-/// Preconditions: `app.orchestrator.agent.show_results()` is true.
+/// Preconditions: `app.orchestrator.agent_panel_state.show_results` is true.
 /// Postconditions: Rendered agent session. State might be mutated if "Close" is clicked.
 fn render_agent_session(ui: &mut egui::Ui, app: &mut FastMdApp) {
     ui.horizontal_wrapped(|ui| {
@@ -199,12 +200,11 @@ fn render_agent_session(ui: &mut egui::Ui, app: &mut FastMdApp) {
                 ui.heading(crate::ui::strings::AGENT_RESPONSE);
                 ui.separator();
                 let strategy = app.orchestrator.config.deficit_strategy();
-                let agent = app.agent_mut();
                 let mut toggles = Vec::new();
                 render_markdown(
                     ui,
                     &content,
-                    &mut agent.state_mut().scroll_to_id,
+                    &mut app.orchestrator.agent_panel_state.scroll_to_id,
                     &mut toggles,
                     strategy,
                     None,
@@ -469,7 +469,7 @@ pub fn show_center_panel(app: &mut FastMdApp, parent_ui: &mut egui::Ui) {
     // `&mut Ui` rather than a `&Context`; allocate within the
     // root Ui we got from `App::ui`.
     CentralPanel::default().show(parent_ui, |ui| {
-        if app.agent().show_results() {
+        if app.orchestrator.agent_panel_state.show_results {
             render_agent_session(ui, app);
         } else if !app.tabs().tabs.is_empty() {
             render_tabs_and_content(ui, app);

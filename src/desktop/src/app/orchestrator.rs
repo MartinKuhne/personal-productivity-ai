@@ -9,6 +9,7 @@ use crate::bus::events::config::ConfigArrived;
 use crate::bus::events::file::FileEvent;
 use crate::bus::events::typed::{BackgroundEvent, FsEvent, McpAuthEvent, ProcessEvent};
 use crate::markdown::Document;
+use crate::ui::agent::panel_state::AgentPanelState;
 use crate::ui::agent::transcript::AgentTranscript;
 use std::path::PathBuf;
 use std::sync::mpsc::Receiver;
@@ -60,6 +61,10 @@ pub struct AppOrchestrator {
     /// transcript (migration step 5, T015). The UI renders agent response and
     /// thinking from this buffer instead of `AgentState::response`/`thinking`.
     pub agent_transcript: AgentTranscript,
+    /// UI-owned panel state (show_results, show_debug_window, scroll_to_id,
+    /// command_input, etc.) — extracted from `AgentSessionManager` in
+    /// migration step 6 (FR-013, SC-007).
+    pub agent_panel_state: AgentPanelState,
 }
 
 impl AppOrchestrator {
@@ -183,14 +188,13 @@ impl AppOrchestrator {
         let (active_file, active_dir, selected_files) =
             self.selection.agent_context(&self.tab_manager.tabs);
         self.agent.start_session(
-            self.tx.clone(),
             prompt,
             active_file,
             active_dir,
             selected_files,
             self.file_event_bus.clone(),
         );
-        self.agent.set_show_results(true);
+        self.agent_panel_state.show_results = true;
         // Clear the transcript immediately so the UI shows empty content
         // between session start and the `SessionStarted` event arrival.
         // `SessionStarted` will create a fresh transcript with the correct

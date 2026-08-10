@@ -123,7 +123,6 @@ impl BatchJobExecutor {
                         prompt_text,
                         cancel_flag,
                         None,
-                        String::new(),
                         file_event_bus,
                         model_name,
                     );
@@ -190,29 +189,26 @@ pub fn run_agent_blocking(
     prompt: String,
     cancel_flag: Arc<AtomicBool>,
     history: Option<Vec<serde_json::Value>>,
-    current_response: String,
     file_event_bus: Bus<FileEvent>,
     model_name: Option<String>,
 ) -> (BatchJobStatus, Option<String>) {
+    use crate::agent::events::AgentEvent as SeamAgentEvent;
     use crate::agent::run_agent;
-    use std::sync::mpsc::channel;
 
-    let (tx, rx) = channel();
+    let agent_event_bus = crate::bus::core::Bus::new();
+    let reader = agent_event_bus.subscribe();
 
     let ctx = crate::agent::AgentContext {
         config,
-        tx_gui: tx,
         file_event_bus,
-        agent_event_bus: crate::bus::core::Bus::new(),
+        agent_event_bus,
         active_file,
         active_dir,
         selected_files,
         prompt,
         cancel_flag,
         history,
-        current_response,
         model_name,
-        session_number: 0,
         session_id: uuid::Uuid::new_v4(),
         browser_session: std::sync::Arc::new(crate::app::session::BrowserSession::new(
             &crate::config::AppConfig::default(),
@@ -228,13 +224,17 @@ pub fn run_agent_blocking(
     let mut status = BatchJobStatus::Completed;
     let mut error = None;
 
-    while let Ok(ev) = rx.recv() {
+    // Drain the agent event bus until SessionFinished or Failed is seen.
+    // `BusReader::recv` spin-waits; the bus stays alive as long as the
+    // `Bus` handle exists (it was moved into the context and dropped when
+    // the agent thread finished, which disconnects the broadcast sender).
+    while let Ok(ev) = reader.recv() {
         match ev {
-            BackgroundEvent::Agent(crate::bus::events::typed::AgentEvent::Failed(err)) => {
+            SeamAgentEvent::SessionFinished { .. } => break,
+            SeamAgentEvent::Failed { error: err, .. } => {
                 status = BatchJobStatus::Failed;
                 error = Some(err);
             }
-            BackgroundEvent::Agent(crate::bus::events::typed::AgentEvent::Finished(_)) => {}
             _ => {}
         }
     }

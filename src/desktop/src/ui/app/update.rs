@@ -53,7 +53,8 @@ impl FastMdApp {
         self.orchestrator.drain_agent_event_bus();
 
         if ctx.input_mut(|i| i.consume_key(egui::Modifiers::ALT, egui::Key::A)) {
-            self.orchestrator.agent.show_debug_window = !self.orchestrator.agent.show_debug_window;
+            self.orchestrator.agent_panel_state.show_debug_window =
+                !self.orchestrator.agent_panel_state.show_debug_window;
         }
 
         self.orchestrator.handle_file_selection();

@@ -5,11 +5,11 @@ use crate::ui::FastMdApp;
 use eframe::egui;
 
 pub fn show_agent_debug_window(app: &mut FastMdApp, ctx: &egui::Context) {
-    if !app.orchestrator.agent.show_debug_window {
+    if !app.orchestrator.agent_panel_state.show_debug_window {
         return;
     }
 
-    let mut open = app.orchestrator.agent.show_debug_window;
+    let mut open = app.orchestrator.agent_panel_state.show_debug_window;
 
     egui::Window::new(crate::ui::strings::AGENT_DEBUG_WINDOW)
         .open(&mut open)
@@ -21,10 +21,10 @@ pub fn show_agent_debug_window(app: &mut FastMdApp, ctx: &egui::Context) {
 
             ui.horizontal(|ui| {
                 ui.label(crate::ui::strings::SEARCH_LABEL);
-                ui.text_edit_singleline(&mut app.orchestrator.agent.debug_search_text);
+                ui.text_edit_singleline(&mut app.orchestrator.agent_panel_state.debug_search_text);
 
                 ui.checkbox(
-                    &mut app.orchestrator.agent.debug_auto_scroll,
+                    &mut app.orchestrator.agent_panel_state.debug_auto_scroll,
                     crate::ui::strings::AUTO_SCROLL_CHECKBOX,
                 );
 
@@ -35,7 +35,11 @@ pub fn show_agent_debug_window(app: &mut FastMdApp, ctx: &egui::Context) {
 
             ui.separator();
 
-            let search_lower = app.orchestrator.agent.debug_search_text.to_lowercase();
+            let search_lower = app
+                .orchestrator
+                .agent_panel_state
+                .debug_search_text
+                .to_lowercase();
             let filtered: Vec<(usize, &AgentDebugEntry)> = entries
                 .iter()
                 .enumerate()
@@ -54,7 +58,7 @@ pub fn show_agent_debug_window(app: &mut FastMdApp, ctx: &egui::Context) {
 
             egui::ScrollArea::both()
                 .auto_shrink([false, false])
-                .stick_to_bottom(app.orchestrator.agent.debug_auto_scroll)
+                .stick_to_bottom(app.orchestrator.agent_panel_state.debug_auto_scroll)
                 .show_rows(ui, row_height, filtered.len(), |ui, row_range| {
                     for i in row_range {
                         let (orig_idx, entry) = filtered[i];
@@ -80,7 +84,7 @@ pub fn show_agent_debug_window(app: &mut FastMdApp, ctx: &egui::Context) {
                 });
         });
 
-    app.orchestrator.agent.show_debug_window = open;
+    app.orchestrator.agent_panel_state.show_debug_window = open;
 }
 
 fn render_entry_row(ui: &mut egui::Ui, entry: &AgentDebugEntry, id_salt: usize) {
@@ -171,19 +175,19 @@ mod tests {
     fn test_show_agent_debug_window_closed() {
         let ctx = egui::Context::default();
         let mut app = create_test_app();
-        app.orchestrator.agent.show_debug_window = false;
+        app.orchestrator.agent_panel_state.show_debug_window = false;
 
         let _ = run_ui_test(&ctx, egui::RawInput::default(), |ui| {
             show_agent_debug_window(&mut app, ui.ctx());
         });
-        assert!(!app.orchestrator.agent.show_debug_window);
+        assert!(!app.orchestrator.agent_panel_state.show_debug_window);
     }
 
     #[test]
     fn test_show_agent_debug_window_open_with_entries() {
         let ctx = egui::Context::default();
         let mut app = create_test_app();
-        app.orchestrator.agent.show_debug_window = true;
+        app.orchestrator.agent_panel_state.show_debug_window = true;
 
         app.orchestrator
             .agent
@@ -198,7 +202,7 @@ mod tests {
         let _ = run_ui_test(&ctx, egui::RawInput::default(), |ui| {
             show_agent_debug_window(&mut app, ui.ctx());
         });
-        assert!(app.orchestrator.agent.show_debug_window);
+        assert!(app.orchestrator.agent_panel_state.show_debug_window);
     }
 
     #[test]
@@ -207,7 +211,7 @@ mod tests {
 
         let ctx = egui::Context::default();
         let mut app = create_test_app();
-        app.orchestrator.agent.show_debug_window = true;
+        app.orchestrator.agent_panel_state.show_debug_window = true;
 
         app.orchestrator
             .agent
@@ -262,7 +266,7 @@ mod tests {
     fn test_clear_button_removes_entries() {
         let ctx = egui::Context::default();
         let mut app = create_test_app();
-        app.orchestrator.agent.show_debug_window = true;
+        app.orchestrator.agent_panel_state.show_debug_window = true;
 
         app.orchestrator
             .agent
@@ -279,6 +283,6 @@ mod tests {
         let _ = run_ui_test(&ctx, egui::RawInput::default(), |ui| {
             show_agent_debug_window(&mut app, ui.ctx());
         });
-        assert!(app.orchestrator.agent.show_debug_window);
+        assert!(app.orchestrator.agent_panel_state.show_debug_window);
     }
 }
