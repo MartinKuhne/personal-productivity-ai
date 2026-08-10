@@ -138,15 +138,9 @@ mod tests {
     use crate::ui::test_helpers::run_ui_test;
     use chrono::Local;
 
-    fn make_entry(
-        turn: usize,
-        session: usize,
-        kind: DebugEntryKind,
-        summary: &str,
-    ) -> AgentDebugEntry {
+    fn make_entry(turn: usize, kind: DebugEntryKind, summary: &str) -> AgentDebugEntry {
         AgentDebugEntry {
             turn,
-            session,
             timestamp: Local::now(),
             kind,
             summary: summary.to_string(),
@@ -158,7 +152,6 @@ mod tests {
     fn make_boundary(session: usize) -> AgentDebugEntry {
         AgentDebugEntry {
             turn: 0,
-            session,
             timestamp: Local::now(),
             kind: DebugEntryKind::Outgoing,
             summary: format!("Session {}", session),
@@ -195,8 +188,8 @@ mod tests {
             .debug_entries
             .extend(vec![
                 make_boundary(1),
-                make_entry(1, 1, DebugEntryKind::Outgoing, "Turn 1 — Outgoing"),
-                make_entry(1, 1, DebugEntryKind::Incoming, "Turn 1 — Incoming"),
+                make_entry(1, DebugEntryKind::Outgoing, "Turn 1 — Outgoing"),
+                make_entry(1, DebugEntryKind::Incoming, "Turn 1 — Incoming"),
             ]);
 
         let _ = run_ui_test(&ctx, egui::RawInput::default(), |ui| {
@@ -221,31 +214,22 @@ mod tests {
                 make_boundary(1),
                 make_entry(
                     1,
-                    1,
                     DebugEntryKind::Outgoing,
                     "Turn 1 — Outgoing (+2 messages)",
                 ),
                 make_entry(
                     1,
-                    1,
                     DebugEntryKind::Incoming,
                     "Turn 1 — Incoming (assistant OK)",
                 ),
-                make_entry(
-                    1,
-                    1,
-                    DebugEntryKind::ToolResults,
-                    "Turn 1 — Tool results (1)",
-                ),
+                make_entry(1, DebugEntryKind::ToolResults, "Turn 1 — Tool results (1)"),
                 make_entry(
                     2,
-                    1,
                     DebugEntryKind::Outgoing,
                     "Turn 2 — Outgoing (+3 messages)",
                 ),
                 make_entry(
                     2,
-                    1,
                     DebugEntryKind::Incoming,
                     "Turn 2 — Incoming (assistant OK)",
                 ),
@@ -272,7 +256,7 @@ mod tests {
             .agent
             .state_mut()
             .debug_entries
-            .push(make_entry(1, 1, DebugEntryKind::Outgoing, "Turn 1"));
+            .push(make_entry(1, DebugEntryKind::Outgoing, "Turn 1"));
 
         assert_eq!(app.orchestrator.agent.state().debug_entries.len(), 1);
 

@@ -60,7 +60,11 @@ pub struct AgentSessionManager {
     /// config-derived work uses the published `AppConfig` instead
     /// of the default placeholder.
     config_arrived: bool,
-    session_counter: usize,
+    /// Uuid of the currently-active (or most-recently-started) agent
+    /// session. Set when `start_session` mints a new `Uuid::new_v4()`.
+    /// Replaces the old `session_counter: usize` (migration step 10,
+    /// FR-008).
+    current_session_id: Option<Uuid>,
     /// Agent→UI structured event bus (new seam path). Cloned into the
     /// agent context on each `start_session`; the UI subscribes via
     /// [`Self::event_bus`] (migration step 2).
@@ -106,7 +110,7 @@ impl AgentSessionManager {
             // observed by this reader.
             config_reader: Some(config_bus.subscribe()),
             config_arrived: false,
-            session_counter: 0,
+            current_session_id: None,
             agent_event_bus: Bus::new(),
             browser_session,
             pdf_backing,
@@ -139,7 +143,7 @@ impl AgentSessionManager {
             config,
             config_reader: None,
             config_arrived: true,
-            session_counter: 0,
+            current_session_id: None,
             agent_event_bus: Bus::new(),
             browser_session,
             pdf_backing: Arc::new(crate::app::session::PdfBackingTracker::new()),
@@ -210,6 +214,13 @@ impl AgentSessionManager {
     /// frame (migration step 2, FR-010).
     pub fn event_bus(&self) -> Bus<SeamAgentEvent> {
         self.agent_event_bus.clone()
+    }
+
+    /// Returns the `Uuid` of the currently-active (or most-recently-started)
+    /// agent session. `None` before the first `start_session` call (migration
+    /// step 10, FR-008).
+    pub fn current_session_id(&self) -> Option<Uuid> {
+        self.current_session_id
     }
 
     /// Get a read-only view of the current agent state.
@@ -350,8 +361,8 @@ impl AgentSessionManager {
         self.state.response.clear();
         self.cancel_flag = Some(Arc::new(AtomicBool::new(false)));
         let cancel_flag = self.cancel_flag.clone().unwrap();
-        self.session_counter += 1;
         let session_id = Uuid::new_v4();
+        self.current_session_id = Some(session_id);
 
         // Build context
         let ctx = AgentContext {

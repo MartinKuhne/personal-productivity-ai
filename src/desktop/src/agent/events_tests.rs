@@ -9,8 +9,8 @@ use crate::agent::events::{AgentEvent, AgentStatus};
 use crate::bus::core::{Bus, BusReader};
 use crate::config::{AppConfig, LlmConfig};
 use std::collections::HashSet;
-use std::sync::atomic::AtomicBool;
 use std::sync::Arc;
+use std::sync::atomic::AtomicBool;
 
 fn make_config(port: u16) -> AppConfig {
     let mut config = AppConfig::default();

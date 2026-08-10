@@ -45,7 +45,6 @@ fn run_agent_inner(ctx: AgentContext) {
 
     let session_boundary = AgentDebugEntry {
         turn: 0,
-        session: 0,
         timestamp: chrono::Local::now(),
         kind: DebugEntryKind::Outgoing,
         summary: format!("Session {:8}", ctx.session_id),
@@ -130,7 +129,6 @@ fn process_turn(
     let delta: Vec<serde_json::Value> = messages[*prev_messages_len..].to_vec();
     let outgoing_entry = AgentDebugEntry {
         turn,
-        session: 0,
         timestamp: chrono::Local::now(),
         kind: DebugEntryKind::Outgoing,
         summary: format!(
@@ -171,7 +169,6 @@ fn process_turn(
         .unwrap_or(0);
     let incoming_entry = AgentDebugEntry {
         turn,
-        session: 0,
         timestamp: chrono::Local::now(),
         kind: DebugEntryKind::Incoming,
         summary: format!(
@@ -247,7 +244,7 @@ fn process_turn(
                     effect,
                 });
             }
-            emit_tool_results_debug(turn, 0, &ctx.agent_event_bus, ctx.session_id, &results);
+            emit_tool_results_debug(turn, &ctx.agent_event_bus, ctx.session_id, &results);
             process_tool_results(&results, tc, messages, &ctx.agent_event_bus, ctx.session_id);
             Turn::Continue
         }
@@ -406,7 +403,6 @@ fn log_tool_result(func_name: &str, result: &str) {
 
 fn emit_tool_results_debug(
     turn: usize,
-    session: usize,
     event_bus: &Bus<SeamAgentEvent>,
     session_id: Uuid,
     results: &[(String, String, String, String)],
@@ -424,7 +420,6 @@ fn emit_tool_results_debug(
         .collect();
     let entry = AgentDebugEntry {
         turn,
-        session,
         timestamp: chrono::Local::now(),
         kind: DebugEntryKind::ToolResults,
         summary: format!("Turn {} — Tool results ({} tools)", turn, entries.len()),

@@ -295,7 +295,6 @@ fn test_debug_entry_accumulates() {
 
     let entry = AgentDebugEntry {
         turn: 1,
-        session: 1,
         timestamp: chrono::Local::now(),
         kind: DebugEntryKind::Outgoing,
         summary: "Turn 1 — Outgoing".to_string(),
@@ -306,13 +305,11 @@ fn test_debug_entry_accumulates() {
     mgr.push_debug_entry(entry);
     assert_eq!(mgr.state.debug_entries.len(), 1);
     assert_eq!(mgr.state.debug_entries[0].turn, 1);
-    assert_eq!(mgr.state.debug_entries[0].session, 1);
     assert_eq!(mgr.state.debug_entries[0].kind, DebugEntryKind::Outgoing);
 
     // Second entry accumulates (no clearing)
     let entry2 = AgentDebugEntry {
         turn: 2,
-        session: 1,
         timestamp: chrono::Local::now(),
         kind: DebugEntryKind::Incoming,
         summary: "Turn 2 — Incoming".to_string(),
@@ -337,7 +334,6 @@ fn test_debug_entries_never_cleared_on_new_session() {
 
     let entry = AgentDebugEntry {
         turn: 1,
-        session: 1,
         timestamp: chrono::Local::now(),
         kind: DebugEntryKind::Outgoing,
         summary: "Turn 1 — Outgoing".to_string(),
@@ -356,11 +352,11 @@ fn test_debug_entries_never_cleared_on_new_session() {
     );
 }
 
-/// T016: Bus lifecycle test — verifies session counter increments on
-/// each `start_session` call. Uses `Bus<AgentEvent>` since the agent
-/// no longer publishes on `tx_gui`.
+/// T035: Uuid session identity — verifies `current_session_id` is set
+/// on each `start_session` call and is a valid `Uuid`. Uses `Bus<AgentEvent>`
+/// since the agent no longer publishes on `tx_gui`.
 #[test]
-fn test_session_counter_increments_on_start_session() {
+fn test_current_session_id_set_on_start_session() {
     use crate::agent::events::AgentEvent as SeamAgentEvent;
     use crate::bus::core::Bus;
 
@@ -382,11 +378,12 @@ fn test_session_counter_increments_on_start_session() {
             &AppConfig::default(),
         )),
     );
-    // new_for_test sets session_counter to 0
+    // Before first session: no session_id
+    assert!(mgr.current_session_id().is_none());
 
     let bus = Bus::new();
 
-    // Start first session — should increment to 1
+    // Start first session — current_session_id must be set
     let reader1 = mgr.event_bus().subscribe();
     mgr.start_session(
         "prompt 1".to_string(),
@@ -395,15 +392,20 @@ fn test_session_counter_increments_on_start_session() {
         HashSet::new(),
         bus.clone(),
     );
+    let session_id_1 = mgr
+        .current_session_id()
+        .expect("session_id set after first start");
+    assert!(!session_id_1.is_nil(), "session_id must be a real Uuid");
+
     // Drain bus until Failed (no valid API key)
     let mut deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
     while std::time::Instant::now() < deadline {
         let mut got_failed = false;
         while let Ok(ev) = reader1.try_recv() {
-            if let SeamAgentEvent::DebugEntry { entry, .. } = &ev {
+            if let SeamAgentEvent::SessionStarted { session_id } = &ev {
                 assert_eq!(
-                    entry.session, 1,
-                    "first session debug entries must have session 1"
+                    *session_id, session_id_1,
+                    "SessionStarted must carry the manager's session_id"
                 );
             }
             if matches!(ev, SeamAgentEvent::Failed { .. }) {
@@ -416,7 +418,7 @@ fn test_session_counter_increments_on_start_session() {
         std::thread::sleep(std::time::Duration::from_millis(5));
     }
 
-    // Start second session — should increment to 2
+    // Start second session — current_session_id must change
     let reader2 = mgr.event_bus().subscribe();
     mgr.start_session(
         "prompt 2".to_string(),
@@ -425,14 +427,22 @@ fn test_session_counter_increments_on_start_session() {
         HashSet::new(),
         bus.clone(),
     );
+    let session_id_2 = mgr
+        .current_session_id()
+        .expect("session_id set after second start");
+    assert_ne!(
+        session_id_1, session_id_2,
+        "each start_session must mint a new session_id"
+    );
+
     deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
     while std::time::Instant::now() < deadline {
         let mut got_failed = false;
         while let Ok(ev) = reader2.try_recv() {
-            if let SeamAgentEvent::DebugEntry { entry, .. } = &ev {
+            if let SeamAgentEvent::SessionStarted { session_id } = &ev {
                 assert_eq!(
-                    entry.session, 2,
-                    "second session debug entries must have session 2"
+                    *session_id, session_id_2,
+                    "SessionStarted must carry the new session_id"
                 );
             }
             if matches!(ev, SeamAgentEvent::Failed { .. }) {
