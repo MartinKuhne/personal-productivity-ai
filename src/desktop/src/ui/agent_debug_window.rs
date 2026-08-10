@@ -113,16 +113,14 @@ fn render_entry_row(ui: &mut egui::Ui, entry: &AgentDebugEntry, id_salt: usize) 
                 });
 
                 let mut json_str = serde_json::to_string_pretty(content).unwrap_or_default();
-                egui::ScrollArea::vertical()
-                    .max_height(1600.0)
-                    .show(ui, |ui| {
-                        ui.add(
-                            egui::TextEdit::multiline(&mut json_str)
-                                .font(egui::TextStyle::Monospace)
-                                .desired_width(f32::INFINITY)
-                                .interactive(false),
-                        );
-                    });
+                egui::ScrollArea::vertical().show(ui, |ui| {
+                    ui.add(
+                        egui::TextEdit::multiline(&mut json_str)
+                            .font(egui::TextStyle::Monospace)
+                            .desired_width(f32::INFINITY)
+                            .interactive(false),
+                    );
+                });
             }
         });
 
