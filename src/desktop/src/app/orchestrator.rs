@@ -11,7 +11,6 @@ use crate::markdown::Document;
 use std::path::PathBuf;
 use std::sync::mpsc::Receiver;
 use std::sync::{Arc, Mutex};
-use std::time::Duration;
 
 pub struct AppOrchestrator {
     pub content_libraries: Vec<crate::config::ContentLibrary>,
@@ -35,7 +34,6 @@ pub struct AppOrchestrator {
     pub config: crate::config::AppConfig,
     pub config_reader: Option<BusReader<ConfigArrived>>,
     pub pending_file_load: Option<PathBuf>,
-    pub repaint_interval: Duration,
     pub finished_watcher_slot: Arc<Mutex<Option<notify::RecommendedWatcher>>>,
     pub tool_manager: std::sync::Arc<std::sync::RwLock<crate::agent::tools::manager::ToolManager>>,
 }

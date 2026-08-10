@@ -7,7 +7,6 @@
 
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
-use std::time::Duration;
 
 use eframe::egui;
 
@@ -198,7 +197,6 @@ impl FastMdApp {
                 config: AppConfig::default(),
                 config_reader: Some(config_reader),
                 pending_file_load: None,
-                repaint_interval: Duration::from_millis(16),
                 finished_watcher_slot,
                 tool_manager: std::sync::Arc::new(std::sync::RwLock::new(
                     crate::agent::tools::manager::ToolManager::new(),
@@ -300,7 +298,6 @@ impl FastMdApp {
                 config,
                 config_reader: None,
                 pending_file_load: None,
-                repaint_interval: Duration::from_millis(16),
                 finished_watcher_slot,
                 tool_manager: std::sync::Arc::new(std::sync::RwLock::new(
                     crate::agent::tools::manager::ToolManager::new(),
