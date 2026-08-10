@@ -2,8 +2,8 @@
 //!
 //! Unit tests live in the sibling `manager_tests.rs` sidecar.
 
-use crate::agent::events::AgentEvent as SeamAgentEvent;
 use crate::agent::AgentContext;
+use crate::agent::events::AgentEvent as SeamAgentEvent;
 use crate::app::session::BrowserSession;
 use crate::bus::core::{Bus, BusReader};
 use crate::bus::events::config::ConfigArrived;
@@ -15,8 +15,8 @@ use serde_json::Value;
 use std::collections::HashSet;
 use std::path::PathBuf;
 use std::sync::{
-    atomic::{AtomicBool, Ordering},
     Arc,
+    atomic::{AtomicBool, Ordering},
 };
 use uuid::Uuid;
 

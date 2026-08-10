@@ -1,6 +1,6 @@
 //! Splits LLM thinking/reasoning blocks from final content and formats tool-call/result messages for the chat UI.
 //!
-//! Unit tests live in the sibling `response_formatter_tests.rs` sidecar.
+//! Unit tests live in the sibling `agent_render_tests.rs` sidecar.
 
 pub fn split_thinking_and_content(text: &str) -> (String, String) {
     let delim = "\u{1f914}";
@@ -313,9 +313,9 @@ fn format_generic_search_result(func_name: &str, data: &serde_json::Value) -> St
 }
 
 // ---------------------------------------------------------------------------
-// Tests live in the sibling `response_formatter_tests.rs` sidecar.
+// Tests live in the sibling `agent_render_tests.rs` sidecar.
 // ---------------------------------------------------------------------------
 
 #[cfg(test)]
-#[path = "response_formatter_tests.rs"]
+#[path = "agent_render_tests.rs"]
 mod tests;

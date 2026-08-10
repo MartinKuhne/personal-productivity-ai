@@ -502,7 +502,7 @@ fn test_parse_markdown_rule_and_blockquote() {
 
 #[test]
 fn test_format_delegate_tool_call_message_uses_double_angle() {
-    let msg = crate::agent::response_formatter::format_delegate_tool_call_message(
+    let msg = crate::ui::render::agent_render::format_delegate_tool_call_message(
         "web_fetch",
         r#"{"url":"https://example.com"}"#,
     );

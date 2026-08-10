@@ -5,10 +5,10 @@ use crate::agent::datamark;
 use crate::agent::events::{AgentEvent as SeamAgentEvent, AgentStatus};
 use crate::agent::llm_client::{LLMClient, parse_usage_block};
 use crate::agent::prompt_builder::SystemPromptBuilder;
-use crate::agent::response_formatter::{
+use crate::agent::tool_executor::ToolExecutor;
+use crate::ui::render::agent_render::{
     format_tool_call_message, format_tool_result_message, split_thinking_and_content,
 };
-use crate::agent::tool_executor::ToolExecutor;
 
 use crate::bus::core::Bus;
 use crate::bus::events::debug::{AgentDebugEntry, DebugEntryKind, DebugEntryRow};
