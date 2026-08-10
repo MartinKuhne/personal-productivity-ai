@@ -1,4 +1,4 @@
-﻿//! CardDAV contact tool implementations for the tool registry.
+//! CardDAV contact tool implementations for the tool registry.
 
 use crate::agent::tools::Tool;
 use crate::agent::tools::context::ToolContext;
@@ -84,7 +84,9 @@ impl Tool for AddContactTool {
     fn execute(&self, ctx: &ToolContext, args: &str) -> Result<serde_json::Value, String> {
         let input: dtos::AddContactInput =
             serde_json::from_str(args).map_err(|e| format!("Invalid args: {}", e))?;
-        crate::integrations::dav::card::tool_add_contact(ctx.config, &input.contact_json).map(|r| {
+        let contact_json = serde_json::to_string(&input)
+            .map_err(|e| format!("Failed to serialize input: {}", e))?;
+        crate::integrations::dav::card::tool_add_contact(ctx.config, &contact_json).map(|r| {
             serde_json::to_value(r).unwrap_or_else(|e| serde_json::json!({"error": e.to_string()}))
         })
     }
@@ -165,14 +167,13 @@ impl Tool for UpdateContactTool {
     fn execute(&self, ctx: &ToolContext, args: &str) -> Result<serde_json::Value, String> {
         let input: dtos::UpdateContactInput =
             serde_json::from_str(args).map_err(|e| format!("Invalid args: {}", e))?;
-        crate::integrations::dav::card::tool_update_contact(
-            ctx.config,
-            &input.id,
-            &input.contact_json,
-        )
-        .map(|r| {
-            serde_json::to_value(r).unwrap_or_else(|e| serde_json::json!({"error": e.to_string()}))
-        })
+        let contact_json = serde_json::to_string(&input)
+            .map_err(|e| format!("Failed to serialize input: {}", e))?;
+        crate::integrations::dav::card::tool_update_contact(ctx.config, &input.id, &contact_json)
+            .map(|r| {
+                serde_json::to_value(r)
+                    .unwrap_or_else(|e| serde_json::json!({"error": e.to_string()}))
+            })
     }
 }
 

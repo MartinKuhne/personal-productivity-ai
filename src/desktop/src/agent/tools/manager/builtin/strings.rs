@@ -162,55 +162,76 @@ pub const GET_CALENDAR_DESCRIPTION: &str = "Get calendar items by date range.";
 
 pub const GET_CALENDAR_ITEM_DESCRIPTION: &str = "Get a calendar item by its full href path. Provide the exact href value returned by search or get tools instead of a UUID.";
 
-pub const ADD_CALENDAR_ITEM_DESCRIPTION: &str = "Add a new calendar item.";
+pub const ADD_CALENDAR_ITEM_DESCRIPTION: &str = "Add a new calendar event to the first configured CalDAV calendar. All fields are optional — only include fields you know. The tool generates a UID automatically.";
 
-pub const UPDATE_CALENDAR_ITEM_DESCRIPTION: &str = "Update an existing calendar item.";
+pub const UPDATE_CALENDAR_ITEM_DESCRIPTION: &str = "Update an existing calendar event identified by `id` (the href returned by search or get tools). Only the fields you provide are changed; all other event properties are preserved.";
 
 pub const DELETE_CALENDAR_ITEM_DESCRIPTION: &str = "Delete a calendar item.";
 
+pub const FIELD_CALENDAR_HREF_DESC: &str =
+    "The full href path of the calendar item, as returned by search or get tools.";
+
+pub const FIELD_CALENDAR_SUMMARY_DESC: &str =
+    "Event title/summary. Defaults to 'New Event' if omitted.";
+
+pub const FIELD_CALENDAR_START_DESC: &str =
+    "Start datetime in ISO 8601 format (e.g. '2025-01-15T09:00:00' or date-only '2025-01-15').";
+
+pub const FIELD_CALENDAR_END_DESC: &str =
+    "End datetime in ISO 8601 format (e.g. '2025-01-15T10:00:00' or date-only '2025-01-15').";
+
+pub const FIELD_CALENDAR_DESCRIPTION_DESC: &str = "Free-text event description or notes.";
+
+pub const FIELD_CALENDAR_LOCATION_DESC: &str = "Event location (e.g. room name, address).";
+
 // --- carddav (contacts) ---
+
+pub const FIELD_CONTACT_HREF_DESC: &str =
+    "The href of the contact, as returned by `get_contact` or `search_contact`.";
+
+pub const FIELD_CONTACT_NAME_DESC: &str = "The contact's display name.";
+
+pub const FIELD_CONTACT_EMAIL_DESC: &str = "Email address.";
+
+pub const FIELD_CONTACT_PHONE_DESC: &str = "Phone number.";
+
+pub const FIELD_CONTACT_COMPANY_DESC: &str = "Company or organization name.";
+
+pub const FIELD_CONTACT_TITLE_DESC: &str = "Job title or role.";
+
+pub const FIELD_CONTACT_NOTES_DESC: &str = "Free-form notes about the contact.";
+
+pub const FIELD_CONTACT_BIRTHDAY_DESC: &str = "Birthday as ISO date YYYY-MM-DD.";
+
+pub const FIELD_CONTACT_ADDRESSES_DESC: &str =
+    "Array of postal address objects. See `AddressInput` schema for field details.";
+
+pub const FIELD_ADDRESS_TYPE_DESC: &str = "Address type: home, work, or another label.";
+
+pub const FIELD_ADDRESS_STREET_DESC: &str = "Street address.";
+
+pub const FIELD_ADDRESS_CITY_DESC: &str = "City.";
+
+pub const FIELD_ADDRESS_REGION_DESC: &str = "State, province, or region.";
+
+pub const FIELD_ADDRESS_POSTAL_CODE_DESC: &str = "Postal or ZIP code.";
+
+pub const FIELD_ADDRESS_COUNTRY_DESC: &str = "Country name.";
+
+pub const FIELD_ADDRESS_PO_BOX_DESC: &str = "P.O. box number.";
+
+pub const FIELD_ADDRESS_EXT_DESC: &str = "Extended address (e.g. apartment or suite).";
 
 pub const SEARCH_CONTACT_DESCRIPTION: &str = "Search contacts by keyword.";
 
-pub const ADD_CONTACT_DESCRIPTION: &str = "Add a new contact to the configured CardDAV addressbook. \
-The `contact_json` argument is a JSON object describing the contact. \
-Use these canonical field names (the listed aliases are also accepted): \
-`name` (aliases: `fn`, `full_name`) — the contact's display name, REQUIRED; \
-`email` (aliases: `email_address`, `mail`); \
-`phone` (aliases: `tel`, `telephone`, `mobile`, `phone_number`); \
-`company` (aliases: `org`, `organization`, `organisation`); \
-`title` (aliases: `job_title`, `role`) — job title; \
-`notes` (aliases: `note`, `comment`) — free-form notes; \
-`birthday` (aliases: `bday`, `dob`, `date_of_birth`) — ISO date `YYYY-MM-DD`; \
-`addresses` — JSON array of postal-address objects (see below). \
-For convenience, a single address may also be sent as `address` (object \
-or single-line string). Only fields you actually know should be included. \
-Empty strings and missing fields are ignored. The created resource is \
-returned with its href, Location, and ETag.\n\n\
-Address object shape: `{\"type\": \"home|work|…\", \"street\": \"…\", \
-\"city\": \"…\", \"region\": \"…\", \"postal_code\": \"…\", \"country\": \"…\", \
-\"po_box\": \"…\", \"ext\": \"…\"}`. All fields are optional; components \
-you don't know should be omitted. The `type` becomes the vCard `TYPE=` \
-parameter. Multiple addresses per contact are supported (e.g. a HOME and \
-a WORK).";
+pub const ADD_CONTACT_DESCRIPTION: &str = "Add a new contact to the configured CardDAV addressbook. All fields are optional — only include fields you know. The created resource is returned with its href, Location, and ETag.";
 
 pub const GET_CONTACT_DESCRIPTION: &str = "Get a contact by its unique ID. The response includes the \
 raw vCard plus structured fields: `fn_name`, `email`, `tel`, `org`, \
 `bday` (ISO `YYYY-MM-DD`), and `addresses` (array of postal-address \
 objects with the same shape as `add_contact`).";
 
-pub const UPDATE_CONTACT_DESCRIPTION: &str = "Update an existing contact at the given `id` (the href \
-returned by `get_contact` or `search_contact`). The `contact_json` argument \
-uses the same schema as `add_contact` (canonical names: `name`, `email`, \
-`phone`, `company`, `title`, `notes`, `birthday`, `addresses`; aliases are \
-also accepted). Only the canonical fields the JSON provides are touched; \
-every other vCard property on the contact (N, NICKNAME, URL, X-*, …) is \
-preserved verbatim, so this is safe to call with a partial payload. The \
-contact's vCard `UID` is preserved across the update so the addressbook \
-href stays stable. `addresses` is list-valued: when provided, the new \
-list replaces every existing ADR on the contact. The update is performed \
-with `If-Match` so concurrent edits are detected — if the server returns \
-412 the caller should re-`get_contact` and retry.";
+pub const UPDATE_CONTACT_DESCRIPTION: &str = "Update an existing contact at the given `id` (the href returned by `get_contact` or `search_contact`). Only the fields you provide are touched; every other vCard property on the contact (N, NICKNAME, URL, X-*, …) is preserved verbatim, so this is safe to call with a partial payload. The contact's vCard `UID` is preserved across the update so the addressbook href stays stable. `addresses` is list-valued: when provided, the new list replaces every existing ADR on the contact. The update is performed with `If-Match` so concurrent edits are detected — if the server returns 412 the caller should re-`get_contact` and retry.";
 
 pub const DELETE_CONTACT_DESCRIPTION: &str = "Delete the contact at the given `id` (the href returned by \
 `get_contact` or `search_contact`). A 404 (already absent) is treated as a \

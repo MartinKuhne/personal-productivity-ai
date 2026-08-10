@@ -212,19 +212,49 @@ pub struct GetCalendarItemResponse {
     pub result: String,
 }
 
-#[derive(Deserialize, Debug, JsonSchema)]
+#[derive(Deserialize, Serialize, Debug, JsonSchema)]
 pub struct AddCalendarItemInput {
-    pub item_json: String,
+    #[schemars(description = strings::FIELD_CALENDAR_SUMMARY_DESC)]
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub summary: Option<String>,
+    #[schemars(description = strings::FIELD_CALENDAR_START_DESC)]
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub start: Option<String>,
+    #[schemars(description = strings::FIELD_CALENDAR_END_DESC)]
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub end: Option<String>,
+    #[schemars(description = strings::FIELD_CALENDAR_DESCRIPTION_DESC)]
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub description: Option<String>,
+    #[schemars(description = strings::FIELD_CALENDAR_LOCATION_DESC)]
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub location: Option<String>,
 }
 #[derive(Serialize, Debug, JsonSchema, PartialEq)]
 pub struct AddCalendarItemResponse {
     pub result: String,
 }
 
-#[derive(Deserialize, Debug, JsonSchema)]
+#[derive(Deserialize, Serialize, Debug, JsonSchema)]
 pub struct UpdateCalendarItemInput {
+    #[schemars(description = strings::FIELD_CALENDAR_HREF_DESC)]
+    #[serde(skip_serializing)]
     pub id: String,
-    pub update_json: String,
+    #[schemars(description = strings::FIELD_CALENDAR_SUMMARY_DESC)]
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub summary: Option<String>,
+    #[schemars(description = strings::FIELD_CALENDAR_START_DESC)]
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub start: Option<String>,
+    #[schemars(description = strings::FIELD_CALENDAR_END_DESC)]
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub end: Option<String>,
+    #[schemars(description = strings::FIELD_CALENDAR_DESCRIPTION_DESC)]
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub description: Option<String>,
+    #[schemars(description = strings::FIELD_CALENDAR_LOCATION_DESC)]
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub location: Option<String>,
 }
 #[derive(Serialize, Debug, JsonSchema, PartialEq)]
 pub struct UpdateCalendarItemResponse {
@@ -321,24 +351,95 @@ pub struct GetContactResponse {
     pub result: String,
 }
 
-#[derive(Deserialize, Debug, JsonSchema)]
+#[derive(Deserialize, Serialize, Debug, JsonSchema)]
+pub struct AddressInput {
+    #[schemars(description = strings::FIELD_ADDRESS_TYPE_DESC)]
+    #[serde(rename = "type", skip_serializing_if = "Option::is_none")]
+    pub addr_type: Option<String>,
+    #[schemars(description = strings::FIELD_ADDRESS_STREET_DESC)]
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub street: Option<String>,
+    #[schemars(description = strings::FIELD_ADDRESS_CITY_DESC)]
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub city: Option<String>,
+    #[schemars(description = strings::FIELD_ADDRESS_REGION_DESC)]
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub region: Option<String>,
+    #[schemars(description = strings::FIELD_ADDRESS_POSTAL_CODE_DESC)]
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub postal_code: Option<String>,
+    #[schemars(description = strings::FIELD_ADDRESS_COUNTRY_DESC)]
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub country: Option<String>,
+    #[schemars(description = strings::FIELD_ADDRESS_PO_BOX_DESC)]
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub po_box: Option<String>,
+    #[schemars(description = strings::FIELD_ADDRESS_EXT_DESC)]
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub ext: Option<String>,
+}
+
+#[derive(Deserialize, Serialize, Debug, JsonSchema)]
 pub struct AddContactInput {
-    pub contact_json: String,
+    #[schemars(description = strings::FIELD_CONTACT_NAME_DESC)]
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub name: Option<String>,
+    #[schemars(description = strings::FIELD_CONTACT_EMAIL_DESC)]
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub email: Option<String>,
+    #[schemars(description = strings::FIELD_CONTACT_PHONE_DESC)]
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub phone: Option<String>,
+    #[schemars(description = strings::FIELD_CONTACT_COMPANY_DESC)]
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub company: Option<String>,
+    #[schemars(description = strings::FIELD_CONTACT_TITLE_DESC)]
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub title: Option<String>,
+    #[schemars(description = strings::FIELD_CONTACT_NOTES_DESC)]
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub notes: Option<String>,
+    #[schemars(description = strings::FIELD_CONTACT_BIRTHDAY_DESC)]
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub birthday: Option<String>,
+    #[schemars(description = strings::FIELD_CONTACT_ADDRESSES_DESC)]
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub addresses: Option<Vec<AddressInput>>,
 }
 #[derive(Serialize, Debug, JsonSchema)]
 pub struct AddContactResponse {
     pub result: String,
 }
 
-#[derive(Deserialize, Debug, JsonSchema)]
+#[derive(Deserialize, Serialize, Debug, JsonSchema)]
 pub struct UpdateContactInput {
-    /// The href of the existing contact to update. Use the value returned
-    /// by `get_contact` or `search_contact`.
+    #[schemars(description = strings::FIELD_CONTACT_HREF_DESC)]
+    #[serde(skip_serializing)]
     pub id: String,
-    /// The full new contact data, in the same JSON schema as
-    /// `add_contact.contact_json`. Missing fields are kept from the
-    /// existing vCard; provided fields overwrite.
-    pub contact_json: String,
+    #[schemars(description = strings::FIELD_CONTACT_NAME_DESC)]
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub name: Option<String>,
+    #[schemars(description = strings::FIELD_CONTACT_EMAIL_DESC)]
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub email: Option<String>,
+    #[schemars(description = strings::FIELD_CONTACT_PHONE_DESC)]
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub phone: Option<String>,
+    #[schemars(description = strings::FIELD_CONTACT_COMPANY_DESC)]
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub company: Option<String>,
+    #[schemars(description = strings::FIELD_CONTACT_TITLE_DESC)]
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub title: Option<String>,
+    #[schemars(description = strings::FIELD_CONTACT_NOTES_DESC)]
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub notes: Option<String>,
+    #[schemars(description = strings::FIELD_CONTACT_BIRTHDAY_DESC)]
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub birthday: Option<String>,
+    #[schemars(description = strings::FIELD_CONTACT_ADDRESSES_DESC)]
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub addresses: Option<Vec<AddressInput>>,
 }
 #[derive(Serialize, Debug, JsonSchema)]
 pub struct UpdateContactResponse {

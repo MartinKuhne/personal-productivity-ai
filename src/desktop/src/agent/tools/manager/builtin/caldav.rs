@@ -125,12 +125,11 @@ impl Tool for AddCalendarItemTool {
     fn execute(&self, ctx: &ToolContext, args: &str) -> Result<serde_json::Value, String> {
         let input: dtos::AddCalendarItemInput =
             serde_json::from_str(args).map_err(|e| format!("Invalid args: {}", e))?;
-        crate::integrations::dav::cal::tool_add_calendar_item(ctx.config, &input.item_json).map(
-            |r| {
-                serde_json::to_value(r)
-                    .unwrap_or_else(|e| serde_json::json!({"error": e.to_string()}))
-            },
-        )
+        let item_json = serde_json::to_string(&input)
+            .map_err(|e| format!("Failed to serialize input: {}", e))?;
+        crate::integrations::dav::cal::tool_add_calendar_item(ctx.config, &item_json).map(|r| {
+            serde_json::to_value(r).unwrap_or_else(|e| serde_json::json!({"error": e.to_string()}))
+        })
     }
 }
 
@@ -155,10 +154,12 @@ impl Tool for UpdateCalendarItemTool {
     fn execute(&self, ctx: &ToolContext, args: &str) -> Result<serde_json::Value, String> {
         let input: dtos::UpdateCalendarItemInput =
             serde_json::from_str(args).map_err(|e| format!("Invalid args: {}", e))?;
+        let update_json = serde_json::to_string(&input)
+            .map_err(|e| format!("Failed to serialize input: {}", e))?;
         crate::integrations::dav::cal::tool_update_calendar_item(
             ctx.config,
             &input.id,
-            &input.update_json,
+            &update_json,
         )
         .map(|r| {
             serde_json::to_value(r).unwrap_or_else(|e| serde_json::json!({"error": e.to_string()}))
