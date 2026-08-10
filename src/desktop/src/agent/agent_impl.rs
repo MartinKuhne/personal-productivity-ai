@@ -6,10 +6,6 @@ use crate::agent::events::{AgentEvent as SeamAgentEvent, AgentStatus};
 use crate::agent::llm_client::{LLMClient, parse_usage_block};
 use crate::agent::prompt_builder::SystemPromptBuilder;
 use crate::agent::tool_executor::ToolExecutor;
-use crate::ui::render::agent_render::{
-    format_tool_call_message, format_tool_result_message, split_thinking_and_content,
-};
-
 use crate::bus::core::Bus;
 use crate::bus::events::debug::{AgentDebugEntry, DebugEntryKind, DebugEntryRow};
 use crate::config::get_config_path;
@@ -38,7 +34,6 @@ fn run_agent_inner(ctx: AgentContext) {
         .write()
         .unwrap()
         .get_tools_schema(&ctx.config, &ctx.prompt);
-    let mut full_response = String::new();
     let executor = ToolExecutor::new(
         ctx.config.clone(),
         ctx.file_event_bus.clone(),
@@ -78,7 +73,6 @@ fn run_agent_inner(ctx: AgentContext) {
             &ctx,
             &mut messages,
             &tools_json,
-            &mut full_response,
             &executor,
             &mut turn_number,
             &mut prev_messages_len,
@@ -120,7 +114,6 @@ fn process_turn(
     ctx: &AgentContext,
     messages: &mut Vec<serde_json::Value>,
     tools_json: &serde_json::Value,
-    full_response: &mut String,
     executor: &ToolExecutor,
     turn_number: &mut usize,
     prev_messages_len: &mut usize,
@@ -212,12 +205,7 @@ fn process_turn(
         }
     };
     handle_reasoning(&message, &ctx.agent_event_bus, ctx.session_id);
-    handle_content(
-        &message,
-        full_response,
-        &ctx.agent_event_bus,
-        ctx.session_id,
-    );
+    handle_content(&message, &ctx.agent_event_bus, ctx.session_id);
     messages.push(message.clone());
     match message.get("tool_calls").and_then(|t| t.as_array()) {
         Some(tc) if !tc.is_empty() => {
@@ -237,8 +225,6 @@ fn process_turn(
                     .and_then(|i| i.as_str())
                     .unwrap_or("")
                     .to_string();
-                full_response.push_str(&format_tool_call_message(fn_name, args));
-                full_response.push_str("\n\n");
                 let args_value = serde_json::from_str::<serde_json::Value>(args)
                     .unwrap_or(serde_json::Value::String(args.to_string()));
                 let _ = ctx
@@ -262,14 +248,7 @@ fn process_turn(
                 });
             }
             emit_tool_results_debug(turn, 0, &ctx.agent_event_bus, ctx.session_id, &results);
-            process_tool_results(
-                &results,
-                tc,
-                messages,
-                full_response,
-                &ctx.agent_event_bus,
-                ctx.session_id,
-            );
+            process_tool_results(&results, tc, messages, &ctx.agent_event_bus, ctx.session_id);
             Turn::Continue
         }
         _ => Turn::Done,
@@ -338,29 +317,15 @@ fn handle_reasoning(
         });
     }
 }
-fn handle_content(
-    message: &serde_json::Value,
-    full_response: &mut String,
-    event_bus: &Bus<SeamAgentEvent>,
-    session_id: Uuid,
-) {
+fn handle_content(message: &serde_json::Value, event_bus: &Bus<SeamAgentEvent>, session_id: Uuid) {
     let content_str = message
         .get("content")
         .and_then(|c| c.as_str())
         .unwrap_or("");
-    let (thinking, content) = split_thinking_and_content(content_str);
-    if !thinking.is_empty() {
-        let _ = event_bus.publish(SeamAgentEvent::Thinking {
-            session_id,
-            text: thinking,
-        });
-    }
-    if !content.is_empty() {
-        full_response.push_str(&content);
-        full_response.push_str("\n\n");
+    if !content_str.is_empty() {
         let _ = event_bus.publish(SeamAgentEvent::ContentDelta {
             session_id,
-            text: format!("{}\n\n", content),
+            text: format!("{}\n\n", content_str),
         });
     }
 }
@@ -368,7 +333,6 @@ fn process_tool_results(
     results: &[(String, String, String, String)],
     tool_calls: &[serde_json::Value],
     messages: &mut Vec<serde_json::Value>,
-    full_response: &mut String,
     event_bus: &Bus<SeamAgentEvent>,
     session_id: Uuid,
 ) {
@@ -385,7 +349,6 @@ fn process_tool_results(
             .to_string();
         if let Some((fn_name, _args, result)) = map.remove(&cid) {
             log_tool_result(&fn_name, &result);
-            full_response.push_str(&format_tool_result_message(&fn_name, &result));
             let result_value = serde_json::from_str::<serde_json::Value>(&result)
                 .unwrap_or(serde_json::Value::String(result.clone()));
             let _ = event_bus.publish(SeamAgentEvent::ToolResult {

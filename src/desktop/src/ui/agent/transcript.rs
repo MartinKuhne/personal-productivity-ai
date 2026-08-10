@@ -3,8 +3,11 @@
 //!
 //! Unit tests live in the sibling `transcript_tests.rs` sidecar.
 
-use crate::agent::events::AgentEvent;
-use crate::ui::render::agent_render::{format_tool_call_message, format_tool_result_message};
+use crate::agent::events::{AgentEvent, DelegateToolCall};
+use crate::ui::render::agent_render::{
+    format_delegate_trace, format_tool_call_message, format_tool_result_message,
+    split_thinking_and_content,
+};
 use uuid::Uuid;
 
 /// Ordered transcript entry — a `Content` block, a `ToolCall` pair, or a
@@ -61,12 +64,22 @@ impl AgentTranscript {
         }
         match event {
             AgentEvent::ContentDelta { text, .. } => {
-                self.content.push_str(text);
-                match self.blocks.last_mut() {
-                    Some(TranscriptBlock::Content { text: buf }) => buf.push_str(text),
-                    _ => self
-                        .blocks
-                        .push(TranscriptBlock::Content { text: text.clone() }),
+                let (thinking, content) = split_thinking_and_content(text);
+                if !thinking.is_empty() {
+                    self.thinking.push_str(&thinking);
+                    match self.blocks.last_mut() {
+                        Some(TranscriptBlock::Thinking { text: buf }) => buf.push_str(&thinking),
+                        _ => self
+                            .blocks
+                            .push(TranscriptBlock::Thinking { text: thinking }),
+                    }
+                }
+                if !content.is_empty() {
+                    self.content.push_str(&content);
+                    match self.blocks.last_mut() {
+                        Some(TranscriptBlock::Content { text: buf }) => buf.push_str(&content),
+                        _ => self.blocks.push(TranscriptBlock::Content { text: content }),
+                    }
                 }
             }
             AgentEvent::Thinking { text, .. } => {
@@ -107,6 +120,17 @@ impl AgentTranscript {
                 };
                 let formatted = format_tool_result_message(name, &result_str);
                 self.content.push_str(&formatted);
+                // Format structured delegate sub-agent trace (FR-014, SC-006).
+                if name == "web_delegate"
+                    && let Some(data) = result.get("data")
+                    && let Some(calls_val) = data.get("tool_calls")
+                    && let Ok(tool_calls) =
+                        serde_json::from_value::<Vec<DelegateToolCall>>(calls_val.clone())
+                    && !tool_calls.is_empty()
+                {
+                    let trace = format_delegate_trace(&tool_calls);
+                    self.content.push_str(&trace);
+                }
                 // Update the matching ToolCall block's result.
                 for block in self.blocks.iter_mut() {
                     if let TranscriptBlock::ToolCall {

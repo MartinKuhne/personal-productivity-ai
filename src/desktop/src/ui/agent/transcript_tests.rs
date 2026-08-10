@@ -121,15 +121,20 @@ fn test_web_delegate_result_formatted() {
             "status": "success",
             "data": {
                 "result": "Done",
-                "tool_call_trace": ">> trace text",
+                "tool_calls": [
+                    {"name": "web_fetch", "args": {"url": "https://example.com"}, "result": {"status": "success"}},
+                ],
             },
         }),
     });
-    // The tool result is formatted via format_tool_result_message, which
-    // includes the raw JSON in the short-result branch. No separate
-    // trace-append (the old agent_impl.rs:431-437 top-level lookup is dead
-    // code — trace is under `data`, not top-level).
+    // The tool result is formatted via format_tool_result_message (main result)
     assert!(t.content.contains("web_delegate"));
+    // The structured delegate trace is formatted via format_delegate_trace (>> prefix)
+    assert!(
+        t.content.contains(">> **Executing tool `web_fetch`**"),
+        "Expected delegate trace formatting, got: {}",
+        t.content
+    );
 }
 
 #[test]

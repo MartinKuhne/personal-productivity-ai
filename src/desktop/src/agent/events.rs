@@ -12,6 +12,7 @@
 use crate::bus::events::debug::AgentDebugEntry;
 use crate::bus::events::messages::TokenUsageInfo;
 use schemars::JsonSchema;
+use serde::Deserialize;
 use serde::Serialize;
 use serde_json::Value;
 use std::collections::HashSet;
@@ -74,8 +75,8 @@ pub enum ToolSideEffect {
 }
 
 /// A single sub-agent tool call captured inside a `WebDelegateResponse` —
-/// structured per-call data replacing the old `tool_call_trace: String`.
-#[derive(Debug, Clone, Serialize, JsonSchema)]
+/// structured per-call data replacing the old string-based trace field.
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
 pub struct DelegateToolCall {
     /// The tool function name (e.g. `browser_navigate`).
     pub name: String,

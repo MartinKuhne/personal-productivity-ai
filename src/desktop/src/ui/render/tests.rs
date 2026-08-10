@@ -501,11 +501,15 @@ fn test_parse_markdown_rule_and_blockquote() {
 }
 
 #[test]
-fn test_format_delegate_tool_call_message_uses_double_angle() {
-    let msg = crate::ui::render::agent_render::format_delegate_tool_call_message(
-        "web_fetch",
-        r#"{"url":"https://example.com"}"#,
-    );
+fn test_format_delegate_trace_uses_double_angle() {
+    use crate::agent::events::DelegateToolCall;
+    use serde_json::json;
+    let tool_calls = vec![DelegateToolCall {
+        name: "web_fetch".to_string(),
+        args: json!({"url": "https://example.com"}),
+        result: json!({"status": "success"}),
+    }];
+    let msg = crate::ui::render::agent_render::format_delegate_trace(&tool_calls);
     assert!(msg.starts_with(">> "), "Expected >> prefix, got: {msg}");
     assert!(
         msg.contains("**Executing tool `web_fetch`**"),

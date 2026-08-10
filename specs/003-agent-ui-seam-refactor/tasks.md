@@ -138,11 +138,11 @@ description: "Task list for Agent Loop / UI Seam Refactor"
 
 ### Implementation for User Story 3
 
-- [ ] T030 [US3] Implement tool-call formatting from structured `AgentEvent::ToolCallStarted`/`ToolResult` in `src/desktop/src/ui/render/agent_render.rs` — format `name` + `args` (JSON) into markdown; replaces agent-side `format_tool_call_message`/`format_tool_result_message` (FR-012)
-- [ ] T031 [US3] Implement `split_thinking_and_content` as a UI presentation-layer concern in `src/desktop/src/ui/render/agent_render.rs` — the agent emits raw `ContentDelta`; the UI splits on the `🤔` delimiter and renders thinking vs content separately (FR-012, AGENT-022 drift flagged)
-- [ ] T032 [US3] Implement delegate trace formatting from `Vec<DelegateToolCall>` in `src/desktop/src/ui/render/agent_render.rs` — format each `DelegateToolCall { name, args, result }` into a `>>`-prefixed markdown group; replaces `format_delegate_tool_call_message` (FR-014, SC-006)
-- [ ] T033 [US3] Write UI restyle test in `src/desktop/src/ui/render/e2e_tests/` — change tool-call display format in `agent_render.rs` only, assert rendered output changes, assert no `src/desktop/src/agent/` file modified (quickstart scenario 8, User Story 3 acceptance scenario 1)
-- [ ] T034 [US3] Write structured delegate trace test — assert `WebDelegateResponse.tool_calls: Vec<DelegateToolCall>` renders from structured data; grep `src/desktop/src/agent/` for `tool_call_trace`/`format_delegate_tool_call_message` → zero hits (quickstart scenario 7, SC-006, INV-7)
+- [x] T030 [US3] Implement tool-call formatting from structured `AgentEvent::ToolCallStarted`/`ToolResult` in `src/desktop/src/ui/render/agent_render.rs` — format `name` + `args` (JSON) into markdown; replaces agent-side `format_tool_call_message`/`format_tool_result_message` (FR-012)
+- [x] T031 [US3] Implement `split_thinking_and_content` as a UI presentation-layer concern in `src/desktop/src/ui/render/agent_render.rs` — the agent emits raw `ContentDelta`; the UI splits on the `🤔` delimiter and renders thinking vs content separately (FR-012, AGENT-022 drift flagged)
+- [x] T032 [US3] Implement delegate trace formatting from `Vec<DelegateToolCall>` in `src/desktop/src/ui/render/agent_render.rs` — format each `DelegateToolCall { name, args, result }` into a `>>`-prefixed markdown group; replaces `format_delegate_tool_call_message` (FR-014, SC-006)
+- [x] T033 [US3] Write UI restyle test in `src/desktop/src/ui/render/e2e_tests/` — change tool-call display format in `agent_render.rs` only, assert rendered output changes, assert no `src/desktop/src/agent/` file modified (quickstart scenario 8, User Story 3 acceptance scenario 1)
+- [x] T034 [US3] Write structured delegate trace test — assert `WebDelegateResponse.tool_calls: Vec<DelegateToolCall>` renders from structured data; grep `src/desktop/src/agent/` for `tool_call_trace`/`format_delegate_tool_call_message` → zero hits (quickstart scenario 7, SC-006, INV-7)
 
 **Checkpoint**: User Story 3 complete — presentation is UI-side. Verify: change a formatting rule in `ui/` only → output changes, no `agent/` edit.
 
