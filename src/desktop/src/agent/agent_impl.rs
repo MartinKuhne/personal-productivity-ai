@@ -276,7 +276,13 @@ fn process_turn(
                 session_id: ctx.session_id,
                 status: AgentStatus::ExecutingTools,
             });
-            let (results, _side_effects) = executor.execute_all(tc);
+            let (results, side_effects) = executor.execute_all(tc);
+            for effect in side_effects {
+                let _ = ctx.agent_event_bus.publish(SeamAgentEvent::ToolSideEffect {
+                    session_id: ctx.session_id,
+                    effect,
+                });
+            }
             emit_tool_results_debug(
                 turn,
                 ctx.session_number,
