@@ -222,3 +222,101 @@ fn test_agent_isolation_event_ordering_no_ui() {
         "SessionFinished must be the last event: {phases:?}"
     );
 }
+
+/// FR-009 / quickstart scenario 6: continuation prompts reuse the same
+/// `session_id` and carry forward the conversation history; a new
+/// `session_id` starts with no history.
+///
+/// This test runs `run_agent` directly (no driver thread / no UI) and
+/// verifies that the `history` field on `SessionFinished` carries the
+/// accumulated messages when the agent is given a pre-populated history,
+/// and that a fresh session (new `session_id`, `history: None`) starts
+/// empty.
+#[test]
+fn test_session_continuity_history_carries_over() {
+    let body = serde_json::json!({
+        "id": "chatcmpl-test", "object": "chat.completion", "created": 0, "model": "test",
+        "choices": [{"index": 0, "message": {"role": "assistant", "content": "Reply."}, "finish_reason": "stop"}]
+    })
+    .to_string();
+
+    // Session 1: fresh session_id, no history.
+    let port1 = spawn_one_shot_http_server(&http_response("HTTP/1.1 200 OK", &body));
+    let (mut ctx1, mut reader1) = make_ctx(make_config(port1));
+    let session_id_1 = ctx1.session_id;
+    ctx1.history = None;
+    run_agent(ctx1);
+    let events1 = collect_bus_events(&mut reader1, std::time::Duration::from_secs(5));
+    let finished1 = events1
+        .iter()
+        .find_map(|ev| match ev {
+            AgentEvent::SessionFinished { history, .. } => Some(history.clone()),
+            _ => None,
+        })
+        .expect("session 1 must emit SessionFinished");
+    // The fresh session produces a non-empty history (system + user + assistant).
+    assert!(
+        !finished1.is_empty(),
+        "session 1 history must be non-empty after a turn: {finished1:?}"
+    );
+
+    // Session 2: SAME session_id, carrying forward history from session 1.
+    // The agent should build on the prior conversation.
+    let port2 = spawn_one_shot_http_server(&http_response("HTTP/1.1 200 OK", &body));
+    let (mut ctx2, mut reader2) = make_ctx(make_config(port2));
+    ctx2.session_id = session_id_1;
+    ctx2.history = Some(finished1.clone());
+    run_agent(ctx2);
+    let events2 = collect_bus_events(&mut reader2, std::time::Duration::from_secs(5));
+    let finished2 = events2
+        .iter()
+        .find_map(|ev| match ev {
+            AgentEvent::SessionFinished { history, .. } => Some(history.clone()),
+            _ => None,
+        })
+        .expect("session 2 must emit SessionFinished");
+    // Continuation: history must be strictly longer than the prior history
+    // (the agent appended a new user + assistant turn).
+    assert!(
+        finished2.len() > finished1.len(),
+        "continuation session must carry forward and extend history: \
+         before={} after={}",
+        finished1.len(),
+        finished2.len()
+    );
+
+    // Session 3: NEW session_id, no history. Must start fresh — history
+    // must be shorter than session 2's accumulated history.
+    let port3 = spawn_one_shot_http_server(&http_response("HTTP/1.1 200 OK", &body));
+    let (mut ctx3, mut reader3) = make_ctx(make_config(port3));
+    let session_id_3 = ctx3.session_id;
+    assert_ne!(
+        session_id_3, session_id_1,
+        "new session must have a different session_id"
+    );
+    ctx3.history = None;
+    run_agent(ctx3);
+    let events3 = collect_bus_events(&mut reader3, std::time::Duration::from_secs(5));
+    let finished3 = events3
+        .iter()
+        .find_map(|ev| match ev {
+            AgentEvent::SessionFinished { history, .. } => Some(history.clone()),
+            _ => None,
+        })
+        .expect("session 3 must emit SessionFinished");
+    assert!(
+        finished3.len() < finished2.len(),
+        "new session (different session_id, no history) must start fresh: \
+         session3={} session2={}",
+        finished3.len(),
+        finished2.len()
+    );
+    // All events in session 3 must carry the new session_id.
+    for ev in &events3 {
+        assert_eq!(
+            ev.session_id(),
+            session_id_3,
+            "session 3 events must carry the new session_id: {ev:?}"
+        );
+    }
+}
