@@ -128,12 +128,12 @@ fn process_turn(
                 delta.len(),
                 tool_count
             ),
-            content: Some(serde_json::json!({
+            content: Some(unescape_json_strings(serde_json::json!({
                 "model": llm.model_name(),
                 "max_tokens": llm.max_tokens(),
                 "tools": tools_json,
                 "new_messages": delta,
-            })),
+            }))),
             row_type: DebugEntryRow::Entry,
         }
         .into(),
@@ -178,7 +178,7 @@ fn process_turn(
                     "no choices"
                 },
             ),
-            content: Some(resp_val.clone()),
+            content: Some(unescape_json_strings(resp_val.clone())),
             row_type: DebugEntryRow::Entry,
         }
         .into(),
@@ -404,11 +404,50 @@ fn emit_tool_results_debug(
             timestamp: chrono::Local::now(),
             kind: DebugEntryKind::ToolResults,
             summary: format!("Turn {} — Tool results ({} tools)", turn, entries.len()),
-            content: Some(serde_json::Value::Array(entries)),
+            content: Some(unescape_json_strings(serde_json::Value::Array(entries))),
             row_type: DebugEntryRow::Entry,
         }
         .into(),
     );
+}
+
+/// Recursively walk a JSON value and, for any string that itself contains
+/// valid JSON (an object or array), replace it with the parsed value.
+///
+/// The OpenAI tool-call wire format encodes `function.arguments` as a
+/// JSON-encoded *string* rather than a nested object, and tool results in
+/// this crate return `args`/`result` as JSON-encoded strings. Without
+/// unescaping, `serde_json::to_string_pretty` renders every inner quote as
+/// `\"`, making the debug window's JSON nearly unreadable. This helper
+/// flattens those string-encoded JSON payloads so they pretty-print as
+/// nested objects/arrays. Strings that do not parse as JSON, or that parse
+/// to a scalar, are left untouched.
+fn unescape_json_strings(value: serde_json::Value) -> serde_json::Value {
+    match value {
+        serde_json::Value::Object(mut map) => {
+            for v in map.values_mut() {
+                *v = unescape_json_strings(std::mem::replace(v, serde_json::Value::Null));
+            }
+            serde_json::Value::Object(map)
+        }
+        serde_json::Value::Array(mut arr) => {
+            for v in arr.iter_mut() {
+                *v = unescape_json_strings(std::mem::replace(v, serde_json::Value::Null));
+            }
+            serde_json::Value::Array(arr)
+        }
+        serde_json::Value::String(s) => {
+            let trimmed = s.trim_start();
+            if (trimmed.starts_with('{') || trimmed.starts_with('['))
+                && let Ok(parsed) = serde_json::from_str::<serde_json::Value>(&s)
+                && (parsed.is_object() || parsed.is_array())
+            {
+                return unescape_json_strings(parsed);
+            }
+            serde_json::Value::String(s)
+        }
+        other => other,
+    }
 }
 
 #[cfg(test)]
@@ -548,5 +587,122 @@ mod tests {
             "Expected web_delegate trace with >> prefix in responses. Got: {:?}",
             responses
         );
+    }
+
+    /// `unescape_json_strings` parses a string-valued `function.arguments`
+    /// (OpenAI wire format) into a nested object so it pretty-prints
+    /// without escaped quotes.
+    #[test]
+    fn test_unescape_json_strings_parses_function_arguments() {
+        let input = serde_json::json!({
+            "id": "call_1",
+            "type": "function",
+            "function": {
+                "name": "run_command",
+                "arguments": "{\"command\":\"ls\",\"flags\":[\"-l\",\"-a\"]}",
+            }
+        });
+        let out = unescape_json_strings(input);
+        let args = out
+            .get("function")
+            .and_then(|f| f.get("arguments"))
+            .expect("arguments present");
+        assert!(
+            args.is_object(),
+            "arguments should be a parsed object, got: {args}"
+        );
+        assert_eq!(args.get("command").and_then(|c| c.as_str()), Some("ls"));
+        assert_eq!(
+            args.get("flags")
+                .and_then(|f| f.as_array())
+                .map(|a| a.len()),
+            Some(2)
+        );
+    }
+
+    /// Tool-results entries store `args` and `result` as JSON-encoded
+    /// strings; both must be parsed so the debug window shows nested JSON.
+    #[test]
+    fn test_unescape_json_strings_parses_tool_result_args_and_result() {
+        let input = serde_json::json!({
+            "call_id": "call_1",
+            "name": "read_file",
+            "arguments": "{\"path\":\"doc.md\"}",
+            "result": "{\"status\":\"success\",\"data\":{\"bytes\":42}}",
+        });
+        let out = unescape_json_strings(input);
+        assert!(out.get("arguments").unwrap().is_object());
+        assert!(out.get("result").unwrap().is_object());
+        assert_eq!(
+            out.get("result")
+                .and_then(|r| r.get("data"))
+                .and_then(|d| d.get("bytes"))
+                .and_then(|b| b.as_i64()),
+            Some(42)
+        );
+    }
+
+    /// Strings that do not contain JSON (or that parse to a scalar) must
+    /// be left untouched — otherwise we would corrupt normal string fields.
+    #[test]
+    fn test_unescape_json_strings_leaves_non_json_strings_untouched() {
+        let input = serde_json::json!({
+            "name": "read_file",
+            "summary": "Turn 1 — Outgoing (+2 messages)",
+            "leading_whitespace": "   {\"a\":1}",
+            "scalar_json": "42",
+            "text_starting_with_brace": "{not actually json",
+            "nested": {
+                "deep": "{\"x\":[1,2]}",
+                "plain": "hello",
+            },
+        });
+        let out = unescape_json_strings(input);
+        assert_eq!(out.get("name").and_then(|n| n.as_str()), Some("read_file"));
+        assert_eq!(
+            out.get("summary").and_then(|s| s.as_str()),
+            Some("Turn 1 — Outgoing (+2 messages)")
+        );
+        // Leading whitespace before the JSON object is still parsed.
+        assert!(out.get("leading_whitespace").unwrap().is_object());
+        // A bare-number string is NOT promoted to a number — we only
+        // unescape object/array payloads, leaving scalar JSON strings as
+        // strings so callers don't lose the original type information.
+        assert!(out.get("scalar_json").unwrap().is_string());
+        // A string that starts with `{` but is not valid JSON stays a string.
+        assert!(out.get("text_starting_with_brace").unwrap().is_string());
+        assert!(out.get("nested").unwrap().get("deep").unwrap().is_object());
+        assert!(
+            out.get("nested")
+                .and_then(|n| n.get("deep"))
+                .and_then(|d| d.get("x"))
+                .unwrap()
+                .is_array()
+        );
+        assert_eq!(
+            out.get("nested")
+                .and_then(|n| n.get("plain"))
+                .and_then(|p| p.as_str()),
+            Some("hello")
+        );
+    }
+
+    /// Round-trip: a pretty-printed unescaped value must not contain a
+    /// backslash-escaped quote inside the `arguments` payload. This is the
+    /// user-visible behaviour the fix targets.
+    #[test]
+    fn test_unescape_json_strings_pretty_output_has_no_escaped_quotes() {
+        let input = serde_json::json!({
+            "function": {
+                "name": "run_command",
+                "arguments": "{\"command\":\"ls\"}",
+            }
+        });
+        let pretty = serde_json::to_string_pretty(&unescape_json_strings(input)).unwrap();
+        assert!(
+            !pretty.contains("\\\""),
+            "escaped quotes still present in pretty output: {pretty}"
+        );
+        assert!(pretty.contains("\"command\": \"ls\""));
     }
 }
