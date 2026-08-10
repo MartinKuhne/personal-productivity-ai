@@ -5,13 +5,13 @@
 //! | --- | --- | --- |
 //! | [`mod@file`] | `FileEvent`, `FileEventKind`, `FileEventProducer` | `Bus<FileEvent>` |
 //! | [`messages`] | `TokenUsageInfo`, `BackgroundLogEntry`, `LogCategory` | shared with [`typed`] |
-//! | [`typed`] | `BackgroundEvent`, `FsEvent`, `ProcessEvent` | `mpsc::Sender<BackgroundEvent>` (one channel, two sub-enums) |
+//! | [`typed`] | `BackgroundEvent` (`Fs`, `Process`, `McpAuth`), `FsEvent`, `ProcessEvent` | `mpsc::Sender<BackgroundEvent>` |
 //! | [`config`] | `ConfigArrived` | `Bus<ConfigArrived>` |
 //!
-//! The legacy `BackgroundMessage` god-enum and its `from_legacy`
-//! compatibility shim were removed in Phase 3 of the P1-6
-//! architecture review. New code constructs the typed
-//! [`BackgroundEvent`] variants in [`typed`] directly.
+//! The `AgentEvent` variant was removed from `BackgroundEvent` in feature 003
+//! (agent-ui-seam-refactor). Agent events now flow on `Bus<AgentEvent>` from
+//! `agent::events::AgentEvent`; the UI converts them into text via
+//! `ui/agent/transcript.rs` → `ui/render/agent_render.rs`.
 //!
 //! See [`crate::bus::core`] for the transport primitive.
 
