@@ -1,7 +1,6 @@
 //! Tests for `agent/manager.rs`.
 
 use super::*;
-use crate::bus::events::typed::AgentEvent;
 use crate::config::AppConfig;
 
 #[test]
@@ -358,8 +357,12 @@ fn test_debug_entries_never_cleared_on_new_session() {
     );
 }
 
+/// T016: Bus lifecycle test — verifies session counter increments on
+/// each `start_session` call. Uses `Bus<AgentEvent>` since the agent
+/// no longer publishes on `tx_gui`.
 #[test]
 fn test_session_counter_increments_on_start_session() {
+    use crate::agent::events::AgentEvent as SeamAgentEvent;
     use crate::bus::core::Bus;
 
     let mut config = AppConfig::default();
@@ -382,10 +385,11 @@ fn test_session_counter_increments_on_start_session() {
     );
     // new_for_test sets session_counter to 0
 
-    let (tx, rx) = std::sync::mpsc::channel();
+    let (tx, _rx) = std::sync::mpsc::channel();
     let bus = Bus::new();
 
     // Start first session — should increment to 1
+    let reader1 = mgr.event_bus().subscribe();
     mgr.start_session(
         tx.clone(),
         "prompt 1".to_string(),
@@ -394,21 +398,29 @@ fn test_session_counter_increments_on_start_session() {
         HashSet::new(),
         bus.clone(),
     );
-    // Blocking drain: wait until the spawned agent thread finishes (Failed, no valid API key)
-    while let Ok(ev) = rx.recv() {
-        match &ev {
-            BackgroundEvent::Agent(AgentEvent::DebugEntry(e)) => {
+    // Drain bus until Failed (no valid API key)
+    let mut deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+    while std::time::Instant::now() < deadline {
+        let mut got_failed = false;
+        while let Ok(ev) = reader1.try_recv() {
+            if let SeamAgentEvent::DebugEntry { entry, .. } = &ev {
                 assert_eq!(
-                    e.session, 1,
+                    entry.session, 1,
                     "first session debug entries must have session 1"
                 );
             }
-            BackgroundEvent::Agent(AgentEvent::Failed(_)) => break,
-            _ => {}
+            if matches!(ev, SeamAgentEvent::Failed { .. }) {
+                got_failed = true;
+            }
         }
+        if got_failed {
+            break;
+        }
+        std::thread::sleep(std::time::Duration::from_millis(5));
     }
 
     // Start second session — should increment to 2
+    let reader2 = mgr.event_bus().subscribe();
     mgr.start_session(
         tx.clone(),
         "prompt 2".to_string(),
@@ -417,16 +429,23 @@ fn test_session_counter_increments_on_start_session() {
         HashSet::new(),
         bus.clone(),
     );
-    while let Ok(ev) = rx.recv() {
-        match &ev {
-            BackgroundEvent::Agent(AgentEvent::DebugEntry(e)) => {
+    deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+    while std::time::Instant::now() < deadline {
+        let mut got_failed = false;
+        while let Ok(ev) = reader2.try_recv() {
+            if let SeamAgentEvent::DebugEntry { entry, .. } = &ev {
                 assert_eq!(
-                    e.session, 2,
+                    entry.session, 2,
                     "second session debug entries must have session 2"
                 );
             }
-            BackgroundEvent::Agent(AgentEvent::Failed(_)) => break,
-            _ => {}
+            if matches!(ev, SeamAgentEvent::Failed { .. }) {
+                got_failed = true;
+            }
         }
+        if got_failed {
+            break;
+        }
+        std::thread::sleep(std::time::Duration::from_millis(5));
     }
 }

@@ -12,12 +12,10 @@ use crate::ui::render::agent_render::{
 
 use crate::bus::core::Bus;
 use crate::bus::events::debug::{AgentDebugEntry, DebugEntryKind, DebugEntryRow};
-use crate::bus::events::typed::{AgentEvent, BackgroundEvent};
 use crate::config::get_config_path;
 use std::collections::HashSet;
 use std::path::PathBuf;
 use std::sync::atomic::Ordering;
-use std::sync::mpsc::Sender;
 use uuid::Uuid;
 
 pub fn run_agent(ctx: AgentContext) {
@@ -59,8 +57,7 @@ fn run_agent_inner(ctx: AgentContext) {
         content: None,
         row_type: DebugEntryRow::SessionBoundary,
     };
-    dual_publish_debug(
-        &ctx.tx_gui,
+    publish_debug(
         &ctx.agent_event_bus,
         ctx.session_id,
         session_boundary.clone(),
@@ -100,17 +97,11 @@ fn run_agent_inner(ctx: AgentContext) {
         }
     }
     if !ctx.cancel_flag.load(Ordering::SeqCst) {
-        let _ = ctx
-            .tx_gui
-            .send(BackgroundEvent::from(AgentEvent::Status("Done".into())));
         let _ = ctx.agent_event_bus.publish(SeamAgentEvent::Status {
             session_id: ctx.session_id,
             status: AgentStatus::Done,
         });
     }
-    let _ = ctx.tx_gui.send(BackgroundEvent::from(AgentEvent::Finished(
-        messages.clone(),
-    )));
     let _ = ctx
         .agent_event_bus
         .publish(SeamAgentEvent::SessionFinished {
@@ -137,9 +128,6 @@ fn process_turn(
     *turn_number += 1;
     let turn = *turn_number;
 
-    let _ = ctx.tx_gui.send(BackgroundEvent::from(AgentEvent::Status(
-        "Waiting for LLM completions...".into(),
-    )));
     let _ = ctx.agent_event_bus.publish(SeamAgentEvent::Status {
         session_id: ctx.session_id,
         status: AgentStatus::AwaitingLlm,
@@ -147,7 +135,6 @@ fn process_turn(
 
     let tool_count = tools_json.as_array().map(|a| a.len()).unwrap_or(0);
     let delta: Vec<serde_json::Value> = messages[*prev_messages_len..].to_vec();
-    let tx = &ctx.tx_gui;
     let outgoing_entry = AgentDebugEntry {
         turn,
         session: ctx.session_number,
@@ -167,15 +154,12 @@ fn process_turn(
         })),
         row_type: DebugEntryRow::Entry,
     };
-    dual_publish_debug(tx, &ctx.agent_event_bus, ctx.session_id, outgoing_entry);
+    publish_debug(&ctx.agent_event_bus, ctx.session_id, outgoing_entry);
     *prev_messages_len = messages.len();
 
     let resp_val = match llm.chat_completion(messages, tools_json) {
         Ok(v) => v,
         Err(e) => {
-            let _ = ctx
-                .tx_gui
-                .send(BackgroundEvent::from(AgentEvent::Failed(e.user_message())));
             let _ = ctx.agent_event_bus.publish(SeamAgentEvent::Failed {
                 session_id: ctx.session_id,
                 error: e.user_message(),
@@ -214,15 +198,12 @@ fn process_turn(
         content: Some(resp_val.clone()),
         row_type: DebugEntryRow::Entry,
     };
-    dual_publish_debug(tx, &ctx.agent_event_bus, ctx.session_id, incoming_entry);
+    publish_debug(&ctx.agent_event_bus, ctx.session_id, incoming_entry);
 
-    emit_usage(&resp_val, &ctx.tx_gui, &ctx.agent_event_bus, ctx.session_id);
+    emit_usage(&resp_val, &ctx.agent_event_bus, ctx.session_id);
     let message = match extract_message(&resp_val) {
         Some(m) => m,
         None => {
-            let _ = ctx.tx_gui.send(BackgroundEvent::from(AgentEvent::Failed(
-                "Invalid response schema".into(),
-            )));
             let _ = ctx.agent_event_bus.publish(SeamAgentEvent::Failed {
                 session_id: ctx.session_id,
                 error: "Invalid response schema".into(),
@@ -230,11 +211,10 @@ fn process_turn(
             return Turn::Failed;
         }
     };
-    handle_reasoning(&message, &ctx.tx_gui, &ctx.agent_event_bus, ctx.session_id);
+    handle_reasoning(&message, &ctx.agent_event_bus, ctx.session_id);
     handle_content(
         &message,
         full_response,
-        &ctx.tx_gui,
         &ctx.agent_event_bus,
         ctx.session_id,
     );
@@ -259,9 +239,6 @@ fn process_turn(
                     .to_string();
                 full_response.push_str(&format_tool_call_message(fn_name, args));
                 full_response.push_str("\n\n");
-                let _ = ctx.tx_gui.send(BackgroundEvent::from(AgentEvent::Response(
-                    full_response.clone(),
-                )));
                 let args_value = serde_json::from_str::<serde_json::Value>(args)
                     .unwrap_or(serde_json::Value::String(args.to_string()));
                 let _ = ctx
@@ -273,9 +250,6 @@ fn process_turn(
                         args: args_value,
                     });
             }
-            let _ = ctx.tx_gui.send(BackgroundEvent::from(AgentEvent::Status(
-                "Executing tools...".into(),
-            )));
             let _ = ctx.agent_event_bus.publish(SeamAgentEvent::Status {
                 session_id: ctx.session_id,
                 status: AgentStatus::ExecutingTools,
@@ -290,7 +264,6 @@ fn process_turn(
             emit_tool_results_debug(
                 turn,
                 ctx.session_number,
-                tx,
                 &ctx.agent_event_bus,
                 ctx.session_id,
                 &results,
@@ -300,7 +273,6 @@ fn process_turn(
                 tc,
                 messages,
                 full_response,
-                &ctx.tx_gui,
                 &ctx.agent_event_bus,
                 ctx.session_id,
             );
@@ -317,9 +289,6 @@ fn resolve_ll_client(ctx: &AgentContext) -> Option<LLMClient> {
             "API key not set. Configure in {} or use `/models`.",
             get_config_path().display()
         );
-        let _ = ctx
-            .tx_gui
-            .send(BackgroundEvent::from(AgentEvent::Failed(err.clone())));
         let _ = ctx.agent_event_bus.publish(SeamAgentEvent::Failed {
             session_id: ctx.session_id,
             error: err,
@@ -345,12 +314,7 @@ fn build_messages(
         messages
     }
 }
-fn emit_usage(
-    resp: &serde_json::Value,
-    tx: &Sender<BackgroundEvent>,
-    event_bus: &Bus<SeamAgentEvent>,
-    session_id: Uuid,
-) {
+fn emit_usage(resp: &serde_json::Value, event_bus: &Bus<SeamAgentEvent>, session_id: Uuid) {
     if let Some(info) = resp.get("usage").and_then(parse_usage_block) {
         tracing::info!(
             name = "agent.usage",
@@ -359,7 +323,6 @@ fn emit_usage(
             total_tokens = info.total_tokens,
             "LLM usage."
         );
-        let _ = tx.send(BackgroundEvent::from(AgentEvent::TokenUsage(info.clone())));
         let _ = event_bus.publish(SeamAgentEvent::TokenUsage {
             session_id,
             usage: info,
@@ -371,12 +334,10 @@ fn extract_message(resp: &serde_json::Value) -> Option<serde_json::Value> {
 }
 fn handle_reasoning(
     message: &serde_json::Value,
-    tx: &Sender<BackgroundEvent>,
     event_bus: &Bus<SeamAgentEvent>,
     session_id: Uuid,
 ) {
     if let Some(r) = message.get("reasoning_content").and_then(|r| r.as_str()) {
-        let _ = tx.send(BackgroundEvent::from(AgentEvent::Thinking(r.to_string())));
         let _ = event_bus.publish(SeamAgentEvent::Thinking {
             session_id,
             text: r.to_string(),
@@ -386,7 +347,6 @@ fn handle_reasoning(
 fn handle_content(
     message: &serde_json::Value,
     full_response: &mut String,
-    tx: &Sender<BackgroundEvent>,
     event_bus: &Bus<SeamAgentEvent>,
     session_id: Uuid,
 ) {
@@ -396,9 +356,6 @@ fn handle_content(
         .unwrap_or("");
     let (thinking, content) = split_thinking_and_content(content_str);
     if !thinking.is_empty() {
-        let _ = tx.send(BackgroundEvent::from(AgentEvent::Thinking(
-            thinking.clone(),
-        )));
         let _ = event_bus.publish(SeamAgentEvent::Thinking {
             session_id,
             text: thinking,
@@ -407,9 +364,6 @@ fn handle_content(
     if !content.is_empty() {
         full_response.push_str(&content);
         full_response.push_str("\n\n");
-        let _ = tx.send(BackgroundEvent::from(AgentEvent::Response(
-            full_response.clone(),
-        )));
         let _ = event_bus.publish(SeamAgentEvent::ContentDelta {
             session_id,
             text: format!("{}\n\n", content),
@@ -421,7 +375,6 @@ fn process_tool_results(
     tool_calls: &[serde_json::Value],
     messages: &mut Vec<serde_json::Value>,
     full_response: &mut String,
-    tx: &Sender<BackgroundEvent>,
     event_bus: &Bus<SeamAgentEvent>,
     session_id: Uuid,
 ) {
@@ -446,9 +399,6 @@ fn process_tool_results(
                 full_response.push_str(trace);
             }
             full_response.push_str(&format_tool_result_message(&fn_name, &result));
-            let _ = tx.send(BackgroundEvent::from(AgentEvent::Response(
-                full_response.clone(),
-            )));
             let result_value = serde_json::from_str::<serde_json::Value>(&result)
                 .unwrap_or(serde_json::Value::String(result.clone()));
             let _ = event_bus.publish(SeamAgentEvent::ToolResult {
@@ -507,7 +457,6 @@ fn log_tool_result(func_name: &str, result: &str) {
 fn emit_tool_results_debug(
     turn: usize,
     session: usize,
-    tx: &Sender<BackgroundEvent>,
     event_bus: &Bus<SeamAgentEvent>,
     session_id: Uuid,
     results: &[(String, String, String, String)],
@@ -532,20 +481,13 @@ fn emit_tool_results_debug(
         content: Some(serde_json::Value::Array(entries)),
         row_type: DebugEntryRow::Entry,
     };
-    dual_publish_debug(tx, event_bus, session_id, entry);
+    publish_debug(event_bus, session_id, entry);
 }
 
-/// Publish a debug entry on both the legacy `tx_gui` mpsc channel (wrapped as
-/// `BackgroundEvent::Agent(AgentEvent::DebugEntry)`) and the new
-/// `Bus<AgentEvent>` (as `SeamAgentEvent::DebugEntry`). Dual-published during
-/// migration steps 2-4; the `tx_gui` path is removed at step 5 (T016).
-fn dual_publish_debug(
-    tx: &Sender<BackgroundEvent>,
-    event_bus: &Bus<SeamAgentEvent>,
-    session_id: Uuid,
-    entry: AgentDebugEntry,
-) {
-    let _ = tx.send(entry.clone().into());
+/// Publish a debug entry on the `Bus<AgentEvent>` as
+/// `SeamAgentEvent::DebugEntry`. The legacy `tx_gui` mpsc path was
+/// removed at step 5 (T016).
+fn publish_debug(event_bus: &Bus<SeamAgentEvent>, session_id: Uuid, entry: AgentDebugEntry) {
     let _ = event_bus.publish(SeamAgentEvent::DebugEntry { session_id, entry });
 }
 
