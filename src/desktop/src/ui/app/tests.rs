@@ -14,6 +14,51 @@ fn create_test_app() -> FastMdApp {
     FastMdApp::empty_state(crate::config::AppConfig::default())
 }
 
+/// Idle-CPU regression: when the app is fully idle (no file events
+/// arrived, indexing is finished, and no raw input is pending),
+/// `FastMdApp::should_request_immediate_repaint` MUST return `false`.
+///
+/// The previous implementation unconditionally called
+/// `ctx.request_repaint_after(16ms)` in the idle branch of
+/// `process_file_events_and_repaint`, which kept the entire
+/// `update_ui` closure running at 60 FPS even when nothing on
+/// screen had changed — pegging the process at ~5% CPU with no
+/// input. The decider now exposes the decision so the idle path
+/// can be unit-tested without driving a real `egui::Context` frame.
+#[test]
+fn test_idle_app_does_not_request_repaint() {
+    let ctx = egui::Context::default();
+    let mut app = create_test_app();
+    // Indexing has finished and the transition has been handled,
+    // so the spinner is hidden and the toolbar is settled.
+    app.orchestrator.file_processor.indexing_finished = true;
+    app.orchestrator.file_processor.indexing_finished_handled = true;
+    // No file events are queued: `process_file_events` would have
+    // returned `false`. The empty ctx has no pending raw input.
+    assert!(
+        !app.should_request_immediate_repaint(&ctx),
+        "An idle app (no file events, indexing finished, no raw input) \
+         must NOT request a repaint. Returning true here re-introduces \
+         the 60 FPS forced-repaint loop and burns idle CPU."
+    );
+}
+
+/// The indexing-active path must still request a repaint so the
+/// spinner keeps animating and the toolbar reflects progress. This
+/// guards against an over-zealous fix that drops the request
+/// unconditionally.
+#[test]
+fn test_indexing_in_progress_requests_repaint() {
+    let ctx = egui::Context::default();
+    let mut app = create_test_app();
+    app.orchestrator.file_processor.indexing_finished = false;
+    assert!(
+        app.should_request_immediate_repaint(&ctx),
+        "An app with active indexing must request a repaint so the \
+         toolbar spinner keeps animating and progress text stays live."
+    );
+}
+
 /// UI-002 (dark color scheme): `configure_dark_theme` must pin the
 /// active theme to Dark and apply the FastMD brand palette
 /// (RGB(9, 9, 11) surface, indigo selection) to the dark theme.
