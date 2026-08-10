@@ -46,12 +46,9 @@ pub struct AppOrchestrator {
     pub repaint_interval: Duration,
     pub finished_watcher_slot: Arc<Mutex<Option<notify::RecommendedWatcher>>>,
     pub tool_manager: std::sync::Arc<std::sync::RwLock<crate::agent::tools::manager::ToolManager>>,
-    /// Reader for the new `Bus<AgentEvent>` agent→UI channel (migration
-    /// step 2). Subscribed once during app init from
-    /// [`AgentSessionManager::event_bus`]. Drained each frame in
-    /// [`Self::drain_agent_event_bus`] — shadow only during steps 2-4 (the
-    /// UI still renders from the legacy `BackgroundEvent::Agent` path until
-    /// step 5, T015).
+    /// Reader for the `Bus<AgentEvent>` agent→UI channel. Subscribed
+    /// once during app init from [`AgentSessionManager::event_bus`].
+    /// Drained each frame in [`Self::drain_agent_event_bus`].
     pub agent_event_reader: Option<BusReader<SeamAgentEvent>>,
     /// True when the last `BusReader::try_recv` on `agent_event_reader`
     /// returned `Lagged(n)`. Cleared on the next `SessionStarted` or
@@ -307,12 +304,6 @@ impl AppOrchestrator {
     pub fn drain_background_channel(&mut self) {
         while let Ok(event) = self.rx.try_recv() {
             match event {
-                // Agent events are now drained from `Bus<AgentEvent>` in
-                // [`Self::drain_agent_event_bus`] (migration step 5, T015).
-                // The legacy `BackgroundEvent::Agent` path is still
-                // published (dual-publish, removed in T016) but no longer
-                // routed to the render path.
-                BackgroundEvent::Agent(_) => {}
                 BackgroundEvent::Fs(fs_ev) => {
                     self.handle_fs_event(fs_ev);
                 }

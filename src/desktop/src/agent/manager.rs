@@ -9,7 +9,6 @@ use crate::bus::core::{Bus, BusReader};
 use crate::bus::events::config::ConfigArrived;
 use crate::bus::events::debug::AgentDebugEntry;
 use crate::bus::events::messages::TokenUsageInfo;
-use crate::bus::events::typed::AgentEvent as LegacyAgentEvent;
 use crate::config::AppConfig;
 use serde_json::Value;
 use std::collections::HashSet;
@@ -46,9 +45,8 @@ pub struct AgentState {
 ///   [`AppConfig`] used by `start_session` is the one published at
 ///   startup, not a value captured at construction time.
 /// - Provides `start_session` to launch a new agent thread
-/// - Handles incoming [`crate::bus::events::typed::AgentEvent`] events to update state
-/// - Supports cancellation via cancel flag
 /// - Exposes read-only `AgentState` for UI rendering
+/// - Exposes `event_bus()` for UI to subscribe to `Bus<AgentEvent>`
 pub struct AgentSessionManager {
     state: AgentState,
     cancel_flag: Option<Arc<AtomicBool>>,
@@ -277,8 +275,8 @@ impl AgentSessionManager {
     }
 
     /// Apply a `TokenUsageInfo` update to the accumulative totals and
-    /// last-turn snapshot (replaces the `TokenUsage` branch of the old
-    /// `handle_agent_event`).
+    /// last-turn snapshot. Called by the orchestrator's
+    /// `drain_agent_event_bus` when a `TokenUsage` event arrives.
     pub fn apply_token_usage(&mut self, info: TokenUsageInfo) {
         if info.prompt_tokens > self.state.total_usage.prompt_tokens {
             self.state.total_usage.prompt_tokens = info.prompt_tokens;
@@ -310,8 +308,8 @@ impl AgentSessionManager {
         self.state.token_usage = Some(info);
     }
 
-    /// Push a debug entry to the accumulated list (replaces the
-    /// `DebugEntry` branch of the old `handle_agent_event`).
+    /// Push a debug entry to the accumulated list. Called by the
+    /// orchestrator's `drain_agent_event_bus` when a `DebugEntry` event arrives.
     pub fn push_debug_entry(&mut self, entry: crate::bus::events::debug::AgentDebugEntry) {
         self.state.debug_entries.push(entry);
     }
@@ -377,78 +375,6 @@ impl AgentSessionManager {
         std::thread::spawn(move || {
             crate::agent::run_agent(ctx);
         });
-    }
-
-    /// Consume and handle a single typed [`LegacyAgentEvent`] from the
-    /// background event channel.
-    ///
-    /// Returns the next queued prompt if the agent just finished and there
-    /// are prompts waiting in the queue. The caller is responsible for
-    /// starting the next session with that prompt.
-    pub fn handle_agent_event(&mut self, event: LegacyAgentEvent) -> Option<String> {
-        match event {
-            LegacyAgentEvent::Status(status) => {
-                self.state.status = status;
-                None
-            }
-            LegacyAgentEvent::Thinking(thinking) => {
-                self.state.thinking = thinking;
-                None
-            }
-            LegacyAgentEvent::Response(resp) => {
-                self.state.response = resp.clone();
-                None
-            }
-            LegacyAgentEvent::Finished(history) => {
-                self.state.running = false;
-                self.state.history = Some(history);
-                // Check for queued prompts
-                self.take_next_queued_prompt()
-            }
-            LegacyAgentEvent::Failed(err) => {
-                self.state.running = false;
-                self.state.status = format!("Error: {}", err);
-                // On failure, also check for queued prompts (or clear them?)
-                // For now, we'll clear the queue on failure to avoid cascading errors
-                self.state.pending_prompts.clear();
-                None
-            }
-            LegacyAgentEvent::TokenUsage(info) => {
-                if info.prompt_tokens > self.state.total_usage.prompt_tokens {
-                    self.state.total_usage.prompt_tokens = info.prompt_tokens;
-                }
-                self.state.total_usage.completion_tokens = self
-                    .state
-                    .total_usage
-                    .completion_tokens
-                    .saturating_add(info.completion_tokens);
-                self.state.total_usage.total_tokens = self
-                    .state
-                    .total_usage
-                    .total_tokens
-                    .saturating_add(info.total_tokens);
-                self.state.total_usage.cached_tokens = Some(
-                    self.state
-                        .total_usage
-                        .cached_tokens
-                        .unwrap_or(0)
-                        .saturating_add(info.cached_tokens.unwrap_or(0)),
-                );
-                self.state.total_usage.reasoning_tokens = Some(
-                    self.state
-                        .total_usage
-                        .reasoning_tokens
-                        .unwrap_or(0)
-                        .saturating_add(info.reasoning_tokens.unwrap_or(0)),
-                );
-                self.state.token_usage = Some(info);
-                None
-            }
-            LegacyAgentEvent::DebugEntry(entry) => {
-                self.state.debug_entries.push(entry);
-                None
-            }
-        }
     }
 }
 

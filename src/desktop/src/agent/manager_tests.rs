@@ -215,8 +215,7 @@ fn test_queue_prompt_and_take_next() {
 }
 
 #[test]
-fn test_handle_agent_event_finished_returns_queued_prompt() {
-    use crate::bus::events::typed::AgentEvent;
+fn test_finished_returns_queued_prompt() {
     let config = AppConfig::default();
     let mut mgr = AgentSessionManager::new_for_test(
         config,
@@ -229,16 +228,17 @@ fn test_handle_agent_event_finished_returns_queued_prompt() {
     mgr.queue_prompt("queued prompt".to_string());
     mgr.state.running = true;
 
-    // Handle Finished event - should return the queued prompt
-    let result = mgr.handle_agent_event(AgentEvent::Finished(vec![]));
+    // Simulate SessionFinished: set running false, store history, dequeue
+    mgr.set_running(false);
+    mgr.set_history(Some(vec![]));
+    let result = mgr.take_next_queued_prompt();
     assert_eq!(result, Some("queued prompt".to_string()));
     assert!(!mgr.state.running);
     assert_eq!(mgr.queued_prompt_count(), 0);
 }
 
 #[test]
-fn test_handle_agent_event_finished_no_queued_prompt() {
-    use crate::bus::events::typed::AgentEvent;
+fn test_finished_no_queued_prompt() {
     let config = AppConfig::default();
     let mut mgr = AgentSessionManager::new_for_test(
         config,
@@ -249,15 +249,16 @@ fn test_handle_agent_event_finished_no_queued_prompt() {
 
     mgr.state.running = true;
 
-    // Handle Finished event with no queued prompts
-    let result = mgr.handle_agent_event(AgentEvent::Finished(vec![]));
+    // Simulate SessionFinished with no queued prompts
+    mgr.set_running(false);
+    mgr.set_history(Some(vec![]));
+    let result = mgr.take_next_queued_prompt();
     assert!(result.is_none());
     assert!(!mgr.state.running);
 }
 
 #[test]
-fn test_handle_agent_event_failed_clears_queue() {
-    use crate::bus::events::typed::AgentEvent;
+fn test_failed_clears_queue() {
     let config = AppConfig::default();
     let mut mgr = AgentSessionManager::new_for_test(
         config,
@@ -271,18 +272,18 @@ fn test_handle_agent_event_failed_clears_queue() {
     mgr.queue_prompt("prompt 2".to_string());
     mgr.state.running = true;
 
-    // Handle Failed event - should clear the queue
-    let result = mgr.handle_agent_event(AgentEvent::Failed("test error".to_string()));
-    assert!(result.is_none());
+    // Simulate Failed event
+    mgr.set_running(false);
+    mgr.set_status("Error: test error".to_string());
+    mgr.clear_queued_prompts();
     assert!(!mgr.state.running);
     assert_eq!(mgr.queued_prompt_count(), 0);
     assert!(mgr.state.status.contains("Error"));
 }
 
 #[test]
-fn test_handle_agent_event_debug_entry_accumulates() {
+fn test_debug_entry_accumulates() {
     use crate::bus::events::debug::{AgentDebugEntry, DebugEntryKind, DebugEntryRow};
-    use crate::bus::events::typed::AgentEvent;
 
     let config = AppConfig::default();
     let mut mgr = AgentSessionManager::new_for_test(
@@ -302,8 +303,7 @@ fn test_handle_agent_event_debug_entry_accumulates() {
         row_type: DebugEntryRow::Entry,
     };
 
-    let result = mgr.handle_agent_event(AgentEvent::DebugEntry(entry));
-    assert!(result.is_none());
+    mgr.push_debug_entry(entry);
     assert_eq!(mgr.state.debug_entries.len(), 1);
     assert_eq!(mgr.state.debug_entries[0].turn, 1);
     assert_eq!(mgr.state.debug_entries[0].session, 1);
@@ -319,14 +319,13 @@ fn test_handle_agent_event_debug_entry_accumulates() {
         content: Some(serde_json::json!({"choices": []})),
         row_type: DebugEntryRow::Entry,
     };
-    mgr.handle_agent_event(AgentEvent::DebugEntry(entry2));
+    mgr.push_debug_entry(entry2);
     assert_eq!(mgr.state.debug_entries.len(), 2);
 }
 
 #[test]
 fn test_debug_entries_never_cleared_on_new_session() {
     use crate::bus::events::debug::{AgentDebugEntry, DebugEntryKind, DebugEntryRow};
-    use crate::bus::events::typed::AgentEvent;
 
     let config = AppConfig::default();
     let mut mgr = AgentSessionManager::new_for_test(
@@ -345,7 +344,7 @@ fn test_debug_entries_never_cleared_on_new_session() {
         content: Some(serde_json::json!({"test": true})),
         row_type: DebugEntryRow::Entry,
     };
-    mgr.handle_agent_event(AgentEvent::DebugEntry(entry));
+    mgr.push_debug_entry(entry);
     assert_eq!(mgr.state.debug_entries.len(), 1);
 
     // Simulate a new session start (clears history but not debug entries)

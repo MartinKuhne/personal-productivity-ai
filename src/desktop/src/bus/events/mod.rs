@@ -5,7 +5,7 @@
 //! | --- | --- | --- |
 //! | [`mod@file`] | `FileEvent`, `FileEventKind`, `FileEventProducer` | `Bus<FileEvent>` |
 //! | [`messages`] | `TokenUsageInfo`, `BackgroundLogEntry`, `LogCategory` | shared with [`typed`] |
-//! | [`typed`] | `BackgroundEvent`, `AgentEvent`, `FsEvent`, `ProcessEvent` | `mpsc::Sender<BackgroundEvent>` (one channel, three sub-enums) |
+//! | [`typed`] | `BackgroundEvent`, `FsEvent`, `ProcessEvent` | `mpsc::Sender<BackgroundEvent>` (one channel, two sub-enums) |
 //! | [`config`] | `ConfigArrived` | `Bus<ConfigArrived>` |
 //!
 //! The legacy `BackgroundMessage` god-enum and its `from_legacy`
@@ -25,4 +25,4 @@ pub use config::ConfigArrived;
 pub use debug::{AgentDebugEntry, DebugEntryKind, DebugEntryRow};
 pub use file::{FileEvent, FileEventKind, FileEventProducer};
 pub use messages::{BackgroundLogEntry, LogCategory, TokenUsageInfo};
-pub use typed::{AgentEvent, BackgroundEvent, FsEvent, McpAuthEvent, ProcessEvent};
+pub use typed::{BackgroundEvent, FsEvent, McpAuthEvent, ProcessEvent};

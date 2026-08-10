@@ -385,13 +385,6 @@ fn process_tool_results(
             .to_string();
         if let Some((fn_name, _args, result)) = map.remove(&cid) {
             log_tool_result(&fn_name, &result);
-            if fn_name == "web_delegate"
-                && let Ok(parsed) = serde_json::from_str::<serde_json::Value>(&result)
-                && let Some(trace) = parsed.get("tool_call_trace").and_then(|t| t.as_str())
-                && !trace.is_empty()
-            {
-                full_response.push_str(trace);
-            }
             full_response.push_str(&format_tool_result_message(&fn_name, &result));
             let result_value = serde_json::from_str::<serde_json::Value>(&result)
                 .unwrap_or(serde_json::Value::String(result.clone()));

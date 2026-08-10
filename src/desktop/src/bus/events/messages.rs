@@ -1,14 +1,15 @@
 //! Cross-cutting value types that do not belong to a single event
 //! channel.
 //!
-//! The per-domain event payloads (`BackgroundEvent`, `AgentEvent`,
-//! `FsEvent`, `ProcessEvent`, `FileEvent`, `ConfigArrived`) live in
-//! their respective modules under [`super`]. This module is reserved
-//! for types shared across channels or independent of any single
-//! event domain — currently:
+//! The per-domain event payloads (`BackgroundEvent`, `FsEvent`,
+//! `ProcessEvent`, `FileEvent`, `ConfigArrived`) live in their
+//! respective modules under [`super`]. Agent events live in
+//! [`crate::agent::events`]. This module is reserved for types
+//! shared across channels or independent of any single event domain —
+//! currently:
 //!
 //! - [`TokenUsageInfo`] — the LLM token-usage record attached to
-//!   [`super::AgentEvent::TokenUsage`].
+//!   [`crate::agent::events::AgentEvent::TokenUsage`].
 //! - [`BackgroundLogEntry`] / [`LogCategory`] — the structured log
 //!   line carried inside [`super::ProcessEvent::LogEntry`]. They used
 //!   to live in `app::background::models`; moving them here removes
