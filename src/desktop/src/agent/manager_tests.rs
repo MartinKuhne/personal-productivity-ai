@@ -2,6 +2,7 @@
 
 use super::*;
 use crate::config::AppConfig;
+use std::collections::HashSet;
 
 #[test]
 fn test_new_manager_is_empty() {
@@ -67,6 +68,7 @@ fn test_drain_config_observes_first_event() {
     let bus = config_bus();
     let mut mgr = AgentSessionManager::new(
         bus.clone(),
+        crate::bus::core::Bus::new(),
         Arc::new(crate::app::session::BrowserSession::new(
             &AppConfig::default(),
         )),
@@ -101,6 +103,7 @@ fn test_drain_config_returns_false_when_empty() {
     let bus = crate::bus::config::config_bus();
     let mut mgr = AgentSessionManager::new(
         bus,
+        crate::bus::core::Bus::new(),
         Arc::new(crate::app::session::BrowserSession::new(
             &AppConfig::default(),
         )),
@@ -128,6 +131,7 @@ fn test_construct_then_publish_order_drains_config() {
     //    call inside `FastMdApp::new`. It subscribes here.
     let mut mgr = AgentSessionManager::new(
         bus.clone(),
+        crate::bus::core::Bus::new(),
         Arc::new(crate::app::session::BrowserSession::new(
             &AppConfig::default(),
         )),
@@ -165,6 +169,7 @@ fn test_publish_then_construct_order_drops_event() {
     // channel won't deliver the event to this reader.
     let mut mgr = AgentSessionManager::new(
         bus,
+        crate::bus::core::Bus::new(),
         Arc::new(crate::app::session::BrowserSession::new(
             &AppConfig::default(),
         )),
@@ -358,7 +363,6 @@ fn test_debug_entries_never_cleared_on_new_session() {
 #[test]
 fn test_current_session_id_set_on_start_session() {
     use crate::agent::events::AgentEvent as SeamAgentEvent;
-    use crate::bus::core::Bus;
 
     let mut config = AppConfig::default();
     config.models.insert(
@@ -381,20 +385,22 @@ fn test_current_session_id_set_on_start_session() {
     // Before first session: no session_id
     assert!(mgr.current_session_id().is_none());
 
-    let bus = Bus::new();
-
     // Start first session — current_session_id must be set
     let reader1 = mgr.event_bus().subscribe();
-    mgr.start_session(
-        "prompt 1".to_string(),
-        None,
-        None,
-        HashSet::new(),
-        bus.clone(),
+    let session_id_1 = uuid::Uuid::new_v4();
+    mgr.submit_prompt(crate::agent::events::AgentPrompt {
+        session_id: session_id_1,
+        text: "prompt 1".to_string(),
+        active_file: None,
+        active_dir: None,
+        selected_files: HashSet::new(),
+        cancel_flag: std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false)),
+    });
+    assert_eq!(
+        mgr.current_session_id(),
+        Some(session_id_1),
+        "current_session_id must match the submitted prompt"
     );
-    let session_id_1 = mgr
-        .current_session_id()
-        .expect("session_id set after first start");
     assert!(!session_id_1.is_nil(), "session_id must be a real Uuid");
 
     // Drain bus until Failed (no valid API key)
@@ -420,19 +426,18 @@ fn test_current_session_id_set_on_start_session() {
 
     // Start second session — current_session_id must change
     let reader2 = mgr.event_bus().subscribe();
-    mgr.start_session(
-        "prompt 2".to_string(),
-        None,
-        None,
-        HashSet::new(),
-        bus.clone(),
-    );
-    let session_id_2 = mgr
-        .current_session_id()
-        .expect("session_id set after second start");
+    let session_id_2 = uuid::Uuid::new_v4();
+    mgr.submit_prompt(crate::agent::events::AgentPrompt {
+        session_id: session_id_2,
+        text: "prompt 2".to_string(),
+        active_file: None,
+        active_dir: None,
+        selected_files: HashSet::new(),
+        cancel_flag: std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false)),
+    });
     assert_ne!(
         session_id_1, session_id_2,
-        "each start_session must mint a new session_id"
+        "each submit_prompt must use a new session_id"
     );
 
     deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);

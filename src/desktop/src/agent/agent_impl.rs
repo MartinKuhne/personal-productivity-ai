@@ -14,8 +14,14 @@ use std::path::PathBuf;
 use std::sync::atomic::Ordering;
 use uuid::Uuid;
 
+/// Run an agent session to completion on the current thread.
+///
+/// Called by the long-lived driver thread (see `agent/manager.rs`) with a
+/// per-session `AgentContext` built from an `AgentPrompt`. The driver owns
+/// the shared resources; this function runs `run_agent_inner` inline —
+/// no inner `std::thread::spawn` (research.md §3, migration step 10).
 pub fn run_agent(ctx: AgentContext) {
-    std::thread::spawn(move || run_agent_inner(ctx));
+    run_agent_inner(ctx);
 }
 fn run_agent_inner(ctx: AgentContext) {
     let llm = match resolve_ll_client(&ctx) {

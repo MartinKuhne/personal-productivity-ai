@@ -122,6 +122,7 @@ impl FastMdApp {
         let pdf_backing_tracker = crate::app::session::PdfBackingTracker::new();
         let agent = AgentSessionManager::new(
             config_bus,
+            background_task.file_event_bus.clone(),
             browser_session.clone(),
             Arc::new(pdf_backing_tracker.clone()),
             tool_manager.clone(),
@@ -258,6 +259,7 @@ impl FastMdApp {
         let pdf_backing_tracker = crate::app::session::PdfBackingTracker::new();
         let mut agent = AgentSessionManager::new(
             bus.clone(),
+            background_task.file_event_bus.clone(),
             test_browser_session,
             Arc::new(pdf_backing_tracker.clone()),
             Arc::new(std::sync::RwLock::new(

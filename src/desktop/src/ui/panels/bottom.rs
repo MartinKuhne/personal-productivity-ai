@@ -176,9 +176,16 @@ pub fn apply_send_click(app: &mut FastMdApp) {
             let (file, dir, files) = app
                 .selection()
                 .agent_context(&app.orchestrator.tab_manager.tabs);
-            let bus = app.orchestrator.file_event_bus.clone();
-            app.agent_mut()
-                .start_session(agent_prompt, file, dir, files, bus);
+            let session_id = uuid::Uuid::new_v4();
+            let prompt = crate::agent::events::AgentPrompt {
+                session_id,
+                text: agent_prompt,
+                active_file: file,
+                active_dir: dir,
+                selected_files: files,
+                cancel_flag: std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false)),
+            };
+            app.agent_mut().submit_prompt(prompt);
             app.orchestrator.agent_panel_state.show_results = true;
         }
         CommandIntent::Empty => {}

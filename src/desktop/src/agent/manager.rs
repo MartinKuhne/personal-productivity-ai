@@ -3,7 +3,7 @@
 //! Unit tests live in the sibling `manager_tests.rs` sidecar.
 
 use crate::agent::AgentContext;
-use crate::agent::events::AgentEvent as SeamAgentEvent;
+use crate::agent::events::{AgentEvent as SeamAgentEvent, AgentPrompt};
 use crate::app::session::BrowserSession;
 use crate::bus::core::{Bus, BusReader};
 use crate::bus::events::config::ConfigArrived;
@@ -11,12 +11,12 @@ use crate::bus::events::debug::AgentDebugEntry;
 use crate::bus::events::messages::TokenUsageInfo;
 use crate::config::AppConfig;
 use serde_json::Value;
-use std::collections::HashSet;
-use std::path::PathBuf;
+use std::sync::mpsc::{self, Sender};
 use std::sync::{
     Arc,
     atomic::{AtomicBool, Ordering},
 };
+use std::thread::JoinHandle;
 use uuid::Uuid;
 
 /// Agent state exposed to UI components.
@@ -51,6 +51,10 @@ pub struct AgentSessionManager {
     state: AgentState,
     cancel_flag: Option<Arc<AtomicBool>>,
     config: AppConfig,
+    /// Shared config cell — the UI thread writes via `drain_config` /
+    /// `set_config`; the driver thread reads when building each
+    /// `AgentContext` (research.md §3, migration step 10).
+    shared_config: Arc<std::sync::RwLock<AppConfig>>,
     /// Reader for the configuration-arrival bus. Subscribed during
     /// `new` so the publish that happens after construction is
     /// observed. Drained on every UI frame by
@@ -61,7 +65,7 @@ pub struct AgentSessionManager {
     /// of the default placeholder.
     config_arrived: bool,
     /// Uuid of the currently-active (or most-recently-started) agent
-    /// session. Set when `start_session` mints a new `Uuid::new_v4()`.
+    /// session. Set when `submit_prompt` mints a new `Uuid::new_v4()`.
     /// Replaces the old `session_counter: usize` (migration step 10,
     /// FR-008).
     current_session_id: Option<Uuid>,
@@ -69,6 +73,15 @@ pub struct AgentSessionManager {
     /// agent context on each `start_session`; the UI subscribes via
     /// [`Self::event_bus`] (migration step 2).
     agent_event_bus: Bus<SeamAgentEvent>,
+    /// UI→agent prompt channel. The UI calls [`Self::submit_prompt`]
+    /// which sends an [`AgentPrompt`] on this sender; the long-lived
+    /// driver thread owns the `Receiver` and blocks on `recv()`
+    /// (research.md §3, migration step 10).
+    prompt_tx: Sender<AgentPrompt>,
+    /// Handle to the long-lived driver thread. Spawned once in
+    /// [`Self::new`] and joined on drop. The driver processes prompts
+    /// sequentially — one session at a time (research.md §3).
+    driver_handle: Option<JoinHandle<()>>,
     /// Long-lived headless Firefox session, shared with the
     /// tool executor. Lazily launches a browser on first use.
     /// Owned by the application, not the agent — sessions
@@ -78,8 +91,6 @@ pub struct AgentSessionManager {
     /// on every page-handle request; the `browser_*` tools are
     /// not registered.
     browser_session: Arc<BrowserSession>,
-    pdf_backing: Arc<crate::app::session::PdfBackingTracker>,
-    tool_manager: Arc<std::sync::RwLock<crate::agent::tools::manager::ToolManager>>,
 }
 
 impl AgentSessionManager {
@@ -87,10 +98,25 @@ impl AgentSessionManager {
     /// empty manager. The bus is the source of truth for the
     pub fn new(
         config_bus: Bus<ConfigArrived>,
+        file_event_bus: Bus<crate::bus::events::file::FileEvent>,
         browser_session: Arc<BrowserSession>,
         pdf_backing: Arc<crate::app::session::PdfBackingTracker>,
         tool_manager: Arc<std::sync::RwLock<crate::agent::tools::manager::ToolManager>>,
     ) -> Self {
+        let agent_event_bus = Bus::new();
+        let (prompt_tx, prompt_rx) = mpsc::channel::<AgentPrompt>();
+        // Shared config cell — the UI thread updates it via `drain_config` /
+        // `set_config`; the driver reads it when building each `AgentContext`.
+        let shared_config = Arc::new(std::sync::RwLock::new(AppConfig::default()));
+        let driver_handle = spawn_driver(
+            prompt_rx,
+            agent_event_bus.clone(),
+            shared_config.clone(),
+            file_event_bus,
+            browser_session.clone(),
+            pdf_backing.clone(),
+            tool_manager.clone(),
+        );
         Self {
             state: AgentState {
                 running: false,
@@ -105,16 +131,17 @@ impl AgentSessionManager {
             },
             cancel_flag: None,
             config: AppConfig::default(),
+            shared_config,
             // Subscribe before returning so the publish that
             // happens immediately afterwards (in main / tests) is
             // observed by this reader.
             config_reader: Some(config_bus.subscribe()),
             config_arrived: false,
             current_session_id: None,
-            agent_event_bus: Bus::new(),
+            agent_event_bus,
+            prompt_tx,
+            driver_handle: Some(driver_handle),
             browser_session,
-            pdf_backing,
-            tool_manager,
         }
     }
 
@@ -127,6 +154,18 @@ impl AgentSessionManager {
         let tool_manager = Arc::new(std::sync::RwLock::new(
             crate::agent::tools::manager::ToolManager::new(),
         ));
+        let agent_event_bus = Bus::new();
+        let (prompt_tx, prompt_rx) = mpsc::channel::<AgentPrompt>();
+        let shared_config = Arc::new(std::sync::RwLock::new(config.clone()));
+        let driver_handle = spawn_driver(
+            prompt_rx,
+            agent_event_bus.clone(),
+            shared_config.clone(),
+            crate::bus::core::Bus::new(),
+            browser_session.clone(),
+            Arc::new(crate::app::session::PdfBackingTracker::new()),
+            tool_manager.clone(),
+        );
         Self {
             state: AgentState {
                 running: false,
@@ -141,13 +180,14 @@ impl AgentSessionManager {
             },
             cancel_flag: None,
             config,
+            shared_config,
             config_reader: None,
             config_arrived: true,
             current_session_id: None,
-            agent_event_bus: Bus::new(),
+            agent_event_bus,
+            prompt_tx,
+            driver_handle: Some(driver_handle),
             browser_session,
-            pdf_backing: Arc::new(crate::app::session::PdfBackingTracker::new()),
-            tool_manager,
         }
     }
 
@@ -167,7 +207,11 @@ impl AgentSessionManager {
         };
         match reader.try_recv() {
             Ok(event) => {
-                self.config = event.config;
+                self.config = event.config.clone();
+                *self
+                    .shared_config
+                    .write()
+                    .expect("shared_config lock poisoned") = event.config;
                 self.config_arrived = true;
                 tracing::info!(
                     name = "config.arrived",
@@ -197,7 +241,11 @@ impl AgentSessionManager {
     /// by the UI to keep the agent's config in sync with the
     /// app-wide config that was set during the bus drain.
     pub fn set_config(&mut self, config: AppConfig) {
-        self.config = config;
+        self.config = config.clone();
+        *self
+            .shared_config
+            .write()
+            .expect("shared_config lock poisoned") = config;
         self.config_arrived = true;
     }
 
@@ -341,51 +389,88 @@ impl AgentSessionManager {
         self.state.status = "Aborted by user.".to_string();
     }
 
-    /// Start a new agent session with the given prompt.
+    /// Submit a prompt to the long-lived driver thread (migration step 10,
+    /// research.md §3, FR-008/FR-009). The UI mints a `session_id: Uuid`
+    /// for a new session or reuses an existing one for a continuation
+    /// prompt. The driver builds a per-session `AgentContext` and runs
+    /// `run_agent_inner` inline (no double-spawn).
     ///
-    /// This spawns a background thread running `crate::agent::run_agent`.
-    /// The agent publishes structured `AgentEvent`s on the `Bus<AgentEvent>`
-    /// owned by this manager; the UI subscribes via [`Self::event_bus`].
-    pub fn start_session(
-        &mut self,
-        prompt: String,
-        active_file: Option<PathBuf>,
-        active_dir: Option<PathBuf>,
-        selected_files: HashSet<PathBuf>,
-        file_event_bus: Bus<crate::bus::events::file::FileEvent>,
-    ) {
-        // Reset state for new session
+    /// This replaces the old `start_session` spawn-per-prompt entry.
+    pub fn submit_prompt(&mut self, mut prompt: AgentPrompt) {
+        let session_id = prompt.session_id;
+        self.current_session_id = Some(session_id);
         self.state.running = true;
         self.state.status = "Initializing agent...".to_string();
         self.state.thinking.clear();
         self.state.response.clear();
-        self.cancel_flag = Some(Arc::new(AtomicBool::new(false)));
-        let cancel_flag = self.cancel_flag.clone().unwrap();
-        let session_id = Uuid::new_v4();
-        self.current_session_id = Some(session_id);
+        let cancel_flag = Arc::new(AtomicBool::new(false));
+        self.cancel_flag = Some(cancel_flag.clone());
+        prompt.cancel_flag = cancel_flag;
+        let _ = self.prompt_tx.send(prompt);
+    }
+}
 
-        // Build context
-        let ctx = AgentContext {
-            config: self.config.clone(),
-            file_event_bus,
-            agent_event_bus: self.agent_event_bus.clone(),
-            active_file,
-            active_dir,
-            selected_files,
-            prompt: prompt.clone(),
-            cancel_flag,
-            history: self.state.history.clone(),
-            model_name: None,
-            session_id,
-            browser_session: self.browser_session.clone(),
-            pdf_backing: self.pdf_backing.clone(),
-            tool_manager: self.tool_manager.clone(),
-            uuid_gen: std::sync::Arc::new(crate::utils::uuid::SystemUuidGenerator),
-        };
-
-        std::thread::spawn(move || {
+/// Spawn the long-lived driver thread (research.md §3, migration step 10).
+///
+/// Owns the `Receiver<AgentPrompt>` and blocks on `recv()`. On each prompt,
+/// builds a per-session `AgentContext` from the prompt + shared resources and
+/// runs `run_agent` inline (no double-spawn). The driver processes prompts
+/// sequentially — one session at a time.
+fn spawn_driver(
+    prompt_rx: std::sync::mpsc::Receiver<AgentPrompt>,
+    agent_event_bus: Bus<SeamAgentEvent>,
+    shared_config: Arc<std::sync::RwLock<AppConfig>>,
+    file_event_bus: Bus<crate::bus::events::file::FileEvent>,
+    browser_session: Arc<BrowserSession>,
+    pdf_backing: Arc<crate::app::session::PdfBackingTracker>,
+    tool_manager: Arc<std::sync::RwLock<crate::agent::tools::manager::ToolManager>>,
+) -> JoinHandle<()> {
+    std::thread::spawn(move || {
+        // Per-session history cache. Keyed by `session_id` so continuation
+        // prompts reuse the same conversation history (FR-009).
+        let mut session_histories: std::collections::HashMap<Uuid, Option<Vec<Value>>> =
+            std::collections::HashMap::new();
+        while let Ok(prompt) = prompt_rx.recv() {
+            let session_id = prompt.session_id;
+            let config = shared_config.read().map(|c| c.clone()).unwrap_or_default();
+            let history = session_histories.get(&session_id).cloned().flatten();
+            let ctx = AgentContext {
+                config,
+                file_event_bus: file_event_bus.clone(),
+                agent_event_bus: agent_event_bus.clone(),
+                active_file: prompt.active_file,
+                active_dir: prompt.active_dir,
+                selected_files: prompt.selected_files,
+                prompt: prompt.text,
+                cancel_flag: prompt.cancel_flag,
+                history: history.clone(),
+                model_name: None,
+                session_id,
+                browser_session: browser_session.clone(),
+                pdf_backing: pdf_backing.clone(),
+                tool_manager: tool_manager.clone(),
+                uuid_gen: std::sync::Arc::new(crate::utils::uuid::SystemUuidGenerator),
+            };
             crate::agent::run_agent(ctx);
-        });
+            // After the session finishes, stash its history for continuation
+            // prompts (FR-009). The history is updated by the `SessionFinished`
+            // event; here we keep the pre-run history — the orchestrator
+            // stores the updated history on the UI side via `set_history`.
+            session_histories.insert(session_id, history);
+        }
+    })
+}
+
+impl Drop for AgentSessionManager {
+    fn drop(&mut self) {
+        // Drop the sender first to disconnect the channel, causing the
+        // driver's `recv()` to return `Err` and the driver loop to exit.
+        // Then join to ensure the thread terminates before shared
+        // resources (`browser_session`, `tool_manager`, etc.) are dropped.
+        self.prompt_tx = mpsc::channel::<AgentPrompt>().0;
+        if let Some(handle) = self.driver_handle.take() {
+            let _ = handle.join();
+        }
     }
 }
 

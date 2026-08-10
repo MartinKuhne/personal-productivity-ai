@@ -17,6 +17,8 @@ use serde::Serialize;
 use serde_json::Value;
 use std::collections::HashSet;
 use std::path::PathBuf;
+use std::sync::Arc;
+use std::sync::atomic::AtomicBool;
 use uuid::Uuid;
 
 /// Input message: UI → agent on `std::sync::mpsc::Sender<AgentPrompt>`.
@@ -34,6 +36,10 @@ pub struct AgentPrompt {
     pub active_dir: Option<PathBuf>,
     /// UI selection context passed through to tools.
     pub selected_files: HashSet<PathBuf>,
+    /// Shared cancel flag for the session. The UI sets this to `true`
+    /// to abort the in-progress turn (FR-015). The driver passes it
+    /// into the `AgentContext` so the agent loop can poll it.
+    pub cancel_flag: Arc<AtomicBool>,
 }
 
 /// Typed agent status — replaces the old `AgentEvent::Status(String)` with

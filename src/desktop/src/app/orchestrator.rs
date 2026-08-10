@@ -184,13 +184,16 @@ impl AppOrchestrator {
     pub fn start_agent_session(&mut self, prompt: String) {
         let (active_file, active_dir, selected_files) =
             self.selection.agent_context(&self.tab_manager.tabs);
-        self.agent.start_session(
-            prompt,
+        let session_id = uuid::Uuid::new_v4();
+        let agent_prompt = crate::agent::events::AgentPrompt {
+            session_id,
+            text: prompt,
             active_file,
             active_dir,
             selected_files,
-            self.file_event_bus.clone(),
-        );
+            cancel_flag: std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false)),
+        };
+        self.agent.submit_prompt(agent_prompt);
         self.agent_panel_state.show_results = true;
         // Clear the transcript immediately so the UI shows empty content
         // between session start and the `SessionStarted` event arrival.
