@@ -1,5 +1,5 @@
 use crate::agent::AgentSessionManager;
-use crate::agent::events::AgentEvent as SeamAgentEvent;
+use crate::agent::events::{AgentEvent as SeamAgentEvent, ToolSideEffect};
 use crate::app::background::{BackgroundLogEntry, LogCategory, SharedProcessManager};
 use crate::app::watcher::directory_tracker::DirectoryTracker;
 use crate::app::watcher::file_processor::FileEventProcessor;
@@ -322,6 +322,9 @@ impl AppOrchestrator {
         let Some(reader) = self.agent_event_reader.as_mut() else {
             return;
         };
+        // Collect events into a buffer so we can release the reader borrow
+        // before calling `self.handle_fs_event` (which needs `&mut self`).
+        let mut pending_side_effects: Vec<(std::path::PathBuf, Vec<String>)> = Vec::new();
         loop {
             match reader.try_recv_exposing_lag() {
                 Ok(event) => {
@@ -336,7 +339,18 @@ impl AppOrchestrator {
                         }
                     }
                     // Shadow: events are drained but not routed to the
-                    // render path yet (step 5, T015 flips this).
+                    // render path yet (step 5, T015 flips this). The
+                    // `ToolSideEffect` branch is active now (step 4, T014):
+                    // it reissues `FsEvent::FileModified` so file reindexing
+                    // works through the typed path even while the legacy
+                    // `tx_gui` path still carries the same event.
+                    if let SeamAgentEvent::ToolSideEffect {
+                        effect: ToolSideEffect::FileCreated { path, tags },
+                        ..
+                    } = &event
+                    {
+                        pending_side_effects.push((path.clone(), tags.clone()));
+                    }
                 }
                 Err(BroadcastRecvError::Empty) => break,
                 Err(BroadcastRecvError::Closed) => {
@@ -358,6 +372,9 @@ impl AppOrchestrator {
                     continue;
                 }
             }
+        }
+        for (path, tags) in pending_side_effects {
+            self.handle_fs_event(FsEvent::FileModified { path, tags });
         }
     }
 
