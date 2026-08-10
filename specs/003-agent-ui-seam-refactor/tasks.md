@@ -68,11 +68,11 @@ description: "Task list for Agent Loop / UI Seam Refactor"
 
 **⚠️ CRITICAL**: No user story work can begin until this phase is complete.
 
-- [ ] T005 Add `Bus<AgentEvent>` field to `AgentSessionManager` in `src/desktop/src/agent/manager.rs`; expose `event_bus()` accessor for UI subscription; clone the `Bus` handle into the driver/agent context (migration step 2)
-- [ ] T006 Wire agent loop to dual-publish on `Bus<AgentEvent>` + old `tx_gui` in `src/desktop/src/agent/agent_impl.rs` — every `ctx.tx_gui.send(...)` site also publishes the equivalent structured `AgentEvent` on the bus (migration step 2)
-- [ ] T007 Add `BusReader<AgentEvent>` to `AppOrchestrator` in `src/desktop/src/app/orchestrator.rs`; subscribe during init; drain in `drain_background_channel` but do NOT route to render path yet (migration step 2)
-- [ ] T008 Write shadow-assertion test that `Bus<AgentEvent>` receives the same events (same order, same session_id) as the old `tx_gui` mpsc path in `src/desktop/src/agent/agent_impl_tests.rs` (migration step 2 verification, quickstart scenario 2 precursor)
-- [ ] T009 Implement `BusReader::Lagged(n)` handling in `src/desktop/src/app/orchestrator.rs` drain loop — on lag, emit visible truncation marker `[output truncated — UI fell behind the agent]` into transcript, log the lag count, re-sync on next `SessionStarted`/`Status` boundary (research.md §1, quickstart scenario 5)
+- [x] T005 Add `Bus<AgentEvent>` field to `AgentSessionManager` in `src/desktop/src/agent/manager.rs`; expose `event_bus()` accessor for UI subscription; clone the `Bus` handle into the driver/agent context (migration step 2)
+- [x] T006 Wire agent loop to dual-publish on `Bus<AgentEvent>` + old `tx_gui` in `src/desktop/src/agent/agent_impl.rs` — every `ctx.tx_gui.send(...)` site also publishes the equivalent structured `AgentEvent` on the bus (migration step 2)
+- [x] T007 Add `BusReader<AgentEvent>` to `AppOrchestrator` in `src/desktop/src/app/orchestrator.rs`; subscribe during init; drain in `drain_background_channel` but do NOT route to render path yet (migration step 2)
+- [x] T008 Write shadow-assertion test that `Bus<AgentEvent>` receives the same events (same order, same session_id) as the old `tx_gui` mpsc path in `src/desktop/src/agent/agent_impl_tests.rs` (migration step 2 verification, quickstart scenario 2 precursor)
+- [x] T009 Implement `BusReader::Lagged(n)` handling in `src/desktop/src/app/orchestrator.rs` drain loop — on lag, emit visible truncation marker `[output truncated — UI fell behind the agent]` into transcript, log the lag count, re-sync on next `SessionStarted`/`Status` boundary (research.md §1, quickstart scenario 5)
 
 **Checkpoint**: New channel runs in shadow; old path still authoritative. Quality gate passes. UI renders unchanged from old path.
 

@@ -174,6 +174,7 @@ impl FastMdApp {
         // `batch_dialog_config.available_dirs` is populated from
         // the published config in `drain_config_bus` on the first
         // frame.
+        let agent_event_reader = agent.event_bus().subscribe();
 
         Self {
             orchestrator: crate::app::orchestrator::AppOrchestrator {
@@ -203,6 +204,8 @@ impl FastMdApp {
                 tool_manager: std::sync::Arc::new(std::sync::RwLock::new(
                     crate::agent::tools::manager::ToolManager::new(),
                 )),
+                agent_event_reader: Some(agent_event_reader),
+                agent_event_lagged: false,
             },
             layout,
             cached_tree_rows: None,
@@ -276,6 +279,7 @@ impl FastMdApp {
 
         let content_libraries = config.content_libraries.clone();
         let inline_editor_enabled = config.inline_editor_enabled;
+        let agent_event_reader = agent.event_bus().subscribe();
 
         Self {
             orchestrator: crate::app::orchestrator::AppOrchestrator {
@@ -305,6 +309,8 @@ impl FastMdApp {
                 tool_manager: std::sync::Arc::new(std::sync::RwLock::new(
                     crate::agent::tools::manager::ToolManager::new(),
                 )),
+                agent_event_reader: Some(agent_event_reader),
+                agent_event_lagged: false,
             },
             layout: PanelLayout::new(),
             cached_tree_rows: None,

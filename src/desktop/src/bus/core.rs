@@ -16,6 +16,33 @@ use tokio::sync::broadcast;
 /// Default capacity for the underlying broadcast channel.
 const BUS_CAPACITY: usize = 8192;
 
+/// Error returned by [`BusReader::try_recv_exposing_lag`] — a transparent
+/// wrapper around `tokio::sync::broadcast::error::TryRecvError` that exposes
+/// the `Lagged(n)` signal (unlike [`std::sync::mpsc::TryRecvError`] which has
+/// no lag variant). Used by UI drain loops that must react to dropped messages
+/// (research.md §1, quickstart scenario 5).
+#[derive(Debug)]
+pub enum BroadcastRecvError {
+    /// No event available (channel not closed, just empty).
+    Empty,
+    /// The subscriber fell behind — `n` events were dropped. The next
+    /// `try_recv` will return the oldest still-buffered event (or `Empty`
+    /// if the buffer was fully skipped).
+    Lagged(u64),
+    /// No more senders exist; the channel is closed.
+    Closed,
+}
+
+impl From<broadcast::error::TryRecvError> for BroadcastRecvError {
+    fn from(e: broadcast::error::TryRecvError) -> Self {
+        match e {
+            broadcast::error::TryRecvError::Closed => Self::Closed,
+            broadcast::error::TryRecvError::Empty => Self::Empty,
+            broadcast::error::TryRecvError::Lagged(n) => Self::Lagged(n),
+        }
+    }
+}
+
 /// A thread-safe, multi-producer / multi-consumer event bus backed by
 /// `tokio::sync::broadcast`.
 ///
@@ -85,6 +112,17 @@ impl<T: Clone> BusReader<T> {
             broadcast::error::TryRecvError::Empty => std::sync::mpsc::TryRecvError::Empty,
             broadcast::error::TryRecvError::Lagged(_) => std::sync::mpsc::TryRecvError::Empty,
         })
+    }
+
+    /// Try to receive an event without blocking, exposing the `Lagged(n)`
+    /// signal from the underlying tokio broadcast channel so callers can
+    /// react to dropped messages (research.md §1, quickstart scenario 5).
+    ///
+    /// Unlike [`Self::try_recv`] (which silently maps `Lagged` to `Empty`),
+    /// this returns `Ok(Lagged(n))` when the subscriber fell behind, so the
+    /// UI drain loop can emit a visible truncation marker and re-sync.
+    pub fn try_recv_exposing_lag(&self) -> Result<T, BroadcastRecvError> {
+        self.inner.lock().unwrap().try_recv().map_err(Into::into)
     }
 
     /// Block until an event is available, or the channel is closed.

@@ -2,21 +2,23 @@
 //!
 //! Unit tests live in the sibling `manager_tests.rs` sidecar.
 
+use crate::agent::events::AgentEvent as SeamAgentEvent;
 use crate::agent::AgentContext;
 use crate::app::session::BrowserSession;
 use crate::bus::core::{Bus, BusReader};
 use crate::bus::events::config::ConfigArrived;
 use crate::bus::events::debug::AgentDebugEntry;
 use crate::bus::events::messages::TokenUsageInfo;
-use crate::bus::events::typed::{AgentEvent, BackgroundEvent};
+use crate::bus::events::typed::{AgentEvent as LegacyAgentEvent, BackgroundEvent};
 use crate::config::AppConfig;
 use serde_json::Value;
 use std::collections::HashSet;
 use std::path::PathBuf;
 use std::sync::{
-    Arc,
     atomic::{AtomicBool, Ordering},
+    Arc,
 };
+use uuid::Uuid;
 
 /// Agent state exposed to UI components.
 #[derive(Debug, Clone)]
@@ -70,6 +72,10 @@ pub struct AgentSessionManager {
     pub debug_search_text: String,
     pub debug_auto_scroll: bool,
     session_counter: usize,
+    /// Agent→UI structured event bus (new seam path). Cloned into the
+    /// agent context on each `start_session`; the UI subscribes via
+    /// [`Self::event_bus`] (migration step 2).
+    agent_event_bus: Bus<SeamAgentEvent>,
     /// Long-lived headless Firefox session, shared with the
     /// tool executor. Lazily launches a browser on first use.
     /// Owned by the application, not the agent — sessions
@@ -118,6 +124,7 @@ impl AgentSessionManager {
             debug_search_text: String::new(),
             debug_auto_scroll: true,
             session_counter: 0,
+            agent_event_bus: Bus::new(),
             browser_session,
             pdf_backing,
             tool_manager,
@@ -156,6 +163,7 @@ impl AgentSessionManager {
             debug_search_text: String::new(),
             debug_auto_scroll: true,
             session_counter: 0,
+            agent_event_bus: Bus::new(),
             browser_session,
             pdf_backing: Arc::new(crate::app::session::PdfBackingTracker::new()),
             tool_manager,
@@ -218,6 +226,13 @@ impl AgentSessionManager {
     /// (clean logout) without going through the agent.
     pub fn browser_session(&self) -> Arc<BrowserSession> {
         self.browser_session.clone()
+    }
+
+    /// Return a clone of the agent→UI event bus so the UI can subscribe
+    /// via `BusReader<AgentEvent>` and drain structured agent events each
+    /// frame (migration step 2, FR-010).
+    pub fn event_bus(&self) -> Bus<SeamAgentEvent> {
+        self.agent_event_bus.clone()
     }
 
     /// Get a read-only view of the current agent state.
@@ -328,12 +343,14 @@ impl AgentSessionManager {
         let cancel_flag = self.cancel_flag.clone().unwrap();
         self.session_counter += 1;
         let session_number = self.session_counter;
+        let session_id = Uuid::new_v4();
 
         // Build context
         let ctx = AgentContext {
             config: self.config.clone(),
             tx_gui: gui_tx,
             file_event_bus,
+            agent_event_bus: self.agent_event_bus.clone(),
             active_file,
             active_dir,
             selected_files,
@@ -343,6 +360,7 @@ impl AgentSessionManager {
             current_response: self.state.response.clone(),
             model_name: None,
             session_number,
+            session_id,
             browser_session: self.browser_session.clone(),
             pdf_backing: self.pdf_backing.clone(),
             tool_manager: self.tool_manager.clone(),
@@ -354,33 +372,33 @@ impl AgentSessionManager {
         });
     }
 
-    /// Consume and handle a single typed [`AgentEvent`] from the
+    /// Consume and handle a single typed [`LegacyAgentEvent`] from the
     /// background event channel.
     ///
     /// Returns the next queued prompt if the agent just finished and there
     /// are prompts waiting in the queue. The caller is responsible for
     /// starting the next session with that prompt.
-    pub fn handle_agent_event(&mut self, event: AgentEvent) -> Option<String> {
+    pub fn handle_agent_event(&mut self, event: LegacyAgentEvent) -> Option<String> {
         match event {
-            AgentEvent::Status(status) => {
+            LegacyAgentEvent::Status(status) => {
                 self.state.status = status;
                 None
             }
-            AgentEvent::Thinking(thinking) => {
+            LegacyAgentEvent::Thinking(thinking) => {
                 self.state.thinking = thinking;
                 None
             }
-            AgentEvent::Response(resp) => {
+            LegacyAgentEvent::Response(resp) => {
                 self.state.response = resp.clone();
                 None
             }
-            AgentEvent::Finished(history) => {
+            LegacyAgentEvent::Finished(history) => {
                 self.state.running = false;
                 self.state.history = Some(history);
                 // Check for queued prompts
                 self.take_next_queued_prompt()
             }
-            AgentEvent::Failed(err) => {
+            LegacyAgentEvent::Failed(err) => {
                 self.state.running = false;
                 self.state.status = format!("Error: {}", err);
                 // On failure, also check for queued prompts (or clear them?)
@@ -388,7 +406,7 @@ impl AgentSessionManager {
                 self.state.pending_prompts.clear();
                 None
             }
-            AgentEvent::TokenUsage(info) => {
+            LegacyAgentEvent::TokenUsage(info) => {
                 if info.prompt_tokens > self.state.total_usage.prompt_tokens {
                     self.state.total_usage.prompt_tokens = info.prompt_tokens;
                 }
@@ -419,7 +437,7 @@ impl AgentSessionManager {
                 self.state.token_usage = Some(info);
                 None
             }
-            AgentEvent::DebugEntry(entry) => {
+            LegacyAgentEvent::DebugEntry(entry) => {
                 self.state.debug_entries.push(entry);
                 None
             }

@@ -1,9 +1,10 @@
 use crate::agent::AgentSessionManager;
+use crate::agent::events::AgentEvent as SeamAgentEvent;
 use crate::app::background::{BackgroundLogEntry, LogCategory, SharedProcessManager};
 use crate::app::watcher::directory_tracker::DirectoryTracker;
 use crate::app::watcher::file_processor::FileEventProcessor;
 use crate::app::{DialogManager, SelectionManager, TabManager, TagManager, TextBuffer};
-use crate::bus::core::{Bus, BusReader};
+use crate::bus::core::{BroadcastRecvError, Bus, BusReader};
 use crate::bus::events::config::ConfigArrived;
 use crate::bus::events::file::FileEvent;
 use crate::bus::events::typed::{BackgroundEvent, FsEvent, McpAuthEvent, ProcessEvent};
@@ -12,6 +13,11 @@ use std::path::PathBuf;
 use std::sync::mpsc::Receiver;
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
+
+/// Visible truncation marker emitted into the transcript when the UI falls
+/// behind the agent's broadcast bus and `BusReader` reports `Lagged(n)`
+/// (research.md §1, quickstart scenario 5).
+pub const LAG_TRUNCATION_MARKER: &str = "[output truncated — UI fell behind the agent]";
 
 pub struct AppOrchestrator {
     pub content_libraries: Vec<crate::config::ContentLibrary>,
@@ -38,6 +44,17 @@ pub struct AppOrchestrator {
     pub repaint_interval: Duration,
     pub finished_watcher_slot: Arc<Mutex<Option<notify::RecommendedWatcher>>>,
     pub tool_manager: std::sync::Arc<std::sync::RwLock<crate::agent::tools::manager::ToolManager>>,
+    /// Reader for the new `Bus<AgentEvent>` agent→UI channel (migration
+    /// step 2). Subscribed once during app init from
+    /// [`AgentSessionManager::event_bus`]. Drained each frame in
+    /// [`Self::drain_agent_event_bus`] — shadow only during steps 2-4 (the
+    /// UI still renders from the legacy `BackgroundEvent::Agent` path until
+    /// step 5, T015).
+    pub agent_event_reader: Option<BusReader<SeamAgentEvent>>,
+    /// True when the last `BusReader::try_recv` on `agent_event_reader`
+    /// returned `Lagged(n)`. Cleared on the next `SessionStarted` or
+    /// `Status` boundary (re-sync point).
+    pub agent_event_lagged: bool,
 }
 
 impl AppOrchestrator {
@@ -290,6 +307,55 @@ impl AppOrchestrator {
                 }
                 BackgroundEvent::McpAuth(mcp_ev) => {
                     self.handle_mcp_auth_event(mcp_ev);
+                }
+            }
+        }
+    }
+
+    /// Drain the new `Bus<AgentEvent>` reader (migration step 2). Shadow
+    /// during steps 2-4: events are drained and counted but NOT routed to
+    /// the render path (the legacy `BackgroundEvent::Agent` path is still
+    /// authoritative). Handles `Lagged(n)` by setting the
+    /// [`Self::agent_event_lagged`] flag and logging a truncation marker
+    /// (research.md §1, quickstart scenario 5).
+    pub fn drain_agent_event_bus(&mut self) {
+        let Some(reader) = self.agent_event_reader.as_mut() else {
+            return;
+        };
+        loop {
+            match reader.try_recv_exposing_lag() {
+                Ok(event) => {
+                    // Re-sync on SessionStarted / Status boundary after a lag.
+                    if self.agent_event_lagged {
+                        match &event {
+                            SeamAgentEvent::SessionStarted { .. }
+                            | SeamAgentEvent::Status { .. } => {
+                                self.agent_event_lagged = false;
+                            }
+                            _ => {}
+                        }
+                    }
+                    // Shadow: events are drained but not routed to the
+                    // render path yet (step 5, T015 flips this).
+                }
+                Err(BroadcastRecvError::Empty) => break,
+                Err(BroadcastRecvError::Closed) => {
+                    self.agent_event_reader = None;
+                    break;
+                }
+                Err(BroadcastRecvError::Lagged(n)) => {
+                    tracing::warn!(
+                        name = "agent.event_bus.lagged",
+                        lagged_events = n,
+                        "BusReader<AgentEvent> lagged — UI fell behind the agent; truncating output"
+                    );
+                    self.agent_event_lagged = true;
+                    // The truncation marker is emitted into the transcript
+                    // once the UI renders from this bus (step 5, T015).
+                    // During shadow drain (steps 2-4) we only log — the
+                    // legacy path is still authoritative.
+                    let _ = LAG_TRUNCATION_MARKER;
+                    continue;
                 }
             }
         }

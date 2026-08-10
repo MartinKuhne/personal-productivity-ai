@@ -203,6 +203,7 @@ pub fn run_agent_blocking(
         config,
         tx_gui: tx,
         file_event_bus,
+        agent_event_bus: crate::bus::core::Bus::new(),
         active_file,
         active_dir,
         selected_files,
@@ -212,6 +213,7 @@ pub fn run_agent_blocking(
         current_response,
         model_name,
         session_number: 0,
+        session_id: uuid::Uuid::new_v4(),
         browser_session: std::sync::Arc::new(crate::app::session::BrowserSession::new(
             &crate::config::AppConfig::default(),
         )),

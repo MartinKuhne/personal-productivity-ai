@@ -1,5 +1,6 @@
 //! Agent context — bundles all inputs (config, channels, file bus, active file/dir, prompt, cancel flag, history) for an agent session.
 
+use crate::agent::events::AgentEvent;
 use crate::app::session::BrowserSession;
 use crate::bus::core::Bus;
 use crate::bus::events::file::FileEvent;
@@ -10,6 +11,7 @@ use std::collections::HashSet;
 use std::path::PathBuf;
 use std::sync::mpsc::Sender;
 use std::sync::{Arc, atomic::AtomicBool};
+use uuid::Uuid;
 
 /// Consolidated context for running an agent session.
 ///
@@ -19,6 +21,10 @@ pub struct AgentContext {
     pub config: AppConfig,
     pub tx_gui: Sender<BackgroundEvent>,
     pub file_event_bus: Bus<FileEvent>,
+    /// Agent→UI structured event bus (new seam path, dual-published
+    /// alongside `tx_gui` during migration steps 2-4). The agent publishes
+    /// structured `AgentEvent`s here; the UI subscribes via `BusReader`.
+    pub agent_event_bus: Bus<AgentEvent>,
     pub active_file: Option<PathBuf>,
     pub active_dir: Option<PathBuf>,
     pub selected_files: HashSet<PathBuf>,
@@ -32,6 +38,10 @@ pub struct AgentContext {
     /// Monotonic session counter (1-based), incremented on each new prompt.
     /// Used by debug entries to group turns by session.
     pub session_number: usize,
+    /// Uuid identity for the session — tags every `AgentEvent` on the new
+    /// `Bus<AgentEvent>` path (FR-008). Coexists with `session_number` during
+    /// migration; replaces it at step 7 (T023).
+    pub session_id: Uuid,
     /// Long-lived headless Firefox session shared with every
     /// mutating browser tool call. Owned by the application
     /// (one instance per app) and handed to the agent thread
@@ -64,6 +74,7 @@ mod tests {
             config: config.clone(),
             tx_gui: tx,
             file_event_bus: bus,
+            agent_event_bus: Bus::new(),
             active_file: Some(PathBuf::from("test.md")),
             active_dir: None,
             selected_files: HashSet::new(),
@@ -73,6 +84,7 @@ mod tests {
             current_response: String::new(),
             model_name: None,
             session_number: 1,
+            session_id: Uuid::new_v4(),
             browser_session: browser,
             pdf_backing: Arc::new(crate::app::session::PdfBackingTracker::new()),
             tool_manager: Arc::new(std::sync::RwLock::new(

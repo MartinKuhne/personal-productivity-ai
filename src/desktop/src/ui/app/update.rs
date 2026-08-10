@@ -50,6 +50,7 @@ impl FastMdApp {
         self.orchestrator.drain_config_bus();
         self.process_file_events_and_repaint(ctx);
         self.orchestrator.drain_background_channel();
+        self.orchestrator.drain_agent_event_bus();
 
         if ctx.input_mut(|i| i.consume_key(egui::Modifiers::ALT, egui::Key::A)) {
             self.orchestrator.agent.show_debug_window = !self.orchestrator.agent.show_debug_window;

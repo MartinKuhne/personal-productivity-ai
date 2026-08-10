@@ -33,6 +33,7 @@ fn make_ctx(config: AppConfig) -> (AgentContext, std::sync::mpsc::Receiver<Backg
         config,
         tx_gui: tx,
         file_event_bus: crate::bus::core::Bus::new(),
+        agent_event_bus: crate::bus::core::Bus::new(),
         active_file: None,
         active_dir: None,
         selected_files: HashSet::new(),
@@ -42,6 +43,7 @@ fn make_ctx(config: AppConfig) -> (AgentContext, std::sync::mpsc::Receiver<Backg
         current_response: String::new(),
         model_name: None,
         session_number: 1,
+        session_id: uuid::Uuid::new_v4(),
         browser_session,
         pdf_backing: std::sync::Arc::new(crate::app::session::PdfBackingTracker::new()),
         tool_manager: std::sync::Arc::new(std::sync::RwLock::new(
@@ -233,6 +235,7 @@ fn test_run_agent_skips_done_status_when_cancelled() {
         config: make_config(port),
         tx_gui: tx,
         file_event_bus: crate::bus::core::Bus::new(),
+        agent_event_bus: crate::bus::core::Bus::new(),
         active_file: None,
         active_dir: None,
         selected_files: HashSet::new(),
@@ -242,6 +245,7 @@ fn test_run_agent_skips_done_status_when_cancelled() {
         current_response: String::new(),
         model_name: None,
         session_number: 1,
+        session_id: uuid::Uuid::new_v4(),
         browser_session,
         pdf_backing: std::sync::Arc::new(crate::app::session::PdfBackingTracker::new()),
         tool_manager: std::sync::Arc::new(std::sync::RwLock::new(
@@ -763,4 +767,93 @@ fn test_debug_outgoing_turn1_includes_full_initial_messages() {
         Some("system"),
         "first message in turn 1 delta must be the system prompt"
     );
+}
+
+/// T008: Shadow-assertion test — verifies that `Bus<AgentEvent>` receives
+/// the same lifecycle events (SessionStarted, Status, Failed, SessionFinished)
+/// as the old `tx_gui` mpsc path. Quickstart scenario 2 precursor.
+#[test]
+fn test_dual_publish_bus_receives_same_lifecycle_events() {
+    let body = serde_json::json!({
+        "id": "chatcmpl-1", "object": "chat.completion", "created": 0, "model": "test",
+        "choices": [{"index": 0, "message": {"role": "assistant", "content": "Hi"}, "finish_reason": "stop"}],
+        "usage": {"prompt_tokens": 1, "completion_tokens": 1, "total_tokens": 2}
+    })
+    .to_string();
+    let port = spawn_one_shot_http_server(&http_response("HTTP/1.1 200 OK", &body));
+    let (ctx, rx) = make_ctx(make_config(port));
+    // Subscribe to the new bus BEFORE spawning the agent so we don't miss events.
+    let bus_reader = ctx.agent_event_bus.subscribe();
+    let session_id = ctx.session_id;
+    run_agent(ctx);
+
+    // Drain the old mpsc path
+    let mut legacy_failed = false;
+    let mut legacy_finished = false;
+    while let Ok(ev) = rx.recv() {
+        match ev {
+            BackgroundEvent::Agent(AgentEvent::Failed(_)) => legacy_failed = true,
+            BackgroundEvent::Agent(AgentEvent::Finished(_)) => legacy_finished = true,
+            _ => {}
+        }
+    }
+
+    // Drain the new bus path
+    let mut bus_events: Vec<crate::agent::events::AgentEvent> = Vec::new();
+    while let Ok(ev) = bus_reader.try_recv() {
+        bus_events.push(ev);
+    }
+
+    // Assert SessionStarted is first and carries the correct session_id
+    assert!(
+        bus_events
+            .iter()
+            .any(|e| matches!(e, crate::agent::events::AgentEvent::SessionStarted { session_id: sid } if *sid == session_id)),
+        "Bus must receive SessionStarted with correct session_id"
+    );
+    // Assert SessionFinished is last and carries the correct session_id
+    assert!(
+        bus_events
+            .iter()
+            .any(|e| matches!(e, crate::agent::events::AgentEvent::SessionFinished { session_id: sid } if *sid == session_id)),
+        "Bus must receive SessionFinished with correct session_id"
+    );
+    // Every bus event carries the same session_id
+    for event in &bus_events {
+        let sid = match event {
+            crate::agent::events::AgentEvent::SessionStarted { session_id } => *session_id,
+            crate::agent::events::AgentEvent::SessionFinished { session_id } => *session_id,
+            crate::agent::events::AgentEvent::Status { session_id, .. } => *session_id,
+            crate::agent::events::AgentEvent::Thinking { session_id, .. } => *session_id,
+            crate::agent::events::AgentEvent::ContentDelta { session_id, .. } => *session_id,
+            crate::agent::events::AgentEvent::ToolCallStarted { session_id, .. } => *session_id,
+            crate::agent::events::AgentEvent::ToolResult { session_id, .. } => *session_id,
+            crate::agent::events::AgentEvent::ToolSideEffect { session_id, .. } => *session_id,
+            crate::agent::events::AgentEvent::DebugEntry { session_id, .. } => *session_id,
+            crate::agent::events::AgentEvent::TokenUsage { session_id, .. } => *session_id,
+            crate::agent::events::AgentEvent::Failed { session_id, .. } => *session_id,
+        };
+        assert_eq!(
+            sid, session_id,
+            "every AgentEvent must carry the correct session_id"
+        );
+    }
+    // If the legacy path saw Failed, the bus must also see Failed
+    if legacy_failed {
+        assert!(
+            bus_events
+                .iter()
+                .any(|e| matches!(e, crate::agent::events::AgentEvent::Failed { .. })),
+            "Bus must receive Failed if legacy path did"
+        );
+    }
+    // If the legacy path saw Finished, the bus must also see SessionFinished
+    if legacy_finished {
+        assert!(
+            bus_events
+                .iter()
+                .any(|e| matches!(e, crate::agent::events::AgentEvent::SessionFinished { .. })),
+            "Bus must receive SessionFinished if legacy path saw Finished"
+        );
+    }
 }

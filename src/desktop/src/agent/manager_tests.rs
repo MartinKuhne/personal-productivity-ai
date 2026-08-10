@@ -1,6 +1,7 @@
 //! Tests for `agent/manager.rs`.
 
 use super::*;
+use crate::bus::events::typed::AgentEvent;
 use crate::config::AppConfig;
 
 #[test]
