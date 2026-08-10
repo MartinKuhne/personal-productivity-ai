@@ -62,6 +62,7 @@ fn run_agent_inner(ctx: AgentContext) {
 
     let mut turn_number: usize = 0;
     let mut prev_messages_len: usize = 0;
+    let mut prev_tools_json: Option<serde_json::Value> = None;
     loop {
         if ctx.cancel_flag.load(Ordering::SeqCst) {
             break;
@@ -75,6 +76,7 @@ fn run_agent_inner(ctx: AgentContext) {
             &executor,
             &mut turn_number,
             &mut prev_messages_len,
+            &mut prev_tools_json,
         ) {
             Turn::Continue => {}
             Turn::Done => break,
@@ -105,6 +107,7 @@ fn process_turn(
     executor: &ToolExecutor,
     turn_number: &mut usize,
     prev_messages_len: &mut usize,
+    prev_tools_json: &mut Option<serde_json::Value>,
 ) -> Turn {
     *turn_number += 1;
     let turn = *turn_number;
@@ -116,6 +119,19 @@ fn process_turn(
     let tool_count = tools_json.as_array().map(|a| a.len()).unwrap_or(0);
     let delta: Vec<serde_json::Value> = messages[*prev_messages_len..].to_vec();
     let tx = &ctx.tx_gui;
+    let tools_unchanged = prev_tools_json
+        .as_ref()
+        .is_some_and(|prev| prev == tools_json);
+    let mut content = serde_json::json!({
+        "model": llm.model_name(),
+        "max_tokens": llm.max_tokens(),
+        "tools": tools_json,
+        "new_messages": delta,
+    });
+    if tools_unchanged && let serde_json::Value::Object(ref mut map) = content {
+        map.remove("tools");
+    }
+    *prev_tools_json = Some(tools_json.clone());
     let _ = tx.send(
         AgentDebugEntry {
             turn,
@@ -128,12 +144,7 @@ fn process_turn(
                 delta.len(),
                 tool_count
             ),
-            content: Some(unescape_json_strings(serde_json::json!({
-                "model": llm.model_name(),
-                "max_tokens": llm.max_tokens(),
-                "tools": tools_json,
-                "new_messages": delta,
-            }))),
+            content: Some(unescape_json_strings(content)),
             row_type: DebugEntryRow::Entry,
         }
         .into(),

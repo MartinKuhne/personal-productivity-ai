@@ -764,3 +764,121 @@ fn test_debug_outgoing_turn1_includes_full_initial_messages() {
         "first message in turn 1 delta must be the system prompt"
     );
 }
+
+/// Verify that the `tools` field is present on the first outgoing debug
+/// entry but omitted on subsequent turns when the tool schema is unchanged.
+#[test]
+fn test_debug_outgoing_omits_tools_on_unchanged_subsequent_turn() {
+    let tool_call_body = serde_json::json!({
+        "id": "chatcmpl-tool", "object": "chat.completion", "created": 0, "model": "test",
+        "choices": [{
+            "index": 0,
+            "message": {
+                "role": "assistant",
+                "content": null,
+                "tool_calls": [{
+                    "id": "call_1",
+                    "type": "function",
+                    "function": {
+                        "name": "read_tags",
+                        "arguments": "{}"
+                    }
+                }]
+            },
+            "finish_reason": "tool_calls"
+        }]
+    })
+    .to_string();
+    let final_body = serde_json::json!({
+        "id": "chatcmpl-final", "object": "chat.completion", "created": 0, "model": "test",
+        "choices": [{"index": 0, "message": {"role": "assistant", "content": "Done."}, "finish_reason": "stop"}]
+    })
+    .to_string();
+
+    use std::io::{Read, Write};
+    use std::net::TcpListener;
+    let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+    let port = listener.local_addr().unwrap().port();
+    std::thread::spawn(move || {
+        for body in [tool_call_body, final_body] {
+            if let Ok((mut stream, _)) = listener.accept() {
+                let mut buf = [0; 8192];
+                let _ = stream.read(&mut buf);
+                let resp = format!(
+                    "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
+                    body.len(),
+                    body
+                );
+                let _ = stream.write_all(resp.as_bytes());
+                let _ = stream.flush();
+                std::thread::sleep(std::time::Duration::from_millis(100));
+            }
+        }
+    });
+    let (ctx, rx) = make_ctx(make_config(port));
+    run_agent(ctx);
+
+    let mut outgoing: Vec<AgentDebugEntry> = Vec::new();
+    while let Ok(ev) = rx.recv() {
+        match &ev {
+            BackgroundEvent::Agent(AgentEvent::DebugEntry(e)) => {
+                if matches!(e.kind, DebugEntryKind::Outgoing)
+                    && matches!(e.row_type, DebugEntryRow::Entry)
+                {
+                    outgoing.push(e.clone());
+                }
+            }
+            BackgroundEvent::Agent(AgentEvent::Finished(_)) => break,
+            _ => {}
+        }
+    }
+
+    assert_eq!(
+        outgoing.len(),
+        2,
+        "must have outgoing entries for both turns"
+    );
+
+    // Turn 1 must include the tools field.
+    let turn1 = outgoing
+        .iter()
+        .find(|e| e.turn == 1)
+        .expect("must have turn 1 outgoing");
+    assert!(
+        turn1
+            .content
+            .as_ref()
+            .and_then(|c| c.get("tools"))
+            .is_some(),
+        "turn 1 outgoing must include the tools field"
+    );
+
+    // Turn 2 must NOT include the tools field (unchanged from turn 1).
+    let turn2 = outgoing
+        .iter()
+        .find(|e| e.turn == 2)
+        .expect("must have turn 2 outgoing");
+    assert!(
+        turn2
+            .content
+            .as_ref()
+            .and_then(|c| c.get("tools"))
+            .is_none(),
+        "turn 2 outgoing must omit the tools field when unchanged from a previous turn"
+    );
+    // Turn 2 must still have the other fields.
+    assert!(
+        turn2
+            .content
+            .as_ref()
+            .and_then(|c| c.get("model"))
+            .is_some()
+    );
+    assert!(
+        turn2
+            .content
+            .as_ref()
+            .and_then(|c| c.get("new_messages"))
+            .is_some()
+    );
+}
