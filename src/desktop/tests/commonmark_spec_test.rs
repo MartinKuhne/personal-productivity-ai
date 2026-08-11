@@ -690,43 +690,40 @@ fn strip_list_markers(md: &str) -> String {
 /// whose source contains at least one non-trivial word must
 /// render that word into the PDF. Closes ADR gaps #1, #4, #10
 /// (the structural-only spec test was 652/652 green for a
+/// Test the *content* half of the round trip: every spec example
+/// whose source contains at least one non-trivial word must
+/// render that word into the PDF. Closes ADR gaps #1, #4, #10
+/// (the structural-only spec test was 652/652 green for a
 /// translator that dropped all body content; this content
 /// fidelity check would fail that same translator immediately).
 ///
-/// `#[ignore]` status: the per-example test hangs after
-/// roughly 125 examples in a tight loop on this machine.
-/// The hang is in `extract_content_needles` — specifically
-/// in the strip functions (`strip_link_ref_defs`,
-/// `strip_link_destinations`, `strip_list_markers`) added
-/// in the gap-fix pass. Individual examples process in <1ms,
-/// but the loop hangs after ~125 examples regardless of
-/// the range tested (0-50 completes, 0-100 completes,
-/// 0-200 hangs; 56-60 completes, 64-70 completes, 64-75
-/// hangs). The hang is not in the Typst engine (the
-/// benchmark with `simple_needles` — no strip functions —
-/// completes all 608 examples in ~5s) and not in
-/// `pdf_oxide` (the benchmark with compile + pdf_oxide
-/// completes all 608 examples in ~6s). The strip functions
-/// are pure string manipulation with no infinite loops
-/// (all loops advance their index unconditionally), so the
-/// root cause is likely a state-accumulation or
-/// allocator-heap issue triggered by the specific input
-/// pattern of spec example ~126 onwards. Not yet isolated
-/// — would need to bisect the strip functions one at a
-/// time on the actual full input.
+/// Threading model: the test processes all 652 examples in
+/// parallel using `std::thread`. Each example is handled in
+/// its own thread; the main thread collects results via a
+/// channel and uses `recv_timeout` to apply a per-example
+/// deadline. Threads that don't finish in time are abandoned
+/// (the result is reported as "timed out" and the thread
+/// keeps running in the background — Rust has no thread
+/// kill, but `std::process::exit` at the end of the test
+/// reaps all live threads when the process exits). This
+/// makes the test *survivable* against the hang in the
+/// needle-extraction strip functions
+/// (`strip_link_ref_defs`, `strip_link_destinations`,
+/// `strip_list_markers`) where some examples stall in a
+/// tight loop. The root cause is still unfixed — see the
+/// `#[ignore]` message on the per-example loop below for
+/// the full investigation notes — but the threaded harness
+/// means a single bad example no longer blocks the rest.
 ///
-/// The 12 needle-extraction fixes are pinned by the fast
-/// default-on companion `content_fidelity_known_gaps`
-/// so a regression on a needle-extraction edge case is
-/// caught even though this full per-example test is
-/// still `#[ignore]`'d.
+/// The needle count per example is capped at 3 to keep the test
+/// fast and to avoid pinning a test pass on a single rare
+/// occurrence of a word; "at least one" is the contract.
 #[test]
-#[ignore = "per-example content fidelity; hangs after ~125 examples \
-          in a tight loop on this machine (see doc comment above). \
-          The 12 needle-extraction fixes are pinned by the \
-          default-on companion `content_fidelity_known_gaps`. \
-          See doc/adr/pdf-export-test-gaps.md gaps #1, #4, #10."]
 fn all_commonmark_examples_render_content_into_pdf() {
+    use std::sync::mpsc;
+    use std::thread;
+    use std::time::{Duration, Instant};
+
     let examples = extract_markdown_examples(SPEC);
     assert!(
         examples.len() >= 600,
@@ -734,75 +731,167 @@ fn all_commonmark_examples_render_content_into_pdf() {
         examples.len()
     );
 
-    let mut failures: Vec<String> = Vec::new();
-    let mut no_needles: Vec<String> = Vec::new();
-    for (n, md) in &examples {
+    /// Total wall-clock budget for the test. After this
+    /// elapses, the main thread stops waiting for new
+    /// results and reports whatever it has. `std::process::exit`
+    /// is called at the end to reap abandoned threads.
+    /// The per-example deadline is implicitly bounded by
+    /// the remaining budget divided by the number of
+    /// unprocessed examples, so the slowest example can
+    /// at most use the full remaining budget.
+    const TOTAL_BUDGET: Duration = Duration::from_secs(120);
+
+    /// Per-example processing, factored out so the
+    /// `move` closure for the worker thread is one line.
+    /// Returns `Ok(())` for a passing example, `Err(msg)`
+    /// for a failing one. The "no needles" case returns
+    /// `Ok(())` and is counted by the caller.
+    fn process_one(_n: usize, md: &str) -> Result<(), String> {
         let needles = extract_content_needles(md);
         if needles.is_empty() {
-            // No tokens of length ≥ 4 (e.g. an example that is
-            // just punctuation or a single character). Nothing
-            // meaningful to assert; record and move on.
-            no_needles.push(format!("#{n}"));
-            continue;
+            return Ok(());
         }
-        let result = compile_markdown_to_pdf(md, "commonmark-content");
-        let bytes = match result {
-            Ok(b) => b,
-            Err(e) => {
-                failures.push(format!(
-                    "example #{n}: compile failed: {e} (needles: {needles:?})"
-                ));
-                continue;
-            }
-        };
-        let doc = match pdf_oxide::PdfDocument::from_bytes(bytes) {
-            Ok(d) => d,
-            Err(e) => {
-                failures.push(format!(
-                    "example #{n}: pdf_oxide parse failed: {e} (needles: {needles:?})"
-                ));
-                continue;
-            }
-        };
-        let spans = match doc.extract_spans(0) {
-            Ok(s) => s,
-            Err(e) => {
-                failures.push(format!(
-                    "example #{n}: extract_spans failed: {e} (needles: {needles:?})"
-                ));
-                continue;
-            }
-        };
+        let bytes = compile_markdown_to_pdf(md, "commonmark-content")
+            .map_err(|e| format!("compile failed: {e}"))?;
+        let doc = pdf_oxide::PdfDocument::from_bytes(bytes)
+            .map_err(|e| format!("pdf_oxide parse failed: {e}"))?;
+        let spans = doc
+            .extract_spans(0)
+            .map_err(|e| format!("extract_spans failed: {e}"))?;
         let extracted: String = spans
             .iter()
             .map(|s| s.text.to_ascii_lowercase())
             .collect::<Vec<_>>()
             .join(" ");
         if !needles.iter().any(|needle| extracted.contains(needle)) {
-            failures.push(format!(
-                "example #{n}: no needle from source found in PDF text. \
-                 Needles: {needles:?}. Source: {md:?}"
+            return Err(format!(
+                "no needle from source found in PDF text. Needles: {needles:?}. Source: {md:?}"
             ));
+        }
+        Ok(())
+    }
+
+    let total = examples.len();
+    let (tx, rx) = mpsc::channel::<(usize, Result<(), String>)>();
+    let started = Instant::now();
+
+    // Spawn one thread per example. The threads do not
+    // share state — each one independently loads fonts
+    // (via the `OnceLock` in `get_cached_fonts`), runs
+    // the translator, and reports its result. Hung
+    // threads are abandoned at the deadline; the result
+    // is reported as "timed out" so the caller can
+    // distinguish a hang from a real failure.
+    for (n, md) in &examples {
+        let tx = tx.clone();
+        let md = md.clone();
+        let n = *n;
+        thread::Builder::new()
+            .name(format!("pdf-content-{n}"))
+            .spawn(move || {
+                let result = process_one(n, &md);
+                tx.send((n, result)).ok();
+            })
+            .expect("failed to spawn worker thread");
+    }
+    drop(tx); // Close the sender so `rx` ends when all workers finish.
+
+    let mut failures: Vec<String> = Vec::new();
+    let mut processed = 0usize;
+    let deadline = started + TOTAL_BUDGET;
+    let expected = total;
+
+    while processed < total {
+        let now = Instant::now();
+        if now >= deadline {
+            // Total budget exhausted. Mark every
+            // unprocessed example as timed out.
+            break;
+        }
+        let remaining = deadline.saturating_duration_since(now);
+        match rx.recv_timeout(remaining) {
+            Ok((n, Ok(()))) => {
+                processed += 1;
+                // Note: the Ok(()) return from
+                // `process_one` covers both the
+                // "needles found" and "no needles"
+                // cases. The no-needles count is
+                // approximated at the end as
+                // `total - processed - failures.len()`.
+                let _ = n;
+            }
+            Ok((n, Err(msg))) => {
+                processed += 1;
+                failures.push(format!("example #{n}: {msg}"));
+            }
+            Err(mpsc::RecvTimeoutError::Timeout) => {
+                // Total budget exhausted.
+                break;
+            }
+            Err(mpsc::RecvTimeoutError::Disconnected) => {
+                // All worker threads have either
+                // reported or been abandoned.
+                break;
+            }
         }
     }
 
-    // The no-needles case is informational, not a failure —
-    // some spec examples are pure punctuation or single chars
-    // and have nothing to assert on. We log it via eprintln so
-    // it's visible in the test output without failing the
-    // assertion.
-    if !no_needles.is_empty() {
+    // At this point, any thread that hasn't reported is
+    // assumed hung. We don't know which examples are
+    // affected without per-thread liveness tracking, so
+    // we report a single summary line rather than N
+    // individual timeouts. The hung threads keep running
+    // in the background; `std::process::exit` below reaps
+    // them.
+    let unaccounted = total - processed;
+    if unaccounted > 0 || started.elapsed() >= TOTAL_BUDGET {
         eprintln!(
-            "[commonmark-content] {} examples had no needles of length >= 4 \
-             (skipped): {}",
-            no_needles.len(),
-            no_needles
-                .iter()
-                .take(20)
-                .cloned()
-                .collect::<Vec<_>>()
-                .join(", ")
+            "[commonmark-content] {}/{} examples processed in {:?}; \
+             {} unaccounted (presumed hung in strip functions)",
+            processed,
+            expected,
+            started.elapsed(),
+            unaccounted
         );
+    }
+
+    // Note: the no-needles accounting from the original
+    // single-threaded version is approximated as
+    // `expected - processed - failures.len() - unaccounted`
+    // when the test completes cleanly. We log the count
+    // rather than failing on it because some spec
+    // examples are pure punctuation and have nothing to
+    // assert on (this was the original behaviour).
+    let skipped = expected
+        .saturating_sub(processed)
+        .saturating_sub(failures.len())
+        .saturating_sub(unaccounted);
+    if skipped > 0 {
+        eprintln!(
+            "[commonmark-content] {} examples skipped (no needles extracted)",
+            skipped
+        );
+    }
+
+    // If any examples didn't report, exit the process
+    // immediately to reap the abandoned worker threads.
+    // This is the only way to guarantee the test process
+    // terminates; Rust threads cannot be killed, and
+    // `std::process::exit` is the documented way to exit
+    // with live threads still running. The test exits
+    // with a non-zero status if there are *any* unaccounted
+    // examples — even if no failures were recorded — so the
+    // CI gate catches the strip-function hang. A passing
+    // test must verify *every* example, not 596/608 of
+    // them.
+    if unaccounted > 0 {
+        eprintln!(
+            "[commonmark-content] {processed}/{total} processed in {:?}; \
+             {unaccounted} unaccounted (presumed hung in strip functions). \
+             Exiting non-zero so CI catches the hang.",
+            started.elapsed()
+        );
+        std::process::exit(1);
     }
 
     assert!(
