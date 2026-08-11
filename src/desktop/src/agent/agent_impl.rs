@@ -3,7 +3,7 @@
 use crate::agent::context::AgentContext;
 use crate::agent::datamark;
 use crate::agent::events::{AgentEvent as SeamAgentEvent, AgentStatus};
-use crate::agent::llm_client::{LLMClient, parse_usage_block};
+use crate::agent::llm_client::{parse_usage_block, LLMClient};
 use crate::agent::prompt_builder::SystemPromptBuilder;
 use crate::agent::tool_executor::ToolExecutor;
 
@@ -448,11 +448,15 @@ fn emit_tool_results_debug(
     let entries: Vec<serde_json::Value> = results
         .iter()
         .map(|(call_id, fn_name, args, result)| {
+            let args_value = serde_json::from_str::<serde_json::Value>(args)
+                .unwrap_or_else(|_| serde_json::Value::String(args.clone()));
+            let result_value = serde_json::from_str::<serde_json::Value>(result)
+                .unwrap_or_else(|_| serde_json::Value::String(result.clone()));
             serde_json::json!({
                 "call_id": call_id,
                 "name": fn_name,
-                "arguments": args,
-                "result": result,
+                "arguments": args_value,
+                "result": result_value,
             })
         })
         .collect();

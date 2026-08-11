@@ -65,7 +65,7 @@ fn test_tool_result_formatting_is_ui_side() {
 }
 
 /// T034: Structured delegate trace renders from `Vec<DelegateToolCall>`.
-/// The `>>`-prefixed formatting comes from `format_delegate_trace` in
+/// The `<span>`-wrapped formatting comes from `format_delegate_trace` in
 /// `agent_render.rs` — no string `tool_call_trace` involved.
 #[test]
 fn test_structured_delegate_trace_renders_from_tool_calls() {
@@ -104,15 +104,15 @@ fn test_structured_delegate_trace_renders_from_tool_calls() {
     );
     // First delegate sub-call
     assert!(
-        t.content.contains(">> **Executing tool `web_fetch`**"),
-        "Expected first delegate trace entry, got: {}",
+        t.content.contains("<span>**Executing tool `web_fetch`**"),
+        "Expected first delegate trace entry with <span> wrapper, got: {}",
         t.content
     );
     // Second delegate sub-call
     assert!(
         t.content
-            .contains(">> **Executing tool `browser_navigate`**"),
-        "Expected second delegate trace entry, got: {}",
+            .contains("<span>**Executing tool `browser_navigate`**"),
+        "Expected second delegate trace entry with <span> wrapper, got: {}",
         t.content
     );
 }

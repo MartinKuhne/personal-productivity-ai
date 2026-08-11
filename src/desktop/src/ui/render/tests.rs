@@ -501,7 +501,7 @@ fn test_parse_markdown_rule_and_blockquote() {
 }
 
 #[test]
-fn test_format_delegate_trace_uses_double_angle() {
+fn test_format_delegate_trace_uses_html_spans() {
     use crate::agent::events::DelegateToolCall;
     use serde_json::json;
     let tool_calls = vec![DelegateToolCall {
@@ -510,12 +510,19 @@ fn test_format_delegate_trace_uses_double_angle() {
         result: json!({"status": "success"}),
     }];
     let msg = crate::ui::render::agent_render::format_delegate_trace(&tool_calls);
-    assert!(msg.starts_with(">> "), "Expected >> prefix, got: {msg}");
+    assert!(
+        msg.contains("<span>"),
+        "Expected <span> wrapper for gray styling, got: {msg}"
+    );
+    assert!(
+        msg.contains("</span>"),
+        "Expected closing </span>, got: {msg}"
+    );
     assert!(
         msg.contains("**Executing tool `web_fetch`**"),
         "Expected tool name"
     );
-    assert!(!msg.contains("<span>"), "Should not contain HTML");
+    assert!(!msg.starts_with(">> "), "Should NOT use >> prefix");
 }
 
 #[test]

@@ -129,10 +129,10 @@ fn test_web_delegate_result_formatted() {
     });
     // The tool result is formatted via format_tool_result_message (main result)
     assert!(t.content.contains("web_delegate"));
-    // The structured delegate trace is formatted via format_delegate_trace (>> prefix)
+    // The structured delegate trace is formatted via format_delegate_trace (HTML <span> wrapper)
     assert!(
-        t.content.contains(">> **Executing tool `web_fetch`**"),
-        "Expected delegate trace formatting, got: {}",
+        t.content.contains("<span>**Executing tool `web_fetch`**"),
+        "Expected delegate trace formatting with <span> wrapper, got: {}",
         t.content
     );
 }
