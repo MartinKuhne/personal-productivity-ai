@@ -501,12 +501,36 @@ fn is_ref_def_start(trimmed: &str) -> bool {
 /// from the original source so multi-byte UTF-8 sequences
 /// (e.g. `ΑΓΩ` in spec example #163) pass through
 /// unmodified. Only ASCII bracket bytes (`[`, `]`, `(`, `)`)
-/// are inspected; all other bytes are copied through.
+/// and the image-opener `!` are inspected; all other bytes
+/// are copied through.
+///
+/// A standalone `!` (one not followed by `[`) is a
+/// pass-through byte — the function does not interpret
+/// `!` outside of image syntax. The first branch in the
+/// loop handles this case explicitly because the
+/// pass-through loop below excludes `!` (so the `![`
+/// branch can see it) and the `![` branch only consumes
+/// `!` when followed by `[`, so a `!` not followed by `[`
+/// would otherwise never advance `i` and the outer loop
+/// would spin forever.
 fn strip_link_destinations(md: &str) -> String {
     let mut out = String::with_capacity(md.len());
     let bytes = md.as_bytes();
     let mut i = 0;
     while i < bytes.len() {
+        // Standalone `!` (not followed by `[`) — pass through.
+        // The pass-through loop below excludes `!` so the
+        // `![` image branch can see it, and the image
+        // branch only consumes `!` when followed by `[`.
+        // Without this branch a `!` followed by anything
+        // else would never advance `i` (infinite loop).
+        // Regression: a single-byte `"!"` input was
+        // previously an infinite loop.
+        if bytes[i] == b'!' && (i + 1 >= bytes.len() || bytes[i + 1] != b'[') {
+            out.push('!');
+            i += 1;
+            continue;
+        }
         // Image: `![alt](...)` or `![alt][label]`
         if bytes[i] == b'!' && i + 1 < bytes.len() && bytes[i + 1] == b'[' {
             let alt_close = match find_unescaped_byte(bytes, i + 2, b']') {
@@ -585,6 +609,86 @@ fn strip_link_destinations(md: &str) -> String {
         out.push_str(&md[start..i]);
     }
     out
+}
+
+// --- Regression tests for the standalone-`!` infinite loop.
+//
+// Before the fix, the function had three branches:
+//   1. `![image](...)` / `![image][label]` — only fires when
+//      `!` is followed by `[`.
+//   2. `[text](...)` / `[text][label]` — fires on `[`.
+//   3. Pass-through copy of non-`[` non-`!` runs.
+//
+// A `!` not followed by `[` was not handled by any branch:
+// the pass-through loop excludes `!` (so the image branch
+// can see it), the image branch only consumes `!` when
+// followed by `[`, and the link branch doesn't match `!`.
+// The outer `while i < bytes.len()` loop therefore spun
+// forever at the first `!` in the input. The smallest
+// trigger was a single-byte `"!"`. Real-world triggers
+// include any text with a `!` not followed by `[` (a
+// JavaScript snippet's `!` operator, a shell-history
+// `!`-reference, an exclamation, etc.). Spec example
+// #127 (`"Hello JavaScript!"` inside a `<script>` block)
+// was the specific 126th example that exhausted the
+// per-example test's 120s wall-clock budget.
+
+#[test]
+fn strip_link_destinations_passes_standalone_exclamation() {
+    // Smallest possible trigger: a single `!` byte.
+    assert_eq!(strip_link_destinations("!"), "!");
+    // `!` followed by a non-`[` byte.
+    assert_eq!(strip_link_destinations("!a"), "!a");
+    // `!` at the end of a word.
+    assert_eq!(strip_link_destinations("hello!"), "hello!");
+    // The real-world trigger from spec example #127.
+    assert_eq!(strip_link_destinations("JavaScript!"), "JavaScript!");
+    // `!` in the middle of a word.
+    assert_eq!(strip_link_destinations("hello!world"), "hello!world");
+    // `!` then `[` should still be treated as image syntax.
+    // The image branch (which is now reached because the
+    // standalone-`!` branch fell through) strips the URL.
+    assert_eq!(strip_link_destinations("![a](u)"), "![a]");
+    // A `!` that would have hung, surrounded by other bytes.
+    assert_eq!(
+        strip_link_destinations("foo ! bar ! baz"),
+        "foo ! bar ! baz"
+    );
+    // A trailing `!` (the original hung case has the `!` at
+    // byte index 115 of 134 — the function must consume it
+    // and keep going).
+    assert_eq!(
+        strip_link_destinations("text ending with !"),
+        "text ending with !"
+    );
+}
+
+#[test]
+fn strip_link_destinations_does_not_hang_on_127th_spec_example() {
+    // The actual reproducer from the per-example test's
+    // 120s budget exhaustion. Spec example #127 is a
+    // `<script>` block with `document.getElementById("demo")
+    // .innerHTML = "Hello JavaScript!";` — the `!` inside
+    // the JS string is the trigger. (We use a synthetic
+    // version of the inner markdown here, not the full
+    // spec extract, to keep the test self-contained.)
+    let md = "<script type=\"text/javascript\">\n// JavaScript example\n\n\
+              document.getElementById(\"demo\").innerHTML = \"Hello JavaScript!\";\n\
+              </script>\nokay";
+    // Bound the test in wall time so a regression to the
+    // hang fails fast instead of timing out the suite.
+    let started = std::time::Instant::now();
+    let out = strip_link_destinations(md);
+    assert!(
+        started.elapsed().as_secs() < 5,
+        "strip_link_destinations took too long ({:?}); \
+         possible regression of the standalone-`!` hang",
+        started.elapsed()
+    );
+    // The function does not strip `!`, only `[text](url)` /
+    // `![alt](url)` link/image destinations. The `!` inside
+    // the JS string is plain text, so it passes through.
+    assert_eq!(out, md);
 }
 
 /// Find the next unescaped `target` byte at or after

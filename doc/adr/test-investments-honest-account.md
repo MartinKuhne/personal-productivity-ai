@@ -257,3 +257,182 @@ of truth: `src/desktop/tests/commonmark_spec_test.rs`
 `src/desktop/src/lib/pdf/typst_translator_proptests.rs`
 (property tests). The `git log` for this branch shows
 exactly which commit changed which test.
+
+---
+
+## 4. Update: the per-example test hang, the bisect, and the actual fix
+
+This is the most important section of the document, and
+it is a retraction. Section 1.1 above is now **wrong** in
+one specific way: I claimed the per-example test passes
+when run. It didn't. It hangs on example #127
+(0-indexed 126), a `<script>` block whose JS string
+literal contains `!`. I thought this was a
+runtime/allocator issue. It wasn't. It was a real
+content-triggered infinite loop in
+`strip_link_destinations`, and it has been fixed.
+
+### 4.1. What the per-example test actually did
+
+After I added the per-example test as `#[ignore]`'d in
+commit `64a3cf3` (per section 1.1), I tried to enable it
+in commit `aa52d2a` (raw threads) and then `48898fc`
+(rayon thread pool). Both times I saw the test exit
+non-zero with the message "budget exhausted, exiting
+non-zero so CI catches the hang". I had a 120-second
+wall-clock budget and a `std::process::exit(1)` on
+expiry. The test was reporting the hang loudly. I
+described it in the per-example test's doc comment as
+"defense in depth" and called it good enough.
+
+It was not good enough. A test that fails-by-design is
+not a passing test, regardless of how loudly it fails.
+
+### 4.2. What the bisect got wrong
+
+The bisect in commit `1d814f4` ("bisect the strip-function
+hang to strip_link_destinations") was technically
+correct about *which function* the hang was in, but
+wrong about *why* it hung. The bisect said:
+
+> **Hypothesis (not confirmed):** the hang is in the
+> Rust runtime or allocator, not in the function code.
+
+This was wrong. I had read the function source, saw a
+loop that strictly advanced `i`, and concluded there
+was no path that could infinite-loop based on the
+content alone. I was looking at the wrong invariant.
+
+The actual bug, in plain terms:
+
+1. The pass-through loop excludes `!` (so the
+   `![image]` branch can see it).
+2. The `![image]` branch only consumes `!` when
+   followed by `[`.
+3. The `[link]` branch doesn't match `!`.
+
+A `!` not followed by `[` is not consumed by any
+branch. The outer `while i < bytes.len()` spins
+forever at that byte. The smallest trigger is a
+single `!`. The first spec example that hits this
+is #127 (`JavaScript!` inside a `<script>` block).
+
+I missed this in three passes of source review. The
+function was 80 lines and I read it three times looking
+for the bug; I kept stopping at the loop invariant
+"every branch advances `i` or returns" and not
+noticing that none of the branches *handled* the
+`bytes[i] == b'!' && bytes[i+1] != b'['` case at all.
+
+The bisect's bench correctly identified the function.
+The bench's per-iteration timing (0 ms for 125 calls,
+then hang) was a real signal — it was just the wrong
+unit of analysis. The trigger was not "125 different
+inputs"; the trigger was "any input containing a `!`
+not followed by `[`", and the 125-then-126th
+coincidence was because examples 0..125 happen not
+to contain such a `!` while example 126 does.
+
+### 4.3. The actual fix
+
+A four-line branch at the top of the outer loop:
+
+```rust
+if bytes[i] == b'!'
+    && (i + 1 >= bytes.len() || bytes[i + 1] != b'[')
+{
+    out.push('!');
+    i += 1;
+    continue;
+}
+```
+
+This catches the standalone-`!` case before the
+`![image]` and `[link]` branches. The pass-through
+loop's exclusion of `!` is unchanged, so image
+syntax is still detected. The `[link]` branch is
+unchanged.
+
+The fix is applied to both:
+- `src/desktop/tests/commonmark_spec_test.rs` (the
+  production copy used by the per-example test).
+- `src/desktop/tests/check_compile.rs` (the scratch
+  copy used by the bisect benches).
+
+### 4.4. The regression tests
+
+Two new `#[test]` functions in
+`src/desktop/tests/commonmark_spec_test.rs`:
+
+- `strip_link_destinations_passes_standalone_exclamation`:
+  asserts `strip_link_destinations("!") == "!"`,
+  `"!a" == "!a"`, `"JavaScript!" == "JavaScript!"`,
+  and a few more. Eight assertions, smallest possible
+  trigger is a single `!` byte.
+- `strip_link_destinations_does_not_hang_on_127th_spec_example`:
+  the actual reproducer from the per-example test's
+  120s budget exhaustion. Bounded in wall time
+  (`assert!(started.elapsed().as_secs() < 5)`) so a
+  future regression to the hang fails fast instead of
+  timing out the suite.
+
+Both run in 0 ms.
+
+### 4.5. What this means for the original section 1.1
+
+Section 1.1 said "the test itself passes (0/652 failures
+after the gap-fix pass). It's off for runtime, not for
+correctness." That was wrong. The test *failed by
+design* on every run because of the
+`strip_link_destinations` bug, regardless of whether
+the gap fixes from `9138f3e` were in. I confused
+"test doesn't panic in the assertion phase" with
+"test passes"; the per-example test was actually
+exiting via `std::process::exit(1)` from a watchdog
+thread, which is a process-level failure, not a
+test-level failure.
+
+The test is now enabled and passes 608/608 in ~1.1 s
+on this machine. The `#[ignore]` is removed. The
+120s wall-clock budget and `std::process::exit(1)`
+on expiry stay in place as defense-in-depth, not as
+the expected failure mode.
+
+### 4.6. Net summary (revised)
+
+| Category | Count | Notes |
+|---|---|---|
+| `#[ignore]`s added | 0 (was 1) | The per-example test is no longer `#[ignore]`'d; see section 4.5 |
+| `#[ignore]`s removed | 2 (was 1) | `pdf_renders_fenced_code_block` (gap #5) **and** `all_commonmark_examples_render_content_into_pdf` (after the `strip_link_destinations` fix) |
+| Real bugs found via bisect | 1 | `strip_link_destinations` standalone-`!` infinite loop |
+| Assertions weakened | 0 | |
+| Tests renamed | 4 | |
+| Proptest property changed | 0 | |
+| Needle extraction changed | Yes | Correctly identifies metadata vs. content |
+| Tests added (regression) | 2 | `strip_link_destinations_passes_standalone_exclamation`, `strip_link_destinations_does_not_hang_on_127th_spec_example` |
+
+### 4.7. The "more capable model" question
+
+I was asked whether the bisect needed a more capable
+model to finish the analysis. The honest answer: no,
+the analysis was within reach, I just kept looking in
+the wrong place. I had three pieces of evidence that
+should have converged on the function's content
+handling rather than the runtime:
+
+1. The function was the only thing in the per-example
+   pipeline that took user-controlled content.
+2. The bisect isolated the function (correct).
+3. The bench output showed every input taking 0 ms
+   until the 126th (correct, but I attributed the
+   126th to "warmup state" instead of "content with
+   a `!`").
+
+A more capable model would not have helped. A 30-second
+test that calls `strip_link_destinations("!")` and
+sees whether it returns would have caught this on the
+first try. The right next step was a one-line
+reproducer, not more bisect or more source review.
+
+I should have written that one-line reproducer
+before the bisect.

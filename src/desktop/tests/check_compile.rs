@@ -1,11 +1,12 @@
 // Hang-investigation scratch for
 // `extract_content_needles` in
 // `commonmark_spec_test.rs`. The per-example
-// content-fidelity test hangs after ~125 examples in a
-// tight loop on this machine. This file is the
-// bisection result.
+// content-fidelity test used to hang on example 127
+// (0-indexed 126), a `<script>` JavaScript snippet
+// containing a `!` in the JS string literal. This file
+// is the bisection that led to the fix.
 //
-// **Bisection result (this pass):**
+// **Bisection result (initial pass):**
 //
 // Ran five benchmarks, each processing all 608 spec
 // examples with different combinations of the three
@@ -19,36 +20,57 @@
 // | `bench_only_list_markers`           | (run)  | (run) |
 // | `bench_all_three` (production)      | >30s   | YES   |
 //
-// **Root cause: `strip_link_destinations`.** The other
-// two strip functions are fine.
+// **Initial conclusion:** `strip_link_destinations` is
+// the culprit. The other two strip functions are fine.
 //
-// **Further narrowing:**
+// **Updated conclusion (after follow-up measurement):**
+// the "hang" is a content-triggered infinite loop in
+// `strip_link_destinations`. A standalone `!` (one not
+// followed by `[`) was unhandled:
+//
+//   1. The pass-through loop excludes `!` (so the
+//      `![image]` branch can see it).
+//   2. The `![image]` branch only consumes `!` when
+//      followed by `[`.
+//   3. The `[link]` branch doesn't match `!`.
+//
+//   → A `!` not followed by `[` is not consumed by any
+//     branch. The outer `while i < bytes.len()` never
+//     advances. True infinite loop.
+//
+// **Smallest trigger:** a single `!` byte.
+//
+// **Why the initial bisect was misleading:** the bench
+// "hangs at the 126th call" with the first 125
+// processing in 0ms, but the trigger is not the 126th
+// call's input — it's that any of the first 608
+// examples contain a `!` not followed by `[`. Examples
+// 0..125 happen not to contain such a `!`; example 126
+// (`<script>...JavaScript!</script>...`) does. The
+// "125 different inputs" framing was a coincidence.
+//
+// **Fix:** added an explicit standalone-`!` branch at
+// the top of the outer loop in `strip_link_destinations`
+// (in `commonmark_spec_test.rs`; the copy here was
+// updated to match). Regression test:
+// `strip_link_destinations_passes_standalone_exclamation`
+// in `commonmark_spec_test.rs`.
+//
+// **Further narrowing (still useful for future bisects):**
 //
 // - Single input 608x: no hang (0ms)
 // - 125x example[0] + 1x example[125]: no hang (0ms)
 // - 125x different inputs (0..124) + 1x example[0]:
 //   no hang (0ms)
 // - 125x different inputs (0..124) + 1x example[125]:
-//   HANG at the 126th call
+//   no hang (post-fix; was a hang pre-fix because the
+//   bench output-buffered and stalled, masking the
+//   real trigger).
 // - Synthetic inputs of matching lengths ("a".repeat(len)):
 //   no hang
-//
-// The hang requires: 125 *different* inputs, then a 126th
-// input that is different from all 125. Synthetic inputs
-// of the same lengths don't trigger it. The function
-// itself is correct for any single input (the 126th
-// example in isolation completes in 0ms).
-//
-// **Hypothesis (not confirmed):** the hang is in the
-// Rust runtime or allocator, not in the function code.
-// The function's pass-through loop is straightforward
-// byte-by-byte copying; there is no path that could
-// infinite-loop on the 126th input based on its content
-// alone. The content-specific trigger (synthetic inputs
-// of the same lengths don't reproduce) suggests the
-// allocator's internal state depends on the specific
-// allocation pattern, not just the number of
-// allocations.
+// - A *single* call to `strip_link_destinations("!")`:
+//   HANG. This is the actual minimal repro and the
+//   cleanest way to verify the fix.
 //
 // **To run an individual bench:**
 //   cargo test --test check_compile -- --ignored --nocapture <name>
@@ -259,6 +281,15 @@ fn strip_link_destinations(md: &str) -> String {
     let bytes = md.as_bytes();
     let mut i = 0;
     while i < bytes.len() {
+        // Standalone `!` (not followed by `[`) — pass through.
+        // Regression fix: the function previously infinite-
+        // looped on a single `!` byte. See the matching
+        // comment + tests in `commonmark_spec_test.rs`.
+        if bytes[i] == b'!' && (i + 1 >= bytes.len() || bytes[i + 1] != b'[') {
+            out.push('!');
+            i += 1;
+            continue;
+        }
         if bytes[i] == b'!' && i + 1 < bytes.len() && bytes[i + 1] == b'[' {
             let alt_close = match find_unescaped_byte(bytes, i + 2, b']') {
                 Some(j) => j,
@@ -380,6 +411,140 @@ fn run_bench(label: &str, transform: impl Fn(&str) -> Vec<String>) {
         );
     }
     eprintln!("[{label}] DONE: {}ms", t0.elapsed().as_millis());
+}
+
+// --- Measurement: is the hang the function or stdout? ---
+//
+// Same loop as `bench_only_link_destinations` but with
+// the per-iteration `println!` removed. If the hang is
+// the function, this will also hang. If the hang is
+// stdout buffering, this will complete in <1s.
+//
+// Also dumps examples[126] (suspected trigger) and times
+// it in isolation.
+
+#[test]
+#[ignore = "measure: is hang the function or the println?"]
+fn measure_no_println() {
+    let examples = extract(SPEC);
+    eprintln!("[noprint] total: {}", examples.len());
+
+    // Dump the suspected trigger before any loop.
+    if examples.len() > 126 {
+        let t = &examples[126];
+        eprintln!("[noprint] examples[126] LEN={}", t.len());
+        eprintln!(
+            "[noprint] examples[126] bytes (first 200): {:?}",
+            &t.as_bytes()[..t.len().min(200)]
+        );
+        eprintln!(
+            "[noprint] examples[126] utf8 (first 200): {:?}",
+            &t[..t.len().min(200)]
+        );
+
+        // Isolated call on examples[126].
+        eprintln!("[noprint] isolated call on examples[126]...");
+        let t0 = Instant::now();
+        let out = strip_link_destinations(t);
+        eprintln!(
+            "[noprint] isolated examples[126]: {}us out_len={}",
+            t0.elapsed().as_micros(),
+            out.len()
+        );
+    }
+
+    let t0 = Instant::now();
+    let mut total_us: u128 = 0;
+    let mut slow: Vec<(usize, u128, usize)> = Vec::new();
+    for (i, src) in examples.iter().enumerate() {
+        let t = Instant::now();
+        let out = strip_link_destinations(src);
+        let us = t.elapsed().as_micros();
+        total_us += us;
+        if us > 100 {
+            slow.push((i, us, out.len()));
+        }
+        if i % 50 == 0 {
+            eprintln!("[noprint] progress: {}/{}", i, examples.len());
+        }
+        // NO println per iteration.
+    }
+    eprintln!(
+        "[noprint] DONE in {}ms, total {}us, slow={:?}",
+        t0.elapsed().as_millis(),
+        total_us,
+        slow
+    );
+}
+//
+// The previous bisect said `bench_only_link_destinations`
+// "hangs" on the 126th call. But it was killed at 30s
+// without confirming whether that 126th call eventually
+// returns. This test measures both:
+//   (a) the 126th input in isolation (10 trials) — gives
+//       the function's intrinsic cost for that input,
+//   (b) the 126th input after warming with 125 *different*
+//       inputs (matching the bench) — gives the actual
+//       trigger condition.
+//
+// Prints per-iteration timing in microseconds. Exits 0
+// either way; the value is in the logs.
+
+#[test]
+#[ignore = "measure: is it a true hang or just slow?"]
+fn measure_link_dest_126() {
+    let examples = extract(SPEC);
+    eprintln!("[measure] total examples: {}", examples.len());
+    let target = &examples[125];
+    eprintln!("[measure] target length: {} bytes", target.len());
+    eprintln!(
+        "[measure] target bytes (first 64): {:?}",
+        &target.as_bytes()[..target.len().min(64)]
+    );
+    eprintln!(
+        "[measure] target as utf8: {:?}",
+        &target[..target.len().min(64)]
+    );
+
+    // (a) 10 isolated calls on the 126th input.
+    eprintln!("[measure] (a) 10 isolated calls on examples[125]:");
+    for trial in 0..10 {
+        let t = Instant::now();
+        let out = strip_link_destinations(target);
+        let us = t.elapsed().as_micros();
+        eprintln!("[measure]   trial {trial}: {us}us  out_len={}", out.len());
+    }
+
+    // (b) After warming with 125 *different* inputs.
+    eprintln!("[measure] (b) warming with examples[0..125]...");
+    for (i, src) in examples.iter().take(125).enumerate() {
+        let _ = strip_link_destinations(src);
+        if i % 25 == 0 {
+            eprintln!("[measure]   warmed: {i}/125");
+        }
+    }
+    eprintln!("[measure] (b) warmed; now timing the 126th call:");
+    let t = Instant::now();
+    let out = strip_link_destinations(target);
+    let ms = t.elapsed().as_millis();
+    eprintln!("[measure] (b) 126th call: {ms}ms  out_len={}", out.len());
+
+    // (c) If (b) returned quickly, try repeating 125→126
+    //     pattern a few times to see if the hang is
+    //     cumulative across cycles.
+    eprintln!("[measure] (c) repeating warmup→126th cycle 3x:");
+    for cycle in 1..=3 {
+        for src in examples.iter().take(125) {
+            let _ = strip_link_destinations(src);
+        }
+        let t = Instant::now();
+        let out = strip_link_destinations(target);
+        eprintln!(
+            "[measure]   cycle {cycle}: 126th call {}ms  out_len={}",
+            t.elapsed().as_millis(),
+            out.len()
+        );
+    }
 }
 
 // --- Individual benches. Each `#[ignore]` so they don't
