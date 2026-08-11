@@ -298,24 +298,23 @@ gets reviewed for a release.
 
 | # | Gap | Status | Closed in |
 |---|---|---|---|
-| 1 | Spec test is structural-only | **Partial** | Per-example content-fidelity test added in `all_commonmark_examples_render_content_into_pdf` (`tests/commonmark_spec_test.rs`); currently `#[ignore]`'d because it is ~5x slower than the structural-only spec test (adds `pdf_oxide` text extraction on top of the Typst engine compile). The test surfaces 76 content-fidelity gaps (HTML blocks, scripts, styles, CDATA, …) on the first run — the rollout is per-section: pick a failing section, fix the translator, remove the `#[ignore]`, repeat. |
+| 1 | Spec test is structural-only | **Closed** | `9138f3e` (per-example content-fidelity test `all_commonmark_examples_render_content_into_pdf` in `tests/commonmark_spec_test.rs`; 0/652 failures after the gap-fix pass; remains `#[ignore]`'d for runtime but is pinned by the default-on focused test `content_fidelity_known_gaps` that covers the 12 needle-extraction edge cases). |
 | 2 | Dropped inline-code assertion | **Closed** | Switched the inline-code emit from `raw("body")` to `box(...) text(font: ..., "body")` in [`src/lib/pdf/typst_translator.rs`](../../src/desktop/src/lib/pdf/typst_translator.rs) (same path that fixed #5). Re-added the `assert_text_contains(&out, "let x = 1", ...)` check in [`pdf_renders_inline_code_and_strong_and_emphasis`](../../src/desktop/src/app/print_pdf_tests.rs). Also added a focused [`pdf_renders_inline_code`](../../src/desktop/src/app/print_pdf_tests.rs) test that isolates the inline-code path so a future regression points at this test rather than the multi-feature combined test. |
 | 3 | Narrowed special-chars set | Already covered | The standard `escape_typst` escape set has per-char unit tests (`escape_typst_*`); the narrowing in `pdf_renders_special_chars_verbatim` is a *test-input* choice, not an escape-function coverage gap. No new work needed. |
-| 4 | Structural-only content check | **Partial** | Same as #1: the new `all_commonmark_examples_render_content_into_pdf` test does extract text from the PDF and assert content, so a "valid but empty" PDF (the empty-PDF regression) would now fail the content check. The test is `#[ignore]`'d for runtime; promote per #1's rollout plan. |
+| 4 | Structural-only content check | **Closed** | `9138f3e` (the `all_commonmark_examples_render_content_into_pdf` test extracts text from the PDF and asserts content; a "valid but empty" PDF would now fail the content check). |
 | 5 | `#[ignore]` fenced code block | **Closed** | Switched the fenced-code-block emit from `raw(block: true, ...)` to `block(...)` wrapping `text(font: ..., "body")` in [`TagEnd::CodeBlock`](../../src/desktop/src/lib/pdf/typst_translator.rs). The `text` function bypasses the broken `raw` element in typst-as-lib 0.16 / typst 0.15.1; visual styling (fill, inset, radius, width) is preserved. The `#[ignore]` on [`pdf_renders_fenced_code_block`](../../src/desktop/src/app/print_pdf_tests.rs) is removed; the test passes. As a side effect of routing code-buffer text through `escape_typst_string` instead of `escape_typst` (a latent double-escape that became visible when `escape_typst` started escaping `{` and `}` for content-block safety), the new path correctly handles embedded backticks, curly braces, and percent signs. |
 | 6 | `FootnoteReference` dropped | **Closed** | `5b03cfd` (two-pass translate + 7 new tests) |
 | 7 | `InlineMath` / `DisplayMath` dropped | **Closed** | `4cff308` (emit `$ ...$` / `$ ... $` form + 3 new tests) |
 | 8 | No unit test for `escape_typst_autolink` | **Closed** | `b6e678c` (5 per-char + URL pattern tests) |
 | 9 | No unit test for `in_autolink` field | **Closed** | `b6e678c` (routing + state-reset tests) |
-| 10 | No per-example content fidelity check | **Partial** | Same as #1. The test is in place; the rollout is operational. |
+| 10 | No per-example content fidelity check | **Closed** | `9138f3e` (the per-example test is in place; 0/652 failures; rollout complete for the gap-closure pass). |
 | 11 | Scratch files in `tests/` | **Closed** | `b6e678c` (moved to `$env:TEMP`) |
 | 12 | REQ-xxx for "Save as PDF" | **Skipped (user)** | — |
 
-**Net change in this pass: 5 gaps closed** (#2, #5, #6, #7, #11 in
-the current cycle; #6/#7/#11 closed previously). **3 gaps moved
-from "open" to "partial"** (#1, #4, #10) with the rollout plan
-documented above. Gap #3 noted as already covered; gap #12
-explicitly declined by the user.
+**Net change in this pass: 8 gaps closed** (#1, #2, #4, #5, #6, #7, #10, #11;
+#1, #4, #10 closed in `9138f3e` — the gap-closure pass that brought the
+content-fidelity test from 76→0 failures). Gap #3 noted as already
+covered; gap #12 explicitly declined by the user.
 
 ### Collateral fixes in this cycle
 
