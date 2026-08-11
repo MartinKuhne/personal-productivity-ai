@@ -131,6 +131,10 @@ pub fn show_agent_debug_window(app: &mut FastMdApp, ctx: &egui::Context) {
                                     }
                                 }
 
+                                if let Some(content) = &mut display_entry.content {
+                                    unescape_json_strings(content);
+                                }
+
                                 render_entry_row(
                                     ui,
                                     &display_entry,
@@ -208,6 +212,59 @@ fn render_json_text_area(
         });
     })
     .response
+}
+
+/// Recursively un-escapes double-escaped JSON strings and external data envelopes
+/// in the debug entry payload, making them pretty-printable in the UI.
+fn unescape_json_strings(val: &mut serde_json::Value) {
+    match val {
+        serde_json::Value::Object(map) => {
+            for (_, v) in map.iter_mut() {
+                unescape_json_strings(v);
+            }
+        }
+        serde_json::Value::Array(arr) => {
+            for v in arr.iter_mut() {
+                unescape_json_strings(v);
+            }
+        }
+        serde_json::Value::String(s) => {
+            let s_trimmed = s.trim();
+            if (s_trimmed.starts_with('{') && s_trimmed.ends_with('}'))
+                || (s_trimmed.starts_with('[') && s_trimmed.ends_with(']'))
+            {
+                if let Ok(mut parsed) = serde_json::from_str::<serde_json::Value>(s_trimmed) {
+                    unescape_json_strings(&mut parsed);
+                    *val = parsed;
+                    return;
+                }
+            }
+
+            if s_trimmed.starts_with("<<<EXTERNAL_DATA>>>") && s_trimmed.ends_with("<<<END_EXTERNAL_DATA>>>") {
+                let inner = &s_trimmed["<<<EXTERNAL_DATA>>>".len()..s_trimmed.len() - "<<<END_EXTERNAL_DATA>>>".len()];
+                let inner = inner.trim();
+                if let Some((prov, data)) = inner.split_once('\n') {
+                    if prov.starts_with("provenance=") {
+                        let data_trimmed = data.trim();
+                        if (data_trimmed.starts_with('{') && data_trimmed.ends_with('}'))
+                            || (data_trimmed.starts_with('[') && data_trimmed.ends_with(']'))
+                        {
+                            if let Ok(mut parsed) = serde_json::from_str::<serde_json::Value>(data_trimmed) {
+                                unescape_json_strings(&mut parsed);
+                                *val = serde_json::json!({
+                                    "EXTERNAL_DATA": {
+                                        "provenance": prov,
+                                        "data": parsed
+                                    }
+                                });
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        _ => {}
+    }
 }
 
 #[cfg(test)]
