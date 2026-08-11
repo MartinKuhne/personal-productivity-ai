@@ -182,10 +182,12 @@ impl AppOrchestrator {
     pub fn start_agent_session(&mut self, prompt: String) {
         let (active_file, active_dir, selected_files) =
             self.selection.agent_context(&self.tab_manager.tabs);
-        let session_id = uuid::Uuid::new_v4();
+        let session_id = self.agent.current_session_id().unwrap_or_else(uuid::Uuid::new_v4);
+        let is_new = self.agent.current_session_id().is_none();
+        
         let agent_prompt = crate::agent::events::AgentPrompt {
             session_id,
-            text: prompt,
+            text: prompt.clone(),
             active_file,
             active_dir,
             selected_files,
@@ -193,11 +195,19 @@ impl AppOrchestrator {
         };
         self.agent.submit_prompt(agent_prompt);
         self.agent_panel_state.show_results = true;
-        // Clear the transcript immediately so the UI shows empty content
-        // between session start and the `SessionStarted` event arrival.
-        // `SessionStarted` will create a fresh transcript with the correct
-        // `session_id`.
-        self.agent_transcript.reset();
+        
+        if is_new {
+            // Clear the transcript immediately so the UI shows empty content
+            // between session start and the `SessionStarted` event arrival.
+            self.agent_transcript.reset();
+        } else {
+            // Visually separate the new prompt in the transcript for continuation
+            let user_prompt = format!("\n\n**User:** {}\n\n", prompt);
+            self.agent_transcript.content.push_str(&user_prompt);
+            self.agent_transcript.blocks.push(crate::ui::agent::transcript::TranscriptBlock::Content {
+                text: user_prompt,
+            });
+        }
     }
 
     pub fn task_take_finished_watcher(&self) -> Option<notify::RecommendedWatcher> {
@@ -344,7 +354,9 @@ impl AppOrchestrator {
                     }
                     match &event {
                         SeamAgentEvent::SessionStarted { session_id } => {
-                            self.agent_transcript = AgentTranscript::new(*session_id);
+                            if self.agent_transcript.session_id != *session_id {
+                                self.agent_transcript = crate::ui::agent::transcript::AgentTranscript::new(*session_id);
+                            }
                         }
                         SeamAgentEvent::SessionFinished { history, .. } => {
                             self.agent.set_running(false);

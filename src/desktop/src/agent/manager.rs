@@ -378,6 +378,7 @@ impl AgentSessionManager {
         self.state.history = None;
         self.state.token_usage = None;
         self.state.total_usage = TokenUsageInfo::default();
+        self.current_session_id = None;
     }
 
     /// Cancel any running agent session.
