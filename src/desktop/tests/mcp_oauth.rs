@@ -294,10 +294,7 @@ fn full_flow_succeeds_with_preregistered_client() {
                     .find_map(|kv| kv.strip_prefix("redirect_uri="))
                     .unwrap_or(""),
             );
-            let location = format!(
-                "{}?code=mock-code&state={}",
-                redirect_uri, state_param
-            );
+            let location = format!("{}?code=mock-code&state={}", redirect_uri, state_param);
             redirect_302(&location)
         }),
     );

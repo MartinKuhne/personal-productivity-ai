@@ -693,26 +693,38 @@ fn strip_list_markers(md: &str) -> String {
 /// translator that dropped all body content; this content
 /// fidelity check would fail that same translator immediately).
 ///
-/// Marked `#[ignore]` because the test is ~5x slower than the
-/// compile-only spec test: each of the 652 examples pays the
-/// `pdf_oxide` extraction cost on top of the Typst engine
-/// compile. Rollout plan (per the ADR):
+/// `#[ignore]` status: the per-example test hangs after
+/// roughly 125 examples in a tight loop on this machine.
+/// The hang is in `extract_content_needles` — specifically
+/// in the strip functions (`strip_link_ref_defs`,
+/// `strip_link_destinations`, `strip_list_markers`) added
+/// in the gap-fix pass. Individual examples process in <1ms,
+/// but the loop hangs after ~125 examples regardless of
+/// the range tested (0-50 completes, 0-100 completes,
+/// 0-200 hangs; 56-60 completes, 64-70 completes, 64-75
+/// hangs). The hang is not in the Typst engine (the
+/// benchmark with `simple_needles` — no strip functions —
+/// completes all 608 examples in ~5s) and not in
+/// `pdf_oxide` (the benchmark with compile + pdf_oxide
+/// completes all 608 examples in ~6s). The strip functions
+/// are pure string manipulation with no infinite loops
+/// (all loops advance their index unconditionally), so the
+/// root cause is likely a state-accumulation or
+/// allocator-heap issue triggered by the specific input
+/// pattern of spec example ~126 onwards. Not yet isolated
+/// — would need to bisect the strip functions one at a
+/// time on the actual full input.
 ///
-/// 1. `cargo nextest run -p fastmd --features pdf-export --run-ignored all_commonmark_examples_render_content_into_pdf`
-///    to time it locally (~2-5 minutes expected).
-/// 2. If the runtime is acceptable, remove the `#[ignore]`.
-/// 3. If specific sections fail, those are real translator bugs
-///    to fix (likely gaps in `escape_typst`, `escape_typst_string`,
-///    or the spec-corpus edge cases like type-1 HTML blocks).
-///
-/// The needle count per example is capped at 3 to keep the test
-/// fast and to avoid pinning a test pass on a single rare
-/// occurrence of a word; "at least one" is the contract.
+/// The 12 needle-extraction fixes are pinned by the fast
+/// default-on companion `content_fidelity_known_gaps`
+/// so a regression on a needle-extraction edge case is
+/// caught even though this full per-example test is
+/// still `#[ignore]`'d.
 #[test]
-#[ignore = "per-example content fidelity; ~5x slower than the \
-          structural-only spec test (adds pdf_oxide text \
-          extraction on top of the Typst engine compile). \
-          Promote to default-on once the runtime is acceptable. \
+#[ignore = "per-example content fidelity; hangs after ~125 examples \
+          in a tight loop on this machine (see doc comment above). \
+          The 12 needle-extraction fixes are pinned by the \
+          default-on companion `content_fidelity_known_gaps`. \
           See doc/adr/pdf-export-test-gaps.md gaps #1, #4, #10."]
 fn all_commonmark_examples_render_content_into_pdf() {
     let examples = extract_markdown_examples(SPEC);
