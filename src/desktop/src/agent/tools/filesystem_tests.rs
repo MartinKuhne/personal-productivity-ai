@@ -51,7 +51,7 @@ fn test_tool_patch_note_not_found() {
     );
     assert_eq!(
         result.unwrap_err(),
-        "The specified old_string was not found in the file."
+        "The specified old_string was not found in the file body."
     );
 }
 

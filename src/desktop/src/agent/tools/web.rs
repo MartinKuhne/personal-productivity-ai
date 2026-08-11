@@ -11,9 +11,9 @@ use fast_h2m::convert;
 use std::collections::HashMap;
 use std::time::Instant;
 
-/// Page size for `tool_web_fetch` (cursor mode). 100 lines per the
+/// Page size for `tool_web_fetch` (cursor mode). 64 lines per the
 /// cursor model specification.
-const WEB_FETCH_PAGE_SIZE: usize = 100;
+const WEB_FETCH_PAGE_SIZE: usize = 64;
 
 pub fn tool_web_fetch(
     input: &crate::agent::tools::dtos::WebFetchInput,
@@ -367,7 +367,7 @@ pub fn tool_web_delegate(
         "type": "function",
         "function": {
             "name": "web_fetch",
-            "description": "Fetch a URL and convert the content to Markdown. Returns up to 100 lines and a cursor token for pagination. Use the cursor to fetch the next page. Use force_refetch=true to bypass.",
+            "description": "Fetch a URL and convert the content to Markdown. Returns up to 64 lines and a cursor token for pagination. Use the cursor to fetch the next page. Use force_refetch=true to bypass.",
             "parameters": schemars::schema_for!(crate::agent::tools::dtos::WebFetchInput)
         }
     })];

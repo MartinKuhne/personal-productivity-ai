@@ -24,6 +24,8 @@ pub struct AgentPanelState {
     /// Stable string id of the heading the agent-results panel should
     /// scroll to. The UI layer maps it to an `egui::Id` at render time.
     pub scroll_to_id: Option<String>,
+    /// Number of JSON rows to show in the debug window's expanded entry view.
+    pub debug_json_rows: usize,
     /// Active session identity (UI tracks which session to render).
     pub active_session_id: Option<Uuid>,
 }
@@ -35,6 +37,7 @@ impl Default for AgentPanelState {
             show_debug_window: false,
             debug_auto_scroll: true,
             debug_search_text: String::new(),
+            debug_json_rows: 8,
             command_input: String::new(),
             scroll_to_id: None,
             active_session_id: None,

@@ -1,6 +1,7 @@
 //! Tests for `agent/manager.rs`.
 
 use super::*;
+use crate::bus::events::debug::{AgentDebugEntry, DebugEntryKind, DebugEntryRow};
 use crate::config::AppConfig;
 use std::collections::HashSet;
 
@@ -288,8 +289,6 @@ fn test_failed_clears_queue() {
 
 #[test]
 fn test_debug_entry_accumulates() {
-    use crate::bus::events::debug::{AgentDebugEntry, DebugEntryKind, DebugEntryRow};
-
     let config = AppConfig::default();
     let mut mgr = AgentSessionManager::new_for_test(
         config,
@@ -322,6 +321,7 @@ fn test_debug_entry_accumulates() {
         row_type: DebugEntryRow::Entry,
     };
     mgr.push_debug_entry(entry2);
+    assert_eq!(mgr.state.debug_entries.len(), 2);
     assert_eq!(mgr.state.debug_entries.len(), 2);
 }
 
