@@ -365,6 +365,7 @@ impl McpClientSession {
             timeout: None,
             pre_registered_client: self.pre_registered_client(),
             loopback_override,
+            browser_override: None,
         }
     }
 
@@ -810,7 +811,21 @@ impl McpClientSession {
                 "websiteUrl": CLIENT_WEBSITE_URL,
             }
         });
-        let init_id: u64 = 1;
+        // Allocate the init id from the same monotonic counter the
+        // rest of the session uses, and bump it. Previously this was
+        // hard-coded to 1, which meant the first post-handshake
+        // request re-used id 1 and any mock that asserts on the
+        // next-id (`test_stdio_session_handshake_and_call` in
+        // `mcp/tests.rs`) saw a duplicate.
+        let init_id: u64 = {
+            let mut state = self.lock_state()?;
+            let id = state.next_id;
+            // Per spec: id MUST be representable as a JSON integer
+            // and SHOULD be unique per session. u64 is fine in
+            // practice; we wrap on overflow rather than panic.
+            state.next_id = state.next_id.wrapping_add(1);
+            id
+        };
         let init_response =
             self.send_request(init_id, "initialize", init_params, DEFAULT_REQUEST_TIMEOUT)?;
         Self::extract_result(&self.config_label(), "initialize", init_response.clone())?;
@@ -982,6 +997,16 @@ impl McpClientSession {
                         "failed to send notifications/cancelled after timeout"
                     );
                 }
+                // Give the subprocess a brief window to drain the
+                // cancel from its stdin pipe before we mark the
+                // transport dead (which kills the child). Without
+                // this grace period a fast `mark_stdio_dead` can
+                // race the read on the child side and the cancel
+                // never makes it into the captured stream. 50ms is
+                // a tight, well-bounded delay: it's a fraction of
+                // any realistic request timeout and only runs on
+                // the unhappy timeout path.
+                std::thread::sleep(std::time::Duration::from_millis(50));
                 // Return the timeout error directly. The previous
                 // implementation fell through to `recv_stdio_line`,
                 // which would surface a generic "no live transport"
@@ -997,7 +1022,12 @@ impl McpClientSession {
                 ));
             }
             let remaining = deadline.saturating_duration_since(now);
-            let line = self.recv_stdio_line(remaining)?;
+            let Some(line) = self.recv_stdio_line(remaining)? else {
+                // Inner read window elapsed without data; loop
+                // back so the outer deadline check above fires
+                // and we go through the cancel-write path.
+                continue;
+            };
             let value: serde_json::Value = match serde_json::from_str(&line) {
                 Ok(v) => v,
                 Err(e) => {
@@ -1040,7 +1070,7 @@ impl McpClientSession {
         }
     }
 
-    fn recv_stdio_line(&self, timeout: std::time::Duration) -> Result<String, McpError> {
+    fn recv_stdio_line(&self, timeout: std::time::Duration) -> Result<Option<String>, McpError> {
         // Grab an Arc handle to the receiver so the session-level
         // lock is released before we sleep.
         let rx = {
@@ -1063,17 +1093,21 @@ impl McpClientSession {
             match recv {
                 // The inner Ok is `std::io::Result<String>`; convert
                 // any read error into a transport error.
-                Ok(Ok(line)) => return Ok(line),
+                Ok(Ok(line)) => return Ok(Some(line)),
                 Ok(Err(io_err)) => {
                     return Err(self.mark_stdio_dead("read", io_err));
                 }
                 Err(std::sync::mpsc::TryRecvError::Empty) => {
                     let now = std::time::Instant::now();
                     if now >= deadline {
-                        return Err(McpError::transport(
-                            format!("stdio server '{}'", self.config_label()),
-                            "read timeout",
-                        ));
+                        // Inner timeout: signal "no data within the
+                        // window" by returning `None`. The caller
+                        // owns the outer deadline and is responsible
+                        // for writing the cancellation notification
+                        // before the child is killed. Returning an
+                        // error here would short-circuit that path
+                        // and the cancel would never be sent.
+                        return Ok(None);
                     }
                     let remaining = deadline.saturating_duration_since(now);
                     std::thread::sleep(sleep_step.min(remaining));

@@ -41,8 +41,8 @@ pub mod test_support;
 
 pub use client::OAuthClient;
 pub use flow::{
-    OAuthFlowInputs, OAuthFlowOutput, PreRegisteredClient, build_resource_uri, refresh, run_flow,
-    run_flow as run_oauth_flow,
+    BrowserOverride, OAuthFlowInputs, OAuthFlowOutput, PreRegisteredClient, build_resource_uri,
+    refresh, run_flow, run_flow as run_oauth_flow,
 };
 pub use pkce::{
     AuthorizationUrlInputs, PkcePair, State, build_authorization_url, percent_encode, s256,

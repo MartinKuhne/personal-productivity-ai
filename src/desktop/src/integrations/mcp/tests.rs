@@ -141,7 +141,6 @@ fn test_update_config_shuts_down_removed_server_sessions() {
 /// * The session can be re-used across calls (subprocess stays
 ///   alive).
 #[test]
-#[ignore = "environment-dependent: requires a working python stdio mock — see issue tracker"]
 fn test_stdio_session_handshake_and_call() {
     let python = locate_python();
     let Some(python) = python else {
@@ -149,10 +148,10 @@ fn test_stdio_session_handshake_and_call() {
         return;
     };
 
-    // Mock server: reads one line, writes the init response,
-    // reads a second line (notifications/initialized) and
-    // discards, reads a third line (tools/call) and writes a
-    // canned result, then exits on EOF.
+    // Mock server: handles the init handshake, then responds to
+    // every `tools/call` it sees. Loops until EOF on stdin so
+    // the test can prove the persistent subprocess is reused
+    // across multiple calls.
     let script = r#"
 import json, sys
 
@@ -160,41 +159,45 @@ def send(obj):
     sys.stdout.write(json.dumps(obj) + "\n")
     sys.stdout.flush()
 
-line1 = sys.stdin.readline()
-req = json.loads(line1)
-assert req.get("method") == "initialize", f"expected initialize, got {req}"
-assert req.get("id") == 1
-params = req.get("params") or {}
-assert params.get("protocolVersion"), "client must send protocolVersion"
-client_info = params.get("clientInfo") or {}
-assert client_info.get("name"), "client must send clientInfo.name"
-send({
-    "jsonrpc": "2.0",
-    "id": 1,
-    "result": {
-        "protocolVersion": "2025-11-25",
-        "capabilities": {"tools": {"listChanged": False}},
-        "serverInfo": {"name": "mock", "version": "0.0.1"},
-        "instructions": "hello",
-    },
-})
-
-# notifications/initialized: no id, no response expected.
-line2 = sys.stdin.readline()
-note = json.loads(line2)
-assert note.get("method") == "notifications/initialized", f"expected notifications/initialized, got {note}"
-assert "id" not in note, "notifications must not carry an id"
-
-# tools/call: id 2, return a canned content block.
-line3 = sys.stdin.readline()
-req3 = json.loads(line3)
-assert req3.get("id") == 2, f"expected id 2, got {req3}"
-assert req3.get("method") == "tools/call"
-send({
-    "jsonrpc": "2.0",
-    "id": 2,
-    "result": {"content": [{"type": "text", "text": "ok"}]},
-})
+next_id = None
+while True:
+    line = sys.stdin.readline()
+    if not line:
+        break
+    req = json.loads(line)
+    method = req.get("method")
+    if method == "initialize":
+        next_id = req.get("id")
+        assert next_id is not None
+        params = req.get("params") or {}
+        assert params.get("protocolVersion"), "client must send protocolVersion"
+        client_info = params.get("clientInfo") or {}
+        assert client_info.get("name"), "client must send clientInfo.name"
+        send({
+            "jsonrpc": "2.0",
+            "id": next_id,
+            "result": {
+                "protocolVersion": "2025-11-25",
+                "capabilities": {"tools": {"listChanged": False}},
+                "serverInfo": {"name": "mock", "version": "0.0.1"},
+                "instructions": "hello",
+            },
+        })
+        next_id = None
+        continue
+    if method == "notifications/initialized":
+        assert "id" not in req, "notifications must not carry an id"
+        continue
+    if method == "tools/call":
+        rid = req.get("id")
+        assert rid is not None
+        send({
+            "jsonrpc": "2.0",
+            "id": rid,
+            "result": {"content": [{"type": "text", "text": "ok"}]},
+        })
+        continue
+    # Ignore anything else (cancellations, progress, etc.).
 "#;
 
     let tmp = tempfile_in_target("mock_mcp_stdio.py");
@@ -410,7 +413,6 @@ with open(r"{cap_path}", "w") as f:
 /// under the 60s default. Also asserts the server saw a
 /// `notifications/cancelled` for the in-flight request id.
 #[test]
-#[ignore = "temporarily disabled: timing-sensitive — see issue tracker"]
 fn test_stdio_call_tool_with_short_timeout_cancels() {
     let Some(python) = locate_python() else {
         eprintln!("python not found; skipping per-call timeout test");
@@ -1541,7 +1543,6 @@ send({
 /// the cap (because the server is hanging, not because the
 /// caller is waiting).
 #[test]
-#[ignore = "temporarily disabled: timing-sensitive — see issue tracker"]
 fn test_stdio_call_tool_caps_extreme_timeout() {
     let Some(python) = locate_python() else {
         eprintln!("python not found; skipping max-timeout cap test");
@@ -1652,7 +1653,6 @@ while True:
 /// but its return value was discarded, so the caller saw the
 /// reader's EOF error instead of the timeout.
 #[test]
-#[ignore = "environment-dependent: requires a working python stdio mock — see issue tracker"]
 fn test_stdio_timeout_error_message_is_preserved() {
     let Some(python) = locate_python() else {
         eprintln!("python not found; skipping timeout-error test");
