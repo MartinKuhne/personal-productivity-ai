@@ -462,19 +462,12 @@ fn pdf_renders_lists() {
 /// `*text*` / `_text_` broke adjacent-to-text cases (spec
 /// test case #311, #326, #337, #352, #371). The
 /// `#emph[...]` / `#strong[...]` content blocks fix the
-/// adjacent cases; the `#raw("...")` function form fixes the
-/// embedded-backtick case.
-///
-/// NOTE: inline code content is currently rendered as
-/// zero-width in the printed PDF. The body shows the
-/// surrounding text and the trailing space from the chain
-/// break, but the `let x = 1` substring does not appear in
-/// the extracted text. Root cause: the embedded `DejaVu Sans
-/// Mono` font is loaded into the engine but the inline
-/// `raw` element is rendering as if the font were missing.
-///
-// TODO: when the code-block font issue is fixed, add the
-// `assert_text_contains(&out, "let x = 1", ...)` check back.
+/// adjacent cases; the `box(...) text(font: ..., "...")`
+/// function form (formerly `#raw("...")`) routes inline code
+/// through a `text` call, which bypasses the broken
+/// `raw` element in typst-as-lib 0.16 / typst 0.15.1
+/// (ADR gap #2). The fenced code-block path uses the same
+/// `block + text` pattern; see `pdf_renders_fenced_code_block`.
 #[test]
 fn pdf_renders_inline_code_and_strong_and_emphasis() {
     let md = r#"
@@ -485,6 +478,8 @@ Emphasis: *this is italic*.
 Adjacent strong: foo**bar**baz.
 
 Adjacent emphasis: foo*bar*baz.
+
+Inline code: `let x = 1`.
 "#;
     let out = compile_and_extract(md, "inline");
     assert_text_contains(
@@ -511,26 +506,49 @@ Adjacent emphasis: foo*bar*baz.
         "baz",
         "pdf_renders_inline_code_and_strong_and_emphasis",
     );
+    // Inline code body. Was previously dropped (ADR gap #2) and
+    // asserted-out by the TODO. The translator now uses
+    // `box(...) text(font: ..., "...")` instead of `raw("...")`
+    // and the body glyphs appear in the PDF.
+    assert_text_contains(
+        &out,
+        "let x = 1",
+        "pdf_renders_inline_code_and_strong_and_emphasis",
+    );
+}
+
+/// Inline code must appear as a literal token in the PDF body.
+/// This is a focused companion to
+/// `pdf_renders_inline_code_and_strong_and_emphasis` that
+/// isolates the inline-code path so a future regression in the
+/// `box + text` emit points at this test rather than the
+/// multi-feature combined test.
+///
+/// The previous `#raw("body")` form dropped the body glyphs in
+/// typst-as-lib 0.16 / typst 0.15.1 (ADR gap #2). The
+/// translator now uses `#box(fill: luma(245), inset: 2pt,
+/// radius: 2pt, text(font: ("DejaVu Sans Mono",
+/// "Liberation Mono", "Courier New"), size: 0.9em, "body"))`
+/// which routes the body through a `text` call.
+#[test]
+fn pdf_renders_inline_code() {
+    let md = "Use `let x = 1` to assign.\n";
+    let out = compile_and_extract(md, "inline-code");
+    assert_text_contains(&out, "let x = 1", "pdf_renders_inline_code");
 }
 
 /// Fenced code block must appear as a literal block of source
-/// text. Typst's `raw(block: true, ...)` rendering is what
-/// surfaces code in the PDF; if the translator emits
-/// backtick-fenced raw instead, the curly braces and percent
-/// signs in the code body would be parsed as markup and either
-/// raise compile errors or be silently dropped.
-///
-/// KNOWN LIMITATION: fenced code blocks currently render as
-/// empty (the body BT for the block has no glyphs). Root cause:
-/// the embedded `DejaVu Sans Mono` font is loaded into the
-/// engine but the block-level `raw` call is dropping the
-/// content. Pinned as a regression test so this doesn't go
-/// further. See `pdf_renders_inline_code_and_strong_and_emphasis`
-/// for the same issue in the inline path.
+/// text. The translator previously used Typst's
+/// `raw(block: true, ...)` which renders the block border,
+/// padding, and framing correctly but dropped the body glyphs
+/// in typst-as-lib 0.16 / typst 0.15.1 (ADR gap #5). The
+/// translator now uses a `block(...)` wrapper around a
+/// `text(font: ..., "body")` call, which bypasses the broken
+/// `raw` element while keeping the same visual styling (fill,
+/// inset, radius, width). The inline code path uses the same
+/// `box + text` pattern; see
+/// `pdf_renders_inline_code_and_strong_and_emphasis`.
 #[test]
-#[ignore = "fenced code block rendering currently drops the body \
-          content; see the doc comment above. The structural \
-          elements (block border, padding) render correctly."]
 fn pdf_renders_fenced_code_block() {
     let md = "```rust\nfn main() {\n    let x: i32 = 1;\n    println!(\"{}\", x);\n}\n```\n";
     let out = compile_and_extract(md, "code-block");

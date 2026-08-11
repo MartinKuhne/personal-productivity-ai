@@ -92,38 +92,52 @@ fn strikethrough_uses_strike_function() {
 }
 
 #[test]
-fn inline_code_renders_as_raw_function() {
-    // Inline code spans are emitted as the Typst `#raw("...")` function
-    // call (string argument) rather than backtick-fenced raw text. The
-    // function form is required because the body can contain backticks
-    // — see `inline_code_with_embedded_backticks` below for the
-    // embedded-backtick regression that motivated the switch. The
-    // body is string-escaped (only `\` and `"`) so markup-special
-    // characters in the code body are passed through verbatim.
+fn inline_code_renders_as_box_text() {
+    // Inline code spans are emitted as a `box` wrapping a `text`
+    // call holding the body. The string form inside `text(...)` is
+    // required because the body can contain backticks — see
+    // `inline_code_with_embedded_backticks` below for the
+    // embedded-backtick regression that motivated the switch away
+    // from backtick-fenced raw text. The body is string-escaped
+    // (only `\` and `"`) so markup-special characters in the code
+    // body are passed through verbatim.
+    //
+    // The previous form `#raw("...")` was switched to
+    // `box(...) text(font: ..., "...")` because typst-as-lib 0.16
+    // / typst 0.15.1 drops the body of the `raw` element in the
+    // generated PDF (ADR gap #2). The new form is the smallest
+    // replacement that bypasses the broken element while keeping
+    // the inline background, inset, and monospace font.
     let out = render_markdown_to_typst("`x = 1`");
     assert!(
-        out.contains("#raw(\"x = 1\")"),
-        "expected raw function form, got: {out}"
+        out.contains("\"x = 1\""),
+        "expected the code body as a string literal, got: {out}"
+    );
+    assert!(
+        out.contains("text(font:"),
+        "expected a text() call setting the monospace font, got: {out}"
+    );
+    assert!(
+        out.contains("box(fill: luma(245)"),
+        "expected the inline background/inset, got: {out}"
     );
 }
 
 #[test]
 fn inline_code_with_embedded_backticks() {
     // Regression: code spans whose body contains one or more backticks
-    // must still render to a valid Typst document. The backtick-
-    // fenced raw text form was rejected by Typst with "unclosed raw
-    // text" because `escape_typst` backslash-escaped the embedded
-    // backtick to `` \` ``, but the `\` is a literal character inside
-    // raw text (not an escape) and the following `` ` `` was
-    // interpreted as the raw's close delimiter. The fix: switch to
-    // the `#raw("...")` function form, where the body is a string
-    // literal and embedded backticks render literally.
+    // must still render to a valid Typst document. The previous
+    // backtick-fenced raw text form was rejected by Typst with
+    // "unclosed raw text" because the embedded backtick was
+    // interpreted as the raw's close delimiter. The fix: use a
+    // string literal inside `text(...)`, where embedded backticks
+    // are literal characters.
     //
     // Each example below is one of the five spec failures
     // (examples #285, #286, #287, #295, #296) — the translation is
-    // asserted to contain `#raw("...")` with the expected body
-    // content. The full round-trip (translation + PDF compile) is
-    // covered by the spec test in `tests/commonmark_spec_test.rs`.
+    // asserted to contain the body verbatim in a string literal.
+    // The full round-trip (translation + PDF compile) is covered
+    // by the spec test in `tests/commonmark_spec_test.rs`.
     let cases = [
         ("`` foo ` bar ``", "foo ` bar"),
         ("` `` `", "``"),
@@ -133,39 +147,71 @@ fn inline_code_with_embedded_backticks() {
     ];
     for (md, expected_body) in cases {
         let out = render_markdown_to_typst(md);
-        let expected_call = format!("#raw(\"{}\")", expected_body);
+        let expected = format!("\"{}\"", expected_body);
         assert!(
-            out.contains(&expected_call),
-            "expected {expected_call:?} in translator output for {md:?}, got: {out}"
+            out.contains(&expected),
+            "expected {expected:?} in translator output for {md:?}, got: {out}"
         );
     }
 }
 
 #[test]
-fn fenced_code_block_uses_raw_with_lang() {
+fn fenced_code_block_uses_block_text() {
     let md = "```rust\nfn main() {}\n```\n";
     let out = render_markdown_to_typst(md);
-    // The new format uses the Typst string form so that curly
-    // braces and other markup-special characters in code bodies
-    // are passed through verbatim.
+    // The new form is a `block` wrapping a `text` call (not
+    // `raw`). The language hint is preserved as a comment; the
+    // body is the string literal. The previous `raw` form was
+    // dropped because typst-as-lib 0.16 / typst 0.15.1 strips the
+    // body glyphs from the PDF stream (ADR gap #5).
     assert!(
-        out.contains("#raw(block: true, lang: \"rust\", \"fn main() {}\")")
-            || out.contains("#raw(block: true, lang: \"rust\""),
-        "got: {out}"
+        out.contains("#block("),
+        "expected #block( for the code block wrapper, got: {out}"
     );
-    assert!(out.contains("fn main()"));
+    assert!(
+        out.contains("fill: luma(245)"),
+        "expected the block-level background fill, got: {out}"
+    );
+    // The body lands in a `#text("...")` call. We don't pin the
+    // exact substring because the body has a trailing newline
+    // (the markdown source ends the body line with `\n`); the
+    // body is present, that's the contract.
+    assert!(
+        out.contains("#text(\""),
+        "expected a #text(\"...\") call for the body, got: {out}"
+    );
+    assert!(
+        out.contains("fn main() {}"),
+        "expected the body content verbatim, got: {out}"
+    );
+    assert!(
+        out.contains("// lang: rust"),
+        "expected the language hint as a comment, got: {out}"
+    );
 }
 
 #[test]
-fn fenced_code_block_without_lang_uses_raw_string() {
+fn fenced_code_block_without_lang_uses_block_text() {
     let md = "```\nplain code\n```\n";
     let out = render_markdown_to_typst(md);
-    // We emit `#raw(block: true, "...")` for the untagged case
-    // so that any markup-special characters in the code body
-    // (curly braces, asterisks, etc.) are passed through verbatim
-    // and not interpreted as Typst markup.
-    assert!(out.contains("#raw(block: true"), "got: {out}");
-    assert!(out.contains("plain code"));
+    // Untagged code blocks get the same `block` + `text` form
+    // without a language-hint comment.
+    assert!(
+        out.contains("#block("),
+        "expected #block( for the code block wrapper, got: {out}"
+    );
+    assert!(
+        out.contains("#text(\""),
+        "expected a #text(\"...\") call for the body, got: {out}"
+    );
+    assert!(
+        out.contains("plain code"),
+        "expected the body content verbatim, got: {out}"
+    );
+    assert!(
+        !out.contains("// lang:"),
+        "expected no language comment for an untagged code block, got: {out}"
+    );
 }
 
 #[test]
@@ -385,9 +431,17 @@ fn complex_doc_round_trips_all_features() {
     assert!(out.contains("= Title"), "missing heading: {out}");
     assert!(out.contains("#strong[bold]"));
     assert!(out.contains("#emph[italic]"));
+    // The fenced code block switched from `raw` to `block + text`
+    // when typst-as-lib 0.16 / typst 0.15.1 dropped the raw
+    // body glyphs (ADR gap #5). We spot-check the new emit
+    // shape here.
     assert!(
-        out.contains("#raw(block: true, lang: \"rust\""),
-        "got: {out}"
+        out.contains("#block("),
+        "expected #block( for the code block wrapper, got: {out}"
+    );
+    assert!(
+        out.contains("fill: luma(245)"),
+        "expected the code block fill, got: {out}"
     );
     assert!(out.contains("#quote(block: true)["));
     assert!(out.contains("#table("));
@@ -515,6 +569,32 @@ fn escape_typst_quote() {
     assert_eq!(escape_typst(r#"say "hi""#), r#"say \"hi\""#);
 }
 
+/// Pin: `{` and `}` are markup-active in Typst content mode (they
+/// delimit script blocks). A literal `{` in user prose would
+/// otherwise open a script block and Typst would parse everything
+/// after it as code until the matching `}`. Added when the
+/// code-block emit switched from `raw` to `block + text`; the
+/// switch made code-block bodies go through a string literal
+/// (where `{` is literal) but other content paths (paragraphs,
+/// headings, table cells) still emit through `escape_typst` into
+/// content blocks where `{` would be live.
+#[test]
+fn escape_typst_braces() {
+    assert_eq!(escape_typst("{"), r"\{");
+    assert_eq!(escape_typst("}"), r"\}");
+    assert_eq!(escape_typst("a { b } c"), r"a \{ b \} c");
+    // The escaped form must appear when a body containing braces
+    // is rendered in body text (NOT inside backticks, which route
+    // through `escape_typst_string` where `{`/`}` are literal and
+    // don't need escaping). Use a heading so the entire body goes
+    // through `escape_typst` into a content block.
+    let out = render_markdown_to_typst("# Struct { key: 1 }");
+    assert!(
+        out.contains(r"\{ key: 1 \}"),
+        "braces in body text should be escaped, got: {out}"
+    );
+}
+
 /// Pin: chars that look like markup but are NOT escaped (and don't
 /// need to be inside a content block). Documents the negative
 /// half of the contract so a well-meaning future change can't
@@ -548,21 +628,25 @@ fn escape_typst_passes_through_safe_chars() {
 fn escape_typst_full_set_round_trip() {
     // Input is 12 chars: `\` `#` `*` `_` `` ` `` `[` `]` `@` `$` `~` `"` `'`
     // (note: two backslashes in source `\\` is one backslash; `\"` is
-    // one double-quote; the apostrophe is unescaped).
-    let input: &str = "\\#*_`[]@$~\"'";
-    // Expected output is 24 chars: each input char becomes
+    // one double-quote; the apostrophe is unescaped). `{` and `}`
+    // are now in the set too (they delimit script blocks and would
+    // otherwise be live in content blocks).
+    let input: &str = "\\#*_`[]{}@$~\"'";
+    // Expected output is 28 chars: each input char becomes
     // backslash + char, except the backslash itself which becomes
     // two backslashes. Build it char-by-char to keep the test
     // obviously correct.
-    let mut expected = String::with_capacity(24);
-    for c in ['\\', '#', '*', '_', '`', '[', ']', '@', '$', '~', '"', '\''] {
+    let mut expected = String::with_capacity(28);
+    for c in [
+        '\\', '#', '*', '_', '`', '[', ']', '{', '}', '@', '$', '~', '"', '\'',
+    ] {
         expected.push('\\');
         expected.push(c);
     }
     let actual = escape_typst(input);
     assert_eq!(actual, expected);
-    // Length sanity check: 12 chars in, 24 chars out.
-    assert_eq!(actual.len(), 24);
+    // Length sanity check: 14 chars in, 28 chars out.
+    assert_eq!(actual.len(), 28);
 }
 
 // ---------------------------------------------------------------------
