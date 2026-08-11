@@ -11,14 +11,26 @@ use crate::config::AppConfig;
 use std::path::Path;
 use std::sync::Arc;
 
+/// Cheap, shallow-clone handle to a shared cache. The
+/// `ToolExecutor` does not own a `ToolCache` directly; the
+/// cache is a process-wide singleton exposed by
+/// [`crate::agent::tools::manager::cache::cache`].
+type SharedCache = Arc<crate::agent::tools::manager::cache::ToolCache>;
+
 pub struct ToolExecutor {
-    config: AppConfig,
+    /// Owned as `Arc` so a parallel dispatch can hand a
+    /// `ToolContext` (which takes `Arc<AppConfig>`) to a
+    /// worker thread without the ad-hoc
+    /// `Arc::new(self.config.clone())` wrap that the previous
+    /// shape required.
+    config: Arc<AppConfig>,
     file_event_bus: Bus<FileEvent>,
     /// When the `browser` Cargo feature is off the session is a
     /// stub that returns
     /// [`crate::app::session::SessionError::Disabled`].
     browser_session: Arc<BrowserSession>,
     pdf_backing: std::sync::Arc<crate::app::session::PdfBackingTracker>,
+    cache: SharedCache,
     tool_manager: std::sync::Arc<std::sync::RwLock<crate::agent::tools::manager::ToolManager>>,
     uuid_gen: std::sync::Arc<dyn crate::utils::uuid::UuidGenerator>,
 }
@@ -29,14 +41,16 @@ impl ToolExecutor {
         file_event_bus: Bus<FileEvent>,
         browser_session: Arc<BrowserSession>,
         pdf_backing: std::sync::Arc<crate::app::session::PdfBackingTracker>,
+        cache: SharedCache,
         tool_manager: std::sync::Arc<std::sync::RwLock<crate::agent::tools::manager::ToolManager>>,
         uuid_gen: std::sync::Arc<dyn crate::utils::uuid::UuidGenerator>,
     ) -> Self {
         Self {
-            config,
+            config: Arc::new(config),
             file_event_bus,
             browser_session,
             pdf_backing,
+            cache,
             tool_manager,
             uuid_gen,
         }
@@ -91,7 +105,6 @@ impl ToolExecutor {
                 return Vec::new();
             }
         };
-        let config_arc = std::sync::Arc::new(self.config.clone());
         let pdf_backing = self.pdf_backing.clone();
         let mut completed = Vec::new();
         rt.block_on(async {
@@ -100,22 +113,15 @@ impl ToolExecutor {
                 let call_id = extract_str(tc, &["id"]).to_string();
                 let func_name = extract_str(tc, &["function", "name"]).to_string();
                 let func_args = extract_str(tc, &["function", "arguments"]).to_string();
-                let cfg = config_arc.clone();
+                let cfg = self.config.clone();
                 let bus = self.file_event_bus.clone();
                 let browser = self.browser_session.clone();
                 let pdf = pdf_backing.clone();
+                let cache = self.cache.clone();
                 let tm = self.tool_manager.clone();
                 let uuid_gen = self.uuid_gen.clone();
                 join_set.spawn_blocking(move || {
-                    let ctx = ToolContext::new(
-                        &cfg,
-                        &bus,
-                        browser,
-                        pdf,
-                        crate::agent::tools::manager::cache::cache(),
-                        tm,
-                        uuid_gen,
-                    );
+                    let ctx = ToolContext::new(cfg, bus, browser, pdf, cache, tm, uuid_gen);
                     let result = execute_tool(&ctx, &func_name, &func_args);
                     (call_id, func_name, func_args, result)
                 });
@@ -142,11 +148,11 @@ impl ToolExecutor {
             let pdf = self.pdf_backing.clone();
             let tm = self.tool_manager.clone();
             let ctx = ToolContext::new(
-                &self.config,
-                &self.file_event_bus,
+                self.config.clone(),
+                self.file_event_bus.clone(),
                 browser,
                 pdf,
-                crate::agent::tools::manager::cache::cache(),
+                self.cache.clone(),
                 tm,
                 self.uuid_gen.clone(),
             );
@@ -263,7 +269,16 @@ mod tests {
             crate::agent::tools::manager::ToolManager::new(),
         ));
         let uuid_gen = std::sync::Arc::new(crate::utils::uuid::SystemUuidGenerator);
-        let executor = ToolExecutor::new(config, bus, browser_session, pdf_backing, tm, uuid_gen);
+        let cache = std::sync::Arc::new(crate::agent::tools::manager::cache::ToolCache::new());
+        let executor = ToolExecutor::new(
+            config,
+            bus,
+            browser_session,
+            pdf_backing,
+            cache,
+            tm,
+            uuid_gen,
+        );
         assert!(executor.config.models.is_empty());
     }
 
@@ -295,7 +310,16 @@ mod tests {
             crate::agent::tools::manager::ToolManager::new(),
         ));
         let uuid_gen = std::sync::Arc::new(crate::utils::uuid::SystemUuidGenerator);
-        let executor = ToolExecutor::new(config, bus, browser_session, pdf_backing, tm, uuid_gen);
+        let cache = std::sync::Arc::new(crate::agent::tools::manager::cache::ToolCache::new());
+        let executor = ToolExecutor::new(
+            config,
+            bus,
+            browser_session,
+            pdf_backing,
+            cache,
+            tm,
+            uuid_gen,
+        );
 
         // Synthetic results: a successful create_note and a failed one, plus a non-create_note tool.
         let results = vec![
@@ -354,7 +378,16 @@ mod tests {
             crate::agent::tools::manager::ToolManager::new(),
         ));
         let uuid_gen = std::sync::Arc::new(crate::utils::uuid::SystemUuidGenerator);
-        let executor = ToolExecutor::new(config, bus, browser_session, pdf_backing, tm, uuid_gen);
+        let cache = std::sync::Arc::new(crate::agent::tools::manager::cache::ToolCache::new());
+        let executor = ToolExecutor::new(
+            config,
+            bus,
+            browser_session,
+            pdf_backing,
+            cache,
+            tm,
+            uuid_gen,
+        );
 
         // Call execute_all with an empty tool_calls list — should return empty results and side effects
         let (results, side_effects) = executor.execute_all(&[]);

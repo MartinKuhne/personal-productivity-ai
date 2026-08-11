@@ -7,13 +7,11 @@ use crate::config::{AppConfig, LlmConfig};
 use std::path::PathBuf;
 use std::sync::mpsc;
 
-/// Build a `FileEventProducer` backed by a leaked (and therefore
-/// `'static`) no-op bus. Useful for tests that exercise
-/// `process_image` without caring about what (if anything) is
-/// published.
-fn noop_producer() -> FileEventProducer<'static> {
-    let bus: &'static Bus<FileEvent> = Box::leak(Box::new(Bus::new()));
-    FileEventProducer::new(bus.clone())
+/// Build a `FileEventProducer` backed by a throwaway bus.
+/// Useful for tests that exercise `process_image` without
+/// caring about what (if anything) is published.
+fn noop_producer() -> FileEventProducer {
+    FileEventProducer::new(Bus::new())
 }
 
 #[tokio::test]
@@ -98,12 +96,14 @@ async fn test_process_image_success() {
         },
     );
 
-    // Wire up a real (leaked) bus + reader so we can verify
-    // that `process_image` publishes a Discovered event for
-    // the produced `.md` once the file is on disk.
-    let bus: &'static Bus<FileEvent> = Box::leak(Box::new(Bus::new()));
+    // Wire up a real bus + reader so we can verify that
+    // `process_image` publishes a Discovered event for the
+    // produced `.md` once the file is on disk. The bus is
+    // owned (no leak needed since `FileEventProducer` is now
+    // lifetime-free).
+    let bus: Bus<FileEvent> = Bus::new();
     let reader = bus.subscribe();
-    let producer = FileEventProducer::new(bus.clone());
+    let producer = FileEventProducer::new(bus);
 
     let (tx, _rx) = mpsc::channel();
     let result = process_image(job, config, tx, &producer).await;

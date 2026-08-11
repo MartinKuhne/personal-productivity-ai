@@ -45,6 +45,7 @@ fn make_ctx(config: AppConfig) -> (AgentContext, BusReader<SeamAgentEvent>) {
         session_id: uuid::Uuid::new_v4(),
         browser_session,
         pdf_backing: std::sync::Arc::new(crate::app::session::PdfBackingTracker::new()),
+        cache: std::sync::Arc::new(crate::agent::tools::manager::cache::ToolCache::new()),
         tool_manager: std::sync::Arc::new(std::sync::RwLock::new(
             crate::agent::tools::manager::ToolManager::new(),
         )),
@@ -272,6 +273,7 @@ fn test_run_agent_skips_done_status_when_cancelled() {
         session_id: uuid::Uuid::new_v4(),
         browser_session,
         pdf_backing: std::sync::Arc::new(crate::app::session::PdfBackingTracker::new()),
+        cache: std::sync::Arc::new(crate::agent::tools::manager::cache::ToolCache::new()),
         tool_manager: std::sync::Arc::new(std::sync::RwLock::new(
             crate::agent::tools::manager::ToolManager::new(),
         )),

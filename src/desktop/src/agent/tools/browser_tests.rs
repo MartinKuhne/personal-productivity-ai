@@ -94,21 +94,20 @@ fn test_session_persists_cookies_across_relaunch() {
 fn test_browser_navigate_tool_round_trip() {
     use crate::agent::tools::context::ToolContext;
     let (_tmp, session) = make_session();
-    let bus = Box::leak(Box::new(crate::bus::core::Bus::<
-        crate::bus::events::file::FileEvent,
-    >::new()));
-    let config = Box::leak(Box::new(AppConfig::default()));
+    let bus = crate::bus::core::Bus::<crate::bus::events::file::FileEvent>::new();
+    let mut config = AppConfig::default();
     config.tool_groups.browser = true;
     let pdf_backing = std::sync::Arc::new(crate::app::session::PdfBackingTracker::new());
     let tm = Arc::new(std::sync::RwLock::new(
         crate::agent::tools::manager::ToolManager::new(),
     ));
+    let cache = Arc::new(crate::agent::tools::manager::cache::ToolCache::new());
     let ctx = ToolContext::new(
-        config,
+        Arc::new(config),
         bus,
         session,
         pdf_backing,
-        crate::agent::tools::manager::cache::cache(),
+        cache,
         tm,
         Arc::new(crate::utils::uuid::SystemUuidGenerator),
     );
@@ -125,21 +124,20 @@ fn test_browser_get_page_state_tool_is_readonly() {
     use crate::agent::tools::Safety;
     use crate::agent::tools::context::ToolContext;
     let (_tmp, session) = make_session();
-    let bus = Box::leak(Box::new(crate::bus::core::Bus::<
-        crate::bus::events::file::FileEvent,
-    >::new()));
-    let config = Box::leak(Box::new(AppConfig::default()));
+    let bus = crate::bus::core::Bus::<crate::bus::events::file::FileEvent>::new();
+    let mut config = AppConfig::default();
     config.tool_groups.browser = true;
     let pdf_backing = std::sync::Arc::new(crate::app::session::PdfBackingTracker::new());
     let tm = Arc::new(std::sync::RwLock::new(
         crate::agent::tools::manager::ToolManager::new(),
     ));
+    let cache = Arc::new(crate::agent::tools::manager::cache::ToolCache::new());
     let _ctx = ToolContext::new(
-        config,
+        Arc::new(config),
         bus,
         session,
         pdf_backing,
-        crate::agent::tools::manager::cache::cache(),
+        cache,
         tm,
         Arc::new(crate::utils::uuid::SystemUuidGenerator),
     );

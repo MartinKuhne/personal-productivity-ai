@@ -4,28 +4,23 @@ use super::*;
 use crate::agent::tools::context::ToolContext;
 use crate::app::session::BrowserSession;
 use crate::bus::core::Bus;
-use crate::bus::events::file::FileEvent;
 use crate::config::AppConfig;
 use serde_json::Value;
 use std::fs;
 use std::sync::Arc;
 use tempfile::TempDir;
 
-fn test_bus() -> &'static Bus<FileEvent> {
-    Box::leak(Box::new(Bus::new()))
-}
-
 fn test_browser_session() -> Arc<BrowserSession> {
     Arc::new(BrowserSession::new(&AppConfig::default()))
 }
 
-fn test_ctx(config: &AppConfig) -> ToolContext<'static> {
+fn test_ctx(config: &AppConfig) -> ToolContext {
     ToolContext::new(
-        unsafe { &*(config as *const AppConfig) },
-        test_bus(),
+        Arc::new(config.clone()),
+        Bus::new(),
         test_browser_session(),
         Arc::new(crate::app::session::PdfBackingTracker::new()),
-        crate::agent::tools::manager::cache::cache(),
+        Arc::new(crate::agent::tools::manager::cache::ToolCache::new()),
         Arc::new(std::sync::RwLock::new(ToolManager::new())),
         Arc::new(crate::utils::uuid::SystemUuidGenerator),
     )

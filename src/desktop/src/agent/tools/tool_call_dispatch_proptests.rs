@@ -37,13 +37,22 @@
 //! `cases = 64` because each case includes a wall-clock measurement
 //! and we want the dispatch proptest block to finish in seconds, not
 //! minutes, on the un-modified production code.
+//!
+//! # Why this is the sidecar that benefits most from the
+//! `ToolContext: 'static` rewrite
+//!
+//! Before the rewrite, this proptest held a `&'static ToolContext`
+//! via the `Box::leak` and pointer-cast trick — about 1 MiB of
+//! leaked memory per 1024 cases. After the rewrite, the context is
+//! built normally, the worker thread takes a cheap `Clone` (the
+//! `Arc`-backed `AppConfig` and `ToolCache` are shared), and the
+//! test runs without `Box::leak` or `unsafe`. The same pattern is
+//! what makes the Phase-5 cargo-fuzz targets for `execute_tool`
+//! feasible.
 
 use crate::agent::tools::context::ToolContext;
-use crate::agent::tools::manager::ToolManager;
-use crate::agent::tools::manager::cache::ToolCache;
 use crate::app::session::{BrowserSession, PdfBackingTracker};
 use crate::bus::core::Bus;
-use crate::bus::events::file::FileEvent;
 use crate::config::AppConfig;
 use crate::utils::uuid::SystemUuidGenerator;
 use proptest::prelude::*;
@@ -56,68 +65,50 @@ const CASES_CHEAP: u32 = 1024;
 const CASES_BOUNDED: u32 = 64;
 const DISPATCH_TIMEOUT: Duration = Duration::from_secs(5);
 
-/// Build a `ToolContext` that lives for the duration of the
-/// proptest. Mirrors the `test_ctx` helper in
-/// `agent/tools/manager/tests.rs`: the inner lifetimes are
-/// extended to `'static` via the standard test-only
-/// pointer-cast trick. The context is built once per proptest
-/// test function; proptest re-runs the closure many times
-/// against the same context, so the per-case cost is just the
-/// `execute_tool` call.
-fn build_dispatch_context() -> ToolContext<'static> {
-    let config: &'static AppConfig = Box::leak(Box::new(AppConfig::default()));
-    let bus: &'static Bus<FileEvent> = Box::leak(Box::new(Bus::new()));
-    let cache: &'static ToolCache = Box::leak(Box::new(ToolCache::new()));
-    let browser_session: Arc<BrowserSession> = Arc::new(BrowserSession::new(config));
-    let pdf_backing: Arc<PdfBackingTracker> = Arc::new(PdfBackingTracker::new());
-    let tool_manager: Arc<std::sync::RwLock<ToolManager>> =
-        Arc::new(std::sync::RwLock::new(ToolManager::new()));
+/// Build a fresh `ToolContext` for one proptest case. Now that
+/// `ToolContext: 'static + Send + Sync + Clone`, no leak or
+/// pointer cast is needed; the context is built by value and
+/// dropped when the proptest case returns. The total
+/// allocations across 1024 cases are bounded and reclaimed
+/// by the test harness.
+fn build_dispatch_context() -> ToolContext {
+    let config = AppConfig::default();
+    let browser_session = Arc::new(BrowserSession::new(&config));
+    let pdf_backing = Arc::new(PdfBackingTracker::new());
+    let tool_manager = Arc::new(std::sync::RwLock::new(
+        crate::agent::tools::manager::ToolManager::new(),
+    ));
     let uuid_gen: Arc<dyn crate::utils::uuid::UuidGenerator> = Arc::new(SystemUuidGenerator);
     ToolContext::new(
-        config,
-        bus,
+        Arc::new(config),
+        Bus::new(),
         browser_session,
         pdf_backing,
-        cache,
+        Arc::new(crate::agent::tools::manager::cache::ToolCache::new()),
         tool_manager,
         uuid_gen,
     )
 }
 
-/// Call `execute_tool` with a wall-clock timeout. If the call
-/// doesn't return within `DISPATCH_TIMEOUT`, the spawned thread
-/// is detached (it'll finish eventually, but the test moves on)
-/// and the test fails.
-///
-/// We can't take the borrowed `ToolContext` into a `move`
-/// closure directly, so we leak it (and a clone of the inputs)
-/// and read the result through an mpsc channel. The leak is
-/// bounded: proptest runs each test closure many times, and the
-/// per-iteration leak is a few hundred bytes at most.
-fn execute_with_timeout(ctx_ptr: usize, name: String, args: String) -> Option<String> {
+/// Call `execute_tool` with a wall-clock timeout. The
+/// `ToolContext` is `'static + Send`, so the worker thread
+/// captures the context by value (via a cheap `Clone`); no
+/// `Box::leak`, no `unsafe`. If the call doesn't return within
+/// `DISPATCH_TIMEOUT`, the spawned thread is detached (it'll
+/// finish eventually, but the test moves on) and the test
+/// fails.
+fn execute_with_timeout(ctx: ToolContext, name: String, args: String) -> Option<String> {
     let (tx, rx) = mpsc::channel();
-    // The worker thread re-creates the call with the same
-    // leaked pointer. We can't move `ctx` (it has lifetimes)
-    // so the thread captures only `name`, `args`, and `ctx_ptr`
-    // (all owned/Send) and re-borrows the leaked context
-    // through the raw pointer.
-    let ctx_ptr_for_thread = ctx_ptr;
-    let name_for_thread = name.clone();
-    let args_for_thread = args.clone();
     let _ = thread::Builder::new()
         .name("dispatch-proptest".to_string())
         .spawn(move || {
-            let _ctx: &'static ToolContext<'static> =
-                unsafe { &*(ctx_ptr_for_thread as *const ToolContext<'static>) };
-            let result = execute_tool(_ctx, &name_for_thread, &args_for_thread);
+            let result = execute_tool(&ctx, &name, &args);
             let _ = tx.send(result);
         });
     rx.recv_timeout(DISPATCH_TIMEOUT).ok()
 }
 
-// Re-export the dispatch function from the manager module. This
-// indirection keeps the unsafe pointer dance in one place and
-// makes the test assertions read naturally.
+// Re-export the dispatch function from the manager module.
 use crate::agent::tools::manager::execute_tool;
 
 /// Arbitrary tool-name strategy. A tool name is any UTF-8
@@ -155,13 +146,7 @@ proptest! {
         name in any_tool_name(),
         args in any_args_str()
     ) {
-        // Build a fresh context per case. Leaking one
-        // ToolContext per proptest iteration is bounded
-        // (the AppConfig / Bus / cache are each a few KiB)
-        // and the test only runs CASES_CHEAP cases, so the
-        // total leak is well under 1 GiB.
         let ctx = build_dispatch_context();
-        let ctx_ptr = &ctx as *const ToolContext<'static> as usize;
 
         // `execute_tool` returns a `String`. The contract:
         // it always returns, never unwinds (because of the
@@ -206,11 +191,6 @@ proptest! {
             status == "success" || status == "error",
             "execute_tool returned an unknown status {status:?} (must be `success` or `error`)"
         );
-
-        // Suppress the unused-warning for the leaked pointer.
-        // (It's needed by the bounded-runtime test below; not
-        // by this test.)
-        let _ = ctx_ptr;
     }
 }
 
@@ -230,10 +210,9 @@ proptest! {
         args in any_args_str()
     ) {
         let ctx = build_dispatch_context();
-        let ctx_ptr = &ctx as *const ToolContext<'static> as usize;
 
         let start = Instant::now();
-        let result = execute_with_timeout(ctx_ptr, name, args);
+        let result = execute_with_timeout(ctx, name, args);
         let elapsed = start.elapsed();
 
         // Sanity: the measurement itself should not be the

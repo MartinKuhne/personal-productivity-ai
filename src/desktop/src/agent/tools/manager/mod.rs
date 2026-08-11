@@ -540,7 +540,7 @@ pub fn execute_tool(ctx: &ToolContext, name: &str, args_str: &str) -> String {
     let (result_raw, tool_group): (Result<serde_json::Value, String>, Option<ToolGroupId>) =
         std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
             let mgr = ctx.tool_manager.read().unwrap();
-            mgr.mcp_manager.update_config(ctx.config);
+            mgr.mcp_manager.update_config(&ctx.config);
             let group = mgr.tool_group(name);
             let result = mgr.execute(ctx, name, args_str);
             (result, group)

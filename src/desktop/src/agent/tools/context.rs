@@ -7,15 +7,18 @@ use crate::bus::events::file::{FileEvent, FileEventKind, FileEventProducer};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
-/// Read-only VFS path resolver wrapping `AppConfig`.
-#[derive(Clone, Copy)]
-pub struct VfsResolver<'a> {
-    pub config: &'a crate::config::AppConfig,
+/// Read-only VFS path resolver wrapping `AppConfig`. Owns an
+/// `Arc<AppConfig>` so the resolver is `'static` and can be
+/// embedded in a long-lived `ToolContext` or cloned across
+/// parallel dispatch without lifetime juggling.
+#[derive(Clone)]
+pub struct VfsResolver {
+    pub config: Arc<crate::config::AppConfig>,
 }
 
-impl<'a> VfsResolver<'a> {
+impl VfsResolver {
     /// Create a new `VfsResolver`.
-    pub fn new(config: &'a crate::config::AppConfig) -> Self {
+    pub fn new(config: Arc<crate::config::AppConfig>) -> Self {
         Self { config }
     }
 
@@ -39,14 +42,17 @@ impl<'a> VfsResolver<'a> {
 }
 
 /// Event publisher wrapping the file event bus for side-effecting tools.
-#[derive(Clone, Copy)]
-pub struct EventPublisher<'a> {
-    pub file_event_bus: &'a Bus<FileEvent>,
+/// Owns a `Bus<FileEvent>` clone (cheap, the underlying
+/// `tokio::sync::broadcast::Sender` is `Arc`-backed) so the
+/// publisher is `'static` and embeddable in a `ToolContext`.
+#[derive(Clone)]
+pub struct EventPublisher {
+    pub file_event_bus: Bus<FileEvent>,
 }
 
-impl<'a> EventPublisher<'a> {
+impl EventPublisher {
     /// Create a new `EventPublisher`.
-    pub fn new(file_event_bus: &'a Bus<FileEvent>) -> Self {
+    pub fn new(file_event_bus: Bus<FileEvent>) -> Self {
         Self { file_event_bus }
     }
 
@@ -68,13 +74,24 @@ impl<'a> EventPublisher<'a> {
     }
 }
 
-/// Tool context — composite providing tools with access to `AppConfig` and the file event bus,
-/// plus safe virtual-path resolution via [`VfsResolver`] and event publishing via [`EventPublisher`].
-pub struct ToolContext<'a> {
-    pub config: &'a crate::config::AppConfig,
-    pub file_event_bus: &'a Bus<FileEvent>,
-    pub resolver: VfsResolver<'a>,
-    pub publisher: EventPublisher<'a>,
+/// Tool context — composite providing tools with access to `AppConfig`
+/// and the file event bus, plus safe virtual-path resolution via
+/// [`VfsResolver`] and event publishing via [`EventPublisher`].
+///
+/// `ToolContext` is `'static` and cheap to clone: every reference-
+/// shaped field is now an owned `Arc` or a `Clone`-cheap `Bus`.
+/// The `Clone` derive is what makes Phase 5's
+/// `cargo-fuzz` targets (which need a `'static` context to
+/// spawn) and the parallel-dispatch path in
+/// [`ToolExecutor`](crate::agent::tool_executor::ToolExecutor)
+/// (which needs an owned handle per `spawn_blocking`) work
+/// without `unsafe` casts.
+#[derive(Clone)]
+pub struct ToolContext {
+    pub config: Arc<crate::config::AppConfig>,
+    pub file_event_bus: Bus<FileEvent>,
+    pub resolver: VfsResolver,
+    pub publisher: EventPublisher,
     /// Long-lived headless Firefox session, shared across every
     /// mutating browser tool call. `None` only in early-startup
     /// tests that don't care about the browser. Tools that
@@ -84,27 +101,29 @@ pub struct ToolContext<'a> {
     /// stays unused.
     pub browser_session: Arc<BrowserSession>,
     pub pdf_backing: std::sync::Arc<crate::app::session::PdfBackingTracker>,
-    pub cache: &'a crate::agent::tools::manager::cache::ToolCache,
+    pub cache: std::sync::Arc<crate::agent::tools::manager::cache::ToolCache>,
     pub tool_manager: std::sync::Arc<std::sync::RwLock<crate::agent::tools::manager::ToolManager>>,
     pub uuid_gen: std::sync::Arc<dyn crate::utils::uuid::UuidGenerator>,
 }
 
-impl<'a> ToolContext<'a> {
+impl ToolContext {
     /// Create a new `ToolContext`.
     pub fn new(
-        config: &'a crate::config::AppConfig,
-        file_event_bus: &'a Bus<FileEvent>,
+        config: Arc<crate::config::AppConfig>,
+        file_event_bus: Bus<FileEvent>,
         browser_session: Arc<BrowserSession>,
         pdf_backing: std::sync::Arc<crate::app::session::PdfBackingTracker>,
-        cache: &'a crate::agent::tools::manager::cache::ToolCache,
+        cache: std::sync::Arc<crate::agent::tools::manager::cache::ToolCache>,
         tool_manager: std::sync::Arc<std::sync::RwLock<crate::agent::tools::manager::ToolManager>>,
         uuid_gen: std::sync::Arc<dyn crate::utils::uuid::UuidGenerator>,
     ) -> Self {
+        let resolver = VfsResolver::new(config.clone());
+        let publisher = EventPublisher::new(file_event_bus.clone());
         Self {
             config,
             file_event_bus,
-            resolver: VfsResolver::new(config),
-            publisher: EventPublisher::new(file_event_bus),
+            resolver,
+            publisher,
             browser_session,
             pdf_backing,
             cache,
@@ -142,3 +161,19 @@ impl<'a> ToolContext<'a> {
         self.pdf_backing.is_pdf_backed(path)
     }
 }
+
+/// Compile-time assertion: `ToolContext` is `'static + Send + Sync`.
+///
+/// This is the contract the rewrite buys. Phase 5 of the
+/// 'static-clean rewrite plan calls for cargo-fuzz targets that
+/// need a `'static` context to `std::thread::spawn`, and the
+/// parallel-dispatch path in `ToolExecutor` needs `Send + Sync`
+/// to hand the context to a `tokio::task::JoinSet::spawn_blocking`
+/// worker. A regression that breaks either property (e.g.
+/// reintroducing a lifetime parameter, or accidentally holding a
+/// `Rc` instead of an `Arc`) is caught at compile time.
+#[allow(dead_code)]
+const _: fn() = || {
+    fn assert_send_sync_static<T: Send + Sync + 'static>() {}
+    assert_send_sync_static::<ToolContext>();
+};
