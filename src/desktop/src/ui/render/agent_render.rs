@@ -1,6 +1,8 @@
 //! Splits LLM thinking/reasoning blocks from final content and formats tool-call/result messages for the chat UI.
 //!
-//! Unit tests live in the sibling `response_formatter_tests.rs` sidecar.
+//! Unit tests live in the sibling `agent_render_tests.rs` sidecar.
+
+use crate::agent::events::DelegateToolCall;
 
 pub fn split_thinking_and_content(text: &str) -> (String, String) {
     let delim = "\u{1f914}";
@@ -37,15 +39,27 @@ pub fn format_tool_call_message(func_name: &str, func_args_str: &str) -> String 
     format!("> **Executing tool `{}`**\n{}\n", func_name, quoted)
 }
 
-/// Like [`format_tool_call_message`], but emits the tool-call summary
-/// without a blockquote prefix so delegate sub-agent tool calls render
-/// as plain markdown (no `>` / `>>` grouping) in the response window.
-pub fn format_delegate_tool_call_message(func_name: &str, func_args_str: &str) -> String {
-    let formatted_args = match serde_json::from_str::<serde_json::Value>(func_args_str) {
-        Ok(val) => serde_json::to_string_pretty(&val).unwrap_or_else(|_| func_args_str.to_string()),
-        Err(_) => func_args_str.to_string(),
-    };
-    format!("**Executing tool `{}`**\n{}\n", func_name, formatted_args)
+/// Format a list of [`DelegateToolCall`]s into a `>>`-prefixed markdown
+/// group, visually distinguishing delegate sub-agent tool calls from the
+/// parent agent's own tool calls (FR-014, SC-006).
+pub fn format_delegate_trace(tool_calls: &[DelegateToolCall]) -> String {
+    let mut out = String::new();
+    for tc in tool_calls {
+        let formatted_args = match serde_json::to_string_pretty(&tc.args) {
+            Ok(s) => s,
+            Err(_) => tc.args.to_string(),
+        };
+        let quoted = formatted_args
+            .lines()
+            .map(|line| format!(">> {}", line))
+            .collect::<Vec<_>>()
+            .join("\n");
+        out.push_str(&format!(
+            ">> **Executing tool `{}`**\n{}\n\n",
+            tc.name, quoted
+        ));
+    }
+    out
 }
 
 fn count_from_data(data: &serde_json::Value, field: &str) -> usize {
@@ -308,9 +322,9 @@ fn format_generic_search_result(func_name: &str, data: &serde_json::Value) -> St
 }
 
 // ---------------------------------------------------------------------------
-// Tests live in the sibling `response_formatter_tests.rs` sidecar.
+// Tests live in the sibling `agent_render_tests.rs` sidecar.
 // ---------------------------------------------------------------------------
 
 #[cfg(test)]
-#[path = "response_formatter_tests.rs"]
+#[path = "agent_render_tests.rs"]
 mod tests;

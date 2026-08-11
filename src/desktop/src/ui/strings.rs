@@ -387,12 +387,6 @@ pub const DEBUG_KIND_INCOMING: &str = "Incoming";
 /// Label for tool results debug entries.
 pub const DEBUG_KIND_TOOL_RESULTS: &str = "ToolResults";
 
-/// Label for the JSON row count combobox.
-pub const DEBUG_JSON_ROWS_LABEL: &str = "JSON rows:";
-
-/// Label for the copy-JSON button in a debug entry's expanded body.
-pub const DEBUG_COPY_JSON_BUTTON: &str = "Copy JSON";
-
 // Inline Editor Widget
 /// Save button label in inline text editor.
 pub const SAVE_BUTTON: &str = "Save";

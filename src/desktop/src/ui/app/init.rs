@@ -7,7 +7,6 @@
 
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
-use std::time::Duration;
 
 use eframe::egui;
 
@@ -22,6 +21,8 @@ use crate::app::{
 use crate::bus::core::Bus;
 use crate::bus::events::config::ConfigArrived;
 use crate::config::AppConfig;
+use crate::ui::agent::panel_state::AgentPanelState;
+use crate::ui::agent::transcript::AgentTranscript;
 
 use super::{FastMdApp, PERSISTED_UI_STATE_KEY};
 
@@ -120,6 +121,7 @@ impl FastMdApp {
         let pdf_backing_tracker = crate::app::session::PdfBackingTracker::new();
         let agent = AgentSessionManager::new(
             config_bus,
+            background_task.file_event_bus.clone(),
             browser_session.clone(),
             Arc::new(pdf_backing_tracker.clone()),
             tool_manager.clone(),
@@ -174,6 +176,7 @@ impl FastMdApp {
         // `batch_dialog_config.available_dirs` is populated from
         // the published config in `drain_config_bus` on the first
         // frame.
+        let agent_event_reader = agent.event_bus().subscribe();
 
         Self {
             orchestrator: crate::app::orchestrator::AppOrchestrator {
@@ -198,11 +201,14 @@ impl FastMdApp {
                 config: AppConfig::default(),
                 config_reader: Some(config_reader),
                 pending_file_load: None,
-                repaint_interval: Duration::from_millis(16),
                 finished_watcher_slot,
                 tool_manager: std::sync::Arc::new(std::sync::RwLock::new(
                     crate::agent::tools::manager::ToolManager::new(),
                 )),
+                agent_event_reader: Some(agent_event_reader),
+                agent_event_lagged: false,
+                agent_transcript: AgentTranscript::new(uuid::Uuid::nil()),
+                agent_panel_state: AgentPanelState::new(),
             },
             layout,
             cached_tree_rows: None,
@@ -251,6 +257,7 @@ impl FastMdApp {
         let pdf_backing_tracker = crate::app::session::PdfBackingTracker::new();
         let mut agent = AgentSessionManager::new(
             bus.clone(),
+            background_task.file_event_bus.clone(),
             test_browser_session,
             Arc::new(pdf_backing_tracker.clone()),
             Arc::new(std::sync::RwLock::new(
@@ -276,6 +283,7 @@ impl FastMdApp {
 
         let content_libraries = config.content_libraries.clone();
         let inline_editor_enabled = config.inline_editor_enabled;
+        let agent_event_reader = agent.event_bus().subscribe();
 
         Self {
             orchestrator: crate::app::orchestrator::AppOrchestrator {
@@ -300,11 +308,14 @@ impl FastMdApp {
                 config,
                 config_reader: None,
                 pending_file_load: None,
-                repaint_interval: Duration::from_millis(16),
                 finished_watcher_slot,
                 tool_manager: std::sync::Arc::new(std::sync::RwLock::new(
                     crate::agent::tools::manager::ToolManager::new(),
                 )),
+                agent_event_reader: Some(agent_event_reader),
+                agent_event_lagged: false,
+                agent_transcript: AgentTranscript::new(uuid::Uuid::nil()),
+                agent_panel_state: AgentPanelState::new(),
             },
             layout: PanelLayout::new(),
             cached_tree_rows: None,

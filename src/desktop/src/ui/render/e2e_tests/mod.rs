@@ -39,6 +39,7 @@
 
 #![cfg(test)]
 
+mod agent_restyle;
 mod commonmark_parser;
 mod commonmark_render;
 mod commonmark_snapshots;

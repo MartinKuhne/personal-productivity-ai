@@ -1,17 +1,63 @@
 //! Tests for `app/mod.rs`.
 
 use super::*;
+use crate::agent::events::{AgentEvent as SeamAgentEvent, AgentStatus};
 use crate::app::orchestrator::AppOrchestrator;
 use crate::bus::events::file::FileEvent;
 use crate::bus::events::messages::TokenUsageInfo;
-use crate::bus::events::typed::AgentEvent;
 use crate::bus::events::typed::FsEvent;
 use crate::ui::test_helpers::assert::assert_no_id_change_in_shapes;
 use crate::ui::test_helpers::run_ui_test;
 use std::path::PathBuf;
+use uuid::Uuid;
 
 fn create_test_app() -> FastMdApp {
     FastMdApp::empty_state(crate::config::AppConfig::default())
+}
+
+/// Idle-CPU regression: when the app is fully idle (no file events
+/// arrived, indexing is finished, and no raw input is pending),
+/// `FastMdApp::should_request_immediate_repaint` MUST return `false`.
+///
+/// The previous implementation unconditionally called
+/// `ctx.request_repaint_after(16ms)` in the idle branch of
+/// `process_file_events_and_repaint`, which kept the entire
+/// `update_ui` closure running at 60 FPS even when nothing on
+/// screen had changed — pegging the process at ~5% CPU with no
+/// input. The decider now exposes the decision so the idle path
+/// can be unit-tested without driving a real `egui::Context` frame.
+#[test]
+fn test_idle_app_does_not_request_repaint() {
+    let ctx = egui::Context::default();
+    let mut app = create_test_app();
+    // Indexing has finished and the transition has been handled,
+    // so the spinner is hidden and the toolbar is settled.
+    app.orchestrator.file_processor.indexing_finished = true;
+    app.orchestrator.file_processor.indexing_finished_handled = true;
+    // No file events are queued: `process_file_events` would have
+    // returned `false`. The empty ctx has no pending raw input.
+    assert!(
+        !app.should_request_immediate_repaint(&ctx),
+        "An idle app (no file events, indexing finished, no raw input) \
+         must NOT request a repaint. Returning true here re-introduces \
+         the 60 FPS forced-repaint loop and burns idle CPU."
+    );
+}
+
+/// The indexing-active path must still request a repaint so the
+/// spinner keeps animating and the toolbar reflects progress. This
+/// guards against an over-zealous fix that drops the request
+/// unconditionally.
+#[test]
+fn test_indexing_in_progress_requests_repaint() {
+    let ctx = egui::Context::default();
+    let mut app = create_test_app();
+    app.orchestrator.file_processor.indexing_finished = false;
+    assert!(
+        app.should_request_immediate_repaint(&ctx),
+        "An app with active indexing must request a repaint so the \
+         toolbar spinner keeps animating and progress text stays live."
+    );
 }
 
 /// UI-002 (dark color scheme): `configure_dark_theme` must pin the
@@ -123,19 +169,33 @@ fn test_background_messages_handling() {
         .send(FsEvent::FinishedWithoutWatcher.into())
         .unwrap();
 
-    // 4. Agent Status & Response
+    // 4. Agent Status & ContentDelta via Bus<AgentEvent> (T015: new path)
+    let session_id = Uuid::new_v4();
     app.orchestrator
-        .tx
-        .send(AgentEvent::Status("Processing...".to_string()).into())
-        .unwrap();
+        .agent
+        .event_bus()
+        .publish(SeamAgentEvent::SessionStarted { session_id });
     app.orchestrator
-        .tx
-        .send(AgentEvent::Thinking("Thinking step".to_string()).into())
-        .unwrap();
+        .agent
+        .event_bus()
+        .publish(SeamAgentEvent::Status {
+            session_id,
+            status: AgentStatus::AwaitingLlm,
+        });
     app.orchestrator
-        .tx
-        .send(AgentEvent::Response("Done result".to_string()).into())
-        .unwrap();
+        .agent
+        .event_bus()
+        .publish(SeamAgentEvent::Thinking {
+            session_id,
+            text: "Thinking step".to_string(),
+        });
+    app.orchestrator
+        .agent
+        .event_bus()
+        .publish(SeamAgentEvent::ContentDelta {
+            session_id,
+            text: "Done result".to_string(),
+        });
 
     let mut output = run_ui_test(&ctx, Default::default(), |ui| {
         app.update_ui(ui);
@@ -150,9 +210,12 @@ fn test_background_messages_handling() {
     );
     assert!(app.orchestrator.file_processor.all_dirs.contains(&test_dir));
     assert!(app.orchestrator.file_processor.indexing_finished);
-    assert_eq!(app.orchestrator.agent.state().status, "Processing...");
-    assert_eq!(app.orchestrator.agent.state().thinking, "Thinking step");
-    assert_eq!(app.orchestrator.agent.state().response, "Done result");
+    assert_eq!(
+        app.orchestrator.agent.state().status,
+        "Waiting for LLM completions..."
+    );
+    assert_eq!(app.orchestrator.agent_transcript.thinking, "Thinking step");
+    assert_eq!(app.orchestrator.agent_transcript.content, "Done result");
 }
 
 #[test]
@@ -227,10 +290,18 @@ fn test_agent_failure_and_finish_messages() {
     let ctx = egui::Context::default();
     let mut app = create_test_app();
 
+    let session_id = Uuid::new_v4();
     app.orchestrator
-        .tx
-        .send(AgentEvent::Failed("Network timeout".to_string()).into())
-        .unwrap();
+        .agent
+        .event_bus()
+        .publish(SeamAgentEvent::SessionStarted { session_id });
+    app.orchestrator
+        .agent
+        .event_bus()
+        .publish(SeamAgentEvent::Failed {
+            session_id,
+            error: "Network timeout".to_string(),
+        });
 
     let mut output = run_ui_test(&ctx, Default::default(), |ui| {
         app.update_ui(ui);
@@ -243,10 +314,20 @@ fn test_agent_failure_and_finish_messages() {
     );
     assert!(!app.orchestrator.agent.state().running);
 
+    let session_id2 = Uuid::new_v4();
     app.orchestrator
-        .tx
-        .send(AgentEvent::Finished(vec![serde_json::json!({"ok": true})]).into())
-        .unwrap();
+        .agent
+        .event_bus()
+        .publish(SeamAgentEvent::SessionStarted {
+            session_id: session_id2,
+        });
+    app.orchestrator
+        .agent
+        .event_bus()
+        .publish(SeamAgentEvent::SessionFinished {
+            session_id: session_id2,
+            history: vec![serde_json::json!({"ok": true})],
+        });
 
     let mut output = run_ui_test(&ctx, Default::default(), |ui| {
         app.update_ui(ui);
@@ -262,19 +343,25 @@ fn test_agent_token_usage_message_accumulates() {
     let ctx = egui::Context::default();
     let mut app = create_test_app();
 
+    let session_id = Uuid::new_v4();
+    app.orchestrator
+        .agent
+        .event_bus()
+        .publish(SeamAgentEvent::SessionStarted { session_id });
+
     // First turn: small context, no cached or reasoning tokens.
     app.orchestrator
-        .tx
-        .send(
-            AgentEvent::TokenUsage(TokenUsageInfo {
+        .agent
+        .event_bus()
+        .publish(SeamAgentEvent::TokenUsage {
+            session_id,
+            usage: TokenUsageInfo {
                 prompt_tokens: 100,
                 completion_tokens: 20,
                 total_tokens: 120,
                 ..Default::default()
-            })
-            .into(),
-        )
-        .unwrap();
+            },
+        });
 
     let mut output = run_ui_test(&ctx, Default::default(), |ui| {
         app.update_ui(ui);
@@ -312,18 +399,18 @@ fn test_agent_token_usage_message_accumulates() {
 
     // Second turn: context grew, completion + reasoning added.
     app.orchestrator
-        .tx
-        .send(
-            AgentEvent::TokenUsage(TokenUsageInfo {
+        .agent
+        .event_bus()
+        .publish(SeamAgentEvent::TokenUsage {
+            session_id,
+            usage: TokenUsageInfo {
                 prompt_tokens: 250,
                 completion_tokens: 30,
                 total_tokens: 280,
                 cached_tokens: Some(50),
                 reasoning_tokens: Some(5),
-            })
-            .into(),
-        )
-        .unwrap();
+            },
+        });
 
     let mut output = run_ui_test(&ctx, Default::default(), |ui| {
         app.update_ui(ui);
@@ -359,19 +446,19 @@ fn test_agent_token_usage_message_accumulates() {
         Some(5)
     );
 
-    // Third turn: smaller context â€” peak should NOT shrink.
+    // Third turn: smaller context — peak should NOT shrink.
     app.orchestrator
-        .tx
-        .send(
-            AgentEvent::TokenUsage(TokenUsageInfo {
+        .agent
+        .event_bus()
+        .publish(SeamAgentEvent::TokenUsage {
+            session_id,
+            usage: TokenUsageInfo {
                 prompt_tokens: 80,
                 completion_tokens: 10,
                 total_tokens: 90,
                 ..Default::default()
-            })
-            .into(),
-        )
-        .unwrap();
+            },
+        });
 
     let mut output = run_ui_test(&ctx, Default::default(), |ui| {
         app.update_ui(ui);
@@ -1212,4 +1299,102 @@ fn ctx_with_native_ppp(ppp: f32) -> (egui::Context, egui::RawInput) {
     let mut output = ctx.end_pass();
     output.textures_delta.clear();
     (ctx, raw_input)
+}
+
+/// T018: Verify that a `ToolSideEffect::FileCreated` event on
+/// `Bus<AgentEvent>` is reissued as `FsEvent::FileModified` by the
+/// orchestrator drain, triggering `handle_fs_event` (verified via
+/// `selection.tree_dirty` becoming true). Quickstart scenario 4, SC-005.
+#[test]
+fn test_tool_side_effect_reissues_fs_event() {
+    use crate::agent::events::{AgentEvent as SeamAgentEvent, ToolSideEffect};
+    use std::io::Write;
+
+    let mut app = create_test_app();
+    let bus = app.orchestrator.agent.event_bus();
+
+    // Create a temp file so handle_fs_event can process it without panicking
+    let temp_dir = std::env::temp_dir().join("fastmd_test_side_effect_reissue");
+    let _ = std::fs::create_dir_all(&temp_dir);
+    let temp_file = temp_dir.join("test_note.md");
+    let mut f = std::fs::File::create(&temp_file).unwrap();
+    let _ = f.write_all(b"---\ntags: [test_tag]\n---\n# Test\n");
+    drop(f);
+
+    let session_id = Uuid::new_v4();
+    bus.publish(SeamAgentEvent::ToolSideEffect {
+        session_id,
+        effect: ToolSideEffect::FileCreated {
+            path: temp_file.clone(),
+            tags: vec!["test_tag".to_string()],
+        },
+    });
+
+    // Reset tree_dirty to false so we can detect the reissue
+    app.orchestrator.selection.tree_dirty = false;
+
+    // tree_dirty should be false before drain
+    assert!(
+        !app.orchestrator.selection.tree_dirty,
+        "tree_dirty must be false before drain"
+    );
+
+    app.orchestrator.drain_agent_event_bus();
+
+    // After drain, tree_dirty should be true (handle_fs_event was called)
+    assert!(
+        app.orchestrator.selection.tree_dirty,
+        "tree_dirty must be true after ToolSideEffect reissue — handle_fs_event was not called"
+    );
+
+    // Cleanup
+    let _ = std::fs::remove_file(&temp_file);
+    let _ = std::fs::remove_dir(&temp_dir);
+}
+
+/// T019: Verify broadcast lag handling — flood > 8192 `ContentDelta`
+/// events on `Bus<AgentEvent>`, then drain. The reader should return
+/// `Lagged(n)` and the orchestrator should emit a truncation marker
+/// into the transcript content (quickstart scenario 5).
+#[test]
+fn test_broadcast_lag_handled_with_truncation_marker() {
+    use crate::agent::events::AgentEvent as SeamAgentEvent;
+
+    let mut app = create_test_app();
+    let bus = app.orchestrator.agent.event_bus();
+    let session_id = Uuid::new_v4();
+
+    // Publish SessionStarted to set up the transcript
+    bus.publish(SeamAgentEvent::SessionStarted { session_id });
+
+    // First drain to consume SessionStarted
+    app.orchestrator.drain_agent_event_bus();
+
+    // Now flood the bus with > BUS_CAPACITY (8192) ContentDelta events.
+    // The reader (subscribed during init) will fall behind and the
+    // broadcast channel will drop old messages, returning Lagged(n).
+    for i in 0..9000u32 {
+        bus.publish(SeamAgentEvent::ContentDelta {
+            session_id,
+            text: format!("chunk {}\n", i),
+        });
+    }
+
+    // Drain — the reader should encounter Lagged(n)
+    app.orchestrator.drain_agent_event_bus();
+
+    // The orchestrator should have set agent_event_lagged = true
+    // and pushed the truncation marker into transcript.content
+    assert!(
+        app.orchestrator.agent_event_lagged,
+        "agent_event_lagged must be true after broadcast lag"
+    );
+    assert!(
+        app.orchestrator
+            .agent_transcript
+            .content
+            .contains("[output truncated"),
+        "transcript content must contain truncation marker; got: {:?}",
+        app.orchestrator.agent_transcript.content
+    );
 }

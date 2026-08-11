@@ -1,14 +1,15 @@
 //! Cross-cutting value types that do not belong to a single event
 //! channel.
 //!
-//! The per-domain event payloads (`BackgroundEvent`, `AgentEvent`,
-//! `FsEvent`, `ProcessEvent`, `FileEvent`, `ConfigArrived`) live in
-//! their respective modules under [`super`]. This module is reserved
-//! for types shared across channels or independent of any single
-//! event domain — currently:
+//! The per-domain event payloads (`BackgroundEvent`, `FsEvent`,
+//! `ProcessEvent`, `FileEvent`, `ConfigArrived`) live in their
+//! respective modules under [`super`]. Agent events live in
+//! [`crate::agent::events`]. This module is reserved for types
+//! shared across channels or independent of any single event domain —
+//! currently:
 //!
 //! - [`TokenUsageInfo`] — the LLM token-usage record attached to
-//!   [`super::AgentEvent::TokenUsage`].
+//!   [`crate::agent::events::AgentEvent::TokenUsage`].
 //! - [`BackgroundLogEntry`] / [`LogCategory`] — the structured log
 //!   line carried inside [`super::ProcessEvent::LogEntry`]. They used
 //!   to live in `app::background::models`; moving them here removes
@@ -25,7 +26,7 @@ use chrono::{DateTime, Local};
 /// tokens, reasoning tokens emitted by o-series models). For Anthropic-style
 /// endpoints, `input_tokens` and `output_tokens` from the response are mapped
 /// onto `prompt_tokens` and `completion_tokens` respectively by the parser.
-#[derive(Debug, Clone, Default, serde::Deserialize)]
+#[derive(Debug, Clone, Default, serde::Deserialize, serde::Serialize)]
 pub struct TokenUsageInfo {
     /// Tokens consumed by the prompt (i.e. the full conversation context
     /// sent on this turn). On Anthropic-style responses this is the

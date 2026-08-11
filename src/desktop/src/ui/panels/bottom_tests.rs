@@ -27,9 +27,9 @@ fn test_apply_send_click_show_models_dispatch() {
             use_case: Vec::new(),
         },
     );
-    app.orchestrator.agent.command_input = "/models".to_string();
+    app.orchestrator.agent_panel_state.command_input = "/models".to_string();
     assert!(
-        !app.orchestrator.agent.show_results(),
+        !app.orchestrator.agent_panel_state.show_results,
         "show_results must start false"
     );
 
@@ -37,7 +37,7 @@ fn test_apply_send_click_show_models_dispatch() {
 
     assert_eq!(app.orchestrator.agent.state().status, "Done");
     assert!(
-        app.orchestrator.agent.show_results(),
+        app.orchestrator.agent_panel_state.show_results,
         "ShowModels dispatch must set show_results"
     );
     assert!(
@@ -50,7 +50,7 @@ fn test_apply_send_click_show_models_dispatch() {
         app.orchestrator.agent.state().response
     );
     assert!(
-        app.orchestrator.agent.command_input.is_empty(),
+        app.orchestrator.agent_panel_state.command_input.is_empty(),
         "command_input must be cleared after dispatch"
     );
 }
@@ -61,16 +61,16 @@ fn test_apply_send_click_show_models_dispatch() {
 #[test]
 fn test_apply_send_click_empty_prompt_is_noop() {
     let mut app = create_test_app();
-    app.orchestrator.agent.command_input = "   ".to_string();
+    app.orchestrator.agent_panel_state.command_input = "   ".to_string();
 
     apply_send_click(&mut app);
 
     assert!(
-        !app.orchestrator.agent.show_results(),
+        !app.orchestrator.agent_panel_state.show_results,
         "Empty intent must not toggle show_results"
     );
     assert!(
-        app.orchestrator.agent.command_input.is_empty(),
+        app.orchestrator.agent_panel_state.command_input.is_empty(),
         "command_input is still cleared (the .clear() runs before the match)"
     );
 }
@@ -83,16 +83,16 @@ fn test_apply_send_click_empty_prompt_is_noop() {
 #[test]
 fn test_apply_send_click_run_agent_dispatches_with_prompt() {
     let mut app = create_test_app();
-    app.orchestrator.agent.command_input = "hello world".to_string();
+    app.orchestrator.agent_panel_state.command_input = "hello world".to_string();
 
     apply_send_click(&mut app);
 
     assert!(
-        app.orchestrator.agent.show_results(),
+        app.orchestrator.agent_panel_state.show_results,
         "RunAgent dispatch must set show_results"
     );
     assert!(
-        app.orchestrator.agent.command_input.is_empty(),
+        app.orchestrator.agent_panel_state.command_input.is_empty(),
         "command_input must be cleared after dispatch"
     );
 }
@@ -113,7 +113,7 @@ fn test_send_enter_key_captures_event() {
 
     let mut harness = stateful_harness(Vec::<&'static str>::new(), |ui, captured| {
         let mut app = create_test_app();
-        app.orchestrator.agent.command_input = "/models".to_string();
+        app.orchestrator.agent_panel_state.command_input = "/models".to_string();
         show_bottom_panel_capture(&mut app, ui, |event| {
             captured.push(event);
         });
@@ -218,7 +218,7 @@ fn test_ime_commit_enter_still_submits() {
 
     let mut harness = stateful_harness(Vec::<&'static str>::new(), |ui, captured| {
         let mut app = create_test_app();
-        app.orchestrator.agent.command_input = "summarize the doc".to_string();
+        app.orchestrator.agent_panel_state.command_input = "summarize the doc".to_string();
         show_bottom_panel_capture(&mut app, ui, |event| {
             captured.push(event);
         });
@@ -343,14 +343,14 @@ fn test_full_app_paste_then_enter_starts_agent() {
         app.agent().state().running,
         "pressing Enter after pasting must start the agent session; \
              command_input={:?}, status={:?}",
-        app.agent().command_input,
+        app.orchestrator.agent_panel_state.command_input,
         app.agent().state().status
     );
     assert!(
-        app.agent().command_input.is_empty(),
+        app.orchestrator.agent_panel_state.command_input.is_empty(),
         "the pasted prompt must have been consumed by the dispatch; \
              command_input={:?}",
-        app.agent().command_input
+        app.orchestrator.agent_panel_state.command_input
     );
 }
 
@@ -365,7 +365,7 @@ fn test_send_enter_key_while_running_queues_prompt() {
         let mut app = create_test_app();
         // Set agent as running
         app.orchestrator.agent.state_mut().running = true;
-        app.orchestrator.agent.command_input = "queued prompt".to_string();
+        app.orchestrator.agent_panel_state.command_input = "queued prompt".to_string();
         show_bottom_panel_capture(&mut app, ui, |_| {});
     });
     harness.fit_contents();

@@ -1,16 +1,15 @@
 //! Tool-call dispatcher — receives tool-call JSON from the LLM, dispatches through the registry, and feeds results back.
 
+use crate::agent::events::ToolSideEffect;
 use crate::agent::tools::Safety;
 use crate::agent::tools::context::ToolContext;
 use crate::agent::tools::execute_tool;
 use crate::app::session::BrowserSession;
 use crate::bus::core::Bus;
 use crate::bus::events::file::FileEvent;
-use crate::bus::events::typed::{BackgroundEvent, FsEvent};
 use crate::config::AppConfig;
 use std::path::Path;
 use std::sync::Arc;
-use std::sync::mpsc::Sender;
 
 pub struct ToolExecutor {
     config: AppConfig,
@@ -43,11 +42,11 @@ impl ToolExecutor {
         }
     }
 
+    #[allow(clippy::type_complexity)]
     pub fn execute_all(
         &self,
         tool_calls: &[serde_json::Value],
-        tx_gui: &Sender<BackgroundEvent>,
-    ) -> Vec<(String, String, String, String)> {
+    ) -> (Vec<(String, String, String, String)>, Vec<ToolSideEffect>) {
         let mut safe_calls = Vec::new();
         let mut unsafe_calls = Vec::new();
         for tc in tool_calls {
@@ -64,8 +63,8 @@ impl ToolExecutor {
         }
         let mut results = self.execute_parallel(&safe_calls);
         results.extend(self.execute_sequential(&unsafe_calls));
-        self.notify_file_creations(&results, tx_gui);
-        results
+        let side_effects = self.extract_side_effects(&results);
+        (results, side_effects)
     }
 
     /// Look up a tool by name through the registry and ask it for its
@@ -157,11 +156,11 @@ impl ToolExecutor {
         results
     }
 
-    fn notify_file_creations(
+    fn extract_side_effects(
         &self,
         results: &[(String, String, String, String)],
-        tx_gui: &Sender<BackgroundEvent>,
-    ) {
+    ) -> Vec<ToolSideEffect> {
+        let mut effects = Vec::new();
         for (_call_id, func_name, func_args_str, result) in results {
             if func_name != "create_note" {
                 continue;
@@ -199,19 +198,17 @@ impl ToolExecutor {
                             let rest: std::path::PathBuf = comps.collect();
                             let abs_path = Path::new(&lib.root_folder).join(rest);
                             let tags = crate::utils::tags::extract_tags_from_file(&abs_path);
-                            let _ = tx_gui.send(
-                                FsEvent::FileModified {
-                                    path: abs_path,
-                                    tags,
-                                }
-                                .into(),
-                            );
+                            effects.push(ToolSideEffect::FileCreated {
+                                path: abs_path,
+                                tags,
+                            });
                             break;
                         }
                     }
                 }
             }
         }
+        effects
     }
 }
 
@@ -268,5 +265,107 @@ mod tests {
         let uuid_gen = std::sync::Arc::new(crate::utils::uuid::SystemUuidGenerator);
         let executor = ToolExecutor::new(config, bus, browser_session, pdf_backing, tm, uuid_gen);
         assert!(executor.config.models.is_empty());
+    }
+
+    /// T018: Verify `extract_side_effects` returns `FileCreated` for
+    /// successful `create_note` calls whose path starts with a known
+    /// content-library name. Also verifies non-`create_note` tools and
+    /// failed calls produce no side effects (quickstart scenario 4, SC-005).
+    #[test]
+    fn test_extract_side_effects_returns_file_created() {
+        let mut config = AppConfig::default();
+        config
+            .content_libraries
+            .push(crate::config::ContentLibrary {
+                name: "notes".to_string(),
+                root_folder: std::env::temp_dir()
+                    .join("fastmd_test_extract_side_effects")
+                    .to_string_lossy()
+                    .to_string(),
+                kind: "notes".to_string(),
+                readonly: false,
+                priority: 0,
+            });
+        let bus = Bus::new();
+        let browser_session = std::sync::Arc::new(crate::app::session::BrowserSession::new(
+            &crate::config::AppConfig::default(),
+        ));
+        let pdf_backing = std::sync::Arc::new(crate::app::session::PdfBackingTracker::new());
+        let tm = std::sync::Arc::new(std::sync::RwLock::new(
+            crate::agent::tools::manager::ToolManager::new(),
+        ));
+        let uuid_gen = std::sync::Arc::new(crate::utils::uuid::SystemUuidGenerator);
+        let executor = ToolExecutor::new(config, bus, browser_session, pdf_backing, tm, uuid_gen);
+
+        // Synthetic results: a successful create_note and a failed one, plus a non-create_note tool.
+        let results = vec![
+            (
+                "call_1".to_string(),
+                "create_note".to_string(),
+                r#"{"path":"notes/test.md","content":"hello"}"#.to_string(),
+                r#"{"status":"success","data":{"size_bytes":10}}"#.to_string(),
+            ),
+            (
+                "call_2".to_string(),
+                "create_note".to_string(),
+                r#"{"path":"notes/other.md","content":"content"}"#.to_string(),
+                r#"{"status":"error","message":"file exists"}"#.to_string(),
+            ),
+            (
+                "call_3".to_string(),
+                "search_notes".to_string(),
+                r#"{"query":"test"}"#.to_string(),
+                r#"{"status":"success","data":{"matches":0}}"#.to_string(),
+            ),
+        ];
+
+        let effects = executor.extract_side_effects(&results);
+        // Only the successful create_note should produce a side effect
+        assert_eq!(
+            effects.len(),
+            1,
+            "only successful create_note produces side effect"
+        );
+        match &effects[0] {
+            ToolSideEffect::FileCreated { path, .. } => {
+                assert!(
+                    path.to_string_lossy().contains("test.md"),
+                    "path should contain test.md; got: {:?}",
+                    path
+                );
+            }
+        }
+    }
+
+    /// T018: Verify `execute_all` returns `Vec<ToolSideEffect>` and does
+    /// NOT send `FsEvent` on any channel (the old `notify_file_creations`
+    /// that sent on `tx_gui` was deleted in T012). We verify by checking
+    /// that the `Bus<FileEvent>` has no events after `execute_all` (SC-005).
+    #[test]
+    fn test_execute_all_no_fs_events_sent() {
+        let config = AppConfig::default();
+        let bus = Bus::new();
+        let bus_reader = bus.subscribe();
+        let browser_session = std::sync::Arc::new(crate::app::session::BrowserSession::new(
+            &crate::config::AppConfig::default(),
+        ));
+        let pdf_backing = std::sync::Arc::new(crate::app::session::PdfBackingTracker::new());
+        let tm = std::sync::Arc::new(std::sync::RwLock::new(
+            crate::agent::tools::manager::ToolManager::new(),
+        ));
+        let uuid_gen = std::sync::Arc::new(crate::utils::uuid::SystemUuidGenerator);
+        let executor = ToolExecutor::new(config, bus, browser_session, pdf_backing, tm, uuid_gen);
+
+        // Call execute_all with an empty tool_calls list — should return empty results and side effects
+        let (results, side_effects) = executor.execute_all(&[]);
+        assert!(results.is_empty());
+        assert!(side_effects.is_empty());
+
+        // Verify no FsEvent was sent on the file event bus
+        match bus_reader.try_recv() {
+            Ok(ev) => panic!("execute_all must not send FsEvent; got: {:?}", ev),
+            Err(std::sync::mpsc::TryRecvError::Empty) => {} // expected
+            Err(std::sync::mpsc::TryRecvError::Disconnected) => {} // also fine
+        }
     }
 }

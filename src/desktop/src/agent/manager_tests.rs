@@ -1,7 +1,9 @@
 //! Tests for `agent/manager.rs`.
 
 use super::*;
+use crate::bus::events::debug::{AgentDebugEntry, DebugEntryKind, DebugEntryRow};
 use crate::config::AppConfig;
+use std::collections::HashSet;
 
 #[test]
 fn test_new_manager_is_empty() {
@@ -67,6 +69,7 @@ fn test_drain_config_observes_first_event() {
     let bus = config_bus();
     let mut mgr = AgentSessionManager::new(
         bus.clone(),
+        crate::bus::core::Bus::new(),
         Arc::new(crate::app::session::BrowserSession::new(
             &AppConfig::default(),
         )),
@@ -101,6 +104,7 @@ fn test_drain_config_returns_false_when_empty() {
     let bus = crate::bus::config::config_bus();
     let mut mgr = AgentSessionManager::new(
         bus,
+        crate::bus::core::Bus::new(),
         Arc::new(crate::app::session::BrowserSession::new(
             &AppConfig::default(),
         )),
@@ -128,6 +132,7 @@ fn test_construct_then_publish_order_drains_config() {
     //    call inside `FastMdApp::new`. It subscribes here.
     let mut mgr = AgentSessionManager::new(
         bus.clone(),
+        crate::bus::core::Bus::new(),
         Arc::new(crate::app::session::BrowserSession::new(
             &AppConfig::default(),
         )),
@@ -165,6 +170,7 @@ fn test_publish_then_construct_order_drops_event() {
     // channel won't deliver the event to this reader.
     let mut mgr = AgentSessionManager::new(
         bus,
+        crate::bus::core::Bus::new(),
         Arc::new(crate::app::session::BrowserSession::new(
             &AppConfig::default(),
         )),
@@ -215,8 +221,7 @@ fn test_queue_prompt_and_take_next() {
 }
 
 #[test]
-fn test_handle_agent_event_finished_returns_queued_prompt() {
-    use crate::bus::events::typed::AgentEvent;
+fn test_finished_returns_queued_prompt() {
     let config = AppConfig::default();
     let mut mgr = AgentSessionManager::new_for_test(
         config,
@@ -229,16 +234,17 @@ fn test_handle_agent_event_finished_returns_queued_prompt() {
     mgr.queue_prompt("queued prompt".to_string());
     mgr.state.running = true;
 
-    // Handle Finished event - should return the queued prompt
-    let result = mgr.handle_agent_event(AgentEvent::Finished(vec![]));
+    // Simulate SessionFinished: set running false, store history, dequeue
+    mgr.set_running(false);
+    mgr.set_history(Some(vec![]));
+    let result = mgr.take_next_queued_prompt();
     assert_eq!(result, Some("queued prompt".to_string()));
     assert!(!mgr.state.running);
     assert_eq!(mgr.queued_prompt_count(), 0);
 }
 
 #[test]
-fn test_handle_agent_event_finished_no_queued_prompt() {
-    use crate::bus::events::typed::AgentEvent;
+fn test_finished_no_queued_prompt() {
     let config = AppConfig::default();
     let mut mgr = AgentSessionManager::new_for_test(
         config,
@@ -249,15 +255,16 @@ fn test_handle_agent_event_finished_no_queued_prompt() {
 
     mgr.state.running = true;
 
-    // Handle Finished event with no queued prompts
-    let result = mgr.handle_agent_event(AgentEvent::Finished(vec![]));
+    // Simulate SessionFinished with no queued prompts
+    mgr.set_running(false);
+    mgr.set_history(Some(vec![]));
+    let result = mgr.take_next_queued_prompt();
     assert!(result.is_none());
     assert!(!mgr.state.running);
 }
 
 #[test]
-fn test_handle_agent_event_failed_clears_queue() {
-    use crate::bus::events::typed::AgentEvent;
+fn test_failed_clears_queue() {
     let config = AppConfig::default();
     let mut mgr = AgentSessionManager::new_for_test(
         config,
@@ -271,19 +278,17 @@ fn test_handle_agent_event_failed_clears_queue() {
     mgr.queue_prompt("prompt 2".to_string());
     mgr.state.running = true;
 
-    // Handle Failed event - should clear the queue
-    let result = mgr.handle_agent_event(AgentEvent::Failed("test error".to_string()));
-    assert!(result.is_none());
+    // Simulate Failed event
+    mgr.set_running(false);
+    mgr.set_status("Error: test error".to_string());
+    mgr.clear_queued_prompts();
     assert!(!mgr.state.running);
     assert_eq!(mgr.queued_prompt_count(), 0);
     assert!(mgr.state.status.contains("Error"));
 }
 
 #[test]
-fn test_handle_agent_event_debug_entry_accumulates() {
-    use crate::bus::events::debug::{AgentDebugEntry, DebugEntryKind, DebugEntryRow};
-    use crate::bus::events::typed::AgentEvent;
-
+fn test_debug_entry_accumulates() {
     let config = AppConfig::default();
     let mut mgr = AgentSessionManager::new_for_test(
         config,
@@ -294,7 +299,6 @@ fn test_handle_agent_event_debug_entry_accumulates() {
 
     let entry = AgentDebugEntry {
         turn: 1,
-        session: 1,
         timestamp: chrono::Local::now(),
         kind: DebugEntryKind::Outgoing,
         summary: "Turn 1 — Outgoing".to_string(),
@@ -302,31 +306,28 @@ fn test_handle_agent_event_debug_entry_accumulates() {
         row_type: DebugEntryRow::Entry,
     };
 
-    let result = mgr.handle_agent_event(AgentEvent::DebugEntry(entry));
-    assert!(result.is_none());
+    mgr.push_debug_entry(entry);
     assert_eq!(mgr.state.debug_entries.len(), 1);
     assert_eq!(mgr.state.debug_entries[0].turn, 1);
-    assert_eq!(mgr.state.debug_entries[0].session, 1);
     assert_eq!(mgr.state.debug_entries[0].kind, DebugEntryKind::Outgoing);
 
     // Second entry accumulates (no clearing)
     let entry2 = AgentDebugEntry {
         turn: 2,
-        session: 1,
         timestamp: chrono::Local::now(),
         kind: DebugEntryKind::Incoming,
         summary: "Turn 2 — Incoming".to_string(),
         content: Some(serde_json::json!({"choices": []})),
         row_type: DebugEntryRow::Entry,
     };
-    mgr.handle_agent_event(AgentEvent::DebugEntry(entry2));
+    mgr.push_debug_entry(entry2);
+    assert_eq!(mgr.state.debug_entries.len(), 2);
     assert_eq!(mgr.state.debug_entries.len(), 2);
 }
 
 #[test]
 fn test_debug_entries_never_cleared_on_new_session() {
     use crate::bus::events::debug::{AgentDebugEntry, DebugEntryKind, DebugEntryRow};
-    use crate::bus::events::typed::AgentEvent;
 
     let config = AppConfig::default();
     let mut mgr = AgentSessionManager::new_for_test(
@@ -338,14 +339,13 @@ fn test_debug_entries_never_cleared_on_new_session() {
 
     let entry = AgentDebugEntry {
         turn: 1,
-        session: 1,
         timestamp: chrono::Local::now(),
         kind: DebugEntryKind::Outgoing,
         summary: "Turn 1 — Outgoing".to_string(),
         content: Some(serde_json::json!({"test": true})),
         row_type: DebugEntryRow::Entry,
     };
-    mgr.handle_agent_event(AgentEvent::DebugEntry(entry));
+    mgr.push_debug_entry(entry);
     assert_eq!(mgr.state.debug_entries.len(), 1);
 
     // Simulate a new session start (clears history but not debug entries)
@@ -357,9 +357,12 @@ fn test_debug_entries_never_cleared_on_new_session() {
     );
 }
 
+/// T035: Uuid session identity — verifies `current_session_id` is set
+/// on each `start_session` call and is a valid `Uuid`. Uses `Bus<AgentEvent>`
+/// since the agent no longer publishes on `tx_gui`.
 #[test]
-fn test_session_counter_increments_on_start_session() {
-    use crate::bus::core::Bus;
+fn test_current_session_id_set_on_start_session() {
+    use crate::agent::events::AgentEvent as SeamAgentEvent;
 
     let mut config = AppConfig::default();
     config.models.insert(
@@ -379,53 +382,81 @@ fn test_session_counter_increments_on_start_session() {
             &AppConfig::default(),
         )),
     );
-    // new_for_test sets session_counter to 0
+    // Before first session: no session_id
+    assert!(mgr.current_session_id().is_none());
 
-    let (tx, rx) = std::sync::mpsc::channel();
-    let bus = Bus::new();
-
-    // Start first session — should increment to 1
-    mgr.start_session(
-        tx.clone(),
-        "prompt 1".to_string(),
-        None,
-        None,
-        HashSet::new(),
-        bus.clone(),
+    // Start first session — current_session_id must be set
+    let reader1 = mgr.event_bus().subscribe();
+    let session_id_1 = uuid::Uuid::new_v4();
+    mgr.submit_prompt(crate::agent::events::AgentPrompt {
+        session_id: session_id_1,
+        text: "prompt 1".to_string(),
+        active_file: None,
+        active_dir: None,
+        selected_files: HashSet::new(),
+        cancel_flag: std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false)),
+    });
+    assert_eq!(
+        mgr.current_session_id(),
+        Some(session_id_1),
+        "current_session_id must match the submitted prompt"
     );
-    // Blocking drain: wait until the spawned agent thread finishes (Failed, no valid API key)
-    while let Ok(ev) = rx.recv() {
-        match &ev {
-            BackgroundEvent::Agent(AgentEvent::DebugEntry(e)) => {
+    assert!(!session_id_1.is_nil(), "session_id must be a real Uuid");
+
+    // Drain bus until Failed (no valid API key)
+    let mut deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+    while std::time::Instant::now() < deadline {
+        let mut got_failed = false;
+        while let Ok(ev) = reader1.try_recv() {
+            if let SeamAgentEvent::SessionStarted { session_id } = &ev {
                 assert_eq!(
-                    e.session, 1,
-                    "first session debug entries must have session 1"
+                    *session_id, session_id_1,
+                    "SessionStarted must carry the manager's session_id"
                 );
             }
-            BackgroundEvent::Agent(AgentEvent::Failed(_)) => break,
-            _ => {}
+            if matches!(ev, SeamAgentEvent::Failed { .. }) {
+                got_failed = true;
+            }
         }
+        if got_failed {
+            break;
+        }
+        std::thread::sleep(std::time::Duration::from_millis(5));
     }
 
-    // Start second session — should increment to 2
-    mgr.start_session(
-        tx.clone(),
-        "prompt 2".to_string(),
-        None,
-        None,
-        HashSet::new(),
-        bus.clone(),
+    // Start second session — current_session_id must change
+    let reader2 = mgr.event_bus().subscribe();
+    let session_id_2 = uuid::Uuid::new_v4();
+    mgr.submit_prompt(crate::agent::events::AgentPrompt {
+        session_id: session_id_2,
+        text: "prompt 2".to_string(),
+        active_file: None,
+        active_dir: None,
+        selected_files: HashSet::new(),
+        cancel_flag: std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false)),
+    });
+    assert_ne!(
+        session_id_1, session_id_2,
+        "each submit_prompt must use a new session_id"
     );
-    while let Ok(ev) = rx.recv() {
-        match &ev {
-            BackgroundEvent::Agent(AgentEvent::DebugEntry(e)) => {
+
+    deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+    while std::time::Instant::now() < deadline {
+        let mut got_failed = false;
+        while let Ok(ev) = reader2.try_recv() {
+            if let SeamAgentEvent::SessionStarted { session_id } = &ev {
                 assert_eq!(
-                    e.session, 2,
-                    "second session debug entries must have session 2"
+                    *session_id, session_id_2,
+                    "SessionStarted must carry the new session_id"
                 );
             }
-            BackgroundEvent::Agent(AgentEvent::Failed(_)) => break,
-            _ => {}
+            if matches!(ev, SeamAgentEvent::Failed { .. }) {
+                got_failed = true;
+            }
         }
+        if got_failed {
+            break;
+        }
+        std::thread::sleep(std::time::Duration::from_millis(5));
     }
 }

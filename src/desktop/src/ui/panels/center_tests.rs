@@ -234,11 +234,11 @@ fn test_clear_agent_session_state() {
     app.agent_mut().set_response("response text".to_string());
     app.agent_mut().set_thinking("thinking process".to_string());
     app.agent_mut().state_mut().running = true;
-    app.agent_mut().set_show_results(true);
+    app.orchestrator.agent_panel_state.show_results = true;
 
     clear_agent_session_state(&mut app);
 
-    assert!(!app.agent().show_results());
+    assert!(!app.orchestrator.agent_panel_state.show_results);
     assert!(app.agent().state().history.is_none());
     assert!(app.agent().state().response.is_empty());
     assert!(app.agent().state().thinking.is_empty());
@@ -308,7 +308,7 @@ fn test_show_center_panel_render_modes() {
     assert_text_contains(&output.shapes, "Document 1 Header");
     assert_text_contains(&output.shapes, "title");
 
-    app.agent_mut().set_show_results(true);
+    app.orchestrator.agent_panel_state.show_results = true;
     app.agent_mut().set_running(true);
     app.agent_mut().set_status("Thinking...".to_string());
     app.agent_mut().set_thinking("Reasoning step 1".to_string());

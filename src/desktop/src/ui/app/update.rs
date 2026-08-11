@@ -50,9 +50,11 @@ impl FastMdApp {
         self.orchestrator.drain_config_bus();
         self.process_file_events_and_repaint(ctx);
         self.orchestrator.drain_background_channel();
+        self.orchestrator.drain_agent_event_bus();
 
         if ctx.input_mut(|i| i.consume_key(egui::Modifiers::ALT, egui::Key::A)) {
-            self.orchestrator.agent.show_debug_window = !self.orchestrator.agent.show_debug_window;
+            self.orchestrator.agent_panel_state.show_debug_window =
+                !self.orchestrator.agent_panel_state.show_debug_window;
         }
 
         self.orchestrator.handle_file_selection();
@@ -93,14 +95,50 @@ impl FastMdApp {
     }
 
     fn process_file_events_and_repaint(&mut self, ctx: &egui::Context) {
-        if self.orchestrator.process_file_events()
-            || !self.orchestrator.file_processor.indexing_finished
-            || !ctx.input(|i| i.raw.events.is_empty())
-        {
+        if self.should_request_immediate_repaint(ctx) {
             ctx.request_repaint();
-        } else {
-            ctx.request_repaint_after(self.orchestrator.repaint_interval);
         }
+        // When `should_request_immediate_repaint` returns `false` the
+        // frame is fully idle (no file events, indexing finished, no
+        // raw input). We deliberately do NOT call
+        // `ctx.request_repaint_after(...)` here. A previous revision
+        // scheduled a 16 ms repaint in the idle branch as a safety net
+        // for the indexing-finished transition, but in practice the
+        // next event always arrived from the winit event loop
+        // (mouse move, key, focus, resize, window move, …) well
+        // before the 16 ms timer — and the timer itself kept the
+        // entire `update_ui` closure running at 60 FPS for no
+        // visible change, pegging the process at ~5% CPU with no
+        // input. egui's reactive model will repaint on the next real
+        // input event; the regression tests
+        // (`tests::test_idle_app_does_not_request_repaint`,
+        // `tests::test_indexing_in_progress_requests_repaint`) lock
+        // this contract in.
+    }
+
+    /// Decide whether this frame needs an *immediate* repaint.
+    ///
+    /// Returns `true` when any of the following is true:
+    /// - File events arrived on the `file_event_bus` this frame.
+    /// - Indexing is still in progress (the toolbar spinner and
+    ///   status text need to keep animating).
+    /// - Raw input is pending in the egui input state (mouse, key,
+    ///   focus, viewport resize, …) that the next frame must flush.
+    ///
+    /// When this returns `false`, the frame is fully idle and the
+    /// caller MUST NOT request any repaint. Letting egui's reactive
+    /// model pick the next repaint from real input events is what
+    /// keeps the idle CPU at 0%; the historical 60 FPS forced loop
+    /// that did the same job is what caused the regression this
+    /// decider exists to prevent.
+    pub(in crate::ui::app) fn should_request_immediate_repaint(
+        &mut self,
+        ctx: &egui::Context,
+    ) -> bool {
+        let events_changed = self.orchestrator.process_file_events();
+        let indexing_active = !self.orchestrator.file_processor.indexing_finished;
+        let raw_input_pending = !ctx.input(|i| i.raw.events.is_empty());
+        events_changed || indexing_active || raw_input_pending
     }
 
     fn handle_deferred_actions(&mut self) {
