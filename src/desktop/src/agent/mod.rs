@@ -17,6 +17,15 @@ pub mod tools;
 #[path = "agent_impl_tests.rs"]
 mod agent_impl_tests;
 
+// Property-based tests for the datamark envelope. Phase 1 of the
+// fuzzing plan (`doc/planning/fuzzing.md`); this is the single
+// highest-value new proptest in the project because the envelope
+// is the security boundary between the LLM and untrusted tool
+// output.
+#[cfg(test)]
+#[path = "datamark_proptests.rs"]
+mod datamark_proptests;
+
 pub use agent_impl::*;
 pub use context::AgentContext;
 pub use manager::AgentSessionManager;

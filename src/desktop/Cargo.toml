@@ -112,6 +112,12 @@ tempfile = "3.8"
 tokio = { version = "1.53.0", features = ["rt", "rt-multi-thread", "macros", "sync"] }
 filetime = "0.2"
 proptest = "1.4"
+# `arbitrary` enables `#[derive(Arbitrary)]` on types we want to feed into
+# `cargo-fuzz` targets. Currently unused in the source — Phase 5 of the
+# fuzzing plan (`doc/planning/fuzzing.md`) is where the cargo-fuzz crate
+# will pull this in. Adding it now means a future PR that adds the fuzz
+# targets doesn't need to touch dev-deps at the same time.
+arbitrary = { version = "1", features = ["derive"] }
 # `rayon` is the data-parallelism library used by the
 # per-example content-fidelity test
 # (`all_commonmark_examples_render_content_into_pdf` in
