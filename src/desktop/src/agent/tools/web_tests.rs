@@ -107,7 +107,7 @@ fn test_tool_web_fetch_cursor_pagination() {
     rustls::crypto::ring::default_provider()
         .install_default()
         .ok();
-    // 150 <p> tags -> 150 markdown lines, well past the 100-line page size.
+    // 150 <p> tags -> 300 markdown lines, well past the 64-line page size.
     let mut html = String::from("<html><body>");
     for i in 0..150 {
         html.push_str(&format!("<p>line{}</p>", i));
@@ -157,9 +157,9 @@ fn test_tool_web_fetch_cursor_pagination() {
     assert!(!second.content.is_empty());
     // The first page's last content line (skipping blank separator lines
     // emitted by the markdown converter) must come immediately before the
-    // second page's first content line. With WEB_FETCH_PAGE_SIZE=100 lines
-    // and `\n\n` separators, the first page contains line0..line49 and the
-    // second page contains line50..line99.
+    // second page's first content line. With WEB_FETCH_PAGE_SIZE=64 lines
+    // and `\n\n` separators, the first page contains line0..line31 and the
+    // second page contains line32..line63.
     let first_page_lines: Vec<&str> = first.content.lines().filter(|l| !l.is_empty()).collect();
     let second_page_lines: Vec<&str> = second.content.lines().filter(|l| !l.is_empty()).collect();
     let last = first_page_lines.last().expect("first page has content");

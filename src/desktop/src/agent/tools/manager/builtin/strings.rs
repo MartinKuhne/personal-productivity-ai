@@ -40,9 +40,9 @@ pub const FIELD_CURSOR_DESCRIPTION: &str = "Pass this pagination token back unch
 /// this paragraph plus a per-family domain sentence.
 pub const SEARCH_EMAIL_CANONICAL_DESCRIPTION: &str = "Search emails by keyword, folder, date range, sender, recipient, or status. You must provide at least one filter. The tool returns up to 100 matching emails and a cursor token for pagination.";
 
-/// Description for `web_fetch` cursor-based pagination. The tool returns up to 100
+/// Description for `web_fetch` cursor-based pagination. The tool returns up to 64
 /// lines of Markdown content and a cursor token for pagination.
-pub const WEB_FETCH_CURSOR_DESCRIPTION: &str = "Fetch a URL and convert the content to Markdown. Returns up to 100 lines and a cursor token for pagination. Use the cursor to fetch the next page. Use force_refetch=true to bypass.";
+pub const WEB_FETCH_CURSOR_DESCRIPTION: &str = "Fetch a URL and convert the content to Markdown. Returns up to 64 lines and a cursor token for pagination. Use the cursor to fetch the next page. Use force_refetch=true to bypass.";
 
 /// Hint string emitted on the final page of a `web_fetch` cursor pagination.
 pub const WEB_FETCH_FINAL_PAGE_HINT: &str = "Final page.";
