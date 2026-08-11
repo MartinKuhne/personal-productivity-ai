@@ -46,45 +46,6 @@ fn printable_ascii() -> impl Strategy<Value = String> {
     prop::string::string_regex(r"[\x20-\x7E]{0,80}").unwrap()
 }
 
-/// Strategy: a string that contains at least one of the
-/// chars the escape function claims to escape. Without
-/// this, the "no un-escaped char survives" property would
-/// degenerate to "passes on inputs with no special chars".
-fn contains_char(c: char) -> impl Strategy<Value = String> {
-    (printable_ascii(), printable_ascii(), printable_ascii()).prop_map(move |(pre, mid, post)| {
-        // Place the target char at a random position in
-        // the middle segment so proptest's shrinking has
-        // the surrounding context to work with.
-        let mid_pos = mid.len() / 2;
-        let (left, right) = mid.split_at(mid_pos);
-        format!("{pre}{left}{c}{right}{post}")
-    })
-}
-
-/// Strategy: a string that contains at least one of the
-/// chars `escape_typst` claims to escape. The target char
-/// is chosen uniformly from the documented escape set so
-/// the proptest explores every char in the set across
-/// shrinking.
-fn string_with_any_target_char() -> impl Strategy<Value = String> {
-    // The set of chars `escape_typst` escapes, in
-    // deterministic order. Picking uniformly across this
-    // set gives every char equal probability.
-    let targets: [char; 16] = [
-        '\\', '#', '*', '_', '`', '[', ']', '{', '}', '@', '$', '~', '\'', '"', '<', '>',
-    ];
-    let idx_strategy = 0..targets.len();
-    (idx_strategy, printable_ascii()).prop_map(move |(idx, base)| {
-        let c = targets[idx];
-        // Splice `c` into the middle of `base`. The
-        // surrounding context gives proptest something to
-        // shrink to when it finds a failure.
-        let mid = base.len() / 2;
-        let (left, right) = base.split_at(mid);
-        format!("{left}{c}{right}")
-    })
-}
-
 proptest! {
     #![proptest_config(ProptestConfig::with_cases(512))]
 
@@ -270,7 +231,6 @@ proptest! {
         // part of `\:` and `\/` escape sequences).
         for c in [':', '/'] {
             let std_count = standard.matches(c).count();
-            let at_count = autolink.matches(c).count();
             let in_count = s.matches(c).count();
             if std_count != in_count {
                 prop_assert!(

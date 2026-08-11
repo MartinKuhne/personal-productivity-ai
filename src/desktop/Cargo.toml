@@ -112,6 +112,12 @@ tempfile = "3.8"
 tokio = { version = "1.53.0", features = ["rt", "rt-multi-thread", "macros", "sync"] }
 filetime = "0.2"
 proptest = "1.4"
+# `criterion` is the project-wide micro-benchmark harness. Run with
+# `cargo bench` locally; the GH Actions bench workflow runs the same
+# suite on a separate (informational, not gating) job. Pinned to
+# the 0.5 line for the `--profile ci` + custom-criterion-config
+# integration to stay stable.
+criterion = { version = "0.5", features = ["html_reports"] }
 egui_kittest = { version = "0.36", features = ["eframe", "snapshot", "wgpu"] }
 # `accesskit::Role` is the type used by `egui_kittest::Role` /
 # `kittest::Queryable::get_by_role`; pull it in as a direct
@@ -142,3 +148,8 @@ path = "src/main.rs"
 [[bin]]
 name = "deploy"
 path = "src/bin/deploy.rs"
+
+[[bench]]
+name = "table_width"
+path = "benches/table_width.rs"
+harness = false
