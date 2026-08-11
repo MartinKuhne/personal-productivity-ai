@@ -39,24 +39,28 @@ pub fn format_tool_call_message(func_name: &str, func_args_str: &str) -> String 
     format!("> **Executing tool `{}`**\n{}\n", func_name, quoted)
 }
 
-/// Format a list of [`DelegateToolCall`]s into a `>>`-prefixed markdown
-/// group, visually distinguishing delegate sub-agent tool calls from the
-/// parent agent's own tool calls (FR-014, SC-006).
+/// Format a list of [`DelegateToolCall`]s into `<span>`-wrapped HTML blocks,
+/// rendering delegate sub-agent tool calls as muted gray text,
+/// visually distinguishing them from the parent agent's own tool calls
+/// (FR-014, SC-006).
 pub fn format_delegate_trace(tool_calls: &[DelegateToolCall]) -> String {
     let mut out = String::new();
     for tc in tool_calls {
+        if tc.name == "create_note" {
+            out.push_str(&format!("<span>**Executing tool `{}`**", tc.name));
+            if let Some(path) = tc.args.get("path").and_then(|p| p.as_str()) {
+                out.push_str(&format!(" — Path: `{}`", path));
+            }
+            out.push_str("</span>\n");
+            continue;
+        }
         let formatted_args = match serde_json::to_string_pretty(&tc.args) {
             Ok(s) => s,
             Err(_) => tc.args.to_string(),
         };
-        let quoted = formatted_args
-            .lines()
-            .map(|line| format!(">> {}", line))
-            .collect::<Vec<_>>()
-            .join("\n");
         out.push_str(&format!(
-            ">> **Executing tool `{}`**\n{}\n\n",
-            tc.name, quoted
+            "<span>**Executing tool `{}`**\n{}\n</span>\n\n",
+            tc.name, formatted_args
         ));
     }
     out

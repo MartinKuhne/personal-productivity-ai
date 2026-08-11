@@ -32,8 +32,9 @@ pub fn tool_search_notes(
             && let Some(rel_path) = entry.path().strip_prefix(root_path).ok()
             && let Ok(content) = std::fs::read_to_string(entry.path())
         {
+            let (_, body) = split_file_content(&content);
             let virtual_path = Path::new(virtual_prefix).join(rel_path);
-            for (idx, line) in content.lines().enumerate() {
+            for (idx, line) in body.lines().enumerate() {
                 if line.to_lowercase().contains(&query_lower) {
                     results.push(format!("{}:{} - {}", virtual_path.display(), idx + 1, line));
                 }
@@ -129,7 +130,10 @@ pub fn tool_read_note(
     path_str: &str,
 ) -> Result<crate::agent::tools::dtos::ReadNoteResponse, String> {
     match crate::utils::read_text_file(Path::new(path_str)) {
-        Ok(content) => Ok(crate::agent::tools::dtos::ReadNoteResponse { content }),
+        Ok(content) => {
+            let (_, body) = split_file_content(&content);
+            Ok(crate::agent::tools::dtos::ReadNoteResponse { content: body })
+        }
         Err(e) => Err(format!("Failed to read file: {}", e)),
     }
 }
@@ -147,7 +151,8 @@ pub fn tool_window_note(
 ) -> Result<crate::agent::tools::dtos::WindowNoteResponse, String> {
     match crate::utils::read_text_file(Path::new(path_str)) {
         Ok(content) => {
-            let lines: Vec<&str> = content.lines().collect();
+            let (_, body) = split_file_content(&content);
+            let lines: Vec<&str> = body.lines().collect();
             let slice = if offset >= lines.len() {
                 &[][..]
             } else {
@@ -221,14 +226,16 @@ pub fn tool_insert_into_note(
 ) -> Result<crate::agent::tools::dtos::InsertIntoNoteResponse, String> {
     match crate::utils::read_text_file(Path::new(path_str)) {
         Ok(content) => {
-            let mut lines: Vec<String> = content.lines().map(|s| s.to_string()).collect();
-            if offset > lines.len() {
+            let (header, body) = split_file_content(&content);
+            let mut lines: Vec<String> = body.lines().map(|s| s.to_string()).collect();
+            if offset > lines.len() && offset > 0 {
                 return Err("Offset out of range.".to_string());
             }
             for (delta, line) in lines_to_insert.iter().enumerate() {
-                lines.insert(offset + delta, line.clone());
+                lines.insert((offset + delta).min(lines.len()), line.clone());
             }
-            let new_content = lines.join("\n");
+            let new_body = lines.join("\n");
+            let new_content = reconstruct_file_content(header, &new_body);
             match std::fs::write(path_str, new_content) {
                 Ok(_) => {
                     producer.publish_updated(Path::new(path_str));
@@ -251,11 +258,13 @@ pub fn tool_patch_note(
 ) -> Result<crate::agent::tools::dtos::PatchNoteResponse, String> {
     match crate::utils::read_text_file(Path::new(path_str)) {
         Ok(content) => {
-            if !content.contains(old_string) {
-                return Err("The specified old_string was not found in the file.".to_string());
+            let (header, body) = split_file_content(&content);
+            if !body.contains(old_string) {
+                return Err("The specified old_string was not found in the file body.".to_string());
             }
-            let count = content.matches(old_string).count();
-            let new_content = content.replace(old_string, new_string);
+            let count = body.matches(old_string).count();
+            let new_body = body.replace(old_string, new_string);
+            let new_content = reconstruct_file_content(header, &new_body);
             match std::fs::write(path_str, new_content) {
                 Ok(_) => {
                     producer.publish_updated(Path::new(path_str));
@@ -267,6 +276,28 @@ pub fn tool_patch_note(
             }
         }
         Err(e) => Err(format!("Failed to read file: {}", e)),
+    }
+}
+
+fn split_file_content(raw_content: &str) -> (Option<String>, String) {
+    match crate::markdown::document::parse_front_matter(raw_content) {
+        Some(fm) => {
+            let mut body = fm.body.as_str();
+            if body.starts_with("\r\n") {
+                body = &body[2..];
+            } else if body.starts_with('\n') {
+                body = &body[1..];
+            }
+            (Some(fm.source), body.to_string())
+        }
+        None => (None, raw_content.to_string()),
+    }
+}
+
+fn reconstruct_file_content(header_source: Option<String>, body: &str) -> String {
+    match header_source {
+        Some(src) => format!("---{}---\n{}", src, body),
+        None => body.to_string(),
     }
 }
 
