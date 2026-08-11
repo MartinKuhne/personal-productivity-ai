@@ -786,12 +786,27 @@ fn emit_end(state: &mut TypstEmitState, tag_end: TagEnd) {
                 // The language hint is preserved as a comment for
                 // debuggability — the new path doesn't have access to
                 // typst's syntax highlighter, so the hint is
-                // informational only.
+                // informational only. The lang is set from
+                // `Tag::CodeBlock` (not via `push_inline`), so
+                // it has not been escaped yet — the string
+                // escape here is the *only* escape.
                 let lang_comment = if buf.lang.is_empty() {
                     String::new()
                 } else {
                     format!("\n  // lang: {}", escape_typst_string(&buf.lang))
                 };
+                // The body is accumulated by `push_inline`,
+                // which routes code-buffer text through
+                // `escape_typst_string` (see the comment on
+                // that function). The body is therefore
+                // already escaped for inclusion in a string
+                // literal — running `escape_typst_string` on
+                // it again would double-escape the backslashes
+                // (a `\` would become `\\\\` instead of `\\`).
+                // The proptest `escape_typst_string_is_idempotent`
+                // catches this class of regression: the
+                // function is not idempotent, and the body
+                // must not be re-escaped here.
                 state.output.push_str(&format!(
                     "#block(\n  fill: luma(245),\n  inset: 8pt,\n  \
                      radius: 4pt,\n  width: 100%\n)[\n  \
@@ -799,7 +814,7 @@ fn emit_end(state: &mut TypstEmitState, tag_end: TagEnd) {
                      \"Liberation Mono\", \"Courier New\"), size: 9pt)\n  \
                      #set par(justify: false, leading: 0.5em){lang_comment}\n  \
                      #text(\"{}\")\n]",
-                    escape_typst_string(&buf.body)
+                    buf.body
                 ));
             }
         }
@@ -1080,3 +1095,13 @@ fn escape_typst_autolink(s: &str) -> String {
 #[cfg(test)]
 #[path = "typst_translator_tests.rs"]
 mod tests;
+
+// Property tests for the escape_typst* family. The four closed
+// escape gaps from the ADR (gaps #2, #5, #8, #9) have
+// example-based unit tests; this proptest layers a stronger
+// property check on top — every char in the documented escape
+// set is verified against random inputs. Sidecar of
+// 	ypst_translator.rs per AGENTS.md RUST-056 / RUST-057.
+#[cfg(test)]
+#[path = "typst_translator_proptests.rs"]
+mod proptests;

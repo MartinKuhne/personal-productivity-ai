@@ -284,3 +284,12 @@ mod tests {
         );
     }
 }
+
+// Property tests for the csv_db query builder. The proptest
+// exercises the seven core properties of the query / delete
+// pipeline: panic-freedom, tautology / contradiction handling,
+// sum / average aggregates, and the all-rows delete. Sidecar of
+// query.rs per AGENTS.md RUST-056 / RUST-057.
+#[cfg(test)]
+#[path = "query_proptests.rs"]
+mod proptests;

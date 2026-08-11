@@ -300,3 +300,11 @@ mod tests {
         assert_eq!(event.paths[0], file_path);
     }
 }
+
+// Property tests for the YAML frontmatter parser. See the file for
+// the surface under test (panic-freedom, key/value round-trip,
+// unclosed-frontmatter rejection). Sidecar of yaml_header.rs per
+// AGENTS.md RUST-056 / RUST-057.
+#[cfg(test)]
+#[path = "yaml_header_proptests.rs"]
+mod proptests;
