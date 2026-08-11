@@ -697,23 +697,32 @@ fn strip_list_markers(md: &str) -> String {
 /// translator that dropped all body content; this content
 /// fidelity check would fail that same translator immediately).
 ///
-/// Threading model: the test processes all 652 examples in
-/// parallel using `std::thread`. Each example is handled in
-/// its own thread; the main thread collects results via a
-/// channel and uses `recv_timeout` to apply a per-example
-/// deadline. Threads that don't finish in time are abandoned
-/// (the result is reported as "timed out" and the thread
-/// keeps running in the background — Rust has no thread
-/// kill, but `std::process::exit` at the end of the test
-/// reaps all live threads when the process exits). This
-/// makes the test *survivable* against the hang in the
-/// needle-extraction strip functions
-/// (`strip_link_ref_defs`, `strip_link_destinations`,
-/// `strip_list_markers`) where some examples stall in a
-/// tight loop. The root cause is still unfixed — see the
-/// `#[ignore]` message on the per-example loop below for
-/// the full investigation notes — but the threaded harness
-/// means a single bad example no longer blocks the rest.
+/// Threading model: the test processes all 652 examples
+/// across a **rayon thread pool** (default = `num_cpus`
+/// threads, work-stealing). Each example is one closure
+/// submitted to the pool via `pool.scope`. The pool
+/// limits concurrent work to the CPU count instead of
+/// spawning one `std::thread` per example (the previous
+/// version spawned 608 threads, ~600MB of stack plus
+/// per-thread Typst engine state, which exhausted memory
+/// on the test machine). Rayon's work-stealing also
+/// means a single slow example doesn't pin a dedicated
+/// worker — the pool redistributes.
+///
+/// The main thread collects results via `mpsc::channel`
+/// with `recv_timeout` to apply a total wall-clock budget.
+/// Rayon has no per-job timeout, so workers that don't
+/// report within the budget are abandoned in the pool;
+/// `std::process::exit` at the end of the test reaps
+/// the still-running workers. The test exits with a
+/// non-zero status if any examples are unaccounted for,
+/// so the CI gate catches the strip-function hang (the
+/// same 12 examples that hung in the single-threaded
+/// version and in the raw-thread version hang here too
+/// — the strip-function bug is independent of the
+/// threading model). The 12 needle-extraction fixes are
+/// still pinned by the fast default-on companion
+/// `content_fidelity_known_gaps` test.
 ///
 /// The needle count per example is capped at 3 to keep the test
 /// fast and to avoid pinning a test pass on a single rare
@@ -721,7 +730,6 @@ fn strip_list_markers(md: &str) -> String {
 #[test]
 fn all_commonmark_examples_render_content_into_pdf() {
     use std::sync::mpsc;
-    use std::thread;
     use std::time::{Duration, Instant};
 
     let examples = extract_markdown_examples(SPEC);
@@ -734,15 +742,11 @@ fn all_commonmark_examples_render_content_into_pdf() {
     /// Total wall-clock budget for the test. After this
     /// elapses, the main thread stops waiting for new
     /// results and reports whatever it has. `std::process::exit`
-    /// is called at the end to reap abandoned threads.
-    /// The per-example deadline is implicitly bounded by
-    /// the remaining budget divided by the number of
-    /// unprocessed examples, so the slowest example can
-    /// at most use the full remaining budget.
+    /// is called at the end to reap abandoned workers.
     const TOTAL_BUDGET: Duration = Duration::from_secs(120);
 
     /// Per-example processing, factored out so the
-    /// `move` closure for the worker thread is one line.
+    /// `move` closure for the worker is one line.
     /// Returns `Ok(())` for a passing example, `Err(msg)`
     /// for a failing one. The "no needles" case returns
     /// `Ok(())` and is counted by the caller.
@@ -772,126 +776,129 @@ fn all_commonmark_examples_render_content_into_pdf() {
     }
 
     let total = examples.len();
+
+    // Build a rayon thread pool. The default size is
+    // `num_cpus` (16 on this Ryzen 9 7950X), so the pool
+    // processes 16 examples concurrently and queues the
+    // rest. Work-stealing means a hung example doesn't
+    // pin a dedicated worker — the pool redistributes
+    // around it (though the hung example itself still
+    // holds its worker, which is why the budget is the
+    // real safety net).
+    //
+    // The pool is wrapped in `Arc` because we need to
+    // share it between the main thread (which uses
+    // `pool` as a value for the `Drop` on budget expiry)
+    // and the dedicated scope thread (which calls
+    // `pool.scope`).
+    let pool = std::sync::Arc::new(
+        rayon::ThreadPoolBuilder::new()
+            .thread_name(|i| format!("pdf-content-{i}"))
+            .build()
+            .expect("failed to build rayon thread pool"),
+    );
+
     let (tx, rx) = mpsc::channel::<(usize, Result<(), String>)>();
     let started = Instant::now();
 
-    // Spawn one thread per example. The threads do not
-    // share state — each one independently loads fonts
-    // (via the `OnceLock` in `get_cached_fonts`), runs
-    // the translator, and reports its result. Hung
-    // threads are abandoned at the deadline; the result
-    // is reported as "timed out" so the caller can
-    // distinguish a hang from a real failure.
-    for (n, md) in &examples {
-        let tx = tx.clone();
-        let md = md.clone();
-        let n = *n;
-        thread::Builder::new()
-            .name(format!("pdf-content-{n}"))
-            .spawn(move || {
-                let result = process_one(n, &md);
-                tx.send((n, result)).ok();
-            })
-            .expect("failed to spawn worker thread");
-    }
-    drop(tx); // Close the sender so `rx` ends when all workers finish.
+    // `pool.scope` blocks until all submitted work
+    // finishes, so we run it on a *dedicated* thread.
+    // The main thread then collects results via `rx`
+    // with `recv_timeout` to apply the wall-clock budget.
+    // If the budget expires, the main thread calls
+    // `std::process::exit(1)` which reaps the scope
+    // thread (and any still-running rayon workers) on
+    // the way out. This is the only way to enforce a
+    // timeout when the underlying executor has no
+    // per-job cancel.
+    let pool_for_scope = std::sync::Arc::clone(&pool);
+    let scope_thread = std::thread::Builder::new()
+        .name("pdf-content-scope".to_string())
+        .spawn(move || {
+            pool_for_scope.scope(|s| {
+                for (n, md) in &examples {
+                    let tx = tx.clone();
+                    let md = md.clone();
+                    let n = *n;
+                    s.spawn(move |_| {
+                        let result = process_one(n, &md);
+                        tx.send((n, result)).ok();
+                    });
+                }
+            });
+            // `pool.scope` returned, so all workers
+            // are done. The sender is still held by
+            // this closure via `tx`; drop it so the
+            // receiver sees `Disconnected` when the
+            // queue drains.
+            drop(tx);
+        })
+        .expect("failed to spawn scope thread");
+
+    // Drop the main thread's clone of `tx` so the
+    // receiver sees `Disconnected` when the scope thread
+    // is done and drops its clone. (The scope thread
+    // moves `tx` into the closure, so this `tx` is
+    // actually never created — the comment is a reminder
+    // that the scope thread owns the last sender.)
 
     let mut failures: Vec<String> = Vec::new();
     let mut processed = 0usize;
     let deadline = started + TOTAL_BUDGET;
-    let expected = total;
 
-    while processed < total {
+    loop {
         let now = Instant::now();
         if now >= deadline {
-            // Total budget exhausted. Mark every
-            // unprocessed example as timed out.
-            break;
+            // Total budget exhausted. Drop the pool
+            // (which signals the scope thread via Arc
+            // refcount) and exit the process so the
+            // still-running scope thread and its rayon
+            // workers are reaped.
+            eprintln!(
+                "[commonmark-content] {processed}/{total} processed in {:?}; \
+                 budget exhausted, exiting non-zero so CI catches the hang",
+                started.elapsed()
+            );
+            std::process::exit(1);
         }
         let remaining = deadline.saturating_duration_since(now);
         match rx.recv_timeout(remaining) {
-            Ok((n, Ok(()))) => {
+            Ok((n, result)) => {
                 processed += 1;
-                // Note: the Ok(()) return from
-                // `process_one` covers both the
-                // "needles found" and "no needles"
-                // cases. The no-needles count is
-                // approximated at the end as
-                // `total - processed - failures.len()`.
-                let _ = n;
-            }
-            Ok((n, Err(msg))) => {
-                processed += 1;
-                failures.push(format!("example #{n}: {msg}"));
+                match result {
+                    Ok(()) => {
+                        // "Needles found" or "no needles" — both pass.
+                    }
+                    Err(msg) => {
+                        failures.push(format!("example #{n}: {msg}"));
+                    }
+                }
             }
             Err(mpsc::RecvTimeoutError::Timeout) => {
-                // Total budget exhausted.
-                break;
+                // Loop will re-check the deadline on the
+                // next iteration and exit.
+                continue;
             }
             Err(mpsc::RecvTimeoutError::Disconnected) => {
-                // All worker threads have either
-                // reported or been abandoned.
+                // Scope thread finished; all results drained.
                 break;
             }
         }
     }
+    // Make sure the scope thread is joined before the
+    // test function returns, so the rayon pool is
+    // cleanly shut down. (On the budget-expiry path we
+    // exit the process before reaching here, so the
+    // thread is reaped by `std::process::exit`.)
+    scope_thread.join().ok();
+    let skipped = total - processed - failures.len();
 
-    // At this point, any thread that hasn't reported is
-    // assumed hung. We don't know which examples are
-    // affected without per-thread liveness tracking, so
-    // we report a single summary line rather than N
-    // individual timeouts. The hung threads keep running
-    // in the background; `std::process::exit` below reaps
-    // them.
-    let unaccounted = total - processed;
-    if unaccounted > 0 || started.elapsed() >= TOTAL_BUDGET {
-        eprintln!(
-            "[commonmark-content] {}/{} examples processed in {:?}; \
-             {} unaccounted (presumed hung in strip functions)",
-            processed,
-            expected,
-            started.elapsed(),
-            unaccounted
-        );
-    }
-
-    // Note: the no-needles accounting from the original
-    // single-threaded version is approximated as
-    // `expected - processed - failures.len() - unaccounted`
-    // when the test completes cleanly. We log the count
-    // rather than failing on it because some spec
-    // examples are pure punctuation and have nothing to
-    // assert on (this was the original behaviour).
-    let skipped = expected
-        .saturating_sub(processed)
-        .saturating_sub(failures.len())
-        .saturating_sub(unaccounted);
+    eprintln!(
+        "[commonmark-content] {processed}/{total} processed in {:?} on rayon pool",
+        started.elapsed()
+    );
     if skipped > 0 {
-        eprintln!(
-            "[commonmark-content] {} examples skipped (no needles extracted)",
-            skipped
-        );
-    }
-
-    // If any examples didn't report, exit the process
-    // immediately to reap the abandoned worker threads.
-    // This is the only way to guarantee the test process
-    // terminates; Rust threads cannot be killed, and
-    // `std::process::exit` is the documented way to exit
-    // with live threads still running. The test exits
-    // with a non-zero status if there are *any* unaccounted
-    // examples — even if no failures were recorded — so the
-    // CI gate catches the strip-function hang. A passing
-    // test must verify *every* example, not 596/608 of
-    // them.
-    if unaccounted > 0 {
-        eprintln!(
-            "[commonmark-content] {processed}/{total} processed in {:?}; \
-             {unaccounted} unaccounted (presumed hung in strip functions). \
-             Exiting non-zero so CI catches the hang.",
-            started.elapsed()
-        );
-        std::process::exit(1);
+        eprintln!("[commonmark-content] {skipped} examples skipped (no needles extracted)");
     }
 
     assert!(

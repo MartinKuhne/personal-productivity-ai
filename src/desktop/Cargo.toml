@@ -112,6 +112,18 @@ tempfile = "3.8"
 tokio = { version = "1.53.0", features = ["rt", "rt-multi-thread", "macros", "sync"] }
 filetime = "0.2"
 proptest = "1.4"
+# `rayon` is the data-parallelism library used by the
+# per-example content-fidelity test
+# (`all_commonmark_examples_render_content_into_pdf` in
+# `tests/commonmark_spec_test.rs`). The test spawns work
+# across a rayon thread pool (default = num_cpus threads)
+# instead of one raw `std::thread` per example. This
+# avoids the 608-thread / ~600MB-stack working set that
+# the raw-thread approach hit, and uses work-stealing so
+# the slowest examples don't pin a worker. Pin to the
+# 1.10 line for the `par_iter` / `ThreadPool` APIs we
+# rely on.
+rayon = "1.10"
 # `criterion` is the project-wide micro-benchmark harness. Run with
 # `cargo bench` locally; the GH Actions bench workflow runs the same
 # suite on a separate (informational, not gating) job. Pinned to
