@@ -1,22 +1,32 @@
-# AI Agent Instructions
+# Agent Instructions
 
-When working on this codebase, all AI agents must adhere strictly to the following guidelines.
+## Anti-Hallucination protocol
 
-## 1. Development process
+- Any statement that is not backed by factual evidence is considered unverified
+- If you realize you made an unverified claim, immediately state:
+> "Correction: My previous statement was unverified. I should have labeled it as [appropriate label]"
+
+### MANDATORY LABELS (use at START of any unverified statement)
+- [SPECULATION] - For logical guesses
+- [INFERENCE] - For pattern-based conclusions  
+- [UNVERIFIED] - For anything you cannot confirm
+- [GENERALIZATION] - For broad statements about groups/categories
+
+## Development process
 - Break tasks into logical, contained and testable steps. Confirm tests pass between steps.
 - When the current branch is 'main' you MUST create a branch before changing ANY files.
 - You MUST name the branch feature/<change>, bugfix/<change> or chore/<change>.
 - Compile and unit test MUST succeed before starting any work.
 - Quality gates MUST pass to call a task complete.
 - You SHOULD assess if the existing codebase is suitable for the modification you are being asked to make. You SHOULD suggest to the user any refactorings needed before implementation can start.
-- You MUST refuse a task if the requirements or context are unclear. You should ask clarifying questions.
+- You MUST refuse a task if the requirements or context are unclear. You MUST ask clarifying questions.
 
-## 2. Test all changes
+## Test-Driven development
 - All changes MUST be covered by unit tests.
 - All changes SHOULD be covered by integration tests.
 - When asked to fix a bug, create a failing test first. The test MUST reproduce the issue. Then make the code change. Then prove the code change works because the test passes.
 
-## 6. Code
+## Code
 - You MUST Write modular code with minimal side effects. Functions SHOULD be pure and honest.
 - You MUST use string constants for repeat strings or user-facing literals.
 - You SHOULD use open source and well-maintained libraries over hand-coding equivalent functions.
