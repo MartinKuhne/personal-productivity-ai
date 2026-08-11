@@ -13,7 +13,7 @@ use std::sync::mpsc;
 /// published.
 fn noop_producer() -> FileEventProducer<'static> {
     let bus: &'static Bus<FileEvent> = Box::leak(Box::new(Bus::new()));
-    FileEventProducer::new(bus)
+    FileEventProducer::new(bus.clone())
 }
 
 #[tokio::test]
@@ -103,7 +103,7 @@ async fn test_process_image_success() {
     // the produced `.md` once the file is on disk.
     let bus: &'static Bus<FileEvent> = Box::leak(Box::new(Bus::new()));
     let reader = bus.subscribe();
-    let producer = FileEventProducer::new(bus);
+    let producer = FileEventProducer::new(bus.clone());
 
     let (tx, _rx) = mpsc::channel();
     let result = process_image(job, config, tx, &producer).await;

@@ -217,7 +217,7 @@ fn test_directory_click_invalidates_tree_cache() {
             inline_editor_enabled: app.orchestrator.inline_editor_enabled,
             bg_tx: &Some(tx),
             file_event_producer: Some(crate::bus::events::file::FileEventProducer::new(
-                file_event_bus,
+                file_event_bus.clone(),
             )),
             tree_dirty: &mut app.orchestrator.selection.tree_dirty,
             pdf_backing_tracker: crate::app::session::PdfBackingTracker::new(),

@@ -89,12 +89,19 @@ impl FileEvent {
 
 /// A thin handle for publishing [`FileEvent`]s from code that mutates
 /// the filesystem (UI handlers, tool implementations, the agent, etc.).
-pub struct FileEventProducer<'a> {
-    bus: &'a Bus<FileEvent>,
+///
+/// Owns a `Bus<FileEvent>` clone (which is itself `Arc`-backed inside
+/// `tokio::sync::broadcast::Sender`), so the producer is `'static`
+/// and cheap to construct or clone. The `Clone` impl is what makes
+/// the lifetime-free `ToolContext` rewrite work: a producer cloned
+/// out of the context still publishes into the same channel.
+#[derive(Clone)]
+pub struct FileEventProducer {
+    bus: Bus<FileEvent>,
 }
 
-impl<'a> FileEventProducer<'a> {
-    pub fn new(bus: &'a Bus<FileEvent>) -> Self {
+impl FileEventProducer {
+    pub fn new(bus: Bus<FileEvent>) -> Self {
         Self { bus }
     }
 
@@ -191,7 +198,7 @@ mod tests {
     fn test_producer_publishes_discovered_for_new_file() {
         let bus: Bus<FileEvent> = Bus::new();
         let reader = bus.subscribe();
-        let producer = FileEventProducer::new(&bus);
+        let producer = FileEventProducer::new(bus.clone());
         let path = PathBuf::from("/tmp/new.md");
 
         producer.publish_discovered(&path);
@@ -205,7 +212,7 @@ mod tests {
     fn test_producer_publishes_updated_for_existing_file() {
         let bus: Bus<FileEvent> = Bus::new();
         let reader = bus.subscribe();
-        let producer = FileEventProducer::new(&bus);
+        let producer = FileEventProducer::new(bus.clone());
         let path = PathBuf::from("/tmp/existing.md");
 
         producer.publish_updated(&path);
@@ -219,7 +226,7 @@ mod tests {
     fn test_producer_publishes_removed() {
         let bus: Bus<FileEvent> = Bus::new();
         let reader = bus.subscribe();
-        let producer = FileEventProducer::new(&bus);
+        let producer = FileEventProducer::new(bus.clone());
         let path = PathBuf::from("/tmp/gone.md");
 
         producer.publish_removed(&path);
@@ -233,7 +240,7 @@ mod tests {
     fn test_producer_publishes_rename_as_removed_plus_discovered() {
         let bus: Bus<FileEvent> = Bus::new();
         let reader = bus.subscribe();
-        let producer = FileEventProducer::new(&bus);
+        let producer = FileEventProducer::new(bus.clone());
         let old = PathBuf::from("/tmp/old.md");
         let new = PathBuf::from("/tmp/new.md");
 
@@ -251,7 +258,7 @@ mod tests {
     fn test_producer_publishes_dir_discovered() {
         let bus: Bus<FileEvent> = Bus::new();
         let reader = bus.subscribe();
-        let producer = FileEventProducer::new(&bus);
+        let producer = FileEventProducer::new(bus.clone());
         let path = PathBuf::from("/tmp/newdir");
 
         producer.publish_dir_discovered(&path);
@@ -265,7 +272,7 @@ mod tests {
     fn test_producer_publishes_dir_removed() {
         let bus: Bus<FileEvent> = Bus::new();
         let reader = bus.subscribe();
-        let producer = FileEventProducer::new(&bus);
+        let producer = FileEventProducer::new(bus.clone());
         let path = PathBuf::from("/tmp/olddir");
 
         producer.publish_dir_removed(&path);
@@ -279,7 +286,7 @@ mod tests {
     fn test_producer_publishes_dir_rename() {
         let bus: Bus<FileEvent> = Bus::new();
         let reader = bus.subscribe();
-        let producer = FileEventProducer::new(&bus);
+        let producer = FileEventProducer::new(bus.clone());
         let old = PathBuf::from("/tmp/olddir");
         let new = PathBuf::from("/tmp/newdir");
 

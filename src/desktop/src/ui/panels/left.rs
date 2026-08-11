@@ -293,7 +293,7 @@ pub fn show_left_panel(app: &mut FastMdApp, parent_ui: &mut egui::Ui) {
                         modifiers: ui.input(|i| i.modifiers),
                         inline_editor_enabled,
                         bg_tx: &Some(tx.clone()),
-                        file_event_producer: Some(FileEventProducer::new(file_event_bus)),
+                        file_event_producer: Some(FileEventProducer::new(file_event_bus.clone())),
                         tree_dirty: &mut selection.tree_dirty,
                         pdf_backing_tracker: pdf_backing_tracker.clone(),
                     };

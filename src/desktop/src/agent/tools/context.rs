@@ -52,7 +52,7 @@ impl<'a> EventPublisher<'a> {
 
     /// Publish a file event to the bus.
     pub fn publish_file_event(&self, kind: FileEventKind, path: &Path) {
-        let producer = FileEventProducer::new(self.file_event_bus);
+        let producer = FileEventProducer::new(self.file_event_bus.clone());
         match kind {
             FileEventKind::Discovered => producer.publish_discovered(path),
             FileEventKind::Updated => producer.publish_updated(path),
@@ -63,8 +63,8 @@ impl<'a> EventPublisher<'a> {
     }
 
     /// Obtain a [`FileEventProducer`] handle.
-    pub fn file_event_producer(&self) -> FileEventProducer<'a> {
-        FileEventProducer::new(self.file_event_bus)
+    pub fn file_event_producer(&self) -> FileEventProducer {
+        FileEventProducer::new(self.file_event_bus.clone())
     }
 }
 
@@ -133,7 +133,7 @@ impl<'a> ToolContext<'a> {
     }
 
     /// Obtain a [`FileEventProducer`] handle.
-    pub fn file_event_producer(&self) -> FileEventProducer<'a> {
+    pub fn file_event_producer(&self) -> FileEventProducer {
         self.publisher.file_event_producer()
     }
 

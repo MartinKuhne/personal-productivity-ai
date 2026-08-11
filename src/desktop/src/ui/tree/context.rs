@@ -68,7 +68,7 @@ pub struct TreeOpsContext<'a> {
     /// Background event sender (for print jobs, etc.).
     pub bg_tx: &'a Option<Sender<BackgroundEvent>>,
     /// Optional file-event producer for immediate UI updates.
-    pub file_event_producer: Option<FileEventProducer<'a>>,
+    pub file_event_producer: Option<FileEventProducer>,
 
     // ---- Cache invalidation ---------------------------------------------
     /// Tree-rows cache invalidation flag. Borrowed from
@@ -197,7 +197,7 @@ impl<'a> TreeOpsContext<'a> {
     }
 
     /// Access file event producer.
-    pub fn file_event_producer(&self) -> &Option<FileEventProducer<'a>> {
+    pub fn file_event_producer(&self) -> &Option<FileEventProducer> {
         &self.file_event_producer
     }
 

@@ -209,7 +209,7 @@ impl ImageVisionWorker {
             async move {
                 let job = ImageJob::new(path);
                 if job.should_process() {
-                    let producer = FileEventProducer::new(&bus);
+                    let producer = FileEventProducer::new(bus.clone());
                     let _ = process_image(job, config, tx, &producer).await;
                 }
             }
