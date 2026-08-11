@@ -3,7 +3,7 @@
 use crate::agent::context::AgentContext;
 use crate::agent::datamark;
 use crate::agent::events::{AgentEvent as SeamAgentEvent, AgentStatus};
-use crate::agent::llm_client::{parse_usage_block, LLMClient};
+use crate::agent::llm_client::{LLMClient, parse_usage_block};
 use crate::agent::prompt_builder::SystemPromptBuilder;
 use crate::agent::tool_executor::ToolExecutor;
 

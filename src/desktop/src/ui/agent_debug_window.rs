@@ -81,17 +81,15 @@ pub fn show_agent_debug_window(app: &mut FastMdApp, ctx: &egui::Context) {
                         seen_tools_this_session = false;
                     }
                     DebugEntryRow::Entry => {
-                        if let Some(content) = &entry.content {
-                            if let Some(obj) = content.as_object() {
-                                if obj.contains_key("tools") {
+                        if let Some(content) = &entry.content
+                            && let Some(obj) = content.as_object()
+                                && obj.contains_key("tools") {
                                     if seen_tools_this_session {
                                         omit_tools_for_idx.insert(*orig_idx);
                                     } else {
                                         seen_tools_this_session = true;
                                     }
                                 }
-                            }
-                        }
                     }
                 }
             }
@@ -118,9 +116,9 @@ pub fn show_agent_debug_window(app: &mut FastMdApp, ctx: &egui::Context) {
                             }
                             DebugEntryRow::Entry => {
                                 let mut display_entry = (*entry).clone();
-                                if omit_tools_for_idx.contains(&orig_idx) {
-                                    if let Some(content) = &mut display_entry.content {
-                                        if let Some(obj) = content.as_object_mut() {
+                                if omit_tools_for_idx.contains(&orig_idx)
+                                    && let Some(content) = &mut display_entry.content
+                                        && let Some(obj) = content.as_object_mut() {
                                             obj.insert(
                                                 "tools".to_string(),
                                                 serde_json::Value::String(
@@ -128,8 +126,6 @@ pub fn show_agent_debug_window(app: &mut FastMdApp, ctx: &egui::Context) {
                                                 ),
                                             );
                                         }
-                                    }
-                                }
 
                                 if let Some(content) = &mut display_entry.content {
                                     unescape_json_strings(content);
@@ -230,26 +226,28 @@ fn unescape_json_strings(val: &mut serde_json::Value) {
         }
         serde_json::Value::String(s) => {
             let s_trimmed = s.trim();
-            if (s_trimmed.starts_with('{') && s_trimmed.ends_with('}'))
-                || (s_trimmed.starts_with('[') && s_trimmed.ends_with(']'))
-            {
-                if let Ok(mut parsed) = serde_json::from_str::<serde_json::Value>(s_trimmed) {
+            if ((s_trimmed.starts_with('{') && s_trimmed.ends_with('}'))
+                || (s_trimmed.starts_with('[') && s_trimmed.ends_with(']')))
+                && let Ok(mut parsed) = serde_json::from_str::<serde_json::Value>(s_trimmed) {
                     unescape_json_strings(&mut parsed);
                     *val = parsed;
                     return;
                 }
-            }
 
-            if s_trimmed.starts_with("<<<EXTERNAL_DATA>>>") && s_trimmed.ends_with("<<<END_EXTERNAL_DATA>>>") {
-                let inner = &s_trimmed["<<<EXTERNAL_DATA>>>".len()..s_trimmed.len() - "<<<END_EXTERNAL_DATA>>>".len()];
+            if s_trimmed.starts_with("<<<EXTERNAL_DATA>>>")
+                && s_trimmed.ends_with("<<<END_EXTERNAL_DATA>>>")
+            {
+                let inner = &s_trimmed["<<<EXTERNAL_DATA>>>".len()
+                    ..s_trimmed.len() - "<<<END_EXTERNAL_DATA>>>".len()];
                 let inner = inner.trim();
-                if let Some((prov, data)) = inner.split_once('\n') {
-                    if prov.starts_with("provenance=") {
+                if let Some((prov, data)) = inner.split_once('\n')
+                    && prov.starts_with("provenance=") {
                         let data_trimmed = data.trim();
-                        if (data_trimmed.starts_with('{') && data_trimmed.ends_with('}'))
-                            || (data_trimmed.starts_with('[') && data_trimmed.ends_with(']'))
-                        {
-                            if let Ok(mut parsed) = serde_json::from_str::<serde_json::Value>(data_trimmed) {
+                        if ((data_trimmed.starts_with('{') && data_trimmed.ends_with('}'))
+                            || (data_trimmed.starts_with('[') && data_trimmed.ends_with(']')))
+                            && let Ok(mut parsed) =
+                                serde_json::from_str::<serde_json::Value>(data_trimmed)
+                            {
                                 unescape_json_strings(&mut parsed);
                                 *val = serde_json::json!({
                                     "EXTERNAL_DATA": {
@@ -258,9 +256,7 @@ fn unescape_json_strings(val: &mut serde_json::Value) {
                                     }
                                 });
                             }
-                        }
                     }
-                }
             }
         }
         _ => {}
