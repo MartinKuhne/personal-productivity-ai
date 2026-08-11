@@ -451,22 +451,37 @@ fn emit_event(
         }
         Event::InlineHtml(html) => {
             // Inline raw HTML inside a paragraph or table cell.
-            // Rendered as an inline raw block so the source stays
-            // visible in the PDF.
+            // Rendered as an inline `box(...)` wrapping a
+            // `text(font: ..., "...")` call holding the body.
+            // The `text` function bypasses the broken `raw`
+            // element in typst-as-lib 0.16 / typst 0.15.1
+            // (the same fix that closed ADR gap #2 for inline
+            // code). The `box` provides the inline background
+            // and inset; the `text` element renders the body
+            // in a monospace font so the source is visible
+            // in the PDF.
             //
             // The trailing space is load-bearing: in Typst, an
-            // expression like `#raw("text")` is followed by
-            // chaining on the next token if the parser can parse
-            // it as a function call. So `#raw("<bar>")(baz)` is
-            // "call `raw()`, then call its return value on `(baz)`",
-            // which is a hard error — the return value is content,
-            // not a function. Inserting a single space after the
-            // call (so the next token starts a content sequence, not
-            // a chained call) is enough to break the chain. The
-            // space is also the right visual: `text<bar>text`
-            // becomes `text <bar> text` in the PDF, which matches
-            // the markdown's intent of inline HTML.
-            state.push_raw(&format!("#raw(\"{}\") ", escape_typst_string(&html)));
+            // expression like `#box(...) text(...)` is followed
+            // by chaining on the next token if the parser can
+            // parse it as a function call. So `#box(...) text(baz)`
+            // is "call the box content on `(baz)`", which is a
+            // hard error. Inserting a single space after the
+            // call breaks the chain (same rationale as
+            // `Event::Code`).
+            let rendered = format!(
+                "#box(fill: luma(245), inset: 2pt, radius: 2pt, \
+                 text(font: (\"DejaVu Sans Mono\", \
+                 \"Liberation Mono\", \"Courier New\"), \
+                 size: 0.9em, \"{}\")) ",
+                escape_typst_string(&html)
+            );
+            if state.in_table_cell() {
+                let last = state.current_row_cells.len() - 1;
+                state.current_row_cells[last].push_str(&rendered);
+            } else {
+                state.output.push_str(&rendered);
+            }
         }
         Event::SoftBreak => {
             // Typst treats a single space as a soft break inside a
@@ -734,15 +749,16 @@ fn emit_start(state: &mut TypstEmitState, tag: Tag<'_>) {
         Tag::HtmlBlock => {
             // Open an HTML block. We accumulate the verbatim HTML
             // source into `html_block_buffer` on each subsequent
-            // `Event::Html`, then emit the whole block as a Typst
-            // raw block at `TagEnd::HtmlBlock`. Visual result: a
-            // shaded `html` raw block containing the original HTML
-            // source — honest "we kept your HTML but can't render
-            // it" behaviour.
+            // `Event::Html`, then emit the whole block as a
+            // `block(...)` wrapping a `text(...)` call at
+            // `TagEnd::HtmlBlock`. The `text` function bypasses the
+            // broken `raw` element in typst-as-lib 0.16 / typst
+            // 0.15.1 (the same fix that closed ADR gap #5 for
+            // fenced code blocks). The `html_block_buffer` is
+            // opened here and closed at the matching end; the
+            // accumulated body is interpolated as the `#text("...")`
+            // argument at close.
             state.block_sep();
-            state
-                .output
-                .push_str("#raw(block: true, lang: \"html\", \"");
             state.html_block_buffer = Some(String::new());
         }
         _ => {}
@@ -916,14 +932,26 @@ fn emit_end(state: &mut TypstEmitState, tag_end: TagEnd) {
             // `current_row_cells`. Nothing to do on end.
         }
         TagEnd::HtmlBlock => {
-            // Close the raw block opened at `Tag::HtmlBlock` start.
+            // Close the block opened at `Tag::HtmlBlock` start.
             // The accumulated HTML source is already string-escaped
-            // (each `Event::Html` ran it through `escape_typst_string`
-            // as it accumulated), so we just append the closing
-            // quote, paren, and a newline.
+            // (each `Event::Html` ran it through
+            // `escape_typst_string` as it accumulated). The
+            // `text("...")` function call is the only escape
+            // we need; running `escape_typst_string` again on
+            // the buffer would double-escape the backslashes
+            // (the same latent bug the code-block proptest
+            // caught). The body is interpolated verbatim.
             if let Some(buf) = state.html_block_buffer.take() {
-                state.output.push_str(&buf);
-                state.output.push_str("\")\n");
+                state.output.push_str(&format!(
+                    "#block(\n  fill: luma(245),\n  inset: 8pt,\n  \
+                     radius: 4pt,\n  width: 100%\n)[\n  \
+                     #set text(font: (\"DejaVu Sans Mono\", \
+                     \"Liberation Mono\", \"Courier New\"), size: 9pt)\n  \
+                     #set par(justify: false, leading: 0.5em)\n  \
+                     // lang: html\n  \
+                     #text(\"{}\")\n]",
+                    buf
+                ));
             }
         }
         _ => {}
