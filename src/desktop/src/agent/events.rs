@@ -30,6 +30,12 @@ pub struct AgentPrompt {
     pub session_id: Uuid,
     /// The user's prompt text. MUST be non-empty after trim.
     pub text: String,
+    /// Pre-assembled system-prompt message blocks. Built by the
+    /// submitter (UI or batch executor) via
+    /// [`crate::app::prompts::build_system_prompts`]. The agent run
+    /// loop no longer constructs these — it just forwards the
+    /// blocks as `role=system` messages ahead of the user turn.
+    pub system_prompts: Vec<String>,
     /// UI selection context passed through to tools.
     pub active_file: Option<PathBuf>,
     /// UI selection context passed through to tools.

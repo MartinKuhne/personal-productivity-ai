@@ -500,6 +500,7 @@ fn spawn_driver(
             ))
             .with_active_paths(prompt.active_file, prompt.active_dir)
             .with_selected_files(prompt.selected_files)
+            .with_system_prompts(prompt.system_prompts)
             .with_cancel_flag(prompt.cancel_flag)
             .with_history(history.clone())
             .with_browser_session(browser_session.clone())
@@ -537,15 +538,9 @@ fn spawn_driver(
 fn integration_app_config(agent_config: &AgentConfig) -> AppConfig {
     AppConfig {
         models: agent_config.models().clone(),
-        user_name: agent_config.user_name().map(String::from),
-        user_address: agent_config.user_address().map(String::from),
-        user_birthdate: agent_config.user_birthdate().map(String::from),
-        user_gender: agent_config.user_gender().map(String::from),
-        system_prompt_extension: agent_config.system_prompt_extension().map(String::from),
         max_tokens: agent_config.max_tokens(),
         tool_groups: agent_config.tool_groups().clone(),
         mcp_servers: agent_config.mcp_servers().clone(),
-        content_libraries: agent_config.content_libraries().to_vec(),
         csv_db_path: agent_config.csv_db_path().map(String::from),
         feature_flags: agent_config.feature_flags().clone(),
         jmap_clients: agent_config.jmap_clients().clone(),

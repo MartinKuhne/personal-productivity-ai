@@ -2,19 +2,22 @@
 //!
 //! The agent module does not need (and should not depend on) the entire
 //! [`crate::config::AppConfig`]. [`AgentConfig`] is the projected slice that
-//! the orchestrator hands to the agent: LLM models, user/system prompt
-//! context, tool groups, MCP servers, integration clients that the
-//! tools read at execute time (JMAP, CalDAV, CardDAV, Trello, SearXNG),
-//! runtime feature flags, the CSV database path, the resolved browser
-//! config, and content libraries for VFS resolution.
+//! the orchestrator hands to the agent: LLM models, tool groups, MCP servers,
+//! integration clients that the tools read at execute time (JMAP, CalDAV,
+//! CardDAV, Trello, SearXNG), runtime feature flags, the CSV database path,
+//! the resolved browser config, and the config path for the "API key not
+//! set" error.
 //!
-//! Fields the agent doesn't touch — `inline_editor_enabled`,
-//! `pdf_converter_command`, `table_width_strategy`, `discord` — are
-//! excluded by the projection.
+//! User identity (`user_name`, `user_address`, `user_birthdate`,
+//! `user_gender`), the system-prompt extension, and the content-library
+//! list are intentionally **not** in [`AgentConfig`]. They drive
+//! system-prompt construction, which lives outside the agent module
+//! (see [`crate::app::prompts::build_system_prompts`]). The agent only
+//! consumes the pre-built prompts.
 //!
 //! Construction:
 //! - [`AgentConfig::from_app_config`] — projection from the global config
-//!   (the canonical entry point at the orchestrator seam).
+//!   (the canonical orchestrator-side constructor).
 //! - [`AgentConfigBuilder`] — fluent builder for tests and per-session
 //!   overrides.
 //!
@@ -29,8 +32,8 @@ use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 
 use crate::config::{
-    AppConfig, CalDavClient, ContentLibrary, JmapClient, LlmConfig, McpServerEntry,
-    ResolvedBrowserConfig, ToolGroupsConfig, TrelloClient, get_config_path,
+    AppConfig, CalDavClient, JmapClient, LlmConfig, McpServerEntry, ResolvedBrowserConfig,
+    ToolGroupsConfig, TrelloClient, get_config_path,
 };
 
 /// Domain-specific configuration for the agent module.
@@ -38,21 +41,16 @@ use crate::config::{
 /// Built via [`AgentConfig::from_app_config`] (orchestrator seam) or
 /// [`AgentConfigBuilder`] (tests / per-session overrides). Every field is
 /// the slice the agent actually consumes; fields the agent doesn't read
-/// (`inline_editor_enabled`, `pdf_converter_command`,
-/// `table_width_strategy`, `discord`) are intentionally not present.
+/// (user identity, system-prompt extension, content libraries,
+/// `inline_editor_enabled`, `pdf_converter_command`, `table_width_strategy`,
+/// `discord`) are intentionally not present.
 #[derive(Clone, Debug)]
 pub struct AgentConfig {
     models: HashMap<String, LlmConfig>,
-    user_name: Option<String>,
-    user_address: Option<String>,
-    user_birthdate: Option<String>,
-    user_gender: Option<String>,
-    system_prompt_extension: Option<String>,
     max_tokens: u32,
     tool_groups: ToolGroupsConfig,
     mcp_servers: HashMap<String, McpServerEntry>,
     browser: ResolvedBrowserConfig,
-    content_libraries: Vec<ContentLibrary>,
     config_path: PathBuf,
     // Tool execution reads these; the agent loop doesn't, but the
     // `is_enabled` check on the registered tools does. Cloning them
@@ -77,16 +75,10 @@ impl AgentConfig {
         let config_path = get_config_path();
         Self {
             models: cfg.models.clone(),
-            user_name: cfg.user_name.clone(),
-            user_address: cfg.user_address.clone(),
-            user_birthdate: cfg.user_birthdate.clone(),
-            user_gender: cfg.user_gender.clone(),
-            system_prompt_extension: cfg.system_prompt_extension.clone(),
             max_tokens: cfg.max_tokens,
             tool_groups: cfg.tool_groups.clone(),
             mcp_servers: cfg.mcp_servers.clone(),
             browser,
-            content_libraries: cfg.content_libraries.clone(),
             config_path,
             jmap_clients: cfg.jmap_clients.clone(),
             caldav_clients: cfg.caldav_clients.clone(),
@@ -100,31 +92,6 @@ impl AgentConfig {
     /// Map of configured LLM models by name.
     pub fn models(&self) -> &HashMap<String, LlmConfig> {
         &self.models
-    }
-
-    /// User's name (used in the dynamic system prompt).
-    pub fn user_name(&self) -> Option<&str> {
-        self.user_name.as_deref()
-    }
-
-    /// User's address.
-    pub fn user_address(&self) -> Option<&str> {
-        self.user_address.as_deref()
-    }
-
-    /// User's birthdate.
-    pub fn user_birthdate(&self) -> Option<&str> {
-        self.user_birthdate.as_deref()
-    }
-
-    /// User's gender.
-    pub fn user_gender(&self) -> Option<&str> {
-        self.user_gender.as_deref()
-    }
-
-    /// System-prompt extension string injected into the dynamic prompt.
-    pub fn system_prompt_extension(&self) -> Option<&str> {
-        self.system_prompt_extension.as_deref()
     }
 
     /// Maximum tokens for LLM responses.
@@ -145,11 +112,6 @@ impl AgentConfig {
     /// Resolved browser configuration (paths filled in by the projection).
     pub fn browser(&self) -> &ResolvedBrowserConfig {
         &self.browser
-    }
-
-    /// Content libraries for VFS resolution and USER.md discovery.
-    pub fn content_libraries(&self) -> &[ContentLibrary] {
-        &self.content_libraries
     }
 
     /// Path to the on-disk config file. Used for the "API key not set"
@@ -217,16 +179,10 @@ impl Default for AgentConfig {
 /// tests can build minimal configs without spelling every field.
 pub struct AgentConfigBuilder {
     models: HashMap<String, LlmConfig>,
-    user_name: Option<String>,
-    user_address: Option<String>,
-    user_birthdate: Option<String>,
-    user_gender: Option<String>,
-    system_prompt_extension: Option<String>,
     max_tokens: u32,
     tool_groups: ToolGroupsConfig,
     mcp_servers: HashMap<String, McpServerEntry>,
     browser: ResolvedBrowserConfig,
-    content_libraries: Vec<ContentLibrary>,
     config_path: PathBuf,
     jmap_clients: HashMap<String, JmapClient>,
     caldav_clients: HashMap<String, CalDavClient>,
@@ -246,16 +202,10 @@ impl AgentConfigBuilder {
             .resolve(&app_defaults.content_libraries);
         Self {
             models: HashMap::new(),
-            user_name: None,
-            user_address: None,
-            user_birthdate: None,
-            user_gender: None,
-            system_prompt_extension: None,
             max_tokens: app_defaults.max_tokens,
             tool_groups: app_defaults.tool_groups.clone(),
             mcp_servers: HashMap::new(),
             browser,
-            content_libraries: Vec::new(),
             config_path: get_config_path(),
             jmap_clients: HashMap::new(),
             caldav_clients: HashMap::new(),
@@ -269,27 +219,6 @@ impl AgentConfigBuilder {
     /// Set the LLM model map.
     pub fn with_models(mut self, models: HashMap<String, LlmConfig>) -> Self {
         self.models = models;
-        self
-    }
-
-    /// Set the user-identifying fields in one call.
-    pub fn with_user(
-        mut self,
-        name: Option<String>,
-        address: Option<String>,
-        birthdate: Option<String>,
-        gender: Option<String>,
-    ) -> Self {
-        self.user_name = name;
-        self.user_address = address;
-        self.user_birthdate = birthdate;
-        self.user_gender = gender;
-        self
-    }
-
-    /// Set the system-prompt extension.
-    pub fn with_system_prompt_extension(mut self, ext: Option<String>) -> Self {
-        self.system_prompt_extension = ext;
         self
     }
 
@@ -314,12 +243,6 @@ impl AgentConfigBuilder {
     /// Set the resolved browser configuration.
     pub fn with_browser(mut self, b: ResolvedBrowserConfig) -> Self {
         self.browser = b;
-        self
-    }
-
-    /// Set the content libraries.
-    pub fn with_content_libraries(mut self, libs: Vec<ContentLibrary>) -> Self {
-        self.content_libraries = libs;
         self
     }
 
@@ -369,16 +292,10 @@ impl AgentConfigBuilder {
     pub fn build(self) -> AgentConfig {
         AgentConfig {
             models: self.models,
-            user_name: self.user_name,
-            user_address: self.user_address,
-            user_birthdate: self.user_birthdate,
-            user_gender: self.user_gender,
-            system_prompt_extension: self.system_prompt_extension,
             max_tokens: self.max_tokens,
             tool_groups: self.tool_groups,
             mcp_servers: self.mcp_servers,
             browser: self.browser,
-            content_libraries: self.content_libraries,
             config_path: self.config_path,
             jmap_clients: self.jmap_clients,
             caldav_clients: self.caldav_clients,

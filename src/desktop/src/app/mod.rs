@@ -27,6 +27,7 @@ pub mod persisted;
 pub mod print;
 #[cfg(feature = "pdf-export")]
 pub mod print_pdf;
+pub mod prompts;
 pub mod selection;
 pub mod session;
 pub mod tabs;

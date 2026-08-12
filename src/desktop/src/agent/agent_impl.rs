@@ -1,10 +1,9 @@
-//! Top-level agent orchestration — builds the system prompt, sends requests, executes tool calls, and streams results back to the UI.
+//! Top-level agent orchestration — sends requests, executes tool calls, and streams results back to the UI.
 
 use crate::agent::context::AgentContext;
 use crate::agent::datamark;
 use crate::agent::events::{AgentEventObserver, AgentStatus};
 use crate::agent::llm_client::{LLMClient, parse_usage_block};
-use crate::agent::prompt_builder::SystemPromptBuilder;
 use crate::agent::tool_executor::ToolExecutor;
 
 use crate::bus::events::debug::{AgentDebugEntry, DebugEntryKind, DebugEntryRow};
@@ -26,13 +25,9 @@ fn run_agent_inner(ctx: AgentContext) {
         Some(c) => c,
         None => return,
     };
-    let system_prompt = SystemPromptBuilder::new()
-        .with_active_file(ctx.active_file.clone())
-        .with_active_dir(ctx.active_dir.clone())
-        .with_selected_files(ctx.selected_files.clone())
-        .build(&ctx.agent_config);
+    let system_prompts = ctx.system_prompts.clone();
     log_prompt_context(&ctx.active_file, &ctx.active_dir, &ctx.selected_files);
-    let mut messages = build_messages(system_prompt, &ctx.prompt, ctx.history.clone());
+    let mut messages = build_messages(system_prompts, &ctx.prompt, ctx.history.clone());
     ctx.tool_manager.rcu(|mgr| {
         let mut new_mgr = (**mgr).clone();
         new_mgr.update_and_refresh(&ctx.app_config);

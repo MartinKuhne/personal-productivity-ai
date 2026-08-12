@@ -190,9 +190,22 @@ impl AppOrchestrator {
             .unwrap_or_else(uuid::Uuid::new_v4);
         let is_new = self.agent.current_session_id().is_none();
 
+        // Assemble the system prompts at submit time — they depend on the
+        // global config (user info, system-prompt extension, content
+        // libraries) and the active UI selection. The agent run loop
+        // doesn't know how to build these; it just forwards the
+        // pre-built blocks.
+        let system_prompts = crate::app::prompts::build_system_prompts(
+            &self.config,
+            active_file.as_deref(),
+            active_dir.as_deref(),
+            &selected_files,
+        );
+
         let agent_prompt = crate::agent::events::AgentPrompt {
             session_id,
             text: prompt.clone(),
+            system_prompts,
             active_file,
             active_dir,
             selected_files,

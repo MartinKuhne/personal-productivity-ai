@@ -238,6 +238,7 @@ fn test_current_session_id_set_on_submit_prompt() {
     mgr.submit_prompt(crate::agent::events::AgentPrompt {
         session_id: session_id_1,
         text: "prompt 1".to_string(),
+        system_prompts: Vec::new(),
         active_file: None,
         active_dir: None,
         selected_files: HashSet::new(),

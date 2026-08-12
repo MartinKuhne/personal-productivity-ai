@@ -1,12 +1,7 @@
 //! Unit tests for the `AgentConfig` projection and builder.
-//!
-//! The agent's domain config must be a faithful projection of the slice
-//! the agent actually reads from `AppConfig`, and the builder must
-//! produce a config that's indistinguishable (in the relevant fields)
-//! from the same data assembled via the projection.
 
 use super::*;
-use crate::config::{LlmConfig, McpServerConfig, McpServerEntry, ToolGroupsConfig};
+use crate::config::{ContentLibrary, LlmConfig, McpServerConfig, McpServerEntry, ToolGroupsConfig};
 use std::collections::HashMap;
 use std::path::PathBuf;
 
@@ -38,32 +33,6 @@ fn test_from_app_config_projects_models() {
     let agent_cfg = AgentConfig::from_app_config(&cfg);
     assert_eq!(agent_cfg.models().len(), 1);
     assert!(agent_cfg.models().contains_key("a"));
-}
-
-#[test]
-fn test_from_app_config_projects_user_fields() {
-    let cfg = AppConfig {
-        user_name: Some("Alice".to_string()),
-        user_address: Some("123 Main".to_string()),
-        user_birthdate: Some("1990-01-01".to_string()),
-        user_gender: Some("female".to_string()),
-        ..AppConfig::default()
-    };
-    let agent_cfg = AgentConfig::from_app_config(&cfg);
-    assert_eq!(agent_cfg.user_name(), Some("Alice"));
-    assert_eq!(agent_cfg.user_address(), Some("123 Main"));
-    assert_eq!(agent_cfg.user_birthdate(), Some("1990-01-01"));
-    assert_eq!(agent_cfg.user_gender(), Some("female"));
-}
-
-#[test]
-fn test_from_app_config_projects_system_prompt_extension() {
-    let cfg = AppConfig {
-        system_prompt_extension: Some("extra".to_string()),
-        ..AppConfig::default()
-    };
-    let agent_cfg = AgentConfig::from_app_config(&cfg);
-    assert_eq!(agent_cfg.system_prompt_extension(), Some("extra"));
 }
 
 #[test]
@@ -109,21 +78,6 @@ fn test_from_app_config_resolves_browser_config() {
 }
 
 #[test]
-fn test_from_app_config_projects_content_libraries() {
-    let mut cfg = AppConfig::default();
-    cfg.content_libraries.push(ContentLibrary {
-        root_folder: "/notes".to_string(),
-        name: "notes".to_string(),
-        kind: "notes".to_string(),
-        readonly: true,
-        priority: 0,
-    });
-    let agent_cfg = AgentConfig::from_app_config(&cfg);
-    assert_eq!(agent_cfg.content_libraries().len(), 1);
-    assert_eq!(agent_cfg.content_libraries()[0].name, "notes");
-}
-
-#[test]
 fn test_from_app_config_captures_config_path() {
     let cfg = AppConfig::default();
     let agent_cfg = AgentConfig::from_app_config(&cfg);
@@ -132,32 +86,31 @@ fn test_from_app_config_captures_config_path() {
 }
 
 #[test]
-fn test_from_app_config_drops_irrelevant_fields() {
-    // The agent config has no `searxng_url`, `jmap_clients`, etc. — those
-    // are not its concern. This test is a structural check that the
-    // projection doesn't accidentally leak them.
+fn test_from_app_config_drops_user_and_content_fields() {
+    // User fields and content_libraries are intentionally not in
+    // AgentConfig — prompt construction lives in
+    // `crate::app::prompts::build_system_prompts`. The agent only
+    // consumes the pre-built prompt blocks.
     let cfg = AppConfig {
-        searxng_url: Some("http://searx".to_string()),
-        inline_editor_enabled: true,
-        csv_db_path: Some("/x".to_string()),
-        table_width_strategy: "weird".to_string(),
+        user_name: Some("Alice".to_string()),
+        user_address: Some("addr".to_string()),
+        user_birthdate: Some("1990-01-01".to_string()),
+        user_gender: Some("female".to_string()),
+        system_prompt_extension: Some("Custom instructions.".to_string()),
+        content_libraries: vec![ContentLibrary {
+            root_folder: "/x".to_string(),
+            name: "x".to_string(),
+            kind: "k".to_string(),
+            readonly: true,
+            priority: 0,
+        }],
         ..AppConfig::default()
     };
     let agent_cfg = AgentConfig::from_app_config(&cfg);
-    // None of the agent's getters should surface these fields.
-    // (We assert by ensuring the type doesn't have accessors for them.)
+    // AgentConfig has no `user_*` / `system_prompt_extension` /
+    // `content_libraries` accessors. If the struct ever grows them, this
+    // test will fail to compile, which is the right trip-wire.
     let _ = agent_cfg;
-}
-
-#[test]
-fn test_from_app_config_default_user_fields_are_none() {
-    let cfg = AppConfig::default();
-    let agent_cfg = AgentConfig::from_app_config(&cfg);
-    assert_eq!(agent_cfg.user_name(), None);
-    assert_eq!(agent_cfg.user_address(), None);
-    assert_eq!(agent_cfg.user_birthdate(), None);
-    assert_eq!(agent_cfg.user_gender(), None);
-    assert_eq!(agent_cfg.system_prompt_extension(), None);
 }
 
 #[test]
@@ -169,7 +122,6 @@ fn test_builder_new_matches_app_config_defaults() {
     assert_eq!(*agent_cfg.tool_groups(), app_defaults.tool_groups);
     assert!(agent_cfg.models().is_empty());
     assert!(agent_cfg.mcp_servers().is_empty());
-    assert!(agent_cfg.content_libraries().is_empty());
 }
 
 #[test]
@@ -180,30 +132,6 @@ fn test_builder_with_models_round_trip() {
         .with_models(models.clone())
         .build();
     assert_eq!(agent_cfg.models(), &models);
-}
-
-#[test]
-fn test_builder_with_user_round_trip() {
-    let agent_cfg = AgentConfigBuilder::new()
-        .with_user(
-            Some("Bob".to_string()),
-            Some("addr".to_string()),
-            Some("2000-01-01".to_string()),
-            Some("male".to_string()),
-        )
-        .build();
-    assert_eq!(agent_cfg.user_name(), Some("Bob"));
-    assert_eq!(agent_cfg.user_address(), Some("addr"));
-    assert_eq!(agent_cfg.user_birthdate(), Some("2000-01-01"));
-    assert_eq!(agent_cfg.user_gender(), Some("male"));
-}
-
-#[test]
-fn test_builder_with_system_prompt_extension_round_trip() {
-    let agent_cfg = AgentConfigBuilder::new()
-        .with_system_prompt_extension(Some("hi".to_string()))
-        .build();
-    assert_eq!(agent_cfg.system_prompt_extension(), Some("hi"));
 }
 
 #[test]
@@ -242,22 +170,6 @@ fn test_builder_with_mcp_servers_round_trip() {
 }
 
 #[test]
-fn test_builder_with_content_libraries_round_trip() {
-    let libs = vec![ContentLibrary {
-        root_folder: "/x".to_string(),
-        name: "x".to_string(),
-        kind: "k".to_string(),
-        readonly: true,
-        priority: 0,
-    }];
-    let agent_cfg = AgentConfigBuilder::new()
-        .with_content_libraries(libs.clone())
-        .build();
-    assert_eq!(agent_cfg.content_libraries().len(), libs.len());
-    assert_eq!(agent_cfg.content_libraries()[0].name, libs[0].name);
-}
-
-#[test]
 fn test_builder_with_config_path_round_trip() {
     let p = PathBuf::from("/tmp/test-config.yaml");
     let agent_cfg = AgentConfigBuilder::new()
@@ -281,7 +193,6 @@ fn test_default_agent_config_matches_builder_default() {
     assert_eq!(a.max_tokens(), b.max_tokens());
     assert_eq!(a.models(), b.models());
     assert_eq!(a.mcp_servers(), b.mcp_servers());
-    assert_eq!(a.content_libraries().len(), b.content_libraries().len());
 }
 
 #[test]

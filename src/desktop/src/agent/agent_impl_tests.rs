@@ -41,6 +41,7 @@ fn make_ctx(config: AgentConfig) -> (AgentContext, BusReader<SeamAgentEvent>) {
             .with_observer(std::sync::Arc::new(
                 crate::app::events::BusAgentEventObserver::new(session_id, agent_event_bus.clone()),
             ))
+            .with_system_prompts(Vec::new())
             .with_browser_session(browser_session)
             .build();
     (ctx, bus_reader)
@@ -267,6 +268,7 @@ fn test_run_agent_skips_done_status_when_cancelled() {
             agent_event_bus.clone(),
         ),
     ))
+    .with_system_prompts(Vec::new())
     .with_browser_session(browser_session)
     .with_cancel_flag(std::sync::Arc::new(std::sync::atomic::AtomicBool::new(
         true,
@@ -479,7 +481,15 @@ fn test_run_agent_system_prompt_starts_with_security_header() {
     })
     .to_string();
     let port = spawn_one_shot_http_server(&http_response("HTTP/1.1 200 OK", &body));
-    let (ctx, mut bus_reader) = make_ctx(make_agent_config(port));
+    let (mut ctx, mut bus_reader) = make_ctx(make_agent_config(port));
+    // Inject real system prompts so the first history message is a
+    // system message (the agent run loop no longer builds these).
+    ctx.system_prompts = crate::app::prompts::build_system_prompts(
+        &AppConfig::default(),
+        None,
+        None,
+        &std::collections::HashSet::new(),
+    );
     run_agent(ctx);
 
     let events = collect_bus_events(&mut bus_reader, std::time::Duration::from_secs(5));
@@ -755,7 +765,15 @@ fn test_debug_outgoing_turn1_includes_full_initial_messages() {
     })
     .to_string();
     let port = spawn_one_shot_http_server(&http_response("HTTP/1.1 200 OK", &body));
-    let (ctx, mut bus_reader) = make_ctx(make_agent_config(port));
+    let (mut ctx, mut bus_reader) = make_ctx(make_agent_config(port));
+    // Same as the security-header test: real system prompts so the
+    // outgoing debug entry contains the system messages.
+    ctx.system_prompts = crate::app::prompts::build_system_prompts(
+        &AppConfig::default(),
+        None,
+        None,
+        &std::collections::HashSet::new(),
+    );
     run_agent(ctx);
 
     let events = collect_bus_events(&mut bus_reader, std::time::Duration::from_secs(5));

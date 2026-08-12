@@ -44,6 +44,7 @@ fn make_ctx(config: AgentConfig) -> (AgentContext, BusReader<AgentEvent>) {
             .with_observer(std::sync::Arc::new(
                 crate::app::events::BusAgentEventObserver::new(session_id, agent_event_bus.clone()),
             ))
+            .with_system_prompts(Vec::new())
             .with_browser_session(browser_session)
             .build();
     (ctx, bus_reader)

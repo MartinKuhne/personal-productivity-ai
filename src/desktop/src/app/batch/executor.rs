@@ -198,6 +198,15 @@ pub fn run_agent_blocking(
     let agent_event_bus = crate::bus::core::Bus::new();
     let reader = agent_event_bus.subscribe();
 
+    // Assemble the system prompts at the same point the orchestrator's
+    // submit path does. The batch driver is a second submitter.
+    let system_prompts = crate::app::prompts::build_system_prompts(
+        &config,
+        active_file.as_deref(),
+        active_dir.as_deref(),
+        &selected_files,
+    );
+
     let ctx = crate::agent::context::AgentContextBuilder::new(
         crate::agent::config::AgentConfig::from_app_config(&config),
         uuid::Uuid::new_v4(),
@@ -213,6 +222,7 @@ pub fn run_agent_blocking(
     ))
     .with_active_paths(active_file, active_dir)
     .with_selected_files(selected_files)
+    .with_system_prompts(system_prompts)
     .with_cancel_flag(cancel_flag)
     .with_history(history)
     .with_model_name(model_name)

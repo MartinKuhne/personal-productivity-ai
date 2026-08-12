@@ -35,6 +35,11 @@ pub struct AgentContext {
     pub active_dir: Option<PathBuf>,
     pub selected_files: HashSet<PathBuf>,
     pub prompt: String,
+    /// Pre-assembled system-prompt message blocks, built by the
+    /// submitter via [`crate::app::prompts::build_system_prompts`].
+    /// The agent run loop forwards these as `role=system` messages
+    /// before the user turn; it does not construct them itself.
+    pub system_prompts: Vec<String>,
     pub cancel_flag: Arc<AtomicBool>,
     pub history: Option<Vec<Value>>,
     /// Optional model name override. When set, `LLMClient::from_agent_config` uses this model
@@ -80,6 +85,7 @@ pub struct AgentContextBuilder {
     cancel_flag: Option<Arc<AtomicBool>>,
     history: Option<Vec<Value>>,
     model_name: Option<String>,
+    system_prompts: Option<Vec<String>>,
     browser_session: Option<Arc<BrowserSession>>,
     pdf_backing: Option<Arc<crate::app::session::PdfBackingTracker>>,
     cache: Option<Arc<crate::agent::tools::registry::cache::ToolCache>>,
@@ -101,6 +107,7 @@ impl AgentContextBuilder {
             selected_files: HashSet::new(),
             cancel_flag: None,
             history: None,
+            system_prompts: None,
             model_name: None,
             browser_session: None,
             pdf_backing: None,
@@ -150,6 +157,15 @@ impl AgentContextBuilder {
 
     pub fn with_model_name(mut self, model_name: Option<String>) -> Self {
         self.model_name = model_name;
+        self
+    }
+
+    /// Set the pre-built system-prompt blocks. The submitter
+    /// (UI submit path or batch executor) calls
+    /// [`crate::app::prompts::build_system_prompts`] and hands the
+    /// result here. Required at [`Self::build`] time.
+    pub fn with_system_prompts(mut self, system_prompts: Vec<String>) -> Self {
+        self.system_prompts = Some(system_prompts);
         self
     }
 
@@ -204,6 +220,9 @@ impl AgentContextBuilder {
             active_file: self.active_file,
             active_dir: self.active_dir,
             selected_files: self.selected_files,
+            system_prompts: self
+                .system_prompts
+                .expect("system_prompts is required (use with_system_prompts)"),
             cancel_flag: self
                 .cancel_flag
                 .unwrap_or_else(|| Arc::new(AtomicBool::new(false))),
@@ -251,6 +270,7 @@ mod tests {
                     crate::bus::core::Bus::new(),
                 )))
                 .with_active_paths(Some(PathBuf::from("test.md")), None)
+                .with_system_prompts(Vec::new())
                 .with_browser_session(browser)
                 .build();
         assert_eq!(ctx.agent_config.models(), agent_config.models());
