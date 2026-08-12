@@ -246,6 +246,7 @@ fn test_run_agent_skips_done_status_when_cancelled() {
     let ctx = crate::agent::context::AgentContextBuilder::new(make_config(port), uuid::Uuid::new_v4(), "List files".to_string())
         .with_buses(crate::bus::core::Bus::new(), agent_event_bus)
         .with_browser_session(browser_session)
+        .with_cancel_flag(std::sync::Arc::new(std::sync::atomic::AtomicBool::new(true)))
         .build();
     run_agent(ctx);
     let events = collect_bus_events(&mut bus_reader, std::time::Duration::from_secs(5));
