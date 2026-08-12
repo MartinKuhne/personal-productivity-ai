@@ -34,6 +34,8 @@
 
 ## Component-specific rules
 
+**CRITICAL ROUTING RULE**: If your task involves editing, analyzing, or testing code in a specific component directory, you **MUST** immediately read its component-specific `AGENTS.md` file using the `view_file` tool *before* taking any action.
+
 | Directory                    | Scope                                                                                  |
 |------------------------------|----------------------------------------------------------------------------------------|
 | [`src/desktop/AGENTS.md`](src/desktop/AGENTS.md)               | Rust `fastmd` crate: documentation, egui, quality gate, tool/UI contracts. |
