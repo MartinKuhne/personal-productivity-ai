@@ -3,7 +3,8 @@
 //!
 //! Unit tests live in the sibling `transcript_tests.rs` sidecar.
 
-use crate::agent::events::{AgentEvent, DelegateToolCall};
+use crate::app::events::AgentEvent;
+use crate::agent::events::DelegateToolCall;
 use crate::ui::render::agent_render::{
     format_delegate_trace, format_tool_call_message, format_tool_result_message,
     split_thinking_and_content,

@@ -192,14 +192,15 @@ pub fn run_agent_blocking(
     file_event_bus: Bus<FileEvent>,
     model_name: Option<String>,
 ) -> (BatchJobStatus, Option<String>) {
-    use crate::agent::events::AgentEvent as SeamAgentEvent;
+    use crate::app::events::AgentEvent as SeamAgentEvent;
     use crate::agent::run_agent;
 
     let agent_event_bus = crate::bus::core::Bus::new();
     let reader = agent_event_bus.subscribe();
 
     let ctx = crate::agent::context::AgentContextBuilder::new(config, uuid::Uuid::new_v4(), prompt)
-        .with_buses(file_event_bus, agent_event_bus)
+        .with_buses(file_event_bus)
+        .with_observer(std::sync::Arc::new(crate::app::events::BusAgentEventObserver::new(uuid::Uuid::new_v4(), agent_event_bus.clone())))
         .with_active_paths(active_file, active_dir)
         .with_selected_files(selected_files)
         .with_cancel_flag(cancel_flag)
@@ -221,6 +222,7 @@ pub fn run_agent_blocking(
             SeamAgentEvent::Failed { error: err, .. } => {
                 status = BatchJobStatus::Failed;
                 error = Some(err);
+                break;
             }
             _ => {}
         }

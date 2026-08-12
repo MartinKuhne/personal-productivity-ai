@@ -1,5 +1,6 @@
 use crate::agent::AgentSession;
-use crate::agent::events::{AgentEvent as SeamAgentEvent, ToolSideEffect};
+use crate::app::events::AgentEvent as SeamAgentEvent;
+use crate::agent::events::ToolSideEffect;
 use crate::app::background::{BackgroundLogEntry, LogCategory, SharedBackgroundLogs};
 use crate::app::watcher::directory_tracker::DirectoryTracker;
 use crate::app::watcher::file_processor::FileEventProcessor;

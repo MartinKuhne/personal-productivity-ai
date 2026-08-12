@@ -7,7 +7,8 @@
 
 #![cfg(test)]
 
-use crate::agent::events::{AgentEvent, DelegateToolCall};
+use crate::app::events::AgentEvent;
+use crate::agent::events::DelegateToolCall;
 use crate::ui::agent::transcript::AgentTranscript;
 use serde_json::json;
 use uuid::Uuid;

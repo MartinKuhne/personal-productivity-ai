@@ -1,6 +1,6 @@
 //! Agent context — bundles all inputs (config, channels, file bus, active file/dir, prompt, cancel flag, history) for an agent session.
 
-use crate::agent::events::AgentEvent;
+use crate::agent::events::AgentEventObserver;
 use crate::app::session::BrowserSession;
 use crate::bus::core::Bus;
 use crate::bus::events::file::FileEvent;
@@ -18,9 +18,8 @@ use uuid::Uuid;
 pub struct AgentContext {
     pub config: AppConfig,
     pub file_event_bus: Bus<FileEvent>,
-    /// Agent→UI structured event bus. The agent publishes structured
-    /// `AgentEvent`s here; the UI subscribes via `BusReader`.
-    pub agent_event_bus: Bus<AgentEvent>,
+    /// Agent→UI structured observer. The agent calls methods here to emit events.
+    pub observer: Arc<dyn AgentEventObserver>,
     pub active_file: Option<PathBuf>,
     pub active_dir: Option<PathBuf>,
     pub selected_files: HashSet<PathBuf>,
@@ -68,7 +67,8 @@ mod tests {
         let bus = Bus::new();
         let browser = Arc::new(crate::app::session::BrowserSession::new(&config));
         let ctx = AgentContextBuilder::new(config.clone(), Uuid::new_v4(), "hello".to_string())
-            .with_buses(bus, Bus::new())
+            .with_buses(bus)
+            .with_observer(Arc::new(crate::app::events::BusAgentEventObserver::new(Uuid::new_v4(), crate::bus::core::Bus::new())))
             .with_active_paths(Some(PathBuf::from("test.md")), None)
             .with_browser_session(browser)
             .build();
@@ -84,7 +84,7 @@ pub struct AgentContextBuilder {
     prompt: String,
     
     file_event_bus: Option<Bus<FileEvent>>,
-    agent_event_bus: Option<Bus<AgentEvent>>,
+    observer: Option<Arc<dyn AgentEventObserver>>,
     active_file: Option<PathBuf>,
     active_dir: Option<PathBuf>,
     selected_files: HashSet<PathBuf>,
@@ -105,7 +105,7 @@ impl AgentContextBuilder {
             session_id,
             prompt,
             file_event_bus: None,
-            agent_event_bus: None,
+            observer: None,
             active_file: None,
             active_dir: None,
             selected_files: HashSet::new(),
@@ -120,9 +120,13 @@ impl AgentContextBuilder {
         }
     }
 
-    pub fn with_buses(mut self, file_event_bus: Bus<FileEvent>, agent_event_bus: Bus<AgentEvent>) -> Self {
+    pub fn with_buses(mut self, file_event_bus: Bus<FileEvent>) -> Self {
         self.file_event_bus = Some(file_event_bus);
-        self.agent_event_bus = Some(agent_event_bus);
+        self
+    }
+
+    pub fn with_observer(mut self, observer: Arc<dyn AgentEventObserver>) -> Self {
+        self.observer = Some(observer);
         self
     }
 
@@ -183,7 +187,7 @@ impl AgentContextBuilder {
             session_id: self.session_id,
             prompt: self.prompt,
             file_event_bus: self.file_event_bus.unwrap_or_else(Bus::new),
-            agent_event_bus: self.agent_event_bus.unwrap_or_else(Bus::new),
+            observer: self.observer.expect("observer is required"),
             active_file: self.active_file,
             active_dir: self.active_dir,
             selected_files: self.selected_files,

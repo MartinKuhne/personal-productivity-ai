@@ -3,7 +3,8 @@
 //! Unit tests live in the sibling `session_tests.rs` sidecar.
 
 use crate::agent::AgentContext;
-use crate::agent::events::{AgentEvent as SeamAgentEvent, AgentPrompt};
+use crate::app::events::AgentEvent as SeamAgentEvent;
+use crate::agent::events::AgentPrompt;
 use crate::app::session::BrowserSession;
 use crate::bus::core::{Bus, BusReader};
 use crate::bus::events::config::ConfigArrived;
@@ -436,7 +437,8 @@ fn spawn_driver(
             let config = shared_config.read().map(|c| c.clone()).unwrap_or_default();
             let history = session_histories.get(&session_id).cloned().flatten();
             let ctx = crate::agent::context::AgentContextBuilder::new(config, session_id, prompt.text)
-                .with_buses(file_event_bus.clone(), agent_event_bus.clone())
+                .with_buses(file_event_bus.clone())
+                .with_observer(std::sync::Arc::new(crate::app::events::BusAgentEventObserver::new(session_id, agent_event_bus.clone())))
                 .with_active_paths(prompt.active_file, prompt.active_dir)
                 .with_selected_files(prompt.selected_files)
                 .with_cancel_flag(prompt.cancel_flag)

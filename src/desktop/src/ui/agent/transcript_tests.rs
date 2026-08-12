@@ -1,7 +1,8 @@
 //! Tests for `ui/agent/transcript.rs`.
 
 use super::*;
-use crate::agent::events::{AgentEvent, AgentStatus, ToolSideEffect};
+use crate::app::events::AgentEvent;
+use crate::agent::events::{AgentStatus, ToolSideEffect};
 use serde_json::json;
 use uuid::Uuid;
 

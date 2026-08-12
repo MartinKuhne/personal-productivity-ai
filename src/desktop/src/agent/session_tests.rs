@@ -362,7 +362,7 @@ fn test_debug_entries_never_cleared_on_new_session() {
 /// since the agent no longer publishes on `tx_gui`.
 #[test]
 fn test_current_session_id_set_on_start_session() {
-    use crate::agent::events::AgentEvent as SeamAgentEvent;
+    use crate::app::events::AgentEvent as SeamAgentEvent;
 
     let mut config = AppConfig::default();
     config.models.insert(

@@ -92,87 +92,30 @@ pub struct DelegateToolCall {
     pub result: Value,
 }
 
-/// Output message: agent → UI on `Bus<AgentEvent>` (tokio broadcast, capacity
-/// 8192). Replaces the old `AgentEvent` enum in `bus/events/typed.rs`.
-///
-/// Every variant carries `session_id: Uuid` — the UI routes events to the
-/// correct session transcript (FR-003, FR-009).
-#[derive(Debug, Clone, Serialize)]
-pub enum AgentEvent {
-    /// Emitted when a new session starts (first event for a `session_id`).
-    SessionStarted { session_id: Uuid },
-    /// Emitted when a session finishes (last event for a `session_id`).
-    /// Carries the final conversation history so the UI can store it for
-    /// continuation in the next session (replaces `AgentEvent::Finished`).
-    SessionFinished {
-        session_id: Uuid,
-        history: Vec<serde_json::Value>,
-    },
-    /// Typed status update bracketing the phases of a turn.
-    Status {
-        session_id: Uuid,
-        status: AgentStatus,
-    },
-    /// Incremental thinking text from the LLM (reasoning model output).
-    Thinking { session_id: Uuid, text: String },
-    /// Incremental content chunk from the LLM. The UI accumulates these into
-    /// its transcript view model (FR-010). Replaces the old running-buffer
-    /// `AgentEvent::Response(full_response.clone())`.
-    ContentDelta { session_id: Uuid, text: String },
-    /// Emitted before the corresponding `ToolResult` for each tool call.
-    ToolCallStarted {
-        session_id: Uuid,
-        id: String,
-        name: String,
-        args: Value,
-    },
-    /// Emitted after a tool completes. For `web_delegate`, `result` contains
-    /// `tool_calls: Vec<DelegateToolCall>` (structured, no string trace).
-    ToolResult {
-        session_id: Uuid,
-        id: String,
-        name: String,
-        result: Value,
-    },
-    /// Emitted once per successful side-effecting tool execution. The UI
-    /// reissues this as `FsEvent::FileModified` (FR-007).
-    ToolSideEffect {
-        session_id: Uuid,
-        effect: ToolSideEffect,
-    },
-    /// Emitted once per debug entry (outgoing, incoming, tool results) plus a
-    /// session-boundary entry at the start of each new session.
-    DebugEntry {
-        session_id: Uuid,
-        entry: AgentDebugEntry,
-    },
-    /// Emitted after every LLM turn that returns a `usage` block.
-    TokenUsage {
-        session_id: Uuid,
-        usage: TokenUsageInfo,
-    },
-    /// Emitted when an error terminates the session.
-    Failed { session_id: Uuid, error: String },
+
+
+// ---------------------------------------------------------------------------
+// Observer Pattern for AgentEvent
+// ---------------------------------------------------------------------------
+
+/// Trait for receiving `AgentEvent`s from the agent loop. Decouples the
+/// agent from the concrete transport (like `tokio::sync::broadcast::Sender`).
+/// The observer is scoped to a specific session.
+pub trait AgentEventObserver: Send + Sync {
+    fn on_session_started(&self);
+    fn on_session_finished(&self, history: Vec<serde_json::Value>);
+    fn on_status(&self, status: AgentStatus);
+    fn on_thinking(&self, text: String);
+    fn on_content_delta(&self, text: String);
+    fn on_tool_call_started(&self, id: String, name: String, args: serde_json::Value);
+    fn on_tool_result(&self, id: String, name: String, result: serde_json::Value);
+    fn on_tool_side_effect(&self, effect: ToolSideEffect);
+    fn on_debug_entry(&self, entry: AgentDebugEntry);
+    fn on_token_usage(&self, usage: TokenUsageInfo);
+    fn on_failed(&self, error: String);
 }
 
-impl AgentEvent {
-    /// Returns the `session_id` carried by this event (every variant has one).
-    pub fn session_id(&self) -> Uuid {
-        match self {
-            AgentEvent::SessionStarted { session_id }
-            | AgentEvent::SessionFinished { session_id, .. }
-            | AgentEvent::Status { session_id, .. }
-            | AgentEvent::Thinking { session_id, .. }
-            | AgentEvent::ContentDelta { session_id, .. }
-            | AgentEvent::ToolCallStarted { session_id, .. }
-            | AgentEvent::ToolResult { session_id, .. }
-            | AgentEvent::ToolSideEffect { session_id, .. }
-            | AgentEvent::DebugEntry { session_id, .. }
-            | AgentEvent::TokenUsage { session_id, .. }
-            | AgentEvent::Failed { session_id, .. } => *session_id,
-        }
-    }
-}
+
 
 // ---------------------------------------------------------------------------
 // Tests live in the sibling `events_tests.rs` sidecar.

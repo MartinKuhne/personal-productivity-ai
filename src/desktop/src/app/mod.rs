@@ -20,6 +20,7 @@ pub mod batch;
 pub mod browser;
 pub mod dialogs;
 pub mod document;
+pub mod events;
 pub mod orchestrator;
 pub mod panel_layout;
 pub mod persisted;

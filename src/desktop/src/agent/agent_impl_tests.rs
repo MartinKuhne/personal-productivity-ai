@@ -2,7 +2,7 @@
 
 use crate::agent::agent_impl::run_agent;
 use crate::agent::context::AgentContext;
-use crate::agent::events::AgentEvent as SeamAgentEvent;
+use crate::app::events::AgentEvent as SeamAgentEvent;
 use crate::bus::core::BusReader;
 use crate::bus::events::debug::{AgentDebugEntry, DebugEntryKind, DebugEntryRow};
 use crate::config::AppConfig;
@@ -32,7 +32,7 @@ fn make_ctx(config: AppConfig) -> (AgentContext, BusReader<SeamAgentEvent>) {
     let agent_event_bus = crate::bus::core::Bus::new();
     let bus_reader = agent_event_bus.subscribe();
     let ctx = crate::agent::context::AgentContextBuilder::new(config, uuid::Uuid::new_v4(), "Hello".to_string())
-        .with_buses(crate::bus::core::Bus::new(), agent_event_bus)
+        .with_buses(crate::bus::core::Bus::new()).with_observer(std::sync::Arc::new(crate::app::events::BusAgentEventObserver::new(uuid::Uuid::new_v4(), agent_event_bus.clone())))
         .with_browser_session(browser_session)
         .build();
     (ctx, bus_reader)
@@ -244,7 +244,7 @@ fn test_run_agent_skips_done_status_when_cancelled() {
     let agent_event_bus = crate::bus::core::Bus::new();
     let mut bus_reader = agent_event_bus.subscribe();
     let ctx = crate::agent::context::AgentContextBuilder::new(make_config(port), uuid::Uuid::new_v4(), "List files".to_string())
-        .with_buses(crate::bus::core::Bus::new(), agent_event_bus)
+        .with_buses(crate::bus::core::Bus::new()).with_observer(std::sync::Arc::new(crate::app::events::BusAgentEventObserver::new(uuid::Uuid::new_v4(), agent_event_bus.clone())))
         .with_browser_session(browser_session)
         .with_cancel_flag(std::sync::Arc::new(std::sync::atomic::AtomicBool::new(true)))
         .build();

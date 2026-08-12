@@ -5,7 +5,8 @@
 
 use crate::agent::agent_impl::run_agent;
 use crate::agent::context::AgentContext;
-use crate::agent::events::{AgentEvent, AgentStatus};
+use crate::app::events::AgentEvent;
+use crate::agent::events::AgentStatus;
 use crate::bus::core::{Bus, BusReader};
 use crate::config::{AppConfig, LlmConfig};
 use std::collections::HashSet;
@@ -34,7 +35,7 @@ fn make_ctx(config: AppConfig) -> (AgentContext, BusReader<AgentEvent>) {
     let agent_event_bus = Bus::new();
     let bus_reader = agent_event_bus.subscribe();
     let ctx = crate::agent::context::AgentContextBuilder::new(config, uuid::Uuid::new_v4(), "Hello".to_string())
-        .with_buses(Bus::new(), agent_event_bus)
+        .with_buses(Bus::new()).with_observer(std::sync::Arc::new(crate::app::events::BusAgentEventObserver::new(uuid::Uuid::new_v4(), agent_event_bus.clone())))
         .with_browser_session(browser_session)
         .build();
     (ctx, bus_reader)
