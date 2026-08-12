@@ -1,4 +1,4 @@
-//! Tests for the `ToolManager` group-state and error-tracking surface.
+//! Tests for the `ToolRegistry` group-state and error-tracking surface.
 //! These complement the `manager::tests` (the migrated registry tests)
 //! and cover the new behaviour introduced by the merge.
 
@@ -9,7 +9,7 @@ use crate::config::McpServerConfig;
 /// Every registered tool has a `tool_to_group` entry â€” no orphans.
 #[test]
 fn tool_to_group_index_is_complete() {
-    let mut mgr = ToolManager::new();
+    let mut mgr = ToolRegistry::new();
     let config = AppConfig::default();
     mgr.refresh_state(&config);
     for name in mgr.tools.keys() {
@@ -29,7 +29,7 @@ fn tool_to_group_index_is_complete() {
 /// `refresh_state` reads the current `AppConfig::tool_groups` flags.
 #[test]
 fn group_state_refresh_reflects_config() {
-    let mut mgr = ToolManager::new();
+    let mut mgr = ToolRegistry::new();
     let mut config = AppConfig::default();
     mgr.refresh_state(&config);
     let id = ToolGroupId::Internal(InternalToolGroup::Filesystem);
@@ -45,14 +45,14 @@ fn group_state_refresh_reflects_config() {
 fn group_parallel_safe_when_all_tools_readonly() {
     // Build a manager that has only `grep` (ReadOnly) in the
     // Filesystem group. We can't easily remove tools from a
-    // `ToolManager`; instead we test the *complement*: a group that
+    // `ToolRegistry`; instead we test the *complement*: a group that
     // mixes read-only and mutating tools is not parallel-safe
     // (verified in the next test). Here we test the trivial case
     // by checking that the Web group's `parallel_safe` value matches
     // the per-tool safety: `web_delegate` is Mutating, so the Web
     // group must not be parallel-safe; but the *Filesystem* group
     // has at least one Mutating tool (`create_file`).
-    let mut mgr = ToolManager::new();
+    let mut mgr = ToolRegistry::new();
     let config = AppConfig::default();
     mgr.refresh_state(&config);
     let fs = mgr
@@ -66,7 +66,7 @@ fn group_parallel_safe_when_all_tools_readonly() {
 /// `parallel_safe_tools` returns every ReadOnly tool.
 #[test]
 fn parallel_safe_tools_includes_all_readonly_tools() {
-    let mgr = ToolManager::new();
+    let mgr = ToolRegistry::new();
     let safe = mgr.parallel_safe_tools();
     // `grep` is documented as ReadOnly. The list is not exhaustive
     // â€” it grows as more tools are audited â€” but it must include
@@ -76,11 +76,11 @@ fn parallel_safe_tools_includes_all_readonly_tools() {
     assert!(!safe.iter().any(|n| n == "create_note"));
 }
 
-/// A `ToolManager`-level error replaces any prior `last_error` for
+/// A `ToolRegistry`-level error replaces any prior `last_error` for
 /// the same group.
 #[test]
 fn record_error_replaces_previous() {
-    let mut mgr = ToolManager::new();
+    let mut mgr = ToolRegistry::new();
     let config = AppConfig::default();
     mgr.refresh_state(&config);
     let id = ToolGroupId::Internal(InternalToolGroup::Filesystem);
@@ -103,7 +103,7 @@ fn record_error_replaces_previous() {
 /// `clear_error` removes the recorded error.
 #[test]
 fn clear_error_removes_recorded_error() {
-    let mut mgr = ToolManager::new();
+    let mut mgr = ToolRegistry::new();
     let config = AppConfig::default();
     mgr.refresh_state(&config);
     let id = ToolGroupId::Internal(InternalToolGroup::Filesystem);
@@ -117,7 +117,7 @@ fn clear_error_removes_recorded_error() {
 /// internal group and persists the change.
 #[test]
 fn set_internal_group_enabled_persists_to_config() {
-    let mgr = ToolManager::new();
+    let mgr = ToolRegistry::new();
     let mut config = AppConfig::default();
     assert!(config.tool_groups.weather);
     mgr.set_group_enabled(
@@ -138,7 +138,7 @@ fn set_internal_group_enabled_persists_to_config() {
 /// MCP group, preserving the transport config.
 #[test]
 fn set_mcp_group_enabled_preserves_server_config() {
-    let mgr = ToolManager::new();
+    let mgr = ToolRegistry::new();
     let mut config = AppConfig::default();
     config.mcp_servers.insert(
         "github".to_string(),
@@ -171,7 +171,7 @@ fn set_mcp_group_enabled_preserves_server_config() {
 #[test]
 #[cfg(feature = "browser")]
 fn browser_group_defaults_to_disabled() {
-    let mut mgr = ToolManager::new();
+    let mut mgr = ToolRegistry::new();
     let config = AppConfig::default();
     mgr.refresh_state(&config);
     let id = ToolGroupId::Internal(InternalToolGroup::Browser);
@@ -184,7 +184,7 @@ fn browser_group_defaults_to_disabled() {
 #[test]
 #[cfg(feature = "browser")]
 fn browser_group_lists_all_eight_tools() {
-    let mut mgr = ToolManager::new();
+    let mut mgr = ToolRegistry::new();
     let mut config = AppConfig::default();
     config.tool_groups.browser = true;
     let snapshot = mgr.groups_snapshot(&config);
@@ -214,7 +214,7 @@ fn browser_group_lists_all_eight_tools() {
 #[test]
 #[cfg(feature = "browser")]
 fn set_browser_group_enabled_persists_to_config() {
-    let mgr = ToolManager::new();
+    let mgr = ToolRegistry::new();
     let mut config = AppConfig::default();
     assert!(!config.tool_groups.browser);
     mgr.set_group_enabled(
@@ -238,7 +238,7 @@ fn set_browser_group_enabled_persists_to_config() {
 #[cfg(feature = "browser")]
 fn browser_only_get_page_state_is_parallel_safe() {
     use crate::agent::tools::Safety;
-    let mgr = ToolManager::new();
+    let mgr = ToolRegistry::new();
     for name in [
         "browser_navigate",
         "browser_click",
@@ -266,7 +266,7 @@ fn browser_only_get_page_state_is_parallel_safe() {
 /// when a 401 is observed.
 #[test]
 fn mcp_needs_auth_now_defaults_to_false() {
-    let mgr = ToolManager::new();
+    let mgr = ToolRegistry::new();
     let mut config = AppConfig::default();
     config.mcp_servers.insert(
         "github".to_string(),
@@ -284,7 +284,7 @@ fn mcp_needs_auth_now_defaults_to_false() {
 /// `mcp_clear_needs_auth` clears the manager's flag for a server.
 #[test]
 fn mcp_clear_needs_auth_clears_the_flag() {
-    let mgr = ToolManager::new();
+    let mgr = ToolRegistry::new();
     let mut config = AppConfig::default();
     config.mcp_servers.insert(
         "github".to_string(),

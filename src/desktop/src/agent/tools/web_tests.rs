@@ -26,7 +26,7 @@ fn spawn_mock_server(body: impl Into<String>) -> String {
 
 #[test]
 fn test_tool_web_fetch_mock() {
-    let cache = crate::agent::tools::manager::cache::ToolCache::new();
+    let cache = crate::agent::tools::registry::cache::ToolCache::new();
     rustls::crypto::ring::default_provider()
         .install_default()
         .ok();
@@ -48,7 +48,7 @@ fn test_tool_web_fetch_mock() {
     assert!(result.total_lines > 0);
 
     // Verify the mock generator was used to create the cache entry
-    if let Some(crate::agent::tools::manager::cache::CacheEntry::WebFetch { cursor }) =
+    if let Some(crate::agent::tools::registry::cache::CacheEntry::WebFetch { cursor }) =
         cache.get(&server_url)
     {
         assert_eq!(cursor, mock_uuid.to_string());
@@ -59,7 +59,7 @@ fn test_tool_web_fetch_mock() {
 
 #[test]
 fn test_tool_web_fetch_error() {
-    let cache = crate::agent::tools::manager::cache::ToolCache::new();
+    let cache = crate::agent::tools::registry::cache::ToolCache::new();
     rustls::crypto::ring::default_provider()
         .install_default()
         .ok();
@@ -75,7 +75,7 @@ fn test_tool_web_fetch_error() {
 
 #[test]
 fn test_tool_web_fetch_pagination() {
-    let cache = crate::agent::tools::manager::cache::ToolCache::new();
+    let cache = crate::agent::tools::registry::cache::ToolCache::new();
     rustls::crypto::ring::default_provider()
         .install_default()
         .ok();
@@ -103,7 +103,7 @@ fn test_tool_web_fetch_pagination() {
 /// `cursor`), so the lookup must hit `WebFetchContent` directly.
 #[test]
 fn test_tool_web_fetch_cursor_pagination() {
-    let cache = crate::agent::tools::manager::cache::ToolCache::new();
+    let cache = crate::agent::tools::registry::cache::ToolCache::new();
     rustls::crypto::ring::default_provider()
         .install_default()
         .ok();
@@ -188,7 +188,7 @@ fn test_tool_web_fetch_cursor_pagination() {
 
 #[test]
 fn test_tool_web_fetch_headers() {
-    let cache = crate::agent::tools::manager::cache::ToolCache::new();
+    let cache = crate::agent::tools::registry::cache::ToolCache::new();
     rustls::crypto::ring::default_provider()
         .install_default()
         .ok();
@@ -207,7 +207,7 @@ fn test_tool_web_fetch_headers() {
 
 #[test]
 fn test_tool_web_fetch_cache_hit() {
-    let cache = crate::agent::tools::manager::cache::ToolCache::new();
+    let cache = crate::agent::tools::registry::cache::ToolCache::new();
     rustls::crypto::ring::default_provider()
         .install_default()
         .ok();
@@ -227,7 +227,7 @@ fn test_tool_web_fetch_cache_hit() {
 
 #[test]
 fn test_tool_web_fetch_force_refetch() {
-    let cache = crate::agent::tools::manager::cache::ToolCache::new();
+    let cache = crate::agent::tools::registry::cache::ToolCache::new();
     rustls::crypto::ring::default_provider()
         .install_default()
         .ok();
@@ -360,7 +360,7 @@ fn test_tool_web_search_invalid_json() {
 
 #[test]
 fn test_tool_web_delegate_missing_api_key() {
-    let cache = crate::agent::tools::manager::cache::ToolCache::new();
+    let cache = crate::agent::tools::registry::cache::ToolCache::new();
     let mut config = AppConfig::default();
     config.models.insert(
         "chat".to_string(),
@@ -380,7 +380,7 @@ fn test_tool_web_delegate_missing_api_key() {
 
 #[test]
 fn test_tool_web_delegate_mock() {
-    let cache = crate::agent::tools::manager::cache::ToolCache::new();
+    let cache = crate::agent::tools::registry::cache::ToolCache::new();
     rustls::crypto::ring::default_provider()
         .install_default()
         .ok();
@@ -415,7 +415,7 @@ fn test_tool_web_delegate_mock() {
 
 #[test]
 fn test_tool_web_delegate_with_unknown_tool_handled_gracefully() {
-    let cache = crate::agent::tools::manager::cache::ToolCache::new();
+    let cache = crate::agent::tools::registry::cache::ToolCache::new();
     rustls::crypto::ring::default_provider()
         .install_default()
         .ok();
@@ -460,7 +460,7 @@ fn test_tool_web_delegate_with_unknown_tool_handled_gracefully() {
 
 #[test]
 fn test_tool_web_delegate_handles_api_error_gracefully() {
-    let cache = crate::agent::tools::manager::cache::ToolCache::new();
+    let cache = crate::agent::tools::registry::cache::ToolCache::new();
     rustls::crypto::ring::default_provider()
         .install_default()
         .ok();

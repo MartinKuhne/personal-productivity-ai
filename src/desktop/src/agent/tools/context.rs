@@ -101,8 +101,8 @@ pub struct ToolContext {
     /// stays unused.
     pub browser_session: Arc<BrowserSession>,
     pub pdf_backing: std::sync::Arc<crate::app::session::PdfBackingTracker>,
-    pub cache: std::sync::Arc<crate::agent::tools::manager::cache::ToolCache>,
-    pub tool_manager: std::sync::Arc<std::sync::RwLock<crate::agent::tools::manager::ToolManager>>,
+    pub cache: std::sync::Arc<crate::agent::tools::registry::cache::ToolCache>,
+    pub tool_manager: std::sync::Arc<std::sync::RwLock<crate::agent::tools::registry::ToolRegistry>>,
     pub uuid_gen: std::sync::Arc<dyn crate::utils::uuid::UuidGenerator>,
 }
 
@@ -113,8 +113,8 @@ impl ToolContext {
         file_event_bus: Bus<FileEvent>,
         browser_session: Arc<BrowserSession>,
         pdf_backing: std::sync::Arc<crate::app::session::PdfBackingTracker>,
-        cache: std::sync::Arc<crate::agent::tools::manager::cache::ToolCache>,
-        tool_manager: std::sync::Arc<std::sync::RwLock<crate::agent::tools::manager::ToolManager>>,
+        cache: std::sync::Arc<crate::agent::tools::registry::cache::ToolCache>,
+        tool_manager: std::sync::Arc<std::sync::RwLock<crate::agent::tools::registry::ToolRegistry>>,
         uuid_gen: std::sync::Arc<dyn crate::utils::uuid::UuidGenerator>,
     ) -> Self {
         let resolver = VfsResolver::new(config.clone());

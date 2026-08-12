@@ -99,9 +99,9 @@ fn test_browser_navigate_tool_round_trip() {
     config.tool_groups.browser = true;
     let pdf_backing = std::sync::Arc::new(crate::app::session::PdfBackingTracker::new());
     let tm = Arc::new(std::sync::RwLock::new(
-        crate::agent::tools::manager::ToolManager::new(),
+        crate::agent::tools::registry::ToolRegistry::new(),
     ));
-    let cache = Arc::new(crate::agent::tools::manager::cache::ToolCache::new());
+    let cache = Arc::new(crate::agent::tools::registry::cache::ToolCache::new());
     let ctx = ToolContext::new(
         Arc::new(config),
         bus,
@@ -112,7 +112,7 @@ fn test_browser_navigate_tool_round_trip() {
         Arc::new(crate::utils::uuid::SystemUuidGenerator),
     );
 
-    let tool = crate::agent::tools::manager::builtin::browser::BrowserNavigateTool;
+    let tool = crate::agent::tools::registry::builtin::browser::BrowserNavigateTool;
     let args = r#"{"url":"about:blank"}"#;
     let result = tool.execute(&ctx, args);
     assert!(result.is_ok(), "navigate failed: {:?}", result.err());
@@ -129,9 +129,9 @@ fn test_browser_get_page_state_tool_is_readonly() {
     config.tool_groups.browser = true;
     let pdf_backing = std::sync::Arc::new(crate::app::session::PdfBackingTracker::new());
     let tm = Arc::new(std::sync::RwLock::new(
-        crate::agent::tools::manager::ToolManager::new(),
+        crate::agent::tools::registry::ToolRegistry::new(),
     ));
-    let cache = Arc::new(crate::agent::tools::manager::cache::ToolCache::new());
+    let cache = Arc::new(crate::agent::tools::registry::cache::ToolCache::new());
     let _ctx = ToolContext::new(
         Arc::new(config),
         bus,
@@ -142,6 +142,6 @@ fn test_browser_get_page_state_tool_is_readonly() {
         Arc::new(crate::utils::uuid::SystemUuidGenerator),
     );
 
-    let tool = crate::agent::tools::manager::builtin::browser::BrowserGetPageStateTool;
+    let tool = crate::agent::tools::registry::builtin::browser::BrowserGetPageStateTool;
     assert_eq!(tool.safety(), Safety::ReadOnly);
 }

@@ -8,7 +8,7 @@ use std::collections::HashSet;
 #[test]
 fn test_new_manager_is_empty() {
     let config = AppConfig::default();
-    let mgr = AgentSessionManager::new_for_test(
+    let mgr = AgentSession::new_for_test(
         config,
         Arc::new(crate::app::session::BrowserSession::new(
             &AppConfig::default(),
@@ -23,7 +23,7 @@ fn test_new_manager_is_empty() {
 #[test]
 fn test_cancel_sets_running_false() {
     let config = AppConfig::default();
-    let mut mgr = AgentSessionManager::new_for_test(
+    let mut mgr = AgentSession::new_for_test(
         config,
         Arc::new(crate::app::session::BrowserSession::new(
             &AppConfig::default(),
@@ -39,7 +39,7 @@ fn test_cancel_sets_running_false() {
 #[test]
 fn test_clear_history_resets_fields() {
     let config = AppConfig::default();
-    let mut mgr = AgentSessionManager::new_for_test(
+    let mut mgr = AgentSession::new_for_test(
         config,
         Arc::new(crate::app::session::BrowserSession::new(
             &AppConfig::default(),
@@ -67,7 +67,7 @@ fn test_drain_config_observes_first_event() {
     use crate::bus::events::config::ConfigArrived;
 
     let bus = config_bus();
-    let mut mgr = AgentSessionManager::new(
+    let mut mgr = AgentSession::new(
         bus.clone(),
         crate::bus::core::Bus::new(),
         Arc::new(crate::app::session::BrowserSession::new(
@@ -75,7 +75,7 @@ fn test_drain_config_observes_first_event() {
         )),
         Arc::new(crate::app::session::PdfBackingTracker::new()),
         Arc::new(std::sync::RwLock::new(
-            crate::agent::tools::manager::ToolManager::new(),
+            crate::agent::tools::registry::ToolRegistry::new(),
         )),
     );
 
@@ -102,7 +102,7 @@ fn test_drain_config_observes_first_event() {
 #[test]
 fn test_drain_config_returns_false_when_empty() {
     let bus = crate::bus::config::config_bus();
-    let mut mgr = AgentSessionManager::new(
+    let mut mgr = AgentSession::new(
         bus,
         crate::bus::core::Bus::new(),
         Arc::new(crate::app::session::BrowserSession::new(
@@ -110,7 +110,7 @@ fn test_drain_config_returns_false_when_empty() {
         )),
         Arc::new(crate::app::session::PdfBackingTracker::new()),
         Arc::new(std::sync::RwLock::new(
-            crate::agent::tools::manager::ToolManager::new(),
+            crate::agent::tools::registry::ToolRegistry::new(),
         )),
     );
 
@@ -128,9 +128,9 @@ fn test_drain_config_returns_false_when_empty() {
 #[test]
 fn test_construct_then_publish_order_drains_config() {
     let bus = crate::bus::config::config_bus();
-    // 1. Construct first — this is the `AgentSessionManager::new`
+    // 1. Construct first — this is the `AgentSession::new`
     //    call inside `FastMdApp::new`. It subscribes here.
-    let mut mgr = AgentSessionManager::new(
+    let mut mgr = AgentSession::new(
         bus.clone(),
         crate::bus::core::Bus::new(),
         Arc::new(crate::app::session::BrowserSession::new(
@@ -138,7 +138,7 @@ fn test_construct_then_publish_order_drains_config() {
         )),
         Arc::new(crate::app::session::PdfBackingTracker::new()),
         Arc::new(std::sync::RwLock::new(
-            crate::agent::tools::manager::ToolManager::new(),
+            crate::agent::tools::registry::ToolRegistry::new(),
         )),
     );
 
@@ -168,7 +168,7 @@ fn test_publish_then_construct_order_drops_event() {
 
     // Subscribing after the publish means the broadcast
     // channel won't deliver the event to this reader.
-    let mut mgr = AgentSessionManager::new(
+    let mut mgr = AgentSession::new(
         bus,
         crate::bus::core::Bus::new(),
         Arc::new(crate::app::session::BrowserSession::new(
@@ -176,7 +176,7 @@ fn test_publish_then_construct_order_drops_event() {
         )),
         Arc::new(crate::app::session::PdfBackingTracker::new()),
         Arc::new(std::sync::RwLock::new(
-            crate::agent::tools::manager::ToolManager::new(),
+            crate::agent::tools::registry::ToolRegistry::new(),
         )),
     );
 
@@ -187,7 +187,7 @@ fn test_publish_then_construct_order_drops_event() {
 #[test]
 fn test_queue_prompt_and_take_next() {
     let config = AppConfig::default();
-    let mut mgr = AgentSessionManager::new_for_test(
+    let mut mgr = AgentSession::new_for_test(
         config,
         Arc::new(crate::app::session::BrowserSession::new(
             &AppConfig::default(),
@@ -223,7 +223,7 @@ fn test_queue_prompt_and_take_next() {
 #[test]
 fn test_finished_returns_queued_prompt() {
     let config = AppConfig::default();
-    let mut mgr = AgentSessionManager::new_for_test(
+    let mut mgr = AgentSession::new_for_test(
         config,
         Arc::new(crate::app::session::BrowserSession::new(
             &AppConfig::default(),
@@ -246,7 +246,7 @@ fn test_finished_returns_queued_prompt() {
 #[test]
 fn test_finished_no_queued_prompt() {
     let config = AppConfig::default();
-    let mut mgr = AgentSessionManager::new_for_test(
+    let mut mgr = AgentSession::new_for_test(
         config,
         Arc::new(crate::app::session::BrowserSession::new(
             &AppConfig::default(),
@@ -266,7 +266,7 @@ fn test_finished_no_queued_prompt() {
 #[test]
 fn test_failed_clears_queue() {
     let config = AppConfig::default();
-    let mut mgr = AgentSessionManager::new_for_test(
+    let mut mgr = AgentSession::new_for_test(
         config,
         Arc::new(crate::app::session::BrowserSession::new(
             &AppConfig::default(),
@@ -290,7 +290,7 @@ fn test_failed_clears_queue() {
 #[test]
 fn test_debug_entry_accumulates() {
     let config = AppConfig::default();
-    let mut mgr = AgentSessionManager::new_for_test(
+    let mut mgr = AgentSession::new_for_test(
         config,
         Arc::new(crate::app::session::BrowserSession::new(
             &AppConfig::default(),
@@ -330,7 +330,7 @@ fn test_debug_entries_never_cleared_on_new_session() {
     use crate::bus::events::debug::{AgentDebugEntry, DebugEntryKind, DebugEntryRow};
 
     let config = AppConfig::default();
-    let mut mgr = AgentSessionManager::new_for_test(
+    let mut mgr = AgentSession::new_for_test(
         config,
         Arc::new(crate::app::session::BrowserSession::new(
             &AppConfig::default(),
@@ -376,7 +376,7 @@ fn test_current_session_id_set_on_start_session() {
         },
     );
 
-    let mut mgr = AgentSessionManager::new_for_test(
+    let mut mgr = AgentSession::new_for_test(
         config,
         Arc::new(crate::app::session::BrowserSession::new(
             &AppConfig::default(),

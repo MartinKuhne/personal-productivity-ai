@@ -10,7 +10,7 @@ use std::sync::{Arc, Mutex};
 
 use eframe::egui;
 
-use crate::agent::AgentSessionManager;
+use crate::agent::AgentSession;
 use crate::app::background::BackgroundLogs;
 use crate::app::background_task::Task;
 use crate::app::watcher::directory_tracker::DirectoryTracker;
@@ -85,7 +85,7 @@ impl FastMdApp {
         // `ConfigArrived` publish reaches every reader.
         let config_reader = config_bus.subscribe();
 
-        // `Task::new` and `AgentSessionManager::new` each subscribe
+        // `Task::new` and `AgentSession::new` each subscribe
         // to the same bus, then defer their own work until the
         // event arrives. The background `Task` spawns a thread that
         // waits on its own reader; the agent's reader is drained on
@@ -94,12 +94,12 @@ impl FastMdApp {
         // The tools manager subscribes to the same bus and performs
         // the one-time
         let tool_manager = std::sync::Arc::new(std::sync::RwLock::new(
-            crate::agent::tools::manager::ToolManager::new(),
+            crate::agent::tools::registry::ToolRegistry::new(),
         ));
         // Start MCP initialization immediately on the app's initial
         // background thread, so the UI thread never blocks on MCP
         // network I/O at startup.
-        crate::agent::tools::manager::spawn_config_subscription(
+        crate::agent::tools::registry::spawn_config_subscription(
             tool_manager.clone(),
             config_bus.clone(),
             background_task.tx.clone(),
@@ -119,7 +119,7 @@ impl FastMdApp {
             &crate::config::AppConfig::default(),
         ));
         let pdf_backing_tracker = crate::app::session::PdfBackingTracker::new();
-        let agent = AgentSessionManager::new(
+        let agent = AgentSession::new(
             config_bus,
             background_task.file_event_bus.clone(),
             browser_session.clone(),
@@ -203,7 +203,7 @@ impl FastMdApp {
                 pending_file_load: None,
                 finished_watcher_slot,
                 tool_manager: std::sync::Arc::new(std::sync::RwLock::new(
-                    crate::agent::tools::manager::ToolManager::new(),
+                    crate::agent::tools::registry::ToolRegistry::new(),
                 )),
                 agent_event_reader: Some(agent_event_reader),
                 agent_event_lagged: false,
@@ -255,13 +255,13 @@ impl FastMdApp {
             &crate::config::AppConfig::default(),
         ));
         let pdf_backing_tracker = crate::app::session::PdfBackingTracker::new();
-        let mut agent = AgentSessionManager::new(
+        let mut agent = AgentSession::new(
             bus.clone(),
             background_task.file_event_bus.clone(),
             test_browser_session,
             Arc::new(pdf_backing_tracker.clone()),
             Arc::new(std::sync::RwLock::new(
-                crate::agent::tools::manager::ToolManager::new(),
+                crate::agent::tools::registry::ToolRegistry::new(),
             )),
         );
         agent.set_config(config.clone());
@@ -310,7 +310,7 @@ impl FastMdApp {
                 pending_file_load: None,
                 finished_watcher_slot,
                 tool_manager: std::sync::Arc::new(std::sync::RwLock::new(
-                    crate::agent::tools::manager::ToolManager::new(),
+                    crate::agent::tools::registry::ToolRegistry::new(),
                 )),
                 agent_event_reader: Some(agent_event_reader),
                 agent_event_lagged: false,

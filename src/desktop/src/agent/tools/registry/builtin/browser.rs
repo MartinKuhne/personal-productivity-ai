@@ -425,9 +425,9 @@ mod tests {
         let session = Arc::new(BrowserSession::new(&config));
         let pdf_backing = Arc::new(crate::app::session::PdfBackingTracker::new());
         let tm = std::sync::Arc::new(std::sync::RwLock::new(
-            crate::agent::tools::manager::ToolManager::new(),
+            crate::agent::tools::registry::ToolRegistry::new(),
         ));
-        let cache = Arc::new(crate::agent::tools::manager::cache::ToolCache::new());
+        let cache = Arc::new(crate::agent::tools::registry::cache::ToolCache::new());
         crate::agent::tools::context::ToolContext::new(
             Arc::new(config),
             bus,

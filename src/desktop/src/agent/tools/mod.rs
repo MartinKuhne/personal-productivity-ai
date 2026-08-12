@@ -1,4 +1,4 @@
-//! LLM-callable tools — the `Tool` trait, the `ToolManager` (catalog +
+//! LLM-callable tools — the `Tool` trait, the `ToolRegistry` (catalog +
 //! per-group state + error tracking), and implementations for
 //! filesystem, web, email, and CSV.
 //!
@@ -17,7 +17,7 @@ pub mod csv_db;
 pub mod dtos;
 pub mod filesystem;
 pub mod jmap;
-pub mod manager;
+pub mod registry;
 pub mod mcp;
 pub mod web;
 pub mod yaml_header;
@@ -30,7 +30,7 @@ mod browser_tests;
 #[cfg(test)]
 mod dtos_proptests;
 
-// Property-based tests for the `ToolManager::execute_tool`
+// Property-based tests for the `ToolRegistry::execute_tool`
 // dispatch — every (name, args) pair the LLM emits. Phase 1 of
 // the fuzzing plan (`doc/planning/fuzzing.md`).
 #[cfg(test)]
@@ -74,4 +74,4 @@ pub trait Tool: Send + Sync {
 }
 
 pub use context::ToolContext as ToolContextType;
-pub use manager::execute_tool;
+pub use registry::execute_tool;

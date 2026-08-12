@@ -8,7 +8,7 @@ pub mod datamark;
 pub mod error;
 pub mod events;
 pub mod llm_client;
-pub mod manager;
+pub mod session;
 pub mod prompt_builder;
 pub mod tool_executor;
 pub mod tools;
@@ -28,4 +28,4 @@ mod datamark_proptests;
 
 pub use agent_impl::*;
 pub use context::AgentContext;
-pub use manager::AgentSessionManager;
+pub use session::AgentSession;

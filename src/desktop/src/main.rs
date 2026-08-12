@@ -81,7 +81,7 @@ fn main() -> eframe::Result<()> {
         // `Ok`.
         Box::new(move |cc| {
             // Build the app first so its internal subscribers
-            // (`Task::new`, `AgentSessionManager::new`, and the UI
+            // (`Task::new`, `AgentSession::new`, and the UI
             // reader in `FastMdApp::new`) register *before* we
             // publish. `tokio::sync::broadcast` only delivers an
             // event to subscribers that exist at publish time —

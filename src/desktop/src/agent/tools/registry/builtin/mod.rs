@@ -13,7 +13,7 @@ pub(crate) mod weather;
 pub(crate) mod web;
 pub(crate) mod yaml;
 
-use super::ToolManager;
+use super::ToolRegistry;
 use super::groups::InternalToolGroup;
 
 /// Generate the JSON Schema for a tool's input DTO.
@@ -23,7 +23,7 @@ pub(crate) fn json_schema<T: schemars::JsonSchema>() -> serde_json::Value {
 
 /// Register every built-in tool into the given manager, tagged with
 /// the group it belongs to.
-pub(crate) fn register_all_builtins(mgr: &mut ToolManager) {
+pub(crate) fn register_all_builtins(mgr: &mut ToolRegistry) {
     // Web
     mgr.register_builtin(InternalToolGroup::Web, Box::new(web::WebDelegateTool));
     mgr.register_builtin(InternalToolGroup::Web, Box::new(web::WebFetchTool));

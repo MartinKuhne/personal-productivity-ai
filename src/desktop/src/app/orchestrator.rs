@@ -1,4 +1,4 @@
-use crate::agent::AgentSessionManager;
+use crate::agent::AgentSession;
 use crate::agent::events::{AgentEvent as SeamAgentEvent, ToolSideEffect};
 use crate::app::background::{BackgroundLogEntry, LogCategory, SharedBackgroundLogs};
 use crate::app::watcher::directory_tracker::DirectoryTracker;
@@ -33,7 +33,7 @@ pub struct AppOrchestrator {
     pub selection: FileSelection,
     pub tabs: Tabs,
     pub _watcher: Option<notify::RecommendedWatcher>,
-    pub agent: AgentSessionManager,
+    pub agent: AgentSession,
     pub dialogs: Dialogs,
     pub submit_prompt: Option<String>,
     pub text_buffer: TextBuffer,
@@ -43,9 +43,9 @@ pub struct AppOrchestrator {
     pub config_reader: Option<BusReader<ConfigArrived>>,
     pub pending_file_load: Option<PathBuf>,
     pub finished_watcher_slot: Arc<Mutex<Option<notify::RecommendedWatcher>>>,
-    pub tool_manager: std::sync::Arc<std::sync::RwLock<crate::agent::tools::manager::ToolManager>>,
+    pub tool_manager: std::sync::Arc<std::sync::RwLock<crate::agent::tools::registry::ToolRegistry>>,
     /// Reader for the `Bus<AgentEvent>` agent→UI channel. Subscribed
-    /// once during app init from [`AgentSessionManager::event_bus`].
+    /// once during app init from [`AgentSession::event_bus`].
     /// Drained each frame in [`Self::drain_agent_event_bus`].
     pub agent_event_reader: Option<BusReader<SeamAgentEvent>>,
     /// True when the last `BusReader::try_recv` on `agent_event_reader`
@@ -57,7 +57,7 @@ pub struct AppOrchestrator {
     /// thinking from this buffer instead of `AgentState::response`/`thinking`.
     pub agent_transcript: AgentTranscript,
     /// UI-owned panel state (show_results, show_debug_window, scroll_to_id,
-    /// command_input, etc.) — extracted from `AgentSessionManager` in
+    /// command_input, etc.) — extracted from `AgentSession` in
     /// migration step 6 (FR-013, SC-007).
     pub agent_panel_state: AgentPanelState,
 }
@@ -532,7 +532,7 @@ impl AppOrchestrator {
     }
 
     pub fn handle_mcp_auth_event(&mut self, ev: McpAuthEvent) {
-        use crate::agent::tools::manager::{ToolErrorKind, ToolGroupError};
+        use crate::agent::tools::registry::{ToolErrorKind, ToolGroupError};
         match ev {
             McpAuthEvent::Completed { server_name, error } => {
                 self.dialogs.set_oauth_idle(&server_name);
@@ -550,7 +550,7 @@ impl AppOrchestrator {
                             "OAuth flow failed; recording error on group row"
                         );
                         self.tool_manager.write().unwrap().record_error(
-                            &crate::agent::tools::manager::ToolGroupId::Mcp(server_name.clone()),
+                            &crate::agent::tools::registry::ToolGroupId::Mcp(server_name.clone()),
                             ToolGroupError::now(ToolErrorKind::Authentication, msg),
                         );
                     }

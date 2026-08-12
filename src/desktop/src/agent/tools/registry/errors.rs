@@ -1,8 +1,8 @@
 //! Per-group error types recorded by
-//! [`ToolManager::record_error`](super::ToolManager::record_error) and
+//! [`ToolRegistry::record_error`](super::ToolRegistry::record_error) and
 //! surfaced through the UI dialog.
 
-/// Kinds of errors the [`ToolManager`](super::ToolManager) tracks per
+/// Kinds of errors the [`ToolRegistry`](super::ToolRegistry) tracks per
 /// group. See TOOL-021 for the auto-clear semantics.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum ToolErrorKind {

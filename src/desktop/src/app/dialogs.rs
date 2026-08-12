@@ -53,7 +53,7 @@ pub struct Dialogs {
 
     // OAuth in-flight state (MCP-021)
     /// Per-server OAuth flow status. Present (InProgress) while the
-    /// background thread running `McpClientManager::authenticate` is
+    /// background thread running `McpClients::authenticate` is
     /// alive. Removed when the thread sends `McpAuthEvent::Completed`.
     pub oauth_status: HashMap<String, OAuthFlowStatus>,
 }

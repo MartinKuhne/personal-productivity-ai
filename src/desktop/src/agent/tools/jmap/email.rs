@@ -23,7 +23,7 @@ use jmap_client::core::set::SetObject;
 use jmap_client::email::query::Filter;
 
 use super::client::JmapSession;
-use crate::agent::tools::manager::cache::{SearchEmailCacheEntry, SearchEmailItem};
+use crate::agent::tools::registry::cache::{SearchEmailCacheEntry, SearchEmailItem};
 
 /// Maximum number of bytes the JMAP server should inline for a single body
 /// part in `bodyValues` (RFC 8621 §6.1.2 `maxBodyValueBytes`).
@@ -491,10 +491,10 @@ pub fn tool_search_email(
     config: &AppConfig,
     filters: SearchEmailFilters<'_>,
     cursor: Option<String>,
-    cache: &crate::agent::tools::manager::cache::ToolCache,
+    cache: &crate::agent::tools::registry::cache::ToolCache,
     uuid_gen: &dyn crate::utils::uuid::UuidGenerator,
 ) -> Result<crate::agent::tools::dtos::SearchEmailResponse, String> {
-    use crate::agent::tools::manager::cache::{CacheEntry, SearchEmailCacheEntry, SearchEmailItem};
+    use crate::agent::tools::registry::cache::{CacheEntry, SearchEmailCacheEntry, SearchEmailItem};
 
     // First call: query JMAP, populate the cache, return first page + cursor.
     let Some(cursor) = cursor else {

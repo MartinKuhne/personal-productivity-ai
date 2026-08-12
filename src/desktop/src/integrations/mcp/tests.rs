@@ -15,7 +15,7 @@ use std::sync::Arc;
 
 #[test]
 fn test_mcp_client_manager_unconfigured_server_error() {
-    let manager = McpClientManager::new();
+    let manager = McpClients::new();
     let result = manager.call_tool("unknown_server", "tool_name", serde_json::json!({}));
     assert!(result.is_err());
     assert!(result.unwrap_err().contains("is not configured"));
@@ -23,7 +23,7 @@ fn test_mcp_client_manager_unconfigured_server_error() {
 
 #[test]
 fn test_mcp_client_manager_empty_command_or_url() {
-    let manager = McpClientManager::new();
+    let manager = McpClients::new();
     let mut config = AppConfig::default();
     config.mcp_servers.insert(
         "empty_stdio".to_string(),
@@ -101,7 +101,7 @@ fn test_update_config_shuts_down_removed_server_sessions() {
     // when the server is removed from config. We can't easily
     // inspect an internal map; instead we assert that
     // `configured_servers` reflects the latest config.
-    let manager = McpClientManager::new();
+    let manager = McpClients::new();
     let mut config = AppConfig::default();
     config.mcp_servers.insert(
         "alpha".to_string(),
@@ -214,7 +214,7 @@ while True:
         .into(),
     );
 
-    let manager = McpClientManager::new();
+    let manager = McpClients::new();
     manager.update_config(&config);
 
     // First call triggers the handshake.
@@ -295,7 +295,7 @@ while True:
         .into(),
     );
 
-    let manager = McpClientManager::new();
+    let manager = McpClients::new();
     manager.update_config(&config);
 
     manager.ping("pingable").expect("first ping should succeed");
@@ -376,7 +376,7 @@ with open(r"{cap_path}", "w") as f:
         return;
     }
 
-    let manager = McpClientManager::new();
+    let manager = McpClients::new();
     manager.update_config(&config);
 
     let start = std::time::Instant::now();
@@ -474,7 +474,7 @@ with open(r"{cap_path}", "w") as f:
         .into(),
     );
 
-    let manager = McpClientManager::new();
+    let manager = McpClients::new();
     manager.update_config(&config);
 
     let start = std::time::Instant::now();
@@ -731,7 +731,7 @@ send({"jsonrpc": "2.0", "id": req["id"], "result": {}})
         .into(),
     );
 
-    let manager = McpClientManager::new();
+    let manager = McpClients::new();
     manager.update_config(&config);
     manager
         .ping("progressor")
@@ -776,7 +776,7 @@ sys.stdout.flush()
         .into(),
     );
 
-    let manager = McpClientManager::new();
+    let manager = McpClients::new();
     manager.update_config(&config);
     let err = manager
         .call_tool("bad", "tool", serde_json::json!({}))
@@ -890,7 +890,7 @@ while True:
         .into(),
     );
 
-    let manager = McpClientManager::new();
+    let manager = McpClients::new();
     manager.update_config(&config);
 
     // First discovery: triggers init + notifications/initialized
@@ -1006,7 +1006,7 @@ while True:
         .into(),
     );
 
-    let manager = McpClientManager::new();
+    let manager = McpClients::new();
     manager.update_config(&config);
 
     let tools = manager
@@ -1110,7 +1110,7 @@ with open(r"{cap_path}", "w") as f:
         .into(),
     );
 
-    let manager = McpClientManager::new();
+    let manager = McpClients::new();
     manager.update_config(&config);
     manager
         .call_tool("captured", "noop", serde_json::json!({}))
@@ -1214,7 +1214,7 @@ while True:
         .into(),
     );
 
-    let manager = McpClientManager::new();
+    let manager = McpClients::new();
     manager.update_config(&config);
     // The call must succeed even though two progress
     // notifications were interleaved. The contract is
@@ -1416,7 +1416,7 @@ while True:
         .into(),
     );
 
-    let manager = Arc::new(McpClientManager::new());
+    let manager = Arc::new(McpClients::new());
     manager.update_config(&config);
 
     // ----- MCP-002: ping the server on app start.
@@ -1522,7 +1522,7 @@ send({
         .into(),
     );
 
-    let manager = McpClientManager::new();
+    let manager = McpClients::new();
     manager.update_config(&config);
 
     let err = manager
@@ -1596,7 +1596,7 @@ while True:
         .into(),
     );
 
-    let manager = McpClientManager::new();
+    let manager = McpClients::new();
     manager.update_config(&config);
 
     // Caller passes a pathologically large timeout. The
@@ -1699,7 +1699,7 @@ while True:
         .into(),
     );
 
-    let manager = McpClientManager::new();
+    let manager = McpClients::new();
     manager.update_config(&config);
 
     let err = manager
@@ -1764,7 +1764,7 @@ fn test_sse_oauth_refresh_after_401_without_browser_flow() {
         },
     );
 
-    let manager = McpClientManager::new();
+    let manager = McpClients::new();
     manager.set_token_store(Some(store));
     let mut config = AppConfig::default();
     config.mcp_servers.insert(

@@ -34,7 +34,7 @@ use std::path::PathBuf;
 
 use eframe::egui;
 
-use crate::agent::AgentSessionManager;
+use crate::agent::AgentSession;
 use crate::app::watcher::file_processor::FileEventProcessor;
 use crate::app::{
     Dialogs, PanelLayout, PersistedUiState, FileSelection, Tabs, Tags,
@@ -170,11 +170,11 @@ impl FastMdApp {
         &mut self.orchestrator.tabs
     }
 
-    pub fn agent(&self) -> &AgentSessionManager {
+    pub fn agent(&self) -> &AgentSession {
         &self.orchestrator.agent
     }
 
-    pub fn agent_mut(&mut self) -> &mut AgentSessionManager {
+    pub fn agent_mut(&mut self) -> &mut AgentSession {
         &mut self.orchestrator.agent
     }
 

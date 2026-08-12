@@ -47,9 +47,9 @@ fn make_ctx(config: AppConfig) -> (AgentContext, BusReader<AgentEvent>) {
         session_id: uuid::Uuid::new_v4(),
         browser_session,
         pdf_backing: Arc::new(crate::app::session::PdfBackingTracker::new()),
-        cache: std::sync::Arc::new(crate::agent::tools::manager::cache::ToolCache::new()),
+        cache: std::sync::Arc::new(crate::agent::tools::registry::cache::ToolCache::new()),
         tool_manager: Arc::new(std::sync::RwLock::new(
-            crate::agent::tools::manager::ToolManager::new(),
+            crate::agent::tools::registry::ToolRegistry::new(),
         )),
         uuid_gen: Arc::new(crate::utils::uuid::SystemUuidGenerator),
     };

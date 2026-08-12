@@ -73,7 +73,7 @@ pub struct McpToolAdapter {
 impl McpToolAdapter {
     /// Constructs a new [`McpToolAdapter`].
     ///
-    /// The public signature is pinned to [`McpClientManager`] so
+    /// The public signature is pinned to [`McpClients`] so
     /// existing callers do not need to change; the adapter widens
     /// the concrete type internally so it can also be constructed
     /// from any [`DynamicToolSource`] back-end.
@@ -82,7 +82,7 @@ impl McpToolAdapter {
         name: impl Into<String>,
         description: impl Into<String>,
         parameters: serde_json::Value,
-        manager: Arc<McpClientManager>,
+        manager: Arc<McpClients>,
     ) -> Self {
         Self {
             server_name: server_name.into(),
@@ -165,25 +165,25 @@ impl Tool for McpToolAdapter {
 }
 
 // ---------------------------------------------------------------------------
-// McpClientManager
+// McpClients
 // ---------------------------------------------------------------------------
 
 /// Manager for MCP server client sessions, transport execution, and
 /// tool dispatching.
 ///
-/// Configured via [`McpClientManager::update_config`]. Sessions for
+/// Configured via [`McpClients::update_config`]. Sessions for
 /// configured servers are created lazily on first
-/// [`McpClientManager::call_tool`]. Removed servers are shut down on
+/// [`McpClients::call_tool`]. Removed servers are shut down on
 /// the next `update_config`.
 ///
 /// OAuth 2.1 authorization (MCP spec §4) is optional and turned on
 /// by installing a [`TokenStore`] via
-/// [`McpClientManager::set_token_store`]. When a store is installed
+/// [`McpClients::set_token_store`]. When a store is installed
 /// and the configured server has no static `Authorization` header,
 /// the session triggers the OAuth flow on a 401 with
 /// `WWW-Authenticate` and caches the resulting access token in the
 /// store.
-pub struct McpClientManager {
+pub struct McpClients {
     state: Mutex<ManagerState>,
 }
 
@@ -198,15 +198,15 @@ struct ManagerState {
     token_store: Option<Arc<TokenStore>>,
 }
 
-impl Default for McpClientManager {
+impl Default for McpClients {
     fn default() -> Self {
         Self::new()
     }
 }
 
-impl McpClientManager {
-    /// Creates a new [`McpClientManager`] with no OAuth support.
-    /// Call [`McpClientManager::set_token_store`] before the first
+impl McpClients {
+    /// Creates a new [`McpClients`] with no OAuth support.
+    /// Call [`McpClients::set_token_store`] before the first
     /// call to enable the OAuth 2.1 flow.
     pub fn new() -> Self {
         Self {
@@ -346,7 +346,7 @@ impl McpClientManager {
         self.call_tool_with_timeout(server_name, tool_name, arguments, DEFAULT_REQUEST_TIMEOUT)
     }
 
-    /// Same as [`McpClientManager::call_tool`] but with a
+    /// Same as [`McpClients::call_tool`] but with a
     /// caller-supplied per-call timeout. Spec §2.5: "SDKs SHOULD
     /// allow per-request timeout configuration." This is the
     /// recommended entry point for tools whose expected runtime
@@ -437,7 +437,7 @@ impl McpClientManager {
     ///
     /// Per MCP-021, callers should translate the error into a
     /// `ToolGroupError { kind: Authentication, ... }` via
-    /// `ToolManager::record_error`.
+    /// `ToolRegistry::record_error`.
     pub fn authenticate(&self, server_name: &str) -> Result<(), String> {
         // Look up the server config.
         let cfg = {
@@ -498,8 +498,8 @@ impl McpClientManager {
 
     /// Read the in-memory `needs_auth` flag. This is NOT persisted
     /// to YAML — it only lives in the manager's runtime state.
-    /// Used by the [`crate::agent::tools::manager::ToolManager`] to populate
-    /// [`ToolGroupState::needs_auth`](crate::agent::tools::manager::ToolGroupState::needs_auth).
+    /// Used by the [`crate::agent::tools::registry::ToolRegistry`] to populate
+    /// [`ToolGroupState::needs_auth`](crate::agent::tools::registry::ToolGroupState::needs_auth).
     pub fn needs_auth_now(&self, server_name: &str) -> bool {
         self.state
             .lock()
@@ -509,7 +509,7 @@ impl McpClientManager {
     }
 
     /// Set or clear the in-memory `needs_auth` flag. Used by the
-    /// dialog's `Forget` link and by [`McpClientManager::authenticate`].
+    /// dialog's `Forget` link and by [`McpClients::authenticate`].
     /// This is NOT persisted to YAML — it only lives in the manager's
     /// runtime state.
     pub fn mark_needs_auth(&self, server_name: &str, needs_auth: bool) {
@@ -541,21 +541,21 @@ impl McpClientManager {
     }
 }
 
-impl Drop for McpClientManager {
+impl Drop for McpClients {
     fn drop(&mut self) {
         self.shutdown();
     }
 }
 
-impl DynamicToolSource for McpClientManager {
+impl DynamicToolSource for McpClients {
     fn configured_servers(&self) -> Vec<String> {
-        McpClientManager::configured_servers(self)
+        McpClients::configured_servers(self)
     }
     fn discover_tools(&self, server: &str) -> Result<Vec<McpToolDescriptor>, String> {
-        McpClientManager::discover_tools(self, server)
+        McpClients::discover_tools(self, server)
     }
     fn update_config(&self, config: &AppConfig) {
-        McpClientManager::update_config(self, config);
+        McpClients::update_config(self, config);
     }
     fn call_tool(
         &self,
@@ -563,7 +563,7 @@ impl DynamicToolSource for McpClientManager {
         tool_name: &str,
         arguments: serde_json::Value,
     ) -> Result<serde_json::Value, String> {
-        McpClientManager::call_tool(self, server, tool_name, arguments)
+        McpClients::call_tool(self, server, tool_name, arguments)
     }
 }
 

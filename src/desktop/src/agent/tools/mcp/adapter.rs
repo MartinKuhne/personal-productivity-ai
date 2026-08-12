@@ -3,7 +3,7 @@
 //! [`McpToolAdapter`] implements the [`Tool`] trait so the LLM can
 //! invoke any tool advertised by an MCP server. The actual protocol
 //! work (transports, sessions, OAuth) is delegated to
-//! [`crate::integrations::mcp::McpClientManager`].
+//! [`crate::integrations::mcp::McpClients`].
 
 use std::any::TypeId;
 use std::sync::Arc;
@@ -11,7 +11,7 @@ use std::sync::Arc;
 use crate::agent::tools::context::ToolContext;
 use crate::agent::tools::{Safety, Tool};
 use crate::config::AppConfig;
-use crate::integrations::mcp::{DynamicToolSource, McpClientManager};
+use crate::integrations::mcp::{DynamicToolSource, McpClients};
 
 /// Adapter implementing [`Tool`] for an external MCP server tool.
 pub struct McpToolAdapter {
@@ -25,7 +25,7 @@ pub struct McpToolAdapter {
 impl McpToolAdapter {
     /// Constructs a new [`McpToolAdapter`].
     ///
-    /// The public signature is pinned to [`McpClientManager`] so
+    /// The public signature is pinned to [`McpClients`] so
     /// existing callers do not need to change; the adapter widens
     /// the concrete type internally so it can also be constructed
     /// from any [`DynamicToolSource`] back-end.
@@ -34,7 +34,7 @@ impl McpToolAdapter {
         name: impl Into<String>,
         description: impl Into<String>,
         parameters: serde_json::Value,
-        manager: Arc<McpClientManager>,
+        manager: Arc<McpClients>,
     ) -> Self {
         Self {
             server_name: server_name.into(),

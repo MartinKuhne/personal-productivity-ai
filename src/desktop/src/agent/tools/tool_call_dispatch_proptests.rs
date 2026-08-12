@@ -1,5 +1,5 @@
 //! Property-based tests for the LLM↔tool dispatch surface
-//! (`ToolManager::execute_tool`).
+//! (`ToolRegistry::execute_tool`).
 //!
 //! `execute_tool` is the single chokepoint through which every
 //! `tool_calls[*].function.arguments` JSON the LLM emits flows into
@@ -76,7 +76,7 @@ fn build_dispatch_context() -> ToolContext {
     let browser_session = Arc::new(BrowserSession::new(&config));
     let pdf_backing = Arc::new(PdfBackingTracker::new());
     let tool_manager = Arc::new(std::sync::RwLock::new(
-        crate::agent::tools::manager::ToolManager::new(),
+        crate::agent::tools::registry::ToolRegistry::new(),
     ));
     let uuid_gen: Arc<dyn crate::utils::uuid::UuidGenerator> = Arc::new(SystemUuidGenerator);
     ToolContext::new(
@@ -84,7 +84,7 @@ fn build_dispatch_context() -> ToolContext {
         Bus::new(),
         browser_session,
         pdf_backing,
-        Arc::new(crate::agent::tools::manager::cache::ToolCache::new()),
+        Arc::new(crate::agent::tools::registry::cache::ToolCache::new()),
         tool_manager,
         uuid_gen,
     )
@@ -109,7 +109,7 @@ fn execute_with_timeout(ctx: ToolContext, name: String, args: String) -> Option<
 }
 
 // Re-export the dispatch function from the manager module.
-use crate::agent::tools::manager::execute_tool;
+use crate::agent::tools::registry::execute_tool;
 
 /// Arbitrary tool-name strategy. A tool name is any UTF-8
 /// string (0-128 bytes). Includes the empty string, single

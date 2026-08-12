@@ -5,7 +5,7 @@
 //! The manager owns:
 //! - the catalog of built-in and MCP-discovered tools,
 //! - the per-group enable / parallel-safe / error state,
-//! - the [`McpClientManager`]
+//! - the [`McpClients`]
 //!   used to discover and call MCP tools.
 //!
 //! Free functions at the bottom of this file keep the same signatures
@@ -36,34 +36,34 @@ use crate::bus::core::Bus;
 use crate::bus::events::config::ConfigArrived;
 use crate::bus::events::typed::BackgroundEvent;
 use crate::config::{AppConfig, McpServerConfig};
-use crate::integrations::mcp::{McpClientManager, McpToolDescriptor};
+use crate::integrations::mcp::{McpClients, McpToolDescriptor};
 use std::collections::BTreeMap;
 use std::sync::Arc;
 use std::sync::mpsc::Sender;
 
 /// Central catalog of agent tools, both built-in and dynamic MCP tools,
 /// plus per-group state for the UI.
-pub struct ToolManager {
+pub struct ToolRegistry {
     /// Registered tools keyed by name.
     tools: BTreeMap<String, Arc<dyn Tool>>,
     /// Reverse index: which group owns each tool? Built at registration.
     tool_to_group: BTreeMap<String, ToolGroupId>,
-    /// Per-group state, rebuilt by [`ToolManager::refresh_state`].
+    /// Per-group state, rebuilt by [`ToolRegistry::refresh_state`].
     group_state: BTreeMap<ToolGroupId, ToolGroupState>,
     /// MCP client manager — owns transport, sessions, and OAuth.
-    mcp_manager: Arc<McpClientManager>,
+    mcp_manager: Arc<McpClients>,
 }
 
-impl Default for ToolManager {
+impl Default for ToolRegistry {
     fn default() -> Self {
         Self::new()
     }
 }
 
-impl ToolManager {
+impl ToolRegistry {
     /// Create a new manager and register every built-in tool.
     pub fn new() -> Self {
-        let mcp_manager = Arc::new(McpClientManager::new());
+        let mcp_manager = Arc::new(McpClients::new());
         let mut mgr = Self {
             tools: BTreeMap::new(),
             tool_to_group: BTreeMap::new(),
@@ -182,7 +182,7 @@ impl ToolManager {
     /// tool is not currently enabled (per [`Tool::is_enabled`]).
     ///
     /// The returned byte count matches what
-    /// [`ToolManager::get_schema`] would serialise for the tool —
+    /// [`ToolRegistry::get_schema`] would serialise for the tool —
     /// `{"type":"function","function":{"name","description","parameters"}}`.
     /// Per TOOL-015.
     pub fn tool_char_count(&self, name: &str, config: &AppConfig, prompt: &str) -> Option<usize> {
@@ -313,7 +313,7 @@ impl ToolManager {
         self.groups()
     }
 
-    pub fn mcp_manager(&self) -> Arc<McpClientManager> {
+    pub fn mcp_manager(&self) -> Arc<McpClients> {
         self.mcp_manager.clone()
     }
 
@@ -343,7 +343,7 @@ impl ToolManager {
 
     /// Flip the enabled flag for a group, persisting into the
     /// supplied `AppConfig`. The change takes effect on the next
-    /// [`ToolManager::get_schema`] call (after the caller writes
+    /// [`ToolRegistry::get_schema`] call (after the caller writes
     /// `config` back to `config.yaml`).
     pub fn set_group_enabled(&self, config: &mut AppConfig, id: &ToolGroupId, enabled: bool) {
         match id {
@@ -360,7 +360,7 @@ impl ToolManager {
 
     /// Record a per-group error. Replaces any previous `last_error`
     /// for the same group. Per TOOL-021, a successful `Execution`
-    /// error is cleared by passing `None` via [`ToolManager::clear_error`].
+    /// error is cleared by passing `None` via [`ToolRegistry::clear_error`].
     pub fn record_error(&mut self, group: &ToolGroupId, err: ToolGroupError) {
         if let Some(state) = self.group_state.get_mut(group) {
             state.last_error = Some(err);
@@ -484,7 +484,7 @@ fn set_internal_group_enabled(config: &mut AppConfig, g: InternalToolGroup, on: 
 }
 
 pub fn spawn_config_subscription(
-    tool_manager: Arc<std::sync::RwLock<ToolManager>>,
+    tool_manager: Arc<std::sync::RwLock<ToolRegistry>>,
     config_bus: Bus<ConfigArrived>,
     tx: Sender<BackgroundEvent>,
 ) {

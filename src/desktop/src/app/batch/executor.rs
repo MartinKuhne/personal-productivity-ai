@@ -214,9 +214,9 @@ pub fn run_agent_blocking(
             &crate::config::AppConfig::default(),
         )),
         pdf_backing: std::sync::Arc::new(crate::app::session::PdfBackingTracker::new()),
-        cache: std::sync::Arc::new(crate::agent::tools::manager::cache::ToolCache::new()),
+        cache: std::sync::Arc::new(crate::agent::tools::registry::cache::ToolCache::new()),
         tool_manager: std::sync::Arc::new(std::sync::RwLock::new(
-            crate::agent::tools::manager::ToolManager::new(),
+            crate::agent::tools::registry::ToolRegistry::new(),
         )),
         uuid_gen: std::sync::Arc::new(crate::utils::uuid::SystemUuidGenerator),
     };

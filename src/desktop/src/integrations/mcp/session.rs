@@ -1,7 +1,7 @@
 //! Persistent MCP client sessions.
 //!
 //! One [`McpClientSession`] per server name, lazily created on first
-//! [`McpClientManager::call_tool`](super::McpClientManager::call_tool) and
+//! [`McpClients::call_tool`](super::McpClients::call_tool) and
 //! cached for the lifetime of the manager. Each session:
 //!
 //! * Negotiates protocol version on first use via the JSON-RPC
@@ -158,7 +158,7 @@ const SUPPORTED_PROTOCOL_VERSIONS: &[&str] = &[PROTOCOL_VERSION];
 
 /// A persistent MCP client session for a single server.
 ///
-/// Created lazily by [`McpClientManager`](super::McpClientManager); you
+/// Created lazily by [`McpClients`](super::McpClients); you
 /// usually don't construct one directly. Thread-safe: the inner state
 /// is guarded by a single `Mutex`.
 pub struct McpClientSession {
@@ -285,7 +285,7 @@ impl McpClientSession {
     /// Returns the previous value of the internal `last_call_saw_unauthorized`
     /// flag, resetting it to `false`. The manager calls this after every
     /// MCP call so it can update the in-memory `needs_auth` flag
-    /// (see [`McpClientManager::mark_needs_auth`](super::McpClientManager::mark_needs_auth)).
+    /// (see [`McpClients::mark_needs_auth`](super::McpClients::mark_needs_auth)).
     /// Returns `false` if the lock is poisoned.
     pub fn take_unauthorized_flag(&self) -> bool {
         let Ok(mut state) = self.state.lock() else {
@@ -747,7 +747,7 @@ impl McpClientSession {
     /// caller-supplied per-call timeout. The spec (§2.5) says SDKs
     /// SHOULD allow per-request timeout configuration; the manager
     /// exposes the same override as
-    /// [`McpClientManager::call_tool_with_timeout`](super::McpClientManager::call_tool_with_timeout).
+    /// [`McpClients::call_tool_with_timeout`](super::McpClients::call_tool_with_timeout).
     pub fn call_request_with_timeout(
         &self,
         method: &str,

@@ -5,12 +5,12 @@
 //! (⚠ error indicator + Restart link, Authenticate button when
 //! applicable).
 //!
-//! All state changes go through [`crate::agent::tools::manager`]
-//! free functions (which lock the global [`ToolManager`]) and
+//! All state changes go through [`crate::agent::tools::registry`]
+//! free functions (which lock the global [`ToolRegistry`]) and
 //! [`crate::config::save_config`] (which persists the toggle to
 //! `config.yaml`).
 
-use crate::agent::tools::manager;
+use crate::agent::tools::registry;
 use crate::bus::events::typed::{BackgroundEvent, McpAuthEvent};
 use crate::config::{McpServerConfig, save_config};
 use crate::ui::FastMdApp;
@@ -167,7 +167,7 @@ pub fn render_contents(ui: &mut eframe::egui::Ui, app: &mut FastMdApp) {
                     // grouped.
                     let (internals, mcp): (Vec<_>, Vec<_>) = groups
                         .into_iter()
-                        .partition(|g| g.kind == manager::ToolGroupKind::Internal);
+                        .partition(|g| g.kind == registry::ToolGroupKind::Internal);
                     for group in internals.into_iter().chain(mcp) {
                         body.row(26.0, |mut row| {
                             render_row(&mut row, app, &group);
@@ -181,9 +181,9 @@ pub fn render_contents(ui: &mut eframe::egui::Ui, app: &mut FastMdApp) {
 fn render_row(
     row: &mut egui_extras::TableRow,
     app: &mut FastMdApp,
-    group: &manager::ToolGroupState,
+    group: &registry::ToolGroupState,
 ) {
-    use manager::{ToolGroupId, ToolGroupKind};
+    use registry::{ToolGroupId, ToolGroupKind};
 
     let id = group.id.clone();
     let prompt = ""; // char count against empty prompt — informational.
@@ -318,7 +318,7 @@ fn spawn_auth_flow(
     server_name: String,
     tx: std::sync::mpsc::Sender<BackgroundEvent>,
     ctx: eframe::egui::Context,
-    mgr: std::sync::Arc<crate::integrations::mcp::McpClientManager>,
+    mgr: std::sync::Arc<crate::integrations::mcp::McpClients>,
 ) {
     std::thread::spawn(move || {
         let error = match mgr.authenticate(&server_name) {

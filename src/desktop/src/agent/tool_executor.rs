@@ -14,8 +14,8 @@ use std::sync::Arc;
 /// Cheap, shallow-clone handle to a shared cache. The
 /// `ToolExecutor` does not own a `ToolCache` directly; the
 /// cache is a process-wide singleton exposed by
-/// [`crate::agent::tools::manager::cache::cache`].
-type SharedCache = Arc<crate::agent::tools::manager::cache::ToolCache>;
+/// [`crate::agent::tools::registry::cache::cache`].
+type SharedCache = Arc<crate::agent::tools::registry::cache::ToolCache>;
 
 pub struct ToolExecutor {
     /// Owned as `Arc` so a parallel dispatch can hand a
@@ -31,7 +31,7 @@ pub struct ToolExecutor {
     browser_session: Arc<BrowserSession>,
     pdf_backing: std::sync::Arc<crate::app::session::PdfBackingTracker>,
     cache: SharedCache,
-    tool_manager: std::sync::Arc<std::sync::RwLock<crate::agent::tools::manager::ToolManager>>,
+    tool_manager: std::sync::Arc<std::sync::RwLock<crate::agent::tools::registry::ToolRegistry>>,
     uuid_gen: std::sync::Arc<dyn crate::utils::uuid::UuidGenerator>,
 }
 
@@ -42,7 +42,7 @@ impl ToolExecutor {
         browser_session: Arc<BrowserSession>,
         pdf_backing: std::sync::Arc<crate::app::session::PdfBackingTracker>,
         cache: SharedCache,
-        tool_manager: std::sync::Arc<std::sync::RwLock<crate::agent::tools::manager::ToolManager>>,
+        tool_manager: std::sync::Arc<std::sync::RwLock<crate::agent::tools::registry::ToolRegistry>>,
         uuid_gen: std::sync::Arc<dyn crate::utils::uuid::UuidGenerator>,
     ) -> Self {
         Self {
@@ -235,7 +235,7 @@ mod tests {
 
     #[test]
     fn test_classify() {
-        let tm = crate::agent::tools::manager::ToolManager::new();
+        let tm = crate::agent::tools::registry::ToolRegistry::new();
         // The registry doesn't exist anymore as a global, but the manager
         // exposes a single `safety_of(name)` lookup that returns
         // Safety::ReadOnly / Safety::Mutating.
@@ -266,10 +266,10 @@ mod tests {
         ));
         let pdf_backing = std::sync::Arc::new(crate::app::session::PdfBackingTracker::new());
         let tm = std::sync::Arc::new(std::sync::RwLock::new(
-            crate::agent::tools::manager::ToolManager::new(),
+            crate::agent::tools::registry::ToolRegistry::new(),
         ));
         let uuid_gen = std::sync::Arc::new(crate::utils::uuid::SystemUuidGenerator);
-        let cache = std::sync::Arc::new(crate::agent::tools::manager::cache::ToolCache::new());
+        let cache = std::sync::Arc::new(crate::agent::tools::registry::cache::ToolCache::new());
         let executor = ToolExecutor::new(
             config,
             bus,
@@ -307,10 +307,10 @@ mod tests {
         ));
         let pdf_backing = std::sync::Arc::new(crate::app::session::PdfBackingTracker::new());
         let tm = std::sync::Arc::new(std::sync::RwLock::new(
-            crate::agent::tools::manager::ToolManager::new(),
+            crate::agent::tools::registry::ToolRegistry::new(),
         ));
         let uuid_gen = std::sync::Arc::new(crate::utils::uuid::SystemUuidGenerator);
-        let cache = std::sync::Arc::new(crate::agent::tools::manager::cache::ToolCache::new());
+        let cache = std::sync::Arc::new(crate::agent::tools::registry::cache::ToolCache::new());
         let executor = ToolExecutor::new(
             config,
             bus,
@@ -375,10 +375,10 @@ mod tests {
         ));
         let pdf_backing = std::sync::Arc::new(crate::app::session::PdfBackingTracker::new());
         let tm = std::sync::Arc::new(std::sync::RwLock::new(
-            crate::agent::tools::manager::ToolManager::new(),
+            crate::agent::tools::registry::ToolRegistry::new(),
         ));
         let uuid_gen = std::sync::Arc::new(crate::utils::uuid::SystemUuidGenerator);
-        let cache = std::sync::Arc::new(crate::agent::tools::manager::cache::ToolCache::new());
+        let cache = std::sync::Arc::new(crate::agent::tools::registry::cache::ToolCache::new());
         let executor = ToolExecutor::new(
             config,
             bus,

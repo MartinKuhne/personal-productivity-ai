@@ -1,5 +1,5 @@
 //! Tool-group taxonomy and per-group state. See `manager::mod` for the
-//! owning [`ToolManager`](super::ToolManager).
+//! owning [`ToolRegistry`](super::ToolRegistry).
 
 use super::errors::ToolGroupError;
 
@@ -55,7 +55,7 @@ pub enum ToolGroupKind {
 }
 
 /// Per-group state, rebuilt by
-/// [`ToolManager::refresh_state`](super::ToolManager::refresh_state).
+/// [`ToolRegistry::refresh_state`](super::ToolRegistry::refresh_state).
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct ToolGroupState {
     /// Stable identifier.
@@ -74,7 +74,7 @@ pub struct ToolGroupState {
     /// require authentication (a 401 was received). The flag is
     /// set by the MCP client when a 401 is observed; cleared by the
     /// dialog's `Forget` link. Read from
-    /// [`McpClientManager::needs_auth_now`](crate::integrations::mcp::McpClientManager::needs_auth_now)
+    /// [`McpClients::needs_auth_now`](crate::integrations::mcp::McpClients::needs_auth_now)
     /// so the manager's own state is the source of truth at
     /// runtime.
     pub needs_auth: bool,
@@ -84,7 +84,7 @@ pub struct ToolGroupState {
     /// [`Safety::ReadOnly`](super::super::Safety::ReadOnly).
     pub parallel_safe: bool,
     /// Most recent error, if any. Cleared by
-    /// [`ToolManager::clear_error`](super::ToolManager::clear_error) or
+    /// [`ToolRegistry::clear_error`](super::ToolRegistry::clear_error) or
     /// by a successful `Execution` (per TOOL-021).
     pub last_error: Option<ToolGroupError>,
 }

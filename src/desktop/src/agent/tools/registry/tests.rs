@@ -20,8 +20,8 @@ fn test_ctx(config: &AppConfig) -> ToolContext {
         Bus::new(),
         test_browser_session(),
         Arc::new(crate::app::session::PdfBackingTracker::new()),
-        Arc::new(crate::agent::tools::manager::cache::ToolCache::new()),
-        Arc::new(std::sync::RwLock::new(ToolManager::new())),
+        Arc::new(crate::agent::tools::registry::cache::ToolCache::new()),
+        Arc::new(std::sync::RwLock::new(ToolRegistry::new())),
         Arc::new(crate::utils::uuid::SystemUuidGenerator),
     )
 }
@@ -715,7 +715,7 @@ fn test_grep_truncation_does_not_count_non_markdown_matches() {
 #[test]
 fn test_csv_tools_in_schema() {
     let config = AppConfig::default();
-    let mut mgr = ToolManager::new();
+    let mut mgr = ToolRegistry::new();
     let schema = mgr.get_tools_schema(&config, "create a csv database");
     let tools = schema.as_array().unwrap();
     let names: Vec<&str> = tools
@@ -732,7 +732,7 @@ fn test_csv_tools_in_schema() {
 #[test]
 fn test_csv_tools_excluded() {
     let config = AppConfig::default();
-    let mut mgr = ToolManager::new();
+    let mut mgr = ToolRegistry::new();
     let schema = mgr.get_tools_schema(&config, "just a normal message");
     let tools = schema.as_array().unwrap();
     let names: Vec<&str> = tools
@@ -746,7 +746,7 @@ fn test_csv_tools_excluded() {
 #[test]
 fn test_get_weather_tool_in_schema() {
     let config = AppConfig::default();
-    let mut mgr = ToolManager::new();
+    let mut mgr = ToolRegistry::new();
     let schema = mgr.get_tools_schema(&config, "what is the weather today");
     let tools = schema.as_array().unwrap();
     let names: Vec<&str> = tools
@@ -760,7 +760,7 @@ fn test_get_weather_tool_in_schema() {
 fn test_get_weather_tool_excluded_when_disabled() {
     let mut config = AppConfig::default();
     config.tool_groups.weather = false;
-    let mut mgr = ToolManager::new();
+    let mut mgr = ToolRegistry::new();
     let schema = mgr.get_tools_schema(&config, "what is the weather today");
     let tools = schema.as_array().unwrap();
     let names: Vec<&str> = tools
@@ -783,7 +783,7 @@ fn test_spawn_config_subscription_runs_init_in_background() {
     let bus = crate::bus::config::config_bus();
     let (tx, rx) = std::sync::mpsc::channel::<BackgroundEvent>();
 
-    let tm = Arc::new(std::sync::RwLock::new(ToolManager::new()));
+    let tm = Arc::new(std::sync::RwLock::new(ToolRegistry::new()));
     spawn_config_subscription(tm, bus.clone(), tx);
 
     bus.publish(ConfigArrived::new(AppConfig::default()));
@@ -819,7 +819,7 @@ fn test_mcp_char_count_bug() {
         }
         .into(),
     );
-    let mut mgr = ToolManager::new();
+    let mut mgr = ToolRegistry::new();
     mgr.register_mcp_tool(
         "test_mcp",
         "mcp_test_mcp_test_tool",

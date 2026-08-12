@@ -47,11 +47,11 @@ pub struct AgentContext {
     /// constructed from this context can pass it into every
     /// `ToolContext` (which now takes the cache by value).
     /// Today this is the process-wide singleton from
-    /// [`crate::agent::tools::manager::cache::cache`], but
+    /// [`crate::agent::tools::registry::cache::cache`], but
     /// the field is independent so a future test or alt
     /// orchestrator can inject a private cache.
-    pub cache: Arc<crate::agent::tools::manager::cache::ToolCache>,
-    pub tool_manager: Arc<std::sync::RwLock<crate::agent::tools::manager::ToolManager>>,
+    pub cache: Arc<crate::agent::tools::registry::cache::ToolCache>,
+    pub tool_manager: Arc<std::sync::RwLock<crate::agent::tools::registry::ToolRegistry>>,
     pub uuid_gen: Arc<dyn crate::utils::uuid::UuidGenerator>,
 }
 
@@ -81,9 +81,9 @@ mod tests {
             session_id: Uuid::new_v4(),
             browser_session: browser,
             pdf_backing: Arc::new(crate::app::session::PdfBackingTracker::new()),
-            cache: Arc::new(crate::agent::tools::manager::cache::ToolCache::new()),
+            cache: Arc::new(crate::agent::tools::registry::cache::ToolCache::new()),
             tool_manager: Arc::new(std::sync::RwLock::new(
-                crate::agent::tools::manager::ToolManager::new(),
+                crate::agent::tools::registry::ToolRegistry::new(),
             )),
             uuid_gen: Arc::new(crate::utils::uuid::SystemUuidGenerator),
         };

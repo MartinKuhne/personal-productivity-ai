@@ -2,7 +2,7 @@
 //!
 //! [`DynamicToolSource`] defines the minimal interface the registry
 //! depends on for MCP-driven tool discovery and execution. The
-//! concrete implementation today is [`McpClientManager`](super::McpClientManager);
+//! concrete implementation today is [`McpClients`](super::McpClients);
 //! test doubles and future non-MCP sources can implement the same
 //! surface without the registry depending on the concrete type.
 

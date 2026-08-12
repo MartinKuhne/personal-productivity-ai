@@ -18,7 +18,7 @@ mod adapter;
 pub use adapter::McpToolAdapter;
 
 // Re-export the protocol-level types so existing callers can keep
-// using `crate::agent::tools::mcp::{McpClientManager,
+// using `crate::agent::tools::mcp::{McpClients,
 // McpToolDescriptor, ...}`. The protocol implementation itself lives
 // in `crate::integrations::mcp`.
 pub use crate::integrations::mcp::{
@@ -31,7 +31,7 @@ pub use crate::integrations::mcp::{
     CLIENT_NAME, CLIENT_VERSION, DEFAULT_REQUEST_TIMEOUT, DynamicToolSource, MAX_REQUEST_TIMEOUT,
     PROTOCOL_VERSION, is_valid_session_id,
 };
-pub use crate::integrations::mcp::{McpClientManager, McpClientSession};
+pub use crate::integrations::mcp::{McpClients, McpClientSession};
 
 #[cfg(test)]
 mod adapter_tests;

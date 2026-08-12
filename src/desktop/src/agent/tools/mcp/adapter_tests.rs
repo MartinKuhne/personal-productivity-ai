@@ -15,7 +15,7 @@ use std::sync::Arc;
 
 #[test]
 fn test_mcp_tool_adapter_metadata_and_safety() {
-    let manager = Arc::new(McpClientManager::new());
+    let manager = Arc::new(McpClients::new());
     let adapter = McpToolAdapter::new(
         "test_server",
         "test_tool",
@@ -55,7 +55,7 @@ fn test_mcp_tool_adapter_disabled_when_entry_disabled() {
     // Regression for CONFIG-012: an entry with `enabled: false`
     // must cause the adapter to be disabled even though the
     // server is present in the config map.
-    let manager = Arc::new(McpClientManager::new());
+    let manager = Arc::new(McpClients::new());
     let adapter = McpToolAdapter::new(
         "test_server",
         "test_tool",

@@ -1,6 +1,6 @@
 //! Agent session manager — lifecycle and UI-visible state for a single LLM agent session (status, response, thinking, history, token usage).
 //!
-//! Unit tests live in the sibling `manager_tests.rs` sidecar.
+//! Unit tests live in the sibling `session_tests.rs` sidecar.
 
 use crate::agent::AgentContext;
 use crate::agent::events::{AgentEvent as SeamAgentEvent, AgentPrompt};
@@ -47,7 +47,7 @@ pub struct AgentState {
 /// - Provides `start_session` to launch a new agent thread
 /// - Exposes read-only `AgentState` for UI rendering
 /// - Exposes `event_bus()` for UI to subscribe to `Bus<AgentEvent>`
-pub struct AgentSessionManager {
+pub struct AgentSession {
     state: AgentState,
     cancel_flag: Option<Arc<AtomicBool>>,
     config: AppConfig,
@@ -93,7 +93,7 @@ pub struct AgentSessionManager {
     browser_session: Arc<BrowserSession>,
 }
 
-impl AgentSessionManager {
+impl AgentSession {
     /// Subscribe to the configuration-arrival bus and return an
     /// empty manager. The bus is the source of truth for the
     pub fn new(
@@ -101,7 +101,7 @@ impl AgentSessionManager {
         file_event_bus: Bus<crate::bus::events::file::FileEvent>,
         browser_session: Arc<BrowserSession>,
         pdf_backing: Arc<crate::app::session::PdfBackingTracker>,
-        tool_manager: Arc<std::sync::RwLock<crate::agent::tools::manager::ToolManager>>,
+        tool_manager: Arc<std::sync::RwLock<crate::agent::tools::registry::ToolRegistry>>,
     ) -> Self {
         let agent_event_bus = Bus::new();
         let (prompt_tx, prompt_rx) = mpsc::channel::<AgentPrompt>();
@@ -152,7 +152,7 @@ impl AgentSessionManager {
     #[doc(hidden)]
     pub fn new_for_test(config: AppConfig, browser_session: Arc<BrowserSession>) -> Self {
         let tool_manager = Arc::new(std::sync::RwLock::new(
-            crate::agent::tools::manager::ToolManager::new(),
+            crate::agent::tools::registry::ToolRegistry::new(),
         ));
         let agent_event_bus = Bus::new();
         let (prompt_tx, prompt_rx) = mpsc::channel::<AgentPrompt>();
@@ -215,7 +215,7 @@ impl AgentSessionManager {
                 self.config_arrived = true;
                 tracing::info!(
                     name = "config.arrived",
-                    "AgentSessionManager received configuration"
+                    "AgentSession received configuration"
                 );
                 // Drop the reader — we only care about the first
                 // arrival (no hot reload).
@@ -424,7 +424,7 @@ fn spawn_driver(
     file_event_bus: Bus<crate::bus::events::file::FileEvent>,
     browser_session: Arc<BrowserSession>,
     pdf_backing: Arc<crate::app::session::PdfBackingTracker>,
-    tool_manager: Arc<std::sync::RwLock<crate::agent::tools::manager::ToolManager>>,
+    tool_manager: Arc<std::sync::RwLock<crate::agent::tools::registry::ToolRegistry>>,
 ) -> JoinHandle<()> {
     std::thread::spawn(move || {
         // Per-session history cache. Keyed by `session_id` so continuation
@@ -449,7 +449,7 @@ fn spawn_driver(
                 session_id,
                 browser_session: browser_session.clone(),
                 pdf_backing: pdf_backing.clone(),
-                cache: std::sync::Arc::new(crate::agent::tools::manager::cache::ToolCache::new()),
+                cache: std::sync::Arc::new(crate::agent::tools::registry::cache::ToolCache::new()),
                 tool_manager: tool_manager.clone(),
                 uuid_gen: std::sync::Arc::new(crate::utils::uuid::SystemUuidGenerator),
             };
@@ -463,7 +463,7 @@ fn spawn_driver(
     })
 }
 
-impl Drop for AgentSessionManager {
+impl Drop for AgentSession {
     fn drop(&mut self) {
         // Drop the sender first to disconnect the channel, causing the
         // driver's `recv()` to return `Err` and the driver loop to exit.
@@ -477,9 +477,9 @@ impl Drop for AgentSessionManager {
 }
 
 // ---------------------------------------------------------------------------
-// Tests live in the sibling `manager_tests.rs` sidecar.
+// Tests live in the sibling `session_tests.rs` sidecar.
 // ---------------------------------------------------------------------------
 
 #[cfg(test)]
-#[path = "manager_tests.rs"]
+#[path = "session_tests.rs"]
 mod tests;

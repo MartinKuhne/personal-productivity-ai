@@ -5,7 +5,7 @@
 //! here reference those consts via `#[schemars(description = ...)]` so the
 //! JSON schema the LLM sees is generated from a single source of truth.
 
-use crate::agent::tools::manager::builtin::strings;
+use crate::agent::tools::registry::builtin::strings;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 

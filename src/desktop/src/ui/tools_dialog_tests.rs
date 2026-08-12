@@ -99,13 +99,13 @@ fn test_tools_dialog_renders_restart_button_on_error() {
     {
         let mut tm = app.orchestrator.tool_manager.write().unwrap();
         tm.groups_snapshot(app.config());
-        let id = crate::agent::tools::manager::ToolGroupId::Internal(
-            crate::agent::tools::manager::InternalToolGroup::Filesystem,
+        let id = crate::agent::tools::registry::ToolGroupId::Internal(
+            crate::agent::tools::registry::InternalToolGroup::Filesystem,
         );
         tm.record_error(
             &id,
-            crate::agent::tools::manager::ToolGroupError::now(
-                crate::agent::tools::manager::ToolErrorKind::Execution,
+            crate::agent::tools::registry::ToolGroupError::now(
+                crate::agent::tools::registry::ToolErrorKind::Execution,
                 "Permission denied".to_string(),
             ),
         );

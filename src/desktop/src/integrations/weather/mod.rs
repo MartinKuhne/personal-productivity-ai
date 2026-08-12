@@ -4,7 +4,7 @@
 //!
 //! This is the protocol layer. The LLM-tool-loop adapter that
 //! exposes it as a single `Tool` impl lives in
-//! crate::agent::tools::manager::builtin::weather.
+//! crate::agent::tools::registry::builtin::weather.
 
 use serde_json::Value;
 
