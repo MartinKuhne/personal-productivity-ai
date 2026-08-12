@@ -317,8 +317,10 @@ fn test_create_document_dialog_writes_file_on_submit() {
     // `Mutex<DialogManager>` lets the test and the closure
     // share mutable state across the harness's frames
     // without requiring `'static` storage.
-    let temp_dir =
-        std::env::temp_dir().join(format!("fastmd_create_document_click_{}", std::process::id()));
+    let temp_dir = std::env::temp_dir().join(format!(
+        "fastmd_create_document_click_{}",
+        std::process::id()
+    ));
     let _ = fs::create_dir_all(&temp_dir);
     let mut dm = DialogManager::new();
     dm.create_document_dialog_open = true;

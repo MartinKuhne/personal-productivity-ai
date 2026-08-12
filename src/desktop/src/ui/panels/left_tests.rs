@@ -177,12 +177,14 @@ fn test_directory_click_invalidates_tree_cache() {
     );
 
     // Simulate a user click on the subdirectory row. We build a
-    // `TreeNodeContext` from the app's state and call
+    // `TreeNodeContext` from the app's state via
+    // `from_app_state` (the same constructor `show_left_panel`
+    // uses on every frame) and call
     // `apply_directory_row_click` directly — this is the same
     // function `render_flat_row` invokes from its `if
-    // response.clicked()` branch. The context borrows from
-    // `app`, so we wrap the click in a block scope to release
-    // the borrows before re-rendering.
+    // response.clicked()` branch. The context owns its fields,
+    // so we wrap the click in a block scope and `write_back`
+    // the mutated state to the orchestrator before re-rendering.
     let dir_row = crate::ui::tree::flatten::FlatRow {
         depth: 0,
         name: "subdir".to_string(),
@@ -191,38 +193,27 @@ fn test_directory_click_invalidates_tree_cache() {
         is_expanded: false,
     };
     {
-        let mut open_editor = None;
-        let tx = app.orchestrator.tx.clone();
-        let file_event_bus = &app.orchestrator.file_event_bus;
-        let mut ctx = TreeNodeContext {
-            selected_file: &mut app.orchestrator.selection.selected_file,
-            selected_files: &mut app.orchestrator.selection.selected_files,
-            expanded_dirs: &mut app.orchestrator.selection.expanded_dirs,
-            tabs: &mut app.orchestrator.tab_manager.tabs,
-            selected_dir: &mut app.orchestrator.selection.selected_dir,
-            create_dir_dialog_open: &mut app.orchestrator.dialogs.create_dir_dialog_open,
-            create_dir_parent: &mut app.orchestrator.dialogs.create_dir_parent,
-            file_to_move: &mut app.orchestrator.dialogs.file_to_move,
-            move_dialog_open: &mut app.orchestrator.dialogs.move_dialog_open,
-            file_to_rename: &mut app.orchestrator.dialogs.file_to_rename,
-            rename_dialog_open: &mut app.orchestrator.dialogs.rename_dialog_open,
-            rename_new_name: &mut app.orchestrator.dialogs.rename_new_name,
-            create_document_dialog_open: &mut app.orchestrator.dialogs.create_document_dialog_open,
-            create_document_parent: &mut app.orchestrator.dialogs.create_document_parent,
-            layout: &mut app.layout,
-            submit_prompt: &mut app.orchestrator.submit_prompt,
-            content_libraries: &app.orchestrator.content_libraries,
-            open_editor: &mut open_editor,
-            modifiers: egui::Modifiers::default(),
-            inline_editor_enabled: app.orchestrator.inline_editor_enabled,
-            bg_tx: &Some(tx),
-            file_event_producer: Some(crate::bus::events::file::FileEventProducer::new(
-                file_event_bus.clone(),
-            )),
-            tree_dirty: &mut app.orchestrator.selection.tree_dirty,
-            pdf_backing_tracker: crate::app::session::PdfBackingTracker::new(),
-        };
+        let mut ctx = TreeNodeContext::from_app_state(
+            &app.orchestrator.selection,
+            &app.orchestrator.tab_manager,
+            &app.orchestrator.dialogs,
+            &app.layout,
+            &app.orchestrator.submit_prompt,
+            &app.orchestrator.content_libraries,
+            Some(app.orchestrator.tx.clone()),
+            app.orchestrator.file_event_bus.clone(),
+            app.orchestrator.inline_editor_enabled,
+            egui::Modifiers::default(),
+            None,
+            app.pdf_backing_tracker().clone(),
+        );
         crate::ui::tree::handlers::apply_directory_row_click(&mut ctx, &dir_row);
+        ctx.write_back(
+            &mut app.orchestrator.selection,
+            &mut app.orchestrator.tab_manager,
+            &mut app.orchestrator.dialogs,
+            &mut app.orchestrator.submit_prompt,
+        );
     }
 
     // The click must invalidate the cached flat rows.

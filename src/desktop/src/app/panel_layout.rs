@@ -1,5 +1,6 @@
 //! Left-panel layout state — width and dirty flag so the panel remembers its size across workspace changes.
 
+#[derive(Clone, Debug, PartialEq)]
 pub struct PanelLayout {
     pub left_panel_width: Option<f32>,
     pub right_panel_width: Option<f32>,

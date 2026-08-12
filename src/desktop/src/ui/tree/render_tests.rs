@@ -1,105 +1,54 @@
 //! Tests for `tree/render.rs`.
+//!
+//! All tests build a [`TreeNodeContext`] directly with owned
+//! fields and `..Default::default()`. The previous version
+//! borrowed every field from local `let mut` variables (or
+//! `Box::leak`ed per-test `OnceLock<StaticFixture>`) to satisfy
+//! the `'static` re-borrow across the harness closure. The
+//! lifetime-free rewrite drops that machinery entirely.
+//!
+//! For `stateful_harness` tests (which run the closure many
+//! times), the context is shared via
+//! `Rc<RefCell<TreeNodeContext>>` so click handlers can mutate
+//! fields like `create_document_dialog_open` and the next
+//! harness pass sees the change.
 
 use super::*;
-use crate::app::panel_layout::PanelLayout;
 use crate::ui::test_helpers::run_ui_test;
 use crate::ui::tree::context::TreeNodeContext;
 use crate::ui::tree::flatten::{FlatRow, TREE_ROW_HEIGHT};
 use eframe::egui;
+use std::cell::RefCell;
 use std::collections::HashSet;
 use std::path::PathBuf;
+use std::rc::Rc;
 
 /// Tier 4 click test: clicking a file row in the left panel's
 /// tree view must fire the `on_click("file_row")` callback.
 ///
-/// The challenge this test solves: `render_flat_row` takes a
-/// `&mut TreeNodeContext<'_>` whose lifetime is tied to the
-/// borrowed sub-fields (selected_file, selected_files, tabs).
-/// The harness closure is `FnMut(&mut Ui, &mut T)` and runs
-/// for many passes; the context must therefore live across
-/// all those passes. We use `Box::leak` to give the context
-/// a `'static` lifetime so the harness can re-borrow it on
-/// every pass. The leak is per-test and bounded (one
-/// `TreeNodeContext` per test run), so it does not affect
-/// long-running test executables.
+/// The harness runs the closure many times; the context is
+/// shared across passes via `Rc<RefCell<...>>` so any
+/// selection state (like `selected_file` after a click)
+/// persists.
 #[test]
 fn test_file_row_click_captures_event() {
     use crate::ui::test_helpers::interact::stateful_harness;
     use egui_kittest::kittest::Queryable;
-    use std::sync::{Mutex, OnceLock};
 
-    // Build the 'static context and row once; reuse across
-    // every harness pass.
-    struct StaticFixture {
-        ctx: Mutex<Option<TreeNodeContext<'static>>>,
-        row: FlatRow,
-    }
-    static FIXTURE: OnceLock<StaticFixture> = OnceLock::new();
-    let fixture = FIXTURE.get_or_init(|| {
-        let selected_file = Box::leak(Box::new(None::<PathBuf>));
-        let selected_files = Box::leak(Box::new(HashSet::<PathBuf>::new()));
-        let expanded_dirs = Box::leak(Box::new(HashSet::<PathBuf>::new()));
-        let tabs = Box::leak(Box::new(Vec::<PathBuf>::new()));
-        let selected_dir = Box::leak(Box::new(None::<PathBuf>));
-        let create_dir_dialog_open = Box::leak(Box::new(false));
-        let create_dir_parent = Box::leak(Box::new(None::<PathBuf>));
-        let file_to_move = Box::leak(Box::new(None::<PathBuf>));
-        let move_dialog_open = Box::leak(Box::new(false));
-        let file_to_rename = Box::leak(Box::new(None::<PathBuf>));
-        let rename_dialog_open = Box::leak(Box::new(false));
-        let rename_new_name = Box::leak(Box::new(String::new()));
-        let create_document_dialog_open = Box::leak(Box::new(false));
-        let create_document_parent = Box::leak(Box::new(None::<PathBuf>));
-        let layout = Box::leak(Box::new(PanelLayout::default()));
-        let submit_prompt = Box::leak(Box::new(None::<String>));
-        let open_editor = Box::leak(Box::new(None::<PathBuf>));
-        let content_libraries = Box::leak(Box::new(Vec::new()));
-        let tree_dirty = Box::leak(Box::new(false));
+    let row = FlatRow {
+        depth: 0,
+        name: "notes.md".to_string(),
+        path: PathBuf::from("notes.md"),
+        is_dir: false,
+        is_expanded: false,
+    };
+    let ctx_cell: Rc<RefCell<TreeNodeContext>> = Rc::new(RefCell::new(TreeNodeContext::default()));
+    let row_for_closure = row.clone();
+    let ctx_for_closure = Rc::clone(&ctx_cell);
 
-        let ctx = TreeNodeContext {
-            selected_file,
-            selected_files,
-            expanded_dirs,
-            tabs,
-            selected_dir,
-            create_dir_dialog_open,
-            create_dir_parent,
-            file_to_move,
-            move_dialog_open,
-            file_to_rename,
-            rename_dialog_open,
-            rename_new_name,
-            create_document_dialog_open,
-            create_document_parent,
-            layout,
-            submit_prompt,
-            content_libraries,
-            open_editor,
-            modifiers: egui::Modifiers::default(),
-            inline_editor_enabled: false,
-            bg_tx: &None,
-            file_event_producer: None,
-            tree_dirty,
-            pdf_backing_tracker: crate::app::session::PdfBackingTracker::new(),
-        };
-
-        let row = FlatRow {
-            depth: 0,
-            name: "notes.md".to_string(),
-            path: PathBuf::from("notes.md"),
-            is_dir: false,
-            is_expanded: false,
-        };
-        StaticFixture {
-            ctx: Mutex::new(Some(ctx)),
-            row,
-        }
-    });
-
-    let mut harness = stateful_harness(Vec::<&'static str>::new(), |ui, captured| {
-        let mut guard = fixture.ctx.lock().unwrap();
-        let ctx = guard.as_mut().expect("context not initialized");
-        render_flat_row_capture(ui, &fixture.row, ctx, |event| {
+    let mut harness = stateful_harness(Vec::<&'static str>::new(), move |ui, captured| {
+        let mut ctx = ctx_for_closure.borrow_mut();
+        render_flat_row_capture(ui, &row_for_closure, &mut ctx, |event| {
             captured.push(event);
         });
     });
@@ -141,54 +90,13 @@ fn test_draw_tree_node_directory_and_file() {
     root.children
         .insert("document.md".to_string(), child_file.clone());
 
-    let mut expanded_dirs = HashSet::new();
-    let mut selected_file = None;
-    let mut selected_files = HashSet::new();
-    let mut tabs = Vec::new();
-    let mut file_to_move = None;
-    let mut move_dialog_open = false;
-    let mut selected_dir = None;
-    let mut create_dir_dialog_open = false;
-    let mut create_dir_parent = None;
-    let mut layout = PanelLayout::new();
-    let mut rename_dialog_open = false;
-    let mut file_to_rename = None;
-    let mut rename_new_name = String::new();
-    let mut create_document_dialog_open = false;
-    let mut create_document_parent = None;
-    let mut submit_prompt = None;
-    let mut open_editor = None;
+    let mut tree_ctx = TreeNodeContext {
+        inline_editor_enabled: true,
+        ..Default::default()
+    };
 
     let _ = run_ui_test(&ctx_egui, Default::default(), |ui| {
         egui::CentralPanel::default().show(ui, |ui| {
-            let mut tree_dirty = false;
-            let mut tree_ctx = TreeNodeContext {
-                selected_file: &mut selected_file,
-                selected_files: &mut selected_files,
-                expanded_dirs: &mut expanded_dirs,
-                tabs: &mut tabs,
-                selected_dir: &mut selected_dir,
-                create_dir_dialog_open: &mut create_dir_dialog_open,
-                create_dir_parent: &mut create_dir_parent,
-                file_to_move: &mut file_to_move,
-                move_dialog_open: &mut move_dialog_open,
-                file_to_rename: &mut file_to_rename,
-                rename_dialog_open: &mut rename_dialog_open,
-                rename_new_name: &mut rename_new_name,
-                create_document_dialog_open: &mut create_document_dialog_open,
-                create_document_parent: &mut create_document_parent,
-                layout: &mut layout,
-                submit_prompt: &mut submit_prompt,
-                content_libraries: &[],
-                open_editor: &mut open_editor,
-                modifiers: egui::Modifiers::default(),
-                inline_editor_enabled: true,
-                bg_tx: &None,
-                file_event_producer: None,
-                tree_dirty: &mut tree_dirty,
-                pdf_backing_tracker: crate::app::session::PdfBackingTracker::new(),
-            };
-
             // Render collapsed directory
             draw_tree_node(ui, &root, &mut tree_ctx);
 
@@ -201,7 +109,7 @@ fn test_draw_tree_node_directory_and_file() {
         });
     });
 
-    assert!(expanded_dirs.contains(&root.path));
+    assert!(tree_ctx.expanded_dirs.contains(&root.path));
 }
 
 /// Regression: the directory tree used to render mojibake'd
@@ -261,58 +169,18 @@ fn test_tree_node_selection_state_modifiers() {
         false,
     );
 
-    let mut expanded_dirs = HashSet::new();
-    let mut selected_file = None;
-    let mut selected_files = HashSet::new();
-    let mut tabs = Vec::new();
-    let mut file_to_move = None;
-    let mut move_dialog_open = false;
-    let mut selected_dir = None;
-    let mut create_dir_dialog_open = false;
-    let mut create_dir_parent = None;
-    let mut layout = PanelLayout::new();
-    let mut rename_dialog_open = false;
-    let mut file_to_rename = None;
-    let mut rename_new_name = String::new();
-    let mut create_document_dialog_open = false;
-    let mut create_document_parent = None;
-    let mut submit_prompt = None;
-    let mut open_editor = None;
+    let mut tree_ctx = TreeNodeContext {
+        modifiers: egui::Modifiers {
+            ctrl: true,
+            ..Default::default()
+        },
+        inline_editor_enabled: true,
+        ..Default::default()
+    };
 
     let _ = run_ui_test(&ctx_egui, Default::default(), |ui| {
         egui::CentralPanel::default().show(ui, |ui| {
             // Test ctrl multi-select simulation
-            let mut tree_dirty = false;
-            let mut tree_ctx = TreeNodeContext {
-                selected_file: &mut selected_file,
-                selected_files: &mut selected_files,
-                expanded_dirs: &mut expanded_dirs,
-                tabs: &mut tabs,
-                selected_dir: &mut selected_dir,
-                create_dir_dialog_open: &mut create_dir_dialog_open,
-                create_dir_parent: &mut create_dir_parent,
-                file_to_move: &mut file_to_move,
-                move_dialog_open: &mut move_dialog_open,
-                file_to_rename: &mut file_to_rename,
-                rename_dialog_open: &mut rename_dialog_open,
-                rename_new_name: &mut rename_new_name,
-                create_document_dialog_open: &mut create_document_dialog_open,
-                create_document_parent: &mut create_document_parent,
-                layout: &mut layout,
-                submit_prompt: &mut submit_prompt,
-                content_libraries: &[],
-                open_editor: &mut open_editor,
-                modifiers: egui::Modifiers {
-                    ctrl: true,
-                    ..Default::default()
-                },
-                inline_editor_enabled: true,
-                bg_tx: &None,
-                file_event_producer: None,
-                tree_dirty: &mut tree_dirty,
-                pdf_backing_tracker: crate::app::session::PdfBackingTracker::new(),
-            };
-
             draw_tree_node(ui, &file1, &mut tree_ctx);
             draw_tree_node(ui, &file2, &mut tree_ctx);
         });
@@ -425,100 +293,47 @@ fn test_new_document_on_directory_opens_dialog_with_dir_parent() {
     use egui_kittest::kittest::Queryable;
     use std::fs;
     use std::path::Path;
-    use std::sync::{Mutex, OnceLock};
+    use std::sync::Arc;
 
-    struct StaticFixture {
-        ctx: Mutex<Option<TreeNodeContext<'static>>>,
-        dm: Mutex<Option<DialogManager>>,
-        bus: Bus<FileEvent>,
-        temp_dir: &'static Path,
-        row: FlatRow,
-    }
-    static FIXTURE: OnceLock<StaticFixture> = OnceLock::new();
-    let fixture = FIXTURE.get_or_init(|| {
-        let leaked = Box::leak(Box::new(
-            std::env::temp_dir().join(format!("fastmd_new_doc_dir_{}", std::process::id())),
-        ));
-        let temp_dir: &'static Path = leaked;
-        let _ = fs::create_dir_all(temp_dir);
+    let temp_dir = std::env::temp_dir().join(format!("fastmd_new_doc_dir_{}", std::process::id()));
+    let _ = fs::create_dir_all(&temp_dir);
+    let temp_dir_arc: Arc<Path> = Arc::from(temp_dir.as_path());
 
-        let selected_file = Box::leak(Box::new(None::<PathBuf>));
-        let selected_files = Box::leak(Box::new(HashSet::<PathBuf>::new()));
-        let expanded_dirs = Box::leak(Box::new(HashSet::<PathBuf>::new()));
-        let tabs = Box::leak(Box::new(Vec::<PathBuf>::new()));
-        let selected_dir = Box::leak(Box::new(None::<PathBuf>));
-        let create_dir_dialog_open = Box::leak(Box::new(false));
-        let create_dir_parent = Box::leak(Box::new(None::<PathBuf>));
-        let file_to_move = Box::leak(Box::new(None::<PathBuf>));
-        let move_dialog_open = Box::leak(Box::new(false));
-        let file_to_rename = Box::leak(Box::new(None::<PathBuf>));
-        let rename_dialog_open = Box::leak(Box::new(false));
-        let rename_new_name = Box::leak(Box::new(String::new()));
-        let create_document_dialog_open = Box::leak(Box::new(false));
-        let create_document_parent = Box::leak(Box::new(None::<PathBuf>));
-        let layout = Box::leak(Box::new(PanelLayout::default()));
-        let submit_prompt = Box::leak(Box::new(None::<String>));
-        let open_editor = Box::leak(Box::new(None::<PathBuf>));
-        let content_libraries = Box::leak(Box::new(Vec::new()));
-        let tree_dirty = Box::leak(Box::new(false));
+    let row = FlatRow {
+        depth: 0,
+        name: "notes".to_string(),
+        path: temp_dir.clone(),
+        is_dir: true,
+        is_expanded: false,
+    };
 
-        let ctx = TreeNodeContext {
-            selected_file,
-            selected_files,
-            expanded_dirs,
-            tabs,
-            selected_dir,
-            create_dir_dialog_open,
-            create_dir_parent,
-            file_to_move,
-            move_dialog_open,
-            file_to_rename,
-            rename_dialog_open,
-            rename_new_name,
-            create_document_dialog_open,
-            create_document_parent,
-            layout,
-            submit_prompt,
-            content_libraries,
-            open_editor,
-            modifiers: egui::Modifiers::default(),
-            inline_editor_enabled: false,
-            bg_tx: &None,
-            file_event_producer: None,
-            tree_dirty,
-            pdf_backing_tracker: crate::app::session::PdfBackingTracker::new(),
-        };
+    let ctx_cell: Rc<RefCell<TreeNodeContext>> = Rc::new(RefCell::new(TreeNodeContext::default()));
+    let dm_cell: Rc<RefCell<DialogManager>> = Rc::new(RefCell::new(DialogManager::new()));
+    let bus = Bus::<FileEvent>::new();
 
-        let row = FlatRow {
-            depth: 0,
-            name: "notes".to_string(),
-            path: temp_dir.to_path_buf(),
-            is_dir: true,
-            is_expanded: false,
-        };
-        StaticFixture {
-            ctx: Mutex::new(Some(ctx)),
-            dm: Mutex::new(Some(DialogManager::new())),
-            bus: Bus::new(),
-            temp_dir,
-            row,
-        }
-    });
+    let row_for_closure = row.clone();
+    let ctx_for_closure = Rc::clone(&ctx_cell);
+    let dm_for_closure = Rc::clone(&dm_cell);
+    let temp_dir_for_closure = Arc::clone(&temp_dir_arc);
+    let bus_for_closure = bus.clone();
 
-    let mut harness = stateful_harness((), |ui, _| {
-        let mut guard = fixture.ctx.lock().unwrap();
-        let ctx = guard.as_mut().expect("context not initialized");
-        render_flat_row(ui, &fixture.row, ctx);
+    let mut harness = stateful_harness((), move |ui, _| {
+        {
+            let mut ctx = ctx_for_closure.borrow_mut();
+            render_flat_row(ui, &row_for_closure, &mut ctx);
 
-        // Mirror the tree → dialog wiring (left.rs + app.rs): the
-        // context menu writes the dialog-open flag and parent into
-        // the tree context; the dialog renders from those fields.
-        if *ctx.create_document_dialog_open() {
-            let mut dguard = fixture.dm.lock().unwrap();
-            if let Some(dm) = dguard.as_mut() {
+            // Mirror the tree → dialog wiring (left.rs + app.rs): the
+            // context menu writes the dialog-open flag and parent into
+            // the tree context; the dialog renders from those fields.
+            if *ctx.create_document_dialog_open() {
+                let mut dm = dm_for_closure.borrow_mut();
                 dm.create_document_dialog_open = true;
                 dm.create_document_parent = ctx.create_document_parent().clone();
-                show_create_document_dialog(dm, &fixture.bus, ui.ctx());
+                drop(ctx); // release the ctx borrow before show_create_document_dialog
+                show_create_document_dialog(&mut dm, &bus_for_closure, ui.ctx());
+                // Mark the parent explicitly so the closure can use
+                // the temp_dir if needed.
+                let _ = temp_dir_for_closure.as_ref();
             }
         }
     });
@@ -543,15 +358,14 @@ fn test_new_document_on_directory_opens_dialog_with_dir_parent() {
     harness.run_steps(2);
 
     {
-        let mut guard = fixture.ctx.lock().unwrap();
-        let ctx = guard.as_mut().expect("context not initialized");
+        let mut ctx = ctx_cell.borrow_mut();
         assert!(
             *ctx.create_document_dialog_open(),
             "choosing [New document] must open the create-document dialog"
         );
         assert_eq!(
             *ctx.create_document_parent(),
-            Some(fixture.temp_dir.to_path_buf()),
+            Some(temp_dir.clone()),
             "the create-document dialog's parent must be the right-clicked directory"
         );
     }
@@ -559,10 +373,8 @@ fn test_new_document_on_directory_opens_dialog_with_dir_parent() {
     // Type a name and submit; the file must be created inside the
     // right-clicked directory.
     {
-        let mut dguard = fixture.dm.lock().unwrap();
-        if let Some(dm) = dguard.as_mut() {
-            dm.create_document_name = "notes".to_string();
-        }
+        let mut dm = dm_cell.borrow_mut();
+        dm.create_document_name = "notes".to_string();
     }
     harness.run_steps(2);
     harness
@@ -571,7 +383,7 @@ fn test_new_document_on_directory_opens_dialog_with_dir_parent() {
     harness.run_steps(2);
     harness.run_steps(2);
 
-    let created = fixture.temp_dir.join("notes.md");
+    let created = temp_dir.join("notes.md");
     assert!(
         created.exists(),
         "submitting the dialog must create the document inside the right-clicked directory"
@@ -579,85 +391,28 @@ fn test_new_document_on_directory_opens_dialog_with_dir_parent() {
     let content = fs::read_to_string(&created).unwrap();
     assert_eq!(content, "---\ntitle: notes\n---\n\n");
 
-    let _ = fs::remove_dir_all(fixture.temp_dir);
+    let _ = fs::remove_dir_all(&temp_dir);
 }
 
 #[test]
 fn test_rename_action_on_directory_opens_rename_dialog() {
     use crate::ui::test_helpers::interact::stateful_harness;
     use egui_kittest::kittest::Queryable;
-    use std::sync::{Mutex, OnceLock};
 
-    struct StaticFixture {
-        ctx: Mutex<Option<TreeNodeContext<'static>>>,
-        row: FlatRow,
-    }
-    static FIXTURE: OnceLock<StaticFixture> = OnceLock::new();
-    let fixture = FIXTURE.get_or_init(|| {
-        let selected_file = Box::leak(Box::new(None::<PathBuf>));
-        let selected_files = Box::leak(Box::new(HashSet::<PathBuf>::new()));
-        let expanded_dirs = Box::leak(Box::new(HashSet::<PathBuf>::new()));
-        let tabs = Box::leak(Box::new(Vec::<PathBuf>::new()));
-        let selected_dir = Box::leak(Box::new(None::<PathBuf>));
-        let create_dir_dialog_open = Box::leak(Box::new(false));
-        let create_dir_parent = Box::leak(Box::new(None::<PathBuf>));
-        let file_to_move = Box::leak(Box::new(None::<PathBuf>));
-        let move_dialog_open = Box::leak(Box::new(false));
-        let file_to_rename = Box::leak(Box::new(None::<PathBuf>));
-        let rename_dialog_open = Box::leak(Box::new(false));
-        let rename_new_name = Box::leak(Box::new(String::new()));
-        let create_document_dialog_open = Box::leak(Box::new(false));
-        let create_document_parent = Box::leak(Box::new(None::<PathBuf>));
-        let layout = Box::leak(Box::new(PanelLayout::default()));
-        let submit_prompt = Box::leak(Box::new(None::<String>));
-        let open_editor = Box::leak(Box::new(None::<PathBuf>));
-        let content_libraries = Box::leak(Box::new(Vec::new()));
-        let tree_dirty = Box::leak(Box::new(false));
+    let row = FlatRow {
+        depth: 0,
+        name: "test_dir".to_string(),
+        path: PathBuf::from("/test/test_dir"),
+        is_dir: true,
+        is_expanded: false,
+    };
+    let ctx_cell: Rc<RefCell<TreeNodeContext>> = Rc::new(RefCell::new(TreeNodeContext::default()));
+    let row_for_closure = row.clone();
+    let ctx_for_closure = Rc::clone(&ctx_cell);
 
-        let ctx = TreeNodeContext {
-            selected_file,
-            selected_files,
-            expanded_dirs,
-            tabs,
-            selected_dir,
-            create_dir_dialog_open,
-            create_dir_parent,
-            file_to_move,
-            move_dialog_open,
-            file_to_rename,
-            rename_dialog_open,
-            rename_new_name,
-            create_document_dialog_open,
-            create_document_parent,
-            layout,
-            submit_prompt,
-            content_libraries,
-            open_editor,
-            modifiers: egui::Modifiers::default(),
-            inline_editor_enabled: false,
-            bg_tx: &None,
-            file_event_producer: None,
-            tree_dirty,
-            pdf_backing_tracker: crate::app::session::PdfBackingTracker::new(),
-        };
-
-        let row = FlatRow {
-            depth: 0,
-            name: "test_dir".to_string(),
-            path: PathBuf::from("/test/test_dir"),
-            is_dir: true,
-            is_expanded: false,
-        };
-        StaticFixture {
-            ctx: Mutex::new(Some(ctx)),
-            row,
-        }
-    });
-
-    let mut harness = stateful_harness((), |ui, _| {
-        let mut guard = fixture.ctx.lock().unwrap();
-        let ctx = guard.as_mut().expect("context not initialized");
-        render_flat_row(ui, &fixture.row, ctx);
+    let mut harness = stateful_harness((), move |ui, _| {
+        let mut ctx = ctx_for_closure.borrow_mut();
+        render_flat_row(ui, &row_for_closure, &mut ctx);
     });
     harness.fit_contents();
 
@@ -679,8 +434,7 @@ fn test_rename_action_on_directory_opens_rename_dialog() {
     harness.run_steps(2);
 
     {
-        let mut guard = fixture.ctx.lock().unwrap();
-        let ctx = guard.as_mut().expect("context not initialized");
+        let mut ctx = ctx_cell.borrow_mut();
         assert!(
             *ctx.rename_dialog_open(),
             "choosing Rename must open the rename dialog"
@@ -702,78 +456,21 @@ fn test_rename_action_on_directory_opens_rename_dialog() {
 fn test_move_action_on_file_opens_move_dialog() {
     use crate::ui::test_helpers::interact::stateful_harness;
     use egui_kittest::kittest::Queryable;
-    use std::sync::{Mutex, OnceLock};
 
-    struct StaticFixture {
-        ctx: Mutex<Option<TreeNodeContext<'static>>>,
-        row: FlatRow,
-    }
-    static FIXTURE: OnceLock<StaticFixture> = OnceLock::new();
-    let fixture = FIXTURE.get_or_init(|| {
-        let selected_file = Box::leak(Box::new(None::<PathBuf>));
-        let selected_files = Box::leak(Box::new(HashSet::<PathBuf>::new()));
-        let expanded_dirs = Box::leak(Box::new(HashSet::<PathBuf>::new()));
-        let tabs = Box::leak(Box::new(Vec::<PathBuf>::new()));
-        let selected_dir = Box::leak(Box::new(None::<PathBuf>));
-        let create_dir_dialog_open = Box::leak(Box::new(false));
-        let create_dir_parent = Box::leak(Box::new(None::<PathBuf>));
-        let file_to_move = Box::leak(Box::new(None::<PathBuf>));
-        let move_dialog_open = Box::leak(Box::new(false));
-        let file_to_rename = Box::leak(Box::new(None::<PathBuf>));
-        let rename_dialog_open = Box::leak(Box::new(false));
-        let rename_new_name = Box::leak(Box::new(String::new()));
-        let create_document_dialog_open = Box::leak(Box::new(false));
-        let create_document_parent = Box::leak(Box::new(None::<PathBuf>));
-        let layout = Box::leak(Box::new(PanelLayout::default()));
-        let submit_prompt = Box::leak(Box::new(None::<String>));
-        let open_editor = Box::leak(Box::new(None::<PathBuf>));
-        let content_libraries = Box::leak(Box::new(Vec::new()));
-        let tree_dirty = Box::leak(Box::new(false));
+    let row = FlatRow {
+        depth: 0,
+        name: "test_file.md".to_string(),
+        path: PathBuf::from("/test/test_file.md"),
+        is_dir: false,
+        is_expanded: false,
+    };
+    let ctx_cell: Rc<RefCell<TreeNodeContext>> = Rc::new(RefCell::new(TreeNodeContext::default()));
+    let row_for_closure = row.clone();
+    let ctx_for_closure = Rc::clone(&ctx_cell);
 
-        let ctx = TreeNodeContext {
-            selected_file,
-            selected_files,
-            expanded_dirs,
-            tabs,
-            selected_dir,
-            create_dir_dialog_open,
-            create_dir_parent,
-            file_to_move,
-            move_dialog_open,
-            file_to_rename,
-            rename_dialog_open,
-            rename_new_name,
-            create_document_dialog_open,
-            create_document_parent,
-            layout,
-            submit_prompt,
-            content_libraries,
-            open_editor,
-            modifiers: egui::Modifiers::default(),
-            inline_editor_enabled: false,
-            bg_tx: &None,
-            file_event_producer: None,
-            tree_dirty,
-            pdf_backing_tracker: crate::app::session::PdfBackingTracker::new(),
-        };
-
-        let row = FlatRow {
-            depth: 0,
-            name: "test_file.md".to_string(),
-            path: PathBuf::from("/test/test_file.md"),
-            is_dir: false,
-            is_expanded: false,
-        };
-        StaticFixture {
-            ctx: Mutex::new(Some(ctx)),
-            row,
-        }
-    });
-
-    let mut harness = stateful_harness((), |ui, _| {
-        let mut guard = fixture.ctx.lock().unwrap();
-        let ctx = guard.as_mut().expect("context not initialized");
-        render_flat_row(ui, &fixture.row, ctx);
+    let mut harness = stateful_harness((), move |ui, _| {
+        let mut ctx = ctx_for_closure.borrow_mut();
+        render_flat_row(ui, &row_for_closure, &mut ctx);
     });
     harness.fit_contents();
 
@@ -797,8 +494,7 @@ fn test_move_action_on_file_opens_move_dialog() {
     harness.run_steps(2);
 
     {
-        let mut guard = fixture.ctx.lock().unwrap();
-        let ctx = guard.as_mut().expect("context not initialized");
+        let mut ctx = ctx_cell.borrow_mut();
         assert!(
             *ctx.move_dialog_open(),
             "choosing Move must open the move dialog"
@@ -815,82 +511,27 @@ fn test_move_action_on_file_opens_move_dialog() {
 fn test_multi_select_merge_action_generates_prompt() {
     use crate::ui::test_helpers::interact::stateful_harness;
     use egui_kittest::kittest::Queryable;
-    use std::sync::{Mutex, OnceLock};
 
-    struct StaticFixture {
-        ctx: Mutex<Option<TreeNodeContext<'static>>>,
-        row: FlatRow,
-    }
-    static FIXTURE: OnceLock<StaticFixture> = OnceLock::new();
-    let fixture = FIXTURE.get_or_init(|| {
-        let selected_file = Box::leak(Box::new(None::<PathBuf>));
-        let mut initial_selected = HashSet::new();
-        initial_selected.insert(PathBuf::from("/test/test_file_1.md"));
-        initial_selected.insert(PathBuf::from("/test/test_file_2.md"));
+    let row = FlatRow {
+        depth: 0,
+        name: "test_file_1.md".to_string(),
+        path: PathBuf::from("/test/test_file_1.md"),
+        is_dir: false,
+        is_expanded: false,
+    };
+    let ctx_cell: Rc<RefCell<TreeNodeContext>> = Rc::new(RefCell::new(TreeNodeContext {
+        selected_files: HashSet::from([
+            PathBuf::from("/test/test_file_1.md"),
+            PathBuf::from("/test/test_file_2.md"),
+        ]),
+        ..Default::default()
+    }));
+    let row_for_closure = row.clone();
+    let ctx_for_closure = Rc::clone(&ctx_cell);
 
-        let selected_files = Box::leak(Box::new(initial_selected));
-        let expanded_dirs = Box::leak(Box::new(HashSet::<PathBuf>::new()));
-        let tabs = Box::leak(Box::new(Vec::<PathBuf>::new()));
-        let selected_dir = Box::leak(Box::new(None::<PathBuf>));
-        let create_dir_dialog_open = Box::leak(Box::new(false));
-        let create_dir_parent = Box::leak(Box::new(None::<PathBuf>));
-        let file_to_move = Box::leak(Box::new(None::<PathBuf>));
-        let move_dialog_open = Box::leak(Box::new(false));
-        let file_to_rename = Box::leak(Box::new(None::<PathBuf>));
-        let rename_dialog_open = Box::leak(Box::new(false));
-        let rename_new_name = Box::leak(Box::new(String::new()));
-        let create_document_dialog_open = Box::leak(Box::new(false));
-        let create_document_parent = Box::leak(Box::new(None::<PathBuf>));
-        let layout = Box::leak(Box::new(PanelLayout::default()));
-        let submit_prompt = Box::leak(Box::new(None::<String>));
-        let open_editor = Box::leak(Box::new(None::<PathBuf>));
-        let content_libraries = Box::leak(Box::new(Vec::new()));
-        let tree_dirty = Box::leak(Box::new(false));
-
-        let ctx = TreeNodeContext {
-            selected_file,
-            selected_files,
-            expanded_dirs,
-            tabs,
-            selected_dir,
-            create_dir_dialog_open,
-            create_dir_parent,
-            file_to_move,
-            move_dialog_open,
-            file_to_rename,
-            rename_dialog_open,
-            rename_new_name,
-            create_document_dialog_open,
-            create_document_parent,
-            layout,
-            submit_prompt,
-            content_libraries,
-            open_editor,
-            modifiers: egui::Modifiers::default(),
-            inline_editor_enabled: false,
-            bg_tx: &None,
-            file_event_producer: None,
-            tree_dirty,
-            pdf_backing_tracker: crate::app::session::PdfBackingTracker::new(),
-        };
-
-        let row = FlatRow {
-            depth: 0,
-            name: "test_file_1.md".to_string(),
-            path: PathBuf::from("/test/test_file_1.md"),
-            is_dir: false,
-            is_expanded: false,
-        };
-        StaticFixture {
-            ctx: Mutex::new(Some(ctx)),
-            row,
-        }
-    });
-
-    let mut harness = stateful_harness((), |ui, _| {
-        let mut guard = fixture.ctx.lock().unwrap();
-        let ctx = guard.as_mut().expect("context not initialized");
-        render_flat_row(ui, &fixture.row, ctx);
+    let mut harness = stateful_harness((), move |ui, _| {
+        let mut ctx = ctx_for_closure.borrow_mut();
+        render_flat_row(ui, &row_for_closure, &mut ctx);
     });
     harness.fit_contents();
 
@@ -914,8 +555,7 @@ fn test_multi_select_merge_action_generates_prompt() {
     harness.run_steps(2);
 
     {
-        let mut guard = fixture.ctx.lock().unwrap();
-        let ctx = guard.as_mut().expect("context not initialized");
+        let mut ctx = ctx_cell.borrow_mut();
         assert!(
             ctx.submit_prompt().is_some(),
             "choosing Merge must generate a prompt into submit_prompt"

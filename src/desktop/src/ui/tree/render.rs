@@ -18,7 +18,7 @@ fn show_dir_context_menu(
     ui: &mut egui::Ui,
     path: &std::path::Path,
     name: &str,
-    ctx: &mut TreeNodeContext<'_>,
+    ctx: &mut TreeNodeContext,
 ) {
     if ui
         .button(crate::ui::strings::SHOW_IN_EXPLORER_ACTION)
@@ -71,7 +71,7 @@ fn show_dir_context_menu(
 
 /// Show multi-select file context menu (merge, delete).
 /// Used by both `render_flat_row` and `draw_tree_node`.
-fn show_multi_select_file_context_menu(ui: &mut egui::Ui, ctx: &mut TreeNodeContext<'_>) {
+fn show_multi_select_file_context_menu(ui: &mut egui::Ui, ctx: &mut TreeNodeContext) {
     if ui.button(crate::ui::strings::MERGE_ACTION).clicked() {
         let files: HashSet<_> = ctx.selected_files().iter().cloned().collect();
         let prompt = build_merge_prompt(ctx.content_libraries(), &files);
@@ -103,7 +103,7 @@ fn show_file_context_menu(
     ui: &mut egui::Ui,
     path: &std::path::Path,
     name: &str,
-    ctx: &mut TreeNodeContext<'_>,
+    ctx: &mut TreeNodeContext,
 ) {
     if ui.button(crate::ui::strings::EDIT_BUTTON).clicked() {
         if ctx.inline_editor_enabled() {
@@ -150,7 +150,7 @@ fn show_file_context_menu(
     }
     if ui.button(crate::ui::strings::PRINT_ACTION).clicked() {
         let path_to_print = path.to_path_buf();
-        if let Some(tx) = ctx.bg_tx().clone() {
+        if let Some(tx) = ctx.bg_tx().cloned() {
             let job = PrintJob::new(path_to_print.clone());
             let _ = execute_print_blocking(job, Some(tx));
         } else {
@@ -211,7 +211,7 @@ fn show_file_context_menu(
         // background work. We do NOT log this as a failure; cancel
         // is a valid user choice.
         if let Some(target) = chosen {
-            if let Some(tx) = ctx.bg_tx().clone() {
+            if let Some(tx) = ctx.bg_tx().cloned() {
                 // Build the job with the chosen `output_path`. The
                 // markdown source path is still the first arg so the
                 // translator reads from the right file; `output_path`
@@ -269,7 +269,7 @@ fn show_file_context_menu(
 
 /// Render a single flat row with the same interaction logic as `draw_tree_node`
 /// but without recursion.
-pub fn render_flat_row(ui: &mut egui::Ui, row: &FlatRow, ctx: &mut TreeNodeContext<'_>) {
+pub fn render_flat_row(ui: &mut egui::Ui, row: &FlatRow, ctx: &mut TreeNodeContext) {
     render_flat_row_capture(ui, row, ctx, |_| {});
 }
 
@@ -283,7 +283,7 @@ pub fn render_flat_row(ui: &mut egui::Ui, row: &FlatRow, ctx: &mut TreeNodeConte
 pub fn render_flat_row_capture(
     ui: &mut egui::Ui,
     row: &FlatRow,
-    ctx: &mut TreeNodeContext<'_>,
+    ctx: &mut TreeNodeContext,
     mut on_click: impl FnMut(&'static str),
 ) {
     ui.push_id((&row.path, row.is_dir), |ui| {
@@ -363,7 +363,7 @@ pub fn render_flat_row_capture(
     });
 }
 
-pub fn draw_tree_node(ui: &mut egui::Ui, node: &TreeNode, ctx: &mut TreeNodeContext<'_>) {
+pub fn draw_tree_node(ui: &mut egui::Ui, node: &TreeNode, ctx: &mut TreeNodeContext) {
     if node.is_dir {
         let is_expanded = ctx.expanded_dirs().contains(&node.path);
         let icon = if is_expanded { "▼ " } else { "▶ " };

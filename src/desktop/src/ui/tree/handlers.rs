@@ -2,7 +2,7 @@
 //!
 //! Unit tests live in the sibling `handlers_tests.rs` sidecar.
 
-use super::context::{TreeNodeContext, TreeOpsContext};
+use super::context::TreeNodeContext;
 use super::flatten::FlatRow;
 use std::collections::HashSet;
 use std::path::PathBuf;
@@ -48,36 +48,31 @@ use std::path::PathBuf;
 /// without driving the egui harness. The directory-row click
 /// path is unchanged — it has a different effect (toggle
 /// expansion + set `selected_dir`).
-pub fn apply_file_row_click(ctx: &mut TreeNodeContext<'_>, row: &FlatRow) {
+pub fn apply_file_row_click(ctx: &mut TreeNodeContext, row: &FlatRow) {
     let modifiers = ctx.modifiers();
-    // Use split borrows through the flat struct fields rather than
-    // calling the accessor methods three times: the accessors are
-    // `&mut self` methods, but the borrow checker cannot prove
-    // disjointness through method boundaries. Direct field access
-    // on the flat `TreeOpsContext` lets the compiler split-borrow.
-    let TreeOpsContext {
-        selected_dir,
-        selected_file,
-        selected_files,
-        tabs,
-        ..
-    } = ctx;
+    // The fields are owned (no `&'a mut T`). We access them
+    // through the `&mut self` accessor methods; the borrow
+    // checker accepts the calls because each method takes
+    // `&mut self` for the whole struct and the calls don't
+    // overlap (we drop each `&mut` borrow before requesting
+    // the next).
     if modifiers.shift || modifiers.ctrl || modifiers.command {
-        if selected_files.contains(&row.path) {
-            selected_files.remove(&row.path);
-            if selected_file.as_ref() == Some(&row.path) {
-                **selected_file = None;
+        let was_in_selection = ctx.selected_files().contains(&row.path);
+        if was_in_selection {
+            ctx.selected_files().remove(&row.path);
+            if ctx.selected_file().as_ref() == Some(&row.path) {
+                *ctx.selected_file() = None;
             }
         } else {
-            selected_files.insert(row.path.clone());
-            **selected_file = Some(row.path.clone());
+            ctx.selected_files().insert(row.path.clone());
+            *ctx.selected_file() = Some(row.path.clone());
         }
     } else {
-        selected_files.clear();
-        selected_files.insert(row.path.clone());
-        **selected_file = Some(row.path.clone());
-        if !tabs.contains(&row.path) {
-            tabs.push(row.path.clone());
+        ctx.selected_files().clear();
+        ctx.selected_files().insert(row.path.clone());
+        *ctx.selected_file() = Some(row.path.clone());
+        if !ctx.tabs().contains(&row.path) {
+            ctx.tabs().push(row.path.clone());
         }
     }
     // Always refresh the current directory context to the file's
@@ -87,7 +82,7 @@ pub fn apply_file_row_click(ctx: &mut TreeNodeContext<'_>, row: &FlatRow) {
     // `Path::parent` returns `None` for bare filenames (no parent
     // component), which is the right neutral state for the bottom
     // panel's `>` prefix.
-    **selected_dir = row.path.parent().map(|p| p.to_path_buf());
+    *ctx.selected_dir() = row.path.parent().map(|p| p.to_path_buf());
 }
 
 /// Purpose: Applies the side effect of clicking a directory row in
@@ -109,28 +104,16 @@ pub fn apply_file_row_click(ctx: &mut TreeNodeContext<'_>, row: &FlatRow) {
 ///   * Clears `ctx.selected_file()` and `ctx.selected_files()` so
 ///     the file context in the agent prompt clears when the user
 ///     navigates to a different directory.
-pub fn apply_directory_row_click(ctx: &mut TreeNodeContext<'_>, row: &FlatRow) {
-    // Split-borrow through the flat struct fields rather than
-    // calling the accessor methods: direct field access on the flat
-    // `TreeOpsContext` lets the compiler prove disjointness without
-    // seeing through method boundaries.
-    let TreeOpsContext {
-        selected_dir,
-        selected_file,
-        selected_files,
-        expanded_dirs,
-        tree_dirty,
-        ..
-    } = ctx;
-    if expanded_dirs.contains(&row.path) {
-        expanded_dirs.remove(&row.path);
+pub fn apply_directory_row_click(ctx: &mut TreeNodeContext, row: &FlatRow) {
+    if ctx.expanded_dirs().contains(&row.path) {
+        ctx.expanded_dirs().remove(&row.path);
     } else {
-        expanded_dirs.insert(row.path.clone());
+        ctx.expanded_dirs().insert(row.path.clone());
     }
-    **selected_dir = Some(row.path.clone());
+    *ctx.selected_dir() = Some(row.path.clone());
     // Clear file selection when user navigates to a directory
-    **selected_file = None;
-    selected_files.clear();
+    *ctx.selected_file() = None;
+    ctx.selected_files().clear();
     // Toggling `expanded_dirs` changes which rows are visible in the
     // tree, so the cached `Vec<FlatRow>` in `FastMdApp` (the P0
     // perf-optimization cache) is now stale. Mark it dirty so the
@@ -140,7 +123,7 @@ pub fn apply_directory_row_click(ctx: &mut TreeNodeContext<'_>, row: &FlatRow) {
     // width, only the flat row cache. See the regression test
     // `test_directory_click_invalidates_tree_cache` in
     // `ui/panels/left.rs` for the user-visible invariant.
-    **tree_dirty = true;
+    *ctx.tree_dirty() = true;
 }
 
 pub fn build_merge_prompt(
