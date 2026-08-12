@@ -135,7 +135,7 @@ pub fn show_move_modal_dialog(
                                         "Failed to move file to new destination. Likely cause: permission denied or file in use. Operator should check file locks."
                                     );
                                 } else {
-                                    let producer = FileEventProducer::new(file_event_bus);
+                                    let producer = FileEventProducer::new(file_event_bus.clone());
                                     producer.publish_rename(file, &new_path);
                                 }
                             }
@@ -194,7 +194,7 @@ pub fn show_create_dir_dialog(
                         );
                     } else {
                         file_processor.add_dir(new_dir_path.clone());
-                        let producer = FileEventProducer::new(file_event_bus);
+                        let producer = FileEventProducer::new(file_event_bus.clone());
                         producer.publish_dir_discovered(&new_dir_path);
                         if let Some(watcher) = watcher {
                             use notify::Watcher;
@@ -263,7 +263,7 @@ pub fn show_create_document_dialog(
                 } else {
                     match write_new_document(parent, entered) {
                         Ok(new_path) => {
-                            let producer = FileEventProducer::new(file_event_bus);
+                            let producer = FileEventProducer::new(file_event_bus.clone());
                             producer.publish_discovered(&new_path);
                         }
                         Err(e) => tracing::error!(
@@ -411,7 +411,7 @@ pub fn show_rename_dialog(ctx: RenameDialogCtx<'_>) {
                             "Failed to rename file. Likely cause: permission denied or file in use. Operator should check file locks."
                         );
                     } else {
-                        let producer = FileEventProducer::new(file_event_bus);
+                        let producer = FileEventProducer::new(file_event_bus.clone());
                         producer.publish_rename(file, &new_path);
                         if loaded_path.as_ref() == Some(file) {
                             *loaded_path = Some(new_path.clone());

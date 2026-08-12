@@ -2,17 +2,12 @@
 
 use super::*;
 use crate::bus::core::Bus;
-use crate::bus::events::file::FileEvent;
 
 /// A producer that publishes to a throwaway bus. Tests don't
 /// need to consume the events — they only care about the
 /// success/failure of the underlying file operation.
-fn noop_producer() -> FileEventProducer<'static> {
-    // We can't return a reference tied to a local bus, so
-    // instead use a leaked one. Tests run in a single thread
-    // here so leaking is fine for the test lifetime.
-    let bus: &'static Bus<FileEvent> = Box::leak(Box::new(Bus::new()));
-    FileEventProducer::new(bus)
+fn noop_producer() -> FileEventProducer {
+    FileEventProducer::new(Bus::new())
 }
 
 #[test]

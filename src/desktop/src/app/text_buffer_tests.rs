@@ -2,16 +2,14 @@
 
 use super::*;
 use crate::bus::core::Bus;
-use crate::bus::events::file::FileEvent;
 use std::fs;
 use tempfile::tempdir;
 
 /// A producer that publishes to a throwaway bus. Tests don't need
 /// to consume the events — they only care about the file I/O
 /// outcome.
-fn noop_producer() -> FileEventProducer<'static> {
-    let bus: &'static Bus<FileEvent> = Box::leak(Box::new(Bus::new()));
-    FileEventProducer::new(bus)
+fn noop_producer() -> FileEventProducer {
+    FileEventProducer::new(Bus::new())
 }
 
 // ---- Cursor ----

@@ -437,7 +437,7 @@ fn handle_connection(
     }))
 }
 
-fn parse_query(q: &str) -> std::collections::HashMap<String, String> {
+pub(crate) fn parse_query(q: &str) -> std::collections::HashMap<String, String> {
     let mut out = std::collections::HashMap::new();
     for pair in q.split('&') {
         if pair.is_empty() {

@@ -308,36 +308,31 @@ fn write_new_document_avoids_existing_name_with_date_suffix() {
 fn test_create_document_dialog_writes_file_on_submit() {
     use crate::ui::test_helpers::interact::stateful_harness;
     use egui_kittest::kittest::Queryable;
-    use std::sync::{Mutex, OnceLock};
+    use std::sync::Mutex;
 
-    struct StaticFixture {
-        dm: Mutex<Option<DialogManager>>,
-        bus: Bus<FileEvent>,
-        temp_dir: &'static Path,
-    }
-    static FIXTURE: OnceLock<StaticFixture> = OnceLock::new();
-    let fixture = FIXTURE.get_or_init(|| {
-        let leaked = Box::leak(Box::new(std::env::temp_dir().join(format!(
-            "fastmd_create_document_click_{}",
-            std::process::id()
-        ))));
-        let temp_dir: &'static Path = leaked;
-        let _ = fs::create_dir_all(temp_dir);
-        let mut dm = DialogManager::new();
-        dm.create_document_dialog_open = true;
-        dm.create_document_parent = Some(temp_dir.to_path_buf());
-        dm.create_document_name = "from dialog".to_string();
-        StaticFixture {
-            dm: Mutex::new(Some(dm)),
-            bus: Bus::new(),
-            temp_dir,
-        }
-    });
+    // Per-test fixture. No `static`, no `OnceLock`, no
+    // `Box::leak(&'static Path)`: the `PathBuf` lives in the
+    // test function's stack frame, and the closure captures
+    // it by `move` for the harness's lifetime. The
+    // `Mutex<DialogManager>` lets the test and the closure
+    // share mutable state across the harness's frames
+    // without requiring `'static` storage.
+    let temp_dir = std::env::temp_dir().join(format!(
+        "fastmd_create_document_click_{}",
+        std::process::id()
+    ));
+    let _ = fs::create_dir_all(&temp_dir);
+    let mut dm = DialogManager::new();
+    dm.create_document_dialog_open = true;
+    dm.create_document_parent = Some(temp_dir.clone());
+    dm.create_document_name = "from dialog".to_string();
+    let bus = Bus::new();
+    let dm = Mutex::new(Some(dm));
 
-    let mut harness = stateful_harness((), |ui, _| {
-        let mut guard = fixture.dm.lock().unwrap();
+    let mut harness = stateful_harness((), move |ui, _| {
+        let mut guard = dm.lock().unwrap();
         if let Some(dm) = guard.as_mut() {
-            show_create_document_dialog(dm, &fixture.bus, ui.ctx());
+            show_create_document_dialog(dm, &bus, ui.ctx());
         }
     });
     harness.fit_contents();
@@ -345,12 +340,12 @@ fn test_create_document_dialog_writes_file_on_submit() {
     harness.run_steps(2);
     harness.run_steps(2);
 
-    let created = fixture.temp_dir.join("from dialog.md");
+    let created = temp_dir.join("from dialog.md");
     assert!(created.exists(), "Ok must create the document file");
     let content = fs::read_to_string(&created).unwrap();
     assert_eq!(content, "---\ntitle: from dialog\n---\n\n");
 
-    let _ = fs::remove_dir_all(fixture.temp_dir);
+    let _ = fs::remove_dir_all(&temp_dir);
 }
 
 /// Tier 4 functional test: opening the rename dialog with a file
@@ -360,34 +355,27 @@ fn test_create_document_dialog_writes_file_on_submit() {
 fn test_rename_dialog_renames_file_on_submit() {
     use crate::ui::test_helpers::interact::stateful_harness;
     use egui_kittest::kittest::Queryable;
-    use std::sync::{Mutex, OnceLock};
+    use std::sync::Mutex;
 
-    struct StaticFixture {
-        app: Mutex<Option<crate::ui::FastMdApp>>,
-        temp_dir: &'static Path,
-    }
-    static FIXTURE: OnceLock<StaticFixture> = OnceLock::new();
-    let fixture = FIXTURE.get_or_init(|| {
-        let leaked = Box::leak(Box::new(
-            std::env::temp_dir().join(format!("fastmd_rename_dialog_click_{}", std::process::id())),
-        ));
-        let temp_dir: &'static Path = leaked;
-        let _ = fs::create_dir_all(temp_dir);
-        let file_path = temp_dir.join("original.txt");
-        let _ = fs::write(&file_path, "content");
-        let mut app = crate::ui::FastMdApp::empty_state(crate::config::AppConfig::default());
-        app.orchestrator.dialogs.rename_dialog_open = true;
-        app.orchestrator.dialogs.file_to_rename = Some(file_path.clone());
-        app.orchestrator.dialogs.rename_new_name = "renamed".to_string();
-        *app.orchestrator.selection.selected_file_mut() = Some(file_path.clone());
-        StaticFixture {
-            app: Mutex::new(Some(app)),
-            temp_dir,
-        }
-    });
+    // Per-test fixture. The `FastMdApp` is moved into the
+    // `Mutex` and the closure captures the `Mutex` by `move`;
+    // no `'static` storage is required and the temp dir is
+    // cleaned up by the `let _ = fs::remove_dir_all(&temp_dir)`
+    // at the end of the test.
+    let temp_dir =
+        std::env::temp_dir().join(format!("fastmd_rename_dialog_click_{}", std::process::id()));
+    let _ = fs::create_dir_all(&temp_dir);
+    let file_path = temp_dir.join("original.txt");
+    let _ = fs::write(&file_path, "content");
+    let mut app = crate::ui::FastMdApp::empty_state(crate::config::AppConfig::default());
+    app.orchestrator.dialogs.rename_dialog_open = true;
+    app.orchestrator.dialogs.file_to_rename = Some(file_path.clone());
+    app.orchestrator.dialogs.rename_new_name = "renamed".to_string();
+    *app.orchestrator.selection.selected_file_mut() = Some(file_path.clone());
+    let app = Mutex::new(Some(app));
 
-    let mut harness = stateful_harness((), |ui, _| {
-        let mut guard = fixture.app.lock().unwrap();
+    let mut harness = stateful_harness((), move |ui, _| {
+        let mut guard = app.lock().unwrap();
         if let Some(app) = guard.as_mut() {
             let sel = &mut app.orchestrator.selection;
             show_rename_dialog(RenameDialogCtx {
@@ -409,12 +397,12 @@ fn test_rename_dialog_renames_file_on_submit() {
     harness.run_steps(2);
     harness.run_steps(2);
 
-    let renamed = fixture.temp_dir.join("renamed.txt");
+    let renamed = temp_dir.join("renamed.txt");
     assert!(
         renamed.exists(),
         "Ok must rename the file (preserving extension)"
     );
-    assert!(!fixture.temp_dir.join("original.txt").exists());
+    assert!(!temp_dir.join("original.txt").exists());
 
-    let _ = fs::remove_dir_all(fixture.temp_dir);
+    let _ = fs::remove_dir_all(&temp_dir);
 }

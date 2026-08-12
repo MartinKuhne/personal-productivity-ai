@@ -267,3 +267,7 @@ data: {\"jsonrpc\":\"2.0\",\"id\":7,\"result\":{\"ok\":true}}
         assert_eq!(walk.response["result"], serde_json::json!({}));
     }
 }
+
+#[cfg(test)]
+#[path = "sse_proptests.rs"]
+mod sse_proptests;

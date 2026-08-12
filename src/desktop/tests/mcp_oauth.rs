@@ -6,40 +6,64 @@
 //! * The MCP resource server (returns 401 + `WWW-Authenticate`,
 //!   then accepts Bearer tokens).
 //! * The authorization server (Protected Resource Metadata,
-//!   Authorization Server Metadata, token endpoint).
+//!   Authorization Server Metadata, token endpoint, and a 302
+//!   `/authorize` endpoint that simulates the AS redirecting the
+//!   browser to the registered `redirect_uri` with `code` and
+//!   `state`).
 //!
-//! The `open_browser` step inside `run_oauth_flow` is NOT short-circuited
-//! by `loopback_override` — the override only replaces the loopback
-//! listener, not the `webbrowser::open(auth_url)` call. As a result,
-//! any test that drives the real flow pops a real browser window at the
-//! mock server's `/authorize` URL. The two tests below are therefore
-//! marked `#[ignore]` so `cargo test` stays hermetic. Re-enable a single
-//! test locally with `cargo nextest run -E 'test(/full_flow/)'` etc.
+//! The `open_browser` step inside `run_oauth_flow` is short-circuited
+//! by `browser_override` (test seam) — instead of popping a real
+//! browser at the auth URL, the override does an HTTP GET that
+//! follows redirects. The mock at `/authorize` 302-redirects to
+//! the loopback, the HTTP client follows it, the loopback captures
+//! the `code` + `state` (which we echo back from the request, so
+//! the flow's state check passes), and the flow proceeds to
+//! exchange the code for a token. **No real browser is involved.**
 //!
-//! Each test owns its own mock server with a script of canned
-//! responses. Responses are queued in REVERSE order on a shared
-//! `Vec<String>` because the handler pops from the back.
+//! Each test owns its own mock server. The mock supports two kinds
+//! of response:
+//!
+//! * **Canned**: a string pushed onto a stack (consumed in
+//!   reverse). Used for static responses like PRM/AS metadata and
+//!   the token endpoint.
+//! * **Dynamic**: a closure that takes the recorded request and
+//!   returns a response string. Used for the `/authorize`
+//!   endpoint, which has to echo the request's `state` and
+//!   `redirect_uri` back in the 302 Location.
 
+use std::collections::HashMap;
 use std::io::{Read, Write};
-use std::net::{TcpListener, TcpStream};
+use std::net::TcpListener;
 use std::sync::{Arc, Mutex};
 use std::thread;
 use std::time::Duration;
 
 use fastmd::integrations::mcp::oauth::{
-    OAuthFlowInputs, PreRegisteredClient, TokenStore, WwwAuthenticateChallenge, run_oauth_flow,
-    start_loopback,
+    BrowserOverride, OAuthError, OAuthFlowInputs, PreRegisteredClient, TokenStore,
+    WwwAuthenticateChallenge, run_oauth_flow, start_loopback,
 };
 
-/// A recorded HTTP request.
+/// A recorded HTTP request. We keep the raw target (path + query)
+/// so dynamic handlers can pull `state` and `redirect_uri` out of
+/// the query string.
 #[derive(Debug, Clone, Default)]
 struct RecordedRequest {
+    /// `path` (without query). Used to route the request to the
+    /// right handler.
     path: String,
-    _method: String,
-    _auth_header: Option<String>,
+    /// `query` (without the leading `?`). Handlers parse the
+    /// params they need out of this.
+    query: String,
 }
 
-/// Build a canned HTTP/1.1 response.
+/// Dynamic response handler: takes the recorded request, returns a
+/// fully-formed HTTP/1.1 response string. Used for endpoints that
+/// need to vary the response based on the request (e.g. `/authorize`
+/// echoing `state` from the query).
+type DynamicHandler = Box<dyn Fn(&RecordedRequest) -> String + Send + Sync>;
+
+/// Build a canned HTTP/1.1 response with a JSON body and the
+/// given status.
 fn canned(status: u16, reason: &str, content_type: &str, body: &str) -> String {
     format!(
         "HTTP/1.1 {status} {reason}\r\nContent-Type: {content_type}\r\nContent-Length: {len}\r\nConnection: close\r\n\r\n{body}",
@@ -47,11 +71,54 @@ fn canned(status: u16, reason: &str, content_type: &str, body: &str) -> String {
     )
 }
 
+/// Build a canned 302 redirect with a `Location` header.
+fn redirect_302(location: &str) -> String {
+    format!(
+        "HTTP/1.1 302 Found\r\nLocation: {location}\r\nContent-Length: 0\r\nConnection: close\r\n\r\n"
+    )
+}
+
+/// Percent-decode a single query-string value. The auth URL
+/// contains URL-encoded values for `state` and `redirect_uri`
+/// (e.g. `redirect_uri=http%3A%2F%2F127.0.0.1%3A54321%2Fcb`).
+/// We need the decoded form so the 302 `Location` header is a
+/// well-formed URL the HTTP client can follow.
+fn percent_decode_value(s: &str) -> String {
+    let bytes = s.as_bytes();
+    let mut out = Vec::with_capacity(bytes.len());
+    let mut i = 0;
+    while i < bytes.len() {
+        let b = bytes[i];
+        if b == b'%' && i + 2 < bytes.len() {
+            let hi = hex_val(bytes[i + 1]);
+            let lo = hex_val(bytes[i + 2]);
+            if let (Some(h), Some(l)) = (hi, lo) {
+                out.push((h << 4) | l);
+                i += 3;
+                continue;
+            }
+        }
+        out.push(b);
+        i += 1;
+    }
+    String::from_utf8_lossy(&out).into_owned()
+}
+
+fn hex_val(b: u8) -> Option<u8> {
+    match b {
+        b'0'..=b'9' => Some(b - b'0'),
+        b'a'..=b'f' => Some(b - b'a' + 10),
+        b'A'..=b'F' => Some(b - b'A' + 10),
+        _ => None,
+    }
+}
+
 /// State shared between the per-connection handler and the
-/// test: a queue of canned responses (consumed in reverse) and
-/// a log of recorded requests.
+/// test: a stack of canned responses (consumed in reverse), an
+/// optional dynamic handler, and a log of recorded requests.
 struct MockState {
     responses: Mutex<Vec<String>>,
+    dynamic: Mutex<HashMap<String, DynamicHandler>>,
     recorded: Mutex<Vec<RecordedRequest>>,
 }
 
@@ -59,13 +126,31 @@ impl MockState {
     fn new() -> Arc<Self> {
         Arc::new(Self {
             responses: Mutex::new(Vec::new()),
+            dynamic: Mutex::new(HashMap::new()),
             recorded: Mutex::new(Vec::new()),
         })
     }
+    /// Push a canned response onto the stack. The handler pops
+    /// the most-recently-pushed first.
     fn push(&self, response: String) {
         self.responses.lock().unwrap().push(response);
     }
-    fn take_next(&self) -> String {
+    /// Register a dynamic handler for a given path. The handler
+    /// receives the recorded request and returns the response
+    /// string. Used for endpoints that need to vary their reply
+    /// per request.
+    fn on(&self, path: &str, handler: DynamicHandler) {
+        self.dynamic
+            .lock()
+            .unwrap()
+            .insert(path.to_owned(), handler);
+    }
+    /// Pop a response for the given path: if a dynamic handler
+    /// is registered, use it; otherwise pop a canned response.
+    fn dispatch(&self, recorded: &RecordedRequest) -> String {
+        if let Some(handler) = self.dynamic.lock().unwrap().get(&recorded.path) {
+            return handler(recorded);
+        }
         self.responses
             .lock()
             .unwrap()
@@ -78,8 +163,9 @@ impl MockState {
 }
 
 /// Start a single-threaded mock server. Each accepted connection
-/// reads ONE request, records it, and writes ONE canned response.
-/// The function returns the bound port and the shared state.
+/// reads ONE request, records it, and writes ONE response
+/// (canned or dynamic, depending on the path). The function
+/// returns the bound port and the shared state.
 fn start_mock() -> (u16, Arc<MockState>) {
     let listener = TcpListener::bind("127.0.0.1:0").expect("bind mock");
     let port = listener.local_addr().unwrap().port();
@@ -106,43 +192,67 @@ fn start_mock() -> (u16, Arc<MockState>) {
                     Err(_) => break,
                 }
             }
-            // Parse request line + Authorization header.
+            // Parse request line. We only need the path + query
+            // for routing; headers are not used by the handlers
+            // today.
             let mut lines = total.split("\r\n");
             let request_line = lines.next().unwrap_or("");
             let mut parts = request_line.split_whitespace();
-            let method = parts.next().unwrap_or("").to_owned();
-            let path = parts.next().unwrap_or("").to_owned();
-            let mut auth = None;
+            let _method = parts.next().unwrap_or("").to_owned();
+            let target = parts.next().unwrap_or("").to_owned();
             for line in lines {
-                if let Some(rest) = line.strip_prefix("Authorization:") {
-                    auth = Some(rest.trim().to_owned());
-                }
                 if line.is_empty() {
                     break;
                 }
             }
-            state_clone.recorded.lock().unwrap().push(RecordedRequest {
-                path,
-                _method: method,
-                _auth_header: auth,
-            });
-            let response = state_clone.take_next();
+            let (path, query) = match target.split_once('?') {
+                Some((p, q)) => (p.to_owned(), q.to_owned()),
+                None => (target.clone(), String::new()),
+            };
+            let recorded = RecordedRequest { path, query };
+            state_clone.recorded.lock().unwrap().push(recorded.clone());
+            let response = state_clone.dispatch(&recorded);
             let _ = stream.write_all(response.as_bytes());
         }
     });
     (port, state)
 }
 
+/// Build a `BrowserOverride` that does an HTTP GET on the auth URL
+/// and follows the 302 the mock returns. We use `reqwest`'s
+/// blocking client with a redirect policy; it transparently walks
+/// the chain `auth URL -> loopback` so the loopback captures the
+/// `code` and `state` query parameters exactly as a real browser
+/// would.
+fn http_redirect_browser_override() -> BrowserOverride {
+    Arc::new(|url: &str| -> Result<(), OAuthError> {
+        let client = reqwest::blocking::Client::builder()
+            .redirect(reqwest::redirect::Policy::limited(5))
+            .timeout(Duration::from_secs(5))
+            .build()
+            .map_err(|e| OAuthError::Transport(format!("browser override client: {e}")))?;
+        let resp = client
+            .get(url)
+            .send()
+            .map_err(|e| OAuthError::Transport(format!("browser override GET: {e}")))?;
+        // We don't care about the response body; the loopback
+        // has already captured the code/state. Drain it so the
+        // connection can close cleanly.
+        let _ = resp.text();
+        Ok(())
+    })
+}
+
 #[test]
-#[ignore = "drives the real OAuth flow, which calls webbrowser::open(auth_url) and pops a browser window at the mock server's /authorize URL — not hermetic; see module docstring"]
 fn full_flow_succeeds_with_preregistered_client() {
     // Canned responses (in reverse — handler pops the last):
-    //   5. Token endpoint → token response
-    //   4. AS Metadata GET → AS doc
-    //   3. PRM GET → resource metadata
-    //   2. (the loopback is overridden, so no GET /callback hits the mock)
-    //   1. (the 401 the session would have sent is what triggers
-    //       the flow; in this test we drive the flow directly)
+    //   3. Token endpoint → token response
+    //   2. AS Metadata GET → AS doc
+    //   1. PRM GET → resource metadata
+    //
+    // The `/authorize` 302 is dynamic (echoes `state` and
+    // `redirect_uri` from the request). The loopback captures
+    // the redirected request and the flow's state check passes.
     let (port, state) = start_mock();
     state.push(canned(
         200,
@@ -166,48 +276,30 @@ fn full_flow_succeeds_with_preregistered_client() {
             r#"{{"resource":"http://127.0.0.1:{port}/mcp","authorization_servers":["http://127.0.0.1:{port}/tenant1"],"scopes_supported":["read","write"]}}"#
         ),
     ));
+    // /authorize: 302 to the loopback with the state we got in
+    // the request. This is what a real AS does after the user
+    // successfully authenticates.
+    state.on(
+        "/authorize",
+        Box::new(|req: &RecordedRequest| -> String {
+            let state_param = percent_decode_value(
+                req.query
+                    .split('&')
+                    .find_map(|kv| kv.strip_prefix("state="))
+                    .unwrap_or(""),
+            );
+            let redirect_uri = percent_decode_value(
+                req.query
+                    .split('&')
+                    .find_map(|kv| kv.strip_prefix("redirect_uri="))
+                    .unwrap_or(""),
+            );
+            let location = format!("{}?code=mock-code&state={}", redirect_uri, state_param);
+            redirect_302(&location)
+        }),
+    );
 
     let loopback = start_loopback(Some("/cb"), Some(Duration::from_secs(5))).unwrap();
-    let code = "test-code".to_owned();
-    let expected_state = "?";
-    // We need to read the actual state the flow sent. The
-    // flow generates it internally; we don't know it in
-    // advance. So: spawn a thread that fires the callback with
-    // a placeholder state and capture the actual one via the
-    // loopback result. (We can't, so we just use a *known* state
-    // — but the flow generates a random state. So instead, the
-    // approach: fire the callback with whatever the loopback
-    // accepted; this test verifies the happy path including the
-    // state check, so we need the right state.)
-    //
-    // Workaround: we use a thread that re-tries until the
-    // callback server reports the same state the flow sent.
-    // We can't see the state from outside; instead, accept the
-    // cost of failure and just check that the flow runs to
-    // completion — if the state is wrong, the flow errors out
-    // and the test fails with a clear message.
-    //
-    // For deterministic state, the cleanest path is to
-    // pre-generate it. The flow does not expose that, so we
-    // skip state verification in this test and instead just
-    // check that the flow's error is `OAuthError::StateMismatch`
-    // when we send a wrong state.
-    let port_for_cb = loopback.port;
-    let redirect_uri = loopback.redirect_uri.clone();
-    let t = thread::spawn(move || {
-        // The flow's `run_flow` blocks on `wait_for_code`, so we
-        // need to fire the callback from a separate thread. We
-        // don't know the state in advance; we use a placeholder
-        // and accept the StateMismatch for this test.
-        let mut stream = TcpStream::connect(("127.0.0.1", port_for_cb)).unwrap();
-        write!(
-            stream,
-            "GET {redirect_uri}?code=test-code&state=placeholder HTTP/1.1\r\nHost: 127.0.0.1\r\nConnection: close\r\n\r\n"
-        )
-        .unwrap();
-        let mut buf = Vec::new();
-        let _ = stream.read_to_end(&mut buf);
-    });
 
     let pre = PreRegisteredClient {
         client_id: "test-client".to_owned(),
@@ -221,31 +313,41 @@ fn full_flow_succeeds_with_preregistered_client() {
         timeout: Some(Duration::from_secs(5)),
         pre_registered_client: Some(pre),
         loopback_override: Some(loopback),
+        browser_override: Some(http_redirect_browser_override()),
     };
-    let result = run_oauth_flow(&inputs, &store);
-    t.join().unwrap();
-    // We expect the flow to fail with StateMismatch because we
-    // used a placeholder state. The test verifies that the
-    // flow runs to the point where the state check fires (i.e.
-    // discovery succeeded and the token exchange would have run
-    // if the state matched).
-    let _ = (code, expected_state);
-    match result {
-        Ok(_) => panic!("expected StateMismatch but flow succeeded"),
-        Err(fastmd::integrations::mcp::oauth::OAuthError::StateMismatch) => {
-            // Discovery requests landed on the mock:
-            let recs = state.record();
-            assert!(
-                recs.iter()
-                    .any(|r| r.path.contains("/.well-known/oauth-protected-resource"))
-            );
-        }
-        Err(other) => panic!("expected StateMismatch, got: {other}"),
-    }
+    let result = run_oauth_flow(&inputs, &store).expect("flow should succeed");
+
+    assert_eq!(result.token.access_token, "fresh-token");
+    assert_eq!(result.token.token_type, "Bearer");
+    assert_eq!(result.client_id, "test-client");
+
+    // The store should now hold the freshly-minted token under
+    // the canonical resource URI.
+    let stored = store
+        .get(&format!("http://127.0.0.1:{port}/mcp"))
+        .expect("token stored");
+    assert_eq!(stored.access_token, "fresh-token");
+
+    // Sanity-check the discovery requests landed on the mock.
+    let recs = state.record();
+    let paths: Vec<&str> = recs.iter().map(|r| r.path.as_str()).collect();
+    assert!(
+        paths
+            .iter()
+            .any(|p| p.contains("/.well-known/oauth-protected-resource")),
+        "expected a PRM probe; got: {paths:?}"
+    );
+    assert!(
+        paths.contains(&"/authorize"),
+        "expected an /authorize hit; got: {paths:?}"
+    );
+    assert!(
+        paths.contains(&"/token"),
+        "expected a /token hit; got: {paths:?}"
+    );
 }
 
 #[test]
-#[ignore = "drives the real OAuth flow, which calls webbrowser::open(auth_url) and pops a browser window at the mock server's /authorize URL — not hermetic; see module docstring"]
 fn flow_uses_challenge_resource_metadata_url() {
     let (port, state) = start_mock();
     state.push(canned(
@@ -262,6 +364,7 @@ fn flow_uses_challenge_resource_metadata_url() {
             r#"{{"issuer":"http://127.0.0.1:{port}","authorization_endpoint":"http://127.0.0.1:{port}/authorize","token_endpoint":"http://127.0.0.1:{port}/token","code_challenge_methods_supported":["S256"],"response_types_supported":["code"]}}"#
         ),
     ));
+    // PRM at the challenge's URL (not the well-known one).
     state.push(canned(
         200,
         "OK",
@@ -270,20 +373,31 @@ fn flow_uses_challenge_resource_metadata_url() {
             r#"{{"resource":"http://127.0.0.1:{port}/mcp","authorization_servers":["http://127.0.0.1:{port}"],"scopes_supported":["read"]}}"#
         ),
     ));
+    // /authorize: 302, echo state + redirect_uri back.
+    state.on(
+        "/authorize",
+        Box::new(|req: &RecordedRequest| -> String {
+            let state_param = percent_decode_value(
+                req.query
+                    .split('&')
+                    .find_map(|kv| kv.strip_prefix("state="))
+                    .unwrap_or(""),
+            );
+            let redirect_uri = percent_decode_value(
+                req.query
+                    .split('&')
+                    .find_map(|kv| kv.strip_prefix("redirect_uri="))
+                    .unwrap_or(""),
+            );
+            let location = format!(
+                "{}?code=via-challenge-code&state={}",
+                redirect_uri, state_param
+            );
+            redirect_302(&location)
+        }),
+    );
 
     let loopback = start_loopback(Some("/cb"), Some(Duration::from_secs(5))).unwrap();
-    let port_for_cb = loopback.port;
-    let redirect_uri = loopback.redirect_uri.clone();
-    let t = thread::spawn(move || {
-        let mut stream = TcpStream::connect(("127.0.0.1", port_for_cb)).unwrap();
-        write!(
-            stream,
-            "GET {redirect_uri}?code=any&state=placeholder HTTP/1.1\r\nHost: 127.0.0.1\r\nConnection: close\r\n\r\n"
-        )
-        .unwrap();
-        let mut buf = Vec::new();
-        let _ = stream.read_to_end(&mut buf);
-    });
 
     let pre = PreRegisteredClient {
         client_id: "test-client".to_owned(),
@@ -304,23 +418,20 @@ fn flow_uses_challenge_resource_metadata_url() {
         timeout: Some(Duration::from_secs(5)),
         pre_registered_client: Some(pre),
         loopback_override: Some(loopback),
+        browser_override: Some(http_redirect_browser_override()),
     };
-    let result = run_oauth_flow(&inputs, &store);
-    t.join().unwrap();
-    match result {
-        Ok(_) => panic!("expected StateMismatch, got success"),
-        Err(fastmd::integrations::mcp::oauth::OAuthError::StateMismatch) => {
-            // The challenge's URL should have been used for the
-            // PRM fetch.
-            let recs = state.record();
-            let paths: Vec<&str> = recs.iter().map(|r| r.path.as_str()).collect();
-            assert!(
-                paths.contains(&"/custom-prm"),
-                "PRM should have hit the challenge URL; got: {paths:?}"
-            );
-        }
-        Err(other) => panic!("expected StateMismatch, got: {other}"),
-    }
+    let result = run_oauth_flow(&inputs, &store).expect("flow should succeed");
+
+    assert_eq!(result.token.access_token, "via-challenge");
+
+    // The challenge's URL should have been used for the PRM
+    // fetch (not the well-known probe).
+    let recs = state.record();
+    let paths: Vec<&str> = recs.iter().map(|r| r.path.as_str()).collect();
+    assert!(
+        paths.contains(&"/custom-prm"),
+        "PRM should have hit the challenge URL; got: {paths:?}"
+    );
 }
 
 #[test]
@@ -350,6 +461,7 @@ fn step_up_combines_required_and_extra_scopes() {
             client_secret: None,
         }),
         loopback_override: None,
+        browser_override: None,
     };
     // We don't have a real server; just verify the flow errors
     // out as expected when discovery fails (no listener on

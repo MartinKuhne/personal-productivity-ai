@@ -26,7 +26,7 @@ use super::FastMdApp;
 
 impl FastMdApp {
     pub(super) fn show_editor_overlay(&mut self, ui: &mut egui::Ui) {
-        let producer = FileEventProducer::new(&self.orchestrator.file_event_bus);
+        let producer = FileEventProducer::new(self.orchestrator.file_event_bus.clone());
         // The editor opens its own top-level `egui::Window` from
         // the context pulled out of `ui`. After it returns we
         // check whether the buffer was closed (either by a

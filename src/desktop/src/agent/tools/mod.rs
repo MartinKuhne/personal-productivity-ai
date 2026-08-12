@@ -25,6 +25,17 @@ pub mod yaml_header;
 #[cfg(all(test, feature = "browser"))]
 mod browser_tests;
 
+// Property-based tests for the LLM↔tool DTO trust boundary.
+// Phase 1 of the fuzzing plan (`doc/planning/fuzzing.md`).
+#[cfg(test)]
+mod dtos_proptests;
+
+// Property-based tests for the `ToolManager::execute_tool`
+// dispatch — every (name, args) pair the LLM emits. Phase 1 of
+// the fuzzing plan (`doc/planning/fuzzing.md`).
+#[cfg(test)]
+mod tool_call_dispatch_proptests;
+
 use crate::config::AppConfig;
 use context::ToolContext;
 use std::any::TypeId;

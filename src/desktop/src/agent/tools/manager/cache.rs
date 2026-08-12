@@ -12,7 +12,7 @@
 
 use serde_json::Value;
 use std::collections::{HashMap, VecDeque};
-use std::sync::{LazyLock, Mutex};
+use std::sync::{Arc, LazyLock, Mutex};
 use std::time::{Duration, Instant};
 
 /// TTL for cache entries shared by `web_fetch` and `search_email`.
@@ -69,9 +69,15 @@ pub struct SearchEmailItem {
     pub email: Value,
 }
 
-/// Process-local shared cache. Use [`cache`] to get the singleton.
+/// Process-local shared cache. `Clone` is a cheap `Arc` clone of the
+/// inner `Mutex<CacheState>`, so a `ToolCache` can be embedded in a
+/// `ToolContext` (or anywhere else that needs an owned handle) and
+/// cloned without deep-copying the entry map.
+///
+/// Use [`cache`] to get the process-wide singleton.
+#[derive(Clone)]
 pub struct ToolCache {
-    state: Mutex<CacheState>,
+    state: Arc<Mutex<CacheState>>,
 }
 
 struct CacheState {
@@ -92,10 +98,10 @@ impl ToolCache {
     /// Create a new empty cache.
     pub fn new() -> Self {
         Self {
-            state: Mutex::new(CacheState {
+            state: Arc::new(Mutex::new(CacheState {
                 entries: HashMap::new(),
                 insertion_order: VecDeque::new(),
-            }),
+            })),
         }
     }
 
@@ -209,6 +215,35 @@ mod tests {
         match entry {
             Some(CacheEntry::WebFetch { cursor }) => assert_eq!(cursor, "test-cursor"),
             _ => panic!("expected WebFetch entry"),
+        }
+    }
+
+    /// `ToolCache::clone` must be an `Arc` clone, not a deep
+    /// clone of the inner `HashMap` + `VecDeque`. The contract
+    /// is the basis for Phase 4 of `doc/planning/fuzzing.md`:
+    /// `ToolContext` will own a `ToolCache` by value and a
+    /// second `ToolContext` (in a parallel dispatch) will see
+    /// the same state via a cheap `Arc::clone`. A regression
+    /// that changed the inner field back to `Mutex<CacheState>`
+    /// (without `Arc`) would still pass the `Clone` derive,
+    /// but it would no longer be a shallow clone; this test
+    /// pins the property.
+    #[test]
+    fn clone_is_shallow() {
+        let cache = ToolCache::new();
+        cache.put("test:shallow".to_string(), web_entry("cursor-1"));
+        let cloned = cache.clone();
+        // The clone must observe the same state — proves the
+        // inner `Arc` is shared.
+        assert!(cloned.get("test:shallow").is_some());
+        // A write through the original is visible through the
+        // clone, and vice versa. This is the test that catches
+        // "cloned the cache struct but not the state" — the
+        // case the rewrite is fixing.
+        cloned.put("test:shallow".to_string(), web_entry("cursor-2"));
+        match cache.get("test:shallow") {
+            Some(CacheEntry::WebFetch { cursor }) => assert_eq!(cursor, "cursor-2"),
+            _ => panic!("expected WebFetch entry after clone write"),
         }
     }
 

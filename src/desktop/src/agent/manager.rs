@@ -449,6 +449,7 @@ fn spawn_driver(
                 session_id,
                 browser_session: browser_session.clone(),
                 pdf_backing: pdf_backing.clone(),
+                cache: std::sync::Arc::new(crate::agent::tools::manager::cache::ToolCache::new()),
                 tool_manager: tool_manager.clone(),
                 uuid_gen: std::sync::Arc::new(crate::utils::uuid::SystemUuidGenerator),
             };

@@ -1,7 +1,13 @@
 //! Tests for `tree/handlers.rs`.
+//!
+//! All tests build a [`TreeNodeContext`] directly with owned
+//! fields and `..Default::default()`. The previous version
+//! borrowed every field from local `let mut` variables and
+//! required 18 `Box::leak` calls per test to satisfy a
+//! `'static` re-borrow across the harness closure. The
+//! lifetime-free rewrite drops that machinery entirely.
 
 use super::*;
-use crate::app::panel_layout::PanelLayout;
 use crate::ui::tree::context::TreeNodeContext;
 use eframe::egui;
 use std::collections::HashSet;
@@ -12,11 +18,6 @@ use std::path::PathBuf;
 /// onto `tabs` if not already there.
 #[test]
 fn test_apply_file_row_click_no_modifier_replaces_selection_and_opens_tab() {
-    let mut tabs: Vec<PathBuf> = vec![PathBuf::from("a.md")];
-    let mut selected_file = Some(PathBuf::from("a.md"));
-    let mut selected_files = HashSet::new();
-    selected_files.insert(PathBuf::from("a.md"));
-    let mut expanded_dirs = HashSet::new();
     let row = FlatRow {
         depth: 0,
         name: "b.md".to_string(),
@@ -24,45 +25,24 @@ fn test_apply_file_row_click_no_modifier_replaces_selection_and_opens_tab() {
         is_dir: false,
         is_expanded: false,
     };
-    let mut tree_dirty = false;
     let mut ctx = TreeNodeContext {
-        selected_file: &mut selected_file,
-        selected_files: &mut selected_files,
-        expanded_dirs: &mut expanded_dirs,
-        tabs: &mut tabs,
-        selected_dir: &mut None,
-        create_dir_dialog_open: &mut false,
-        create_dir_parent: &mut None,
-        file_to_move: &mut None,
-        move_dialog_open: &mut false,
-        file_to_rename: &mut None,
-        rename_dialog_open: &mut false,
-        rename_new_name: &mut String::new(),
-        create_document_dialog_open: &mut false,
-        create_document_parent: &mut None,
-        layout: &mut PanelLayout::default(),
-        submit_prompt: &mut None,
-        content_libraries: &[],
-        open_editor: &mut None,
-        modifiers: egui::Modifiers::default(),
-        inline_editor_enabled: false,
-        bg_tx: &None,
-        file_event_producer: None,
-        tree_dirty: &mut tree_dirty,
-        pdf_backing_tracker: crate::app::session::PdfBackingTracker::new(),
+        selected_file: Some(PathBuf::from("a.md")),
+        selected_files: HashSet::from([PathBuf::from("a.md")]),
+        tabs: vec![PathBuf::from("a.md")],
+        ..Default::default()
     };
 
     apply_file_row_click(&mut ctx, &row);
 
-    assert_eq!(selected_file, Some(PathBuf::from("b.md")));
-    assert!(selected_files.contains(&PathBuf::from("b.md")));
+    assert_eq!(ctx.selected_file, Some(PathBuf::from("b.md")));
+    assert!(ctx.selected_files.contains(&PathBuf::from("b.md")));
     assert_eq!(
-        selected_files.len(),
+        ctx.selected_files.len(),
         1,
         "previous selection must be cleared"
     );
     assert_eq!(
-        tabs,
+        ctx.tabs,
         vec![PathBuf::from("a.md"), PathBuf::from("b.md")],
         "clicked file must be pushed onto tabs"
     );
@@ -74,11 +54,6 @@ fn test_apply_file_row_click_no_modifier_replaces_selection_and_opens_tab() {
 /// if it pointed at that file.
 #[test]
 fn test_apply_file_row_click_shift_toggles_off() {
-    let mut tabs: Vec<PathBuf> = vec![];
-    let mut selected_file = Some(PathBuf::from("b.md"));
-    let mut selected_files = HashSet::new();
-    selected_files.insert(PathBuf::from("b.md"));
-    let mut expanded_dirs = HashSet::new();
     let row = FlatRow {
         depth: 0,
         name: "b.md".to_string(),
@@ -86,45 +61,24 @@ fn test_apply_file_row_click_shift_toggles_off() {
         is_dir: false,
         is_expanded: false,
     };
-    let mut tree_dirty = false;
     let mut ctx = TreeNodeContext {
-        selected_file: &mut selected_file,
-        selected_files: &mut selected_files,
-        expanded_dirs: &mut expanded_dirs,
-        tabs: &mut tabs,
-        selected_dir: &mut None,
-        create_dir_dialog_open: &mut false,
-        create_dir_parent: &mut None,
-        file_to_move: &mut None,
-        move_dialog_open: &mut false,
-        file_to_rename: &mut None,
-        rename_dialog_open: &mut false,
-        rename_new_name: &mut String::new(),
-        create_document_dialog_open: &mut false,
-        create_document_parent: &mut None,
-        layout: &mut PanelLayout::default(),
-        submit_prompt: &mut None,
-        content_libraries: &[],
-        open_editor: &mut None,
+        selected_file: Some(PathBuf::from("b.md")),
+        selected_files: HashSet::from([PathBuf::from("b.md")]),
         modifiers: egui::Modifiers {
             shift: true,
             ..Default::default()
         },
-        inline_editor_enabled: false,
-        bg_tx: &None,
-        file_event_producer: None,
-        tree_dirty: &mut tree_dirty,
-        pdf_backing_tracker: crate::app::session::PdfBackingTracker::new(),
+        ..Default::default()
     };
 
     apply_file_row_click(&mut ctx, &row);
 
     assert!(
-        !selected_files.contains(&PathBuf::from("b.md")),
+        !ctx.selected_files.contains(&PathBuf::from("b.md")),
         "shift-click on a selected file must remove it from selected_files"
     );
     assert!(
-        selected_file.is_none(),
+        ctx.selected_file.is_none(),
         "selected_file must be cleared when the toggled-off file was the selected one"
     );
 }
@@ -135,11 +89,6 @@ fn test_apply_file_row_click_shift_toggles_off() {
 /// not auto-open tabs).
 #[test]
 fn test_apply_file_row_click_shift_adds_to_selection_without_opening_tab() {
-    let mut tabs: Vec<PathBuf> = vec![];
-    let mut selected_file = Some(PathBuf::from("a.md"));
-    let mut selected_files = HashSet::new();
-    selected_files.insert(PathBuf::from("a.md"));
-    let mut expanded_dirs = HashSet::new();
     let row = FlatRow {
         depth: 0,
         name: "b.md".to_string(),
@@ -147,47 +96,26 @@ fn test_apply_file_row_click_shift_adds_to_selection_without_opening_tab() {
         is_dir: false,
         is_expanded: false,
     };
-    let mut tree_dirty = false;
     let mut ctx = TreeNodeContext {
-        selected_file: &mut selected_file,
-        selected_files: &mut selected_files,
-        expanded_dirs: &mut expanded_dirs,
-        tabs: &mut tabs,
-        selected_dir: &mut None,
-        create_dir_dialog_open: &mut false,
-        create_dir_parent: &mut None,
-        file_to_move: &mut None,
-        move_dialog_open: &mut false,
-        file_to_rename: &mut None,
-        rename_dialog_open: &mut false,
-        rename_new_name: &mut String::new(),
-        create_document_dialog_open: &mut false,
-        create_document_parent: &mut None,
-        layout: &mut PanelLayout::default(),
-        submit_prompt: &mut None,
-        content_libraries: &[],
-        open_editor: &mut None,
+        selected_file: Some(PathBuf::from("a.md")),
+        selected_files: HashSet::from([PathBuf::from("a.md")]),
         modifiers: egui::Modifiers {
             shift: true,
             ..Default::default()
         },
-        inline_editor_enabled: false,
-        bg_tx: &None,
-        file_event_producer: None,
-        tree_dirty: &mut tree_dirty,
-        pdf_backing_tracker: crate::app::session::PdfBackingTracker::new(),
+        ..Default::default()
     };
 
     apply_file_row_click(&mut ctx, &row);
 
-    assert!(selected_files.contains(&PathBuf::from("b.md")));
+    assert!(ctx.selected_files.contains(&PathBuf::from("b.md")));
     assert_eq!(
-        selected_file,
+        ctx.selected_file,
         Some(PathBuf::from("b.md")),
         "shift-click must set selected_file to the clicked file"
     );
     assert!(
-        tabs.is_empty(),
+        ctx.tabs.is_empty(),
         "shift-click must NOT auto-open the clicked file as a tab (multi-select mode)"
     );
 }
@@ -197,11 +125,6 @@ fn test_apply_file_row_click_shift_adds_to_selection_without_opening_tab() {
 /// open paths.
 #[test]
 fn test_apply_file_row_click_no_duplicate_tab() {
-    let mut tabs: Vec<PathBuf> = vec![PathBuf::from("a.md")];
-    let mut selected_file = Some(PathBuf::from("a.md"));
-    let mut selected_files = HashSet::new();
-    selected_files.insert(PathBuf::from("a.md"));
-    let mut expanded_dirs = HashSet::new();
     let row = FlatRow {
         depth: 0,
         name: "a.md".to_string(),
@@ -209,38 +132,17 @@ fn test_apply_file_row_click_no_duplicate_tab() {
         is_dir: false,
         is_expanded: false,
     };
-    let mut tree_dirty = false;
     let mut ctx = TreeNodeContext {
-        selected_file: &mut selected_file,
-        selected_files: &mut selected_files,
-        expanded_dirs: &mut expanded_dirs,
-        tabs: &mut tabs,
-        selected_dir: &mut None,
-        create_dir_dialog_open: &mut false,
-        create_dir_parent: &mut None,
-        file_to_move: &mut None,
-        move_dialog_open: &mut false,
-        file_to_rename: &mut None,
-        rename_dialog_open: &mut false,
-        rename_new_name: &mut String::new(),
-        create_document_dialog_open: &mut false,
-        create_document_parent: &mut None,
-        layout: &mut PanelLayout::default(),
-        submit_prompt: &mut None,
-        content_libraries: &[],
-        open_editor: &mut None,
-        modifiers: egui::Modifiers::default(),
-        inline_editor_enabled: false,
-        bg_tx: &None,
-        file_event_producer: None,
-        tree_dirty: &mut tree_dirty,
-        pdf_backing_tracker: crate::app::session::PdfBackingTracker::new(),
+        selected_file: Some(PathBuf::from("a.md")),
+        selected_files: HashSet::from([PathBuf::from("a.md")]),
+        tabs: vec![PathBuf::from("a.md")],
+        ..Default::default()
     };
 
     apply_file_row_click(&mut ctx, &row);
 
     assert_eq!(
-        tabs,
+        ctx.tabs,
         vec![PathBuf::from("a.md")],
         "clicking an already-open tab must not push a duplicate"
     );
@@ -259,53 +161,25 @@ fn test_apply_file_row_click_no_duplicate_tab() {
 /// wrong context once the user opened a file.
 #[test]
 fn test_apply_file_row_click_updates_selected_dir_to_parent() {
-    let mut tabs: Vec<PathBuf> = vec![];
-    let mut selected_file: Option<PathBuf> = None;
-    let mut selected_files: HashSet<PathBuf> = HashSet::new();
-    let mut expanded_dirs: HashSet<PathBuf> = HashSet::new();
-    // Pre-existing stale value to prove the click overwrites it.
-    let mut selected_dir: Option<PathBuf> = Some(PathBuf::from("C:/old/dir"));
     let file_path = PathBuf::from("C:/notes/folder/file.md");
     let expected_parent = Some(PathBuf::from("C:/notes/folder"));
     let row = FlatRow {
         depth: 1,
         name: "file.md".to_string(),
-        path: file_path.clone(),
+        path: file_path,
         is_dir: false,
         is_expanded: false,
     };
-    let mut tree_dirty = false;
+    // Pre-existing stale value to prove the click overwrites it.
     let mut ctx = TreeNodeContext {
-        selected_file: &mut selected_file,
-        selected_files: &mut selected_files,
-        expanded_dirs: &mut expanded_dirs,
-        tabs: &mut tabs,
-        selected_dir: &mut selected_dir,
-        create_dir_dialog_open: &mut false,
-        create_dir_parent: &mut None,
-        file_to_move: &mut None,
-        move_dialog_open: &mut false,
-        file_to_rename: &mut None,
-        rename_dialog_open: &mut false,
-        rename_new_name: &mut String::new(),
-        create_document_dialog_open: &mut false,
-        create_document_parent: &mut None,
-        layout: &mut PanelLayout::default(),
-        submit_prompt: &mut None,
-        content_libraries: &[],
-        open_editor: &mut None,
-        modifiers: egui::Modifiers::default(),
-        inline_editor_enabled: false,
-        bg_tx: &None,
-        file_event_producer: None,
-        tree_dirty: &mut tree_dirty,
-        pdf_backing_tracker: crate::app::session::PdfBackingTracker::new(),
+        selected_dir: Some(PathBuf::from("C:/old/dir")),
+        ..Default::default()
     };
 
     apply_file_row_click(&mut ctx, &row);
 
     assert_eq!(
-        selected_dir, expected_parent,
+        ctx.selected_dir, expected_parent,
         "clicking a file row must update selected_dir to the file's containing directory"
     );
 }
@@ -317,55 +191,27 @@ fn test_apply_file_row_click_updates_selected_dir_to_parent() {
 /// context should reflect it.
 #[test]
 fn test_apply_file_row_click_shift_updates_selected_dir_to_parent() {
-    let mut tabs: Vec<PathBuf> = vec![];
-    let mut selected_file: Option<PathBuf> = None;
-    let mut selected_files: HashSet<PathBuf> = HashSet::new();
-    let mut expanded_dirs: HashSet<PathBuf> = HashSet::new();
-    let mut selected_dir: Option<PathBuf> = None;
     let file_path = PathBuf::from("C:/notes/folder/file.md");
     let expected_parent = Some(PathBuf::from("C:/notes/folder"));
     let row = FlatRow {
         depth: 1,
         name: "file.md".to_string(),
-        path: file_path.clone(),
+        path: file_path,
         is_dir: false,
         is_expanded: false,
     };
-    let mut tree_dirty = false;
     let mut ctx = TreeNodeContext {
-        selected_file: &mut selected_file,
-        selected_files: &mut selected_files,
-        expanded_dirs: &mut expanded_dirs,
-        tabs: &mut tabs,
-        selected_dir: &mut selected_dir,
-        create_dir_dialog_open: &mut false,
-        create_dir_parent: &mut None,
-        file_to_move: &mut None,
-        move_dialog_open: &mut false,
-        file_to_rename: &mut None,
-        rename_dialog_open: &mut false,
-        rename_new_name: &mut String::new(),
-        create_document_dialog_open: &mut false,
-        create_document_parent: &mut None,
-        layout: &mut PanelLayout::default(),
-        submit_prompt: &mut None,
-        content_libraries: &[],
-        open_editor: &mut None,
         modifiers: egui::Modifiers {
             shift: true,
             ..Default::default()
         },
-        inline_editor_enabled: false,
-        bg_tx: &None,
-        file_event_producer: None,
-        tree_dirty: &mut tree_dirty,
-        pdf_backing_tracker: crate::app::session::PdfBackingTracker::new(),
+        ..Default::default()
     };
 
     apply_file_row_click(&mut ctx, &row);
 
     assert_eq!(
-        selected_dir, expected_parent,
+        ctx.selected_dir, expected_parent,
         "shift-clicking a file row must also update selected_dir to the file's containing directory"
     );
 }
@@ -381,11 +227,6 @@ fn test_apply_file_row_click_shift_updates_selected_dir_to_parent() {
 /// renders the bare `">"` prefix, matching the `None` case.
 #[test]
 fn test_apply_file_row_click_bare_filename_sets_empty_parent() {
-    let mut tabs: Vec<PathBuf> = vec![];
-    let mut selected_file: Option<PathBuf> = None;
-    let mut selected_files: HashSet<PathBuf> = HashSet::new();
-    let mut expanded_dirs: HashSet<PathBuf> = HashSet::new();
-    let mut selected_dir: Option<PathBuf> = Some(PathBuf::from("C:/stale/dir"));
     let row = FlatRow {
         depth: 0,
         name: "file.md".to_string(),
@@ -393,32 +234,9 @@ fn test_apply_file_row_click_bare_filename_sets_empty_parent() {
         is_dir: false,
         is_expanded: false,
     };
-    let mut tree_dirty = false;
     let mut ctx = TreeNodeContext {
-        selected_file: &mut selected_file,
-        selected_files: &mut selected_files,
-        expanded_dirs: &mut expanded_dirs,
-        tabs: &mut tabs,
-        selected_dir: &mut selected_dir,
-        create_dir_dialog_open: &mut false,
-        create_dir_parent: &mut None,
-        file_to_move: &mut None,
-        move_dialog_open: &mut false,
-        file_to_rename: &mut None,
-        rename_dialog_open: &mut false,
-        rename_new_name: &mut String::new(),
-        create_document_dialog_open: &mut false,
-        create_document_parent: &mut None,
-        layout: &mut PanelLayout::default(),
-        submit_prompt: &mut None,
-        content_libraries: &[],
-        open_editor: &mut None,
-        modifiers: egui::Modifiers::default(),
-        inline_editor_enabled: false,
-        bg_tx: &None,
-        file_event_producer: None,
-        tree_dirty: &mut tree_dirty,
-        pdf_backing_tracker: crate::app::session::PdfBackingTracker::new(),
+        selected_dir: Some(PathBuf::from("C:/stale/dir")),
+        ..Default::default()
     };
 
     apply_file_row_click(&mut ctx, &row);
@@ -429,11 +247,11 @@ fn test_apply_file_row_click_bare_filename_sets_empty_parent() {
     // the resulting bottom-panel prefix renders as the bare
     // ">" (same surface as `selected_dir == None`).
     assert_eq!(
-        selected_dir,
+        ctx.selected_dir,
         Some(PathBuf::new()),
         "clicking a bare-filename row must set selected_dir to Some(Path::new(\"\"))"
     );
-    let prefix = crate::ui::panels::bottom::compute_prompt_prefix(selected_dir.as_deref(), &[]);
+    let prefix = crate::ui::panels::bottom::compute_prompt_prefix(ctx.selected_dir.as_deref(), &[]);
     assert_eq!(
         prefix, ">",
         "an empty-path selected_dir must render as the bare `>` prefix in the bottom panel"
@@ -479,14 +297,6 @@ fn test_apply_file_row_click_bare_filename_sets_empty_parent() {
 ///     bottom-panel prompt prefix and the agent session).
 #[test]
 fn test_apply_directory_row_click_clears_selected_file() {
-    let mut tabs: Vec<PathBuf> = vec![PathBuf::from("doc.md")];
-    let mut selected_file: Option<PathBuf> = Some(PathBuf::from("doc.md"));
-    let mut selected_files: HashSet<PathBuf> = HashSet::new();
-    selected_files.insert(PathBuf::from("doc.md"));
-    let mut expanded_dirs: HashSet<PathBuf> = HashSet::new();
-    // Pre-existing stale value to prove the click overwrites it
-    // (mirrors the `apply_file_row_click` `selected_dir` test).
-    let mut selected_dir: Option<PathBuf> = Some(PathBuf::from("C:/old/dir"));
     let dir_path = PathBuf::from("C:/notes/folder");
     let row = FlatRow {
         depth: 0,
@@ -495,59 +305,41 @@ fn test_apply_directory_row_click_clears_selected_file() {
         is_dir: true,
         is_expanded: false,
     };
-    let mut tree_dirty = false;
+    // Pre-existing stale value to prove the click overwrites it
+    // (mirrors the `apply_file_row_click` `selected_dir` test).
     let mut ctx = TreeNodeContext {
-        selected_file: &mut selected_file,
-        selected_files: &mut selected_files,
-        expanded_dirs: &mut expanded_dirs,
-        tabs: &mut tabs,
-        selected_dir: &mut selected_dir,
-        create_dir_dialog_open: &mut false,
-        create_dir_parent: &mut None,
-        file_to_move: &mut None,
-        move_dialog_open: &mut false,
-        file_to_rename: &mut None,
-        rename_dialog_open: &mut false,
-        rename_new_name: &mut String::new(),
-        create_document_dialog_open: &mut false,
-        create_document_parent: &mut None,
-        layout: &mut PanelLayout::default(),
-        submit_prompt: &mut None,
-        content_libraries: &[],
-        open_editor: &mut None,
-        modifiers: egui::Modifiers::default(),
-        inline_editor_enabled: false,
-        bg_tx: &None,
-        file_event_producer: None,
-        tree_dirty: &mut tree_dirty,
-        pdf_backing_tracker: crate::app::session::PdfBackingTracker::new(),
+        selected_file: Some(PathBuf::from("doc.md")),
+        selected_files: HashSet::from([PathBuf::from("doc.md")]),
+        tabs: vec![PathBuf::from("doc.md")],
+        selected_dir: Some(PathBuf::from("C:/old/dir")),
+        ..Default::default()
     };
 
     apply_directory_row_click(&mut ctx, &row);
 
     // The contract: file selection is cleared when navigating directories.
     assert!(
-        selected_file.is_none(),
+        ctx.selected_file.is_none(),
         "directory row click must clear selected_file"
     );
     assert!(
-        selected_files.is_empty(),
+        ctx.selected_files.is_empty(),
         "directory row click must clear selected_files"
     );
     assert_eq!(
-        tabs,
+        ctx.tabs,
         vec![PathBuf::from("doc.md")],
         "directory row click must NOT touch the open tabs"
     );
     // The actual purpose: expand the folder and refresh the
     // current-directory context.
     assert!(
-        expanded_dirs.contains(&dir_path),
+        ctx.expanded_dirs.contains(&dir_path),
         "directory row click must add the folder to expanded_dirs"
     );
     assert_eq!(
-        selected_dir,
-        Some(dir_path.clone()),
+        ctx.selected_dir,
+        Some(dir_path),
         "directory row click must update selected_dir to the folder's path"
     );
 }
@@ -565,14 +357,7 @@ fn test_apply_directory_row_click_clears_selected_file() {
 /// assertion set live independently of the next call.
 #[test]
 fn test_apply_directory_row_click_collapses_expanded_folder_clears_selection() {
-    let mut tabs: Vec<PathBuf> = vec![PathBuf::from("doc.md")];
-    let mut selected_file: Option<PathBuf> = Some(PathBuf::from("doc.md"));
-    let mut selected_files: HashSet<PathBuf> = HashSet::new();
-    selected_files.insert(PathBuf::from("doc.md"));
-    let mut expanded_dirs: HashSet<PathBuf> = HashSet::new();
     let dir_path = PathBuf::from("C:/notes/folder");
-    expanded_dirs.insert(dir_path.clone());
-    let mut selected_dir: Option<PathBuf> = Some(dir_path.clone());
     let row = FlatRow {
         depth: 0,
         name: "folder".to_string(),
@@ -580,59 +365,40 @@ fn test_apply_directory_row_click_collapses_expanded_folder_clears_selection() {
         is_dir: true,
         is_expanded: true,
     };
-    let mut tree_dirty = false;
     let mut ctx = TreeNodeContext {
-        selected_file: &mut selected_file,
-        selected_files: &mut selected_files,
-        expanded_dirs: &mut expanded_dirs,
-        tabs: &mut tabs,
-        selected_dir: &mut selected_dir,
-        create_dir_dialog_open: &mut false,
-        create_dir_parent: &mut None,
-        file_to_move: &mut None,
-        move_dialog_open: &mut false,
-        file_to_rename: &mut None,
-        rename_dialog_open: &mut false,
-        rename_new_name: &mut String::new(),
-        create_document_dialog_open: &mut false,
-        create_document_parent: &mut None,
-        layout: &mut PanelLayout::default(),
-        submit_prompt: &mut None,
-        content_libraries: &[],
-        open_editor: &mut None,
-        modifiers: egui::Modifiers::default(),
-        inline_editor_enabled: false,
-        bg_tx: &None,
-        file_event_producer: None,
-        tree_dirty: &mut tree_dirty,
-        pdf_backing_tracker: crate::app::session::PdfBackingTracker::new(),
+        selected_file: Some(PathBuf::from("doc.md")),
+        selected_files: HashSet::from([PathBuf::from("doc.md")]),
+        tabs: vec![PathBuf::from("doc.md")],
+        expanded_dirs: HashSet::from([dir_path.clone()]),
+        selected_dir: Some(dir_path.clone()),
+        ..Default::default()
     };
 
     apply_directory_row_click(&mut ctx, &row);
 
     // Collapse: the folder is removed from `expanded_dirs`.
     assert!(
-        !expanded_dirs.contains(&dir_path),
+        !ctx.expanded_dirs.contains(&dir_path),
         "clicking an already-expanded directory must collapse it"
     );
     // File selection is cleared when navigating directories.
     assert!(
-        selected_file.is_none(),
+        ctx.selected_file.is_none(),
         "collapsing a directory must clear selected_file"
     );
     assert!(
-        selected_files.is_empty(),
+        ctx.selected_files.is_empty(),
         "collapsing a directory must clear selected_files"
     );
     assert_eq!(
-        tabs,
+        ctx.tabs,
         vec![PathBuf::from("doc.md")],
         "collapsing a directory must NOT touch the open tabs"
     );
     // `selected_dir` is refreshed to the directory's path
     // regardless of whether the click expanded or collapsed it.
     assert_eq!(
-        selected_dir,
+        ctx.selected_dir,
         Some(dir_path),
         "collapsing a directory must still update selected_dir to its path"
     );
@@ -651,11 +417,6 @@ fn test_apply_directory_row_click_collapses_expanded_folder_clears_selection() {
 /// user-visible outcome.
 #[test]
 fn test_apply_directory_row_click_marks_tree_dirty() {
-    let mut tabs: Vec<PathBuf> = vec![];
-    let mut selected_file: Option<PathBuf> = None;
-    let mut selected_files: HashSet<PathBuf> = HashSet::new();
-    let mut expanded_dirs: HashSet<PathBuf> = HashSet::new();
-    let mut selected_dir: Option<PathBuf> = None;
     let dir_path = PathBuf::from("C:/notes/folder");
     let row = FlatRow {
         depth: 0,
@@ -664,33 +425,7 @@ fn test_apply_directory_row_click_marks_tree_dirty() {
         is_dir: true,
         is_expanded: false,
     };
-    let mut tree_dirty = false;
-    let mut ctx = TreeNodeContext {
-        selected_file: &mut selected_file,
-        selected_files: &mut selected_files,
-        expanded_dirs: &mut expanded_dirs,
-        tabs: &mut tabs,
-        selected_dir: &mut selected_dir,
-        create_dir_dialog_open: &mut false,
-        create_dir_parent: &mut None,
-        file_to_move: &mut None,
-        move_dialog_open: &mut false,
-        file_to_rename: &mut None,
-        rename_dialog_open: &mut false,
-        rename_new_name: &mut String::new(),
-        create_document_dialog_open: &mut false,
-        create_document_parent: &mut None,
-        layout: &mut PanelLayout::default(),
-        submit_prompt: &mut None,
-        content_libraries: &[],
-        open_editor: &mut None,
-        modifiers: egui::Modifiers::default(),
-        inline_editor_enabled: false,
-        bg_tx: &None,
-        file_event_producer: None,
-        tree_dirty: &mut tree_dirty,
-        pdf_backing_tracker: crate::app::session::PdfBackingTracker::new(),
-    };
+    let mut ctx = TreeNodeContext::default();
 
     // Expanding a directory (the path is not in `expanded_dirs`).
     apply_directory_row_click(&mut ctx, &row);
@@ -705,7 +440,7 @@ fn test_apply_directory_row_click_marks_tree_dirty() {
     let row_expanded = FlatRow {
         depth: 0,
         name: "folder".to_string(),
-        path: dir_path.clone(),
+        path: dir_path,
         is_dir: true,
         is_expanded: true,
     };
@@ -726,11 +461,6 @@ fn test_apply_directory_row_click_marks_tree_dirty() {
 /// perf optimization.
 #[test]
 fn test_apply_file_row_click_does_not_mark_tree_dirty() {
-    let mut tabs: Vec<PathBuf> = vec![];
-    let mut selected_file: Option<PathBuf> = None;
-    let mut selected_files: HashSet<PathBuf> = HashSet::new();
-    let mut expanded_dirs: HashSet<PathBuf> = HashSet::new();
-    let mut selected_dir: Option<PathBuf> = None;
     let row = FlatRow {
         depth: 0,
         name: "b.md".to_string(),
@@ -738,33 +468,7 @@ fn test_apply_file_row_click_does_not_mark_tree_dirty() {
         is_dir: false,
         is_expanded: false,
     };
-    let mut tree_dirty = false;
-    let mut ctx = TreeNodeContext {
-        selected_file: &mut selected_file,
-        selected_files: &mut selected_files,
-        expanded_dirs: &mut expanded_dirs,
-        tabs: &mut tabs,
-        selected_dir: &mut selected_dir,
-        create_dir_dialog_open: &mut false,
-        create_dir_parent: &mut None,
-        file_to_move: &mut None,
-        move_dialog_open: &mut false,
-        file_to_rename: &mut None,
-        rename_dialog_open: &mut false,
-        rename_new_name: &mut String::new(),
-        create_document_dialog_open: &mut false,
-        create_document_parent: &mut None,
-        layout: &mut PanelLayout::default(),
-        submit_prompt: &mut None,
-        content_libraries: &[],
-        open_editor: &mut None,
-        modifiers: egui::Modifiers::default(),
-        inline_editor_enabled: false,
-        bg_tx: &None,
-        file_event_producer: None,
-        tree_dirty: &mut tree_dirty,
-        pdf_backing_tracker: crate::app::session::PdfBackingTracker::new(),
-    };
+    let mut ctx = TreeNodeContext::default();
 
     // No-modifier click: opens the file in a tab. The cache
     // must NOT be invalidated.
@@ -778,33 +482,11 @@ fn test_apply_file_row_click_does_not_mark_tree_dirty() {
     // still NOT be invalidated.
     *ctx.tree_dirty() = false;
     let mut shift_ctx = TreeNodeContext {
-        selected_file: &mut selected_file,
-        selected_files: &mut selected_files,
-        expanded_dirs: &mut expanded_dirs,
-        tabs: &mut tabs,
-        selected_dir: &mut selected_dir,
-        create_dir_dialog_open: &mut false,
-        create_dir_parent: &mut None,
-        file_to_move: &mut None,
-        move_dialog_open: &mut false,
-        file_to_rename: &mut None,
-        rename_dialog_open: &mut false,
-        rename_new_name: &mut String::new(),
-        create_document_dialog_open: &mut false,
-        create_document_parent: &mut None,
-        layout: &mut PanelLayout::default(),
-        submit_prompt: &mut None,
-        content_libraries: &[],
-        open_editor: &mut None,
         modifiers: egui::Modifiers {
             shift: true,
             ..Default::default()
         },
-        inline_editor_enabled: false,
-        bg_tx: &None,
-        file_event_producer: None,
-        tree_dirty: &mut false,
-        pdf_backing_tracker: crate::app::session::PdfBackingTracker::new(),
+        ..Default::default()
     };
     apply_file_row_click(&mut shift_ctx, &row);
     assert!(

@@ -481,3 +481,7 @@ mod tests {
         assert!(url_parse("").is_err());
     }
 }
+
+#[cfg(test)]
+#[path = "discovery_proptests.rs"]
+mod discovery_proptests;

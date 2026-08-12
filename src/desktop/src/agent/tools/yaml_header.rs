@@ -122,9 +122,8 @@ mod tests {
     /// A producer that publishes to a throwaway bus. Tests don't
     /// need to consume the events — they only care about the
     /// success/failure of the underlying file operation.
-    fn noop_producer() -> FileEventProducer<'static> {
-        let bus: &'static Bus<FileEvent> = Box::leak(Box::new(Bus::new()));
-        FileEventProducer::new(bus)
+    fn noop_producer() -> FileEventProducer {
+        FileEventProducer::new(Bus::new())
     }
 
     #[test]
@@ -249,7 +248,7 @@ mod tests {
         // directory tree and tag manager pick it up.
         let bus: Bus<FileEvent> = Bus::new();
         let reader = bus.subscribe();
-        let producer = FileEventProducer::new(&bus);
+        let producer = FileEventProducer::new(bus.clone());
 
         let dir = tempdir().unwrap();
         let file_path = dir.path().join("brand_new.md");
@@ -277,7 +276,7 @@ mod tests {
         // publish an Updated event.
         let bus: Bus<FileEvent> = Bus::new();
         let reader = bus.subscribe();
-        let producer = FileEventProducer::new(&bus);
+        let producer = FileEventProducer::new(bus.clone());
 
         let dir = tempdir().unwrap();
         let file_path = dir.path().join("existing.md");
@@ -300,3 +299,11 @@ mod tests {
         assert_eq!(event.paths[0], file_path);
     }
 }
+
+// Property tests for the YAML frontmatter parser. See the file for
+// the surface under test (panic-freedom, key/value round-trip,
+// unclosed-frontmatter rejection). Sidecar of yaml_header.rs per
+// AGENTS.md RUST-056 / RUST-057.
+#[cfg(test)]
+#[path = "yaml_header_proptests.rs"]
+mod proptests;

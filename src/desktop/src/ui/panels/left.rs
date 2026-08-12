@@ -2,7 +2,6 @@
 //!
 //! Unit tests live in the sibling `left_tests.rs` sidecar.
 
-use crate::bus::events::file::FileEventProducer;
 use crate::ui::FastMdApp;
 use crate::ui::TreeNode;
 use crate::ui::TreeNodeContext;
@@ -254,55 +253,56 @@ pub fn show_left_panel(app: &mut FastMdApp, parent_ui: &mut egui::Ui) {
             // the redundant outer scroll area lets `show_rows` size
             // itself to the panel's available height, so the rects
             // are stable across passes.
-            let mut open_editor = None;
-            let _modifiers = ui.input(|i| i.modifiers);
-            let pdf_backing_tracker = app.pdf_backing_tracker().clone();
-            let selection = &mut app.orchestrator.selection;
-            let tab_manager = &mut app.orchestrator.tab_manager;
-            let dialogs = &mut app.orchestrator.dialogs;
-            let layout = &mut app.layout;
-            let submit_prompt = &mut app.orchestrator.submit_prompt;
-            let content_libraries = &app.orchestrator.content_libraries;
-            let inline_editor_enabled = app.orchestrator.inline_editor_enabled;
-            let file_event_bus = &app.orchestrator.file_event_bus;
-            let tx = app.orchestrator.tx.clone();
+            // Build the per-frame view object once, render all
+            // rows into it, then write the (possibly modified)
+            // fields back to the orchestrator. Owning the
+            // fields in `TreeNodeContext` (no `&'a mut T`)
+            // means the per-row closure doesn't have to re-borrow
+            // from `selection` / `dialogs` / etc. on every pass,
+            // and tests can construct a `TreeNodeContext` directly
+            // without any `Box::leak`.
+            //
+            // `open_editor` starts as `None`; render-row click
+            // handlers in `tree/render.rs` write into
+            // `ctx.open_editor` directly when a user requests an
+            // inline edit. The consumer below then reads
+            // `ctx.open_editor()` to perform the file open.
+            let mut ctx = TreeNodeContext::from_app_state(
+                &app.orchestrator.selection,
+                &app.orchestrator.tab_manager,
+                &app.orchestrator.dialogs,
+                &app.layout,
+                &app.orchestrator.submit_prompt,
+                &app.orchestrator.content_libraries,
+                Some(app.orchestrator.tx.clone()),
+                app.orchestrator.file_event_bus.clone(),
+                app.orchestrator.inline_editor_enabled,
+                ui.input(|i| i.modifiers),
+                None,
+                app.pdf_backing_tracker().clone(),
+            );
 
             egui::ScrollArea::vertical()
                 .id_salt("virtual_tree_rows")
                 .auto_shrink([false, false])
                 .show_rows(ui, TREE_ROW_HEIGHT, tree_rows.len(), |ui, row_range| {
-                    let mut ctx = TreeNodeContext {
-                        selected_file: &mut selection.selected_file,
-                        selected_files: &mut selection.selected_files,
-                        expanded_dirs: &mut selection.expanded_dirs,
-                        tabs: &mut tab_manager.tabs,
-                        selected_dir: &mut selection.selected_dir,
-                        create_dir_dialog_open: &mut dialogs.create_dir_dialog_open,
-                        create_dir_parent: &mut dialogs.create_dir_parent,
-                        file_to_move: &mut dialogs.file_to_move,
-                        move_dialog_open: &mut dialogs.move_dialog_open,
-                        file_to_rename: &mut dialogs.file_to_rename,
-                        rename_dialog_open: &mut dialogs.rename_dialog_open,
-                        rename_new_name: &mut dialogs.rename_new_name,
-                        create_document_dialog_open: &mut dialogs.create_document_dialog_open,
-                        create_document_parent: &mut dialogs.create_document_parent,
-                        layout,
-                        submit_prompt,
-                        content_libraries,
-                        open_editor: &mut open_editor,
-                        modifiers: ui.input(|i| i.modifiers),
-                        inline_editor_enabled,
-                        bg_tx: &Some(tx.clone()),
-                        file_event_producer: Some(FileEventProducer::new(file_event_bus)),
-                        tree_dirty: &mut selection.tree_dirty,
-                        pdf_backing_tracker: pdf_backing_tracker.clone(),
-                    };
-
                     for i in row_range {
                         let row = &tree_rows[i];
                         render_flat_row(ui, row, &mut ctx);
                     }
                 });
+
+            // Commit the (possibly mutated) view object back to
+            // the orchestrator. `bg_tx`, `file_event_producer`,
+            // `modifiers`, `inline_editor_enabled`, `layout`,
+            // `content_libraries`, and `pdf_backing_tracker` are
+            // not written back — those are inputs, not outputs.
+            ctx.write_back(
+                &mut app.orchestrator.selection,
+                &mut app.orchestrator.tab_manager,
+                &mut app.orchestrator.dialogs,
+                &mut app.orchestrator.submit_prompt,
+            );
 
             // Empty-state placeholder must be rendered outside the
             // virtual-scroll `show_rows` (which would allocate zero
@@ -319,7 +319,7 @@ pub fn show_left_panel(app: &mut FastMdApp, parent_ui: &mut egui::Ui) {
                 );
             }
 
-            if let Some(ref path) = open_editor
+            if let Some(ref path) = ctx.open_editor().clone()
                 && let Ok(content) = std::fs::read_to_string(path)
             {
                 let is_pdf_backed = app.pdf_backing_tracker().is_pdf_backed(path);

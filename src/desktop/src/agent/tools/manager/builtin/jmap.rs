@@ -34,7 +34,7 @@ impl Tool for SearchEmailTool {
         let input: dtos::SearchEmailInput =
             serde_json::from_str(args).map_err(|e| format!("Invalid args: {}", e))?;
         crate::agent::tools::jmap::tool_search_email(
-            ctx.config,
+            &ctx.config,
             crate::agent::tools::jmap::SearchEmailFilters {
                 keyword: input.keyword.as_deref(),
                 folder: input.folder.as_deref(),
@@ -46,7 +46,7 @@ impl Tool for SearchEmailTool {
                 is_flagged: input.is_flagged,
             },
             input.cursor,
-            ctx.cache,
+            &ctx.cache,
             ctx.uuid_gen.as_ref(),
         )
         .map(|r| {
@@ -79,7 +79,7 @@ impl Tool for GetEmailByIdTool {
     fn execute(&self, ctx: &ToolContext, args: &str) -> Result<serde_json::Value, String> {
         let input: dtos::GetEmailByIdInput =
             serde_json::from_str(args).map_err(|e| format!("Invalid args: {}", e))?;
-        crate::agent::tools::jmap::tool_get_email_by_id(ctx.config, &input.id).map(|r| {
+        crate::agent::tools::jmap::tool_get_email_by_id(&ctx.config, &input.id).map(|r| {
             serde_json::to_value(r).unwrap_or_else(|e| serde_json::json!({"error": e.to_string()}))
         })
     }
@@ -107,7 +107,7 @@ impl Tool for SendEmailTool {
         let input: dtos::SendEmailInput =
             serde_json::from_str(args).map_err(|e| format!("Invalid args: {}", e))?;
         crate::agent::tools::jmap::tool_send_email(
-            ctx.config,
+            &ctx.config,
             &input.to,
             &input.subject,
             &input.body,

@@ -1326,3 +1326,7 @@ mod tests {
         );
     }
 }
+
+#[cfg(test)]
+#[path = "parser_proptests.rs"]
+mod parser_proptests;

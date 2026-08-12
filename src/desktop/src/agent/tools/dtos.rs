@@ -238,7 +238,6 @@ pub struct AddCalendarItemResponse {
 #[derive(Deserialize, Serialize, Debug, JsonSchema)]
 pub struct UpdateCalendarItemInput {
     #[schemars(description = strings::FIELD_CALENDAR_HREF_DESC)]
-    #[serde(skip_serializing)]
     pub id: String,
     #[schemars(description = strings::FIELD_CALENDAR_SUMMARY_DESC)]
     #[serde(skip_serializing_if = "Option::is_none")]

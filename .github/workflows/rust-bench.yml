@@ -1,0 +1,84 @@
+name: Rust Bench (informational)
+
+# This workflow runs the criterion micro-benchmarks on
+# every push. It is *informational* — it does not gate
+# the merge. The bench output (and the HTML report) is
+# uploaded as an artifact so perf regressions surface in
+# the PR conversation without breaking the build.
+#
+# The bench grid is sized to finish in under five minutes
+# on the GH Actions Linux runner:
+#   2 strategies × 9 regimes × 20 samples = 360 samples
+#   (each sample = 1 `ftwa` call, ~1 us to 3 us)
+#   Warmup is 3 s per bench × 18 benches = 54 s
+#   Measurement is 5 s per bench × 18 benches = 90 s
+#   Total: ~3 min wall time plus criterion's report write.
+#
+# If a future bench addition blows the budget, reduce
+# `sample_size` in the bench file (not the workflow) so
+# the bench stays reproducible locally.
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "src/desktop/**"
+      - "src/desktop/benches/**"
+      - ".github/workflows/rust-bench.yml"
+      - "src/desktop/Cargo.toml"
+  pull_request:
+    paths:
+      - "src/desktop/**"
+      - "src/desktop/benches/**"
+      - ".github/workflows/rust-bench.yml"
+      - "src/desktop/Cargo.toml"
+
+# Same permission scope as the gate workflow — only read
+# contents + write actions (for artifact upload).
+permissions:
+  contents: read
+  actions: write
+
+jobs:
+  bench:
+    name: criterion bench (informational)
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: src/desktop
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: src/desktop
+      # Build the bench binary in release mode (required
+      # for criterion to produce meaningful numbers — debug
+      # builds inflate the per-call cost by 10-100x).
+      - name: Build benches
+        run: cargo bench --no-run --bench table_width
+      - name: Run benches
+        # `--output-format bencher` is criterion's machine-
+        # readable format: each line is one benchmark with
+        # the time estimate + throughput. The artifact is
+        # the criterion HTML report (target/criterion/...).
+        run: cargo bench --bench table_width -- --output-format bencher
+        continue-on-error: true
+      - name: Upload bench report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: criterion-report
+          path: src/desktop/target/criterion
+          if-no-files-found: warn
+      # The bench-job summary lists each regime + strategy
+      # with the time estimate. This is the "did the bench
+      # run" signal — if a bench file panics on startup or
+      # fails to compile, this line is empty.
+      - name: Bench summary
+        if: always()
+        run: |
+          echo "## Criterion bench results" >> $GITHUB_STEP_SUMMARY
+          echo '```' >> $GITHUB_STEP_SUMMARY
+          cat src/desktop/target/criterion/*/new/benchmark.json 2>/dev/null | head -200 >> $GITHUB_STEP_SUMMARY || echo "(no JSON results found)"
+          echo '```' >> $GITHUB_STEP_SUMMARY

@@ -412,28 +412,28 @@ mod tests {
     use crate::config::AppConfig;
     use std::sync::Arc;
 
-    fn ctx_with_session() -> crate::agent::tools::context::ToolContext<'static> {
-        // We can't build a full ToolContext<'static> without
-        // leaking â€” instead, this helper verifies the schema
-        // and DTO round-trip. The actual execute paths are
-        // covered by the integration tests in
-        // `app/browser/session.rs` (and the gated Playwright
-        // integration tests in `tools/browser_tests.rs`).
-        let config = Box::leak(Box::new(AppConfig::default()));
-        let bus = Box::leak(Box::new(crate::bus::core::Bus::<
-            crate::bus::events::file::FileEvent,
-        >::new()));
-        let session = Arc::new(BrowserSession::new(config));
+    fn ctx_with_session() -> crate::agent::tools::context::ToolContext {
+        // `ToolContext` is now `'static` by construction (every
+        // reference-shaped field is an owned `Arc` or a cheap-clone
+        // `Bus`), so the previous `Box::leak`-and-pointer-cast trick
+        // is gone. The helper just constructs a context by value.
+        // The actual execute paths are covered by the integration
+        // tests in `app/browser/session.rs` (and the gated
+        // Playwright integration tests in `tools/browser_tests.rs`).
+        let config = AppConfig::default();
+        let bus = crate::bus::core::Bus::<crate::bus::events::file::FileEvent>::new();
+        let session = Arc::new(BrowserSession::new(&config));
         let pdf_backing = Arc::new(crate::app::session::PdfBackingTracker::new());
         let tm = std::sync::Arc::new(std::sync::RwLock::new(
             crate::agent::tools::manager::ToolManager::new(),
         ));
+        let cache = Arc::new(crate::agent::tools::manager::cache::ToolCache::new());
         crate::agent::tools::context::ToolContext::new(
-            config,
+            Arc::new(config),
             bus,
             session,
             pdf_backing,
-            crate::agent::tools::manager::cache::cache(),
+            cache,
             tm,
             std::sync::Arc::new(crate::utils::uuid::SystemUuidGenerator),
         )

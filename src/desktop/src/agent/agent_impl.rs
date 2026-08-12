@@ -46,6 +46,7 @@ fn run_agent_inner(ctx: AgentContext) {
         ctx.file_event_bus.clone(),
         ctx.browser_session.clone(),
         ctx.pdf_backing.clone(),
+        ctx.cache.clone(),
         ctx.tool_manager.clone(),
         ctx.uuid_gen.clone(),
     );

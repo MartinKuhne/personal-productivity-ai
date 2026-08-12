@@ -2,16 +2,14 @@
 
 use super::*;
 use crate::bus::core::Bus;
-use crate::bus::events::file::FileEvent;
 use crate::ui::test_helpers::run_ui_test;
 use crate::ui::test_helpers::text::extract_text;
 
 /// A producer that publishes to a throwaway bus. Editor tests
 /// don't need to consume the events — they only care about the
 /// rendered output / early-return path.
-fn noop_producer() -> FileEventProducer<'static> {
-    let bus: &'static Bus<FileEvent> = Box::leak(Box::new(Bus::new()));
-    FileEventProducer::new(bus)
+fn noop_producer() -> FileEventProducer {
+    FileEventProducer::new(Bus::new())
 }
 
 #[test]

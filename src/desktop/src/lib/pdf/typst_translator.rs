@@ -311,24 +311,43 @@ impl TypstEmitState {
 
     /// Push a chunk of text to the current "inline target" — the
     /// main output stream, the code buffer, or the current table
-    /// cell. Escape user content for safe inclusion in Typst markup.
+    /// cell. Escape user content for safe inclusion in the right
+    /// destination:
+    ///
+    /// - **Code buffer**: the body is later wrapped in a Typst
+    ///   string literal (`"...body..."`) and only `\` and `"`
+    ///   need to be escaped there. Every other char — including
+    ///   `{`, `}`, `*`, `_`, `#` — is literal inside a string
+    ///   literal. The previous behaviour routed through
+    ///   `escape_typst` here too, which was a latent
+    ///   double-escape (harmless until `escape_typst` started
+    ///   escaping `{` and `}` for content-block safety; the
+    ///   double-escape became visible as `\\{\\}` in the
+    ///   generated Typst). The code-buffer target is the only
+    ///   string-literal destination; the main output and table
+    ///   cells are content blocks and continue to use
+    ///   `escape_typst`.
+    /// - **Autolink text** (the URL is rendered as the link's
+    ///   text content): the URL may contain `:` and `//` which
+    ///   Typst treats as markup-active in content mode (label
+    ///   terminator and line-break marker). The stricter
+    ///   `escape_typst_autolink` is autolink-only — escaping
+    ///   `:` in general text would break labelled content the
+    ///   user actually wants (e.g. "Step 1: do X" inside a
+    ///   callout).
+    /// - **Other text**: the standard markup escape.
     fn push_inline(&mut self, text: &str) {
-        // Autolink text equals the URL and may contain `:` and
-        // `//` which Typst treats as markup-active in content mode
-        // (label terminator and line-break marker). Regular user-
-        // written text doesn't have those patterns naturally, so
-        // the stricter escape is autolink-only — escaping `:` in
-        // general text would break labelled content the user
-        // actually wants (e.g. "Step 1: do X" inside a callout).
+        if let Some(buf) = self.code_buffer.as_mut() {
+            // Code body is going into a string literal — only
+            // `\` and `"` are active there.
+            buf.body.push_str(&escape_typst_string(text));
+            return;
+        }
         let escaped = if self.in_autolink {
             escape_typst_autolink(text)
         } else {
             escape_typst(text)
         };
-        if let Some(buf) = self.code_buffer.as_mut() {
-            buf.body.push_str(&escaped);
-            return;
-        }
         if self.in_table_cell() {
             let last = self.current_row_cells.len() - 1;
             self.current_row_cells[last].push_str(&escaped);
@@ -384,32 +403,31 @@ fn emit_event(
                 // unusual but we route to the buffer if they occur.
                 state.push_inline(&code);
             } else {
-                // Use the Typst `#raw("...")` function form (string
-                // argument) rather than backtick-fenced raw text, so
-                // embedded backticks in the code span body render
-                // literally. Backtick-fenced raw would be ambiguous
-                // when the body contains a backtick — e.g. the
-                // CommonMark example `` ``foo`bar`` `` produces a
-                // `Code` event with content `foo`bar`, and the
-                // backtick-fenced form would emit `` `foo\`bar` ``.
-                // In Typst the `\` inside raw text is a literal
-                // backslash (not an escape), so the parser sees the
-                // following `` ` `` as the raw's close delimiter,
-                // leaving `bar` outside the raw and the trailing
-                // `` ` `` opening a new unclosed raw. The function
-                // form avoids this entirely: the body lives inside
-                // a `"..."` string literal, where only `\` and `"`
-                // need to be escaped, and embedded backticks are
-                // literal characters in the string.
+                // Emit a Typst `box` wrapping a `text` call holding
+                // the inline code body. The previous form used
+                // `raw("...")` which renders the inline background
+                // and inset but drops the body glyphs in
+                // typst-as-lib 0.16 / typst 0.15.1 (ADR gap #2).
+                // The `text` function bypasses the broken `raw`
+                // element entirely.
                 //
-                // Trailing space after the call is the same chain
-                // break used for inline HTML — in Typst, a function
-                // call followed by `(...)` or `[...]` chains
-                // (calling the result on the next group), and
-                // content can't be called. The space forces the
-                // parser to start a new content sequence. See
-                // [`Event::InlineHtml`] for the full rationale.
-                let rendered = format!("#raw(\"{}\") ", escape_typst_string(&code));
+                // The body is a string literal so no markup
+                // escaping is needed — only `\` and `"` are escaped
+                // via `escape_typst_string`. Embedded backticks
+                // (which were the original motivation for the
+                // string form) render literally. The trailing space
+                // is the chain break used for inline code, inline
+                // HTML, and math: a function call followed by
+                // `(...)` or `[...]` chains, and content can't be
+                // called. The space forces a new content sequence.
+                // See [`Event::InlineHtml`] for the full rationale.
+                let rendered = format!(
+                    "#box(fill: luma(245), inset: 2pt, radius: 2pt, \
+                     text(font: (\"DejaVu Sans Mono\", \
+                     \"Liberation Mono\", \"Courier New\"), \
+                     size: 0.9em, \"{}\")) ",
+                    escape_typst_string(&code)
+                );
                 if state.in_table_cell() {
                     let last = state.current_row_cells.len() - 1;
                     state.current_row_cells[last].push_str(&rendered);
@@ -433,22 +451,37 @@ fn emit_event(
         }
         Event::InlineHtml(html) => {
             // Inline raw HTML inside a paragraph or table cell.
-            // Rendered as an inline raw block so the source stays
-            // visible in the PDF.
+            // Rendered as an inline `box(...)` wrapping a
+            // `text(font: ..., "...")` call holding the body.
+            // The `text` function bypasses the broken `raw`
+            // element in typst-as-lib 0.16 / typst 0.15.1
+            // (the same fix that closed ADR gap #2 for inline
+            // code). The `box` provides the inline background
+            // and inset; the `text` element renders the body
+            // in a monospace font so the source is visible
+            // in the PDF.
             //
             // The trailing space is load-bearing: in Typst, an
-            // expression like `#raw("text")` is followed by
-            // chaining on the next token if the parser can parse
-            // it as a function call. So `#raw("<bar>")(baz)` is
-            // "call `raw()`, then call its return value on `(baz)`",
-            // which is a hard error — the return value is content,
-            // not a function. Inserting a single space after the
-            // call (so the next token starts a content sequence, not
-            // a chained call) is enough to break the chain. The
-            // space is also the right visual: `text<bar>text`
-            // becomes `text <bar> text` in the PDF, which matches
-            // the markdown's intent of inline HTML.
-            state.push_raw(&format!("#raw(\"{}\") ", escape_typst_string(&html)));
+            // expression like `#box(...) text(...)` is followed
+            // by chaining on the next token if the parser can
+            // parse it as a function call. So `#box(...) text(baz)`
+            // is "call the box content on `(baz)`", which is a
+            // hard error. Inserting a single space after the
+            // call breaks the chain (same rationale as
+            // `Event::Code`).
+            let rendered = format!(
+                "#box(fill: luma(245), inset: 2pt, radius: 2pt, \
+                 text(font: (\"DejaVu Sans Mono\", \
+                 \"Liberation Mono\", \"Courier New\"), \
+                 size: 0.9em, \"{}\")) ",
+                escape_typst_string(&html)
+            );
+            if state.in_table_cell() {
+                let last = state.current_row_cells.len() - 1;
+                state.current_row_cells[last].push_str(&rendered);
+            } else {
+                state.output.push_str(&rendered);
+            }
         }
         Event::SoftBreak => {
             // Typst treats a single space as a soft break inside a
@@ -716,15 +749,16 @@ fn emit_start(state: &mut TypstEmitState, tag: Tag<'_>) {
         Tag::HtmlBlock => {
             // Open an HTML block. We accumulate the verbatim HTML
             // source into `html_block_buffer` on each subsequent
-            // `Event::Html`, then emit the whole block as a Typst
-            // raw block at `TagEnd::HtmlBlock`. Visual result: a
-            // shaded `html` raw block containing the original HTML
-            // source — honest "we kept your HTML but can't render
-            // it" behaviour.
+            // `Event::Html`, then emit the whole block as a
+            // `block(...)` wrapping a `text(...)` call at
+            // `TagEnd::HtmlBlock`. The `text` function bypasses the
+            // broken `raw` element in typst-as-lib 0.16 / typst
+            // 0.15.1 (the same fix that closed ADR gap #5 for
+            // fenced code blocks). The `html_block_buffer` is
+            // opened here and closed at the matching end; the
+            // accumulated body is interpolated as the `#text("...")`
+            // argument at close.
             state.block_sep();
-            state
-                .output
-                .push_str("#raw(block: true, lang: \"html\", \"");
             state.html_block_buffer = Some(String::new());
         }
         _ => {}
@@ -748,26 +782,56 @@ fn emit_end(state: &mut TypstEmitState, tag_end: TagEnd) {
         }
         TagEnd::CodeBlock => {
             if let Some(buf) = state.code_buffer.take() {
-                if buf.lang.is_empty() {
-                    // Untagged code block — emit as a Typst `raw` block
-                    // using the string form so `{`, `}`, `*`, etc. in
-                    // the code body don't get interpreted as markup.
-                    state.output.push_str(&format!(
-                        "#raw(block: true, \"{}\")",
-                        escape_typst_string(&buf.body)
-                    ));
+                // Emit a Typst `block` wrapping a `text` call holding
+                // the code body. The previous form used
+                // `raw(block: true, lang: ..., "...")` which renders
+                // the block border, padding, and framing correctly
+                // but drops the body glyphs in typst-as-lib 0.16 /
+                // typst 0.15.1 (ADR gap #5). The `text` function
+                // bypasses the broken `raw` element entirely; the
+                // styling matches the `#show raw.where(block: true)`
+                // rule in the template (fill, inset, radius, width),
+                // which becomes a no-op for code blocks but is still
+                // used by HTML blocks.
+                //
+                // The body is a string literal so no markup escaping
+                // is needed — only `\` and `"` are escaped via
+                // `escape_typst_string`. Newlines in the body are
+                // preserved as soft breaks and render as line breaks
+                // because `#set par(justify: false)` is in scope.
+                // The language hint is preserved as a comment for
+                // debuggability — the new path doesn't have access to
+                // typst's syntax highlighter, so the hint is
+                // informational only. The lang is set from
+                // `Tag::CodeBlock` (not via `push_inline`), so
+                // it has not been escaped yet — the string
+                // escape here is the *only* escape.
+                let lang_comment = if buf.lang.is_empty() {
+                    String::new()
                 } else {
-                    // Tagged code block — same string form, with a
-                    // language hint. The string form is essential
-                    // because code bodies routinely contain markup-
-                    // special characters (curly braces in Rust/JS,
-                    // percent signs in SQL, etc.).
-                    state.output.push_str(&format!(
-                        "#raw(block: true, lang: \"{}\", \"{}\")",
-                        escape_typst_string(&buf.lang),
-                        escape_typst_string(&buf.body),
-                    ));
-                }
+                    format!("\n  // lang: {}", escape_typst_string(&buf.lang))
+                };
+                // The body is accumulated by `push_inline`,
+                // which routes code-buffer text through
+                // `escape_typst_string` (see the comment on
+                // that function). The body is therefore
+                // already escaped for inclusion in a string
+                // literal — running `escape_typst_string` on
+                // it again would double-escape the backslashes
+                // (a `\` would become `\\\\` instead of `\\`).
+                // The proptest `escape_typst_string_is_idempotent`
+                // catches this class of regression: the
+                // function is not idempotent, and the body
+                // must not be re-escaped here.
+                state.output.push_str(&format!(
+                    "#block(\n  fill: luma(245),\n  inset: 8pt,\n  \
+                     radius: 4pt,\n  width: 100%\n)[\n  \
+                     #set text(font: (\"DejaVu Sans Mono\", \
+                     \"Liberation Mono\", \"Courier New\"), size: 9pt)\n  \
+                     #set par(justify: false, leading: 0.5em){lang_comment}\n  \
+                     #text(\"{}\")\n]",
+                    buf.body
+                ));
             }
         }
         TagEnd::List(_) => {
@@ -868,14 +932,26 @@ fn emit_end(state: &mut TypstEmitState, tag_end: TagEnd) {
             // `current_row_cells`. Nothing to do on end.
         }
         TagEnd::HtmlBlock => {
-            // Close the raw block opened at `Tag::HtmlBlock` start.
+            // Close the block opened at `Tag::HtmlBlock` start.
             // The accumulated HTML source is already string-escaped
-            // (each `Event::Html` ran it through `escape_typst_string`
-            // as it accumulated), so we just append the closing
-            // quote, paren, and a newline.
+            // (each `Event::Html` ran it through
+            // `escape_typst_string` as it accumulated). The
+            // `text("...")` function call is the only escape
+            // we need; running `escape_typst_string` again on
+            // the buffer would double-escape the backslashes
+            // (the same latent bug the code-block proptest
+            // caught). The body is interpolated verbatim.
             if let Some(buf) = state.html_block_buffer.take() {
-                state.output.push_str(&buf);
-                state.output.push_str("\")\n");
+                state.output.push_str(&format!(
+                    "#block(\n  fill: luma(245),\n  inset: 8pt,\n  \
+                     radius: 4pt,\n  width: 100%\n)[\n  \
+                     #set text(font: (\"DejaVu Sans Mono\", \
+                     \"Liberation Mono\", \"Courier New\"), size: 9pt)\n  \
+                     #set par(justify: false, leading: 0.5em)\n  \
+                     // lang: html\n  \
+                     #text(\"{}\")\n]",
+                    buf
+                ));
             }
         }
         _ => {}
@@ -899,6 +975,15 @@ fn emit_end(state: &mut TypstEmitState, tag_end: TagEnd) {
 /// - `_` (emphasis)
 /// - `` ` `` (inline raw text)
 /// - `[` `]` (content block delimiters)
+/// - `{` `}` (code-block delimiters — markup-active in content
+///   mode; a literal `{` in user text would otherwise open a
+///   code block and the following content would be parsed as
+///   script until the matching `}`. Added after the code-block
+///   emit switched from `raw` to `block + text`; even though the
+///   new emit routes code bodies through a string literal where
+///   `{` is literal, any other place the translator emits body
+///   content (paragraphs, headings, table cells) needs `{`
+///   escaped to survive user-supplied braces in prose.)
 /// - `@` (reference marker)
 /// - `$` (entry into math mode — also block mode if surrounded by
 ///   whitespace)
@@ -940,6 +1025,8 @@ fn escape_typst(s: &str) -> String {
             '`' => out.push_str("\\`"),
             '[' => out.push_str("\\["),
             ']' => out.push_str("\\]"),
+            '{' => out.push_str("\\{"),
+            '}' => out.push_str("\\}"),
             '@' => out.push_str("\\@"),
             '$' => out.push_str("\\$"),
             '~' => out.push_str("\\~"),
@@ -1036,3 +1123,13 @@ fn escape_typst_autolink(s: &str) -> String {
 #[cfg(test)]
 #[path = "typst_translator_tests.rs"]
 mod tests;
+
+// Property tests for the escape_typst* family. The four closed
+// escape gaps from the ADR (gaps #2, #5, #8, #9) have
+// example-based unit tests; this proptest layers a stronger
+// property check on top — every char in the documented escape
+// set is verified against random inputs. Sidecar of
+// 	ypst_translator.rs per AGENTS.md RUST-056 / RUST-057.
+#[cfg(test)]
+#[path = "typst_translator_proptests.rs"]
+mod proptests;

@@ -309,3 +309,7 @@ mod tests {
         assert!(url.contains("client_id=c&") || url.contains("client_id=c"));
     }
 }
+
+#[cfg(test)]
+#[path = "pkce_proptests.rs"]
+mod pkce_proptests;

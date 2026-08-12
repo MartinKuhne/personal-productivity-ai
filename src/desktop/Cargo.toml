@@ -112,6 +112,30 @@ tempfile = "3.8"
 tokio = { version = "1.53.0", features = ["rt", "rt-multi-thread", "macros", "sync"] }
 filetime = "0.2"
 proptest = "1.4"
+# `arbitrary` enables `#[derive(Arbitrary)]` on types we want to feed into
+# `cargo-fuzz` targets. Currently unused in the source — Phase 5 of the
+# fuzzing plan (`doc/planning/fuzzing.md`) is where the cargo-fuzz crate
+# will pull this in. Adding it now means a future PR that adds the fuzz
+# targets doesn't need to touch dev-deps at the same time.
+arbitrary = { version = "1", features = ["derive"] }
+# `rayon` is the data-parallelism library used by the
+# per-example content-fidelity test
+# (`all_commonmark_examples_render_content_into_pdf` in
+# `tests/commonmark_spec_test.rs`). The test spawns work
+# across a rayon thread pool (default = num_cpus threads)
+# instead of one raw `std::thread` per example. This
+# avoids the 608-thread / ~600MB-stack working set that
+# the raw-thread approach hit, and uses work-stealing so
+# the slowest examples don't pin a worker. Pin to the
+# 1.10 line for the `par_iter` / `ThreadPool` APIs we
+# rely on.
+rayon = "1.10"
+# `criterion` is the project-wide micro-benchmark harness. Run with
+# `cargo bench` locally; the GH Actions bench workflow runs the same
+# suite on a separate (informational, not gating) job. Pinned to
+# the 0.5 line for the `--profile ci` + custom-criterion-config
+# integration to stay stable.
+criterion = { version = "0.5", features = ["html_reports"] }
 egui_kittest = { version = "0.36", features = ["eframe", "snapshot", "wgpu"] }
 # `accesskit::Role` is the type used by `egui_kittest::Role` /
 # `kittest::Queryable::get_by_role`; pull it in as a direct
@@ -142,3 +166,8 @@ path = "src/main.rs"
 [[bin]]
 name = "deploy"
 path = "src/bin/deploy.rs"
+
+[[bench]]
+name = "table_width"
+path = "benches/table_width.rs"
+harness = false

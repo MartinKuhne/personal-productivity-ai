@@ -315,3 +315,13 @@ mod tests {
         assert_eq!(path, PathBuf::from("C:/lib/one/a/b/c.md"));
     }
 }
+
+// Property tests for the VFS virtual-path parser. The proptest is the
+// project's coverage against path-traversal regressions: a single
+// future commit that lets a .. slip through the parser is caught
+// by ny_path_with_parent_component_is_rejected (proptest runs
+// 512 cases per property with shrinking to the minimum failing input).
+// Sidecar of irtual_path.rs per AGENTS.md RUST-056 / RUST-057.
+#[cfg(test)]
+#[path = "virtual_path_proptests.rs"]
+mod proptests;

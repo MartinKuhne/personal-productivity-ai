@@ -63,7 +63,7 @@ fn email_get_full(
 
 /// Convert HTML body values in a JMAP response to Markdown using `fast_h2m`.
 #[allow(dead_code)]
-fn convert_html_in_jmap(mut res: serde_json::Value) -> serde_json::Value {
+pub(crate) fn convert_html_in_jmap(mut res: serde_json::Value) -> serde_json::Value {
     fn process(val: &mut serde_json::Value) {
         match val {
             serde_json::Value::Object(map) => {
@@ -836,7 +836,10 @@ fn resolve_inbox(session: &JmapSession, _account_id: &str) -> Result<String, Str
 
 /// Simplify JMAP `methodResponses` containing `Email/get` results.
 #[allow(dead_code)]
-fn simplify_jmap_emails(res: serde_json::Value, max_lines: Option<usize>) -> serde_json::Value {
+pub(crate) fn simplify_jmap_emails(
+    res: serde_json::Value,
+    max_lines: Option<usize>,
+) -> serde_json::Value {
     let mut simplified_emails = Vec::new();
 
     if let Some(method_responses) = res.get("methodResponses").and_then(|mr| mr.as_array()) {
@@ -961,3 +964,7 @@ fn simplify_jmap_emails(res: serde_json::Value, max_lines: Option<usize>) -> ser
 #[cfg(test)]
 #[path = "email_tests.rs"]
 mod tests;
+
+#[cfg(test)]
+#[path = "email_proptests.rs"]
+mod email_proptests;

@@ -303,3 +303,7 @@ mod tests {
         );
     }
 }
+
+#[cfg(test)]
+#[path = "operations_proptests.rs"]
+mod operations_proptests;

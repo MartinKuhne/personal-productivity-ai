@@ -69,6 +69,15 @@ pub enum SafetyResult {
     Blocked { reason: String },
 }
 
+impl SafetyResult {
+    /// `true` for the `Safe` variant, `false` for `Blocked`.
+    /// Convenience accessor used by the safety proptest sidecar
+    /// to keep the assertion lines readable.
+    pub fn is_safe(&self) -> bool {
+        matches!(self, SafetyResult::Safe)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -157,3 +166,7 @@ mod tests {
         assert_eq!(result, SafetyResult::Safe);
     }
 }
+
+#[cfg(test)]
+#[path = "safety_proptests.rs"]
+mod safety_proptests;

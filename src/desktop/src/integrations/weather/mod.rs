@@ -70,7 +70,7 @@ pub(crate) fn points_url(base: &str, lat: f64, lon: f64) -> String {
 /// `body` is the JSON array Nominatim returns; we take the first
 /// element and extract `lat`/`lon` as strings (Nominatim returns
 /// them as strings, not numbers).
-fn parse_nominatim_first(body: &Value) -> Result<(f64, f64), String> {
+pub(crate) fn parse_nominatim_first(body: &Value) -> Result<(f64, f64), String> {
     let first = body.as_array().and_then(|a| a.first()).ok_or_else(|| {
         tracing::error!(
             name = "tool.weather.geocode.not_found",
@@ -496,3 +496,7 @@ mod tests {
         assert!(err.contains("No weather data found"), "got: {err}");
     }
 }
+
+#[cfg(test)]
+#[path = "../weather_proptests.rs"]
+mod weather_proptests;

@@ -20,6 +20,7 @@
 //! again with `extra_scopes` to obtain a new token with additional
 //! scopes, while keeping the same redirect URI / client_id.
 
+use std::sync::Arc;
 use std::time::Duration;
 
 use super::client::OAuthClient;
@@ -40,7 +41,6 @@ use super::types::{
 /// from the per-request context: MCP server URL, optional static
 /// headers, and a pre-emptive `WWW-Authenticate` challenge if the
 /// caller already saw a 401.
-#[derive(Debug, Clone)]
 pub struct OAuthFlowInputs {
     /// Canonical MCP server URL. This becomes the `resource`
     /// parameter (RFC 8707) and the token store key.
@@ -67,6 +67,56 @@ pub struct OAuthFlowInputs {
     /// instead of starting its own. Used by integration tests to
     /// inject a controlled callback.
     pub loopback_override: Option<LoopbackServer>,
+    /// Test seam: if set, the driver calls this closure in place
+    /// of `webbrowser::open` for the authorization step. Production
+    /// code leaves this `None` and pops a real browser; tests
+    /// substitute an HTTP-redirect-following client (e.g.
+    /// `reqwest::blocking::Client::get`) pointed at a wiremock
+    /// that 302-redirects to the loopback with `code` + `state`.
+    /// The closure must return `Ok(())` on success and an
+    /// `OAuthError` on failure (matching the production contract).
+    pub browser_override: Option<BrowserOverride>,
+}
+
+/// Test-seam closure for the OAuth browser step. See
+/// [`OAuthFlowInputs::browser_override`]. `Send + Sync` so the
+/// flow can hold it in the same struct as the loopback server
+/// without lifetime gymnastics.
+pub type BrowserOverride = Arc<dyn Fn(&str) -> Result<(), OAuthError> + Send + Sync>;
+
+// Manual `Debug` impl: the derived form would try to format
+// `Arc<dyn Fn>`, which isn't `Debug`. In practice the
+// `browser_override` is a test-only field; we print its
+// presence/absence and the rest of the struct as usual.
+impl std::fmt::Debug for OAuthFlowInputs {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("OAuthFlowInputs")
+            .field("mcp_server_url", &self.mcp_server_url)
+            .field("www_authenticate", &self.www_authenticate)
+            .field("extra_scopes", &self.extra_scopes)
+            .field("timeout", &self.timeout)
+            .field("pre_registered_client", &self.pre_registered_client)
+            .field("loopback_override", &self.loopback_override)
+            .field(
+                "browser_override",
+                &self.browser_override.as_ref().map(|_| "<fn>"),
+            )
+            .finish()
+    }
+}
+
+impl Clone for OAuthFlowInputs {
+    fn clone(&self) -> Self {
+        Self {
+            mcp_server_url: self.mcp_server_url.clone(),
+            www_authenticate: self.www_authenticate.clone(),
+            extra_scopes: self.extra_scopes.clone(),
+            timeout: self.timeout,
+            pre_registered_client: self.pre_registered_client.clone(),
+            loopback_override: self.loopback_override.clone(),
+            browser_override: self.browser_override.clone(),
+        }
+    }
 }
 
 /// Pre-registered OAuth client. Comes from the MCP server's
@@ -205,7 +255,19 @@ pub fn run_flow(
 
     // Step 7: open the browser. Best-effort: if the browser fails
     // to launch, we still let the caller print the URL themselves.
-    if let Err(e) = open_browser(&auth_url) {
+    // The `browser_override` seam lets integration tests substitute
+    // a non-browser path (typically an HTTP-redirect-following
+    // client pointed at a wiremock) without touching the
+    // production code path.
+    if let Some(override_fn) = &inputs.browser_override {
+        if let Err(e) = override_fn(&auth_url) {
+            tracing::warn!(
+                error = %e,
+                authorization_url = %auth_url,
+                "browser override returned an error"
+            );
+        }
+    } else if let Err(e) = open_browser(&auth_url) {
         tracing::warn!(
             error = %e,
             authorization_url = %auth_url,
@@ -638,6 +700,7 @@ mod tests {
                 client_secret: None,
             }),
             loopback_override: None,
+            browser_override: None,
         };
 
         let output = refresh(&inputs, &store, &existing).expect("refresh should succeed");
@@ -694,6 +757,7 @@ mod tests {
             timeout: None,
             pre_registered_client: None,
             loopback_override: None,
+            browser_override: None,
         };
         let err = refresh(&inputs, &store, &existing).expect_err("refresh must fail");
         assert!(matches!(err, OAuthError::RefreshFailed(_)));
@@ -734,3 +798,7 @@ mod tests {
         })
     }
 }
+
+#[cfg(test)]
+#[path = "flow_proptests.rs"]
+mod flow_proptests;

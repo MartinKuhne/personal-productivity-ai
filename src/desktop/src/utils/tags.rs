@@ -117,3 +117,7 @@ mod tests {
         assert!(tags.is_empty());
     }
 }
+
+#[cfg(test)]
+#[path = "tags_proptests.rs"]
+mod tags_proptests;
