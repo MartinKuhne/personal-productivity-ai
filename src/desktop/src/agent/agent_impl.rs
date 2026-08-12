@@ -8,11 +8,9 @@ use crate::agent::prompt_builder::SystemPromptBuilder;
 use crate::agent::tool_executor::ToolExecutor;
 
 use crate::bus::events::debug::{AgentDebugEntry, DebugEntryKind, DebugEntryRow};
-use crate::config::get_config_path;
 use std::collections::HashSet;
 use std::path::PathBuf;
 use std::sync::atomic::Ordering;
-use uuid::Uuid;
 
 /// Run an agent session to completion on the current thread.
 ///
@@ -28,21 +26,24 @@ fn run_agent_inner(ctx: AgentContext) {
         Some(c) => c,
         None => return,
     };
-    let system_prompt = SystemPromptBuilder::new(&ctx.config)
+    let system_prompt = SystemPromptBuilder::new()
         .with_active_file(ctx.active_file.clone())
         .with_active_dir(ctx.active_dir.clone())
         .with_selected_files(ctx.selected_files.clone())
-        .build(&ctx.config);
+        .build(&ctx.agent_config);
     log_prompt_context(&ctx.active_file, &ctx.active_dir, &ctx.selected_files);
     let mut messages = build_messages(system_prompt, &ctx.prompt, ctx.history.clone());
     ctx.tool_manager.rcu(|mgr| {
         let mut new_mgr = (**mgr).clone();
-        new_mgr.update_and_refresh(&ctx.config);
+        new_mgr.update_and_refresh(&ctx.app_config);
         new_mgr
     });
-    let tools_json = ctx.tool_manager.load().get_schema(&ctx.config, &ctx.prompt);
+    let tools_json = ctx
+        .tool_manager
+        .load()
+        .get_schema(&ctx.app_config, &ctx.prompt);
     let executor = crate::agent::tool_executor::ToolExecutorBuilder::new(
-        std::sync::Arc::new(ctx.config.clone()),
+        ctx.app_config.clone(),
         ctx.file_event_bus.clone(),
         ctx.cache.clone(),
         ctx.tool_manager.clone(),
@@ -60,12 +61,9 @@ fn run_agent_inner(ctx: AgentContext) {
         content: None,
         row_type: DebugEntryRow::SessionBoundary,
     };
-    publish_debug(
-        &*ctx.observer,
-        session_boundary.clone(),
-    );
+    publish_debug(&*ctx.observer, session_boundary.clone());
     // New seam: SessionStarted lifecycle event
-    let _ = ctx.observer.on_session_started();
+    ctx.observer.on_session_started();
 
     let mut turn_number: usize = 0;
     let mut prev_messages_len: usize = 0;
@@ -85,16 +83,15 @@ fn run_agent_inner(ctx: AgentContext) {
             Turn::Continue => {}
             Turn::Done => break,
             Turn::Failed => {
-                let _ = ctx.observer.on_session_finished(Vec::new());
+                ctx.observer.on_session_finished(Vec::new());
                 return;
             }
         }
     }
     if !ctx.cancel_flag.load(Ordering::SeqCst) {
-        let _ = ctx.observer.on_status( AgentStatus::Done,
-        );
+        ctx.observer.on_status(AgentStatus::Done);
     }
-    let _ = ctx.observer.on_session_finished(messages);
+    ctx.observer.on_session_finished(messages);
 }
 enum Turn {
     Continue,
@@ -114,8 +111,7 @@ fn process_turn(
     *turn_number += 1;
     let turn = *turn_number;
 
-    let _ = ctx.observer.on_status( AgentStatus::AwaitingLlm,
-    );
+    ctx.observer.on_status(AgentStatus::AwaitingLlm);
 
     let tool_count = tools_json.as_array().map(|a| a.len()).unwrap_or(0);
     let delta: Vec<serde_json::Value> = messages[*prev_messages_len..].to_vec();
@@ -143,8 +139,7 @@ fn process_turn(
     let resp_val = match llm.chat_completion(messages, tools_json) {
         Ok(v) => v,
         Err(e) => {
-            let _ = ctx.observer.on_failed( e.user_message(),
-            );
+            ctx.observer.on_failed(e.user_message());
             return Turn::Failed;
         }
     };
@@ -184,8 +179,8 @@ fn process_turn(
     let message = match extract_message(&resp_val) {
         Some(m) => m,
         None => {
-            let _ = ctx.observer.on_failed( "Invalid response schema".into(),
-            );
+            ctx.observer
+                .on_failed("Invalid response schema".to_string());
             return Turn::Failed;
         }
     };
@@ -212,13 +207,13 @@ fn process_turn(
                     .to_string();
                 let args_value = serde_json::from_str::<serde_json::Value>(args)
                     .unwrap_or(serde_json::Value::String(args.to_string()));
-                let _ = ctx.observer.on_tool_call_started(call_id, fn_name.to_string(), args_value);
+                ctx.observer
+                    .on_tool_call_started(call_id, fn_name.to_string(), args_value);
             }
-            let _ = ctx.observer.on_status( AgentStatus::ExecutingTools,
-            );
+            ctx.observer.on_status(AgentStatus::ExecutingTools);
             let (results, side_effects) = executor.execute_all(tc);
             for effect in side_effects {
-                let _ = ctx.observer.on_tool_side_effect(effect.clone());
+                ctx.observer.on_tool_side_effect(effect.clone());
             }
             emit_tool_results_debug(turn, &*ctx.observer, &results);
             process_tool_results(&results, tc, messages, &*ctx.observer);
@@ -228,10 +223,11 @@ fn process_turn(
     }
 }
 fn resolve_ll_client(ctx: &AgentContext) -> Option<LLMClient> {
-    let client = match LLMClient::from_config(&ctx.config, ctx.model_name.as_deref()) {
+    let client = match LLMClient::from_agent_config(&ctx.agent_config, ctx.model_name.as_deref()) {
         Some(c) => c,
         None => {
-            let _ = ctx.observer.on_failed("Model configuration not found".to_string());
+            ctx.observer
+                .on_failed("Model configuration not found".to_string());
             return None;
         }
     };
@@ -239,10 +235,9 @@ fn resolve_ll_client(ctx: &AgentContext) -> Option<LLMClient> {
         tracing::warn!(name = "agent.api_key.missing", "Agent run skipped.");
         let err = format!(
             "API key not set. Configure in {} or use `/models`.",
-            get_config_path().display()
+            ctx.agent_config.config_path().display()
         );
-        let _ = ctx.observer.on_failed( err,
-        );
+        ctx.observer.on_failed(err);
         return None;
     }
     Some(client)
@@ -264,7 +259,7 @@ fn build_messages(
         messages
     }
 }
-fn emit_usage(resp: &serde_json::Value, observer: &(dyn AgentEventObserver)) {
+fn emit_usage(resp: &serde_json::Value, observer: &dyn AgentEventObserver) {
     if let Some(info) = resp.get("usage").and_then(parse_usage_block) {
         tracing::info!(
             name = "agent.usage",
@@ -273,37 +268,31 @@ fn emit_usage(resp: &serde_json::Value, observer: &(dyn AgentEventObserver)) {
             total_tokens = info.total_tokens,
             "LLM usage."
         );
-        let _ = observer.on_token_usage( info,
-        );
+        observer.on_token_usage(info);
     }
 }
 fn extract_message(resp: &serde_json::Value) -> Option<serde_json::Value> {
     resp.get("choices")?.get(0)?.get("message").cloned()
 }
-fn handle_reasoning(
-    message: &serde_json::Value,
-    observer: &(dyn AgentEventObserver),
-) {
+fn handle_reasoning(message: &serde_json::Value, observer: &dyn AgentEventObserver) {
     if let Some(r) = message.get("reasoning_content").and_then(|r| r.as_str()) {
-        let _ = observer.on_thinking( r.to_string(),
-        );
+        observer.on_thinking(r.to_string());
     }
 }
-fn handle_content(message: &serde_json::Value, observer: &(dyn AgentEventObserver)) {
+fn handle_content(message: &serde_json::Value, observer: &dyn AgentEventObserver) {
     let content_str = message
         .get("content")
         .and_then(|c| c.as_str())
         .unwrap_or("");
     if !content_str.is_empty() {
-        let _ = observer.on_content_delta( format!("{}\n\n", content_str),
-        );
+        observer.on_content_delta(format!("{}\n\n", content_str));
     }
 }
 fn process_tool_results(
     results: &[(String, String, String, String)],
     tool_calls: &[serde_json::Value],
     messages: &mut Vec<serde_json::Value>,
-    observer: &(dyn AgentEventObserver),
+    observer: &dyn AgentEventObserver,
 ) {
     let mut map: std::collections::HashMap<String, (String, String, String)> =
         std::collections::HashMap::new();
@@ -320,8 +309,7 @@ fn process_tool_results(
             log_tool_result(&fn_name, &result);
             let result_value = serde_json::from_str::<serde_json::Value>(&result)
                 .unwrap_or(serde_json::Value::String(result.clone()));
-            let _ = observer.on_tool_result( cid.clone(),  fn_name.clone(),  result_value,
-            );
+            observer.on_tool_result(cid.clone(), fn_name.clone(), result_value);
             // R1 (Spotlighting): wrap the tool result in a
             // datamark envelope so the LLM treats it as data, not
             // instructions. The user-facing response above is built
@@ -402,7 +390,7 @@ fn log_tool_result(func_name: &str, result: &str) {
 
 fn emit_tool_results_debug(
     turn: usize,
-    observer: &(dyn AgentEventObserver),
+    observer: &dyn AgentEventObserver,
     results: &[(String, String, String, String)],
 ) {
     let entries: Vec<serde_json::Value> = results
@@ -434,8 +422,8 @@ fn emit_tool_results_debug(
 /// Publish a debug entry on the `Bus<AgentEvent>` as
 /// `SeamAgentEvent::DebugEntry`. The legacy `tx_gui` mpsc path was
 /// removed at step 5 (T016).
-fn publish_debug(observer: &(dyn AgentEventObserver), entry: AgentDebugEntry) {
-    let _ = observer.on_debug_entry(entry);
+fn publish_debug(observer: &dyn AgentEventObserver, entry: AgentDebugEntry) {
+    observer.on_debug_entry(entry);
 }
 
 #[cfg(test)]

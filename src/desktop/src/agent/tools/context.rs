@@ -1,24 +1,25 @@
-//! Tool context — provides tools with access to `AppConfig` and the file event bus, plus safe virtual-path resolution.
+//! Tool context — provides tools with access to the global `AppConfig` and the file event bus, plus safe virtual-path resolution.
 
 use crate::app::session::BrowserSession;
 use crate::app::vfs;
 use crate::bus::core::Bus;
 use crate::bus::events::file::{FileEvent, FileEventKind, FileEventProducer};
+use crate::config::AppConfig;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 /// Read-only VFS path resolver wrapping `AppConfig`. Owns an
-/// `Arc<AppConfig>` so the resolver is `'static` and can be
-/// embedded in a long-lived `ToolContext` or cloned across
-/// parallel dispatch without lifetime juggling.
+/// `Arc<AppConfig>` so the resolver is `'static` and can be embedded
+/// in a long-lived `ToolContext` or cloned across parallel dispatch
+/// without lifetime juggling.
 #[derive(Clone)]
 pub struct VfsResolver {
-    pub config: Arc<crate::config::AppConfig>,
+    pub config: Arc<AppConfig>,
 }
 
 impl VfsResolver {
     /// Create a new `VfsResolver`.
-    pub fn new(config: Arc<crate::config::AppConfig>) -> Self {
+    pub fn new(config: Arc<AppConfig>) -> Self {
         Self { config }
     }
 
@@ -88,7 +89,7 @@ impl EventPublisher {
 /// without `unsafe` casts.
 #[derive(Clone)]
 pub struct ToolContext {
-    pub config: Arc<crate::config::AppConfig>,
+    pub config: Arc<AppConfig>,
     pub file_event_bus: Bus<FileEvent>,
     pub resolver: VfsResolver,
     pub publisher: EventPublisher,
@@ -102,13 +103,12 @@ pub struct ToolContext {
     pub browser_session: Arc<BrowserSession>,
     pub pdf_backing: std::sync::Arc<crate::app::session::PdfBackingTracker>,
     pub cache: std::sync::Arc<crate::agent::tools::registry::cache::ToolCache>,
-    pub tool_manager: std::sync::Arc<arc_swap::ArcSwap<crate::agent::tools::registry::ToolRegistry>>,
+    pub tool_manager:
+        std::sync::Arc<arc_swap::ArcSwap<crate::agent::tools::registry::ToolRegistry>>,
     pub uuid_gen: std::sync::Arc<dyn crate::utils::uuid::UuidGenerator>,
 }
 
 impl ToolContext {
-
-
     /// Resolve a virtual path to an absolute filesystem path.
     pub fn resolve_virtual_path(
         &self,
@@ -156,7 +156,7 @@ const _: fn() = || {
 };
 
 pub struct ToolContextBuilder {
-    config: Arc<crate::config::AppConfig>,
+    config: Arc<AppConfig>,
     file_event_bus: Bus<FileEvent>,
     tool_manager: std::sync::Arc<arc_swap::ArcSwap<crate::agent::tools::registry::ToolRegistry>>,
     cache: std::sync::Arc<crate::agent::tools::registry::cache::ToolCache>,
@@ -167,9 +167,11 @@ pub struct ToolContextBuilder {
 
 impl ToolContextBuilder {
     pub fn new(
-        config: Arc<crate::config::AppConfig>,
+        config: Arc<AppConfig>,
         file_event_bus: Bus<FileEvent>,
-        tool_manager: std::sync::Arc<arc_swap::ArcSwap<crate::agent::tools::registry::ToolRegistry>>,
+        tool_manager: std::sync::Arc<
+            arc_swap::ArcSwap<crate::agent::tools::registry::ToolRegistry>,
+        >,
         cache: std::sync::Arc<crate::agent::tools::registry::cache::ToolCache>,
         uuid_gen: std::sync::Arc<dyn crate::utils::uuid::UuidGenerator>,
     ) -> Self {
@@ -189,12 +191,16 @@ impl ToolContextBuilder {
         self
     }
 
-    pub fn with_pdf_backing(mut self, pdf_backing: std::sync::Arc<crate::app::session::PdfBackingTracker>) -> Self {
+    pub fn with_pdf_backing(
+        mut self,
+        pdf_backing: std::sync::Arc<crate::app::session::PdfBackingTracker>,
+    ) -> Self {
         self.pdf_backing = Some(pdf_backing);
         self
     }
 
     pub fn build(self) -> ToolContext {
+        let default_browser = Arc::new(BrowserSession::new(&self.config));
         let resolver = VfsResolver::new(self.config.clone());
         let publisher = EventPublisher::new(self.file_event_bus.clone());
         ToolContext {
@@ -202,8 +208,10 @@ impl ToolContextBuilder {
             file_event_bus: self.file_event_bus,
             resolver,
             publisher,
-            browser_session: self.browser_session.unwrap_or_else(|| Arc::new(BrowserSession::new(&crate::config::AppConfig::default()))),
-            pdf_backing: self.pdf_backing.unwrap_or_else(|| Arc::new(crate::app::session::PdfBackingTracker::new())),
+            browser_session: self.browser_session.unwrap_or(default_browser),
+            pdf_backing: self
+                .pdf_backing
+                .unwrap_or_else(|| Arc::new(crate::app::session::PdfBackingTracker::new())),
             cache: self.cache,
             tool_manager: self.tool_manager,
             uuid_gen: self.uuid_gen,

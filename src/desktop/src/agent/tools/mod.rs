@@ -5,7 +5,7 @@
 //! Protocol-layer code for the external service integrations
 //! (CalDAV, CardDAV, MCP, Trello, Weather) lives under
 //! [`crate::integrations`] and is referenced from the `Tool`
-//! adapters in [`manager::builtin`].
+//! adapters in [`registry::builtin`].
 //!
 //! Requirements: see [`SPEC.md`](SPEC.md) (TOOL-001..TOOL-010, TOOL-014..024) for the full specification.
 
@@ -17,8 +17,8 @@ pub mod csv_db;
 pub mod dtos;
 pub mod filesystem;
 pub mod jmap;
-pub mod registry;
 pub mod mcp;
+pub mod registry;
 pub mod web;
 pub mod yaml_header;
 

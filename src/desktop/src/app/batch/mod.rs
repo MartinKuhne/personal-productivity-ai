@@ -14,4 +14,6 @@ pub use coordinator::BatchCoordinator;
 pub use discoverer::Discoverer;
 pub use executor::{BatchJobExecutor, run_agent_blocking};
 pub use prompts::{discover_prompts, read_prompt_content, resolve_prompts};
-pub use types::{BatchConfig, BatchHandle, BatchJob, BatchJobStatus, BatchMode, BatchResult, PromptInfo};
+pub use types::{
+    BatchConfig, BatchHandle, BatchJob, BatchJobStatus, BatchMode, BatchResult, PromptInfo,
+};

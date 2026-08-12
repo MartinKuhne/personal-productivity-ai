@@ -2,8 +2,8 @@
 //!
 //! Unit tests live in the sibling `prompt_builder_tests.rs` sidecar.
 
+use crate::agent::config::AgentConfig;
 use crate::agent::datamark::{SECURITY_HEADER, wrap_user_md};
-use crate::config::AppConfig;
 use std::collections::HashSet;
 use std::path::PathBuf;
 
@@ -15,7 +15,7 @@ pub struct SystemPromptBuilder {
 }
 
 impl SystemPromptBuilder {
-    pub fn new(_config: &AppConfig) -> Self {
+    pub fn new() -> Self {
         Self {
             static_prompt: build_static_system_prompt(),
             active_file: None,
@@ -39,10 +39,10 @@ impl SystemPromptBuilder {
         self
     }
 
-    pub fn build(self, config: &AppConfig) -> Vec<String> {
+    pub fn build(self, config: &AgentConfig) -> Vec<String> {
         let mut dynamic = build_dynamic_system_prompt(config);
         let to_virtual = |path: &PathBuf| -> String {
-            crate::config::library_display_label(&config.content_libraries, path)
+            crate::config::library_display_label(config.content_libraries(), path)
                 .unwrap_or_else(|| path.to_string_lossy().to_string())
         };
 
@@ -68,7 +68,7 @@ impl SystemPromptBuilder {
             dynamic.push('.');
         }
 
-        for lib in &config.content_libraries {
+        for lib in config.content_libraries() {
             let user_md = std::path::Path::new(&lib.root_folder).join("USER.md");
             if user_md.exists()
                 && let Ok(content) = std::fs::read_to_string(&user_md)
@@ -84,28 +84,34 @@ impl SystemPromptBuilder {
     }
 }
 
+impl Default for SystemPromptBuilder {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 fn build_static_system_prompt() -> String {
     format!(
         "{SECURITY_HEADER}\n\nYou are FastMD Agent, a personal assistant grounded in the user's knowledge base — a library of Markdown notes that captures their information, preferences, and context. You help with everyday tasks by reasoning over these notes and using integrated tools: email, calendar, contacts, web search, to-dos, and file operations. Consult the user's own knowledge before reaching for external information, then take action step by step. Respond using Markdown format.\n\nCRITICAL: Avoid context bloat! Do NOT use the `read_note` tool on multiple notes in a single step. Always prefer `read_yaml_header` to survey notes, or `search_notes` to extract specific information without reading entire notes."
     )
 }
 
-fn build_dynamic_system_prompt(config: &AppConfig) -> String {
+fn build_dynamic_system_prompt(config: &AgentConfig) -> String {
     let date_str = chrono::Local::now().format("%Y-%m-%d").to_string();
     let mut prompt = format!("Today's date and time is: {}", date_str);
-    if let Some(name) = &config.user_name {
+    if let Some(name) = config.user_name() {
         prompt.push_str(&format!("\nUser's Name: {}", name));
     }
-    if let Some(address) = &config.user_address {
+    if let Some(address) = config.user_address() {
         prompt.push_str(&format!("\nUser's Address: {}", address));
     }
-    if let Some(birthdate) = &config.user_birthdate {
+    if let Some(birthdate) = config.user_birthdate() {
         append_birthdate_info(&mut prompt, birthdate);
     }
-    if let Some(gender) = &config.user_gender {
+    if let Some(gender) = config.user_gender() {
         prompt.push_str(&format!("\nUser's Gender: {}", gender));
     }
-    if let Some(ext) = &config.system_prompt_extension {
+    if let Some(ext) = config.system_prompt_extension() {
         prompt.push_str(&format!("\n{}", ext));
     }
     prompt

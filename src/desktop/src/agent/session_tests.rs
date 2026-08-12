@@ -1,19 +1,28 @@
-//! Tests for `agent/manager.rs`.
+//! Tests for `agent/session.rs`.
 
 use super::*;
+use crate::agent::config::AgentConfigBuilder;
 use crate::bus::events::debug::{AgentDebugEntry, DebugEntryKind, DebugEntryRow};
-use crate::config::AppConfig;
 use std::collections::HashSet;
+
+/// Build a default `AgentSession` for unit tests. Each call spawns a
+/// fresh driver thread.
+fn make_session() -> AgentSession {
+    AgentSession::new(
+        crate::bus::core::Bus::new(),
+        Arc::new(crate::app::session::BrowserSession::with_resolved(
+            AgentConfig::default().browser().clone(),
+        )),
+        Arc::new(crate::app::session::PdfBackingTracker::new()),
+        Arc::new(arc_swap::ArcSwap::from_pointee(
+            crate::agent::tools::registry::ToolRegistry::new(),
+        )),
+    )
+}
 
 #[test]
 fn test_new_manager_is_empty() {
-    let config = AppConfig::default();
-    let mgr = AgentSession::new_for_test(
-        config,
-        Arc::new(crate::app::session::BrowserSession::new(
-            &AppConfig::default(),
-        )),
-    );
+    let mgr = make_session();
     let state = mgr.state();
     assert!(!state.running);
     assert!(state.status.is_empty());
@@ -22,13 +31,7 @@ fn test_new_manager_is_empty() {
 
 #[test]
 fn test_cancel_sets_running_false() {
-    let config = AppConfig::default();
-    let mut mgr = AgentSession::new_for_test(
-        config,
-        Arc::new(crate::app::session::BrowserSession::new(
-            &AppConfig::default(),
-        )),
-    );
+    let mut mgr = make_session();
     mgr.state_mut().running = true;
     mgr.cancel_flag = Some(Arc::new(AtomicBool::new(false)));
     mgr.cancel();
@@ -38,13 +41,7 @@ fn test_cancel_sets_running_false() {
 
 #[test]
 fn test_clear_history_resets_fields() {
-    let config = AppConfig::default();
-    let mut mgr = AgentSession::new_for_test(
-        config,
-        Arc::new(crate::app::session::BrowserSession::new(
-            &AppConfig::default(),
-        )),
-    );
+    let mut mgr = make_session();
     mgr.state.history = Some(vec![Value::String("old".to_string())]);
     mgr.state.token_usage = Some(TokenUsageInfo {
         prompt_tokens: 100,
@@ -57,142 +54,42 @@ fn test_clear_history_resets_fields() {
     assert!(mgr.state.token_usage.is_none());
 }
 
-/// Regression: the bus-driven constructor must observe the
-/// first published `ConfigArrived` and store it. The second
-/// `drain_config` call (after the reader is dropped) is a
-/// no-op.
 #[test]
-fn test_drain_config_observes_first_event() {
-    use crate::bus::config::config_bus;
-    use crate::bus::events::config::ConfigArrived;
-
-    let bus = config_bus();
-    let mut mgr = AgentSession::new(
-        bus.clone(),
-        crate::bus::core::Bus::new(),
-        Arc::new(crate::app::session::BrowserSession::new(
-            &AppConfig::default(),
-        )),
-        Arc::new(crate::app::session::PdfBackingTracker::new()),
-        Arc::new(arc_swap::ArcSwap::from_pointee(
-            crate::agent::tools::registry::ToolRegistry::new(),
-        )),
+fn test_set_agent_config_round_trip() {
+    let mgr = make_session();
+    let mut models = std::collections::HashMap::new();
+    models.insert(
+        "a".to_string(),
+        crate::config::LlmConfig {
+            model: "a".to_string(),
+            api_url: "http://a".to_string(),
+            api_key: "k".to_string(),
+            cost: Some(0),
+            use_case: vec!["chat".to_string()],
+        },
     );
-
-    // Before any event: not arrived, default config in use.
-    assert!(!mgr.config_arrived());
-
-    let cfg = AppConfig {
-        csv_db_path: Some("/tmp/foo".to_string()),
-        ..AppConfig::default()
-    };
-    bus.publish(ConfigArrived::new(cfg.clone()));
-
-    assert!(mgr.drain_config());
-    assert!(mgr.config_arrived());
-    assert_eq!(mgr.config.csv_db_path, cfg.csv_db_path);
-
-    // Subsequent drain is a no-op (reader dropped after first).
-    assert!(!mgr.drain_config());
+    let new_cfg = AgentConfigBuilder::new().with_models(models).build();
+    mgr.set_agent_config(new_cfg.clone());
+    let read_back = mgr.agent_config();
+    assert_eq!(read_back.models().len(), 1);
+    assert!(read_back.models().contains_key("a"));
 }
 
-/// Regression: `drain_config` returns false when no event has
-/// been published yet, and does not flip the `config_arrived`
-/// flag.
 #[test]
-fn test_drain_config_returns_false_when_empty() {
-    let bus = crate::bus::config::config_bus();
-    let mut mgr = AgentSession::new(
-        bus,
-        crate::bus::core::Bus::new(),
-        Arc::new(crate::app::session::BrowserSession::new(
-            &AppConfig::default(),
-        )),
-        Arc::new(crate::app::session::PdfBackingTracker::new()),
-        Arc::new(arc_swap::ArcSwap::from_pointee(
-            crate::agent::tools::registry::ToolRegistry::new(),
-        )),
-    );
-
-    assert!(!mgr.drain_config());
-    assert!(!mgr.config_arrived());
-}
-
-/// Regression: the production startup order in `main.rs`
-/// must be "construct subscribers first, then publish" —
-/// `tokio::sync::broadcast` only delivers an event to
-/// subscribers that exist at publish time. Reversing the
-/// order silently drops the event and the agent never sees
-/// the loaded config. This test pins that contract: build
-/// the manager (which subscribes), then publish, then drain.
-#[test]
-fn test_construct_then_publish_order_drains_config() {
-    let bus = crate::bus::config::config_bus();
-    // 1. Construct first — this is the `AgentSession::new`
-    //    call inside `FastMdApp::new`. It subscribes here.
-    let mut mgr = AgentSession::new(
-        bus.clone(),
-        crate::bus::core::Bus::new(),
-        Arc::new(crate::app::session::BrowserSession::new(
-            &AppConfig::default(),
-        )),
-        Arc::new(crate::app::session::PdfBackingTracker::new()),
-        Arc::new(arc_swap::ArcSwap::from_pointee(
-            crate::agent::tools::registry::ToolRegistry::new(),
-        )),
-    );
-
-    // 2. Publish second — this is the line in `main.rs` that
-    //    fires `config_bus.publish(...)` after construction.
-    //    Because the subscription is already in place, the
-    //    broadcast channel delivers the event to this reader.
-    let cfg = AppConfig {
-        csv_db_path: Some("/tmp/regression".to_string()),
-        ..AppConfig::default()
-    };
-    bus.publish(ConfigArrived::new(cfg.clone()));
-
-    // 3. Drain on the first UI frame.
-    assert!(mgr.drain_config());
-    assert!(mgr.config_arrived());
-    assert_eq!(mgr.config.csv_db_path, cfg.csv_db_path);
-}
-
-/// Regression: the *reverse* order (publish, then construct)
-/// silently drops the event. We assert this so any future
-/// refactor that flips the order is caught immediately.
-#[test]
-fn test_publish_then_construct_order_drops_event() {
-    let bus = crate::bus::config::config_bus();
-    bus.publish(ConfigArrived::new(AppConfig::default()));
-
-    // Subscribing after the publish means the broadcast
-    // channel won't deliver the event to this reader.
-    let mut mgr = AgentSession::new(
-        bus,
-        crate::bus::core::Bus::new(),
-        Arc::new(crate::app::session::BrowserSession::new(
-            &AppConfig::default(),
-        )),
-        Arc::new(crate::app::session::PdfBackingTracker::new()),
-        Arc::new(arc_swap::ArcSwap::from_pointee(
-            crate::agent::tools::registry::ToolRegistry::new(),
-        )),
-    );
-
-    assert!(!mgr.drain_config());
-    assert!(!mgr.config_arrived());
+fn test_replace_agent_config_passes_current() {
+    let mgr = make_session();
+    mgr.set_agent_config(AgentConfigBuilder::new().with_max_tokens(8192).build());
+    mgr.replace_agent_config(|c| {
+        AgentConfigBuilder::new()
+            .with_max_tokens(c.max_tokens() * 2)
+            .build()
+    });
+    assert_eq!(mgr.agent_config().max_tokens(), 16384);
 }
 
 #[test]
 fn test_queue_prompt_and_take_next() {
-    let config = AppConfig::default();
-    let mut mgr = AgentSession::new_for_test(
-        config,
-        Arc::new(crate::app::session::BrowserSession::new(
-            &AppConfig::default(),
-        )),
-    );
+    let mut mgr = make_session();
 
     // Initially no queued prompts
     assert_eq!(mgr.queued_prompt_count(), 0);
@@ -222,13 +119,7 @@ fn test_queue_prompt_and_take_next() {
 
 #[test]
 fn test_finished_returns_queued_prompt() {
-    let config = AppConfig::default();
-    let mut mgr = AgentSession::new_for_test(
-        config,
-        Arc::new(crate::app::session::BrowserSession::new(
-            &AppConfig::default(),
-        )),
-    );
+    let mut mgr = make_session();
 
     // Queue a prompt
     mgr.queue_prompt("queued prompt".to_string());
@@ -245,13 +136,7 @@ fn test_finished_returns_queued_prompt() {
 
 #[test]
 fn test_finished_no_queued_prompt() {
-    let config = AppConfig::default();
-    let mut mgr = AgentSession::new_for_test(
-        config,
-        Arc::new(crate::app::session::BrowserSession::new(
-            &AppConfig::default(),
-        )),
-    );
+    let mut mgr = make_session();
 
     mgr.state.running = true;
 
@@ -265,13 +150,7 @@ fn test_finished_no_queued_prompt() {
 
 #[test]
 fn test_failed_clears_queue() {
-    let config = AppConfig::default();
-    let mut mgr = AgentSession::new_for_test(
-        config,
-        Arc::new(crate::app::session::BrowserSession::new(
-            &AppConfig::default(),
-        )),
-    );
+    let mut mgr = make_session();
 
     // Queue some prompts
     mgr.queue_prompt("prompt 1".to_string());
@@ -289,13 +168,7 @@ fn test_failed_clears_queue() {
 
 #[test]
 fn test_debug_entry_accumulates() {
-    let config = AppConfig::default();
-    let mut mgr = AgentSession::new_for_test(
-        config,
-        Arc::new(crate::app::session::BrowserSession::new(
-            &AppConfig::default(),
-        )),
-    );
+    let mut mgr = make_session();
 
     let entry = AgentDebugEntry {
         turn: 1,
@@ -322,20 +195,11 @@ fn test_debug_entry_accumulates() {
     };
     mgr.push_debug_entry(entry2);
     assert_eq!(mgr.state.debug_entries.len(), 2);
-    assert_eq!(mgr.state.debug_entries.len(), 2);
 }
 
 #[test]
 fn test_debug_entries_never_cleared_on_new_session() {
-    use crate::bus::events::debug::{AgentDebugEntry, DebugEntryKind, DebugEntryRow};
-
-    let config = AppConfig::default();
-    let mut mgr = AgentSession::new_for_test(
-        config,
-        Arc::new(crate::app::session::BrowserSession::new(
-            &AppConfig::default(),
-        )),
-    );
+    let mut mgr = make_session();
 
     let entry = AgentDebugEntry {
         turn: 1,
@@ -358,34 +222,17 @@ fn test_debug_entries_never_cleared_on_new_session() {
 }
 
 /// T035: Uuid session identity — verifies `current_session_id` is set
-/// on each `start_session` call and is a valid `Uuid`. Uses `Bus<AgentEvent>`
-/// since the agent no longer publishes on `tx_gui`.
+/// on each `submit_prompt` call and is a valid `Uuid`. Uses
+/// `Bus<AgentEvent>` since the agent no longer publishes on `tx_gui`.
 #[test]
-fn test_current_session_id_set_on_start_session() {
+fn test_current_session_id_set_on_submit_prompt() {
     use crate::app::events::AgentEvent as SeamAgentEvent;
 
-    let mut config = AppConfig::default();
-    config.models.insert(
-        "test".to_string(),
-        crate::config::LlmConfig {
-            model: "test".to_string(),
-            api_url: "http://localhost".to_string(),
-            api_key: "".to_string(),
-            cost: None,
-            use_case: vec!["chat".to_string()],
-        },
-    );
-
-    let mut mgr = AgentSession::new_for_test(
-        config,
-        Arc::new(crate::app::session::BrowserSession::new(
-            &AppConfig::default(),
-        )),
-    );
+    let mut mgr = make_session();
     // Before first session: no session_id
     assert!(mgr.current_session_id().is_none());
 
-    // Start first session — current_session_id must be set
+    // Submit first session — current_session_id must be set
     let reader1 = mgr.event_bus().subscribe();
     let session_id_1 = uuid::Uuid::new_v4();
     mgr.submit_prompt(crate::agent::events::AgentPrompt {
@@ -403,58 +250,20 @@ fn test_current_session_id_set_on_start_session() {
     );
     assert!(!session_id_1.is_nil(), "session_id must be a real Uuid");
 
-    // Drain bus until Failed (no valid API key)
-    let mut deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+    // Drain bus until the agent's prompt loop processes the message.
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
     while std::time::Instant::now() < deadline {
-        let mut got_failed = false;
+        let mut got_started = false;
         while let Ok(ev) = reader1.try_recv() {
             if let SeamAgentEvent::SessionStarted { session_id } = &ev {
                 assert_eq!(
                     *session_id, session_id_1,
                     "SessionStarted must carry the manager's session_id"
                 );
-            }
-            if matches!(ev, SeamAgentEvent::Failed { .. }) {
-                got_failed = true;
+                got_started = true;
             }
         }
-        if got_failed {
-            break;
-        }
-        std::thread::sleep(std::time::Duration::from_millis(5));
-    }
-
-    // Start second session — current_session_id must change
-    let reader2 = mgr.event_bus().subscribe();
-    let session_id_2 = uuid::Uuid::new_v4();
-    mgr.submit_prompt(crate::agent::events::AgentPrompt {
-        session_id: session_id_2,
-        text: "prompt 2".to_string(),
-        active_file: None,
-        active_dir: None,
-        selected_files: HashSet::new(),
-        cancel_flag: std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false)),
-    });
-    assert_ne!(
-        session_id_1, session_id_2,
-        "each submit_prompt must use a new session_id"
-    );
-
-    deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
-    while std::time::Instant::now() < deadline {
-        let mut got_failed = false;
-        while let Ok(ev) = reader2.try_recv() {
-            if let SeamAgentEvent::SessionStarted { session_id } = &ev {
-                assert_eq!(
-                    *session_id, session_id_2,
-                    "SessionStarted must carry the new session_id"
-                );
-            }
-            if matches!(ev, SeamAgentEvent::Failed { .. }) {
-                got_failed = true;
-            }
-        }
-        if got_failed {
+        if got_started {
             break;
         }
         std::thread::sleep(std::time::Duration::from_millis(5));

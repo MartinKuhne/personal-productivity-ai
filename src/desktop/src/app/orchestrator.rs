@@ -1,7 +1,7 @@
 use crate::agent::AgentSession;
-use crate::app::events::AgentEvent as SeamAgentEvent;
 use crate::agent::events::ToolSideEffect;
 use crate::app::background::{BackgroundLogEntry, LogCategory, SharedBackgroundLogs};
+use crate::app::events::AgentEvent as SeamAgentEvent;
 use crate::app::watcher::directory_tracker::DirectoryTracker;
 use crate::app::watcher::file_processor::FileEventProcessor;
 use crate::app::{Dialogs, FileSelection, Tabs, Tags, TextBuffer};
@@ -44,7 +44,8 @@ pub struct AppOrchestrator {
     pub config_reader: Option<BusReader<ConfigArrived>>,
     pub pending_file_load: Option<PathBuf>,
     pub finished_watcher_slot: Arc<Mutex<Option<notify::RecommendedWatcher>>>,
-    pub tool_manager: std::sync::Arc<arc_swap::ArcSwap<crate::agent::tools::registry::ToolRegistry>>,
+    pub tool_manager:
+        std::sync::Arc<arc_swap::ArcSwap<crate::agent::tools::registry::ToolRegistry>>,
     /// Reader for the `Bus<AgentEvent>` agent→UI channel. Subscribed
     /// once during app init from [`AgentSession::event_bus`].
     /// Drained each frame in [`Self::drain_agent_event_bus`].
@@ -291,7 +292,12 @@ impl AppOrchestrator {
                 });
         }
 
-        self.agent.set_config(config.clone());
+        // Project the global config to the agent's domain slice and
+        // hand it to the agent. The agent's run loop reads only the
+        // projected fields; the tool context (built per session)
+        // carries the full `AppConfig` separately.
+        let agent_cfg = crate::agent::config::AgentConfig::from_app_config(&config);
+        self.agent.set_agent_config(agent_cfg);
 
         self.content_libraries = config.content_libraries.clone();
         self.selection.tree_dirty = true;
@@ -502,8 +508,7 @@ impl AppOrchestrator {
                         self.tabs.current_markdown = doc.body().to_string();
                         self.tabs.invalidate_heading_ids_cache();
                         self.tabs.loaded_path = Some(path.clone());
-                        self.tabs.toc =
-                            crate::ui::render::build_toc(&self.tabs.current_markdown);
+                        self.tabs.toc = crate::ui::render::build_toc(&self.tabs.current_markdown);
                         self.tabs.scroll_to_header_id = None;
                     }
                     Err(err) => {
@@ -553,7 +558,9 @@ impl AppOrchestrator {
                         self.tool_manager.rcu(|mgr| {
                             let mut new_mgr = (**mgr).clone();
                             new_mgr.record_error(
-                                &crate::agent::tools::registry::ToolGroupId::Mcp(server_name.clone()),
+                                &crate::agent::tools::registry::ToolGroupId::Mcp(
+                                    server_name.clone(),
+                                ),
                                 ToolGroupError::now(ToolErrorKind::Authentication, msg.clone()),
                             );
                             new_mgr

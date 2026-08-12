@@ -4,18 +4,19 @@
 //! SC-001/SC-004).
 
 use crate::agent::agent_impl::run_agent;
+use crate::agent::config::AgentConfig;
+use crate::agent::config::AgentConfigBuilder;
 use crate::agent::context::AgentContext;
-use crate::app::events::AgentEvent;
 use crate::agent::events::AgentStatus;
+use crate::app::events::AgentEvent;
 use crate::bus::core::{Bus, BusReader};
 use crate::config::{AppConfig, LlmConfig};
-use std::collections::HashSet;
 use std::sync::Arc;
-use std::sync::atomic::AtomicBool;
 
-fn make_config(port: u16) -> AppConfig {
-    let mut config = AppConfig::default();
-    config.models.insert(
+fn make_agent_config(port: u16) -> AgentConfig {
+    use std::collections::HashMap;
+    let mut models = HashMap::new();
+    models.insert(
         "test".to_string(),
         LlmConfig {
             model: "test".to_string(),
@@ -25,19 +26,26 @@ fn make_config(port: u16) -> AppConfig {
             use_case: vec!["chat".to_string()],
         },
     );
-    config
+    AgentConfigBuilder::new().with_models(models).build()
 }
 
-fn make_ctx(config: AppConfig) -> (AgentContext, BusReader<AgentEvent>) {
-    let browser_session = Arc::new(crate::app::session::BrowserSession::new(
-        &AppConfig::default(),
+fn make_ctx(config: AgentConfig) -> (AgentContext, BusReader<AgentEvent>) {
+    let browser_session = Arc::new(crate::app::session::BrowserSession::with_resolved(
+        config.browser().clone(),
     ));
     let agent_event_bus = Bus::new();
     let bus_reader = agent_event_bus.subscribe();
-    let ctx = crate::agent::context::AgentContextBuilder::new(config, uuid::Uuid::new_v4(), "Hello".to_string())
-        .with_buses(Bus::new()).with_observer(std::sync::Arc::new(crate::app::events::BusAgentEventObserver::new(uuid::Uuid::new_v4(), agent_event_bus.clone())))
-        .with_browser_session(browser_session)
-        .build();
+    let app_config = Arc::new(AppConfig::default());
+    let session_id = uuid::Uuid::new_v4();
+    let ctx =
+        crate::agent::context::AgentContextBuilder::new(config, session_id, "Hello".to_string())
+            .with_app_config(app_config)
+            .with_buses(Bus::new())
+            .with_observer(std::sync::Arc::new(
+                crate::app::events::BusAgentEventObserver::new(session_id, agent_event_bus.clone()),
+            ))
+            .with_browser_session(browser_session)
+            .build();
     (ctx, bus_reader)
 }
 
@@ -138,7 +146,7 @@ fn test_agent_isolation_event_ordering_no_ui() {
     })
     .to_string();
     let port = spawn_one_shot_http_server(&http_response("HTTP/1.1 200 OK", &body));
-    let (ctx, mut bus_reader) = make_ctx(make_config(port));
+    let (ctx, mut bus_reader) = make_ctx(make_agent_config(port));
     let session_id = ctx.session_id;
     run_agent(ctx);
     let events = collect_bus_events(&mut bus_reader, std::time::Duration::from_secs(5));
@@ -228,7 +236,7 @@ fn test_session_continuity_history_carries_over() {
 
     // Session 1: fresh session_id, no history.
     let port1 = spawn_one_shot_http_server(&http_response("HTTP/1.1 200 OK", &body));
-    let (mut ctx1, mut reader1) = make_ctx(make_config(port1));
+    let (mut ctx1, mut reader1) = make_ctx(make_agent_config(port1));
     let session_id_1 = ctx1.session_id;
     ctx1.history = None;
     run_agent(ctx1);
@@ -249,7 +257,7 @@ fn test_session_continuity_history_carries_over() {
     // Session 2: SAME session_id, carrying forward history from session 1.
     // The agent should build on the prior conversation.
     let port2 = spawn_one_shot_http_server(&http_response("HTTP/1.1 200 OK", &body));
-    let (mut ctx2, mut reader2) = make_ctx(make_config(port2));
+    let (mut ctx2, mut reader2) = make_ctx(make_agent_config(port2));
     ctx2.session_id = session_id_1;
     ctx2.history = Some(finished1.clone());
     run_agent(ctx2);
@@ -274,7 +282,7 @@ fn test_session_continuity_history_carries_over() {
     // Session 3: NEW session_id, no history. Must start fresh — history
     // must be shorter than session 2's accumulated history.
     let port3 = spawn_one_shot_http_server(&http_response("HTTP/1.1 200 OK", &body));
-    let (mut ctx3, mut reader3) = make_ctx(make_config(port3));
+    let (mut ctx3, mut reader3) = make_ctx(make_agent_config(port3));
     let session_id_3 = ctx3.session_id;
     assert_ne!(
         session_id_3, session_id_1,

@@ -1,18 +1,19 @@
 //! Integration tests for `run_agent` — mock HTTP server simulating LLM responses, verifying tool calls, streaming, and cancellation.
 
 use crate::agent::agent_impl::run_agent;
+use crate::agent::config::AgentConfig;
+use crate::agent::config::AgentConfigBuilder;
 use crate::agent::context::AgentContext;
 use crate::app::events::AgentEvent as SeamAgentEvent;
 use crate::bus::core::BusReader;
 use crate::bus::events::debug::{AgentDebugEntry, DebugEntryKind, DebugEntryRow};
 use crate::config::AppConfig;
-use std::collections::HashSet;
 use std::sync::Arc;
-use std::sync::atomic::AtomicBool;
 
-fn make_config(port: u16) -> AppConfig {
-    let mut config = AppConfig::default();
-    config.models.insert(
+fn make_agent_config(port: u16) -> AgentConfig {
+    use std::collections::HashMap;
+    let mut models = HashMap::new();
+    models.insert(
         "test".to_string(),
         crate::config::LlmConfig {
             model: "test".to_string(),
@@ -22,19 +23,26 @@ fn make_config(port: u16) -> AppConfig {
             use_case: vec!["chat".to_string()],
         },
     );
-    config
+    AgentConfigBuilder::new().with_models(models).build()
 }
 
-fn make_ctx(config: AppConfig) -> (AgentContext, BusReader<SeamAgentEvent>) {
-    let browser_session = std::sync::Arc::new(crate::app::session::BrowserSession::new(
-        &crate::config::AppConfig::default(),
+fn make_ctx(config: AgentConfig) -> (AgentContext, BusReader<SeamAgentEvent>) {
+    let browser_session = std::sync::Arc::new(crate::app::session::BrowserSession::with_resolved(
+        config.browser().clone(),
     ));
     let agent_event_bus = crate::bus::core::Bus::new();
     let bus_reader = agent_event_bus.subscribe();
-    let ctx = crate::agent::context::AgentContextBuilder::new(config, uuid::Uuid::new_v4(), "Hello".to_string())
-        .with_buses(crate::bus::core::Bus::new()).with_observer(std::sync::Arc::new(crate::app::events::BusAgentEventObserver::new(uuid::Uuid::new_v4(), agent_event_bus.clone())))
-        .with_browser_session(browser_session)
-        .build();
+    let app_config = Arc::new(AppConfig::default());
+    let session_id = uuid::Uuid::new_v4();
+    let ctx =
+        crate::agent::context::AgentContextBuilder::new(config, session_id, "Hello".to_string())
+            .with_app_config(app_config)
+            .with_buses(crate::bus::core::Bus::new())
+            .with_observer(std::sync::Arc::new(
+                crate::app::events::BusAgentEventObserver::new(session_id, agent_event_bus.clone()),
+            ))
+            .with_browser_session(browser_session)
+            .build();
     (ctx, bus_reader)
 }
 
@@ -103,8 +111,9 @@ fn http_response(status_line: &str, body: &str) -> Vec<u8> {
 
 #[test]
 fn test_run_agent_missing_api_key() {
-    let mut config = AppConfig::default();
-    config.models.insert(
+    use std::collections::HashMap;
+    let mut models = HashMap::new();
+    models.insert(
         "test".to_string(),
         crate::config::LlmConfig {
             model: "test".to_string(),
@@ -114,6 +123,7 @@ fn test_run_agent_missing_api_key() {
             use_case: vec!["chat".to_string()],
         },
     );
+    let config = AgentConfigBuilder::new().with_models(models).build();
     let (ctx, mut bus_reader) = make_ctx(config);
     run_agent(ctx);
     let events = collect_bus_events(&mut bus_reader, std::time::Duration::from_secs(2));
@@ -129,8 +139,9 @@ fn test_run_agent_missing_api_key() {
 
 #[test]
 fn test_run_agent_network_error() {
-    let mut config = AppConfig::default();
-    config.models.insert(
+    use std::collections::HashMap;
+    let mut models = HashMap::new();
+    models.insert(
         "test".to_string(),
         crate::config::LlmConfig {
             model: "test".to_string(),
@@ -140,6 +151,7 @@ fn test_run_agent_network_error() {
             use_case: vec!["chat".to_string()],
         },
     );
+    let config = AgentConfigBuilder::new().with_models(models).build();
     let (ctx, mut bus_reader) = make_ctx(config);
     run_agent(ctx);
     let events = collect_bus_events(&mut bus_reader, std::time::Duration::from_secs(30));
@@ -156,7 +168,7 @@ fn test_run_agent_network_error() {
 #[test]
 fn test_run_agent_invalid_json_response() {
     let port = spawn_one_shot_http_server(b"HTTP/1.1 200 OK\r\nContent-Length: 1\r\n\r\n{");
-    let (ctx, mut bus_reader) = make_ctx(make_config(port));
+    let (ctx, mut bus_reader) = make_ctx(make_agent_config(port));
     run_agent(ctx);
     let events = collect_bus_events(&mut bus_reader, std::time::Duration::from_secs(5));
     assert!(
@@ -174,7 +186,7 @@ fn test_run_agent_http_status_error() {
     let port = spawn_one_shot_http_server(
         b"HTTP/1.1 400 Bad Request\r\nContent-Length: 11\r\n\r\nbad request",
     );
-    let (ctx, mut bus_reader) = make_ctx(make_config(port));
+    let (ctx, mut bus_reader) = make_ctx(make_agent_config(port));
     run_agent(ctx);
     let events = collect_bus_events(&mut bus_reader, std::time::Duration::from_secs(5));
     assert!(
@@ -190,7 +202,7 @@ fn test_run_agent_http_status_error() {
 #[test]
 fn test_run_agent_missing_choices() {
     let port = spawn_one_shot_http_server(&http_response("HTTP/1.1 200 OK", "{}"));
-    let (ctx, mut bus_reader) = make_ctx(make_config(port));
+    let (ctx, mut bus_reader) = make_ctx(make_agent_config(port));
     run_agent(ctx);
     let events = collect_bus_events(&mut bus_reader, std::time::Duration::from_secs(5));
     assert!(
@@ -211,7 +223,7 @@ fn test_run_agent_emits_done_status_on_natural_completion() {
     })
     .to_string();
     let port = spawn_one_shot_http_server(&http_response("HTTP/1.1 200 OK", &body));
-    let (ctx, mut bus_reader) = make_ctx(make_config(port));
+    let (ctx, mut bus_reader) = make_ctx(make_agent_config(port));
     run_agent(ctx);
     let events = collect_bus_events(&mut bus_reader, std::time::Duration::from_secs(5));
     let saw_finished = events
@@ -243,11 +255,23 @@ fn test_run_agent_skips_done_status_when_cancelled() {
     ));
     let agent_event_bus = crate::bus::core::Bus::new();
     let mut bus_reader = agent_event_bus.subscribe();
-    let ctx = crate::agent::context::AgentContextBuilder::new(make_config(port), uuid::Uuid::new_v4(), "List files".to_string())
-        .with_buses(crate::bus::core::Bus::new()).with_observer(std::sync::Arc::new(crate::app::events::BusAgentEventObserver::new(uuid::Uuid::new_v4(), agent_event_bus.clone())))
-        .with_browser_session(browser_session)
-        .with_cancel_flag(std::sync::Arc::new(std::sync::atomic::AtomicBool::new(true)))
-        .build();
+    let ctx = crate::agent::context::AgentContextBuilder::new(
+        make_agent_config(port),
+        uuid::Uuid::new_v4(),
+        "List files".to_string(),
+    )
+    .with_buses(crate::bus::core::Bus::new())
+    .with_observer(std::sync::Arc::new(
+        crate::app::events::BusAgentEventObserver::new(
+            uuid::Uuid::new_v4(),
+            agent_event_bus.clone(),
+        ),
+    ))
+    .with_browser_session(browser_session)
+    .with_cancel_flag(std::sync::Arc::new(std::sync::atomic::AtomicBool::new(
+        true,
+    )))
+    .build();
     run_agent(ctx);
     let events = collect_bus_events(&mut bus_reader, std::time::Duration::from_secs(5));
     let saw_finished = events
@@ -317,7 +341,7 @@ fn test_run_agent_emits_executing_tool_message_immediately() {
             }
         }
     });
-    let (ctx, mut bus_reader) = make_ctx(make_config(port));
+    let (ctx, mut bus_reader) = make_ctx(make_agent_config(port));
     run_agent(ctx);
     let events = collect_bus_events(&mut bus_reader, std::time::Duration::from_secs(5));
     assert!(
@@ -399,7 +423,7 @@ fn test_run_agent_datamarks_tool_results_in_conversation_history() {
             }
         }
     });
-    let (ctx, mut bus_reader) = make_ctx(make_config(port));
+    let (ctx, mut bus_reader) = make_ctx(make_agent_config(port));
     run_agent(ctx);
 
     // Drain the event stream, capturing the SessionFinished history.
@@ -455,7 +479,7 @@ fn test_run_agent_system_prompt_starts_with_security_header() {
     })
     .to_string();
     let port = spawn_one_shot_http_server(&http_response("HTTP/1.1 200 OK", &body));
-    let (ctx, mut bus_reader) = make_ctx(make_config(port));
+    let (ctx, mut bus_reader) = make_ctx(make_agent_config(port));
     run_agent(ctx);
 
     let events = collect_bus_events(&mut bus_reader, std::time::Duration::from_secs(5));
@@ -503,7 +527,7 @@ fn test_run_agent_system_prompt_without_context_has_no_file_context() {
     // make_ctx already passes active_file=None, active_dir=None,
     // selected_files empty — the state the interactive entry points
     // hand over when all tabs are closed.
-    let (ctx, mut bus_reader) = make_ctx(make_config(port));
+    let (ctx, mut bus_reader) = make_ctx(make_agent_config(port));
     run_agent(ctx);
 
     let events = collect_bus_events(&mut bus_reader, std::time::Duration::from_secs(5));
@@ -544,7 +568,7 @@ fn test_run_agent_emits_debug_entries() {
     })
     .to_string();
     let port = spawn_one_shot_http_server(&http_response("HTTP/1.1 200 OK", &body));
-    let (ctx, mut bus_reader) = make_ctx(make_config(port));
+    let (ctx, mut bus_reader) = make_ctx(make_agent_config(port));
     run_agent(ctx);
 
     let events = collect_bus_events(&mut bus_reader, std::time::Duration::from_secs(5));
@@ -655,7 +679,7 @@ fn test_run_agent_debug_entries_with_tool_calls() {
             }
         }
     });
-    let (ctx, mut bus_reader) = make_ctx(make_config(port));
+    let (ctx, mut bus_reader) = make_ctx(make_agent_config(port));
     run_agent(ctx);
 
     let events = collect_bus_events(&mut bus_reader, std::time::Duration::from_secs(5));
@@ -731,7 +755,7 @@ fn test_debug_outgoing_turn1_includes_full_initial_messages() {
     })
     .to_string();
     let port = spawn_one_shot_http_server(&http_response("HTTP/1.1 200 OK", &body));
-    let (ctx, mut bus_reader) = make_ctx(make_config(port));
+    let (ctx, mut bus_reader) = make_ctx(make_agent_config(port));
     run_agent(ctx);
 
     let events = collect_bus_events(&mut bus_reader, std::time::Duration::from_secs(5));
@@ -784,7 +808,7 @@ fn test_dual_publish_bus_receives_same_lifecycle_events() {
     })
     .to_string();
     let port = spawn_one_shot_http_server(&http_response("HTTP/1.1 200 OK", &body));
-    let (ctx, mut bus_reader) = make_ctx(make_config(port));
+    let (ctx, mut bus_reader) = make_ctx(make_agent_config(port));
     let session_id = ctx.session_id;
     run_agent(ctx);
 

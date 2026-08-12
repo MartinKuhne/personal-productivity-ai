@@ -1,4 +1,4 @@
-﻿//! YAML front-matter header tool implementations for the tool registry.
+//! YAML front-matter header tool implementations for the tool registry.
 
 use crate::agent::tools::Tool;
 use crate::agent::tools::context::ToolContext;

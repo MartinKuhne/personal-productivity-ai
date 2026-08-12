@@ -428,10 +428,15 @@ mod tests {
             crate::agent::tools::registry::ToolRegistry::new(),
         ));
         let cache = Arc::new(crate::agent::tools::registry::cache::ToolCache::new());
-        crate::agent::tools::context::crate::agent::tools::context::ToolContextBuilder::new(Arc::new(config), bus, tm, cache, std::sync::Arc::new(crate::utils::uuid::SystemUuidGenerator)
-        .with_browser_session(session)
-        .with_pdf_backing(pdf_backing)
-        .build(),
+        crate::agent::tools::context::crate::agent::tools::context::ToolContextBuilder::new(
+            Arc::new(config),
+            bus,
+            tm,
+            cache,
+            std::sync::Arc::new(crate::utils::uuid::SystemUuidGenerator)
+                .with_browser_session(session)
+                .with_pdf_backing(pdf_backing)
+                .build(),
         )
     }
 

@@ -2,12 +2,11 @@
 //!
 //! Unit tests live in the sibling `session_tests.rs` sidecar.
 
-use crate::agent::AgentContext;
-use crate::app::events::AgentEvent as SeamAgentEvent;
+use crate::agent::config::AgentConfig;
 use crate::agent::events::AgentPrompt;
+use crate::app::events::AgentEvent as SeamAgentEvent;
 use crate::app::session::BrowserSession;
-use crate::bus::core::{Bus, BusReader};
-use crate::bus::events::config::ConfigArrived;
+use crate::bus::core::Bus;
 use crate::bus::events::debug::AgentDebugEntry;
 use crate::bus::events::messages::TokenUsageInfo;
 use crate::config::AppConfig;
@@ -42,29 +41,22 @@ pub struct AgentState {
 ///
 /// Responsibilities:
 /// - Owns agent state (status, thinking, response, history, token usage)
-/// - Subscribes to the [`crate::bus::events::config::ConfigArrived`] bus so the
-///   [`AppConfig`] used by `start_session` is the one published at
-///   startup, not a value captured at construction time.
-/// - Provides `start_session` to launch a new agent thread
+/// - Holds the agent's domain [`AgentConfig`] (no direct
+///   `Bus<ConfigArrived>` subscription — the orchestrator hands us
+///   the projected config via [`Self::set_agent_config`]).
+/// - Provides `submit_prompt` to enqueue work for the long-lived
+///   driver thread.
 /// - Exposes read-only `AgentState` for UI rendering
 /// - Exposes `event_bus()` for UI to subscribe to `Bus<AgentEvent>`
 pub struct AgentSession {
     state: AgentState,
     cancel_flag: Option<Arc<AtomicBool>>,
-    config: AppConfig,
-    /// Shared config cell — the UI thread writes via `drain_config` /
-    /// `set_config`; the driver thread reads when building each
-    /// `AgentContext` (research.md §3, migration step 10).
-    shared_config: Arc<std::sync::RwLock<AppConfig>>,
-    /// Reader for the configuration-arrival bus. Subscribed during
-    /// `new` so the publish that happens after construction is
-    /// observed. Drained on every UI frame by
-    /// [`Self::drain_config`].
-    config_reader: Option<BusReader<ConfigArrived>>,
-    /// Tracks whether the bus has delivered the config yet so
-    /// config-derived work uses the published `AppConfig` instead
-    /// of the default placeholder.
-    config_arrived: bool,
+    /// Shared cell holding the agent's domain config. The UI thread
+    /// writes via [`Self::set_agent_config`]; the driver thread reads
+    /// it (and projects to the global `AppConfig` for the tool
+    /// context) when building each `AgentContext` (research.md §3,
+    /// migration step 10).
+    agent_config_provider: Arc<std::sync::RwLock<AgentConfig>>,
     /// Uuid of the currently-active (or most-recently-started) agent
     /// session. Set when `submit_prompt` mints a new `Uuid::new_v4()`.
     /// Replaces the old `session_counter: usize` (migration step 10,
@@ -83,7 +75,7 @@ pub struct AgentSession {
     /// [`Self::new`] and joined on drop. The driver processes prompts
     /// sequentially — one session at a time (research.md §3).
     driver_handle: Option<JoinHandle<()>>,
-    /// Long-lived headless Firefox session, shared with the
+    /// Long-lived headless browser session, shared with the
     /// tool executor. Lazily launches a browser on first use.
     /// Owned by the application, not the agent — sessions
     /// survive across agent turns so cookies persist (BRWS-001).
@@ -95,159 +87,75 @@ pub struct AgentSession {
 }
 
 impl AgentSession {
-    /// Subscribe to the configuration-arrival bus and return an
-    /// empty manager. The bus is the source of truth for the
+    /// Create a new empty [`AgentSessionBuilder`]. The builder is
+    /// the recommended way to construct a session; the legacy
+    /// `AgentSession::new` constructor is kept for the
+    /// orchestrator's hot path.
+    pub fn builder() -> AgentSessionBuilder {
+        AgentSessionBuilder::new()
+    }
+
+    /// Build a session manager with a shared cell for the agent's
+    /// domain config. The orchestrator writes the cell via
+    /// [`Self::set_agent_config`]; the driver reads it per session.
     pub fn new(
-        config_bus: Bus<ConfigArrived>,
         file_event_bus: Bus<crate::bus::events::file::FileEvent>,
         browser_session: Arc<BrowserSession>,
         pdf_backing: Arc<crate::app::session::PdfBackingTracker>,
         tool_manager: Arc<arc_swap::ArcSwap<crate::agent::tools::registry::ToolRegistry>>,
     ) -> Self {
-        let agent_event_bus = Bus::new();
-        let (prompt_tx, prompt_rx) = mpsc::channel::<AgentPrompt>();
-        // Shared config cell — the UI thread updates it via `drain_config` /
-        // `set_config`; the driver reads it when building each `AgentContext`.
-        let shared_config = Arc::new(std::sync::RwLock::new(AppConfig::default()));
-        let driver_handle = spawn_driver(
-            prompt_rx,
-            agent_event_bus.clone(),
-            shared_config.clone(),
-            file_event_bus,
-            browser_session.clone(),
-            pdf_backing.clone(),
-            tool_manager.clone(),
-        );
-        Self {
-            state: AgentState {
-                running: false,
-                status: String::new(),
-                thinking: String::new(),
-                response: String::new(),
-                history: None,
-                token_usage: None,
-                total_usage: TokenUsageInfo::default(),
-                pending_prompts: Vec::new(),
-                debug_entries: Vec::new(),
-            },
-            cancel_flag: None,
-            config: AppConfig::default(),
-            shared_config,
-            // Subscribe before returning so the publish that
-            // happens immediately afterwards (in main / tests) is
-            // observed by this reader.
-            config_reader: Some(config_bus.subscribe()),
-            config_arrived: false,
-            current_session_id: None,
-            agent_event_bus,
-            prompt_tx,
-            driver_handle: Some(driver_handle),
-            browser_session,
-        }
+        Self::builder()
+            .with_file_event_bus(file_event_bus)
+            .with_browser_session(browser_session)
+            .with_pdf_backing(pdf_backing)
+            .with_tool_manager(tool_manager)
+            .build()
     }
 
-    /// Test helper: build a manager whose [`AppConfig`] is set
-    /// immediately, without going through the bus. Mirrors the old
-    /// `new(config)` signature for callers that just want a
-    /// populated manager (existing test fixtures).
-    #[doc(hidden)]
-    pub fn new_for_test(config: AppConfig, browser_session: Arc<BrowserSession>) -> Self {
-        let tool_manager = Arc::new(arc_swap::ArcSwap::from_pointee(
-            crate::agent::tools::registry::ToolRegistry::new(),
-        ));
-        let agent_event_bus = Bus::new();
-        let (prompt_tx, prompt_rx) = mpsc::channel::<AgentPrompt>();
-        let shared_config = Arc::new(std::sync::RwLock::new(config.clone()));
-        let driver_handle = spawn_driver(
-            prompt_rx,
-            agent_event_bus.clone(),
-            shared_config.clone(),
-            crate::bus::core::Bus::new(),
-            browser_session.clone(),
-            Arc::new(crate::app::session::PdfBackingTracker::new()),
-            tool_manager.clone(),
-        );
-        Self {
-            state: AgentState {
-                running: false,
-                status: String::new(),
-                thinking: String::new(),
-                response: String::new(),
-                history: None,
-                token_usage: None,
-                total_usage: TokenUsageInfo::default(),
-                pending_prompts: Vec::new(),
-                debug_entries: Vec::new(),
-            },
-            cancel_flag: None,
-            config,
-            shared_config,
-            config_reader: None,
-            config_arrived: true,
-            current_session_id: None,
-            agent_event_bus,
-            prompt_tx,
-            driver_handle: Some(driver_handle),
-            browser_session,
-        }
+    /// Construct an `AgentSession` with an initial domain config.
+    /// The session holds a private cell containing the config; updates
+    /// arrive via [`Self::set_agent_config`].
+    pub fn new_with_agent_config(
+        initial_config: AgentConfig,
+        file_event_bus: Bus<crate::bus::events::file::FileEvent>,
+        browser_session: Arc<BrowserSession>,
+        pdf_backing: Arc<crate::app::session::PdfBackingTracker>,
+        tool_manager: Arc<arc_swap::ArcSwap<crate::agent::tools::registry::ToolRegistry>>,
+    ) -> Self {
+        Self::builder()
+            .with_agent_config(initial_config)
+            .with_file_event_bus(file_event_bus)
+            .with_browser_session(browser_session)
+            .with_pdf_backing(pdf_backing)
+            .with_tool_manager(tool_manager)
+            .build()
     }
 
-    /// Drain one event from the configuration bus (non-blocking
-    /// `try_recv`). If a [`ConfigArrived`] event is observed, the
-    /// stored [`AppConfig`] is updated. Returns `true` if the
-    /// config was updated by this call.
-    ///
-    /// Called once per frame from the UI's
-    /// [`FastMdApp::update_ui`](crate::ui::FastMdApp::update_ui)
-    /// path. The reader is taken on the first success so the
-    /// per-frame cost is a single `Option::None` check after the
-    /// initial delivery.
-    pub fn drain_config(&mut self) -> bool {
-        let Some(reader) = self.config_reader.as_ref() else {
-            return false;
-        };
-        match reader.try_recv() {
-            Ok(event) => {
-                self.config = event.config.clone();
-                *self
-                    .shared_config
-                    .write()
-                    .expect("shared_config lock poisoned") = event.config;
-                self.config_arrived = true;
-                tracing::info!(
-                    name = "config.arrived",
-                    "AgentSession received configuration"
-                );
-                // Drop the reader — we only care about the first
-                // arrival (no hot reload).
-                self.config_reader = None;
-                true
-            }
-            Err(std::sync::mpsc::TryRecvError::Empty) => false,
-            Err(std::sync::mpsc::TryRecvError::Disconnected) => {
-                // Bus is gone; stop trying to drain.
-                self.config_reader = None;
-                false
-            }
-        }
+    /// Snapshot of the current agent config.
+    pub fn agent_config(&self) -> AgentConfig {
+        self.agent_config_provider
+            .read()
+            .map(|c| c.clone())
+            .unwrap_or_default()
     }
 
-    /// `true` once the bus has delivered (or the test path bypassed
-    /// it).
-    pub fn config_arrived(&self) -> bool {
-        self.config_arrived
-    }
-
-    /// Update the stored config directly. Bypasses the bus — used
-    /// by the UI to keep the agent's config in sync with the
-    /// app-wide config that was set during the bus drain.
-    pub fn set_config(&mut self, config: AppConfig) {
-        self.config = config.clone();
+    /// Replace the stored agent config. Subsequent sessions use the
+    /// new value; in-flight sessions finish with the value they were
+    /// built with.
+    pub fn set_agent_config(&self, agent_config: AgentConfig) {
         *self
-            .shared_config
+            .agent_config_provider
             .write()
-            .expect("shared_config lock poisoned") = config;
-        self.config_arrived = true;
+            .expect("agent_config lock poisoned") = agent_config;
+    }
+
+    /// Apply a transformation to the stored config.
+    pub fn replace_agent_config(&self, f: impl FnOnce(&AgentConfig) -> AgentConfig) {
+        let mut guard = self
+            .agent_config_provider
+            .write()
+            .expect("agent_config lock poisoned");
+        *guard = f(&guard);
     }
 
     /// Hand out an `Arc` clone of the headless-browser session
@@ -412,6 +320,140 @@ impl AgentSession {
     }
 }
 
+/// Builder for [`AgentSession`].
+///
+/// Replaces the previous multi-arg `new` and the bus-driven init path.
+/// The bus-driven path is gone — the agent receives its domain config
+/// via [`Self::with_agent_config`] or a shared cell via
+/// [`Self::with_agent_config_provider`]. The orchestrator (which already
+/// drains `Bus<ConfigArrived>`) is the projection site.
+pub struct AgentSessionBuilder {
+    file_event_bus: Option<Bus<crate::bus::events::file::FileEvent>>,
+    browser_session: Option<Arc<BrowserSession>>,
+    pdf_backing: Option<Arc<crate::app::session::PdfBackingTracker>>,
+    tool_manager: Option<Arc<arc_swap::ArcSwap<crate::agent::tools::registry::ToolRegistry>>>,
+    initial_agent_config: Option<AgentConfig>,
+    agent_config_provider: Option<Arc<std::sync::RwLock<AgentConfig>>>,
+}
+
+impl AgentSessionBuilder {
+    /// Create a new empty builder.
+    pub fn new() -> Self {
+        Self {
+            file_event_bus: None,
+            browser_session: None,
+            pdf_backing: None,
+            tool_manager: None,
+            initial_agent_config: None,
+            agent_config_provider: None,
+        }
+    }
+
+    /// Set the file event bus.
+    pub fn with_file_event_bus(mut self, bus: Bus<crate::bus::events::file::FileEvent>) -> Self {
+        self.file_event_bus = Some(bus);
+        self
+    }
+
+    /// Set the long-lived headless browser session.
+    pub fn with_browser_session(mut self, browser_session: Arc<BrowserSession>) -> Self {
+        self.browser_session = Some(browser_session);
+        self
+    }
+
+    /// Set the shared PDF-backing tracker.
+    pub fn with_pdf_backing(
+        mut self,
+        pdf_backing: Arc<crate::app::session::PdfBackingTracker>,
+    ) -> Self {
+        self.pdf_backing = Some(pdf_backing);
+        self
+    }
+
+    /// Set the tool registry.
+    pub fn with_tool_manager(
+        mut self,
+        tool_manager: Arc<arc_swap::ArcSwap<crate::agent::tools::registry::ToolRegistry>>,
+    ) -> Self {
+        self.tool_manager = Some(tool_manager);
+        self
+    }
+
+    /// Seed the agent config cell with an initial value.
+    pub fn with_agent_config(mut self, cfg: AgentConfig) -> Self {
+        self.initial_agent_config = Some(cfg);
+        self
+    }
+
+    /// Hand the agent config cell directly. Use this when the UI thread
+    /// already owns a cell and will push updates to it.
+    pub fn with_agent_config_provider(
+        mut self,
+        provider: Arc<std::sync::RwLock<AgentConfig>>,
+    ) -> Self {
+        self.agent_config_provider = Some(provider);
+        self
+    }
+
+    /// Build the [`AgentSession`]. Panics if any required field is missing.
+    pub fn build(self) -> AgentSession {
+        let file_event_bus = self
+            .file_event_bus
+            .expect("AgentSession requires with_file_event_bus");
+        let browser_session = self
+            .browser_session
+            .expect("AgentSession requires with_browser_session");
+        let pdf_backing = self
+            .pdf_backing
+            .expect("AgentSession requires with_pdf_backing");
+        let tool_manager = self
+            .tool_manager
+            .expect("AgentSession requires with_tool_manager");
+        let agent_config_provider = self.agent_config_provider.unwrap_or_else(|| {
+            Arc::new(std::sync::RwLock::new(
+                self.initial_agent_config.unwrap_or_default(),
+            ))
+        });
+        let agent_event_bus = Bus::new();
+        let (prompt_tx, prompt_rx) = mpsc::channel::<AgentPrompt>();
+        let driver_handle = spawn_driver(
+            prompt_rx,
+            agent_event_bus.clone(),
+            agent_config_provider.clone(),
+            file_event_bus,
+            browser_session.clone(),
+            pdf_backing,
+            tool_manager,
+        );
+        AgentSession {
+            state: AgentState {
+                running: false,
+                status: String::new(),
+                thinking: String::new(),
+                response: String::new(),
+                history: None,
+                token_usage: None,
+                total_usage: TokenUsageInfo::default(),
+                pending_prompts: Vec::new(),
+                debug_entries: Vec::new(),
+            },
+            cancel_flag: None,
+            agent_config_provider,
+            current_session_id: None,
+            agent_event_bus,
+            prompt_tx,
+            driver_handle: Some(driver_handle),
+            browser_session,
+        }
+    }
+}
+
+impl Default for AgentSessionBuilder {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 /// Spawn the long-lived driver thread (research.md §3, migration step 10).
 ///
 /// Owns the `Receiver<AgentPrompt>` and blocks on `recv()`. On each prompt,
@@ -421,7 +463,7 @@ impl AgentSession {
 fn spawn_driver(
     prompt_rx: std::sync::mpsc::Receiver<AgentPrompt>,
     agent_event_bus: Bus<SeamAgentEvent>,
-    shared_config: Arc<std::sync::RwLock<AppConfig>>,
+    agent_config_provider: Arc<std::sync::RwLock<AgentConfig>>,
     file_event_bus: Bus<crate::bus::events::file::FileEvent>,
     browser_session: Arc<BrowserSession>,
     pdf_backing: Arc<crate::app::session::PdfBackingTracker>,
@@ -434,21 +476,40 @@ fn spawn_driver(
             std::collections::HashMap::new();
         while let Ok(prompt) = prompt_rx.recv() {
             let session_id = prompt.session_id;
-            let config = shared_config.read().map(|c| c.clone()).unwrap_or_default();
+            let agent_config = agent_config_provider
+                .read()
+                .map(|c| c.clone())
+                .unwrap_or_default();
+            // The tool context still needs the global config for the
+            // integration-layer tools (JMAP / CalDAV / Trello / SearXNG).
+            // We project back via the same path: derive a default
+            // `AppConfig`, then layer the agent-relevant fields from
+            // `agent_config`. The integration tools only read the maps
+            // they need, so the layered value is good enough for them.
+            let app_config = Arc::new(integration_app_config(&agent_config));
             let history = session_histories.get(&session_id).cloned().flatten();
-            let ctx = crate::agent::context::AgentContextBuilder::new(config, session_id, prompt.text)
-                .with_buses(file_event_bus.clone())
-                .with_observer(std::sync::Arc::new(crate::app::events::BusAgentEventObserver::new(session_id, agent_event_bus.clone())))
-                .with_active_paths(prompt.active_file, prompt.active_dir)
-                .with_selected_files(prompt.selected_files)
-                .with_cancel_flag(prompt.cancel_flag)
-                .with_history(history.clone())
-                .with_browser_session(browser_session.clone())
-                .with_pdf_backing(pdf_backing.clone())
-                .with_cache(std::sync::Arc::new(crate::agent::tools::registry::cache::ToolCache::new()))
-                .with_tool_manager(tool_manager.clone())
-                .with_uuid_gen(std::sync::Arc::new(crate::utils::uuid::SystemUuidGenerator))
-                .build();
+            let ctx = crate::agent::context::AgentContextBuilder::new(
+                agent_config,
+                session_id,
+                prompt.text,
+            )
+            .with_app_config(app_config)
+            .with_buses(file_event_bus.clone())
+            .with_observer(std::sync::Arc::new(
+                crate::app::events::BusAgentEventObserver::new(session_id, agent_event_bus.clone()),
+            ))
+            .with_active_paths(prompt.active_file, prompt.active_dir)
+            .with_selected_files(prompt.selected_files)
+            .with_cancel_flag(prompt.cancel_flag)
+            .with_history(history.clone())
+            .with_browser_session(browser_session.clone())
+            .with_pdf_backing(pdf_backing.clone())
+            .with_cache(std::sync::Arc::new(
+                crate::agent::tools::registry::cache::ToolCache::new(),
+            ))
+            .with_tool_manager(tool_manager.clone())
+            .with_uuid_gen(std::sync::Arc::new(crate::utils::uuid::SystemUuidGenerator))
+            .build();
             crate::agent::run_agent(ctx);
             // After the session finishes, stash its history for continuation
             // prompts (FR-009). The history is updated by the `SessionFinished`
@@ -457,6 +518,42 @@ fn spawn_driver(
             session_histories.insert(session_id, history);
         }
     })
+}
+
+/// Derive an `AppConfig` from an `AgentConfig` for the integration-layer
+/// tools. The tool context carries `Arc<AppConfig>` because the
+/// integration functions still take that type; this helper projects
+/// the relevant maps back. The orchestrator's path is the
+/// `AgentConfig::from_app_config` mirror — fields the agent doesn't
+/// expose (`inline_editor_enabled`, `pdf_converter_command`,
+/// `table_width_strategy`, `discord`) are filled with their
+/// `AppConfig::default` values.
+///
+/// In production the orchestrator passes the real `AppConfig` via
+/// `AgentContextBuilder::with_app_config`; this helper is the
+/// fallback path used by `AgentSession::spawn_driver` when the
+/// driver is constructed without an external `AppConfig` (i.e. the
+/// `new_with_agent_config` test path).
+fn integration_app_config(agent_config: &AgentConfig) -> AppConfig {
+    AppConfig {
+        models: agent_config.models().clone(),
+        user_name: agent_config.user_name().map(String::from),
+        user_address: agent_config.user_address().map(String::from),
+        user_birthdate: agent_config.user_birthdate().map(String::from),
+        user_gender: agent_config.user_gender().map(String::from),
+        system_prompt_extension: agent_config.system_prompt_extension().map(String::from),
+        max_tokens: agent_config.max_tokens(),
+        tool_groups: agent_config.tool_groups().clone(),
+        mcp_servers: agent_config.mcp_servers().clone(),
+        content_libraries: agent_config.content_libraries().to_vec(),
+        csv_db_path: agent_config.csv_db_path().map(String::from),
+        feature_flags: agent_config.feature_flags().clone(),
+        jmap_clients: agent_config.jmap_clients().clone(),
+        caldav_clients: agent_config.caldav_clients().clone(),
+        trello_client: agent_config.trello_client().cloned(),
+        searxng_url: agent_config.searxng_url().map(String::from),
+        ..AppConfig::default()
+    }
 }
 
 impl Drop for AgentSession {

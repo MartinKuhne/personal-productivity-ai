@@ -1,4 +1,4 @@
-﻿//! Trello API tools for the tool registry.
+//! Trello API tools for the tool registry.
 
 use crate::agent::tools::Tool;
 use crate::agent::tools::context::ToolContext;

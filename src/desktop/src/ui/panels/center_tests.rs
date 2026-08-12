@@ -49,10 +49,7 @@ fn test_apply_tab_close_click_out_of_range_is_noop() {
 
     apply_tab_close_click(&mut app, 5);
 
-    assert_eq!(
-        app.orchestrator.tabs.tabs,
-        vec![PathBuf::from("a.md")]
-    );
+    assert_eq!(app.orchestrator.tabs.tabs, vec![PathBuf::from("a.md")]);
     assert_eq!(
         app.orchestrator.selection.selected_file(),
         Some(&PathBuf::from("a.md"))
@@ -74,10 +71,7 @@ fn test_apply_tab_close_others_click_keeps_only_target_tab() {
 
     apply_tab_close_others_click(&mut app, 1);
 
-    assert_eq!(
-        app.orchestrator.tabs.tabs,
-        vec![PathBuf::from("b.md")]
-    );
+    assert_eq!(app.orchestrator.tabs.tabs, vec![PathBuf::from("b.md")]);
     assert_eq!(
         app.orchestrator.selection.selected_file(),
         Some(&PathBuf::from("b.md"))

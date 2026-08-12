@@ -15,9 +15,7 @@ use crate::app::background::BackgroundLogs;
 use crate::app::background_task::Task;
 use crate::app::watcher::directory_tracker::DirectoryTracker;
 use crate::app::watcher::file_processor::FileEventProcessor;
-use crate::app::{
-    Dialogs, PanelLayout, PersistedUiState, FileSelection, Tags, TextBuffer,
-};
+use crate::app::{Dialogs, FileSelection, PanelLayout, PersistedUiState, Tags, TextBuffer};
 use crate::bus::core::Bus;
 use crate::bus::events::config::ConfigArrived;
 use crate::config::AppConfig;
@@ -119,8 +117,14 @@ impl FastMdApp {
             &crate::config::AppConfig::default(),
         ));
         let pdf_backing_tracker = crate::app::session::PdfBackingTracker::new();
+        // The agent no longer subscribes to `Bus<ConfigArrived>`.
+        // The orchestrator projects `AppConfig -> AgentConfig`
+        // and pushes the result into the agent's domain-config
+        // cell. We hand `FastMdApp` a `Sender<ConfigArrived>`-style
+        // channel? No — we keep `config_bus` and `config_reader`
+        // so the UI can still drain the bus; the `AgentSession`
+        // itself is built without a `config_bus` parameter.
         let agent = AgentSession::new(
-            config_bus,
             background_task.file_event_bus.clone(),
             browser_session.clone(),
             Arc::new(pdf_backing_tracker.clone()),
@@ -255,8 +259,7 @@ impl FastMdApp {
             &crate::config::AppConfig::default(),
         ));
         let pdf_backing_tracker = crate::app::session::PdfBackingTracker::new();
-        let mut agent = AgentSession::new(
-            bus.clone(),
+        let agent = AgentSession::new(
             background_task.file_event_bus.clone(),
             test_browser_session,
             Arc::new(pdf_backing_tracker.clone()),
@@ -264,7 +267,7 @@ impl FastMdApp {
                 crate::agent::tools::registry::ToolRegistry::new(),
             )),
         );
-        agent.set_config(config.clone());
+        agent.set_agent_config(crate::agent::config::AgentConfig::from_app_config(&config));
 
         let event_bus = background_task.file_event_bus;
         let dir_tracker = DirectoryTracker::new(event_bus.subscribe());

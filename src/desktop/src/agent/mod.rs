@@ -3,13 +3,14 @@
 //! Requirements: see [`SPEC.md`](SPEC.md) (AGENT-001..AGENT-023) for the full specification.
 
 pub mod agent_impl;
+pub mod config;
 pub mod context;
 pub mod datamark;
 pub mod error;
 pub mod events;
 pub mod llm_client;
-pub mod session;
 pub mod prompt_builder;
+pub mod session;
 pub mod tool_executor;
 pub mod tools;
 

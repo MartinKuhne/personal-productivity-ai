@@ -1,5 +1,6 @@
 //! Agent context — bundles all inputs (config, channels, file bus, active file/dir, prompt, cancel flag, history) for an agent session.
 
+use crate::agent::config::AgentConfig;
 use crate::agent::events::AgentEventObserver;
 use crate::app::session::BrowserSession;
 use crate::bus::core::Bus;
@@ -16,7 +17,17 @@ use uuid::Uuid;
 /// Construct with the struct literal `AgentContext { ... }`; the previous
 /// `AgentContext::new` was a pass-through forwarder (PSD-004) and was removed.
 pub struct AgentContext {
-    pub config: AppConfig,
+    /// Domain-specific configuration for the agent's run loop (LLM,
+    /// system prompt, tool groups, MCP, browser, content libraries).
+    /// Projected from the global [`AppConfig`] by the orchestrator via
+    /// [`crate::agent::config::AgentConfig::from_app_config`].
+    pub agent_config: AgentConfig,
+    /// Global configuration. The agent's run loop does **not** read this
+    /// — it's here for the tool context, which the integration-layer
+    /// tools (JMAP, CalDAV, CardDAV, Trello, SearXNG) still need at
+    /// execute time. Carried alongside [`Self::agent_config`] so the
+    /// tool context can be built without re-fetching the global config.
+    pub app_config: Arc<AppConfig>,
     pub file_event_bus: Bus<FileEvent>,
     /// Agent→UI structured observer. The agent calls methods here to emit events.
     pub observer: Arc<dyn AgentEventObserver>,
@@ -26,7 +37,7 @@ pub struct AgentContext {
     pub prompt: String,
     pub cancel_flag: Arc<AtomicBool>,
     pub history: Option<Vec<Value>>,
-    /// Optional model name override. When set, `LLMClient::from_config` uses this model
+    /// Optional model name override. When set, `LLMClient::from_agent_config` uses this model
     /// directly instead of selecting the cheapest available model.
     pub model_name: Option<String>,
     /// Uuid identity for the session — tags every `AgentEvent` on the
@@ -50,39 +61,17 @@ pub struct AgentContext {
     /// the field is independent so a future test or alt
     /// orchestrator can inject a private cache.
     pub cache: Arc<crate::agent::tools::registry::cache::ToolCache>,
-    pub tool_manager: std::sync::Arc<arc_swap::ArcSwap<crate::agent::tools::registry::ToolRegistry>>,
+    pub tool_manager:
+        std::sync::Arc<arc_swap::ArcSwap<crate::agent::tools::registry::ToolRegistry>>,
     pub uuid_gen: Arc<dyn crate::utils::uuid::UuidGenerator>,
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    use crate::config::AppConfig;
-    use std::path::Path;
-
-    #[test]
-    fn test_agent_context_creation() {
-        let config = AppConfig::default();
-        let bus = Bus::new();
-        let browser = Arc::new(crate::app::session::BrowserSession::new(&config));
-        let ctx = AgentContextBuilder::new(config.clone(), Uuid::new_v4(), "hello".to_string())
-            .with_buses(bus)
-            .with_observer(Arc::new(crate::app::events::BusAgentEventObserver::new(Uuid::new_v4(), crate::bus::core::Bus::new())))
-            .with_active_paths(Some(PathBuf::from("test.md")), None)
-            .with_browser_session(browser)
-            .build();
-        assert_eq!(ctx.config.models, config.models);
-        assert!(ctx.active_file.as_deref() == Some(Path::new("test.md")));
-        assert_eq!(ctx.prompt, "hello");
-    }
-}
-
 pub struct AgentContextBuilder {
-    config: AppConfig,
+    agent_config: AgentConfig,
+    app_config: Option<Arc<AppConfig>>,
     session_id: Uuid,
     prompt: String,
-    
+
     file_event_bus: Option<Bus<FileEvent>>,
     observer: Option<Arc<dyn AgentEventObserver>>,
     active_file: Option<PathBuf>,
@@ -99,9 +88,10 @@ pub struct AgentContextBuilder {
 }
 
 impl AgentContextBuilder {
-    pub fn new(config: AppConfig, session_id: Uuid, prompt: String) -> Self {
+    pub fn new(agent_config: AgentConfig, session_id: Uuid, prompt: String) -> Self {
         Self {
-            config,
+            agent_config,
+            app_config: None,
             session_id,
             prompt,
             file_event_bus: None,
@@ -118,6 +108,13 @@ impl AgentContextBuilder {
             tool_manager: None,
             uuid_gen: None,
         }
+    }
+
+    /// Set the global [`AppConfig`] used by the tool context. Falls
+    /// back to [`AppConfig::default`] if not called.
+    pub fn with_app_config(mut self, app_config: Arc<AppConfig>) -> Self {
+        self.app_config = Some(app_config);
+        self
     }
 
     pub fn with_buses(mut self, file_event_bus: Bus<FileEvent>) -> Self {
@@ -161,17 +158,26 @@ impl AgentContextBuilder {
         self
     }
 
-    pub fn with_pdf_backing(mut self, pdf_backing: Arc<crate::app::session::PdfBackingTracker>) -> Self {
+    pub fn with_pdf_backing(
+        mut self,
+        pdf_backing: Arc<crate::app::session::PdfBackingTracker>,
+    ) -> Self {
         self.pdf_backing = Some(pdf_backing);
         self
     }
 
-    pub fn with_cache(mut self, cache: Arc<crate::agent::tools::registry::cache::ToolCache>) -> Self {
+    pub fn with_cache(
+        mut self,
+        cache: Arc<crate::agent::tools::registry::cache::ToolCache>,
+    ) -> Self {
         self.cache = Some(cache);
         self
     }
 
-    pub fn with_tool_manager(mut self, tool_manager: Arc<arc_swap::ArcSwap<crate::agent::tools::registry::ToolRegistry>>) -> Self {
+    pub fn with_tool_manager(
+        mut self,
+        tool_manager: Arc<arc_swap::ArcSwap<crate::agent::tools::registry::ToolRegistry>>,
+    ) -> Self {
         self.tool_manager = Some(tool_manager);
         self
     }
@@ -182,23 +188,73 @@ impl AgentContextBuilder {
     }
 
     pub fn build(self) -> AgentContext {
+        let default_browser_session = Arc::new(BrowserSession::with_resolved(
+            self.agent_config.browser().clone(),
+        ));
+        let app_config = self
+            .app_config
+            .unwrap_or_else(|| Arc::new(AppConfig::default()));
         AgentContext {
-            config: self.config,
+            agent_config: self.agent_config,
+            app_config,
             session_id: self.session_id,
             prompt: self.prompt,
-            file_event_bus: self.file_event_bus.unwrap_or_else(Bus::new),
+            file_event_bus: self.file_event_bus.unwrap_or_default(),
             observer: self.observer.expect("observer is required"),
             active_file: self.active_file,
             active_dir: self.active_dir,
             selected_files: self.selected_files,
-            cancel_flag: self.cancel_flag.unwrap_or_else(|| Arc::new(AtomicBool::new(false))),
+            cancel_flag: self
+                .cancel_flag
+                .unwrap_or_else(|| Arc::new(AtomicBool::new(false))),
             history: self.history,
             model_name: self.model_name,
-            browser_session: self.browser_session.unwrap_or_else(|| Arc::new(BrowserSession::new(&crate::config::AppConfig::default()))),
-            pdf_backing: self.pdf_backing.unwrap_or_else(|| Arc::new(crate::app::session::PdfBackingTracker::new())),
-            cache: self.cache.unwrap_or_else(|| Arc::new(crate::agent::tools::registry::cache::ToolCache::new())),
-            tool_manager: self.tool_manager.unwrap_or_else(|| Arc::new(arc_swap::ArcSwap::from_pointee(crate::agent::tools::registry::ToolRegistry::new()))),
-            uuid_gen: self.uuid_gen.unwrap_or_else(|| Arc::new(crate::utils::uuid::SystemUuidGenerator)),
+            browser_session: self.browser_session.unwrap_or(default_browser_session),
+            pdf_backing: self
+                .pdf_backing
+                .unwrap_or_else(|| Arc::new(crate::app::session::PdfBackingTracker::new())),
+            cache: self.cache.unwrap_or_else(|| {
+                Arc::new(crate::agent::tools::registry::cache::ToolCache::new())
+            }),
+            tool_manager: self.tool_manager.unwrap_or_else(|| {
+                Arc::new(arc_swap::ArcSwap::from_pointee(
+                    crate::agent::tools::registry::ToolRegistry::new(),
+                ))
+            }),
+            uuid_gen: self
+                .uuid_gen
+                .unwrap_or_else(|| Arc::new(crate::utils::uuid::SystemUuidGenerator)),
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    use std::path::Path;
+
+    #[test]
+    fn test_agent_context_creation() {
+        let agent_config = AgentConfig::default();
+        let app_config = Arc::new(AppConfig::default());
+        let bus = Bus::new();
+        let browser = Arc::new(crate::app::session::BrowserSession::with_resolved(
+            agent_config.browser().clone(),
+        ));
+        let ctx =
+            AgentContextBuilder::new(agent_config.clone(), Uuid::new_v4(), "hello".to_string())
+                .with_app_config(app_config.clone())
+                .with_buses(bus)
+                .with_observer(Arc::new(crate::app::events::BusAgentEventObserver::new(
+                    Uuid::new_v4(),
+                    crate::bus::core::Bus::new(),
+                )))
+                .with_active_paths(Some(PathBuf::from("test.md")), None)
+                .with_browser_session(browser)
+                .build();
+        assert_eq!(ctx.agent_config.models(), agent_config.models());
+        assert!(ctx.active_file.as_deref() == Some(Path::new("test.md")));
+        assert_eq!(ctx.prompt, "hello");
     }
 }

@@ -4,7 +4,6 @@ use crate::bus::events::debug::AgentDebugEntry;
 use crate::bus::events::messages::TokenUsageInfo;
 use serde::Serialize;
 use serde_json::Value;
-use std::sync::Arc;
 use uuid::Uuid;
 
 /// Output message: agent → UI on `Bus<AgentEvent>` (tokio broadcast, capacity
@@ -109,46 +108,82 @@ impl BusAgentEventObserver {
 
 impl AgentEventObserver for BusAgentEventObserver {
     fn on_session_started(&self) {
-        self.emit(AgentEvent::SessionStarted { session_id: self.session_id });
+        self.emit(AgentEvent::SessionStarted {
+            session_id: self.session_id,
+        });
     }
 
     fn on_session_finished(&self, history: Vec<serde_json::Value>) {
-        self.emit(AgentEvent::SessionFinished { session_id: self.session_id, history });
+        self.emit(AgentEvent::SessionFinished {
+            session_id: self.session_id,
+            history,
+        });
     }
 
     fn on_status(&self, status: AgentStatus) {
-        self.emit(AgentEvent::Status { session_id: self.session_id, status });
+        self.emit(AgentEvent::Status {
+            session_id: self.session_id,
+            status,
+        });
     }
 
     fn on_thinking(&self, text: String) {
-        self.emit(AgentEvent::Thinking { session_id: self.session_id, text });
+        self.emit(AgentEvent::Thinking {
+            session_id: self.session_id,
+            text,
+        });
     }
 
     fn on_content_delta(&self, text: String) {
-        self.emit(AgentEvent::ContentDelta { session_id: self.session_id, text });
+        self.emit(AgentEvent::ContentDelta {
+            session_id: self.session_id,
+            text,
+        });
     }
 
     fn on_tool_call_started(&self, id: String, name: String, args: serde_json::Value) {
-        self.emit(AgentEvent::ToolCallStarted { session_id: self.session_id, id, name, args });
+        self.emit(AgentEvent::ToolCallStarted {
+            session_id: self.session_id,
+            id,
+            name,
+            args,
+        });
     }
 
     fn on_tool_result(&self, id: String, name: String, result: serde_json::Value) {
-        self.emit(AgentEvent::ToolResult { session_id: self.session_id, id, name, result });
+        self.emit(AgentEvent::ToolResult {
+            session_id: self.session_id,
+            id,
+            name,
+            result,
+        });
     }
 
     fn on_tool_side_effect(&self, effect: ToolSideEffect) {
-        self.emit(AgentEvent::ToolSideEffect { session_id: self.session_id, effect });
+        self.emit(AgentEvent::ToolSideEffect {
+            session_id: self.session_id,
+            effect,
+        });
     }
 
     fn on_debug_entry(&self, entry: AgentDebugEntry) {
-        self.emit(AgentEvent::DebugEntry { session_id: self.session_id, entry });
+        self.emit(AgentEvent::DebugEntry {
+            session_id: self.session_id,
+            entry,
+        });
     }
 
     fn on_token_usage(&self, usage: TokenUsageInfo) {
-        self.emit(AgentEvent::TokenUsage { session_id: self.session_id, usage });
+        self.emit(AgentEvent::TokenUsage {
+            session_id: self.session_id,
+            usage,
+        });
     }
 
     fn on_failed(&self, error: String) {
-        self.emit(AgentEvent::Failed { session_id: self.session_id, error });
+        self.emit(AgentEvent::Failed {
+            session_id: self.session_id,
+            error,
+        });
     }
 }

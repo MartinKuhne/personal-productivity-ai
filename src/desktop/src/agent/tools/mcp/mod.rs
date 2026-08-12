@@ -31,7 +31,7 @@ pub use crate::integrations::mcp::{
     CLIENT_NAME, CLIENT_VERSION, DEFAULT_REQUEST_TIMEOUT, DynamicToolSource, MAX_REQUEST_TIMEOUT,
     PROTOCOL_VERSION, is_valid_session_id,
 };
-pub use crate::integrations::mcp::{McpClients, McpClientSession};
+pub use crate::integrations::mcp::{McpClientSession, McpClients};
 
 #[cfg(test)]
 mod adapter_tests;

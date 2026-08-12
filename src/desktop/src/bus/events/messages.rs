@@ -9,7 +9,7 @@
 //! currently:
 //!
 //! - [`TokenUsageInfo`] — the LLM token-usage record attached to
-//!   [`crate::agent::events::AgentEvent::TokenUsage`].
+//!   `crate::app::events::AgentEvent::TokenUsage`.
 //! - [`BackgroundLogEntry`] / [`LogCategory`] — the structured log
 //!   line carried inside [`super::ProcessEvent::LogEntry`]. They used
 //!   to live in `app::background::models`; moving them here removes

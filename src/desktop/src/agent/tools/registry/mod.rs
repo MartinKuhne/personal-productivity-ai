@@ -328,7 +328,7 @@ impl ToolRegistry {
         self.refresh_mcp_tools(config);
         self.refresh_state(config);
     }
-    
+
     pub fn get_tools_schema(&mut self, config: &AppConfig, prompt: &str) -> serde_json::Value {
         self.mcp_manager.update_config(config);
         self.refresh_mcp_tools(config);

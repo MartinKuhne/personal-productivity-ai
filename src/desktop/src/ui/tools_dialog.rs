@@ -199,12 +199,11 @@ fn render_row(
         let mut enabled = group.enabled;
         if ui.checkbox(&mut enabled, "").changed() {
             let mut new_config = app.config().clone();
-            app.orchestrator
-                .tool_manager.rcu(|mgr| {
-                    let mut new_mgr = (**mgr).clone();
-                    new_mgr.set_group_enabled(&mut new_config, &id, enabled);
-                    new_mgr
-                });
+            app.orchestrator.tool_manager.rcu(|mgr| {
+                let new_mgr = (**mgr).clone();
+                new_mgr.set_group_enabled(&mut new_config, &id, enabled);
+                new_mgr
+            });
             if let Err(e) = save_config(&new_config) {
                 tracing::error!(
                     error = %e,
@@ -262,12 +261,11 @@ fn render_row(
                 ui.label(egui::RichText::new("⚠").color(egui::Color32::from_rgb(220, 130, 0)))
                     .on_hover_text(format!("{:?}: {}", err.kind, err.message));
                 if ui.small_button(TOOLS_RESTART).clicked() {
-                    app.orchestrator
-                        .tool_manager.rcu(|mgr| {
-                            let mut new_mgr = (**mgr).clone();
-                            new_mgr.clear_error(&id);
-                            new_mgr
-                        });
+                    app.orchestrator.tool_manager.rcu(|mgr| {
+                        let mut new_mgr = (**mgr).clone();
+                        new_mgr.clear_error(&id);
+                        new_mgr
+                    });
                 }
             }
 

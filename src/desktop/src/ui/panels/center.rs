@@ -370,12 +370,7 @@ pub fn render_tabs_and_content_capture(
         let pdf_backed = app.pdf_backing_tracker().is_pdf_backed(selected_path);
         let frame_fill = pdf_backed.then_some(egui::Color32::from_rgb(35, 30, 20));
         let deficit_strategy = app.orchestrator.config.deficit_strategy();
-        render_markdown_content(
-            ui,
-            &mut app.orchestrator.tabs,
-            frame_fill,
-            deficit_strategy,
-        );
+        render_markdown_content(ui, &mut app.orchestrator.tabs, frame_fill, deficit_strategy);
     }
 }
 
@@ -431,11 +426,7 @@ fn show_markdown_scroll_area(
             // P0-2: Apply task checkbox toggles to the markdown source.
             if !tabs.pending_task_toggles.is_empty() {
                 for (idx, checked) in tabs.pending_task_toggles.drain(..) {
-                    crate::ui::render::apply_task_toggle(
-                        &mut tabs.current_markdown,
-                        idx,
-                        checked,
-                    );
+                    crate::ui::render::apply_task_toggle(&mut tabs.current_markdown, idx, checked);
                 }
             }
         });

@@ -43,7 +43,7 @@ pub struct AgentPrompt {
 }
 
 /// Typed agent status — replaces the old `AgentEvent::Status(String)` with
-/// structured states. Carried inside [`AgentEvent::Status`].
+/// structured states. Carried inside [`crate::app::events::AgentEvent::Status`].
 #[derive(Debug, Clone, Serialize, PartialEq, Eq)]
 pub enum AgentStatus {
     /// Waiting for the LLM to return a response.
@@ -92,8 +92,6 @@ pub struct DelegateToolCall {
     pub result: Value,
 }
 
-
-
 // ---------------------------------------------------------------------------
 // Observer Pattern for AgentEvent
 // ---------------------------------------------------------------------------
@@ -114,8 +112,6 @@ pub trait AgentEventObserver: Send + Sync {
     fn on_token_usage(&self, usage: TokenUsageInfo);
     fn on_failed(&self, error: String);
 }
-
-
 
 // ---------------------------------------------------------------------------
 // Tests live in the sibling `events_tests.rs` sidecar.

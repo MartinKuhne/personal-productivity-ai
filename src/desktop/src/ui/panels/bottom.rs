@@ -173,9 +173,7 @@ pub fn apply_send_click(app: &mut FastMdApp) {
             app.orchestrator.agent_panel_state.show_results = true;
         }
         CommandIntent::RunAgent(agent_prompt) => {
-            let (file, dir, files) = app
-                .selection()
-                .agent_context(&app.orchestrator.tabs.tabs);
+            let (file, dir, files) = app.selection().agent_context(&app.orchestrator.tabs.tabs);
             let session_id = uuid::Uuid::new_v4();
             let prompt = crate::agent::events::AgentPrompt {
                 session_id,
@@ -222,9 +220,7 @@ pub fn show_bottom_panel_capture(
             let ctx = ui.ctx().clone();
 
             // Get the file context (active file) for display
-            let (active_file, _, _) = app
-                .selection()
-                .agent_context(&app.orchestrator.tabs.tabs);
+            let (active_file, _, _) = app.selection().agent_context(&app.orchestrator.tabs.tabs);
 
             let prompt_prefix = compute_prompt_prefix(
                 app.selection()

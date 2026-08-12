@@ -36,10 +36,7 @@ use eframe::egui;
 
 use crate::agent::AgentSession;
 use crate::app::watcher::file_processor::FileEventProcessor;
-use crate::app::{
-    Dialogs, PanelLayout, PersistedUiState, FileSelection, Tabs, Tags,
-    TextBuffer,
-};
+use crate::app::{Dialogs, FileSelection, PanelLayout, PersistedUiState, Tabs, Tags, TextBuffer};
 
 /// The key used to persist the eframe UI state.
 const PERSISTED_UI_STATE_KEY: &str = "ppai_ui_state";

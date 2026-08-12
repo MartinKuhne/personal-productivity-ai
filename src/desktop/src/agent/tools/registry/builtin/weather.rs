@@ -1,4 +1,4 @@
-﻿//! Weather tool implementation for the tool registry.
+//! Weather tool implementation for the tool registry.
 
 use crate::agent::tools::Tool;
 use crate::agent::tools::context::ToolContext;
