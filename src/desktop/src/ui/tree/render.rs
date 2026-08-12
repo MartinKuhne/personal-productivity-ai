@@ -219,8 +219,11 @@ fn show_file_context_menu(
                 let mut job = SaveAsPdfJob::from_path(path_to_export.clone());
                 job.output_path = Some(target.clone());
                 let target_for_log = target.clone();
-                std::thread::spawn(move || {
-                    if let Err(e) = execute_save_as_pdf_blocking(job, Some(tx)) {
+                std::thread::Builder::new()
+                    .name("pdf-export".into())
+                    .stack_size(crate::app::print_pdf::TYPST_THREAD_STACK_SIZE)
+                    .spawn(move || {
+                        if let Err(e) = execute_save_as_pdf_blocking(job, Some(tx)) {
                         tracing::error!(
                             name = "ui.file.save_as_pdf_failed",
                             source = %path_to_export.display(),
@@ -229,7 +232,7 @@ fn show_file_context_menu(
                             "Save as PDF failed."
                         );
                     }
-                });
+                }).expect("failed to spawn pdf-export thread");
             } else {
                 tracing::warn!(
                     name = "ui.file.save_as_pdf_no_channel",

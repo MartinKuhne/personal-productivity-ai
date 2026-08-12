@@ -97,6 +97,12 @@ pub fn compile_markdown_to_pdf(markdown: &str, title: &str) -> Result<Vec<u8>, S
     crate::pdf::generate(title, &body)
 }
 
+/// Typst compiler requires an 8MB stack to process deeply nested
+/// documents. The default thread stack (2MB on Linux, 512KB on macOS)
+/// will reliably SIGABRT on complex documents. Use this constant when
+/// spawning threads that compile Typst.
+pub const TYPST_THREAD_STACK_SIZE: usize = 8 * 1024 * 1024;
+
 /// Compile the markdown content to a PDF file at
 /// `job.resolved_output_path()`. Suitable to be called from a
 /// `std::thread::spawn` background worker (matches the
