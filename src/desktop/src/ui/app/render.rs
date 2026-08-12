@@ -7,7 +7,7 @@
 //! Order matters:
 //! - [`FastMdApp::show_editor_overlay`] runs first so the editor window
 //!   is open before the panels draw the file-tree / markdown body. If
-//!   the editor closed this frame we also clear `tab_manager.loaded_path`
+//!   the editor closed this frame we also clear `tabs.loaded_path`
 //!   so the centre panel reloads from disk on the next frame.
 //! - [`FastMdApp::show_modals`] runs second so dialogs float above the
 //!   panels.
@@ -40,7 +40,7 @@ impl FastMdApp {
             &producer,
         );
         if was_open && !self.orchestrator.text_buffer.is_open {
-            self.orchestrator.tab_manager.loaded_path = None;
+            self.orchestrator.tabs.loaded_path = None;
         }
     }
 
@@ -71,14 +71,14 @@ impl FastMdApp {
         if self.orchestrator.dialogs.rename_dialog_open {
             let selection = &mut self.orchestrator.selection;
             crate::ui::modals::show_rename_dialog(crate::ui::modals::RenameDialogCtx {
-                dialog_manager: &mut self.orchestrator.dialogs,
+                dialogs: &mut self.orchestrator.dialogs,
                 file_event_bus: &self.orchestrator.file_event_bus,
-                loaded_path: &mut self.orchestrator.tab_manager.loaded_path,
+                loaded_path: &mut self.orchestrator.tabs.loaded_path,
                 selected_file: &mut selection.selected_file,
                 selected_dir: &mut selection.selected_dir,
-                tabs: &mut self.orchestrator.tab_manager.tabs,
+                tabs: &mut self.orchestrator.tabs.tabs,
                 file_processor: &mut self.orchestrator.file_processor,
-                tag_manager: &mut self.orchestrator.tag_manager,
+                app_tags: &mut self.orchestrator.tags,
                 expanded_dirs: &mut selection.expanded_dirs,
                 ctx,
             });

@@ -143,14 +143,14 @@ fn test_rename_modal() {
     {
         let sel = &mut app.orchestrator.selection;
         show_rename_dialog(RenameDialogCtx {
-            dialog_manager: &mut app.orchestrator.dialogs,
+            dialogs: &mut app.orchestrator.dialogs,
             file_event_bus: &app.orchestrator.file_event_bus,
-            loaded_path: &mut app.orchestrator.tab_manager.loaded_path,
+            loaded_path: &mut app.orchestrator.tabs.loaded_path,
             selected_file: &mut sel.selected_file,
             selected_dir: &mut sel.selected_dir,
-            tabs: &mut app.orchestrator.tab_manager.tabs,
+            tabs: &mut app.orchestrator.tabs.tabs,
             file_processor: &mut app.orchestrator.file_processor,
-            tag_manager: &mut app.orchestrator.tag_manager,
+            app_tags: &mut app.orchestrator.tags,
             expanded_dirs: &mut sel.expanded_dirs,
             ctx: &ctx,
         });
@@ -161,21 +161,21 @@ fn test_rename_modal() {
     app.orchestrator.dialogs.file_to_rename = Some(file_path.clone());
     app.orchestrator.dialogs.rename_new_name = "new_name".to_string();
     *app.orchestrator.selection.selected_file_mut() = Some(file_path.clone());
-    app.orchestrator.tab_manager.tabs = vec![file_path.clone()];
+    app.orchestrator.tabs.tabs = vec![file_path.clone()];
 
     // See `test_move_modal_rendering_and_state` for the rationale
     // on why the modal's rendered text is not asserted here.
     let _ = run_ui_test(&ctx, raw_input(), |ui| {
         let sel = &mut app.orchestrator.selection;
         show_rename_dialog(RenameDialogCtx {
-            dialog_manager: &mut app.orchestrator.dialogs,
+            dialogs: &mut app.orchestrator.dialogs,
             file_event_bus: &app.orchestrator.file_event_bus,
-            loaded_path: &mut app.orchestrator.tab_manager.loaded_path,
+            loaded_path: &mut app.orchestrator.tabs.loaded_path,
             selected_file: &mut sel.selected_file,
             selected_dir: &mut sel.selected_dir,
-            tabs: &mut app.orchestrator.tab_manager.tabs,
+            tabs: &mut app.orchestrator.tabs.tabs,
             file_processor: &mut app.orchestrator.file_processor,
-            tag_manager: &mut app.orchestrator.tag_manager,
+            app_tags: &mut app.orchestrator.tags,
             expanded_dirs: &mut sel.expanded_dirs,
             ctx: ui.ctx(),
         });
@@ -187,14 +187,14 @@ fn test_rename_modal() {
     let _ = run_ui_test(&ctx, raw_input(), |ui| {
         let sel = &mut app.orchestrator.selection;
         show_rename_dialog(RenameDialogCtx {
-            dialog_manager: &mut app.orchestrator.dialogs,
+            dialogs: &mut app.orchestrator.dialogs,
             file_event_bus: &app.orchestrator.file_event_bus,
-            loaded_path: &mut app.orchestrator.tab_manager.loaded_path,
+            loaded_path: &mut app.orchestrator.tabs.loaded_path,
             selected_file: &mut sel.selected_file,
             selected_dir: &mut sel.selected_dir,
-            tabs: &mut app.orchestrator.tab_manager.tabs,
+            tabs: &mut app.orchestrator.tabs.tabs,
             file_processor: &mut app.orchestrator.file_processor,
-            tag_manager: &mut app.orchestrator.tag_manager,
+            app_tags: &mut app.orchestrator.tags,
             expanded_dirs: &mut sel.expanded_dirs,
             ctx: ui.ctx(),
         });
@@ -221,14 +221,14 @@ fn test_rename_preserves_extension() {
     let _ = run_ui_test(&ctx, Default::default(), |ui| {
         let sel = &mut app.orchestrator.selection;
         show_rename_dialog(RenameDialogCtx {
-            dialog_manager: &mut app.orchestrator.dialogs,
+            dialogs: &mut app.orchestrator.dialogs,
             file_event_bus: &app.orchestrator.file_event_bus,
-            loaded_path: &mut app.orchestrator.tab_manager.loaded_path,
+            loaded_path: &mut app.orchestrator.tabs.loaded_path,
             selected_file: &mut sel.selected_file,
             selected_dir: &mut sel.selected_dir,
-            tabs: &mut app.orchestrator.tab_manager.tabs,
+            tabs: &mut app.orchestrator.tabs.tabs,
             file_processor: &mut app.orchestrator.file_processor,
-            tag_manager: &mut app.orchestrator.tag_manager,
+            app_tags: &mut app.orchestrator.tags,
             expanded_dirs: &mut sel.expanded_dirs,
             ctx: ui.ctx(),
         });
@@ -314,7 +314,7 @@ fn test_create_document_dialog_writes_file_on_submit() {
     // `Box::leak(&'static Path)`: the `PathBuf` lives in the
     // test function's stack frame, and the closure captures
     // it by `move` for the harness's lifetime. The
-    // `Mutex<DialogManager>` lets the test and the closure
+    // `Mutex<Dialogs>` lets the test and the closure
     // share mutable state across the harness's frames
     // without requiring `'static` storage.
     let temp_dir = std::env::temp_dir().join(format!(
@@ -322,7 +322,7 @@ fn test_create_document_dialog_writes_file_on_submit() {
         std::process::id()
     ));
     let _ = fs::create_dir_all(&temp_dir);
-    let mut dm = DialogManager::new();
+    let mut dm = Dialogs::new();
     dm.create_document_dialog_open = true;
     dm.create_document_parent = Some(temp_dir.clone());
     dm.create_document_name = "from dialog".to_string();
@@ -379,14 +379,14 @@ fn test_rename_dialog_renames_file_on_submit() {
         if let Some(app) = guard.as_mut() {
             let sel = &mut app.orchestrator.selection;
             show_rename_dialog(RenameDialogCtx {
-                dialog_manager: &mut app.orchestrator.dialogs,
+                dialogs: &mut app.orchestrator.dialogs,
                 file_event_bus: &app.orchestrator.file_event_bus,
-                loaded_path: &mut app.orchestrator.tab_manager.loaded_path,
+                loaded_path: &mut app.orchestrator.tabs.loaded_path,
                 selected_file: &mut sel.selected_file,
                 selected_dir: &mut sel.selected_dir,
-                tabs: &mut app.orchestrator.tab_manager.tabs,
+                tabs: &mut app.orchestrator.tabs.tabs,
                 file_processor: &mut app.orchestrator.file_processor,
-                tag_manager: &mut app.orchestrator.tag_manager,
+                app_tags: &mut app.orchestrator.tags,
                 expanded_dirs: &mut sel.expanded_dirs,
                 ctx: ui.ctx(),
             });

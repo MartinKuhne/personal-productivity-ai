@@ -15,7 +15,7 @@ struct TabStripCache {
     titles: Vec<String>,
 }
 
-pub struct TabManager {
+pub struct Tabs {
     pub loaded_path: Option<PathBuf>,
     pub current_yaml: Option<serde_norway::Value>,
     pub current_markdown: String,
@@ -37,7 +37,7 @@ pub struct TabManager {
     heading_ids_cache: Option<(u64, Vec<String>)>,
 }
 
-impl TabManager {
+impl Tabs {
     pub fn new() -> Self {
         Self {
             loaded_path: None,
@@ -164,7 +164,7 @@ impl TabManager {
     }
 }
 
-impl Default for TabManager {
+impl Default for Tabs {
     fn default() -> Self {
         Self::new()
     }
@@ -176,7 +176,7 @@ mod tests {
 
     #[test]
     fn test_new() {
-        let manager = TabManager::new();
+        let manager = Tabs::new();
         assert!(manager.loaded_path.is_none());
         assert!(manager.current_yaml.is_none());
         assert_eq!(manager.current_markdown, "");
@@ -187,7 +187,7 @@ mod tests {
 
     #[test]
     fn test_open_tab() {
-        let mut manager = TabManager::new();
+        let mut manager = Tabs::new();
         let path = PathBuf::from("test.md");
         manager.open_tab(path.clone());
         assert!(manager.tabs.contains(&path));
@@ -195,7 +195,7 @@ mod tests {
 
     #[test]
     fn test_open_tab_no_duplicates() {
-        let mut manager = TabManager::new();
+        let mut manager = Tabs::new();
         let path = PathBuf::from("test.md");
         manager.open_tab(path.clone());
         manager.open_tab(path.clone());
@@ -204,7 +204,7 @@ mod tests {
 
     #[test]
     fn test_close_tab() {
-        let mut manager = TabManager::new();
+        let mut manager = Tabs::new();
         let path = PathBuf::from("test.md");
         manager.open_tab(path.clone());
         manager.close_tab(&path);
@@ -213,7 +213,7 @@ mod tests {
 
     #[test]
     fn test_clear_content() {
-        let mut manager = TabManager::new();
+        let mut manager = Tabs::new();
         manager.loaded_path = Some(PathBuf::from("test.md"));
         manager.current_markdown = "# Test".to_string();
         manager.clear_content();
@@ -238,7 +238,7 @@ mod tests {
     #[test]
     fn test_scroll_to_header_id_is_optional_string() {
         // Confirm the field is an egui-free Option<String>.
-        let mut m = TabManager::new();
+        let mut m = Tabs::new();
         assert_eq!(m.scroll_to_header_id, None);
         m.scroll_to_header_id = Some("Intro".to_string());
         assert_eq!(m.scroll_to_header_id.as_deref(), Some("Intro"));

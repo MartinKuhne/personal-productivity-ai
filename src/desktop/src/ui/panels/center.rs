@@ -81,7 +81,7 @@ pub fn apply_tab_action(
 /// close, as it appeared in the tab strip on the frame the button
 /// was clicked)
 /// Outputs: ()
-/// Purity: Impure (mutates `app.orchestrator.tab_manager.tabs` and
+/// Purity: Impure (mutates `app.orchestrator.tabs.tabs` and
 /// `app.orchestrator.selection.selected_file`).
 /// Preconditions: None — `i` is bounds-checked inside
 /// `apply_tab_action`; an out-of-range index is a silent no-op.
@@ -97,7 +97,7 @@ pub fn apply_tab_action(
 /// API.
 pub fn apply_tab_close_click(app: &mut FastMdApp, i: usize) {
     apply_tab_action(
-        &mut app.orchestrator.tab_manager.tabs,
+        &mut app.orchestrator.tabs.tabs,
         app.orchestrator.selection.selected_file_mut(),
         TabAction::Close(i),
     );
@@ -109,16 +109,16 @@ pub fn apply_tab_close_click(app: &mut FastMdApp, i: usize) {
 /// keep, as it appeared in the tab strip on the frame the menu
 /// item was clicked)
 /// Outputs: ()
-/// Purity: Impure (mutates `app.orchestrator.tab_manager.tabs` and
+/// Purity: Impure (mutates `app.orchestrator.tabs.tabs` and
 /// `app.orchestrator.selection.selected_file`).
 /// Preconditions: None — `i` is bounds-checked inside
 /// `apply_tab_action`.
 /// Postconditions: All tabs except the one at index `i` are
-/// removed. The kept tab is `app.orchestrator.tab_manager.tabs[0]` after the
+/// removed. The kept tab is `app.orchestrator.tabs.tabs[0]` after the
 /// call. `selected_file` is updated if it was a closed tab.
 pub fn apply_tab_close_others_click(app: &mut FastMdApp, i: usize) {
     apply_tab_action(
-        &mut app.orchestrator.tab_manager.tabs,
+        &mut app.orchestrator.tabs.tabs,
         app.orchestrator.selection.selected_file_mut(),
         TabAction::CloseOthers(i),
     );
@@ -128,13 +128,13 @@ pub fn apply_tab_close_others_click(app: &mut FastMdApp, i: usize) {
 /// "Close All Tabs" item.
 /// Inputs: app (the application state)
 /// Outputs: ()
-/// Purity: Impure (mutates `app.orchestrator.tab_manager.tabs` and
+/// Purity: Impure (mutates `app.orchestrator.tabs.tabs` and
 /// `app.orchestrator.selection.selected_file`).
 /// Preconditions: None.
 /// Postconditions: All tabs are removed. `selected_file` is `None`.
 pub fn apply_tab_close_all_click(app: &mut FastMdApp) {
     apply_tab_action(
-        &mut app.orchestrator.tab_manager.tabs,
+        &mut app.orchestrator.tabs.tabs,
         app.orchestrator.selection.selected_file_mut(),
         TabAction::CloseAll,
     );
@@ -252,8 +252,8 @@ pub fn render_tabs_and_content_capture(
     mut on_click: impl FnMut(&'static str),
 ) {
     ui.horizontal(|ui| {
-        let tabs_snapshot: Vec<PathBuf> = app.orchestrator.tab_manager.tabs.clone();
-        let tab_titles = app.orchestrator.tab_manager.tab_titles().to_vec();
+        let tabs_snapshot: Vec<PathBuf> = app.orchestrator.tabs.tabs.clone();
+        let tab_titles = app.orchestrator.tabs.tab_titles().to_vec();
 
         for (i, (tab_path, title)) in tabs_snapshot.iter().zip(tab_titles.iter()).enumerate() {
             let is_selected = app.orchestrator.selection.selected_file() == Some(tab_path);
@@ -372,7 +372,7 @@ pub fn render_tabs_and_content_capture(
         let deficit_strategy = app.orchestrator.config.deficit_strategy();
         render_markdown_content(
             ui,
-            &mut app.orchestrator.tab_manager,
+            &mut app.orchestrator.tabs,
             frame_fill,
             deficit_strategy,
         );
@@ -382,7 +382,7 @@ pub fn render_tabs_and_content_capture(
 /// Purpose: Renders the shared markdown preview content (YAML table, rendered
 /// markdown, task toggles) inside an optional sepia frame and a vertical
 /// scroll area.
-/// Inputs: `ui` - Egui UI context, `tab_manager` - The tab manager holding the
+/// Inputs: `ui` - Egui UI context, `tabs` - The tab manager holding the
 ///   current markdown, YAML, and scroll state, `frame_fill` - Optional frame
 ///   background color (sepia tint for PDF-backed files, `None` otherwise),
 ///   `deficit_strategy` - The table width deficit strategy for rendering.
@@ -394,45 +394,45 @@ pub fn render_tabs_and_content_capture(
 ///   source.
 fn render_markdown_content(
     ui: &mut egui::Ui,
-    tab_manager: &mut crate::app::TabManager,
+    tabs: &mut crate::app::Tabs,
     frame_fill: Option<egui::Color32>,
     deficit_strategy: crate::ui::table_width::DeficitStrategy,
 ) {
     if let Some(fill) = frame_fill {
         egui::Frame::new().fill(fill).show(ui, |ui| {
-            show_markdown_scroll_area(ui, tab_manager, deficit_strategy);
+            show_markdown_scroll_area(ui, tabs, deficit_strategy);
         });
     } else {
-        show_markdown_scroll_area(ui, tab_manager, deficit_strategy);
+        show_markdown_scroll_area(ui, tabs, deficit_strategy);
     }
 }
 
 /// Renders the scroll area containing YAML table, markdown, and task toggles.
 fn show_markdown_scroll_area(
     ui: &mut egui::Ui,
-    tab_manager: &mut crate::app::TabManager,
+    tabs: &mut crate::app::Tabs,
     deficit_strategy: crate::ui::table_width::DeficitStrategy,
 ) {
     egui::ScrollArea::vertical()
         .id_salt("main_markdown_scroll")
         .show(ui, |ui| {
-            if let Some(yaml) = &tab_manager.current_yaml {
+            if let Some(yaml) = &tabs.current_yaml {
                 render_yaml_table(ui, yaml);
             }
-            let heading_ids = tab_manager.heading_ids().to_vec();
+            let heading_ids = tabs.heading_ids().to_vec();
             render_markdown(
                 ui,
-                &tab_manager.current_markdown,
-                &mut tab_manager.scroll_to_header_id,
-                &mut tab_manager.pending_task_toggles,
+                &tabs.current_markdown,
+                &mut tabs.scroll_to_header_id,
+                &mut tabs.pending_task_toggles,
                 deficit_strategy,
                 Some(&heading_ids),
             );
             // P0-2: Apply task checkbox toggles to the markdown source.
-            if !tab_manager.pending_task_toggles.is_empty() {
-                for (idx, checked) in tab_manager.pending_task_toggles.drain(..) {
+            if !tabs.pending_task_toggles.is_empty() {
+                for (idx, checked) in tabs.pending_task_toggles.drain(..) {
                     crate::ui::render::apply_task_toggle(
-                        &mut tab_manager.current_markdown,
+                        &mut tabs.current_markdown,
                         idx,
                         checked,
                     );

@@ -3,7 +3,7 @@
 use std::collections::HashSet;
 use std::path::PathBuf;
 
-pub struct SelectionManager {
+pub struct FileSelection {
     pub selected_file: Option<PathBuf>,
     pub selected_files: HashSet<PathBuf>,
     pub selected_dir: Option<PathBuf>,
@@ -11,13 +11,13 @@ pub struct SelectionManager {
     pub tree_dirty: bool,
 }
 
-impl Default for SelectionManager {
+impl Default for FileSelection {
     fn default() -> Self {
         Self::new()
     }
 }
 
-impl SelectionManager {
+impl FileSelection {
     pub fn new() -> Self {
         Self {
             selected_file: None,
@@ -166,7 +166,7 @@ mod tests {
 
     #[test]
     fn test_select_file() {
-        let mut manager = SelectionManager::new();
+        let mut manager = FileSelection::new();
         let path = PathBuf::from("test.md");
         manager.select_file(path.clone());
         assert_eq!(manager.selected_file(), Some(&path));
@@ -174,7 +174,7 @@ mod tests {
 
     #[test]
     fn test_toggle_file_adds() {
-        let mut manager = SelectionManager::new();
+        let mut manager = FileSelection::new();
         let path = PathBuf::from("test.md");
         manager.toggle_file(path.clone());
         assert!(manager.is_selected(&path));
@@ -182,7 +182,7 @@ mod tests {
 
     #[test]
     fn test_toggle_file_removes() {
-        let mut manager = SelectionManager::new();
+        let mut manager = FileSelection::new();
         let path = PathBuf::from("test.md");
         manager.toggle_file(path.clone());
         manager.toggle_file(path.clone());
@@ -191,7 +191,7 @@ mod tests {
 
     #[test]
     fn test_toggle_expanded() {
-        let mut manager = SelectionManager::new();
+        let mut manager = FileSelection::new();
         let path = PathBuf::from("dir");
         manager.toggle_expanded(path.clone());
         assert!(manager.is_expanded(&path));
@@ -201,7 +201,7 @@ mod tests {
 
     #[test]
     fn test_clear() {
-        let mut manager = SelectionManager::new();
+        let mut manager = FileSelection::new();
         let file = PathBuf::from("test.md");
         let dir = PathBuf::from("dir");
         manager.select_file(file.clone());
@@ -217,7 +217,7 @@ mod tests {
 
     #[test]
     fn test_is_selected() {
-        let mut manager = SelectionManager::new();
+        let mut manager = FileSelection::new();
         let path = PathBuf::from("test.md");
         assert!(!manager.is_selected(&path));
         manager.toggle_file(path.clone());
@@ -226,7 +226,7 @@ mod tests {
 
     #[test]
     fn test_select_dir() {
-        let mut manager = SelectionManager::new();
+        let mut manager = FileSelection::new();
         let path = PathBuf::from("dir");
         manager.select_dir(path.clone());
         assert_eq!(manager.selected_dir(), Some(&path));
@@ -239,7 +239,7 @@ mod tests {
     /// panel, the last tree-selected directory is used (AGENT-014).
     #[test]
     fn test_agent_context_suppresses_file_context_when_no_tabs() {
-        let mut manager = SelectionManager::new();
+        let mut manager = FileSelection::new();
         manager.select_file(PathBuf::from("a.md"));
         manager.select_dir(PathBuf::from("stale_dir"));
         manager.toggle_file(PathBuf::from("b.md"));
@@ -259,7 +259,7 @@ mod tests {
     /// active tab file's parent (AGENT-013/AGENT-014).
     #[test]
     fn test_agent_context_returned_when_tabs_open() {
-        let mut manager = SelectionManager::new();
+        let mut manager = FileSelection::new();
         let file = PathBuf::from("C:/notes/folder/a.md");
         let multi = PathBuf::from("C:/notes/other/b.md");
         manager.select_file(file.clone());
@@ -281,7 +281,7 @@ mod tests {
     /// tree-selected directory.
     #[test]
     fn test_prompt_dir_uses_active_tab_file_parent() {
-        let mut manager = SelectionManager::new();
+        let mut manager = FileSelection::new();
         manager.select_dir(PathBuf::from("stale_tree_dir"));
         let tab = PathBuf::from("C:/notes/folder/file.md");
         manager.select_file(tab.clone());
@@ -294,7 +294,7 @@ mod tests {
     /// directory context; the last tree-selected directory is used.
     #[test]
     fn test_prompt_dir_ignores_non_tab_selected_file() {
-        let mut manager = SelectionManager::new();
+        let mut manager = FileSelection::new();
         manager.select_dir(PathBuf::from("tree_dir"));
         manager.select_file(PathBuf::from("C:/other/selected.md"));
         assert_eq!(
@@ -308,7 +308,7 @@ mod tests {
     /// the last directory selected from the directory tree.
     #[test]
     fn test_prompt_dir_falls_back_to_tree_selected_dir() {
-        let mut manager = SelectionManager::new();
+        let mut manager = FileSelection::new();
         manager.select_dir(PathBuf::from("tree_dir"));
         assert_eq!(manager.prompt_dir(&[]), Some(PathBuf::from("tree_dir")));
     }
@@ -317,7 +317,7 @@ mod tests {
     /// directory exists, the directory context is `None`.
     #[test]
     fn test_prompt_dir_none_when_no_context() {
-        let manager = SelectionManager::new();
+        let manager = FileSelection::new();
         assert_eq!(manager.prompt_dir(&[]), None);
     }
 }

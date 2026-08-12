@@ -21,7 +21,7 @@ pub enum OAuthFlowStatus {
 ///
 /// This extraction reduces `FastMdApp` by ~10 fields and consolidates
 /// modal interactions into a single, cohesive module.
-pub struct DialogManager {
+pub struct Dialogs {
     // Move dialog
     pub move_dialog_open: bool,
     pub file_to_move: Option<PathBuf>,
@@ -58,7 +58,7 @@ pub struct DialogManager {
     pub oauth_status: HashMap<String, OAuthFlowStatus>,
 }
 
-impl DialogManager {
+impl Dialogs {
     /// Create a new, empty dialog manager.
     pub fn new() -> Self {
         Self {
@@ -112,7 +112,7 @@ impl DialogManager {
     }
 }
 
-impl Default for DialogManager {
+impl Default for Dialogs {
     fn default() -> Self {
         Self::new()
     }
@@ -123,8 +123,8 @@ mod tests {
     use super::*;
 
     #[test]
-    fn test_new_dialog_manager_is_empty() {
-        let dm = DialogManager::new();
+    fn test_new_dialogs_is_empty() {
+        let dm = Dialogs::new();
         assert!(!dm.move_dialog_open);
         assert!(dm.file_to_move.is_none());
         assert!(!dm.create_dir_dialog_open);
@@ -139,14 +139,14 @@ mod tests {
 
     #[test]
     fn oauth_status_starts_idle() {
-        let dm = DialogManager::new();
+        let dm = Dialogs::new();
         assert!(!dm.is_oauth_in_progress("my-server"));
         assert!(dm.oauth_status.is_empty());
     }
 
     #[test]
     fn set_in_progress_and_back_to_idle() {
-        let mut dm = DialogManager::new();
+        let mut dm = Dialogs::new();
         dm.set_oauth_in_progress("srv");
         assert!(dm.is_oauth_in_progress("srv"));
         assert!(!dm.is_oauth_in_progress("other"));

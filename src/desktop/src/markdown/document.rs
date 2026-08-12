@@ -11,8 +11,8 @@
 //! - `events()` returns the events parsed from the *body* (source with
 //!   the front-matter block stripped), not the full source. This
 //!   matches the previous behaviour of every call site that did
-//!   `parse_markdown_to_events(&tab_manager.current_markdown)` after
-//!   `tab_manager.current_markdown` was set to the body.
+//!   `parse_markdown_to_events(&tabs.current_markdown)` after
+//!   `tabs.current_markdown` was set to the body.
 //! - `body()` returns the full source when there is no front matter
 //!   and the post-`---` body when there is. This is what tools and
 //!   renderers should pass to a pure markdown parser.
@@ -111,7 +111,7 @@ pub fn apply_task_toggle(markdown: &mut String, task_index: usize, checked: bool
 /// Conventions (see the module docs for the full list):
 /// - `events()` returns events parsed from the *body*, not the
 ///   full source. This matches the pre-refactor behaviour of every
-///   renderer call site that parsed `&tab_manager.current_markdown`.
+///   renderer call site that parsed `&tabs.current_markdown`.
 /// - `body()` returns the full source when there is no front matter
 ///   and the post-`---` body when there is.
 #[derive(Clone, Debug)]

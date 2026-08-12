@@ -10,14 +10,14 @@ use std::path::{Path, PathBuf};
 /// - Tracks which files are prompts (tagged with `prompt`, case-insensitive).
 /// - Provides incremental updates during the initial scan (`add_tags`) and
 ///   full rebuilds (`rebuild`) after modifications or removals.
-pub struct TagManager {
+pub struct Tags {
     file_tags: BTreeMap<PathBuf, Vec<String>>,
     all_tags: BTreeSet<String>,
     prompt_paths: BTreeSet<PathBuf>,
     pub selected_tag: Option<String>,
 }
 
-impl TagManager {
+impl Tags {
     pub fn new() -> Self {
         Self {
             file_tags: BTreeMap::new(),
@@ -89,7 +89,7 @@ impl TagManager {
     }
 }
 
-impl Default for TagManager {
+impl Default for Tags {
     fn default() -> Self {
         Self::new()
     }
@@ -101,7 +101,7 @@ mod tests {
 
     #[test]
     fn test_new_is_empty() {
-        let tm = TagManager::new();
+        let tm = Tags::new();
         assert!(tm.file_tags().is_empty());
         assert!(tm.all_tags().is_empty());
         assert!(tm.prompt_paths().is_empty());
@@ -109,7 +109,7 @@ mod tests {
 
     #[test]
     fn test_add_tags_tracks_tags_and_prompts() {
-        let mut tm = TagManager::new();
+        let mut tm = Tags::new();
         let p1 = PathBuf::from("doc.md");
         let p2 = PathBuf::from("prompt.md");
 
@@ -128,7 +128,7 @@ mod tests {
 
     #[test]
     fn test_add_tags_prompt_case_insensitive() {
-        let mut tm = TagManager::new();
+        let mut tm = Tags::new();
         let p = PathBuf::from("p.md");
         tm.add_tags(p.clone(), vec!["PROMPT".into()]);
         assert!(tm.prompt_paths().contains(&p));
@@ -136,7 +136,7 @@ mod tests {
 
     #[test]
     fn test_add_tags_removes_old_prompt_status() {
-        let mut tm = TagManager::new();
+        let mut tm = Tags::new();
         let p = PathBuf::from("was_prompt.md");
 
         tm.add_tags(p.clone(), vec!["prompt".into()]);
@@ -149,7 +149,7 @@ mod tests {
 
     #[test]
     fn test_remove_file_removes_from_prompt_paths() {
-        let mut tm = TagManager::new();
+        let mut tm = Tags::new();
         let p = PathBuf::from("prompt.md");
         tm.add_tags(p.clone(), vec!["prompt".into()]);
         assert!(tm.prompt_paths().contains(&p));
@@ -161,7 +161,7 @@ mod tests {
 
     #[test]
     fn test_rebuild_evicts_stale_tags() {
-        let mut tm = TagManager::new();
+        let mut tm = Tags::new();
         let p1 = PathBuf::from("a.md");
         let p2 = PathBuf::from("b.md");
 
@@ -179,7 +179,7 @@ mod tests {
 
     #[test]
     fn test_rebuild_rebuilds_prompt_paths() {
-        let mut tm = TagManager::new();
+        let mut tm = Tags::new();
         let p1 = PathBuf::from("prompt.md");
         let p2 = PathBuf::from("regular.md");
 
@@ -200,7 +200,7 @@ mod tests {
         // Match current behavior: add_tags is incremental and does NOT
         // remove tags from all_tags that old tag lists no longer carry.
         // The caller must call rebuild() for eviction.
-        let mut tm = TagManager::new();
+        let mut tm = Tags::new();
         let p = PathBuf::from("doc.md");
 
         tm.add_tags(p.clone(), vec!["rust".into(), "ui".into()]);

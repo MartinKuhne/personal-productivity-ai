@@ -1,9 +1,9 @@
-use fastmd::app::background::manager::{BackgroundProcessManager, MAX_LOG_ENTRIES};
+use fastmd::app::background::logs::{BackgroundLogs, MAX_LOG_ENTRIES};
 use fastmd::app::background::models::{BackgroundLogEntry, LogCategory};
 
 #[test]
 fn test_background_manager_push_limit() {
-    let mut manager = BackgroundProcessManager::new();
+    let mut manager = BackgroundLogs::new();
 
     // Add MAX_LOG_ENTRIES + 10 entries
     for i in 0..(MAX_LOG_ENTRIES + 10) {

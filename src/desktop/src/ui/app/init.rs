@@ -11,12 +11,12 @@ use std::sync::{Arc, Mutex};
 use eframe::egui;
 
 use crate::agent::AgentSessionManager;
-use crate::app::background::BackgroundProcessManager;
+use crate::app::background::BackgroundLogs;
 use crate::app::background_task::Task;
 use crate::app::watcher::directory_tracker::DirectoryTracker;
 use crate::app::watcher::file_processor::FileEventProcessor;
 use crate::app::{
-    DialogManager, PanelLayout, PersistedUiState, SelectionManager, TagManager, TextBuffer,
+    Dialogs, PanelLayout, PersistedUiState, FileSelection, Tags, TextBuffer,
 };
 use crate::bus::core::Bus;
 use crate::bus::events::config::ConfigArrived;
@@ -110,7 +110,7 @@ impl FastMdApp {
         // in `handle_fs_event`.
         let finished_watcher_slot = background_task.finished_watcher.clone();
         let file_processor = FileEventProcessor::new(background_task.file_event_bus.subscribe());
-        let background_manager = Arc::new(Mutex::new(BackgroundProcessManager::new()));
+        let background_manager = Arc::new(Mutex::new(BackgroundLogs::new()));
         // One BrowserSession for the whole app lifetime; shared
         // with the agent and (read-only) with the Tools dialog
         // so the UI can call `tick()` / `forget()`. Lazily
@@ -167,12 +167,12 @@ impl FastMdApp {
             layout.right_panel_width = Some(w);
         }
 
-        let mut selection = SelectionManager::new();
+        let mut selection = FileSelection::new();
         for dir in &persisted_ui_state.expanded_dirs {
             selection.expanded_dirs.insert(dir.clone());
         }
 
-        let dialogs = DialogManager::new();
+        let dialogs = Dialogs::new();
         // `batch_dialog_config.available_dirs` is populated from
         // the published config in `drain_config_bus` on the first
         // frame.
@@ -188,9 +188,9 @@ impl FastMdApp {
                 file_processor,
                 pdf_backing_tracker,
                 directory_tracker: dir_tracker,
-                tag_manager: TagManager::new(),
+                tags: Tags::new(),
                 selection,
-                tab_manager: crate::app::tab_manager::TabManager::new(),
+                tabs: crate::app::tabs::Tabs::new(),
                 _watcher: None,
                 agent,
                 dialogs,
@@ -250,7 +250,7 @@ impl FastMdApp {
         // we point the slot at a fresh empty one.
         let finished_watcher_slot = background_task.finished_watcher.clone();
         let file_processor = FileEventProcessor::new(background_task.file_event_bus.subscribe());
-        let background_manager = Arc::new(Mutex::new(BackgroundProcessManager::new()));
+        let background_manager = Arc::new(Mutex::new(BackgroundLogs::new()));
         let test_browser_session = std::sync::Arc::new(crate::app::session::BrowserSession::new(
             &crate::config::AppConfig::default(),
         ));
@@ -269,8 +269,8 @@ impl FastMdApp {
         let event_bus = background_task.file_event_bus;
         let dir_tracker = DirectoryTracker::new(event_bus.subscribe());
 
-        let selection = SelectionManager::new();
-        let mut dialogs = DialogManager::new();
+        let selection = FileSelection::new();
+        let mut dialogs = Dialogs::new();
         let batch_dialog_config = crate::app::batch::types::BatchDialogConfig {
             available_dirs: config
                 .content_libraries
@@ -294,9 +294,9 @@ impl FastMdApp {
                 file_event_reader: Some(event_bus.subscribe()),
                 file_processor,
                 pdf_backing_tracker,
-                tag_manager: TagManager::new(),
+                tags: Tags::new(),
                 selection,
-                tab_manager: crate::app::tab_manager::TabManager::new(),
+                tabs: crate::app::tabs::Tabs::new(),
                 _watcher: None,
                 agent,
                 dialogs,

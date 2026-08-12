@@ -2,7 +2,7 @@
 //!
 //! Unit tests live in the sibling `modals_tests.rs` sidecar.
 
-use crate::app::dialog_manager::DialogManager;
+use crate::app::dialogs::Dialogs;
 use crate::app::watcher::file_processor::FileEventProcessor;
 use crate::bus::core::Bus;
 use crate::bus::events::file::{FileEvent, FileEventProducer};
@@ -74,7 +74,7 @@ fn show_name_entry_window(
 }
 
 pub fn show_move_modal_dialog(
-    dm: &mut DialogManager,
+    dm: &mut Dialogs,
     content_libraries: &[ContentLibrary],
     file_processor: &FileEventProcessor,
     file_event_bus: &Bus<FileEvent>,
@@ -156,7 +156,7 @@ pub fn show_move_modal_dialog(
 }
 
 pub fn show_create_dir_dialog(
-    dm: &mut DialogManager,
+    dm: &mut Dialogs,
     file_processor: &mut FileEventProcessor,
     watcher: &mut Option<notify::RecommendedWatcher>,
     file_event_bus: &Bus<FileEvent>,
@@ -235,7 +235,7 @@ pub fn show_create_dir_dialog(
 /// success the new file is announced through `publish_discovered` so
 /// the tree, tab list and tag manager refresh immediately.
 pub fn show_create_document_dialog(
-    dm: &mut DialogManager,
+    dm: &mut Dialogs,
     file_event_bus: &Bus<FileEvent>,
     ctx: &egui::Context,
 ) {
@@ -347,31 +347,31 @@ fn date_suffixed_name(file_name: &str) -> String {
 /// in `FastMdApp::show_modals` constructs the bundle by reborrowing
 /// each field from `&mut self`.
 pub struct RenameDialogCtx<'a> {
-    pub dialog_manager: &'a mut DialogManager,
+    pub dialogs: &'a mut Dialogs,
     pub file_event_bus: &'a Bus<FileEvent>,
     pub loaded_path: &'a mut Option<PathBuf>,
     pub selected_file: &'a mut Option<PathBuf>,
     pub selected_dir: &'a mut Option<PathBuf>,
     pub tabs: &'a mut [PathBuf],
     pub file_processor: &'a mut FileEventProcessor,
-    pub tag_manager: &'a mut crate::app::tag_manager::TagManager,
+    pub app_tags: &'a mut crate::app::tags::Tags,
     pub expanded_dirs: &'a mut std::collections::HashSet<PathBuf>,
     pub ctx: &'a egui::Context,
 }
 
 pub fn show_rename_dialog(ctx: RenameDialogCtx<'_>) {
-    if !ctx.dialog_manager.rename_dialog_open {
+    if !ctx.dialogs.rename_dialog_open {
         return;
     }
     let RenameDialogCtx {
-        dialog_manager: dm,
+        dialogs: dm,
         file_event_bus,
         loaded_path,
         selected_file,
         selected_dir,
         tabs,
         file_processor,
-        tag_manager,
+        app_tags,
         expanded_dirs,
         ctx,
     } = ctx;
@@ -437,8 +437,8 @@ pub fn show_rename_dialog(ctx: RenameDialogCtx<'_>) {
                             file_processor.add_file(new_path.clone());
                         }
                         let tags = crate::utils::tags::extract_tags_from_file(&new_path);
-                        tag_manager.remove_file(file);
-                        tag_manager.add_tags(new_path.clone(), tags);
+                        app_tags.remove_file(file);
+                        app_tags.add_tags(new_path.clone(), tags);
                         if expanded_dirs.remove(file) {
                             expanded_dirs.insert(new_path.clone());
                         }

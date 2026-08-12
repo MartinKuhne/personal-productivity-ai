@@ -39,14 +39,14 @@ impl io::Write for FailingWriter {
 
 #[test]
 fn test_push_log_adds_entry() {
-    let mut mgr = BackgroundProcessManager::new();
+    let mut mgr = BackgroundLogs::new();
     mgr.push_log(make_entry("test"));
     assert_eq!(mgr.get_logs().len(), 1);
 }
 
 #[test]
 fn test_push_log_overflow_evicts_oldest() {
-    let mut mgr = BackgroundProcessManager::new();
+    let mut mgr = BackgroundLogs::new();
     for i in 0..MAX_LOG_ENTRIES + 10 {
         mgr.push_log(make_entry(&format!("entry {}", i)));
     }
@@ -57,7 +57,7 @@ fn test_push_log_overflow_evicts_oldest() {
 
 #[test]
 fn test_clear_logs_empties() {
-    let mut mgr = BackgroundProcessManager::new();
+    let mut mgr = BackgroundLogs::new();
     mgr.push_log(make_entry("test"));
     mgr.clear_logs();
     assert!(mgr.get_logs().is_empty());
@@ -68,7 +68,7 @@ fn test_save_logs_creates_file() {
     let dir = tempfile::tempdir().unwrap();
     let log_path = dir.path().join("logs/test.log");
 
-    let mut mgr = BackgroundProcessManager::new();
+    let mut mgr = BackgroundLogs::new();
     mgr.push_log(make_entry("line one"));
     mgr.push_log(make_entry("line two"));
 
@@ -88,7 +88,7 @@ fn test_save_logs_propagates_write_errors() {
     // broken pipe, etc.) and returned Ok(()) on a truncated file.
     // Contract: when the underlying write fails, save_logs must
     // return Err so the caller knows the file is incomplete.
-    let mut mgr = BackgroundProcessManager::new();
+    let mut mgr = BackgroundLogs::new();
     // Several entries so we cross the "fail_after" boundary
     // mid-stream and not on the first line.
     for i in 0..10 {
@@ -106,7 +106,7 @@ fn test_save_logs_propagates_write_errors() {
 
 #[test]
 fn test_filter_category_none_shows_all() {
-    let mut mgr = BackgroundProcessManager::new();
+    let mut mgr = BackgroundLogs::new();
     mgr.push_log(BackgroundLogEntry::new(
         LogCategory::Indexer,
         "idx".to_string(),
@@ -135,7 +135,7 @@ fn test_filter_category_none_shows_all() {
 /// same predicate; if the two diverge, that test will catch it.
 #[test]
 fn test_filter_category_isolates_matching_entries() {
-    let mut mgr = BackgroundProcessManager::new();
+    let mut mgr = BackgroundLogs::new();
     mgr.push_log(BackgroundLogEntry::new(
         LogCategory::Indexer,
         "indexed 1".to_string(),
@@ -193,7 +193,7 @@ fn test_filter_category_isolates_matching_entries() {
 /// matching would pass it. This test adds a mixed-case check.
 #[test]
 fn test_search_text_is_case_insensitive() {
-    let mut mgr = BackgroundProcessManager::new();
+    let mut mgr = BackgroundLogs::new();
     mgr.push_log(make_entry("Indexing file.md"));
     mgr.push_log(make_entry("Watching directory"));
     mgr.push_log(make_entry("PDF conversion"));
@@ -221,7 +221,7 @@ fn test_search_text_is_case_insensitive() {
 
 #[test]
 fn test_search_text_filters() {
-    let mut mgr = BackgroundProcessManager::new();
+    let mut mgr = BackgroundLogs::new();
     mgr.push_log(make_entry("apple banana"));
     mgr.push_log(make_entry("cherry date"));
 
@@ -244,6 +244,6 @@ fn test_search_text_filters() {
 
 #[test]
 fn test_auto_scroll_default_true() {
-    let mgr = BackgroundProcessManager::new();
+    let mgr = BackgroundLogs::new();
     assert!(mgr.auto_scroll);
 }

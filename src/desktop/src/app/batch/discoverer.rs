@@ -1,18 +1,14 @@
-//! Job discoverer trait and implementations — resolves which paths a batch job should process (files or directories).
+//! Job discoverer implementations — resolves which paths a batch job should process (files or directories).
 
 use crate::app::batch::types::{BatchConfig, BatchMode};
 use std::path::PathBuf;
-
-pub trait JobDiscoverer: Send {
-    fn discover(&self) -> Result<Vec<PathBuf>, String>;
-}
 
 pub struct FileMatcherDiscoverer {
     pub directory: PathBuf,
     pub pattern: String,
 }
 
-impl JobDiscoverer for FileMatcherDiscoverer {
+impl FileMatcherDiscoverer {
     fn discover(&self) -> Result<Vec<PathBuf>, String> {
         crate::app::batch::file_matcher::find_matching_files(&self.directory, &self.pattern)
     }
@@ -22,7 +18,7 @@ pub struct DirectoryDiscoverer {
     pub directory: PathBuf,
 }
 
-impl JobDiscoverer for DirectoryDiscoverer {
+impl DirectoryDiscoverer {
     fn discover(&self) -> Result<Vec<PathBuf>, String> {
         Ok(crate::app::batch::file_matcher::find_subdirectories(
             &self.directory,
@@ -30,14 +26,26 @@ impl JobDiscoverer for DirectoryDiscoverer {
     }
 }
 
-impl dyn JobDiscoverer {
-    pub fn from_config(config: &BatchConfig) -> Box<dyn JobDiscoverer> {
+pub enum Discoverer {
+    File(FileMatcherDiscoverer),
+    Directory(DirectoryDiscoverer),
+}
+
+impl Discoverer {
+    pub fn discover(&self) -> Result<Vec<PathBuf>, String> {
+        match self {
+            Self::File(d) => d.discover(),
+            Self::Directory(d) => d.discover(),
+        }
+    }
+
+    pub fn from_config(config: &BatchConfig) -> Self {
         match config.mode {
-            BatchMode::File => Box::new(FileMatcherDiscoverer {
+            BatchMode::File => Self::File(FileMatcherDiscoverer {
                 directory: config.directory.clone(),
                 pattern: config.pattern.clone(),
             }),
-            BatchMode::Directory => Box::new(DirectoryDiscoverer {
+            BatchMode::Directory => Self::Directory(DirectoryDiscoverer {
                 directory: config.directory.clone(),
             }),
         }
@@ -86,7 +94,7 @@ mod tests {
             mode: BatchMode::File,
             concurrency: 4,
         };
-        let _discoverer: Box<dyn JobDiscoverer> = <dyn JobDiscoverer>::from_config(&config);
+        let _discoverer = Discoverer::from_config(&config);
     }
 
     #[test]
@@ -98,7 +106,7 @@ mod tests {
             mode: BatchMode::Directory,
             concurrency: 4,
         };
-        let _discoverer: Box<dyn JobDiscoverer> = <dyn JobDiscoverer>::from_config(&config);
+        let _discoverer = Discoverer::from_config(&config);
     }
 
     #[test]

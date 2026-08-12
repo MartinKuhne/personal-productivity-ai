@@ -33,7 +33,7 @@ pub fn discover_prompts(config: &AppConfig) -> Vec<PromptInfo> {
             let content = match std::fs::read_to_string(path) {
                 Ok(c) => c,
                 Err(e) => {
-                    eprintln!("Failed to read prompt file {}: {}", path.display(), e);
+                    tracing::error!(target: "batch", "Failed to read prompt file {}: {}", path.display(), e);
                     continue;
                 }
             };
@@ -84,7 +84,7 @@ pub fn resolve_prompts(
             let content = match std::fs::read_to_string(path) {
                 Ok(c) => c,
                 Err(e) => {
-                    eprintln!("Failed to read prompt file {}: {}", path.display(), e);
+                    tracing::error!(target: "batch", "Failed to read prompt file {}: {}", path.display(), e);
                     return None;
                 }
             };

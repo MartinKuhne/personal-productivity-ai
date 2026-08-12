@@ -52,7 +52,7 @@ impl PdfConversionJob {
                 );
                 return Err("Command template is empty".to_string());
             }
-            let mut args = Vec::new();
+            let mut args: Vec<String> = Vec::with_capacity(3);
             let exe = template[0].clone();
 
             let exe_lower = exe.to_lowercase();

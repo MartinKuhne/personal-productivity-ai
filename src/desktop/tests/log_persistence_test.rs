@@ -1,10 +1,10 @@
-use fastmd::app::background::manager::BackgroundProcessManager;
+use fastmd::app::background::logs::BackgroundLogs;
 use fastmd::app::background::models::{BackgroundLogEntry, LogCategory};
 use tempfile::tempdir;
 
 #[test]
 fn test_log_persistence() {
-    let mut manager = BackgroundProcessManager::new();
+    let mut manager = BackgroundLogs::new();
 
     manager.push_log(BackgroundLogEntry::new(
         LogCategory::Indexer,

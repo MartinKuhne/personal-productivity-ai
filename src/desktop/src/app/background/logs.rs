@@ -1,6 +1,6 @@
 //! Background log manager — bounded ring buffer of log entries with filtering/search state for the UI panel.
 //!
-//! Unit tests live in the sibling `manager_tests.rs` sidecar.
+//! Unit tests live in the sibling `logs_tests.rs` sidecar.
 
 use crate::app::background::models::{BackgroundLogEntry, LogCategory};
 use std::collections::VecDeque;
@@ -8,9 +8,11 @@ use std::fs::File;
 use std::io::Write;
 use std::sync::{Arc, Mutex};
 
+/// Maximum number of log entries to retain in memory.
+/// This prevents memory exhaustion from runaway background processes.
 pub const MAX_LOG_ENTRIES: usize = 10_000;
 
-pub struct BackgroundProcessManager {
+pub struct BackgroundLogs {
     logs: VecDeque<BackgroundLogEntry>,
     pub filter_category: Option<LogCategory>,
     pub search_text: String,
@@ -18,7 +20,7 @@ pub struct BackgroundProcessManager {
     pub show_background_logs: bool,
 }
 
-impl Default for BackgroundProcessManager {
+impl Default for BackgroundLogs {
     fn default() -> Self {
         Self {
             logs: VecDeque::with_capacity(MAX_LOG_ENTRIES),
@@ -30,7 +32,7 @@ impl Default for BackgroundProcessManager {
     }
 }
 
-impl BackgroundProcessManager {
+impl BackgroundLogs {
     pub fn new() -> Self {
         Self::default()
     }
@@ -81,12 +83,12 @@ impl BackgroundProcessManager {
     }
 }
 
-pub type SharedProcessManager = Arc<Mutex<BackgroundProcessManager>>;
+pub type SharedBackgroundLogs = Arc<Mutex<BackgroundLogs>>;
 
 // ---------------------------------------------------------------------------
-// Tests live in the sibling `manager_tests.rs` sidecar.
+// Tests live in the sibling `logs_tests.rs` sidecar.
 // ---------------------------------------------------------------------------
 
 #[cfg(test)]
-#[path = "manager_tests.rs"]
+#[path = "logs_tests.rs"]
 mod tests;

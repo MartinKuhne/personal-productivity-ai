@@ -89,7 +89,7 @@ fn test_show_left_panel_with_libraries_and_files() {
 /// the flat row list on every frame, so the new `expanded_dirs`
 /// membership was reflected immediately. After P0 the flat rows
 /// are cached in `FastMdApp::cached_tree_rows` and only rebuilt
-/// when `SelectionManager::tree_dirty` is `true`. The directory
+/// when `FileSelection::tree_dirty` is `true`. The directory
 /// click handler (`apply_directory_row_click`) mutates
 /// `expanded_dirs` but did not set `tree_dirty`, so the cache
 /// kept returning the *previous* flat rows and the click looked
@@ -195,7 +195,7 @@ fn test_directory_click_invalidates_tree_cache() {
     {
         let mut ctx = TreeNodeContext::from_app_state(
             &app.orchestrator.selection,
-            &app.orchestrator.tab_manager,
+            &app.orchestrator.tabs,
             &app.orchestrator.dialogs,
             &app.layout,
             &app.orchestrator.submit_prompt,
@@ -210,7 +210,7 @@ fn test_directory_click_invalidates_tree_cache() {
         crate::ui::tree::handlers::apply_directory_row_click(&mut ctx, &dir_row);
         ctx.write_back(
             &mut app.orchestrator.selection,
-            &mut app.orchestrator.tab_manager,
+            &mut app.orchestrator.tabs,
             &mut app.orchestrator.dialogs,
             &mut app.orchestrator.submit_prompt,
         );

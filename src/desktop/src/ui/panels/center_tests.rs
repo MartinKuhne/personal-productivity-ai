@@ -10,12 +10,12 @@ fn create_test_app() -> FastMdApp {
 }
 
 /// Tier 1 test for the `×` tab close button click effect. The
-/// click removes the tab at `i` from `app.orchestrator.tab_manager.tabs`.
+/// click removes the tab at `i` from `app.orchestrator.tabs.tabs`.
 /// We verify the effect without driving the egui harness.
 #[test]
 fn test_apply_tab_close_click_removes_tab_at_index() {
     let mut app = create_test_app();
-    app.orchestrator.tab_manager.tabs = vec![
+    app.orchestrator.tabs.tabs = vec![
         PathBuf::from("a.md"),
         PathBuf::from("b.md"),
         PathBuf::from("c.md"),
@@ -25,7 +25,7 @@ fn test_apply_tab_close_click_removes_tab_at_index() {
     apply_tab_close_click(&mut app, 1);
 
     assert_eq!(
-        app.orchestrator.tab_manager.tabs,
+        app.orchestrator.tabs.tabs,
         vec![PathBuf::from("a.md"), PathBuf::from("c.md")],
         "tab at i=1 must be removed"
     );
@@ -44,13 +44,13 @@ fn test_apply_tab_close_click_removes_tab_at_index() {
 #[test]
 fn test_apply_tab_close_click_out_of_range_is_noop() {
     let mut app = create_test_app();
-    app.orchestrator.tab_manager.tabs = vec![PathBuf::from("a.md")];
+    app.orchestrator.tabs.tabs = vec![PathBuf::from("a.md")];
     *app.orchestrator.selection.selected_file_mut() = Some(PathBuf::from("a.md"));
 
     apply_tab_close_click(&mut app, 5);
 
     assert_eq!(
-        app.orchestrator.tab_manager.tabs,
+        app.orchestrator.tabs.tabs,
         vec![PathBuf::from("a.md")]
     );
     assert_eq!(
@@ -65,7 +65,7 @@ fn test_apply_tab_close_click_out_of_range_is_noop() {
 #[test]
 fn test_apply_tab_close_others_click_keeps_only_target_tab() {
     let mut app = create_test_app();
-    app.orchestrator.tab_manager.tabs = vec![
+    app.orchestrator.tabs.tabs = vec![
         PathBuf::from("a.md"),
         PathBuf::from("b.md"),
         PathBuf::from("c.md"),
@@ -75,7 +75,7 @@ fn test_apply_tab_close_others_click_keeps_only_target_tab() {
     apply_tab_close_others_click(&mut app, 1);
 
     assert_eq!(
-        app.orchestrator.tab_manager.tabs,
+        app.orchestrator.tabs.tabs,
         vec![PathBuf::from("b.md")]
     );
     assert_eq!(
@@ -89,7 +89,7 @@ fn test_apply_tab_close_others_click_keeps_only_target_tab() {
 #[test]
 fn test_apply_tab_close_all_click_clears_all_tabs() {
     let mut app = create_test_app();
-    app.orchestrator.tab_manager.tabs = vec![
+    app.orchestrator.tabs.tabs = vec![
         PathBuf::from("a.md"),
         PathBuf::from("b.md"),
         PathBuf::from("c.md"),
@@ -98,7 +98,7 @@ fn test_apply_tab_close_all_click_clears_all_tabs() {
 
     apply_tab_close_all_click(&mut app);
 
-    assert!(app.orchestrator.tab_manager.tabs.is_empty());
+    assert!(app.orchestrator.tabs.tabs.is_empty());
     assert!(
         app.orchestrator.selection.selected_file().is_none(),
         "selected_file must be None when all tabs are closed"
@@ -110,7 +110,7 @@ fn test_apply_tab_close_all_click_clears_all_tabs() {
 /// callback. Renders `render_tabs_and_content_capture` (not the
 /// full `show_center_panel`) so the test stays focused on the
 /// tab-strip click. The click handler also removes the tab
-/// from `app.orchestrator.tab_manager.tabs`, but the harness owns `&mut app`
+/// from `app.orchestrator.tabs.tabs`, but the harness owns `&mut app`
 /// so the side effect is observed via the captured event.
 #[test]
 fn test_tab_close_button_captures_event() {
@@ -119,7 +119,7 @@ fn test_tab_close_button_captures_event() {
 
     let mut harness = stateful_harness(Vec::<&'static str>::new(), |ui, captured| {
         let mut app = create_test_app();
-        app.orchestrator.tab_manager.tabs = vec![PathBuf::from("a.md"), PathBuf::from("b.md")];
+        app.orchestrator.tabs.tabs = vec![PathBuf::from("a.md"), PathBuf::from("b.md")];
         *app.orchestrator.selection.selected_file_mut() = Some(PathBuf::from("a.md"));
         render_tabs_and_content_capture(ui, &mut app, |event| {
             captured.push(event);

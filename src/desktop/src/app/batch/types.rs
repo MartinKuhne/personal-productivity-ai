@@ -206,7 +206,7 @@ impl BatchHandle {
         match self.thread.join() {
             Ok(result) => result,
             Err(_) => {
-                eprintln!("Batch thread panicked");
+                tracing::error!(target: "batch", "Batch thread panicked");
                 BatchResult {
                     total_jobs: 0,
                     completed: 0,

@@ -274,7 +274,7 @@ fn test_apply_file_row_click_bare_filename_sets_empty_parent() {
 /// `should_show_panel(has_toc, has_selected_file)` requires
 /// a selected file. The user would have to click the file
 /// again to restore the preview, even though
-/// `tab_manager.current_markdown` / `current_yaml` /
+/// `tabs.current_markdown` / `current_yaml` /
 /// `loaded_path` were never touched.
 ///
 /// **The bug.** The directory-click branch in

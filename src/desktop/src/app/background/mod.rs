@@ -14,14 +14,14 @@
 //! and `PdfConversionJob`) stay always compiled.
 
 pub mod indexer;
-pub mod manager;
+pub mod logs;
 pub mod models;
 pub mod pdf_converter;
 #[cfg(feature = "image-library")]
 pub mod vision_processor;
 
 pub use indexer::Indexer;
-pub use manager::{BackgroundProcessManager, MAX_LOG_ENTRIES, SharedProcessManager};
+pub use logs::{BackgroundLogs, MAX_LOG_ENTRIES, SharedBackgroundLogs};
 #[cfg(feature = "image-library")]
 pub use models::ImageJob;
 pub use models::{BackgroundLogEntry, LogCategory};

@@ -37,7 +37,7 @@ use eframe::egui;
 use crate::agent::AgentSessionManager;
 use crate::app::watcher::file_processor::FileEventProcessor;
 use crate::app::{
-    DialogManager, PanelLayout, PersistedUiState, SelectionManager, TabManager, TagManager,
+    Dialogs, PanelLayout, PersistedUiState, FileSelection, Tabs, Tags,
     TextBuffer,
 };
 
@@ -138,12 +138,12 @@ impl FastMdApp {
         &self.orchestrator.pdf_backing_tracker
     }
 
-    pub fn tags(&self) -> &TagManager {
-        &self.orchestrator.tag_manager
+    pub fn tags(&self) -> &Tags {
+        &self.orchestrator.tags
     }
 
-    pub fn tags_mut(&mut self) -> &mut TagManager {
-        &mut self.orchestrator.tag_manager
+    pub fn tags_mut(&mut self) -> &mut Tags {
+        &mut self.orchestrator.tags
     }
 
     pub fn layout(&self) -> &PanelLayout {
@@ -154,20 +154,20 @@ impl FastMdApp {
         &mut self.layout
     }
 
-    pub fn selection(&self) -> &SelectionManager {
+    pub fn selection(&self) -> &FileSelection {
         &self.orchestrator.selection
     }
 
-    pub fn selection_mut(&mut self) -> &mut SelectionManager {
+    pub fn selection_mut(&mut self) -> &mut FileSelection {
         &mut self.orchestrator.selection
     }
 
-    pub fn tabs(&self) -> &TabManager {
-        &self.orchestrator.tab_manager
+    pub fn tabs(&self) -> &Tabs {
+        &self.orchestrator.tabs
     }
 
-    pub fn tabs_mut(&mut self) -> &mut TabManager {
-        &mut self.orchestrator.tab_manager
+    pub fn tabs_mut(&mut self) -> &mut Tabs {
+        &mut self.orchestrator.tabs
     }
 
     pub fn agent(&self) -> &AgentSessionManager {
@@ -178,11 +178,11 @@ impl FastMdApp {
         &mut self.orchestrator.agent
     }
 
-    pub fn dialogs(&self) -> &DialogManager {
+    pub fn dialogs(&self) -> &Dialogs {
         &self.orchestrator.dialogs
     }
 
-    pub fn dialogs_mut(&mut self) -> &mut DialogManager {
+    pub fn dialogs_mut(&mut self) -> &mut Dialogs {
         &mut self.orchestrator.dialogs
     }
 
