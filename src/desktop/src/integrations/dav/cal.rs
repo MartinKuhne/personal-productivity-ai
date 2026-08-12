@@ -51,7 +51,7 @@ pub struct CalDavResponse {
     pub errors: Vec<String>,
 }
 
-pub(super) fn parse_ical_data(client: &str, href: &str, data: &str) -> CalDavEventDetails {
+pub(crate) fn parse_ical_data(client: &str, href: &str, data: &str) -> CalDavEventDetails {
     let mut event = CalDavEventDetails {
         client: client.to_string(),
         id: href.to_string(),
@@ -523,3 +523,7 @@ pub fn json_to_ical(json_str: &str, uid_override: Option<&str>) -> String {
 #[cfg(test)]
 #[path = "cal_tests.rs"]
 mod tests;
+
+#[cfg(test)]
+#[path = "cal_proptests.rs"]
+mod cal_proptests;

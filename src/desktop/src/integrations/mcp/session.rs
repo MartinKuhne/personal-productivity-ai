@@ -2177,3 +2177,6 @@ pub struct McpToolDescriptor {
     /// JSON Schema object describing the tool's input.
     pub input_schema: serde_json::Value,
 }
+#[cfg(test)]
+#[path = "session_proptests.rs"]
+mod session_proptests;

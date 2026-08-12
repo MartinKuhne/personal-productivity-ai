@@ -92,3 +92,7 @@ pub fn trello_request(
 #[cfg(test)]
 #[path = "client_tests.rs"]
 mod tests;
+
+#[cfg(test)]
+#[path = "client_proptests.rs"]
+mod client_proptests;

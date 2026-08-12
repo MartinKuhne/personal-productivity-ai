@@ -570,7 +570,7 @@ pub(super) async fn fetch_contacts_from_book(
     Ok(contacts)
 }
 
-pub(super) fn parse_vcard(client: &str, href: &str, data: &str) -> CardDavContactDetails {
+pub(crate) fn parse_vcard(client: &str, href: &str, data: &str) -> CardDavContactDetails {
     let mut contact = CardDavContactDetails {
         client: client.to_string(),
         href: href.to_string(),
@@ -1000,3 +1000,7 @@ pub fn tool_delete_contact(
 #[cfg(test)]
 #[path = "card_tests.rs"]
 mod tests;
+
+#[cfg(test)]
+#[path = "card_proptests.rs"]
+mod card_proptests;

@@ -798,3 +798,7 @@ mod tests {
         })
     }
 }
+
+#[cfg(test)]
+#[path = "flow_proptests.rs"]
+mod flow_proptests;
