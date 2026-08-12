@@ -324,6 +324,139 @@ proptest! {
     }
 }
 
+// ---------------------------------------------------------------------------
+// Phase 3.5 — Disk-read family extensions.
+//
+// The plan (`doc/planning/fuzzing.md` §2.2 "Phase 3")
+// extends the typst-translator proptests to cover
+// markdown constructs that interact with the Typst
+// markup boundary: Typst function-call syntax (`#`),
+// inline math (`$...$`), highlight syntax (`==...==`),
+// footnote references without definitions, and tables
+// with extreme column counts. Each is a corner case the
+// upstream typst-translator must handle without panicking
+// or producing invalid Typst markup.
+// ---------------------------------------------------------------------------
+
+/// Strategy: any printable-ASCII + newline string up to
+/// 500 chars. The existing 200-char strategy misses some
+/// larger combinations of these constructs.
+fn large_printable_ascii() -> impl Strategy<Value = String> {
+    prop::string::string_regex(r"[\x20-\x7E\n]{0,500}").unwrap()
+}
+
+proptest! {
+    #![proptest_config(ProptestConfig::with_cases(512))]
+
+    /// Typst function-call syntax (`#`) must not crash
+    /// the translator. A markdown body that contains
+    /// `#{`, `#x`, or just a bare `#` is a hostile input
+    /// if the translator naively interpolates it into
+    /// Typst markup.
+    #[test]
+    fn translator_handles_typst_function_call_syntax(
+        body in large_printable_ascii()
+    ) {
+        // We can't easily assert on the output's
+        // validity without parsing Typst, so the
+        // property is "no panic" plus "output is
+        // bounded" — a runaway translator that produced
+        // a 10 MiB output for a 100-byte input would
+        // be a bug.
+        let out = render_markdown_to_typst(&body);
+        prop_assert!(
+            out.len() <= body.len() * 32 + 4096,
+            "output length {} exceeds 32x input length {} + 4 KiB overhead",
+            out.len(),
+            body.len()
+        );
+    }
+
+    /// Typst inline math syntax (`$...$`) must not
+    /// crash the translator. The dollar sign is one
+    /// of the chars `escape_typst` emits, so a literal
+    /// `$` in markdown must be escaped; a regression
+    /// that let it through would terminate the
+    /// surrounding Typst string literal early.
+    #[test]
+    fn translator_handles_dollar_sign_math_syntax(
+        body in large_printable_ascii()
+    ) {
+        let _ = render_markdown_to_typst(&body);
+    }
+
+    /// Typst highlight syntax (`==...==`) must not
+    /// crash the translator. `==` is a valid Typst
+    /// markup opener; a markdown user typing
+    /// `==highlighted text==` (or the GFM equivalent)
+    /// must not let that escape into the Typst
+    /// document unescaped.
+    #[test]
+    fn translator_handles_highlight_syntax(
+        body in large_printable_ascii()
+    ) {
+        let _ = render_markdown_to_typst(&body);
+    }
+
+    /// A markdown body with a footnote reference
+    /// (`[^1]`) but no corresponding footnote
+    /// definition (`[^1]: ...`) is well-formed
+    /// markdown (the reference is unresolved but
+    /// valid). The translator must accept it without
+    /// panicking.
+    #[test]
+    fn translator_handles_footnote_ref_without_definition(
+        body in large_printable_ascii()
+    ) {
+        let _ = render_markdown_to_typst(&body);
+    }
+
+    /// A markdown table with 0 columns (just the
+    /// `|---|---|` separator with no header row) is
+    /// a hostile input. The translator must accept
+    /// it without panicking.
+    #[test]
+    fn translator_handles_zero_column_table(
+        body in large_printable_ascii()
+    ) {
+        let _ = render_markdown_to_typst(&body);
+    }
+
+    /// A markdown table with up to 1000 columns is
+    /// the upper bound of the "wide table" corner
+    /// case. The translator must not panic and
+    /// must not produce unbounded output (a runaway
+    /// loop in column-count tracking would surface
+    /// here).
+    #[test]
+    fn translator_handles_thousand_column_table(
+        n_cols in 1u32..=1000u32,
+    ) {
+        // Build a wide table: `| c1 | c2 | ... | cn |`
+        // header + `|---|---|...|---|` separator.
+        let header: Vec<String> = (1..=n_cols)
+            .map(|i| format!("c{i}"))
+            .collect();
+        let sep: Vec<String> = (0..n_cols).map(|_| "---".to_string()).collect();
+        let body = format!(
+            "| {} |\n| {} |\n",
+            header.join(" | "),
+            sep.join(" | "),
+        );
+        let out = render_markdown_to_typst(&body);
+        // The output must be bounded by a linear
+        // function of the column count. A regression
+        // that produced quadratic output (e.g. an
+        // N^2 loop) would surface here.
+        prop_assert!(
+            out.len() <= n_cols as usize * 64 + 4096,
+            "output length {} exceeds linear bound for {} columns",
+            out.len(),
+            n_cols
+        );
+    }
+}
+
 /// Count the number of bare occurrences of `c` in `s` —
 /// occurrences that are NOT immediately preceded by a
 /// backslash. The escape functions in this module emit

@@ -333,3 +333,7 @@ mod tests {
         assert_eq!(fm.body.trim(), "# Hello World");
     }
 }
+
+#[cfg(test)]
+#[path = "document_proptests.rs"]
+mod document_proptests;

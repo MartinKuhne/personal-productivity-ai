@@ -224,15 +224,16 @@ fn show_file_context_menu(
                     .stack_size(crate::app::print_pdf::TYPST_THREAD_STACK_SIZE)
                     .spawn(move || {
                         if let Err(e) = execute_save_as_pdf_blocking(job, Some(tx)) {
-                        tracing::error!(
-                            name = "ui.file.save_as_pdf_failed",
-                            source = %path_to_export.display(),
-                            target = %target_for_log.display(),
-                            error = %e,
-                            "Save as PDF failed."
-                        );
-                    }
-                }).expect("failed to spawn pdf-export thread");
+                            tracing::error!(
+                                name = "ui.file.save_as_pdf_failed",
+                                source = %path_to_export.display(),
+                                target = %target_for_log.display(),
+                                error = %e,
+                                "Save as PDF failed."
+                            );
+                        }
+                    })
+                    .expect("failed to spawn pdf-export thread");
             } else {
                 tracing::warn!(
                     name = "ui.file.save_as_pdf_no_channel",
