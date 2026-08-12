@@ -117,6 +117,7 @@ pub const PROTOCOL_VERSION: &str = "2025-11-25";
 
 /// MCP client identity sent in the `initialize` `clientInfo`.
 pub const CLIENT_NAME: &str = "fastmd";
+/// The fastmd client version reported to MCP servers.
 pub const CLIENT_VERSION: &str = env!("CARGO_PKG_VERSION");
 
 /// Display name for the client (spec §2.2: "clientInfo.title").
@@ -1915,6 +1916,7 @@ impl McpClientSession {
     /// if the server returns a `nextCursor`, we follow it and log a
     /// warning if we hit the safety cap.
     pub fn list_tools(&self) -> Result<Vec<McpToolDescriptor>, McpError> {
+        /// Maximum number of pages to fetch when listing MCP resources.
         const MAX_PAGES: u32 = 16;
         let start = std::time::Instant::now();
         let mut all = Vec::new();

@@ -41,6 +41,7 @@ use crate::app::{
     TextBuffer,
 };
 
+/// The key used to persist the eframe UI state.
 const PERSISTED_UI_STATE_KEY: &str = "ppai_ui_state";
 
 /// Sanity bounds for the user-chosen font scale multiplier.
@@ -54,6 +55,7 @@ const PERSISTED_UI_STATE_KEY: &str = "ppai_ui_state";
 /// launch) or outright corruption. We clamp them on apply and
 /// self-heal them to `None` on the next save.
 const FONT_SCALE_MIN: f32 = 0.5;
+/// The maximum font scaling factor allowed.
 const FONT_SCALE_MAX: f32 = 3.0;
 
 /// Validate that a candidate font scale is a finite, in-range

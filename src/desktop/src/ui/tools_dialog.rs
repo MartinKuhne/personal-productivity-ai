@@ -76,12 +76,16 @@ pub(crate) fn compute_dialog_size(
     viewport: eframe::egui::Rect,
     row_count: usize,
 ) -> ([f32; 2], [f32; 2], f32) {
+    /// The row height for tool items in the dialog list.
     const ROW_HEIGHT: f32 = 24.0;
+    /// The height of the table header row.
     const HEADER_HEIGHT: f32 = 20.0;
     /// Title bar + window border + interior padding above the
     /// table.
     const CHROME_HEIGHT: f32 = 56.0;
+    /// Extra padding for the dialog scroll area.
     const EXTRA_PADDING: f32 = 8.0;
+    /// The minimum height of the tools dialog.
     const MIN_HEIGHT: f32 = 200.0;
     /// Hard cap so a 4K monitor doesn't produce a 2000-px-tall
     /// dialog. Kept well above the 85%-of-screen cap on common
@@ -90,7 +94,9 @@ pub(crate) fn compute_dialog_size(
     /// genuinely huge screens hit this and fall back to scrolling
     /// inside the window.
     const MAX_HEIGHT_HARD_CAP: f32 = 1200.0;
+    /// The minimum width of the tools dialog.
     const MIN_WIDTH: f32 = 520.0;
+    /// The default width of the tools dialog.
     const DEFAULT_WIDTH: f32 = 720.0;
 
     let preferred_height =

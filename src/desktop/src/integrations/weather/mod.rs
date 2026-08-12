@@ -11,6 +11,7 @@ use serde_json::Value;
 /// Production upstream base URLs. Tests swap in wiremock URIs via
 /// [`WeatherConfig`].
 const NOMINATIM_BASE: &str = "https://nominatim.openstreetmap.org";
+/// The base URL for the National Weather Service API.
 const NWS_BASE: &str = "https://api.weather.gov";
 
 /// Per-call override of the upstream URLs.
