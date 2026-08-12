@@ -36,20 +36,22 @@ fn run_agent_inner(ctx: AgentContext) {
         .build(&ctx.config);
     log_prompt_context(&ctx.active_file, &ctx.active_dir, &ctx.selected_files);
     let mut messages = build_messages(system_prompt, &ctx.prompt, ctx.history.clone());
-    let tools_json = ctx
-        .tool_manager
-        .write()
-        .unwrap()
-        .get_tools_schema(&ctx.config, &ctx.prompt);
-    let executor = ToolExecutor::new(
-        ctx.config.clone(),
+    ctx.tool_manager.rcu(|mgr| {
+        let mut new_mgr = (**mgr).clone();
+        new_mgr.update_and_refresh(&ctx.config);
+        new_mgr
+    });
+    let tools_json = ctx.tool_manager.load().get_schema(&ctx.config, &ctx.prompt);
+    let executor = crate::agent::tool_executor::ToolExecutorBuilder::new(
+        std::sync::Arc::new(ctx.config.clone()),
         ctx.file_event_bus.clone(),
-        ctx.browser_session.clone(),
-        ctx.pdf_backing.clone(),
         ctx.cache.clone(),
         ctx.tool_manager.clone(),
-        ctx.uuid_gen.clone(),
-    );
+    )
+    .with_browser_session(ctx.browser_session.clone())
+    .with_pdf_backing(ctx.pdf_backing.clone())
+    .with_uuid_gen(ctx.uuid_gen.clone())
+    .build();
 
     let session_boundary = AgentDebugEntry {
         turn: 0,

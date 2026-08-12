@@ -43,6 +43,7 @@ use std::sync::mpsc::Sender;
 
 /// Central catalog of agent tools, both built-in and dynamic MCP tools,
 /// plus per-group state for the UI.
+#[derive(Clone)]
 pub struct ToolRegistry {
     /// Registered tools keyed by name.
     tools: BTreeMap<String, Arc<dyn Tool>>,
@@ -322,6 +323,12 @@ impl ToolRegistry {
         self.refresh_mcp_tools(config);
     }
 
+    pub fn update_and_refresh(&mut self, config: &AppConfig) {
+        self.mcp_manager.update_config(config);
+        self.refresh_mcp_tools(config);
+        self.refresh_state(config);
+    }
+    
     pub fn get_tools_schema(&mut self, config: &AppConfig, prompt: &str) -> serde_json::Value {
         self.mcp_manager.update_config(config);
         self.refresh_mcp_tools(config);
@@ -484,7 +491,7 @@ fn set_internal_group_enabled(config: &mut AppConfig, g: InternalToolGroup, on: 
 }
 
 pub fn spawn_config_subscription(
-    tool_manager: Arc<std::sync::RwLock<ToolRegistry>>,
+    tool_manager: Arc<arc_swap::ArcSwap<ToolRegistry>>,
     config_bus: Bus<ConfigArrived>,
     tx: Sender<BackgroundEvent>,
 ) {
@@ -501,7 +508,11 @@ pub fn spawn_config_subscription(
                 AppConfig::default()
             }
         };
-        tool_manager.write().unwrap().init_mcp_on_startup(&config);
+        tool_manager.rcu(|mgr| {
+            let mut new_mgr = (**mgr).clone();
+            new_mgr.init_mcp_on_startup(&config);
+            new_mgr
+        });
         let _ = tx.send(
             BackgroundLogEntry::new(
                 LogCategory::Indexer,
@@ -512,10 +523,11 @@ pub fn spawn_config_subscription(
 
         loop {
             if let Ok(event) = config_reader.recv() {
-                tool_manager
-                    .write()
-                    .unwrap()
-                    .refresh_mcp_tools(&event.config);
+                tool_manager.rcu(|mgr| {
+                    let mut new_mgr = (**mgr).clone();
+                    new_mgr.refresh_mcp_tools(&event.config);
+                    new_mgr
+                });
             }
         }
     });
@@ -539,7 +551,7 @@ pub fn execute_tool(ctx: &ToolContext, name: &str, args_str: &str) -> String {
     // Phase 1: read-locked — do the I/O and snapshot the tool's group.
     let (result_raw, tool_group): (Result<serde_json::Value, String>, Option<ToolGroupId>) =
         std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-            let mgr = ctx.tool_manager.read().unwrap();
+            let mgr = ctx.tool_manager.load();
             mgr.mcp_manager.update_config(&ctx.config);
             let group = mgr.tool_group(name);
             let result = mgr.execute(ctx, name, args_str);
@@ -558,14 +570,17 @@ pub fn execute_tool(ctx: &ToolContext, name: &str, args_str: &str) -> String {
 
     // Phase 2: write-locked — record/clear the Execution error.
     if let Some(group) = &tool_group {
-        let mut mgr = ctx.tool_manager.write().unwrap();
-        match &result_raw {
-            Ok(_) => mgr.clear_error(group),
-            Err(msg) => mgr.record_error(
-                group,
-                ToolGroupError::now(ToolErrorKind::Execution, msg.clone()),
-            ),
-        }
+        ctx.tool_manager.rcu(|mgr| {
+            let mut new_mgr = (**mgr).clone();
+            match &result_raw {
+                Ok(_) => new_mgr.clear_error(group),
+                Err(msg) => new_mgr.record_error(
+                    group,
+                    ToolGroupError::now(ToolErrorKind::Execution, msg.clone()),
+                ),
+            }
+            new_mgr
+        });
     }
 
     let elapsed = start_time.elapsed();

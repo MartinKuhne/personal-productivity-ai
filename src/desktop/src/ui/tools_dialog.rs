@@ -37,12 +37,12 @@ pub fn show_tools_dialog(ctx: &eframe::egui::Context, app: &mut FastMdApp) {
     let mut open = true;
     let title = TOOLS_DIALOG_TITLE;
 
-    let groups = app
-        .orchestrator
-        .tool_manager
-        .write()
-        .unwrap()
-        .groups_snapshot(app.config());
+    app.orchestrator.tool_manager.rcu(|mgr| {
+        let mut new_mgr = (**mgr).clone();
+        new_mgr.refresh_state(app.config());
+        new_mgr
+    });
+    let groups = app.orchestrator.tool_manager.load().groups();
     let (default_size, min_size, max_height) =
         compute_dialog_size(ctx.viewport_rect(), groups.len());
 
@@ -116,12 +116,12 @@ pub(crate) fn compute_dialog_size(
 pub fn render_contents(ui: &mut eframe::egui::Ui, app: &mut FastMdApp) {
     // Snapshot the group view under a fresh refresh so we don't
     // hold any lock across UI rendering.
-    let groups = app
-        .orchestrator
-        .tool_manager
-        .write()
-        .unwrap()
-        .groups_snapshot(app.config());
+    app.orchestrator.tool_manager.rcu(|mgr| {
+        let mut new_mgr = (**mgr).clone();
+        new_mgr.refresh_state(app.config());
+        new_mgr
+    });
+    let groups = app.orchestrator.tool_manager.load().groups();
 
     if groups.is_empty() {
         ui.label("No tool groups registered.");
@@ -200,10 +200,11 @@ fn render_row(
         if ui.checkbox(&mut enabled, "").changed() {
             let mut new_config = app.config().clone();
             app.orchestrator
-                .tool_manager
-                .write()
-                .unwrap()
-                .set_group_enabled(&mut new_config, &id, enabled);
+                .tool_manager.rcu(|mgr| {
+                    let mut new_mgr = (**mgr).clone();
+                    new_mgr.set_group_enabled(&mut new_config, &id, enabled);
+                    new_mgr
+                });
             if let Err(e) = save_config(&new_config) {
                 tracing::error!(
                     error = %e,
@@ -246,8 +247,7 @@ fn render_row(
             .filter_map(|n| {
                 app.orchestrator
                     .tool_manager
-                    .read()
-                    .unwrap()
+                    .load()
                     .tool_char_count(n, app.config(), prompt)
             })
             .sum();
@@ -263,10 +263,11 @@ fn render_row(
                     .on_hover_text(format!("{:?}: {}", err.kind, err.message));
                 if ui.small_button(TOOLS_RESTART).clicked() {
                     app.orchestrator
-                        .tool_manager
-                        .write()
-                        .unwrap()
-                        .clear_error(&id);
+                        .tool_manager.rcu(|mgr| {
+                            let mut new_mgr = (**mgr).clone();
+                            new_mgr.clear_error(&id);
+                            new_mgr
+                        });
                 }
             }
 
@@ -288,15 +289,14 @@ fn render_row(
                             name.clone(),
                             app.orchestrator.tx.clone(),
                             ui.ctx().clone(),
-                            app.orchestrator.tool_manager.read().unwrap().mcp_manager(),
+                            app.orchestrator.tool_manager.load().mcp_manager(),
                         );
                     }
                 }
                 if ui.small_button(TOOLS_FORGET).clicked() {
                     app.orchestrator
                         .tool_manager
-                        .write()
-                        .unwrap()
+                        .load()
                         .mcp_manager()
                         .mark_needs_auth(name, false);
                 }

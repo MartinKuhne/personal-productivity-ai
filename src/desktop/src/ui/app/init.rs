@@ -93,7 +93,7 @@ impl FastMdApp {
         let background_task = Task::new(config_bus.clone());
         // The tools manager subscribes to the same bus and performs
         // the one-time
-        let tool_manager = std::sync::Arc::new(std::sync::RwLock::new(
+        let tool_manager = std::sync::Arc::new(arc_swap::ArcSwap::from_pointee(
             crate::agent::tools::registry::ToolRegistry::new(),
         ));
         // Start MCP initialization immediately on the app's initial
@@ -202,7 +202,7 @@ impl FastMdApp {
                 config_reader: Some(config_reader),
                 pending_file_load: None,
                 finished_watcher_slot,
-                tool_manager: std::sync::Arc::new(std::sync::RwLock::new(
+                tool_manager: std::sync::Arc::new(arc_swap::ArcSwap::from_pointee(
                     crate::agent::tools::registry::ToolRegistry::new(),
                 )),
                 agent_event_reader: Some(agent_event_reader),
@@ -260,7 +260,7 @@ impl FastMdApp {
             background_task.file_event_bus.clone(),
             test_browser_session,
             Arc::new(pdf_backing_tracker.clone()),
-            Arc::new(std::sync::RwLock::new(
+            Arc::new(arc_swap::ArcSwap::from_pointee(
                 crate::agent::tools::registry::ToolRegistry::new(),
             )),
         );
@@ -309,7 +309,7 @@ impl FastMdApp {
                 config_reader: None,
                 pending_file_load: None,
                 finished_watcher_slot,
-                tool_manager: std::sync::Arc::new(std::sync::RwLock::new(
+                tool_manager: std::sync::Arc::new(arc_swap::ArcSwap::from_pointee(
                     crate::agent::tools::registry::ToolRegistry::new(),
                 )),
                 agent_event_reader: Some(agent_event_reader),

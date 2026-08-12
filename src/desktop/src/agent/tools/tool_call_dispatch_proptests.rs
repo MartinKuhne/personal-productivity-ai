@@ -75,19 +75,20 @@ fn build_dispatch_context() -> ToolContext {
     let config = AppConfig::default();
     let browser_session = Arc::new(BrowserSession::new(&config));
     let pdf_backing = Arc::new(PdfBackingTracker::new());
-    let tool_manager = Arc::new(std::sync::RwLock::new(
+    let tool_manager = Arc::new(arc_swap::ArcSwap::from_pointee(
         crate::agent::tools::registry::ToolRegistry::new(),
     ));
     let uuid_gen: Arc<dyn crate::utils::uuid::UuidGenerator> = Arc::new(SystemUuidGenerator);
-    ToolContext::new(
+    crate::agent::tools::context::ToolContextBuilder::new(
         Arc::new(config),
         Bus::new(),
-        browser_session,
-        pdf_backing,
-        Arc::new(crate::agent::tools::registry::cache::ToolCache::new()),
         tool_manager,
+        Arc::new(crate::agent::tools::registry::cache::ToolCache::new()),
         uuid_gen,
     )
+    .with_browser_session(browser_session)
+    .with_pdf_backing(pdf_backing)
+    .build()
 }
 
 /// Call `execute_tool` with a wall-clock timeout. The

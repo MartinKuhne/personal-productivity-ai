@@ -33,26 +33,10 @@ fn make_ctx(config: AppConfig) -> (AgentContext, BusReader<AgentEvent>) {
     ));
     let agent_event_bus = Bus::new();
     let bus_reader = agent_event_bus.subscribe();
-    let ctx = AgentContext {
-        config,
-        file_event_bus: Bus::new(),
-        agent_event_bus,
-        active_file: None,
-        active_dir: None,
-        selected_files: HashSet::new(),
-        prompt: "Hello".to_string(),
-        cancel_flag: Arc::new(AtomicBool::new(false)),
-        history: None,
-        model_name: None,
-        session_id: uuid::Uuid::new_v4(),
-        browser_session,
-        pdf_backing: Arc::new(crate::app::session::PdfBackingTracker::new()),
-        cache: std::sync::Arc::new(crate::agent::tools::registry::cache::ToolCache::new()),
-        tool_manager: Arc::new(std::sync::RwLock::new(
-            crate::agent::tools::registry::ToolRegistry::new(),
-        )),
-        uuid_gen: Arc::new(crate::utils::uuid::SystemUuidGenerator),
-    };
+    let ctx = crate::agent::context::AgentContextBuilder::new(config, uuid::Uuid::new_v4(), "Hello".to_string())
+        .with_buses(Bus::new(), agent_event_bus)
+        .with_browser_session(browser_session)
+        .build();
     (ctx, bus_reader)
 }
 

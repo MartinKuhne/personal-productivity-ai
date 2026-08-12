@@ -101,7 +101,7 @@ impl AgentSession {
         file_event_bus: Bus<crate::bus::events::file::FileEvent>,
         browser_session: Arc<BrowserSession>,
         pdf_backing: Arc<crate::app::session::PdfBackingTracker>,
-        tool_manager: Arc<std::sync::RwLock<crate::agent::tools::registry::ToolRegistry>>,
+        tool_manager: Arc<arc_swap::ArcSwap<crate::agent::tools::registry::ToolRegistry>>,
     ) -> Self {
         let agent_event_bus = Bus::new();
         let (prompt_tx, prompt_rx) = mpsc::channel::<AgentPrompt>();
@@ -151,7 +151,7 @@ impl AgentSession {
     /// populated manager (existing test fixtures).
     #[doc(hidden)]
     pub fn new_for_test(config: AppConfig, browser_session: Arc<BrowserSession>) -> Self {
-        let tool_manager = Arc::new(std::sync::RwLock::new(
+        let tool_manager = Arc::new(arc_swap::ArcSwap::from_pointee(
             crate::agent::tools::registry::ToolRegistry::new(),
         ));
         let agent_event_bus = Bus::new();
@@ -424,7 +424,7 @@ fn spawn_driver(
     file_event_bus: Bus<crate::bus::events::file::FileEvent>,
     browser_session: Arc<BrowserSession>,
     pdf_backing: Arc<crate::app::session::PdfBackingTracker>,
-    tool_manager: Arc<std::sync::RwLock<crate::agent::tools::registry::ToolRegistry>>,
+    tool_manager: Arc<arc_swap::ArcSwap<crate::agent::tools::registry::ToolRegistry>>,
 ) -> JoinHandle<()> {
     std::thread::spawn(move || {
         // Per-session history cache. Keyed by `session_id` so continuation
@@ -435,24 +435,18 @@ fn spawn_driver(
             let session_id = prompt.session_id;
             let config = shared_config.read().map(|c| c.clone()).unwrap_or_default();
             let history = session_histories.get(&session_id).cloned().flatten();
-            let ctx = AgentContext {
-                config,
-                file_event_bus: file_event_bus.clone(),
-                agent_event_bus: agent_event_bus.clone(),
-                active_file: prompt.active_file,
-                active_dir: prompt.active_dir,
-                selected_files: prompt.selected_files,
-                prompt: prompt.text,
-                cancel_flag: prompt.cancel_flag,
-                history: history.clone(),
-                model_name: None,
-                session_id,
-                browser_session: browser_session.clone(),
-                pdf_backing: pdf_backing.clone(),
-                cache: std::sync::Arc::new(crate::agent::tools::registry::cache::ToolCache::new()),
-                tool_manager: tool_manager.clone(),
-                uuid_gen: std::sync::Arc::new(crate::utils::uuid::SystemUuidGenerator),
-            };
+            let ctx = crate::agent::context::AgentContextBuilder::new(config, session_id, prompt.text)
+                .with_buses(file_event_bus.clone(), agent_event_bus.clone())
+                .with_active_paths(prompt.active_file, prompt.active_dir)
+                .with_selected_files(prompt.selected_files)
+                .with_cancel_flag(prompt.cancel_flag)
+                .with_history(history.clone())
+                .with_browser_session(browser_session.clone())
+                .with_pdf_backing(pdf_backing.clone())
+                .with_cache(std::sync::Arc::new(crate::agent::tools::registry::cache::ToolCache::new()))
+                .with_tool_manager(tool_manager.clone())
+                .with_uuid_gen(std::sync::Arc::new(crate::utils::uuid::SystemUuidGenerator))
+                .build();
             crate::agent::run_agent(ctx);
             // After the session finishes, stash its history for continuation
             // prompts (FR-009). The history is updated by the `SessionFinished`

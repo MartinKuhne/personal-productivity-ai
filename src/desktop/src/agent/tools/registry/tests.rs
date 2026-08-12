@@ -15,15 +15,16 @@ fn test_browser_session() -> Arc<BrowserSession> {
 }
 
 fn test_ctx(config: &AppConfig) -> ToolContext {
-    ToolContext::new(
+    crate::agent::tools::context::ToolContextBuilder::new(
         Arc::new(config.clone()),
         Bus::new(),
-        test_browser_session(),
-        Arc::new(crate::app::session::PdfBackingTracker::new()),
+        Arc::new(arc_swap::ArcSwap::from_pointee(ToolRegistry::new())),
         Arc::new(crate::agent::tools::registry::cache::ToolCache::new()),
-        Arc::new(std::sync::RwLock::new(ToolRegistry::new())),
         Arc::new(crate::utils::uuid::SystemUuidGenerator),
     )
+    .with_browser_session(test_browser_session())
+    .with_pdf_backing(Arc::new(crate::app::session::PdfBackingTracker::new()))
+    .build()
 }
 
 #[test]
@@ -783,7 +784,7 @@ fn test_spawn_config_subscription_runs_init_in_background() {
     let bus = crate::bus::config::config_bus();
     let (tx, rx) = std::sync::mpsc::channel::<BackgroundEvent>();
 
-    let tm = Arc::new(std::sync::RwLock::new(ToolRegistry::new()));
+    let tm = Arc::new(arc_swap::ArcSwap::from_pointee(ToolRegistry::new()));
     spawn_config_subscription(tm, bus.clone(), tx);
 
     bus.publish(ConfigArrived::new(AppConfig::default()));

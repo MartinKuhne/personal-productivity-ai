@@ -198,28 +198,14 @@ pub fn run_agent_blocking(
     let agent_event_bus = crate::bus::core::Bus::new();
     let reader = agent_event_bus.subscribe();
 
-    let ctx = crate::agent::AgentContext {
-        config,
-        file_event_bus,
-        agent_event_bus,
-        active_file,
-        active_dir,
-        selected_files,
-        prompt,
-        cancel_flag,
-        history,
-        model_name,
-        session_id: uuid::Uuid::new_v4(),
-        browser_session: std::sync::Arc::new(crate::app::session::BrowserSession::new(
-            &crate::config::AppConfig::default(),
-        )),
-        pdf_backing: std::sync::Arc::new(crate::app::session::PdfBackingTracker::new()),
-        cache: std::sync::Arc::new(crate::agent::tools::registry::cache::ToolCache::new()),
-        tool_manager: std::sync::Arc::new(std::sync::RwLock::new(
-            crate::agent::tools::registry::ToolRegistry::new(),
-        )),
-        uuid_gen: std::sync::Arc::new(crate::utils::uuid::SystemUuidGenerator),
-    };
+    let ctx = crate::agent::context::AgentContextBuilder::new(config, uuid::Uuid::new_v4(), prompt)
+        .with_buses(file_event_bus, agent_event_bus)
+        .with_active_paths(active_file, active_dir)
+        .with_selected_files(selected_files)
+        .with_cancel_flag(cancel_flag)
+        .with_history(history)
+        .with_model_name(model_name)
+        .build();
     run_agent(ctx);
 
     let mut status = BatchJobStatus::Completed;

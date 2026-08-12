@@ -31,26 +31,10 @@ fn make_ctx(config: AppConfig) -> (AgentContext, BusReader<SeamAgentEvent>) {
     ));
     let agent_event_bus = crate::bus::core::Bus::new();
     let bus_reader = agent_event_bus.subscribe();
-    let ctx = AgentContext {
-        config,
-        file_event_bus: crate::bus::core::Bus::new(),
-        agent_event_bus,
-        active_file: None,
-        active_dir: None,
-        selected_files: HashSet::new(),
-        prompt: "Hello".to_string(),
-        cancel_flag: Arc::new(AtomicBool::new(false)),
-        history: None,
-        model_name: None,
-        session_id: uuid::Uuid::new_v4(),
-        browser_session,
-        pdf_backing: std::sync::Arc::new(crate::app::session::PdfBackingTracker::new()),
-        cache: std::sync::Arc::new(crate::agent::tools::registry::cache::ToolCache::new()),
-        tool_manager: std::sync::Arc::new(std::sync::RwLock::new(
-            crate::agent::tools::registry::ToolRegistry::new(),
-        )),
-        uuid_gen: std::sync::Arc::new(crate::utils::uuid::SystemUuidGenerator),
-    };
+    let ctx = crate::agent::context::AgentContextBuilder::new(config, uuid::Uuid::new_v4(), "Hello".to_string())
+        .with_buses(crate::bus::core::Bus::new(), agent_event_bus)
+        .with_browser_session(browser_session)
+        .build();
     (ctx, bus_reader)
 }
 
@@ -259,26 +243,10 @@ fn test_run_agent_skips_done_status_when_cancelled() {
     ));
     let agent_event_bus = crate::bus::core::Bus::new();
     let mut bus_reader = agent_event_bus.subscribe();
-    let ctx = AgentContext {
-        config: make_config(port),
-        file_event_bus: crate::bus::core::Bus::new(),
-        agent_event_bus,
-        active_file: None,
-        active_dir: None,
-        selected_files: HashSet::new(),
-        prompt: "Hello".to_string(),
-        cancel_flag: Arc::new(AtomicBool::new(true)),
-        history: None,
-        model_name: None,
-        session_id: uuid::Uuid::new_v4(),
-        browser_session,
-        pdf_backing: std::sync::Arc::new(crate::app::session::PdfBackingTracker::new()),
-        cache: std::sync::Arc::new(crate::agent::tools::registry::cache::ToolCache::new()),
-        tool_manager: std::sync::Arc::new(std::sync::RwLock::new(
-            crate::agent::tools::registry::ToolRegistry::new(),
-        )),
-        uuid_gen: std::sync::Arc::new(crate::utils::uuid::SystemUuidGenerator),
-    };
+    let ctx = crate::agent::context::AgentContextBuilder::new(make_config(port), uuid::Uuid::new_v4(), "List files".to_string())
+        .with_buses(crate::bus::core::Bus::new(), agent_event_bus)
+        .with_browser_session(browser_session)
+        .build();
     run_agent(ctx);
     let events = collect_bus_events(&mut bus_reader, std::time::Duration::from_secs(5));
     let saw_finished = events

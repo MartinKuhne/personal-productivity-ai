@@ -102,14 +102,10 @@ fn test_browser_navigate_tool_round_trip() {
         crate::agent::tools::registry::ToolRegistry::new(),
     ));
     let cache = Arc::new(crate::agent::tools::registry::cache::ToolCache::new());
-    let ctx = ToolContext::new(
-        Arc::new(config),
-        bus,
-        session,
-        pdf_backing,
-        cache,
-        tm,
-        Arc::new(crate::utils::uuid::SystemUuidGenerator),
+    let ctx = crate::agent::tools::context::ToolContextBuilder::new(Arc::new(config), bus, tm, cache, Arc::new(crate::utils::uuid::SystemUuidGenerator)
+        .with_browser_session(session)
+        .with_pdf_backing(pdf_backing)
+        .build(),
     );
 
     let tool = crate::agent::tools::registry::builtin::browser::BrowserNavigateTool;
@@ -132,14 +128,10 @@ fn test_browser_get_page_state_tool_is_readonly() {
         crate::agent::tools::registry::ToolRegistry::new(),
     ));
     let cache = Arc::new(crate::agent::tools::registry::cache::ToolCache::new());
-    let _ctx = ToolContext::new(
-        Arc::new(config),
-        bus,
-        session,
-        pdf_backing,
-        cache,
-        tm,
-        Arc::new(crate::utils::uuid::SystemUuidGenerator),
+    let _ctx = crate::agent::tools::context::ToolContextBuilder::new(Arc::new(config), bus, tm, cache, Arc::new(crate::utils::uuid::SystemUuidGenerator)
+        .with_browser_session(session)
+        .with_pdf_backing(pdf_backing)
+        .build(),
     );
 
     let tool = crate::agent::tools::registry::builtin::browser::BrowserGetPageStateTool;
