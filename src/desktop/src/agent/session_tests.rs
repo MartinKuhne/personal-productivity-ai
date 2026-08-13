@@ -5,10 +5,27 @@ use crate::agent::config::AgentConfigBuilder;
 use crate::agent::events::{AgentDebugEntry, DebugEntryKind, DebugEntryRow};
 use std::collections::HashSet;
 
+struct TestNoopObserver;
+impl crate::agent::events::AgentEventObserver for TestNoopObserver {
+    fn on_session_started(&self) {}
+    fn on_session_finished(&self, _history: Vec<serde_json::Value>) {}
+    fn on_status(&self, _status: crate::agent::events::AgentStatus) {}
+    fn on_thinking(&self, _text: String) {}
+    fn on_content_delta(&self, _text: String) {}
+    fn on_tool_call_started(&self, _id: String, _name: String, _args: serde_json::Value) {}
+    fn on_tool_result(&self, _id: String, _name: String, _result: serde_json::Value) {}
+    fn on_tool_side_effect(&self, _effect: crate::agent::events::ToolSideEffect) {}
+    fn on_debug_entry(&self, _entry: AgentDebugEntry) {}
+    fn on_token_usage(&self, _usage: TokenUsageInfo) {}
+    fn on_failed(&self, _error: String) {}
+}
+
 /// Build a default `AgentSession` for unit tests. Each call spawns a
 /// fresh driver thread.
 fn make_session() -> AgentSession {
+    let factory: AgentObserverFactory = Arc::new(|_session_id| Arc::new(TestNoopObserver));
     AgentSession::builder()
+        .with_observer_factory(factory)
         .with_file_observer(std::sync::Arc::new(
             crate::agent::tools::observer::DefaultFileObserver,
         ))
@@ -226,13 +243,32 @@ fn test_debug_entries_never_cleared_on_new_session() {
 #[test]
 fn test_current_session_id_set_on_submit_prompt() {
     use crate::app::events::AgentEvent as SeamAgentEvent;
+    use crate::bus::core::Bus;
 
-    let mut mgr = make_session();
+    let bus = Bus::new();
+    let reader1 = bus.subscribe();
+    let bus_clone = bus.clone();
+    let factory: AgentObserverFactory = Arc::new(move |session_id| {
+        Arc::new(crate::app::events::BusAgentEventObserver::new(
+            session_id,
+            bus_clone.clone(),
+        ))
+    });
+    let mut mgr = AgentSession::builder()
+        .with_observer_factory(factory)
+        .with_file_observer(std::sync::Arc::new(
+            crate::agent::tools::observer::DefaultFileObserver,
+        ))
+        .with_tool_call_policy(Arc::new(crate::agent::tools::policy::DefaultToolCallPolicy))
+        .with_tool_context(Arc::new(arc_swap::ArcSwap::from_pointee(
+            crate::agent::AgentToolContext::new(crate::agent::tools::registry::ToolRegistry::new()),
+        )))
+        .build();
+
     // Before first session: no session_id
     assert!(mgr.current_session_id().is_none());
 
     // Submit first session — current_session_id must be set
-    let reader1 = mgr.event_bus().subscribe();
     let session_id_1 = uuid::Uuid::new_v4();
     mgr.submit_prompt(crate::agent::events::AgentPrompt {
         session_id: session_id_1,

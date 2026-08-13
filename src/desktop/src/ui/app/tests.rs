@@ -173,26 +173,22 @@ fn test_background_messages_handling() {
     // 4. Agent Status & ContentDelta via Bus<AgentEvent> (T015: new path)
     let session_id = Uuid::new_v4();
     app.orchestrator
-        .agent
-        .event_bus()
+        .agent_event_bus
         .publish(SeamAgentEvent::SessionStarted { session_id });
     app.orchestrator
-        .agent
-        .event_bus()
+        .agent_event_bus
         .publish(SeamAgentEvent::Status {
             session_id,
             status: AgentStatus::AwaitingLlm,
         });
     app.orchestrator
-        .agent
-        .event_bus()
+        .agent_event_bus
         .publish(SeamAgentEvent::Thinking {
             session_id,
             text: "Thinking step".to_string(),
         });
     app.orchestrator
-        .agent
-        .event_bus()
+        .agent_event_bus
         .publish(SeamAgentEvent::ContentDelta {
             session_id,
             text: "Done result".to_string(),
@@ -293,12 +289,10 @@ fn test_agent_failure_and_finish_messages() {
 
     let session_id = Uuid::new_v4();
     app.orchestrator
-        .agent
-        .event_bus()
+        .agent_event_bus
         .publish(SeamAgentEvent::SessionStarted { session_id });
     app.orchestrator
-        .agent
-        .event_bus()
+        .agent_event_bus
         .publish(SeamAgentEvent::Failed {
             session_id,
             error: "Network timeout".to_string(),
@@ -317,14 +311,12 @@ fn test_agent_failure_and_finish_messages() {
 
     let session_id2 = Uuid::new_v4();
     app.orchestrator
-        .agent
-        .event_bus()
+        .agent_event_bus
         .publish(SeamAgentEvent::SessionStarted {
             session_id: session_id2,
         });
     app.orchestrator
-        .agent
-        .event_bus()
+        .agent_event_bus
         .publish(SeamAgentEvent::SessionFinished {
             session_id: session_id2,
             history: vec![serde_json::json!({"ok": true})],
@@ -346,14 +338,12 @@ fn test_agent_token_usage_message_accumulates() {
 
     let session_id = Uuid::new_v4();
     app.orchestrator
-        .agent
-        .event_bus()
+        .agent_event_bus
         .publish(SeamAgentEvent::SessionStarted { session_id });
 
     // First turn: small context, no cached or reasoning tokens.
     app.orchestrator
-        .agent
-        .event_bus()
+        .agent_event_bus
         .publish(SeamAgentEvent::TokenUsage {
             session_id,
             usage: TokenUsageInfo {
@@ -400,8 +390,7 @@ fn test_agent_token_usage_message_accumulates() {
 
     // Second turn: context grew, completion + reasoning added.
     app.orchestrator
-        .agent
-        .event_bus()
+        .agent_event_bus
         .publish(SeamAgentEvent::TokenUsage {
             session_id,
             usage: TokenUsageInfo {
@@ -449,8 +438,7 @@ fn test_agent_token_usage_message_accumulates() {
 
     // Third turn: smaller context — peak should NOT shrink.
     app.orchestrator
-        .agent
-        .event_bus()
+        .agent_event_bus
         .publish(SeamAgentEvent::TokenUsage {
             session_id,
             usage: TokenUsageInfo {
@@ -1313,7 +1301,7 @@ fn test_tool_side_effect_reissues_fs_event() {
     use std::io::Write;
 
     let mut app = create_test_app();
-    let bus = app.orchestrator.agent.event_bus();
+    let bus = app.orchestrator.agent_event_bus.clone();
 
     // Create a temp file so handle_fs_event can process it without panicking
     let temp_dir = std::env::temp_dir().join("fastmd_test_side_effect_reissue");
@@ -1363,7 +1351,7 @@ fn test_broadcast_lag_handled_with_truncation_marker() {
     use crate::app::events::AgentEvent as SeamAgentEvent;
 
     let mut app = create_test_app();
-    let bus = app.orchestrator.agent.event_bus();
+    let bus = app.orchestrator.agent_event_bus.clone();
     let session_id = Uuid::new_v4();
 
     // Publish SessionStarted to set up the transcript

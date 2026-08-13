@@ -201,6 +201,9 @@ pub trait AgentEventObserver: Send + Sync {
     fn on_failed(&self, error: String);
 }
 
+/// Factory function type that creates an [`AgentEventObserver`] for a new session `Uuid`.
+pub type AgentObserverFactory = Arc<dyn Fn(Uuid) -> Arc<dyn AgentEventObserver> + Send + Sync>;
+
 // ---------------------------------------------------------------------------
 // Tests live in the sibling `events_tests.rs` sidecar.
 // ---------------------------------------------------------------------------

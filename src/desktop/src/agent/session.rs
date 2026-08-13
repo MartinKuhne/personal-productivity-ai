@@ -3,9 +3,7 @@
 //! Unit tests live in the sibling `session_tests.rs` sidecar.
 
 use crate::agent::config::AgentConfig;
-use crate::agent::events::{AgentDebugEntry, AgentPrompt, TokenUsageInfo};
-use crate::app::events::AgentEvent as SeamAgentEvent;
-use crate::bus::core::Bus;
+use crate::agent::events::{AgentDebugEntry, AgentObserverFactory, AgentPrompt, TokenUsageInfo};
 use serde_json::Value;
 use std::sync::mpsc::{self, Sender};
 use std::sync::{
@@ -43,7 +41,6 @@ pub struct AgentState {
 /// - Provides `submit_prompt` to enqueue work for the long-lived
 ///   driver thread.
 /// - Exposes read-only `AgentState` for UI rendering
-/// - Exposes `event_bus()` for UI to subscribe to `Bus<AgentEvent>`
 pub struct AgentSession {
     pub extensions: crate::agent::tools::extensions::Extensions,
     state: AgentState,
@@ -59,10 +56,6 @@ pub struct AgentSession {
     /// Replaces the old `session_counter: usize` (migration step 10,
     /// FR-008).
     current_session_id: Option<Uuid>,
-    /// Agent→UI structured event bus (new seam path). Cloned into the
-    /// agent context on each `start_session`; the UI subscribes via
-    /// [`Self::event_bus`] (migration step 2).
-    agent_event_bus: Bus<SeamAgentEvent>,
     /// UI→agent prompt channel. The UI calls [`Self::submit_prompt`]
     /// which sends an [`AgentPrompt`] on this sender; the long-lived
     /// driver thread owns the `Receiver` and blocks on `recv()`
@@ -108,13 +101,6 @@ impl AgentSession {
             .write()
             .expect("agent_config lock poisoned");
         *guard = f(&guard);
-    }
-
-    /// Return a clone of the agent→UI event bus so the UI can subscribe
-    /// via `BusReader<AgentEvent>` and drain structured agent events each
-    /// frame (migration step 2, FR-010).
-    pub fn event_bus(&self) -> Bus<SeamAgentEvent> {
-        self.agent_event_bus.clone()
     }
 
     /// Returns the `Uuid` of the currently-active (or most-recently-started)
@@ -274,6 +260,7 @@ impl AgentSession {
 pub struct AgentSessionBuilder {
     extensions: crate::agent::tools::extensions::Extensions,
     file_observer: Option<std::sync::Arc<dyn crate::agent::tools::observer::OnFileChanged>>,
+    observer_factory: Option<AgentObserverFactory>,
     policy: Option<Arc<dyn crate::agent::tools::policy::ToolCallPolicy>>,
     tool_context: Option<Arc<arc_swap::ArcSwap<crate::agent::AgentToolContext>>>,
     initial_agent_config: Option<AgentConfig>,
@@ -285,6 +272,7 @@ impl AgentSessionBuilder {
     pub fn new() -> Self {
         Self {
             file_observer: None,
+            observer_factory: None,
             policy: None,
             tool_context: None,
             initial_agent_config: None,
@@ -301,6 +289,12 @@ impl AgentSessionBuilder {
         bus: std::sync::Arc<dyn crate::agent::tools::observer::OnFileChanged>,
     ) -> Self {
         self.file_observer = Some(bus);
+        self
+    }
+
+    /// Set the observer factory that creates an [`crate::agent::events::AgentEventObserver`] for each session.
+    pub fn with_observer_factory(mut self, factory: AgentObserverFactory) -> Self {
+        self.observer_factory = Some(factory);
         self
     }
 
@@ -352,6 +346,9 @@ impl AgentSessionBuilder {
         let file_observer = self
             .file_observer
             .expect("AgentSession requires with_file_observer");
+        let observer_factory = self
+            .observer_factory
+            .expect("AgentSession requires with_observer_factory");
         let policy = self
             .policy
             .unwrap_or_else(|| Arc::new(crate::agent::tools::policy::DefaultToolCallPolicy));
@@ -363,11 +360,10 @@ impl AgentSessionBuilder {
                 self.initial_agent_config.unwrap_or_default(),
             ))
         });
-        let agent_event_bus = Bus::new();
         let (prompt_tx, prompt_rx) = mpsc::channel::<AgentPrompt>();
         let driver_handle = spawn_driver(
             prompt_rx,
-            agent_event_bus.clone(),
+            observer_factory,
             agent_config_provider.clone(),
             file_observer,
             policy,
@@ -389,7 +385,6 @@ impl AgentSessionBuilder {
             cancel_flag: None,
             agent_config_provider,
             current_session_id: None,
-            agent_event_bus,
             prompt_tx,
             driver_handle: Some(driver_handle),
             extensions: self.extensions,
@@ -411,7 +406,7 @@ impl Default for AgentSessionBuilder {
 /// sequentially — one session at a time.
 fn spawn_driver(
     prompt_rx: std::sync::mpsc::Receiver<AgentPrompt>,
-    agent_event_bus: Bus<SeamAgentEvent>,
+    observer_factory: AgentObserverFactory,
     agent_config_provider: Arc<std::sync::RwLock<AgentConfig>>,
     file_observer: std::sync::Arc<dyn crate::agent::tools::observer::OnFileChanged>,
     policy: Arc<dyn crate::agent::tools::policy::ToolCallPolicy>,
@@ -430,15 +425,14 @@ fn spawn_driver(
                 .map(|c| c.clone())
                 .unwrap_or_default();
             let history = session_histories.get(&session_id).cloned().flatten();
+            let observer = (observer_factory)(session_id);
             let ctx = crate::agent::context::AgentContextBuilder::new(
                 agent_config,
                 session_id,
                 prompt.text,
             )
             .with_file_observer(file_observer.clone())
-            .with_observer(std::sync::Arc::new(
-                crate::app::events::BusAgentEventObserver::new(session_id, agent_event_bus.clone()),
-            ))
+            .with_observer(observer)
             .with_active_paths(prompt.active_file, prompt.active_dir)
             .with_selected_files(prompt.selected_files)
             .with_system_prompts(prompt.system_prompts)

@@ -45,8 +45,10 @@ pub struct AppOrchestrator {
     pub pending_file_load: Option<PathBuf>,
     pub finished_watcher_slot: Arc<Mutex<Option<notify::RecommendedWatcher>>>,
     pub tool_context: std::sync::Arc<arc_swap::ArcSwap<crate::agent::AgentToolContext>>,
+    /// Event bus for agent events. Owned by the application orchestration layer.
+    pub agent_event_bus: Bus<SeamAgentEvent>,
     /// Reader for the `Bus<AgentEvent>` agent→UI channel. Subscribed
-    /// once during app init from [`AgentSession::event_bus`].
+    /// once during app init.
     /// Drained each frame in [`Self::drain_agent_event_bus`].
     pub agent_event_reader: Option<BusReader<SeamAgentEvent>>,
     /// True when the last `BusReader::try_recv` on `agent_event_reader`
