@@ -100,13 +100,15 @@ fn record_error_replaces_previous() {
     );
 }
 
-/// `clear_error` removes the recorded error.
+/// Per-group error recording and clearing round-trip.
 #[test]
-fn clear_error_removes_recorded_error() {
+fn record_and_clear_error_round_trip() {
     let mut mgr = ToolRegistry::new();
     let config = AgentConfig::default();
     mgr.refresh_state(&config);
     let id = ToolGroupId::Internal(InternalToolGroup::Filesystem);
+    assert!(mgr.group(&id).unwrap().last_error.is_none());
+
     mgr.record_error(&id, ToolGroupError::now(ToolErrorKind::Execution, "boom"));
     assert!(mgr.group(&id).unwrap().last_error.is_some());
     mgr.clear_error(&id);
@@ -118,7 +120,7 @@ fn clear_error_removes_recorded_error() {
 #[test]
 fn set_internal_group_enabled_persists_to_config() {
     let mgr = ToolRegistry::new();
-    let mut config = crate::config::AppConfig::default();
+    let mut config = AgentConfig::default();
     assert!(config.tool_groups.weather);
     mgr.set_group_enabled(
         &mut config,
@@ -139,7 +141,7 @@ fn set_internal_group_enabled_persists_to_config() {
 #[test]
 fn set_mcp_group_enabled_preserves_server_config() {
     let mgr = ToolRegistry::new();
-    let mut config = crate::config::AppConfig::default();
+    let mut config = AgentConfig::default();
     config.mcp_servers.insert(
         "github".to_string(),
         McpServerConfig::Stdio {
@@ -185,7 +187,7 @@ fn browser_group_defaults_to_disabled() {
 #[cfg(feature = "browser")]
 fn browser_group_lists_all_eight_tools() {
     let mut mgr = ToolRegistry::new();
-    let mut config = crate::config::AppConfig::default();
+    let mut config = AgentConfig::default();
     config.tool_groups.browser = true;
     let snapshot = mgr.groups_snapshot(&config);
     let browser = snapshot
@@ -215,7 +217,7 @@ fn browser_group_lists_all_eight_tools() {
 #[cfg(feature = "browser")]
 fn set_browser_group_enabled_persists_to_config() {
     let mgr = ToolRegistry::new();
-    let mut config = crate::config::AppConfig::default();
+    let mut config = AgentConfig::default();
     assert!(!config.tool_groups.browser);
     mgr.set_group_enabled(
         &mut config,
@@ -267,7 +269,7 @@ fn browser_only_get_page_state_is_parallel_safe() {
 #[test]
 fn mcp_needs_auth_now_defaults_to_false() {
     let mgr = ToolRegistry::new();
-    let mut config = crate::config::AppConfig::default();
+    let mut config = AgentConfig::default();
     config.mcp_servers.insert(
         "github".to_string(),
         McpServerConfig::Sse {
@@ -277,7 +279,7 @@ fn mcp_needs_auth_now_defaults_to_false() {
         }
         .into(),
     );
-    mgr.mcp_manager().update_config(&config.to_agent_config());
+    mgr.mcp_manager().update_config(&config);
     assert!(!mgr.mcp_manager().needs_auth_now("github"));
 }
 
@@ -285,7 +287,7 @@ fn mcp_needs_auth_now_defaults_to_false() {
 #[test]
 fn mcp_clear_needs_auth_clears_the_flag() {
     let mgr = ToolRegistry::new();
-    let mut config = crate::config::AppConfig::default();
+    let mut config = AgentConfig::default();
     config.mcp_servers.insert(
         "github".to_string(),
         McpServerConfig::Sse {
@@ -295,7 +297,7 @@ fn mcp_clear_needs_auth_clears_the_flag() {
         }
         .into(),
     );
-    mgr.mcp_manager().update_config(&config.to_agent_config());
+    mgr.mcp_manager().update_config(&config);
     mgr.mcp_manager().mark_needs_auth("github", true);
     assert!(mgr.mcp_manager().needs_auth_now("github"));
     mgr.mcp_manager().mark_needs_auth("github", false);

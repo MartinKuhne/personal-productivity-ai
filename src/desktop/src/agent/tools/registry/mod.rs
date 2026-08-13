@@ -27,20 +27,15 @@ pub use errors::{ToolErrorKind, ToolGroupError};
 pub use groups::{InternalToolGroup, ToolGroupId, ToolGroupKind, ToolGroupState};
 pub use pagination::paginate_in_range;
 
+use crate::agent::config::AgentConfig;
 use crate::agent::lib::mcp::{McpClients, McpToolDescriptor};
 use crate::agent::tools::RegisteredTool;
 use crate::agent::tools::context::ToolContext;
 use crate::agent::tools::mcp::McpToolAdapter;
 use crate::agent::tools::{Safety, Tool, ToolDispatcher, ToolOutcome};
-use crate::app::background::{BackgroundLogEntry, LogCategory};
-use crate::bus::config::CONFIG_ARRIVAL_TIMEOUT;
-use crate::bus::core::Bus;
-use crate::bus::events::config::ConfigArrived;
-use crate::bus::events::typed::BackgroundEvent;
-use crate::config::{AppConfig, McpServerConfig};
+use crate::config::McpServerConfig;
 use std::collections::BTreeMap;
 use std::sync::Arc;
-use std::sync::mpsc::Sender;
 
 /// Central catalog of agent tools, both built-in and dynamic MCP tools,
 /// plus per-group state for the UI.
@@ -344,8 +339,8 @@ impl ToolRegistry {
         self.group_state = next;
     }
 
-    pub fn groups_snapshot(&mut self, config: &AppConfig) -> Vec<ToolGroupState> {
-        self.refresh_state(&config.to_agent_config());
+    pub fn groups_snapshot(&mut self, config: &AgentConfig) -> Vec<ToolGroupState> {
+        self.refresh_state(config);
         self.groups()
     }
 
@@ -353,10 +348,9 @@ impl ToolRegistry {
         self.mcp_manager.clone()
     }
 
-    pub fn init_mcp_on_startup(&mut self, config: &AppConfig) {
-        let agent_cfg = config.to_agent_config();
-        self.mcp_manager.update_config(&agent_cfg);
-        self.refresh_mcp_tools(&agent_cfg);
+    pub fn init_mcp_on_startup(&mut self, config: &AgentConfig) {
+        self.mcp_manager.update_config(config);
+        self.refresh_mcp_tools(config);
     }
 
     pub fn update_and_refresh(&mut self, config: &crate::agent::config::AgentConfig) {
@@ -389,10 +383,9 @@ impl ToolRegistry {
     // ---- Group mutations (used by the UI dialog) ----
 
     /// Flip the enabled flag for a group, persisting into the
-    /// supplied `AppConfig`. The change takes effect on the next
-    /// [`ToolRegistry::get_schema`] call (after the caller writes
-    /// `config` back to `config.yaml`).
-    pub fn set_group_enabled(&self, config: &mut AppConfig, id: &ToolGroupId, enabled: bool) {
+    /// supplied `AgentConfig`. The change takes effect on the next
+    /// [`ToolRegistry::get_schema`] call.
+    pub fn set_group_enabled(&self, config: &mut AgentConfig, id: &ToolGroupId, enabled: bool) {
         match id {
             ToolGroupId::Internal(g) => set_internal_group_enabled(config, *g, enabled),
             ToolGroupId::Mcp(name) => {
@@ -541,7 +534,7 @@ fn is_internal_group_enabled(
     }
 }
 
-fn set_internal_group_enabled(config: &mut AppConfig, g: InternalToolGroup, on: bool) {
+fn set_internal_group_enabled(config: &mut AgentConfig, g: InternalToolGroup, on: bool) {
     use InternalToolGroup::*;
     match g {
         Filesystem => config.tool_groups.filesystem = on,
@@ -554,51 +547,6 @@ fn set_internal_group_enabled(config: &mut AppConfig, g: InternalToolGroup, on: 
         Weather => config.tool_groups.weather = on,
         Trello => config.tool_groups.trello = on,
     }
-}
-
-pub fn spawn_config_subscription(
-    tool_context: Arc<arc_swap::ArcSwap<crate::agent::AgentToolContext>>,
-    config_bus: Bus<ConfigArrived>,
-    tx: Sender<BackgroundEvent>,
-) {
-    let config_reader = config_bus.subscribe();
-    std::thread::spawn(move || {
-        let config = match config_reader.recv_timeout(CONFIG_ARRIVAL_TIMEOUT) {
-            Ok(event) => event.config,
-            Err(_) => {
-                tracing::error!(
-                    name = "config.arrived.timeout",
-                    timeout_ms = CONFIG_ARRIVAL_TIMEOUT.as_millis() as u64,
-                    "No ConfigArrived event observed within timeout; using default configuration"
-                );
-                AppConfig::default()
-            }
-        };
-        tool_context.rcu(|ctx| {
-            let mut new_ctx = (**ctx).clone();
-            new_ctx.registry.init_mcp_on_startup(&config);
-            new_ctx
-        });
-        let _ = tx.send(
-            BackgroundLogEntry::new(
-                LogCategory::Indexer,
-                "MCP startup initialization complete".to_string(),
-            )
-            .into(),
-        );
-
-        loop {
-            if let Ok(event) = config_reader.recv() {
-                tool_context.rcu(|ctx| {
-                    let mut new_ctx = (**ctx).clone();
-                    new_ctx
-                        .registry
-                        .refresh_mcp_tools(&event.config.to_agent_config());
-                    new_ctx
-                });
-            }
-        }
-    });
 }
 
 pub fn execute_tool(

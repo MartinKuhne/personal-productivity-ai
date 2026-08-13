@@ -348,7 +348,7 @@ mod tests {
 
     #[test]
     fn test_is_enabled_matches_config_flag() {
-        let mut config = crate::config::AppConfig::default();
+        let mut config = crate::agent::config::AgentConfig::default();
         assert!(!BrowserNavigateTool.is_enabled(&config, ""));
         config.tool_groups.browser = true;
         assert!(BrowserNavigateTool.is_enabled(&config, ""));

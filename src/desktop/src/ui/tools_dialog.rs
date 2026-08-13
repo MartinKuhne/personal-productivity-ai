@@ -10,7 +10,7 @@
 //! [`crate::config::save_config`] (which persists the toggle to
 //! `config.yaml`).
 
-use crate::agent::tools::registry;
+use crate::agent::tools::registry::{self, InternalToolGroup};
 use crate::bus::events::typed::{BackgroundEvent, McpAuthEvent};
 use crate::config::{McpServerConfig, save_config};
 use crate::ui::FastMdApp;
@@ -203,13 +203,24 @@ fn render_row(
         let mut enabled = group.enabled;
         if ui.checkbox(&mut enabled, "").changed() {
             let mut new_config = app.config().clone();
-            app.orchestrator.tool_context.rcu(|bundle| {
-                let new_bundle = (**bundle).clone();
-                new_bundle
-                    .registry
-                    .set_group_enabled(&mut new_config, &id, enabled);
-                new_bundle
-            });
+            match &id {
+                ToolGroupId::Internal(g) => match g {
+                    InternalToolGroup::Filesystem => new_config.tool_groups.filesystem = enabled,
+                    InternalToolGroup::Web => new_config.tool_groups.web = enabled,
+                    InternalToolGroup::Browser => new_config.tool_groups.browser = enabled,
+                    InternalToolGroup::Email => new_config.tool_groups.email = enabled,
+                    InternalToolGroup::Contacts => new_config.tool_groups.contacts = enabled,
+                    InternalToolGroup::Calendar => new_config.tool_groups.calendar = enabled,
+                    InternalToolGroup::CsvDb => new_config.tool_groups.csv_db = enabled,
+                    InternalToolGroup::Weather => new_config.tool_groups.weather = enabled,
+                    InternalToolGroup::Trello => new_config.tool_groups.trello = enabled,
+                },
+                ToolGroupId::Mcp(name) => {
+                    if let Some(entry) = new_config.mcp_servers.get_mut(name) {
+                        entry.enabled = enabled;
+                    }
+                }
+            }
             if let Err(e) = save_config(&new_config) {
                 tracing::error!(
                     error = %e,

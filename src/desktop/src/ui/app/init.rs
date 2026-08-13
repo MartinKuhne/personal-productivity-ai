@@ -97,7 +97,7 @@ impl FastMdApp {
         // Start MCP initialization immediately on the app's initial
         // background thread, so the UI thread never blocks on MCP
         // network I/O at startup.
-        crate::agent::tools::registry::spawn_config_subscription(
+        crate::app::session::spawn_config_subscription(
             tool_context.clone(),
             config_bus.clone(),
             background_task.tx.clone(),
