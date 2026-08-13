@@ -28,7 +28,7 @@ fn execute_create_csv(
 ) -> Result<serde_json::Value, String> {
     let input: crate::agent::tools::csv_db::schema::CreateCsvInput =
         serde_json::from_str(args).map_err(|e| format!("Invalid args: {}", e))?;
-    crate::agent::tools::csv_db::operations::create_csv(&ctx.config, input).map(|r| {
+    crate::agent::tools::csv_db::operations::create_csv(ctx, input).map(|r| {
         serde_json::to_value(r).unwrap_or_else(|e| serde_json::json!({"error": e.to_string()}))
     })
 }
@@ -52,7 +52,7 @@ fn execute_list_csv(
 ) -> Result<serde_json::Value, String> {
     let input: crate::agent::tools::csv_db::schema::ListCsvInput =
         serde_json::from_str(args).map_err(|e| format!("Invalid args: {}", e))?;
-    crate::agent::tools::csv_db::operations::list_csv(&ctx.config, input).map(|r| {
+    crate::agent::tools::csv_db::operations::list_csv(ctx, input).map(|r| {
         serde_json::to_value(r).unwrap_or_else(|e| serde_json::json!({"error": e.to_string()}))
     })
 }
@@ -76,7 +76,7 @@ fn execute_add_rows(
 ) -> Result<serde_json::Value, String> {
     let input: crate::agent::tools::csv_db::schema::AddRowsInput =
         serde_json::from_str(args).map_err(|e| format!("Invalid args: {}", e))?;
-    crate::agent::tools::csv_db::operations::add_rows(&ctx.config, input).map(|r| {
+    crate::agent::tools::csv_db::operations::add_rows(ctx, input).map(|r| {
         serde_json::to_value(r).unwrap_or_else(|e| serde_json::json!({"error": e.to_string()}))
     })
 }
@@ -100,7 +100,7 @@ fn execute_delete_rows(
 ) -> Result<serde_json::Value, String> {
     let input: crate::agent::tools::csv_db::schema::DeleteRowsInput =
         serde_json::from_str(args).map_err(|e| format!("Invalid args: {}", e))?;
-    crate::agent::tools::csv_db::query::delete_rows(&ctx.config, input).map(|r| {
+    crate::agent::tools::csv_db::query::delete_rows(ctx, input).map(|r| {
         serde_json::to_value(r).unwrap_or_else(|e| serde_json::json!({"error": e.to_string()}))
     })
 }
@@ -124,7 +124,7 @@ fn execute_query(
 ) -> Result<serde_json::Value, String> {
     let input: crate::agent::tools::csv_db::schema::QueryRequest =
         serde_json::from_str(args).map_err(|e| format!("Invalid args: {}", e))?;
-    crate::agent::tools::csv_db::query::query_csv(&ctx.config, input).map(|r| {
+    crate::agent::tools::csv_db::query::query_csv(ctx, input).map(|r| {
         serde_json::to_value(r).unwrap_or_else(|e| serde_json::json!({"error": e.to_string()}))
     })
 }

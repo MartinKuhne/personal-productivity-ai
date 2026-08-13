@@ -22,6 +22,6 @@ impl Extensions {
     pub fn get<T: Send + Sync + 'static>(&self) -> Option<Arc<T>> {
         self.map
             .get(&TypeId::of::<T>())
-            .and_then(|t| t.downcast_ref::<Arc<T>>().cloned())
+            .and_then(|t| t.clone().downcast::<T>().ok())
     }
 }

@@ -40,18 +40,22 @@ pub struct ToolContext {
 }
 
 impl ToolContext {
+    pub fn vfs(&self) -> std::sync::Arc<dyn crate::agent::tools::vfs::VirtualFileSystem> {
+        self.extensions.get::<crate::agent::tools::vfs::VirtualFileSystemExt>().expect("VFS not injected").0.clone()
+    }
+
     /// Resolve a virtual path to an absolute filesystem path.
     pub fn resolve_virtual_path(
         &self,
         vpath: &str,
         allow_write: bool,
     ) -> Result<Option<(PathBuf, bool)>, String> {
-        self.extensions.get::<crate::agent::tools::vfs::VirtualFileSystemExt>().expect("VFS not injected").0.resolve_virtual_path(vpath, allow_write)
+        self.vfs().resolve_virtual_path(vpath, allow_write)
     }
 
     /// Resolve a virtual path for a mutating tool.
     pub fn resolve_writable(&self, vpath: &str) -> Result<PathBuf, String> {
-        self.extensions.get::<crate::agent::tools::vfs::VirtualFileSystemExt>().expect("VFS not injected").0.resolve_writable(vpath)
+        self.vfs().resolve_writable(vpath)
     }
 
     pub fn cache(&self) -> std::sync::Arc<crate::agent::tools::registry::cache::ToolCache> {

@@ -39,7 +39,7 @@ fn execute_patch_note(
     let path = ctx.resolve_writable(&input.path)?;
     ctx.check_write_allowed(&path)?;
     let observer = ctx.file_observer();
-    crate::agent::tools::filesystem::tool_patch_note(
+    crate::agent::tools::filesystem::tool_patch_note(ctx, 
         &path.to_string_lossy(),
         &input.old_string,
         &input.new_string,
@@ -72,7 +72,7 @@ fn execute_search_notes(
     let mut libs: Vec<_> = ctx.config.content_libraries().iter().collect();
     libs.sort_by_key(|b| std::cmp::Reverse(b.priority));
     for lib in libs {
-        if let Ok(mut matches) = crate::agent::tools::filesystem::tool_search_notes(
+        if let Ok(mut matches) = crate::agent::tools::filesystem::tool_search_notes(ctx, 
             &lib.root_path(),
             &lib.name,
             &input.query,
@@ -122,7 +122,7 @@ fn execute_read_tags(
         serde_json::from_str(args).map_err(|e| format!("Invalid args: {}", e))?;
     let mut all_tags = std::collections::BTreeSet::new();
     for lib in ctx.config.content_libraries() {
-        if let Ok(res) = crate::agent::tools::filesystem::tool_read_tags(&lib.root_path()) {
+        if let Ok(res) = crate::agent::tools::filesystem::tool_read_tags(ctx, &lib.root_path()) {
             for tag in res.tags {
                 all_tags.insert(tag);
             }
@@ -158,7 +158,7 @@ fn execute_list_notes_by_tag(
         .unwrap_or(super::super::pagination::DEFAULT_LIST_NOTES_BY_TAG_LIMIT);
     let mut all_matches: Vec<String> = Vec::new();
     for lib in ctx.config.content_libraries() {
-        match crate::agent::tools::filesystem::tool_list_notes_by_tag(
+        match crate::agent::tools::filesystem::tool_list_notes_by_tag(ctx, 
             &lib.root_path(),
             &lib.name,
             &input.tag,
@@ -204,7 +204,7 @@ fn execute_list_notes(
         .limit
         .unwrap_or(super::super::pagination::DEFAULT_LIST_NOTES_BY_TAG_LIMIT);
     let all_matches: Vec<String> = match ctx.resolve_virtual_path(&input.path, false)? {
-        Some((path, _)) => crate::agent::tools::filesystem::tool_list_notes(&path, &input.path)?,
+        Some((path, _)) => crate::agent::tools::filesystem::tool_list_notes(ctx, &path, &input.path)?,
         None => {
             let mut libs: Vec<String> = ctx
                 .config
@@ -252,7 +252,7 @@ fn execute_read_note(
     let (path, _) = ctx
         .resolve_virtual_path(&input.path, false)?
         .ok_or_else(|| "Cannot perform this operation on the virtual root".to_string())?;
-    crate::agent::tools::filesystem::tool_read_note(&path.to_string_lossy()).map(|r| {
+    crate::agent::tools::filesystem::tool_read_note(ctx, &path.to_string_lossy()).map(|r| {
         serde_json::to_value(r).unwrap_or_else(|e| serde_json::json!({"error": e.to_string()}))
     })
 }
@@ -280,7 +280,7 @@ fn execute_window_note(
         .ok_or_else(|| "Cannot perform this operation on the virtual root".to_string())?;
     let offset = input.offset.unwrap_or(0);
     let limit = input.limit.unwrap_or(DEFAULT_WINDOW_NOTE_LIMIT);
-    crate::agent::tools::filesystem::tool_window_note(&path.to_string_lossy(), offset, limit).map(
+    crate::agent::tools::filesystem::tool_window_note(ctx, &path.to_string_lossy(), offset, limit).map(
         |r| serde_json::to_value(r).unwrap_or_else(|e| serde_json::json!({"error": e.to_string()})),
     )
 }
@@ -306,7 +306,7 @@ fn execute_create_note(
     let path = ctx.resolve_writable(&input.path)?;
     ctx.check_write_allowed(&path)?;
     let observer = ctx.file_observer();
-    crate::agent::tools::filesystem::tool_create_note(
+    crate::agent::tools::filesystem::tool_create_note(ctx, 
         &path.to_string_lossy(),
         &input.content,
         &*observer,
@@ -337,7 +337,7 @@ fn execute_insert_into_note(
     let path = ctx.resolve_writable(&input.path)?;
     ctx.check_write_allowed(&path)?;
     let observer = ctx.file_observer();
-    crate::agent::tools::filesystem::tool_insert_into_note(
+    crate::agent::tools::filesystem::tool_insert_into_note(ctx, 
         &path.to_string_lossy(),
         input.offset,
         &input.lines,

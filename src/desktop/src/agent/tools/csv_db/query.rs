@@ -2,6 +2,16 @@
 
 use super::schema::{DeleteRowsInput, QueryRequest, QueryResponse};
 use crate::agent::config::AgentConfig;
+
+fn test_ctx(config: &crate::agent::config::AgentConfig) -> crate::agent::tools::context::ToolContext {
+    let mut builder = crate::agent::tools::context::ToolContextBuilder::new(
+        std::sync::Arc::new(config.clone()),
+        std::sync::Arc::new(crate::agent::tools::observer::DefaultFileObserver)
+    );
+    builder = builder.with_extension(std::sync::Arc::new(crate::agent::tools::vfs::VirtualFileSystemExt(std::sync::Arc::new(crate::agent::tools::vfs::VfsResolver::new(std::sync::Arc::new(config.clone()))))));
+    builder.build()
+}
+
 use evalexpr::{ContextWithMutableVariables, HashMapContext, Value};
 use std::collections::HashMap;
 
@@ -21,8 +31,8 @@ fn create_context(row: &csv::StringRecord, headers: &csv::StringRecord) -> HashM
     context
 }
 
-pub fn delete_rows(config: &AgentConfig, input: DeleteRowsInput) -> Result<String, String> {
-    let db_path = super::operations::get_db_path(config, &input.db_name);
+pub fn delete_rows(ctx: &crate::agent::tools::context::ToolContext, input: DeleteRowsInput) -> Result<String, String> {
+    let db_path = super::operations::get_db_path(ctx, &input.db_name);
     if !db_path.exists() {
         return Err(format!("Database '{}' does not exist", input.db_name));
     }
@@ -67,8 +77,8 @@ pub fn delete_rows(config: &AgentConfig, input: DeleteRowsInput) -> Result<Strin
     Ok(format!("Deleted {} rows", deleted_count))
 }
 
-pub fn query_csv(config: &AgentConfig, input: QueryRequest) -> Result<QueryResponse, String> {
-    let db_path = super::operations::get_db_path(config, &input.db_name);
+pub fn query_csv(ctx: &crate::agent::tools::context::ToolContext, input: QueryRequest) -> Result<QueryResponse, String> {
+    let db_path = super::operations::get_db_path(ctx, &input.db_name);
     if !db_path.exists() {
         return Err(format!("Database '{}' does not exist", input.db_name));
     }
@@ -152,8 +162,7 @@ mod tests {
             .with_csv_db_path(Some(tmp_dir.path().to_string_lossy().to_string()))
             .build();
 
-        let _ = super::super::operations::create_csv(
-            &config,
+        let _ = super::super::operations::create_csv(&test_ctx(&config),
             CreateCsvInput {
                 db_name: "sales".to_string(),
                 headers: vec!["item".to_string(), "price".to_string(), "qty".to_string()],
@@ -170,16 +179,14 @@ mod tests {
         row2.insert("price".to_string(), "0.5".to_string());
         row2.insert("qty".to_string(), "20".to_string());
 
-        let _ = super::super::operations::add_rows(
-            &config,
+        let _ = super::super::operations::add_rows(&test_ctx(&config),
             AddRowsInput {
                 db_name: "sales".to_string(),
                 rows: vec![row1, row2],
             },
         );
 
-        let q_res = query_csv(
-            &config,
+        let q_res = query_csv(&test_ctx(&config),
             QueryRequest {
                 db_name: "sales".to_string(),
                 predicate: Some("price < 1.0".to_string()),
@@ -192,8 +199,7 @@ mod tests {
         assert_eq!(q_res.rows[0].get("item").unwrap(), "banana");
 
         // Test aggregate sum
-        let q_res2 = query_csv(
-            &config,
+        let q_res2 = query_csv(&test_ctx(&config),
             QueryRequest {
                 db_name: "sales".to_string(),
                 predicate: None,
@@ -205,8 +211,7 @@ mod tests {
         assert_eq!(q_res2.aggregate_result, Some(30.0));
 
         // Test aggregate average
-        let q_res_avg = query_csv(
-            &config,
+        let q_res_avg = query_csv(&test_ctx(&config),
             QueryRequest {
                 db_name: "sales".to_string(),
                 predicate: None,
@@ -218,8 +223,7 @@ mod tests {
         assert_eq!(q_res_avg.aggregate_result, Some(1.0));
 
         // Test unsupported aggregate
-        let err_agg = query_csv(
-            &config,
+        let err_agg = query_csv(&test_ctx(&config),
             QueryRequest {
                 db_name: "sales".to_string(),
                 predicate: None,
@@ -231,8 +235,7 @@ mod tests {
         assert!(err_agg.contains("Unsupported aggregate function"));
 
         // Test query invalid database
-        let err_not_exist = query_csv(
-            &config,
+        let err_not_exist = query_csv(&test_ctx(&config),
             QueryRequest {
                 db_name: "missing".to_string(),
                 predicate: None,
@@ -244,8 +247,7 @@ mod tests {
         assert!(err_not_exist.contains("does not exist"));
 
         // Test delete
-        let d_res = delete_rows(
-            &config,
+        let d_res = delete_rows(&test_ctx(&config),
             DeleteRowsInput {
                 db_name: "sales".to_string(),
                 predicate: "item == \"apple\"".to_string(),
@@ -254,8 +256,7 @@ mod tests {
         .unwrap();
         assert!(d_res.contains("Deleted 1 rows"));
 
-        let q_res3 = query_csv(
-            &config,
+        let q_res3 = query_csv(&test_ctx(&config),
             QueryRequest {
                 db_name: "sales".to_string(),
                 predicate: None,
@@ -268,8 +269,7 @@ mod tests {
         assert_eq!(q_res3.rows[0].get("item").unwrap(), "banana");
 
         // Test delete invalid predicate
-        let err_pred = delete_rows(
-            &config,
+        let err_pred = delete_rows(&test_ctx(&config),
             DeleteRowsInput {
                 db_name: "sales".to_string(),
                 predicate: "invalid syntax ++".to_string(),

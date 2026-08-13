@@ -410,7 +410,7 @@ fn execute_browser_screenshot(
         handle.page.screenshot(Some(opts)).await
     })
     .map_err(err)?;
-    std::fs::write(&out_path, &bytes).map_err(|e| err(format!("write screenshot: {}", e)))?;
+    ctx.vfs().write(&out_path, &bytes).map_err(|e| err(format!("write screenshot: {}", e)))?;
     let resp = dtos::BrowserScreenshotResponse {
         path: out_path.to_string_lossy().to_string(),
         bytes: bytes.len(),

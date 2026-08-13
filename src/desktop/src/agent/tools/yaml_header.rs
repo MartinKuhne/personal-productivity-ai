@@ -4,11 +4,13 @@
 use crate::markdown::Document;
 use serde_norway::{Mapping, Value};
 use std::path::Path;
+use crate::agent::tools::vfs::VirtualFileSystem;
 
 pub fn tool_read_yaml_header(
+    ctx: &crate::agent::tools::context::ToolContext,
     path_str: &str,
 ) -> Result<crate::agent::tools::dtos::ReadYamlHeaderResponse, String> {
-    match std::fs::read_to_string(path_str) {
+    match ctx.vfs().read_to_string(path_str.as_ref()) {
         Ok(content) => {
             // `Document` parses the front matter (if any) in one
             // pass; reaching `front_matter()` is the same call the
@@ -30,6 +32,7 @@ pub fn tool_read_yaml_header(
 }
 
 pub fn tool_write_yaml_header(
+    ctx: &crate::agent::tools::context::ToolContext,
     path_str: &str,
     title: Option<&str>,
     summary: Option<&str>,
@@ -38,7 +41,7 @@ pub fn tool_write_yaml_header(
     producer: &dyn crate::agent::tools::observer::OnFileChanged,
 ) -> Result<crate::agent::tools::dtos::WriteYamlHeaderResponse, String> {
     let existed = Path::new(path_str).exists();
-    let current_content = std::fs::read_to_string(path_str).unwrap_or_else(|_| "".to_string());
+    let current_content = ctx.vfs().read_to_string(path_str.as_ref()).unwrap_or_else(|_| "".to_string());
 
     // `Document::body()` returns the source with the front-matter
     // block stripped when one is present, or the full source
@@ -81,9 +84,9 @@ pub fn tool_write_yaml_header(
             let new_content = format!("---\n{}---\n{}", yaml_final, markdown_body.trim_start());
             let path = Path::new(path_str);
             if let Some(parent) = path.parent() {
-                let _ = std::fs::create_dir_all(parent);
+                let _ = ctx.vfs().create_dir_all(parent);
             }
-            match std::fs::write(path_str, new_content) {
+            match ctx.vfs().write(path_str.as_ref(), new_content.as_bytes()) {
                 Ok(_) => {
                     // Was the file created or updated? Publish the
                     // matching event so consumers (directory tree,
@@ -112,6 +115,17 @@ pub fn tool_write_yaml_header(
 
 #[cfg(test)]
 mod tests {
+
+fn test_ctx() -> crate::agent::tools::context::ToolContext {
+    let config = crate::agent::config::AgentConfig::default();
+    let mut builder = crate::agent::tools::context::ToolContextBuilder::new(
+        std::sync::Arc::new(config.clone()),
+        std::sync::Arc::new(crate::agent::tools::observer::DefaultFileObserver)
+    );
+    builder = builder.with_extension(std::sync::Arc::new(crate::agent::tools::vfs::VirtualFileSystemExt(std::sync::Arc::new(crate::agent::tools::vfs::VfsResolver::new(std::sync::Arc::new(config.clone()))))));
+    builder.build()
+}
+
     use super::*;
     use crate::bus::core::Bus;
     use crate::bus::events::file::FileEvent;
@@ -132,7 +146,7 @@ mod tests {
         let file_path = dir.path().join("test.md");
         fs::write(&file_path, "---\ntitle: Test\ntags: [tag1]\n---\nContent").unwrap();
 
-        let result = tool_read_yaml_header(file_path.to_str().unwrap())
+        let result = tool_read_yaml_header(&test_ctx(), file_path.to_str().unwrap())
             .unwrap()
             .content;
         assert!(result.contains("title"));
@@ -145,7 +159,7 @@ mod tests {
         let file_path = dir.path().join("test.md");
         fs::write(&file_path, "No header here").unwrap();
 
-        let result = tool_read_yaml_header(file_path.to_str().unwrap());
+        let result = tool_read_yaml_header(&test_ctx(), file_path.to_str().unwrap());
         assert_eq!(result.unwrap_err(), "No YAML header found in this file.");
     }
 
@@ -155,7 +169,7 @@ mod tests {
         let file_path = dir.path().join("new.md");
 
         let producer = noop_producer();
-        let result = tool_write_yaml_header(
+        let result = tool_write_yaml_header(&test_ctx(), 
             file_path.to_str().unwrap(),
             Some("Test Title"),
             Some("Test summary"),
@@ -202,7 +216,7 @@ mod tests {
         fs::write(&file_path, "---\ntitle: Old\n---\n# Body Content").unwrap();
 
         let producer = noop_producer();
-        let result = tool_write_yaml_header(
+        let result = tool_write_yaml_header(&test_ctx(), 
             file_path.to_str().unwrap(),
             Some("New Title"),
             None,
@@ -227,7 +241,7 @@ mod tests {
         let file_path = dir.path().join("subdir").join("test.md");
 
         let producer = noop_producer();
-        let result = tool_write_yaml_header(
+        let result = tool_write_yaml_header(&test_ctx(), 
             file_path.to_str().unwrap(),
             Some("Title"),
             None,
@@ -249,13 +263,11 @@ mod tests {
         let bus = crate::bus::core::Bus::new();
         let reader = bus.subscribe();
         let producer: std::sync::Arc<dyn crate::agent::tools::observer::OnFileChanged> = std::sync::Arc::new(crate::app::session::bus_observer::AppFileObserver::new(bus.clone()));
-        
-        let producer = std::sync::Arc::new(crate::agent::tools::observer::DefaultFileObserver);
 
         let dir = tempdir().unwrap();
         let file_path = dir.path().join("brand_new.md");
 
-        tool_write_yaml_header(
+        tool_write_yaml_header(&test_ctx(), 
             file_path.to_str().unwrap(),
             Some("Title"),
             None,
@@ -265,7 +277,7 @@ mod tests {
         )
         .unwrap();
 
-        let mut reader = bus.subscribe();
+
         let event = reader
             .recv_timeout(std::time::Duration::from_millis(100))
             .unwrap();
@@ -280,14 +292,12 @@ mod tests {
         let bus = crate::bus::core::Bus::new();
         let reader = bus.subscribe();
         let producer: std::sync::Arc<dyn crate::agent::tools::observer::OnFileChanged> = std::sync::Arc::new(crate::app::session::bus_observer::AppFileObserver::new(bus.clone()));
-        
-        let producer = std::sync::Arc::new(crate::agent::tools::observer::DefaultFileObserver);
 
         let dir = tempdir().unwrap();
         let file_path = dir.path().join("existing.md");
         fs::write(&file_path, "# Body").unwrap();
 
-        tool_write_yaml_header(
+        tool_write_yaml_header(&test_ctx(), 
             file_path.to_str().unwrap(),
             Some("New Title"),
             None,
@@ -297,7 +307,7 @@ mod tests {
         )
         .unwrap();
 
-        let mut reader = bus.subscribe();
+
         let event = reader
             .recv_timeout(std::time::Duration::from_millis(100))
             .unwrap();

@@ -47,6 +47,16 @@ use super::super::operations::{add_rows, create_csv};
 use super::super::query::{delete_rows, query_csv};
 use super::super::schema::{AddRowsInput, CreateCsvInput, DeleteRowsInput, QueryRequest};
 use crate::agent::config::AgentConfig;
+
+fn test_ctx(config: &crate::agent::config::AgentConfig) -> crate::agent::tools::context::ToolContext {
+    let mut builder = crate::agent::tools::context::ToolContextBuilder::new(
+        std::sync::Arc::new(config.clone()),
+        std::sync::Arc::new(crate::agent::tools::observer::DefaultFileObserver)
+    );
+    builder = builder.with_extension(std::sync::Arc::new(crate::agent::tools::vfs::VirtualFileSystemExt(std::sync::Arc::new(crate::agent::tools::vfs::VfsResolver::new(std::sync::Arc::new(config.clone()))))));
+    builder.build()
+}
+
 use proptest::prelude::*;
 use std::collections::HashMap;
 use tempfile::tempdir;
@@ -60,8 +70,7 @@ use tempfile::tempdir;
 /// `evalexpr` on random inputs.
 fn build_fixture_csv(config: &AgentConfig) -> (String, Vec<HashMap<String, String>>) {
     let db_name = "proptest".to_string();
-    create_csv(
-        config,
+    create_csv(&test_ctx(&config),
         CreateCsvInput {
             db_name: db_name.clone(),
             headers: vec!["item".to_string(), "price".to_string(), "qty".to_string()],
@@ -81,8 +90,7 @@ fn build_fixture_csv(config: &AgentConfig) -> (String, Vec<HashMap<String, Strin
                 .collect()
         })
         .collect();
-    add_rows(
-        config,
+    add_rows(&test_ctx(&config),
         AddRowsInput {
             db_name: db_name.clone(),
             rows: rows.clone(),
@@ -105,7 +113,7 @@ proptest! {
         };
         let (db_name, rows) = build_fixture_csv(&config);
         let res = query_csv(
-            &config,
+            &test_ctx(&config),
             QueryRequest {
                 db_name,
                 predicate: None,
@@ -128,7 +136,7 @@ proptest! {
         let (db_name, rows) = build_fixture_csv(&config);
         for pred in &["1 == 1", "true", "1.0 == 1.0"] {
             let res = query_csv(
-                &config,
+                &test_ctx(&config),
                 QueryRequest {
                     db_name: db_name.clone(),
                     predicate: Some(pred.to_string()),
@@ -159,7 +167,7 @@ proptest! {
         let (db_name, _rows) = build_fixture_csv(&config);
         for pred in &["1 == 0", "false", "1.0 == 0.0"] {
             let res = query_csv(
-                &config,
+                &test_ctx(&config),
                 QueryRequest {
                     db_name: db_name.clone(),
                     predicate: Some(pred.to_string()),
@@ -190,7 +198,7 @@ proptest! {
         let (db_name, _) = build_fixture_csv(&config);
         // qty: 10 + 20 + 5 = 35
         let res = query_csv(
-            &config,
+            &test_ctx(&config),
             QueryRequest {
                 db_name,
                 predicate: None,
@@ -214,7 +222,7 @@ proptest! {
         let (db_name, _) = build_fixture_csv(&config);
         // price: (1.5 + 0.5 + 2.0) / 3 = 1.333...
         let res = query_csv(
-            &config,
+            &test_ctx(&config),
             QueryRequest {
                 db_name,
                 predicate: None,
@@ -242,7 +250,7 @@ proptest! {
         };
         let (db_name, rows) = build_fixture_csv(&config);
         let result = delete_rows(
-            &config,
+            &test_ctx(&config),
             DeleteRowsInput {
                 db_name: db_name.clone(),
                 predicate: "1 == 1".to_string(),
@@ -256,7 +264,7 @@ proptest! {
         );
         // Re-query to confirm the CSV is empty.
         let res = query_csv(
-            &config,
+            &test_ctx(&config),
             QueryRequest {
                 db_name,
                 predicate: None,
@@ -300,7 +308,7 @@ proptest! {
         // (any number of rows) or Err (predicate or
         // column doesn't exist); both are acceptable.
         let _ = query_csv(
-            &config,
+            &test_ctx(&config),
             QueryRequest {
                 db_name,
                 predicate: Some(predicate),

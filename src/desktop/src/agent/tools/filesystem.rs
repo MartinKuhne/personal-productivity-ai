@@ -18,7 +18,7 @@ pub const DEFAULT_SEARCH_NOTES_MAX_RESULTS: usize = 200;
 /// strictly to Markdown (`.md`) files under `root_path`. The caller
 /// (the tool registry) is responsible for applying the result cap
 /// across libraries, so this function returns all matches unfiltered.
-pub fn tool_search_notes(
+pub fn tool_search_notes(ctx: &crate::agent::tools::context::ToolContext, 
     root_path: &Path,
     virtual_prefix: &str,
     query: &str,
@@ -30,7 +30,7 @@ pub fn tool_search_notes(
             && let Some(ext) = entry.path().extension()
             && ext == "md"
             && let Some(rel_path) = entry.path().strip_prefix(root_path).ok()
-            && let Ok(content) = std::fs::read_to_string(entry.path())
+            && let Ok(content) = ctx.vfs().read_to_string(entry.path().as_ref())
         {
             let (_, body) = split_file_content(&content);
             let virtual_path = Path::new(virtual_prefix).join(rel_path);
@@ -44,7 +44,7 @@ pub fn tool_search_notes(
     Ok(results)
 }
 
-pub fn tool_read_tags(
+pub fn tool_read_tags(ctx: &crate::agent::tools::context::ToolContext, 
     root_path: &Path,
 ) -> Result<crate::agent::tools::dtos::ReadTagsResponse, String> {
     let mut all_tags = std::collections::BTreeSet::new();
@@ -72,7 +72,7 @@ pub fn tool_read_tags(
 /// (`registry.rs`) is responsible for slicing the combined
 /// cross-library result, so the page and total fields stay consistent
 /// regardless of how many libraries the user has configured.
-pub fn tool_list_notes_by_tag(
+pub fn tool_list_notes_by_tag(ctx: &crate::agent::tools::context::ToolContext, 
     root_path: &Path,
     virtual_prefix: &str,
     tag: &str,
@@ -103,14 +103,13 @@ pub fn tool_list_notes_by_tag(
 /// applied here — the call site (`registry.rs`) is responsible for
 /// slicing the result so the page and total fields stay consistent
 /// regardless of how the call is dispatched.
-pub fn tool_list_notes(target_dir: &Path, virtual_prefix: &str) -> Result<Vec<String>, String> {
+pub fn tool_list_notes(ctx: &crate::agent::tools::context::ToolContext, target_dir: &Path, virtual_prefix: &str) -> Result<Vec<String>, String> {
     let mut files = Vec::new();
-    if let Ok(entries) = std::fs::read_dir(target_dir) {
-        for entry in entries.filter_map(|e| e.ok()) {
-            if let Ok(file_type) = entry.file_type()
-                && file_type.is_file()
+    if let Ok(entries) = ctx.vfs().read_dir(target_dir) {
+        for entry in entries.into_iter() {
+            if entry.is_file
             {
-                let path = entry.path();
+                let path = &entry.path;
                 if let Some(ext) = path.extension()
                     && (ext == "md" || ext == "markdown")
                     && let Some(name) = path.file_name()
@@ -126,7 +125,7 @@ pub fn tool_list_notes(target_dir: &Path, virtual_prefix: &str) -> Result<Vec<St
     Ok(files)
 }
 
-pub fn tool_read_note(
+pub fn tool_read_note(ctx: &crate::agent::tools::context::ToolContext, 
     path_str: &str,
 ) -> Result<crate::agent::tools::dtos::ReadNoteResponse, String> {
     match crate::utils::read_text_file(Path::new(path_str)) {
@@ -144,7 +143,7 @@ pub fn tool_read_note(
 /// maximum number of lines to return. The slice is clamped to the
 /// file's line count, so a `limit` that overflows returns the
 /// remainder; an `offset` past the end returns an empty `content`.
-pub fn tool_window_note(
+pub fn tool_window_note(ctx: &crate::agent::tools::context::ToolContext, 
     path_str: &str,
     offset: usize,
     limit: usize,
@@ -167,7 +166,7 @@ pub fn tool_window_note(
     }
 }
 
-pub fn tool_create_note(
+pub fn tool_create_note(ctx: &crate::agent::tools::context::ToolContext, 
     path_str: &str,
     content: &str,
     producer: &dyn crate::agent::tools::observer::OnFileChanged,
@@ -194,13 +193,13 @@ pub fn tool_create_note(
     }
 
     if let Some(parent) = path.parent()
-        && let Err(e) = std::fs::create_dir_all(parent)
+        && let Err(e) = ctx.vfs().create_dir_all(parent)
     {
         return Err(format!("Failed to create parent directories: {}", e));
     }
-    match std::fs::write(path, content) {
+    match ctx.vfs().write(path, content.as_bytes()) {
         Ok(_) => {
-            let size_bytes = std::fs::metadata(path).map(|m| m.len()).unwrap_or(0);
+            let size_bytes = ctx.vfs().metadata(path).map(|m| m.len).unwrap_or(0);
             // Tell the rest of the app this file now exists so the
             // directory tree, tag manager, etc. can pick it up without
             // waiting for an OS-level notify event.
@@ -218,7 +217,7 @@ pub fn tool_create_note(
 ///
 /// `offset == 0` inserts at the top; `offset == lines.len()` appends
 /// to the end. `offset > lines.len()` returns an error.
-pub fn tool_insert_into_note(
+pub fn tool_insert_into_note(ctx: &crate::agent::tools::context::ToolContext, 
     path_str: &str,
     offset: usize,
     lines_to_insert: &[String],
@@ -236,7 +235,7 @@ pub fn tool_insert_into_note(
             }
             let new_body = lines.join("\n");
             let new_content = reconstruct_file_content(header, &new_body);
-            match std::fs::write(path_str, new_content) {
+            match ctx.vfs().write(path_str.as_ref(), new_content.as_bytes()) {
                 Ok(_) => {
                     producer.on_file_changed(Path::new(path_str), crate::bus::events::file::FileEventKind::Updated);
                     Ok(crate::agent::tools::dtos::InsertIntoNoteResponse {
@@ -250,7 +249,7 @@ pub fn tool_insert_into_note(
     }
 }
 
-pub fn tool_patch_note(
+pub fn tool_patch_note(ctx: &crate::agent::tools::context::ToolContext, 
     path_str: &str,
     old_string: &str,
     new_string: &str,
@@ -265,7 +264,7 @@ pub fn tool_patch_note(
             let count = body.matches(old_string).count();
             let new_body = body.replace(old_string, new_string);
             let new_content = reconstruct_file_content(header, &new_body);
-            match std::fs::write(path_str, new_content) {
+            match ctx.vfs().write(path_str.as_ref(), new_content.as_bytes()) {
                 Ok(_) => {
                     producer.on_file_changed(Path::new(path_str), crate::bus::events::file::FileEventKind::Updated);
                     Ok(crate::agent::tools::dtos::PatchNoteResponse {

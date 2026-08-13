@@ -2,10 +2,20 @@
 
 use super::schema::{AddRowsInput, CreateCsvInput, CsvDatabase, ListCsvInput};
 use crate::agent::config::AgentConfig;
+
+fn test_ctx(config: &crate::agent::config::AgentConfig) -> crate::agent::tools::context::ToolContext {
+    let mut builder = crate::agent::tools::context::ToolContextBuilder::new(
+        std::sync::Arc::new(config.clone()),
+        std::sync::Arc::new(crate::agent::tools::observer::DefaultFileObserver)
+    );
+    builder = builder.with_extension(std::sync::Arc::new(crate::agent::tools::vfs::VirtualFileSystemExt(std::sync::Arc::new(crate::agent::tools::vfs::VfsResolver::new(std::sync::Arc::new(config.clone()))))));
+    builder.build()
+}
+
 use std::path::PathBuf;
 
-pub fn get_db_dir(config: &AgentConfig) -> PathBuf {
-    let path = if let Some(ref override_path) = config.csv_db_path {
+pub fn get_db_dir(ctx: &crate::agent::tools::context::ToolContext) -> PathBuf {
+    let path = if let Some(ref override_path) = ctx.config.csv_db_path {
         PathBuf::from(override_path)
     } else {
         let app_data = std::env::var("APPDATA").unwrap_or_else(|_| {
@@ -18,18 +28,18 @@ pub fn get_db_dir(config: &AgentConfig) -> PathBuf {
         p
     };
 
-    let _ = std::fs::create_dir_all(&path);
+    let _ = ctx.vfs().create_dir_all(&path);
     path
 }
 
-pub fn get_db_path(config: &AgentConfig, db_name: &str) -> PathBuf {
-    let mut path = get_db_dir(config);
+pub fn get_db_path(ctx: &crate::agent::tools::context::ToolContext, db_name: &str) -> PathBuf {
+    let mut path = get_db_dir(ctx);
     path.push(format!("{}.csv", db_name));
     path
 }
 
-pub fn create_csv(config: &AgentConfig, input: CreateCsvInput) -> Result<CsvDatabase, String> {
-    let db_path = get_db_path(config, &input.db_name);
+pub fn create_csv(ctx: &crate::agent::tools::context::ToolContext, input: CreateCsvInput) -> Result<CsvDatabase, String> {
+    let db_path = get_db_path(ctx, &input.db_name);
     if db_path.exists() {
         return Err(format!("Database '{}' already exists", input.db_name));
     }
@@ -47,13 +57,13 @@ pub fn create_csv(config: &AgentConfig, input: CreateCsvInput) -> Result<CsvData
     })
 }
 
-pub fn list_csv(config: &AgentConfig, _input: ListCsvInput) -> Result<Vec<CsvDatabase>, String> {
-    let db_dir = get_db_dir(config);
+pub fn list_csv(ctx: &crate::agent::tools::context::ToolContext, _input: ListCsvInput) -> Result<Vec<CsvDatabase>, String> {
+    let db_dir = get_db_dir(ctx);
     let mut dbs = Vec::new();
 
-    if let Ok(entries) = std::fs::read_dir(db_dir) {
-        for entry in entries.flatten() {
-            let path = entry.path();
+    if let Ok(entries) = ctx.vfs().read_dir(&db_dir) {
+        for entry in entries {
+            let path = entry.path;
             if path.extension().and_then(|e| e.to_str()) == Some("csv") {
                 let name = path
                     .file_stem()
@@ -80,8 +90,8 @@ pub fn list_csv(config: &AgentConfig, _input: ListCsvInput) -> Result<Vec<CsvDat
     Ok(dbs)
 }
 
-pub fn add_rows(config: &AgentConfig, input: AddRowsInput) -> Result<String, String> {
-    let db_path = get_db_path(config, &input.db_name);
+pub fn add_rows(ctx: &crate::agent::tools::context::ToolContext, input: AddRowsInput) -> Result<String, String> {
+    let db_path = get_db_path(ctx, &input.db_name);
     if !db_path.exists() {
         return Err(format!("Database '{}' does not exist", input.db_name));
     }
@@ -125,13 +135,7 @@ pub fn add_rows(config: &AgentConfig, input: AddRowsInput) -> Result<String, Str
     let mut buffer: Vec<u8> = Vec::new();
     write_rows_to_writer(&input.rows, &headers, &mut buffer)?;
 
-    use std::io::Write;
-    let mut file = std::fs::OpenOptions::new()
-        .append(true)
-        .open(&db_path)
-        .map_err(|e| format!("Failed to open file: {}", e))?;
-    file.write_all(&buffer)
-        .map_err(|e| format!("Failed to write to file: {}", e))?;
+    ctx.vfs().append(&db_path, &buffer).map_err(|e| format!("Failed to write to file: {}", e))?;
 
     Ok(format!("Added {} rows", input.rows.len()))
 }
@@ -208,15 +212,15 @@ mod tests {
             db_name: "test_db".to_string(),
             headers: vec!["id".to_string(), "name".to_string(), "age".to_string()],
         };
-        let db = create_csv(&config, create_input.clone()).unwrap();
+        let db = create_csv(&test_ctx(&config), create_input.clone()).unwrap();
         assert_eq!(db.name, "test_db");
         assert_eq!(db.headers.len(), 3);
 
         // Test creating again should fail
-        let err_create = create_csv(&config, create_input).unwrap_err();
+        let err_create = create_csv(&test_ctx(&config), create_input).unwrap_err();
         assert!(err_create.contains("already exists"));
 
-        let list = list_csv(&config, ListCsvInput {}).unwrap();
+        let list = list_csv(&test_ctx(&config), ListCsvInput {}).unwrap();
         assert_eq!(list.len(), 1);
         assert_eq!(list[0].name, "test_db");
 
@@ -234,7 +238,7 @@ mod tests {
             db_name: "test_db".to_string(),
             rows: vec![row1, row2],
         };
-        let add_res = add_rows(&config, add_input).unwrap();
+        let add_res = add_rows(&test_ctx(&config), add_input).unwrap();
         assert!(add_res.contains("Added 2 rows"));
 
         // Test invalid header
@@ -244,7 +248,7 @@ mod tests {
             db_name: "test_db".to_string(),
             rows: vec![bad_row],
         };
-        let err = add_rows(&config, bad_input).unwrap_err();
+        let err = add_rows(&test_ctx(&config), bad_input).unwrap_err();
         assert!(err.contains("invalid header"));
 
         // Test missing required header
@@ -255,12 +259,11 @@ mod tests {
             db_name: "test_db".to_string(),
             rows: vec![missing_row],
         };
-        let err_missing = add_rows(&config, missing_input).unwrap_err();
+        let err_missing = add_rows(&test_ctx(&config), missing_input).unwrap_err();
         assert!(err_missing.contains("missing required header"));
 
         // Test add to non-existent db
-        let err_not_exist = add_rows(
-            &config,
+        let err_not_exist = add_rows(&test_ctx(&config),
             AddRowsInput {
                 db_name: "missing_db".to_string(),
                 rows: vec![],
