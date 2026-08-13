@@ -1,13 +1,13 @@
 //! Built-in tool implementations and the default provider list.
 //!
-//! Each submodule under [`builtin`] defines a single family of
+//! Each submodule under `builtin` defines a single family of
 //! tools plus a `ToolProvider` struct that lists them. The
-//! [`default_providers`] function returns the canonical provider
+//! `default_providers` function returns the canonical provider
 //! list, in registration order; the [`ToolRegistry`] constructor
 //! iterates it and registers every tool each provider returns.
 //!
 //! MCP tools are registered separately via
-//! [`ToolRegistry::register_mcp_tool`], which calls into the MCP
+//! [`ToolRegistry::register_mcp_tool`](crate::agent::tools::registry::ToolRegistry::register_mcp_tool), which calls into the MCP
 //! client manager rather than a provider.
 
 #[cfg(feature = "browser")]

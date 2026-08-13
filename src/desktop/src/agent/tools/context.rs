@@ -99,17 +99,9 @@ pub struct ToolContext {
     pub file_event_bus: Bus<FileEvent>,
     pub resolver: VfsResolver,
     pub publisher: EventPublisher,
-    /// Long-lived headless Firefox session, shared across every
-    /// mutating browser tool call. `None` only in early-startup
-    /// tests that don't care about the browser. Tools that
-    /// don't use the browser ignore this field. When the
-    /// `browser` Cargo feature is off the session is a stub;
-    /// the `browser_*` tools are not registered and the field
-    /// stays unused.
-    pub browser_session: Arc<BrowserSession>,
-    pub pdf_backing: std::sync::Arc<crate::app::session::PdfBackingTracker>,
     pub cache: std::sync::Arc<crate::agent::tools::registry::cache::ToolCache>,
     pub uuid_gen: std::sync::Arc<dyn crate::utils::uuid::UuidGenerator>,
+    pub extensions: crate::agent::tools::extensions::Extensions,
 }
 
 impl ToolContext {
@@ -139,7 +131,14 @@ impl ToolContext {
 
     /// Check whether the given path is a Markdown file with a PDF sibling.
     pub fn is_pdf_backed(&self, path: &Path) -> bool {
-        self.pdf_backing.is_pdf_backed(path)
+        if let Some(pdf_backing) = self
+            .extensions
+            .get::<crate::app::session::PdfBackingTracker>()
+        {
+            pdf_backing.is_pdf_backed(path)
+        } else {
+            false
+        }
     }
 }
 
@@ -164,8 +163,7 @@ pub struct ToolContextBuilder {
     file_event_bus: Bus<FileEvent>,
     cache: std::sync::Arc<crate::agent::tools::registry::cache::ToolCache>,
     uuid_gen: std::sync::Arc<dyn crate::utils::uuid::UuidGenerator>,
-    browser_session: Option<Arc<BrowserSession>>,
-    pdf_backing: Option<std::sync::Arc<crate::app::session::PdfBackingTracker>>,
+    extensions: crate::agent::tools::extensions::Extensions,
 }
 
 impl ToolContextBuilder {
@@ -180,13 +178,12 @@ impl ToolContextBuilder {
             file_event_bus,
             cache,
             uuid_gen,
-            browser_session: None,
-            pdf_backing: None,
+            extensions: crate::agent::tools::extensions::Extensions::default(),
         }
     }
 
     pub fn with_browser_session(mut self, browser_session: Arc<BrowserSession>) -> Self {
-        self.browser_session = Some(browser_session);
+        self.extensions.insert(browser_session);
         self
     }
 
@@ -194,25 +191,38 @@ impl ToolContextBuilder {
         mut self,
         pdf_backing: std::sync::Arc<crate::app::session::PdfBackingTracker>,
     ) -> Self {
-        self.pdf_backing = Some(pdf_backing);
+        self.extensions.insert(pdf_backing);
+        self
+    }
+
+    pub fn with_extension<T: Send + Sync + 'static>(mut self, extension: Arc<T>) -> Self {
+        self.extensions.insert(extension);
         self
     }
 
     pub fn build(self) -> ToolContext {
-        let default_browser = Arc::new(BrowserSession::new(&self.config));
         let resolver = VfsResolver::new(self.config.clone());
         let publisher = EventPublisher::new(self.file_event_bus.clone());
+
+        let mut extensions = self.extensions;
+        if extensions.get::<BrowserSession>().is_none() {
+            extensions.insert(Arc::new(BrowserSession::new(&self.config)));
+        }
+        if extensions
+            .get::<crate::app::session::PdfBackingTracker>()
+            .is_none()
+        {
+            extensions.insert(Arc::new(crate::app::session::PdfBackingTracker::new()));
+        }
+
         ToolContext {
             config: self.config,
             file_event_bus: self.file_event_bus,
             resolver,
             publisher,
-            browser_session: self.browser_session.unwrap_or(default_browser),
-            pdf_backing: self
-                .pdf_backing
-                .unwrap_or_else(|| Arc::new(crate::app::session::PdfBackingTracker::new())),
             cache: self.cache,
             uuid_gen: self.uuid_gen,
+            extensions,
         }
     }
 }

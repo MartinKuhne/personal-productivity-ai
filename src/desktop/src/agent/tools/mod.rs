@@ -21,6 +21,7 @@ pub mod dispatcher;
 #[cfg(test)]
 mod dispatcher_tests;
 pub mod dtos;
+pub mod extensions;
 pub mod filesystem;
 pub mod jmap;
 pub mod mcp;

@@ -6,7 +6,7 @@ use crate::integrations::discord::commands::{
     APPLICATION_COMMAND, InteractionResponse, deferred_response, ephemeral_response,
     get_default_commands,
 };
-use crate::integrations::discord::context::ContextManager;
+use crate::integrations::discord::context::DiscordContext;
 use crate::integrations::discord::context::Role;
 use crate::integrations::discord::gateway::{
     GatewayClient, GatewayEvent, InteractionCreate, InteractionData, MessageCreate,
@@ -31,7 +31,7 @@ struct BotHandles {
     bot_token: String,
     http_client: HttpClient,
     llm_client: Option<LLMClient>,
-    context_manager: Arc<ContextManager>,
+    context_manager: Arc<DiscordContext>,
     rate_limiter: Arc<RateLimiter>,
     safety_filter: Arc<SafetyFilter>,
     system_prompt: Option<String>,
@@ -60,14 +60,17 @@ impl DiscordBot {
         let http_client = HttpClient::new();
         let (event_sender, event_receiver) = mpsc::unbounded_channel();
         let gateway = GatewayClient::new(bot_token.clone(), event_sender);
-        let context_manager = Arc::new(ContextManager::new(
+        let context_manager = Arc::new(DiscordContext::new(
             config.max_history,
             3600,
             Arc::new(crate::utils::uuid::SystemUuidGenerator),
         )); // 1 hour TTL
         let rate_limiter = Arc::new(RateLimiter::new(config.rate_limit_per_minute));
         let safety_filter = Arc::new(SafetyFilter::with_patterns(config.blocked_patterns.clone()));
-        let llm_client = LLMClient::from_config(&app_config, None);
+        let llm_client = LLMClient::from_agent_config(
+            &crate::agent::config::AgentConfig::from_app_config(&app_config),
+            None,
+        );
         let system_prompt = config.system_prompt.clone();
 
         let handles = BotHandles {

@@ -72,6 +72,7 @@ pub struct AgentContext {
     /// [`crate::agent::AgentToolContext`].
     pub tool_context: std::sync::Arc<arc_swap::ArcSwap<crate::agent::AgentToolContext>>,
     pub uuid_gen: Arc<dyn crate::utils::uuid::UuidGenerator>,
+    pub extensions: crate::agent::tools::extensions::Extensions,
 }
 
 pub struct AgentContextBuilder {
@@ -94,6 +95,7 @@ pub struct AgentContextBuilder {
     cache: Option<Arc<crate::agent::tools::registry::cache::ToolCache>>,
     tool_context: Option<Arc<arc_swap::ArcSwap<crate::agent::AgentToolContext>>>,
     uuid_gen: Option<Arc<dyn crate::utils::uuid::UuidGenerator>>,
+    extensions: crate::agent::tools::extensions::Extensions,
 }
 
 impl AgentContextBuilder {
@@ -117,6 +119,7 @@ impl AgentContextBuilder {
             cache: None,
             tool_context: None,
             uuid_gen: None,
+            extensions: crate::agent::tools::extensions::Extensions::new(),
         }
     }
 
@@ -206,6 +209,11 @@ impl AgentContextBuilder {
         self
     }
 
+    pub fn with_extension<T: Send + Sync + 'static>(mut self, extension: Arc<T>) -> Self {
+        self.extensions.insert(extension);
+        self
+    }
+
     pub fn build(self) -> AgentContext {
         let default_browser_session = Arc::new(BrowserSession::with_resolved(
             self.agent_config.browser().clone(),
@@ -248,6 +256,7 @@ impl AgentContextBuilder {
             uuid_gen: self
                 .uuid_gen
                 .unwrap_or_else(|| Arc::new(crate::utils::uuid::SystemUuidGenerator)),
+            extensions: self.extensions,
         }
     }
 }
