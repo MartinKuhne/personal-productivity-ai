@@ -2,7 +2,7 @@
 
 use crate::agent::config::AgentConfig;
 use crate::agent::error::AgentError;
-use crate::bus::events::messages::TokenUsageInfo;
+use crate::agent::events::TokenUsageInfo;
 use backon::BlockingRetryable;
 use backon::ExponentialBuilder;
 

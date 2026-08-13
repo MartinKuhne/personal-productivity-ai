@@ -1,9 +1,12 @@
 use crate::agent::events::{AgentEventObserver, AgentStatus, ToolSideEffect};
+use crate::agent::tools::observer::OnFileChanged;
 use crate::bus::core::Bus;
 use crate::bus::events::debug::AgentDebugEntry;
+use crate::bus::events::file::{FileEvent, FileEventProducer};
 use crate::bus::events::messages::TokenUsageInfo;
 use serde::Serialize;
 use serde_json::Value;
+use std::path::Path;
 use uuid::Uuid;
 
 /// Output message: agent → UI on `Bus<AgentEvent>` (tokio broadcast, capacity
@@ -89,16 +92,31 @@ impl AgentEvent {
 }
 
 /// An observer that serializes observer calls back into `AgentEvent` variants
-/// and forwards them to a `Bus<AgentEvent>`.
+/// and forwards them to a `Bus<AgentEvent>`, and publishes file mutations
+/// to a `Bus<FileEvent>`.
 pub struct BusAgentEventObserver {
     session_id: Uuid,
     bus: Bus<AgentEvent>,
+    file_producer: Option<FileEventProducer>,
 }
 
 impl BusAgentEventObserver {
     /// Create a new observer scoped to `session_id` that sends events to the given `bus`.
     pub fn new(session_id: Uuid, bus: Bus<AgentEvent>) -> Self {
-        Self { session_id, bus }
+        Self {
+            session_id,
+            bus,
+            file_producer: None,
+        }
+    }
+
+    /// Create a new observer scoped to `session_id` that also publishes file changes to `file_bus`.
+    pub fn with_file_bus(session_id: Uuid, bus: Bus<AgentEvent>, file_bus: Bus<FileEvent>) -> Self {
+        Self {
+            session_id,
+            bus,
+            file_producer: Some(FileEventProducer::new(file_bus)),
+        }
     }
 
     fn emit(&self, event: AgentEvent) {
@@ -150,7 +168,7 @@ impl AgentEventObserver for BusAgentEventObserver {
         });
     }
 
-    fn on_tool_result(&self, id: String, name: String, result: serde_json::Value) {
+    fn on_tool_result(&self, id: String, name: String, result: Value) {
         self.emit(AgentEvent::ToolResult {
             session_id: self.session_id,
             id,
@@ -160,6 +178,13 @@ impl AgentEventObserver for BusAgentEventObserver {
     }
 
     fn on_tool_side_effect(&self, effect: ToolSideEffect) {
+        if let Some(ref producer) = self.file_producer {
+            match &effect {
+                ToolSideEffect::FileCreated { path, .. } | ToolSideEffect::FileChanged { path } => {
+                    producer.publish_updated(path);
+                }
+            }
+        }
         self.emit(AgentEvent::ToolSideEffect {
             session_id: self.session_id,
             effect,
@@ -184,6 +209,14 @@ impl AgentEventObserver for BusAgentEventObserver {
         self.emit(AgentEvent::Failed {
             session_id: self.session_id,
             error,
+        });
+    }
+}
+
+impl OnFileChanged for BusAgentEventObserver {
+    fn on_file_changed(&self, path: &Path) {
+        self.on_tool_side_effect(ToolSideEffect::FileChanged {
+            path: path.to_path_buf(),
         });
     }
 }

@@ -3,11 +3,9 @@
 //! Unit tests live in the sibling `session_tests.rs` sidecar.
 
 use crate::agent::config::AgentConfig;
-use crate::agent::events::AgentPrompt;
+use crate::agent::events::{AgentDebugEntry, AgentPrompt, TokenUsageInfo};
 use crate::app::events::AgentEvent as SeamAgentEvent;
 use crate::bus::core::Bus;
-use crate::bus::events::debug::AgentDebugEntry;
-use crate::bus::events::messages::TokenUsageInfo;
 use serde_json::Value;
 use std::sync::mpsc::{self, Sender};
 use std::sync::{
@@ -224,7 +222,7 @@ impl AgentSession {
 
     /// Push a debug entry to the accumulated list. Called by the
     /// orchestrator's `drain_agent_event_bus` when a `DebugEntry` event arrives.
-    pub fn push_debug_entry(&mut self, entry: crate::bus::events::debug::AgentDebugEntry) {
+    pub fn push_debug_entry(&mut self, entry: AgentDebugEntry) {
         self.state.debug_entries.push(entry);
     }
 

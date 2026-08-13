@@ -2,11 +2,11 @@
 
 use crate::agent::context::AgentContext;
 use crate::agent::datamark;
-use crate::agent::events::{AgentEventObserver, AgentStatus};
+use crate::agent::events::{
+    AgentDebugEntry, AgentEventObserver, AgentStatus, DebugEntryKind, DebugEntryRow,
+};
 use crate::agent::llm_client::{LLMClient, parse_usage_block};
 use crate::agent::tool_executor::ToolExecutor;
-
-use crate::bus::events::debug::{AgentDebugEntry, DebugEntryKind, DebugEntryRow};
 use std::collections::HashSet;
 use std::path::PathBuf;
 use std::sync::atomic::Ordering;

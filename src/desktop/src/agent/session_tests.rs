@@ -2,7 +2,7 @@
 
 use super::*;
 use crate::agent::config::AgentConfigBuilder;
-use crate::bus::events::debug::{AgentDebugEntry, DebugEntryKind, DebugEntryRow};
+use crate::agent::events::{AgentDebugEntry, DebugEntryKind, DebugEntryRow};
 use std::collections::HashSet;
 
 /// Build a default `AgentSession` for unit tests. Each call spawns a

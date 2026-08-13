@@ -4,9 +4,9 @@ use crate::agent::agent_impl::run_agent;
 use crate::agent::config::AgentConfig;
 use crate::agent::config::AgentConfigBuilder;
 use crate::agent::context::AgentContext;
+use crate::agent::events::{AgentDebugEntry, DebugEntryKind, DebugEntryRow};
 use crate::app::events::AgentEvent as SeamAgentEvent;
 use crate::bus::core::BusReader;
-use crate::bus::events::debug::{AgentDebugEntry, DebugEntryKind, DebugEntryRow};
 use std::sync::Arc;
 
 fn make_agent_config(port: u16) -> AgentConfig {

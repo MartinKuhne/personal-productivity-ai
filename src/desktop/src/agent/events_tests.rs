@@ -310,3 +310,43 @@ fn test_session_continuity_history_carries_over() {
         );
     }
 }
+
+#[test]
+fn test_bus_agent_event_observer_forwards_file_events() {
+    use crate::agent::events::AgentEventObserver;
+    use crate::bus::events::file::{FileEvent, FileEventKind};
+    use std::path::PathBuf;
+
+    let session_id = uuid::Uuid::new_v4();
+    let agent_bus = Bus::new();
+    let agent_reader = agent_bus.subscribe();
+    let file_bus: Bus<FileEvent> = Bus::new();
+    let file_reader = file_bus.subscribe();
+
+    let observer =
+        crate::app::events::BusAgentEventObserver::with_file_bus(session_id, agent_bus, file_bus);
+
+    let test_path = PathBuf::from("notes/test.md");
+    observer.on_tool_side_effect(crate::agent::events::ToolSideEffect::FileChanged {
+        path: test_path.clone(),
+    });
+
+    let ev = file_reader
+        .try_recv()
+        .expect("file event must be published");
+    assert_eq!(ev.kind, FileEventKind::Updated);
+    assert_eq!(ev.paths, vec![test_path.clone()]);
+
+    let agent_ev = agent_reader
+        .try_recv()
+        .expect("agent event must be published");
+    match agent_ev {
+        AgentEvent::ToolSideEffect { effect, .. } => {
+            assert_eq!(
+                effect,
+                crate::agent::events::ToolSideEffect::FileChanged { path: test_path }
+            );
+        }
+        other => panic!("expected ToolSideEffect, got {:?}", other),
+    }
+}

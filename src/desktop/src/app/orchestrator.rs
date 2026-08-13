@@ -399,12 +399,15 @@ impl AppOrchestrator {
                         SeamAgentEvent::DebugEntry { entry, .. } => {
                             self.agent.push_debug_entry(entry.clone());
                         }
-                        SeamAgentEvent::ToolSideEffect {
-                            effect: ToolSideEffect::FileCreated { path, tags },
-                            ..
-                        } => {
-                            pending_side_effects.push((path.clone(), tags.clone()));
-                        }
+                        SeamAgentEvent::ToolSideEffect { effect, .. } => match effect {
+                            ToolSideEffect::FileCreated { path, tags } => {
+                                pending_side_effects.push((path.clone(), tags.clone()));
+                            }
+                            ToolSideEffect::FileChanged { path } => {
+                                let tags = crate::utils::tags::extract_tags_from_file(path);
+                                pending_side_effects.push((path.clone(), tags));
+                            }
+                        },
                         // Transcript-building events:
                         SeamAgentEvent::ContentDelta { .. }
                         | SeamAgentEvent::Thinking { .. }

@@ -1,7 +1,6 @@
 //! Tool context — provides tools with access to the global `AppConfig` and the file event bus, plus safe virtual-path resolution.
 
 use crate::agent::config::AgentConfig;
-use crate::bus::events::file::FileEventKind;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
@@ -85,8 +84,8 @@ impl ToolContext {
         }
     }
 
-    pub fn publish_file_event(&self, kind: FileEventKind, path: &Path) {
-        self.file_observer().on_file_changed(path, kind);
+    pub fn publish_file_event(&self, path: &Path) {
+        self.file_observer().on_file_changed(path);
     }
 
     /// Check whether the given path is allowed to be written to. Returns an error string if blocked.

@@ -38,7 +38,6 @@ pub fn tool_write_yaml_header(
     header_date: Option<&str>,
     producer: &dyn crate::agent::tools::observer::OnFileChanged,
 ) -> Result<crate::agent::tools::dtos::WriteYamlHeaderResponse, String> {
-    let existed = Path::new(path_str).exists();
     let current_content = ctx
         .vfs()
         .read_to_string(path_str.as_ref())
@@ -89,20 +88,7 @@ pub fn tool_write_yaml_header(
             }
             match ctx.vfs().write(path_str.as_ref(), new_content.as_bytes()) {
                 Ok(_) => {
-                    // Was the file created or updated? Publish the
-                    // matching event so consumers (directory tree,
-                    // tag manager) refresh.
-                    if existed {
-                        producer.on_file_changed(
-                            path,
-                            crate::bus::events::file::FileEventKind::Updated,
-                        );
-                    } else {
-                        producer.on_file_changed(
-                            path,
-                            crate::bus::events::file::FileEventKind::Discovered,
-                        );
-                    }
+                    producer.on_file_changed(path);
                     Ok(crate::agent::tools::dtos::WriteYamlHeaderResponse {
                         result: "YAML header written successfully.".to_string(),
                     })
@@ -269,9 +255,7 @@ mod tests {
     }
 
     #[test]
-    fn test_tool_write_yaml_header_publishes_discovered_for_new_file() {
-        // A brand new file must publish a Discovered event so the
-        // directory tree and tag manager pick it up.
+    fn test_tool_write_yaml_header_publishes_event_on_write() {
         let bus = crate::bus::core::Bus::new();
         let reader = bus.subscribe();
         let producer: std::sync::Arc<dyn crate::agent::tools::observer::OnFileChanged> =
@@ -296,7 +280,7 @@ mod tests {
         let event = reader
             .recv_timeout(std::time::Duration::from_millis(100))
             .unwrap();
-        assert_eq!(event.kind, FileEventKind::Discovered);
+        assert_eq!(event.kind, FileEventKind::Updated);
         assert_eq!(event.paths[0], file_path);
     }
 

@@ -211,7 +211,7 @@ pub fn tool_create_note(
             // Tell the rest of the app this file now exists so the
             // directory tree, tag manager, etc. can pick it up without
             // waiting for an OS-level notify event.
-            producer.on_file_changed(path, crate::bus::events::file::FileEventKind::Discovered);
+            producer.on_file_changed(path);
             Ok(crate::agent::tools::dtos::CreateNoteResponse {
                 result: "File created successfully.".to_string(),
                 size_bytes,
@@ -246,10 +246,7 @@ pub fn tool_insert_into_note(
             let new_content = reconstruct_file_content(header, &new_body);
             match ctx.vfs().write(path_str.as_ref(), new_content.as_bytes()) {
                 Ok(_) => {
-                    producer.on_file_changed(
-                        Path::new(path_str),
-                        crate::bus::events::file::FileEventKind::Updated,
-                    );
+                    producer.on_file_changed(Path::new(path_str));
                     Ok(crate::agent::tools::dtos::InsertIntoNoteResponse {
                         result: "Lines inserted successfully.".to_string(),
                     })
@@ -279,10 +276,7 @@ pub fn tool_patch_note(
             let new_content = reconstruct_file_content(header, &new_body);
             match ctx.vfs().write(path_str.as_ref(), new_content.as_bytes()) {
                 Ok(_) => {
-                    producer.on_file_changed(
-                        Path::new(path_str),
-                        crate::bus::events::file::FileEventKind::Updated,
-                    );
+                    producer.on_file_changed(Path::new(path_str));
                     Ok(crate::agent::tools::dtos::PatchNoteResponse {
                         result: format!("Successfully replaced {} occurrence(s).", count),
                     })
