@@ -1,6 +1,5 @@
 //! Tool context — provides tools with access to the global `AppConfig` and the file event bus, plus safe virtual-path resolution.
 
-use crate::app::session::BrowserSession;
 use crate::app::vfs;
 use crate::bus::core::Bus;
 use crate::bus::events::file::{FileEvent, FileEventKind};
@@ -128,11 +127,6 @@ impl ToolContextBuilder {
         }
     }
 
-    pub fn with_browser_session(mut self, browser_session: Arc<BrowserSession>) -> Self {
-        self.extensions.insert(browser_session);
-        self
-    }
-
     pub fn with_tool_call_policy(
         mut self,
         policy: std::sync::Arc<dyn crate::agent::tools::policy::ToolCallPolicy>,
@@ -154,9 +148,6 @@ impl ToolContextBuilder {
             extensions.insert(std::sync::Arc::new(crate::agent::tools::vfs::VirtualFileSystemExt(std::sync::Arc::new(
                 crate::agent::tools::vfs::VfsResolver::new(self.config.clone())
             ))));
-        }
-        if extensions.get::<BrowserSession>().is_none() {
-            extensions.insert(Arc::new(BrowserSession::with_resolved(self.config.browser().clone())));
         }
         if extensions
             .get::<crate::agent::tools::policy::ToolCallPolicyExt>()

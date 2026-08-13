@@ -5,7 +5,6 @@
 use crate::agent::config::AgentConfig;
 use crate::agent::events::AgentPrompt;
 use crate::app::events::AgentEvent as SeamAgentEvent;
-use crate::app::session::BrowserSession;
 use crate::bus::core::Bus;
 use crate::bus::events::debug::AgentDebugEntry;
 use crate::bus::events::messages::TokenUsageInfo;
@@ -48,6 +47,7 @@ pub struct AgentState {
 /// - Exposes read-only `AgentState` for UI rendering
 /// - Exposes `event_bus()` for UI to subscribe to `Bus<AgentEvent>`
 pub struct AgentSession {
+    pub extensions: crate::agent::tools::extensions::Extensions,
     state: AgentState,
     cancel_flag: Option<Arc<AtomicBool>>,
     /// Shared cell holding the agent's domain config. The UI thread
@@ -82,7 +82,6 @@ pub struct AgentSession {
     /// a stub that returns [`crate::app::session::SessionError::Disabled`]
     /// on every page-handle request; the `browser_*` tools are
     /// not registered.
-    browser_session: Arc<BrowserSession>,
 }
 
 impl AgentSession {
@@ -97,38 +96,12 @@ impl AgentSession {
     /// Build a session manager with a shared cell for the agent's
     /// domain config. The orchestrator writes the cell via
     /// [`Self::set_agent_config`]; the driver reads it per session.
-    pub fn new(
-        file_observer: std::sync::Arc<dyn crate::agent::tools::observer::OnFileChanged>,
-        browser_session: Arc<BrowserSession>,
-        policy: Arc<dyn crate::agent::tools::policy::ToolCallPolicy>,
-        tool_context: Arc<arc_swap::ArcSwap<crate::agent::AgentToolContext>>,
-    ) -> Self {
-        Self::builder()
-            .with_file_observer(file_observer)
-            .with_browser_session(browser_session)
-            .with_tool_call_policy(policy)
-            .with_tool_context(tool_context)
-            .build()
-    }
+    
 
     /// Construct an `AgentSession` with an initial domain config.
     /// The session holds a private cell containing the config; updates
     /// arrive via [`Self::set_agent_config`].
-    pub fn new_with_agent_config(
-        initial_config: AgentConfig,
-        file_observer: std::sync::Arc<dyn crate::agent::tools::observer::OnFileChanged>,
-        browser_session: Arc<BrowserSession>,
-        policy: Arc<dyn crate::agent::tools::policy::ToolCallPolicy>,
-        tool_context: Arc<arc_swap::ArcSwap<crate::agent::AgentToolContext>>,
-    ) -> Self {
-        Self::builder()
-            .with_agent_config(initial_config)
-            .with_file_observer(file_observer)
-            .with_browser_session(browser_session)
-            .with_tool_call_policy(policy)
-            .with_tool_context(tool_context)
-            .build()
-    }
+    
 
     /// Snapshot of the current agent config.
     pub fn agent_config(&self) -> AgentConfig {
@@ -161,9 +134,6 @@ impl AgentSession {
     /// so the UI layer can call [`BrowserSession::tick`]
     /// (idle-timeout) and [`BrowserSession::forget`]
     /// (clean logout) without going through the agent.
-    pub fn browser_session(&self) -> Arc<BrowserSession> {
-        self.browser_session.clone()
-    }
 
     /// Return a clone of the agent→UI event bus so the UI can subscribe
     /// via `BusReader<AgentEvent>` and drain structured agent events each
@@ -327,8 +297,8 @@ impl AgentSession {
 /// [`Self::with_agent_config_provider`]. The orchestrator (which already
 /// drains `Bus<ConfigArrived>`) is the projection site.
 pub struct AgentSessionBuilder {
+    extensions: crate::agent::tools::extensions::Extensions,
     file_observer: Option<std::sync::Arc<dyn crate::agent::tools::observer::OnFileChanged>>,
-    browser_session: Option<Arc<BrowserSession>>,
     policy: Option<Arc<dyn crate::agent::tools::policy::ToolCallPolicy>>,
     tool_context: Option<Arc<arc_swap::ArcSwap<crate::agent::AgentToolContext>>>,
     initial_agent_config: Option<AgentConfig>,
@@ -340,14 +310,14 @@ impl AgentSessionBuilder {
     pub fn new() -> Self {
         Self {
             file_observer: None,
-            browser_session: None,
             policy: None,
             tool_context: None,
             initial_agent_config: None,
             agent_config_provider: None,
+            extensions: crate::agent::tools::extensions::Extensions::default(),
         }
     }
-
+    pub fn builder() -> Self { Self::new() }
     /// Set the file event bus.
     pub fn with_file_observer(mut self, bus: std::sync::Arc<dyn crate::agent::tools::observer::OnFileChanged>) -> Self {
         self.file_observer = Some(bus);
@@ -355,10 +325,6 @@ impl AgentSessionBuilder {
     }
 
     /// Set the long-lived headless browser session.
-    pub fn with_browser_session(mut self, browser_session: Arc<BrowserSession>) -> Self {
-        self.browser_session = Some(browser_session);
-        self
-    }
 
     /// Set the shared PDF-backing tracker.
     pub fn with_tool_call_policy(
@@ -376,6 +342,11 @@ impl AgentSessionBuilder {
         tool_context: Arc<arc_swap::ArcSwap<crate::agent::AgentToolContext>>,
     ) -> Self {
         self.tool_context = Some(tool_context);
+        self
+    }
+
+    pub fn with_extension<T: Send + Sync + \'static>(mut self, extension: std::sync::Arc<T>) -> Self {
+        self.extensions.insert(extension);
         self
     }
 
@@ -400,9 +371,6 @@ impl AgentSessionBuilder {
         let file_observer = self
             .file_observer
             .expect("AgentSession requires with_file_observer");
-        let browser_session = self
-            .browser_session
-            .expect("AgentSession requires with_browser_session");
         let policy = self
             .policy
             .expect("AgentSession requires with_tool_call_policy");
@@ -421,9 +389,9 @@ impl AgentSessionBuilder {
             agent_event_bus.clone(),
             agent_config_provider.clone(),
             file_observer,
-            browser_session.clone(),
             policy,
             tool_context,
+            self.extensions,
         );
         AgentSession {
             state: AgentState {
@@ -443,7 +411,7 @@ impl AgentSessionBuilder {
             agent_event_bus,
             prompt_tx,
             driver_handle: Some(driver_handle),
-            browser_session,
+            extensions: self.extensions,
         }
     }
 }
@@ -465,9 +433,9 @@ fn spawn_driver(
     agent_event_bus: Bus<SeamAgentEvent>,
     agent_config_provider: Arc<std::sync::RwLock<AgentConfig>>,
     file_observer: std::sync::Arc<dyn crate::agent::tools::observer::OnFileChanged>,
-    browser_session: Arc<BrowserSession>,
     policy: Arc<dyn crate::agent::tools::policy::ToolCallPolicy>,
     tool_context: Arc<arc_swap::ArcSwap<crate::agent::AgentToolContext>>,
+    extensions: crate::agent::tools::extensions::Extensions,
 ) -> JoinHandle<()> {
     std::thread::spawn(move || {
         // Per-session history cache. Keyed by `session_id` so continuation
@@ -495,8 +463,8 @@ fn spawn_driver(
             .with_system_prompts(prompt.system_prompts)
             .with_cancel_flag(prompt.cancel_flag)
             .with_history(history.clone())
-            .with_browser_session(browser_session.clone())
             .with_tool_call_policy(policy.clone())
+              .with_extensions(extensions.clone())
             .with_cache(std::sync::Arc::new(
                 crate::agent::tools::registry::cache::ToolCache::new(),
             ))

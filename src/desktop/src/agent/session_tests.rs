@@ -10,10 +10,7 @@ use std::collections::HashSet;
 fn make_session() -> AgentSession {
     AgentSession::new(
         std::sync::Arc::new(crate::agent::tools::observer::DefaultFileObserver),
-        Arc::new(crate::app::session::BrowserSession::with_resolved(
-            AgentConfig::default().browser().clone(),
-        )),
-        Arc::new(crate::agent::tools::policy::DefaultToolCallPolicy),
+                Arc::new(crate::agent::tools::policy::DefaultToolCallPolicy),
         Arc::new(arc_swap::ArcSwap::from_pointee(
             crate::agent::AgentToolContext::new(crate::agent::tools::registry::ToolRegistry::new()),
         )),

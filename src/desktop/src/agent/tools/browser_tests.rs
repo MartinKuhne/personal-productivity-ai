@@ -17,7 +17,6 @@
 #![cfg(test)]
 
 use crate::agent::tools::Tool;
-use crate::app::session::BrowserSession;
 use crate::agent::config::AgentConfig;
 use std::sync::Arc;
 use tempfile::TempDir;
@@ -104,7 +103,6 @@ fn test_browser_navigate_tool_round_trip() {
     )
     .with_extension(std::sync::Arc::new(crate::agent::tools::context::ToolCacheExt(cache.clone())))
     .with_extension(std::sync::Arc::new(crate::agent::tools::context::UuidGeneratorExt(Arc::new(crate::utils::uuid::SystemUuidGenerator))))
-    .with_browser_session(session)
     .with_tool_call_policy(pdf_backing)
     .build();
 
@@ -130,7 +128,6 @@ fn test_browser_get_page_state_tool_is_readonly() {
     )
     .with_extension(std::sync::Arc::new(crate::agent::tools::context::ToolCacheExt(cache.clone())))
     .with_extension(std::sync::Arc::new(crate::agent::tools::context::UuidGeneratorExt(Arc::new(crate::utils::uuid::SystemUuidGenerator))))
-    .with_browser_session(session)
     .with_tool_call_policy(pdf_backing)
     .build();
 

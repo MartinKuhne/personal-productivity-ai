@@ -2,17 +2,12 @@
 
 use super::*;
 use crate::agent::tools::context::ToolContext;
-use crate::app::session::BrowserSession;
 use crate::bus::core::Bus;
 use crate::agent::config::AgentConfig;
 use serde_json::Value;
 use std::fs;
 use std::sync::Arc;
 use tempfile::TempDir;
-
-fn test_browser_session() -> Arc<BrowserSession> {
-    Arc::new(BrowserSession::new(&crate::config::AppConfig::default()))
-}
 
 fn test_ctx(config: &AgentConfig) -> ToolContext {
     crate::agent::tools::context::ToolContextBuilder::new(

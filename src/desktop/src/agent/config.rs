@@ -31,10 +31,6 @@
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 
-use crate::config::{
-    CalDavClient, ContentLibrary, JmapClient, LlmConfig, McpServerEntry, ResolvedBrowserConfig,
-    ToolGroupsConfig, TrelloClient, get_config_path,
-};
 
 /// Domain-specific configuration for the agent module.
 ///
@@ -319,7 +315,14 @@ impl Default for AgentConfigBuilder {
 /// agent's existing tests use so the test-side churn is a one-liner.
 #[cfg(test)]
 pub(crate) fn make_test_agent_config() -> AgentConfig {
-    use crate::config::LlmConfig;
+    
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize, PartialEq)]
+pub struct LlmConfig {
+    pub provider: String,
+    pub api_key: Option<String>,
+    pub model_id: Option<String>,
+    pub base_url: Option<String>,
+}
     let mut models = HashMap::new();
     models.insert(
         "test".to_string(),

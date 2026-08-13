@@ -124,12 +124,13 @@ impl FastMdApp {
         // channel? No — we keep `config_bus` and `config_reader`
         // so the UI can still drain the bus; the `AgentSession`
         // itself is built without a `config_bus` parameter.
-        let agent = AgentSession::new(
-            std::sync::Arc::new(crate::app::session::bus_observer::AppFileObserver::new(background_task.file_event_bus.clone())),
-            browser_session.clone(),
-            Arc::new(pdf_backing_tracker.clone()),
-            tool_context.clone(),
-        );
+        let agent = AgentSession::builder()
+            .with_file_observer(std::sync::Arc::new(crate::app::session::bus_observer::AppFileObserver::new(background_task.file_event_bus.clone())))
+            .with_extension(browser_session.clone())
+            .with_extension(Arc::new(crate::agent::tools::browser::BrowserExt(browser_session.clone())))
+            .with_extension(Arc::new(pdf_backing_tracker.clone()))
+            .with_tool_context(tool_context.clone())
+            .build();
 
         let event_bus = background_task.file_event_bus;
         let dir_tracker = DirectoryTracker::new(event_bus.subscribe());

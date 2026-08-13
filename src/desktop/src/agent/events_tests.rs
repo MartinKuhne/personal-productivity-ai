@@ -30,9 +30,6 @@ fn make_agent_config(port: u16) -> AgentConfig {
 }
 
 fn make_ctx(config: AgentConfig) -> (AgentContext, BusReader<AgentEvent>) {
-    let browser_session = Arc::new(crate::app::session::BrowserSession::with_resolved(
-        config.browser().clone(),
-    ));
     let agent_event_bus = Bus::new();
     let bus_reader = agent_event_bus.subscribe();
     let session_id = uuid::Uuid::new_v4();
@@ -43,7 +40,6 @@ fn make_ctx(config: AgentConfig) -> (AgentContext, BusReader<AgentEvent>) {
                 crate::app::events::BusAgentEventObserver::new(session_id, agent_event_bus.clone()),
             ))
             .with_system_prompts(Vec::new())
-            .with_browser_session(browser_session)
             .build();
     (ctx, bus_reader)
 }

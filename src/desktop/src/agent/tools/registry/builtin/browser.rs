@@ -1,11 +1,7 @@
 //! LLM tool wrappers for the headless browser (`BRWS-001..008`).
 //!
-//! Each tool's `Tool::execute` runs the underlying Playwright
-//! future on the process-wide Tokio runtime via
-//! [`crate::agent::tools::blocking::block_on`] — the same
-//! sync-to-async bridge the CalDAV / CardDAV tools use. Mutating
-//! tools trigger a `save_storage()` on the
-//! [`crate::app::session::BrowserSession`] so cookies / local
+//! Each tool's `Tool::execute` runs the underlying browser extension methods.
+//! Mutating tools trigger a `save_storage()` so cookies / local
 //! storage survive an app restart. See
 //! `doc/planning/browser_tools.md` for the design record and
 //! `src/desktop/Tools.md` for the user-facing catalog.
@@ -20,9 +16,7 @@ use crate::agent::tools::registry::groups::{InternalToolGroup, ToolGroupId};
 use fastmd_tool_macros::ToolDescriptor;
 use std::sync::Arc;
 
-/// Convert any error string into a Tool error string. Most
-/// Playwright errors already have decent `Display` impls; we
-/// just wrap them with a stable prefix.
+/// Convert any error string into a Tool error string.
 fn err(s: impl std::fmt::Display) -> String {
     format!("browser tool failed: {}", s)
 }
@@ -30,6 +24,12 @@ fn err(s: impl std::fmt::Display) -> String {
 fn browser_spec() -> ToolConfigSpec {
     let group = ToolGroupId::Internal(InternalToolGroup::Browser);
     ToolConfigSpec::group_only(group)
+}
+
+fn ext(ctx: &ToolContext) -> Result<Arc<dyn crate::agent::tools::browser::BrowserAutomationExt>, String> {
+    ctx.extensions.get::<crate::agent::tools::browser::BrowserExt>()
+        .map(|w| w.0.clone())
+        .ok_or_else(|| err("browser extension not found"))
 }
 
 // ---------------------------------------------------------------------------
@@ -54,23 +54,9 @@ fn execute_browser_navigate(
 ) -> Result<serde_json::Value, String> {
     let input: dtos::BrowserNavigateInput =
         serde_json::from_str(args).map_err(|e| err(format!("Invalid args: {}", e)))?;
-    let handle = ctx
-        .extensions
-        .get::<crate::app::session::BrowserSession>()
-        .unwrap()
-        .page()
-        .map_err(err)?;
-    crate::agent::tools::blocking::block_on(async { handle.page.goto(&input.url, None).await })
-        .map_err(err)?;
-    // After navigation, the cookies may have changed; persist.
-    let _ = ctx
-        .extensions
-        .get::<crate::app::session::BrowserSession>()
-        .unwrap()
-        .save_storage();
-    let final_url = handle.page.url();
-    let title = crate::agent::tools::blocking::block_on(async { handle.page.title().await })
-        .unwrap_or_default();
+    let browser = ext(ctx)?;
+    let (final_url, title) = browser.navigate(&input.url).map_err(err)?;
+    let _ = browser.save_storage();
     let resp = dtos::BrowserNavigateResponse {
         url: final_url,
         title,
@@ -98,40 +84,8 @@ fn execute_browser_get_page_state(
     ctx: &ToolContext,
     _args: &str,
 ) -> Result<serde_json::Value, String> {
-    let handle = ctx
-        .extensions
-        .get::<crate::app::session::BrowserSession>()
-        .unwrap()
-        .page()
-        .map_err(err)?;
-    let script = r#"
-        () => {
-            const elements = document.querySelectorAll('a, button, input, select, textarea');
-            const out = [];
-            elements.forEach((el, i) => {
-                el.setAttribute('data-agent-id', i);
-                out.push({
-                    agent_id: i,
-                    tag: el.tagName,
-                    text: (el.innerText || el.value || '').slice(0, 200),
-                    placeholder: el.getAttribute('placeholder') || '',
-                    name: el.getAttribute('name') || '',
-                    type: el.getAttribute('type') || '',
-                    href: el.getAttribute('href') || null
-                });
-            });
-            return out;
-        }
-    "#;
-    let value: serde_json::Value = crate::agent::tools::blocking::block_on(async {
-        handle.page.evaluate(script, None::<&()>).await
-    })
-    .map_err(err)?;
-    let elements_json = serde_json::to_string(&value).unwrap_or_else(|_| "[]".to_string());
-    let total = value.as_array().map(|a| a.len()).unwrap_or(0);
-    let url = handle.page.url();
-    let title = crate::agent::tools::blocking::block_on(async { handle.page.title().await })
-        .unwrap_or_default();
+    let browser = ext(ctx)?;
+    let (url, title, elements_json, total) = browser.get_page_state().map_err(err)?;
     let resp = dtos::BrowserGetPageStateResponse {
         url,
         title,
@@ -163,20 +117,9 @@ fn execute_browser_click(
 ) -> Result<serde_json::Value, String> {
     let input: dtos::BrowserClickInput =
         serde_json::from_str(args).map_err(|e| err(format!("Invalid args: {}", e)))?;
-    let handle = ctx
-        .extensions
-        .get::<crate::app::session::BrowserSession>()
-        .unwrap()
-        .page()
-        .map_err(err)?;
-    let selector = input.selector;
-    let locator = handle.page.locator(&selector);
-    crate::agent::tools::blocking::block_on(async { locator.click(None).await }).map_err(err)?;
-    let _ = ctx
-        .extensions
-        .get::<crate::app::session::BrowserSession>()
-        .unwrap()
-        .save_storage();
+    let browser = ext(ctx)?;
+    browser.click(&input.selector).map_err(err)?;
+    let _ = browser.save_storage();
     let resp = dtos::BrowserClickResponse {
         result: "clicked".to_string(),
     };
@@ -205,22 +148,9 @@ fn execute_browser_fill_input(
 ) -> Result<serde_json::Value, String> {
     let input: dtos::BrowserFillInputInput =
         serde_json::from_str(args).map_err(|e| err(format!("Invalid args: {}", e)))?;
-    let handle = ctx
-        .extensions
-        .get::<crate::app::session::BrowserSession>()
-        .unwrap()
-        .page()
-        .map_err(err)?;
-    let selector = input.selector;
-    let text = input.text;
-    let locator = handle.page.locator(&selector);
-    crate::agent::tools::blocking::block_on(async { locator.fill(&text, None).await })
-        .map_err(err)?;
-    let _ = ctx
-        .extensions
-        .get::<crate::app::session::BrowserSession>()
-        .unwrap()
-        .save_storage();
+    let browser = ext(ctx)?;
+    browser.fill_input(&input.selector, &input.text).map_err(err)?;
+    let _ = browser.save_storage();
     let resp = dtos::BrowserFillInputResponse {
         result: "filled".to_string(),
     };
@@ -249,24 +179,9 @@ fn execute_browser_select_dropdown(
 ) -> Result<serde_json::Value, String> {
     let input: dtos::BrowserSelectDropdownInput =
         serde_json::from_str(args).map_err(|e| err(format!("Invalid args: {}", e)))?;
-    let handle = ctx
-        .extensions
-        .get::<crate::app::session::BrowserSession>()
-        .unwrap()
-        .page()
-        .map_err(err)?;
-    let selector = input.selector;
-    let value = input.value;
-    let locator = handle.page.locator(&selector);
-    crate::agent::tools::blocking::block_on(async {
-        locator.select_option(value.as_str(), None).await
-    })
-    .map_err(err)?;
-    let _ = ctx
-        .extensions
-        .get::<crate::app::session::BrowserSession>()
-        .unwrap()
-        .save_storage();
+    let browser = ext(ctx)?;
+    browser.select_dropdown(&input.selector, &input.value).map_err(err)?;
+    let _ = browser.save_storage();
     let resp = dtos::BrowserSelectDropdownResponse {
         result: "selected".to_string(),
     };
@@ -295,22 +210,9 @@ fn execute_browser_press_key(
 ) -> Result<serde_json::Value, String> {
     let input: dtos::BrowserPressKeyInput =
         serde_json::from_str(args).map_err(|e| err(format!("Invalid args: {}", e)))?;
-    let handle = ctx
-        .extensions
-        .get::<crate::app::session::BrowserSession>()
-        .unwrap()
-        .page()
-        .map_err(err)?;
-    let key = input.key;
-    crate::agent::tools::blocking::block_on(async {
-        handle.page.keyboard().press(&key, None).await
-    })
-    .map_err(err)?;
-    let _ = ctx
-        .extensions
-        .get::<crate::app::session::BrowserSession>()
-        .unwrap()
-        .save_storage();
+    let browser = ext(ctx)?;
+    browser.press_key(&input.key).map_err(err)?;
+    let _ = browser.save_storage();
     let resp = dtos::BrowserPressKeyResponse {
         result: "pressed".to_string(),
     };
@@ -339,22 +241,9 @@ fn execute_browser_evaluate_js(
 ) -> Result<serde_json::Value, String> {
     let input: dtos::BrowserEvaluateJsInput =
         serde_json::from_str(args).map_err(|e| err(format!("Invalid args: {}", e)))?;
-    let handle = ctx
-        .extensions
-        .get::<crate::app::session::BrowserSession>()
-        .unwrap()
-        .page()
-        .map_err(err)?;
-    let script = input.script;
-    let value: serde_json::Value = crate::agent::tools::blocking::block_on(async {
-        handle.page.evaluate(&script, None::<&()>).await
-    })
-    .map_err(err)?;
-    let _ = ctx
-        .extensions
-        .get::<crate::app::session::BrowserSession>()
-        .unwrap()
-        .save_storage();
+    let browser = ext(ctx)?;
+    let value = browser.evaluate_js(&input.script).map_err(err)?;
+    let _ = browser.save_storage();
     let result_str = serde_json::to_string(&value).unwrap_or_else(|_| "null".to_string());
     let resp = dtos::BrowserEvaluateJsResponse { result: result_str };
     Ok(serde_json::to_value(resp).unwrap_or_else(|e| serde_json::json!({"error": e.to_string()})))
@@ -382,34 +271,11 @@ fn execute_browser_screenshot(
 ) -> Result<serde_json::Value, String> {
     let input: dtos::BrowserScreenshotInput =
         serde_json::from_str(args).map_err(|e| err(format!("Invalid args: {}", e)))?;
-    // Sanitise the filename against the session's policy
-    // before doing any Playwright work — fail fast on bad
-    // input.
-    let out_path = ctx
-        .extensions
-        .get::<crate::app::session::BrowserSession>()
-        .unwrap()
-        .resolve_screenshot_path(&input.filename)
-        .map_err(err)?;
-    let handle = ctx
-        .extensions
-        .get::<crate::app::session::BrowserSession>()
-        .unwrap()
-        .page()
-        .map_err(err)?;
-    let bytes = crate::agent::tools::blocking::block_on(async {
-        use playwright_rs::ScreenshotOptions;
-        // full_page is the only option we set; everything
-        // else stays at playwright's defaults. Use the
-        // builder because `full_page` is only exposed on
-        // `ScreenshotOptionsBuilder`, not on the struct.
-        // `Page::screenshot` takes `Option<ScreenshotOptions>`.
-        let opts = ScreenshotOptions::builder()
-            .full_page(input.full_page)
-            .build();
-        handle.page.screenshot(Some(opts)).await
-    })
-    .map_err(err)?;
+    let browser = ext(ctx)?;
+    
+    // The policy check and screenshot generation happens inside the trait method
+    let (out_path, bytes) = browser.screenshot(&input.filename, input.full_page).map_err(err)?;
+    
     ctx.vfs().write(&out_path, &bytes).map_err(|e| err(format!("write screenshot: {}", e)))?;
     let resp = dtos::BrowserScreenshotResponse {
         path: out_path.to_string_lossy().to_string(),

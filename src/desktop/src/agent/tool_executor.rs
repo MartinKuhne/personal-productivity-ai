@@ -6,7 +6,6 @@ use crate::agent::AgentToolContext;
 use crate::agent::events::ToolSideEffect;
 use crate::agent::tools::Safety;
 use crate::agent::tools::execute_tool;
-use crate::app::session::BrowserSession;
 use crate::bus::core::Bus;
 use crate::bus::events::file::FileEvent;
 use crate::agent::config::AgentConfig;
@@ -29,7 +28,6 @@ pub struct ToolExecutor {
     /// When the `browser` Cargo feature is off the session is a
     /// stub that returns
     /// [`crate::app::session::SessionError::Disabled`].
-    browser_session: Arc<BrowserSession>,
     policy: std::sync::Arc<dyn crate::agent::tools::policy::ToolCallPolicy>,
     cache: SharedCache,
     /// Catalog-level bundle. The executor snapshots this per
@@ -44,7 +42,6 @@ pub struct ToolExecutorBuilder {
     file_observer: std::sync::Arc<dyn crate::agent::tools::observer::OnFileChanged>,
     cache: SharedCache,
     tool_context: std::sync::Arc<arc_swap::ArcSwap<AgentToolContext>>,
-    browser_session: Option<Arc<BrowserSession>>,
     policy: Option<std::sync::Arc<dyn crate::agent::tools::policy::ToolCallPolicy>>,
     uuid_gen: Option<std::sync::Arc<dyn crate::utils::uuid::UuidGenerator>>,
 }
@@ -61,15 +58,9 @@ impl ToolExecutorBuilder {
             file_observer,
             cache,
             tool_context,
-            browser_session: None,
             policy: None,
             uuid_gen: None,
         }
-    }
-
-    pub fn with_browser_session(mut self, browser_session: Arc<BrowserSession>) -> Self {
-        self.browser_session = Some(browser_session);
-        self
     }
 
     pub fn with_tool_call_policy(
@@ -89,11 +80,9 @@ impl ToolExecutorBuilder {
     }
 
     pub fn build(self) -> ToolExecutor {
-        let default_browser = Arc::new(BrowserSession::with_resolved(self.config.browser().clone()));
         ToolExecutor {
             config: self.config,
             file_observer: self.file_observer,
-            browser_session: self.browser_session.unwrap_or(default_browser),
             policy: self
                 .policy
                 .unwrap_or_else(|| Arc::new(crate::agent::tools::policy::DefaultToolCallPolicy)),
@@ -205,7 +194,7 @@ impl ToolExecutor {
                 let func_args = extract_str(tc, &["function", "arguments"]).to_string();
                 let cfg = self.config.clone();
                 let bus = self.file_observer.clone();
-                let browser = self.browser_session.clone();
+                
                 let pdf = policy.clone();
                 let cache = self.cache.clone();
                 let tc_arc = self.tool_context.clone();
@@ -218,7 +207,7 @@ impl ToolExecutor {
                     )
                     .with_extension(std::sync::Arc::new(crate::agent::tools::context::ToolCacheExt(cache)))
                     .with_extension(std::sync::Arc::new(crate::agent::tools::context::UuidGeneratorExt(uuid_gen)))
-                    .with_browser_session(browser)
+                    
                     .with_tool_call_policy(pdf)
                     .build();
                     let result = execute_tool(dispatcher, &ctx, &func_name, &func_args);
@@ -243,7 +232,7 @@ impl ToolExecutor {
             let call_id = extract_str(tc, &["id"]).to_string();
             let func_name = extract_str(tc, &["function", "name"]).to_string();
             let func_args = extract_str(tc, &["function", "arguments"]).to_string();
-            let browser = self.browser_session.clone();
+            
             let pdf = self.policy.clone();
             let snapshot = self.tool_context.load();
             let dispatcher = &snapshot.registry;
@@ -253,7 +242,7 @@ impl ToolExecutor {
             )
             .with_extension(std::sync::Arc::new(crate::agent::tools::context::ToolCacheExt(self.cache.clone())))
             .with_extension(std::sync::Arc::new(crate::agent::tools::context::UuidGeneratorExt(self.uuid_gen.clone())))
-            .with_browser_session(browser)
+            
             .with_tool_call_policy(pdf)
             .build();
             let result = execute_tool(dispatcher, &ctx, &func_name, &func_args);
@@ -370,17 +359,14 @@ mod tests {
     fn test_tool_executor_new() {
         let config = AgentConfig::default();
         let bus = std::sync::Arc::new(crate::agent::tools::observer::DefaultFileObserver);
-        let browser_session = std::sync::Arc::new(crate::app::session::BrowserSession::with_resolved(
-            config.browser().clone(),
-        ));
-        let policy = std::sync::Arc::new(crate::agent::tools::policy::DefaultToolCallPolicy);
+                let policy = std::sync::Arc::new(crate::agent::tools::policy::DefaultToolCallPolicy);
         let tm = std::sync::Arc::new(arc_swap::ArcSwap::from_pointee(AgentToolContext::new(
             crate::agent::tools::registry::ToolRegistry::new(),
         )));
         let uuid_gen = std::sync::Arc::new(crate::utils::uuid::SystemUuidGenerator);
         let cache = std::sync::Arc::new(crate::agent::tools::registry::cache::ToolCache::new());
         let executor = ToolExecutorBuilder::new(std::sync::Arc::new(config), bus, cache, tm)
-            .with_browser_session(browser_session)
+            
             .with_tool_call_policy(policy)
             .with_uuid_gen(uuid_gen)
             .build();

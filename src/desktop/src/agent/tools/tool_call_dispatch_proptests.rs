@@ -51,7 +51,6 @@
 //! feasible.
 
 use crate::agent::tools::context::ToolContext;
-use crate::app::session::{BrowserSession, PdfBackingTracker};
 use crate::bus::core::Bus;
 use crate::agent::config::AgentConfig;
 use crate::utils::uuid::SystemUuidGenerator;

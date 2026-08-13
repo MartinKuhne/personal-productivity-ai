@@ -2,7 +2,6 @@
 
 use crate::agent::config::AgentConfig;
 use crate::agent::events::AgentEventObserver;
-use crate::app::session::BrowserSession;
 use crate::bus::core::Bus;
 use crate::bus::events::file::FileEvent;
 use serde_json::Value;
@@ -47,11 +46,9 @@ pub struct AgentContext {
     /// via this field. When the `browser` Cargo feature is off
     /// the session is a stub; the `browser_*` tools are not
     /// registered and the field stays unused.
-    pub browser_session: Arc<BrowserSession>,
     pub tool_call_policy: std::sync::Arc<dyn crate::agent::tools::policy::ToolCallPolicy>,
     /// Shared PDF-backing tracker — gives tools access to
     /// the set of Markdown files that have a `.pdf` sibling.
-    pub pdf_backing: Arc<crate::app::session::PdfBackingTracker>,
     /// Shared tool cache — held as an `Arc` so the executor
     /// constructed from this context can pass it into every
     /// `ToolContext` (which now takes the cache by value).
@@ -83,9 +80,7 @@ pub struct AgentContextBuilder {
     history: Option<Vec<Value>>,
     model_name: Option<String>,
     system_prompts: Option<Vec<String>>,
-    browser_session: Option<Arc<BrowserSession>>,
     tool_call_policy: Option<std::sync::Arc<dyn crate::agent::tools::policy::ToolCallPolicy>>,
-    pdf_backing: Option<Arc<crate::app::session::PdfBackingTracker>>,
     cache: Option<Arc<crate::agent::tools::registry::cache::ToolCache>>,
     tool_context: Option<Arc<arc_swap::ArcSwap<crate::agent::AgentToolContext>>>,
     uuid_gen: Option<Arc<dyn crate::utils::uuid::UuidGenerator>>,
@@ -107,9 +102,7 @@ impl AgentContextBuilder {
             history: None,
             system_prompts: None,
             model_name: None,
-            browser_session: None,
             tool_call_policy: None,
-            pdf_backing: None,
             cache: None,
             tool_context: None,
             uuid_gen: None,
@@ -162,21 +155,8 @@ impl AgentContextBuilder {
         self
     }
 
-    pub fn with_browser_session(mut self, browser_session: Arc<BrowserSession>) -> Self {
-        self.browser_session = Some(browser_session);
-        self
-    }
-
     pub fn with_tool_call_policy(mut self, policy: std::sync::Arc<dyn crate::agent::tools::policy::ToolCallPolicy>) -> Self {
         self.tool_call_policy = Some(policy);
-        self
-    }
-
-    pub fn with_pdf_backing(
-        mut self,
-        pdf_backing: Arc<crate::app::session::PdfBackingTracker>,
-    ) -> Self {
-        self.pdf_backing = Some(pdf_backing);
         self
     }
 
@@ -206,10 +186,12 @@ impl AgentContextBuilder {
         self
     }
 
+    pub fn with_extensions(mut self, extensions: crate::agent::tools::extensions::Extensions) -> Self {
+        self.extensions = extensions;
+        self
+    }
+
     pub fn build(self) -> AgentContext {
-        let default_browser_session = Arc::new(BrowserSession::with_resolved(
-            self.agent_config.browser().clone(),
-        ));
         AgentContext {
             agent_config: self.agent_config,
             session_id: self.session_id,
@@ -228,10 +210,6 @@ impl AgentContextBuilder {
                 .unwrap_or_else(|| Arc::new(AtomicBool::new(false))),
             history: self.history,
             model_name: self.model_name,
-            browser_session: self.browser_session.unwrap_or(default_browser_session),
-            pdf_backing: self
-                .pdf_backing
-                .unwrap_or_else(|| Arc::new(crate::app::session::PdfBackingTracker::new())),
             cache: self.cache.unwrap_or_else(|| {
                 Arc::new(crate::agent::tools::registry::cache::ToolCache::new())
             }),
@@ -260,10 +238,7 @@ mod tests {
     fn test_agent_context_creation() {
         let agent_config = AgentConfig::default();
         
-        let browser = Arc::new(crate::app::session::BrowserSession::with_resolved(
-            agent_config.browser().clone(),
-        ));
-        let ctx =
+                let ctx =
             AgentContextBuilder::new(agent_config.clone(), Uuid::new_v4(), "hello".to_string())
                 .with_file_observer(std::sync::Arc::new(crate::agent::tools::observer::DefaultFileObserver))
                 .with_observer(Arc::new(crate::app::events::BusAgentEventObserver::new(
@@ -272,7 +247,7 @@ mod tests {
                 )))
                 .with_active_paths(Some(PathBuf::from("test.md")), None)
                 .with_system_prompts(Vec::new())
-                .with_browser_session(browser)
+                
                 .build();
         assert_eq!(ctx.agent_config.models(), agent_config.models());
         assert!(ctx.active_file.as_deref() == Some(Path::new("test.md")));
