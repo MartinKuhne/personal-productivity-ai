@@ -6,12 +6,12 @@ use super::descriptor::{
     ConfigPredicate, LatencyClass, PromptPredicate, SessionRequirement, ToolConfigSpec,
     ToolDescriptor, ToolProfile, group_enabled,
 };
+use crate::agent::config::AgentConfig;
 use crate::agent::tools::Safety;
 use crate::agent::tools::registry::groups::{InternalToolGroup, ToolGroupId};
 use crate::config::{
     CalDavClient, JmapClient, McpServerConfig, McpServerEntry, ToolGroupsConfig, TrelloClient,
 };
-use crate::agent::config::AgentConfig;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 

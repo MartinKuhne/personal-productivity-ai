@@ -3,15 +3,15 @@
 //! [`McpToolAdapter`] implements the [`Tool`] trait so the LLM can
 //! invoke any tool advertised by an MCP server. The actual protocol
 //! work (transports, sessions, OAuth) is delegated to
-//! [`crate::integrations::mcp::McpClients`].
+//! [`crate::agent::lib::mcp::McpClients`].
 
 use std::sync::OnceLock;
 
+use crate::agent::lib::mcp::{DynamicToolSource, McpClients};
 use crate::agent::tools::Tool;
 use crate::agent::tools::context::ToolContext;
 use crate::agent::tools::descriptor::{ToolConfigSpec, ToolDescriptor};
 use crate::agent::tools::registry::groups::ToolGroupId;
-use crate::integrations::mcp::{DynamicToolSource, McpClients};
 
 /// Adapter implementing [`Tool`] for an external MCP server tool.
 pub struct McpToolAdapter {

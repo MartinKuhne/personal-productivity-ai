@@ -26,8 +26,11 @@ fn browser_spec() -> ToolConfigSpec {
     ToolConfigSpec::group_only(group)
 }
 
-fn ext(ctx: &ToolContext) -> Result<Arc<dyn crate::agent::tools::browser::BrowserAutomationExt>, String> {
-    ctx.extensions.get::<crate::agent::tools::browser::BrowserExt>()
+fn ext(
+    ctx: &ToolContext,
+) -> Result<Arc<dyn crate::agent::tools::browser::BrowserAutomationExt>, String> {
+    ctx.extensions
+        .get::<crate::agent::tools::browser::BrowserExt>()
         .map(|w| w.0.clone())
         .ok_or_else(|| err("browser extension not found"))
 }
@@ -149,7 +152,9 @@ fn execute_browser_fill_input(
     let input: dtos::BrowserFillInputInput =
         serde_json::from_str(args).map_err(|e| err(format!("Invalid args: {}", e)))?;
     let browser = ext(ctx)?;
-    browser.fill_input(&input.selector, &input.text).map_err(err)?;
+    browser
+        .fill_input(&input.selector, &input.text)
+        .map_err(err)?;
     let _ = browser.save_storage();
     let resp = dtos::BrowserFillInputResponse {
         result: "filled".to_string(),
@@ -180,7 +185,9 @@ fn execute_browser_select_dropdown(
     let input: dtos::BrowserSelectDropdownInput =
         serde_json::from_str(args).map_err(|e| err(format!("Invalid args: {}", e)))?;
     let browser = ext(ctx)?;
-    browser.select_dropdown(&input.selector, &input.value).map_err(err)?;
+    browser
+        .select_dropdown(&input.selector, &input.value)
+        .map_err(err)?;
     let _ = browser.save_storage();
     let resp = dtos::BrowserSelectDropdownResponse {
         result: "selected".to_string(),
@@ -272,11 +279,15 @@ fn execute_browser_screenshot(
     let input: dtos::BrowserScreenshotInput =
         serde_json::from_str(args).map_err(|e| err(format!("Invalid args: {}", e)))?;
     let browser = ext(ctx)?;
-    
+
     // The policy check and screenshot generation happens inside the trait method
-    let (out_path, bytes) = browser.screenshot(&input.filename, input.full_page).map_err(err)?;
-    
-    ctx.vfs().write(&out_path, &bytes).map_err(|e| err(format!("write screenshot: {}", e)))?;
+    let (out_path, bytes) = browser
+        .screenshot(&input.filename, input.full_page)
+        .map_err(err)?;
+
+    ctx.vfs()
+        .write(&out_path, &bytes)
+        .map_err(|e| err(format!("write screenshot: {}", e)))?;
     let resp = dtos::BrowserScreenshotResponse {
         path: out_path.to_string_lossy().to_string(),
         bytes: bytes.len(),

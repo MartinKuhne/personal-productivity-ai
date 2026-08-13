@@ -74,7 +74,7 @@ pub struct ToolGroupState {
     /// require authentication (a 401 was received). The flag is
     /// set by the MCP client when a 401 is observed; cleared by the
     /// dialog's `Forget` link. Read from
-    /// [`McpClients::needs_auth_now`](crate::integrations::mcp::McpClients::needs_auth_now)
+    /// [`McpClients::needs_auth_now`](crate::agent::lib::mcp::McpClients::needs_auth_now)
     /// so the manager's own state is the source of truth at
     /// runtime.
     pub needs_auth: bool,

@@ -1,6 +1,6 @@
-use crate::bus::events::file::{FileEvent, FileEventKind, FileEventProducer};
-use crate::bus::core::Bus;
 use crate::agent::tools::observer::OnFileChanged;
+use crate::bus::core::Bus;
+use crate::bus::events::file::{FileEvent, FileEventKind, FileEventProducer};
 
 pub struct AppFileObserver {
     producer: FileEventProducer,

@@ -34,12 +34,17 @@ fn make_ctx(config: AgentConfig) -> (AgentContext, BusReader<SeamAgentEvent>) {
     let session_id = uuid::Uuid::new_v4();
     let ctx =
         crate::agent::context::AgentContextBuilder::new(config, session_id, "Hello".to_string())
-            .with_file_observer(std::sync::Arc::new(crate::agent::tools::observer::DefaultFileObserver))
+            .with_file_observer(std::sync::Arc::new(
+                crate::agent::tools::observer::DefaultFileObserver,
+            ))
             .with_observer(std::sync::Arc::new(
                 crate::app::events::BusAgentEventObserver::new(session_id, agent_event_bus.clone()),
             ))
             .with_system_prompts(Vec::new())
-            .with_browser_session(browser_session)
+            .with_extension(browser_session.clone())
+            .with_extension(Arc::new(crate::agent::tools::browser::BrowserExt(
+                browser_session,
+            )))
             .build();
     (ctx, bus_reader)
 }
@@ -249,7 +254,9 @@ fn test_run_agent_skips_done_status_when_cancelled() {
     .to_string();
     let port = spawn_one_shot_http_server(&http_response("HTTP/1.1 200 OK", &body));
     let default_browser = std::sync::Arc::new(crate::app::session::BrowserSession::with_resolved(
-        crate::agent::config::AgentConfig::default().browser().clone(),
+        crate::agent::config::AgentConfig::default()
+            .browser()
+            .clone(),
     ));
     let agent_event_bus = crate::bus::core::Bus::new();
     let mut bus_reader = agent_event_bus.subscribe();
@@ -258,7 +265,9 @@ fn test_run_agent_skips_done_status_when_cancelled() {
         uuid::Uuid::new_v4(),
         "List files".to_string(),
     )
-    .with_file_observer(std::sync::Arc::new(crate::agent::tools::observer::DefaultFileObserver))
+    .with_file_observer(std::sync::Arc::new(
+        crate::agent::tools::observer::DefaultFileObserver,
+    ))
     .with_observer(std::sync::Arc::new(
         crate::app::events::BusAgentEventObserver::new(
             uuid::Uuid::new_v4(),
@@ -266,7 +275,10 @@ fn test_run_agent_skips_done_status_when_cancelled() {
         ),
     ))
     .with_system_prompts(Vec::new())
-    .with_browser_session(default_browser)
+    .with_extension(default_browser.clone())
+    .with_extension(Arc::new(crate::agent::tools::browser::BrowserExt(
+        default_browser,
+    )))
     .with_cancel_flag(std::sync::Arc::new(std::sync::atomic::AtomicBool::new(
         true,
     )))

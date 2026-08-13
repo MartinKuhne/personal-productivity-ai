@@ -1,9 +1,8 @@
 //! Unit tests for ToolRegistry.
 
 use super::*;
-use crate::agent::tools::context::ToolContext;
-use crate::bus::core::Bus;
 use crate::agent::config::AgentConfig;
+use crate::agent::tools::context::ToolContext;
 use serde_json::Value;
 use std::fs;
 use std::sync::Arc;
@@ -14,9 +13,16 @@ fn test_ctx(config: &AgentConfig) -> ToolContext {
         Arc::new(config.clone()),
         std::sync::Arc::new(crate::agent::tools::observer::DefaultFileObserver),
     )
-    .with_extension(std::sync::Arc::new(crate::agent::tools::context::ToolCacheExt(Arc::new(crate::agent::tools::registry::cache::ToolCache::new()))))
-    .with_extension(std::sync::Arc::new(crate::agent::tools::context::UuidGeneratorExt(Arc::new(crate::utils::uuid::SystemUuidGenerator))))
-    .with_browser_session(test_browser_session())
+    .with_extension(std::sync::Arc::new(
+        crate::agent::tools::context::ToolCacheExt(Arc::new(
+            crate::agent::tools::registry::cache::ToolCache::new(),
+        )),
+    ))
+    .with_extension(std::sync::Arc::new(
+        crate::agent::tools::context::UuidGeneratorExt(Arc::new(
+            crate::utils::uuid::SystemUuidGenerator,
+        )),
+    ))
     .with_tool_call_policy(Arc::new(crate::agent::tools::policy::DefaultToolCallPolicy))
     .build()
 }

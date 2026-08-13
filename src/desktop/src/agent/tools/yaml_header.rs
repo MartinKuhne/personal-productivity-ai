@@ -1,10 +1,8 @@
 //! YAML front-matter tools — `read_yaml_header` and `write_yaml_header` for title, summary, tags, date, etc.
 
-
 use crate::markdown::Document;
 use serde_norway::{Mapping, Value};
 use std::path::Path;
-use crate::agent::tools::vfs::VirtualFileSystem;
 
 pub fn tool_read_yaml_header(
     ctx: &crate::agent::tools::context::ToolContext,
@@ -41,7 +39,10 @@ pub fn tool_write_yaml_header(
     producer: &dyn crate::agent::tools::observer::OnFileChanged,
 ) -> Result<crate::agent::tools::dtos::WriteYamlHeaderResponse, String> {
     let existed = Path::new(path_str).exists();
-    let current_content = ctx.vfs().read_to_string(path_str.as_ref()).unwrap_or_else(|_| "".to_string());
+    let current_content = ctx
+        .vfs()
+        .read_to_string(path_str.as_ref())
+        .unwrap_or_else(|_| "".to_string());
 
     // `Document::body()` returns the source with the front-matter
     // block stripped when one is present, or the full source
@@ -92,9 +93,15 @@ pub fn tool_write_yaml_header(
                     // matching event so consumers (directory tree,
                     // tag manager) refresh.
                     if existed {
-                        producer.on_file_changed(path, crate::bus::events::file::FileEventKind::Updated);
+                        producer.on_file_changed(
+                            path,
+                            crate::bus::events::file::FileEventKind::Updated,
+                        );
                     } else {
-                        producer.on_file_changed(path, crate::bus::events::file::FileEventKind::Discovered);
+                        producer.on_file_changed(
+                            path,
+                            crate::bus::events::file::FileEventKind::Discovered,
+                        );
                     }
                     Ok(crate::agent::tools::dtos::WriteYamlHeaderResponse {
                         result: "YAML header written successfully.".to_string(),
@@ -116,19 +123,21 @@ pub fn tool_write_yaml_header(
 #[cfg(test)]
 mod tests {
 
-fn test_ctx() -> crate::agent::tools::context::ToolContext {
-    let config = crate::agent::config::AgentConfig::default();
-    let mut builder = crate::agent::tools::context::ToolContextBuilder::new(
-        std::sync::Arc::new(config.clone()),
-        std::sync::Arc::new(crate::agent::tools::observer::DefaultFileObserver)
-    );
-    builder = builder.with_extension(std::sync::Arc::new(crate::agent::tools::vfs::VirtualFileSystemExt(std::sync::Arc::new(crate::agent::tools::vfs::VfsResolver::new(std::sync::Arc::new(config.clone()))))));
-    builder.build()
-}
+    fn test_ctx() -> crate::agent::tools::context::ToolContext {
+        let config = crate::agent::config::AgentConfig::default();
+        let mut builder = crate::agent::tools::context::ToolContextBuilder::new(
+            std::sync::Arc::new(config.clone()),
+            std::sync::Arc::new(crate::agent::tools::observer::DefaultFileObserver),
+        );
+        builder = builder.with_extension(std::sync::Arc::new(
+            crate::agent::tools::vfs::VirtualFileSystemExt(std::sync::Arc::new(
+                crate::agent::tools::vfs::VfsResolver::new(std::sync::Arc::new(config.clone())),
+            )),
+        ));
+        builder.build()
+    }
 
     use super::*;
-    use crate::bus::core::Bus;
-    use crate::bus::events::file::FileEvent;
     use crate::bus::events::file::FileEventKind;
     use std::fs;
     use tempfile::tempdir;
@@ -169,7 +178,8 @@ fn test_ctx() -> crate::agent::tools::context::ToolContext {
         let file_path = dir.path().join("new.md");
 
         let producer = noop_producer();
-        let result = tool_write_yaml_header(&test_ctx(), 
+        let result = tool_write_yaml_header(
+            &test_ctx(),
             file_path.to_str().unwrap(),
             Some("Test Title"),
             Some("Test summary"),
@@ -216,7 +226,8 @@ fn test_ctx() -> crate::agent::tools::context::ToolContext {
         fs::write(&file_path, "---\ntitle: Old\n---\n# Body Content").unwrap();
 
         let producer = noop_producer();
-        let result = tool_write_yaml_header(&test_ctx(), 
+        let result = tool_write_yaml_header(
+            &test_ctx(),
             file_path.to_str().unwrap(),
             Some("New Title"),
             None,
@@ -241,7 +252,8 @@ fn test_ctx() -> crate::agent::tools::context::ToolContext {
         let file_path = dir.path().join("subdir").join("test.md");
 
         let producer = noop_producer();
-        let result = tool_write_yaml_header(&test_ctx(), 
+        let result = tool_write_yaml_header(
+            &test_ctx(),
             file_path.to_str().unwrap(),
             Some("Title"),
             None,
@@ -262,12 +274,16 @@ fn test_ctx() -> crate::agent::tools::context::ToolContext {
         // directory tree and tag manager pick it up.
         let bus = crate::bus::core::Bus::new();
         let reader = bus.subscribe();
-        let producer: std::sync::Arc<dyn crate::agent::tools::observer::OnFileChanged> = std::sync::Arc::new(crate::app::session::bus_observer::AppFileObserver::new(bus.clone()));
+        let producer: std::sync::Arc<dyn crate::agent::tools::observer::OnFileChanged> =
+            std::sync::Arc::new(crate::app::session::bus_observer::AppFileObserver::new(
+                bus.clone(),
+            ));
 
         let dir = tempdir().unwrap();
         let file_path = dir.path().join("brand_new.md");
 
-        tool_write_yaml_header(&test_ctx(), 
+        tool_write_yaml_header(
+            &test_ctx(),
             file_path.to_str().unwrap(),
             Some("Title"),
             None,
@@ -276,7 +292,6 @@ fn test_ctx() -> crate::agent::tools::context::ToolContext {
             &*producer,
         )
         .unwrap();
-
 
         let event = reader
             .recv_timeout(std::time::Duration::from_millis(100))
@@ -291,13 +306,17 @@ fn test_ctx() -> crate::agent::tools::context::ToolContext {
         // publish an Updated event.
         let bus = crate::bus::core::Bus::new();
         let reader = bus.subscribe();
-        let producer: std::sync::Arc<dyn crate::agent::tools::observer::OnFileChanged> = std::sync::Arc::new(crate::app::session::bus_observer::AppFileObserver::new(bus.clone()));
+        let producer: std::sync::Arc<dyn crate::agent::tools::observer::OnFileChanged> =
+            std::sync::Arc::new(crate::app::session::bus_observer::AppFileObserver::new(
+                bus.clone(),
+            ));
 
         let dir = tempdir().unwrap();
         let file_path = dir.path().join("existing.md");
         fs::write(&file_path, "# Body").unwrap();
 
-        tool_write_yaml_header(&test_ctx(), 
+        tool_write_yaml_header(
+            &test_ctx(),
             file_path.to_str().unwrap(),
             Some("New Title"),
             None,
@@ -306,7 +325,6 @@ fn test_ctx() -> crate::agent::tools::context::ToolContext {
             &*producer,
         )
         .unwrap();
-
 
         let event = reader
             .recv_timeout(std::time::Duration::from_millis(100))

@@ -1,19 +1,13 @@
 //! Tool context — provides tools with access to the global `AppConfig` and the file event bus, plus safe virtual-path resolution.
 
-use crate::app::vfs;
-use crate::bus::core::Bus;
-use crate::bus::events::file::{FileEvent, FileEventKind};
 use crate::agent::config::AgentConfig;
+use crate::bus::events::file::FileEventKind;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
-
-
-
-
 /// Tool context — composite providing tools with access to `AgentConfig`
 /// and the file event bus, plus safe virtual-path resolution via
-/// [`VfsResolver`] and event publishing via [`EventPublisher`].
+/// [`crate::agent::tools::vfs::VirtualFileSystem`] and event publishing.
 ///
 /// `ToolContext` is `'static` and cheap to clone: every reference-
 /// shaped field is now an owned `Arc` or a `Clone`-cheap `Bus`.
@@ -40,7 +34,11 @@ pub struct ToolContext {
 
 impl ToolContext {
     pub fn vfs(&self) -> std::sync::Arc<dyn crate::agent::tools::vfs::VirtualFileSystem> {
-        self.extensions.get::<crate::agent::tools::vfs::VirtualFileSystemExt>().expect("VFS not injected").0.clone()
+        self.extensions
+            .get::<crate::agent::tools::vfs::VirtualFileSystemExt>()
+            .expect("VFS not injected")
+            .0
+            .clone()
     }
 
     /// Resolve a virtual path to an absolute filesystem path.
@@ -58,16 +56,29 @@ impl ToolContext {
     }
 
     pub fn cache(&self) -> std::sync::Arc<crate::agent::tools::registry::cache::ToolCache> {
-        self.extensions.get::<ToolCacheExt>().expect("ToolCache not injected").0.clone()
+        self.extensions
+            .get::<ToolCacheExt>()
+            .expect("ToolCache not injected")
+            .0
+            .clone()
     }
-    
+
     pub fn uuid_gen(&self) -> std::sync::Arc<dyn crate::utils::uuid::UuidGenerator> {
-        self.extensions.get::<UuidGeneratorExt>().expect("UuidGenerator not injected").0.clone()
+        self.extensions
+            .get::<UuidGeneratorExt>()
+            .expect("UuidGenerator not injected")
+            .0
+            .clone()
     }
 
     /// Publish a file event to the file event bus.
-    pub fn file_observer(&self) -> std::sync::Arc<dyn crate::agent::tools::observer::OnFileChanged> {
-        if let Some(ext) = self.extensions.get::<crate::agent::tools::observer::OnFileChangedExt>() {
+    pub fn file_observer(
+        &self,
+    ) -> std::sync::Arc<dyn crate::agent::tools::observer::OnFileChanged> {
+        if let Some(ext) = self
+            .extensions
+            .get::<crate::agent::tools::observer::OnFileChangedExt>()
+        {
             ext.0.clone()
         } else {
             std::sync::Arc::new(crate::agent::tools::observer::DefaultFileObserver)
@@ -77,8 +88,6 @@ impl ToolContext {
     pub fn publish_file_event(&self, kind: FileEventKind, path: &Path) {
         self.file_observer().on_file_changed(path, kind);
     }
-
-    /// Obtain a [`dyn crate::agent::tools::observer::OnFileChanged`] handle.
 
     /// Check whether the given path is allowed to be written to. Returns an error string if blocked.
     pub fn check_write_allowed(&self, path: &Path) -> Result<(), String> {
@@ -131,7 +140,10 @@ impl ToolContextBuilder {
         mut self,
         policy: std::sync::Arc<dyn crate::agent::tools::policy::ToolCallPolicy>,
     ) -> Self {
-        self.extensions.insert(Arc::new(crate::agent::tools::policy::ToolCallPolicyExt(policy)));
+        self.extensions
+            .insert(Arc::new(crate::agent::tools::policy::ToolCallPolicyExt(
+                policy,
+            )));
         self
     }
 
@@ -142,19 +154,26 @@ impl ToolContextBuilder {
 
     pub fn build(self) -> ToolContext {
         let mut extensions = self.extensions;
-        extensions.insert(Arc::new(crate::agent::tools::observer::OnFileChangedExt(self.file_observer.clone())));
+        extensions.insert(Arc::new(crate::agent::tools::observer::OnFileChangedExt(
+            self.file_observer.clone(),
+        )));
 
-        if extensions.get::<crate::agent::tools::vfs::VirtualFileSystemExt>().is_none() {
-            extensions.insert(std::sync::Arc::new(crate::agent::tools::vfs::VirtualFileSystemExt(std::sync::Arc::new(
-                crate::agent::tools::vfs::VfsResolver::new(self.config.clone())
-            ))));
+        if extensions
+            .get::<crate::agent::tools::vfs::VirtualFileSystemExt>()
+            .is_none()
+        {
+            extensions.insert(std::sync::Arc::new(
+                crate::agent::tools::vfs::VirtualFileSystemExt(std::sync::Arc::new(
+                    crate::agent::tools::vfs::VfsResolver::new(self.config.clone()),
+                )),
+            ));
         }
         if extensions
             .get::<crate::agent::tools::policy::ToolCallPolicyExt>()
             .is_none()
         {
             extensions.insert(Arc::new(crate::agent::tools::policy::ToolCallPolicyExt(
-                Arc::new(crate::agent::tools::policy::DefaultToolCallPolicy)
+                Arc::new(crate::agent::tools::policy::DefaultToolCallPolicy),
             )));
         }
 

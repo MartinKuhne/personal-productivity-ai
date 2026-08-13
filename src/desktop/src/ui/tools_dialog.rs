@@ -39,7 +39,9 @@ pub fn show_tools_dialog(ctx: &eframe::egui::Context, app: &mut FastMdApp) {
 
     app.orchestrator.tool_context.rcu(|bundle| {
         let mut new_bundle = (**bundle).clone();
-        new_bundle.registry.refresh_state(&app.config().to_agent_config());
+        new_bundle
+            .registry
+            .refresh_state(&app.config().to_agent_config());
         new_bundle
     });
     let groups = app.orchestrator.tool_context.load().registry.groups();
@@ -118,7 +120,9 @@ pub fn render_contents(ui: &mut eframe::egui::Ui, app: &mut FastMdApp) {
     // hold any lock across UI rendering.
     app.orchestrator.tool_context.rcu(|bundle| {
         let mut new_bundle = (**bundle).clone();
-        new_bundle.registry.refresh_state(&app.config().to_agent_config());
+        new_bundle
+            .registry
+            .refresh_state(&app.config().to_agent_config());
         new_bundle
     });
     let groups = app.orchestrator.tool_context.load().registry.groups();
@@ -326,7 +330,7 @@ fn spawn_auth_flow(
     server_name: String,
     tx: std::sync::mpsc::Sender<BackgroundEvent>,
     ctx: eframe::egui::Context,
-    mgr: std::sync::Arc<crate::integrations::mcp::McpClients>,
+    mgr: std::sync::Arc<crate::agent::lib::mcp::McpClients>,
 ) {
     std::thread::spawn(move || {
         let error = match mgr.authenticate(&server_name) {

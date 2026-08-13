@@ -50,9 +50,9 @@
 //! what makes the Phase-5 cargo-fuzz targets for `execute_tool`
 //! feasible.
 
-use crate::agent::tools::context::ToolContext;
-use crate::bus::core::Bus;
 use crate::agent::config::AgentConfig;
+use crate::agent::tools::context::ToolContext;
+use crate::app::session::{BrowserSession, PdfBackingTracker};
 use crate::utils::uuid::SystemUuidGenerator;
 use proptest::prelude::*;
 use std::sync::Arc;
@@ -79,9 +79,18 @@ fn build_dispatch_context() -> ToolContext {
         Arc::new(config),
         std::sync::Arc::new(crate::agent::tools::observer::DefaultFileObserver),
     )
-    .with_extension(std::sync::Arc::new(crate::agent::tools::context::ToolCacheExt(Arc::new(crate::agent::tools::registry::cache::ToolCache::new()))))
-    .with_extension(std::sync::Arc::new(crate::agent::tools::context::UuidGeneratorExt(uuid_gen)))
-    .with_browser_session(browser_session)
+    .with_extension(std::sync::Arc::new(
+        crate::agent::tools::context::ToolCacheExt(Arc::new(
+            crate::agent::tools::registry::cache::ToolCache::new(),
+        )),
+    ))
+    .with_extension(std::sync::Arc::new(
+        crate::agent::tools::context::UuidGeneratorExt(uuid_gen),
+    ))
+    .with_extension(browser_session.clone())
+    .with_extension(Arc::new(crate::agent::tools::browser::BrowserExt(
+        browser_session,
+    )))
     .with_tool_call_policy(policy)
     .build()
 }

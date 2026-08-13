@@ -1,16 +1,6 @@
 //! CSV-database CRUD operations — create a new CSV database, add rows, list databases, and path resolution.
 
 use super::schema::{AddRowsInput, CreateCsvInput, CsvDatabase, ListCsvInput};
-use crate::agent::config::AgentConfig;
-
-fn test_ctx(config: &crate::agent::config::AgentConfig) -> crate::agent::tools::context::ToolContext {
-    let mut builder = crate::agent::tools::context::ToolContextBuilder::new(
-        std::sync::Arc::new(config.clone()),
-        std::sync::Arc::new(crate::agent::tools::observer::DefaultFileObserver)
-    );
-    builder = builder.with_extension(std::sync::Arc::new(crate::agent::tools::vfs::VirtualFileSystemExt(std::sync::Arc::new(crate::agent::tools::vfs::VfsResolver::new(std::sync::Arc::new(config.clone()))))));
-    builder.build()
-}
 
 use std::path::PathBuf;
 
@@ -38,7 +28,10 @@ pub fn get_db_path(ctx: &crate::agent::tools::context::ToolContext, db_name: &st
     path
 }
 
-pub fn create_csv(ctx: &crate::agent::tools::context::ToolContext, input: CreateCsvInput) -> Result<CsvDatabase, String> {
+pub fn create_csv(
+    ctx: &crate::agent::tools::context::ToolContext,
+    input: CreateCsvInput,
+) -> Result<CsvDatabase, String> {
     let db_path = get_db_path(ctx, &input.db_name);
     if db_path.exists() {
         return Err(format!("Database '{}' already exists", input.db_name));
@@ -57,7 +50,10 @@ pub fn create_csv(ctx: &crate::agent::tools::context::ToolContext, input: Create
     })
 }
 
-pub fn list_csv(ctx: &crate::agent::tools::context::ToolContext, _input: ListCsvInput) -> Result<Vec<CsvDatabase>, String> {
+pub fn list_csv(
+    ctx: &crate::agent::tools::context::ToolContext,
+    _input: ListCsvInput,
+) -> Result<Vec<CsvDatabase>, String> {
     let db_dir = get_db_dir(ctx);
     let mut dbs = Vec::new();
 
@@ -90,7 +86,10 @@ pub fn list_csv(ctx: &crate::agent::tools::context::ToolContext, _input: ListCsv
     Ok(dbs)
 }
 
-pub fn add_rows(ctx: &crate::agent::tools::context::ToolContext, input: AddRowsInput) -> Result<String, String> {
+pub fn add_rows(
+    ctx: &crate::agent::tools::context::ToolContext,
+    input: AddRowsInput,
+) -> Result<String, String> {
     let db_path = get_db_path(ctx, &input.db_name);
     if !db_path.exists() {
         return Err(format!("Database '{}' does not exist", input.db_name));
@@ -135,7 +134,9 @@ pub fn add_rows(ctx: &crate::agent::tools::context::ToolContext, input: AddRowsI
     let mut buffer: Vec<u8> = Vec::new();
     write_rows_to_writer(&input.rows, &headers, &mut buffer)?;
 
-    ctx.vfs().append(&db_path, &buffer).map_err(|e| format!("Failed to write to file: {}", e))?;
+    ctx.vfs()
+        .append(&db_path, &buffer)
+        .map_err(|e| format!("Failed to write to file: {}", e))?;
 
     Ok(format!("Added {} rows", input.rows.len()))
 }
@@ -171,6 +172,21 @@ mod tests {
     use super::*;
     use std::collections::HashMap;
     use tempfile::tempdir;
+
+    fn test_ctx(
+        config: &crate::agent::config::AgentConfig,
+    ) -> crate::agent::tools::context::ToolContext {
+        let mut builder = crate::agent::tools::context::ToolContextBuilder::new(
+            std::sync::Arc::new(config.clone()),
+            std::sync::Arc::new(crate::agent::tools::observer::DefaultFileObserver),
+        );
+        builder = builder.with_extension(std::sync::Arc::new(
+            crate::agent::tools::vfs::VirtualFileSystemExt(std::sync::Arc::new(
+                crate::agent::tools::vfs::VfsResolver::new(std::sync::Arc::new(config.clone())),
+            )),
+        ));
+        builder.build()
+    }
 
     /// A `Write` that succeeds for the first `fail_after` bytes, then
     /// returns an error on every subsequent call. Used to simulate
@@ -263,7 +279,8 @@ mod tests {
         assert!(err_missing.contains("missing required header"));
 
         // Test add to non-existent db
-        let err_not_exist = add_rows(&test_ctx(&config),
+        let err_not_exist = add_rows(
+            &test_ctx(&config),
             AddRowsInput {
                 db_name: "missing_db".to_string(),
                 rows: vec![],

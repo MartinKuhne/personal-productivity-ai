@@ -50,7 +50,7 @@ fn trello_request(
         .trello_client
         .as_ref()
         .ok_or_else(|| "Trello configuration missing".to_string())?;
-    crate::integrations::trello::trello_request(client_config, method, endpoint, body)
+    crate::agent::lib::trello::trello_request(client_config, method, endpoint, body)
 }
 
 #[derive(ToolDescriptor)]

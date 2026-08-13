@@ -30,7 +30,7 @@ fn execute_search_contact(
 ) -> Result<serde_json::Value, String> {
     let input: dtos::SearchContactInput =
         serde_json::from_str(args).map_err(|e| format!("Invalid args: {}", e))?;
-    crate::integrations::dav::card::tool_search_contact(&ctx.config, &input.keyword).map(|r| {
+    crate::agent::lib::dav::card::tool_search_contact(&ctx.config, &input.keyword).map(|r| {
         serde_json::to_value(r).unwrap_or_else(|e| serde_json::json!({"error": e.to_string()}))
     })
 }
@@ -56,7 +56,7 @@ fn execute_add_contact(
         serde_json::from_str(args).map_err(|e| format!("Invalid args: {}", e))?;
     let contact_json =
         serde_json::to_string(&input).map_err(|e| format!("Failed to serialize input: {}", e))?;
-    crate::integrations::dav::card::tool_add_contact(&ctx.config, &contact_json).map(|r| {
+    crate::agent::lib::dav::card::tool_add_contact(&ctx.config, &contact_json).map(|r| {
         serde_json::to_value(r).unwrap_or_else(|e| serde_json::json!({"error": e.to_string()}))
     })
 }
@@ -80,7 +80,7 @@ fn execute_get_contact(
 ) -> Result<serde_json::Value, String> {
     let input: dtos::GetContactInput =
         serde_json::from_str(args).map_err(|e| format!("Invalid args: {}", e))?;
-    crate::integrations::dav::card::tool_get_contact(&ctx.config, &input.id).map(|r| {
+    crate::agent::lib::dav::card::tool_get_contact(&ctx.config, &input.id).map(|r| {
         serde_json::to_value(r).unwrap_or_else(|e| serde_json::json!({"error": e.to_string()}))
     })
 }
@@ -106,7 +106,7 @@ fn execute_update_contact(
         serde_json::from_str(args).map_err(|e| format!("Invalid args: {}", e))?;
     let contact_json =
         serde_json::to_string(&input).map_err(|e| format!("Failed to serialize input: {}", e))?;
-    crate::integrations::dav::card::tool_update_contact(&ctx.config, &input.id, &contact_json).map(
+    crate::agent::lib::dav::card::tool_update_contact(&ctx.config, &input.id, &contact_json).map(
         |r| serde_json::to_value(r).unwrap_or_else(|e| serde_json::json!({"error": e.to_string()})),
     )
 }
@@ -149,7 +149,7 @@ fn execute_delete_contact(
 ) -> Result<serde_json::Value, String> {
     let input: dtos::DeleteContactInput =
         serde_json::from_str(args).map_err(|e| format!("Invalid args: {}", e))?;
-    crate::integrations::dav::card::tool_delete_contact(&ctx.config, &input.id).map(|r| {
+    crate::agent::lib::dav::card::tool_delete_contact(&ctx.config, &input.id).map(|r| {
         serde_json::to_value(r).unwrap_or_else(|e| serde_json::json!({"error": e.to_string()}))
     })
 }

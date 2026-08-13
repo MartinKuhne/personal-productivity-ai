@@ -27,6 +27,7 @@ pub use errors::{ToolErrorKind, ToolGroupError};
 pub use groups::{InternalToolGroup, ToolGroupId, ToolGroupKind, ToolGroupState};
 pub use pagination::paginate_in_range;
 
+use crate::agent::lib::mcp::{McpClients, McpToolDescriptor};
 use crate::agent::tools::RegisteredTool;
 use crate::agent::tools::context::ToolContext;
 use crate::agent::tools::mcp::McpToolAdapter;
@@ -37,7 +38,6 @@ use crate::bus::core::Bus;
 use crate::bus::events::config::ConfigArrived;
 use crate::bus::events::typed::BackgroundEvent;
 use crate::config::{AppConfig, McpServerConfig};
-use crate::integrations::mcp::{McpClients, McpToolDescriptor};
 use std::collections::BTreeMap;
 use std::sync::Arc;
 use std::sync::mpsc::Sender;
@@ -199,7 +199,11 @@ impl ToolRegistry {
     /// Build the JSON-Schema tool list for the LLM, honouring both
     /// per-group enable flags and the prompt-content rule in
     /// [`Tool::is_enabled`].
-    pub fn get_schema(&self, config: &crate::agent::config::AgentConfig, prompt: &str) -> serde_json::Value {
+    pub fn get_schema(
+        &self,
+        config: &crate::agent::config::AgentConfig,
+        prompt: &str,
+    ) -> serde_json::Value {
         let mut tools = Vec::new();
         for name in self.tools.keys() {
             if let Some(fragment) = self.schema_fragment(name, config, prompt) {
@@ -224,7 +228,12 @@ impl ToolRegistry {
     /// tool contributes to the LLM `tools` array, or `None` if the
     /// tool is not currently enabled (per [`Tool::is_enabled`]).
     /// Per TOOL-015.
-    pub fn tool_char_count(&self, name: &str, config: &crate::agent::config::AgentConfig, prompt: &str) -> Option<usize> {
+    pub fn tool_char_count(
+        &self,
+        name: &str,
+        config: &crate::agent::config::AgentConfig,
+        prompt: &str,
+    ) -> Option<usize> {
         let entry = self.schema_fragment(name, config, prompt)?;
         Some(serde_json::to_string(&entry).map(|s| s.len()).unwrap_or(0))
     }
@@ -356,7 +365,11 @@ impl ToolRegistry {
         self.refresh_state(config);
     }
 
-    pub fn get_tools_schema(&mut self, config: &crate::agent::config::AgentConfig, prompt: &str) -> serde_json::Value {
+    pub fn get_tools_schema(
+        &mut self,
+        config: &crate::agent::config::AgentConfig,
+        prompt: &str,
+    ) -> serde_json::Value {
         self.mcp_manager.update_config(config);
         self.refresh_mcp_tools(config);
         self.refresh_state(config);
@@ -510,7 +523,10 @@ impl ToolDispatcher for ToolRegistry {
 // `set_group_enabled` method can be a single `match`.
 // ---------------------------------------------------------------------------
 
-fn is_internal_group_enabled(config: &crate::agent::config::AgentConfig, g: InternalToolGroup) -> bool {
+fn is_internal_group_enabled(
+    config: &crate::agent::config::AgentConfig,
+    g: InternalToolGroup,
+) -> bool {
     use InternalToolGroup::*;
     match g {
         Filesystem => config.tool_groups.filesystem,
@@ -575,7 +591,9 @@ pub fn spawn_config_subscription(
             if let Ok(event) = config_reader.recv() {
                 tool_context.rcu(|ctx| {
                     let mut new_ctx = (**ctx).clone();
-                    new_ctx.registry.refresh_mcp_tools(&event.config.to_agent_config());
+                    new_ctx
+                        .registry
+                        .refresh_mcp_tools(&event.config.to_agent_config());
                     new_ctx
                 });
             }

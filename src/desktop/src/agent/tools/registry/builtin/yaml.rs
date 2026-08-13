@@ -56,7 +56,8 @@ fn execute_write_yaml_header(
         serde_json::from_str(args).map_err(|e| format!("Invalid args: {}", e))?;
     let path = ctx.resolve_writable(&input.path)?;
     let observer = ctx.file_observer();
-    crate::agent::tools::yaml_header::tool_write_yaml_header(ctx, 
+    crate::agent::tools::yaml_header::tool_write_yaml_header(
+        ctx,
         &path.to_string_lossy(),
         input.title.as_deref(),
         input.summary.as_deref(),

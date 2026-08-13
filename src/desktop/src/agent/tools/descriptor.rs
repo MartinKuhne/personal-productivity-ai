@@ -16,9 +16,9 @@
 //!
 //! Unit tests live in the sibling `descriptor_tests.rs` sidecar.
 
+use crate::agent::config::AgentConfig;
 use crate::agent::tools::Safety;
 use crate::agent::tools::registry::groups::{InternalToolGroup, ToolGroupId};
-use crate::agent::config::AgentConfig;
 use std::any::TypeId;
 use std::borrow::Cow;
 

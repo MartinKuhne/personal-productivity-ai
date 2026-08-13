@@ -10,12 +10,8 @@
 //! Requirements: see [`SPEC.md`](SPEC.md) (TOOL-001..TOOL-010, TOOL-014..024) for the full specification.
 
 pub mod blocking;
-#[cfg(feature = "browser")]
 pub mod browser;
 pub mod context;
-pub mod observer;
-pub mod vfs;
-pub mod policy;
 pub mod csv_db;
 pub mod descriptor;
 #[cfg(test)]
@@ -28,10 +24,13 @@ pub mod extensions;
 pub mod filesystem;
 pub mod jmap;
 pub mod mcp;
+pub mod observer;
+pub mod policy;
 pub mod provider;
 #[cfg(test)]
 mod provider_tests;
 pub mod registry;
+pub mod vfs;
 pub mod web;
 pub mod yaml_header;
 
@@ -49,7 +48,6 @@ mod dtos_proptests;
 #[cfg(test)]
 mod tool_call_dispatch_proptests;
 
-use crate::config::AppConfig;
 use context::ToolContext;
 use descriptor::ToolDescriptor;
 use std::any::TypeId;

@@ -2,8 +2,6 @@
 
 use crate::agent::config::AgentConfig;
 use crate::agent::events::AgentEventObserver;
-use crate::bus::core::Bus;
-use crate::bus::events::file::FileEvent;
 use serde_json::Value;
 use std::collections::HashSet;
 use std::path::PathBuf;
@@ -110,7 +108,10 @@ impl AgentContextBuilder {
         }
     }
 
-    pub fn with_file_observer(mut self, file_observer: std::sync::Arc<dyn crate::agent::tools::observer::OnFileChanged>) -> Self {
+    pub fn with_file_observer(
+        mut self,
+        file_observer: std::sync::Arc<dyn crate::agent::tools::observer::OnFileChanged>,
+    ) -> Self {
         self.file_observer = Some(file_observer);
         self
     }
@@ -155,7 +156,10 @@ impl AgentContextBuilder {
         self
     }
 
-    pub fn with_tool_call_policy(mut self, policy: std::sync::Arc<dyn crate::agent::tools::policy::ToolCallPolicy>) -> Self {
+    pub fn with_tool_call_policy(
+        mut self,
+        policy: std::sync::Arc<dyn crate::agent::tools::policy::ToolCallPolicy>,
+    ) -> Self {
         self.tool_call_policy = Some(policy);
         self
     }
@@ -186,7 +190,10 @@ impl AgentContextBuilder {
         self
     }
 
-    pub fn with_extensions(mut self, extensions: crate::agent::tools::extensions::Extensions) -> Self {
+    pub fn with_extensions(
+        mut self,
+        extensions: crate::agent::tools::extensions::Extensions,
+    ) -> Self {
         self.extensions = extensions;
         self
     }
@@ -196,11 +203,15 @@ impl AgentContextBuilder {
             agent_config: self.agent_config,
             session_id: self.session_id,
             prompt: self.prompt,
-            file_observer: self.file_observer.unwrap_or_else(|| std::sync::Arc::new(crate::agent::tools::observer::DefaultFileObserver)),
+            file_observer: self.file_observer.unwrap_or_else(|| {
+                std::sync::Arc::new(crate::agent::tools::observer::DefaultFileObserver)
+            }),
             observer: self.observer.expect("observer is required"),
             active_file: self.active_file,
             active_dir: self.active_dir,
-            tool_call_policy: self.tool_call_policy.unwrap_or_else(|| std::sync::Arc::new(crate::agent::tools::policy::DefaultToolCallPolicy)),
+            tool_call_policy: self.tool_call_policy.unwrap_or_else(|| {
+                std::sync::Arc::new(crate::agent::tools::policy::DefaultToolCallPolicy)
+            }),
             selected_files: self.selected_files,
             system_prompts: self
                 .system_prompts
@@ -237,17 +248,18 @@ mod tests {
     #[test]
     fn test_agent_context_creation() {
         let agent_config = AgentConfig::default();
-        
-                let ctx =
+
+        let ctx =
             AgentContextBuilder::new(agent_config.clone(), Uuid::new_v4(), "hello".to_string())
-                .with_file_observer(std::sync::Arc::new(crate::agent::tools::observer::DefaultFileObserver))
+                .with_file_observer(std::sync::Arc::new(
+                    crate::agent::tools::observer::DefaultFileObserver,
+                ))
                 .with_observer(Arc::new(crate::app::events::BusAgentEventObserver::new(
                     Uuid::new_v4(),
                     crate::bus::core::Bus::new(),
                 )))
                 .with_active_paths(Some(PathBuf::from("test.md")), None)
                 .with_system_prompts(Vec::new())
-                
                 .build();
         assert_eq!(ctx.agent_config.models(), agent_config.models());
         assert!(ctx.active_file.as_deref() == Some(Path::new("test.md")));

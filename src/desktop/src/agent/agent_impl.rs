@@ -45,7 +45,6 @@ fn run_agent_inner(ctx: AgentContext) {
         ctx.tool_context.clone(),
     )
     .with_tool_call_policy(ctx.tool_call_policy.clone())
-    
     .with_uuid_gen(ctx.uuid_gen.clone())
     .build();
 

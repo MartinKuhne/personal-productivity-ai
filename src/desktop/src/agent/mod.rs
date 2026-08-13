@@ -8,6 +8,7 @@ pub mod context;
 pub mod datamark;
 pub mod error;
 pub mod events;
+pub mod lib;
 pub mod llm_client;
 pub mod session;
 pub mod tool_context;

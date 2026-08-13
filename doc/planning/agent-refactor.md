@@ -20,7 +20,7 @@ The agent module relies on several other bounded subsystems across the crate. (A
   * Depends on `AgentConfig` (which the orchestrator slices from `AppConfig`). `ToolContext` natively holds `AgentConfig` instead of the global `AppConfig`.
   * References integration configs: `ContentLibrary`, `LlmConfig`, `McpServerConfig`, `ToolGroupsConfig`, `JmapClient`.
 * **`integrations::` (External Services)**
-  * `integrations::mcp::{McpClients, DynamicToolSource}`: The registry relies on the MCP integration layer to manage the transport, session, and discovery of external MCP tools.
+  * `agent::lib::mcp::{McpClients, DynamicToolSource}`: The registry relies on the MCP integration layer to manage the transport, session, and discovery of external MCP tools.
 * **`markdown::` and `utils::`**
   * `markdown::Document`: Used by filesystem tools to parse and write front-matter/markdown safely.
   * `utils::tags::extract_tags_from_file`: Used to read tags when the agent creates new files.

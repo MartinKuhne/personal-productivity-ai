@@ -28,10 +28,9 @@ fn execute_get_weather(
 ) -> Result<serde_json::Value, String> {
     let input: dtos::GetWeatherInput =
         serde_json::from_str(args).map_err(|e| format!("Invalid args: {}", e))?;
-    crate::integrations::weather::tool_get_weather(&input.location, input.date_range.as_deref())
-        .map(|r| {
-            serde_json::to_value(r).unwrap_or_else(|e| serde_json::json!({"error": e.to_string()}))
-        })
+    crate::agent::lib::weather::tool_get_weather(&input.location, input.date_range.as_deref()).map(
+        |r| serde_json::to_value(r).unwrap_or_else(|e| serde_json::json!({"error": e.to_string()})),
+    )
 }
 
 /// Self-registering provider for the weather family.

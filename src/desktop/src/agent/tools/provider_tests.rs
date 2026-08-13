@@ -4,7 +4,6 @@ use super::provider::{RegisteredTool, ToolProvider};
 use crate::agent::tools::Tool;
 use crate::agent::tools::descriptor::ToolDescriptor;
 use crate::agent::tools::registry::groups::{InternalToolGroup, ToolGroupId};
-use crate::agent::config::AgentConfig;
 use std::any::TypeId;
 use std::sync::Arc;
 

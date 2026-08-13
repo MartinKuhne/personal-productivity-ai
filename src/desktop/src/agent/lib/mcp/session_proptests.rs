@@ -1,5 +1,5 @@
 //! Property-based tests for the JSON-RPC response parser in
-//! `integrations::mcp::session::extract_result`.
+//! `agent::lib::mcp::session::extract_result`.
 //!
 //! Every MCP response goes through `extract_result` before the
 //! LLM sees the result. The function is a pure JSON-shape
@@ -34,7 +34,7 @@
 //! `cases = 512` per property. The JSON-RPC spec surface is
 //! small; the proptest value is in adversarial-shape coverage.
 
-use crate::integrations::mcp::session::McpClientSession;
+use crate::agent::lib::mcp::session::McpClientSession;
 use proptest::prelude::*;
 
 /// One proptest case count for every property in this sidecar.

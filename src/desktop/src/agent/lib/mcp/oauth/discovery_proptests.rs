@@ -1,5 +1,5 @@
 //! Property-based tests for the OAuth 2.1 metadata parsers in
-//! `integrations::mcp::oauth::discovery`.
+//! `agent::lib::mcp::oauth::discovery`.
 //!
 //! The two discovery functions in `discovery.rs` —
 //! `discover_resource_metadata` and
@@ -25,7 +25,7 @@
 //! proptest-added value is in the adversarial-shape corner
 //! cases.
 
-use crate::integrations::mcp::oauth::types::{
+use crate::agent::lib::mcp::oauth::types::{
     AuthorizationServerMetadata, ProtectedResourceMetadata,
 };
 use proptest::prelude::*;

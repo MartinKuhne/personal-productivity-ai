@@ -4,9 +4,9 @@ use crate::agent::config::AgentConfig;
 //
 // Sidecar file for `crate::agent::tools::mcp`. Extracted from the
 // original `tests.rs` when the protocol layer moved to
-// `crate::integrations::mcp`; only the adapter-side tests live here.
+// `crate::agent::lib::mcp`; only the adapter-side tests live here.
 // Protocol-layer tests now live in
-// `crate::integrations::mcp::tests`.
+// `crate::agent::lib::mcp::tests`.
 
 use super::*;
 use crate::agent::tools::{Safety, Tool};

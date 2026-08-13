@@ -1,5 +1,5 @@
 //! Property-based tests for the vCard 3.0 / 4.0 parser in
-//! `integrations::dav::card::parse_vcard`.
+//! `agent::lib::dav::card::parse_vcard`.
 //!
 //! The DAV server returns the contact data as a raw vCard
 //! text body. The parser must turn that into a typed
@@ -32,7 +32,7 @@
 //!    semicolon-separated list of 5 components. The parser
 //!    must accept the full 5-component form without panic.
 
-use crate::integrations::dav::card::parse_vcard;
+use crate::agent::lib::dav::card::parse_vcard;
 use proptest::prelude::*;
 
 /// One proptest case count for every property in this sidecar.

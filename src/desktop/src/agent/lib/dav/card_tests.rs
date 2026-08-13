@@ -1,4 +1,4 @@
-//! Tests for `integrations/dav/card.rs`.
+//! Tests for `agent/lib/dav/card.rs`.
 
 use super::*;
 

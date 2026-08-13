@@ -1,8 +1,6 @@
 //! Batch job executor — runs the LLM agent against each discovered unit (file or directory) with configurable concurrency.
 
 use crate::app::batch::types::{BatchJob, BatchJobStatus, BatchResult};
-use crate::bus::core::Bus;
-use crate::bus::events::file::FileEvent;
 use crate::bus::events::typed::BackgroundEvent;
 use crate::config::AppConfig;
 use crate::utils::clock::Clock;
@@ -93,7 +91,7 @@ impl BatchJobExecutor {
                 let active_dir = job.active_dir.clone();
                 let prompt_text = job.prompt_text.clone();
                 let app_config = self.app_config.clone();
-                
+
                 let cancel_flag = cancel_flag.clone();
 
                 // Assign model round-robin when multiple min-cost models exist.

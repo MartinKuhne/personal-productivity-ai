@@ -2,7 +2,6 @@
 //!
 //! Unit tests live in the sibling `filesystem_tests.rs` sidecar.
 
-
 use crate::markdown::Document;
 use crate::utils::tags::extract_tags_from_file;
 use std::path::Path;
@@ -18,7 +17,8 @@ pub const DEFAULT_SEARCH_NOTES_MAX_RESULTS: usize = 200;
 /// strictly to Markdown (`.md`) files under `root_path`. The caller
 /// (the tool registry) is responsible for applying the result cap
 /// across libraries, so this function returns all matches unfiltered.
-pub fn tool_search_notes(ctx: &crate::agent::tools::context::ToolContext, 
+pub fn tool_search_notes(
+    ctx: &crate::agent::tools::context::ToolContext,
     root_path: &Path,
     virtual_prefix: &str,
     query: &str,
@@ -44,7 +44,8 @@ pub fn tool_search_notes(ctx: &crate::agent::tools::context::ToolContext,
     Ok(results)
 }
 
-pub fn tool_read_tags(ctx: &crate::agent::tools::context::ToolContext, 
+pub fn tool_read_tags(
+    _ctx: &crate::agent::tools::context::ToolContext,
     root_path: &Path,
 ) -> Result<crate::agent::tools::dtos::ReadTagsResponse, String> {
     let mut all_tags = std::collections::BTreeSet::new();
@@ -72,7 +73,8 @@ pub fn tool_read_tags(ctx: &crate::agent::tools::context::ToolContext,
 /// (`registry.rs`) is responsible for slicing the combined
 /// cross-library result, so the page and total fields stay consistent
 /// regardless of how many libraries the user has configured.
-pub fn tool_list_notes_by_tag(ctx: &crate::agent::tools::context::ToolContext, 
+pub fn tool_list_notes_by_tag(
+    _ctx: &crate::agent::tools::context::ToolContext,
     root_path: &Path,
     virtual_prefix: &str,
     tag: &str,
@@ -103,12 +105,15 @@ pub fn tool_list_notes_by_tag(ctx: &crate::agent::tools::context::ToolContext,
 /// applied here — the call site (`registry.rs`) is responsible for
 /// slicing the result so the page and total fields stay consistent
 /// regardless of how the call is dispatched.
-pub fn tool_list_notes(ctx: &crate::agent::tools::context::ToolContext, target_dir: &Path, virtual_prefix: &str) -> Result<Vec<String>, String> {
+pub fn tool_list_notes(
+    ctx: &crate::agent::tools::context::ToolContext,
+    target_dir: &Path,
+    virtual_prefix: &str,
+) -> Result<Vec<String>, String> {
     let mut files = Vec::new();
     if let Ok(entries) = ctx.vfs().read_dir(target_dir) {
         for entry in entries.into_iter() {
-            if entry.is_file
-            {
+            if entry.is_file {
                 let path = &entry.path;
                 if let Some(ext) = path.extension()
                     && (ext == "md" || ext == "markdown")
@@ -125,7 +130,8 @@ pub fn tool_list_notes(ctx: &crate::agent::tools::context::ToolContext, target_d
     Ok(files)
 }
 
-pub fn tool_read_note(ctx: &crate::agent::tools::context::ToolContext, 
+pub fn tool_read_note(
+    _ctx: &crate::agent::tools::context::ToolContext,
     path_str: &str,
 ) -> Result<crate::agent::tools::dtos::ReadNoteResponse, String> {
     match crate::utils::read_text_file(Path::new(path_str)) {
@@ -143,7 +149,8 @@ pub fn tool_read_note(ctx: &crate::agent::tools::context::ToolContext,
 /// maximum number of lines to return. The slice is clamped to the
 /// file's line count, so a `limit` that overflows returns the
 /// remainder; an `offset` past the end returns an empty `content`.
-pub fn tool_window_note(ctx: &crate::agent::tools::context::ToolContext, 
+pub fn tool_window_note(
+    _ctx: &crate::agent::tools::context::ToolContext,
     path_str: &str,
     offset: usize,
     limit: usize,
@@ -166,7 +173,8 @@ pub fn tool_window_note(ctx: &crate::agent::tools::context::ToolContext,
     }
 }
 
-pub fn tool_create_note(ctx: &crate::agent::tools::context::ToolContext, 
+pub fn tool_create_note(
+    ctx: &crate::agent::tools::context::ToolContext,
     path_str: &str,
     content: &str,
     producer: &dyn crate::agent::tools::observer::OnFileChanged,
@@ -217,7 +225,8 @@ pub fn tool_create_note(ctx: &crate::agent::tools::context::ToolContext,
 ///
 /// `offset == 0` inserts at the top; `offset == lines.len()` appends
 /// to the end. `offset > lines.len()` returns an error.
-pub fn tool_insert_into_note(ctx: &crate::agent::tools::context::ToolContext, 
+pub fn tool_insert_into_note(
+    ctx: &crate::agent::tools::context::ToolContext,
     path_str: &str,
     offset: usize,
     lines_to_insert: &[String],
@@ -237,7 +246,10 @@ pub fn tool_insert_into_note(ctx: &crate::agent::tools::context::ToolContext,
             let new_content = reconstruct_file_content(header, &new_body);
             match ctx.vfs().write(path_str.as_ref(), new_content.as_bytes()) {
                 Ok(_) => {
-                    producer.on_file_changed(Path::new(path_str), crate::bus::events::file::FileEventKind::Updated);
+                    producer.on_file_changed(
+                        Path::new(path_str),
+                        crate::bus::events::file::FileEventKind::Updated,
+                    );
                     Ok(crate::agent::tools::dtos::InsertIntoNoteResponse {
                         result: "Lines inserted successfully.".to_string(),
                     })
@@ -249,7 +261,8 @@ pub fn tool_insert_into_note(ctx: &crate::agent::tools::context::ToolContext,
     }
 }
 
-pub fn tool_patch_note(ctx: &crate::agent::tools::context::ToolContext, 
+pub fn tool_patch_note(
+    ctx: &crate::agent::tools::context::ToolContext,
     path_str: &str,
     old_string: &str,
     new_string: &str,
@@ -266,7 +279,10 @@ pub fn tool_patch_note(ctx: &crate::agent::tools::context::ToolContext,
             let new_content = reconstruct_file_content(header, &new_body);
             match ctx.vfs().write(path_str.as_ref(), new_content.as_bytes()) {
                 Ok(_) => {
-                    producer.on_file_changed(Path::new(path_str), crate::bus::events::file::FileEventKind::Updated);
+                    producer.on_file_changed(
+                        Path::new(path_str),
+                        crate::bus::events::file::FileEventKind::Updated,
+                    );
                     Ok(crate::agent::tools::dtos::PatchNoteResponse {
                         result: format!("Successfully replaced {} occurrence(s).", count),
                     })

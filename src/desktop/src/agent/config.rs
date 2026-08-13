@@ -16,7 +16,7 @@
 //! consumes the pre-built prompts.
 //!
 //! Construction:
-//! - [`AgentConfig::from_app_config`] — projection from the global config
+//! - [`crate::config::AppConfig::to_agent_config`] — projection from the global config
 //!   (the canonical orchestrator-side constructor).
 //! - [`AgentConfigBuilder`] — fluent builder for tests and per-session
 //!   overrides.
@@ -31,6 +31,10 @@
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 
+use crate::config::{
+    CalDavClient, ContentLibrary, JmapClient, LlmConfig, McpServerEntry, ResolvedBrowserConfig,
+    ToolGroupsConfig, TrelloClient, get_config_path,
+};
 
 /// Domain-specific configuration for the agent module.
 ///
@@ -62,7 +66,6 @@ pub struct AgentConfig {
 }
 
 impl AgentConfig {
-
     /// Map of configured LLM models by name.
     pub fn models(&self) -> &HashMap<String, LlmConfig> {
         &self.models
@@ -132,7 +135,10 @@ impl AgentConfig {
     }
 
     /// Find the best model for a given use_case (lowest cost among matches).
-    pub fn model_for_use_case(&self, use_case: impl AsRef<str>) -> Option<(&String, &crate::config::LlmConfig)> {
+    pub fn model_for_use_case(
+        &self,
+        use_case: impl AsRef<str>,
+    ) -> Option<(&String, &crate::config::LlmConfig)> {
         let uc_ref = use_case.as_ref();
         self.models
             .iter()
@@ -315,18 +321,10 @@ impl Default for AgentConfigBuilder {
 /// agent's existing tests use so the test-side churn is a one-liner.
 #[cfg(test)]
 pub(crate) fn make_test_agent_config() -> AgentConfig {
-    
-#[derive(Debug, Clone, serde::Serialize, serde::Deserialize, PartialEq)]
-pub struct LlmConfig {
-    pub provider: String,
-    pub api_key: Option<String>,
-    pub model_id: Option<String>,
-    pub base_url: Option<String>,
-}
     let mut models = HashMap::new();
     models.insert(
         "test".to_string(),
-        LlmConfig {
+        crate::config::LlmConfig {
             model: "test-model".to_string(),
             api_url: "http://localhost:0".to_string(),
             api_key: "test-key".to_string(),

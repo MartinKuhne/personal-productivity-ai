@@ -1,5 +1,5 @@
 //! Property-based tests for the weather tool's JSON parsers
-//! in `integrations::weather`.
+//! in `agent::lib::weather`.
 //!
 //! The weather tool chains three HTTP requests (Nominatim
 //! geocode → NWS `points` → NWS `forecast`). Each response is
@@ -28,7 +28,7 @@
 //!
 //! `cases = 512` per property.
 
-use crate::integrations::weather::parse_nominatim_first;
+use crate::agent::lib::weather::parse_nominatim_first;
 use proptest::prelude::*;
 
 /// One proptest case count for every property in this sidecar.

@@ -51,9 +51,9 @@ fn execute_web_fetch(
 ) -> Result<serde_json::Value, String> {
     let input: dtos::WebFetchInput =
         serde_json::from_str(args).map_err(|e| format!("Invalid args: {}", e))?;
-    crate::agent::tools::web::tool_web_fetch(&input, &_ctx.cache(), _ctx.uuid_gen().as_ref()).map(|r| {
-        serde_json::to_value(r).unwrap_or_else(|e| serde_json::json!({"error": e.to_string()}))
-    })
+    crate::agent::tools::web::tool_web_fetch(&input, &_ctx.cache(), _ctx.uuid_gen().as_ref()).map(
+        |r| serde_json::to_value(r).unwrap_or_else(|e| serde_json::json!({"error": e.to_string()})),
+    )
 }
 
 /// Tool that searches the web using SearXNG.

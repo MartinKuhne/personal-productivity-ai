@@ -1,5 +1,5 @@
 //! Property-based tests for the Trello HTTP client in
-//! `integrations::trello::client::trello_http_call`.
+//! `agent::lib::trello::client::trello_http_call`.
 //!
 //! `trello_http_call` is a thin HTTP wrapper, but its response
 //! parser (`serde_json::from_str(&text)`) sees every Trello
@@ -36,7 +36,7 @@
 //!
 //! `cases = 512` per property.
 
-use crate::integrations::trello::client::trello_http_call;
+use crate::agent::lib::trello::client::trello_http_call;
 use proptest::prelude::*;
 use wiremock::{Mock, MockServer, ResponseTemplate};
 

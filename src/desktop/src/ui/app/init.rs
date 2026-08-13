@@ -125,10 +125,17 @@ impl FastMdApp {
         // so the UI can still drain the bus; the `AgentSession`
         // itself is built without a `config_bus` parameter.
         let agent = AgentSession::builder()
-            .with_file_observer(std::sync::Arc::new(crate::app::session::bus_observer::AppFileObserver::new(background_task.file_event_bus.clone())))
+            .with_file_observer(std::sync::Arc::new(
+                crate::app::session::bus_observer::AppFileObserver::new(
+                    background_task.file_event_bus.clone(),
+                ),
+            ))
             .with_extension(browser_session.clone())
-            .with_extension(Arc::new(crate::agent::tools::browser::BrowserExt(browser_session.clone())))
+            .with_extension(Arc::new(crate::agent::tools::browser::BrowserExt(
+                browser_session.clone(),
+            )))
             .with_extension(Arc::new(pdf_backing_tracker.clone()))
+            .with_tool_call_policy(Arc::new(pdf_backing_tracker.clone()))
             .with_tool_context(tool_context.clone())
             .build();
 
@@ -262,16 +269,24 @@ impl FastMdApp {
             &crate::config::AppConfig::default(),
         ));
         let pdf_backing_tracker = crate::app::session::PdfBackingTracker::new();
-        let agent = AgentSession::new(
-            std::sync::Arc::new(crate::app::session::bus_observer::AppFileObserver::new(background_task.file_event_bus.clone())),
-            test_browser_session,
-            Arc::new(pdf_backing_tracker.clone()),
-            Arc::new(arc_swap::ArcSwap::from_pointee(
+        let agent = AgentSession::builder()
+            .with_file_observer(std::sync::Arc::new(
+                crate::app::session::bus_observer::AppFileObserver::new(
+                    background_task.file_event_bus.clone(),
+                ),
+            ))
+            .with_extension(test_browser_session.clone())
+            .with_extension(Arc::new(crate::agent::tools::browser::BrowserExt(
+                test_browser_session,
+            )))
+            .with_extension(Arc::new(pdf_backing_tracker.clone()))
+            .with_tool_call_policy(Arc::new(pdf_backing_tracker.clone()))
+            .with_tool_context(Arc::new(arc_swap::ArcSwap::from_pointee(
                 crate::agent::AgentToolContext::new(
                     crate::agent::tools::registry::ToolRegistry::new(),
                 ),
-            )),
-        );
+            )))
+            .build();
         agent.set_agent_config(config.to_agent_config());
 
         let event_bus = background_task.file_event_bus;

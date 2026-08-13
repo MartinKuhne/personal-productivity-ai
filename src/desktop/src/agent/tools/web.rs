@@ -2,11 +2,11 @@
 //!
 //! Unit tests live in the sibling `web_tests.rs` sidecar.
 
+use crate::agent::config::AgentConfig;
 use crate::agent::datamark::{self, SECURITY_HEADER};
 use crate::agent::events::DelegateToolCall;
 use crate::agent::tools::registry::builtin::strings::WEB_FETCH_FINAL_PAGE_HINT;
 use crate::agent::tools::registry::cache::CacheEntry;
-use crate::agent::config::AgentConfig;
 use fast_h2m::convert;
 use std::collections::HashMap;
 use std::time::Instant;

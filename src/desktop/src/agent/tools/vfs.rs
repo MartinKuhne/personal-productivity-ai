@@ -14,7 +14,11 @@ pub struct VfsDirEntry {
 }
 
 pub trait VirtualFileSystem: Send + Sync {
-    fn resolve_virtual_path(&self, vpath: &str, allow_write: bool) -> Result<Option<(PathBuf, bool)>, String>;
+    fn resolve_virtual_path(
+        &self,
+        vpath: &str,
+        allow_write: bool,
+    ) -> Result<Option<(PathBuf, bool)>, String>;
     fn resolve_writable(&self, vpath: &str) -> Result<PathBuf, String>;
 
     fn read_to_string(&self, path: &Path) -> std::io::Result<String>;
@@ -62,7 +66,10 @@ impl VirtualFileSystem for VfsResolver {
 
     fn append(&self, path: &Path, content: &[u8]) -> std::io::Result<()> {
         use std::io::Write;
-        let mut file = std::fs::OpenOptions::new().append(true).create(true).open(path)?;
+        let mut file = std::fs::OpenOptions::new()
+            .append(true)
+            .create(true)
+            .open(path)?;
         file.write_all(content)
     }
 

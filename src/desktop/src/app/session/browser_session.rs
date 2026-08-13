@@ -620,8 +620,9 @@ impl crate::agent::tools::browser::BrowserAutomationExt for BrowserSession {
         "#;
         let value: serde_json::Value = crate::agent::tools::blocking::block_on(async {
             handle.page.evaluate(script, None::<&()>).await
-        }).map_err(|e| e.to_string())?;
-        
+        })
+        .map_err(|e| e.to_string())?;
+
         let elements_json = serde_json::to_string(&value).unwrap_or_else(|_| "[]".to_string());
         let total = value.as_array().map(|a| a.len()).unwrap_or(0);
         let url = handle.page.url().unwrap_or_default();
@@ -653,31 +654,80 @@ impl crate::agent::tools::browser::BrowserAutomationExt for BrowserSession {
 
     fn press_key(&self, key: &str) -> Result<(), String> {
         let handle = self.page().map_err(|e| e.to_string())?;
-        crate::agent::tools::blocking::block_on(async { handle.page.keyboard().press(key, None).await })
-            .map_err(|e| e.to_string())
+        crate::agent::tools::blocking::block_on(async {
+            handle.page.keyboard().press(key, None).await
+        })
+        .map_err(|e| e.to_string())
     }
 
     fn evaluate_js(&self, script: &str) -> Result<serde_json::Value, String> {
         let handle = self.page().map_err(|e| e.to_string())?;
-        crate::agent::tools::blocking::block_on(async { handle.page.evaluate(script, None::<&()>).await })
-            .map_err(|e| e.to_string())
+        crate::agent::tools::blocking::block_on(async {
+            handle.page.evaluate(script, None::<&()>).await
+        })
+        .map_err(|e| e.to_string())
     }
 
-    fn screenshot(&self, filename: &str, full_page: bool) -> Result<(std::path::PathBuf, Vec<u8>), String> {
-        let out_path = self.resolve_screenshot_path(filename).map_err(|e| e.to_string())?;
+    fn screenshot(
+        &self,
+        filename: &str,
+        full_page: bool,
+    ) -> Result<(std::path::PathBuf, Vec<u8>), String> {
+        let out_path = self
+            .resolve_screenshot_path(filename)
+            .map_err(|e| e.to_string())?;
         let handle = self.page().map_err(|e| e.to_string())?;
         let bytes = crate::agent::tools::blocking::block_on(async {
             use playwright_rs::ScreenshotOptions;
             let opts = ScreenshotOptions::builder().full_page(full_page).build();
             handle.page.screenshot(Some(opts)).await
-        }).map_err(|e| e.to_string())?;
+        })
+        .map_err(|e| e.to_string())?;
         Ok((out_path, bytes))
     }
 
     fn save_storage(&self) -> Result<(), String> {
         BrowserSession::save_storage(self).map_err(|e| e.to_string())
     }
-    
+
+    fn resolve_screenshot_path(&self, filename: &str) -> Result<std::path::PathBuf, String> {
+        BrowserSession::resolve_screenshot_path(self, filename).map_err(|e| e.to_string())
+    }
+}
+
+#[cfg(not(feature = "browser"))]
+impl crate::agent::tools::browser::BrowserAutomationExt for BrowserSession {
+    fn navigate(&self, _url: &str) -> Result<(String, String), String> {
+        Err("Browser automation disabled (build without 'browser' feature)".into())
+    }
+    fn get_page_state(&self) -> Result<(String, String, String, usize), String> {
+        Err("Browser automation disabled (build without 'browser' feature)".into())
+    }
+    fn click(&self, _selector: &str) -> Result<(), String> {
+        Err("Browser automation disabled (build without 'browser' feature)".into())
+    }
+    fn fill_input(&self, _selector: &str, _text: &str) -> Result<(), String> {
+        Err("Browser automation disabled (build without 'browser' feature)".into())
+    }
+    fn select_dropdown(&self, _selector: &str, _value: &str) -> Result<(), String> {
+        Err("Browser automation disabled (build without 'browser' feature)".into())
+    }
+    fn press_key(&self, _key: &str) -> Result<(), String> {
+        Err("Browser automation disabled (build without 'browser' feature)".into())
+    }
+    fn evaluate_js(&self, _script: &str) -> Result<serde_json::Value, String> {
+        Err("Browser automation disabled (build without 'browser' feature)".into())
+    }
+    fn screenshot(
+        &self,
+        _filename: &str,
+        _full_page: bool,
+    ) -> Result<(std::path::PathBuf, Vec<u8>), String> {
+        Err("Browser automation disabled (build without 'browser' feature)".into())
+    }
+    fn save_storage(&self) -> Result<(), String> {
+        Err("Browser automation disabled (build without 'browser' feature)".into())
+    }
     fn resolve_screenshot_path(&self, filename: &str) -> Result<std::path::PathBuf, String> {
         BrowserSession::resolve_screenshot_path(self, filename).map_err(|e| e.to_string())
     }

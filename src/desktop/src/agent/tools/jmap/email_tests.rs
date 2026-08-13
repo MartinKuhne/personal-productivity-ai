@@ -461,7 +461,7 @@ fn test_simplify_cc_and_bcc_preserved() {
 
 use super::{SearchEmailFilters, tool_get_email_by_id, tool_search_email, tool_send_email};
 use crate::agent::tools::jmap::mock_server::{spawn_mock_server, spawn_recording_mock_server};
-use crate::config::{JmapClient};
+use crate::config::JmapClient;
 #[test]
 fn test_tool_search_email_no_clients() {
     let cache = crate::agent::tools::registry::cache::ToolCache::new();

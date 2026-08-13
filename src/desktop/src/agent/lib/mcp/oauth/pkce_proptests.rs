@@ -1,5 +1,5 @@
 //! Property-based tests for the PKCE / `state` generators in
-//! `integrations::mcp::oauth::pkce`.
+//! `agent::lib::mcp::oauth::pkce`.
 //!
 //! The PKCE code-verifier and OAuth `state` parameter are the
 //! two pieces of CSPRNG-driven entropy that an attacker must
@@ -37,7 +37,7 @@
 //! `SystemRandom` CSPRNG; this is fast and the high entropy
 //! guarantees the invariants hold on every case.
 
-use crate::integrations::mcp::oauth::pkce::{PkcePair, State, s256};
+use crate::agent::lib::mcp::oauth::pkce::{PkcePair, State, s256};
 use proptest::prelude::*;
 
 /// One proptest case count for every property in this sidecar.

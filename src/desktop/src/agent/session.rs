@@ -74,14 +74,6 @@ pub struct AgentSession {
     /// [`Self::new`] and joined on drop. The driver processes prompts
     /// sequentially — one session at a time (research.md §3).
     driver_handle: Option<JoinHandle<()>>,
-    /// Long-lived headless browser session, shared with the
-    /// tool executor. Lazily launches a browser on first use.
-    /// Owned by the application, not the agent — sessions
-    /// survive across agent turns so cookies persist (BRWS-001).
-    /// When the `browser` Cargo feature is off the session is
-    /// a stub that returns [`crate::app::session::SessionError::Disabled`]
-    /// on every page-handle request; the `browser_*` tools are
-    /// not registered.
 }
 
 impl AgentSession {
@@ -92,16 +84,6 @@ impl AgentSession {
     pub fn builder() -> AgentSessionBuilder {
         AgentSessionBuilder::new()
     }
-
-    /// Build a session manager with a shared cell for the agent's
-    /// domain config. The orchestrator writes the cell via
-    /// [`Self::set_agent_config`]; the driver reads it per session.
-    
-
-    /// Construct an `AgentSession` with an initial domain config.
-    /// The session holds a private cell containing the config; updates
-    /// arrive via [`Self::set_agent_config`].
-    
 
     /// Snapshot of the current agent config.
     pub fn agent_config(&self) -> AgentConfig {
@@ -129,11 +111,6 @@ impl AgentSession {
             .expect("agent_config lock poisoned");
         *guard = f(&guard);
     }
-
-    /// Hand out an `Arc` clone of the headless-browser session
-    /// so the UI layer can call [`BrowserSession::tick`]
-    /// (idle-timeout) and [`BrowserSession::forget`]
-    /// (clean logout) without going through the agent.
 
     /// Return a clone of the agent→UI event bus so the UI can subscribe
     /// via `BusReader<AgentEvent>` and drain structured agent events each
@@ -317,14 +294,17 @@ impl AgentSessionBuilder {
             extensions: crate::agent::tools::extensions::Extensions::default(),
         }
     }
-    pub fn builder() -> Self { Self::new() }
+    pub fn builder() -> Self {
+        Self::new()
+    }
     /// Set the file event bus.
-    pub fn with_file_observer(mut self, bus: std::sync::Arc<dyn crate::agent::tools::observer::OnFileChanged>) -> Self {
+    pub fn with_file_observer(
+        mut self,
+        bus: std::sync::Arc<dyn crate::agent::tools::observer::OnFileChanged>,
+    ) -> Self {
         self.file_observer = Some(bus);
         self
     }
-
-    /// Set the long-lived headless browser session.
 
     /// Set the shared PDF-backing tracker.
     pub fn with_tool_call_policy(
@@ -345,7 +325,10 @@ impl AgentSessionBuilder {
         self
     }
 
-    pub fn with_extension<T: Send + Sync + \'static>(mut self, extension: std::sync::Arc<T>) -> Self {
+    pub fn with_extension<T: Send + Sync + 'static>(
+        mut self,
+        extension: std::sync::Arc<T>,
+    ) -> Self {
         self.extensions.insert(extension);
         self
     }
@@ -373,7 +356,7 @@ impl AgentSessionBuilder {
             .expect("AgentSession requires with_file_observer");
         let policy = self
             .policy
-            .expect("AgentSession requires with_tool_call_policy");
+            .unwrap_or_else(|| Arc::new(crate::agent::tools::policy::DefaultToolCallPolicy));
         let tool_context = self
             .tool_context
             .expect("AgentSession requires with_tool_context");
@@ -391,7 +374,7 @@ impl AgentSessionBuilder {
             file_observer,
             policy,
             tool_context,
-            self.extensions,
+            self.extensions.clone(),
         );
         AgentSession {
             state: AgentState {
@@ -464,7 +447,7 @@ fn spawn_driver(
             .with_cancel_flag(prompt.cancel_flag)
             .with_history(history.clone())
             .with_tool_call_policy(policy.clone())
-              .with_extensions(extensions.clone())
+            .with_extensions(extensions.clone())
             .with_cache(std::sync::Arc::new(
                 crate::agent::tools::registry::cache::ToolCache::new(),
             ))

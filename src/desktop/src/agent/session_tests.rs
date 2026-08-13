@@ -8,13 +8,15 @@ use std::collections::HashSet;
 /// Build a default `AgentSession` for unit tests. Each call spawns a
 /// fresh driver thread.
 fn make_session() -> AgentSession {
-    AgentSession::new(
-        std::sync::Arc::new(crate::agent::tools::observer::DefaultFileObserver),
-                Arc::new(crate::agent::tools::policy::DefaultToolCallPolicy),
-        Arc::new(arc_swap::ArcSwap::from_pointee(
+    AgentSession::builder()
+        .with_file_observer(std::sync::Arc::new(
+            crate::agent::tools::observer::DefaultFileObserver,
+        ))
+        .with_tool_call_policy(Arc::new(crate::agent::tools::policy::DefaultToolCallPolicy))
+        .with_tool_context(Arc::new(arc_swap::ArcSwap::from_pointee(
             crate::agent::AgentToolContext::new(crate::agent::tools::registry::ToolRegistry::new()),
-        )),
-    )
+        )))
+        .build()
 }
 
 #[test]

@@ -3,12 +3,10 @@
 //! feeds results back.
 
 use crate::agent::AgentToolContext;
+use crate::agent::config::AgentConfig;
 use crate::agent::events::ToolSideEffect;
 use crate::agent::tools::Safety;
 use crate::agent::tools::execute_tool;
-use crate::bus::core::Bus;
-use crate::bus::events::file::FileEvent;
-use crate::agent::config::AgentConfig;
 use std::path::Path;
 use std::sync::Arc;
 
@@ -194,7 +192,7 @@ impl ToolExecutor {
                 let func_args = extract_str(tc, &["function", "arguments"]).to_string();
                 let cfg = self.config.clone();
                 let bus = self.file_observer.clone();
-                
+
                 let pdf = policy.clone();
                 let cache = self.cache.clone();
                 let tc_arc = self.tool_context.clone();
@@ -202,14 +200,15 @@ impl ToolExecutor {
                 join_set.spawn_blocking(move || {
                     let snapshot = tc_arc.load();
                     let dispatcher = &snapshot.registry;
-                    let ctx = crate::agent::tools::context::ToolContextBuilder::new(
-                        cfg, bus,
-                    )
-                    .with_extension(std::sync::Arc::new(crate::agent::tools::context::ToolCacheExt(cache)))
-                    .with_extension(std::sync::Arc::new(crate::agent::tools::context::UuidGeneratorExt(uuid_gen)))
-                    
-                    .with_tool_call_policy(pdf)
-                    .build();
+                    let ctx = crate::agent::tools::context::ToolContextBuilder::new(cfg, bus)
+                        .with_extension(std::sync::Arc::new(
+                            crate::agent::tools::context::ToolCacheExt(cache),
+                        ))
+                        .with_extension(std::sync::Arc::new(
+                            crate::agent::tools::context::UuidGeneratorExt(uuid_gen),
+                        ))
+                        .with_tool_call_policy(pdf)
+                        .build();
                     let result = execute_tool(dispatcher, &ctx, &func_name, &func_args);
                     (call_id, func_name, func_args, result)
                 });
@@ -232,7 +231,7 @@ impl ToolExecutor {
             let call_id = extract_str(tc, &["id"]).to_string();
             let func_name = extract_str(tc, &["function", "name"]).to_string();
             let func_args = extract_str(tc, &["function", "arguments"]).to_string();
-            
+
             let pdf = self.policy.clone();
             let snapshot = self.tool_context.load();
             let dispatcher = &snapshot.registry;
@@ -240,9 +239,12 @@ impl ToolExecutor {
                 self.config.clone(),
                 self.file_observer.clone(),
             )
-            .with_extension(std::sync::Arc::new(crate::agent::tools::context::ToolCacheExt(self.cache.clone())))
-            .with_extension(std::sync::Arc::new(crate::agent::tools::context::UuidGeneratorExt(self.uuid_gen.clone())))
-            
+            .with_extension(std::sync::Arc::new(
+                crate::agent::tools::context::ToolCacheExt(self.cache.clone()),
+            ))
+            .with_extension(std::sync::Arc::new(
+                crate::agent::tools::context::UuidGeneratorExt(self.uuid_gen.clone()),
+            ))
             .with_tool_call_policy(pdf)
             .build();
             let result = execute_tool(dispatcher, &ctx, &func_name, &func_args);
@@ -359,14 +361,13 @@ mod tests {
     fn test_tool_executor_new() {
         let config = AgentConfig::default();
         let bus = std::sync::Arc::new(crate::agent::tools::observer::DefaultFileObserver);
-                let policy = std::sync::Arc::new(crate::agent::tools::policy::DefaultToolCallPolicy);
+        let policy = std::sync::Arc::new(crate::agent::tools::policy::DefaultToolCallPolicy);
         let tm = std::sync::Arc::new(arc_swap::ArcSwap::from_pointee(AgentToolContext::new(
             crate::agent::tools::registry::ToolRegistry::new(),
         )));
         let uuid_gen = std::sync::Arc::new(crate::utils::uuid::SystemUuidGenerator);
         let cache = std::sync::Arc::new(crate::agent::tools::registry::cache::ToolCache::new());
         let executor = ToolExecutorBuilder::new(std::sync::Arc::new(config), bus, cache, tm)
-            
             .with_tool_call_policy(policy)
             .with_uuid_gen(uuid_gen)
             .build();

@@ -38,7 +38,7 @@ use std::sync::{Arc, Mutex};
 use std::thread;
 use std::time::Duration;
 
-use fastmd::integrations::mcp::oauth::{
+use fastmd::agent::lib::mcp::oauth::{
     BrowserOverride, OAuthError, OAuthFlowInputs, PreRegisteredClient, TokenStore,
     WwwAuthenticateChallenge, run_oauth_flow, start_loopback,
 };

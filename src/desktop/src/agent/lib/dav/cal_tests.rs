@@ -1,6 +1,7 @@
-//! Tests for `integrations/dav/cal.rs`.
+//! Tests for `agent/lib/dav/cal.rs`.
 
 use super::*;
+use crate::agent::config::AgentConfig;
 use fast_dav_rs::CalDavClient;
 
 // --- parse_ical_data tests ---
@@ -189,8 +190,8 @@ use wiremock::{Mock, MockServer, ResponseTemplate};
 /// A wiremock server whose backing tokio runtime lives as long as
 /// this guard. The runtime owns the hyper task that serves mock
 /// responses; drop the guard and the server stops. Same shape as
-/// the guard used in `trello/client_tests.rs` and
-/// `integrations::weather/mod.rs`.
+/// the guard used in `agent/lib/trello/client_tests.rs` and
+/// `agent::lib::weather/mod.rs`.
 struct WiremockGuard {
     server: MockServer,
     _runtime: tokio::runtime::Runtime,

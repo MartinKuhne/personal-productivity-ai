@@ -6,13 +6,15 @@ fn test_ctx() -> crate::agent::tools::context::ToolContext {
     let config = crate::agent::config::AgentConfig::default();
     let mut builder = crate::agent::tools::context::ToolContextBuilder::new(
         std::sync::Arc::new(config.clone()),
-        std::sync::Arc::new(crate::agent::tools::observer::DefaultFileObserver)
+        std::sync::Arc::new(crate::agent::tools::observer::DefaultFileObserver),
     );
-    builder = builder.with_extension(std::sync::Arc::new(crate::agent::tools::vfs::VirtualFileSystemExt(std::sync::Arc::new(crate::agent::tools::vfs::VfsResolver::new(std::sync::Arc::new(config.clone()))))));
+    builder = builder.with_extension(std::sync::Arc::new(
+        crate::agent::tools::vfs::VirtualFileSystemExt(std::sync::Arc::new(
+            crate::agent::tools::vfs::VfsResolver::new(std::sync::Arc::new(config.clone())),
+        )),
+    ));
     builder.build()
 }
-
-use crate::bus::core::Bus;
 
 /// A producer that publishes to a throwaway bus. Tests don't
 /// need to consume the events — they only care about the
@@ -28,7 +30,8 @@ fn test_tool_patch_note() {
     std::fs::write(&file_path, "Line 1\nOld Text\nLine 3").unwrap();
 
     let producer = noop_producer();
-    let result = tool_patch_note(&test_ctx(), 
+    let result = tool_patch_note(
+        &test_ctx(),
         file_path.to_str().unwrap(),
         "Old Text",
         "New Text",
@@ -49,7 +52,8 @@ fn test_tool_patch_note_not_found() {
     std::fs::write(&file_path, "Line 1\nOld Text\nLine 3").unwrap();
 
     let producer = noop_producer();
-    let result = tool_patch_note(&test_ctx(), 
+    let result = tool_patch_note(
+        &test_ctx(),
         file_path.to_str().unwrap(),
         "Missing Text",
         "New Text",
@@ -99,7 +103,9 @@ fn test_tool_read_note() {
     let file_path = dir.path().join("test.md");
     fs::write(&file_path, "Hello World").unwrap();
 
-    let result = tool_read_note(&test_ctx(), file_path.to_str().unwrap()).unwrap().content;
+    let result = tool_read_note(&test_ctx(), file_path.to_str().unwrap())
+        .unwrap()
+        .content;
     assert_eq!(result, "Hello World");
 }
 
@@ -154,7 +160,8 @@ fn test_tool_create_note() {
     let file_path = dir.path().join("new.md");
 
     let producer = noop_producer();
-    let result = tool_create_note(&test_ctx(), 
+    let result = tool_create_note(
+        &test_ctx(),
         file_path.to_str().unwrap(),
         "---\ntitle: Test\n---\n# Hello",
         &*producer,
@@ -175,7 +182,12 @@ fn test_tool_create_note_invalid_extension() {
     let file_path = dir.path().join("new.txt");
 
     let producer = noop_producer();
-    let result = tool_create_note(&test_ctx(), file_path.to_str().unwrap(), "content", &*producer);
+    let result = tool_create_note(
+        &test_ctx(),
+        file_path.to_str().unwrap(),
+        "content",
+        &*producer,
+    );
     assert_eq!(
         result.unwrap_err(),
         "Only markdown files (.md) are allowed."
@@ -188,7 +200,8 @@ fn test_tool_create_note_invalid_yaml() {
     let file_path = dir.path().join("new.md");
 
     let producer = noop_producer();
-    let result = tool_create_note(&test_ctx(), 
+    let result = tool_create_note(
+        &test_ctx(),
         file_path.to_str().unwrap(),
         "---\ninvalid: [unclosed\n---\nContent",
         &*producer,
@@ -206,7 +219,8 @@ fn test_tool_create_note_fails_if_exists() {
     fs::write(&file_path, "existing content").unwrap();
 
     let producer = noop_producer();
-    let result = tool_create_note(&test_ctx(), 
+    let result = tool_create_note(
+        &test_ctx(),
         file_path.to_str().unwrap(),
         "---\ntitle: Test\n---\n# Hello",
         &*producer,
@@ -228,7 +242,8 @@ fn test_tool_insert_into_note() {
 
     let producer = noop_producer();
     // 0-indexed: insert at position 1 (between "Line 1" and "Line 2").
-    let result = tool_insert_into_note(&test_ctx(), 
+    let result = tool_insert_into_note(
+        &test_ctx(),
         file_path.to_str().unwrap(),
         1,
         &["New Line".to_string()],
@@ -250,7 +265,8 @@ fn test_tool_insert_into_note_at_top() {
     fs::write(&file_path, "Line 1\nLine 2").unwrap();
 
     let producer = noop_producer();
-    let result = tool_insert_into_note(&test_ctx(), 
+    let result = tool_insert_into_note(
+        &test_ctx(),
         file_path.to_str().unwrap(),
         0,
         &["New".to_string()],
@@ -270,7 +286,8 @@ fn test_tool_insert_into_note_at_end() {
     fs::write(&file_path, "Line 1\nLine 2").unwrap();
 
     let producer = noop_producer();
-    let result = tool_insert_into_note(&test_ctx(), 
+    let result = tool_insert_into_note(
+        &test_ctx(),
         file_path.to_str().unwrap(),
         2,
         &["New".to_string()],
@@ -290,7 +307,8 @@ fn test_tool_insert_into_note_out_of_range() {
 
     let producer = noop_producer();
     // 2-line file accepts offset in [0, 2]; offset 5 is out of range.
-    let result = tool_insert_into_note(&test_ctx(), 
+    let result = tool_insert_into_note(
+        &test_ctx(),
         file_path.to_str().unwrap(),
         5,
         &["New".to_string()],
@@ -516,7 +534,12 @@ fn test_tool_create_note_rejects_markdown_extension() {
     let file_path = dir.path().join("new.markdown");
 
     let producer = noop_producer();
-    let result = tool_create_note(&test_ctx(), file_path.to_str().unwrap(), "# Hello", &*producer);
+    let result = tool_create_note(
+        &test_ctx(),
+        file_path.to_str().unwrap(),
+        "# Hello",
+        &*producer,
+    );
     // Should reject .markdown extension
     assert_eq!(
         result.unwrap_err(),

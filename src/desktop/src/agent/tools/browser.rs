@@ -10,7 +10,7 @@ pub trait BrowserAutomationExt: Send + Sync {
     fn press_key(&self, key: &str) -> Result<(), String>;
     fn evaluate_js(&self, script: &str) -> Result<serde_json::Value, String>;
     fn screenshot(&self, filename: &str, full_page: bool) -> Result<(PathBuf, Vec<u8>), String>;
-    
+
     // Additional methods for session management
     fn save_storage(&self) -> Result<(), String>;
     fn resolve_screenshot_path(&self, filename: &str) -> Result<PathBuf, String>;

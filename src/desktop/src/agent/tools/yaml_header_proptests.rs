@@ -49,7 +49,7 @@ use proptest::prelude::*;
 fn yaml_value_strategy() -> impl Strategy<Value = (String, String)> {
     (
         prop::string::string_regex(r"[a-z][a-z0-9_]{0,15}").unwrap(),
-        prop::string::string_regex(r"[a-zA-Z0-9_]{1,20}").unwrap(),
+        prop::string::string_regex(r"[a-zA-Z][a-zA-Z0-9_]{0,19}").unwrap(),
     )
 }
 

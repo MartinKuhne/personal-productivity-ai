@@ -1,5 +1,5 @@
 //! Property-based tests for the iCal / RFC 5545 parser in
-//! `integrations::dav::cal::parse_ical_data`.
+//! `agent::lib::dav::cal::parse_ical_data`.
 //!
 //! The DAV server returns the calendar data as a raw iCalendar
 //! text body (RFC 5545). A hostile or buggy server can return
@@ -38,7 +38,7 @@
 //!
 //! `cases = 512` per property.
 
-use crate::integrations::dav::cal::parse_ical_data;
+use crate::agent::lib::dav::cal::parse_ical_data;
 use proptest::prelude::*;
 
 /// One proptest case count for every property in this sidecar.

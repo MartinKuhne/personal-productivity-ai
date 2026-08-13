@@ -29,7 +29,7 @@ fn execute_search_calendar(
 ) -> Result<serde_json::Value, String> {
     let input: dtos::SearchCalendarInput =
         serde_json::from_str(args).map_err(|e| format!("Invalid args: {}", e))?;
-    crate::integrations::dav::cal::tool_search_calendar(&ctx.config, &input.keyword).map(|r| {
+    crate::agent::lib::dav::cal::tool_search_calendar(&ctx.config, &input.keyword).map(|r| {
         serde_json::to_value(r).unwrap_or_else(|e| serde_json::json!({"error": e.to_string()}))
     })
 }
@@ -53,14 +53,10 @@ fn execute_get_calendar(
 ) -> Result<serde_json::Value, String> {
     let input: dtos::GetCalendarInput =
         serde_json::from_str(args).map_err(|e| format!("Invalid args: {}", e))?;
-    crate::integrations::dav::cal::tool_get_calendar(
-        &ctx.config,
-        &input.start_date,
-        &input.end_date,
-    )
-    .map(|r| {
-        serde_json::to_value(r).unwrap_or_else(|e| serde_json::json!({"error": e.to_string()}))
-    })
+    crate::agent::lib::dav::cal::tool_get_calendar(&ctx.config, &input.start_date, &input.end_date)
+        .map(|r| {
+            serde_json::to_value(r).unwrap_or_else(|e| serde_json::json!({"error": e.to_string()}))
+        })
 }
 
 /// Tool that gets a specific calendar item by its full href.
@@ -82,7 +78,7 @@ fn execute_get_calendar_item(
 ) -> Result<serde_json::Value, String> {
     let input: dtos::GetCalendarItemInput =
         serde_json::from_str(args).map_err(|e| format!("Invalid args: {}", e))?;
-    crate::integrations::dav::cal::tool_get_calendar_item(&ctx.config, &input.href).map(|r| {
+    crate::agent::lib::dav::cal::tool_get_calendar_item(&ctx.config, &input.href).map(|r| {
         serde_json::to_value(r).unwrap_or_else(|e| serde_json::json!({"error": e.to_string()}))
     })
 }
@@ -108,7 +104,7 @@ fn execute_add_calendar_item(
         serde_json::from_str(args).map_err(|e| format!("Invalid args: {}", e))?;
     let item_json =
         serde_json::to_string(&input).map_err(|e| format!("Failed to serialize input: {}", e))?;
-    crate::integrations::dav::cal::tool_add_calendar_item(&ctx.config, &item_json).map(|r| {
+    crate::agent::lib::dav::cal::tool_add_calendar_item(&ctx.config, &item_json).map(|r| {
         serde_json::to_value(r).unwrap_or_else(|e| serde_json::json!({"error": e.to_string()}))
     })
 }
@@ -134,7 +130,7 @@ fn execute_update_calendar_item(
         serde_json::from_str(args).map_err(|e| format!("Invalid args: {}", e))?;
     let update_json =
         serde_json::to_string(&input).map_err(|e| format!("Failed to serialize input: {}", e))?;
-    crate::integrations::dav::cal::tool_update_calendar_item(&ctx.config, &input.id, &update_json)
+    crate::agent::lib::dav::cal::tool_update_calendar_item(&ctx.config, &input.id, &update_json)
         .map(|r| {
             serde_json::to_value(r).unwrap_or_else(|e| serde_json::json!({"error": e.to_string()}))
         })
@@ -159,7 +155,7 @@ fn execute_delete_calendar_item(
 ) -> Result<serde_json::Value, String> {
     let input: dtos::DeleteCalendarItemInput =
         serde_json::from_str(args).map_err(|e| format!("Invalid args: {}", e))?;
-    crate::integrations::dav::cal::tool_delete_calendar_item(&ctx.config, &input.id).map(|r| {
+    crate::agent::lib::dav::cal::tool_delete_calendar_item(&ctx.config, &input.id).map(|r| {
         serde_json::to_value(r).unwrap_or_else(|e| serde_json::json!({"error": e.to_string()}))
     })
 }
