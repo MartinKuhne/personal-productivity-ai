@@ -15,7 +15,7 @@ fn make_session() -> AgentSession {
         )),
         Arc::new(crate::app::session::PdfBackingTracker::new()),
         Arc::new(arc_swap::ArcSwap::from_pointee(
-            crate::agent::tools::registry::ToolRegistry::new(),
+            crate::agent::AgentToolContext::new(crate::agent::tools::registry::ToolRegistry::new()),
         )),
     )
 }

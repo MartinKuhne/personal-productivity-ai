@@ -97,10 +97,10 @@ fn test_tools_dialog_renders_restart_button_on_error() {
     // Populate the global manager's group state so `record_error`
     // has a row to attach the error to, then record it.
     {
-        app.orchestrator.tool_manager.rcu(|mgr| {
-            let mut new_mgr = (**mgr).clone();
-            new_mgr.refresh_state(app.config());
-            new_mgr
+        app.orchestrator.tool_context.rcu(|bundle| {
+            let mut new_bundle = (**bundle).clone();
+            new_bundle.registry.refresh_state(app.config());
+            new_bundle
         });
         let id = crate::agent::tools::registry::ToolGroupId::Internal(
             crate::agent::tools::registry::InternalToolGroup::Filesystem,

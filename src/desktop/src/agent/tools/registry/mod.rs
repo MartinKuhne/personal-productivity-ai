@@ -83,7 +83,7 @@ impl ToolRegistry {
     // ---- Registration ----
 
     /// Register a tool from a [`RegisteredTool`] entry. The
-    /// entry's [`ToolDescriptor`] is the source of metadata; the
+    /// entry's [`crate::agent::tools::ToolDescriptor`] is the source of metadata; the
     /// group is taken from the descriptor so the call site doesn't
     /// have to know which family a tool belongs to. The legacy
     /// `Box<dyn Tool>` registration path is gone — providers hand
@@ -540,7 +540,7 @@ fn set_internal_group_enabled(config: &mut AppConfig, g: InternalToolGroup, on: 
 }
 
 pub fn spawn_config_subscription(
-    tool_manager: Arc<arc_swap::ArcSwap<ToolRegistry>>,
+    tool_context: Arc<arc_swap::ArcSwap<crate::agent::AgentToolContext>>,
     config_bus: Bus<ConfigArrived>,
     tx: Sender<BackgroundEvent>,
 ) {
@@ -557,10 +557,10 @@ pub fn spawn_config_subscription(
                 AppConfig::default()
             }
         };
-        tool_manager.rcu(|mgr| {
-            let mut new_mgr = (**mgr).clone();
-            new_mgr.init_mcp_on_startup(&config);
-            new_mgr
+        tool_context.rcu(|ctx| {
+            let mut new_ctx = (**ctx).clone();
+            new_ctx.registry.init_mcp_on_startup(&config);
+            new_ctx
         });
         let _ = tx.send(
             BackgroundLogEntry::new(
@@ -572,10 +572,10 @@ pub fn spawn_config_subscription(
 
         loop {
             if let Ok(event) = config_reader.recv() {
-                tool_manager.rcu(|mgr| {
-                    let mut new_mgr = (**mgr).clone();
-                    new_mgr.refresh_mcp_tools(&event.config);
-                    new_mgr
+                tool_context.rcu(|ctx| {
+                    let mut new_ctx = (**ctx).clone();
+                    new_ctx.registry.refresh_mcp_tools(&event.config);
+                    new_ctx
                 });
             }
         }

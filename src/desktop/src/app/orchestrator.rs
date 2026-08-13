@@ -44,8 +44,7 @@ pub struct AppOrchestrator {
     pub config_reader: Option<BusReader<ConfigArrived>>,
     pub pending_file_load: Option<PathBuf>,
     pub finished_watcher_slot: Arc<Mutex<Option<notify::RecommendedWatcher>>>,
-    pub tool_manager:
-        std::sync::Arc<arc_swap::ArcSwap<crate::agent::tools::registry::ToolRegistry>>,
+    pub tool_context: std::sync::Arc<arc_swap::ArcSwap<crate::agent::AgentToolContext>>,
     /// Reader for the `Bus<AgentEvent>` agent→UI channel. Subscribed
     /// once during app init from [`AgentSession::event_bus`].
     /// Drained each frame in [`Self::drain_agent_event_bus`].
@@ -568,15 +567,15 @@ impl AppOrchestrator {
                             error = %msg,
                             "OAuth flow failed; recording error on group row"
                         );
-                        self.tool_manager.rcu(|mgr| {
-                            let mut new_mgr = (**mgr).clone();
-                            new_mgr.record_error(
+                        self.tool_context.rcu(|bundle| {
+                            let mut new_bundle = (**bundle).clone();
+                            new_bundle.registry.record_error(
                                 &crate::agent::tools::registry::ToolGroupId::Mcp(
                                     server_name.clone(),
                                 ),
                                 ToolGroupError::now(ToolErrorKind::Authentication, msg.clone()),
                             );
-                            new_mgr
+                            new_bundle
                         });
                     }
                 }

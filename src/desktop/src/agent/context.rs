@@ -66,8 +66,11 @@ pub struct AgentContext {
     /// the field is independent so a future test or alt
     /// orchestrator can inject a private cache.
     pub cache: Arc<crate::agent::tools::registry::cache::ToolCache>,
-    pub tool_manager:
-        std::sync::Arc<arc_swap::ArcSwap<crate::agent::tools::registry::ToolRegistry>>,
+    /// Catalog-level bundle. The agent loop, executor, and prompt
+    /// builder all snapshot this per turn. Swapped atomically on
+    /// `ConfigArrived` and MCP discovery. See
+    /// [`crate::agent::AgentToolContext`].
+    pub tool_context: std::sync::Arc<arc_swap::ArcSwap<crate::agent::AgentToolContext>>,
     pub uuid_gen: Arc<dyn crate::utils::uuid::UuidGenerator>,
 }
 
@@ -89,7 +92,7 @@ pub struct AgentContextBuilder {
     browser_session: Option<Arc<BrowserSession>>,
     pdf_backing: Option<Arc<crate::app::session::PdfBackingTracker>>,
     cache: Option<Arc<crate::agent::tools::registry::cache::ToolCache>>,
-    tool_manager: Option<Arc<arc_swap::ArcSwap<crate::agent::tools::registry::ToolRegistry>>>,
+    tool_context: Option<Arc<arc_swap::ArcSwap<crate::agent::AgentToolContext>>>,
     uuid_gen: Option<Arc<dyn crate::utils::uuid::UuidGenerator>>,
 }
 
@@ -112,7 +115,7 @@ impl AgentContextBuilder {
             browser_session: None,
             pdf_backing: None,
             cache: None,
-            tool_manager: None,
+            tool_context: None,
             uuid_gen: None,
         }
     }
@@ -190,11 +193,11 @@ impl AgentContextBuilder {
         self
     }
 
-    pub fn with_tool_manager(
+    pub fn with_tool_context(
         mut self,
-        tool_manager: Arc<arc_swap::ArcSwap<crate::agent::tools::registry::ToolRegistry>>,
+        tool_context: Arc<arc_swap::ArcSwap<crate::agent::AgentToolContext>>,
     ) -> Self {
-        self.tool_manager = Some(tool_manager);
+        self.tool_context = Some(tool_context);
         self
     }
 
@@ -235,9 +238,11 @@ impl AgentContextBuilder {
             cache: self.cache.unwrap_or_else(|| {
                 Arc::new(crate::agent::tools::registry::cache::ToolCache::new())
             }),
-            tool_manager: self.tool_manager.unwrap_or_else(|| {
+            tool_context: self.tool_context.unwrap_or_else(|| {
                 Arc::new(arc_swap::ArcSwap::from_pointee(
-                    crate::agent::tools::registry::ToolRegistry::new(),
+                    crate::agent::AgentToolContext::new(
+                        crate::agent::tools::registry::ToolRegistry::new(),
+                    ),
                 ))
             }),
             uuid_gen: self

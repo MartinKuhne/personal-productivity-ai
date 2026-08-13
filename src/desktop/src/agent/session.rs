@@ -102,13 +102,13 @@ impl AgentSession {
         file_event_bus: Bus<crate::bus::events::file::FileEvent>,
         browser_session: Arc<BrowserSession>,
         pdf_backing: Arc<crate::app::session::PdfBackingTracker>,
-        tool_manager: Arc<arc_swap::ArcSwap<crate::agent::tools::registry::ToolRegistry>>,
+        tool_context: Arc<arc_swap::ArcSwap<crate::agent::AgentToolContext>>,
     ) -> Self {
         Self::builder()
             .with_file_event_bus(file_event_bus)
             .with_browser_session(browser_session)
             .with_pdf_backing(pdf_backing)
-            .with_tool_manager(tool_manager)
+            .with_tool_context(tool_context)
             .build()
     }
 
@@ -120,14 +120,14 @@ impl AgentSession {
         file_event_bus: Bus<crate::bus::events::file::FileEvent>,
         browser_session: Arc<BrowserSession>,
         pdf_backing: Arc<crate::app::session::PdfBackingTracker>,
-        tool_manager: Arc<arc_swap::ArcSwap<crate::agent::tools::registry::ToolRegistry>>,
+        tool_context: Arc<arc_swap::ArcSwap<crate::agent::AgentToolContext>>,
     ) -> Self {
         Self::builder()
             .with_agent_config(initial_config)
             .with_file_event_bus(file_event_bus)
             .with_browser_session(browser_session)
             .with_pdf_backing(pdf_backing)
-            .with_tool_manager(tool_manager)
+            .with_tool_context(tool_context)
             .build()
     }
 
@@ -331,7 +331,7 @@ pub struct AgentSessionBuilder {
     file_event_bus: Option<Bus<crate::bus::events::file::FileEvent>>,
     browser_session: Option<Arc<BrowserSession>>,
     pdf_backing: Option<Arc<crate::app::session::PdfBackingTracker>>,
-    tool_manager: Option<Arc<arc_swap::ArcSwap<crate::agent::tools::registry::ToolRegistry>>>,
+    tool_context: Option<Arc<arc_swap::ArcSwap<crate::agent::AgentToolContext>>>,
     initial_agent_config: Option<AgentConfig>,
     agent_config_provider: Option<Arc<std::sync::RwLock<AgentConfig>>>,
 }
@@ -343,7 +343,7 @@ impl AgentSessionBuilder {
             file_event_bus: None,
             browser_session: None,
             pdf_backing: None,
-            tool_manager: None,
+            tool_context: None,
             initial_agent_config: None,
             agent_config_provider: None,
         }
@@ -370,12 +370,13 @@ impl AgentSessionBuilder {
         self
     }
 
-    /// Set the tool registry.
-    pub fn with_tool_manager(
+    /// Set the catalog-level bundle (the registry wrapped in
+    /// [`crate::agent::AgentToolContext`]).
+    pub fn with_tool_context(
         mut self,
-        tool_manager: Arc<arc_swap::ArcSwap<crate::agent::tools::registry::ToolRegistry>>,
+        tool_context: Arc<arc_swap::ArcSwap<crate::agent::AgentToolContext>>,
     ) -> Self {
-        self.tool_manager = Some(tool_manager);
+        self.tool_context = Some(tool_context);
         self
     }
 
@@ -406,9 +407,9 @@ impl AgentSessionBuilder {
         let pdf_backing = self
             .pdf_backing
             .expect("AgentSession requires with_pdf_backing");
-        let tool_manager = self
-            .tool_manager
-            .expect("AgentSession requires with_tool_manager");
+        let tool_context = self
+            .tool_context
+            .expect("AgentSession requires with_tool_context");
         let agent_config_provider = self.agent_config_provider.unwrap_or_else(|| {
             Arc::new(std::sync::RwLock::new(
                 self.initial_agent_config.unwrap_or_default(),
@@ -423,7 +424,7 @@ impl AgentSessionBuilder {
             file_event_bus,
             browser_session.clone(),
             pdf_backing,
-            tool_manager,
+            tool_context,
         );
         AgentSession {
             state: AgentState {
@@ -467,7 +468,7 @@ fn spawn_driver(
     file_event_bus: Bus<crate::bus::events::file::FileEvent>,
     browser_session: Arc<BrowserSession>,
     pdf_backing: Arc<crate::app::session::PdfBackingTracker>,
-    tool_manager: Arc<arc_swap::ArcSwap<crate::agent::tools::registry::ToolRegistry>>,
+    tool_context: Arc<arc_swap::ArcSwap<crate::agent::AgentToolContext>>,
 ) -> JoinHandle<()> {
     std::thread::spawn(move || {
         // Per-session history cache. Keyed by `session_id` so continuation
@@ -508,7 +509,7 @@ fn spawn_driver(
             .with_cache(std::sync::Arc::new(
                 crate::agent::tools::registry::cache::ToolCache::new(),
             ))
-            .with_tool_manager(tool_manager.clone())
+            .with_tool_context(tool_context.clone())
             .with_uuid_gen(std::sync::Arc::new(crate::utils::uuid::SystemUuidGenerator))
             .build();
             crate::agent::run_agent(ctx);
@@ -556,7 +557,7 @@ impl Drop for AgentSession {
         // Drop the sender first to disconnect the channel, causing the
         // driver's `recv()` to return `Err` and the driver loop to exit.
         // Then join to ensure the thread terminates before shared
-        // resources (`browser_session`, `tool_manager`, etc.) are dropped.
+        // resources (`browser_session`, `tool_context`, etc.) are dropped.
         self.prompt_tx = mpsc::channel::<AgentPrompt>().0;
         if let Some(handle) = self.driver_handle.take() {
             let _ = handle.join();

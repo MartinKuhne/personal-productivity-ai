@@ -91,14 +91,14 @@ impl FastMdApp {
         let background_task = Task::new(config_bus.clone());
         // The tools manager subscribes to the same bus and performs
         // the one-time
-        let tool_manager = std::sync::Arc::new(arc_swap::ArcSwap::from_pointee(
-            crate::agent::tools::registry::ToolRegistry::new(),
+        let tool_context = std::sync::Arc::new(arc_swap::ArcSwap::from_pointee(
+            crate::agent::AgentToolContext::new(crate::agent::tools::registry::ToolRegistry::new()),
         ));
         // Start MCP initialization immediately on the app's initial
         // background thread, so the UI thread never blocks on MCP
         // network I/O at startup.
         crate::agent::tools::registry::spawn_config_subscription(
-            tool_manager.clone(),
+            tool_context.clone(),
             config_bus.clone(),
             background_task.tx.clone(),
         );
@@ -128,7 +128,7 @@ impl FastMdApp {
             background_task.file_event_bus.clone(),
             browser_session.clone(),
             Arc::new(pdf_backing_tracker.clone()),
-            tool_manager.clone(),
+            tool_context.clone(),
         );
 
         let event_bus = background_task.file_event_bus;
@@ -206,8 +206,10 @@ impl FastMdApp {
                 config_reader: Some(config_reader),
                 pending_file_load: None,
                 finished_watcher_slot,
-                tool_manager: std::sync::Arc::new(arc_swap::ArcSwap::from_pointee(
-                    crate::agent::tools::registry::ToolRegistry::new(),
+                tool_context: std::sync::Arc::new(arc_swap::ArcSwap::from_pointee(
+                    crate::agent::AgentToolContext::new(
+                        crate::agent::tools::registry::ToolRegistry::new(),
+                    ),
                 )),
                 agent_event_reader: Some(agent_event_reader),
                 agent_event_lagged: false,
@@ -264,7 +266,9 @@ impl FastMdApp {
             test_browser_session,
             Arc::new(pdf_backing_tracker.clone()),
             Arc::new(arc_swap::ArcSwap::from_pointee(
-                crate::agent::tools::registry::ToolRegistry::new(),
+                crate::agent::AgentToolContext::new(
+                    crate::agent::tools::registry::ToolRegistry::new(),
+                ),
             )),
         );
         agent.set_agent_config(crate::agent::config::AgentConfig::from_app_config(&config));
@@ -312,8 +316,10 @@ impl FastMdApp {
                 config_reader: None,
                 pending_file_load: None,
                 finished_watcher_slot,
-                tool_manager: std::sync::Arc::new(arc_swap::ArcSwap::from_pointee(
-                    crate::agent::tools::registry::ToolRegistry::new(),
+                tool_context: std::sync::Arc::new(arc_swap::ArcSwap::from_pointee(
+                    crate::agent::AgentToolContext::new(
+                        crate::agent::tools::registry::ToolRegistry::new(),
+                    ),
                 )),
                 agent_event_reader: Some(agent_event_reader),
                 agent_event_lagged: false,

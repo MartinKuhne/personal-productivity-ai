@@ -28,20 +28,21 @@ fn run_agent_inner(ctx: AgentContext) {
     let system_prompts = ctx.system_prompts.clone();
     log_prompt_context(&ctx.active_file, &ctx.active_dir, &ctx.selected_files);
     let mut messages = build_messages(system_prompts, &ctx.prompt, ctx.history.clone());
-    ctx.tool_manager.rcu(|mgr| {
-        let mut new_mgr = (**mgr).clone();
-        new_mgr.update_and_refresh(&ctx.app_config);
-        new_mgr
+    ctx.tool_context.rcu(|bundle| {
+        let mut new_bundle = (**bundle).clone();
+        new_bundle.registry.update_and_refresh(&ctx.app_config);
+        new_bundle
     });
     let tools_json = ctx
-        .tool_manager
+        .tool_context
         .load()
+        .registry
         .get_schema(&ctx.app_config, &ctx.prompt);
     let executor = crate::agent::tool_executor::ToolExecutorBuilder::new(
         ctx.app_config.clone(),
         ctx.file_event_bus.clone(),
         ctx.cache.clone(),
-        ctx.tool_manager.clone(),
+        ctx.tool_context.clone(),
     )
     .with_browser_session(ctx.browser_session.clone())
     .with_pdf_backing(ctx.pdf_backing.clone())

@@ -814,7 +814,9 @@ fn test_spawn_config_subscription_runs_init_in_background() {
     let bus = crate::bus::config::config_bus();
     let (tx, rx) = std::sync::mpsc::channel::<BackgroundEvent>();
 
-    let tm = Arc::new(arc_swap::ArcSwap::from_pointee(ToolRegistry::new()));
+    let tm = Arc::new(arc_swap::ArcSwap::from_pointee(
+        crate::agent::AgentToolContext::new(ToolRegistry::new()),
+    ));
     spawn_config_subscription(tm, bus.clone(), tx);
 
     bus.publish(ConfigArrived::new(AppConfig::default()));

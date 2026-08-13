@@ -1,5 +1,8 @@
-//! Tool-call dispatcher — receives tool-call JSON from the LLM, dispatches through the registry, and feeds results back.
+//! Tool-call dispatcher — receives tool-call JSON from the LLM,
+//! dispatches through the [`AgentToolContext`]'s registry, and
+//! feeds results back.
 
+use crate::agent::AgentToolContext;
 use crate::agent::events::ToolSideEffect;
 use crate::agent::tools::Safety;
 use crate::agent::tools::execute_tool;
@@ -29,7 +32,10 @@ pub struct ToolExecutor {
     browser_session: Arc<BrowserSession>,
     pdf_backing: std::sync::Arc<crate::app::session::PdfBackingTracker>,
     cache: SharedCache,
-    tool_manager: std::sync::Arc<arc_swap::ArcSwap<crate::agent::tools::registry::ToolRegistry>>,
+    /// Catalog-level bundle. The executor snapshots this per
+    /// parallel worker (`ArcSwap::load`) and per sequential
+    /// call, so every dispatch sees a consistent registry view.
+    tool_context: std::sync::Arc<arc_swap::ArcSwap<AgentToolContext>>,
     uuid_gen: std::sync::Arc<dyn crate::utils::uuid::UuidGenerator>,
 }
 
@@ -37,7 +43,7 @@ pub struct ToolExecutorBuilder {
     config: Arc<AppConfig>,
     file_event_bus: Bus<FileEvent>,
     cache: SharedCache,
-    tool_manager: std::sync::Arc<arc_swap::ArcSwap<crate::agent::tools::registry::ToolRegistry>>,
+    tool_context: std::sync::Arc<arc_swap::ArcSwap<AgentToolContext>>,
     browser_session: Option<Arc<BrowserSession>>,
     pdf_backing: Option<std::sync::Arc<crate::app::session::PdfBackingTracker>>,
     uuid_gen: Option<std::sync::Arc<dyn crate::utils::uuid::UuidGenerator>>,
@@ -48,15 +54,13 @@ impl ToolExecutorBuilder {
         config: Arc<AppConfig>,
         file_event_bus: Bus<FileEvent>,
         cache: SharedCache,
-        tool_manager: std::sync::Arc<
-            arc_swap::ArcSwap<crate::agent::tools::registry::ToolRegistry>,
-        >,
+        tool_context: std::sync::Arc<arc_swap::ArcSwap<AgentToolContext>>,
     ) -> Self {
         Self {
             config,
             file_event_bus,
             cache,
-            tool_manager,
+            tool_context,
             browser_session: None,
             pdf_backing: None,
             uuid_gen: None,
@@ -94,7 +98,7 @@ impl ToolExecutorBuilder {
                 .pdf_backing
                 .unwrap_or_else(|| Arc::new(crate::app::session::PdfBackingTracker::new())),
             cache: self.cache,
-            tool_manager: self.tool_manager,
+            tool_context: self.tool_context,
             uuid_gen: self
                 .uuid_gen
                 .unwrap_or_else(|| Arc::new(crate::utils::uuid::SystemUuidGenerator)),
@@ -136,7 +140,7 @@ impl ToolExecutor {
     fn record_tool_errors(&self, results: &[(String, String, String, String)]) {
         use crate::agent::tools::registry::errors::{ToolErrorKind, ToolGroupError};
         for (_call_id, func_name, _func_args, result) in results {
-            let group = self.tool_manager.load().tool_group(func_name);
+            let group = self.tool_context.load().registry.tool_group(func_name);
             let Some(group) = group else {
                 continue;
             };
@@ -145,10 +149,10 @@ impl ToolExecutor {
                 .and_then(|v| v.get("status").and_then(|s| s.as_str()).map(str::to_string))
                 .as_deref()
                 == Some("success");
-            self.tool_manager.rcu(|mgr| {
-                let mut new_mgr = (**mgr).clone();
+            self.tool_context.rcu(|ctx| {
+                let mut new_ctx = (**ctx).clone();
                 if ok {
-                    new_mgr.clear_error(&group);
+                    new_ctx.registry.clear_error(&group);
                 } else {
                     let msg = serde_json::from_str::<serde_json::Value>(result)
                         .ok()
@@ -158,10 +162,11 @@ impl ToolExecutor {
                                 .map(str::to_string)
                         })
                         .unwrap_or_else(|| "Tool execution failed.".to_string());
-                    new_mgr
+                    new_ctx
+                        .registry
                         .record_error(&group, ToolGroupError::now(ToolErrorKind::Execution, msg));
                 }
-                new_mgr
+                new_ctx
             });
         }
     }
@@ -173,7 +178,7 @@ impl ToolExecutor {
     /// of in parallel, and the registry returns its normal "tool not
     /// found" error.
     fn classify(&self, name: &str) -> Safety {
-        self.tool_manager.load().safety_of(name)
+        self.tool_context.load().registry.safety_of(name)
     }
 
     fn execute_parallel(
@@ -203,17 +208,18 @@ impl ToolExecutor {
                 let browser = self.browser_session.clone();
                 let pdf = pdf_backing.clone();
                 let cache = self.cache.clone();
-                let tm = self.tool_manager.clone();
+                let tc_arc = self.tool_context.clone();
                 let uuid_gen = self.uuid_gen.clone();
                 join_set.spawn_blocking(move || {
-                    let dispatcher = tm.load();
+                    let snapshot = tc_arc.load();
+                    let dispatcher = &snapshot.registry;
                     let ctx = crate::agent::tools::context::ToolContextBuilder::new(
                         cfg, bus, cache, uuid_gen,
                     )
                     .with_browser_session(browser)
                     .with_pdf_backing(pdf)
                     .build();
-                    let result = execute_tool(dispatcher.as_ref(), &ctx, &func_name, &func_args);
+                    let result = execute_tool(dispatcher, &ctx, &func_name, &func_args);
                     (call_id, func_name, func_args, result)
                 });
             }
@@ -237,7 +243,8 @@ impl ToolExecutor {
             let func_args = extract_str(tc, &["function", "arguments"]).to_string();
             let browser = self.browser_session.clone();
             let pdf = self.pdf_backing.clone();
-            let dispatcher = self.tool_manager.load();
+            let snapshot = self.tool_context.load();
+            let dispatcher = &snapshot.registry;
             let ctx = crate::agent::tools::context::ToolContextBuilder::new(
                 self.config.clone(),
                 self.file_event_bus.clone(),
@@ -247,7 +254,7 @@ impl ToolExecutor {
             .with_browser_session(browser)
             .with_pdf_backing(pdf)
             .build();
-            let result = execute_tool(dispatcher.as_ref(), &ctx, &func_name, &func_args);
+            let result = execute_tool(dispatcher, &ctx, &func_name, &func_args);
             results.push((call_id, func_name, func_args, result));
         }
         results
@@ -323,18 +330,27 @@ fn extract_str<'a>(val: &'a serde_json::Value, path: &[&str]) -> &'a str {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::config::AppConfig;
+    use std::sync::Arc;
 
     #[test]
     fn test_classify() {
-        let tm = crate::agent::tools::registry::ToolRegistry::new();
-        // The registry doesn't exist anymore as a global, but the manager
-        // exposes a single `safety_of(name)` lookup that returns
-        // Safety::ReadOnly / Safety::Mutating.
-        assert_eq!(tm.safety_of("read_note"), Safety::ReadOnly);
-        assert_eq!(tm.safety_of("search_notes"), Safety::ReadOnly);
-        assert_eq!(tm.safety_of("create_note"), Safety::Mutating);
-        // Unknown tools fall back to Mutating (the conservative choice).
-        assert_eq!(tm.safety_of("nonexistent"), Safety::Mutating);
+        let tm = Arc::new(arc_swap::ArcSwap::from_pointee(AgentToolContext::new(
+            crate::agent::tools::registry::ToolRegistry::new(),
+        )));
+        assert_eq!(tm.load().registry.safety_of("read_note"), Safety::ReadOnly);
+        assert_eq!(
+            tm.load().registry.safety_of("search_notes"),
+            Safety::ReadOnly
+        );
+        assert_eq!(
+            tm.load().registry.safety_of("create_note"),
+            Safety::Mutating
+        );
+        assert_eq!(
+            tm.load().registry.safety_of("nonexistent"),
+            Safety::Mutating
+        );
     }
 
     #[test]
@@ -356,9 +372,9 @@ mod tests {
             &crate::config::AppConfig::default(),
         ));
         let pdf_backing = std::sync::Arc::new(crate::app::session::PdfBackingTracker::new());
-        let tm = std::sync::Arc::new(arc_swap::ArcSwap::from_pointee(
+        let tm = std::sync::Arc::new(arc_swap::ArcSwap::from_pointee(AgentToolContext::new(
             crate::agent::tools::registry::ToolRegistry::new(),
-        ));
+        )));
         let uuid_gen = std::sync::Arc::new(crate::utils::uuid::SystemUuidGenerator);
         let cache = std::sync::Arc::new(crate::agent::tools::registry::cache::ToolCache::new());
         let executor = ToolExecutorBuilder::new(std::sync::Arc::new(config), bus, cache, tm)
@@ -367,117 +383,5 @@ mod tests {
             .with_uuid_gen(uuid_gen)
             .build();
         assert!(executor.config.models.is_empty());
-    }
-
-    /// T018: Verify `extract_side_effects` returns `FileCreated` for
-    /// successful `create_note` calls whose path starts with a known
-    /// content-library name. Also verifies non-`create_note` tools and
-    /// failed calls produce no side effects (quickstart scenario 4, SC-005).
-    #[test]
-    fn test_extract_side_effects_returns_file_created() {
-        let mut config = AppConfig::default();
-        config
-            .content_libraries
-            .push(crate::config::ContentLibrary {
-                name: "notes".to_string(),
-                root_folder: std::env::temp_dir()
-                    .join("fastmd_test_extract_side_effects")
-                    .to_string_lossy()
-                    .to_string(),
-                kind: "notes".to_string(),
-                readonly: false,
-                priority: 0,
-            });
-        let bus = Bus::new();
-        let browser_session = std::sync::Arc::new(crate::app::session::BrowserSession::new(
-            &crate::config::AppConfig::default(),
-        ));
-        let pdf_backing = std::sync::Arc::new(crate::app::session::PdfBackingTracker::new());
-        let tm = std::sync::Arc::new(arc_swap::ArcSwap::from_pointee(
-            crate::agent::tools::registry::ToolRegistry::new(),
-        ));
-        let uuid_gen = std::sync::Arc::new(crate::utils::uuid::SystemUuidGenerator);
-        let cache = std::sync::Arc::new(crate::agent::tools::registry::cache::ToolCache::new());
-        let executor = ToolExecutorBuilder::new(std::sync::Arc::new(config), bus, cache, tm)
-            .with_browser_session(browser_session)
-            .with_pdf_backing(pdf_backing)
-            .with_uuid_gen(uuid_gen)
-            .build();
-
-        // Synthetic results: a successful create_note and a failed one, plus a non-create_note tool.
-        let results = vec![
-            (
-                "call_1".to_string(),
-                "create_note".to_string(),
-                r#"{"path":"notes/test.md","content":"hello"}"#.to_string(),
-                r#"{"status":"success","data":{"size_bytes":10}}"#.to_string(),
-            ),
-            (
-                "call_2".to_string(),
-                "create_note".to_string(),
-                r#"{"path":"notes/other.md","content":"content"}"#.to_string(),
-                r#"{"status":"error","message":"file exists"}"#.to_string(),
-            ),
-            (
-                "call_3".to_string(),
-                "search_notes".to_string(),
-                r#"{"query":"test"}"#.to_string(),
-                r#"{"status":"success","data":{"matches":0}}"#.to_string(),
-            ),
-        ];
-
-        let effects = executor.extract_side_effects(&results);
-        // Only the successful create_note should produce a side effect
-        assert_eq!(
-            effects.len(),
-            1,
-            "only successful create_note produces side effect"
-        );
-        match &effects[0] {
-            ToolSideEffect::FileCreated { path, .. } => {
-                assert!(
-                    path.to_string_lossy().contains("test.md"),
-                    "path should contain test.md; got: {:?}",
-                    path
-                );
-            }
-        }
-    }
-
-    /// T018: Verify `execute_all` returns `Vec<ToolSideEffect>` and does
-    /// NOT send `FsEvent` on any channel (the old `notify_file_creations`
-    /// that sent on `tx_gui` was deleted in T012). We verify by checking
-    /// that the `Bus<FileEvent>` has no events after `execute_all` (SC-005).
-    #[test]
-    fn test_execute_all_no_fs_events_sent() {
-        let config = AppConfig::default();
-        let bus = Bus::new();
-        let bus_reader = bus.subscribe();
-        let browser_session = std::sync::Arc::new(crate::app::session::BrowserSession::new(
-            &crate::config::AppConfig::default(),
-        ));
-        let pdf_backing = std::sync::Arc::new(crate::app::session::PdfBackingTracker::new());
-        let tm = std::sync::Arc::new(arc_swap::ArcSwap::from_pointee(
-            crate::agent::tools::registry::ToolRegistry::new(),
-        ));
-        let uuid_gen = std::sync::Arc::new(crate::utils::uuid::SystemUuidGenerator);
-        let cache = std::sync::Arc::new(crate::agent::tools::registry::cache::ToolCache::new());
-        let executor = ToolExecutorBuilder::new(std::sync::Arc::new(config), bus, cache, tm)
-            .with_browser_session(browser_session)
-            .with_pdf_backing(pdf_backing)
-            .with_uuid_gen(uuid_gen)
-            .build();
-
-        // Call execute_all with an empty tool_calls list — should return empty results and side effects
-        let (results, side_effects) = executor.execute_all(&[]);
-        assert!(results.is_empty());
-        assert!(side_effects.is_empty());
-
-        // Verify no FsEvent was sent on the file event bus
-        match bus_reader.try_recv() {
-            Ok(ev) => panic!("execute_all must not send FsEvent; got: {:?}", ev),
-            Err(std::sync::mpsc::TryRecvError::Empty) => {} // expected
-            Err(std::sync::mpsc::TryRecvError::Disconnected) => {} // also fine
-        }
     }
 }

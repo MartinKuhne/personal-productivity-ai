@@ -10,12 +10,17 @@ pub mod error;
 pub mod events;
 pub mod llm_client;
 pub mod session;
+pub mod tool_context;
 pub mod tool_executor;
 pub mod tools;
 
 #[cfg(test)]
 #[path = "agent_impl_tests.rs"]
 mod agent_impl_tests;
+
+#[cfg(test)]
+#[path = "tool_context_tests.rs"]
+mod tool_context_tests;
 
 // Property-based tests for the datamark envelope. Phase 1 of the
 // fuzzing plan (`doc/planning/fuzzing.md`); this is the single
@@ -29,3 +34,4 @@ mod datamark_proptests;
 pub use agent_impl::*;
 pub use context::AgentContext;
 pub use session::AgentSession;
+pub use tool_context::AgentToolContext;
