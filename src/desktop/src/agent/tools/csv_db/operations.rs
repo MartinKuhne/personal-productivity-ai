@@ -1,10 +1,10 @@
 //! CSV-database CRUD operations — create a new CSV database, add rows, list databases, and path resolution.
 
 use super::schema::{AddRowsInput, CreateCsvInput, CsvDatabase, ListCsvInput};
-use crate::config::AppConfig;
+use crate::agent::config::AgentConfig;
 use std::path::PathBuf;
 
-pub fn get_db_dir(config: &AppConfig) -> PathBuf {
+pub fn get_db_dir(config: &AgentConfig) -> PathBuf {
     let path = if let Some(ref override_path) = config.csv_db_path {
         PathBuf::from(override_path)
     } else {
@@ -22,13 +22,13 @@ pub fn get_db_dir(config: &AppConfig) -> PathBuf {
     path
 }
 
-pub fn get_db_path(config: &AppConfig, db_name: &str) -> PathBuf {
+pub fn get_db_path(config: &AgentConfig, db_name: &str) -> PathBuf {
     let mut path = get_db_dir(config);
     path.push(format!("{}.csv", db_name));
     path
 }
 
-pub fn create_csv(config: &AppConfig, input: CreateCsvInput) -> Result<CsvDatabase, String> {
+pub fn create_csv(config: &AgentConfig, input: CreateCsvInput) -> Result<CsvDatabase, String> {
     let db_path = get_db_path(config, &input.db_name);
     if db_path.exists() {
         return Err(format!("Database '{}' already exists", input.db_name));
@@ -47,7 +47,7 @@ pub fn create_csv(config: &AppConfig, input: CreateCsvInput) -> Result<CsvDataba
     })
 }
 
-pub fn list_csv(config: &AppConfig, _input: ListCsvInput) -> Result<Vec<CsvDatabase>, String> {
+pub fn list_csv(config: &AgentConfig, _input: ListCsvInput) -> Result<Vec<CsvDatabase>, String> {
     let db_dir = get_db_dir(config);
     let mut dbs = Vec::new();
 
@@ -80,7 +80,7 @@ pub fn list_csv(config: &AppConfig, _input: ListCsvInput) -> Result<Vec<CsvDatab
     Ok(dbs)
 }
 
-pub fn add_rows(config: &AppConfig, input: AddRowsInput) -> Result<String, String> {
+pub fn add_rows(config: &AgentConfig, input: AddRowsInput) -> Result<String, String> {
     let db_path = get_db_path(config, &input.db_name);
     if !db_path.exists() {
         return Err(format!("Database '{}' does not exist", input.db_name));
@@ -200,10 +200,9 @@ mod tests {
     #[test]
     fn test_create_and_list_and_add_rows() {
         let dir = tempdir().unwrap();
-        let config = AppConfig {
-            csv_db_path: Some(dir.path().to_string_lossy().to_string()),
-            ..AppConfig::default()
-        };
+        let config = crate::agent::config::AgentConfigBuilder::new()
+            .with_csv_db_path(Some(dir.path().to_string_lossy().to_string()))
+            .build();
 
         let create_input = CreateCsvInput {
             db_name: "test_db".to_string(),

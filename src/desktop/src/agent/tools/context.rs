@@ -4,22 +4,22 @@ use crate::app::session::BrowserSession;
 use crate::app::vfs;
 use crate::bus::core::Bus;
 use crate::bus::events::file::{FileEvent, FileEventKind, FileEventProducer};
-use crate::config::AppConfig;
+use crate::agent::config::AgentConfig;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
-/// Read-only VFS path resolver wrapping `AppConfig`. Owns an
-/// `Arc<AppConfig>` so the resolver is `'static` and can be embedded
+/// Read-only VFS path resolver wrapping `AgentConfig`. Owns an
+/// `Arc<AgentConfig>` so the resolver is `'static` and can be embedded
 /// in a long-lived `ToolContext` or cloned across parallel dispatch
 /// without lifetime juggling.
 #[derive(Clone)]
 pub struct VfsResolver {
-    pub config: Arc<AppConfig>,
+    pub config: Arc<AgentConfig>,
 }
 
 impl VfsResolver {
     /// Create a new `VfsResolver`.
-    pub fn new(config: Arc<AppConfig>) -> Self {
+    pub fn new(config: Arc<AgentConfig>) -> Self {
         Self { config }
     }
 
@@ -31,14 +31,14 @@ impl VfsResolver {
         vpath: &str,
         allow_write: bool,
     ) -> Result<Option<(PathBuf, bool)>, String> {
-        vfs::behaviour::resolve(vpath, allow_write, &self.config.content_libraries)
+        vfs::behaviour::resolve(vpath, allow_write, self.config.content_libraries())
     }
 
     /// Resolve a virtual path for a mutating tool. Thin shim over
     /// [`vfs::behaviour::resolve_writable`]. Returns the absolute
     /// filesystem path on success.
     pub fn resolve_writable(&self, vpath: &str) -> Result<PathBuf, String> {
-        vfs::behaviour::resolve_writable(vpath, &self.config.content_libraries)
+        vfs::behaviour::resolve_writable(vpath, self.config.content_libraries())
     }
 }
 
@@ -75,7 +75,7 @@ impl EventPublisher {
     }
 }
 
-/// Tool context — composite providing tools with access to `AppConfig`
+/// Tool context — composite providing tools with access to `AgentConfig`
 /// and the file event bus, plus safe virtual-path resolution via
 /// [`VfsResolver`] and event publishing via [`EventPublisher`].
 ///
@@ -95,7 +95,7 @@ impl EventPublisher {
 /// implicit context ↔ registry cycle the previous design had.
 #[derive(Clone)]
 pub struct ToolContext {
-    pub config: Arc<AppConfig>,
+    pub config: Arc<AgentConfig>,
     pub file_event_bus: Bus<FileEvent>,
     pub resolver: VfsResolver,
     pub publisher: EventPublisher,
@@ -159,7 +159,7 @@ const _: fn() = || {
 };
 
 pub struct ToolContextBuilder {
-    config: Arc<AppConfig>,
+    config: Arc<AgentConfig>,
     file_event_bus: Bus<FileEvent>,
     cache: std::sync::Arc<crate::agent::tools::registry::cache::ToolCache>,
     uuid_gen: std::sync::Arc<dyn crate::utils::uuid::UuidGenerator>,
@@ -168,7 +168,7 @@ pub struct ToolContextBuilder {
 
 impl ToolContextBuilder {
     pub fn new(
-        config: Arc<AppConfig>,
+        config: Arc<AgentConfig>,
         file_event_bus: Bus<FileEvent>,
         cache: std::sync::Arc<crate::agent::tools::registry::cache::ToolCache>,
         uuid_gen: std::sync::Arc<dyn crate::utils::uuid::UuidGenerator>,
@@ -206,7 +206,7 @@ impl ToolContextBuilder {
 
         let mut extensions = self.extensions;
         if extensions.get::<BrowserSession>().is_none() {
-            extensions.insert(Arc::new(BrowserSession::new(&self.config)));
+            extensions.insert(Arc::new(BrowserSession::with_resolved(self.config.browser().clone())));
         }
         if extensions
             .get::<crate::app::session::PdfBackingTracker>()

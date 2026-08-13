@@ -1,4 +1,5 @@
-//! Tests for `jmap/email.rs`.
+use crate::agent::config::AgentConfig;
+// Tests for `jmap/email.rs`.
 
 use serde_json::json;
 
@@ -460,11 +461,11 @@ fn test_simplify_cc_and_bcc_preserved() {
 
 use super::{SearchEmailFilters, tool_get_email_by_id, tool_search_email, tool_send_email};
 use crate::agent::tools::jmap::mock_server::{spawn_mock_server, spawn_recording_mock_server};
-use crate::config::{AppConfig, JmapClient};
+use crate::config::{JmapClient};
 #[test]
 fn test_tool_search_email_no_clients() {
     let cache = crate::agent::tools::registry::cache::ToolCache::new();
-    let config = AppConfig::default();
+    let config = AgentConfig::default();
     let res = tool_search_email(
         &config,
         SearchEmailFilters {
@@ -493,7 +494,7 @@ fn test_tool_search_email_success() {
             ]\
         }";
     let url = spawn_mock_server(body);
-    let mut config = AppConfig::default();
+    let mut config = AgentConfig::default();
     config.jmap_clients.insert(
         "test".to_string(),
         JmapClient {
@@ -528,7 +529,7 @@ fn test_tool_get_email_by_id_success() {
             ]\
         }";
     let url = spawn_mock_server(body);
-    let mut config = AppConfig::default();
+    let mut config = AgentConfig::default();
     config.jmap_clients.insert(
         "test".to_string(),
         JmapClient {
@@ -558,7 +559,7 @@ fn test_tool_get_email_by_id_sends_body_value_args() {
             ]\
         }";
     let (url, recorder) = spawn_recording_mock_server(body);
-    let mut config = AppConfig::default();
+    let mut config = AgentConfig::default();
     config.jmap_clients.insert(
         "test".to_string(),
         JmapClient {
@@ -612,7 +613,7 @@ fn test_tool_get_email_by_id_returns_body_content() {
             ]\
         }";
     let url = spawn_mock_server(body);
-    let mut config = AppConfig::default();
+    let mut config = AgentConfig::default();
     config.jmap_clients.insert(
         "test".to_string(),
         JmapClient {
@@ -643,7 +644,7 @@ fn test_tool_search_email_with_status_filters_success() {
             ]\
         }";
     let url = spawn_mock_server(body);
-    let mut config = AppConfig::default();
+    let mut config = AgentConfig::default();
     config.jmap_clients.insert(
         "test".to_string(),
         JmapClient {
@@ -687,7 +688,7 @@ fn test_tool_send_email_success() {
             ]\
         }";
     let url = spawn_mock_server(body);
-    let mut config = AppConfig::default();
+    let mut config = AgentConfig::default();
     config.jmap_clients.insert(
         "test".to_string(),
         JmapClient {
@@ -712,7 +713,7 @@ fn test_tool_send_email_ai_agent_footer() {
 #[test]
 fn test_tool_search_email_empty_filters_errors() {
     let cache = crate::agent::tools::registry::cache::ToolCache::new();
-    let config = AppConfig::default();
+    let config = AgentConfig::default();
     let res = tool_search_email(
         &config,
         SearchEmailFilters {
@@ -733,7 +734,7 @@ fn test_tool_search_email_empty_filters_with_client_errors() {
     rustls::crypto::ring::default_provider()
         .install_default()
         .ok();
-    let mut config = AppConfig::default();
+    let mut config = AgentConfig::default();
     let body = "{\"apiUrl\": \"{API_URL}\", \"primaryAccounts\": {\"urn:ietf:params:jmap:mail\": \"acc1\"}}";
     let url = spawn_mock_server(body);
     config.jmap_clients.insert(
@@ -782,7 +783,7 @@ fn test_tool_search_email_first_call_small_set_returns_final_page_hint() {
             }"#
         .to_string();
     let url = spawn_mock_server(body);
-    let mut config = AppConfig::default();
+    let mut config = AgentConfig::default();
     config.jmap_clients.insert(
         "test".to_string(),
         JmapClient {
@@ -839,7 +840,7 @@ fn test_tool_search_email_cursor_unknown_returns_error() {
             }"#
         .to_string();
     let url = spawn_mock_server(body);
-    let mut config = AppConfig::default();
+    let mut config = AgentConfig::default();
     config.jmap_clients.insert(
         "test".to_string(),
         JmapClient {
@@ -905,7 +906,7 @@ fn test_tool_search_email_cursor_pagination() {
         email_objects.join(",")
     );
     let url = spawn_mock_server(body);
-    let mut config = AppConfig::default();
+    let mut config = AgentConfig::default();
     config.jmap_clients.insert(
         "test".to_string(),
         JmapClient {
@@ -1008,7 +1009,7 @@ fn test_tool_search_email_pagination_hint_on_final_page() {
             }"#
         .to_string();
     let url = spawn_mock_server(body);
-    let mut config = AppConfig::default();
+    let mut config = AgentConfig::default();
     config.jmap_clients.insert(
         "test".to_string(),
         JmapClient {
@@ -1060,7 +1061,7 @@ fn test_tool_search_email_multiple_clients() {
             }"#
         .to_string();
     let url = spawn_mock_server(body);
-    let mut config = AppConfig::default();
+    let mut config = AgentConfig::default();
     config.jmap_clients.insert(
         "client1".to_string(),
         JmapClient {
@@ -1114,7 +1115,7 @@ fn test_tool_search_email_logs_tracing() {
             }"#
     .to_string();
     let url = spawn_mock_server(body);
-    let mut config = AppConfig::default();
+    let mut config = AgentConfig::default();
     config.jmap_clients.insert(
         "fastmail".to_string(),
         JmapClient {

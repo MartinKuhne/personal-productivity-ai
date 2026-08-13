@@ -4,17 +4,17 @@ use super::*;
 use crate::agent::tools::context::ToolContext;
 use crate::app::session::BrowserSession;
 use crate::bus::core::Bus;
-use crate::config::AppConfig;
+use crate::agent::config::AgentConfig;
 use serde_json::Value;
 use std::fs;
 use std::sync::Arc;
 use tempfile::TempDir;
 
 fn test_browser_session() -> Arc<BrowserSession> {
-    Arc::new(BrowserSession::new(&AppConfig::default()))
+    Arc::new(BrowserSession::new(&crate::config::AppConfig::default()))
 }
 
-fn test_ctx(config: &AppConfig) -> ToolContext {
+fn test_ctx(config: &AgentConfig) -> ToolContext {
     crate::agent::tools::context::ToolContextBuilder::new(
         Arc::new(config.clone()),
         Bus::new(),
@@ -28,7 +28,7 @@ fn test_ctx(config: &AppConfig) -> ToolContext {
 
 #[test]
 fn test_resolve_virtual_path() {
-    let mut config = AppConfig::default();
+    let mut config = AgentConfig::default();
     config
         .content_libraries
         .push(crate::config::ContentLibrary {
@@ -75,7 +75,7 @@ fn test_resolve_virtual_path() {
 
 #[test]
 fn test_grep_priority_ordering() {
-    let mut config = AppConfig::default();
+    let mut config = AgentConfig::default();
     config
         .content_libraries
         .push(crate::config::ContentLibrary {
@@ -102,7 +102,7 @@ fn test_grep_priority_ordering() {
 
 #[test]
 fn test_path_traversal_dotdot_rejected() {
-    let mut config = AppConfig::default();
+    let mut config = AgentConfig::default();
     config
         .content_libraries
         .push(crate::config::ContentLibrary {
@@ -133,7 +133,7 @@ fn test_path_traversal_dotdot_rejected() {
 
 #[test]
 fn test_resolve_path_with_library_missing() {
-    let config = AppConfig::default();
+    let config = AgentConfig::default();
     let ctx = test_ctx(&config);
     let res = execute_tool(
         &ToolRegistry::new(),
@@ -146,7 +146,7 @@ fn test_resolve_path_with_library_missing() {
 
 #[test]
 fn test_unknown_tool_returns_error() {
-    let config = AppConfig::default();
+    let config = AgentConfig::default();
     let ctx = test_ctx(&config);
     let res = execute_tool(&ToolRegistry::new(), &ctx, "nonexistent_tool", "{}");
     assert!(res.contains("Tool nonexistent_tool not found"));
@@ -154,7 +154,7 @@ fn test_unknown_tool_returns_error() {
 
 #[test]
 fn test_tool_invalid_args_returns_error() {
-    let config = AppConfig::default();
+    let config = AgentConfig::default();
     let ctx = test_ctx(&config);
     let res = execute_tool(&ToolRegistry::new(), &ctx, "list_notes", "not valid json");
     assert!(res.contains("Invalid args") || res.contains("error"));
@@ -162,7 +162,7 @@ fn test_tool_invalid_args_returns_error() {
 
 #[test]
 fn test_tool_call_debug_mode_feature_flag() {
-    let mut config = AppConfig::default();
+    let mut config = AgentConfig::default();
     assert!(
         !config
             .feature_flags
@@ -190,14 +190,14 @@ struct LibFixture {
     _b: Option<TempDir>,
 }
 
-fn single_lib_with_n_tagged_files(n: usize) -> (AppConfig, LibFixture) {
+fn single_lib_with_n_tagged_files(n: usize) -> (AgentConfig, LibFixture) {
     let dir = tempfile::tempdir().unwrap();
     for i in 0..n {
         let name = format!("file_{:03}.md", i);
         let body = format!("---\ntags: [meeting]\n---\n# Doc {}\n", i);
         fs::write(dir.path().join(name), body).unwrap();
     }
-    let mut config = AppConfig::default();
+    let mut config = AgentConfig::default();
     config
         .content_libraries
         .push(crate::config::ContentLibrary {
@@ -210,7 +210,7 @@ fn single_lib_with_n_tagged_files(n: usize) -> (AppConfig, LibFixture) {
     (config, LibFixture { _a: dir, _b: None })
 }
 
-fn two_libs_with_n_tagged_files_each(n: usize) -> (AppConfig, LibFixture) {
+fn two_libs_with_n_tagged_files_each(n: usize) -> (AgentConfig, LibFixture) {
     let a = tempfile::tempdir().unwrap();
     let b = tempfile::tempdir().unwrap();
     for i in 0..n {
@@ -218,7 +218,7 @@ fn two_libs_with_n_tagged_files_each(n: usize) -> (AppConfig, LibFixture) {
         fs::write(a.path().join(format!("a_{:03}.md", i)), &body).unwrap();
         fs::write(b.path().join(format!("b_{:03}.md", i)), &body).unwrap();
     }
-    let mut config = AppConfig::default();
+    let mut config = AgentConfig::default();
     config
         .content_libraries
         .push(crate::config::ContentLibrary {
@@ -240,7 +240,7 @@ fn two_libs_with_n_tagged_files_each(n: usize) -> (AppConfig, LibFixture) {
     (config, LibFixture { _a: a, _b: Some(b) })
 }
 
-fn run_list_by_tag(config: &AppConfig, args: &str) -> Value {
+fn run_list_by_tag(config: &AgentConfig, args: &str) -> Value {
     let ctx = test_ctx(config);
     let raw = execute_tool(&ToolRegistry::new(), &ctx, "list_notes_by_tag", args);
     serde_json::from_str(&raw)
@@ -401,7 +401,7 @@ fn test_list_by_tag_paging_is_global_across_libraries() {
 #[test]
 fn test_list_by_tag_no_matches_reports_zero_total() {
     let _empty = tempfile::tempdir().unwrap();
-    let mut config = AppConfig::default();
+    let mut config = AgentConfig::default();
     config
         .content_libraries
         .push(crate::config::ContentLibrary {
@@ -436,20 +436,20 @@ fn test_list_by_tag_offset_zero_returns_first_slice() {
     assert!(files.iter().any(|p| p.ends_with("file_002.md")));
 }
 
-fn run_list_files(config: &AppConfig, args: &str) -> Value {
+fn run_list_files(config: &AgentConfig, args: &str) -> Value {
     let ctx = test_ctx(config);
     let raw = execute_tool(&ToolRegistry::new(), &ctx, "list_notes", args);
     serde_json::from_str(&raw)
         .unwrap_or_else(|e| panic!("could not parse tool response `{}`: {}", raw, e))
 }
 
-fn single_lib_with_n_md_files(n: usize) -> (AppConfig, LibFixture) {
+fn single_lib_with_n_md_files(n: usize) -> (AgentConfig, LibFixture) {
     let dir = tempfile::tempdir().unwrap();
     for i in 0..n {
         let name = format!("note_{:03}.md", i);
         fs::write(dir.path().join(name), "# Just a doc").unwrap();
     }
-    let mut config = AppConfig::default();
+    let mut config = AgentConfig::default();
     config
         .content_libraries
         .push(crate::config::ContentLibrary {
@@ -590,7 +590,7 @@ fn test_list_files_multiple_libraries_paging_global() {
         fs::write(dir_a.path().join(format!("a_{:03}.md", i)), "x").unwrap();
         fs::write(dir_b.path().join(format!("b_{:03}.md", i)), "x").unwrap();
     }
-    let mut config = AppConfig::default();
+    let mut config = AgentConfig::default();
     config
         .content_libraries
         .push(crate::config::ContentLibrary {
@@ -633,19 +633,19 @@ fn test_list_files_returns_json_array_not_string() {
     assert!(parsed["data"]["files"].is_array());
 }
 
-fn run_grep(config: &AppConfig, args: &str) -> Value {
+fn run_grep(config: &AgentConfig, args: &str) -> Value {
     let ctx = test_ctx(config);
     let raw = execute_tool(&ToolRegistry::new(), &ctx, "search_notes", args);
     serde_json::from_str(&raw)
         .unwrap_or_else(|e| panic!("could not parse tool response `{}`: {}", raw, e))
 }
 
-fn single_lib_with_files(files: &[(&str, &str)]) -> (AppConfig, TempDir) {
+fn single_lib_with_files(files: &[(&str, &str)]) -> (AgentConfig, TempDir) {
     let dir = tempfile::tempdir().unwrap();
     for (name, content) in files {
         fs::write(dir.path().join(name), content).unwrap();
     }
-    let mut config = AppConfig::default();
+    let mut config = AgentConfig::default();
     config
         .content_libraries
         .push(crate::config::ContentLibrary {
@@ -745,7 +745,7 @@ fn test_grep_truncation_does_not_count_non_markdown_matches() {
 
 #[test]
 fn test_csv_tools_in_schema() {
-    let config = AppConfig::default();
+    let config = AgentConfig::default();
     let mut mgr = ToolRegistry::new();
     let schema = mgr.get_tools_schema(&config, "create a csv database");
     let tools = schema.as_array().unwrap();
@@ -762,7 +762,7 @@ fn test_csv_tools_in_schema() {
 
 #[test]
 fn test_csv_tools_excluded() {
-    let config = AppConfig::default();
+    let config = AgentConfig::default();
     let mut mgr = ToolRegistry::new();
     let schema = mgr.get_tools_schema(&config, "just a normal message");
     let tools = schema.as_array().unwrap();
@@ -776,7 +776,7 @@ fn test_csv_tools_excluded() {
 
 #[test]
 fn test_get_weather_tool_in_schema() {
-    let config = AppConfig::default();
+    let config = AgentConfig::default();
     let mut mgr = ToolRegistry::new();
     let schema = mgr.get_tools_schema(&config, "what is the weather today");
     let tools = schema.as_array().unwrap();
@@ -789,7 +789,7 @@ fn test_get_weather_tool_in_schema() {
 
 #[test]
 fn test_get_weather_tool_excluded_when_disabled() {
-    let mut config = AppConfig::default();
+    let mut config = AgentConfig::default();
     config.tool_groups.weather = false;
     let mut mgr = ToolRegistry::new();
     let schema = mgr.get_tools_schema(&config, "what is the weather today");
@@ -819,7 +819,7 @@ fn test_spawn_config_subscription_runs_init_in_background() {
     ));
     spawn_config_subscription(tm, bus.clone(), tx);
 
-    bus.publish(ConfigArrived::new(AppConfig::default()));
+    bus.publish(ConfigArrived::new(crate::config::AppConfig::default()));
 
     let start = std::time::Instant::now();
     while start.elapsed().as_secs() < 5 {
@@ -842,7 +842,7 @@ fn test_spawn_config_subscription_runs_init_in_background() {
 
 #[test]
 fn test_mcp_char_count_bug() {
-    let mut config = AppConfig::default();
+    let mut config = AgentConfig::default();
     config.mcp_servers.insert(
         "test_mcp".into(),
         crate::config::McpServerConfig::Stdio {

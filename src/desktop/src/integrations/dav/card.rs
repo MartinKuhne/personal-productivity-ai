@@ -8,7 +8,7 @@
 //!
 //! Unit tests live in the sibling `carddav_tests.rs` sidecar.
 
-use crate::config::AppConfig;
+use crate::agent::config::AgentConfig;
 use fast_dav_rs::CardDavClient;
 
 /// Cap on the number of body bytes echoed into a single tracing event.
@@ -844,13 +844,13 @@ pub(super) fn json_to_vcard(json_str: &str, uid_override: Option<&str>) -> Strin
 /// `"Error on client {name}: {e}"` — the same string the previous
 /// inline-loop code produced — so any existing log lines and
 /// downstream tooling keep working.
-fn for_each_card_client<T, F>(config: &AppConfig, mut f: F) -> (Vec<T>, Vec<String>)
+fn for_each_card_client<T, F>(config: &AgentConfig, mut f: F) -> (Vec<T>, Vec<String>)
 where
     F: FnMut(&str, &crate::integrations::dav::client::DavClient) -> Result<T, String>,
 {
     let mut results = Vec::new();
     let mut errors = Vec::new();
-    for (name, cc) in &config.caldav_clients {
+    for (name, cc) in config.caldav_clients() {
         match crate::integrations::dav::client::DavClient::new(name.clone(), cc)
             .and_then(|c| f(name, &c))
         {
@@ -864,13 +864,13 @@ where
 /// Like [`for_each_card_client`] but for methods that return a
 /// `Vec` per server (search). The per-server `Vec`s are flattened
 /// into the aggregate `results` vec.
-fn for_each_card_client_vec<T, F>(config: &AppConfig, mut f: F) -> (Vec<T>, Vec<String>)
+fn for_each_card_client_vec<T, F>(config: &AgentConfig, mut f: F) -> (Vec<T>, Vec<String>)
 where
     F: FnMut(&str, &crate::integrations::dav::client::DavClient) -> Result<Vec<T>, String>,
 {
     let mut results = Vec::new();
     let mut errors = Vec::new();
-    for (name, cc) in &config.caldav_clients {
+    for (name, cc) in config.caldav_clients() {
         match crate::integrations::dav::client::DavClient::new(name.clone(), cc)
             .and_then(|c| f(name, &c))
         {
@@ -889,7 +889,7 @@ fn serialize_card_response(resp: &CardDavResponse) -> String {
 }
 
 pub fn tool_search_contact(
-    config: &AppConfig,
+    config: &AgentConfig,
     keyword: &str,
 ) -> Result<crate::agent::tools::dtos::SearchContactResponse, String> {
     let (results, errors) = for_each_card_client_vec(config, |_, c| c.search_contact(keyword));
@@ -899,7 +899,7 @@ pub fn tool_search_contact(
 }
 
 pub fn tool_get_contact(
-    config: &AppConfig,
+    config: &AgentConfig,
     id: &str,
 ) -> Result<crate::agent::tools::dtos::GetContactResponse, String> {
     let (results, errors) = for_each_card_client(config, |_, c| c.get_contact(id));
@@ -909,7 +909,7 @@ pub fn tool_get_contact(
 }
 
 pub fn tool_add_contact(
-    config: &AppConfig,
+    config: &AgentConfig,
     contact_json: &str,
 ) -> Result<crate::agent::tools::dtos::AddContactResponse, String> {
     // `add_contact` is special: it acts on the *first* configured CalDAV
@@ -917,7 +917,7 @@ pub fn tool_add_contact(
     // per-server output is a single status string, so the aggregation
     // shape doesn't fit `for_each_card_client` cleanly.
     let mut all_results = Vec::new();
-    if let Some((name, cc)) = config.caldav_clients.iter().next() {
+    if let Some((name, cc)) = config.caldav_clients().iter().next() {
         match crate::integrations::dav::client::DavClient::new(name.clone(), cc)
             .and_then(|c| c.add_contact(contact_json))
         {
@@ -942,12 +942,12 @@ pub fn tool_add_contact(
 /// per configured DAV server, then aggregates the per-server
 /// results. See that method for the GET → If-Match PUT flow.
 pub fn tool_update_contact(
-    config: &AppConfig,
+    config: &AgentConfig,
     href: &str,
     contact_json: &str,
 ) -> Result<crate::agent::tools::dtos::UpdateContactResponse, String> {
     let mut all_results = Vec::new();
-    for (name, cc) in &config.caldav_clients {
+    for (name, cc) in config.caldav_clients() {
         match crate::integrations::dav::client::DavClient::new(name.clone(), cc)
             .and_then(|c| c.update_contact(href, contact_json))
         {
@@ -972,11 +972,11 @@ pub fn tool_update_contact(
 /// [`crate::integrations::dav::client::DavClient::delete_contact`]
 /// per configured DAV server.
 pub fn tool_delete_contact(
-    config: &AppConfig,
+    config: &AgentConfig,
     href: &str,
 ) -> Result<crate::agent::tools::dtos::DeleteContactResponse, String> {
     let mut all_results = Vec::new();
-    for (name, cc) in &config.caldav_clients {
+    for (name, cc) in config.caldav_clients() {
         match crate::integrations::dav::client::DavClient::new(name.clone(), cc)
             .and_then(|c| c.delete_contact(href))
         {

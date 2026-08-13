@@ -9,9 +9,9 @@ use super::descriptor::{
 use crate::agent::tools::Safety;
 use crate::agent::tools::registry::groups::{InternalToolGroup, ToolGroupId};
 use crate::config::{
-    AppConfig, CalDavClient, JmapClient, McpServerConfig, McpServerEntry, ToolGroupsConfig,
-    TrelloClient,
+    CalDavClient, JmapClient, McpServerConfig, McpServerEntry, ToolGroupsConfig, TrelloClient,
 };
+use crate::agent::config::AgentConfig;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
@@ -55,12 +55,12 @@ fn mcp_entry(enabled: bool) -> McpServerEntry {
 
 #[test]
 fn test_group_only_spec_gates_on_group_flag() {
-    let mut c = AppConfig {
+    let mut c = AgentConfig {
         tool_groups: ToolGroupsConfig {
             filesystem: false,
             ..ToolGroupsConfig::default()
         },
-        ..AppConfig::default()
+        ..AgentConfig::default()
     };
     let spec = ToolConfigSpec::group_only(ToolGroupId::Internal(InternalToolGroup::Filesystem));
     assert!(!spec.is_enabled_for(&c, ""));
@@ -70,7 +70,7 @@ fn test_group_only_spec_gates_on_group_flag() {
 
 #[test]
 fn test_searxng_predicate() {
-    let mut c = AppConfig::default();
+    let mut c = AgentConfig::default();
     c.tool_groups.web = false;
     c.searxng_url = None;
     let spec = ToolConfigSpec {
@@ -90,7 +90,7 @@ fn test_searxng_predicate() {
 
 #[test]
 fn test_trello_predicate() {
-    let mut c = AppConfig::default();
+    let mut c = AgentConfig::default();
     let spec = crate::app::tool_specs::trello_spec();
     assert!(!spec.is_enabled_for(&c, ""));
     c.trello_client = Some(trello());
@@ -99,7 +99,7 @@ fn test_trello_predicate() {
 
 #[test]
 fn test_jmap_clients_present_predicate() {
-    let mut c = AppConfig::default();
+    let mut c = AgentConfig::default();
     let spec = ToolConfigSpec {
         group: Some(ToolGroupId::Internal(InternalToolGroup::Email)),
         requires: vec![ConfigPredicate::JmapClientsPresent],
@@ -112,7 +112,7 @@ fn test_jmap_clients_present_predicate() {
 
 #[test]
 fn test_dav_or_jmap_predicate_follows_feature_flag() {
-    let mut c = AppConfig::default();
+    let mut c = AgentConfig::default();
     c.jmap_clients.insert("j".into(), jmap());
     c.caldav_clients.insert("d".into(), caldav());
     let spec = crate::app::tool_specs::contacts_spec();
@@ -137,12 +137,12 @@ fn test_never_predicate_is_always_false() {
         requires: vec![ConfigPredicate::Never],
         prompt_rule: None,
     };
-    assert!(!spec.is_enabled_for(&AppConfig::default(), ""));
+    assert!(!spec.is_enabled_for(&AgentConfig::default(), ""));
 }
 
 #[test]
 fn test_group_enabled_for_internal_groups() {
-    let mut c = AppConfig::default();
+    let mut c = AgentConfig::default();
     c.tool_groups.filesystem = true;
     assert!(group_enabled(
         &c,
@@ -156,7 +156,7 @@ fn test_group_enabled_for_internal_groups() {
 
 #[test]
 fn test_group_enabled_for_mcp_servers() {
-    let mut c = AppConfig::default();
+    let mut c = AgentConfig::default();
     c.mcp_servers.insert("srv".to_string(), mcp_entry(false));
     let id = ToolGroupId::Mcp("srv".to_string());
     assert!(!group_enabled(&c, &id));

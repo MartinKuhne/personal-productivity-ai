@@ -39,7 +39,7 @@ pub fn show_tools_dialog(ctx: &eframe::egui::Context, app: &mut FastMdApp) {
 
     app.orchestrator.tool_context.rcu(|bundle| {
         let mut new_bundle = (**bundle).clone();
-        new_bundle.registry.refresh_state(app.config());
+        new_bundle.registry.refresh_state(&app.config().to_agent_config());
         new_bundle
     });
     let groups = app.orchestrator.tool_context.load().registry.groups();
@@ -118,7 +118,7 @@ pub fn render_contents(ui: &mut eframe::egui::Ui, app: &mut FastMdApp) {
     // hold any lock across UI rendering.
     app.orchestrator.tool_context.rcu(|bundle| {
         let mut new_bundle = (**bundle).clone();
-        new_bundle.registry.refresh_state(app.config());
+        new_bundle.registry.refresh_state(&app.config().to_agent_config());
         new_bundle
     });
     let groups = app.orchestrator.tool_context.load().registry.groups();
@@ -250,7 +250,7 @@ fn render_row(
                     .tool_context
                     .load()
                     .registry
-                    .tool_char_count(n, app.config(), prompt)
+                    .tool_char_count(n, &app.config().to_agent_config(), prompt)
             })
             .sum();
         ui.label(format!("{char_count}"));

@@ -341,7 +341,7 @@ fn test_json_to_vcard_accepts_notes_and_note_aliases() {
 #[test]
 fn test_tool_search_contact_handles_empty_clients_gracefully() {
     // When caldav_clients is empty, the function should handle it gracefully
-    let config = crate::config::AppConfig::default();
+    let config = crate::agent::config::AgentConfig::default();
     let res = tool_search_contact(&config, "test");
 
     // Should handle empty config without panicking

@@ -18,13 +18,13 @@
 
 use crate::agent::tools::Tool;
 use crate::app::session::BrowserSession;
-use crate::config::AppConfig;
+use crate::agent::config::AgentConfig;
 use std::sync::Arc;
 use tempfile::TempDir;
 
 fn make_session() -> (TempDir, Arc<BrowserSession>) {
     let tmp = tempfile::tempdir().expect("tempdir");
-    let mut config = AppConfig::default();
+    let mut config = AgentConfig::default();
     // Use a sandbox screenshot dir inside the tempdir so the
     // tests don't litter the user's real library.
     config.browser.screenshot_dir = tmp.path().join("screenshots").to_string_lossy().to_string();
@@ -72,7 +72,7 @@ fn test_session_persists_cookies_across_relaunch() {
 
     // Build a second session against the same dir and confirm
     // it picks up the existing file.
-    let mut config = AppConfig::default();
+    let mut config = AgentConfig::default();
     config.browser.storage_state_path = tmp
         .path()
         .join("storage.json")
@@ -94,7 +94,7 @@ fn test_session_persists_cookies_across_relaunch() {
 fn test_browser_navigate_tool_round_trip() {
     let (_tmp, session) = make_session();
     let bus = crate::bus::core::Bus::<crate::bus::events::file::FileEvent>::new();
-    let mut config = AppConfig::default();
+    let mut config = AgentConfig::default();
     config.tool_groups.browser = true;
     let pdf_backing = std::sync::Arc::new(crate::app::session::PdfBackingTracker::new());
     let cache = Arc::new(crate::agent::tools::registry::cache::ToolCache::new());
@@ -120,7 +120,7 @@ fn test_browser_get_page_state_tool_is_readonly() {
     use crate::agent::tools::Safety;
     let (_tmp, session) = make_session();
     let bus = crate::bus::core::Bus::<crate::bus::events::file::FileEvent>::new();
-    let mut config = AppConfig::default();
+    let mut config = AgentConfig::default();
     config.tool_groups.browser = true;
     let pdf_backing = std::sync::Arc::new(crate::app::session::PdfBackingTracker::new());
     let cache = Arc::new(crate::agent::tools::registry::cache::ToolCache::new());

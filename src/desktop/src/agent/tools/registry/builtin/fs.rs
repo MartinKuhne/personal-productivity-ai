@@ -71,7 +71,7 @@ fn execute_search_notes(
     let input: dtos::SearchNotesInput =
         serde_json::from_str(args).map_err(|e| format!("Invalid args: {}", e))?;
     let mut all_matches: Vec<String> = Vec::new();
-    let mut libs: Vec<_> = ctx.config.content_libraries.iter().collect();
+    let mut libs: Vec<_> = ctx.config.content_libraries().iter().collect();
     libs.sort_by_key(|b| std::cmp::Reverse(b.priority));
     for lib in libs {
         if let Ok(mut matches) = crate::agent::tools::filesystem::tool_search_notes(
@@ -123,7 +123,7 @@ fn execute_read_tags(
     let _: dtos::ReadTagsInput =
         serde_json::from_str(args).map_err(|e| format!("Invalid args: {}", e))?;
     let mut all_tags = std::collections::BTreeSet::new();
-    for lib in &ctx.config.content_libraries {
+    for lib in ctx.config.content_libraries() {
         if let Ok(res) = crate::agent::tools::filesystem::tool_read_tags(&lib.root_path()) {
             for tag in res.tags {
                 all_tags.insert(tag);
@@ -159,7 +159,7 @@ fn execute_list_notes_by_tag(
         .limit
         .unwrap_or(super::super::pagination::DEFAULT_LIST_NOTES_BY_TAG_LIMIT);
     let mut all_matches: Vec<String> = Vec::new();
-    for lib in &ctx.config.content_libraries {
+    for lib in ctx.config.content_libraries() {
         match crate::agent::tools::filesystem::tool_list_notes_by_tag(
             &lib.root_path(),
             &lib.name,
@@ -210,7 +210,7 @@ fn execute_list_notes(
         None => {
             let mut libs: Vec<String> = ctx
                 .config
-                .content_libraries
+                .content_libraries()
                 .iter()
                 .map(|lib| lib.name.clone())
                 .collect();

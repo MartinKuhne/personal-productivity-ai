@@ -1,7 +1,8 @@
 //! Tests for `tools/web.rs`.
 
 use super::*;
-use crate::config::{AppConfig, LlmConfig};
+use crate::agent::config::AgentConfig;
+use crate::config::LlmConfig;
 
 fn spawn_mock_server(body: impl Into<String>) -> String {
     let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
@@ -361,7 +362,7 @@ fn test_tool_web_search_invalid_json() {
 #[test]
 fn test_tool_web_delegate_missing_api_key() {
     let cache = crate::agent::tools::registry::cache::ToolCache::new();
-    let mut config = AppConfig::default();
+    let mut config = AgentConfig::default();
     config.models.insert(
         "chat".to_string(),
         LlmConfig {
@@ -397,7 +398,7 @@ fn test_tool_web_delegate_mock() {
 
     let server_url = spawn_mock_server(mock_response.to_string());
 
-    let mut config = AppConfig::default();
+    let mut config = AgentConfig::default();
     config.models.insert(
         "chat".to_string(),
         LlmConfig {
@@ -439,7 +440,7 @@ fn test_tool_web_delegate_with_unknown_tool_handled_gracefully() {
 
     let server_url = spawn_mock_server(mock_response.to_string());
 
-    let mut config = AppConfig::default();
+    let mut config = AgentConfig::default();
     config.models.insert(
         "chat".to_string(),
         LlmConfig {
@@ -478,7 +479,7 @@ fn test_tool_web_delegate_handles_api_error_gracefully() {
         }
     });
 
-    let mut config = AppConfig::default();
+    let mut config = AgentConfig::default();
     config.models.insert(
         "chat".to_string(),
         LlmConfig {

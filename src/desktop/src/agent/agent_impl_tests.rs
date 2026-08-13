@@ -7,7 +7,6 @@ use crate::agent::context::AgentContext;
 use crate::app::events::AgentEvent as SeamAgentEvent;
 use crate::bus::core::BusReader;
 use crate::bus::events::debug::{AgentDebugEntry, DebugEntryKind, DebugEntryRow};
-use crate::config::AppConfig;
 use std::sync::Arc;
 
 fn make_agent_config(port: u16) -> AgentConfig {
@@ -32,11 +31,9 @@ fn make_ctx(config: AgentConfig) -> (AgentContext, BusReader<SeamAgentEvent>) {
     ));
     let agent_event_bus = crate::bus::core::Bus::new();
     let bus_reader = agent_event_bus.subscribe();
-    let app_config = Arc::new(AppConfig::default());
     let session_id = uuid::Uuid::new_v4();
     let ctx =
         crate::agent::context::AgentContextBuilder::new(config, session_id, "Hello".to_string())
-            .with_app_config(app_config)
             .with_buses(crate::bus::core::Bus::new())
             .with_observer(std::sync::Arc::new(
                 crate::app::events::BusAgentEventObserver::new(session_id, agent_event_bus.clone()),
@@ -251,8 +248,8 @@ fn test_run_agent_skips_done_status_when_cancelled() {
     })
     .to_string();
     let port = spawn_one_shot_http_server(&http_response("HTTP/1.1 200 OK", &body));
-    let browser_session = std::sync::Arc::new(crate::app::session::BrowserSession::new(
-        &crate::config::AppConfig::default(),
+    let default_browser = std::sync::Arc::new(crate::app::session::BrowserSession::with_resolved(
+        crate::agent::config::AgentConfig::default().browser().clone(),
     ));
     let agent_event_bus = crate::bus::core::Bus::new();
     let mut bus_reader = agent_event_bus.subscribe();
@@ -269,7 +266,7 @@ fn test_run_agent_skips_done_status_when_cancelled() {
         ),
     ))
     .with_system_prompts(Vec::new())
-    .with_browser_session(browser_session)
+    .with_browser_session(default_browser)
     .with_cancel_flag(std::sync::Arc::new(std::sync::atomic::AtomicBool::new(
         true,
     )))
@@ -485,7 +482,7 @@ fn test_run_agent_system_prompt_starts_with_security_header() {
     // Inject real system prompts so the first history message is a
     // system message (the agent run loop no longer builds these).
     ctx.system_prompts = crate::app::prompts::build_system_prompts(
-        &AppConfig::default(),
+        &crate::config::AppConfig::default(),
         None,
         None,
         &std::collections::HashSet::new(),
@@ -769,7 +766,7 @@ fn test_debug_outgoing_turn1_includes_full_initial_messages() {
     // Same as the security-header test: real system prompts so the
     // outgoing debug entry contains the system messages.
     ctx.system_prompts = crate::app::prompts::build_system_prompts(
-        &AppConfig::default(),
+        &crate::config::AppConfig::default(),
         None,
         None,
         &std::collections::HashSet::new(),

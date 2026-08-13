@@ -10,7 +10,7 @@ use crate::agent::context::AgentContext;
 use crate::agent::events::AgentStatus;
 use crate::app::events::AgentEvent;
 use crate::bus::core::{Bus, BusReader};
-use crate::config::{AppConfig, LlmConfig};
+use crate::config::LlmConfig;
 use std::sync::Arc;
 
 fn make_agent_config(port: u16) -> AgentConfig {
@@ -35,11 +35,9 @@ fn make_ctx(config: AgentConfig) -> (AgentContext, BusReader<AgentEvent>) {
     ));
     let agent_event_bus = Bus::new();
     let bus_reader = agent_event_bus.subscribe();
-    let app_config = Arc::new(AppConfig::default());
     let session_id = uuid::Uuid::new_v4();
     let ctx =
         crate::agent::context::AgentContextBuilder::new(config, session_id, "Hello".to_string())
-            .with_app_config(app_config)
             .with_buses(Bus::new())
             .with_observer(std::sync::Arc::new(
                 crate::app::events::BusAgentEventObserver::new(session_id, agent_event_bus.clone()),

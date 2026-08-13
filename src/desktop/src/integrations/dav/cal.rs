@@ -26,7 +26,7 @@ use crate::agent::tools::dtos::{
     AddCalendarItemResponse, DeleteCalendarItemResponse, GetCalendarItemResponse,
     GetCalendarResponse, SearchCalendarResponse, UpdateCalendarItemResponse,
 };
-use crate::config::AppConfig;
+use crate::agent::config::AgentConfig;
 // Re-exported at `crate::integrations::dav::DavClient` so the
 // LLM-adapter `tool_*` wrappers below can build one per server
 // without reaching into `client` directly.
@@ -294,13 +294,13 @@ pub fn update_ical_string(original: &str, updates: &serde_json::Value) -> String
 /// an `errors` vec. Errors are recorded as `"Error on client {name}: {e}"`
 /// — the same string the previous inline-loop code produced — so the
 /// existing test assertions keep working.
-fn for_each_client<T, F>(config: &AppConfig, mut f: F) -> (Vec<T>, Vec<String>)
+fn for_each_client<T, F>(config: &crate::agent::config::AgentConfig, mut f: F) -> (Vec<T>, Vec<String>)
 where
     F: FnMut(&str, &DavClient) -> Result<T, String>,
 {
     let mut results = Vec::new();
     let mut errors = Vec::new();
-    for (name, cc) in &config.caldav_clients {
+    for (name, cc) in config.caldav_clients() {
         match DavClient::new(name.clone(), cc).and_then(|c| f(name, &c)) {
             Ok(item) => results.push(item),
             Err(e) => errors.push(format!("Error on client {}: {}", name, e)),
@@ -312,13 +312,13 @@ where
 /// Like [`for_each_client`] but for methods that return a `Vec` per
 /// server (search, get). The per-server `Vec`s are flattened into the
 /// aggregate `results` vec.
-fn for_each_client_vec<T, F>(config: &AppConfig, mut f: F) -> (Vec<T>, Vec<String>)
+fn for_each_client_vec<T, F>(config: &crate::agent::config::AgentConfig, mut f: F) -> (Vec<T>, Vec<String>)
 where
     F: FnMut(&str, &DavClient) -> Result<Vec<T>, String>,
 {
     let mut results = Vec::new();
     let mut errors = Vec::new();
-    for (name, cc) in &config.caldav_clients {
+    for (name, cc) in config.caldav_clients() {
         match DavClient::new(name.clone(), cc).and_then(|c| f(name, &c)) {
             Ok(mut v) => results.append(&mut v),
             Err(e) => errors.push(format!("Error on client {}: {}", name, e)),
@@ -337,7 +337,7 @@ fn serialize_response(resp: &CalDavResponse) -> String {
 }
 
 pub fn tool_search_calendar(
-    config: &AppConfig,
+    config: &crate::agent::config::AgentConfig,
     keyword: &str,
 ) -> Result<SearchCalendarResponse, String> {
     let (results, errors) = for_each_client_vec(config, |_, c| c.search_calendar(keyword));
@@ -347,7 +347,7 @@ pub fn tool_search_calendar(
 }
 
 pub fn tool_get_calendar(
-    config: &AppConfig,
+    config: &crate::agent::config::AgentConfig,
     start: &str,
     end: &str,
 ) -> Result<GetCalendarResponse, String> {
@@ -358,7 +358,7 @@ pub fn tool_get_calendar(
 }
 
 pub fn tool_get_calendar_item(
-    config: &AppConfig,
+    config: &crate::agent::config::AgentConfig,
     id: &str,
 ) -> Result<GetCalendarItemResponse, String> {
     let (results, errors) = for_each_client(config, |_, c| c.get_calendar_item(id));
@@ -368,7 +368,7 @@ pub fn tool_get_calendar_item(
 }
 
 pub fn tool_add_calendar_item(
-    config: &AppConfig,
+    config: &crate::agent::config::AgentConfig,
     item_json: &str,
 ) -> Result<AddCalendarItemResponse, String> {
     // `add_calendar_item` is special: it acts on the *first* configured
@@ -376,7 +376,7 @@ pub fn tool_add_calendar_item(
     // per-server output is a single status string, so the aggregation
     // shape doesn't fit `for_each_client` cleanly.
     let mut all_results = Vec::new();
-    if let Some((name, cc)) = config.caldav_clients.iter().next() {
+    if let Some((name, cc)) = config.caldav_clients().iter().next() {
         match DavClient::new(name.clone(), cc).and_then(|c| c.add_calendar_item(item_json)) {
             Ok(s) => all_results.push(format!("--- Client: {} ---\n{}", name, s)),
             Err(e) => all_results.push(format!("Error on client {}: {}", name, e)),
@@ -392,12 +392,12 @@ pub fn tool_add_calendar_item(
 }
 
 pub fn tool_update_calendar_item(
-    config: &AppConfig,
+    config: &crate::agent::config::AgentConfig,
     id: &str,
     update_json: &str,
 ) -> Result<UpdateCalendarItemResponse, String> {
     let mut all_results = Vec::new();
-    for (name, cc) in &config.caldav_clients {
+    for (name, cc) in config.caldav_clients() {
         match DavClient::new(name.clone(), cc).and_then(|c| c.update_calendar_item(id, update_json))
         {
             Ok(s) => all_results.push(format!("--- Client: {} ---\n{}", name, s)),
@@ -414,11 +414,11 @@ pub fn tool_update_calendar_item(
 }
 
 pub fn tool_delete_calendar_item(
-    config: &AppConfig,
+    config: &crate::agent::config::AgentConfig,
     id: &str,
 ) -> Result<DeleteCalendarItemResponse, String> {
     let mut all_results = Vec::new();
-    for (name, cc) in &config.caldav_clients {
+    for (name, cc) in config.caldav_clients() {
         match DavClient::new(name.clone(), cc).and_then(|c| c.delete_calendar_item(id)) {
             Ok(()) => all_results.push(format!("--- Client: {} ---\nDeleted successfully", name)),
             Err(e) => all_results.push(format!("Error on client {}: {}", name, e)),

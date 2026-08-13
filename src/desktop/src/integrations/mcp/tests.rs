@@ -1,15 +1,16 @@
-//! Tests for the MCP protocol client (transports, sessions, manager,
-//! OAuth 2.1 flow, error type, SSE walker).
-
-//! Tool-adapter tests now live in
-//! `crate::agent::tools::mcp::adapter_tests`.
+use crate::agent::config::AgentConfig;
+// Tests for the MCP protocol client (transports, sessions, manager,
+// OAuth 2.1 flow, error type, SSE walker).
+//
+// Tool-adapter tests now live in
+// `crate::agent::tools::mcp::adapter_tests`.
 
 use super::MAX_REQUEST_TIMEOUT;
 use super::McpClientSession;
 use super::is_valid_session_id;
 use super::*;
 use crate::agent::tools::mcp::McpToolAdapter;
-use crate::config::{AppConfig, McpOAuthConfig, McpServerConfig};
+use crate::config::{McpOAuthConfig, McpServerConfig};
 use std::collections::HashMap;
 use std::sync::Arc;
 
@@ -24,7 +25,7 @@ fn test_mcp_client_manager_unconfigured_server_error() {
 #[test]
 fn test_mcp_client_manager_empty_command_or_url() {
     let manager = McpClients::new();
-    let mut config = AppConfig::default();
+    let mut config = AgentConfig::default();
     config.mcp_servers.insert(
         "empty_stdio".to_string(),
         McpServerConfig::Stdio {
@@ -102,7 +103,7 @@ fn test_update_config_shuts_down_removed_server_sessions() {
     // inspect an internal map; instead we assert that
     // `configured_servers` reflects the latest config.
     let manager = McpClients::new();
-    let mut config = AppConfig::default();
+    let mut config = AgentConfig::default();
     config.mcp_servers.insert(
         "alpha".to_string(),
         McpServerConfig::Stdio {
@@ -116,7 +117,7 @@ fn test_update_config_shuts_down_removed_server_sessions() {
     assert_eq!(manager.configured_servers(), vec!["alpha".to_string()]);
 
     // Replace with a different server.
-    let mut config2 = AppConfig::default();
+    let mut config2 = AgentConfig::default();
     config2.mcp_servers.insert(
         "beta".to_string(),
         McpServerConfig::Stdio {
@@ -203,7 +204,7 @@ while True:
     let tmp = tempfile_in_target("mock_mcp_stdio.py");
     std::fs::write(&tmp, script).expect("write mock script");
 
-    let mut config = AppConfig::default();
+    let mut config = AgentConfig::default();
     config.mcp_servers.insert(
         "mock".to_string(),
         McpServerConfig::Stdio {
@@ -284,7 +285,7 @@ while True:
     let tmp = tempfile_in_target("mock_mcp_ping.py");
     std::fs::write(&tmp, script).expect("write mock script");
 
-    let mut config = AppConfig::default();
+    let mut config = AgentConfig::default();
     config.mcp_servers.insert(
         "pingable".to_string(),
         McpServerConfig::Stdio {
@@ -352,7 +353,7 @@ with open(r"{cap_path}", "w") as f:
     let tmp = tempfile_in_target("mock_mcp_hang.py");
     std::fs::write(&tmp, script).expect("write mock script");
 
-    let mut config = AppConfig::default();
+    let mut config = AgentConfig::default();
     config.mcp_servers.insert(
         "hanger".to_string(),
         McpServerConfig::Stdio {
@@ -463,7 +464,7 @@ with open(r"{cap_path}", "w") as f:
     let tmp = tempfile_in_target("mock_mcp_slow.py");
     std::fs::write(&tmp, script).expect("write mock script");
 
-    let mut config = AppConfig::default();
+    let mut config = AgentConfig::default();
     config.mcp_servers.insert(
         "slow".to_string(),
         McpServerConfig::Stdio {
@@ -720,7 +721,7 @@ send({"jsonrpc": "2.0", "id": req["id"], "result": {}})
     let tmp = tempfile_in_target("mock_mcp_progress.py");
     std::fs::write(&tmp, script).expect("write mock script");
 
-    let mut config = AppConfig::default();
+    let mut config = AgentConfig::default();
     config.mcp_servers.insert(
         "progressor".to_string(),
         McpServerConfig::Stdio {
@@ -765,7 +766,7 @@ sys.stdout.flush()
     let tmp = tempfile_in_target("mock_mcp_stdio_err.py");
     std::fs::write(&tmp, script).expect("write mock script");
 
-    let mut config = AppConfig::default();
+    let mut config = AgentConfig::default();
     config.mcp_servers.insert(
         "bad".to_string(),
         McpServerConfig::Stdio {
@@ -879,7 +880,7 @@ while True:
     let tmp = tempfile_in_target("mock_mcp_discover.py");
     std::fs::write(&tmp, script).expect("write mock script");
 
-    let mut config = AppConfig::default();
+    let mut config = AgentConfig::default();
     config.mcp_servers.insert(
         "disc".to_string(),
         McpServerConfig::Stdio {
@@ -995,7 +996,7 @@ while True:
     let tmp = tempfile_in_target("mock_mcp_paginated.py");
     std::fs::write(&tmp, script).expect("write mock script");
 
-    let mut config = AppConfig::default();
+    let mut config = AgentConfig::default();
     config.mcp_servers.insert(
         "paged".to_string(),
         McpServerConfig::Stdio {
@@ -1099,7 +1100,7 @@ with open(r"{cap_path}", "w") as f:
     let tmp = tempfile_in_target("mock_mcp_client_info.py");
     std::fs::write(&tmp, script).expect("write mock script");
 
-    let mut config = AppConfig::default();
+    let mut config = AgentConfig::default();
     config.mcp_servers.insert(
         "captured".to_string(),
         McpServerConfig::Stdio {
@@ -1203,7 +1204,7 @@ while True:
     let tmp = tempfile_in_target("mock_mcp_progress_tracker.py");
     std::fs::write(&tmp, script).expect("write mock script");
 
-    let mut config = AppConfig::default();
+    let mut config = AgentConfig::default();
     config.mcp_servers.insert(
         "tracker".to_string(),
         McpServerConfig::Stdio {
@@ -1405,7 +1406,7 @@ while True:
     let tmp = tempfile_in_target("mock_mcp_e2e.py");
     std::fs::write(&tmp, script).expect("write mock script");
 
-    let mut config = AppConfig::default();
+    let mut config = AgentConfig::default();
     config.mcp_servers.insert(
         "e2e".to_string(),
         McpServerConfig::Stdio {
@@ -1511,7 +1512,7 @@ send({
     let tmp = tempfile_in_target("mock_mcp_bad_version.py");
     std::fs::write(&tmp, script).expect("write mock script");
 
-    let mut config = AppConfig::default();
+    let mut config = AgentConfig::default();
     config.mcp_servers.insert(
         "futuristic".to_string(),
         McpServerConfig::Stdio {
@@ -1585,7 +1586,7 @@ while True:
     let tmp = tempfile_in_target("mock_mcp_cap.py");
     std::fs::write(&tmp, script).expect("write mock script");
 
-    let mut config = AppConfig::default();
+    let mut config = AgentConfig::default();
     config.mcp_servers.insert(
         "cap".to_string(),
         McpServerConfig::Stdio {
@@ -1688,7 +1689,7 @@ while True:
     let tmp = tempfile_in_target("mock_mcp_hang_err.py");
     std::fs::write(&tmp, script).expect("write mock script");
 
-    let mut config = AppConfig::default();
+    let mut config = AgentConfig::default();
     config.mcp_servers.insert(
         "hanger".to_string(),
         McpServerConfig::Stdio {
@@ -1766,7 +1767,7 @@ fn test_sse_oauth_refresh_after_401_without_browser_flow() {
 
     let manager = McpClients::new();
     manager.set_token_store(Some(store));
-    let mut config = AppConfig::default();
+    let mut config = AgentConfig::default();
     config.mcp_servers.insert(
         "mock".to_owned(),
         McpServerConfig::Sse {

@@ -9,7 +9,6 @@ use crate::app::session::BrowserSession;
 use crate::bus::core::Bus;
 use crate::bus::events::debug::AgentDebugEntry;
 use crate::bus::events::messages::TokenUsageInfo;
-use crate::config::AppConfig;
 use serde_json::Value;
 use std::sync::mpsc::{self, Sender};
 use std::sync::{
@@ -481,20 +480,12 @@ fn spawn_driver(
                 .read()
                 .map(|c| c.clone())
                 .unwrap_or_default();
-            // The tool context still needs the global config for the
-            // integration-layer tools (JMAP / CalDAV / Trello / SearXNG).
-            // We project back via the same path: derive a default
-            // `AppConfig`, then layer the agent-relevant fields from
-            // `agent_config`. The integration tools only read the maps
-            // they need, so the layered value is good enough for them.
-            let app_config = Arc::new(integration_app_config(&agent_config));
             let history = session_histories.get(&session_id).cloned().flatten();
             let ctx = crate::agent::context::AgentContextBuilder::new(
                 agent_config,
                 session_id,
                 prompt.text,
             )
-            .with_app_config(app_config)
             .with_buses(file_event_bus.clone())
             .with_observer(std::sync::Arc::new(
                 crate::app::events::BusAgentEventObserver::new(session_id, agent_event_bus.clone()),
@@ -520,36 +511,6 @@ fn spawn_driver(
             session_histories.insert(session_id, history);
         }
     })
-}
-
-/// Derive an `AppConfig` from an `AgentConfig` for the integration-layer
-/// tools. The tool context carries `Arc<AppConfig>` because the
-/// integration functions still take that type; this helper projects
-/// the relevant maps back. The orchestrator's path is the
-/// `AgentConfig::from_app_config` mirror — fields the agent doesn't
-/// expose (`inline_editor_enabled`, `pdf_converter_command`,
-/// `table_width_strategy`, `discord`) are filled with their
-/// `AppConfig::default` values.
-///
-/// In production the orchestrator passes the real `AppConfig` via
-/// `AgentContextBuilder::with_app_config`; this helper is the
-/// fallback path used by `AgentSession::spawn_driver` when the
-/// driver is constructed without an external `AppConfig` (i.e. the
-/// `new_with_agent_config` test path).
-fn integration_app_config(agent_config: &AgentConfig) -> AppConfig {
-    AppConfig {
-        models: agent_config.models().clone(),
-        max_tokens: agent_config.max_tokens(),
-        tool_groups: agent_config.tool_groups().clone(),
-        mcp_servers: agent_config.mcp_servers().clone(),
-        csv_db_path: agent_config.csv_db_path().map(String::from),
-        feature_flags: agent_config.feature_flags().clone(),
-        jmap_clients: agent_config.jmap_clients().clone(),
-        caldav_clients: agent_config.caldav_clients().clone(),
-        trello_client: agent_config.trello_client().cloned(),
-        searxng_url: agent_config.searxng_url().map(String::from),
-        ..AppConfig::default()
-    }
 }
 
 impl Drop for AgentSession {

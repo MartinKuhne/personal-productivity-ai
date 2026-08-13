@@ -5,7 +5,6 @@ use crate::agent::events::AgentEventObserver;
 use crate::app::session::BrowserSession;
 use crate::bus::core::Bus;
 use crate::bus::events::file::FileEvent;
-use crate::config::AppConfig;
 use serde_json::Value;
 use std::collections::HashSet;
 use std::path::PathBuf;
@@ -19,15 +18,9 @@ use uuid::Uuid;
 pub struct AgentContext {
     /// Domain-specific configuration for the agent's run loop (LLM,
     /// system prompt, tool groups, MCP, browser, content libraries).
-    /// Projected from the global [`AppConfig`] by the orchestrator via
-    /// [`crate::agent::config::AgentConfig::from_app_config`].
+    /// Projected from the global `AppConfig` by the orchestrator via
+    /// `AppConfig::to_agent_config`.
     pub agent_config: AgentConfig,
-    /// Global configuration. The agent's run loop does **not** read this
-    /// — it's here for the tool context, which the integration-layer
-    /// tools (JMAP, CalDAV, CardDAV, Trello, SearXNG) still need at
-    /// execute time. Carried alongside [`Self::agent_config`] so the
-    /// tool context can be built without re-fetching the global config.
-    pub app_config: Arc<AppConfig>,
     pub file_event_bus: Bus<FileEvent>,
     /// Agent→UI structured observer. The agent calls methods here to emit events.
     pub observer: Arc<dyn AgentEventObserver>,
@@ -77,7 +70,6 @@ pub struct AgentContext {
 
 pub struct AgentContextBuilder {
     agent_config: AgentConfig,
-    app_config: Option<Arc<AppConfig>>,
     session_id: Uuid,
     prompt: String,
 
@@ -102,7 +94,6 @@ impl AgentContextBuilder {
     pub fn new(agent_config: AgentConfig, session_id: Uuid, prompt: String) -> Self {
         Self {
             agent_config,
-            app_config: None,
             session_id,
             prompt,
             file_event_bus: None,
@@ -121,13 +112,6 @@ impl AgentContextBuilder {
             uuid_gen: None,
             extensions: crate::agent::tools::extensions::Extensions::new(),
         }
-    }
-
-    /// Set the global [`AppConfig`] used by the tool context. Falls
-    /// back to [`AppConfig::default`] if not called.
-    pub fn with_app_config(mut self, app_config: Arc<AppConfig>) -> Self {
-        self.app_config = Some(app_config);
-        self
     }
 
     pub fn with_buses(mut self, file_event_bus: Bus<FileEvent>) -> Self {
@@ -218,12 +202,8 @@ impl AgentContextBuilder {
         let default_browser_session = Arc::new(BrowserSession::with_resolved(
             self.agent_config.browser().clone(),
         ));
-        let app_config = self
-            .app_config
-            .unwrap_or_else(|| Arc::new(AppConfig::default()));
         AgentContext {
             agent_config: self.agent_config,
-            app_config,
             session_id: self.session_id,
             prompt: self.prompt,
             file_event_bus: self.file_event_bus.unwrap_or_default(),
@@ -270,14 +250,12 @@ mod tests {
     #[test]
     fn test_agent_context_creation() {
         let agent_config = AgentConfig::default();
-        let app_config = Arc::new(AppConfig::default());
         let bus = Bus::new();
         let browser = Arc::new(crate::app::session::BrowserSession::with_resolved(
             agent_config.browser().clone(),
         ));
         let ctx =
             AgentContextBuilder::new(agent_config.clone(), Uuid::new_v4(), "hello".to_string())
-                .with_app_config(app_config.clone())
                 .with_buses(bus)
                 .with_observer(Arc::new(crate::app::events::BusAgentEventObserver::new(
                     Uuid::new_v4(),

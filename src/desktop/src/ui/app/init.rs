@@ -271,7 +271,7 @@ impl FastMdApp {
                 ),
             )),
         );
-        agent.set_agent_config(crate::agent::config::AgentConfig::from_app_config(&config));
+        agent.set_agent_config(config.to_agent_config());
 
         let event_bus = background_task.file_event_bus;
         let dir_tracker = DirectoryTracker::new(event_bus.subscribe());

@@ -4,7 +4,7 @@ use super::provider::{RegisteredTool, ToolProvider};
 use crate::agent::tools::Tool;
 use crate::agent::tools::descriptor::ToolDescriptor;
 use crate::agent::tools::registry::groups::{InternalToolGroup, ToolGroupId};
-use crate::config::AppConfig;
+use crate::agent::config::AgentConfig;
 use std::any::TypeId;
 use std::sync::Arc;
 
@@ -122,5 +122,5 @@ fn test_provider_refresh_default_is_noop() {
     // `ToolProvider::refresh` defaults to no-op; verify it
     // compiles and runs without touching state.
     let mut provider = DummyProvider;
-    provider.refresh(&AppConfig::default());
+    provider.refresh(&crate::config::AppConfig::default());
 }

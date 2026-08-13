@@ -1,4 +1,5 @@
 //! Unit tests for the `AgentConfig` projection and builder.
+use crate::config::AppConfig;
 
 use super::*;
 use crate::config::{ContentLibrary, LlmConfig, McpServerConfig, McpServerEntry, ToolGroupsConfig};
@@ -30,7 +31,7 @@ fn sample_mcp_entry() -> McpServerEntry {
 fn test_from_app_config_projects_models() {
     let mut cfg = AppConfig::default();
     cfg.models.insert("a".to_string(), sample_lc());
-    let agent_cfg = AgentConfig::from_app_config(&cfg);
+    let agent_cfg = cfg.to_agent_config();
     assert_eq!(agent_cfg.models().len(), 1);
     assert!(agent_cfg.models().contains_key("a"));
 }
@@ -41,14 +42,14 @@ fn test_from_app_config_projects_max_tokens() {
         max_tokens: 4096,
         ..AppConfig::default()
     };
-    let agent_cfg = AgentConfig::from_app_config(&cfg);
+    let agent_cfg = cfg.to_agent_config();
     assert_eq!(agent_cfg.max_tokens(), 4096);
 }
 
 #[test]
 fn test_from_app_config_projects_tool_groups() {
     let cfg = AppConfig::default();
-    let agent_cfg = AgentConfig::from_app_config(&cfg);
+    let agent_cfg = cfg.to_agent_config();
     let expected = cfg.tool_groups.clone();
     assert_eq!(*agent_cfg.tool_groups(), expected);
 }
@@ -57,7 +58,7 @@ fn test_from_app_config_projects_tool_groups() {
 fn test_from_app_config_projects_mcp_servers() {
     let mut cfg = AppConfig::default();
     cfg.mcp_servers.insert("s1".to_string(), sample_mcp_entry());
-    let agent_cfg = AgentConfig::from_app_config(&cfg);
+    let agent_cfg = cfg.to_agent_config();
     assert_eq!(agent_cfg.mcp_servers().len(), 1);
     assert!(agent_cfg.mcp_servers().contains_key("s1"));
 }
@@ -65,7 +66,7 @@ fn test_from_app_config_projects_mcp_servers() {
 #[test]
 fn test_from_app_config_resolves_browser_config() {
     let cfg = AppConfig::default();
-    let agent_cfg = AgentConfig::from_app_config(&cfg);
+    let agent_cfg = cfg.to_agent_config();
     // The default browser config must end up resolved (no empty path strings).
     assert!(!agent_cfg.browser().screenshot_dir.as_os_str().is_empty());
     assert!(
@@ -80,7 +81,7 @@ fn test_from_app_config_resolves_browser_config() {
 #[test]
 fn test_from_app_config_captures_config_path() {
     let cfg = AppConfig::default();
-    let agent_cfg = AgentConfig::from_app_config(&cfg);
+    let agent_cfg = cfg.to_agent_config();
     let expected = crate::config::get_config_path();
     assert_eq!(agent_cfg.config_path(), expected.as_path());
 }
@@ -106,7 +107,7 @@ fn test_from_app_config_drops_user_and_content_fields() {
         }],
         ..AppConfig::default()
     };
-    let agent_cfg = AgentConfig::from_app_config(&cfg);
+    let agent_cfg = cfg.to_agent_config();
     // AgentConfig has no `user_*` / `system_prompt_extension` /
     // `content_libraries` accessors. If the struct ever grows them, this
     // test will fail to compile, which is the right trip-wire.
@@ -199,7 +200,7 @@ fn test_default_agent_config_matches_builder_default() {
 fn test_from_app_config_via_into() {
     let mut cfg = AppConfig::default();
     cfg.models.insert("a".to_string(), sample_lc());
-    let agent_cfg: AgentConfig = (&cfg).into();
+    let agent_cfg: AgentConfig = cfg.to_agent_config();
     assert_eq!(agent_cfg.models().len(), 1);
 }
 

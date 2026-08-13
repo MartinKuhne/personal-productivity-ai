@@ -2,12 +2,11 @@
 //! [`super::prompt_rules`].
 
 use super::prompt_rules::csv_prompt_rule;
-use crate::config::AppConfig;
 
 #[test]
 fn test_csv_prompt_rule_gates_on_prompt_keyword() {
     let spec = csv_prompt_rule();
-    let mut c = AppConfig::default();
+    let mut c = crate::agent::config::AgentConfig::default();
     c.tool_groups.csv_db = true;
     // Negative cases — no keyword in the prompt.
     assert!(!spec.is_enabled_for(&c, "what is the weather today"));
@@ -21,7 +20,7 @@ fn test_csv_prompt_rule_gates_on_prompt_keyword() {
 #[test]
 fn test_csv_prompt_rule_gates_on_group_flag() {
     let spec = csv_prompt_rule();
-    let mut c = AppConfig::default();
+    let mut c = crate::agent::config::AgentConfig::default();
     c.tool_groups.csv_db = false;
     // Even with a matching keyword, the group flag must also be on.
     assert!(!spec.is_enabled_for(&c, "show me the csv database"));
@@ -32,7 +31,7 @@ fn test_csv_prompt_rule_gates_on_group_flag() {
 #[test]
 fn test_csv_prompt_rule_case_insensitive() {
     let spec = csv_prompt_rule();
-    let mut c = AppConfig::default();
+    let mut c = crate::agent::config::AgentConfig::default();
     c.tool_groups.csv_db = true;
     assert!(spec.is_enabled_for(&c, "query the CSV"));
     assert!(spec.is_enabled_for(&c, "what is a TABLE"));

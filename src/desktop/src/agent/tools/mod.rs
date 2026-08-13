@@ -108,8 +108,8 @@ pub trait Tool: Send + Sync {
 
     /// Whether the tool should currently be offered to the LLM.
     /// Defaults to evaluating `self.descriptor().config` against
-    /// the live `AppConfig` and the current prompt.
-    fn is_enabled(&self, config: &AppConfig, prompt: &str) -> bool {
+    /// the live `AgentConfig` and the current prompt.
+    fn is_enabled(&self, config: &crate::agent::config::AgentConfig, prompt: &str) -> bool {
         self.descriptor().config.is_enabled_for(config, prompt)
     }
 

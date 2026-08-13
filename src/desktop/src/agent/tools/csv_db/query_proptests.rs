@@ -46,7 +46,7 @@
 use super::super::operations::{add_rows, create_csv};
 use super::super::query::{delete_rows, query_csv};
 use super::super::schema::{AddRowsInput, CreateCsvInput, DeleteRowsInput, QueryRequest};
-use crate::config::AppConfig;
+use crate::agent::config::AgentConfig;
 use proptest::prelude::*;
 use std::collections::HashMap;
 use tempfile::tempdir;
@@ -58,7 +58,7 @@ use tempfile::tempdir;
 /// because the property under test is the *builder's*
 /// behaviour on a known input, not the behaviour of
 /// `evalexpr` on random inputs.
-fn build_fixture_csv(config: &AppConfig) -> (String, Vec<HashMap<String, String>>) {
+fn build_fixture_csv(config: &AgentConfig) -> (String, Vec<HashMap<String, String>>) {
     let db_name = "proptest".to_string();
     create_csv(
         config,
@@ -99,9 +99,9 @@ proptest! {
     #[test]
     fn no_predicate_returns_all_rows(_dummy in 0u8..1) {
         let dir = tempdir().unwrap();
-        let config = AppConfig {
+        let config = AgentConfig {
             csv_db_path: Some(dir.path().to_string_lossy().to_string()),
-            ..AppConfig::default()
+            ..AgentConfig::default()
         };
         let (db_name, rows) = build_fixture_csv(&config);
         let res = query_csv(
@@ -121,9 +121,9 @@ proptest! {
     #[test]
     fn tautology_predicate_matches_all_rows(_dummy in 0u8..1) {
         let dir = tempdir().unwrap();
-        let config = AppConfig {
+        let config = AgentConfig {
             csv_db_path: Some(dir.path().to_string_lossy().to_string()),
-            ..AppConfig::default()
+            ..AgentConfig::default()
         };
         let (db_name, rows) = build_fixture_csv(&config);
         for pred in &["1 == 1", "true", "1.0 == 1.0"] {
@@ -152,9 +152,9 @@ proptest! {
     #[test]
     fn contradiction_predicate_matches_no_rows(_dummy in 0u8..1) {
         let dir = tempdir().unwrap();
-        let config = AppConfig {
+        let config = AgentConfig {
             csv_db_path: Some(dir.path().to_string_lossy().to_string()),
-            ..AppConfig::default()
+            ..AgentConfig::default()
         };
         let (db_name, _rows) = build_fixture_csv(&config);
         for pred in &["1 == 0", "false", "1.0 == 0.0"] {
@@ -183,9 +183,9 @@ proptest! {
     #[test]
     fn sum_aggregate_is_correct(_dummy in 0u8..1) {
         let dir = tempdir().unwrap();
-        let config = AppConfig {
+        let config = AgentConfig {
             csv_db_path: Some(dir.path().to_string_lossy().to_string()),
-            ..AppConfig::default()
+            ..AgentConfig::default()
         };
         let (db_name, _) = build_fixture_csv(&config);
         // qty: 10 + 20 + 5 = 35
@@ -207,9 +207,9 @@ proptest! {
     #[test]
     fn average_aggregate_is_correct(_dummy in 0u8..1) {
         let dir = tempdir().unwrap();
-        let config = AppConfig {
+        let config = AgentConfig {
             csv_db_path: Some(dir.path().to_string_lossy().to_string()),
-            ..AppConfig::default()
+            ..AgentConfig::default()
         };
         let (db_name, _) = build_fixture_csv(&config);
         // price: (1.5 + 0.5 + 2.0) / 3 = 1.333...
@@ -236,9 +236,9 @@ proptest! {
     #[test]
     fn delete_tautology_removes_all_rows(_dummy in 0u8..1) {
         let dir = tempdir().unwrap();
-        let config = AppConfig {
+        let config = AgentConfig {
             csv_db_path: Some(dir.path().to_string_lossy().to_string()),
-            ..AppConfig::default()
+            ..AgentConfig::default()
         };
         let (db_name, rows) = build_fixture_csv(&config);
         let result = delete_rows(
@@ -288,9 +288,9 @@ proptest! {
         value in prop::string::string_regex(r"[a-zA-Z0-9_]{1,10}").unwrap(),
     ) {
         let dir = tempdir().unwrap();
-        let config = AppConfig {
+        let config = AgentConfig {
             csv_db_path: Some(dir.path().to_string_lossy().to_string()),
-            ..AppConfig::default()
+            ..AgentConfig::default()
         };
         let (db_name, _) = build_fixture_csv(&config);
         // Quote the value to handle non-numeric predicates

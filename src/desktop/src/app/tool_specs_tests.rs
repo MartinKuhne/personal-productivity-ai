@@ -2,9 +2,8 @@
 //! [`super::tool_specs`].
 
 use super::tool_specs::{calendar_spec, contacts_spec, email_spec, trello_spec, web_search_spec};
-use crate::config::{
-    AppConfig, CalDavClient, JmapClient, McpServerConfig, McpServerEntry, TrelloClient,
-};
+use crate::agent::config::AgentConfig;
+use crate::config::{CalDavClient, JmapClient, McpServerConfig, McpServerEntry, TrelloClient};
 
 fn jmap() -> JmapClient {
     JmapClient {
@@ -30,7 +29,7 @@ fn trello() -> TrelloClient {
 
 #[test]
 fn test_email_spec_requires_jmap_clients() {
-    let mut c = AppConfig::default();
+    let mut c = AgentConfig::default();
     assert!(!email_spec().is_enabled_for(&c, ""));
     c.jmap_clients.insert("p".into(), jmap());
     assert!(email_spec().is_enabled_for(&c, ""));
@@ -38,7 +37,7 @@ fn test_email_spec_requires_jmap_clients() {
 
 #[test]
 fn test_calendar_spec_requires_caldav_clients() {
-    let mut c = AppConfig::default();
+    let mut c = AgentConfig::default();
     assert!(!calendar_spec().is_enabled_for(&c, ""));
     c.caldav_clients.insert("p".into(), caldav());
     assert!(calendar_spec().is_enabled_for(&c, ""));
@@ -46,7 +45,7 @@ fn test_calendar_spec_requires_caldav_clients() {
 
 #[test]
 fn test_contacts_spec_follows_feature_flag() {
-    let mut c = AppConfig::default();
+    let mut c = AgentConfig::default();
     c.jmap_clients.insert("j".into(), jmap());
     c.caldav_clients.insert("d".into(), caldav());
     // Default flag off → JMAP.
@@ -59,7 +58,7 @@ fn test_contacts_spec_follows_feature_flag() {
 
 #[test]
 fn test_trello_spec_requires_client() {
-    let mut c = AppConfig::default();
+    let mut c = AgentConfig::default();
     assert!(!trello_spec().is_enabled_for(&c, ""));
     c.trello_client = Some(trello());
     assert!(trello_spec().is_enabled_for(&c, ""));
@@ -67,7 +66,7 @@ fn test_trello_spec_requires_client() {
 
 #[test]
 fn test_web_search_spec_requires_searxng() {
-    let mut c = AppConfig::default();
+    let mut c = AgentConfig::default();
     c.tool_groups.web = false;
     c.searxng_url = None;
     assert!(!web_search_spec().is_enabled_for(&c, ""));
@@ -81,7 +80,7 @@ fn test_web_search_spec_requires_searxng() {
 fn test_specs_gate_on_group_flag() {
     // Even with the integration configured, each spec requires its
     // group to be on.
-    let mut c = AppConfig::default();
+    let mut c = AgentConfig::default();
     c.jmap_clients.insert("p".into(), jmap());
     c.caldav_clients.insert("p".into(), caldav());
     c.trello_client = Some(trello());

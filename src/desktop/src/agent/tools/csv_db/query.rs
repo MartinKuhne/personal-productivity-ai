@@ -1,7 +1,7 @@
 //! CSV-database query and delete operations — expression-based (evalexpr) predicate evaluation against row values.
 
 use super::schema::{DeleteRowsInput, QueryRequest, QueryResponse};
-use crate::config::AppConfig;
+use crate::agent::config::AgentConfig;
 use evalexpr::{ContextWithMutableVariables, HashMapContext, Value};
 use std::collections::HashMap;
 
@@ -21,7 +21,7 @@ fn create_context(row: &csv::StringRecord, headers: &csv::StringRecord) -> HashM
     context
 }
 
-pub fn delete_rows(config: &AppConfig, input: DeleteRowsInput) -> Result<String, String> {
+pub fn delete_rows(config: &AgentConfig, input: DeleteRowsInput) -> Result<String, String> {
     let db_path = super::operations::get_db_path(config, &input.db_name);
     if !db_path.exists() {
         return Err(format!("Database '{}' does not exist", input.db_name));
@@ -67,7 +67,7 @@ pub fn delete_rows(config: &AppConfig, input: DeleteRowsInput) -> Result<String,
     Ok(format!("Deleted {} rows", deleted_count))
 }
 
-pub fn query_csv(config: &AppConfig, input: QueryRequest) -> Result<QueryResponse, String> {
+pub fn query_csv(config: &AgentConfig, input: QueryRequest) -> Result<QueryResponse, String> {
     let db_path = super::operations::get_db_path(config, &input.db_name);
     if !db_path.exists() {
         return Err(format!("Database '{}' does not exist", input.db_name));
@@ -147,11 +147,10 @@ mod tests {
 
     #[test]
     fn test_query_and_delete() {
-        let dir = tempdir().unwrap();
-        let config = AppConfig {
-            csv_db_path: Some(dir.path().to_string_lossy().to_string()),
-            ..AppConfig::default()
-        };
+        let tmp_dir = tempdir().unwrap();
+        let config = crate::agent::config::AgentConfigBuilder::new()
+            .with_csv_db_path(Some(tmp_dir.path().to_string_lossy().to_string()))
+            .build();
 
         let _ = super::super::operations::create_csv(
             &config,

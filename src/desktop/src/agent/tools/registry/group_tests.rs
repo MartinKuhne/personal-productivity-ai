@@ -3,14 +3,14 @@
 //! and cover the new behaviour introduced by the merge.
 
 use super::*;
-use crate::config::AppConfig;
+use crate::agent::config::AgentConfig;
 use crate::config::McpServerConfig;
 
 /// Every registered tool has a `tool_to_group` entry â€” no orphans.
 #[test]
 fn tool_to_group_index_is_complete() {
     let mut mgr = ToolRegistry::new();
-    let config = AppConfig::default();
+    let config = AgentConfig::default();
     mgr.refresh_state(&config);
     for name in mgr.tools.keys() {
         assert!(
@@ -26,17 +26,17 @@ fn tool_to_group_index_is_complete() {
     }
 }
 
-/// `refresh_state` reads the current `AppConfig::tool_groups` flags.
+/// `refresh_state` reads the current `AgentConfig::tool_groups` flags.
 #[test]
 fn group_state_refresh_reflects_config() {
     let mut mgr = ToolRegistry::new();
-    let mut config = AppConfig::default();
-    mgr.refresh_state(&config);
+    let mut config = crate::config::AppConfig::default();
+    mgr.refresh_state(&config.to_agent_config());
     let id = ToolGroupId::Internal(InternalToolGroup::Filesystem);
     assert!(mgr.group(&id).unwrap().enabled);
 
     config.tool_groups.filesystem = false;
-    mgr.refresh_state(&config);
+    mgr.refresh_state(&config.to_agent_config());
     assert!(!mgr.group(&id).unwrap().enabled);
 }
 
@@ -53,7 +53,7 @@ fn group_parallel_safe_when_all_tools_readonly() {
     // group must not be parallel-safe; but the *Filesystem* group
     // has at least one Mutating tool (`create_file`).
     let mut mgr = ToolRegistry::new();
-    let config = AppConfig::default();
+    let config = AgentConfig::default();
     mgr.refresh_state(&config);
     let fs = mgr
         .group(&ToolGroupId::Internal(InternalToolGroup::Filesystem))
@@ -81,7 +81,7 @@ fn parallel_safe_tools_includes_all_readonly_tools() {
 #[test]
 fn record_error_replaces_previous() {
     let mut mgr = ToolRegistry::new();
-    let config = AppConfig::default();
+    let config = AgentConfig::default();
     mgr.refresh_state(&config);
     let id = ToolGroupId::Internal(InternalToolGroup::Filesystem);
     mgr.record_error(&id, ToolGroupError::now(ToolErrorKind::Execution, "first"));
@@ -104,7 +104,7 @@ fn record_error_replaces_previous() {
 #[test]
 fn clear_error_removes_recorded_error() {
     let mut mgr = ToolRegistry::new();
-    let config = AppConfig::default();
+    let config = AgentConfig::default();
     mgr.refresh_state(&config);
     let id = ToolGroupId::Internal(InternalToolGroup::Filesystem);
     mgr.record_error(&id, ToolGroupError::now(ToolErrorKind::Execution, "boom"));
@@ -113,12 +113,12 @@ fn clear_error_removes_recorded_error() {
     assert!(mgr.group(&id).unwrap().last_error.is_none());
 }
 
-/// `set_group_enabled` flips the right field on `AppConfig` for an
+/// `set_group_enabled` flips the right field on `AgentConfig` for an
 /// internal group and persists the change.
 #[test]
 fn set_internal_group_enabled_persists_to_config() {
     let mgr = ToolRegistry::new();
-    let mut config = AppConfig::default();
+    let mut config = crate::config::AppConfig::default();
     assert!(config.tool_groups.weather);
     mgr.set_group_enabled(
         &mut config,
@@ -139,7 +139,7 @@ fn set_internal_group_enabled_persists_to_config() {
 #[test]
 fn set_mcp_group_enabled_preserves_server_config() {
     let mgr = ToolRegistry::new();
-    let mut config = AppConfig::default();
+    let mut config = crate::config::AppConfig::default();
     config.mcp_servers.insert(
         "github".to_string(),
         McpServerConfig::Stdio {
@@ -172,7 +172,7 @@ fn set_mcp_group_enabled_preserves_server_config() {
 #[cfg(feature = "browser")]
 fn browser_group_defaults_to_disabled() {
     let mut mgr = ToolRegistry::new();
-    let config = AppConfig::default();
+    let config = AgentConfig::default();
     mgr.refresh_state(&config);
     let id = ToolGroupId::Internal(InternalToolGroup::Browser);
     let state = mgr.group(&id).expect("Browser group missing");
@@ -185,7 +185,7 @@ fn browser_group_defaults_to_disabled() {
 #[cfg(feature = "browser")]
 fn browser_group_lists_all_eight_tools() {
     let mut mgr = ToolRegistry::new();
-    let mut config = AppConfig::default();
+    let mut config = crate::config::AppConfig::default();
     config.tool_groups.browser = true;
     let snapshot = mgr.groups_snapshot(&config);
     let browser = snapshot
@@ -210,12 +210,12 @@ fn browser_group_lists_all_eight_tools() {
 }
 
 /// Contract: `set_group_enabled` flips the new `tool_groups.browser`
-/// field on `AppConfig` (BRWS-CONF-001).
+/// field on `AgentConfig` (BRWS-CONF-001).
 #[test]
 #[cfg(feature = "browser")]
 fn set_browser_group_enabled_persists_to_config() {
     let mgr = ToolRegistry::new();
-    let mut config = AppConfig::default();
+    let mut config = crate::config::AppConfig::default();
     assert!(!config.tool_groups.browser);
     mgr.set_group_enabled(
         &mut config,
@@ -267,7 +267,7 @@ fn browser_only_get_page_state_is_parallel_safe() {
 #[test]
 fn mcp_needs_auth_now_defaults_to_false() {
     let mgr = ToolRegistry::new();
-    let mut config = AppConfig::default();
+    let mut config = crate::config::AppConfig::default();
     config.mcp_servers.insert(
         "github".to_string(),
         McpServerConfig::Sse {
@@ -277,7 +277,7 @@ fn mcp_needs_auth_now_defaults_to_false() {
         }
         .into(),
     );
-    mgr.mcp_manager().update_config(&config);
+    mgr.mcp_manager().update_config(&config.to_agent_config());
     assert!(!mgr.mcp_manager().needs_auth_now("github"));
 }
 
@@ -285,7 +285,7 @@ fn mcp_needs_auth_now_defaults_to_false() {
 #[test]
 fn mcp_clear_needs_auth_clears_the_flag() {
     let mgr = ToolRegistry::new();
-    let mut config = AppConfig::default();
+    let mut config = crate::config::AppConfig::default();
     config.mcp_servers.insert(
         "github".to_string(),
         McpServerConfig::Sse {
@@ -295,7 +295,7 @@ fn mcp_clear_needs_auth_clears_the_flag() {
         }
         .into(),
     );
-    mgr.mcp_manager().update_config(&config);
+    mgr.mcp_manager().update_config(&config.to_agent_config());
     mgr.mcp_manager().mark_needs_auth("github", true);
     assert!(mgr.mcp_manager().needs_auth_now("github"));
     mgr.mcp_manager().mark_needs_auth("github", false);

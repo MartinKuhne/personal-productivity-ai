@@ -30,16 +30,16 @@ fn run_agent_inner(ctx: AgentContext) {
     let mut messages = build_messages(system_prompts, &ctx.prompt, ctx.history.clone());
     ctx.tool_context.rcu(|bundle| {
         let mut new_bundle = (**bundle).clone();
-        new_bundle.registry.update_and_refresh(&ctx.app_config);
+        new_bundle.registry.update_and_refresh(&ctx.agent_config);
         new_bundle
     });
     let tools_json = ctx
         .tool_context
         .load()
         .registry
-        .get_schema(&ctx.app_config, &ctx.prompt);
+        .get_schema(&ctx.agent_config, &ctx.prompt);
     let executor = crate::agent::tool_executor::ToolExecutorBuilder::new(
-        ctx.app_config.clone(),
+        std::sync::Arc::new(ctx.agent_config.clone()),
         ctx.file_event_bus.clone(),
         ctx.cache.clone(),
         ctx.tool_context.clone(),

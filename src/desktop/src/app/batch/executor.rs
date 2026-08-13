@@ -208,11 +208,10 @@ pub fn run_agent_blocking(
     );
 
     let ctx = crate::agent::context::AgentContextBuilder::new(
-        crate::agent::config::AgentConfig::from_app_config(&config),
+        config.to_agent_config(),
         uuid::Uuid::new_v4(),
         prompt,
     )
-    .with_app_config(std::sync::Arc::new(config))
     .with_buses(file_event_bus)
     .with_observer(std::sync::Arc::new(
         crate::app::events::BusAgentEventObserver::new(

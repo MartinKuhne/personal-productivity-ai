@@ -61,8 +61,7 @@ fn execute_web_fetch(
 /// The descriptor carries [`crate::app::tool_specs::web_search_spec`]
 /// so the tool is hidden when no `searxng_url` is configured.
 /// Because [`crate::agent::tools::Tool::is_enabled`] now derives
-/// from the spec, the duplicated `if let Some(url) = &ctx.config.searxng_url`
-/// branch in `execute` is gone — `is_enabled` is the single source
+/// from the spec, the duplicated if config.searxng_url.is_some() {branch in `execute` is gone — `is_enabled` is the single source
 /// of truth. The single `as_deref().ok_or_else` below just unwraps
 /// the value the function needs; if the spec is ever bypassed it
 /// surfaces a clear error instead of panicking.

@@ -1,15 +1,16 @@
-//! Tests for [`McpToolAdapter`] — the LLM-tool-loop adapter that
-//! exposes MCP-discovered tools to the agent tool registry.
-//!
-//! Sidecar file for `crate::agent::tools::mcp`. Extracted from the
-//! original `tests.rs` when the protocol layer moved to
-//! `crate::integrations::mcp`; only the adapter-side tests live here.
-//! Protocol-layer tests now live in
-//! `crate::integrations::mcp::tests`.
+use crate::agent::config::AgentConfig;
+// Tests for [`McpToolAdapter`] — the LLM-tool-loop adapter that
+// exposes MCP-discovered tools to the agent tool registry.
+//
+// Sidecar file for `crate::agent::tools::mcp`. Extracted from the
+// original `tests.rs` when the protocol layer moved to
+// `crate::integrations::mcp`; only the adapter-side tests live here.
+// Protocol-layer tests now live in
+// `crate::integrations::mcp::tests`.
 
 use super::*;
 use crate::agent::tools::{Safety, Tool};
-use crate::config::{AppConfig, McpServerConfig, McpServerEntry};
+use crate::config::{McpServerConfig, McpServerEntry};
 use std::collections::HashMap;
 use std::sync::Arc;
 
@@ -35,7 +36,7 @@ fn test_mcp_tool_adapter_metadata_and_safety() {
     assert_eq!(adapter.safety(), Safety::Mutating);
     assert_eq!(adapter.parameters_schema()["type"].as_str(), Some("object"));
 
-    let mut config = AppConfig::default();
+    let mut config = AgentConfig::default();
     assert!(!adapter.is_enabled(&config, "prompt"));
 
     config.mcp_servers.insert(
@@ -64,7 +65,7 @@ fn test_mcp_tool_adapter_disabled_when_entry_disabled() {
         manager,
     );
 
-    let mut config = AppConfig::default();
+    let mut config = AgentConfig::default();
     config.mcp_servers.insert(
         "test_server".to_string(),
         McpServerEntry {

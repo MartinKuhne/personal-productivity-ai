@@ -45,7 +45,7 @@
 //! via the `Box::leak` and pointer-cast trick — about 1 MiB of
 //! leaked memory per 1024 cases. After the rewrite, the context is
 //! built normally, the worker thread takes a cheap `Clone` (the
-//! `Arc`-backed `AppConfig` and `ToolCache` are shared), and the
+//! `Arc`-backed `AgentConfig` and `ToolCache` are shared), and the
 //! test runs without `Box::leak` or `unsafe`. The same pattern is
 //! what makes the Phase-5 cargo-fuzz targets for `execute_tool`
 //! feasible.
@@ -53,7 +53,7 @@
 use crate::agent::tools::context::ToolContext;
 use crate::app::session::{BrowserSession, PdfBackingTracker};
 use crate::bus::core::Bus;
-use crate::config::AppConfig;
+use crate::agent::config::AgentConfig;
 use crate::utils::uuid::SystemUuidGenerator;
 use proptest::prelude::*;
 use std::sync::Arc;
@@ -72,8 +72,8 @@ const DISPATCH_TIMEOUT: Duration = Duration::from_secs(5);
 /// allocations across 1024 cases are bounded and reclaimed
 /// by the test harness.
 fn build_dispatch_context() -> ToolContext {
-    let config = AppConfig::default();
-    let browser_session = Arc::new(BrowserSession::new(&config));
+    let config = AgentConfig::default();
+    let browser_session = Arc::new(BrowserSession::with_resolved(config.browser.clone()));
     let pdf_backing = Arc::new(PdfBackingTracker::new());
     let uuid_gen: Arc<dyn crate::utils::uuid::UuidGenerator> = Arc::new(SystemUuidGenerator);
     crate::agent::tools::context::ToolContextBuilder::new(

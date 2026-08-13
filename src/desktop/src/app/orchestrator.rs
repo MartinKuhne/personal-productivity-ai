@@ -308,7 +308,7 @@ impl AppOrchestrator {
         // hand it to the agent. The agent's run loop reads only the
         // projected fields; the tool context (built per session)
         // carries the full `AppConfig` separately.
-        let agent_cfg = crate::agent::config::AgentConfig::from_app_config(&config);
+        let agent_cfg = config.to_agent_config();
         self.agent.set_agent_config(agent_cfg);
 
         self.content_libraries = config.content_libraries.clone();

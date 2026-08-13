@@ -9,7 +9,7 @@ use crate::agent::tools::execute_tool;
 use crate::app::session::BrowserSession;
 use crate::bus::core::Bus;
 use crate::bus::events::file::FileEvent;
-use crate::config::AppConfig;
+use crate::agent::config::AgentConfig;
 use std::path::Path;
 use std::sync::Arc;
 
@@ -20,11 +20,11 @@ use std::sync::Arc;
 type SharedCache = Arc<crate::agent::tools::registry::cache::ToolCache>;
 
 pub struct ToolExecutor {
-    /// Global `AppConfig` shared with every tool call (used by
+    /// Global `AgentConfig` shared with every tool call (used by
     /// the tool context for VFS resolution and integration
     /// clients). Cheap to clone per parallel worker (single
     /// `Arc` refcount bump).
-    config: Arc<AppConfig>,
+    config: Arc<AgentConfig>,
     file_event_bus: Bus<FileEvent>,
     /// When the `browser` Cargo feature is off the session is a
     /// stub that returns
@@ -40,7 +40,7 @@ pub struct ToolExecutor {
 }
 
 pub struct ToolExecutorBuilder {
-    config: Arc<AppConfig>,
+    config: Arc<AgentConfig>,
     file_event_bus: Bus<FileEvent>,
     cache: SharedCache,
     tool_context: std::sync::Arc<arc_swap::ArcSwap<AgentToolContext>>,
@@ -51,7 +51,7 @@ pub struct ToolExecutorBuilder {
 
 impl ToolExecutorBuilder {
     pub fn new(
-        config: Arc<AppConfig>,
+        config: Arc<AgentConfig>,
         file_event_bus: Bus<FileEvent>,
         cache: SharedCache,
         tool_context: std::sync::Arc<arc_swap::ArcSwap<AgentToolContext>>,
@@ -89,7 +89,7 @@ impl ToolExecutorBuilder {
     }
 
     pub fn build(self) -> ToolExecutor {
-        let default_browser = Arc::new(BrowserSession::new(&self.config));
+        let default_browser = Arc::new(BrowserSession::with_resolved(self.config.browser().clone()));
         ToolExecutor {
             config: self.config,
             file_event_bus: self.file_event_bus,
@@ -297,7 +297,7 @@ impl ToolExecutor {
                 }
                 if let Some(std::path::Component::Normal(first)) = comps.next() {
                     let lib_name = first.to_string_lossy();
-                    for lib in &self.config.content_libraries {
+                    for lib in self.config.content_libraries() {
                         if lib.name == lib_name {
                             let rest: std::path::PathBuf = comps.collect();
                             let abs_path = Path::new(&lib.root_folder).join(rest);
@@ -330,7 +330,7 @@ fn extract_str<'a>(val: &'a serde_json::Value, path: &[&str]) -> &'a str {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::config::AppConfig;
+    use crate::agent::config::AgentConfig;
     use std::sync::Arc;
 
     #[test]
@@ -366,10 +366,10 @@ mod tests {
 
     #[test]
     fn test_tool_executor_new() {
-        let config = AppConfig::default();
+        let config = AgentConfig::default();
         let bus = Bus::new();
-        let browser_session = std::sync::Arc::new(crate::app::session::BrowserSession::new(
-            &crate::config::AppConfig::default(),
+        let browser_session = std::sync::Arc::new(crate::app::session::BrowserSession::with_resolved(
+            config.browser().clone(),
         ));
         let pdf_backing = std::sync::Arc::new(crate::app::session::PdfBackingTracker::new());
         let tm = std::sync::Arc::new(arc_swap::ArcSwap::from_pointee(AgentToolContext::new(
@@ -382,6 +382,6 @@ mod tests {
             .with_pdf_backing(pdf_backing)
             .with_uuid_gen(uuid_gen)
             .build();
-        assert!(executor.config.models.is_empty());
+        assert!(executor.config.models().is_empty());
     }
 }

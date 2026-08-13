@@ -327,7 +327,7 @@ fn register_caldav_stubs(mock: &WiremockGuard) {
 
 #[test]
 fn test_caldav_tools_empty_config() {
-    let config = AppConfig::default();
+    let config = AgentConfig::default();
 
     assert_eq!(
         tool_add_calendar_item(&config, "{}").unwrap_err(),
@@ -379,7 +379,7 @@ fn test_caldav_tools_empty_config() {
                 with `cargo nextest run --run-ignored all -- tools::caldav::tests::test_caldav_tools_unreachable_client`."]
 fn test_caldav_tools_unreachable_client() {
     let _ = rustls::crypto::ring::default_provider().install_default();
-    let mut config = AppConfig::default();
+    let mut config = AgentConfig::default();
     config.caldav_clients.insert(
         "test_client".to_string(),
         crate::config::CalDavClient {
@@ -408,11 +408,11 @@ fn test_caldav_tools_unreachable_client() {
     assert!(delete_res.result.contains("Error on client test_client"));
 }
 
-/// Build a [`AppConfig`] with a single CalDAV client pointing at
+/// Build a [`AgentConfig`] with a single CalDAV client pointing at
 /// `server_uri`. Keeps the three mock tests below focused on the
 /// behaviour they exercise.
-fn dav_config_for(server_uri: String) -> AppConfig {
-    let mut config = AppConfig::default();
+fn dav_config_for(server_uri: String) -> AgentConfig {
+    let mut config = AgentConfig::default();
     config.caldav_clients.insert(
         "mock_client".to_string(),
         crate::config::CalDavClient {

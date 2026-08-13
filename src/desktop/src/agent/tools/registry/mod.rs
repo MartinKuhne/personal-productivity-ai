@@ -175,7 +175,7 @@ impl ToolRegistry {
     pub fn schema_fragment(
         &self,
         name: &str,
-        config: &AppConfig,
+        config: &crate::agent::config::AgentConfig,
         prompt: &str,
     ) -> Option<serde_json::Value> {
         let entry = self.tools.get(name)?;
@@ -199,7 +199,7 @@ impl ToolRegistry {
     /// Build the JSON-Schema tool list for the LLM, honouring both
     /// per-group enable flags and the prompt-content rule in
     /// [`Tool::is_enabled`].
-    pub fn get_schema(&self, config: &AppConfig, prompt: &str) -> serde_json::Value {
+    pub fn get_schema(&self, config: &crate::agent::config::AgentConfig, prompt: &str) -> serde_json::Value {
         let mut tools = Vec::new();
         for name in self.tools.keys() {
             if let Some(fragment) = self.schema_fragment(name, config, prompt) {
@@ -224,7 +224,7 @@ impl ToolRegistry {
     /// tool contributes to the LLM `tools` array, or `None` if the
     /// tool is not currently enabled (per [`Tool::is_enabled`]).
     /// Per TOOL-015.
-    pub fn tool_char_count(&self, name: &str, config: &AppConfig, prompt: &str) -> Option<usize> {
+    pub fn tool_char_count(&self, name: &str, config: &crate::agent::config::AgentConfig, prompt: &str) -> Option<usize> {
         let entry = self.schema_fragment(name, config, prompt)?;
         Some(serde_json::to_string(&entry).map(|s| s.len()).unwrap_or(0))
     }
@@ -234,7 +234,7 @@ impl ToolRegistry {
     /// Recompute the per-group view from the current `AppConfig` and
     /// the current catalog. Cheap (no I/O). Called on every config
     /// change and on every dialog open.
-    pub fn refresh_state(&mut self, config: &AppConfig) {
+    pub fn refresh_state(&mut self, config: &crate::agent::config::AgentConfig) {
         // For each known group, rebuild the state from the catalog
         // and the config. We carry forward the `last_error` from the
         // previous view: a successful `Execution` clears it via
@@ -336,7 +336,7 @@ impl ToolRegistry {
     }
 
     pub fn groups_snapshot(&mut self, config: &AppConfig) -> Vec<ToolGroupState> {
-        self.refresh_state(config);
+        self.refresh_state(&config.to_agent_config());
         self.groups()
     }
 
@@ -345,17 +345,18 @@ impl ToolRegistry {
     }
 
     pub fn init_mcp_on_startup(&mut self, config: &AppConfig) {
-        self.mcp_manager.update_config(config);
-        self.refresh_mcp_tools(config);
+        let agent_cfg = config.to_agent_config();
+        self.mcp_manager.update_config(&agent_cfg);
+        self.refresh_mcp_tools(&agent_cfg);
     }
 
-    pub fn update_and_refresh(&mut self, config: &AppConfig) {
+    pub fn update_and_refresh(&mut self, config: &crate::agent::config::AgentConfig) {
         self.mcp_manager.update_config(config);
         self.refresh_mcp_tools(config);
         self.refresh_state(config);
     }
 
-    pub fn get_tools_schema(&mut self, config: &AppConfig, prompt: &str) -> serde_json::Value {
+    pub fn get_tools_schema(&mut self, config: &crate::agent::config::AgentConfig, prompt: &str) -> serde_json::Value {
         self.mcp_manager.update_config(config);
         self.refresh_mcp_tools(config);
         self.refresh_state(config);
@@ -414,7 +415,7 @@ impl ToolRegistry {
     /// Refresh the MCP catalog: re-run `tools/list` against every
     /// configured server, register the discovered tools, and record
     /// `Discovery` errors on the affected group when a server fails.
-    pub fn refresh_mcp_tools(&mut self, config: &AppConfig) {
+    pub fn refresh_mcp_tools(&mut self, config: &crate::agent::config::AgentConfig) {
         // Remove tools that came from a server whose config is gone or
         // whose config changed.
         let valid_servers: Vec<String> = config.mcp_servers.keys().cloned().collect();
@@ -509,7 +510,7 @@ impl ToolDispatcher for ToolRegistry {
 // `set_group_enabled` method can be a single `match`.
 // ---------------------------------------------------------------------------
 
-fn is_internal_group_enabled(config: &AppConfig, g: InternalToolGroup) -> bool {
+fn is_internal_group_enabled(config: &crate::agent::config::AgentConfig, g: InternalToolGroup) -> bool {
     use InternalToolGroup::*;
     match g {
         Filesystem => config.tool_groups.filesystem,
@@ -574,7 +575,7 @@ pub fn spawn_config_subscription(
             if let Ok(event) = config_reader.recv() {
                 tool_context.rcu(|ctx| {
                     let mut new_ctx = (**ctx).clone();
-                    new_ctx.registry.refresh_mcp_tools(&event.config);
+                    new_ctx.registry.refresh_mcp_tools(&event.config.to_agent_config());
                     new_ctx
                 });
             }
@@ -594,7 +595,7 @@ pub fn execute_tool(
 
     let debug_mode = ctx
         .config
-        .feature_flags
+        .feature_flags()
         .get("toolCallDebugMode")
         .copied()
         .unwrap_or(false);

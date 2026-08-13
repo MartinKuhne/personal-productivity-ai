@@ -10,7 +10,7 @@
 //!
 //! The companion [`ToolConfigSpec`] carries the configuration
 //! requirements a tool needs in order to be enabled. Combined with
-//! [`crate::config::AppConfig`] and the current prompt, it is the
+//! [`crate::agent::config::AgentConfig`] and the current prompt, it is the
 //! single source of truth for "is this tool currently offered to the
 //! LLM?".
 //!
@@ -18,7 +18,7 @@
 
 use crate::agent::tools::Safety;
 use crate::agent::tools::registry::groups::{InternalToolGroup, ToolGroupId};
-use crate::config::AppConfig;
+use crate::agent::config::AgentConfig;
 use std::any::TypeId;
 use std::borrow::Cow;
 
@@ -204,7 +204,7 @@ pub struct ToolConfigSpec {
     /// Almost every tool sets this; the registry uses it to build
     /// the per-group enable view.
     pub group: Option<ToolGroupId>,
-    /// Soft requirements on `AppConfig` fields. All must be
+    /// Soft requirements on `AgentConfig` fields. All must be
     /// satisfied. Used for "this tool needs an API key", "this tool
     /// needs a JMAP client", etc.
     pub requires: Vec<ConfigPredicate>,
@@ -225,13 +225,13 @@ impl ToolConfigSpec {
     }
 
     /// Decide whether a tool with this spec should be offered to the
-    /// LLM, given the current `AppConfig` and the user's prompt.
+    /// LLM, given the current `AgentConfig` and the user's prompt.
     ///
     /// Note: prompt-content gating rules themselves live in the
     /// application domain (see
     /// [`crate::app::batch::prompt_rules`]). The tool system here
     /// just evaluates whatever [`PromptPredicate`] the spec carries.
-    pub fn is_enabled_for(&self, config: &AppConfig, prompt: &str) -> bool {
+    pub fn is_enabled_for(&self, config: &AgentConfig, prompt: &str) -> bool {
         if let Some(group) = &self.group
             && !group_enabled(config, group)
         {
@@ -247,7 +247,7 @@ impl ToolConfigSpec {
     }
 }
 
-/// A single boolean predicate over `AppConfig`. See
+/// A single boolean predicate over `AgentConfig`. See
 /// [`ToolConfigSpec::requires`].
 #[derive(Clone, Debug)]
 pub enum ConfigPredicate {
@@ -273,7 +273,7 @@ pub enum ConfigPredicate {
 
 impl ConfigPredicate {
     /// Evaluate the predicate against the live config.
-    pub fn eval(&self, config: &AppConfig) -> bool {
+    pub fn eval(&self, config: &AgentConfig) -> bool {
         match self {
             Self::SearxngConfigured => config.searxng_url.is_some(),
             Self::TrelloConfigured => config.trello_client.is_some(),
@@ -321,11 +321,11 @@ impl PromptPredicate {
 // ---------------------------------------------------------------------------
 
 /// Whether the given group is currently enabled according to
-/// `AppConfig`. The MCP-server branch is consulted by the
+/// `AgentConfig`. The MCP-server branch is consulted by the
 /// descriptor's default `is_enabled`; the internal branch mirrors
 /// the logic the registry uses to build the UI dialog's per-group
 /// view.
-pub fn group_enabled(config: &AppConfig, group: &ToolGroupId) -> bool {
+pub fn group_enabled(config: &AgentConfig, group: &ToolGroupId) -> bool {
     match group {
         ToolGroupId::Internal(g) => internal_group_enabled(config, *g),
         ToolGroupId::Mcp(name) => config
@@ -335,7 +335,7 @@ pub fn group_enabled(config: &AppConfig, group: &ToolGroupId) -> bool {
     }
 }
 
-fn internal_group_enabled(config: &AppConfig, g: InternalToolGroup) -> bool {
+fn internal_group_enabled(config: &AgentConfig, g: InternalToolGroup) -> bool {
     use InternalToolGroup::*;
     match g {
         Filesystem => config.tool_groups.filesystem,

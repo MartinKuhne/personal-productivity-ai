@@ -1,4 +1,4 @@
-﻿//! MCP (Model Context Protocol) client integration — client manager,
+//! MCP (Model Context Protocol) client integration — client manager,
 //! transports, and tool adapters.
 //!
 //! This module targets the 2025-11-25 specification. Compliance status:
@@ -129,7 +129,7 @@ impl McpClients {
     /// Update manager configuration with active MCP servers. Any
     /// previously-cached sessions for servers that are no longer
     /// present in `config` are shut down and dropped.
-    pub fn update_config(&self, config: &AppConfig) {
+    pub fn update_config(&self, config: &crate::agent::config::AgentConfig) {
         let mut state = match self.state.lock() {
             Ok(g) => g,
             Err(_) => return,
@@ -445,7 +445,7 @@ impl DynamicToolSource for McpClients {
         McpClients::discover_tools(self, server)
     }
     fn update_config(&self, config: &AppConfig) {
-        McpClients::update_config(self, config);
+        McpClients::update_config(self, &config.to_agent_config());
     }
     fn call_tool(
         &self,

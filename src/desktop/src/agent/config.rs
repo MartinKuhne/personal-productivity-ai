@@ -32,62 +32,40 @@ use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 
 use crate::config::{
-    AppConfig, CalDavClient, JmapClient, LlmConfig, McpServerEntry, ResolvedBrowserConfig,
+    CalDavClient, ContentLibrary, JmapClient, LlmConfig, McpServerEntry, ResolvedBrowserConfig,
     ToolGroupsConfig, TrelloClient, get_config_path,
 };
 
 /// Domain-specific configuration for the agent module.
 ///
-/// Built via [`AgentConfig::from_app_config`] (orchestrator seam) or
+/// Built via [`crate::config::AppConfig::to_agent_config`] (orchestrator seam) or
 /// [`AgentConfigBuilder`] (tests / per-session overrides). Every field is
 /// the slice the agent actually consumes; fields the agent doesn't read
-/// (user identity, system-prompt extension, content libraries,
+/// (user identity, system-prompt extension,
 /// `inline_editor_enabled`, `pdf_converter_command`, `table_width_strategy`,
 /// `discord`) are intentionally not present.
 #[derive(Clone, Debug)]
 pub struct AgentConfig {
-    models: HashMap<String, LlmConfig>,
-    max_tokens: u32,
-    tool_groups: ToolGroupsConfig,
-    mcp_servers: HashMap<String, McpServerEntry>,
-    browser: ResolvedBrowserConfig,
-    config_path: PathBuf,
+    pub(crate) models: HashMap<String, LlmConfig>,
+    pub(crate) max_tokens: u32,
+    pub(crate) tool_groups: ToolGroupsConfig,
+    pub(crate) mcp_servers: HashMap<String, McpServerEntry>,
+    pub(crate) browser: ResolvedBrowserConfig,
+    pub(crate) config_path: PathBuf,
     // Tool execution reads these; the agent loop doesn't, but the
     // `is_enabled` check on the registered tools does. Cloning them
     // here keeps `ToolContext` self-contained — the executor's parallel
     // workers don't need to chase a back-pointer to the global config.
-    jmap_clients: HashMap<String, JmapClient>,
-    caldav_clients: HashMap<String, CalDavClient>,
-    trello_client: Option<TrelloClient>,
-    searxng_url: Option<String>,
-    csv_db_path: Option<String>,
-    feature_flags: HashMap<String, bool>,
+    pub(crate) jmap_clients: HashMap<String, JmapClient>,
+    pub(crate) caldav_clients: HashMap<String, CalDavClient>,
+    pub(crate) trello_client: Option<TrelloClient>,
+    pub(crate) searxng_url: Option<String>,
+    pub(crate) csv_db_path: Option<String>,
+    pub(crate) feature_flags: HashMap<String, bool>,
+    pub(crate) content_libraries: Vec<ContentLibrary>,
 }
 
 impl AgentConfig {
-    /// Project the global [`AppConfig`] into the agent's domain slice.
-    ///
-    /// Resolves the browser config (filling env-dependent defaults) and
-    /// captures the config path for the "API key not set" error message.
-    /// The orchestrator calls this once per `ConfigArrived` event.
-    pub fn from_app_config(cfg: &AppConfig) -> Self {
-        let browser = cfg.browser.resolve(&cfg.content_libraries);
-        let config_path = get_config_path();
-        Self {
-            models: cfg.models.clone(),
-            max_tokens: cfg.max_tokens,
-            tool_groups: cfg.tool_groups.clone(),
-            mcp_servers: cfg.mcp_servers.clone(),
-            browser,
-            config_path,
-            jmap_clients: cfg.jmap_clients.clone(),
-            caldav_clients: cfg.caldav_clients.clone(),
-            trello_client: cfg.trello_client.clone(),
-            searxng_url: cfg.searxng_url.clone(),
-            csv_db_path: cfg.csv_db_path.clone(),
-            feature_flags: cfg.feature_flags.clone(),
-        }
-    }
 
     /// Map of configured LLM models by name.
     pub fn models(&self) -> &HashMap<String, LlmConfig> {
@@ -151,13 +129,37 @@ impl AgentConfig {
     pub fn feature_flags(&self) -> &HashMap<String, bool> {
         &self.feature_flags
     }
-}
 
-/// Ergonomic projection so callers that already hold an `&AppConfig` can
-/// use `.into()` instead of spelling out [`AgentConfig::from_app_config`].
-impl From<&AppConfig> for AgentConfig {
-    fn from(cfg: &AppConfig) -> Self {
-        AgentConfig::from_app_config(cfg)
+    /// Configured content libraries for VFS path resolution.
+    pub fn content_libraries(&self) -> &[ContentLibrary] {
+        &self.content_libraries
+    }
+
+    /// Find the best model for a given use_case (lowest cost among matches).
+    pub fn model_for_use_case(&self, use_case: impl AsRef<str>) -> Option<(&String, &crate::config::LlmConfig)> {
+        let uc_ref = use_case.as_ref();
+        self.models
+            .iter()
+            .filter(|(_, cfg)| cfg.has_use_case(uc_ref))
+            .min_by_key(|(_, cfg)| cfg.get_cost())
+    }
+
+    /// Select a chat model, preferring one configured for the "chat" use case,
+    /// falling back to the first available model, and rejecting default/empty keys.
+    pub fn select_chat_model(&self) -> Result<&crate::config::LlmConfig, String> {
+        let model_cfg = if let Some((_key, model_cfg)) = self.model_for_use_case("chat") {
+            model_cfg
+        } else if let Some(model_cfg) = self.models.values().next() {
+            model_cfg
+        } else {
+            return Err("No LLM models are configured.".to_string());
+        };
+
+        if model_cfg.api_key == "your-api-key-here" || model_cfg.api_key.is_empty() {
+            return Err("API key not set or invalid.".to_string());
+        }
+
+        Ok(model_cfg)
     }
 }
 
@@ -169,14 +171,8 @@ impl Default for AgentConfig {
 
 /// Fluent builder for [`AgentConfig`].
 ///
-/// Used in two places:
-/// - the projection helper [`AgentConfig::from_app_config`], which is
-///   the canonical orchestrator-side constructor;
-/// - tests and per-session overrides that want to assemble a domain
-///   config without going through the global [`AppConfig`].
-///
-/// All fields default to the same values as [`AppConfig::default`] so
-/// tests can build minimal configs without spelling every field.
+/// Used for tests and per-session overrides that want to assemble a domain
+/// config without going through the global config.
 pub struct AgentConfigBuilder {
     models: HashMap<String, LlmConfig>,
     max_tokens: u32,
@@ -190,20 +186,17 @@ pub struct AgentConfigBuilder {
     searxng_url: Option<String>,
     csv_db_path: Option<String>,
     feature_flags: HashMap<String, bool>,
+    content_libraries: Vec<ContentLibrary>,
 }
 
 impl AgentConfigBuilder {
-    /// Create a builder populated with the same defaults as
-    /// [`AppConfig::default`].
+    /// Create a builder populated with defaults.
     pub fn new() -> Self {
-        let app_defaults = AppConfig::default();
-        let browser = app_defaults
-            .browser
-            .resolve(&app_defaults.content_libraries);
+        let browser = crate::config::BrowserConfig::default().resolve(&[]);
         Self {
             models: HashMap::new(),
-            max_tokens: app_defaults.max_tokens,
-            tool_groups: app_defaults.tool_groups.clone(),
+            max_tokens: 32768,
+            tool_groups: ToolGroupsConfig::default(),
             mcp_servers: HashMap::new(),
             browser,
             config_path: get_config_path(),
@@ -212,7 +205,8 @@ impl AgentConfigBuilder {
             trello_client: None,
             searxng_url: None,
             csv_db_path: None,
-            feature_flags: app_defaults.feature_flags.clone(),
+            feature_flags: HashMap::new(),
+            content_libraries: Vec::new(),
         }
     }
 
@@ -288,6 +282,12 @@ impl AgentConfigBuilder {
         self
     }
 
+    /// Set the content libraries.
+    pub fn with_content_libraries(mut self, l: Vec<ContentLibrary>) -> Self {
+        self.content_libraries = l;
+        self
+    }
+
     /// Build the [`AgentConfig`].
     pub fn build(self) -> AgentConfig {
         AgentConfig {
@@ -303,6 +303,7 @@ impl AgentConfigBuilder {
             searxng_url: self.searxng_url,
             csv_db_path: self.csv_db_path,
             feature_flags: self.feature_flags,
+            content_libraries: self.content_libraries,
         }
     }
 }
