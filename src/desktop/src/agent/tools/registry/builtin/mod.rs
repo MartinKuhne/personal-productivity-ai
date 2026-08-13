@@ -1,4 +1,14 @@
-//! Built-in tool implementations and registration logic.
+//! Built-in tool implementations and the default provider list.
+//!
+//! Each submodule under [`builtin`] defines a single family of
+//! tools plus a `ToolProvider` struct that lists them. The
+//! [`default_providers`] function returns the canonical provider
+//! list, in registration order; the [`ToolRegistry`] constructor
+//! iterates it and registers every tool each provider returns.
+//!
+//! MCP tools are registered separately via
+//! [`ToolRegistry::register_mcp_tool`], which calls into the MCP
+//! client manager rather than a provider.
 
 #[cfg(feature = "browser")]
 pub(crate) mod browser;
@@ -14,174 +24,34 @@ pub(crate) mod web;
 pub(crate) mod yaml;
 
 use super::ToolRegistry;
-use super::groups::InternalToolGroup;
+use crate::agent::tools::provider::ToolProvider;
+use std::sync::Arc;
 
-/// Register every built-in tool into the given manager, tagged with
-/// the group it belongs to.
+/// Default list of built-in tool providers, in the order the
+/// registry should register them. Each provider contributes a
+/// `Vec<RegisteredTool>` of tools from one family.
+pub(crate) fn default_providers() -> Vec<Arc<dyn ToolProvider>> {
+    vec![
+        Arc::new(fs::FilesystemProvider),
+        Arc::new(yaml::YamlProvider),
+        Arc::new(web::WebProvider),
+        Arc::new(jmap::JmapProvider),
+        Arc::new(caldav::CalDavProvider),
+        Arc::new(carddav::CardDavProvider),
+        Arc::new(csv::CsvProvider),
+        Arc::new(weather::WeatherProvider),
+        Arc::new(trello::TrelloProvider),
+        #[cfg(feature = "browser")]
+        Arc::new(browser::BrowserProvider),
+    ]
+}
+
+/// Register every built-in tool into the given manager by
+/// iterating the default provider list.
 pub(crate) fn register_all_builtins(mgr: &mut ToolRegistry) {
-    // Web
-    mgr.register_builtin(InternalToolGroup::Web, Box::new(web::WebDelegateTool));
-    mgr.register_builtin(InternalToolGroup::Web, Box::new(web::WebFetchTool));
-    mgr.register_builtin(InternalToolGroup::Web, Box::new(web::WebSearchTool));
-
-    // Browser automation (BRWS-001..008). Only registered when
-    // the `browser` Cargo feature is enabled; without it the
-    // browser tool group is empty and any LLM that asks for a
-    // `browser_*` tool gets a "tool not found" error.
-    #[cfg(feature = "browser")]
-    {
-        mgr.register_builtin(
-            InternalToolGroup::Browser,
-            Box::new(browser::BrowserNavigateTool),
-        );
-        mgr.register_builtin(
-            InternalToolGroup::Browser,
-            Box::new(browser::BrowserGetPageStateTool),
-        );
-        mgr.register_builtin(
-            InternalToolGroup::Browser,
-            Box::new(browser::BrowserClickTool),
-        );
-        mgr.register_builtin(
-            InternalToolGroup::Browser,
-            Box::new(browser::BrowserFillInputTool),
-        );
-        mgr.register_builtin(
-            InternalToolGroup::Browser,
-            Box::new(browser::BrowserSelectDropdownTool),
-        );
-        mgr.register_builtin(
-            InternalToolGroup::Browser,
-            Box::new(browser::BrowserPressKeyTool),
-        );
-        mgr.register_builtin(
-            InternalToolGroup::Browser,
-            Box::new(browser::BrowserEvaluateJsTool),
-        );
-        mgr.register_builtin(
-            InternalToolGroup::Browser,
-            Box::new(browser::BrowserScreenshotTool),
-        );
+    for provider in default_providers() {
+        for tool in provider.tools() {
+            mgr.register_registered_tool(tool);
+        }
     }
-
-    // Filesystem
-    mgr.register_builtin(InternalToolGroup::Filesystem, Box::new(fs::PatchNoteTool));
-    mgr.register_builtin(InternalToolGroup::Filesystem, Box::new(fs::SearchNotesTool));
-    mgr.register_builtin(InternalToolGroup::Filesystem, Box::new(fs::ReadTagsTool));
-    mgr.register_builtin(
-        InternalToolGroup::Filesystem,
-        Box::new(fs::ListNotesByTagTool),
-    );
-    mgr.register_builtin(InternalToolGroup::Filesystem, Box::new(fs::ListNotesTool));
-    mgr.register_builtin(InternalToolGroup::Filesystem, Box::new(fs::ReadNoteTool));
-    mgr.register_builtin(InternalToolGroup::Filesystem, Box::new(fs::WindowNoteTool));
-    mgr.register_builtin(InternalToolGroup::Filesystem, Box::new(fs::CreateNoteTool));
-    mgr.register_builtin(
-        InternalToolGroup::Filesystem,
-        Box::new(fs::InsertIntoNoteTool),
-    );
-    mgr.register_builtin(
-        InternalToolGroup::Filesystem,
-        Box::new(yaml::ReadYamlHeaderTool),
-    );
-    mgr.register_builtin(
-        InternalToolGroup::Filesystem,
-        Box::new(yaml::WriteYamlHeaderTool),
-    );
-
-    // Calendar (CalDAV)
-    mgr.register_builtin(
-        InternalToolGroup::Calendar,
-        Box::new(caldav::SearchCalendarTool),
-    );
-    mgr.register_builtin(
-        InternalToolGroup::Calendar,
-        Box::new(caldav::GetCalendarTool),
-    );
-    mgr.register_builtin(
-        InternalToolGroup::Calendar,
-        Box::new(caldav::GetCalendarItemTool),
-    );
-    mgr.register_builtin(
-        InternalToolGroup::Calendar,
-        Box::new(caldav::AddCalendarItemTool),
-    );
-    mgr.register_builtin(
-        InternalToolGroup::Calendar,
-        Box::new(caldav::UpdateCalendarItemTool),
-    );
-    mgr.register_builtin(
-        InternalToolGroup::Calendar,
-        Box::new(caldav::DeleteCalendarItemTool),
-    );
-
-    // Email (JMAP)
-    mgr.register_builtin(InternalToolGroup::Email, Box::new(jmap::SearchEmailTool));
-    mgr.register_builtin(InternalToolGroup::Email, Box::new(jmap::GetEmailByIdTool));
-    mgr.register_builtin(InternalToolGroup::Email, Box::new(jmap::SendEmailTool));
-
-    // Contacts (CardDAV)
-    mgr.register_builtin(
-        InternalToolGroup::Contacts,
-        Box::new(carddav::SearchContactTool),
-    );
-    mgr.register_builtin(
-        InternalToolGroup::Contacts,
-        Box::new(carddav::AddContactTool),
-    );
-    mgr.register_builtin(
-        InternalToolGroup::Contacts,
-        Box::new(carddav::GetContactTool),
-    );
-    mgr.register_builtin(
-        InternalToolGroup::Contacts,
-        Box::new(carddav::UpdateContactTool),
-    );
-    mgr.register_builtin(
-        InternalToolGroup::Contacts,
-        Box::new(carddav::DeleteContactTool),
-    );
-
-    // CSV database
-    mgr.register_builtin(InternalToolGroup::CsvDb, Box::new(csv::CsvCreateTool));
-    mgr.register_builtin(InternalToolGroup::CsvDb, Box::new(csv::CsvListTool));
-    mgr.register_builtin(InternalToolGroup::CsvDb, Box::new(csv::CsvAddRowsTool));
-    mgr.register_builtin(InternalToolGroup::CsvDb, Box::new(csv::CsvDeleteRowsTool));
-    mgr.register_builtin(InternalToolGroup::CsvDb, Box::new(csv::CsvQueryTool));
-
-    // Weather
-    mgr.register_builtin(
-        InternalToolGroup::Weather,
-        Box::new(weather::GetWeatherTool),
-    );
-
-    // Trello
-    mgr.register_builtin(
-        InternalToolGroup::Trello,
-        Box::new(trello::TrelloGetBoardsTool),
-    );
-    mgr.register_builtin(
-        InternalToolGroup::Trello,
-        Box::new(trello::TrelloGetBoardTool),
-    );
-    mgr.register_builtin(
-        InternalToolGroup::Trello,
-        Box::new(trello::TrelloGetListsTool),
-    );
-    mgr.register_builtin(
-        InternalToolGroup::Trello,
-        Box::new(trello::TrelloGetCardsTool),
-    );
-    mgr.register_builtin(
-        InternalToolGroup::Trello,
-        Box::new(trello::TrelloCreateCardTool),
-    );
-    mgr.register_builtin(
-        InternalToolGroup::Trello,
-        Box::new(trello::TrelloUpdateCardTool),
-    );
-    mgr.register_builtin(
-        InternalToolGroup::Trello,
-        Box::new(trello::TrelloDeleteCardTool),
-    );
 }

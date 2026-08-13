@@ -2,9 +2,11 @@
 
 use crate::agent::tools::Tool;
 use crate::agent::tools::context::ToolContext;
-use crate::agent::tools::descriptor::ToolConfigSpec;
+use crate::agent::tools::descriptor::ToolDescriptor;
+use crate::agent::tools::provider::{RegisteredTool, ToolProvider};
+use crate::agent::tools::registry::groups::{InternalToolGroup, ToolGroupId};
 use serde::{Deserialize, Serialize};
-use std::sync::OnceLock;
+use std::sync::{Arc, OnceLock};
 
 use super::strings;
 
@@ -35,31 +37,20 @@ pub struct TrelloUpdateCardInput {
     pub id_list: Option<String>,
 }
 
-/// Spec for the Trello family. Enabled when the trello group is on
-/// AND `trello_client` is configured.
-fn trello_spec() -> ToolConfigSpec {
-    let group = crate::agent::tools::registry::groups::ToolGroupId::Internal(
-        crate::agent::tools::registry::groups::InternalToolGroup::Trello,
-    );
-    ToolConfigSpec::group_plus_trello(group)
-}
-
 fn build_trello_descriptor<I>(
     name: &'static str,
     description: &'static str,
     safety: crate::agent::tools::Safety,
-) -> crate::agent::tools::descriptor::ToolDescriptor
+) -> ToolDescriptor
 where
     I: schemars::JsonSchema + 'static,
 {
-    let group = crate::agent::tools::registry::groups::ToolGroupId::Internal(
-        crate::agent::tools::registry::groups::InternalToolGroup::Trello,
-    );
-    crate::agent::tools::descriptor::ToolDescriptor::new::<I>(
+    let group = ToolGroupId::Internal(InternalToolGroup::Trello);
+    ToolDescriptor::new::<I>(
         name,
         description,
         safety,
-        trello_spec(),
+        crate::app::tool_specs::trello_spec(),
         group,
     )
 }
@@ -82,8 +73,8 @@ fn trello_request(
 
 pub(crate) struct TrelloGetBoardsTool;
 impl Tool for TrelloGetBoardsTool {
-    fn descriptor(&self) -> &crate::agent::tools::descriptor::ToolDescriptor {
-        static D: OnceLock<crate::agent::tools::descriptor::ToolDescriptor> = OnceLock::new();
+    fn descriptor(&self) -> &ToolDescriptor {
+        static D: OnceLock<ToolDescriptor> = OnceLock::new();
         D.get_or_init(|| {
             build_trello_descriptor::<TrelloEmptyInput>(
                 "trello_get_boards",
@@ -100,8 +91,8 @@ impl Tool for TrelloGetBoardsTool {
 
 pub(crate) struct TrelloGetBoardTool;
 impl Tool for TrelloGetBoardTool {
-    fn descriptor(&self) -> &crate::agent::tools::descriptor::ToolDescriptor {
-        static D: OnceLock<crate::agent::tools::descriptor::ToolDescriptor> = OnceLock::new();
+    fn descriptor(&self) -> &ToolDescriptor {
+        static D: OnceLock<ToolDescriptor> = OnceLock::new();
         D.get_or_init(|| {
             build_trello_descriptor::<TrelloIdInput>(
                 "trello_get_board",
@@ -123,8 +114,8 @@ impl Tool for TrelloGetBoardTool {
 
 pub(crate) struct TrelloGetListsTool;
 impl Tool for TrelloGetListsTool {
-    fn descriptor(&self) -> &crate::agent::tools::descriptor::ToolDescriptor {
-        static D: OnceLock<crate::agent::tools::descriptor::ToolDescriptor> = OnceLock::new();
+    fn descriptor(&self) -> &ToolDescriptor {
+        static D: OnceLock<ToolDescriptor> = OnceLock::new();
         D.get_or_init(|| {
             build_trello_descriptor::<TrelloIdInput>(
                 "trello_get_lists",
@@ -146,8 +137,8 @@ impl Tool for TrelloGetListsTool {
 
 pub(crate) struct TrelloGetCardsTool;
 impl Tool for TrelloGetCardsTool {
-    fn descriptor(&self) -> &crate::agent::tools::descriptor::ToolDescriptor {
-        static D: OnceLock<crate::agent::tools::descriptor::ToolDescriptor> = OnceLock::new();
+    fn descriptor(&self) -> &ToolDescriptor {
+        static D: OnceLock<ToolDescriptor> = OnceLock::new();
         D.get_or_init(|| {
             build_trello_descriptor::<TrelloIdInput>(
                 "trello_get_cards",
@@ -169,8 +160,8 @@ impl Tool for TrelloGetCardsTool {
 
 pub(crate) struct TrelloCreateCardTool;
 impl Tool for TrelloCreateCardTool {
-    fn descriptor(&self) -> &crate::agent::tools::descriptor::ToolDescriptor {
-        static D: OnceLock<crate::agent::tools::descriptor::ToolDescriptor> = OnceLock::new();
+    fn descriptor(&self) -> &ToolDescriptor {
+        static D: OnceLock<ToolDescriptor> = OnceLock::new();
         D.get_or_init(|| {
             build_trello_descriptor::<TrelloCreateCardInput>(
                 "trello_create_card",
@@ -242,8 +233,8 @@ impl Tool for TrelloCreateCardTool {
 
 pub(crate) struct TrelloUpdateCardTool;
 impl Tool for TrelloUpdateCardTool {
-    fn descriptor(&self) -> &crate::agent::tools::descriptor::ToolDescriptor {
-        static D: OnceLock<crate::agent::tools::descriptor::ToolDescriptor> = OnceLock::new();
+    fn descriptor(&self) -> &ToolDescriptor {
+        static D: OnceLock<ToolDescriptor> = OnceLock::new();
         D.get_or_init(|| {
             build_trello_descriptor::<TrelloUpdateCardInput>(
                 "trello_update_card",
@@ -267,8 +258,8 @@ impl Tool for TrelloUpdateCardTool {
 
 pub(crate) struct TrelloDeleteCardTool;
 impl Tool for TrelloDeleteCardTool {
-    fn descriptor(&self) -> &crate::agent::tools::descriptor::ToolDescriptor {
-        static D: OnceLock<crate::agent::tools::descriptor::ToolDescriptor> = OnceLock::new();
+    fn descriptor(&self) -> &ToolDescriptor {
+        static D: OnceLock<ToolDescriptor> = OnceLock::new();
         D.get_or_init(|| {
             build_trello_descriptor::<TrelloIdInput>(
                 "trello_delete_card",
@@ -288,33 +279,31 @@ impl Tool for TrelloDeleteCardTool {
     }
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use crate::config::{AppConfig, ToolGroupsConfig, TrelloClient};
+/// Self-registering provider for the Trello family.
+pub(crate) struct TrelloProvider;
+impl ToolProvider for TrelloProvider {
+    fn id(&self) -> &'static str {
+        "trello"
+    }
+    fn group(&self) -> ToolGroupId {
+        ToolGroupId::Internal(InternalToolGroup::Trello)
+    }
+    fn tools(&self) -> Vec<RegisteredTool> {
+        vec![
+            registered(TrelloGetBoardsTool),
+            registered(TrelloGetBoardTool),
+            registered(TrelloGetListsTool),
+            registered(TrelloGetCardsTool),
+            registered(TrelloCreateCardTool),
+            registered(TrelloUpdateCardTool),
+            registered(TrelloDeleteCardTool),
+        ]
+    }
+}
 
-    /// Spec-level test mirroring the previous `trello_tools_enabled`
-    /// behaviour: the spec must gate the tool on the group flag AND
-    /// the presence of `trello_client`.
-    #[test]
-    fn test_trello_spec_gating() {
-        let mut config = AppConfig {
-            tool_groups: ToolGroupsConfig {
-                trello: true,
-                ..Default::default()
-            },
-            ..Default::default()
-        };
-        config.trello_client = None;
-        assert!(!trello_spec().is_enabled_for(&config, ""));
-
-        config.trello_client = Some(TrelloClient {
-            token: "t".to_string(),
-            api_key: "s".to_string(),
-        });
-        assert!(trello_spec().is_enabled_for(&config, ""));
-
-        config.tool_groups.trello = false;
-        assert!(!trello_spec().is_enabled_for(&config, ""));
+fn registered<T: Tool + 'static>(tool: T) -> RegisteredTool {
+    RegisteredTool {
+        descriptor: Arc::new(tool.descriptor().clone()),
+        executor: Arc::new(tool),
     }
 }

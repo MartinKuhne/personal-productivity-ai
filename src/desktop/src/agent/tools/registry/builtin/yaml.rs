@@ -1,8 +1,11 @@
-//! YAML front-matter header tool implementations for the tool registry.
+//! YAML front-matter header tool implementations and provider for the tool registry.
 
 use crate::agent::tools::Tool;
 use crate::agent::tools::context::ToolContext;
 use crate::agent::tools::dtos;
+use crate::agent::tools::provider::{RegisteredTool, ToolProvider};
+use crate::agent::tools::registry::groups::{InternalToolGroup, ToolGroupId};
+use std::sync::Arc;
 
 use super::strings;
 
@@ -54,5 +57,29 @@ impl Tool for WriteYamlHeaderTool {
         .map(|r| {
             serde_json::to_value(r).unwrap_or_else(|e| serde_json::json!({"error": e.to_string()}))
         })
+    }
+}
+
+/// Self-registering provider for the YAML front-matter family.
+pub(crate) struct YamlProvider;
+impl ToolProvider for YamlProvider {
+    fn id(&self) -> &'static str {
+        "yaml"
+    }
+    fn group(&self) -> ToolGroupId {
+        ToolGroupId::Internal(InternalToolGroup::Filesystem)
+    }
+    fn tools(&self) -> Vec<RegisteredTool> {
+        vec![
+            registered(ReadYamlHeaderTool),
+            registered(WriteYamlHeaderTool),
+        ]
+    }
+}
+
+fn registered<T: Tool + 'static>(tool: T) -> RegisteredTool {
+    RegisteredTool {
+        descriptor: Arc::new(tool.descriptor().clone()),
+        executor: Arc::new(tool),
     }
 }

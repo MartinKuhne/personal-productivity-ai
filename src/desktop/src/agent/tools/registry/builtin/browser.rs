@@ -16,8 +16,9 @@ use crate::agent::tools::context::ToolContext;
 use crate::agent::tools::descriptor::ToolConfigSpec;
 use crate::agent::tools::descriptor::ToolDescriptor;
 use crate::agent::tools::dtos;
+use crate::agent::tools::provider::{RegisteredTool, ToolProvider};
 use crate::agent::tools::registry::groups::{InternalToolGroup, ToolGroupId};
-use std::sync::OnceLock;
+use std::sync::{Arc, OnceLock};
 
 /// Convert any error string into a Tool error string. Most
 /// Playwright errors already have decent `Display` impls; we
@@ -353,6 +354,38 @@ impl Tool for BrowserScreenshotTool {
         };
         Ok(serde_json::to_value(resp)
             .unwrap_or_else(|e| serde_json::json!({"error": e.to_string()})))
+    }
+}
+
+/// Self-registering provider for the browser family. Only
+/// emitted when the `browser` Cargo feature is on; without it
+/// the catalog simply doesn't include the browser group.
+pub(crate) struct BrowserProvider;
+impl ToolProvider for BrowserProvider {
+    fn id(&self) -> &'static str {
+        "browser"
+    }
+    fn group(&self) -> ToolGroupId {
+        ToolGroupId::Internal(InternalToolGroup::Browser)
+    }
+    fn tools(&self) -> Vec<RegisteredTool> {
+        vec![
+            registered(BrowserNavigateTool),
+            registered(BrowserGetPageStateTool),
+            registered(BrowserClickTool),
+            registered(BrowserFillInputTool),
+            registered(BrowserSelectDropdownTool),
+            registered(BrowserPressKeyTool),
+            registered(BrowserEvaluateJsTool),
+            registered(BrowserScreenshotTool),
+        ]
+    }
+}
+
+fn registered<T: Tool + 'static>(tool: T) -> RegisteredTool {
+    RegisteredTool {
+        descriptor: Arc::new(tool.descriptor().clone()),
+        executor: Arc::new(tool),
     }
 }
 

@@ -867,3 +867,55 @@ fn test_mcp_char_count_bug() {
     assert_eq!(count, Some(116));
     assert_eq!(count2, Some(103));
 }
+
+#[test]
+fn test_default_providers_register_every_family() {
+    use crate::agent::tools::registry::builtin::default_providers;
+    let provider_count = default_providers().len();
+    assert!(
+        provider_count >= 9,
+        "default_providers should list every built-in family (got {provider_count})"
+    );
+
+    // Each provider must contribute at least one tool, and every
+    // tool's descriptor must report the provider's group, so the
+    // registry's reverse index is consistent.
+    for provider in default_providers() {
+        let tools = provider.tools();
+        assert!(
+            !tools.is_empty(),
+            "provider {:?} returned no tools",
+            provider.id()
+        );
+        let expected_group = provider.group();
+        for tool in &tools {
+            assert_eq!(
+                tool.descriptor.group, expected_group,
+                "tool {} reports a different group than its provider",
+                tool.descriptor.name
+            );
+        }
+    }
+
+    // The ToolRegistry constructor iterates the default provider
+    // list, so every family is represented in the live catalog.
+    // Spot-check one tool per family.
+    let mgr = ToolRegistry::new();
+    for expected in [
+        "read_note",
+        "write_yaml_header",
+        "web_fetch",
+        "web_search",
+        "search_email",
+        "search_calendar",
+        "search_contact",
+        "create_csv",
+        "get_weather",
+        "trello_get_boards",
+    ] {
+        assert!(
+            mgr.descriptor(expected).is_some(),
+            "expected tool {expected} in default registry"
+        );
+    }
+}

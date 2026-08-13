@@ -130,37 +130,6 @@ impl ToolConfigSpec {
         }
     }
 
-    /// Spec for an internal group tool that additionally needs at
-    /// least one of `caldav_clients` or `jmap_clients` to be
-    /// configured. Used by the contact / calendar / email tools.
-    pub fn group_plus_dav_or_jmap(group: ToolGroupId) -> Self {
-        Self {
-            group: Some(group),
-            requires: vec![ConfigPredicate::DavOrJmapClients],
-            prompt_rule: None,
-        }
-    }
-
-    /// Spec for an internal group tool that additionally needs the
-    /// `trello_client` to be configured.
-    pub fn group_plus_trello(group: ToolGroupId) -> Self {
-        Self {
-            group: Some(group),
-            requires: vec![ConfigPredicate::TrelloConfigured],
-            prompt_rule: None,
-        }
-    }
-
-    /// Spec for an internal group tool that needs a configured
-    /// `searxng_url`.
-    pub fn group_plus_searxng(group: ToolGroupId) -> Self {
-        Self {
-            group: Some(group),
-            requires: vec![ConfigPredicate::SearxngConfigured],
-            prompt_rule: None,
-        }
-    }
-
     /// Decide whether a tool with this spec should be offered to the
     /// LLM, given the current `AppConfig` and the user's prompt.
     ///

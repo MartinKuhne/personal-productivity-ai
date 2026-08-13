@@ -2,23 +2,30 @@
 
 use crate::agent::tools::Tool;
 use crate::agent::tools::context::ToolContext;
-use crate::agent::tools::descriptor::{ConfigPredicate, ToolConfigSpec, ToolDescriptor};
+use crate::agent::tools::descriptor::ToolDescriptor;
 use crate::agent::tools::dtos;
+use crate::agent::tools::provider::{RegisteredTool, ToolProvider};
 use crate::agent::tools::registry::groups::{InternalToolGroup, ToolGroupId};
-use std::sync::OnceLock;
+use std::sync::{Arc, OnceLock};
 
 use super::strings;
 
-/// Build a `ToolConfigSpec` for an email-family tool: enabled iff
-/// `tool_groups.email` is on and at least one JMAP client is
-/// configured.
-fn email_spec() -> ToolConfigSpec {
+fn build_email_descriptor<I>(
+    name: &'static str,
+    description: &'static str,
+    safety: crate::agent::tools::Safety,
+) -> ToolDescriptor
+where
+    I: schemars::JsonSchema + 'static,
+{
     let group = ToolGroupId::Internal(InternalToolGroup::Email);
-    ToolConfigSpec {
-        group: Some(group),
-        requires: vec![ConfigPredicate::JmapClientsPresent],
-        prompt_rule: None,
-    }
+    ToolDescriptor::new::<I>(
+        name,
+        description,
+        safety,
+        crate::app::tool_specs::email_spec(),
+        group,
+    )
 }
 
 /// Tool that searches email by keyword, folder, date range, etc.
@@ -27,13 +34,10 @@ impl Tool for SearchEmailTool {
     fn descriptor(&self) -> &ToolDescriptor {
         static D: OnceLock<ToolDescriptor> = OnceLock::new();
         D.get_or_init(|| {
-            let group = ToolGroupId::Internal(InternalToolGroup::Email);
-            ToolDescriptor::new::<dtos::SearchEmailInput>(
+            build_email_descriptor::<dtos::SearchEmailInput>(
                 "search_email",
                 strings::SEARCH_EMAIL_DESCRIPTION,
                 crate::agent::tools::Safety::ReadOnly,
-                email_spec(),
-                group,
             )
         })
     }
@@ -68,13 +72,10 @@ impl Tool for GetEmailByIdTool {
     fn descriptor(&self) -> &ToolDescriptor {
         static D: OnceLock<ToolDescriptor> = OnceLock::new();
         D.get_or_init(|| {
-            let group = ToolGroupId::Internal(InternalToolGroup::Email);
-            ToolDescriptor::new::<dtos::GetEmailByIdInput>(
+            build_email_descriptor::<dtos::GetEmailByIdInput>(
                 "get_email_by_id",
                 strings::GET_EMAIL_BY_ID_DESCRIPTION,
                 crate::agent::tools::Safety::ReadOnly,
-                email_spec(),
-                group,
             )
         })
     }
@@ -93,13 +94,10 @@ impl Tool for SendEmailTool {
     fn descriptor(&self) -> &ToolDescriptor {
         static D: OnceLock<ToolDescriptor> = OnceLock::new();
         D.get_or_init(|| {
-            let group = ToolGroupId::Internal(InternalToolGroup::Email);
-            ToolDescriptor::new::<dtos::SendEmailInput>(
+            build_email_descriptor::<dtos::SendEmailInput>(
                 "send_email",
                 strings::SEND_EMAIL_DESCRIPTION,
                 crate::agent::tools::Safety::Mutating,
-                email_spec(),
-                group,
             )
         })
     }
@@ -115,5 +113,30 @@ impl Tool for SendEmailTool {
         .map(|r| {
             serde_json::to_value(r).unwrap_or_else(|e| serde_json::json!({"error": e.to_string()}))
         })
+    }
+}
+
+/// Self-registering provider for the JMAP email family.
+pub(crate) struct JmapProvider;
+impl ToolProvider for JmapProvider {
+    fn id(&self) -> &'static str {
+        "jmap"
+    }
+    fn group(&self) -> ToolGroupId {
+        ToolGroupId::Internal(InternalToolGroup::Email)
+    }
+    fn tools(&self) -> Vec<RegisteredTool> {
+        vec![
+            registered(SearchEmailTool),
+            registered(GetEmailByIdTool),
+            registered(SendEmailTool),
+        ]
+    }
+}
+
+fn registered<T: Tool + 'static>(tool: T) -> RegisteredTool {
+    RegisteredTool {
+        descriptor: Arc::new(tool.descriptor().clone()),
+        executor: Arc::new(tool),
     }
 }

@@ -1,9 +1,12 @@
-//! Filesystem tool implementations for the tool registry.
+//! Filesystem tool implementations and provider for the tool registry.
 
 use crate::agent::tools::Tool;
 use crate::agent::tools::context::ToolContext;
 use crate::agent::tools::dtos;
+use crate::agent::tools::provider::{RegisteredTool, ToolProvider};
+use crate::agent::tools::registry::groups::{InternalToolGroup, ToolGroupId};
 use crate::app::vfs::behaviour::ContentLibraryExt;
+use std::sync::Arc;
 
 use super::super::pagination::paginate_in_range;
 use super::strings;
@@ -316,5 +319,36 @@ impl Tool for InsertIntoNoteTool {
         .map(|r| {
             serde_json::to_value(r).unwrap_or_else(|e| serde_json::json!({"error": e.to_string()}))
         })
+    }
+}
+
+/// Self-registering provider for the filesystem family.
+pub(crate) struct FilesystemProvider;
+impl ToolProvider for FilesystemProvider {
+    fn id(&self) -> &'static str {
+        "filesystem"
+    }
+    fn group(&self) -> ToolGroupId {
+        ToolGroupId::Internal(InternalToolGroup::Filesystem)
+    }
+    fn tools(&self) -> Vec<RegisteredTool> {
+        vec![
+            registered(PatchNoteTool),
+            registered(SearchNotesTool),
+            registered(ReadTagsTool),
+            registered(ListNotesByTagTool),
+            registered(ListNotesTool),
+            registered(ReadNoteTool),
+            registered(WindowNoteTool),
+            registered(CreateNoteTool),
+            registered(InsertIntoNoteTool),
+        ]
+    }
+}
+
+fn registered<T: Tool + 'static>(tool: T) -> RegisteredTool {
+    RegisteredTool {
+        descriptor: Arc::new(tool.descriptor().clone()),
+        executor: Arc::new(tool),
     }
 }

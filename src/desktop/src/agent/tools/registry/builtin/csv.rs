@@ -1,20 +1,13 @@
-//! CSV database tool implementations for the tool registry.
+//! CSV database tool implementations and provider for the tool registry.
 
 use crate::agent::tools::Tool;
 use crate::agent::tools::context::ToolContext;
-use crate::agent::tools::descriptor::{ToolConfigSpec, ToolDescriptor};
+use crate::agent::tools::descriptor::ToolDescriptor;
+use crate::agent::tools::provider::{RegisteredTool, ToolProvider};
 use crate::agent::tools::registry::groups::{InternalToolGroup, ToolGroupId};
-use std::sync::OnceLock;
+use std::sync::{Arc, OnceLock};
 
 use super::strings;
-
-/// Spec for the CSV family. The group must be on AND the prompt
-/// must mention one of the CSV keywords (TOOL-001). The rule
-/// itself is application-level knowledge; see
-/// [`crate::app::batch::prompt_rules::csv_prompt_rule`].
-fn csv_spec() -> ToolConfigSpec {
-    crate::app::batch::prompt_rules::csv_prompt_rule()
-}
 
 fn build_csv_descriptor<I>(
     name: &'static str,
@@ -25,7 +18,13 @@ where
     I: schemars::JsonSchema + 'static,
 {
     let group = ToolGroupId::Internal(InternalToolGroup::CsvDb);
-    ToolDescriptor::new::<I>(name, description, safety, csv_spec(), group)
+    ToolDescriptor::new::<I>(
+        name,
+        description,
+        safety,
+        crate::app::batch::prompt_rules::csv_prompt_rule(),
+        group,
+    )
 }
 
 /// Tool that creates a new CSV file database.
@@ -135,5 +134,32 @@ impl Tool for CsvQueryTool {
         crate::agent::tools::csv_db::query::query_csv(&ctx.config, input).map(|r| {
             serde_json::to_value(r).unwrap_or_else(|e| serde_json::json!({"error": e.to_string()}))
         })
+    }
+}
+
+/// Self-registering provider for the CSV family.
+pub(crate) struct CsvProvider;
+impl ToolProvider for CsvProvider {
+    fn id(&self) -> &'static str {
+        "csv"
+    }
+    fn group(&self) -> ToolGroupId {
+        ToolGroupId::Internal(InternalToolGroup::CsvDb)
+    }
+    fn tools(&self) -> Vec<RegisteredTool> {
+        vec![
+            registered(CsvCreateTool),
+            registered(CsvListTool),
+            registered(CsvAddRowsTool),
+            registered(CsvDeleteRowsTool),
+            registered(CsvQueryTool),
+        ]
+    }
+}
+
+fn registered<T: Tool + 'static>(tool: T) -> RegisteredTool {
+    RegisteredTool {
+        descriptor: Arc::new(tool.descriptor().clone()),
+        executor: Arc::new(tool),
     }
 }

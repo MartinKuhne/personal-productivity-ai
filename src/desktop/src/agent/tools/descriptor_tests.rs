@@ -90,7 +90,7 @@ fn test_searxng_predicate() {
 #[test]
 fn test_trello_predicate() {
     let mut c = AppConfig::default();
-    let spec = ToolConfigSpec::group_plus_trello(ToolGroupId::Internal(InternalToolGroup::Trello));
+    let spec = crate::app::tool_specs::trello_spec();
     assert!(!spec.is_enabled_for(&c, ""));
     c.trello_client = Some(trello());
     assert!(spec.is_enabled_for(&c, ""));
@@ -114,8 +114,7 @@ fn test_dav_or_jmap_predicate_follows_feature_flag() {
     let mut c = AppConfig::default();
     c.jmap_clients.insert("j".into(), jmap());
     c.caldav_clients.insert("d".into(), caldav());
-    let spec =
-        ToolConfigSpec::group_plus_dav_or_jmap(ToolGroupId::Internal(InternalToolGroup::Contacts));
+    let spec = crate::app::tool_specs::contacts_spec();
     // Default: feature flag off → JMAP.
     assert!(spec.is_enabled_for(&c, ""));
     // Flag on → CalDAV.

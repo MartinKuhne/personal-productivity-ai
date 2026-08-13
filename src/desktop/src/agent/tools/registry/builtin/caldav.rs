@@ -2,24 +2,13 @@
 
 use crate::agent::tools::Tool;
 use crate::agent::tools::context::ToolContext;
-use crate::agent::tools::descriptor::{ConfigPredicate, ToolConfigSpec, ToolDescriptor};
+use crate::agent::tools::descriptor::ToolDescriptor;
 use crate::agent::tools::dtos;
+use crate::agent::tools::provider::{RegisteredTool, ToolProvider};
 use crate::agent::tools::registry::groups::{InternalToolGroup, ToolGroupId};
-use std::sync::OnceLock;
+use std::sync::{Arc, OnceLock};
 
 use super::strings;
-
-/// Build a `ToolConfigSpec` for a calendar-family tool: enabled iff
-/// `tool_groups.calendar` is on and at least one CalDAV client is
-/// configured.
-fn calendar_spec() -> ToolConfigSpec {
-    let group = ToolGroupId::Internal(InternalToolGroup::Calendar);
-    ToolConfigSpec {
-        group: Some(group),
-        requires: vec![ConfigPredicate::CalDavClientsPresent],
-        prompt_rule: None,
-    }
-}
 
 fn build_calendar_descriptor<I>(
     name: &'static str,
@@ -30,7 +19,13 @@ where
     I: schemars::JsonSchema + 'static,
 {
     let group = ToolGroupId::Internal(InternalToolGroup::Calendar);
-    ToolDescriptor::new::<I>(name, description, safety, calendar_spec(), group)
+    ToolDescriptor::new::<I>(
+        name,
+        description,
+        safety,
+        crate::app::tool_specs::calendar_spec(),
+        group,
+    )
 }
 
 /// Tool that searches calendar items by keyword.
@@ -176,5 +171,33 @@ impl Tool for DeleteCalendarItemTool {
         crate::integrations::dav::cal::tool_delete_calendar_item(&ctx.config, &input.id).map(|r| {
             serde_json::to_value(r).unwrap_or_else(|e| serde_json::json!({"error": e.to_string()}))
         })
+    }
+}
+
+/// Self-registering provider for the CalDAV calendar family.
+pub(crate) struct CalDavProvider;
+impl ToolProvider for CalDavProvider {
+    fn id(&self) -> &'static str {
+        "caldav"
+    }
+    fn group(&self) -> ToolGroupId {
+        ToolGroupId::Internal(InternalToolGroup::Calendar)
+    }
+    fn tools(&self) -> Vec<RegisteredTool> {
+        vec![
+            registered(SearchCalendarTool),
+            registered(GetCalendarTool),
+            registered(GetCalendarItemTool),
+            registered(AddCalendarItemTool),
+            registered(UpdateCalendarItemTool),
+            registered(DeleteCalendarItemTool),
+        ]
+    }
+}
+
+fn registered<T: Tool + 'static>(tool: T) -> RegisteredTool {
+    RegisteredTool {
+        descriptor: Arc::new(tool.descriptor().clone()),
+        executor: Arc::new(tool),
     }
 }

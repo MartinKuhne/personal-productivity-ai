@@ -2,10 +2,11 @@
 
 use crate::agent::tools::Tool;
 use crate::agent::tools::context::ToolContext;
-use crate::agent::tools::descriptor::{ToolConfigSpec, ToolDescriptor};
+use crate::agent::tools::descriptor::ToolDescriptor;
 use crate::agent::tools::dtos;
+use crate::agent::tools::provider::{RegisteredTool, ToolProvider};
 use crate::agent::tools::registry::groups::{InternalToolGroup, ToolGroupId};
-use std::sync::OnceLock;
+use std::sync::{Arc, OnceLock};
 
 use super::strings;
 
@@ -54,10 +55,10 @@ impl Tool for WebFetchTool {
 
 /// Tool that searches the web using SearXNG.
 ///
-/// The descriptor carries `ToolConfigSpec::group_plus_searxng` so
-/// the tool is hidden when no `searxng_url` is configured. Because
-/// [`crate::agent::tools::Tool::is_enabled`] now derives from the
-/// spec, the duplicated `if let Some(url) = &ctx.config.searxng_url`
+/// The descriptor carries [`crate::app::tool_specs::web_search_spec`]
+/// so the tool is hidden when no `searxng_url` is configured.
+/// Because [`crate::agent::tools::Tool::is_enabled`] now derives
+/// from the spec, the duplicated `if let Some(url) = &ctx.config.searxng_url`
 /// branch in `execute` is gone — `is_enabled` is the single source
 /// of truth. The single `as_deref().ok_or_else` below just unwraps
 /// the value the function needs; if the spec is ever bypassed it
@@ -72,7 +73,7 @@ impl Tool for WebSearchTool {
                 "web_search",
                 strings::WEB_SEARCH_DESCRIPTION,
                 crate::agent::tools::Safety::ReadOnly,
-                ToolConfigSpec::group_plus_searxng(group.clone()),
+                crate::app::tool_specs::web_search_spec(),
                 group,
             )
         })
@@ -88,5 +89,30 @@ impl Tool for WebSearchTool {
         crate::agent::tools::web::tool_web_search(url, &input.query).map(|r| {
             serde_json::to_value(r).unwrap_or_else(|e| serde_json::json!({"error": e.to_string()}))
         })
+    }
+}
+
+/// Self-registering provider for the web family.
+pub(crate) struct WebProvider;
+impl ToolProvider for WebProvider {
+    fn id(&self) -> &'static str {
+        "web"
+    }
+    fn group(&self) -> ToolGroupId {
+        ToolGroupId::Internal(InternalToolGroup::Web)
+    }
+    fn tools(&self) -> Vec<RegisteredTool> {
+        vec![
+            registered(WebDelegateTool),
+            registered(WebFetchTool),
+            registered(WebSearchTool),
+        ]
+    }
+}
+
+fn registered<T: Tool + 'static>(tool: T) -> RegisteredTool {
+    RegisteredTool {
+        descriptor: Arc::new(tool.descriptor().clone()),
+        executor: Arc::new(tool),
     }
 }

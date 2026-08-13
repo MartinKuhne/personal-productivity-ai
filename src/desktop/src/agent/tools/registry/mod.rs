@@ -82,21 +82,17 @@ impl ToolRegistry {
 
     // ---- Registration ----
 
-    /// Register a built-in tool with the given group. The tool's
-    /// own `descriptor()` is used as the source of metadata.
-    pub fn register_builtin(&mut self, group: InternalToolGroup, tool: Box<dyn Tool>) {
-        let arc: Arc<dyn Tool> = Arc::from(tool);
-        let descriptor = arc.descriptor().clone();
-        let name = descriptor.name.to_string();
-        self.tool_to_group
-            .insert(name.clone(), ToolGroupId::Internal(group));
-        self.tools.insert(
-            name,
-            RegisteredTool {
-                descriptor: Arc::new(descriptor),
-                executor: arc,
-            },
-        );
+    /// Register a tool from a [`RegisteredTool`] entry. The
+    /// entry's [`ToolDescriptor`] is the source of metadata; the
+    /// group is taken from the descriptor so the call site doesn't
+    /// have to know which family a tool belongs to. The legacy
+    /// `Box<dyn Tool>` registration path is gone — providers hand
+    /// the registry pre-built entries.
+    pub fn register_registered_tool(&mut self, entry: RegisteredTool) {
+        let name = entry.descriptor.name.to_string();
+        let group = entry.descriptor.group.clone();
+        self.tool_to_group.insert(name.clone(), group);
+        self.tools.insert(name, entry);
     }
 
     /// Register a dynamic MCP tool into this manager.
