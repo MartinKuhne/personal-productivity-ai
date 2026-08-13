@@ -311,7 +311,6 @@ no_panic_on_garbage_value!(weather_get_value_no_panic, GetWeatherInput);
 #[cfg(feature = "browser")]
 mod browser_dtos {
     use super::*;
-    use crate::agent::tools::dtos::*;
 
     no_panic_on_garbage_str!(browser_navigate_no_panic, BrowserNavigateInput);
     no_panic_on_garbage_value!(browser_navigate_value_no_panic, BrowserNavigateInput);

@@ -2025,6 +2025,7 @@ dependencies = [
  "evalexpr",
  "fast-dav-rs",
  "fast_h2m",
+ "fastmd-tool-macros",
  "filetime",
  "futures",
  "glob",
@@ -2067,6 +2068,15 @@ dependencies = [
  "webbrowser",
  "windows 0.62.2",
  "wiremock",
+]
+
+[[package]]
+name = "fastmd-tool-macros"
+version = "0.1.0"
+dependencies = [
+ "proc-macro2",
+ "quote",
+ "syn 2.0.119",
 ]
 
 [[package]]

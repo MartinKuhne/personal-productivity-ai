@@ -22,6 +22,76 @@ use crate::config::AppConfig;
 use std::any::TypeId;
 use std::borrow::Cow;
 
+/// Latency class for an LLM-callable tool. Used by future
+/// scheduling and UI affordances (a "Slow" tool may show a
+/// different progress indicator than a "Fast" one). The agent
+/// loop does not read this today; the data is here so the
+/// caller can declare it without re-plumbing the descriptor.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum LatencyClass {
+    /// A `ReadOnly` tool backed by an in-memory or local-disk
+    /// source (filesystem search, tag read, list notes). Returns
+    /// in well under a second.
+    #[default]
+    Fast,
+    /// A `ReadOnly` tool that makes a network call (SearXNG
+    /// search, web fetch, MCP server round-trip). Returns in a
+    /// few seconds.
+    Interactive,
+    /// A tool that may take tens of seconds (MCP `tools/list`
+    /// on a slow server, browser navigation, OCR pass). The UI
+    /// should show a long-running affordance.
+    Slow,
+}
+
+/// Whether the tool shares a long-lived resource across calls.
+/// Today the only consumer is the browser session; future tools
+/// that pin a connection (a long-lived SSH session, a
+/// streaming MCP server) can declare the same kind of
+/// sharing.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub enum SessionRequirement {
+    /// The tool has no long-lived resource requirements.
+    #[default]
+    None,
+    /// The tool shares the named session with any other tool
+    /// that lists the same name. Calls against the same session
+    /// are serialised.
+    Shared(Cow<'static, str>),
+}
+
+/// Additional behavioural metadata for a tool, beyond
+/// [`Safety`]. Today nothing reads this — it's here so the
+/// caller can declare idempotency, latency, user-confirmation,
+/// and session requirements without re-plumbing the descriptor.
+/// Future work (a retry path that uses `idempotent`, a UI
+/// progress indicator driven by `latency_class`, a confirmation
+/// dialog driven by `requires_user_confirmation`, a per-session
+/// serialiser driven by `session`) reads the data from here.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct ToolProfile {
+    /// Whether the tool is safe to re-run after a transient
+    /// failure. `false` for tools that have a non-idempotent
+    /// effect (e.g. `send_email`).
+    pub idempotent: bool,
+    /// Latency hint. Default: [`LatencyClass::Fast`].
+    pub latency_class: LatencyClass,
+    /// Whether the UI should require a user confirmation step
+    /// before invoking this tool. Default: `false`.
+    pub requires_user_confirmation: bool,
+    /// Long-lived resource requirements. Default:
+    /// [`SessionRequirement::None`].
+    pub session: SessionRequirement,
+}
+
+impl ToolProfile {
+    /// All defaults. Equivalent to [`Default::default`] but
+    /// named for readability at the call site.
+    pub fn defaults() -> Self {
+        Self::default()
+    }
+}
+
 /// Static metadata for one LLM-callable tool. Cheap to clone (`Cow`
 /// + small `Value`) and safe to share across threads.
 #[derive(Clone, Debug)]
@@ -46,12 +116,19 @@ pub struct ToolDescriptor {
     /// Which group owns this tool — used to compute the per-group
     /// enable flag and to populate the UI dialog's group list.
     pub group: ToolGroupId,
+    /// Additional behavioural metadata (idempotency, latency,
+    /// user-confirmation, session requirements). See
+    /// [`ToolProfile`].
+    pub profile: ToolProfile,
 }
 
 impl ToolDescriptor {
     /// Build a descriptor whose `parameters_schema` is a JSON Schema
     /// for `I` (must be `schemars::JsonSchema`). The caller supplies
-    /// the rest.
+    /// the rest. `profile` defaults to [`ToolProfile::default`] —
+    /// tools that need to declare non-default behavioural metadata
+    /// (idempotency, latency, user confirmation, session
+    /// requirements) use [`ToolDescriptor::with_profile`].
     pub fn new<I>(
         name: impl Into<Cow<'static, str>>,
         description: impl Into<Cow<'static, str>>,
@@ -71,6 +148,7 @@ impl ToolDescriptor {
             safety,
             config,
             group,
+            profile: ToolProfile::default(),
         }
     }
 
@@ -93,7 +171,23 @@ impl ToolDescriptor {
             safety,
             config,
             group,
+            profile: ToolProfile::default(),
         }
+    }
+
+    /// Replace the default `profile` with a caller-supplied one.
+    /// Builder-style so the existing [`ToolDescriptor::new`] /
+    /// [`ToolDescriptor::with_json_schema`] constructors stay
+    /// short. The agent loop, the prompt builder, and the UI dialog
+    /// never need this — they read the default profile and the
+    /// defaults are right for the current set of callers. It's
+    /// here so future audit work (e.g. tagging the
+    /// `send_email` tool as `idempotent: false`,
+    /// `requires_user_confirmation: true`) doesn't have to touch
+    /// the constructor signatures.
+    pub fn with_profile(mut self, profile: ToolProfile) -> Self {
+        self.profile = profile;
+        self
     }
 }
 
@@ -283,6 +377,32 @@ fn internal_group_enabled(config: &AppConfig, g: InternalToolGroup) -> bool {
 /// ```
 #[macro_export]
 macro_rules! tool_descriptor {
+    (
+        name: $name:expr,
+        desc: $desc:expr,
+        input: $input:ty,
+        safety: $safety:expr,
+        group: $group:ident $(,)?
+        profile: $profile:expr $(,)?
+    ) => {
+        fn descriptor(&self) -> &$crate::agent::tools::ToolDescriptor {
+            static D: ::std::sync::OnceLock<$crate::agent::tools::ToolDescriptor> =
+                ::std::sync::OnceLock::new();
+            D.get_or_init(|| {
+                let group_id = $crate::agent::tools::registry::groups::ToolGroupId::Internal(
+                    $crate::agent::tools::registry::groups::InternalToolGroup::$group,
+                );
+                $crate::agent::tools::ToolDescriptor::new::<$input>(
+                    $name,
+                    $desc,
+                    $safety,
+                    $crate::agent::tools::descriptor::ToolConfigSpec::group_only(group_id.clone()),
+                    group_id,
+                )
+                .with_profile($profile)
+            })
+        }
+    };
     (
         name: $name:expr,
         desc: $desc:expr,

@@ -3,7 +3,8 @@
 //! `group_enabled`.
 
 use super::descriptor::{
-    ConfigPredicate, PromptPredicate, ToolConfigSpec, ToolDescriptor, group_enabled,
+    ConfigPredicate, LatencyClass, PromptPredicate, SessionRequirement, ToolConfigSpec,
+    ToolDescriptor, ToolProfile, group_enabled,
 };
 use crate::agent::tools::Safety;
 use crate::agent::tools::registry::groups::{InternalToolGroup, ToolGroupId};
@@ -197,4 +198,113 @@ fn test_tool_descriptor_with_json_schema_uses_value() {
     );
     assert_eq!(d.parameters_schema, schema);
     assert_eq!(d.safety, Safety::Mutating);
+}
+
+// ---------------------------------------------------------------------------
+// ToolProfile — defaults, custom values, LatencyClass, SessionRequirement.
+// ---------------------------------------------------------------------------
+
+#[test]
+fn test_tool_profile_defaults_match_spec() {
+    // Spec: idempotent=false (the conservative default — true only
+    // after a tool has been audited), latency_class=Fast, no user
+    // confirmation, no session sharing.
+    let p = ToolProfile::default();
+    assert!(!p.idempotent);
+    assert_eq!(p.latency_class, LatencyClass::Fast);
+    assert!(!p.requires_user_confirmation);
+    assert_eq!(p.session, SessionRequirement::None);
+}
+
+#[test]
+fn test_tool_profile_defaults_helper_is_default() {
+    // The named `defaults()` constructor is just an alias for
+    // `Default::default` — locked in here so the two can't drift.
+    assert_eq!(ToolProfile::defaults(), ToolProfile::default());
+}
+
+#[test]
+fn test_tool_profile_constructor_attaches_default_profile() {
+    // `ToolDescriptor::new` must populate `profile` (the field was
+    // added late; constructors that forget to set it cause
+    // read-then-uninit bugs that are silent at compile time).
+    let d = ToolDescriptor::new::<DummyInput>(
+        "dummy",
+        "test",
+        Safety::ReadOnly,
+        ToolConfigSpec::group_only(ToolGroupId::Internal(InternalToolGroup::Filesystem)),
+        ToolGroupId::Internal(InternalToolGroup::Filesystem),
+    );
+    assert_eq!(d.profile, ToolProfile::default());
+}
+
+#[test]
+fn test_tool_profile_constructor_with_json_schema_attaches_default_profile() {
+    let d = ToolDescriptor::with_json_schema(
+        "mcp",
+        "from wire",
+        serde_json::json!({"type": "object"}),
+        Safety::Mutating,
+        ToolConfigSpec::group_only(ToolGroupId::Mcp("srv".to_string())),
+        ToolGroupId::Mcp("srv".to_string()),
+    );
+    assert_eq!(d.profile, ToolProfile::default());
+}
+
+#[test]
+fn test_tool_profile_with_profile_replaces() {
+    // Builder-style: `with_profile` swaps the default out for a
+    // caller-supplied one and returns the descriptor for chaining.
+    let custom = ToolProfile {
+        idempotent: false,
+        latency_class: LatencyClass::Interactive,
+        requires_user_confirmation: true,
+        session: SessionRequirement::None,
+    };
+    let d = ToolDescriptor::new::<DummyInput>(
+        "send_email",
+        "send a message",
+        Safety::Mutating,
+        ToolConfigSpec::group_only(ToolGroupId::Internal(InternalToolGroup::Email)),
+        ToolGroupId::Internal(InternalToolGroup::Email),
+    )
+    .with_profile(custom.clone());
+    assert_eq!(d.profile, custom);
+    assert!(d.profile.requires_user_confirmation);
+    assert_eq!(d.profile.latency_class, LatencyClass::Interactive);
+}
+
+#[test]
+fn test_latency_class_default_is_fast() {
+    // `Default` for the enum is `Fast` — every other variant is
+    // opt-in, so a tool that forgets to declare its latency still
+    // claims the cheapest class.
+    assert_eq!(LatencyClass::default(), LatencyClass::Fast);
+}
+
+#[test]
+fn test_latency_class_variants_distinct() {
+    // The three classes are distinct values; the descriptor uses
+    // `PartialEq` to drive per-class UI affordances so the
+    // comparison must be meaningful.
+    assert_ne!(LatencyClass::Fast, LatencyClass::Interactive);
+    assert_ne!(LatencyClass::Interactive, LatencyClass::Slow);
+    assert_ne!(LatencyClass::Fast, LatencyClass::Slow);
+}
+
+#[test]
+fn test_session_requirement_default_is_none() {
+    assert_eq!(SessionRequirement::default(), SessionRequirement::None);
+}
+
+#[test]
+fn test_session_requirement_shared_is_distinct_by_name() {
+    // Two `Shared` variants with the same name compare equal —
+    // a future per-session serialiser treats them as the same lock.
+    let a = SessionRequirement::Shared(std::borrow::Cow::Borrowed("browser"));
+    let b = SessionRequirement::Shared(std::borrow::Cow::Borrowed("browser"));
+    let c = SessionRequirement::Shared(std::borrow::Cow::Borrowed("ssh"));
+    assert_eq!(a, b);
+    assert_ne!(a, c);
+    assert_ne!(a, SessionRequirement::None);
 }

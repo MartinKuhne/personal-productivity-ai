@@ -92,26 +92,21 @@ fn test_session_persists_cookies_across_relaunch() {
 #[test]
 #[ignore = "requires Playwright Firefox installed locally"]
 fn test_browser_navigate_tool_round_trip() {
-    use crate::agent::tools::context::ToolContext;
     let (_tmp, session) = make_session();
     let bus = crate::bus::core::Bus::<crate::bus::events::file::FileEvent>::new();
     let mut config = AppConfig::default();
     config.tool_groups.browser = true;
     let pdf_backing = std::sync::Arc::new(crate::app::session::PdfBackingTracker::new());
-    let tm = Arc::new(std::sync::RwLock::new(
-        crate::agent::tools::registry::ToolRegistry::new(),
-    ));
     let cache = Arc::new(crate::agent::tools::registry::cache::ToolCache::new());
     let ctx = crate::agent::tools::context::ToolContextBuilder::new(
         Arc::new(config),
         bus,
-        tm,
         cache,
-        Arc::new(crate::utils::uuid::SystemUuidGenerator)
-            .with_browser_session(session)
-            .with_pdf_backing(pdf_backing)
-            .build(),
-    );
+        Arc::new(crate::utils::uuid::SystemUuidGenerator),
+    )
+    .with_browser_session(session)
+    .with_pdf_backing(pdf_backing)
+    .build();
 
     let tool = crate::agent::tools::registry::builtin::browser::BrowserNavigateTool;
     let args = r#"{"url":"about:blank"}"#;
@@ -123,26 +118,21 @@ fn test_browser_navigate_tool_round_trip() {
 #[ignore = "requires Playwright Firefox installed locally"]
 fn test_browser_get_page_state_tool_is_readonly() {
     use crate::agent::tools::Safety;
-    use crate::agent::tools::context::ToolContext;
     let (_tmp, session) = make_session();
     let bus = crate::bus::core::Bus::<crate::bus::events::file::FileEvent>::new();
     let mut config = AppConfig::default();
     config.tool_groups.browser = true;
     let pdf_backing = std::sync::Arc::new(crate::app::session::PdfBackingTracker::new());
-    let tm = Arc::new(std::sync::RwLock::new(
-        crate::agent::tools::registry::ToolRegistry::new(),
-    ));
     let cache = Arc::new(crate::agent::tools::registry::cache::ToolCache::new());
     let _ctx = crate::agent::tools::context::ToolContextBuilder::new(
         Arc::new(config),
         bus,
-        tm,
         cache,
-        Arc::new(crate::utils::uuid::SystemUuidGenerator)
-            .with_browser_session(session)
-            .with_pdf_backing(pdf_backing)
-            .build(),
-    );
+        Arc::new(crate::utils::uuid::SystemUuidGenerator),
+    )
+    .with_browser_session(session)
+    .with_pdf_backing(pdf_backing)
+    .build();
 
     let tool = crate::agent::tools::registry::builtin::browser::BrowserGetPageStateTool;
     assert_eq!(tool.safety(), Safety::ReadOnly);
