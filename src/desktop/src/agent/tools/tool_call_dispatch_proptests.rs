@@ -74,16 +74,16 @@ const DISPATCH_TIMEOUT: Duration = Duration::from_secs(5);
 fn build_dispatch_context() -> ToolContext {
     let config = AgentConfig::default();
     let browser_session = Arc::new(BrowserSession::with_resolved(config.browser.clone()));
-    let pdf_backing = Arc::new(PdfBackingTracker::new());
+    let policy = Arc::new(PdfBackingTracker::new());
     let uuid_gen: Arc<dyn crate::utils::uuid::UuidGenerator> = Arc::new(SystemUuidGenerator);
     crate::agent::tools::context::ToolContextBuilder::new(
         Arc::new(config),
-        Bus::new(),
+        std::sync::Arc::new(crate::agent::tools::observer::DefaultFileObserver),
         Arc::new(crate::agent::tools::registry::cache::ToolCache::new()),
         uuid_gen,
     )
     .with_browser_session(browser_session)
-    .with_pdf_backing(pdf_backing)
+    .with_tool_call_policy(policy)
     .build()
 }
 

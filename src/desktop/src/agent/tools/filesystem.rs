@@ -2,7 +2,7 @@
 //!
 //! Unit tests live in the sibling `filesystem_tests.rs` sidecar.
 
-use crate::bus::events::file::FileEventProducer;
+
 use crate::markdown::Document;
 use crate::utils::tags::extract_tags_from_file;
 use std::path::Path;
@@ -170,7 +170,7 @@ pub fn tool_window_note(
 pub fn tool_create_note(
     path_str: &str,
     content: &str,
-    producer: &FileEventProducer,
+    producer: &dyn crate::agent::tools::observer::OnFileChanged,
 ) -> Result<crate::agent::tools::dtos::CreateNoteResponse, String> {
     if !path_str.to_lowercase().ends_with(".md") {
         return Err("Only markdown files (.md) are allowed.".to_string());
@@ -204,7 +204,7 @@ pub fn tool_create_note(
             // Tell the rest of the app this file now exists so the
             // directory tree, tag manager, etc. can pick it up without
             // waiting for an OS-level notify event.
-            producer.publish_discovered(path);
+            producer.on_file_changed(path, crate::bus::events::file::FileEventKind::Discovered);
             Ok(crate::agent::tools::dtos::CreateNoteResponse {
                 result: "File created successfully.".to_string(),
                 size_bytes,
@@ -222,7 +222,7 @@ pub fn tool_insert_into_note(
     path_str: &str,
     offset: usize,
     lines_to_insert: &[String],
-    producer: &FileEventProducer,
+    producer: &dyn crate::agent::tools::observer::OnFileChanged,
 ) -> Result<crate::agent::tools::dtos::InsertIntoNoteResponse, String> {
     match crate::utils::read_text_file(Path::new(path_str)) {
         Ok(content) => {
@@ -238,7 +238,7 @@ pub fn tool_insert_into_note(
             let new_content = reconstruct_file_content(header, &new_body);
             match std::fs::write(path_str, new_content) {
                 Ok(_) => {
-                    producer.publish_updated(Path::new(path_str));
+                    producer.on_file_changed(Path::new(path_str), crate::bus::events::file::FileEventKind::Updated);
                     Ok(crate::agent::tools::dtos::InsertIntoNoteResponse {
                         result: "Lines inserted successfully.".to_string(),
                     })
@@ -254,7 +254,7 @@ pub fn tool_patch_note(
     path_str: &str,
     old_string: &str,
     new_string: &str,
-    producer: &FileEventProducer,
+    producer: &dyn crate::agent::tools::observer::OnFileChanged,
 ) -> Result<crate::agent::tools::dtos::PatchNoteResponse, String> {
     match crate::utils::read_text_file(Path::new(path_str)) {
         Ok(content) => {
@@ -267,7 +267,7 @@ pub fn tool_patch_note(
             let new_content = reconstruct_file_content(header, &new_body);
             match std::fs::write(path_str, new_content) {
                 Ok(_) => {
-                    producer.publish_updated(Path::new(path_str));
+                    producer.on_file_changed(Path::new(path_str), crate::bus::events::file::FileEventKind::Updated);
                     Ok(crate::agent::tools::dtos::PatchNoteResponse {
                         result: format!("Successfully replaced {} occurrence(s).", count),
                     })

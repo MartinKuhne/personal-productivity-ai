@@ -98,15 +98,15 @@ impl AgentSession {
     /// domain config. The orchestrator writes the cell via
     /// [`Self::set_agent_config`]; the driver reads it per session.
     pub fn new(
-        file_event_bus: Bus<crate::bus::events::file::FileEvent>,
+        file_observer: std::sync::Arc<dyn crate::agent::tools::observer::OnFileChanged>,
         browser_session: Arc<BrowserSession>,
-        pdf_backing: Arc<crate::app::session::PdfBackingTracker>,
+        policy: Arc<dyn crate::agent::tools::policy::ToolCallPolicy>,
         tool_context: Arc<arc_swap::ArcSwap<crate::agent::AgentToolContext>>,
     ) -> Self {
         Self::builder()
-            .with_file_event_bus(file_event_bus)
+            .with_file_observer(file_observer)
             .with_browser_session(browser_session)
-            .with_pdf_backing(pdf_backing)
+            .with_tool_call_policy(policy)
             .with_tool_context(tool_context)
             .build()
     }
@@ -116,16 +116,16 @@ impl AgentSession {
     /// arrive via [`Self::set_agent_config`].
     pub fn new_with_agent_config(
         initial_config: AgentConfig,
-        file_event_bus: Bus<crate::bus::events::file::FileEvent>,
+        file_observer: std::sync::Arc<dyn crate::agent::tools::observer::OnFileChanged>,
         browser_session: Arc<BrowserSession>,
-        pdf_backing: Arc<crate::app::session::PdfBackingTracker>,
+        policy: Arc<dyn crate::agent::tools::policy::ToolCallPolicy>,
         tool_context: Arc<arc_swap::ArcSwap<crate::agent::AgentToolContext>>,
     ) -> Self {
         Self::builder()
             .with_agent_config(initial_config)
-            .with_file_event_bus(file_event_bus)
+            .with_file_observer(file_observer)
             .with_browser_session(browser_session)
-            .with_pdf_backing(pdf_backing)
+            .with_tool_call_policy(policy)
             .with_tool_context(tool_context)
             .build()
     }
@@ -327,9 +327,9 @@ impl AgentSession {
 /// [`Self::with_agent_config_provider`]. The orchestrator (which already
 /// drains `Bus<ConfigArrived>`) is the projection site.
 pub struct AgentSessionBuilder {
-    file_event_bus: Option<Bus<crate::bus::events::file::FileEvent>>,
+    file_observer: Option<std::sync::Arc<dyn crate::agent::tools::observer::OnFileChanged>>,
     browser_session: Option<Arc<BrowserSession>>,
-    pdf_backing: Option<Arc<crate::app::session::PdfBackingTracker>>,
+    policy: Option<Arc<dyn crate::agent::tools::policy::ToolCallPolicy>>,
     tool_context: Option<Arc<arc_swap::ArcSwap<crate::agent::AgentToolContext>>>,
     initial_agent_config: Option<AgentConfig>,
     agent_config_provider: Option<Arc<std::sync::RwLock<AgentConfig>>>,
@@ -339,9 +339,9 @@ impl AgentSessionBuilder {
     /// Create a new empty builder.
     pub fn new() -> Self {
         Self {
-            file_event_bus: None,
+            file_observer: None,
             browser_session: None,
-            pdf_backing: None,
+            policy: None,
             tool_context: None,
             initial_agent_config: None,
             agent_config_provider: None,
@@ -349,8 +349,8 @@ impl AgentSessionBuilder {
     }
 
     /// Set the file event bus.
-    pub fn with_file_event_bus(mut self, bus: Bus<crate::bus::events::file::FileEvent>) -> Self {
-        self.file_event_bus = Some(bus);
+    pub fn with_file_observer(mut self, bus: std::sync::Arc<dyn crate::agent::tools::observer::OnFileChanged>) -> Self {
+        self.file_observer = Some(bus);
         self
     }
 
@@ -361,11 +361,11 @@ impl AgentSessionBuilder {
     }
 
     /// Set the shared PDF-backing tracker.
-    pub fn with_pdf_backing(
+    pub fn with_tool_call_policy(
         mut self,
-        pdf_backing: Arc<crate::app::session::PdfBackingTracker>,
+        policy: Arc<dyn crate::agent::tools::policy::ToolCallPolicy>,
     ) -> Self {
-        self.pdf_backing = Some(pdf_backing);
+        self.policy = Some(policy);
         self
     }
 
@@ -397,15 +397,15 @@ impl AgentSessionBuilder {
 
     /// Build the [`AgentSession`]. Panics if any required field is missing.
     pub fn build(self) -> AgentSession {
-        let file_event_bus = self
-            .file_event_bus
-            .expect("AgentSession requires with_file_event_bus");
+        let file_observer = self
+            .file_observer
+            .expect("AgentSession requires with_file_observer");
         let browser_session = self
             .browser_session
             .expect("AgentSession requires with_browser_session");
-        let pdf_backing = self
-            .pdf_backing
-            .expect("AgentSession requires with_pdf_backing");
+        let policy = self
+            .policy
+            .expect("AgentSession requires with_tool_call_policy");
         let tool_context = self
             .tool_context
             .expect("AgentSession requires with_tool_context");
@@ -420,9 +420,9 @@ impl AgentSessionBuilder {
             prompt_rx,
             agent_event_bus.clone(),
             agent_config_provider.clone(),
-            file_event_bus,
+            file_observer,
             browser_session.clone(),
-            pdf_backing,
+            policy,
             tool_context,
         );
         AgentSession {
@@ -464,9 +464,9 @@ fn spawn_driver(
     prompt_rx: std::sync::mpsc::Receiver<AgentPrompt>,
     agent_event_bus: Bus<SeamAgentEvent>,
     agent_config_provider: Arc<std::sync::RwLock<AgentConfig>>,
-    file_event_bus: Bus<crate::bus::events::file::FileEvent>,
+    file_observer: std::sync::Arc<dyn crate::agent::tools::observer::OnFileChanged>,
     browser_session: Arc<BrowserSession>,
-    pdf_backing: Arc<crate::app::session::PdfBackingTracker>,
+    policy: Arc<dyn crate::agent::tools::policy::ToolCallPolicy>,
     tool_context: Arc<arc_swap::ArcSwap<crate::agent::AgentToolContext>>,
 ) -> JoinHandle<()> {
     std::thread::spawn(move || {
@@ -486,7 +486,7 @@ fn spawn_driver(
                 session_id,
                 prompt.text,
             )
-            .with_buses(file_event_bus.clone())
+            .with_file_observer(file_observer.clone())
             .with_observer(std::sync::Arc::new(
                 crate::app::events::BusAgentEventObserver::new(session_id, agent_event_bus.clone()),
             ))
@@ -496,7 +496,7 @@ fn spawn_driver(
             .with_cancel_flag(prompt.cancel_flag)
             .with_history(history.clone())
             .with_browser_session(browser_session.clone())
-            .with_pdf_backing(pdf_backing.clone())
+            .with_tool_call_policy(policy.clone())
             .with_cache(std::sync::Arc::new(
                 crate::agent::tools::registry::cache::ToolCache::new(),
             ))

@@ -3,7 +3,7 @@
 use crate::app::session::BrowserSession;
 use crate::app::vfs;
 use crate::bus::core::Bus;
-use crate::bus::events::file::{FileEvent, FileEventKind, FileEventProducer};
+use crate::bus::events::file::{FileEvent, FileEventKind};
 use crate::agent::config::AgentConfig;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
@@ -42,38 +42,7 @@ impl VfsResolver {
     }
 }
 
-/// Event publisher wrapping the file event bus for side-effecting tools.
-/// Owns a `Bus<FileEvent>` clone (cheap, the underlying
-/// `tokio::sync::broadcast::Sender` is `Arc`-backed) so the
-/// publisher is `'static` and embeddable in a `ToolContext`.
-#[derive(Clone)]
-pub struct EventPublisher {
-    pub file_event_bus: Bus<FileEvent>,
-}
 
-impl EventPublisher {
-    /// Create a new `EventPublisher`.
-    pub fn new(file_event_bus: Bus<FileEvent>) -> Self {
-        Self { file_event_bus }
-    }
-
-    /// Publish a file event to the bus.
-    pub fn publish_file_event(&self, kind: FileEventKind, path: &Path) {
-        let producer = FileEventProducer::new(self.file_event_bus.clone());
-        match kind {
-            FileEventKind::Discovered => producer.publish_discovered(path),
-            FileEventKind::Updated => producer.publish_updated(path),
-            FileEventKind::Removed => producer.publish_removed(path),
-            FileEventKind::DirDiscovered => producer.publish_dir_discovered(path),
-            FileEventKind::DirRemoved => producer.publish_dir_removed(path),
-        }
-    }
-
-    /// Obtain a [`FileEventProducer`] handle.
-    pub fn file_event_producer(&self) -> FileEventProducer {
-        FileEventProducer::new(self.file_event_bus.clone())
-    }
-}
 
 /// Tool context — composite providing tools with access to `AgentConfig`
 /// and the file event bus, plus safe virtual-path resolution via
@@ -96,9 +65,9 @@ impl EventPublisher {
 #[derive(Clone)]
 pub struct ToolContext {
     pub config: Arc<AgentConfig>,
-    pub file_event_bus: Bus<FileEvent>,
+    
     pub resolver: VfsResolver,
-    pub publisher: EventPublisher,
+    
     pub cache: std::sync::Arc<crate::agent::tools::registry::cache::ToolCache>,
     pub uuid_gen: std::sync::Arc<dyn crate::utils::uuid::UuidGenerator>,
     pub extensions: crate::agent::tools::extensions::Extensions,
@@ -120,24 +89,29 @@ impl ToolContext {
     }
 
     /// Publish a file event to the file event bus.
-    pub fn publish_file_event(&self, kind: FileEventKind, path: &Path) {
-        self.publisher.publish_file_event(kind, path);
-    }
-
-    /// Obtain a [`FileEventProducer`] handle.
-    pub fn file_event_producer(&self) -> FileEventProducer {
-        self.publisher.file_event_producer()
-    }
-
-    /// Check whether the given path is a Markdown file with a PDF sibling.
-    pub fn is_pdf_backed(&self, path: &Path) -> bool {
-        if let Some(pdf_backing) = self
-            .extensions
-            .get::<crate::app::session::PdfBackingTracker>()
-        {
-            pdf_backing.is_pdf_backed(path)
+    pub fn file_observer(&self) -> std::sync::Arc<dyn crate::agent::tools::observer::OnFileChanged> {
+        if let Some(ext) = self.extensions.get::<crate::agent::tools::observer::OnFileChangedExt>() {
+            ext.0.clone()
         } else {
-            false
+            std::sync::Arc::new(crate::agent::tools::observer::DefaultFileObserver)
+        }
+    }
+
+    pub fn publish_file_event(&self, kind: FileEventKind, path: &Path) {
+        self.file_observer().on_file_changed(path, kind);
+    }
+
+    /// Obtain a [`dyn crate::agent::tools::observer::OnFileChanged`] handle.
+
+    /// Check whether the given path is allowed to be written to. Returns an error string if blocked.
+    pub fn check_write_allowed(&self, path: &Path) -> Result<(), String> {
+        if let Some(ext) = self
+            .extensions
+            .get::<crate::agent::tools::policy::ToolCallPolicyExt>()
+        {
+            ext.0.check_write_allowed(path)
+        } else {
+            Ok(())
         }
     }
 }
@@ -160,7 +134,7 @@ const _: fn() = || {
 
 pub struct ToolContextBuilder {
     config: Arc<AgentConfig>,
-    file_event_bus: Bus<FileEvent>,
+    file_observer: std::sync::Arc<dyn crate::agent::tools::observer::OnFileChanged>,
     cache: std::sync::Arc<crate::agent::tools::registry::cache::ToolCache>,
     uuid_gen: std::sync::Arc<dyn crate::utils::uuid::UuidGenerator>,
     extensions: crate::agent::tools::extensions::Extensions,
@@ -169,13 +143,13 @@ pub struct ToolContextBuilder {
 impl ToolContextBuilder {
     pub fn new(
         config: Arc<AgentConfig>,
-        file_event_bus: Bus<FileEvent>,
+        file_observer: std::sync::Arc<dyn crate::agent::tools::observer::OnFileChanged>,
         cache: std::sync::Arc<crate::agent::tools::registry::cache::ToolCache>,
         uuid_gen: std::sync::Arc<dyn crate::utils::uuid::UuidGenerator>,
     ) -> Self {
         Self {
             config,
-            file_event_bus,
+            file_observer,
             cache,
             uuid_gen,
             extensions: crate::agent::tools::extensions::Extensions::default(),
@@ -187,11 +161,11 @@ impl ToolContextBuilder {
         self
     }
 
-    pub fn with_pdf_backing(
+    pub fn with_tool_call_policy(
         mut self,
-        pdf_backing: std::sync::Arc<crate::app::session::PdfBackingTracker>,
+        policy: std::sync::Arc<dyn crate::agent::tools::policy::ToolCallPolicy>,
     ) -> Self {
-        self.extensions.insert(pdf_backing);
+        self.extensions.insert(Arc::new(crate::agent::tools::policy::ToolCallPolicyExt(policy)));
         self
     }
 
@@ -202,24 +176,24 @@ impl ToolContextBuilder {
 
     pub fn build(self) -> ToolContext {
         let resolver = VfsResolver::new(self.config.clone());
-        let publisher = EventPublisher::new(self.file_event_bus.clone());
 
         let mut extensions = self.extensions;
+        extensions.insert(Arc::new(crate::agent::tools::observer::OnFileChangedExt(self.file_observer.clone())));
         if extensions.get::<BrowserSession>().is_none() {
             extensions.insert(Arc::new(BrowserSession::with_resolved(self.config.browser().clone())));
         }
         if extensions
-            .get::<crate::app::session::PdfBackingTracker>()
+            .get::<crate::agent::tools::policy::ToolCallPolicyExt>()
             .is_none()
         {
-            extensions.insert(Arc::new(crate::app::session::PdfBackingTracker::new()));
+            extensions.insert(Arc::new(crate::agent::tools::policy::ToolCallPolicyExt(
+                Arc::new(crate::agent::tools::policy::DefaultToolCallPolicy)
+            )));
         }
 
         ToolContext {
             config: self.config,
-            file_event_bus: self.file_event_bus,
             resolver,
-            publisher,
             cache: self.cache,
             uuid_gen: self.uuid_gen,
             extensions,

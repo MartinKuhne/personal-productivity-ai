@@ -96,7 +96,7 @@ fn test_browser_navigate_tool_round_trip() {
     let bus = crate::bus::core::Bus::<crate::bus::events::file::FileEvent>::new();
     let mut config = AgentConfig::default();
     config.tool_groups.browser = true;
-    let pdf_backing = std::sync::Arc::new(crate::app::session::PdfBackingTracker::new());
+    let policy = std::sync::Arc::new(crate::agent::tools::policy::DefaultToolCallPolicy);
     let cache = Arc::new(crate::agent::tools::registry::cache::ToolCache::new());
     let ctx = crate::agent::tools::context::ToolContextBuilder::new(
         Arc::new(config),
@@ -105,7 +105,7 @@ fn test_browser_navigate_tool_round_trip() {
         Arc::new(crate::utils::uuid::SystemUuidGenerator),
     )
     .with_browser_session(session)
-    .with_pdf_backing(pdf_backing)
+    .with_tool_call_policy(pdf_backing)
     .build();
 
     let tool = crate::agent::tools::registry::builtin::browser::BrowserNavigateTool;
@@ -122,7 +122,7 @@ fn test_browser_get_page_state_tool_is_readonly() {
     let bus = crate::bus::core::Bus::<crate::bus::events::file::FileEvent>::new();
     let mut config = AgentConfig::default();
     config.tool_groups.browser = true;
-    let pdf_backing = std::sync::Arc::new(crate::app::session::PdfBackingTracker::new());
+    let policy = std::sync::Arc::new(crate::agent::tools::policy::DefaultToolCallPolicy);
     let cache = Arc::new(crate::agent::tools::registry::cache::ToolCache::new());
     let _ctx = crate::agent::tools::context::ToolContextBuilder::new(
         Arc::new(config),
@@ -131,7 +131,7 @@ fn test_browser_get_page_state_tool_is_readonly() {
         Arc::new(crate::utils::uuid::SystemUuidGenerator),
     )
     .with_browser_session(session)
-    .with_pdf_backing(pdf_backing)
+    .with_tool_call_policy(pdf_backing)
     .build();
 
     let tool = crate::agent::tools::registry::builtin::browser::BrowserGetPageStateTool;

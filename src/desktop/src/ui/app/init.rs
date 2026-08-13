@@ -125,7 +125,7 @@ impl FastMdApp {
         // so the UI can still drain the bus; the `AgentSession`
         // itself is built without a `config_bus` parameter.
         let agent = AgentSession::new(
-            background_task.file_event_bus.clone(),
+            std::sync::Arc::new(crate::app::session::bus_observer::AppFileObserver::new(background_task.file_event_bus.clone())),
             browser_session.clone(),
             Arc::new(pdf_backing_tracker.clone()),
             tool_context.clone(),
@@ -262,7 +262,7 @@ impl FastMdApp {
         ));
         let pdf_backing_tracker = crate::app::session::PdfBackingTracker::new();
         let agent = AgentSession::new(
-            background_task.file_event_bus.clone(),
+            std::sync::Arc::new(crate::app::session::bus_observer::AppFileObserver::new(background_task.file_event_bus.clone())),
             test_browser_session,
             Arc::new(pdf_backing_tracker.clone()),
             Arc::new(arc_swap::ArcSwap::from_pointee(

@@ -21,7 +21,7 @@ pub struct AgentContext {
     /// Projected from the global `AppConfig` by the orchestrator via
     /// `AppConfig::to_agent_config`.
     pub agent_config: AgentConfig,
-    pub file_event_bus: Bus<FileEvent>,
+    pub file_observer: std::sync::Arc<dyn crate::agent::tools::observer::OnFileChanged>,
     /// Agent→UI structured observer. The agent calls methods here to emit events.
     pub observer: Arc<dyn AgentEventObserver>,
     pub active_file: Option<PathBuf>,
@@ -48,6 +48,7 @@ pub struct AgentContext {
     /// the session is a stub; the `browser_*` tools are not
     /// registered and the field stays unused.
     pub browser_session: Arc<BrowserSession>,
+    pub tool_call_policy: std::sync::Arc<dyn crate::agent::tools::policy::ToolCallPolicy>,
     /// Shared PDF-backing tracker — gives tools access to
     /// the set of Markdown files that have a `.pdf` sibling.
     pub pdf_backing: Arc<crate::app::session::PdfBackingTracker>,
@@ -73,7 +74,7 @@ pub struct AgentContextBuilder {
     session_id: Uuid,
     prompt: String,
 
-    file_event_bus: Option<Bus<FileEvent>>,
+    file_observer: Option<std::sync::Arc<dyn crate::agent::tools::observer::OnFileChanged>>,
     observer: Option<Arc<dyn AgentEventObserver>>,
     active_file: Option<PathBuf>,
     active_dir: Option<PathBuf>,
@@ -83,6 +84,7 @@ pub struct AgentContextBuilder {
     model_name: Option<String>,
     system_prompts: Option<Vec<String>>,
     browser_session: Option<Arc<BrowserSession>>,
+    tool_call_policy: Option<std::sync::Arc<dyn crate::agent::tools::policy::ToolCallPolicy>>,
     pdf_backing: Option<Arc<crate::app::session::PdfBackingTracker>>,
     cache: Option<Arc<crate::agent::tools::registry::cache::ToolCache>>,
     tool_context: Option<Arc<arc_swap::ArcSwap<crate::agent::AgentToolContext>>>,
@@ -96,7 +98,7 @@ impl AgentContextBuilder {
             agent_config,
             session_id,
             prompt,
-            file_event_bus: None,
+            file_observer: None,
             observer: None,
             active_file: None,
             active_dir: None,
@@ -106,6 +108,7 @@ impl AgentContextBuilder {
             system_prompts: None,
             model_name: None,
             browser_session: None,
+            tool_call_policy: None,
             pdf_backing: None,
             cache: None,
             tool_context: None,
@@ -114,8 +117,8 @@ impl AgentContextBuilder {
         }
     }
 
-    pub fn with_buses(mut self, file_event_bus: Bus<FileEvent>) -> Self {
-        self.file_event_bus = Some(file_event_bus);
+    pub fn with_file_observer(mut self, file_observer: std::sync::Arc<dyn crate::agent::tools::observer::OnFileChanged>) -> Self {
+        self.file_observer = Some(file_observer);
         self
     }
 
@@ -164,6 +167,11 @@ impl AgentContextBuilder {
         self
     }
 
+    pub fn with_tool_call_policy(mut self, policy: std::sync::Arc<dyn crate::agent::tools::policy::ToolCallPolicy>) -> Self {
+        self.tool_call_policy = Some(policy);
+        self
+    }
+
     pub fn with_pdf_backing(
         mut self,
         pdf_backing: Arc<crate::app::session::PdfBackingTracker>,
@@ -206,10 +214,11 @@ impl AgentContextBuilder {
             agent_config: self.agent_config,
             session_id: self.session_id,
             prompt: self.prompt,
-            file_event_bus: self.file_event_bus.unwrap_or_default(),
+            file_observer: self.file_observer.unwrap_or_else(|| std::sync::Arc::new(crate::agent::tools::observer::DefaultFileObserver)),
             observer: self.observer.expect("observer is required"),
             active_file: self.active_file,
             active_dir: self.active_dir,
+            tool_call_policy: self.tool_call_policy.unwrap_or_else(|| std::sync::Arc::new(crate::agent::tools::policy::DefaultToolCallPolicy)),
             selected_files: self.selected_files,
             system_prompts: self
                 .system_prompts
@@ -250,13 +259,13 @@ mod tests {
     #[test]
     fn test_agent_context_creation() {
         let agent_config = AgentConfig::default();
-        let bus = Bus::new();
+        
         let browser = Arc::new(crate::app::session::BrowserSession::with_resolved(
             agent_config.browser().clone(),
         ));
         let ctx =
             AgentContextBuilder::new(agent_config.clone(), Uuid::new_v4(), "hello".to_string())
-                .with_buses(bus)
+                .with_file_observer(std::sync::Arc::new(crate::agent::tools::observer::DefaultFileObserver))
                 .with_observer(Arc::new(crate::app::events::BusAgentEventObserver::new(
                     Uuid::new_v4(),
                     crate::bus::core::Bus::new(),

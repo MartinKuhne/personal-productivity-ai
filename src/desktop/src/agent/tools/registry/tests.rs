@@ -17,12 +17,12 @@ fn test_browser_session() -> Arc<BrowserSession> {
 fn test_ctx(config: &AgentConfig) -> ToolContext {
     crate::agent::tools::context::ToolContextBuilder::new(
         Arc::new(config.clone()),
-        Bus::new(),
+        std::sync::Arc::new(crate::agent::tools::observer::DefaultFileObserver),
         Arc::new(crate::agent::tools::registry::cache::ToolCache::new()),
         Arc::new(crate::utils::uuid::SystemUuidGenerator),
     )
     .with_browser_session(test_browser_session())
-    .with_pdf_backing(Arc::new(crate::app::session::PdfBackingTracker::new()))
+    .with_tool_call_policy(Arc::new(crate::agent::tools::policy::DefaultToolCallPolicy))
     .build()
 }
 

@@ -34,7 +34,7 @@ fn make_ctx(config: AgentConfig) -> (AgentContext, BusReader<SeamAgentEvent>) {
     let session_id = uuid::Uuid::new_v4();
     let ctx =
         crate::agent::context::AgentContextBuilder::new(config, session_id, "Hello".to_string())
-            .with_buses(crate::bus::core::Bus::new())
+            .with_file_observer(std::sync::Arc::new(crate::agent::tools::observer::DefaultFileObserver))
             .with_observer(std::sync::Arc::new(
                 crate::app::events::BusAgentEventObserver::new(session_id, agent_event_bus.clone()),
             ))
@@ -258,7 +258,7 @@ fn test_run_agent_skips_done_status_when_cancelled() {
         uuid::Uuid::new_v4(),
         "List files".to_string(),
     )
-    .with_buses(crate::bus::core::Bus::new())
+    .with_file_observer(std::sync::Arc::new(crate::agent::tools::observer::DefaultFileObserver))
     .with_observer(std::sync::Arc::new(
         crate::app::events::BusAgentEventObserver::new(
             uuid::Uuid::new_v4(),

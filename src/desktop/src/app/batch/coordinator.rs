@@ -114,7 +114,7 @@ impl BatchCoordinator {
 
         let executor = BatchJobExecutor::new(
             self.app_config,
-            self.file_event_bus,
+            std::sync::Arc::new(crate::app::session::bus_observer::AppFileObserver::new(self.file_event_bus.clone())),
             self.tx_gui,
             self.prompt_text,
             self.cancel_flag.clone(),

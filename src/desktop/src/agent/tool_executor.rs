@@ -25,12 +25,12 @@ pub struct ToolExecutor {
     /// clients). Cheap to clone per parallel worker (single
     /// `Arc` refcount bump).
     config: Arc<AgentConfig>,
-    file_event_bus: Bus<FileEvent>,
+    file_observer: std::sync::Arc<dyn crate::agent::tools::observer::OnFileChanged>,
     /// When the `browser` Cargo feature is off the session is a
     /// stub that returns
     /// [`crate::app::session::SessionError::Disabled`].
     browser_session: Arc<BrowserSession>,
-    pdf_backing: std::sync::Arc<crate::app::session::PdfBackingTracker>,
+    policy: std::sync::Arc<dyn crate::agent::tools::policy::ToolCallPolicy>,
     cache: SharedCache,
     /// Catalog-level bundle. The executor snapshots this per
     /// parallel worker (`ArcSwap::load`) and per sequential
@@ -41,28 +41,28 @@ pub struct ToolExecutor {
 
 pub struct ToolExecutorBuilder {
     config: Arc<AgentConfig>,
-    file_event_bus: Bus<FileEvent>,
+    file_observer: std::sync::Arc<dyn crate::agent::tools::observer::OnFileChanged>,
     cache: SharedCache,
     tool_context: std::sync::Arc<arc_swap::ArcSwap<AgentToolContext>>,
     browser_session: Option<Arc<BrowserSession>>,
-    pdf_backing: Option<std::sync::Arc<crate::app::session::PdfBackingTracker>>,
+    policy: Option<std::sync::Arc<dyn crate::agent::tools::policy::ToolCallPolicy>>,
     uuid_gen: Option<std::sync::Arc<dyn crate::utils::uuid::UuidGenerator>>,
 }
 
 impl ToolExecutorBuilder {
     pub fn new(
         config: Arc<AgentConfig>,
-        file_event_bus: Bus<FileEvent>,
+        file_observer: std::sync::Arc<dyn crate::agent::tools::observer::OnFileChanged>,
         cache: SharedCache,
         tool_context: std::sync::Arc<arc_swap::ArcSwap<AgentToolContext>>,
     ) -> Self {
         Self {
             config,
-            file_event_bus,
+            file_observer,
             cache,
             tool_context,
             browser_session: None,
-            pdf_backing: None,
+            policy: None,
             uuid_gen: None,
         }
     }
@@ -72,11 +72,11 @@ impl ToolExecutorBuilder {
         self
     }
 
-    pub fn with_pdf_backing(
+    pub fn with_tool_call_policy(
         mut self,
-        pdf_backing: std::sync::Arc<crate::app::session::PdfBackingTracker>,
+        policy: std::sync::Arc<dyn crate::agent::tools::policy::ToolCallPolicy>,
     ) -> Self {
-        self.pdf_backing = Some(pdf_backing);
+        self.policy = Some(policy);
         self
     }
 
@@ -92,11 +92,11 @@ impl ToolExecutorBuilder {
         let default_browser = Arc::new(BrowserSession::with_resolved(self.config.browser().clone()));
         ToolExecutor {
             config: self.config,
-            file_event_bus: self.file_event_bus,
+            file_observer: self.file_observer,
             browser_session: self.browser_session.unwrap_or(default_browser),
-            pdf_backing: self
-                .pdf_backing
-                .unwrap_or_else(|| Arc::new(crate::app::session::PdfBackingTracker::new())),
+            policy: self
+                .policy
+                .unwrap_or_else(|| Arc::new(crate::agent::tools::policy::DefaultToolCallPolicy)),
             cache: self.cache,
             tool_context: self.tool_context,
             uuid_gen: self
@@ -195,7 +195,7 @@ impl ToolExecutor {
                 return Vec::new();
             }
         };
-        let pdf_backing = self.pdf_backing.clone();
+        let policy = self.policy.clone();
         let mut completed = Vec::new();
         rt.block_on(async {
             let mut join_set = tokio::task::JoinSet::new();
@@ -204,9 +204,9 @@ impl ToolExecutor {
                 let func_name = extract_str(tc, &["function", "name"]).to_string();
                 let func_args = extract_str(tc, &["function", "arguments"]).to_string();
                 let cfg = self.config.clone();
-                let bus = self.file_event_bus.clone();
+                let bus = self.file_observer.clone();
                 let browser = self.browser_session.clone();
-                let pdf = pdf_backing.clone();
+                let pdf = policy.clone();
                 let cache = self.cache.clone();
                 let tc_arc = self.tool_context.clone();
                 let uuid_gen = self.uuid_gen.clone();
@@ -217,7 +217,7 @@ impl ToolExecutor {
                         cfg, bus, cache, uuid_gen,
                     )
                     .with_browser_session(browser)
-                    .with_pdf_backing(pdf)
+                    .with_tool_call_policy(pdf)
                     .build();
                     let result = execute_tool(dispatcher, &ctx, &func_name, &func_args);
                     (call_id, func_name, func_args, result)
@@ -242,17 +242,17 @@ impl ToolExecutor {
             let func_name = extract_str(tc, &["function", "name"]).to_string();
             let func_args = extract_str(tc, &["function", "arguments"]).to_string();
             let browser = self.browser_session.clone();
-            let pdf = self.pdf_backing.clone();
+            let pdf = self.policy.clone();
             let snapshot = self.tool_context.load();
             let dispatcher = &snapshot.registry;
             let ctx = crate::agent::tools::context::ToolContextBuilder::new(
                 self.config.clone(),
-                self.file_event_bus.clone(),
+                self.file_observer.clone(),
                 self.cache.clone(),
                 self.uuid_gen.clone(),
             )
             .with_browser_session(browser)
-            .with_pdf_backing(pdf)
+            .with_tool_call_policy(pdf)
             .build();
             let result = execute_tool(dispatcher, &ctx, &func_name, &func_args);
             results.push((call_id, func_name, func_args, result));
@@ -367,11 +367,11 @@ mod tests {
     #[test]
     fn test_tool_executor_new() {
         let config = AgentConfig::default();
-        let bus = Bus::new();
+        let bus = std::sync::Arc::new(crate::agent::tools::observer::DefaultFileObserver);
         let browser_session = std::sync::Arc::new(crate::app::session::BrowserSession::with_resolved(
             config.browser().clone(),
         ));
-        let pdf_backing = std::sync::Arc::new(crate::app::session::PdfBackingTracker::new());
+        let policy = std::sync::Arc::new(crate::agent::tools::policy::DefaultToolCallPolicy);
         let tm = std::sync::Arc::new(arc_swap::ArcSwap::from_pointee(AgentToolContext::new(
             crate::agent::tools::registry::ToolRegistry::new(),
         )));
@@ -379,7 +379,7 @@ mod tests {
         let cache = std::sync::Arc::new(crate::agent::tools::registry::cache::ToolCache::new());
         let executor = ToolExecutorBuilder::new(std::sync::Arc::new(config), bus, cache, tm)
             .with_browser_session(browser_session)
-            .with_pdf_backing(pdf_backing)
+            .with_tool_call_policy(policy)
             .with_uuid_gen(uuid_gen)
             .build();
         assert!(executor.config.models().is_empty());

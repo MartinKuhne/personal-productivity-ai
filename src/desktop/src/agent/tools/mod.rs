@@ -13,6 +13,8 @@ pub mod blocking;
 #[cfg(feature = "browser")]
 pub mod browser;
 pub mod context;
+pub mod observer;
+pub mod policy;
 pub mod csv_db;
 pub mod descriptor;
 #[cfg(test)]

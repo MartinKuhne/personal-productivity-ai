@@ -1,6 +1,6 @@
 //! YAML front-matter tools — `read_yaml_header` and `write_yaml_header` for title, summary, tags, date, etc.
 
-use crate::bus::events::file::FileEventProducer;
+
 use crate::markdown::Document;
 use serde_norway::{Mapping, Value};
 use std::path::Path;
@@ -35,7 +35,7 @@ pub fn tool_write_yaml_header(
     summary: Option<&str>,
     tags: Option<Vec<String>>,
     header_date: Option<&str>,
-    producer: &FileEventProducer,
+    producer: &dyn crate::agent::tools::observer::OnFileChanged,
 ) -> Result<crate::agent::tools::dtos::WriteYamlHeaderResponse, String> {
     let existed = Path::new(path_str).exists();
     let current_content = std::fs::read_to_string(path_str).unwrap_or_else(|_| "".to_string());
@@ -89,9 +89,9 @@ pub fn tool_write_yaml_header(
                     // matching event so consumers (directory tree,
                     // tag manager) refresh.
                     if existed {
-                        producer.publish_updated(path);
+                        producer.on_file_changed(path, crate::bus::events::file::FileEventKind::Updated);
                     } else {
-                        producer.publish_discovered(path);
+                        producer.on_file_changed(path, crate::bus::events::file::FileEventKind::Discovered);
                     }
                     Ok(crate::agent::tools::dtos::WriteYamlHeaderResponse {
                         result: "YAML header written successfully.".to_string(),
@@ -122,8 +122,8 @@ mod tests {
     /// A producer that publishes to a throwaway bus. Tests don't
     /// need to consume the events — they only care about the
     /// success/failure of the underlying file operation.
-    fn noop_producer() -> FileEventProducer {
-        FileEventProducer::new(Bus::new())
+    fn noop_producer() -> std::sync::Arc<dyn crate::agent::tools::observer::OnFileChanged> {
+        std::sync::Arc::new(crate::agent::tools::observer::DefaultFileObserver)
     }
 
     #[test]
@@ -161,7 +161,7 @@ mod tests {
             Some("Test summary"),
             Some(vec!["tag1".to_string(), "tag2".to_string()]),
             Some("2024-01-01T00:00:00Z"),
-            &producer,
+            &*producer,
         )
         .unwrap()
         .result;
@@ -208,7 +208,7 @@ mod tests {
             None,
             None,
             None,
-            &producer,
+            &*producer,
         )
         .unwrap()
         .result;
@@ -233,7 +233,7 @@ mod tests {
             None,
             None,
             None,
-            &producer,
+            &*producer,
         )
         .unwrap()
         .result;
@@ -246,9 +246,11 @@ mod tests {
     fn test_tool_write_yaml_header_publishes_discovered_for_new_file() {
         // A brand new file must publish a Discovered event so the
         // directory tree and tag manager pick it up.
-        let bus: Bus<FileEvent> = Bus::new();
+        let bus = crate::bus::core::Bus::new();
         let reader = bus.subscribe();
-        let producer = FileEventProducer::new(bus.clone());
+        let producer: std::sync::Arc<dyn crate::agent::tools::observer::OnFileChanged> = std::sync::Arc::new(crate::app::session::bus_observer::AppFileObserver::new(bus.clone()));
+        
+        let producer = std::sync::Arc::new(crate::agent::tools::observer::DefaultFileObserver);
 
         let dir = tempdir().unwrap();
         let file_path = dir.path().join("brand_new.md");
@@ -259,10 +261,11 @@ mod tests {
             None,
             None,
             None,
-            &producer,
+            &*producer,
         )
         .unwrap();
 
+        let mut reader = bus.subscribe();
         let event = reader
             .recv_timeout(std::time::Duration::from_millis(100))
             .unwrap();
@@ -274,9 +277,11 @@ mod tests {
     fn test_tool_write_yaml_header_publishes_updated_for_existing_file() {
         // An existing file getting its header rewritten must
         // publish an Updated event.
-        let bus: Bus<FileEvent> = Bus::new();
+        let bus = crate::bus::core::Bus::new();
         let reader = bus.subscribe();
-        let producer = FileEventProducer::new(bus.clone());
+        let producer: std::sync::Arc<dyn crate::agent::tools::observer::OnFileChanged> = std::sync::Arc::new(crate::app::session::bus_observer::AppFileObserver::new(bus.clone()));
+        
+        let producer = std::sync::Arc::new(crate::agent::tools::observer::DefaultFileObserver);
 
         let dir = tempdir().unwrap();
         let file_path = dir.path().join("existing.md");
@@ -288,10 +293,11 @@ mod tests {
             None,
             None,
             None,
-            &producer,
+            &*producer,
         )
         .unwrap();
 
+        let mut reader = bus.subscribe();
         let event = reader
             .recv_timeout(std::time::Duration::from_millis(100))
             .unwrap();

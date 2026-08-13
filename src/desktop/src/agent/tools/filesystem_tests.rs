@@ -6,8 +6,8 @@ use crate::bus::core::Bus;
 /// A producer that publishes to a throwaway bus. Tests don't
 /// need to consume the events — they only care about the
 /// success/failure of the underlying file operation.
-fn noop_producer() -> FileEventProducer {
-    FileEventProducer::new(Bus::new())
+fn noop_producer() -> std::sync::Arc<dyn crate::agent::tools::observer::OnFileChanged> {
+    std::sync::Arc::new(crate::agent::tools::observer::DefaultFileObserver)
 }
 
 #[test]
@@ -21,7 +21,7 @@ fn test_tool_patch_note() {
         file_path.to_str().unwrap(),
         "Old Text",
         "New Text",
-        &producer,
+        &*producer,
     )
     .unwrap()
     .result;
@@ -42,7 +42,7 @@ fn test_tool_patch_note_not_found() {
         file_path.to_str().unwrap(),
         "Missing Text",
         "New Text",
-        &producer,
+        &*producer,
     );
     assert_eq!(
         result.unwrap_err(),
@@ -146,7 +146,7 @@ fn test_tool_create_note() {
     let result = tool_create_note(
         file_path.to_str().unwrap(),
         "---\ntitle: Test\n---\n# Hello",
-        &producer,
+        &*producer,
     )
     .unwrap()
     .result;
@@ -164,7 +164,7 @@ fn test_tool_create_note_invalid_extension() {
     let file_path = dir.path().join("new.txt");
 
     let producer = noop_producer();
-    let result = tool_create_note(file_path.to_str().unwrap(), "content", &producer);
+    let result = tool_create_note(file_path.to_str().unwrap(), "content", &*producer);
     assert_eq!(
         result.unwrap_err(),
         "Only markdown files (.md) are allowed."
@@ -180,7 +180,7 @@ fn test_tool_create_note_invalid_yaml() {
     let result = tool_create_note(
         file_path.to_str().unwrap(),
         "---\ninvalid: [unclosed\n---\nContent",
-        &producer,
+        &*producer,
     );
     assert_eq!(
         result.unwrap_err(),
@@ -198,7 +198,7 @@ fn test_tool_create_note_fails_if_exists() {
     let result = tool_create_note(
         file_path.to_str().unwrap(),
         "---\ntitle: Test\n---\n# Hello",
-        &producer,
+        &*producer,
     );
     assert_eq!(
         result.unwrap_err(),
@@ -221,7 +221,7 @@ fn test_tool_insert_into_note() {
         file_path.to_str().unwrap(),
         1,
         &["New Line".to_string()],
-        &producer,
+        &*producer,
     )
     .unwrap()
     .result;
@@ -243,7 +243,7 @@ fn test_tool_insert_into_note_at_top() {
         file_path.to_str().unwrap(),
         0,
         &["New".to_string()],
-        &producer,
+        &*producer,
     );
     assert!(result.is_ok());
 
@@ -263,7 +263,7 @@ fn test_tool_insert_into_note_at_end() {
         file_path.to_str().unwrap(),
         2,
         &["New".to_string()],
-        &producer,
+        &*producer,
     );
     assert!(result.is_ok());
 
@@ -283,7 +283,7 @@ fn test_tool_insert_into_note_out_of_range() {
         file_path.to_str().unwrap(),
         5,
         &["New".to_string()],
-        &producer,
+        &*producer,
     );
     assert_eq!(result.unwrap_err(), "Offset out of range.");
 }
@@ -505,7 +505,7 @@ fn test_tool_create_note_rejects_markdown_extension() {
     let file_path = dir.path().join("new.markdown");
 
     let producer = noop_producer();
-    let result = tool_create_note(file_path.to_str().unwrap(), "# Hello", &producer);
+    let result = tool_create_note(file_path.to_str().unwrap(), "# Hello", &*producer);
     // Should reject .markdown extension
     assert_eq!(
         result.unwrap_err(),

@@ -37,15 +37,13 @@ fn execute_patch_note(
     let input: dtos::PatchNoteInput =
         serde_json::from_str(args).map_err(|e| format!("Invalid args: {}", e))?;
     let path = ctx.resolve_writable(&input.path)?;
-    if ctx.is_pdf_backed(&path) {
-        return Err(crate::ui::strings::PDF_BACKED_ERROR.to_string());
-    }
-    let producer = ctx.file_event_producer();
+    ctx.check_write_allowed(&path)?;
+    let observer = ctx.file_observer();
     crate::agent::tools::filesystem::tool_patch_note(
         &path.to_string_lossy(),
         &input.old_string,
         &input.new_string,
-        &producer,
+        &*observer,
     )
     .map(|r| {
         serde_json::to_value(r).unwrap_or_else(|e| serde_json::json!({"error": e.to_string()}))
@@ -306,14 +304,12 @@ fn execute_create_note(
     let input: dtos::CreateNoteInput =
         serde_json::from_str(args).map_err(|e| format!("Invalid args: {}", e))?;
     let path = ctx.resolve_writable(&input.path)?;
-    if ctx.is_pdf_backed(&path) {
-        return Err(crate::ui::strings::PDF_BACKED_ERROR.to_string());
-    }
-    let producer = ctx.file_event_producer();
+    ctx.check_write_allowed(&path)?;
+    let observer = ctx.file_observer();
     crate::agent::tools::filesystem::tool_create_note(
         &path.to_string_lossy(),
         &input.content,
-        &producer,
+        &*observer,
     )
     .map(|r| {
         serde_json::to_value(r).unwrap_or_else(|e| serde_json::json!({"error": e.to_string()}))
@@ -339,15 +335,13 @@ fn execute_insert_into_note(
     let input: dtos::InsertIntoNoteInput =
         serde_json::from_str(args).map_err(|e| format!("Invalid args: {}", e))?;
     let path = ctx.resolve_writable(&input.path)?;
-    if ctx.is_pdf_backed(&path) {
-        return Err(crate::ui::strings::PDF_BACKED_ERROR.to_string());
-    }
-    let producer = ctx.file_event_producer();
+    ctx.check_write_allowed(&path)?;
+    let observer = ctx.file_observer();
     crate::agent::tools::filesystem::tool_insert_into_note(
         &path.to_string_lossy(),
         input.offset,
         &input.lines,
-        &producer,
+        &*observer,
     )
     .map(|r| {
         serde_json::to_value(r).unwrap_or_else(|e| serde_json::json!({"error": e.to_string()}))

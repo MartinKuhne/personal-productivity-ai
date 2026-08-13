@@ -40,12 +40,13 @@ fn run_agent_inner(ctx: AgentContext) {
         .get_schema(&ctx.agent_config, &ctx.prompt);
     let executor = crate::agent::tool_executor::ToolExecutorBuilder::new(
         std::sync::Arc::new(ctx.agent_config.clone()),
-        ctx.file_event_bus.clone(),
+        ctx.file_observer.clone(),
         ctx.cache.clone(),
         ctx.tool_context.clone(),
     )
     .with_browser_session(ctx.browser_session.clone())
-    .with_pdf_backing(ctx.pdf_backing.clone())
+    .with_tool_call_policy(ctx.tool_call_policy.clone())
+    
     .with_uuid_gen(ctx.uuid_gen.clone())
     .build();
 

@@ -55,14 +55,14 @@ fn execute_write_yaml_header(
     let input: dtos::WriteYamlHeaderInput =
         serde_json::from_str(args).map_err(|e| format!("Invalid args: {}", e))?;
     let path = ctx.resolve_writable(&input.path)?;
-    let producer = ctx.file_event_producer();
+    let observer = ctx.file_observer();
     crate::agent::tools::yaml_header::tool_write_yaml_header(
         &path.to_string_lossy(),
         input.title.as_deref(),
         input.summary.as_deref(),
         input.tags,
         input.header_date.as_deref(),
-        &producer,
+        &*observer,
     )
     .map(|r| {
         serde_json::to_value(r).unwrap_or_else(|e| serde_json::json!({"error": e.to_string()}))

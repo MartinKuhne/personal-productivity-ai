@@ -38,7 +38,7 @@ fn make_ctx(config: AgentConfig) -> (AgentContext, BusReader<AgentEvent>) {
     let session_id = uuid::Uuid::new_v4();
     let ctx =
         crate::agent::context::AgentContextBuilder::new(config, session_id, "Hello".to_string())
-            .with_buses(Bus::new())
+            .with_file_observer(std::sync::Arc::new(crate::agent::tools::observer::DefaultFileObserver))
             .with_observer(std::sync::Arc::new(
                 crate::app::events::BusAgentEventObserver::new(session_id, agent_event_bus.clone()),
             ))

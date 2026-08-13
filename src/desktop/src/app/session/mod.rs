@@ -35,6 +35,7 @@
 //! rationale.
 
 pub mod browser_session;
+pub mod bus_observer;
 pub mod pdf_backing_tracker;
 
 pub use browser_session::{BrowserSession, PageHandle, SessionError};

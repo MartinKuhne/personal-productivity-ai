@@ -9,11 +9,11 @@ use std::collections::HashSet;
 /// fresh driver thread.
 fn make_session() -> AgentSession {
     AgentSession::new(
-        crate::bus::core::Bus::new(),
+        std::sync::Arc::new(crate::agent::tools::observer::DefaultFileObserver),
         Arc::new(crate::app::session::BrowserSession::with_resolved(
             AgentConfig::default().browser().clone(),
         )),
-        Arc::new(crate::app::session::PdfBackingTracker::new()),
+        Arc::new(crate::agent::tools::policy::DefaultToolCallPolicy),
         Arc::new(arc_swap::ArcSwap::from_pointee(
             crate::agent::AgentToolContext::new(crate::agent::tools::registry::ToolRegistry::new()),
         )),
