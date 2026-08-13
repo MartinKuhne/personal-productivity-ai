@@ -75,14 +75,10 @@ fn build_dispatch_context() -> ToolContext {
     let config = AppConfig::default();
     let browser_session = Arc::new(BrowserSession::new(&config));
     let pdf_backing = Arc::new(PdfBackingTracker::new());
-    let tool_manager = Arc::new(arc_swap::ArcSwap::from_pointee(
-        crate::agent::tools::registry::ToolRegistry::new(),
-    ));
     let uuid_gen: Arc<dyn crate::utils::uuid::UuidGenerator> = Arc::new(SystemUuidGenerator);
     crate::agent::tools::context::ToolContextBuilder::new(
         Arc::new(config),
         Bus::new(),
-        tool_manager,
         Arc::new(crate::agent::tools::registry::cache::ToolCache::new()),
         uuid_gen,
     )
@@ -103,7 +99,8 @@ fn execute_with_timeout(ctx: ToolContext, name: String, args: String) -> Option<
     let _ = thread::Builder::new()
         .name("dispatch-proptest".to_string())
         .spawn(move || {
-            let result = execute_tool(&ctx, &name, &args);
+            let dispatcher = crate::agent::tools::registry::ToolRegistry::new();
+            let result = execute_tool(&dispatcher, &ctx, &name, &args);
             let _ = tx.send(result);
         });
     rx.recv_timeout(DISPATCH_TIMEOUT).ok()
@@ -153,7 +150,8 @@ proptest! {
         // it always returns, never unwinds (because of the
         // `catch_unwind` in production), and the return
         // is a JSON object with a `status` field.
-        let result = execute_tool(&ctx, &name, &args);
+        let dispatcher = crate::agent::tools::registry::ToolRegistry::new();
+        let result = execute_tool(&dispatcher, &ctx, &name, &args);
 
         // The return must be a non-empty String. A regression
         // that returned an empty string would break the agent

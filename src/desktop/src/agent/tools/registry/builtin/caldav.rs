@@ -2,33 +2,49 @@
 
 use crate::agent::tools::Tool;
 use crate::agent::tools::context::ToolContext;
+use crate::agent::tools::descriptor::{ConfigPredicate, ToolConfigSpec, ToolDescriptor};
 use crate::agent::tools::dtos;
-use crate::config::AppConfig;
-use std::any::TypeId;
+use crate::agent::tools::registry::groups::{InternalToolGroup, ToolGroupId};
+use std::sync::OnceLock;
 
-use super::json_schema;
 use super::strings;
+
+/// Build a `ToolConfigSpec` for a calendar-family tool: enabled iff
+/// `tool_groups.calendar` is on and at least one CalDAV client is
+/// configured.
+fn calendar_spec() -> ToolConfigSpec {
+    let group = ToolGroupId::Internal(InternalToolGroup::Calendar);
+    ToolConfigSpec {
+        group: Some(group),
+        requires: vec![ConfigPredicate::CalDavClientsPresent],
+        prompt_rule: None,
+    }
+}
+
+fn build_calendar_descriptor<I>(
+    name: &'static str,
+    description: &'static str,
+    safety: crate::agent::tools::Safety,
+) -> ToolDescriptor
+where
+    I: schemars::JsonSchema + 'static,
+{
+    let group = ToolGroupId::Internal(InternalToolGroup::Calendar);
+    ToolDescriptor::new::<I>(name, description, safety, calendar_spec(), group)
+}
 
 /// Tool that searches calendar items by keyword.
 pub(crate) struct SearchCalendarTool;
 impl Tool for SearchCalendarTool {
-    fn name(&self) -> &'static str {
-        "search_calendar"
-    }
-    fn description(&self) -> &'static str {
-        strings::SEARCH_CALENDAR_DESCRIPTION
-    }
-    fn input_type(&self) -> TypeId {
-        TypeId::of::<dtos::SearchCalendarInput>()
-    }
-    fn parameters_schema(&self) -> serde_json::Value {
-        json_schema::<dtos::SearchCalendarInput>()
-    }
-    fn is_enabled(&self, config: &AppConfig, _: &str) -> bool {
-        config.tool_groups.calendar && !config.caldav_clients.is_empty()
-    }
-    fn safety(&self) -> crate::agent::tools::Safety {
-        crate::agent::tools::Safety::ReadOnly
+    fn descriptor(&self) -> &ToolDescriptor {
+        static D: OnceLock<ToolDescriptor> = OnceLock::new();
+        D.get_or_init(|| {
+            build_calendar_descriptor::<dtos::SearchCalendarInput>(
+                "search_calendar",
+                strings::SEARCH_CALENDAR_DESCRIPTION,
+                crate::agent::tools::Safety::ReadOnly,
+            )
+        })
     }
     fn execute(&self, ctx: &ToolContext, args: &str) -> Result<serde_json::Value, String> {
         let input: dtos::SearchCalendarInput =
@@ -42,23 +58,15 @@ impl Tool for SearchCalendarTool {
 /// Tool that gets calendar items by date range.
 pub(crate) struct GetCalendarTool;
 impl Tool for GetCalendarTool {
-    fn name(&self) -> &'static str {
-        "get_calendar"
-    }
-    fn description(&self) -> &'static str {
-        strings::GET_CALENDAR_DESCRIPTION
-    }
-    fn input_type(&self) -> TypeId {
-        TypeId::of::<dtos::GetCalendarInput>()
-    }
-    fn parameters_schema(&self) -> serde_json::Value {
-        json_schema::<dtos::GetCalendarInput>()
-    }
-    fn is_enabled(&self, config: &AppConfig, _: &str) -> bool {
-        config.tool_groups.calendar && !config.caldav_clients.is_empty()
-    }
-    fn safety(&self) -> crate::agent::tools::Safety {
-        crate::agent::tools::Safety::ReadOnly
+    fn descriptor(&self) -> &ToolDescriptor {
+        static D: OnceLock<ToolDescriptor> = OnceLock::new();
+        D.get_or_init(|| {
+            build_calendar_descriptor::<dtos::GetCalendarInput>(
+                "get_calendar",
+                strings::GET_CALENDAR_DESCRIPTION,
+                crate::agent::tools::Safety::ReadOnly,
+            )
+        })
     }
     fn execute(&self, ctx: &ToolContext, args: &str) -> Result<serde_json::Value, String> {
         let input: dtos::GetCalendarInput =
@@ -77,23 +85,15 @@ impl Tool for GetCalendarTool {
 /// Tool that gets a specific calendar item by its full href.
 pub(crate) struct GetCalendarItemTool;
 impl Tool for GetCalendarItemTool {
-    fn name(&self) -> &'static str {
-        "get_calendar_item"
-    }
-    fn description(&self) -> &'static str {
-        strings::GET_CALENDAR_ITEM_DESCRIPTION
-    }
-    fn input_type(&self) -> TypeId {
-        TypeId::of::<dtos::GetCalendarItemInput>()
-    }
-    fn parameters_schema(&self) -> serde_json::Value {
-        json_schema::<dtos::GetCalendarItemInput>()
-    }
-    fn is_enabled(&self, config: &AppConfig, _: &str) -> bool {
-        config.tool_groups.calendar && !config.caldav_clients.is_empty()
-    }
-    fn safety(&self) -> crate::agent::tools::Safety {
-        crate::agent::tools::Safety::ReadOnly
+    fn descriptor(&self) -> &ToolDescriptor {
+        static D: OnceLock<ToolDescriptor> = OnceLock::new();
+        D.get_or_init(|| {
+            build_calendar_descriptor::<dtos::GetCalendarItemInput>(
+                "get_calendar_item",
+                strings::GET_CALENDAR_ITEM_DESCRIPTION,
+                crate::agent::tools::Safety::ReadOnly,
+            )
+        })
     }
     fn execute(&self, ctx: &ToolContext, args: &str) -> Result<serde_json::Value, String> {
         let input: dtos::GetCalendarItemInput =
@@ -107,20 +107,15 @@ impl Tool for GetCalendarItemTool {
 /// Tool that adds a new calendar item.
 pub(crate) struct AddCalendarItemTool;
 impl Tool for AddCalendarItemTool {
-    fn name(&self) -> &'static str {
-        "add_calendar_item"
-    }
-    fn description(&self) -> &'static str {
-        strings::ADD_CALENDAR_ITEM_DESCRIPTION
-    }
-    fn input_type(&self) -> TypeId {
-        TypeId::of::<dtos::AddCalendarItemInput>()
-    }
-    fn parameters_schema(&self) -> serde_json::Value {
-        json_schema::<dtos::AddCalendarItemInput>()
-    }
-    fn is_enabled(&self, config: &AppConfig, _: &str) -> bool {
-        config.tool_groups.calendar && !config.caldav_clients.is_empty()
+    fn descriptor(&self) -> &ToolDescriptor {
+        static D: OnceLock<ToolDescriptor> = OnceLock::new();
+        D.get_or_init(|| {
+            build_calendar_descriptor::<dtos::AddCalendarItemInput>(
+                "add_calendar_item",
+                strings::ADD_CALENDAR_ITEM_DESCRIPTION,
+                crate::agent::tools::Safety::Mutating,
+            )
+        })
     }
     fn execute(&self, ctx: &ToolContext, args: &str) -> Result<serde_json::Value, String> {
         let input: dtos::AddCalendarItemInput =
@@ -136,20 +131,15 @@ impl Tool for AddCalendarItemTool {
 /// Tool that updates an existing calendar item.
 pub(crate) struct UpdateCalendarItemTool;
 impl Tool for UpdateCalendarItemTool {
-    fn name(&self) -> &'static str {
-        "update_calendar_item"
-    }
-    fn description(&self) -> &'static str {
-        strings::UPDATE_CALENDAR_ITEM_DESCRIPTION
-    }
-    fn input_type(&self) -> TypeId {
-        TypeId::of::<dtos::UpdateCalendarItemInput>()
-    }
-    fn parameters_schema(&self) -> serde_json::Value {
-        json_schema::<dtos::UpdateCalendarItemInput>()
-    }
-    fn is_enabled(&self, config: &AppConfig, _: &str) -> bool {
-        config.tool_groups.calendar && !config.caldav_clients.is_empty()
+    fn descriptor(&self) -> &ToolDescriptor {
+        static D: OnceLock<ToolDescriptor> = OnceLock::new();
+        D.get_or_init(|| {
+            build_calendar_descriptor::<dtos::UpdateCalendarItemInput>(
+                "update_calendar_item",
+                strings::UPDATE_CALENDAR_ITEM_DESCRIPTION,
+                crate::agent::tools::Safety::Mutating,
+            )
+        })
     }
     fn execute(&self, ctx: &ToolContext, args: &str) -> Result<serde_json::Value, String> {
         let input: dtos::UpdateCalendarItemInput =
@@ -170,20 +160,15 @@ impl Tool for UpdateCalendarItemTool {
 /// Tool that deletes a calendar item.
 pub(crate) struct DeleteCalendarItemTool;
 impl Tool for DeleteCalendarItemTool {
-    fn name(&self) -> &'static str {
-        "delete_calendar_item"
-    }
-    fn description(&self) -> &'static str {
-        strings::DELETE_CALENDAR_ITEM_DESCRIPTION
-    }
-    fn input_type(&self) -> TypeId {
-        TypeId::of::<dtos::DeleteCalendarItemInput>()
-    }
-    fn parameters_schema(&self) -> serde_json::Value {
-        json_schema::<dtos::DeleteCalendarItemInput>()
-    }
-    fn is_enabled(&self, config: &AppConfig, _: &str) -> bool {
-        config.tool_groups.calendar && !config.caldav_clients.is_empty()
+    fn descriptor(&self) -> &ToolDescriptor {
+        static D: OnceLock<ToolDescriptor> = OnceLock::new();
+        D.get_or_init(|| {
+            build_calendar_descriptor::<dtos::DeleteCalendarItemInput>(
+                "delete_calendar_item",
+                strings::DELETE_CALENDAR_ITEM_DESCRIPTION,
+                crate::agent::tools::Safety::Mutating,
+            )
+        })
     }
     fn execute(&self, ctx: &ToolContext, args: &str) -> Result<serde_json::Value, String> {
         let input: dtos::DeleteCalendarItemInput =

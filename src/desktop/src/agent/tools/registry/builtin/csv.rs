@@ -2,41 +2,44 @@
 
 use crate::agent::tools::Tool;
 use crate::agent::tools::context::ToolContext;
-use crate::config::AppConfig;
-use std::any::TypeId;
+use crate::agent::tools::descriptor::{ToolConfigSpec, ToolDescriptor};
+use crate::agent::tools::registry::groups::{InternalToolGroup, ToolGroupId};
+use std::sync::OnceLock;
 
-use super::json_schema;
 use super::strings;
 
-fn csv_tools_enabled(prompt: &str) -> bool {
-    let p = prompt.to_lowercase();
-    p.contains("table")
-        || p.contains("csv")
-        || p.contains("database")
-        || p.contains("add_rows")
-        || p.contains("delete_rows")
-        || p.contains("create_csv")
-        || p.contains("list_csv")
-        || p.contains("query")
+/// Spec for the CSV family. The group must be on AND the prompt
+/// must mention one of the CSV keywords (TOOL-001). The rule
+/// itself is application-level knowledge; see
+/// [`crate::app::batch::prompt_rules::csv_prompt_rule`].
+fn csv_spec() -> ToolConfigSpec {
+    crate::app::batch::prompt_rules::csv_prompt_rule()
+}
+
+fn build_csv_descriptor<I>(
+    name: &'static str,
+    description: &'static str,
+    safety: crate::agent::tools::Safety,
+) -> ToolDescriptor
+where
+    I: schemars::JsonSchema + 'static,
+{
+    let group = ToolGroupId::Internal(InternalToolGroup::CsvDb);
+    ToolDescriptor::new::<I>(name, description, safety, csv_spec(), group)
 }
 
 /// Tool that creates a new CSV file database.
 pub(crate) struct CsvCreateTool;
 impl Tool for CsvCreateTool {
-    fn name(&self) -> &'static str {
-        "create_csv"
-    }
-    fn description(&self) -> &'static str {
-        strings::CREATE_CSV_DESCRIPTION
-    }
-    fn input_type(&self) -> TypeId {
-        TypeId::of::<crate::agent::tools::csv_db::schema::CreateCsvInput>()
-    }
-    fn parameters_schema(&self) -> serde_json::Value {
-        json_schema::<crate::agent::tools::csv_db::schema::CreateCsvInput>()
-    }
-    fn is_enabled(&self, config: &AppConfig, prompt: &str) -> bool {
-        config.tool_groups.csv_db && csv_tools_enabled(prompt)
+    fn descriptor(&self) -> &ToolDescriptor {
+        static D: OnceLock<ToolDescriptor> = OnceLock::new();
+        D.get_or_init(|| {
+            build_csv_descriptor::<crate::agent::tools::csv_db::schema::CreateCsvInput>(
+                "create_csv",
+                strings::CREATE_CSV_DESCRIPTION,
+                crate::agent::tools::Safety::Mutating,
+            )
+        })
     }
     fn execute(&self, ctx: &ToolContext, args: &str) -> Result<serde_json::Value, String> {
         let input: crate::agent::tools::csv_db::schema::CreateCsvInput =
@@ -50,23 +53,15 @@ impl Tool for CsvCreateTool {
 /// Tool that lists all CSV file databases.
 pub(crate) struct CsvListTool;
 impl Tool for CsvListTool {
-    fn name(&self) -> &'static str {
-        "list_csv"
-    }
-    fn description(&self) -> &'static str {
-        strings::LIST_CSV_DESCRIPTION
-    }
-    fn input_type(&self) -> TypeId {
-        TypeId::of::<crate::agent::tools::csv_db::schema::ListCsvInput>()
-    }
-    fn parameters_schema(&self) -> serde_json::Value {
-        json_schema::<crate::agent::tools::csv_db::schema::ListCsvInput>()
-    }
-    fn is_enabled(&self, config: &AppConfig, prompt: &str) -> bool {
-        config.tool_groups.csv_db && csv_tools_enabled(prompt)
-    }
-    fn safety(&self) -> crate::agent::tools::Safety {
-        crate::agent::tools::Safety::ReadOnly
+    fn descriptor(&self) -> &ToolDescriptor {
+        static D: OnceLock<ToolDescriptor> = OnceLock::new();
+        D.get_or_init(|| {
+            build_csv_descriptor::<crate::agent::tools::csv_db::schema::ListCsvInput>(
+                "list_csv",
+                strings::LIST_CSV_DESCRIPTION,
+                crate::agent::tools::Safety::ReadOnly,
+            )
+        })
     }
     fn execute(&self, ctx: &ToolContext, args: &str) -> Result<serde_json::Value, String> {
         let input: crate::agent::tools::csv_db::schema::ListCsvInput =
@@ -80,20 +75,15 @@ impl Tool for CsvListTool {
 /// Tool that adds rows to a CSV file database.
 pub(crate) struct CsvAddRowsTool;
 impl Tool for CsvAddRowsTool {
-    fn name(&self) -> &'static str {
-        "add_rows"
-    }
-    fn description(&self) -> &'static str {
-        strings::ADD_ROWS_DESCRIPTION
-    }
-    fn input_type(&self) -> TypeId {
-        TypeId::of::<crate::agent::tools::csv_db::schema::AddRowsInput>()
-    }
-    fn parameters_schema(&self) -> serde_json::Value {
-        json_schema::<crate::agent::tools::csv_db::schema::AddRowsInput>()
-    }
-    fn is_enabled(&self, config: &AppConfig, prompt: &str) -> bool {
-        config.tool_groups.csv_db && csv_tools_enabled(prompt)
+    fn descriptor(&self) -> &ToolDescriptor {
+        static D: OnceLock<ToolDescriptor> = OnceLock::new();
+        D.get_or_init(|| {
+            build_csv_descriptor::<crate::agent::tools::csv_db::schema::AddRowsInput>(
+                "add_rows",
+                strings::ADD_ROWS_DESCRIPTION,
+                crate::agent::tools::Safety::Mutating,
+            )
+        })
     }
     fn execute(&self, ctx: &ToolContext, args: &str) -> Result<serde_json::Value, String> {
         let input: crate::agent::tools::csv_db::schema::AddRowsInput =
@@ -107,20 +97,15 @@ impl Tool for CsvAddRowsTool {
 /// Tool that deletes rows from a CSV file database based on a predicate.
 pub(crate) struct CsvDeleteRowsTool;
 impl Tool for CsvDeleteRowsTool {
-    fn name(&self) -> &'static str {
-        "delete_rows"
-    }
-    fn description(&self) -> &'static str {
-        strings::DELETE_ROWS_DESCRIPTION
-    }
-    fn input_type(&self) -> TypeId {
-        TypeId::of::<crate::agent::tools::csv_db::schema::DeleteRowsInput>()
-    }
-    fn parameters_schema(&self) -> serde_json::Value {
-        json_schema::<crate::agent::tools::csv_db::schema::DeleteRowsInput>()
-    }
-    fn is_enabled(&self, config: &AppConfig, prompt: &str) -> bool {
-        config.tool_groups.csv_db && csv_tools_enabled(prompt)
+    fn descriptor(&self) -> &ToolDescriptor {
+        static D: OnceLock<ToolDescriptor> = OnceLock::new();
+        D.get_or_init(|| {
+            build_csv_descriptor::<crate::agent::tools::csv_db::schema::DeleteRowsInput>(
+                "delete_rows",
+                strings::DELETE_ROWS_DESCRIPTION,
+                crate::agent::tools::Safety::Mutating,
+            )
+        })
     }
     fn execute(&self, ctx: &ToolContext, args: &str) -> Result<serde_json::Value, String> {
         let input: crate::agent::tools::csv_db::schema::DeleteRowsInput =
@@ -134,23 +119,15 @@ impl Tool for CsvDeleteRowsTool {
 /// Tool that queries a CSV file database using an evalexpr predicate.
 pub(crate) struct CsvQueryTool;
 impl Tool for CsvQueryTool {
-    fn name(&self) -> &'static str {
-        "query"
-    }
-    fn description(&self) -> &'static str {
-        strings::QUERY_DESCRIPTION
-    }
-    fn input_type(&self) -> TypeId {
-        TypeId::of::<crate::agent::tools::csv_db::schema::QueryRequest>()
-    }
-    fn parameters_schema(&self) -> serde_json::Value {
-        json_schema::<crate::agent::tools::csv_db::schema::QueryRequest>()
-    }
-    fn is_enabled(&self, config: &AppConfig, prompt: &str) -> bool {
-        config.tool_groups.csv_db && csv_tools_enabled(prompt)
-    }
-    fn safety(&self) -> crate::agent::tools::Safety {
-        crate::agent::tools::Safety::ReadOnly
+    fn descriptor(&self) -> &ToolDescriptor {
+        static D: OnceLock<ToolDescriptor> = OnceLock::new();
+        D.get_or_init(|| {
+            build_csv_descriptor::<crate::agent::tools::csv_db::schema::QueryRequest>(
+                "query",
+                strings::QUERY_DESCRIPTION,
+                crate::agent::tools::Safety::ReadOnly,
+            )
+        })
     }
     fn execute(&self, ctx: &ToolContext, args: &str) -> Result<serde_json::Value, String> {
         let input: crate::agent::tools::csv_db::schema::QueryRequest =

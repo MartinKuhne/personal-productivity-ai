@@ -2,30 +2,22 @@
 
 use crate::agent::tools::Tool;
 use crate::agent::tools::context::ToolContext;
+use crate::agent::tools::descriptor::{ToolConfigSpec, ToolDescriptor};
 use crate::agent::tools::dtos;
-use crate::config::AppConfig;
-use std::any::TypeId;
+use crate::agent::tools::registry::groups::{InternalToolGroup, ToolGroupId};
+use std::sync::OnceLock;
 
-use super::json_schema;
 use super::strings;
 
 /// Tool that delegates web searches and fetches to a sub-agent.
 pub(crate) struct WebDelegateTool;
 impl Tool for WebDelegateTool {
-    fn name(&self) -> &'static str {
-        "web_delegate"
-    }
-    fn description(&self) -> &'static str {
-        strings::WEB_DELEGATE_DESCRIPTION
-    }
-    fn input_type(&self) -> TypeId {
-        TypeId::of::<dtos::WebDelegateInput>()
-    }
-    fn parameters_schema(&self) -> serde_json::Value {
-        json_schema::<dtos::WebDelegateInput>()
-    }
-    fn is_enabled(&self, config: &AppConfig, _: &str) -> bool {
-        config.tool_groups.web
+    crate::tool_descriptor! {
+        name: "web_delegate",
+        desc: strings::WEB_DELEGATE_DESCRIPTION,
+        input: dtos::WebDelegateInput,
+        safety: crate::agent::tools::Safety::Mutating,
+        group: Web,
     }
     fn execute(&self, ctx: &ToolContext, args: &str) -> Result<serde_json::Value, String> {
         let input: dtos::WebDelegateInput =
@@ -41,23 +33,12 @@ impl Tool for WebDelegateTool {
 /// Tool that fetches content from a URL and converts to Markdown.
 pub(crate) struct WebFetchTool;
 impl Tool for WebFetchTool {
-    fn name(&self) -> &'static str {
-        "web_fetch"
-    }
-    fn description(&self) -> &'static str {
-        strings::WEB_FETCH_DESCRIPTION
-    }
-    fn input_type(&self) -> TypeId {
-        TypeId::of::<dtos::WebFetchInput>()
-    }
-    fn parameters_schema(&self) -> serde_json::Value {
-        json_schema::<dtos::WebFetchInput>()
-    }
-    fn is_enabled(&self, config: &AppConfig, _: &str) -> bool {
-        config.tool_groups.web
-    }
-    fn safety(&self) -> crate::agent::tools::Safety {
-        crate::agent::tools::Safety::ReadOnly
+    crate::tool_descriptor! {
+        name: "web_fetch",
+        desc: strings::WEB_FETCH_DESCRIPTION,
+        input: dtos::WebFetchInput,
+        safety: crate::agent::tools::Safety::ReadOnly,
+        group: Web,
     }
     fn execute(&self, _ctx: &ToolContext, args: &str) -> Result<serde_json::Value, String> {
         let input: dtos::WebFetchInput =
@@ -72,36 +53,40 @@ impl Tool for WebFetchTool {
 }
 
 /// Tool that searches the web using SearXNG.
+///
+/// The descriptor carries `ToolConfigSpec::group_plus_searxng` so
+/// the tool is hidden when no `searxng_url` is configured. Because
+/// [`crate::agent::tools::Tool::is_enabled`] now derives from the
+/// spec, the duplicated `if let Some(url) = &ctx.config.searxng_url`
+/// branch in `execute` is gone — `is_enabled` is the single source
+/// of truth. The single `as_deref().ok_or_else` below just unwraps
+/// the value the function needs; if the spec is ever bypassed it
+/// surfaces a clear error instead of panicking.
 pub(crate) struct WebSearchTool;
 impl Tool for WebSearchTool {
-    fn name(&self) -> &'static str {
-        "web_search"
-    }
-    fn description(&self) -> &'static str {
-        strings::WEB_SEARCH_DESCRIPTION
-    }
-    fn input_type(&self) -> TypeId {
-        TypeId::of::<dtos::WebSearchInput>()
-    }
-    fn parameters_schema(&self) -> serde_json::Value {
-        json_schema::<dtos::WebSearchInput>()
-    }
-    fn is_enabled(&self, config: &AppConfig, _: &str) -> bool {
-        config.tool_groups.web && config.searxng_url.is_some()
-    }
-    fn safety(&self) -> crate::agent::tools::Safety {
-        crate::agent::tools::Safety::ReadOnly
+    fn descriptor(&self) -> &ToolDescriptor {
+        static D: OnceLock<ToolDescriptor> = OnceLock::new();
+        D.get_or_init(|| {
+            let group = ToolGroupId::Internal(InternalToolGroup::Web);
+            ToolDescriptor::new::<dtos::WebSearchInput>(
+                "web_search",
+                strings::WEB_SEARCH_DESCRIPTION,
+                crate::agent::tools::Safety::ReadOnly,
+                ToolConfigSpec::group_plus_searxng(group.clone()),
+                group,
+            )
+        })
     }
     fn execute(&self, ctx: &ToolContext, args: &str) -> Result<serde_json::Value, String> {
         let input: dtos::WebSearchInput =
             serde_json::from_str(args).map_err(|e| format!("Invalid args: {}", e))?;
-        if let Some(url) = &ctx.config.searxng_url {
-            crate::agent::tools::web::tool_web_search(url, &input.query).map(|r| {
-                serde_json::to_value(r)
-                    .unwrap_or_else(|e| serde_json::json!({"error": e.to_string()}))
-            })
-        } else {
-            Err("web_search tool is disabled (no SearXNG URL configured).".to_string())
-        }
+        let url = ctx
+            .config
+            .searxng_url
+            .as_deref()
+            .ok_or_else(|| "web_search is disabled (no SearXNG URL configured).".to_string())?;
+        crate::agent::tools::web::tool_web_search(url, &input.query).map(|r| {
+            serde_json::to_value(r).unwrap_or_else(|e| serde_json::json!({"error": e.to_string()}))
+        })
     }
 }

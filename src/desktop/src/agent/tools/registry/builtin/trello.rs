@@ -2,11 +2,10 @@
 
 use crate::agent::tools::Tool;
 use crate::agent::tools::context::ToolContext;
-use crate::config::AppConfig;
+use crate::agent::tools::descriptor::ToolConfigSpec;
 use serde::{Deserialize, Serialize};
-use std::any::TypeId;
+use std::sync::OnceLock;
 
-use super::json_schema;
 use super::strings;
 
 #[derive(Serialize, Deserialize, Clone, schemars::JsonSchema)]
@@ -36,8 +35,33 @@ pub struct TrelloUpdateCardInput {
     pub id_list: Option<String>,
 }
 
-fn trello_tools_enabled(config: &AppConfig) -> bool {
-    config.tool_groups.trello && config.trello_client.is_some()
+/// Spec for the Trello family. Enabled when the trello group is on
+/// AND `trello_client` is configured.
+fn trello_spec() -> ToolConfigSpec {
+    let group = crate::agent::tools::registry::groups::ToolGroupId::Internal(
+        crate::agent::tools::registry::groups::InternalToolGroup::Trello,
+    );
+    ToolConfigSpec::group_plus_trello(group)
+}
+
+fn build_trello_descriptor<I>(
+    name: &'static str,
+    description: &'static str,
+    safety: crate::agent::tools::Safety,
+) -> crate::agent::tools::descriptor::ToolDescriptor
+where
+    I: schemars::JsonSchema + 'static,
+{
+    let group = crate::agent::tools::registry::groups::ToolGroupId::Internal(
+        crate::agent::tools::registry::groups::InternalToolGroup::Trello,
+    );
+    crate::agent::tools::descriptor::ToolDescriptor::new::<I>(
+        name,
+        description,
+        safety,
+        trello_spec(),
+        group,
+    )
 }
 
 /// Pull the [`crate::config::TrelloClientConfig`] out of [`ToolContext`] and
@@ -58,23 +82,15 @@ fn trello_request(
 
 pub(crate) struct TrelloGetBoardsTool;
 impl Tool for TrelloGetBoardsTool {
-    fn name(&self) -> &'static str {
-        "trello_get_boards"
-    }
-    fn description(&self) -> &'static str {
-        strings::GET_BOARDS_DESCRIPTION
-    }
-    fn input_type(&self) -> TypeId {
-        TypeId::of::<TrelloEmptyInput>()
-    }
-    fn parameters_schema(&self) -> serde_json::Value {
-        json_schema::<TrelloEmptyInput>()
-    }
-    fn is_enabled(&self, config: &AppConfig, _prompt: &str) -> bool {
-        trello_tools_enabled(config)
-    }
-    fn safety(&self) -> crate::agent::tools::Safety {
-        crate::agent::tools::Safety::ReadOnly
+    fn descriptor(&self) -> &crate::agent::tools::descriptor::ToolDescriptor {
+        static D: OnceLock<crate::agent::tools::descriptor::ToolDescriptor> = OnceLock::new();
+        D.get_or_init(|| {
+            build_trello_descriptor::<TrelloEmptyInput>(
+                "trello_get_boards",
+                strings::GET_BOARDS_DESCRIPTION,
+                crate::agent::tools::Safety::ReadOnly,
+            )
+        })
     }
     fn execute(&self, ctx: &ToolContext, args: &str) -> Result<serde_json::Value, String> {
         let _input: TrelloEmptyInput = serde_json::from_str(args).unwrap_or(TrelloEmptyInput {});
@@ -84,23 +100,15 @@ impl Tool for TrelloGetBoardsTool {
 
 pub(crate) struct TrelloGetBoardTool;
 impl Tool for TrelloGetBoardTool {
-    fn name(&self) -> &'static str {
-        "trello_get_board"
-    }
-    fn description(&self) -> &'static str {
-        strings::GET_BOARD_DESCRIPTION
-    }
-    fn input_type(&self) -> TypeId {
-        TypeId::of::<TrelloIdInput>()
-    }
-    fn parameters_schema(&self) -> serde_json::Value {
-        json_schema::<TrelloIdInput>()
-    }
-    fn is_enabled(&self, config: &AppConfig, _prompt: &str) -> bool {
-        trello_tools_enabled(config)
-    }
-    fn safety(&self) -> crate::agent::tools::Safety {
-        crate::agent::tools::Safety::ReadOnly
+    fn descriptor(&self) -> &crate::agent::tools::descriptor::ToolDescriptor {
+        static D: OnceLock<crate::agent::tools::descriptor::ToolDescriptor> = OnceLock::new();
+        D.get_or_init(|| {
+            build_trello_descriptor::<TrelloIdInput>(
+                "trello_get_board",
+                strings::GET_BOARD_DESCRIPTION,
+                crate::agent::tools::Safety::ReadOnly,
+            )
+        })
     }
     fn execute(&self, ctx: &ToolContext, args: &str) -> Result<serde_json::Value, String> {
         let input: TrelloIdInput = serde_json::from_str(args).map_err(|e| e.to_string())?;
@@ -115,23 +123,15 @@ impl Tool for TrelloGetBoardTool {
 
 pub(crate) struct TrelloGetListsTool;
 impl Tool for TrelloGetListsTool {
-    fn name(&self) -> &'static str {
-        "trello_get_lists"
-    }
-    fn description(&self) -> &'static str {
-        strings::GET_LISTS_DESCRIPTION
-    }
-    fn input_type(&self) -> TypeId {
-        TypeId::of::<TrelloIdInput>()
-    }
-    fn parameters_schema(&self) -> serde_json::Value {
-        json_schema::<TrelloIdInput>()
-    }
-    fn is_enabled(&self, config: &AppConfig, _prompt: &str) -> bool {
-        trello_tools_enabled(config)
-    }
-    fn safety(&self) -> crate::agent::tools::Safety {
-        crate::agent::tools::Safety::ReadOnly
+    fn descriptor(&self) -> &crate::agent::tools::descriptor::ToolDescriptor {
+        static D: OnceLock<crate::agent::tools::descriptor::ToolDescriptor> = OnceLock::new();
+        D.get_or_init(|| {
+            build_trello_descriptor::<TrelloIdInput>(
+                "trello_get_lists",
+                strings::GET_LISTS_DESCRIPTION,
+                crate::agent::tools::Safety::ReadOnly,
+            )
+        })
     }
     fn execute(&self, ctx: &ToolContext, args: &str) -> Result<serde_json::Value, String> {
         let input: TrelloIdInput = serde_json::from_str(args).map_err(|e| e.to_string())?;
@@ -146,23 +146,15 @@ impl Tool for TrelloGetListsTool {
 
 pub(crate) struct TrelloGetCardsTool;
 impl Tool for TrelloGetCardsTool {
-    fn name(&self) -> &'static str {
-        "trello_get_cards"
-    }
-    fn description(&self) -> &'static str {
-        strings::GET_CARDS_DESCRIPTION
-    }
-    fn input_type(&self) -> TypeId {
-        TypeId::of::<TrelloIdInput>()
-    }
-    fn parameters_schema(&self) -> serde_json::Value {
-        json_schema::<TrelloIdInput>()
-    }
-    fn is_enabled(&self, config: &AppConfig, _prompt: &str) -> bool {
-        trello_tools_enabled(config)
-    }
-    fn safety(&self) -> crate::agent::tools::Safety {
-        crate::agent::tools::Safety::ReadOnly
+    fn descriptor(&self) -> &crate::agent::tools::descriptor::ToolDescriptor {
+        static D: OnceLock<crate::agent::tools::descriptor::ToolDescriptor> = OnceLock::new();
+        D.get_or_init(|| {
+            build_trello_descriptor::<TrelloIdInput>(
+                "trello_get_cards",
+                strings::GET_CARDS_DESCRIPTION,
+                crate::agent::tools::Safety::ReadOnly,
+            )
+        })
     }
     fn execute(&self, ctx: &ToolContext, args: &str) -> Result<serde_json::Value, String> {
         let input: TrelloIdInput = serde_json::from_str(args).map_err(|e| e.to_string())?;
@@ -177,20 +169,15 @@ impl Tool for TrelloGetCardsTool {
 
 pub(crate) struct TrelloCreateCardTool;
 impl Tool for TrelloCreateCardTool {
-    fn name(&self) -> &'static str {
-        "trello_create_card"
-    }
-    fn description(&self) -> &'static str {
-        strings::CREATE_CARD_DESCRIPTION
-    }
-    fn input_type(&self) -> TypeId {
-        TypeId::of::<TrelloCreateCardInput>()
-    }
-    fn parameters_schema(&self) -> serde_json::Value {
-        json_schema::<TrelloCreateCardInput>()
-    }
-    fn is_enabled(&self, config: &AppConfig, _prompt: &str) -> bool {
-        trello_tools_enabled(config)
+    fn descriptor(&self) -> &crate::agent::tools::descriptor::ToolDescriptor {
+        static D: OnceLock<crate::agent::tools::descriptor::ToolDescriptor> = OnceLock::new();
+        D.get_or_init(|| {
+            build_trello_descriptor::<TrelloCreateCardInput>(
+                "trello_create_card",
+                strings::CREATE_CARD_DESCRIPTION,
+                crate::agent::tools::Safety::Mutating,
+            )
+        })
     }
     fn execute(&self, ctx: &ToolContext, args: &str) -> Result<serde_json::Value, String> {
         let mut input: TrelloCreateCardInput =
@@ -255,20 +242,15 @@ impl Tool for TrelloCreateCardTool {
 
 pub(crate) struct TrelloUpdateCardTool;
 impl Tool for TrelloUpdateCardTool {
-    fn name(&self) -> &'static str {
-        "trello_update_card"
-    }
-    fn description(&self) -> &'static str {
-        strings::UPDATE_CARD_DESCRIPTION
-    }
-    fn input_type(&self) -> TypeId {
-        TypeId::of::<TrelloUpdateCardInput>()
-    }
-    fn parameters_schema(&self) -> serde_json::Value {
-        json_schema::<TrelloUpdateCardInput>()
-    }
-    fn is_enabled(&self, config: &AppConfig, _prompt: &str) -> bool {
-        trello_tools_enabled(config)
+    fn descriptor(&self) -> &crate::agent::tools::descriptor::ToolDescriptor {
+        static D: OnceLock<crate::agent::tools::descriptor::ToolDescriptor> = OnceLock::new();
+        D.get_or_init(|| {
+            build_trello_descriptor::<TrelloUpdateCardInput>(
+                "trello_update_card",
+                strings::UPDATE_CARD_DESCRIPTION,
+                crate::agent::tools::Safety::Mutating,
+            )
+        })
     }
     fn execute(&self, ctx: &ToolContext, args: &str) -> Result<serde_json::Value, String> {
         let input: TrelloUpdateCardInput = serde_json::from_str(args).map_err(|e| e.to_string())?;
@@ -285,20 +267,15 @@ impl Tool for TrelloUpdateCardTool {
 
 pub(crate) struct TrelloDeleteCardTool;
 impl Tool for TrelloDeleteCardTool {
-    fn name(&self) -> &'static str {
-        "trello_delete_card"
-    }
-    fn description(&self) -> &'static str {
-        strings::DELETE_CARD_DESCRIPTION
-    }
-    fn input_type(&self) -> TypeId {
-        TypeId::of::<TrelloIdInput>()
-    }
-    fn parameters_schema(&self) -> serde_json::Value {
-        json_schema::<TrelloIdInput>()
-    }
-    fn is_enabled(&self, config: &AppConfig, _prompt: &str) -> bool {
-        trello_tools_enabled(config)
+    fn descriptor(&self) -> &crate::agent::tools::descriptor::ToolDescriptor {
+        static D: OnceLock<crate::agent::tools::descriptor::ToolDescriptor> = OnceLock::new();
+        D.get_or_init(|| {
+            build_trello_descriptor::<TrelloIdInput>(
+                "trello_delete_card",
+                strings::DELETE_CARD_DESCRIPTION,
+                crate::agent::tools::Safety::Mutating,
+            )
+        })
     }
     fn execute(&self, ctx: &ToolContext, args: &str) -> Result<serde_json::Value, String> {
         let input: TrelloIdInput = serde_json::from_str(args).map_err(|e| e.to_string())?;
@@ -316,8 +293,11 @@ mod tests {
     use super::*;
     use crate::config::{AppConfig, ToolGroupsConfig, TrelloClient};
 
+    /// Spec-level test mirroring the previous `trello_tools_enabled`
+    /// behaviour: the spec must gate the tool on the group flag AND
+    /// the presence of `trello_client`.
     #[test]
-    fn test_trello_tools_enabled() {
+    fn test_trello_spec_gating() {
         let mut config = AppConfig {
             tool_groups: ToolGroupsConfig {
                 trello: true,
@@ -326,15 +306,15 @@ mod tests {
             ..Default::default()
         };
         config.trello_client = None;
-        assert!(!trello_tools_enabled(&config));
+        assert!(!trello_spec().is_enabled_for(&config, ""));
 
         config.trello_client = Some(TrelloClient {
             token: "t".to_string(),
             api_key: "s".to_string(),
         });
-        assert!(trello_tools_enabled(&config));
+        assert!(trello_spec().is_enabled_for(&config, ""));
 
         config.tool_groups.trello = false;
-        assert!(!trello_tools_enabled(&config));
+        assert!(!trello_spec().is_enabled_for(&config, ""));
     }
 }

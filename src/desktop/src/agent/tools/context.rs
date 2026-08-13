@@ -87,6 +87,12 @@ impl EventPublisher {
 /// [`ToolExecutor`](crate::agent::tool_executor::ToolExecutor)
 /// (which needs an owned handle per `spawn_blocking`) work
 /// without `unsafe` casts.
+///
+/// Note: the context deliberately does **not** carry a back-reference
+/// to the tool registry. The executor, which dispatches to tools,
+/// owns the registry and the dispatcher; the per-call context only
+/// exposes the services a tool actually needs. This breaks the
+/// implicit context ↔ registry cycle the previous design had.
 #[derive(Clone)]
 pub struct ToolContext {
     pub config: Arc<AppConfig>,
@@ -103,8 +109,6 @@ pub struct ToolContext {
     pub browser_session: Arc<BrowserSession>,
     pub pdf_backing: std::sync::Arc<crate::app::session::PdfBackingTracker>,
     pub cache: std::sync::Arc<crate::agent::tools::registry::cache::ToolCache>,
-    pub tool_manager:
-        std::sync::Arc<arc_swap::ArcSwap<crate::agent::tools::registry::ToolRegistry>>,
     pub uuid_gen: std::sync::Arc<dyn crate::utils::uuid::UuidGenerator>,
 }
 
@@ -158,7 +162,6 @@ const _: fn() = || {
 pub struct ToolContextBuilder {
     config: Arc<AppConfig>,
     file_event_bus: Bus<FileEvent>,
-    tool_manager: std::sync::Arc<arc_swap::ArcSwap<crate::agent::tools::registry::ToolRegistry>>,
     cache: std::sync::Arc<crate::agent::tools::registry::cache::ToolCache>,
     uuid_gen: std::sync::Arc<dyn crate::utils::uuid::UuidGenerator>,
     browser_session: Option<Arc<BrowserSession>>,
@@ -169,16 +172,12 @@ impl ToolContextBuilder {
     pub fn new(
         config: Arc<AppConfig>,
         file_event_bus: Bus<FileEvent>,
-        tool_manager: std::sync::Arc<
-            arc_swap::ArcSwap<crate::agent::tools::registry::ToolRegistry>,
-        >,
         cache: std::sync::Arc<crate::agent::tools::registry::cache::ToolCache>,
         uuid_gen: std::sync::Arc<dyn crate::utils::uuid::UuidGenerator>,
     ) -> Self {
         Self {
             config,
             file_event_bus,
-            tool_manager,
             cache,
             uuid_gen,
             browser_session: None,
@@ -213,7 +212,6 @@ impl ToolContextBuilder {
                 .pdf_backing
                 .unwrap_or_else(|| Arc::new(crate::app::session::PdfBackingTracker::new())),
             cache: self.cache,
-            tool_manager: self.tool_manager,
             uuid_gen: self.uuid_gen,
         }
     }

@@ -2,33 +2,40 @@
 
 use crate::agent::tools::Tool;
 use crate::agent::tools::context::ToolContext;
+use crate::agent::tools::descriptor::{ConfigPredicate, ToolConfigSpec, ToolDescriptor};
 use crate::agent::tools::dtos;
-use crate::config::AppConfig;
-use std::any::TypeId;
+use crate::agent::tools::registry::groups::{InternalToolGroup, ToolGroupId};
+use std::sync::OnceLock;
 
-use super::json_schema;
 use super::strings;
+
+/// Build a `ToolConfigSpec` for an email-family tool: enabled iff
+/// `tool_groups.email` is on and at least one JMAP client is
+/// configured.
+fn email_spec() -> ToolConfigSpec {
+    let group = ToolGroupId::Internal(InternalToolGroup::Email);
+    ToolConfigSpec {
+        group: Some(group),
+        requires: vec![ConfigPredicate::JmapClientsPresent],
+        prompt_rule: None,
+    }
+}
 
 /// Tool that searches email by keyword, folder, date range, etc.
 pub(crate) struct SearchEmailTool;
 impl Tool for SearchEmailTool {
-    fn name(&self) -> &'static str {
-        "search_email"
-    }
-    fn description(&self) -> &'static str {
-        strings::SEARCH_EMAIL_DESCRIPTION
-    }
-    fn input_type(&self) -> TypeId {
-        TypeId::of::<dtos::SearchEmailInput>()
-    }
-    fn parameters_schema(&self) -> serde_json::Value {
-        json_schema::<dtos::SearchEmailInput>()
-    }
-    fn is_enabled(&self, config: &AppConfig, _: &str) -> bool {
-        config.tool_groups.email && !config.jmap_clients.is_empty()
-    }
-    fn safety(&self) -> crate::agent::tools::Safety {
-        crate::agent::tools::Safety::ReadOnly
+    fn descriptor(&self) -> &ToolDescriptor {
+        static D: OnceLock<ToolDescriptor> = OnceLock::new();
+        D.get_or_init(|| {
+            let group = ToolGroupId::Internal(InternalToolGroup::Email);
+            ToolDescriptor::new::<dtos::SearchEmailInput>(
+                "search_email",
+                strings::SEARCH_EMAIL_DESCRIPTION,
+                crate::agent::tools::Safety::ReadOnly,
+                email_spec(),
+                group,
+            )
+        })
     }
     fn execute(&self, ctx: &ToolContext, args: &str) -> Result<serde_json::Value, String> {
         let input: dtos::SearchEmailInput =
@@ -58,23 +65,18 @@ impl Tool for SearchEmailTool {
 /// Tool that gets an email by ID.
 pub(crate) struct GetEmailByIdTool;
 impl Tool for GetEmailByIdTool {
-    fn name(&self) -> &'static str {
-        "get_email_by_id"
-    }
-    fn description(&self) -> &'static str {
-        strings::GET_EMAIL_BY_ID_DESCRIPTION
-    }
-    fn input_type(&self) -> TypeId {
-        TypeId::of::<dtos::GetEmailByIdInput>()
-    }
-    fn parameters_schema(&self) -> serde_json::Value {
-        json_schema::<dtos::GetEmailByIdInput>()
-    }
-    fn is_enabled(&self, config: &AppConfig, _: &str) -> bool {
-        config.tool_groups.email && !config.jmap_clients.is_empty()
-    }
-    fn safety(&self) -> crate::agent::tools::Safety {
-        crate::agent::tools::Safety::ReadOnly
+    fn descriptor(&self) -> &ToolDescriptor {
+        static D: OnceLock<ToolDescriptor> = OnceLock::new();
+        D.get_or_init(|| {
+            let group = ToolGroupId::Internal(InternalToolGroup::Email);
+            ToolDescriptor::new::<dtos::GetEmailByIdInput>(
+                "get_email_by_id",
+                strings::GET_EMAIL_BY_ID_DESCRIPTION,
+                crate::agent::tools::Safety::ReadOnly,
+                email_spec(),
+                group,
+            )
+        })
     }
     fn execute(&self, ctx: &ToolContext, args: &str) -> Result<serde_json::Value, String> {
         let input: dtos::GetEmailByIdInput =
@@ -88,20 +90,18 @@ impl Tool for GetEmailByIdTool {
 /// Tool that sends an email via JMAP.
 pub(crate) struct SendEmailTool;
 impl Tool for SendEmailTool {
-    fn name(&self) -> &'static str {
-        "send_email"
-    }
-    fn description(&self) -> &'static str {
-        strings::SEND_EMAIL_DESCRIPTION
-    }
-    fn input_type(&self) -> TypeId {
-        TypeId::of::<dtos::SendEmailInput>()
-    }
-    fn parameters_schema(&self) -> serde_json::Value {
-        json_schema::<dtos::SendEmailInput>()
-    }
-    fn is_enabled(&self, config: &AppConfig, _: &str) -> bool {
-        config.tool_groups.email && !config.jmap_clients.is_empty()
+    fn descriptor(&self) -> &ToolDescriptor {
+        static D: OnceLock<ToolDescriptor> = OnceLock::new();
+        D.get_or_init(|| {
+            let group = ToolGroupId::Internal(InternalToolGroup::Email);
+            ToolDescriptor::new::<dtos::SendEmailInput>(
+                "send_email",
+                strings::SEND_EMAIL_DESCRIPTION,
+                crate::agent::tools::Safety::Mutating,
+                email_spec(),
+                group,
+            )
+        })
     }
     fn execute(&self, ctx: &ToolContext, args: &str) -> Result<serde_json::Value, String> {
         let input: dtos::SendEmailInput =

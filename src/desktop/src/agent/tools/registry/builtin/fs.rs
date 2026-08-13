@@ -4,11 +4,8 @@ use crate::agent::tools::Tool;
 use crate::agent::tools::context::ToolContext;
 use crate::agent::tools::dtos;
 use crate::app::vfs::behaviour::ContentLibraryExt;
-use crate::config::AppConfig;
-use std::any::TypeId;
 
 use super::super::pagination::paginate_in_range;
-use super::json_schema;
 use super::strings;
 
 /// Default `limit` for the `read_lines` tool. 0-indexed line slice;
@@ -20,20 +17,12 @@ const DEFAULT_WINDOW_NOTE_LIMIT: usize = 100;
 /// Tool that replaces exact text occurrences in a file.
 pub(crate) struct PatchNoteTool;
 impl Tool for PatchNoteTool {
-    fn name(&self) -> &'static str {
-        "patch_note"
-    }
-    fn description(&self) -> &'static str {
-        strings::PATCH_NOTE_DESCRIPTION
-    }
-    fn input_type(&self) -> TypeId {
-        TypeId::of::<dtos::PatchNoteInput>()
-    }
-    fn parameters_schema(&self) -> serde_json::Value {
-        json_schema::<dtos::PatchNoteInput>()
-    }
-    fn is_enabled(&self, config: &AppConfig, _: &str) -> bool {
-        config.tool_groups.filesystem
+    crate::tool_descriptor! {
+        name: "patch_note",
+        desc: strings::PATCH_NOTE_DESCRIPTION,
+        input: dtos::PatchNoteInput,
+        safety: crate::agent::tools::Safety::Mutating,
+        group: Filesystem,
     }
     fn execute(&self, ctx: &ToolContext, args: &str) -> Result<serde_json::Value, String> {
         let input: dtos::PatchNoteInput =
@@ -58,23 +47,12 @@ impl Tool for PatchNoteTool {
 /// Tool that greps query strings case-insensitively across Markdown files.
 pub(crate) struct SearchNotesTool;
 impl Tool for SearchNotesTool {
-    fn name(&self) -> &'static str {
-        "search_notes"
-    }
-    fn description(&self) -> &'static str {
-        strings::SEARCH_NOTES_DESCRIPTION
-    }
-    fn input_type(&self) -> TypeId {
-        TypeId::of::<dtos::SearchNotesInput>()
-    }
-    fn parameters_schema(&self) -> serde_json::Value {
-        json_schema::<dtos::SearchNotesInput>()
-    }
-    fn is_enabled(&self, config: &AppConfig, _: &str) -> bool {
-        config.tool_groups.filesystem
-    }
-    fn safety(&self) -> crate::agent::tools::Safety {
-        crate::agent::tools::Safety::ReadOnly
+    crate::tool_descriptor! {
+        name: "search_notes",
+        desc: strings::SEARCH_NOTES_DESCRIPTION,
+        input: dtos::SearchNotesInput,
+        safety: crate::agent::tools::Safety::ReadOnly,
+        group: Filesystem,
     }
     fn execute(&self, ctx: &ToolContext, args: &str) -> Result<serde_json::Value, String> {
         let input: dtos::SearchNotesInput =
@@ -117,23 +95,12 @@ impl Tool for SearchNotesTool {
 /// Tool that reads all unique tags defined in front-matter headers.
 pub(crate) struct ReadTagsTool;
 impl Tool for ReadTagsTool {
-    fn name(&self) -> &'static str {
-        "read_tags"
-    }
-    fn description(&self) -> &'static str {
-        strings::READ_TAGS_DESCRIPTION
-    }
-    fn input_type(&self) -> TypeId {
-        TypeId::of::<dtos::ReadTagsInput>()
-    }
-    fn parameters_schema(&self) -> serde_json::Value {
-        json_schema::<dtos::ReadTagsInput>()
-    }
-    fn is_enabled(&self, config: &AppConfig, _: &str) -> bool {
-        config.tool_groups.filesystem
-    }
-    fn safety(&self) -> crate::agent::tools::Safety {
-        crate::agent::tools::Safety::ReadOnly
+    crate::tool_descriptor! {
+        name: "read_tags",
+        desc: strings::READ_TAGS_DESCRIPTION,
+        input: dtos::ReadTagsInput,
+        safety: crate::agent::tools::Safety::ReadOnly,
+        group: Filesystem,
     }
     fn execute(&self, ctx: &ToolContext, args: &str) -> Result<serde_json::Value, String> {
         let _: dtos::ReadTagsInput =
@@ -156,23 +123,12 @@ impl Tool for ReadTagsTool {
 /// Tool that lists Markdown files containing a specific front-matter tag.
 pub(crate) struct ListNotesByTagTool;
 impl Tool for ListNotesByTagTool {
-    fn name(&self) -> &'static str {
-        "list_notes_by_tag"
-    }
-    fn description(&self) -> &'static str {
-        strings::LIST_NOTES_BY_TAG_DESCRIPTION
-    }
-    fn input_type(&self) -> TypeId {
-        TypeId::of::<dtos::ListNotesByTagInput>()
-    }
-    fn parameters_schema(&self) -> serde_json::Value {
-        json_schema::<dtos::ListNotesByTagInput>()
-    }
-    fn is_enabled(&self, config: &AppConfig, _: &str) -> bool {
-        config.tool_groups.filesystem
-    }
-    fn safety(&self) -> crate::agent::tools::Safety {
-        crate::agent::tools::Safety::ReadOnly
+    crate::tool_descriptor! {
+        name: "list_notes_by_tag",
+        desc: strings::LIST_NOTES_BY_TAG_DESCRIPTION,
+        input: dtos::ListNotesByTagInput,
+        safety: crate::agent::tools::Safety::ReadOnly,
+        group: Filesystem,
     }
     fn execute(&self, ctx: &ToolContext, args: &str) -> Result<serde_json::Value, String> {
         let input: dtos::ListNotesByTagInput =
@@ -211,23 +167,12 @@ impl Tool for ListNotesByTagTool {
 /// Tool that lists Markdown files in a directory.
 pub(crate) struct ListNotesTool;
 impl Tool for ListNotesTool {
-    fn name(&self) -> &'static str {
-        "list_notes"
-    }
-    fn description(&self) -> &'static str {
-        strings::LIST_NOTES_DESCRIPTION
-    }
-    fn input_type(&self) -> TypeId {
-        TypeId::of::<dtos::ListNotesInput>()
-    }
-    fn parameters_schema(&self) -> serde_json::Value {
-        json_schema::<dtos::ListNotesInput>()
-    }
-    fn is_enabled(&self, config: &AppConfig, _: &str) -> bool {
-        config.tool_groups.filesystem
-    }
-    fn safety(&self) -> crate::agent::tools::Safety {
-        crate::agent::tools::Safety::ReadOnly
+    crate::tool_descriptor! {
+        name: "list_notes",
+        desc: strings::LIST_NOTES_DESCRIPTION,
+        input: dtos::ListNotesInput,
+        safety: crate::agent::tools::Safety::ReadOnly,
+        group: Filesystem,
     }
     fn execute(&self, ctx: &ToolContext, args: &str) -> Result<serde_json::Value, String> {
         let input: dtos::ListNotesInput =
@@ -270,23 +215,12 @@ impl Tool for ListNotesTool {
 /// Tool that reads the entire content of a file.
 pub(crate) struct ReadNoteTool;
 impl Tool for ReadNoteTool {
-    fn name(&self) -> &'static str {
-        "read_note"
-    }
-    fn description(&self) -> &'static str {
-        strings::READ_NOTE_DESCRIPTION
-    }
-    fn input_type(&self) -> TypeId {
-        TypeId::of::<dtos::ReadNoteInput>()
-    }
-    fn parameters_schema(&self) -> serde_json::Value {
-        json_schema::<dtos::ReadNoteInput>()
-    }
-    fn is_enabled(&self, config: &AppConfig, _: &str) -> bool {
-        config.tool_groups.filesystem
-    }
-    fn safety(&self) -> crate::agent::tools::Safety {
-        crate::agent::tools::Safety::ReadOnly
+    crate::tool_descriptor! {
+        name: "read_note",
+        desc: strings::READ_NOTE_DESCRIPTION,
+        input: dtos::ReadNoteInput,
+        safety: crate::agent::tools::Safety::ReadOnly,
+        group: Filesystem,
     }
     fn execute(&self, ctx: &ToolContext, args: &str) -> Result<serde_json::Value, String> {
         let input: dtos::ReadNoteInput =
@@ -303,23 +237,12 @@ impl Tool for ReadNoteTool {
 /// Tool that reads a contiguous slice of lines from a file.
 pub(crate) struct WindowNoteTool;
 impl Tool for WindowNoteTool {
-    fn name(&self) -> &'static str {
-        "window_note"
-    }
-    fn description(&self) -> &'static str {
-        strings::WINDOW_NOTE_DESCRIPTION
-    }
-    fn input_type(&self) -> TypeId {
-        TypeId::of::<dtos::WindowNoteInput>()
-    }
-    fn parameters_schema(&self) -> serde_json::Value {
-        json_schema::<dtos::WindowNoteInput>()
-    }
-    fn is_enabled(&self, config: &AppConfig, _: &str) -> bool {
-        config.tool_groups.filesystem
-    }
-    fn safety(&self) -> crate::agent::tools::Safety {
-        crate::agent::tools::Safety::ReadOnly
+    crate::tool_descriptor! {
+        name: "window_note",
+        desc: strings::WINDOW_NOTE_DESCRIPTION,
+        input: dtos::WindowNoteInput,
+        safety: crate::agent::tools::Safety::ReadOnly,
+        group: Filesystem,
     }
     fn execute(&self, ctx: &ToolContext, args: &str) -> Result<serde_json::Value, String> {
         let input: dtos::WindowNoteInput =
@@ -340,20 +263,12 @@ impl Tool for WindowNoteTool {
 /// Tool that creates a new file.
 pub(crate) struct CreateNoteTool;
 impl Tool for CreateNoteTool {
-    fn name(&self) -> &'static str {
-        "create_note"
-    }
-    fn description(&self) -> &'static str {
-        strings::CREATE_NOTE_DESCRIPTION
-    }
-    fn input_type(&self) -> TypeId {
-        TypeId::of::<dtos::CreateNoteInput>()
-    }
-    fn parameters_schema(&self) -> serde_json::Value {
-        json_schema::<dtos::CreateNoteInput>()
-    }
-    fn is_enabled(&self, config: &AppConfig, _: &str) -> bool {
-        config.tool_groups.filesystem
+    crate::tool_descriptor! {
+        name: "create_note",
+        desc: strings::CREATE_NOTE_DESCRIPTION,
+        input: dtos::CreateNoteInput,
+        safety: crate::agent::tools::Safety::Mutating,
+        group: Filesystem,
     }
     fn execute(&self, ctx: &ToolContext, args: &str) -> Result<serde_json::Value, String> {
         let input: dtos::CreateNoteInput =
@@ -377,20 +292,12 @@ impl Tool for CreateNoteTool {
 /// Tool that inserts lines into a file at a 0-indexed offset.
 pub(crate) struct InsertIntoNoteTool;
 impl Tool for InsertIntoNoteTool {
-    fn name(&self) -> &'static str {
-        "insert_into_note"
-    }
-    fn description(&self) -> &'static str {
-        strings::INSERT_INTO_NOTE_DESCRIPTION
-    }
-    fn input_type(&self) -> TypeId {
-        TypeId::of::<dtos::InsertIntoNoteInput>()
-    }
-    fn parameters_schema(&self) -> serde_json::Value {
-        json_schema::<dtos::InsertIntoNoteInput>()
-    }
-    fn is_enabled(&self, config: &AppConfig, _: &str) -> bool {
-        config.tool_groups.filesystem
+    crate::tool_descriptor! {
+        name: "insert_into_note",
+        desc: strings::INSERT_INTO_NOTE_DESCRIPTION,
+        input: dtos::InsertIntoNoteInput,
+        safety: crate::agent::tools::Safety::Mutating,
+        group: Filesystem,
     }
     fn execute(&self, ctx: &ToolContext, args: &str) -> Result<serde_json::Value, String> {
         let input: dtos::InsertIntoNoteInput =

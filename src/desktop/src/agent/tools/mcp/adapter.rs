@@ -5,12 +5,12 @@
 //! work (transports, sessions, OAuth) is delegated to
 //! [`crate::integrations::mcp::McpClients`].
 
-use std::any::TypeId;
-use std::sync::Arc;
+use std::sync::OnceLock;
 
+use crate::agent::tools::Tool;
 use crate::agent::tools::context::ToolContext;
-use crate::agent::tools::{Safety, Tool};
-use crate::config::AppConfig;
+use crate::agent::tools::descriptor::{ToolConfigSpec, ToolDescriptor};
+use crate::agent::tools::registry::groups::ToolGroupId;
 use crate::integrations::mcp::{DynamicToolSource, McpClients};
 
 /// Adapter implementing [`Tool`] for an external MCP server tool.
@@ -19,22 +19,23 @@ pub struct McpToolAdapter {
     name: String,
     description: String,
     parameters: serde_json::Value,
-    manager: Arc<dyn DynamicToolSource>,
+    manager: std::sync::Arc<dyn DynamicToolSource>,
+    /// Lazily-initialised descriptor. The `Box` is leaked inside
+    /// the `OnceLock` so the returned `&ToolDescriptor` has a
+    /// `'static`-ish lifetime tied to the adapter instance. MCP
+    /// tools live for the lifetime of the process, so the leak
+    /// is bounded.
+    descriptor_cell: OnceLock<Box<ToolDescriptor>>,
 }
 
 impl McpToolAdapter {
     /// Constructs a new [`McpToolAdapter`].
-    ///
-    /// The public signature is pinned to [`McpClients`] so
-    /// existing callers do not need to change; the adapter widens
-    /// the concrete type internally so it can also be constructed
-    /// from any [`DynamicToolSource`] back-end.
     pub fn new(
         server_name: impl Into<String>,
         name: impl Into<String>,
         description: impl Into<String>,
         parameters: serde_json::Value,
-        manager: Arc<McpClients>,
+        manager: std::sync::Arc<McpClients>,
     ) -> Self {
         Self {
             server_name: server_name.into(),
@@ -42,17 +43,17 @@ impl McpToolAdapter {
             description: description.into(),
             parameters,
             manager,
+            descriptor_cell: OnceLock::new(),
         }
     }
 
     /// Construct from any [`DynamicToolSource`] back-end.
-    /// Preferred by the registry after the P0-1 split.
     pub fn from_dynamic_source(
         server_name: impl Into<String>,
         name: impl Into<String>,
         description: impl Into<String>,
         parameters: serde_json::Value,
-        manager: Arc<dyn DynamicToolSource>,
+        manager: std::sync::Arc<dyn DynamicToolSource>,
     ) -> Self {
         Self {
             server_name: server_name.into(),
@@ -60,6 +61,7 @@ impl McpToolAdapter {
             description: description.into(),
             parameters,
             manager,
+            descriptor_cell: OnceLock::new(),
         }
     }
 
@@ -70,31 +72,22 @@ impl McpToolAdapter {
 }
 
 impl Tool for McpToolAdapter {
-    fn name(&self) -> &str {
-        &self.name
-    }
-
-    fn description(&self) -> &str {
-        &self.description
-    }
-
-    fn input_type(&self) -> TypeId {
-        TypeId::of::<serde_json::Value>()
-    }
-
-    fn parameters_schema(&self) -> serde_json::Value {
-        self.parameters.clone()
-    }
-
-    fn is_enabled(&self, config: &AppConfig, _prompt: &str) -> bool {
-        config
-            .mcp_servers
-            .get(&self.server_name)
-            .is_some_and(|entry| entry.is_enabled())
-    }
-
-    fn safety(&self) -> Safety {
-        Safety::Mutating
+    fn descriptor(&self) -> &ToolDescriptor {
+        self.descriptor_cell
+            .get_or_init(|| {
+                Box::new(ToolDescriptor::with_json_schema(
+                    self.name.clone(),
+                    self.description.clone(),
+                    self.parameters.clone(),
+                    crate::agent::tools::Safety::Mutating,
+                    // The group's enable flag is the single source
+                    // of truth for "is this MCP server enabled?";
+                    // see [`crate::agent::tools::descriptor::group_enabled`].
+                    ToolConfigSpec::group_only(ToolGroupId::Mcp(self.server_name.clone())),
+                    ToolGroupId::Mcp(self.server_name.clone()),
+                ))
+            })
+            .as_ref()
     }
 
     fn execute(&self, _ctx: &ToolContext, input_json: &str) -> Result<serde_json::Value, String> {

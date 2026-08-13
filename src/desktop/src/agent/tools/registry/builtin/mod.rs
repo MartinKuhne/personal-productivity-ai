@@ -16,11 +16,6 @@ pub(crate) mod yaml;
 use super::ToolRegistry;
 use super::groups::InternalToolGroup;
 
-/// Generate the JSON Schema for a tool's input DTO.
-pub(crate) fn json_schema<T: schemars::JsonSchema>() -> serde_json::Value {
-    serde_json::to_value(schemars::schema_for!(T)).unwrap()
-}
-
 /// Register every built-in tool into the given manager, tagged with
 /// the group it belongs to.
 pub(crate) fn register_all_builtins(mgr: &mut ToolRegistry) {

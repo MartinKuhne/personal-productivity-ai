@@ -124,8 +124,46 @@ impl ToolExecutor {
         }
         let mut results = self.execute_parallel(&safe_calls);
         results.extend(self.execute_sequential(&unsafe_calls));
+        self.record_tool_errors(&results);
         let side_effects = self.extract_side_effects(&results);
         (results, side_effects)
+    }
+
+    /// Per-TOOL-021: record the most recent execution-kind error on
+    /// each tool's group, or clear it on success. Called once per
+    /// turn after all tool calls have completed. Per-group error
+    /// state is what the UI dialog's "needs attention" badge reads.
+    fn record_tool_errors(&self, results: &[(String, String, String, String)]) {
+        use crate::agent::tools::registry::errors::{ToolErrorKind, ToolGroupError};
+        for (_call_id, func_name, _func_args, result) in results {
+            let group = self.tool_manager.load().tool_group(func_name);
+            let Some(group) = group else {
+                continue;
+            };
+            let ok = serde_json::from_str::<serde_json::Value>(result)
+                .ok()
+                .and_then(|v| v.get("status").and_then(|s| s.as_str()).map(str::to_string))
+                .as_deref()
+                == Some("success");
+            self.tool_manager.rcu(|mgr| {
+                let mut new_mgr = (**mgr).clone();
+                if ok {
+                    new_mgr.clear_error(&group);
+                } else {
+                    let msg = serde_json::from_str::<serde_json::Value>(result)
+                        .ok()
+                        .and_then(|v| {
+                            v.get("message")
+                                .and_then(|m| m.as_str())
+                                .map(str::to_string)
+                        })
+                        .unwrap_or_else(|| "Tool execution failed.".to_string());
+                    new_mgr
+                        .record_error(&group, ToolGroupError::now(ToolErrorKind::Execution, msg));
+                }
+                new_mgr
+            });
+        }
     }
 
     /// Look up a tool by name through the registry and ask it for its
@@ -168,13 +206,14 @@ impl ToolExecutor {
                 let tm = self.tool_manager.clone();
                 let uuid_gen = self.uuid_gen.clone();
                 join_set.spawn_blocking(move || {
+                    let dispatcher = tm.load();
                     let ctx = crate::agent::tools::context::ToolContextBuilder::new(
-                        cfg, bus, tm, cache, uuid_gen,
+                        cfg, bus, cache, uuid_gen,
                     )
                     .with_browser_session(browser)
                     .with_pdf_backing(pdf)
                     .build();
-                    let result = execute_tool(&ctx, &func_name, &func_args);
+                    let result = execute_tool(dispatcher.as_ref(), &ctx, &func_name, &func_args);
                     (call_id, func_name, func_args, result)
                 });
             }
@@ -198,18 +237,17 @@ impl ToolExecutor {
             let func_args = extract_str(tc, &["function", "arguments"]).to_string();
             let browser = self.browser_session.clone();
             let pdf = self.pdf_backing.clone();
-            let tm = self.tool_manager.clone();
+            let dispatcher = self.tool_manager.load();
             let ctx = crate::agent::tools::context::ToolContextBuilder::new(
                 self.config.clone(),
                 self.file_event_bus.clone(),
-                tm,
                 self.cache.clone(),
                 self.uuid_gen.clone(),
             )
             .with_browser_session(browser)
             .with_pdf_backing(pdf)
             .build();
-            let result = execute_tool(&ctx, &func_name, &func_args);
+            let result = execute_tool(dispatcher.as_ref(), &ctx, &func_name, &func_args);
             results.push((call_id, func_name, func_args, result));
         }
         results

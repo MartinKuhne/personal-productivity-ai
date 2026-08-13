@@ -2,7 +2,7 @@
 //!
 //! Each tool's `Tool::execute` runs the underlying Playwright
 //! future on the process-wide Tokio runtime via
-//! [`crate::agent::tools::blocking::block_on`] â€” the same
+//! [`crate::agent::tools::blocking::block_on`] — the same
 //! sync-to-async bridge the CalDAV / CardDAV tools use. Mutating
 //! tools trigger a `save_storage()` on the
 //! [`crate::app::session::BrowserSession`] so cookies / local
@@ -10,14 +10,14 @@
 //! `doc/planning/browser_tools.md` for the design record and
 //! `src/desktop/Tools.md` for the user-facing catalog.
 
-use super::json_schema;
 use super::strings;
-use crate::agent::tools::Safety;
 use crate::agent::tools::Tool;
 use crate::agent::tools::context::ToolContext;
+use crate::agent::tools::descriptor::ToolConfigSpec;
+use crate::agent::tools::descriptor::ToolDescriptor;
 use crate::agent::tools::dtos;
-use crate::config::AppConfig;
-use std::any::TypeId;
+use crate::agent::tools::registry::groups::{InternalToolGroup, ToolGroupId};
+use std::sync::OnceLock;
 
 /// Convert any error string into a Tool error string. Most
 /// Playwright errors already have decent `Display` impls; we
@@ -26,29 +26,38 @@ fn err(s: impl std::fmt::Display) -> String {
     format!("browser tool failed: {}", s)
 }
 
+fn browser_spec() -> ToolConfigSpec {
+    let group = ToolGroupId::Internal(InternalToolGroup::Browser);
+    ToolConfigSpec::group_only(group)
+}
+
+fn build_browser_descriptor<I>(
+    name: &'static str,
+    description: &'static str,
+    safety: crate::agent::tools::Safety,
+) -> ToolDescriptor
+where
+    I: schemars::JsonSchema + 'static,
+{
+    let group = ToolGroupId::Internal(InternalToolGroup::Browser);
+    ToolDescriptor::new::<I>(name, description, safety, browser_spec(), group)
+}
+
 // ---------------------------------------------------------------------------
 // browser_navigate (BRWS-001, Mutating)
 // ---------------------------------------------------------------------------
 
 pub(crate) struct BrowserNavigateTool;
 impl Tool for BrowserNavigateTool {
-    fn name(&self) -> &'static str {
-        "browser_navigate"
-    }
-    fn description(&self) -> &'static str {
-        strings::BROWSER_NAVIGATE_DESCRIPTION
-    }
-    fn input_type(&self) -> TypeId {
-        TypeId::of::<dtos::BrowserNavigateInput>()
-    }
-    fn parameters_schema(&self) -> serde_json::Value {
-        json_schema::<dtos::BrowserNavigateInput>()
-    }
-    fn is_enabled(&self, config: &AppConfig, _: &str) -> bool {
-        config.tool_groups.browser
-    }
-    fn safety(&self) -> Safety {
-        Safety::Mutating
+    fn descriptor(&self) -> &ToolDescriptor {
+        static D: OnceLock<ToolDescriptor> = OnceLock::new();
+        D.get_or_init(|| {
+            build_browser_descriptor::<dtos::BrowserNavigateInput>(
+                "browser_navigate",
+                strings::BROWSER_NAVIGATE_DESCRIPTION,
+                crate::agent::tools::Safety::Mutating,
+            )
+        })
     }
     fn execute(&self, ctx: &ToolContext, args: &str) -> Result<serde_json::Value, String> {
         let input: dtos::BrowserNavigateInput =
@@ -76,23 +85,15 @@ impl Tool for BrowserNavigateTool {
 
 pub(crate) struct BrowserGetPageStateTool;
 impl Tool for BrowserGetPageStateTool {
-    fn name(&self) -> &'static str {
-        "browser_get_page_state"
-    }
-    fn description(&self) -> &'static str {
-        strings::BROWSER_GET_PAGE_STATE_DESCRIPTION
-    }
-    fn input_type(&self) -> TypeId {
-        TypeId::of::<dtos::BrowserGetPageStateInput>()
-    }
-    fn parameters_schema(&self) -> serde_json::Value {
-        json_schema::<dtos::BrowserGetPageStateInput>()
-    }
-    fn is_enabled(&self, config: &AppConfig, _: &str) -> bool {
-        config.tool_groups.browser
-    }
-    fn safety(&self) -> Safety {
-        Safety::ReadOnly
+    fn descriptor(&self) -> &ToolDescriptor {
+        static D: OnceLock<ToolDescriptor> = OnceLock::new();
+        D.get_or_init(|| {
+            build_browser_descriptor::<dtos::BrowserGetPageStateInput>(
+                "browser_get_page_state",
+                strings::BROWSER_GET_PAGE_STATE_DESCRIPTION,
+                crate::agent::tools::Safety::ReadOnly,
+            )
+        })
     }
     fn execute(&self, ctx: &ToolContext, _args: &str) -> Result<serde_json::Value, String> {
         let handle = ctx.browser_session.page().map_err(err)?;
@@ -141,23 +142,15 @@ impl Tool for BrowserGetPageStateTool {
 
 pub(crate) struct BrowserClickTool;
 impl Tool for BrowserClickTool {
-    fn name(&self) -> &'static str {
-        "browser_click"
-    }
-    fn description(&self) -> &'static str {
-        strings::BROWSER_CLICK_DESCRIPTION
-    }
-    fn input_type(&self) -> TypeId {
-        TypeId::of::<dtos::BrowserClickInput>()
-    }
-    fn parameters_schema(&self) -> serde_json::Value {
-        json_schema::<dtos::BrowserClickInput>()
-    }
-    fn is_enabled(&self, config: &AppConfig, _: &str) -> bool {
-        config.tool_groups.browser
-    }
-    fn safety(&self) -> Safety {
-        Safety::Mutating
+    fn descriptor(&self) -> &ToolDescriptor {
+        static D: OnceLock<ToolDescriptor> = OnceLock::new();
+        D.get_or_init(|| {
+            build_browser_descriptor::<dtos::BrowserClickInput>(
+                "browser_click",
+                strings::BROWSER_CLICK_DESCRIPTION,
+                crate::agent::tools::Safety::Mutating,
+            )
+        })
     }
     fn execute(&self, ctx: &ToolContext, args: &str) -> Result<serde_json::Value, String> {
         let input: dtos::BrowserClickInput =
@@ -182,23 +175,15 @@ impl Tool for BrowserClickTool {
 
 pub(crate) struct BrowserFillInputTool;
 impl Tool for BrowserFillInputTool {
-    fn name(&self) -> &'static str {
-        "browser_fill_input"
-    }
-    fn description(&self) -> &'static str {
-        strings::BROWSER_FILL_INPUT_DESCRIPTION
-    }
-    fn input_type(&self) -> TypeId {
-        TypeId::of::<dtos::BrowserFillInputInput>()
-    }
-    fn parameters_schema(&self) -> serde_json::Value {
-        json_schema::<dtos::BrowserFillInputInput>()
-    }
-    fn is_enabled(&self, config: &AppConfig, _: &str) -> bool {
-        config.tool_groups.browser
-    }
-    fn safety(&self) -> Safety {
-        Safety::Mutating
+    fn descriptor(&self) -> &ToolDescriptor {
+        static D: OnceLock<ToolDescriptor> = OnceLock::new();
+        D.get_or_init(|| {
+            build_browser_descriptor::<dtos::BrowserFillInputInput>(
+                "browser_fill_input",
+                strings::BROWSER_FILL_INPUT_DESCRIPTION,
+                crate::agent::tools::Safety::Mutating,
+            )
+        })
     }
     fn execute(&self, ctx: &ToolContext, args: &str) -> Result<serde_json::Value, String> {
         let input: dtos::BrowserFillInputInput =
@@ -224,23 +209,15 @@ impl Tool for BrowserFillInputTool {
 
 pub(crate) struct BrowserSelectDropdownTool;
 impl Tool for BrowserSelectDropdownTool {
-    fn name(&self) -> &'static str {
-        "browser_select_dropdown"
-    }
-    fn description(&self) -> &'static str {
-        strings::BROWSER_SELECT_DROPDOWN_DESCRIPTION
-    }
-    fn input_type(&self) -> TypeId {
-        TypeId::of::<dtos::BrowserSelectDropdownInput>()
-    }
-    fn parameters_schema(&self) -> serde_json::Value {
-        json_schema::<dtos::BrowserSelectDropdownInput>()
-    }
-    fn is_enabled(&self, config: &AppConfig, _: &str) -> bool {
-        config.tool_groups.browser
-    }
-    fn safety(&self) -> Safety {
-        Safety::Mutating
+    fn descriptor(&self) -> &ToolDescriptor {
+        static D: OnceLock<ToolDescriptor> = OnceLock::new();
+        D.get_or_init(|| {
+            build_browser_descriptor::<dtos::BrowserSelectDropdownInput>(
+                "browser_select_dropdown",
+                strings::BROWSER_SELECT_DROPDOWN_DESCRIPTION,
+                crate::agent::tools::Safety::Mutating,
+            )
+        })
     }
     fn execute(&self, ctx: &ToolContext, args: &str) -> Result<serde_json::Value, String> {
         let input: dtos::BrowserSelectDropdownInput =
@@ -249,8 +226,6 @@ impl Tool for BrowserSelectDropdownTool {
         let selector = input.selector;
         let value = input.value;
         let locator = handle.page.locator(&selector);
-        // `Locator::select_option` expects `impl Into<SelectOption>`;
-        // `SelectOption: From<&str>` so pass the str view.
         crate::agent::tools::blocking::block_on(async {
             locator.select_option(value.as_str(), None).await
         })
@@ -270,23 +245,15 @@ impl Tool for BrowserSelectDropdownTool {
 
 pub(crate) struct BrowserPressKeyTool;
 impl Tool for BrowserPressKeyTool {
-    fn name(&self) -> &'static str {
-        "browser_press_key"
-    }
-    fn description(&self) -> &'static str {
-        strings::BROWSER_PRESS_KEY_DESCRIPTION
-    }
-    fn input_type(&self) -> TypeId {
-        TypeId::of::<dtos::BrowserPressKeyInput>()
-    }
-    fn parameters_schema(&self) -> serde_json::Value {
-        json_schema::<dtos::BrowserPressKeyInput>()
-    }
-    fn is_enabled(&self, config: &AppConfig, _: &str) -> bool {
-        config.tool_groups.browser
-    }
-    fn safety(&self) -> Safety {
-        Safety::Mutating
+    fn descriptor(&self) -> &ToolDescriptor {
+        static D: OnceLock<ToolDescriptor> = OnceLock::new();
+        D.get_or_init(|| {
+            build_browser_descriptor::<dtos::BrowserPressKeyInput>(
+                "browser_press_key",
+                strings::BROWSER_PRESS_KEY_DESCRIPTION,
+                crate::agent::tools::Safety::Mutating,
+            )
+        })
     }
     fn execute(&self, ctx: &ToolContext, args: &str) -> Result<serde_json::Value, String> {
         let input: dtos::BrowserPressKeyInput =
@@ -307,28 +274,20 @@ impl Tool for BrowserPressKeyTool {
 }
 
 // ---------------------------------------------------------------------------
-// browser_evaluate_js (BRWS-007, Mutating â€” true escape hatch)
+// browser_evaluate_js (BRWS-007, Mutating — true escape hatch)
 // ---------------------------------------------------------------------------
 
 pub(crate) struct BrowserEvaluateJsTool;
 impl Tool for BrowserEvaluateJsTool {
-    fn name(&self) -> &'static str {
-        "browser_evaluate_js"
-    }
-    fn description(&self) -> &'static str {
-        strings::BROWSER_EVALUATE_JS_DESCRIPTION
-    }
-    fn input_type(&self) -> TypeId {
-        TypeId::of::<dtos::BrowserEvaluateJsInput>()
-    }
-    fn parameters_schema(&self) -> serde_json::Value {
-        json_schema::<dtos::BrowserEvaluateJsInput>()
-    }
-    fn is_enabled(&self, config: &AppConfig, _: &str) -> bool {
-        config.tool_groups.browser
-    }
-    fn safety(&self) -> Safety {
-        Safety::Mutating
+    fn descriptor(&self) -> &ToolDescriptor {
+        static D: OnceLock<ToolDescriptor> = OnceLock::new();
+        D.get_or_init(|| {
+            build_browser_descriptor::<dtos::BrowserEvaluateJsInput>(
+                "browser_evaluate_js",
+                strings::BROWSER_EVALUATE_JS_DESCRIPTION,
+                crate::agent::tools::Safety::Mutating,
+            )
+        })
     }
     fn execute(&self, ctx: &ToolContext, args: &str) -> Result<serde_json::Value, String> {
         let input: dtos::BrowserEvaluateJsInput =
@@ -348,34 +307,26 @@ impl Tool for BrowserEvaluateJsTool {
 }
 
 // ---------------------------------------------------------------------------
-// browser_screenshot (BRWS-008, Mutating â€” writes to a sandbox dir)
+// browser_screenshot (BRWS-008, Mutating — writes to a sandbox dir)
 // ---------------------------------------------------------------------------
 
 pub(crate) struct BrowserScreenshotTool;
 impl Tool for BrowserScreenshotTool {
-    fn name(&self) -> &'static str {
-        "browser_screenshot"
-    }
-    fn description(&self) -> &'static str {
-        strings::BROWSER_SCREENSHOT_DESCRIPTION
-    }
-    fn input_type(&self) -> TypeId {
-        TypeId::of::<dtos::BrowserScreenshotInput>()
-    }
-    fn parameters_schema(&self) -> serde_json::Value {
-        json_schema::<dtos::BrowserScreenshotInput>()
-    }
-    fn is_enabled(&self, config: &AppConfig, _: &str) -> bool {
-        config.tool_groups.browser
-    }
-    fn safety(&self) -> Safety {
-        Safety::Mutating
+    fn descriptor(&self) -> &ToolDescriptor {
+        static D: OnceLock<ToolDescriptor> = OnceLock::new();
+        D.get_or_init(|| {
+            build_browser_descriptor::<dtos::BrowserScreenshotInput>(
+                "browser_screenshot",
+                strings::BROWSER_SCREENSHOT_DESCRIPTION,
+                crate::agent::tools::Safety::Mutating,
+            )
+        })
     }
     fn execute(&self, ctx: &ToolContext, args: &str) -> Result<serde_json::Value, String> {
         let input: dtos::BrowserScreenshotInput =
             serde_json::from_str(args).map_err(|e| err(format!("Invalid args: {}", e)))?;
         // Sanitise the filename against the session's policy
-        // before doing any Playwright work â€” fail fast on bad
+        // before doing any Playwright work — fail fast on bad
         // input.
         let out_path = ctx
             .browser_session
@@ -408,37 +359,6 @@ impl Tool for BrowserScreenshotTool {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::app::session::BrowserSession;
-    use crate::config::AppConfig;
-    use std::sync::Arc;
-
-    fn ctx_with_session() -> crate::agent::tools::context::ToolContext {
-        // `ToolContext` is now `'static` by construction (every
-        // reference-shaped field is an owned `Arc` or a cheap-clone
-        // `Bus`), so the previous `Box::leak`-and-pointer-cast trick
-        // is gone. The helper just constructs a context by value.
-        // The actual execute paths are covered by the integration
-        // tests in `app/browser/session.rs` (and the gated
-        // Playwright integration tests in `tools/browser_tests.rs`).
-        let config = AppConfig::default();
-        let bus = crate::bus::core::Bus::<crate::bus::events::file::FileEvent>::new();
-        let session = Arc::new(BrowserSession::new(&config));
-        let pdf_backing = Arc::new(crate::app::session::PdfBackingTracker::new());
-        let tm = std::sync::Arc::new(std::sync::RwLock::new(
-            crate::agent::tools::registry::ToolRegistry::new(),
-        ));
-        let cache = Arc::new(crate::agent::tools::registry::cache::ToolCache::new());
-        crate::agent::tools::context::crate::agent::tools::context::ToolContextBuilder::new(
-            Arc::new(config),
-            bus,
-            tm,
-            cache,
-            std::sync::Arc::new(crate::utils::uuid::SystemUuidGenerator)
-                .with_browser_session(session)
-                .with_pdf_backing(pdf_backing)
-                .build(),
-        )
-    }
 
     #[test]
     fn test_dto_round_trip_browser_navigate() {
@@ -457,7 +377,7 @@ mod tests {
 
     #[test]
     fn test_is_enabled_matches_config_flag() {
-        let mut config = AppConfig::default();
+        let mut config = crate::config::AppConfig::default();
         assert!(!BrowserNavigateTool.is_enabled(&config, ""));
         config.tool_groups.browser = true;
         assert!(BrowserNavigateTool.is_enabled(&config, ""));
@@ -467,7 +387,7 @@ mod tests {
     fn test_only_get_page_state_is_readonly() {
         // BRWS-002 explicitly calls this out.
         let readonly = BrowserGetPageStateTool.safety();
-        assert_eq!(readonly, Safety::ReadOnly);
+        assert_eq!(readonly, crate::agent::tools::Safety::ReadOnly);
         for safety in [
             BrowserNavigateTool.safety(),
             BrowserClickTool.safety(),
@@ -477,7 +397,7 @@ mod tests {
             BrowserEvaluateJsTool.safety(),
             BrowserScreenshotTool.safety(),
         ] {
-            assert_eq!(safety, Safety::Mutating);
+            assert_eq!(safety, crate::agent::tools::Safety::Mutating);
         }
     }
 
@@ -487,11 +407,5 @@ mod tests {
         // schemars types is caught at build time.
         let _ = BrowserNavigateTool.parameters_schema();
         let _ = BrowserScreenshotTool.parameters_schema();
-    }
-
-    #[test]
-    fn test_context_carries_session() {
-        // The plumbing worked: ToolContext now owns the session.
-        let _ = ctx_with_session();
     }
 }

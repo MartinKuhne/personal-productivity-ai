@@ -27,9 +27,10 @@ pub use errors::{ToolErrorKind, ToolGroupError};
 pub use groups::{InternalToolGroup, ToolGroupId, ToolGroupKind, ToolGroupState};
 pub use pagination::paginate_in_range;
 
+use crate::agent::tools::RegisteredTool;
 use crate::agent::tools::context::ToolContext;
 use crate::agent::tools::mcp::McpToolAdapter;
-use crate::agent::tools::{Safety, Tool};
+use crate::agent::tools::{Safety, Tool, ToolDispatcher, ToolOutcome};
 use crate::app::background::{BackgroundLogEntry, LogCategory};
 use crate::bus::config::CONFIG_ARRIVAL_TIMEOUT;
 use crate::bus::core::Bus;
@@ -45,8 +46,12 @@ use std::sync::mpsc::Sender;
 /// plus per-group state for the UI.
 #[derive(Clone)]
 pub struct ToolRegistry {
-    /// Registered tools keyed by name.
-    tools: BTreeMap<String, Arc<dyn Tool>>,
+    /// Registered tools keyed by name. Each entry pairs the static
+    /// [`crate::agent::tools::ToolDescriptor`] (used by the LLM
+    /// schema, the UI dialog, and the prompt char-count) with the
+    /// `Arc<dyn Tool>` executor (used by the dispatcher at run
+    /// time). See [`crate::agent::tools::RegisteredTool`].
+    tools: BTreeMap<String, RegisteredTool>,
     /// Reverse index: which group owns each tool? Built at registration.
     tool_to_group: BTreeMap<String, ToolGroupId>,
     /// Per-group state, rebuilt by [`ToolRegistry::refresh_state`].
@@ -77,12 +82,21 @@ impl ToolRegistry {
 
     // ---- Registration ----
 
-    /// Register a built-in tool with the given group.
+    /// Register a built-in tool with the given group. The tool's
+    /// own `descriptor()` is used as the source of metadata.
     pub fn register_builtin(&mut self, group: InternalToolGroup, tool: Box<dyn Tool>) {
-        let name = tool.name().to_string();
+        let arc: Arc<dyn Tool> = Arc::from(tool);
+        let descriptor = arc.descriptor().clone();
+        let name = descriptor.name.to_string();
         self.tool_to_group
             .insert(name.clone(), ToolGroupId::Internal(group));
-        self.tools.insert(name, Arc::from(tool));
+        self.tools.insert(
+            name,
+            RegisteredTool {
+                descriptor: Arc::new(descriptor),
+                executor: arc,
+            },
+        );
     }
 
     /// Register a dynamic MCP tool into this manager.
@@ -95,23 +109,37 @@ impl ToolRegistry {
     ) {
         let server_name = server_name.into();
         let tool_name = tool_name.into();
-        let adapter = McpToolAdapter::from_dynamic_source(
+        let adapter = Arc::new(McpToolAdapter::from_dynamic_source(
             &server_name,
             &tool_name,
             description,
             parameters,
             self.mcp_manager.clone(),
-        );
+        ));
+        let descriptor = adapter.descriptor().clone();
         self.tool_to_group
             .insert(tool_name.clone(), ToolGroupId::Mcp(server_name));
-        self.tools.insert(tool_name, Arc::new(adapter));
+        self.tools.insert(
+            tool_name,
+            RegisteredTool {
+                descriptor: Arc::new(descriptor),
+                executor: adapter,
+            },
+        );
     }
 
     // ---- Catalog queries (used by the agent loop) ----
 
-    /// Look up a tool by name.
+    /// Look up a tool executor by name.
     pub fn tool(&self, name: &str) -> Option<&dyn Tool> {
-        self.tools.get(name).map(|t| t.as_ref())
+        self.tools.get(name).map(|t| t.executor.as_ref())
+    }
+
+    /// Look up the static [`crate::agent::tools::ToolDescriptor`]
+    /// for a tool by name. Used by the LLM schema, the UI dialog,
+    /// and the prompt char-count.
+    pub fn descriptor(&self, name: &str) -> Option<&crate::agent::tools::ToolDescriptor> {
+        self.tools.get(name).map(|t| t.descriptor.as_ref())
     }
 
     /// Look up the group that owns a given tool. Returns `None` for
@@ -123,9 +151,8 @@ impl ToolRegistry {
     /// Parallel-safety classification of a tool. Unknown names are
     /// conservatively classified as [`Safety::Mutating`].
     pub fn safety_of(&self, name: &str) -> Safety {
-        self.tools
-            .get(name)
-            .map(|t| t.safety())
+        self.descriptor(name)
+            .map(|d| d.safety)
             .unwrap_or(Safety::Mutating)
     }
 
@@ -140,7 +167,37 @@ impl ToolRegistry {
             .tools
             .get(name)
             .ok_or_else(|| format!("Tool {name} not found."))?;
-        tool.execute(ctx, args)
+        tool.executor.execute(ctx, args)
+    }
+
+    /// Build a single JSON-Schema entry (`{"type":"function",
+    /// "function":{"name","description","parameters"}}`) for the
+    /// given tool descriptor, or `None` if the tool is not
+    /// currently enabled. The fragment is the source of truth for
+    /// both [`ToolRegistry::get_schema`] and
+    /// [`ToolRegistry::tool_char_count`] — see TOOL-015.
+    pub fn schema_fragment(
+        &self,
+        name: &str,
+        config: &AppConfig,
+        prompt: &str,
+    ) -> Option<serde_json::Value> {
+        let entry = self.tools.get(name)?;
+        if !entry.executor.is_enabled(config, prompt) {
+            return None;
+        }
+        let mut params = entry.descriptor.parameters_schema.clone();
+        if params.get("properties").is_none() {
+            params["properties"] = serde_json::Value::Object(Default::default());
+        }
+        Some(serde_json::json!({
+            "type": "function",
+            "function": {
+                "name": entry.descriptor.name,
+                "description": entry.descriptor.description,
+                "parameters": params
+            }
+        }))
     }
 
     /// Build the JSON-Schema tool list for the LLM, honouring both
@@ -148,20 +205,9 @@ impl ToolRegistry {
     /// [`Tool::is_enabled`].
     pub fn get_schema(&self, config: &AppConfig, prompt: &str) -> serde_json::Value {
         let mut tools = Vec::new();
-        for tool in self.tools.values() {
-            if tool.is_enabled(config, prompt) {
-                let mut params = tool.parameters_schema();
-                if params.get("properties").is_none() {
-                    params["properties"] = serde_json::Value::Object(Default::default());
-                }
-                tools.push(serde_json::json!({
-                    "type": "function",
-                    "function": {
-                        "name": tool.name(),
-                        "description": tool.description(),
-                        "parameters": params
-                    }
-                }));
+        for name in self.tools.keys() {
+            if let Some(fragment) = self.schema_fragment(name, config, prompt) {
+                tools.push(fragment);
             }
         }
         serde_json::Value::Array(tools)
@@ -173,7 +219,7 @@ impl ToolRegistry {
     pub fn parallel_safe_tools(&self) -> Vec<String> {
         self.tools
             .iter()
-            .filter(|(_, t)| t.safety() == Safety::ReadOnly)
+            .filter(|(_, t)| t.descriptor.safety == Safety::ReadOnly)
             .map(|(name, _)| name.clone())
             .collect()
     }
@@ -181,28 +227,9 @@ impl ToolRegistry {
     /// Length (in characters) of the JSON-Schema entry that a single
     /// tool contributes to the LLM `tools` array, or `None` if the
     /// tool is not currently enabled (per [`Tool::is_enabled`]).
-    ///
-    /// The returned byte count matches what
-    /// [`ToolRegistry::get_schema`] would serialise for the tool —
-    /// `{"type":"function","function":{"name","description","parameters"}}`.
     /// Per TOOL-015.
     pub fn tool_char_count(&self, name: &str, config: &AppConfig, prompt: &str) -> Option<usize> {
-        let tool = self.tools.get(name)?;
-        if !tool.is_enabled(config, prompt) {
-            return None;
-        }
-        let mut params = tool.parameters_schema();
-        if params.get("properties").is_none() {
-            params["properties"] = serde_json::Value::Object(Default::default());
-        }
-        let entry = serde_json::json!({
-            "type": "function",
-            "function": {
-                "name": tool.name(),
-                "description": tool.description(),
-                "parameters": params
-            }
-        });
+        let entry = self.schema_fragment(name, config, prompt)?;
         Some(serde_json::to_string(&entry).map(|s| s.len()).unwrap_or(0))
     }
 
@@ -267,8 +294,11 @@ impl ToolRegistry {
                 }
             });
             entry.tool_names.push(tool_name.clone());
-            let tool = self.tools.get(tool_name).map(|t| t.as_ref());
-            let safety = tool.map(|t| t.safety()).unwrap_or(Safety::Mutating);
+            let safety = self
+                .tools
+                .get(tool_name)
+                .map(|t| t.descriptor.safety)
+                .unwrap_or(Safety::Mutating);
             if safety != Safety::ReadOnly {
                 entry.parallel_safe = false;
             }
@@ -447,11 +477,34 @@ impl ToolRegistry {
         self.tools
             .values()
             .map(|t| McpToolDescriptor {
-                name: t.name().to_string(),
-                description: t.description().to_string(),
-                input_schema: t.parameters_schema(),
+                name: t.descriptor.name.to_string(),
+                description: t.descriptor.description.to_string(),
+                input_schema: t.descriptor.parameters_schema.clone(),
             })
             .collect()
+    }
+}
+
+// ---------------------------------------------------------------------------
+// ToolDispatcher impl — the registry acts as the dispatch surface
+// for the executor and for any tool that needs to invoke another
+// tool by name.
+// ---------------------------------------------------------------------------
+
+impl ToolDispatcher for ToolRegistry {
+    fn dispatch(&self, name: &str, args: &str, ctx: &ToolContext) -> ToolOutcome {
+        let tool = match self.tools.get(name) {
+            Some(t) => t,
+            None => return ToolOutcome::err(format!("Tool {name} not found.")),
+        };
+        match tool.executor.execute(ctx, args) {
+            Ok(value) => ToolOutcome::ok(value),
+            Err(message) => ToolOutcome::err(message),
+        }
+    }
+
+    fn safety(&self, name: &str) -> Safety {
+        self.safety_of(name)
     }
 }
 
@@ -533,7 +586,12 @@ pub fn spawn_config_subscription(
     });
 }
 
-pub fn execute_tool(ctx: &ToolContext, name: &str, args_str: &str) -> String {
+pub fn execute_tool(
+    dispatcher: &dyn ToolDispatcher,
+    ctx: &ToolContext,
+    name: &str,
+    args_str: &str,
+) -> String {
     rustls::crypto::ring::default_provider()
         .install_default()
         .ok();
@@ -548,14 +606,12 @@ pub fn execute_tool(ctx: &ToolContext, name: &str, args_str: &str) -> String {
     tracing::info!(name = "tool.manager.call", tool_name = %name, args = %args_str, "Executing tool call");
     let start_time = std::time::Instant::now();
 
-    // Phase 1: read-locked — do the I/O and snapshot the tool's group.
-    let (result_raw, tool_group): (Result<serde_json::Value, String>, Option<ToolGroupId>) =
+    // Phase 1: dispatch through the dispatcher, catching any panic so
+    // a buggy tool cannot kill the agent loop. The executor handles
+    // the per-group error-recording phase (see `agent::tool_executor`).
+    let result_raw: Result<serde_json::Value, String> =
         std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-            let mgr = ctx.tool_manager.load();
-            mgr.mcp_manager.update_config(&ctx.config);
-            let group = mgr.tool_group(name);
-            let result = mgr.execute(ctx, name, args_str);
-            (result, group)
+            dispatcher.dispatch(name, args_str, ctx).into_json_result()
         }))
         .unwrap_or_else(|e| {
             let msg = if let Some(s) = e.downcast_ref::<&str>() {
@@ -565,23 +621,8 @@ pub fn execute_tool(ctx: &ToolContext, name: &str, args_str: &str) -> String {
             } else {
                 "Unknown panic"
             };
-            (Err(format!("Tool {name} panicked: {msg}")), None)
+            Err(format!("Tool {name} panicked: {msg}"))
         });
-
-    // Phase 2: write-locked — record/clear the Execution error.
-    if let Some(group) = &tool_group {
-        ctx.tool_manager.rcu(|mgr| {
-            let mut new_mgr = (**mgr).clone();
-            match &result_raw {
-                Ok(_) => new_mgr.clear_error(group),
-                Err(msg) => new_mgr.record_error(
-                    group,
-                    ToolGroupError::now(ToolErrorKind::Execution, msg.clone()),
-                ),
-            }
-            new_mgr
-        });
-    }
 
     let elapsed = start_time.elapsed();
     let response_dto = match result_raw {
