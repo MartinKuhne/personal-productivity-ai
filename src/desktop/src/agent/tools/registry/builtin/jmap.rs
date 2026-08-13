@@ -42,8 +42,8 @@ fn execute_search_email(
             is_flagged: input.is_flagged,
         },
         input.cursor,
-        &ctx.cache,
-        ctx.uuid_gen.as_ref(),
+        &ctx.cache(),
+        ctx.uuid_gen().as_ref(),
     )
     .map(|r| {
         serde_json::to_value(r).unwrap_or_else(|e| serde_json::json!({"error": e.to_string()}))

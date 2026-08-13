@@ -99,11 +99,11 @@ fn test_browser_navigate_tool_round_trip() {
     let policy = std::sync::Arc::new(crate::agent::tools::policy::DefaultToolCallPolicy);
     let cache = Arc::new(crate::agent::tools::registry::cache::ToolCache::new());
     let ctx = crate::agent::tools::context::ToolContextBuilder::new(
-        Arc::new(config),
-        bus,
-        cache,
-        Arc::new(crate::utils::uuid::SystemUuidGenerator),
+        Arc::new(config.clone()),
+        std::sync::Arc::new(crate::agent::tools::observer::DefaultFileObserver),
     )
+    .with_extension(std::sync::Arc::new(crate::agent::tools::context::ToolCacheExt(cache.clone())))
+    .with_extension(std::sync::Arc::new(crate::agent::tools::context::UuidGeneratorExt(Arc::new(crate::utils::uuid::SystemUuidGenerator))))
     .with_browser_session(session)
     .with_tool_call_policy(pdf_backing)
     .build();
@@ -125,11 +125,11 @@ fn test_browser_get_page_state_tool_is_readonly() {
     let policy = std::sync::Arc::new(crate::agent::tools::policy::DefaultToolCallPolicy);
     let cache = Arc::new(crate::agent::tools::registry::cache::ToolCache::new());
     let _ctx = crate::agent::tools::context::ToolContextBuilder::new(
-        Arc::new(config),
-        bus,
-        cache,
-        Arc::new(crate::utils::uuid::SystemUuidGenerator),
+        Arc::new(config.clone()),
+        std::sync::Arc::new(crate::agent::tools::observer::DefaultFileObserver),
     )
+    .with_extension(std::sync::Arc::new(crate::agent::tools::context::ToolCacheExt(cache.clone())))
+    .with_extension(std::sync::Arc::new(crate::agent::tools::context::UuidGeneratorExt(Arc::new(crate::utils::uuid::SystemUuidGenerator))))
     .with_browser_session(session)
     .with_tool_call_policy(pdf_backing)
     .build();

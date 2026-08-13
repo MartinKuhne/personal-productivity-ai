@@ -79,9 +79,9 @@ fn build_dispatch_context() -> ToolContext {
     crate::agent::tools::context::ToolContextBuilder::new(
         Arc::new(config),
         std::sync::Arc::new(crate::agent::tools::observer::DefaultFileObserver),
-        Arc::new(crate::agent::tools::registry::cache::ToolCache::new()),
-        uuid_gen,
     )
+    .with_extension(std::sync::Arc::new(crate::agent::tools::context::ToolCacheExt(Arc::new(crate::agent::tools::registry::cache::ToolCache::new()))))
+    .with_extension(std::sync::Arc::new(crate::agent::tools::context::UuidGeneratorExt(uuid_gen)))
     .with_browser_session(browser_session)
     .with_tool_call_policy(policy)
     .build()

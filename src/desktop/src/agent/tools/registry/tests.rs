@@ -18,9 +18,9 @@ fn test_ctx(config: &AgentConfig) -> ToolContext {
     crate::agent::tools::context::ToolContextBuilder::new(
         Arc::new(config.clone()),
         std::sync::Arc::new(crate::agent::tools::observer::DefaultFileObserver),
-        Arc::new(crate::agent::tools::registry::cache::ToolCache::new()),
-        Arc::new(crate::utils::uuid::SystemUuidGenerator),
     )
+    .with_extension(std::sync::Arc::new(crate::agent::tools::context::ToolCacheExt(Arc::new(crate::agent::tools::registry::cache::ToolCache::new()))))
+    .with_extension(std::sync::Arc::new(crate::agent::tools::context::UuidGeneratorExt(Arc::new(crate::utils::uuid::SystemUuidGenerator))))
     .with_browser_session(test_browser_session())
     .with_tool_call_policy(Arc::new(crate::agent::tools::policy::DefaultToolCallPolicy))
     .build()

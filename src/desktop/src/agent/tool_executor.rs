@@ -214,8 +214,10 @@ impl ToolExecutor {
                     let snapshot = tc_arc.load();
                     let dispatcher = &snapshot.registry;
                     let ctx = crate::agent::tools::context::ToolContextBuilder::new(
-                        cfg, bus, cache, uuid_gen,
+                        cfg, bus,
                     )
+                    .with_extension(std::sync::Arc::new(crate::agent::tools::context::ToolCacheExt(cache)))
+                    .with_extension(std::sync::Arc::new(crate::agent::tools::context::UuidGeneratorExt(uuid_gen)))
                     .with_browser_session(browser)
                     .with_tool_call_policy(pdf)
                     .build();
@@ -248,9 +250,9 @@ impl ToolExecutor {
             let ctx = crate::agent::tools::context::ToolContextBuilder::new(
                 self.config.clone(),
                 self.file_observer.clone(),
-                self.cache.clone(),
-                self.uuid_gen.clone(),
             )
+            .with_extension(std::sync::Arc::new(crate::agent::tools::context::ToolCacheExt(self.cache.clone())))
+            .with_extension(std::sync::Arc::new(crate::agent::tools::context::UuidGeneratorExt(self.uuid_gen.clone())))
             .with_browser_session(browser)
             .with_tool_call_policy(pdf)
             .build();
