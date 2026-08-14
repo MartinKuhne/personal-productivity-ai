@@ -18,21 +18,6 @@ name: Rust Bench (informational)
 # `sample_size` in the bench file (not the workflow) so
 # the bench stays reproducible locally.
 
-on:
-  push:
-    branches: [main]
-    paths:
-      - "src/desktop/**"
-      - "src/desktop/benches/**"
-      - ".github/workflows/rust-bench.yml"
-      - "src/desktop/Cargo.toml"
-  pull_request:
-    paths:
-      - "src/desktop/**"
-      - "src/desktop/benches/**"
-      - ".github/workflows/rust-bench.yml"
-      - "src/desktop/Cargo.toml"
-
 # Same permission scope as the gate workflow — only read
 # contents + write actions (for artifact upload).
 permissions:
