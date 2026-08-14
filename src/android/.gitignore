@@ -13,3 +13,8 @@
 .externalNativeBuild
 .cxx
 local.properties
+
+# Files left in the source tree during a migration, marked so the build
+# skips them. They should be removed with `git rm` once the migration is
+# committed and reviewed.
+*.removed
