@@ -7,8 +7,8 @@ use crate::events::{AgentDebugEntry, AgentObserverFactory, AgentPrompt, TokenUsa
 use serde_json::Value;
 use std::sync::mpsc::{self, Sender};
 use std::sync::{
-    atomic::{AtomicBool, Ordering},
     Arc,
+    atomic::{AtomicBool, Ordering},
 };
 use std::thread::JoinHandle;
 use uuid::Uuid;

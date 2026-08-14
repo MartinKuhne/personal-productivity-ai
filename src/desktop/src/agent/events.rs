@@ -16,8 +16,8 @@ use serde::Serialize;
 use serde_json::Value;
 use std::collections::HashSet;
 use std::path::PathBuf;
-use std::sync::atomic::AtomicBool;
 use std::sync::Arc;
+use std::sync::atomic::AtomicBool;
 use uuid::Uuid;
 
 /// Direction of a debug entry.

@@ -158,9 +158,10 @@ mod tests {
             lib.display_label_for(Path::new("C:/my/test/dir")),
             Some("TestLib".to_string())
         );
-        assert!(lib
-            .display_label_for(Path::new("C:/other/path.md"))
-            .is_none());
+        assert!(
+            lib.display_label_for(Path::new("C:/other/path.md"))
+                .is_none()
+        );
     }
 
     #[test]
@@ -220,9 +221,11 @@ mod tests {
         let libs = test_config();
         let result = resolve("NonExistent/file.md", false, &libs);
         assert!(result.is_err());
-        assert!(result
-            .unwrap_err()
-            .contains("Content library 'NonExistent' not found"));
+        assert!(
+            result
+                .unwrap_err()
+                .contains("Content library 'NonExistent' not found")
+        );
     }
 
     #[test]

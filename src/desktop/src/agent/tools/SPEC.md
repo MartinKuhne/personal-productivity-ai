@@ -19,6 +19,7 @@ The requirements below have been formatted using the **Easy Approach to Requirem
 | `read_note` | Read the entire text contents of a note. |
 | `window_note` | Read a contiguous slice of lines from a note. Paginated via `offset`/`limit` (0-indexed; default `offset=0`, `limit=100`). |
 | `create_note` | Create a new markdown-formatted note with the specified content. Fails if the note already exists. |
+| `move_note` | Move or rename a markdown-formatted note from a source virtual path to a target virtual path. Fails if the target note already exists. |
 | `insert_into_note` | Insert new lines of text into an existing note at a specific 0-indexed `offset` (default-constructed; required input). `offset=0` inserts at the top; `offset=lines.len()` appends to the end. |
 | `patch_note` | Patch occurrences of old_string with new_string in a note. |
 | `web_fetch` | Fetch content from a URL and convert HTML to Markdown. Cursor-based pagination: returns up to 100 lines and a `cursor` token; pass the `cursor` back unchanged to get the next page. The full content is cached for 30 minutes in the shared `ToolCache`; pass `force_refetch=true` to bypass. |
@@ -122,6 +123,14 @@ The `window_note` and `insert_into_note` tools operate on contiguous line ranges
 
 * [TOOL-036] The `window_note` tool SHALL accept `offset: Option<usize>` (0-indexed; default 0) and `limit: Option<usize>` (default 100) input parameters. The response SHALL contain the requested slice of lines joined with newlines. An `offset` past the end of the file SHALL return an empty `content`; a `limit` that would overflow the file's line count SHALL be clamped to the remainder. The tool SHALL NOT expose a `start_line` or `end_line` parameter, and SHALL NOT be exposed to the LLM under any other name (e.g. `read_file_lines`).
 * [TOOL-037] The `insert_into_note` tool SHALL accept a required `offset: usize` (0-indexed) input parameter. `offset=0` SHALL insert at the top of the file; `offset=lines.len()` SHALL append to the end. `offset > lines.len()` SHALL return the error `"Offset out of range."`. The tool SHALL NOT expose a `line_index` parameter.
+
+### Move Note Tool
+
+* [TOOL-038] The `move_note` tool SHALL accept `source` and `target` string parameters representing virtual file paths.
+* [TOOL-039] The `move_note` tool SHALL reject operations where the source or target path does not end with the `.md` extension.
+* [TOOL-040] The `move_note` tool SHALL fail with an error if the source file does not exist.
+* [TOOL-041] The `move_note` tool SHALL NOT overwrite an existing target file, and SHALL return an error if the target already exists.
+* [TOOL-042] When moving a note to a path with non-existent parent directories, the system SHALL automatically create all missing parent directories.
 
 ### Browser Automation Tools
 

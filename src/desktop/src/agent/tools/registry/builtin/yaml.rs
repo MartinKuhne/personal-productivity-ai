@@ -1,10 +1,10 @@
 //! YAML front-matter header tool implementations and provider for the tool registry.
 
+use crate::tools::Tool;
 use crate::tools::context::ToolContext;
 use crate::tools::dtos;
 use crate::tools::provider::{RegisteredTool, ToolProvider};
 use crate::tools::registry::groups::{InternalToolGroup, ToolGroupId};
-use crate::tools::Tool;
 use fastmd_tool_macros::ToolDescriptor;
 use std::sync::Arc;
 

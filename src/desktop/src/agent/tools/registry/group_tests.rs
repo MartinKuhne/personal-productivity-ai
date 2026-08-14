@@ -78,6 +78,7 @@ fn parallel_safe_tools_includes_all_readonly_tools() {
     assert!(safe.iter().any(|n| n == "search_notes"));
     // And it must NOT include obviously-mutating tools.
     assert!(!safe.iter().any(|n| n == "create_note"));
+    assert!(!safe.iter().any(|n| n == "move_note"));
 }
 
 /// A `ToolRegistry`-level error replaces any prior `last_error` for
