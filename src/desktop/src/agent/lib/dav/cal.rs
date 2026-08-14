@@ -15,18 +15,18 @@
 //!    layer. They iterate `config.caldav_clients`, build a
 //!    [`DavClient`] per server, aggregate the per-server results,
 //!    and serialize to the LLM-facing DTO from
-//!    `crate::agent::tools::dtos`.
+//!    `crate::tools::dtos`.
 //! 3. Pure helpers (`parse_ical_data`, `json_to_ical`,
 //!    `update_ical_string`) are independent of any client and are
 //!    `pub(super)` so `DavClient` can call them.
 //!
 //! Unit tests live in the sibling `cal_tests.rs` sidecar.
 
-use crate::agent::tools::dtos::{
+use crate::tools::dtos::{
     AddCalendarItemResponse, DeleteCalendarItemResponse, GetCalendarItemResponse,
     GetCalendarResponse, SearchCalendarResponse, UpdateCalendarItemResponse,
 };
-// Re-exported at `crate::agent::lib::dav::DavClient` so the
+// Re-exported at `crate::lib::dav::DavClient` so the
 // LLM-adapter `tool_*` wrappers below can build one per server
 // without reaching into `client` directly.
 use super::DavClient;
@@ -135,9 +135,9 @@ pub(crate) fn parse_ical_data(client: &str, href: &str, data: &str) -> CalDavEve
     event
 }
 
-/// `DavClient` lives in `crate::agent::lib::dav::client` and is
-/// re-exported from `crate::agent::lib::dav` as
-/// [`crate::agent::lib::dav::DavClient`]. The LLM-adapter
+/// `DavClient` lives in `crate::lib::dav::client` and is
+/// re-exported from `crate::lib::dav` as
+/// [`crate::lib::dav::DavClient`]. The LLM-adapter
 /// `tool_*` wrappers below build one per entry in
 /// `config.caldav_clients` and delegate.
 pub fn update_ical_string(original: &str, updates: &serde_json::Value) -> String {
@@ -285,7 +285,7 @@ pub fn update_ical_string(original: &str, updates: &serde_json::Value) -> String
 // LLM-adapter layer — the `tool_*` functions. Each one iterates the
 // configured CalDAV clients, delegates to a [`DavClient`] method, and
 // serialises the aggregated results to the LLM-facing DTO from
-// `crate::agent::tools::dtos`.
+// `crate::tools::dtos`.
 // ---------------------------------------------------------------------------
 
 /// Iterate every configured CalDAV client, invoke `f` against each
@@ -293,10 +293,7 @@ pub fn update_ical_string(original: &str, updates: &serde_json::Value) -> String
 /// an `errors` vec. Errors are recorded as `"Error on client {name}: {e}"`
 /// — the same string the previous inline-loop code produced — so the
 /// existing test assertions keep working.
-fn for_each_client<T, F>(
-    config: &crate::agent::config::AgentConfig,
-    mut f: F,
-) -> (Vec<T>, Vec<String>)
+fn for_each_client<T, F>(config: &crate::config::AgentConfig, mut f: F) -> (Vec<T>, Vec<String>)
 where
     F: FnMut(&str, &DavClient) -> Result<T, String>,
 {
@@ -314,10 +311,7 @@ where
 /// Like [`for_each_client`] but for methods that return a `Vec` per
 /// server (search, get). The per-server `Vec`s are flattened into the
 /// aggregate `results` vec.
-fn for_each_client_vec<T, F>(
-    config: &crate::agent::config::AgentConfig,
-    mut f: F,
-) -> (Vec<T>, Vec<String>)
+fn for_each_client_vec<T, F>(config: &crate::config::AgentConfig, mut f: F) -> (Vec<T>, Vec<String>)
 where
     F: FnMut(&str, &DavClient) -> Result<Vec<T>, String>,
 {
@@ -342,7 +336,7 @@ fn serialize_response(resp: &CalDavResponse) -> String {
 }
 
 pub fn tool_search_calendar(
-    config: &crate::agent::config::AgentConfig,
+    config: &crate::config::AgentConfig,
     keyword: &str,
 ) -> Result<SearchCalendarResponse, String> {
     let (results, errors) = for_each_client_vec(config, |_, c| c.search_calendar(keyword));
@@ -352,7 +346,7 @@ pub fn tool_search_calendar(
 }
 
 pub fn tool_get_calendar(
-    config: &crate::agent::config::AgentConfig,
+    config: &crate::config::AgentConfig,
     start: &str,
     end: &str,
 ) -> Result<GetCalendarResponse, String> {
@@ -363,7 +357,7 @@ pub fn tool_get_calendar(
 }
 
 pub fn tool_get_calendar_item(
-    config: &crate::agent::config::AgentConfig,
+    config: &crate::config::AgentConfig,
     id: &str,
 ) -> Result<GetCalendarItemResponse, String> {
     let (results, errors) = for_each_client(config, |_, c| c.get_calendar_item(id));
@@ -373,7 +367,7 @@ pub fn tool_get_calendar_item(
 }
 
 pub fn tool_add_calendar_item(
-    config: &crate::agent::config::AgentConfig,
+    config: &crate::config::AgentConfig,
     item_json: &str,
 ) -> Result<AddCalendarItemResponse, String> {
     // `add_calendar_item` is special: it acts on the *first* configured
@@ -397,7 +391,7 @@ pub fn tool_add_calendar_item(
 }
 
 pub fn tool_update_calendar_item(
-    config: &crate::agent::config::AgentConfig,
+    config: &crate::config::AgentConfig,
     id: &str,
     update_json: &str,
 ) -> Result<UpdateCalendarItemResponse, String> {
@@ -419,7 +413,7 @@ pub fn tool_update_calendar_item(
 }
 
 pub fn tool_delete_calendar_item(
-    config: &crate::agent::config::AgentConfig,
+    config: &crate::config::AgentConfig,
     id: &str,
 ) -> Result<DeleteCalendarItemResponse, String> {
     let mut all_results = Vec::new();

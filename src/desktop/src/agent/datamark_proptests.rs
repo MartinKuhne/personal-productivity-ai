@@ -57,7 +57,7 @@
 //! fine — 512 cases on a `prop_recursive` value space visits each
 //! shape many times.
 
-use crate::agent::datamark::{
+use crate::datamark::{
     EXTERNAL_DATA_END, EXTERNAL_DATA_START, Provenance, wrap, wrap_tool_result, wrap_user_md,
 };
 use proptest::prelude::*;

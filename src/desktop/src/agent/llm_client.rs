@@ -1,8 +1,8 @@
 //! LLM HTTP client — builds requests, streams responses, parses tool calls, and extracts token-usage blocks from OpenAI/Anthropic APIs.
 
-use crate::agent::config::AgentConfig;
-use crate::agent::error::AgentError;
-use crate::agent::events::TokenUsageInfo;
+use crate::config::AgentConfig;
+use crate::error::AgentError;
+use crate::events::TokenUsageInfo;
 use backon::BlockingRetryable;
 use backon::ExponentialBuilder;
 
@@ -202,7 +202,7 @@ impl LLMClient {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::agent::config::AgentConfigBuilder;
+    use crate::config::AgentConfigBuilder;
 
     #[test]
     fn test_parse_usage_openai() {

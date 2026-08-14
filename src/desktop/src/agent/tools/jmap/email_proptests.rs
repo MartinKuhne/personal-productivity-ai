@@ -35,7 +35,7 @@
 //!    accepted; the converter does not try to fetch
 //!    additional content and does not panic.
 
-use crate::agent::tools::jmap::email::{convert_html_in_jmap, simplify_jmap_emails};
+use crate::tools::jmap::email::{convert_html_in_jmap, simplify_jmap_emails};
 use proptest::prelude::*;
 
 /// One proptest case count for every property in this sidecar.

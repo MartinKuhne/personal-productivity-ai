@@ -6,7 +6,7 @@
 //! test doubles and future non-MCP sources can implement the same
 //! surface without the registry depending on the concrete type.
 
-use crate::config::AppConfig;
+use crate::config::AgentConfig;
 
 /// Surface the registry needs from whichever backend powers
 /// tool discovery and invocation.
@@ -18,9 +18,9 @@ pub trait DynamicToolSource: Send + Sync {
     /// descriptors it currently advertises.
     fn discover_tools(&self, server: &str) -> Result<Vec<super::McpToolDescriptor>, String>;
 
-    /// Push an updated [`AppConfig`], dropping sessions for
+    /// Push an updated [`AgentConfig`], dropping sessions for
     /// servers that were removed or changed.
-    fn update_config(&self, config: &AppConfig);
+    fn update_config(&self, config: &AgentConfig);
 
     /// Execute a tool call (`tools/call`) against the named server.
     fn call_tool(

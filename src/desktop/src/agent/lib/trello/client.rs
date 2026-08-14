@@ -1,7 +1,7 @@
 //! Trello REST client — thin wrapper over `https://api.trello.com/1`.
 //!
 //! The LLM-tool-loop adapters that call into this client live in
-//! [`crate::agent::tools::registry::builtin::trello`].
+//! [`crate::tools::registry::builtin::trello`].
 
 use crate::config::TrelloClient;
 

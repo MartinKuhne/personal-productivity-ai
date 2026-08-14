@@ -2025,6 +2025,7 @@ dependencies = [
  "evalexpr",
  "fast-dav-rs",
  "fast_h2m",
+ "fastmd-agent",
  "fastmd-tool-macros",
  "filetime",
  "futures",
@@ -2068,6 +2069,42 @@ dependencies = [
  "webbrowser",
  "windows 0.62.2",
  "wiremock",
+]
+
+[[package]]
+name = "fastmd-agent"
+version = "0.2.0"
+dependencies = [
+ "anyhow",
+ "arc-swap",
+ "backon",
+ "base64",
+ "bytes",
+ "chrono",
+ "csv",
+ "encoding_rs",
+ "evalexpr",
+ "fast-dav-rs",
+ "fast_h2m",
+ "fastmd-tool-macros",
+ "futures",
+ "jmap-client",
+ "pulldown-cmark",
+ "reqwest",
+ "ring",
+ "rustls",
+ "schemars",
+ "serde",
+ "serde_json",
+ "serde_norway",
+ "thiserror 2.0.19",
+ "tokio",
+ "tokio-tungstenite",
+ "tracing",
+ "url",
+ "uuid",
+ "walkdir",
+ "webbrowser",
 ]
 
 [[package]]

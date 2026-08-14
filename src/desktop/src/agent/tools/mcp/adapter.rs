@@ -3,15 +3,15 @@
 //! [`McpToolAdapter`] implements the [`Tool`] trait so the LLM can
 //! invoke any tool advertised by an MCP server. The actual protocol
 //! work (transports, sessions, OAuth) is delegated to
-//! [`crate::agent::lib::mcp::McpClients`].
+//! [`crate::lib::mcp::McpClients`].
 
 use std::sync::OnceLock;
 
-use crate::agent::lib::mcp::{DynamicToolSource, McpClients};
-use crate::agent::tools::Tool;
-use crate::agent::tools::context::ToolContext;
-use crate::agent::tools::descriptor::{ToolConfigSpec, ToolDescriptor};
-use crate::agent::tools::registry::groups::ToolGroupId;
+use crate::lib::mcp::{DynamicToolSource, McpClients};
+use crate::tools::Tool;
+use crate::tools::context::ToolContext;
+use crate::tools::descriptor::{ToolConfigSpec, ToolDescriptor};
+use crate::tools::registry::groups::ToolGroupId;
 
 /// Adapter implementing [`Tool`] for an external MCP server tool.
 pub struct McpToolAdapter {
@@ -79,10 +79,10 @@ impl Tool for McpToolAdapter {
                     self.name.clone(),
                     self.description.clone(),
                     self.parameters.clone(),
-                    crate::agent::tools::Safety::Mutating,
+                    crate::tools::Safety::Mutating,
                     // The group's enable flag is the single source
                     // of truth for "is this MCP server enabled?";
-                    // see [`crate::agent::tools::descriptor::group_enabled`].
+                    // see [`crate::tools::descriptor::group_enabled`].
                     ToolConfigSpec::group_only(ToolGroupId::Mcp(self.server_name.clone())),
                     ToolGroupId::Mcp(self.server_name.clone()),
                 ))

@@ -33,7 +33,6 @@ pub mod session;
 pub mod tabs;
 pub mod tags;
 pub mod text_buffer;
-pub mod tool_specs;
 pub mod vfs;
 pub mod watcher;
 
@@ -45,6 +44,3 @@ pub use tabs::Tabs;
 pub use tags::Tags;
 pub use text_buffer::{Cursor, Selection, TextBuffer, UndoStack};
 pub use vfs::{VirtualPath, VirtualPathError};
-
-#[cfg(test)]
-mod tool_specs_tests;

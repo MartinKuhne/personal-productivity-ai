@@ -23,14 +23,14 @@
 //!    LLM-adapter layer. They iterate `config.caldav_clients`,
 //!    build a `DavClient` per server, aggregate the per-server
 //!    results, and serialise to the LLM-facing DTOs from
-//!    `crate::agent::tools::dtos`.
+//!    `crate::tools::dtos`.
 
 use fast_dav_rs::{CalDavClient, CardDavClient};
 
-use crate::agent::lib::dav::cal::{self, CalDavEventDetails};
-use crate::agent::lib::dav::card::{self, CardDavContactDetails};
-use crate::agent::tools::blocking::block_on;
 use crate::config::CalDavClient as CalDavClientConfig;
+use crate::lib::dav::cal::{self, CalDavEventDetails};
+use crate::lib::dav::card::{self, CardDavContactDetails};
+use crate::tools::blocking::block_on;
 
 /// One DAV server connection — both CalDAV and CardDAV over the
 /// same base URL with the same credentials.

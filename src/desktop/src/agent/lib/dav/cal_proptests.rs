@@ -38,7 +38,7 @@
 //!
 //! `cases = 512` per property.
 
-use crate::agent::lib::dav::cal::parse_ical_data;
+use crate::lib::dav::cal::parse_ical_data;
 use proptest::prelude::*;
 
 /// One proptest case count for every property in this sidecar.

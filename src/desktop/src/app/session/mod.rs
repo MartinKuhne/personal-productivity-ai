@@ -42,3 +42,7 @@ pub mod pdf_backing_tracker;
 pub use browser_session::{BrowserSession, PageHandle, SessionError};
 pub use config_subscriber::spawn_config_subscription;
 pub use pdf_backing_tracker::PdfBackingTracker;
+
+#[cfg(all(test, feature = "browser"))]
+#[path = "browser_tests.rs"]
+mod browser_tests;

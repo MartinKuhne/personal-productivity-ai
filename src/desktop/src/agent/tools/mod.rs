@@ -4,7 +4,7 @@
 //!
 //! Protocol-layer code for the external service integrations
 //! (CalDAV, CardDAV, MCP, Trello, Weather) lives under
-//! [`crate::integrations`] and is referenced from the `Tool`
+//! [`crate::lib`] and is referenced from the `Tool`
 //! adapters in [`registry::builtin`].
 //!
 //! Requirements: see [`SPEC.md`](SPEC.md) (TOOL-001..TOOL-010, TOOL-014..024) for the full specification.
@@ -30,12 +30,10 @@ pub mod provider;
 #[cfg(test)]
 mod provider_tests;
 pub mod registry;
+pub mod specs;
 pub mod vfs;
 pub mod web;
 pub mod yaml_header;
-
-#[cfg(all(test, feature = "browser"))]
-mod browser_tests;
 
 // Property-based tests for the LLM↔tool DTO trust boundary.
 // Phase 1 of the fuzzing plan (`doc/planning/fuzzing.md`).
@@ -55,7 +53,7 @@ use std::any::TypeId;
 /// Whether a tool mutates user state and therefore cannot be dispatched
 /// in parallel with other mutating tools.
 ///
-/// `Tool::safety` lets [`crate::agent::tool_executor::ToolExecutor`]
+/// `Tool::safety` lets [`crate::tool_executor::ToolExecutor`]
 /// classify tools without matching on string names. The default
 /// classification is [`Safety::Mutating`] (the conservative choice for
 /// any tool that has not yet been audited).
@@ -110,7 +108,7 @@ pub trait Tool: Send + Sync {
     /// Whether the tool should currently be offered to the LLM.
     /// Defaults to evaluating `self.descriptor().config` against
     /// the live `AgentConfig` and the current prompt.
-    fn is_enabled(&self, config: &crate::agent::config::AgentConfig, prompt: &str) -> bool {
+    fn is_enabled(&self, config: &crate::config::AgentConfig, prompt: &str) -> bool {
         self.descriptor().config.is_enabled_for(config, prompt)
     }
 

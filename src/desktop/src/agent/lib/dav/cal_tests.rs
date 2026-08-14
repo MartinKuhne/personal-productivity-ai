@@ -1,7 +1,7 @@
 //! Tests for `agent/lib/dav/cal.rs`.
 
 use super::*;
-use crate::agent::config::AgentConfig;
+use crate::config::AgentConfig;
 use fast_dav_rs::CalDavClient;
 
 // --- parse_ical_data tests ---
@@ -184,7 +184,7 @@ fn test_update_ical_string_no_updates_preserves() {
 
 // --- CalDAV Tool Config & Client Tests (mock server) ---
 
-use wiremock::matchers::{method, path};
+use wiremock::matchers::{method, path as wm_path};
 use wiremock::{Mock, MockServer, ResponseTemplate};
 
 /// A wiremock server whose backing tokio runtime lives as long as
@@ -287,7 +287,7 @@ fn register_caldav_stubs(mock: &WiremockGuard) {
     // GET /item1.ics → 200 with the existing iCal body.
     mock.register(
         Mock::given(method("GET"))
-            .and(path("/item1.ics"))
+            .and(wm_path("/item1.ics"))
             .respond_with(
                 ResponseTemplate::new(200)
                     .insert_header("content-type", "text/calendar")
@@ -297,7 +297,7 @@ fn register_caldav_stubs(mock: &WiremockGuard) {
     // GET /notfound → 404.
     mock.register(
         Mock::given(method("GET"))
-            .and(path("/notfound"))
+            .and(wm_path("/notfound"))
             .respond_with(
                 ResponseTemplate::new(404)
                     .insert_header("content-type", "text/plain")
@@ -311,13 +311,13 @@ fn register_caldav_stubs(mock: &WiremockGuard) {
     // DELETE /item1.ics → 204.
     mock.register(
         Mock::given(method("DELETE"))
-            .and(path("/item1.ics"))
+            .and(wm_path("/item1.ics"))
             .respond_with(ResponseTemplate::new(204).set_body_string("")),
     );
     // DELETE /fail → 500 Internal Server Error.
     mock.register(
         Mock::given(method("DELETE"))
-            .and(path("/fail"))
+            .and(wm_path("/fail"))
             .respond_with(
                 ResponseTemplate::new(500)
                     .insert_header("content-type", "text/plain")
@@ -508,7 +508,7 @@ fn test_caldav_tools_mock_server_keep_alive() {
 /// fail with `connection closed before message completed`.
 #[test]
 fn test_caldav_tools_mock_server_single_client_reuse() {
-    use crate::agent::tools::blocking::block_on;
+    use crate::tools::blocking::block_on;
 
     let _ = rustls::crypto::ring::default_provider().install_default();
     let mock = WiremockGuard::start();
@@ -707,7 +707,7 @@ fn register_carddav_stubs(mock: &WiremockGuard) {
     // GET /alice.vcf → 200 with the vCard body.
     mock.register(
         Mock::given(method("GET"))
-            .and(path("/alice.vcf"))
+            .and(wm_path("/alice.vcf"))
             .respond_with(
                 ResponseTemplate::new(200)
                     .insert_header("content-type", "text/vcard")
@@ -717,14 +717,14 @@ fn register_carddav_stubs(mock: &WiremockGuard) {
     // DELETE /alice.vcf → 204.
     mock.register(
         Mock::given(method("DELETE"))
-            .and(path("/alice.vcf"))
+            .and(wm_path("/alice.vcf"))
             .respond_with(ResponseTemplate::new(204).set_body_string("")),
     );
     // DELETE /missing.vcf → 404 (treated as success in
     // `delete_contact`).
     mock.register(
         Mock::given(method("DELETE"))
-            .and(path("/missing.vcf"))
+            .and(wm_path("/missing.vcf"))
             .respond_with(
                 ResponseTemplate::new(404)
                     .insert_header("content-type", "text/plain")

@@ -4,7 +4,7 @@
 //!
 //! This is the protocol layer. The LLM-tool-loop adapter that
 //! exposes it as a single `Tool` impl lives in
-//! crate::agent::tools::registry::builtin::weather.
+//! crate::tools::registry::builtin::weather.
 
 use serde_json::Value;
 
@@ -150,7 +150,7 @@ fn geocode(cfg: &WeatherConfig, location: &str) -> Result<(f64, f64), String> {
 pub fn tool_get_weather(
     location: &str,
     date_range: Option<&str>,
-) -> Result<crate::agent::tools::dtos::GetWeatherResponse, String> {
+) -> Result<crate::tools::dtos::GetWeatherResponse, String> {
     tool_get_weather_with(&WeatherConfig::default(), location, date_range)
 }
 
@@ -162,7 +162,7 @@ pub fn tool_get_weather_with(
     cfg: &WeatherConfig,
     location: &str,
     date_range: Option<&str>,
-) -> Result<crate::agent::tools::dtos::GetWeatherResponse, String> {
+) -> Result<crate::tools::dtos::GetWeatherResponse, String> {
     // Reference: https://www.weather.gov/documentation/services-web-api
 
     let (lat, lon) = geocode(cfg, location)?;
@@ -277,7 +277,7 @@ pub fn tool_get_weather_with(
         return Err(err_msg);
     }
 
-    Ok(crate::agent::tools::dtos::GetWeatherResponse {
+    Ok(crate::tools::dtos::GetWeatherResponse {
         result: serde_json::to_string(&results).unwrap_or_default(),
     })
 }

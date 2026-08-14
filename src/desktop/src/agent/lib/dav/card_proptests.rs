@@ -32,7 +32,7 @@
 //!    semicolon-separated list of 5 components. The parser
 //!    must accept the full 5-component form without panic.
 
-use crate::agent::lib::dav::card::parse_vcard;
+use crate::lib::dav::card::parse_vcard;
 use proptest::prelude::*;
 
 /// One proptest case count for every property in this sidecar.

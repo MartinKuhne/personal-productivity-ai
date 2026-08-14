@@ -2,19 +2,19 @@
 //! dispatches through the [`AgentToolContext`]'s registry, and
 //! feeds results back.
 
-use crate::agent::AgentToolContext;
-use crate::agent::config::AgentConfig;
-use crate::agent::events::ToolSideEffect;
-use crate::agent::tools::Safety;
-use crate::agent::tools::execute_tool;
+use crate::AgentToolContext;
+use crate::config::AgentConfig;
+use crate::events::ToolSideEffect;
+use crate::tools::Safety;
+use crate::tools::execute_tool;
 use std::path::Path;
 use std::sync::Arc;
 
 /// Cheap, shallow-clone handle to a shared cache. The
 /// `ToolExecutor` does not own a `ToolCache` directly; the
 /// cache is a process-wide singleton exposed by
-/// [`crate::agent::tools::registry::cache::cache`].
-type SharedCache = Arc<crate::agent::tools::registry::cache::ToolCache>;
+/// [`crate::tools::registry::cache::cache`].
+type SharedCache = Arc<crate::tools::registry::cache::ToolCache>;
 
 pub struct ToolExecutor {
     /// Global `AgentConfig` shared with every tool call (used by
@@ -22,11 +22,11 @@ pub struct ToolExecutor {
     /// clients). Cheap to clone per parallel worker (single
     /// `Arc` refcount bump).
     config: Arc<AgentConfig>,
-    file_observer: std::sync::Arc<dyn crate::agent::tools::observer::OnFileChanged>,
+    file_observer: std::sync::Arc<dyn crate::tools::observer::OnFileChanged>,
     /// When the `browser` Cargo feature is off the session is a
     /// stub that returns
     /// [`crate::app::session::SessionError::Disabled`].
-    policy: std::sync::Arc<dyn crate::agent::tools::policy::ToolCallPolicy>,
+    policy: std::sync::Arc<dyn crate::tools::policy::ToolCallPolicy>,
     cache: SharedCache,
     /// Catalog-level bundle. The executor snapshots this per
     /// parallel worker (`ArcSwap::load`) and per sequential
@@ -37,17 +37,17 @@ pub struct ToolExecutor {
 
 pub struct ToolExecutorBuilder {
     config: Arc<AgentConfig>,
-    file_observer: std::sync::Arc<dyn crate::agent::tools::observer::OnFileChanged>,
+    file_observer: std::sync::Arc<dyn crate::tools::observer::OnFileChanged>,
     cache: SharedCache,
     tool_context: std::sync::Arc<arc_swap::ArcSwap<AgentToolContext>>,
-    policy: Option<std::sync::Arc<dyn crate::agent::tools::policy::ToolCallPolicy>>,
+    policy: Option<std::sync::Arc<dyn crate::tools::policy::ToolCallPolicy>>,
     uuid_gen: Option<std::sync::Arc<dyn crate::utils::uuid::UuidGenerator>>,
 }
 
 impl ToolExecutorBuilder {
     pub fn new(
         config: Arc<AgentConfig>,
-        file_observer: std::sync::Arc<dyn crate::agent::tools::observer::OnFileChanged>,
+        file_observer: std::sync::Arc<dyn crate::tools::observer::OnFileChanged>,
         cache: SharedCache,
         tool_context: std::sync::Arc<arc_swap::ArcSwap<AgentToolContext>>,
     ) -> Self {
@@ -63,7 +63,7 @@ impl ToolExecutorBuilder {
 
     pub fn with_tool_call_policy(
         mut self,
-        policy: std::sync::Arc<dyn crate::agent::tools::policy::ToolCallPolicy>,
+        policy: std::sync::Arc<dyn crate::tools::policy::ToolCallPolicy>,
     ) -> Self {
         self.policy = Some(policy);
         self
@@ -83,7 +83,7 @@ impl ToolExecutorBuilder {
             file_observer: self.file_observer,
             policy: self
                 .policy
-                .unwrap_or_else(|| Arc::new(crate::agent::tools::policy::DefaultToolCallPolicy)),
+                .unwrap_or_else(|| Arc::new(crate::tools::policy::DefaultToolCallPolicy)),
             cache: self.cache,
             tool_context: self.tool_context,
             uuid_gen: self
@@ -125,7 +125,7 @@ impl ToolExecutor {
     /// turn after all tool calls have completed. Per-group error
     /// state is what the UI dialog's "needs attention" badge reads.
     fn record_tool_errors(&self, results: &[(String, String, String, String)]) {
-        use crate::agent::tools::registry::errors::{ToolErrorKind, ToolGroupError};
+        use crate::tools::registry::errors::{ToolErrorKind, ToolGroupError};
         for (_call_id, func_name, _func_args, result) in results {
             let group = self.tool_context.load().registry.tool_group(func_name);
             let Some(group) = group else {
@@ -200,12 +200,12 @@ impl ToolExecutor {
                 join_set.spawn_blocking(move || {
                     let snapshot = tc_arc.load();
                     let dispatcher = &snapshot.registry;
-                    let ctx = crate::agent::tools::context::ToolContextBuilder::new(cfg, bus)
+                    let ctx = crate::tools::context::ToolContextBuilder::new(cfg, bus)
+                        .with_extension(std::sync::Arc::new(crate::tools::context::ToolCacheExt(
+                            cache,
+                        )))
                         .with_extension(std::sync::Arc::new(
-                            crate::agent::tools::context::ToolCacheExt(cache),
-                        ))
-                        .with_extension(std::sync::Arc::new(
-                            crate::agent::tools::context::UuidGeneratorExt(uuid_gen),
+                            crate::tools::context::UuidGeneratorExt(uuid_gen),
                         ))
                         .with_tool_call_policy(pdf)
                         .build();
@@ -235,15 +235,15 @@ impl ToolExecutor {
             let pdf = self.policy.clone();
             let snapshot = self.tool_context.load();
             let dispatcher = &snapshot.registry;
-            let ctx = crate::agent::tools::context::ToolContextBuilder::new(
+            let ctx = crate::tools::context::ToolContextBuilder::new(
                 self.config.clone(),
                 self.file_observer.clone(),
             )
+            .with_extension(std::sync::Arc::new(crate::tools::context::ToolCacheExt(
+                self.cache.clone(),
+            )))
             .with_extension(std::sync::Arc::new(
-                crate::agent::tools::context::ToolCacheExt(self.cache.clone()),
-            ))
-            .with_extension(std::sync::Arc::new(
-                crate::agent::tools::context::UuidGeneratorExt(self.uuid_gen.clone()),
+                crate::tools::context::UuidGeneratorExt(self.uuid_gen.clone()),
             ))
             .with_tool_call_policy(pdf)
             .build();
@@ -323,13 +323,13 @@ fn extract_str<'a>(val: &'a serde_json::Value, path: &[&str]) -> &'a str {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::agent::config::AgentConfig;
+    use crate::config::AgentConfig;
     use std::sync::Arc;
 
     #[test]
     fn test_classify() {
         let tm = Arc::new(arc_swap::ArcSwap::from_pointee(AgentToolContext::new(
-            crate::agent::tools::registry::ToolRegistry::new(),
+            crate::tools::registry::ToolRegistry::new(),
         )));
         assert_eq!(tm.load().registry.safety_of("read_note"), Safety::ReadOnly);
         assert_eq!(
@@ -360,13 +360,13 @@ mod tests {
     #[test]
     fn test_tool_executor_new() {
         let config = AgentConfig::default();
-        let bus = std::sync::Arc::new(crate::agent::tools::observer::DefaultFileObserver);
-        let policy = std::sync::Arc::new(crate::agent::tools::policy::DefaultToolCallPolicy);
+        let bus = std::sync::Arc::new(crate::tools::observer::DefaultFileObserver);
+        let policy = std::sync::Arc::new(crate::tools::policy::DefaultToolCallPolicy);
         let tm = std::sync::Arc::new(arc_swap::ArcSwap::from_pointee(AgentToolContext::new(
-            crate::agent::tools::registry::ToolRegistry::new(),
+            crate::tools::registry::ToolRegistry::new(),
         )));
         let uuid_gen = std::sync::Arc::new(crate::utils::uuid::SystemUuidGenerator);
-        let cache = std::sync::Arc::new(crate::agent::tools::registry::cache::ToolCache::new());
+        let cache = std::sync::Arc::new(crate::tools::registry::cache::ToolCache::new());
         let executor = ToolExecutorBuilder::new(std::sync::Arc::new(config), bus, cache, tm)
             .with_tool_call_policy(policy)
             .with_uuid_gen(uuid_gen)

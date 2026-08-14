@@ -2,18 +2,23 @@
 //!
 //! Requirements: see [`SPEC.md`](SPEC.md) (AGENT-001..AGENT-023) for the full specification.
 
+#![allow(special_module_name)]
+
 pub mod agent_impl;
 pub mod config;
 pub mod context;
 pub mod datamark;
 pub mod error;
 pub mod events;
+#[allow(special_module_name)]
 pub mod lib;
 pub mod llm_client;
 pub mod session;
 pub mod tool_context;
 pub mod tool_executor;
 pub mod tools;
+pub mod utils;
+pub mod vfs;
 
 #[cfg(test)]
 #[path = "agent_impl_tests.rs"]

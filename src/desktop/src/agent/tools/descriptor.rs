@@ -5,20 +5,20 @@
 //! `ToolDescriptor` is a `'static` value shared by every caller that
 //! only needs metadata (the agent loop, the prompt builder, the UI
 //! dialog, the tool registry's schema-fragment builders). Tools
-//! themselves implement [`crate::agent::tools::Tool`] and return
-//! `&'static ToolDescriptor` from [`crate::agent::tools::Tool::descriptor`].
+//! themselves implement [`crate::tools::Tool`] and return
+//! `&'static ToolDescriptor` from [`crate::tools::Tool::descriptor`].
 //!
 //! The companion [`ToolConfigSpec`] carries the configuration
 //! requirements a tool needs in order to be enabled. Combined with
-//! [`crate::agent::config::AgentConfig`] and the current prompt, it is the
+//! [`crate::config::AgentConfig`] and the current prompt, it is the
 //! single source of truth for "is this tool currently offered to the
 //! LLM?".
 //!
 //! Unit tests live in the sibling `descriptor_tests.rs` sidecar.
 
-use crate::agent::config::AgentConfig;
-use crate::agent::tools::Safety;
-use crate::agent::tools::registry::groups::{InternalToolGroup, ToolGroupId};
+use crate::config::AgentConfig;
+use crate::tools::Safety;
+use crate::tools::registry::groups::{InternalToolGroup, ToolGroupId};
 use std::any::TypeId;
 use std::borrow::Cow;
 
@@ -196,7 +196,7 @@ impl ToolDescriptor {
 // ---------------------------------------------------------------------------
 
 /// Declarative configuration requirements for a tool. Drives
-/// [`crate::agent::tools::Tool::is_enabled`] in combination with the
+/// [`crate::tools::Tool::is_enabled`] in combination with the
 /// group's enable flag and an optional prompt-content rule.
 #[derive(Clone, Debug, Default)]
 pub struct ToolConfigSpec {
@@ -228,8 +228,8 @@ impl ToolConfigSpec {
     /// LLM, given the current `AgentConfig` and the user's prompt.
     ///
     /// Note: prompt-content gating rules themselves live in the
-    /// application domain (see
-    /// [`crate::app::batch::prompt_rules`]). The tool system here
+    /// specifications module (see
+    /// [`crate::tools::specs`]). The tool system here
     /// just evaluates whatever [`PromptPredicate`] the spec carries.
     pub fn is_enabled_for(&self, config: &AgentConfig, prompt: &str) -> bool {
         if let Some(group) = &self.group
@@ -297,8 +297,8 @@ impl ConfigPredicate {
 }
 
 /// Prompt-content rule. Today the only variant is keyword
-/// matching. The actual keyword lists live in the application
-/// domain (see [`crate::app::batch::prompt_rules`]); the tool
+/// matching. The actual keyword lists live in the specifications
+/// module (see [`crate::tools::specs`]); the tool
 /// system here just provides the matching mechanism.
 #[derive(Clone, Debug)]
 pub enum PromptPredicate {
@@ -367,8 +367,8 @@ fn internal_group_enabled(config: &AgentConfig, g: InternalToolGroup) -> bool {
 ///     crate::tool_descriptor! {
 ///         name: "patch_note",
 ///         desc: strings::PATCH_NOTE_DESCRIPTION,
-///         input: crate::agent::tools::dtos::PatchNoteInput,
-///         safety: crate::agent::tools::Safety::Mutating,
+///         input: crate::tools::dtos::PatchNoteInput,
+///         safety: crate::tools::Safety::Mutating,
 ///         group: Filesystem,
 ///     }
 ///     fn execute(&self, ctx: &ToolContext, args: &str)
@@ -385,18 +385,18 @@ macro_rules! tool_descriptor {
         group: $group:ident $(,)?
         profile: $profile:expr $(,)?
     ) => {
-        fn descriptor(&self) -> &$crate::agent::tools::ToolDescriptor {
-            static D: ::std::sync::OnceLock<$crate::agent::tools::ToolDescriptor> =
+        fn descriptor(&self) -> &$crate::tools::ToolDescriptor {
+            static D: ::std::sync::OnceLock<$crate::tools::ToolDescriptor> =
                 ::std::sync::OnceLock::new();
             D.get_or_init(|| {
-                let group_id = $crate::agent::tools::registry::groups::ToolGroupId::Internal(
-                    $crate::agent::tools::registry::groups::InternalToolGroup::$group,
+                let group_id = $crate::tools::registry::groups::ToolGroupId::Internal(
+                    $crate::tools::registry::groups::InternalToolGroup::$group,
                 );
-                $crate::agent::tools::ToolDescriptor::new::<$input>(
+                $crate::tools::ToolDescriptor::new::<$input>(
                     $name,
                     $desc,
                     $safety,
-                    $crate::agent::tools::descriptor::ToolConfigSpec::group_only(group_id.clone()),
+                    $crate::tools::descriptor::ToolConfigSpec::group_only(group_id.clone()),
                     group_id,
                 )
                 .with_profile($profile)
@@ -410,18 +410,18 @@ macro_rules! tool_descriptor {
         safety: $safety:expr,
         group: $group:ident $(,)?
     ) => {
-        fn descriptor(&self) -> &$crate::agent::tools::ToolDescriptor {
-            static D: ::std::sync::OnceLock<$crate::agent::tools::ToolDescriptor> =
+        fn descriptor(&self) -> &$crate::tools::ToolDescriptor {
+            static D: ::std::sync::OnceLock<$crate::tools::ToolDescriptor> =
                 ::std::sync::OnceLock::new();
             D.get_or_init(|| {
-                let group_id = $crate::agent::tools::registry::groups::ToolGroupId::Internal(
-                    $crate::agent::tools::registry::groups::InternalToolGroup::$group,
+                let group_id = $crate::tools::registry::groups::ToolGroupId::Internal(
+                    $crate::tools::registry::groups::InternalToolGroup::$group,
                 );
-                $crate::agent::tools::ToolDescriptor::new::<$input>(
+                $crate::tools::ToolDescriptor::new::<$input>(
                     $name,
                     $desc,
                     $safety,
-                    $crate::agent::tools::descriptor::ToolConfigSpec::group_only(group_id.clone()),
+                    $crate::tools::descriptor::ToolConfigSpec::group_only(group_id.clone()),
                     group_id,
                 )
             })

@@ -1,7 +1,7 @@
 //! Agent context — bundles all inputs (config, channels, file bus, active file/dir, prompt, cancel flag, history) for an agent session.
 
-use crate::agent::config::AgentConfig;
-use crate::agent::events::AgentEventObserver;
+use crate::config::AgentConfig;
+use crate::events::AgentEventObserver;
 use serde_json::Value;
 use std::collections::HashSet;
 use std::path::PathBuf;
@@ -18,15 +18,14 @@ pub struct AgentContext {
     /// Projected from the global `AppConfig` by the orchestrator via
     /// `AppConfig::to_agent_config`.
     pub agent_config: AgentConfig,
-    pub file_observer: std::sync::Arc<dyn crate::agent::tools::observer::OnFileChanged>,
+    pub file_observer: std::sync::Arc<dyn crate::tools::observer::OnFileChanged>,
     /// Agent→UI structured observer. The agent calls methods here to emit events.
     pub observer: Arc<dyn AgentEventObserver>,
     pub active_file: Option<PathBuf>,
     pub active_dir: Option<PathBuf>,
     pub selected_files: HashSet<PathBuf>,
     pub prompt: String,
-    /// Pre-assembled system-prompt message blocks, built by the
-    /// submitter via [`crate::app::prompts::build_system_prompts`].
+    /// Pre-assembled system-prompt message blocks, built by the caller.
     /// The agent run loop forwards these as `role=system` messages
     /// before the user turn; it does not construct them itself.
     pub system_prompts: Vec<String>,
@@ -44,24 +43,24 @@ pub struct AgentContext {
     /// via this field. When the `browser` Cargo feature is off
     /// the session is a stub; the `browser_*` tools are not
     /// registered and the field stays unused.
-    pub tool_call_policy: std::sync::Arc<dyn crate::agent::tools::policy::ToolCallPolicy>,
+    pub tool_call_policy: std::sync::Arc<dyn crate::tools::policy::ToolCallPolicy>,
     /// Shared PDF-backing tracker — gives tools access to
     /// the set of Markdown files that have a `.pdf` sibling.
     /// Shared tool cache — held as an `Arc` so the executor
     /// constructed from this context can pass it into every
     /// `ToolContext` (which now takes the cache by value).
     /// Today this is the process-wide singleton from
-    /// [`crate::agent::tools::registry::cache::cache`], but
+    /// [`crate::tools::registry::cache::cache`], but
     /// the field is independent so a future test or alt
     /// orchestrator can inject a private cache.
-    pub cache: Arc<crate::agent::tools::registry::cache::ToolCache>,
+    pub cache: Arc<crate::tools::registry::cache::ToolCache>,
     /// Catalog-level bundle. The agent loop, executor, and prompt
     /// builder all snapshot this per turn. Swapped atomically on
     /// `ConfigArrived` and MCP discovery. See
-    /// [`crate::agent::AgentToolContext`].
-    pub tool_context: std::sync::Arc<arc_swap::ArcSwap<crate::agent::AgentToolContext>>,
+    /// [`crate::AgentToolContext`].
+    pub tool_context: std::sync::Arc<arc_swap::ArcSwap<crate::AgentToolContext>>,
     pub uuid_gen: Arc<dyn crate::utils::uuid::UuidGenerator>,
-    pub extensions: crate::agent::tools::extensions::Extensions,
+    pub extensions: crate::tools::extensions::Extensions,
 }
 
 pub struct AgentContextBuilder {
@@ -69,7 +68,7 @@ pub struct AgentContextBuilder {
     session_id: Uuid,
     prompt: String,
 
-    file_observer: Option<std::sync::Arc<dyn crate::agent::tools::observer::OnFileChanged>>,
+    file_observer: Option<std::sync::Arc<dyn crate::tools::observer::OnFileChanged>>,
     observer: Option<Arc<dyn AgentEventObserver>>,
     active_file: Option<PathBuf>,
     active_dir: Option<PathBuf>,
@@ -78,11 +77,11 @@ pub struct AgentContextBuilder {
     history: Option<Vec<Value>>,
     model_name: Option<String>,
     system_prompts: Option<Vec<String>>,
-    tool_call_policy: Option<std::sync::Arc<dyn crate::agent::tools::policy::ToolCallPolicy>>,
-    cache: Option<Arc<crate::agent::tools::registry::cache::ToolCache>>,
-    tool_context: Option<Arc<arc_swap::ArcSwap<crate::agent::AgentToolContext>>>,
+    tool_call_policy: Option<std::sync::Arc<dyn crate::tools::policy::ToolCallPolicy>>,
+    cache: Option<Arc<crate::tools::registry::cache::ToolCache>>,
+    tool_context: Option<Arc<arc_swap::ArcSwap<crate::AgentToolContext>>>,
     uuid_gen: Option<Arc<dyn crate::utils::uuid::UuidGenerator>>,
-    extensions: crate::agent::tools::extensions::Extensions,
+    extensions: crate::tools::extensions::Extensions,
 }
 
 impl AgentContextBuilder {
@@ -104,13 +103,13 @@ impl AgentContextBuilder {
             cache: None,
             tool_context: None,
             uuid_gen: None,
-            extensions: crate::agent::tools::extensions::Extensions::new(),
+            extensions: crate::tools::extensions::Extensions::new(),
         }
     }
 
     pub fn with_file_observer(
         mut self,
-        file_observer: std::sync::Arc<dyn crate::agent::tools::observer::OnFileChanged>,
+        file_observer: std::sync::Arc<dyn crate::tools::observer::OnFileChanged>,
     ) -> Self {
         self.file_observer = Some(file_observer);
         self
@@ -147,10 +146,8 @@ impl AgentContextBuilder {
         self
     }
 
-    /// Set the pre-built system-prompt blocks. The submitter
-    /// (UI submit path or batch executor) calls
-    /// [`crate::app::prompts::build_system_prompts`] and hands the
-    /// result here. Required at [`Self::build`] time.
+    /// Set the pre-built system-prompt blocks.
+    /// Required at [`Self::build`] time.
     pub fn with_system_prompts(mut self, system_prompts: Vec<String>) -> Self {
         self.system_prompts = Some(system_prompts);
         self
@@ -158,23 +155,20 @@ impl AgentContextBuilder {
 
     pub fn with_tool_call_policy(
         mut self,
-        policy: std::sync::Arc<dyn crate::agent::tools::policy::ToolCallPolicy>,
+        policy: std::sync::Arc<dyn crate::tools::policy::ToolCallPolicy>,
     ) -> Self {
         self.tool_call_policy = Some(policy);
         self
     }
 
-    pub fn with_cache(
-        mut self,
-        cache: Arc<crate::agent::tools::registry::cache::ToolCache>,
-    ) -> Self {
+    pub fn with_cache(mut self, cache: Arc<crate::tools::registry::cache::ToolCache>) -> Self {
         self.cache = Some(cache);
         self
     }
 
     pub fn with_tool_context(
         mut self,
-        tool_context: Arc<arc_swap::ArcSwap<crate::agent::AgentToolContext>>,
+        tool_context: Arc<arc_swap::ArcSwap<crate::AgentToolContext>>,
     ) -> Self {
         self.tool_context = Some(tool_context);
         self
@@ -190,10 +184,7 @@ impl AgentContextBuilder {
         self
     }
 
-    pub fn with_extensions(
-        mut self,
-        extensions: crate::agent::tools::extensions::Extensions,
-    ) -> Self {
+    pub fn with_extensions(mut self, extensions: crate::tools::extensions::Extensions) -> Self {
         self.extensions = extensions;
         self
     }
@@ -204,13 +195,13 @@ impl AgentContextBuilder {
             session_id: self.session_id,
             prompt: self.prompt,
             file_observer: self.file_observer.unwrap_or_else(|| {
-                std::sync::Arc::new(crate::agent::tools::observer::DefaultFileObserver)
+                std::sync::Arc::new(crate::tools::observer::DefaultFileObserver)
             }),
             observer: self.observer.expect("observer is required"),
             active_file: self.active_file,
             active_dir: self.active_dir,
             tool_call_policy: self.tool_call_policy.unwrap_or_else(|| {
-                std::sync::Arc::new(crate::agent::tools::policy::DefaultToolCallPolicy)
+                std::sync::Arc::new(crate::tools::policy::DefaultToolCallPolicy)
             }),
             selected_files: self.selected_files,
             system_prompts: self
@@ -221,14 +212,12 @@ impl AgentContextBuilder {
                 .unwrap_or_else(|| Arc::new(AtomicBool::new(false))),
             history: self.history,
             model_name: self.model_name,
-            cache: self.cache.unwrap_or_else(|| {
-                Arc::new(crate::agent::tools::registry::cache::ToolCache::new())
-            }),
+            cache: self
+                .cache
+                .unwrap_or_else(|| Arc::new(crate::tools::registry::cache::ToolCache::new())),
             tool_context: self.tool_context.unwrap_or_else(|| {
                 Arc::new(arc_swap::ArcSwap::from_pointee(
-                    crate::agent::AgentToolContext::new(
-                        crate::agent::tools::registry::ToolRegistry::new(),
-                    ),
+                    crate::AgentToolContext::new(crate::tools::registry::ToolRegistry::new()),
                 ))
             }),
             uuid_gen: self
@@ -252,12 +241,9 @@ mod tests {
         let ctx =
             AgentContextBuilder::new(agent_config.clone(), Uuid::new_v4(), "hello".to_string())
                 .with_file_observer(std::sync::Arc::new(
-                    crate::agent::tools::observer::DefaultFileObserver,
+                    crate::tools::observer::DefaultFileObserver,
                 ))
-                .with_observer(Arc::new(crate::app::events::BusAgentEventObserver::new(
-                    Uuid::new_v4(),
-                    crate::bus::core::Bus::new(),
-                )))
+                .with_observer(Arc::new(crate::events::RecordingObserver::new()))
                 .with_active_paths(Some(PathBuf::from("test.md")), None)
                 .with_system_prompts(Vec::new())
                 .build();

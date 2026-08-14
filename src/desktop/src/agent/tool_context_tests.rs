@@ -1,7 +1,7 @@
 //! Unit tests for [`super::tool_context`].
 
 use super::tool_context::AgentToolContext;
-use crate::agent::tools::registry::ToolRegistry;
+use crate::tools::registry::ToolRegistry;
 
 #[test]
 fn test_new_wraps_registry() {

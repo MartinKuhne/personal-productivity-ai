@@ -6,12 +6,12 @@ use super::descriptor::{
     ConfigPredicate, LatencyClass, PromptPredicate, SessionRequirement, ToolConfigSpec,
     ToolDescriptor, ToolProfile, group_enabled,
 };
-use crate::agent::config::AgentConfig;
-use crate::agent::tools::Safety;
-use crate::agent::tools::registry::groups::{InternalToolGroup, ToolGroupId};
+use crate::config::AgentConfig;
 use crate::config::{
     CalDavClient, JmapClient, McpServerConfig, McpServerEntry, ToolGroupsConfig, TrelloClient,
 };
+use crate::tools::Safety;
+use crate::tools::registry::groups::{InternalToolGroup, ToolGroupId};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
@@ -91,7 +91,7 @@ fn test_searxng_predicate() {
 #[test]
 fn test_trello_predicate() {
     let mut c = AgentConfig::default();
-    let spec = crate::app::tool_specs::trello_spec();
+    let spec = crate::tools::specs::trello_spec();
     assert!(!spec.is_enabled_for(&c, ""));
     c.trello_client = Some(trello());
     assert!(spec.is_enabled_for(&c, ""));
@@ -115,7 +115,7 @@ fn test_dav_or_jmap_predicate_follows_feature_flag() {
     let mut c = AgentConfig::default();
     c.jmap_clients.insert("j".into(), jmap());
     c.caldav_clients.insert("d".into(), caldav());
-    let spec = crate::app::tool_specs::contacts_spec();
+    let spec = crate::tools::specs::contacts_spec();
     // Default: feature flag off → JMAP.
     assert!(spec.is_enabled_for(&c, ""));
     // Flag on → CalDAV.

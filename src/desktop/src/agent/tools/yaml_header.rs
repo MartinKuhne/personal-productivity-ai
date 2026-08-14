@@ -1,20 +1,17 @@
 //! YAML front-matter tools — `read_yaml_header` and `write_yaml_header` for title, summary, tags, date, etc.
 
-use crate::markdown::Document;
+use crate::utils::markdown::parse_front_matter;
 use serde_norway::{Mapping, Value};
 use std::path::Path;
 
 pub fn tool_read_yaml_header(
-    ctx: &crate::agent::tools::context::ToolContext,
+    ctx: &crate::tools::context::ToolContext,
     path_str: &str,
-) -> Result<crate::agent::tools::dtos::ReadYamlHeaderResponse, String> {
+) -> Result<crate::tools::dtos::ReadYamlHeaderResponse, String> {
     match ctx.vfs().read_to_string(path_str.as_ref()) {
         Ok(content) => {
-            // `Document` parses the front matter (if any) in one
-            // pass; reaching `front_matter()` is the same call the
-            // editor and the orchestrator use.
-            if let Some(fm) = Document::new(content).front_matter() {
-                Ok(crate::agent::tools::dtos::ReadYamlHeaderResponse {
+            if let Some(fm) = parse_front_matter(&content) {
+                Ok(crate::tools::dtos::ReadYamlHeaderResponse {
                     content: format!("{:#?}", fm.yaml),
                 })
             } else {
@@ -30,24 +27,22 @@ pub fn tool_read_yaml_header(
 }
 
 pub fn tool_write_yaml_header(
-    ctx: &crate::agent::tools::context::ToolContext,
+    ctx: &crate::tools::context::ToolContext,
     path_str: &str,
     title: Option<&str>,
     summary: Option<&str>,
     tags: Option<Vec<String>>,
     header_date: Option<&str>,
-    producer: &dyn crate::agent::tools::observer::OnFileChanged,
-) -> Result<crate::agent::tools::dtos::WriteYamlHeaderResponse, String> {
+    producer: &dyn crate::tools::observer::OnFileChanged,
+) -> Result<crate::tools::dtos::WriteYamlHeaderResponse, String> {
     let current_content = ctx
         .vfs()
         .read_to_string(path_str.as_ref())
         .unwrap_or_else(|_| "".to_string());
 
-    // `Document::body()` returns the source with the front-matter
-    // block stripped when one is present, or the full source
-    // otherwise — exactly the slice we want to preserve verbatim
-    // when rewriting the header.
-    let markdown_body = Document::new(current_content).body().to_string();
+    let markdown_body = parse_front_matter(&current_content)
+        .map(|fm| fm.body)
+        .unwrap_or(current_content);
 
     let mut map = Mapping::new();
     if let Some(t) = title {
@@ -89,7 +84,7 @@ pub fn tool_write_yaml_header(
             match ctx.vfs().write(path_str.as_ref(), new_content.as_bytes()) {
                 Ok(_) => {
                     producer.on_file_changed(path);
-                    Ok(crate::agent::tools::dtos::WriteYamlHeaderResponse {
+                    Ok(crate::tools::dtos::WriteYamlHeaderResponse {
                         result: "YAML header written successfully.".to_string(),
                     })
                 }
@@ -109,30 +104,29 @@ pub fn tool_write_yaml_header(
 #[cfg(test)]
 mod tests {
 
-    fn test_ctx() -> crate::agent::tools::context::ToolContext {
-        let config = crate::agent::config::AgentConfig::default();
-        let mut builder = crate::agent::tools::context::ToolContextBuilder::new(
+    fn test_ctx() -> crate::tools::context::ToolContext {
+        let config = crate::config::AgentConfig::default();
+        let mut builder = crate::tools::context::ToolContextBuilder::new(
             std::sync::Arc::new(config.clone()),
-            std::sync::Arc::new(crate::agent::tools::observer::DefaultFileObserver),
+            std::sync::Arc::new(crate::tools::observer::DefaultFileObserver),
         );
         builder = builder.with_extension(std::sync::Arc::new(
-            crate::agent::tools::vfs::VirtualFileSystemExt(std::sync::Arc::new(
-                crate::agent::tools::vfs::VfsResolver::new(std::sync::Arc::new(config.clone())),
+            crate::tools::vfs::VirtualFileSystemExt(std::sync::Arc::new(
+                crate::tools::vfs::VfsResolver::new(std::sync::Arc::new(config.clone())),
             )),
         ));
         builder.build()
     }
 
     use super::*;
-    use crate::bus::events::file::FileEventKind;
     use std::fs;
     use tempfile::tempdir;
 
     /// A producer that publishes to a throwaway bus. Tests don't
     /// need to consume the events — they only care about the
     /// success/failure of the underlying file operation.
-    fn noop_producer() -> std::sync::Arc<dyn crate::agent::tools::observer::OnFileChanged> {
-        std::sync::Arc::new(crate::agent::tools::observer::DefaultFileObserver)
+    fn noop_producer() -> std::sync::Arc<dyn crate::tools::observer::OnFileChanged> {
+        std::sync::Arc::new(crate::tools::observer::DefaultFileObserver)
     }
 
     #[test]
@@ -193,12 +187,7 @@ mod tests {
                 || content.contains("header-date: \"2024-01-01T00:00:00Z\""),
             "header-date not present in expected form: {content}"
         );
-        // `Document::front_matter()` extracts only the YAML block
-        // between the `---` delimiters, mirroring how the app reads
-        // headers. Parsing the full file (front matter + body)
-        // would be multi-document YAML, which `serde_norway` rejects.
-        let doc = crate::markdown::Document::new(content);
-        let fm = doc.front_matter().expect("front matter should parse");
+        let fm = parse_front_matter(&content).expect("front matter should parse");
         assert_eq!(
             fm.yaml.get("header-date").and_then(|v| v.as_str()),
             Some("2024-01-01T00:00:00Z")
@@ -254,14 +243,18 @@ mod tests {
         assert!(file_path.exists());
     }
 
+    #[derive(Clone, Default)]
+    struct RecordingFileObserver(std::sync::Arc<std::sync::Mutex<Vec<std::path::PathBuf>>>);
+    impl crate::tools::observer::OnFileChanged for RecordingFileObserver {
+        fn on_file_changed(&self, path: &std::path::Path) {
+            self.0.lock().unwrap().push(path.to_path_buf());
+        }
+    }
+
     #[test]
     fn test_tool_write_yaml_header_publishes_event_on_write() {
-        let bus = crate::bus::core::Bus::new();
-        let reader = bus.subscribe();
-        let producer: std::sync::Arc<dyn crate::agent::tools::observer::OnFileChanged> =
-            std::sync::Arc::new(crate::app::session::bus_observer::AppFileObserver::new(
-                bus.clone(),
-            ));
+        let recorded = std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
+        let producer = RecordingFileObserver(recorded.clone());
 
         let dir = tempdir().unwrap();
         let file_path = dir.path().join("brand_new.md");
@@ -273,27 +266,17 @@ mod tests {
             None,
             None,
             None,
-            &*producer,
+            &producer,
         )
         .unwrap();
 
-        let event = reader
-            .recv_timeout(std::time::Duration::from_millis(100))
-            .unwrap();
-        assert_eq!(event.kind, FileEventKind::Updated);
-        assert_eq!(event.paths[0], file_path);
+        assert_eq!(*recorded.lock().unwrap(), vec![file_path]);
     }
 
     #[test]
     fn test_tool_write_yaml_header_publishes_updated_for_existing_file() {
-        // An existing file getting its header rewritten must
-        // publish an Updated event.
-        let bus = crate::bus::core::Bus::new();
-        let reader = bus.subscribe();
-        let producer: std::sync::Arc<dyn crate::agent::tools::observer::OnFileChanged> =
-            std::sync::Arc::new(crate::app::session::bus_observer::AppFileObserver::new(
-                bus.clone(),
-            ));
+        let recorded = std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
+        let producer = RecordingFileObserver(recorded.clone());
 
         let dir = tempdir().unwrap();
         let file_path = dir.path().join("existing.md");
@@ -306,15 +289,11 @@ mod tests {
             None,
             None,
             None,
-            &*producer,
+            &producer,
         )
         .unwrap();
 
-        let event = reader
-            .recv_timeout(std::time::Duration::from_millis(100))
-            .unwrap();
-        assert_eq!(event.kind, FileEventKind::Updated);
-        assert_eq!(event.paths[0], file_path);
+        assert_eq!(*recorded.lock().unwrap(), vec![file_path]);
     }
 }
 

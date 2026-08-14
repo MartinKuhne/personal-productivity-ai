@@ -1,20 +1,11 @@
-//! Per-family tool enable specs.
+//! Per-family tool enable specs and prompt rules.
 //!
 //! Each function returns a [`ToolConfigSpec`] expressing what an
-//! `AppConfig` (and, where relevant, the current prompt) must
-//! satisfy for the LLM to see a tool from a given family. The
-//! tool system in `agent/tools/descriptor.rs` exposes the
-//! `ConfigPredicate` enum and the evaluation logic; the per-family
-//! *decisions* live here, in the application domain, because
-//! "this integration requires that credential" is a product
-//! rule, not a tool-system rule.
-//!
-//! The CSV family's prompt-content rule lives in
-//! [`crate::app::batch::prompt_rules`] (it's a prompt rule, not
-//! a config rule — different mechanism, different file).
+//! `AgentConfig` (and, where relevant, the current prompt) must
+//! satisfy for the LLM to see a tool from a given family.
 
-use crate::agent::tools::descriptor::{ConfigPredicate, ToolConfigSpec};
-use crate::agent::tools::registry::groups::{InternalToolGroup, ToolGroupId};
+use crate::tools::descriptor::{ConfigPredicate, PromptPredicate, ToolConfigSpec};
+use crate::tools::registry::groups::{InternalToolGroup, ToolGroupId};
 
 /// Spec for the email family: the email group is on AND at
 /// least one JMAP client is configured.
@@ -74,3 +65,38 @@ pub fn web_search_spec() -> ToolConfigSpec {
         prompt_rule: None,
     }
 }
+
+/// The keywords the CSV family looks for in the prompt (TOOL-001).
+/// Case-insensitive: the matcher lower-cases the prompt before
+/// scanning.
+pub fn csv_keywords() -> &'static [&'static str] {
+    &[
+        "table",
+        "csv",
+        "database",
+        "add_rows",
+        "delete_rows",
+        "create_csv",
+        "list_csv",
+        "query",
+    ]
+}
+
+/// Build the [`ToolConfigSpec`] for the CSV family of tools. The
+/// spec is gated on:
+/// 1. the `tool_groups.csv_db` flag being on (the group
+///    enable), and
+/// 2. the current prompt containing at least one of the CSV
+///    keywords (TOOL-001).
+pub fn csv_prompt_rule() -> ToolConfigSpec {
+    let group = ToolGroupId::Internal(InternalToolGroup::CsvDb);
+    ToolConfigSpec {
+        group: Some(group),
+        requires: Vec::new(),
+        prompt_rule: Some(PromptPredicate::ContainsAny(csv_keywords())),
+    }
+}
+
+#[cfg(test)]
+#[path = "specs_tests.rs"]
+mod tests;

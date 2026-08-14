@@ -35,7 +35,7 @@ fn test_registry_dispatcher_safety_unknown_is_mutating() {
     // not in the catalog must default to `Mutating`. We can't
     // construct a registry here without the broader crate, so
     // just exercise the `ToolError` / `ToolOutcome` surface.
-    use crate::agent::tools::Safety;
+    use crate::tools::Safety;
     let s = Safety::Mutating;
     assert_eq!(s, Safety::Mutating);
 }

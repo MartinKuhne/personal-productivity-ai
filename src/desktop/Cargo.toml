@@ -18,7 +18,7 @@ discord = []
 # `app::browser`, the `BrowserSession` runtime in `app::session`, and
 # the `browser_*` agent tools. Heavy dependency (~6 MB compiled
 # output for the Playwright client + macros); off by default.
-browser = ["dep:playwright-rs"]
+browser = ["dep:playwright-rs", "fastmd-agent/browser"]
 # Image-library / image-vision worker. Adds the [`ImageJob`]
 # type, the `ImageVisionWorker` background processor, the
 # image-routing branch in the file-event bus router, and the
@@ -108,6 +108,7 @@ arc-swap = "1.9.2"
 # added as a path dep rather than going into a separate
 # workspace member.
 fastmd-tool-macros = { path = "fastmd-tool-macros" }
+fastmd-agent = { path = "src/agent" }
 
 [target.'cfg(windows)'.dependencies]
 windows = { version = "0.62", features = ["Win32_System_Com", "Win32_UI_Shell"] }

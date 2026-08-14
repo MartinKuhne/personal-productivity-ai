@@ -1,16 +1,16 @@
-use crate::agent::config::AgentConfig;
+use crate::config::AgentConfig;
 // Tests for the MCP protocol client (transports, sessions, manager,
 // OAuth 2.1 flow, error type, SSE walker).
 //
 // Tool-adapter tests now live in
-// `crate::agent::tools::mcp::adapter_tests`.
+// `crate::tools::mcp::adapter_tests`.
 
 use super::MAX_REQUEST_TIMEOUT;
 use super::McpClientSession;
 use super::is_valid_session_id;
 use super::*;
-use crate::agent::tools::mcp::McpToolAdapter;
 use crate::config::{McpOAuthConfig, McpServerConfig};
+use crate::tools::mcp::McpToolAdapter;
 use std::collections::HashMap;
 use std::sync::Arc;
 

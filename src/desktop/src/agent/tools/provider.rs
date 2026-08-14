@@ -72,7 +72,7 @@ pub trait ToolProvider: Send + Sync {
     fn id(&self) -> &'static str;
 
     /// The group this provider's tools belong to.
-    fn group(&self) -> crate::agent::tools::registry::groups::ToolGroupId;
+    fn group(&self) -> crate::tools::registry::groups::ToolGroupId;
 
     /// The tools this provider currently contributes. Called once
     /// at registry construction and again on
@@ -84,5 +84,5 @@ pub trait ToolProvider: Send + Sync {
     /// The provider is responsible for clearing any state on the
     /// registry that should be rebuilt — typically done by the
     /// registry's higher-level refresh logic.
-    fn refresh(&mut self, _config: &crate::config::AppConfig) {}
+    fn refresh(&mut self, _config: &crate::config::AgentConfig) {}
 }

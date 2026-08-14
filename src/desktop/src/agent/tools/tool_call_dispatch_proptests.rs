@@ -50,10 +50,9 @@
 //! what makes the Phase-5 cargo-fuzz targets for `execute_tool`
 //! feasible.
 
-use crate::agent::config::AgentConfig;
-use crate::agent::tools::context::ToolContext;
-use crate::app::session::{BrowserSession, PdfBackingTracker};
-use crate::utils::uuid::SystemUuidGenerator;
+use crate::config::AgentConfig;
+use crate::tools::context::ToolContext;
+use crate::utils::uuid::{SystemUuidGenerator, UuidGenerator};
 use proptest::prelude::*;
 use std::sync::Arc;
 use std::sync::mpsc;
@@ -64,33 +63,67 @@ const CASES_CHEAP: u32 = 1024;
 const CASES_BOUNDED: u32 = 64;
 const DISPATCH_TIMEOUT: Duration = Duration::from_secs(5);
 
-/// Build a fresh `ToolContext` for one proptest case. Now that
-/// `ToolContext: 'static + Send + Sync + Clone`, no leak or
-/// pointer cast is needed; the context is built by value and
-/// dropped when the proptest case returns. The total
-/// allocations across 1024 cases are bounded and reclaimed
-/// by the test harness.
+struct DummyBrowser;
+impl crate::tools::browser::BrowserAutomationExt for DummyBrowser {
+    fn navigate(&self, _url: &str) -> Result<(String, String), String> {
+        Ok(("http://localhost".to_string(), "Mock".to_string()))
+    }
+    fn get_page_state(&self) -> Result<(String, String, String, usize), String> {
+        Ok((
+            "http://localhost".to_string(),
+            "Mock".to_string(),
+            "[]".to_string(),
+            0,
+        ))
+    }
+    fn click(&self, _selector: &str) -> Result<(), String> {
+        Ok(())
+    }
+    fn fill_input(&self, _selector: &str, _text: &str) -> Result<(), String> {
+        Ok(())
+    }
+    fn select_dropdown(&self, _selector: &str, _value: &str) -> Result<(), String> {
+        Ok(())
+    }
+    fn press_key(&self, _key: &str) -> Result<(), String> {
+        Ok(())
+    }
+    fn evaluate_js(&self, _script: &str) -> Result<serde_json::Value, String> {
+        Ok(serde_json::Value::Null)
+    }
+    fn screenshot(
+        &self,
+        _filename: &str,
+        _full_page: bool,
+    ) -> Result<(std::path::PathBuf, Vec<u8>), String> {
+        Ok((std::path::PathBuf::from("screenshot.png"), Vec::new()))
+    }
+    fn save_storage(&self) -> Result<(), String> {
+        Ok(())
+    }
+    fn resolve_screenshot_path(&self, filename: &str) -> Result<std::path::PathBuf, String> {
+        Ok(std::path::PathBuf::from(filename))
+    }
+}
+
+/// Build a fresh `ToolContext` for one proptest case.
 fn build_dispatch_context() -> ToolContext {
     let config = AgentConfig::default();
-    let browser_session = Arc::new(BrowserSession::with_resolved(config.browser.clone()));
-    let policy = Arc::new(PdfBackingTracker::new());
-    let uuid_gen: Arc<dyn crate::utils::uuid::UuidGenerator> = Arc::new(SystemUuidGenerator);
-    crate::agent::tools::context::ToolContextBuilder::new(
+    let browser_session: Arc<dyn crate::tools::browser::BrowserAutomationExt> =
+        Arc::new(DummyBrowser);
+    let policy = Arc::new(crate::tools::policy::DefaultToolCallPolicy);
+    let uuid_gen: Arc<dyn UuidGenerator> = Arc::new(SystemUuidGenerator);
+    crate::tools::context::ToolContextBuilder::new(
         Arc::new(config),
-        std::sync::Arc::new(crate::agent::tools::observer::DefaultFileObserver),
+        std::sync::Arc::new(crate::tools::observer::DefaultFileObserver),
     )
-    .with_extension(std::sync::Arc::new(
-        crate::agent::tools::context::ToolCacheExt(Arc::new(
-            crate::agent::tools::registry::cache::ToolCache::new(),
-        )),
-    ))
-    .with_extension(std::sync::Arc::new(
-        crate::agent::tools::context::UuidGeneratorExt(uuid_gen),
-    ))
-    .with_extension(browser_session.clone())
-    .with_extension(Arc::new(crate::agent::tools::browser::BrowserExt(
-        browser_session,
+    .with_extension(std::sync::Arc::new(crate::tools::context::ToolCacheExt(
+        Arc::new(crate::tools::registry::cache::ToolCache::new()),
     )))
+    .with_extension(std::sync::Arc::new(
+        crate::tools::context::UuidGeneratorExt(uuid_gen),
+    ))
+    .with_extension(Arc::new(crate::tools::browser::BrowserExt(browser_session)))
     .with_tool_call_policy(policy)
     .build()
 }
@@ -107,7 +140,7 @@ fn execute_with_timeout(ctx: ToolContext, name: String, args: String) -> Option<
     let _ = thread::Builder::new()
         .name("dispatch-proptest".to_string())
         .spawn(move || {
-            let dispatcher = crate::agent::tools::registry::ToolRegistry::new();
+            let dispatcher = crate::tools::registry::ToolRegistry::new();
             let result = execute_tool(&dispatcher, &ctx, &name, &args);
             let _ = tx.send(result);
         });
@@ -115,7 +148,7 @@ fn execute_with_timeout(ctx: ToolContext, name: String, args: String) -> Option<
 }
 
 // Re-export the dispatch function from the manager module.
-use crate::agent::tools::registry::execute_tool;
+use crate::tools::registry::execute_tool;
 
 /// Arbitrary tool-name strategy. A tool name is any UTF-8
 /// string (0-128 bytes). Includes the empty string, single
@@ -158,7 +191,7 @@ proptest! {
         // it always returns, never unwinds (because of the
         // `catch_unwind` in production), and the return
         // is a JSON object with a `status` field.
-        let dispatcher = crate::agent::tools::registry::ToolRegistry::new();
+        let dispatcher = crate::tools::registry::ToolRegistry::new();
         let result = execute_tool(&dispatcher, &ctx, &name, &args);
 
         // The return must be a non-empty String. A regression

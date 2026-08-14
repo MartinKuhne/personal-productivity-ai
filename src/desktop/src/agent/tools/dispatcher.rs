@@ -9,23 +9,23 @@
 //! receive a [`ToolExecContext`](super::context::ToolContext) with
 //! no registry back-reference.
 
-use crate::agent::tools::Safety;
-use crate::config::AppConfig;
+use crate::config::AgentConfig;
+use crate::tools::Safety;
 use std::sync::Arc;
 
 /// Service bundle handed to tools alongside their arguments.
 /// Today this is exactly the read-only view of the live
-/// `AppConfig`; future additions (e.g. a typed credential store)
+/// `AgentConfig`; future additions (e.g. a typed credential store)
 /// go here.
 #[derive(Clone, Debug)]
 pub struct ToolServices {
     /// Live configuration. Cheap to clone (single `Arc`).
-    pub config: Arc<AppConfig>,
+    pub config: Arc<AgentConfig>,
 }
 
 impl ToolServices {
     /// Build a `ToolServices` from the given config.
-    pub fn new(config: Arc<AppConfig>) -> Self {
+    pub fn new(config: Arc<AgentConfig>) -> Self {
         Self { config }
     }
 }
@@ -116,7 +116,7 @@ pub trait ToolDispatcher: Send + Sync {
         &self,
         name: &str,
         args: &str,
-        ctx: &crate::agent::tools::context::ToolContext,
+        ctx: &crate::tools::context::ToolContext,
     ) -> ToolOutcome;
 
     /// Look up the [`Safety`] classification of `name`. Unknown

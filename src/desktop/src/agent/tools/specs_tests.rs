@@ -1,9 +1,9 @@
-//! Unit tests for the per-family tool enable specs in
-//! [`super::tool_specs`].
+//! Unit tests for the per-family tool enable specs and prompt rules.
 
-use super::tool_specs::{calendar_spec, contacts_spec, email_spec, trello_spec, web_search_spec};
-use crate::agent::config::AgentConfig;
-use crate::config::{CalDavClient, JmapClient, McpServerConfig, McpServerEntry, TrelloClient};
+use super::*;
+use crate::config::{
+    AgentConfig, CalDavClient, JmapClient, McpServerConfig, McpServerEntry, TrelloClient,
+};
 
 fn jmap() -> JmapClient {
     JmapClient {
@@ -98,8 +98,6 @@ fn test_specs_gate_on_group_flag() {
 
 #[test]
 fn test_uses_mcp_server_entry_helper() {
-    // Sanity: the McpServerEntry/McpServerConfig roundtrip that
-    // MCP-server families use to gate themselves is stable.
     let entry = McpServerEntry {
         enabled: true,
         config: McpServerConfig::Sse {
@@ -109,4 +107,38 @@ fn test_uses_mcp_server_entry_helper() {
         },
     };
     assert!(entry.is_enabled());
+}
+
+#[test]
+fn test_csv_prompt_rule_gates_on_prompt_keyword() {
+    let spec = csv_prompt_rule();
+    let mut c = AgentConfig::default();
+    c.tool_groups.csv_db = true;
+    // Negative cases — no keyword in the prompt.
+    assert!(!spec.is_enabled_for(&c, "what is the weather today"));
+    assert!(!spec.is_enabled_for(&c, "summarise my notes"));
+    // Positive cases — the tool name itself or a synonym.
+    assert!(spec.is_enabled_for(&c, "show me the csv database"));
+    assert!(spec.is_enabled_for(&c, "add_rows to my csv"));
+    assert!(spec.is_enabled_for(&c, "TABLE of contents"));
+}
+
+#[test]
+fn test_csv_prompt_rule_gates_on_group_flag() {
+    let spec = csv_prompt_rule();
+    let mut c = AgentConfig::default();
+    c.tool_groups.csv_db = false;
+    // Even with a matching keyword, the group flag must also be on.
+    assert!(!spec.is_enabled_for(&c, "show me the csv database"));
+    c.tool_groups.csv_db = true;
+    assert!(spec.is_enabled_for(&c, "show me the csv database"));
+}
+
+#[test]
+fn test_csv_prompt_rule_case_insensitive() {
+    let spec = csv_prompt_rule();
+    let mut c = AgentConfig::default();
+    c.tool_groups.csv_db = true;
+    assert!(spec.is_enabled_for(&c, "query the CSV"));
+    assert!(spec.is_enabled_for(&c, "what is a TABLE"));
 }

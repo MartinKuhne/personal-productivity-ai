@@ -28,7 +28,7 @@
 //!
 //! `cases = 512` per property.
 
-use crate::agent::lib::weather::parse_nominatim_first;
+use crate::lib::weather::parse_nominatim_first;
 use proptest::prelude::*;
 
 /// One proptest case count for every property in this sidecar.

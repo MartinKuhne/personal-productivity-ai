@@ -3,7 +3,7 @@
 //! This is the protocol layer. The LLM-tool-loop adapters that expose
 //! it as a family of `Tool` impls (`trello_get_boards`,
 //! `trello_create_card`, …) live in
-//! crate::agent::tools::registry::builtin::trello.
+//! crate::tools::registry::builtin::trello.
 
 mod client;
 

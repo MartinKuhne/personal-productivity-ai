@@ -4,7 +4,7 @@ use super::schema::{AddRowsInput, CreateCsvInput, CsvDatabase, ListCsvInput};
 
 use std::path::PathBuf;
 
-pub fn get_db_dir(ctx: &crate::agent::tools::context::ToolContext) -> PathBuf {
+pub fn get_db_dir(ctx: &crate::tools::context::ToolContext) -> PathBuf {
     let path = if let Some(ref override_path) = ctx.config.csv_db_path {
         PathBuf::from(override_path)
     } else {
@@ -22,14 +22,14 @@ pub fn get_db_dir(ctx: &crate::agent::tools::context::ToolContext) -> PathBuf {
     path
 }
 
-pub fn get_db_path(ctx: &crate::agent::tools::context::ToolContext, db_name: &str) -> PathBuf {
+pub fn get_db_path(ctx: &crate::tools::context::ToolContext, db_name: &str) -> PathBuf {
     let mut path = get_db_dir(ctx);
     path.push(format!("{}.csv", db_name));
     path
 }
 
 pub fn create_csv(
-    ctx: &crate::agent::tools::context::ToolContext,
+    ctx: &crate::tools::context::ToolContext,
     input: CreateCsvInput,
 ) -> Result<CsvDatabase, String> {
     let db_path = get_db_path(ctx, &input.db_name);
@@ -51,7 +51,7 @@ pub fn create_csv(
 }
 
 pub fn list_csv(
-    ctx: &crate::agent::tools::context::ToolContext,
+    ctx: &crate::tools::context::ToolContext,
     _input: ListCsvInput,
 ) -> Result<Vec<CsvDatabase>, String> {
     let db_dir = get_db_dir(ctx);
@@ -87,7 +87,7 @@ pub fn list_csv(
 }
 
 pub fn add_rows(
-    ctx: &crate::agent::tools::context::ToolContext,
+    ctx: &crate::tools::context::ToolContext,
     input: AddRowsInput,
 ) -> Result<String, String> {
     let db_path = get_db_path(ctx, &input.db_name);
@@ -173,16 +173,14 @@ mod tests {
     use std::collections::HashMap;
     use tempfile::tempdir;
 
-    fn test_ctx(
-        config: &crate::agent::config::AgentConfig,
-    ) -> crate::agent::tools::context::ToolContext {
-        let mut builder = crate::agent::tools::context::ToolContextBuilder::new(
+    fn test_ctx(config: &crate::config::AgentConfig) -> crate::tools::context::ToolContext {
+        let mut builder = crate::tools::context::ToolContextBuilder::new(
             std::sync::Arc::new(config.clone()),
-            std::sync::Arc::new(crate::agent::tools::observer::DefaultFileObserver),
+            std::sync::Arc::new(crate::tools::observer::DefaultFileObserver),
         );
         builder = builder.with_extension(std::sync::Arc::new(
-            crate::agent::tools::vfs::VirtualFileSystemExt(std::sync::Arc::new(
-                crate::agent::tools::vfs::VfsResolver::new(std::sync::Arc::new(config.clone())),
+            crate::tools::vfs::VirtualFileSystemExt(std::sync::Arc::new(
+                crate::tools::vfs::VfsResolver::new(std::sync::Arc::new(config.clone())),
             )),
         ));
         builder.build()
@@ -220,7 +218,7 @@ mod tests {
     #[test]
     fn test_create_and_list_and_add_rows() {
         let dir = tempdir().unwrap();
-        let config = crate::agent::config::AgentConfigBuilder::new()
+        let config = crate::config::AgentConfigBuilder::new()
             .with_csv_db_path(Some(dir.path().to_string_lossy().to_string()))
             .build();
 

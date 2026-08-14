@@ -2,8 +2,8 @@
 //!
 //! Unit tests live in the sibling `session_tests.rs` sidecar.
 
-use crate::agent::config::AgentConfig;
-use crate::agent::events::{AgentDebugEntry, AgentObserverFactory, AgentPrompt, TokenUsageInfo};
+use crate::config::AgentConfig;
+use crate::events::{AgentDebugEntry, AgentObserverFactory, AgentPrompt, TokenUsageInfo};
 use serde_json::Value;
 use std::sync::mpsc::{self, Sender};
 use std::sync::{
@@ -42,7 +42,7 @@ pub struct AgentState {
 ///   driver thread.
 /// - Exposes read-only `AgentState` for UI rendering
 pub struct AgentSession {
-    pub extensions: crate::agent::tools::extensions::Extensions,
+    pub extensions: crate::tools::extensions::Extensions,
     state: AgentState,
     cancel_flag: Option<Arc<AtomicBool>>,
     /// Shared cell holding the agent's domain config. The UI thread
@@ -258,11 +258,11 @@ impl AgentSession {
 /// [`Self::with_agent_config_provider`]. The orchestrator (which already
 /// drains `Bus<ConfigArrived>`) is the projection site.
 pub struct AgentSessionBuilder {
-    extensions: crate::agent::tools::extensions::Extensions,
-    file_observer: Option<std::sync::Arc<dyn crate::agent::tools::observer::OnFileChanged>>,
+    extensions: crate::tools::extensions::Extensions,
+    file_observer: Option<std::sync::Arc<dyn crate::tools::observer::OnFileChanged>>,
     observer_factory: Option<AgentObserverFactory>,
-    policy: Option<Arc<dyn crate::agent::tools::policy::ToolCallPolicy>>,
-    tool_context: Option<Arc<arc_swap::ArcSwap<crate::agent::AgentToolContext>>>,
+    policy: Option<Arc<dyn crate::tools::policy::ToolCallPolicy>>,
+    tool_context: Option<Arc<arc_swap::ArcSwap<crate::AgentToolContext>>>,
     initial_agent_config: Option<AgentConfig>,
     agent_config_provider: Option<Arc<std::sync::RwLock<AgentConfig>>>,
 }
@@ -277,7 +277,7 @@ impl AgentSessionBuilder {
             tool_context: None,
             initial_agent_config: None,
             agent_config_provider: None,
-            extensions: crate::agent::tools::extensions::Extensions::default(),
+            extensions: crate::tools::extensions::Extensions::default(),
         }
     }
     pub fn builder() -> Self {
@@ -286,13 +286,13 @@ impl AgentSessionBuilder {
     /// Set the file event bus.
     pub fn with_file_observer(
         mut self,
-        bus: std::sync::Arc<dyn crate::agent::tools::observer::OnFileChanged>,
+        bus: std::sync::Arc<dyn crate::tools::observer::OnFileChanged>,
     ) -> Self {
         self.file_observer = Some(bus);
         self
     }
 
-    /// Set the observer factory that creates an [`crate::agent::events::AgentEventObserver`] for each session.
+    /// Set the observer factory that creates an [`crate::events::AgentEventObserver`] for each session.
     pub fn with_observer_factory(mut self, factory: AgentObserverFactory) -> Self {
         self.observer_factory = Some(factory);
         self
@@ -301,17 +301,17 @@ impl AgentSessionBuilder {
     /// Set the shared PDF-backing tracker.
     pub fn with_tool_call_policy(
         mut self,
-        policy: Arc<dyn crate::agent::tools::policy::ToolCallPolicy>,
+        policy: Arc<dyn crate::tools::policy::ToolCallPolicy>,
     ) -> Self {
         self.policy = Some(policy);
         self
     }
 
     /// Set the catalog-level bundle (the registry wrapped in
-    /// [`crate::agent::AgentToolContext`]).
+    /// [`crate::AgentToolContext`]).
     pub fn with_tool_context(
         mut self,
-        tool_context: Arc<arc_swap::ArcSwap<crate::agent::AgentToolContext>>,
+        tool_context: Arc<arc_swap::ArcSwap<crate::AgentToolContext>>,
     ) -> Self {
         self.tool_context = Some(tool_context);
         self
@@ -351,7 +351,7 @@ impl AgentSessionBuilder {
             .expect("AgentSession requires with_observer_factory");
         let policy = self
             .policy
-            .unwrap_or_else(|| Arc::new(crate::agent::tools::policy::DefaultToolCallPolicy));
+            .unwrap_or_else(|| Arc::new(crate::tools::policy::DefaultToolCallPolicy));
         let tool_context = self
             .tool_context
             .expect("AgentSession requires with_tool_context");
@@ -408,10 +408,10 @@ fn spawn_driver(
     prompt_rx: std::sync::mpsc::Receiver<AgentPrompt>,
     observer_factory: AgentObserverFactory,
     agent_config_provider: Arc<std::sync::RwLock<AgentConfig>>,
-    file_observer: std::sync::Arc<dyn crate::agent::tools::observer::OnFileChanged>,
-    policy: Arc<dyn crate::agent::tools::policy::ToolCallPolicy>,
-    tool_context: Arc<arc_swap::ArcSwap<crate::agent::AgentToolContext>>,
-    extensions: crate::agent::tools::extensions::Extensions,
+    file_observer: std::sync::Arc<dyn crate::tools::observer::OnFileChanged>,
+    policy: Arc<dyn crate::tools::policy::ToolCallPolicy>,
+    tool_context: Arc<arc_swap::ArcSwap<crate::AgentToolContext>>,
+    extensions: crate::tools::extensions::Extensions,
 ) -> JoinHandle<()> {
     std::thread::spawn(move || {
         // Per-session history cache. Keyed by `session_id` so continuation
@@ -426,27 +426,24 @@ fn spawn_driver(
                 .unwrap_or_default();
             let history = session_histories.get(&session_id).cloned().flatten();
             let observer = (observer_factory)(session_id);
-            let ctx = crate::agent::context::AgentContextBuilder::new(
-                agent_config,
-                session_id,
-                prompt.text,
-            )
-            .with_file_observer(file_observer.clone())
-            .with_observer(observer)
-            .with_active_paths(prompt.active_file, prompt.active_dir)
-            .with_selected_files(prompt.selected_files)
-            .with_system_prompts(prompt.system_prompts)
-            .with_cancel_flag(prompt.cancel_flag)
-            .with_history(history.clone())
-            .with_tool_call_policy(policy.clone())
-            .with_extensions(extensions.clone())
-            .with_cache(std::sync::Arc::new(
-                crate::agent::tools::registry::cache::ToolCache::new(),
-            ))
-            .with_tool_context(tool_context.clone())
-            .with_uuid_gen(std::sync::Arc::new(crate::utils::uuid::SystemUuidGenerator))
-            .build();
-            crate::agent::run_agent(ctx);
+            let ctx =
+                crate::context::AgentContextBuilder::new(agent_config, session_id, prompt.text)
+                    .with_file_observer(file_observer.clone())
+                    .with_observer(observer)
+                    .with_active_paths(prompt.active_file, prompt.active_dir)
+                    .with_selected_files(prompt.selected_files)
+                    .with_system_prompts(prompt.system_prompts)
+                    .with_cancel_flag(prompt.cancel_flag)
+                    .with_history(history.clone())
+                    .with_tool_call_policy(policy.clone())
+                    .with_extensions(extensions.clone())
+                    .with_cache(std::sync::Arc::new(
+                        crate::tools::registry::cache::ToolCache::new(),
+                    ))
+                    .with_tool_context(tool_context.clone())
+                    .with_uuid_gen(std::sync::Arc::new(crate::utils::uuid::SystemUuidGenerator))
+                    .build();
+            crate::run_agent(ctx);
             // After the session finishes, stash its history for continuation
             // prompts (FR-009). The history is updated by the `SessionFinished`
             // event; here we keep the pre-run history — the orchestrator

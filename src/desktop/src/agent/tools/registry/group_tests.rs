@@ -3,7 +3,7 @@
 //! and cover the new behaviour introduced by the merge.
 
 use super::*;
-use crate::agent::config::AgentConfig;
+use crate::config::AgentConfig;
 use crate::config::McpServerConfig;
 
 /// Every registered tool has a `tool_to_group` entry â€” no orphans.
@@ -30,13 +30,17 @@ fn tool_to_group_index_is_complete() {
 #[test]
 fn group_state_refresh_reflects_config() {
     let mut mgr = ToolRegistry::new();
-    let mut config = crate::config::AppConfig::default();
-    mgr.refresh_state(&config.to_agent_config());
+    let config = crate::config::AgentConfig::default();
+    mgr.refresh_state(&config);
     let id = ToolGroupId::Internal(InternalToolGroup::Filesystem);
     assert!(mgr.group(&id).unwrap().enabled);
 
-    config.tool_groups.filesystem = false;
-    mgr.refresh_state(&config.to_agent_config());
+    let mut tool_groups = config.tool_groups().clone();
+    tool_groups.filesystem = false;
+    let config = crate::config::AgentConfigBuilder::new()
+        .with_tool_groups(tool_groups)
+        .build();
+    mgr.refresh_state(&config);
     assert!(!mgr.group(&id).unwrap().enabled);
 }
 
@@ -239,7 +243,7 @@ fn set_browser_group_enabled_persists_to_config() {
 #[test]
 #[cfg(feature = "browser")]
 fn browser_only_get_page_state_is_parallel_safe() {
-    use crate::agent::tools::Safety;
+    use crate::tools::Safety;
     let mgr = ToolRegistry::new();
     for name in [
         "browser_navigate",

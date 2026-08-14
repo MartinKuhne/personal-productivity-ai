@@ -36,7 +36,7 @@
 //!
 //! `cases = 512` per property.
 
-use crate::agent::lib::trello::client::trello_http_call;
+use crate::lib::trello::client::trello_http_call;
 use proptest::prelude::*;
 use wiremock::{Mock, MockServer, ResponseTemplate};
 

@@ -4,8 +4,8 @@
 //! `AgentToolContext` is the catalog-level bundle that swaps
 //! atomically on `ConfigArrived` events and MCP discovery. Today
 //! it carries just the [`ToolRegistry`]; the bundle exists so
-//! future services (a pre-projected [`AgentConfig`](crate::agent::config::AgentConfig), a
-//! per-bundle [`PdfBackingTracker`](crate::app::session::PdfBackingTracker), a typed credential handle)
+//! future services (a pre-projected [`AgentConfig`](crate::config::AgentConfig),
+//! a typed credential handle)
 //! can be added without re-plumbing every consumer.
 //!
 //! Consumers that just need the catalog should reach for
@@ -16,7 +16,7 @@
 //!
 //! Unit tests live in the sibling `tool_context_tests.rs` sidecar.
 
-use crate::agent::tools::registry::ToolRegistry;
+use crate::tools::registry::ToolRegistry;
 
 #[derive(Clone)]
 pub struct AgentToolContext {

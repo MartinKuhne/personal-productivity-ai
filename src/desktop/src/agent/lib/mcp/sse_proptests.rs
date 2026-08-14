@@ -38,7 +38,7 @@
 //! massive (every UTF-8 string is a valid SSE body) and proptest's
 //! `string_regex` covers the structural shapes well at this count.
 
-use crate::agent::lib::mcp::sse::{parse_sse_body, walk_for_response};
+use crate::lib::mcp::sse::{parse_sse_body, walk_for_response};
 use proptest::prelude::*;
 
 /// One proptest case count for every property in this sidecar.

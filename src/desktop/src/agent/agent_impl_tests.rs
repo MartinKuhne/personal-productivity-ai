@@ -1,12 +1,14 @@
 //! Integration tests for `run_agent` — mock HTTP server simulating LLM responses, verifying tool calls, streaming, and cancellation.
 
-use crate::agent::agent_impl::run_agent;
-use crate::agent::config::AgentConfig;
-use crate::agent::config::AgentConfigBuilder;
-use crate::agent::context::AgentContext;
-use crate::agent::events::{AgentDebugEntry, DebugEntryKind, DebugEntryRow};
-use crate::app::events::AgentEvent as SeamAgentEvent;
-use crate::bus::core::BusReader;
+use crate::agent_impl::run_agent;
+use crate::config::AgentConfig;
+use crate::config::AgentConfigBuilder;
+use crate::config::LlmConfig;
+use crate::context::AgentContext;
+use crate::events::{
+    AgentDebugEntry, AgentObserverEvent, AgentStatus, DebugEntryKind, DebugEntryRow,
+    RecordingObserver,
+};
 use std::sync::Arc;
 
 fn make_agent_config(port: u16) -> AgentConfig {
@@ -14,7 +16,7 @@ fn make_agent_config(port: u16) -> AgentConfig {
     let mut models = HashMap::new();
     models.insert(
         "test".to_string(),
-        crate::config::LlmConfig {
+        LlmConfig {
             model: "test".to_string(),
             api_url: format!("http://127.0.0.1:{}", port),
             api_key: "valid-key".to_string(),
@@ -25,64 +27,86 @@ fn make_agent_config(port: u16) -> AgentConfig {
     AgentConfigBuilder::new().with_models(models).build()
 }
 
-fn make_ctx(config: AgentConfig) -> (AgentContext, BusReader<SeamAgentEvent>) {
-    let browser_session = std::sync::Arc::new(crate::app::session::BrowserSession::with_resolved(
-        config.browser().clone(),
-    ));
-    let agent_event_bus = crate::bus::core::Bus::new();
-    let bus_reader = agent_event_bus.subscribe();
-    let session_id = uuid::Uuid::new_v4();
-    let ctx =
-        crate::agent::context::AgentContextBuilder::new(config, session_id, "Hello".to_string())
-            .with_file_observer(std::sync::Arc::new(
-                crate::agent::tools::observer::DefaultFileObserver,
-            ))
-            .with_observer(std::sync::Arc::new(
-                crate::app::events::BusAgentEventObserver::new(session_id, agent_event_bus.clone()),
-            ))
-            .with_system_prompts(Vec::new())
-            .with_extension(browser_session.clone())
-            .with_extension(Arc::new(crate::agent::tools::browser::BrowserExt(
-                browser_session,
-            )))
-            .build();
-    (ctx, bus_reader)
+struct DummyBrowser;
+impl crate::tools::browser::BrowserAutomationExt for DummyBrowser {
+    fn navigate(&self, _url: &str) -> Result<(String, String), String> {
+        Ok(("http://localhost".to_string(), "Mock".to_string()))
+    }
+    fn get_page_state(&self) -> Result<(String, String, String, usize), String> {
+        Ok((
+            "http://localhost".to_string(),
+            "Mock".to_string(),
+            "[]".to_string(),
+            0,
+        ))
+    }
+    fn click(&self, _selector: &str) -> Result<(), String> {
+        Ok(())
+    }
+    fn fill_input(&self, _selector: &str, _text: &str) -> Result<(), String> {
+        Ok(())
+    }
+    fn select_dropdown(&self, _selector: &str, _value: &str) -> Result<(), String> {
+        Ok(())
+    }
+    fn press_key(&self, _key: &str) -> Result<(), String> {
+        Ok(())
+    }
+    fn evaluate_js(&self, _script: &str) -> Result<serde_json::Value, String> {
+        Ok(serde_json::Value::Null)
+    }
+    fn screenshot(
+        &self,
+        _filename: &str,
+        _full_page: bool,
+    ) -> Result<(std::path::PathBuf, Vec<u8>), String> {
+        Ok((std::path::PathBuf::from("screenshot.png"), Vec::new()))
+    }
+    fn save_storage(&self) -> Result<(), String> {
+        Ok(())
+    }
+    fn resolve_screenshot_path(&self, filename: &str) -> Result<std::path::PathBuf, String> {
+        Ok(std::path::PathBuf::from(filename))
+    }
 }
 
-/// Collect bus events until `SessionFinished` is seen or `timeout` elapses.
-/// After `SessionFinished`, drains any remaining buffered events.
-fn collect_bus_events(
-    reader: &mut BusReader<SeamAgentEvent>,
+fn make_ctx(config: AgentConfig) -> (AgentContext, Arc<RecordingObserver>) {
+    let default_browser: std::sync::Arc<dyn crate::tools::browser::BrowserAutomationExt> =
+        std::sync::Arc::new(DummyBrowser);
+    let recorded = Arc::new(RecordingObserver::new());
+    let session_id = uuid::Uuid::new_v4();
+    let ctx = crate::context::AgentContextBuilder::new(config, session_id, "Hello".to_string())
+        .with_file_observer(std::sync::Arc::new(
+            crate::tools::observer::DefaultFileObserver,
+        ))
+        .with_observer(recorded.clone())
+        .with_system_prompts(Vec::new())
+        .with_extension(Arc::new(crate::tools::browser::BrowserExt(default_browser)))
+        .build();
+    (ctx, recorded)
+}
+
+/// Collect observer events until `SessionFinished` is seen or `timeout` elapses.
+fn collect_observer_events(
+    recorded: &RecordingObserver,
     timeout: std::time::Duration,
-) -> Vec<SeamAgentEvent> {
-    let mut events = Vec::new();
+) -> Vec<AgentObserverEvent> {
     let deadline = std::time::Instant::now() + timeout;
     while std::time::Instant::now() < deadline {
-        while let Ok(ev) = reader.try_recv() {
-            let is_finished = matches!(ev, SeamAgentEvent::SessionFinished { .. });
-            events.push(ev);
-            if is_finished {
-                while let Ok(ev) = reader.try_recv() {
-                    events.push(ev);
-                }
-                return events;
-            }
+        let events = recorded.events();
+        if events
+            .iter()
+            .any(|ev| matches!(ev, AgentObserverEvent::SessionFinished(..)))
+        {
+            return events;
         }
         std::thread::sleep(std::time::Duration::from_millis(5));
     }
-    events
+    recorded.events()
 }
 
 /// Spawn a one-shot HTTP server on a random localhost port and bind
 /// the given `body` as the response to the first incoming request.
-/// Returns the bound port. The server thread sleeps for 200 ms after
-/// writing the response so the client has time to read it before the
-/// thread exits.
-///
-/// Consolidated from 5 inline `TcpListener::bind` + `thread::spawn`
-/// blocks that all did the same `accept` + `read` + `write_all` +
-/// `sleep` pattern. The bodies they served were the only thing that
-/// varied.
 fn spawn_one_shot_http_server(body: &[u8]) -> u16 {
     use std::io::{Read, Write};
     use std::net::TcpListener;
@@ -101,9 +125,7 @@ fn spawn_one_shot_http_server(body: &[u8]) -> u16 {
     port
 }
 
-/// Build a minimal HTTP/1.1 response with the given status line and
-/// body. Centralises the `Content-Length` math so individual tests
-/// don't have to repeat the `format!` boilerplate.
+/// Build a minimal HTTP/1.1 response with the given status line and body.
 fn http_response(status_line: &str, body: &str) -> Vec<u8> {
     format!(
         "{status_line}\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
@@ -118,7 +140,7 @@ fn test_run_agent_missing_api_key() {
     let mut models = HashMap::new();
     models.insert(
         "test".to_string(),
-        crate::config::LlmConfig {
+        LlmConfig {
             model: "test".to_string(),
             api_url: "http://localhost".to_string(),
             api_key: "".to_string(),
@@ -127,13 +149,13 @@ fn test_run_agent_missing_api_key() {
         },
     );
     let config = AgentConfigBuilder::new().with_models(models).build();
-    let (ctx, mut bus_reader) = make_ctx(config);
+    let (ctx, recorded) = make_ctx(config);
     run_agent(ctx);
-    let events = collect_bus_events(&mut bus_reader, std::time::Duration::from_secs(2));
+    let events = collect_observer_events(&recorded, std::time::Duration::from_secs(2));
     assert!(
         events.iter().any(|e| matches!(
             e,
-            SeamAgentEvent::Failed { error, .. } if error.contains("API key not set")
+            AgentObserverEvent::Failed(error) if error.contains("API key not set")
         )),
         "expected Failed with API key message; got: {:?}",
         events
@@ -146,7 +168,7 @@ fn test_run_agent_network_error() {
     let mut models = HashMap::new();
     models.insert(
         "test".to_string(),
-        crate::config::LlmConfig {
+        LlmConfig {
             model: "test".to_string(),
             api_url: "http://127.0.0.1:0".to_string(),
             api_key: "valid-key".to_string(),
@@ -155,13 +177,13 @@ fn test_run_agent_network_error() {
         },
     );
     let config = AgentConfigBuilder::new().with_models(models).build();
-    let (ctx, mut bus_reader) = make_ctx(config);
+    let (ctx, recorded) = make_ctx(config);
     run_agent(ctx);
-    let events = collect_bus_events(&mut bus_reader, std::time::Duration::from_secs(30));
+    let events = collect_observer_events(&recorded, std::time::Duration::from_secs(30));
     assert!(
         events.iter().any(|e| matches!(
             e,
-            SeamAgentEvent::Failed { error, .. } if error.contains("Network error") || error.contains("timed out")
+            AgentObserverEvent::Failed(error) if error.contains("Network error") || error.contains("timed out")
         )),
         "expected Failed with network error; got: {:?}",
         events
@@ -171,13 +193,13 @@ fn test_run_agent_network_error() {
 #[test]
 fn test_run_agent_invalid_json_response() {
     let port = spawn_one_shot_http_server(b"HTTP/1.1 200 OK\r\nContent-Length: 1\r\n\r\n{");
-    let (ctx, mut bus_reader) = make_ctx(make_agent_config(port));
+    let (ctx, recorded) = make_ctx(make_agent_config(port));
     run_agent(ctx);
-    let events = collect_bus_events(&mut bus_reader, std::time::Duration::from_secs(5));
+    let events = collect_observer_events(&recorded, std::time::Duration::from_secs(5));
     assert!(
         events.iter().any(|e| matches!(
             e,
-            SeamAgentEvent::Failed { error, .. } if error.contains("Failed to parse")
+            AgentObserverEvent::Failed(error) if error.contains("Failed to parse")
         )),
         "expected Failed with parse error; got: {:?}",
         events
@@ -189,13 +211,13 @@ fn test_run_agent_http_status_error() {
     let port = spawn_one_shot_http_server(
         b"HTTP/1.1 400 Bad Request\r\nContent-Length: 11\r\n\r\nbad request",
     );
-    let (ctx, mut bus_reader) = make_ctx(make_agent_config(port));
+    let (ctx, recorded) = make_ctx(make_agent_config(port));
     run_agent(ctx);
-    let events = collect_bus_events(&mut bus_reader, std::time::Duration::from_secs(5));
+    let events = collect_observer_events(&recorded, std::time::Duration::from_secs(5));
     assert!(
         events.iter().any(|e| matches!(
             e,
-            SeamAgentEvent::Failed { error, .. } if error.contains("HTTP 400 error")
+            AgentObserverEvent::Failed(error) if error.contains("HTTP 400 error")
         )),
         "expected Failed with HTTP 400 error; got: {:?}",
         events
@@ -205,13 +227,13 @@ fn test_run_agent_http_status_error() {
 #[test]
 fn test_run_agent_missing_choices() {
     let port = spawn_one_shot_http_server(&http_response("HTTP/1.1 200 OK", "{}"));
-    let (ctx, mut bus_reader) = make_ctx(make_agent_config(port));
+    let (ctx, recorded) = make_ctx(make_agent_config(port));
     run_agent(ctx);
-    let events = collect_bus_events(&mut bus_reader, std::time::Duration::from_secs(5));
+    let events = collect_observer_events(&recorded, std::time::Duration::from_secs(5));
     assert!(
         events.iter().any(|e| matches!(
             e,
-            SeamAgentEvent::Failed { error, .. } if error.contains("Invalid response schema")
+            AgentObserverEvent::Failed(error) if error.contains("Invalid response schema")
         )),
         "expected Failed with schema error; got: {:?}",
         events
@@ -226,22 +248,16 @@ fn test_run_agent_emits_done_status_on_natural_completion() {
     })
     .to_string();
     let port = spawn_one_shot_http_server(&http_response("HTTP/1.1 200 OK", &body));
-    let (ctx, mut bus_reader) = make_ctx(make_agent_config(port));
+    let (ctx, recorded) = make_ctx(make_agent_config(port));
     run_agent(ctx);
-    let events = collect_bus_events(&mut bus_reader, std::time::Duration::from_secs(5));
+    let events = collect_observer_events(&recorded, std::time::Duration::from_secs(5));
     let saw_finished = events
         .iter()
-        .any(|e| matches!(e, SeamAgentEvent::SessionFinished { .. }));
+        .any(|e| matches!(e, AgentObserverEvent::SessionFinished(..)));
     assert!(saw_finished, "must see SessionFinished");
-    let saw_done = events.iter().any(|e| {
-        matches!(
-            e,
-            SeamAgentEvent::Status {
-                status: crate::agent::events::AgentStatus::Done,
-                ..
-            }
-        )
-    });
+    let saw_done = events
+        .iter()
+        .any(|e| matches!(e, AgentObserverEvent::Status(AgentStatus::Done)));
     assert!(saw_done, "must see Status(Done); events: {:?}", events);
 }
 
@@ -253,50 +269,32 @@ fn test_run_agent_skips_done_status_when_cancelled() {
     })
     .to_string();
     let port = spawn_one_shot_http_server(&http_response("HTTP/1.1 200 OK", &body));
-    let default_browser = std::sync::Arc::new(crate::app::session::BrowserSession::with_resolved(
-        crate::agent::config::AgentConfig::default()
-            .browser()
-            .clone(),
-    ));
-    let agent_event_bus = crate::bus::core::Bus::new();
-    let mut bus_reader = agent_event_bus.subscribe();
-    let ctx = crate::agent::context::AgentContextBuilder::new(
+    let default_browser: std::sync::Arc<dyn crate::tools::browser::BrowserAutomationExt> =
+        std::sync::Arc::new(DummyBrowser);
+    let recorded = Arc::new(RecordingObserver::new());
+    let ctx = crate::context::AgentContextBuilder::new(
         make_agent_config(port),
         uuid::Uuid::new_v4(),
         "List files".to_string(),
     )
     .with_file_observer(std::sync::Arc::new(
-        crate::agent::tools::observer::DefaultFileObserver,
+        crate::tools::observer::DefaultFileObserver,
     ))
-    .with_observer(std::sync::Arc::new(
-        crate::app::events::BusAgentEventObserver::new(
-            uuid::Uuid::new_v4(),
-            agent_event_bus.clone(),
-        ),
-    ))
+    .with_observer(recorded.clone())
     .with_system_prompts(Vec::new())
-    .with_extension(default_browser.clone())
-    .with_extension(Arc::new(crate::agent::tools::browser::BrowserExt(
-        default_browser,
-    )))
+    .with_extension(Arc::new(crate::tools::browser::BrowserExt(default_browser)))
     .with_cancel_flag(std::sync::Arc::new(std::sync::atomic::AtomicBool::new(
         true,
     )))
     .build();
     run_agent(ctx);
-    let events = collect_bus_events(&mut bus_reader, std::time::Duration::from_secs(5));
+    let events = collect_observer_events(&recorded, std::time::Duration::from_secs(5));
     let saw_finished = events
         .iter()
-        .any(|e| matches!(e, SeamAgentEvent::SessionFinished { .. }));
-    let saw_done = events.iter().any(|e| {
-        matches!(
-            e,
-            SeamAgentEvent::Status {
-                status: crate::agent::events::AgentStatus::Done,
-                ..
-            }
-        )
-    });
+        .any(|e| matches!(e, AgentObserverEvent::SessionFinished(..)));
+    let saw_done = events
+        .iter()
+        .any(|e| matches!(e, AgentObserverEvent::Status(AgentStatus::Done)));
     assert!(saw_finished, "must see SessionFinished");
     assert!(!saw_done, "must NOT see Status(Done) when cancelled");
 }
@@ -329,9 +327,6 @@ fn test_run_agent_emits_executing_tool_message_immediately() {
     })
     .to_string();
 
-    // Tool-call flow needs a 2-request server (tool_calls response, then
-    // a final assistant response). We use a dedicated helper rather than
-    // `spawn_one_shot_http_server` because the latter is single-request.
     use std::io::{Read, Write};
     use std::net::TcpListener;
     let listener = TcpListener::bind("127.0.0.1:0").unwrap();
@@ -352,13 +347,13 @@ fn test_run_agent_emits_executing_tool_message_immediately() {
             }
         }
     });
-    let (ctx, mut bus_reader) = make_ctx(make_agent_config(port));
+    let (ctx, recorded) = make_ctx(make_agent_config(port));
     run_agent(ctx);
-    let events = collect_bus_events(&mut bus_reader, std::time::Duration::from_secs(5));
+    let events = collect_observer_events(&recorded, std::time::Duration::from_secs(5));
     assert!(
         events.iter().any(|e| matches!(
             e,
-            SeamAgentEvent::ToolCallStarted { name, .. } if name == "read_tags"
+            AgentObserverEvent::ToolCallStarted { name, .. } if name == "read_tags"
         )),
         "must see ToolCallStarted for read_tags; events: {:?}",
         events
@@ -366,27 +361,16 @@ fn test_run_agent_emits_executing_tool_message_immediately() {
     assert!(
         events.iter().any(|e| matches!(
             e,
-            SeamAgentEvent::ToolResult { name, .. } if name == "read_tags"
+            AgentObserverEvent::ToolResult { name, .. } if name == "read_tags"
         )),
         "must see ToolResult for read_tags; events: {:?}",
         events
     );
 }
 
-/// R1 (Spotlighting) regression: every `role:tool` message that
-/// joins the conversation history must be wrapped in the
-/// `EXTERNAL_DATA` datamark envelope. The user-facing chat-panel
-/// response (the `Result (...)` line emitted above) is NOT wrapped
-/// — that string goes to the UI, not to the LLM. Only the
-/// `messages` array that gets sent on the next LLM call is
-/// wrapped.
-///
-/// This test sends a tool-call → final assistant flow, then
-/// inspects the `Finished(messages)` payload that `run_agent`
-/// emits and asserts that the `role:tool` entry is wrapped.
 #[test]
 fn test_run_agent_datamarks_tool_results_in_conversation_history() {
-    use crate::agent::datamark::{EXTERNAL_DATA_END, EXTERNAL_DATA_START};
+    use crate::datamark::{EXTERNAL_DATA_END, EXTERNAL_DATA_START};
 
     let tool_call_body = serde_json::json!({
         "id": "chatcmpl-tool", "object": "chat.completion", "created": 0, "model": "test",
@@ -434,15 +418,14 @@ fn test_run_agent_datamarks_tool_results_in_conversation_history() {
             }
         }
     });
-    let (ctx, mut bus_reader) = make_ctx(make_agent_config(port));
+    let (ctx, recorded) = make_ctx(make_agent_config(port));
     run_agent(ctx);
 
-    // Drain the event stream, capturing the SessionFinished history.
-    let events = collect_bus_events(&mut bus_reader, std::time::Duration::from_secs(5));
+    let events = collect_observer_events(&recorded, std::time::Duration::from_secs(5));
     let history = events
         .iter()
         .find_map(|e| match e {
-            SeamAgentEvent::SessionFinished { history, .. } => Some(history.clone()),
+            AgentObserverEvent::SessionFinished(history) => Some(history.clone()),
             _ => None,
         })
         .expect("agent must emit SessionFinished with history");
@@ -475,13 +458,6 @@ fn test_run_agent_datamarks_tool_results_in_conversation_history() {
     );
 }
 
-/// R1 (Spotlighting) regression: the system prompt sent on the
-/// first LLM call must begin with the security header. We assert
-/// this by checking that the *first* message in the history is
-/// the system prompt and that it contains the canonical header
-/// text. If a future edit accidentally reorders the prompt so
-/// the header lands below the role definition, the LLM no longer
-/// follows it under adversarial pressure and the test fires.
 #[test]
 fn test_run_agent_system_prompt_starts_with_security_header() {
     let body = serde_json::json!({
@@ -490,22 +466,18 @@ fn test_run_agent_system_prompt_starts_with_security_header() {
     })
     .to_string();
     let port = spawn_one_shot_http_server(&http_response("HTTP/1.1 200 OK", &body));
-    let (mut ctx, mut bus_reader) = make_ctx(make_agent_config(port));
-    // Inject real system prompts so the first history message is a
-    // system message (the agent run loop no longer builds these).
-    ctx.system_prompts = crate::app::prompts::build_system_prompts(
-        &crate::config::AppConfig::default(),
-        None,
-        None,
-        &std::collections::HashSet::new(),
-    );
+    let (mut ctx, recorded) = make_ctx(make_agent_config(port));
+    ctx.system_prompts = vec![format!(
+        "{}\nYou are FastMD AI...",
+        crate::datamark::SECURITY_HEADER
+    )];
     run_agent(ctx);
 
-    let events = collect_bus_events(&mut bus_reader, std::time::Duration::from_secs(5));
+    let events = collect_observer_events(&recorded, std::time::Duration::from_secs(5));
     let history = events
         .iter()
         .find_map(|e| match e {
-            SeamAgentEvent::SessionFinished { history, .. } => Some(history.clone()),
+            AgentObserverEvent::SessionFinished(history) => Some(history.clone()),
             _ => None,
         })
         .expect("agent must emit SessionFinished with history");
@@ -523,17 +495,12 @@ fn test_run_agent_system_prompt_starts_with_security_header() {
         .and_then(|c| c.as_str())
         .expect("system message must have string content");
     assert!(
-        content.starts_with(crate::agent::datamark::SECURITY_HEADER),
+        content.starts_with(crate::datamark::SECURITY_HEADER),
         "system prompt must start with the security header; got first 200 chars: {:?}",
         &content[..content.len().min(200)]
     );
 }
 
-/// AGENT-026 regression: when no file, directory, or selected-files
-/// context is handed to the agent (all tabs closed), the system
-/// prompt sent to the LLM must not mention any file or directory
-/// context. This guards the whole chain: the context computed at
-/// prompt start is the only thing the LLM sees.
 #[test]
 fn test_run_agent_system_prompt_without_context_has_no_file_context() {
     let body = serde_json::json!({
@@ -543,17 +510,14 @@ fn test_run_agent_system_prompt_without_context_has_no_file_context() {
     .to_string();
     let port = spawn_one_shot_http_server(&http_response("HTTP/1.1 200 OK", &body));
 
-    // make_ctx already passes active_file=None, active_dir=None,
-    // selected_files empty — the state the interactive entry points
-    // hand over when all tabs are closed.
-    let (ctx, mut bus_reader) = make_ctx(make_agent_config(port));
+    let (ctx, recorded) = make_ctx(make_agent_config(port));
     run_agent(ctx);
 
-    let events = collect_bus_events(&mut bus_reader, std::time::Duration::from_secs(5));
+    let events = collect_observer_events(&recorded, std::time::Duration::from_secs(5));
     let history = events
         .iter()
         .find_map(|e| match e {
-            SeamAgentEvent::SessionFinished { history, .. } => Some(history.clone()),
+            AgentObserverEvent::SessionFinished(history) => Some(history.clone()),
             _ => None,
         })
         .expect("agent must emit SessionFinished with history");
@@ -577,8 +541,6 @@ fn test_run_agent_system_prompt_without_context_has_no_file_context() {
     }
 }
 
-/// Verify that the agent emits debug entries during a simple
-/// (no tool-call) run: session boundary, outgoing, incoming.
 #[test]
 fn test_run_agent_emits_debug_entries() {
     let body = serde_json::json!({
@@ -587,14 +549,14 @@ fn test_run_agent_emits_debug_entries() {
     })
     .to_string();
     let port = spawn_one_shot_http_server(&http_response("HTTP/1.1 200 OK", &body));
-    let (ctx, mut bus_reader) = make_ctx(make_agent_config(port));
+    let (ctx, recorded) = make_ctx(make_agent_config(port));
     run_agent(ctx);
 
-    let events = collect_bus_events(&mut bus_reader, std::time::Duration::from_secs(5));
+    let events = collect_observer_events(&recorded, std::time::Duration::from_secs(5));
     let debug_entries: Vec<AgentDebugEntry> = events
         .iter()
         .filter_map(|e| match e {
-            SeamAgentEvent::DebugEntry { entry, .. } => Some(entry.clone()),
+            AgentObserverEvent::DebugEntry(entry) => Some(entry.clone()),
             _ => None,
         })
         .collect();
@@ -648,8 +610,6 @@ fn test_run_agent_emits_debug_entries() {
     assert!(content.get("choices").is_some());
 }
 
-/// Verify that debug entries are emitted during a tool-call run,
-/// including ToolResults entries.
 #[test]
 fn test_run_agent_debug_entries_with_tool_calls() {
     let tool_call_body = serde_json::json!({
@@ -698,14 +658,14 @@ fn test_run_agent_debug_entries_with_tool_calls() {
             }
         }
     });
-    let (ctx, mut bus_reader) = make_ctx(make_agent_config(port));
+    let (ctx, recorded) = make_ctx(make_agent_config(port));
     run_agent(ctx);
 
-    let events = collect_bus_events(&mut bus_reader, std::time::Duration::from_secs(5));
+    let events = collect_observer_events(&recorded, std::time::Duration::from_secs(5));
     let debug_entries: Vec<AgentDebugEntry> = events
         .iter()
         .filter_map(|e| match e {
-            SeamAgentEvent::DebugEntry { entry, .. } => Some(entry.clone()),
+            AgentObserverEvent::DebugEntry(entry) => Some(entry.clone()),
             _ => None,
         })
         .collect();
@@ -764,8 +724,6 @@ fn test_run_agent_debug_entries_with_tool_calls() {
     assert!(!delta.is_empty(), "turn 2 outgoing delta must not be empty");
 }
 
-/// Verify that the outgoing debug entry for turn 1 contains the full
-/// initial messages (since there is no previous turn to diff against).
 #[test]
 fn test_debug_outgoing_turn1_includes_full_initial_messages() {
     let body = serde_json::json!({
@@ -774,22 +732,18 @@ fn test_debug_outgoing_turn1_includes_full_initial_messages() {
     })
     .to_string();
     let port = spawn_one_shot_http_server(&http_response("HTTP/1.1 200 OK", &body));
-    let (mut ctx, mut bus_reader) = make_ctx(make_agent_config(port));
-    // Same as the security-header test: real system prompts so the
-    // outgoing debug entry contains the system messages.
-    ctx.system_prompts = crate::app::prompts::build_system_prompts(
-        &crate::config::AppConfig::default(),
-        None,
-        None,
-        &std::collections::HashSet::new(),
-    );
+    let (mut ctx, recorded) = make_ctx(make_agent_config(port));
+    ctx.system_prompts = vec![format!(
+        "{}\nYou are FastMD AI...",
+        crate::datamark::SECURITY_HEADER
+    )];
     run_agent(ctx);
 
-    let events = collect_bus_events(&mut bus_reader, std::time::Duration::from_secs(5));
+    let events = collect_observer_events(&recorded, std::time::Duration::from_secs(5));
     let outgoing: Vec<AgentDebugEntry> = events
         .iter()
         .filter_map(|e| match e {
-            SeamAgentEvent::DebugEntry { entry, .. } => {
+            AgentObserverEvent::DebugEntry(entry) => {
                 if matches!(entry.kind, DebugEntryKind::Outgoing)
                     && matches!(entry.row_type, DebugEntryRow::Entry)
                 {
@@ -823,11 +777,8 @@ fn test_debug_outgoing_turn1_includes_full_initial_messages() {
     );
 }
 
-/// T008: Bus lifecycle test — verifies that `Bus<AgentEvent>` receives
-/// the expected lifecycle events (SessionStarted, Status, SessionFinished)
-/// and every event carries the correct session_id. Quickstart scenario 2.
 #[test]
-fn test_dual_publish_bus_receives_same_lifecycle_events() {
+fn test_observer_receives_lifecycle_events() {
     let body = serde_json::json!({
         "id": "chatcmpl-1", "object": "chat.completion", "created": 0, "model": "test",
         "choices": [{"index": 0, "message": {"role": "assistant", "content": "Hi"}, "finish_reason": "stop"}],
@@ -835,32 +786,21 @@ fn test_dual_publish_bus_receives_same_lifecycle_events() {
     })
     .to_string();
     let port = spawn_one_shot_http_server(&http_response("HTTP/1.1 200 OK", &body));
-    let (ctx, mut bus_reader) = make_ctx(make_agent_config(port));
-    let session_id = ctx.session_id;
+    let (ctx, recorded) = make_ctx(make_agent_config(port));
     run_agent(ctx);
 
-    let bus_events = collect_bus_events(&mut bus_reader, std::time::Duration::from_secs(5));
+    let observer_events = collect_observer_events(&recorded, std::time::Duration::from_secs(5));
 
-    // Assert SessionStarted is present and carries the correct session_id
     assert!(
-        bus_events
+        observer_events
             .iter()
-            .any(|e| matches!(e, SeamAgentEvent::SessionStarted { session_id: sid } if *sid == session_id)),
-        "Bus must receive SessionStarted with correct session_id"
+            .any(|e| matches!(e, AgentObserverEvent::SessionStarted)),
+        "Observer must receive SessionStarted"
     );
-    // Assert SessionFinished is present and carries the correct session_id
     assert!(
-        bus_events
+        observer_events
             .iter()
-            .any(|e| matches!(e, SeamAgentEvent::SessionFinished { session_id: sid, .. } if *sid == session_id)),
-        "Bus must receive SessionFinished with correct session_id"
+            .any(|e| matches!(e, AgentObserverEvent::SessionFinished(..))),
+        "Observer must receive SessionFinished"
     );
-    // Every bus event carries the same session_id
-    for event in &bus_events {
-        assert_eq!(
-            event.session_id(),
-            session_id,
-            "every AgentEvent must carry the correct session_id"
-        );
-    }
 }

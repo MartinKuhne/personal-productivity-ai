@@ -10,7 +10,7 @@ pub enum ToolGroupId {
     /// One of the seven built-in tool families.
     Internal(InternalToolGroup),
     /// A configured MCP server (name is the map key in
-    /// [`AppConfig::mcp_servers`](crate::config::AppConfig::mcp_servers)).
+    /// [`AgentConfig::mcp_servers`](crate::config::AgentConfig::mcp_servers)).
     Mcp(String),
 }
 
@@ -66,7 +66,7 @@ pub struct ToolGroupState {
     /// Internal vs MCP.
     pub kind: ToolGroupKind,
     /// Whether the group is currently enabled (read from
-    /// [`AppConfig::tool_groups`](crate::config::AppConfig::tool_groups)
+    /// [`AgentConfig::tool_groups`](crate::config::AgentConfig::tool_groups)
     /// or
     /// [`McpServerEntry::enabled`](crate::config::McpServerEntry::enabled)).
     pub enabled: bool,
@@ -74,7 +74,7 @@ pub struct ToolGroupState {
     /// require authentication (a 401 was received). The flag is
     /// set by the MCP client when a 401 is observed; cleared by the
     /// dialog's `Forget` link. Read from
-    /// [`McpClients::needs_auth_now`](crate::agent::lib::mcp::McpClients::needs_auth_now)
+    /// [`McpClients::needs_auth_now`](crate::lib::mcp::McpClients::needs_auth_now)
     /// so the manager's own state is the source of truth at
     /// runtime.
     pub needs_auth: bool,

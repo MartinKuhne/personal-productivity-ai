@@ -5,7 +5,7 @@
 //! here reference those consts via `#[schemars(description = ...)]` so the
 //! JSON schema the LLM sees is generated from a single source of truth.
 
-use crate::agent::tools::registry::builtin::strings;
+use crate::tools::registry::builtin::strings;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
@@ -486,7 +486,7 @@ pub struct WebDelegateResponse {
     pub result: String,
     /// Structured trace of sub-agent tool calls (FR-014, SC-006).
     #[serde(default)]
-    pub tool_calls: Vec<crate::agent::events::DelegateToolCall>,
+    pub tool_calls: Vec<crate::events::DelegateToolCall>,
 }
 
 // ---------------------------------------------------------------------------

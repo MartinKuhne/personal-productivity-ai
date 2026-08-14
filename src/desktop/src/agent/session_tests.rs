@@ -1,20 +1,22 @@
 //! Tests for `agent/session.rs`.
 
 use super::*;
-use crate::agent::config::AgentConfigBuilder;
-use crate::agent::events::{AgentDebugEntry, DebugEntryKind, DebugEntryRow};
+use crate::config::AgentConfigBuilder;
+use crate::events::{
+    AgentDebugEntry, AgentObserverEvent, DebugEntryKind, DebugEntryRow, RecordingObserver,
+};
 use std::collections::HashSet;
 
 struct TestNoopObserver;
-impl crate::agent::events::AgentEventObserver for TestNoopObserver {
+impl crate::events::AgentEventObserver for TestNoopObserver {
     fn on_session_started(&self) {}
     fn on_session_finished(&self, _history: Vec<serde_json::Value>) {}
-    fn on_status(&self, _status: crate::agent::events::AgentStatus) {}
+    fn on_status(&self, _status: crate::events::AgentStatus) {}
     fn on_thinking(&self, _text: String) {}
     fn on_content_delta(&self, _text: String) {}
     fn on_tool_call_started(&self, _id: String, _name: String, _args: serde_json::Value) {}
     fn on_tool_result(&self, _id: String, _name: String, _result: serde_json::Value) {}
-    fn on_tool_side_effect(&self, _effect: crate::agent::events::ToolSideEffect) {}
+    fn on_tool_side_effect(&self, _effect: crate::events::ToolSideEffect) {}
     fn on_debug_entry(&self, _entry: AgentDebugEntry) {}
     fn on_token_usage(&self, _usage: TokenUsageInfo) {}
     fn on_failed(&self, _error: String) {}
@@ -27,11 +29,11 @@ fn make_session() -> AgentSession {
     AgentSession::builder()
         .with_observer_factory(factory)
         .with_file_observer(std::sync::Arc::new(
-            crate::agent::tools::observer::DefaultFileObserver,
+            crate::tools::observer::DefaultFileObserver,
         ))
-        .with_tool_call_policy(Arc::new(crate::agent::tools::policy::DefaultToolCallPolicy))
+        .with_tool_call_policy(Arc::new(crate::tools::policy::DefaultToolCallPolicy))
         .with_tool_context(Arc::new(arc_swap::ArcSwap::from_pointee(
-            crate::agent::AgentToolContext::new(crate::agent::tools::registry::ToolRegistry::new()),
+            crate::AgentToolContext::new(crate::tools::registry::ToolRegistry::new()),
         )))
         .build()
 }
@@ -242,26 +244,34 @@ fn test_debug_entries_never_cleared_on_new_session() {
 /// `Bus<AgentEvent>` since the agent no longer publishes on `tx_gui`.
 #[test]
 fn test_current_session_id_set_on_submit_prompt() {
-    use crate::app::events::AgentEvent as SeamAgentEvent;
-    use crate::bus::core::Bus;
+    use std::collections::HashMap;
+    let mut models = HashMap::new();
+    models.insert(
+        "test".to_string(),
+        crate::config::LlmConfig {
+            model: "test".to_string(),
+            api_url: "http://127.0.0.1:0".to_string(),
+            api_key: "valid-key".to_string(),
+            cost: None,
+            use_case: vec!["chat".to_string()],
+        },
+    );
+    let agent_config = crate::config::AgentConfigBuilder::new()
+        .with_models(models)
+        .build();
 
-    let bus = Bus::new();
-    let reader1 = bus.subscribe();
-    let bus_clone = bus.clone();
-    let factory: AgentObserverFactory = Arc::new(move |session_id| {
-        Arc::new(crate::app::events::BusAgentEventObserver::new(
-            session_id,
-            bus_clone.clone(),
-        ))
-    });
+    let recorded = Arc::new(RecordingObserver::new());
+    let recorded_clone = recorded.clone();
+    let factory: AgentObserverFactory = Arc::new(move |_session_id| recorded_clone.clone());
     let mut mgr = AgentSession::builder()
+        .with_agent_config(agent_config)
         .with_observer_factory(factory)
         .with_file_observer(std::sync::Arc::new(
-            crate::agent::tools::observer::DefaultFileObserver,
+            crate::tools::observer::DefaultFileObserver,
         ))
-        .with_tool_call_policy(Arc::new(crate::agent::tools::policy::DefaultToolCallPolicy))
+        .with_tool_call_policy(Arc::new(crate::tools::policy::DefaultToolCallPolicy))
         .with_tool_context(Arc::new(arc_swap::ArcSwap::from_pointee(
-            crate::agent::AgentToolContext::new(crate::agent::tools::registry::ToolRegistry::new()),
+            crate::AgentToolContext::new(crate::tools::registry::ToolRegistry::new()),
         )))
         .build();
 
@@ -270,7 +280,7 @@ fn test_current_session_id_set_on_submit_prompt() {
 
     // Submit first session — current_session_id must be set
     let session_id_1 = uuid::Uuid::new_v4();
-    mgr.submit_prompt(crate::agent::events::AgentPrompt {
+    mgr.submit_prompt(crate::events::AgentPrompt {
         session_id: session_id_1,
         text: "prompt 1".to_string(),
         system_prompts: Vec::new(),
@@ -286,22 +296,17 @@ fn test_current_session_id_set_on_submit_prompt() {
     );
     assert!(!session_id_1.is_nil(), "session_id must be a real Uuid");
 
-    // Drain bus until the agent's prompt loop processes the message.
     let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
     while std::time::Instant::now() < deadline {
-        let mut got_started = false;
-        while let Ok(ev) = reader1.try_recv() {
-            if let SeamAgentEvent::SessionStarted { session_id } = &ev {
-                assert_eq!(
-                    *session_id, session_id_1,
-                    "SessionStarted must carry the manager's session_id"
-                );
-                got_started = true;
-            }
-        }
-        if got_started {
+        let events = recorded.events();
+        if events.contains(&AgentObserverEvent::SessionStarted) {
             break;
         }
         std::thread::sleep(std::time::Duration::from_millis(5));
     }
+    assert!(
+        recorded
+            .events()
+            .contains(&AgentObserverEvent::SessionStarted)
+    );
 }

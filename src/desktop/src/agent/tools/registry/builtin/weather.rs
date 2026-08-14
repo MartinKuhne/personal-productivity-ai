@@ -1,10 +1,10 @@
 //! Weather tool implementation and provider for the tool registry.
 
-use crate::agent::tools::Tool;
-use crate::agent::tools::context::ToolContext;
-use crate::agent::tools::dtos;
-use crate::agent::tools::provider::{RegisteredTool, ToolProvider};
-use crate::agent::tools::registry::groups::{InternalToolGroup, ToolGroupId};
+use crate::tools::Tool;
+use crate::tools::context::ToolContext;
+use crate::tools::dtos;
+use crate::tools::provider::{RegisteredTool, ToolProvider};
+use crate::tools::registry::groups::{InternalToolGroup, ToolGroupId};
 use fastmd_tool_macros::ToolDescriptor;
 use std::sync::Arc;
 
@@ -16,7 +16,7 @@ use super::strings;
     name = "get_weather",
     desc = strings::GET_WEATHER_DESCRIPTION,
     input = dtos::GetWeatherInput,
-    safety = crate::agent::tools::Safety::ReadOnly,
+    safety = crate::tools::Safety::ReadOnly,
     group = Weather,
     execute_with = execute_get_weather,
 )]
@@ -28,9 +28,9 @@ fn execute_get_weather(
 ) -> Result<serde_json::Value, String> {
     let input: dtos::GetWeatherInput =
         serde_json::from_str(args).map_err(|e| format!("Invalid args: {}", e))?;
-    crate::agent::lib::weather::tool_get_weather(&input.location, input.date_range.as_deref()).map(
-        |r| serde_json::to_value(r).unwrap_or_else(|e| serde_json::json!({"error": e.to_string()})),
-    )
+    crate::lib::weather::tool_get_weather(&input.location, input.date_range.as_deref()).map(|r| {
+        serde_json::to_value(r).unwrap_or_else(|e| serde_json::json!({"error": e.to_string()}))
+    })
 }
 
 /// Self-registering provider for the weather family.
