@@ -1,11 +1,11 @@
 //! CardDAV contact tool implementations for the tool registry.
 
-use crate::agent::tools::Tool;
-use crate::agent::tools::context::ToolContext;
-use crate::agent::tools::descriptor::{ConfigPredicate, ToolConfigSpec};
-use crate::agent::tools::dtos;
-use crate::agent::tools::provider::{RegisteredTool, ToolProvider};
-use crate::agent::tools::registry::groups::{InternalToolGroup, ToolGroupId};
+use crate::tools::Tool;
+use crate::tools::context::ToolContext;
+use crate::tools::descriptor::{ConfigPredicate, ToolConfigSpec};
+use crate::tools::dtos;
+use crate::tools::provider::{RegisteredTool, ToolProvider};
+use crate::tools::registry::groups::{InternalToolGroup, ToolGroupId};
 use fastmd_tool_macros::ToolDescriptor;
 use std::sync::Arc;
 
@@ -17,9 +17,9 @@ use super::strings;
     name = "search_contact",
     desc = strings::SEARCH_CONTACT_DESCRIPTION,
     input = dtos::SearchContactInput,
-    safety = crate::agent::tools::Safety::ReadOnly,
+    safety = crate::tools::Safety::ReadOnly,
     group = Contacts,
-    config = crate::app::tool_specs::contacts_spec(),
+    config = crate::tools::specs::contacts_spec(),
     execute_with = execute_search_contact,
 )]
 pub(crate) struct SearchContactTool;
@@ -30,7 +30,7 @@ fn execute_search_contact(
 ) -> Result<serde_json::Value, String> {
     let input: dtos::SearchContactInput =
         serde_json::from_str(args).map_err(|e| format!("Invalid args: {}", e))?;
-    crate::agent::lib::dav::card::tool_search_contact(&ctx.config, &input.keyword).map(|r| {
+    crate::lib::dav::card::tool_search_contact(&ctx.config, &input.keyword).map(|r| {
         serde_json::to_value(r).unwrap_or_else(|e| serde_json::json!({"error": e.to_string()}))
     })
 }
@@ -41,9 +41,9 @@ fn execute_search_contact(
     name = "add_contact",
     desc = strings::ADD_CONTACT_DESCRIPTION,
     input = dtos::AddContactInput,
-    safety = crate::agent::tools::Safety::Mutating,
+    safety = crate::tools::Safety::Mutating,
     group = Contacts,
-    config = crate::app::tool_specs::contacts_spec(),
+    config = crate::tools::specs::contacts_spec(),
     execute_with = execute_add_contact,
 )]
 pub(crate) struct AddContactTool;
@@ -56,7 +56,7 @@ fn execute_add_contact(
         serde_json::from_str(args).map_err(|e| format!("Invalid args: {}", e))?;
     let contact_json =
         serde_json::to_string(&input).map_err(|e| format!("Failed to serialize input: {}", e))?;
-    crate::agent::lib::dav::card::tool_add_contact(&ctx.config, &contact_json).map(|r| {
+    crate::lib::dav::card::tool_add_contact(&ctx.config, &contact_json).map(|r| {
         serde_json::to_value(r).unwrap_or_else(|e| serde_json::json!({"error": e.to_string()}))
     })
 }
@@ -67,9 +67,9 @@ fn execute_add_contact(
     name = "get_contact",
     desc = strings::GET_CONTACT_DESCRIPTION,
     input = dtos::GetContactInput,
-    safety = crate::agent::tools::Safety::ReadOnly,
+    safety = crate::tools::Safety::ReadOnly,
     group = Contacts,
-    config = crate::app::tool_specs::contacts_spec(),
+    config = crate::tools::specs::contacts_spec(),
     execute_with = execute_get_contact,
 )]
 pub(crate) struct GetContactTool;
@@ -80,7 +80,7 @@ fn execute_get_contact(
 ) -> Result<serde_json::Value, String> {
     let input: dtos::GetContactInput =
         serde_json::from_str(args).map_err(|e| format!("Invalid args: {}", e))?;
-    crate::agent::lib::dav::card::tool_get_contact(&ctx.config, &input.id).map(|r| {
+    crate::lib::dav::card::tool_get_contact(&ctx.config, &input.id).map(|r| {
         serde_json::to_value(r).unwrap_or_else(|e| serde_json::json!({"error": e.to_string()}))
     })
 }
@@ -91,9 +91,9 @@ fn execute_get_contact(
     name = "update_contact",
     desc = strings::UPDATE_CONTACT_DESCRIPTION,
     input = dtos::UpdateContactInput,
-    safety = crate::agent::tools::Safety::Mutating,
+    safety = crate::tools::Safety::Mutating,
     group = Contacts,
-    config = crate::app::tool_specs::contacts_spec(),
+    config = crate::tools::specs::contacts_spec(),
     execute_with = execute_update_contact,
 )]
 pub(crate) struct UpdateContactTool;
@@ -106,15 +106,15 @@ fn execute_update_contact(
         serde_json::from_str(args).map_err(|e| format!("Invalid args: {}", e))?;
     let contact_json =
         serde_json::to_string(&input).map_err(|e| format!("Failed to serialize input: {}", e))?;
-    crate::agent::lib::dav::card::tool_update_contact(&ctx.config, &input.id, &contact_json).map(
-        |r| serde_json::to_value(r).unwrap_or_else(|e| serde_json::json!({"error": e.to_string()})),
-    )
+    crate::lib::dav::card::tool_update_contact(&ctx.config, &input.id, &contact_json).map(|r| {
+        serde_json::to_value(r).unwrap_or_else(|e| serde_json::json!({"error": e.to_string()}))
+    })
 }
 
 /// `ToolConfigSpec` for the disabled [`DeleteContactTool`]. Kept
-/// here (not in `app::tool_specs`) because no other tool uses the
+/// here (not in `agent::tools::specs`) because no other tool uses the
 /// `ConfigPredicate::Never` gate — re-enabling the tool means
-/// swapping this spec out for [`crate::app::tool_specs::contacts_spec`].
+/// swapping this spec out for [`crate::tools::specs::contacts_spec`].
 fn delete_contact_disabled_spec(group: ToolGroupId) -> ToolConfigSpec {
     ToolConfigSpec {
         group: Some(group),
@@ -130,13 +130,13 @@ fn delete_contact_disabled_spec(group: ToolGroupId) -> ToolConfigSpec {
 /// `is_enabled` returns `false` so the LLM never sees the tool. To
 /// re-enable, replace the
 /// [`delete_contact_disabled_spec`] below with
-/// [`crate::app::tool_specs::contacts_spec`].
+/// [`crate::tools::specs::contacts_spec`].
 #[derive(ToolDescriptor)]
 #[tool(
     name = "delete_contact",
     desc = strings::DELETE_CONTACT_DESCRIPTION,
     input = dtos::DeleteContactInput,
-    safety = crate::agent::tools::Safety::Mutating,
+    safety = crate::tools::Safety::Mutating,
     group = Contacts,
     config = delete_contact_disabled_spec(ToolGroupId::Internal(InternalToolGroup::Contacts)),
     execute_with = execute_delete_contact,
@@ -149,7 +149,7 @@ fn execute_delete_contact(
 ) -> Result<serde_json::Value, String> {
     let input: dtos::DeleteContactInput =
         serde_json::from_str(args).map_err(|e| format!("Invalid args: {}", e))?;
-    crate::agent::lib::dav::card::tool_delete_contact(&ctx.config, &input.id).map(|r| {
+    crate::lib::dav::card::tool_delete_contact(&ctx.config, &input.id).map(|r| {
         serde_json::to_value(r).unwrap_or_else(|e| serde_json::json!({"error": e.to_string()}))
     })
 }

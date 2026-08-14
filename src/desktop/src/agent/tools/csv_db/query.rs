@@ -22,7 +22,7 @@ fn create_context(row: &csv::StringRecord, headers: &csv::StringRecord) -> HashM
 }
 
 pub fn delete_rows(
-    ctx: &crate::agent::tools::context::ToolContext,
+    ctx: &crate::tools::context::ToolContext,
     input: DeleteRowsInput,
 ) -> Result<String, String> {
     let db_path = super::operations::get_db_path(ctx, &input.db_name);
@@ -71,7 +71,7 @@ pub fn delete_rows(
 }
 
 pub fn query_csv(
-    ctx: &crate::agent::tools::context::ToolContext,
+    ctx: &crate::tools::context::ToolContext,
     input: QueryRequest,
 ) -> Result<QueryResponse, String> {
     let db_path = super::operations::get_db_path(ctx, &input.db_name);
@@ -148,19 +148,17 @@ pub fn query_csv(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::agent::tools::csv_db::schema::{AddRowsInput, CreateCsvInput};
+    use crate::tools::csv_db::schema::{AddRowsInput, CreateCsvInput};
     use tempfile::tempdir;
 
-    fn test_ctx(
-        config: &crate::agent::config::AgentConfig,
-    ) -> crate::agent::tools::context::ToolContext {
-        let mut builder = crate::agent::tools::context::ToolContextBuilder::new(
+    fn test_ctx(config: &crate::config::AgentConfig) -> crate::tools::context::ToolContext {
+        let mut builder = crate::tools::context::ToolContextBuilder::new(
             std::sync::Arc::new(config.clone()),
-            std::sync::Arc::new(crate::agent::tools::observer::DefaultFileObserver),
+            std::sync::Arc::new(crate::tools::observer::DefaultFileObserver),
         );
         builder = builder.with_extension(std::sync::Arc::new(
-            crate::agent::tools::vfs::VirtualFileSystemExt(std::sync::Arc::new(
-                crate::agent::tools::vfs::VfsResolver::new(std::sync::Arc::new(config.clone())),
+            crate::tools::vfs::VirtualFileSystemExt(std::sync::Arc::new(
+                crate::tools::vfs::VfsResolver::new(std::sync::Arc::new(config.clone())),
             )),
         ));
         builder.build()
@@ -169,7 +167,7 @@ mod tests {
     #[test]
     fn test_query_and_delete() {
         let tmp_dir = tempdir().unwrap();
-        let config = crate::agent::config::AgentConfigBuilder::new()
+        let config = crate::config::AgentConfigBuilder::new()
             .with_csv_db_path(Some(tmp_dir.path().to_string_lossy().to_string()))
             .build();
 

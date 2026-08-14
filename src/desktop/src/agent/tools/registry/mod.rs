@@ -27,13 +27,13 @@ pub use errors::{ToolErrorKind, ToolGroupError};
 pub use groups::{InternalToolGroup, ToolGroupId, ToolGroupKind, ToolGroupState};
 pub use pagination::paginate_in_range;
 
-use crate::agent::config::AgentConfig;
-use crate::agent::lib::mcp::{McpClients, McpToolDescriptor};
-use crate::agent::tools::RegisteredTool;
-use crate::agent::tools::context::ToolContext;
-use crate::agent::tools::mcp::McpToolAdapter;
-use crate::agent::tools::{Safety, Tool, ToolDispatcher, ToolOutcome};
+use crate::config::AgentConfig;
 use crate::config::McpServerConfig;
+use crate::lib::mcp::{McpClients, McpToolDescriptor};
+use crate::tools::RegisteredTool;
+use crate::tools::context::ToolContext;
+use crate::tools::mcp::McpToolAdapter;
+use crate::tools::{Safety, Tool, ToolDispatcher, ToolOutcome};
 use std::collections::BTreeMap;
 use std::sync::Arc;
 
@@ -42,10 +42,10 @@ use std::sync::Arc;
 #[derive(Clone)]
 pub struct ToolRegistry {
     /// Registered tools keyed by name. Each entry pairs the static
-    /// [`crate::agent::tools::ToolDescriptor`] (used by the LLM
+    /// [`crate::tools::ToolDescriptor`] (used by the LLM
     /// schema, the UI dialog, and the prompt char-count) with the
     /// `Arc<dyn Tool>` executor (used by the dispatcher at run
-    /// time). See [`crate::agent::tools::RegisteredTool`].
+    /// time). See [`crate::tools::RegisteredTool`].
     tools: BTreeMap<String, RegisteredTool>,
     /// Reverse index: which group owns each tool? Built at registration.
     tool_to_group: BTreeMap<String, ToolGroupId>,
@@ -78,7 +78,7 @@ impl ToolRegistry {
     // ---- Registration ----
 
     /// Register a tool from a [`RegisteredTool`] entry. The
-    /// entry's [`crate::agent::tools::ToolDescriptor`] is the source of metadata; the
+    /// entry's [`crate::tools::ToolDescriptor`] is the source of metadata; the
     /// group is taken from the descriptor so the call site doesn't
     /// have to know which family a tool belongs to. The legacy
     /// `Box<dyn Tool>` registration path is gone — providers hand
@@ -126,10 +126,10 @@ impl ToolRegistry {
         self.tools.get(name).map(|t| t.executor.as_ref())
     }
 
-    /// Look up the static [`crate::agent::tools::ToolDescriptor`]
+    /// Look up the static [`crate::tools::ToolDescriptor`]
     /// for a tool by name. Used by the LLM schema, the UI dialog,
     /// and the prompt char-count.
-    pub fn descriptor(&self, name: &str) -> Option<&crate::agent::tools::ToolDescriptor> {
+    pub fn descriptor(&self, name: &str) -> Option<&crate::tools::ToolDescriptor> {
         self.tools.get(name).map(|t| t.descriptor.as_ref())
     }
 
@@ -170,7 +170,7 @@ impl ToolRegistry {
     pub fn schema_fragment(
         &self,
         name: &str,
-        config: &crate::agent::config::AgentConfig,
+        config: &crate::config::AgentConfig,
         prompt: &str,
     ) -> Option<serde_json::Value> {
         let entry = self.tools.get(name)?;
@@ -196,7 +196,7 @@ impl ToolRegistry {
     /// [`Tool::is_enabled`].
     pub fn get_schema(
         &self,
-        config: &crate::agent::config::AgentConfig,
+        config: &crate::config::AgentConfig,
         prompt: &str,
     ) -> serde_json::Value {
         let mut tools = Vec::new();
@@ -226,7 +226,7 @@ impl ToolRegistry {
     pub fn tool_char_count(
         &self,
         name: &str,
-        config: &crate::agent::config::AgentConfig,
+        config: &crate::config::AgentConfig,
         prompt: &str,
     ) -> Option<usize> {
         let entry = self.schema_fragment(name, config, prompt)?;
@@ -238,7 +238,7 @@ impl ToolRegistry {
     /// Recompute the per-group view from the current `AppConfig` and
     /// the current catalog. Cheap (no I/O). Called on every config
     /// change and on every dialog open.
-    pub fn refresh_state(&mut self, config: &crate::agent::config::AgentConfig) {
+    pub fn refresh_state(&mut self, config: &crate::config::AgentConfig) {
         // For each known group, rebuild the state from the catalog
         // and the config. We carry forward the `last_error` from the
         // previous view: a successful `Execution` clears it via
@@ -353,7 +353,7 @@ impl ToolRegistry {
         self.refresh_mcp_tools(config);
     }
 
-    pub fn update_and_refresh(&mut self, config: &crate::agent::config::AgentConfig) {
+    pub fn update_and_refresh(&mut self, config: &crate::config::AgentConfig) {
         self.mcp_manager.update_config(config);
         self.refresh_mcp_tools(config);
         self.refresh_state(config);
@@ -361,7 +361,7 @@ impl ToolRegistry {
 
     pub fn get_tools_schema(
         &mut self,
-        config: &crate::agent::config::AgentConfig,
+        config: &crate::config::AgentConfig,
         prompt: &str,
     ) -> serde_json::Value {
         self.mcp_manager.update_config(config);
@@ -421,7 +421,7 @@ impl ToolRegistry {
     /// Refresh the MCP catalog: re-run `tools/list` against every
     /// configured server, register the discovered tools, and record
     /// `Discovery` errors on the affected group when a server fails.
-    pub fn refresh_mcp_tools(&mut self, config: &crate::agent::config::AgentConfig) {
+    pub fn refresh_mcp_tools(&mut self, config: &crate::config::AgentConfig) {
         // Remove tools that came from a server whose config is gone or
         // whose config changed.
         let valid_servers: Vec<String> = config.mcp_servers.keys().cloned().collect();
@@ -516,10 +516,7 @@ impl ToolDispatcher for ToolRegistry {
 // `set_group_enabled` method can be a single `match`.
 // ---------------------------------------------------------------------------
 
-fn is_internal_group_enabled(
-    config: &crate::agent::config::AgentConfig,
-    g: InternalToolGroup,
-) -> bool {
+fn is_internal_group_enabled(config: &crate::config::AgentConfig, g: InternalToolGroup) -> bool {
     use InternalToolGroup::*;
     match g {
         Filesystem => config.tool_groups.filesystem,
@@ -597,11 +594,11 @@ pub fn execute_tool(
             } else {
                 tracing::info!(name = "tool.manager.success", tool_name = %name, elapsed = ?elapsed, "Tool execution succeeded");
             }
-            crate::agent::tools::dtos::ToolResponse::Success { data }
+            crate::tools::dtos::ToolResponse::Success { data }
         }
         Err(err) => {
             tracing::error!(name = "tool.manager.failed", tool_name = %name, elapsed = ?elapsed, error = %err, "Tool execution failed. Operator should verify tool inputs.");
-            crate::agent::tools::dtos::ToolResponse::Error { message: err }
+            crate::tools::dtos::ToolResponse::Error { message: err }
         }
     };
 

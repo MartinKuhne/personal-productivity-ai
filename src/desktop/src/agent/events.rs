@@ -45,7 +45,7 @@ pub enum DebugEntryRow {
 /// Session identity lives on the enclosing `AgentEvent::DebugEntry { session_id }`
 /// variant — this struct no longer carries its own `session` field (migration
 /// step 10, data-model.md §4).
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, PartialEq, Serialize)]
 pub struct AgentDebugEntry {
     /// Monotonic turn number within the session (1-based; 0 for session boundaries).
     pub turn: usize,
@@ -67,7 +67,7 @@ pub struct AgentDebugEntry {
 /// tokens, reasoning tokens emitted by o-series models). For Anthropic-style
 /// endpoints, `input_tokens` and `output_tokens` from the response are mapped
 /// onto `prompt_tokens` and `completion_tokens` respectively by the parser.
-#[derive(Debug, Clone, Default, serde::Deserialize, serde::Serialize)]
+#[derive(Debug, Clone, Default, PartialEq, serde::Deserialize, serde::Serialize)]
 pub struct TokenUsageInfo {
     /// Tokens consumed by the prompt (i.e. the full conversation context
     /// sent on this turn). On Anthropic-style responses this is the
@@ -97,9 +97,8 @@ pub struct AgentPrompt {
     /// The user's prompt text. MUST be non-empty after trim.
     pub text: String,
     /// Pre-assembled system-prompt message blocks. Built by the
-    /// submitter (UI or batch executor) via
-    /// [`crate::app::prompts::build_system_prompts`]. The agent run
-    /// loop no longer constructs these — it just forwards the
+    /// caller. The agent run
+    /// loop forwards the
     /// blocks as `role=system` messages ahead of the user turn.
     pub system_prompts: Vec<String>,
     /// UI selection context passed through to tools.
@@ -114,8 +113,7 @@ pub struct AgentPrompt {
     pub cancel_flag: Arc<AtomicBool>,
 }
 
-/// Typed agent status — replaces the old `AgentEvent::Status(String)` with
-/// structured states. Carried inside [`crate::app::events::AgentEvent::Status`].
+/// Typed agent status — structured states emitted during an agent run.
 #[derive(Debug, Clone, Serialize, PartialEq, Eq)]
 pub enum AgentStatus {
     /// Waiting for the LLM to return a response.
@@ -203,6 +201,119 @@ pub trait AgentEventObserver: Send + Sync {
 
 /// Factory function type that creates an [`AgentEventObserver`] for a new session `Uuid`.
 pub type AgentObserverFactory = Arc<dyn Fn(Uuid) -> Arc<dyn AgentEventObserver> + Send + Sync>;
+
+/// Lightweight in-memory observer event recorded by [`RecordingObserver`].
+#[derive(Debug, Clone, PartialEq)]
+pub enum AgentObserverEvent {
+    SessionStarted,
+    SessionFinished(Vec<serde_json::Value>),
+    Status(AgentStatus),
+    Thinking(String),
+    ContentDelta(String),
+    ToolCallStarted {
+        id: String,
+        name: String,
+        args: serde_json::Value,
+    },
+    ToolResult {
+        id: String,
+        name: String,
+        result: serde_json::Value,
+    },
+    ToolSideEffect(ToolSideEffect),
+    DebugEntry(AgentDebugEntry),
+    TokenUsage(TokenUsageInfo),
+    Failed(String),
+}
+
+/// In-memory observer for tests and lightweight interception.
+#[derive(Default, Debug)]
+pub struct RecordingObserver {
+    pub events: std::sync::Mutex<Vec<AgentObserverEvent>>,
+}
+
+impl RecordingObserver {
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    pub fn events(&self) -> Vec<AgentObserverEvent> {
+        self.events.lock().unwrap().clone()
+    }
+
+    pub fn clear(&self) {
+        self.events.lock().unwrap().clear();
+    }
+}
+
+impl AgentEventObserver for RecordingObserver {
+    fn on_session_started(&self) {
+        self.events
+            .lock()
+            .unwrap()
+            .push(AgentObserverEvent::SessionStarted);
+    }
+    fn on_session_finished(&self, history: Vec<serde_json::Value>) {
+        self.events
+            .lock()
+            .unwrap()
+            .push(AgentObserverEvent::SessionFinished(history));
+    }
+    fn on_status(&self, status: AgentStatus) {
+        self.events
+            .lock()
+            .unwrap()
+            .push(AgentObserverEvent::Status(status));
+    }
+    fn on_thinking(&self, text: String) {
+        self.events
+            .lock()
+            .unwrap()
+            .push(AgentObserverEvent::Thinking(text));
+    }
+    fn on_content_delta(&self, text: String) {
+        self.events
+            .lock()
+            .unwrap()
+            .push(AgentObserverEvent::ContentDelta(text));
+    }
+    fn on_tool_call_started(&self, id: String, name: String, args: serde_json::Value) {
+        self.events
+            .lock()
+            .unwrap()
+            .push(AgentObserverEvent::ToolCallStarted { id, name, args });
+    }
+    fn on_tool_result(&self, id: String, name: String, result: serde_json::Value) {
+        self.events
+            .lock()
+            .unwrap()
+            .push(AgentObserverEvent::ToolResult { id, name, result });
+    }
+    fn on_tool_side_effect(&self, effect: ToolSideEffect) {
+        self.events
+            .lock()
+            .unwrap()
+            .push(AgentObserverEvent::ToolSideEffect(effect));
+    }
+    fn on_debug_entry(&self, entry: AgentDebugEntry) {
+        self.events
+            .lock()
+            .unwrap()
+            .push(AgentObserverEvent::DebugEntry(entry));
+    }
+    fn on_token_usage(&self, usage: TokenUsageInfo) {
+        self.events
+            .lock()
+            .unwrap()
+            .push(AgentObserverEvent::TokenUsage(usage));
+    }
+    fn on_failed(&self, error: String) {
+        self.events
+            .lock()
+            .unwrap()
+            .push(AgentObserverEvent::Failed(error));
+    }
+}
 
 // ---------------------------------------------------------------------------
 // Tests live in the sibling `events_tests.rs` sidecar.

@@ -1,7 +1,7 @@
 //! Tests for `tools/web.rs`.
 
 use super::*;
-use crate::agent::config::AgentConfig;
+use crate::config::AgentConfig;
 use crate::config::LlmConfig;
 
 fn spawn_mock_server(body: impl Into<String>) -> String {
@@ -27,12 +27,12 @@ fn spawn_mock_server(body: impl Into<String>) -> String {
 
 #[test]
 fn test_tool_web_fetch_mock() {
-    let cache = crate::agent::tools::registry::cache::ToolCache::new();
+    let cache = crate::tools::registry::cache::ToolCache::new();
     rustls::crypto::ring::default_provider()
         .install_default()
         .ok();
     let server_url = spawn_mock_server("<html><body><h1>Hello World</h1></body></html>");
-    let input = crate::agent::tools::dtos::WebFetchInput {
+    let input = crate::tools::dtos::WebFetchInput {
         url: server_url.clone(),
         headers: false,
         force_refetch: true,
@@ -49,7 +49,7 @@ fn test_tool_web_fetch_mock() {
     assert!(result.total_lines > 0);
 
     // Verify the mock generator was used to create the cache entry
-    if let Some(crate::agent::tools::registry::cache::CacheEntry::WebFetch { cursor }) =
+    if let Some(crate::tools::registry::cache::CacheEntry::WebFetch { cursor }) =
         cache.get(&server_url)
     {
         assert_eq!(cursor, mock_uuid.to_string());
@@ -60,11 +60,11 @@ fn test_tool_web_fetch_mock() {
 
 #[test]
 fn test_tool_web_fetch_error() {
-    let cache = crate::agent::tools::registry::cache::ToolCache::new();
+    let cache = crate::tools::registry::cache::ToolCache::new();
     rustls::crypto::ring::default_provider()
         .install_default()
         .ok();
-    let input = crate::agent::tools::dtos::WebFetchInput {
+    let input = crate::tools::dtos::WebFetchInput {
         url: "http://127.0.0.1:1".to_string(),
         headers: false,
         force_refetch: true,
@@ -76,14 +76,14 @@ fn test_tool_web_fetch_error() {
 
 #[test]
 fn test_tool_web_fetch_pagination() {
-    let cache = crate::agent::tools::registry::cache::ToolCache::new();
+    let cache = crate::tools::registry::cache::ToolCache::new();
     rustls::crypto::ring::default_provider()
         .install_default()
         .ok();
     let html =
         "<html><body><p>line1</p><p>line2</p><p>line3</p><p>line4</p><p>line5</p></body></html>";
     let server_url = spawn_mock_server(html);
-    let input = crate::agent::tools::dtos::WebFetchInput {
+    let input = crate::tools::dtos::WebFetchInput {
         url: server_url.clone(),
         headers: false,
         force_refetch: true,
@@ -104,7 +104,7 @@ fn test_tool_web_fetch_pagination() {
 /// `cursor`), so the lookup must hit `WebFetchContent` directly.
 #[test]
 fn test_tool_web_fetch_cursor_pagination() {
-    let cache = crate::agent::tools::registry::cache::ToolCache::new();
+    let cache = crate::tools::registry::cache::ToolCache::new();
     rustls::crypto::ring::default_provider()
         .install_default()
         .ok();
@@ -117,7 +117,7 @@ fn test_tool_web_fetch_cursor_pagination() {
     let server_url = spawn_mock_server(html);
 
     // First call: no cursor, force a fresh fetch.
-    let first_input = crate::agent::tools::dtos::WebFetchInput {
+    let first_input = crate::tools::dtos::WebFetchInput {
         url: server_url.clone(),
         headers: false,
         force_refetch: true,
@@ -141,7 +141,7 @@ fn test_tool_web_fetch_cursor_pagination() {
     // `"Cursor expired or unknown; re-run the fetch with no cursor."`
     // because the cursor branch looked up `WebFetch { cursor }` at the
     // cursor key, which actually holds `WebFetchContent`.
-    let second_input = crate::agent::tools::dtos::WebFetchInput {
+    let second_input = crate::tools::dtos::WebFetchInput {
         url: server_url.clone(),
         headers: false,
         force_refetch: false,
@@ -189,12 +189,12 @@ fn test_tool_web_fetch_cursor_pagination() {
 
 #[test]
 fn test_tool_web_fetch_headers() {
-    let cache = crate::agent::tools::registry::cache::ToolCache::new();
+    let cache = crate::tools::registry::cache::ToolCache::new();
     rustls::crypto::ring::default_provider()
         .install_default()
         .ok();
     let server_url = spawn_mock_server("<html><body><h1>Test</h1></body></html>");
-    let input = crate::agent::tools::dtos::WebFetchInput {
+    let input = crate::tools::dtos::WebFetchInput {
         url: server_url.clone(),
         headers: true,
         force_refetch: true,
@@ -208,12 +208,12 @@ fn test_tool_web_fetch_headers() {
 
 #[test]
 fn test_tool_web_fetch_cache_hit() {
-    let cache = crate::agent::tools::registry::cache::ToolCache::new();
+    let cache = crate::tools::registry::cache::ToolCache::new();
     rustls::crypto::ring::default_provider()
         .install_default()
         .ok();
     let server_url = spawn_mock_server("<html><body><h1>Cached</h1></body></html>");
-    let input = crate::agent::tools::dtos::WebFetchInput {
+    let input = crate::tools::dtos::WebFetchInput {
         url: server_url.clone(),
         headers: false,
         force_refetch: false,
@@ -228,19 +228,19 @@ fn test_tool_web_fetch_cache_hit() {
 
 #[test]
 fn test_tool_web_fetch_force_refetch() {
-    let cache = crate::agent::tools::registry::cache::ToolCache::new();
+    let cache = crate::tools::registry::cache::ToolCache::new();
     rustls::crypto::ring::default_provider()
         .install_default()
         .ok();
     let server_url = spawn_mock_server("<html><body><h1>Force</h1></body></html>");
-    let input = crate::agent::tools::dtos::WebFetchInput {
+    let input = crate::tools::dtos::WebFetchInput {
         url: server_url.clone(),
         headers: false,
         force_refetch: false,
         cursor: None,
     };
     let _first = tool_web_fetch(&input, &cache, &crate::utils::uuid::SystemUuidGenerator).unwrap();
-    let force_input = crate::agent::tools::dtos::WebFetchInput {
+    let force_input = crate::tools::dtos::WebFetchInput {
         url: server_url.clone(),
         headers: false,
         force_refetch: true,
@@ -361,7 +361,7 @@ fn test_tool_web_search_invalid_json() {
 
 #[test]
 fn test_tool_web_delegate_missing_api_key() {
-    let cache = crate::agent::tools::registry::cache::ToolCache::new();
+    let cache = crate::tools::registry::cache::ToolCache::new();
     let mut config = AgentConfig::default();
     config.models.insert(
         "chat".to_string(),
@@ -381,7 +381,7 @@ fn test_tool_web_delegate_missing_api_key() {
 
 #[test]
 fn test_tool_web_delegate_mock() {
-    let cache = crate::agent::tools::registry::cache::ToolCache::new();
+    let cache = crate::tools::registry::cache::ToolCache::new();
     rustls::crypto::ring::default_provider()
         .install_default()
         .ok();
@@ -416,7 +416,7 @@ fn test_tool_web_delegate_mock() {
 
 #[test]
 fn test_tool_web_delegate_with_unknown_tool_handled_gracefully() {
-    let cache = crate::agent::tools::registry::cache::ToolCache::new();
+    let cache = crate::tools::registry::cache::ToolCache::new();
     rustls::crypto::ring::default_provider()
         .install_default()
         .ok();
@@ -461,7 +461,7 @@ fn test_tool_web_delegate_with_unknown_tool_handled_gracefully() {
 
 #[test]
 fn test_tool_web_delegate_handles_api_error_gracefully() {
-    let cache = crate::agent::tools::registry::cache::ToolCache::new();
+    let cache = crate::tools::registry::cache::ToolCache::new();
     rustls::crypto::ring::default_provider()
         .install_default()
         .ok();

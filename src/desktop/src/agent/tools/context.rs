@@ -1,19 +1,19 @@
 //! Tool context — provides tools with access to the global `AppConfig` and the file event bus, plus safe virtual-path resolution.
 
-use crate::agent::config::AgentConfig;
+use crate::config::AgentConfig;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 /// Tool context — composite providing tools with access to `AgentConfig`
 /// and the file event bus, plus safe virtual-path resolution via
-/// [`crate::agent::tools::vfs::VirtualFileSystem`] and event publishing.
+/// [`crate::tools::vfs::VirtualFileSystem`] and event publishing.
 ///
 /// `ToolContext` is `'static` and cheap to clone: every reference-
 /// shaped field is now an owned `Arc` or a `Clone`-cheap `Bus`.
 /// The `Clone` derive is what makes Phase 5's
 /// `cargo-fuzz` targets (which need a `'static` context to
 /// spawn) and the parallel-dispatch path in
-/// [`ToolExecutor`](crate::agent::tool_executor::ToolExecutor)
+/// [`ToolExecutor`](crate::tool_executor::ToolExecutor)
 /// (which needs an owned handle per `spawn_blocking`) work
 /// without `unsafe` casts.
 ///
@@ -22,19 +22,19 @@ use std::sync::Arc;
 /// owns the registry and the dispatcher; the per-call context only
 /// exposes the services a tool actually needs. This breaks the
 /// implicit context ↔ registry cycle the previous design had.
-pub struct ToolCacheExt(pub std::sync::Arc<crate::agent::tools::registry::cache::ToolCache>);
+pub struct ToolCacheExt(pub std::sync::Arc<crate::tools::registry::cache::ToolCache>);
 pub struct UuidGeneratorExt(pub std::sync::Arc<dyn crate::utils::uuid::UuidGenerator>);
 
 #[derive(Clone)]
 pub struct ToolContext {
     pub config: Arc<AgentConfig>,
-    pub extensions: crate::agent::tools::extensions::Extensions,
+    pub extensions: crate::tools::extensions::Extensions,
 }
 
 impl ToolContext {
-    pub fn vfs(&self) -> std::sync::Arc<dyn crate::agent::tools::vfs::VirtualFileSystem> {
+    pub fn vfs(&self) -> std::sync::Arc<dyn crate::tools::vfs::VirtualFileSystem> {
         self.extensions
-            .get::<crate::agent::tools::vfs::VirtualFileSystemExt>()
+            .get::<crate::tools::vfs::VirtualFileSystemExt>()
             .expect("VFS not injected")
             .0
             .clone()
@@ -54,7 +54,7 @@ impl ToolContext {
         self.vfs().resolve_writable(vpath)
     }
 
-    pub fn cache(&self) -> std::sync::Arc<crate::agent::tools::registry::cache::ToolCache> {
+    pub fn cache(&self) -> std::sync::Arc<crate::tools::registry::cache::ToolCache> {
         self.extensions
             .get::<ToolCacheExt>()
             .expect("ToolCache not injected")
@@ -71,16 +71,14 @@ impl ToolContext {
     }
 
     /// Publish a file event to the file event bus.
-    pub fn file_observer(
-        &self,
-    ) -> std::sync::Arc<dyn crate::agent::tools::observer::OnFileChanged> {
+    pub fn file_observer(&self) -> std::sync::Arc<dyn crate::tools::observer::OnFileChanged> {
         if let Some(ext) = self
             .extensions
-            .get::<crate::agent::tools::observer::OnFileChangedExt>()
+            .get::<crate::tools::observer::OnFileChangedExt>()
         {
             ext.0.clone()
         } else {
-            std::sync::Arc::new(crate::agent::tools::observer::DefaultFileObserver)
+            std::sync::Arc::new(crate::tools::observer::DefaultFileObserver)
         }
     }
 
@@ -92,7 +90,7 @@ impl ToolContext {
     pub fn check_write_allowed(&self, path: &Path) -> Result<(), String> {
         if let Some(ext) = self
             .extensions
-            .get::<crate::agent::tools::policy::ToolCallPolicyExt>()
+            .get::<crate::tools::policy::ToolCallPolicyExt>()
         {
             ext.0.check_write_allowed(path)
         } else {
@@ -119,30 +117,28 @@ const _: fn() = || {
 
 pub struct ToolContextBuilder {
     config: Arc<AgentConfig>,
-    file_observer: std::sync::Arc<dyn crate::agent::tools::observer::OnFileChanged>,
-    extensions: crate::agent::tools::extensions::Extensions,
+    file_observer: std::sync::Arc<dyn crate::tools::observer::OnFileChanged>,
+    extensions: crate::tools::extensions::Extensions,
 }
 
 impl ToolContextBuilder {
     pub fn new(
         config: Arc<AgentConfig>,
-        file_observer: std::sync::Arc<dyn crate::agent::tools::observer::OnFileChanged>,
+        file_observer: std::sync::Arc<dyn crate::tools::observer::OnFileChanged>,
     ) -> Self {
         Self {
             config,
             file_observer,
-            extensions: crate::agent::tools::extensions::Extensions::default(),
+            extensions: crate::tools::extensions::Extensions::default(),
         }
     }
 
     pub fn with_tool_call_policy(
         mut self,
-        policy: std::sync::Arc<dyn crate::agent::tools::policy::ToolCallPolicy>,
+        policy: std::sync::Arc<dyn crate::tools::policy::ToolCallPolicy>,
     ) -> Self {
         self.extensions
-            .insert(Arc::new(crate::agent::tools::policy::ToolCallPolicyExt(
-                policy,
-            )));
+            .insert(Arc::new(crate::tools::policy::ToolCallPolicyExt(policy)));
         self
     }
 
@@ -153,27 +149,27 @@ impl ToolContextBuilder {
 
     pub fn build(self) -> ToolContext {
         let mut extensions = self.extensions;
-        extensions.insert(Arc::new(crate::agent::tools::observer::OnFileChangedExt(
+        extensions.insert(Arc::new(crate::tools::observer::OnFileChangedExt(
             self.file_observer.clone(),
         )));
 
         if extensions
-            .get::<crate::agent::tools::vfs::VirtualFileSystemExt>()
+            .get::<crate::tools::vfs::VirtualFileSystemExt>()
             .is_none()
         {
             extensions.insert(std::sync::Arc::new(
-                crate::agent::tools::vfs::VirtualFileSystemExt(std::sync::Arc::new(
-                    crate::agent::tools::vfs::VfsResolver::new(self.config.clone()),
+                crate::tools::vfs::VirtualFileSystemExt(std::sync::Arc::new(
+                    crate::tools::vfs::VfsResolver::new(self.config.clone()),
                 )),
             ));
         }
         if extensions
-            .get::<crate::agent::tools::policy::ToolCallPolicyExt>()
+            .get::<crate::tools::policy::ToolCallPolicyExt>()
             .is_none()
         {
-            extensions.insert(Arc::new(crate::agent::tools::policy::ToolCallPolicyExt(
-                Arc::new(crate::agent::tools::policy::DefaultToolCallPolicy),
-            )));
+            extensions.insert(Arc::new(crate::tools::policy::ToolCallPolicyExt(Arc::new(
+                crate::tools::policy::DefaultToolCallPolicy,
+            ))));
         }
 
         ToolContext {

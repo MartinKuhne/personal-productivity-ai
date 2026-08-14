@@ -2,15 +2,15 @@
 
 use super::*;
 
-fn test_ctx() -> crate::agent::tools::context::ToolContext {
-    let config = crate::agent::config::AgentConfig::default();
-    let mut builder = crate::agent::tools::context::ToolContextBuilder::new(
+fn test_ctx() -> crate::tools::context::ToolContext {
+    let config = crate::config::AgentConfig::default();
+    let mut builder = crate::tools::context::ToolContextBuilder::new(
         std::sync::Arc::new(config.clone()),
-        std::sync::Arc::new(crate::agent::tools::observer::DefaultFileObserver),
+        std::sync::Arc::new(crate::tools::observer::DefaultFileObserver),
     );
     builder = builder.with_extension(std::sync::Arc::new(
-        crate::agent::tools::vfs::VirtualFileSystemExt(std::sync::Arc::new(
-            crate::agent::tools::vfs::VfsResolver::new(std::sync::Arc::new(config.clone())),
+        crate::tools::vfs::VirtualFileSystemExt(std::sync::Arc::new(
+            crate::tools::vfs::VfsResolver::new(std::sync::Arc::new(config.clone())),
         )),
     ));
     builder.build()
@@ -19,8 +19,8 @@ fn test_ctx() -> crate::agent::tools::context::ToolContext {
 /// A producer that publishes to a throwaway bus. Tests don't
 /// need to consume the events — they only care about the
 /// success/failure of the underlying file operation.
-fn noop_producer() -> std::sync::Arc<dyn crate::agent::tools::observer::OnFileChanged> {
-    std::sync::Arc::new(crate::agent::tools::observer::DefaultFileObserver)
+fn noop_producer() -> std::sync::Arc<dyn crate::tools::observer::OnFileChanged> {
+    std::sync::Arc::new(crate::tools::observer::DefaultFileObserver)
 }
 
 #[test]

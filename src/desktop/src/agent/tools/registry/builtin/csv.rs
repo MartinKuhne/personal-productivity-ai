@@ -1,9 +1,9 @@
 //! CSV database tool implementations and provider for the tool registry.
 
-use crate::agent::tools::Tool;
-use crate::agent::tools::context::ToolContext;
-use crate::agent::tools::provider::{RegisteredTool, ToolProvider};
-use crate::agent::tools::registry::groups::{InternalToolGroup, ToolGroupId};
+use crate::tools::Tool;
+use crate::tools::context::ToolContext;
+use crate::tools::provider::{RegisteredTool, ToolProvider};
+use crate::tools::registry::groups::{InternalToolGroup, ToolGroupId};
 use fastmd_tool_macros::ToolDescriptor;
 use std::sync::Arc;
 
@@ -14,10 +14,10 @@ use super::strings;
 #[tool(
     name = "create_csv",
     desc = strings::CREATE_CSV_DESCRIPTION,
-    input = crate::agent::tools::csv_db::schema::CreateCsvInput,
-    safety = crate::agent::tools::Safety::Mutating,
+    input = crate::tools::csv_db::schema::CreateCsvInput,
+    safety = crate::tools::Safety::Mutating,
     group = CsvDb,
-    config = crate::app::batch::prompt_rules::csv_prompt_rule(),
+    config = crate::tools::specs::csv_prompt_rule(),
     execute_with = execute_create_csv,
 )]
 pub(crate) struct CsvCreateTool;
@@ -26,9 +26,9 @@ fn execute_create_csv(
     ctx: &ToolContext,
     args: &str,
 ) -> Result<serde_json::Value, String> {
-    let input: crate::agent::tools::csv_db::schema::CreateCsvInput =
+    let input: crate::tools::csv_db::schema::CreateCsvInput =
         serde_json::from_str(args).map_err(|e| format!("Invalid args: {}", e))?;
-    crate::agent::tools::csv_db::operations::create_csv(ctx, input).map(|r| {
+    crate::tools::csv_db::operations::create_csv(ctx, input).map(|r| {
         serde_json::to_value(r).unwrap_or_else(|e| serde_json::json!({"error": e.to_string()}))
     })
 }
@@ -38,10 +38,10 @@ fn execute_create_csv(
 #[tool(
     name = "list_csv",
     desc = strings::LIST_CSV_DESCRIPTION,
-    input = crate::agent::tools::csv_db::schema::ListCsvInput,
-    safety = crate::agent::tools::Safety::ReadOnly,
+    input = crate::tools::csv_db::schema::ListCsvInput,
+    safety = crate::tools::Safety::ReadOnly,
     group = CsvDb,
-    config = crate::app::batch::prompt_rules::csv_prompt_rule(),
+    config = crate::tools::specs::csv_prompt_rule(),
     execute_with = execute_list_csv,
 )]
 pub(crate) struct CsvListTool;
@@ -50,9 +50,9 @@ fn execute_list_csv(
     ctx: &ToolContext,
     args: &str,
 ) -> Result<serde_json::Value, String> {
-    let input: crate::agent::tools::csv_db::schema::ListCsvInput =
+    let input: crate::tools::csv_db::schema::ListCsvInput =
         serde_json::from_str(args).map_err(|e| format!("Invalid args: {}", e))?;
-    crate::agent::tools::csv_db::operations::list_csv(ctx, input).map(|r| {
+    crate::tools::csv_db::operations::list_csv(ctx, input).map(|r| {
         serde_json::to_value(r).unwrap_or_else(|e| serde_json::json!({"error": e.to_string()}))
     })
 }
@@ -62,10 +62,10 @@ fn execute_list_csv(
 #[tool(
     name = "add_rows",
     desc = strings::ADD_ROWS_DESCRIPTION,
-    input = crate::agent::tools::csv_db::schema::AddRowsInput,
-    safety = crate::agent::tools::Safety::Mutating,
+    input = crate::tools::csv_db::schema::AddRowsInput,
+    safety = crate::tools::Safety::Mutating,
     group = CsvDb,
-    config = crate::app::batch::prompt_rules::csv_prompt_rule(),
+    config = crate::tools::specs::csv_prompt_rule(),
     execute_with = execute_add_rows,
 )]
 pub(crate) struct CsvAddRowsTool;
@@ -74,9 +74,9 @@ fn execute_add_rows(
     ctx: &ToolContext,
     args: &str,
 ) -> Result<serde_json::Value, String> {
-    let input: crate::agent::tools::csv_db::schema::AddRowsInput =
+    let input: crate::tools::csv_db::schema::AddRowsInput =
         serde_json::from_str(args).map_err(|e| format!("Invalid args: {}", e))?;
-    crate::agent::tools::csv_db::operations::add_rows(ctx, input).map(|r| {
+    crate::tools::csv_db::operations::add_rows(ctx, input).map(|r| {
         serde_json::to_value(r).unwrap_or_else(|e| serde_json::json!({"error": e.to_string()}))
     })
 }
@@ -86,10 +86,10 @@ fn execute_add_rows(
 #[tool(
     name = "delete_rows",
     desc = strings::DELETE_ROWS_DESCRIPTION,
-    input = crate::agent::tools::csv_db::schema::DeleteRowsInput,
-    safety = crate::agent::tools::Safety::Mutating,
+    input = crate::tools::csv_db::schema::DeleteRowsInput,
+    safety = crate::tools::Safety::Mutating,
     group = CsvDb,
-    config = crate::app::batch::prompt_rules::csv_prompt_rule(),
+    config = crate::tools::specs::csv_prompt_rule(),
     execute_with = execute_delete_rows,
 )]
 pub(crate) struct CsvDeleteRowsTool;
@@ -98,9 +98,9 @@ fn execute_delete_rows(
     ctx: &ToolContext,
     args: &str,
 ) -> Result<serde_json::Value, String> {
-    let input: crate::agent::tools::csv_db::schema::DeleteRowsInput =
+    let input: crate::tools::csv_db::schema::DeleteRowsInput =
         serde_json::from_str(args).map_err(|e| format!("Invalid args: {}", e))?;
-    crate::agent::tools::csv_db::query::delete_rows(ctx, input).map(|r| {
+    crate::tools::csv_db::query::delete_rows(ctx, input).map(|r| {
         serde_json::to_value(r).unwrap_or_else(|e| serde_json::json!({"error": e.to_string()}))
     })
 }
@@ -110,10 +110,10 @@ fn execute_delete_rows(
 #[tool(
     name = "query",
     desc = strings::QUERY_DESCRIPTION,
-    input = crate::agent::tools::csv_db::schema::QueryRequest,
-    safety = crate::agent::tools::Safety::ReadOnly,
+    input = crate::tools::csv_db::schema::QueryRequest,
+    safety = crate::tools::Safety::ReadOnly,
     group = CsvDb,
-    config = crate::app::batch::prompt_rules::csv_prompt_rule(),
+    config = crate::tools::specs::csv_prompt_rule(),
     execute_with = execute_query,
 )]
 pub(crate) struct CsvQueryTool;
@@ -122,9 +122,9 @@ fn execute_query(
     ctx: &ToolContext,
     args: &str,
 ) -> Result<serde_json::Value, String> {
-    let input: crate::agent::tools::csv_db::schema::QueryRequest =
+    let input: crate::tools::csv_db::schema::QueryRequest =
         serde_json::from_str(args).map_err(|e| format!("Invalid args: {}", e))?;
-    crate::agent::tools::csv_db::query::query_csv(ctx, input).map(|r| {
+    crate::tools::csv_db::query::query_csv(ctx, input).map(|r| {
         serde_json::to_value(r).unwrap_or_else(|e| serde_json::json!({"error": e.to_string()}))
     })
 }

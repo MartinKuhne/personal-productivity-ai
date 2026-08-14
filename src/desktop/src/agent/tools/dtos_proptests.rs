@@ -37,7 +37,7 @@
 //! regressions in less-common shapes but small enough that the entire
 //! sidecar finishes in well under 5 seconds.
 
-use crate::agent::tools::dtos::*;
+use crate::tools::dtos::*;
 use proptest::prelude::*;
 use serde_json::Value;
 

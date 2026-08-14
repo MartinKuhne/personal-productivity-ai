@@ -46,18 +46,16 @@
 use super::super::operations::{add_rows, create_csv};
 use super::super::query::{delete_rows, query_csv};
 use super::super::schema::{AddRowsInput, CreateCsvInput, DeleteRowsInput, QueryRequest};
-use crate::agent::config::AgentConfig;
+use crate::config::AgentConfig;
 
-fn test_ctx(
-    config: &crate::agent::config::AgentConfig,
-) -> crate::agent::tools::context::ToolContext {
-    let mut builder = crate::agent::tools::context::ToolContextBuilder::new(
+fn test_ctx(config: &crate::config::AgentConfig) -> crate::tools::context::ToolContext {
+    let mut builder = crate::tools::context::ToolContextBuilder::new(
         std::sync::Arc::new(config.clone()),
-        std::sync::Arc::new(crate::agent::tools::observer::DefaultFileObserver),
+        std::sync::Arc::new(crate::tools::observer::DefaultFileObserver),
     );
     builder = builder.with_extension(std::sync::Arc::new(
-        crate::agent::tools::vfs::VirtualFileSystemExt(std::sync::Arc::new(
-            crate::agent::tools::vfs::VfsResolver::new(std::sync::Arc::new(config.clone())),
+        crate::tools::vfs::VirtualFileSystemExt(std::sync::Arc::new(
+            crate::tools::vfs::VfsResolver::new(std::sync::Arc::new(config.clone())),
         )),
     ));
     builder.build()

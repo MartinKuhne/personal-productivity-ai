@@ -1,12 +1,12 @@
 //! Top-level agent orchestration — sends requests, executes tool calls, and streams results back to the UI.
 
-use crate::agent::context::AgentContext;
-use crate::agent::datamark;
-use crate::agent::events::{
+use crate::context::AgentContext;
+use crate::datamark;
+use crate::events::{
     AgentDebugEntry, AgentEventObserver, AgentStatus, DebugEntryKind, DebugEntryRow,
 };
-use crate::agent::llm_client::{LLMClient, parse_usage_block};
-use crate::agent::tool_executor::ToolExecutor;
+use crate::llm_client::{LLMClient, parse_usage_block};
+use crate::tool_executor::ToolExecutor;
 use std::collections::HashSet;
 use std::path::PathBuf;
 use std::sync::atomic::Ordering;
@@ -38,7 +38,7 @@ fn run_agent_inner(ctx: AgentContext) {
         .load()
         .registry
         .get_schema(&ctx.agent_config, &ctx.prompt);
-    let executor = crate::agent::tool_executor::ToolExecutorBuilder::new(
+    let executor = crate::tool_executor::ToolExecutorBuilder::new(
         std::sync::Arc::new(ctx.agent_config.clone()),
         ctx.file_observer.clone(),
         ctx.cache.clone(),

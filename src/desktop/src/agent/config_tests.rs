@@ -1,8 +1,7 @@
-//! Unit tests for the `AgentConfig` projection and builder.
-use crate::config::AppConfig;
+//! Unit tests for the `AgentConfig` builder and defaults.
 
 use super::*;
-use crate::config::{ContentLibrary, LlmConfig, McpServerConfig, McpServerEntry, ToolGroupsConfig};
+use crate::config::{LlmConfig, McpServerConfig, McpServerEntry, ToolGroupsConfig};
 use std::collections::HashMap;
 use std::path::PathBuf;
 
@@ -28,99 +27,11 @@ fn sample_mcp_entry() -> McpServerEntry {
 }
 
 #[test]
-fn test_from_app_config_projects_models() {
-    let mut cfg = AppConfig::default();
-    cfg.models.insert("a".to_string(), sample_lc());
-    let agent_cfg = cfg.to_agent_config();
-    assert_eq!(agent_cfg.models().len(), 1);
-    assert!(agent_cfg.models().contains_key("a"));
-}
-
-#[test]
-fn test_from_app_config_projects_max_tokens() {
-    let cfg = AppConfig {
-        max_tokens: 4096,
-        ..AppConfig::default()
-    };
-    let agent_cfg = cfg.to_agent_config();
-    assert_eq!(agent_cfg.max_tokens(), 4096);
-}
-
-#[test]
-fn test_from_app_config_projects_tool_groups() {
-    let cfg = AppConfig::default();
-    let agent_cfg = cfg.to_agent_config();
-    let expected = cfg.tool_groups.clone();
-    assert_eq!(*agent_cfg.tool_groups(), expected);
-}
-
-#[test]
-fn test_from_app_config_projects_mcp_servers() {
-    let mut cfg = AppConfig::default();
-    cfg.mcp_servers.insert("s1".to_string(), sample_mcp_entry());
-    let agent_cfg = cfg.to_agent_config();
-    assert_eq!(agent_cfg.mcp_servers().len(), 1);
-    assert!(agent_cfg.mcp_servers().contains_key("s1"));
-}
-
-#[test]
-fn test_from_app_config_resolves_browser_config() {
-    let cfg = AppConfig::default();
-    let agent_cfg = cfg.to_agent_config();
-    // The default browser config must end up resolved (no empty path strings).
-    assert!(!agent_cfg.browser().screenshot_dir.as_os_str().is_empty());
-    assert!(
-        !agent_cfg
-            .browser()
-            .storage_state_path
-            .as_os_str()
-            .is_empty()
-    );
-}
-
-#[test]
-fn test_from_app_config_captures_config_path() {
-    let cfg = AppConfig::default();
-    let agent_cfg = cfg.to_agent_config();
-    let expected = crate::config::get_config_path();
-    assert_eq!(agent_cfg.config_path(), expected.as_path());
-}
-
-#[test]
-fn test_from_app_config_drops_user_and_content_fields() {
-    // User fields and content_libraries are intentionally not in
-    // AgentConfig — prompt construction lives in
-    // `crate::app::prompts::build_system_prompts`. The agent only
-    // consumes the pre-built prompt blocks.
-    let cfg = AppConfig {
-        user_name: Some("Alice".to_string()),
-        user_address: Some("addr".to_string()),
-        user_birthdate: Some("1990-01-01".to_string()),
-        user_gender: Some("female".to_string()),
-        system_prompt_extension: Some("Custom instructions.".to_string()),
-        content_libraries: vec![ContentLibrary {
-            root_folder: "/x".to_string(),
-            name: "x".to_string(),
-            kind: "k".to_string(),
-            readonly: true,
-            priority: 0,
-        }],
-        ..AppConfig::default()
-    };
-    let agent_cfg = cfg.to_agent_config();
-    // AgentConfig has no `user_*` / `system_prompt_extension` /
-    // `content_libraries` accessors. If the struct ever grows them, this
-    // test will fail to compile, which is the right trip-wire.
-    let _ = agent_cfg;
-}
-
-#[test]
-fn test_builder_new_matches_app_config_defaults() {
+fn test_builder_new_defaults() {
     let builder = AgentConfigBuilder::new();
     let agent_cfg = builder.build();
-    let app_defaults = AppConfig::default();
-    assert_eq!(agent_cfg.max_tokens(), app_defaults.max_tokens);
-    assert_eq!(*agent_cfg.tool_groups(), app_defaults.tool_groups);
+    assert_eq!(agent_cfg.max_tokens(), 32768);
+    assert_eq!(*agent_cfg.tool_groups(), ToolGroupsConfig::default());
     assert!(agent_cfg.models().is_empty());
     assert!(agent_cfg.mcp_servers().is_empty());
 }
@@ -194,14 +105,6 @@ fn test_default_agent_config_matches_builder_default() {
     assert_eq!(a.max_tokens(), b.max_tokens());
     assert_eq!(a.models(), b.models());
     assert_eq!(a.mcp_servers(), b.mcp_servers());
-}
-
-#[test]
-fn test_from_app_config_via_into() {
-    let mut cfg = AppConfig::default();
-    cfg.models.insert("a".to_string(), sample_lc());
-    let agent_cfg: AgentConfig = cfg.to_agent_config();
-    assert_eq!(agent_cfg.models().len(), 1);
 }
 
 #[test]

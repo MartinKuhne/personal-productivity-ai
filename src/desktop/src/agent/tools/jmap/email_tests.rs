@@ -1,4 +1,4 @@
-use crate::agent::config::AgentConfig;
+use crate::config::AgentConfig;
 // Tests for `jmap/email.rs`.
 
 use serde_json::json;
@@ -7,7 +7,7 @@ use super::{convert_html_in_jmap, simplify_jmap_emails};
 
 #[test]
 fn test_convert_html_plain_text_unchanged() {
-    let _cache = crate::agent::tools::registry::cache::ToolCache::new();
+    let _cache = crate::tools::registry::cache::ToolCache::new();
     let res = json!({
         "methodResponses": [[
             "Email/get",
@@ -31,7 +31,7 @@ fn test_convert_html_plain_text_unchanged() {
 
 #[test]
 fn test_convert_html_converts_simple_html() {
-    let _cache = crate::agent::tools::registry::cache::ToolCache::new();
+    let _cache = crate::tools::registry::cache::ToolCache::new();
     let res = json!({
         "methodResponses": [[
             "Email/get",
@@ -56,7 +56,7 @@ fn test_convert_html_converts_simple_html() {
 
 #[test]
 fn test_convert_html_multiple_body_parts() {
-    let _cache = crate::agent::tools::registry::cache::ToolCache::new();
+    let _cache = crate::tools::registry::cache::ToolCache::new();
     let res = json!({
         "methodResponses": [[
             "Email/get",
@@ -82,7 +82,7 @@ fn test_convert_html_multiple_body_parts() {
 
 #[test]
 fn test_convert_html_no_body_values() {
-    let _cache = crate::agent::tools::registry::cache::ToolCache::new();
+    let _cache = crate::tools::registry::cache::ToolCache::new();
     let res = json!({
         "methodResponses": [[
             "Email/get",
@@ -102,7 +102,7 @@ fn test_convert_html_no_body_values() {
 
 #[test]
 fn test_convert_html_empty_body_values() {
-    let _cache = crate::agent::tools::registry::cache::ToolCache::new();
+    let _cache = crate::tools::registry::cache::ToolCache::new();
     let res = json!({
         "methodResponses": [[
             "Email/get",
@@ -117,7 +117,7 @@ fn test_convert_html_empty_body_values() {
 
 #[test]
 fn test_convert_html_value_missing_angle_brackets_not_converted() {
-    let _cache = crate::agent::tools::registry::cache::ToolCache::new();
+    let _cache = crate::tools::registry::cache::ToolCache::new();
     let res = json!({
         "methodResponses": [[
             "Email/get",
@@ -141,7 +141,7 @@ fn test_convert_html_value_missing_angle_brackets_not_converted() {
 
 #[test]
 fn test_convert_html_non_string_value_not_converted() {
-    let _cache = crate::agent::tools::registry::cache::ToolCache::new();
+    let _cache = crate::tools::registry::cache::ToolCache::new();
     let res = json!({
         "methodResponses": [[
             "Email/get",
@@ -161,7 +161,7 @@ fn test_convert_html_non_string_value_not_converted() {
 
 #[test]
 fn test_simplify_empty_method_responses() {
-    let _cache = crate::agent::tools::registry::cache::ToolCache::new();
+    let _cache = crate::tools::registry::cache::ToolCache::new();
     let res = json!({ "methodResponses": [] });
     let result = simplify_jmap_emails(res, None);
     assert_eq!(result, json!([]));
@@ -169,7 +169,7 @@ fn test_simplify_empty_method_responses() {
 
 #[test]
 fn test_simplify_no_email_get_method() {
-    let _cache = crate::agent::tools::registry::cache::ToolCache::new();
+    let _cache = crate::tools::registry::cache::ToolCache::new();
     let res = json!({
         "methodResponses": [[
             "Contact/query", { "ids": [] }, "0"
@@ -181,7 +181,7 @@ fn test_simplify_no_email_get_method() {
 
 #[test]
 fn test_simplify_email_get_empty_list() {
-    let _cache = crate::agent::tools::registry::cache::ToolCache::new();
+    let _cache = crate::tools::registry::cache::ToolCache::new();
     let res = json!({
         "methodResponses": [[
             "Email/get",
@@ -195,7 +195,7 @@ fn test_simplify_email_get_empty_list() {
 
 #[test]
 fn test_simplify_single_email_html_body() {
-    let _cache = crate::agent::tools::registry::cache::ToolCache::new();
+    let _cache = crate::tools::registry::cache::ToolCache::new();
     let res = json!({
         "methodResponses": [[
             "Email/get",
@@ -229,7 +229,7 @@ fn test_simplify_single_email_html_body() {
 
 #[test]
 fn test_simplify_email_text_body_fallback() {
-    let _cache = crate::agent::tools::registry::cache::ToolCache::new();
+    let _cache = crate::tools::registry::cache::ToolCache::new();
     let res = json!({
         "methodResponses": [[
             "Email/get",
@@ -259,7 +259,7 @@ fn test_simplify_email_text_body_fallback() {
 
 #[test]
 fn test_simplify_multiple_emails() {
-    let _cache = crate::agent::tools::registry::cache::ToolCache::new();
+    let _cache = crate::tools::registry::cache::ToolCache::new();
     let res = json!({
         "methodResponses": [[
             "Email/get",
@@ -299,7 +299,7 @@ fn test_simplify_multiple_emails() {
 
 #[test]
 fn test_simplify_truncates_body_to_max_lines() {
-    let _cache = crate::agent::tools::registry::cache::ToolCache::new();
+    let _cache = crate::tools::registry::cache::ToolCache::new();
     let res = json!({
         "methodResponses": [[
             "Email/get",
@@ -327,7 +327,7 @@ fn test_simplify_truncates_body_to_max_lines() {
 
 #[test]
 fn test_simplify_truncated_body_appends_hint() {
-    let _cache = crate::agent::tools::registry::cache::ToolCache::new();
+    let _cache = crate::tools::registry::cache::ToolCache::new();
     let res = json!({
         "methodResponses": [[
             "Email/get",
@@ -354,7 +354,7 @@ fn test_simplify_truncated_body_appends_hint() {
 
 #[test]
 fn test_simplify_body_not_truncated_if_under_limit() {
-    let _cache = crate::agent::tools::registry::cache::ToolCache::new();
+    let _cache = crate::tools::registry::cache::ToolCache::new();
     let res = json!({
         "methodResponses": [[
             "Email/get",
@@ -382,7 +382,7 @@ fn test_simplify_body_not_truncated_if_under_limit() {
 
 #[test]
 fn test_simplify_handles_missing_optional_fields() {
-    let _cache = crate::agent::tools::registry::cache::ToolCache::new();
+    let _cache = crate::tools::registry::cache::ToolCache::new();
     let res = json!({
         "methodResponses": [[
             "Email/get",
@@ -405,7 +405,7 @@ fn test_simplify_handles_missing_optional_fields() {
 
 #[test]
 fn test_simplify_handles_server_truncated_body() {
-    let _cache = crate::agent::tools::registry::cache::ToolCache::new();
+    let _cache = crate::tools::registry::cache::ToolCache::new();
     let res = json!({
         "methodResponses": [[
             "Email/get",
@@ -432,7 +432,7 @@ fn test_simplify_handles_server_truncated_body() {
 
 #[test]
 fn test_simplify_cc_and_bcc_preserved() {
-    let _cache = crate::agent::tools::registry::cache::ToolCache::new();
+    let _cache = crate::tools::registry::cache::ToolCache::new();
     let res = json!({
         "methodResponses": [[
             "Email/get",
@@ -460,11 +460,11 @@ fn test_simplify_cc_and_bcc_preserved() {
 }
 
 use super::{SearchEmailFilters, tool_get_email_by_id, tool_search_email, tool_send_email};
-use crate::agent::tools::jmap::mock_server::{spawn_mock_server, spawn_recording_mock_server};
 use crate::config::JmapClient;
+use crate::tools::jmap::mock_server::{spawn_mock_server, spawn_recording_mock_server};
 #[test]
 fn test_tool_search_email_no_clients() {
-    let cache = crate::agent::tools::registry::cache::ToolCache::new();
+    let cache = crate::tools::registry::cache::ToolCache::new();
     let config = AgentConfig::default();
     let res = tool_search_email(
         &config,
@@ -481,7 +481,7 @@ fn test_tool_search_email_no_clients() {
 
 #[test]
 fn test_tool_search_email_success() {
-    let cache = crate::agent::tools::registry::cache::ToolCache::new();
+    let cache = crate::tools::registry::cache::ToolCache::new();
     rustls::crypto::ring::default_provider()
         .install_default()
         .ok();
@@ -517,7 +517,7 @@ fn test_tool_search_email_success() {
 
 #[test]
 fn test_tool_get_email_by_id_success() {
-    let _cache = crate::agent::tools::registry::cache::ToolCache::new();
+    let _cache = crate::tools::registry::cache::ToolCache::new();
     rustls::crypto::ring::default_provider()
         .install_default()
         .ok();
@@ -547,7 +547,7 @@ fn test_tool_get_email_by_id_success() {
 /// `bodyValues` (default `maxBodyValueBytes` is 0).
 #[test]
 fn test_tool_get_email_by_id_sends_body_value_args() {
-    let _cache = crate::agent::tools::registry::cache::ToolCache::new();
+    let _cache = crate::tools::registry::cache::ToolCache::new();
     rustls::crypto::ring::default_provider()
         .install_default()
         .ok();
@@ -594,7 +594,7 @@ fn test_tool_get_email_by_id_sends_body_value_args() {
 /// must surface the body content (not a silently empty string).
 #[test]
 fn test_tool_get_email_by_id_returns_body_content() {
-    let _cache = crate::agent::tools::registry::cache::ToolCache::new();
+    let _cache = crate::tools::registry::cache::ToolCache::new();
     rustls::crypto::ring::default_provider()
         .install_default()
         .ok();
@@ -631,7 +631,7 @@ fn test_tool_get_email_by_id_returns_body_content() {
 
 #[test]
 fn test_tool_search_email_with_status_filters_success() {
-    let cache = crate::agent::tools::registry::cache::ToolCache::new();
+    let cache = crate::tools::registry::cache::ToolCache::new();
     rustls::crypto::ring::default_provider()
         .install_default()
         .ok();
@@ -673,7 +673,7 @@ fn test_tool_search_email_with_status_filters_success() {
 
 #[test]
 fn test_tool_send_email_success() {
-    let _cache = crate::agent::tools::registry::cache::ToolCache::new();
+    let _cache = crate::tools::registry::cache::ToolCache::new();
     rustls::crypto::ring::default_provider()
         .install_default()
         .ok();
@@ -702,7 +702,7 @@ fn test_tool_send_email_success() {
 
 #[test]
 fn test_tool_send_email_ai_agent_footer() {
-    let _cache = crate::agent::tools::registry::cache::ToolCache::new();
+    let _cache = crate::tools::registry::cache::ToolCache::new();
     use super::AI_AGENT_FOOTER;
     assert_eq!(
         AI_AGENT_FOOTER,
@@ -712,7 +712,7 @@ fn test_tool_send_email_ai_agent_footer() {
 
 #[test]
 fn test_tool_search_email_empty_filters_errors() {
-    let cache = crate::agent::tools::registry::cache::ToolCache::new();
+    let cache = crate::tools::registry::cache::ToolCache::new();
     let config = AgentConfig::default();
     let res = tool_search_email(
         &config,
@@ -730,7 +730,7 @@ fn test_tool_search_email_empty_filters_errors() {
 
 #[test]
 fn test_tool_search_email_empty_filters_with_client_errors() {
-    let cache = crate::agent::tools::registry::cache::ToolCache::new();
+    let cache = crate::tools::registry::cache::ToolCache::new();
     rustls::crypto::ring::default_provider()
         .install_default()
         .ok();
@@ -762,7 +762,7 @@ fn test_tool_search_email_empty_filters_with_client_errors() {
 
 #[test]
 fn test_tool_search_email_first_call_small_set_returns_final_page_hint() {
-    let cache = crate::agent::tools::registry::cache::ToolCache::new();
+    let cache = crate::tools::registry::cache::ToolCache::new();
     rustls::crypto::ring::default_provider()
         .install_default()
         .ok();
@@ -821,7 +821,7 @@ fn test_tool_search_email_first_call_small_set_returns_final_page_hint() {
 
 #[test]
 fn test_tool_search_email_cursor_unknown_returns_error() {
-    let cache = crate::agent::tools::registry::cache::ToolCache::new();
+    let cache = crate::tools::registry::cache::ToolCache::new();
     rustls::crypto::ring::default_provider()
         .install_default()
         .ok();
@@ -876,7 +876,7 @@ fn test_tool_search_email_cursor_unknown_returns_error() {
 /// guard against the same shape of bug that broke `web_fetch`.
 #[test]
 fn test_tool_search_email_cursor_pagination() {
-    let cache = crate::agent::tools::registry::cache::ToolCache::new();
+    let cache = crate::tools::registry::cache::ToolCache::new();
     rustls::crypto::ring::default_provider()
         .install_default()
         .ok();
@@ -983,7 +983,7 @@ fn test_tool_search_email_cursor_pagination() {
 
 #[test]
 fn test_tool_search_email_pagination_hint_on_final_page() {
-    let cache = crate::agent::tools::registry::cache::ToolCache::new();
+    let cache = crate::tools::registry::cache::ToolCache::new();
     // When the first call returns a result set that fits entirely
     // on one page (here, total = 1, page size = 100), the
     // response omits `cursor` and sets `hint` to
@@ -1042,7 +1042,7 @@ fn test_tool_search_email_pagination_hint_on_final_page() {
 
 #[test]
 fn test_tool_search_email_multiple_clients() {
-    let cache = crate::agent::tools::registry::cache::ToolCache::new();
+    let cache = crate::tools::registry::cache::ToolCache::new();
     rustls::crypto::ring::default_provider()
         .install_default()
         .ok();
@@ -1095,7 +1095,7 @@ fn test_tool_search_email_multiple_clients() {
 
 #[test]
 fn test_tool_search_email_logs_tracing() {
-    let cache = crate::agent::tools::registry::cache::ToolCache::new();
+    let cache = crate::tools::registry::cache::ToolCache::new();
     rustls::crypto::ring::default_provider()
         .install_default()
         .ok();

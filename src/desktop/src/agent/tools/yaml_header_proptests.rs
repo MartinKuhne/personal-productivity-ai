@@ -35,7 +35,7 @@
 //!    against a future regression that loosens the
 //!    "matching closing fence" rule.
 
-use crate::markdown::Document;
+use crate::utils::markdown::parse_front_matter;
 use proptest::prelude::*;
 
 /// Strategy: a single frontmatter key/value pair. Keys are
@@ -57,7 +57,7 @@ proptest! {
     #![proptest_config(ProptestConfig::with_cases(256))]
 
     /// Property 1: panic-freedom on any random byte string.
-    /// `Document::new(bytes).front_matter()` must return `None`
+    /// `parse_front_matter(bytes)` must return `None`
     /// or `Some(...)`; it must never panic. The byte string
     /// is constrained to valid UTF-8 (the parser is a UTF-8
     /// parser; non-UTF-8 input is a different layer) but
@@ -68,16 +68,11 @@ proptest! {
     fn frontmatter_parser_never_panics_on_arbitrary_input(
         body in prop::string::string_regex(r"[\x20-\x7E\n]{0,200}").unwrap()
     ) {
-        let doc = Document::new(body);
-        // The contract is "Result or Option, never panic".
-        // `front_matter` returns `Option<&FrontMatter>`; we
-        // don't care about the value, only that the call
-        // returns without unwinding.
-        let _ = doc.front_matter();
+        let _ = parse_front_matter(&body);
     }
 
     /// Property 2: a key/value frontmatter block round-trips
-    /// through `Document::new(content).front_matter()`. The
+    /// through `parse_front_matter(content)`. The
     /// key and value are arbitrary (within the printable-ASCII
     /// range); the test constructs a `---\n{key}: {value}\n---\n`
     /// block, parses it, and asserts the same key/value pair
@@ -88,22 +83,13 @@ proptest! {
         (key, value) in yaml_value_strategy()
     ) {
         let body = format!("---\n{key}: {value}\n---\nbody\n");
-        let doc = Document::new(body);
-        let fm = doc.front_matter().expect("frontmatter should parse");
+        let fm = parse_front_matter(&body).expect("frontmatter should parse");
         let v = fm.yaml.get(&key).expect("key should round-trip");
-        // The YAML emitter (serde_norway 0.9, YAML 1.2 strict)
-        // may tag the value as a string. We accept any scalar
-        // form whose string representation matches the input
-        // value — that is the "did the user get back what they
-        // wrote" contract.
         let s = v.as_str().map(String::from)
             .or_else(|| v.as_i64().map(|n| n.to_string()))
             .or_else(|| v.as_f64().map(|n| n.to_string()))
             .or_else(|| v.as_bool().map(|b| b.to_string()))
             .unwrap_or_default();
-        // `prop_assert_eq!`'s format string is a literal (it
-        // can't capture local variables) so the diagnostic
-        // message is built explicitly when the assertion fails.
         if s != value {
             prop_assert!(
                 false,
@@ -118,23 +104,15 @@ proptest! {
     /// Property 3: a frontmatter block without the closing
     /// `---` is NOT parsed as frontmatter. The parser treats
     /// the entire file (including the unclosed `---` line) as
-    /// body. This is the spec behaviour; the proptest guards
-    /// against a future regression that silently accepts an
-    /// unclosed frontmatter (which would mean a user types
-    /// `---\ntitle: foo` at the top of a note and the parser
-    /// treats the rest of the file as YAML — a data-loss
-    /// scenario where the rest of the file is then dropped on
-    /// the next `write_yaml_header`).
+    /// body.
     #[test]
     fn unclosed_frontmatter_is_not_parsed_as_frontmatter(
         (key, value) in yaml_value_strategy()
     ) {
         let body = format!("---\n{key}: {value}\nthis is body, not yaml\n");
-        let doc = Document::new(body);
         prop_assert!(
-            doc.front_matter().is_none(),
-            "unclosed frontmatter should be ignored; got: {:?}",
-            doc.front_matter().map(|fm| format!("{:?}", fm.yaml))
+            parse_front_matter(&body).is_none(),
+            "unclosed frontmatter should be ignored"
         );
     }
 }

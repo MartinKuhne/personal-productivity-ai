@@ -1,11 +1,11 @@
 //! Filesystem tool implementations and provider for the tool registry.
 
-use crate::agent::tools::Tool;
-use crate::agent::tools::context::ToolContext;
-use crate::agent::tools::dtos;
-use crate::agent::tools::provider::{RegisteredTool, ToolProvider};
-use crate::agent::tools::registry::groups::{InternalToolGroup, ToolGroupId};
-use crate::app::vfs::behaviour::ContentLibraryExt;
+use crate::config::ContentLibraryExt;
+use crate::tools::Tool;
+use crate::tools::context::ToolContext;
+use crate::tools::dtos;
+use crate::tools::provider::{RegisteredTool, ToolProvider};
+use crate::tools::registry::groups::{InternalToolGroup, ToolGroupId};
 use fastmd_tool_macros::ToolDescriptor;
 use std::sync::Arc;
 
@@ -24,7 +24,7 @@ const DEFAULT_WINDOW_NOTE_LIMIT: usize = 100;
     name = "patch_note",
     desc = strings::PATCH_NOTE_DESCRIPTION,
     input = dtos::PatchNoteInput,
-    safety = crate::agent::tools::Safety::Mutating,
+    safety = crate::tools::Safety::Mutating,
     group = Filesystem,
     execute_with = execute_patch_note,
 )]
@@ -39,7 +39,7 @@ fn execute_patch_note(
     let path = ctx.resolve_writable(&input.path)?;
     ctx.check_write_allowed(&path)?;
     let observer = ctx.file_observer();
-    crate::agent::tools::filesystem::tool_patch_note(
+    crate::tools::filesystem::tool_patch_note(
         ctx,
         &path.to_string_lossy(),
         &input.old_string,
@@ -57,7 +57,7 @@ fn execute_patch_note(
     name = "search_notes",
     desc = strings::SEARCH_NOTES_DESCRIPTION,
     input = dtos::SearchNotesInput,
-    safety = crate::agent::tools::Safety::ReadOnly,
+    safety = crate::tools::Safety::ReadOnly,
     group = Filesystem,
     execute_with = execute_search_notes,
 )]
@@ -73,7 +73,7 @@ fn execute_search_notes(
     let mut libs: Vec<_> = ctx.config.content_libraries().iter().collect();
     libs.sort_by_key(|b| std::cmp::Reverse(b.priority));
     for lib in libs {
-        if let Ok(mut matches) = crate::agent::tools::filesystem::tool_search_notes(
+        if let Ok(mut matches) = crate::tools::filesystem::tool_search_notes(
             ctx,
             &lib.root_path(),
             &lib.name,
@@ -83,7 +83,7 @@ fn execute_search_notes(
         }
     }
     let total = all_matches.len();
-    let limit = crate::agent::tools::filesystem::DEFAULT_SEARCH_NOTES_MAX_RESULTS;
+    let limit = crate::tools::filesystem::DEFAULT_SEARCH_NOTES_MAX_RESULTS;
     let truncated = total > limit;
     all_matches.truncate(limit);
     if truncated {
@@ -110,7 +110,7 @@ fn execute_search_notes(
     name = "read_tags",
     desc = strings::READ_TAGS_DESCRIPTION,
     input = dtos::ReadTagsInput,
-    safety = crate::agent::tools::Safety::ReadOnly,
+    safety = crate::tools::Safety::ReadOnly,
     group = Filesystem,
     execute_with = execute_read_tags,
 )]
@@ -124,7 +124,7 @@ fn execute_read_tags(
         serde_json::from_str(args).map_err(|e| format!("Invalid args: {}", e))?;
     let mut all_tags = std::collections::BTreeSet::new();
     for lib in ctx.config.content_libraries() {
-        if let Ok(res) = crate::agent::tools::filesystem::tool_read_tags(ctx, &lib.root_path()) {
+        if let Ok(res) = crate::tools::filesystem::tool_read_tags(ctx, &lib.root_path()) {
             for tag in res.tags {
                 all_tags.insert(tag);
             }
@@ -142,7 +142,7 @@ fn execute_read_tags(
     name = "list_notes_by_tag",
     desc = strings::LIST_NOTES_BY_TAG_DESCRIPTION,
     input = dtos::ListNotesByTagInput,
-    safety = crate::agent::tools::Safety::ReadOnly,
+    safety = crate::tools::Safety::ReadOnly,
     group = Filesystem,
     execute_with = execute_list_notes_by_tag,
 )]
@@ -160,7 +160,7 @@ fn execute_list_notes_by_tag(
         .unwrap_or(super::super::pagination::DEFAULT_LIST_NOTES_BY_TAG_LIMIT);
     let mut all_matches: Vec<String> = Vec::new();
     for lib in ctx.config.content_libraries() {
-        match crate::agent::tools::filesystem::tool_list_notes_by_tag(
+        match crate::tools::filesystem::tool_list_notes_by_tag(
             ctx,
             &lib.root_path(),
             &lib.name,
@@ -190,7 +190,7 @@ fn execute_list_notes_by_tag(
     name = "list_notes",
     desc = strings::LIST_NOTES_DESCRIPTION,
     input = dtos::ListNotesInput,
-    safety = crate::agent::tools::Safety::ReadOnly,
+    safety = crate::tools::Safety::ReadOnly,
     group = Filesystem,
     execute_with = execute_list_notes,
 )]
@@ -207,9 +207,7 @@ fn execute_list_notes(
         .limit
         .unwrap_or(super::super::pagination::DEFAULT_LIST_NOTES_BY_TAG_LIMIT);
     let all_matches: Vec<String> = match ctx.resolve_virtual_path(&input.path, false)? {
-        Some((path, _)) => {
-            crate::agent::tools::filesystem::tool_list_notes(ctx, &path, &input.path)?
-        }
+        Some((path, _)) => crate::tools::filesystem::tool_list_notes(ctx, &path, &input.path)?,
         None => {
             let mut libs: Vec<String> = ctx
                 .config
@@ -242,7 +240,7 @@ fn execute_list_notes(
     name = "read_note",
     desc = strings::READ_NOTE_DESCRIPTION,
     input = dtos::ReadNoteInput,
-    safety = crate::agent::tools::Safety::ReadOnly,
+    safety = crate::tools::Safety::ReadOnly,
     group = Filesystem,
     execute_with = execute_read_note,
 )]
@@ -257,7 +255,7 @@ fn execute_read_note(
     let (path, _) = ctx
         .resolve_virtual_path(&input.path, false)?
         .ok_or_else(|| "Cannot perform this operation on the virtual root".to_string())?;
-    crate::agent::tools::filesystem::tool_read_note(ctx, &path.to_string_lossy()).map(|r| {
+    crate::tools::filesystem::tool_read_note(ctx, &path.to_string_lossy()).map(|r| {
         serde_json::to_value(r).unwrap_or_else(|e| serde_json::json!({"error": e.to_string()}))
     })
 }
@@ -268,7 +266,7 @@ fn execute_read_note(
     name = "window_note",
     desc = strings::WINDOW_NOTE_DESCRIPTION,
     input = dtos::WindowNoteInput,
-    safety = crate::agent::tools::Safety::ReadOnly,
+    safety = crate::tools::Safety::ReadOnly,
     group = Filesystem,
     execute_with = execute_window_note,
 )]
@@ -285,10 +283,9 @@ fn execute_window_note(
         .ok_or_else(|| "Cannot perform this operation on the virtual root".to_string())?;
     let offset = input.offset.unwrap_or(0);
     let limit = input.limit.unwrap_or(DEFAULT_WINDOW_NOTE_LIMIT);
-    crate::agent::tools::filesystem::tool_window_note(ctx, &path.to_string_lossy(), offset, limit)
-        .map(|r| {
-            serde_json::to_value(r).unwrap_or_else(|e| serde_json::json!({"error": e.to_string()}))
-        })
+    crate::tools::filesystem::tool_window_note(ctx, &path.to_string_lossy(), offset, limit).map(
+        |r| serde_json::to_value(r).unwrap_or_else(|e| serde_json::json!({"error": e.to_string()})),
+    )
 }
 
 /// Tool that creates a new file.
@@ -297,7 +294,7 @@ fn execute_window_note(
     name = "create_note",
     desc = strings::CREATE_NOTE_DESCRIPTION,
     input = dtos::CreateNoteInput,
-    safety = crate::agent::tools::Safety::Mutating,
+    safety = crate::tools::Safety::Mutating,
     group = Filesystem,
     execute_with = execute_create_note,
 )]
@@ -312,7 +309,7 @@ fn execute_create_note(
     let path = ctx.resolve_writable(&input.path)?;
     ctx.check_write_allowed(&path)?;
     let observer = ctx.file_observer();
-    crate::agent::tools::filesystem::tool_create_note(
+    crate::tools::filesystem::tool_create_note(
         ctx,
         &path.to_string_lossy(),
         &input.content,
@@ -329,7 +326,7 @@ fn execute_create_note(
     name = "insert_into_note",
     desc = strings::INSERT_INTO_NOTE_DESCRIPTION,
     input = dtos::InsertIntoNoteInput,
-    safety = crate::agent::tools::Safety::Mutating,
+    safety = crate::tools::Safety::Mutating,
     group = Filesystem,
     execute_with = execute_insert_into_note,
 )]
@@ -344,7 +341,7 @@ fn execute_insert_into_note(
     let path = ctx.resolve_writable(&input.path)?;
     ctx.check_write_allowed(&path)?;
     let observer = ctx.file_observer();
-    crate::agent::tools::filesystem::tool_insert_into_note(
+    crate::tools::filesystem::tool_insert_into_note(
         ctx,
         &path.to_string_lossy(),
         input.offset,

@@ -7,7 +7,6 @@ pub mod coordinator;
 pub mod discoverer;
 pub mod executor;
 pub mod file_matcher;
-pub mod prompt_rules;
 pub mod prompts;
 pub mod types;
 
@@ -18,6 +17,3 @@ pub use prompts::{discover_prompts, read_prompt_content, resolve_prompts};
 pub use types::{
     BatchConfig, BatchHandle, BatchJob, BatchJobStatus, BatchMode, BatchResult, PromptInfo,
 };
-
-#[cfg(test)]
-mod prompt_rules_tests;

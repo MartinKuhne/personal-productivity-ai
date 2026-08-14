@@ -14,7 +14,7 @@
 //!
 //! Unit tests live in the sibling `email_tests.rs` sidecar.
 
-use crate::agent::config::AgentConfig;
+use crate::config::AgentConfig;
 use fast_h2m::convert;
 use jmap_client::core::query::Filter as CoreFilter;
 use jmap_client::core::query::Filter as MailFilter;
@@ -23,7 +23,7 @@ use jmap_client::core::set::SetObject;
 use jmap_client::email::query::Filter;
 
 use super::client::JmapSession;
-use crate::agent::tools::registry::cache::{SearchEmailCacheEntry, SearchEmailItem};
+use crate::tools::registry::cache::{SearchEmailCacheEntry, SearchEmailItem};
 
 /// Maximum number of bytes the JMAP server should inline for a single body
 /// part in `bodyValues` (RFC 8621 §6.1.2 `maxBodyValueBytes`).
@@ -491,12 +491,10 @@ pub fn tool_search_email(
     config: &AgentConfig,
     filters: SearchEmailFilters<'_>,
     cursor: Option<String>,
-    cache: &crate::agent::tools::registry::cache::ToolCache,
+    cache: &crate::tools::registry::cache::ToolCache,
     uuid_gen: &dyn crate::utils::uuid::UuidGenerator,
-) -> Result<crate::agent::tools::dtos::SearchEmailResponse, String> {
-    use crate::agent::tools::registry::cache::{
-        CacheEntry, SearchEmailCacheEntry, SearchEmailItem,
-    };
+) -> Result<crate::tools::dtos::SearchEmailResponse, String> {
+    use crate::tools::registry::cache::{CacheEntry, SearchEmailCacheEntry, SearchEmailItem};
 
     // First call: query JMAP, populate the cache, return first page + cursor.
     let Some(cursor) = cursor else {
@@ -528,7 +526,7 @@ pub fn tool_search_email(
         // invalidate it before returning.
         if total == 0 {
             cache.invalidate(&new_cursor);
-            return Ok(crate::agent::tools::dtos::SearchEmailResponse {
+            return Ok(crate::tools::dtos::SearchEmailResponse {
                 results: "No matching emails found.".to_string(),
                 total: 0,
                 cursor: None,
@@ -552,7 +550,7 @@ pub fn tool_search_email(
         let first_refs: Vec<&SearchEmailItem> = first_page.iter().collect();
         let results = format_search_page(&first_refs, &entry.errors);
 
-        return Ok(crate::agent::tools::dtos::SearchEmailResponse {
+        return Ok(crate::tools::dtos::SearchEmailResponse {
             results,
             total,
             cursor: cursor_out,
@@ -605,7 +603,7 @@ pub fn tool_search_email(
         }),
     );
 
-    Ok(crate::agent::tools::dtos::SearchEmailResponse {
+    Ok(crate::tools::dtos::SearchEmailResponse {
         results,
         total,
         cursor: cursor_out,
@@ -617,7 +615,7 @@ pub fn tool_search_email(
 pub fn tool_get_email_by_id(
     config: &AgentConfig,
     id: &str,
-) -> Result<crate::agent::tools::dtos::GetEmailByIdResponse, String> {
+) -> Result<crate::tools::dtos::GetEmailByIdResponse, String> {
     for (name, client) in &config.jmap_clients {
         let session = match JmapSession::connect(client) {
             Ok(s) => s,
@@ -630,7 +628,7 @@ pub fn tool_get_email_by_id(
         match email_get_full(&session, id) {
             Ok(Some(mut email)) => {
                 let email_json = simplify_email(&mut email, None);
-                return Ok(crate::agent::tools::dtos::GetEmailByIdResponse {
+                return Ok(crate::tools::dtos::GetEmailByIdResponse {
                     result: serde_json::to_string_pretty(&email_json).unwrap_or_default(),
                 });
             }
@@ -656,7 +654,7 @@ pub fn tool_send_email(
     to: &str,
     subject: &str,
     body: &str,
-) -> Result<crate::agent::tools::dtos::SendEmailResponse, String> {
+) -> Result<crate::tools::dtos::SendEmailResponse, String> {
     let mut all_results = Vec::new();
     if let Some((name, client)) = config.jmap_clients.iter().next() {
         let mut session = match JmapSession::connect(client) {
@@ -737,7 +735,7 @@ pub fn tool_send_email(
         );
         Err("No JMAP clients configured.".to_string())
     } else {
-        Ok(crate::agent::tools::dtos::SendEmailResponse {
+        Ok(crate::tools::dtos::SendEmailResponse {
             result: all_results.join("\n\n"),
         })
     }

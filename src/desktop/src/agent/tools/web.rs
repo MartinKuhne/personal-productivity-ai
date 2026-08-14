@@ -2,11 +2,11 @@
 //!
 //! Unit tests live in the sibling `web_tests.rs` sidecar.
 
-use crate::agent::config::AgentConfig;
-use crate::agent::datamark::{self, SECURITY_HEADER};
-use crate::agent::events::DelegateToolCall;
-use crate::agent::tools::registry::builtin::strings::WEB_FETCH_FINAL_PAGE_HINT;
-use crate::agent::tools::registry::cache::CacheEntry;
+use crate::config::AgentConfig;
+use crate::datamark::{self, SECURITY_HEADER};
+use crate::events::DelegateToolCall;
+use crate::tools::registry::builtin::strings::WEB_FETCH_FINAL_PAGE_HINT;
+use crate::tools::registry::cache::CacheEntry;
 use fast_h2m::convert;
 use std::collections::HashMap;
 use std::time::Instant;
@@ -16,10 +16,10 @@ use std::time::Instant;
 const WEB_FETCH_PAGE_SIZE: usize = 64;
 
 pub fn tool_web_fetch(
-    input: &crate::agent::tools::dtos::WebFetchInput,
-    cache: &crate::agent::tools::registry::cache::ToolCache,
+    input: &crate::tools::dtos::WebFetchInput,
+    cache: &crate::tools::registry::cache::ToolCache,
     uuid_gen: &dyn crate::utils::uuid::UuidGenerator,
-) -> Result<crate::agent::tools::dtos::WebFetchResponse, String> {
+) -> Result<crate::tools::dtos::WebFetchResponse, String> {
     let url = &input.url;
 
     // If a cursor is provided, look up the cached content and slice from it.
@@ -52,7 +52,7 @@ pub fn tool_web_fetch(
 
         // If cursor_offset >= total_lines, no more content. Return final page hint.
         if cursor_offset >= total_lines {
-            return Ok(crate::agent::tools::dtos::WebFetchResponse {
+            return Ok(crate::tools::dtos::WebFetchResponse {
                 content: String::new(),
                 total_lines,
                 cursor: None,
@@ -91,7 +91,7 @@ pub fn tool_web_fetch(
             },
         );
 
-        return Ok(crate::agent::tools::dtos::WebFetchResponse {
+        return Ok(crate::tools::dtos::WebFetchResponse {
             content: page_content,
             total_lines,
             cursor: cursor_out,
@@ -161,7 +161,7 @@ pub fn tool_web_fetch(
                 },
             );
 
-            return Ok(crate::agent::tools::dtos::WebFetchResponse {
+            return Ok(crate::tools::dtos::WebFetchResponse {
                 content: page_content,
                 total_lines,
                 cursor: cursor_out,
@@ -233,7 +233,7 @@ pub fn tool_web_fetch(
                         },
                     );
 
-                    Ok(crate::agent::tools::dtos::WebFetchResponse {
+                    Ok(crate::tools::dtos::WebFetchResponse {
                         content: page_content,
                         total_lines,
                         cursor: cursor_out,
@@ -268,7 +268,7 @@ pub fn tool_web_fetch(
 pub fn tool_web_search(
     url: &str,
     query: &str,
-) -> Result<crate::agent::tools::dtos::WebSearchResponse, String> {
+) -> Result<crate::tools::dtos::WebSearchResponse, String> {
     let endpoint = format!("{}/search", url);
     match reqwest::blocking::Client::new()
         .get(&endpoint)
@@ -303,9 +303,9 @@ pub fn tool_web_search(
                             ));
                         }
                         if output.is_empty() {
-                            Ok(crate::agent::tools::dtos::WebSearchResponse { results: "No results found.".to_string() })
+                            Ok(crate::tools::dtos::WebSearchResponse { results: "No results found.".to_string() })
                         } else {
-                            Ok(crate::agent::tools::dtos::WebSearchResponse { results: output })
+                            Ok(crate::tools::dtos::WebSearchResponse { results: output })
                         }
                     } else {
                         tracing::error!(name = "tool.web_search.parse_results_failed", url = %endpoint, "Search API returned JSON without a 'results' array. Operator should verify search provider compatibility.");
@@ -331,8 +331,8 @@ pub fn tool_web_search(
 pub fn tool_web_delegate(
     config: &AgentConfig,
     instruction: &str,
-    cache: &crate::agent::tools::registry::cache::ToolCache,
-) -> Result<crate::agent::tools::dtos::WebDelegateResponse, String> {
+    cache: &crate::tools::registry::cache::ToolCache,
+) -> Result<crate::tools::dtos::WebDelegateResponse, String> {
     let model_cfg = config.select_chat_model().map_err(|e| {
         tracing::warn!(name = "tool.web_delegate.missing_api_key", "{}", e);
         e
@@ -368,7 +368,7 @@ pub fn tool_web_delegate(
         "function": {
             "name": "web_fetch",
             "description": "Fetch a URL and convert the content to Markdown. Returns up to 64 lines and a cursor token for pagination. Use the cursor to fetch the next page. Use force_refetch=true to bypass.",
-            "parameters": schemars::schema_for!(crate::agent::tools::dtos::WebFetchInput)
+            "parameters": schemars::schema_for!(crate::tools::dtos::WebFetchInput)
         }
     })];
 
@@ -378,7 +378,7 @@ pub fn tool_web_delegate(
             "function": {
                 "name": "web_search",
                 "description": "Search the web using SearXNG.",
-                "parameters": schemars::schema_for!(crate::agent::tools::dtos::WebSearchInput)
+                "parameters": schemars::schema_for!(crate::tools::dtos::WebSearchInput)
             }
         }));
     }
@@ -475,50 +475,48 @@ pub fn tool_web_delegate(
                     .unwrap_or("{}");
 
                 let result = if func_name == "web_fetch" {
-                    if let Ok(input) = serde_json::from_str::<
-                        crate::agent::tools::dtos::WebFetchInput,
-                    >(func_args_str)
+                    if let Ok(input) =
+                        serde_json::from_str::<crate::tools::dtos::WebFetchInput>(func_args_str)
                     {
                         match tool_web_fetch(
                             &input,
                             cache,
                             &crate::utils::uuid::SystemUuidGenerator,
                         ) {
-                            Ok(res) => serde_json::to_string(
-                                &crate::agent::tools::dtos::ToolResponse::Success { data: res },
-                            )
-                            .unwrap_or_default(),
-                            Err(e) => {
-                                serde_json::to_string(&crate::agent::tools::dtos::ToolResponse::<
-                                    crate::agent::tools::dtos::WebFetchResponse,
-                                >::Error {
-                                    message: e,
+                            Ok(res) => {
+                                serde_json::to_string(&crate::tools::dtos::ToolResponse::Success {
+                                    data: res,
                                 })
                                 .unwrap_or_default()
                             }
+                            Err(e) => serde_json::to_string(&crate::tools::dtos::ToolResponse::<
+                                crate::tools::dtos::WebFetchResponse,
+                            >::Error {
+                                message: e,
+                            })
+                            .unwrap_or_default(),
                         }
                     } else {
                         r#"{"status":"error","message":"Invalid input"}"#.to_string()
                     }
                 } else if func_name == "web_search" {
-                    if let Ok(input) = serde_json::from_str::<
-                        crate::agent::tools::dtos::WebSearchInput,
-                    >(func_args_str)
+                    if let Ok(input) =
+                        serde_json::from_str::<crate::tools::dtos::WebSearchInput>(func_args_str)
                     {
                         if let Some(url) = config.searxng_url() {
                             match tool_web_search(url, &input.query) {
                                 Ok(res) => serde_json::to_string(
-                                    &crate::agent::tools::dtos::ToolResponse::Success { data: res },
+                                    &crate::tools::dtos::ToolResponse::Success { data: res },
                                 )
                                 .unwrap_or_default(),
-                                Err(e) => serde_json::to_string(
-                                    &crate::agent::tools::dtos::ToolResponse::<
-                                        crate::agent::tools::dtos::WebSearchResponse,
+                                Err(e) => {
+                                    serde_json::to_string(&crate::tools::dtos::ToolResponse::<
+                                        crate::tools::dtos::WebSearchResponse,
                                     >::Error {
                                         message: e,
-                                    },
-                                )
-                                .unwrap_or_default(),
+                                    })
+                                    .unwrap_or_default()
+                                }
                             }
                         } else {
                             r#"{"status":"error","message":"web_search disabled"}"#.to_string()
@@ -567,7 +565,7 @@ pub fn tool_web_delegate(
         tracing::warn!(name = "tool.web_delegate.empty_result", model = %model_name, loops = loop_count, max_loops = max_loops, instruction_len = instruction.len(), tool_call_count = delegate_tool_calls.len(), "Delegate completed with empty result after {loop_count} loops.");
     }
 
-    Ok(crate::agent::tools::dtos::WebDelegateResponse {
+    Ok(crate::tools::dtos::WebDelegateResponse {
         result: final_content,
         tool_calls: delegate_tool_calls,
     })

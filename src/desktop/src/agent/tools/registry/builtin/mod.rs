@@ -7,7 +7,7 @@
 //! iterates it and registers every tool each provider returns.
 //!
 //! MCP tools are registered separately via
-//! [`ToolRegistry::register_mcp_tool`](crate::agent::tools::registry::ToolRegistry::register_mcp_tool), which calls into the MCP
+//! [`ToolRegistry::register_mcp_tool`](crate::tools::registry::ToolRegistry::register_mcp_tool), which calls into the MCP
 //! client manager rather than a provider.
 
 #[cfg(feature = "browser")]
@@ -24,7 +24,7 @@ pub(crate) mod web;
 pub(crate) mod yaml;
 
 use super::ToolRegistry;
-use crate::agent::tools::provider::ToolProvider;
+use crate::tools::provider::ToolProvider;
 use std::sync::Arc;
 
 /// Default list of built-in tool providers, in the order the

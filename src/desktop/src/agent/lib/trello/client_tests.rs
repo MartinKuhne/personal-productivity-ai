@@ -9,7 +9,7 @@
 
 use super::*;
 use crate::config::TrelloClient;
-use wiremock::matchers::{any, method, path};
+use wiremock::matchers::{any, method, path as wm_path};
 use wiremock::{Mock, MockServer, ResponseTemplate};
 
 fn make_client() -> TrelloClient {
@@ -102,7 +102,7 @@ fn trello_http_call_returns_parsed_json_on_2xx() {
     let mock = WiremockGuard::start();
     mock.register(
         Mock::given(method("GET"))
-            .and(path("/1/members/me/boards"))
+            .and(wm_path("/1/members/me/boards"))
             .respond_with(
                 ResponseTemplate::new(200)
                     .insert_header("content-type", "application/json")

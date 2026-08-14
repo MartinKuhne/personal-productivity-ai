@@ -15,8 +15,8 @@
 //!
 //! This is the protocol layer. The LLM-tool-loop adapters that
 //! expose these as `Tool` impls live in
-//! crate::agent::tools::registry::builtin::caldav and
-//! crate::agent::tools::registry::builtin::carddav.
+//! crate::tools::registry::builtin::caldav and
+//! crate::tools::registry::builtin::carddav.
 
 pub mod cal;
 pub mod card;

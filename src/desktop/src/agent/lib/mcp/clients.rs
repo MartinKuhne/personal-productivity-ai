@@ -1,7 +1,7 @@
 //! MCP client manager — owns transport sessions, OAuth token store, and
 //! the per-server `needs_auth` flags the tools dialog renders.
 
-use crate::config::{AppConfig, McpServerConfig, McpServerEntry, get_config_path};
+use crate::config::{AgentConfig, McpServerConfig, McpServerEntry};
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 
@@ -80,7 +80,7 @@ impl McpClients {
     /// Update manager configuration with active MCP servers. Any
     /// previously-cached sessions for servers that are no longer
     /// present in `config` are shut down and dropped.
-    pub fn update_config(&self, config: &AppConfig) {
+    pub fn update_config(&self, config: &AgentConfig) {
         let mut state = match self.state.lock() {
             Ok(g) => g,
             Err(_) => return,
@@ -298,9 +298,9 @@ impl McpClients {
             ));
         }
 
-        // Install token store if not already installed (lazy init on first authenticate).
         if self.token_store().is_none() {
-            let config_dir = get_config_path()
+            let config_dir = crate::config::AgentConfig::default()
+                .config_path()
                 .parent()
                 .unwrap_or_else(|| std::path::Path::new("."))
                 .to_path_buf();
@@ -339,8 +339,8 @@ impl McpClients {
 
     /// Read the in-memory `needs_auth` flag. This is NOT persisted
     /// to YAML — it only lives in the manager's runtime state.
-    /// Used by the [`crate::agent::tools::registry::ToolRegistry`] to populate
-    /// [`ToolGroupState::needs_auth`](crate::agent::tools::registry::ToolGroupState::needs_auth).
+    /// Used by the [`crate::tools::registry::ToolRegistry`] to populate
+    /// [`ToolGroupState::needs_auth`](crate::tools::registry::ToolGroupState::needs_auth).
     pub fn needs_auth_now(&self, server_name: &str) -> bool {
         self.state
             .lock()
@@ -395,7 +395,7 @@ impl DynamicToolSource for McpClients {
     fn discover_tools(&self, server: &str) -> Result<Vec<McpToolDescriptor>, String> {
         McpClients::discover_tools(self, server)
     }
-    fn update_config(&self, config: &AppConfig) {
+    fn update_config(&self, config: &AgentConfig) {
         McpClients::update_config(self, config);
     }
     fn call_tool(

@@ -37,7 +37,7 @@
 //!
 //! `cases = 1024` per property.
 
-use crate::agent::tools::csv_db::operations::write_rows_to_writer;
+use crate::tools::csv_db::operations::write_rows_to_writer;
 use proptest::prelude::*;
 use std::collections::HashMap;
 use std::io::{self, Write};

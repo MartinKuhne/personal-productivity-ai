@@ -1,10 +1,10 @@
 //! CalDAV calendar tool implementations for the tool registry.
 
-use crate::agent::tools::Tool;
-use crate::agent::tools::context::ToolContext;
-use crate::agent::tools::dtos;
-use crate::agent::tools::provider::{RegisteredTool, ToolProvider};
-use crate::agent::tools::registry::groups::{InternalToolGroup, ToolGroupId};
+use crate::tools::Tool;
+use crate::tools::context::ToolContext;
+use crate::tools::dtos;
+use crate::tools::provider::{RegisteredTool, ToolProvider};
+use crate::tools::registry::groups::{InternalToolGroup, ToolGroupId};
 use fastmd_tool_macros::ToolDescriptor;
 use std::sync::Arc;
 
@@ -16,9 +16,9 @@ use super::strings;
     name = "search_calendar",
     desc = strings::SEARCH_CALENDAR_DESCRIPTION,
     input = dtos::SearchCalendarInput,
-    safety = crate::agent::tools::Safety::ReadOnly,
+    safety = crate::tools::Safety::ReadOnly,
     group = Calendar,
-    config = crate::app::tool_specs::calendar_spec(),
+    config = crate::tools::specs::calendar_spec(),
     execute_with = execute_search_calendar,
 )]
 pub(crate) struct SearchCalendarTool;
@@ -29,7 +29,7 @@ fn execute_search_calendar(
 ) -> Result<serde_json::Value, String> {
     let input: dtos::SearchCalendarInput =
         serde_json::from_str(args).map_err(|e| format!("Invalid args: {}", e))?;
-    crate::agent::lib::dav::cal::tool_search_calendar(&ctx.config, &input.keyword).map(|r| {
+    crate::lib::dav::cal::tool_search_calendar(&ctx.config, &input.keyword).map(|r| {
         serde_json::to_value(r).unwrap_or_else(|e| serde_json::json!({"error": e.to_string()}))
     })
 }
@@ -40,9 +40,9 @@ fn execute_search_calendar(
     name = "get_calendar",
     desc = strings::GET_CALENDAR_DESCRIPTION,
     input = dtos::GetCalendarInput,
-    safety = crate::agent::tools::Safety::ReadOnly,
+    safety = crate::tools::Safety::ReadOnly,
     group = Calendar,
-    config = crate::app::tool_specs::calendar_spec(),
+    config = crate::tools::specs::calendar_spec(),
     execute_with = execute_get_calendar,
 )]
 pub(crate) struct GetCalendarTool;
@@ -53,10 +53,9 @@ fn execute_get_calendar(
 ) -> Result<serde_json::Value, String> {
     let input: dtos::GetCalendarInput =
         serde_json::from_str(args).map_err(|e| format!("Invalid args: {}", e))?;
-    crate::agent::lib::dav::cal::tool_get_calendar(&ctx.config, &input.start_date, &input.end_date)
-        .map(|r| {
-            serde_json::to_value(r).unwrap_or_else(|e| serde_json::json!({"error": e.to_string()}))
-        })
+    crate::lib::dav::cal::tool_get_calendar(&ctx.config, &input.start_date, &input.end_date).map(
+        |r| serde_json::to_value(r).unwrap_or_else(|e| serde_json::json!({"error": e.to_string()})),
+    )
 }
 
 /// Tool that gets a specific calendar item by its full href.
@@ -65,9 +64,9 @@ fn execute_get_calendar(
     name = "get_calendar_item",
     desc = strings::GET_CALENDAR_ITEM_DESCRIPTION,
     input = dtos::GetCalendarItemInput,
-    safety = crate::agent::tools::Safety::ReadOnly,
+    safety = crate::tools::Safety::ReadOnly,
     group = Calendar,
-    config = crate::app::tool_specs::calendar_spec(),
+    config = crate::tools::specs::calendar_spec(),
     execute_with = execute_get_calendar_item,
 )]
 pub(crate) struct GetCalendarItemTool;
@@ -78,7 +77,7 @@ fn execute_get_calendar_item(
 ) -> Result<serde_json::Value, String> {
     let input: dtos::GetCalendarItemInput =
         serde_json::from_str(args).map_err(|e| format!("Invalid args: {}", e))?;
-    crate::agent::lib::dav::cal::tool_get_calendar_item(&ctx.config, &input.href).map(|r| {
+    crate::lib::dav::cal::tool_get_calendar_item(&ctx.config, &input.href).map(|r| {
         serde_json::to_value(r).unwrap_or_else(|e| serde_json::json!({"error": e.to_string()}))
     })
 }
@@ -89,9 +88,9 @@ fn execute_get_calendar_item(
     name = "add_calendar_item",
     desc = strings::ADD_CALENDAR_ITEM_DESCRIPTION,
     input = dtos::AddCalendarItemInput,
-    safety = crate::agent::tools::Safety::Mutating,
+    safety = crate::tools::Safety::Mutating,
     group = Calendar,
-    config = crate::app::tool_specs::calendar_spec(),
+    config = crate::tools::specs::calendar_spec(),
     execute_with = execute_add_calendar_item,
 )]
 pub(crate) struct AddCalendarItemTool;
@@ -104,7 +103,7 @@ fn execute_add_calendar_item(
         serde_json::from_str(args).map_err(|e| format!("Invalid args: {}", e))?;
     let item_json =
         serde_json::to_string(&input).map_err(|e| format!("Failed to serialize input: {}", e))?;
-    crate::agent::lib::dav::cal::tool_add_calendar_item(&ctx.config, &item_json).map(|r| {
+    crate::lib::dav::cal::tool_add_calendar_item(&ctx.config, &item_json).map(|r| {
         serde_json::to_value(r).unwrap_or_else(|e| serde_json::json!({"error": e.to_string()}))
     })
 }
@@ -115,9 +114,9 @@ fn execute_add_calendar_item(
     name = "update_calendar_item",
     desc = strings::UPDATE_CALENDAR_ITEM_DESCRIPTION,
     input = dtos::UpdateCalendarItemInput,
-    safety = crate::agent::tools::Safety::Mutating,
+    safety = crate::tools::Safety::Mutating,
     group = Calendar,
-    config = crate::app::tool_specs::calendar_spec(),
+    config = crate::tools::specs::calendar_spec(),
     execute_with = execute_update_calendar_item,
 )]
 pub(crate) struct UpdateCalendarItemTool;
@@ -130,10 +129,9 @@ fn execute_update_calendar_item(
         serde_json::from_str(args).map_err(|e| format!("Invalid args: {}", e))?;
     let update_json =
         serde_json::to_string(&input).map_err(|e| format!("Failed to serialize input: {}", e))?;
-    crate::agent::lib::dav::cal::tool_update_calendar_item(&ctx.config, &input.id, &update_json)
-        .map(|r| {
-            serde_json::to_value(r).unwrap_or_else(|e| serde_json::json!({"error": e.to_string()}))
-        })
+    crate::lib::dav::cal::tool_update_calendar_item(&ctx.config, &input.id, &update_json).map(|r| {
+        serde_json::to_value(r).unwrap_or_else(|e| serde_json::json!({"error": e.to_string()}))
+    })
 }
 
 /// Tool that deletes a calendar item.
@@ -142,9 +140,9 @@ fn execute_update_calendar_item(
     name = "delete_calendar_item",
     desc = strings::DELETE_CALENDAR_ITEM_DESCRIPTION,
     input = dtos::DeleteCalendarItemInput,
-    safety = crate::agent::tools::Safety::Mutating,
+    safety = crate::tools::Safety::Mutating,
     group = Calendar,
-    config = crate::app::tool_specs::calendar_spec(),
+    config = crate::tools::specs::calendar_spec(),
     execute_with = execute_delete_calendar_item,
 )]
 pub(crate) struct DeleteCalendarItemTool;
@@ -155,7 +153,7 @@ fn execute_delete_calendar_item(
 ) -> Result<serde_json::Value, String> {
     let input: dtos::DeleteCalendarItemInput =
         serde_json::from_str(args).map_err(|e| format!("Invalid args: {}", e))?;
-    crate::agent::lib::dav::cal::tool_delete_calendar_item(&ctx.config, &input.id).map(|r| {
+    crate::lib::dav::cal::tool_delete_calendar_item(&ctx.config, &input.id).map(|r| {
         serde_json::to_value(r).unwrap_or_else(|e| serde_json::json!({"error": e.to_string()}))
     })
 }

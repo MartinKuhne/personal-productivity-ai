@@ -7,12 +7,12 @@
 //! `src/desktop/Tools.md` for the user-facing catalog.
 
 use super::strings;
-use crate::agent::tools::Tool;
-use crate::agent::tools::context::ToolContext;
-use crate::agent::tools::descriptor::ToolConfigSpec;
-use crate::agent::tools::dtos;
-use crate::agent::tools::provider::{RegisteredTool, ToolProvider};
-use crate::agent::tools::registry::groups::{InternalToolGroup, ToolGroupId};
+use crate::tools::Tool;
+use crate::tools::context::ToolContext;
+use crate::tools::descriptor::ToolConfigSpec;
+use crate::tools::dtos;
+use crate::tools::provider::{RegisteredTool, ToolProvider};
+use crate::tools::registry::groups::{InternalToolGroup, ToolGroupId};
 use fastmd_tool_macros::ToolDescriptor;
 use std::sync::Arc;
 
@@ -26,11 +26,9 @@ fn browser_spec() -> ToolConfigSpec {
     ToolConfigSpec::group_only(group)
 }
 
-fn ext(
-    ctx: &ToolContext,
-) -> Result<Arc<dyn crate::agent::tools::browser::BrowserAutomationExt>, String> {
+fn ext(ctx: &ToolContext) -> Result<Arc<dyn crate::tools::browser::BrowserAutomationExt>, String> {
     ctx.extensions
-        .get::<crate::agent::tools::browser::BrowserExt>()
+        .get::<crate::tools::browser::BrowserExt>()
         .map(|w| w.0.clone())
         .ok_or_else(|| err("browser extension not found"))
 }
@@ -44,7 +42,7 @@ fn ext(
     name = "browser_navigate",
     desc = strings::BROWSER_NAVIGATE_DESCRIPTION,
     input = dtos::BrowserNavigateInput,
-    safety = crate::agent::tools::Safety::Mutating,
+    safety = crate::tools::Safety::Mutating,
     group = Browser,
     config = browser_spec(),
     execute_with = execute_browser_navigate,
@@ -76,7 +74,7 @@ fn execute_browser_navigate(
     name = "browser_get_page_state",
     desc = strings::BROWSER_GET_PAGE_STATE_DESCRIPTION,
     input = dtos::BrowserGetPageStateInput,
-    safety = crate::agent::tools::Safety::ReadOnly,
+    safety = crate::tools::Safety::ReadOnly,
     group = Browser,
     config = browser_spec(),
     execute_with = execute_browser_get_page_state,
@@ -107,7 +105,7 @@ fn execute_browser_get_page_state(
     name = "browser_click",
     desc = strings::BROWSER_CLICK_DESCRIPTION,
     input = dtos::BrowserClickInput,
-    safety = crate::agent::tools::Safety::Mutating,
+    safety = crate::tools::Safety::Mutating,
     group = Browser,
     config = browser_spec(),
     execute_with = execute_browser_click,
@@ -138,7 +136,7 @@ fn execute_browser_click(
     name = "browser_fill_input",
     desc = strings::BROWSER_FILL_INPUT_DESCRIPTION,
     input = dtos::BrowserFillInputInput,
-    safety = crate::agent::tools::Safety::Mutating,
+    safety = crate::tools::Safety::Mutating,
     group = Browser,
     config = browser_spec(),
     execute_with = execute_browser_fill_input,
@@ -171,7 +169,7 @@ fn execute_browser_fill_input(
     name = "browser_select_dropdown",
     desc = strings::BROWSER_SELECT_DROPDOWN_DESCRIPTION,
     input = dtos::BrowserSelectDropdownInput,
-    safety = crate::agent::tools::Safety::Mutating,
+    safety = crate::tools::Safety::Mutating,
     group = Browser,
     config = browser_spec(),
     execute_with = execute_browser_select_dropdown,
@@ -204,7 +202,7 @@ fn execute_browser_select_dropdown(
     name = "browser_press_key",
     desc = strings::BROWSER_PRESS_KEY_DESCRIPTION,
     input = dtos::BrowserPressKeyInput,
-    safety = crate::agent::tools::Safety::Mutating,
+    safety = crate::tools::Safety::Mutating,
     group = Browser,
     config = browser_spec(),
     execute_with = execute_browser_press_key,
@@ -235,7 +233,7 @@ fn execute_browser_press_key(
     name = "browser_evaluate_js",
     desc = strings::BROWSER_EVALUATE_JS_DESCRIPTION,
     input = dtos::BrowserEvaluateJsInput,
-    safety = crate::agent::tools::Safety::Mutating,
+    safety = crate::tools::Safety::Mutating,
     group = Browser,
     config = browser_spec(),
     execute_with = execute_browser_evaluate_js,
@@ -265,7 +263,7 @@ fn execute_browser_evaluate_js(
     name = "browser_screenshot",
     desc = strings::BROWSER_SCREENSHOT_DESCRIPTION,
     input = dtos::BrowserScreenshotInput,
-    safety = crate::agent::tools::Safety::Mutating,
+    safety = crate::tools::Safety::Mutating,
     group = Browser,
     config = browser_spec(),
     execute_with = execute_browser_screenshot,
@@ -348,7 +346,7 @@ mod tests {
 
     #[test]
     fn test_is_enabled_matches_config_flag() {
-        let mut config = crate::agent::config::AgentConfig::default();
+        let mut config = crate::config::AgentConfig::default();
         assert!(!BrowserNavigateTool.is_enabled(&config, ""));
         config.tool_groups.browser = true;
         assert!(BrowserNavigateTool.is_enabled(&config, ""));
@@ -358,7 +356,7 @@ mod tests {
     fn test_only_get_page_state_is_readonly() {
         // BRWS-002 explicitly calls this out.
         let readonly = BrowserGetPageStateTool.safety();
-        assert_eq!(readonly, crate::agent::tools::Safety::ReadOnly);
+        assert_eq!(readonly, crate::tools::Safety::ReadOnly);
         for safety in [
             BrowserNavigateTool.safety(),
             BrowserClickTool.safety(),
@@ -368,7 +366,7 @@ mod tests {
             BrowserEvaluateJsTool.safety(),
             BrowserScreenshotTool.safety(),
         ] {
-            assert_eq!(safety, crate::agent::tools::Safety::Mutating);
+            assert_eq!(safety, crate::tools::Safety::Mutating);
         }
     }
 

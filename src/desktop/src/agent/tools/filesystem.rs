@@ -2,7 +2,7 @@
 //!
 //! Unit tests live in the sibling `filesystem_tests.rs` sidecar.
 
-use crate::markdown::Document;
+use crate::utils::markdown::parse_front_matter;
 use crate::utils::tags::extract_tags_from_file;
 use std::path::Path;
 use walkdir::WalkDir;
@@ -18,7 +18,7 @@ pub const DEFAULT_SEARCH_NOTES_MAX_RESULTS: usize = 200;
 /// (the tool registry) is responsible for applying the result cap
 /// across libraries, so this function returns all matches unfiltered.
 pub fn tool_search_notes(
-    ctx: &crate::agent::tools::context::ToolContext,
+    ctx: &crate::tools::context::ToolContext,
     root_path: &Path,
     virtual_prefix: &str,
     query: &str,
@@ -45,9 +45,9 @@ pub fn tool_search_notes(
 }
 
 pub fn tool_read_tags(
-    _ctx: &crate::agent::tools::context::ToolContext,
+    _ctx: &crate::tools::context::ToolContext,
     root_path: &Path,
-) -> Result<crate::agent::tools::dtos::ReadTagsResponse, String> {
+) -> Result<crate::tools::dtos::ReadTagsResponse, String> {
     let mut all_tags = std::collections::BTreeSet::new();
     for entry in WalkDir::new(root_path).into_iter().filter_map(|e| e.ok()) {
         if entry.path().is_file()
@@ -60,7 +60,7 @@ pub fn tool_read_tags(
             }
         }
     }
-    Ok(crate::agent::tools::dtos::ReadTagsResponse {
+    Ok(crate::tools::dtos::ReadTagsResponse {
         tags: all_tags.into_iter().collect(),
     })
 }
@@ -74,7 +74,7 @@ pub fn tool_read_tags(
 /// cross-library result, so the page and total fields stay consistent
 /// regardless of how many libraries the user has configured.
 pub fn tool_list_notes_by_tag(
-    _ctx: &crate::agent::tools::context::ToolContext,
+    _ctx: &crate::tools::context::ToolContext,
     root_path: &Path,
     virtual_prefix: &str,
     tag: &str,
@@ -106,7 +106,7 @@ pub fn tool_list_notes_by_tag(
 /// slicing the result so the page and total fields stay consistent
 /// regardless of how the call is dispatched.
 pub fn tool_list_notes(
-    ctx: &crate::agent::tools::context::ToolContext,
+    ctx: &crate::tools::context::ToolContext,
     target_dir: &Path,
     virtual_prefix: &str,
 ) -> Result<Vec<String>, String> {
@@ -131,13 +131,13 @@ pub fn tool_list_notes(
 }
 
 pub fn tool_read_note(
-    _ctx: &crate::agent::tools::context::ToolContext,
+    _ctx: &crate::tools::context::ToolContext,
     path_str: &str,
-) -> Result<crate::agent::tools::dtos::ReadNoteResponse, String> {
+) -> Result<crate::tools::dtos::ReadNoteResponse, String> {
     match crate::utils::read_text_file(Path::new(path_str)) {
         Ok(content) => {
             let (_, body) = split_file_content(&content);
-            Ok(crate::agent::tools::dtos::ReadNoteResponse { content: body })
+            Ok(crate::tools::dtos::ReadNoteResponse { content: body })
         }
         Err(e) => Err(format!("Failed to read file: {}", e)),
     }
@@ -150,11 +150,11 @@ pub fn tool_read_note(
 /// file's line count, so a `limit` that overflows returns the
 /// remainder; an `offset` past the end returns an empty `content`.
 pub fn tool_window_note(
-    _ctx: &crate::agent::tools::context::ToolContext,
+    _ctx: &crate::tools::context::ToolContext,
     path_str: &str,
     offset: usize,
     limit: usize,
-) -> Result<crate::agent::tools::dtos::WindowNoteResponse, String> {
+) -> Result<crate::tools::dtos::WindowNoteResponse, String> {
     match crate::utils::read_text_file(Path::new(path_str)) {
         Ok(content) => {
             let (_, body) = split_file_content(&content);
@@ -165,7 +165,7 @@ pub fn tool_window_note(
                 let end = (offset + limit).min(lines.len());
                 &lines[offset..end]
             };
-            Ok(crate::agent::tools::dtos::WindowNoteResponse {
+            Ok(crate::tools::dtos::WindowNoteResponse {
                 content: slice.join("\n"),
             })
         }
@@ -174,26 +174,18 @@ pub fn tool_window_note(
 }
 
 pub fn tool_create_note(
-    ctx: &crate::agent::tools::context::ToolContext,
+    ctx: &crate::tools::context::ToolContext,
     path_str: &str,
     content: &str,
-    producer: &dyn crate::agent::tools::observer::OnFileChanged,
-) -> Result<crate::agent::tools::dtos::CreateNoteResponse, String> {
+    producer: &dyn crate::tools::observer::OnFileChanged,
+) -> Result<crate::tools::dtos::CreateNoteResponse, String> {
     if !path_str.to_lowercase().ends_with(".md") {
         return Err("Only markdown files (.md) are allowed.".to_string());
     }
 
-    // One `Document` call parses both the optional YAML
-    // front-matter and the markdown body. If the content claims
-    // to start with a front-matter block, the parse must succeed
-    // there; if it doesn't, the YAML check passes by construction
-    // (the front-matter is just absent).
-    let doc = Document::new(content.to_string());
-    if content.starts_with("---\n") && doc.front_matter().is_none() {
+    if content.starts_with("---\n") && parse_front_matter(content).is_none() {
         return Err("Invalid YAML front-matter in markdown.".to_string());
     }
-    // Validate the markdown body by ensuring it parses cleanly.
-    let _events = doc.events();
 
     let path = Path::new(path_str);
     if path.exists() {
@@ -212,7 +204,7 @@ pub fn tool_create_note(
             // directory tree, tag manager, etc. can pick it up without
             // waiting for an OS-level notify event.
             producer.on_file_changed(path);
-            Ok(crate::agent::tools::dtos::CreateNoteResponse {
+            Ok(crate::tools::dtos::CreateNoteResponse {
                 result: "File created successfully.".to_string(),
                 size_bytes,
             })
@@ -226,12 +218,12 @@ pub fn tool_create_note(
 /// `offset == 0` inserts at the top; `offset == lines.len()` appends
 /// to the end. `offset > lines.len()` returns an error.
 pub fn tool_insert_into_note(
-    ctx: &crate::agent::tools::context::ToolContext,
+    ctx: &crate::tools::context::ToolContext,
     path_str: &str,
     offset: usize,
     lines_to_insert: &[String],
-    producer: &dyn crate::agent::tools::observer::OnFileChanged,
-) -> Result<crate::agent::tools::dtos::InsertIntoNoteResponse, String> {
+    producer: &dyn crate::tools::observer::OnFileChanged,
+) -> Result<crate::tools::dtos::InsertIntoNoteResponse, String> {
     match crate::utils::read_text_file(Path::new(path_str)) {
         Ok(content) => {
             let (header, body) = split_file_content(&content);
@@ -247,7 +239,7 @@ pub fn tool_insert_into_note(
             match ctx.vfs().write(path_str.as_ref(), new_content.as_bytes()) {
                 Ok(_) => {
                     producer.on_file_changed(Path::new(path_str));
-                    Ok(crate::agent::tools::dtos::InsertIntoNoteResponse {
+                    Ok(crate::tools::dtos::InsertIntoNoteResponse {
                         result: "Lines inserted successfully.".to_string(),
                     })
                 }
@@ -259,12 +251,12 @@ pub fn tool_insert_into_note(
 }
 
 pub fn tool_patch_note(
-    ctx: &crate::agent::tools::context::ToolContext,
+    ctx: &crate::tools::context::ToolContext,
     path_str: &str,
     old_string: &str,
     new_string: &str,
-    producer: &dyn crate::agent::tools::observer::OnFileChanged,
-) -> Result<crate::agent::tools::dtos::PatchNoteResponse, String> {
+    producer: &dyn crate::tools::observer::OnFileChanged,
+) -> Result<crate::tools::dtos::PatchNoteResponse, String> {
     match crate::utils::read_text_file(Path::new(path_str)) {
         Ok(content) => {
             let (header, body) = split_file_content(&content);
@@ -277,7 +269,7 @@ pub fn tool_patch_note(
             match ctx.vfs().write(path_str.as_ref(), new_content.as_bytes()) {
                 Ok(_) => {
                     producer.on_file_changed(Path::new(path_str));
-                    Ok(crate::agent::tools::dtos::PatchNoteResponse {
+                    Ok(crate::tools::dtos::PatchNoteResponse {
                         result: format!("Successfully replaced {} occurrence(s).", count),
                     })
                 }
@@ -289,7 +281,7 @@ pub fn tool_patch_note(
 }
 
 fn split_file_content(raw_content: &str) -> (Option<String>, String) {
-    match crate::markdown::document::parse_front_matter(raw_content) {
+    match parse_front_matter(raw_content) {
         Some(fm) => {
             let mut body = fm.body.as_str();
             if body.starts_with("\r\n") {

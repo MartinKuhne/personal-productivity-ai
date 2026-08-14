@@ -37,7 +37,7 @@
 //! `SystemRandom` CSPRNG; this is fast and the high entropy
 //! guarantees the invariants hold on every case.
 
-use crate::agent::lib::mcp::oauth::pkce::{PkcePair, State, s256};
+use crate::lib::mcp::oauth::pkce::{PkcePair, State, s256};
 use proptest::prelude::*;
 
 /// One proptest case count for every property in this sidecar.

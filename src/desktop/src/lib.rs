@@ -18,7 +18,7 @@
 //! the short path and the type is conceptually a top-level entry point
 //! (e.g. the `App` impl, the configuration bus's first event).
 
-pub mod agent;
+pub use fastmd_agent as agent;
 pub mod app;
 pub mod bus;
 pub mod integrations;

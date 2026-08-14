@@ -34,7 +34,7 @@
 //! `cases = 512` per property. The JSON-RPC spec surface is
 //! small; the proptest value is in adversarial-shape coverage.
 
-use crate::agent::lib::mcp::session::McpClientSession;
+use crate::lib::mcp::session::McpClientSession;
 use proptest::prelude::*;
 
 /// One proptest case count for every property in this sidecar.

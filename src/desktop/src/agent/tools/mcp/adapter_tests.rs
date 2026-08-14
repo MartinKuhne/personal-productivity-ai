@@ -1,16 +1,16 @@
-use crate::agent::config::AgentConfig;
+use crate::config::AgentConfig;
 // Tests for [`McpToolAdapter`] — the LLM-tool-loop adapter that
 // exposes MCP-discovered tools to the agent tool registry.
 //
-// Sidecar file for `crate::agent::tools::mcp`. Extracted from the
+// Sidecar file for `crate::tools::mcp`. Extracted from the
 // original `tests.rs` when the protocol layer moved to
-// `crate::agent::lib::mcp`; only the adapter-side tests live here.
+// `crate::lib::mcp`; only the adapter-side tests live here.
 // Protocol-layer tests now live in
-// `crate::agent::lib::mcp::tests`.
+// `crate::lib::mcp::tests`.
 
 use super::*;
-use crate::agent::tools::{Safety, Tool};
 use crate::config::{McpServerConfig, McpServerEntry};
+use crate::tools::{Safety, Tool};
 use std::collections::HashMap;
 use std::sync::Arc;
 

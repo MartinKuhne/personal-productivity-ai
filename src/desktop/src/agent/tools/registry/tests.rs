@@ -1,29 +1,25 @@
 //! Unit tests for ToolRegistry.
 
 use super::*;
-use crate::agent::config::AgentConfig;
-use crate::agent::tools::context::ToolContext;
+use crate::config::AgentConfig;
+use crate::tools::context::ToolContext;
 use serde_json::Value;
 use std::fs;
 use std::sync::Arc;
 use tempfile::TempDir;
 
 fn test_ctx(config: &AgentConfig) -> ToolContext {
-    crate::agent::tools::context::ToolContextBuilder::new(
+    crate::tools::context::ToolContextBuilder::new(
         Arc::new(config.clone()),
-        std::sync::Arc::new(crate::agent::tools::observer::DefaultFileObserver),
+        std::sync::Arc::new(crate::tools::observer::DefaultFileObserver),
     )
+    .with_extension(std::sync::Arc::new(crate::tools::context::ToolCacheExt(
+        Arc::new(crate::tools::registry::cache::ToolCache::new()),
+    )))
     .with_extension(std::sync::Arc::new(
-        crate::agent::tools::context::ToolCacheExt(Arc::new(
-            crate::agent::tools::registry::cache::ToolCache::new(),
-        )),
+        crate::tools::context::UuidGeneratorExt(Arc::new(crate::utils::uuid::SystemUuidGenerator)),
     ))
-    .with_extension(std::sync::Arc::new(
-        crate::agent::tools::context::UuidGeneratorExt(Arc::new(
-            crate::utils::uuid::SystemUuidGenerator,
-        )),
-    ))
-    .with_tool_call_policy(Arc::new(crate::agent::tools::policy::DefaultToolCallPolicy))
+    .with_tool_call_policy(Arc::new(crate::tools::policy::DefaultToolCallPolicy))
     .build()
 }
 
@@ -834,7 +830,7 @@ fn test_mcp_char_count_bug() {
 
 #[test]
 fn test_default_providers_register_every_family() {
-    use crate::agent::tools::registry::builtin::default_providers;
+    use crate::tools::registry::builtin::default_providers;
     let provider_count = default_providers().len();
     assert!(
         provider_count >= 9,

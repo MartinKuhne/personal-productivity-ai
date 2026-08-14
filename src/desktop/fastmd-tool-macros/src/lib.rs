@@ -268,9 +268,9 @@ pub fn derive_tool_descriptor(input: TokenStream) -> TokenStream {
     let config_expr: TokenStream2 = match &args.config {
         Some(e) => quote! { #e },
         None => quote! {
-            crate::agent::tools::descriptor::ToolConfigSpec::group_only(
-                crate::agent::tools::registry::groups::ToolGroupId::Internal(
-                    crate::agent::tools::registry::groups::InternalToolGroup::#group_ident,
+            crate::tools::descriptor::ToolConfigSpec::group_only(
+                crate::tools::registry::groups::ToolGroupId::Internal(
+                    crate::tools::registry::groups::InternalToolGroup::#group_ident,
                 ),
             )
         },
@@ -283,7 +283,7 @@ pub fn derive_tool_descriptor(input: TokenStream) -> TokenStream {
     // or a helper function).
     let profile_expr: TokenStream2 = match &args.profile {
         Some(e) => quote! { #e },
-        None => quote! { crate::agent::tools::descriptor::ToolProfile::default() },
+        None => quote! { crate::tools::descriptor::ToolProfile::default() },
     };
 
     // Reuse the `group_id` value twice — once for the spec,
@@ -299,15 +299,15 @@ pub fn derive_tool_descriptor(input: TokenStream) -> TokenStream {
     // signature the trait promises even though unit-struct
     // tools never read it.
     let expanded = quote! {
-        impl #impl_generics crate::agent::tools::Tool for #name #ty_generics #where_clause {
-            fn descriptor(&self) -> &'static crate::agent::tools::ToolDescriptor {
-                static D: ::std::sync::OnceLock<crate::agent::tools::ToolDescriptor> =
+        impl #impl_generics crate::tools::Tool for #name #ty_generics #where_clause {
+            fn descriptor(&self) -> &'static crate::tools::ToolDescriptor {
+                static D: ::std::sync::OnceLock<crate::tools::ToolDescriptor> =
                     ::std::sync::OnceLock::new();
                 D.get_or_init(|| {
-                    let group_id = crate::agent::tools::registry::groups::ToolGroupId::Internal(
-                        crate::agent::tools::registry::groups::InternalToolGroup::#group_ident,
+                    let group_id = crate::tools::registry::groups::ToolGroupId::Internal(
+                        crate::tools::registry::groups::InternalToolGroup::#group_ident,
                     );
-                    crate::agent::tools::ToolDescriptor::new::<#input_ty>(
+                    crate::tools::ToolDescriptor::new::<#input_ty>(
                         #name_lit,
                         #desc_expr,
                         #safety_expr,
@@ -319,7 +319,7 @@ pub fn derive_tool_descriptor(input: TokenStream) -> TokenStream {
             }
             fn execute(
                 &self,
-                ctx: &crate::agent::tools::context::ToolContext,
+                ctx: &crate::tools::context::ToolContext,
                 args: &str,
             ) -> ::std::result::Result<serde_json::Value, String> {
                 #execute_with(self, ctx, args)

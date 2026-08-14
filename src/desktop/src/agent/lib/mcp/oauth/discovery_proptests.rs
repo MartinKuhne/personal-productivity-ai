@@ -25,9 +25,7 @@
 //! proptest-added value is in the adversarial-shape corner
 //! cases.
 
-use crate::agent::lib::mcp::oauth::types::{
-    AuthorizationServerMetadata, ProtectedResourceMetadata,
-};
+use crate::lib::mcp::oauth::types::{AuthorizationServerMetadata, ProtectedResourceMetadata};
 use proptest::prelude::*;
 
 /// One proptest case count for every property in this sidecar.

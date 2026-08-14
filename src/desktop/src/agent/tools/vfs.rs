@@ -34,11 +34,11 @@ pub struct VirtualFileSystemExt(pub Arc<dyn VirtualFileSystem>);
 
 #[derive(Clone)]
 pub struct VfsResolver {
-    pub config: Arc<crate::agent::config::AgentConfig>,
+    pub config: Arc<crate::config::AgentConfig>,
 }
 
 impl VfsResolver {
-    pub fn new(config: Arc<crate::agent::config::AgentConfig>) -> Self {
+    pub fn new(config: Arc<crate::config::AgentConfig>) -> Self {
         Self { config }
     }
 }
@@ -49,11 +49,11 @@ impl VirtualFileSystem for VfsResolver {
         vpath: &str,
         allow_write: bool,
     ) -> Result<Option<(PathBuf, bool)>, String> {
-        crate::app::vfs::behaviour::resolve(vpath, allow_write, self.config.content_libraries())
+        crate::vfs::behaviour::resolve(vpath, allow_write, self.config.content_libraries())
     }
 
     fn resolve_writable(&self, vpath: &str) -> Result<PathBuf, String> {
-        crate::app::vfs::behaviour::resolve_writable(vpath, self.config.content_libraries())
+        crate::vfs::behaviour::resolve_writable(vpath, self.config.content_libraries())
     }
 
     fn read_to_string(&self, path: &Path) -> std::io::Result<String> {

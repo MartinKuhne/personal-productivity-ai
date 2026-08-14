@@ -45,7 +45,7 @@
 //!
 //! `cases = 512` per property.
 
-use crate::agent::lib::mcp::oauth::flow::build_resource_uri;
+use crate::lib::mcp::oauth::flow::build_resource_uri;
 use proptest::prelude::*;
 
 /// One proptest case count for every property in this sidecar.
@@ -68,7 +68,7 @@ proptest! {
     /// `HashMap` for a well-formed one.
     #[test]
     fn parse_query_does_not_panic_on_any_input(q in any_query_string()) {
-        use crate::agent::lib::mcp::oauth::redirect::parse_query;
+        use crate::lib::mcp::oauth::redirect::parse_query;
         let out = parse_query(&q);
         let _ = out.len();
     }
@@ -83,7 +83,7 @@ proptest! {
         state_b in "[A-Za-z0-9]{1,32}",
     ) {
         prop_assume!(state_a != state_b);
-        use crate::agent::lib::mcp::oauth::redirect::parse_query;
+        use crate::lib::mcp::oauth::redirect::parse_query;
         let q = format!("state={state_a}&state={state_b}");
         let out = parse_query(&q);
         let state = out.get("state");
@@ -100,7 +100,7 @@ proptest! {
         prefix in "[A-Za-z0-9]{1,16}",
         suffix in "[A-Za-z0-9]{1,16}",
     ) {
-        use crate::agent::lib::mcp::oauth::redirect::parse_query;
+        use crate::lib::mcp::oauth::redirect::parse_query;
         let q = format!("k={prefix}%0A{suffix}");
         let out = parse_query(&q);
         let v = out.get("k").expect("key `k` must be present");
@@ -120,7 +120,7 @@ proptest! {
         prefix in "[A-Za-z0-9]{1,16}",
         suffix in "[A-Za-z0-9]{1,16}",
     ) {
-        use crate::agent::lib::mcp::oauth::redirect::parse_query;
+        use crate::lib::mcp::oauth::redirect::parse_query;
         let q = format!("code={prefix}%26{suffix}");
         let out = parse_query(&q);
         let v = out.get("code").expect("key `code` must be present");

@@ -1,9 +1,9 @@
 //! Unit tests for [`super::provider`] — `RegisteredTool`, `ToolProvider`.
 
 use super::provider::{RegisteredTool, ToolProvider};
-use crate::agent::tools::Tool;
-use crate::agent::tools::descriptor::ToolDescriptor;
-use crate::agent::tools::registry::groups::{InternalToolGroup, ToolGroupId};
+use crate::tools::Tool;
+use crate::tools::descriptor::ToolDescriptor;
+use crate::tools::registry::groups::{InternalToolGroup, ToolGroupId};
 use std::any::TypeId;
 use std::sync::Arc;
 
@@ -17,8 +17,8 @@ impl Tool for DummyTool {
             ToolDescriptor::new::<DummyInput>(
                 "dummy",
                 "test tool",
-                crate::agent::tools::Safety::ReadOnly,
-                crate::agent::tools::descriptor::ToolConfigSpec::group_only(ToolGroupId::Internal(
+                crate::tools::Safety::ReadOnly,
+                crate::tools::descriptor::ToolConfigSpec::group_only(ToolGroupId::Internal(
                     InternalToolGroup::Filesystem,
                 )),
                 ToolGroupId::Internal(InternalToolGroup::Filesystem),
@@ -27,7 +27,7 @@ impl Tool for DummyTool {
     }
     fn execute(
         &self,
-        _ctx: &crate::agent::tools::context::ToolContext,
+        _ctx: &crate::tools::context::ToolContext,
         _args: &str,
     ) -> Result<serde_json::Value, String> {
         Ok(serde_json::json!({"ok": true}))
@@ -52,8 +52,8 @@ impl ToolProvider for DummyProvider {
         let descriptor = ToolDescriptor::new::<DummyInput>(
             "dummy",
             "test tool",
-            crate::agent::tools::Safety::ReadOnly,
-            crate::agent::tools::descriptor::ToolConfigSpec::group_only(ToolGroupId::Internal(
+            crate::tools::Safety::ReadOnly,
+            crate::tools::descriptor::ToolConfigSpec::group_only(ToolGroupId::Internal(
                 InternalToolGroup::Filesystem,
             )),
             ToolGroupId::Internal(InternalToolGroup::Filesystem),
@@ -88,8 +88,8 @@ fn test_registered_tool_clone_shares_arc() {
     let descriptor = ToolDescriptor::new::<DummyInput>(
         "dummy",
         "test",
-        crate::agent::tools::Safety::ReadOnly,
-        crate::agent::tools::descriptor::ToolConfigSpec::group_only(ToolGroupId::Internal(
+        crate::tools::Safety::ReadOnly,
+        crate::tools::descriptor::ToolConfigSpec::group_only(ToolGroupId::Internal(
             InternalToolGroup::Filesystem,
         )),
         ToolGroupId::Internal(InternalToolGroup::Filesystem),
@@ -121,5 +121,5 @@ fn test_provider_refresh_default_is_noop() {
     // `ToolProvider::refresh` defaults to no-op; verify it
     // compiles and runs without touching state.
     let mut provider = DummyProvider;
-    provider.refresh(&crate::config::AppConfig::default());
+    provider.refresh(&crate::config::AgentConfig::default());
 }

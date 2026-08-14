@@ -1,9 +1,9 @@
 //! Trello API tools for the tool registry.
 
-use crate::agent::tools::Tool;
-use crate::agent::tools::context::ToolContext;
-use crate::agent::tools::provider::{RegisteredTool, ToolProvider};
-use crate::agent::tools::registry::groups::{InternalToolGroup, ToolGroupId};
+use crate::tools::Tool;
+use crate::tools::context::ToolContext;
+use crate::tools::provider::{RegisteredTool, ToolProvider};
+use crate::tools::registry::groups::{InternalToolGroup, ToolGroupId};
 use fastmd_tool_macros::ToolDescriptor;
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
@@ -50,7 +50,7 @@ fn trello_request(
         .trello_client
         .as_ref()
         .ok_or_else(|| "Trello configuration missing".to_string())?;
-    crate::agent::lib::trello::trello_request(client_config, method, endpoint, body)
+    crate::lib::trello::trello_request(client_config, method, endpoint, body)
 }
 
 #[derive(ToolDescriptor)]
@@ -58,9 +58,9 @@ fn trello_request(
     name = "trello_get_boards",
     desc = strings::GET_BOARDS_DESCRIPTION,
     input = TrelloEmptyInput,
-    safety = crate::agent::tools::Safety::ReadOnly,
+    safety = crate::tools::Safety::ReadOnly,
     group = Trello,
-    config = crate::app::tool_specs::trello_spec(),
+    config = crate::tools::specs::trello_spec(),
     execute_with = execute_trello_get_boards,
 )]
 pub(crate) struct TrelloGetBoardsTool;
@@ -78,9 +78,9 @@ fn execute_trello_get_boards(
     name = "trello_get_board",
     desc = strings::GET_BOARD_DESCRIPTION,
     input = TrelloIdInput,
-    safety = crate::agent::tools::Safety::ReadOnly,
+    safety = crate::tools::Safety::ReadOnly,
     group = Trello,
-    config = crate::app::tool_specs::trello_spec(),
+    config = crate::tools::specs::trello_spec(),
     execute_with = execute_trello_get_board,
 )]
 pub(crate) struct TrelloGetBoardTool;
@@ -103,9 +103,9 @@ fn execute_trello_get_board(
     name = "trello_get_lists",
     desc = strings::GET_LISTS_DESCRIPTION,
     input = TrelloIdInput,
-    safety = crate::agent::tools::Safety::ReadOnly,
+    safety = crate::tools::Safety::ReadOnly,
     group = Trello,
-    config = crate::app::tool_specs::trello_spec(),
+    config = crate::tools::specs::trello_spec(),
     execute_with = execute_trello_get_lists,
 )]
 pub(crate) struct TrelloGetListsTool;
@@ -128,9 +128,9 @@ fn execute_trello_get_lists(
     name = "trello_get_cards",
     desc = strings::GET_CARDS_DESCRIPTION,
     input = TrelloIdInput,
-    safety = crate::agent::tools::Safety::ReadOnly,
+    safety = crate::tools::Safety::ReadOnly,
     group = Trello,
-    config = crate::app::tool_specs::trello_spec(),
+    config = crate::tools::specs::trello_spec(),
     execute_with = execute_trello_get_cards,
 )]
 pub(crate) struct TrelloGetCardsTool;
@@ -153,9 +153,9 @@ fn execute_trello_get_cards(
     name = "trello_create_card",
     desc = strings::CREATE_CARD_DESCRIPTION,
     input = TrelloCreateCardInput,
-    safety = crate::agent::tools::Safety::Mutating,
+    safety = crate::tools::Safety::Mutating,
     group = Trello,
-    config = crate::app::tool_specs::trello_spec(),
+    config = crate::tools::specs::trello_spec(),
     execute_with = execute_trello_create_card,
 )]
 pub(crate) struct TrelloCreateCardTool;
@@ -227,9 +227,9 @@ fn execute_trello_create_card(
     name = "trello_update_card",
     desc = strings::UPDATE_CARD_DESCRIPTION,
     input = TrelloUpdateCardInput,
-    safety = crate::agent::tools::Safety::Mutating,
+    safety = crate::tools::Safety::Mutating,
     group = Trello,
-    config = crate::app::tool_specs::trello_spec(),
+    config = crate::tools::specs::trello_spec(),
     execute_with = execute_trello_update_card,
 )]
 pub(crate) struct TrelloUpdateCardTool;
@@ -254,9 +254,9 @@ fn execute_trello_update_card(
     name = "trello_delete_card",
     desc = strings::DELETE_CARD_DESCRIPTION,
     input = TrelloIdInput,
-    safety = crate::agent::tools::Safety::Mutating,
+    safety = crate::tools::Safety::Mutating,
     group = Trello,
-    config = crate::app::tool_specs::trello_spec(),
+    config = crate::tools::specs::trello_spec(),
     execute_with = execute_trello_delete_card,
 )]
 pub(crate) struct TrelloDeleteCardTool;

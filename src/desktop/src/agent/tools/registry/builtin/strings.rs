@@ -2,7 +2,7 @@
 //!
 //! Every const lives at the top level of this module. The `Tool::description()` impls in the
 //! sibling `builtin/*.rs` files and the `#[schemars(description = ...)]` attributes on the
-//! DTO fields in `crate::agent::tools::dtos` and `crate::agent::tools::csv_db::schema`
+//! DTO fields in `crate::tools::dtos` and `crate::tools::csv_db::schema`
 //! both reference the consts here. Editing a string in this module is the only place to
 //! change what the LLM sees for that tool.
 //!

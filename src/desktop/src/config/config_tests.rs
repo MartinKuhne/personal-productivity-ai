@@ -640,3 +640,101 @@ fn test_select_chat_model_default_key_rejected() {
     assert!(res2.is_err());
     assert!(res2.unwrap_err().contains("API key not set"));
 }
+
+#[test]
+fn test_from_app_config_projects_models() {
+    let mut cfg = AppConfig::default();
+    cfg.models.insert(
+        "a".to_string(),
+        LlmConfig {
+            model: "m".to_string(),
+            api_url: "http://api".to_string(),
+            api_key: "k".to_string(),
+            cost: Some(0),
+            use_case: vec!["chat".to_string()],
+        },
+    );
+    let agent_cfg = cfg.to_agent_config();
+    assert_eq!(agent_cfg.models().len(), 1);
+    assert!(agent_cfg.models().contains_key("a"));
+}
+
+#[test]
+fn test_from_app_config_projects_max_tokens() {
+    let cfg = AppConfig {
+        max_tokens: 4096,
+        ..AppConfig::default()
+    };
+    let agent_cfg = cfg.to_agent_config();
+    assert_eq!(agent_cfg.max_tokens(), 4096);
+}
+
+#[test]
+fn test_from_app_config_projects_tool_groups() {
+    let cfg = AppConfig::default();
+    let agent_cfg = cfg.to_agent_config();
+    let expected = cfg.tool_groups.clone();
+    assert_eq!(*agent_cfg.tool_groups(), expected);
+}
+
+#[test]
+fn test_from_app_config_projects_mcp_servers() {
+    let mut cfg = AppConfig::default();
+    cfg.mcp_servers.insert(
+        "s1".to_string(),
+        McpServerEntry {
+            enabled: true,
+            config: McpServerConfig::Stdio {
+                command: "cmd".to_string(),
+                args: vec![],
+                env: std::collections::HashMap::new(),
+            },
+        },
+    );
+    let agent_cfg = cfg.to_agent_config();
+    assert_eq!(agent_cfg.mcp_servers().len(), 1);
+    assert!(agent_cfg.mcp_servers().contains_key("s1"));
+}
+
+#[test]
+fn test_from_app_config_resolves_browser_config() {
+    let cfg = AppConfig::default();
+    let agent_cfg = cfg.to_agent_config();
+    assert!(!agent_cfg.browser().screenshot_dir.as_os_str().is_empty());
+    assert!(
+        !agent_cfg
+            .browser()
+            .storage_state_path
+            .as_os_str()
+            .is_empty()
+    );
+}
+
+#[test]
+fn test_from_app_config_captures_config_path() {
+    let cfg = AppConfig::default();
+    let agent_cfg = cfg.to_agent_config();
+    let expected = crate::config::get_config_path();
+    assert_eq!(agent_cfg.config_path(), expected.as_path());
+}
+
+#[test]
+fn test_from_app_config_drops_user_and_content_fields() {
+    let cfg = AppConfig {
+        user_name: Some("Alice".to_string()),
+        user_address: Some("addr".to_string()),
+        user_birthdate: Some("1990-01-01".to_string()),
+        user_gender: Some("female".to_string()),
+        system_prompt_extension: Some("Custom instructions.".to_string()),
+        content_libraries: vec![ContentLibrary {
+            root_folder: "/x".to_string(),
+            name: "x".to_string(),
+            kind: "k".to_string(),
+            readonly: true,
+            priority: 0,
+        }],
+        ..AppConfig::default()
+    };
+    let agent_cfg = cfg.to_agent_config();
+    let _ = agent_cfg;
+}
