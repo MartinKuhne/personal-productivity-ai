@@ -1,19 +1,15 @@
-//! Top-level agent orchestration — builds the system prompt, sends requests, executes tool calls, and streams results back to the UI.
+//! Top-level agent orchestration — sends requests, executes tool calls, and streams results back to the UI.
 
 use crate::agent::context::AgentContext;
 use crate::agent::datamark;
-use crate::agent::events::{AgentEvent as SeamAgentEvent, AgentStatus};
+use crate::agent::events::{
+    AgentDebugEntry, AgentEventObserver, AgentStatus, DebugEntryKind, DebugEntryRow,
+};
 use crate::agent::llm_client::{LLMClient, parse_usage_block};
-use crate::agent::prompt_builder::SystemPromptBuilder;
 use crate::agent::tool_executor::ToolExecutor;
-
-use crate::bus::core::Bus;
-use crate::bus::events::debug::{AgentDebugEntry, DebugEntryKind, DebugEntryRow};
-use crate::config::get_config_path;
 use std::collections::HashSet;
 use std::path::PathBuf;
 use std::sync::atomic::Ordering;
-use uuid::Uuid;
 
 /// Run an agent session to completion on the current thread.
 ///
@@ -29,27 +25,28 @@ fn run_agent_inner(ctx: AgentContext) {
         Some(c) => c,
         None => return,
     };
-    let system_prompt = SystemPromptBuilder::new(&ctx.config)
-        .with_active_file(ctx.active_file.clone())
-        .with_active_dir(ctx.active_dir.clone())
-        .with_selected_files(ctx.selected_files.clone())
-        .build(&ctx.config);
+    let system_prompts = ctx.system_prompts.clone();
     log_prompt_context(&ctx.active_file, &ctx.active_dir, &ctx.selected_files);
-    let mut messages = build_messages(system_prompt, &ctx.prompt, ctx.history.clone());
+    let mut messages = build_messages(system_prompts, &ctx.prompt, ctx.history.clone());
+    ctx.tool_context.rcu(|bundle| {
+        let mut new_bundle = (**bundle).clone();
+        new_bundle.registry.update_and_refresh(&ctx.agent_config);
+        new_bundle
+    });
     let tools_json = ctx
-        .tool_manager
-        .write()
-        .unwrap()
-        .get_tools_schema(&ctx.config, &ctx.prompt);
-    let executor = ToolExecutor::new(
-        ctx.config.clone(),
-        ctx.file_event_bus.clone(),
-        ctx.browser_session.clone(),
-        ctx.pdf_backing.clone(),
+        .tool_context
+        .load()
+        .registry
+        .get_schema(&ctx.agent_config, &ctx.prompt);
+    let executor = crate::agent::tool_executor::ToolExecutorBuilder::new(
+        std::sync::Arc::new(ctx.agent_config.clone()),
+        ctx.file_observer.clone(),
         ctx.cache.clone(),
-        ctx.tool_manager.clone(),
-        ctx.uuid_gen.clone(),
-    );
+        ctx.tool_context.clone(),
+    )
+    .with_tool_call_policy(ctx.tool_call_policy.clone())
+    .with_uuid_gen(ctx.uuid_gen.clone())
+    .build();
 
     let session_boundary = AgentDebugEntry {
         turn: 0,
@@ -59,15 +56,9 @@ fn run_agent_inner(ctx: AgentContext) {
         content: None,
         row_type: DebugEntryRow::SessionBoundary,
     };
-    publish_debug(
-        &ctx.agent_event_bus,
-        ctx.session_id,
-        session_boundary.clone(),
-    );
+    publish_debug(&*ctx.observer, session_boundary.clone());
     // New seam: SessionStarted lifecycle event
-    let _ = ctx.agent_event_bus.publish(SeamAgentEvent::SessionStarted {
-        session_id: ctx.session_id,
-    });
+    ctx.observer.on_session_started();
 
     let mut turn_number: usize = 0;
     let mut prev_messages_len: usize = 0;
@@ -87,28 +78,15 @@ fn run_agent_inner(ctx: AgentContext) {
             Turn::Continue => {}
             Turn::Done => break,
             Turn::Failed => {
-                let _ = ctx
-                    .agent_event_bus
-                    .publish(SeamAgentEvent::SessionFinished {
-                        session_id: ctx.session_id,
-                        history: Vec::new(),
-                    });
+                ctx.observer.on_session_finished(Vec::new());
                 return;
             }
         }
     }
     if !ctx.cancel_flag.load(Ordering::SeqCst) {
-        let _ = ctx.agent_event_bus.publish(SeamAgentEvent::Status {
-            session_id: ctx.session_id,
-            status: AgentStatus::Done,
-        });
+        ctx.observer.on_status(AgentStatus::Done);
     }
-    let _ = ctx
-        .agent_event_bus
-        .publish(SeamAgentEvent::SessionFinished {
-            session_id: ctx.session_id,
-            history: messages,
-        });
+    ctx.observer.on_session_finished(messages);
 }
 enum Turn {
     Continue,
@@ -128,10 +106,7 @@ fn process_turn(
     *turn_number += 1;
     let turn = *turn_number;
 
-    let _ = ctx.agent_event_bus.publish(SeamAgentEvent::Status {
-        session_id: ctx.session_id,
-        status: AgentStatus::AwaitingLlm,
-    });
+    ctx.observer.on_status(AgentStatus::AwaitingLlm);
 
     let tool_count = tools_json.as_array().map(|a| a.len()).unwrap_or(0);
     let delta: Vec<serde_json::Value> = messages[*prev_messages_len..].to_vec();
@@ -153,16 +128,13 @@ fn process_turn(
         })),
         row_type: DebugEntryRow::Entry,
     };
-    publish_debug(&ctx.agent_event_bus, ctx.session_id, outgoing_entry);
+    publish_debug(&*ctx.observer, outgoing_entry);
     *prev_messages_len = messages.len();
 
     let resp_val = match llm.chat_completion(messages, tools_json) {
         Ok(v) => v,
         Err(e) => {
-            let _ = ctx.agent_event_bus.publish(SeamAgentEvent::Failed {
-                session_id: ctx.session_id,
-                error: e.user_message(),
-            });
+            ctx.observer.on_failed(e.user_message());
             return Turn::Failed;
         }
     };
@@ -196,21 +168,19 @@ fn process_turn(
         content: Some(resp_val.clone()),
         row_type: DebugEntryRow::Entry,
     };
-    publish_debug(&ctx.agent_event_bus, ctx.session_id, incoming_entry);
+    publish_debug(&*ctx.observer, incoming_entry);
 
-    emit_usage(&resp_val, &ctx.agent_event_bus, ctx.session_id);
+    emit_usage(&resp_val, &*ctx.observer);
     let message = match extract_message(&resp_val) {
         Some(m) => m,
         None => {
-            let _ = ctx.agent_event_bus.publish(SeamAgentEvent::Failed {
-                session_id: ctx.session_id,
-                error: "Invalid response schema".into(),
-            });
+            ctx.observer
+                .on_failed("Invalid response schema".to_string());
             return Turn::Failed;
         }
     };
-    handle_reasoning(&message, &ctx.agent_event_bus, ctx.session_id);
-    handle_content(&message, &ctx.agent_event_bus, ctx.session_id);
+    handle_reasoning(&message, &*ctx.observer);
+    handle_content(&message, &*ctx.observer);
     messages.push(message.clone());
     match message.get("tool_calls").and_then(|t| t.as_array()) {
         Some(tc) if !tc.is_empty() => {
@@ -232,45 +202,37 @@ fn process_turn(
                     .to_string();
                 let args_value = serde_json::from_str::<serde_json::Value>(args)
                     .unwrap_or(serde_json::Value::String(args.to_string()));
-                let _ = ctx
-                    .agent_event_bus
-                    .publish(SeamAgentEvent::ToolCallStarted {
-                        session_id: ctx.session_id,
-                        id: call_id,
-                        name: fn_name.to_string(),
-                        args: args_value,
-                    });
+                ctx.observer
+                    .on_tool_call_started(call_id, fn_name.to_string(), args_value);
             }
-            let _ = ctx.agent_event_bus.publish(SeamAgentEvent::Status {
-                session_id: ctx.session_id,
-                status: AgentStatus::ExecutingTools,
-            });
+            ctx.observer.on_status(AgentStatus::ExecutingTools);
             let (results, side_effects) = executor.execute_all(tc);
             for effect in side_effects {
-                let _ = ctx.agent_event_bus.publish(SeamAgentEvent::ToolSideEffect {
-                    session_id: ctx.session_id,
-                    effect,
-                });
+                ctx.observer.on_tool_side_effect(effect.clone());
             }
-            emit_tool_results_debug(turn, &ctx.agent_event_bus, ctx.session_id, &results);
-            process_tool_results(&results, tc, messages, &ctx.agent_event_bus, ctx.session_id);
+            emit_tool_results_debug(turn, &*ctx.observer, &results);
+            process_tool_results(&results, tc, messages, &*ctx.observer);
             Turn::Continue
         }
         _ => Turn::Done,
     }
 }
 fn resolve_ll_client(ctx: &AgentContext) -> Option<LLMClient> {
-    let client = LLMClient::from_config(&ctx.config, ctx.model_name.as_deref())?;
+    let client = match LLMClient::from_agent_config(&ctx.agent_config, ctx.model_name.as_deref()) {
+        Some(c) => c,
+        None => {
+            ctx.observer
+                .on_failed("Model configuration not found".to_string());
+            return None;
+        }
+    };
     if !client.api_key_valid() {
         tracing::warn!(name = "agent.api_key.missing", "Agent run skipped.");
         let err = format!(
             "API key not set. Configure in {} or use `/models`.",
-            get_config_path().display()
+            ctx.agent_config.config_path().display()
         );
-        let _ = ctx.agent_event_bus.publish(SeamAgentEvent::Failed {
-            session_id: ctx.session_id,
-            error: err,
-        });
+        ctx.observer.on_failed(err);
         return None;
     }
     Some(client)
@@ -292,7 +254,7 @@ fn build_messages(
         messages
     }
 }
-fn emit_usage(resp: &serde_json::Value, event_bus: &Bus<SeamAgentEvent>, session_id: Uuid) {
+fn emit_usage(resp: &serde_json::Value, observer: &dyn AgentEventObserver) {
     if let Some(info) = resp.get("usage").and_then(parse_usage_block) {
         tracing::info!(
             name = "agent.usage",
@@ -301,45 +263,31 @@ fn emit_usage(resp: &serde_json::Value, event_bus: &Bus<SeamAgentEvent>, session
             total_tokens = info.total_tokens,
             "LLM usage."
         );
-        let _ = event_bus.publish(SeamAgentEvent::TokenUsage {
-            session_id,
-            usage: info,
-        });
+        observer.on_token_usage(info);
     }
 }
 fn extract_message(resp: &serde_json::Value) -> Option<serde_json::Value> {
     resp.get("choices")?.get(0)?.get("message").cloned()
 }
-fn handle_reasoning(
-    message: &serde_json::Value,
-    event_bus: &Bus<SeamAgentEvent>,
-    session_id: Uuid,
-) {
+fn handle_reasoning(message: &serde_json::Value, observer: &dyn AgentEventObserver) {
     if let Some(r) = message.get("reasoning_content").and_then(|r| r.as_str()) {
-        let _ = event_bus.publish(SeamAgentEvent::Thinking {
-            session_id,
-            text: r.to_string(),
-        });
+        observer.on_thinking(r.to_string());
     }
 }
-fn handle_content(message: &serde_json::Value, event_bus: &Bus<SeamAgentEvent>, session_id: Uuid) {
+fn handle_content(message: &serde_json::Value, observer: &dyn AgentEventObserver) {
     let content_str = message
         .get("content")
         .and_then(|c| c.as_str())
         .unwrap_or("");
     if !content_str.is_empty() {
-        let _ = event_bus.publish(SeamAgentEvent::ContentDelta {
-            session_id,
-            text: format!("{}\n\n", content_str),
-        });
+        observer.on_content_delta(format!("{}\n\n", content_str));
     }
 }
 fn process_tool_results(
     results: &[(String, String, String, String)],
     tool_calls: &[serde_json::Value],
     messages: &mut Vec<serde_json::Value>,
-    event_bus: &Bus<SeamAgentEvent>,
-    session_id: Uuid,
+    observer: &dyn AgentEventObserver,
 ) {
     let mut map: std::collections::HashMap<String, (String, String, String)> =
         std::collections::HashMap::new();
@@ -356,12 +304,7 @@ fn process_tool_results(
             log_tool_result(&fn_name, &result);
             let result_value = serde_json::from_str::<serde_json::Value>(&result)
                 .unwrap_or(serde_json::Value::String(result.clone()));
-            let _ = event_bus.publish(SeamAgentEvent::ToolResult {
-                session_id,
-                id: cid.clone(),
-                name: fn_name.clone(),
-                result: result_value,
-            });
+            observer.on_tool_result(cid.clone(), fn_name.clone(), result_value);
             // R1 (Spotlighting): wrap the tool result in a
             // datamark envelope so the LLM treats it as data, not
             // instructions. The user-facing response above is built
@@ -442,8 +385,7 @@ fn log_tool_result(func_name: &str, result: &str) {
 
 fn emit_tool_results_debug(
     turn: usize,
-    event_bus: &Bus<SeamAgentEvent>,
-    session_id: Uuid,
+    observer: &dyn AgentEventObserver,
     results: &[(String, String, String, String)],
 ) {
     let entries: Vec<serde_json::Value> = results
@@ -469,14 +411,14 @@ fn emit_tool_results_debug(
         content: Some(serde_json::Value::Array(entries)),
         row_type: DebugEntryRow::Entry,
     };
-    publish_debug(event_bus, session_id, entry);
+    publish_debug(observer, entry);
 }
 
 /// Publish a debug entry on the `Bus<AgentEvent>` as
 /// `SeamAgentEvent::DebugEntry`. The legacy `tx_gui` mpsc path was
 /// removed at step 5 (T016).
-fn publish_debug(event_bus: &Bus<SeamAgentEvent>, session_id: Uuid, entry: AgentDebugEntry) {
-    let _ = event_bus.publish(SeamAgentEvent::DebugEntry { session_id, entry });
+fn publish_debug(observer: &dyn AgentEventObserver, entry: AgentDebugEntry) {
+    observer.on_debug_entry(entry);
 }
 
 #[cfg(test)]

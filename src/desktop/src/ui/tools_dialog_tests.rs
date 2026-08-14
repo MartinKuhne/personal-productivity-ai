@@ -97,15 +97,18 @@ fn test_tools_dialog_renders_restart_button_on_error() {
     // Populate the global manager's group state so `record_error`
     // has a row to attach the error to, then record it.
     {
-        let mut tm = app.orchestrator.tool_manager.write().unwrap();
-        tm.groups_snapshot(app.config());
-        let id = crate::agent::tools::manager::ToolGroupId::Internal(
-            crate::agent::tools::manager::InternalToolGroup::Filesystem,
+        app.orchestrator.tool_context.rcu(|bundle| {
+            let mut new_bundle = (**bundle).clone();
+            new_bundle.registry.refresh_state(app.config());
+            new_bundle
+        });
+        let id = crate::agent::tools::registry::ToolGroupId::Internal(
+            crate::agent::tools::registry::InternalToolGroup::Filesystem,
         );
         tm.record_error(
             &id,
-            crate::agent::tools::manager::ToolGroupError::now(
-                crate::agent::tools::manager::ToolErrorKind::Execution,
+            crate::agent::tools::registry::ToolGroupError::now(
+                crate::agent::tools::registry::ToolErrorKind::Execution,
                 "Permission denied".to_string(),
             ),
         );

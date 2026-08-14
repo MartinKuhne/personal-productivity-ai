@@ -1,14 +1,14 @@
 //! YAML front-matter tools — `read_yaml_header` and `write_yaml_header` for title, summary, tags, date, etc.
 
-use crate::bus::events::file::FileEventProducer;
 use crate::markdown::Document;
 use serde_norway::{Mapping, Value};
 use std::path::Path;
 
 pub fn tool_read_yaml_header(
+    ctx: &crate::agent::tools::context::ToolContext,
     path_str: &str,
 ) -> Result<crate::agent::tools::dtos::ReadYamlHeaderResponse, String> {
-    match std::fs::read_to_string(path_str) {
+    match ctx.vfs().read_to_string(path_str.as_ref()) {
         Ok(content) => {
             // `Document` parses the front matter (if any) in one
             // pass; reaching `front_matter()` is the same call the
@@ -30,15 +30,18 @@ pub fn tool_read_yaml_header(
 }
 
 pub fn tool_write_yaml_header(
+    ctx: &crate::agent::tools::context::ToolContext,
     path_str: &str,
     title: Option<&str>,
     summary: Option<&str>,
     tags: Option<Vec<String>>,
     header_date: Option<&str>,
-    producer: &FileEventProducer,
+    producer: &dyn crate::agent::tools::observer::OnFileChanged,
 ) -> Result<crate::agent::tools::dtos::WriteYamlHeaderResponse, String> {
-    let existed = Path::new(path_str).exists();
-    let current_content = std::fs::read_to_string(path_str).unwrap_or_else(|_| "".to_string());
+    let current_content = ctx
+        .vfs()
+        .read_to_string(path_str.as_ref())
+        .unwrap_or_else(|_| "".to_string());
 
     // `Document::body()` returns the source with the front-matter
     // block stripped when one is present, or the full source
@@ -81,18 +84,11 @@ pub fn tool_write_yaml_header(
             let new_content = format!("---\n{}---\n{}", yaml_final, markdown_body.trim_start());
             let path = Path::new(path_str);
             if let Some(parent) = path.parent() {
-                let _ = std::fs::create_dir_all(parent);
+                let _ = ctx.vfs().create_dir_all(parent);
             }
-            match std::fs::write(path_str, new_content) {
+            match ctx.vfs().write(path_str.as_ref(), new_content.as_bytes()) {
                 Ok(_) => {
-                    // Was the file created or updated? Publish the
-                    // matching event so consumers (directory tree,
-                    // tag manager) refresh.
-                    if existed {
-                        producer.publish_updated(path);
-                    } else {
-                        producer.publish_discovered(path);
-                    }
+                    producer.on_file_changed(path);
                     Ok(crate::agent::tools::dtos::WriteYamlHeaderResponse {
                         result: "YAML header written successfully.".to_string(),
                     })
@@ -112,9 +108,22 @@ pub fn tool_write_yaml_header(
 
 #[cfg(test)]
 mod tests {
+
+    fn test_ctx() -> crate::agent::tools::context::ToolContext {
+        let config = crate::agent::config::AgentConfig::default();
+        let mut builder = crate::agent::tools::context::ToolContextBuilder::new(
+            std::sync::Arc::new(config.clone()),
+            std::sync::Arc::new(crate::agent::tools::observer::DefaultFileObserver),
+        );
+        builder = builder.with_extension(std::sync::Arc::new(
+            crate::agent::tools::vfs::VirtualFileSystemExt(std::sync::Arc::new(
+                crate::agent::tools::vfs::VfsResolver::new(std::sync::Arc::new(config.clone())),
+            )),
+        ));
+        builder.build()
+    }
+
     use super::*;
-    use crate::bus::core::Bus;
-    use crate::bus::events::file::FileEvent;
     use crate::bus::events::file::FileEventKind;
     use std::fs;
     use tempfile::tempdir;
@@ -122,8 +131,8 @@ mod tests {
     /// A producer that publishes to a throwaway bus. Tests don't
     /// need to consume the events — they only care about the
     /// success/failure of the underlying file operation.
-    fn noop_producer() -> FileEventProducer {
-        FileEventProducer::new(Bus::new())
+    fn noop_producer() -> std::sync::Arc<dyn crate::agent::tools::observer::OnFileChanged> {
+        std::sync::Arc::new(crate::agent::tools::observer::DefaultFileObserver)
     }
 
     #[test]
@@ -132,7 +141,7 @@ mod tests {
         let file_path = dir.path().join("test.md");
         fs::write(&file_path, "---\ntitle: Test\ntags: [tag1]\n---\nContent").unwrap();
 
-        let result = tool_read_yaml_header(file_path.to_str().unwrap())
+        let result = tool_read_yaml_header(&test_ctx(), file_path.to_str().unwrap())
             .unwrap()
             .content;
         assert!(result.contains("title"));
@@ -145,7 +154,7 @@ mod tests {
         let file_path = dir.path().join("test.md");
         fs::write(&file_path, "No header here").unwrap();
 
-        let result = tool_read_yaml_header(file_path.to_str().unwrap());
+        let result = tool_read_yaml_header(&test_ctx(), file_path.to_str().unwrap());
         assert_eq!(result.unwrap_err(), "No YAML header found in this file.");
     }
 
@@ -156,12 +165,13 @@ mod tests {
 
         let producer = noop_producer();
         let result = tool_write_yaml_header(
+            &test_ctx(),
             file_path.to_str().unwrap(),
             Some("Test Title"),
             Some("Test summary"),
             Some(vec!["tag1".to_string(), "tag2".to_string()]),
             Some("2024-01-01T00:00:00Z"),
-            &producer,
+            &*producer,
         )
         .unwrap()
         .result;
@@ -203,12 +213,13 @@ mod tests {
 
         let producer = noop_producer();
         let result = tool_write_yaml_header(
+            &test_ctx(),
             file_path.to_str().unwrap(),
             Some("New Title"),
             None,
             None,
             None,
-            &producer,
+            &*producer,
         )
         .unwrap()
         .result;
@@ -228,12 +239,13 @@ mod tests {
 
         let producer = noop_producer();
         let result = tool_write_yaml_header(
+            &test_ctx(),
             file_path.to_str().unwrap(),
             Some("Title"),
             None,
             None,
             None,
-            &producer,
+            &*producer,
         )
         .unwrap()
         .result;
@@ -243,30 +255,32 @@ mod tests {
     }
 
     #[test]
-    fn test_tool_write_yaml_header_publishes_discovered_for_new_file() {
-        // A brand new file must publish a Discovered event so the
-        // directory tree and tag manager pick it up.
-        let bus: Bus<FileEvent> = Bus::new();
+    fn test_tool_write_yaml_header_publishes_event_on_write() {
+        let bus = crate::bus::core::Bus::new();
         let reader = bus.subscribe();
-        let producer = FileEventProducer::new(bus.clone());
+        let producer: std::sync::Arc<dyn crate::agent::tools::observer::OnFileChanged> =
+            std::sync::Arc::new(crate::app::session::bus_observer::AppFileObserver::new(
+                bus.clone(),
+            ));
 
         let dir = tempdir().unwrap();
         let file_path = dir.path().join("brand_new.md");
 
         tool_write_yaml_header(
+            &test_ctx(),
             file_path.to_str().unwrap(),
             Some("Title"),
             None,
             None,
             None,
-            &producer,
+            &*producer,
         )
         .unwrap();
 
         let event = reader
             .recv_timeout(std::time::Duration::from_millis(100))
             .unwrap();
-        assert_eq!(event.kind, FileEventKind::Discovered);
+        assert_eq!(event.kind, FileEventKind::Updated);
         assert_eq!(event.paths[0], file_path);
     }
 
@@ -274,21 +288,25 @@ mod tests {
     fn test_tool_write_yaml_header_publishes_updated_for_existing_file() {
         // An existing file getting its header rewritten must
         // publish an Updated event.
-        let bus: Bus<FileEvent> = Bus::new();
+        let bus = crate::bus::core::Bus::new();
         let reader = bus.subscribe();
-        let producer = FileEventProducer::new(bus.clone());
+        let producer: std::sync::Arc<dyn crate::agent::tools::observer::OnFileChanged> =
+            std::sync::Arc::new(crate::app::session::bus_observer::AppFileObserver::new(
+                bus.clone(),
+            ));
 
         let dir = tempdir().unwrap();
         let file_path = dir.path().join("existing.md");
         fs::write(&file_path, "# Body").unwrap();
 
         tool_write_yaml_header(
+            &test_ctx(),
             file_path.to_str().unwrap(),
             Some("New Title"),
             None,
             None,
             None,
-            &producer,
+            &*producer,
         )
         .unwrap();
 

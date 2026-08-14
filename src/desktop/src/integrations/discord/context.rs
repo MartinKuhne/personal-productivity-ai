@@ -36,14 +36,14 @@ pub struct ConversationContext {
 
 /// Manages per-conversation contexts with TTL-based cleanup.
 #[derive(Debug)]
-pub struct ContextManager {
+pub struct DiscordContext {
     contexts: Arc<RwLock<HashMap<String, ConversationContext>>>,
     max_history: usize,
     ttl: Duration,
     uuid_gen: Arc<dyn UuidGenerator>,
 }
 
-impl ContextManager {
+impl DiscordContext {
     pub fn new(max_history: usize, ttl_seconds: u64, uuid_gen: Arc<dyn UuidGenerator>) -> Self {
         Self {
             contexts: Arc::new(RwLock::new(HashMap::new())),
@@ -145,7 +145,7 @@ mod tests {
     #[tokio::test]
     async fn test_add_message_creates_context_if_missing() {
         let manager =
-            ContextManager::new(20, 3600, Arc::new(crate::utils::uuid::SystemUuidGenerator));
+            DiscordContext::new(20, 3600, Arc::new(crate::utils::uuid::SystemUuidGenerator));
 
         manager
             .add_message("fresh-channel", Role::User, "first message".to_string())
@@ -163,7 +163,7 @@ mod tests {
     #[tokio::test]
     async fn test_context_manager_creates_new_context() {
         let mock_uuid = uuid::Uuid::nil();
-        let manager = ContextManager::new(
+        let manager = DiscordContext::new(
             20,
             3600,
             Arc::new(crate::utils::uuid::FixedUuidGenerator::new(mock_uuid)),
@@ -179,7 +179,7 @@ mod tests {
     #[tokio::test]
     async fn test_context_manager_returns_existing_context() {
         let manager =
-            ContextManager::new(20, 3600, Arc::new(crate::utils::uuid::SystemUuidGenerator));
+            DiscordContext::new(20, 3600, Arc::new(crate::utils::uuid::SystemUuidGenerator));
         let ctx1 = manager.get_or_create("channel-123").await;
         let ctx2 = manager.get_or_create("channel-123").await;
 
@@ -190,7 +190,7 @@ mod tests {
     #[tokio::test]
     async fn test_add_message_appends_to_context() {
         let manager =
-            ContextManager::new(20, 3600, Arc::new(crate::utils::uuid::SystemUuidGenerator));
+            DiscordContext::new(20, 3600, Arc::new(crate::utils::uuid::SystemUuidGenerator));
         manager.get_or_create("channel-123").await; // Create context first
         manager
             .add_message("channel-123", Role::User, "Hello".to_string())
@@ -210,7 +210,7 @@ mod tests {
     #[tokio::test]
     async fn test_system_prompt_included_in_llm_messages() {
         let manager =
-            ContextManager::new(20, 3600, Arc::new(crate::utils::uuid::SystemUuidGenerator));
+            DiscordContext::new(20, 3600, Arc::new(crate::utils::uuid::SystemUuidGenerator));
         manager.get_or_create("channel-123").await; // Create context first
         manager
             .add_message("channel-123", Role::User, "Hello".to_string())
@@ -229,7 +229,7 @@ mod tests {
     #[tokio::test]
     async fn test_max_history_trims_old_messages() {
         let manager =
-            ContextManager::new(3, 3600, Arc::new(crate::utils::uuid::SystemUuidGenerator));
+            DiscordContext::new(3, 3600, Arc::new(crate::utils::uuid::SystemUuidGenerator));
         manager.get_or_create("channel-123").await; // Create context first
         manager
             .add_message("channel-123", Role::User, "1".to_string())
@@ -258,7 +258,7 @@ mod tests {
     #[tokio::test]
     async fn test_token_count_estimation() {
         let manager =
-            ContextManager::new(20, 3600, Arc::new(crate::utils::uuid::SystemUuidGenerator));
+            DiscordContext::new(20, 3600, Arc::new(crate::utils::uuid::SystemUuidGenerator));
         manager.get_or_create("channel-123").await; // Create context first
         manager
             .add_message("channel-123", Role::User, "Hello world".to_string())
@@ -274,7 +274,7 @@ mod tests {
     #[tokio::test]
     async fn test_different_scopes_have_isolated_contexts() {
         let manager =
-            ContextManager::new(20, 3600, Arc::new(crate::utils::uuid::SystemUuidGenerator));
+            DiscordContext::new(20, 3600, Arc::new(crate::utils::uuid::SystemUuidGenerator));
         manager.get_or_create("channel-1").await;
         manager.get_or_create("channel-2").await;
         manager
@@ -295,7 +295,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_cleanup_expired_removes_old_contexts() {
-        let manager = ContextManager::new(20, 1, Arc::new(crate::utils::uuid::SystemUuidGenerator)); // 1 second TTL
+        let manager = DiscordContext::new(20, 1, Arc::new(crate::utils::uuid::SystemUuidGenerator)); // 1 second TTL
         manager.get_or_create("channel-123").await; // Create context first
         manager
             .add_message("channel-123", Role::User, "Hello".to_string())

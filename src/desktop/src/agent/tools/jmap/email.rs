@@ -14,7 +14,7 @@
 //!
 //! Unit tests live in the sibling `email_tests.rs` sidecar.
 
-use crate::config::AppConfig;
+use crate::agent::config::AgentConfig;
 use fast_h2m::convert;
 use jmap_client::core::query::Filter as CoreFilter;
 use jmap_client::core::query::Filter as MailFilter;
@@ -23,7 +23,7 @@ use jmap_client::core::set::SetObject;
 use jmap_client::email::query::Filter;
 
 use super::client::JmapSession;
-use crate::agent::tools::manager::cache::{SearchEmailCacheEntry, SearchEmailItem};
+use crate::agent::tools::registry::cache::{SearchEmailCacheEntry, SearchEmailItem};
 
 /// Maximum number of bytes the JMAP server should inline for a single body
 /// part in `bodyValues` (RFC 8621 §6.1.2 `maxBodyValueBytes`).
@@ -272,7 +272,7 @@ pub fn new_search_email_cursor(uuid_gen: &dyn crate::utils::uuid::UuidGenerator)
 /// the cache lookup misses). The result is cached in the shared
 /// `ToolCache` under a fresh UUID cursor.
 fn fetch_full_search_result(
-    config: &AppConfig,
+    config: &AgentConfig,
     filters: &SearchEmailFilters<'_>,
 ) -> Result<SearchEmailCacheEntry, String> {
     let keyword = filters.keyword;
@@ -488,13 +488,15 @@ fn format_search_page(page_items: &[&SearchEmailItem], errors: &[String]) -> Str
 /// cursor, the helper returns an error instructing the LLM to
 /// re-run the search with no cursor.
 pub fn tool_search_email(
-    config: &AppConfig,
+    config: &AgentConfig,
     filters: SearchEmailFilters<'_>,
     cursor: Option<String>,
-    cache: &crate::agent::tools::manager::cache::ToolCache,
+    cache: &crate::agent::tools::registry::cache::ToolCache,
     uuid_gen: &dyn crate::utils::uuid::UuidGenerator,
 ) -> Result<crate::agent::tools::dtos::SearchEmailResponse, String> {
-    use crate::agent::tools::manager::cache::{CacheEntry, SearchEmailCacheEntry, SearchEmailItem};
+    use crate::agent::tools::registry::cache::{
+        CacheEntry, SearchEmailCacheEntry, SearchEmailItem,
+    };
 
     // First call: query JMAP, populate the cache, return first page + cursor.
     let Some(cursor) = cursor else {
@@ -613,7 +615,7 @@ pub fn tool_search_email(
 
 /// Get a single email by its JMAP ID.
 pub fn tool_get_email_by_id(
-    config: &AppConfig,
+    config: &AgentConfig,
     id: &str,
 ) -> Result<crate::agent::tools::dtos::GetEmailByIdResponse, String> {
     for (name, client) in &config.jmap_clients {
@@ -650,7 +652,7 @@ pub const AI_AGENT_FOOTER: &str = "\n---\nSent by FastMD on behalf of the user";
 /// Send an email using `Email/set` to create the message and `EmailSubmission/set`
 /// to submit it for delivery via the typed crate API.
 pub fn tool_send_email(
-    config: &AppConfig,
+    config: &AgentConfig,
     to: &str,
     subject: &str,
     body: &str,

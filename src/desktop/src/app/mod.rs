@@ -18,27 +18,33 @@ pub mod background_task;
 pub mod batch;
 #[cfg(feature = "browser")]
 pub mod browser;
-pub mod dialog_manager;
+pub mod dialogs;
 pub mod document;
+pub mod events;
 pub mod orchestrator;
 pub mod panel_layout;
 pub mod persisted;
 pub mod print;
 #[cfg(feature = "pdf-export")]
 pub mod print_pdf;
-pub mod selection_manager;
+pub mod prompts;
+pub mod selection;
 pub mod session;
-pub mod tab_manager;
-pub mod tag_manager;
+pub mod tabs;
+pub mod tags;
 pub mod text_buffer;
+pub mod tool_specs;
 pub mod vfs;
 pub mod watcher;
 
-pub use dialog_manager::DialogManager;
+pub use dialogs::Dialogs;
 pub use panel_layout::PanelLayout;
 pub use persisted::PersistedUiState;
-pub use selection_manager::SelectionManager;
-pub use tab_manager::TabManager;
-pub use tag_manager::TagManager;
+pub use selection::FileSelection;
+pub use tabs::Tabs;
+pub use tags::Tags;
 pub use text_buffer::{Cursor, Selection, TextBuffer, UndoStack};
 pub use vfs::{VirtualPath, VirtualPathError};
+
+#[cfg(test)]
+mod tool_specs_tests;

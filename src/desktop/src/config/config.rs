@@ -718,6 +718,28 @@ impl AppConfig {
         crate::ui::table_width::DeficitStrategy::from_config(&self.table_width_strategy)
     }
 
+    /// Project the global `AppConfig` into the agent's domain slice.
+    ///
+    /// Resolves the browser config (filling env-dependent defaults) and
+    /// captures the config path for the "API key not set" error message.
+    pub fn to_agent_config(&self) -> crate::agent::config::AgentConfig {
+        crate::agent::config::AgentConfigBuilder::new()
+            .with_models(self.models.clone())
+            .with_max_tokens(self.max_tokens)
+            .with_tool_groups(self.tool_groups.clone())
+            .with_mcp_servers(self.mcp_servers.clone())
+            .with_browser(self.browser.resolve(&self.content_libraries))
+            .with_config_path(get_config_path())
+            .with_jmap_clients(self.jmap_clients.clone())
+            .with_caldav_clients(self.caldav_clients.clone())
+            .with_trello_client(self.trello_client.clone())
+            .with_searxng_url(self.searxng_url.clone())
+            .with_csv_db_path(self.csv_db_path.clone())
+            .with_feature_flags(self.feature_flags.clone())
+            .with_content_libraries(self.content_libraries.clone())
+            .build()
+    }
+
     /// Find the best model for a given use_case (lowest cost among matches).
     pub fn model_for_use_case(&self, use_case: impl AsRef<str>) -> Option<(&String, &LlmConfig)> {
         let uc_ref = use_case.as_ref();

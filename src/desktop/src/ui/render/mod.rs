@@ -58,7 +58,7 @@ use eframe::egui;
 /// Purity: Impure (modifies UI state). Coordinates parsing and rendering.
 ///
 /// `scroll_to_id_str` is the egui-free stable identifier that lives in
-/// `TabManager::scroll_to_header_id`; this function takes it by `&mut
+/// `Tabs::scroll_to_header_id`; this function takes it by `&mut
 /// Option<String>`, converts it to an `egui::Id` for the inner
 /// scroll-to-me comparison, and clears the field when the matching
 /// heading has been scrolled to.

@@ -12,31 +12,3 @@
 
 #[cfg(feature = "discord")]
 pub mod discord;
-
-/// MCP (Model Context Protocol) client integration.
-///
-/// The wire-protocol client (transports, sessions, OAuth 2.1,
-/// manager) and the [`McpClientManager`](crate::integrations::mcp::McpClientManager)
-/// that owns them. The LLM-tool-loop glue that exposes
-/// MCP-discovered tools to the agent tool registry lives in
-/// [`crate::agent::tools::mcp`].
-pub mod mcp;
-
-/// Weather integration — Nominatim (geocoding) + the US National
-/// Weather Service (api.weather.gov) forecast. The LLM-tool-loop
-/// adapter that exposes `get_weather` as a `Tool` impl lives in
-/// crate::agent::tools::manager::builtin::weather.
-pub mod weather;
-
-/// Trello integration — REST client over `https://api.trello.com/1`.
-/// The LLM-tool-loop adapters (`trello_get_boards`, `trello_create_card`,
-/// …) live in
-/// crate::agent::tools::manager::builtin::trello.
-pub mod trello;
-
-/// DAV integration — CalDAV (RFC 4791) + CardDAV (RFC 6352) over HTTP,
-/// backed by the `fast_dav_rs` SDK. The LLM-tool-loop adapters
-/// (`search_calendar`, `add_contact`, …) live in
-/// crate::agent::tools::manager::builtin::caldav and
-/// crate::agent::tools::manager::builtin::carddav.
-pub mod dav;

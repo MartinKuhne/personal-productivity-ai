@@ -27,7 +27,7 @@ Two compounding factors in our specific code path:
    produces the very window we are trying to avoid.
 
 2. **The MCP stdio spawn
-   ([`src/desktop/src/integrations/mcp/session.rs:1081`](../../src/desktop/src/integrations/mcp/session.rs),
+   ([`src/desktop/src/agent/lib/mcp/session.rs:1081`](../../src/desktop/src/agent/lib/mcp/session.rs),
    pre-fix)**
    called `std::process::Command::new(executable)` and
    `cmd.spawn()` with no `creation_flags`. With `dwCreationFlags
@@ -43,8 +43,8 @@ crate, with varying blast radius:
 
 | File:Line | Spawn | Frequency |
 |---|---|---|
-| `integrations/mcp/oauth/store.rs:344` | `icacls` to set token-store ACLs | One-shot |
-| `integrations/mcp/manager.rs:2646` | `python` / `python3` / `py --version` discovery probe | One-shot at discovery |
+| `agent/lib/mcp/oauth/store.rs:344` | `icacls` to set token-store ACLs | One-shot |
+| `agent/lib/mcp/manager.rs:2646` | `python` / `python3` / `py --version` discovery probe | One-shot at discovery |
 | `app/background/pdf_converter.rs:105` | Configured PDF converter | Per conversion |
 | `bin/deploy.rs:8` | `cargo` for the deploy script | Deploy-time only |
 
@@ -128,7 +128,7 @@ scope for this ADR; tracked as a follow-up).
 
 - `cargo check` (lib) — clean.
 - `cargo clippy --lib -- -D warnings` — clean.
-- `cargo fmt --check src/integrations/mcp/session.rs` — clean.
+- `cargo fmt --check src/agent/lib/mcp/session.rs` — clean.
 - `cargo test --lib integrations::mcp` — **92 passed; 0 failed;
   6 ignored**, including the 3 new tests
   `build_stdio_command_sets_program_args_env_and_pipes_stdio`,

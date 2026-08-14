@@ -1,24 +1,36 @@
-//! LLM-callable tools — the `Tool` trait, the `ToolManager` (catalog +
+//! LLM-callable tools — the `Tool` trait, the `ToolRegistry` (catalog +
 //! per-group state + error tracking), and implementations for
 //! filesystem, web, email, and CSV.
 //!
 //! Protocol-layer code for the external service integrations
 //! (CalDAV, CardDAV, MCP, Trello, Weather) lives under
 //! [`crate::integrations`] and is referenced from the `Tool`
-//! adapters in [`manager::builtin`].
+//! adapters in [`registry::builtin`].
 //!
 //! Requirements: see [`SPEC.md`](SPEC.md) (TOOL-001..TOOL-010, TOOL-014..024) for the full specification.
 
 pub mod blocking;
-#[cfg(feature = "browser")]
 pub mod browser;
 pub mod context;
 pub mod csv_db;
+pub mod descriptor;
+#[cfg(test)]
+mod descriptor_tests;
+pub mod dispatcher;
+#[cfg(test)]
+mod dispatcher_tests;
 pub mod dtos;
+pub mod extensions;
 pub mod filesystem;
 pub mod jmap;
-pub mod manager;
 pub mod mcp;
+pub mod observer;
+pub mod policy;
+pub mod provider;
+#[cfg(test)]
+mod provider_tests;
+pub mod registry;
+pub mod vfs;
 pub mod web;
 pub mod yaml_header;
 
@@ -30,14 +42,14 @@ mod browser_tests;
 #[cfg(test)]
 mod dtos_proptests;
 
-// Property-based tests for the `ToolManager::execute_tool`
+// Property-based tests for the `ToolRegistry::execute_tool`
 // dispatch — every (name, args) pair the LLM emits. Phase 1 of
 // the fuzzing plan (`doc/planning/fuzzing.md`).
 #[cfg(test)]
 mod tool_call_dispatch_proptests;
 
-use crate::config::AppConfig;
 use context::ToolContext;
+use descriptor::ToolDescriptor;
 use std::any::TypeId;
 
 /// Whether a tool mutates user state and therefore cannot be dispatched
@@ -57,21 +69,66 @@ pub enum Safety {
     Mutating,
 }
 
+/// LLM-callable tool. Implementations return a `'static`
+/// [`ToolDescriptor`] from [`Tool::descriptor`]; the metadata
+/// methods default to reading from the descriptor. The default
+/// `is_enabled` consults the descriptor's
+/// [`descriptor::ToolConfigSpec`] and the current prompt; tools
+/// with non-trivial prompt rules (e.g. the CSV family's TOOL-001
+/// gate) override the default.
 pub trait Tool: Send + Sync {
-    fn name(&self) -> &str;
-    fn description(&self) -> &str;
-    fn input_type(&self) -> TypeId;
-    fn parameters_schema(&self) -> serde_json::Value;
+    /// Static metadata for this tool. Returned by reference so the
+    /// descriptor can be cached in a `OnceLock` and shared with
+    /// the agent loop, the prompt builder, and the UI dialog
+    /// without an allocation per call.
+    fn descriptor(&self) -> &ToolDescriptor;
 
-    fn is_enabled(&self, config: &AppConfig, prompt: &str) -> bool;
-    /// Classification used by the agent loop to decide parallel vs.
-    /// sequential dispatch. Default is `Mutating`; tools that cannot
-    /// cause side effects override this to `ReadOnly`.
-    fn safety(&self) -> Safety {
-        Safety::Mutating
+    /// Tool name as it appears to the LLM. Defaults to
+    /// `self.descriptor().name`.
+    fn name(&self) -> &str {
+        &self.descriptor().name
     }
+
+    /// Tool description shown to the LLM. Defaults to
+    /// `self.descriptor().description`.
+    fn description(&self) -> &str {
+        &self.descriptor().description
+    }
+
+    /// Compile-time identifier of the input DTO. Defaults to
+    /// `self.descriptor().input_type`.
+    fn input_type(&self) -> TypeId {
+        self.descriptor().input_type
+    }
+
+    /// JSON Schema for the tool's input. Defaults to a clone of
+    /// `self.descriptor().parameters_schema`.
+    fn parameters_schema(&self) -> serde_json::Value {
+        self.descriptor().parameters_schema.clone()
+    }
+
+    /// Whether the tool should currently be offered to the LLM.
+    /// Defaults to evaluating `self.descriptor().config` against
+    /// the live `AgentConfig` and the current prompt.
+    fn is_enabled(&self, config: &crate::agent::config::AgentConfig, prompt: &str) -> bool {
+        self.descriptor().config.is_enabled_for(config, prompt)
+    }
+
+    /// Classification used by the agent loop to decide parallel vs.
+    /// sequential dispatch. Defaults to
+    /// `self.descriptor().safety`.
+    fn safety(&self) -> Safety {
+        self.descriptor().safety
+    }
+
+    /// Run the tool with the given JSON arguments. Errors are
+    /// returned as `Err(String)`; success as a serialised JSON
+    /// value.
     fn execute(&self, ctx: &ToolContext, input_json: &str) -> Result<serde_json::Value, String>;
 }
 
 pub use context::ToolContext as ToolContextType;
-pub use manager::execute_tool;
+pub use descriptor::ToolDescriptor as ToolDescriptorType;
+pub use dispatcher::{ToolDispatcher, ToolError, ToolOutcome, ToolServices};
+pub use provider::{RegisteredTool, ToolProvider};
+pub use registry::execute_tool;

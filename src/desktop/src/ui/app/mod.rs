@@ -34,13 +34,11 @@ use std::path::PathBuf;
 
 use eframe::egui;
 
-use crate::agent::AgentSessionManager;
+use crate::agent::AgentSession;
 use crate::app::watcher::file_processor::FileEventProcessor;
-use crate::app::{
-    DialogManager, PanelLayout, PersistedUiState, SelectionManager, TabManager, TagManager,
-    TextBuffer,
-};
+use crate::app::{Dialogs, FileSelection, PanelLayout, PersistedUiState, Tabs, Tags, TextBuffer};
 
+/// The key used to persist the eframe UI state.
 const PERSISTED_UI_STATE_KEY: &str = "ppai_ui_state";
 
 /// Sanity bounds for the user-chosen font scale multiplier.
@@ -54,6 +52,7 @@ const PERSISTED_UI_STATE_KEY: &str = "ppai_ui_state";
 /// launch) or outright corruption. We clamp them on apply and
 /// self-heal them to `None` on the next save.
 const FONT_SCALE_MIN: f32 = 0.5;
+/// The maximum font scaling factor allowed.
 const FONT_SCALE_MAX: f32 = 3.0;
 
 /// Validate that a candidate font scale is a finite, in-range
@@ -138,12 +137,12 @@ impl FastMdApp {
         &self.orchestrator.pdf_backing_tracker
     }
 
-    pub fn tags(&self) -> &TagManager {
-        &self.orchestrator.tag_manager
+    pub fn tags(&self) -> &Tags {
+        &self.orchestrator.tags
     }
 
-    pub fn tags_mut(&mut self) -> &mut TagManager {
-        &mut self.orchestrator.tag_manager
+    pub fn tags_mut(&mut self) -> &mut Tags {
+        &mut self.orchestrator.tags
     }
 
     pub fn layout(&self) -> &PanelLayout {
@@ -154,35 +153,35 @@ impl FastMdApp {
         &mut self.layout
     }
 
-    pub fn selection(&self) -> &SelectionManager {
+    pub fn selection(&self) -> &FileSelection {
         &self.orchestrator.selection
     }
 
-    pub fn selection_mut(&mut self) -> &mut SelectionManager {
+    pub fn selection_mut(&mut self) -> &mut FileSelection {
         &mut self.orchestrator.selection
     }
 
-    pub fn tabs(&self) -> &TabManager {
-        &self.orchestrator.tab_manager
+    pub fn tabs(&self) -> &Tabs {
+        &self.orchestrator.tabs
     }
 
-    pub fn tabs_mut(&mut self) -> &mut TabManager {
-        &mut self.orchestrator.tab_manager
+    pub fn tabs_mut(&mut self) -> &mut Tabs {
+        &mut self.orchestrator.tabs
     }
 
-    pub fn agent(&self) -> &AgentSessionManager {
+    pub fn agent(&self) -> &AgentSession {
         &self.orchestrator.agent
     }
 
-    pub fn agent_mut(&mut self) -> &mut AgentSessionManager {
+    pub fn agent_mut(&mut self) -> &mut AgentSession {
         &mut self.orchestrator.agent
     }
 
-    pub fn dialogs(&self) -> &DialogManager {
+    pub fn dialogs(&self) -> &Dialogs {
         &self.orchestrator.dialogs
     }
 
-    pub fn dialogs_mut(&mut self) -> &mut DialogManager {
+    pub fn dialogs_mut(&mut self) -> &mut Dialogs {
         &mut self.orchestrator.dialogs
     }
 

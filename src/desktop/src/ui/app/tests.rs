@@ -1,7 +1,8 @@
 //! Tests for `app/mod.rs`.
 
 use super::*;
-use crate::agent::events::{AgentEvent as SeamAgentEvent, AgentStatus};
+use crate::agent::events::AgentStatus;
+use crate::app::events::AgentEvent as SeamAgentEvent;
 use crate::app::orchestrator::AppOrchestrator;
 use crate::bus::events::file::FileEvent;
 use crate::bus::events::messages::TokenUsageInfo;
@@ -116,21 +117,21 @@ fn test_treenode_new() {
 }
 
 #[test]
-fn test_tag_manager_tracks_tags_correctly() {
+fn test_tags_tracks_tags_correctly() {
     let mut app = create_test_app();
-    app.orchestrator.tag_manager.add_tags(
+    app.orchestrator.tags.add_tags(
         PathBuf::from("file1.md"),
         vec!["rust".to_string(), "ui".to_string()],
     );
-    app.orchestrator.tag_manager.add_tags(
+    app.orchestrator.tags.add_tags(
         PathBuf::from("file2.md"),
         vec!["rust".to_string(), "testing".to_string()],
     );
 
-    assert_eq!(app.orchestrator.tag_manager.all_tags().len(), 3);
-    assert!(app.orchestrator.tag_manager.all_tags().contains("rust"));
-    assert!(app.orchestrator.tag_manager.all_tags().contains("ui"));
-    assert!(app.orchestrator.tag_manager.all_tags().contains("testing"));
+    assert_eq!(app.orchestrator.tags.all_tags().len(), 3);
+    assert!(app.orchestrator.tags.all_tags().contains("rust"));
+    assert!(app.orchestrator.tags.all_tags().contains("ui"));
+    assert!(app.orchestrator.tags.all_tags().contains("testing"));
 }
 
 #[test]
@@ -172,26 +173,22 @@ fn test_background_messages_handling() {
     // 4. Agent Status & ContentDelta via Bus<AgentEvent> (T015: new path)
     let session_id = Uuid::new_v4();
     app.orchestrator
-        .agent
-        .event_bus()
+        .agent_event_bus
         .publish(SeamAgentEvent::SessionStarted { session_id });
     app.orchestrator
-        .agent
-        .event_bus()
+        .agent_event_bus
         .publish(SeamAgentEvent::Status {
             session_id,
             status: AgentStatus::AwaitingLlm,
         });
     app.orchestrator
-        .agent
-        .event_bus()
+        .agent_event_bus
         .publish(SeamAgentEvent::Thinking {
             session_id,
             text: "Thinking step".to_string(),
         });
     app.orchestrator
-        .agent
-        .event_bus()
+        .agent_event_bus
         .publish(SeamAgentEvent::ContentDelta {
             session_id,
             text: "Done result".to_string(),
@@ -233,7 +230,7 @@ fn test_background_message_file_modified_and_deleted() {
         .selection
         .selected_files_mut()
         .insert(file_path.clone());
-    app.orchestrator.tab_manager.loaded_path = Some(file_path.clone());
+    app.orchestrator.tabs.loaded_path = Some(file_path.clone());
 
     // File modified message
     app.orchestrator
@@ -252,7 +249,7 @@ fn test_background_message_file_modified_and_deleted() {
     });
     output.textures_delta.clear();
 
-    assert!(app.orchestrator.tab_manager.loaded_path.is_none()); // Trigger reload
+    assert!(app.orchestrator.tabs.loaded_path.is_none()); // Trigger reload
 
     // File deleted message
     app.orchestrator
@@ -292,12 +289,10 @@ fn test_agent_failure_and_finish_messages() {
 
     let session_id = Uuid::new_v4();
     app.orchestrator
-        .agent
-        .event_bus()
+        .agent_event_bus
         .publish(SeamAgentEvent::SessionStarted { session_id });
     app.orchestrator
-        .agent
-        .event_bus()
+        .agent_event_bus
         .publish(SeamAgentEvent::Failed {
             session_id,
             error: "Network timeout".to_string(),
@@ -316,14 +311,12 @@ fn test_agent_failure_and_finish_messages() {
 
     let session_id2 = Uuid::new_v4();
     app.orchestrator
-        .agent
-        .event_bus()
+        .agent_event_bus
         .publish(SeamAgentEvent::SessionStarted {
             session_id: session_id2,
         });
     app.orchestrator
-        .agent
-        .event_bus()
+        .agent_event_bus
         .publish(SeamAgentEvent::SessionFinished {
             session_id: session_id2,
             history: vec![serde_json::json!({"ok": true})],
@@ -345,14 +338,12 @@ fn test_agent_token_usage_message_accumulates() {
 
     let session_id = Uuid::new_v4();
     app.orchestrator
-        .agent
-        .event_bus()
+        .agent_event_bus
         .publish(SeamAgentEvent::SessionStarted { session_id });
 
     // First turn: small context, no cached or reasoning tokens.
     app.orchestrator
-        .agent
-        .event_bus()
+        .agent_event_bus
         .publish(SeamAgentEvent::TokenUsage {
             session_id,
             usage: TokenUsageInfo {
@@ -399,8 +390,7 @@ fn test_agent_token_usage_message_accumulates() {
 
     // Second turn: context grew, completion + reasoning added.
     app.orchestrator
-        .agent
-        .event_bus()
+        .agent_event_bus
         .publish(SeamAgentEvent::TokenUsage {
             session_id,
             usage: TokenUsageInfo {
@@ -448,8 +438,7 @@ fn test_agent_token_usage_message_accumulates() {
 
     // Third turn: smaller context — peak should NOT shrink.
     app.orchestrator
-        .agent
-        .event_bus()
+        .agent_event_bus
         .publish(SeamAgentEvent::TokenUsage {
             session_id,
             usage: TokenUsageInfo {
@@ -499,7 +488,7 @@ fn test_process_file_events_updated_resets_loaded_path() {
     let path = PathBuf::from("/tmp/active_doc.md");
 
     *app.orchestrator.selection.selected_file_mut() = Some(path.clone());
-    app.orchestrator.tab_manager.loaded_path = Some(path.clone());
+    app.orchestrator.tabs.loaded_path = Some(path.clone());
     app.orchestrator.file_processor.all_files.push(path.clone());
 
     // Subscribe a reader to the bus so we can publish into it
@@ -514,7 +503,7 @@ fn test_process_file_events_updated_resets_loaded_path() {
     let changed = app.orchestrator.process_file_events();
     assert!(changed, "process_file_events should report a change");
     assert!(
-        app.orchestrator.tab_manager.loaded_path.is_none(),
+        app.orchestrator.tabs.loaded_path.is_none(),
         "loaded_path must be cleared so the renderer reloads on the next frame"
     );
     // selected_file must be preserved so the renderer knows
@@ -531,7 +520,7 @@ fn test_process_file_events_updated_preserves_loaded_when_editor_open() {
     let path = PathBuf::from("/tmp/being_edited.md");
 
     *app.orchestrator.selection.selected_file_mut() = Some(path.clone());
-    app.orchestrator.tab_manager.loaded_path = Some(path.clone());
+    app.orchestrator.tabs.loaded_path = Some(path.clone());
     app.orchestrator.file_processor.all_files.push(path.clone());
     app.orchestrator
         .text_buffer
@@ -544,7 +533,7 @@ fn test_process_file_events_updated_preserves_loaded_when_editor_open() {
 
     let _ = app.orchestrator.process_file_events();
     assert!(
-        app.orchestrator.tab_manager.loaded_path.is_some(),
+        app.orchestrator.tabs.loaded_path.is_some(),
         "loaded_path must NOT be cleared while the inline editor is open"
     );
 }
@@ -559,7 +548,7 @@ fn test_process_file_events_removed_clears_loaded_path() {
     let path = PathBuf::from("/tmp/gone.md");
 
     *app.orchestrator.selection.selected_file_mut() = Some(path.clone());
-    app.orchestrator.tab_manager.loaded_path = Some(path.clone());
+    app.orchestrator.tabs.loaded_path = Some(path.clone());
     app.orchestrator.file_processor.all_files.push(path.clone());
 
     app.orchestrator.file_event_reader = Some(app.orchestrator.file_event_bus.subscribe());
@@ -567,7 +556,7 @@ fn test_process_file_events_removed_clears_loaded_path() {
     publisher.publish(FileEvent::removed_one(path.clone()));
 
     let _ = app.orchestrator.process_file_events();
-    assert!(app.orchestrator.tab_manager.loaded_path.is_none());
+    assert!(app.orchestrator.tabs.loaded_path.is_none());
 }
 
 #[test]
@@ -706,7 +695,7 @@ fn test_process_file_events_rebuild_only_on_removal() {
 
     // Pre-populate tag manager so the tag exists.
     app.orchestrator
-        .tag_manager
+        .tags
         .add_tags(PathBuf::from("/lib/notes.md"), vec!["work".to_string()]);
     app.orchestrator
         .file_processor
@@ -721,7 +710,7 @@ fn test_process_file_events_rebuild_only_on_removal() {
         .publish(FileEvent::removed_one(PathBuf::from("/lib/notes.md")));
     let _ = app.orchestrator.process_file_events();
     assert!(
-        !app.orchestrator.tag_manager.all_tags().contains("work"),
+        !app.orchestrator.tags.all_tags().contains("work"),
         "Removed events must trigger rebuild so stale tags are evicted"
     );
 
@@ -729,14 +718,14 @@ fn test_process_file_events_rebuild_only_on_removal() {
     // would clear all_tags and lose the tag we just
     // added).
     app.orchestrator
-        .tag_manager
+        .tags
         .add_tags(PathBuf::from("/lib/other.md"), vec!["keep".to_string()]);
     app.orchestrator
         .file_event_bus
         .publish(FileEvent::discovered_one(PathBuf::from("/lib/other.md")));
     let _ = app.orchestrator.process_file_events();
     assert!(
-        app.orchestrator.tag_manager.all_tags().contains("keep"),
+        app.orchestrator.tags.all_tags().contains("keep"),
         "Discovered events must NOT call rebuild â€” the FileParsed path \
              updates all_tags incrementally"
     );
@@ -752,13 +741,13 @@ fn test_render_panels_no_id_change_warnings_on_toc_transition() {
     let mut app = create_test_app();
     let file = PathBuf::from("Laptop.md");
 
-    app.orchestrator.tab_manager.tabs = vec![file.clone()];
+    app.orchestrator.tabs.tabs = vec![file.clone()];
     *app.orchestrator.selection.selected_file_mut() = Some(file.clone());
     app.layout.left_panel_width = Some(200.0);
     app.layout.left_panel_dirty = false;
 
     // Populate TOC (simulating rendering a document with headings like Laptop.md).
-    app.orchestrator.tab_manager.toc = vec![
+    app.orchestrator.tabs.toc = vec![
         crate::ui::ToCEntry {
             title: "Introduction".to_string(),
             level: 1,
@@ -797,16 +786,16 @@ fn test_all_top_level_panels_visible_and_rendered() {
     let mut app = create_test_app();
     let file = PathBuf::from("Laptop.md");
 
-    app.orchestrator.tab_manager.tabs = vec![file.clone()];
+    app.orchestrator.tabs.tabs = vec![file.clone()];
     *app.orchestrator.selection.selected_file_mut() = Some(file.clone());
     app.layout.left_panel_width = Some(200.0);
     app.layout.left_panel_dirty = false;
     app.file_processor_mut().indexing_finished = true;
-    app.orchestrator.tab_manager.current_markdown =
+    app.orchestrator.tabs.current_markdown =
         "# Laptop Specifications\n\n- CPU: 8 Cores\n- RAM: 32GB".to_string();
 
     // Populate TOC so the right panel is active.
-    app.orchestrator.tab_manager.toc = vec![crate::ui::ToCEntry {
+    app.orchestrator.tabs.toc = vec![crate::ui::ToCEntry {
         title: "Laptop Specifications".to_string(),
         level: 1,
         id: "laptop_specs".to_string(),
@@ -974,8 +963,8 @@ fn test_process_file_events_removed_closes_open_tab() {
     let mut app = create_test_app();
     let gone = PathBuf::from("/tmp/gone.md");
     let keep = PathBuf::from("/tmp/keep.md");
-    app.orchestrator.tab_manager.tabs = vec![gone.clone(), keep.clone()];
-    app.orchestrator.tab_manager.loaded_path = Some(gone.clone());
+    app.orchestrator.tabs.tabs = vec![gone.clone(), keep.clone()];
+    app.orchestrator.tabs.loaded_path = Some(gone.clone());
     *app.orchestrator.selection.selected_file_mut() = Some(gone.clone());
 
     app.orchestrator.file_event_reader = Some(app.orchestrator.file_event_bus.subscribe());
@@ -985,11 +974,11 @@ fn test_process_file_events_removed_closes_open_tab() {
     let _ = app.orchestrator.process_file_events();
 
     assert!(
-        !app.orchestrator.tab_manager.tabs.contains(&gone),
+        !app.orchestrator.tabs.tabs.contains(&gone),
         "tab for deleted file must be closed"
     );
     assert!(
-        app.orchestrator.tab_manager.tabs.contains(&keep),
+        app.orchestrator.tabs.tabs.contains(&keep),
         "tab for remaining file must stay open"
     );
     assert_eq!(
@@ -998,7 +987,7 @@ fn test_process_file_events_removed_closes_open_tab() {
         "selection must fall back to the last remaining tab"
     );
     assert!(
-        app.orchestrator.tab_manager.loaded_path.is_none(),
+        app.orchestrator.tabs.loaded_path.is_none(),
         "loaded_path must be cleared"
     );
 }
@@ -1009,9 +998,9 @@ fn test_process_file_events_removed_closes_open_tab() {
 fn test_process_file_events_removed_closes_last_tab_clears_content() {
     let mut app = create_test_app();
     let gone = PathBuf::from("/tmp/gone.md");
-    app.orchestrator.tab_manager.tabs = vec![gone.clone()];
-    app.orchestrator.tab_manager.loaded_path = Some(gone.clone());
-    app.orchestrator.tab_manager.current_markdown = "some content".to_string();
+    app.orchestrator.tabs.tabs = vec![gone.clone()];
+    app.orchestrator.tabs.loaded_path = Some(gone.clone());
+    app.orchestrator.tabs.current_markdown = "some content".to_string();
     *app.orchestrator.selection.selected_file_mut() = Some(gone.clone());
 
     app.orchestrator.file_event_reader = Some(app.orchestrator.file_event_bus.subscribe());
@@ -1021,7 +1010,7 @@ fn test_process_file_events_removed_closes_last_tab_clears_content() {
     let _ = app.orchestrator.process_file_events();
 
     assert!(
-        app.orchestrator.tab_manager.tabs.is_empty(),
+        app.orchestrator.tabs.tabs.is_empty(),
         "all tabs must be closed"
     );
     assert!(
@@ -1029,11 +1018,11 @@ fn test_process_file_events_removed_closes_last_tab_clears_content() {
         "selection must be None when no tabs remain"
     );
     assert!(
-        app.orchestrator.tab_manager.loaded_path.is_none(),
+        app.orchestrator.tabs.loaded_path.is_none(),
         "loaded_path must be cleared"
     );
     assert!(
-        app.orchestrator.tab_manager.current_markdown.is_empty(),
+        app.orchestrator.tabs.current_markdown.is_empty(),
         "content must be cleared when no tab remains"
     );
 }
@@ -1046,15 +1035,15 @@ fn test_handle_fs_event_file_deleted_closes_open_tab() {
     let mut app = create_test_app();
     let gone = PathBuf::from("gone.md");
     let keep = PathBuf::from("keep.md");
-    app.orchestrator.tab_manager.tabs = vec![gone.clone(), keep.clone()];
-    app.orchestrator.tab_manager.loaded_path = Some(gone.clone());
+    app.orchestrator.tabs.tabs = vec![gone.clone(), keep.clone()];
+    app.orchestrator.tabs.loaded_path = Some(gone.clone());
     *app.orchestrator.selection.selected_file_mut() = Some(gone.clone());
 
     app.orchestrator
         .handle_fs_event(FsEvent::FileDeleted { path: gone.clone() });
 
     assert!(
-        !app.orchestrator.tab_manager.tabs.contains(&gone),
+        !app.orchestrator.tabs.tabs.contains(&gone),
         "tab for deleted file must be closed"
     );
     assert_eq!(
@@ -1307,11 +1296,12 @@ fn ctx_with_native_ppp(ppp: f32) -> (egui::Context, egui::RawInput) {
 /// `selection.tree_dirty` becoming true). Quickstart scenario 4, SC-005.
 #[test]
 fn test_tool_side_effect_reissues_fs_event() {
-    use crate::agent::events::{AgentEvent as SeamAgentEvent, ToolSideEffect};
+    use crate::agent::events::ToolSideEffect;
+    use crate::app::events::AgentEvent as SeamAgentEvent;
     use std::io::Write;
 
     let mut app = create_test_app();
-    let bus = app.orchestrator.agent.event_bus();
+    let bus = app.orchestrator.agent_event_bus.clone();
 
     // Create a temp file so handle_fs_event can process it without panicking
     let temp_dir = std::env::temp_dir().join("fastmd_test_side_effect_reissue");
@@ -1358,10 +1348,10 @@ fn test_tool_side_effect_reissues_fs_event() {
 /// into the transcript content (quickstart scenario 5).
 #[test]
 fn test_broadcast_lag_handled_with_truncation_marker() {
-    use crate::agent::events::AgentEvent as SeamAgentEvent;
+    use crate::app::events::AgentEvent as SeamAgentEvent;
 
     let mut app = create_test_app();
-    let bus = app.orchestrator.agent.event_bus();
+    let bus = app.orchestrator.agent_event_bus.clone();
     let session_id = Uuid::new_v4();
 
     // Publish SessionStarted to set up the transcript

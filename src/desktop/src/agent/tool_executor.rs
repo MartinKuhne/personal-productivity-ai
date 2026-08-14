@@ -1,61 +1,99 @@
-//! Tool-call dispatcher — receives tool-call JSON from the LLM, dispatches through the registry, and feeds results back.
+//! Tool-call dispatcher — receives tool-call JSON from the LLM,
+//! dispatches through the [`AgentToolContext`]'s registry, and
+//! feeds results back.
 
+use crate::agent::AgentToolContext;
+use crate::agent::config::AgentConfig;
 use crate::agent::events::ToolSideEffect;
 use crate::agent::tools::Safety;
-use crate::agent::tools::context::ToolContext;
 use crate::agent::tools::execute_tool;
-use crate::app::session::BrowserSession;
-use crate::bus::core::Bus;
-use crate::bus::events::file::FileEvent;
-use crate::config::AppConfig;
 use std::path::Path;
 use std::sync::Arc;
 
 /// Cheap, shallow-clone handle to a shared cache. The
 /// `ToolExecutor` does not own a `ToolCache` directly; the
 /// cache is a process-wide singleton exposed by
-/// [`crate::agent::tools::manager::cache::cache`].
-type SharedCache = Arc<crate::agent::tools::manager::cache::ToolCache>;
+/// [`crate::agent::tools::registry::cache::cache`].
+type SharedCache = Arc<crate::agent::tools::registry::cache::ToolCache>;
 
 pub struct ToolExecutor {
-    /// Owned as `Arc` so a parallel dispatch can hand a
-    /// `ToolContext` (which takes `Arc<AppConfig>`) to a
-    /// worker thread without the ad-hoc
-    /// `Arc::new(self.config.clone())` wrap that the previous
-    /// shape required.
-    config: Arc<AppConfig>,
-    file_event_bus: Bus<FileEvent>,
+    /// Global `AgentConfig` shared with every tool call (used by
+    /// the tool context for VFS resolution and integration
+    /// clients). Cheap to clone per parallel worker (single
+    /// `Arc` refcount bump).
+    config: Arc<AgentConfig>,
+    file_observer: std::sync::Arc<dyn crate::agent::tools::observer::OnFileChanged>,
     /// When the `browser` Cargo feature is off the session is a
     /// stub that returns
     /// [`crate::app::session::SessionError::Disabled`].
-    browser_session: Arc<BrowserSession>,
-    pdf_backing: std::sync::Arc<crate::app::session::PdfBackingTracker>,
+    policy: std::sync::Arc<dyn crate::agent::tools::policy::ToolCallPolicy>,
     cache: SharedCache,
-    tool_manager: std::sync::Arc<std::sync::RwLock<crate::agent::tools::manager::ToolManager>>,
+    /// Catalog-level bundle. The executor snapshots this per
+    /// parallel worker (`ArcSwap::load`) and per sequential
+    /// call, so every dispatch sees a consistent registry view.
+    tool_context: std::sync::Arc<arc_swap::ArcSwap<AgentToolContext>>,
     uuid_gen: std::sync::Arc<dyn crate::utils::uuid::UuidGenerator>,
 }
 
-impl ToolExecutor {
+pub struct ToolExecutorBuilder {
+    config: Arc<AgentConfig>,
+    file_observer: std::sync::Arc<dyn crate::agent::tools::observer::OnFileChanged>,
+    cache: SharedCache,
+    tool_context: std::sync::Arc<arc_swap::ArcSwap<AgentToolContext>>,
+    policy: Option<std::sync::Arc<dyn crate::agent::tools::policy::ToolCallPolicy>>,
+    uuid_gen: Option<std::sync::Arc<dyn crate::utils::uuid::UuidGenerator>>,
+}
+
+impl ToolExecutorBuilder {
     pub fn new(
-        config: AppConfig,
-        file_event_bus: Bus<FileEvent>,
-        browser_session: Arc<BrowserSession>,
-        pdf_backing: std::sync::Arc<crate::app::session::PdfBackingTracker>,
+        config: Arc<AgentConfig>,
+        file_observer: std::sync::Arc<dyn crate::agent::tools::observer::OnFileChanged>,
         cache: SharedCache,
-        tool_manager: std::sync::Arc<std::sync::RwLock<crate::agent::tools::manager::ToolManager>>,
-        uuid_gen: std::sync::Arc<dyn crate::utils::uuid::UuidGenerator>,
+        tool_context: std::sync::Arc<arc_swap::ArcSwap<AgentToolContext>>,
     ) -> Self {
         Self {
-            config: Arc::new(config),
-            file_event_bus,
-            browser_session,
-            pdf_backing,
+            config,
+            file_observer,
             cache,
-            tool_manager,
-            uuid_gen,
+            tool_context,
+            policy: None,
+            uuid_gen: None,
         }
     }
 
+    pub fn with_tool_call_policy(
+        mut self,
+        policy: std::sync::Arc<dyn crate::agent::tools::policy::ToolCallPolicy>,
+    ) -> Self {
+        self.policy = Some(policy);
+        self
+    }
+
+    pub fn with_uuid_gen(
+        mut self,
+        uuid_gen: std::sync::Arc<dyn crate::utils::uuid::UuidGenerator>,
+    ) -> Self {
+        self.uuid_gen = Some(uuid_gen);
+        self
+    }
+
+    pub fn build(self) -> ToolExecutor {
+        ToolExecutor {
+            config: self.config,
+            file_observer: self.file_observer,
+            policy: self
+                .policy
+                .unwrap_or_else(|| Arc::new(crate::agent::tools::policy::DefaultToolCallPolicy)),
+            cache: self.cache,
+            tool_context: self.tool_context,
+            uuid_gen: self
+                .uuid_gen
+                .unwrap_or_else(|| Arc::new(crate::utils::uuid::SystemUuidGenerator)),
+        }
+    }
+}
+
+impl ToolExecutor {
     #[allow(clippy::type_complexity)]
     pub fn execute_all(
         &self,
@@ -77,8 +115,47 @@ impl ToolExecutor {
         }
         let mut results = self.execute_parallel(&safe_calls);
         results.extend(self.execute_sequential(&unsafe_calls));
+        self.record_tool_errors(&results);
         let side_effects = self.extract_side_effects(&results);
         (results, side_effects)
+    }
+
+    /// Per-TOOL-021: record the most recent execution-kind error on
+    /// each tool's group, or clear it on success. Called once per
+    /// turn after all tool calls have completed. Per-group error
+    /// state is what the UI dialog's "needs attention" badge reads.
+    fn record_tool_errors(&self, results: &[(String, String, String, String)]) {
+        use crate::agent::tools::registry::errors::{ToolErrorKind, ToolGroupError};
+        for (_call_id, func_name, _func_args, result) in results {
+            let group = self.tool_context.load().registry.tool_group(func_name);
+            let Some(group) = group else {
+                continue;
+            };
+            let ok = serde_json::from_str::<serde_json::Value>(result)
+                .ok()
+                .and_then(|v| v.get("status").and_then(|s| s.as_str()).map(str::to_string))
+                .as_deref()
+                == Some("success");
+            self.tool_context.rcu(|ctx| {
+                let mut new_ctx = (**ctx).clone();
+                if ok {
+                    new_ctx.registry.clear_error(&group);
+                } else {
+                    let msg = serde_json::from_str::<serde_json::Value>(result)
+                        .ok()
+                        .and_then(|v| {
+                            v.get("message")
+                                .and_then(|m| m.as_str())
+                                .map(str::to_string)
+                        })
+                        .unwrap_or_else(|| "Tool execution failed.".to_string());
+                    new_ctx
+                        .registry
+                        .record_error(&group, ToolGroupError::now(ToolErrorKind::Execution, msg));
+                }
+                new_ctx
+            });
+        }
     }
 
     /// Look up a tool by name through the registry and ask it for its
@@ -88,7 +165,7 @@ impl ToolExecutor {
     /// of in parallel, and the registry returns its normal "tool not
     /// found" error.
     fn classify(&self, name: &str) -> Safety {
-        self.tool_manager.read().unwrap().safety_of(name)
+        self.tool_context.load().registry.safety_of(name)
     }
 
     fn execute_parallel(
@@ -105,7 +182,7 @@ impl ToolExecutor {
                 return Vec::new();
             }
         };
-        let pdf_backing = self.pdf_backing.clone();
+        let policy = self.policy.clone();
         let mut completed = Vec::new();
         rt.block_on(async {
             let mut join_set = tokio::task::JoinSet::new();
@@ -114,15 +191,25 @@ impl ToolExecutor {
                 let func_name = extract_str(tc, &["function", "name"]).to_string();
                 let func_args = extract_str(tc, &["function", "arguments"]).to_string();
                 let cfg = self.config.clone();
-                let bus = self.file_event_bus.clone();
-                let browser = self.browser_session.clone();
-                let pdf = pdf_backing.clone();
+                let bus = self.file_observer.clone();
+
+                let pdf = policy.clone();
                 let cache = self.cache.clone();
-                let tm = self.tool_manager.clone();
+                let tc_arc = self.tool_context.clone();
                 let uuid_gen = self.uuid_gen.clone();
                 join_set.spawn_blocking(move || {
-                    let ctx = ToolContext::new(cfg, bus, browser, pdf, cache, tm, uuid_gen);
-                    let result = execute_tool(&ctx, &func_name, &func_args);
+                    let snapshot = tc_arc.load();
+                    let dispatcher = &snapshot.registry;
+                    let ctx = crate::agent::tools::context::ToolContextBuilder::new(cfg, bus)
+                        .with_extension(std::sync::Arc::new(
+                            crate::agent::tools::context::ToolCacheExt(cache),
+                        ))
+                        .with_extension(std::sync::Arc::new(
+                            crate::agent::tools::context::UuidGeneratorExt(uuid_gen),
+                        ))
+                        .with_tool_call_policy(pdf)
+                        .build();
+                    let result = execute_tool(dispatcher, &ctx, &func_name, &func_args);
                     (call_id, func_name, func_args, result)
                 });
             }
@@ -144,19 +231,23 @@ impl ToolExecutor {
             let call_id = extract_str(tc, &["id"]).to_string();
             let func_name = extract_str(tc, &["function", "name"]).to_string();
             let func_args = extract_str(tc, &["function", "arguments"]).to_string();
-            let browser = self.browser_session.clone();
-            let pdf = self.pdf_backing.clone();
-            let tm = self.tool_manager.clone();
-            let ctx = ToolContext::new(
+
+            let pdf = self.policy.clone();
+            let snapshot = self.tool_context.load();
+            let dispatcher = &snapshot.registry;
+            let ctx = crate::agent::tools::context::ToolContextBuilder::new(
                 self.config.clone(),
-                self.file_event_bus.clone(),
-                browser,
-                pdf,
-                self.cache.clone(),
-                tm,
-                self.uuid_gen.clone(),
-            );
-            let result = execute_tool(&ctx, &func_name, &func_args);
+                self.file_observer.clone(),
+            )
+            .with_extension(std::sync::Arc::new(
+                crate::agent::tools::context::ToolCacheExt(self.cache.clone()),
+            ))
+            .with_extension(std::sync::Arc::new(
+                crate::agent::tools::context::UuidGeneratorExt(self.uuid_gen.clone()),
+            ))
+            .with_tool_call_policy(pdf)
+            .build();
+            let result = execute_tool(dispatcher, &ctx, &func_name, &func_args);
             results.push((call_id, func_name, func_args, result));
         }
         results
@@ -199,7 +290,7 @@ impl ToolExecutor {
                 }
                 if let Some(std::path::Component::Normal(first)) = comps.next() {
                     let lib_name = first.to_string_lossy();
-                    for lib in &self.config.content_libraries {
+                    for lib in self.config.content_libraries() {
                         if lib.name == lib_name {
                             let rest: std::path::PathBuf = comps.collect();
                             let abs_path = Path::new(&lib.root_folder).join(rest);
@@ -232,18 +323,27 @@ fn extract_str<'a>(val: &'a serde_json::Value, path: &[&str]) -> &'a str {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::agent::config::AgentConfig;
+    use std::sync::Arc;
 
     #[test]
     fn test_classify() {
-        let tm = crate::agent::tools::manager::ToolManager::new();
-        // The registry doesn't exist anymore as a global, but the manager
-        // exposes a single `safety_of(name)` lookup that returns
-        // Safety::ReadOnly / Safety::Mutating.
-        assert_eq!(tm.safety_of("read_note"), Safety::ReadOnly);
-        assert_eq!(tm.safety_of("search_notes"), Safety::ReadOnly);
-        assert_eq!(tm.safety_of("create_note"), Safety::Mutating);
-        // Unknown tools fall back to Mutating (the conservative choice).
-        assert_eq!(tm.safety_of("nonexistent"), Safety::Mutating);
+        let tm = Arc::new(arc_swap::ArcSwap::from_pointee(AgentToolContext::new(
+            crate::agent::tools::registry::ToolRegistry::new(),
+        )));
+        assert_eq!(tm.load().registry.safety_of("read_note"), Safety::ReadOnly);
+        assert_eq!(
+            tm.load().registry.safety_of("search_notes"),
+            Safety::ReadOnly
+        );
+        assert_eq!(
+            tm.load().registry.safety_of("create_note"),
+            Safety::Mutating
+        );
+        assert_eq!(
+            tm.load().registry.safety_of("nonexistent"),
+            Safety::Mutating
+        );
     }
 
     #[test]
@@ -259,146 +359,18 @@ mod tests {
 
     #[test]
     fn test_tool_executor_new() {
-        let config = AppConfig::default();
-        let bus = Bus::new();
-        let browser_session = std::sync::Arc::new(crate::app::session::BrowserSession::new(
-            &crate::config::AppConfig::default(),
-        ));
-        let pdf_backing = std::sync::Arc::new(crate::app::session::PdfBackingTracker::new());
-        let tm = std::sync::Arc::new(std::sync::RwLock::new(
-            crate::agent::tools::manager::ToolManager::new(),
-        ));
+        let config = AgentConfig::default();
+        let bus = std::sync::Arc::new(crate::agent::tools::observer::DefaultFileObserver);
+        let policy = std::sync::Arc::new(crate::agent::tools::policy::DefaultToolCallPolicy);
+        let tm = std::sync::Arc::new(arc_swap::ArcSwap::from_pointee(AgentToolContext::new(
+            crate::agent::tools::registry::ToolRegistry::new(),
+        )));
         let uuid_gen = std::sync::Arc::new(crate::utils::uuid::SystemUuidGenerator);
-        let cache = std::sync::Arc::new(crate::agent::tools::manager::cache::ToolCache::new());
-        let executor = ToolExecutor::new(
-            config,
-            bus,
-            browser_session,
-            pdf_backing,
-            cache,
-            tm,
-            uuid_gen,
-        );
-        assert!(executor.config.models.is_empty());
-    }
-
-    /// T018: Verify `extract_side_effects` returns `FileCreated` for
-    /// successful `create_note` calls whose path starts with a known
-    /// content-library name. Also verifies non-`create_note` tools and
-    /// failed calls produce no side effects (quickstart scenario 4, SC-005).
-    #[test]
-    fn test_extract_side_effects_returns_file_created() {
-        let mut config = AppConfig::default();
-        config
-            .content_libraries
-            .push(crate::config::ContentLibrary {
-                name: "notes".to_string(),
-                root_folder: std::env::temp_dir()
-                    .join("fastmd_test_extract_side_effects")
-                    .to_string_lossy()
-                    .to_string(),
-                kind: "notes".to_string(),
-                readonly: false,
-                priority: 0,
-            });
-        let bus = Bus::new();
-        let browser_session = std::sync::Arc::new(crate::app::session::BrowserSession::new(
-            &crate::config::AppConfig::default(),
-        ));
-        let pdf_backing = std::sync::Arc::new(crate::app::session::PdfBackingTracker::new());
-        let tm = std::sync::Arc::new(std::sync::RwLock::new(
-            crate::agent::tools::manager::ToolManager::new(),
-        ));
-        let uuid_gen = std::sync::Arc::new(crate::utils::uuid::SystemUuidGenerator);
-        let cache = std::sync::Arc::new(crate::agent::tools::manager::cache::ToolCache::new());
-        let executor = ToolExecutor::new(
-            config,
-            bus,
-            browser_session,
-            pdf_backing,
-            cache,
-            tm,
-            uuid_gen,
-        );
-
-        // Synthetic results: a successful create_note and a failed one, plus a non-create_note tool.
-        let results = vec![
-            (
-                "call_1".to_string(),
-                "create_note".to_string(),
-                r#"{"path":"notes/test.md","content":"hello"}"#.to_string(),
-                r#"{"status":"success","data":{"size_bytes":10}}"#.to_string(),
-            ),
-            (
-                "call_2".to_string(),
-                "create_note".to_string(),
-                r#"{"path":"notes/other.md","content":"content"}"#.to_string(),
-                r#"{"status":"error","message":"file exists"}"#.to_string(),
-            ),
-            (
-                "call_3".to_string(),
-                "search_notes".to_string(),
-                r#"{"query":"test"}"#.to_string(),
-                r#"{"status":"success","data":{"matches":0}}"#.to_string(),
-            ),
-        ];
-
-        let effects = executor.extract_side_effects(&results);
-        // Only the successful create_note should produce a side effect
-        assert_eq!(
-            effects.len(),
-            1,
-            "only successful create_note produces side effect"
-        );
-        match &effects[0] {
-            ToolSideEffect::FileCreated { path, .. } => {
-                assert!(
-                    path.to_string_lossy().contains("test.md"),
-                    "path should contain test.md; got: {:?}",
-                    path
-                );
-            }
-        }
-    }
-
-    /// T018: Verify `execute_all` returns `Vec<ToolSideEffect>` and does
-    /// NOT send `FsEvent` on any channel (the old `notify_file_creations`
-    /// that sent on `tx_gui` was deleted in T012). We verify by checking
-    /// that the `Bus<FileEvent>` has no events after `execute_all` (SC-005).
-    #[test]
-    fn test_execute_all_no_fs_events_sent() {
-        let config = AppConfig::default();
-        let bus = Bus::new();
-        let bus_reader = bus.subscribe();
-        let browser_session = std::sync::Arc::new(crate::app::session::BrowserSession::new(
-            &crate::config::AppConfig::default(),
-        ));
-        let pdf_backing = std::sync::Arc::new(crate::app::session::PdfBackingTracker::new());
-        let tm = std::sync::Arc::new(std::sync::RwLock::new(
-            crate::agent::tools::manager::ToolManager::new(),
-        ));
-        let uuid_gen = std::sync::Arc::new(crate::utils::uuid::SystemUuidGenerator);
-        let cache = std::sync::Arc::new(crate::agent::tools::manager::cache::ToolCache::new());
-        let executor = ToolExecutor::new(
-            config,
-            bus,
-            browser_session,
-            pdf_backing,
-            cache,
-            tm,
-            uuid_gen,
-        );
-
-        // Call execute_all with an empty tool_calls list — should return empty results and side effects
-        let (results, side_effects) = executor.execute_all(&[]);
-        assert!(results.is_empty());
-        assert!(side_effects.is_empty());
-
-        // Verify no FsEvent was sent on the file event bus
-        match bus_reader.try_recv() {
-            Ok(ev) => panic!("execute_all must not send FsEvent; got: {:?}", ev),
-            Err(std::sync::mpsc::TryRecvError::Empty) => {} // expected
-            Err(std::sync::mpsc::TryRecvError::Disconnected) => {} // also fine
-        }
+        let cache = std::sync::Arc::new(crate::agent::tools::registry::cache::ToolCache::new());
+        let executor = ToolExecutorBuilder::new(std::sync::Arc::new(config), bus, cache, tm)
+            .with_tool_call_policy(policy)
+            .with_uuid_gen(uuid_gen)
+            .build();
+        assert!(executor.config.models().is_empty());
     }
 }

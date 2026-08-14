@@ -60,9 +60,9 @@ pub fn calculate_font_size(level: usize) -> f32 {
 /// Inputs: app (the application state), entry_id (the
 /// `egui::Id` of the clicked TOC entry)
 /// Outputs: ()
-/// Purity: Impure (mutates `app.orchestrator.tab_manager.scroll_to_header_id`).
+/// Purity: Impure (mutates `app.orchestrator.tabs.scroll_to_header_id`).
 /// Preconditions: None.
-/// Postconditions: `app.orchestrator.tab_manager.scroll_to_header_id == Some(entry_id_str)`
+/// Postconditions: `app.orchestrator.tabs.scroll_to_header_id == Some(entry_id_str)`
 /// after the call. The center panel reads this field on the next
 /// frame, converts it to an `egui::Id` at render time, and scrolls
 /// the markdown to the heading with that id.
@@ -71,7 +71,7 @@ pub fn calculate_font_size(level: usize) -> f32 {
 /// is extracted so the side effect can be unit-tested without
 /// driving the egui harness.
 pub fn apply_toc_row_click(app: &mut FastMdApp, entry_id: &str) {
-    app.orchestrator.tab_manager.scroll_to_header_id = Some(entry_id.to_string());
+    app.orchestrator.tabs.scroll_to_header_id = Some(entry_id.to_string());
 }
 
 pub fn show_right_panel(app: &mut FastMdApp, parent_ui: &mut egui::Ui) {
@@ -170,9 +170,9 @@ pub fn show_right_panel_capture(
                 .show_rows(
                     ui,
                     18.0,
-                    app.orchestrator.tab_manager.toc.len(),
+                    app.orchestrator.tabs.toc.len(),
                     |ui, row_range| {
-                        let toc_snapshot = app.orchestrator.tab_manager.toc.clone();
+                        let toc_snapshot = app.orchestrator.tabs.toc.clone();
                         for i in row_range {
                             if let Some(entry) = toc_snapshot.get(i) {
                                 ui.push_id((i, &entry.id, "toc_item"), |ui| {

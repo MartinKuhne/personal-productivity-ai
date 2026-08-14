@@ -2,11 +2,11 @@
 //!
 //! Unit tests live in the sibling `web_tests.rs` sidecar.
 
+use crate::agent::config::AgentConfig;
 use crate::agent::datamark::{self, SECURITY_HEADER};
 use crate::agent::events::DelegateToolCall;
-use crate::agent::tools::manager::builtin::strings::WEB_FETCH_FINAL_PAGE_HINT;
-use crate::agent::tools::manager::cache::CacheEntry;
-use crate::config::AppConfig;
+use crate::agent::tools::registry::builtin::strings::WEB_FETCH_FINAL_PAGE_HINT;
+use crate::agent::tools::registry::cache::CacheEntry;
 use fast_h2m::convert;
 use std::collections::HashMap;
 use std::time::Instant;
@@ -17,7 +17,7 @@ const WEB_FETCH_PAGE_SIZE: usize = 64;
 
 pub fn tool_web_fetch(
     input: &crate::agent::tools::dtos::WebFetchInput,
-    cache: &crate::agent::tools::manager::cache::ToolCache,
+    cache: &crate::agent::tools::registry::cache::ToolCache,
     uuid_gen: &dyn crate::utils::uuid::UuidGenerator,
 ) -> Result<crate::agent::tools::dtos::WebFetchResponse, String> {
     let url = &input.url;
@@ -329,9 +329,9 @@ pub fn tool_web_search(
 }
 
 pub fn tool_web_delegate(
-    config: &AppConfig,
+    config: &AgentConfig,
     instruction: &str,
-    cache: &crate::agent::tools::manager::cache::ToolCache,
+    cache: &crate::agent::tools::registry::cache::ToolCache,
 ) -> Result<crate::agent::tools::dtos::WebDelegateResponse, String> {
     let model_cfg = config.select_chat_model().map_err(|e| {
         tracing::warn!(name = "tool.web_delegate.missing_api_key", "{}", e);
@@ -372,7 +372,7 @@ pub fn tool_web_delegate(
         }
     })];
 
-    if config.searxng_url.is_some() {
+    if config.searxng_url().is_some() {
         tools_json.push(serde_json::json!({
             "type": "function",
             "function": {
@@ -505,7 +505,7 @@ pub fn tool_web_delegate(
                         crate::agent::tools::dtos::WebSearchInput,
                     >(func_args_str)
                     {
-                        if let Some(url) = &config.searxng_url {
+                        if let Some(url) = config.searxng_url() {
                             match tool_web_search(url, &input.query) {
                                 Ok(res) => serde_json::to_string(
                                     &crate::agent::tools::dtos::ToolResponse::Success { data: res },

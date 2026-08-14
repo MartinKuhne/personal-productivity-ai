@@ -13,11 +13,11 @@ use std::path::PathBuf;
 use std::sync::mpsc::{Receiver, Sender};
 
 #[allow(clippy::result_large_err)]
-pub async fn process_image<'a>(
+pub async fn process_image(
     job: ImageJob,
     config: AppConfig,
     tx: Sender<BackgroundEvent>,
-    producer: &FileEventProducer<'a>,
+    producer: &FileEventProducer,
 ) -> Result<(), String> {
     // Find vision model
     let vision_model = config.models.values().find(|m| m.has_vision());

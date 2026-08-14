@@ -648,7 +648,23 @@ use crate::ui::strings::{COMMAND_INPUT_HINT, STOP_AGENT_BUTTON};
 use crate::ui::test_helpers::text::{assert_text_contains, extract_text};
 
 fn create_test_app() -> FastMdApp {
-    FastMdApp::empty_state(crate::config::AppConfig::default())
+    use std::collections::HashMap;
+    let mut models = HashMap::new();
+    models.insert(
+        "test".to_string(),
+        crate::config::LlmConfig {
+            model: "test".to_string(),
+            api_url: "http://localhost:0".to_string(),
+            api_key: "test-key".to_string(),
+            cost: None,
+            use_case: vec!["chat".to_string()],
+        },
+    );
+    let config = crate::config::AppConfig {
+        models,
+        ..crate::config::AppConfig::default()
+    };
+    FastMdApp::empty_state(config)
 }
 
 /// R-2 / Q12: rendered-content assertion for the bottom panel.

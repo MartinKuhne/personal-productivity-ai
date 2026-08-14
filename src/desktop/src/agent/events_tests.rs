@@ -4,17 +4,18 @@
 //! SC-001/SC-004).
 
 use crate::agent::agent_impl::run_agent;
+use crate::agent::config::AgentConfig;
+use crate::agent::config::AgentConfigBuilder;
 use crate::agent::context::AgentContext;
-use crate::agent::events::{AgentEvent, AgentStatus};
+use crate::agent::events::AgentStatus;
+use crate::app::events::AgentEvent;
 use crate::bus::core::{Bus, BusReader};
-use crate::config::{AppConfig, LlmConfig};
-use std::collections::HashSet;
-use std::sync::Arc;
-use std::sync::atomic::AtomicBool;
+use crate::config::LlmConfig;
 
-fn make_config(port: u16) -> AppConfig {
-    let mut config = AppConfig::default();
-    config.models.insert(
+fn make_agent_config(port: u16) -> AgentConfig {
+    use std::collections::HashMap;
+    let mut models = HashMap::new();
+    models.insert(
         "test".to_string(),
         LlmConfig {
             model: "test".to_string(),
@@ -24,35 +25,23 @@ fn make_config(port: u16) -> AppConfig {
             use_case: vec!["chat".to_string()],
         },
     );
-    config
+    AgentConfigBuilder::new().with_models(models).build()
 }
 
-fn make_ctx(config: AppConfig) -> (AgentContext, BusReader<AgentEvent>) {
-    let browser_session = Arc::new(crate::app::session::BrowserSession::new(
-        &AppConfig::default(),
-    ));
+fn make_ctx(config: AgentConfig) -> (AgentContext, BusReader<AgentEvent>) {
     let agent_event_bus = Bus::new();
     let bus_reader = agent_event_bus.subscribe();
-    let ctx = AgentContext {
-        config,
-        file_event_bus: Bus::new(),
-        agent_event_bus,
-        active_file: None,
-        active_dir: None,
-        selected_files: HashSet::new(),
-        prompt: "Hello".to_string(),
-        cancel_flag: Arc::new(AtomicBool::new(false)),
-        history: None,
-        model_name: None,
-        session_id: uuid::Uuid::new_v4(),
-        browser_session,
-        pdf_backing: Arc::new(crate::app::session::PdfBackingTracker::new()),
-        cache: std::sync::Arc::new(crate::agent::tools::manager::cache::ToolCache::new()),
-        tool_manager: Arc::new(std::sync::RwLock::new(
-            crate::agent::tools::manager::ToolManager::new(),
-        )),
-        uuid_gen: Arc::new(crate::utils::uuid::SystemUuidGenerator),
-    };
+    let session_id = uuid::Uuid::new_v4();
+    let ctx =
+        crate::agent::context::AgentContextBuilder::new(config, session_id, "Hello".to_string())
+            .with_file_observer(std::sync::Arc::new(
+                crate::agent::tools::observer::DefaultFileObserver,
+            ))
+            .with_observer(std::sync::Arc::new(
+                crate::app::events::BusAgentEventObserver::new(session_id, agent_event_bus.clone()),
+            ))
+            .with_system_prompts(Vec::new())
+            .build();
     (ctx, bus_reader)
 }
 
@@ -153,7 +142,7 @@ fn test_agent_isolation_event_ordering_no_ui() {
     })
     .to_string();
     let port = spawn_one_shot_http_server(&http_response("HTTP/1.1 200 OK", &body));
-    let (ctx, mut bus_reader) = make_ctx(make_config(port));
+    let (ctx, mut bus_reader) = make_ctx(make_agent_config(port));
     let session_id = ctx.session_id;
     run_agent(ctx);
     let events = collect_bus_events(&mut bus_reader, std::time::Duration::from_secs(5));
@@ -243,7 +232,7 @@ fn test_session_continuity_history_carries_over() {
 
     // Session 1: fresh session_id, no history.
     let port1 = spawn_one_shot_http_server(&http_response("HTTP/1.1 200 OK", &body));
-    let (mut ctx1, mut reader1) = make_ctx(make_config(port1));
+    let (mut ctx1, mut reader1) = make_ctx(make_agent_config(port1));
     let session_id_1 = ctx1.session_id;
     ctx1.history = None;
     run_agent(ctx1);
@@ -264,7 +253,7 @@ fn test_session_continuity_history_carries_over() {
     // Session 2: SAME session_id, carrying forward history from session 1.
     // The agent should build on the prior conversation.
     let port2 = spawn_one_shot_http_server(&http_response("HTTP/1.1 200 OK", &body));
-    let (mut ctx2, mut reader2) = make_ctx(make_config(port2));
+    let (mut ctx2, mut reader2) = make_ctx(make_agent_config(port2));
     ctx2.session_id = session_id_1;
     ctx2.history = Some(finished1.clone());
     run_agent(ctx2);
@@ -289,7 +278,7 @@ fn test_session_continuity_history_carries_over() {
     // Session 3: NEW session_id, no history. Must start fresh — history
     // must be shorter than session 2's accumulated history.
     let port3 = spawn_one_shot_http_server(&http_response("HTTP/1.1 200 OK", &body));
-    let (mut ctx3, mut reader3) = make_ctx(make_config(port3));
+    let (mut ctx3, mut reader3) = make_ctx(make_agent_config(port3));
     let session_id_3 = ctx3.session_id;
     assert_ne!(
         session_id_3, session_id_1,
@@ -319,5 +308,45 @@ fn test_session_continuity_history_carries_over() {
             session_id_3,
             "session 3 events must carry the new session_id: {ev:?}"
         );
+    }
+}
+
+#[test]
+fn test_bus_agent_event_observer_forwards_file_events() {
+    use crate::agent::events::AgentEventObserver;
+    use crate::bus::events::file::{FileEvent, FileEventKind};
+    use std::path::PathBuf;
+
+    let session_id = uuid::Uuid::new_v4();
+    let agent_bus = Bus::new();
+    let agent_reader = agent_bus.subscribe();
+    let file_bus: Bus<FileEvent> = Bus::new();
+    let file_reader = file_bus.subscribe();
+
+    let observer =
+        crate::app::events::BusAgentEventObserver::with_file_bus(session_id, agent_bus, file_bus);
+
+    let test_path = PathBuf::from("notes/test.md");
+    observer.on_tool_side_effect(crate::agent::events::ToolSideEffect::FileChanged {
+        path: test_path.clone(),
+    });
+
+    let ev = file_reader
+        .try_recv()
+        .expect("file event must be published");
+    assert_eq!(ev.kind, FileEventKind::Updated);
+    assert_eq!(ev.paths, vec![test_path.clone()]);
+
+    let agent_ev = agent_reader
+        .try_recv()
+        .expect("agent event must be published");
+    match agent_ev {
+        AgentEvent::ToolSideEffect { effect, .. } => {
+            assert_eq!(
+                effect,
+                crate::agent::events::ToolSideEffect::FileChanged { path: test_path }
+            );
+        }
+        other => panic!("expected ToolSideEffect, got {:?}", other),
     }
 }

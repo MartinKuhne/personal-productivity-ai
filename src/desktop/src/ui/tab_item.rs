@@ -88,7 +88,7 @@ impl TabItem {
 
     /// Computes a hash of the tab for use in caching.
     ///
-    /// This is used by TabManager to compute the hash of the tabs
+    /// This is used by Tabs to compute the hash of the tabs
     /// vector to detect changes and invalidate the tab strip cache.
     #[allow(clippy::never_loop)]
     pub(crate) fn hash<H: std::hash::Hasher>(&self, state: &mut H) {

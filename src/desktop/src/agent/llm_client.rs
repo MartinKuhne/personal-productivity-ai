@@ -1,8 +1,8 @@
 //! LLM HTTP client — builds requests, streams responses, parses tool calls, and extracts token-usage blocks from OpenAI/Anthropic APIs.
 
+use crate::agent::config::AgentConfig;
 use crate::agent::error::AgentError;
-use crate::bus::events::messages::TokenUsageInfo;
-use crate::config::AppConfig;
+use crate::agent::events::TokenUsageInfo;
 use backon::BlockingRetryable;
 use backon::ExponentialBuilder;
 
@@ -52,19 +52,24 @@ pub struct LLMClient {
 }
 
 impl LLMClient {
-    pub fn from_config(config: &AppConfig, model_name: Option<&str>) -> Option<Self> {
+    pub fn from_agent_config(config: &AgentConfig, model_name: Option<&str>) -> Option<Self> {
         let model_cfg = if let Some(name) = model_name {
-            config.models.get(name)?.clone()
-        } else if let Some((_key, cfg)) = config.model_for_use_case("chat") {
+            config.models().get(name)?.clone()
+        } else if let Some((_key, cfg)) = config
+            .models()
+            .iter()
+            .filter(|(_, cfg)| cfg.has_use_case("chat"))
+            .min_by_key(|(_, cfg)| cfg.get_cost())
+        {
             cfg.clone()
         } else {
-            config.models.values().next()?.clone()
+            config.models().values().next()?.clone()
         };
         Some(Self {
             api_url: model_cfg.api_url,
             api_key: model_cfg.api_key,
             model_name: model_cfg.model,
-            max_tokens: config.max_tokens,
+            max_tokens: config.max_tokens(),
         })
     }
 
@@ -197,6 +202,7 @@ impl LLMClient {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::agent::config::AgentConfigBuilder;
 
     #[test]
     fn test_parse_usage_openai() {
@@ -270,20 +276,21 @@ mod tests {
     }
 
     #[test]
-    fn test_llm_client_from_config_includes_max_tokens() {
-        let mut config = AppConfig::default();
-        config.models.insert(
-            "test_model".to_string(),
-            crate::config::LlmConfig {
-                model: "gpt-4".to_string(),
-                api_url: "http://api.example.com".to_string(),
-                api_key: "test-key".to_string(),
-                cost: None,
-                use_case: vec!["chat".to_string()],
-            },
-        );
-        config.max_tokens = 16384;
-        let client = LLMClient::from_config(&config, None).unwrap();
+    fn test_llm_client_from_agent_config_includes_max_tokens() {
+        let config = AgentConfigBuilder::new()
+            .with_max_tokens(16384)
+            .with_models(std::collections::HashMap::from([(
+                "test_model".to_string(),
+                crate::config::LlmConfig {
+                    model: "gpt-4".to_string(),
+                    api_url: "http://api.example.com".to_string(),
+                    api_key: "test-key".to_string(),
+                    cost: None,
+                    use_case: vec!["chat".to_string()],
+                },
+            )]))
+            .build();
+        let client = LLMClient::from_agent_config(&config, None).unwrap();
         assert_eq!(client.max_tokens, 16384);
     }
 }

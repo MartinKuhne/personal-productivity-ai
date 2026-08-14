@@ -1,13 +1,26 @@
 //! Tests for `tools/filesystem.rs`.
 
 use super::*;
-use crate::bus::core::Bus;
+
+fn test_ctx() -> crate::agent::tools::context::ToolContext {
+    let config = crate::agent::config::AgentConfig::default();
+    let mut builder = crate::agent::tools::context::ToolContextBuilder::new(
+        std::sync::Arc::new(config.clone()),
+        std::sync::Arc::new(crate::agent::tools::observer::DefaultFileObserver),
+    );
+    builder = builder.with_extension(std::sync::Arc::new(
+        crate::agent::tools::vfs::VirtualFileSystemExt(std::sync::Arc::new(
+            crate::agent::tools::vfs::VfsResolver::new(std::sync::Arc::new(config.clone())),
+        )),
+    ));
+    builder.build()
+}
 
 /// A producer that publishes to a throwaway bus. Tests don't
 /// need to consume the events — they only care about the
 /// success/failure of the underlying file operation.
-fn noop_producer() -> FileEventProducer {
-    FileEventProducer::new(Bus::new())
+fn noop_producer() -> std::sync::Arc<dyn crate::agent::tools::observer::OnFileChanged> {
+    std::sync::Arc::new(crate::agent::tools::observer::DefaultFileObserver)
 }
 
 #[test]
@@ -18,10 +31,11 @@ fn test_tool_patch_note() {
 
     let producer = noop_producer();
     let result = tool_patch_note(
+        &test_ctx(),
         file_path.to_str().unwrap(),
         "Old Text",
         "New Text",
-        &producer,
+        &*producer,
     )
     .unwrap()
     .result;
@@ -39,10 +53,11 @@ fn test_tool_patch_note_not_found() {
 
     let producer = noop_producer();
     let result = tool_patch_note(
+        &test_ctx(),
         file_path.to_str().unwrap(),
         "Missing Text",
         "New Text",
-        &producer,
+        &*producer,
     );
     assert_eq!(
         result.unwrap_err(),
@@ -59,7 +74,7 @@ fn test_tool_search_notes() {
     let file_path = dir.path().join("test.md");
     fs::write(&file_path, "# Hello\nWorld content\nAnother line").unwrap();
 
-    let result = tool_search_notes(dir.path(), "Workspace", "World").unwrap();
+    let result = tool_search_notes(&test_ctx(), dir.path(), "Workspace", "World").unwrap();
     assert!(result.iter().any(|m| m.contains("World content")));
     assert!(result.iter().any(|m| m.contains("Workspace")));
     assert!(result.iter().any(|m| m.contains("test.md")));
@@ -76,7 +91,7 @@ fn test_tool_list_notes() {
     // The low-level tool now returns a `Vec<String>` of every
     // match (no paging, no newline joining). Paging is applied at
     // the registry call site.
-    let result = tool_list_notes(dir.path(), "Workspace").unwrap();
+    let result = tool_list_notes(&test_ctx(), dir.path(), "Workspace").unwrap();
     assert_eq!(result.len(), 1, "non-recursive scan must return just a.md");
     assert!(result[0].ends_with("a.md"));
     assert!(result[0].starts_with("Workspace"));
@@ -88,13 +103,15 @@ fn test_tool_read_note() {
     let file_path = dir.path().join("test.md");
     fs::write(&file_path, "Hello World").unwrap();
 
-    let result = tool_read_note(file_path.to_str().unwrap()).unwrap().content;
+    let result = tool_read_note(&test_ctx(), file_path.to_str().unwrap())
+        .unwrap()
+        .content;
     assert_eq!(result, "Hello World");
 }
 
 #[test]
 fn test_tool_read_note_not_found() {
-    let result = tool_read_note("/nonexistent/path.md");
+    let result = tool_read_note(&test_ctx(), "/nonexistent/path.md");
     assert!(result.is_err());
     assert!(result.unwrap_err().contains("Failed to read file"));
 }
@@ -106,7 +123,7 @@ fn test_tool_window_note() {
     fs::write(&file_path, "Line 1\nLine 2\nLine 3\nLine 4").unwrap();
 
     // 0-indexed: skip "Line 1", return the next 2 lines.
-    let result = tool_window_note(file_path.to_str().unwrap(), 1, 2)
+    let result = tool_window_note(&test_ctx(), file_path.to_str().unwrap(), 1, 2)
         .unwrap()
         .content;
     assert_eq!(result, "Line 2\nLine 3");
@@ -119,7 +136,7 @@ fn test_tool_window_note_offset_zero() {
     let file_path = dir.path().join("test.md");
     fs::write(&file_path, "Line 1\nLine 2").unwrap();
 
-    let result = tool_window_note(file_path.to_str().unwrap(), 0, 1)
+    let result = tool_window_note(&test_ctx(), file_path.to_str().unwrap(), 0, 1)
         .unwrap()
         .content;
     assert_eq!(result, "Line 1");
@@ -131,7 +148,7 @@ fn test_tool_window_note_empty_file() {
     let file_path = dir.path().join("empty.md");
     fs::write(&file_path, "").unwrap();
 
-    let result = tool_window_note(file_path.to_str().unwrap(), 0, 50)
+    let result = tool_window_note(&test_ctx(), file_path.to_str().unwrap(), 0, 50)
         .unwrap()
         .content;
     assert_eq!(result, "");
@@ -144,9 +161,10 @@ fn test_tool_create_note() {
 
     let producer = noop_producer();
     let result = tool_create_note(
+        &test_ctx(),
         file_path.to_str().unwrap(),
         "---\ntitle: Test\n---\n# Hello",
-        &producer,
+        &*producer,
     )
     .unwrap()
     .result;
@@ -164,7 +182,12 @@ fn test_tool_create_note_invalid_extension() {
     let file_path = dir.path().join("new.txt");
 
     let producer = noop_producer();
-    let result = tool_create_note(file_path.to_str().unwrap(), "content", &producer);
+    let result = tool_create_note(
+        &test_ctx(),
+        file_path.to_str().unwrap(),
+        "content",
+        &*producer,
+    );
     assert_eq!(
         result.unwrap_err(),
         "Only markdown files (.md) are allowed."
@@ -178,9 +201,10 @@ fn test_tool_create_note_invalid_yaml() {
 
     let producer = noop_producer();
     let result = tool_create_note(
+        &test_ctx(),
         file_path.to_str().unwrap(),
         "---\ninvalid: [unclosed\n---\nContent",
-        &producer,
+        &*producer,
     );
     assert_eq!(
         result.unwrap_err(),
@@ -196,9 +220,10 @@ fn test_tool_create_note_fails_if_exists() {
 
     let producer = noop_producer();
     let result = tool_create_note(
+        &test_ctx(),
         file_path.to_str().unwrap(),
         "---\ntitle: Test\n---\n# Hello",
-        &producer,
+        &*producer,
     );
     assert_eq!(
         result.unwrap_err(),
@@ -218,10 +243,11 @@ fn test_tool_insert_into_note() {
     let producer = noop_producer();
     // 0-indexed: insert at position 1 (between "Line 1" and "Line 2").
     let result = tool_insert_into_note(
+        &test_ctx(),
         file_path.to_str().unwrap(),
         1,
         &["New Line".to_string()],
-        &producer,
+        &*producer,
     )
     .unwrap()
     .result;
@@ -240,10 +266,11 @@ fn test_tool_insert_into_note_at_top() {
 
     let producer = noop_producer();
     let result = tool_insert_into_note(
+        &test_ctx(),
         file_path.to_str().unwrap(),
         0,
         &["New".to_string()],
-        &producer,
+        &*producer,
     );
     assert!(result.is_ok());
 
@@ -260,10 +287,11 @@ fn test_tool_insert_into_note_at_end() {
 
     let producer = noop_producer();
     let result = tool_insert_into_note(
+        &test_ctx(),
         file_path.to_str().unwrap(),
         2,
         &["New".to_string()],
-        &producer,
+        &*producer,
     );
     assert!(result.is_ok());
 
@@ -280,10 +308,11 @@ fn test_tool_insert_into_note_out_of_range() {
     let producer = noop_producer();
     // 2-line file accepts offset in [0, 2]; offset 5 is out of range.
     let result = tool_insert_into_note(
+        &test_ctx(),
         file_path.to_str().unwrap(),
         5,
         &["New".to_string()],
-        &producer,
+        &*producer,
     );
     assert_eq!(result.unwrap_err(), "Offset out of range.");
 }
@@ -294,7 +323,7 @@ fn test_tool_read_tags() {
     let file_path = dir.path().join("test.md");
     fs::write(&file_path, "---\ntags: [tag1, tag2]\n---\n# Hello").unwrap();
 
-    let result = tool_read_tags(dir.path()).unwrap().tags;
+    let result = tool_read_tags(&test_ctx(), dir.path()).unwrap().tags;
     assert_eq!(result, vec!["tag1", "tag2"]);
 }
 
@@ -320,7 +349,7 @@ fn test_list_files_by_tag_returns_all_sorted_when_no_paging_in_tool() {
     // slicing — paging lives at the call site so it can be
     // applied to the cross-library result.
     let dir = build_tagged_library(5, "meeting");
-    let res = tool_list_notes_by_tag(dir.path(), "Workspace", "meeting").unwrap();
+    let res = tool_list_notes_by_tag(&test_ctx(), dir.path(), "Workspace", "meeting").unwrap();
     assert_eq!(res.len(), 5);
     // Use ends_with because Path::join uses the platform
     // separator (backslash on Windows, forward slash elsewhere).
@@ -333,7 +362,7 @@ fn test_list_files_by_tag_returns_all_sorted_when_no_paging_in_tool() {
 fn test_list_files_by_tag_no_matches_returns_empty() {
     let dir = tempdir().unwrap();
     fs::write(dir.path().join("solo.md"), "---\ntags: [other]\n---\n# x\n").unwrap();
-    let res = tool_list_notes_by_tag(dir.path(), "Workspace", "meeting").unwrap();
+    let res = tool_list_notes_by_tag(&test_ctx(), dir.path(), "Workspace", "meeting").unwrap();
     assert!(res.is_empty());
 }
 
@@ -348,7 +377,7 @@ fn test_list_files_by_tag_ignores_non_markdown_files() {
     )
     .unwrap();
     fs::write(dir.path().join("note.txt"), "tags: [meeting]").unwrap();
-    let res = tool_list_notes_by_tag(dir.path(), "Workspace", "meeting").unwrap();
+    let res = tool_list_notes_by_tag(&test_ctx(), dir.path(), "Workspace", "meeting").unwrap();
     assert_eq!(res.len(), 1);
     assert!(res[0].ends_with("note.md"));
     assert!(res[0].starts_with("Workspace"));
@@ -374,7 +403,7 @@ fn test_tool_search_notes_ignores_non_markdown_files() {
     fs::write(&txt_file, "This also contains search term").unwrap();
     fs::write(&pdf_file, "Search term in PDF").unwrap();
 
-    let result = tool_search_notes(dir.path(), "Workspace", "search term").unwrap();
+    let result = tool_search_notes(&test_ctx(), dir.path(), "Workspace", "search term").unwrap();
     // Only the .md file should be found
     assert!(result.iter().any(|m| m.contains("test.md")));
     assert!(result.iter().any(|m| m.contains("Contains search term")));
@@ -396,7 +425,7 @@ fn test_tool_search_notes_multiple_matches_same_file() {
     )
     .unwrap();
 
-    let result = tool_search_notes(dir.path(), "Workspace", "foo").unwrap();
+    let result = tool_search_notes(&test_ctx(), dir.path(), "Workspace", "foo").unwrap();
 
     // Should find 3 matches at lines 1, 3, 5
     assert_eq!(result.len(), 3, "Expected 3 matches, got: {:?}", result);
@@ -427,7 +456,7 @@ fn test_tool_search_notes_case_insensitive() {
     let file_path = dir.path().join("test.md");
     fs::write(&file_path, "Hello WORLD hello World HELLO").unwrap();
 
-    let result = tool_search_notes(dir.path(), "Workspace", "hello").unwrap();
+    let result = tool_search_notes(&test_ctx(), dir.path(), "Workspace", "hello").unwrap();
     let matches_text = result.join("\n");
     assert!(matches_text.contains("Hello"));
     assert!(matches_text.contains("WORLD"));
@@ -443,7 +472,7 @@ fn test_tool_search_notes_no_matches_returns_empty_vec() {
     // registry call site, not the low-level scan.
     let dir = tempdir().unwrap();
     fs::write(dir.path().join("test.md"), "# Project\nNothing here").unwrap();
-    let result = tool_search_notes(dir.path(), "Workspace", "nonexistent").unwrap();
+    let result = tool_search_notes(&test_ctx(), dir.path(), "Workspace", "nonexistent").unwrap();
     assert!(result.is_empty());
 }
 
@@ -463,7 +492,7 @@ fn test_tool_window_note_offset_past_end() {
     let file_path = dir.path().join("test.md");
     fs::write(&file_path, "Line 1\nLine 2\nLine 3").unwrap();
 
-    let result = tool_window_note(file_path.to_str().unwrap(), 999, 100)
+    let result = tool_window_note(&test_ctx(), file_path.to_str().unwrap(), 999, 100)
         .unwrap()
         .content;
     assert_eq!(result, "");
@@ -476,7 +505,7 @@ fn test_tool_window_note_limit_zero() {
     let file_path = dir.path().join("test.md");
     fs::write(&file_path, "Line 1\nLine 2").unwrap();
 
-    let result = tool_window_note(file_path.to_str().unwrap(), 0, 0)
+    let result = tool_window_note(&test_ctx(), file_path.to_str().unwrap(), 0, 0)
         .unwrap()
         .content;
     assert_eq!(result, "");
@@ -490,7 +519,7 @@ fn test_tool_window_note_limit_beyond_file() {
     let file_path = dir.path().join("test.md");
     fs::write(&file_path, "Line 1\nLine 2\nLine 3").unwrap();
 
-    let content = tool_window_note(file_path.to_str().unwrap(), 0, 100)
+    let content = tool_window_note(&test_ctx(), file_path.to_str().unwrap(), 0, 100)
         .unwrap()
         .content;
     assert!(content.contains("Line 1"));
@@ -505,7 +534,12 @@ fn test_tool_create_note_rejects_markdown_extension() {
     let file_path = dir.path().join("new.markdown");
 
     let producer = noop_producer();
-    let result = tool_create_note(file_path.to_str().unwrap(), "# Hello", &producer);
+    let result = tool_create_note(
+        &test_ctx(),
+        file_path.to_str().unwrap(),
+        "# Hello",
+        &*producer,
+    );
     // Should reject .markdown extension
     assert_eq!(
         result.unwrap_err(),
@@ -522,7 +556,7 @@ fn test_tool_list_notes_excludes_subdirectories() {
     fs::create_dir(dir.path().join("subdir")).unwrap();
     fs::write(dir.path().join("subdir").join("nested.md"), "content").unwrap();
 
-    let result = tool_list_notes(dir.path(), "Workspace").unwrap();
+    let result = tool_list_notes(&test_ctx(), dir.path(), "Workspace").unwrap();
     assert_eq!(result.len(), 1);
     assert!(result[0].ends_with("root.md"));
     // Nested files should NOT be included
@@ -539,7 +573,7 @@ fn test_tool_list_notes_by_tag_with_markdown_extension() {
     )
     .unwrap();
 
-    let res = tool_list_notes_by_tag(dir.path(), "Workspace", "test-tag").unwrap();
+    let res = tool_list_notes_by_tag(&test_ctx(), dir.path(), "Workspace", "test-tag").unwrap();
     assert_eq!(res.len(), 1);
     assert!(res[0].ends_with("doc.markdown"));
 }

@@ -279,13 +279,13 @@ fn test_tree_row_height_matches_selectable_label_height() {
 /// the right-clicked directory (UI-015).
 ///
 /// The harness mirrors the production wiring (`left.rs` passes the
-/// `DialogManager`'s create-document fields into the
+/// `Dialogs`'s create-document fields into the
 /// `TreeNodeContext`; `app.rs` renders the dialog from those same
 /// fields): the flat row and the create-document dialog are drawn
 /// in the same frame, driven by shared state.
 #[test]
 fn test_new_document_on_directory_opens_dialog_with_dir_parent() {
-    use crate::app::dialog_manager::DialogManager;
+    use crate::app::dialogs::Dialogs;
     use crate::bus::core::Bus;
     use crate::bus::events::file::FileEvent;
     use crate::ui::modals::show_create_document_dialog;
@@ -308,7 +308,7 @@ fn test_new_document_on_directory_opens_dialog_with_dir_parent() {
     };
 
     let ctx_cell: Rc<RefCell<TreeNodeContext>> = Rc::new(RefCell::new(TreeNodeContext::default()));
-    let dm_cell: Rc<RefCell<DialogManager>> = Rc::new(RefCell::new(DialogManager::new()));
+    let dm_cell: Rc<RefCell<Dialogs>> = Rc::new(RefCell::new(Dialogs::new()));
     let bus = Bus::<FileEvent>::new();
 
     let row_for_closure = row.clone();

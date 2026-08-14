@@ -1,82 +1,12 @@
-//! Tool context — provides tools with access to `AppConfig` and the file event bus, plus safe virtual-path resolution.
+//! Tool context — provides tools with access to the global `AppConfig` and the file event bus, plus safe virtual-path resolution.
 
-use crate::app::session::BrowserSession;
-use crate::app::vfs;
-use crate::bus::core::Bus;
-use crate::bus::events::file::{FileEvent, FileEventKind, FileEventProducer};
+use crate::agent::config::AgentConfig;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
-/// Read-only VFS path resolver wrapping `AppConfig`. Owns an
-/// `Arc<AppConfig>` so the resolver is `'static` and can be
-/// embedded in a long-lived `ToolContext` or cloned across
-/// parallel dispatch without lifetime juggling.
-#[derive(Clone)]
-pub struct VfsResolver {
-    pub config: Arc<crate::config::AppConfig>,
-}
-
-impl VfsResolver {
-    /// Create a new `VfsResolver`.
-    pub fn new(config: Arc<crate::config::AppConfig>) -> Self {
-        Self { config }
-    }
-
-    /// Resolve a virtual path to an absolute filesystem path. Thin shim
-    /// over [`vfs::behaviour::resolve`] that pulls the library list from
-    /// the active config. Spec: [`app/vfs/SPEC.md`](../../app/vfs/SPEC.md) (VFS-004, VFS-009).
-    pub fn resolve_virtual_path(
-        &self,
-        vpath: &str,
-        allow_write: bool,
-    ) -> Result<Option<(PathBuf, bool)>, String> {
-        vfs::behaviour::resolve(vpath, allow_write, &self.config.content_libraries)
-    }
-
-    /// Resolve a virtual path for a mutating tool. Thin shim over
-    /// [`vfs::behaviour::resolve_writable`]. Returns the absolute
-    /// filesystem path on success.
-    pub fn resolve_writable(&self, vpath: &str) -> Result<PathBuf, String> {
-        vfs::behaviour::resolve_writable(vpath, &self.config.content_libraries)
-    }
-}
-
-/// Event publisher wrapping the file event bus for side-effecting tools.
-/// Owns a `Bus<FileEvent>` clone (cheap, the underlying
-/// `tokio::sync::broadcast::Sender` is `Arc`-backed) so the
-/// publisher is `'static` and embeddable in a `ToolContext`.
-#[derive(Clone)]
-pub struct EventPublisher {
-    pub file_event_bus: Bus<FileEvent>,
-}
-
-impl EventPublisher {
-    /// Create a new `EventPublisher`.
-    pub fn new(file_event_bus: Bus<FileEvent>) -> Self {
-        Self { file_event_bus }
-    }
-
-    /// Publish a file event to the bus.
-    pub fn publish_file_event(&self, kind: FileEventKind, path: &Path) {
-        let producer = FileEventProducer::new(self.file_event_bus.clone());
-        match kind {
-            FileEventKind::Discovered => producer.publish_discovered(path),
-            FileEventKind::Updated => producer.publish_updated(path),
-            FileEventKind::Removed => producer.publish_removed(path),
-            FileEventKind::DirDiscovered => producer.publish_dir_discovered(path),
-            FileEventKind::DirRemoved => producer.publish_dir_removed(path),
-        }
-    }
-
-    /// Obtain a [`FileEventProducer`] handle.
-    pub fn file_event_producer(&self) -> FileEventProducer {
-        FileEventProducer::new(self.file_event_bus.clone())
-    }
-}
-
-/// Tool context — composite providing tools with access to `AppConfig`
+/// Tool context — composite providing tools with access to `AgentConfig`
 /// and the file event bus, plus safe virtual-path resolution via
-/// [`VfsResolver`] and event publishing via [`EventPublisher`].
+/// [`crate::agent::tools::vfs::VirtualFileSystem`] and event publishing.
 ///
 /// `ToolContext` is `'static` and cheap to clone: every reference-
 /// shaped field is now an owned `Arc` or a `Clone`-cheap `Bus`.
@@ -86,50 +16,28 @@ impl EventPublisher {
 /// [`ToolExecutor`](crate::agent::tool_executor::ToolExecutor)
 /// (which needs an owned handle per `spawn_blocking`) work
 /// without `unsafe` casts.
+///
+/// Note: the context deliberately does **not** carry a back-reference
+/// to the tool registry. The executor, which dispatches to tools,
+/// owns the registry and the dispatcher; the per-call context only
+/// exposes the services a tool actually needs. This breaks the
+/// implicit context ↔ registry cycle the previous design had.
+pub struct ToolCacheExt(pub std::sync::Arc<crate::agent::tools::registry::cache::ToolCache>);
+pub struct UuidGeneratorExt(pub std::sync::Arc<dyn crate::utils::uuid::UuidGenerator>);
+
 #[derive(Clone)]
 pub struct ToolContext {
-    pub config: Arc<crate::config::AppConfig>,
-    pub file_event_bus: Bus<FileEvent>,
-    pub resolver: VfsResolver,
-    pub publisher: EventPublisher,
-    /// Long-lived headless Firefox session, shared across every
-    /// mutating browser tool call. `None` only in early-startup
-    /// tests that don't care about the browser. Tools that
-    /// don't use the browser ignore this field. When the
-    /// `browser` Cargo feature is off the session is a stub;
-    /// the `browser_*` tools are not registered and the field
-    /// stays unused.
-    pub browser_session: Arc<BrowserSession>,
-    pub pdf_backing: std::sync::Arc<crate::app::session::PdfBackingTracker>,
-    pub cache: std::sync::Arc<crate::agent::tools::manager::cache::ToolCache>,
-    pub tool_manager: std::sync::Arc<std::sync::RwLock<crate::agent::tools::manager::ToolManager>>,
-    pub uuid_gen: std::sync::Arc<dyn crate::utils::uuid::UuidGenerator>,
+    pub config: Arc<AgentConfig>,
+    pub extensions: crate::agent::tools::extensions::Extensions,
 }
 
 impl ToolContext {
-    /// Create a new `ToolContext`.
-    pub fn new(
-        config: Arc<crate::config::AppConfig>,
-        file_event_bus: Bus<FileEvent>,
-        browser_session: Arc<BrowserSession>,
-        pdf_backing: std::sync::Arc<crate::app::session::PdfBackingTracker>,
-        cache: std::sync::Arc<crate::agent::tools::manager::cache::ToolCache>,
-        tool_manager: std::sync::Arc<std::sync::RwLock<crate::agent::tools::manager::ToolManager>>,
-        uuid_gen: std::sync::Arc<dyn crate::utils::uuid::UuidGenerator>,
-    ) -> Self {
-        let resolver = VfsResolver::new(config.clone());
-        let publisher = EventPublisher::new(file_event_bus.clone());
-        Self {
-            config,
-            file_event_bus,
-            resolver,
-            publisher,
-            browser_session,
-            pdf_backing,
-            cache,
-            tool_manager,
-            uuid_gen,
-        }
+    pub fn vfs(&self) -> std::sync::Arc<dyn crate::agent::tools::vfs::VirtualFileSystem> {
+        self.extensions
+            .get::<crate::agent::tools::vfs::VirtualFileSystemExt>()
+            .expect("VFS not injected")
+            .0
+            .clone()
     }
 
     /// Resolve a virtual path to an absolute filesystem path.
@@ -138,27 +46,58 @@ impl ToolContext {
         vpath: &str,
         allow_write: bool,
     ) -> Result<Option<(PathBuf, bool)>, String> {
-        self.resolver.resolve_virtual_path(vpath, allow_write)
+        self.vfs().resolve_virtual_path(vpath, allow_write)
     }
 
     /// Resolve a virtual path for a mutating tool.
     pub fn resolve_writable(&self, vpath: &str) -> Result<PathBuf, String> {
-        self.resolver.resolve_writable(vpath)
+        self.vfs().resolve_writable(vpath)
+    }
+
+    pub fn cache(&self) -> std::sync::Arc<crate::agent::tools::registry::cache::ToolCache> {
+        self.extensions
+            .get::<ToolCacheExt>()
+            .expect("ToolCache not injected")
+            .0
+            .clone()
+    }
+
+    pub fn uuid_gen(&self) -> std::sync::Arc<dyn crate::utils::uuid::UuidGenerator> {
+        self.extensions
+            .get::<UuidGeneratorExt>()
+            .expect("UuidGenerator not injected")
+            .0
+            .clone()
     }
 
     /// Publish a file event to the file event bus.
-    pub fn publish_file_event(&self, kind: FileEventKind, path: &Path) {
-        self.publisher.publish_file_event(kind, path);
+    pub fn file_observer(
+        &self,
+    ) -> std::sync::Arc<dyn crate::agent::tools::observer::OnFileChanged> {
+        if let Some(ext) = self
+            .extensions
+            .get::<crate::agent::tools::observer::OnFileChangedExt>()
+        {
+            ext.0.clone()
+        } else {
+            std::sync::Arc::new(crate::agent::tools::observer::DefaultFileObserver)
+        }
     }
 
-    /// Obtain a [`FileEventProducer`] handle.
-    pub fn file_event_producer(&self) -> FileEventProducer {
-        self.publisher.file_event_producer()
+    pub fn publish_file_event(&self, path: &Path) {
+        self.file_observer().on_file_changed(path);
     }
 
-    /// Check whether the given path is a Markdown file with a PDF sibling.
-    pub fn is_pdf_backed(&self, path: &Path) -> bool {
-        self.pdf_backing.is_pdf_backed(path)
+    /// Check whether the given path is allowed to be written to. Returns an error string if blocked.
+    pub fn check_write_allowed(&self, path: &Path) -> Result<(), String> {
+        if let Some(ext) = self
+            .extensions
+            .get::<crate::agent::tools::policy::ToolCallPolicyExt>()
+        {
+            ext.0.check_write_allowed(path)
+        } else {
+            Ok(())
+        }
     }
 }
 
@@ -177,3 +116,69 @@ const _: fn() = || {
     fn assert_send_sync_static<T: Send + Sync + 'static>() {}
     assert_send_sync_static::<ToolContext>();
 };
+
+pub struct ToolContextBuilder {
+    config: Arc<AgentConfig>,
+    file_observer: std::sync::Arc<dyn crate::agent::tools::observer::OnFileChanged>,
+    extensions: crate::agent::tools::extensions::Extensions,
+}
+
+impl ToolContextBuilder {
+    pub fn new(
+        config: Arc<AgentConfig>,
+        file_observer: std::sync::Arc<dyn crate::agent::tools::observer::OnFileChanged>,
+    ) -> Self {
+        Self {
+            config,
+            file_observer,
+            extensions: crate::agent::tools::extensions::Extensions::default(),
+        }
+    }
+
+    pub fn with_tool_call_policy(
+        mut self,
+        policy: std::sync::Arc<dyn crate::agent::tools::policy::ToolCallPolicy>,
+    ) -> Self {
+        self.extensions
+            .insert(Arc::new(crate::agent::tools::policy::ToolCallPolicyExt(
+                policy,
+            )));
+        self
+    }
+
+    pub fn with_extension<T: Send + Sync + 'static>(mut self, extension: Arc<T>) -> Self {
+        self.extensions.insert(extension);
+        self
+    }
+
+    pub fn build(self) -> ToolContext {
+        let mut extensions = self.extensions;
+        extensions.insert(Arc::new(crate::agent::tools::observer::OnFileChangedExt(
+            self.file_observer.clone(),
+        )));
+
+        if extensions
+            .get::<crate::agent::tools::vfs::VirtualFileSystemExt>()
+            .is_none()
+        {
+            extensions.insert(std::sync::Arc::new(
+                crate::agent::tools::vfs::VirtualFileSystemExt(std::sync::Arc::new(
+                    crate::agent::tools::vfs::VfsResolver::new(self.config.clone()),
+                )),
+            ));
+        }
+        if extensions
+            .get::<crate::agent::tools::policy::ToolCallPolicyExt>()
+            .is_none()
+        {
+            extensions.insert(Arc::new(crate::agent::tools::policy::ToolCallPolicyExt(
+                Arc::new(crate::agent::tools::policy::DefaultToolCallPolicy),
+            )));
+        }
+
+        ToolContext {
+            config: self.config,
+            extensions,
+        }
+    }
+}

@@ -1,6 +1,6 @@
 //! Batch coordinator — discovers targets, spawns the executor on a background thread, polls progress, and reports results.
 
-use crate::app::batch::discoverer::JobDiscoverer;
+use crate::app::batch::discoverer::Discoverer;
 use crate::app::batch::executor::BatchJobExecutor;
 use crate::app::batch::types::{
     BatchConfig, BatchHandle, BatchJob, BatchJobStatus, BatchMode, BatchResult,
@@ -57,7 +57,7 @@ impl BatchCoordinator {
 
     fn run(self) -> BatchResult {
         let start_time = self.clock.now();
-        let discoverer: Box<dyn JobDiscoverer> = <dyn JobDiscoverer>::from_config(&self.config);
+        let discoverer = Discoverer::from_config(&self.config);
         let targets = match discoverer.discover() {
             Ok(t) => t,
             Err(e) => {
@@ -114,7 +114,9 @@ impl BatchCoordinator {
 
         let executor = BatchJobExecutor::new(
             self.app_config,
-            self.file_event_bus,
+            std::sync::Arc::new(crate::app::session::bus_observer::AppFileObserver::new(
+                self.file_event_bus.clone(),
+            )),
             self.tx_gui,
             self.prompt_text,
             self.cancel_flag.clone(),

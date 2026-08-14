@@ -100,6 +100,14 @@ typst-layout = { version = "0.15", optional = true }
 typst-pdf = { version = "0.15", optional = true }
 typst = { version = "0.15", optional = true }
 typst-kit = { version = "0.15", optional = true }
+arc-swap = "1.9.2"
+# `fastmd-tool-macros` — sibling proc-macro crate that ships
+# `#[derive(ToolDescriptor)]`. See `fastmd-tool-macros/src/lib.rs`
+# for the macro contract. The repo has no Cargo workspace today
+# (this crate is the only runtime crate), so the proc-macro is
+# added as a path dep rather than going into a separate
+# workspace member.
+fastmd-tool-macros = { path = "fastmd-tool-macros" }
 
 [target.'cfg(windows)'.dependencies]
 windows = { version = "0.62", features = ["Win32_System_Com", "Win32_UI_Shell"] }

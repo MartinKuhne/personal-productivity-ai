@@ -269,7 +269,7 @@ pub fn show_left_panel(app: &mut FastMdApp, parent_ui: &mut egui::Ui) {
             // `ctx.open_editor()` to perform the file open.
             let mut ctx = TreeNodeContext::from_app_state(
                 &app.orchestrator.selection,
-                &app.orchestrator.tab_manager,
+                &app.orchestrator.tabs,
                 &app.orchestrator.dialogs,
                 &app.layout,
                 &app.orchestrator.submit_prompt,
@@ -299,7 +299,7 @@ pub fn show_left_panel(app: &mut FastMdApp, parent_ui: &mut egui::Ui) {
             // not written back — those are inputs, not outputs.
             ctx.write_back(
                 &mut app.orchestrator.selection,
-                &mut app.orchestrator.tab_manager,
+                &mut app.orchestrator.tabs,
                 &mut app.orchestrator.dialogs,
                 &mut app.orchestrator.submit_prompt,
             );

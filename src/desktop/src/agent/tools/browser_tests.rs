@@ -16,15 +16,14 @@
 
 #![cfg(test)]
 
+use crate::agent::config::AgentConfig;
 use crate::agent::tools::Tool;
-use crate::app::session::BrowserSession;
-use crate::config::AppConfig;
 use std::sync::Arc;
 use tempfile::TempDir;
 
 fn make_session() -> (TempDir, Arc<BrowserSession>) {
     let tmp = tempfile::tempdir().expect("tempdir");
-    let mut config = AppConfig::default();
+    let mut config = AgentConfig::default();
     // Use a sandbox screenshot dir inside the tempdir so the
     // tests don't litter the user's real library.
     config.browser.screenshot_dir = tmp.path().join("screenshots").to_string_lossy().to_string();
@@ -72,7 +71,7 @@ fn test_session_persists_cookies_across_relaunch() {
 
     // Build a second session against the same dir and confirm
     // it picks up the existing file.
-    let mut config = AppConfig::default();
+    let mut config = AgentConfig::default();
     config.browser.storage_state_path = tmp
         .path()
         .join("storage.json")
@@ -92,27 +91,28 @@ fn test_session_persists_cookies_across_relaunch() {
 #[test]
 #[ignore = "requires Playwright Firefox installed locally"]
 fn test_browser_navigate_tool_round_trip() {
-    use crate::agent::tools::context::ToolContext;
     let (_tmp, session) = make_session();
     let bus = crate::bus::core::Bus::<crate::bus::events::file::FileEvent>::new();
-    let mut config = AppConfig::default();
+    let mut config = AgentConfig::default();
     config.tool_groups.browser = true;
-    let pdf_backing = std::sync::Arc::new(crate::app::session::PdfBackingTracker::new());
-    let tm = Arc::new(std::sync::RwLock::new(
-        crate::agent::tools::manager::ToolManager::new(),
-    ));
-    let cache = Arc::new(crate::agent::tools::manager::cache::ToolCache::new());
-    let ctx = ToolContext::new(
-        Arc::new(config),
-        bus,
-        session,
-        pdf_backing,
-        cache,
-        tm,
-        Arc::new(crate::utils::uuid::SystemUuidGenerator),
-    );
+    let policy = std::sync::Arc::new(crate::agent::tools::policy::DefaultToolCallPolicy);
+    let cache = Arc::new(crate::agent::tools::registry::cache::ToolCache::new());
+    let ctx = crate::agent::tools::context::ToolContextBuilder::new(
+        Arc::new(config.clone()),
+        std::sync::Arc::new(crate::agent::tools::observer::DefaultFileObserver),
+    )
+    .with_extension(std::sync::Arc::new(
+        crate::agent::tools::context::ToolCacheExt(cache.clone()),
+    ))
+    .with_extension(std::sync::Arc::new(
+        crate::agent::tools::context::UuidGeneratorExt(Arc::new(
+            crate::utils::uuid::SystemUuidGenerator,
+        )),
+    ))
+    .with_tool_call_policy(pdf_backing)
+    .build();
 
-    let tool = crate::agent::tools::manager::builtin::browser::BrowserNavigateTool;
+    let tool = crate::agent::tools::registry::builtin::browser::BrowserNavigateTool;
     let args = r#"{"url":"about:blank"}"#;
     let result = tool.execute(&ctx, args);
     assert!(result.is_ok(), "navigate failed: {:?}", result.err());
@@ -122,26 +122,27 @@ fn test_browser_navigate_tool_round_trip() {
 #[ignore = "requires Playwright Firefox installed locally"]
 fn test_browser_get_page_state_tool_is_readonly() {
     use crate::agent::tools::Safety;
-    use crate::agent::tools::context::ToolContext;
     let (_tmp, session) = make_session();
     let bus = crate::bus::core::Bus::<crate::bus::events::file::FileEvent>::new();
-    let mut config = AppConfig::default();
+    let mut config = AgentConfig::default();
     config.tool_groups.browser = true;
-    let pdf_backing = std::sync::Arc::new(crate::app::session::PdfBackingTracker::new());
-    let tm = Arc::new(std::sync::RwLock::new(
-        crate::agent::tools::manager::ToolManager::new(),
-    ));
-    let cache = Arc::new(crate::agent::tools::manager::cache::ToolCache::new());
-    let _ctx = ToolContext::new(
-        Arc::new(config),
-        bus,
-        session,
-        pdf_backing,
-        cache,
-        tm,
-        Arc::new(crate::utils::uuid::SystemUuidGenerator),
-    );
+    let policy = std::sync::Arc::new(crate::agent::tools::policy::DefaultToolCallPolicy);
+    let cache = Arc::new(crate::agent::tools::registry::cache::ToolCache::new());
+    let _ctx = crate::agent::tools::context::ToolContextBuilder::new(
+        Arc::new(config.clone()),
+        std::sync::Arc::new(crate::agent::tools::observer::DefaultFileObserver),
+    )
+    .with_extension(std::sync::Arc::new(
+        crate::agent::tools::context::ToolCacheExt(cache.clone()),
+    ))
+    .with_extension(std::sync::Arc::new(
+        crate::agent::tools::context::UuidGeneratorExt(Arc::new(
+            crate::utils::uuid::SystemUuidGenerator,
+        )),
+    ))
+    .with_tool_call_policy(pdf_backing)
+    .build();
 
-    let tool = crate::agent::tools::manager::builtin::browser::BrowserGetPageStateTool;
+    let tool = crate::agent::tools::registry::builtin::browser::BrowserGetPageStateTool;
     assert_eq!(tool.safety(), Safety::ReadOnly);
 }

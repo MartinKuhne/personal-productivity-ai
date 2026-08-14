@@ -1,5 +1,5 @@
 //! Property-based tests for the LLM↔tool dispatch surface
-//! (`ToolManager::execute_tool`).
+//! (`ToolRegistry::execute_tool`).
 //!
 //! `execute_tool` is the single chokepoint through which every
 //! `tool_calls[*].function.arguments` JSON the LLM emits flows into
@@ -45,15 +45,14 @@
 //! via the `Box::leak` and pointer-cast trick — about 1 MiB of
 //! leaked memory per 1024 cases. After the rewrite, the context is
 //! built normally, the worker thread takes a cheap `Clone` (the
-//! `Arc`-backed `AppConfig` and `ToolCache` are shared), and the
+//! `Arc`-backed `AgentConfig` and `ToolCache` are shared), and the
 //! test runs without `Box::leak` or `unsafe`. The same pattern is
 //! what makes the Phase-5 cargo-fuzz targets for `execute_tool`
 //! feasible.
 
+use crate::agent::config::AgentConfig;
 use crate::agent::tools::context::ToolContext;
 use crate::app::session::{BrowserSession, PdfBackingTracker};
-use crate::bus::core::Bus;
-use crate::config::AppConfig;
 use crate::utils::uuid::SystemUuidGenerator;
 use proptest::prelude::*;
 use std::sync::Arc;
@@ -72,22 +71,28 @@ const DISPATCH_TIMEOUT: Duration = Duration::from_secs(5);
 /// allocations across 1024 cases are bounded and reclaimed
 /// by the test harness.
 fn build_dispatch_context() -> ToolContext {
-    let config = AppConfig::default();
-    let browser_session = Arc::new(BrowserSession::new(&config));
-    let pdf_backing = Arc::new(PdfBackingTracker::new());
-    let tool_manager = Arc::new(std::sync::RwLock::new(
-        crate::agent::tools::manager::ToolManager::new(),
-    ));
+    let config = AgentConfig::default();
+    let browser_session = Arc::new(BrowserSession::with_resolved(config.browser.clone()));
+    let policy = Arc::new(PdfBackingTracker::new());
     let uuid_gen: Arc<dyn crate::utils::uuid::UuidGenerator> = Arc::new(SystemUuidGenerator);
-    ToolContext::new(
+    crate::agent::tools::context::ToolContextBuilder::new(
         Arc::new(config),
-        Bus::new(),
-        browser_session,
-        pdf_backing,
-        Arc::new(crate::agent::tools::manager::cache::ToolCache::new()),
-        tool_manager,
-        uuid_gen,
+        std::sync::Arc::new(crate::agent::tools::observer::DefaultFileObserver),
     )
+    .with_extension(std::sync::Arc::new(
+        crate::agent::tools::context::ToolCacheExt(Arc::new(
+            crate::agent::tools::registry::cache::ToolCache::new(),
+        )),
+    ))
+    .with_extension(std::sync::Arc::new(
+        crate::agent::tools::context::UuidGeneratorExt(uuid_gen),
+    ))
+    .with_extension(browser_session.clone())
+    .with_extension(Arc::new(crate::agent::tools::browser::BrowserExt(
+        browser_session,
+    )))
+    .with_tool_call_policy(policy)
+    .build()
 }
 
 /// Call `execute_tool` with a wall-clock timeout. The
@@ -102,14 +107,15 @@ fn execute_with_timeout(ctx: ToolContext, name: String, args: String) -> Option<
     let _ = thread::Builder::new()
         .name("dispatch-proptest".to_string())
         .spawn(move || {
-            let result = execute_tool(&ctx, &name, &args);
+            let dispatcher = crate::agent::tools::registry::ToolRegistry::new();
+            let result = execute_tool(&dispatcher, &ctx, &name, &args);
             let _ = tx.send(result);
         });
     rx.recv_timeout(DISPATCH_TIMEOUT).ok()
 }
 
 // Re-export the dispatch function from the manager module.
-use crate::agent::tools::manager::execute_tool;
+use crate::agent::tools::registry::execute_tool;
 
 /// Arbitrary tool-name strategy. A tool name is any UTF-8
 /// string (0-128 bytes). Includes the empty string, single
@@ -152,7 +158,8 @@ proptest! {
         // it always returns, never unwinds (because of the
         // `catch_unwind` in production), and the return
         // is a JSON object with a `status` field.
-        let result = execute_tool(&ctx, &name, &args);
+        let dispatcher = crate::agent::tools::registry::ToolRegistry::new();
+        let result = execute_tool(&dispatcher, &ctx, &name, &args);
 
         // The return must be a non-empty String. A regression
         // that returned an empty string would break the agent

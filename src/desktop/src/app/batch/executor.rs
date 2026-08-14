@@ -1,8 +1,6 @@
 //! Batch job executor — runs the LLM agent against each discovered unit (file or directory) with configurable concurrency.
 
 use crate::app::batch::types::{BatchJob, BatchJobStatus, BatchResult};
-use crate::bus::core::Bus;
-use crate::bus::events::file::FileEvent;
 use crate::bus::events::typed::BackgroundEvent;
 use crate::config::AppConfig;
 use crate::utils::clock::Clock;
@@ -13,7 +11,7 @@ use tokio::sync::Semaphore;
 
 pub struct BatchJobExecutor {
     app_config: AppConfig,
-    file_event_bus: Bus<FileEvent>,
+    file_event_bus: std::sync::Arc<dyn crate::agent::tools::observer::OnFileChanged>,
     tx_gui: mpsc::Sender<BackgroundEvent>,
     cancel_flag: Arc<AtomicBool>,
     clock: Arc<dyn Clock>,
@@ -22,7 +20,7 @@ pub struct BatchJobExecutor {
 impl BatchJobExecutor {
     pub fn new(
         app_config: AppConfig,
-        file_event_bus: Bus<FileEvent>,
+        file_event_bus: std::sync::Arc<dyn crate::agent::tools::observer::OnFileChanged>,
         tx_gui: mpsc::Sender<BackgroundEvent>,
         _prompt: String,
         cancel_flag: Arc<AtomicBool>,
@@ -93,7 +91,7 @@ impl BatchJobExecutor {
                 let active_dir = job.active_dir.clone();
                 let prompt_text = job.prompt_text.clone();
                 let app_config = self.app_config.clone();
-                let file_event_bus = self.file_event_bus.clone();
+
                 let cancel_flag = cancel_flag.clone();
 
                 // Assign model round-robin when multiple min-cost models exist.
@@ -109,6 +107,7 @@ impl BatchJobExecutor {
 
                 tracing::info!(target: "batch", job_id, path = ?target_path, "Starting batch job");
 
+                let file_event_bus_clone = self.file_event_bus.clone();
                 join_set.spawn(async move {
                     if cancel_flag.load(Ordering::SeqCst) {
                         drop(permit);
@@ -123,7 +122,7 @@ impl BatchJobExecutor {
                         prompt_text,
                         cancel_flag,
                         None,
-                        file_event_bus,
+                        file_event_bus_clone,
                         model_name,
                     );
 
@@ -189,37 +188,43 @@ pub fn run_agent_blocking(
     prompt: String,
     cancel_flag: Arc<AtomicBool>,
     history: Option<Vec<serde_json::Value>>,
-    file_event_bus: Bus<FileEvent>,
+    file_event_bus: std::sync::Arc<dyn crate::agent::tools::observer::OnFileChanged>,
     model_name: Option<String>,
 ) -> (BatchJobStatus, Option<String>) {
-    use crate::agent::events::AgentEvent as SeamAgentEvent;
     use crate::agent::run_agent;
+    use crate::app::events::AgentEvent as SeamAgentEvent;
 
     let agent_event_bus = crate::bus::core::Bus::new();
     let reader = agent_event_bus.subscribe();
 
-    let ctx = crate::agent::AgentContext {
-        config,
-        file_event_bus,
-        agent_event_bus,
-        active_file,
-        active_dir,
-        selected_files,
+    // Assemble the system prompts at the same point the orchestrator's
+    // submit path does. The batch driver is a second submitter.
+    let system_prompts = crate::app::prompts::build_system_prompts(
+        &config,
+        active_file.as_deref(),
+        active_dir.as_deref(),
+        &selected_files,
+    );
+
+    let ctx = crate::agent::context::AgentContextBuilder::new(
+        config.to_agent_config(),
+        uuid::Uuid::new_v4(),
         prompt,
-        cancel_flag,
-        history,
-        model_name,
-        session_id: uuid::Uuid::new_v4(),
-        browser_session: std::sync::Arc::new(crate::app::session::BrowserSession::new(
-            &crate::config::AppConfig::default(),
-        )),
-        pdf_backing: std::sync::Arc::new(crate::app::session::PdfBackingTracker::new()),
-        cache: std::sync::Arc::new(crate::agent::tools::manager::cache::ToolCache::new()),
-        tool_manager: std::sync::Arc::new(std::sync::RwLock::new(
-            crate::agent::tools::manager::ToolManager::new(),
-        )),
-        uuid_gen: std::sync::Arc::new(crate::utils::uuid::SystemUuidGenerator),
-    };
+    )
+    .with_file_observer(file_event_bus.clone())
+    .with_observer(std::sync::Arc::new(
+        crate::app::events::BusAgentEventObserver::new(
+            uuid::Uuid::new_v4(),
+            agent_event_bus.clone(),
+        ),
+    ))
+    .with_active_paths(active_file, active_dir)
+    .with_selected_files(selected_files)
+    .with_system_prompts(system_prompts)
+    .with_cancel_flag(cancel_flag)
+    .with_history(history)
+    .with_model_name(model_name)
+    .build();
     run_agent(ctx);
 
     let mut status = BatchJobStatus::Completed;
@@ -235,6 +240,7 @@ pub fn run_agent_blocking(
             SeamAgentEvent::Failed { error: err, .. } => {
                 status = BatchJobStatus::Failed;
                 error = Some(err);
+                break;
             }
             _ => {}
         }
@@ -251,7 +257,7 @@ mod tests {
     #[test]
     fn test_execute_concurrent_empty() {
         let (tx, _rx) = mpsc::channel();
-        let bus: Bus<FileEvent> = Bus::new();
+        let bus = std::sync::Arc::new(crate::agent::tools::observer::DefaultFileObserver);
         let cancel_flag = Arc::new(AtomicBool::new(false));
 
         let executor = BatchJobExecutor::new(
@@ -273,7 +279,7 @@ mod tests {
     #[test]
     fn test_execute_concurrent_cancellation() {
         let (tx, _rx) = mpsc::channel();
-        let bus: Bus<FileEvent> = Bus::new();
+        let bus = std::sync::Arc::new(crate::agent::tools::observer::DefaultFileObserver);
         let cancel_flag = Arc::new(AtomicBool::new(true));
 
         let executor = BatchJobExecutor::new(

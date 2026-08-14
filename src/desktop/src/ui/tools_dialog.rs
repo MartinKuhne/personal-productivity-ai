@@ -5,12 +5,12 @@
 //! (⚠ error indicator + Restart link, Authenticate button when
 //! applicable).
 //!
-//! All state changes go through [`crate::agent::tools::manager`]
-//! free functions (which lock the global [`ToolManager`]) and
+//! All state changes go through [`crate::agent::tools::registry`]
+//! free functions (which lock the global [`ToolRegistry`]) and
 //! [`crate::config::save_config`] (which persists the toggle to
 //! `config.yaml`).
 
-use crate::agent::tools::manager;
+use crate::agent::tools::registry::{self, InternalToolGroup};
 use crate::bus::events::typed::{BackgroundEvent, McpAuthEvent};
 use crate::config::{McpServerConfig, save_config};
 use crate::ui::FastMdApp;
@@ -37,12 +37,14 @@ pub fn show_tools_dialog(ctx: &eframe::egui::Context, app: &mut FastMdApp) {
     let mut open = true;
     let title = TOOLS_DIALOG_TITLE;
 
-    let groups = app
-        .orchestrator
-        .tool_manager
-        .write()
-        .unwrap()
-        .groups_snapshot(app.config());
+    app.orchestrator.tool_context.rcu(|bundle| {
+        let mut new_bundle = (**bundle).clone();
+        new_bundle
+            .registry
+            .refresh_state(&app.config().to_agent_config());
+        new_bundle
+    });
+    let groups = app.orchestrator.tool_context.load().registry.groups();
     let (default_size, min_size, max_height) =
         compute_dialog_size(ctx.viewport_rect(), groups.len());
 
@@ -76,12 +78,16 @@ pub(crate) fn compute_dialog_size(
     viewport: eframe::egui::Rect,
     row_count: usize,
 ) -> ([f32; 2], [f32; 2], f32) {
+    /// The row height for tool items in the dialog list.
     const ROW_HEIGHT: f32 = 24.0;
+    /// The height of the table header row.
     const HEADER_HEIGHT: f32 = 20.0;
     /// Title bar + window border + interior padding above the
     /// table.
     const CHROME_HEIGHT: f32 = 56.0;
+    /// Extra padding for the dialog scroll area.
     const EXTRA_PADDING: f32 = 8.0;
+    /// The minimum height of the tools dialog.
     const MIN_HEIGHT: f32 = 200.0;
     /// Hard cap so a 4K monitor doesn't produce a 2000-px-tall
     /// dialog. Kept well above the 85%-of-screen cap on common
@@ -90,7 +96,9 @@ pub(crate) fn compute_dialog_size(
     /// genuinely huge screens hit this and fall back to scrolling
     /// inside the window.
     const MAX_HEIGHT_HARD_CAP: f32 = 1200.0;
+    /// The minimum width of the tools dialog.
     const MIN_WIDTH: f32 = 520.0;
+    /// The default width of the tools dialog.
     const DEFAULT_WIDTH: f32 = 720.0;
 
     let preferred_height =
@@ -110,12 +118,14 @@ pub(crate) fn compute_dialog_size(
 pub fn render_contents(ui: &mut eframe::egui::Ui, app: &mut FastMdApp) {
     // Snapshot the group view under a fresh refresh so we don't
     // hold any lock across UI rendering.
-    let groups = app
-        .orchestrator
-        .tool_manager
-        .write()
-        .unwrap()
-        .groups_snapshot(app.config());
+    app.orchestrator.tool_context.rcu(|bundle| {
+        let mut new_bundle = (**bundle).clone();
+        new_bundle
+            .registry
+            .refresh_state(&app.config().to_agent_config());
+        new_bundle
+    });
+    let groups = app.orchestrator.tool_context.load().registry.groups();
 
     if groups.is_empty() {
         ui.label("No tool groups registered.");
@@ -167,7 +177,7 @@ pub fn render_contents(ui: &mut eframe::egui::Ui, app: &mut FastMdApp) {
                     // grouped.
                     let (internals, mcp): (Vec<_>, Vec<_>) = groups
                         .into_iter()
-                        .partition(|g| g.kind == manager::ToolGroupKind::Internal);
+                        .partition(|g| g.kind == registry::ToolGroupKind::Internal);
                     for group in internals.into_iter().chain(mcp) {
                         body.row(26.0, |mut row| {
                             render_row(&mut row, app, &group);
@@ -181,9 +191,9 @@ pub fn render_contents(ui: &mut eframe::egui::Ui, app: &mut FastMdApp) {
 fn render_row(
     row: &mut egui_extras::TableRow,
     app: &mut FastMdApp,
-    group: &manager::ToolGroupState,
+    group: &registry::ToolGroupState,
 ) {
-    use manager::{ToolGroupId, ToolGroupKind};
+    use registry::{ToolGroupId, ToolGroupKind};
 
     let id = group.id.clone();
     let prompt = ""; // char count against empty prompt — informational.
@@ -193,11 +203,24 @@ fn render_row(
         let mut enabled = group.enabled;
         if ui.checkbox(&mut enabled, "").changed() {
             let mut new_config = app.config().clone();
-            app.orchestrator
-                .tool_manager
-                .write()
-                .unwrap()
-                .set_group_enabled(&mut new_config, &id, enabled);
+            match &id {
+                ToolGroupId::Internal(g) => match g {
+                    InternalToolGroup::Filesystem => new_config.tool_groups.filesystem = enabled,
+                    InternalToolGroup::Web => new_config.tool_groups.web = enabled,
+                    InternalToolGroup::Browser => new_config.tool_groups.browser = enabled,
+                    InternalToolGroup::Email => new_config.tool_groups.email = enabled,
+                    InternalToolGroup::Contacts => new_config.tool_groups.contacts = enabled,
+                    InternalToolGroup::Calendar => new_config.tool_groups.calendar = enabled,
+                    InternalToolGroup::CsvDb => new_config.tool_groups.csv_db = enabled,
+                    InternalToolGroup::Weather => new_config.tool_groups.weather = enabled,
+                    InternalToolGroup::Trello => new_config.tool_groups.trello = enabled,
+                },
+                ToolGroupId::Mcp(name) => {
+                    if let Some(entry) = new_config.mcp_servers.get_mut(name) {
+                        entry.enabled = enabled;
+                    }
+                }
+            }
             if let Err(e) = save_config(&new_config) {
                 tracing::error!(
                     error = %e,
@@ -239,10 +262,10 @@ fn render_row(
             .iter()
             .filter_map(|n| {
                 app.orchestrator
-                    .tool_manager
-                    .read()
-                    .unwrap()
-                    .tool_char_count(n, app.config(), prompt)
+                    .tool_context
+                    .load()
+                    .registry
+                    .tool_char_count(n, &app.config().to_agent_config(), prompt)
             })
             .sum();
         ui.label(format!("{char_count}"));
@@ -256,11 +279,11 @@ fn render_row(
                 ui.label(egui::RichText::new("⚠").color(egui::Color32::from_rgb(220, 130, 0)))
                     .on_hover_text(format!("{:?}: {}", err.kind, err.message));
                 if ui.small_button(TOOLS_RESTART).clicked() {
-                    app.orchestrator
-                        .tool_manager
-                        .write()
-                        .unwrap()
-                        .clear_error(&id);
+                    app.orchestrator.tool_context.rcu(|bundle| {
+                        let mut new_bundle = (**bundle).clone();
+                        new_bundle.registry.clear_error(&id);
+                        new_bundle
+                    });
                 }
             }
 
@@ -282,15 +305,15 @@ fn render_row(
                             name.clone(),
                             app.orchestrator.tx.clone(),
                             ui.ctx().clone(),
-                            app.orchestrator.tool_manager.read().unwrap().mcp_manager(),
+                            app.orchestrator.tool_context.load().registry.mcp_manager(),
                         );
                     }
                 }
                 if ui.small_button(TOOLS_FORGET).clicked() {
                     app.orchestrator
-                        .tool_manager
-                        .write()
-                        .unwrap()
+                        .tool_context
+                        .load()
+                        .registry
                         .mcp_manager()
                         .mark_needs_auth(name, false);
                 }
@@ -318,7 +341,7 @@ fn spawn_auth_flow(
     server_name: String,
     tx: std::sync::mpsc::Sender<BackgroundEvent>,
     ctx: eframe::egui::Context,
-    mgr: std::sync::Arc<crate::integrations::mcp::McpClientManager>,
+    mgr: std::sync::Arc<crate::agent::lib::mcp::McpClients>,
 ) {
     std::thread::spawn(move || {
         let error = match mgr.authenticate(&server_name) {

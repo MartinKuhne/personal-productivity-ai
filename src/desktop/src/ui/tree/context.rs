@@ -185,9 +185,9 @@ impl TreeOpsContext {
     /// `ctx.open_editor` field directly.
     #[allow(clippy::too_many_arguments)]
     pub fn from_app_state(
-        selection: &crate::app::selection_manager::SelectionManager,
-        tab_manager: &crate::app::tab_manager::TabManager,
-        dialogs: &crate::app::dialog_manager::DialogManager,
+        selection: &crate::app::selection::FileSelection,
+        tabs: &crate::app::tabs::Tabs,
+        dialogs: &crate::app::dialogs::Dialogs,
         layout: &crate::app::panel_layout::PanelLayout,
         submit_prompt: &Option<String>,
         content_libraries: &[ContentLibrary],
@@ -202,7 +202,7 @@ impl TreeOpsContext {
             selected_file: selection.selected_file.clone(),
             selected_files: selection.selected_files.clone(),
             expanded_dirs: selection.expanded_dirs.clone(),
-            tabs: tab_manager.tabs.clone(),
+            tabs: tabs.tabs.clone(),
             selected_dir: selection.selected_dir.clone(),
             create_dir_dialog_open: dialogs.create_dir_dialog_open,
             create_dir_parent: dialogs.create_dir_parent.clone(),
@@ -235,9 +235,9 @@ impl TreeOpsContext {
     /// orchestrator is the source of truth for them.
     pub fn write_back(
         &self,
-        selection: &mut crate::app::selection_manager::SelectionManager,
-        tab_manager: &mut crate::app::tab_manager::TabManager,
-        dialogs: &mut crate::app::dialog_manager::DialogManager,
+        selection: &mut crate::app::selection::FileSelection,
+        tabs: &mut crate::app::tabs::Tabs,
+        dialogs: &mut crate::app::dialogs::Dialogs,
         submit_prompt: &mut Option<String>,
     ) {
         selection.selected_file = self.selected_file.clone();
@@ -245,7 +245,7 @@ impl TreeOpsContext {
         selection.expanded_dirs = self.expanded_dirs.clone();
         selection.selected_dir = self.selected_dir.clone();
         selection.tree_dirty = self.tree_dirty;
-        tab_manager.tabs = self.tabs.clone();
+        tabs.tabs = self.tabs.clone();
         dialogs.create_dir_dialog_open = self.create_dir_dialog_open;
         dialogs.create_dir_parent = self.create_dir_parent.clone();
         dialogs.file_to_move = self.file_to_move.clone();

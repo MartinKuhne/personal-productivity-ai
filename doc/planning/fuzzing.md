@@ -98,27 +98,27 @@ Acceptance criteria:
 ### Phase 2 — Network response parsers (C1, C3–C16)
 
 Steps, one proptest sidecar per parser (`cases = 512`):
-1. `src/desktop/src/integrations/mcp/sse_proptests.rs` — `parse_sse_body`
+1. `src/desktop/src/agent/lib/mcp/sse_proptests.rs` — `parse_sse_body`
    on arbitrary bytes.
-2. `src/desktop/src/integrations/mcp/oauth/discovery_proptests.rs` —
+2. `src/desktop/src/agent/lib/mcp/oauth/discovery_proptests.rs` —
    PRM and AS-metadata parsers.
-3. `src/desktop/src/integrations/mcp/oauth/pkce_proptests.rs` — verifier
+3. `src/desktop/src/agent/lib/mcp/oauth/pkce_proptests.rs` — verifier
    URL-safe, challenge is 43 chars, state uniqueness.
-4. `src/desktop/src/integrations/mcp/oauth/flow_proptests.rs` — arbitrary
+4. `src/desktop/src/agent/lib/mcp/oauth/flow_proptests.rs` — arbitrary
    `/authorize` redirect query strings; state-check rejects mismatches.
-5. `src/desktop/src/integrations/mcp/session_proptests.rs` — arbitrary
+5. `src/desktop/src/agent/lib/mcp/session_proptests.rs` — arbitrary
    JSON-RPC frames; response router does not panic on id mismatch.
-6. `src/desktop/src/integrations/dav/cal_proptests.rs` — arbitrary
+6. `src/desktop/src/agent/lib/dav/cal_proptests.rs` — arbitrary
    `text/calendar` strings (line-folding, VTIMEZONE, RDATE/EXDATE,
    leap-seconds).
-7. `src/desktop/src/integrations/dav/card_proptests.rs` — arbitrary
+7. `src/desktop/src/agent/lib/dav/card_proptests.rs` — arbitrary
    vCard 3.0/4.0.
 8. `src/desktop/src/agent/tools/jmap/email_proptests.rs` — arbitrary
    `Email/get` and `Email/query` JSON; includes truncated bodies,
    missing `bodyValues`, deeply-nested HTML.
 9. `src/desktop/src/integrations/weather_proptests.rs` — arbitrary
    Open-Meteo-shape JSON; no NaN/Inf in returned strings.
-10. `src/desktop/src/integrations/trello/client_proptests.rs` — arbitrary
+10. `src/desktop/src/agent/lib/trello/client_proptests.rs` — arbitrary
     Trello JSON via `wiremock`; no panic, no `null`-field crash.
 11. `src/desktop/src/integrations/discord/safety_proptests.rs` —
     `SafetyFilter` over message content (bidi, ZWJ, `@everyone`/`@here`).

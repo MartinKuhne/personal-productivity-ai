@@ -1,9 +1,10 @@
-use crate::agent::AgentSessionManager;
-use crate::agent::events::{AgentEvent as SeamAgentEvent, ToolSideEffect};
-use crate::app::background::{BackgroundLogEntry, LogCategory, SharedProcessManager};
+use crate::agent::AgentSession;
+use crate::agent::events::ToolSideEffect;
+use crate::app::background::{BackgroundLogEntry, LogCategory, SharedBackgroundLogs};
+use crate::app::events::AgentEvent as SeamAgentEvent;
 use crate::app::watcher::directory_tracker::DirectoryTracker;
 use crate::app::watcher::file_processor::FileEventProcessor;
-use crate::app::{DialogManager, SelectionManager, TabManager, TagManager, TextBuffer};
+use crate::app::{Dialogs, FileSelection, Tabs, Tags, TextBuffer};
 use crate::bus::core::{BroadcastRecvError, Bus, BusReader};
 use crate::bus::events::config::ConfigArrived;
 use crate::bus::events::file::FileEvent;
@@ -28,24 +29,26 @@ pub struct AppOrchestrator {
     pub file_event_reader: Option<BusReader<FileEvent>>,
     pub file_processor: FileEventProcessor,
     pub pdf_backing_tracker: crate::app::session::PdfBackingTracker,
-    pub tag_manager: TagManager,
+    pub tags: Tags,
     pub directory_tracker: DirectoryTracker,
-    pub selection: SelectionManager,
-    pub tab_manager: TabManager,
+    pub selection: FileSelection,
+    pub tabs: Tabs,
     pub _watcher: Option<notify::RecommendedWatcher>,
-    pub agent: AgentSessionManager,
-    pub dialogs: DialogManager,
+    pub agent: AgentSession,
+    pub dialogs: Dialogs,
     pub submit_prompt: Option<String>,
     pub text_buffer: TextBuffer,
     pub inline_editor_enabled: bool,
-    pub background_manager: SharedProcessManager,
+    pub background_manager: SharedBackgroundLogs,
     pub config: crate::config::AppConfig,
     pub config_reader: Option<BusReader<ConfigArrived>>,
     pub pending_file_load: Option<PathBuf>,
     pub finished_watcher_slot: Arc<Mutex<Option<notify::RecommendedWatcher>>>,
-    pub tool_manager: std::sync::Arc<std::sync::RwLock<crate::agent::tools::manager::ToolManager>>,
+    pub tool_context: std::sync::Arc<arc_swap::ArcSwap<crate::agent::AgentToolContext>>,
+    /// Event bus for agent events. Owned by the application orchestration layer.
+    pub agent_event_bus: Bus<SeamAgentEvent>,
     /// Reader for the `Bus<AgentEvent>` agent→UI channel. Subscribed
-    /// once during app init from [`AgentSessionManager::event_bus`].
+    /// once during app init.
     /// Drained each frame in [`Self::drain_agent_event_bus`].
     pub agent_event_reader: Option<BusReader<SeamAgentEvent>>,
     /// True when the last `BusReader::try_recv` on `agent_event_reader`
@@ -57,7 +60,7 @@ pub struct AppOrchestrator {
     /// thinking from this buffer instead of `AgentState::response`/`thinking`.
     pub agent_transcript: AgentTranscript,
     /// UI-owned panel state (show_results, show_debug_window, scroll_to_id,
-    /// command_input, etc.) — extracted from `AgentSessionManager` in
+    /// command_input, etc.) — extracted from `AgentSession` in
     /// migration step 6 (FR-013, SC-007).
     pub agent_panel_state: AgentPanelState,
 }
@@ -96,10 +99,10 @@ impl AppOrchestrator {
                     }
                     FileEventKind::Updated => {
                         for p in &event.paths {
-                            if self.tab_manager.loaded_path.as_ref() == Some(p)
+                            if self.tabs.loaded_path.as_ref() == Some(p)
                                 && !self.text_buffer.is_open
                             {
-                                self.tab_manager.loaded_path = None;
+                                self.tabs.loaded_path = None;
                             }
                         }
                     }
@@ -107,10 +110,10 @@ impl AppOrchestrator {
                         self.pdf_backing_tracker.process_removed(&event.paths);
                         for p in &event.paths {
                             self.file_processor.remove_file(p);
-                            if self.tab_manager.loaded_path.as_ref() == Some(p) {
-                                self.tab_manager.loaded_path = None;
+                            if self.tabs.loaded_path.as_ref() == Some(p) {
+                                self.tabs.loaded_path = None;
                             }
-                            self.tag_manager.remove_file(p);
+                            self.tags.remove_file(p);
                         }
                         removed_paths.extend(event.paths);
                         needs_rebuild = true;
@@ -136,7 +139,7 @@ impl AppOrchestrator {
         }
 
         if needs_rebuild {
-            self.tag_manager.rebuild();
+            self.tags.rebuild();
         }
 
         if tree_dirty {
@@ -149,8 +152,8 @@ impl AppOrchestrator {
     pub fn close_tabs_for_removed_files(&mut self, paths: &[PathBuf]) {
         let mut closed_any = false;
         for path in paths {
-            if self.tab_manager.tabs.contains(path) {
-                self.tab_manager.tabs.retain(|p| p != path);
+            if self.tabs.tabs.contains(path) {
+                self.tabs.tabs.retain(|p| p != path);
                 closed_any = true;
             }
         }
@@ -158,14 +161,14 @@ impl AppOrchestrator {
             return;
         }
         if let Some(selected) = self.selection.selected_file().cloned() {
-            if !self.tab_manager.tabs.contains(&selected) {
-                *self.selection.selected_file_mut() = self.tab_manager.tabs.last().cloned();
+            if !self.tabs.tabs.contains(&selected) {
+                *self.selection.selected_file_mut() = self.tabs.tabs.last().cloned();
             }
-        } else if !self.tab_manager.tabs.is_empty() {
-            *self.selection.selected_file_mut() = self.tab_manager.tabs.last().cloned();
+        } else if !self.tabs.tabs.is_empty() {
+            *self.selection.selected_file_mut() = self.tabs.tabs.last().cloned();
         }
         if self.selection.selected_file().is_none() {
-            self.tab_manager.clear_content();
+            self.tabs.clear_content();
         }
     }
 
@@ -181,16 +184,29 @@ impl AppOrchestrator {
 
     pub fn start_agent_session(&mut self, prompt: String) {
         let (active_file, active_dir, selected_files) =
-            self.selection.agent_context(&self.tab_manager.tabs);
+            self.selection.agent_context(&self.tabs.tabs);
         let session_id = self
             .agent
             .current_session_id()
             .unwrap_or_else(uuid::Uuid::new_v4);
         let is_new = self.agent.current_session_id().is_none();
 
+        // Assemble the system prompts at submit time — they depend on the
+        // global config (user info, system-prompt extension, content
+        // libraries) and the active UI selection. The agent run loop
+        // doesn't know how to build these; it just forwards the
+        // pre-built blocks.
+        let system_prompts = crate::app::prompts::build_system_prompts(
+            &self.config,
+            active_file.as_deref(),
+            active_dir.as_deref(),
+            &selected_files,
+        );
+
         let agent_prompt = crate::agent::events::AgentPrompt {
             session_id,
             text: prompt.clone(),
+            system_prompts,
             active_file,
             active_dir,
             selected_files,
@@ -290,7 +306,12 @@ impl AppOrchestrator {
                 });
         }
 
-        self.agent.set_config(config.clone());
+        // Project the global config to the agent's domain slice and
+        // hand it to the agent. The agent's run loop reads only the
+        // projected fields; the tool context (built per session)
+        // carries the full `AppConfig` separately.
+        let agent_cfg = config.to_agent_config();
+        self.agent.set_agent_config(agent_cfg);
 
         self.content_libraries = config.content_libraries.clone();
         self.selection.tree_dirty = true;
@@ -380,12 +401,15 @@ impl AppOrchestrator {
                         SeamAgentEvent::DebugEntry { entry, .. } => {
                             self.agent.push_debug_entry(entry.clone());
                         }
-                        SeamAgentEvent::ToolSideEffect {
-                            effect: ToolSideEffect::FileCreated { path, tags },
-                            ..
-                        } => {
-                            pending_side_effects.push((path.clone(), tags.clone()));
-                        }
+                        SeamAgentEvent::ToolSideEffect { effect, .. } => match effect {
+                            ToolSideEffect::FileCreated { path, tags } => {
+                                pending_side_effects.push((path.clone(), tags.clone()));
+                            }
+                            ToolSideEffect::FileChanged { path } => {
+                                let tags = crate::utils::tags::extract_tags_from_file(path);
+                                pending_side_effects.push((path.clone(), tags));
+                            }
+                        },
                         // Transcript-building events:
                         SeamAgentEvent::ContentDelta { .. }
                         | SeamAgentEvent::Thinking { .. }
@@ -429,7 +453,7 @@ impl AppOrchestrator {
         use FsEvent;
         match ev {
             FsEvent::FileParsed { path, tags } => {
-                self.tag_manager.add_tags(path.clone(), tags);
+                self.tags.add_tags(path.clone(), tags);
                 self.file_processor.add_file(path);
                 self.selection.tree_dirty = true;
             }
@@ -442,38 +466,38 @@ impl AppOrchestrator {
                     self._watcher = Some(watcher);
                 }
                 self.file_processor.indexing_finished = true;
-                self.tag_manager.rebuild();
+                self.tags.rebuild();
                 self.selection.tree_dirty = true;
             }
             FsEvent::FinishedWithoutWatcher => {
                 self.file_processor.indexing_finished = true;
-                self.tag_manager.rebuild();
+                self.tags.rebuild();
                 self.selection.tree_dirty = true;
             }
             FsEvent::FileModified { path, tags } => {
-                self.tag_manager.add_tags(path.clone(), tags);
+                self.tags.add_tags(path.clone(), tags);
                 self.file_processor.add_file(path.clone());
-                self.tag_manager.rebuild();
-                if self.tab_manager.loaded_path.as_ref() == Some(&path) {
-                    self.tab_manager.loaded_path = None;
+                self.tags.rebuild();
+                if self.tabs.loaded_path.as_ref() == Some(&path) {
+                    self.tabs.loaded_path = None;
                 }
                 self.selection.tree_dirty = true;
             }
             FsEvent::FileDeleted { path } => {
                 self.file_processor.remove_file(&path);
-                self.tag_manager.remove_file(&path);
-                self.tag_manager.rebuild();
+                self.tags.remove_file(&path);
+                self.tags.rebuild();
                 self.close_tabs_for_removed_files(std::slice::from_ref(&path));
                 if self.selection.selected_file().is_some_and(|p| p == &path) {
                     *self.selection.selected_file_mut() = None;
-                    self.tab_manager.current_yaml = None;
-                    self.tab_manager.current_markdown = String::new();
-                    self.tab_manager.invalidate_heading_ids_cache();
-                    self.tab_manager.toc.clear();
+                    self.tabs.current_yaml = None;
+                    self.tabs.current_markdown = String::new();
+                    self.tabs.invalidate_heading_ids_cache();
+                    self.tabs.toc.clear();
                 }
                 self.selection.selected_files_mut().remove(&path);
-                if self.tab_manager.loaded_path.as_ref() == Some(&path) {
-                    self.tab_manager.loaded_path = None;
+                if self.tabs.loaded_path.as_ref() == Some(&path) {
+                    self.tabs.loaded_path = None;
                 }
                 self.selection.tree_dirty = true;
             }
@@ -497,26 +521,25 @@ impl AppOrchestrator {
                         // from it. Avoids the previous two-step
                         // `parse_front_matter` + manual body copy.
                         let doc = Document::new(content);
-                        self.tab_manager.current_yaml = doc.yaml().cloned();
-                        self.tab_manager.current_markdown = doc.body().to_string();
-                        self.tab_manager.invalidate_heading_ids_cache();
-                        self.tab_manager.loaded_path = Some(path.clone());
-                        self.tab_manager.toc =
-                            crate::ui::render::build_toc(&self.tab_manager.current_markdown);
-                        self.tab_manager.scroll_to_header_id = None;
+                        self.tabs.current_yaml = doc.yaml().cloned();
+                        self.tabs.current_markdown = doc.body().to_string();
+                        self.tabs.invalidate_heading_ids_cache();
+                        self.tabs.loaded_path = Some(path.clone());
+                        self.tabs.toc = crate::ui::render::build_toc(&self.tabs.current_markdown);
+                        self.tabs.scroll_to_header_id = None;
                     }
                     Err(err) => {
                         // Load failed — do not leave stale content or an open tab.
-                        self.tab_manager.close_tab(&path);
+                        self.tabs.close_tab(&path);
                         if self.selection.selected_file() == Some(&path) {
                             *self.selection.selected_file_mut() = None;
                         }
                         self.selection.selected_files_mut().remove(&path);
-                        self.tab_manager.current_yaml = None;
-                        self.tab_manager.current_markdown = String::new();
-                        self.tab_manager.invalidate_heading_ids_cache();
-                        self.tab_manager.toc.clear();
-                        self.tab_manager.scroll_to_header_id = None;
+                        self.tabs.current_yaml = None;
+                        self.tabs.current_markdown = String::new();
+                        self.tabs.invalidate_heading_ids_cache();
+                        self.tabs.toc.clear();
+                        self.tabs.scroll_to_header_id = None;
 
                         // Log the failure to the background log.
                         if let Ok(mut mgr) = self.background_manager.lock() {
@@ -532,7 +555,7 @@ impl AppOrchestrator {
     }
 
     pub fn handle_mcp_auth_event(&mut self, ev: McpAuthEvent) {
-        use crate::agent::tools::manager::{ToolErrorKind, ToolGroupError};
+        use crate::agent::tools::registry::{ToolErrorKind, ToolGroupError};
         match ev {
             McpAuthEvent::Completed { server_name, error } => {
                 self.dialogs.set_oauth_idle(&server_name);
@@ -549,10 +572,16 @@ impl AppOrchestrator {
                             error = %msg,
                             "OAuth flow failed; recording error on group row"
                         );
-                        self.tool_manager.write().unwrap().record_error(
-                            &crate::agent::tools::manager::ToolGroupId::Mcp(server_name.clone()),
-                            ToolGroupError::now(ToolErrorKind::Authentication, msg),
-                        );
+                        self.tool_context.rcu(|bundle| {
+                            let mut new_bundle = (**bundle).clone();
+                            new_bundle.registry.record_error(
+                                &crate::agent::tools::registry::ToolGroupId::Mcp(
+                                    server_name.clone(),
+                                ),
+                                ToolGroupError::now(ToolErrorKind::Authentication, msg.clone()),
+                            );
+                            new_bundle
+                        });
                     }
                 }
             }
@@ -561,7 +590,7 @@ impl AppOrchestrator {
 
     pub fn handle_file_selection(&mut self) {
         if let Some(selected_path) = self.selection.selected_file()
-            && self.tab_manager.loaded_path.as_ref() != Some(selected_path)
+            && self.tabs.loaded_path.as_ref() != Some(selected_path)
             && self.pending_file_load.as_ref() != Some(selected_path)
         {
             self.pending_file_load = Some(selected_path.clone());

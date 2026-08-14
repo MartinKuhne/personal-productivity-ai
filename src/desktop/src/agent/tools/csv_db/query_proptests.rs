@@ -46,7 +46,23 @@
 use super::super::operations::{add_rows, create_csv};
 use super::super::query::{delete_rows, query_csv};
 use super::super::schema::{AddRowsInput, CreateCsvInput, DeleteRowsInput, QueryRequest};
-use crate::config::AppConfig;
+use crate::agent::config::AgentConfig;
+
+fn test_ctx(
+    config: &crate::agent::config::AgentConfig,
+) -> crate::agent::tools::context::ToolContext {
+    let mut builder = crate::agent::tools::context::ToolContextBuilder::new(
+        std::sync::Arc::new(config.clone()),
+        std::sync::Arc::new(crate::agent::tools::observer::DefaultFileObserver),
+    );
+    builder = builder.with_extension(std::sync::Arc::new(
+        crate::agent::tools::vfs::VirtualFileSystemExt(std::sync::Arc::new(
+            crate::agent::tools::vfs::VfsResolver::new(std::sync::Arc::new(config.clone())),
+        )),
+    ));
+    builder.build()
+}
+
 use proptest::prelude::*;
 use std::collections::HashMap;
 use tempfile::tempdir;
@@ -58,10 +74,10 @@ use tempfile::tempdir;
 /// because the property under test is the *builder's*
 /// behaviour on a known input, not the behaviour of
 /// `evalexpr` on random inputs.
-fn build_fixture_csv(config: &AppConfig) -> (String, Vec<HashMap<String, String>>) {
+fn build_fixture_csv(config: &AgentConfig) -> (String, Vec<HashMap<String, String>>) {
     let db_name = "proptest".to_string();
     create_csv(
-        config,
+        &test_ctx(&config),
         CreateCsvInput {
             db_name: db_name.clone(),
             headers: vec!["item".to_string(), "price".to_string(), "qty".to_string()],
@@ -82,7 +98,7 @@ fn build_fixture_csv(config: &AppConfig) -> (String, Vec<HashMap<String, String>
         })
         .collect();
     add_rows(
-        config,
+        &test_ctx(&config),
         AddRowsInput {
             db_name: db_name.clone(),
             rows: rows.clone(),
@@ -99,13 +115,13 @@ proptest! {
     #[test]
     fn no_predicate_returns_all_rows(_dummy in 0u8..1) {
         let dir = tempdir().unwrap();
-        let config = AppConfig {
+        let config = AgentConfig {
             csv_db_path: Some(dir.path().to_string_lossy().to_string()),
-            ..AppConfig::default()
+            ..AgentConfig::default()
         };
         let (db_name, rows) = build_fixture_csv(&config);
         let res = query_csv(
-            &config,
+            &test_ctx(&config),
             QueryRequest {
                 db_name,
                 predicate: None,
@@ -121,14 +137,14 @@ proptest! {
     #[test]
     fn tautology_predicate_matches_all_rows(_dummy in 0u8..1) {
         let dir = tempdir().unwrap();
-        let config = AppConfig {
+        let config = AgentConfig {
             csv_db_path: Some(dir.path().to_string_lossy().to_string()),
-            ..AppConfig::default()
+            ..AgentConfig::default()
         };
         let (db_name, rows) = build_fixture_csv(&config);
         for pred in &["1 == 1", "true", "1.0 == 1.0"] {
             let res = query_csv(
-                &config,
+                &test_ctx(&config),
                 QueryRequest {
                     db_name: db_name.clone(),
                     predicate: Some(pred.to_string()),
@@ -152,14 +168,14 @@ proptest! {
     #[test]
     fn contradiction_predicate_matches_no_rows(_dummy in 0u8..1) {
         let dir = tempdir().unwrap();
-        let config = AppConfig {
+        let config = AgentConfig {
             csv_db_path: Some(dir.path().to_string_lossy().to_string()),
-            ..AppConfig::default()
+            ..AgentConfig::default()
         };
         let (db_name, _rows) = build_fixture_csv(&config);
         for pred in &["1 == 0", "false", "1.0 == 0.0"] {
             let res = query_csv(
-                &config,
+                &test_ctx(&config),
                 QueryRequest {
                     db_name: db_name.clone(),
                     predicate: Some(pred.to_string()),
@@ -183,14 +199,14 @@ proptest! {
     #[test]
     fn sum_aggregate_is_correct(_dummy in 0u8..1) {
         let dir = tempdir().unwrap();
-        let config = AppConfig {
+        let config = AgentConfig {
             csv_db_path: Some(dir.path().to_string_lossy().to_string()),
-            ..AppConfig::default()
+            ..AgentConfig::default()
         };
         let (db_name, _) = build_fixture_csv(&config);
         // qty: 10 + 20 + 5 = 35
         let res = query_csv(
-            &config,
+            &test_ctx(&config),
             QueryRequest {
                 db_name,
                 predicate: None,
@@ -207,14 +223,14 @@ proptest! {
     #[test]
     fn average_aggregate_is_correct(_dummy in 0u8..1) {
         let dir = tempdir().unwrap();
-        let config = AppConfig {
+        let config = AgentConfig {
             csv_db_path: Some(dir.path().to_string_lossy().to_string()),
-            ..AppConfig::default()
+            ..AgentConfig::default()
         };
         let (db_name, _) = build_fixture_csv(&config);
         // price: (1.5 + 0.5 + 2.0) / 3 = 1.333...
         let res = query_csv(
-            &config,
+            &test_ctx(&config),
             QueryRequest {
                 db_name,
                 predicate: None,
@@ -236,13 +252,13 @@ proptest! {
     #[test]
     fn delete_tautology_removes_all_rows(_dummy in 0u8..1) {
         let dir = tempdir().unwrap();
-        let config = AppConfig {
+        let config = AgentConfig {
             csv_db_path: Some(dir.path().to_string_lossy().to_string()),
-            ..AppConfig::default()
+            ..AgentConfig::default()
         };
         let (db_name, rows) = build_fixture_csv(&config);
         let result = delete_rows(
-            &config,
+            &test_ctx(&config),
             DeleteRowsInput {
                 db_name: db_name.clone(),
                 predicate: "1 == 1".to_string(),
@@ -256,7 +272,7 @@ proptest! {
         );
         // Re-query to confirm the CSV is empty.
         let res = query_csv(
-            &config,
+            &test_ctx(&config),
             QueryRequest {
                 db_name,
                 predicate: None,
@@ -288,9 +304,9 @@ proptest! {
         value in prop::string::string_regex(r"[a-zA-Z0-9_]{1,10}").unwrap(),
     ) {
         let dir = tempdir().unwrap();
-        let config = AppConfig {
+        let config = AgentConfig {
             csv_db_path: Some(dir.path().to_string_lossy().to_string()),
-            ..AppConfig::default()
+            ..AgentConfig::default()
         };
         let (db_name, _) = build_fixture_csv(&config);
         // Quote the value to handle non-numeric predicates
@@ -300,7 +316,7 @@ proptest! {
         // (any number of rows) or Err (predicate or
         // column doesn't exist); both are acceptable.
         let _ = query_csv(
-            &config,
+            &test_ctx(&config),
             QueryRequest {
                 db_name,
                 predicate: Some(predicate),
