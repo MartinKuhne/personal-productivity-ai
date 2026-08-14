@@ -13,6 +13,8 @@
 //! `models` (the `BackgroundLogEntry` / `LogCategory` re-exports
 //! and `PdfConversionJob`) stay always compiled.
 
+#[cfg(feature = "vector-search")]
+pub mod embeddings;
 pub mod indexer;
 pub mod logs;
 pub mod models;

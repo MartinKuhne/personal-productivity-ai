@@ -1,10 +1,11 @@
-//! Optional Markdown vector indexing and search worker (AGENT-031).
+//! Optional Markdown vector indexing and search worker (AGENT-005, AGENT-031).
+//! Chunk vectors are produced by the user-configured `embeddings` model.
 
+use crate::app::background::embeddings::EmbeddingClient;
 use crate::bus::core::{Bus, BusReader};
 use crate::bus::events::file::{FileEvent, FileEventKind};
 use crate::bus::events::typed::BackgroundEvent;
 use crate::config::AppConfig;
-use fastembed::{EmbeddingModel, InitOptions, TextEmbedding};
 use sahomedb::prelude::{
     Collection, Config, Database, Distance, Metadata, Record, Vector, VectorID,
 };
@@ -35,7 +36,7 @@ pub struct VectorSearchService {
 }
 
 struct VectorState {
-    model: Option<Arc<TextEmbedding>>,
+    model: Option<Arc<EmbeddingClient>>,
     collection: Collection,
     database: Option<Database>,
 }
@@ -64,13 +65,13 @@ impl VectorSearchService {
                 .content_libraries
                 .first()
                 .map(|library| PathBuf::from(&library.root_folder).join(".fastmd-vector-index"));
-            let model = TextEmbedding::try_new(InitOptions {
-                model_name: EmbeddingModel::BGESmallENV15,
-                show_download_progress: false,
-                ..Default::default()
-            });
-            let Ok(model) = model else {
-                let _ = tx.send(bg_log_failed("Embedding model initialization failed").into());
+            let Some(model) = EmbeddingClient::from_config(&config) else {
+                let _ = tx.send(
+                    bg_log_failed(
+                        "Vector search disabled: no model configured with the 'embeddings' use case.",
+                    )
+                    .into(),
+                );
                 return;
             };
             let mut state = service.state.lock().expect("vector state lock poisoned");
@@ -129,8 +130,8 @@ impl VectorSearchService {
             };
             model.clone()
         };
-        let texts: Vec<&str> = chunks.iter().map(|chunk| chunk.text.as_str()).collect();
-        let Ok(embeddings) = model.embed(texts, None) else {
+        let texts: Vec<String> = chunks.iter().map(|chunk| chunk.text.clone()).collect();
+        let Ok(embeddings) = model.embed(texts) else {
             tracing::error!(name = "vector_search.embed_failed", path = %path.display(), "Embedding failed");
             return;
         };
@@ -215,11 +216,13 @@ impl VectorSearchService {
             state
                 .model
                 .as_ref()
-                .ok_or_else(|| "Vector search is still initializing.".to_string())?
+                .ok_or_else(|| {
+                    "Vector search is unavailable: no model with the 'embeddings' use case is configured or the worker is not ready.".to_string()
+                })?
                 .clone()
         };
         let embedding = model
-            .embed(vec![query], None)
+            .embed(vec![query.to_string()])
             .map_err(|error| {
                 tracing::error!(name = "vector_search.embed_failed", error = %error, "Embedding query failed");
                 VECTOR_SEARCH_FAILED
