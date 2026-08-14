@@ -126,9 +126,13 @@ pub struct InsertIntoNoteResponse {
 
 #[derive(Deserialize, Debug, JsonSchema)]
 pub struct MoveNoteInput {
+    /// Virtual file path of the source note to move.
+    /// Accepts: `source`, `source_path`, `from`.
     #[schemars(description = strings::FIELD_MOVE_NOTE_INPUT_SOURCE)]
     #[serde(alias = "source_path", alias = "from")]
     pub source: String,
+    /// Virtual file path of the destination where the note should be moved.
+    /// Accepts: `target`, `target_path`, `destination`, `to`.
     #[schemars(description = strings::FIELD_MOVE_NOTE_INPUT_TARGET)]
     #[serde(alias = "target_path", alias = "destination", alias = "to")]
     pub target: String,

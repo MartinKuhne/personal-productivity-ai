@@ -700,7 +700,9 @@ fn test_grep_truncates_at_default_max_results() {
 }
 
 #[test]
-fn test_grep_only_matches_md_files() {
+fn test_grep_matches_md_and_markdown_files_but_not_others() {
+    // search_notes covers .md and .markdown (consistent with list_notes_by_tag / read_tags)
+    // but must NOT scan .txt or other file types.
     let (config, _dir) = single_lib_with_files(&[
         ("note.md", "needle in md"),
         ("note.markdown", "needle in markdown"),
@@ -708,10 +710,10 @@ fn test_grep_only_matches_md_files() {
     ]);
     let envelope = run_grep(&config, r#"{"query":"needle"}"#);
     let data = &envelope["data"];
-    assert_eq!(data["total"], 1);
+    assert_eq!(data["total"], 2);
     let matches = data["matches"].as_str().unwrap();
     assert!(matches.contains("note.md"));
-    assert!(!matches.contains("note.markdown"));
+    assert!(matches.contains("note.markdown"));
     assert!(!matches.contains("note.txt"));
 }
 

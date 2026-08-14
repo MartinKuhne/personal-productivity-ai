@@ -1,6 +1,8 @@
 //! Tests for `tools/filesystem.rs`.
 
 use super::*;
+use std::fs;
+use tempfile::tempdir;
 
 fn test_ctx() -> crate::tools::context::ToolContext {
     let config = crate::config::AgentConfig::default();
@@ -65,8 +67,6 @@ fn test_tool_patch_note_not_found() {
     );
 }
 
-use std::fs;
-use tempfile::tempdir;
 
 #[test]
 fn test_tool_search_notes() {
@@ -388,10 +388,9 @@ fn test_list_files_by_tag_ignores_non_markdown_files() {
 // =====================================================================
 
 #[test]
-fn test_tool_search_notes_ignores_non_markdown_files() {
-    // NEGATIVE ASSERTION: Files without a `.md` extension must NOT
-    // be searched, even if they contain matching text. This includes
-    // `.markdown` files, which the grep tool does not match.
+fn test_tool_search_notes_covers_md_and_markdown_but_not_other_types() {
+    // search_notes scans both .md and .markdown files, consistent with
+    // list_notes_by_tag and read_tags. Other file types (.txt, .pdf, …) are excluded.
     let dir = tempdir().unwrap();
     let md_file = dir.path().join("test.md");
     let md2_file = dir.path().join("doc.markdown");
@@ -404,13 +403,14 @@ fn test_tool_search_notes_ignores_non_markdown_files() {
     fs::write(&pdf_file, "Search term in PDF").unwrap();
 
     let result = tool_search_notes(&test_ctx(), dir.path(), "Workspace", "search term").unwrap();
-    // Only the .md file should be found
+    // Both .md and .markdown files must appear
     assert!(result.iter().any(|m| m.contains("test.md")));
     assert!(result.iter().any(|m| m.contains("Contains search term")));
-    // txt, pdf, and .markdown must NOT appear in results
+    assert!(result.iter().any(|m| m.contains("doc.markdown")));
+    assert!(result.iter().any(|m| m.contains("Also contains search term")));
+    // txt and pdf must NOT appear in results
     assert!(!result.iter().any(|m| m.contains("secret.txt")));
     assert!(!result.iter().any(|m| m.contains("notes.pdf")));
-    assert!(!result.iter().any(|m| m.contains("doc.markdown")));
 }
 
 #[test]

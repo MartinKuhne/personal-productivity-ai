@@ -14,9 +14,10 @@ pub const DEFAULT_SEARCH_NOTES_MAX_RESULTS: usize = 200;
 
 /// Grep a single content library for a query string, case-insensitively.
 /// Returns every matching line as `virtual/path:line - content`, scoped
-/// strictly to Markdown (`.md`) files under `root_path`. The caller
-/// (the tool registry) is responsible for applying the result cap
-/// across libraries, so this function returns all matches unfiltered.
+/// to Markdown (`.md` and `.markdown`) files under `root_path`, consistent
+/// with `tool_list_notes_by_tag` and `tool_read_tags`. The caller (the tool
+/// registry) is responsible for applying the result cap across libraries, so
+/// this function returns all matches unfiltered.
 pub fn tool_search_notes(
     ctx: &crate::tools::context::ToolContext,
     root_path: &Path,
@@ -28,7 +29,7 @@ pub fn tool_search_notes(
     for entry in WalkDir::new(root_path).into_iter().filter_map(|e| e.ok()) {
         if entry.path().is_file()
             && let Some(ext) = entry.path().extension()
-            && ext == "md"
+            && (ext == "md" || ext == "markdown")
             && let Some(rel_path) = entry.path().strip_prefix(root_path).ok()
             && let Ok(content) = ctx.vfs().read_to_string(entry.path().as_ref())
         {
@@ -193,6 +194,7 @@ pub fn tool_create_note(
     }
 
     if let Some(parent) = path.parent()
+        && !parent.as_os_str().is_empty()
         && let Err(e) = ctx.vfs().create_dir_all(parent)
     {
         return Err(format!("Failed to create parent directories: {}", e));
@@ -228,7 +230,7 @@ pub fn tool_insert_into_note(
         Ok(content) => {
             let (header, body) = split_file_content(&content);
             let mut lines: Vec<String> = body.lines().map(|s| s.to_string()).collect();
-            if offset > lines.len() && offset > 0 {
+            if offset > lines.len() {
                 return Err("Offset out of range.".to_string());
             }
             for (delta, line) in lines_to_insert.iter().enumerate() {
@@ -287,6 +289,12 @@ pub fn tool_patch_note(
 /// - the source file does not exist
 /// - the target file already exists (cannot overwrite)
 /// - source and target are identical
+///
+/// # Extension check rationale
+/// The `.md`-only guard here operates on the raw resolved path string and is
+/// intentionally separate from `check_write_allowed` at the registry layer,
+/// which operates on the VFS-resolved absolute path for library-policy
+/// enforcement (read-only libraries, etc.). Both guards are necessary.
 pub fn tool_move_note(
     ctx: &crate::tools::context::ToolContext,
     source_str: &str,
@@ -312,6 +320,7 @@ pub fn tool_move_note(
     }
 
     if let Some(parent) = target_path.parent()
+        && !parent.as_os_str().is_empty()
         && let Err(e) = ctx.vfs().create_dir_all(parent)
     {
         return Err(format!("Failed to create parent directories: {}", e));
@@ -328,7 +337,19 @@ pub fn tool_move_note(
         Err(e) => {
             if ctx.vfs().copy(source_path, target_path).is_ok() {
                 if let Err(rm_err) = ctx.vfs().remove_file(source_path) {
-                    let _ = ctx.vfs().remove_file(target_path);
+                    // Best-effort rollback: attempt to remove the target copy.
+                    // If this also fails the copy is orphaned on disk — log at
+                    // warn level so operators can detect and clean it up.
+                    if let Err(rollback_err) = ctx.vfs().remove_file(target_path) {
+                        tracing::warn!(
+                            source = %source_path.display(),
+                            target = %target_path.display(),
+                            remove_err = %rm_err,
+                            rollback_err = %rollback_err,
+                            "move_note: source remove and rollback both failed; \
+                             target copy may be orphaned"
+                        );
+                    }
                     return Err(format!(
                         "Failed to remove source file after copy: {}",
                         rm_err
@@ -350,8 +371,8 @@ fn split_file_content(raw_content: &str) -> (Option<String>, String) {
     match parse_front_matter(raw_content) {
         Some(fm) => {
             let mut body = fm.body.as_str();
-            if body.starts_with("\r\n") {
-                body = &body[2..];
+            if let Some(stripped) = body.strip_prefix("\r\n") {
+                body = stripped;
             } else if body.starts_with('\n') {
                 body = &body[1..];
             }
