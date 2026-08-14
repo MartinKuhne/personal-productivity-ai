@@ -13,6 +13,7 @@ The requirements below have been formatted using the **Easy Approach to Requirem
 | Tool | Description |
 |---|---|
 | `search_notes` | Search markdown-formatted notes for patterns across all libraries. Returns at most 200 matching lines; when truncated, directs caller to refine the query or delegate to a sub-agent. |
+| `vector_search` | Search indexed Markdown content by meaning (semantic/vector search). Optional; only offered when the vector-search feature is enabled. |
 | `read_tags` | Read all unique tags from markdown front-matter across all libraries. |
 | `list_notes_by_tag` | List notes that contain a specific tag in their front-matter. Paginated via `offset`/`limit` (0-indexed; default `offset=0`, `limit=100`); the response carries `total` and an optional `hint`. |
 | `list_notes` | List markdown-formatted notes in a directory (non-recursive). With "/" or "." returns library names. Paginated via `offset`/`limit` (0-indexed; default `offset=0`, `limit=100`); the response carries `total` and an optional `hint`. |
@@ -131,6 +132,10 @@ The `window_note` and `insert_into_note` tools operate on contiguous line ranges
 * [TOOL-040] The `move_note` tool SHALL fail with an error if the source file does not exist.
 * [TOOL-041] The `move_note` tool SHALL NOT overwrite an existing target file, and SHALL return an error if the target already exists.
 * [TOOL-042] When moving a note to a path with non-existent parent directories, the system SHALL automatically create all missing parent directories.
+
+### Vector Search Tool
+
+* [TOOL-043] The `vector_search` tool SHALL search indexed Markdown content by meaning. It SHALL be ReadOnly, SHALL clamp its `limit` input to a bounded range, and SHALL return matching chunks together with their source paths. The tool SHALL only be offered when the optional vector-search feature is enabled.
 
 ### Browser Automation Tools
 

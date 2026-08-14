@@ -103,7 +103,7 @@ impl ToolExecutorBuilder {
     }
 
     pub fn with_extensions(mut self, extensions: crate::tools::extensions::Extensions) -> Self {
-        self.extensions = extensions;
+        self.extensions.extend(&extensions);
         self
     }
 

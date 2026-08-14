@@ -1,17 +1,21 @@
-//! Optional Markdown vector indexing and search worker.
+//! Optional Markdown vector indexing and search worker (AGENT-031).
 
 use crate::bus::core::{Bus, BusReader};
 use crate::bus::events::file::{FileEvent, FileEventKind};
 use crate::bus::events::typed::BackgroundEvent;
 use crate::config::AppConfig;
 use fastembed::{EmbeddingModel, InitOptions, TextEmbedding};
-use sahomedb::prelude::{Collection, Config, Database, Distance, Metadata, Record, Vector};
+use sahomedb::prelude::{
+    Collection, Config, Database, Distance, Metadata, Record, Vector, VectorID,
+};
+use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 
 const CHUNK_SIZE: usize = 1200;
 const CHUNK_OVERLAP: usize = 200;
 const COLLECTION_NAME: &str = "markdown";
+const VECTOR_SEARCH_FAILED: &str = "Vector search failed. See background logs for details.";
 
 /// A chunk of Markdown content with its stable content hash.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -31,7 +35,7 @@ pub struct VectorSearchService {
 }
 
 struct VectorState {
-    model: Option<TextEmbedding>,
+    model: Option<Arc<TextEmbedding>>,
     collection: Collection,
     database: Option<Database>,
 }
@@ -66,17 +70,15 @@ impl VectorSearchService {
                 ..Default::default()
             });
             let Ok(model) = model else {
-                let _ =
-                    tx.send(BackgroundLog::failed("Embedding model initialization failed").into());
+                let _ = tx.send(bg_log_failed("Embedding model initialization failed").into());
                 return;
             };
             let mut state = service.state.lock().expect("vector state lock poisoned");
-            state.model = Some(model);
+            state.model = Some(Arc::new(model));
             if let Some(path) = database_path {
                 if let Err(error) = std::fs::create_dir_all(&path) {
-                    let _ = tx.send(
-                        BackgroundLog::failed(&format!("Vector index directory: {error}")).into(),
-                    );
+                    let _ =
+                        tx.send(bg_log_failed(&format!("Vector index directory: {error}")).into());
                 } else if let Ok(database) = Database::open(&path.to_string_lossy()) {
                     state.database = Some(database);
                 }
@@ -118,20 +120,45 @@ impl VectorSearchService {
             return;
         };
         let chunks = markdown_chunks(path, &content);
-        let Ok(mut state) = self.state.lock() else {
-            return;
-        };
-        let Some(model) = state.model.as_ref() else {
-            return;
+        let model = {
+            let Ok(state) = self.state.lock() else {
+                return;
+            };
+            let Some(model) = state.model.as_ref() else {
+                return;
+            };
+            model.clone()
         };
         let texts: Vec<&str> = chunks.iter().map(|chunk| chunk.text.as_str()).collect();
         let Ok(embeddings) = model.embed(texts, None) else {
+            tracing::error!(name = "vector_search.embed_failed", path = %path.display(), "Embedding failed");
             return;
         };
-        for (chunk, embedding) in chunks.into_iter().zip(embeddings) {
+        let Ok(mut state) = self.state.lock() else {
+            return;
+        };
+        let current: HashMap<String, Vec<f32>> = chunks
+            .iter()
+            .cloned()
+            .zip(embeddings)
+            .map(|(chunk, embedding)| (chunk.hash.clone(), embedding))
+            .collect();
+        let existing = records_for_path(&state.collection, path);
+        for (hash, id) in &existing {
+            if !current.contains_key(hash) {
+                let _ = state.collection.delete(id);
+            }
+        }
+        for chunk in chunks {
+            if existing.contains_key(&chunk.hash) {
+                continue;
+            }
+            let Some(embedding) = current.get(&chunk.hash) else {
+                continue;
+            };
             let record = Record::new(
                 &Vector::from(embedding),
-                &Metadata::from(format!("{}\n{}", path.display(), chunk.text)),
+                &chunk_metadata(path, &chunk.hash, &chunk.text),
             );
             let _ = state.collection.insert(&record);
         }
@@ -141,7 +168,21 @@ impl VectorSearchService {
         }
     }
 
-    fn remove_path(&self, _path: &Path) {}
+    fn remove_path(&self, path: &Path) {
+        let Ok(mut state) = self.state.lock() else {
+            return;
+        };
+        let ids: Vec<VectorID> = records_for_path(&state.collection, path)
+            .into_values()
+            .collect();
+        for id in ids {
+            let _ = state.collection.delete(&id);
+        }
+        let collection = state.collection.clone();
+        if let Some(database) = state.database.as_mut() {
+            let _ = database.save_collection(COLLECTION_NAME, &collection);
+        }
+    }
 }
 
 impl Default for VectorSearchService {
@@ -156,11 +197,10 @@ impl crate::agent::tools::vector_search::VectorSearchService for VectorSearchSer
         query: &str,
         limit: usize,
     ) -> Result<Vec<crate::agent::tools::vector_search::VectorSearchHit>, String> {
-        let service = self.clone();
-        let query = query.to_string();
-        std::thread::spawn(move || service.search_inner(&query, limit))
-            .join()
-            .map_err(|_| "Vector search worker panicked.".to_string())?
+        std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            self.search_inner(query, limit)
+        }))
+        .map_err(|_| "Vector search worker panicked.".to_string())?
     }
 }
 
@@ -170,32 +210,42 @@ impl VectorSearchService {
         query: &str,
         limit: usize,
     ) -> Result<Vec<crate::agent::tools::vector_search::VectorSearchHit>, String> {
-        let state = self
-            .state
-            .lock()
-            .map_err(|_| "Vector state lock poisoned".to_string())?;
-        let model = state
-            .model
-            .as_ref()
-            .ok_or_else(|| "Vector search is still initializing.".to_string())?;
+        let model = {
+            let state = self.state.lock().map_err(|_| VECTOR_SEARCH_FAILED)?;
+            state
+                .model
+                .as_ref()
+                .ok_or_else(|| "Vector search is still initializing.".to_string())?
+                .clone()
+        };
         let embedding = model
             .embed(vec![query], None)
-            .map_err(|e| e.to_string())?
+            .map_err(|error| {
+                tracing::error!(name = "vector_search.embed_failed", error = %error, "Embedding query failed");
+                VECTOR_SEARCH_FAILED
+            })?
             .remove(0);
-        let results = state
-            .collection
-            .search(&Vector::from(embedding), limit)
-            .map_err(|e| e.message().to_string())?;
+        let results = {
+            let state = self.state.lock().map_err(|_| VECTOR_SEARCH_FAILED)?;
+            state
+                .collection
+                .search(&Vector::from(embedding), limit)
+                .map_err(|error| {
+                    tracing::error!(
+                        name = "vector_search.search_failed",
+                        error = error.message(),
+                        "Collection search failed"
+                    );
+                    VECTOR_SEARCH_FAILED
+                })?
+        };
         Ok(results
             .into_iter()
             .filter_map(|result| {
-                let Metadata::Text(value) = result.data else {
-                    return None;
-                };
-                let mut parts = value.splitn(2, '\n');
+                let (path, _, text) = chunk_from_metadata(result.data)?;
                 Some(crate::agent::tools::vector_search::VectorSearchHit {
-                    path: parts.next().unwrap_or_default().to_string(),
-                    text: parts.next().unwrap_or_default().to_string(),
+                    path,
+                    text,
                     distance: result.distance,
                 })
             })
@@ -247,6 +297,50 @@ pub fn markdown_chunks(path: &Path, content: &str) -> Vec<MarkdownChunk> {
         .collect()
 }
 
+/// Encode a chunk as structured collection metadata (path, hash, text).
+fn chunk_metadata(path: &Path, hash: &str, text: &str) -> Metadata {
+    let mut map = HashMap::new();
+    map.insert("path".to_string(), path.to_string_lossy().into_owned());
+    map.insert("hash".to_string(), hash.to_string());
+    map.insert("text".to_string(), text.to_string());
+    Metadata::from(map)
+}
+
+/// Decode structured chunk metadata into `(path, hash, text)`.
+fn chunk_from_metadata(metadata: Metadata) -> Option<(String, String, String)> {
+    let Metadata::Object(map) = metadata else {
+        return None;
+    };
+    let path = match map.get("path") {
+        Some(Metadata::Text(path)) => path.clone(),
+        _ => return None,
+    };
+    let hash = match map.get("hash") {
+        Some(Metadata::Text(hash)) => hash.clone(),
+        _ => return None,
+    };
+    let text = match map.get("text") {
+        Some(Metadata::Text(text)) => text.clone(),
+        _ => return None,
+    };
+    Some((path, hash, text))
+}
+
+/// Return the IDs of records belonging to the given path, keyed by chunk hash.
+fn records_for_path(collection: &Collection, path: &Path) -> HashMap<String, VectorID> {
+    let Ok(records) = collection.list() else {
+        return HashMap::new();
+    };
+    let target = path.to_string_lossy().into_owned();
+    records
+        .into_iter()
+        .filter_map(|(id, record)| {
+            let (record_path, hash, _) = chunk_from_metadata(record.data)?;
+            (record_path == target).then_some((hash, id))
+        })
+        .collect()
+}
+
 fn hash(text: &str) -> String {
     let digest = ring::digest::digest(&ring::digest::SHA256, text.as_bytes());
     digest
@@ -265,24 +359,22 @@ fn collection_config() -> Config {
 
 fn log_progress(processed: usize, tx: &std::sync::mpsc::Sender<BackgroundEvent>) {
     if processed.is_multiple_of(100) {
-        let _ = tx.send(BackgroundLog::progress(processed).into());
+        let _ = tx.send(bg_log_progress(processed).into());
     }
 }
 
-struct BackgroundLog;
-impl BackgroundLog {
-    fn progress(processed: usize) -> crate::bus::events::BackgroundLogEntry {
-        crate::bus::events::BackgroundLogEntry::new(
-            crate::bus::events::LogCategory::Indexer,
-            format!("Vector search indexed {processed} Markdown files"),
-        )
-    }
-    fn failed(message: &str) -> crate::bus::events::BackgroundLogEntry {
-        crate::bus::events::BackgroundLogEntry::new(
-            crate::bus::events::LogCategory::Indexer,
-            message.to_string(),
-        )
-    }
+fn bg_log_progress(processed: usize) -> crate::bus::events::BackgroundLogEntry {
+    crate::bus::events::BackgroundLogEntry::new(
+        crate::bus::events::LogCategory::Indexer,
+        format!("Vector search indexed {processed} Markdown files"),
+    )
+}
+
+fn bg_log_failed(message: &str) -> crate::bus::events::BackgroundLogEntry {
+    crate::bus::events::BackgroundLogEntry::new(
+        crate::bus::events::LogCategory::Indexer,
+        message.to_string(),
+    )
 }
 
 #[cfg(test)]
@@ -305,5 +397,15 @@ mod tests {
             markdown_chunks(Path::new("a.md"), &"a".repeat(1400))[0].hash
         );
         assert_eq!(chunks[0].text[1000..], chunks[1].text[..200]);
+    }
+
+    #[test]
+    fn metadata_round_trips_structured_chunks() {
+        let metadata = chunk_metadata(Path::new("a.md"), "abc", "body");
+        let (path, hash, text) = chunk_from_metadata(metadata).unwrap();
+        assert_eq!(path, "a.md");
+        assert_eq!(hash, "abc");
+        assert_eq!(text, "body");
+        assert!(chunk_from_metadata(Metadata::Text("nope".into())).is_none());
     }
 }

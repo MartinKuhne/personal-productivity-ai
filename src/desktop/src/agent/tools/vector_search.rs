@@ -1,4 +1,5 @@
-//! Vector-search service contract and tool integration.
+//! Vector-search service contract and tool integration (TOOL-043, AGENT-031).
+//! Unit tests live in the sibling `vector_search_tests.rs` sidecar.
 
 use crate::tools::context::ToolContext;
 use crate::tools::provider::{RegisteredTool, ToolProvider};
@@ -105,17 +106,4 @@ impl ToolProvider for VectorSearchProvider {
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn input_limit_is_bounded_by_tool() {
-        assert_eq!(default_limit(), 5);
-        assert_eq!(
-            serde_json::from_str::<VectorSearchInput>(r#"{"query":"x"}"#)
-                .unwrap()
-                .limit,
-            5
-        );
-    }
-}
+mod tests;

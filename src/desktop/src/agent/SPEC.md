@@ -47,5 +47,6 @@ The agent has zero `ui::render` imports. Display formatting (tool-call messages,
 * [AGENT-024] The top toolbar shall provide a "Tools..." button alongside the existing "Batch..." button. Clicking the button shall open the Tools dialog (UI-051).
 * [AGENT-025] The agent loop's parallel/sequential dispatch (per AGENT-012) shall source tool safety classification uniformly from the centralized tool safety manager for all registered tool names.
 * [AGENT-026] When the user closes all open tabs and then sends an AI prompt, the system shall pass the file selected in the directory tree pane (if one is selected) as file-level context to the LLM system prompt. The system shall select the file's parent directory as the directory context. If a directory is selected, only the directory context is sent.
+* [AGENT-031] The system shall provide an optional background worker that indexes Markdown content into a vector collection and answers semantic search queries against it. When enabled, the `vector_search` tool SHALL return chunks from the current index, and the index SHALL stay in sync with file create, update, and delete events.
 
 

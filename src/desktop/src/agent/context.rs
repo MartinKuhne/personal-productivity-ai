@@ -5,7 +5,7 @@ use crate::events::AgentEventObserver;
 use serde_json::Value;
 use std::collections::HashSet;
 use std::path::PathBuf;
-use std::sync::{Arc, atomic::AtomicBool};
+use std::sync::{atomic::AtomicBool, Arc};
 use uuid::Uuid;
 
 /// Consolidated context for running an agent session.
@@ -236,9 +236,9 @@ impl AgentContextBuilder {
         self
     }
 
-    /// Replace the extension bag wholesale.
+    /// Merge the given extensions into the extension bag.
     pub fn with_extensions(mut self, extensions: crate::tools::extensions::Extensions) -> Self {
-        self.extensions = extensions;
+        self.extensions.extend(&extensions);
         self
     }
 
