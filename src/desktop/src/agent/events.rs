@@ -16,8 +16,8 @@ use serde::Serialize;
 use serde_json::Value;
 use std::collections::HashSet;
 use std::path::PathBuf;
-use std::sync::Arc;
 use std::sync::atomic::AtomicBool;
+use std::sync::Arc;
 use uuid::Uuid;
 
 /// Direction of a debug entry.
@@ -91,6 +91,7 @@ pub struct TokenUsageInfo {
 ///
 /// The UI mints `session_id: Uuid::new_v4()` for a new session and reuses it
 /// for continuation prompts in the same session (FR-008).
+#[derive(Debug)]
 pub struct AgentPrompt {
     /// Identity of the session this prompt belongs to.
     pub session_id: Uuid,

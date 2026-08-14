@@ -55,6 +55,16 @@ pub struct ToolRegistry {
     mcp_manager: Arc<McpClients>,
 }
 
+impl std::fmt::Debug for ToolRegistry {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("ToolRegistry")
+            .field("tools", &self.tools.keys().collect::<Vec<_>>())
+            .field("group_state", &self.group_state)
+            .field("mcp_manager", &"<McpClients>")
+            .finish()
+    }
+}
+
 impl Default for ToolRegistry {
     fn default() -> Self {
         Self::new()
@@ -153,11 +163,11 @@ impl ToolRegistry {
         ctx: &ToolContext,
         name: &str,
         args: &str,
-    ) -> Result<serde_json::Value, String> {
+    ) -> Result<serde_json::Value, crate::tools::ToolError> {
         let tool = self
             .tools
             .get(name)
-            .ok_or_else(|| format!("Tool {name} not found."))?;
+            .ok_or_else(|| crate::tools::ToolError::new(format!("Tool {name} not found.")))?;
         tool.executor.execute(ctx, args)
     }
 
@@ -502,7 +512,7 @@ impl ToolDispatcher for ToolRegistry {
         };
         match tool.executor.execute(ctx, args) {
             Ok(value) => ToolOutcome::ok(value),
-            Err(message) => ToolOutcome::err(message),
+            Err(e) => ToolOutcome::Err(e),
         }
     }
 

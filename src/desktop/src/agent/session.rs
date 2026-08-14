@@ -7,8 +7,8 @@ use crate::events::{AgentDebugEntry, AgentObserverFactory, AgentPrompt, TokenUsa
 use serde_json::Value;
 use std::sync::mpsc::{self, Sender};
 use std::sync::{
-    Arc,
     atomic::{AtomicBool, Ordering},
+    Arc,
 };
 use std::thread::JoinHandle;
 use uuid::Uuid;
@@ -41,6 +41,7 @@ pub struct AgentState {
 /// - Provides `submit_prompt` to enqueue work for the long-lived
 ///   driver thread.
 /// - Exposes read-only `AgentState` for UI rendering
+#[derive(Debug)]
 pub struct AgentSession {
     pub extensions: crate::tools::extensions::Extensions,
     state: AgentState,
@@ -298,7 +299,8 @@ impl AgentSessionBuilder {
         self
     }
 
-    /// Set the shared PDF-backing tracker.
+    /// Set the tool-call policy deciding whether a tool call is
+    /// allowed.
     pub fn with_tool_call_policy(
         mut self,
         policy: Arc<dyn crate::tools::policy::ToolCallPolicy>,
@@ -317,6 +319,7 @@ impl AgentSessionBuilder {
         self
     }
 
+    /// Add a typed extension carried by the session.
     pub fn with_extension<T: Send + Sync + 'static>(
         mut self,
         extension: std::sync::Arc<T>,

@@ -6,6 +6,7 @@ pub trait ToolCallPolicy: Send + Sync + 'static {
     fn check_write_allowed(&self, path: &Path) -> Result<(), String>;
 }
 
+#[derive(Debug)]
 pub struct DefaultToolCallPolicy;
 
 impl ToolCallPolicy for DefaultToolCallPolicy {
@@ -16,3 +17,11 @@ impl ToolCallPolicy for DefaultToolCallPolicy {
 
 #[derive(Clone)]
 pub struct ToolCallPolicyExt(pub std::sync::Arc<dyn ToolCallPolicy>);
+
+impl std::fmt::Debug for ToolCallPolicyExt {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_tuple("ToolCallPolicyExt")
+            .field(&"<dyn ToolCallPolicy>")
+            .finish()
+    }
+}

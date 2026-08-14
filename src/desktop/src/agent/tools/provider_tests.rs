@@ -1,9 +1,9 @@
 //! Unit tests for [`super::provider`] — `RegisteredTool`, `ToolProvider`.
 
 use super::provider::{RegisteredTool, ToolProvider};
-use crate::tools::Tool;
 use crate::tools::descriptor::ToolDescriptor;
 use crate::tools::registry::groups::{InternalToolGroup, ToolGroupId};
+use crate::tools::Tool;
 use std::any::TypeId;
 use std::sync::Arc;
 
@@ -29,7 +29,7 @@ impl Tool for DummyTool {
         &self,
         _ctx: &crate::tools::context::ToolContext,
         _args: &str,
-    ) -> Result<serde_json::Value, String> {
+    ) -> Result<serde_json::Value, crate::tools::ToolError> {
         Ok(serde_json::json!({"ok": true}))
     }
 }
