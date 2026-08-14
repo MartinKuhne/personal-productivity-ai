@@ -1,10 +1,14 @@
 //! LLM HTTP client — builds requests, streams responses, parses tool calls, and extracts token-usage blocks from OpenAI/Anthropic APIs.
+//!
+//! Transport uses `async-openai` (with the `byot` feature for raw-JSON request/response
+//! round-trips, preserving non-standard fields such as `reasoning_content`).
+//! The agent loop remains synchronous: each `chat_completion` call drives the async
+//! client on a process-wide tokio runtime via `std::sync::OnceLock<Runtime>`.
 
 use crate::config::AgentConfig;
 use crate::error::AgentError;
 use crate::events::TokenUsageInfo;
-use backon::BlockingRetryable;
-use backon::ExponentialBuilder;
+use async_openai::{Client, config::OpenAIConfig, error::OpenAIError};
 
 pub fn parse_usage_block(usage: &serde_json::Value) -> Option<TokenUsageInfo> {
     let prompt_tokens = usage
@@ -40,6 +44,14 @@ pub fn parse_usage_block(usage: &serde_json::Value) -> Option<TokenUsageInfo> {
         }),
         cached_tokens,
         reasoning_tokens,
+    })
+}
+
+static RUNTIME: std::sync::OnceLock<tokio::runtime::Runtime> = std::sync::OnceLock::new();
+
+fn get_runtime() -> &'static tokio::runtime::Runtime {
+    RUNTIME.get_or_init(|| {
+        tokio::runtime::Runtime::new().expect("Failed to create tokio runtime for LLMClient")
     })
 }
 
@@ -90,112 +102,114 @@ impl LLMClient {
         messages: &[serde_json::Value],
         tools: &serde_json::Value,
     ) -> Result<serde_json::Value, AgentError> {
-        let client = reqwest::blocking::Client::builder()
+        let config = OpenAIConfig::new()
+            .with_api_key(&self.api_key)
+            .with_api_base(self.api_url.trim_matches('"').trim_end_matches('/'));
+
+        let http_client = reqwest::Client::builder()
             .connect_timeout(std::time::Duration::from_secs(60))
             .timeout(std::time::Duration::from_secs(1800))
             .build()
             .map_err(|e| AgentError::NetworkError(e.to_string()))?;
 
-        let url = format!(
-            "{}/chat/completions",
-            self.api_url.trim_matches('"').trim_end_matches('/')
-        );
+        let client = Client::build(http_client, config);
+
+        let tools_value = if tools.as_array().map(|a| a.is_empty()).unwrap_or(true) {
+            serde_json::Value::Null
+        } else {
+            tools.clone()
+        };
+
         let body = serde_json::json!({
             "model": self.model_name,
             "messages": messages,
-            "tools": tools,
+            "tools": tools_value,
             "tool_choice": "auto",
             "max_tokens": self.max_tokens
         });
 
-        // reqwest's blocking client does not raise on 4xx/5xx by
-        // default, so 2xx/4xx/5xx all land in `Ok(_)` and we branch
-        // on the status code. The body is then available for
-        // diagnostic logging on 5xx/429 retries.
-        let response = (|| {
-            let result = client
-                .post(&url)
-                .bearer_auth(&self.api_key)
-                .json(&body)
-                .send();
+        let response: serde_json::Value = retry_with_backoff(|| {
+            get_runtime()
+                .block_on(client.chat().create_byot(body.clone()))
+                .map_err(map_openai_error)
+        })?;
 
-            match result {
-                Ok(resp) => {
-                    let status = resp.status();
-                    if status.is_success() {
-                        Ok(resp)
-                    } else {
-                        let code = status.as_u16();
-                        let body_str = resp
-                            .text()
-                            .unwrap_or_else(|_| "[Could not read body]".to_string());
-                        if code >= 500 || code == 429 {
-                            tracing::warn!(
-                                name = "agent.api.retry",
-                                status = code,
-                                "Retryable HTTP error, will retry"
-                            );
-                        } else {
-                            tracing::error!(
-                                name = "agent.api.failed",
-                                status = code,
-                                response = %body_str,
-                                "Non-retryable HTTP error."
-                            );
-                        }
-                        Err(AgentError::HttpError {
-                            status: code,
-                            body: body_str,
-                        })
-                    }
-                }
-                Err(e) => {
-                    let err_str = e.to_string();
-                    // `reqwest::Error::is_timeout()` is the canonical
-                    // check; we also match on substrings of the display
-                    // form to keep behaviour aligned with the
-                    // connection-level classifier for cases that
-                    // surface as connect/read errors.
-                    let is_timeout = e.is_timeout()
-                        || e.is_connect()
-                        || err_str.contains("timed out")
-                        || err_str.contains("Timeout")
-                        || err_str.contains("Network is unreachable");
-                    if is_timeout {
-                        tracing::warn!(
-                            name = "agent.api.retry",
-                            error = %err_str,
-                            "Timeout, will retry"
-                        );
-                        Err(AgentError::Timeout)
-                    } else {
-                        Err(AgentError::NetworkError(err_str))
-                    }
-                }
+        Ok(response)
+    }
+}
+
+fn map_openai_error(e: OpenAIError) -> AgentError {
+    match e {
+        OpenAIError::Reqwest(e) => {
+            let err_str = e.to_string();
+            let is_timeout = e.is_timeout()
+                || e.is_connect()
+                || err_str.contains("timed out")
+                || err_str.contains("Timeout")
+                || err_str.contains("Network is unreachable");
+            if is_timeout {
+                AgentError::Timeout
+            } else {
+                AgentError::NetworkError(err_str)
             }
-        })
-        .retry(
-            ExponentialBuilder::default()
-                .with_factor(2.0)
-                .with_min_delay(std::time::Duration::from_secs(1))
-                .with_max_delay(std::time::Duration::from_secs(8))
-                .with_total_delay(Some(std::time::Duration::from_secs(10))),
-        )
-        .when(|e: &AgentError| match e {
-            AgentError::Timeout => true,
-            AgentError::HttpError { status, .. } => *status >= 500 || *status == 429,
-            _ => false,
-        })
-        .call()?;
-
-        response.json().map_err(|e| {
+        }
+        OpenAIError::ApiError(api_err) => {
+            let status = api_err.status_code.as_u16();
+            let body = api_err.api_error.message.clone();
+            if status >= 500 || status == 429 {
+                tracing::warn!(
+                    name = "agent.api.retry",
+                    status = status,
+                    "Retryable HTTP error from async-openai"
+                );
+            } else {
+                tracing::error!(
+                    name = "agent.api.failed",
+                    status = status,
+                    response = %body,
+                    "Non-retryable HTTP error from async-openai"
+                );
+            }
+            AgentError::HttpError { status, body }
+        }
+        OpenAIError::JSONDeserialize(_err, content) => {
             tracing::error!(
                 name = "agent.api.invalid_json",
-                error = %e,
-                "Failed to parse JSON response."
+                content = %content,
+                "Failed to parse API response."
             );
-            AgentError::JsonParseError(e.to_string())
-        })
+            AgentError::JsonParseError(content)
+        }
+        OpenAIError::InvalidArgument(msg) => {
+            AgentError::RuntimeError(format!("Invalid argument: {msg}"))
+        }
+        e => AgentError::RuntimeError(e.to_string()),
+    }
+}
+
+fn retry_with_backoff<F, T>(mut f: F) -> Result<T, AgentError>
+where
+    F: FnMut() -> Result<T, AgentError>,
+{
+    let start = std::time::Instant::now();
+    let total_timeout = std::time::Duration::from_secs(10);
+    let mut delay_ms = 1000u64;
+    let max_delay_ms = 8000u64;
+
+    loop {
+        match f() {
+            Ok(val) => return Ok(val),
+            Err(e) if e.is_retryable() && start.elapsed() < total_timeout => {
+                tracing::warn!(
+                    name = "agent.api.retry",
+                    error = %e,
+                    "Retrying after backoff"
+                );
+                std::thread::sleep(std::time::Duration::from_millis(delay_ms));
+                delay_ms = std::cmp::min(delay_ms * 2, max_delay_ms);
+            }
+            Err(e) => return Err(e),
+        }
     }
 }
 
