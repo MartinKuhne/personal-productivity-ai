@@ -280,6 +280,72 @@ pub fn tool_patch_note(
     }
 }
 
+/// Move or rename a markdown-formatted note from `source_str` to `target_str` (TOOL-038..TOOL-042).
+///
+/// Fails if:
+/// - either path does not end with `.md` (case-insensitive)
+/// - the source file does not exist
+/// - the target file already exists (cannot overwrite)
+/// - source and target are identical
+pub fn tool_move_note(
+    ctx: &crate::tools::context::ToolContext,
+    source_str: &str,
+    target_str: &str,
+    producer: &dyn crate::tools::observer::OnFileChanged,
+) -> Result<crate::tools::dtos::MoveNoteResponse, String> {
+    if !source_str.to_lowercase().ends_with(".md") || !target_str.to_lowercase().ends_with(".md") {
+        return Err("Only markdown files (.md) are allowed.".to_string());
+    }
+
+    let source_path = Path::new(source_str);
+    if !source_path.exists() {
+        return Err("Source file does not exist.".to_string());
+    }
+
+    let target_path = Path::new(target_str);
+    if source_path == target_path {
+        return Err("Source and target paths must be different.".to_string());
+    }
+
+    if target_path.exists() {
+        return Err("Target file already exists. Cannot overwrite existing file.".to_string());
+    }
+
+    if let Some(parent) = target_path.parent()
+        && let Err(e) = ctx.vfs().create_dir_all(parent)
+    {
+        return Err(format!("Failed to create parent directories: {}", e));
+    }
+
+    match ctx.vfs().rename(source_path, target_path) {
+        Ok(_) => {
+            producer.on_file_changed(source_path);
+            producer.on_file_changed(target_path);
+            Ok(crate::tools::dtos::MoveNoteResponse {
+                result: "File moved successfully.".to_string(),
+            })
+        }
+        Err(e) => {
+            if ctx.vfs().copy(source_path, target_path).is_ok() {
+                if let Err(rm_err) = ctx.vfs().remove_file(source_path) {
+                    let _ = ctx.vfs().remove_file(target_path);
+                    return Err(format!(
+                        "Failed to remove source file after copy: {}",
+                        rm_err
+                    ));
+                }
+                producer.on_file_changed(source_path);
+                producer.on_file_changed(target_path);
+                Ok(crate::tools::dtos::MoveNoteResponse {
+                    result: "File moved successfully.".to_string(),
+                })
+            } else {
+                Err(format!("Failed to move file: {}", e))
+            }
+        }
+    }
+}
+
 fn split_file_content(raw_content: &str) -> (Option<String>, String) {
     match parse_front_matter(raw_content) {
         Some(fm) => {

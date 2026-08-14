@@ -577,3 +577,594 @@ fn test_tool_list_notes_by_tag_with_markdown_extension() {
     assert_eq!(res.len(), 1);
     assert!(res[0].ends_with("doc.markdown"));
 }
+
+#[test]
+fn test_tool_move_note_success() {
+    let dir = tempdir().unwrap();
+    let source_path = dir.path().join("source.md");
+    let target_path = dir.path().join("target.md");
+    fs::write(&source_path, "# Note Content\nSome body text.").unwrap();
+
+    let producer = noop_producer();
+    let result = tool_move_note(
+        &test_ctx(),
+        source_path.to_str().unwrap(),
+        target_path.to_str().unwrap(),
+        &*producer,
+    )
+    .unwrap()
+    .result;
+
+    assert_eq!(result, "File moved successfully.");
+    assert!(!source_path.exists());
+    assert!(target_path.exists());
+
+    let content = fs::read_to_string(&target_path).unwrap();
+    assert_eq!(content, "# Note Content\nSome body text.");
+}
+
+#[test]
+fn test_tool_move_note_creates_parent_directories() {
+    let dir = tempdir().unwrap();
+    let source_path = dir.path().join("source.md");
+    let target_path = dir.path().join("nested").join("sub").join("target.md");
+    fs::write(&source_path, "# Nested move test").unwrap();
+
+    let producer = noop_producer();
+    let result = tool_move_note(
+        &test_ctx(),
+        source_path.to_str().unwrap(),
+        target_path.to_str().unwrap(),
+        &*producer,
+    )
+    .unwrap()
+    .result;
+
+    assert_eq!(result, "File moved successfully.");
+    assert!(!source_path.exists());
+    assert!(target_path.exists());
+    let content = fs::read_to_string(&target_path).unwrap();
+    assert_eq!(content, "# Nested move test");
+}
+
+#[test]
+fn test_tool_move_note_fails_if_source_not_found() {
+    let dir = tempdir().unwrap();
+    let source_path = dir.path().join("nonexistent.md");
+    let target_path = dir.path().join("target.md");
+
+    let producer = noop_producer();
+    let result = tool_move_note(
+        &test_ctx(),
+        source_path.to_str().unwrap(),
+        target_path.to_str().unwrap(),
+        &*producer,
+    );
+
+    assert_eq!(result.unwrap_err(), "Source file does not exist.");
+    assert!(!target_path.exists());
+}
+
+#[test]
+fn test_tool_move_note_fails_if_target_already_exists() {
+    let dir = tempdir().unwrap();
+    let source_path = dir.path().join("source.md");
+    let target_path = dir.path().join("target.md");
+    fs::write(&source_path, "Source content").unwrap();
+    fs::write(&target_path, "Target content").unwrap();
+
+    let producer = noop_producer();
+    let result = tool_move_note(
+        &test_ctx(),
+        source_path.to_str().unwrap(),
+        target_path.to_str().unwrap(),
+        &*producer,
+    );
+
+    assert_eq!(
+        result.unwrap_err(),
+        "Target file already exists. Cannot overwrite existing file."
+    );
+    // Both files must remain unchanged
+    assert_eq!(fs::read_to_string(&source_path).unwrap(), "Source content");
+    assert_eq!(fs::read_to_string(&target_path).unwrap(), "Target content");
+}
+
+#[test]
+fn test_tool_move_note_rejects_invalid_extensions() {
+    let dir = tempdir().unwrap();
+    let md_path = dir.path().join("note.md");
+    let txt_path = dir.path().join("note.txt");
+    let markdown_path = dir.path().join("note.markdown");
+    fs::write(&md_path, "content").unwrap();
+    fs::write(&txt_path, "content").unwrap();
+    fs::write(&markdown_path, "content").unwrap();
+
+    let producer = noop_producer();
+
+    // Source is .txt
+    let res1 = tool_move_note(
+        &test_ctx(),
+        txt_path.to_str().unwrap(),
+        dir.path().join("dest.md").to_str().unwrap(),
+        &*producer,
+    );
+    assert_eq!(res1.unwrap_err(), "Only markdown files (.md) are allowed.");
+
+    // Target is .txt
+    let res2 = tool_move_note(
+        &test_ctx(),
+        md_path.to_str().unwrap(),
+        dir.path().join("dest.txt").to_str().unwrap(),
+        &*producer,
+    );
+    assert_eq!(res2.unwrap_err(), "Only markdown files (.md) are allowed.");
+
+    // Source is .markdown
+    let res3 = tool_move_note(
+        &test_ctx(),
+        markdown_path.to_str().unwrap(),
+        dir.path().join("dest.md").to_str().unwrap(),
+        &*producer,
+    );
+    assert_eq!(res3.unwrap_err(), "Only markdown files (.md) are allowed.");
+
+    // Target is .markdown
+    let res4 = tool_move_note(
+        &test_ctx(),
+        md_path.to_str().unwrap(),
+        dir.path().join("dest.markdown").to_str().unwrap(),
+        &*producer,
+    );
+    assert_eq!(res4.unwrap_err(), "Only markdown files (.md) are allowed.");
+}
+
+#[test]
+fn test_tool_move_note_rejects_same_path() {
+    let dir = tempdir().unwrap();
+    let file_path = dir.path().join("note.md");
+    fs::write(&file_path, "content").unwrap();
+
+    let producer = noop_producer();
+    let result = tool_move_note(
+        &test_ctx(),
+        file_path.to_str().unwrap(),
+        file_path.to_str().unwrap(),
+        &*producer,
+    );
+    assert_eq!(
+        result.unwrap_err(),
+        "Source and target paths must be different."
+    );
+}
+
+#[test]
+fn test_tool_move_note_notifies_observer_for_both_paths() {
+    use std::sync::Mutex;
+
+    struct TrackingObserver {
+        events: Mutex<Vec<std::path::PathBuf>>,
+    }
+    impl crate::tools::observer::OnFileChanged for TrackingObserver {
+        fn on_file_changed(&self, path: &Path) {
+            self.events.lock().unwrap().push(path.to_path_buf());
+        }
+    }
+
+    let observer = std::sync::Arc::new(TrackingObserver {
+        events: Mutex::new(Vec::new()),
+    });
+
+    let dir = tempdir().unwrap();
+    let source_path = dir.path().join("source.md");
+    let target_path = dir.path().join("target.md");
+    fs::write(&source_path, "# Notified move").unwrap();
+
+    let result = tool_move_note(
+        &test_ctx(),
+        source_path.to_str().unwrap(),
+        target_path.to_str().unwrap(),
+        &*observer,
+    )
+    .unwrap();
+    assert_eq!(result.result, "File moved successfully.");
+
+    let recorded = observer.events.lock().unwrap().clone();
+    assert_eq!(recorded.len(), 2);
+    assert_eq!(recorded[0], source_path);
+    assert_eq!(recorded[1], target_path);
+}
+
+#[test]
+fn test_tool_move_note_via_registry_virtual_paths() {
+    let dir = tempdir().unwrap();
+    let file_path = dir.path().join("initial.md");
+    fs::write(&file_path, "# Virtual Move Test").unwrap();
+
+    let config = crate::config::AgentConfigBuilder::new()
+        .with_content_libraries(vec![crate::config::ContentLibrary {
+            name: "Workspace".to_string(),
+            root_folder: dir.path().to_str().unwrap().to_string(),
+            kind: "text".to_string(),
+            readonly: false,
+            priority: 1,
+        }])
+        .build();
+
+    let mut builder = crate::tools::context::ToolContextBuilder::new(
+        std::sync::Arc::new(config.clone()),
+        std::sync::Arc::new(crate::tools::observer::DefaultFileObserver),
+    );
+    builder = builder.with_extension(std::sync::Arc::new(
+        crate::tools::vfs::VirtualFileSystemExt(std::sync::Arc::new(
+            crate::tools::vfs::VfsResolver::new(std::sync::Arc::new(config)),
+        )),
+    ));
+    let ctx = builder.build();
+
+    let mut registry = crate::tools::registry::ToolRegistry::new();
+    registry.refresh_state(&ctx.config);
+
+    let res = crate::tools::registry::execute_tool(
+        &registry,
+        &ctx,
+        "move_note",
+        r#"{"source": "Workspace/initial.md", "target": "Workspace/renamed.md"}"#,
+    );
+
+    assert!(
+        res.contains(r#""status":"success""#),
+        "Unexpected failure: {}",
+        res
+    );
+    assert!(!file_path.exists());
+    let new_path = dir.path().join("renamed.md");
+    assert!(new_path.exists());
+    assert_eq!(
+        fs::read_to_string(&new_path).unwrap(),
+        "# Virtual Move Test"
+    );
+}
+
+#[test]
+fn test_tool_move_note_via_registry_fails_on_readonly_library() {
+    let dir = tempdir().unwrap();
+    let file_path = dir.path().join("initial.md");
+    fs::write(&file_path, "# Readonly Move Test").unwrap();
+
+    let config = crate::config::AgentConfigBuilder::new()
+        .with_content_libraries(vec![crate::config::ContentLibrary {
+            name: "ReadOnlyLib".to_string(),
+            root_folder: dir.path().to_str().unwrap().to_string(),
+            kind: "text".to_string(),
+            readonly: true,
+            priority: 1,
+        }])
+        .build();
+
+    let mut builder = crate::tools::context::ToolContextBuilder::new(
+        std::sync::Arc::new(config.clone()),
+        std::sync::Arc::new(crate::tools::observer::DefaultFileObserver),
+    );
+    builder = builder.with_extension(std::sync::Arc::new(
+        crate::tools::vfs::VirtualFileSystemExt(std::sync::Arc::new(
+            crate::tools::vfs::VfsResolver::new(std::sync::Arc::new(config)),
+        )),
+    ));
+    let ctx = builder.build();
+
+    let mut registry = crate::tools::registry::ToolRegistry::new();
+    registry.refresh_state(&ctx.config);
+
+    let res = crate::tools::registry::execute_tool(
+        &registry,
+        &ctx,
+        "move_note",
+        r#"{"source": "ReadOnlyLib/initial.md", "target": "ReadOnlyLib/renamed.md"}"#,
+    );
+
+    assert!(
+        res.contains(r#""status":"error""#),
+        "Expected error on readonly lib: {}",
+        res
+    );
+    assert!(res.contains("read-only"));
+    assert!(file_path.exists());
+}
+
+// ---------------------------------------------------------------------------
+// Additional coverage: case-insensitive extension, serde aliases, and mock-VFS
+// code-path tests for the cross-device fallback branches.
+// ---------------------------------------------------------------------------
+
+/// Build a ToolContext backed by an arbitrary `VirtualFileSystem` implementation.
+fn ctx_with_vfs(
+    vfs: std::sync::Arc<dyn crate::tools::vfs::VirtualFileSystem>,
+) -> crate::tools::context::ToolContext {
+    let config = crate::config::AgentConfig::default();
+    crate::tools::context::ToolContextBuilder::new(
+        std::sync::Arc::new(config),
+        std::sync::Arc::new(crate::tools::observer::DefaultFileObserver),
+    )
+    .with_extension(std::sync::Arc::new(
+        crate::tools::vfs::VirtualFileSystemExt(vfs),
+    ))
+    .build()
+}
+
+/// A minimal `VirtualFileSystem` mock wrapping an inner `VfsResolver` but
+/// letting callers override the behaviour of `rename`, `copy`, and
+/// `remove_file` through per-instance flags.
+struct MockVfs {
+    inner: crate::tools::vfs::VfsResolver,
+    /// `None` → delegate to real fs; `Some(msg)` → return an `io::Error`
+    rename_err: Option<&'static str>,
+    copy_err: Option<&'static str>,
+    remove_file_err: Option<&'static str>,
+    create_dir_all_err: Option<&'static str>,
+}
+
+impl MockVfs {
+    fn new(config: std::sync::Arc<crate::config::AgentConfig>) -> Self {
+        MockVfs {
+            inner: crate::tools::vfs::VfsResolver::new(config),
+            rename_err: None,
+            copy_err: None,
+            remove_file_err: None,
+            create_dir_all_err: None,
+        }
+    }
+}
+
+impl crate::tools::vfs::VirtualFileSystem for MockVfs {
+    fn resolve_virtual_path(
+        &self,
+        vpath: &str,
+        allow_write: bool,
+    ) -> Result<Option<crate::vfs::ResolvedVirtualPath>, String> {
+        self.inner.resolve_virtual_path(vpath, allow_write)
+    }
+    fn resolve_writable(&self, vpath: &str) -> Result<std::path::PathBuf, String> {
+        self.inner.resolve_writable(vpath)
+    }
+    fn read_to_string(&self, path: &Path) -> std::io::Result<String> {
+        self.inner.read_to_string(path)
+    }
+    fn write(&self, path: &Path, content: &[u8]) -> std::io::Result<()> {
+        self.inner.write(path, content)
+    }
+    fn append(&self, path: &Path, content: &[u8]) -> std::io::Result<()> {
+        self.inner.append(path, content)
+    }
+    fn create_dir_all(&self, path: &Path) -> std::io::Result<()> {
+        if let Some(msg) = self.create_dir_all_err {
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::PermissionDenied,
+                msg,
+            ));
+        }
+        self.inner.create_dir_all(path)
+    }
+    fn read_dir(&self, path: &Path) -> std::io::Result<Vec<crate::tools::vfs::VfsDirEntry>> {
+        self.inner.read_dir(path)
+    }
+    fn metadata(&self, path: &Path) -> std::io::Result<crate::tools::vfs::VfsMetadata> {
+        self.inner.metadata(path)
+    }
+    fn rename(&self, from: &Path, to: &Path) -> std::io::Result<()> {
+        if let Some(msg) = self.rename_err {
+            return Err(std::io::Error::new(std::io::ErrorKind::CrossesDevices, msg));
+        }
+        self.inner.rename(from, to)
+    }
+    fn remove_file(&self, path: &Path) -> std::io::Result<()> {
+        if let Some(msg) = self.remove_file_err {
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::PermissionDenied,
+                msg,
+            ));
+        }
+        self.inner.remove_file(path)
+    }
+    fn copy(&self, from: &Path, to: &Path) -> std::io::Result<u64> {
+        if let Some(msg) = self.copy_err {
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::PermissionDenied,
+                msg,
+            ));
+        }
+        self.inner.copy(from, to)
+    }
+}
+
+#[test]
+fn test_tool_move_note_accepts_uppercase_md_extension() {
+    // The extension check is case-insensitive; both .MD and .Md must be accepted.
+    let dir = tempdir().unwrap();
+    let source_path = dir.path().join("source.MD");
+    let target_path = dir.path().join("target.MD");
+    fs::write(&source_path, "# UPPER content").unwrap();
+
+    let producer = noop_producer();
+    let result = tool_move_note(
+        &test_ctx(),
+        source_path.to_str().unwrap(),
+        target_path.to_str().unwrap(),
+        &*producer,
+    );
+    assert!(result.is_ok(), "Unexpected error: {:?}", result);
+    assert!(!source_path.exists());
+    assert!(target_path.exists());
+}
+
+#[test]
+fn test_tool_move_note_input_deserializes_primary_fields() {
+    // Confirm `source` / `target` primary field names round-trip.
+    let json = r#"{"source": "Lib/a.md", "target": "Lib/b.md"}"#;
+    let input: crate::tools::dtos::MoveNoteInput = serde_json::from_str(json).unwrap();
+    assert_eq!(input.source, "Lib/a.md");
+    assert_eq!(input.target, "Lib/b.md");
+}
+
+#[test]
+fn test_tool_move_note_input_alias_from_to() {
+    // Serde aliases: `from` → `source`, `to` → `target`.
+    let json = r#"{"from": "Lib/old.md", "to": "Lib/new.md"}"#;
+    let input: crate::tools::dtos::MoveNoteInput = serde_json::from_str(json).unwrap();
+    assert_eq!(input.source, "Lib/old.md");
+    assert_eq!(input.target, "Lib/new.md");
+}
+
+#[test]
+fn test_tool_move_note_input_alias_source_path_destination() {
+    // Serde aliases: `source_path` → `source`, `destination` → `target`.
+    let json = r#"{"source_path": "Lib/old.md", "destination": "Lib/new.md"}"#;
+    let input: crate::tools::dtos::MoveNoteInput = serde_json::from_str(json).unwrap();
+    assert_eq!(input.source, "Lib/old.md");
+    assert_eq!(input.target, "Lib/new.md");
+}
+
+#[test]
+fn test_tool_move_note_input_alias_target_path() {
+    // Serde alias: `target_path` → `target`.
+    let json = r#"{"source": "Lib/old.md", "target_path": "Lib/new.md"}"#;
+    let input: crate::tools::dtos::MoveNoteInput = serde_json::from_str(json).unwrap();
+    assert_eq!(input.source, "Lib/old.md");
+    assert_eq!(input.target, "Lib/new.md");
+}
+
+#[test]
+fn test_tool_move_note_fallback_copy_remove_on_rename_failure() {
+    // Simulate a cross-device rename failure; the fallback copy+remove path must succeed.
+    let dir = tempdir().unwrap();
+    let source_path = dir.path().join("source.md");
+    let target_path = dir.path().join("target.md");
+    fs::write(&source_path, "# Cross-device content").unwrap();
+
+    let config = std::sync::Arc::new(crate::config::AgentConfig::default());
+    let mut mock = MockVfs::new(config);
+    mock.rename_err = Some("cross-device link");
+
+    let ctx = ctx_with_vfs(std::sync::Arc::new(mock));
+    let producer = noop_producer();
+    let result = tool_move_note(
+        &ctx,
+        source_path.to_str().unwrap(),
+        target_path.to_str().unwrap(),
+        &*producer,
+    )
+    .unwrap();
+    assert_eq!(result.result, "File moved successfully.");
+    assert!(!source_path.exists(), "Source should be removed after copy");
+    assert!(target_path.exists(), "Target should exist after copy");
+    let content = fs::read_to_string(&target_path).unwrap();
+    assert_eq!(content, "# Cross-device content");
+}
+
+#[test]
+fn test_tool_move_note_fallback_copy_fails_returns_rename_error() {
+    // When rename AND copy both fail, the error reports the rename failure.
+    let dir = tempdir().unwrap();
+    let source_path = dir.path().join("source.md");
+    let target_path = dir.path().join("target.md");
+    fs::write(&source_path, "# Content").unwrap();
+
+    let config = std::sync::Arc::new(crate::config::AgentConfig::default());
+    let mut mock = MockVfs::new(config);
+    mock.rename_err = Some("cross-device link");
+    mock.copy_err = Some("disk full");
+
+    let ctx = ctx_with_vfs(std::sync::Arc::new(mock));
+    let producer = noop_producer();
+    let err = tool_move_note(
+        &ctx,
+        source_path.to_str().unwrap(),
+        target_path.to_str().unwrap(),
+        &*producer,
+    )
+    .unwrap_err();
+
+    assert!(
+        err.contains("Failed to move file:"),
+        "Expected move error, got: {}",
+        err
+    );
+    // Source must be left untouched.
+    assert!(source_path.exists());
+    assert!(!target_path.exists());
+}
+
+#[test]
+fn test_tool_move_note_fallback_copy_ok_remove_fails_rolls_back() {
+    // When rename fails, copy succeeds, but remove_file fails,
+    // the target copy is deleted and an error is returned.
+    let dir = tempdir().unwrap();
+    let source_path = dir.path().join("source.md");
+    let target_path = dir.path().join("target.md");
+    fs::write(&source_path, "# Rollback content").unwrap();
+
+    let config = std::sync::Arc::new(crate::config::AgentConfig::default());
+    let mut mock = MockVfs::new(config);
+    mock.rename_err = Some("cross-device link");
+    mock.remove_file_err = Some("permission denied");
+
+    let ctx = ctx_with_vfs(std::sync::Arc::new(mock));
+    let producer = noop_producer();
+    let err = tool_move_note(
+        &ctx,
+        source_path.to_str().unwrap(),
+        target_path.to_str().unwrap(),
+        &*producer,
+    )
+    .unwrap_err();
+
+    assert!(
+        err.contains("Failed to remove source file after copy:"),
+        "Expected remove-after-copy error, got: {}",
+        err
+    );
+    // Source must still exist (remove_file is mocked to fail).
+    assert!(source_path.exists());
+    // The rollback call to remove the target also goes through the mock VFS,
+    // so it fails silently too — the target copy is left on disk. This matches
+    // the implementation: the rollback is best-effort.
+    assert!(
+        target_path.exists(),
+        "Target copy is left when rollback remove also fails"
+    );
+}
+
+#[test]
+fn test_tool_move_note_create_dir_all_failure() {
+    // When creating parent directories fails, the tool must return an error
+    // without touching the source file.
+    let dir = tempdir().unwrap();
+    let source_path = dir.path().join("source.md");
+    let target_path = dir.path().join("deep").join("nested").join("target.md");
+    fs::write(&source_path, "# Dir fail content").unwrap();
+
+    let config = std::sync::Arc::new(crate::config::AgentConfig::default());
+    let mut mock = MockVfs::new(config);
+    mock.create_dir_all_err = Some("permission denied");
+
+    let ctx = ctx_with_vfs(std::sync::Arc::new(mock));
+    let producer = noop_producer();
+    let err = tool_move_note(
+        &ctx,
+        source_path.to_str().unwrap(),
+        target_path.to_str().unwrap(),
+        &*producer,
+    )
+    .unwrap_err();
+
+    assert!(
+        err.contains("Failed to create parent directories:"),
+        "Expected dir-creation error, got: {}",
+        err
+    );
+    assert!(
+        source_path.exists(),
+        "Source must be untouched on dir failure"
+    );
+    assert!(!target_path.exists());
+}

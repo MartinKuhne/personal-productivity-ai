@@ -1,6 +1,6 @@
 # FastMD Agent Tools Reference
 
-The following table summarizes all 26 tools available to the LLM agent, categorized by functionality:
+The following table summarizes all tools available to the LLM agent, categorized by functionality:
 
 | Category | Tool Name | Description | Configuration Required |
 | --- | --- | --- | --- |
@@ -11,6 +11,7 @@ The following table summarizes all 26 tools available to the LLM agent, categori
 | **Core Workspace** | `read_note` | Read the entire text contents of a file at the specified path. | None |
 | **Core Workspace** | `window_note` | Read a contiguous slice of lines from a file (0-indexed; default `offset=0`, `limit=100`). | None |
 | **Core Workspace** | `create_note` | Create a new file with specified content. | None |
+| **Core Workspace** | `move_note` | Move or rename a markdown file from source virtual path to target virtual path. Target file may not be overwritten. | None |
 | **Core Workspace** | `insert_into_note` | Insert lines at a specific 0-indexed offset. | None |
 | **Core Workspace** | `patch_note` | Replace exact occurrences of old_string with new_string in a file. | None |
 | **Core Workspace** | `read_yaml_header` | Parse a YAML header from a markdown file and return its content representation. | None |
@@ -146,6 +147,19 @@ All tool responses follow the same envelope:
 * **Response (`data`):**
   ```json
   { "result": "File created successfully.", "size_bytes": 52 }
+  ```
+
+##### `move_note`
+* **Description:** Move or rename a markdown-formatted note from a source virtual path to a target virtual path. Fails if the target file already exists.
+* **Request:**
+  ```json
+  { "source": "MyLib/old_name.md", "target": "MyLib/sub/new_name.md" }
+  ```
+  * `source` — virtual file path of the source note to move.
+  * `target` — virtual file path of the destination where the note should be moved.
+* **Response (`data`):**
+  ```json
+  { "result": "File moved successfully." }
   ```
 
 ##### `insert_into_note`

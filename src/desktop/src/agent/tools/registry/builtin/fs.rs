@@ -1,11 +1,11 @@
 //! Filesystem tool implementations and provider for the tool registry.
 
 use crate::config::ContentLibraryExt;
+use crate::tools::Tool;
 use crate::tools::context::ToolContext;
 use crate::tools::dtos;
 use crate::tools::provider::{RegisteredTool, ToolProvider};
 use crate::tools::registry::groups::{InternalToolGroup, ToolGroupId};
-use crate::tools::Tool;
 use fastmd_tool_macros::ToolDescriptor;
 use std::sync::Arc;
 
@@ -357,6 +357,40 @@ fn execute_insert_into_note(
     })
 }
 
+/// Tool that moves or renames a markdown-formatted note.
+#[derive(ToolDescriptor)]
+#[tool(
+    name = "move_note",
+    desc = strings::MOVE_NOTE_DESCRIPTION,
+    input = dtos::MoveNoteInput,
+    safety = crate::tools::Safety::Mutating,
+    group = Filesystem,
+    execute_with = execute_move_note,
+)]
+pub(crate) struct MoveNoteTool;
+fn execute_move_note(
+    _self: &MoveNoteTool,
+    ctx: &ToolContext,
+    args: &str,
+) -> Result<serde_json::Value, String> {
+    let input: dtos::MoveNoteInput =
+        serde_json::from_str(args).map_err(|e| format!("Invalid args: {}", e))?;
+    let source_path = ctx.resolve_writable(&input.source)?;
+    ctx.check_write_allowed(&source_path)?;
+    let target_path = ctx.resolve_writable(&input.target)?;
+    ctx.check_write_allowed(&target_path)?;
+    let observer = ctx.file_observer();
+    crate::tools::filesystem::tool_move_note(
+        ctx,
+        &source_path.to_string_lossy(),
+        &target_path.to_string_lossy(),
+        &*observer,
+    )
+    .map(|r| {
+        serde_json::to_value(r).unwrap_or_else(|e| serde_json::json!({"error": e.to_string()}))
+    })
+}
+
 /// Self-registering provider for the filesystem family.
 pub(crate) struct FilesystemProvider;
 impl ToolProvider for FilesystemProvider {
@@ -377,6 +411,7 @@ impl ToolProvider for FilesystemProvider {
             registered(WindowNoteTool),
             registered(CreateNoteTool),
             registered(InsertIntoNoteTool),
+            registered(MoveNoteTool),
         ]
     }
 }

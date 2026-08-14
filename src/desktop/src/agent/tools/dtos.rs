@@ -1,4 +1,4 @@
-﻿//! Input/output data-transfer objects for every tool â€” `serde` and `JsonSchema` derives for LLM argument serialisation.
+//! Input/output data-transfer objects for every tool â€” `serde` and `JsonSchema` derives for LLM argument serialisation.
 //!
 //! Every user-visible string (tool description, per-field description) lives
 //! in the per-family `strings` submodule under `registry/builtin/`. The DTOs
@@ -121,6 +121,21 @@ pub struct InsertIntoNoteInput {
 }
 #[derive(Serialize, Debug, JsonSchema)]
 pub struct InsertIntoNoteResponse {
+    pub result: String,
+}
+
+#[derive(Deserialize, Debug, JsonSchema)]
+pub struct MoveNoteInput {
+    #[schemars(description = strings::FIELD_MOVE_NOTE_INPUT_SOURCE)]
+    #[serde(alias = "source_path", alias = "from")]
+    pub source: String,
+    #[schemars(description = strings::FIELD_MOVE_NOTE_INPUT_TARGET)]
+    #[serde(alias = "target_path", alias = "destination", alias = "to")]
+    pub target: String,
+}
+#[derive(Serialize, Debug, JsonSchema)]
+pub struct MoveNoteResponse {
+    #[schemars(description = strings::FIELD_MOVE_NOTE_RESPONSE_RESULT)]
     pub result: String,
 }
 

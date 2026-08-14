@@ -1,9 +1,9 @@
 //! Unit tests for [`super::provider`] — `RegisteredTool`, `ToolProvider`.
 
 use super::provider::{RegisteredTool, ToolProvider};
+use crate::tools::Tool;
 use crate::tools::descriptor::ToolDescriptor;
 use crate::tools::registry::groups::{InternalToolGroup, ToolGroupId};
-use crate::tools::Tool;
 use std::any::TypeId;
 use std::sync::Arc;
 

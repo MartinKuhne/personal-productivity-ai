@@ -8,11 +8,11 @@
 use std::sync::OnceLock;
 
 use crate::lib::mcp::{DynamicToolSource, McpClients};
+use crate::tools::Tool;
 use crate::tools::context::ToolContext;
 use crate::tools::descriptor::{ToolConfigSpec, ToolDescriptor};
 use crate::tools::dispatcher::ToolError;
 use crate::tools::registry::groups::ToolGroupId;
-use crate::tools::Tool;
 
 /// Adapter implementing [`Tool`] for an external MCP server tool.
 pub struct McpToolAdapter {
