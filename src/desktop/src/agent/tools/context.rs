@@ -22,10 +22,12 @@ use std::sync::Arc;
 /// owns the registry and the dispatcher; the per-call context only
 /// exposes the services a tool actually needs. This breaks the
 /// implicit context ↔ registry cycle the previous design had.
+#[derive(Clone, Debug)]
 pub struct ToolCacheExt(pub std::sync::Arc<crate::tools::registry::cache::ToolCache>);
+#[derive(Clone, Debug)]
 pub struct UuidGeneratorExt(pub std::sync::Arc<dyn crate::utils::uuid::UuidGenerator>);
 
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub struct ToolContext {
     pub config: Arc<AgentConfig>,
     pub extensions: crate::tools::extensions::Extensions,
@@ -45,7 +47,7 @@ impl ToolContext {
         &self,
         vpath: &str,
         allow_write: bool,
-    ) -> Result<Option<(PathBuf, bool)>, String> {
+    ) -> Result<Option<crate::vfs::ResolvedVirtualPath>, String> {
         self.vfs().resolve_virtual_path(vpath, allow_write)
     }
 
@@ -121,6 +123,15 @@ pub struct ToolContextBuilder {
     extensions: crate::tools::extensions::Extensions,
 }
 
+impl std::fmt::Debug for ToolContextBuilder {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("ToolContextBuilder")
+            .field("config", &self.config)
+            .field("extensions", &self.extensions)
+            .finish_non_exhaustive()
+    }
+}
+
 impl ToolContextBuilder {
     pub fn new(
         config: Arc<AgentConfig>,
@@ -133,6 +144,7 @@ impl ToolContextBuilder {
         }
     }
 
+    /// Set the policy deciding whether a tool call is allowed.
     pub fn with_tool_call_policy(
         mut self,
         policy: std::sync::Arc<dyn crate::tools::policy::ToolCallPolicy>,
@@ -142,11 +154,31 @@ impl ToolContextBuilder {
         self
     }
 
+    /// Add a typed extension to the tool context.
     pub fn with_extension<T: Send + Sync + 'static>(mut self, extension: Arc<T>) -> Self {
         self.extensions.insert(extension);
         self
     }
 
+    /// Build the [`ToolContext`], injecting the file observer and the
+    /// default VFS resolver and tool-call policy when no overrides
+    /// were supplied.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use std::sync::Arc;
+    /// use fastmd_agent::config::AgentConfig;
+    /// use fastmd_agent::tools::context::ToolContextBuilder;
+    /// use fastmd_agent::tools::observer::DefaultFileObserver;
+    ///
+    /// let ctx = ToolContextBuilder::new(
+    ///     Arc::new(AgentConfig::default()),
+    ///     Arc::new(DefaultFileObserver),
+    /// )
+    /// .build();
+    /// assert!(ctx.config.content_libraries().is_empty());
+    /// ```
     pub fn build(self) -> ToolContext {
         let mut extensions = self.extensions;
         extensions.insert(Arc::new(crate::tools::observer::OnFileChangedExt(

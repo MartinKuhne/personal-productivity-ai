@@ -18,7 +18,7 @@
 
 use crate::tools::registry::ToolRegistry;
 
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub struct AgentToolContext {
     /// The LLM-facing tool catalog. Built once at startup; cloned
     /// on every `ArcSwap` swap.

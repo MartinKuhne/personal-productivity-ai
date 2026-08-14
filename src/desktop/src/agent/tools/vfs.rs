@@ -1,12 +1,14 @@
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
+#[derive(Debug)]
 pub struct VfsMetadata {
     pub is_file: bool,
     pub is_dir: bool,
     pub len: u64,
 }
 
+#[derive(Debug)]
 pub struct VfsDirEntry {
     pub path: PathBuf,
     pub is_file: bool,
@@ -18,7 +20,7 @@ pub trait VirtualFileSystem: Send + Sync {
         &self,
         vpath: &str,
         allow_write: bool,
-    ) -> Result<Option<(PathBuf, bool)>, String>;
+    ) -> Result<Option<crate::vfs::ResolvedVirtualPath>, String>;
     fn resolve_writable(&self, vpath: &str) -> Result<PathBuf, String>;
 
     fn read_to_string(&self, path: &Path) -> std::io::Result<String>;
@@ -32,7 +34,15 @@ pub trait VirtualFileSystem: Send + Sync {
 #[derive(Clone)]
 pub struct VirtualFileSystemExt(pub Arc<dyn VirtualFileSystem>);
 
-#[derive(Clone)]
+impl std::fmt::Debug for VirtualFileSystemExt {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_tuple("VirtualFileSystemExt")
+            .field(&"<dyn VirtualFileSystem>")
+            .finish()
+    }
+}
+
+#[derive(Clone, Debug)]
 pub struct VfsResolver {
     pub config: Arc<crate::config::AgentConfig>,
 }
@@ -48,7 +58,7 @@ impl VirtualFileSystem for VfsResolver {
         &self,
         vpath: &str,
         allow_write: bool,
-    ) -> Result<Option<(PathBuf, bool)>, String> {
+    ) -> Result<Option<crate::vfs::ResolvedVirtualPath>, String> {
         crate::vfs::behaviour::resolve(vpath, allow_write, self.config.content_libraries())
     }
 

@@ -28,7 +28,7 @@ pub const MAX_CACHE_ENTRIES: usize = 1024;
 
 /// One cache entry. Variants correspond to tools that participate
 /// in the shared cache.
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub enum CacheEntry {
     /// `web_fetch` result. The URL is the cache key, storing the cursor UUID.
     WebFetch { cursor: String },
@@ -46,7 +46,7 @@ pub enum CacheEntry {
 
 /// One `search_email` cache entry. The cache stores the full server
 /// result set so subsequent cursor calls slice from memory.
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub struct SearchEmailCacheEntry {
     /// The full server result set, in the order the server returned.
     pub items: Vec<SearchEmailItem>,
@@ -63,7 +63,7 @@ pub struct SearchEmailCacheEntry {
 
 /// One `search_email` item: the JMAP client name and the simplified
 /// email JSON value.
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub struct SearchEmailItem {
     pub client: String,
     pub email: Value,
@@ -75,11 +75,12 @@ pub struct SearchEmailItem {
 /// cloned without deep-copying the entry map.
 ///
 /// Use [`cache`] to get the process-wide singleton.
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub struct ToolCache {
     state: Arc<Mutex<CacheState>>,
 }
 
+#[derive(Debug)]
 struct CacheState {
     entries: HashMap<String, CacheEntry>,
     /// Insertion order, used for FIFO eviction when the cap is exceeded.

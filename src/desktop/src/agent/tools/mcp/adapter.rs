@@ -8,10 +8,11 @@
 use std::sync::OnceLock;
 
 use crate::lib::mcp::{DynamicToolSource, McpClients};
-use crate::tools::Tool;
 use crate::tools::context::ToolContext;
 use crate::tools::descriptor::{ToolConfigSpec, ToolDescriptor};
+use crate::tools::dispatcher::ToolError;
 use crate::tools::registry::groups::ToolGroupId;
+use crate::tools::Tool;
 
 /// Adapter implementing [`Tool`] for an external MCP server tool.
 pub struct McpToolAdapter {
@@ -90,7 +91,11 @@ impl Tool for McpToolAdapter {
             .as_ref()
     }
 
-    fn execute(&self, _ctx: &ToolContext, input_json: &str) -> Result<serde_json::Value, String> {
+    fn execute(
+        &self,
+        _ctx: &ToolContext,
+        input_json: &str,
+    ) -> Result<serde_json::Value, ToolError> {
         let args: serde_json::Value = if input_json.trim().is_empty() {
             serde_json::json!({})
         } else {
@@ -101,10 +106,15 @@ impl Tool for McpToolAdapter {
                     error = %e,
                     "Malformed JSON parameters for MCP tool call"
                 );
-                format!("Invalid JSON parameters for MCP tool {}: {}", self.name, e)
+                ToolError::new(format!(
+                    "Invalid JSON parameters for MCP tool {}: {}",
+                    self.name, e
+                ))
             })?
         };
 
-        self.manager.call_tool(&self.server_name, &self.name, args)
+        self.manager
+            .call_tool(&self.server_name, &self.name, args)
+            .map_err(ToolError::new)
     }
 }

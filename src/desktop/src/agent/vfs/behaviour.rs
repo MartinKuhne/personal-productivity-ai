@@ -14,12 +14,29 @@ pub fn library_display_label(libraries: &[ContentLibrary], path: &Path) -> Optio
     libraries.iter().find_map(|lib| lib.display_label_for(path))
 }
 
+/// Result of resolving a virtual path against the configured
+/// libraries: the absolute filesystem path plus whether the owning
+/// content library is read-only.
+///
+/// Returned by [`resolve`] and
+/// [`crate::tools::context::ToolContext::resolve_virtual_path`] in
+/// place of a bare `(PathBuf, bool)` tuple so callers read the
+/// semantic meaning (`path` vs `readonly`) at the call site.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ResolvedVirtualPath {
+    /// Absolute filesystem path the virtual path maps to.
+    pub path: PathBuf,
+    /// Whether the owning content library is read-only. Read-only
+    /// libraries reject mutating operations.
+    pub readonly: bool,
+}
+
 /// Resolve a virtual path against the configured libraries.
 pub fn resolve(
     vpath: &str,
     allow_write: bool,
     libraries: &[ContentLibrary],
-) -> Result<Option<(PathBuf, bool)>, String> {
+) -> Result<Option<ResolvedVirtualPath>, String> {
     let normalized = vpath.replace('\\', "/");
     let trimmed = normalized.trim_matches('/');
     if trimmed.is_empty() || trimmed == "." {
@@ -34,7 +51,10 @@ pub fn resolve(
                 if allow_write && !lib.is_writable() {
                     return Err("Cannot perform this operation on a read-only library".to_string());
                 }
-                return Ok(Some((lib.root_path(), lib.readonly)));
+                return Ok(Some(ResolvedVirtualPath {
+                    path: lib.root_path(),
+                    readonly: lib.readonly,
+                }));
             }
             return Err(format!(
                 "Content library '{}' not found in virtual path '{}'",
@@ -58,13 +78,16 @@ pub fn resolve(
         return Err("Cannot perform this operation on a read-only library".to_string());
     }
 
-    Ok(Some((lib.resolve(&vp.sub_path), lib.readonly)))
+    Ok(Some(ResolvedVirtualPath {
+        path: lib.resolve(&vp.sub_path),
+        readonly: lib.readonly,
+    }))
 }
 
 /// Resolve a virtual path for a mutating tool.
 pub fn resolve_writable(vpath: &str, libraries: &[ContentLibrary]) -> Result<PathBuf, String> {
     match resolve(vpath, true, libraries)? {
-        Some((path, _readonly)) => Ok(path),
+        Some(resolved) => Ok(resolved.path),
         None => Err("Cannot perform this operation on the virtual root".to_string()),
     }
 }
@@ -135,10 +158,9 @@ mod tests {
             lib.display_label_for(Path::new("C:/my/test/dir")),
             Some("TestLib".to_string())
         );
-        assert!(
-            lib.display_label_for(Path::new("C:/other/path.md"))
-                .is_none()
-        );
+        assert!(lib
+            .display_label_for(Path::new("C:/other/path.md"))
+            .is_none());
     }
 
     #[test]
@@ -178,7 +200,9 @@ mod tests {
         let libs = test_config();
         let result = resolve("TestLib/sub/file.md", false, &libs);
         assert!(result.is_ok());
-        let (path, readonly) = result.unwrap().unwrap();
+        let (path, readonly) = match result.unwrap().unwrap() {
+            ResolvedVirtualPath { path, readonly } => (path, readonly),
+        };
         assert_eq!(path, PathBuf::from("/tmp/testlib/sub/file.md"));
         assert!(!readonly);
     }
@@ -196,11 +220,9 @@ mod tests {
         let libs = test_config();
         let result = resolve("NonExistent/file.md", false, &libs);
         assert!(result.is_err());
-        assert!(
-            result
-                .unwrap_err()
-                .contains("Content library 'NonExistent' not found")
-        );
+        assert!(result
+            .unwrap_err()
+            .contains("Content library 'NonExistent' not found"));
     }
 
     #[test]
@@ -216,7 +238,9 @@ mod tests {
         let libs = test_config();
         let result = resolve("ReadOnlyLib/file.md", false, &libs);
         assert!(result.is_ok());
-        let (path, readonly) = result.unwrap().unwrap();
+        let (path, readonly) = match result.unwrap().unwrap() {
+            ResolvedVirtualPath { path, readonly } => (path, readonly),
+        };
         assert_eq!(path, PathBuf::from("/tmp/readonly/file.md"));
         assert!(readonly);
     }
@@ -250,21 +274,23 @@ mod tests {
             "leading slash must resolve; got {:?}",
             result.err()
         );
-        let (path, readonly) = result.unwrap().unwrap();
+        let (path, readonly) = match result.unwrap().unwrap() {
+            ResolvedVirtualPath { path, readonly } => (path, readonly),
+        };
         assert_eq!(path, PathBuf::from("/tmp/wiki/Career/SQA.md"));
         assert!(!readonly);
 
         let result = resolve("\\Wiki\\Career\\SQA.md", false, &libs);
         assert!(result.is_ok());
         assert_eq!(
-            result.unwrap().unwrap().0,
+            result.unwrap().unwrap().path,
             PathBuf::from("/tmp/wiki/Career/SQA.md")
         );
 
         let result = resolve("/Wiki/Career/SQA.md/", false, &libs);
         assert!(result.is_ok());
         assert_eq!(
-            result.unwrap().unwrap().0,
+            result.unwrap().unwrap().path,
             PathBuf::from("/tmp/wiki/Career/SQA.md")
         );
     }
