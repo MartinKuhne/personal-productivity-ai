@@ -1,0 +1,24 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- App identity -->
+    <string name="app_name">FastMD</string>
+    <string name="app_title">FastMD Android Viewer</string>
+
+    <!-- Auth screen -->
+    <string name="sign_in_with_onedrive">Sign In with OneDrive</string>
+
+    <!-- Browser screen -->
+    <string name="root_folder_label">Root Folder</string>
+    <string name="load_folder">Load Folder</string>
+    <string name="folder_empty_hint">No folder loaded yet. Tap Load Folder.</string>
+    <string name="folder_load_errors_snackbar">%1$d folder(s) failed to load. Showing what we could.</string>
+
+    <!-- Viewer pane -->
+    <string name="default_file_title">File</string>
+    <string name="select_markdown_hint">Select a markdown file to view</string>
+
+    <!-- Dialogs / errors -->
+    <string name="dialog_title_error">Error</string>
+    <string name="dialog_button_ok">OK</string>
+    <string name="error_generic_failure">Something went wrong.</string>
+</resources>
