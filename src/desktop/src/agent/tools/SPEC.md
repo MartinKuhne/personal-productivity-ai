@@ -136,6 +136,7 @@ The `window_note` and `insert_into_note` tools operate on contiguous line ranges
 ### Vector Search Tool
 
 * [TOOL-043] The `vector_search` tool SHALL search indexed Markdown content by meaning. It SHALL be ReadOnly, SHALL clamp its `limit` input to a bounded range, and SHALL return matching chunks together with their source paths. The tool SHALL only be offered when the optional vector-search feature is enabled.
+* [TOOL-044] The `vector_search` tool SHALL respond to embedding or index failures with a generic user-facing message directing the caller to the background log, and SHALL NOT expose internal error details, file paths, or model metadata to the LLM.
 
 ### Browser Automation Tools
 
