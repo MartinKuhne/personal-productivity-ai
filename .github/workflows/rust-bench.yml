@@ -18,6 +18,9 @@ name: Rust Bench (informational)
 # `sample_size` in the bench file (not the workflow) so
 # the bench stays reproducible locally.
 
+on:
+  workflow_dispatch:
+
 # Same permission scope as the gate workflow — only read
 # contents + write actions (for artifact upload).
 permissions:
