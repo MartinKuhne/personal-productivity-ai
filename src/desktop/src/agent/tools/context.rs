@@ -147,6 +147,11 @@ impl ToolContextBuilder {
         self
     }
 
+    pub fn with_extensions(mut self, extensions: crate::tools::extensions::Extensions) -> Self {
+        self.extensions.extend(&extensions);
+        self
+    }
+
     pub fn build(self) -> ToolContext {
         let mut extensions = self.extensions;
         extensions.insert(Arc::new(crate::tools::observer::OnFileChangedExt(

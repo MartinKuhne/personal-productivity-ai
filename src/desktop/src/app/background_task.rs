@@ -36,6 +36,8 @@ pub struct Task {
     /// [`Task::take_finished_watcher`] after observing that event to
     /// take ownership.
     pub finished_watcher: Arc<Mutex<Option<notify::RecommendedWatcher>>>,
+    #[cfg(feature = "vector-search")]
+    pub vector_search_service: Arc<crate::app::background::VectorSearchService>,
     /// Cancellation signal shared with the indexer. Set to `true` via
     /// [`Task::cancel`] to ask the initial library scan to stop early.
     cancel: Arc<AtomicBool>,
@@ -57,12 +59,19 @@ impl Task {
         let cancel = Arc::new(AtomicBool::new(false));
         let cancel_clone = cancel.clone();
         let finished_watcher = Arc::new(Mutex::new(None));
+        #[cfg(feature = "vector-search")]
+        let vector_search_service = Arc::new(crate::app::background::VectorSearchService::new());
 
         // Subscribe before spawning so the thread's reader is in place
         // by the time the caller publishes.
         let config_reader = config_bus.subscribe();
 
+        #[cfg(feature = "vector-search")]
+        let vector_search_service_for_thread = vector_search_service.clone();
+
         std::thread::spawn(move || {
+            #[cfg(feature = "vector-search")]
+            let vector_search_service = vector_search_service_for_thread;
             let config = match config_reader.recv_timeout(CONFIG_ARRIVAL_TIMEOUT) {
                 Ok(event) => {
                     tracing::info!(
@@ -80,7 +89,15 @@ impl Task {
                     AppConfig::default()
                 }
             };
-            Self::run_indexing(config, tx_clone, bus_clone, cancel_clone, finished_watcher);
+            Self::run_indexing(
+                config,
+                tx_clone,
+                bus_clone,
+                cancel_clone,
+                finished_watcher,
+                #[cfg(feature = "vector-search")]
+                vector_search_service.clone(),
+            );
         });
 
         Self {
@@ -88,6 +105,8 @@ impl Task {
             tx,
             file_event_bus,
             finished_watcher: Arc::new(Mutex::new(None)),
+            #[cfg(feature = "vector-search")]
+            vector_search_service,
             cancel,
         }
     }
@@ -133,7 +152,13 @@ impl Task {
         file_event_bus: Bus<FileEvent>,
         cancel: Arc<AtomicBool>,
         finished_watcher: Arc<Mutex<Option<notify::RecommendedWatcher>>>,
+        #[cfg(feature = "vector-search")] vector_search_service: Arc<
+            crate::app::background::VectorSearchService,
+        >,
     ) {
+        #[cfg(feature = "vector-search")]
+        vector_search_service.start(config.clone(), file_event_bus.subscribe(), tx.clone());
+
         let (tx_work, rx_work) = channel::<PathBuf>();
         let rx_work = Arc::new(Mutex::new(rx_work));
         let (tx_pdf, rx_pdf) = channel::<PathBuf>();

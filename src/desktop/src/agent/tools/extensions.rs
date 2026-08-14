@@ -19,6 +19,16 @@ impl Extensions {
         self.map = Arc::new(new_map);
     }
 
+    pub fn extend(&mut self, other: &Self) {
+        let mut new_map = (*self.map).clone();
+        new_map.extend(
+            (*other.map)
+                .iter()
+                .map(|(key, value)| (*key, value.clone())),
+        );
+        self.map = Arc::new(new_map);
+    }
+
     pub fn get<T: Send + Sync + 'static>(&self) -> Option<Arc<T>> {
         self.map
             .get(&TypeId::of::<T>())

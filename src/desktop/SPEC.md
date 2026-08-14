@@ -27,7 +27,10 @@ The requirements below have been formatted using the **Easy Approach to Requirem
 | LLM Tools | [`src/agent/tools/SPEC.md`](src/agent/tools/SPEC.md) | All LLM tools + ToolManager (TOOL-014..024) |
 | Application logic | [`src/app/SPEC.md`](src/app/SPEC.md) | PDF support, image support, panel logic |
 
-## Sources
+## Optional semantic Markdown search
+
+Where the `vector-search` Cargo feature is enabled, FastMD may build a local semantic index of `.md` and `.markdown` files. Indexing and embedding run only on background workers, `.txt` files are excluded, and the `vector_search` agent tool is available for read-only semantic lookup. The index subscribes to file events before the initial scan and does not replay earlier events; progress is reported in the background log window after each 100 processed Markdown files.
+
 - RFC 2119 Key Words Reference: [ietf.org/rfc/rfc2119.txt](https://www.ietf.org/rfc/rfc2119.txt)
 - Egui Documentation: [github.com/ocornut/egui](https://github.com/ocornut/egui)
 - Notify Crate API Documentation: [docs.rs/notify](https://docs.rs/notify)

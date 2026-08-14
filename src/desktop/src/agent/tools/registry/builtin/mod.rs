@@ -20,6 +20,8 @@ pub(crate) mod jmap;
 pub(crate) mod strings;
 pub(crate) mod trello;
 pub(crate) mod weather;
+#[cfg(feature = "vector-search")]
+pub(crate) use crate::tools::vector_search;
 pub(crate) mod web;
 pub(crate) mod yaml;
 
@@ -34,6 +36,8 @@ pub(crate) fn default_providers() -> Vec<Arc<dyn ToolProvider>> {
     vec![
         Arc::new(fs::FilesystemProvider),
         Arc::new(yaml::YamlProvider),
+        #[cfg(feature = "vector-search")]
+        Arc::new(vector_search::VectorSearchProvider),
         Arc::new(web::WebProvider),
         Arc::new(jmap::JmapProvider),
         Arc::new(caldav::CalDavProvider),

@@ -5,7 +5,7 @@ use crate::datamark;
 use crate::events::{
     AgentDebugEntry, AgentEventObserver, AgentStatus, DebugEntryKind, DebugEntryRow,
 };
-use crate::llm_client::{LLMClient, parse_usage_block};
+use crate::llm_client::{parse_usage_block, LLMClient};
 use crate::tool_executor::ToolExecutor;
 use std::collections::HashSet;
 use std::path::PathBuf;
@@ -46,6 +46,7 @@ fn run_agent_inner(ctx: AgentContext) {
     )
     .with_tool_call_policy(ctx.tool_call_policy.clone())
     .with_uuid_gen(ctx.uuid_gen.clone())
+    .with_extensions(ctx.extensions.clone())
     .build();
 
     let session_boundary = AgentDebugEntry {

@@ -135,7 +135,7 @@ impl FastMdApp {
                 ))
             });
 
-        let agent = AgentSession::builder()
+        let agent_builder = AgentSession::builder()
             .with_observer_factory(observer_factory)
             .with_file_observer(std::sync::Arc::new(
                 crate::app::session::bus_observer::AppFileObserver::new(
@@ -148,8 +148,14 @@ impl FastMdApp {
             )))
             .with_extension(Arc::new(pdf_backing_tracker.clone()))
             .with_tool_call_policy(Arc::new(pdf_backing_tracker.clone()))
-            .with_tool_context(tool_context.clone())
-            .build();
+            .with_tool_context(tool_context.clone());
+        #[cfg(feature = "vector-search")]
+        let agent_builder = agent_builder.with_extension(Arc::new(
+            crate::agent::tools::vector_search::VectorSearchExt(
+                background_task.vector_search_service.clone(),
+            ),
+        ));
+        let agent = agent_builder.build();
 
         let event_bus = background_task.file_event_bus;
         let dir_tracker = DirectoryTracker::new(event_bus.subscribe());
@@ -289,7 +295,7 @@ impl FastMdApp {
                 ))
             });
 
-        let agent = AgentSession::builder()
+        let agent_builder = AgentSession::builder()
             .with_observer_factory(observer_factory)
             .with_file_observer(std::sync::Arc::new(
                 crate::app::session::bus_observer::AppFileObserver::new(
@@ -306,8 +312,14 @@ impl FastMdApp {
                 crate::agent::AgentToolContext::new(
                     crate::agent::tools::registry::ToolRegistry::new(),
                 ),
-            )))
-            .build();
+            )));
+        #[cfg(feature = "vector-search")]
+        let agent_builder = agent_builder.with_extension(Arc::new(
+            crate::agent::tools::vector_search::VectorSearchExt(
+                background_task.vector_search_service.clone(),
+            ),
+        ));
+        let agent = agent_builder.build();
         agent.set_agent_config(config.to_agent_config());
 
         let event_bus = background_task.file_event_bus;

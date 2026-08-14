@@ -32,6 +32,8 @@ mod provider_tests;
 pub mod registry;
 pub mod specs;
 pub mod vfs;
+#[cfg(feature = "vector-search")]
+pub mod vector_search;
 pub mod web;
 pub mod yaml_header;
 

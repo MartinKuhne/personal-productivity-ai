@@ -33,6 +33,7 @@ pub struct ToolExecutor {
     /// call, so every dispatch sees a consistent registry view.
     tool_context: std::sync::Arc<arc_swap::ArcSwap<AgentToolContext>>,
     uuid_gen: std::sync::Arc<dyn crate::utils::uuid::UuidGenerator>,
+    extensions: crate::tools::extensions::Extensions,
 }
 
 pub struct ToolExecutorBuilder {
@@ -42,6 +43,7 @@ pub struct ToolExecutorBuilder {
     tool_context: std::sync::Arc<arc_swap::ArcSwap<AgentToolContext>>,
     policy: Option<std::sync::Arc<dyn crate::tools::policy::ToolCallPolicy>>,
     uuid_gen: Option<std::sync::Arc<dyn crate::utils::uuid::UuidGenerator>>,
+    extensions: crate::tools::extensions::Extensions,
 }
 
 impl ToolExecutorBuilder {
@@ -58,6 +60,7 @@ impl ToolExecutorBuilder {
             tool_context,
             policy: None,
             uuid_gen: None,
+            extensions: crate::tools::extensions::Extensions::default(),
         }
     }
 
@@ -77,6 +80,11 @@ impl ToolExecutorBuilder {
         self
     }
 
+    pub fn with_extensions(mut self, extensions: crate::tools::extensions::Extensions) -> Self {
+        self.extensions = extensions;
+        self
+    }
+
     pub fn build(self) -> ToolExecutor {
         ToolExecutor {
             config: self.config,
@@ -89,6 +97,7 @@ impl ToolExecutorBuilder {
             uuid_gen: self
                 .uuid_gen
                 .unwrap_or_else(|| Arc::new(crate::utils::uuid::SystemUuidGenerator)),
+            extensions: self.extensions,
         }
     }
 }
@@ -183,6 +192,7 @@ impl ToolExecutor {
             }
         };
         let policy = self.policy.clone();
+        let extensions = self.extensions.clone();
         let mut completed = Vec::new();
         rt.block_on(async {
             let mut join_set = tokio::task::JoinSet::new();
@@ -197,6 +207,7 @@ impl ToolExecutor {
                 let cache = self.cache.clone();
                 let tc_arc = self.tool_context.clone();
                 let uuid_gen = self.uuid_gen.clone();
+                let extensions = extensions.clone();
                 join_set.spawn_blocking(move || {
                     let snapshot = tc_arc.load();
                     let dispatcher = &snapshot.registry;
@@ -208,6 +219,7 @@ impl ToolExecutor {
                             crate::tools::context::UuidGeneratorExt(uuid_gen),
                         ))
                         .with_tool_call_policy(pdf)
+                        .with_extensions(extensions.clone())
                         .build();
                     let result = execute_tool(dispatcher, &ctx, &func_name, &func_args);
                     (call_id, func_name, func_args, result)
@@ -227,6 +239,7 @@ impl ToolExecutor {
         calls: &[serde_json::Value],
     ) -> Vec<(String, String, String, String)> {
         let mut results = Vec::new();
+        let extensions = self.extensions.clone();
         for tc in calls {
             let call_id = extract_str(tc, &["id"]).to_string();
             let func_name = extract_str(tc, &["function", "name"]).to_string();
@@ -246,6 +259,7 @@ impl ToolExecutor {
                 crate::tools::context::UuidGeneratorExt(self.uuid_gen.clone()),
             ))
             .with_tool_call_policy(pdf)
+            .with_extensions(extensions.clone())
             .build();
             let result = execute_tool(dispatcher, &ctx, &func_name, &func_args);
             results.push((call_id, func_name, func_args, result));
