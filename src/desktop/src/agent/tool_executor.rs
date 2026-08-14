@@ -36,6 +36,16 @@ pub struct ToolExecutor {
     extensions: crate::tools::extensions::Extensions,
 }
 
+impl std::fmt::Debug for ToolExecutor {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("ToolExecutor")
+            .field("config", &self.config)
+            .field("cache", &self.cache)
+            .field("uuid_gen", &self.uuid_gen)
+            .finish_non_exhaustive()
+    }
+}
+
 pub struct ToolExecutorBuilder {
     config: Arc<AgentConfig>,
     file_observer: std::sync::Arc<dyn crate::tools::observer::OnFileChanged>,
@@ -44,6 +54,16 @@ pub struct ToolExecutorBuilder {
     policy: Option<std::sync::Arc<dyn crate::tools::policy::ToolCallPolicy>>,
     uuid_gen: Option<std::sync::Arc<dyn crate::utils::uuid::UuidGenerator>>,
     extensions: crate::tools::extensions::Extensions,
+}
+
+impl std::fmt::Debug for ToolExecutorBuilder {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("ToolExecutorBuilder")
+            .field("config", &self.config)
+            .field("cache", &self.cache)
+            .field("uuid_gen", &self.uuid_gen)
+            .finish_non_exhaustive()
+    }
 }
 
 impl ToolExecutorBuilder {
@@ -64,6 +84,7 @@ impl ToolExecutorBuilder {
         }
     }
 
+    /// Set the policy deciding whether a tool call is allowed.
     pub fn with_tool_call_policy(
         mut self,
         policy: std::sync::Arc<dyn crate::tools::policy::ToolCallPolicy>,
@@ -72,6 +93,7 @@ impl ToolExecutorBuilder {
         self
     }
 
+    /// Set the generator used to mint run UUIDs.
     pub fn with_uuid_gen(
         mut self,
         uuid_gen: std::sync::Arc<dyn crate::utils::uuid::UuidGenerator>,

@@ -43,7 +43,7 @@ pub fn parse_usage_block(usage: &serde_json::Value) -> Option<TokenUsageInfo> {
     })
 }
 
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub struct LLMClient {
     api_url: String,
     api_key: String,

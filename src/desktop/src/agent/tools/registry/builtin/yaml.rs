@@ -28,9 +28,10 @@ fn execute_read_yaml_header(
 ) -> Result<serde_json::Value, String> {
     let input: dtos::ReadYamlHeaderInput =
         serde_json::from_str(args).map_err(|e| format!("Invalid args: {}", e))?;
-    let (path, _) = ctx
+    let path = ctx
         .resolve_virtual_path(&input.path, false)?
-        .ok_or_else(|| "Cannot perform this operation on the virtual root".to_string())?;
+        .ok_or_else(|| "Cannot perform this operation on the virtual root".to_string())?
+        .path;
     crate::tools::yaml_header::tool_read_yaml_header(ctx, &path.to_string_lossy()).map(|r| {
         serde_json::to_value(r).unwrap_or_else(|e| serde_json::json!({"error": e.to_string()}))
     })

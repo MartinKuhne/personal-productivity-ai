@@ -8,6 +8,14 @@ pub struct Extensions {
     map: Arc<HashMap<TypeId, Arc<dyn Any + Send + Sync>>>,
 }
 
+impl std::fmt::Debug for Extensions {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("Extensions")
+            .field("entries", &self.map.len())
+            .finish()
+    }
+}
+
 impl Extensions {
     pub fn new() -> Self {
         Self::default()

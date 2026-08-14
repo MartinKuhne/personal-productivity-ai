@@ -122,9 +122,9 @@ pub trait Tool: Send + Sync {
     }
 
     /// Run the tool with the given JSON arguments. Errors are
-    /// returned as `Err(String)`; success as a serialised JSON
+    /// returned as [`ToolError`]; success as a serialised JSON
     /// value.
-    fn execute(&self, ctx: &ToolContext, input_json: &str) -> Result<serde_json::Value, String>;
+    fn execute(&self, ctx: &ToolContext, input_json: &str) -> Result<serde_json::Value, ToolError>;
 }
 
 pub use context::ToolContext as ToolContextType;

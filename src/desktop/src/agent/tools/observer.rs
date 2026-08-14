@@ -7,6 +7,7 @@ pub trait OnFileChanged: Send + Sync + 'static {
 }
 
 /// A no-op implementation of [`OnFileChanged`].
+#[derive(Debug)]
 pub struct DefaultFileObserver;
 
 impl OnFileChanged for DefaultFileObserver {
@@ -16,3 +17,11 @@ impl OnFileChanged for DefaultFileObserver {
 /// Extension wrapper for storing [`OnFileChanged`] in a tool context.
 #[derive(Clone)]
 pub struct OnFileChangedExt(pub std::sync::Arc<dyn OnFileChanged>);
+
+impl std::fmt::Debug for OnFileChangedExt {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_tuple("OnFileChangedExt")
+            .field(&"<dyn OnFileChanged>")
+            .finish()
+    }
+}

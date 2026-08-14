@@ -89,6 +89,14 @@ pub struct ToolError {
 
 impl ToolError {
     /// Build a new error with the given message.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// let err = fastmd_agent::tools::ToolError::new("boom");
+    /// assert_eq!(err.message, "boom");
+    /// assert_eq!(err.to_string(), "boom");
+    /// ```
     pub fn new(message: impl Into<String>) -> Self {
         Self {
             message: message.into(),
@@ -111,7 +119,7 @@ pub trait ToolDispatcher: Send + Sync {
     /// Invoke `name` with the given JSON arguments and return the
     /// outcome. The dispatcher is responsible for finding the
     /// tool, calling `Tool::execute`, and translating the
-    /// `Result<_, String>` return into a [`ToolOutcome`].
+    /// [`ToolError`] return into a [`ToolOutcome`].
     fn dispatch(
         &self,
         name: &str,

@@ -197,6 +197,9 @@ no_panic_on_garbage_value!(fs_insert_into_note_value_no_panic, InsertIntoNoteInp
 no_panic_on_garbage_str!(fs_patch_note_no_panic, PatchNoteInput);
 no_panic_on_garbage_value!(fs_patch_note_value_no_panic, PatchNoteInput);
 
+no_panic_on_garbage_str!(fs_move_note_no_panic, MoveNoteInput);
+no_panic_on_garbage_value!(fs_move_note_value_no_panic, MoveNoteInput);
+
 no_panic_on_garbage_str!(fs_read_yaml_header_no_panic, ReadYamlHeaderInput);
 no_panic_on_garbage_value!(fs_read_yaml_header_value_no_panic, ReadYamlHeaderInput);
 

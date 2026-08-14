@@ -102,6 +102,17 @@ pub const CREATE_NOTE_DESCRIPTION: &str = "Create a new file at the specified pa
 
 pub const INSERT_INTO_NOTE_DESCRIPTION: &str = "Insert lines into a markdown-formatted note at a specified 0-indexed offset. `offset=0` inserts at the top of the note; `offset=lines.len()` appends to the end. `offset > lines.len()` returns an error.";
 
+// --- move_note ---
+
+pub const MOVE_NOTE_DESCRIPTION: &str = "Move or rename a markdown-formatted note from a source virtual path to a target virtual path. Fails if the target file already exists.";
+
+pub const FIELD_MOVE_NOTE_INPUT_SOURCE: &str = "Virtual file path of the source note to move.";
+
+pub const FIELD_MOVE_NOTE_INPUT_TARGET: &str =
+    "Virtual file path of the destination where the note should be moved.";
+
+pub const FIELD_MOVE_NOTE_RESPONSE_RESULT: &str = "Description of the operation result.";
+
 // --- web ---
 
 // --- web_delegate ---

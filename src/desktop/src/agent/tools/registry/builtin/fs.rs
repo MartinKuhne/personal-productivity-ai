@@ -207,7 +207,9 @@ fn execute_list_notes(
         .limit
         .unwrap_or(super::super::pagination::DEFAULT_LIST_NOTES_BY_TAG_LIMIT);
     let all_matches: Vec<String> = match ctx.resolve_virtual_path(&input.path, false)? {
-        Some((path, _)) => crate::tools::filesystem::tool_list_notes(ctx, &path, &input.path)?,
+        Some(resolved) => {
+            crate::tools::filesystem::tool_list_notes(ctx, &resolved.path, &input.path)?
+        }
         None => {
             let mut libs: Vec<String> = ctx
                 .config
@@ -252,9 +254,10 @@ fn execute_read_note(
 ) -> Result<serde_json::Value, String> {
     let input: dtos::ReadNoteInput =
         serde_json::from_str(args).map_err(|e| format!("Invalid args: {}", e))?;
-    let (path, _) = ctx
+    let path = ctx
         .resolve_virtual_path(&input.path, false)?
-        .ok_or_else(|| "Cannot perform this operation on the virtual root".to_string())?;
+        .ok_or_else(|| "Cannot perform this operation on the virtual root".to_string())?
+        .path;
     crate::tools::filesystem::tool_read_note(ctx, &path.to_string_lossy()).map(|r| {
         serde_json::to_value(r).unwrap_or_else(|e| serde_json::json!({"error": e.to_string()}))
     })
@@ -278,9 +281,10 @@ fn execute_window_note(
 ) -> Result<serde_json::Value, String> {
     let input: dtos::WindowNoteInput =
         serde_json::from_str(args).map_err(|e| format!("Invalid args: {}", e))?;
-    let (path, _) = ctx
+    let path = ctx
         .resolve_virtual_path(&input.path, false)?
-        .ok_or_else(|| "Cannot perform this operation on the virtual root".to_string())?;
+        .ok_or_else(|| "Cannot perform this operation on the virtual root".to_string())?
+        .path;
     let offset = input.offset.unwrap_or(0);
     let limit = input.limit.unwrap_or(DEFAULT_WINDOW_NOTE_LIMIT);
     crate::tools::filesystem::tool_window_note(ctx, &path.to_string_lossy(), offset, limit).map(
@@ -353,6 +357,40 @@ fn execute_insert_into_note(
     })
 }
 
+/// Tool that moves or renames a markdown-formatted note.
+#[derive(ToolDescriptor)]
+#[tool(
+    name = "move_note",
+    desc = strings::MOVE_NOTE_DESCRIPTION,
+    input = dtos::MoveNoteInput,
+    safety = crate::tools::Safety::Mutating,
+    group = Filesystem,
+    execute_with = execute_move_note,
+)]
+pub(crate) struct MoveNoteTool;
+fn execute_move_note(
+    _self: &MoveNoteTool,
+    ctx: &ToolContext,
+    args: &str,
+) -> Result<serde_json::Value, String> {
+    let input: dtos::MoveNoteInput =
+        serde_json::from_str(args).map_err(|e| format!("Invalid args: {}", e))?;
+    let source_path = ctx.resolve_writable(&input.source)?;
+    ctx.check_write_allowed(&source_path)?;
+    let target_path = ctx.resolve_writable(&input.target)?;
+    ctx.check_write_allowed(&target_path)?;
+    let observer = ctx.file_observer();
+    crate::tools::filesystem::tool_move_note(
+        ctx,
+        &source_path.to_string_lossy(),
+        &target_path.to_string_lossy(),
+        &*observer,
+    )
+    .map(|r| {
+        serde_json::to_value(r).unwrap_or_else(|e| serde_json::json!({"error": e.to_string()}))
+    })
+}
+
 /// Self-registering provider for the filesystem family.
 pub(crate) struct FilesystemProvider;
 impl ToolProvider for FilesystemProvider {
@@ -373,6 +411,7 @@ impl ToolProvider for FilesystemProvider {
             registered(WindowNoteTool),
             registered(CreateNoteTool),
             registered(InsertIntoNoteTool),
+            registered(MoveNoteTool),
         ]
     }
 }

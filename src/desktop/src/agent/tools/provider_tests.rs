@@ -29,7 +29,7 @@ impl Tool for DummyTool {
         &self,
         _ctx: &crate::tools::context::ToolContext,
         _args: &str,
-    ) -> Result<serde_json::Value, String> {
+    ) -> Result<serde_json::Value, crate::tools::ToolError> {
         Ok(serde_json::json!({"ok": true}))
     }
 }

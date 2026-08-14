@@ -63,6 +63,26 @@ pub struct AgentContext {
     pub extensions: crate::tools::extensions::Extensions,
 }
 
+impl std::fmt::Debug for AgentContext {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("AgentContext")
+            .field("agent_config", &self.agent_config)
+            .field("active_file", &self.active_file)
+            .field("active_dir", &self.active_dir)
+            .field("selected_files", &self.selected_files)
+            .field("prompt", &self.prompt)
+            .field("system_prompts", &self.system_prompts)
+            .field("cancel_flag", &self.cancel_flag)
+            .field("history", &self.history)
+            .field("model_name", &self.model_name)
+            .field("session_id", &self.session_id)
+            .field("cache", &self.cache)
+            .field("uuid_gen", &self.uuid_gen)
+            .field("extensions", &self.extensions)
+            .finish_non_exhaustive()
+    }
+}
+
 pub struct AgentContextBuilder {
     agent_config: AgentConfig,
     session_id: Uuid,
@@ -82,6 +102,25 @@ pub struct AgentContextBuilder {
     tool_context: Option<Arc<arc_swap::ArcSwap<crate::AgentToolContext>>>,
     uuid_gen: Option<Arc<dyn crate::utils::uuid::UuidGenerator>>,
     extensions: crate::tools::extensions::Extensions,
+}
+
+impl std::fmt::Debug for AgentContextBuilder {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("AgentContextBuilder")
+            .field("session_id", &self.session_id)
+            .field("prompt", &self.prompt)
+            .field("active_file", &self.active_file)
+            .field("active_dir", &self.active_dir)
+            .field("selected_files", &self.selected_files)
+            .field("cancel_flag", &self.cancel_flag)
+            .field("history", &self.history)
+            .field("model_name", &self.model_name)
+            .field("system_prompts", &self.system_prompts)
+            .field("cache", &self.cache)
+            .field("uuid_gen", &self.uuid_gen)
+            .field("extensions", &self.extensions)
+            .finish_non_exhaustive()
+    }
 }
 
 impl AgentContextBuilder {
@@ -107,6 +146,8 @@ impl AgentContextBuilder {
         }
     }
 
+    /// Set the file-change observer notified when tool calls modify
+    /// files on disk.
     pub fn with_file_observer(
         mut self,
         file_observer: std::sync::Arc<dyn crate::tools::observer::OnFileChanged>,
@@ -115,32 +156,38 @@ impl AgentContextBuilder {
         self
     }
 
+    /// Set the agent event observer receiving lifecycle events.
     pub fn with_observer(mut self, observer: Arc<dyn AgentEventObserver>) -> Self {
         self.observer = Some(observer);
         self
     }
 
+    /// Set the active file and directory the agent operates on.
     pub fn with_active_paths(mut self, file: Option<PathBuf>, dir: Option<PathBuf>) -> Self {
         self.active_file = file;
         self.active_dir = dir;
         self
     }
 
+    /// Set the set of files the user has selected.
     pub fn with_selected_files(mut self, selected_files: HashSet<PathBuf>) -> Self {
         self.selected_files = selected_files;
         self
     }
 
+    /// Set a cancellation flag the agent loop polls between steps.
     pub fn with_cancel_flag(mut self, cancel_flag: Arc<AtomicBool>) -> Self {
         self.cancel_flag = Some(cancel_flag);
         self
     }
 
+    /// Set the conversation history passed to the model.
     pub fn with_history(mut self, history: Option<Vec<Value>>) -> Self {
         self.history = history;
         self
     }
 
+    /// Set the model name to use for the session.
     pub fn with_model_name(mut self, model_name: Option<String>) -> Self {
         self.model_name = model_name;
         self
@@ -153,6 +200,7 @@ impl AgentContextBuilder {
         self
     }
 
+    /// Set the policy deciding whether a tool call is allowed.
     pub fn with_tool_call_policy(
         mut self,
         policy: std::sync::Arc<dyn crate::tools::policy::ToolCallPolicy>,
@@ -161,11 +209,13 @@ impl AgentContextBuilder {
         self
     }
 
+    /// Set the tool cache used to memoise repeated tool results.
     pub fn with_cache(mut self, cache: Arc<crate::tools::registry::cache::ToolCache>) -> Self {
         self.cache = Some(cache);
         self
     }
 
+    /// Set the swap-in tool context bundle used by the executor.
     pub fn with_tool_context(
         mut self,
         tool_context: Arc<arc_swap::ArcSwap<crate::AgentToolContext>>,
@@ -174,16 +224,19 @@ impl AgentContextBuilder {
         self
     }
 
+    /// Set the generator used to mint session/run UUIDs.
     pub fn with_uuid_gen(mut self, uuid_gen: Arc<dyn crate::utils::uuid::UuidGenerator>) -> Self {
         self.uuid_gen = Some(uuid_gen);
         self
     }
 
+    /// Add a typed extension to the tool context.
     pub fn with_extension<T: Send + Sync + 'static>(mut self, extension: Arc<T>) -> Self {
         self.extensions.insert(extension);
         self
     }
 
+    /// Replace the extension bag wholesale.
     pub fn with_extensions(mut self, extensions: crate::tools::extensions::Extensions) -> Self {
         self.extensions = extensions;
         self

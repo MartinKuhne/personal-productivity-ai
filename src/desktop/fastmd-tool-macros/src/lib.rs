@@ -150,9 +150,7 @@ impl Parse for ToolArgs {
                 }
                 "execute_with" => {
                     if execute_with.is_some() {
-                        return Err(input.error(
-                            "duplicate `execute_with` key in #[tool(...)]",
-                        ));
+                        return Err(input.error("duplicate `execute_with` key in #[tool(...)]"));
                     }
                     // `execute_with = "path::to::function"` is a
                     // path expression. We accept either a bare
@@ -166,8 +164,9 @@ impl Parse for ToolArgs {
                         // expression so the generated code is
                         // uniform.
                         let lit: LitStr = input.parse()?;
-                        let path: syn::Path = syn::parse_str(&lit.value())
-                            .map_err(|_| input.error("`execute_with` string must be a valid Rust path"))?;
+                        let path: syn::Path = syn::parse_str(&lit.value()).map_err(|_| {
+                            input.error("`execute_with` string must be a valid Rust path")
+                        })?;
                         Expr::Path(syn::ExprPath {
                             attrs: Vec::new(),
                             qself: None,
@@ -321,8 +320,8 @@ pub fn derive_tool_descriptor(input: TokenStream) -> TokenStream {
                 &self,
                 ctx: &crate::tools::context::ToolContext,
                 args: &str,
-            ) -> ::std::result::Result<serde_json::Value, String> {
-                #execute_with(self, ctx, args)
+            ) -> ::std::result::Result<serde_json::Value, crate::tools::ToolError> {
+                #execute_with(self, ctx, args).map_err(crate::tools::ToolError::new)
             }
         }
     };
