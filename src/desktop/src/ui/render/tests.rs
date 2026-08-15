@@ -1,4 +1,3 @@
-#![allow(clippy::doc_suspicious_footnotes)]
 //! Parser / structural tests for the render module.
 //!
 //! These tests exercise [`parse_markdown_to_events`], [`parse_yaml_to_pairs`],

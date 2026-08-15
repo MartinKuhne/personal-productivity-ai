@@ -6,7 +6,7 @@ use crate::events::{
     AgentDebugEntry, AgentEventObserver, AgentStatus, DebugEntryKind, DebugEntryRow,
 };
 use crate::llm_client::{LLMClient, parse_usage_block};
-use crate::tool_executor::ToolExecutor;
+use crate::tool_executor::{ToolCallRecord, ToolExecutor};
 use std::collections::HashSet;
 use std::path::PathBuf;
 use std::sync::atomic::Ordering;
@@ -94,7 +94,6 @@ enum Turn {
     Done,
     Failed,
 }
-#[allow(clippy::too_many_arguments)]
 fn process_turn(
     llm: &LLMClient,
     ctx: &AgentContext,
@@ -285,15 +284,15 @@ fn handle_content(message: &serde_json::Value, observer: &dyn AgentEventObserver
     }
 }
 fn process_tool_results(
-    results: &[(String, String, String, String)],
+    results: &[ToolCallRecord],
     tool_calls: &[serde_json::Value],
     messages: &mut Vec<serde_json::Value>,
     observer: &dyn AgentEventObserver,
 ) {
-    let mut map: std::collections::HashMap<String, (String, String, String)> =
+    let mut map: std::collections::HashMap<String, &ToolCallRecord> =
         std::collections::HashMap::new();
-    for (cid, fn_name, args, result) in results {
-        map.insert(cid.clone(), (fn_name.clone(), args.clone(), result.clone()));
+    for record in results {
+        map.insert(record.call_id.clone(), record);
     }
     for tc in tool_calls {
         let cid = tc
@@ -301,11 +300,11 @@ fn process_tool_results(
             .and_then(|id| id.as_str())
             .unwrap_or("")
             .to_string();
-        if let Some((fn_name, _args, result)) = map.remove(&cid) {
-            log_tool_result(&fn_name, &result);
-            let result_value = serde_json::from_str::<serde_json::Value>(&result)
-                .unwrap_or(serde_json::Value::String(result.clone()));
-            observer.on_tool_result(cid.clone(), fn_name.clone(), result_value);
+        if let Some(record) = map.remove(&cid) {
+            log_tool_result(&record.name, &record.result);
+            let result_value = serde_json::from_str::<serde_json::Value>(&record.result)
+                .unwrap_or(serde_json::Value::String(record.result.clone()));
+            observer.on_tool_result(cid.clone(), record.name.clone(), result_value);
             // R1 (Spotlighting): wrap the tool result in a
             // datamark envelope so the LLM treats it as data, not
             // instructions. The user-facing response above is built
@@ -318,8 +317,8 @@ fn process_tool_results(
             // above). Strip it from the LLM-bound payload so the model
             // only sees the `status` and `result` fields, avoiding
             // redundant context bloat.
-            let llm_result = strip_web_delegate_trace(&fn_name, &result);
-            let wrapped = datamark::wrap_tool_result(&fn_name, &llm_result);
+            let llm_result = strip_web_delegate_trace(&record.name, &record.result);
+            let wrapped = datamark::wrap_tool_result(&record.name, &llm_result);
             messages.push(serde_json::json!({
                 "role": "tool",
                 "tool_call_id": cid,
@@ -387,18 +386,18 @@ fn log_tool_result(func_name: &str, result: &str) {
 fn emit_tool_results_debug(
     turn: usize,
     observer: &dyn AgentEventObserver,
-    results: &[(String, String, String, String)],
+    results: &[ToolCallRecord],
 ) {
     let entries: Vec<serde_json::Value> = results
         .iter()
-        .map(|(call_id, fn_name, args, result)| {
-            let args_value = serde_json::from_str::<serde_json::Value>(args)
-                .unwrap_or_else(|_| serde_json::Value::String(args.clone()));
-            let result_value = serde_json::from_str::<serde_json::Value>(result)
-                .unwrap_or_else(|_| serde_json::Value::String(result.clone()));
+        .map(|record| {
+            let args_value = serde_json::from_str::<serde_json::Value>(&record.arguments)
+                .unwrap_or_else(|_| serde_json::Value::String(record.arguments.clone()));
+            let result_value = serde_json::from_str::<serde_json::Value>(&record.result)
+                .unwrap_or_else(|_| serde_json::Value::String(record.result.clone()));
             serde_json::json!({
-                "call_id": call_id,
-                "name": fn_name,
+                "call_id": record.call_id,
+                "name": record.name,
                 "arguments": args_value,
                 "result": result_value,
             })

@@ -99,6 +99,16 @@ impl Default for PdfBackingTracker {
     }
 }
 
+impl crate::agent::tools::policy::ToolCallPolicy for PdfBackingTracker {
+    fn check_write_allowed(&self, path: &std::path::Path) -> Result<(), String> {
+        if self.is_pdf_backed(path) {
+            Err(crate::ui::strings::PDF_BACKED_ERROR.to_string())
+        } else {
+            Ok(())
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -231,15 +241,5 @@ mod tests {
         let tracker = PdfBackingTracker::new();
         tracker.process_discovered(std::slice::from_ref(&md_path));
         assert!(tracker.is_pdf_backed(&md_path));
-    }
-}
-
-impl crate::agent::tools::policy::ToolCallPolicy for PdfBackingTracker {
-    fn check_write_allowed(&self, path: &std::path::Path) -> Result<(), String> {
-        if self.is_pdf_backed(path) {
-            Err(crate::ui::strings::PDF_BACKED_ERROR.to_string())
-        } else {
-            Ok(())
-        }
     }
 }

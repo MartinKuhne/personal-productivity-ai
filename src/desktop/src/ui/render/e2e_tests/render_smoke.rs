@@ -439,7 +439,7 @@ fn test_render_inline_wrapped_rows_left_aligned() {
             egui::ScrollArea::vertical()
                 .id_salt("test_inline_wrap_scroll")
                 .show(ui, |ui| {
-                    render_inline(ui, &elems, false, None, 0, None, 0, &mut pending_toggles);
+                    render_inline(ui, &InlineRenderItem::simple(&elems), &mut pending_toggles);
                 });
         });
     });
