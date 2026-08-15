@@ -25,6 +25,8 @@ release/
 *.log
 .env*
 !.env.example
+deploy/data/
+.fastmd-vector-index/
 
 
 # Proptest regression cases (auto-generated when a proptest

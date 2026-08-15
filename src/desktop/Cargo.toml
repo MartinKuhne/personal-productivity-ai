@@ -12,7 +12,7 @@ keywords = ["markdown", "viewer", "ai", "agent"]
 default = ["pdf-export"]
 vector-search = [
     "dep:async-openai",
-    "dep:sahomedb",
+    "dep:qdrant-client",
     "dep:text-splitter",
     "fastmd-agent/vector-search",
 ]
@@ -86,7 +86,7 @@ reqwest = { version = "0.13", default-features = false, features = ["blocking", 
 opener = { version = "0.8", features = ["reveal"] }
 webbrowser = "1"
 backon = "1.6"
-uuid = { version = "1", features = ["v4", "serde"] }
+uuid = { version = "1", features = ["v4", "v5", "serde"] }
 csv = "1.4.0"
 evalexpr = "13.1.0"
 html-escape = "0.2"
@@ -121,7 +121,8 @@ text-splitter = { version = "0.32", optional = true }
 # workspace member.
 fastmd-tool-macros = { path = "fastmd-tool-macros" }
 fastmd-agent = { path = "src/agent" }
-sahomedb = { version = "=0.4.0", optional = true }
+qdrant-client = { version = "1.13", optional = true }
+
 
 [target.'cfg(windows)'.dependencies]
 windows = { version = "0.62", features = ["Win32_System_Com", "Win32_UI_Shell"] }

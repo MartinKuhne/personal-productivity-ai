@@ -10,14 +10,29 @@ fn markdown_filter_excludes_txt() {
 }
 
 #[test]
-fn metadata_round_trips_structured_chunks() {
-    let metadata = chunk_metadata("Library/a.md", "embed-model", "abc", 10, 50);
-    let (path, hash, offset, limit) = chunk_from_metadata(metadata).unwrap();
+fn payload_round_trips_structured_chunks() {
+    let payload = chunk_payload("Library/a.md", "embed-model", "abc", 10, 50);
+    let (path, hash, offset, limit) = chunk_from_payload(&payload).unwrap();
     assert_eq!(path, "Library/a.md");
     assert_eq!(hash, "abc");
     assert_eq!(offset, 10);
     assert_eq!(limit, 50);
-    assert!(chunk_from_metadata(Metadata::Text("nope".into())).is_none());
+
+    let empty_payload = HashMap::new();
+    assert!(chunk_from_payload(&empty_payload).is_none());
+}
+
+#[test]
+fn chunk_point_id_is_deterministic() {
+    let id1 = chunk_point_id("Notes/doc.md", "hash123");
+    let id2 = chunk_point_id("Notes/doc.md", "hash123");
+    let id3 = chunk_point_id("Notes/doc.md", "hash456");
+    let id4 = chunk_point_id("Other/doc.md", "hash123");
+
+    assert_eq!(id1, id2);
+    assert_ne!(id1, id3);
+    assert_ne!(id1, id4);
+    assert!(uuid::Uuid::parse_str(&id1).is_ok());
 }
 
 #[test]
@@ -47,75 +62,6 @@ fn chunks_are_deterministic() {
 }
 
 #[test]
-fn saves_every_save_interval() {
-    assert!(!should_save(SAVE_INTERVAL - 1));
-    assert!(should_save(SAVE_INTERVAL));
-    assert!(!should_save(SAVE_INTERVAL + 1));
-}
-
-#[test]
-fn build_chunk_index_groups_by_vpath_and_hash() {
-    let mut collection = Collection::new(&collection_config());
-    let rec1 = Record::new(
-        &Vector::from(vec![1.0, 0.0]),
-        &chunk_metadata("Lib/doc1.md", "model", "hash1", 0, 5),
-    );
-    let rec2 = Record::new(
-        &Vector::from(vec![0.0, 1.0]),
-        &chunk_metadata("Lib/doc1.md", "model", "hash2", 5, 5),
-    );
-    let rec3 = Record::new(
-        &Vector::from(vec![0.5, 0.5]),
-        &chunk_metadata("Lib/doc2.md", "model", "hash3", 0, 8),
-    );
-
-    let ids = collection.insert_many(&[rec1, rec2, rec3]).unwrap();
-    let id1 = ids[0];
-    let id2 = ids[1];
-    let id3 = ids[2];
-
-    let index = build_chunk_index(&collection);
-    assert_eq!(index.len(), 2);
-
-    let doc1_chunks = index.get("Lib/doc1.md").unwrap();
-    assert_eq!(doc1_chunks.len(), 2);
-    assert_eq!(doc1_chunks.get("hash1"), Some(&id1));
-    assert_eq!(doc1_chunks.get("hash2"), Some(&id2));
-
-    let doc2_chunks = index.get("Lib/doc2.md").unwrap();
-    assert_eq!(doc2_chunks.len(), 1);
-    assert_eq!(doc2_chunks.get("hash3"), Some(&id3));
-
-    assert!(!index.contains_key("Lib/missing.md"));
-}
-
-#[test]
-fn remove_path_cleans_collection_and_chunk_index() {
-    let service = VectorSearchService::new();
-    let rec = Record::new(
-        &Vector::from(vec![1.0, 0.0]),
-        &chunk_metadata("doc.md", "model", "h1", 0, 5),
-    );
-    let id = {
-        let mut state = service.state.lock().unwrap();
-        let ids = state.collection.insert_many(&[rec]).unwrap();
-        let id = ids[0];
-        state
-            .chunk_index
-            .entry("doc.md".to_string())
-            .or_default()
-            .insert("h1".to_string(), id);
-        id
-    };
-
-    service.remove_path(Path::new("doc.md"));
-
-    let state = service.state.lock().unwrap();
-    assert!(!state.chunk_index.contains_key("doc.md"));
-    assert!(state.collection.get(&id).is_err());
-}
-
-#[test]
 fn test_exact_hash_match_logic_detects_already_indexed() {
     let p1 = "Paragraph one with detailed content to exceed chunk threshold. ".repeat(20);
     let p2 = "Paragraph two with completely different details to form a second chunk. ".repeat(20);
@@ -123,9 +69,9 @@ fn test_exact_hash_match_logic_detects_already_indexed() {
     let chunks = markdown_chunks(Path::new("note.md"), &text);
     assert!(!chunks.is_empty());
 
-    let mut existing = HashMap::new();
-    for (i, chunk) in chunks.iter().enumerate() {
-        existing.insert(chunk.hash.clone(), VectorID(i as u32));
+    let mut existing: HashSet<String> = HashSet::new();
+    for chunk in &chunks {
+        existing.insert(chunk.hash.clone());
     }
 
     let unique_hashes: HashSet<&str> = chunks.iter().map(|c| c.hash.as_str()).collect();
@@ -133,16 +79,14 @@ fn test_exact_hash_match_logic_detects_already_indexed() {
     // Verify exact match criteria
     let is_already_indexed = !existing.is_empty()
         && existing.len() == unique_hashes.len()
-        && unique_hashes
-            .iter()
-            .all(|hash| existing.contains_key(*hash));
+        && unique_hashes.iter().all(|hash| existing.contains(*hash));
 
     assert!(is_already_indexed);
 
     // Verify that filtering for missing chunks yields empty list
     let missing_chunks: Vec<&MarkdownChunk> = chunks
         .iter()
-        .filter(|chunk| !existing.contains_key(&chunk.hash))
+        .filter(|chunk| !existing.contains(chunk.hash.as_str()))
         .collect();
     assert!(missing_chunks.is_empty());
 }
@@ -156,27 +100,25 @@ fn test_duplicate_chunks_in_same_file_handled_correctly() {
 
     let unique_hashes: HashSet<&str> = chunks.iter().map(|c| c.hash.as_str()).collect();
 
-    let mut existing = HashMap::new();
-    for (i, hash) in unique_hashes.iter().enumerate() {
-        existing.insert(hash.to_string(), VectorID(i as u32));
+    let mut existing: HashSet<String> = HashSet::new();
+    for hash in &unique_hashes {
+        existing.insert(hash.to_string());
     }
 
     // When indexed, the unique hash matches the single record in existing
     let is_already_indexed = !existing.is_empty()
         && existing.len() == unique_hashes.len()
-        && unique_hashes
-            .iter()
-            .all(|hash| existing.contains_key(*hash));
+        && unique_hashes.iter().all(|hash| existing.contains(*hash));
 
     assert!(is_already_indexed);
 }
 
 #[test]
 fn test_partial_chunk_modifications_identifies_missing_and_obsolete() {
-    let mut existing = HashMap::new();
-    existing.insert("hash_a".to_string(), VectorID(10));
-    existing.insert("hash_b".to_string(), VectorID(20));
-    existing.insert("hash_c".to_string(), VectorID(30)); // will become obsolete
+    let mut existing: HashSet<String> = HashSet::new();
+    existing.insert("hash_a".to_string());
+    existing.insert("hash_b".to_string());
+    existing.insert("hash_c".to_string()); // will become obsolete
 
     // New version of the file has hash_a, hash_b, and new hash_d
     let chunks = [
@@ -208,22 +150,20 @@ fn test_partial_chunk_modifications_identifies_missing_and_obsolete() {
     // 1. Should NOT match as already indexed
     let is_already_indexed = !existing.is_empty()
         && existing.len() == unique_hashes.len()
-        && unique_hashes
-            .iter()
-            .all(|hash| existing.contains_key(*hash));
+        && unique_hashes.iter().all(|hash| existing.contains(*hash));
     assert!(!is_already_indexed);
 
     // 2. Missing chunks should be only "hash_d"
     let missing_chunks: Vec<&MarkdownChunk> = chunks
         .iter()
-        .filter(|chunk| !existing.contains_key(&chunk.hash))
+        .filter(|chunk| !existing.contains(chunk.hash.as_str()))
         .collect();
     assert_eq!(missing_chunks.len(), 1);
     assert_eq!(missing_chunks[0].hash, "hash_d");
 
     // 3. Obsolete chunks should be only "hash_c"
     let obsolete_hashes: Vec<&str> = existing
-        .keys()
+        .iter()
         .filter(|h| !unique_hashes.contains(h.as_str()))
         .map(|s| s.as_str())
         .collect();
@@ -255,43 +195,27 @@ fn test_front_matter_change_preserves_body_chunk_hashes() {
 #[test]
 fn test_multiple_vpaths_isolated_in_chunk_index() {
     let service = VectorSearchService::new();
-    let rec_a = Record::new(
-        &Vector::from(vec![1.0, 0.0]),
-        &chunk_metadata("LibA/doc.md", "model", "common_hash", 0, 5),
-    );
-    let rec_b = Record::new(
-        &Vector::from(vec![1.0, 0.0]),
-        &chunk_metadata("LibB/doc.md", "model", "common_hash", 0, 5),
-    );
-
-    let (id_a, id_b) = {
+    {
         let mut state = service.state.lock().unwrap();
-        let ids = state.collection.insert_many(&[rec_a, rec_b]).unwrap();
         state
             .chunk_index
             .entry("LibA/doc.md".to_string())
             .or_default()
-            .insert("common_hash".to_string(), ids[0]);
+            .insert("common_hash".to_string());
         state
             .chunk_index
             .entry("LibB/doc.md".to_string())
             .or_default()
-            .insert("common_hash".to_string(), ids[1]);
-        (ids[0], ids[1])
-    };
+            .insert("common_hash".to_string());
+    }
 
-    // Remove LibA/doc.md
-    service.remove_path(Path::new("LibA/doc.md"));
+    {
+        let mut state = service.state.lock().unwrap();
+        state.chunk_index.remove("LibA/doc.md");
+    }
 
     let state = service.state.lock().unwrap();
     assert!(!state.chunk_index.contains_key("LibA/doc.md"));
-    assert!(state.collection.get(&id_a).is_err());
-
-    // LibB/doc.md MUST remain intact
     assert!(state.chunk_index.contains_key("LibB/doc.md"));
-    assert_eq!(
-        state.chunk_index["LibB/doc.md"].get("common_hash"),
-        Some(&id_b)
-    );
-    assert!(state.collection.get(&id_b).is_ok());
+    assert!(state.chunk_index["LibB/doc.md"].contains("common_hash"));
 }

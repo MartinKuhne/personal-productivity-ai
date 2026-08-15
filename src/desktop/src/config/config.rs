@@ -148,6 +148,18 @@ pub struct AppConfig {
     /// Discord bot configuration.
     #[serde(default)]
     pub discord: Option<DiscordConfig>,
+
+    /// Optional Qdrant vector database URL (e.g. "http://localhost:6334").
+    #[serde(default)]
+    pub qdrant_url: Option<String>,
+
+    /// Optional Qdrant API key for authenticated endpoints.
+    #[serde(default)]
+    pub qdrant_api_key: Option<String>,
+
+    /// Optional Qdrant collection name (defaults to "fastmd_chunks").
+    #[serde(default)]
+    pub qdrant_collection: Option<String>,
 }
 
 impl std::fmt::Debug for AppConfig {
@@ -173,6 +185,8 @@ impl std::fmt::Debug for AppConfig {
             .field("table_width_strategy", &self.table_width_strategy)
             .field("trello_client", &self.trello_client)
             .field("discord", &self.discord)
+            .field("qdrant_url", &self.qdrant_url)
+            .field("qdrant_collection", &self.qdrant_collection)
             .finish()
     }
 }
@@ -201,6 +215,9 @@ impl Default for AppConfig {
             browser: BrowserConfig::default(),
             trello_client: None,
             discord: None,
+            qdrant_url: None,
+            qdrant_api_key: None,
+            qdrant_collection: None,
         }
     }
 }
