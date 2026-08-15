@@ -26,6 +26,14 @@ const DEFAULT_QDRANT_URL: &str = "http://localhost:6334";
 const DEFAULT_COLLECTION_NAME: &str = "fastmd_chunks";
 const VECTOR_SEARCH_FAILED: &str = "Vector search failed. See background logs for details.";
 
+/// Default maximum cosine distance cutoff when not explicitly overridden by the caller.
+pub const DEFAULT_MAX_DISTANCE: f32 = 0.6;
+
+/// Convert a Qdrant cosine similarity score in `[-1.0, 1.0]` to cosine distance in `[0.0, 2.0]`.
+pub fn score_to_distance(score: f32) -> f32 {
+    (1.0 - score).max(0.0)
+}
+
 /// A chunk of Markdown content with its stable content hash, line offset and limit.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct MarkdownChunk {
@@ -447,13 +455,12 @@ impl crate::agent::tools::vector_search::VectorSearchService for VectorSearchSer
             }
         }?;
 
-        let threshold = max_distance.unwrap_or(0.6);
+        let threshold = max_distance.unwrap_or(DEFAULT_MAX_DISTANCE);
         Ok(results
             .result
             .into_iter()
             .filter_map(|point| {
-                // Cosine score from Qdrant is similarity in [-1, 1]. Convert to distance in [0, 2].
-                let distance = (1.0 - point.score).max(0.0);
+                let distance = score_to_distance(point.score);
                 if distance > threshold {
                     return None;
                 }

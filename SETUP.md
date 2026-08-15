@@ -113,6 +113,17 @@ qdrant_collection: "fastmd_chunks"
 # qdrant_api_key: "optional-key"
 ```
 
+#### How to Use Vector Search Effectively
+
+- **Semantic vs. Keyword Queries**: Vector search operates on dense embeddings (meaning, context, concepts) rather than exact word matching.
+  - ❌ *Isolated keywords* (e.g. `"invoice"` or `"2007"`): Embeddings for single keywords have weak semantic context against full paragraphs and may be filtered out. For exact terms, IDs, or filenames, use `grep_search`.
+  -  *Descriptive / Conceptual queries* (e.g. `"Monthly electricity utility bills from 2024"` or `"Checking account statement and balance history"`): Natural language queries carry strong directional vectors that match relevant paragraphs accurately.
+- **Distance Threshold (`max_distance`)**:
+  - `0.6` (Default): Standard semantic threshold ($1.0 - \text{cosine\_similarity} \le 0.6$, corresponding to $\ge 0.40$ cosine similarity).
+  - `0.3`–`0.5`: High precision / strict matches (only chunks very closely aligned with the query).
+  - `0.8`–`1.0`: Broad thematic discovery or shorter search terms.
+
+
 ### Web Search (SearXNG)
 
 FastMD supports SearXNG to perform web searches via its JSON API.

@@ -51,12 +51,16 @@ impl ToolContext {
 
 #[derive(Debug, Deserialize, JsonSchema)]
 struct VectorSearchInput {
+    /// Semantic search query. Use descriptive phrases, natural language questions,
+    /// or conceptual summaries (e.g., 'monthly bank account statements from First Tech')
+    /// rather than isolated single keywords. For exact text matching, use `grep_search`.
     query: String,
+    /// Maximum number of matching chunks to return (1–20, default: 5).
     #[serde(default = "default_limit")]
     limit: usize,
-    /// Optional maximum cosine distance threshold (0–2). Results with
-    /// distance above this value are excluded. Defaults to 0.6 when
-    /// not set.
+    /// Optional maximum cosine distance cutoff (0.0 to 2.0, default: 0.6).
+    /// Results with distance above this threshold are excluded.
+    /// Use 0.3–0.5 for strict high-precision matches; use 0.8–1.0 for broader thematic exploration.
     #[serde(default)]
     max_distance: Option<f32>,
 }
@@ -65,7 +69,14 @@ fn default_limit() -> usize {
     5
 }
 
-const VECTOR_SEARCH_DESCRIPTION: &str = "Search indexed Markdown content by meaning. Optionally pass `max_distance` (0–2) to exclude low-relevance results (defaults to 0.6).";
+const VECTOR_SEARCH_DESCRIPTION: &str = "\
+Search indexed Markdown notes by semantic meaning and concepts. \
+Formulate queries as descriptive phrases, natural language questions, or conceptual summaries \
+(e.g., 'checking account statements from credit union' rather than single keywords). \
+For exact keywords, timestamps, or filenames, prefer `grep_search`. \
+Optionally pass `max_distance` (0.0 to 2.0, default 0.6) to tune sensitivity: \
+use 0.3–0.5 for strict matches or 0.8–1.0 for broader exploration.";
+
 
 /// LLM tool for searching the optional Markdown vector index.
 #[derive(ToolDescriptor)]

@@ -62,6 +62,65 @@ fn chunks_are_deterministic() {
 }
 
 #[test]
+fn test_score_to_distance_conversion() {
+    assert!((score_to_distance(1.0) - 0.0).abs() < 1e-6);
+    assert!((score_to_distance(0.8) - 0.2).abs() < 1e-6);
+    assert!((score_to_distance(0.4) - 0.6).abs() < 1e-6);
+    assert!((score_to_distance(0.0) - 1.0).abs() < 1e-6);
+    assert!((score_to_distance(-0.5) - 1.5).abs() < 1e-6);
+    assert_eq!(score_to_distance(1.05), 0.0); // Clamped at 0.0
+}
+
+#[test]
+fn test_default_max_distance_filtering_logic() {
+    assert_eq!(DEFAULT_MAX_DISTANCE, 0.6);
+
+    let threshold = DEFAULT_MAX_DISTANCE;
+
+    // Simulated Qdrant cosine similarity scores:
+    let high_relevance_score = 0.75; // distance = 0.25 <= 0.6 (Pass)
+    let exact_cutoff_score = 0.40; // distance = 0.60 <= 0.6 (Pass)
+    let low_relevance_score = 0.35; // distance = 0.65 > 0.6 (Filtered out)
+    let very_low_score = 0.10; // distance = 0.90 > 0.6 (Filtered out)
+
+    assert!(score_to_distance(high_relevance_score) <= threshold);
+    assert!(score_to_distance(exact_cutoff_score) <= threshold);
+    assert!(score_to_distance(low_relevance_score) > threshold);
+    assert!(score_to_distance(very_low_score) > threshold);
+}
+
+#[test]
+fn test_custom_max_distance_overrides_default() {
+    let scores = [0.85, 0.60, 0.35, 0.15];
+
+    // With default threshold (0.6): distances <= 0.6 (scores >= 0.40)
+    let default_passes: Vec<f32> = scores
+        .iter()
+        .copied()
+        .filter(|&s| score_to_distance(s) <= DEFAULT_MAX_DISTANCE)
+        .collect();
+    assert_eq!(default_passes, vec![0.85, 0.60]);
+
+    // With strict custom threshold (0.3): distances <= 0.3 (scores >= 0.70)
+    let strict_threshold = 0.3;
+    let strict_passes: Vec<f32> = scores
+        .iter()
+        .copied()
+        .filter(|&s| score_to_distance(s) <= strict_threshold)
+        .collect();
+    assert_eq!(strict_passes, vec![0.85]);
+
+    // With relaxed custom threshold (0.8): distances <= 0.8 (scores >= 0.20)
+    let relaxed_threshold = 0.8;
+    let relaxed_passes: Vec<f32> = scores
+        .iter()
+        .copied()
+        .filter(|&s| score_to_distance(s) <= relaxed_threshold)
+        .collect();
+    assert_eq!(relaxed_passes, vec![0.85, 0.60, 0.35]);
+}
+
+#[test]
 fn test_exact_hash_match_logic_detects_already_indexed() {
     let p1 = "Paragraph one with detailed content to exceed chunk threshold. ".repeat(20);
     let p2 = "Paragraph two with completely different details to form a second chunk. ".repeat(20);
