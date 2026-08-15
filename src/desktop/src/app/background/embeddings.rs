@@ -34,8 +34,8 @@ impl EmbeddingClient {
         &self.model
     }
 
-    /// Embed a batch of texts. Returns vectors in input order.
-    pub fn embed(&self, texts: Vec<String>) -> Result<Vec<Vec<f32>>, String> {
+    /// Embed a batch of texts asynchronously. Returns vectors in input order.
+    pub async fn embed_async(&self, texts: Vec<String>) -> Result<Vec<Vec<f32>>, String> {
         if texts.is_empty() {
             return Ok(Vec::new());
         }
@@ -44,10 +44,24 @@ impl EmbeddingClient {
             .input(EmbeddingInput::StringArray(texts))
             .build()
             .map_err(|error| error.to_string())?;
-        let response =
-            crate::agent::tools::blocking::block_on(self.client.embeddings().create(request))
-                .map_err(|error| error.to_string())?;
+        let response = self
+            .client
+            .embeddings()
+            .create(request)
+            .await
+            .map_err(|error| error.to_string())?;
         Ok(order_by_index(response.data))
+    }
+
+    /// Embed a batch of texts synchronously. Returns vectors in input order.
+    pub fn embed(&self, texts: Vec<String>) -> Result<Vec<Vec<f32>>, String> {
+        if texts.is_empty() {
+            return Ok(Vec::new());
+        }
+        match tokio::runtime::Handle::try_current() {
+            Ok(handle) => tokio::task::block_in_place(|| handle.block_on(self.embed_async(texts))),
+            Err(_) => crate::agent::tools::blocking::block_on(self.embed_async(texts)),
+        }
     }
 }
 

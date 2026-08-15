@@ -262,7 +262,7 @@ impl VectorSearchService {
             Vec::new()
         } else {
             let texts: Vec<String> = missing_chunks.iter().map(|c| c.text.clone()).collect();
-            let Ok(embeddings) = model.embed(texts) else {
+            let Ok(embeddings) = model.embed_async(texts).await else {
                 tracing::error!(
                     name = "vector_search.embed_failed",
                     path = %path.display(),
@@ -414,18 +414,26 @@ impl crate::agent::tools::vector_search::VectorSearchService for VectorSearchSer
             )
         };
 
-        let embedding = model
-            .embed(vec![query.to_string()])
-            .map_err(|error| {
-                tracing::error!(name = "vector_search.embed_failed", error = %error, "Embedding query failed");
-                VECTOR_SEARCH_FAILED
-            })?
-            .remove(0);
-
         let search_future = async {
+            let embedding = model
+                .embed_async(vec![query.to_string()])
+                .await
+                .map_err(|error| {
+                    tracing::error!(name = "vector_search.embed_failed", error = %error, "Embedding query failed");
+                    VECTOR_SEARCH_FAILED
+                })?
+                .remove(0);
+
             let search_points = SearchPointsBuilder::new(&collection_name, embedding, limit as u64)
                 .with_payload(true);
-            client.search_points(search_points).await
+            client.search_points(search_points).await.map_err(|error| {
+                tracing::error!(
+                    name = "vector_search.search_failed",
+                    error = %error,
+                    "Qdrant vector search failed"
+                );
+                VECTOR_SEARCH_FAILED
+            })
         };
 
         let results = match tokio::runtime::Handle::try_current() {
@@ -437,15 +445,7 @@ impl crate::agent::tools::vector_search::VectorSearchService for VectorSearchSer
                     .map_err(|_| VECTOR_SEARCH_FAILED)?;
                 rt.block_on(search_future)
             }
-        }
-        .map_err(|error| {
-            tracing::error!(
-                name = "vector_search.search_failed",
-                error = %error,
-                "Qdrant vector search failed"
-            );
-            VECTOR_SEARCH_FAILED
-        })?;
+        }?;
 
         let threshold = max_distance.unwrap_or(0.6);
         Ok(results
@@ -486,7 +486,8 @@ async fn ensure_collection(
 ) -> anyhow::Result<()> {
     if !client.collection_exists(collection_name).await? {
         let sample = model
-            .embed(vec!["fastmd".to_string()])
+            .embed_async(vec!["fastmd".to_string()])
+            .await
             .map_err(anyhow::Error::msg)?;
         let dimension = sample.first().map_or(1536, Vec::len);
         client
