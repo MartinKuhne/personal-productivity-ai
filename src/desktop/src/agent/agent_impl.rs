@@ -17,13 +17,13 @@ use std::sync::atomic::Ordering;
 /// per-session `AgentContext` built from an `AgentPrompt`. The driver owns
 /// the shared resources; this function runs `run_agent_inner` inline —
 /// no inner `std::thread::spawn` (research.md §3, migration step 10).
-pub fn run_agent(ctx: AgentContext) {
-    run_agent_inner(ctx);
+pub fn run_agent(ctx: AgentContext) -> Vec<serde_json::Value> {
+    run_agent_inner(ctx)
 }
-fn run_agent_inner(ctx: AgentContext) {
+fn run_agent_inner(ctx: AgentContext) -> Vec<serde_json::Value> {
     let llm = match resolve_ll_client(&ctx) {
         Some(c) => c,
-        None => return,
+        None => return Vec::new(),
     };
     let system_prompts = ctx.system_prompts.clone();
     log_prompt_context(&ctx.active_file, &ctx.active_dir, &ctx.selected_files);
@@ -79,14 +79,15 @@ fn run_agent_inner(ctx: AgentContext) {
             Turn::Done => break,
             Turn::Failed => {
                 ctx.observer.on_session_finished(Vec::new());
-                return;
+                return Vec::new();
             }
         }
     }
     if !ctx.cancel_flag.load(Ordering::SeqCst) {
         ctx.observer.on_status(AgentStatus::Done);
     }
-    ctx.observer.on_session_finished(messages);
+    ctx.observer.on_session_finished(messages.clone());
+    messages
 }
 enum Turn {
     Continue,

@@ -446,12 +446,12 @@ fn spawn_driver(
                     .with_tool_context(tool_context.clone())
                     .with_uuid_gen(std::sync::Arc::new(crate::utils::uuid::SystemUuidGenerator))
                     .build();
-            crate::run_agent(ctx);
+            let new_history = crate::run_agent(ctx);
             // After the session finishes, stash its history for continuation
-            // prompts (FR-009). The history is updated by the `SessionFinished`
-            // event; here we keep the pre-run history — the orchestrator
-            // stores the updated history on the UI side via `set_history`.
-            session_histories.insert(session_id, history);
+            // prompts (FR-009).
+            if !new_history.is_empty() {
+                session_histories.insert(session_id, Some(new_history));
+            }
         }
     })
 }
