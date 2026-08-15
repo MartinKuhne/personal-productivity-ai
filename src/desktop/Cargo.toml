@@ -13,6 +13,7 @@ default = ["pdf-export"]
 vector-search = [
     "dep:async-openai",
     "dep:sahomedb",
+    "dep:text-splitter",
     "fastmd-agent/vector-search",
 ]
 # Discord bot integration. Adds the `integrations::discord` module and
@@ -111,6 +112,7 @@ arc-swap = "1.9.2"
 # configured `embeddings` use-case model (AGENT-005). `rustls` keeps a single
 # TLS stack with the rest of the crate; `embedding` enables the embeddings API.
 async-openai = { version = "0.41", optional = true, default-features = false, features = ["rustls", "embedding"] }
+text-splitter = { version = "0.32", optional = true }
 # `fastmd-tool-macros` — sibling proc-macro crate that ships
 # `#[derive(ToolDescriptor)]`. See `fastmd-tool-macros/src/lib.rs`
 # for the macro contract. The repo has no Cargo workspace today

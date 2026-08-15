@@ -5,20 +5,26 @@ use crate::app::background::embeddings::EmbeddingClient;
 use crate::bus::core::{Bus, BusReader};
 use crate::bus::events::file::{FileEvent, FileEventKind};
 use crate::bus::events::typed::BackgroundEvent;
-use crate::config::AppConfig;
+use crate::config::library_display_label;
+use crate::config::{get_config_path, AppConfig, ContentLibrary, VirtualPath};
+use crate::markdown::parse_front_matter;
 use sahomedb::prelude::{
     Collection, Config, Database, Distance, Metadata, Record, Vector, VectorID,
 };
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
+use text_splitter::{ChunkConfig, TextSplitter};
 
 const CHUNK_SIZE: usize = 1200;
 const CHUNK_OVERLAP: usize = 200;
+// SahomeDB serializes the whole collection on each save; batching avoids
+// excessive sled blob growth during the initial scan and update bursts.
+const SAVE_INTERVAL: usize = 100;
 const COLLECTION_NAME: &str = "markdown";
 const VECTOR_SEARCH_FAILED: &str = "Vector search failed. See background logs for details.";
 
-/// A chunk of Markdown content with its stable content hash.
+/// A chunk of Markdown content with its stable content hash, line offset and limit.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct MarkdownChunk {
     /// Source path.
@@ -27,6 +33,10 @@ pub struct MarkdownChunk {
     pub text: String,
     /// Stable hash of the chunk body.
     pub hash: String,
+    /// 0-indexed line offset of this chunk within the note body (after YAML front matter).
+    pub offset: usize,
+    /// Number of lines in this chunk.
+    pub limit: usize,
 }
 
 /// Shared service handle injected into the agent tool context.
@@ -39,6 +49,7 @@ struct VectorState {
     model: Option<Arc<EmbeddingClient>>,
     collection: Collection,
     database: Option<Database>,
+    content_libraries: Vec<ContentLibrary>,
 }
 
 impl VectorSearchService {
@@ -49,6 +60,7 @@ impl VectorSearchService {
                 model: None,
                 collection: Collection::new(&collection_config()),
                 database: None,
+                content_libraries: Vec::new(),
             })),
         }
     }
@@ -61,11 +73,18 @@ impl VectorSearchService {
     ) {
         let service = self.clone();
         std::thread::spawn(move || {
-            let database_path = config
-                .content_libraries
-                .first()
-                .map(|library| PathBuf::from(&library.root_folder).join(".fastmd-vector-index"));
+            let database_path = Some(
+                get_config_path()
+                    .parent()
+                    .map(|p| p.to_path_buf())
+                    .unwrap_or_else(|| PathBuf::from("."))
+                    .join(".fastmd-vector-index"),
+            );
             let Some(model) = EmbeddingClient::from_config(&config) else {
+                tracing::warn!(
+                    name = "vector_search.no_embeddings_model",
+                    "Vector search feature is enabled but no model is configured with the 'embeddings' use case; vector indexing is disabled."
+                );
                 let _ = tx.send(
                     bg_log_failed(
                         "Vector search disabled: no model configured with the 'embeddings' use case.",
@@ -76,6 +95,7 @@ impl VectorSearchService {
             };
             let mut state = service.state.lock().expect("vector state lock poisoned");
             state.model = Some(Arc::new(model));
+            state.content_libraries = config.content_libraries.clone();
             if let Some(path) = database_path {
                 if let Err(error) = std::fs::create_dir_all(&path) {
                     let _ =
@@ -95,9 +115,13 @@ impl VectorSearchService {
                         service.index_path(entry.path());
                         processed += 1;
                         log_progress(processed, &tx);
+                        if should_save(processed) {
+                            service.save_collection();
+                        }
                     }
                 }
             }
+            service.save_collection();
             while let Ok(event) = reader.recv() {
                 for path in event.paths {
                     match event.kind {
@@ -106,6 +130,9 @@ impl VectorSearchService {
                                 service.index_path(&path);
                                 processed += 1;
                                 log_progress(processed, &tx);
+                                if should_save(processed) {
+                                    service.save_collection();
+                                }
                             }
                         }
                         FileEventKind::Removed => service.remove_path(&path),
@@ -113,6 +140,7 @@ impl VectorSearchService {
                     }
                 }
             }
+            service.save_collection();
         });
     }
 
@@ -120,7 +148,12 @@ impl VectorSearchService {
         let Ok(content) = std::fs::read_to_string(path) else {
             return;
         };
-        let chunks = markdown_chunks(path, &content);
+        let body = if let Some(fm) = parse_front_matter(&content) {
+            fm.body.strip_prefix('\n').unwrap_or(&fm.body).to_string()
+        } else {
+            content
+        };
+        let chunks = markdown_chunks(path, &body);
         let model = {
             let Ok(state) = self.state.lock() else {
                 return;
@@ -138,13 +171,15 @@ impl VectorSearchService {
         let Ok(mut state) = self.state.lock() else {
             return;
         };
+        let vpath = library_display_label(&state.content_libraries, path)
+            .unwrap_or_else(|| path.to_string_lossy().to_string());
         let current: HashMap<String, Vec<f32>> = chunks
             .iter()
             .cloned()
             .zip(embeddings)
             .map(|(chunk, embedding)| (chunk.hash.clone(), embedding))
             .collect();
-        let existing = records_for_path(&state.collection, path);
+        let existing = records_for_path(&state.collection, &vpath);
         for (hash, id) in &existing {
             if !current.contains_key(hash) {
                 let _ = state.collection.delete(id);
@@ -159,10 +194,22 @@ impl VectorSearchService {
             };
             let record = Record::new(
                 &Vector::from(embedding),
-                &chunk_metadata(path, &chunk.hash, &chunk.text),
+                &chunk_metadata(
+                    &vpath,
+                    model.model_name(),
+                    &chunk.hash,
+                    chunk.offset,
+                    chunk.limit,
+                ),
             );
             let _ = state.collection.insert(&record);
         }
+    }
+
+    fn save_collection(&self) {
+        let Ok(mut state) = self.state.lock() else {
+            return;
+        };
         let collection = state.collection.clone();
         if let Some(database) = state.database.as_mut() {
             let _ = database.save_collection(COLLECTION_NAME, &collection);
@@ -173,15 +220,13 @@ impl VectorSearchService {
         let Ok(mut state) = self.state.lock() else {
             return;
         };
-        let ids: Vec<VectorID> = records_for_path(&state.collection, path)
+        let vpath = library_display_label(&state.content_libraries, path)
+            .unwrap_or_else(|| path.to_string_lossy().to_string());
+        let ids: Vec<VectorID> = records_for_path(&state.collection, &vpath)
             .into_values()
             .collect();
         for id in ids {
             let _ = state.collection.delete(&id);
-        }
-        let collection = state.collection.clone();
-        if let Some(database) = state.database.as_mut() {
-            let _ = database.save_collection(COLLECTION_NAME, &collection);
         }
     }
 }
@@ -197,9 +242,10 @@ impl crate::agent::tools::vector_search::VectorSearchService for VectorSearchSer
         &self,
         query: &str,
         limit: usize,
+        max_distance: Option<f32>,
     ) -> Result<Vec<crate::agent::tools::vector_search::VectorSearchHit>, String> {
         std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-            self.search_inner(query, limit)
+            self.search_inner(query, limit, max_distance)
         }))
         .map_err(|_| "Vector search worker panicked.".to_string())?
     }
@@ -210,6 +256,7 @@ impl VectorSearchService {
         &self,
         query: &str,
         limit: usize,
+        max_distance: Option<f32>,
     ) -> Result<Vec<crate::agent::tools::vector_search::VectorSearchHit>, String> {
         let model = {
             let state = self.state.lock().map_err(|_| VECTOR_SEARCH_FAILED)?;
@@ -228,9 +275,9 @@ impl VectorSearchService {
                 VECTOR_SEARCH_FAILED
             })?
             .remove(0);
-        let results = {
+        let (results, libraries) = {
             let state = self.state.lock().map_err(|_| VECTOR_SEARCH_FAILED)?;
-            state
+            let results = state
                 .collection
                 .search(&Vector::from(embedding), limit)
                 .map_err(|error| {
@@ -240,20 +287,52 @@ impl VectorSearchService {
                         "Collection search failed"
                     );
                     VECTOR_SEARCH_FAILED
-                })?
+                })?;
+            (results, state.content_libraries.clone())
         };
+        let threshold = max_distance.unwrap_or(0.6);
         Ok(results
             .into_iter()
+            .filter(|result| result.distance <= threshold)
             .filter_map(|result| {
-                let (path, _, text) = chunk_from_metadata(result.data)?;
+                let (vpath, _, offset, limit) = chunk_from_metadata(result.data)?;
+                let content = resolve_and_read(&vpath, &libraries, offset, limit)?;
                 Some(crate::agent::tools::vector_search::VectorSearchHit {
-                    path,
-                    text,
+                    path: vpath,
                     distance: result.distance,
+                    offset,
+                    limit,
+                    content,
                 })
             })
             .collect())
     }
+}
+
+/// Resolve a virtual path to a physical path, read the source file,
+/// strip YAML front matter, and extract lines at the given 0-indexed
+/// line offset/limit within the body. Returns `None` when the offset
+/// is past the end of the body.
+fn resolve_and_read(
+    vpath: &str,
+    libraries: &[ContentLibrary],
+    line_offset: usize,
+    line_limit: usize,
+) -> Option<String> {
+    let vp = VirtualPath::parse(vpath).ok()?;
+    let physical = vp.resolve(libraries).ok()?;
+    let content = std::fs::read_to_string(&physical).ok()?;
+    let body = if let Some(fm) = parse_front_matter(&content) {
+        fm.body.strip_prefix('\n').unwrap_or(&fm.body).to_string()
+    } else {
+        content
+    };
+    let lines: Vec<&str> = body.lines().collect();
+    if line_offset >= lines.len() {
+        return None;
+    }
+    let end = (line_offset + line_limit).min(lines.len());
+    Some(lines[line_offset..end].join("\n"))
 }
 
 /// Start the optional vector worker and return its shared tool service.
@@ -278,39 +357,46 @@ pub fn is_markdown(path: &Path) -> bool {
     )
 }
 
-/// Split Markdown into overlapping bounded chunks and hash each chunk.
+/// Split Markdown body text into semantically-bounded chunks using text-splitter.
+/// `content` should be the note body (YAML front matter already stripped).
 pub fn markdown_chunks(path: &Path, content: &str) -> Vec<MarkdownChunk> {
-    let chars: Vec<char> = content.chars().collect();
-    if chars.is_empty() {
-        return Vec::new();
-    }
-    let step = CHUNK_SIZE.saturating_sub(CHUNK_OVERLAP).max(1);
-    (0..chars.len())
-        .step_by(step)
-        .map(|start| {
-            let text: String = chars[start..(start + CHUNK_SIZE).min(chars.len())]
-                .iter()
-                .collect();
+    let config = ChunkConfig::new(CHUNK_SIZE)
+        .with_overlap(CHUNK_OVERLAP)
+        .unwrap();
+    let splitter = TextSplitter::new(config);
+    splitter
+        .chunk_indices(content)
+        .map(|(byte_offset, text)| {
+            let line_offset = content[..byte_offset]
+                .chars()
+                .filter(|&c| c == '\n')
+                .count();
+            let line_limit = text.lines().count();
             MarkdownChunk {
                 path: path.to_path_buf(),
-                hash: hash(&text),
-                text,
+                hash: hash(text),
+                offset: line_offset,
+                limit: line_limit,
+                text: text.to_string(),
             }
         })
         .collect()
 }
 
-/// Encode a chunk as structured collection metadata (path, hash, text).
-fn chunk_metadata(path: &Path, hash: &str, text: &str) -> Metadata {
+/// Encode a chunk as structured collection metadata (virtual path, kind, model, hash, line offset, line limit).
+fn chunk_metadata(vpath: &str, model: &str, hash: &str, offset: usize, limit: usize) -> Metadata {
     let mut map = HashMap::new();
-    map.insert("path".to_string(), path.to_string_lossy().into_owned());
+    map.insert("path".to_string(), vpath.to_string());
+    map.insert("kind".to_string(), "note".to_string());
+    map.insert("model".to_string(), model.to_string());
     map.insert("hash".to_string(), hash.to_string());
-    map.insert("text".to_string(), text.to_string());
+    map.insert("offset".to_string(), offset.to_string());
+    map.insert("limit".to_string(), limit.to_string());
     Metadata::from(map)
 }
 
-/// Decode structured chunk metadata into `(path, hash, text)`.
-fn chunk_from_metadata(metadata: Metadata) -> Option<(String, String, String)> {
+/// Decode structured chunk metadata into `(path, hash, line_offset, line_limit)`.
+fn chunk_from_metadata(metadata: Metadata) -> Option<(String, String, usize, usize)> {
     let Metadata::Object(map) = metadata else {
         return None;
     };
@@ -322,24 +408,27 @@ fn chunk_from_metadata(metadata: Metadata) -> Option<(String, String, String)> {
         Some(Metadata::Text(hash)) => hash.clone(),
         _ => return None,
     };
-    let text = match map.get("text") {
-        Some(Metadata::Text(text)) => text.clone(),
+    let offset = match map.get("offset") {
+        Some(Metadata::Text(s)) => s.parse().ok()?,
         _ => return None,
     };
-    Some((path, hash, text))
+    let limit = match map.get("limit") {
+        Some(Metadata::Text(s)) => s.parse().ok()?,
+        _ => return None,
+    };
+    Some((path, hash, offset, limit))
 }
 
-/// Return the IDs of records belonging to the given path, keyed by chunk hash.
-fn records_for_path(collection: &Collection, path: &Path) -> HashMap<String, VectorID> {
+/// Return the IDs of records belonging to the given virtual path, keyed by chunk hash.
+fn records_for_path(collection: &Collection, vpath: &str) -> HashMap<String, VectorID> {
     let Ok(records) = collection.list() else {
         return HashMap::new();
     };
-    let target = path.to_string_lossy().into_owned();
     records
         .into_iter()
         .filter_map(|(id, record)| {
-            let (record_path, hash, _) = chunk_from_metadata(record.data)?;
-            (record_path == target).then_some((hash, id))
+            let (record_path, hash, _, _) = chunk_from_metadata(record.data)?;
+            (record_path == vpath).then_some((hash, id))
         })
         .collect()
 }
@@ -351,6 +440,10 @@ fn hash(text: &str) -> String {
         .iter()
         .map(|byte| format!("{byte:02x}"))
         .collect()
+}
+
+fn should_save(processed: usize) -> bool {
+    processed.is_multiple_of(SAVE_INTERVAL)
 }
 
 fn collection_config() -> Config {
@@ -392,23 +485,46 @@ mod tests {
     }
 
     #[test]
-    fn chunks_have_stable_hashes_and_overlap() {
-        let chunks = markdown_chunks(Path::new("a.md"), &"a".repeat(1400));
-        assert!(chunks.len() > 1);
-        assert_eq!(
-            chunks[0].hash,
-            markdown_chunks(Path::new("a.md"), &"a".repeat(1400))[0].hash
-        );
-        assert_eq!(chunks[0].text[1000..], chunks[1].text[..200]);
+    fn metadata_round_trips_structured_chunks() {
+        let metadata = chunk_metadata("Library/a.md", "embed-model", "abc", 10, 50);
+        let (path, hash, offset, limit) = chunk_from_metadata(metadata).unwrap();
+        assert_eq!(path, "Library/a.md");
+        assert_eq!(hash, "abc");
+        assert_eq!(offset, 10);
+        assert_eq!(limit, 50);
+        assert!(chunk_from_metadata(Metadata::Text("nope".into())).is_none());
     }
 
     #[test]
-    fn metadata_round_trips_structured_chunks() {
-        let metadata = chunk_metadata(Path::new("a.md"), "abc", "body");
-        let (path, hash, text) = chunk_from_metadata(metadata).unwrap();
-        assert_eq!(path, "a.md");
-        assert_eq!(hash, "abc");
-        assert_eq!(text, "body");
-        assert!(chunk_from_metadata(Metadata::Text("nope".into())).is_none());
+    fn chunks_use_semantic_boundaries() {
+        let text = "First paragraph.\n\nSecond sentence here.\n\nThird paragraph content with more words.\n\nFourth paragraph ending now.";
+        let chunks = markdown_chunks(Path::new("a.md"), text);
+        assert!(!chunks.is_empty());
+        for chunk in &chunks {
+            assert!(!chunk.text.is_empty());
+            assert!(chunk.limit > 0);
+            let line_count = chunk.text.lines().count();
+            assert_eq!(chunk.limit, line_count);
+        }
+    }
+
+    #[test]
+    fn chunks_are_deterministic() {
+        let text = "Some content\n\nSecond paragraph\n\nThird paragraph\n\nFourth paragraph\n\nFifth paragraph.";
+        let a = markdown_chunks(Path::new("a.md"), text);
+        let b = markdown_chunks(Path::new("a.md"), text);
+        assert_eq!(a.len(), b.len());
+        for (ca, cb) in a.iter().zip(b.iter()) {
+            assert_eq!(ca.hash, cb.hash);
+            assert_eq!(ca.offset, cb.offset);
+            assert_eq!(ca.limit, cb.limit);
+        }
+    }
+
+    #[test]
+    fn saves_every_save_interval() {
+        assert!(!should_save(SAVE_INTERVAL - 1));
+        assert!(should_save(SAVE_INTERVAL));
+        assert!(!should_save(SAVE_INTERVAL + 1));
     }
 }

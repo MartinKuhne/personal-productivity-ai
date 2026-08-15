@@ -15,16 +15,25 @@ use std::sync::Arc;
 pub struct VectorSearchHit {
     /// Source Markdown path.
     pub path: String,
-    /// Matching Markdown chunk.
-    pub text: String,
     /// Distance reported by the vector index.
     pub distance: f32,
+    /// 0-indexed line offset within the note body (after YAML front matter).
+    pub offset: usize,
+    /// Number of lines in the chunk.
+    pub limit: usize,
+    /// Source file lines at the chunk's offset/limit.
+    pub content: String,
 }
 
 /// Background vector-index service supplied by the desktop application.
 pub trait VectorSearchService: Send + Sync {
     /// Search indexed Markdown chunks without doing embedding work on the caller thread.
-    fn search(&self, query: &str, limit: usize) -> Result<Vec<VectorSearchHit>, String>;
+    fn search(
+        &self,
+        query: &str,
+        limit: usize,
+        max_distance: Option<f32>,
+    ) -> Result<Vec<VectorSearchHit>, String>;
 }
 
 /// Extension wrapper used to inject the shared vector-search service.
@@ -45,13 +54,18 @@ struct VectorSearchInput {
     query: String,
     #[serde(default = "default_limit")]
     limit: usize,
+    /// Optional maximum cosine distance threshold (0–2). Results with
+    /// distance above this value are excluded. Defaults to 0.6 when
+    /// not set.
+    #[serde(default)]
+    max_distance: Option<f32>,
 }
 
 fn default_limit() -> usize {
     5
 }
 
-const VECTOR_SEARCH_DESCRIPTION: &str = "Search indexed Markdown content by meaning. Vector indexing and embedding run in the background.";
+const VECTOR_SEARCH_DESCRIPTION: &str = "Search indexed Markdown content by meaning. Optionally pass `max_distance` (0–2) to exclude low-relevance results (defaults to 0.6).";
 
 /// LLM tool for searching the optional Markdown vector index.
 #[derive(ToolDescriptor)]
@@ -80,7 +94,7 @@ fn execute_vector_search(
         .extensions
         .get::<VectorSearchExt>()
         .ok_or_else(|| "Vector search is not available.".to_string())?;
-    let hits = service.0.search(input.query.trim(), limit)?;
+    let hits = service.0.search(input.query.trim(), limit, input.max_distance)?;
     serde_json::to_value(hits).map_err(|e| e.to_string())
 }
 
