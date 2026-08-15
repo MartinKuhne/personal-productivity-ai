@@ -8,7 +8,9 @@ use crate::app::{Dialogs, FileSelection, Tabs, Tags, TextBuffer};
 use crate::bus::core::{BroadcastRecvError, Bus, BusReader};
 use crate::bus::events::config::ConfigArrived;
 use crate::bus::events::file::FileEvent;
-use crate::bus::events::typed::{BackgroundEvent, FsEvent, McpAuthEvent, ProcessEvent};
+use crate::bus::events::typed::{
+    BackgroundEvent, BackgroundEventSender, FsEvent, McpAuthEvent, ProcessEvent,
+};
 use crate::markdown::Document;
 use crate::ui::agent::panel_state::AgentPanelState;
 use crate::ui::agent::transcript::AgentTranscript;
@@ -24,7 +26,7 @@ pub const LAG_TRUNCATION_MARKER: &str = "[output truncated — UI fell behind th
 pub struct AppOrchestrator {
     pub content_libraries: Vec<crate::config::ContentLibrary>,
     pub rx: Receiver<BackgroundEvent>,
-    pub tx: std::sync::mpsc::Sender<BackgroundEvent>,
+    pub tx: BackgroundEventSender,
     pub file_event_bus: Bus<FileEvent>,
     pub file_event_reader: Option<BusReader<FileEvent>>,
     pub file_processor: FileEventProcessor,

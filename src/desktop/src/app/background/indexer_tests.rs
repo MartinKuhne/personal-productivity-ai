@@ -2,6 +2,7 @@
 
 use super::*;
 use crate::bus::events::file::FileEventKind;
+use crate::bus::events::typed::{BackgroundEvent, BackgroundEventSender};
 use crate::config::{AppConfig, ContentLibrary};
 use tempfile::tempdir;
 
@@ -21,6 +22,7 @@ fn test_scan_libraries_discovers_md() {
     });
 
     let (tx, _rx) = std::sync::mpsc::channel();
+    let tx = BackgroundEventSender::new(tx);
     let bus = Bus::new();
     let reader = bus.subscribe();
     let cancel = Arc::new(AtomicBool::new(false));
@@ -63,6 +65,7 @@ fn test_scan_libraries_skips_git() {
     });
 
     let (tx, _rx) = std::sync::mpsc::channel();
+    let tx = BackgroundEventSender::new(tx);
     let bus = Bus::new();
     let reader = bus.subscribe();
     let cancel = Arc::new(AtomicBool::new(false));
@@ -103,6 +106,7 @@ fn test_scan_libraries_queues_pdf() {
     });
 
     let (tx, _rx) = std::sync::mpsc::channel();
+    let tx = BackgroundEventSender::new(tx);
     let bus = Bus::new();
     let cancel = Arc::new(AtomicBool::new(false));
     let indexer = Indexer::new(config, tx, bus, cancel);
@@ -126,6 +130,7 @@ fn test_spawn_workers_creates_correct_number() {
     let (tx_work, rx_work) = std::sync::mpsc::channel();
     let rx_work = Arc::new(Mutex::new(rx_work));
     let (tx_gui, _rx_gui) = std::sync::mpsc::channel();
+    let tx_gui = BackgroundEventSender::new(tx_gui);
     let workers = Indexer::spawn_workers(4, rx_work, tx_gui);
     assert_eq!(workers.len(), 4);
     drop(tx_work);
@@ -151,6 +156,7 @@ fn test_spawn_workers_processes_all_items() {
     let (tx_work, rx_work) = std::sync::mpsc::channel();
     let rx_work = Arc::new(Mutex::new(rx_work));
     let (tx_gui, rx_gui) = std::sync::mpsc::channel();
+    let tx_gui = BackgroundEventSender::new(tx_gui);
 
     let workers = Indexer::spawn_workers(4, rx_work, tx_gui);
     for p in &paths {
@@ -186,6 +192,7 @@ fn test_spawn_workers_terminates_when_sender_dropped_with_empty_queue() {
     let (_tx_work, rx_work) = std::sync::mpsc::channel();
     let rx_work = Arc::new(Mutex::new(rx_work));
     let (tx_gui, _rx_gui) = std::sync::mpsc::channel();
+    let tx_gui = BackgroundEventSender::new(tx_gui);
 
     let workers = Indexer::spawn_workers(4, rx_work, tx_gui);
     // Sender is in scope, but no items are sent. Drop the
@@ -217,6 +224,7 @@ fn test_spawn_workers_handles_missing_file() {
     let (tx_work, rx_work) = std::sync::mpsc::channel();
     let rx_work = Arc::new(Mutex::new(rx_work));
     let (tx_gui, rx_gui) = std::sync::mpsc::channel();
+    let tx_gui = BackgroundEventSender::new(tx_gui);
 
     let workers = Indexer::spawn_workers(1, rx_work, tx_gui);
     let missing = PathBuf::from("definitely/does/not/exist/note.md");

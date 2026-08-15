@@ -48,8 +48,8 @@ impl FastMdApp {
         self.apply_persisted_font_scale(ctx);
 
         self.orchestrator.drain_config_bus();
-        self.process_file_events_and_repaint(ctx);
         self.orchestrator.drain_background_channel();
+        self.process_file_events_and_repaint(ctx);
         self.orchestrator.drain_agent_event_bus();
 
         if ctx.input_mut(|i| i.consume_key(egui::Modifiers::ALT, egui::Key::A)) {
@@ -112,7 +112,7 @@ impl FastMdApp {
         // input. egui's reactive model will repaint on the next real
         // input event; the regression tests
         // (`tests::test_idle_app_does_not_request_repaint`,
-        // `tests::test_indexing_in_progress_requests_repaint`) lock
+        // `tests::test_indexing_in_progress_without_events_does_not_request_repaint`) lock
         // this contract in.
     }
 
@@ -136,9 +136,8 @@ impl FastMdApp {
         ctx: &egui::Context,
     ) -> bool {
         let events_changed = self.orchestrator.process_file_events();
-        let indexing_active = !self.orchestrator.file_processor.indexing_finished;
         let raw_input_pending = !ctx.input(|i| i.raw.events.is_empty());
-        events_changed || indexing_active || raw_input_pending
+        events_changed || raw_input_pending
     }
 
     fn handle_deferred_actions(&mut self) {

@@ -1,10 +1,8 @@
 //! Renders markdown to HTML and drives physical printing (or PDF export) via an embedded web-view pipeline.
 
 use crate::app::background::{BackgroundLogEntry, LogCategory};
-use crate::bus::events::typed::BackgroundEvent;
 use std::io::Write;
 use std::path::PathBuf;
-use std::sync::mpsc::Sender;
 use std::sync::{Mutex, OnceLock};
 
 fn temp_print_files() -> &'static Mutex<Vec<PathBuf>> {
@@ -125,7 +123,7 @@ fn build_html_document(title: &str, content: &str) -> String {
 /// Opens the rendered HTML in the default browser for printing.
 pub fn execute_print_blocking(
     job: PrintJob,
-    tx: Option<Sender<BackgroundEvent>>,
+    tx: Option<crate::bus::events::typed::BackgroundEventSender>,
 ) -> Result<(), String> {
     let html_content = markdown_to_html(&job.markdown_content);
     let html_document = build_html_document(&job.title, &html_content);

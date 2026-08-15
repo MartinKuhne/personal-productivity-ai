@@ -31,12 +31,11 @@
 use crate::app::panel_layout::PanelLayout;
 use crate::bus::core::Bus;
 use crate::bus::events::file::{FileEvent, FileEventProducer};
-use crate::bus::events::typed::BackgroundEvent;
+use crate::bus::events::typed::BackgroundEventSender;
 use crate::config::ContentLibrary;
 use eframe::egui;
 use std::collections::HashSet;
 use std::path::PathBuf;
-use std::sync::mpsc::Sender;
 
 /// Flat context for all tree-rendering operations. Owns every
 /// field so the struct is `'static + Send` and embeddable in a
@@ -111,7 +110,7 @@ pub struct TreeOpsContext {
     /// Whether inline editor is enabled.
     pub inline_editor_enabled: bool,
     /// Background event sender (for print jobs, etc.).
-    pub bg_tx: Option<Sender<BackgroundEvent>>,
+    pub bg_tx: Option<BackgroundEventSender>,
     /// Optional file-event producer for immediate UI updates.
     pub file_event_producer: Option<FileEventProducer>,
 
@@ -191,7 +190,7 @@ impl TreeOpsContext {
         layout: &crate::app::panel_layout::PanelLayout,
         submit_prompt: &Option<String>,
         content_libraries: &[ContentLibrary],
-        bg_tx: Option<Sender<BackgroundEvent>>,
+        bg_tx: Option<BackgroundEventSender>,
         file_event_bus: Bus<FileEvent>,
         inline_editor_enabled: bool,
         modifiers: egui::Modifiers,
@@ -359,7 +358,7 @@ impl TreeOpsContext {
     }
 
     /// Access background sender.
-    pub fn bg_tx(&self) -> Option<&Sender<BackgroundEvent>> {
+    pub fn bg_tx(&self) -> Option<&BackgroundEventSender> {
         self.bg_tx.as_ref()
     }
 

@@ -11,12 +11,12 @@ use crate::bus::config::CONFIG_ARRIVAL_TIMEOUT;
 use crate::bus::core::Bus;
 use crate::bus::events::config::ConfigArrived;
 use crate::bus::events::file::FileEvent;
-use crate::bus::events::typed::BackgroundEvent;
+use crate::bus::events::typed::{BackgroundEvent, BackgroundEventSender};
 use crate::bus::router::BusRouter;
 use crate::config::AppConfig;
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::mpsc::{Receiver, Sender, channel};
+use std::sync::mpsc::{Receiver, channel};
 use std::sync::{Arc, Mutex};
 
 pub struct Task {
@@ -25,7 +25,7 @@ pub struct Task {
     pub rx: Receiver<BackgroundEvent>,
     /// Sender handed to every background worker. Producers send
     /// typed [`BackgroundEvent`] values directly.
-    pub tx: Sender<BackgroundEvent>,
+    pub tx: BackgroundEventSender,
     /// File-event bus shared with the watcher, indexer, PDF/vision
     /// workers, and the UI.
     pub file_event_bus: Bus<FileEvent>,
@@ -50,7 +50,8 @@ impl Task {
     /// [`AppConfig::default`] if no event arrives within
     /// [`CONFIG_ARRIVAL_TIMEOUT`]).
     pub fn new(config_bus: Bus<ConfigArrived>) -> Self {
-        let (tx, rx) = channel();
+        let (raw_tx, rx) = channel();
+        let tx = BackgroundEventSender::new(raw_tx);
         let tx_clone = tx.clone();
         let file_event_bus = Bus::new();
         let bus_clone = file_event_bus.clone();
@@ -62,6 +63,7 @@ impl Task {
         // by the time the caller publishes.
         let config_reader = config_bus.subscribe();
 
+        let finished_watcher_for_worker = finished_watcher.clone();
         std::thread::spawn(move || {
             let config = match config_reader.recv_timeout(CONFIG_ARRIVAL_TIMEOUT) {
                 Ok(event) => {
@@ -80,14 +82,20 @@ impl Task {
                     AppConfig::default()
                 }
             };
-            Self::run_indexing(config, tx_clone, bus_clone, cancel_clone, finished_watcher);
+            Self::run_indexing(
+                config,
+                tx_clone,
+                bus_clone,
+                cancel_clone,
+                finished_watcher_for_worker,
+            );
         });
 
         Self {
             rx,
             tx,
             file_event_bus,
-            finished_watcher: Arc::new(Mutex::new(None)),
+            finished_watcher,
             cancel,
         }
     }
@@ -129,7 +137,7 @@ impl Task {
 
     fn run_indexing(
         config: crate::config::AppConfig,
-        tx: Sender<BackgroundEvent>,
+        tx: BackgroundEventSender,
         file_event_bus: Bus<FileEvent>,
         cancel: Arc<AtomicBool>,
         finished_watcher: Arc<Mutex<Option<notify::RecommendedWatcher>>>,

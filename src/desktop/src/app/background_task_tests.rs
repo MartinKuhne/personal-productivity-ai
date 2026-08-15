@@ -73,6 +73,29 @@ fn test_background_task_indexing() {
 }
 
 #[test]
+fn test_background_task_retains_finished_watcher_in_task_slot() {
+    let mut config = AppConfig::default();
+    let dir = tempdir().unwrap();
+    config.content_libraries.push(ContentLibrary {
+        name: "test".to_string(),
+        kind: "text".to_string(),
+        root_folder: dir.path().to_string_lossy().to_string(),
+        readonly: true,
+        priority: 0,
+    });
+
+    let task = Task::new_for_test(config);
+    assert!(
+        wait_for_finished(&task, 5).is_some(),
+        "indexing should finish"
+    );
+    assert!(
+        task.take_finished_watcher().is_some(),
+        "the watcher must be retained in the Task slot that the UI owns"
+    );
+}
+
+#[test]
 fn test_initial_scan_publishes_discovered_events() {
     let mut config = AppConfig::default();
     let dir = tempdir().unwrap();
