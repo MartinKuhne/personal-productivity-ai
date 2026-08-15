@@ -6,7 +6,7 @@ use crate::app::background::PdfConversionJob;
 use crate::app::background::models::{BackgroundLogEntry, LogCategory};
 use crate::bus::core::Bus;
 use crate::bus::events::file::FileEvent;
-use crate::bus::events::typed::{BackgroundEvent, FsEvent};
+use crate::bus::events::typed::{BackgroundEventSender, FsEvent};
 use crate::config::AppConfig;
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -15,7 +15,7 @@ use std::sync::{Arc, Mutex};
 
 pub struct Indexer {
     config: AppConfig,
-    tx: Sender<BackgroundEvent>,
+    tx: BackgroundEventSender,
     bus: Bus<FileEvent>,
     cancel: Arc<AtomicBool>,
 }
@@ -23,7 +23,7 @@ pub struct Indexer {
 impl Indexer {
     pub fn new(
         config: AppConfig,
-        tx: Sender<BackgroundEvent>,
+        tx: BackgroundEventSender,
         bus: Bus<FileEvent>,
         cancel: Arc<AtomicBool>,
     ) -> Self {
@@ -38,7 +38,7 @@ impl Indexer {
     pub fn spawn_workers(
         num: usize,
         rx_work: Arc<Mutex<Receiver<PathBuf>>>,
-        tx_gui: Sender<BackgroundEvent>,
+        tx_gui: BackgroundEventSender,
     ) -> Vec<std::thread::JoinHandle<()>> {
         let mut workers = Vec::new();
         for _ in 0..num {

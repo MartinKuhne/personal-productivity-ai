@@ -7,17 +7,16 @@ use crate::app::batch::types::{
 };
 use crate::bus::core::Bus;
 use crate::bus::events::file::FileEvent;
-use crate::bus::events::typed::BackgroundEvent;
 use crate::config::AppConfig;
 use crate::utils::clock::Clock;
+use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::{Arc, mpsc};
 use std::thread;
 
 pub struct BatchCoordinator {
     config: BatchConfig,
     app_config: AppConfig,
-    tx_gui: mpsc::Sender<BackgroundEvent>,
+    tx_gui: crate::bus::events::typed::BackgroundEventSender,
     file_event_bus: Bus<FileEvent>,
     prompt_text: String,
     cancel_flag: Arc<AtomicBool>,
@@ -28,7 +27,7 @@ impl BatchCoordinator {
     pub fn new(
         config: BatchConfig,
         app_config: AppConfig,
-        tx_gui: mpsc::Sender<BackgroundEvent>,
+        tx_gui: crate::bus::events::typed::BackgroundEventSender,
         file_event_bus: Bus<FileEvent>,
         prompt_text: String,
         clock: Arc<dyn Clock>,
@@ -149,12 +148,15 @@ impl BatchCoordinator {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::bus::events::typed::BackgroundEventSender;
     use crate::config::AppConfig;
+    use std::sync::mpsc;
 
     #[test]
     fn test_coordinator_new_and_execute() {
         let dir = tempfile::tempdir().unwrap();
         let (tx, _rx) = mpsc::channel();
+        let tx = BackgroundEventSender::new(tx);
         let bus: Bus<FileEvent> = Bus::new();
 
         let config = BatchConfig {
@@ -187,6 +189,7 @@ mod tests {
     fn test_coordinator_empty_directory() {
         let dir = tempfile::tempdir().unwrap();
         let (tx, _rx) = mpsc::channel();
+        let tx = BackgroundEventSender::new(tx);
         let bus: Bus<FileEvent> = Bus::new();
 
         let config = BatchConfig {
@@ -222,6 +225,7 @@ mod tests {
         std::fs::write(dir.path().join("test3.md"), "").unwrap();
 
         let (tx, _rx) = mpsc::channel();
+        let tx = BackgroundEventSender::new(tx);
         let bus: Bus<FileEvent> = Bus::new();
 
         let config = BatchConfig {

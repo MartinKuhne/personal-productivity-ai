@@ -16,6 +16,50 @@
 //! instead of the message bus.
 
 use crate::bus::events::messages::BackgroundLogEntry;
+use std::sync::{Arc, Mutex};
+
+type RepaintCallback = Arc<dyn Fn() + Send + Sync>;
+
+/// Sends typed background events and optionally wakes the UI after delivery.
+///
+/// The callback is deliberately generic so the application layer does not
+/// depend on egui. The UI installs its callback at startup.
+#[derive(Clone)]
+pub struct BackgroundEventSender {
+    sender: std::sync::mpsc::Sender<BackgroundEvent>,
+    repaint: Arc<Mutex<Option<RepaintCallback>>>,
+}
+
+impl BackgroundEventSender {
+    /// Wrap a typed background-event sender without a repaint callback.
+    pub fn new(sender: std::sync::mpsc::Sender<BackgroundEvent>) -> Self {
+        Self {
+            sender,
+            repaint: Arc::new(Mutex::new(None)),
+        }
+    }
+
+    /// Install the callback used to wake the UI after an event is delivered.
+    pub fn set_repaint_callback(&self, callback: RepaintCallback) {
+        if let Ok(mut repaint) = self.repaint.lock() {
+            *repaint = Some(callback);
+        }
+    }
+
+    /// Deliver an event and request a repaint only when delivery succeeds.
+    pub fn send(
+        &self,
+        event: BackgroundEvent,
+    ) -> Result<(), std::sync::mpsc::SendError<BackgroundEvent>> {
+        self.sender.send(event)?;
+        if let Ok(callback) = self.repaint.lock()
+            && let Some(callback) = callback.as_ref()
+        {
+            callback();
+        }
+        Ok(())
+    }
+}
 
 /// Filesystem-watcher-domain events emitted by the file watcher,
 /// indexer, and tool executor.
@@ -157,5 +201,39 @@ mod tests {
             ev,
             BackgroundEvent::McpAuth(McpAuthEvent::Completed { error: None, .. })
         ));
+    }
+
+    #[test]
+    fn sender_calls_repaint_callback_after_delivery() {
+        let (tx, rx) = std::sync::mpsc::channel();
+        let sender = BackgroundEventSender::new(tx);
+        let calls = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+        let calls_for_callback = Arc::clone(&calls);
+        sender.set_repaint_callback(Arc::new(move || {
+            calls_for_callback.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+        }));
+
+        sender.send(FsEvent::Finished.into()).unwrap();
+
+        assert!(matches!(
+            rx.recv().unwrap(),
+            BackgroundEvent::Fs(FsEvent::Finished)
+        ));
+        assert_eq!(calls.load(std::sync::atomic::Ordering::SeqCst), 1);
+    }
+
+    #[test]
+    fn sender_does_not_call_repaint_callback_after_failed_delivery() {
+        let (tx, rx) = std::sync::mpsc::channel();
+        drop(rx);
+        let sender = BackgroundEventSender::new(tx);
+        let calls = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+        let calls_for_callback = Arc::clone(&calls);
+        sender.set_repaint_callback(Arc::new(move || {
+            calls_for_callback.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+        }));
+
+        assert!(sender.send(FsEvent::Finished.into()).is_err());
+        assert_eq!(calls.load(std::sync::atomic::Ordering::SeqCst), 0);
     }
 }

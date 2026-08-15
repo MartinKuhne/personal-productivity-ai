@@ -4,7 +4,7 @@ use crate::app::background::PdfConversionJob;
 use crate::app::background::models::{BackgroundLogEntry, LogCategory};
 use crate::bus::core::Bus;
 use crate::bus::events::file::FileEvent;
-use crate::bus::events::typed::{BackgroundEvent, FsEvent};
+use crate::bus::events::typed::FsEvent;
 use crate::config::AppConfig;
 use notify::Watcher;
 use std::path::PathBuf;
@@ -13,7 +13,7 @@ use std::sync::{Arc, Mutex};
 
 pub struct FileWatcher {
     config: AppConfig,
-    tx: Sender<BackgroundEvent>,
+    tx: crate::bus::events::typed::BackgroundEventSender,
     bus: Bus<FileEvent>,
     tx_pdf: Sender<PathBuf>,
     /// Image-vision sender. Only present when the `image-library`
@@ -34,7 +34,7 @@ impl FileWatcher {
     /// `image-library` Cargo feature is enabled.
     pub fn new(
         config: AppConfig,
-        tx: Sender<BackgroundEvent>,
+        tx: crate::bus::events::typed::BackgroundEventSender,
         bus: Bus<FileEvent>,
         tx_pdf: Sender<PathBuf>,
         #[cfg(feature = "image-library")] tx_img: Sender<PathBuf>,
@@ -257,6 +257,8 @@ impl FileWatcher {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::bus::events::typed::BackgroundEvent;
+    use crate::bus::events::typed::BackgroundEventSender;
     use crate::config::{AppConfig, ContentLibrary};
     use tempfile::tempdir;
 
@@ -264,6 +266,7 @@ mod tests {
     fn test_watcher_new_creates_struct() {
         let config = AppConfig::default();
         let (tx, _rx) = std::sync::mpsc::channel();
+        let tx = BackgroundEventSender::new(tx);
         let bus = Bus::new();
         let (tx_pdf, _rx_pdf) = std::sync::mpsc::channel();
         #[cfg(feature = "image-library")]
@@ -289,6 +292,7 @@ mod tests {
         });
 
         let (tx, rx) = std::sync::mpsc::channel();
+        let tx = BackgroundEventSender::new(tx);
         let bus = Bus::new();
         let (tx_pdf, _rx_pdf) = std::sync::mpsc::channel();
         #[cfg(feature = "image-library")]
