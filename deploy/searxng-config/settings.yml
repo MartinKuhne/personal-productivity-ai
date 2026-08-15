@@ -1,0 +1,133 @@
+use_default_settings: true
+server:
+  secret_key: "fastmd_searxng_secret_key_change_in_production"
+  trusted_proxies:
+    - "127.0.0.0/8"
+    - "::1/128"
+    - "172.16.0.0/12"
+    - "192.168.0.0/16"
+    - "10.0.0.0/8"
+
+outgoing:
+  # User-Agent configuration
+  useragent_suffix: "fastmd_searxng_instance (contact: admin@localhost)"
+
+search:
+  formats:
+    - html
+    - json
+
+engines:
+  - name: duckduckgo
+    engine: duckduckgo
+    shortcut: ddg
+    disabled: false
+
+  - name: qwant
+    engine: qwant
+    qwant_categ: web
+    shortcut: qw
+    disabled: false
+
+  - name: qwant news
+    engine: qwant
+    qwant_categ: news
+    shortcut: qwn
+    disabled: false
+
+  - name: qwant images
+    engine: qwant
+    qwant_categ: images
+    shortcut: qwi
+    disabled: false
+
+  - name: qwant videos
+    engine: qwant
+    qwant_categ: videos
+    shortcut: qwv
+    disabled: false
+
+  - name: startpage
+    engine: startpage
+    startpage_categ: web
+    shortcut: sp
+    disabled: false
+
+  - name: startpage news
+    engine: startpage
+    startpage_categ: news
+    shortcut: spn
+    disabled: false
+
+  - name: startpage images
+    engine: startpage
+    startpage_categ: images
+    shortcut: spi
+    disabled: false
+
+  - name: mojeek
+    engine: mojeek
+    shortcut: mj
+    disabled: false
+
+  - name: mojeek images
+    engine: mojeek
+    search_type: images
+    shortcut: mji
+    disabled: false
+
+  - name: mojeek news
+    engine: mojeek
+    search_type: news
+    shortcut: mjn
+    disabled: false
+
+  - name: swisscows
+    engine: swisscows
+    swisscows_category: web
+    shortcut: sc
+    disabled: false
+
+  - name: swisscows images
+    engine: swisscows
+    swisscows_category: images
+    shortcut: sci
+    disabled: false
+
+  - name: swisscows videos
+    engine: swisscows
+    swisscows_category: videos
+    shortcut: scv
+    disabled: false
+
+  - name: seznam
+    engine: seznam
+    shortcut: sz
+    disabled: false
+
+  - name: tiger
+    engine: tiger
+    tiger_category: Websuche
+    shortcut: tgr
+    disabled: false
+
+  - name: tiger news
+    engine: tiger
+    tiger_category: News
+    shortcut: tgrn
+    disabled: false
+
+  - name: neosearch
+    engine: neosearch
+    shortcut: neo
+    disabled: false
+
+  - name: mwmbl
+    engine: mwmbl
+    shortcut: mwmbl
+    disabled: false
+
+  - name: ansa
+    engine: ansa
+    shortcut: ans
+    disabled: false

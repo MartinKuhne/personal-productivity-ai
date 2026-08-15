@@ -1,0 +1,70 @@
+services:
+  # ==============================================================================
+  # Qdrant Vector Database
+  # ==============================================================================
+  qdrant:
+    image: qdrant/qdrant:${QDRANT_VERSION:-v1.13.4}
+    container_name: fastmd-qdrant
+    restart: unless-stopped
+    ports:
+      # REST API & Web Dashboard (http://localhost:6333/dashboard)
+      - "${QDRANT_REST_PORT:-6333}:6333"
+      # gRPC API for fastmd qdrant-client
+      - "${QDRANT_GRPC_PORT:-6334}:6334"
+    volumes:
+      - ./data/qdrant_storage:/qdrant/storage
+      - ./data/qdrant_snapshots:/qdrant/snapshots
+    environment:
+      - QDRANT__LOG_LEVEL=${QDRANT_LOG_LEVEL:-INFO}
+      - QDRANT__SERVICE__API_KEY=${QDRANT_API_KEY:-}
+      - QDRANT__SERVICE__ENABLE_STATIC_CONTENT=true
+    healthcheck:
+      test: ["CMD-SHELL", "bash -c 'exec 3<>/dev/tcp/127.0.0.1/6333 && echo -e \"GET /readyz HTTP/1.1\\r\\nHost: localhost\\r\\nConnection: close\\r\\n\\r\\n\" >&3 && cat <&3 | grep -q \"HTTP/1.1 200 OK\"'"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 5s
+    networks:
+      - fastmd-network
+
+  # ==============================================================================
+  # SearXNG Metasearch Engine
+  # ==============================================================================
+  searxng:
+    container_name: fastmd-searxng
+    image: docker.io/searxng/searxng:${SEARXNG_VERSION:-latest}
+    restart: unless-stopped
+    ports:
+      # HTTP Web UI & JSON API (http://localhost:3001)
+      - "${SEARXNG_PORT:-3001}:8080"
+    volumes:
+      - ./searxng-config/:/etc/searxng/:Z
+      - searxng-data:/var/cache/searxng/
+    environment:
+      - SEARXNG_BASE_URL=${SEARXNG_BASE_URL:-http://localhost:3001/}
+    depends_on:
+      - valkey
+    networks:
+      - fastmd-network
+
+  # ==============================================================================
+  # Valkey (Redis-compatible cache for SearXNG)
+  # ==============================================================================
+  valkey:
+    container_name: fastmd-valkey
+    image: docker.io/valkey/valkey:9-alpine
+    command: valkey-server --save 30 1 --loglevel warning
+    restart: unless-stopped
+    volumes:
+      - valkey-data:/data/
+    networks:
+      - fastmd-network
+
+volumes:
+  searxng-data:
+  valkey-data:
+
+networks:
+  fastmd-network:
+    name: fastmd-network
+    driver: bridge
