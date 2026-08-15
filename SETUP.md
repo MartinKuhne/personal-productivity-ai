@@ -8,15 +8,49 @@
 
 ## Installation
 
-```
+### Standard Installation
+
+```bash
 cargo install --git https://github.com/MartinKuhne/personal-productivity-ai
 ```
 
-## Setup
+### Installation with Vector Search (RAG) Support
 
-FastMD uses a YAML configuration file for its internal settings, AI agent configurations, and external API integrations (such as JMAP and SearXNG). 
+To enable semantic vector search with Qdrant:
 
-On Windows, the preferred location is `%AppData%\fastmd\config.yaml`
+```bash
+cargo install --git https://github.com/MartinKuhne/personal-productivity-ai --features vector-search
+```
+
+---
+
+## Infrastructure Services (Docker Compose)
+
+FastMD includes an integrated Docker Compose stack in `deploy/` for local infrastructure dependencies:
+- **Qdrant** (Vector database for semantic search)
+- **SearXNG** (Privacy-respecting metasearch engine)
+- **Valkey** (In-memory cache for SearXNG)
+
+### Starting the Services
+
+From the project root:
+
+```bash
+docker compose -f deploy/docker-compose.yml up -d
+```
+
+- **Qdrant Web Dashboard**: [http://localhost:6333/dashboard](http://localhost:6333/dashboard) (gRPC API on port `6334`)
+- **SearXNG Search Web UI & API**: [http://localhost:3001](http://localhost:3001)
+
+An environment template is provided at [`deploy/.env.example`](file:///C:/Users/mkuhn/src/ppai.dev2/deploy/.env.example).
+
+---
+
+## Configuration
+
+FastMD uses a YAML configuration file for internal settings, AI agent configurations, model endpoints, and external service integrations.
+
+On Windows, the preferred location is `%AppData%\fastmd\config.yaml`.
 
 The application searches for the configuration file in the following order:
 1. `%APPDATA%\fastmd\config.yaml`
@@ -25,9 +59,9 @@ The application searches for the configuration file in the following order:
 
 If no configuration file is found, a default one will be automatically created at the first available location.
 
-### Setting up a library
+### Setting up a Library
 
-FastMD is centered around one or more libraries of markdown formatted notes. Set them up like this
+FastMD is centered around one or more libraries of markdown formatted notes:
 
 ```yaml
 content_libraries:
@@ -41,48 +75,55 @@ content_libraries:
     readonly: true
 ```
 
-### LLM
+### LLMs and Embeddings
 
-FastMD requires an OpenAI compatible chat endpoint.
-It provides no facility to run a LLM locally. It is strongly recommended to self-host if you use it as your personal information base to protect your PII.
-If you are just getting started, [LM studio]{https://lmstudio.ai/) is a reasonably easy way to run models locally.
-As of summer 2026 I've tested FastMD with the _google/gemma-4-12B_ on a 16GB VRAM GPU with good success. My daily driver is [Qwen/Qwen3.6-35B-A3B](https://huggingface.co/Qwen/Qwen3.6-35B-A3B)
+FastMD communicates with OpenAI-compatible chat and embedding endpoints. It does not run LLMs in-process; self-hosting is strongly recommended for privacy (protecting personal PII).
 
-[Openrouter](https://openrouter.ai/) offers free and pay-per-use models.
+- **Local Runners**: [LM Studio](https://lmstudio.ai/), Ollama, or vLLM.
+- **Cloud Providers**: [OpenRouter](https://openrouter.ai/), OpenAI, Anthropic, etc.
 
-Set up your LLMs as follows:
+Configure your models in `config.yaml`:
 
 ```yaml
 models:
-  gpt4:
-    model: "openai/gpt-4"
-    api_url: "https://api.openai.com/v1"
-    api_key: "your-openai-key"
-  claude:
-    model: "anthropic/claude-3-opus"
-    api_url: "https://api.anthropic.com/v1"
-    api_key: "your-anthropic-key"
+  chat-model:
+    model: "qwen/qwen-2.5-32b-instruct"
+    api_url: "http://localhost:1234/v1"
+    api_key: "lm-studio"
+    cost: 0.0
+    use_cases:
+      - chat
+
+  embed-model:
+    model: "qwen3-embedding-4b" # or text-embedding-3-small
+    api_url: "http://localhost:1234/v1"
+    api_key: "lm-studio"
+    cost: 0.0
+    use_cases:
+      - embeddings
 ```
 
-There is a cost field and it will prefer the lowest cost model. I promise to update the documentation later.
+### Vector Search (Qdrant)
 
-### Web search
-
-Web search is not required, however it makes the application a lot more useful. Web search turned out a hard problem to solve,
-as search engines want you to see the additional content they provide with their search results. 
-
-FastMD supports SearXNG to perform web searches. To my disappointment, SearXNG doesn't know how to get around _bot blocking_ either.
-It does provide a framework for you to configure one or more providers to do so.
-
-Once you have SearXNG established, configure it as follows
+When compiled with `--features vector-search` and an embedding model configured above, FastMD automatically indexes your Markdown notes into Qdrant chunks for semantic search.
 
 ```yaml
-searxng_url: http://localhost:3001
+qdrant_url: "http://localhost:6334"
+qdrant_collection: "fastmd_chunks"
+# qdrant_api_key: "optional-key"
 ```
 
-### E-Mail
+### Web Search (SearXNG)
 
-A JMAP speaking host can be added like so
+FastMD supports SearXNG to perform web searches via its JSON API.
+
+```yaml
+searxng_url: "http://localhost:3001"
+```
+
+### Email (JMAP)
+
+Connect to a JMAP-compatible email host (e.g. Fastmail):
 
 ```yaml
 jmap_clients:
@@ -91,9 +132,9 @@ jmap_clients:
     token: "your-fastmail-token"
 ```
 
-### DAV (Calendar and contacts)
+### DAV (Calendar & Contacts)
 
-Uses one config section for CalDAV and CardDAV
+Configure CalDAV and CardDAV synchronization:
 
 ```yaml
 caldav_clients:
@@ -103,35 +144,34 @@ caldav_clients:
     password: "app-password"
 ```
 
-### ToDo lists
+### To-Do Lists (Trello)
 
-FastMD can talk to Trello to maintain To-Do lists
+FastMD can integrate with Trello for maintaining tasks and to-do lists:
 
 ```yaml
 trello_client:
-  token: do.not.share
-  api_key: my.key
+  token: "your-trello-token"
+  api_key: "your-trello-key"
 ```
 
-### PDF conversion
+### PDF Conversion
 
-When provided with a PDF-to-Markdown conversion command, FastMD will create Markdown files for every PDF file it encounters.
-That in turn will make the PDF files' content available to the AI agent (and yourself)
+When provided with a PDF-to-Markdown conversion command, FastMD automatically extracts Markdown representations for PDF documents:
 
 ```yaml
 pdf_converter_command:
-- marker_single
-- '{input}'
-- --output_dir
-- '{output}'
-- --output_format
-- markdown
-- --disable_image_extraction
+  - marker_single
+  - '{input}'
+  - --output_dir
+  - '{output}'
+  - --output_format
+  - markdown
+  - --disable_image_extraction
 ```
 
-### Other options
+### Configuration Reference
 
-The `config.yaml` file supports the following options:
+The `config.yaml` file supports the following top-level options:
 
 | Option | Type | Default Value | Description |
 |--------|------|---------------|-------------|
@@ -142,3 +182,9 @@ The `config.yaml` file supports the following options:
 | `system_prompt_extension` | String (Optional) | `null` | Additional text to append to the AI system prompt. |
 | `inline_editor_enabled` | Boolean | `false` | Enable the built-in inline text editor. |
 | `csv_db_path` | String (Optional) | `null` | Override the default storage location for CSV databases. |
+| `searxng_url` | String (Optional) | `http://localhost:8090` | Endpoint for the SearXNG web search engine. |
+| `qdrant_url` | String (Optional) | `http://localhost:6334` | gRPC endpoint for the Qdrant vector database. |
+| `qdrant_collection` | String (Optional) | `fastmd_chunks` | Collection name for vector embeddings. |
+| `qdrant_api_key` | String (Optional) | `null` | Optional API key for authenticated Qdrant instances. |
+| `max_tokens` | Integer | `32768` | Maximum tokens for LLM response generation. |
+| `table_width_strategy` | String | `hybrid` | Markdown table width deficit layout strategy. |

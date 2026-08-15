@@ -12,8 +12,8 @@ services:
       # gRPC API for fastmd qdrant-client
       - "${QDRANT_GRPC_PORT:-6334}:6334"
     volumes:
-      - ./data/qdrant_storage:/qdrant/storage
-      - ./data/qdrant_snapshots:/qdrant/snapshots
+      - qdrant_storage:/qdrant/storage
+      - qdrant_snapshots:/qdrant/snapshots
     environment:
       - QDRANT__LOG_LEVEL=${QDRANT_LOG_LEVEL:-INFO}
       - QDRANT__SERVICE__API_KEY=${QDRANT_API_KEY:-}
@@ -62,7 +62,13 @@ services:
 
 volumes:
   searxng-data:
+    name: fastmd-searxng
   valkey-data:
+    name: fastmd-valkey
+  qdrant_storage:
+    name: fastmd-qdrant_storage
+  qdrant_snapshots:
+    name: fastmd-qdrant_snapshots
 
 networks:
   fastmd-network:
