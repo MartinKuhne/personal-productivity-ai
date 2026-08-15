@@ -45,19 +45,15 @@ fn test_idle_app_does_not_request_repaint() {
     );
 }
 
-/// The indexing-active path must still request a repaint so the
-/// spinner keeps animating and the toolbar reflects progress. This
-/// guards against an over-zealous fix that drops the request
-/// unconditionally.
+/// Indexing alone is not a repaint reason when no UI-visible event is pending.
 #[test]
-fn test_indexing_in_progress_requests_repaint() {
+fn test_indexing_in_progress_without_events_does_not_request_repaint() {
     let ctx = egui::Context::default();
     let mut app = create_test_app();
     app.orchestrator.file_processor.indexing_finished = false;
     assert!(
-        app.should_request_immediate_repaint(&ctx),
-        "An app with active indexing must request a repaint so the \
-         toolbar spinner keeps animating and progress text stays live."
+        !app.should_request_immediate_repaint(&ctx),
+        "Indexing without a changed UI state must not create a repaint loop"
     );
 }
 

@@ -89,6 +89,12 @@ impl FastMdApp {
         // waits on its own reader; the agent's reader is drained on
         // the UI thread in `update_ui`.
         let background_task = Task::new(config_bus.clone());
+        background_task
+            .tx
+            .set_repaint_callback(std::sync::Arc::new({
+                let ctx = cc.egui_ctx.clone();
+                move || ctx.request_repaint()
+            }));
         // The tools manager subscribes to the same bus and performs
         // the one-time
         let tool_context = std::sync::Arc::new(arc_swap::ArcSwap::from_pointee(
@@ -253,7 +259,7 @@ impl FastMdApp {
     /// Outputs: `FastMdApp` with every collection empty and every optional set to `None`.
     /// Purity: Constructs a new value; no side effects.
     /// Preconditions: None.
-    /// Postconditions: Caller still owns a usable `Sender<BackgroundEvent>` paired with `rx`.
+    /// Postconditions: Caller still owns a usable background event sender paired with `rx`.
     pub fn empty_state(config: crate::config::AppConfig) -> Self {
         // Publish the supplied config into a private bus and let
         // `empty_state_via_bus` build the struct through the same
@@ -269,7 +275,6 @@ impl FastMdApp {
     /// counterpart of [`Self::new`]: no `CreationContext` is needed
     /// because we don't apply egui visuals.
     fn empty_state_via_bus(bus: Bus<ConfigArrived>, config: crate::config::AppConfig) -> Self {
-        let (tx, rx) = std::sync::mpsc::channel();
         let background_task = Task::new(bus.clone());
         // The `empty_state` test path creates the background `Task`
         // (so it subscribes to the config bus) but uses its own
@@ -343,8 +348,8 @@ impl FastMdApp {
         Self {
             orchestrator: crate::app::orchestrator::AppOrchestrator {
                 content_libraries,
-                rx,
-                tx,
+                rx: background_task.rx,
+                tx: background_task.tx,
                 file_event_bus: event_bus.clone(),
                 file_event_reader: Some(event_bus.subscribe()),
                 file_processor,

@@ -33,9 +33,7 @@
 //! Unit tests live in the sibling `print_pdf_tests.rs` sidecar.
 
 use crate::app::background::{BackgroundLogEntry, LogCategory};
-use crate::bus::events::typed::BackgroundEvent;
 use std::path::{Path, PathBuf};
-use std::sync::mpsc::Sender;
 
 /// Job description for the "Save as PDF" background action.
 ///
@@ -120,7 +118,7 @@ pub const TYPST_THREAD_STACK_SIZE: usize = 8 * 1024 * 1024;
 /// desktop during `cargo test`.
 pub fn compile_and_save_pdf(
     job: &SaveAsPdfJob,
-    tx: Option<&Sender<BackgroundEvent>>,
+    tx: Option<&crate::bus::events::typed::BackgroundEventSender>,
 ) -> Result<PathBuf, String> {
     if job.markdown_content.is_empty() {
         return Err(format!(
@@ -221,7 +219,7 @@ pub fn open_pdf_in_viewer(path: &Path) -> Result<(), String> {
 /// developer's `cargo test` run is silent.
 pub fn execute_save_as_pdf_blocking(
     job: SaveAsPdfJob,
-    tx: Option<Sender<BackgroundEvent>>,
+    tx: Option<crate::bus::events::typed::BackgroundEventSender>,
 ) -> Result<PathBuf, String> {
     let output_path = compile_and_save_pdf(&job, tx.as_ref())?;
     // Open the resulting PDF in the user's default viewer. Best-effort:

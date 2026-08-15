@@ -5,14 +5,14 @@ use crate::bus::events::typed::BackgroundEvent;
 use crate::config::AppConfig;
 use crate::utils::clock::Clock;
 use std::path::PathBuf;
+use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
-use std::sync::{Arc, mpsc};
 use tokio::sync::Semaphore;
 
 pub struct BatchJobExecutor {
     app_config: AppConfig,
     file_event_bus: std::sync::Arc<dyn crate::agent::tools::observer::OnFileChanged>,
-    tx_gui: mpsc::Sender<BackgroundEvent>,
+    tx_gui: crate::bus::events::typed::BackgroundEventSender,
     cancel_flag: Arc<AtomicBool>,
     clock: Arc<dyn Clock>,
 }
@@ -21,7 +21,7 @@ impl BatchJobExecutor {
     pub fn new(
         app_config: AppConfig,
         file_event_bus: std::sync::Arc<dyn crate::agent::tools::observer::OnFileChanged>,
-        tx_gui: mpsc::Sender<BackgroundEvent>,
+        tx_gui: crate::bus::events::typed::BackgroundEventSender,
         _prompt: String,
         cancel_flag: Arc<AtomicBool>,
         clock: Arc<dyn Clock>,
@@ -252,11 +252,14 @@ pub fn run_agent_blocking(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::bus::events::typed::BackgroundEventSender;
     use std::sync::atomic::AtomicBool;
+    use std::sync::mpsc;
 
     #[test]
     fn test_execute_concurrent_empty() {
         let (tx, _rx) = mpsc::channel();
+        let tx = BackgroundEventSender::new(tx);
         let bus = std::sync::Arc::new(crate::agent::tools::observer::DefaultFileObserver);
         let cancel_flag = Arc::new(AtomicBool::new(false));
 
@@ -279,6 +282,7 @@ mod tests {
     #[test]
     fn test_execute_concurrent_cancellation() {
         let (tx, _rx) = mpsc::channel();
+        let tx = BackgroundEventSender::new(tx);
         let bus = std::sync::Arc::new(crate::agent::tools::observer::DefaultFileObserver);
         let cancel_flag = Arc::new(AtomicBool::new(true));
 

@@ -6,7 +6,7 @@ use crate::bus::core::{Bus, BusReader};
 use crate::bus::events::file::{FileEvent, FileEventKind};
 use crate::bus::events::typed::BackgroundEvent;
 use crate::config::library_display_label;
-use crate::config::{get_config_path, AppConfig, ContentLibrary, VirtualPath};
+use crate::config::{AppConfig, ContentLibrary, VirtualPath, get_config_path};
 use crate::markdown::parse_front_matter;
 use sahomedb::prelude::{
     Collection, Config, Database, Distance, Metadata, Record, Vector, VectorID,
@@ -173,6 +173,14 @@ impl VectorSearchService {
         };
         let vpath = library_display_label(&state.content_libraries, path)
             .unwrap_or_else(|| path.to_string_lossy().to_string());
+        let vector_dimension = embeddings.first().map_or(0, Vec::len);
+        tracing::debug!(
+            name = "vector_search.vectors_created",
+            path = %vpath,
+            chunk_count = chunks.len(),
+            vector_dimension,
+            "Created vectors for virtual file"
+        );
         let current: HashMap<String, Vec<f32>> = chunks
             .iter()
             .cloned()
@@ -180,6 +188,19 @@ impl VectorSearchService {
             .map(|(chunk, embedding)| (chunk.hash.clone(), embedding))
             .collect();
         let existing = records_for_path(&state.collection, &vpath);
+        if !existing.is_empty()
+            && chunks
+                .iter()
+                .all(|chunk| existing.contains_key(&chunk.hash))
+        {
+            tracing::debug!(
+                name = "vector_search.file_already_indexed",
+                path = %vpath,
+                chunk_count = chunks.len(),
+                indexed_chunk_count = existing.len(),
+                "Virtual file is already indexed"
+            );
+        }
         for (hash, id) in &existing {
             if !current.contains_key(hash) {
                 let _ = state.collection.delete(id);
@@ -202,7 +223,16 @@ impl VectorSearchService {
                     chunk.limit,
                 ),
             );
-            let _ = state.collection.insert(&record);
+            if let Err(error) = state.collection.insert(&record) {
+                tracing::error!(
+                    name = "vector_search.insert_failed",
+                    path = %vpath,
+                    model = model.model_name(),
+                    chunk_hash = %chunk.hash,
+                    error = error.message(),
+                    "Failed to insert vector record"
+                );
+            }
         }
     }
 

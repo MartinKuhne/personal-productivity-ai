@@ -1,4 +1,4 @@
-//! Top-level agent orchestration — sends requests, executes tool calls, and streams results back to the UI.
+﻿//! Top-level agent orchestration â€” sends requests, executes tool calls, and streams results back to the UI.
 
 use crate::context::AgentContext;
 use crate::datamark;
@@ -15,15 +15,15 @@ use std::sync::atomic::Ordering;
 ///
 /// Called by the long-lived driver thread (see `agent/manager.rs`) with a
 /// per-session `AgentContext` built from an `AgentPrompt`. The driver owns
-/// the shared resources; this function runs `run_agent_inner` inline —
-/// no inner `std::thread::spawn` (research.md §3, migration step 10).
-pub fn run_agent(ctx: AgentContext) {
-    run_agent_inner(ctx);
+/// the shared resources; this function runs `run_agent_inner` inline â€”
+/// no inner `std::thread::spawn` (research.md Â§3, migration step 10).
+pub fn run_agent(ctx: AgentContext) -> Vec<serde_json::Value> {
+    run_agent_inner(ctx)
 }
-fn run_agent_inner(ctx: AgentContext) {
+fn run_agent_inner(ctx: AgentContext) -> Vec<serde_json::Value> {
     let llm = match resolve_ll_client(&ctx) {
         Some(c) => c,
-        None => return,
+        None => return Vec::new(),
     };
     let system_prompts = ctx.system_prompts.clone();
     log_prompt_context(&ctx.active_file, &ctx.active_dir, &ctx.selected_files);
@@ -80,14 +80,15 @@ fn run_agent_inner(ctx: AgentContext) {
             Turn::Done => break,
             Turn::Failed => {
                 ctx.observer.on_session_finished(Vec::new());
-                return;
+                return Vec::new();
             }
         }
     }
     if !ctx.cancel_flag.load(Ordering::SeqCst) {
         ctx.observer.on_status(AgentStatus::Done);
     }
-    ctx.observer.on_session_finished(messages);
+    ctx.observer.on_session_finished(messages.clone());
+    messages
 }
 enum Turn {
     Continue,
@@ -116,7 +117,7 @@ fn process_turn(
         timestamp: chrono::Local::now(),
         kind: DebugEntryKind::Outgoing,
         summary: format!(
-            "Turn {} — Outgoing (+{} messages, {} tools)",
+            "Turn {} â€” Outgoing (+{} messages, {} tools)",
             turn,
             delta.len(),
             tool_count
@@ -153,7 +154,7 @@ fn process_turn(
         timestamp: chrono::Local::now(),
         kind: DebugEntryKind::Incoming,
         summary: format!(
-            "Turn {} — Incoming (assistant{} {})",
+            "Turn {} â€” Incoming (assistant{} {})",
             turn,
             if incoming_tool_call_count > 0 {
                 format!(" + {} tool call(s)", incoming_tool_call_count)
@@ -408,7 +409,7 @@ fn emit_tool_results_debug(
         turn,
         timestamp: chrono::Local::now(),
         kind: DebugEntryKind::ToolResults,
-        summary: format!("Turn {} — Tool results ({} tools)", turn, entries.len()),
+        summary: format!("Turn {} â€” Tool results ({} tools)", turn, entries.len()),
         content: Some(serde_json::Value::Array(entries)),
         row_type: DebugEntryRow::Entry,
     };
@@ -541,7 +542,7 @@ mod tests {
         );
     }
 
-    /// Non-`web_delegate` tools must pass through unchanged — the strip
+    /// Non-`web_delegate` tools must pass through unchanged â€” the strip
     /// is scoped to the one tool that carries a `tool_call_trace` field.
     #[test]
     fn test_strip_web_delegate_trace_leaves_other_tools_unchanged() {
@@ -550,7 +551,7 @@ mod tests {
         assert_eq!(stripped, result);
     }
 
-    /// Malformed JSON must round-trip unchanged rather than panic — the
+    /// Malformed JSON must round-trip unchanged rather than panic â€” the
     /// LLM still receives the original tool result on a parse failure.
     #[test]
     fn test_strip_web_delegate_trace_passthrough_on_parse_error() {

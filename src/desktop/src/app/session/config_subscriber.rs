@@ -5,9 +5,7 @@ use crate::app::background::{BackgroundLogEntry, LogCategory};
 use crate::bus::config::CONFIG_ARRIVAL_TIMEOUT;
 use crate::bus::core::Bus;
 use crate::bus::events::config::ConfigArrived;
-use crate::bus::events::typed::BackgroundEvent;
 use std::sync::Arc;
-use std::sync::mpsc::Sender;
 
 /// Spawns a background thread that listens for [`ConfigArrived`] events on `config_bus`,
 /// performs one-time MCP initialization on startup, and refreshes MCP tools on subsequent
@@ -15,7 +13,7 @@ use std::sync::mpsc::Sender;
 pub fn spawn_config_subscription(
     tool_context: Arc<arc_swap::ArcSwap<AgentToolContext>>,
     config_bus: Bus<ConfigArrived>,
-    tx: Sender<BackgroundEvent>,
+    tx: crate::bus::events::typed::BackgroundEventSender,
 ) {
     let config_reader = config_bus.subscribe();
     std::thread::spawn(move || {

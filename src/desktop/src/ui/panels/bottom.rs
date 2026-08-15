@@ -173,28 +173,7 @@ pub fn apply_send_click(app: &mut FastMdApp) {
             app.orchestrator.agent_panel_state.show_results = true;
         }
         CommandIntent::RunAgent(agent_prompt) => {
-            let (file, dir, files) = app.selection().agent_context(&app.orchestrator.tabs.tabs);
-            let session_id = uuid::Uuid::new_v4();
-            // Assemble the system prompts at submit time — see
-            // `app::orchestrator::start_agent_session` for the parallel
-            // flow used by the orchestrator's own submit path.
-            let system_prompts = crate::app::prompts::build_system_prompts(
-                app.config(),
-                file.as_deref(),
-                dir.as_deref(),
-                &files,
-            );
-            let prompt = crate::agent::events::AgentPrompt {
-                session_id,
-                text: agent_prompt,
-                system_prompts,
-                active_file: file,
-                active_dir: dir,
-                selected_files: files,
-                cancel_flag: std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false)),
-            };
-            app.agent_mut().submit_prompt(prompt);
-            app.orchestrator.agent_panel_state.show_results = true;
+            app.orchestrator.start_agent_session(agent_prompt);
         }
         CommandIntent::Empty => {}
     }

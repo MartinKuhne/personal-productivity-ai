@@ -5,18 +5,18 @@
 use crate::app::background::models::{BackgroundLogEntry, ImageJob, LogCategory};
 use crate::bus::core::Bus;
 use crate::bus::events::file::{FileEvent, FileEventProducer};
-use crate::bus::events::typed::BackgroundEvent;
+use crate::bus::events::typed::{BackgroundEvent, BackgroundEventSender};
 use crate::config::AppConfig;
 use base64::{Engine as _, engine::general_purpose::STANDARD as b64};
 use serde_json::json;
 use std::path::PathBuf;
-use std::sync::mpsc::{Receiver, Sender};
+use std::sync::mpsc::Receiver;
 
 #[allow(clippy::result_large_err)]
 pub async fn process_image(
     job: ImageJob,
     config: AppConfig,
-    tx: Sender<BackgroundEvent>,
+    tx: BackgroundEventSender,
     producer: &FileEventProducer,
 ) -> Result<(), String> {
     // Find vision model
@@ -175,7 +175,7 @@ pub async fn process_image(
 
 pub struct ImageVisionWorker {
     rx: Receiver<PathBuf>,
-    tx: Sender<BackgroundEvent>,
+    tx: BackgroundEventSender,
     config: AppConfig,
     bus: Bus<FileEvent>,
 }
@@ -183,7 +183,7 @@ pub struct ImageVisionWorker {
 impl ImageVisionWorker {
     pub fn new(
         rx: Receiver<PathBuf>,
-        tx: Sender<BackgroundEvent>,
+        tx: BackgroundEventSender,
         config: AppConfig,
         bus: Bus<FileEvent>,
     ) -> Self {

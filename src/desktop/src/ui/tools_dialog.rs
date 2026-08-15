@@ -11,7 +11,7 @@
 //! `config.yaml`).
 
 use crate::agent::tools::registry::{self, InternalToolGroup};
-use crate::bus::events::typed::{BackgroundEvent, McpAuthEvent};
+use crate::bus::events::typed::McpAuthEvent;
 use crate::config::{McpServerConfig, save_config};
 use crate::ui::FastMdApp;
 use crate::ui::strings::{
@@ -339,7 +339,7 @@ fn needs_authentication(cfg: &McpServerConfig) -> bool {
 /// the state change without waiting for the next timer tick.
 fn spawn_auth_flow(
     server_name: String,
-    tx: std::sync::mpsc::Sender<BackgroundEvent>,
+    tx: crate::bus::events::typed::BackgroundEventSender,
     ctx: eframe::egui::Context,
     mgr: std::sync::Arc<crate::agent::lib::mcp::McpClients>,
 ) {

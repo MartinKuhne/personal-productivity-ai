@@ -1,6 +1,6 @@
 use super::*;
 use crate::agent::tools::registry::ToolRegistry;
-use crate::bus::events::typed::ProcessEvent;
+use crate::bus::events::typed::{BackgroundEvent, BackgroundEventSender, ProcessEvent};
 
 #[test]
 fn test_spawn_config_subscription_runs_init_in_background() {
@@ -10,7 +10,7 @@ fn test_spawn_config_subscription_runs_init_in_background() {
     let tm = Arc::new(arc_swap::ArcSwap::from_pointee(
         crate::agent::AgentToolContext::new(ToolRegistry::new()),
     ));
-    spawn_config_subscription(tm, bus.clone(), tx);
+    spawn_config_subscription(tm, bus.clone(), BackgroundEventSender::new(tx));
 
     bus.publish(ConfigArrived::new(crate::config::AppConfig::default()));
 

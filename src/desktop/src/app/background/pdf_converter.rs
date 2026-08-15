@@ -3,11 +3,11 @@
 use crate::app::background::models::{BackgroundLogEntry, LogCategory};
 use crate::bus::core::Bus;
 use crate::bus::events::file::FileEvent;
-use crate::bus::events::typed::BackgroundEvent;
+use crate::bus::events::typed::BackgroundEventSender;
 use std::path::PathBuf;
+use std::sync::mpsc::Receiver;
 #[cfg(test)]
 use std::sync::mpsc::channel;
-use std::sync::mpsc::{Receiver, Sender};
 use tokio::process::Command;
 
 pub struct PdfConversionJob {
@@ -42,7 +42,7 @@ impl PdfConversionJob {
     pub async fn execute(
         self,
         cmd_template: Option<Vec<String>>,
-        tx: Sender<BackgroundEvent>,
+        tx: BackgroundEventSender,
     ) -> Result<(), String> {
         if let Some(template) = cmd_template {
             if template.is_empty() {
@@ -187,7 +187,7 @@ impl PdfConversionJob {
 
 pub struct PdfConverterWorker {
     rx: Receiver<PathBuf>,
-    tx: Sender<BackgroundEvent>,
+    tx: BackgroundEventSender,
     bus: Bus<FileEvent>,
     cmd: Option<Vec<String>>,
 }
@@ -195,7 +195,7 @@ pub struct PdfConverterWorker {
 impl PdfConverterWorker {
     pub fn new(
         rx: Receiver<PathBuf>,
-        tx: Sender<BackgroundEvent>,
+        tx: BackgroundEventSender,
         bus: Bus<FileEvent>,
         cmd: Option<Vec<String>>,
     ) -> Self {
@@ -290,6 +290,7 @@ mod tests {
         let pdf = dir.path().join("doc.pdf");
         std::fs::write(&pdf, "pdf").unwrap();
         let (tx, _rx) = channel();
+        let tx = BackgroundEventSender::new(tx);
 
         let rt = tokio::runtime::Runtime::new().unwrap();
         let job = PdfConversionJob::new(pdf);
@@ -314,6 +315,7 @@ mod tests {
             "{output}".to_string(),
         ]);
         let (tx, _rx) = channel();
+        let tx = BackgroundEventSender::new(tx);
 
         let rt = tokio::runtime::Runtime::new().unwrap();
         let result = rt.block_on(job.execute(template, tx));
@@ -329,6 +331,7 @@ mod tests {
         let pdf = dir.path().join("doc.pdf");
         std::fs::write(&pdf, "pdf").unwrap();
         let (tx, _rx) = channel();
+        let tx = BackgroundEventSender::new(tx);
 
         let rt = tokio::runtime::Runtime::new().unwrap();
         let job = PdfConversionJob::new(pdf);
@@ -342,6 +345,7 @@ mod tests {
         let pdf = dir.path().join("doc.pdf");
         std::fs::write(&pdf, "pdf").unwrap();
         let (tx, _rx) = channel();
+        let tx = BackgroundEventSender::new(tx);
 
         let rt = tokio::runtime::Runtime::new().unwrap();
         let job = PdfConversionJob::new(pdf);
@@ -366,6 +370,7 @@ mod tests {
         let pdf = dir.path().join("doc.pdf");
         std::fs::write(&pdf, "pdf").unwrap();
         let (tx, _rx) = channel();
+        let tx = BackgroundEventSender::new(tx);
 
         let rt = tokio::runtime::Runtime::new().unwrap();
         let job = PdfConversionJob::new(pdf);
@@ -405,6 +410,7 @@ mod tests {
         std::fs::copy(source, &marker_exe).unwrap_or_default();
 
         let (tx, _rx) = channel();
+        let tx = BackgroundEventSender::new(tx);
         let rt = tokio::runtime::Runtime::new().unwrap();
         let job = PdfConversionJob::new(pdf);
 
