@@ -1,17 +1,18 @@
 //! Optional Markdown vector indexing and search worker (AGENT-005, AGENT-031).
-//! Chunk vectors are produced by the user-configured `embeddings` model.
+//!
+//! Unit tests live in the sibling `vector_search_tests.rs` sidecar.
 
 use crate::app::background::embeddings::EmbeddingClient;
 use crate::bus::core::{Bus, BusReader};
 use crate::bus::events::file::{FileEvent, FileEventKind};
-use crate::bus::events::typed::BackgroundEvent;
+use crate::bus::events::typed::BackgroundEventSender;
 use crate::config::library_display_label;
 use crate::config::{AppConfig, ContentLibrary, VirtualPath, get_config_path};
 use crate::markdown::parse_front_matter;
 use sahomedb::prelude::{
     Collection, Config, Database, Distance, Metadata, Record, Vector, VectorID,
 };
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 use text_splitter::{ChunkConfig, TextSplitter};
@@ -50,6 +51,7 @@ struct VectorState {
     collection: Collection,
     database: Option<Database>,
     content_libraries: Vec<ContentLibrary>,
+    chunk_index: HashMap<String, HashMap<String, VectorID>>,
 }
 
 impl VectorSearchService {
@@ -61,6 +63,7 @@ impl VectorSearchService {
                 collection: Collection::new(&collection_config()),
                 database: None,
                 content_libraries: Vec::new(),
+                chunk_index: HashMap::new(),
             })),
         }
     }
@@ -69,7 +72,7 @@ impl VectorSearchService {
         &self,
         config: AppConfig,
         reader: BusReader<FileEvent>,
-        tx: std::sync::mpsc::Sender<BackgroundEvent>,
+        tx: BackgroundEventSender,
     ) {
         let service = self.clone();
         std::thread::spawn(move || {
@@ -104,6 +107,7 @@ impl VectorSearchService {
                     state.database = Some(database);
                 }
             }
+            state.chunk_index = build_chunk_index(&state.collection);
             drop(state);
             let mut processed = 0usize;
             for library in &config.content_libraries {
@@ -154,41 +158,26 @@ impl VectorSearchService {
             content
         };
         let chunks = markdown_chunks(path, &body);
-        let model = {
+        if chunks.is_empty() {
+            self.remove_path(path);
+            return;
+        }
+
+        let (vpath, model, existing) = {
             let Ok(state) = self.state.lock() else {
                 return;
             };
-            let Some(model) = state.model.as_ref() else {
+            let Some(model) = state.model.as_ref().cloned() else {
                 return;
             };
-            model.clone()
+            let vpath = library_display_label(&state.content_libraries, path)
+                .unwrap_or_else(|| path.to_string_lossy().to_string());
+            let existing = state.chunk_index.get(&vpath).cloned().unwrap_or_default();
+            (vpath, model, existing)
         };
-        let texts: Vec<String> = chunks.iter().map(|chunk| chunk.text.clone()).collect();
-        let Ok(embeddings) = model.embed(texts) else {
-            tracing::error!(name = "vector_search.embed_failed", path = %path.display(), "Embedding failed");
-            return;
-        };
-        let Ok(mut state) = self.state.lock() else {
-            return;
-        };
-        let vpath = library_display_label(&state.content_libraries, path)
-            .unwrap_or_else(|| path.to_string_lossy().to_string());
-        let vector_dimension = embeddings.first().map_or(0, Vec::len);
-        tracing::debug!(
-            name = "vector_search.vectors_created",
-            path = %vpath,
-            chunk_count = chunks.len(),
-            vector_dimension,
-            "Created vectors for virtual file"
-        );
-        let current: HashMap<String, Vec<f32>> = chunks
-            .iter()
-            .cloned()
-            .zip(embeddings)
-            .map(|(chunk, embedding)| (chunk.hash.clone(), embedding))
-            .collect();
-        let existing = records_for_path(&state.collection, &vpath);
+
         if !existing.is_empty()
+            && existing.len() == chunks.len()
             && chunks
                 .iter()
                 .all(|chunk| existing.contains_key(&chunk.hash))
@@ -197,42 +186,89 @@ impl VectorSearchService {
                 name = "vector_search.file_already_indexed",
                 path = %vpath,
                 chunk_count = chunks.len(),
-                indexed_chunk_count = existing.len(),
                 "Virtual file is already indexed"
             );
+            return;
         }
-        for (hash, id) in &existing {
-            if !current.contains_key(hash) {
-                let _ = state.collection.delete(id);
-            }
-        }
-        for chunk in chunks {
-            if existing.contains_key(&chunk.hash) {
-                continue;
-            }
-            let Some(embedding) = current.get(&chunk.hash) else {
-                continue;
-            };
-            let record = Record::new(
-                &Vector::from(embedding),
-                &chunk_metadata(
-                    &vpath,
-                    model.model_name(),
-                    &chunk.hash,
-                    chunk.offset,
-                    chunk.limit,
-                ),
-            );
-            if let Err(error) = state.collection.insert(&record) {
+
+        let missing_chunks: Vec<MarkdownChunk> = chunks
+            .iter()
+            .filter(|chunk| !existing.contains_key(&chunk.hash))
+            .cloned()
+            .collect();
+
+        let embeddings = if missing_chunks.is_empty() {
+            Vec::new()
+        } else {
+            let texts: Vec<String> = missing_chunks.iter().map(|c| c.text.clone()).collect();
+            let Ok(embeddings) = model.embed(texts) else {
                 tracing::error!(
-                    name = "vector_search.insert_failed",
-                    path = %vpath,
-                    model = model.model_name(),
-                    chunk_hash = %chunk.hash,
-                    error = error.message(),
-                    "Failed to insert vector record"
+                    name = "vector_search.embed_failed",
+                    path = %path.display(),
+                    "Embedding failed"
                 );
+                return;
+            };
+            embeddings
+        };
+
+        let Ok(mut state) = self.state.lock() else {
+            return;
+        };
+
+        let current_hashes: HashSet<&str> = chunks.iter().map(|c| c.hash.as_str()).collect();
+        for (hash, id) in &existing {
+            if !current_hashes.contains(hash.as_str()) {
+                let _ = state.collection.delete(id);
+                if let Some(file_chunks) = state.chunk_index.get_mut(&vpath) {
+                    file_chunks.remove(hash);
+                }
             }
+        }
+
+        if !missing_chunks.is_empty() {
+            let vector_dimension = embeddings.first().map_or(0, Vec::len);
+            let records: Vec<Record> = missing_chunks
+                .iter()
+                .zip(&embeddings)
+                .map(|(chunk, embedding)| {
+                    Record::new(
+                        &Vector::from(embedding.clone()),
+                        &chunk_metadata(
+                            &vpath,
+                            model.model_name(),
+                            &chunk.hash,
+                            chunk.offset,
+                            chunk.limit,
+                        ),
+                    )
+                })
+                .collect();
+
+            match state.collection.insert_many(&records) {
+                Ok(ids) => {
+                    let file_chunks = state.chunk_index.entry(vpath.clone()).or_default();
+                    for (chunk, id) in missing_chunks.into_iter().zip(ids) {
+                        file_chunks.insert(chunk.hash, id);
+                    }
+                }
+                Err(error) => {
+                    tracing::error!(
+                        name = "vector_search.insert_failed",
+                        path = %vpath,
+                        model = model.model_name(),
+                        error = error.message(),
+                        "Failed to insert vector records"
+                    );
+                }
+            }
+            tracing::debug!(
+                name = "vector_search.vectors_created",
+                path = %vpath,
+                chunk_count = chunks.len(),
+                vector_dimension,
+                "Created vectors for virtual file"
+            );
         }
     }
 
@@ -252,11 +288,10 @@ impl VectorSearchService {
         };
         let vpath = library_display_label(&state.content_libraries, path)
             .unwrap_or_else(|| path.to_string_lossy().to_string());
-        let ids: Vec<VectorID> = records_for_path(&state.collection, &vpath)
-            .into_values()
-            .collect();
-        for id in ids {
-            let _ = state.collection.delete(&id);
+        if let Some(records) = state.chunk_index.remove(&vpath) {
+            for id in records.into_values() {
+                let _ = state.collection.delete(&id);
+            }
         }
     }
 }
@@ -369,7 +404,7 @@ fn resolve_and_read(
 pub fn start(
     config: AppConfig,
     bus: Bus<FileEvent>,
-    tx: std::sync::mpsc::Sender<BackgroundEvent>,
+    tx: BackgroundEventSender,
 ) -> Arc<VectorSearchService> {
     let service = Arc::new(VectorSearchService::new());
     service.start(config, bus.subscribe(), tx);
@@ -449,18 +484,18 @@ fn chunk_from_metadata(metadata: Metadata) -> Option<(String, String, usize, usi
     Some((path, hash, offset, limit))
 }
 
-/// Return the IDs of records belonging to the given virtual path, keyed by chunk hash.
-fn records_for_path(collection: &Collection, vpath: &str) -> HashMap<String, VectorID> {
+/// Build an in-memory index mapping each virtual path to its chunk hashes and vector IDs.
+fn build_chunk_index(collection: &Collection) -> HashMap<String, HashMap<String, VectorID>> {
     let Ok(records) = collection.list() else {
         return HashMap::new();
     };
-    records
-        .into_iter()
-        .filter_map(|(id, record)| {
-            let (record_path, hash, _, _) = chunk_from_metadata(record.data)?;
-            (record_path == vpath).then_some((hash, id))
-        })
-        .collect()
+    let mut index: HashMap<String, HashMap<String, VectorID>> = HashMap::new();
+    for (id, record) in records {
+        if let Some((vpath, hash, _, _)) = chunk_from_metadata(record.data) {
+            index.entry(vpath).or_default().insert(hash, id);
+        }
+    }
+    index
 }
 
 fn hash(text: &str) -> String {
@@ -483,7 +518,7 @@ fn collection_config() -> Config {
     }
 }
 
-fn log_progress(processed: usize, tx: &std::sync::mpsc::Sender<BackgroundEvent>) {
+fn log_progress(processed: usize, tx: &BackgroundEventSender) {
     if processed.is_multiple_of(100) {
         let _ = tx.send(bg_log_progress(processed).into());
     }
@@ -504,57 +539,5 @@ fn bg_log_failed(message: &str) -> crate::bus::events::BackgroundLogEntry {
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn markdown_filter_excludes_txt() {
-        assert!(is_markdown(Path::new("a.MARKDOWN")));
-        assert!(is_markdown(Path::new("a.md")));
-        assert!(!is_markdown(Path::new("a.txt")));
-    }
-
-    #[test]
-    fn metadata_round_trips_structured_chunks() {
-        let metadata = chunk_metadata("Library/a.md", "embed-model", "abc", 10, 50);
-        let (path, hash, offset, limit) = chunk_from_metadata(metadata).unwrap();
-        assert_eq!(path, "Library/a.md");
-        assert_eq!(hash, "abc");
-        assert_eq!(offset, 10);
-        assert_eq!(limit, 50);
-        assert!(chunk_from_metadata(Metadata::Text("nope".into())).is_none());
-    }
-
-    #[test]
-    fn chunks_use_semantic_boundaries() {
-        let text = "First paragraph.\n\nSecond sentence here.\n\nThird paragraph content with more words.\n\nFourth paragraph ending now.";
-        let chunks = markdown_chunks(Path::new("a.md"), text);
-        assert!(!chunks.is_empty());
-        for chunk in &chunks {
-            assert!(!chunk.text.is_empty());
-            assert!(chunk.limit > 0);
-            let line_count = chunk.text.lines().count();
-            assert_eq!(chunk.limit, line_count);
-        }
-    }
-
-    #[test]
-    fn chunks_are_deterministic() {
-        let text = "Some content\n\nSecond paragraph\n\nThird paragraph\n\nFourth paragraph\n\nFifth paragraph.";
-        let a = markdown_chunks(Path::new("a.md"), text);
-        let b = markdown_chunks(Path::new("a.md"), text);
-        assert_eq!(a.len(), b.len());
-        for (ca, cb) in a.iter().zip(b.iter()) {
-            assert_eq!(ca.hash, cb.hash);
-            assert_eq!(ca.offset, cb.offset);
-            assert_eq!(ca.limit, cb.limit);
-        }
-    }
-
-    #[test]
-    fn saves_every_save_interval() {
-        assert!(!should_save(SAVE_INTERVAL - 1));
-        assert!(should_save(SAVE_INTERVAL));
-        assert!(!should_save(SAVE_INTERVAL + 1));
-    }
-}
+#[path = "vector_search_tests.rs"]
+mod tests;
