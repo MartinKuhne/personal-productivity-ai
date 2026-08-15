@@ -114,3 +114,184 @@ fn remove_path_cleans_collection_and_chunk_index() {
     assert!(!state.chunk_index.contains_key("doc.md"));
     assert!(state.collection.get(&id).is_err());
 }
+
+#[test]
+fn test_exact_hash_match_logic_detects_already_indexed() {
+    let p1 = "Paragraph one with detailed content to exceed chunk threshold. ".repeat(20);
+    let p2 = "Paragraph two with completely different details to form a second chunk. ".repeat(20);
+    let text = format!("{p1}\n\n{p2}");
+    let chunks = markdown_chunks(Path::new("note.md"), &text);
+    assert!(!chunks.is_empty());
+
+    let mut existing = HashMap::new();
+    for (i, chunk) in chunks.iter().enumerate() {
+        existing.insert(chunk.hash.clone(), VectorID(i as u32));
+    }
+
+    let unique_hashes: HashSet<&str> = chunks.iter().map(|c| c.hash.as_str()).collect();
+
+    // Verify exact match criteria
+    let is_already_indexed = !existing.is_empty()
+        && existing.len() == unique_hashes.len()
+        && unique_hashes
+            .iter()
+            .all(|hash| existing.contains_key(*hash));
+
+    assert!(is_already_indexed);
+
+    // Verify that filtering for missing chunks yields empty list
+    let missing_chunks: Vec<&MarkdownChunk> = chunks
+        .iter()
+        .filter(|chunk| !existing.contains_key(&chunk.hash))
+        .collect();
+    assert!(missing_chunks.is_empty());
+}
+
+#[test]
+fn test_duplicate_chunks_in_same_file_handled_correctly() {
+    let paragraph = "A".repeat(800);
+    let text = format!("{paragraph}\n\n{paragraph}");
+    let chunks = markdown_chunks(Path::new("dup.md"), &text);
+    assert!(!chunks.is_empty());
+
+    let unique_hashes: HashSet<&str> = chunks.iter().map(|c| c.hash.as_str()).collect();
+
+    let mut existing = HashMap::new();
+    for (i, hash) in unique_hashes.iter().enumerate() {
+        existing.insert(hash.to_string(), VectorID(i as u32));
+    }
+
+    // When indexed, the unique hash matches the single record in existing
+    let is_already_indexed = !existing.is_empty()
+        && existing.len() == unique_hashes.len()
+        && unique_hashes
+            .iter()
+            .all(|hash| existing.contains_key(*hash));
+
+    assert!(is_already_indexed);
+}
+
+#[test]
+fn test_partial_chunk_modifications_identifies_missing_and_obsolete() {
+    let mut existing = HashMap::new();
+    existing.insert("hash_a".to_string(), VectorID(10));
+    existing.insert("hash_b".to_string(), VectorID(20));
+    existing.insert("hash_c".to_string(), VectorID(30)); // will become obsolete
+
+    // New version of the file has hash_a, hash_b, and new hash_d
+    let chunks = [
+        MarkdownChunk {
+            path: PathBuf::from("doc.md"),
+            text: "A".into(),
+            hash: "hash_a".into(),
+            offset: 0,
+            limit: 1,
+        },
+        MarkdownChunk {
+            path: PathBuf::from("doc.md"),
+            text: "B".into(),
+            hash: "hash_b".into(),
+            offset: 1,
+            limit: 1,
+        },
+        MarkdownChunk {
+            path: PathBuf::from("doc.md"),
+            text: "D".into(),
+            hash: "hash_d".into(),
+            offset: 2,
+            limit: 1,
+        },
+    ];
+
+    let unique_hashes: HashSet<&str> = chunks.iter().map(|c| c.hash.as_str()).collect();
+
+    // 1. Should NOT match as already indexed
+    let is_already_indexed = !existing.is_empty()
+        && existing.len() == unique_hashes.len()
+        && unique_hashes
+            .iter()
+            .all(|hash| existing.contains_key(*hash));
+    assert!(!is_already_indexed);
+
+    // 2. Missing chunks should be only "hash_d"
+    let missing_chunks: Vec<&MarkdownChunk> = chunks
+        .iter()
+        .filter(|chunk| !existing.contains_key(&chunk.hash))
+        .collect();
+    assert_eq!(missing_chunks.len(), 1);
+    assert_eq!(missing_chunks[0].hash, "hash_d");
+
+    // 3. Obsolete chunks should be only "hash_c"
+    let obsolete_hashes: Vec<&str> = existing
+        .keys()
+        .filter(|h| !unique_hashes.contains(h.as_str()))
+        .map(|s| s.as_str())
+        .collect();
+    assert_eq!(obsolete_hashes.len(), 1);
+    assert_eq!(obsolete_hashes[0], "hash_c");
+}
+
+#[test]
+fn test_front_matter_change_preserves_body_chunk_hashes() {
+    let file1 = "---\ntitle: Old Title\ntags: [a]\n---\nBody paragraph one.\n\nBody paragraph two.";
+    let file2 = "---\ntitle: New Title\ntags: [b, c]\nauthor: Alice\n---\nBody paragraph one.\n\nBody paragraph two.";
+
+    let fm1 = parse_front_matter(file1).unwrap();
+    let fm2 = parse_front_matter(file2).unwrap();
+
+    let body1 = fm1.body.strip_prefix('\n').unwrap_or(&fm1.body);
+    let body2 = fm2.body.strip_prefix('\n').unwrap_or(&fm2.body);
+
+    let chunks1 = markdown_chunks(Path::new("file.md"), body1);
+    let chunks2 = markdown_chunks(Path::new("file.md"), body2);
+
+    assert_eq!(chunks1.len(), chunks2.len());
+    for (c1, c2) in chunks1.iter().zip(chunks2.iter()) {
+        assert_eq!(c1.hash, c2.hash);
+        assert_eq!(c1.text, c2.text);
+    }
+}
+
+#[test]
+fn test_multiple_vpaths_isolated_in_chunk_index() {
+    let service = VectorSearchService::new();
+    let rec_a = Record::new(
+        &Vector::from(vec![1.0, 0.0]),
+        &chunk_metadata("LibA/doc.md", "model", "common_hash", 0, 5),
+    );
+    let rec_b = Record::new(
+        &Vector::from(vec![1.0, 0.0]),
+        &chunk_metadata("LibB/doc.md", "model", "common_hash", 0, 5),
+    );
+
+    let (id_a, id_b) = {
+        let mut state = service.state.lock().unwrap();
+        let ids = state.collection.insert_many(&[rec_a, rec_b]).unwrap();
+        state
+            .chunk_index
+            .entry("LibA/doc.md".to_string())
+            .or_default()
+            .insert("common_hash".to_string(), ids[0]);
+        state
+            .chunk_index
+            .entry("LibB/doc.md".to_string())
+            .or_default()
+            .insert("common_hash".to_string(), ids[1]);
+        (ids[0], ids[1])
+    };
+
+    // Remove LibA/doc.md
+    service.remove_path(Path::new("LibA/doc.md"));
+
+    let state = service.state.lock().unwrap();
+    assert!(!state.chunk_index.contains_key("LibA/doc.md"));
+    assert!(state.collection.get(&id_a).is_err());
+
+    // LibB/doc.md MUST remain intact
+    assert!(state.chunk_index.contains_key("LibB/doc.md"));
+    assert_eq!(
+        state.chunk_index["LibB/doc.md"].get("common_hash"),
+        Some(&id_b)
+    );
+    assert!(state.collection.get(&id_b).is_ok());
+}

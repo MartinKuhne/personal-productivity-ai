@@ -176,11 +176,13 @@ impl VectorSearchService {
             (vpath, model, existing)
         };
 
+        let unique_hashes: HashSet<&str> = chunks.iter().map(|c| c.hash.as_str()).collect();
+
         if !existing.is_empty()
-            && existing.len() == chunks.len()
-            && chunks
+            && existing.len() == unique_hashes.len()
+            && unique_hashes
                 .iter()
-                .all(|chunk| existing.contains_key(&chunk.hash))
+                .all(|hash| existing.contains_key(*hash))
         {
             tracing::debug!(
                 name = "vector_search.file_already_indexed",
@@ -216,9 +218,8 @@ impl VectorSearchService {
             return;
         };
 
-        let current_hashes: HashSet<&str> = chunks.iter().map(|c| c.hash.as_str()).collect();
         for (hash, id) in &existing {
-            if !current_hashes.contains(hash.as_str()) {
+            if !unique_hashes.contains(hash.as_str()) {
                 let _ = state.collection.delete(id);
                 if let Some(file_chunks) = state.chunk_index.get_mut(&vpath) {
                     file_chunks.remove(hash);
