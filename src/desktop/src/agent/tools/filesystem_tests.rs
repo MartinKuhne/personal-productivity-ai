@@ -67,7 +67,6 @@ fn test_tool_patch_note_not_found() {
     );
 }
 
-
 #[test]
 fn test_tool_search_notes() {
     let dir = tempdir().unwrap();
@@ -407,7 +406,11 @@ fn test_tool_search_notes_covers_md_and_markdown_but_not_other_types() {
     assert!(result.iter().any(|m| m.contains("test.md")));
     assert!(result.iter().any(|m| m.contains("Contains search term")));
     assert!(result.iter().any(|m| m.contains("doc.markdown")));
-    assert!(result.iter().any(|m| m.contains("Also contains search term")));
+    assert!(
+        result
+            .iter()
+            .any(|m| m.contains("Also contains search term"))
+    );
     // txt and pdf must NOT appear in results
     assert!(!result.iter().any(|m| m.contains("secret.txt")));
     assert!(!result.iter().any(|m| m.contains("notes.pdf")));

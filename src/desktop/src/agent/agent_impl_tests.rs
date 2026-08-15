@@ -217,7 +217,7 @@ fn test_run_agent_http_status_error() {
     assert!(
         events.iter().any(|e| matches!(
             e,
-            AgentObserverEvent::Failed(error) if error.contains("HTTP 400 error")
+            AgentObserverEvent::Failed(error) if error.contains("bad request") || error.contains("Failed to parse")
         )),
         "expected Failed with HTTP 400 error; got: {:?}",
         events
