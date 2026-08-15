@@ -97,6 +97,62 @@ fn test_apply_send_click_run_agent_dispatches_with_prompt() {
     );
 }
 
+/// Regression test: submitting a prompt while agent results are already
+/// displayed must continue the existing conversation (reuse session_id
+/// and append to transcript). After closing results, a new prompt must
+/// mint a fresh session_id.
+#[test]
+fn test_apply_send_click_reuses_session_id_when_results_displayed() {
+    let mut app = create_test_app();
+    app.orchestrator.agent_panel_state.command_input = "first prompt".to_string();
+
+    apply_send_click(&mut app);
+
+    assert!(app.orchestrator.agent_panel_state.show_results);
+    let session_id_1 = app
+        .agent()
+        .current_session_id()
+        .expect("session_id must be set on first prompt");
+
+    // Second prompt while agent results are still displayed
+    app.orchestrator.agent_panel_state.command_input = "second prompt".to_string();
+    apply_send_click(&mut app);
+
+    let session_id_2 = app
+        .agent()
+        .current_session_id()
+        .expect("session_id must remain set on continuation");
+    assert_eq!(
+        session_id_1, session_id_2,
+        "second prompt while results are displayed must reuse the active session_id"
+    );
+    assert!(
+        app.orchestrator
+            .agent_transcript
+            .content
+            .contains("second prompt"),
+        "continuation prompt must be appended to the transcript"
+    );
+
+    // Close agent results
+    crate::ui::panels::center::clear_agent_session_state(&mut app);
+    assert!(!app.orchestrator.agent_panel_state.show_results);
+    assert!(app.agent().current_session_id().is_none());
+
+    // Third prompt after closing results must start a new session
+    app.orchestrator.agent_panel_state.command_input = "third prompt".to_string();
+    apply_send_click(&mut app);
+
+    let session_id_3 = app
+        .agent()
+        .current_session_id()
+        .expect("session_id must be set on fresh prompt");
+    assert_ne!(
+        session_id_1, session_id_3,
+        "prompt after closing must start a new session with a new session_id"
+    );
+}
+
 /// Tier 4 click test: pressing Enter in the bottom-panel
 /// command input must dispatch the prompt via
 /// `apply_send_click` and fire the `on_click("send")` callback.
