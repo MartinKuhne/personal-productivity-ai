@@ -131,7 +131,7 @@ fn test_render_hyperlink_smoke() {
         egui::CentralPanel::default().show(ui, |ui| {
             // task_checked=None, needs_bullet=false → not a list
             // item; renders the link inline.
-            render_inline(ui, &elems, false, None, 0, None, 0, &mut Vec::new());
+            render_inline(ui, &InlineRenderItem::simple(&elems), &mut Vec::new());
         });
     });
     // No click happened, so the UI's `OpenUrl` output must be
@@ -173,7 +173,7 @@ fn test_hyperlink_click_opens_url() {
         )];
         // task_checked=None, needs_bullet=false → not a list
         // item; renders the link inline.
-        render_inline(ui, &elems, false, None, 0, None, 0, &mut Vec::new());
+        render_inline(ui, &InlineRenderItem::simple(&elems), &mut Vec::new());
     });
     harness.fit_contents();
     harness.run();

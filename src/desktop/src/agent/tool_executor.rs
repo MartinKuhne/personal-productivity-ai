@@ -16,6 +16,19 @@ use std::sync::Arc;
 /// [`crate::tools::registry::cache::cache`].
 type SharedCache = Arc<crate::tools::registry::cache::ToolCache>;
 
+/// Result record for an individual executed tool call.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ToolCallRecord {
+    /// Unique identifier for the tool call.
+    pub call_id: String,
+    /// Name of the tool executed.
+    pub name: String,
+    /// Raw JSON arguments passed to the tool.
+    pub arguments: String,
+    /// Output result string from the tool execution.
+    pub result: String,
+}
+
 pub struct ToolExecutor {
     /// Global `AgentConfig` shared with every tool call (used by
     /// the tool context for VFS resolution and integration
@@ -116,11 +129,10 @@ impl ToolExecutorBuilder {
 }
 
 impl ToolExecutor {
-    #[allow(clippy::type_complexity)]
     pub fn execute_all(
         &self,
         tool_calls: &[serde_json::Value],
-    ) -> (Vec<(String, String, String, String)>, Vec<ToolSideEffect>) {
+    ) -> (Vec<ToolCallRecord>, Vec<ToolSideEffect>) {
         let mut safe_calls = Vec::new();
         let mut unsafe_calls = Vec::new();
         for tc in tool_calls {
@@ -146,9 +158,11 @@ impl ToolExecutor {
     /// each tool's group, or clear it on success. Called once per
     /// turn after all tool calls have completed. Per-group error
     /// state is what the UI dialog's "needs attention" badge reads.
-    fn record_tool_errors(&self, results: &[(String, String, String, String)]) {
+    fn record_tool_errors(&self, results: &[ToolCallRecord]) {
         use crate::tools::registry::errors::{ToolErrorKind, ToolGroupError};
-        for (_call_id, func_name, _func_args, result) in results {
+        for record in results {
+            let func_name = &record.name;
+            let result = &record.result;
             let group = self.tool_context.load().registry.tool_group(func_name);
             let Some(group) = group else {
                 continue;
@@ -193,7 +207,7 @@ impl ToolExecutor {
     fn execute_parallel(
         &self,
         calls: &[serde_json::Value],
-    ) -> Vec<(String, String, String, String)> {
+    ) -> Vec<ToolCallRecord> {
         let rt = match tokio::runtime::Builder::new_multi_thread()
             .enable_all()
             .build()
@@ -232,7 +246,7 @@ impl ToolExecutor {
                         .with_tool_call_policy(pdf)
                         .build();
                     let result = execute_tool(dispatcher, &ctx, &func_name, &func_args);
-                    (call_id, func_name, func_args, result)
+                    ToolCallRecord { call_id, name: func_name, arguments: func_args, result }
                 });
             }
             while let Some(res) = join_set.join_next().await {
@@ -247,7 +261,7 @@ impl ToolExecutor {
     fn execute_sequential(
         &self,
         calls: &[serde_json::Value],
-    ) -> Vec<(String, String, String, String)> {
+    ) -> Vec<ToolCallRecord> {
         let mut results = Vec::new();
         for tc in calls {
             let call_id = extract_str(tc, &["id"]).to_string();
@@ -270,17 +284,20 @@ impl ToolExecutor {
             .with_tool_call_policy(pdf)
             .build();
             let result = execute_tool(dispatcher, &ctx, &func_name, &func_args);
-            results.push((call_id, func_name, func_args, result));
+            results.push(ToolCallRecord { call_id, name: func_name, arguments: func_args, result });
         }
         results
     }
 
     fn extract_side_effects(
         &self,
-        results: &[(String, String, String, String)],
+        results: &[ToolCallRecord],
     ) -> Vec<ToolSideEffect> {
         let mut effects = Vec::new();
-        for (_call_id, func_name, func_args_str, result) in results {
+        for record in results {
+            let func_name = &record.name;
+            let func_args_str = &record.arguments;
+            let result = &record.result;
             if func_name != "create_note" {
                 continue;
             }

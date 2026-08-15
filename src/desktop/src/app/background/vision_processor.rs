@@ -12,7 +12,6 @@ use serde_json::json;
 use std::path::PathBuf;
 use std::sync::mpsc::Receiver;
 
-#[allow(clippy::result_large_err)]
 pub async fn process_image(
     job: ImageJob,
     config: AppConfig,

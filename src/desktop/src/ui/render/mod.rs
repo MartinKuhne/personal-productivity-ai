@@ -45,7 +45,7 @@ pub use crate::markdown::{
 pub(crate) use code::copy_code_to_output;
 pub(crate) use code::render_code_block;
 pub(crate) use heading::render_heading;
-pub(crate) use inline::render_inline;
+pub(crate) use inline::{InlineRenderItem, render_inline};
 pub(crate) use table::render_table_with_config;
 pub(crate) use yaml_table::render_yaml_table;
 
@@ -183,16 +183,15 @@ pub fn render_markdown(
             } => {
                 // P0-2: Assign a task index to each task list item so
                 // checkbox toggles can be mapped back to the source.
-                render_inline(
-                    ui,
+                let item = InlineRenderItem {
                     elems,
-                    *needs_bullet,
-                    *task_checked,
-                    *indent,
-                    *list_ordinal,
+                    needs_bullet: *needs_bullet,
+                    task_checked: *task_checked,
+                    indent: *indent,
+                    list_ordinal: *list_ordinal,
                     task_index,
-                    pending_toggles,
-                );
+                };
+                render_inline(ui, &item, pending_toggles);
                 if task_checked.is_some() {
                     task_index += 1;
                 }

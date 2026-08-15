@@ -57,6 +57,7 @@ mod table_regressions;
 pub(super) use super::{
     // Markdown re-exports (these were `pub use` in the old `render.rs`).
     InlineElem,
+    InlineRenderItem,
     RenderEvent,
     TextStyle,
     apply_task_toggle,
