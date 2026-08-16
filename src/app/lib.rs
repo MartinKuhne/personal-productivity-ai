@@ -22,11 +22,11 @@ pub use fastmd_agent as agent;
 pub mod app;
 pub mod background;
 pub mod bus;
+pub mod export;
 pub mod integrations;
 pub mod markdown;
 #[cfg(feature = "pdf-export")]
-#[path = "lib/pdf/mod.rs"]
-pub mod pdf;
+pub use export::pdf;
 pub mod ui;
 pub mod utils;
 pub mod workspace;

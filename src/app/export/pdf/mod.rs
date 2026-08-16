@@ -1,3 +1,10 @@
+//! Typst-powered PDF generation engine and export actions.
+
+pub mod save;
+pub mod typst_translator;
+
+pub use save::*;
+
 const TEMPLATE: &str = r##"
 #set page(
   paper: "a4",
@@ -114,5 +121,3 @@ pub fn generate(title: &str, typst_body: &str) -> Result<Vec<u8>, String> {
 
     Ok(pdf_bytes)
 }
-
-pub mod typst_translator;

@@ -5,9 +5,9 @@
 use super::context::TreeNodeContext;
 use super::flatten::{FlatRow, initial_rename_value};
 use super::handlers::{apply_directory_row_click, apply_file_row_click, build_merge_prompt};
-use crate::app::print::{PrintJob, execute_print_blocking};
 #[cfg(feature = "pdf-export")]
-use crate::app::print_pdf::{SaveAsPdfJob, execute_save_as_pdf_blocking};
+use crate::export::pdf::{SaveAsPdfJob, execute_save_as_pdf_blocking};
+use crate::export::print::{PrintJob, execute_print_blocking};
 use crate::ui::TreeNode;
 use eframe::egui;
 use std::collections::HashSet;
@@ -221,7 +221,7 @@ fn show_file_context_menu(
                 let target_for_log = target.clone();
                 std::thread::Builder::new()
                     .name("pdf-export".into())
-                    .stack_size(crate::app::print_pdf::TYPST_THREAD_STACK_SIZE)
+                    .stack_size(crate::export::pdf::TYPST_THREAD_STACK_SIZE)
                     .spawn(move || {
                         if let Err(e) = execute_save_as_pdf_blocking(job, Some(tx)) {
                             tracing::error!(

@@ -21,9 +21,9 @@ pub mod browser;
 pub mod document;
 pub mod events;
 pub mod orchestrator;
-pub mod print;
 #[cfg(feature = "pdf-export")]
-pub mod print_pdf;
+pub use crate::export::pdf as print_pdf;
+pub use crate::export::print;
 pub mod prompts;
 pub mod session;
 pub mod tags;

@@ -230,7 +230,7 @@ pub fn generate_format_prompt(date_str: &str) -> String {
 
 impl eframe::App for FastMdApp {
     fn on_exit(&mut self) {
-        crate::app::print::cleanup_temp_files();
+        crate::export::print::cleanup_temp_files();
         if let Ok(mgr) = self.orchestrator.background_manager.lock() {
             let log_path = crate::config::get_config_path()
                 .parent()
