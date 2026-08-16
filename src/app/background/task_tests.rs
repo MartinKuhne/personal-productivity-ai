@@ -211,7 +211,7 @@ fn test_initial_scan_publishes_pdf_discovered_to_bus() {
 
 #[test]
 fn test_bus_published_pdf_triggers_conversion_via_subscriber() {
-    use crate::app::background::LogCategory;
+    use crate::background::LogCategory;
     use crate::bus::events::typed::ProcessEvent;
 
     let mut config = AppConfig::default();
@@ -340,7 +340,7 @@ fn test_pdf_worker_publishes_discovered_for_output_md() {
 #[cfg(feature = "image-library")]
 #[test]
 fn test_bus_published_image_triggers_vision_via_subscriber() {
-    use crate::app::background::LogCategory;
+    use crate::background::LogCategory;
     use crate::config::LlmConfig;
 
     let mut config = AppConfig::default();

@@ -13,8 +13,8 @@
 //! messaging primitives (event buses, message types, bus routing) live
 //! in [`crate::bus`].
 
-pub mod background;
-pub mod background_task;
+pub use crate::background;
+pub use crate::background::task as background_task;
 pub mod batch;
 #[cfg(feature = "browser")]
 pub mod browser;

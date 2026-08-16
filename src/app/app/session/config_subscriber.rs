@@ -1,7 +1,7 @@
 //! Background subscription that initializes and refreshes MCP tools on configuration arrivals.
 
 use crate::agent::AgentToolContext;
-use crate::app::background::{BackgroundLogEntry, LogCategory};
+use crate::background::{BackgroundLogEntry, LogCategory};
 use crate::bus::config::CONFIG_ARRIVAL_TIMEOUT;
 use crate::bus::core::Bus;
 use crate::bus::events::config::ConfigArrived;

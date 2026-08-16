@@ -1,7 +1,7 @@
 //! Filesystem watcher — observes content-library directories and routes changes to PDF converter and vision processor queues.
 
-use crate::app::background::PdfConversionJob;
-use crate::app::background::models::{BackgroundLogEntry, LogCategory};
+use crate::background::PdfConversionJob;
+use crate::background::models::{BackgroundLogEntry, LogCategory};
 use crate::bus::core::Bus;
 use crate::bus::events::file::FileEvent;
 use crate::bus::events::typed::FsEvent;
@@ -194,7 +194,7 @@ impl FileWatcher {
                                     match event.kind {
                                         notify::EventKind::Create(_)
                                         | notify::EventKind::Modify(_) => {
-                                            let job = crate::app::background::models::ImageJob::new(
+                                            let job = crate::background::models::ImageJob::new(
                                                 path.clone(),
                                             );
                                             if job.should_process() {

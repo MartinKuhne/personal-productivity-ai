@@ -11,9 +11,8 @@ use std::sync::{Arc, Mutex};
 use eframe::egui;
 
 use crate::agent::AgentSession;
-use crate::app::background::BackgroundLogs;
-use crate::app::background_task::Task;
 use crate::app::{Dialogs, FileSelection, PanelLayout, PersistedUiState, Tags, TextBuffer};
+use crate::background::{BackgroundLogs, Task};
 use crate::bus::core::Bus;
 use crate::bus::events::config::ConfigArrived;
 use crate::config::AppConfig;

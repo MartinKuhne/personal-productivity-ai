@@ -2,7 +2,7 @@
 //!
 //! Unit tests live in the sibling `logs_tests.rs` sidecar.
 
-use crate::app::background::models::{BackgroundLogEntry, LogCategory};
+use crate::background::models::{BackgroundLogEntry, LogCategory};
 use std::collections::VecDeque;
 use std::fs::File;
 use std::io::Write;

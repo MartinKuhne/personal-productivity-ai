@@ -32,7 +32,7 @@
 //!
 //! Unit tests live in the sibling `print_pdf_tests.rs` sidecar.
 
-use crate::app::background::{BackgroundLogEntry, LogCategory};
+use crate::background::{BackgroundLogEntry, LogCategory};
 use std::path::{Path, PathBuf};
 
 /// Job description for the "Save as PDF" background action.

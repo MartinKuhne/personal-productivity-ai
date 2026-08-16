@@ -2,7 +2,7 @@
 //!
 //! Unit tests live in the sibling `vision_processor_tests.rs` sidecar.
 
-use crate::app::background::models::{BackgroundLogEntry, ImageJob, LogCategory};
+use crate::background::models::{BackgroundLogEntry, ImageJob, LogCategory};
 use crate::bus::core::Bus;
 use crate::bus::events::file::{FileEvent, FileEventProducer};
 use crate::bus::events::typed::BackgroundEventSender;

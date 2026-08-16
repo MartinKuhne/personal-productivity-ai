@@ -1,11 +1,11 @@
 //! Background task orchestrator for watcher, indexing, conversion, vision, and routing workers.
 //!
-//! Unit tests live in the sibling `background_task_tests.rs` sidecar.
+//! Unit tests live in the sibling `task_tests.rs` sidecar.
 
-use crate::app::background::indexer::Indexer;
-use crate::app::background::pdf_converter::PdfConverterWorker;
+use super::indexer::Indexer;
+use super::pdf_converter::PdfConverterWorker;
 #[cfg(feature = "image-library")]
-use crate::app::background::vision_processor::ImageVisionWorker;
+use super::vision_processor::ImageVisionWorker;
 use crate::bus::config::CONFIG_ARRIVAL_TIMEOUT;
 use crate::bus::core::Bus;
 use crate::bus::events::config::ConfigArrived;
@@ -31,7 +31,7 @@ pub struct Task {
     pub finished_watcher: Arc<Mutex<Option<notify::RecommendedWatcher>>>,
     #[cfg(feature = "vector-search")]
     /// Shared vector-search service.
-    pub vector_search_service: Arc<crate::app::background::VectorSearchService>,
+    pub vector_search_service: Arc<crate::background::VectorSearchService>,
     cancel: Arc<AtomicBool>,
 }
 
@@ -47,7 +47,7 @@ impl Task {
         let cancel_clone = cancel.clone();
         let finished_watcher = Arc::new(Mutex::new(None));
         #[cfg(feature = "vector-search")]
-        let vector_search_service = Arc::new(crate::app::background::VectorSearchService::new());
+        let vector_search_service = Arc::new(crate::background::VectorSearchService::new());
 
         let config_reader = config_bus.subscribe();
         let finished_watcher_for_worker = finished_watcher.clone();
@@ -125,7 +125,7 @@ impl Task {
         cancel: Arc<AtomicBool>,
         finished_watcher: Arc<Mutex<Option<notify::RecommendedWatcher>>>,
         #[cfg(feature = "vector-search")] vector_search_service: Arc<
-            crate::app::background::VectorSearchService,
+            crate::background::VectorSearchService,
         >,
     ) {
         #[cfg(feature = "vector-search")]
@@ -173,5 +173,5 @@ impl Task {
 }
 
 #[cfg(test)]
-#[path = "background_task_tests.rs"]
+#[path = "task_tests.rs"]
 mod tests;

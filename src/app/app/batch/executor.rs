@@ -161,8 +161,8 @@ impl BatchJobExecutor {
                 Err(_) => {
                     failed += 1;
                     let _ = self.tx_gui.send(BackgroundEvent::from(
-                        crate::app::background::models::BackgroundLogEntry::new(
-                            crate::app::background::models::LogCategory::Batch,
+                        crate::background::models::BackgroundLogEntry::new(
+                            crate::background::models::LogCategory::Batch,
                             "A batch job panicked and was terminated".to_string(),
                         ),
                     ));

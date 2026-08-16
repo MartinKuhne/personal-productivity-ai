@@ -1,6 +1,6 @@
 //! Typed background events — the per-domain event payloads that flow
 //! over the single `mpsc::Sender<BackgroundEvent>` channel owned by
-//! [`crate::app::background_task::Task`].
+//! [`crate::background::Task`].
 //!
 //! Each variant of [`BackgroundEvent`] wraps a domain-specific
 //! sub-enum: [`FsEvent`] for the file watcher and indexer,
@@ -12,7 +12,7 @@
 //!
 //! The non-cloneable `notify::RecommendedWatcher` handle that the
 //! file-watcher owns is moved through the
-//! [`crate::app::background_task::Task::finished_watcher`] slot
+//! [`crate::background::Task::finished_watcher`] slot
 //! instead of the message bus.
 
 use crate::bus::events::messages::BackgroundLogEntry;
@@ -176,7 +176,7 @@ mod tests {
     //! call-site tests in `app/background/*` and `agent/*`.
 
     use super::*;
-    use crate::app::background::LogCategory;
+    use crate::background::LogCategory;
 
     #[test]
     fn from_log_entry_wraps_process_variant() {

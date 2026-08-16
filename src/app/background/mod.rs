@@ -19,6 +19,7 @@ pub mod indexer;
 pub mod logs;
 pub mod models;
 pub mod pdf_converter;
+pub mod task;
 #[cfg(feature = "vector-search")]
 pub mod vector_search;
 #[cfg(feature = "image-library")]
@@ -30,6 +31,7 @@ pub use logs::{BackgroundLogs, MAX_LOG_ENTRIES, SharedBackgroundLogs};
 pub use models::ImageJob;
 pub use models::{BackgroundLogEntry, LogCategory};
 pub use pdf_converter::{PdfConversionJob, PdfConverterWorker};
+pub use task::Task;
 #[cfg(feature = "vector-search")]
 pub use vector_search::{
     VectorSearchService, is_markdown, markdown_chunks, start as start_vector_search,

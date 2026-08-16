@@ -2,8 +2,8 @@
 //!
 //! Unit tests live in the sibling `indexer_tests.rs` sidecar.
 
-use crate::app::background::PdfConversionJob;
-use crate::app::background::models::{BackgroundLogEntry, LogCategory};
+use crate::background::PdfConversionJob;
+use crate::background::models::{BackgroundLogEntry, LogCategory};
 use crate::bus::core::Bus;
 use crate::bus::events::file::FileEvent;
 use crate::bus::events::typed::{BackgroundEventSender, FsEvent};
@@ -149,9 +149,8 @@ impl Indexer {
                             // vision.
                             #[cfg(feature = "image-library")]
                             {
-                                let job = crate::app::background::models::ImageJob::new(
-                                    path.to_path_buf(),
-                                );
+                                let job =
+                                    crate::background::models::ImageJob::new(path.to_path_buf());
                                 if job.should_process() {
                                     images_queued += 1;
                                     let _ = tx_img.send(path.to_path_buf());

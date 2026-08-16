@@ -20,6 +20,7 @@
 
 pub use fastmd_agent as agent;
 pub mod app;
+pub mod background;
 pub mod bus;
 pub mod integrations;
 pub mod markdown;

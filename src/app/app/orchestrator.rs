@@ -1,8 +1,8 @@
 use crate::agent::AgentSession;
 use crate::agent::events::ToolSideEffect;
-use crate::app::background::{BackgroundLogEntry, LogCategory, SharedBackgroundLogs};
 use crate::app::events::AgentEvent as SeamAgentEvent;
 use crate::app::{Dialogs, FileSelection, Tabs, Tags, TextBuffer};
+use crate::background::{BackgroundLogEntry, LogCategory, SharedBackgroundLogs};
 use crate::bus::core::{BroadcastRecvError, Bus, BusReader};
 use crate::bus::events::config::ConfigArrived;
 use crate::bus::events::file::FileEvent;

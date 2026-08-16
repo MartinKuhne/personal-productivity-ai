@@ -1,6 +1,6 @@
 //! Renders markdown to HTML and drives physical printing (or PDF export) via an embedded web-view pipeline.
 
-use crate::app::background::{BackgroundLogEntry, LogCategory};
+use crate::background::{BackgroundLogEntry, LogCategory};
 use std::io::Write;
 use std::path::PathBuf;
 use std::sync::{Mutex, OnceLock};

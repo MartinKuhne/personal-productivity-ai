@@ -2,7 +2,7 @@
 //!
 //! Unit tests live in the sibling `vector_search_tests.rs` sidecar.
 
-use crate::app::background::embeddings::EmbeddingClient;
+use crate::background::embeddings::EmbeddingClient;
 use crate::bus::core::{Bus, BusReader};
 use crate::bus::events::file::{FileEvent, FileEventKind};
 use crate::bus::events::typed::BackgroundEventSender;
