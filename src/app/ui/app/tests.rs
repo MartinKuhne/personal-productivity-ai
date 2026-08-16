@@ -2,11 +2,11 @@
 
 use super::*;
 use crate::agent::events::AgentStatus;
-use crate::app::orchestrator::AppOrchestrator;
 use crate::bus::events::agent::AgentEvent as SeamAgentEvent;
 use crate::bus::events::file::FileEvent;
 use crate::bus::events::messages::TokenUsageInfo;
 use crate::bus::events::typed::FsEvent;
+use crate::orchestrator::AppOrchestrator;
 use crate::ui::test_helpers::assert::assert_no_id_change_in_shapes;
 use crate::ui::test_helpers::run_ui_test;
 use std::path::PathBuf;
@@ -1217,7 +1217,7 @@ fn test_font_scale_rejects_non_finite_value() {
 /// as a multiplier.
 #[test]
 fn test_persisted_state_migration_clears_legacy_font_size_scale() {
-    use crate::app::persisted::{CURRENT_SCHEMA_VERSION, PersistedUiState};
+    use crate::ui::persisted::{CURRENT_SCHEMA_VERSION, PersistedUiState};
 
     // Hand-written JSON mimicking the pre-fix on-disk shape:
     // no `schema_version` field; `font_size_scale` holds the

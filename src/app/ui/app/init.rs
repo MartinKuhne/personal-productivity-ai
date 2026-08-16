@@ -184,14 +184,14 @@ impl FastMdApp {
         // Clear the field on the first launch after the fix so
         // the user starts at the OS default; other fields
         // (panel widths, expanded dirs) are preserved.
-        if persisted_ui_state.schema_version < crate::app::persisted::CURRENT_SCHEMA_VERSION {
+        if persisted_ui_state.schema_version < crate::ui::persisted::CURRENT_SCHEMA_VERSION {
             tracing::info!(
                 from = persisted_ui_state.schema_version,
-                to = crate::app::persisted::CURRENT_SCHEMA_VERSION,
+                to = crate::ui::persisted::CURRENT_SCHEMA_VERSION,
                 "migrating persisted UI state: clearing legacy font_size_scale"
             );
             persisted_ui_state.font_size_scale = None;
-            persisted_ui_state.schema_version = crate::app::persisted::CURRENT_SCHEMA_VERSION;
+            persisted_ui_state.schema_version = crate::ui::persisted::CURRENT_SCHEMA_VERSION;
         }
 
         let mut layout = PanelLayout::new();
@@ -210,7 +210,7 @@ impl FastMdApp {
         let dialogs = Dialogs::new();
 
         Self {
-            orchestrator: crate::app::orchestrator::AppOrchestrator {
+            orchestrator: crate::orchestrator::AppOrchestrator {
                 content_libraries: Vec::new(),
                 rx: background_task.rx,
                 tx: background_task.tx,
@@ -331,7 +331,7 @@ impl FastMdApp {
 
         let selection = FileSelection::new();
         let mut dialogs = Dialogs::new();
-        let batch_dialog_config = crate::app::batch::types::BatchDialogConfig {
+        let batch_dialog_config = crate::agent::batch::types::BatchDialogConfig {
             available_dirs: config
                 .content_libraries
                 .iter()
@@ -345,7 +345,7 @@ impl FastMdApp {
         let inline_editor_enabled = config.inline_editor_enabled;
 
         Self {
-            orchestrator: crate::app::orchestrator::AppOrchestrator {
+            orchestrator: crate::orchestrator::AppOrchestrator {
                 content_libraries,
                 rx: background_task.rx,
                 tx: background_task.tx,

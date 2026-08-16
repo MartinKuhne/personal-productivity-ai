@@ -33,8 +33,8 @@
 //!
 //! Unit tests live in the sibling `text_buffer_tests.rs` sidecar.
 
-use crate::app::document::DocumentContent;
 use crate::bus::events::file::FileEventProducer;
+use crate::markdown::DocumentContent;
 use std::fs;
 use std::path::{Path, PathBuf};
 
@@ -282,7 +282,7 @@ impl TextBuffer {
         &mut self,
         file_path: &Path,
         raw_content: &str,
-        pdf_backing: Option<&crate::app::session::PdfBackingTracker>,
+        pdf_backing: Option<&crate::agent::session::PdfBackingTracker>,
     ) {
         let is_pdf_backed = pdf_backing
             .map(|t| t.is_pdf_backed(file_path))

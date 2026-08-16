@@ -38,8 +38,8 @@
 
 #![cfg(feature = "pdf-export")]
 
-use fastmd::app::print_pdf::compile_markdown_to_pdf;
-use fastmd::pdf::typst_translator::render_markdown_to_typst;
+use fastmd::export::pdf::compile_markdown_to_pdf;
+use fastmd::export::pdf::typst_translator::render_markdown_to_typst;
 
 /// Source of the vendored spec. `include_str!` resolves at compile
 /// time, so the test binary carries the spec as a static — the file
@@ -898,7 +898,7 @@ fn all_commonmark_examples_render_content_into_pdf() {
     let pool = std::sync::Arc::new(
         rayon::ThreadPoolBuilder::new()
             .thread_name(|i| format!("pdf-content-{i}"))
-            .stack_size(fastmd::app::print_pdf::TYPST_THREAD_STACK_SIZE)
+            .stack_size(fastmd::export::pdf::TYPST_THREAD_STACK_SIZE)
             .build()
             .expect("failed to build rayon thread pool"),
     );

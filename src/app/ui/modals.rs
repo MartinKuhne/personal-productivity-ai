@@ -354,7 +354,7 @@ pub struct RenameDialogCtx<'a> {
     pub selected_dir: &'a mut Option<PathBuf>,
     pub tabs: &'a mut [PathBuf],
     pub file_processor: &'a mut FileEventProcessor,
-    pub app_tags: &'a mut crate::app::tags::Tags,
+    pub app_tags: &'a mut crate::workspace::Tags,
     pub expanded_dirs: &'a mut std::collections::HashSet<PathBuf>,
     pub ctx: &'a egui::Context,
 }

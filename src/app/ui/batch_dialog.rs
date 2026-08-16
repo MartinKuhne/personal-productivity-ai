@@ -1,11 +1,11 @@
 //! Batch prompt-processing dialog UI — directory/prompt/concurrency selection, progress display, and results summary.
 //!
 //! This is the egui presentation layer for the batch subsystem. The domain
-//! logic and data types live in [`crate::app::batch`]; this module only renders
+//! logic and data types live in [`crate::agent::batch`]; this module only renders
 //! the dialog and translates UI state into a [`BatchDialogResult`].
 
-use crate::app::batch::prompts::resolve_prompts;
-use crate::app::batch::types::{
+use crate::agent::batch::prompts::resolve_prompts;
+use crate::agent::batch::types::{
     BatchConfig, BatchDialogConfig, BatchDialogResult, BatchMode, validate_batch_params,
 };
 use crate::ui::FastMdApp;

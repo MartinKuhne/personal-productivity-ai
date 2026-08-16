@@ -86,7 +86,7 @@ impl TreeNode {
 }
 
 pub struct FastMdApp {
-    pub orchestrator: crate::app::orchestrator::AppOrchestrator,
+    pub orchestrator: crate::orchestrator::AppOrchestrator,
     pub layout: PanelLayout,
     /// Cached flattened tree rows to avoid rebuilding the file tree every frame.
     /// Invalidated when selection.tree_dirty is true.
@@ -134,7 +134,7 @@ impl FastMdApp {
         &mut self.orchestrator.file_processor
     }
 
-    pub fn pdf_backing_tracker(&self) -> &crate::app::session::PdfBackingTracker {
+    pub fn pdf_backing_tracker(&self) -> &crate::agent::session::PdfBackingTracker {
         &self.orchestrator.pdf_backing_tracker
     }
 

@@ -163,14 +163,14 @@ fn test_batch_dialog_renders_running_view() {
     let mut app = crate::ui::FastMdApp::empty_state(crate::config::AppConfig::default());
     // Simulate running state by attaching a dummy handle
     let cancel_flag = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
-    let dummy_thread = std::thread::spawn(|| crate::app::batch::types::BatchResult {
+    let dummy_thread = std::thread::spawn(|| crate::agent::batch::types::BatchResult {
         total_jobs: 0,
         completed: 0,
         failed: 0,
         cancelled: 0,
         duration: std::time::Duration::ZERO,
     }); // Finished immediately
-    let handle = crate::app::batch::types::BatchHandle {
+    let handle = crate::agent::batch::types::BatchHandle {
         cancel_flag,
         thread: dummy_thread,
     };

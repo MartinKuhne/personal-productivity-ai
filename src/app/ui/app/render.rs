@@ -114,7 +114,7 @@ impl FastMdApp {
                 crate::ui::batch_dialog::show_batch_modal(self, ctx, &mut dialog_config)
             {
                 match result {
-                    crate::app::batch::types::BatchDialogResult::Process(config) => {
+                    crate::agent::batch::types::BatchDialogResult::Process(config) => {
                         if self.orchestrator.dialogs.batch_handle.is_none() {
                             let prompt_text = dialog_config
                                 .available_prompts
@@ -123,7 +123,7 @@ impl FastMdApp {
                                 .unwrap_or_default();
 
                             let (coordinator, cancel_flag) =
-                                crate::app::batch::coordinator::BatchCoordinator::new(
+                                crate::agent::batch::coordinator::BatchCoordinator::new(
                                     config,
                                     self.orchestrator.config.clone(),
                                     self.orchestrator.tx.clone(),
@@ -136,7 +136,7 @@ impl FastMdApp {
                             self.orchestrator.dialogs.batch_cancel_flag = Some(cancel_flag);
                         }
                     }
-                    crate::app::batch::types::BatchDialogResult::Cancel => {
+                    crate::agent::batch::types::BatchDialogResult::Cancel => {
                         self.orchestrator.dialogs.batch_dialog_open = false;
                         dialog_config.available_prompts.clear();
                         dialog_config.selected_prompt_idx = None;

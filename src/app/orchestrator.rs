@@ -1,3 +1,5 @@
+//! Application orchestrator — coordinates domain state, background events, file-watcher events, and agent turn lifecycles.
+
 use crate::agent::AgentSession;
 use crate::agent::events::ToolSideEffect;
 use crate::background::{BackgroundLogEntry, LogCategory, SharedBackgroundLogs};
@@ -198,7 +200,7 @@ impl AppOrchestrator {
         // libraries) and the active UI selection. The agent run loop
         // doesn't know how to build these; it just forwards the
         // pre-built blocks.
-        let system_prompts = crate::app::prompts::build_system_prompts(
+        let system_prompts = crate::agent::prompts::build_system_prompts(
             &self.config,
             active_file.as_deref(),
             active_dir.as_deref(),

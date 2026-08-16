@@ -1,7 +1,7 @@
 //! Background subsystem — indexer, manager, models, PDF converter, and vision processor.
 //!
 //! The `notify`-based filesystem watcher lives in
-//! [`crate::app::watcher::file_watcher`]. All cross-thread messaging
+//! [`crate::workspace::watcher::file_watcher`]. All cross-thread messaging
 //! primitives (buses, event payloads, routing) live in [`crate::bus`].
 //!
 //! ## `image-library` feature

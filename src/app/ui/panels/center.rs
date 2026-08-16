@@ -389,7 +389,7 @@ pub fn render_tabs_and_content_capture(
 ///   source.
 fn render_markdown_content(
     ui: &mut egui::Ui,
-    tabs: &mut crate::app::Tabs,
+    tabs: &mut crate::ui::Tabs,
     frame_fill: Option<egui::Color32>,
     deficit_strategy: crate::ui::table_width::DeficitStrategy,
 ) {
@@ -405,7 +405,7 @@ fn render_markdown_content(
 /// Renders the scroll area containing YAML table, markdown, and task toggles.
 fn show_markdown_scroll_area(
     ui: &mut egui::Ui,
-    tabs: &mut crate::app::Tabs,
+    tabs: &mut crate::ui::Tabs,
     deficit_strategy: crate::ui::table_width::DeficitStrategy,
 ) {
     egui::ScrollArea::vertical()

@@ -1,6 +1,6 @@
 //! Prompt discovery — walks content libraries to find prompt files (markdown tagged with `tags: [prompt]`) for the batch dialog.
 
-use crate::app::batch::types::PromptInfo;
+use super::types::PromptInfo;
 use crate::config::{AppConfig, ContentLibrary};
 use crate::markdown::Document;
 use serde_norway::Value;

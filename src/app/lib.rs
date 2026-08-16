@@ -19,14 +19,15 @@
 //! (e.g. the `App` impl, the configuration bus's first event).
 
 pub mod agent;
-pub mod app;
 pub mod background;
 pub mod bus;
 pub mod export;
 pub mod integrations;
 pub mod markdown;
+pub mod orchestrator;
 #[cfg(feature = "pdf-export")]
 pub use export::pdf;
+pub use orchestrator::AppOrchestrator;
 pub mod ui;
 pub mod utils;
 pub mod workspace;

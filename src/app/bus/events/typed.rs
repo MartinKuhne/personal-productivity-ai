@@ -81,7 +81,7 @@ pub enum FsEvent {
     },
     /// Initial scan completed and the [`notify::RecommendedWatcher`]
     /// handle is now available in
-    /// [`crate::app::background_task::Task::finished_watcher`].
+    /// [`crate::background::Task::finished_watcher`].
     Finished,
     /// Initial scan completed but no watcher was created (e.g. the
     /// library root is empty).

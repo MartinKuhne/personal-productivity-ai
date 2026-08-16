@@ -1,5 +1,5 @@
-use fastmd::app::background::logs::{BackgroundLogs, MAX_LOG_ENTRIES};
-use fastmd::app::background::models::{BackgroundLogEntry, LogCategory};
+use fastmd::background::logs::{BackgroundLogs, MAX_LOG_ENTRIES};
+use fastmd::background::models::{BackgroundLogEntry, LogCategory};
 
 #[test]
 fn test_background_manager_push_limit() {

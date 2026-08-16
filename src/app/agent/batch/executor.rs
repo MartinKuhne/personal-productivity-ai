@@ -1,6 +1,6 @@
 //! Batch job executor — runs the LLM agent against each discovered unit (file or directory) with configurable concurrency.
 
-use crate::app::batch::types::{BatchJob, BatchJobStatus, BatchResult};
+use super::types::{BatchJob, BatchJobStatus, BatchResult};
 use crate::bus::events::typed::BackgroundEvent;
 use crate::config::AppConfig;
 use crate::utils::clock::Clock;

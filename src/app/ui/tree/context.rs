@@ -124,7 +124,7 @@ pub struct TreeOpsContext {
     /// file row click) leave this flag alone.
     pub tree_dirty: bool,
     /// Tracker for PDF backed files
-    pub pdf_backing_tracker: crate::app::session::PdfBackingTracker,
+    pub pdf_backing_tracker: crate::agent::session::PdfBackingTracker,
 }
 
 /// Type alias for backward compatibility.
@@ -165,7 +165,7 @@ impl Default for TreeOpsContext {
             bg_tx: None,
             file_event_producer: None,
             tree_dirty: false,
-            pdf_backing_tracker: crate::app::session::PdfBackingTracker::default(),
+            pdf_backing_tracker: crate::agent::session::PdfBackingTracker::default(),
         }
     }
 }
@@ -196,7 +196,7 @@ impl TreeOpsContext {
         inline_editor_enabled: bool,
         modifiers: egui::Modifiers,
         open_editor: Option<PathBuf>,
-        pdf_backing_tracker: crate::app::session::PdfBackingTracker,
+        pdf_backing_tracker: crate::agent::session::PdfBackingTracker,
     ) -> Self {
         Self {
             selected_file: selection.selected_file.clone(),

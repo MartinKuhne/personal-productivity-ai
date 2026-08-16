@@ -5,8 +5,8 @@
 
 #![cfg(test)]
 
+use super::BrowserSession;
 use crate::agent::tools::Tool;
-use crate::app::session::BrowserSession;
 use crate::config::AppConfig;
 use std::sync::Arc;
 use tempfile::TempDir;

@@ -1,5 +1,5 @@
-use fastmd::app::background::logs::BackgroundLogs;
-use fastmd::app::background::models::{BackgroundLogEntry, LogCategory};
+use fastmd::background::logs::BackgroundLogs;
+use fastmd::background::models::{BackgroundLogEntry, LogCategory};
 use tempfile::tempdir;
 
 #[test]

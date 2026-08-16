@@ -37,8 +37,7 @@ pub struct ToolExecutor {
     config: Arc<AgentConfig>,
     file_observer: std::sync::Arc<dyn crate::tools::observer::OnFileChanged>,
     /// When the `browser` Cargo feature is off the session is a
-    /// stub that returns
-    /// [`crate::app::session::SessionError::Disabled`].
+    /// stub that returns `SessionError::Disabled`.
     policy: std::sync::Arc<dyn crate::tools::policy::ToolCallPolicy>,
     cache: SharedCache,
     /// Catalog-level bundle. The executor snapshots this per

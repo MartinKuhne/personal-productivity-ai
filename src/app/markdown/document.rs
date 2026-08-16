@@ -32,6 +32,43 @@ pub struct FrontMatter {
     pub body: String,
 }
 
+/// Markdown document model — splits raw text into YAML front matter and body.
+#[derive(Debug, Clone, PartialEq)]
+pub struct DocumentContent {
+    pub front_matter: Option<String>,
+    pub body: String,
+}
+
+impl DocumentContent {
+    /// Parses a raw document string into front-matter and body.
+    pub fn parse(raw: &str) -> Self {
+        let content = raw.strip_prefix('\u{feff}').unwrap_or(raw);
+
+        if let Some(fm) = parse_front_matter(content) {
+            let original_fm = format!("---{}---", fm.source);
+            return Self {
+                front_matter: Some(original_fm),
+                body: fm.body.to_string(),
+            };
+        }
+
+        Self {
+            front_matter: None,
+            body: raw.to_string(),
+        }
+    }
+}
+
+impl std::fmt::Display for DocumentContent {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        if let Some(fm) = &self.front_matter {
+            write!(f, "{}{}", fm, self.body)
+        } else {
+            write!(f, "{}", self.body)
+        }
+    }
+}
+
 /// Parse YAML front matter from markdown content. The returned [`FrontMatter`]
 /// gives access to the parsed YAML value, the original YAML source text
 /// (preserved verbatim for round-tripping on save), and the body content
@@ -331,6 +368,41 @@ mod tests {
         assert_eq!(fm.yaml["title"].as_str(), Some("Test Document"));
         assert_eq!(fm.yaml["author"].as_str(), Some("John Doe"));
         assert_eq!(fm.body.trim(), "# Hello World");
+    }
+
+    #[test]
+    fn test_document_content_parse_with_front_matter() {
+        let raw = "---\ntitle: Test\n---\nBody text";
+        let doc = DocumentContent::parse(raw);
+        assert_eq!(doc.front_matter, Some("---\ntitle: Test\n---".to_string()));
+        assert_eq!(doc.body, "\nBody text");
+    }
+
+    #[test]
+    fn test_document_content_parse_without_front_matter() {
+        let raw = "Just body\ncontent";
+        let doc = DocumentContent::parse(raw);
+        assert!(doc.front_matter.is_none());
+        assert_eq!(doc.body, "Just body\ncontent");
+    }
+
+    #[test]
+    fn test_document_content_to_string_with_front_matter() {
+        let doc = DocumentContent {
+            front_matter: Some("---\ntitle: Test\n---".to_string()),
+            body: "\nBody".to_string(),
+        };
+        let result = doc.to_string();
+        assert_eq!(result, "---\ntitle: Test\n---\nBody");
+    }
+
+    #[test]
+    fn test_document_content_to_string_without_front_matter() {
+        let doc = DocumentContent {
+            front_matter: None,
+            body: "Just body".to_string(),
+        };
+        assert_eq!(doc.to_string(), "Just body");
     }
 }
 
