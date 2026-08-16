@@ -642,6 +642,40 @@ fn test_select_chat_model_default_key_rejected() {
 }
 
 #[test]
+fn test_select_chat_model_explicit_override() {
+    let mut config = AppConfig::default();
+    config.models.insert(
+        "model_a".to_string(),
+        LlmConfig {
+            model: "model-a".to_string(),
+            api_url: "http://a".to_string(),
+            api_key: "valid-key".to_string(),
+            cost: Some(1),
+            use_case: vec!["chat".to_string()],
+        },
+    );
+    config.models.insert(
+        "model_b".to_string(),
+        LlmConfig {
+            model: "model-b".to_string(),
+            api_url: "http://a".to_string(),
+            api_key: "valid-key".to_string(),
+            cost: Some(10),
+            use_case: vec!["chat".to_string()],
+        },
+    );
+
+    // Default without explicit selection picks lowest cost (model_a)
+    assert_eq!(config.current_chat_model_key().as_deref(), Some("model_a"));
+    assert_eq!(config.select_chat_model().unwrap().model, "model-a");
+
+    // Setting selected_chat_model overrides cost preference
+    config.selected_chat_model = Some("model_b".to_string());
+    assert_eq!(config.current_chat_model_key().as_deref(), Some("model_b"));
+    assert_eq!(config.select_chat_model().unwrap().model, "model-b");
+}
+
+#[test]
 fn test_from_app_config_projects_models() {
     let mut cfg = AppConfig::default();
     cfg.models.insert(

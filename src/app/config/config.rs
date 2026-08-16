@@ -93,6 +93,9 @@ pub struct AppConfig {
     pub system_prompt_extension: Option<String>,
     #[serde(default)]
     pub models: HashMap<String, LlmConfig>,
+    /// User-selected active chat model name (overrides auto cost selection).
+    #[serde(default)]
+    pub selected_chat_model: Option<String>,
     #[serde(default)]
     pub searxng_url: Option<String>,
     #[serde(default)]
@@ -171,6 +174,7 @@ impl std::fmt::Debug for AppConfig {
             .field("user_gender", &self.user_gender)
             .field("system_prompt_extension", &self.system_prompt_extension)
             .field("models", &self.models)
+            .field("selected_chat_model", &self.selected_chat_model)
             .field("searxng_url", &self.searxng_url)
             .field("jmap_clients", &self.jmap_clients)
             .field("caldav_clients", &self.caldav_clients)
@@ -200,6 +204,7 @@ impl Default for AppConfig {
             user_gender: None,
             system_prompt_extension: None,
             models: HashMap::new(),
+            selected_chat_model: None,
             searxng_url: Some("http://localhost:8090".to_string()),
             jmap_clients: HashMap::new(),
             caldav_clients: HashMap::new(),
@@ -237,6 +242,7 @@ impl AppConfig {
     pub fn to_agent_config(&self) -> crate::agent::config::AgentConfig {
         crate::agent::config::AgentConfigBuilder::new()
             .with_models(self.models.clone())
+            .with_selected_chat_model(self.selected_chat_model.clone())
             .with_max_tokens(self.max_tokens)
             .with_tool_groups(self.tool_groups.clone())
             .with_mcp_servers(self.mcp_servers.clone())
@@ -286,10 +292,34 @@ impl AppConfig {
             .collect()
     }
 
-    /// Select a chat model, preferring one configured for the "chat" use case,
-    /// falling back to the first available model, and rejecting default/empty keys.
+    /// Determine the active chat model key: explicit `selected_chat_model` if valid,
+    /// falling back to the lowest-cost model with "chat" use_case, then the first model.
+    pub fn current_chat_model_key(&self) -> Option<String> {
+        if let Some(selected) = &self.selected_chat_model
+            && self.models.contains_key(selected)
+        {
+            return Some(selected.clone());
+        }
+        self.model_for_use_case("chat")
+            .map(|(key, _)| key.clone())
+            .or_else(|| self.models.keys().next().cloned())
+    }
+
+    /// Select a chat model, preferring the explicitly chosen `selected_chat_model`,
+    /// then one configured for the "chat" use case, falling back to the first available model,
+    /// and rejecting default/empty keys.
     pub fn select_chat_model(&self) -> Result<&LlmConfig, String> {
-        let model_cfg = if let Some((_key, model_cfg)) = self.model_for_use_case("chat") {
+        let model_cfg = if let Some(key) = &self.selected_chat_model {
+            if let Some(cfg) = self.models.get(key) {
+                cfg
+            } else if let Some((_key, model_cfg)) = self.model_for_use_case("chat") {
+                model_cfg
+            } else if let Some(model_cfg) = self.models.values().next() {
+                model_cfg
+            } else {
+                return Err("No LLM models are configured.".to_string());
+            }
+        } else if let Some((_key, model_cfg)) = self.model_for_use_case("chat") {
             model_cfg
         } else if let Some(model_cfg) = self.models.values().next() {
             model_cfg

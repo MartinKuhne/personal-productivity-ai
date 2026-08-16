@@ -113,3 +113,53 @@ fn test_make_test_agent_config_has_one_model() {
     assert_eq!(agent_cfg.models().len(), 1);
     assert!(agent_cfg.models().contains_key("test"));
 }
+
+#[test]
+fn test_builder_with_selected_chat_model_round_trip() {
+    let agent_cfg = AgentConfigBuilder::new()
+        .with_selected_chat_model(Some("custom-model".to_string()))
+        .build();
+    assert_eq!(agent_cfg.selected_chat_model(), Some("custom-model"));
+}
+
+#[test]
+fn test_agent_config_select_chat_model_explicit() {
+    let mut models = HashMap::new();
+    models.insert(
+        "cheap".to_string(),
+        LlmConfig {
+            model: "cheap-model".to_string(),
+            api_url: "http://api".to_string(),
+            api_key: "k".to_string(),
+            cost: Some(1),
+            use_case: vec!["chat".to_string()],
+        },
+    );
+    models.insert(
+        "expensive".to_string(),
+        LlmConfig {
+            model: "expensive-model".to_string(),
+            api_url: "http://api".to_string(),
+            api_key: "k".to_string(),
+            cost: Some(100),
+            use_case: vec!["chat".to_string()],
+        },
+    );
+
+    let default_cfg = AgentConfigBuilder::new()
+        .with_models(models.clone())
+        .build();
+    assert_eq!(
+        default_cfg.select_chat_model().unwrap().model,
+        "cheap-model"
+    );
+
+    let override_cfg = AgentConfigBuilder::new()
+        .with_models(models)
+        .with_selected_chat_model(Some("expensive".to_string()))
+        .build();
+    assert_eq!(
+        override_cfg.select_chat_model().unwrap().model,
+        "expensive-model"
+    );
+}

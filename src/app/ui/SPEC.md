@@ -105,6 +105,15 @@ This module owns the user interface layer: pane layout and styling, directory tr
 * [UI-059] Authenticate Error State: When an `Authenticate` call fails, the row's status line shall show the error message until the next successful authentication attempt or until the user closes the dialog.
 * [UI-060] Clear Error: Each row with an error indicator shall provide a "Restart" action to clear the error state and retry.
 
+### Top Toolbar Hamburger Menu
+
+* [UI-061] Hamburger Menu: The top toolbar shall display a hamburger menu button (`☰`) aligned to the far right. Clicking the button opens a dropdown menu containing submenus for application windows, chat models, and table wrap algorithm options.
+* [UI-062] Windows Submenu: The top toolbar hamburger menu shall contain a "Windows" submenu offering toggles for supplementary application windows.
+* [UI-063] Window Toggles: The "Windows" submenu shall contain "Background operations" and "Agent debug" items that toggle the visibility of the Background Processes and Agent Debug windows respectively.
+* [UI-064] Chat Models Submenu: The top toolbar hamburger menu shall contain a "Chat models" submenu listing all configured chat models by name followed by their cost in the format `<name> (Cost: <cost>)`. When no models are configured, an informational placeholder is displayed.
+* [UI-065] Chat Model Selection: The "Chat models" submenu shall display a checkmark indicator (`✓`) next to the currently selected active chat model. When the user clicks any model from the list, the system shall set that model as the active chat model and persist the selection to configuration.
+* [UI-066] Table Wrap Algorithm Submenu: The top toolbar hamburger menu shall contain a "Table wrap algorithm" submenu listing all deficit strategies with a checkmark (`✓`) next to the active choice. Selecting an algorithm updates the active table formatting strategy and persists it to configuration.
+
 ---
 
 ## Existing Table Layout Renderer Requirements (TBL-xxx)

@@ -2,13 +2,12 @@
 
 use super::*;
 use crate::ui::test_helpers::run_ui_test;
-use crate::ui::test_helpers::text::assert_text_contains;
+use crate::ui::test_helpers::text::{assert_text_contains, extract_text};
 
-/// Tier 4 click test: clicking the batch-processing button in
-/// the top toolbar must open the batch dialog (sets
-/// `app.orchestrator.dialogs.batch_dialog_open = true`) and fire the
-/// `on_click("batch_button")` callback that the test
-/// harness captures into its persistent state.
+/// Tier 4 click test: clicking Batch... inside the hamburger menu must open
+/// the batch dialog (sets `app.orchestrator.dialogs.batch_dialog_open = true`)
+/// and fire the `on_click("batch_button")` callback that the test harness
+/// captures into its persistent state.
 ///
 /// Uses the `stateful_harness` helper from `test_helpers::interact`
 /// (R-3). The closure calls the production `show_top_panel_capture`
@@ -34,39 +33,33 @@ fn test_batch_button_click_opens_dialog() {
             captured.push(event);
         });
     });
-    harness.fit_contents();
-    // The top toolbar shows a spinner while indexing is in
-    // progress, which keeps repainting forever. Use
-    // `run_steps` with a bounded count rather than `run()`
-    // (which would hit `Harness::run exceeded max_steps`).
+    harness.set_size(egui::vec2(800.0, 600.0));
     harness.run_steps(2);
-    // Locate the batch button by its label (from
-    // `strings::BATCH_BUTTON`) and click it.
+
+    // Open the hamburger menu.
     harness
-        .get_by_label(crate::ui::strings::BATCH_BUTTON)
+        .get_by_label(crate::ui::strings::HAMBURGER_MENU_BUTTON)
         .click();
-    // Two `run_steps` calls after the click: the first
-    // processes the pointer events (hover + press + release
-    // = three steps), the second settles any post-click
-    // repaint. Bounded count to avoid the spinner infinite
-    // loop.
+    harness.run_steps(2);
+    harness.run_steps(2);
+
+    // Click Batch... inside the dropdown.
+    harness.get_by_label(crate::ui::strings::MENU_BATCH).click();
     harness.run_steps(2);
     harness.run_steps(2);
 
     let captured = harness.state();
     assert!(
         captured.contains(&"batch_button"),
-        "clicking the batch button must fire the `batch_button` \
+        "clicking Batch... in the hamburger menu must fire the `batch_button` \
              on_click event; got: {:?}",
         captured
     );
 }
 
-/// Tier 4 click test: clicking the "Tools..." button in the top
-/// toolbar must open the tools dialog (sets
-/// `app.orchestrator.dialogs.tools_dialog_open = true`) and fire the
-/// `on_click("tools_button")` callback. Mirrors the batch
-/// button test above.
+/// Tier 4 click test: clicking Tools... inside the hamburger menu must open
+/// the tools dialog (sets `app.orchestrator.dialogs.tools_dialog_open = true`)
+/// and fire the `on_click("tools_button")` callback. Mirrors the batch test above.
 #[test]
 fn test_tools_button_click_opens_dialog() {
     use crate::ui::test_helpers::interact::stateful_harness;
@@ -79,21 +72,309 @@ fn test_tools_button_click_opens_dialog() {
             captured.push(event);
         });
     });
-    harness.fit_contents();
+    harness.set_size(egui::vec2(800.0, 600.0));
     harness.run_steps(2);
+
+    // Open the hamburger menu.
     harness
-        .get_by_label(crate::ui::strings::TOOLS_BUTTON)
+        .get_by_label(crate::ui::strings::HAMBURGER_MENU_BUTTON)
         .click();
+    harness.run_steps(2);
+    harness.run_steps(2);
+
+    // Click Tools... inside the dropdown.
+    harness.get_by_label(crate::ui::strings::MENU_TOOLS).click();
     harness.run_steps(2);
     harness.run_steps(2);
 
     let captured = harness.state();
     assert!(
         captured.contains(&"tools_button"),
-        "clicking the tools button must fire the `tools_button` \
+        "clicking Tools... in the hamburger menu must fire the `tools_button` \
              on_click event; got: {:?}",
         captured
     );
+}
+
+/// Tier 4 click test: clicking the hamburger menu button in the top
+/// toolbar opens the menu dropdown, navigates into the Table wrap algorithm
+/// submenu, and clicking a strategy option fires the
+/// `on_click("table_width_strategy")` callback.
+#[test]
+fn test_hamburger_menu_click_opens_menu_and_selects_strategy() {
+    use crate::ui::test_helpers::interact::stateful_harness;
+    use egui_kittest::kittest::Queryable;
+
+    let mut harness = stateful_harness(Vec::<&'static str>::new(), |ui, captured| {
+        let mut app = create_test_app();
+        show_top_panel_capture(&mut app, ui, |event| {
+            captured.push(event);
+        });
+    });
+    harness.set_size(egui::vec2(800.0, 600.0));
+    harness.run_steps(2);
+    // Locate the hamburger menu button by its label ("☰") and click it.
+    harness
+        .get_by_label(crate::ui::strings::HAMBURGER_MENU_BUTTON)
+        .click();
+    harness.run_steps(2);
+    harness.run_steps(2);
+
+    // Open the "Table wrap algorithm" submenu (egui appends " ⏵" to submenu labels)
+    harness
+        .get_by_label_contains(crate::ui::strings::MENU_TABLE_WRAP_ALGORITHM)
+        .click();
+    harness.run_steps(2);
+    harness.run_steps(2);
+
+    // Locate and click the Proportional strategy option inside the opened submenu.
+    harness
+        .get_by_label_contains(crate::ui::strings::TABLE_WIDTH_STRATEGY_PROPORTIONAL)
+        .click_accesskit();
+    harness.run_steps(2);
+    harness.run_steps(2);
+
+    let captured = harness.state();
+    assert!(
+        captured.contains(&crate::ui::strings::TABLE_WIDTH_STRATEGY_EVENT),
+        "selecting a strategy in the hamburger menu must fire the `{}` on_click event; got: {:?}",
+        crate::ui::strings::TABLE_WIDTH_STRATEGY_EVENT,
+        captured
+    );
+}
+
+/// Tier 4 click test: clicking hamburger menu -> Windows -> Background operations
+/// toggles background logs and fires the on_click("background_operations") event.
+#[test]
+fn test_hamburger_menu_windows_background_operations_click() {
+    use crate::ui::test_helpers::interact::stateful_harness;
+    use egui_kittest::kittest::Queryable;
+
+    let mut harness = stateful_harness(Vec::<&'static str>::new(), |ui, captured| {
+        let mut app = create_test_app();
+        show_top_panel_capture(&mut app, ui, |event| {
+            captured.push(event);
+        });
+    });
+    harness.set_size(egui::vec2(800.0, 600.0));
+    harness.run_steps(2);
+
+    // Open hamburger menu
+    harness
+        .get_by_label(crate::ui::strings::HAMBURGER_MENU_BUTTON)
+        .click();
+    harness.run_steps(2);
+    harness.run_steps(2);
+
+    // Open Windows submenu (egui appends " ⏵" to submenu button labels)
+    harness
+        .get_by_label_contains(crate::ui::strings::MENU_WINDOWS)
+        .click();
+    harness.run_steps(2);
+    harness.run_steps(2);
+
+    // Click Background operations item
+    harness
+        .get_by_label_contains(crate::ui::strings::MENU_BACKGROUND_OPERATIONS)
+        .click_accesskit();
+    harness.run_steps(2);
+    harness.run_steps(2);
+
+    let captured = harness.state();
+    assert!(
+        captured.contains(&crate::ui::strings::BACKGROUND_OPERATIONS_EVENT),
+        "toggling background operations in the Windows menu must fire the `{}` event; got: {:?}",
+        crate::ui::strings::BACKGROUND_OPERATIONS_EVENT,
+        captured
+    );
+}
+
+/// Tier 4 click test: clicking hamburger menu -> Windows -> Agent debug
+/// toggles the agent debug window and fires the on_click("agent_debug") event.
+#[test]
+fn test_hamburger_menu_windows_agent_debug_click() {
+    use crate::ui::test_helpers::interact::stateful_harness;
+    use egui_kittest::kittest::Queryable;
+
+    let mut harness = stateful_harness(Vec::<&'static str>::new(), |ui, captured| {
+        let mut app = create_test_app();
+        show_top_panel_capture(&mut app, ui, |event| {
+            captured.push(event);
+        });
+    });
+    harness.set_size(egui::vec2(800.0, 600.0));
+    harness.run_steps(2);
+
+    // Open hamburger menu
+    harness
+        .get_by_label(crate::ui::strings::HAMBURGER_MENU_BUTTON)
+        .click();
+    harness.run_steps(2);
+    harness.run_steps(2);
+
+    // Open Windows submenu
+    harness
+        .get_by_label_contains(crate::ui::strings::MENU_WINDOWS)
+        .click();
+    harness.run_steps(2);
+    harness.run_steps(2);
+
+    // Click Agent debug item
+    harness
+        .get_by_label_contains(crate::ui::strings::MENU_AGENT_DEBUG)
+        .click_accesskit();
+    harness.run_steps(2);
+    harness.run_steps(2);
+
+    let captured = harness.state();
+    assert!(
+        captured.contains(&crate::ui::strings::AGENT_DEBUG_EVENT),
+        "toggling agent debug in the Windows menu must fire the `{}` event; got: {:?}",
+        crate::ui::strings::AGENT_DEBUG_EVENT,
+        captured
+    );
+}
+
+fn create_test_app_with_models() -> FastMdApp {
+    let mut config = crate::config::AppConfig::default();
+    config.models.insert(
+        "model-a".to_string(),
+        crate::config::LlmConfig {
+            model: "model-a".to_string(),
+            api_url: "http://localhost".to_string(),
+            api_key: "key".to_string(),
+            cost: Some(10),
+            use_case: vec!["chat".to_string()],
+        },
+    );
+    config.models.insert(
+        "model-b".to_string(),
+        crate::config::LlmConfig {
+            model: "model-b".to_string(),
+            api_url: "http://localhost".to_string(),
+            api_key: "key".to_string(),
+            cost: Some(20),
+            use_case: vec!["chat".to_string()],
+        },
+    );
+    FastMdApp::empty_state(config)
+}
+
+/// Tier 4 click test: clicking hamburger menu -> Chat models -> model-b
+/// sets selected_chat_model and fires the on_click("chat_model_selection") event.
+#[test]
+fn test_hamburger_menu_chat_models_selection_click() {
+    use crate::ui::test_helpers::interact::stateful_harness;
+    use egui_kittest::kittest::Queryable;
+
+    let mut harness = stateful_harness(
+        (create_test_app_with_models(), Vec::<&'static str>::new()),
+        |ui, (app, captured)| {
+            show_top_panel_capture(app, ui, |event| {
+                captured.push(event);
+            });
+        },
+    );
+    harness.set_size(egui::vec2(800.0, 600.0));
+    harness.run_steps(2);
+
+    // Open hamburger menu
+    harness
+        .get_by_label(crate::ui::strings::HAMBURGER_MENU_BUTTON)
+        .click();
+    harness.run_steps(2);
+    harness.run_steps(2);
+
+    // Open Chat models submenu
+    harness
+        .get_by_label_contains(crate::ui::strings::MENU_CHAT_MODELS)
+        .click();
+    harness.run_steps(2);
+    harness.run_steps(2);
+
+    // Click model-b item
+    harness.get_by_label_contains("model-b").click_accesskit();
+    harness.run_steps(2);
+    harness.run_steps(2);
+
+    let (app, captured) = harness.state();
+    assert_eq!(app.config().selected_chat_model.as_deref(), Some("model-b"));
+    assert_eq!(
+        app.agent().agent_config().selected_chat_model(),
+        Some("model-b"),
+        "selecting a chat model must update the runtime agent configuration"
+    );
+    assert!(
+        captured.contains(&crate::ui::strings::CHAT_MODEL_SELECTION_EVENT),
+        "selecting a chat model in the Chat models menu must fire the `{}` event; got: {:?}",
+        crate::ui::strings::CHAT_MODEL_SELECTION_EVENT,
+        captured
+    );
+}
+
+/// Tier 1 test for `apply_chat_model_selection`.
+#[test]
+fn test_apply_chat_model_selection() {
+    let mut app = create_test_app_with_models();
+    assert_eq!(app.config().selected_chat_model, None);
+    assert_eq!(
+        app.config().current_chat_model_key().as_deref(),
+        Some("model-a")
+    );
+
+    let mut saved = false;
+    let mut save_fn = |_cfg: &crate::config::AppConfig| -> Result<std::path::PathBuf, String> {
+        saved = true;
+        Ok(std::path::PathBuf::from("config.yaml"))
+    };
+    apply_chat_model_selection(&mut app, "model-b".to_string(), &mut save_fn);
+
+    assert!(saved);
+    assert_eq!(app.config().selected_chat_model.as_deref(), Some("model-b"));
+    assert_eq!(
+        app.config().current_chat_model_key().as_deref(),
+        Some("model-b")
+    );
+}
+
+/// Tier 1 test for `apply_background_logs_toggle`.
+#[test]
+fn test_apply_background_logs_toggle() {
+    let mut app = create_test_app();
+    assert!(
+        !app.orchestrator
+            .background_manager
+            .lock()
+            .unwrap()
+            .show_background_logs
+    );
+    apply_background_logs_toggle(&mut app, true);
+    assert!(
+        app.orchestrator
+            .background_manager
+            .lock()
+            .unwrap()
+            .show_background_logs
+    );
+    apply_background_logs_toggle(&mut app, false);
+    assert!(
+        !app.orchestrator
+            .background_manager
+            .lock()
+            .unwrap()
+            .show_background_logs
+    );
+}
+
+/// Tier 1 test for `apply_agent_debug_toggle`.
+#[test]
+fn test_apply_agent_debug_toggle() {
+    let mut app = create_test_app();
+    assert!(!app.orchestrator.agent_panel_state.show_debug_window);
+    apply_agent_debug_toggle(&mut app, true);
+    assert!(app.orchestrator.agent_panel_state.show_debug_window);
+    apply_agent_debug_toggle(&mut app, false);
+    assert!(!app.orchestrator.agent_panel_state.show_debug_window);
 }
 
 /// Tier 1 test for the batch button click effect. The click sets
@@ -178,10 +459,11 @@ fn test_apply_table_width_strategy_change_updates_config() {
     // the persist callback receives the post-mutation config. We
     // capture it for inspection rather than writing to disk.
     let mut persisted: Option<crate::config::AppConfig> = None;
-    apply_table_width_strategy_change(&mut app, target, |cfg| {
+    let mut persist_fn = |cfg: &crate::config::AppConfig| {
         persisted = Some(cfg.clone());
         Ok(PathBuf::new())
-    });
+    };
+    apply_table_width_strategy_change(&mut app, target, &mut persist_fn);
     assert_eq!(
         app.orchestrator.config.deficit_strategy(),
         target,
@@ -203,9 +485,10 @@ fn test_apply_table_width_strategy_change_updates_config() {
     // callback must NOT be called — supply a closure that panics if
     // it is, to assert the short-circuit.
     let before = app.orchestrator.config.table_width_strategy.clone();
-    apply_table_width_strategy_change(&mut app, target, |_cfg| {
+    let mut noop_fn = |_cfg: &crate::config::AppConfig| -> Result<PathBuf, String> {
         panic!("persist must not be called when the value is unchanged");
-    });
+    };
+    apply_table_width_strategy_change(&mut app, target, &mut noop_fn);
     let after = app.orchestrator.config.table_width_strategy.clone();
     assert_eq!(
         before, after,
@@ -347,7 +630,7 @@ fn test_compute_next_selected_file_file_not_in_tags() {
 
 // --- UI / window tests (R-7: merged from `mod ui_tests`) ---
 
-use crate::ui::strings::{APP_TITLE, BATCH_BUTTON, SHOW_LOG_CHECKBOX};
+use crate::ui::strings::APP_TITLE;
 use crate::ui::test_helpers::assert::assert_no_id_change_in_log;
 
 fn create_test_app() -> FastMdApp {
@@ -362,28 +645,15 @@ fn test_show_top_panel_indexing_unfinished() {
     let output = run_ui_test(&ctx, egui::RawInput::default(), |ui| {
         show_top_panel(&mut app, ui);
     });
-    // R-2 / Q12: the top panel always renders the app title, the log
-    // checkbox, the batch button, and the new tools button — those
-    // are stable across states. The table-width-strategy combobox
-    // is also unconditionally visible (it's a user preference, not
-    // gated on indexing).
+    // The top panel keeps the app title and hamburger button visible.
+    // Batch..., Tools..., and the log toggle are in the hamburger menu.
     assert_text_contains(&output.shapes, APP_TITLE);
-    assert_text_contains(&output.shapes, SHOW_LOG_CHECKBOX);
-    assert_text_contains(&output.shapes, BATCH_BUTTON);
-    assert_text_contains(&output.shapes, crate::ui::strings::TOOLS_BUTTON);
-    assert_text_contains(
-        &output.shapes,
-        crate::ui::strings::TABLE_WIDTH_STRATEGY_LABEL,
+    assert!(
+        !extract_text(&output.shapes)
+            .iter()
+            .any(|text| text.contains("Show log"))
     );
-    // Default config's deficit strategy is HybridMinPenaltyWaterFill
-    // (see `default_table_width_strategy` in `config.rs`); the
-    // combobox's `selected_text` must reflect that. Kept in sync
-    // with `default_table_width_strategy` and the
-    // `DeficitStrategy::from_config` fallback.
-    assert_text_contains(
-        &output.shapes,
-        strategy_label(crate::ui::table_width::DeficitStrategy::HybridMinPenaltyWaterFill),
-    );
+    assert_text_contains(&output.shapes, crate::ui::strings::HAMBURGER_MENU_BUTTON);
     assert!(!app.file_processor().indexing_finished);
 }
 
