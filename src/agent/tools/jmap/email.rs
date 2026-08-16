@@ -647,8 +647,8 @@ pub fn tool_get_email_by_id(
 /// Footer appended to all emails sent by the AI agent.
 pub const AI_AGENT_FOOTER: &str = "\n---\nSent by FastMD on behalf of the user";
 
-/// Send an email using `Email/set` to create the message and `EmailSubmission/set`
-/// to submit it for delivery via the typed crate API.
+/// Send an email using `Email/set` to create the message in the Drafts mailbox
+/// and `EmailSubmission/set` to submit it for delivery via the typed crate API.
 pub fn tool_send_email(
     config: &AgentConfig,
     to: &str,
@@ -668,11 +668,11 @@ pub fn tool_send_email(
 
         let account_id = session.account_id("urn:ietf:params:jmap:mail");
 
-        let inbox_id = match resolve_inbox(&session, &account_id) {
+        let drafts_id = match resolve_drafts(&session, &account_id) {
             Ok(id) => id,
             Err(e) => {
-                tracing::error!(name = "tool.email.send.resolve_inbox_failed", client = %name, error = %e, "Failed to resolve inbox mailbox ID.");
-                all_results.push(format!("Error resolving inbox for {}: {}", name, e));
+                tracing::error!(name = "tool.email.send.resolve_drafts_failed", client = %name, error = %e, "Failed to resolve drafts mailbox ID.");
+                all_results.push(format!("Error resolving drafts for {}: {}", name, e));
                 return Err(all_results.join("\n\n"));
             }
         };
@@ -689,7 +689,7 @@ pub fn tool_send_email(
         let full_body = format!("{body}{AI_AGENT_FOOTER}");
         let email_id = match create_email_via_set(
             &session,
-            &inbox_id,
+            &drafts_id,
             &identity_email,
             to,
             subject,
@@ -741,10 +741,10 @@ pub fn tool_send_email(
     }
 }
 
-/// Create an email via `Email/set` using the typed crate request builder.
+/// Create an email via `Email/set` in the Drafts mailbox using the typed crate request builder.
 fn create_email_via_set(
     session: &JmapSession,
-    inbox_id: &str,
+    drafts_id: &str,
     from_email: &str,
     to: &str,
     subject: &str,
@@ -754,7 +754,7 @@ fn create_email_via_set(
     let create_id = request
         .set_email()
         .create()
-        .mailbox_ids([inbox_id])
+        .mailbox_ids([drafts_id])
         .from([from_email])
         .to([to])
         .subject(subject)
@@ -811,13 +811,13 @@ fn get_first_identity_id(session: &JmapSession) -> Result<String, String> {
         .ok_or_else(|| "No identity found".to_string())
 }
 
-/// Resolve the Inbox mailbox ID using the typed crate `mailbox_query` with a role filter.
-fn resolve_inbox(session: &JmapSession, _account_id: &str) -> Result<String, String> {
+/// Resolve the Drafts mailbox ID using the typed crate `mailbox_query` with a role filter.
+fn resolve_drafts(session: &JmapSession, _account_id: &str) -> Result<String, String> {
     let mut query = session
         .inner()
         .mailbox_query(
             Some(jmap_client::mailbox::query::Filter::role(
-                jmap_client::mailbox::Role::Inbox,
+                jmap_client::mailbox::Role::Drafts,
             )),
             None::<Vec<_>>,
         )
@@ -826,10 +826,10 @@ fn resolve_inbox(session: &JmapSession, _account_id: &str) -> Result<String, Str
     let ids = query.take_ids();
     if ids.is_empty() {
         tracing::warn!(
-            name = "tool.email.resolve_inbox.not_found",
-            "Mailbox/query returned no inbox IDs"
+            name = "tool.email.resolve_drafts.not_found",
+            "Mailbox/query returned no drafts IDs"
         );
-        return Err("Inbox mailbox not found".to_string());
+        return Err("Drafts mailbox not found".to_string());
     }
     Ok(ids.into_iter().next().unwrap())
 }
