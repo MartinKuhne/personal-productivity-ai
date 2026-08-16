@@ -293,7 +293,8 @@ fn handle_jmap_post(body_text: &str, method_responses: &[serde_json::Value]) -> 
                     let call_id = call_arr.get(2).and_then(|id| id.as_str()).unwrap_or("0");
                     let call_args = call_arr.get(1);
 
-                    let matched = find_method_response(method_name, call_id, method_responses);
+                    let matched =
+                        find_method_response(method_name, call_id, call_args, method_responses);
 
                     if let Some(resp) = matched {
                         let mut resp_arr = resp.as_array().cloned().unwrap_or_default();
@@ -367,13 +368,26 @@ fn filter_response_by_ids(
 /// Find the best matching method response for a given method call.
 ///
 /// Matching order (per RFC 8620 §3.3):
-/// 1. Exact match on method name **and** call ID
+/// 1. Exact match on method name **and** call ID (and matching filter if configured in response)
 /// 2. Match on method name only (first match wins — for backwards compat)
 fn find_method_response<'a>(
     method_name: &str,
     call_id: &str,
+    call_args: Option<&serde_json::Value>,
     method_responses: &'a [serde_json::Value],
 ) -> Option<&'a serde_json::Value> {
+    let matches_filter = |r: &serde_json::Value| -> bool {
+        let Some(resp_obj) = r.get(1).and_then(|v| v.as_object()) else {
+            return true;
+        };
+        if let Some(expected_filter) = resp_obj.get("filter") {
+            let actual_filter = call_args.and_then(|a| a.get("filter"));
+            actual_filter == Some(expected_filter)
+        } else {
+            true
+        }
+    };
+
     method_responses
         .iter()
         .find(|r| {
@@ -382,12 +396,12 @@ fn find_method_response<'a>(
             };
             let r_method = r_arr.first().and_then(|m| m.as_str()).unwrap_or("");
             let r_call_id = r_arr.get(2).and_then(|id| id.as_str()).unwrap_or("");
-            r_method.eq_ignore_ascii_case(method_name) && r_call_id == call_id
+            r_method.eq_ignore_ascii_case(method_name) && r_call_id == call_id && matches_filter(r)
         })
         .or_else(|| {
             method_responses.iter().find(|r| {
                 let r_method = r.get(0).and_then(|m| m.as_str()).unwrap_or("");
-                r_method.eq_ignore_ascii_case(method_name)
+                r_method.eq_ignore_ascii_case(method_name) && matches_filter(r)
             })
         })
 }

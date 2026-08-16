@@ -681,7 +681,36 @@ fn test_tool_send_email_success() {
             \"apiUrl\": \"{API_URL}\",\
             \"primaryAccounts\": {\"urn:ietf:params:jmap:mail\": \"acc1\", \"urn:ietf:params:jmap:submission\": \"acc1\"},\
             \"methodResponses\": [\
-                [\"Mailbox/query\", {\"ids\": [\"inbox-id\"]}, \"0\"],\
+                [\"Mailbox/query\", {\"ids\": [\"drafts-id\"]}, \"0\"],\
+                [\"Identity/get\", {\"state\": \"id-state-0\", \"list\": [{\"id\": \"ident-1\", \"email\": \"sender@test.com\"}], \"notFound\": []}, \"1\"],\
+                [\"Email/set\", {\"created\": {\"c0\": {\"id\": \"email-1\"}}}, \"2\"],\
+                [\"EmailSubmission/set\", {\"created\": {\"c0\": {\"id\": \"sub-1\"}}}, \"3\"]\
+            ]\
+        }";
+    let url = spawn_mock_server(body);
+    let mut config = AgentConfig::default();
+    config.jmap_clients.insert(
+        "test".to_string(),
+        JmapClient {
+            url,
+            token: "tok".to_string(),
+        },
+    );
+    let res = tool_send_email(&config, "to@test.com", "Subject", "Body");
+    assert!(res.is_ok(), "Error: {}", res.unwrap_err());
+}
+
+#[test]
+fn test_tool_send_email_uses_drafts_mailbox() {
+    let _cache = crate::tools::registry::cache::ToolCache::new();
+    rustls::crypto::ring::default_provider()
+        .install_default()
+        .ok();
+    let body = "{\
+            \"apiUrl\": \"{API_URL}\",\
+            \"primaryAccounts\": {\"urn:ietf:params:jmap:mail\": \"acc1\", \"urn:ietf:params:jmap:submission\": \"acc1\"},\
+            \"methodResponses\": [\
+                [\"Mailbox/query\", {\"filter\": {\"role\": \"drafts\"}, \"ids\": [\"drafts-id\"]}, \"0\"],\
                 [\"Identity/get\", {\"state\": \"id-state-0\", \"list\": [{\"id\": \"ident-1\", \"email\": \"sender@test.com\"}], \"notFound\": []}, \"1\"],\
                 [\"Email/set\", {\"created\": {\"c0\": {\"id\": \"email-1\"}}}, \"2\"],\
                 [\"EmailSubmission/set\", {\"created\": {\"c0\": {\"id\": \"sub-1\"}}}, \"3\"]\
