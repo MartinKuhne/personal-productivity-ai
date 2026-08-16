@@ -160,6 +160,11 @@ impl ToolContextBuilder {
         self
     }
 
+    pub fn with_extensions(mut self, extensions: crate::tools::extensions::Extensions) -> Self {
+        self.extensions.extend(&extensions);
+        self
+    }
+
     /// Build the [`ToolContext`], injecting the file observer and the
     /// default VFS resolver and tool-call policy when no overrides
     /// were supplied.

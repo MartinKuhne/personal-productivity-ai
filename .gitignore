@@ -22,9 +22,12 @@ target
 release/
 *.rlib
 *.prof*
-.idea/
 *.log
 .env*
+!.env.example
+deploy/data/
+.fastmd-vector-index/
+
 
 # Proptest regression cases (auto-generated when a proptest
 # assertion fails; contains a minimal failing input you can

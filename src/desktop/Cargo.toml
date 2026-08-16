@@ -10,6 +10,12 @@ keywords = ["markdown", "viewer", "ai", "agent"]
 
 [features]
 default = ["pdf-export"]
+vector-search = [
+    "dep:async-openai",
+    "dep:qdrant-client",
+    "dep:text-splitter",
+    "fastmd-agent/vector-search",
+]
 # Discord bot integration. Adds the `integrations::discord` module and
 # the `run_discord_bot` entry point. Off by default — the bot is not
 # wired into `main.rs` and ships as opt-in.
@@ -80,7 +86,7 @@ reqwest = { version = "0.13", default-features = false, features = ["blocking", 
 opener = { version = "0.8", features = ["reveal"] }
 webbrowser = "1"
 backon = "1.6"
-uuid = { version = "1", features = ["v4", "serde"] }
+uuid = { version = "1", features = ["v4", "v5", "serde"] }
 csv = "1.4.0"
 evalexpr = "13.1.0"
 html-escape = "0.2"
@@ -101,6 +107,12 @@ typst-pdf = { version = "0.15", optional = true }
 typst = { version = "0.15", optional = true }
 typst-kit = { version = "0.15", optional = true }
 arc-swap = "1.9.2"
+# `async-openai` provides the OpenAI-compatible embeddings endpoint for the
+# optional vector-search worker. The embedding model comes from the user's
+# configured `embeddings` use-case model (AGENT-005). `rustls` keeps a single
+# TLS stack with the rest of the crate; `embedding` enables the embeddings API.
+async-openai = { version = "0.41", optional = true, default-features = false, features = ["rustls", "embedding"] }
+text-splitter = { version = "0.32", optional = true }
 # `fastmd-tool-macros` — sibling proc-macro crate that ships
 # `#[derive(ToolDescriptor)]`. See `fastmd-tool-macros/src/lib.rs`
 # for the macro contract. The repo has no Cargo workspace today
@@ -109,6 +121,8 @@ arc-swap = "1.9.2"
 # workspace member.
 fastmd-tool-macros = { path = "fastmd-tool-macros" }
 fastmd-agent = { path = "src/agent" }
+qdrant-client = { version = "1.13", optional = true }
+
 
 [target.'cfg(windows)'.dependencies]
 windows = { version = "0.62", features = ["Win32_System_Com", "Win32_UI_Shell"] }

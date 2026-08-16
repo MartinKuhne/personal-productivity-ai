@@ -35,7 +35,10 @@ C4Context
 
 The `fastmd` crate produces a single desktop application
 
-## Component Diagram (Level 3) — UI Layer
+## Optional Vector Search
+
+When the `vector-search` feature is enabled, `app/background/vector_search.rs` owns a SahomeDB collection and `app/background/embeddings.rs` builds an OpenAI-compatible embedding client (via `async-openai`) from the user-configured `embeddings` model (AGENT-005). `Task` creates the shared service before starting the initial scan, subscribes it to `Bus<FileEvent>` before scan events are published, and injects the service into `AgentSession` through the existing `Extensions` container. Markdown chunks are hashed, embedded, and stored in the local collection; the read-only `vector_search` built-in tool performs searches through that service. The service does not replay file events emitted before its subscription and reports progress through `BackgroundEvent::Process(LogEntry(...))` every 100 processed Markdown files.
+
 
 `ui/` renders the desktop app. `FastMdApp` (`app.rs`, 1346 lines) is the root
 `eframe::App` and owns all cross-cutting state. A 5-pane layout is enforced by

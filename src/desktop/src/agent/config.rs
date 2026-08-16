@@ -172,7 +172,7 @@ impl ContentLibraryExt for ContentLibrary {
         if label.ends_with('\\') || label.ends_with('/') {
             label.pop();
         }
-        Some(label)
+        Some(label.replace('\\', "/"))
     }
 
     fn contains_path(&self, path: &Path) -> bool {

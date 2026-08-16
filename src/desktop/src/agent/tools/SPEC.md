@@ -13,6 +13,7 @@ The requirements below have been formatted using the **Easy Approach to Requirem
 | Tool | Description |
 |---|---|
 | `search_notes` | Search markdown-formatted notes for patterns across all libraries. Returns at most 200 matching lines; when truncated, directs caller to refine the query or delegate to a sub-agent. |
+| `vector_search` | Search indexed Markdown content by meaning (semantic/vector search). Optional; only offered when the vector-search feature is enabled. |
 | `read_tags` | Read all unique tags from markdown front-matter across all libraries. |
 | `list_notes_by_tag` | List notes that contain a specific tag in their front-matter. Paginated via `offset`/`limit` (0-indexed; default `offset=0`, `limit=100`); the response carries `total` and an optional `hint`. |
 | `list_notes` | List markdown-formatted notes in a directory (non-recursive). With "/" or "." returns library names. Paginated via `offset`/`limit` (0-indexed; default `offset=0`, `limit=100`); the response carries `total` and an optional `hint`. |
@@ -131,6 +132,14 @@ The `window_note` and `insert_into_note` tools operate on contiguous line ranges
 * [TOOL-040] The `move_note` tool SHALL fail with an error if the source file does not exist.
 * [TOOL-041] The `move_note` tool SHALL NOT overwrite an existing target file, and SHALL return an error if the target already exists.
 * [TOOL-042] When moving a note to a path with non-existent parent directories, the system SHALL automatically create all missing parent directories.
+
+### Vector Search Tool
+
+* [TOOL-043] The `vector_search` tool SHALL search indexed Markdown content by meaning. It SHALL be ReadOnly, SHALL accept `query: String`, `limit: Option<usize>` (clamped to 1–20, default 5), `max_distance: Option<f32>` (range 0.0–2.0, default 0.6), and an optional `cursor` parameter for continuing multi-page retrieval. The tool SHALL only be offered when the optional vector-search feature is enabled.
+* [TOOL-044] The `vector_search` tool SHALL respond to embedding or index failures with a generic user-facing message directing the caller to the background log, and SHALL NOT expose internal error details, file paths, or model metadata to the LLM.
+* [TOOL-045] For each matching record within the distance threshold, the tool SHALL resolve the virtual path against configured content libraries, slice the exact matching source lines at the reported `(offset, limit)` within the note body, and return `path`, `distance`, `offset`, `limit`, and `content`.
+* [TOOL-046] The tool descriptor SHALL instruct the LLM to formulate queries as descriptive phrases, natural language questions, or conceptual summaries rather than isolated keywords, and to recommend `grep_search` for exact string or filename matches.
+* [TOOL-047] When additional matching results exist beyond the requested `limit`, the `vector_search` tool response SHALL include a continuation `next_cursor` value that can be passed as `cursor` to subsequent tool calls to retrieve the next page of results.
 
 ### Browser Automation Tools
 

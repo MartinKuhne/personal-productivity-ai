@@ -71,10 +71,15 @@ To convert the markdown text into vectors, an embedding generator is required.
 * **Pros**: Zero external dependencies, self-contained executable. Can run massive LLM models natively.
 * **Cons**: High boilerplate and complexity (requires handling weights and tokenization manually).
 
+### 4.4. OpenAI-compatible API via `async-openai` (CHOSEN)
+* **Type**: Remote API call to the user-configured `embeddings` model.
+* **Pros**: Reuses the existing model configuration (`use_case: embeddings`, AGENT-005) and the crate's rustls-only TLS stack. Works with any OpenAI-compatible embeddings endpoint (OpenAI, OpenRouter, Ollama, llama.cpp). No bundled model downloads or ONNX runtime.
+* **Cons**: Requires a network-accessible embedding endpoint and an API key; the local `fastembed` / ONNX stack (4.1) is no longer bundled.
+
 ## 5. Proposed Architecture
 
 For indexing ~10k to 50k markdown documents simply and robustly, the recommended stack is:
-1. **Embedding Generation**: Use `fastembed-rs` to locally convert markdown strings into dense vectors.
+1. **Embedding Generation**: Use the user-configured `embeddings` model through an OpenAI-compatible API (`async-openai`, see 4.4). `app/background/embeddings.rs` builds the client from `AppConfig::model_for_use_case("embeddings")`.
 2. **Storage and Indexing**: Use **LanceDB** or **SahomeDB** to persist those vectors and their associated metadata (file paths) to a local directory.
 
 Both options keep the entire process embedded within a single Rust binary without external clusters.

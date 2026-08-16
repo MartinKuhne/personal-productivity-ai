@@ -1,4 +1,4 @@
-//! Background task orchestrator — spawns and owns all worker threads (watcher, indexer, PDF converter, vision processor, bus router).
+//! Background task orchestrator for watcher, indexing, conversion, vision, and routing workers.
 //!
 //! Unit tests live in the sibling `background_task_tests.rs` sidecar.
 
@@ -19,36 +19,24 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::{Receiver, channel};
 use std::sync::{Arc, Mutex};
 
+/// Owns the background worker threads and their event channel.
 pub struct Task {
-    /// Receiver for typed background events. The UI drains this on
-    /// every frame and dispatches by domain (Agent / Fs / Process).
+    /// Receiver for typed background events drained by the UI.
     pub rx: Receiver<BackgroundEvent>,
-    /// Sender handed to every background worker. Producers send
-    /// typed [`BackgroundEvent`] values directly.
+    /// Sender handed to every background worker.
     pub tx: BackgroundEventSender,
-    /// File-event bus shared with the watcher, indexer, PDF/vision
-    /// workers, and the UI.
+    /// File-event bus shared by background workers and the UI.
     pub file_event_bus: Bus<FileEvent>,
-    /// Slot for the `notify::RecommendedWatcher` handle. The
-    /// file-watcher thread writes the handle here when initial
-    /// scan completes, then sends [`crate::bus::events::typed::FsEvent::Finished`]
-    /// on the typed channel. The UI calls
-    /// [`Task::take_finished_watcher`] after observing that event to
-    /// take ownership.
+    /// Slot containing the watcher after initial scan completion.
     pub finished_watcher: Arc<Mutex<Option<notify::RecommendedWatcher>>>,
-    /// Cancellation signal shared with the indexer. Set to `true` via
-    /// [`Task::cancel`] to ask the initial library scan to stop early.
+    #[cfg(feature = "vector-search")]
+    /// Shared vector-search service.
+    pub vector_search_service: Arc<crate::app::background::VectorSearchService>,
     cancel: Arc<AtomicBool>,
 }
 
 impl Task {
-    /// Build a background task that waits for a [`ConfigArrived`] event
-    /// on `config_bus` before spawning its worker threads. The
-    /// subscription is registered before this returns, so callers may
-    /// publish any time afterwards and the spawned thread will
-    /// observe the first arrival (or fall back to
-    /// [`AppConfig::default`] if no event arrives within
-    /// [`CONFIG_ARRIVAL_TIMEOUT`]).
+    /// Wait for configuration, then spawn the background workers.
     pub fn new(config_bus: Bus<ConfigArrived>) -> Self {
         let (raw_tx, rx) = channel();
         let tx = BackgroundEventSender::new(raw_tx);
@@ -58,13 +46,17 @@ impl Task {
         let cancel = Arc::new(AtomicBool::new(false));
         let cancel_clone = cancel.clone();
         let finished_watcher = Arc::new(Mutex::new(None));
+        #[cfg(feature = "vector-search")]
+        let vector_search_service = Arc::new(crate::app::background::VectorSearchService::new());
 
-        // Subscribe before spawning so the thread's reader is in place
-        // by the time the caller publishes.
         let config_reader = config_bus.subscribe();
-
         let finished_watcher_for_worker = finished_watcher.clone();
+        #[cfg(feature = "vector-search")]
+        let vector_search_service_for_thread = vector_search_service.clone();
+
         std::thread::spawn(move || {
+            #[cfg(feature = "vector-search")]
+            let vector_search_service = vector_search_service_for_thread;
             let config = match config_reader.recv_timeout(CONFIG_ARRIVAL_TIMEOUT) {
                 Ok(event) => {
                     tracing::info!(
@@ -88,6 +80,8 @@ impl Task {
                 bus_clone,
                 cancel_clone,
                 finished_watcher_for_worker,
+                #[cfg(feature = "vector-search")]
+                vector_search_service,
             );
         });
 
@@ -96,38 +90,27 @@ impl Task {
             tx,
             file_event_bus,
             finished_watcher,
+            #[cfg(feature = "vector-search")]
+            vector_search_service,
             cancel,
         }
     }
 
-    /// Build a background task whose workers start immediately, using
-    /// the supplied configuration. This is a convenience for tests
-    /// that do not need the bus-driven init path.
+    /// Build a background task using the bus-driven initialization path.
     #[doc(hidden)]
     pub fn new_for_test(config: AppConfig) -> Self {
-        // Subscribe before publishing so the broadcast delivery
-        // matches the event. `Task::new` registers the subscription
-        // during construction; we publish after it returns.
         let bus = Bus::new();
         let task = Self::new(bus.clone());
         bus.publish(ConfigArrived::new(config));
         task
     }
 
-    /// Signal the initial library scan to stop. The watcher and the
-    /// post-scan workers are not affected (they have their own
-    /// shutdown paths). Calling this after the scan has already
-    /// completed is a no-op.
+    /// Signal the initial library scan to stop.
     pub fn cancel(&self) {
         self.cancel.store(true, Ordering::SeqCst);
     }
 
-    /// Take the `notify::RecommendedWatcher` handle, if one was
-    /// written by the file-watcher thread. Returns `None` if the
-    /// watcher has not initialized yet, or if it has already been
-    /// taken. The UI calls this after observing
-    /// [`crate::bus::events::typed::FsEvent::Finished`] on the typed
-    /// background-event channel.
+    /// Take the watcher handle after it has been initialized.
     pub fn take_finished_watcher(&self) -> Option<notify::RecommendedWatcher> {
         self.finished_watcher
             .lock()
@@ -141,26 +124,25 @@ impl Task {
         file_event_bus: Bus<FileEvent>,
         cancel: Arc<AtomicBool>,
         finished_watcher: Arc<Mutex<Option<notify::RecommendedWatcher>>>,
+        #[cfg(feature = "vector-search")] vector_search_service: Arc<
+            crate::app::background::VectorSearchService,
+        >,
     ) {
+        #[cfg(feature = "vector-search")]
+        vector_search_service.start(config.clone(), file_event_bus.subscribe(), tx.clone());
+
         let (tx_work, rx_work) = channel::<PathBuf>();
         let rx_work = Arc::new(Mutex::new(rx_work));
         let (tx_pdf, rx_pdf) = channel::<PathBuf>();
-        // Image-vision channel + worker are only spun up when the
-        // `image-library` Cargo feature is enabled. Without it the
-        // channel is dropped immediately and the `BusRouter`'s
-        // image-routing branch is a no-op (the field is gated in
-        // `bus/router/bus_router.rs`).
         #[cfg(feature = "image-library")]
         let (tx_img, rx_img) = channel::<PathBuf>();
 
         let cmd_template = config.pdf_converter_command.clone();
         PdfConverterWorker::new(rx_pdf, tx.clone(), file_event_bus.clone(), cmd_template).spawn();
-
         #[cfg(feature = "image-library")]
         ImageVisionWorker::new(rx_img, tx.clone(), config.clone(), file_event_bus.clone()).spawn();
 
         let workers = Indexer::spawn_workers(4, rx_work, tx.clone());
-
         let indexer = Indexer::new(config.clone(), tx.clone(), file_event_bus.clone(), cancel);
         #[cfg(feature = "image-library")]
         indexer.scan_libraries(&tx_work, &tx_pdf, &tx_img);
@@ -173,7 +155,7 @@ impl Task {
         }
 
         let mut file_watcher = FileWatcher::new(
-            config.clone(),
+            config,
             tx.clone(),
             file_event_bus.clone(),
             tx_pdf.clone(),
@@ -189,10 +171,6 @@ impl Task {
         BusRouter::new(file_event_bus.clone(), tx_pdf).spawn();
     }
 }
-
-// ---------------------------------------------------------------------------
-// Tests live in the sibling `background_task_tests.rs` sidecar.
-// ---------------------------------------------------------------------------
 
 #[cfg(test)]
 #[path = "background_task_tests.rs"]

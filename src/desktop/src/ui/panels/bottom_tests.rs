@@ -471,8 +471,7 @@ fn test_compute_prompt_prefix_with_dir_and_libs() {
         priority: 0,
     }];
     let prefix = compute_prompt_prefix(Some(&dir), &libs);
-    let expected = PathBuf::from("TestLib").join("subdir");
-    assert_eq!(prefix, format!("{} >", expected.to_string_lossy()));
+    assert_eq!(prefix, "TestLib/subdir >");
 }
 
 #[test]

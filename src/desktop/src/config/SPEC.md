@@ -57,6 +57,7 @@ models:
 
 * [CONFIG-011] Tool Group State: The system shall persist the enabled/disabled state of every built-in tool group in `config.yaml` under `tool_groups` (filesystem, web, email, contacts, calendar, csv_db, weather). Each group shall default to `true` when the key is absent.
 * [CONFIG-012] MCP Server Enabled Flag: The system shall persist an `enabled` boolean on every entry of the `mcp_servers` map in `config.yaml`. The flag shall default to `true` when absent, preserving backwards compatibility with existing configurations. Toggling the enabled state shall preserve the server's configured `transport`, `command`, `url`, `headers`, and `oauth` settings intact.
+* [CONFIG-013] Embeddings Model Routing: When the vector-search feature is enabled, the system SHALL route embedding requests to the configured model with the `embeddings` use case, preferring the lowest `cost` when multiple models match. Where no such model is configured, vector indexing SHALL be disabled.
 
 ## Cross-cutting references
 
