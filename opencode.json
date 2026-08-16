@@ -5,7 +5,8 @@
             "type": "local",
             "command": [
                 "rust-analyzer-mcp"
-            ]
+            ],
+            "enabled": false
         },
         "codegraph": {
           "type": "local",
@@ -20,7 +21,8 @@
             "type": "local",
             "command": [
                 "egui-mcp"
-            ]
+            ],
+            "enabled": false
         }
     }
 }

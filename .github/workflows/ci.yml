@@ -1,0 +1,126 @@
+name: Rust Quality Gate
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "src/**"
+      - "tests/**"
+      - "benches/**"
+      - ".config/**"
+      - "Cargo.toml"
+      - "Cargo.lock"
+      - ".github/workflows/ci.yml"
+  pull_request:
+    paths:
+      - "src/**"
+      - "tests/**"
+      - "benches/**"
+      - ".config/**"
+      - "Cargo.toml"
+      - "Cargo.lock"
+      - ".github/workflows/ci.yml"
+
+env:
+  CARGO_TERM_COLOR: always
+
+permissions:
+  contents: read
+
+jobs:
+  check:
+    name: cargo check
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: .
+      - run: cargo check --workspace --all-features
+
+  test:
+    name: cargo nextest
+    runs-on: ubuntu-latest
+    needs: check
+    permissions:
+      contents: read
+      actions: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: .
+      # Install cargo-nextest at the same version the project ships in
+      # `.config/nextest.toml`. The repo config is the source
+      # of truth; pinning the version here ensures CI matches local runs.
+      - run: cargo install cargo-nextest --locked --version ^0.9
+      - name: Install Vulkan software renderer (lavapipe)
+        run: sudo apt-get update && sudo apt-get install -y libvulkan1 mesa-vulkan-drivers
+      # Use the `ci` profile (no retries, fail-fast, JUnit output) defined
+      # in `.config/nextest.toml`. Local devs use the default
+      # profile (2 retries, top-failures summary).
+      - run: cargo nextest run --workspace --all-features --profile ci
+      - name: Upload JUnit report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: nextest-junit
+          path: target/nextest/ci/junit.xml
+      # Tier 3 visual regression gate. `egui_kittest`'s snapshot
+      # feature writes `{name}.new.png` next to each saved
+      # `{name}.png` when the rendered output differs. Failing
+      # the build on any `.new.png` is the egui_kittest equivalent
+      # of `cargo insta pending-snapshots`. Reviewers can
+      # inspect the diff locally and commit the new PNG to accept
+      # intentional changes. See Q3 in
+      # `doc/planning/egui-testing.md` for the policy.
+      - name: Fail on pending snapshot diffs
+        shell: bash
+        run: |
+          if compgen -G "tests/snapshots/*.new.png" > /dev/null; then
+            echo "Error: pending snapshot diffs detected:"
+            ls -la tests/snapshots/*.new.png
+            echo ""
+            echo "Inspect the diffs locally and either accept the new"
+            echo "PNG (rename .new.png to .png) or fix the regression."
+            exit 1
+          fi
+
+  clippy:
+    name: cargo clippy
+    runs-on: ubuntu-latest
+    needs: check
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: .
+      - run: cargo clippy --workspace --all-features -- -D warnings
+
+  fmt:
+    name: cargo fmt
+    runs-on: ubuntu-latest
+    needs: check
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt
+      - run: cargo fmt --check
+
+  doc:
+    name: cargo doc
+    runs-on: ubuntu-latest
+    needs: check
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: .
+      - run: cargo doc --workspace --all-features --no-deps --quiet

@@ -1,0 +1,337 @@
+//! Batch job executor — runs the LLM agent against each discovered unit (file or directory) with configurable concurrency.
+
+use super::types::{BatchJob, BatchJobStatus, BatchResult};
+use crate::bus::events::typed::BackgroundEvent;
+use crate::config::AppConfig;
+use crate::utils::clock::Clock;
+use std::path::PathBuf;
+use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
+use tokio::sync::Semaphore;
+
+pub struct BatchJobExecutor {
+    app_config: AppConfig,
+    file_event_bus: std::sync::Arc<dyn crate::agent::tools::observer::OnFileChanged>,
+    tx_gui: crate::bus::events::typed::BackgroundEventSender,
+    cancel_flag: Arc<AtomicBool>,
+    clock: Arc<dyn Clock>,
+}
+
+impl BatchJobExecutor {
+    pub fn new(
+        app_config: AppConfig,
+        file_event_bus: std::sync::Arc<dyn crate::agent::tools::observer::OnFileChanged>,
+        tx_gui: crate::bus::events::typed::BackgroundEventSender,
+        _prompt: String,
+        cancel_flag: Arc<AtomicBool>,
+        clock: Arc<dyn Clock>,
+    ) -> Self {
+        Self {
+            app_config,
+            file_event_bus,
+            tx_gui,
+            cancel_flag,
+            clock,
+        }
+    }
+
+    pub fn execute_concurrent(&self, mut jobs: Vec<BatchJob>, concurrency: u8) -> BatchResult {
+        let start_time = self.clock.now();
+        let total_jobs = jobs.len();
+
+        let Ok(rt) = tokio::runtime::Builder::new_multi_thread()
+            .enable_all()
+            .build()
+        else {
+            tracing::error!(target: "batch", "Failed to create tokio runtime for batch processing");
+            return BatchResult {
+                total_jobs,
+                completed: 0,
+                failed: 0,
+                cancelled: 0,
+                duration: (self.clock.now() - start_time).to_std().unwrap_or_default(),
+            };
+        };
+
+        // Round-robin across all models tied for the minimum cost for "chat".
+        let min_cost_models: Vec<String> = self
+            .app_config
+            .models_for_use_case_min_cost("chat")
+            .into_iter()
+            .map(|(key, _)| key.clone())
+            .collect();
+        let model_count = min_cost_models.len();
+        let rr_counter = Arc::new(AtomicUsize::new(0));
+
+        let semaphore = Arc::new(Semaphore::new(concurrency as usize));
+        let mut join_set = tokio::task::JoinSet::new();
+        let cancel_flag = self.cancel_flag.clone();
+
+        let mut completed: usize = 0;
+        let mut failed: usize = 0;
+        let mut cancelled: usize = 0;
+
+        rt.block_on(async {
+            for job in &mut jobs {
+                if cancel_flag.load(Ordering::SeqCst) {
+                    job.status = BatchJobStatus::Cancelled;
+                    cancelled += 1;
+                    continue;
+                }
+
+                let Ok(permit) = semaphore.clone().acquire_owned().await else {
+                    job.status = BatchJobStatus::Failed;
+                    failed += 1;
+                    continue;
+                };
+
+                let job_id = job.id;
+                let target_path = job.target_path.clone();
+                let active_file = job.active_file.clone();
+                let active_dir = job.active_dir.clone();
+                let prompt_text = job.prompt_text.clone();
+                let app_config = self.app_config.clone();
+
+                let cancel_flag = cancel_flag.clone();
+
+                // Assign model round-robin when multiple min-cost models exist.
+                let model_name = if model_count > 1 {
+                    let i = rr_counter.fetch_add(1, Ordering::Relaxed) % model_count;
+                    Some(min_cost_models[i].clone())
+                } else {
+                    None
+                };
+
+                job.status = BatchJobStatus::Running;
+                job.start_time = Some(self.clock.now());
+
+                tracing::info!(target: "batch", job_id, path = ?target_path, "Starting batch job");
+
+                let file_event_bus_clone = self.file_event_bus.clone();
+                join_set.spawn(async move {
+                    if cancel_flag.load(Ordering::SeqCst) {
+                        drop(permit);
+                        return (job_id, target_path, BatchJobStatus::Cancelled, None);
+                    }
+
+                    let params = BatchAgentRunParams {
+                        config: app_config,
+                        active_file,
+                        active_dir,
+                        selected_files: std::collections::HashSet::new(),
+                        prompt: prompt_text,
+                        cancel_flag,
+                        history: None,
+                        file_event_bus: file_event_bus_clone,
+                        model_name,
+                    };
+                    let result = run_agent_blocking(params);
+
+                    drop(permit);
+                    (job_id, target_path, result.0, result.1)
+                });
+            }
+        });
+
+        while let Some(res) = rt.block_on(join_set.join_next()) {
+            match res {
+                Ok((job_id, target_path, status, error)) => {
+                    if let Some(job) = jobs.iter_mut().find(|j| j.id == job_id) {
+                        job.status = status;
+                        job.end_time = Some(self.clock.now());
+                        if let Some(ref err) = error {
+                            job.error = Some(err.clone());
+                        }
+                    }
+
+                    match status {
+                        BatchJobStatus::Failed => {
+                            tracing::warn!(target: "batch", job_id, path = ?target_path, error = %error.unwrap_or_default(), "Batch job failed");
+                            failed += 1;
+                        }
+                        BatchJobStatus::Cancelled => {
+                            cancelled += 1;
+                        }
+                        _ => {
+                            tracing::info!(target: "batch", job_id, path = ?target_path, "Completed batch job");
+                            completed += 1;
+                        }
+                    }
+                }
+                Err(_) => {
+                    failed += 1;
+                    let _ = self.tx_gui.send(BackgroundEvent::from(
+                        crate::background::models::BackgroundLogEntry::new(
+                            crate::background::models::LogCategory::Batch,
+                            "A batch job panicked and was terminated".to_string(),
+                        ),
+                    ));
+                }
+            }
+        }
+
+        BatchResult {
+            total_jobs,
+            completed,
+            failed,
+            cancelled,
+            duration: (self.clock.now() - start_time).to_std().unwrap_or_default(),
+        }
+    }
+}
+
+/// Parameters for running an agent synchronously in a batch job.
+pub struct BatchAgentRunParams {
+    /// Application configuration.
+    pub config: AppConfig,
+    /// Currently active file path, if any.
+    pub active_file: Option<PathBuf>,
+    /// Currently active directory path, if any.
+    pub active_dir: Option<PathBuf>,
+    /// Set of selected file paths.
+    pub selected_files: std::collections::HashSet<PathBuf>,
+    /// Prompt text to submit to the agent.
+    pub prompt: String,
+    /// Cancellation flag for aborting the job.
+    pub cancel_flag: Arc<AtomicBool>,
+    /// Prior conversation message history, if continuing a session.
+    pub history: Option<Vec<serde_json::Value>>,
+    /// Observer handle for propagating file changes.
+    pub file_event_bus: std::sync::Arc<dyn crate::agent::tools::observer::OnFileChanged>,
+    /// Optional override model name.
+    pub model_name: Option<String>,
+}
+
+pub fn run_agent_blocking(params: BatchAgentRunParams) -> (BatchJobStatus, Option<String>) {
+    let BatchAgentRunParams {
+        config,
+        active_file,
+        active_dir,
+        selected_files,
+        prompt,
+        cancel_flag,
+        history,
+        file_event_bus,
+        model_name,
+    } = params;
+    use crate::agent::run_agent;
+    use crate::bus::events::agent::AgentEvent as SeamAgentEvent;
+
+    let agent_event_bus = crate::bus::core::Bus::new();
+    let reader = agent_event_bus.subscribe();
+
+    // Assemble the system prompts at the same point the orchestrator's
+    // submit path does. The batch driver is a second submitter.
+    let system_prompts = crate::agent::prompts::build_system_prompts(
+        &config,
+        active_file.as_deref(),
+        active_dir.as_deref(),
+        &selected_files,
+    );
+
+    let ctx = crate::agent::context::AgentContextBuilder::new(
+        config.to_agent_config(),
+        uuid::Uuid::new_v4(),
+        prompt,
+    )
+    .with_file_observer(file_event_bus.clone())
+    .with_observer(std::sync::Arc::new(
+        crate::bus::events::agent::BusAgentEventObserver::new(
+            uuid::Uuid::new_v4(),
+            agent_event_bus.clone(),
+        ),
+    ))
+    .with_active_paths(active_file, active_dir)
+    .with_selected_files(selected_files)
+    .with_system_prompts(system_prompts)
+    .with_cancel_flag(cancel_flag)
+    .with_history(history)
+    .with_model_name(model_name)
+    .build();
+    run_agent(ctx);
+
+    let mut status = BatchJobStatus::Completed;
+    let mut error = None;
+
+    // Drain the agent event bus until SessionFinished or Failed is seen.
+    // `BusReader::recv` spin-waits; the bus stays alive as long as the
+    // `Bus` handle exists (it was moved into the context and dropped when
+    // the agent thread finished, which disconnects the broadcast sender).
+    while let Ok(ev) = reader.recv() {
+        match ev {
+            SeamAgentEvent::SessionFinished { .. } => break,
+            SeamAgentEvent::Failed { error: err, .. } => {
+                status = BatchJobStatus::Failed;
+                error = Some(err);
+                break;
+            }
+            _ => {}
+        }
+    }
+
+    (status, error)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::bus::events::typed::BackgroundEventSender;
+    use std::sync::atomic::AtomicBool;
+    use std::sync::mpsc;
+
+    #[test]
+    fn test_execute_concurrent_empty() {
+        let (tx, _rx) = mpsc::channel();
+        let tx = BackgroundEventSender::new(tx);
+        let bus = std::sync::Arc::new(crate::agent::tools::observer::DefaultFileObserver);
+        let cancel_flag = Arc::new(AtomicBool::new(false));
+
+        let executor = BatchJobExecutor::new(
+            AppConfig::default(),
+            bus,
+            tx,
+            "test prompt".to_string(),
+            cancel_flag,
+            Arc::new(crate::utils::clock::SystemClock),
+        );
+
+        let result = executor.execute_concurrent(vec![], 4);
+        assert_eq!(result.total_jobs, 0);
+        assert_eq!(result.completed, 0);
+        assert_eq!(result.failed, 0);
+        assert_eq!(result.cancelled, 0);
+    }
+
+    #[test]
+    fn test_execute_concurrent_cancellation() {
+        let (tx, _rx) = mpsc::channel();
+        let tx = BackgroundEventSender::new(tx);
+        let bus = std::sync::Arc::new(crate::agent::tools::observer::DefaultFileObserver);
+        let cancel_flag = Arc::new(AtomicBool::new(true));
+
+        let executor = BatchJobExecutor::new(
+            AppConfig::default(),
+            bus,
+            tx,
+            "test prompt".to_string(),
+            cancel_flag,
+            Arc::new(crate::utils::clock::SystemClock),
+        );
+
+        let jobs = vec![BatchJob {
+            id: 0,
+            target_path: PathBuf::from("/tmp/test1.md"),
+            active_file: Some(PathBuf::from("/tmp/test1.md")),
+            active_dir: None,
+            prompt_text: "test".to_string(),
+            status: BatchJobStatus::Pending,
+            start_time: None,
+            end_time: None,
+            error: None,
+        }];
+
+        let result = executor.execute_concurrent(jobs, 4);
+        assert_eq!(result.total_jobs, 1);
+        assert_eq!(result.cancelled, 1);
+    }
+}

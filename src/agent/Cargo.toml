@@ -1,0 +1,51 @@
+[package]
+name = "fastmd-agent"
+version = "0.2.0"
+edition = "2024"
+description = "AI Agent core engine for FastMD"
+
+[features]
+default = []
+browser = []
+vector-search = []
+
+[lib]
+path = "mod.rs"
+
+[dependencies]
+anyhow = "1.0.104"
+thiserror = "2"
+tracing = "0.1"
+chrono = "0.4.45"
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+serde_norway = "0.9"
+schemars = "1.2.1"
+tokio = { version = "1.53.0", features = ["rt-multi-thread", "macros", "sync", "process"] }
+reqwest = { version = "0.13", default-features = false, features = ["blocking", "json", "query", "rustls"] }
+webbrowser = "1"
+uuid = { version = "1", features = ["v4", "serde"] }
+arc-swap = "1.9.2"
+fastmd-tool-macros = { path = "../fastmd-tool-macros" }
+csv = "1.4.0"
+evalexpr = "13.1.0"
+encoding_rs = "0.8.35"
+walkdir = "2.4"
+url = "2.5"
+fast-dav-rs = "0.4.4"
+fast_h2m = "^0.4"
+jmap-client = { version = "=0.4.1", default-features = false, features = ["blocking", "rustls"] }
+pulldown-cmark = { version = "0.13", features = ["html"] }
+tokio-tungstenite = { version = "0.30", features = ["rustls"] }
+futures = "0.3"
+bytes = "1"
+ring = "0.17"
+base64 = "0.22.1"
+rustls = { version = "0.23", features = ["ring"] }
+async-openai = { version = "0.41.3", default-features = false, features = ["byot", "chat-completion", "rustls"] }
+
+[dev-dependencies]
+tempfile = "3.8"
+proptest = "1.4"
+tracing-subscriber = "0.3"
+wiremock = "0.6"
