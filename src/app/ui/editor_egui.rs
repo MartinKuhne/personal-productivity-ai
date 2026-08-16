@@ -1,7 +1,7 @@
 //! egui adapter for the inline text editor — palette + `show_text_editor`.
 //!
 //! Everything in this module imports `eframe::egui`; the data model it
-//! adapts lives in [`crate::app::text_buffer`] and is egui-free.
+//! adapts lives in [`crate::ui::text_buffer`] and is egui-free.
 //!
 //! The two responsibilities of this file are:
 //!
@@ -11,8 +11,8 @@
 //!    [`TextBuffer::content`] and writing the resulting cursor
 //!    position back via [`TextBuffer::set_cursor`] before returning.
 
-use crate::app::text_buffer::TextBuffer;
 use crate::bus::events::file::FileEventProducer;
+use crate::ui::text_buffer::TextBuffer;
 use eframe::egui::{self, Key};
 
 /// Inverted color scheme for the inline text editor (UI-046).

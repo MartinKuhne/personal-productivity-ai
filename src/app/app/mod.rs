@@ -18,29 +18,21 @@ pub use crate::background::task as background_task;
 pub mod batch;
 #[cfg(feature = "browser")]
 pub mod browser;
-pub mod dialogs;
 pub mod document;
 pub mod events;
 pub mod orchestrator;
-pub mod panel_layout;
-pub mod persisted;
 pub mod print;
 #[cfg(feature = "pdf-export")]
 pub mod print_pdf;
 pub mod prompts;
-pub mod selection;
 pub mod session;
-pub mod tabs;
 pub mod tags;
-pub mod text_buffer;
+pub mod tree_search;
 
-pub use crate::workspace::{vfs, watcher};
-
-pub use dialogs::Dialogs;
-pub use panel_layout::PanelLayout;
-pub use persisted::PersistedUiState;
-pub use selection::FileSelection;
-pub use tabs::Tabs;
+pub use crate::ui::{
+    Cursor, Dialogs, FileSelection, OAuthFlowStatus, PanelLayout, PersistedUiState, Selection,
+    TabItem, Tabs, TextBuffer, UndoStack, dialogs, panel_layout, persisted, selection, tabs,
+    text_buffer,
+};
+pub use crate::workspace::{VirtualPath, VirtualPathError, vfs, watcher};
 pub use tags::Tags;
-pub use text_buffer::{Cursor, Selection, TextBuffer, UndoStack};
-pub use vfs::{VirtualPath, VirtualPathError};

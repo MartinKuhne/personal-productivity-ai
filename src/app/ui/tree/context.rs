@@ -28,11 +28,12 @@
 //! ctx.write_back(&mut app);
 //! ```
 
-use crate::app::panel_layout::PanelLayout;
 use crate::bus::core::Bus;
 use crate::bus::events::file::{FileEvent, FileEventProducer};
 use crate::bus::events::typed::BackgroundEventSender;
 use crate::config::ContentLibrary;
+use crate::ui::panel_layout::PanelLayout;
+use crate::ui::{Dialogs, FileSelection, Tabs};
 use eframe::egui;
 use std::collections::HashSet;
 use std::path::PathBuf;
@@ -184,10 +185,10 @@ impl TreeOpsContext {
     /// `ctx.open_editor` field directly.
     #[allow(clippy::too_many_arguments)]
     pub fn from_app_state(
-        selection: &crate::app::selection::FileSelection,
-        tabs: &crate::app::tabs::Tabs,
-        dialogs: &crate::app::dialogs::Dialogs,
-        layout: &crate::app::panel_layout::PanelLayout,
+        selection: &FileSelection,
+        tabs: &Tabs,
+        dialogs: &Dialogs,
+        layout: &PanelLayout,
         submit_prompt: &Option<String>,
         content_libraries: &[ContentLibrary],
         bg_tx: Option<BackgroundEventSender>,
@@ -234,9 +235,9 @@ impl TreeOpsContext {
     /// orchestrator is the source of truth for them.
     pub fn write_back(
         &self,
-        selection: &mut crate::app::selection::FileSelection,
-        tabs: &mut crate::app::tabs::Tabs,
-        dialogs: &mut crate::app::dialogs::Dialogs,
+        selection: &mut FileSelection,
+        tabs: &mut Tabs,
+        dialogs: &mut Dialogs,
         submit_prompt: &mut Option<String>,
     ) {
         selection.selected_file = self.selected_file.clone();

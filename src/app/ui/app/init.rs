@@ -11,13 +11,14 @@ use std::sync::{Arc, Mutex};
 use eframe::egui;
 
 use crate::agent::AgentSession;
-use crate::app::{Dialogs, FileSelection, PanelLayout, PersistedUiState, Tags, TextBuffer};
+use crate::app::Tags;
 use crate::background::{BackgroundLogs, Task};
 use crate::bus::core::Bus;
 use crate::bus::events::config::ConfigArrived;
 use crate::config::AppConfig;
 use crate::ui::agent::panel_state::AgentPanelState;
 use crate::ui::agent::transcript::AgentTranscript;
+use crate::ui::{Dialogs, FileSelection, PanelLayout, PersistedUiState, Tabs, TextBuffer};
 use crate::workspace::watcher::{DirectoryTracker, FileEventProcessor};
 
 use super::{FastMdApp, PERSISTED_UI_STATE_KEY};
@@ -220,7 +221,7 @@ impl FastMdApp {
                 directory_tracker: dir_tracker,
                 tags: Tags::new(),
                 selection,
-                tabs: crate::app::tabs::Tabs::new(),
+                tabs: Tabs::new(),
                 _watcher: None,
                 agent,
                 dialogs,
@@ -354,7 +355,7 @@ impl FastMdApp {
                 pdf_backing_tracker,
                 tags: Tags::new(),
                 selection,
-                tabs: crate::app::tabs::Tabs::new(),
+                tabs: Tabs::new(),
                 _watcher: None,
                 agent,
                 dialogs,

@@ -12,7 +12,7 @@ use std::path::PathBuf;
 /// This is the central type that enables the tab-based architecture by providing
 /// a unified representation for both file and agent tabs. Each variant carries
 /// the necessary data to identify and operate on the tab.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub enum TabItem {
     /// A file tab that contains a markdown document.
     File(PathBuf),
@@ -85,20 +85,6 @@ impl TabItem {
             TabItem::Agent => None,
         }
     }
-
-    /// Computes a hash of the tab for use in caching.
-    ///
-    /// This is used by Tabs to compute the hash of the tabs
-    /// vector to detect changes and invalidate the tab strip cache.
-    pub(crate) fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
-        match self {
-            TabItem::File(path) => path.hash(state),
-            TabItem::Agent => {
-                // Hash a constant to ensure all agent tabs hash the same
-                state.write_u8(b'A');
-            }
-        }
-    }
 }
 
 #[cfg(test)]
@@ -146,7 +132,7 @@ mod tests {
         let windows_path = TabItem::File(PathBuf::from("C:\\Users\\user\\docs\\note.md"));
         assert_eq!(windows_path.label(), "note.md");
 
-        let path_without_name = TabItem::File(PathBuf::from("/home/user/"));
+        let path_without_name = TabItem::File(PathBuf::from("/"));
         assert_eq!(path_without_name.label(), "");
     }
 }

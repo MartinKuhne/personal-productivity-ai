@@ -285,9 +285,9 @@ fn test_tree_row_height_matches_selectable_label_height() {
 /// in the same frame, driven by shared state.
 #[test]
 fn test_new_document_on_directory_opens_dialog_with_dir_parent() {
-    use crate::app::dialogs::Dialogs;
     use crate::bus::core::Bus;
     use crate::bus::events::file::FileEvent;
+    use crate::ui::dialogs::Dialogs;
     use crate::ui::modals::show_create_document_dialog;
     use crate::ui::test_helpers::interact::stateful_harness;
     use egui_kittest::kittest::Queryable;
