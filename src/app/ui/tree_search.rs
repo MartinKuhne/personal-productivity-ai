@@ -145,7 +145,7 @@ mod tests {
 
         let mut search = TreeSearch::new();
         *search.query_mut() = "HELLO".to_string();
-        search.apply(&[file.clone()]);
+        search.apply(std::slice::from_ref(&file));
 
         assert!(search.matching_files().contains(&file));
     }
@@ -158,7 +158,7 @@ mod tests {
 
         let mut search = TreeSearch::new();
         *search.query_mut() = "  needle  ".to_string();
-        search.apply(&[file.clone()]);
+        search.apply(std::slice::from_ref(&file));
 
         assert_eq!(search.active_filter(), Some("needle"));
     }
@@ -185,7 +185,7 @@ mod tests {
 
         let mut search = TreeSearch::new();
         *search.query_mut() = "needle".to_string();
-        search.apply(&[file.clone()]);
+        search.apply(std::slice::from_ref(&file));
         assert!(search.is_filtering());
 
         search.clear();
