@@ -11,7 +11,7 @@
 //! client manager rather than a provider.
 
 #[cfg(feature = "browser")]
-pub(crate) mod browser;
+pub mod browser;
 pub(crate) mod caldav;
 pub(crate) mod carddav;
 pub(crate) mod csv;

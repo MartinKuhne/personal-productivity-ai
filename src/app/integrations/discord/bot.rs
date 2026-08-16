@@ -67,10 +67,8 @@ impl DiscordBot {
         )); // 1 hour TTL
         let rate_limiter = Arc::new(RateLimiter::new(config.rate_limit_per_minute));
         let safety_filter = Arc::new(SafetyFilter::with_patterns(config.blocked_patterns.clone()));
-        let llm_client = LLMClient::from_agent_config(
-            &crate::agent::config::AgentConfig::from_app_config(&app_config),
-            None,
-        );
+        let agent_config = app_config.to_agent_config();
+        let llm_client = LLMClient::from_agent_config(&agent_config, None);
         let system_prompt = config.system_prompt.clone();
 
         let handles = BotHandles {

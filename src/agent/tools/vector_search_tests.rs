@@ -45,7 +45,8 @@ fn input_deserializes_explicit_max_distance() {
 fn execute_vector_search_forwards_max_distance_to_service() {
     let mock = Arc::new(MockVectorSearchService::default());
     let mut ctx = ToolContext::default();
-    ctx.extensions.insert(VectorSearchExt(mock.clone()));
+    ctx.extensions
+        .insert(Arc::new(VectorSearchExt(mock.clone())));
 
     let tool = VectorSearchTool;
     let result = execute_vector_search(
@@ -67,7 +68,8 @@ fn execute_vector_search_forwards_max_distance_to_service() {
 fn execute_vector_search_forwards_none_max_distance_when_omitted() {
     let mock = Arc::new(MockVectorSearchService::default());
     let mut ctx = ToolContext::default();
-    ctx.extensions.insert(VectorSearchExt(mock.clone()));
+    ctx.extensions
+        .insert(Arc::new(VectorSearchExt(mock.clone())));
 
     let tool = VectorSearchTool;
     let result = execute_vector_search(&tool, &ctx, r#"{"query":"credit union"}"#);

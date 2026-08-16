@@ -591,7 +591,7 @@ impl crate::agent::tools::browser::BrowserAutomationExt for BrowserSession {
         let handle = self.page().map_err(|e| e.to_string())?;
         crate::agent::tools::blocking::block_on(async { handle.page.goto(url, None).await })
             .map_err(|e| e.to_string())?;
-        let final_url = handle.page.url().unwrap_or_default();
+        let final_url = handle.page.url();
         let title = crate::agent::tools::blocking::block_on(async { handle.page.title().await })
             .unwrap_or_default();
         Ok((final_url, title))
@@ -625,7 +625,7 @@ impl crate::agent::tools::browser::BrowserAutomationExt for BrowserSession {
 
         let elements_json = serde_json::to_string(&value).unwrap_or_else(|_| "[]".to_string());
         let total = value.as_array().map(|a| a.len()).unwrap_or(0);
-        let url = handle.page.url().unwrap_or_default();
+        let url = handle.page.url();
         let title = crate::agent::tools::blocking::block_on(async { handle.page.title().await })
             .unwrap_or_default();
         Ok((url, title, elements_json, total))
@@ -649,6 +649,7 @@ impl crate::agent::tools::browser::BrowserAutomationExt for BrowserSession {
         let handle = self.page().map_err(|e| e.to_string())?;
         let locator = handle.page.locator(selector);
         crate::agent::tools::blocking::block_on(async { locator.select_option(value, None).await })
+            .map(|_| ())
             .map_err(|e| e.to_string())
     }
 

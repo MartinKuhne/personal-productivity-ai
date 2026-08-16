@@ -101,6 +101,16 @@ impl ToolContext {
     }
 }
 
+impl Default for ToolContext {
+    fn default() -> Self {
+        ToolContextBuilder::new(
+            Arc::new(AgentConfig::default()),
+            Arc::new(crate::tools::observer::DefaultFileObserver),
+        )
+        .build()
+    }
+}
+
 /// Compile-time assertion: `ToolContext` is `'static + Send + Sync`.
 ///
 /// This is the contract the rewrite buys. Phase 5 of the

@@ -5,7 +5,7 @@
 use crate::app::background::models::{BackgroundLogEntry, ImageJob, LogCategory};
 use crate::bus::core::Bus;
 use crate::bus::events::file::{FileEvent, FileEventProducer};
-use crate::bus::events::typed::{BackgroundEvent, BackgroundEventSender};
+use crate::bus::events::typed::BackgroundEventSender;
 use crate::config::AppConfig;
 use base64::{Engine as _, engine::general_purpose::STANDARD as b64};
 use serde_json::json;

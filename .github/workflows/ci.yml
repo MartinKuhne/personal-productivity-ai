@@ -4,12 +4,22 @@ on:
   push:
     branches: [main]
     paths:
-      - "src/desktop/**"
-      - ".github/workflows/rust-quality-gate.yml"
+      - "src/**"
+      - "tests/**"
+      - "benches/**"
+      - ".config/**"
+      - "Cargo.toml"
+      - "Cargo.lock"
+      - ".github/workflows/ci.yml"
   pull_request:
     paths:
-      - "src/desktop/**"
-      - ".github/workflows/rust-quality-gate.yml"
+      - "src/**"
+      - "tests/**"
+      - "benches/**"
+      - ".config/**"
+      - "Cargo.toml"
+      - "Cargo.lock"
+      - ".github/workflows/ci.yml"
 
 env:
   CARGO_TERM_COLOR: always
@@ -21,16 +31,13 @@ jobs:
   check:
     name: cargo check
     runs-on: ubuntu-latest
-    defaults:
-      run:
-        working-directory: src/desktop
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
         with:
-          workspaces: src/desktop
-      - run: cargo check
+          workspaces: .
+      - run: cargo check --workspace --all-features
 
   test:
     name: cargo nextest
@@ -39,31 +46,28 @@ jobs:
     permissions:
       contents: read
       actions: write
-    defaults:
-      run:
-        working-directory: src/desktop
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
         with:
-          workspaces: src/desktop
+          workspaces: .
       # Install cargo-nextest at the same version the project ships in
-      # `src/desktop/.config/nextest.toml`. The repo config is the source
+      # `.config/nextest.toml`. The repo config is the source
       # of truth; pinning the version here ensures CI matches local runs.
       - run: cargo install cargo-nextest --locked --version ^0.9
       - name: Install Vulkan software renderer (lavapipe)
         run: sudo apt-get update && sudo apt-get install -y libvulkan1 mesa-vulkan-drivers
       # Use the `ci` profile (no retries, fail-fast, JUnit output) defined
-      # in `src/desktop/.config/nextest.toml`. Local devs use the default
+      # in `.config/nextest.toml`. Local devs use the default
       # profile (2 retries, top-failures summary).
-      - run: cargo nextest run --profile ci
+      - run: cargo nextest run --workspace --all-features --profile ci
       - name: Upload JUnit report
         if: always()
         uses: actions/upload-artifact@v4
         with:
           name: nextest-junit
-          path: src/desktop/target/nextest/ci/junit.xml
+          path: target/nextest/ci/junit.xml
       # Tier 3 visual regression gate. `egui_kittest`'s snapshot
       # feature writes `{name}.new.png` next to each saved
       # `{name}.png` when the rendered output differs. Failing
@@ -88,9 +92,6 @@ jobs:
     name: cargo clippy
     runs-on: ubuntu-latest
     needs: check
-    defaults:
-      run:
-        working-directory: src/desktop
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
@@ -98,16 +99,13 @@ jobs:
           components: clippy
       - uses: Swatinem/rust-cache@v2
         with:
-          workspaces: src/desktop
-      - run: cargo clippy -- -D warnings
+          workspaces: .
+      - run: cargo clippy --workspace --all-features -- -D warnings
 
   fmt:
     name: cargo fmt
     runs-on: ubuntu-latest
     needs: check
-    defaults:
-      run:
-        working-directory: src/desktop
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
@@ -119,13 +117,10 @@ jobs:
     name: cargo doc
     runs-on: ubuntu-latest
     needs: check
-    defaults:
-      run:
-        working-directory: src/desktop
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
         with:
-          workspaces: src/desktop
-      - run: cargo doc --no-deps --quiet
+          workspaces: .
+      - run: cargo doc --workspace --all-features --no-deps --quiet

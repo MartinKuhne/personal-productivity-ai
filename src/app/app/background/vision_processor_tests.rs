@@ -22,7 +22,13 @@ async fn test_process_image_no_model() {
     };
     let config = AppConfig::default();
     let (tx, _rx) = mpsc::channel();
-    let result = process_image(job, config, tx, &noop_producer()).await;
+    let result = process_image(
+        job,
+        config,
+        BackgroundEventSender::new(tx),
+        &noop_producer(),
+    )
+    .await;
     assert!(result.is_err());
     assert_eq!(result.unwrap_err(), "No vision model configured");
 }
@@ -45,7 +51,13 @@ async fn test_process_image_missing_file() {
         },
     );
     let (tx, _rx) = mpsc::channel();
-    let result = process_image(job, config, tx, &noop_producer()).await;
+    let result = process_image(
+        job,
+        config,
+        BackgroundEventSender::new(tx),
+        &noop_producer(),
+    )
+    .await;
     assert!(result.is_err());
     assert!(result.unwrap_err().contains("Failed to read image"));
 }
@@ -106,7 +118,7 @@ async fn test_process_image_success() {
     let producer = FileEventProducer::new(bus);
 
     let (tx, _rx) = mpsc::channel();
-    let result = process_image(job, config, tx, &producer).await;
+    let result = process_image(job, config, BackgroundEventSender::new(tx), &producer).await;
 
     assert!(result.is_ok());
     let md_content = std::fs::read_to_string(&md_path).unwrap();
@@ -169,7 +181,13 @@ async fn test_process_image_api_error() {
     );
 
     let (tx, _rx) = mpsc::channel();
-    let result = process_image(job, config, tx, &noop_producer()).await;
+    let result = process_image(
+        job,
+        config,
+        BackgroundEventSender::new(tx),
+        &noop_producer(),
+    )
+    .await;
 
     assert!(result.is_err());
     assert!(result.unwrap_err().contains("API request failed"));
@@ -222,7 +240,13 @@ async fn test_process_image_no_content() {
     );
 
     let (tx, _rx) = mpsc::channel();
-    let result = process_image(job, config, tx, &noop_producer()).await;
+    let result = process_image(
+        job,
+        config,
+        BackgroundEventSender::new(tx),
+        &noop_producer(),
+    )
+    .await;
 
     assert!(result.is_err());
     assert!(result.unwrap_err().contains("No content in response"));

@@ -47,7 +47,7 @@ fn ext(ctx: &ToolContext) -> Result<Arc<dyn crate::tools::browser::BrowserAutoma
     config = browser_spec(),
     execute_with = execute_browser_navigate,
 )]
-pub(crate) struct BrowserNavigateTool;
+pub struct BrowserNavigateTool;
 fn execute_browser_navigate(
     _self: &BrowserNavigateTool,
     ctx: &ToolContext,
@@ -79,7 +79,7 @@ fn execute_browser_navigate(
     config = browser_spec(),
     execute_with = execute_browser_get_page_state,
 )]
-pub(crate) struct BrowserGetPageStateTool;
+pub struct BrowserGetPageStateTool;
 fn execute_browser_get_page_state(
     _self: &BrowserGetPageStateTool,
     ctx: &ToolContext,
@@ -110,7 +110,7 @@ fn execute_browser_get_page_state(
     config = browser_spec(),
     execute_with = execute_browser_click,
 )]
-pub(crate) struct BrowserClickTool;
+pub struct BrowserClickTool;
 fn execute_browser_click(
     _self: &BrowserClickTool,
     ctx: &ToolContext,
@@ -141,7 +141,7 @@ fn execute_browser_click(
     config = browser_spec(),
     execute_with = execute_browser_fill_input,
 )]
-pub(crate) struct BrowserFillInputTool;
+pub struct BrowserFillInputTool;
 fn execute_browser_fill_input(
     _self: &BrowserFillInputTool,
     ctx: &ToolContext,
@@ -174,7 +174,7 @@ fn execute_browser_fill_input(
     config = browser_spec(),
     execute_with = execute_browser_select_dropdown,
 )]
-pub(crate) struct BrowserSelectDropdownTool;
+pub struct BrowserSelectDropdownTool;
 fn execute_browser_select_dropdown(
     _self: &BrowserSelectDropdownTool,
     ctx: &ToolContext,
@@ -207,7 +207,7 @@ fn execute_browser_select_dropdown(
     config = browser_spec(),
     execute_with = execute_browser_press_key,
 )]
-pub(crate) struct BrowserPressKeyTool;
+pub struct BrowserPressKeyTool;
 fn execute_browser_press_key(
     _self: &BrowserPressKeyTool,
     ctx: &ToolContext,
@@ -238,7 +238,7 @@ fn execute_browser_press_key(
     config = browser_spec(),
     execute_with = execute_browser_evaluate_js,
 )]
-pub(crate) struct BrowserEvaluateJsTool;
+pub struct BrowserEvaluateJsTool;
 fn execute_browser_evaluate_js(
     _self: &BrowserEvaluateJsTool,
     ctx: &ToolContext,
@@ -268,7 +268,7 @@ fn execute_browser_evaluate_js(
     config = browser_spec(),
     execute_with = execute_browser_screenshot,
 )]
-pub(crate) struct BrowserScreenshotTool;
+pub struct BrowserScreenshotTool;
 fn execute_browser_screenshot(
     _self: &BrowserScreenshotTool,
     ctx: &ToolContext,
