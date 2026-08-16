@@ -1,4 +1,4 @@
-name: Rust Quality Gate
+name: FastMD CI
 
 on:
   push:
