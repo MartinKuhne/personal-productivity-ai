@@ -41,3 +41,4 @@ pub use agent_impl::*;
 pub use context::AgentContext;
 pub use session::AgentSession;
 pub use tool_context::AgentToolContext;
+pub use tool_executor::{ToolCallRecord, ToolExecutor, ToolExecutorBuilder};

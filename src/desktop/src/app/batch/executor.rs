@@ -114,17 +114,18 @@ impl BatchJobExecutor {
                         return (job_id, target_path, BatchJobStatus::Cancelled, None);
                     }
 
-                    let result = run_agent_blocking(
-                        app_config,
+                    let params = BatchAgentRunParams {
+                        config: app_config,
                         active_file,
                         active_dir,
-                        std::collections::HashSet::new(),
-                        prompt_text,
+                        selected_files: std::collections::HashSet::new(),
+                        prompt: prompt_text,
                         cancel_flag,
-                        None,
-                        file_event_bus_clone,
+                        history: None,
+                        file_event_bus: file_event_bus_clone,
                         model_name,
-                    );
+                    };
+                    let result = run_agent_blocking(params);
 
                     drop(permit);
                     (job_id, target_path, result.0, result.1)
@@ -179,18 +180,40 @@ impl BatchJobExecutor {
     }
 }
 
-#[allow(clippy::too_many_arguments)]
-pub fn run_agent_blocking(
-    config: AppConfig,
-    active_file: Option<PathBuf>,
-    active_dir: Option<PathBuf>,
-    selected_files: std::collections::HashSet<PathBuf>,
-    prompt: String,
-    cancel_flag: Arc<AtomicBool>,
-    history: Option<Vec<serde_json::Value>>,
-    file_event_bus: std::sync::Arc<dyn crate::agent::tools::observer::OnFileChanged>,
-    model_name: Option<String>,
-) -> (BatchJobStatus, Option<String>) {
+/// Parameters for running an agent synchronously in a batch job.
+pub struct BatchAgentRunParams {
+    /// Application configuration.
+    pub config: AppConfig,
+    /// Currently active file path, if any.
+    pub active_file: Option<PathBuf>,
+    /// Currently active directory path, if any.
+    pub active_dir: Option<PathBuf>,
+    /// Set of selected file paths.
+    pub selected_files: std::collections::HashSet<PathBuf>,
+    /// Prompt text to submit to the agent.
+    pub prompt: String,
+    /// Cancellation flag for aborting the job.
+    pub cancel_flag: Arc<AtomicBool>,
+    /// Prior conversation message history, if continuing a session.
+    pub history: Option<Vec<serde_json::Value>>,
+    /// Observer handle for propagating file changes.
+    pub file_event_bus: std::sync::Arc<dyn crate::agent::tools::observer::OnFileChanged>,
+    /// Optional override model name.
+    pub model_name: Option<String>,
+}
+
+pub fn run_agent_blocking(params: BatchAgentRunParams) -> (BatchJobStatus, Option<String>) {
+    let BatchAgentRunParams {
+        config,
+        active_file,
+        active_dir,
+        selected_files,
+        prompt,
+        cancel_flag,
+        history,
+        file_event_bus,
+        model_name,
+    } = params;
     use crate::agent::run_agent;
     use crate::app::events::AgentEvent as SeamAgentEvent;
 

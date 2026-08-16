@@ -855,7 +855,6 @@ fn extra_lines_at_width(bps: &[Breakpoint], w: f32) -> i32 {
 /// All those checks are re-asserted in-line because this function is
 /// called from the dispatch in `ftwa` *after* the shared checks, but it
 /// is also a public entry point for tests and external callers.
-#[allow(clippy::too_many_arguments)]
 pub fn solve_waterfill_ratio(
     max_content: &[f32],
     min_content: &[f32],
@@ -1009,7 +1008,6 @@ pub fn solve_waterfill_ratio(
 /// # Panics
 ///
 /// Same input contracts as [`ftwa`] (re-asserted in-line for direct callers).
-#[allow(clippy::too_many_arguments)]
 pub fn solve_lagrange_penalty(
     max_content: &[f32],
     min_content: &[f32],
@@ -1221,7 +1219,6 @@ fn lagrange_optimal_width(
 /// # Panics
 ///
 /// Same input contracts as [`ftwa`] (re-asserted in-line for direct callers).
-#[allow(clippy::too_many_arguments)]
 pub fn solve_hybrid(
     max_content: &[f32],
     min_content: &[f32],

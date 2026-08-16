@@ -1,12 +1,12 @@
-﻿//! Top-level agent orchestration â€” sends requests, executes tool calls, and streams results back to the UI.
+//! Top-level agent orchestration — sends requests, executes tool calls, and streams results back to the UI.
 
 use crate::context::AgentContext;
 use crate::datamark;
 use crate::events::{
     AgentDebugEntry, AgentEventObserver, AgentStatus, DebugEntryKind, DebugEntryRow,
 };
-use crate::llm_client::{parse_usage_block, LLMClient};
-use crate::tool_executor::ToolExecutor;
+use crate::llm_client::{LLMClient, parse_usage_block};
+use crate::tool_executor::{ToolCallRecord, ToolExecutor};
 use std::collections::HashSet;
 use std::path::PathBuf;
 use std::sync::atomic::Ordering;
@@ -15,8 +15,8 @@ use std::sync::atomic::Ordering;
 ///
 /// Called by the long-lived driver thread (see `agent/manager.rs`) with a
 /// per-session `AgentContext` built from an `AgentPrompt`. The driver owns
-/// the shared resources; this function runs `run_agent_inner` inline â€”
-/// no inner `std::thread::spawn` (research.md Â§3, migration step 10).
+/// the shared resources; this function runs `run_agent_inner` inline —
+/// no inner `std::thread::spawn` (research.md §3, migration step 10).
 pub fn run_agent(ctx: AgentContext) -> Vec<serde_json::Value> {
     run_agent_inner(ctx)
 }
@@ -46,7 +46,6 @@ fn run_agent_inner(ctx: AgentContext) -> Vec<serde_json::Value> {
     )
     .with_tool_call_policy(ctx.tool_call_policy.clone())
     .with_uuid_gen(ctx.uuid_gen.clone())
-    .with_extensions(ctx.extensions.clone())
     .build();
 
     let session_boundary = AgentDebugEntry {
@@ -95,7 +94,6 @@ enum Turn {
     Done,
     Failed,
 }
-#[allow(clippy::too_many_arguments)]
 fn process_turn(
     llm: &LLMClient,
     ctx: &AgentContext,
@@ -117,7 +115,7 @@ fn process_turn(
         timestamp: chrono::Local::now(),
         kind: DebugEntryKind::Outgoing,
         summary: format!(
-            "Turn {} â€” Outgoing (+{} messages, {} tools)",
+            "Turn {} — Outgoing (+{} messages, {} tools)",
             turn,
             delta.len(),
             tool_count
@@ -154,7 +152,7 @@ fn process_turn(
         timestamp: chrono::Local::now(),
         kind: DebugEntryKind::Incoming,
         summary: format!(
-            "Turn {} â€” Incoming (assistant{} {})",
+            "Turn {} — Incoming (assistant{} {})",
             turn,
             if incoming_tool_call_count > 0 {
                 format!(" + {} tool call(s)", incoming_tool_call_count)
@@ -286,15 +284,15 @@ fn handle_content(message: &serde_json::Value, observer: &dyn AgentEventObserver
     }
 }
 fn process_tool_results(
-    results: &[(String, String, String, String)],
+    results: &[ToolCallRecord],
     tool_calls: &[serde_json::Value],
     messages: &mut Vec<serde_json::Value>,
     observer: &dyn AgentEventObserver,
 ) {
-    let mut map: std::collections::HashMap<String, (String, String, String)> =
+    let mut map: std::collections::HashMap<String, &ToolCallRecord> =
         std::collections::HashMap::new();
-    for (cid, fn_name, args, result) in results {
-        map.insert(cid.clone(), (fn_name.clone(), args.clone(), result.clone()));
+    for record in results {
+        map.insert(record.call_id.clone(), record);
     }
     for tc in tool_calls {
         let cid = tc
@@ -302,11 +300,11 @@ fn process_tool_results(
             .and_then(|id| id.as_str())
             .unwrap_or("")
             .to_string();
-        if let Some((fn_name, _args, result)) = map.remove(&cid) {
-            log_tool_result(&fn_name, &result);
-            let result_value = serde_json::from_str::<serde_json::Value>(&result)
-                .unwrap_or(serde_json::Value::String(result.clone()));
-            observer.on_tool_result(cid.clone(), fn_name.clone(), result_value);
+        if let Some(record) = map.remove(&cid) {
+            log_tool_result(&record.name, &record.result);
+            let result_value = serde_json::from_str::<serde_json::Value>(&record.result)
+                .unwrap_or(serde_json::Value::String(record.result.clone()));
+            observer.on_tool_result(cid.clone(), record.name.clone(), result_value);
             // R1 (Spotlighting): wrap the tool result in a
             // datamark envelope so the LLM treats it as data, not
             // instructions. The user-facing response above is built
@@ -319,8 +317,8 @@ fn process_tool_results(
             // above). Strip it from the LLM-bound payload so the model
             // only sees the `status` and `result` fields, avoiding
             // redundant context bloat.
-            let llm_result = strip_web_delegate_trace(&fn_name, &result);
-            let wrapped = datamark::wrap_tool_result(&fn_name, &llm_result);
+            let llm_result = strip_web_delegate_trace(&record.name, &record.result);
+            let wrapped = datamark::wrap_tool_result(&record.name, &llm_result);
             messages.push(serde_json::json!({
                 "role": "tool",
                 "tool_call_id": cid,
@@ -388,18 +386,18 @@ fn log_tool_result(func_name: &str, result: &str) {
 fn emit_tool_results_debug(
     turn: usize,
     observer: &dyn AgentEventObserver,
-    results: &[(String, String, String, String)],
+    results: &[ToolCallRecord],
 ) {
     let entries: Vec<serde_json::Value> = results
         .iter()
-        .map(|(call_id, fn_name, args, result)| {
-            let args_value = serde_json::from_str::<serde_json::Value>(args)
-                .unwrap_or_else(|_| serde_json::Value::String(args.clone()));
-            let result_value = serde_json::from_str::<serde_json::Value>(result)
-                .unwrap_or_else(|_| serde_json::Value::String(result.clone()));
+        .map(|record| {
+            let args_value = serde_json::from_str::<serde_json::Value>(&record.arguments)
+                .unwrap_or_else(|_| serde_json::Value::String(record.arguments.clone()));
+            let result_value = serde_json::from_str::<serde_json::Value>(&record.result)
+                .unwrap_or_else(|_| serde_json::Value::String(record.result.clone()));
             serde_json::json!({
-                "call_id": call_id,
-                "name": fn_name,
+                "call_id": record.call_id,
+                "name": record.name,
                 "arguments": args_value,
                 "result": result_value,
             })
@@ -409,7 +407,7 @@ fn emit_tool_results_debug(
         turn,
         timestamp: chrono::Local::now(),
         kind: DebugEntryKind::ToolResults,
-        summary: format!("Turn {} â€” Tool results ({} tools)", turn, entries.len()),
+        summary: format!("Turn {} — Tool results ({} tools)", turn, entries.len()),
         content: Some(serde_json::Value::Array(entries)),
         row_type: DebugEntryRow::Entry,
     };
@@ -542,7 +540,7 @@ mod tests {
         );
     }
 
-    /// Non-`web_delegate` tools must pass through unchanged â€” the strip
+    /// Non-`web_delegate` tools must pass through unchanged — the strip
     /// is scoped to the one tool that carries a `tool_call_trace` field.
     #[test]
     fn test_strip_web_delegate_trace_leaves_other_tools_unchanged() {
@@ -551,7 +549,7 @@ mod tests {
         assert_eq!(stripped, result);
     }
 
-    /// Malformed JSON must round-trip unchanged rather than panic â€” the
+    /// Malformed JSON must round-trip unchanged rather than panic — the
     /// LLM still receives the original tool result on a parse failure.
     #[test]
     fn test_strip_web_delegate_trace_passthrough_on_parse_error() {
