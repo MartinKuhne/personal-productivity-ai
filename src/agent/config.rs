@@ -473,6 +473,7 @@ impl std::fmt::Debug for McpServerConfig {
 #[derive(Clone, Debug)]
 pub struct AgentConfig {
     pub(crate) models: HashMap<String, LlmConfig>,
+    pub(crate) selected_chat_model: Option<String>,
     pub(crate) max_tokens: u32,
     pub(crate) tool_groups: ToolGroupsConfig,
     pub(crate) mcp_servers: HashMap<String, McpServerEntry>,
@@ -490,6 +491,10 @@ pub struct AgentConfig {
 impl AgentConfig {
     pub fn models(&self) -> &HashMap<String, LlmConfig> {
         &self.models
+    }
+
+    pub fn selected_chat_model(&self) -> Option<&str> {
+        self.selected_chat_model.as_deref()
     }
 
     pub fn max_tokens(&self) -> u32 {
@@ -549,7 +554,17 @@ impl AgentConfig {
     }
 
     pub fn select_chat_model(&self) -> Result<&LlmConfig, String> {
-        let model_cfg = if let Some((_key, model_cfg)) = self.model_for_use_case("chat") {
+        let model_cfg = if let Some(key) = &self.selected_chat_model {
+            if let Some(cfg) = self.models.get(key) {
+                cfg
+            } else if let Some((_key, model_cfg)) = self.model_for_use_case("chat") {
+                model_cfg
+            } else if let Some(model_cfg) = self.models.values().next() {
+                model_cfg
+            } else {
+                return Err("No LLM models are configured.".to_string());
+            }
+        } else if let Some((_key, model_cfg)) = self.model_for_use_case("chat") {
             model_cfg
         } else if let Some(model_cfg) = self.models.values().next() {
             model_cfg
@@ -574,6 +589,7 @@ impl Default for AgentConfig {
 /// Fluent builder for [`AgentConfig`].
 pub struct AgentConfigBuilder {
     models: HashMap<String, LlmConfig>,
+    selected_chat_model: Option<String>,
     max_tokens: u32,
     tool_groups: ToolGroupsConfig,
     mcp_servers: HashMap<String, McpServerEntry>,
@@ -593,6 +609,7 @@ impl AgentConfigBuilder {
         let browser = BrowserConfig::default().resolve(&[]);
         Self {
             models: HashMap::new(),
+            selected_chat_model: None,
             max_tokens: 32768,
             tool_groups: ToolGroupsConfig::default(),
             mcp_servers: HashMap::new(),
@@ -610,6 +627,11 @@ impl AgentConfigBuilder {
 
     pub fn with_models(mut self, models: HashMap<String, LlmConfig>) -> Self {
         self.models = models;
+        self
+    }
+
+    pub fn with_selected_chat_model(mut self, model: Option<String>) -> Self {
+        self.selected_chat_model = model;
         self
     }
 
@@ -676,6 +698,7 @@ impl AgentConfigBuilder {
     pub fn build(self) -> AgentConfig {
         AgentConfig {
             models: self.models,
+            selected_chat_model: self.selected_chat_model,
             max_tokens: self.max_tokens,
             tool_groups: self.tool_groups,
             mcp_servers: self.mcp_servers,

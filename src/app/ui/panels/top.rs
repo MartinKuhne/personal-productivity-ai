@@ -96,6 +96,60 @@ pub fn apply_tools_button_click(app: &mut FastMdApp) {
     app.dialogs_mut().tools_dialog_open = true;
 }
 
+/// Purpose: Applies the side effect of toggling the background logs window from the Windows menu.
+///
+/// Inputs: app (the application state), `show`: the new boolean state
+/// Outputs: ()
+/// Purity: Impure (mutates `app.orchestrator.background_manager.show_background_logs`).
+/// Preconditions: None.
+/// Postconditions: `show_background_logs` matches `show`.
+pub fn apply_background_logs_toggle(app: &mut FastMdApp, show: bool) {
+    app.orchestrator
+        .background_manager
+        .lock()
+        .unwrap()
+        .show_background_logs = show;
+}
+
+/// Purpose: Applies the side effect of toggling the agent debug window from the Windows menu.
+///
+/// Inputs: app (the application state), `show`: the new boolean state
+/// Outputs: ()
+/// Purity: Impure (mutates `app.orchestrator.agent_panel_state.show_debug_window`).
+/// Preconditions: None.
+/// Postconditions: `show_debug_window` matches `show`.
+pub fn apply_agent_debug_toggle(app: &mut FastMdApp, show: bool) {
+    app.orchestrator.agent_panel_state.show_debug_window = show;
+}
+
+/// Purpose: Applies the side effect of picking a new chat model from the Chat Models menu.
+///
+/// Inputs: `app` (application state), `model_name` (selected model name), `persist` (config saver callback).
+/// Outputs: ()
+/// Purity: Impure (mutates the app and agent configuration).
+/// Preconditions: None.
+/// Postconditions: Both app and agent configuration select `model_name`, and config is saved.
+pub fn apply_chat_model_selection<F>(app: &mut FastMdApp, model_name: String, persist: &mut F)
+where
+    F: FnMut(&AppConfig) -> Result<PathBuf, String>,
+{
+    let mut new_config = app.config().clone();
+    if new_config.selected_chat_model.as_deref() == Some(&model_name) {
+        return;
+    }
+    new_config.selected_chat_model = Some(model_name.clone());
+    if let Err(e) = persist(&new_config) {
+        tracing::error!(
+            error = %e,
+            model = %model_name,
+            "failed to persist AppConfig after chat-model selection change"
+        );
+    }
+    app.agent_mut()
+        .set_agent_config(new_config.to_agent_config());
+    *app.config_mut() = new_config;
+}
+
 /// Human-readable label for a [`DeficitStrategy`] variant, used as the
 /// `selected_text` of the top-bar table-width-strategy combobox and as
 /// the row label inside the dropdown. The match is intentionally
@@ -167,9 +221,9 @@ pub fn strategy_label(strategy: DeficitStrategy) -> &'static str {
 pub fn apply_table_width_strategy_change<F>(
     app: &mut FastMdApp,
     strategy: DeficitStrategy,
-    persist: F,
+    persist: &mut F,
 ) where
-    F: FnOnce(&AppConfig) -> Result<PathBuf, String>,
+    F: FnMut(&AppConfig) -> Result<PathBuf, String>,
 {
     let new_value = strategy.to_config();
     let mut new_config = app.config().clone();
@@ -192,25 +246,35 @@ pub fn apply_table_width_strategy_change<F>(
 }
 
 pub fn show_top_panel(app: &mut FastMdApp, parent_ui: &mut egui::Ui) {
-    show_top_panel_capture(app, parent_ui, |_| {});
+    show_top_panel_capture_with_persist(app, parent_ui, crate::config::save_config, |_| {});
 }
 
 /// Tier 4 test variant of [`show_top_panel`]. The `on_click` callback
 /// is invoked after every button click in the toolbar, with a stable
-/// event name. The production caller ([`show_top_panel`]) passes a
-/// no-op closure; the test caller in
-/// `tests::test_batch_button_click_opens_dialog` passes a closure
-/// that pushes the event into the harness's persistent state. The
-/// callback runs on the same frame as the click, *after* the side
-/// effect on `app` is applied, so the test can read both `app`
-/// (via the captured `&mut FastMdApp` in the closure) and the
-/// harness's `state()` after `harness.run()` to verify the
-/// integration end-to-end.
+/// event name. The test persister is a no-op so tests do not touch disk.
+#[cfg(test)]
 pub fn show_top_panel_capture(
     app: &mut FastMdApp,
     parent_ui: &mut egui::Ui,
-    mut on_click: impl FnMut(&'static str),
+    on_click: impl FnMut(&'static str),
 ) {
+    show_top_panel_capture_with_persist(
+        app,
+        parent_ui,
+        |_| Ok(std::path::PathBuf::new()),
+        on_click,
+    );
+}
+
+/// Variant of [`show_top_panel_capture`] allowing custom persistence handler.
+pub fn show_top_panel_capture_with_persist<F>(
+    app: &mut FastMdApp,
+    parent_ui: &mut egui::Ui,
+    mut persist: F,
+    mut on_click: impl FnMut(&'static str),
+) where
+    F: FnMut(&AppConfig) -> Result<PathBuf, String>,
+{
     // egui 0.35 unified `TopBottomPanel` into `Panel`.
     Panel::top("top_panel").show(parent_ui, |ui| {
         ui.horizontal(|ui| {
@@ -220,33 +284,6 @@ pub fn show_top_panel_capture(
                     .color(egui::Color32::from_rgb(100, 200, 255)),
             );
             ui.separator();
-            // Single lock acquisition for the read-modify-write of
-            // `show_background_logs`. The previous revision locked
-            // twice (read + write) with an `unwrap()` on each — two
-            // panic-on-poison sites per frame plus a lost-update
-            // window between the locks (render-audit P1-8).
-            {
-                let mut bg = app.orchestrator.background_manager.lock().unwrap();
-                let mut show_bg = bg.show_background_logs;
-                if ui
-                    .checkbox(&mut show_bg, crate::ui::strings::SHOW_LOG_CHECKBOX)
-                    .changed()
-                {
-                    bg.show_background_logs = show_bg;
-                }
-            }
-            ui.separator();
-
-            if ui.button(crate::ui::strings::BATCH_BUTTON).clicked() {
-                apply_batch_button_click(app);
-                on_click("batch_button");
-            }
-            if ui.button(crate::ui::strings::TOOLS_BUTTON).clicked() {
-                apply_tools_button_click(app);
-                on_click("tools_button");
-            }
-            ui.separator();
-
             // Spinner and tag combobox must always allocate, even
             // when invisible, so their widget ids stay stable across
             // the indexing-finished transition. The previous
@@ -313,51 +350,143 @@ pub fn show_top_panel_capture(
                     });
             });
 
-            // Table-width deficit-strategy combobox. Always visible
-            // (not gated on `indexing_finished` — the strategy is a
-            // user preference unrelated to the indexer). Picked
-            // strategy is persisted to `AppConfig::table_width_strategy`
-            // on change; the markdown renderer re-reads it every
-            // frame via `app.orchestrator.config.deficit_strategy()`,
-            // so the next paint uses the new algorithm without any
-            // explicit invalidation hook.
-            ui.separator();
-            ui.label(crate::ui::strings::TABLE_WIDTH_STRATEGY_LABEL);
-            let current_strategy = app.orchestrator.config.deficit_strategy();
-            let mut pending: Option<DeficitStrategy> = None;
-            egui::ComboBox::from_id_salt(crate::ui::strings::TABLE_WIDTH_STRATEGY_ID_SALT)
-                .selected_text(strategy_label(current_strategy))
-                .show_ui(ui, |ui| {
-                    // Order matters: default first (HybridMinPenaltyWaterFill,
-                    // best G1/G2 trade-off), then the two original FTWA
-                    // strategies, then the three survey algorithms from
-                    // `doc/planning/table-column-width-algorithm.md` §2.10
-                    // / §2.13 / §2.14. Future strategies should be appended
-                    // here AND in `DeficitStrategy` in
-                    // `src/markdown/table_width/mod.rs` (exhaustive match).
-                    for variant in [
-                        DeficitStrategy::HybridMinPenaltyWaterFill,
-                        DeficitStrategy::ProportionalToSlack,
-                        DeficitStrategy::BreakpointWaterFill,
-                        DeficitStrategy::WaterFillRatio,
-                        DeficitStrategy::LagrangePenalty,
-                    ] {
-                        if ui
-                            .selectable_label(
-                                strategy_label(variant) == strategy_label(current_strategy),
-                                strategy_label(variant),
-                            )
-                            .clicked()
-                            && variant != current_strategy
-                        {
-                            pending = Some(variant);
-                        }
+            // Hamburger menu placed at the far right of the top toolbar.
+            // Clicking the hamburger button opens a dropdown containing
+            // Batch, Tools, Windows, Chat models, and Table wrap algorithm entries.
+            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                ui.menu_button(crate::ui::strings::HAMBURGER_MENU_BUTTON, |ui| {
+                    ui.set_min_width(180.0);
+
+                    // Direct action items — open dialogs immediately on click.
+                    if ui.button(crate::ui::strings::MENU_BATCH).clicked() {
+                        apply_batch_button_click(app);
+                        on_click("batch_button");
+                        ui.close();
                     }
+                    if ui.button(crate::ui::strings::MENU_TOOLS).clicked() {
+                        apply_tools_button_click(app);
+                        on_click("tools_button");
+                        ui.close();
+                    }
+
+                    ui.separator();
+
+                    // Windows submenu offering window visibility toggles.
+                    ui.menu_button(crate::ui::strings::MENU_WINDOWS, |ui| {
+                        let show_bg = {
+                            app.orchestrator
+                                .background_manager
+                                .lock()
+                                .unwrap()
+                                .show_background_logs
+                        };
+                        let background_operations_label =
+                            crate::ui::strings::format_menu_selection_label(
+                                crate::ui::strings::MENU_BACKGROUND_OPERATIONS,
+                                show_bg,
+                            );
+                        if ui.button(background_operations_label).clicked() {
+                            apply_background_logs_toggle(app, !show_bg);
+                            on_click(crate::ui::strings::BACKGROUND_OPERATIONS_EVENT);
+                            ui.close();
+                        }
+
+                        let show_debug = app.orchestrator.agent_panel_state.show_debug_window;
+                        let agent_debug_label = crate::ui::strings::format_menu_selection_label(
+                            crate::ui::strings::MENU_AGENT_DEBUG,
+                            show_debug,
+                        );
+                        if ui.button(agent_debug_label).clicked() {
+                            apply_agent_debug_toggle(app, !show_debug);
+                            on_click(crate::ui::strings::AGENT_DEBUG_EVENT);
+                            ui.close();
+                        }
+                    });
+
+                    // Chat models submenu offering chat model selection.
+                    ui.menu_button(crate::ui::strings::MENU_CHAT_MODELS, |ui| {
+                        let current_model = app.config().current_chat_model_key();
+                        let mut chat_models: Vec<(&String, &crate::config::LlmConfig)> = app
+                            .config()
+                            .models
+                            .iter()
+                            .filter(|(_, cfg)| cfg.has_use_case("chat"))
+                            .collect();
+                        if chat_models.is_empty() {
+                            chat_models = app.config().models.iter().collect();
+                        }
+                        chat_models.sort_by_key(|(name, _)| (*name).clone());
+
+                        if chat_models.is_empty() {
+                            ui.add_enabled(
+                                false,
+                                egui::Button::new(crate::ui::strings::NO_CHAT_MODELS_CONFIGURED),
+                            );
+                        } else {
+                            let mut pending_model: Option<String> = None;
+                            for (name, model_cfg) in chat_models {
+                                let is_current = current_model.as_deref() == Some(name.as_str());
+                                let checkmark = if is_current { "✓ " } else { "   " };
+                                let label = format!(
+                                    "{}{}",
+                                    checkmark,
+                                    crate::ui::strings::format_chat_model_menu_label(
+                                        name,
+                                        model_cfg.get_cost()
+                                    )
+                                );
+                                if ui.button(label).clicked() {
+                                    if !is_current {
+                                        pending_model = Some(name.clone());
+                                    }
+                                    ui.close();
+                                }
+                            }
+
+                            if let Some(picked) = pending_model {
+                                apply_chat_model_selection(app, picked, &mut persist);
+                                on_click(crate::ui::strings::CHAT_MODEL_SELECTION_EVENT);
+                            }
+                        }
+                    });
+
+                    // Table wrap algorithm submenu offering deficit strategy selection.
+                    ui.menu_button(crate::ui::strings::MENU_TABLE_WRAP_ALGORITHM, |ui| {
+                        let current_strategy = app.orchestrator.config.deficit_strategy();
+                        let mut pending: Option<DeficitStrategy> = None;
+
+                        // Order matters: default first (HybridMinPenaltyWaterFill,
+                        // best G1/G2 trade-off), then the two original FTWA
+                        // strategies, then the three survey algorithms from
+                        // `doc/planning/table-column-width-algorithm.md` §2.10
+                        // / §2.13 / §2.14. Future strategies should be appended
+                        // here AND in `DeficitStrategy` in
+                        // `src/markdown/table_width/mod.rs` (exhaustive match).
+                        for variant in [
+                            DeficitStrategy::HybridMinPenaltyWaterFill,
+                            DeficitStrategy::ProportionalToSlack,
+                            DeficitStrategy::BreakpointWaterFill,
+                            DeficitStrategy::WaterFillRatio,
+                            DeficitStrategy::LagrangePenalty,
+                        ] {
+                            let is_selected = variant == current_strategy;
+                            let checkmark = if is_selected { "✓ " } else { "   " };
+                            let label = format!("{}{}", checkmark, strategy_label(variant));
+                            if ui.button(label).clicked() {
+                                if !is_selected {
+                                    pending = Some(variant);
+                                }
+                                ui.close();
+                            }
+                        }
+
+                        if let Some(picked) = pending {
+                            apply_table_width_strategy_change(app, picked, &mut persist);
+                            on_click(crate::ui::strings::TABLE_WIDTH_STRATEGY_EVENT);
+                        }
+                    });
                 });
-            if let Some(picked) = pending {
-                apply_table_width_strategy_change(app, picked, crate::config::save_config);
-                on_click(crate::ui::strings::TABLE_WIDTH_STRATEGY_EVENT);
-            }
+            });
         });
     });
 }

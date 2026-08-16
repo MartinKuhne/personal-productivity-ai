@@ -4,14 +4,17 @@
 /// Application title displayed in the top toolbar.
 pub const APP_TITLE: &str = "⚡ FastMD Viewer";
 
-/// Label for the background log toggle checkbox in the top toolbar.
-pub const SHOW_LOG_CHECKBOX: &str = "Show log";
-
-/// Label for the batch prompt processing button in the top toolbar.
+/// Label for the batch prompt processing button (now in the hamburger menu).
 pub const BATCH_BUTTON: &str = "Batch...";
 
-/// Label for the tools dialog button in the top toolbar.
+/// Label for the batch prompt processing entry in the hamburger menu.
+pub const MENU_BATCH: &str = "Batch...";
+
+/// Label for the tools dialog button (now in the hamburger menu).
 pub const TOOLS_BUTTON: &str = "Tools...";
+
+/// Label for the tools dialog entry in the hamburger menu.
+pub const MENU_TOOLS: &str = "Tools...";
 
 /// Title of the tools dialog modal.
 pub const TOOLS_DIALOG_TITLE: &str = "Tools";
@@ -52,6 +55,49 @@ pub const TAG_FILTER_ID_SALT: &str = "tag_combobox";
 
 /// Default label shown when no tag is selected in the tag filter.
 pub const TAG_FILTER_DEFAULT: &str = "Filter by Tag: All";
+
+/// Label for the hamburger menu button in the top toolbar.
+pub const HAMBURGER_MENU_BUTTON: &str = "☰";
+
+/// ID salt for the hamburger menu in egui.
+pub const HAMBURGER_MENU_ID_SALT: &str = "top_hamburger_menu";
+
+/// Submenu label for the Table Wrap Algorithm submenu in the top hamburger menu.
+pub const MENU_TABLE_WRAP_ALGORITHM: &str = "Table wrap algorithm";
+
+/// Submenu label for the Windows submenu in the top hamburger menu.
+pub const MENU_WINDOWS: &str = "Windows";
+
+/// Menu item label for opening/toggling the Background Operations (processes/logs) window.
+pub const MENU_BACKGROUND_OPERATIONS: &str = "Background operations";
+
+/// Menu item label for opening/toggling the Agent Debug window.
+pub const MENU_AGENT_DEBUG: &str = "Agent debug";
+
+/// `on_click` event name fired when the user toggles Background Operations from the menu.
+pub const BACKGROUND_OPERATIONS_EVENT: &str = "background_operations";
+
+/// `on_click` event name fired when the user toggles Agent Debug from the menu.
+pub const AGENT_DEBUG_EVENT: &str = "agent_debug";
+
+/// Submenu label for the Chat Models submenu in the top hamburger menu.
+pub const MENU_CHAT_MODELS: &str = "Chat models";
+
+/// Informational label shown in the Chat Models menu when no models are configured.
+pub const NO_CHAT_MODELS_CONFIGURED: &str = "No models configured";
+
+/// `on_click` event name fired when the user selects a chat model from the menu.
+pub const CHAT_MODEL_SELECTION_EVENT: &str = "chat_model_selection";
+
+/// Formats a model entry for the Chat Models dropdown menu.
+pub fn format_chat_model_menu_label(name: &str, cost: i32) -> String {
+    format!("{} (Cost: {})", name, cost)
+}
+
+/// Formats a menu selection with an explicit checkmark for the selected item.
+pub fn format_menu_selection_label(label: &str, selected: bool) -> String {
+    format!("{}{}", if selected { "✓ " } else { "   " }, label)
+}
 
 /// Label preceding the table-width-strategy dropdown in the top toolbar.
 pub const TABLE_WIDTH_STRATEGY_LABEL: &str = "Table wrap:";
@@ -460,5 +506,30 @@ mod tests {
         assert_eq!(DEBUG_KIND_OUTGOING, "Outgoing");
         assert_eq!(DEBUG_KIND_INCOMING, "Incoming");
         assert_eq!(DEBUG_KIND_TOOL_RESULTS, "ToolResults");
+    }
+
+    #[test]
+    fn test_hamburger_menu_strings() {
+        assert_eq!(HAMBURGER_MENU_BUTTON, "☰");
+        assert_eq!(HAMBURGER_MENU_ID_SALT, "top_hamburger_menu");
+        assert_eq!(MENU_TABLE_WRAP_ALGORITHM, "Table wrap algorithm");
+        assert_eq!(MENU_WINDOWS, "Windows");
+        assert_eq!(MENU_BACKGROUND_OPERATIONS, "Background operations");
+        assert_eq!(MENU_AGENT_DEBUG, "Agent debug");
+        assert_eq!(MENU_CHAT_MODELS, "Chat models");
+        assert_eq!(NO_CHAT_MODELS_CONFIGURED, "No models configured");
+        assert_eq!(CHAT_MODEL_SELECTION_EVENT, "chat_model_selection");
+        assert_eq!(
+            format_chat_model_menu_label("gpt-4o", 15),
+            "gpt-4o (Cost: 15)"
+        );
+        assert_eq!(
+            format_menu_selection_label("Background operations", true),
+            "✓ Background operations"
+        );
+        assert_eq!(
+            format_menu_selection_label("Background operations", false),
+            "   Background operations"
+        );
     }
 }
