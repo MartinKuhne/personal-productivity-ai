@@ -1,3 +1,5 @@
+//! Agent seam events and bus observer — the event payloads that flow over `Bus<AgentEvent>`.
+
 use crate::agent::events::{AgentEventObserver, AgentStatus, ToolSideEffect};
 use crate::agent::tools::observer::OnFileChanged;
 use crate::bus::core::Bus;

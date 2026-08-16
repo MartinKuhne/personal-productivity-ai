@@ -35,8 +35,8 @@ use std::path::PathBuf;
 use eframe::egui;
 
 use crate::agent::AgentSession;
-use crate::app::Tags;
 use crate::ui::{Dialogs, FileSelection, PanelLayout, PersistedUiState, Tabs, TextBuffer};
+use crate::workspace::Tags;
 use crate::workspace::watcher::FileEventProcessor;
 
 /// The key used to persist the eframe UI state.

@@ -2,8 +2,8 @@
 
 use super::*;
 use crate::agent::events::AgentStatus;
-use crate::app::events::AgentEvent as SeamAgentEvent;
 use crate::app::orchestrator::AppOrchestrator;
+use crate::bus::events::agent::AgentEvent as SeamAgentEvent;
 use crate::bus::events::file::FileEvent;
 use crate::bus::events::messages::TokenUsageInfo;
 use crate::bus::events::typed::FsEvent;
@@ -1293,7 +1293,7 @@ fn ctx_with_native_ppp(ppp: f32) -> (egui::Context, egui::RawInput) {
 #[test]
 fn test_tool_side_effect_reissues_fs_event() {
     use crate::agent::events::ToolSideEffect;
-    use crate::app::events::AgentEvent as SeamAgentEvent;
+    use crate::bus::events::agent::AgentEvent as SeamAgentEvent;
     use std::io::Write;
 
     let mut app = create_test_app();
@@ -1344,7 +1344,7 @@ fn test_tool_side_effect_reissues_fs_event() {
 /// into the transcript content (quickstart scenario 5).
 #[test]
 fn test_broadcast_lag_handled_with_truncation_marker() {
-    use crate::app::events::AgentEvent as SeamAgentEvent;
+    use crate::bus::events::agent::AgentEvent as SeamAgentEvent;
 
     let mut app = create_test_app();
     let bus = app.orchestrator.agent_event_bus.clone();

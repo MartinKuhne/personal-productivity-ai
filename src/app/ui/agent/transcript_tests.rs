@@ -2,7 +2,7 @@
 
 use super::*;
 use crate::agent::events::{AgentStatus, ToolSideEffect};
-use crate::app::events::AgentEvent;
+use crate::bus::events::agent::AgentEvent;
 use serde_json::json;
 use uuid::Uuid;
 

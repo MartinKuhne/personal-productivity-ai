@@ -11,7 +11,6 @@ use std::sync::{Arc, Mutex};
 use eframe::egui;
 
 use crate::agent::AgentSession;
-use crate::app::Tags;
 use crate::background::{BackgroundLogs, Task};
 use crate::bus::core::Bus;
 use crate::bus::events::config::ConfigArrived;
@@ -19,6 +18,7 @@ use crate::config::AppConfig;
 use crate::ui::agent::panel_state::AgentPanelState;
 use crate::ui::agent::transcript::AgentTranscript;
 use crate::ui::{Dialogs, FileSelection, PanelLayout, PersistedUiState, Tabs, TextBuffer};
+use crate::workspace::Tags;
 use crate::workspace::watcher::{DirectoryTracker, FileEventProcessor};
 
 use super::{FastMdApp, PERSISTED_UI_STATE_KEY};
@@ -102,7 +102,7 @@ impl FastMdApp {
         // Start MCP initialization immediately on the app's initial
         // background thread, so the UI thread never blocks on MCP
         // network I/O at startup.
-        crate::app::session::spawn_config_subscription(
+        crate::agent::session::spawn_config_subscription(
             tool_context.clone(),
             config_bus.clone(),
             background_task.tx.clone(),
@@ -118,10 +118,10 @@ impl FastMdApp {
         // with the agent and (read-only) with the Tools dialog
         // so the UI can call `tick()` / `forget()`. Lazily
         // launches a Firefox process on first browser tool call.
-        let browser_session = std::sync::Arc::new(crate::app::session::BrowserSession::new(
+        let browser_session = std::sync::Arc::new(crate::agent::session::BrowserSession::new(
             &crate::config::AppConfig::default(),
         ));
-        let pdf_backing_tracker = crate::app::session::PdfBackingTracker::new();
+        let pdf_backing_tracker = crate::agent::session::PdfBackingTracker::new();
         // The agent no longer subscribes to `Bus<ConfigArrived>`.
         // The orchestrator projects `AppConfig -> AgentConfig`
         // and pushes the result into the agent's domain-config
@@ -134,7 +134,7 @@ impl FastMdApp {
         let agent_event_bus_clone = agent_event_bus.clone();
         let observer_factory: crate::agent::events::AgentObserverFactory =
             std::sync::Arc::new(move |session_id| {
-                std::sync::Arc::new(crate::app::events::BusAgentEventObserver::new(
+                std::sync::Arc::new(crate::bus::events::agent::BusAgentEventObserver::new(
                     session_id,
                     agent_event_bus_clone.clone(),
                 ))
@@ -143,7 +143,7 @@ impl FastMdApp {
         let agent_builder = AgentSession::builder()
             .with_observer_factory(observer_factory)
             .with_file_observer(std::sync::Arc::new(
-                crate::app::session::bus_observer::AppFileObserver::new(
+                crate::agent::session::bus_observer::AppFileObserver::new(
                     background_task.file_event_bus.clone(),
                 ),
             ))
@@ -284,16 +284,16 @@ impl FastMdApp {
         let finished_watcher_slot = background_task.finished_watcher.clone();
         let file_processor = FileEventProcessor::new(background_task.file_event_bus.subscribe());
         let background_manager = Arc::new(Mutex::new(BackgroundLogs::new()));
-        let test_browser_session = std::sync::Arc::new(crate::app::session::BrowserSession::new(
+        let test_browser_session = std::sync::Arc::new(crate::agent::session::BrowserSession::new(
             &crate::config::AppConfig::default(),
         ));
-        let pdf_backing_tracker = crate::app::session::PdfBackingTracker::new();
+        let pdf_backing_tracker = crate::agent::session::PdfBackingTracker::new();
         let agent_event_bus = Bus::new();
         let agent_event_reader = agent_event_bus.subscribe();
         let agent_event_bus_clone = agent_event_bus.clone();
         let observer_factory: crate::agent::events::AgentObserverFactory =
             std::sync::Arc::new(move |session_id| {
-                std::sync::Arc::new(crate::app::events::BusAgentEventObserver::new(
+                std::sync::Arc::new(crate::bus::events::agent::BusAgentEventObserver::new(
                     session_id,
                     agent_event_bus_clone.clone(),
                 ))
@@ -302,7 +302,7 @@ impl FastMdApp {
         let agent_builder = AgentSession::builder()
             .with_observer_factory(observer_factory)
             .with_file_observer(std::sync::Arc::new(
-                crate::app::session::bus_observer::AppFileObserver::new(
+                crate::agent::session::bus_observer::AppFileObserver::new(
                     background_task.file_event_bus.clone(),
                 ),
             ))

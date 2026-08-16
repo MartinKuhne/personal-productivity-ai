@@ -215,14 +215,14 @@ pub fn run_agent_blocking(params: BatchAgentRunParams) -> (BatchJobStatus, Optio
         model_name,
     } = params;
     use crate::agent::run_agent;
-    use crate::app::events::AgentEvent as SeamAgentEvent;
+    use crate::bus::events::agent::AgentEvent as SeamAgentEvent;
 
     let agent_event_bus = crate::bus::core::Bus::new();
     let reader = agent_event_bus.subscribe();
 
     // Assemble the system prompts at the same point the orchestrator's
     // submit path does. The batch driver is a second submitter.
-    let system_prompts = crate::app::prompts::build_system_prompts(
+    let system_prompts = crate::agent::prompts::build_system_prompts(
         &config,
         active_file.as_deref(),
         active_dir.as_deref(),
@@ -236,7 +236,7 @@ pub fn run_agent_blocking(params: BatchAgentRunParams) -> (BatchJobStatus, Optio
     )
     .with_file_observer(file_event_bus.clone())
     .with_observer(std::sync::Arc::new(
-        crate::app::events::BusAgentEventObserver::new(
+        crate::bus::events::agent::BusAgentEventObserver::new(
             uuid::Uuid::new_v4(),
             agent_event_bus.clone(),
         ),

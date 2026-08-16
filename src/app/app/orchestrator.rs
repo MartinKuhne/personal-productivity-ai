@@ -1,9 +1,8 @@
 use crate::agent::AgentSession;
 use crate::agent::events::ToolSideEffect;
-use crate::app::Tags;
-use crate::app::events::AgentEvent as SeamAgentEvent;
 use crate::background::{BackgroundLogEntry, LogCategory, SharedBackgroundLogs};
 use crate::bus::core::{BroadcastRecvError, Bus, BusReader};
+use crate::bus::events::agent::AgentEvent as SeamAgentEvent;
 use crate::bus::events::config::ConfigArrived;
 use crate::bus::events::file::FileEvent;
 use crate::bus::events::typed::{
@@ -13,6 +12,7 @@ use crate::markdown::Document;
 use crate::ui::agent::panel_state::AgentPanelState;
 use crate::ui::agent::transcript::AgentTranscript;
 use crate::ui::{Dialogs, FileSelection, Tabs, TextBuffer};
+use crate::workspace::Tags;
 use crate::workspace::watcher::{DirectoryTracker, FileEventProcessor};
 use std::path::PathBuf;
 use std::sync::mpsc::Receiver;
@@ -30,7 +30,7 @@ pub struct AppOrchestrator {
     pub file_event_bus: Bus<FileEvent>,
     pub file_event_reader: Option<BusReader<FileEvent>>,
     pub file_processor: FileEventProcessor,
-    pub pdf_backing_tracker: crate::app::session::PdfBackingTracker,
+    pub pdf_backing_tracker: crate::agent::session::PdfBackingTracker,
     pub tags: Tags,
     pub directory_tracker: DirectoryTracker,
     pub selection: FileSelection,

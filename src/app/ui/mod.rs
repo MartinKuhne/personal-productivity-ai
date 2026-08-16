@@ -22,6 +22,7 @@ pub mod test_helpers;
 pub mod text_buffer;
 mod tools_dialog;
 mod tree;
+pub mod tree_search;
 
 pub use crate::markdown::ToCEntry;
 pub use app::{FastMdApp, TreeNode, generate_format_prompt};
@@ -38,3 +39,4 @@ pub use tree::{
     FlatRow, TREE_ROW_HEIGHT, TreeNodeContext, TreeOpsContext, draw_tree_node, flatten_tree,
     render_flat_row,
 };
+pub use tree_search::TreeSearch;
