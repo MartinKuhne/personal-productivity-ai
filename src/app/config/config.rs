@@ -4,9 +4,9 @@
 //!
 //! The VFS domain types ([`VirtualPath`], [`VirtualPathError`], and the
 //! behaviour on [`ContentLibrary`]) now live under
-//! [`crate::app::vfs`] and are re-exported here for backwards
-//! compatibility — prefer importing from `crate::app::vfs` in new
-//! code. See [`app/vfs/SPEC.md`](../app/vfs/SPEC.md).
+//! [`crate::workspace::vfs`] and are re-exported here for backwards
+//! compatibility — prefer importing from `crate::workspace::vfs` in new
+//! code. See [`workspace/vfs/SPEC.md`](../workspace/vfs/SPEC.md).
 //!
 //! Unit tests live in the sibling `config_tests.rs` sidecar.
 
@@ -18,7 +18,7 @@ pub use crate::agent::config::{
     McpOAuthConfig, McpServerConfig, McpServerEntry, ResolvedBrowserConfig, ToolGroupsConfig,
     TrelloClient, default_use_case,
 };
-pub use crate::app::vfs::{VirtualPath, VirtualPathError, library_display_label};
+pub use crate::workspace::vfs::{VirtualPath, VirtualPathError, library_display_label};
 
 fn default_feature_flags() -> HashMap<String, bool> {
     let mut m = HashMap::new();

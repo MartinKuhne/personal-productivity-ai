@@ -13,14 +13,13 @@ use eframe::egui;
 use crate::agent::AgentSession;
 use crate::app::background::BackgroundLogs;
 use crate::app::background_task::Task;
-use crate::app::watcher::directory_tracker::DirectoryTracker;
-use crate::app::watcher::file_processor::FileEventProcessor;
 use crate::app::{Dialogs, FileSelection, PanelLayout, PersistedUiState, Tags, TextBuffer};
 use crate::bus::core::Bus;
 use crate::bus::events::config::ConfigArrived;
 use crate::config::AppConfig;
 use crate::ui::agent::panel_state::AgentPanelState;
 use crate::ui::agent::transcript::AgentTranscript;
+use crate::workspace::watcher::{DirectoryTracker, FileEventProcessor};
 
 use super::{FastMdApp, PERSISTED_UI_STATE_KEY};
 

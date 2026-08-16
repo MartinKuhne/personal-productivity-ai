@@ -9,7 +9,7 @@
 //! with a crafted `vpath` could read or write outside the
 //! configured `content_libraries`.
 //!
-//! Per the VFS spec ([`crate::app::vfs::SPEC.md`], VFS-004,
+//! Per the VFS spec ([`crate::workspace::vfs::SPEC.md`], VFS-004,
 //! VFS-009) the parser must:
 //!
 //! - Reject empty paths.
@@ -43,7 +43,7 @@
 //!    path *names* like `..hidden` as a traversal, even
 //!    though `..hidden` is a legal filename).
 
-use crate::app::vfs::virtual_path::{VirtualPath, VirtualPathError};
+use crate::workspace::vfs::virtual_path::{VirtualPath, VirtualPathError};
 use proptest::prelude::*;
 
 /// Strategy: any random string up to 64 bytes, including

@@ -6,7 +6,6 @@ use crate::app::background::indexer::Indexer;
 use crate::app::background::pdf_converter::PdfConverterWorker;
 #[cfg(feature = "image-library")]
 use crate::app::background::vision_processor::ImageVisionWorker;
-use crate::app::watcher::file_watcher::FileWatcher;
 use crate::bus::config::CONFIG_ARRIVAL_TIMEOUT;
 use crate::bus::core::Bus;
 use crate::bus::events::config::ConfigArrived;
@@ -14,6 +13,7 @@ use crate::bus::events::file::FileEvent;
 use crate::bus::events::typed::{BackgroundEvent, BackgroundEventSender};
 use crate::bus::router::BusRouter;
 use crate::config::AppConfig;
+use crate::workspace::watcher::FileWatcher;
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::{Receiver, channel};

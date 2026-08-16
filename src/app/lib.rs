@@ -28,6 +28,7 @@ pub mod markdown;
 pub mod pdf;
 pub mod ui;
 pub mod utils;
+pub mod workspace;
 
 #[path = "config/config.rs"]
 pub mod config;

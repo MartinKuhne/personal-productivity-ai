@@ -33,8 +33,8 @@ pub mod session;
 pub mod tabs;
 pub mod tags;
 pub mod text_buffer;
-pub mod vfs;
-pub mod watcher;
+
+pub use crate::workspace::{vfs, watcher};
 
 pub use dialogs::Dialogs;
 pub use panel_layout::PanelLayout;

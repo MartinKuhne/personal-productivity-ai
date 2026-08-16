@@ -3,10 +3,10 @@
 //! Unit tests live in the sibling `modals_tests.rs` sidecar.
 
 use crate::app::dialogs::Dialogs;
-use crate::app::watcher::file_processor::FileEventProcessor;
 use crate::bus::core::Bus;
 use crate::bus::events::file::{FileEvent, FileEventProducer};
 use crate::config::ContentLibrary;
+use crate::workspace::watcher::FileEventProcessor;
 use eframe::egui;
 use std::collections::BTreeSet;
 use std::path::{Path, PathBuf};
