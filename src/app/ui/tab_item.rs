@@ -43,6 +43,7 @@ impl TabItem {
             TabItem::File(path) => path
                 .file_name()
                 .and_then(|n| n.to_str())
+                .map(|name| name.rsplit(['/', '\\']).next().unwrap_or(name))
                 .unwrap_or("")
                 .to_string(),
             TabItem::Agent => "🤖 FastMD Agent Session".to_string(),
