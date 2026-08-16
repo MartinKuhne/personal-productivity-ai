@@ -50,9 +50,6 @@ The agent has zero `ui::render` imports. Display formatting (tool-call messages,
 * [AGENT-031] The system shall provide an optional background worker that indexes Markdown content into a vector collection and answers semantic search queries against it. When enabled, the `vector_search` tool SHALL return chunks from the current index, and the index SHALL stay in sync with file create, update, and delete events.
 * [AGENT-032] When the vector-search feature is enabled, the system SHALL produce vector embeddings for indexing and queries through the configured model with the `embeddings` use case (AGENT-005), preferring the lowest `cost` when multiple models are configured.
 * [AGENT-033] Where no model with the `embeddings` use case is configured, the system SHALL disable vector indexing and SHALL report the reason in the background log.
-* [AGENT-034] The embeddings client SHALL support asynchronous execution and runtime-safe synchronous fallback to prevent executor thread blocking or runtime nesting panics.
-* [AGENT-035] The vector search service SHALL compute cosine distances as $\text{distance} = \max(0.0, 1.0 - \text{cosine\_similarity})$ and SHALL filter out any search results exceeding the active distance threshold (default: `0.6`).
-* [AGENT-036] The vector search service and tool SHALL support continuation cursors for paginating multi-page query results.
 
 
 
