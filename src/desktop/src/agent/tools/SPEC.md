@@ -135,8 +135,11 @@ The `window_note` and `insert_into_note` tools operate on contiguous line ranges
 
 ### Vector Search Tool
 
-* [TOOL-043] The `vector_search` tool SHALL search indexed Markdown content by meaning. It SHALL be ReadOnly, SHALL clamp its `limit` input to a bounded range, and SHALL return matching chunks together with their source paths. The tool SHALL only be offered when the optional vector-search feature is enabled.
+* [TOOL-043] The `vector_search` tool SHALL search indexed Markdown content by meaning. It SHALL be ReadOnly, SHALL accept `query: String`, `limit: Option<usize>` (clamped to 1–20, default 5), `max_distance: Option<f32>` (range 0.0–2.0, default 0.6), and an optional `cursor` parameter for continuing multi-page retrieval. The tool SHALL only be offered when the optional vector-search feature is enabled.
 * [TOOL-044] The `vector_search` tool SHALL respond to embedding or index failures with a generic user-facing message directing the caller to the background log, and SHALL NOT expose internal error details, file paths, or model metadata to the LLM.
+* [TOOL-045] For each matching record within the distance threshold, the tool SHALL resolve the virtual path against configured content libraries, slice the exact matching source lines at the reported `(offset, limit)` within the note body, and return `path`, `distance`, `offset`, `limit`, and `content`.
+* [TOOL-046] The tool descriptor SHALL instruct the LLM to formulate queries as descriptive phrases, natural language questions, or conceptual summaries rather than isolated keywords, and to recommend `grep_search` for exact string or filename matches.
+* [TOOL-047] When additional matching results exist beyond the requested `limit`, the `vector_search` tool response SHALL include a continuation `next_cursor` value that can be passed as `cursor` to subsequent tool calls to retrieve the next page of results.
 
 ### Browser Automation Tools
 

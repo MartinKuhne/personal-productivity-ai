@@ -63,6 +63,19 @@
 - [REQ-477]: While initial indexing runs, the FastMD Viewer SHALL emit progress messages at least every 500 files or every 5 seconds, reporting images found and analyses queued and completed.
 - [REQ-478]: When the file watcher receives a file system change notification related to images, the FastMD Viewer SHALL log the event type and virtual path to the Background Process Log.
 
+### Semantic Vector Search & Indexing Pipeline
+- [REQ-480]: When the application starts with the `vector-search` feature enabled and an `embeddings` model configured, the FastMD Viewer SHALL initialize a background vector indexing worker on a dedicated thread.
+- [REQ-481]: The vector indexing worker SHALL connect to a persistent vector store using configured endpoint, collection name, and authentication credentials, falling back to corresponding environment variables.
+- [REQ-482]: If the target vector collection does not exist in the vector store, the system SHALL automatically initialize it configured with cosine distance and vector dimensions matching the configured embedding model, and SHALL create metadata indexes for document paths and chunk hashes.
+- [REQ-483]: On worker startup, the system SHALL synchronize an in-memory index of already indexed virtual paths and chunk hashes from the vector store to avoid redundant round-trips during indexing.
+- [REQ-484]: The worker SHALL crawl all configured text content libraries for Markdown files (`.md`, `.markdown`), strip YAML front-matter before chunking, and partition the body text into semantic chunks (~1,200 characters with 200-character overlap).
+- [REQ-485]: The worker SHALL compute a deterministic hash for each chunk and SHALL skip embedding generation for any document whose set of chunk hashes already matches the indexed state.
+- [REQ-486]: When a file is modified, the worker SHALL generate embeddings only for missing or updated chunks, store them in the vector store with deterministic identifiers derived from the virtual path and chunk hash, and delete obsolete chunks belonging to that file from the vector store.
+- [REQ-487]: When a Markdown file is deleted, the worker SHALL delete all vector records associated with that file's virtual path from the vector store and remove them from the in-memory index.
+- [REQ-488]: While initial vector indexing runs, the system SHALL emit progress entries to the Background Process Log (`Indexer` category) every 100 indexed documents.
+- [REQ-489]: If connection to the vector store or index initialization fails, the system SHALL log the error to the Background Process Log and disable vector search without interrupting other application functions.
+- [REQ-490]: The vector search service SHALL support cursor-based pagination to allow callers to retrieve subsequent pages of ranked search results.
+
 ### CLI & Deployment
 - [REQ-501]: The FastMD Viewer SHALL accept a workspace directory path as its first command-line argument.
 - [REQ-502]: If the provided workspace path does not exist, then the FastMD Viewer SHALL fall back to the current working directory.
