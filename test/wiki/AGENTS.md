@@ -17,6 +17,6 @@ Test wiki fixtures used as input by the `fastmd` integration tests. Repo-root
   in the same change.
 
 ## 3. Quality gate
-- `src/desktop/` `cargo test` still green after any fixture change.
+- `cargo nextest run` still green after any fixture change.
 - No real secrets; if in doubt, run `github_run_secret_scanning` over the
   changed content before commit.

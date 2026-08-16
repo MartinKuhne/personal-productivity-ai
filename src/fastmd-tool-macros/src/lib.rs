@@ -74,8 +74,8 @@ use proc_macro::TokenStream;
 use proc_macro2::TokenStream as TokenStream2;
 use quote::quote;
 use syn::{
-    parse::{Parse, ParseStream, Result as ParseResult},
     DeriveInput, Expr, Ident, LitStr, Token, Type,
+    parse::{Parse, ParseStream, Result as ParseResult},
 };
 
 // ---------------------------------------------------------------------------

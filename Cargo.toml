@@ -8,6 +8,16 @@ repository = "https://github.com/MartinKuhne/personal-productivity-ai/"
 categories = ["text-editors"]
 keywords = ["markdown", "viewer", "ai", "agent"]
 
+[workspace]
+members = [
+    ".",
+    "src/agent",
+    "src/fastmd-tool-macros",
+]
+
+[lib]
+path = "src/app/lib.rs"
+
 [features]
 default = ["pdf-export"]
 vector-search = [
@@ -119,7 +129,7 @@ text-splitter = { version = "0.32", optional = true }
 # (this crate is the only runtime crate), so the proc-macro is
 # added as a path dep rather than going into a separate
 # workspace member.
-fastmd-tool-macros = { path = "fastmd-tool-macros" }
+fastmd-tool-macros = { path = "src/fastmd-tool-macros" }
 fastmd-agent = { path = "src/agent" }
 qdrant-client = { version = "1.13", optional = true }
 
@@ -184,11 +194,11 @@ pdf_oxide = "0.3.77"
 
 [[bin]]
 name = "fastmd"
-path = "src/main.rs"
+path = "src/app/main.rs"
 
 [[bin]]
 name = "deploy"
-path = "src/bin/deploy.rs"
+path = "src/app/bin/deploy.rs"
 
 [[bench]]
 name = "table_width"

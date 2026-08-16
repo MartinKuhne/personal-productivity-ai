@@ -2274,6 +2274,7 @@ dependencies = [
  "fastmd-tool-macros",
  "futures",
  "jmap-client",
+ "proptest",
  "pulldown-cmark",
  "reqwest",
  "ring",
@@ -2282,14 +2283,17 @@ dependencies = [
  "serde",
  "serde_json",
  "serde_norway",
+ "tempfile",
  "thiserror 2.0.19",
  "tokio",
  "tokio-tungstenite",
  "tracing",
+ "tracing-subscriber",
  "url",
  "uuid",
  "walkdir",
  "webbrowser",
+ "wiremock",
 ]
 
 [[package]]

@@ -149,11 +149,11 @@ mod tests {
     #[test]
     fn test_content_library_display_label_for_member() {
         let lib = make_lib("C:/my/test/dir", "TestLib", true);
-        let expected = PathBuf::from("TestLib").join("sub/file.md");
+        let expected = "TestLib/sub/file.md";
         let actual = lib
             .display_label_for(Path::new("C:/my/test/dir/sub/file.md"))
             .expect("path is inside library");
-        assert_eq!(actual, expected.to_string_lossy());
+        assert_eq!(actual, expected);
         assert_eq!(
             lib.display_label_for(Path::new("C:/my/test/dir")),
             Some("TestLib".to_string())
@@ -170,10 +170,10 @@ mod tests {
             make_lib("C:/lib/one", "One", true),
             make_lib("C:/lib/two", "Two", true),
         ];
-        let expected = PathBuf::from("Two").join("note.md");
+        let expected = "Two/note.md";
         let actual = library_display_label(&libs, Path::new("C:/lib/two/note.md"))
             .expect("path is inside a library");
-        assert_eq!(actual, expected.to_string_lossy());
+        assert_eq!(actual, expected);
         assert!(library_display_label(&libs, Path::new("C:/other/note.md")).is_none());
     }
 

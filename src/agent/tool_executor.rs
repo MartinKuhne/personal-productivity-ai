@@ -213,10 +213,7 @@ impl ToolExecutor {
         self.tool_context.load().registry.safety_of(name)
     }
 
-    fn execute_parallel(
-        &self,
-        calls: &[serde_json::Value],
-    ) -> Vec<ToolCallRecord> {
+    fn execute_parallel(&self, calls: &[serde_json::Value]) -> Vec<ToolCallRecord> {
         let rt = match tokio::runtime::Builder::new_multi_thread()
             .enable_all()
             .build()
@@ -258,7 +255,12 @@ impl ToolExecutor {
                         .with_extensions(extensions.clone())
                         .build();
                     let result = execute_tool(dispatcher, &ctx, &func_name, &func_args);
-                    ToolCallRecord { call_id, name: func_name, arguments: func_args, result }
+                    ToolCallRecord {
+                        call_id,
+                        name: func_name,
+                        arguments: func_args,
+                        result,
+                    }
                 });
             }
             while let Some(res) = join_set.join_next().await {
@@ -270,10 +272,7 @@ impl ToolExecutor {
         completed
     }
 
-    fn execute_sequential(
-        &self,
-        calls: &[serde_json::Value],
-    ) -> Vec<ToolCallRecord> {
+    fn execute_sequential(&self, calls: &[serde_json::Value]) -> Vec<ToolCallRecord> {
         let mut results = Vec::new();
         let extensions = self.extensions.clone();
         for tc in calls {
@@ -298,15 +297,17 @@ impl ToolExecutor {
             .with_extensions(extensions.clone())
             .build();
             let result = execute_tool(dispatcher, &ctx, &func_name, &func_args);
-            results.push(ToolCallRecord { call_id, name: func_name, arguments: func_args, result });
+            results.push(ToolCallRecord {
+                call_id,
+                name: func_name,
+                arguments: func_args,
+                result,
+            });
         }
         results
     }
 
-    fn extract_side_effects(
-        &self,
-        results: &[ToolCallRecord],
-    ) -> Vec<ToolSideEffect> {
+    fn extract_side_effects(&self, results: &[ToolCallRecord]) -> Vec<ToolSideEffect> {
         let mut effects = Vec::new();
         for record in results {
             let func_name = &record.name;

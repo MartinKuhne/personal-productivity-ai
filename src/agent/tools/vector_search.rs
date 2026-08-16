@@ -77,7 +77,6 @@ For exact keywords, timestamps, or filenames, prefer `grep_search`. \
 Optionally pass `max_distance` (0.0 to 2.0, default 0.6) to tune sensitivity: \
 use 0.3–0.5 for strict matches or 0.8–1.0 for broader exploration.";
 
-
 /// LLM tool for searching the optional Markdown vector index.
 #[derive(ToolDescriptor)]
 #[tool(
@@ -105,7 +104,9 @@ fn execute_vector_search(
         .extensions
         .get::<VectorSearchExt>()
         .ok_or_else(|| "Vector search is not available.".to_string())?;
-    let hits = service.0.search(input.query.trim(), limit, input.max_distance)?;
+    let hits = service
+        .0
+        .search(input.query.trim(), limit, input.max_distance)?;
     serde_json::to_value(hits).map_err(|e| e.to_string())
 }
 
@@ -131,4 +132,5 @@ impl ToolProvider for VectorSearchProvider {
 }
 
 #[cfg(test)]
+#[path = "vector_search_tests.rs"]
 mod tests;

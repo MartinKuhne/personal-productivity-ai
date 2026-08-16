@@ -38,11 +38,10 @@
 
 | Directory                    | Scope                                                                                  |
 |------------------------------|----------------------------------------------------------------------------------------|
-| [`src/desktop/AGENTS.md`](src/desktop/AGENTS.md)               | Rust `fastmd` crate: documentation, egui, quality gate, tool/UI contracts. |
-| [`src/android/AGENTS.md`](src/android/AGENTS.md)               | Android Kotlin/Gradle companion app.                                                  |
+| [`src/AGENTS.md`](src/AGENTS.md)                               | Rust `fastmd` application and crates: documentation, egui, quality gate, tool/UI contracts. |
 | [`doc/technical-context/AGENTS.md`](doc/technical-context/AGENTS.md) | Maintenance of architecture documentation.                |
 | [`doc/planning/AGENTS.md`](doc/planning/AGENTS.md)             | Planning / design-record documents.                                                   |
-| [`src/test/wiki/AGENTS.md`](src/test/wiki/AGENTS.md)           | Test wiki fixtures.                                                                   |
+| [`test/wiki/AGENTS.md`](test/wiki/AGENTS.md)                   | Test wiki fixtures.                                                                   |
 
 <!-- CODEGRAPH_START -->
 ## CodeGraph

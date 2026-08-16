@@ -55,7 +55,10 @@ fn execute_vector_search_forwards_max_distance_to_service() {
     );
 
     assert!(result.is_ok());
-    assert_eq!(mock.last_query.lock().unwrap().as_deref(), Some("credit union"));
+    assert_eq!(
+        mock.last_query.lock().unwrap().as_deref(),
+        Some("credit union")
+    );
     assert_eq!(*mock.last_limit.lock().unwrap(), Some(10));
     assert_eq!(*mock.last_max_distance.lock().unwrap(), Some(Some(0.75)));
 }

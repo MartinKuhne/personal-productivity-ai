@@ -26,7 +26,7 @@ reqwest = { version = "0.13", default-features = false, features = ["blocking", 
 webbrowser = "1"
 uuid = { version = "1", features = ["v4", "serde"] }
 arc-swap = "1.9.2"
-fastmd-tool-macros = { path = "../../fastmd-tool-macros" }
+fastmd-tool-macros = { path = "../fastmd-tool-macros" }
 csv = "1.4.0"
 evalexpr = "13.1.0"
 encoding_rs = "0.8.35"

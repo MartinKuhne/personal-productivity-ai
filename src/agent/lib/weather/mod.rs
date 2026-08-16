@@ -84,6 +84,7 @@ pub(crate) fn parse_nominatim_first(body: &Value) -> Result<(f64, f64), String> 
         .get("lat")
         .and_then(|v| v.as_str())
         .and_then(|s| s.parse::<f64>().ok())
+        .filter(|n| n.is_finite())
         .ok_or_else(|| {
             tracing::error!(
                 name = "tool.weather.geocode.missing_lat",
@@ -95,6 +96,7 @@ pub(crate) fn parse_nominatim_first(body: &Value) -> Result<(f64, f64), String> 
         .get("lon")
         .and_then(|v| v.as_str())
         .and_then(|s| s.parse::<f64>().ok())
+        .filter(|n| n.is_finite())
         .ok_or_else(|| {
             tracing::error!(
                 name = "tool.weather.geocode.missing_lon",
