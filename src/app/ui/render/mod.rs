@@ -66,6 +66,7 @@ use eframe::egui;
 /// `heading_ids` is an optional pre-computed slice of heading IDs
 /// (with duplicate disambiguation). If provided, avoids re-parsing
 /// headings and re-computing IDs on every frame.
+#[tracing::instrument(skip_all, name = "ui.render_markdown", level = "debug")]
 pub fn render_markdown(
     ui: &mut egui::Ui,
     markdown_text: &str,

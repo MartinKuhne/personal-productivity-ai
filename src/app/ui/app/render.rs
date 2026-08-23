@@ -25,6 +25,7 @@ use crate::ui::panels::{
 use super::FastMdApp;
 
 impl FastMdApp {
+    #[tracing::instrument(skip_all, name = "ui.show_editor_overlay", level = "debug")]
     pub(super) fn show_editor_overlay(&mut self, ui: &mut egui::Ui) {
         let producer = FileEventProducer::new(self.orchestrator.file_event_bus.clone());
         // The editor opens its own top-level `egui::Window` from
@@ -44,6 +45,7 @@ impl FastMdApp {
         }
     }
 
+    #[tracing::instrument(skip_all, name = "ui.show_modals", level = "debug")]
     pub(super) fn show_modals(&mut self, parent_ui: &mut egui::Ui) {
         // egui 0.35: modal dialogs are still rendered through
         // `egui::Window`, which can take the context directly. We
@@ -147,6 +149,7 @@ impl FastMdApp {
         }
     }
 
+    #[tracing::instrument(skip_all, name = "ui.render_panels", level = "debug")]
     pub(super) fn render_panels(&mut self, parent_ui: &mut egui::Ui) {
         // egui 0.35: each `*Panel` allocates itself from a parent
         // `&mut Ui`; pass the root `Ui` from `App::ui` straight

@@ -70,6 +70,7 @@ pub struct AppOrchestrator {
 }
 
 impl AppOrchestrator {
+    #[tracing::instrument(skip_all, name = "orchestrator.process_file_events", level = "debug")]
     pub fn process_file_events(&mut self) -> bool {
         use crate::bus::events::file::FileEventKind;
 
@@ -240,6 +241,7 @@ impl AppOrchestrator {
             .and_then(|mut slot| slot.take())
     }
 
+    #[tracing::instrument(skip_all, name = "orchestrator.drain_config_bus", level = "debug")]
     pub fn drain_config_bus(&mut self) {
         let mut config: Option<ConfigArrived> = None;
         if let Some(reader) = self.config_reader.as_ref() {
@@ -332,6 +334,11 @@ impl AppOrchestrator {
         );
     }
 
+    #[tracing::instrument(
+        skip_all,
+        name = "orchestrator.drain_background_channel",
+        level = "debug"
+    )]
     pub fn drain_background_channel(&mut self) {
         while let Ok(event) = self.rx.try_recv() {
             match event {
@@ -358,6 +365,7 @@ impl AppOrchestrator {
     /// `FsEvent::FileModified`. Handles `Lagged(n)` by emitting a visible
     /// truncation marker into the transcript (research.md §1, quickstart
     /// scenario 5).
+    #[tracing::instrument(skip_all, name = "orchestrator.drain_agent_event_bus", level = "debug")]
     pub fn drain_agent_event_bus(&mut self) {
         let Some(reader) = self.agent_event_reader.as_mut() else {
             return;
@@ -592,6 +600,7 @@ impl AppOrchestrator {
         }
     }
 
+    #[tracing::instrument(skip_all, name = "orchestrator.handle_file_selection", level = "debug")]
     pub fn handle_file_selection(&mut self) {
         if let Some(selected_path) = self.selection.selected_file()
             && self.tabs.loaded_path.as_ref() != Some(selected_path)

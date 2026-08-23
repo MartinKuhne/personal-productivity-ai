@@ -72,6 +72,7 @@ impl PdfConversionJob {
         false
     }
 
+    #[tracing::instrument(skip(self, tx), name = "pdf_converter.execute", fields(pdf = %self.input_pdf.display()))]
     pub async fn execute(
         self,
         cmd_template: Option<Vec<String>>,

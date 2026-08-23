@@ -30,8 +30,19 @@ fn main() -> eframe::Result<()> {
         );
     }));
 
-    // Initialize tracing
-    tracing_subscriber::fmt::init();
+    // Initialize tracing.
+    // `FmtSpan::CLOSE` prints `time.busy` (CPU) and `time.idle` (async wait)
+    // for every span when it closes — enabling zero-overhead profiling of
+    // instrumented hot paths via `RUST_LOG`.
+    let filter = tracing_subscriber::EnvFilter::try_from_default_env()
+        .unwrap_or_else(|_| tracing_subscriber::EnvFilter::new("info,fastmd=debug"));
+
+    tracing_subscriber::fmt()
+        .with_env_filter(filter)
+        .with_target(true)
+        .with_thread_ids(true)
+        .with_span_events(tracing_subscriber::fmt::format::FmtSpan::CLOSE)
+        .init();
 
     // Install rustls crypto provider
     rustls::crypto::ring::default_provider()

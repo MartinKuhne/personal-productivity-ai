@@ -86,6 +86,7 @@ pub fn show_right_panel(app: &mut FastMdApp, parent_ui: &mut egui::Ui) {
 /// that pushes the event into the harness's persistent state. See
 /// the matching doc-comment on [`show_top_panel_capture`] for the
 /// full rationale.
+#[tracing::instrument(skip_all, name = "ui.panel.right", level = "debug")]
 pub fn show_right_panel_capture(
     app: &mut FastMdApp,
     parent_ui: &mut egui::Ui,

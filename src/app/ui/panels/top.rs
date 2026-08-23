@@ -267,6 +267,7 @@ pub fn show_top_panel_capture(
 }
 
 /// Variant of [`show_top_panel_capture`] allowing custom persistence handler.
+#[tracing::instrument(skip_all, name = "ui.panel.top", level = "debug")]
 pub fn show_top_panel_capture_with_persist<F>(
     app: &mut FastMdApp,
     parent_ui: &mut egui::Ui,

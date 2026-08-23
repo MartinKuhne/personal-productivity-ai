@@ -37,6 +37,7 @@ impl FastMdApp {
     /// all panels, and pluck out the [`egui::Context`] for the
     /// non-rendering bookkeeping (file-event drain, repaint
     /// scheduling, etc).
+    #[tracing::instrument(skip(self, ui), name = "ui.frame", level = "debug")]
     pub fn update_ui(&mut self, ui: &mut egui::Ui) {
         let ctx = ui.ctx();
 
@@ -94,6 +95,7 @@ impl FastMdApp {
         os_shell::dispatch_platform_commands(&commands, os_shell::open_url);
     }
 
+    #[tracing::instrument(skip_all, name = "ui.process_file_events_and_repaint", level = "debug")]
     fn process_file_events_and_repaint(&mut self, ctx: &egui::Context) {
         if self.should_request_immediate_repaint(ctx) {
             ctx.request_repaint();
@@ -131,6 +133,11 @@ impl FastMdApp {
     /// keeps the idle CPU at 0%; the historical 60 FPS forced loop
     /// that did the same job is what caused the regression this
     /// decider exists to prevent.
+    #[tracing::instrument(
+        skip_all,
+        name = "ui.should_request_immediate_repaint",
+        level = "debug"
+    )]
     pub(in crate::ui::app) fn should_request_immediate_repaint(
         &mut self,
         ctx: &egui::Context,
@@ -140,6 +147,7 @@ impl FastMdApp {
         events_changed || raw_input_pending
     }
 
+    #[tracing::instrument(skip_all, name = "ui.handle_deferred_actions", level = "debug")]
     fn handle_deferred_actions(&mut self) {
         if let Some(prompt) = self.orchestrator.submit_prompt.take() {
             self.orchestrator.start_agent_session(prompt);
@@ -160,6 +168,7 @@ impl FastMdApp {
     ///
     /// Window size/position are persisted by eframe's built-in
     /// `persistence` feature — we do not duplicate that here.
+    #[tracing::instrument(skip_all, name = "ui.update_persisted_ui_state", level = "debug")]
     fn update_persisted_ui_state(&mut self, ctx: &egui::Context) {
         // Update panel widths from layout
         self.persisted_ui_state.left_panel_width = self.layout.left_panel_width;

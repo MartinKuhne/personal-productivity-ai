@@ -12,6 +12,7 @@ use serde_json::json;
 use std::path::PathBuf;
 use std::sync::mpsc::Receiver;
 
+#[tracing::instrument(skip(config, tx, producer), name = "vision.process_image", fields(image = %job.image_path.display()))]
 pub async fn process_image(
     job: ImageJob,
     config: AppConfig,

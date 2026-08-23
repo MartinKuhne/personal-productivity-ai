@@ -24,6 +24,7 @@ fn prune_empty_dirs(node: &mut TreeNode) {
 }
 
 /// Builds the `TreeNode` hierarchy from content libraries, discovered files, and tag filters.
+#[tracing::instrument(skip_all, name = "ui.left.build_workspace_tree", level = "debug")]
 pub fn build_workspace_tree(app: &FastMdApp) -> TreeNode {
     let filtered_files: Vec<&std::path::PathBuf> = app
         .file_processor()
@@ -145,6 +146,7 @@ pub fn build_workspace_tree(app: &FastMdApp) -> TreeNode {
     root_node
 }
 
+#[tracing::instrument(skip_all, name = "ui.panel.left", level = "debug")]
 pub fn show_left_panel(app: &mut FastMdApp, parent_ui: &mut egui::Ui) {
     let ctx = parent_ui.ctx();
     let panel_id = parent_ui.make_persistent_id("left_panel");

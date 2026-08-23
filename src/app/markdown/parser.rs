@@ -161,6 +161,7 @@ fn push_link_coalesce(buffer: &mut Vec<InlineElem>, url: &str, text: &str) {
 }
 
 /// Parses markdown text into a sequence of render events.
+#[tracing::instrument(skip_all, name = "markdown.parse_to_events", level = "debug")]
 pub fn parse_markdown_to_events(markdown_text: &str) -> Vec<RenderEvent> {
     use pulldown_cmark::{Event, HeadingLevel, Options, Parser, Tag, TagEnd};
 
