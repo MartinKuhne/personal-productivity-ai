@@ -15,11 +15,12 @@ pub fn spawn_config_subscription(
     config_bus: Bus<ConfigArrived>,
     tx: crate::bus::events::typed::BackgroundEventSender,
 ) {
-    let config_reader = config_bus.subscribe();
-    std::thread::spawn(move || {
-        let config = match config_reader.recv_timeout(CONFIG_ARRIVAL_TIMEOUT) {
-            Ok(event) => event.config,
-            Err(_) => {
+    let mut config_reader = config_bus.subscribe_async();
+    let task = async move {
+        let config = match tokio::time::timeout(CONFIG_ARRIVAL_TIMEOUT, config_reader.recv()).await
+        {
+            Ok(Ok(event)) => event.config,
+            _ => {
                 tracing::error!(
                     name = "config.arrived.timeout",
                     timeout_ms = CONFIG_ARRIVAL_TIMEOUT.as_millis() as u64,
@@ -42,17 +43,28 @@ pub fn spawn_config_subscription(
             .into(),
         );
 
-        loop {
-            if let Ok(event) = config_reader.recv() {
-                let agent_config = event.config.to_agent_config();
-                tool_context.rcu(|ctx| {
-                    let mut new_ctx = (**ctx).clone();
-                    new_ctx.registry.refresh_mcp_tools(&agent_config);
-                    new_ctx
-                });
-            }
+        while let Ok(event) = config_reader.recv().await {
+            let agent_config = event.config.to_agent_config();
+            tool_context.rcu(|ctx| {
+                let mut new_ctx = (**ctx).clone();
+                new_ctx.registry.refresh_mcp_tools(&agent_config);
+                new_ctx
+            });
         }
-    });
+    };
+
+    if let Ok(handle) = tokio::runtime::Handle::try_current() {
+        handle.spawn(task);
+    } else {
+        std::thread::spawn(move || {
+            if let Ok(rt) = tokio::runtime::Builder::new_current_thread()
+                .enable_all()
+                .build()
+            {
+                rt.block_on(task);
+            }
+        });
+    }
 }
 
 #[cfg(test)]

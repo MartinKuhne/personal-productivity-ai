@@ -73,6 +73,11 @@ impl<T: Clone + Send + 'static> Bus<T> {
         }
     }
 
+    /// Register a new asynchronous consumer backed directly by a Tokio broadcast receiver.
+    pub fn subscribe_async(&self) -> broadcast::Receiver<T> {
+        self.sender.subscribe()
+    }
+
     /// Publish an event to every registered consumer.
     ///
     /// Returns the number of consumers the event was successfully
@@ -118,6 +123,11 @@ impl<T: Clone> BusReader<T> {
             inner: Mutex::new(rx),
             notify: Arc::new(Condvar::new()),
         }
+    }
+
+    /// Unwrap into the underlying async Tokio receiver.
+    pub fn into_inner(self) -> broadcast::Receiver<T> {
+        self.inner.into_inner().unwrap()
     }
 
     /// Try to receive an event without blocking.

@@ -40,13 +40,13 @@ impl BusRouter {
         #[cfg(feature = "image-library")]
         let tx_img = self.tx_img;
 
-        std::thread::spawn(move || {
-            let reader = bus.subscribe();
+        let router_task = async move {
+            let mut reader = bus.subscribe_async();
             let mut pdf_open = true;
             #[cfg(feature = "image-library")]
             let mut img_open = true;
 
-            while let Ok(event) = reader.recv() {
+            while let Ok(event) = reader.recv().await {
                 #[cfg(feature = "image-library")]
                 if !pdf_open && !img_open {
                     break;
@@ -99,7 +99,20 @@ impl BusRouter {
                     }
                 }
             }
-        });
+        };
+
+        if let Ok(handle) = tokio::runtime::Handle::try_current() {
+            handle.spawn(router_task);
+        } else {
+            std::thread::spawn(move || {
+                if let Ok(rt) = tokio::runtime::Builder::new_current_thread()
+                    .enable_all()
+                    .build()
+                {
+                    rt.block_on(router_task);
+                }
+            });
+        }
     }
 }
 
