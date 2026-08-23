@@ -1,4 +1,7 @@
 //! PDF-to-markdown converter worker — invokes an external tool to produce a sibling `.md` file for each PDF.
+//!
+//! REQ-455B: background processes spawned by the FastMD Viewer SHALL NOT create a visible console
+//! window on Windows. See `build_pdf_command` for the `CREATE_NO_WINDOW` enforcement.
 
 use crate::background::models::{BackgroundLogEntry, LogCategory};
 use crate::bus::core::Bus;
@@ -9,6 +12,36 @@ use std::sync::mpsc::Receiver;
 #[cfg(test)]
 use std::sync::mpsc::channel;
 use tokio::process::Command;
+
+/// Win32 `CREATE_NO_WINDOW` flag for [`CreateProcessW`].
+///
+/// Passed to [`tokio::process::Command::creation_flags`] to prevent a
+/// console-subsystem child from popping a visible console window when
+/// launched from a GUI-subsystem parent. The child still receives a
+/// (hidden) console buffer so stdout/stderr redirection to pipes keeps
+/// working — only the visible window is suppressed.
+/// See `doc/adr/cmd-substitution.md` for rationale.
+///
+/// [`CreateProcessW`]: https://learn.microsoft.com/en-us/windows/win32/api/processthreadsapi/nf-processthreadsapi-createprocessw
+#[cfg(windows)]
+const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+
+/// Build a [`tokio::process::Command`] for the PDF converter process.
+///
+/// On Windows, applies [`CREATE_NO_WINDOW`] (REQ-455B) so that the
+/// child process does not flash an empty console window when the
+/// application runs as a GUI-subsystem binary. On non-Windows
+/// platforms the `creation_flags` call is gated away and this
+/// function is a thin wrapper around `Command::new`.
+pub(crate) fn build_pdf_command(exe: &str, args: &[String]) -> Command {
+    let mut cmd = Command::new(exe);
+    cmd.args(args);
+    #[cfg(windows)]
+    {
+        cmd.creation_flags(CREATE_NO_WINDOW);
+    }
+    cmd
+}
 
 pub struct PdfConversionJob {
     pub input_pdf: PathBuf,
@@ -102,8 +135,7 @@ impl PdfConversionJob {
                 .into(),
             );
 
-            let output = Command::new(&exe)
-                .args(&args)
+            let output = build_pdf_command(&exe, &args)
                 .output()
                 .await
                 .map_err(|e| {
@@ -223,8 +255,57 @@ impl PdfConverterWorker {
 
 #[cfg(test)]
 mod tests {
+    //! The `CREATE_NO_WINDOW` creation flag cannot be read back through
+    //! the public `tokio::process::Command` API — there is no getter.
+    //! Per the project AGENTS.md anti-hallucination / TDD guidance, we
+    //! cover what is observable:
+    //!   - the helper sets the correct program and args (tested directly)
+    //!   - the resulting command is spawnable end-to-end (execution tests)
+    //! A manual visual test on Windows (no flash CMD window) remains the
+    //! authoritative check for the invisible `creation_flags` field.
+    //! See `doc/adr/cmd-substitution.md` for the full decision record.
     use super::*;
     use tempfile::tempdir;
+
+    // REQ-455B: build_pdf_command must pass the exe name through to the command.
+    #[test]
+    fn build_pdf_command_sets_program() {
+        let args = vec!["--help".to_string()];
+        let cmd = build_pdf_command("cargo", &args);
+        assert_eq!(cmd.as_std().get_program(), "cargo");
+    }
+
+    // REQ-455B: build_pdf_command must pass all args through unchanged.
+    #[test]
+    fn build_pdf_command_sets_args() {
+        let args = vec!["arg1".to_string(), "arg2".to_string()];
+        let cmd = build_pdf_command("cargo", &args);
+        let got: Vec<std::ffi::OsString> = cmd
+            .as_std()
+            .get_args()
+            .map(std::ffi::OsString::from)
+            .collect();
+        assert_eq!(
+            got,
+            vec![
+                std::ffi::OsString::from("arg1"),
+                std::ffi::OsString::from("arg2"),
+            ],
+            "args must pass through verbatim"
+        );
+    }
+
+    // REQ-455B: on Windows, build_pdf_command must embed CREATE_NO_WINDOW.
+    // The tokio::process::Command API has no public getter for creation_flags,
+    // so this test serves as a compile-time proof that the cfg(windows) block
+    // compiles and the constant is in scope; execution-level proof requires a
+    // manual visual check (no CMD flash) on a Windows GUI-subsystem build.
+    #[cfg(windows)]
+    #[test]
+    fn build_pdf_command_create_no_window_constant_is_correct() {
+        // 0x0800_0000 is the documented Win32 CREATE_NO_WINDOW value.
+        assert_eq!(CREATE_NO_WINDOW, 0x0800_0000u32);
+    }
 
     #[test]
     fn test_pdf_job_new_swaps_extension() {

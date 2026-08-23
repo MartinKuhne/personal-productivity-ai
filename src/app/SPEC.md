@@ -31,6 +31,7 @@
 - [REQ-454]: If no corresponding Markdown file exists, or if the Markdown file's last-modified timestamp is older than the PDF's last-modified timestamp, then the FastMD Viewer SHALL queue the PDF for conversion.
 - [REQ-455]: The FastMD Viewer SHALL run the PDF converter as a background process.
 - [REQ-455A]: When the PDF converter runs, the FastMD Viewer SHALL capture its stdout and stderr and write the output to the Background Process Log.
+- [REQ-455B]: Background processes spawned by the FastMD Viewer SHALL NOT create a visible console window on Windows. The `CREATE_NO_WINDOW` Win32 flag (0x08000000) MUST be applied to every child process spawned from a GUI-subsystem binary.
 - [REQ-456A]: If the PDF converter exits with code 0, then the FastMD Viewer SHALL allow the file watcher to pick up the generated Markdown file and SHALL index the file.
 - [REQ-456B]: If the PDF converter exits with a non-zero code, then the FastMD Viewer SHALL log the conversion error to the Background Process Log and SHALL NOT create the Markdown file.
 - [REQ-457]: While initial indexing runs, the FastMD Viewer SHALL emit progress messages at least every 500 files scanned or every 5 seconds, reporting files processed, PDFs found, and conversions queued and completed.
