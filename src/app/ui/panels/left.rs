@@ -2,6 +2,8 @@
 //!
 //! Unit tests live in the sibling `left_tests.rs` sidecar.
 
+use std::sync::Arc;
+
 use crate::ui::FastMdApp;
 use crate::ui::TreeNode;
 use crate::ui::TreeNodeContext;
@@ -200,28 +202,21 @@ pub fn show_left_panel(app: &mut FastMdApp, parent_ui: &mut egui::Ui) {
         .max(180.0)
         .min(max_w);
 
-    // Rebuild tree rows only when dirty
-    let tree_rows: Vec<FlatRow> = if app.selection().tree_dirty() {
-        let root_node = build_workspace_tree(app);
-        let mut rows = Vec::new();
-        if !root_node.children.is_empty() {
-            flatten_tree(&root_node, 0, &app.selection().expanded_dirs, &mut rows);
-        }
-        app.cached_tree_rows = Some(rows.clone());
-        *app.selection_mut().tree_dirty_mut() = false;
-        rows
-    } else if let Some(cached) = app.cached_tree_rows.take() {
-        let rows = cached.clone();
-        app.cached_tree_rows = Some(cached);
-        rows
+    // Rebuild tree rows only when dirty or not yet cached
+    let tree_rows: Arc<Vec<FlatRow>> = if !app.selection().tree_dirty()
+        && let Some(cached) = &app.cached_tree_rows
+    {
+        Arc::clone(cached)
     } else {
         let root_node = build_workspace_tree(app);
         let mut rows = Vec::new();
         if !root_node.children.is_empty() {
             flatten_tree(&root_node, 0, &app.selection().expanded_dirs, &mut rows);
         }
-        app.cached_tree_rows = Some(rows.clone());
-        rows
+        let rows_arc = Arc::new(rows);
+        app.cached_tree_rows = Some(Arc::clone(&rows_arc));
+        *app.selection_mut().tree_dirty_mut() = false;
+        rows_arc
     };
 
     // egui 0.35 unified `SidePanel`/`TopBottomPanel` into `Panel`,

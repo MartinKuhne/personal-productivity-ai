@@ -31,6 +31,7 @@ mod update;
 
 use std::collections::{BTreeMap, HashSet};
 use std::path::PathBuf;
+use std::sync::Arc;
 
 use eframe::egui;
 
@@ -90,7 +91,7 @@ pub struct FastMdApp {
     pub layout: PanelLayout,
     /// Cached flattened tree rows to avoid rebuilding the file tree every frame.
     /// Invalidated when selection.tree_dirty is true.
-    pub cached_tree_rows: Option<Vec<crate::ui::tree::FlatRow>>,
+    pub cached_tree_rows: Option<Arc<Vec<crate::ui::tree::FlatRow>>>,
     pub persisted_ui_state: PersistedUiState,
     /// Track whether we've applied persisted font scale on first frame.
     persisted_font_applied: bool,
