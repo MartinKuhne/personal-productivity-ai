@@ -190,6 +190,7 @@ pub fn show_bottom_panel(app: &mut FastMdApp, parent_ui: &mut egui::Ui) {
 /// test caller in `tests::test_send_enter_key_captures_event`
 /// passes a closure that pushes the event into the harness's
 /// persistent state.
+#[tracing::instrument(skip_all, name = "ui.panel.bottom", level = "debug")]
 pub fn show_bottom_panel_capture(
     app: &mut FastMdApp,
     parent_ui: &mut egui::Ui,

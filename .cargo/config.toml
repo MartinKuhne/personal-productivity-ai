@@ -1,5 +1,13 @@
-[target.x86_64-pc-windows-msvc]
-rustflags = ["-C", "target-cpu=x86-64-v3"]
+﻿# Cargo build configuration
+# Optimized for local development on Ryzen 7950X (Zen 4 / znver4).
+# target-cpu=native enables AVX2, AVX-512, BMI2, and all other Zen 4 extensions.
+# NOTE: binaries built with this config will NOT run on older CPUs.
+[build]
+rustflags = ["-C", "target-cpu=native"]
 
-[target.x86_64-unknown-linux-gnu]
-rustflags = ["-C", "target-cpu=x86-64-v3"]
+# Release-profile overrides: maximize runtime performance.
+# lto=thin gives most of the benefit of full LTO at a fraction of the link time.
+# codegen-units=1 lets LLVM see the whole crate for better inlining/optimization.
+[profile.release]
+lto = "thin"
+codegen-units = 1

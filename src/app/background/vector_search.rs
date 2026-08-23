@@ -189,7 +189,8 @@ impl VectorSearchService {
                     }
                 }
 
-                while let Ok(event) = reader.recv() {
+                let mut reader = reader.into_inner();
+                while let Ok(event) = reader.recv().await {
                     for path in event.paths {
                         match event.kind {
                             FileEventKind::Discovered | FileEventKind::Updated => {

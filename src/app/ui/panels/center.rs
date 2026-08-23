@@ -246,6 +246,7 @@ fn render_tabs_and_content(ui: &mut egui::Ui, app: &mut FastMdApp) {
 /// test caller in `tests::test_tab_close_button_captures_event`
 /// passes a closure that pushes the event into the harness's
 /// persistent state.
+#[tracing::instrument(skip_all, name = "ui.center.tabs_and_content", level = "debug")]
 pub fn render_tabs_and_content_capture(
     ui: &mut egui::Ui,
     app: &mut FastMdApp,
@@ -387,6 +388,7 @@ pub fn render_tabs_and_content_capture(
 /// Postconditions: Renders the markdown preview with YAML front-matter table
 ///   (if present) and applies any pending task-checkbox toggles to the markdown
 ///   source.
+#[tracing::instrument(skip_all, name = "ui.center.render_markdown_content", level = "debug")]
 fn render_markdown_content(
     ui: &mut egui::Ui,
     tabs: &mut crate::ui::Tabs,
@@ -403,6 +405,11 @@ fn render_markdown_content(
 }
 
 /// Renders the scroll area containing YAML table, markdown, and task toggles.
+#[tracing::instrument(
+    skip_all,
+    name = "ui.center.show_markdown_scroll_area",
+    level = "debug"
+)]
 fn show_markdown_scroll_area(
     ui: &mut egui::Ui,
     tabs: &mut crate::ui::Tabs,
@@ -438,6 +445,7 @@ fn show_markdown_scroll_area(
 /// Purity: Impure (performs UI rendering).
 /// Preconditions: None.
 /// Postconditions: Rendered empty state message.
+#[tracing::instrument(skip_all, name = "ui.center.render_empty_state", level = "debug")]
 fn render_empty_state(ui: &mut egui::Ui) {
     ui.centered_and_justified(|ui| {
         ui.label(
@@ -455,6 +463,7 @@ fn render_empty_state(ui: &mut egui::Ui) {
 /// Purity: Impure (performs UI rendering and routes side effects).
 /// Preconditions: None.
 /// Postconditions: Renders the central panel content.
+#[tracing::instrument(skip_all, name = "ui.panel.center", level = "debug")]
 pub fn show_center_panel(app: &mut FastMdApp, parent_ui: &mut egui::Ui) {
     // egui 0.35: `CentralPanel::show` now takes the parent
     // `&mut Ui` rather than a `&Context`; allocate within the

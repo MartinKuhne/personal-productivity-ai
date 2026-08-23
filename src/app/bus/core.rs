@@ -9,7 +9,7 @@
 //! on the broadcast channel, the subscriber count automatically reflects how
 //! many consumers are still alive.
 
-use std::sync::Mutex;
+use std::sync::{Arc, Condvar, Mutex};
 use std::time::Duration;
 use tokio::sync::broadcast;
 
@@ -44,20 +44,24 @@ impl From<broadcast::error::TryRecvError> for BroadcastRecvError {
 }
 
 /// A thread-safe, multi-producer / multi-consumer event bus backed by
-/// `tokio::sync::broadcast`.
+/// `tokio::sync::broadcast` with a [`Condvar`] for zero-CPU synchronous blocking.
 ///
-/// Cloning a `Bus` is cheap (it's an `Arc` of the sender internally) and
+/// Cloning a `Bus` is cheap (it shares the sender and condvar via `Arc`) and
 /// produces a new handle that shares the same broadcast channel.
 #[derive(Clone)]
 pub struct Bus<T: Clone + Send + 'static> {
     sender: broadcast::Sender<T>,
+    notify: Arc<Condvar>,
 }
 
 impl<T: Clone + Send + 'static> Bus<T> {
     /// Create a new bus with a fixed-capacity broadcast channel.
     pub fn new() -> Self {
         let (sender, _) = broadcast::channel(BUS_CAPACITY);
-        Self { sender }
+        Self {
+            sender,
+            notify: Arc::new(Condvar::new()),
+        }
     }
 
     /// Register a new consumer. Each consumer gets its own receiver;
@@ -65,7 +69,13 @@ impl<T: Clone + Send + 'static> Bus<T> {
     pub fn subscribe(&self) -> BusReader<T> {
         BusReader {
             inner: Mutex::new(self.sender.subscribe()),
+            notify: Arc::clone(&self.notify),
         }
+    }
+
+    /// Register a new asynchronous consumer backed directly by a Tokio broadcast receiver.
+    pub fn subscribe_async(&self) -> broadcast::Receiver<T> {
+        self.sender.subscribe()
     }
 
     /// Publish an event to every registered consumer.
@@ -75,12 +85,20 @@ impl<T: Clone + Send + 'static> Bus<T> {
     /// events (the broadcast channel drops the oldest events when
     /// full).
     pub fn publish(&self, event: T) -> usize {
-        self.sender.send(event).unwrap_or(0)
+        let count = self.sender.send(event).unwrap_or(0);
+        self.notify.notify_all();
+        count
     }
 
     /// Number of currently registered consumers.
     pub fn subscriber_count(&self) -> usize {
         self.sender.receiver_count()
+    }
+}
+
+impl<T: Clone + Send + 'static> Drop for Bus<T> {
+    fn drop(&mut self) {
+        self.notify.notify_all();
     }
 }
 
@@ -92,9 +110,10 @@ impl<T: Clone + Send + 'static> Default for Bus<T> {
 
 /// The receive end of a bus subscription. Backed by a
 /// `tokio::sync::broadcast::Receiver` wrapped in a `Mutex` for
-/// interior mutability (all methods take `&self`).
+/// interior mutability, with a shared `Condvar` to avoid polling.
 pub struct BusReader<T: Clone> {
     inner: Mutex<broadcast::Receiver<T>>,
+    notify: Arc<Condvar>,
 }
 
 impl<T: Clone> BusReader<T> {
@@ -102,7 +121,13 @@ impl<T: Clone> BusReader<T> {
     pub fn new(rx: broadcast::Receiver<T>) -> Self {
         Self {
             inner: Mutex::new(rx),
+            notify: Arc::new(Condvar::new()),
         }
+    }
+
+    /// Unwrap into the underlying async Tokio receiver.
+    pub fn into_inner(self) -> broadcast::Receiver<T> {
+        self.inner.into_inner().unwrap()
     }
 
     /// Try to receive an event without blocking.
@@ -126,16 +151,18 @@ impl<T: Clone> BusReader<T> {
     }
 
     /// Block until an event is available, or the channel is closed.
-    /// Uses a spin-wait with short sleeps since the underlying broadcast
-    /// receiver has no blocking synchronous API.
+    /// Blocks the OS thread on a condvar instead of spin-waiting.
     pub fn recv(&self) -> Result<T, std::sync::mpsc::RecvError> {
+        let mut guard = self.inner.lock().unwrap();
         loop {
-            match self.inner.lock().unwrap().try_recv() {
+            match guard.try_recv() {
                 Ok(val) => return Ok(val),
                 Err(broadcast::error::TryRecvError::Closed) => {
                     return Err(std::sync::mpsc::RecvError);
                 }
-                Err(_) => std::thread::sleep(Duration::from_millis(10)),
+                Err(_) => {
+                    guard = self.notify.wait(guard).unwrap();
+                }
             }
         }
     }
@@ -143,17 +170,30 @@ impl<T: Clone> BusReader<T> {
     /// Block for at most `timeout` waiting for an event.
     pub fn recv_timeout(&self, timeout: Duration) -> Result<T, std::sync::mpsc::RecvTimeoutError> {
         let start = std::time::Instant::now();
+        let mut guard = self.inner.lock().unwrap();
         loop {
-            match self.inner.lock().unwrap().try_recv() {
+            match guard.try_recv() {
                 Ok(val) => return Ok(val),
                 Err(broadcast::error::TryRecvError::Closed) => {
                     return Err(std::sync::mpsc::RecvTimeoutError::Disconnected);
                 }
                 Err(_) => {
-                    if start.elapsed() >= timeout {
+                    let elapsed = start.elapsed();
+                    if elapsed >= timeout {
                         return Err(std::sync::mpsc::RecvTimeoutError::Timeout);
                     }
-                    std::thread::sleep(Duration::from_millis(10));
+                    let remaining = timeout - elapsed;
+                    let (new_guard, wait_res) = self.notify.wait_timeout(guard, remaining).unwrap();
+                    guard = new_guard;
+                    if wait_res.timed_out() && start.elapsed() >= timeout {
+                        return match guard.try_recv() {
+                            Ok(val) => Ok(val),
+                            Err(broadcast::error::TryRecvError::Closed) => {
+                                Err(std::sync::mpsc::RecvTimeoutError::Disconnected)
+                            }
+                            Err(_) => Err(std::sync::mpsc::RecvTimeoutError::Timeout),
+                        };
+                    }
                 }
             }
         }

@@ -35,6 +35,7 @@ impl BatchJobExecutor {
         }
     }
 
+    #[tracing::instrument(skip(self, jobs), name = "batch.execute_concurrent", fields(total_jobs = jobs.len(), concurrency))]
     pub fn execute_concurrent(&self, mut jobs: Vec<BatchJob>, concurrency: u8) -> BatchResult {
         let start_time = self.clock.now();
         let total_jobs = jobs.len();
@@ -202,6 +203,10 @@ pub struct BatchAgentRunParams {
     pub model_name: Option<String>,
 }
 
+#[tracing::instrument(skip(params), name = "batch.run_agent_blocking", fields(
+    active_file = ?params.active_file,
+    model = ?params.model_name
+))]
 pub fn run_agent_blocking(params: BatchAgentRunParams) -> (BatchJobStatus, Option<String>) {
     let BatchAgentRunParams {
         config,

@@ -12,6 +12,7 @@ use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::{Receiver, Sender};
 use std::sync::{Arc, Mutex};
+use tracing::instrument;
 
 pub struct Indexer {
     config: AppConfig,
@@ -63,7 +64,14 @@ impl Indexer {
                             }
                         }
                     };
-                    let tags = crate::utils::tags::extract_tags_from_file(&path);
+                    let tags = {
+                        let _span = tracing::debug_span!(
+                            "indexer.parse_file",
+                            path = %path.display()
+                        )
+                        .entered();
+                        crate::utils::tags::extract_tags_from_file(&path)
+                    };
                     let _ = tx_clone.send(FsEvent::FileParsed { path, tags }.into());
                     std::thread::yield_now();
                 }
@@ -83,6 +91,7 @@ impl Indexer {
     /// image files are also forwarded on their respective channels for
     /// background conversion / vision processing. The `tx_img` parameter
     /// is only present when the `image-library` Cargo feature is enabled.
+    #[instrument(skip_all, name = "indexer.scan_libraries")]
     pub fn scan_libraries(
         &self,
         tx_work: &Sender<PathBuf>,
