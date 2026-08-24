@@ -77,3 +77,40 @@ fn execute_vector_search_forwards_none_max_distance_when_omitted() {
     assert!(result.is_ok());
     assert_eq!(*mock.last_max_distance.lock().unwrap(), Some(None));
 }
+
+#[test]
+fn execute_vector_search_cursor_session_pagination() {
+    let mock = Arc::new(MockVectorSearchService::default());
+    let cache = Arc::new(crate::tools::registry::cache::ToolCache::new());
+    let mut ctx = ToolContext::default();
+    ctx.extensions
+        .insert(Arc::new(VectorSearchExt(mock.clone())));
+    ctx.extensions
+        .insert(Arc::new(crate::tools::context::ToolCacheExt(cache.clone())));
+
+    let uuid_gen = crate::utils::uuid::FixedUuidGenerator::new(uuid::Uuid::nil());
+    let hits = vec![
+        VectorSearchHit {
+            path: "note1.md".to_string(),
+            distance: 0.1,
+            offset: 0,
+            limit: 5,
+            content: "chunk 1".to_string(),
+        },
+        VectorSearchHit {
+            path: "note2.md".to_string(),
+            distance: 0.2,
+            offset: 0,
+            limit: 5,
+            content: "chunk 2".to_string(),
+        },
+    ];
+
+    let page = cache.vector_sessions.create_session(hits, &uuid_gen);
+    assert_eq!(page.total, 2);
+
+    let tool = VectorSearchTool;
+    // Query with unknown cursor returns error
+    let err_res = execute_vector_search(&tool, &ctx, r#"{"cursor":"unknown_cursor"}"#);
+    assert!(err_res.is_err());
+}

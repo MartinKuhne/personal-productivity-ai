@@ -260,8 +260,9 @@ mod tests {
     //! the public `tokio::process::Command` API — there is no getter.
     //! Per the project AGENTS.md anti-hallucination / TDD guidance, we
     //! cover what is observable:
-    //!   - the helper sets the correct program and args (tested directly)
-    //!   - the resulting command is spawnable end-to-end (execution tests)
+    //! - the helper sets the correct program and args (tested directly)
+    //! - the resulting command is spawnable end-to-end (execution tests)
+    //!
     //! A manual visual test on Windows (no flash CMD window) remains the
     //! authoritative check for the invisible `creation_flags` field.
     //! See `doc/adr/cmd-substitution.md` for the full decision record.

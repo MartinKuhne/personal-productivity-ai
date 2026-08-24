@@ -23,7 +23,7 @@ use jmap_client::core::set::SetObject;
 use jmap_client::email::query::Filter;
 
 use super::client::JmapSession;
-use crate::tools::registry::cache::{SearchEmailCacheEntry, SearchEmailItem};
+use crate::tools::registry::cache::SearchEmailItem;
 
 /// Maximum number of bytes the JMAP server should inline for a single body
 /// part in `bodyValues` (RFC 8621 §6.1.2 `maxBodyValueBytes`).
@@ -267,14 +267,17 @@ pub fn new_search_email_cursor(uuid_gen: &dyn crate::utils::uuid::UuidGenerator)
     uuid_gen.new_v4().to_string()
 }
 
+struct FullSearchResult {
+    items: Vec<crate::tools::registry::cache::SearchEmailItem>,
+    errors: Vec<String>,
+}
+
 /// Fetch the full server result set for a search. Used by the
-/// cursor flow when the caller has not supplied a cursor (or when
-/// the cache lookup misses). The result is cached in the shared
-/// `ToolCache` under a fresh UUID cursor.
+/// cursor flow when the caller has not supplied a cursor.
 fn fetch_full_search_result(
     config: &AgentConfig,
     filters: &SearchEmailFilters<'_>,
-) -> Result<SearchEmailCacheEntry, String> {
+) -> Result<FullSearchResult, String> {
     let keyword = filters.keyword;
     let folder = filters.folder;
     let start_date = filters.start_date;
@@ -444,12 +447,8 @@ fn fetch_full_search_result(
         }
     }
 
-    let total = all_items.len();
-    Ok(SearchEmailCacheEntry {
+    Ok(FullSearchResult {
         items: all_items,
-        cursor_offset: 0,
-        total,
-        fetched_at: std::time::Instant::now(),
         errors: error_messages,
     })
 }
@@ -494,120 +493,41 @@ pub fn tool_search_email(
     cache: &crate::tools::registry::cache::ToolCache,
     uuid_gen: &dyn crate::utils::uuid::UuidGenerator,
 ) -> Result<crate::tools::dtos::SearchEmailResponse, String> {
-    use crate::tools::registry::cache::{CacheEntry, SearchEmailCacheEntry, SearchEmailItem};
+    use crate::tools::registry::cache::SearchEmailItem;
 
-    // First call: query JMAP, populate the cache, return first page + cursor.
-    let Some(cursor) = cursor else {
-        let entry = fetch_full_search_result(config, &filters)?;
-        let total = entry.total;
-        let first_page: Vec<SearchEmailItem> = entry
-            .items
-            .iter()
-            .take(SEARCH_EMAIL_PAGE_SIZE)
-            .cloned()
-            .collect();
-        let next_offset = first_page.len();
-        let new_cursor = new_search_email_cursor(uuid_gen);
-
-        // Store the cache entry (a clone of the items we will keep
-        // serving from). The cursor_offset is set so the next call
-        // returns the items immediately after this batch.
-        let cache_entry = SearchEmailCacheEntry {
-            items: entry.items,
-            cursor_offset: next_offset,
-            total,
-            fetched_at: entry.fetched_at,
-            errors: entry.errors.clone(),
-        };
-        cache.put(new_cursor.clone(), CacheEntry::SearchEmail(cache_entry));
-
-        // Empty result set: no cursor, hint says "no matches". We
-        // do not need to keep the cache entry we just inserted, so
-        // invalidate it before returning.
-        if total == 0 {
-            cache.invalidate(&new_cursor);
-            return Ok(crate::tools::dtos::SearchEmailResponse {
-                results: "No matching emails found.".to_string(),
-                total: 0,
-                cursor: None,
-                hint: Some("No matching emails found.".to_string()),
-            });
-        }
-
-        // If we served every item in this batch, the cursor is
-        // final: emit a hint instead of a cursor so the LLM stops
-        // walking. If there are more, the LLM gets the cursor and
-        // makes a follow-up call.
-        let (cursor_out, hint_out) = if next_offset >= total {
-            // All items already returned in this first page; remove
-            // the cache entry since there will be no follow-up.
-            cache.invalidate(&new_cursor);
-            (None, Some(SEARCH_EMAIL_FINAL_PAGE_HINT.to_string()))
-        } else {
-            (Some(new_cursor), None)
-        };
-
-        let first_refs: Vec<&SearchEmailItem> = first_page.iter().collect();
-        let results = format_search_page(&first_refs, &entry.errors);
-
+    if let Some(cursor) = cursor {
+        let page = cache.email_sessions.next_page(&cursor)?;
+        let page_refs: Vec<&SearchEmailItem> = page.items.iter().collect();
+        let results = format_search_page(&page_refs, &[]);
         return Ok(crate::tools::dtos::SearchEmailResponse {
             results,
-            total,
-            cursor: cursor_out,
-            hint: hint_out,
+            total: page.total,
+            cursor: page.cursor,
+            hint: page.hint,
         });
-    };
-
-    // Subsequent call: look up the cache, slice, return next page.
-    let entry = match cache.get(&cursor) {
-        Some(CacheEntry::SearchEmail(e)) => e,
-        _ => {
-            return Err("Cursor expired or unknown; re-run the search with no cursor.".to_string());
-        }
-    };
-
-    let total = entry.total;
-    let start = entry.cursor_offset;
-    if start >= total {
-        // Cursor used after final page was already returned.
-        // This indicates the LLM incorrectly reused a cursor.
-        // Return the same error as for an unknown/expired cursor.
-        return Err("Cursor expired or unknown; re-run the search with no cursor.".to_string());
     }
 
-    let end = (start + SEARCH_EMAIL_PAGE_SIZE).min(total);
-    let page_refs: Vec<&SearchEmailItem> = entry.items[start..end].iter().collect();
-    let results = format_search_page(&page_refs, &entry.errors);
+    let search_res = fetch_full_search_result(config, &filters)?;
+    if search_res.items.is_empty() {
+        return Ok(crate::tools::dtos::SearchEmailResponse {
+            results: "No matching emails found.".to_string(),
+            total: 0,
+            cursor: None,
+            hint: Some("No matching emails found.".to_string()),
+        });
+    }
 
-    // Advance the cached offset for the next call.
-    let new_offset = end;
-    let (cursor_out, hint_out) = if new_offset >= total {
-        // Final page.
-        (None, Some(SEARCH_EMAIL_FINAL_PAGE_HINT.to_string()))
-    } else {
-        // More pages exist: same cursor, advanced offset.
-        (Some(cursor.clone()), None)
-    };
-
-    // Update the cached entry with the new offset. Re-put is the
-    // simplest way; the cache key is unchanged so the entry stays
-    // in the same slot.
-    cache.put(
-        cursor,
-        CacheEntry::SearchEmail(SearchEmailCacheEntry {
-            items: entry.items,
-            cursor_offset: new_offset,
-            total,
-            fetched_at: entry.fetched_at,
-            errors: entry.errors,
-        }),
-    );
+    let page = cache
+        .email_sessions
+        .create_session(search_res.items, uuid_gen);
+    let page_refs: Vec<&SearchEmailItem> = page.items.iter().collect();
+    let results = format_search_page(&page_refs, &search_res.errors);
 
     Ok(crate::tools::dtos::SearchEmailResponse {
         results,
-        total,
-        cursor: cursor_out,
-        hint: hint_out,
+        total: page.total,
+        cursor: page.cursor,
+        hint: page.hint,
     })
 }
 

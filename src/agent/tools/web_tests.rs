@@ -48,14 +48,8 @@ fn test_tool_web_fetch_mock() {
     assert!(result.content.contains("Hello") || result.content.contains("World"));
     assert!(result.total_lines > 0);
 
-    // Verify the mock generator was used to create the cache entry
-    if let Some(crate::tools::registry::cache::CacheEntry::WebFetch { cursor }) =
-        cache.get(&server_url)
-    {
-        assert_eq!(cursor, mock_uuid.to_string());
-    } else {
-        panic!("Cache missing WebFetch entry for url");
-    }
+    // Verify the document was stored in the web_documents cache
+    assert!(cache.web_documents.get(&server_url).is_some());
 }
 
 #[test]

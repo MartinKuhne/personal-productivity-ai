@@ -54,6 +54,7 @@ struct VectorSearchInput {
     /// Semantic search query. Use descriptive phrases, natural language questions,
     /// or conceptual summaries (e.g., 'monthly bank account statements from First Tech')
     /// rather than isolated single keywords. For exact text matching, use `grep_search`.
+    #[serde(default)]
     query: String,
     /// Maximum number of matching chunks to return (1–20, default: 5).
     #[serde(default = "default_limit")]
@@ -63,6 +64,9 @@ struct VectorSearchInput {
     /// Use 0.3–0.5 for strict high-precision matches; use 0.8–1.0 for broader thematic exploration.
     #[serde(default)]
     max_distance: Option<f32>,
+    /// Optional cursor token for continuing multi-page retrieval (TOOL-043, TOOL-047).
+    #[serde(default)]
+    cursor: Option<String>,
 }
 
 fn default_limit() -> usize {
@@ -96,6 +100,12 @@ fn execute_vector_search(
 ) -> Result<serde_json::Value, String> {
     let input: VectorSearchInput =
         serde_json::from_str(args).map_err(|e| format!("Invalid args: {e}"))?;
+
+    if let Some(cursor) = &input.cursor {
+        let page = ctx.cache().vector_sessions.next_page(cursor)?;
+        return serde_json::to_value(page).map_err(|e| e.to_string());
+    }
+
     if input.query.trim().is_empty() {
         return Err("query must not be empty".to_string());
     }
