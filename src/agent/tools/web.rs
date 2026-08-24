@@ -29,17 +29,10 @@ pub fn tool_web_fetch(
         });
     }
 
-    // 2. If force_refetch, invalidate URL cache
-    if input.force_refetch {
-        cache.web_documents.invalidate(url);
-    }
+    // 2. A call without a cursor incurs a force refetch and invalidates cache entries (TOOL-032)
+    cache.web_documents.invalidate(url);
 
-    // 3. Check URL cache
-    let (cached_doc, from_cache) = if !input.force_refetch
-        && let Some(doc) = cache.web_documents.get(url)
-    {
-        (doc, true)
-    } else {
+    let (cached_doc, from_cache) = {
         match reqwest::blocking::Client::new()
             .get(url)
             .header(
@@ -126,7 +119,25 @@ pub fn tool_web_fetch(
 pub fn tool_web_search(
     url: &str,
     query: &str,
+    cursor: Option<String>,
+    cache: &crate::tools::registry::cache::ToolCache,
+    uuid_gen: &dyn crate::utils::uuid::UuidGenerator,
 ) -> Result<crate::tools::dtos::WebSearchResponse, String> {
+    if let Some(cursor) = cursor {
+        let page = cache.web_search_sessions.next_page(&cursor)?;
+        let results = if page.items.is_empty() {
+            "No results found.".to_string()
+        } else {
+            page.items.join("\n\n")
+        };
+        return Ok(crate::tools::dtos::WebSearchResponse {
+            results,
+            total: page.total,
+            cursor: page.cursor,
+            hint: page.hint,
+        });
+    }
+
     let endpoint = format!("{}/search", url);
     match reqwest::blocking::Client::new()
         .get(&endpoint)
@@ -142,28 +153,34 @@ pub fn tool_web_search(
             Ok(body) => {
                 if let Ok(json) = serde_json::from_str::<serde_json::Value>(&body) {
                     if let Some(results) = json.get("results").and_then(|r| r.as_array()) {
-                        // Surface every result the SearXNG instance returned.
-                        // The page size is controlled server-side by
-                        // `search.max_results` in settings.yml; we don't
-                        // slice on the client because the operator asked to
-                        // see whatever the server actually returned.
-                        let mut output = String::new();
+                        let mut items = Vec::new();
                         for (i, result) in results.iter().enumerate() {
                             let title = result.get("title").and_then(|t| t.as_str()).unwrap_or("");
                             let url = result.get("url").and_then(|u| u.as_str()).unwrap_or("");
                             let content = result.get("content").and_then(|c| c.as_str()).unwrap_or("");
-                            output.push_str(&format!(
-                                "{}. [{}]({})\n{}\n\n",
+                            items.push(format!(
+                                "{}. [{}]({})\n{}",
                                 i + 1,
                                 title,
                                 url,
                                 content
                             ));
                         }
-                        if output.is_empty() {
-                            Ok(crate::tools::dtos::WebSearchResponse { results: "No results found.".to_string() })
+                        if items.is_empty() {
+                            Ok(crate::tools::dtos::WebSearchResponse {
+                                results: "No results found.".to_string(),
+                                total: 0,
+                                cursor: None,
+                                hint: Some(crate::tools::registry::builtin::strings::FINAL_PAGE_HINT.to_string()),
+                            })
                         } else {
-                            Ok(crate::tools::dtos::WebSearchResponse { results: output })
+                            let page = cache.web_search_sessions.create_session(items, uuid_gen);
+                            Ok(crate::tools::dtos::WebSearchResponse {
+                                results: page.items.join("\n\n"),
+                                total: page.total,
+                                cursor: page.cursor,
+                                hint: page.hint,
+                            })
                         }
                     } else {
                         tracing::error!(name = "tool.web_search.parse_results_failed", url = %endpoint, "Search API returned JSON without a 'results' array. Operator should verify search provider compatibility.");
@@ -362,7 +379,13 @@ pub fn tool_web_delegate(
                         serde_json::from_str::<crate::tools::dtos::WebSearchInput>(func_args_str)
                     {
                         if let Some(url) = config.searxng_url() {
-                            match tool_web_search(url, &input.query) {
+                            match tool_web_search(
+                                url,
+                                &input.query,
+                                input.cursor,
+                                cache,
+                                &crate::utils::uuid::SystemUuidGenerator,
+                            ) {
                                 Ok(res) => serde_json::to_string(
                                     &crate::tools::dtos::ToolResponse::Success { data: res },
                                 )

@@ -8,8 +8,8 @@ use std::time::Duration;
 /// Default TTL for cursor sessions (30 minutes per TOOL-030).
 pub const DEFAULT_CURSOR_TTL: Duration = Duration::from_secs(1800);
 
-/// Default capacity for cursor sessions (1024 entries per TOOL-030).
-pub const DEFAULT_CURSOR_CAPACITY: u64 = 1024;
+/// Default capacity for cursor sessions (256 entries per TOOL-030).
+pub const DEFAULT_CURSOR_CAPACITY: u64 = 256;
 
 /// A single page slice returned by cursor pagination.
 #[derive(Clone, Debug, PartialEq, Eq, serde::Serialize)]

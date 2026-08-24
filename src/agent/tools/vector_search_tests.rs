@@ -26,19 +26,12 @@ impl VectorSearchService for MockVectorSearchService {
 }
 
 #[test]
-fn input_limit_is_bounded_by_tool() {
-    assert_eq!(default_limit(), 5);
-    let parsed: VectorSearchInput = serde_json::from_str(r#"{"query":"x"}"#).unwrap();
-    assert_eq!(parsed.limit, 5);
-    assert_eq!(parsed.max_distance, None);
-}
-
-#[test]
 fn input_deserializes_explicit_max_distance() {
     let parsed: VectorSearchInput =
         serde_json::from_str(r#"{"query":"bank statement","max_distance":0.85}"#).unwrap();
     assert_eq!(parsed.query, "bank statement");
     assert_eq!(parsed.max_distance, Some(0.85));
+    assert_eq!(parsed.cursor, None);
 }
 
 #[test]
@@ -52,7 +45,7 @@ fn execute_vector_search_forwards_max_distance_to_service() {
     let result = execute_vector_search(
         &tool,
         &ctx,
-        r#"{"query":"credit union","limit":10,"max_distance":0.75}"#,
+        r#"{"query":"credit union","max_distance":0.75}"#,
     );
 
     assert!(result.is_ok());
@@ -60,7 +53,6 @@ fn execute_vector_search_forwards_max_distance_to_service() {
         mock.last_query.lock().unwrap().as_deref(),
         Some("credit union")
     );
-    assert_eq!(*mock.last_limit.lock().unwrap(), Some(10));
     assert_eq!(*mock.last_max_distance.lock().unwrap(), Some(Some(0.75)));
 }
 

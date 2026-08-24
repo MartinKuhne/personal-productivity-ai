@@ -29,7 +29,14 @@ fn execute_search_calendar(
 ) -> Result<serde_json::Value, String> {
     let input: dtos::SearchCalendarInput =
         serde_json::from_str(args).map_err(|e| format!("Invalid args: {}", e))?;
-    crate::lib::dav::cal::tool_search_calendar(&ctx.config, &input.keyword).map(|r| {
+    crate::lib::dav::cal::tool_search_calendar(
+        &ctx.config,
+        &input.keyword,
+        input.cursor,
+        &ctx.cache(),
+        ctx.uuid_gen().as_ref(),
+    )
+    .map(|r| {
         serde_json::to_value(r).unwrap_or_else(|e| serde_json::json!({"error": e.to_string()}))
     })
 }
@@ -53,9 +60,17 @@ fn execute_get_calendar(
 ) -> Result<serde_json::Value, String> {
     let input: dtos::GetCalendarInput =
         serde_json::from_str(args).map_err(|e| format!("Invalid args: {}", e))?;
-    crate::lib::dav::cal::tool_get_calendar(&ctx.config, &input.start_date, &input.end_date).map(
-        |r| serde_json::to_value(r).unwrap_or_else(|e| serde_json::json!({"error": e.to_string()})),
+    crate::lib::dav::cal::tool_get_calendar(
+        &ctx.config,
+        &input.start_date,
+        &input.end_date,
+        input.cursor,
+        &ctx.cache(),
+        ctx.uuid_gen().as_ref(),
     )
+    .map(|r| {
+        serde_json::to_value(r).unwrap_or_else(|e| serde_json::json!({"error": e.to_string()}))
+    })
 }
 
 /// Tool that gets a specific calendar item by its full href.

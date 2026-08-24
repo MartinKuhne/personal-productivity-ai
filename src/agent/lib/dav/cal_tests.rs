@@ -343,25 +343,19 @@ fn test_caldav_tools_empty_config() {
         "No CalDAV clients configured."
     );
 
-    let search_res = tool_search_calendar(&config, "test").unwrap();
-    assert_eq!(
-        search_res.results,
-        serde_json::to_string_pretty(&CalDavResponse {
-            results: vec![],
-            errors: vec![]
-        })
-        .unwrap()
-    );
+    let cache = crate::tools::registry::cache::ToolCache::new();
+    let uuid_gen = crate::utils::uuid::SystemUuidGenerator;
 
-    let get_res = tool_get_calendar(&config, "2024-01-01", "2024-01-02").unwrap();
-    assert_eq!(
-        get_res.results,
-        serde_json::to_string_pretty(&CalDavResponse {
-            results: vec![],
-            errors: vec![]
-        })
-        .unwrap()
-    );
+    let search_res = tool_search_calendar(&config, "test", None, &cache, &uuid_gen).unwrap();
+    assert_eq!(search_res.results, "No events found.");
+    assert_eq!(search_res.total, 0);
+    assert_eq!(search_res.hint.as_deref(), Some("Final page."));
+
+    let get_res =
+        tool_get_calendar(&config, "2024-01-01", "2024-01-02", None, &cache, &uuid_gen).unwrap();
+    assert_eq!(get_res.results, "No events found.");
+    assert_eq!(get_res.total, 0);
+    assert_eq!(get_res.hint.as_deref(), Some("Final page."));
 
     let item_res = tool_get_calendar_item(&config, "/item.ics").unwrap();
     assert_eq!(
@@ -389,11 +383,14 @@ fn test_caldav_tools_unreachable_client() {
             password: "password".to_string(),
         },
     );
+    let cache = crate::tools::registry::cache::ToolCache::new();
+    let uuid_gen = crate::utils::uuid::SystemUuidGenerator;
 
-    let search_res = tool_search_calendar(&config, "test").unwrap();
+    let search_res = tool_search_calendar(&config, "test", None, &cache, &uuid_gen).unwrap();
     assert!(search_res.results.contains("Error on client test_client"));
 
-    let get_res = tool_get_calendar(&config, "2024-01-01", "2024-01-02").unwrap();
+    let get_res =
+        tool_get_calendar(&config, "2024-01-01", "2024-01-02", None, &cache, &uuid_gen).unwrap();
     assert!(get_res.results.contains("Error on client test_client"));
 
     let item_res = tool_get_calendar_item(&config, "/item.ics").unwrap();
@@ -431,13 +428,16 @@ fn test_caldav_tools_mock_server() {
     let mock = WiremockGuard::start();
     register_caldav_stubs(&mock);
     let config = dav_config_for(mock.uri());
+    let cache = crate::tools::registry::cache::ToolCache::new();
+    let uuid_gen = crate::utils::uuid::SystemUuidGenerator;
 
     // 1. Search calendar
-    let search_res = tool_search_calendar(&config, "Bob").unwrap();
+    let search_res = tool_search_calendar(&config, "Bob", None, &cache, &uuid_gen).unwrap();
     assert!(search_res.results.contains("Meeting with Bob"));
 
     // 2. Get calendar (date range)
-    let get_res = tool_get_calendar(&config, "2024-01-01", "2024-01-02").unwrap();
+    let get_res =
+        tool_get_calendar(&config, "2024-01-01", "2024-01-02", None, &cache, &uuid_gen).unwrap();
     assert!(get_res.results.contains("Meeting with Bob"));
 
     // 3. Get calendar item success
@@ -798,4 +798,33 @@ fn dav_client_get_contact_404_includes_status() {
         err.contains("Not found by href"),
         "error should mention the lookup failure, got: {err}"
     );
+}
+
+#[test]
+fn test_calendar_cursor_sessions() {
+    let cache = crate::tools::registry::cache::ToolCache::new();
+    let uuid_gen = crate::utils::uuid::SystemUuidGenerator;
+    let events: Vec<String> = (1..=70).map(|i| format!("Event {}", i)).collect();
+
+    let page1 = cache
+        .calendar_search_sessions
+        .create_session(events, &uuid_gen);
+    assert_eq!(page1.total, 70);
+    assert_eq!(page1.items.len(), 32);
+    assert!(page1.cursor.is_some());
+    assert!(page1.hint.is_none());
+    let cursor1 = page1.cursor.unwrap();
+
+    let page2 = cache.calendar_search_sessions.next_page(&cursor1).unwrap();
+    assert_eq!(page2.total, 70);
+    assert_eq!(page2.items.len(), 32);
+    assert!(page2.cursor.is_some());
+    assert!(page2.hint.is_none());
+    let cursor2 = page2.cursor.unwrap();
+
+    let page3 = cache.calendar_search_sessions.next_page(&cursor2).unwrap();
+    assert_eq!(page3.total, 70);
+    assert_eq!(page3.items.len(), 6);
+    assert!(page3.cursor.is_none());
+    assert_eq!(page3.hint.as_deref(), Some("Final page."));
 }

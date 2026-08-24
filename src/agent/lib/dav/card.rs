@@ -877,20 +877,69 @@ where
     (results, errors)
 }
 
-/// Serialize a [`CardDavResponse`] to a pretty JSON string. Falls
-/// back to `"{}"` on encoder failure to match the cal side's
-/// `serialize_response` and the pre-refactor inline fallback.
 fn serialize_card_response(resp: &CardDavResponse) -> String {
     serde_json::to_string_pretty(resp).unwrap_or_else(|_| "{}".to_string())
+}
+
+fn format_contact_page(items: &[String], errors: &[String]) -> String {
+    let mut parts = Vec::new();
+    if !items.is_empty() {
+        parts.push(items.join("\n\n"));
+    }
+    for err in errors {
+        parts.push(err.clone());
+    }
+    if parts.is_empty() {
+        "{}".to_string()
+    } else {
+        parts.join("\n\n")
+    }
 }
 
 pub fn tool_search_contact(
     config: &AgentConfig,
     keyword: &str,
+    cursor: Option<String>,
+    cache: &crate::tools::registry::cache::ToolCache,
+    uuid_gen: &dyn crate::utils::uuid::UuidGenerator,
 ) -> Result<crate::tools::dtos::SearchContactResponse, String> {
+    if let Some(cursor) = cursor {
+        let page = cache.contact_search_sessions.next_page(&cursor)?;
+        return Ok(crate::tools::dtos::SearchContactResponse {
+            results: format_contact_page(&page.items, &[]),
+            total: page.total,
+            cursor: page.cursor,
+            hint: page.hint,
+        });
+    }
+
     let (results, errors) = for_each_card_client_vec(config, |_, c| c.search_contact(keyword));
+    let items: Vec<String> = results
+        .into_iter()
+        .map(|r| serde_json::to_string_pretty(&r).unwrap_or_default())
+        .collect();
+
+    if items.is_empty() {
+        return Ok(crate::tools::dtos::SearchContactResponse {
+            results: if errors.is_empty() {
+                "No contacts found.".to_string()
+            } else {
+                errors.join("\n\n")
+            },
+            total: 0,
+            cursor: None,
+            hint: Some(crate::tools::registry::builtin::strings::FINAL_PAGE_HINT.to_string()),
+        });
+    }
+
+    let page = cache
+        .contact_search_sessions
+        .create_session(items, uuid_gen);
     Ok(crate::tools::dtos::SearchContactResponse {
-        results: serialize_card_response(&CardDavResponse { results, errors }),
+        results: format_contact_page(&page.items, &errors),
+        total: page.total,
+        cursor: page.cursor,
+        hint: page.hint,
     })
 }
 

@@ -56,25 +56,20 @@ struct VectorSearchInput {
     /// rather than isolated single keywords. For exact text matching, use `grep_search`.
     #[serde(default)]
     query: String,
-    /// Maximum number of matching chunks to return (1–20, default: 5).
-    #[serde(default = "default_limit")]
-    limit: usize,
     /// Optional maximum cosine distance cutoff (0.0 to 2.0, default: 0.6).
     /// Results with distance above this threshold are excluded.
     /// Use 0.3–0.5 for strict high-precision matches; use 0.8–1.0 for broader thematic exploration.
     #[serde(default)]
     max_distance: Option<f32>,
-    /// Optional cursor token for continuing multi-page retrieval (TOOL-043, TOOL-047).
+    /// Optional cursor token for continuing multi-page retrieval (TOOL-028, TOOL-029).
     #[serde(default)]
     cursor: Option<String>,
 }
 
-fn default_limit() -> usize {
-    5
-}
-
 const VECTOR_SEARCH_DESCRIPTION: &str = "\
 Search indexed Markdown notes by semantic meaning and concepts. \
+Returns up to 32 results per page. Pass the `cursor` back unchanged to retrieve subsequent pages. \
+When all results have been returned, the response includes a `hint` field and no `cursor`. \
 Formulate queries as descriptive phrases, natural language questions, or conceptual summaries \
 (e.g., 'checking account statements from credit union' rather than single keywords). \
 For exact keywords, timestamps, or filenames, prefer `grep_search`. \
@@ -109,15 +104,30 @@ fn execute_vector_search(
     if input.query.trim().is_empty() {
         return Err("query must not be empty".to_string());
     }
-    let limit = input.limit.clamp(1, 20);
     let service = ctx
         .extensions
         .get::<VectorSearchExt>()
         .ok_or_else(|| "Vector search is not available.".to_string())?;
     let hits = service
         .0
-        .search(input.query.trim(), limit, input.max_distance)?;
-    serde_json::to_value(hits).map_err(|e| e.to_string())
+        .search(input.query.trim(), 128, input.max_distance)?;
+
+    if hits.is_empty() {
+        let page: crate::tools::registry::cursor::CursorPage<VectorSearchHit> =
+            crate::tools::registry::cursor::CursorPage {
+                items: Vec::new(),
+                total: 0,
+                cursor: None,
+                hint: Some(crate::tools::registry::builtin::strings::FINAL_PAGE_HINT.to_string()),
+            };
+        return serde_json::to_value(page).map_err(|e| e.to_string());
+    }
+
+    let page = ctx
+        .cache()
+        .vector_sessions
+        .create_session(hits, ctx.uuid_gen().as_ref());
+    serde_json::to_value(page).map_err(|e| e.to_string())
 }
 
 /// Provider for the optional vector-search built-in tool.

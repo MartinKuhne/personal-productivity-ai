@@ -29,23 +29,24 @@ pub const FIELD_TOTAL_DESCRIPTION: &str = "The total number of items across all 
 pub const FIELD_HINT_DESCRIPTION: &str =
     "Displays a message when the offset exceeds total results or when no matches exist.";
 
-// --- cursor â€” canonical for cursor-paginated tools ---
+// --- cursor — canonical for cursor-paginated tools ---
+
+/// Standard cursor-based pagination description paragraph (TOOL-028).
+#[allow(dead_code)]
+pub const CURSOR_PAGINATION_CANONICAL_DESCRIPTION: &str = "This tool uses cursor-based pagination. The first call returns the initial results and an opaque `cursor` token. Pass the `cursor` back unchanged to retrieve subsequent pages. When all results have been returned, the response includes a `hint` field and no `cursor`.";
 
 /// `cursor` field description. Used on both the input and output `cursor` fields of
-/// `search_email` and `web_fetch` because the LLM passes back whatever the tool returned.
+/// cursor-paginated tools because the LLM passes back whatever the tool returned.
 pub const FIELD_CURSOR_DESCRIPTION: &str = "Pass this pagination token back unchanged to get the next page. The tool generates this token on the first call.";
 
-/// Description for `search_email`. Replaces the offset/limit canonical paragraph
-/// because the cursor flow is fundamentally different. The full tool description is
-/// this paragraph plus a per-family domain sentence.
-pub const SEARCH_EMAIL_CANONICAL_DESCRIPTION: &str = "Search emails by keyword, folder, date range, sender, recipient, or status. You must provide at least one filter. The tool returns up to 100 matching emails and a cursor token for pagination.";
+/// Description for `search_email` (TOOL-026a).
+pub const SEARCH_EMAIL_CANONICAL_DESCRIPTION: &str = "Search emails by keyword, folder, date range, sender, recipient, or status. You must provide at least one filter. Returns up to 32 matching emails per page. Pass the `cursor` back unchanged to retrieve subsequent pages. When all results have been returned, the response includes a `hint` field and no `cursor`.";
 
-/// Description for `web_fetch` cursor-based pagination. The tool returns up to 64
-/// lines of Markdown content and a cursor token for pagination.
-pub const WEB_FETCH_CURSOR_DESCRIPTION: &str = "Fetch a URL and convert the content to Markdown. Returns up to 64 lines and a cursor token for pagination. Use the cursor to fetch the next page. Use force_refetch=true to bypass.";
+/// Description for `web_fetch` cursor-based pagination (TOOL-026b).
+pub const WEB_FETCH_CURSOR_DESCRIPTION: &str = "Fetch a URL and convert the content to Markdown. Returns up to 64 lines per page. Pass the `cursor` back unchanged to retrieve subsequent pages. Use force_refetch=true to bypass.";
 
-/// Hint string emitted on the final page of a `web_fetch` cursor pagination.
-pub const WEB_FETCH_FINAL_PAGE_HINT: &str = "Final page.";
+/// Hint string emitted on the final page of a cursor pagination (TOOL-025).
+pub const FINAL_PAGE_HINT: &str = "Final page.";
 
 // --- filesystem (fs) ---
 
@@ -55,17 +56,14 @@ pub const PATCH_NOTE_DESCRIPTION: &str = "Patch a markdown-formatted note by rep
 
 // --- search_notes ---
 
-pub const SEARCH_NOTES_DESCRIPTION: &str = "Search markdown-formatted notes for text. The tool returns up to 200 matching lines. If the tool truncates results, refine your query or use a sub-agent.";
+pub const SEARCH_NOTES_DESCRIPTION: &str = "Search markdown-formatted notes for text. Returns up to 64 matching lines per page. Pass the `cursor` back unchanged to retrieve subsequent pages. When all results have been returned, the response includes a `hint` field and no `cursor`.";
 
 pub const FIELD_SEARCH_NOTES_INPUT_QUERY: &str = "Specify the search term.";
 
-pub const FIELD_SEARCH_NOTES_RESPONSE_MATCHES: &str = "Contains matching lines up to 200 results. Returns `\"No matches found.\"` when no matches exist.";
+pub const FIELD_SEARCH_NOTES_RESPONSE_MATCHES: &str = "Contains matching lines for the requested page slice. Returns `\"No matches found.\"` when no matches exist.";
 
 pub const FIELD_SEARCH_NOTES_RESPONSE_TOTAL: &str =
     "Total number of matching lines found across all libraries.";
-
-pub const FIELD_SEARCH_NOTES_RESPONSE_TRUNCATED: &str =
-    "Set to `true` when total matches exceed 200 lines.";
 
 // --- read_tags ---
 
@@ -74,7 +72,7 @@ pub const READ_TAGS_DESCRIPTION: &str =
 
 // --- list_notes_by_tag ---
 
-pub const LIST_NOTES_BY_TAG_DESCRIPTION: &str = "Return a paginated list of markdown-formatted notes that contain a tag in their front-matter. Default parameters: `offset=0`, `limit=100`.";
+pub const LIST_NOTES_BY_TAG_DESCRIPTION: &str = "Return a cursor-paginated list of markdown-formatted notes that contain a tag in their front-matter. Returns up to 64 file names per page. Pass the `cursor` back unchanged to retrieve subsequent pages. When all results have been returned, the response includes a `hint` field and no `cursor`.";
 
 pub const FIELD_LIST_NOTES_BY_TAG_RESPONSE_FILES: &str =
     "JSON array of virtual file paths for the requested page slice.";
@@ -131,7 +129,7 @@ pub const FIELD_WEB_FETCH_RESPONSE_FROM_CACHE: &str =
 
 // --- web_search ---
 
-pub const WEB_SEARCH_DESCRIPTION: &str = "Search the web for information using a query string. Use for ambiguous or open-ended questions, evaluating broad result sets, crawling multiple pages, or when you need to try different search strategies to find what you're looking for.";
+pub const WEB_SEARCH_DESCRIPTION: &str = "Search the web for information using a query string. Returns up to 32 results per page. Pass the `cursor` back unchanged to retrieve subsequent pages. When all results have been returned, the response includes a `hint` field and no `cursor`.";
 
 pub const FIELD_WEB_SEARCH_INPUT_QUERY: &str = "Specify the search term.";
 
@@ -167,9 +165,9 @@ pub const FIELD_SEARCH_EMAIL_INPUT_IS_FLAGGED: &str =
 
 // --- caldav (calendar) ---
 
-pub const SEARCH_CALENDAR_DESCRIPTION: &str = "Search calendar items by keyword.";
+pub const SEARCH_CALENDAR_DESCRIPTION: &str = "Search calendar items by keyword. Returns up to 32 results per page. Pass the `cursor` back unchanged to retrieve subsequent pages. When all results have been returned, the response includes a `hint` field and no `cursor`.";
 
-pub const GET_CALENDAR_DESCRIPTION: &str = "Get calendar items by date range.";
+pub const GET_CALENDAR_DESCRIPTION: &str = "Get calendar items by date range. Returns up to 32 results per page. Pass the `cursor` back unchanged to retrieve subsequent pages. When all results have been returned, the response includes a `hint` field and no `cursor`.";
 
 pub const GET_CALENDAR_ITEM_DESCRIPTION: &str = "Get a calendar item by its full href path. Provide the exact href value returned by search or get tools instead of a UUID.";
 
@@ -233,7 +231,7 @@ pub const FIELD_ADDRESS_PO_BOX_DESC: &str = "P.O. box number.";
 
 pub const FIELD_ADDRESS_EXT_DESC: &str = "Extended address (e.g. apartment or suite).";
 
-pub const SEARCH_CONTACT_DESCRIPTION: &str = "Search contacts by keyword.";
+pub const SEARCH_CONTACT_DESCRIPTION: &str = "Search contacts by keyword. Returns up to 32 results per page. Pass the `cursor` back unchanged to retrieve subsequent pages. When all results have been returned, the response includes a `hint` field and no `cursor`.";
 
 pub const ADD_CONTACT_DESCRIPTION: &str = "Add a new contact to the configured CardDAV addressbook. All fields are optional — only include fields you know. The created resource is returned with its href, Location, and ETag.";
 
