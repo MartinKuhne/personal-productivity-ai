@@ -106,7 +106,7 @@ impl<T: Clone + Send + Sync + 'static> CursorSessionManager<T> {
             };
         }
 
-        let cursor_id = uuid_gen.new_v4().to_string();
+        let cursor_id = format!("c_{}", &uuid_gen.new_v4().simple().to_string()[..8]);
         let page_items = items[..self.page_size].to_vec();
         let dataset = PagedDataset {
             items,

@@ -261,10 +261,9 @@ pub const SEARCH_EMAIL_PAGE_SIZE: usize = 25;
 /// walk.
 pub const SEARCH_EMAIL_FINAL_PAGE_HINT: &str = "Final page.";
 
-/// Generate a new opaque cursor string (UUID v4). The cursor is the
-/// cache key in the shared `ToolCache`; the LLM treats it as opaque.
+/// Generate a new compact, token-friendly cursor string (e.g. `c_a8f91042`).
 pub fn new_search_email_cursor(uuid_gen: &dyn crate::utils::uuid::UuidGenerator) -> String {
-    uuid_gen.new_v4().to_string()
+    format!("c_{}", &uuid_gen.new_v4().simple().to_string()[..8])
 }
 
 struct FullSearchResult {

@@ -60,10 +60,7 @@ fn multi_page_traversal() {
     let p1 = mgr.create_session(items, &uuid_gen);
     assert_eq!(p1.items, vec![1, 2, 3]);
     assert_eq!(p1.total, 7);
-    assert_eq!(
-        p1.cursor.as_deref(),
-        Some("00000000-0000-0000-0000-000000000000")
-    );
+    assert_eq!(p1.cursor.as_deref(), Some("c_00000000"));
     assert!(p1.hint.is_none());
     assert_eq!(mgr.len(), 1);
 
@@ -73,10 +70,7 @@ fn multi_page_traversal() {
     let p2 = mgr.next_page(&cursor).unwrap();
     assert_eq!(p2.items, vec![4, 5, 6]);
     assert_eq!(p2.total, 7);
-    assert_eq!(
-        p2.cursor.as_deref(),
-        Some("00000000-0000-0000-0000-000000000000")
-    );
+    assert_eq!(p2.cursor.as_deref(), Some("c_00000000"));
     assert!(p2.hint.is_none());
 
     // Page 3 (Final)
