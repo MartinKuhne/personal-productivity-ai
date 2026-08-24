@@ -772,3 +772,86 @@ fn test_from_app_config_drops_user_and_content_fields() {
     let agent_cfg = cfg.to_agent_config();
     let _ = agent_cfg;
 }
+
+#[test]
+fn test_selected_chat_model_is_not_persisted() {
+    let mut config = AppConfig::default();
+    config.selected_chat_model = Some("test-model".to_string());
+
+    // Serialization should omit selected_chat_model
+    let serialized = serde_norway::to_string(&config).expect("serialization should succeed");
+    assert!(
+        !serialized.contains("selected_chat_model"),
+        "selected_chat_model must not be present in serialized config: {serialized}"
+    );
+
+    // Deserialization should ignore selected_chat_model if present in YAML
+    let yaml_with_selected = "selected_chat_model: test-model\nmax_tokens: 4096\n";
+    let deserialized: AppConfig =
+        serde_norway::from_str(yaml_with_selected).expect("deserialization should succeed");
+    assert_eq!(
+        deserialized.selected_chat_model, None,
+        "selected_chat_model must not be loaded from configuration file"
+    );
+}
+
+#[test]
+fn test_chat_model_switching_runtime_lifecycle() {
+    let mut config = AppConfig::default();
+    config.models.insert(
+        "cheap".to_string(),
+        LlmConfig {
+            model: "cheap-model".to_string(),
+            api_url: "http://a".to_string(),
+            api_key: "valid-key".to_string(),
+            cost: Some(1),
+            use_case: vec!["chat".to_string()],
+        },
+    );
+    config.models.insert(
+        "expensive".to_string(),
+        LlmConfig {
+            model: "expensive-model".to_string(),
+            api_url: "http://a".to_string(),
+            api_key: "valid-key".to_string(),
+            cost: Some(100),
+            use_case: vec!["chat".to_string()],
+        },
+    );
+
+    // Initial state: default picks lowest cost (cheap)
+    assert_eq!(config.current_chat_model_key().as_deref(), Some("cheap"));
+    assert_eq!(config.select_chat_model().unwrap().model, "cheap-model");
+    let agent_cfg = config.to_agent_config();
+    assert_eq!(agent_cfg.selected_chat_model(), None);
+    assert_eq!(agent_cfg.select_chat_model().unwrap().model, "cheap-model");
+
+    // Switch to expensive model at runtime
+    config.selected_chat_model = Some("expensive".to_string());
+    assert_eq!(
+        config.current_chat_model_key().as_deref(),
+        Some("expensive")
+    );
+    assert_eq!(config.select_chat_model().unwrap().model, "expensive-model");
+    let agent_cfg = config.to_agent_config();
+    assert_eq!(agent_cfg.selected_chat_model(), Some("expensive"));
+    assert_eq!(
+        agent_cfg.select_chat_model().unwrap().model,
+        "expensive-model"
+    );
+
+    // Switch back to cheap model at runtime
+    config.selected_chat_model = Some("cheap".to_string());
+    assert_eq!(config.current_chat_model_key().as_deref(), Some("cheap"));
+    assert_eq!(config.select_chat_model().unwrap().model, "cheap-model");
+    let agent_cfg = config.to_agent_config();
+    assert_eq!(agent_cfg.selected_chat_model(), Some("cheap"));
+    assert_eq!(agent_cfg.select_chat_model().unwrap().model, "cheap-model");
+
+    // Reset selection to None (auto selection)
+    config.selected_chat_model = None;
+    assert_eq!(config.current_chat_model_key().as_deref(), Some("cheap"));
+    let agent_cfg = config.to_agent_config();
+    assert_eq!(agent_cfg.selected_chat_model(), None);
+    assert_eq!(agent_cfg.select_chat_model().unwrap().model, "cheap-model");
+}

@@ -21,6 +21,11 @@ name: Rust Bench (informational)
 on:
   workflow_dispatch:
 
+env:
+  CARGO_TERM_COLOR: always
+  # Override repo-level .cargo/config.toml `target-cpu=native` for portable CI VM execution
+  RUSTFLAGS: ""
+
 # Same permission scope as the gate workflow — only read
 # contents + write actions (for artifact upload).
 permissions:
