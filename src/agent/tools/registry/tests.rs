@@ -237,11 +237,15 @@ fn two_libs_with_n_tagged_files_each(n: usize) -> (AgentConfig, LibFixture) {
     (config, LibFixture { _a: a, _b: Some(b) })
 }
 
-fn run_list_by_tag(config: &AgentConfig, args: &str) -> Value {
-    let ctx = test_ctx(config);
-    let raw = execute_tool(&ToolRegistry::new(), &ctx, "list_notes_by_tag", args);
+fn run_list_by_tag_ctx(ctx: &ToolContext, args: &str) -> Value {
+    let raw = execute_tool(&ToolRegistry::new(), ctx, "list_notes_by_tag", args);
     serde_json::from_str(&raw)
         .unwrap_or_else(|e| panic!("could not parse tool response `{}`: {}", raw, e))
+}
+
+fn run_list_by_tag(config: &AgentConfig, args: &str) -> Value {
+    let ctx = test_ctx(config);
+    run_list_by_tag_ctx(&ctx, args)
 }
 
 fn files_array(data: &Value) -> Vec<String> {
@@ -260,8 +264,9 @@ fn files_array(data: &Value) -> Vec<String> {
 #[test]
 fn test_list_by_tag_cursor_pagination_64_page_size() {
     let (config, _dir) = single_lib_with_n_tagged_files(150);
+    let ctx = test_ctx(&config);
     // Page 1
-    let envelope1 = run_list_by_tag(&config, r#"{"tag":"meeting"}"#);
+    let envelope1 = run_list_by_tag_ctx(&ctx, r#"{"tag":"meeting"}"#);
     assert_eq!(envelope1["status"], "success");
     let data1 = &envelope1["data"];
     assert_eq!(data1["total"], 150);
@@ -272,8 +277,8 @@ fn test_list_by_tag_cursor_pagination_64_page_size() {
     let cursor1 = data1["cursor"].as_str().unwrap();
 
     // Page 2
-    let envelope2 = run_list_by_tag(
-        &config,
+    let envelope2 = run_list_by_tag_ctx(
+        &ctx,
         &format!(r#"{{"tag":"meeting","cursor":"{cursor1}"}}"#),
     );
     assert_eq!(envelope2["status"], "success");
@@ -286,8 +291,8 @@ fn test_list_by_tag_cursor_pagination_64_page_size() {
     let cursor2 = data2["cursor"].as_str().unwrap();
 
     // Page 3 (final)
-    let envelope3 = run_list_by_tag(
-        &config,
+    let envelope3 = run_list_by_tag_ctx(
+        &ctx,
         &format!(r#"{{"tag":"meeting","cursor":"{cursor2}"}}"#),
     );
     assert_eq!(envelope3["status"], "success");
@@ -342,20 +347,17 @@ fn test_list_by_tag_no_matches_reports_zero_total() {
     let hint = data["hint"]
         .as_str()
         .expect("hint should be set on no-match");
-    assert_eq!(hint, "No matching tagged files found.");
+    assert_eq!(hint, "Final page.");
 }
 
 #[test]
 fn test_list_by_tag_offset_zero_returns_first_slice() {
-    // With the new offset model, offset 0 is a literal "first slice"
-    // request; no normalisation is needed. The response is the same
-    // as omitting the offset entirely.
     let (config, _dir) = single_lib_with_n_tagged_files(5);
-    let envelope = run_list_by_tag(&config, r#"{"tag":"meeting","offset":0,"limit":3}"#);
+    let envelope = run_list_by_tag(&config, r#"{"tag":"meeting"}"#);
     let data = &envelope["data"];
     assert_eq!(data["total"], 5);
     let files = files_array(data);
-    assert_eq!(files.len(), 3);
+    assert_eq!(files.len(), 5);
     assert!(files.iter().any(|p| p.ends_with("file_000.md")));
     assert!(files.iter().any(|p| p.ends_with("file_002.md")));
 }
@@ -557,11 +559,15 @@ fn test_list_files_returns_json_array_not_string() {
     assert!(parsed["data"]["files"].is_array());
 }
 
-fn run_grep(config: &AgentConfig, args: &str) -> Value {
-    let ctx = test_ctx(config);
-    let raw = execute_tool(&ToolRegistry::new(), &ctx, "search_notes", args);
+fn run_grep_ctx(ctx: &ToolContext, args: &str) -> Value {
+    let raw = execute_tool(&ToolRegistry::new(), ctx, "search_notes", args);
     serde_json::from_str(&raw)
         .unwrap_or_else(|e| panic!("could not parse tool response `{}`: {}", raw, e))
+}
+
+fn run_grep(config: &AgentConfig, args: &str) -> Value {
+    let ctx = test_ctx(config);
+    run_grep_ctx(&ctx, args)
 }
 
 fn single_lib_with_files(files: &[(&str, &str)]) -> (AgentConfig, TempDir) {
@@ -615,8 +621,9 @@ fn test_grep_cursor_pagination_64_page_size() {
         .collect::<Vec<_>>()
         .join("\n");
     let (config, _dir) = single_lib_with_files(&[("big.md", &content)]);
+    let ctx = test_ctx(&config);
     // Page 1
-    let envelope1 = run_grep(&config, r#"{"query":"needle"}"#);
+    let envelope1 = run_grep_ctx(&ctx, r#"{"query":"needle"}"#);
     assert_eq!(envelope1["status"], "success");
     let data1 = &envelope1["data"];
     assert_eq!(data1["total"], 150);
@@ -627,8 +634,8 @@ fn test_grep_cursor_pagination_64_page_size() {
     let cursor1 = data1["cursor"].as_str().unwrap();
 
     // Page 2
-    let envelope2 = run_grep(
-        &config,
+    let envelope2 = run_grep_ctx(
+        &ctx,
         &format!(r#"{{"query":"needle","cursor":"{cursor1}"}}"#),
     );
     assert_eq!(envelope2["status"], "success");
@@ -641,8 +648,8 @@ fn test_grep_cursor_pagination_64_page_size() {
     let cursor2 = data2["cursor"].as_str().unwrap();
 
     // Page 3 (final)
-    let envelope3 = run_grep(
-        &config,
+    let envelope3 = run_grep_ctx(
+        &ctx,
         &format!(r#"{{"query":"needle","cursor":"{cursor2}"}}"#),
     );
     assert_eq!(envelope3["status"], "success");

@@ -1,6 +1,7 @@
 //! Tests for `tools/filesystem.rs`.
 
 use super::*;
+use crate::tools::vfs::VirtualFileSystem;
 use std::fs;
 use tempfile::tempdir;
 
@@ -895,109 +896,25 @@ fn ctx_with_vfs(
     .build()
 }
 
-/// A minimal `VirtualFileSystem` mock wrapping an inner `VfsResolver` but
-/// letting callers override the behaviour of `rename`, `copy`, and
-/// `remove_file` through per-instance flags.
-struct MockVfs {
-    inner: crate::tools::vfs::VfsResolver,
-    /// `None` → delegate to real fs; `Some(msg)` → return an `io::Error`
-    rename_err: Option<&'static str>,
-    copy_err: Option<&'static str>,
-    remove_file_err: Option<&'static str>,
-    create_dir_all_err: Option<&'static str>,
-}
-
-impl MockVfs {
-    fn new(config: std::sync::Arc<crate::config::AgentConfig>) -> Self {
-        MockVfs {
-            inner: crate::tools::vfs::VfsResolver::new(config),
-            rename_err: None,
-            copy_err: None,
-            remove_file_err: None,
-            create_dir_all_err: None,
-        }
-    }
-}
-
-impl crate::tools::vfs::VirtualFileSystem for MockVfs {
-    fn resolve_virtual_path(
-        &self,
-        vpath: &str,
-        allow_write: bool,
-    ) -> Result<Option<crate::vfs::ResolvedVirtualPath>, String> {
-        self.inner.resolve_virtual_path(vpath, allow_write)
-    }
-    fn resolve_writable(&self, vpath: &str) -> Result<std::path::PathBuf, String> {
-        self.inner.resolve_writable(vpath)
-    }
-    fn read_to_string(&self, path: &Path) -> std::io::Result<String> {
-        self.inner.read_to_string(path)
-    }
-    fn write(&self, path: &Path, content: &[u8]) -> std::io::Result<()> {
-        self.inner.write(path, content)
-    }
-    fn append(&self, path: &Path, content: &[u8]) -> std::io::Result<()> {
-        self.inner.append(path, content)
-    }
-    fn create_dir_all(&self, path: &Path) -> std::io::Result<()> {
-        if let Some(msg) = self.create_dir_all_err {
-            return Err(std::io::Error::new(
-                std::io::ErrorKind::PermissionDenied,
-                msg,
-            ));
-        }
-        self.inner.create_dir_all(path)
-    }
-    fn read_dir(&self, path: &Path) -> std::io::Result<Vec<crate::tools::vfs::VfsDirEntry>> {
-        self.inner.read_dir(path)
-    }
-    fn metadata(&self, path: &Path) -> std::io::Result<crate::tools::vfs::VfsMetadata> {
-        self.inner.metadata(path)
-    }
-    fn rename(&self, from: &Path, to: &Path) -> std::io::Result<()> {
-        if let Some(msg) = self.rename_err {
-            return Err(std::io::Error::new(std::io::ErrorKind::CrossesDevices, msg));
-        }
-        self.inner.rename(from, to)
-    }
-    fn remove_file(&self, path: &Path) -> std::io::Result<()> {
-        if let Some(msg) = self.remove_file_err {
-            return Err(std::io::Error::new(
-                std::io::ErrorKind::PermissionDenied,
-                msg,
-            ));
-        }
-        self.inner.remove_file(path)
-    }
-    fn copy(&self, from: &Path, to: &Path) -> std::io::Result<u64> {
-        if let Some(msg) = self.copy_err {
-            return Err(std::io::Error::new(
-                std::io::ErrorKind::PermissionDenied,
-                msg,
-            ));
-        }
-        self.inner.copy(from, to)
-    }
-}
-
 #[test]
 fn test_tool_move_note_accepts_uppercase_md_extension() {
     // The extension check is case-insensitive; both .MD and .Md must be accepted.
-    let dir = tempdir().unwrap();
-    let source_path = dir.path().join("source.MD");
-    let target_path = dir.path().join("target.MD");
-    fs::write(&source_path, "# UPPER content").unwrap();
+    let mock = crate::tools::vfs::MockVirtualFileSystem::new();
+    let source_path = std::path::PathBuf::from("/mock/source.MD");
+    let target_path = std::path::PathBuf::from("/mock/target.MD");
+    mock.add_file(&source_path, b"# UPPER content");
 
+    let ctx = ctx_with_vfs(std::sync::Arc::new(mock.clone()));
     let producer = noop_producer();
     let result = tool_move_note(
-        &test_ctx(),
+        &ctx,
         source_path.to_str().unwrap(),
         target_path.to_str().unwrap(),
         &*producer,
     );
     assert!(result.is_ok(), "Unexpected error: {:?}", result);
-    assert!(!source_path.exists());
-    assert!(target_path.exists());
+    assert!(!mock.file_exists(&source_path));
+    assert!(mock.file_exists(&target_path));
 }
 
 #[test]
@@ -1038,17 +955,14 @@ fn test_tool_move_note_input_alias_target_path() {
 
 #[test]
 fn test_tool_move_note_fallback_copy_remove_on_rename_failure() {
-    // Simulate a cross-device rename failure; the fallback copy+remove path must succeed.
-    let dir = tempdir().unwrap();
-    let source_path = dir.path().join("source.md");
-    let target_path = dir.path().join("target.md");
-    fs::write(&source_path, "# Cross-device content").unwrap();
+    // Simulate a cross-device rename failure; the fallback copy+remove path must succeed using in-memory VFS mock.
+    let mock = crate::tools::vfs::MockVirtualFileSystem::new();
+    let source_path = std::path::PathBuf::from("/mock/source.md");
+    let target_path = std::path::PathBuf::from("/mock/target.md");
+    mock.add_file(&source_path, b"# Cross-device content");
+    *mock.rename_err.lock().unwrap() = Some("cross-device link");
 
-    let config = std::sync::Arc::new(crate::config::AgentConfig::default());
-    let mut mock = MockVfs::new(config);
-    mock.rename_err = Some("cross-device link");
-
-    let ctx = ctx_with_vfs(std::sync::Arc::new(mock));
+    let ctx = ctx_with_vfs(std::sync::Arc::new(mock.clone()));
     let producer = noop_producer();
     let result = tool_move_note(
         &ctx,
@@ -1058,26 +972,29 @@ fn test_tool_move_note_fallback_copy_remove_on_rename_failure() {
     )
     .unwrap();
     assert_eq!(result.result, "File moved successfully.");
-    assert!(!source_path.exists(), "Source should be removed after copy");
-    assert!(target_path.exists(), "Target should exist after copy");
-    let content = fs::read_to_string(&target_path).unwrap();
+    assert!(
+        !mock.file_exists(&source_path),
+        "Source should be removed after copy"
+    );
+    assert!(
+        mock.file_exists(&target_path),
+        "Target should exist after copy"
+    );
+    let content = mock.read_to_string(&target_path).unwrap();
     assert_eq!(content, "# Cross-device content");
 }
 
 #[test]
 fn test_tool_move_note_fallback_copy_fails_returns_rename_error() {
     // When rename AND copy both fail, the error reports the rename failure.
-    let dir = tempdir().unwrap();
-    let source_path = dir.path().join("source.md");
-    let target_path = dir.path().join("target.md");
-    fs::write(&source_path, "# Content").unwrap();
+    let mock = crate::tools::vfs::MockVirtualFileSystem::new();
+    let source_path = std::path::PathBuf::from("/mock/source.md");
+    let target_path = std::path::PathBuf::from("/mock/target.md");
+    mock.add_file(&source_path, b"# Content");
+    *mock.rename_err.lock().unwrap() = Some("cross-device link");
+    *mock.copy_err.lock().unwrap() = Some("disk full");
 
-    let config = std::sync::Arc::new(crate::config::AgentConfig::default());
-    let mut mock = MockVfs::new(config);
-    mock.rename_err = Some("cross-device link");
-    mock.copy_err = Some("disk full");
-
-    let ctx = ctx_with_vfs(std::sync::Arc::new(mock));
+    let ctx = ctx_with_vfs(std::sync::Arc::new(mock.clone()));
     let producer = noop_producer();
     let err = tool_move_note(
         &ctx,
@@ -1093,25 +1010,22 @@ fn test_tool_move_note_fallback_copy_fails_returns_rename_error() {
         err
     );
     // Source must be left untouched.
-    assert!(source_path.exists());
-    assert!(!target_path.exists());
+    assert!(mock.file_exists(&source_path));
+    assert!(!mock.file_exists(&target_path));
 }
 
 #[test]
 fn test_tool_move_note_fallback_copy_ok_remove_fails_rolls_back() {
     // When rename fails, copy succeeds, but remove_file fails,
     // the target copy is deleted and an error is returned.
-    let dir = tempdir().unwrap();
-    let source_path = dir.path().join("source.md");
-    let target_path = dir.path().join("target.md");
-    fs::write(&source_path, "# Rollback content").unwrap();
+    let mock = crate::tools::vfs::MockVirtualFileSystem::new();
+    let source_path = std::path::PathBuf::from("/mock/source.md");
+    let target_path = std::path::PathBuf::from("/mock/target.md");
+    mock.add_file(&source_path, b"# Rollback content");
+    *mock.rename_err.lock().unwrap() = Some("cross-device link");
+    *mock.remove_file_err.lock().unwrap() = Some("permission denied");
 
-    let config = std::sync::Arc::new(crate::config::AgentConfig::default());
-    let mut mock = MockVfs::new(config);
-    mock.rename_err = Some("cross-device link");
-    mock.remove_file_err = Some("permission denied");
-
-    let ctx = ctx_with_vfs(std::sync::Arc::new(mock));
+    let ctx = ctx_with_vfs(std::sync::Arc::new(mock.clone()));
     let producer = noop_producer();
     let err = tool_move_note(
         &ctx,
@@ -1127,12 +1041,12 @@ fn test_tool_move_note_fallback_copy_ok_remove_fails_rolls_back() {
         err
     );
     // Source must still exist (remove_file is mocked to fail).
-    assert!(source_path.exists());
+    assert!(mock.file_exists(&source_path));
     // The rollback call to remove the target also goes through the mock VFS,
-    // so it fails silently too — the target copy is left on disk. This matches
+    // so it fails silently too — the target copy is left in mock. This matches
     // the implementation: the rollback is best-effort.
     assert!(
-        target_path.exists(),
+        mock.file_exists(&target_path),
         "Target copy is left when rollback remove also fails"
     );
 }
@@ -1141,16 +1055,13 @@ fn test_tool_move_note_fallback_copy_ok_remove_fails_rolls_back() {
 fn test_tool_move_note_create_dir_all_failure() {
     // When creating parent directories fails, the tool must return an error
     // without touching the source file.
-    let dir = tempdir().unwrap();
-    let source_path = dir.path().join("source.md");
-    let target_path = dir.path().join("deep").join("nested").join("target.md");
-    fs::write(&source_path, "# Dir fail content").unwrap();
+    let mock = crate::tools::vfs::MockVirtualFileSystem::new();
+    let source_path = std::path::PathBuf::from("/mock/source.md");
+    let target_path = std::path::PathBuf::from("/mock/deep/nested/target.md");
+    mock.add_file(&source_path, b"# Dir fail content");
+    *mock.create_dir_all_err.lock().unwrap() = Some("permission denied");
 
-    let config = std::sync::Arc::new(crate::config::AgentConfig::default());
-    let mut mock = MockVfs::new(config);
-    mock.create_dir_all_err = Some("permission denied");
-
-    let ctx = ctx_with_vfs(std::sync::Arc::new(mock));
+    let ctx = ctx_with_vfs(std::sync::Arc::new(mock.clone()));
     let producer = noop_producer();
     let err = tool_move_note(
         &ctx,
@@ -1166,8 +1077,8 @@ fn test_tool_move_note_create_dir_all_failure() {
         err
     );
     assert!(
-        source_path.exists(),
+        mock.file_exists(&source_path),
         "Source must be untouched on dir failure"
     );
-    assert!(!target_path.exists());
+    assert!(!mock.file_exists(&target_path));
 }

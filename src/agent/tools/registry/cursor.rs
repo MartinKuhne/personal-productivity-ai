@@ -2,7 +2,7 @@
 //! Unit tests live in the sibling `cursor_tests.rs` sidecar.
 
 use crate::utils::uuid::UuidGenerator;
-use mini_moka::sync::Cache;
+use mini_moka::sync::{Cache, ConcurrentCacheExt};
 use std::time::Duration;
 
 /// Default TTL for cursor sessions (30 minutes per TOOL-030).
@@ -114,6 +114,7 @@ impl<T: Clone + Send + Sync + 'static> CursorSessionManager<T> {
             total,
         };
         self.sessions.insert(cursor_id.clone(), dataset);
+        self.sessions.sync();
 
         CursorPage {
             items: page_items,
@@ -137,6 +138,7 @@ impl<T: Clone + Send + Sync + 'static> CursorSessionManager<T> {
         let total = entry.total;
         if offset >= total {
             self.sessions.invalidate(&cursor_key);
+            self.sessions.sync();
             return Err(self.expired_error.to_string());
         }
 
@@ -146,6 +148,7 @@ impl<T: Clone + Send + Sync + 'static> CursorSessionManager<T> {
         if end >= total {
             // Final page reached: invalidate the session
             self.sessions.invalidate(&cursor_key);
+            self.sessions.sync();
             Ok(CursorPage {
                 items: page_items,
                 cursor: None,
@@ -160,6 +163,7 @@ impl<T: Clone + Send + Sync + 'static> CursorSessionManager<T> {
                 total,
             };
             self.sessions.insert(cursor_key, updated);
+            self.sessions.sync();
             Ok(CursorPage {
                 items: page_items,
                 cursor: Some(cursor.to_string()),
@@ -173,10 +177,12 @@ impl<T: Clone + Send + Sync + 'static> CursorSessionManager<T> {
     pub fn invalidate(&self, cursor: &str) {
         let cursor_key = cursor.to_string();
         self.sessions.invalidate(&cursor_key);
+        self.sessions.sync();
     }
 
     /// Current number of active sessions.
     pub fn len(&self) -> u64 {
+        self.sessions.sync();
         self.sessions.entry_count()
     }
 
