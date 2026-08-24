@@ -26,19 +26,12 @@ impl VectorSearchService for MockVectorSearchService {
 }
 
 #[test]
-fn input_limit_is_bounded_by_tool() {
-    assert_eq!(default_limit(), 5);
-    let parsed: VectorSearchInput = serde_json::from_str(r#"{"query":"x"}"#).unwrap();
-    assert_eq!(parsed.limit, 5);
-    assert_eq!(parsed.max_distance, None);
-}
-
-#[test]
 fn input_deserializes_explicit_max_distance() {
     let parsed: VectorSearchInput =
         serde_json::from_str(r#"{"query":"bank statement","max_distance":0.85}"#).unwrap();
     assert_eq!(parsed.query, "bank statement");
     assert_eq!(parsed.max_distance, Some(0.85));
+    assert_eq!(parsed.cursor, None);
 }
 
 #[test]
@@ -52,7 +45,7 @@ fn execute_vector_search_forwards_max_distance_to_service() {
     let result = execute_vector_search(
         &tool,
         &ctx,
-        r#"{"query":"credit union","limit":10,"max_distance":0.75}"#,
+        r#"{"query":"credit union","max_distance":0.75}"#,
     );
 
     assert!(result.is_ok());
@@ -60,7 +53,6 @@ fn execute_vector_search_forwards_max_distance_to_service() {
         mock.last_query.lock().unwrap().as_deref(),
         Some("credit union")
     );
-    assert_eq!(*mock.last_limit.lock().unwrap(), Some(10));
     assert_eq!(*mock.last_max_distance.lock().unwrap(), Some(Some(0.75)));
 }
 
@@ -76,4 +68,41 @@ fn execute_vector_search_forwards_none_max_distance_when_omitted() {
 
     assert!(result.is_ok());
     assert_eq!(*mock.last_max_distance.lock().unwrap(), Some(None));
+}
+
+#[test]
+fn execute_vector_search_cursor_session_pagination() {
+    let mock = Arc::new(MockVectorSearchService::default());
+    let cache = Arc::new(crate::tools::registry::cache::ToolCache::new());
+    let mut ctx = ToolContext::default();
+    ctx.extensions
+        .insert(Arc::new(VectorSearchExt(mock.clone())));
+    ctx.extensions
+        .insert(Arc::new(crate::tools::context::ToolCacheExt(cache.clone())));
+
+    let uuid_gen = crate::utils::uuid::FixedUuidGenerator::new(uuid::Uuid::nil());
+    let hits = vec![
+        VectorSearchHit {
+            path: "note1.md".to_string(),
+            distance: 0.1,
+            offset: 0,
+            limit: 5,
+            content: "chunk 1".to_string(),
+        },
+        VectorSearchHit {
+            path: "note2.md".to_string(),
+            distance: 0.2,
+            offset: 0,
+            limit: 5,
+            content: "chunk 2".to_string(),
+        },
+    ];
+
+    let page = cache.vector_sessions.create_session(hits, &uuid_gen);
+    assert_eq!(page.total, 2);
+
+    let tool = VectorSearchTool;
+    // Query with unknown cursor returns error
+    let err_res = execute_vector_search(&tool, &ctx, r#"{"cursor":"unknown_cursor"}"#);
+    assert!(err_res.is_err());
 }

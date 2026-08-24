@@ -258,141 +258,68 @@ fn files_array(data: &Value) -> Vec<String> {
 }
 
 #[test]
-fn test_list_by_tag_default_limit_is_100() {
-    // Create 150 files so the default limit of 100 actually clips
-    // the response.
+fn test_list_by_tag_cursor_pagination_64_page_size() {
     let (config, _dir) = single_lib_with_n_tagged_files(150);
-    let envelope = run_list_by_tag(&config, r#"{"tag":"meeting"}"#);
-    assert_eq!(envelope["status"], "success");
-    let data = &envelope["data"];
-    assert_eq!(data["total"], 150);
-    let files = files_array(data);
-    assert_eq!(files.len(), 100);
-    assert!(files.iter().any(|p| p.ends_with("file_000.md")));
-    assert!(files.iter().any(|p| p.ends_with("file_099.md")));
-    assert!(data.get("hint").is_none() || data["hint"].is_null());
+    // Page 1
+    let envelope1 = run_list_by_tag(&config, r#"{"tag":"meeting"}"#);
+    assert_eq!(envelope1["status"], "success");
+    let data1 = &envelope1["data"];
+    assert_eq!(data1["total"], 150);
+    let files1 = files_array(data1);
+    assert_eq!(files1.len(), 64);
+    assert!(data1["cursor"].is_string());
+    assert!(data1["hint"].is_null());
+    let cursor1 = data1["cursor"].as_str().unwrap();
+
+    // Page 2
+    let envelope2 = run_list_by_tag(
+        &config,
+        &format!(r#"{{"tag":"meeting","cursor":"{cursor1}"}}"#),
+    );
+    assert_eq!(envelope2["status"], "success");
+    let data2 = &envelope2["data"];
+    assert_eq!(data2["total"], 150);
+    let files2 = files_array(data2);
+    assert_eq!(files2.len(), 64);
+    assert!(data2["cursor"].is_string());
+    assert!(data2["hint"].is_null());
+    let cursor2 = data2["cursor"].as_str().unwrap();
+
+    // Page 3 (final)
+    let envelope3 = run_list_by_tag(
+        &config,
+        &format!(r#"{{"tag":"meeting","cursor":"{cursor2}"}}"#),
+    );
+    assert_eq!(envelope3["status"], "success");
+    let data3 = &envelope3["data"];
+    assert_eq!(data3["total"], 150);
+    let files3 = files_array(data3);
+    assert_eq!(files3.len(), 22);
+    assert!(data3["cursor"].is_null());
+    assert_eq!(data3["hint"], "Final page.");
 }
 
 #[test]
-fn test_list_by_tag_paging_dispatch() {
-    // Each case: (label, n_files, offset, limit, expected_len, expected_first_idx, expected_last_idx)
-    // `expected_len == 0` means the response should be empty (past-end).
-    struct Case {
-        label: &'static str,
-        n_files: usize,
-        offset: u32,
-        limit: u32,
-        expected_len: usize,
-        expected_first_idx: Option<usize>,
-        expected_last_idx: Option<usize>,
-    }
-    let cases: &[Case] = &[
-        Case {
-            label: "first slice (50 files, offset 0, limit 20)",
-            n_files: 50,
-            offset: 0,
-            limit: 20,
-            expected_len: 20,
-            expected_first_idx: Some(0),
-            expected_last_idx: Some(19),
-        },
-        Case {
-            label: "second slice (50 files, offset 20, limit 20)",
-            n_files: 50,
-            offset: 20,
-            limit: 20,
-            expected_len: 20,
-            expected_first_idx: Some(20),
-            expected_last_idx: Some(39),
-        },
-        Case {
-            label: "last partial slice (50 files, offset 40, limit 20)",
-            n_files: 50,
-            offset: 40,
-            limit: 20,
-            expected_len: 10,
-            expected_first_idx: Some(40),
-            expected_last_idx: Some(49),
-        },
-        Case {
-            label: "offset past end (5 files, offset 999, limit 20)",
-            n_files: 5,
-            offset: 999,
-            limit: 20,
-            expected_len: 0,
-            expected_first_idx: None,
-            expected_last_idx: None,
-        },
-        Case {
-            label: "limit one (3 files, offset 1, limit 1)",
-            n_files: 3,
-            offset: 1,
-            limit: 1,
-            expected_len: 1,
-            expected_first_idx: Some(1),
-            expected_last_idx: Some(1),
-        },
-    ];
-
-    for case in cases {
-        let (config, _dir) = single_lib_with_n_tagged_files(case.n_files);
-        let envelope = run_list_by_tag(
-            &config,
-            &format!(
-                r#"{{"tag":"meeting","offset":{},"limit":{}}}"#,
-                case.offset, case.limit
-            ),
-        );
-        let data = &envelope["data"];
-        let files = files_array(data);
-        assert_eq!(
-            files.len(),
-            case.expected_len,
-            "[{}] page count mismatch (total={}, got {} files)",
-            case.label,
-            data["total"],
-            files.len()
-        );
-        if let (Some(first), Some(last)) = (case.expected_first_idx, case.expected_last_idx) {
-            assert!(
-                files
-                    .first()
-                    .is_some_and(|p| p.ends_with(&format!("file_{first:03}.md"))),
-                "[{}] first file mismatch; got {:?}",
-                case.label,
-                files.first()
-            );
-            assert!(
-                files
-                    .last()
-                    .is_some_and(|p| p.ends_with(&format!("file_{last:03}.md"))),
-                "[{}] last file mismatch; got {:?}",
-                case.label,
-                files.last()
-            );
-        }
-        if case.expected_len == 0 {
-            // Past-end case: a `hint` field with a useful message.
-            let hint = data["hint"]
-                .as_str()
-                .unwrap_or_else(|| panic!("[{}] expected hint on past-end page", case.label));
-            assert!(
-                hint.contains(&format!("offset {}", case.offset))
-                    && hint.contains(&format!("{} total", case.n_files)),
-                "[{}] hint text mismatch: {hint}",
-                case.label
-            );
-        }
-    }
+fn test_list_by_tag_single_page_has_hint_and_no_cursor() {
+    let (config, _dir) = single_lib_with_n_tagged_files(5);
+    let envelope = run_list_by_tag(&config, r#"{"tag":"meeting"}"#);
+    assert_eq!(envelope["status"], "success");
+    let data = &envelope["data"];
+    assert_eq!(data["total"], 5);
+    let files = files_array(data);
+    assert_eq!(files.len(), 5);
+    assert!(data["cursor"].is_null());
+    assert_eq!(data["hint"], "Final page.");
 }
 
 #[test]
 fn test_list_by_tag_paging_is_global_across_libraries() {
     let (config, _fixture) = two_libs_with_n_tagged_files_each(25);
-    let envelope = run_list_by_tag(&config, r#"{"tag":"meeting","offset":0,"limit":20}"#);
+    let envelope = run_list_by_tag(&config, r#"{"tag":"meeting"}"#);
     let data = &envelope["data"];
     assert_eq!(data["total"], 50);
-    assert_eq!(files_array(data).len(), 20);
+    assert_eq!(files_array(data).len(), 50);
+    assert_eq!(data["hint"], "Final page.");
 }
 
 #[test]
@@ -663,7 +590,8 @@ fn test_grep_no_matches_keeps_sentinel() {
     let data = &envelope["data"];
     assert_eq!(data["matches"], "No matches found.");
     assert_eq!(data["total"], 0);
-    assert_eq!(data["truncated"], false);
+    assert!(data["cursor"].is_null());
+    assert_eq!(data["hint"], "Final page.");
 }
 
 #[test]
@@ -673,30 +601,57 @@ fn test_grep_returns_matches_within_limit() {
     assert_eq!(envelope["status"], "success");
     let data = &envelope["data"];
     assert_eq!(data["total"], 2);
-    assert_eq!(data["truncated"], false);
+    assert!(data["cursor"].is_null());
+    assert_eq!(data["hint"], "Final page.");
     let matches = data["matches"].as_str().unwrap();
     assert!(matches.starts_with("Lib"));
     assert!(matches.contains("note.md"));
-    assert!(!matches.contains("truncated"));
 }
 
 #[test]
-fn test_grep_truncates_at_default_max_results() {
-    let content = (0..250)
+fn test_grep_cursor_pagination_64_page_size() {
+    let content = (0..150)
         .map(|i| format!("needle line {}", i))
         .collect::<Vec<_>>()
         .join("\n");
     let (config, _dir) = single_lib_with_files(&[("big.md", &content)]);
-    let envelope = run_grep(&config, r#"{"query":"needle"}"#);
-    assert_eq!(envelope["status"], "success");
-    let data = &envelope["data"];
-    assert_eq!(data["total"], 250);
-    assert_eq!(data["truncated"], true);
-    let matches = data["matches"].as_str().unwrap();
-    // 200 matching lines plus the truncation notice.
-    assert_eq!(matches.lines().count(), 201);
-    assert!(matches.contains("results truncated at 200 matches"));
-    assert!(matches.contains("narrower terms"));
+    // Page 1
+    let envelope1 = run_grep(&config, r#"{"query":"needle"}"#);
+    assert_eq!(envelope1["status"], "success");
+    let data1 = &envelope1["data"];
+    assert_eq!(data1["total"], 150);
+    assert!(data1["cursor"].is_string());
+    assert!(data1["hint"].is_null());
+    let matches1 = data1["matches"].as_str().unwrap();
+    assert_eq!(matches1.lines().count(), 64);
+    let cursor1 = data1["cursor"].as_str().unwrap();
+
+    // Page 2
+    let envelope2 = run_grep(
+        &config,
+        &format!(r#"{{"query":"needle","cursor":"{cursor1}"}}"#),
+    );
+    assert_eq!(envelope2["status"], "success");
+    let data2 = &envelope2["data"];
+    assert_eq!(data2["total"], 150);
+    assert!(data2["cursor"].is_string());
+    assert!(data2["hint"].is_null());
+    let matches2 = data2["matches"].as_str().unwrap();
+    assert_eq!(matches2.lines().count(), 64);
+    let cursor2 = data2["cursor"].as_str().unwrap();
+
+    // Page 3 (final)
+    let envelope3 = run_grep(
+        &config,
+        &format!(r#"{{"query":"needle","cursor":"{cursor2}"}}"#),
+    );
+    assert_eq!(envelope3["status"], "success");
+    let data3 = &envelope3["data"];
+    assert_eq!(data3["total"], 150);
+    assert!(data3["cursor"].is_null());
+    assert_eq!(data3["hint"], "Final page.");
+    let matches3 = data3["matches"].as_str().unwrap();
+    assert_eq!(matches3.lines().count(), 22);
 }
 
 #[test]
@@ -718,11 +673,8 @@ fn test_grep_matches_md_and_markdown_files_but_not_others() {
 }
 
 #[test]
-fn test_grep_truncation_does_not_count_non_markdown_matches() {
-    // Non-markdown files must never consume the 200-match cap: a large
-    // `.txt` with many matches must not appear in, or crowd out, the
-    // Markdown results.
-    let md_content = (0..250)
+fn test_grep_does_not_count_non_markdown_matches() {
+    let md_content = (0..100)
         .map(|i| format!("needle line {}", i))
         .collect::<Vec<_>>()
         .join("\n");
@@ -734,11 +686,9 @@ fn test_grep_truncation_does_not_count_non_markdown_matches() {
         single_lib_with_files(&[("big.md", &md_content), ("noise.txt", &txt_content)]);
     let envelope = run_grep(&config, r#"{"query":"needle"}"#);
     let data = &envelope["data"];
-    assert_eq!(data["total"], 250);
-    assert_eq!(data["truncated"], true);
+    assert_eq!(data["total"], 100);
     let matches = data["matches"].as_str().unwrap();
-    assert_eq!(matches.lines().count(), 201);
-    assert!(matches.contains("results truncated at 200 matches"));
+    assert_eq!(matches.lines().count(), 64);
     assert!(!matches.contains("needle txt"));
 }
 

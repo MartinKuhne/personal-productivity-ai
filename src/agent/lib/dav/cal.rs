@@ -335,13 +335,65 @@ fn serialize_response(resp: &CalDavResponse) -> String {
     serde_json::to_string_pretty(resp).unwrap_or_else(|_| "{}".to_string())
 }
 
+fn format_calendar_page(items: &[String], errors: &[String]) -> String {
+    let mut parts = Vec::new();
+    if !items.is_empty() {
+        parts.push(items.join("\n\n"));
+    }
+    for err in errors {
+        parts.push(err.clone());
+    }
+    if parts.is_empty() {
+        "{}".to_string()
+    } else {
+        parts.join("\n\n")
+    }
+}
+
 pub fn tool_search_calendar(
     config: &crate::config::AgentConfig,
     keyword: &str,
+    cursor: Option<String>,
+    cache: &crate::tools::registry::cache::ToolCache,
+    uuid_gen: &dyn crate::utils::uuid::UuidGenerator,
 ) -> Result<SearchCalendarResponse, String> {
+    if let Some(cursor) = cursor {
+        let page = cache.calendar_search_sessions.next_page(&cursor)?;
+        return Ok(SearchCalendarResponse {
+            results: format_calendar_page(&page.items, &[]),
+            total: page.total,
+            cursor: page.cursor,
+            hint: page.hint,
+        });
+    }
+
     let (results, errors) = for_each_client_vec(config, |_, c| c.search_calendar(keyword));
+    let items: Vec<String> = results
+        .into_iter()
+        .map(|r| serde_json::to_string_pretty(&r).unwrap_or_default())
+        .collect();
+
+    if items.is_empty() {
+        return Ok(SearchCalendarResponse {
+            results: if errors.is_empty() {
+                "No events found.".to_string()
+            } else {
+                errors.join("\n\n")
+            },
+            total: 0,
+            cursor: None,
+            hint: Some(crate::tools::registry::builtin::strings::FINAL_PAGE_HINT.to_string()),
+        });
+    }
+
+    let page = cache
+        .calendar_search_sessions
+        .create_session(items, uuid_gen);
     Ok(SearchCalendarResponse {
-        results: serialize_response(&CalDavResponse { results, errors }),
+        results: format_calendar_page(&page.items, &errors),
+        total: page.total,
+        cursor: page.cursor,
+        hint: page.hint,
     })
 }
 
@@ -349,10 +401,45 @@ pub fn tool_get_calendar(
     config: &crate::config::AgentConfig,
     start: &str,
     end: &str,
+    cursor: Option<String>,
+    cache: &crate::tools::registry::cache::ToolCache,
+    uuid_gen: &dyn crate::utils::uuid::UuidGenerator,
 ) -> Result<GetCalendarResponse, String> {
+    if let Some(cursor) = cursor {
+        let page = cache.calendar_get_sessions.next_page(&cursor)?;
+        return Ok(GetCalendarResponse {
+            results: format_calendar_page(&page.items, &[]),
+            total: page.total,
+            cursor: page.cursor,
+            hint: page.hint,
+        });
+    }
+
     let (results, errors) = for_each_client_vec(config, |_, c| c.get_calendar(start, end));
+    let items: Vec<String> = results
+        .into_iter()
+        .map(|r| serde_json::to_string_pretty(&r).unwrap_or_default())
+        .collect();
+
+    if items.is_empty() {
+        return Ok(GetCalendarResponse {
+            results: if errors.is_empty() {
+                "No events found.".to_string()
+            } else {
+                errors.join("\n\n")
+            },
+            total: 0,
+            cursor: None,
+            hint: Some(crate::tools::registry::builtin::strings::FINAL_PAGE_HINT.to_string()),
+        });
+    }
+
+    let page = cache.calendar_get_sessions.create_session(items, uuid_gen);
     Ok(GetCalendarResponse {
-        results: serialize_response(&CalDavResponse { results, errors }),
+        results: format_calendar_page(&page.items, &errors),
+        total: page.total,
+        cursor: page.cursor,
+        hint: page.hint,
     })
 }
 

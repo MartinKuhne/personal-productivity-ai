@@ -42,7 +42,7 @@ The requirements below have been formatted using the **Easy Approach to Requirem
 | `add_calendar_item` | Add a new calendar item. Requires CalDAV config. |
 | `update_calendar_item` | Update a calendar item. Requires CalDAV config. |
 | `delete_calendar_item` | Delete a calendar item. Requires CalDAV config. |
-| `search_email` | Search email by keyword, folder, date range, sender, recipient, unread, or flagged status. The first call returns up to 100 matching emails plus a `cursor`; pass the `cursor` back unchanged to get the next page. The full server result set is cached for 30 minutes. When the result set is exhausted the response includes a `hint` and no `cursor`. Requires JMAP config. |
+| `search_email` | Search email by keyword, folder, date range, sender, recipient, unread, or flagged status. Requires JMAP config. |
 | `get_email_by_id` | Get email by id. Requires JMAP config. |
 | `get_email` | Get email by date range, sender, recipient, unread, or flagged status. Requires JMAP config. |
 | `send_email` | Send an email. Requires JMAP config. |
@@ -107,16 +107,22 @@ The requirements below have been formatted using the **Easy Approach to Requirem
 
 ### Tool Pagination (cursor, shared cache)
 
-The cursor-paginated tools (`search_email`, `web_fetch`) use a stateful cursor model backed by the shared tool cache.
-
-* [TOOL-025] Every paginated tool SHALL return a `hint` field on its response. For cursor-paginated tools (`search_email`, `web_fetch`), `hint` SHALL be set to "Final page." when the response has no `cursor`. `hint` SHALL be absent (or `null`) otherwise.
-* [TOOL-026] The page size SHALL be fixed at 100 for both `search_email` (emails) and `web_fetch` (Markdown lines). The LLM does not control the page size.
-* [TOOL-027] Cursor-paginated tools SHALL NOT be subject to limit caps because the LLM does not control the page size.
+* [TOOL-033] The `search_email`, `web_fetch`, `search_notes`, `list_notes_by_tag`, `web_search`, `search_calendar`, `get_calendar`, `search_contact` and `vector_search` tools SHALL be cursor paginated.
+* [TOOL-025] Every cursor paginated tool SHALL return a `hint` field on its response. `hint` SHALL be set to "Final page." when the response has no `cursor`. `hint` SHALL be absent (or `null`) otherwise.
+* [TOOL-026a] The page size SHALL be fixed at 32 results for `search_email`
+* [TOOL-026b] The page size SHALL be fixed at 64 markdown lines for `web_fetch`.
+* [TOOL-026c] The page size SHALL be fixed at 64 file names for `search_notes`.
+* [TOOL-026d] The page size SHALL be fixed at 64 file names for `list_notes_by_tag`.
+* [TOOL-026e] The page size SHALL be fixed at 32 results for `web_search`
+* [TOOL-026f] The page size SHALL be fixed at 32 results for `search_calendar`
+* [TOOL-026g] The page size SHALL be fixed at 32 results for `get_calendar`
+* [TOOL-026h] The page size SHALL be fixed at 32 results for `search_contact`
+* [TOOL-026i] The page size SHALL be fixed at 32 results for `vector_search`
 * [TOOL-028] Cursor-paginated tools SHALL use the parameter name `cursor` and the response field names `cursor`, `total`/`total_lines`, and `hint`. The names `page`, `page_size`, `offset`, and `limit` SHALL NOT appear in any cursor-paginated tool's schema. The LLM-facing description of every cursor-paginated tool SHALL include the standardized cursor-based paging description paragraph.
-* [TOOL-029] The `search_email` tool SHALL accept a `cursor: Option<String>` input parameter and SHALL return a `cursor: Option<String>` output field. The first call (no cursor in input) SHALL return up to 100 matching emails plus a new cursor. Subsequent calls with the same cursor SHALL return the next 100 emails (or fewer on the final page). The cursor is opaque and SHALL be passed back unchanged. When the result set is exhausted, the response SHALL include a `hint` and no `cursor`. The page size SHALL be fixed at 100; the LLM does not control it.
-* [TOOL-030] An in-memory process-local cache SHALL be shared by `search_email` and `web_fetch`. Cache entries SHALL be evicted lazily on access after 30 minutes. A capacity cap of 1024 entries SHALL be enforced with FIFO eviction once exceeded. The cache SHALL NOT be persisted across process restarts. The cache SHALL be the single source of truth for both tools' per-URL / per-search result set state.
-* [TOOL-031] The first `search_email` call with a given filter set SHALL populate the cache with the full server result set. Subsequent calls with the matching cursor SHALL slice from the cache without re-fetching. A `search_email` call with a cursor that does not match a live cache entry SHALL return the error `"Cursor expired or unknown; re-run the search with no cursor."`
-* [TOOL-032] The `web_fetch` tool SHALL utilize the shared tool cache (TOOL-030) for fetched content. The URL SHALL map to a cursor UUID which maps to the full content. The `force_refetch` parameter SHALL invalidate the cache entry before re-fetching. The 30-minute TTL SHALL match the shared cache's TTL exactly.
+* [TOOL-029] Cursor-paginated tools SHALL accept a `cursor: Option<String>` input parameter and SHALL return a `cursor: Option<String>` output field. The first call (no cursor in input) SHALL return the initial matches plus a new cursor. Subsequent calls with the same cursor SHALL return the next set of results (or fewer on the final page). The cursor is opaque and SHALL be passed back unchanged. When the result set is exhausted, the response SHALL include a `hint` and no `cursor`. The page size SHALL be fixed; the LLM does not control it.
+* [TOOL-030] An in-memory process-local cache SHALL be shared by all tools using a cursor. Cache entries SHALL be evicted lazily on access after 30 minutes. A capacity cap of 256 entries SHALL be enforced with FIFO eviction once exceeded. The cache SHALL NOT be persisted across process restarts. The cache SHALL be the single source of truth result set state.
+* [TOOL-031] A call with a cursor that does not match a live cache entry SHALL return the error `"Cursor expired or unknown; re-run the search with no cursor."`
+* [TOOL-032] A call without a cursor shall incur a force refetch and invalidate any cache entries before re-fetching.
 
 ### Filesystem Line Tools
 

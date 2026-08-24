@@ -340,18 +340,46 @@ fn test_json_to_vcard_accepts_notes_and_note_aliases() {
 
 #[test]
 fn test_tool_search_contact_handles_empty_clients_gracefully() {
-    // When caldav_clients is empty, the function should handle it gracefully
     let config = crate::config::AgentConfig::default();
-    let res = tool_search_contact(&config, "test");
+    let cache = crate::tools::registry::cache::ToolCache::new();
+    let uuid_gen = crate::utils::uuid::SystemUuidGenerator;
+    let res = tool_search_contact(&config, "test", None, &cache, &uuid_gen);
 
-    // Should handle empty config without panicking
-    // Result may be Ok with empty response or Err depending on implementation
-    assert!(res.is_ok() || res.is_err());
-    if let Ok(response) = res {
-        // If Ok, verify results is a valid string (we just access the
-        // field; a panic here would mean a bug in the producer).
-        let _ = &response.results;
-    }
+    assert!(res.is_ok());
+    let response = res.unwrap();
+    assert_eq!(response.results, "No contacts found.");
+    assert_eq!(response.total, 0);
+    assert_eq!(response.hint.as_deref(), Some("Final page."));
+    assert!(response.cursor.is_none());
+}
+
+#[test]
+fn test_search_contact_cursor_sessions() {
+    let cache = crate::tools::registry::cache::ToolCache::new();
+    let uuid_gen = crate::utils::uuid::SystemUuidGenerator;
+    let contacts: Vec<String> = (1..=70).map(|i| format!("Contact {}", i)).collect();
+
+    let page1 = cache
+        .contact_search_sessions
+        .create_session(contacts, &uuid_gen);
+    assert_eq!(page1.total, 70);
+    assert_eq!(page1.items.len(), 32);
+    assert!(page1.cursor.is_some());
+    assert!(page1.hint.is_none());
+    let cursor1 = page1.cursor.unwrap();
+
+    let page2 = cache.contact_search_sessions.next_page(&cursor1).unwrap();
+    assert_eq!(page2.total, 70);
+    assert_eq!(page2.items.len(), 32);
+    assert!(page2.cursor.is_some());
+    assert!(page2.hint.is_none());
+    let cursor2 = page2.cursor.unwrap();
+
+    let page3 = cache.contact_search_sessions.next_page(&cursor2).unwrap();
+    assert_eq!(page3.total, 70);
+    assert_eq!(page3.items.len(), 6);
+    assert!(page3.cursor.is_none());
+    assert_eq!(page3.hint.as_deref(), Some("Final page."));
 }
 
 // =====================================================================

@@ -14,6 +14,7 @@
 
 pub mod builtin;
 pub mod cache;
+pub mod cursor;
 pub mod errors;
 pub mod groups;
 pub mod pagination;
@@ -23,6 +24,7 @@ mod group_tests;
 #[cfg(test)]
 mod tests;
 
+pub use cursor::{CursorPage, CursorSessionManager, PagedDataset};
 pub use errors::{ToolErrorKind, ToolGroupError};
 pub use groups::{InternalToolGroup, ToolGroupId, ToolGroupKind, ToolGroupState};
 pub use pagination::paginate_in_range;

@@ -88,7 +88,14 @@ fn execute_web_search(
         .searxng_url
         .as_deref()
         .ok_or_else(|| "web_search is disabled (no SearXNG URL configured).".to_string())?;
-    crate::tools::web::tool_web_search(url, &input.query).map(|r| {
+    crate::tools::web::tool_web_search(
+        url,
+        &input.query,
+        input.cursor,
+        &ctx.cache(),
+        ctx.uuid_gen().as_ref(),
+    )
+    .map(|r| {
         serde_json::to_value(r).unwrap_or_else(|e| serde_json::json!({"error": e.to_string()}))
     })
 }

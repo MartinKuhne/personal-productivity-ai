@@ -30,7 +30,14 @@ fn execute_search_contact(
 ) -> Result<serde_json::Value, String> {
     let input: dtos::SearchContactInput =
         serde_json::from_str(args).map_err(|e| format!("Invalid args: {}", e))?;
-    crate::lib::dav::card::tool_search_contact(&ctx.config, &input.keyword).map(|r| {
+    crate::lib::dav::card::tool_search_contact(
+        &ctx.config,
+        &input.keyword,
+        input.cursor,
+        &ctx.cache(),
+        ctx.uuid_gen().as_ref(),
+    )
+    .map(|r| {
         serde_json::to_value(r).unwrap_or_else(|e| serde_json::json!({"error": e.to_string()}))
     })
 }

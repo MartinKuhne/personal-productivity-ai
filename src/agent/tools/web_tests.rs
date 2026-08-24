@@ -48,14 +48,8 @@ fn test_tool_web_fetch_mock() {
     assert!(result.content.contains("Hello") || result.content.contains("World"));
     assert!(result.total_lines > 0);
 
-    // Verify the mock generator was used to create the cache entry
-    if let Some(crate::tools::registry::cache::CacheEntry::WebFetch { cursor }) =
-        cache.get(&server_url)
-    {
-        assert_eq!(cursor, mock_uuid.to_string());
-    } else {
-        panic!("Cache missing WebFetch entry for url");
-    }
+    // Verify the document was stored in the web_documents cache
+    assert!(cache.web_documents.get(&server_url).is_some());
 }
 
 #[test]
@@ -257,6 +251,7 @@ fn test_tool_web_fetch_force_refetch() {
 
 #[test]
 fn test_tool_web_search_mock() {
+    let cache = crate::tools::registry::cache::ToolCache::new();
     rustls::crypto::ring::default_provider()
         .install_default()
         .ok();
@@ -270,14 +265,25 @@ fn test_tool_web_search_mock() {
         ]
     });
     let server_url = spawn_mock_server(mock_json.to_string());
-    let result = tool_web_search(&server_url, "test query").unwrap().results;
-    assert!(result.contains("Test Title"));
-    assert!(result.contains("https://test.com"));
-    assert!(result.contains("Test content"));
+    let result = tool_web_search(
+        &server_url,
+        "test query",
+        None,
+        &cache,
+        &crate::utils::uuid::SystemUuidGenerator,
+    )
+    .unwrap();
+    assert!(result.results.contains("Test Title"));
+    assert!(result.results.contains("https://test.com"));
+    assert!(result.results.contains("Test content"));
+    assert_eq!(result.total, 1);
+    assert!(result.cursor.is_none());
+    assert_eq!(result.hint.as_deref(), Some("Final page."));
 }
 
 #[test]
 fn test_tool_web_search_empty() {
+    let cache = crate::tools::registry::cache::ToolCache::new();
     rustls::crypto::ring::default_provider()
         .install_default()
         .ok();
@@ -285,49 +291,27 @@ fn test_tool_web_search_empty() {
         "results": []
     });
     let server_url = spawn_mock_server(mock_json.to_string());
-    let result = tool_web_search(&server_url, "test query").unwrap().results;
-    assert_eq!(result, "No results found.");
+    let result = tool_web_search(
+        &server_url,
+        "test query",
+        None,
+        &cache,
+        &crate::utils::uuid::SystemUuidGenerator,
+    )
+    .unwrap();
+    assert_eq!(result.results, "No results found.");
+    assert_eq!(result.total, 0);
+    assert!(result.cursor.is_none());
+    assert_eq!(result.hint.as_deref(), Some("Final page."));
 }
 
 #[test]
-fn test_tool_web_search_returns_full_default_page() {
-    // SearXNG with default `search.max_results=10` returns 10 results.
-    // Verify we surface all of them.
+fn test_tool_web_search_cursor_pagination_32_page_size() {
+    let cache = crate::tools::registry::cache::ToolCache::new();
     rustls::crypto::ring::default_provider()
         .install_default()
         .ok();
-    let results: Vec<serde_json::Value> = (1..=10)
-        .map(|i| {
-            serde_json::json!({
-                "title": format!("Title {}", i),
-                "url": format!("https://example.com/{}", i),
-                "content": format!("Content for result {}", i),
-            })
-        })
-        .collect();
-    let mock_json = serde_json::json!({ "results": results });
-    let server_url = spawn_mock_server(mock_json.to_string());
-    let out = tool_web_search(&server_url, "q").unwrap().results;
-    for i in 1..=10 {
-        assert!(
-            out.contains(&format!("Title {}", i)),
-            "Expected result #{} to be present; missing from output: {}",
-            i,
-            out
-        );
-    }
-}
-
-#[test]
-fn test_tool_web_search_does_not_slice() {
-    // Regression guard: the operator asked us to surface whatever
-    // SearXNG returns without a client-side cap. Even if the server
-    // returns more than the default 10 (e.g. an instance with many
-    // engines enabled), we must pass every result through.
-    rustls::crypto::ring::default_provider()
-        .install_default()
-        .ok();
-    let total = 25;
+    let total = 70;
     let results: Vec<serde_json::Value> = (1..=total)
         .map(|i| {
             serde_json::json!({
@@ -339,23 +323,63 @@ fn test_tool_web_search_does_not_slice() {
         .collect();
     let mock_json = serde_json::json!({ "results": results });
     let server_url = spawn_mock_server(mock_json.to_string());
-    let out = tool_web_search(&server_url, "q").unwrap().results;
-    for i in 1..=total {
-        assert!(
-            out.contains(&format!("Title {}", i)),
-            "result #{} should be present; the tool must not slice the server response",
-            i
-        );
-    }
+
+    // Page 1
+    let page1 = tool_web_search(
+        &server_url,
+        "q",
+        None,
+        &cache,
+        &crate::utils::uuid::SystemUuidGenerator,
+    )
+    .unwrap();
+    assert_eq!(page1.total, 70);
+    assert!(page1.cursor.is_some());
+    assert!(page1.hint.is_none());
+    let cursor1 = page1.cursor.unwrap();
+
+    // Page 2
+    let page2 = tool_web_search(
+        &server_url,
+        "q",
+        Some(cursor1),
+        &cache,
+        &crate::utils::uuid::SystemUuidGenerator,
+    )
+    .unwrap();
+    assert_eq!(page2.total, 70);
+    assert!(page2.cursor.is_some());
+    assert!(page2.hint.is_none());
+    let cursor2 = page2.cursor.unwrap();
+
+    // Page 3 (final)
+    let page3 = tool_web_search(
+        &server_url,
+        "q",
+        Some(cursor2),
+        &cache,
+        &crate::utils::uuid::SystemUuidGenerator,
+    )
+    .unwrap();
+    assert_eq!(page3.total, 70);
+    assert!(page3.cursor.is_none());
+    assert_eq!(page3.hint.as_deref(), Some("Final page."));
 }
 
 #[test]
 fn test_tool_web_search_invalid_json() {
+    let cache = crate::tools::registry::cache::ToolCache::new();
     rustls::crypto::ring::default_provider()
         .install_default()
         .ok();
     let server_url = spawn_mock_server("invalid json");
-    let result = tool_web_search(&server_url, "test query");
+    let result = tool_web_search(
+        &server_url,
+        "test query",
+        None,
+        &cache,
+        &crate::utils::uuid::SystemUuidGenerator,
+    );
     assert!(result.is_err());
 }
 

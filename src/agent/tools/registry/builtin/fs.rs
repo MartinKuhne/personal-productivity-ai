@@ -69,6 +69,23 @@ fn execute_search_notes(
 ) -> Result<serde_json::Value, String> {
     let input: dtos::SearchNotesInput =
         serde_json::from_str(args).map_err(|e| format!("Invalid args: {}", e))?;
+
+    if let Some(cursor) = &input.cursor {
+        let page = ctx.cache().search_notes_sessions.next_page(cursor)?;
+        let matches = if page.items.is_empty() {
+            "No matches found.".to_string()
+        } else {
+            page.items.join("\n")
+        };
+        return Ok(serde_json::to_value(dtos::SearchNotesResponse {
+            matches,
+            total: page.total,
+            cursor: page.cursor,
+            hint: page.hint,
+        })
+        .unwrap());
+    }
+
     let mut all_matches: Vec<String> = Vec::new();
     let mut libs: Vec<_> = ctx.config.content_libraries().iter().collect();
     libs.sort_by_key(|b| std::cmp::Reverse(b.priority));
@@ -82,24 +99,26 @@ fn execute_search_notes(
             all_matches.append(&mut matches);
         }
     }
-    let total = all_matches.len();
-    let limit = crate::tools::filesystem::DEFAULT_SEARCH_NOTES_MAX_RESULTS;
-    let truncated = total > limit;
-    all_matches.truncate(limit);
-    if truncated {
-        all_matches.push(format!(
-            "... (results truncated at {limit} matches; refine the query with narrower terms or delegate to a sub-agent to analyse a specific file)"
-        ));
+
+    if all_matches.is_empty() {
+        return Ok(serde_json::to_value(dtos::SearchNotesResponse {
+            matches: "No matches found.".to_string(),
+            total: 0,
+            cursor: None,
+            hint: Some(strings::FINAL_PAGE_HINT.to_string()),
+        })
+        .unwrap());
     }
-    let matches = if all_matches.is_empty() {
-        "No matches found.".to_string()
-    } else {
-        all_matches.join("\n")
-    };
+
+    let page = ctx
+        .cache()
+        .search_notes_sessions
+        .create_session(all_matches, ctx.uuid_gen().as_ref());
     Ok(serde_json::to_value(dtos::SearchNotesResponse {
-        matches,
-        total,
-        truncated,
+        matches: page.items.join("\n"),
+        total: page.total,
+        cursor: page.cursor,
+        hint: page.hint,
     })
     .unwrap())
 }
@@ -154,10 +173,18 @@ fn execute_list_notes_by_tag(
 ) -> Result<serde_json::Value, String> {
     let input: dtos::ListNotesByTagInput =
         serde_json::from_str(args).map_err(|e| format!("Invalid args: {}", e))?;
-    let offset = input.offset.unwrap_or(0);
-    let limit = input
-        .limit
-        .unwrap_or(super::super::pagination::DEFAULT_LIST_NOTES_BY_TAG_LIMIT);
+
+    if let Some(cursor) = &input.cursor {
+        let page = ctx.cache().list_notes_by_tag_sessions.next_page(cursor)?;
+        return Ok(serde_json::to_value(dtos::ListNotesByTagResponse {
+            files: page.items,
+            total: page.total,
+            cursor: page.cursor,
+            hint: page.hint,
+        })
+        .unwrap());
+    }
+
     let mut all_matches: Vec<String> = Vec::new();
     for lib in ctx.config.content_libraries() {
         match crate::tools::filesystem::tool_list_notes_by_tag(
@@ -174,12 +201,26 @@ fn execute_list_notes_by_tag(
     }
     all_matches.sort();
     all_matches.dedup();
-    let total = all_matches.len();
-    let (page_files, hint) = paginate_in_range(&all_matches, offset, limit, total, "tagged files");
+
+    if all_matches.is_empty() {
+        return Ok(serde_json::to_value(dtos::ListNotesByTagResponse {
+            files: Vec::new(),
+            total: 0,
+            cursor: None,
+            hint: Some(strings::FINAL_PAGE_HINT.to_string()),
+        })
+        .unwrap());
+    }
+
+    let page = ctx
+        .cache()
+        .list_notes_by_tag_sessions
+        .create_session(all_matches, ctx.uuid_gen().as_ref());
     Ok(serde_json::to_value(dtos::ListNotesByTagResponse {
-        files: page_files,
-        total,
-        hint,
+        files: page.items,
+        total: page.total,
+        cursor: page.cursor,
+        hint: page.hint,
     })
     .unwrap())
 }

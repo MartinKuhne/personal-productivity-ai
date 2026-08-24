@@ -5,15 +5,9 @@
 use crate::config::AgentConfig;
 use crate::datamark::{self, SECURITY_HEADER};
 use crate::events::DelegateToolCall;
-use crate::tools::registry::builtin::strings::WEB_FETCH_FINAL_PAGE_HINT;
-use crate::tools::registry::cache::CacheEntry;
+use crate::tools::registry::cache::CachedWebDocument;
 use fast_h2m::convert;
 use std::collections::HashMap;
-use std::time::Instant;
-
-/// Page size for `tool_web_fetch` (cursor mode). 64 lines per the
-/// cursor model specification.
-const WEB_FETCH_PAGE_SIZE: usize = 64;
 
 pub fn tool_web_fetch(
     input: &crate::tools::dtos::WebFetchInput,
@@ -22,253 +16,128 @@ pub fn tool_web_fetch(
 ) -> Result<crate::tools::dtos::WebFetchResponse, String> {
     let url = &input.url;
 
-    // If a cursor is provided, look up the cached content and slice from it.
-    // The cursor is a UUID that points to the full content in the cache.
+    // 1. If cursor is provided, slice next page from line cursor manager
     if let Some(cursor) = &input.cursor {
-        // The cursor the LLM sends back IS the content UUID we stored on the
-        // first call. The entry at that key is the `WebFetchContent` itself,
-        // not a `WebFetch { cursor }` indirection. Look it up directly.
-        let (content, response_headers, fetched_at, cursor_offset, total_lines) =
-            match cache.get(cursor) {
-                Some(CacheEntry::WebFetchContent {
-                    content,
-                    response_headers,
-                    fetched_at,
-                    cursor_offset,
-                    total_lines,
-                }) => (
-                    content,
-                    response_headers,
-                    fetched_at,
-                    cursor_offset,
-                    total_lines,
-                ),
-                _ => {
-                    return Err(
-                        "Cursor expired or unknown; re-run the fetch with no cursor.".to_string(),
-                    );
-                }
-            };
-
-        // If cursor_offset >= total_lines, no more content. Return final page hint.
-        if cursor_offset >= total_lines {
-            return Ok(crate::tools::dtos::WebFetchResponse {
-                content: String::new(),
-                total_lines,
-                cursor: None,
-                hint: Some(WEB_FETCH_FINAL_PAGE_HINT.to_string()),
-                response_headers: if input.headers {
-                    Some(response_headers.clone())
-                } else {
-                    None
-                },
-                from_cache: true,
-            });
-        }
-
-        let end = (cursor_offset + WEB_FETCH_PAGE_SIZE).min(total_lines);
-        let lines: Vec<&str> = content.lines().collect();
-        let page_content = lines[cursor_offset..end].join("\n");
-
-        let new_cursor_offset = end;
-        let (cursor_out, hint_out) = if new_cursor_offset >= total_lines {
-            // Final page
-            (None, Some(WEB_FETCH_FINAL_PAGE_HINT.to_string()))
-        } else {
-            // More pages: same cursor UUID, advance cursor offset
-            (Some(cursor.clone()), None)
-        };
-
-        // Update the cached entry with the new cursor offset
-        cache.put(
-            cursor.clone(),
-            CacheEntry::WebFetchContent {
-                content: content.clone(),
-                response_headers: response_headers.clone(),
-                fetched_at,
-                cursor_offset: new_cursor_offset,
-                total_lines,
-            },
-        );
-
+        let page = cache.web_lines.next_page(cursor)?;
         return Ok(crate::tools::dtos::WebFetchResponse {
-            content: page_content,
-            total_lines,
-            cursor: cursor_out,
-            hint: hint_out,
-            response_headers: if input.headers {
-                Some(response_headers.clone())
-            } else {
-                None
-            },
+            content: page.items.join("\n"),
+            total_lines: page.total,
+            cursor: page.cursor,
+            hint: page.hint,
+            response_headers: None,
             from_cache: true,
         });
     }
 
-    // No cursor: first call. Check cache for fresh fetch by URL.
-    if !input.force_refetch
-        && let Some(CacheEntry::WebFetch {
-            cursor: content_uuid,
-        }) = cache.get(url)
-    {
-        // Get the content
-        let entry = match cache.get(&content_uuid) {
-            Some(CacheEntry::WebFetchContent {
-                content,
-                response_headers,
-                fetched_at,
-                cursor_offset,
-                total_lines,
-            }) => Some((
-                content,
-                response_headers,
-                fetched_at,
-                cursor_offset,
-                total_lines,
-            )),
-            _ => {
-                // Content missing, treat as fresh fetch
-                None
-            }
-        };
+    // 2. A call without a cursor incurs a force refetch and invalidates cache entries (TOOL-032)
+    cache.web_documents.invalidate(url);
 
-        if let Some((content, response_headers, fetched_at, _cursor_offset, total_lines)) = entry {
-            // If called with no cursor, always serve the first page from cache.
-            // Reset cursor_offset to 0 so subsequent calls without cursor work.
-            let lines: Vec<&str> = content.lines().collect();
-            let page_content = lines[..WEB_FETCH_PAGE_SIZE.min(total_lines)].join("\n");
-
-            let (cursor_out, hint_out) = if total_lines <= WEB_FETCH_PAGE_SIZE {
-                // All content fits on one page
-                (None, Some(WEB_FETCH_FINAL_PAGE_HINT.to_string()))
-            } else {
-                // Return the cursor UUID for pagination
-                (Some(content_uuid.clone()), None)
-            };
-
-            // Advance the offset to the start of the next page so the cursor
-            // returned to the LLM points at page 2 (TOOL-006). The slicing
-            // above always serves the first page; a subsequent call with the
-            // cursor reads `cursor_offset` and slices from there.
-            cache.put(
-                content_uuid.clone(),
-                CacheEntry::WebFetchContent {
-                    content: content.clone(),
-                    response_headers: response_headers.clone(),
-                    fetched_at,
-                    cursor_offset: WEB_FETCH_PAGE_SIZE,
-                    total_lines,
-                },
-            );
-
-            return Ok(crate::tools::dtos::WebFetchResponse {
-                content: page_content,
-                total_lines,
-                cursor: cursor_out,
-                hint: hint_out,
-                response_headers: if input.headers {
-                    Some(response_headers.clone())
-                } else {
-                    None
-                },
-                from_cache: true,
-            });
-        }
-    }
-
-    if input.force_refetch {
-        // Caller asked for a fresh fetch; clear any existing entry first.
-        cache.invalidate(url);
-    }
-
-    match reqwest::blocking::Client::new()
-    .get(url)
-    .header("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36")
-    .header("Accept", "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8")
-    .header("Accept-Language", "en-US,en;q=0.9")
-    .send() {
-    Ok(response) => {
-        let mut response_headers = HashMap::new();
-        for (name, value) in response.headers() {
-            if let Ok(val) = value.to_str() {
-                response_headers.insert(name.as_str().to_string(), val.to_string());
-            }
-        }
-        match response.text() {
-            Ok(body) => match convert(&body, None) {
-                Ok(res) => {
-                    let md_content = res.content.unwrap_or_default();
-                    let total_lines = md_content.lines().count();
-                    let lines: Vec<&str> = md_content.lines().collect();
-                    let page_content = lines[..WEB_FETCH_PAGE_SIZE.min(total_lines)].join("\n");
-
-                    let content_uuid = uuid_gen.new_v4().to_string();
-                    let (cursor_out, hint_out) = if total_lines <= WEB_FETCH_PAGE_SIZE {
-                        // All content fits on one page
-                        (None, Some(WEB_FETCH_FINAL_PAGE_HINT.to_string()))
-                    } else {
-                        // Return the cursor UUID for pagination
-                        (Some(content_uuid.clone()), None)
-                    };
-
-                    // Store URL -> cursor UUID mapping
-                    cache.put(
-                        url.clone(),
-                        CacheEntry::WebFetch {
-                            cursor: content_uuid.clone(),
-                        },
-                    );
-
-                    // Store full content under cursor UUID. The cursor is
-                    // advanced past the first page (TOOL-006) so a subsequent
-                    // call with the cursor slices from line WEB_FETCH_PAGE_SIZE.
-                    cache.put(
-                        content_uuid.clone(),
-                        CacheEntry::WebFetchContent {
-                            content: md_content.clone(),
-                            response_headers: response_headers.clone(),
-                            fetched_at: Instant::now(),
-                            cursor_offset: WEB_FETCH_PAGE_SIZE,
-                            total_lines,
-                        },
-                    );
-
-                    Ok(crate::tools::dtos::WebFetchResponse {
-                        content: page_content,
-                        total_lines,
-                        cursor: cursor_out,
-                        hint: hint_out,
-                        response_headers: if input.headers {
-                            Some(response_headers)
-                        } else {
-                            None
-                        },
-                        from_cache: false,
-                    })
-                },
-                Err(e) => {
-                    tracing::error!(name = "tool.web.html2md_failed", error = %e, url = %url, "Failed to convert fetched HTML to Markdown. Operator should verify if the URL returns valid HTML.");
-                    Err(format!("Failed to convert HTML to Markdown: {}", e))
+    let (cached_doc, from_cache) = {
+        match reqwest::blocking::Client::new()
+            .get(url)
+            .header(
+                "User-Agent",
+                "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36",
+            )
+            .header(
+                "Accept",
+                "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+            )
+            .header("Accept-Language", "en-US,en;q=0.9")
+            .send()
+        {
+            Ok(response) => {
+                let mut response_headers = HashMap::new();
+                for (name, value) in response.headers() {
+                    if let Ok(val) = value.to_str() {
+                        response_headers.insert(name.as_str().to_string(), val.to_string());
+                    }
                 }
-            },
-            Err(e) => {
-                tracing::error!(name = "tool.web.read_body_failed", error = %e, url = %url, "Failed to read response body from web fetch. Operator should check network connectivity or URL validity.");
-                Err(format!("Failed to read web response body: {}", e))
+                match response.text() {
+                    Ok(body) => match convert(&body, None) {
+                        Ok(res) => {
+                            let md_content = res.content.unwrap_or_default();
+                            let doc = CachedWebDocument {
+                                content: md_content,
+                                response_headers,
+                            };
+                            cache.web_documents.insert(url.clone(), doc.clone());
+                            Ok((doc, false))
+                        }
+                        Err(e) => {
+                            tracing::error!(
+                                name = "tool.web.html2md_failed",
+                                error = %e,
+                                url = %url,
+                                "Failed to convert fetched HTML to Markdown. Operator should verify if the URL returns valid HTML."
+                            );
+                            Err(format!("Failed to convert HTML to Markdown: {}", e))
+                        }
+                    },
+                    Err(e) => {
+                        tracing::error!(
+                            name = "tool.web.read_body_failed",
+                            error = %e,
+                            url = %url,
+                            "Failed to read response body from web fetch. Operator should check network connectivity or URL validity."
+                        );
+                        Err(format!("Failed to read web response body: {}", e))
+                    }
+                }
             }
-        }
-    },
-    Err(e) => {
-        tracing::error!(name = "tool.web.fetch_failed", error = %e, url = %url, "Failed to fetch URL. Likely cause: network error or invalid URL. Operator should verify network connectivity.");
-        Err(format!("Failed to fetch URL: {}", e))
-    }
-}
+            Err(e) => {
+                tracing::error!(
+                    name = "tool.web.fetch_failed",
+                    error = %e,
+                    url = %url,
+                    "Failed to fetch URL. Likely cause: network error or invalid URL. Operator should verify network connectivity."
+                );
+                Err(format!("Failed to fetch URL: {}", e))
+            }
+        }?
+    };
+
+    // 4. Create cursor pagination session over markdown lines
+    let lines: Vec<String> = cached_doc.content.lines().map(|s| s.to_string()).collect();
+    let page = cache.web_lines.create_session(lines, uuid_gen);
+
+    Ok(crate::tools::dtos::WebFetchResponse {
+        content: page.items.join("\n"),
+        total_lines: page.total,
+        cursor: page.cursor,
+        hint: page.hint,
+        response_headers: if input.headers {
+            Some(cached_doc.response_headers)
+        } else {
+            None
+        },
+        from_cache,
+    })
 }
 
 // Reference: https://docs.searxng.org/dev/search_api.html
 pub fn tool_web_search(
     url: &str,
     query: &str,
+    cursor: Option<String>,
+    cache: &crate::tools::registry::cache::ToolCache,
+    uuid_gen: &dyn crate::utils::uuid::UuidGenerator,
 ) -> Result<crate::tools::dtos::WebSearchResponse, String> {
+    if let Some(cursor) = cursor {
+        let page = cache.web_search_sessions.next_page(&cursor)?;
+        let results = if page.items.is_empty() {
+            "No results found.".to_string()
+        } else {
+            page.items.join("\n\n")
+        };
+        return Ok(crate::tools::dtos::WebSearchResponse {
+            results,
+            total: page.total,
+            cursor: page.cursor,
+            hint: page.hint,
+        });
+    }
+
     let endpoint = format!("{}/search", url);
     match reqwest::blocking::Client::new()
         .get(&endpoint)
@@ -284,28 +153,34 @@ pub fn tool_web_search(
             Ok(body) => {
                 if let Ok(json) = serde_json::from_str::<serde_json::Value>(&body) {
                     if let Some(results) = json.get("results").and_then(|r| r.as_array()) {
-                        // Surface every result the SearXNG instance returned.
-                        // The page size is controlled server-side by
-                        // `search.max_results` in settings.yml; we don't
-                        // slice on the client because the operator asked to
-                        // see whatever the server actually returned.
-                        let mut output = String::new();
+                        let mut items = Vec::new();
                         for (i, result) in results.iter().enumerate() {
                             let title = result.get("title").and_then(|t| t.as_str()).unwrap_or("");
                             let url = result.get("url").and_then(|u| u.as_str()).unwrap_or("");
                             let content = result.get("content").and_then(|c| c.as_str()).unwrap_or("");
-                            output.push_str(&format!(
-                                "{}. [{}]({})\n{}\n\n",
+                            items.push(format!(
+                                "{}. [{}]({})\n{}",
                                 i + 1,
                                 title,
                                 url,
                                 content
                             ));
                         }
-                        if output.is_empty() {
-                            Ok(crate::tools::dtos::WebSearchResponse { results: "No results found.".to_string() })
+                        if items.is_empty() {
+                            Ok(crate::tools::dtos::WebSearchResponse {
+                                results: "No results found.".to_string(),
+                                total: 0,
+                                cursor: None,
+                                hint: Some(crate::tools::registry::builtin::strings::FINAL_PAGE_HINT.to_string()),
+                            })
                         } else {
-                            Ok(crate::tools::dtos::WebSearchResponse { results: output })
+                            let page = cache.web_search_sessions.create_session(items, uuid_gen);
+                            Ok(crate::tools::dtos::WebSearchResponse {
+                                results: page.items.join("\n\n"),
+                                total: page.total,
+                                cursor: page.cursor,
+                                hint: page.hint,
+                            })
                         }
                     } else {
                         tracing::error!(name = "tool.web_search.parse_results_failed", url = %endpoint, "Search API returned JSON without a 'results' array. Operator should verify search provider compatibility.");
@@ -504,7 +379,13 @@ pub fn tool_web_delegate(
                         serde_json::from_str::<crate::tools::dtos::WebSearchInput>(func_args_str)
                     {
                         if let Some(url) = config.searxng_url() {
-                            match tool_web_search(url, &input.query) {
+                            match tool_web_search(
+                                url,
+                                &input.query,
+                                input.cursor,
+                                cache,
+                                &crate::utils::uuid::SystemUuidGenerator,
+                            ) {
                                 Ok(res) => serde_json::to_string(
                                     &crate::tools::dtos::ToolResponse::Success { data: res },
                                 )
