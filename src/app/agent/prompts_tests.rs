@@ -764,3 +764,178 @@ fn test_e2e_openai_wiremock_folder_skill_context_sent_as_system_context() {
         "System message must not claim to be viewing a file when only a folder was selected"
     );
 }
+
+/// T-01: End-to-end test for the "Format Markdown" action.
+///
+/// When the user right-clicks a tab or file and chooses "Format Markdown",
+/// `generate_format_prompt` produces the user prompt, and the active note path
+/// is placed in the system context as "currently viewing the file: …".
+///
+/// Proves that both the format prompt text *and* the active-file context reach
+/// the LLM via `POST /chat/completions`.
+#[test]
+fn test_e2e_openai_wiremock_format_document_context_and_prompt_sent_to_llm() {
+    use wiremock::matchers::{method, path};
+    use wiremock::{Mock, MockServer, ResponseTemplate};
+
+    let runtime = tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+        .expect("build tokio runtime");
+
+    let mock_server = runtime.block_on(MockServer::start());
+
+    let response_body = serde_json::json!({
+        "id": "chatcmpl-format",
+        "object": "chat.completion",
+        "created": 1677652288,
+        "model": "gpt-4o",
+        "choices": [{
+            "index": 0,
+            "message": {
+                "role": "assistant",
+                "content": "I have formatted your document."
+            },
+            "finish_reason": "stop"
+        }],
+        "usage": {
+            "prompt_tokens": 40,
+            "completion_tokens": 8,
+            "total_tokens": 48
+        }
+    });
+
+    runtime.block_on(
+        Mock::given(method("POST"))
+            .and(path("/chat/completions"))
+            .respond_with(
+                ResponseTemplate::new(200)
+                    .insert_header("content-type", "application/json")
+                    .set_body_json(response_body),
+            )
+            .mount(&mock_server),
+    );
+
+    let tmp = tempfile::tempdir().unwrap();
+    let notes_dir = tmp.path().join("Notes");
+    std::fs::create_dir_all(&notes_dir).unwrap();
+    let note_path = notes_dir.join("project-plan.md");
+    std::fs::write(&note_path, "# Project Plan\n\nSome content.").unwrap();
+
+    // Simulate: user right-clicks the tab → "Format Markdown"
+    // center.rs does:
+    //   *app.submit_prompt_mut() = Some(generate_format_prompt(&date_str));
+    //   *app.selection_mut().selected_file_mut() = Some(tab_path.clone());
+    // The orchestrator's start_agent_session reads selected_file as active_file.
+    let date_str = "2026-08-24T00:00:00Z";
+    let user_prompt = crate::ui::generate_format_prompt(date_str);
+
+    let config = AppConfig {
+        content_libraries: vec![ContentLibrary {
+            root_folder: notes_dir.to_string_lossy().to_string(),
+            name: "Notes".to_string(),
+            kind: "text".to_string(),
+            readonly: false,
+            priority: 0,
+        }],
+        ..AppConfig::default()
+    };
+
+    let system_prompts = build_system_prompts(
+        &config,
+        Some(&note_path), // active_file: the tab whose "Format Markdown" was clicked
+        None,
+        &HashSet::new(),
+    );
+
+    // Pre-check: system prompt already has the active file context
+    assert!(system_prompts[1].contains("viewing the file"));
+    assert!(system_prompts[1].contains("project-plan.md"));
+
+    let mut models = std::collections::HashMap::new();
+    models.insert(
+        "default".to_string(),
+        fastmd_agent::config::LlmConfig {
+            model: "gpt-4o".to_string(),
+            api_url: mock_server.uri(),
+            api_key: "test-openai-key".to_string(),
+            cost: None,
+            use_case: vec!["chat".to_string()],
+        },
+    );
+
+    let agent_config = fastmd_agent::config::AgentConfigBuilder::new()
+        .with_models(models)
+        .build();
+
+    let session_id = uuid::Uuid::new_v4();
+    let observer = std::sync::Arc::new(fastmd_agent::events::RecordingObserver::new());
+    let ctx = fastmd_agent::context::AgentContextBuilder::new(
+        agent_config,
+        session_id,
+        user_prompt.clone(),
+    )
+    .with_system_prompts(system_prompts)
+    .with_observer(observer.clone())
+    .build();
+
+    let handle = std::thread::spawn(move || {
+        fastmd_agent::run_agent(ctx);
+    });
+    handle.join().unwrap();
+
+    let received_requests = runtime
+        .block_on(mock_server.received_requests())
+        .expect("must record requests");
+    assert_eq!(
+        received_requests.len(),
+        1,
+        "Expected exactly 1 request to OpenAI mock server"
+    );
+
+    let payload: serde_json::Value = serde_json::from_slice(&received_requests[0].body)
+        .expect("request body must be valid JSON");
+    let messages = payload["messages"]
+        .as_array()
+        .expect("messages array must be present");
+
+    // 1. System message must contain the active-file context
+    let system_with_file = messages
+        .iter()
+        .find(|m| {
+            m["role"] == "system"
+                && m["content"]
+                    .as_str()
+                    .map(|c| c.contains("viewing the file") && c.contains("project-plan.md"))
+                    .unwrap_or(false)
+        })
+        .expect("Must find system message with active-file context");
+
+    assert!(
+        system_with_file["content"]
+            .as_str()
+            .unwrap()
+            .contains("viewing the file"),
+        "System message must identify the active file"
+    );
+
+    // 2. User message must contain the format prompt text
+    let user_msg = messages
+        .iter()
+        .find(|m| m["role"] == "user")
+        .expect("Must find a user message");
+
+    let user_content = user_msg["content"].as_str().unwrap();
+    assert!(
+        user_content.contains("Format the current document"),
+        "User message must contain the format prompt instruction"
+    );
+    assert!(
+        user_content.contains(date_str),
+        "User message must contain the date string embedded in the format prompt"
+    );
+    assert!(
+        user_content.contains("header-date"),
+        "User message must contain the yaml front-matter template"
+    );
+}
