@@ -486,6 +486,7 @@ pub struct AgentConfig {
     pub(crate) csv_db_path: Option<String>,
     pub(crate) feature_flags: HashMap<String, bool>,
     pub(crate) content_libraries: Vec<ContentLibrary>,
+    pub(crate) system_library_name: Option<String>,
 }
 
 impl AgentConfig {
@@ -545,6 +546,14 @@ impl AgentConfig {
         &self.content_libraries
     }
 
+    pub fn system_library_name(&self) -> Option<&str> {
+        self.system_library_name.as_deref()
+    }
+
+    pub fn system_library_display_name(&self) -> &str {
+        self.system_library_name.as_deref().unwrap_or("System")
+    }
+
     pub fn model_for_use_case(&self, use_case: impl AsRef<str>) -> Option<(&String, &LlmConfig)> {
         let uc_ref = use_case.as_ref();
         self.models
@@ -602,6 +611,7 @@ pub struct AgentConfigBuilder {
     csv_db_path: Option<String>,
     feature_flags: HashMap<String, bool>,
     content_libraries: Vec<ContentLibrary>,
+    system_library_name: Option<String>,
 }
 
 impl AgentConfigBuilder {
@@ -622,6 +632,7 @@ impl AgentConfigBuilder {
             csv_db_path: None,
             feature_flags: HashMap::new(),
             content_libraries: Vec::new(),
+            system_library_name: None,
         }
     }
 
@@ -695,6 +706,11 @@ impl AgentConfigBuilder {
         self
     }
 
+    pub fn with_system_library_name(mut self, name: Option<String>) -> Self {
+        self.system_library_name = name;
+        self
+    }
+
     pub fn build(self) -> AgentConfig {
         AgentConfig {
             models: self.models,
@@ -711,6 +727,7 @@ impl AgentConfigBuilder {
             csv_db_path: self.csv_db_path,
             feature_flags: self.feature_flags,
             content_libraries: self.content_libraries,
+            system_library_name: self.system_library_name,
         }
     }
 }

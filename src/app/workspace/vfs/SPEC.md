@@ -36,6 +36,19 @@ the YAML schema) but its behaviour lives here.
 * [VFS-006] The file-based tools shall take virtual paths as arguments, and shall resolve these paths to fully qualified file names for the underlying operating system. (Replaces REQ-704.)
 * [VFS-007] The search_notes tool shall search all libraries in priority order (highest first), and return a concatenated result. When the `list_notes` tool is invoked with the `/` or `.` argument alone, it shall enumerate the list of libraries, enabling the LLM to continue the folder search for the virtual library subfolders. (Replaces REQ-705 + REQ-706.)
 
+### Default library
+
+* [VFS-100] The system SHALL support a system library.
+* [VFS-101] The default name of the system library SHALL be `System`.
+* [VFS-102] The system SHALL support a permanent configuration option for the user to specify the display name of the system library.
+* [VFS-103] The system SHALL store the files for the system library under `%APPDATA%/fastmd/system` on the Windows operating system.
+* [VFS-104] When the `%APPDATA%/fastmd/system` on the Windows operating system does not exist, the system SHALL create it.
+* [VFS-110] The system library SHALL support a 'Conversations` folder.
+* [VFS-111] When the user performs an agent prompt, the system SHALL log the prompt, the chat model response, and any further prompts and responses to a file in the `Conversations` folder.
+* [VFS-112] When the system creates a file to log a prompt, the file name SHALL be `YYYY-MM-DD HH-MM-SS.md`
+* [VFS-113] When the system writes to a file to log a prompt, it shall use headings `## Prompt (nnn)` and `## Response (nnn)` with nnn representing a one based, incrementing number.
+* [VFS-114] When the system logs to a prompt log file, it shall include any write tool calls at the end of the `## Response (nnn)` section.
+
 ## Architecture
 
 ```

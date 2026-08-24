@@ -7,6 +7,7 @@
 pub mod agent_impl;
 pub mod config;
 pub mod context;
+pub mod conversation_logger;
 pub mod datamark;
 pub mod error;
 pub mod events;

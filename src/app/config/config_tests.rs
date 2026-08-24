@@ -855,3 +855,74 @@ fn test_chat_model_switching_runtime_lifecycle() {
     assert_eq!(agent_cfg.selected_chat_model(), None);
     assert_eq!(agent_cfg.select_chat_model().unwrap().model, "cheap-model");
 }
+
+#[test]
+fn test_system_library_default_name() {
+    let config = AppConfig::default();
+    assert_eq!(config.system_library_name, None);
+    assert_eq!(config.system_library_display_name(), "System");
+    let agent_cfg = config.to_agent_config();
+    assert_eq!(agent_cfg.system_library_name(), None);
+    assert_eq!(agent_cfg.system_library_display_name(), "System");
+}
+
+#[test]
+fn test_system_library_custom_name() {
+    let mut config = AppConfig::default();
+    config.system_library_name = Some("Personal Knowledge".to_string());
+    assert_eq!(config.system_library_display_name(), "Personal Knowledge");
+    let agent_cfg = config.to_agent_config();
+    assert_eq!(agent_cfg.system_library_name(), Some("Personal Knowledge"));
+    assert_eq!(
+        agent_cfg.system_library_display_name(),
+        "Personal Knowledge"
+    );
+}
+
+#[test]
+fn test_system_library_yaml_roundtrip() {
+    let yaml = r#"
+system_library_name: "Knowledge Base"
+"#;
+    let config: AppConfig = serde_norway::from_str(yaml).unwrap();
+    assert_eq!(
+        config.system_library_name.as_deref(),
+        Some("Knowledge Base")
+    );
+    assert_eq!(config.system_library_display_name(), "Knowledge Base");
+}
+
+#[test]
+fn test_system_library_dir_creation() {
+    let dir = tempdir().unwrap();
+    let sys_dir = AppConfig::ensure_system_library_dir_at(dir.path()).unwrap();
+    assert!(sys_dir.exists());
+    assert!(sys_dir.is_dir());
+
+    let conv_dir = AppConfig::ensure_conversations_dir_at(dir.path()).unwrap();
+    assert!(conv_dir.exists());
+    assert!(conv_dir.is_dir());
+    assert_eq!(conv_dir, sys_dir.join("Conversations"));
+}
+
+#[test]
+fn test_ensure_system_library_present_at() {
+    let dir = tempdir().unwrap();
+    let sys_path = dir.path().join("system");
+    let mut config = AppConfig::default();
+    config.ensure_system_library_present_at(&sys_path);
+
+    assert_eq!(config.content_libraries.len(), 1);
+    let lib = &config.content_libraries[0];
+    assert_eq!(lib.name, "System");
+    assert_eq!(lib.kind, "text");
+    assert!(!lib.readonly);
+    assert!(sys_path.exists());
+    assert!(sys_path.join("Conversations").exists());
+
+    // Calling again with custom name should update the existing library name
+    config.system_library_name = Some("Custom System".to_string());
+    config.ensure_system_library_present_at(&sys_path);
+    assert_eq!(config.content_libraries.len(), 1);
+    assert_eq!(config.content_libraries[0].name, "Custom System");
+}

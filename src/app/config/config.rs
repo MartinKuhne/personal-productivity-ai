@@ -164,6 +164,11 @@ pub struct AppConfig {
     /// Optional Qdrant collection name (defaults to "fastmd_chunks").
     #[serde(default)]
     pub qdrant_collection: Option<String>,
+
+    /// Optional user-specified display name for the default system library (VFS-102).
+    /// Defaults to "System" when not set (VFS-101).
+    #[serde(default)]
+    pub system_library_name: Option<String>,
 }
 
 impl std::fmt::Debug for AppConfig {
@@ -180,6 +185,7 @@ impl std::fmt::Debug for AppConfig {
             .field("jmap_clients", &self.jmap_clients)
             .field("caldav_clients", &self.caldav_clients)
             .field("content_libraries", &self.content_libraries)
+            .field("system_library_name", &self.system_library_name)
             .field("pdf_converter_command", &self.pdf_converter_command)
             .field("inline_editor_enabled", &self.inline_editor_enabled)
             .field("csv_db_path", &self.csv_db_path)
@@ -210,6 +216,7 @@ impl Default for AppConfig {
             jmap_clients: HashMap::new(),
             caldav_clients: HashMap::new(),
             content_libraries: Vec::new(),
+            system_library_name: None,
             pdf_converter_command: None,
             inline_editor_enabled: false,
             csv_db_path: None,
@@ -256,7 +263,126 @@ impl AppConfig {
             .with_csv_db_path(self.csv_db_path.clone())
             .with_feature_flags(self.feature_flags.clone())
             .with_content_libraries(self.content_libraries.clone())
+            .with_system_library_name(self.system_library_name.clone())
             .build()
+    }
+
+    /// Returns the display name of the system library (VFS-101, VFS-102).
+    pub fn system_library_display_name(&self) -> &str {
+        self.system_library_name.as_deref().unwrap_or("System")
+    }
+
+    /// Resolves the default storage directory for the system library (VFS-103).
+    /// On Windows, resolves to `%APPDATA%/fastmd/system`.
+    pub fn get_system_library_path() -> PathBuf {
+        if let Ok(app_data) = std::env::var("APPDATA") {
+            PathBuf::from(app_data).join("fastmd").join("system")
+        } else if let Ok(user_profile) = std::env::var("USERPROFILE") {
+            PathBuf::from(user_profile).join(".fastmd").join("system")
+        } else {
+            PathBuf::from("system")
+        }
+    }
+
+    /// Ensures that the system library directory exists on disk, creating it if missing (VFS-104).
+    pub fn ensure_system_library_dir() -> std::io::Result<PathBuf> {
+        let path = Self::get_system_library_path();
+        std::fs::create_dir_all(&path)?;
+        Ok(path)
+    }
+
+    /// Ensures that the `Conversations` subdirectory inside the system library exists on disk (VFS-110).
+    pub fn ensure_conversations_dir() -> std::io::Result<PathBuf> {
+        let path = Self::get_system_library_path().join("Conversations");
+        std::fs::create_dir_all(&path)?;
+        Ok(path)
+    }
+
+    /// Ensures that the system library directory exists at a specific root path (useful for tests).
+    pub fn ensure_system_library_dir_at(root: &Path) -> std::io::Result<PathBuf> {
+        let path = root.join("system");
+        std::fs::create_dir_all(&path)?;
+        Ok(path)
+    }
+
+    /// Ensures that the `Conversations` directory exists at a specific root path (useful for tests).
+    pub fn ensure_conversations_dir_at(root: &Path) -> std::io::Result<PathBuf> {
+        let path = root.join("system").join("Conversations");
+        std::fs::create_dir_all(&path)?;
+        Ok(path)
+    }
+
+    /// Construct a `ContentLibrary` representation for the system library (VFS-100..104).
+    pub fn get_or_create_system_library(&self) -> ContentLibrary {
+        let root =
+            Self::ensure_system_library_dir().unwrap_or_else(|_| Self::get_system_library_path());
+        let root_folder = root.to_string_lossy().to_string();
+        ContentLibrary {
+            root_folder,
+            name: self.system_library_display_name().to_string(),
+            kind: "text".to_string(),
+            readonly: false,
+            priority: 0,
+        }
+    }
+
+    /// Construct a `ContentLibrary` representation for the system library rooted at a specific path.
+    pub fn get_or_create_system_library_at(&self, root_system_dir: &Path) -> ContentLibrary {
+        let _ = std::fs::create_dir_all(root_system_dir);
+        let _ = std::fs::create_dir_all(root_system_dir.join("Conversations"));
+        let root_folder = root_system_dir.to_string_lossy().to_string();
+        ContentLibrary {
+            root_folder,
+            name: self.system_library_display_name().to_string(),
+            kind: "text".to_string(),
+            readonly: false,
+            priority: 0,
+        }
+    }
+
+    /// Ensures that the system library exists on disk and is present in `content_libraries` (VFS-100..104).
+    pub fn ensure_system_library_present(&mut self) {
+        let system_path =
+            Self::ensure_system_library_dir().unwrap_or_else(|_| Self::get_system_library_path());
+        let _ = Self::ensure_conversations_dir();
+        self.ensure_system_library_present_at(&system_path);
+    }
+
+    /// Ensures that the system library rooted at `system_path` is present in `content_libraries`.
+    pub fn ensure_system_library_present_at(&mut self, system_path: &Path) {
+        let _ = std::fs::create_dir_all(system_path);
+        let _ = std::fs::create_dir_all(system_path.join("Conversations"));
+        let mut path_str = system_path
+            .canonicalize()
+            .unwrap_or_else(|_| system_path.to_path_buf())
+            .to_string_lossy()
+            .to_string();
+        if path_str.starts_with(r"\\?\") {
+            path_str = path_str[4..].to_string();
+        }
+        let raw_path_str = system_path.to_string_lossy().to_string();
+        let display_name = self.system_library_display_name().to_string();
+
+        if let Some(existing) = self.content_libraries.iter_mut().find(|lib| {
+            lib.root_folder == path_str
+                || lib.root_folder == raw_path_str
+                || lib.name == display_name
+                || lib.name == "System"
+        }) {
+            existing.name = display_name;
+            existing.root_folder = path_str;
+        } else {
+            self.content_libraries.insert(
+                0,
+                crate::config::ContentLibrary {
+                    root_folder: path_str,
+                    name: display_name,
+                    kind: "text".to_string(),
+                    readonly: false,
+                    priority: 0,
+                },
+            );
+        }
     }
 
     /// Find the best model for a given use_case (lowest cost among matches).

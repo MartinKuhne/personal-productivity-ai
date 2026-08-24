@@ -312,6 +312,9 @@ impl AppOrchestrator {
                 });
         }
 
+        // Ensure default system library is present (VFS-100..104, VFS-110)
+        config.ensure_system_library_present();
+
         // Project the global config to the agent's domain slice and
         // hand it to the agent. The agent's run loop reads only the
         // projected fields; the tool context (built per session)
