@@ -330,6 +330,27 @@ pub fn render_tabs_and_content_capture(
                     *app.orchestrator.selection.selected_file_mut() = Some(tab_path.clone());
                     ui.close();
                 }
+
+                // Note skills (VFS-121)
+                let note_skills = app.config().list_note_skills();
+                if !note_skills.is_empty() {
+                    ui.separator();
+                    for skill in note_skills {
+                        if ui.button(&skill.name).clicked() {
+                            if let Ok(content) = std::fs::read_to_string(&skill.path) {
+                                *app.selection_mut().selected_file_mut() = Some(tab_path.clone());
+                                *app.submit_prompt_mut() = Some(content);
+                            } else {
+                                tracing::error!(
+                                    name = "ui.tab.skill_prompt_failed",
+                                    path = %skill.path.display(),
+                                    "Failed to read skill file content to run as prompt."
+                                );
+                            }
+                            ui.close();
+                        }
+                    }
+                }
             });
 
             if ui

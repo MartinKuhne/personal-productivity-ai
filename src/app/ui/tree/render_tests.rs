@@ -567,3 +567,151 @@ fn test_multi_select_merge_action_generates_prompt() {
         );
     }
 }
+
+#[test]
+fn test_note_skill_context_menu_action() {
+    use crate::config::ContentLibrary;
+    use crate::ui::test_helpers::interact::stateful_harness;
+    use egui_kittest::kittest::Queryable;
+
+    let dir = tempfile::tempdir().unwrap();
+    let sys_dir = dir.path().join("system");
+    let note_skills_dir = sys_dir.join("Skills").join("Note");
+    std::fs::create_dir_all(&note_skills_dir).unwrap();
+    std::fs::write(
+        note_skills_dir.join("Proofread.md"),
+        "Please proofread this document carefully.",
+    )
+    .unwrap();
+
+    let target_file = dir.path().join("target_note.md");
+    std::fs::write(&target_file, "Note contents").unwrap();
+
+    let row = FlatRow {
+        depth: 0,
+        name: "target_note.md".to_string(),
+        path: target_file.clone(),
+        is_dir: false,
+        is_expanded: false,
+    };
+    let ctx_cell: Rc<RefCell<TreeNodeContext>> = Rc::new(RefCell::new(TreeNodeContext {
+        content_libraries: vec![ContentLibrary {
+            root_folder: sys_dir.to_string_lossy().to_string(),
+            name: "System".to_string(),
+            kind: "text".to_string(),
+            readonly: false,
+            priority: 0,
+        }],
+        ..Default::default()
+    }));
+    let row_for_closure = row.clone();
+    let ctx_for_closure = Rc::clone(&ctx_cell);
+
+    let mut harness = stateful_harness((), move |ui, _| {
+        let mut ctx = ctx_for_closure.borrow_mut();
+        render_flat_row(ui, &row_for_closure, &mut ctx);
+    });
+    harness.fit_contents();
+
+    let file_nodes: Vec<_> = harness
+        .query_all_by_label_contains("target_note.md")
+        .collect();
+    assert!(
+        !file_nodes.is_empty(),
+        "expected the file row to be present"
+    );
+    file_nodes[0].click_secondary();
+    harness.run_steps(2);
+    harness.run_steps(2);
+
+    harness.get_by_label("Proofread").click_accesskit();
+    harness.run_steps(2);
+    harness.run_steps(2);
+
+    {
+        let mut ctx = ctx_cell.borrow_mut();
+        assert_eq!(
+            *ctx.submit_prompt(),
+            Some("Please proofread this document carefully.".to_string()),
+            "choosing Note skill must populate submit_prompt with file contents"
+        );
+        assert_eq!(
+            *ctx.selected_file(),
+            Some(target_file),
+            "choosing Note skill must set target file as selected"
+        );
+    }
+}
+
+#[test]
+fn test_folder_skill_context_menu_action() {
+    use crate::config::ContentLibrary;
+    use crate::ui::test_helpers::interact::stateful_harness;
+    use egui_kittest::kittest::Queryable;
+
+    let dir = tempfile::tempdir().unwrap();
+    let sys_dir = dir.path().join("system");
+    let folder_skills_dir = sys_dir.join("Skills").join("Folder");
+    std::fs::create_dir_all(&folder_skills_dir).unwrap();
+    std::fs::write(
+        folder_skills_dir.join("IndexNotes.md"),
+        "Please build an index of all notes in this directory.",
+    )
+    .unwrap();
+
+    let target_folder = dir.path().join("my_notes");
+    std::fs::create_dir_all(&target_folder).unwrap();
+
+    let row = FlatRow {
+        depth: 0,
+        name: "my_notes".to_string(),
+        path: target_folder.clone(),
+        is_dir: true,
+        is_expanded: false,
+    };
+    let ctx_cell: Rc<RefCell<TreeNodeContext>> = Rc::new(RefCell::new(TreeNodeContext {
+        content_libraries: vec![ContentLibrary {
+            root_folder: sys_dir.to_string_lossy().to_string(),
+            name: "System".to_string(),
+            kind: "text".to_string(),
+            readonly: false,
+            priority: 0,
+        }],
+        ..Default::default()
+    }));
+    let row_for_closure = row.clone();
+    let ctx_for_closure = Rc::clone(&ctx_cell);
+
+    let mut harness = stateful_harness((), move |ui, _| {
+        let mut ctx = ctx_for_closure.borrow_mut();
+        render_flat_row(ui, &row_for_closure, &mut ctx);
+    });
+    harness.fit_contents();
+
+    let dir_nodes: Vec<_> = harness.query_all_by_label_contains("my_notes").collect();
+    assert!(
+        !dir_nodes.is_empty(),
+        "expected the folder row to be present"
+    );
+    dir_nodes[0].click_secondary();
+    harness.run_steps(2);
+    harness.run_steps(2);
+
+    harness.get_by_label("IndexNotes").click_accesskit();
+    harness.run_steps(2);
+    harness.run_steps(2);
+
+    {
+        let mut ctx = ctx_cell.borrow_mut();
+        assert_eq!(
+            *ctx.submit_prompt(),
+            Some("Please build an index of all notes in this directory.".to_string()),
+            "choosing Folder skill must populate submit_prompt with file contents"
+        );
+        assert_eq!(
+            *ctx.selected_dir(),
+            Some(target_folder),
+            "choosing Folder skill must set target directory as selected"
+        );
+    }
+}

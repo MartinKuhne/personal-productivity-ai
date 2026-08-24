@@ -926,3 +926,59 @@ fn test_ensure_system_library_present_at() {
     assert_eq!(config.content_libraries.len(), 1);
     assert_eq!(config.content_libraries[0].name, "Custom System");
 }
+
+#[test]
+fn test_skills_directories_creation() {
+    let dir = tempdir().unwrap();
+    let skills_dir = AppConfig::ensure_skills_dirs_at(dir.path()).unwrap();
+    assert!(skills_dir.exists());
+    assert!(skills_dir.join("Note").exists());
+    assert!(skills_dir.join("Folder").exists());
+    assert!(skills_dir.join("Batch").exists());
+
+    assert_eq!(
+        AppConfig::get_skills_note_dir_at(dir.path()),
+        skills_dir.join("Note")
+    );
+    assert_eq!(
+        AppConfig::get_skills_folder_dir_at(dir.path()),
+        skills_dir.join("Folder")
+    );
+    assert_eq!(
+        AppConfig::get_skills_batch_dir_at(dir.path()),
+        skills_dir.join("Batch")
+    );
+}
+
+#[test]
+fn test_list_skills_files() {
+    let dir = tempdir().unwrap();
+    let sys_path = dir.path().join("system");
+    let mut config = AppConfig::default();
+    config.ensure_system_library_present_at(&sys_path);
+
+    let note_dir = sys_path.join("Skills").join("Note");
+    let folder_dir = sys_path.join("Skills").join("Folder");
+    let batch_dir = sys_path.join("Skills").join("Batch");
+
+    // Write sample skill files
+    std::fs::write(note_dir.join("Proofread.md"), "Proofread this note.").unwrap();
+    std::fs::write(note_dir.join("summarize.txt"), "Summarize this note.").unwrap();
+    std::fs::write(note_dir.join(".hidden.md"), "Hidden file").unwrap();
+
+    std::fs::write(folder_dir.join("Index.md"), "Index this folder.").unwrap();
+    std::fs::write(batch_dir.join("BulkFormat.md"), "Format all notes.").unwrap();
+
+    let note_skills = config.list_note_skills();
+    assert_eq!(note_skills.len(), 2);
+    assert_eq!(note_skills[0].name, "Proofread");
+    assert_eq!(note_skills[1].name, "summarize");
+
+    let folder_skills = config.list_folder_skills();
+    assert_eq!(folder_skills.len(), 1);
+    assert_eq!(folder_skills[0].name, "Index");
+
+    let batch_skills = config.list_batch_skills();
+    assert_eq!(batch_skills.len(), 1);
+    assert_eq!(batch_skills[0].name, "BulkFormat");
+}

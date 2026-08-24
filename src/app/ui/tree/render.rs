@@ -67,6 +67,40 @@ fn show_dir_context_menu(
         }
         ui.close();
     }
+
+    // Folder skills (VFS-122)
+    let folder_skills = {
+        let folder_dir = ctx
+            .content_libraries()
+            .iter()
+            .find(|lib| lib.name == "System")
+            .map(|lib| {
+                std::path::PathBuf::from(&lib.root_folder)
+                    .join("Skills")
+                    .join("Folder")
+            })
+            .unwrap_or_else(crate::config::AppConfig::get_skills_folder_dir);
+        crate::config::AppConfig::list_skill_files_in(&folder_dir)
+    };
+    if !folder_skills.is_empty() {
+        ui.separator();
+        for skill in folder_skills {
+            if ui.button(&skill.name).clicked() {
+                if let Ok(content) = std::fs::read_to_string(&skill.path) {
+                    *ctx.selected_dir() = Some(path.to_path_buf());
+                    *ctx.selected_file() = Some(path.to_path_buf());
+                    *ctx.submit_prompt() = Some(content);
+                } else {
+                    tracing::error!(
+                        name = "ui.dir.skill_prompt_failed",
+                        path = %skill.path.display(),
+                        "Failed to read folder skill file content to run as prompt."
+                    );
+                }
+                ui.close();
+            }
+        }
+    }
 }
 
 /// Show multi-select file context menu (merge, delete).
@@ -268,6 +302,39 @@ fn show_file_context_menu(
             producer.publish_removed(&path);
         }
         ui.close();
+    }
+
+    // Note skills (VFS-121)
+    let note_skills = {
+        let note_dir = ctx
+            .content_libraries()
+            .iter()
+            .find(|lib| lib.name == "System")
+            .map(|lib| {
+                std::path::PathBuf::from(&lib.root_folder)
+                    .join("Skills")
+                    .join("Note")
+            })
+            .unwrap_or_else(crate::config::AppConfig::get_skills_note_dir);
+        crate::config::AppConfig::list_skill_files_in(&note_dir)
+    };
+    if !note_skills.is_empty() {
+        ui.separator();
+        for skill in note_skills {
+            if ui.button(&skill.name).clicked() {
+                if let Ok(content) = std::fs::read_to_string(&skill.path) {
+                    *ctx.selected_file() = Some(path.to_path_buf());
+                    *ctx.submit_prompt() = Some(content);
+                } else {
+                    tracing::error!(
+                        name = "ui.file.skill_prompt_failed",
+                        path = %skill.path.display(),
+                        "Failed to read skill file content to run as prompt."
+                    );
+                }
+                ui.close();
+            }
+        }
     }
 }
 

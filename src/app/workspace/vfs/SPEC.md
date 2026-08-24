@@ -48,6 +48,10 @@ the YAML schema) but its behaviour lives here.
 * [VFS-112] When the system creates a file to log a prompt, the file name SHALL be `YYYY-MM-DD HH-MM-SS.md`
 * [VFS-113] When the system writes to a file to log a prompt, it shall use headings `## Prompt (nnn)` and `## Response (nnn)` with nnn representing a one based, incrementing number.
 * [VFS-114] When the system logs to a prompt log file, it shall include any write tool calls at the end of the `## Response (nnn)` section.
+* [VFS-120] The system library SHALL support a `Skills` folder with `Note`, `Folder` and `Batch` subdirectories.
+* [VFS-121] When one or more files are present in the `Skills/Note` folder, the system shall offer them as an option in the context menu when the user right-clicks on a note, either in the directory tree or on an open tab. The system shall then execute an agent prompt with the contents of the file as the user prompt.
+* [VFS-122] When one or more files are present in the `Skills/Folder` folder, the system shall offer them as an option in the context menu when the user right-clicks on a folder in the directory tree. The system shall then execute an agent prompt with the contents of the file as the user prompt.
+* [VFS-123] When one or more files are present in the `Skills/Batch` folder, the system shall offer them as an option in the batch dialog.
 
 ## Architecture
 

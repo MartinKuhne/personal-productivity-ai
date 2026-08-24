@@ -235,6 +235,15 @@ impl Default for AppConfig {
     }
 }
 
+/// Representation of an executable skill file discovered in a Skills directory (VFS-120..123).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SkillFile {
+    /// Display name of the skill (file stem or filename).
+    pub name: String,
+    /// Absolute filesystem path to the skill file.
+    pub path: PathBuf,
+}
+
 impl AppConfig {
     /// Parse `table_width_strategy` into the enum used by the FTWA algorithm.
     /// Unknown values fall back to `DeficitStrategy::HybridMinPenaltyWaterFill`
@@ -298,6 +307,124 @@ impl AppConfig {
         Ok(path)
     }
 
+    /// Resolves the path to the `Skills` directory inside the system library (VFS-120).
+    pub fn get_skills_dir() -> PathBuf {
+        Self::get_system_library_path().join("Skills")
+    }
+
+    /// Resolves the path to the `Skills/Note` directory inside the system library (VFS-120, VFS-121).
+    pub fn get_skills_note_dir() -> PathBuf {
+        Self::get_skills_dir().join("Note")
+    }
+
+    /// Resolves the path to the `Skills/Folder` directory inside the system library (VFS-120, VFS-122).
+    pub fn get_skills_folder_dir() -> PathBuf {
+        Self::get_skills_dir().join("Folder")
+    }
+
+    /// Resolves the path to the `Skills/Batch` directory inside the system library (VFS-120, VFS-123).
+    pub fn get_skills_batch_dir() -> PathBuf {
+        Self::get_skills_dir().join("Batch")
+    }
+
+    /// Ensures that the `Skills` directory and its subdirectories (`Note`, `Folder`, `Batch`) exist on disk (VFS-120).
+    pub fn ensure_skills_dirs() -> std::io::Result<PathBuf> {
+        let skills_dir = Self::get_skills_dir();
+        std::fs::create_dir_all(skills_dir.join("Note"))?;
+        std::fs::create_dir_all(skills_dir.join("Folder"))?;
+        std::fs::create_dir_all(skills_dir.join("Batch"))?;
+        Ok(skills_dir)
+    }
+
+    /// Ensures that the `Skills` directory and its subdirectories exist at a specific root path (useful for tests).
+    pub fn ensure_skills_dirs_at(root: &Path) -> std::io::Result<PathBuf> {
+        let skills_dir = root.join("system").join("Skills");
+        std::fs::create_dir_all(skills_dir.join("Note"))?;
+        std::fs::create_dir_all(skills_dir.join("Folder"))?;
+        std::fs::create_dir_all(skills_dir.join("Batch"))?;
+        Ok(skills_dir)
+    }
+
+    /// Resolves the `Skills/Note` directory at a specific root path.
+    pub fn get_skills_note_dir_at(root: &Path) -> PathBuf {
+        root.join("system").join("Skills").join("Note")
+    }
+
+    /// Resolves the `Skills/Folder` directory at a specific root path.
+    pub fn get_skills_folder_dir_at(root: &Path) -> PathBuf {
+        root.join("system").join("Skills").join("Folder")
+    }
+
+    /// Resolves the `Skills/Batch` directory at a specific root path.
+    pub fn get_skills_batch_dir_at(root: &Path) -> PathBuf {
+        root.join("system").join("Skills").join("Batch")
+    }
+
+    /// Lists all skill files present in a specified directory, sorted alphabetically by name.
+    pub fn list_skill_files_in(dir: &Path) -> Vec<SkillFile> {
+        if !dir.exists() || !dir.is_dir() {
+            return Vec::new();
+        }
+        let mut skills = Vec::new();
+        if let Ok(entries) = std::fs::read_dir(dir) {
+            for entry in entries.flatten() {
+                let path = entry.path();
+                if path.is_file() {
+                    let file_name = path
+                        .file_name()
+                        .map(|s| s.to_string_lossy().to_string())
+                        .unwrap_or_default();
+                    if !file_name.starts_with('.') {
+                        let name = path
+                            .file_stem()
+                            .map(|s| s.to_string_lossy().to_string())
+                            .unwrap_or(file_name);
+                        skills.push(SkillFile { name, path });
+                    }
+                }
+            }
+        }
+        skills.sort_by_key(|a| a.name.to_lowercase());
+        skills
+    }
+
+    /// Lists all Note skill files from the configured system library (VFS-121).
+    pub fn list_note_skills(&self) -> Vec<SkillFile> {
+        let note_dir = self
+            .content_libraries
+            .iter()
+            .find(|lib| lib.name == self.system_library_display_name())
+            .map(|lib| PathBuf::from(&lib.root_folder).join("Skills").join("Note"))
+            .unwrap_or_else(Self::get_skills_note_dir);
+        Self::list_skill_files_in(&note_dir)
+    }
+
+    /// Lists all Folder skill files from the configured system library (VFS-122).
+    pub fn list_folder_skills(&self) -> Vec<SkillFile> {
+        let folder_dir = self
+            .content_libraries
+            .iter()
+            .find(|lib| lib.name == self.system_library_display_name())
+            .map(|lib| {
+                PathBuf::from(&lib.root_folder)
+                    .join("Skills")
+                    .join("Folder")
+            })
+            .unwrap_or_else(Self::get_skills_folder_dir);
+        Self::list_skill_files_in(&folder_dir)
+    }
+
+    /// Lists all Batch skill files from the configured system library (VFS-123).
+    pub fn list_batch_skills(&self) -> Vec<SkillFile> {
+        let batch_dir = self
+            .content_libraries
+            .iter()
+            .find(|lib| lib.name == self.system_library_display_name())
+            .map(|lib| PathBuf::from(&lib.root_folder).join("Skills").join("Batch"))
+            .unwrap_or_else(Self::get_skills_batch_dir);
+        Self::list_skill_files_in(&batch_dir)
+    }
+
     /// Ensures that the system library directory exists at a specific root path (useful for tests).
     pub fn ensure_system_library_dir_at(root: &Path) -> std::io::Result<PathBuf> {
         let path = root.join("system");
@@ -312,10 +439,11 @@ impl AppConfig {
         Ok(path)
     }
 
-    /// Construct a `ContentLibrary` representation for the system library (VFS-100..104).
+    /// Construct a `ContentLibrary` representation for the system library (VFS-100..104, VFS-120).
     pub fn get_or_create_system_library(&self) -> ContentLibrary {
         let root =
             Self::ensure_system_library_dir().unwrap_or_else(|_| Self::get_system_library_path());
+        let _ = Self::ensure_skills_dirs();
         let root_folder = root.to_string_lossy().to_string();
         ContentLibrary {
             root_folder,
@@ -330,6 +458,9 @@ impl AppConfig {
     pub fn get_or_create_system_library_at(&self, root_system_dir: &Path) -> ContentLibrary {
         let _ = std::fs::create_dir_all(root_system_dir);
         let _ = std::fs::create_dir_all(root_system_dir.join("Conversations"));
+        let _ = std::fs::create_dir_all(root_system_dir.join("Skills").join("Note"));
+        let _ = std::fs::create_dir_all(root_system_dir.join("Skills").join("Folder"));
+        let _ = std::fs::create_dir_all(root_system_dir.join("Skills").join("Batch"));
         let root_folder = root_system_dir.to_string_lossy().to_string();
         ContentLibrary {
             root_folder,
@@ -340,11 +471,12 @@ impl AppConfig {
         }
     }
 
-    /// Ensures that the system library exists on disk and is present in `content_libraries` (VFS-100..104).
+    /// Ensures that the system library exists on disk and is present in `content_libraries` (VFS-100..104, VFS-120).
     pub fn ensure_system_library_present(&mut self) {
         let system_path =
             Self::ensure_system_library_dir().unwrap_or_else(|_| Self::get_system_library_path());
         let _ = Self::ensure_conversations_dir();
+        let _ = Self::ensure_skills_dirs();
         self.ensure_system_library_present_at(&system_path);
     }
 
@@ -352,6 +484,9 @@ impl AppConfig {
     pub fn ensure_system_library_present_at(&mut self, system_path: &Path) {
         let _ = std::fs::create_dir_all(system_path);
         let _ = std::fs::create_dir_all(system_path.join("Conversations"));
+        let _ = std::fs::create_dir_all(system_path.join("Skills").join("Note"));
+        let _ = std::fs::create_dir_all(system_path.join("Skills").join("Folder"));
+        let _ = std::fs::create_dir_all(system_path.join("Skills").join("Batch"));
         let mut path_str = system_path
             .canonicalize()
             .unwrap_or_else(|_| system_path.to_path_buf())

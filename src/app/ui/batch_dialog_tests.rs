@@ -200,3 +200,43 @@ fn test_batch_dialog_renders_running_view() {
         texts
     );
 }
+
+#[test]
+fn test_batch_dialog_discovers_batch_skills() {
+    let dir = tempfile::tempdir().unwrap();
+    let sys_dir = dir.path().join("system");
+    let batch_skills_dir = sys_dir.join("Skills").join("Batch");
+    std::fs::create_dir_all(&batch_skills_dir).unwrap();
+    std::fs::write(
+        batch_skills_dir.join("BatchSummarize.md"),
+        "Summarize all notes in batch.",
+    )
+    .unwrap();
+
+    let mut config = crate::config::AppConfig::default();
+    config.content_libraries = vec![crate::config::ContentLibrary {
+        root_folder: sys_dir.to_string_lossy().to_string(),
+        name: "System".to_string(),
+        kind: "text".to_string(),
+        readonly: false,
+        priority: 0,
+    }];
+
+    let mut app = crate::ui::FastMdApp::empty_state(config);
+    let mut dialog_config = BatchDialogConfig::default();
+    let _ = render_dialog_once(&mut app, &mut dialog_config);
+
+    assert_eq!(
+        dialog_config.available_prompts.len(),
+        1,
+        "batch skill in Skills/Batch must be discovered as available prompt"
+    );
+    assert_eq!(
+        dialog_config.available_prompts[0].display_name,
+        "System / Skills/Batch/BatchSummarize"
+    );
+    assert_eq!(
+        dialog_config.available_prompts[0].content,
+        "Summarize all notes in batch."
+    );
+}
