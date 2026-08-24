@@ -160,23 +160,19 @@ fn test_tool_invalid_args_returns_error() {
 #[test]
 fn test_tool_call_debug_mode_feature_flag() {
     let mut config = AgentConfig::default();
-    assert!(
-        !config
-            .feature_flags
-            .get("toolCallDebugMode")
-            .copied()
-            .unwrap_or(false)
-    );
+    assert!(!config
+        .feature_flags
+        .get("toolCallDebugMode")
+        .copied()
+        .unwrap_or(false));
     config
         .feature_flags
         .insert("toolCallDebugMode".to_string(), true);
-    assert!(
-        config
-            .feature_flags
-            .get("toolCallDebugMode")
-            .copied()
-            .unwrap_or(false)
-    );
+    assert!(config
+        .feature_flags
+        .get("toolCallDebugMode")
+        .copied()
+        .unwrap_or(false));
     let ctx = test_ctx(&config);
     let res = execute_tool(&ToolRegistry::new(), &ctx, "unknown_tool", "{}");
     assert!(res.contains("not found") || res.contains("error"));
@@ -239,7 +235,11 @@ fn two_libs_with_n_tagged_files_each(n: usize) -> (AgentConfig, LibFixture) {
 
 fn run_list_by_tag(config: &AgentConfig, args: &str) -> Value {
     let ctx = test_ctx(config);
-    let raw = execute_tool(&ToolRegistry::new(), &ctx, "list_notes_by_tag", args);
+    run_list_by_tag_with_context(&ctx, args)
+}
+
+fn run_list_by_tag_with_context(ctx: &ToolContext, args: &str) -> Value {
+    let raw = execute_tool(&ToolRegistry::new(), ctx, "list_notes_by_tag", args);
     serde_json::from_str(&raw)
         .unwrap_or_else(|e| panic!("could not parse tool response `{}`: {}", raw, e))
 }
@@ -260,8 +260,9 @@ fn files_array(data: &Value) -> Vec<String> {
 #[test]
 fn test_list_by_tag_cursor_pagination_64_page_size() {
     let (config, _dir) = single_lib_with_n_tagged_files(150);
+    let ctx = test_ctx(&config);
     // Page 1
-    let envelope1 = run_list_by_tag(&config, r#"{"tag":"meeting"}"#);
+    let envelope1 = run_list_by_tag_with_context(&ctx, r#"{"tag":"meeting"}"#);
     assert_eq!(envelope1["status"], "success");
     let data1 = &envelope1["data"];
     assert_eq!(data1["total"], 150);
@@ -272,8 +273,8 @@ fn test_list_by_tag_cursor_pagination_64_page_size() {
     let cursor1 = data1["cursor"].as_str().unwrap();
 
     // Page 2
-    let envelope2 = run_list_by_tag(
-        &config,
+    let envelope2 = run_list_by_tag_with_context(
+        &ctx,
         &format!(r#"{{"tag":"meeting","cursor":"{cursor1}"}}"#),
     );
     assert_eq!(envelope2["status"], "success");
@@ -286,8 +287,8 @@ fn test_list_by_tag_cursor_pagination_64_page_size() {
     let cursor2 = data2["cursor"].as_str().unwrap();
 
     // Page 3 (final)
-    let envelope3 = run_list_by_tag(
-        &config,
+    let envelope3 = run_list_by_tag_with_context(
+        &ctx,
         &format!(r#"{{"tag":"meeting","cursor":"{cursor2}"}}"#),
     );
     assert_eq!(envelope3["status"], "success");
@@ -396,11 +397,9 @@ fn test_list_files_default_limit_is_100() {
     assert_eq!(data["total"], 150);
     let files = files_array(data);
     assert_eq!(files.len(), 100);
-    assert!(
-        files
-            .iter()
-            .all(|p| p.starts_with("Lib") && p.contains("note_"))
-    );
+    assert!(files
+        .iter()
+        .all(|p| p.starts_with("Lib") && p.contains("note_")));
 }
 
 #[test]
@@ -559,7 +558,11 @@ fn test_list_files_returns_json_array_not_string() {
 
 fn run_grep(config: &AgentConfig, args: &str) -> Value {
     let ctx = test_ctx(config);
-    let raw = execute_tool(&ToolRegistry::new(), &ctx, "search_notes", args);
+    run_grep_with_context(&ctx, args)
+}
+
+fn run_grep_with_context(ctx: &ToolContext, args: &str) -> Value {
+    let raw = execute_tool(&ToolRegistry::new(), ctx, "search_notes", args);
     serde_json::from_str(&raw)
         .unwrap_or_else(|e| panic!("could not parse tool response `{}`: {}", raw, e))
 }
@@ -615,8 +618,9 @@ fn test_grep_cursor_pagination_64_page_size() {
         .collect::<Vec<_>>()
         .join("\n");
     let (config, _dir) = single_lib_with_files(&[("big.md", &content)]);
+    let ctx = test_ctx(&config);
     // Page 1
-    let envelope1 = run_grep(&config, r#"{"query":"needle"}"#);
+    let envelope1 = run_grep_with_context(&ctx, r#"{"query":"needle"}"#);
     assert_eq!(envelope1["status"], "success");
     let data1 = &envelope1["data"];
     assert_eq!(data1["total"], 150);
@@ -627,8 +631,8 @@ fn test_grep_cursor_pagination_64_page_size() {
     let cursor1 = data1["cursor"].as_str().unwrap();
 
     // Page 2
-    let envelope2 = run_grep(
-        &config,
+    let envelope2 = run_grep_with_context(
+        &ctx,
         &format!(r#"{{"query":"needle","cursor":"{cursor1}"}}"#),
     );
     assert_eq!(envelope2["status"], "success");
@@ -641,8 +645,8 @@ fn test_grep_cursor_pagination_64_page_size() {
     let cursor2 = data2["cursor"].as_str().unwrap();
 
     // Page 3 (final)
-    let envelope3 = run_grep(
-        &config,
+    let envelope3 = run_grep_with_context(
+        &ctx,
         &format!(r#"{{"query":"needle","cursor":"{cursor2}"}}"#),
     );
     assert_eq!(envelope3["status"], "success");
