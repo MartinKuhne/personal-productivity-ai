@@ -158,7 +158,11 @@ pub fn format_tool_result_message(func_name: &str, result: &str) -> String {
                 .and_then(|f| f.as_bool())
                 .unwrap_or(false);
             let cache_tag = if from_cache { " (cached)" } else { "" };
-            let returned = content.lines().count();
+            let returned = if content.is_empty() {
+                0
+            } else {
+                content.split('\n').count()
+            };
 
             let mut msg = format!(
                 "> **Result (`{}`):** {} of {} markdown lines returned{}.",

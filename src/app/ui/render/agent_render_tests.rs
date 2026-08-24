@@ -298,3 +298,29 @@ fn test_format_result_web_fetch_single_page_no_paging() {
     assert!(!msg.contains("More pages remain"));
     assert!(!msg.contains("Final page"));
 }
+
+#[test]
+fn test_format_result_web_fetch_preserves_count_with_trailing_empty_line() {
+    // 64 lines where line 64 is an empty line (common between markdown blocks).
+    // Joining with "\n" creates a trailing newline. The count must be 64, not 63.
+    let mut lines: Vec<&str> = (0..63).map(|_| "paragraph text").collect();
+    lines.push("");
+    let content = lines.join("\n");
+
+    let result = serde_json::json!({
+        "status": "success",
+        "data": {
+            "content": content,
+            "total_lines": 3089,
+            "cursor": "c_4a8b2f9c",
+            "hint": null,
+            "from_cache": false
+        }
+    })
+    .to_string();
+
+    let msg = format_tool_result_message("web_fetch", &result);
+    assert!(msg.contains("64 of 3089 markdown lines returned"));
+    assert!(msg.contains("More pages remain"));
+    assert!(msg.contains("c_4a8b2f9c"));
+}
