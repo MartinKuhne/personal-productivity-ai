@@ -9,6 +9,7 @@ use crate::bus::events::messages::TokenUsageInfo;
 use serde::Serialize;
 use serde_json::Value;
 use std::path::Path;
+use std::sync::Arc;
 use uuid::Uuid;
 
 /// Output message: agent → UI on `Bus<AgentEvent>` (tokio broadcast, capacity
@@ -223,6 +224,86 @@ impl OnFileChanged for BusAgentEventObserver {
     }
 }
 
+/// An observer that forwards every event to multiple underlying [`AgentEventObserver`] instances.
+pub struct CompositeAgentEventObserver {
+    observers: Vec<Arc<dyn AgentEventObserver>>,
+}
+
+impl CompositeAgentEventObserver {
+    /// Creates a new composite observer from a list of observers.
+    pub fn new(observers: Vec<Arc<dyn AgentEventObserver>>) -> Self {
+        Self { observers }
+    }
+}
+
+impl AgentEventObserver for CompositeAgentEventObserver {
+    fn on_session_started(&self) {
+        for obs in &self.observers {
+            obs.on_session_started();
+        }
+    }
+
+    fn on_session_finished(&self, history: Vec<serde_json::Value>) {
+        for obs in &self.observers {
+            obs.on_session_finished(history.clone());
+        }
+    }
+
+    fn on_status(&self, status: AgentStatus) {
+        for obs in &self.observers {
+            obs.on_status(status.clone());
+        }
+    }
+
+    fn on_thinking(&self, text: String) {
+        for obs in &self.observers {
+            obs.on_thinking(text.clone());
+        }
+    }
+
+    fn on_content_delta(&self, text: String) {
+        for obs in &self.observers {
+            obs.on_content_delta(text.clone());
+        }
+    }
+
+    fn on_tool_call_started(&self, id: String, name: String, args: serde_json::Value) {
+        for obs in &self.observers {
+            obs.on_tool_call_started(id.clone(), name.clone(), args.clone());
+        }
+    }
+
+    fn on_tool_result(&self, id: String, name: String, result: Value) {
+        for obs in &self.observers {
+            obs.on_tool_result(id.clone(), name.clone(), result.clone());
+        }
+    }
+
+    fn on_tool_side_effect(&self, effect: ToolSideEffect) {
+        for obs in &self.observers {
+            obs.on_tool_side_effect(effect.clone());
+        }
+    }
+
+    fn on_debug_entry(&self, entry: AgentDebugEntry) {
+        for obs in &self.observers {
+            obs.on_debug_entry(entry.clone());
+        }
+    }
+
+    fn on_token_usage(&self, usage: TokenUsageInfo) {
+        for obs in &self.observers {
+            obs.on_token_usage(usage.clone());
+        }
+    }
+
+    fn on_failed(&self, error: String) {
+        for obs in &self.observers {
+            obs.on_failed(error.clone());
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -259,5 +340,22 @@ mod tests {
             }
             other => panic!("expected ToolSideEffect, got {:?}", other),
         }
+    }
+
+    #[test]
+    fn test_composite_agent_event_observer_forwards_all_events() {
+        let obs1 = Arc::new(crate::agent::events::RecordingObserver::new());
+        let obs2 = Arc::new(crate::agent::events::RecordingObserver::new());
+
+        let composite = CompositeAgentEventObserver::new(vec![obs1.clone(), obs2.clone()]);
+        composite.on_session_started();
+        composite.on_thinking("reasoning".to_string());
+        composite.on_content_delta("delta".to_string());
+        composite.on_status(AgentStatus::Done);
+        composite.on_session_finished(vec![serde_json::json!({"role": "user", "content": "hi"})]);
+
+        assert_eq!(obs1.events().len(), 5);
+        assert_eq!(obs2.events().len(), 5);
+        assert_eq!(obs1.events(), obs2.events());
     }
 }

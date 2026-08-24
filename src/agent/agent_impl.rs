@@ -62,23 +62,18 @@ fn run_agent_inner(ctx: AgentContext) -> Vec<serde_json::Value> {
 
     let mut turn_number: usize = 0;
     let mut prev_messages_len: usize = 0;
-    let mut write_tool_records: Vec<ToolCallRecord> = Vec::new();
     loop {
         if ctx.cancel_flag.load(Ordering::SeqCst) {
             break;
         }
-        let mut state = TurnState {
-            turn_number: &mut turn_number,
-            prev_messages_len: &mut prev_messages_len,
-            write_tool_records: &mut write_tool_records,
-        };
         match process_turn(
             &llm,
             &ctx,
             &mut messages,
             &tools_json,
             &executor,
-            &mut state,
+            &mut turn_number,
+            &mut prev_messages_len,
         ) {
             Turn::Continue => {}
             Turn::Done => break,
@@ -92,57 +87,8 @@ fn run_agent_inner(ctx: AgentContext) -> Vec<serde_json::Value> {
         ctx.observer.on_status(AgentStatus::Done);
     }
 
-    let assistant_response = messages
-        .iter()
-        .rev()
-        .find_map(|m| {
-            if m.get("role").and_then(|r| r.as_str()) == Some("assistant") {
-                m.get("content")
-                    .and_then(|c| c.as_str())
-                    .map(|s| s.to_string())
-            } else {
-                None
-            }
-        })
-        .unwrap_or_default();
-
-    let conversations_dir = ctx
-        .agent_config
-        .content_libraries()
-        .iter()
-        .find(|lib| lib.name == ctx.agent_config.system_library_display_name())
-        .map(|lib| std::path::PathBuf::from(&lib.root_folder).join("Conversations"))
-        .unwrap_or_else(|| {
-            if let Ok(app_data) = std::env::var("APPDATA") {
-                std::path::PathBuf::from(app_data)
-                    .join("fastmd")
-                    .join("system")
-                    .join("Conversations")
-            } else if let Ok(user_profile) = std::env::var("USERPROFILE") {
-                std::path::PathBuf::from(user_profile)
-                    .join(".fastmd")
-                    .join("system")
-                    .join("Conversations")
-            } else {
-                std::path::PathBuf::from("system").join("Conversations")
-            }
-        });
-
-    let _ = crate::conversation_logger::global_logger().log_turn(
-        ctx.session_id,
-        &ctx.prompt,
-        &assistant_response,
-        &write_tool_records,
-        &conversations_dir,
-    );
-
     ctx.observer.on_session_finished(messages.clone());
     messages
-}
-struct TurnState<'a> {
-    turn_number: &'a mut usize,
-    prev_messages_len: &'a mut usize,
-    write_tool_records: &'a mut Vec<ToolCallRecord>,
 }
 
 enum Turn {
@@ -157,15 +103,16 @@ fn process_turn(
     messages: &mut Vec<serde_json::Value>,
     tools_json: &serde_json::Value,
     executor: &ToolExecutor,
-    state: &mut TurnState<'_>,
+    turn_number: &mut usize,
+    prev_messages_len: &mut usize,
 ) -> Turn {
-    *state.turn_number += 1;
-    let turn = *state.turn_number;
+    *turn_number += 1;
+    let turn = *turn_number;
 
     ctx.observer.on_status(AgentStatus::AwaitingLlm);
 
     let tool_count = tools_json.as_array().map(|a| a.len()).unwrap_or(0);
-    let delta: Vec<serde_json::Value> = messages[*state.prev_messages_len..].to_vec();
+    let delta: Vec<serde_json::Value> = messages[*prev_messages_len..].to_vec();
     let outgoing_entry = AgentDebugEntry {
         turn,
         timestamp: chrono::Local::now(),
@@ -185,7 +132,7 @@ fn process_turn(
         row_type: DebugEntryRow::Entry,
     };
     publish_debug(&*ctx.observer, outgoing_entry);
-    *state.prev_messages_len = messages.len();
+    *prev_messages_len = messages.len();
 
     let resp_val = match llm.chat_completion(messages, tools_json) {
         Ok(v) => v,
@@ -265,11 +212,6 @@ fn process_turn(
             let (results, side_effects) = executor.execute_all(tc);
             for effect in side_effects {
                 ctx.observer.on_tool_side_effect(effect.clone());
-            }
-            for record in &results {
-                if executor.classify(&record.name) == crate::tools::Safety::Mutating {
-                    state.write_tool_records.push(record.clone());
-                }
             }
             emit_tool_results_debug(turn, &*ctx.observer, &results);
             process_tool_results(&results, tc, messages, &*ctx.observer);

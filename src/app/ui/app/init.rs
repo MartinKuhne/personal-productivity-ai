@@ -134,9 +134,19 @@ impl FastMdApp {
         let agent_event_bus_clone = agent_event_bus.clone();
         let observer_factory: crate::agent::events::AgentObserverFactory =
             std::sync::Arc::new(move |session_id| {
-                std::sync::Arc::new(crate::bus::events::agent::BusAgentEventObserver::new(
-                    session_id,
-                    agent_event_bus_clone.clone(),
+                let bus_observer =
+                    std::sync::Arc::new(crate::bus::events::agent::BusAgentEventObserver::new(
+                        session_id,
+                        agent_event_bus_clone.clone(),
+                    ));
+                let logger_observer = std::sync::Arc::new(
+                    crate::ui::agent::conversation_logger::ConversationLoggerObserver::new(
+                        session_id,
+                        crate::config::AppConfig::get_system_library_path().join("Conversations"),
+                    ),
+                );
+                std::sync::Arc::new(crate::bus::events::agent::CompositeAgentEventObserver::new(
+                    vec![bus_observer, logger_observer],
                 ))
             });
 
@@ -293,9 +303,19 @@ impl FastMdApp {
         let agent_event_bus_clone = agent_event_bus.clone();
         let observer_factory: crate::agent::events::AgentObserverFactory =
             std::sync::Arc::new(move |session_id| {
-                std::sync::Arc::new(crate::bus::events::agent::BusAgentEventObserver::new(
-                    session_id,
-                    agent_event_bus_clone.clone(),
+                let bus_observer =
+                    std::sync::Arc::new(crate::bus::events::agent::BusAgentEventObserver::new(
+                        session_id,
+                        agent_event_bus_clone.clone(),
+                    ));
+                let logger_observer = std::sync::Arc::new(
+                    crate::ui::agent::conversation_logger::ConversationLoggerObserver::new(
+                        session_id,
+                        crate::config::AppConfig::get_system_library_path().join("Conversations"),
+                    ),
+                );
+                std::sync::Arc::new(crate::bus::events::agent::CompositeAgentEventObserver::new(
+                    vec![bus_observer, logger_observer],
                 ))
             });
 
