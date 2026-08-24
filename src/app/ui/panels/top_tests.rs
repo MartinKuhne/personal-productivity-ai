@@ -312,7 +312,77 @@ fn test_hamburger_menu_chat_models_selection_click() {
     );
 }
 
-/// Tier 1 test for `apply_chat_model_selection`.
+/// Tier 4 click test: clicking hamburger menu -> Chat models -> model-b, then switching back to model-a.
+#[test]
+fn test_hamburger_menu_chat_models_switch_between_models_click() {
+    use crate::ui::test_helpers::interact::stateful_harness;
+    use egui_kittest::kittest::Queryable;
+
+    let mut harness = stateful_harness(
+        (create_test_app_with_models(), Vec::<&'static str>::new()),
+        |ui, (app, captured)| {
+            show_top_panel_capture(app, ui, |event| {
+                captured.push(event);
+            });
+        },
+    );
+    harness.set_size(egui::vec2(800.0, 600.0));
+    harness.run_steps(2);
+
+    // Open hamburger menu -> Chat models -> click model-b
+    harness
+        .get_by_label(crate::ui::strings::HAMBURGER_MENU_BUTTON)
+        .click();
+    harness.run_steps(2);
+    harness.run_steps(2);
+
+    harness
+        .get_by_label_contains(crate::ui::strings::MENU_CHAT_MODELS)
+        .click();
+    harness.run_steps(2);
+    harness.run_steps(2);
+
+    harness.get_by_label_contains("model-b").click_accesskit();
+    harness.run_steps(2);
+    harness.run_steps(2);
+
+    let (app, captured) = harness.state();
+    assert_eq!(app.config().selected_chat_model.as_deref(), Some("model-b"));
+    assert_eq!(
+        app.agent().agent_config().selected_chat_model(),
+        Some("model-b")
+    );
+    assert_eq!(
+        captured.last().copied(),
+        Some(crate::ui::strings::CHAT_MODEL_SELECTION_EVENT)
+    );
+
+    // Open hamburger menu -> Chat models -> switch back to model-a
+    harness
+        .get_by_label(crate::ui::strings::HAMBURGER_MENU_BUTTON)
+        .click();
+    harness.run_steps(2);
+    harness.run_steps(2);
+
+    harness
+        .get_by_label_contains(crate::ui::strings::MENU_CHAT_MODELS)
+        .click();
+    harness.run_steps(2);
+    harness.run_steps(2);
+
+    harness.get_by_label_contains("model-a").click_accesskit();
+    harness.run_steps(2);
+    harness.run_steps(2);
+
+    let (app, _) = harness.state();
+    assert_eq!(app.config().selected_chat_model.as_deref(), Some("model-a"));
+    assert_eq!(
+        app.agent().agent_config().selected_chat_model(),
+        Some("model-a")
+    );
+}
+
+/// Tier 1 test for `apply_chat_model_selection` verifying switching between models and idempotence.
 #[test]
 fn test_apply_chat_model_selection() {
     let mut app = create_test_app_with_models();
@@ -322,8 +392,8 @@ fn test_apply_chat_model_selection() {
         Some("model-a")
     );
 
+    // Switch to model-b
     apply_chat_model_selection(&mut app, "model-b".to_string());
-
     assert_eq!(app.config().selected_chat_model.as_deref(), Some("model-b"));
     assert_eq!(
         app.config().current_chat_model_key().as_deref(),
@@ -332,6 +402,38 @@ fn test_apply_chat_model_selection() {
     assert_eq!(
         app.agent().agent_config().selected_chat_model(),
         Some("model-b")
+    );
+    assert_eq!(
+        app.agent()
+            .agent_config()
+            .select_chat_model()
+            .unwrap()
+            .model,
+        "model-b"
+    );
+
+    // Idempotent re-selection of same model
+    apply_chat_model_selection(&mut app, "model-b".to_string());
+    assert_eq!(app.config().selected_chat_model.as_deref(), Some("model-b"));
+
+    // Switch back to model-a
+    apply_chat_model_selection(&mut app, "model-a".to_string());
+    assert_eq!(app.config().selected_chat_model.as_deref(), Some("model-a"));
+    assert_eq!(
+        app.config().current_chat_model_key().as_deref(),
+        Some("model-a")
+    );
+    assert_eq!(
+        app.agent().agent_config().selected_chat_model(),
+        Some("model-a")
+    );
+    assert_eq!(
+        app.agent()
+            .agent_config()
+            .select_chat_model()
+            .unwrap()
+            .model,
+        "model-a"
     );
 }
 
