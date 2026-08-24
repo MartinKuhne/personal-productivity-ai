@@ -18,47 +18,6 @@ fn test_default_config_produces_static_and_date_only() {
 }
 
 #[test]
-fn test_user_name_in_dynamic() {
-    let config = AppConfig {
-        user_name: Some("Alice".to_string()),
-        ..AppConfig::default()
-    };
-    let prompts = build_system_prompts(&config, None, None, &HashSet::new());
-    assert!(prompts[1].contains("Alice"));
-    assert!(prompts[1].contains("User's Name: Alice"));
-}
-
-#[test]
-fn test_user_address_in_dynamic() {
-    let config = AppConfig {
-        user_address: Some("123 Main".to_string()),
-        ..AppConfig::default()
-    };
-    let prompts = build_system_prompts(&config, None, None, &HashSet::new());
-    assert!(prompts[1].contains("123 Main"));
-}
-
-#[test]
-fn test_user_birthdate_in_dynamic() {
-    let config = AppConfig {
-        user_birthdate: Some("1990-01-01".to_string()),
-        ..AppConfig::default()
-    };
-    let prompts = build_system_prompts(&config, None, None, &HashSet::new());
-    assert!(prompts[1].contains("User's Age:"));
-}
-
-#[test]
-fn test_user_gender_in_dynamic() {
-    let config = AppConfig {
-        user_gender: Some("female".to_string()),
-        ..AppConfig::default()
-    };
-    let prompts = build_system_prompts(&config, None, None, &HashSet::new());
-    assert!(prompts[1].contains("female"));
-}
-
-#[test]
 fn test_system_prompt_extension_in_dynamic() {
     let config = AppConfig {
         system_prompt_extension: Some("Custom instructions.".to_string()),

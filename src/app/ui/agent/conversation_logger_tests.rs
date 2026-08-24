@@ -11,6 +11,20 @@ fn test_generate_conversation_filename() {
 }
 
 #[test]
+fn test_conversation_path_avoids_timestamp_collision() {
+    let temp = tempfile::tempdir().unwrap();
+    let now = Local.with_ymd_and_hms(2026, 8, 24, 14, 30, 45).unwrap();
+    let first = conversation_log_path(temp.path(), now);
+    std::fs::write(&first, "existing").unwrap();
+
+    let second = conversation_log_path(temp.path(), now);
+
+    assert_eq!(first.file_name().unwrap(), "2026-08-24 14-30-45.md");
+    assert_eq!(second.file_name().unwrap(), "2026-08-24 14-30-45-2.md");
+    assert_ne!(first, second);
+}
+
+#[test]
 fn test_heading_formatting() {
     assert_eq!(format_prompt_heading(1), "## Prompt (1)");
     assert_eq!(format_response_heading(1), "## Response (1)");
@@ -114,6 +128,32 @@ fn test_conversation_logger_observer_multi_turn() {
     assert!(content_2.contains("## Prompt (2)\n\nTurn 2 prompt"));
     assert!(content_2.contains("## Response (2)\n\nTurn 2 response"));
     assert!(content_2.contains("> **Executing tool `create_note`**"));
+}
+
+#[test]
+fn test_conversation_logger_retains_turn_after_write_failure() {
+    let temp = tempfile::tempdir().unwrap();
+    let log_path = temp.path().join("not-a-file");
+    std::fs::create_dir(&log_path).unwrap();
+    let observer = ConversationLoggerObserver::new(Uuid::new_v4(), temp.path().to_path_buf());
+    {
+        let mut state = observer.state.lock().unwrap();
+        state.file_path = Some(log_path);
+        state.mutating_tool_records.push(MutatingToolCallRecord {
+            name: "create_note".to_string(),
+            arguments: "{}".to_string(),
+            result: "created".to_string(),
+        });
+    }
+
+    observer.on_session_finished(vec![
+        serde_json::json!({"role": "user", "content": "Prompt"}),
+        serde_json::json!({"role": "assistant", "content": "Response"}),
+    ]);
+
+    let state = observer.state.lock().unwrap();
+    assert_eq!(state.turn_number, 0);
+    assert_eq!(state.mutating_tool_records.len(), 1);
 }
 
 #[test]

@@ -39,6 +39,23 @@ pub fn generate_conversation_filename(now: DateTime<Local>) -> String {
     format!("{}.md", now.format("%Y-%m-%d %H-%M-%S"))
 }
 
+fn conversation_log_path(dir: &std::path::Path, now: DateTime<Local>) -> PathBuf {
+    let stem = now.format("%Y-%m-%d %H-%M-%S").to_string();
+    let first = dir.join(generate_conversation_filename(now));
+    if !first.exists() {
+        return first;
+    }
+
+    let mut suffix = 2;
+    loop {
+        let candidate = dir.join(format!("{stem}-{suffix}.md"));
+        if !candidate.exists() {
+            return candidate;
+        }
+        suffix += 1;
+    }
+}
+
 /// Formats a prompt section heading `## Prompt (nnn)` (VFS-113).
 pub fn format_prompt_heading(turn_number: usize) -> String {
     format!("## Prompt ({})", turn_number)
@@ -194,16 +211,10 @@ impl AgentEventObserver for ConversationLoggerObserver {
 
         let path = match state.file_path.clone() {
             Some(p) => p,
-            None => {
-                let filename = generate_conversation_filename(Local::now());
-                let p = self.conversations_dir.join(filename);
-                state.file_path = Some(p.clone());
-                p
-            }
+            None => conversation_log_path(&self.conversations_dir, Local::now()),
         };
 
-        state.turn_number += 1;
-        let turn = state.turn_number;
+        let turn = state.turn_number + 1;
         let entry = format_turn_entry(
             turn,
             &user_prompt,
@@ -211,17 +222,26 @@ impl AgentEventObserver for ConversationLoggerObserver {
             &state.mutating_tool_records,
         );
 
-        if let Ok(mut file) = OpenOptions::new().create(true).append(true).open(&path) {
-            let _ = file.write_all(entry.as_bytes());
-            let _ = file.flush();
-        } else {
+        let write_result = OpenOptions::new()
+            .create(true)
+            .append(true)
+            .open(&path)
+            .and_then(|mut file| {
+                file.write_all(entry.as_bytes())?;
+                file.flush()
+            });
+        if let Err(e) = write_result {
             tracing::error!(
                 name = "ui.conversation_logger.write_failed",
                 path = %path.display(),
+                error = %e,
                 "Failed to write to conversation log file."
             );
+            return;
         }
 
+        state.file_path = Some(path);
+        state.turn_number = turn;
         state.mutating_tool_records.clear();
         state.started_tool_calls.clear();
     }

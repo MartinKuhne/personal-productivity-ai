@@ -82,14 +82,6 @@ fn default_discord_rate_limit() -> u32 {
 #[serde(default)]
 pub struct AppConfig {
     #[serde(default)]
-    pub user_name: Option<String>,
-    #[serde(default)]
-    pub user_address: Option<String>,
-    #[serde(default)]
-    pub user_birthdate: Option<String>,
-    #[serde(default)]
-    pub user_gender: Option<String>,
-    #[serde(default)]
     pub system_prompt_extension: Option<String>,
     #[serde(default)]
     pub models: HashMap<String, LlmConfig>,
@@ -174,10 +166,6 @@ pub struct AppConfig {
 impl std::fmt::Debug for AppConfig {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("AppConfig")
-            .field("user_name", &self.user_name)
-            .field("user_address", &self.user_address)
-            .field("user_birthdate", &self.user_birthdate)
-            .field("user_gender", &self.user_gender)
             .field("system_prompt_extension", &self.system_prompt_extension)
             .field("models", &self.models)
             .field("selected_chat_model", &self.selected_chat_model)
@@ -205,10 +193,6 @@ impl std::fmt::Debug for AppConfig {
 impl Default for AppConfig {
     fn default() -> Self {
         Self {
-            user_name: None,
-            user_address: None,
-            user_birthdate: None,
-            user_gender: None,
             system_prompt_extension: None,
             models: HashMap::new(),
             selected_chat_model: None,
@@ -506,15 +490,18 @@ impl AppConfig {
         }
         let raw_path_str = system_path.to_string_lossy().to_string();
         let display_name = self.system_library_display_name().to_string();
+        let has_custom_display_name = self.system_library_name.is_some();
 
         if let Some(existing) = self.content_libraries.iter_mut().find(|lib| {
             lib.root_folder == path_str
                 || lib.root_folder == raw_path_str
-                || lib.name == display_name
-                || lib.name == "System"
+                || (has_custom_display_name && lib.name == display_name)
         }) {
             existing.name = display_name;
             existing.root_folder = path_str;
+            existing.kind = "text".to_string();
+            existing.readonly = false;
+            existing.priority = 0;
         } else {
             self.content_libraries.insert(
                 0,

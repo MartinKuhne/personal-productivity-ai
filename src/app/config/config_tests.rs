@@ -222,13 +222,14 @@ fn test_load_config_valid_file() {
     let dir = tempdir().unwrap();
     let config_path = dir.path().join("fastmd").join("config.yaml");
     std::fs::create_dir_all(config_path.parent().unwrap()).unwrap();
-    let yaml = r#"
-user_name: "TestUser"
-"#;
+    let yaml = "system_prompt_extension: \"Test extension\"\n";
     std::fs::write(&config_path, yaml).unwrap();
 
     let config = load_config_from_path(&config_path);
-    assert_eq!(config.user_name, Some("TestUser".to_string()));
+    assert_eq!(
+        config.system_prompt_extension,
+        Some("Test extension".to_string())
+    );
 }
 
 #[test]
@@ -240,7 +241,7 @@ fn test_load_config_invalid_file() {
 
     let config = load_config_from_path(&config_path);
     // Should return default
-    assert!(config.user_name.is_none());
+    assert!(config.system_prompt_extension.is_none());
 }
 
 #[test]
@@ -280,7 +281,7 @@ fn test_debug_impls() {
 /// back. Under the parallel test runner, another test could overwrite
 /// `APPDATA` between the `set_var` and the `load_config` call, so
 /// `test_load_config_invalid_file` would sometimes load a sibling
-/// test's valid YAML and see `user_name: Some("TestUser")` instead of
+/// test's valid YAML and see another test's value instead of
 /// the expected `None`.
 ///
 /// The refactor that moved the file I/O behind a path parameter
@@ -302,7 +303,7 @@ fn test_load_config_from_path_is_isolated() {
             let barrier = Arc::clone(&barrier);
             thread::spawn(move || {
                 let config_path = dir.join(format!("cfg_{i}.yaml"));
-                let yaml = format!("user_name: \"User{i}\"\n");
+                let yaml = format!("system_prompt_extension: \"Extension{i}\"\n");
                 std::fs::write(&config_path, yaml).unwrap();
 
                 // Maximise the race window: every worker waits here
@@ -312,8 +313,8 @@ fn test_load_config_from_path_is_isolated() {
 
                 let config = load_config_from_path(&config_path);
                 assert_eq!(
-                    config.user_name,
-                    Some(format!("User{i}")),
+                    config.system_prompt_extension,
+                    Some(format!("Extension{i}")),
                     "thread {i} saw the wrong config (cross-talk between loads)"
                 );
             })
@@ -755,10 +756,6 @@ fn test_from_app_config_captures_config_path() {
 #[test]
 fn test_from_app_config_drops_user_and_content_fields() {
     let cfg = AppConfig {
-        user_name: Some("Alice".to_string()),
-        user_address: Some("addr".to_string()),
-        user_birthdate: Some("1990-01-01".to_string()),
-        user_gender: Some("female".to_string()),
         system_prompt_extension: Some("Custom instructions.".to_string()),
         content_libraries: vec![ContentLibrary {
             root_folder: "/x".to_string(),
@@ -925,6 +922,61 @@ fn test_ensure_system_library_present_at() {
     config.ensure_system_library_present_at(&sys_path);
     assert_eq!(config.content_libraries.len(), 1);
     assert_eq!(config.content_libraries[0].name, "Custom System");
+}
+
+#[test]
+fn test_ensure_system_library_does_not_repoint_unrelated_system_name() {
+    let dir = tempdir().unwrap();
+    let sys_path = dir.path().join("system");
+    let unrelated_path = dir.path().join("unrelated");
+    let mut config = AppConfig::default();
+    config
+        .content_libraries
+        .push(crate::config::ContentLibrary {
+            root_folder: unrelated_path.to_string_lossy().to_string(),
+            name: "System".to_string(),
+            kind: "text".to_string(),
+            readonly: true,
+            priority: 3,
+        });
+
+    config.ensure_system_library_present_at(&sys_path);
+
+    assert_eq!(config.content_libraries.len(), 2);
+    assert_eq!(config.content_libraries[0].name, "System");
+    assert_eq!(
+        config.content_libraries[0].root_folder,
+        sys_path.to_string_lossy()
+    );
+    assert!(config.content_libraries[1].readonly);
+    assert_eq!(
+        config.content_libraries[1].root_folder,
+        unrelated_path.to_string_lossy()
+    );
+}
+
+#[test]
+fn test_ensure_system_library_repairs_readonly_root_match() {
+    let dir = tempdir().unwrap();
+    let sys_path = dir.path().join("system");
+    let mut config = AppConfig::default();
+    config
+        .content_libraries
+        .push(crate::config::ContentLibrary {
+            root_folder: sys_path.to_string_lossy().to_string(),
+            name: "Old System".to_string(),
+            kind: "markdown".to_string(),
+            readonly: true,
+            priority: 4,
+        });
+
+    config.ensure_system_library_present_at(&sys_path);
+
+    let lib = &config.content_libraries[0];
+    assert_eq!(lib.name, "System");
+    assert_eq!(lib.kind, "text");
+    assert!(!lib.readonly);
+    assert_eq!(lib.priority, 0);
 }
 
 #[test]

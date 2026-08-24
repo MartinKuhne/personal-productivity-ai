@@ -349,13 +349,12 @@ impl VirtualFileSystem for MockVirtualFileSystem {
         if let Some(msg) = *self.rename_err.lock().unwrap() {
             return Err(std::io::Error::new(std::io::ErrorKind::CrossesDevices, msg));
         }
+        if let Some(parent) = to.parent() {
+            self.create_dir_all(parent)?;
+        }
         let mut files = self.files.lock().unwrap();
         if let Some(bytes) = files.remove(from) {
             files.insert(to.to_path_buf(), bytes);
-            drop(files);
-            if let Some(parent) = to.parent() {
-                self.create_dir_all(parent)?;
-            }
             return Ok(());
         }
         Err(std::io::Error::new(
@@ -473,5 +472,18 @@ mod tests {
         vfs.rename(&to_copy, &to_rename).unwrap();
         assert!(!vfs.file_exists(&to_copy));
         assert!(vfs.file_exists(&to_rename));
+    }
+
+    #[test]
+    fn test_mock_rename_does_not_mutate_when_destination_parent_creation_fails() {
+        let vfs = MockVirtualFileSystem::new();
+        let from = PathBuf::from("/source/doc.md");
+        let to = PathBuf::from("/destination/doc.md");
+        vfs.write(&from, b"content").unwrap();
+        *vfs.create_dir_all_err.lock().unwrap() = Some("permission denied");
+
+        assert!(vfs.rename(&from, &to).is_err());
+        assert!(vfs.file_exists(&from));
+        assert!(!vfs.file_exists(&to));
     }
 }

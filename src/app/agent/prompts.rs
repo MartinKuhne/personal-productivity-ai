@@ -133,18 +133,6 @@ fn build_dynamic_system_prompt(
 ) -> String {
     let date_str = chrono::Local::now().format("%Y-%m-%d").to_string();
     let mut prompt = format!("Today's date and time is: {}", date_str);
-    if let Some(name) = &config.user_name {
-        prompt.push_str(&format!("\nUser's Name: {}", name));
-    }
-    if let Some(address) = &config.user_address {
-        prompt.push_str(&format!("\nUser's Address: {}", address));
-    }
-    if let Some(birthdate) = &config.user_birthdate {
-        append_birthdate_info(&mut prompt, birthdate);
-    }
-    if let Some(gender) = &config.user_gender {
-        prompt.push_str(&format!("\nUser's Gender: {}", gender));
-    }
     if let Some(ext) = &config.system_prompt_extension {
         prompt.push_str(&format!("\n{}", ext));
     }
@@ -173,18 +161,6 @@ fn build_dynamic_system_prompt(
         prompt.push('.');
     }
     prompt
-}
-
-/// Parse a birthdate string and append either an age (when the
-/// format is recognisable) or the raw string. Mirrors the previous
-/// in-agent `append_birthdate_info` + `parse_age` helpers.
-fn append_birthdate_info(prompt: &mut String, birthdate: &str) {
-    let age_str = parse_age(birthdate);
-    if let Some(a) = age_str {
-        prompt.push_str(&format!("\nUser's Age: {}", a));
-    } else {
-        prompt.push_str(&format!("\nUser's Birthdate/Age info: {}", birthdate));
-    }
 }
 
 /// Parse a birthdate into a human-readable age. Accepts
