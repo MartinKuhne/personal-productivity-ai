@@ -21,11 +21,33 @@ use std::path::{Path, PathBuf};
 use crate::agent::datamark::{SECURITY_HEADER, wrap_user_md};
 use crate::config::AppConfig;
 
+/// Finds a `User.md` (or `USER.md` / `user.md`) file at the root of the specified directory (VFS-130, AGENT-020).
+pub fn find_user_md_file(dir: &Path) -> Option<PathBuf> {
+    if let Ok(entries) = std::fs::read_dir(dir) {
+        for entry in entries.flatten() {
+            let path = entry.path();
+            if path.is_file()
+                && let Some(name) = path.file_name().and_then(|n| n.to_str())
+                && name.eq_ignore_ascii_case("user.md")
+            {
+                return Some(path);
+            }
+        }
+    }
+    for name in &["User.md", "USER.md", "user.md"] {
+        let p = dir.join(name);
+        if p.is_file() {
+            return Some(p);
+        }
+    }
+    None
+}
+
 /// Build the system-prompt message blocks for an agent turn.
 ///
 /// Reads the user's identity / system-prompt extension / content
 /// libraries from the global [`AppConfig`], wraps each library's
-/// `USER.md` (if present) in a datamark envelope, and returns the
+/// `USER.md` / `User.md` (if present) in a datamark envelope, and returns the
 /// assembled messages. The caller is the UI's submit path or the
 /// batch executor; both have the active file/dir/selected files
 /// from the UI state and the global config from the orchestrator.
@@ -34,7 +56,7 @@ use crate::config::AppConfig;
 /// LLM as a separate `role=system` message. The order is:
 /// 1. Static prompt (security header + role + critical rules).
 /// 2. Dynamic prompt (date, user info, extension, active context).
-/// 3. One block per `USER.md` found in the content libraries.
+/// 3. One block per `USER.md` / `User.md` found in the content libraries and system library (VFS-130).
 pub fn build_system_prompts(
     config: &AppConfig,
     active_file: Option<&Path>,
@@ -49,11 +71,16 @@ pub fn build_system_prompts(
         active_dir,
         selected_files,
     ));
+
+    let mut visited_paths = HashSet::new();
     for lib in &config.content_libraries {
-        let user_md = Path::new(&lib.root_folder).join("USER.md");
-        if user_md.exists()
+        let root = Path::new(&lib.root_folder);
+        if let Some(user_md) = find_user_md_file(root)
             && let Ok(content) = std::fs::read_to_string(&user_md)
         {
+            if let Ok(canon) = user_md.canonicalize() {
+                visited_paths.insert(canon);
+            }
             out.push(format!(
                 "\nUser Context (from {}):\n{}",
                 lib.name,
@@ -61,6 +88,25 @@ pub fn build_system_prompts(
             ));
         }
     }
+
+    // VFS-130: When the system library contains a User.md file at the root of the system folder,
+    // provide its contents as additional system context.
+    let system_lib_path = crate::config::AppConfig::get_system_library_path();
+    if let Some(user_md) = find_user_md_file(&system_lib_path) {
+        let already_visited = user_md
+            .canonicalize()
+            .map(|c| visited_paths.contains(&c))
+            .unwrap_or(false);
+        if !already_visited && let Ok(content) = std::fs::read_to_string(&user_md) {
+            let lib_name = config.system_library_display_name();
+            out.push(format!(
+                "\nUser Context (from {}):\n{}",
+                lib_name,
+                wrap_user_md(lib_name, &content)
+            ));
+        }
+    }
+
     out
 }
 

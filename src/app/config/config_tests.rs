@@ -982,3 +982,66 @@ fn test_list_skills_files() {
     assert_eq!(batch_skills.len(), 1);
     assert_eq!(batch_skills[0].name, "BulkFormat");
 }
+
+#[test]
+fn test_ensure_all_system_folders_creation() {
+    let dir = tempdir().unwrap();
+    let sys_path = dir.path().join("my_system");
+    assert!(!sys_path.exists());
+
+    AppConfig::ensure_all_system_folders_at(&sys_path).unwrap();
+
+    assert!(sys_path.exists(), "system root folder must be created");
+    assert!(
+        sys_path.join("Conversations").exists(),
+        "Conversations folder must be created"
+    );
+    assert!(
+        sys_path.join("Skills").exists(),
+        "Skills folder must be created"
+    );
+    assert!(
+        sys_path.join("Skills").join("Note").exists(),
+        "Skills/Note folder must be created"
+    );
+    assert!(
+        sys_path.join("Skills").join("Folder").exists(),
+        "Skills/Folder folder must be created"
+    );
+    assert!(
+        sys_path.join("Skills").join("Batch").exists(),
+        "Skills/Batch folder must be created"
+    );
+}
+
+#[test]
+fn test_list_skills_creates_missing_folders() {
+    let dir = tempdir().unwrap();
+    let sys_path = dir.path().join("system");
+    let mut config = AppConfig::default();
+    config.content_libraries = vec![ContentLibrary {
+        root_folder: sys_path.to_string_lossy().to_string(),
+        name: "System".to_string(),
+        kind: "text".to_string(),
+        readonly: false,
+        priority: 0,
+    }];
+
+    // Verify folders do not exist initially
+    assert!(!sys_path.join("Skills").join("Note").exists());
+    assert!(!sys_path.join("Skills").join("Folder").exists());
+    assert!(!sys_path.join("Skills").join("Batch").exists());
+
+    // Calling listing methods should create missing folders per VFS-105
+    let notes = config.list_note_skills();
+    assert!(notes.is_empty());
+    assert!(sys_path.join("Skills").join("Note").exists());
+
+    let folders = config.list_folder_skills();
+    assert!(folders.is_empty());
+    assert!(sys_path.join("Skills").join("Folder").exists());
+
+    let batches = config.list_batch_skills();
+    assert!(batches.is_empty());
+    assert!(sys_path.join("Skills").join("Batch").exists());
+}

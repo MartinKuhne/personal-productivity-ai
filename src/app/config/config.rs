@@ -388,6 +388,23 @@ impl AppConfig {
         skills
     }
 
+    /// Ensures that all folders mentioned for the system library (root, Conversations, Skills, Skills/Note, Skills/Folder, Skills/Batch) exist on disk (VFS-105).
+    pub fn ensure_all_system_folders() -> std::io::Result<PathBuf> {
+        let root = Self::get_system_library_path();
+        Self::ensure_all_system_folders_at(&root)?;
+        Ok(root)
+    }
+
+    /// Ensures that all system library folders exist at a specific root path (VFS-105).
+    pub fn ensure_all_system_folders_at(root: &Path) -> std::io::Result<()> {
+        std::fs::create_dir_all(root)?;
+        std::fs::create_dir_all(root.join("Conversations"))?;
+        std::fs::create_dir_all(root.join("Skills").join("Note"))?;
+        std::fs::create_dir_all(root.join("Skills").join("Folder"))?;
+        std::fs::create_dir_all(root.join("Skills").join("Batch"))?;
+        Ok(())
+    }
+
     /// Lists all Note skill files from the configured system library (VFS-121).
     pub fn list_note_skills(&self) -> Vec<SkillFile> {
         let note_dir = self
@@ -396,6 +413,7 @@ impl AppConfig {
             .find(|lib| lib.name == self.system_library_display_name())
             .map(|lib| PathBuf::from(&lib.root_folder).join("Skills").join("Note"))
             .unwrap_or_else(Self::get_skills_note_dir);
+        let _ = std::fs::create_dir_all(&note_dir);
         Self::list_skill_files_in(&note_dir)
     }
 
@@ -411,6 +429,7 @@ impl AppConfig {
                     .join("Folder")
             })
             .unwrap_or_else(Self::get_skills_folder_dir);
+        let _ = std::fs::create_dir_all(&folder_dir);
         Self::list_skill_files_in(&folder_dir)
     }
 
@@ -422,6 +441,7 @@ impl AppConfig {
             .find(|lib| lib.name == self.system_library_display_name())
             .map(|lib| PathBuf::from(&lib.root_folder).join("Skills").join("Batch"))
             .unwrap_or_else(Self::get_skills_batch_dir);
+        let _ = std::fs::create_dir_all(&batch_dir);
         Self::list_skill_files_in(&batch_dir)
     }
 
@@ -439,11 +459,10 @@ impl AppConfig {
         Ok(path)
     }
 
-    /// Construct a `ContentLibrary` representation for the system library (VFS-100..104, VFS-120).
+    /// Construct a `ContentLibrary` representation for the system library (VFS-100..105, VFS-120).
     pub fn get_or_create_system_library(&self) -> ContentLibrary {
         let root =
-            Self::ensure_system_library_dir().unwrap_or_else(|_| Self::get_system_library_path());
-        let _ = Self::ensure_skills_dirs();
+            Self::ensure_all_system_folders().unwrap_or_else(|_| Self::get_system_library_path());
         let root_folder = root.to_string_lossy().to_string();
         ContentLibrary {
             root_folder,
@@ -456,11 +475,7 @@ impl AppConfig {
 
     /// Construct a `ContentLibrary` representation for the system library rooted at a specific path.
     pub fn get_or_create_system_library_at(&self, root_system_dir: &Path) -> ContentLibrary {
-        let _ = std::fs::create_dir_all(root_system_dir);
-        let _ = std::fs::create_dir_all(root_system_dir.join("Conversations"));
-        let _ = std::fs::create_dir_all(root_system_dir.join("Skills").join("Note"));
-        let _ = std::fs::create_dir_all(root_system_dir.join("Skills").join("Folder"));
-        let _ = std::fs::create_dir_all(root_system_dir.join("Skills").join("Batch"));
+        let _ = Self::ensure_all_system_folders_at(root_system_dir);
         let root_folder = root_system_dir.to_string_lossy().to_string();
         ContentLibrary {
             root_folder,
@@ -471,22 +486,16 @@ impl AppConfig {
         }
     }
 
-    /// Ensures that the system library exists on disk and is present in `content_libraries` (VFS-100..104, VFS-120).
+    /// Ensures that the system library exists on disk and is present in `content_libraries` (VFS-100..105, VFS-120).
     pub fn ensure_system_library_present(&mut self) {
         let system_path =
-            Self::ensure_system_library_dir().unwrap_or_else(|_| Self::get_system_library_path());
-        let _ = Self::ensure_conversations_dir();
-        let _ = Self::ensure_skills_dirs();
+            Self::ensure_all_system_folders().unwrap_or_else(|_| Self::get_system_library_path());
         self.ensure_system_library_present_at(&system_path);
     }
 
     /// Ensures that the system library rooted at `system_path` is present in `content_libraries`.
     pub fn ensure_system_library_present_at(&mut self, system_path: &Path) {
-        let _ = std::fs::create_dir_all(system_path);
-        let _ = std::fs::create_dir_all(system_path.join("Conversations"));
-        let _ = std::fs::create_dir_all(system_path.join("Skills").join("Note"));
-        let _ = std::fs::create_dir_all(system_path.join("Skills").join("Folder"));
-        let _ = std::fs::create_dir_all(system_path.join("Skills").join("Batch"));
+        let _ = Self::ensure_all_system_folders_at(system_path);
         let mut path_str = system_path
             .canonicalize()
             .unwrap_or_else(|_| system_path.to_path_buf())

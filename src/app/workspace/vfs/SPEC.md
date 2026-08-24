@@ -43,6 +43,7 @@ the YAML schema) but its behaviour lives here.
 * [VFS-102] The system SHALL support a permanent configuration option for the user to specify the display name of the system library.
 * [VFS-103] The system SHALL store the files for the system library under `%APPDATA%/fastmd/system` on the Windows operating system.
 * [VFS-104] When the `%APPDATA%/fastmd/system` on the Windows operating system does not exist, the system SHALL create it.
+* [VFS-105] When any of the folders mentioned do not exist, the system SHALL create them.
 * [VFS-110] The system library SHALL support a 'Conversations` folder.
 * [VFS-111] When the user performs an agent prompt, the system SHALL log the prompt, the chat model response, and any further prompts and responses to a file in the `Conversations` folder.
 * [VFS-112] When the system creates a file to log a prompt, the file name SHALL be `YYYY-MM-DD HH-MM-SS.md`
@@ -52,6 +53,7 @@ the YAML schema) but its behaviour lives here.
 * [VFS-121] When one or more files are present in the `Skills/Note` folder, the system shall offer them as an option in the context menu when the user right-clicks on a note, either in the directory tree or on an open tab. The system shall then execute an agent prompt with the contents of the file as the user prompt.
 * [VFS-122] When one or more files are present in the `Skills/Folder` folder, the system shall offer them as an option in the context menu when the user right-clicks on a folder in the directory tree. The system shall then execute an agent prompt with the contents of the file as the user prompt.
 * [VFS-123] When one or more files are present in the `Skills/Batch` folder, the system shall offer them as an option in the batch dialog.
+* [VFS-130] When the system library contains a `User.md` file at the root of the system folder, the system shall provide the contents of that file as an additional system context.
 
 ## Architecture
 

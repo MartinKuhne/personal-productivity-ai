@@ -239,3 +239,59 @@ fn test_static_prompt_has_security_header() {
     assert!(prompts[0].starts_with(SECURITY_HEADER));
     assert!(prompts[0].contains("FastMD Agent"));
 }
+
+/// VFS-130: When the system library contains a User.md file at the root of the system folder,
+/// the system provides its contents as additional system context.
+#[test]
+fn test_system_library_user_md_provided_as_system_context() {
+    let tmp = tempfile::tempdir().unwrap();
+    let sys_path = tmp.path().join("system");
+    std::fs::create_dir_all(&sys_path).unwrap();
+
+    let user_md_path = sys_path.join("User.md");
+    std::fs::write(&user_md_path, "System user preferences and profile.").unwrap();
+
+    let mut config = AppConfig::default();
+    config.content_libraries = vec![ContentLibrary {
+        root_folder: sys_path.to_string_lossy().to_string(),
+        name: "System".to_string(),
+        kind: "text".to_string(),
+        readonly: false,
+        priority: 0,
+    }];
+
+    let prompts = build_system_prompts(&config, None, None, &HashSet::new());
+    let user_context_block = prompts
+        .iter()
+        .find(|p| p.contains("User Context (from System):"))
+        .expect("System User.md context block must be present");
+
+    assert!(user_context_block.contains("System user preferences and profile."));
+    assert!(user_context_block.contains("provenance=user_md"));
+}
+
+#[test]
+fn test_find_user_md_file_case_variants() {
+    let tmp = tempfile::tempdir().unwrap();
+    let root = tmp.path();
+
+    // No file
+    assert!(find_user_md_file(root).is_none());
+
+    // User.md
+    let p = root.join("User.md");
+    std::fs::write(&p, "test").unwrap();
+    assert_eq!(find_user_md_file(root), Some(p.clone()));
+    std::fs::remove_file(&p).unwrap();
+
+    // USER.md
+    let p_upper = root.join("USER.md");
+    std::fs::write(&p_upper, "test").unwrap();
+    assert_eq!(find_user_md_file(root), Some(p_upper.clone()));
+    std::fs::remove_file(&p_upper).unwrap();
+
+    // user.md
+    let p_lower = root.join("user.md");
+    std::fs::write(&p_lower, "test").unwrap();
+    assert_eq!(find_user_md_file(root), Some(p_lower));
+}
