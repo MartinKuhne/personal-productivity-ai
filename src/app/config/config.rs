@@ -94,7 +94,8 @@ pub struct AppConfig {
     #[serde(default)]
     pub models: HashMap<String, LlmConfig>,
     /// User-selected active chat model name (overrides auto cost selection).
-    #[serde(default)]
+    /// In-memory runtime state only; not persisted to configuration file.
+    #[serde(skip)]
     pub selected_chat_model: Option<String>,
     #[serde(default)]
     pub searxng_url: Option<String>,

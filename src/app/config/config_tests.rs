@@ -772,3 +772,25 @@ fn test_from_app_config_drops_user_and_content_fields() {
     let agent_cfg = cfg.to_agent_config();
     let _ = agent_cfg;
 }
+
+#[test]
+fn test_selected_chat_model_is_not_persisted() {
+    let mut config = AppConfig::default();
+    config.selected_chat_model = Some("test-model".to_string());
+
+    // Serialization should omit selected_chat_model
+    let serialized = serde_norway::to_string(&config).expect("serialization should succeed");
+    assert!(
+        !serialized.contains("selected_chat_model"),
+        "selected_chat_model must not be present in serialized config: {serialized}"
+    );
+
+    // Deserialization should ignore selected_chat_model if present in YAML
+    let yaml_with_selected = "selected_chat_model: test-model\nmax_tokens: 4096\n";
+    let deserialized: AppConfig =
+        serde_norway::from_str(yaml_with_selected).expect("deserialization should succeed");
+    assert_eq!(
+        deserialized.selected_chat_model, None,
+        "selected_chat_model must not be loaded from configuration file"
+    );
+}

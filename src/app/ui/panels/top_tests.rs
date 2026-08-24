@@ -322,17 +322,15 @@ fn test_apply_chat_model_selection() {
         Some("model-a")
     );
 
-    let mut saved = false;
-    let mut save_fn = |_cfg: &crate::config::AppConfig| -> Result<std::path::PathBuf, String> {
-        saved = true;
-        Ok(std::path::PathBuf::from("config.yaml"))
-    };
-    apply_chat_model_selection(&mut app, "model-b".to_string(), &mut save_fn);
+    apply_chat_model_selection(&mut app, "model-b".to_string());
 
-    assert!(saved);
     assert_eq!(app.config().selected_chat_model.as_deref(), Some("model-b"));
     assert_eq!(
         app.config().current_chat_model_key().as_deref(),
+        Some("model-b")
+    );
+    assert_eq!(
+        app.agent().agent_config().selected_chat_model(),
         Some("model-b")
     );
 }

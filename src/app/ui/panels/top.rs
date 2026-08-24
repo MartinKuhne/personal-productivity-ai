@@ -124,27 +124,17 @@ pub fn apply_agent_debug_toggle(app: &mut FastMdApp, show: bool) {
 
 /// Purpose: Applies the side effect of picking a new chat model from the Chat Models menu.
 ///
-/// Inputs: `app` (application state), `model_name` (selected model name), `persist` (config saver callback).
+/// Inputs: `app` (application state), `model_name` (selected model name).
 /// Outputs: ()
-/// Purity: Impure (mutates the app and agent configuration).
+/// Purity: Impure (mutates the app and agent configuration in memory).
 /// Preconditions: None.
-/// Postconditions: Both app and agent configuration select `model_name`, and config is saved.
-pub fn apply_chat_model_selection<F>(app: &mut FastMdApp, model_name: String, persist: &mut F)
-where
-    F: FnMut(&AppConfig) -> Result<PathBuf, String>,
-{
+/// Postconditions: Both app and agent configuration select `model_name`.
+pub fn apply_chat_model_selection(app: &mut FastMdApp, model_name: String) {
     let mut new_config = app.config().clone();
     if new_config.selected_chat_model.as_deref() == Some(&model_name) {
         return;
     }
-    new_config.selected_chat_model = Some(model_name.clone());
-    if let Err(e) = persist(&new_config) {
-        tracing::error!(
-            error = %e,
-            model = %model_name,
-            "failed to persist AppConfig after chat-model selection change"
-        );
-    }
+    new_config.selected_chat_model = Some(model_name);
     app.agent_mut()
         .set_agent_config(new_config.to_agent_config());
     *app.config_mut() = new_config;
@@ -445,7 +435,7 @@ pub fn show_top_panel_capture_with_persist<F>(
                             }
 
                             if let Some(picked) = pending_model {
-                                apply_chat_model_selection(app, picked, &mut persist);
+                                apply_chat_model_selection(app, picked);
                                 on_click(crate::ui::strings::CHAT_MODEL_SELECTION_EVENT);
                             }
                         }
