@@ -445,3 +445,322 @@ fn test_e2e_openai_wiremock_user_md_sent_as_system_context() {
         "Datamark closing marker must be present"
     );
 }
+
+/// End-to-end test: when a Note skill is invoked, the active note's path
+/// is injected into the LLM's system context as "currently viewing the file".
+/// This proves the Note skill context flows from `build_system_prompts` →
+/// `build_dynamic_system_prompt` → OpenAI `POST /chat/completions`.
+#[test]
+fn test_e2e_openai_wiremock_note_skill_context_sent_as_system_context() {
+    use wiremock::matchers::{method, path};
+    use wiremock::{Mock, MockServer, ResponseTemplate};
+
+    let runtime = tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+        .expect("build tokio runtime");
+
+    let mock_server = runtime.block_on(MockServer::start());
+
+    let response_body = serde_json::json!({
+        "id": "chatcmpl-note-skill",
+        "object": "chat.completion",
+        "created": 1677652288,
+        "model": "gpt-4o",
+        "choices": [{
+            "index": 0,
+            "message": {
+                "role": "assistant",
+                "content": "I see you are working on meeting-notes.md."
+            },
+            "finish_reason": "stop"
+        }],
+        "usage": {
+            "prompt_tokens": 30,
+            "completion_tokens": 15,
+            "total_tokens": 45
+        }
+    });
+
+    runtime.block_on(
+        Mock::given(method("POST"))
+            .and(path("/chat/completions"))
+            .respond_with(
+                ResponseTemplate::new(200)
+                    .insert_header("content-type", "application/json")
+                    .set_body_json(response_body),
+            )
+            .mount(&mock_server),
+    );
+
+    let tmp = tempfile::tempdir().unwrap();
+    let notes_dir = tmp.path().join("Notes");
+    std::fs::create_dir_all(&notes_dir).unwrap();
+    let note_path = notes_dir.join("meeting-notes.md");
+    std::fs::write(&note_path, "# Meeting Notes\n- Discussed roadmap.").unwrap();
+
+    // Simulate a Note skill being executed: active_file is set to the note path.
+    // This mirrors what center.rs and tree/render.rs do when a note skill button is clicked:
+    //   *app.selection_mut().selected_file_mut() = Some(tab_path.clone());
+    //   *app.submit_prompt_mut() = Some(skill_content);
+    // which then becomes `active_file` in `build_system_prompts`.
+    let config = AppConfig {
+        content_libraries: vec![ContentLibrary {
+            root_folder: notes_dir.to_string_lossy().to_string(),
+            name: "Notes".to_string(),
+            kind: "text".to_string(),
+            readonly: false,
+            priority: 0,
+        }],
+        ..AppConfig::default()
+    };
+
+    let system_prompts = build_system_prompts(
+        &config,
+        Some(&note_path), // active_file: the note the skill was invoked on
+        None,
+        &HashSet::new(),
+    );
+
+    // Verify static system prompts already include the note path context
+    let dynamic = &system_prompts[1];
+    assert!(
+        dynamic.contains("viewing the file"),
+        "Dynamic prompt must include 'viewing the file' for note context"
+    );
+    assert!(
+        dynamic.contains("meeting-notes.md"),
+        "Dynamic prompt must include the note filename"
+    );
+
+    let mut models = std::collections::HashMap::new();
+    models.insert(
+        "default".to_string(),
+        fastmd_agent::config::LlmConfig {
+            model: "gpt-4o".to_string(),
+            api_url: mock_server.uri(),
+            api_key: "test-openai-key".to_string(),
+            cost: None,
+            use_case: vec!["chat".to_string()],
+        },
+    );
+
+    let agent_config = fastmd_agent::config::AgentConfigBuilder::new()
+        .with_models(models)
+        .build();
+
+    let session_id = uuid::Uuid::new_v4();
+    let observer = std::sync::Arc::new(fastmd_agent::events::RecordingObserver::new());
+    let ctx = fastmd_agent::context::AgentContextBuilder::new(
+        agent_config,
+        session_id,
+        "Proofread this note.".to_string(),
+    )
+    .with_system_prompts(system_prompts)
+    .with_observer(observer.clone())
+    .build();
+
+    let handle = std::thread::spawn(move || {
+        fastmd_agent::run_agent(ctx);
+    });
+    handle.join().unwrap();
+
+    let received_requests = runtime
+        .block_on(mock_server.received_requests())
+        .expect("must record requests");
+    assert_eq!(
+        received_requests.len(),
+        1,
+        "Expected exactly 1 request to OpenAI mock server"
+    );
+
+    let payload: serde_json::Value = serde_json::from_slice(&received_requests[0].body)
+        .expect("request body must be valid JSON");
+    let messages = payload["messages"]
+        .as_array()
+        .expect("messages array must be present");
+
+    // The note path must appear in a system message — proving it was passed to the LLM.
+    let system_msg_with_note = messages
+        .iter()
+        .find(|m| {
+            m["role"] == "system"
+                && m["content"]
+                    .as_str()
+                    .map(|c| c.contains("viewing the file") && c.contains("meeting-notes.md"))
+                    .unwrap_or(false)
+        })
+        .expect("Must find system message containing note file context");
+
+    let content = system_msg_with_note["content"].as_str().unwrap();
+    assert!(
+        content.contains("viewing the file"),
+        "System message must say 'viewing the file' for note skill context"
+    );
+    assert!(
+        content.contains("meeting-notes.md"),
+        "System message must contain the note's filename"
+    );
+}
+
+/// End-to-end test: when a Folder skill is invoked, the active directory path
+/// is injected into the LLM's system context as "directory context".
+/// This proves the Folder skill context flows from `build_system_prompts` →
+/// `build_dynamic_system_prompt` → OpenAI `POST /chat/completions`.
+#[test]
+fn test_e2e_openai_wiremock_folder_skill_context_sent_as_system_context() {
+    use wiremock::matchers::{method, path};
+    use wiremock::{Mock, MockServer, ResponseTemplate};
+
+    let runtime = tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+        .expect("build tokio runtime");
+
+    let mock_server = runtime.block_on(MockServer::start());
+
+    let response_body = serde_json::json!({
+        "id": "chatcmpl-folder-skill",
+        "object": "chat.completion",
+        "created": 1677652288,
+        "model": "gpt-4o",
+        "choices": [{
+            "index": 0,
+            "message": {
+                "role": "assistant",
+                "content": "I see you want to work on the Projects folder."
+            },
+            "finish_reason": "stop"
+        }],
+        "usage": {
+            "prompt_tokens": 25,
+            "completion_tokens": 12,
+            "total_tokens": 37
+        }
+    });
+
+    runtime.block_on(
+        Mock::given(method("POST"))
+            .and(path("/chat/completions"))
+            .respond_with(
+                ResponseTemplate::new(200)
+                    .insert_header("content-type", "application/json")
+                    .set_body_json(response_body),
+            )
+            .mount(&mock_server),
+    );
+
+    let tmp = tempfile::tempdir().unwrap();
+    let notes_dir = tmp.path().join("Notes");
+    let projects_dir = notes_dir.join("Projects");
+    std::fs::create_dir_all(&projects_dir).unwrap();
+
+    // Simulate a Folder skill being executed: active_dir is set to the selected directory path.
+    // This mirrors what tree/render.rs does when a folder skill button is clicked:
+    //   *ctx.selected_dir() = Some(path.to_path_buf());
+    //   *ctx.selected_file() = Some(path.to_path_buf());
+    //   *ctx.submit_prompt() = Some(skill_content);
+    // The orchestrator subsequently passes selected_dir as active_dir to `build_system_prompts`.
+    let config = AppConfig {
+        content_libraries: vec![ContentLibrary {
+            root_folder: notes_dir.to_string_lossy().to_string(),
+            name: "Notes".to_string(),
+            kind: "text".to_string(),
+            readonly: false,
+            priority: 0,
+        }],
+        ..AppConfig::default()
+    };
+
+    let system_prompts = build_system_prompts(
+        &config,
+        None,
+        Some(&projects_dir), // active_dir: the folder the skill was invoked on
+        &HashSet::new(),
+    );
+
+    // Verify dynamic system prompt already includes the folder context
+    let dynamic = &system_prompts[1];
+    assert!(
+        dynamic.contains("directory context"),
+        "Dynamic prompt must include 'directory context' for folder skill"
+    );
+    assert!(
+        dynamic.contains("Projects"),
+        "Dynamic prompt must include the folder name"
+    );
+
+    let mut models = std::collections::HashMap::new();
+    models.insert(
+        "default".to_string(),
+        fastmd_agent::config::LlmConfig {
+            model: "gpt-4o".to_string(),
+            api_url: mock_server.uri(),
+            api_key: "test-openai-key".to_string(),
+            cost: None,
+            use_case: vec!["chat".to_string()],
+        },
+    );
+
+    let agent_config = fastmd_agent::config::AgentConfigBuilder::new()
+        .with_models(models)
+        .build();
+
+    let session_id = uuid::Uuid::new_v4();
+    let observer = std::sync::Arc::new(fastmd_agent::events::RecordingObserver::new());
+    let ctx = fastmd_agent::context::AgentContextBuilder::new(
+        agent_config,
+        session_id,
+        "Summarise all notes in this folder.".to_string(),
+    )
+    .with_system_prompts(system_prompts)
+    .with_observer(observer.clone())
+    .build();
+
+    let handle = std::thread::spawn(move || {
+        fastmd_agent::run_agent(ctx);
+    });
+    handle.join().unwrap();
+
+    let received_requests = runtime
+        .block_on(mock_server.received_requests())
+        .expect("must record requests");
+    assert_eq!(
+        received_requests.len(),
+        1,
+        "Expected exactly 1 request to OpenAI mock server"
+    );
+
+    let payload: serde_json::Value = serde_json::from_slice(&received_requests[0].body)
+        .expect("request body must be valid JSON");
+    let messages = payload["messages"]
+        .as_array()
+        .expect("messages array must be present");
+
+    // The directory path must appear in a system message — proving it was passed to the LLM.
+    let system_msg_with_dir = messages
+        .iter()
+        .find(|m| {
+            m["role"] == "system"
+                && m["content"]
+                    .as_str()
+                    .map(|c| c.contains("directory context") && c.contains("Projects"))
+                    .unwrap_or(false)
+        })
+        .expect("Must find system message containing folder directory context");
+
+    let content = system_msg_with_dir["content"].as_str().unwrap();
+    assert!(
+        content.contains("directory context"),
+        "System message must say 'directory context' for folder skill context"
+    );
+    assert!(
+        content.contains("Projects"),
+        "System message must contain the folder name"
+    );
+    // active_file was not set, so file viewing message must NOT appear
+    assert!(
+        !content.contains("viewing the file"),
+        "System message must not claim to be viewing a file when only a folder was selected"
+    );
+}
