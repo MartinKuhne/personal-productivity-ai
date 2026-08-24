@@ -295,3 +295,153 @@ fn test_find_user_md_file_case_variants() {
     std::fs::write(&p_lower, "test").unwrap();
     assert_eq!(find_user_md_file(root), Some(p_lower));
 }
+
+/// End-to-end test using an OpenAI wiremock server to prove that User.md
+/// content is formatted in datamark envelope and transmitted as a system context message.
+#[test]
+fn test_e2e_openai_wiremock_user_md_sent_as_system_context() {
+    use wiremock::matchers::{method, path};
+    use wiremock::{Mock, MockServer, ResponseTemplate};
+
+    let runtime = tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+        .expect("build tokio runtime");
+
+    let mock_server = runtime.block_on(MockServer::start());
+
+    let response_body = serde_json::json!({
+        "id": "chatcmpl-test",
+        "object": "chat.completion",
+        "created": 1677652288,
+        "model": "gpt-4o",
+        "choices": [{
+            "index": 0,
+            "message": {
+                "role": "assistant",
+                "content": "Received user context."
+            },
+            "finish_reason": "stop"
+        }],
+        "usage": {
+            "prompt_tokens": 20,
+            "completion_tokens": 10,
+            "total_tokens": 30
+        }
+    });
+
+    runtime.block_on(
+        Mock::given(method("POST"))
+            .and(path("/chat/completions"))
+            .respond_with(
+                ResponseTemplate::new(200)
+                    .insert_header("content-type", "application/json")
+                    .set_body_json(response_body),
+            )
+            .mount(&mock_server),
+    );
+
+    let tmp = tempfile::tempdir().unwrap();
+    let sys_path = tmp.path().join("system");
+    std::fs::create_dir_all(&sys_path).unwrap();
+
+    let user_md_path = sys_path.join("User.md");
+    let user_md_content = "Preferences: User prefers concise responses and dark mode.";
+    std::fs::write(&user_md_path, user_md_content).unwrap();
+
+    let mut config = AppConfig::default();
+    config.content_libraries = vec![ContentLibrary {
+        root_folder: sys_path.to_string_lossy().to_string(),
+        name: "System".to_string(),
+        kind: "text".to_string(),
+        readonly: false,
+        priority: 0,
+    }];
+
+    let system_prompts = build_system_prompts(&config, None, None, &HashSet::new());
+
+    let mut models = std::collections::HashMap::new();
+    models.insert(
+        "default".to_string(),
+        fastmd_agent::config::LlmConfig {
+            model: "gpt-4o".to_string(),
+            api_url: mock_server.uri(),
+            api_key: "test-openai-key".to_string(),
+            cost: None,
+            use_case: vec!["chat".to_string()],
+        },
+    );
+
+    let agent_config = fastmd_agent::config::AgentConfigBuilder::new()
+        .with_models(models)
+        .build();
+
+    let session_id = uuid::Uuid::new_v4();
+    let observer = std::sync::Arc::new(fastmd_agent::events::RecordingObserver::new());
+    let ctx = fastmd_agent::context::AgentContextBuilder::new(
+        agent_config,
+        session_id,
+        "Hello agent".to_string(),
+    )
+    .with_system_prompts(system_prompts)
+    .with_observer(observer.clone())
+    .build();
+
+    let handle = std::thread::spawn(move || {
+        fastmd_agent::run_agent(ctx);
+    });
+    handle.join().unwrap();
+
+    let received_requests = runtime
+        .block_on(mock_server.received_requests())
+        .expect("must record requests");
+    assert_eq!(
+        received_requests.len(),
+        1,
+        "Expected exactly 1 request to OpenAI mock server"
+    );
+
+    let request = &received_requests[0];
+    assert_eq!(request.method.as_str(), "POST");
+    assert_eq!(request.url.path(), "/chat/completions");
+
+    let payload: serde_json::Value =
+        serde_json::from_slice(&request.body).expect("request body must be valid JSON");
+    let messages = payload["messages"]
+        .as_array()
+        .expect("messages array must be present in OpenAI payload");
+
+    // Verify that the User.md content was delivered in a system message block
+    let system_msg_with_user_md = messages
+        .iter()
+        .find(|m| {
+            m["role"] == "system"
+                && m["content"]
+                    .as_str()
+                    .map(|c| c.contains(user_md_content))
+                    .unwrap_or(false)
+        })
+        .expect("Must find system message containing User.md content");
+
+    let content = system_msg_with_user_md["content"].as_str().unwrap();
+    assert!(
+        content.contains("User Context (from System):"),
+        "Context header must identify System library"
+    );
+    assert!(
+        content.contains("provenance=user_md"),
+        "Provenance attribute must specify user_md"
+    );
+    assert!(
+        content.contains("library=System"),
+        "Library attribute must specify System"
+    );
+    assert!(
+        content.contains("<<<EXTERNAL_DATA>>>"),
+        "Datamark opening marker must be present"
+    );
+    assert!(
+        content.contains("<<<END_EXTERNAL_DATA>>>"),
+        "Datamark closing marker must be present"
+    );
+}
