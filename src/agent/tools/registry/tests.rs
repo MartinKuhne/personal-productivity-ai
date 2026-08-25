@@ -351,18 +351,20 @@ fn test_list_by_tag_no_matches_reports_zero_total() {
 }
 
 #[test]
-fn test_list_by_tag_offset_zero_returns_first_slice() {
-    // With the new offset model, offset 0 is a literal "first slice"
-    // request; no normalisation is needed. The response is the same
-    // as omitting the offset entirely.
+fn test_list_by_tag_first_page_below_page_size() {
+    // list_notes_by_tag is cursor-only; it has no offset/limit parameters.
+    // With 5 files (well below the 64-item page size), the first call with
+    // no cursor returns all 5 results, no cursor, and the Final page hint.
     let (config, _dir) = single_lib_with_n_tagged_files(5);
-    let envelope = run_list_by_tag(&config, r#"{"tag":"meeting","offset":0,"limit":3}"#);
+    let envelope = run_list_by_tag(&config, r#"{"tag":"meeting"}"#);
     let data = &envelope["data"];
     assert_eq!(data["total"], 5);
     let files = files_array(data);
-    assert_eq!(files.len(), 3);
+    assert_eq!(files.len(), 5);
+    assert!(data["cursor"].is_null());
+    assert_eq!(data["hint"], "Final page.");
     assert!(files.iter().any(|p| p.ends_with("file_000.md")));
-    assert!(files.iter().any(|p| p.ends_with("file_002.md")));
+    assert!(files.iter().any(|p| p.ends_with("file_004.md")));
 }
 
 fn run_list_files(config: &AgentConfig, args: &str) -> Value {
