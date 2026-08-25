@@ -11,8 +11,10 @@
 
 pub mod blocking;
 pub mod browser;
+pub mod cache;
 pub mod context;
 pub mod csv_db;
+pub mod cursor;
 pub mod descriptor;
 #[cfg(test)]
 mod descriptor_tests;
@@ -127,7 +129,12 @@ pub trait Tool: Send + Sync {
     fn execute(&self, ctx: &ToolContext, input_json: &str) -> Result<serde_json::Value, ToolError>;
 }
 
+pub use cache::{
+    CACHE_TTL, CURSOR_EXPIRED_ERROR, CachedWebDocument, FINAL_PAGE_HINT, MAX_CACHE_ENTRIES,
+    SearchEmailItem, ToolCache, cache,
+};
 pub use context::ToolContext as ToolContextType;
+pub use cursor::{CursorPage, CursorSessionManager, PagedDataset};
 pub use descriptor::ToolDescriptor as ToolDescriptorType;
 pub use dispatcher::{ToolDispatcher, ToolError, ToolOutcome, ToolServices};
 pub use provider::{RegisteredTool, ToolProvider};

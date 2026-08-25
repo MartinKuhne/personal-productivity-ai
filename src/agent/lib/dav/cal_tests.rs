@@ -494,6 +494,9 @@ fn test_caldav_tools_mock_server_keep_alive() {
     let cache = crate::tools::registry::cache::ToolCache::new();
     let uuid_gen = crate::utils::uuid::SystemUuidGenerator;
 
+    let cache = crate::tools::registry::cache::ToolCache::new();
+    let uuid_gen = crate::utils::uuid::SystemUuidGenerator;
+
     for _ in 0..16 {
         let get_res =
             tool_get_calendar(&config, "2024-01-01", "2024-01-02", None, &cache, &uuid_gen)
