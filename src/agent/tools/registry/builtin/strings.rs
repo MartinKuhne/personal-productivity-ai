@@ -48,6 +48,9 @@ pub const WEB_FETCH_CURSOR_DESCRIPTION: &str = "Fetch a URL and convert the cont
 /// Hint string emitted on the final page of a cursor pagination (TOOL-025).
 pub const FINAL_PAGE_HINT: &str = "Final page.";
 
+/// Hint string emitted by `list_notes_by_tag` when no files match the requested tag (TOOL-026d).
+pub const NO_MATCHING_TAGGED_FILES_HINT: &str = "No matching tagged files found.";
+
 // --- filesystem (fs) ---
 
 // --- patch_note ---

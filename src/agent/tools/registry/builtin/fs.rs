@@ -207,7 +207,7 @@ fn execute_list_notes_by_tag(
             files: Vec::new(),
             total: 0,
             cursor: None,
-            hint: Some(strings::FINAL_PAGE_HINT.to_string()),
+            hint: Some(strings::NO_MATCHING_TAGGED_FILES_HINT.to_string()),
         })
         .unwrap());
     }

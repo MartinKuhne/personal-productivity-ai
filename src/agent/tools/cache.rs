@@ -3,7 +3,7 @@
 //! Powered by `mini_moka` for lock-optimized in-memory caching with automatic
 //! 30-minute TTL expiration and 256 entry capacity capping (TOOL-030).
 
-use crate::tools::registry::cursor::CursorSessionManager;
+use crate::tools::cursor::CursorSessionManager;
 use mini_moka::sync::Cache;
 use serde_json::Value;
 use std::collections::HashMap;
