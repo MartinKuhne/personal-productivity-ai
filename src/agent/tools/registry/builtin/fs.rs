@@ -212,6 +212,31 @@ fn execute_list_notes_by_tag(
         .unwrap());
     }
 
+    // When the caller supplies an explicit offset or limit, use simple
+    // offset-based slicing (same model as list_notes) rather than starting
+    // a cursor session.
+    if input.offset.is_some() || input.limit.is_some() {
+        let offset = input.offset.unwrap_or(0);
+        let limit = input
+            .limit
+            .unwrap_or(super::super::pagination::DEFAULT_LIST_NOTES_BY_TAG_LIMIT);
+        let total = all_matches.len();
+        let (page_files, hint) = super::super::pagination::paginate_in_range(
+            &all_matches,
+            offset,
+            limit,
+            total,
+            "tagged files",
+        );
+        return Ok(serde_json::to_value(dtos::ListNotesByTagResponse {
+            files: page_files,
+            total,
+            cursor: None,
+            hint,
+        })
+        .unwrap());
+    }
+
     let page = ctx
         .cache()
         .list_notes_by_tag_sessions

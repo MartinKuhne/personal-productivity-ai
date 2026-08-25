@@ -51,6 +51,10 @@ pub struct ListNotesByTagInput {
     #[schemars(description = strings::FIELD_CURSOR_DESCRIPTION)]
     #[serde(default)]
     pub cursor: Option<String>,
+    #[schemars(description = strings::FIELD_OFFSET_DESCRIPTION)]
+    pub offset: Option<usize>,
+    #[schemars(description = strings::FIELD_LIMIT_DESCRIPTION)]
+    pub limit: Option<usize>,
 }
 #[derive(Serialize, Debug, JsonSchema)]
 pub struct ListNotesByTagResponse {
