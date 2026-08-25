@@ -160,19 +160,23 @@ fn test_tool_invalid_args_returns_error() {
 #[test]
 fn test_tool_call_debug_mode_feature_flag() {
     let mut config = AgentConfig::default();
-    assert!(!config
-        .feature_flags
-        .get("toolCallDebugMode")
-        .copied()
-        .unwrap_or(false));
+    assert!(
+        !config
+            .feature_flags
+            .get("toolCallDebugMode")
+            .copied()
+            .unwrap_or(false)
+    );
     config
         .feature_flags
         .insert("toolCallDebugMode".to_string(), true);
-    assert!(config
-        .feature_flags
-        .get("toolCallDebugMode")
-        .copied()
-        .unwrap_or(false));
+    assert!(
+        config
+            .feature_flags
+            .get("toolCallDebugMode")
+            .copied()
+            .unwrap_or(false)
+    );
     let ctx = test_ctx(&config);
     let res = execute_tool(&ToolRegistry::new(), &ctx, "unknown_tool", "{}");
     assert!(res.contains("not found") || res.contains("error"));
@@ -397,9 +401,11 @@ fn test_list_files_default_limit_is_100() {
     assert_eq!(data["total"], 150);
     let files = files_array(data);
     assert_eq!(files.len(), 100);
-    assert!(files
-        .iter()
-        .all(|p| p.starts_with("Lib") && p.contains("note_")));
+    assert!(
+        files
+            .iter()
+            .all(|p| p.starts_with("Lib") && p.contains("note_"))
+    );
 }
 
 #[test]
