@@ -120,7 +120,7 @@ concern and expose its public API through a `mod.rs` that re-exports symbols.
 
 ## Quality Gate
 
-Before marking any task as complete, run the following from `src/desktop/` and ensure they all pass cleanly:
+Before marking any task as complete, run the following from `/` and ensure they all pass cleanly:
 - `cargo check --quiet` — no errors or warnings
 - `cargo nextest run --status-level fail --show-progress none` — all tests pass (the `default` profile in `.config/nextest.toml` retries flaky tier-4 click tests twice; CI uses the `ci` profile which is strict)
 - `cargo clippy -- -D warnings` — no lint warnings (deny all)
