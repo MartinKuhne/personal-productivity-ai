@@ -77,8 +77,9 @@ pub fn build_system_prompts(
     for lib in &config.content_libraries {
         let root = Path::new(&lib.root_folder);
         if let Some(user_md) = find_user_md_file(root)
-            && let Ok(content) = std::fs::read_to_string(&user_md)
+            && let Ok(raw_content) = std::fs::read_to_string(&user_md)
         {
+            let content = crate::markdown::DocumentContent::parse(&raw_content).body.trim().to_string();
             if let Ok(canon) = user_md.canonicalize()
                 && !visited_paths.insert(canon)
             {
