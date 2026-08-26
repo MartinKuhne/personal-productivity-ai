@@ -537,12 +537,16 @@ with open(r"{cap_path}", "w") as f:
 /// server in this test harness, so we exercise the negative
 /// path: the helper must not panic and must surface an error
 /// that the caller can choose to log-and-ignore.)
-#[tokio::test]
-async fn test_http_session_delete_returns_error_on_unreachable() {
+#[test]
+fn test_http_session_delete_returns_error_on_unreachable() {
     // Bind a socket to get a free port, then drop it so the
     // port is almost certainly still closed. (There's a tiny
     // race window, but for a test of "do we panic?" it's
     // good enough.)
+    //
+    // This test stays sync (not #[tokio::test]) because
+    // `http_session_delete` uses `reqwest::blocking::Client`,
+    // which panics when dropped inside a tokio runtime.
     let listener = std::net::TcpListener::bind("127.0.0.1:0").expect("bind");
     let port = listener.local_addr().expect("addr").port();
     drop(listener);
