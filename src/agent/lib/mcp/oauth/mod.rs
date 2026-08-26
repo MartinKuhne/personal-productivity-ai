@@ -37,6 +37,9 @@ mod store;
 pub mod types;
 
 #[cfg(test)]
+mod integration_tests;
+
+#[cfg(test)]
 pub mod test_support;
 
 pub use client::OAuthClient;

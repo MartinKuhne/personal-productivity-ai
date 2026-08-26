@@ -5,7 +5,7 @@
 //! pixel-level PNG snapshot comparisons to catch visual regressions (font wrapping,
 //! spacing, padding, line heights, border alignment, colors, and layout bounds).
 //!
-//! Reference: `tests/collateral/commonmark.md` and `tests/functional-test-plan.md`.
+//! Reference: `tests/collateral/commonmark.md`.
 //! Each test annotates the CM example numbers it exercises via `[CM-NNN]`.
 
 #![cfg(test)]

@@ -38,10 +38,7 @@ use std::sync::{Arc, Mutex};
 use std::thread;
 use std::time::Duration;
 
-use fastmd::agent::lib::mcp::oauth::{
-    BrowserOverride, OAuthError, OAuthFlowInputs, PreRegisteredClient, TokenStore,
-    WwwAuthenticateChallenge, run_oauth_flow, start_loopback,
-};
+use super::*;
 
 /// A recorded HTTP request. We keep the raw target (path + query)
 /// so dynamic handlers can pull `state` and `redirect_uri` out of

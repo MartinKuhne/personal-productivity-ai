@@ -148,3 +148,7 @@ path = "src/app/bin/deploy.rs"
 name = "table_width"
 path = "benches/table_width.rs"
 harness = false
+
+[[bench]]
+name = "commonmark_bisect"
+path = "benches/commonmark_bisect.rs"

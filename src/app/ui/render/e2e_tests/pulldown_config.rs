@@ -12,8 +12,7 @@
 //! instead, so the test fails when the user's markdown stops being
 //! recognized.
 
-use fastmd::ui::render::RenderEvent;
-use fastmd::ui::render::parse_markdown_to_events;
+use super::*;
 
 fn has_table(events: &[RenderEvent]) -> bool {
     events.iter().any(|e| matches!(e, RenderEvent::Table(_)))
@@ -22,7 +21,7 @@ fn has_table(events: &[RenderEvent]) -> bool {
 fn has_footnote_ref(events: &[RenderEvent]) -> bool {
     events.iter().any(|e| match e {
         RenderEvent::FlushInline { elems, .. } => elems.iter().any(|el| match el {
-            fastmd::ui::render::InlineElem::Text(t, style) if style.code => t.contains("[^"),
+            InlineElem::Text(t, style) if style.code => t.contains("[^"),
             _ => false,
         }),
         _ => false,
@@ -32,7 +31,7 @@ fn has_footnote_ref(events: &[RenderEvent]) -> bool {
 fn has_strikethrough(events: &[RenderEvent]) -> bool {
     events.iter().any(|e| match e {
         RenderEvent::FlushInline { elems, .. } => elems.iter().any(|el| match el {
-            fastmd::ui::render::InlineElem::Text(_, style) => style.strikethrough,
+            InlineElem::Text(_, style) => style.strikethrough,
             _ => false,
         }),
         _ => false,
@@ -131,7 +130,7 @@ fn parse_emits_flush_inline_for_newline_separated_text() {
             RenderEvent::FlushInline { elems, .. } => {
                 let mut s = String::new();
                 for elem in elems {
-                    if let fastmd::ui::render::InlineElem::Text(t, _) = elem {
+                    if let InlineElem::Text(t, _) = elem {
                         s.push_str(t);
                     }
                 }

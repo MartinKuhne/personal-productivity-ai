@@ -4,10 +4,9 @@
 //! text reachability using `egui::Context::run_ui`, `egui_kittest::Harness`, and
 //! `fastmd::ui::render::render_markdown`.
 
-use eframe::egui;
-use fastmd::markdown::table_width::DeficitStrategy;
-use fastmd::ui::render::render_markdown;
-use fastmd::ui::test_helpers::run_ui_test;
+use super::*;
+use crate::markdown::table_width::DeficitStrategy;
+use crate::ui::test_helpers::run_ui_test;
 
 /// Markdown document fixture containing a multi-column table with varying text
 /// lengths and multi-line content (similar to `c:\temp\top.png`).
@@ -531,7 +530,7 @@ fn test_problematic_table() {
 | ExampleShop | ~$200–$250 (on sale ~$180–$200) | [ExampleShop](https://www.example.com/products/monitor/abc123) |
 | TestStore | ~$200–$250 | [TestStore](https://www.example.com/product/test-monitor-32-xyz) |
 | SampleClub | Check membership deals | [SampleClub](https://www.example.com/p/test-monitor/456789) |"#;
-    let events = fastmd::markdown::parser::parse_markdown_to_events(md);
+    let events = crate::markdown::parser::parse_markdown_to_events(md);
     println!("Parsed events: {:#?}", events);
     let out = render_table_markdown_to_shapes(md, 500.0);
     assert!(!out.shapes.is_empty());

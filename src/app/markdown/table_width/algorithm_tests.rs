@@ -1,25 +1,7 @@
-//! Integration tests for the `markdown::table_width` algorithm
+//! Tests for the `markdown::table_width` algorithm
 //! (FTWA — fair table-width algorithm).
-//!
-//! These exercise the **public** API only: `ftwa`,
-//! `DeficitStrategy`, `ColumnWidths`. Placing them in `tests/`
-//! (rather than a sibling sidecar) pins the algorithm to its
-//! public surface — if a future refactor narrows or renames an
-//! item, these tests catch it.
-//!
-//! Tests for the internal helpers (`cell_breakpoints`,
-//! `greedy_line_count`, `next_breakpoint_below`,
-//! `extra_lines_at_width`, `ftwa_wf`) live in the sibling
-//! `internal_tests.rs` sidecar — they need access to private
-//! items, which a top-level integration test cannot provide.
-//!
-//! Companion to the higher-level UI rendering tests in
-//! `tests/table_layout_test.rs` and
-//! `tests/table_visual_layout_test.rs` (which drive the full
-//! FTWA → render pipeline through egui).
 
-// Public API of the algorithm under test.
-use fastmd::markdown::table_width::{ColumnWidths, DeficitStrategy, ftwa};
+use super::{ColumnWidths, DeficitStrategy, ftwa};
 
 /// Helper: round `f32` to 3 decimals for stable compares.
 fn r(v: f32) -> f32 {

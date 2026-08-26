@@ -73,12 +73,11 @@
 //   cleanest way to verify the fix.
 //
 // **To run an individual bench:**
-//   cargo test --test check_compile -- --ignored --nocapture <name>
-#![cfg(test)]
+//   cargo test --bench commonmark_bisect -- --ignored --nocapture <name>
 
 use std::time::Instant;
 
-const SPEC: &str = include_str!("fixtures/commonmark-0.31.2-spec.txt");
+const SPEC: &str = include_str!("../tests/fixtures/commonmark-0.31.2-spec.txt");
 const FENCE: &str = "````````````````````````````````";
 const OPEN_FENCE: &str = "```````````````````````````````` example";
 const SEPARATOR: &str = "\n.\n";
