@@ -17,13 +17,13 @@ use std::sync::atomic::Ordering;
 /// per-session `AgentContext` built from an `AgentPrompt`. The driver owns
 /// the shared resources; this function runs `run_agent_inner` inline —
 /// no inner `std::thread::spawn` (research.md §3, migration step 10).
-pub fn run_agent(ctx: AgentContext) -> Vec<serde_json::Value> {
+pub fn run_agent(ctx: AgentContext) -> (Vec<serde_json::Value>, usize) {
     run_agent_inner(ctx)
 }
-fn run_agent_inner(ctx: AgentContext) -> Vec<serde_json::Value> {
+fn run_agent_inner(ctx: AgentContext) -> (Vec<serde_json::Value>, usize) {
     let llm = match resolve_ll_client(&ctx) {
         Some(c) => c,
-        None => return Vec::new(),
+        None => return (Vec::new(), ctx.start_turn),
     };
     let system_prompts = ctx.system_prompts.clone();
     log_prompt_context(&ctx.active_file, &ctx.active_dir, &ctx.selected_files);
@@ -49,7 +49,7 @@ fn run_agent_inner(ctx: AgentContext) -> Vec<serde_json::Value> {
     .build();
 
     let session_boundary = AgentDebugEntry {
-        turn: 0,
+        turn: ctx.start_turn,
         timestamp: chrono::Local::now(),
         kind: DebugEntryKind::Outgoing,
         summary: format!("Session {:8}", ctx.session_id),
@@ -60,7 +60,7 @@ fn run_agent_inner(ctx: AgentContext) -> Vec<serde_json::Value> {
     // New seam: SessionStarted lifecycle event
     ctx.observer.on_session_started();
 
-    let mut turn_number: usize = 0;
+    let mut turn_number: usize = ctx.start_turn;
     let mut prev_messages_len: usize = 0;
     loop {
         if ctx.cancel_flag.load(Ordering::SeqCst) {
@@ -79,7 +79,7 @@ fn run_agent_inner(ctx: AgentContext) -> Vec<serde_json::Value> {
             Turn::Done => break,
             Turn::Failed => {
                 ctx.observer.on_session_finished(Vec::new());
-                return Vec::new();
+                return (Vec::new(), turn_number);
             }
         }
     }
@@ -88,7 +88,7 @@ fn run_agent_inner(ctx: AgentContext) -> Vec<serde_json::Value> {
     }
 
     ctx.observer.on_session_finished(messages.clone());
-    messages
+    (messages, turn_number)
 }
 
 enum Turn {
