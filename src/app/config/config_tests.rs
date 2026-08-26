@@ -17,7 +17,7 @@ fn test_load_config_creates_default_when_missing() {
 
     // No global env mutation: pass the path explicitly so this test
     // cannot race with any other test that also touches APPDATA.
-    let _config = load_config_from_path(&config_path);
+    let _config = load_config_from_path(&config_path, Some(&dir.path().join("system")));
 
     // Config file should have been created
     assert!(config_path.exists());
@@ -225,7 +225,7 @@ fn test_load_config_valid_file() {
     let yaml = "system_prompt_extension: \"Test extension\"\n";
     std::fs::write(&config_path, yaml).unwrap();
 
-    let config = load_config_from_path(&config_path);
+    let config = load_config_from_path(&config_path, Some(&dir.path().join("system")));
     assert_eq!(
         config.system_prompt_extension,
         Some("Test extension".to_string())
@@ -239,7 +239,7 @@ fn test_load_config_invalid_file() {
     std::fs::create_dir_all(config_path.parent().unwrap()).unwrap();
     std::fs::write(&config_path, "invalid: yaml: [").unwrap();
 
-    let config = load_config_from_path(&config_path);
+    let config = load_config_from_path(&config_path, Some(&dir.path().join("system")));
     // Should return default
     assert!(config.system_prompt_extension.is_none());
 }
@@ -311,7 +311,7 @@ fn test_load_config_from_path_is_isolated() {
                 // concurrently.
                 barrier.wait();
 
-                let config = load_config_from_path(&config_path);
+                let config = load_config_from_path(&config_path, Some(&dir.join("system")));
                 assert_eq!(
                     config.system_prompt_extension,
                     Some(format!("Extension{i}")),
@@ -1096,4 +1096,44 @@ fn test_list_skills_creates_missing_folders() {
     let batches = config.list_batch_skills();
     assert!(batches.is_empty());
     assert!(sys_path.join("Skills").join("Batch").exists());
+}
+
+#[test]
+fn test_ensure_all_system_folders_seeds_keep_files() {
+    let dir = tempdir().unwrap();
+    let sys_path = dir.path().join("seed_system");
+
+    AppConfig::ensure_all_system_folders_at(&sys_path).unwrap();
+
+    // Each Skills subfolder must contain a .keep file so the folder is
+    // visible in the tree even before the user adds any skill files (VFS-105).
+    assert!(
+        sys_path.join("Skills").join("Note").join(".keep").exists(),
+        "Skills/Note/.keep must be seeded"
+    );
+    assert!(
+        sys_path
+            .join("Skills")
+            .join("Folder")
+            .join(".keep")
+            .exists(),
+        "Skills/Folder/.keep must be seeded"
+    );
+    assert!(
+        sys_path.join("Skills").join("Batch").join(".keep").exists(),
+        "Skills/Batch/.keep must be seeded"
+    );
+}
+
+#[test]
+fn test_ensure_all_system_folders_keep_is_idempotent() {
+    let dir = tempdir().unwrap();
+    let sys_path = dir.path().join("idempotent_system");
+
+    // First call seeds the files.
+    AppConfig::ensure_all_system_folders_at(&sys_path).unwrap();
+    // Second call must not error even though .keep files already exist.
+    AppConfig::ensure_all_system_folders_at(&sys_path).unwrap();
+
+    assert!(sys_path.join("Skills").join("Note").join(".keep").exists());
 }

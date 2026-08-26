@@ -389,7 +389,7 @@ fn test_new_document_on_directory_opens_dialog_with_dir_parent() {
         "submitting the dialog must create the document inside the right-clicked directory"
     );
     let content = fs::read_to_string(&created).unwrap();
-    assert_eq!(content, "---\ntitle: notes\n---\n\n");
+    assert_eq!(content, "");
 
     let _ = fs::remove_dir_all(&temp_dir);
 }

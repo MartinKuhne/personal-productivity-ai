@@ -72,38 +72,29 @@ pub fn build_system_prompts(
         selected_files,
     ));
 
+    let sys_name = config.system_library_display_name();
     let mut visited_paths = HashSet::new();
     for lib in &config.content_libraries {
         let root = Path::new(&lib.root_folder);
         if let Some(user_md) = find_user_md_file(root)
             && let Ok(content) = std::fs::read_to_string(&user_md)
         {
-            if let Ok(canon) = user_md.canonicalize() {
-                visited_paths.insert(canon);
+            if let Ok(canon) = user_md.canonicalize()
+                && !visited_paths.insert(canon)
+            {
+                continue;
             }
-            out.push(format!(
-                "\nUser Context (from {}):\n{}",
-                lib.name,
-                wrap_user_md(&lib.name, &content)
-            ));
-        }
-    }
-
-    // VFS-130: When the system library contains a User.md file at the root of the system folder,
-    // provide its contents as additional system context.
-    let system_lib_path = crate::config::AppConfig::get_system_library_path();
-    if let Some(user_md) = find_user_md_file(&system_lib_path) {
-        let already_visited = user_md
-            .canonicalize()
-            .map(|c| visited_paths.contains(&c))
-            .unwrap_or(false);
-        if !already_visited && let Ok(content) = std::fs::read_to_string(&user_md) {
-            let lib_name = config.system_library_display_name();
-            out.push(format!(
-                "\nUser Context (from {}):\n{}",
-                lib_name,
-                wrap_user_md(lib_name, &content)
-            ));
+            if lib.name == sys_name {
+                // VFS-130: System library User.md provided directly without additional context or guardrails.
+                out.push(content);
+            } else {
+                // AGENT-020: Content library USER.md wrapped in datamark envelope.
+                out.push(format!(
+                    "\nUser Context (from {}):\n{}",
+                    lib.name,
+                    wrap_user_md(&lib.name, &content)
+                ));
+            }
         }
     }
 

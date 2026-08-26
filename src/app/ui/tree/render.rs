@@ -86,7 +86,8 @@ fn show_dir_context_menu(
         ui.separator();
         for skill in folder_skills {
             if ui.button(&skill.name).clicked() {
-                if let Ok(content) = std::fs::read_to_string(&skill.path) {
+                if let Ok(raw_content) = std::fs::read_to_string(&skill.path) {
+                    let content = crate::markdown::DocumentContent::parse(&raw_content).body;
                     *ctx.selected_dir() = Some(path.to_path_buf());
                     *ctx.selected_file() = Some(path.to_path_buf());
                     *ctx.submit_prompt() = Some(content);
@@ -322,7 +323,8 @@ fn show_file_context_menu(
         ui.separator();
         for skill in note_skills {
             if ui.button(&skill.name).clicked() {
-                if let Ok(content) = std::fs::read_to_string(&skill.path) {
+                if let Ok(raw_content) = std::fs::read_to_string(&skill.path) {
+                    let content = crate::markdown::DocumentContent::parse(&raw_content).body;
                     *ctx.selected_file() = Some(path.to_path_buf());
                     *ctx.submit_prompt() = Some(content);
                 } else {

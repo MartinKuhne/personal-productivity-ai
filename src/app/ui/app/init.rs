@@ -311,7 +311,7 @@ impl FastMdApp {
                 let logger_observer = std::sync::Arc::new(
                     crate::ui::agent::conversation_logger::ConversationLoggerObserver::new(
                         session_id,
-                        crate::config::AppConfig::get_system_library_path().join("Conversations"),
+                        std::env::temp_dir().join("fastmd_test_conversations"),
                     ),
                 );
                 std::sync::Arc::new(crate::bus::events::agent::CompositeAgentEventObserver::new(

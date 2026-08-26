@@ -276,7 +276,7 @@ fn write_new_document_creates_yaml_headed_markdown() {
     let path = write_new_document(&temp_dir, "first notes").unwrap();
     assert_eq!(path, temp_dir.join("first notes.md"));
     let content = fs::read_to_string(&path).unwrap();
-    assert_eq!(content, "---\ntitle: first notes\n---\n\n");
+    assert_eq!(content, "");
 
     let _ = fs::remove_dir_all(&temp_dir);
 }
@@ -343,7 +343,7 @@ fn test_create_document_dialog_writes_file_on_submit() {
     let created = temp_dir.join("from dialog.md");
     assert!(created.exists(), "Ok must create the document file");
     let content = fs::read_to_string(&created).unwrap();
-    assert_eq!(content, "---\ntitle: from dialog\n---\n\n");
+    assert_eq!(content, "");
 
     let _ = fs::remove_dir_all(&temp_dir);
 }

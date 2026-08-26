@@ -311,21 +311,48 @@ impl AppConfig {
         Self::get_skills_dir().join("Batch")
     }
 
+    /// Helper to create the Skills directories and default sample skills (VFS-125, VFS-126).
+    fn create_skills_dir(skills_dir: &Path) -> std::io::Result<()> {
+        let skills_note = skills_dir.join("Note");
+        if !skills_note.exists() {
+            std::fs::create_dir_all(&skills_note)?;
+            let _ = std::fs::write(
+                skills_note.join("FormatMarkdown.md"),
+                "instructions to format the current note into correct markdown.",
+            );
+        }
+
+        let skills_folder = skills_dir.join("Folder");
+        if !skills_folder.exists() {
+            std::fs::create_dir_all(&skills_folder)?;
+            let _ = std::fs::write(
+                skills_folder.join("CreateSummary.md"),
+                "Provide a brief summary of the contents of the folder, in the format <filename>: <one sentence summary of the contents>. One line per file",
+            );
+        }
+
+        let skills_batch = skills_dir.join("Batch");
+        if !skills_batch.exists() {
+            std::fs::create_dir_all(&skills_batch)?;
+        }
+
+        Self::seed_keep_file(&skills_note)?;
+        Self::seed_keep_file(&skills_folder)?;
+        Self::seed_keep_file(&skills_batch)?;
+        Ok(())
+    }
+
     /// Ensures that the `Skills` directory and its subdirectories (`Note`, `Folder`, `Batch`) exist on disk (VFS-120).
     pub fn ensure_skills_dirs() -> std::io::Result<PathBuf> {
         let skills_dir = Self::get_skills_dir();
-        std::fs::create_dir_all(skills_dir.join("Note"))?;
-        std::fs::create_dir_all(skills_dir.join("Folder"))?;
-        std::fs::create_dir_all(skills_dir.join("Batch"))?;
+        Self::create_skills_dir(&skills_dir)?;
         Ok(skills_dir)
     }
 
     /// Ensures that the `Skills` directory and its subdirectories exist at a specific root path (useful for tests).
     pub fn ensure_skills_dirs_at(root: &Path) -> std::io::Result<PathBuf> {
         let skills_dir = root.join("system").join("Skills");
-        std::fs::create_dir_all(skills_dir.join("Note"))?;
-        std::fs::create_dir_all(skills_dir.join("Folder"))?;
-        std::fs::create_dir_all(skills_dir.join("Batch"))?;
+        Self::create_skills_dir(&skills_dir)?;
         Ok(skills_dir)
     }
 
@@ -383,9 +410,18 @@ impl AppConfig {
     pub fn ensure_all_system_folders_at(root: &Path) -> std::io::Result<()> {
         std::fs::create_dir_all(root)?;
         std::fs::create_dir_all(root.join("Conversations"))?;
-        std::fs::create_dir_all(root.join("Skills").join("Note"))?;
-        std::fs::create_dir_all(root.join("Skills").join("Folder"))?;
-        std::fs::create_dir_all(root.join("Skills").join("Batch"))?;
+        Self::create_skills_dir(&root.join("Skills"))?;
+        Ok(())
+    }
+
+    /// Writes a `.keep` sentinel file into `dir` so the folder is visible in
+    /// the directory tree even when it contains no skill files (VFS-105).
+    /// This is a no-op if the file already exists.
+    fn seed_keep_file(dir: &Path) -> std::io::Result<()> {
+        let keep = dir.join(".keep");
+        if !keep.exists() {
+            std::fs::write(keep, "")?;
+        }
         Ok(())
     }
 
@@ -629,7 +665,7 @@ pub fn get_config_path() -> PathBuf {
 /// (resolved via [`get_config_path`]). Thin wrapper around the path-based
 /// loader for production callers.
 pub fn load_config() -> AppConfig {
-    load_config_from_path(&get_config_path())
+    load_config_from_path(&get_config_path(), None)
 }
 
 /// Persist the supplied configuration to the platform-default
@@ -670,11 +706,18 @@ pub fn save_config_to_path(config: &AppConfig, path: &Path) -> Result<PathBuf, S
 /// Taking an explicit path (rather than reading `APPDATA` from the
 /// environment) makes the function deterministic for tests and prevents
 /// parallel tests from racing on the process-wide environment.
-pub(crate) fn load_config_from_path(config_path: &Path) -> AppConfig {
+pub(crate) fn load_config_from_path(config_path: &Path, system_path: Option<&Path>) -> AppConfig {
     if config_path.exists() {
         if let Ok(content) = std::fs::read_to_string(config_path) {
             match serde_norway::from_str::<AppConfig>(&content) {
-                Ok(config) => return config,
+                Ok(mut config) => {
+                    if let Some(sys_path) = system_path {
+                        config.ensure_system_library_present_at(sys_path);
+                    } else {
+                        config.ensure_system_library_present();
+                    }
+                    return config;
+                }
                 Err(err) => {
                     tracing::error!(
                         name = "config.parse.failed",
@@ -695,12 +738,24 @@ pub(crate) fn load_config_from_path(config_path: &Path) -> AppConfig {
         if let Some(parent) = config_path.parent() {
             let _ = std::fs::create_dir_all(parent);
         }
-        let default_config = AppConfig::default();
+        let mut default_config = AppConfig::default();
+        if let Some(sys_path) = system_path {
+            default_config.ensure_system_library_present_at(sys_path);
+        } else {
+            default_config.ensure_system_library_present();
+        }
         if let Ok(yaml_str) = serde_norway::to_string(&default_config) {
             let _ = std::fs::write(config_path, yaml_str);
         }
+        return default_config;
     }
-    AppConfig::default()
+    let mut fallback = AppConfig::default();
+    if let Some(sys_path) = system_path {
+        fallback.ensure_system_library_present_at(sys_path);
+    } else {
+        fallback.ensure_system_library_present();
+    }
+    fallback
 }
 
 // ---------------------------------------------------------------------------

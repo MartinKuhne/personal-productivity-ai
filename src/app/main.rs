@@ -57,7 +57,57 @@ fn main() -> eframe::Result<()> {
         ..Default::default()
     };
 
-    let config = fastmd::config::load_config();
+    let mut config = fastmd::config::load_config();
+
+    let args: Vec<String> = std::env::args().collect();
+    if args.len() > 1 {
+        let path = std::path::PathBuf::from(&args[1]);
+        if path.exists() && path.is_dir() {
+            let mut path_str = path
+                .canonicalize()
+                .unwrap_or(path)
+                .to_string_lossy()
+                .to_string();
+            if path_str.starts_with(r"\\?\") {
+                path_str = path_str[4..].to_string();
+            }
+            let found = config
+                .content_libraries
+                .iter()
+                .any(|lib| lib.root_folder == path_str);
+            if !found {
+                config
+                    .content_libraries
+                    .push(fastmd::config::ContentLibrary {
+                        root_folder: path_str,
+                        name: "Workspace".to_string(),
+                        kind: "text".to_string(),
+                        readonly: false,
+                        priority: 0,
+                    });
+            }
+        }
+    }
+    
+    if config.content_libraries.len() <= 1 && config.content_libraries.iter().all(|lib| lib.name == config.system_library_display_name()) {
+        let mut current_dir = std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from("."));
+        if let Ok(canon) = std::fs::canonicalize(&current_dir) {
+            current_dir = canon;
+        }
+        let mut path_str = current_dir.to_string_lossy().to_string();
+        if path_str.starts_with(r"\\?\") {
+            path_str = path_str[4..].to_string();
+        }
+        config
+            .content_libraries
+            .push(fastmd::config::ContentLibrary {
+                root_folder: path_str,
+                name: "Workspace".to_string(),
+                kind: "text".to_string(),
+                readonly: false,
+                priority: 0,
+            });
+    }
 
     // The configuration-arrival bus is the fan-out channel that
     // each subsystem (background workers, agent, UI) subscribes to
