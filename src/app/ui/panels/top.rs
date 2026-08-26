@@ -371,24 +371,32 @@ pub fn show_top_panel_capture_with_persist<F>(
                                 .unwrap()
                                 .show_background_logs
                         };
-                        let background_operations_label =
-                            crate::ui::strings::format_menu_selection_label(
+                        // egui's `ui.checkbox` draws the checkmark as vector
+                        // strokes, so it renders correctly without relying on a
+                        // glyph (e.g. U+2713) that is absent from egui's bundled
+                        // default fonts. On click egui flips `background_checked`
+                        // before returning, so `apply_background_logs_toggle`
+                        // receives the post-click value.
+                        let mut background_checked = show_bg;
+                        if ui
+                            .checkbox(
+                                &mut background_checked,
                                 crate::ui::strings::MENU_BACKGROUND_OPERATIONS,
-                                show_bg,
-                            );
-                        if ui.button(background_operations_label).clicked() {
-                            apply_background_logs_toggle(app, !show_bg);
+                            )
+                            .clicked()
+                        {
+                            apply_background_logs_toggle(app, background_checked);
                             on_click(crate::ui::strings::BACKGROUND_OPERATIONS_EVENT);
                             ui.close();
                         }
 
                         let show_debug = app.orchestrator.agent_panel_state.show_debug_window;
-                        let agent_debug_label = crate::ui::strings::format_menu_selection_label(
-                            crate::ui::strings::MENU_AGENT_DEBUG,
-                            show_debug,
-                        );
-                        if ui.button(agent_debug_label).clicked() {
-                            apply_agent_debug_toggle(app, !show_debug);
+                        let mut debug_checked = show_debug;
+                        if ui
+                            .checkbox(&mut debug_checked, crate::ui::strings::MENU_AGENT_DEBUG)
+                            .clicked()
+                        {
+                            apply_agent_debug_toggle(app, debug_checked);
                             on_click(crate::ui::strings::AGENT_DEBUG_EVENT);
                             ui.close();
                         }
@@ -417,16 +425,19 @@ pub fn show_top_panel_capture_with_persist<F>(
                             let mut pending_model: Option<String> = None;
                             for (name, model_cfg) in chat_models {
                                 let is_current = current_model.as_deref() == Some(name.as_str());
-                                let checkmark = if is_current { "✓ " } else { "   " };
-                                let label = format!(
-                                    "{}{}",
-                                    checkmark,
-                                    crate::ui::strings::format_chat_model_menu_label(
-                                        name,
-                                        model_cfg.get_cost()
-                                    )
+                                // `ui.checkbox` renders the selected indicator
+                                // as vector strokes rather than a `✓` glyph that
+                                // is absent from egui's bundled default fonts
+                                // (see the Chat models / Windows / Table wrap
+                                // submenus). The local `checked` flip on click
+                                // is invisible because the menu closes
+                                // immediately.
+                                let mut checked = is_current;
+                                let label = crate::ui::strings::format_chat_model_menu_label(
+                                    name,
+                                    model_cfg.get_cost(),
                                 );
-                                if ui.button(label).clicked() {
+                                if ui.checkbox(&mut checked, label).clicked() {
                                     if !is_current {
                                         pending_model = Some(name.clone());
                                     }
@@ -461,9 +472,8 @@ pub fn show_top_panel_capture_with_persist<F>(
                             DeficitStrategy::LagrangePenalty,
                         ] {
                             let is_selected = variant == current_strategy;
-                            let checkmark = if is_selected { "✓ " } else { "   " };
-                            let label = format!("{}{}", checkmark, strategy_label(variant));
-                            if ui.button(label).clicked() {
+                            let mut checked = is_selected;
+                            if ui.checkbox(&mut checked, strategy_label(variant)).clicked() {
                                 if !is_selected {
                                     pending = Some(variant);
                                 }
