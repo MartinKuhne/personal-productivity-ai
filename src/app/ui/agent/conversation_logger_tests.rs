@@ -545,3 +545,60 @@ fn test_e2e_openai_wiremock_chat_log_with_mutating_tool() {
     assert!(content.contains("# Todo list"));
     assert!(content.contains("> **Result (`create_note`):**"));
 }
+
+// ---- VFS-111: history with no user message is silently skipped ----
+
+#[test]
+fn test_conversation_logger_observer_skips_turn_without_user_message() {
+    let temp = tempfile::tempdir().unwrap();
+    let conv_dir = temp.path().join("Conversations");
+    let observer = ConversationLoggerObserver::new(Uuid::new_v4(), conv_dir.clone());
+
+    // History contains only an assistant message — no user turn.
+    observer.on_session_finished(vec![
+        serde_json::json!({"role": "assistant", "content": "unsolicited response"}),
+    ]);
+
+    assert_eq!(observer.get_turn_number(), 0, "turn must not advance");
+    assert!(
+        observer.get_log_path().is_none(),
+        "no log file must be created when there is no user prompt"
+    );
+    assert!(
+        !conv_dir.exists(),
+        "no Conversations directory must be materialised for a skipped turn"
+    );
+}
+
+// ---- VFS-114: orphan tool result (no matching on_tool_call_started) ----
+
+#[test]
+fn test_conversation_logger_observer_orphan_tool_result_recorded_with_empty_args() {
+    let temp = tempfile::tempdir().unwrap();
+    let conv_dir = temp.path().join("Conversations");
+    let observer = ConversationLoggerObserver::new(Uuid::new_v4(), conv_dir);
+
+    // `on_tool_result` arrives for an id that was never started.
+    observer.on_tool_result(
+        "orphan_id".to_string(),
+        "patch_note".to_string(),
+        serde_json::json!("Patched anyway"),
+    );
+
+    let history = vec![
+        serde_json::json!({"role": "user", "content": "Patch note"}),
+        serde_json::json!({"role": "assistant", "content": "Done."}),
+    ];
+    observer.on_session_finished(history);
+
+    let log_path = observer.get_log_path().expect("log file must exist");
+    let content = std::fs::read_to_string(&log_path).unwrap();
+    // The mutating tool is still recorded at the end of the
+    // response section, with empty arguments (the args come from
+    // the never-received `on_tool_call_started` entry).
+    assert!(content.contains("> **Executing tool `patch_note`**"));
+    assert!(
+        content.contains("> **Result (`patch_note`):**"),
+        "orphan tool result must still be logged with its result string"
+    );
+}

@@ -268,9 +268,19 @@ impl AppConfig {
     /// Resolves the default storage directory for the system library (VFS-103).
     /// On Windows, resolves to `%APPDATA%/fastmd/system`.
     pub fn get_system_library_path() -> PathBuf {
-        if let Ok(app_data) = std::env::var("APPDATA") {
+        let appdata = std::env::var("APPDATA").ok();
+        let userprofile = std::env::var("USERPROFILE").ok();
+        Self::system_library_path_from_env(appdata.as_deref(), userprofile.as_deref())
+    }
+
+    /// Pure resolution of the system library path from injected env values.
+    /// Extracted from [`get_system_library_path`] so the three branches
+    /// (APPDATA, USERPROFILE fallback, relative) are testable without
+    /// mutating process-global environment variables (VFS-103).
+    fn system_library_path_from_env(appdata: Option<&str>, userprofile: Option<&str>) -> PathBuf {
+        if let Some(app_data) = appdata {
             PathBuf::from(app_data).join("fastmd").join("system")
-        } else if let Ok(user_profile) = std::env::var("USERPROFILE") {
+        } else if let Some(user_profile) = userprofile {
             PathBuf::from(user_profile).join(".fastmd").join("system")
         } else {
             PathBuf::from("system")

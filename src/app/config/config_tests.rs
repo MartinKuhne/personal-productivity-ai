@@ -1139,3 +1139,224 @@ fn test_ensure_all_system_folders_keep_is_idempotent() {
 
     assert!(sys_path.join("Skills").join("Note").join(".keep").exists());
 }
+
+// ---- VFS-103: system library path resolution & fallbacks ----
+
+#[test]
+fn test_system_library_path_appdata_branch() {
+    let p = AppConfig::system_library_path_from_env(Some("C:/AppData"), None);
+    assert_eq!(p, PathBuf::from("C:/AppData").join("fastmd").join("system"));
+}
+
+#[test]
+fn test_system_library_path_userprofile_fallback_branch() {
+    let p = AppConfig::system_library_path_from_env(None, Some("C:/Users/test"));
+    assert_eq!(
+        p,
+        PathBuf::from("C:/Users/test")
+            .join(".fastmd")
+            .join("system")
+    );
+}
+
+#[test]
+fn test_system_library_path_relative_fallback_branch() {
+    let p = AppConfig::system_library_path_from_env(None, None);
+    assert_eq!(p, PathBuf::from("system"));
+}
+
+#[test]
+fn test_system_library_path_appdata_takes_precedence_over_userprofile() {
+    let p = AppConfig::system_library_path_from_env(Some("AD"), Some("UP"));
+    assert_eq!(p, PathBuf::from("AD").join("fastmd").join("system"));
+}
+
+// ---- VFS-104 / VFS-105 / VFS-110: IO-failure error paths ----
+
+#[test]
+fn test_ensure_system_library_dir_at_fails_when_root_is_a_file() {
+    let dir = tempdir().unwrap();
+    let file_path = dir.path().join("not_a_dir");
+    std::fs::write(&file_path, "bytes").unwrap();
+
+    let result = AppConfig::ensure_system_library_dir_at(&file_path);
+    assert!(
+        result.is_err(),
+        "must propagate io::Error when the parent is not a directory"
+    );
+}
+
+#[test]
+fn test_ensure_conversations_dir_at_fails_when_root_is_a_file() {
+    let dir = tempdir().unwrap();
+    let file_path = dir.path().join("not_a_dir");
+    std::fs::write(&file_path, "bytes").unwrap();
+
+    let result = AppConfig::ensure_conversations_dir_at(&file_path);
+    assert!(
+        result.is_err(),
+        "must propagate io::Error when the parent is not a directory"
+    );
+}
+
+#[test]
+fn test_ensure_all_system_folders_at_fails_when_root_is_a_file() {
+    let dir = tempdir().unwrap();
+    let file_path = dir.path().join("not_a_dir");
+    std::fs::write(&file_path, "bytes").unwrap();
+
+    let result = AppConfig::ensure_all_system_folders_at(&file_path);
+    assert!(
+        result.is_err(),
+        "must propagate io::Error when the root is not a directory"
+    );
+}
+
+// ---- VFS-102: empty / whitespace custom name ----
+
+#[test]
+fn test_system_library_display_name_empty_string_is_returned_verbatim() {
+    let mut config = AppConfig::default();
+    config.system_library_name = Some(String::new());
+    // `unwrap_or("System")` only fires for `None`; an empty `Some`
+    // is returned as-is. This pins the current behaviour so any
+    // future normalisation is a deliberate, visible change.
+    assert_eq!(config.system_library_display_name(), "");
+}
+
+#[test]
+fn test_system_library_display_name_whitespace_is_returned_verbatim() {
+    let mut config = AppConfig::default();
+    config.system_library_name = Some("   ".to_string());
+    assert_eq!(config.system_library_display_name(), "   ");
+}
+
+// ---- VFS-125 / VFS-126: sample skill content & "only-when-creating" ----
+
+#[test]
+fn test_skills_sample_files_seeded_with_required_content() {
+    let dir = tempdir().unwrap();
+    AppConfig::ensure_skills_dirs_at(dir.path()).unwrap();
+
+    let note_sample = AppConfig::get_skills_note_dir_at(dir.path()).join("FormatMarkdown.md");
+    let folder_sample = AppConfig::get_skills_folder_dir_at(dir.path()).join("CreateSummary.md");
+
+    assert!(
+        note_sample.exists(),
+        "Skills/Note/FormatMarkdown.md must be seeded on creation (VFS-125)"
+    );
+    assert_eq!(
+        std::fs::read_to_string(&note_sample).unwrap(),
+        "instructions to format the current note into correct markdown.",
+        "VFS-125 sample content must match the spec wording"
+    );
+
+    assert!(
+        folder_sample.exists(),
+        "Skills/Folder/CreateSummary.md must be seeded on creation (VFS-126)"
+    );
+    assert_eq!(
+        std::fs::read_to_string(&folder_sample).unwrap(),
+        "Provide a brief summary of the contents of the folder, in the format <filename>: <one sentence summary of the contents>. One line per file",
+        "VFS-126 sample content must match the spec wording verbatim"
+    );
+
+    // The spec seeds sample skills only into Note and Folder; Batch
+    // must contain no sample file.
+    let batch_entries: Vec<_> = std::fs::read_dir(AppConfig::get_skills_batch_dir_at(dir.path()))
+        .unwrap()
+        .map(|e| e.unwrap().file_name().to_string_lossy().to_string())
+        .collect();
+    assert!(
+        !batch_entries.iter().any(|n| n.ends_with(".md")),
+        "Skills/Batch must not receive a sample skill file; found: {batch_entries:?}"
+    );
+}
+
+#[test]
+fn test_create_skills_dir_preserves_existing_sample_files() {
+    // "Only when creating": if the subfolder already exists, the
+    // sample skill must NOT be (re)written — a user-authored file
+    // with the same name must survive untouched.
+    let dir = tempdir().unwrap();
+    let skills_dir = dir.path().join("system").join("Skills");
+    let note_dir = skills_dir.join("Note");
+    let folder_dir = skills_dir.join("Folder");
+    std::fs::create_dir_all(&note_dir).unwrap();
+    std::fs::create_dir_all(&folder_dir).unwrap();
+
+    let user_note_content = "My custom format instructions.";
+    let user_folder_content = "My custom summary instructions.";
+    std::fs::write(note_dir.join("FormatMarkdown.md"), user_note_content).unwrap();
+    std::fs::write(folder_dir.join("CreateSummary.md"), user_folder_content).unwrap();
+
+    AppConfig::create_skills_dir(&skills_dir).unwrap();
+
+    assert_eq!(
+        std::fs::read_to_string(note_dir.join("FormatMarkdown.md")).unwrap(),
+        user_note_content,
+        "existing user FormatMarkdown.md must not be overwritten (VFS-125 only-when-creating)"
+    );
+    assert_eq!(
+        std::fs::read_to_string(folder_dir.join("CreateSummary.md")).unwrap(),
+        user_folder_content,
+        "existing user CreateSummary.md must not be overwritten (VFS-126 only-when-creating)"
+    );
+}
+
+#[test]
+fn test_create_skills_dir_does_not_seed_sample_into_pre_existing_folder_without_file() {
+    // If the subfolder exists but the sample file does not, the
+    // "only-when-creating" guard still skips seeding (the guard
+    // keys on folder existence, not file existence). Pin this
+    // behaviour so a future change that adds the sample to an
+    // already-present folder is a deliberate, reviewed change.
+    let dir = tempdir().unwrap();
+    let skills_dir = dir.path().join("system").join("Skills");
+    let note_dir = skills_dir.join("Note");
+    std::fs::create_dir_all(&note_dir).unwrap();
+
+    AppConfig::create_skills_dir(&skills_dir).unwrap();
+
+    assert!(
+        !note_dir.join("FormatMarkdown.md").exists(),
+        "sample must not be seeded into a pre-existing Note folder (VFS-125 only-when-creating)"
+    );
+}
+
+// ---- VFS-100: no-op when system library already correct ----
+
+#[test]
+fn test_ensure_system_library_present_idempotent_when_already_correct() {
+    let dir = tempdir().unwrap();
+    let sys_path = dir.path().join("system");
+    let mut config = AppConfig::default();
+    config.content_libraries = vec![ContentLibrary {
+        root_folder: sys_path.to_string_lossy().to_string(),
+        name: "System".to_string(),
+        kind: "text".to_string(),
+        readonly: false,
+        priority: 0,
+    }];
+
+    let libs_before = config.content_libraries.clone();
+    config.ensure_system_library_present_at(&sys_path);
+
+    assert_eq!(
+        config.content_libraries.len(),
+        libs_before.len(),
+        "an already-correct System library must not change the library count (VFS-100 no-op)"
+    );
+    // ContentLibrary does not derive PartialEq; compare the
+    // single library field-by-field.
+    let lib = &config.content_libraries[0];
+    assert_eq!(lib.name, "System");
+    assert_eq!(lib.kind, "text");
+    assert!(!lib.readonly);
+    assert_eq!(lib.priority, 0);
+    assert_eq!(
+        lib.root_folder,
+        sys_path.to_string_lossy().to_string(),
+        "root_folder must not be repointed for an already-correct System library"
+    );
+}

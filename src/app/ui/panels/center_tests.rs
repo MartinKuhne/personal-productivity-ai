@@ -312,3 +312,169 @@ fn test_show_center_panel_render_modes() {
 fn test_agent_session_close_button_label() {
     assert_eq!(crate::ui::strings::AGENT_SESSION_CLOSE_BUTTON, "Close");
 }
+
+// ---- VFS-121: Note skills in the open-tab context menu ----
+
+/// Helper: build a `FastMdApp` with a single open tab and a System
+/// content library rooted at `sys_dir`.
+fn app_with_open_tab(sys_dir: &std::path::Path, tab_path: &std::path::Path) -> FastMdApp {
+    let mut app = create_test_app();
+    app.orchestrator.tabs.tabs = vec![tab_path.to_path_buf()];
+    *app.orchestrator.selection.selected_file_mut() = Some(tab_path.to_path_buf());
+    app.orchestrator.config = crate::config::AppConfig {
+        content_libraries: vec![crate::config::ContentLibrary {
+            root_folder: sys_dir.to_string_lossy().to_string(),
+            name: "System".to_string(),
+            kind: "text".to_string(),
+            readonly: false,
+            priority: 0,
+        }],
+        ..crate::config::AppConfig::default()
+    };
+    app
+}
+
+/// VFS-121: right-clicking an open tab and choosing a Note skill
+/// populates `submit_prompt` with the skill body and selects the
+/// tab path as `selected_file`.
+#[test]
+fn test_tab_context_menu_note_skill_action() {
+    use crate::ui::test_helpers::interact::stateful_harness;
+    use egui_kittest::kittest::Queryable;
+    use std::cell::RefCell;
+    use std::rc::Rc;
+
+    let dir = tempfile::tempdir().unwrap();
+    let sys_dir = dir.path().join("system");
+    let note_skills_dir = sys_dir.join("Skills").join("Note");
+    std::fs::create_dir_all(&note_skills_dir).unwrap();
+    std::fs::write(
+        note_skills_dir.join("Proofread.md"),
+        "Please proofread this document carefully.",
+    )
+    .unwrap();
+
+    let tab_path = dir.path().join("meeting.md");
+    std::fs::write(&tab_path, "# Meeting\n").unwrap();
+
+    let app = app_with_open_tab(&sys_dir, &tab_path);
+    let app_cell: Rc<RefCell<FastMdApp>> = Rc::new(RefCell::new(app));
+    let app_for_closure = Rc::clone(&app_cell);
+
+    let mut harness = stateful_harness((), move |ui, _| {
+        let mut app = app_for_closure.borrow_mut();
+        render_tabs_and_content_capture(ui, &mut app, |_| {});
+    });
+    harness.fit_contents();
+
+    let tab_nodes: Vec<_> = harness.query_all_by_label_contains("meeting.md").collect();
+    assert!(!tab_nodes.is_empty(), "the tab must be present");
+    tab_nodes[0].click_secondary();
+    harness.run_steps(2);
+    harness.run_steps(2);
+
+    harness.get_by_label("Proofread").click_accesskit();
+    harness.run_steps(2);
+    harness.run_steps(2);
+
+    let app = app_cell.borrow();
+    assert_eq!(
+        app.submit_prompt(),
+        &Some("Please proofread this document carefully.".to_string()),
+        "choosing Note skill from tab context menu must populate submit_prompt"
+    );
+    assert_eq!(
+        app.selection().selected_file(),
+        Some(&tab_path),
+        "choosing Note skill must select the tab path"
+    );
+}
+
+/// VFS-121 negative: when no Note skill files are present, the
+/// open-tab context menu does not offer a skill button.
+#[test]
+fn test_tab_context_menu_offers_no_note_skill_when_dir_empty() {
+    use crate::ui::test_helpers::interact::stateful_harness;
+    use egui_kittest::kittest::Queryable;
+    use std::cell::RefCell;
+    use std::rc::Rc;
+
+    let dir = tempfile::tempdir().unwrap();
+    let sys_dir = dir.path().join("system");
+    // No Skills/Note files created.
+    let tab_path = dir.path().join("notes.md");
+    std::fs::write(&tab_path, "# Notes\n").unwrap();
+
+    let app = app_with_open_tab(&sys_dir, &tab_path);
+    let app_cell: Rc<RefCell<FastMdApp>> = Rc::new(RefCell::new(app));
+    let app_for_closure = Rc::clone(&app_cell);
+
+    let mut harness = stateful_harness((), move |ui, _| {
+        let mut app = app_for_closure.borrow_mut();
+        render_tabs_and_content_capture(ui, &mut app, |_| {});
+    });
+    harness.fit_contents();
+
+    let tab_nodes: Vec<_> = harness.query_all_by_label_contains("notes.md").collect();
+    assert!(!tab_nodes.is_empty());
+    tab_nodes[0].click_secondary();
+    harness.run_steps(2);
+    harness.run_steps(2);
+
+    let skill_buttons: Vec<_> = harness.query_all_by_label_contains("Proofread").collect();
+    assert!(
+        skill_buttons.is_empty(),
+        "no Note skill button must be offered when Skills/Note is empty"
+    );
+}
+
+/// VFS-121 error path: a Note skill file that exists in the listing
+/// but cannot be read as UTF-8 must NOT populate `submit_prompt`
+/// (the `else` branch logs and leaves the prompt untouched).
+#[test]
+fn test_tab_context_menu_note_skill_read_failure_leaves_prompt_empty() {
+    use crate::ui::test_helpers::interact::stateful_harness;
+    use egui_kittest::kittest::Queryable;
+    use std::cell::RefCell;
+    use std::rc::Rc;
+
+    let dir = tempfile::tempdir().unwrap();
+    let sys_dir = dir.path().join("system");
+    let note_skills_dir = sys_dir.join("Skills").join("Note");
+    std::fs::create_dir_all(&note_skills_dir).unwrap();
+    // Invalid UTF-8: listed by list_note_skills but unreadable by read_to_string.
+    std::fs::write(
+        note_skills_dir.join("Proofread.md"),
+        [0xFF, 0xFE, 0x00, 0x80],
+    )
+    .unwrap();
+
+    let tab_path = dir.path().join("meeting.md");
+    std::fs::write(&tab_path, "# Meeting\n").unwrap();
+
+    let app = app_with_open_tab(&sys_dir, &tab_path);
+    let app_cell: Rc<RefCell<FastMdApp>> = Rc::new(RefCell::new(app));
+    let app_for_closure = Rc::clone(&app_cell);
+
+    let mut harness = stateful_harness((), move |ui, _| {
+        let mut app = app_for_closure.borrow_mut();
+        render_tabs_and_content_capture(ui, &mut app, |_| {});
+    });
+    harness.fit_contents();
+
+    let tab_nodes: Vec<_> = harness.query_all_by_label_contains("meeting.md").collect();
+    tab_nodes[0].click_secondary();
+    harness.run_steps(2);
+    harness.run_steps(2);
+
+    harness.get_by_label("Proofread").click_accesskit();
+    harness.run_steps(2);
+    harness.run_steps(2);
+
+    let app = app_cell.borrow();
+    assert_eq!(
+        app.submit_prompt(),
+        &None,
+        "unreadable skill file must not populate submit_prompt (VFS-121 error path)"
+    );
+}

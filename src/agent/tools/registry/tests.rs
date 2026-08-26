@@ -347,7 +347,13 @@ fn test_list_by_tag_no_matches_reports_zero_total() {
     let hint = data["hint"]
         .as_str()
         .expect("hint should be set on no-match");
-    assert_eq!(hint, "Final page.");
+    // A zero-match result has no cursor session, so the dedicated
+    // no-match hint is returned instead of the paging "Final page."
+    // hint (see `builtin::strings::NO_MATCHING_TAGGED_FILES_HINT`).
+    assert_eq!(
+        hint,
+        crate::tools::registry::builtin::strings::NO_MATCHING_TAGGED_FILES_HINT
+    );
 }
 
 #[test]

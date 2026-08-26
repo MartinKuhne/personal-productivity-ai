@@ -240,3 +240,74 @@ fn test_batch_dialog_discovers_batch_skills() {
         "Summarize all notes in batch."
     );
 }
+
+/// VFS-123: an empty Skills/Batch folder contributes no batch prompts.
+#[test]
+fn test_batch_dialog_discovers_no_batch_skills_when_dir_empty() {
+    let dir = tempfile::tempdir().unwrap();
+    let sys_dir = dir.path().join("system");
+    let batch_skills_dir = sys_dir.join("Skills").join("Batch");
+    std::fs::create_dir_all(&batch_skills_dir).unwrap();
+
+    let mut config = crate::config::AppConfig::default();
+    config.content_libraries = vec![crate::config::ContentLibrary {
+        root_folder: sys_dir.to_string_lossy().to_string(),
+        name: "System".to_string(),
+        kind: "text".to_string(),
+        readonly: false,
+        priority: 0,
+    }];
+
+    let mut app = crate::ui::FastMdApp::empty_state(config);
+    let mut dialog_config = BatchDialogConfig::default();
+    let _ = render_dialog_once(&mut app, &mut dialog_config);
+
+    assert!(
+        !dialog_config
+            .available_prompts
+            .iter()
+            .any(|p| p.display_name.contains("Skills/Batch")),
+        "no Skills/Batch prompts must be offered when the folder is empty"
+    );
+}
+
+/// VFS-123: non-`.md` files in Skills/Batch are NOT filtered out by
+/// `list_skill_files_in` (it only skips dotfiles). Pin this current
+/// behaviour so any future Markdown-only restriction is a deliberate,
+/// visible change.
+#[test]
+fn test_batch_dialog_includes_non_md_files_in_batch_skills_dir() {
+    let dir = tempfile::tempdir().unwrap();
+    let sys_dir = dir.path().join("system");
+    let batch_skills_dir = sys_dir.join("Skills").join("Batch");
+    std::fs::create_dir_all(&batch_skills_dir).unwrap();
+    std::fs::write(batch_skills_dir.join("BatchSummarize.md"), "Summarize.").unwrap();
+    std::fs::write(batch_skills_dir.join("readme.txt"), "Text file.").unwrap();
+
+    let mut config = crate::config::AppConfig::default();
+    config.content_libraries = vec![crate::config::ContentLibrary {
+        root_folder: sys_dir.to_string_lossy().to_string(),
+        name: "System".to_string(),
+        kind: "text".to_string(),
+        readonly: false,
+        priority: 0,
+    }];
+
+    let mut app = crate::ui::FastMdApp::empty_state(config);
+    let mut dialog_config = BatchDialogConfig::default();
+    let _ = render_dialog_once(&mut app, &mut dialog_config);
+
+    let names: Vec<&str> = dialog_config
+        .available_prompts
+        .iter()
+        .map(|p| p.display_name.as_str())
+        .collect();
+    assert!(
+        names.iter().any(|n| n.ends_with("BatchSummarize")),
+        "the .md batch skill must be discovered: {names:?}"
+    );
+    assert!(
+        names.iter().any(|n| n.ends_with("readme")),
+        "the non-.md file must also be discovered (current behaviour): {names:?}"
+    );
+}

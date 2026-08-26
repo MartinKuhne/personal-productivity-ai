@@ -491,8 +491,6 @@ fn test_caldav_tools_mock_server_keep_alive() {
     let mock = WiremockGuard::start();
     register_caldav_stubs(&mock);
     let config = dav_config_for(mock.uri());
-    let cache = crate::tools::registry::cache::ToolCache::new();
-    let uuid_gen = crate::utils::uuid::SystemUuidGenerator;
 
     let cache = crate::tools::registry::cache::ToolCache::new();
     let uuid_gen = crate::utils::uuid::SystemUuidGenerator;

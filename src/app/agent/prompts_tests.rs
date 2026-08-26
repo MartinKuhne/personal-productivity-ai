@@ -265,6 +265,47 @@ fn test_user_md_strips_yaml_front_matter() {
     assert!(!user_context_block.contains("---"));
 }
 
+/// VFS-130: a User.md that exists but cannot be read as UTF-8 is
+/// silently dropped — `read_to_string` returns `Err` for invalid
+/// UTF-8 bytes and the `if let Ok(...)` arm skips the block without
+/// panicking or injecting any envelope.
+#[test]
+fn test_system_library_user_md_unreadable_is_silently_dropped() {
+    let tmp = tempfile::tempdir().unwrap();
+    let sys_path = tmp.path().join("system");
+    std::fs::create_dir_all(&sys_path).unwrap();
+
+    let user_md_path = sys_path.join("User.md");
+    // Write raw invalid-UTF-8 bytes so `read_to_string` fails.
+    std::fs::write(&user_md_path, [0xFF, 0xFE, 0x00, 0x80]).unwrap();
+    // Sanity: the path is a file, so find_user_md_file would return it.
+    assert!(user_md_path.is_file());
+
+    let mut config = AppConfig::default();
+    config.content_libraries = vec![ContentLibrary {
+        root_folder: sys_path.to_string_lossy().to_string(),
+        name: "System".to_string(),
+        kind: "text".to_string(),
+        readonly: false,
+        priority: 0,
+    }];
+
+    let prompts = build_system_prompts(&config, None, None, &HashSet::new());
+
+    // Only the static + dynamic prompts must remain; no User.md block.
+    assert_eq!(
+        prompts.len(),
+        2,
+        "unreadable User.md must not produce a system context block"
+    );
+    assert!(
+        !prompts
+            .iter()
+            .any(|p| p.contains("provenance=user_md") || p.contains("User Context (from")),
+        "no datamark envelope must be emitted for an unreadable User.md"
+    );
+}
+
 #[test]
 fn test_find_user_md_file_case_variants() {
     let tmp = tempfile::tempdir().unwrap();
