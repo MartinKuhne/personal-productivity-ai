@@ -200,7 +200,7 @@ fn test_static_prompt_has_security_header() {
 }
 
 /// VFS-130: When the system library contains a User.md file at the root of the system folder,
-/// the system provides its contents as additional system context.
+/// the system shall provide the contents of that file as an additional system context without any additional context or guardrails.
 #[test]
 fn test_system_library_user_md_provided_as_system_context() {
     let tmp = tempfile::tempdir().unwrap();
@@ -222,11 +222,14 @@ fn test_system_library_user_md_provided_as_system_context() {
     let prompts = build_system_prompts(&config, None, None, &HashSet::new());
     let user_context_block = prompts
         .iter()
-        .find(|p| p.contains("User Context (from System):"))
+        .find(|p| p.contains("System user preferences and profile."))
         .expect("System User.md context block must be present");
 
-    assert!(user_context_block.contains("System user preferences and profile."));
-    assert!(user_context_block.contains("provenance=user_md"));
+    // VFS-130: Provided verbatim without additional context headers or guardrails envelope.
+    assert_eq!(user_context_block, "System user preferences and profile.");
+    assert!(!user_context_block.contains("User Context (from"));
+    assert!(!user_context_block.contains("provenance=user_md"));
+    assert!(!user_context_block.contains("<<<EXTERNAL_DATA>>>"));
 }
 
 #[test]
@@ -370,7 +373,7 @@ fn test_e2e_openai_wiremock_user_md_sent_as_system_context() {
         .as_array()
         .expect("messages array must be present in OpenAI payload");
 
-    // Verify that the User.md content was delivered in a system message block
+    // Verify that the User.md content was delivered in a system message block without additional context or guardrails (VFS-130)
     let system_msg_with_user_md = messages
         .iter()
         .find(|m| {
@@ -383,26 +386,12 @@ fn test_e2e_openai_wiremock_user_md_sent_as_system_context() {
         .expect("Must find system message containing User.md content");
 
     let content = system_msg_with_user_md["content"].as_str().unwrap();
-    assert!(
-        content.contains("User Context (from System):"),
-        "Context header must identify System library"
+    assert_eq!(
+        content, user_md_content,
+        "System library User.md must be provided verbatim without additional context or guardrails (VFS-130)"
     );
-    assert!(
-        content.contains("provenance=user_md"),
-        "Provenance attribute must specify user_md"
-    );
-    assert!(
-        content.contains("library=System"),
-        "Library attribute must specify System"
-    );
-    assert!(
-        content.contains("<<<EXTERNAL_DATA>>>"),
-        "Datamark opening marker must be present"
-    );
-    assert!(
-        content.contains("<<<END_EXTERNAL_DATA>>>"),
-        "Datamark closing marker must be present"
-    );
+    assert!(!content.contains("User Context (from System):"));
+    assert!(!content.contains("<<<EXTERNAL_DATA>>>"));
 }
 
 /// End-to-end test: when a Note skill is invoked, the active note's path
@@ -727,7 +716,7 @@ fn test_e2e_openai_wiremock_folder_skill_context_sent_as_system_context() {
 /// T-01: End-to-end test for the "Format Markdown" action.
 ///
 /// When the user right-clicks a tab or file and chooses "Format Markdown",
-/// `generate_format_prompt` produces the user prompt, and the active note path
+/// The UI produces the user prompt, and the active note path
 /// is placed in the system context as "currently viewing the file: …".
 ///
 /// Proves that both the format prompt text *and* the active-file context reach
@@ -781,13 +770,9 @@ fn test_e2e_openai_wiremock_format_document_context_and_prompt_sent_to_llm() {
     let note_path = notes_dir.join("project-plan.md");
     std::fs::write(&note_path, "# Project Plan\n\nSome content.").unwrap();
 
-    // Simulate: user right-clicks the tab → "Format Markdown"
-    // center.rs does:
-    //   *app.submit_prompt_mut() = Some(generate_format_prompt(&date_str));
-    //   *app.selection_mut().selected_file_mut() = Some(tab_path.clone());
+    // Simulate: user right-clicks the tab -> runs a context skill.
     // The orchestrator's start_agent_session reads selected_file as active_file.
-    let date_str = "2026-08-24T00:00:00Z";
-    let user_prompt = crate::ui::generate_format_prompt(date_str);
+    let user_prompt = "Format the current document into correct markdown".to_string();
 
     let config = AppConfig {
         content_libraries: vec![ContentLibrary {
@@ -889,12 +874,27 @@ fn test_e2e_openai_wiremock_format_document_context_and_prompt_sent_to_llm() {
         user_content.contains("Format the current document"),
         "User message must contain the format prompt instruction"
     );
+
+}
+
+#[test]
+fn test_static_prompt_instructs_user_md_already_in_system_context() {
+    let config = AppConfig::default();
+    let prompts = build_system_prompts(&config, None, None, &HashSet::new());
+    let static_prompt = &prompts[0];
+
+    // Static prompt must explicitly instruct the LLM that User.md context
+    // is already provided directly in system context and must not be fetched via read_note (VFS-130).
     assert!(
-        user_content.contains(date_str),
-        "User message must contain the date string embedded in the format prompt"
+        static_prompt.contains("User.md"),
+        "Static prompt must reference User.md"
     );
     assert!(
-        user_content.contains("header-date"),
-        "User message must contain the yaml front-matter template"
+        static_prompt.contains("User Context") || static_prompt.contains("system context"),
+        "Static prompt must mention system context / User Context"
+    );
+    assert!(
+        static_prompt.contains("read_note"),
+        "Static prompt must instruct not to use read_note on User.md"
     );
 }

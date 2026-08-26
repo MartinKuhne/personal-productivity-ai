@@ -89,11 +89,11 @@ pub const FIELD_LIST_NOTES_RESPONSE_FILES: &str =
 
 // --- read_note ---
 
-pub const READ_NOTE_DESCRIPTION: &str = "Read the full text of a markdown-formatted note at a path. Use `read_yaml_header` if you only need a document summary.";
+pub const READ_NOTE_DESCRIPTION: &str = "Read the full text of a markdown-formatted note at a path. Note: User context files (`User.md` / `System/User.md`) are already provided directly in system context and do not need to be read with this tool. Use `read_yaml_header` if you only need a document summary.";
 
 // --- window_note ---
 
-pub const WINDOW_NOTE_DESCRIPTION: &str = "Read a contiguous slice of lines from a markdown-formatted note. `offset` is 0-indexed (`0` is the first line); `limit` is the maximum number of lines to return. An `offset` past the end of the note returns an empty `content`. A `limit` that would overflow the note's line count is clamped to the remainder. Default parameters: `offset=0`, `limit=100`. Pairs with `read_note` when you need the whole note.";
+pub const WINDOW_NOTE_DESCRIPTION: &str = "Read a contiguous slice of lines from a markdown-formatted note. `offset` is 0-indexed (`0` is the first line); `limit` is the maximum number of lines to return. An `offset` past the end of the note returns an empty `content`. A `limit` that would overflow the note's line count is clamped to the remainder. Default parameters: `offset=0`, `limit=100`. Note: User context files (`User.md` / `System/User.md`) are already provided directly in system context and do not need to be read with this tool. Pairs with `read_note` when you need the whole note.";
 
 // --- create_note ---
 

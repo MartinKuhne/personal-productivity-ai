@@ -160,15 +160,6 @@ fn show_file_context_menu(
         ui.close();
     }
     if ui
-        .button(crate::ui::strings::FORMAT_MARKDOWN_ACTION)
-        .clicked()
-    {
-        let now = chrono::Local::now();
-        let date_str = now.to_rfc3339();
-        *ctx.submit_prompt() = Some(crate::ui::generate_format_prompt(&date_str));
-        ui.close();
-    }
-    if ui
         .button(crate::ui::strings::RUN_AS_PROMPT_ACTION)
         .clicked()
     {

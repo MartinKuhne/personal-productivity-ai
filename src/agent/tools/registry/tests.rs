@@ -843,3 +843,25 @@ fn test_default_providers_register_every_family() {
         );
     }
 }
+
+#[test]
+fn test_read_note_and_window_note_descriptions_reference_user_context() {
+    let mgr = ToolRegistry::new();
+    let read_desc = &mgr
+        .descriptor("read_note")
+        .expect("read_note must be registered")
+        .description;
+    assert!(
+        read_desc.contains("User.md") || read_desc.contains("user context"),
+        "read_note description must note that User.md / user context is already in system context"
+    );
+
+    let window_desc = &mgr
+        .descriptor("window_note")
+        .expect("window_note must be registered")
+        .description;
+    assert!(
+        window_desc.contains("User.md") || window_desc.contains("user context"),
+        "window_note description must note that User.md / user context is already in system context"
+    );
+}

@@ -488,13 +488,7 @@ fn test_compute_prompt_prefix_exact_match() {
     assert_eq!(prefix, "TestLib >");
 }
 
-#[test]
-fn test_generate_format_markdown_prompt() {
-    let date = "2026-07-19T22:31:41-07:00";
-    let prompt = crate::ui::generate_format_prompt(date);
-    assert!(prompt.contains(date));
-    assert!(prompt.contains("title: A brief title"));
-}
+
 
 #[test]
 fn test_parse_command_intent() {

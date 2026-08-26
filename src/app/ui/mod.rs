@@ -25,7 +25,7 @@ mod tree;
 pub mod tree_search;
 
 pub use crate::markdown::ToCEntry;
-pub use app::{FastMdApp, TreeNode, generate_format_prompt};
+pub use app::{FastMdApp, TreeNode};
 pub use dialogs::{Dialogs, OAuthFlowStatus};
 pub use os_shell::{open_in_system_editor, open_url, show_in_file_explorer};
 pub use panel_layout::PanelLayout;

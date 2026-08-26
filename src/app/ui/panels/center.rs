@@ -3,7 +3,7 @@
 //! Unit tests live in the sibling `center_tests.rs` sidecar.
 
 use crate::ui::render::{render_markdown, render_yaml_table};
-use crate::ui::{FastMdApp, generate_format_prompt, open_in_system_editor, show_in_file_explorer};
+use crate::ui::{FastMdApp, open_in_system_editor, show_in_file_explorer};
 use eframe::egui;
 use egui::RichText;
 use egui::containers::CentralPanel;
@@ -318,16 +318,6 @@ pub fn render_tabs_and_content_capture(
                     .clicked()
                 {
                     open_in_system_editor(tab_path);
-                    ui.close();
-                }
-                if ui
-                    .button(crate::ui::strings::FORMAT_MARKDOWN_ACTION)
-                    .clicked()
-                {
-                    let now = chrono::Local::now();
-                    let date_str = now.to_rfc3339();
-                    *app.submit_prompt_mut() = Some(generate_format_prompt(&date_str));
-                    *app.orchestrator.selection.selected_file_mut() = Some(tab_path.clone());
                     ui.close();
                 }
 

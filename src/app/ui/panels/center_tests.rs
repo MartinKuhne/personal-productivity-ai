@@ -1,7 +1,7 @@
 //! Tests for `panels/center.rs`.
 
 use super::*;
-use crate::ui::generate_format_prompt;
+
 use crate::ui::test_helpers::run_ui_test;
 use std::path::PathBuf;
 
@@ -141,14 +141,7 @@ fn test_tab_close_button_captures_event() {
     );
 }
 
-#[test]
-fn test_generate_format_prompt() {
-    let date_str = "2026-07-20T12:00:00Z";
-    let prompt = generate_format_prompt(date_str);
-    assert!(prompt.contains(date_str));
-    assert!(prompt.contains("Format the current document"));
-    assert!(prompt.contains("header-date: 2026-07-20T12:00:00Z"));
-}
+
 
 /// The previous four `test_apply_tab_action_*` tests
 /// (Close / CloseOthers / CloseAll / out_of_bounds) are all

@@ -52,6 +52,8 @@ the YAML schema) but its behaviour lives here.
 * [VFS-121] When one or more files are present in the `Skills/Note` folder, the system shall offer them as an option in the context menu when the user right-clicks on a note, either in the directory tree or on an open tab. The system shall then execute an agent prompt with the contents of the file as the user prompt
 * [VFS-122] When one or more files are present in the `Skills/Folder` folder, the system shall offer them as an option in the context menu when the user right-clicks on a folder in the directory tree. The system shall then execute an agent prompt with the contents of the file as the user prompt
 * [VFS-123] When one or more files are present in the `Skills/Batch` folder, the system shall offer them as an option in the batch dialog.
+* [VFS-125] When - and only when - creating the `Skills/Note` folder, create a sample `Skills/Note/FormatMarkdown.md` skill with instructions to format the current note into correct markdown.
+* [VFS-126] When - and only when - creating the `Skills/Folder` folder, create a sample `Skills/Folder/CreateSummary.md` skill with content `Provide a brief summary of the contents of the folder, in the format <filename>: <one sentence summary of the contents>. One line per file`.
 * [VFS-130] When the system library contains a `User.md` file at the root of the system folder, the system shall provide the contents of that file as an additional system context without any additional context or guardrails.
 
 
