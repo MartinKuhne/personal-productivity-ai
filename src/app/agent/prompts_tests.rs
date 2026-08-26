@@ -233,6 +233,36 @@ fn test_system_library_user_md_provided_as_system_context() {
 }
 
 #[test]
+fn test_user_md_strips_yaml_front_matter() {
+    let tmp = tempfile::tempdir().unwrap();
+    let sys_path = tmp.path().join("system");
+    std::fs::create_dir_all(&sys_path).unwrap();
+
+    let user_md_path = sys_path.join("User.md");
+    let content_with_yaml = "---\ntitle: User.md\n---\n\nUser location: Kirkland, WA 98034, USA.";
+    std::fs::write(&user_md_path, content_with_yaml).unwrap();
+
+    let mut config = AppConfig::default();
+    config.content_libraries = vec![ContentLibrary {
+        root_folder: sys_path.to_string_lossy().to_string(),
+        name: "System".to_string(),
+        kind: "text".to_string(),
+        readonly: false,
+        priority: 0,
+    }];
+
+    let prompts = build_system_prompts(&config, None, None, &HashSet::new());
+    let user_context_block = prompts
+        .iter()
+        .find(|p| p.contains("Kirkland"))
+        .expect("System User.md context block must be present");
+
+    assert_eq!(user_context_block, "User location: Kirkland, WA 98034, USA.");
+    assert!(!user_context_block.contains("title: User.md"));
+    assert!(!user_context_block.contains("---"));
+}
+
+#[test]
 fn test_find_user_md_file_case_variants() {
     let tmp = tempfile::tempdir().unwrap();
     let root = tmp.path();
