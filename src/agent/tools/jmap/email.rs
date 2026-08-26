@@ -451,31 +451,6 @@ fn fetch_full_search_result(
     })
 }
 
-/// Format a slice of cached search-email items as the
-/// `SearchEmailResponse.results` payload: a `--- Client: X ---`
-/// block per client, followed by per-client error messages.
-fn format_search_page(page_items: &[&SearchEmailItem], errors: &[String]) -> String {
-    use std::collections::BTreeMap;
-    let mut client_items: BTreeMap<&str, Vec<&serde_json::Value>> = BTreeMap::new();
-    for item in page_items {
-        client_items
-            .entry(item.client.as_str())
-            .or_default()
-            .push(&item.email);
-    }
-
-    let mut result_parts: Vec<String> = Vec::new();
-    for (client, items) in &client_items {
-        result_parts.push(format!(
-            "--- Client: {} ---\n{}",
-            client,
-            serde_json::to_string_pretty(items).unwrap_or_default()
-        ));
-    }
-    result_parts.extend(errors.iter().cloned());
-    result_parts.join("\n\n")
-}
-
 /// Search emails across all configured JMAP clients using a
 /// cursor-based paging model backed by the shared `ToolCache`. The
 /// first call (no cursor) queries JMAP once, caches the full result
@@ -491,41 +466,38 @@ pub fn tool_search_email(
     cache: &crate::tools::registry::cache::ToolCache,
     uuid_gen: &dyn crate::utils::uuid::UuidGenerator,
 ) -> Result<crate::tools::dtos::SearchEmailResponse, String> {
-    use crate::tools::registry::cache::SearchEmailItem;
-
     if let Some(cursor) = cursor {
         let page = cache.email_sessions.next_page(&cursor)?;
-        let page_refs: Vec<&SearchEmailItem> = page.items.iter().collect();
-        let results = format_search_page(&page_refs, &[]);
         return Ok(crate::tools::dtos::SearchEmailResponse {
-            results,
+            results: page.items,
             total: page.total,
             cursor: page.cursor,
             hint: page.hint,
+            errors: Vec::new(),
         });
     }
 
     let search_res = fetch_full_search_result(config, &filters)?;
     if search_res.items.is_empty() {
         return Ok(crate::tools::dtos::SearchEmailResponse {
-            results: "No matching emails found.".to_string(),
+            results: Vec::new(),
             total: 0,
             cursor: None,
             hint: Some("No matching emails found.".to_string()),
+            errors: Vec::new(),
         });
     }
 
     let page = cache
         .email_sessions
         .create_session(search_res.items, uuid_gen);
-    let page_refs: Vec<&SearchEmailItem> = page.items.iter().collect();
-    let results = format_search_page(&page_refs, &search_res.errors);
 
     Ok(crate::tools::dtos::SearchEmailResponse {
-        results,
+        results: page.items,
         total: page.total,
         cursor: page.cursor,
         hint: page.hint,
+        errors: search_res.errors,
     })
 }
 

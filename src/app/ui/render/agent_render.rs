@@ -268,14 +268,12 @@ fn format_search_email_result(func_name: &str, data: &serde_json::Value) -> Stri
     let total = data.get("total").and_then(|t| t.as_u64()).unwrap_or(0);
     let cursor = data.get("cursor").and_then(|c| c.as_str()).unwrap_or("");
     let hint = data.get("hint").and_then(|h| h.as_str()).unwrap_or("");
-    // Count items on this page by parsing the JSON-serialized
-    // `results` array. If parsing fails (e.g. the "No matching
-    // emails found." sentinel on empty results), fall back to 0.
+    // Count items on this page from the structured JSON `results`
+    // array. The empty result sentinel is an empty array.
     let page_items = data
         .get("results")
-        .and_then(|r| r.as_str())
-        .and_then(|s| serde_json::from_str::<serde_json::Value>(s).ok())
-        .and_then(|v| v.as_array().map(|a| a.len()))
+        .and_then(|r| r.as_array())
+        .map(|a| a.len())
         .unwrap_or(0);
 
     let mut msg = format!(

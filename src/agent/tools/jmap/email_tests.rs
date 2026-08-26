@@ -846,6 +846,10 @@ fn test_tool_search_email_first_call_small_set_returns_final_page_hint() {
         Some(super::SEARCH_EMAIL_FINAL_PAGE_HINT)
     );
     assert!(!response.results.is_empty());
+    assert!(
+        response.errors.is_empty(),
+        "successful single-client search must not report errors"
+    );
 }
 
 #[test]
@@ -959,18 +963,33 @@ fn test_tool_search_email_cursor_pagination() {
     );
     assert!(first.hint.is_none());
     let cursor = first.cursor.clone().unwrap();
-    // Count items on the first page by counting unique `"id": "e` markers in
-    // the rendered JSON. The mock server enriches each email with `blobId`
-    // and `threadId` that contain the same `e{n}` token, so the marker must
-    // match the JSON key prefix exactly to count emails.
-    let first_id_count = first.results.matches(r#""id": "e"#).count();
+    // Results are now a structured Vec<SearchEmailItem>; count them directly.
     assert_eq!(
-        first_id_count,
+        first.results.len(),
         super::SEARCH_EMAIL_PAGE_SIZE,
         "first page must contain exactly SEARCH_EMAIL_PAGE_SIZE items"
     );
-    assert!(first.results.contains("Subject 1"));
-    assert!(!first.results.contains(&format!("Subject {total_emails}")));
+    let subject_of = |item: &crate::tools::cache::SearchEmailItem| -> String {
+        item.email
+            .get("subject")
+            .and_then(|s| s.as_str())
+            .unwrap_or("")
+            .to_string()
+    };
+    let id_of = |item: &crate::tools::cache::SearchEmailItem| -> String {
+        item.email
+            .get("id")
+            .and_then(|s| s.as_str())
+            .unwrap_or("")
+            .to_string()
+    };
+    assert!(first.results.iter().any(|i| subject_of(i) == "Subject 1"));
+    assert!(
+        !first
+            .results
+            .iter()
+            .any(|i| subject_of(i) == format!("Subject {total_emails}"))
+    );
 
     // Second call: with cursor, must return remaining items + final hint.
     let second = tool_search_email(&config, filters, Some(cursor.clone()), &cache, &uuid)
@@ -984,29 +1003,35 @@ fn test_tool_search_email_cursor_pagination() {
         second.hint.as_deref(),
         Some(super::SEARCH_EMAIL_FINAL_PAGE_HINT)
     );
-    let second_id_count = second.results.matches(r#""id": "e"#).count();
     assert_eq!(
-        second_id_count,
+        second.results.len(),
         total_emails - super::SEARCH_EMAIL_PAGE_SIZE,
         "second page must contain the remaining items"
     );
-    assert!(!second.results.contains("Subject 1"));
-    assert!(second.results.contains(&format!("Subject {total_emails}")));
+    assert!(!second.results.iter().any(|i| subject_of(i) == "Subject 1"));
+    assert!(
+        second
+            .results
+            .iter()
+            .any(|i| subject_of(i) == format!("Subject {total_emails}"))
+    );
 
-    // Pages must not repeat any content lines (i.e., no email id may appear
-    // on both pages). The first page must contain e1 and the last page must
-    // not; the last page must contain e{total_emails} and the first must not.
-    assert!(first.results.contains(r#""id": "e1""#));
-    assert!(!second.results.contains(r#""id": "e1""#));
+    // Pages must not repeat any email id. The first page must contain e1 and
+    // the last page must not; the last page must contain e{total_emails} and
+    // the first must not.
+    assert!(first.results.iter().any(|i| id_of(i) == "e1"));
+    assert!(!second.results.iter().any(|i| id_of(i) == "e1"));
     assert!(
         !first
             .results
-            .contains(&format!(r#""id": "e{total_emails}""#))
+            .iter()
+            .any(|i| id_of(i) == format!("e{total_emails}"))
     );
     assert!(
         second
             .results
-            .contains(&format!(r#""id": "e{total_emails}""#))
+            .iter()
+            .any(|i| id_of(i) == format!("e{total_emails}"))
     );
 }
 
@@ -1118,8 +1143,8 @@ fn test_tool_search_email_multiple_clients() {
     assert!(res.is_ok());
     let response = res.unwrap();
     assert_eq!(response.total, 2);
-    assert!(response.results.contains("client1"));
-    assert!(response.results.contains("client2"));
+    assert!(response.results.iter().any(|i| i.client == "client1"));
+    assert!(response.results.iter().any(|i| i.client == "client2"));
 }
 
 #[test]

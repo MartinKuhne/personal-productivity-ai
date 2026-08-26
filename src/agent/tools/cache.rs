@@ -24,7 +24,9 @@ pub const CURSOR_EXPIRED_ERROR: &str =
 pub const FINAL_PAGE_HINT: &str = "Final page.";
 
 /// One `search_email` item: the JMAP client name and the simplified email JSON value.
-#[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[derive(
+    Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize, schemars::JsonSchema,
+)]
 pub struct SearchEmailItem {
     /// JMAP account / client identifier.
     pub client: String,
