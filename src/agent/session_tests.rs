@@ -6,6 +6,7 @@ use crate::events::{
     AgentDebugEntry, AgentObserverEvent, DebugEntryKind, DebugEntryRow, RecordingObserver,
 };
 use std::collections::HashSet;
+use std::sync::atomic::{AtomicUsize, Ordering};
 
 struct TestNoopObserver;
 impl crate::events::AgentEventObserver for TestNoopObserver {
@@ -495,7 +496,12 @@ fn test_driver_continuation_turn_number_increments() {
 
     let recorded = Arc::new(RecordingObserver::new());
     let recorded_clone = recorded.clone();
-    let factory: AgentObserverFactory = Arc::new(move |_session_id| recorded_clone.clone());
+    let factory_calls = Arc::new(AtomicUsize::new(0));
+    let factory_calls_clone = factory_calls.clone();
+    let factory: AgentObserverFactory = Arc::new(move |_session_id| {
+        factory_calls_clone.fetch_add(1, Ordering::SeqCst);
+        recorded_clone.clone()
+    });
     let mut mgr = AgentSession::builder()
         .with_agent_config(agent_config)
         .with_observer_factory(factory)
@@ -580,4 +586,9 @@ fn test_driver_continuation_turn_number_increments() {
         .collect();
 
     assert_eq!(outgoing_turns, vec![1, 2], "The turns should be 1, then 2.");
+    assert_eq!(
+        factory_calls.load(Ordering::SeqCst),
+        1,
+        "a continued logical session must reuse its observer"
+    );
 }
