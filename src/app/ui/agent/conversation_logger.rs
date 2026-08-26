@@ -34,13 +34,21 @@ pub fn is_mutating_tool(name: &str) -> bool {
     )
 }
 
-/// Generates a timestamped markdown filename `YYYY-MM-DD HH-MM-SS.md` (VFS-112).
+/// Generates a timestamped markdown filename `YYYY/MM/YYYY-MM-DD HH-MM-SS.md` (VFS-112).
 pub fn generate_conversation_filename(now: DateTime<Local>) -> String {
-    format!("{}.md", now.format("%Y-%m-%d %H-%M-%S"))
+    format!(
+        "{}/{}/{}.md",
+        now.format("%Y"),
+        now.format("%m"),
+        now.format("%Y-%m-%d %H-%M-%S")
+    )
 }
 
 fn conversation_log_path(dir: &std::path::Path, now: DateTime<Local>) -> PathBuf {
     let stem = now.format("%Y-%m-%d %H-%M-%S").to_string();
+    let year = now.format("%Y").to_string();
+    let month = now.format("%m").to_string();
+
     let first = dir.join(generate_conversation_filename(now));
     if !first.exists() {
         return first;
@@ -48,7 +56,10 @@ fn conversation_log_path(dir: &std::path::Path, now: DateTime<Local>) -> PathBuf
 
     let mut suffix = 2;
     loop {
-        let candidate = dir.join(format!("{stem}-{suffix}.md"));
+        let candidate = dir
+            .join(&year)
+            .join(&month)
+            .join(format!("{stem}-{suffix}.md"));
         if !candidate.exists() {
             return candidate;
         }
@@ -199,20 +210,22 @@ impl AgentEventObserver for ConversationLoggerObserver {
             return;
         };
 
-        if let Err(e) = std::fs::create_dir_all(&self.conversations_dir) {
+        let path = match state.file_path.clone() {
+            Some(p) => p,
+            None => conversation_log_path(&self.conversations_dir, Local::now()),
+        };
+
+        if let Some(parent) = path.parent()
+            && let Err(e) = std::fs::create_dir_all(parent)
+        {
             tracing::error!(
                 name = "ui.conversation_logger.dir_create_failed",
-                path = %self.conversations_dir.display(),
+                path = %parent.display(),
                 error = %e,
                 "Failed to create conversations directory."
             );
             return;
         }
-
-        let path = match state.file_path.clone() {
-            Some(p) => p,
-            None => conversation_log_path(&self.conversations_dir, Local::now()),
-        };
 
         let turn = state.turn_number + 1;
         let entry = format_turn_entry(

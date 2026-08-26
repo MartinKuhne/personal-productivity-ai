@@ -7,7 +7,7 @@ use chrono::TimeZone;
 fn test_generate_conversation_filename() {
     let dt = Local.with_ymd_and_hms(2026, 8, 24, 14, 30, 45).unwrap();
     let filename = generate_conversation_filename(dt);
-    assert_eq!(filename, "2026-08-24 14-30-45.md");
+    assert_eq!(filename, "2026/08/2026-08-24 14-30-45.md");
 }
 
 #[test]
@@ -15,12 +15,37 @@ fn test_conversation_path_avoids_timestamp_collision() {
     let temp = tempfile::tempdir().unwrap();
     let now = Local.with_ymd_and_hms(2026, 8, 24, 14, 30, 45).unwrap();
     let first = conversation_log_path(temp.path(), now);
+
+    std::fs::create_dir_all(first.parent().unwrap()).unwrap();
     std::fs::write(&first, "existing").unwrap();
 
     let second = conversation_log_path(temp.path(), now);
 
     assert_eq!(first.file_name().unwrap(), "2026-08-24 14-30-45.md");
+    assert_eq!(first.parent().unwrap().file_name().unwrap(), "08");
+    assert_eq!(
+        first
+            .parent()
+            .unwrap()
+            .parent()
+            .unwrap()
+            .file_name()
+            .unwrap(),
+        "2026"
+    );
+
     assert_eq!(second.file_name().unwrap(), "2026-08-24 14-30-45-2.md");
+    assert_eq!(second.parent().unwrap().file_name().unwrap(), "08");
+    assert_eq!(
+        second
+            .parent()
+            .unwrap()
+            .parent()
+            .unwrap()
+            .file_name()
+            .unwrap(),
+        "2026"
+    );
     assert_ne!(first, second);
 }
 
@@ -96,7 +121,16 @@ fn test_conversation_logger_observer_multi_turn() {
     assert_eq!(observer.get_turn_number(), 1);
     let log_path = observer.get_log_path().expect("log path must be set");
     assert!(log_path.exists());
-    assert_eq!(log_path.parent().unwrap(), conv_dir);
+    assert_eq!(
+        log_path
+            .parent()
+            .unwrap()
+            .parent()
+            .unwrap()
+            .parent()
+            .unwrap(),
+        conv_dir
+    );
 
     let content_1 = std::fs::read_to_string(&log_path).unwrap();
     assert!(content_1.contains("## Prompt (1)\n\nTurn 1 prompt"));
@@ -335,7 +369,16 @@ fn test_e2e_openai_wiremock_chat_log_generation_multi_turn() {
     assert_eq!(logger_observer.get_turn_number(), 1);
     let log_path = logger_observer.get_log_path().expect("log file must exist");
     assert!(log_path.exists());
-    assert_eq!(log_path.parent().unwrap(), conv_dir.as_path());
+    assert_eq!(
+        log_path
+            .parent()
+            .unwrap()
+            .parent()
+            .unwrap()
+            .parent()
+            .unwrap(),
+        conv_dir.as_path()
+    );
 
     // Verify filename format YYYY-MM-DD HH-MM-SS.md
     let filename = log_path.file_name().unwrap().to_str().unwrap();
