@@ -133,7 +133,6 @@ Before marking any task as complete, run the following from `/` and ensure they 
 
 | Directory                    | Scope                                                                                  |
 |------------------------------|----------------------------------------------------------------------------------------|
-| [`src/AGENTS.md`](src/AGENTS.md)                               | Rust `fastmd` application and crates: documentation, egui, quality gate, tool/UI contracts. |
 | [`doc/technical-context/AGENTS.md`](doc/technical-context/AGENTS.md) | Maintenance of architecture documentation.                |
 | [`doc/planning/AGENTS.md`](doc/planning/AGENTS.md)             | Planning / design-record documents.                                                   |
 | [`test/wiki/AGENTS.md`](test/wiki/AGENTS.md)                   | Test wiki fixtures.                                                                   |
