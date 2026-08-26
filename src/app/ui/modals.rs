@@ -308,7 +308,7 @@ fn unique_document_name(entered: &str) -> String {
     }
 }
 
-/// Write a new YAML-headed markdown document into `parent` using the
+/// Write a new markdown document into `parent` using the
 /// user-entered name (`.md` appended when the name has no extension).
 /// If a file with the preferred name already exists, a
 /// `<stem> <date-time><ext>` name is generated instead so the created
@@ -319,8 +319,7 @@ fn write_new_document(parent: &Path, entered: &str) -> std::io::Result<PathBuf> 
     if new_path.exists() {
         new_path = parent.join(date_suffixed_name(&file_name));
     }
-    let yaml_header = format!("---\ntitle: {}\n---\n\n", entered);
-    std::fs::write(&new_path, yaml_header)?;
+    std::fs::write(&new_path, "")?;
     Ok(new_path)
 }
 

@@ -208,7 +208,7 @@ impl ToolExecutor {
     /// an LLM-emitted call to a missing tool runs sequentially instead
     /// of in parallel, and the registry returns its normal "tool not
     /// found" error.
-    fn classify(&self, name: &str) -> Safety {
+    pub fn classify(&self, name: &str) -> Safety {
         self.tool_context.load().registry.safety_of(name)
     }
 

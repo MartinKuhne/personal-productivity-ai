@@ -14,16 +14,18 @@ use crate::tools::mcp::McpToolAdapter;
 use std::collections::HashMap;
 use std::sync::Arc;
 
-#[test]
-fn test_mcp_client_manager_unconfigured_server_error() {
+#[tokio::test]
+async fn test_mcp_client_manager_unconfigured_server_error() {
     let manager = McpClients::new();
-    let result = manager.call_tool("unknown_server", "tool_name", serde_json::json!({}));
+    let result = manager
+        .call_tool("unknown_server", "tool_name", serde_json::json!({}))
+        .await;
     assert!(result.is_err());
     assert!(result.unwrap_err().contains("is not configured"));
 }
 
-#[test]
-fn test_mcp_client_manager_empty_command_or_url() {
+#[tokio::test]
+async fn test_mcp_client_manager_empty_command_or_url() {
     let manager = McpClients::new();
     let mut config = AgentConfig::default();
     config.mcp_servers.insert(
@@ -46,17 +48,21 @@ fn test_mcp_client_manager_empty_command_or_url() {
     );
     manager.update_config(&config);
 
-    let stdio_res = manager.call_tool("empty_stdio", "my_tool", serde_json::json!({}));
+    let stdio_res = manager
+        .call_tool("empty_stdio", "my_tool", serde_json::json!({}))
+        .await;
     assert!(stdio_res.is_err());
     assert!(stdio_res.unwrap_err().contains("empty command path"));
 
-    let sse_res = manager.call_tool("empty_sse", "my_tool", serde_json::json!({}));
+    let sse_res = manager
+        .call_tool("empty_sse", "my_tool", serde_json::json!({}))
+        .await;
     assert!(sse_res.is_err());
     assert!(sse_res.unwrap_err().contains("empty endpoint URL"));
 }
 
-#[test]
-fn test_extract_result_accepts_result_and_error() {
+#[tokio::test]
+async fn test_extract_result_accepts_result_and_error() {
     // Valid result envelope.
     let resp = serde_json::json!({
         "jsonrpc": "2.0",
@@ -96,8 +102,8 @@ fn test_extract_result_accepts_result_and_error() {
     assert!(none_res.is_err());
 }
 
-#[test]
-fn test_update_config_shuts_down_removed_server_sessions() {
+#[tokio::test]
+async fn test_update_config_shuts_down_removed_server_sessions() {
     // A session should be created for a server, then dropped
     // when the server is removed from config. We can't easily
     // inspect an internal map; instead we assert that
@@ -141,8 +147,8 @@ fn test_update_config_shuts_down_removed_server_sessions() {
 /// * Subsequent `tools/call` uses request id 2.
 /// * The session can be re-used across calls (subprocess stays
 ///   alive).
-#[test]
-fn test_stdio_session_handshake_and_call() {
+#[tokio::test]
+async fn test_stdio_session_handshake_and_call() {
     let python = locate_python();
     let Some(python) = python else {
         eprintln!("python not found; skipping stdio integration test");
@@ -221,6 +227,7 @@ while True:
     // First call triggers the handshake.
     let result = manager
         .call_tool("mock", "my_tool", serde_json::json!({}))
+        .await
         .expect("tools/call should succeed");
     assert_eq!(result["content"][0]["text"], "ok");
 
@@ -228,6 +235,7 @@ while True:
     // should be cached.
     let session = manager
         .initialize_server("mock")
+        .await
         .expect("server still configured");
     assert_eq!(session.protocol_version().as_deref(), Some("2025-11-25"));
     let info = session.server_info().expect("serverInfo cached");
@@ -239,6 +247,7 @@ while True:
     // here, but a successful second call is the best signal.
     let result2 = manager
         .call_tool("mock", "my_tool", serde_json::json!({"x": 1}))
+        .await
         .expect("second tools/call should succeed");
     assert_eq!(result2["content"][0]["text"], "ok");
 
@@ -248,8 +257,8 @@ while True:
 /// `ping` round-trip: a healthy server should respond with an
 /// empty result, and a second call should succeed (proving the
 /// session is reusable).
-#[test]
-fn test_stdio_ping_round_trip() {
+#[tokio::test]
+async fn test_stdio_ping_round_trip() {
     let Some(python) = locate_python() else {
         eprintln!("python not found; skipping ping test");
         return;
@@ -299,9 +308,13 @@ while True:
     let manager = McpClients::new();
     manager.update_config(&config);
 
-    manager.ping("pingable").expect("first ping should succeed");
     manager
         .ping("pingable")
+        .await
+        .expect("first ping should succeed");
+    manager
+        .ping("pingable")
+        .await
         .expect("second ping should succeed (reuses session)");
 
     let _ = std::fs::remove_file(&tmp);
@@ -319,8 +332,8 @@ while True:
 /// being short enough to keep the test fast — if it gets raised
 /// in the future, this test should be adjusted to use a smaller
 /// timeout override; for now 60s is the upper bound.)
-#[test]
-fn test_stdio_timeout_sends_cancellation() {
+#[tokio::test]
+async fn test_stdio_timeout_sends_cancellation() {
     let Some(python) = locate_python() else {
         eprintln!("python not found; skipping timeout test");
         return;
@@ -381,7 +394,10 @@ with open(r"{cap_path}", "w") as f:
     manager.update_config(&config);
 
     let start = std::time::Instant::now();
-    let err = manager.ping("hanger").expect_err("ping should time out");
+    let err = manager
+        .ping("hanger")
+        .await
+        .expect_err("ping should time out");
     let elapsed = start.elapsed();
     assert!(
         elapsed < DEFAULT_REQUEST_TIMEOUT * 2,
@@ -413,8 +429,8 @@ with open(r"{cap_path}", "w") as f:
 /// against a hanging server must surface a timeout error well
 /// under the 60s default. Also asserts the server saw a
 /// `notifications/cancelled` for the in-flight request id.
-#[test]
-fn test_stdio_call_tool_with_short_timeout_cancels() {
+#[tokio::test]
+async fn test_stdio_call_tool_with_short_timeout_cancels() {
     let Some(python) = locate_python() else {
         eprintln!("python not found; skipping per-call timeout test");
         return;
@@ -486,6 +502,7 @@ with open(r"{cap_path}", "w") as f:
             serde_json::json!({}),
             std::time::Duration::from_millis(750),
         )
+        .await
         .expect_err("call should time out");
     let elapsed = start.elapsed();
     assert!(
@@ -526,6 +543,10 @@ fn test_http_session_delete_returns_error_on_unreachable() {
     // port is almost certainly still closed. (There's a tiny
     // race window, but for a test of "do we panic?" it's
     // good enough.)
+    //
+    // This test stays sync (not #[tokio::test]) because
+    // `http_session_delete` uses `reqwest::blocking::Client`,
+    // which panics when dropped inside a tokio runtime.
     let listener = std::net::TcpListener::bind("127.0.0.1:0").expect("bind");
     let port = listener.local_addr().expect("addr").port();
     drop(listener);
@@ -597,8 +618,8 @@ fn spawn_401_server(body: &'static str) -> (u16, std::thread::JoinHandle<()>) {
 /// regardless of whether a token store is installed. The
 /// OAuth retry itself still requires a token store — that
 /// gate stays.
-#[test]
-fn test_401_latches_unauthorized_flag_without_token_store() {
+#[tokio::test]
+async fn test_401_latches_unauthorized_flag_without_token_store() {
     let (port, server) = spawn_401_server(r#"{"error":"invalid_token"}"#);
     let url = format!("http://127.0.0.1:{port}/mcp");
     let config = McpServerConfig::Sse {
@@ -611,7 +632,7 @@ fn test_401_latches_unauthorized_flag_without_token_store() {
 
     // The init handshake goes through `http_request_with_oauth`.
     // The 401 should surface as Err AND set the flag.
-    let result = session.ensure_initialized();
+    let result = session.ensure_initialized().await;
     assert!(
         result.is_err(),
         "initialize against a 401-only server must fail"
@@ -642,8 +663,8 @@ fn test_401_latches_unauthorized_flag_without_token_store() {
 /// that case must NOT latch the unauthorized flag — there's
 /// no OAuth flow to run, and the Tools dialog should not
 /// suggest the OAuth `Authenticate` action.
-#[test]
-fn test_401_does_not_latch_flag_when_static_authorization_set() {
+#[tokio::test]
+async fn test_401_does_not_latch_flag_when_static_authorization_set() {
     let (port, server) = spawn_401_server("unauthorized");
     let url = format!("http://127.0.0.1:{port}/mcp");
     let mut headers = HashMap::new();
@@ -658,7 +679,7 @@ fn test_401_does_not_latch_flag_when_static_authorization_set() {
     };
     let session = McpClientSession::new(config, None);
 
-    let result = session.ensure_initialized();
+    let result = session.ensure_initialized().await;
     assert!(
         result.is_err(),
         "initialize against a 401-only server must fail"
@@ -675,8 +696,8 @@ fn test_401_does_not_latch_flag_when_static_authorization_set() {
 /// response should be consumed by the session without breaking
 /// the call. The session must still find the response with the
 /// matching id and return it.
-#[test]
-fn test_stdio_progress_notification_before_response() {
+#[tokio::test]
+async fn test_stdio_progress_notification_before_response() {
     let Some(python) = locate_python() else {
         eprintln!("python not found; skipping progress test");
         return;
@@ -736,6 +757,7 @@ send({"jsonrpc": "2.0", "id": req["id"], "result": {}})
     manager.update_config(&config);
     manager
         .ping("progressor")
+        .await
         .expect("ping should succeed even with an interleaved progress notification");
 
     let _ = std::fs::remove_file(&tmp);
@@ -744,8 +766,8 @@ send({"jsonrpc": "2.0", "id": req["id"], "result": {}})
 /// Stdio init failure: server replies with a JSON-RPC error to
 /// the `initialize` request. The error must be surfaced and the
 /// session left in a state that allows retry.
-#[test]
-fn test_stdio_init_error_is_surfaced() {
+#[tokio::test]
+async fn test_stdio_init_error_is_surfaced() {
     let Some(python) = locate_python() else {
         eprintln!("python not found; skipping stdio error test");
         return;
@@ -781,6 +803,7 @@ sys.stdout.flush()
     manager.update_config(&config);
     let err = manager
         .call_tool("bad", "tool", serde_json::json!({}))
+        .await
         .expect_err("init error must surface");
     assert!(err.contains("-32602"), "error: {err}");
     assert!(err.contains("Unsupported protocol version"), "error: {err}");
@@ -796,8 +819,8 @@ sys.stdout.flush()
 ///   parsed and surfaced.
 /// * Discovery is idempotent: calling it twice returns the same
 ///   list and reuses the same persistent subprocess.
-#[test]
-fn test_stdio_discover_tools() {
+#[tokio::test]
+async fn test_stdio_discover_tools() {
     let Some(python) = locate_python() else {
         eprintln!("python not found; skipping discover-tools test");
         return;
@@ -898,6 +921,7 @@ while True:
     // + tools/list in one round of three messages.
     let tools = manager
         .discover_tools("disc")
+        .await
         .expect("discover_tools should succeed");
     assert_eq!(tools.len(), 2, "expected 2 tools, got {tools:?}");
 
@@ -914,12 +938,14 @@ while True:
     // tools/list and returns the same two tools.
     let tools2 = manager
         .discover_tools("disc")
+        .await
         .expect("second discover_tools should succeed");
     assert_eq!(tools2.len(), 2);
 
     // And the manager can still call the discovered tool.
     let result = manager
         .call_tool("disc", "echo", serde_json::json!({"text": "hi"}))
+        .await
         .expect("tools/call should succeed");
     assert_eq!(result["content"][0]["text"], "called");
 
@@ -930,8 +956,8 @@ while True:
 /// server returns more pages than the safety cap, we surface a
 /// warning and stop. Here the server returns two pages of one
 /// tool each; the discovery should see both.
-#[test]
-fn test_stdio_discover_tools_with_pagination() {
+#[tokio::test]
+async fn test_stdio_discover_tools_with_pagination() {
     let Some(python) = locate_python() else {
         eprintln!("python not found; skipping pagination test");
         return;
@@ -1012,6 +1038,7 @@ while True:
 
     let tools = manager
         .discover_tools("paged")
+        .await
         .expect("discover_tools should follow nextCursor");
     let names: Vec<&str> = tools.iter().map(|t| t.name.as_str()).collect();
     assert!(names.contains(&"alpha"), "missing alpha in {names:?}");
@@ -1027,8 +1054,8 @@ while True:
 
 /// `is_valid_session_id` (spec §3.4) is a free function, so we
 /// can unit-test it directly without standing up a server.
-#[test]
-fn test_is_valid_session_id() {
+#[tokio::test]
+async fn test_is_valid_session_id() {
     // Spec-valid: visible ASCII, no whitespace, no control chars.
     assert!(is_valid_session_id("abc-123_XYZ~"));
     assert!(is_valid_session_id("a"));
@@ -1049,8 +1076,8 @@ fn test_is_valid_session_id() {
 /// Spec §2.2: `clientInfo` may include `title`, `description`,
 /// and `websiteUrl`. The mock captures the raw init request
 /// so we can assert those fields are present and shaped right.
-#[test]
-fn test_stdio_init_sends_full_client_info() {
+#[tokio::test]
+async fn test_stdio_init_sends_full_client_info() {
     let Some(python) = locate_python() else {
         eprintln!("python not found; skipping clientInfo test");
         return;
@@ -1115,6 +1142,7 @@ with open(r"{cap_path}", "w") as f:
     manager.update_config(&config);
     manager
         .call_tool("captured", "noop", serde_json::json!({}))
+        .await
         .expect("call should succeed");
 
     let body = std::fs::read_to_string(&captured).expect("read captured");
@@ -1142,8 +1170,8 @@ with open(r"{cap_path}", "w") as f:
 /// the call succeeds (the tracking is internal; the
 /// observable contract is "the call returns successfully
 /// despite the interleaved notification").
-#[test]
-fn test_stdio_progress_tokens_cleared_after_response() {
+#[tokio::test]
+async fn test_stdio_progress_tokens_cleared_after_response() {
     let Some(python) = locate_python() else {
         eprintln!("python not found; skipping progress-tracking test");
         return;
@@ -1222,12 +1250,14 @@ while True:
     // observable as "no spurious error".
     manager
         .call_tool("tracker", "any", serde_json::json!({}))
+        .await
         .expect("call should succeed despite interleaved progress");
 
     // A second call also succeeds — the token tracking
     // state from the first call must have been cleared.
     manager
         .call_tool("tracker", "any", serde_json::json!({}))
+        .await
         .expect("second call should also succeed");
 
     let _ = std::fs::remove_file(&tmp);
@@ -1239,8 +1269,8 @@ while True:
 /// `sse.rs`; here we just confirm the field is plumbed
 /// through by reading the most recent id from a small
 /// hand-rolled SSE body.
-#[test]
-fn test_walk_for_response_returns_last_event_id() {
+#[tokio::test]
+async fn test_walk_for_response_returns_last_event_id() {
     use super::sse::{parse_sse_body, walk_for_response};
 
     // Two events, each with an id, the last being the
@@ -1266,8 +1296,8 @@ data: {\"jsonrpc\":\"2.0\",\"id\":42,\"result\":{\"ok\":true}}
 
 /// `walk_for_response` must leave `last_event_id` as `None`
 /// when the server never assigned event ids.
-#[test]
-fn test_walk_for_response_no_event_id() {
+#[tokio::test]
+async fn test_walk_for_response_no_event_id() {
     use super::sse::{parse_sse_body, walk_for_response};
 
     let body = "data: {\"jsonrpc\":\"2.0\",\"id\":7,\"result\":{}}\n\n";
@@ -1283,8 +1313,8 @@ fn test_walk_for_response_no_event_id() {
 /// we test the negative path: a probe GET against a closed
 /// port must surface a transport error that mentions BOTH
 /// the original POST status and the GET failure.
-#[test]
-fn test_probe_legacy_transport_negative_path() {
+#[tokio::test]
+async fn test_probe_legacy_transport_negative_path() {
     // Bind to a port, then drop so the port is free. The
     // GET will then get a connection refused.
     let listener = std::net::TcpListener::bind("127.0.0.1:0").expect("bind");
@@ -1292,7 +1322,8 @@ fn test_probe_legacy_transport_negative_path() {
     drop(listener);
     let url = format!("http://127.0.0.1:{port}/mcp");
     let headers = std::collections::HashMap::new();
-    let err = McpClientSession::probe_legacy_transport(&url, &headers, 405, "Method Not Allowed");
+    let err =
+        McpClientSession::probe_legacy_transport(&url, &headers, 405, "Method Not Allowed").await;
     let msg = err.to_string();
     assert!(msg.contains("405"), "should mention POST status: {msg}");
     assert!(
@@ -1306,7 +1337,7 @@ fn test_probe_legacy_transport_negative_path() {
 ///
 /// * [MCP-001] protocol envelope is correct (init / ping /
 ///   tools/list / tools/call all shape right)
-/// * [MCP-002] `manager.ping(server)` succeeds against a
+/// * [MCP-002] `manager.ping(server).await` succeeds against a
 ///   live server (the registry's `init_mcp_on_startup`
 ///   calls this on app start)
 /// * [MCP-003] after the ping, `manager.discover_tools`
@@ -1317,8 +1348,8 @@ fn test_probe_legacy_transport_negative_path() {
 /// * [MCP-005] invoking the adapter (what the LLM does)
 ///   makes the `tools/call` round-trip and returns the
 ///   result
-#[test]
-fn test_mcp_001_through_005_end_to_end() {
+#[tokio::test]
+async fn test_mcp_001_through_005_end_to_end() {
     let Some(python) = locate_python() else {
         eprintln!("python not found; skipping MCP-001..005 end-to-end test");
         return;
@@ -1423,12 +1454,14 @@ while True:
     // ----- MCP-002: ping the server on app start.
     manager
         .ping("e2e")
+        .await
         .expect("[MCP-002] startup ping should succeed");
 
     // ----- MCP-003: retrieve the tool list after a
     // successful ping.
     let tools = manager
         .discover_tools("e2e")
+        .await
         .expect("[MCP-003] tools/list should succeed");
     assert_eq!(tools.len(), 1, "expected 1 tool, got {tools:?}");
     let greet = &tools[0];
@@ -1457,6 +1490,7 @@ while True:
     // protocol-level contract.
     let result = manager
         .call_tool("e2e", "greet", serde_json::json!({"name": "world"}))
+        .await
         .expect("[MCP-005] tools/call should succeed");
     assert_eq!(result["content"][0]["text"], "hello, world!");
 
@@ -1469,8 +1503,8 @@ while True:
 /// torn down (spec §2.2 / §2.6). A follow-up call should
 /// re-attempt a fresh handshake, not return a cached
 /// failure.
-#[test]
-fn test_stdio_init_protocol_version_mismatch() {
+#[tokio::test]
+async fn test_stdio_init_protocol_version_mismatch() {
     let Some(python) = locate_python() else {
         eprintln!("python not found; skipping version-mismatch test");
         return;
@@ -1528,6 +1562,7 @@ send({
 
     let err = manager
         .call_tool("futuristic", "any", serde_json::json!({}))
+        .await
         .expect_err("init must fail on version mismatch");
     assert!(err.contains("unsupported protocol version"), "error: {err}");
     assert!(err.contains("2099-01-01"), "error: {err}");
@@ -1543,8 +1578,8 @@ send({
 /// request must still fail with a transport error well under
 /// the cap (because the server is hanging, not because the
 /// caller is waiting).
-#[test]
-fn test_stdio_call_tool_caps_extreme_timeout() {
+#[tokio::test]
+async fn test_stdio_call_tool_caps_extreme_timeout() {
     let Some(python) = locate_python() else {
         eprintln!("python not found; skipping max-timeout cap test");
         return;
@@ -1619,6 +1654,7 @@ while True:
             serde_json::json!({}),
             std::time::Duration::from_millis(500),
         )
+        .await
         .expect_err("call must fail against a silent server");
     let elapsed = start.elapsed();
     assert!(
@@ -1653,8 +1689,8 @@ while True:
 /// fixed in this round: `mark_stdio_dead` was being called
 /// but its return value was discarded, so the caller saw the
 /// reader's EOF error instead of the timeout.
-#[test]
-fn test_stdio_timeout_error_message_is_preserved() {
+#[tokio::test]
+async fn test_stdio_timeout_error_message_is_preserved() {
     let Some(python) = locate_python() else {
         eprintln!("python not found; skipping timeout-error test");
         return;
@@ -1710,6 +1746,7 @@ while True:
             serde_json::json!({}),
             std::time::Duration::from_millis(500),
         )
+        .await
         .expect_err("call must time out");
     // The fix ensures the error message is the timeout one,
     // not a follow-up "no live transport" / "server closed
@@ -1744,9 +1781,9 @@ while True:
 /// 60-second default test timeout. Re-enable locally with
 /// `cargo test -- --ignored test_sse_oauth_refresh_after_401` and
 /// bisect before relying on it in CI.
-#[test]
+#[tokio::test]
 #[ignore = "hangs in CI; OAuth refresh path exceeds 60s test timeout"]
-fn test_sse_oauth_refresh_after_401_without_browser_flow() {
+async fn test_sse_oauth_refresh_after_401_without_browser_flow() {
     let server = mock_mcp_oauth_server();
     let origin = server.origin.clone();
     let mcp_url = format!("{origin}/mcp");
@@ -1786,6 +1823,7 @@ fn test_sse_oauth_refresh_after_401_without_browser_flow() {
 
     let result = manager
         .call_tool("mock", "my_tool", serde_json::json!({}))
+        .await
         .expect("call should succeed after an automatic refresh");
     assert_eq!(result["content"][0]["text"], "ok");
 

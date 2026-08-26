@@ -421,6 +421,11 @@ fn spawn_driver(
         // prompts reuse the same conversation history (FR-009).
         let mut session_histories: std::collections::HashMap<Uuid, Option<Vec<Value>>> =
             std::collections::HashMap::new();
+        // Track the last turn number for each session so that continuations
+        // increment from where they left off rather than resetting to Turn 1.
+        let mut session_turn_offsets: std::collections::HashMap<Uuid, usize> =
+            std::collections::HashMap::new();
+
         while let Ok(prompt) = prompt_rx.recv() {
             let session_id = prompt.session_id;
             let agent_config = agent_config_provider
@@ -428,6 +433,7 @@ fn spawn_driver(
                 .map(|c| c.clone())
                 .unwrap_or_default();
             let history = session_histories.get(&session_id).cloned().flatten();
+            let start_turn = session_turn_offsets.get(&session_id).copied().unwrap_or(0);
             let observer = (observer_factory)(session_id);
             let ctx =
                 crate::context::AgentContextBuilder::new(agent_config, session_id, prompt.text)
@@ -445,12 +451,14 @@ fn spawn_driver(
                     ))
                     .with_tool_context(tool_context.clone())
                     .with_uuid_gen(std::sync::Arc::new(crate::utils::uuid::SystemUuidGenerator))
+                    .with_start_turn(start_turn)
                     .build();
-            let new_history = crate::run_agent(ctx);
+            let (new_history, final_turn) = crate::run_agent(ctx);
             // After the session finishes, stash its history for continuation
             // prompts (FR-009).
             if !new_history.is_empty() {
                 session_histories.insert(session_id, Some(new_history));
+                session_turn_offsets.insert(session_id, final_turn);
             }
         }
     })

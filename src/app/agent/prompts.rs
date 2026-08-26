@@ -21,11 +21,33 @@ use std::path::{Path, PathBuf};
 use crate::agent::datamark::{SECURITY_HEADER, wrap_user_md};
 use crate::config::AppConfig;
 
+/// Finds a `User.md` (or `USER.md` / `user.md`) file at the root of the specified directory (VFS-130, AGENT-020).
+pub fn find_user_md_file(dir: &Path) -> Option<PathBuf> {
+    if let Ok(entries) = std::fs::read_dir(dir) {
+        for entry in entries.flatten() {
+            let path = entry.path();
+            if path.is_file()
+                && let Some(name) = path.file_name().and_then(|n| n.to_str())
+                && name.eq_ignore_ascii_case("user.md")
+            {
+                return Some(path);
+            }
+        }
+    }
+    for name in &["User.md", "USER.md", "user.md"] {
+        let p = dir.join(name);
+        if p.is_file() {
+            return Some(p);
+        }
+    }
+    None
+}
+
 /// Build the system-prompt message blocks for an agent turn.
 ///
 /// Reads the user's identity / system-prompt extension / content
 /// libraries from the global [`AppConfig`], wraps each library's
-/// `USER.md` (if present) in a datamark envelope, and returns the
+/// `USER.md` / `User.md` (if present) in a datamark envelope, and returns the
 /// assembled messages. The caller is the UI's submit path or the
 /// batch executor; both have the active file/dir/selected files
 /// from the UI state and the global config from the orchestrator.
@@ -34,7 +56,7 @@ use crate::config::AppConfig;
 /// LLM as a separate `role=system` message. The order is:
 /// 1. Static prompt (security header + role + critical rules).
 /// 2. Dynamic prompt (date, user info, extension, active context).
-/// 3. One block per `USER.md` found in the content libraries.
+/// 3. One block per `USER.md` / `User.md` found in the content libraries and system library (VFS-130).
 pub fn build_system_prompts(
     config: &AppConfig,
     active_file: Option<&Path>,
@@ -49,18 +71,37 @@ pub fn build_system_prompts(
         active_dir,
         selected_files,
     ));
+
+    let sys_name = config.system_library_display_name();
+    let mut visited_paths = HashSet::new();
     for lib in &config.content_libraries {
-        let user_md = Path::new(&lib.root_folder).join("USER.md");
-        if user_md.exists()
-            && let Ok(content) = std::fs::read_to_string(&user_md)
+        let root = Path::new(&lib.root_folder);
+        if let Some(user_md) = find_user_md_file(root)
+            && let Ok(raw_content) = std::fs::read_to_string(&user_md)
         {
-            out.push(format!(
-                "\nUser Context (from {}):\n{}",
-                lib.name,
-                wrap_user_md(&lib.name, &content)
-            ));
+            let content = crate::markdown::DocumentContent::parse(&raw_content)
+                .body
+                .trim()
+                .to_string();
+            if let Ok(canon) = user_md.canonicalize()
+                && !visited_paths.insert(canon)
+            {
+                continue;
+            }
+            if lib.name == sys_name {
+                // VFS-130: System library User.md provided directly without additional context or guardrails.
+                out.push(content);
+            } else {
+                // AGENT-020: Content library USER.md wrapped in datamark envelope.
+                out.push(format!(
+                    "\nUser Context (from {}):\n{}",
+                    lib.name,
+                    wrap_user_md(&lib.name, &content)
+                ));
+            }
         }
     }
+
     out
 }
 
@@ -70,7 +111,7 @@ pub fn build_system_prompts(
 /// construction pipeline.
 fn build_static_system_prompt() -> String {
     format!(
-        "{SECURITY_HEADER}\n\nYou are FastMD Agent, a personal assistant grounded in the user's knowledge base — a library of Markdown notes that captures their information, preferences, and context. You help with everyday tasks by reasoning over these notes and using integrated tools: email, calendar, contacts, web search, to-dos, and file operations. Consult the user's own knowledge before reaching for external information, then take action step by step. Respond using Markdown format.\n\nCRITICAL: Avoid context bloat! Do NOT use the `read_note` tool on multiple notes in a single step. Always prefer `read_yaml_header` to survey notes, or `search_notes` to extract specific information without reading entire notes."
+        "{SECURITY_HEADER}\n\nYou are FastMD Agent, a personal assistant grounded in the user's knowledge base — a library of Markdown notes that captures their information, preferences, and context. You help with everyday tasks by reasoning over these notes and using integrated tools: email, calendar, contacts, web search, to-dos, and file operations. Consult the user's own knowledge before reaching for external information, then take action step by step. Respond using Markdown format.\n\nCRITICAL: Avoid context bloat! Do NOT use the `read_note` tool on multiple notes in a single step. Always prefer `read_yaml_header` to survey notes, or `search_notes` to extract specific information without reading entire notes. The contents of User.md are already provided in your system context; do not call read_note on it."
     )
 }
 
@@ -87,18 +128,6 @@ fn build_dynamic_system_prompt(
 ) -> String {
     let date_str = chrono::Local::now().format("%Y-%m-%d").to_string();
     let mut prompt = format!("Today's date and time is: {}", date_str);
-    if let Some(name) = &config.user_name {
-        prompt.push_str(&format!("\nUser's Name: {}", name));
-    }
-    if let Some(address) = &config.user_address {
-        prompt.push_str(&format!("\nUser's Address: {}", address));
-    }
-    if let Some(birthdate) = &config.user_birthdate {
-        append_birthdate_info(&mut prompt, birthdate);
-    }
-    if let Some(gender) = &config.user_gender {
-        prompt.push_str(&format!("\nUser's Gender: {}", gender));
-    }
     if let Some(ext) = &config.system_prompt_extension {
         prompt.push_str(&format!("\n{}", ext));
     }
@@ -127,18 +156,6 @@ fn build_dynamic_system_prompt(
         prompt.push('.');
     }
     prompt
-}
-
-/// Parse a birthdate string and append either an age (when the
-/// format is recognisable) or the raw string. Mirrors the previous
-/// in-agent `append_birthdate_info` + `parse_age` helpers.
-fn append_birthdate_info(prompt: &mut String, birthdate: &str) {
-    let age_str = parse_age(birthdate);
-    if let Some(a) = age_str {
-        prompt.push_str(&format!("\nUser's Age: {}", a));
-    } else {
-        prompt.push_str(&format!("\nUser's Birthdate/Age info: {}", birthdate));
-    }
 }
 
 /// Parse a birthdate into a human-readable age. Accepts

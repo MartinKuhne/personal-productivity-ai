@@ -37,23 +37,25 @@ the YAML schema) but its behaviour lives here.
 * [VFS-007] The search_notes tool shall search all libraries in priority order (highest first), and return a concatenated result. When the `list_notes` tool is invoked with the `/` or `.` argument alone, it shall enumerate the list of libraries, enabling the LLM to continue the folder search for the virtual library subfolders. (Replaces REQ-705 + REQ-706.)
 
 ### Default library
-
 * [VFS-100] The system SHALL support a system library.
 * [VFS-101] The default name of the system library SHALL be `System`.
 * [VFS-102] The system SHALL support a permanent configuration option for the user to specify the display name of the system library.
 * [VFS-103] The system SHALL store the files for the system library under `%APPDATA%/fastmd/system` on the Windows operating system.
 * [VFS-104] When the `%APPDATA%/fastmd/system` on the Windows operating system does not exist, the system SHALL create it.
-* [VFS-105] When any of the folders mentioned do not exist, the system SHALL create them.
+* [VFS-105] When `Skills` folder or it's subfolders do not exist, the system SHALL create them.
 * [VFS-110] The system library SHALL support a 'Conversations` folder.
 * [VFS-111] When the user performs an agent prompt, the system SHALL log the prompt, the chat model response, and any further prompts and responses to a file in the `Conversations` folder.
 * [VFS-112] When the system creates a file to log a prompt, the file name SHALL be `YYYY-MM-DD HH-MM-SS.md`
 * [VFS-113] When the system writes to a file to log a prompt, it shall use headings `## Prompt (nnn)` and `## Response (nnn)` with nnn representing a one based, incrementing number.
 * [VFS-114] When the system logs to a prompt log file, it shall include any write tool calls at the end of the `## Response (nnn)` section.
-* [VFS-120] The system library SHALL support a `Skills` folder with `Note`, `Folder` and `Batch` subdirectories.
-* [VFS-121] When one or more files are present in the `Skills/Note` folder, the system shall offer them as an option in the context menu when the user right-clicks on a note, either in the directory tree or on an open tab. The system shall then execute an agent prompt with the contents of the file as the user prompt.
-* [VFS-122] When one or more files are present in the `Skills/Folder` folder, the system shall offer them as an option in the context menu when the user right-clicks on a folder in the directory tree. The system shall then execute an agent prompt with the contents of the file as the user prompt.
+* [VFS-120] The system library SHALL support a `Skills` folder with `Note`, `Folder` and `Batch` subdirectories
+* [VFS-121] When one or more files are present in the `Skills/Note` folder, the system shall offer them as an option in the context menu when the user right-clicks on a note, either in the directory tree or on an open tab. The system shall then execute an agent prompt with the contents of the file as the user prompt
+* [VFS-122] When one or more files are present in the `Skills/Folder` folder, the system shall offer them as an option in the context menu when the user right-clicks on a folder in the directory tree. The system shall then execute an agent prompt with the contents of the file as the user prompt
 * [VFS-123] When one or more files are present in the `Skills/Batch` folder, the system shall offer them as an option in the batch dialog.
-* [VFS-130] When the system library contains a `User.md` file at the root of the system folder, the system shall provide the contents of that file as an additional system context.
+* [VFS-125] When - and only when - creating the `Skills/Note` folder, create a sample `Skills/Note/FormatMarkdown.md` skill with instructions to format the current note into correct markdown.
+* [VFS-126] When - and only when - creating the `Skills/Folder` folder, create a sample `Skills/Folder/CreateSummary.md` skill with content `Provide a brief summary of the contents of the folder, in the format <filename>: <one sentence summary of the contents>. One line per file`.
+* [VFS-130] When the system library contains a `User.md` file at the root of the system folder, the system shall provide the contents of that file as an additional system context without any additional context or guardrails.
+
 
 ## Architecture
 

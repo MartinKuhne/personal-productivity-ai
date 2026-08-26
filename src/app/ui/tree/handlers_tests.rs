@@ -526,3 +526,194 @@ fn test_merge_prompt_includes_consolidate_instruction_and_files() {
     assert!(prompt.contains("alpha.md"), "prompt should list alpha.md");
     assert!(prompt.contains("beta.md"), "prompt should list beta.md");
 }
+
+/// T-02: End-to-end test for the multi-select "Merge" operation.
+///
+/// When the user selects multiple files in the tree and chooses "Merge",
+/// `build_merge_prompt` generates the user prompt listing the selected files,
+/// and `build_system_prompts` injects `"selected the following files"` into the
+/// dynamic system context.
+///
+/// Proves that both the merge prompt text *and* the selected-files context
+/// reach the LLM via `POST /chat/completions`.
+#[test]
+fn test_e2e_openai_wiremock_multi_select_merge_prompt_and_context_sent_to_llm() {
+    use wiremock::matchers::{method, path};
+    use wiremock::{Mock, MockServer, ResponseTemplate};
+
+    let runtime = tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+        .expect("build tokio runtime");
+
+    let mock_server = runtime.block_on(MockServer::start());
+
+    let response_body = serde_json::json!({
+        "id": "chatcmpl-merge",
+        "object": "chat.completion",
+        "created": 1677652288,
+        "model": "gpt-4o",
+        "choices": [{
+            "index": 0,
+            "message": {
+                "role": "assistant",
+                "content": "I have merged the selected notes."
+            },
+            "finish_reason": "stop"
+        }],
+        "usage": {
+            "prompt_tokens": 50,
+            "completion_tokens": 10,
+            "total_tokens": 60
+        }
+    });
+
+    runtime.block_on(
+        Mock::given(method("POST"))
+            .and(path("/chat/completions"))
+            .respond_with(
+                ResponseTemplate::new(200)
+                    .insert_header("content-type", "application/json")
+                    .set_body_json(response_body),
+            )
+            .mount(&mock_server),
+    );
+
+    let tmp = tempfile::tempdir().unwrap();
+    let notes_dir = tmp.path().join("Notes");
+    std::fs::create_dir_all(&notes_dir).unwrap();
+    let file1 = notes_dir.join("meeting-2026-01.md");
+    let file2 = notes_dir.join("meeting-2026-02.md");
+    std::fs::write(&file1, "# Meeting Jan 2026").unwrap();
+    std::fs::write(&file2, "# Meeting Feb 2026").unwrap();
+
+    let libs = vec![crate::config::ContentLibrary {
+        root_folder: notes_dir.to_string_lossy().to_string(),
+        name: "Notes".to_string(),
+        kind: "text".to_string(),
+        readonly: false,
+        priority: 0,
+    }];
+
+    // Simulate: user ctrl-clicks two files → right-click → "Merge"
+    // render.rs does:
+    //   let prompt = build_merge_prompt(ctx.content_libraries(), &files);
+    //   *ctx.submit_prompt() = Some(prompt);
+    // The orchestrator's start_agent_session gets selected_files via selection.agent_context().
+    let mut selected_files = HashSet::new();
+    selected_files.insert(file1.clone());
+    selected_files.insert(file2.clone());
+
+    let user_prompt = build_merge_prompt(&libs, &selected_files);
+
+    let config = crate::config::AppConfig {
+        content_libraries: libs,
+        ..crate::config::AppConfig::default()
+    };
+
+    // Build system prompts with selected_files — this injects the "selected the following files" line
+    let system_prompts = crate::agent::prompts::build_system_prompts(
+        &config,
+        None, // no single active file — multi-select has no primary file
+        None,
+        &selected_files,
+    );
+
+    // Pre-check: selected files are in the dynamic prompt
+    assert!(system_prompts[1].contains("selected the following files"));
+    assert!(system_prompts[1].contains("meeting-2026-01.md"));
+    assert!(system_prompts[1].contains("meeting-2026-02.md"));
+
+    // Pre-check: merge prompt lists both files
+    assert!(user_prompt.contains("merge"));
+    assert!(user_prompt.contains("meeting-2026-01.md"));
+    assert!(user_prompt.contains("meeting-2026-02.md"));
+
+    let mut models = std::collections::HashMap::new();
+    models.insert(
+        "default".to_string(),
+        fastmd_agent::config::LlmConfig {
+            model: "gpt-4o".to_string(),
+            api_url: mock_server.uri(),
+            api_key: "test-openai-key".to_string(),
+            cost: None,
+            use_case: vec!["chat".to_string()],
+        },
+    );
+
+    let agent_config = fastmd_agent::config::AgentConfigBuilder::new()
+        .with_models(models)
+        .build();
+
+    let session_id = uuid::Uuid::new_v4();
+    let observer = std::sync::Arc::new(fastmd_agent::events::RecordingObserver::new());
+    let ctx =
+        fastmd_agent::context::AgentContextBuilder::new(agent_config, session_id, user_prompt)
+            .with_system_prompts(system_prompts)
+            .with_observer(observer.clone())
+            .build();
+
+    let handle = std::thread::spawn(move || {
+        fastmd_agent::run_agent(ctx);
+    });
+    handle.join().unwrap();
+
+    let received_requests = runtime
+        .block_on(mock_server.received_requests())
+        .expect("must record requests");
+    assert_eq!(
+        received_requests.len(),
+        1,
+        "Expected exactly 1 request to OpenAI mock server"
+    );
+
+    let payload: serde_json::Value = serde_json::from_slice(&received_requests[0].body)
+        .expect("request body must be valid JSON");
+    let messages = payload["messages"]
+        .as_array()
+        .expect("messages array must be present");
+
+    // 1. System message must contain the selected-files context
+    let system_with_files = messages
+        .iter()
+        .find(|m| {
+            m["role"] == "system"
+                && m["content"]
+                    .as_str()
+                    .map(|c| {
+                        c.contains("selected the following files")
+                            && c.contains("meeting-2026-01.md")
+                            && c.contains("meeting-2026-02.md")
+                    })
+                    .unwrap_or(false)
+        })
+        .expect("Must find system message listing all selected files");
+
+    assert!(
+        system_with_files["content"]
+            .as_str()
+            .unwrap()
+            .contains("selected the following files"),
+        "System message must say 'selected the following files'"
+    );
+
+    // 2. User message must contain the merge instruction and both file names
+    let user_msg = messages
+        .iter()
+        .find(|m| m["role"] == "user")
+        .expect("Must find a user message");
+
+    let user_content = user_msg["content"].as_str().unwrap();
+    assert!(
+        user_content.to_lowercase().contains("merge"),
+        "User message must contain merge instruction"
+    );
+    assert!(
+        user_content.contains("meeting-2026-01.md"),
+        "User message must list first selected file"
+    );
+    assert!(
+        user_content.contains("meeting-2026-02.md"),
+        "User message must list second selected file"
+    );
+}

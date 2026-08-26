@@ -237,15 +237,15 @@ fn two_libs_with_n_tagged_files_each(n: usize) -> (AgentConfig, LibFixture) {
     (config, LibFixture { _a: a, _b: Some(b) })
 }
 
-fn run_list_by_tag(config: &AgentConfig, args: &str) -> Value {
-    let ctx = test_ctx(config);
-    run_list_by_tag_with_context(&ctx, args)
-}
-
-fn run_list_by_tag_with_context(ctx: &ToolContext, args: &str) -> Value {
+fn run_list_by_tag_ctx(ctx: &ToolContext, args: &str) -> Value {
     let raw = execute_tool(&ToolRegistry::new(), ctx, "list_notes_by_tag", args);
     serde_json::from_str(&raw)
         .unwrap_or_else(|e| panic!("could not parse tool response `{}`: {}", raw, e))
+}
+
+fn run_list_by_tag(config: &AgentConfig, args: &str) -> Value {
+    let ctx = test_ctx(config);
+    run_list_by_tag_ctx(&ctx, args)
 }
 
 fn files_array(data: &Value) -> Vec<String> {
@@ -266,7 +266,7 @@ fn test_list_by_tag_cursor_pagination_64_page_size() {
     let (config, _dir) = single_lib_with_n_tagged_files(150);
     let ctx = test_ctx(&config);
     // Page 1
-    let envelope1 = run_list_by_tag_with_context(&ctx, r#"{"tag":"meeting"}"#);
+    let envelope1 = run_list_by_tag_ctx(&ctx, r#"{"tag":"meeting"}"#);
     assert_eq!(envelope1["status"], "success");
     let data1 = &envelope1["data"];
     assert_eq!(data1["total"], 150);
@@ -277,7 +277,7 @@ fn test_list_by_tag_cursor_pagination_64_page_size() {
     let cursor1 = data1["cursor"].as_str().unwrap();
 
     // Page 2
-    let envelope2 = run_list_by_tag_with_context(
+    let envelope2 = run_list_by_tag_ctx(
         &ctx,
         &format!(r#"{{"tag":"meeting","cursor":"{cursor1}"}}"#),
     );
@@ -291,7 +291,7 @@ fn test_list_by_tag_cursor_pagination_64_page_size() {
     let cursor2 = data2["cursor"].as_str().unwrap();
 
     // Page 3 (final)
-    let envelope3 = run_list_by_tag_with_context(
+    let envelope3 = run_list_by_tag_ctx(
         &ctx,
         &format!(r#"{{"tag":"meeting","cursor":"{cursor2}"}}"#),
     );
@@ -347,7 +347,13 @@ fn test_list_by_tag_no_matches_reports_zero_total() {
     let hint = data["hint"]
         .as_str()
         .expect("hint should be set on no-match");
-    assert_eq!(hint, "No matching tagged files found.");
+    // A zero-match result has no cursor session, so the dedicated
+    // no-match hint is returned instead of the paging "Final page."
+    // hint (see `builtin::strings::NO_MATCHING_TAGGED_FILES_HINT`).
+    assert_eq!(
+        hint,
+        crate::tools::registry::builtin::strings::NO_MATCHING_TAGGED_FILES_HINT
+    );
 }
 
 #[test]
@@ -564,15 +570,15 @@ fn test_list_files_returns_json_array_not_string() {
     assert!(parsed["data"]["files"].is_array());
 }
 
-fn run_grep(config: &AgentConfig, args: &str) -> Value {
-    let ctx = test_ctx(config);
-    run_grep_with_context(&ctx, args)
-}
-
-fn run_grep_with_context(ctx: &ToolContext, args: &str) -> Value {
+fn run_grep_ctx(ctx: &ToolContext, args: &str) -> Value {
     let raw = execute_tool(&ToolRegistry::new(), ctx, "search_notes", args);
     serde_json::from_str(&raw)
         .unwrap_or_else(|e| panic!("could not parse tool response `{}`: {}", raw, e))
+}
+
+fn run_grep(config: &AgentConfig, args: &str) -> Value {
+    let ctx = test_ctx(config);
+    run_grep_ctx(&ctx, args)
 }
 
 fn single_lib_with_files(files: &[(&str, &str)]) -> (AgentConfig, TempDir) {
@@ -628,7 +634,7 @@ fn test_grep_cursor_pagination_64_page_size() {
     let (config, _dir) = single_lib_with_files(&[("big.md", &content)]);
     let ctx = test_ctx(&config);
     // Page 1
-    let envelope1 = run_grep_with_context(&ctx, r#"{"query":"needle"}"#);
+    let envelope1 = run_grep_ctx(&ctx, r#"{"query":"needle"}"#);
     assert_eq!(envelope1["status"], "success");
     let data1 = &envelope1["data"];
     assert_eq!(data1["total"], 150);
@@ -639,7 +645,7 @@ fn test_grep_cursor_pagination_64_page_size() {
     let cursor1 = data1["cursor"].as_str().unwrap();
 
     // Page 2
-    let envelope2 = run_grep_with_context(
+    let envelope2 = run_grep_ctx(
         &ctx,
         &format!(r#"{{"query":"needle","cursor":"{cursor1}"}}"#),
     );
@@ -653,7 +659,7 @@ fn test_grep_cursor_pagination_64_page_size() {
     let cursor2 = data2["cursor"].as_str().unwrap();
 
     // Page 3 (final)
-    let envelope3 = run_grep_with_context(
+    let envelope3 = run_grep_ctx(
         &ctx,
         &format!(r#"{{"query":"needle","cursor":"{cursor2}"}}"#),
     );
@@ -842,4 +848,26 @@ fn test_default_providers_register_every_family() {
             "expected tool {expected} in default registry"
         );
     }
+}
+
+#[test]
+fn test_read_note_and_window_note_descriptions_reference_user_context() {
+    let mgr = ToolRegistry::new();
+    let read_desc = &mgr
+        .descriptor("read_note")
+        .expect("read_note must be registered")
+        .description;
+    assert!(
+        read_desc.contains("User.md") || read_desc.contains("user context"),
+        "read_note description must note that User.md / user context is already in system context"
+    );
+
+    let window_desc = &mgr
+        .descriptor("window_note")
+        .expect("window_note must be registered")
+        .description;
+    assert!(
+        window_desc.contains("User.md") || window_desc.contains("user context"),
+        "window_note description must note that User.md / user context is already in system context"
+    );
 }

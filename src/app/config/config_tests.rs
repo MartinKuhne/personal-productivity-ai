@@ -17,7 +17,7 @@ fn test_load_config_creates_default_when_missing() {
 
     // No global env mutation: pass the path explicitly so this test
     // cannot race with any other test that also touches APPDATA.
-    let _config = load_config_from_path(&config_path);
+    let _config = load_config_from_path(&config_path, Some(&dir.path().join("system")));
 
     // Config file should have been created
     assert!(config_path.exists());
@@ -222,13 +222,14 @@ fn test_load_config_valid_file() {
     let dir = tempdir().unwrap();
     let config_path = dir.path().join("fastmd").join("config.yaml");
     std::fs::create_dir_all(config_path.parent().unwrap()).unwrap();
-    let yaml = r#"
-user_name: "TestUser"
-"#;
+    let yaml = "system_prompt_extension: \"Test extension\"\n";
     std::fs::write(&config_path, yaml).unwrap();
 
-    let config = load_config_from_path(&config_path);
-    assert_eq!(config.user_name, Some("TestUser".to_string()));
+    let config = load_config_from_path(&config_path, Some(&dir.path().join("system")));
+    assert_eq!(
+        config.system_prompt_extension,
+        Some("Test extension".to_string())
+    );
 }
 
 #[test]
@@ -238,9 +239,9 @@ fn test_load_config_invalid_file() {
     std::fs::create_dir_all(config_path.parent().unwrap()).unwrap();
     std::fs::write(&config_path, "invalid: yaml: [").unwrap();
 
-    let config = load_config_from_path(&config_path);
+    let config = load_config_from_path(&config_path, Some(&dir.path().join("system")));
     // Should return default
-    assert!(config.user_name.is_none());
+    assert!(config.system_prompt_extension.is_none());
 }
 
 #[test]
@@ -280,7 +281,7 @@ fn test_debug_impls() {
 /// back. Under the parallel test runner, another test could overwrite
 /// `APPDATA` between the `set_var` and the `load_config` call, so
 /// `test_load_config_invalid_file` would sometimes load a sibling
-/// test's valid YAML and see `user_name: Some("TestUser")` instead of
+/// test's valid YAML and see another test's value instead of
 /// the expected `None`.
 ///
 /// The refactor that moved the file I/O behind a path parameter
@@ -302,7 +303,7 @@ fn test_load_config_from_path_is_isolated() {
             let barrier = Arc::clone(&barrier);
             thread::spawn(move || {
                 let config_path = dir.join(format!("cfg_{i}.yaml"));
-                let yaml = format!("user_name: \"User{i}\"\n");
+                let yaml = format!("system_prompt_extension: \"Extension{i}\"\n");
                 std::fs::write(&config_path, yaml).unwrap();
 
                 // Maximise the race window: every worker waits here
@@ -310,10 +311,10 @@ fn test_load_config_from_path_is_isolated() {
                 // concurrently.
                 barrier.wait();
 
-                let config = load_config_from_path(&config_path);
+                let config = load_config_from_path(&config_path, Some(&dir.join("system")));
                 assert_eq!(
-                    config.user_name,
-                    Some(format!("User{i}")),
+                    config.system_prompt_extension,
+                    Some(format!("Extension{i}")),
                     "thread {i} saw the wrong config (cross-talk between loads)"
                 );
             })
@@ -755,10 +756,6 @@ fn test_from_app_config_captures_config_path() {
 #[test]
 fn test_from_app_config_drops_user_and_content_fields() {
     let cfg = AppConfig {
-        user_name: Some("Alice".to_string()),
-        user_address: Some("addr".to_string()),
-        user_birthdate: Some("1990-01-01".to_string()),
-        user_gender: Some("female".to_string()),
         system_prompt_extension: Some("Custom instructions.".to_string()),
         content_libraries: vec![ContentLibrary {
             root_folder: "/x".to_string(),
@@ -775,8 +772,10 @@ fn test_from_app_config_drops_user_and_content_fields() {
 
 #[test]
 fn test_selected_chat_model_is_not_persisted() {
-    let mut config = AppConfig::default();
-    config.selected_chat_model = Some("test-model".to_string());
+    let config = AppConfig {
+        selected_chat_model: Some("test-model".to_string()),
+        ..Default::default()
+    };
 
     // Serialization should omit selected_chat_model
     let serialized = serde_norway::to_string(&config).expect("serialization should succeed");
@@ -854,4 +853,522 @@ fn test_chat_model_switching_runtime_lifecycle() {
     let agent_cfg = config.to_agent_config();
     assert_eq!(agent_cfg.selected_chat_model(), None);
     assert_eq!(agent_cfg.select_chat_model().unwrap().model, "cheap-model");
+}
+
+#[test]
+fn test_system_library_default_name() {
+    let config = AppConfig::default();
+    assert_eq!(config.system_library_name, None);
+    assert_eq!(config.system_library_display_name(), "System");
+    let agent_cfg = config.to_agent_config();
+    assert_eq!(agent_cfg.system_library_name(), None);
+    assert_eq!(agent_cfg.system_library_display_name(), "System");
+}
+
+#[test]
+fn test_system_library_custom_name() {
+    let config = AppConfig {
+        system_library_name: Some("Personal Knowledge".to_string()),
+        ..Default::default()
+    };
+    assert_eq!(config.system_library_display_name(), "Personal Knowledge");
+    let agent_cfg = config.to_agent_config();
+    assert_eq!(agent_cfg.system_library_name(), Some("Personal Knowledge"));
+    assert_eq!(
+        agent_cfg.system_library_display_name(),
+        "Personal Knowledge"
+    );
+}
+
+#[test]
+fn test_system_library_yaml_roundtrip() {
+    let yaml = r#"
+system_library_name: "Knowledge Base"
+"#;
+    let config: AppConfig = serde_norway::from_str(yaml).unwrap();
+    assert_eq!(
+        config.system_library_name.as_deref(),
+        Some("Knowledge Base")
+    );
+    assert_eq!(config.system_library_display_name(), "Knowledge Base");
+}
+
+#[test]
+fn test_system_library_dir_creation() {
+    let dir = tempdir().unwrap();
+    let sys_dir = AppConfig::ensure_system_library_dir_at(dir.path()).unwrap();
+    assert!(sys_dir.exists());
+    assert!(sys_dir.is_dir());
+
+    let conv_dir = AppConfig::ensure_conversations_dir_at(dir.path()).unwrap();
+    assert!(conv_dir.exists());
+    assert!(conv_dir.is_dir());
+    assert_eq!(conv_dir, sys_dir.join("Conversations"));
+}
+
+#[test]
+fn test_ensure_system_library_present_at() {
+    let dir = tempdir().unwrap();
+    let sys_path = dir.path().join("system");
+    let mut config = AppConfig::default();
+    config.ensure_system_library_present_at(&sys_path);
+
+    assert_eq!(config.content_libraries.len(), 1);
+    let lib = &config.content_libraries[0];
+    assert_eq!(lib.name, "System");
+    assert_eq!(lib.kind, "text");
+    assert!(!lib.readonly);
+    assert!(sys_path.exists());
+    assert!(sys_path.join("Conversations").exists());
+
+    // Calling again with custom name should update the existing library name
+    config.system_library_name = Some("Custom System".to_string());
+    config.ensure_system_library_present_at(&sys_path);
+    assert_eq!(config.content_libraries.len(), 1);
+    assert_eq!(config.content_libraries[0].name, "Custom System");
+}
+
+#[test]
+fn test_ensure_system_library_does_not_repoint_unrelated_system_name() {
+    let dir = tempdir().unwrap();
+    let sys_path = dir.path().join("system");
+    let unrelated_path = dir.path().join("unrelated");
+    let mut config = AppConfig::default();
+    config
+        .content_libraries
+        .push(crate::config::ContentLibrary {
+            root_folder: unrelated_path.to_string_lossy().to_string(),
+            name: "System".to_string(),
+            kind: "text".to_string(),
+            readonly: true,
+            priority: 3,
+        });
+
+    config.ensure_system_library_present_at(&sys_path);
+
+    assert_eq!(config.content_libraries.len(), 2);
+    assert_eq!(config.content_libraries[0].name, "System");
+    assert_eq!(
+        config.content_libraries[0].root_folder,
+        sys_path.to_string_lossy()
+    );
+    assert!(config.content_libraries[1].readonly);
+    assert_eq!(
+        config.content_libraries[1].root_folder,
+        unrelated_path.to_string_lossy()
+    );
+}
+
+#[test]
+fn test_ensure_system_library_repairs_readonly_root_match() {
+    let dir = tempdir().unwrap();
+    let sys_path = dir.path().join("system");
+    let mut config = AppConfig::default();
+    config
+        .content_libraries
+        .push(crate::config::ContentLibrary {
+            root_folder: sys_path.to_string_lossy().to_string(),
+            name: "Old System".to_string(),
+            kind: "markdown".to_string(),
+            readonly: true,
+            priority: 4,
+        });
+
+    config.ensure_system_library_present_at(&sys_path);
+
+    let lib = &config.content_libraries[0];
+    assert_eq!(lib.name, "System");
+    assert_eq!(lib.kind, "text");
+    assert!(!lib.readonly);
+    assert_eq!(lib.priority, 0);
+}
+
+#[test]
+fn test_skills_directories_creation() {
+    let dir = tempdir().unwrap();
+    let skills_dir = AppConfig::ensure_skills_dirs_at(dir.path()).unwrap();
+    assert!(skills_dir.exists());
+    assert!(skills_dir.join("Note").exists());
+    assert!(skills_dir.join("Folder").exists());
+    assert!(skills_dir.join("Batch").exists());
+
+    assert_eq!(
+        AppConfig::get_skills_note_dir_at(dir.path()),
+        skills_dir.join("Note")
+    );
+    assert_eq!(
+        AppConfig::get_skills_folder_dir_at(dir.path()),
+        skills_dir.join("Folder")
+    );
+    assert_eq!(
+        AppConfig::get_skills_batch_dir_at(dir.path()),
+        skills_dir.join("Batch")
+    );
+}
+
+#[test]
+fn test_list_skills_files() {
+    let dir = tempdir().unwrap();
+    let sys_path = dir.path().join("system");
+    let mut config = AppConfig::default();
+    config.ensure_system_library_present_at(&sys_path);
+
+    let note_dir = sys_path.join("Skills").join("Note");
+    let folder_dir = sys_path.join("Skills").join("Folder");
+    let batch_dir = sys_path.join("Skills").join("Batch");
+
+    // Write sample skill files
+    std::fs::write(note_dir.join("Proofread.md"), "Proofread this note.").unwrap();
+    std::fs::write(note_dir.join("summarize.txt"), "Summarize this note.").unwrap();
+    std::fs::write(note_dir.join(".hidden.md"), "Hidden file").unwrap();
+
+    std::fs::write(folder_dir.join("Index.md"), "Index this folder.").unwrap();
+    std::fs::write(batch_dir.join("BulkFormat.md"), "Format all notes.").unwrap();
+
+    let note_skills = config.list_note_skills();
+    assert_eq!(note_skills.len(), 3);
+    assert_eq!(note_skills[0].name, "FormatMarkdown");
+    assert_eq!(note_skills[1].name, "Proofread");
+    assert_eq!(note_skills[2].name, "summarize");
+
+    let folder_skills = config.list_folder_skills();
+    assert_eq!(folder_skills.len(), 2);
+    assert_eq!(folder_skills[0].name, "CreateSummary");
+    assert_eq!(folder_skills[1].name, "Index");
+
+    let batch_skills = config.list_batch_skills();
+    assert_eq!(batch_skills.len(), 1);
+    assert_eq!(batch_skills[0].name, "BulkFormat");
+}
+
+#[test]
+fn test_ensure_all_system_folders_creation() {
+    let dir = tempdir().unwrap();
+    let sys_path = dir.path().join("my_system");
+    assert!(!sys_path.exists());
+
+    AppConfig::ensure_all_system_folders_at(&sys_path).unwrap();
+
+    assert!(sys_path.exists(), "system root folder must be created");
+    assert!(
+        sys_path.join("Conversations").exists(),
+        "Conversations folder must be created"
+    );
+    assert!(
+        sys_path.join("Skills").exists(),
+        "Skills folder must be created"
+    );
+    assert!(
+        sys_path.join("Skills").join("Note").exists(),
+        "Skills/Note folder must be created"
+    );
+    assert!(
+        sys_path.join("Skills").join("Folder").exists(),
+        "Skills/Folder folder must be created"
+    );
+    assert!(
+        sys_path.join("Skills").join("Batch").exists(),
+        "Skills/Batch folder must be created"
+    );
+}
+
+#[test]
+fn test_list_skills_creates_missing_folders() {
+    let dir = tempdir().unwrap();
+    let sys_path = dir.path().join("system");
+    let config = AppConfig {
+        content_libraries: vec![ContentLibrary {
+            root_folder: sys_path.to_string_lossy().to_string(),
+            name: "System".to_string(),
+            kind: "text".to_string(),
+            readonly: false,
+            priority: 0,
+        }],
+        ..Default::default()
+    };
+
+    // Verify folders do not exist initially
+    assert!(!sys_path.join("Skills").join("Note").exists());
+    assert!(!sys_path.join("Skills").join("Folder").exists());
+    assert!(!sys_path.join("Skills").join("Batch").exists());
+
+    // Calling listing methods should create missing folders per VFS-105
+    let notes = config.list_note_skills();
+    assert!(notes.is_empty());
+    assert!(sys_path.join("Skills").join("Note").exists());
+
+    let folders = config.list_folder_skills();
+    assert!(folders.is_empty());
+    assert!(sys_path.join("Skills").join("Folder").exists());
+
+    let batches = config.list_batch_skills();
+    assert!(batches.is_empty());
+    assert!(sys_path.join("Skills").join("Batch").exists());
+}
+
+#[test]
+fn test_ensure_all_system_folders_seeds_keep_files() {
+    let dir = tempdir().unwrap();
+    let sys_path = dir.path().join("seed_system");
+
+    AppConfig::ensure_all_system_folders_at(&sys_path).unwrap();
+
+    // Each Skills subfolder must contain a .keep file so the folder is
+    // visible in the tree even before the user adds any skill files (VFS-105).
+    assert!(
+        sys_path.join("Skills").join("Note").join(".keep").exists(),
+        "Skills/Note/.keep must be seeded"
+    );
+    assert!(
+        sys_path
+            .join("Skills")
+            .join("Folder")
+            .join(".keep")
+            .exists(),
+        "Skills/Folder/.keep must be seeded"
+    );
+    assert!(
+        sys_path.join("Skills").join("Batch").join(".keep").exists(),
+        "Skills/Batch/.keep must be seeded"
+    );
+}
+
+#[test]
+fn test_ensure_all_system_folders_keep_is_idempotent() {
+    let dir = tempdir().unwrap();
+    let sys_path = dir.path().join("idempotent_system");
+
+    // First call seeds the files.
+    AppConfig::ensure_all_system_folders_at(&sys_path).unwrap();
+    // Second call must not error even though .keep files already exist.
+    AppConfig::ensure_all_system_folders_at(&sys_path).unwrap();
+
+    assert!(sys_path.join("Skills").join("Note").join(".keep").exists());
+}
+
+// ---- VFS-103: system library path resolution & fallbacks ----
+
+#[test]
+fn test_system_library_path_appdata_branch() {
+    let p = AppConfig::system_library_path_from_env(Some("C:/AppData"), None);
+    assert_eq!(p, PathBuf::from("C:/AppData").join("fastmd").join("system"));
+}
+
+#[test]
+fn test_system_library_path_userprofile_fallback_branch() {
+    let p = AppConfig::system_library_path_from_env(None, Some("C:/Users/test"));
+    assert_eq!(
+        p,
+        PathBuf::from("C:/Users/test")
+            .join(".fastmd")
+            .join("system")
+    );
+}
+
+#[test]
+fn test_system_library_path_relative_fallback_branch() {
+    let p = AppConfig::system_library_path_from_env(None, None);
+    assert_eq!(p, PathBuf::from("system"));
+}
+
+#[test]
+fn test_system_library_path_appdata_takes_precedence_over_userprofile() {
+    let p = AppConfig::system_library_path_from_env(Some("AD"), Some("UP"));
+    assert_eq!(p, PathBuf::from("AD").join("fastmd").join("system"));
+}
+
+// ---- VFS-104 / VFS-105 / VFS-110: IO-failure error paths ----
+
+#[test]
+fn test_ensure_system_library_dir_at_fails_when_root_is_a_file() {
+    let dir = tempdir().unwrap();
+    let file_path = dir.path().join("not_a_dir");
+    std::fs::write(&file_path, "bytes").unwrap();
+
+    let result = AppConfig::ensure_system_library_dir_at(&file_path);
+    assert!(
+        result.is_err(),
+        "must propagate io::Error when the parent is not a directory"
+    );
+}
+
+#[test]
+fn test_ensure_conversations_dir_at_fails_when_root_is_a_file() {
+    let dir = tempdir().unwrap();
+    let file_path = dir.path().join("not_a_dir");
+    std::fs::write(&file_path, "bytes").unwrap();
+
+    let result = AppConfig::ensure_conversations_dir_at(&file_path);
+    assert!(
+        result.is_err(),
+        "must propagate io::Error when the parent is not a directory"
+    );
+}
+
+#[test]
+fn test_ensure_all_system_folders_at_fails_when_root_is_a_file() {
+    let dir = tempdir().unwrap();
+    let file_path = dir.path().join("not_a_dir");
+    std::fs::write(&file_path, "bytes").unwrap();
+
+    let result = AppConfig::ensure_all_system_folders_at(&file_path);
+    assert!(
+        result.is_err(),
+        "must propagate io::Error when the root is not a directory"
+    );
+}
+
+// ---- VFS-102: empty / whitespace custom name ----
+
+#[test]
+fn test_system_library_display_name_empty_string_is_returned_verbatim() {
+    let config = AppConfig {
+        system_library_name: Some(String::new()),
+        ..Default::default()
+    };
+    // `unwrap_or("System")` only fires for `None`; an empty `Some`
+    // is returned as-is. This pins the current behaviour so any
+    // future normalisation is a deliberate, visible change.
+    assert_eq!(config.system_library_display_name(), "");
+}
+
+#[test]
+fn test_system_library_display_name_whitespace_is_returned_verbatim() {
+    let config = AppConfig {
+        system_library_name: Some("   ".to_string()),
+        ..Default::default()
+    };
+    assert_eq!(config.system_library_display_name(), "   ");
+}
+
+// ---- VFS-125 / VFS-126: sample skill content & "only-when-creating" ----
+
+#[test]
+fn test_skills_sample_files_seeded_with_required_content() {
+    let dir = tempdir().unwrap();
+    AppConfig::ensure_skills_dirs_at(dir.path()).unwrap();
+
+    let note_sample = AppConfig::get_skills_note_dir_at(dir.path()).join("FormatMarkdown.md");
+    let folder_sample = AppConfig::get_skills_folder_dir_at(dir.path()).join("CreateSummary.md");
+
+    assert!(
+        note_sample.exists(),
+        "Skills/Note/FormatMarkdown.md must be seeded on creation (VFS-125)"
+    );
+    assert_eq!(
+        std::fs::read_to_string(&note_sample).unwrap(),
+        "instructions to format the current note into correct markdown.",
+        "VFS-125 sample content must match the spec wording"
+    );
+
+    assert!(
+        folder_sample.exists(),
+        "Skills/Folder/CreateSummary.md must be seeded on creation (VFS-126)"
+    );
+    assert_eq!(
+        std::fs::read_to_string(&folder_sample).unwrap(),
+        "Provide a brief summary of the contents of the folder, in the format <filename>: <one sentence summary of the contents>. One line per file",
+        "VFS-126 sample content must match the spec wording verbatim"
+    );
+
+    // The spec seeds sample skills only into Note and Folder; Batch
+    // must contain no sample file.
+    let batch_entries: Vec<_> = std::fs::read_dir(AppConfig::get_skills_batch_dir_at(dir.path()))
+        .unwrap()
+        .map(|e| e.unwrap().file_name().to_string_lossy().to_string())
+        .collect();
+    assert!(
+        !batch_entries.iter().any(|n| n.ends_with(".md")),
+        "Skills/Batch must not receive a sample skill file; found: {batch_entries:?}"
+    );
+}
+
+#[test]
+fn test_create_skills_dir_preserves_existing_sample_files() {
+    // "Only when creating": if the subfolder already exists, the
+    // sample skill must NOT be (re)written — a user-authored file
+    // with the same name must survive untouched.
+    let dir = tempdir().unwrap();
+    let skills_dir = dir.path().join("system").join("Skills");
+    let note_dir = skills_dir.join("Note");
+    let folder_dir = skills_dir.join("Folder");
+    std::fs::create_dir_all(&note_dir).unwrap();
+    std::fs::create_dir_all(&folder_dir).unwrap();
+
+    let user_note_content = "My custom format instructions.";
+    let user_folder_content = "My custom summary instructions.";
+    std::fs::write(note_dir.join("FormatMarkdown.md"), user_note_content).unwrap();
+    std::fs::write(folder_dir.join("CreateSummary.md"), user_folder_content).unwrap();
+
+    AppConfig::create_skills_dir(&skills_dir).unwrap();
+
+    assert_eq!(
+        std::fs::read_to_string(note_dir.join("FormatMarkdown.md")).unwrap(),
+        user_note_content,
+        "existing user FormatMarkdown.md must not be overwritten (VFS-125 only-when-creating)"
+    );
+    assert_eq!(
+        std::fs::read_to_string(folder_dir.join("CreateSummary.md")).unwrap(),
+        user_folder_content,
+        "existing user CreateSummary.md must not be overwritten (VFS-126 only-when-creating)"
+    );
+}
+
+#[test]
+fn test_create_skills_dir_does_not_seed_sample_into_pre_existing_folder_without_file() {
+    // If the subfolder exists but the sample file does not, the
+    // "only-when-creating" guard still skips seeding (the guard
+    // keys on folder existence, not file existence). Pin this
+    // behaviour so a future change that adds the sample to an
+    // already-present folder is a deliberate, reviewed change.
+    let dir = tempdir().unwrap();
+    let skills_dir = dir.path().join("system").join("Skills");
+    let note_dir = skills_dir.join("Note");
+    std::fs::create_dir_all(&note_dir).unwrap();
+
+    AppConfig::create_skills_dir(&skills_dir).unwrap();
+
+    assert!(
+        !note_dir.join("FormatMarkdown.md").exists(),
+        "sample must not be seeded into a pre-existing Note folder (VFS-125 only-when-creating)"
+    );
+}
+
+// ---- VFS-100: no-op when system library already correct ----
+
+#[test]
+fn test_ensure_system_library_present_idempotent_when_already_correct() {
+    let dir = tempdir().unwrap();
+    let sys_path = dir.path().join("system");
+    let mut config = AppConfig {
+        content_libraries: vec![ContentLibrary {
+            root_folder: sys_path.to_string_lossy().to_string(),
+            name: "System".to_string(),
+            kind: "text".to_string(),
+            readonly: false,
+            priority: 0,
+        }],
+        ..Default::default()
+    };
+
+    let libs_before = config.content_libraries.clone();
+    config.ensure_system_library_present_at(&sys_path);
+
+    assert_eq!(
+        config.content_libraries.len(),
+        libs_before.len(),
+        "an already-correct System library must not change the library count (VFS-100 no-op)"
+    );
+    // ContentLibrary does not derive PartialEq; compare the
+    // single library field-by-field.
+    let lib = &config.content_libraries[0];
+    assert_eq!(lib.name, "System");
+    assert_eq!(lib.kind, "text");
+    assert!(!lib.readonly);
+    assert_eq!(lib.priority, 0);
+    assert_eq!(
+        lib.root_folder,
+        sys_path.to_string_lossy().to_string(),
+        "root_folder must not be repointed for an already-correct System library"
+    );
 }

@@ -29,10 +29,13 @@ pub fn tool_web_fetch(
         });
     }
 
-    // 2. A call without a cursor incurs a force refetch and invalidates cache entries (TOOL-032)
-    cache.web_documents.invalidate(url);
-
-    let (cached_doc, from_cache) = {
+    // 2. Check cache if force_refetch is false
+    let (cached_doc, from_cache) = if !input.force_refetch
+        && let Some(doc) = cache.web_documents.get(url)
+    {
+        (doc, true)
+    } else {
+        cache.web_documents.invalidate(url);
         match reqwest::blocking::Client::new()
             .get(url)
             .header(

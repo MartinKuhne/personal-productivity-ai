@@ -180,6 +180,42 @@ fn session_expires_after_ttl() {
 }
 
 #[test]
+fn capacity_eviction_under_pressure() {
+    let mgr = CursorSessionManager::<i32>::with_options(
+        2,
+        Duration::from_secs(60),
+        2, // capacity of 2 sessions
+        TEST_HINT,
+        TEST_ERROR,
+    );
+    let sys_gen = SystemUuidGenerator;
+
+    let p1 = mgr.create_session(vec![1, 2, 3, 4], &sys_gen);
+    let c1 = p1.cursor.unwrap();
+
+    let p2 = mgr.create_session(vec![10, 20, 30, 40], &sys_gen);
+    let c2 = p2.cursor.unwrap();
+
+    let p3 = mgr.create_session(vec![100, 200, 300, 400], &sys_gen);
+    let c3 = p3.cursor.unwrap();
+
+    // Total active sessions must not exceed the configured capacity of 2
+    assert!(mgr.len() <= 2);
+
+    // At least one session must have been evicted due to capacity cap
+    let results = [
+        mgr.next_page(&c1).is_ok(),
+        mgr.next_page(&c2).is_ok(),
+        mgr.next_page(&c3).is_ok(),
+    ];
+    let ok_count = results.iter().filter(|&&r| r).count();
+    assert!(
+        ok_count <= 2,
+        "Cannot have more active sessions than capacity"
+    );
+}
+
+#[test]
 fn shallow_clone_shares_sessions() {
     let mgr = CursorSessionManager::<i32>::new(2, TEST_HINT, TEST_ERROR);
     let uuid_gen = FixedUuidGenerator::new(uuid::Uuid::nil());

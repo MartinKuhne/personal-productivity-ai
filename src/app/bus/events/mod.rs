@@ -22,7 +22,7 @@ pub mod file;
 pub mod messages;
 pub mod typed;
 
-pub use agent::{AgentEvent, BusAgentEventObserver};
+pub use agent::{AgentEvent, BusAgentEventObserver, CompositeAgentEventObserver};
 pub use config::ConfigArrived;
 pub use debug::{AgentDebugEntry, DebugEntryKind, DebugEntryRow};
 pub use file::{FileEvent, FileEventKind, FileEventProducer};

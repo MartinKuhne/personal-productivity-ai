@@ -198,9 +198,15 @@ impl McpClients {
     /// Eagerly initialize the session for a given server. Returns
     /// the cached [`McpClientSession`] so callers can inspect the
     /// negotiated protocol version, server info, etc. Idempotent.
-    pub fn initialize_server(&self, server_name: &str) -> Result<Arc<McpClientSession>, String> {
+    pub async fn initialize_server(
+        &self,
+        server_name: &str,
+    ) -> Result<Arc<McpClientSession>, String> {
         let session = self.get_or_create_session(server_name)?;
-        session.ensure_initialized().map_err(|e| e.to_string())?;
+        session
+            .ensure_initialized()
+            .await
+            .map_err(|e| e.to_string())?;
         Ok(session)
     }
 
@@ -212,28 +218,32 @@ impl McpClients {
     /// currently exposes. Errors (transport, JSON-RPC, or
     /// validation) are surfaced so callers can decide whether to
     /// skip the server or surface the failure.
-    pub fn discover_tools(&self, server_name: &str) -> Result<Vec<McpToolDescriptor>, String> {
+    pub async fn discover_tools(
+        &self,
+        server_name: &str,
+    ) -> Result<Vec<McpToolDescriptor>, String> {
         let session = self.get_or_create_session(server_name)?;
-        session.list_tools().map_err(|e| e.to_string())
+        session.list_tools().await.map_err(|e| e.to_string())
     }
 
     /// Health-check a single MCP server by issuing a `ping` request.
     /// Performs the init handshake lazily. Used to verify the
     /// server is still alive before kicking off a long call.
-    pub fn ping(&self, server_name: &str) -> Result<(), String> {
+    pub async fn ping(&self, server_name: &str) -> Result<(), String> {
         let session = self.get_or_create_session(server_name)?;
-        session.ping().map_err(|e| e.to_string())
+        session.ping().await.map_err(|e| e.to_string())
     }
 
     /// Execute a tool call (`tools/call`) on the specified MCP server.
     /// Performs the init handshake lazily on first use.
-    pub fn call_tool(
+    pub async fn call_tool(
         &self,
         server_name: &str,
         tool_name: &str,
         arguments: serde_json::Value,
     ) -> Result<serde_json::Value, String> {
         self.call_tool_with_timeout(server_name, tool_name, arguments, DEFAULT_REQUEST_TIMEOUT)
+            .await
     }
 
     /// Same as [`McpClients::call_tool`] but with a
@@ -241,7 +251,7 @@ impl McpClients {
     /// allow per-request timeout configuration." This is the
     /// recommended entry point for tools whose expected runtime
     /// varies widely (e.g. long batch jobs vs. quick lookups).
-    pub fn call_tool_with_timeout(
+    pub async fn call_tool_with_timeout(
         &self,
         server_name: &str,
         tool_name: &str,
@@ -255,7 +265,9 @@ impl McpClients {
             "name": tool_name,
             "arguments": arguments,
         });
-        let result = session.call_request_with_timeout("tools/call", params, timeout);
+        let result = session
+            .call_request_with_timeout("tools/call", params, timeout)
+            .await;
         let elapsed = start.elapsed();
 
         match &result {
@@ -328,7 +340,7 @@ impl McpClients {
     /// Per MCP-021, callers should translate the error into a
     /// `ToolGroupError { kind: Authentication, ... }` via
     /// `ToolRegistry::record_error`.
-    pub fn authenticate(&self, server_name: &str) -> Result<(), String> {
+    pub async fn authenticate(&self, server_name: &str) -> Result<(), String> {
         // Look up the server config.
         let cfg = {
             let state = self
@@ -375,6 +387,7 @@ impl McpClients {
         // path in `McpClientSession` will run the flow transparently.
         let result = self
             .discover_tools(server_name)
+            .await
             .map(|_| ())
             .map_err(|e| format!("OAuth flow for '{server_name}' failed: {e}"));
         // Whether the flow succeeded or failed, the server told us
@@ -437,23 +450,24 @@ impl Drop for McpClients {
     }
 }
 
+#[async_trait::async_trait]
 impl DynamicToolSource for McpClients {
     fn configured_servers(&self) -> Vec<String> {
         McpClients::configured_servers(self)
     }
-    fn discover_tools(&self, server: &str) -> Result<Vec<McpToolDescriptor>, String> {
-        McpClients::discover_tools(self, server)
+    async fn discover_tools(&self, server: &str) -> Result<Vec<McpToolDescriptor>, String> {
+        McpClients::discover_tools(self, server).await
     }
     fn update_config(&self, config: &AgentConfig) {
         McpClients::update_config(self, config);
     }
-    fn call_tool(
+    async fn call_tool(
         &self,
         server: &str,
         tool_name: &str,
         arguments: serde_json::Value,
     ) -> Result<serde_json::Value, String> {
-        McpClients::call_tool(self, server, tool_name, arguments)
+        McpClients::call_tool(self, server, tool_name, arguments).await
     }
 }
 

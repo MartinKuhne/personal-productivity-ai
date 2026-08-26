@@ -30,11 +30,12 @@ pub fn spawn_config_subscription(
             }
         };
         let agent_config = config.to_agent_config();
-        tool_context.rcu(|ctx| {
-            let mut new_ctx = (**ctx).clone();
-            new_ctx.registry.init_mcp_on_startup(&agent_config);
-            new_ctx
-        });
+        {
+            let current = tool_context.load_full();
+            let mut new_ctx = (*current).clone();
+            new_ctx.registry.init_mcp_on_startup(&agent_config).await;
+            tool_context.store(Arc::new(new_ctx));
+        }
         let _ = tx.send(
             BackgroundLogEntry::new(
                 LogCategory::Indexer,
@@ -45,11 +46,10 @@ pub fn spawn_config_subscription(
 
         while let Ok(event) = config_reader.recv().await {
             let agent_config = event.config.to_agent_config();
-            tool_context.rcu(|ctx| {
-                let mut new_ctx = (**ctx).clone();
-                new_ctx.registry.refresh_mcp_tools(&agent_config);
-                new_ctx
-            });
+            let current = tool_context.load_full();
+            let mut new_ctx = (*current).clone();
+            new_ctx.registry.refresh_mcp_tools(&agent_config).await;
+            tool_context.store(Arc::new(new_ctx));
         }
     };
 

@@ -186,10 +186,6 @@ The `config.yaml` file supports the following top-level options:
 
 | Option | Type | Default Value | Description |
 |--------|------|---------------|-------------|
-| `user_name` | String (Optional) | `null` | The name of the user. |
-| `user_address` | String (Optional) | `null` | The address of the user. |
-| `user_birthdate` | String (Optional) | `null` | The birthdate of the user. |
-| `user_gender` | String (Optional) | `null` | The gender of the user. |
 | `system_prompt_extension` | String (Optional) | `null` | Additional text to append to the AI system prompt. |
 | `inline_editor_enabled` | Boolean | `false` | Enable the built-in inline text editor. |
 | `csv_db_path` | String (Optional) | `null` | Override the default storage location for CSV databases. |

@@ -61,6 +61,7 @@ pub struct AgentContext {
     pub tool_context: std::sync::Arc<arc_swap::ArcSwap<crate::AgentToolContext>>,
     pub uuid_gen: Arc<dyn crate::utils::uuid::UuidGenerator>,
     pub extensions: crate::tools::extensions::Extensions,
+    pub start_turn: usize,
 }
 
 impl std::fmt::Debug for AgentContext {
@@ -79,6 +80,7 @@ impl std::fmt::Debug for AgentContext {
             .field("cache", &self.cache)
             .field("uuid_gen", &self.uuid_gen)
             .field("extensions", &self.extensions)
+            .field("start_turn", &self.start_turn)
             .finish_non_exhaustive()
     }
 }
@@ -102,6 +104,7 @@ pub struct AgentContextBuilder {
     tool_context: Option<Arc<arc_swap::ArcSwap<crate::AgentToolContext>>>,
     uuid_gen: Option<Arc<dyn crate::utils::uuid::UuidGenerator>>,
     extensions: crate::tools::extensions::Extensions,
+    start_turn: usize,
 }
 
 impl std::fmt::Debug for AgentContextBuilder {
@@ -119,6 +122,7 @@ impl std::fmt::Debug for AgentContextBuilder {
             .field("cache", &self.cache)
             .field("uuid_gen", &self.uuid_gen)
             .field("extensions", &self.extensions)
+            .field("start_turn", &self.start_turn)
             .finish_non_exhaustive()
     }
 }
@@ -143,6 +147,7 @@ impl AgentContextBuilder {
             tool_context: None,
             uuid_gen: None,
             extensions: crate::tools::extensions::Extensions::new(),
+            start_turn: 0,
         }
     }
 
@@ -242,6 +247,12 @@ impl AgentContextBuilder {
         self
     }
 
+    /// Set the starting turn number (used for continuation prompts to resume counting).
+    pub fn with_start_turn(mut self, start_turn: usize) -> Self {
+        self.start_turn = start_turn;
+        self
+    }
+
     pub fn build(self) -> AgentContext {
         AgentContext {
             agent_config: self.agent_config,
@@ -277,6 +288,7 @@ impl AgentContextBuilder {
                 .uuid_gen
                 .unwrap_or_else(|| Arc::new(crate::utils::uuid::SystemUuidGenerator)),
             extensions: self.extensions,
+            start_turn: self.start_turn,
         }
     }
 }

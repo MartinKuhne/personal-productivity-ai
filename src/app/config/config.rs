@@ -82,14 +82,6 @@ fn default_discord_rate_limit() -> u32 {
 #[serde(default)]
 pub struct AppConfig {
     #[serde(default)]
-    pub user_name: Option<String>,
-    #[serde(default)]
-    pub user_address: Option<String>,
-    #[serde(default)]
-    pub user_birthdate: Option<String>,
-    #[serde(default)]
-    pub user_gender: Option<String>,
-    #[serde(default)]
     pub system_prompt_extension: Option<String>,
     #[serde(default)]
     pub models: HashMap<String, LlmConfig>,
@@ -164,15 +156,16 @@ pub struct AppConfig {
     /// Optional Qdrant collection name (defaults to "fastmd_chunks").
     #[serde(default)]
     pub qdrant_collection: Option<String>,
+
+    /// Optional user-specified display name for the default system library (VFS-102).
+    /// Defaults to "System" when not set (VFS-101).
+    #[serde(default)]
+    pub system_library_name: Option<String>,
 }
 
 impl std::fmt::Debug for AppConfig {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("AppConfig")
-            .field("user_name", &self.user_name)
-            .field("user_address", &self.user_address)
-            .field("user_birthdate", &self.user_birthdate)
-            .field("user_gender", &self.user_gender)
             .field("system_prompt_extension", &self.system_prompt_extension)
             .field("models", &self.models)
             .field("selected_chat_model", &self.selected_chat_model)
@@ -180,6 +173,7 @@ impl std::fmt::Debug for AppConfig {
             .field("jmap_clients", &self.jmap_clients)
             .field("caldav_clients", &self.caldav_clients)
             .field("content_libraries", &self.content_libraries)
+            .field("system_library_name", &self.system_library_name)
             .field("pdf_converter_command", &self.pdf_converter_command)
             .field("inline_editor_enabled", &self.inline_editor_enabled)
             .field("csv_db_path", &self.csv_db_path)
@@ -199,10 +193,6 @@ impl std::fmt::Debug for AppConfig {
 impl Default for AppConfig {
     fn default() -> Self {
         Self {
-            user_name: None,
-            user_address: None,
-            user_birthdate: None,
-            user_gender: None,
             system_prompt_extension: None,
             models: HashMap::new(),
             selected_chat_model: None,
@@ -210,6 +200,7 @@ impl Default for AppConfig {
             jmap_clients: HashMap::new(),
             caldav_clients: HashMap::new(),
             content_libraries: Vec::new(),
+            system_library_name: None,
             pdf_converter_command: None,
             inline_editor_enabled: false,
             csv_db_path: None,
@@ -226,6 +217,15 @@ impl Default for AppConfig {
             qdrant_collection: None,
         }
     }
+}
+
+/// Representation of an executable skill file discovered in a Skills directory (VFS-120..123).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SkillFile {
+    /// Display name of the skill (file stem or filename).
+    pub name: String,
+    /// Absolute filesystem path to the skill file.
+    pub path: PathBuf,
 }
 
 impl AppConfig {
@@ -256,7 +256,310 @@ impl AppConfig {
             .with_csv_db_path(self.csv_db_path.clone())
             .with_feature_flags(self.feature_flags.clone())
             .with_content_libraries(self.content_libraries.clone())
+            .with_system_library_name(self.system_library_name.clone())
             .build()
+    }
+
+    /// Returns the display name of the system library (VFS-101, VFS-102).
+    pub fn system_library_display_name(&self) -> &str {
+        self.system_library_name.as_deref().unwrap_or("System")
+    }
+
+    /// Resolves the default storage directory for the system library (VFS-103).
+    /// On Windows, resolves to `%APPDATA%/fastmd/system`.
+    pub fn get_system_library_path() -> PathBuf {
+        let appdata = std::env::var("APPDATA").ok();
+        let userprofile = std::env::var("USERPROFILE").ok();
+        Self::system_library_path_from_env(appdata.as_deref(), userprofile.as_deref())
+    }
+
+    /// Pure resolution of the system library path from injected env values.
+    /// Extracted from [`get_system_library_path`] so the three branches
+    /// (APPDATA, USERPROFILE fallback, relative) are testable without
+    /// mutating process-global environment variables (VFS-103).
+    fn system_library_path_from_env(appdata: Option<&str>, userprofile: Option<&str>) -> PathBuf {
+        if let Some(app_data) = appdata {
+            PathBuf::from(app_data).join("fastmd").join("system")
+        } else if let Some(user_profile) = userprofile {
+            PathBuf::from(user_profile).join(".fastmd").join("system")
+        } else {
+            PathBuf::from("system")
+        }
+    }
+
+    /// Ensures that the system library directory exists on disk, creating it if missing (VFS-104).
+    pub fn ensure_system_library_dir() -> std::io::Result<PathBuf> {
+        let path = Self::get_system_library_path();
+        std::fs::create_dir_all(&path)?;
+        Ok(path)
+    }
+
+    /// Ensures that the `Conversations` subdirectory inside the system library exists on disk (VFS-110).
+    pub fn ensure_conversations_dir() -> std::io::Result<PathBuf> {
+        let path = Self::get_system_library_path().join("Conversations");
+        std::fs::create_dir_all(&path)?;
+        Ok(path)
+    }
+
+    /// Resolves the path to the `Skills` directory inside the system library (VFS-120).
+    pub fn get_skills_dir() -> PathBuf {
+        Self::get_system_library_path().join("Skills")
+    }
+
+    /// Resolves the path to the `Skills/Note` directory inside the system library (VFS-120, VFS-121).
+    pub fn get_skills_note_dir() -> PathBuf {
+        Self::get_skills_dir().join("Note")
+    }
+
+    /// Resolves the path to the `Skills/Folder` directory inside the system library (VFS-120, VFS-122).
+    pub fn get_skills_folder_dir() -> PathBuf {
+        Self::get_skills_dir().join("Folder")
+    }
+
+    /// Resolves the path to the `Skills/Batch` directory inside the system library (VFS-120, VFS-123).
+    pub fn get_skills_batch_dir() -> PathBuf {
+        Self::get_skills_dir().join("Batch")
+    }
+
+    /// Helper to create the Skills directories and default sample skills (VFS-125, VFS-126).
+    fn create_skills_dir(skills_dir: &Path) -> std::io::Result<()> {
+        let skills_note = skills_dir.join("Note");
+        if !skills_note.exists() {
+            std::fs::create_dir_all(&skills_note)?;
+            let _ = std::fs::write(
+                skills_note.join("FormatMarkdown.md"),
+                "instructions to format the current note into correct markdown.",
+            );
+        }
+
+        let skills_folder = skills_dir.join("Folder");
+        if !skills_folder.exists() {
+            std::fs::create_dir_all(&skills_folder)?;
+            let _ = std::fs::write(
+                skills_folder.join("CreateSummary.md"),
+                "Provide a brief summary of the contents of the folder, in the format <filename>: <one sentence summary of the contents>. One line per file",
+            );
+        }
+
+        let skills_batch = skills_dir.join("Batch");
+        if !skills_batch.exists() {
+            std::fs::create_dir_all(&skills_batch)?;
+        }
+
+        Self::seed_keep_file(&skills_note)?;
+        Self::seed_keep_file(&skills_folder)?;
+        Self::seed_keep_file(&skills_batch)?;
+        Ok(())
+    }
+
+    /// Ensures that the `Skills` directory and its subdirectories (`Note`, `Folder`, `Batch`) exist on disk (VFS-120).
+    pub fn ensure_skills_dirs() -> std::io::Result<PathBuf> {
+        let skills_dir = Self::get_skills_dir();
+        Self::create_skills_dir(&skills_dir)?;
+        Ok(skills_dir)
+    }
+
+    /// Ensures that the `Skills` directory and its subdirectories exist at a specific root path (useful for tests).
+    pub fn ensure_skills_dirs_at(root: &Path) -> std::io::Result<PathBuf> {
+        let skills_dir = root.join("system").join("Skills");
+        Self::create_skills_dir(&skills_dir)?;
+        Ok(skills_dir)
+    }
+
+    /// Resolves the `Skills/Note` directory at a specific root path.
+    pub fn get_skills_note_dir_at(root: &Path) -> PathBuf {
+        root.join("system").join("Skills").join("Note")
+    }
+
+    /// Resolves the `Skills/Folder` directory at a specific root path.
+    pub fn get_skills_folder_dir_at(root: &Path) -> PathBuf {
+        root.join("system").join("Skills").join("Folder")
+    }
+
+    /// Resolves the `Skills/Batch` directory at a specific root path.
+    pub fn get_skills_batch_dir_at(root: &Path) -> PathBuf {
+        root.join("system").join("Skills").join("Batch")
+    }
+
+    /// Lists all skill files present in a specified directory, sorted alphabetically by name.
+    pub fn list_skill_files_in(dir: &Path) -> Vec<SkillFile> {
+        if !dir.exists() || !dir.is_dir() {
+            return Vec::new();
+        }
+        let mut skills = Vec::new();
+        if let Ok(entries) = std::fs::read_dir(dir) {
+            for entry in entries.flatten() {
+                let path = entry.path();
+                if path.is_file() {
+                    let file_name = path
+                        .file_name()
+                        .map(|s| s.to_string_lossy().to_string())
+                        .unwrap_or_default();
+                    if !file_name.starts_with('.') {
+                        let name = path
+                            .file_stem()
+                            .map(|s| s.to_string_lossy().to_string())
+                            .unwrap_or(file_name);
+                        skills.push(SkillFile { name, path });
+                    }
+                }
+            }
+        }
+        skills.sort_by_key(|a| a.name.to_lowercase());
+        skills
+    }
+
+    /// Ensures that all folders mentioned for the system library (root, Conversations, Skills, Skills/Note, Skills/Folder, Skills/Batch) exist on disk (VFS-105).
+    pub fn ensure_all_system_folders() -> std::io::Result<PathBuf> {
+        let root = Self::get_system_library_path();
+        Self::ensure_all_system_folders_at(&root)?;
+        Ok(root)
+    }
+
+    /// Ensures that all system library folders exist at a specific root path (VFS-105).
+    pub fn ensure_all_system_folders_at(root: &Path) -> std::io::Result<()> {
+        std::fs::create_dir_all(root)?;
+        std::fs::create_dir_all(root.join("Conversations"))?;
+        Self::create_skills_dir(&root.join("Skills"))?;
+        Ok(())
+    }
+
+    /// Writes a `.keep` sentinel file into `dir` so the folder is visible in
+    /// the directory tree even when it contains no skill files (VFS-105).
+    /// This is a no-op if the file already exists.
+    fn seed_keep_file(dir: &Path) -> std::io::Result<()> {
+        let keep = dir.join(".keep");
+        if !keep.exists() {
+            std::fs::write(keep, "")?;
+        }
+        Ok(())
+    }
+
+    /// Lists all Note skill files from the configured system library (VFS-121).
+    pub fn list_note_skills(&self) -> Vec<SkillFile> {
+        let note_dir = self
+            .content_libraries
+            .iter()
+            .find(|lib| lib.name == self.system_library_display_name())
+            .map(|lib| PathBuf::from(&lib.root_folder).join("Skills").join("Note"))
+            .unwrap_or_else(Self::get_skills_note_dir);
+        let _ = std::fs::create_dir_all(&note_dir);
+        Self::list_skill_files_in(&note_dir)
+    }
+
+    /// Lists all Folder skill files from the configured system library (VFS-122).
+    pub fn list_folder_skills(&self) -> Vec<SkillFile> {
+        let folder_dir = self
+            .content_libraries
+            .iter()
+            .find(|lib| lib.name == self.system_library_display_name())
+            .map(|lib| {
+                PathBuf::from(&lib.root_folder)
+                    .join("Skills")
+                    .join("Folder")
+            })
+            .unwrap_or_else(Self::get_skills_folder_dir);
+        let _ = std::fs::create_dir_all(&folder_dir);
+        Self::list_skill_files_in(&folder_dir)
+    }
+
+    /// Lists all Batch skill files from the configured system library (VFS-123).
+    pub fn list_batch_skills(&self) -> Vec<SkillFile> {
+        let batch_dir = self
+            .content_libraries
+            .iter()
+            .find(|lib| lib.name == self.system_library_display_name())
+            .map(|lib| PathBuf::from(&lib.root_folder).join("Skills").join("Batch"))
+            .unwrap_or_else(Self::get_skills_batch_dir);
+        let _ = std::fs::create_dir_all(&batch_dir);
+        Self::list_skill_files_in(&batch_dir)
+    }
+
+    /// Ensures that the system library directory exists at a specific root path (useful for tests).
+    pub fn ensure_system_library_dir_at(root: &Path) -> std::io::Result<PathBuf> {
+        let path = root.join("system");
+        std::fs::create_dir_all(&path)?;
+        Ok(path)
+    }
+
+    /// Ensures that the `Conversations` directory exists at a specific root path (useful for tests).
+    pub fn ensure_conversations_dir_at(root: &Path) -> std::io::Result<PathBuf> {
+        let path = root.join("system").join("Conversations");
+        std::fs::create_dir_all(&path)?;
+        Ok(path)
+    }
+
+    /// Construct a `ContentLibrary` representation for the system library (VFS-100..105, VFS-120).
+    pub fn get_or_create_system_library(&self) -> ContentLibrary {
+        let root =
+            Self::ensure_all_system_folders().unwrap_or_else(|_| Self::get_system_library_path());
+        let root_folder = root.to_string_lossy().to_string();
+        ContentLibrary {
+            root_folder,
+            name: self.system_library_display_name().to_string(),
+            kind: "text".to_string(),
+            readonly: false,
+            priority: 0,
+        }
+    }
+
+    /// Construct a `ContentLibrary` representation for the system library rooted at a specific path.
+    pub fn get_or_create_system_library_at(&self, root_system_dir: &Path) -> ContentLibrary {
+        let _ = Self::ensure_all_system_folders_at(root_system_dir);
+        let root_folder = root_system_dir.to_string_lossy().to_string();
+        ContentLibrary {
+            root_folder,
+            name: self.system_library_display_name().to_string(),
+            kind: "text".to_string(),
+            readonly: false,
+            priority: 0,
+        }
+    }
+
+    /// Ensures that the system library exists on disk and is present in `content_libraries` (VFS-100..105, VFS-120).
+    pub fn ensure_system_library_present(&mut self) {
+        let system_path =
+            Self::ensure_all_system_folders().unwrap_or_else(|_| Self::get_system_library_path());
+        self.ensure_system_library_present_at(&system_path);
+    }
+
+    /// Ensures that the system library rooted at `system_path` is present in `content_libraries`.
+    pub fn ensure_system_library_present_at(&mut self, system_path: &Path) {
+        let _ = Self::ensure_all_system_folders_at(system_path);
+        let mut path_str = system_path
+            .canonicalize()
+            .unwrap_or_else(|_| system_path.to_path_buf())
+            .to_string_lossy()
+            .to_string();
+        if path_str.starts_with(r"\\?\") {
+            path_str = path_str[4..].to_string();
+        }
+        let raw_path_str = system_path.to_string_lossy().to_string();
+        let display_name = self.system_library_display_name().to_string();
+        let has_custom_display_name = self.system_library_name.is_some();
+
+        if let Some(existing) = self.content_libraries.iter_mut().find(|lib| {
+            lib.root_folder == path_str
+                || lib.root_folder == raw_path_str
+                || (has_custom_display_name && lib.name == display_name)
+        }) {
+            existing.name = display_name;
+            existing.root_folder = path_str;
+            existing.kind = "text".to_string();
+            existing.readonly = false;
+            existing.priority = 0;
+        } else {
+            self.content_libraries.insert(
+                0,
+                crate::config::ContentLibrary {
+                    root_folder: path_str,
+                    name: display_name,
+                    kind: "text".to_string(),
+                    readonly: false,
+                    priority: 0,
+                },
+            );
+        }
     }
 
     /// Find the best model for a given use_case (lowest cost among matches).
@@ -372,7 +675,7 @@ pub fn get_config_path() -> PathBuf {
 /// (resolved via [`get_config_path`]). Thin wrapper around the path-based
 /// loader for production callers.
 pub fn load_config() -> AppConfig {
-    load_config_from_path(&get_config_path())
+    load_config_from_path(&get_config_path(), None)
 }
 
 /// Persist the supplied configuration to the platform-default
@@ -413,11 +716,18 @@ pub fn save_config_to_path(config: &AppConfig, path: &Path) -> Result<PathBuf, S
 /// Taking an explicit path (rather than reading `APPDATA` from the
 /// environment) makes the function deterministic for tests and prevents
 /// parallel tests from racing on the process-wide environment.
-pub(crate) fn load_config_from_path(config_path: &Path) -> AppConfig {
+pub(crate) fn load_config_from_path(config_path: &Path, system_path: Option<&Path>) -> AppConfig {
     if config_path.exists() {
         if let Ok(content) = std::fs::read_to_string(config_path) {
             match serde_norway::from_str::<AppConfig>(&content) {
-                Ok(config) => return config,
+                Ok(mut config) => {
+                    if let Some(sys_path) = system_path {
+                        config.ensure_system_library_present_at(sys_path);
+                    } else {
+                        config.ensure_system_library_present();
+                    }
+                    return config;
+                }
                 Err(err) => {
                     tracing::error!(
                         name = "config.parse.failed",
@@ -438,12 +748,24 @@ pub(crate) fn load_config_from_path(config_path: &Path) -> AppConfig {
         if let Some(parent) = config_path.parent() {
             let _ = std::fs::create_dir_all(parent);
         }
-        let default_config = AppConfig::default();
+        let mut default_config = AppConfig::default();
+        if let Some(sys_path) = system_path {
+            default_config.ensure_system_library_present_at(sys_path);
+        } else {
+            default_config.ensure_system_library_present();
+        }
         if let Ok(yaml_str) = serde_norway::to_string(&default_config) {
             let _ = std::fs::write(config_path, yaml_str);
         }
+        return default_config;
     }
-    AppConfig::default()
+    let mut fallback = AppConfig::default();
+    if let Some(sys_path) = system_path {
+        fallback.ensure_system_library_present_at(sys_path);
+    } else {
+        fallback.ensure_system_library_present();
+    }
+    fallback
 }
 
 // ---------------------------------------------------------------------------

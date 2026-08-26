@@ -62,8 +62,54 @@ pub fn discover_prompts(config: &AppConfig) -> Vec<PromptInfo> {
         }
     }
 
+    for skill in discover_batch_skills(&config.content_libraries) {
+        if !prompts.iter().any(|p| p.path == skill.path) {
+            prompts.push(skill);
+        }
+    }
+
     prompts.sort_by(|a, b| a.display_name.cmp(&b.display_name));
     prompts
+}
+
+/// Discovers all batch skill files from content libraries' `Skills/Batch` folder (VFS-123).
+pub fn discover_batch_skills(libraries: &[ContentLibrary]) -> Vec<PromptInfo> {
+    let mut skills = Vec::new();
+    for lib in libraries {
+        let batch_dir = Path::new(&lib.root_folder).join("Skills").join("Batch");
+        if !batch_dir.exists() || !batch_dir.is_dir() {
+            continue;
+        }
+        if let Ok(entries) = std::fs::read_dir(&batch_dir) {
+            for entry in entries.flatten() {
+                let path = entry.path();
+                if path.is_file() {
+                    let file_name = path
+                        .file_name()
+                        .map(|s| s.to_string_lossy().to_string())
+                        .unwrap_or_default();
+                    if file_name.starts_with('.') {
+                        continue;
+                    }
+                    if let Ok(content) = std::fs::read_to_string(&path) {
+                        let doc = Document::new(content);
+                        let stem = path
+                            .file_stem()
+                            .map(|s| s.to_string_lossy().to_string())
+                            .unwrap_or_else(|| file_name.clone());
+                        let display_name = format!("{} / Skills/Batch/{}", lib.name, stem);
+                        skills.push(PromptInfo {
+                            path: path.clone(),
+                            display_name,
+                            library_name: lib.name.clone(),
+                            content: doc.body().trim().to_string(),
+                        });
+                    }
+                }
+            }
+        }
+    }
+    skills
 }
 
 /// Resolve a set of prompt paths into full `PromptInfo` objects.
@@ -111,6 +157,14 @@ pub fn resolve_prompts(
             })
         })
         .collect();
+
+    // Include batch skills (VFS-123)
+    for skill in discover_batch_skills(libraries) {
+        if !prompts.iter().any(|p| p.path == skill.path) {
+            prompts.push(skill);
+        }
+    }
+
     prompts.sort_by(|a, b| a.display_name.cmp(&b.display_name));
     prompts
 }
@@ -187,5 +241,48 @@ mod tests {
     fn test_read_prompt_content_nonexistent_file() {
         let result = read_prompt_content(Path::new("/nonexistent/file.md"));
         assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_discover_batch_skills() {
+        let dir = tempfile::tempdir().unwrap();
+        let sys_dir = dir.path().join("system");
+        let batch_dir = sys_dir.join("Skills").join("Batch");
+        fs::create_dir_all(&batch_dir).unwrap();
+
+        fs::write(
+            batch_dir.join("SummarizeAll.md"),
+            "---\ntitle: Summarize\n---\nSummarize this file.",
+        )
+        .unwrap();
+        fs::write(
+            batch_dir.join("ExtractEntities.txt"),
+            "Extract entities from this file.",
+        )
+        .unwrap();
+        fs::write(batch_dir.join(".hidden.md"), "Ignore me").unwrap();
+
+        let libs = vec![ContentLibrary {
+            root_folder: sys_dir.to_string_lossy().to_string(),
+            name: "System".to_string(),
+            kind: "text".to_string(),
+            readonly: false,
+            priority: 0,
+        }];
+
+        let skills = discover_batch_skills(&libs);
+        assert_eq!(skills.len(), 2);
+        assert_eq!(skills[0].content, "Extract entities from this file.");
+        assert_eq!(skills[1].content, "Summarize this file.");
+
+        let config = AppConfig {
+            content_libraries: libs.clone(),
+            ..Default::default()
+        };
+        let discovered = discover_prompts(&config);
+        assert_eq!(discovered.len(), 2);
+
+        let resolved = resolve_prompts(&BTreeSet::new(), &libs);
+        assert_eq!(resolved.len(), 2);
     }
 }

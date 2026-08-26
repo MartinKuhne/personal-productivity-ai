@@ -189,7 +189,7 @@ pub fn tool_create_note(
     }
 
     let path = Path::new(path_str);
-    if path.exists() {
+    if ctx.vfs().exists(path) {
         return Err("File already exists. This tool can only create new files.".to_string());
     }
 
@@ -306,7 +306,7 @@ pub fn tool_move_note(
     }
 
     let source_path = Path::new(source_str);
-    if !source_path.exists() {
+    if !ctx.vfs().exists(source_path) {
         return Err("Source file does not exist.".to_string());
     }
 
@@ -315,7 +315,7 @@ pub fn tool_move_note(
         return Err("Source and target paths must be different.".to_string());
     }
 
-    if target_path.exists() {
+    if ctx.vfs().exists(target_path) {
         return Err("Target file already exists. Cannot overwrite existing file.".to_string());
     }
 

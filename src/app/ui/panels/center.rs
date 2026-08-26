@@ -3,7 +3,7 @@
 //! Unit tests live in the sibling `center_tests.rs` sidecar.
 
 use crate::ui::render::{render_markdown, render_yaml_table};
-use crate::ui::{FastMdApp, generate_format_prompt, open_in_system_editor, show_in_file_explorer};
+use crate::ui::{FastMdApp, open_in_system_editor, show_in_file_explorer};
 use eframe::egui;
 use egui::RichText;
 use egui::containers::CentralPanel;
@@ -320,15 +320,28 @@ pub fn render_tabs_and_content_capture(
                     open_in_system_editor(tab_path);
                     ui.close();
                 }
-                if ui
-                    .button(crate::ui::strings::FORMAT_MARKDOWN_ACTION)
-                    .clicked()
-                {
-                    let now = chrono::Local::now();
-                    let date_str = now.to_rfc3339();
-                    *app.submit_prompt_mut() = Some(generate_format_prompt(&date_str));
-                    *app.orchestrator.selection.selected_file_mut() = Some(tab_path.clone());
-                    ui.close();
+
+                // Note skills (VFS-121)
+                let note_skills = app.config().list_note_skills();
+                if !note_skills.is_empty() {
+                    ui.separator();
+                    for skill in note_skills {
+                        if ui.button(&skill.name).clicked() {
+                            if let Ok(raw_content) = std::fs::read_to_string(&skill.path) {
+                                let content =
+                                    crate::markdown::DocumentContent::parse(&raw_content).body;
+                                *app.selection_mut().selected_file_mut() = Some(tab_path.clone());
+                                *app.submit_prompt_mut() = Some(content);
+                            } else {
+                                tracing::error!(
+                                    name = "ui.tab.skill_prompt_failed",
+                                    path = %skill.path.display(),
+                                    "Failed to read skill file content to run as prompt."
+                                );
+                            }
+                            ui.close();
+                        }
+                    }
                 }
             });
 

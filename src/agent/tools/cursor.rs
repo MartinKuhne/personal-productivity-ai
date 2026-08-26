@@ -114,6 +114,7 @@ impl<T: Clone + Send + Sync + 'static> CursorSessionManager<T> {
             total,
         };
         self.sessions.insert(cursor_id.clone(), dataset);
+        self.sessions.sync();
 
         CursorPage {
             items: page_items,
@@ -137,6 +138,7 @@ impl<T: Clone + Send + Sync + 'static> CursorSessionManager<T> {
         let total = entry.total;
         if offset >= total {
             self.sessions.invalidate(&cursor_key);
+            self.sessions.sync();
             return Err(self.expired_error.to_string());
         }
 
@@ -146,6 +148,7 @@ impl<T: Clone + Send + Sync + 'static> CursorSessionManager<T> {
         if end >= total {
             // Final page reached: invalidate the session
             self.sessions.invalidate(&cursor_key);
+            self.sessions.sync();
             Ok(CursorPage {
                 items: page_items,
                 cursor: None,
@@ -160,6 +163,7 @@ impl<T: Clone + Send + Sync + 'static> CursorSessionManager<T> {
                 total,
             };
             self.sessions.insert(cursor_key, updated);
+            self.sessions.sync();
             Ok(CursorPage {
                 items: page_items,
                 cursor: Some(cursor.to_string()),

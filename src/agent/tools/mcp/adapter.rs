@@ -113,8 +113,11 @@ impl Tool for McpToolAdapter {
             })?
         };
 
-        self.manager
-            .call_tool(&self.server_name, &self.name, args)
-            .map_err(ToolError::new)
+        crate::tools::blocking::block_on(async {
+            self.manager
+                .call_tool(&self.server_name, &self.name, args)
+                .await
+        })
+        .map_err(ToolError::new)
     }
 }
