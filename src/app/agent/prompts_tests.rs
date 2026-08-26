@@ -210,14 +210,16 @@ fn test_system_library_user_md_provided_as_system_context() {
     let user_md_path = sys_path.join("User.md");
     std::fs::write(&user_md_path, "System user preferences and profile.").unwrap();
 
-    let mut config = AppConfig::default();
-    config.content_libraries = vec![ContentLibrary {
-        root_folder: sys_path.to_string_lossy().to_string(),
-        name: "System".to_string(),
-        kind: "text".to_string(),
-        readonly: false,
-        priority: 0,
-    }];
+    let config = AppConfig {
+        content_libraries: vec![ContentLibrary {
+            root_folder: sys_path.to_string_lossy().to_string(),
+            name: "System".to_string(),
+            kind: "text".to_string(),
+            readonly: false,
+            priority: 0,
+        }],
+        ..Default::default()
+    };
 
     let prompts = build_system_prompts(&config, None, None, &HashSet::new());
     let user_context_block = prompts
@@ -242,14 +244,16 @@ fn test_user_md_strips_yaml_front_matter() {
     let content_with_yaml = "---\ntitle: User.md\n---\n\nUser location: Kirkland, WA 98034, USA.";
     std::fs::write(&user_md_path, content_with_yaml).unwrap();
 
-    let mut config = AppConfig::default();
-    config.content_libraries = vec![ContentLibrary {
-        root_folder: sys_path.to_string_lossy().to_string(),
-        name: "System".to_string(),
-        kind: "text".to_string(),
-        readonly: false,
-        priority: 0,
-    }];
+    let config = AppConfig {
+        content_libraries: vec![ContentLibrary {
+            root_folder: sys_path.to_string_lossy().to_string(),
+            name: "System".to_string(),
+            kind: "text".to_string(),
+            readonly: false,
+            priority: 0,
+        }],
+        ..Default::default()
+    };
 
     let prompts = build_system_prompts(&config, None, None, &HashSet::new());
     let user_context_block = prompts
@@ -281,14 +285,16 @@ fn test_system_library_user_md_unreadable_is_silently_dropped() {
     // Sanity: the path is a file, so find_user_md_file would return it.
     assert!(user_md_path.is_file());
 
-    let mut config = AppConfig::default();
-    config.content_libraries = vec![ContentLibrary {
-        root_folder: sys_path.to_string_lossy().to_string(),
-        name: "System".to_string(),
-        kind: "text".to_string(),
-        readonly: false,
-        priority: 0,
-    }];
+    let config = AppConfig {
+        content_libraries: vec![ContentLibrary {
+            root_folder: sys_path.to_string_lossy().to_string(),
+            name: "System".to_string(),
+            kind: "text".to_string(),
+            readonly: false,
+            priority: 0,
+        }],
+        ..Default::default()
+    };
 
     let prompts = build_system_prompts(&config, None, None, &HashSet::new());
 
@@ -385,14 +391,16 @@ fn test_e2e_openai_wiremock_user_md_sent_as_system_context() {
     let user_md_content = "Preferences: User prefers concise responses and dark mode.";
     std::fs::write(&user_md_path, user_md_content).unwrap();
 
-    let mut config = AppConfig::default();
-    config.content_libraries = vec![ContentLibrary {
-        root_folder: sys_path.to_string_lossy().to_string(),
-        name: "System".to_string(),
-        kind: "text".to_string(),
-        readonly: false,
-        priority: 0,
-    }];
+    let config = AppConfig {
+        content_libraries: vec![ContentLibrary {
+            root_folder: sys_path.to_string_lossy().to_string(),
+            name: "System".to_string(),
+            kind: "text".to_string(),
+            readonly: false,
+            priority: 0,
+        }],
+        ..Default::default()
+    };
 
     let system_prompts = build_system_prompts(&config, None, None, &HashSet::new());
 

@@ -275,8 +275,10 @@ mod tests {
         assert_eq!(skills[0].content, "Extract entities from this file.");
         assert_eq!(skills[1].content, "Summarize this file.");
 
-        let mut config = AppConfig::default();
-        config.content_libraries = libs.clone();
+        let config = AppConfig {
+            content_libraries: libs.clone(),
+            ..Default::default()
+        };
         let discovered = discover_prompts(&config);
         assert_eq!(discovered.len(), 2);
 

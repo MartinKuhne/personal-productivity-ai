@@ -494,14 +494,13 @@ fn test_e2e_openai_wiremock_chat_log_with_mutating_tool() {
         },
     );
 
-    let mut content_libraries = Vec::new();
-    content_libraries.push(crate::config::ContentLibrary {
+    let content_libraries = vec![crate::config::ContentLibrary {
         name: "Notes".to_string(),
         root_folder: notes_dir.to_string_lossy().to_string(),
         kind: "text".to_string(),
         readonly: false,
         priority: 0,
-    });
+    }];
 
     let agent_config = fastmd_agent::config::AgentConfigBuilder::new()
         .with_models(models)

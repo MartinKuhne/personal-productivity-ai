@@ -364,14 +364,14 @@ impl ToolRegistry {
         self.mcp_manager.clone()
     }
 
-    pub fn init_mcp_on_startup(&mut self, config: &AgentConfig) {
+    pub async fn init_mcp_on_startup(&mut self, config: &AgentConfig) {
         self.mcp_manager.update_config(config);
-        self.refresh_mcp_tools(config);
+        self.refresh_mcp_tools(config).await;
     }
 
     pub fn update_and_refresh(&mut self, config: &crate::config::AgentConfig) {
         self.mcp_manager.update_config(config);
-        self.refresh_mcp_tools(config);
+        crate::tools::blocking::block_on(async { self.refresh_mcp_tools(config).await });
         self.refresh_state(config);
     }
 
@@ -381,7 +381,7 @@ impl ToolRegistry {
         prompt: &str,
     ) -> serde_json::Value {
         self.mcp_manager.update_config(config);
-        self.refresh_mcp_tools(config);
+        crate::tools::blocking::block_on(async { self.refresh_mcp_tools(config).await });
         self.refresh_state(config);
         self.get_schema(config, prompt)
     }
@@ -437,7 +437,7 @@ impl ToolRegistry {
     /// Refresh the MCP catalog: re-run `tools/list` against every
     /// configured server, register the discovered tools, and record
     /// `Discovery` errors on the affected group when a server fails.
-    pub fn refresh_mcp_tools(&mut self, config: &crate::config::AgentConfig) {
+    pub async fn refresh_mcp_tools(&mut self, config: &crate::config::AgentConfig) {
         // Remove tools that came from a server whose config is gone or
         // whose config changed.
         let valid_servers: Vec<String> = config.mcp_servers.keys().cloned().collect();
@@ -453,7 +453,7 @@ impl ToolRegistry {
         });
 
         for server_name in valid_servers {
-            match self.mcp_manager.discover_tools(&server_name) {
+            match self.mcp_manager.discover_tools(&server_name).await {
                 Ok(tools) => {
                     // Clear any prior Discovery error on success.
                     self.clear_error(&ToolGroupId::Mcp(server_name.clone()));

@@ -344,7 +344,9 @@ fn spawn_auth_flow(
     mgr: std::sync::Arc<crate::agent::lib::mcp::McpClients>,
 ) {
     std::thread::spawn(move || {
-        let error = match mgr.authenticate(&server_name) {
+        let error = match crate::agent::tools::blocking::block_on(async {
+            mgr.authenticate(&server_name).await
+        }) {
             Ok(()) => {
                 tracing::info!(server = %server_name, "OAuth flow completed");
                 None

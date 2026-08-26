@@ -35,7 +35,7 @@ fn main() -> eframe::Result<()> {
     // for every span when it closes — enabling zero-overhead profiling of
     // instrumented hot paths via `RUST_LOG`.
     let filter = tracing_subscriber::EnvFilter::try_from_default_env()
-        .unwrap_or_else(|_| tracing_subscriber::EnvFilter::new("info,fastmd=debug"));
+        .unwrap_or_else(|_| tracing_subscriber::EnvFilter::new("info"));
 
     tracing_subscriber::fmt()
         .with_env_filter(filter)

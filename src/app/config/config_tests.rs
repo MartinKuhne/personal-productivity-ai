@@ -772,8 +772,10 @@ fn test_from_app_config_drops_user_and_content_fields() {
 
 #[test]
 fn test_selected_chat_model_is_not_persisted() {
-    let mut config = AppConfig::default();
-    config.selected_chat_model = Some("test-model".to_string());
+    let config = AppConfig {
+        selected_chat_model: Some("test-model".to_string()),
+        ..Default::default()
+    };
 
     // Serialization should omit selected_chat_model
     let serialized = serde_norway::to_string(&config).expect("serialization should succeed");
@@ -865,8 +867,10 @@ fn test_system_library_default_name() {
 
 #[test]
 fn test_system_library_custom_name() {
-    let mut config = AppConfig::default();
-    config.system_library_name = Some("Personal Knowledge".to_string());
+    let config = AppConfig {
+        system_library_name: Some("Personal Knowledge".to_string()),
+        ..Default::default()
+    };
     assert_eq!(config.system_library_display_name(), "Personal Knowledge");
     let agent_cfg = config.to_agent_config();
     assert_eq!(agent_cfg.system_library_name(), Some("Personal Knowledge"));
@@ -1072,14 +1076,16 @@ fn test_ensure_all_system_folders_creation() {
 fn test_list_skills_creates_missing_folders() {
     let dir = tempdir().unwrap();
     let sys_path = dir.path().join("system");
-    let mut config = AppConfig::default();
-    config.content_libraries = vec![ContentLibrary {
-        root_folder: sys_path.to_string_lossy().to_string(),
-        name: "System".to_string(),
-        kind: "text".to_string(),
-        readonly: false,
-        priority: 0,
-    }];
+    let config = AppConfig {
+        content_libraries: vec![ContentLibrary {
+            root_folder: sys_path.to_string_lossy().to_string(),
+            name: "System".to_string(),
+            kind: "text".to_string(),
+            readonly: false,
+            priority: 0,
+        }],
+        ..Default::default()
+    };
 
     // Verify folders do not exist initially
     assert!(!sys_path.join("Skills").join("Note").exists());
@@ -1216,8 +1222,10 @@ fn test_ensure_all_system_folders_at_fails_when_root_is_a_file() {
 
 #[test]
 fn test_system_library_display_name_empty_string_is_returned_verbatim() {
-    let mut config = AppConfig::default();
-    config.system_library_name = Some(String::new());
+    let config = AppConfig {
+        system_library_name: Some(String::new()),
+        ..Default::default()
+    };
     // `unwrap_or("System")` only fires for `None`; an empty `Some`
     // is returned as-is. This pins the current behaviour so any
     // future normalisation is a deliberate, visible change.
@@ -1226,8 +1234,10 @@ fn test_system_library_display_name_empty_string_is_returned_verbatim() {
 
 #[test]
 fn test_system_library_display_name_whitespace_is_returned_verbatim() {
-    let mut config = AppConfig::default();
-    config.system_library_name = Some("   ".to_string());
+    let config = AppConfig {
+        system_library_name: Some("   ".to_string()),
+        ..Default::default()
+    };
     assert_eq!(config.system_library_display_name(), "   ");
 }
 
@@ -1330,14 +1340,16 @@ fn test_create_skills_dir_does_not_seed_sample_into_pre_existing_folder_without_
 fn test_ensure_system_library_present_idempotent_when_already_correct() {
     let dir = tempdir().unwrap();
     let sys_path = dir.path().join("system");
-    let mut config = AppConfig::default();
-    config.content_libraries = vec![ContentLibrary {
-        root_folder: sys_path.to_string_lossy().to_string(),
-        name: "System".to_string(),
-        kind: "text".to_string(),
-        readonly: false,
-        priority: 0,
-    }];
+    let mut config = AppConfig {
+        content_libraries: vec![ContentLibrary {
+            root_folder: sys_path.to_string_lossy().to_string(),
+            name: "System".to_string(),
+            kind: "text".to_string(),
+            readonly: false,
+            priority: 0,
+        }],
+        ..Default::default()
+    };
 
     let libs_before = config.content_libraries.clone();
     config.ensure_system_library_present_at(&sys_path);

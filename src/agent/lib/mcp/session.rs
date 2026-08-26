@@ -42,9 +42,9 @@ use std::io::Write;
 use std::process::{Child, ChildStdin, Stdio};
 use std::sync::{Arc, Mutex};
 
-/// Build a [`reqwest::blocking::Client`] for MCP HTTP requests.
+/// Build a [`reqwest::Client`] for MCP HTTP requests (async).
 ///
-/// * Default 4xx/5xx handling — reqwest's blocking client does not
+/// * Default 4xx/5xx handling — reqwest's async client does not
 ///   raise on 4xx/5xx by default, so the response is always
 ///   available for body inspection. This is what drives the OAuth
 ///   retry path on 401/403 and the body-content diagnostic
@@ -54,7 +54,18 @@ use std::sync::{Arc, Mutex};
 ///   via `RequestBuilder::timeout`.
 ///
 /// [rb]: reqwest::RequestBuilder
-fn mcp_client(timeout: std::time::Duration) -> reqwest::blocking::Client {
+fn mcp_client(timeout: std::time::Duration) -> reqwest::Client {
+    reqwest::Client::builder()
+        .timeout(timeout)
+        .build()
+        .expect("reqwest::Client builder should not fail with default configuration")
+}
+
+/// Build a [`reqwest::blocking::Client`] for the rare sync HTTP
+/// path (session `DELETE` on shutdown). The blocking client panics
+/// if constructed inside a tokio runtime, so callers must invoke
+/// it from a plain thread — see [`McpClientSession::shutdown`].
+fn mcp_blocking_client(timeout: std::time::Duration) -> reqwest::blocking::Client {
     reqwest::blocking::Client::builder()
         .timeout(timeout)
         .build()
@@ -405,14 +416,22 @@ impl McpClientSession {
         // MAY respond with `405 Method Not Allowed` (server-managed
         // lifetime) — we accept that as success. Network errors are
         // logged but don't fail shutdown.
+        //
+        // The DELETE uses [`mcp_blocking_client`] (a
+        // `reqwest::blocking::Client`) which panics if constructed
+        // inside a tokio runtime. We spawn a plain OS thread to
+        // keep `shutdown` callable from any context — sync agent
+        // loop, tokio config subscriber, or `Drop`.
         if let Some((url, headers, sid)) = self.http_session_endpoint() {
-            if let Err(e) = Self::http_session_delete(&url, &headers, &sid) {
-                tracing::warn!(
-                    server = %self.config_label(),
-                    error = %e,
-                    "MCP HTTP DELETE on shutdown failed; continuing with local teardown"
-                );
-            }
+            std::thread::spawn(move || {
+                if let Err(e) = Self::http_session_delete(&url, &headers, &sid) {
+                    tracing::warn!(
+                        server = "shutdown",
+                        error = %e,
+                        "MCP HTTP DELETE on shutdown failed; continuing with local teardown"
+                    );
+                }
+            });
             // Drop the cached session id so a re-init later doesn't
             // try to reuse a deleted session.
             if let Ok(mut state) = self.state.lock() {
@@ -459,13 +478,13 @@ impl McpClientSession {
     /// URL. If the GET also fails or returns no endpoint event,
     /// we surface a "could not negotiate transport" error with
     /// both status codes.
-    pub fn probe_legacy_transport(
+    pub async fn probe_legacy_transport(
         url: &str,
         headers: &std::collections::HashMap<String, String>,
         post_code: u16,
         post_body: &str,
     ) -> McpError {
-        // reqwest's blocking client does not raise on 4xx/5xx by
+        // reqwest's async client does not raise on 4xx/5xx by
         // default, so the response body is always available for
         // diagnostic messages. The timeout is on the client.
         let client = mcp_client(DEFAULT_REQUEST_TIMEOUT);
@@ -473,7 +492,7 @@ impl McpClientSession {
         for (k, v) in headers {
             req = req.header(k.as_str(), v.as_str());
         }
-        let resp = match req.send() {
+        let resp = match req.send().await {
             Ok(r) => r,
             Err(e) => {
                 return McpError::transport(
@@ -486,7 +505,7 @@ impl McpClientSession {
         };
         let get_code = resp.status().as_u16();
         if get_code >= 400 {
-            let body = resp.text().unwrap_or_default();
+            let body = resp.text().await.unwrap_or_default();
             return McpError::transport(
                 format!("HTTP server '{url}'"),
                 format!(
@@ -508,7 +527,7 @@ impl McpClientSession {
                 ),
             );
         }
-        let body = resp.text().unwrap_or_default();
+        let body = resp.text().await.unwrap_or_default();
         let events = super::sse::parse_sse_body(&body);
         for event in events {
             if event.event.as_deref() == Some("endpoint") && !event.data.is_empty() {
@@ -545,7 +564,7 @@ impl McpClientSession {
         // reqwest's blocking client does not raise on 4xx/5xx by
         // default. The 405 acknowledgement path is therefore
         // expressed as a status-code check on the response.
-        let client = mcp_client(DEFAULT_REQUEST_TIMEOUT);
+        let client = mcp_blocking_client(DEFAULT_REQUEST_TIMEOUT);
         let mut req = client
             .delete(url)
             .header("MCP-Session-Id", session_id)
@@ -664,7 +683,7 @@ impl McpClientSession {
     fn send_sigterm(_child: &mut std::process::Child) {}
 
     /// Initialize the session if it is not yet active. Idempotent.
-    pub fn ensure_initialized(&self) -> Result<(), McpError> {
+    pub async fn ensure_initialized(&self) -> Result<(), McpError> {
         // Fast path: already active.
         if let Ok(state) = self.state.lock()
             && state.phase == SessionPhase::Active
@@ -673,7 +692,7 @@ impl McpClientSession {
         }
 
         // Slow path: do the init handshake.
-        let init_response = self.do_initialize()?;
+        let init_response = self.do_initialize().await?;
 
         // Per spec §2.2 / §2.6: if the server returns a
         // `protocolVersion` we don't support, we MUST disconnect
@@ -736,12 +755,13 @@ impl McpClientSession {
     /// Send a JSON-RPC request (`method` + `params`) and return the
     /// decoded `result` value. Performs the init handshake lazily on
     /// first call. Uses [`DEFAULT_REQUEST_TIMEOUT`].
-    pub fn call_request(
+    pub async fn call_request(
         &self,
         method: &str,
         params: serde_json::Value,
     ) -> Result<serde_json::Value, McpError> {
         self.call_request_with_timeout(method, params, DEFAULT_REQUEST_TIMEOUT)
+            .await
     }
 
     /// Same as [`McpClientSession::call_request`] but with a
@@ -749,13 +769,13 @@ impl McpClientSession {
     /// SHOULD allow per-request timeout configuration; the manager
     /// exposes the same override as
     /// [`McpClients::call_tool_with_timeout`](super::McpClients::call_tool_with_timeout).
-    pub fn call_request_with_timeout(
+    pub async fn call_request_with_timeout(
         &self,
         method: &str,
         params: serde_json::Value,
         timeout: std::time::Duration,
     ) -> Result<serde_json::Value, McpError> {
-        self.ensure_initialized()?;
+        self.ensure_initialized().await?;
         let id = {
             let mut state = self.lock_state()?;
             let id = state.next_id;
@@ -770,7 +790,9 @@ impl McpClientSession {
         // override so a buggy caller can't request a 24-hour
         // timeout and wedge the agent.
         let bounded_timeout = timeout.min(MAX_REQUEST_TIMEOUT);
-        let response = self.send_request(id, method, params, bounded_timeout)?;
+        let response = self
+            .send_request(id, method, params, bounded_timeout)
+            .await?;
         Self::extract_result(&self.config_label(), method, response)
     }
 
@@ -780,8 +802,8 @@ impl McpClientSession {
     /// Spec (basic/utilities/ping): the receiver MUST respond with
     /// an empty result. Per spec, used to verify the server is
     /// still responsive.
-    pub fn ping(&self) -> Result<(), McpError> {
-        let result = self.call_request("ping", serde_json::json!({}))?;
+    pub async fn ping(&self) -> Result<(), McpError> {
+        let result = self.call_request("ping", serde_json::json!({})).await?;
         // Validate the empty-result shape. Anything else is
         // protocol-non-compliant.
         match &result {
@@ -794,7 +816,7 @@ impl McpClientSession {
         }
     }
 
-    fn do_initialize(&self) -> Result<serde_json::Value, McpError> {
+    async fn do_initialize(&self) -> Result<serde_json::Value, McpError> {
         // Build the `initialize` request. We declare no special
         // capabilities (no roots, no sampling, no elicitation).
         // clientInfo carries the spec-optional `title`,
@@ -827,8 +849,9 @@ impl McpClientSession {
             state.next_id = state.next_id.wrapping_add(1);
             id
         };
-        let init_response =
-            self.send_request(init_id, "initialize", init_params, DEFAULT_REQUEST_TIMEOUT)?;
+        let init_response = self
+            .send_request(init_id, "initialize", init_params, DEFAULT_REQUEST_TIMEOUT)
+            .await?;
         Self::extract_result(&self.config_label(), "initialize", init_response.clone())?;
 
         // Send `notifications/initialized`. It's a notification
@@ -838,7 +861,7 @@ impl McpClientSession {
             "jsonrpc": "2.0",
             "method": "notifications/initialized"
         });
-        self.send_notification(&initialized_note)?;
+        self.send_notification(&initialized_note).await?;
 
         // Log the negotiated contract so an operator can
         // confirm at a glance which protocol version and server
@@ -867,7 +890,7 @@ impl McpClientSession {
 
     // ----- internal: send_request / send_notification -----
 
-    fn send_request(
+    async fn send_request(
         &self,
         id: u64,
         method: &str,
@@ -890,7 +913,7 @@ impl McpClientSession {
         );
         let result = match &self.config {
             McpServerConfig::Stdio { .. } => self.stdio_request(id, payload, timeout),
-            McpServerConfig::Sse { .. } => self.http_request(id, payload, timeout),
+            McpServerConfig::Sse { .. } => self.http_request(id, payload, timeout).await,
         };
         let elapsed = start.elapsed();
         // Spec §5.3: "The client MUST stop tracking progress
@@ -927,10 +950,10 @@ impl McpClientSession {
         })
     }
 
-    fn send_notification(&self, payload: &serde_json::Value) -> Result<(), McpError> {
+    async fn send_notification(&self, payload: &serde_json::Value) -> Result<(), McpError> {
         match &self.config {
             McpServerConfig::Stdio { .. } => self.stdio_write(payload),
-            McpServerConfig::Sse { .. } => self.http_notification(payload),
+            McpServerConfig::Sse { .. } => self.http_notification(payload).await,
         }
     }
 
@@ -1300,7 +1323,7 @@ impl McpClientSession {
 
     // ----- internal: HTTP transport -----
 
-    fn http_request(
+    async fn http_request(
         &self,
         id: u64,
         payload: serde_json::Value,
@@ -1312,6 +1335,7 @@ impl McpClientSession {
         // second 401 from the same call surfaces as an error
         // rather than another flow.
         self.http_request_with_oauth(id, payload, timeout, Vec::new(), 0)
+            .await
     }
 
     /// Core HTTP request with optional OAuth retry. `initial_bearer`
@@ -1320,7 +1344,7 @@ impl McpClientSession {
     /// when this is a step-up retry driven by a previous 403.
     /// `oauth_attempts` counts how many OAuth flows have already
     /// been run for this call; we cap at 1 to prevent loops.
-    fn http_request_with_oauth(
+    async fn http_request_with_oauth(
         &self,
         id: u64,
         payload: serde_json::Value,
@@ -1384,7 +1408,7 @@ impl McpClientSession {
         // client MUST include it on every subsequent request. Spec
         // (timeouts): client SHOULD establish per-request timeouts.
         //
-        // reqwest's blocking client does not raise on 4xx/5xx by
+        // reqwest's async client does not raise on 4xx/5xx by
         // default, so the response is always available for body
         // inspection. We branch on the status code so the OAuth retry
         // logic still has access to the WWW-Authenticate header and
@@ -1410,7 +1434,7 @@ impl McpClientSession {
             }
         }
 
-        let response = req.json(&payload).send();
+        let response = req.json(&payload).send().await;
         // reqwest does not raise on 4xx/5xx by default, so the
         // response is always available. We branch on the status code
         // so the OAuth retry logic still has access to the
@@ -1424,7 +1448,7 @@ impl McpClientSession {
                     .get("WWW-Authenticate")
                     .and_then(|v| v.to_str().ok())
                     .map(str::to_owned);
-                let body = r.text().unwrap_or_default();
+                let body = r.text().await.unwrap_or_default();
                 // The server has indicated it requires auth.
                 // Mark the session so the manager can update
                 // McpServerEntry::needs_auth on its way out.
@@ -1496,51 +1520,80 @@ impl McpClientSession {
                         // expired-token case without a browser
                         // round-trip (MCP-018). A 403 step-up always
                         // re-runs the interactive flow.
-                        let refreshed = if code == 401 {
-                            store.get(&resource).filter(|t| t.refresh_token.is_some()).and_then(
-                                |existing| match refresh(&inputs, store, &existing) {
-                                    Ok(_output) => {
-                                        tracing::info!(
-                                            server = %self.config_label(),
-                                            "OAuth refresh succeeded after 401"
-                                        );
-                                        Some(())
-                                    }
-                                    Err(e) => {
-                                        tracing::warn!(
-                                            server = %self.config_label(),
-                                            error = %e,
-                                            "OAuth refresh failed after 401; falling back to interactive flow"
-                                        );
-                                        None
-                                    }
-                                },
-                            )
-                        } else {
-                            None
-                        };
-                        if refreshed.is_some() {
-                            return self.http_request_with_oauth(
+                        //
+                        // `refresh` and `run_flow` use
+                        // `reqwest::blocking::Client` internally and
+                        // cannot be called from within a tokio
+                        // runtime. We bridge with `spawn_blocking`,
+                        // which runs the closure on a dedicated
+                        // blocking thread where no async context is
+                        // active.
+                        let mut refreshed = false;
+                        if code == 401
+                            && let Some(existing) =
+                                store.get(&resource).filter(|t| t.refresh_token.is_some())
+                        {
+                            let inputs_clone = inputs.clone();
+                            let store_clone = store.clone();
+                            let existing_clone = existing.clone();
+                            match tokio::task::spawn_blocking(move || {
+                                refresh(&inputs_clone, &store_clone, &existing_clone)
+                            })
+                            .await
+                            {
+                                Ok(Ok(_output)) => {
+                                    tracing::info!(
+                                        server = %self.config_label(),
+                                        "OAuth refresh succeeded after 401"
+                                    );
+                                    refreshed = true;
+                                }
+                                Ok(Err(e)) => {
+                                    tracing::warn!(
+                                        server = %self.config_label(),
+                                        error = %e,
+                                        "OAuth refresh failed after 401; falling back to interactive flow"
+                                    );
+                                }
+                                Err(e) => {
+                                    tracing::warn!(
+                                        server = %self.config_label(),
+                                        error = %e,
+                                        "OAuth refresh task panicked"
+                                    );
+                                }
+                            }
+                        }
+                        if refreshed {
+                            return Box::pin(self.http_request_with_oauth(
                                 id,
                                 payload,
                                 timeout,
                                 scopes_for_step_up,
                                 oauth_attempts + 1,
-                            );
+                            ))
+                            .await;
                         }
-                        match run_flow(&inputs, store) {
-                            Ok(_output) => {
+                        let inputs_clone = inputs.clone();
+                        let store_clone = store.clone();
+                        match tokio::task::spawn_blocking(move || {
+                            run_flow(&inputs_clone, &store_clone)
+                        })
+                        .await
+                        {
+                            Ok(Ok(_output)) => {
                                 // Retry once with the fresh token
                                 // (and the step-up scopes if any).
-                                return self.http_request_with_oauth(
+                                return Box::pin(self.http_request_with_oauth(
                                     id,
                                     payload,
                                     timeout,
                                     scopes_for_step_up,
                                     oauth_attempts + 1,
-                                );
+                                ))
+                                .await;
                             }
-                            Err(e) => {
+                            Ok(Err(e)) => {
                                 let label = if code == 401 {
                                     "OAuth flow failed after 401"
                                 } else {
@@ -1554,6 +1607,17 @@ impl McpClientSession {
                                 return Err(McpError::transport(
                                     format!("HTTP server '{}'", self.config_label()),
                                     format!("{label}: {e}"),
+                                ));
+                            }
+                            Err(e) => {
+                                tracing::warn!(
+                                    server = %self.config_label(),
+                                    error = %e,
+                                    "OAuth flow task panicked"
+                                );
+                                return Err(McpError::transport(
+                                    format!("HTTP server '{}'", self.config_label()),
+                                    format!("OAuth flow task panicked: {e}"),
                                 ));
                             }
                         }
@@ -1582,7 +1646,7 @@ impl McpClientSession {
                 // surface a clear error naming the discovered
                 // endpoint URL so the operator can debug.
                 if matches!(code, 400 | 404 | 405) {
-                    return Err(Self::probe_legacy_transport(&url, &headers, code, &body));
+                    return Err(Self::probe_legacy_transport(&url, &headers, code, &body).await);
                 }
                 return Err(McpError::transport(
                     format!("HTTP server '{}'", self.config_label()),
@@ -1639,7 +1703,7 @@ impl McpClientSession {
             .unwrap_or("")
             .to_ascii_lowercase();
 
-        let body = resp.text().map_err(|e| {
+        let body = resp.text().await.map_err(|e| {
             McpError::transport(
                 format!("HTTP server '{}'", self.config_label()),
                 format!("failed to read response body: {e}"),
@@ -1821,7 +1885,7 @@ impl McpClientSession {
         }
     }
 
-    fn http_notification(&self, payload: &serde_json::Value) -> Result<(), McpError> {
+    async fn http_notification(&self, payload: &serde_json::Value) -> Result<(), McpError> {
         // Spec: notifications are accepted with 202 Accepted and no
         // body. We don't bother inspecting the response; we only
         // surface network errors.
@@ -1837,7 +1901,7 @@ impl McpClientSession {
         // Notifications are fire-and-forget per spec: 2xx (typically
         // 202 Accepted) is success, but 4xx/5xx is also swallowed
         // because the spec says clients SHOULD ignore the response.
-        // reqwest's blocking client does not raise on 4xx/5xx by
+        // reqwest's async client does not raise on 4xx/5xx by
         // default, so anything that gets an HTTP response lands in
         // `Ok(_)`; only network-level errors produce `Err(_)`.
         let client = mcp_client(DEFAULT_REQUEST_TIMEOUT);
@@ -1857,7 +1921,7 @@ impl McpClientSession {
                 req = req.header("MCP-Session-Id", sid);
             }
         }
-        match req.json(payload).send() {
+        match req.json(payload).send().await {
             Ok(_resp) => Ok(()),
             Err(e) => Err(McpError::transport(
                 format!("HTTP server '{}'", self.config_label()),
@@ -1915,7 +1979,7 @@ impl McpClientSession {
     /// [`McpClientSession::call_request`]). Pagination is best-effort:
     /// if the server returns a `nextCursor`, we follow it and log a
     /// warning if we hit the safety cap.
-    pub fn list_tools(&self) -> Result<Vec<McpToolDescriptor>, McpError> {
+    pub async fn list_tools(&self) -> Result<Vec<McpToolDescriptor>, McpError> {
         /// Maximum number of pages to fetch when listing MCP resources.
         const MAX_PAGES: u32 = 16;
         let start = std::time::Instant::now();
@@ -1928,7 +1992,9 @@ impl McpClientSession {
             if let Some(c) = &cursor {
                 params.insert("cursor".to_owned(), serde_json::Value::String(c.clone()));
             }
-            let result = self.call_request("tools/list", serde_json::Value::Object(params))?;
+            let result = self
+                .call_request("tools/list", serde_json::Value::Object(params))
+                .await?;
 
             let tools = result
                 .get("tools")
