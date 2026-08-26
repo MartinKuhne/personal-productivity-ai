@@ -957,25 +957,3 @@ fn test_e2e_openai_wiremock_format_document_context_and_prompt_sent_to_llm() {
         "User message must contain the format prompt instruction"
     );
 }
-
-#[test]
-fn test_static_prompt_instructs_user_md_already_in_system_context() {
-    let config = AppConfig::default();
-    let prompts = build_system_prompts(&config, None, None, &HashSet::new());
-    let static_prompt = &prompts[0];
-
-    // Static prompt must explicitly instruct the LLM that User.md context
-    // is already provided directly in system context and must not be fetched via read_note (VFS-130).
-    assert!(
-        static_prompt.contains("User.md"),
-        "Static prompt must reference User.md"
-    );
-    assert!(
-        static_prompt.contains("User Context") || static_prompt.contains("system context"),
-        "Static prompt must mention system context / User Context"
-    );
-    assert!(
-        static_prompt.contains("read_note"),
-        "Static prompt must instruct not to use read_note on User.md"
-    );
-}

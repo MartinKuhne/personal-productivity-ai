@@ -167,7 +167,11 @@ pub fn show_left_panel(app: &mut FastMdApp, parent_ui: &mut egui::Ui) {
                 }
             }
             if depth > 0 {
-                let icon = if node.is_dir { egui_phosphor::regular::CARET_RIGHT } else { " " };
+                let icon = if node.is_dir {
+                    egui_phosphor::regular::CARET_RIGHT
+                } else {
+                    " "
+                };
                 let text = format!("{} {}", icon, node.name);
                 // egui 0.35: `FontsView::layout_no_wrap` requires
                 // `&mut self`, so we need `fonts_mut` rather than `fonts`.

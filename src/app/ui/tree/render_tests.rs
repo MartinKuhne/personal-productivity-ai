@@ -112,8 +112,6 @@ fn test_draw_tree_node_directory_and_file() {
     assert!(tree_ctx.expanded_dirs.contains(&root.path));
 }
 
-
-
 #[test]
 fn test_tree_node_selection_state_modifiers() {
     let ctx_egui = egui::Context::default();
