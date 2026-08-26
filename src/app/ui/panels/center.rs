@@ -328,7 +328,8 @@ pub fn render_tabs_and_content_capture(
                     for skill in note_skills {
                         if ui.button(&skill.name).clicked() {
                             if let Ok(raw_content) = std::fs::read_to_string(&skill.path) {
-                                let content = crate::markdown::DocumentContent::parse(&raw_content).body;
+                                let content =
+                                    crate::markdown::DocumentContent::parse(&raw_content).body;
                                 *app.selection_mut().selected_file_mut() = Some(tab_path.clone());
                                 *app.submit_prompt_mut() = Some(content);
                             } else {

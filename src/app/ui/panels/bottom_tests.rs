@@ -488,8 +488,6 @@ fn test_compute_prompt_prefix_exact_match() {
     assert_eq!(prefix, "TestLib >");
 }
 
-
-
 #[test]
 fn test_parse_command_intent() {
     assert_eq!(parse_command_intent("/models"), CommandIntent::ShowModels);

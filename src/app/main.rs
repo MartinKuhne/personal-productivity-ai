@@ -88,9 +88,15 @@ fn main() -> eframe::Result<()> {
             }
         }
     }
-    
-    if config.content_libraries.len() <= 1 && config.content_libraries.iter().all(|lib| lib.name == config.system_library_display_name()) {
-        let mut current_dir = std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from("."));
+
+    if config.content_libraries.len() <= 1
+        && config
+            .content_libraries
+            .iter()
+            .all(|lib| lib.name == config.system_library_display_name())
+    {
+        let mut current_dir =
+            std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from("."));
         if let Ok(canon) = std::fs::canonicalize(&current_dir) {
             current_dir = canon;
         }

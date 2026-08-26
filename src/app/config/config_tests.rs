@@ -1022,13 +1022,15 @@ fn test_list_skills_files() {
     std::fs::write(batch_dir.join("BulkFormat.md"), "Format all notes.").unwrap();
 
     let note_skills = config.list_note_skills();
-    assert_eq!(note_skills.len(), 2);
-    assert_eq!(note_skills[0].name, "Proofread");
-    assert_eq!(note_skills[1].name, "summarize");
+    assert_eq!(note_skills.len(), 3);
+    assert_eq!(note_skills[0].name, "FormatMarkdown");
+    assert_eq!(note_skills[1].name, "Proofread");
+    assert_eq!(note_skills[2].name, "summarize");
 
     let folder_skills = config.list_folder_skills();
-    assert_eq!(folder_skills.len(), 1);
-    assert_eq!(folder_skills[0].name, "Index");
+    assert_eq!(folder_skills.len(), 2);
+    assert_eq!(folder_skills[0].name, "CreateSummary");
+    assert_eq!(folder_skills[1].name, "Index");
 
     let batch_skills = config.list_batch_skills();
     assert_eq!(batch_skills.len(), 1);

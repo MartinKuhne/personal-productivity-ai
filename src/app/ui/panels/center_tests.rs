@@ -141,8 +141,6 @@ fn test_tab_close_button_captures_event() {
     );
 }
 
-
-
 /// The previous four `test_apply_tab_action_*` tests
 /// (Close / CloseOthers / CloseAll / out_of_bounds) are all
 /// subsumed by this property test, which sweeps every input

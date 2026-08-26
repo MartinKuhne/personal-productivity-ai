@@ -257,7 +257,10 @@ fn test_user_md_strips_yaml_front_matter() {
         .find(|p| p.contains("Kirkland"))
         .expect("System User.md context block must be present");
 
-    assert_eq!(user_context_block, "User location: Kirkland, WA 98034, USA.");
+    assert_eq!(
+        user_context_block,
+        "User location: Kirkland, WA 98034, USA."
+    );
     assert!(!user_context_block.contains("title: User.md"));
     assert!(!user_context_block.contains("---"));
 }
@@ -904,7 +907,6 @@ fn test_e2e_openai_wiremock_format_document_context_and_prompt_sent_to_llm() {
         user_content.contains("Format the current document"),
         "User message must contain the format prompt instruction"
     );
-
 }
 
 #[test]
