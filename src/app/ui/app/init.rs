@@ -78,6 +78,17 @@ impl FastMdApp {
         // our custom visuals to the dark theme explicitly.
         Self::configure_dark_theme(&cc.egui_ctx);
 
+        let mut fonts = egui::FontDefinitions::default();
+        let font_bytes = egui_phosphor::Variant::Regular.font_bytes();
+        fonts.font_data.insert(
+            "phosphor".to_owned(),
+            std::sync::Arc::new(egui::FontData::from_static(font_bytes)),
+        );
+        if let Some(font_keys) = fonts.families.get_mut(&egui::FontFamily::Proportional) {
+            font_keys.insert(1, "phosphor".to_owned());
+        }
+        cc.egui_ctx.set_fonts(fonts);
+
         // Subscribe before any worker is spawned so the first
         // `ConfigArrived` publish reaches every reader.
         let config_reader = config_bus.subscribe();

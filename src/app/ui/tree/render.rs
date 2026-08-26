@@ -352,8 +352,8 @@ pub fn render_flat_row_capture(
 ) {
     ui.push_id((&row.path, row.is_dir), |ui| {
         if row.is_dir {
-            let icon = if row.is_expanded { "▼ " } else { "▶ " };
-            let label = format!("{}{}", icon, row.name);
+            let icon = if row.is_expanded { egui_phosphor::regular::CARET_DOWN } else { egui_phosphor::regular::CARET_RIGHT };
+            let label = format!("{} {}", icon, row.name);
 
             ui.horizontal(|ui| {
                 // Clamp depth to prevent visual overflow on deeply nested paths
@@ -430,8 +430,8 @@ pub fn render_flat_row_capture(
 pub fn draw_tree_node(ui: &mut egui::Ui, node: &TreeNode, ctx: &mut TreeNodeContext) {
     if node.is_dir {
         let is_expanded = ctx.expanded_dirs().contains(&node.path);
-        let icon = if is_expanded { "▼ " } else { "▶ " };
-        let label = format!("{}{}", icon, node.name);
+        let icon = if is_expanded { egui_phosphor::regular::CARET_DOWN } else { egui_phosphor::regular::CARET_RIGHT };
+        let label = format!("{} {}", icon, node.name);
 
         let response = ui.selectable_label(false, label);
         if response.clicked() {
