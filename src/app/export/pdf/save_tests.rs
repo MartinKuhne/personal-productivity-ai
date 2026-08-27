@@ -61,6 +61,29 @@ fn save_as_pdf_job_resolved_output_path_honours_override() {
 }
 
 #[test]
+fn save_as_pdf_job_from_path_missing_file_falls_back_to_empty() {
+    let missing = PathBuf::from("definitely_missing_job_file_67890.md");
+    let job = SaveAsPdfJob::from_path(missing);
+    assert_eq!(job.markdown_content, "");
+    assert_eq!(job.title, "definitely_missing_job_file_67890");
+}
+
+#[test]
+fn save_as_pdf_job_resolved_output_path_without_extension_appends_pdf() {
+    // A source path with no extension still resolves to a `.pdf` sibling.
+    let job = SaveAsPdfJob {
+        markdown_path: PathBuf::from("/tmp/work/notes"),
+        markdown_content: "x".to_string(),
+        title: "notes".to_string(),
+        output_path: None,
+    };
+    assert_eq!(
+        job.resolved_output_path(),
+        PathBuf::from("/tmp/work/notes.pdf")
+    );
+}
+
+#[test]
 fn save_as_pdf_job_rejects_empty_content() {
     let dir = tempfile::tempdir().unwrap();
     let md = dir.path().join("empty.md");

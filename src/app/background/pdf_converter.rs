@@ -368,6 +368,20 @@ mod tests {
     }
 
     #[test]
+    fn test_should_convert_metadata_read_failure_returns_false() {
+        let dir = tempdir().unwrap();
+        // The output .md exists, but the input .pdf does not. `metadata`
+        // on the missing PDF fails, so `should_convert` must return false
+        // rather than attempting to convert a vanished source.
+        let pdf = dir.path().join("doc.pdf");
+        let md = dir.path().join("doc.md");
+        std::fs::write(&md, "md content").unwrap();
+
+        let job = PdfConversionJob::new(pdf);
+        assert!(!job.should_convert());
+    }
+
+    #[test]
     fn test_execute_without_command_returns_error() {
         let dir = tempdir().unwrap();
         let pdf = dir.path().join("doc.pdf");
