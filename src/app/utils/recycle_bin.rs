@@ -4,6 +4,8 @@
 //! Recycle Bin (Windows) using the `IFileOperation` COM API.
 //! This replaces the external `trash` crate to avoid a `windows`-crate
 //! version conflict with `wgpu`.
+//!
+//! Unit tests live in the sibling `recycle_bin_tests.rs` sidecar.
 
 use std::path::Path;
 
@@ -188,3 +190,7 @@ pub enum RecycleBinError {
     #[error("Recycle Bin operation was aborted")]
     Aborted,
 }
+
+#[cfg(test)]
+#[path = "recycle_bin_tests.rs"]
+mod tests;
