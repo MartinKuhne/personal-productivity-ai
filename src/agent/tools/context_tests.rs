@@ -6,9 +6,8 @@
 
 use super::*;
 use crate::tools::observer::{DefaultFileObserver, OnFileChangedExt};
-use crate::tools::policy::{ToolCallPolicy, ToolCallPolicyExt};
+use crate::tools::policy::ToolCallPolicy;
 use crate::tools::vfs::MockVirtualFileSystem;
-use crate::tools::vfs::VirtualFileSystemExt;
 
 fn default_ctx() -> ToolContext {
     ToolContext::default()
