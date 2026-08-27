@@ -713,7 +713,7 @@ fn test_grep_does_not_count_non_markdown_matches() {
 #[test]
 fn test_csv_tools_in_schema() {
     let config = AgentConfig::default();
-    let mgr = ToolRegistry::new();
+    let mut mgr = ToolRegistry::new();
     let schema = mgr.get_tools_schema(&config, "create a csv database");
     let tools = schema.as_array().unwrap();
     let names: Vec<&str> = tools
@@ -730,7 +730,7 @@ fn test_csv_tools_in_schema() {
 #[test]
 fn test_csv_tools_excluded() {
     let config = AgentConfig::default();
-    let mgr = ToolRegistry::new();
+    let mut mgr = ToolRegistry::new();
     let schema = mgr.get_tools_schema(&config, "just a normal message");
     let tools = schema.as_array().unwrap();
     let names: Vec<&str> = tools
@@ -744,7 +744,7 @@ fn test_csv_tools_excluded() {
 #[test]
 fn test_get_weather_tool_in_schema() {
     let config = AgentConfig::default();
-    let mgr = ToolRegistry::new();
+    let mut mgr = ToolRegistry::new();
     let schema = mgr.get_tools_schema(&config, "what is the weather today");
     let tools = schema.as_array().unwrap();
     let names: Vec<&str> = tools
@@ -758,7 +758,7 @@ fn test_get_weather_tool_in_schema() {
 fn test_get_weather_tool_excluded_when_disabled() {
     let mut config = AgentConfig::default();
     config.tool_groups.weather = false;
-    let mgr = ToolRegistry::new();
+    let mut mgr = ToolRegistry::new();
     let schema = mgr.get_tools_schema(&config, "what is the weather today");
     let tools = schema.as_array().unwrap();
     let names: Vec<&str> = tools
@@ -780,7 +780,7 @@ fn test_mcp_char_count_bug() {
         }
         .into(),
     );
-    let mgr = ToolRegistry::new();
+    let mut mgr = ToolRegistry::new();
     mgr.register_mcp_tool(
         "test_mcp",
         "mcp_test_mcp_test_tool",
@@ -831,7 +831,7 @@ fn test_default_providers_register_every_family() {
     // The ToolRegistry constructor iterates the default provider
     // list, so every family is represented in the live catalog.
     // Spot-check one tool per family.
-    let mgr = ToolRegistry::new();
+    let mut mgr = ToolRegistry::new();
     for expected in [
         "read_note",
         "write_yaml_header",
@@ -853,7 +853,7 @@ fn test_default_providers_register_every_family() {
 
 #[test]
 fn test_read_note_and_window_note_descriptions_reference_user_context() {
-    let mgr = ToolRegistry::new();
+    let mut mgr = ToolRegistry::new();
     let read_desc = &mgr
         .descriptor("read_note")
         .expect("read_note must be registered")
