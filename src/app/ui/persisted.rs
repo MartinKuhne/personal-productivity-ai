@@ -155,4 +155,60 @@ mod tests {
         // font_size_scale when schema_version < CURRENT_SCHEMA_VERSION.
         assert!(restored.schema_version < CURRENT_SCHEMA_VERSION);
     }
+
+    #[test]
+    fn test_corrupted_non_json_input_fails_to_deserialize() {
+        // Garbage that is not valid JSON must fail loudly rather than
+        // silently yielding a default, so a corrupt state file is
+        // surfaced instead of being masked.
+        let result: Result<PersistedUiState, _> = serde_json::from_str("this is not json{{{{");
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_future_schema_version_round_trips_unchanged() {
+        // State written by a newer build carries a higher schema
+        // version; loading it must preserve the version verbatim so the
+        // caller can decide how to handle it (rather than clobbering it).
+        let s = PersistedUiState {
+            schema_version: CURRENT_SCHEMA_VERSION + 5,
+            left_panel_width: Some(100.0),
+            ..Default::default()
+        };
+        let json = serde_json::to_string(&s).unwrap();
+        let restored: PersistedUiState = serde_json::from_str(&json).unwrap();
+        assert_eq!(restored.schema_version, CURRENT_SCHEMA_VERSION + 5);
+        assert_eq!(restored.left_panel_width, Some(100.0));
+    }
+
+    #[test]
+    fn test_nan_and_infinite_widths_round_trip_as_null() {
+        // serde_json serialises non-finite floats as JSON `null`, so a
+        // NaN/Inf width round-trips to `None` rather than corrupting
+        // the state file or panicking.
+        let nan_state = PersistedUiState {
+            left_panel_width: Some(f32::NAN),
+            ..Default::default()
+        };
+        let json = serde_json::to_string(&nan_state).unwrap();
+        let restored: PersistedUiState = serde_json::from_str(&json).unwrap();
+        assert_eq!(restored.left_panel_width, None);
+
+        let inf_state = PersistedUiState {
+            window_width: Some(f32::INFINITY),
+            ..Default::default()
+        };
+        let json = serde_json::to_string(&inf_state).unwrap();
+        let restored: PersistedUiState = serde_json::from_str(&json).unwrap();
+        assert_eq!(restored.window_width, None);
+    }
+
+    #[test]
+    fn test_non_finite_json_width_is_rejected() {
+        // A JSON payload containing an explicitly non-finite float must
+        // also fail to deserialize.
+        let json = r#"{"left_panel_width": NaN}"#;
+        let result: Result<PersistedUiState, _> = serde_json::from_str(json);
+        assert!(result.is_err());
+    }
 }

@@ -245,4 +245,53 @@ mod tests {
         m.scroll_to_header_id = None;
         assert_eq!(m.scroll_to_header_id, None);
     }
+
+    #[test]
+    fn test_close_tab_missing_path_is_noop() {
+        // Closing a tab that was never opened must be a silent no-op
+        // (no panic, no spurious removal of other tabs).
+        let mut manager = Tabs::new();
+        let open = PathBuf::from("a.md");
+        manager.open_tab(open.clone());
+        manager.close_tab(&PathBuf::from("never-opened.md"));
+        assert_eq!(manager.tabs.len(), 1);
+        assert!(manager.tabs.contains(&open));
+    }
+
+    #[test]
+    fn test_tab_titles_path_without_file_name_uses_empty() {
+        // A path with no file name (e.g. a root "/") falls back to an
+        // empty title via `unwrap_or_default`.
+        let mut manager = Tabs::new();
+        manager.open_tab(PathBuf::from("/"));
+        let titles = manager.tab_titles().to_vec();
+        assert_eq!(titles.len(), 1);
+        assert_eq!(titles[0], "");
+    }
+
+    #[test]
+    fn test_tab_titles_mixed_and_cached() {
+        let mut manager = Tabs::new();
+        manager.open_tab(PathBuf::from("/"));
+        manager.open_tab(PathBuf::from("dir/notes.md"));
+        let titles = manager.tab_titles().to_vec();
+        assert_eq!(titles, vec!["".to_string(), "notes.md".to_string()]);
+
+        // A second call returns the cached slice with the same values.
+        let again = manager.tab_titles().to_vec();
+        assert_eq!(titles, again);
+    }
+
+    #[test]
+    fn test_clear_content_invalidates_heading_ids_cache() {
+        let mut manager = Tabs::new();
+        manager.current_markdown = "# Intro\n\n# Intro\n\n# Body".to_string();
+        let first = manager.heading_ids().to_vec();
+        assert_eq!(first.len(), 3);
+        assert_eq!(first[1], "Intro#1");
+
+        // clear_content resets the markdown and invalidates the cache.
+        manager.clear_content();
+        assert!(manager.heading_ids().is_empty());
+    }
 }
