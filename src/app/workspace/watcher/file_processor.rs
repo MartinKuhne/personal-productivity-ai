@@ -184,4 +184,86 @@ mod tests {
         assert_eq!(processor.all_files.len(), 1);
         assert!(processor.contains_file(&PathBuf::from("keep.md")));
     }
+
+    #[test]
+    fn test_add_file_duplicate_returns_false() {
+        let bus = Bus::new();
+        let mut p = FileEventProcessor::new(bus.subscribe());
+        assert!(p.add_file(PathBuf::from("a.md")));
+        assert!(!p.add_file(PathBuf::from("a.md")));
+        assert_eq!(p.all_files.len(), 1);
+    }
+
+    #[test]
+    fn test_add_dir_and_contains_and_remove() {
+        let bus = Bus::new();
+        let mut p = FileEventProcessor::new(bus.subscribe());
+        assert!(p.add_dir(PathBuf::from("docs")));
+        assert!(!p.add_dir(PathBuf::from("docs")));
+        assert!(p.contains_dir(&PathBuf::from("docs")));
+        assert!(!p.contains_dir(&PathBuf::from("other")));
+        assert!(p.remove_dir(&PathBuf::from("docs")));
+        assert!(!p.remove_dir(&PathBuf::from("docs")));
+        assert!(p.all_dirs.is_empty());
+    }
+
+    #[test]
+    fn test_remove_file_missing_returns_false() {
+        let bus = Bus::new();
+        let mut p = FileEventProcessor::new(bus.subscribe());
+        assert!(!p.remove_file(&PathBuf::from("missing.md")));
+    }
+
+    #[test]
+    fn test_is_workspace_and_sorted() {
+        let bus = Bus::new();
+        let mut p = FileEventProcessor::new(bus.subscribe());
+        p.add_file(PathBuf::from("b.md"));
+        p.add_file(PathBuf::from("a.md"));
+        p.add_dir(PathBuf::from("z"));
+        p.add_dir(PathBuf::from("a"));
+        assert!(p.is_workspace_file(&PathBuf::from("a.md")));
+        assert!(!p.is_workspace_file(&PathBuf::from("x.md")));
+        assert_eq!(
+            p.files_sorted(),
+            vec![PathBuf::from("a.md"), PathBuf::from("b.md")]
+        );
+        assert_eq!(
+            p.dirs_sorted(),
+            vec![PathBuf::from("a"), PathBuf::from("z")]
+        );
+    }
+
+    #[test]
+    fn test_process_events_updated_and_dir_ignored() {
+        let bus = Bus::new();
+        let mut p = FileEventProcessor::new(bus.subscribe());
+        bus.publish(FileEvent {
+            kind: FileEventKind::Updated,
+            paths: vec![PathBuf::from("x.md")],
+        });
+        assert!(p.process_events());
+        bus.publish(FileEvent {
+            kind: FileEventKind::DirDiscovered,
+            paths: vec![PathBuf::from("docs")],
+        });
+        bus.publish(FileEvent {
+            kind: FileEventKind::DirRemoved,
+            paths: vec![PathBuf::from("docs")],
+        });
+        // Dir events do not set needs_reload, so false when only those queued
+        assert!(!p.process_events());
+        // No events -> false
+        assert!(!p.process_events());
+    }
+
+    #[test]
+    fn test_process_discovered_duplicate_no_reload() {
+        let bus = Bus::new();
+        let mut p = FileEventProcessor::new(bus.subscribe());
+        p.add_file(PathBuf::from("a.md"));
+        bus.publish(FileEvent::discovered_one(PathBuf::from("a.md")));
+        // duplicate add returns false, so needs_reload stays false
+        assert!(!p.process_events());
+    }
 }
