@@ -2231,6 +2231,126 @@ mod tests {
         assert_eq!(cmd_a.get_program(), "cargo");
         assert_eq!(cmd_b.get_program(), "node");
     }
+
+    #[test]
+    fn is_valid_session_id_accepts_visible_ascii() {
+        assert!(is_valid_session_id("abc123-XYZ_~"));
+        assert!(is_valid_session_id("!\"#$%&'()*+,-./012"));
+        assert!(!is_valid_session_id(""));
+        assert!(!is_valid_session_id("has space"));
+        assert!(!is_valid_session_id("has\tdelimiter"));
+        assert!(!is_valid_session_id("has\u{7f}del"));
+    }
+
+    #[test]
+    fn redact_session_id_shows_len_and_prefix() {
+        assert_eq!(redact_session_id("abcdefgh"), "len=8:abcd");
+        assert_eq!(redact_session_id("ab"), "len=2:ab");
+        assert_eq!(redact_session_id(""), "len=0:");
+    }
+
+    #[test]
+    fn extract_result_success_and_error_branches() {
+        let ok = serde_json::json!({"jsonrpc":"2.0","result":{"x":1},"id":1});
+        assert_eq!(
+            McpClientSession::extract_result("srv", "m", ok).unwrap(),
+            serde_json::json!({"x":1})
+        );
+        let bad_jsonrpc = serde_json::json!({"result":{}});
+        assert!(
+            McpClientSession::extract_result("srv", "m", bad_jsonrpc)
+                .unwrap_err()
+                .to_string()
+                .contains("not a JSON-RPC")
+        );
+        let with_error =
+            serde_json::json!({"jsonrpc":"2.0","error":{"code":-32600,"message":"oops"}});
+        let err = McpClientSession::extract_result("srv", "m", with_error).unwrap_err();
+        assert!(err.to_string().contains("oops"));
+        let missing_both = serde_json::json!({"jsonrpc":"2.0","id":1});
+        assert!(
+            McpClientSession::extract_result("srv", "m", missing_both)
+                .unwrap_err()
+                .to_string()
+                .contains("neither result nor error")
+        );
+    }
+
+    #[test]
+    fn session_pure_helpers_resource_uri_and_auth() {
+        let sse = McpServerConfig::Sse {
+            url: "https://example.com/mcp".to_string(),
+            headers: HashMap::new(),
+            oauth: None,
+        };
+        let sess = McpClientSession::new(sse, None);
+        assert_eq!(
+            sess.resource_uri().as_deref(),
+            Some("https://example.com/mcp")
+        );
+        assert!(!sess.has_static_authorization());
+        assert!(sess.oauth_config_scopes().is_empty());
+        assert_eq!(sess.config_label(), "http:https://example.com/mcp");
+        // case-insensitive Authorization header
+        let mut h = HashMap::new();
+        h.insert("Authorization".to_string(), "Bearer x".to_string());
+        let sse_auth = McpServerConfig::Sse {
+            url: "https://example.com/mcp".to_string(),
+            headers: h,
+            oauth: None,
+        };
+        let sess2 = McpClientSession::new(sse_auth, None);
+        assert!(sess2.has_static_authorization());
+        let h2: HashMap<String, String> = [("authorization".to_string(), "Bearer y".to_string())]
+            .into_iter()
+            .collect();
+        let sse_auth2 = McpServerConfig::Sse {
+            url: "https://example.com/mcp".to_string(),
+            headers: h2,
+            oauth: None,
+        };
+        let sess3 = McpClientSession::new(sse_auth2, None);
+        assert!(sess3.has_static_authorization(), "case-insensitive");
+        let stdio = McpServerConfig::Stdio {
+            command: "echo".to_string(),
+            args: vec![],
+            env: HashMap::new(),
+        };
+        let sess_stdio = McpClientSession::new(stdio, None);
+        assert_eq!(sess_stdio.resource_uri(), None);
+        assert_eq!(sess_stdio.config_label(), "stdio:echo");
+        assert!(!sess_stdio.has_static_authorization());
+    }
+
+    #[test]
+    fn take_unauthorized_flag_resets() {
+        let sse = McpServerConfig::Sse {
+            url: "https://example.com/mcp".to_string(),
+            headers: HashMap::new(),
+            oauth: None,
+        };
+        let sess = McpClientSession::new(sse, None);
+        assert!(!sess.take_unauthorized_flag());
+        {
+            let mut st = sess.state.lock().unwrap();
+            st.last_call_saw_unauthorized = true;
+        }
+        assert!(sess.take_unauthorized_flag());
+        assert!(!sess.take_unauthorized_flag(), "reset after take");
+    }
+
+    #[test]
+    fn protocol_version_and_server_info_initially_none() {
+        let sse = McpServerConfig::Sse {
+            url: "https://example.com/mcp".to_string(),
+            headers: HashMap::new(),
+            oauth: None,
+        };
+        let sess = McpClientSession::new(sse, None);
+        assert!(sess.protocol_version().is_none());
+        assert!(sess.server_capabilities().is_none());
+        assert!(sess.server_info().is_none());
+    }
 }
 
 /// A tool advertised by an MCP server. Returned by
