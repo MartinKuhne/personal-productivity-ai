@@ -257,6 +257,7 @@ impl FileWatcher {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::bus::events::FileEventKind;
     use crate::bus::events::typed::BackgroundEvent;
     use crate::bus::events::typed::BackgroundEventSender;
     use crate::config::{AppConfig, ContentLibrary};
@@ -321,5 +322,142 @@ mod tests {
                 other
             ),
         }
+    }
+
+    fn spawn_watcher_on(dir: &std::path::Path) -> (FileWatcher, Bus<FileEvent>) {
+        let mut config = AppConfig::default();
+        config.content_libraries.push(ContentLibrary {
+            name: "test".to_string(),
+            kind: "text".to_string(),
+            root_folder: dir.to_string_lossy().to_string(),
+            readonly: true,
+            priority: 0,
+        });
+        let (tx, _rx) = std::sync::mpsc::channel();
+        let tx = BackgroundEventSender::new(tx);
+        let bus = Bus::new();
+        let (tx_pdf, _rx_pdf) = std::sync::mpsc::channel();
+        #[cfg(feature = "image-library")]
+        let (tx_img, _rx_img) = std::sync::mpsc::channel();
+        let slot = Arc::new(Mutex::new(None));
+
+        #[cfg(feature = "image-library")]
+        let watcher = FileWatcher::new(config, tx, bus.clone(), tx_pdf, tx_img, slot);
+        #[cfg(not(feature = "image-library"))]
+        let watcher = FileWatcher::new(config, tx, bus.clone(), tx_pdf, slot);
+        (watcher, bus)
+    }
+
+    fn wait_for_bus_event(
+        reader: &crate::bus::core::BusReader<FileEvent>,
+        pred: impl Fn(&FileEvent) -> bool,
+        timeout: std::time::Duration,
+    ) -> FileEvent {
+        let start = std::time::Instant::now();
+        while start.elapsed() < timeout {
+            match reader.recv_timeout(std::time::Duration::from_millis(100)) {
+                Ok(ev) if pred(&ev) => return ev,
+                Ok(_) | Err(_) => continue,
+            }
+        }
+        panic!("no matching FileEvent observed within timeout");
+    }
+
+    #[test]
+    fn test_watcher_routes_md_create_modify_remove() {
+        let dir = tempdir().unwrap();
+        let (mut watcher, bus) = spawn_watcher_on(dir.path());
+        let reader = bus.subscribe();
+        watcher.start();
+
+        let file = dir.path().join("notes.md");
+        std::fs::write(&file, "hello").unwrap();
+
+        // Create -> FileModified on the typed bus.
+        wait_for_bus_event(
+            &reader,
+            |e| e.kind == FileEventKind::Updated && e.paths.contains(&file),
+            std::time::Duration::from_secs(5),
+        );
+
+        // Modify the file -> another FileModified.
+        std::thread::sleep(std::time::Duration::from_millis(50));
+        std::fs::write(&file, "hello world").unwrap();
+        wait_for_bus_event(
+            &reader,
+            |e| e.kind == FileEventKind::Updated && e.paths.contains(&file),
+            std::time::Duration::from_secs(5),
+        );
+
+        // Remove -> FileEvent::Removed.
+        std::fs::remove_file(&file).unwrap();
+        wait_for_bus_event(
+            &reader,
+            |e| e.kind == FileEventKind::Removed && e.paths.contains(&file),
+            std::time::Duration::from_secs(5),
+        );
+    }
+
+    #[test]
+    fn test_watcher_ignores_git_directory_and_non_workspace_files() {
+        let dir = tempdir().unwrap();
+        let (mut watcher, bus) = spawn_watcher_on(dir.path());
+        let reader = bus.subscribe();
+        watcher.start();
+
+        let git_dir = dir.path().join(".git");
+        std::fs::create_dir_all(&git_dir).unwrap();
+        std::fs::write(git_dir.join("config"), "x").unwrap();
+
+        let bin = dir.path().join("program.exe");
+        std::fs::write(&bin, "not text").unwrap();
+
+        // The watcher must not surface .git or non-workspace extensions on
+        // the file-event bus.
+        std::thread::sleep(std::time::Duration::from_millis(700));
+        let mut got = 0;
+        while reader.try_recv().is_ok() {
+            got += 1;
+        }
+        assert_eq!(got, 0, "unexpected FileEvents published");
+    }
+
+    #[test]
+    fn test_watcher_routes_pdf_to_converter_queue() {
+        let dir = tempdir().unwrap();
+        let mut config = AppConfig::default();
+        config.content_libraries.push(ContentLibrary {
+            name: "test".to_string(),
+            kind: "text".to_string(),
+            root_folder: dir.path().to_string_lossy().to_string(),
+            readonly: true,
+            priority: 0,
+        });
+        let (tx, _rx) = std::sync::mpsc::channel();
+        let tx = BackgroundEventSender::new(tx);
+        let bus = Bus::new();
+        let (tx_pdf, rx_pdf) = std::sync::mpsc::channel();
+        #[cfg(feature = "image-library")]
+        let (tx_img, _rx_img) = std::sync::mpsc::channel();
+        let slot = Arc::new(Mutex::new(None));
+
+        #[cfg(feature = "image-library")]
+        let mut watcher = FileWatcher::new(config, tx, bus, tx_pdf, tx_img, slot);
+        #[cfg(not(feature = "image-library"))]
+        let mut watcher = FileWatcher::new(config, tx, bus, tx_pdf, slot);
+        watcher.start();
+
+        // Minimal valid PDF so `should_convert` does not depend on metadata.
+        let pdf = dir.path().join("doc.pdf");
+        std::fs::write(&pdf, b"%PDF-1.4\n%%EOF\n").unwrap();
+
+        let start = std::time::Instant::now();
+        while start.elapsed() < std::time::Duration::from_secs(5) {
+            match rx_pdf.recv_timeout(std::time::Duration::from_millis(100)) {
+                Ok(p) if p == pdf => return,
+                Ok(_) | Err(_) => continue,
+            }
+        }
+        panic!("PDF path never reached the converter queue");
     }
 }

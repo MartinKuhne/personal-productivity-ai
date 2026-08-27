@@ -196,4 +196,108 @@ mod tests {
         let path = rx_img.recv_timeout(std::time::Duration::from_millis(100));
         assert!(path.is_err());
     }
+
+    #[test]
+    fn test_pdf_router_ignores_no_extension() {
+        let bus: Bus<FileEvent> = Bus::new();
+        let (tx_pdf, rx_pdf) = channel();
+        #[cfg(feature = "image-library")]
+        let (tx_img, _rx_img) = channel();
+
+        #[cfg(feature = "image-library")]
+        let router = BusRouter::new(bus.clone(), tx_pdf, tx_img);
+        #[cfg(not(feature = "image-library"))]
+        let router = BusRouter::new(bus.clone(), tx_pdf);
+        router.spawn();
+        std::thread::sleep(std::time::Duration::from_millis(50));
+
+        bus.publish(FileEvent::discovered_one(PathBuf::from("test")));
+
+        let path = rx_pdf.recv_timeout(std::time::Duration::from_millis(100));
+        assert!(path.is_err());
+    }
+
+    #[test]
+    fn test_pdf_router_normalizes_uppercase_extension() {
+        let bus: Bus<FileEvent> = Bus::new();
+        let (tx_pdf, rx_pdf) = channel();
+        #[cfg(feature = "image-library")]
+        let (tx_img, _rx_img) = channel();
+
+        #[cfg(feature = "image-library")]
+        let router = BusRouter::new(bus.clone(), tx_pdf, tx_img);
+        #[cfg(not(feature = "image-library"))]
+        let router = BusRouter::new(bus.clone(), tx_pdf);
+        router.spawn();
+        std::thread::sleep(std::time::Duration::from_millis(50));
+
+        bus.publish(FileEvent::discovered_one(PathBuf::from("test.PDF")));
+
+        let path = rx_pdf.recv_timeout(std::time::Duration::from_millis(500));
+        assert!(path.is_ok());
+        assert_eq!(path.unwrap(), PathBuf::from("test.PDF"));
+    }
+
+    #[test]
+    fn test_pdf_router_filters_removed_and_directory_events() {
+        let bus: Bus<FileEvent> = Bus::new();
+        let (tx_pdf, rx_pdf) = channel();
+        #[cfg(feature = "image-library")]
+        let (tx_img, _rx_img) = channel();
+
+        #[cfg(feature = "image-library")]
+        let router = BusRouter::new(bus.clone(), tx_pdf, tx_img);
+        #[cfg(not(feature = "image-library"))]
+        let router = BusRouter::new(bus.clone(), tx_pdf);
+        router.spawn();
+        std::thread::sleep(std::time::Duration::from_millis(50));
+
+        bus.publish(FileEvent::removed_one(PathBuf::from("gone.pdf")));
+        bus.publish(FileEvent::dir_discovered_one(PathBuf::from("dir.pdf")));
+        bus.publish(FileEvent::dir_removed_one(PathBuf::from("dir2.pdf")));
+
+        let path = rx_pdf.recv_timeout(std::time::Duration::from_millis(100));
+        assert!(path.is_err());
+    }
+
+    #[test]
+    fn test_pdf_router_forwards_updated_pdf() {
+        let bus: Bus<FileEvent> = Bus::new();
+        let (tx_pdf, rx_pdf) = channel();
+        #[cfg(feature = "image-library")]
+        let (tx_img, _rx_img) = channel();
+
+        #[cfg(feature = "image-library")]
+        let router = BusRouter::new(bus.clone(), tx_pdf, tx_img);
+        #[cfg(not(feature = "image-library"))]
+        let router = BusRouter::new(bus.clone(), tx_pdf);
+        router.spawn();
+        std::thread::sleep(std::time::Duration::from_millis(50));
+
+        bus.publish(FileEvent::updated_one(PathBuf::from("upd.pdf")));
+
+        let path = rx_pdf.recv_timeout(std::time::Duration::from_millis(500));
+        assert!(path.is_ok());
+        assert_eq!(path.unwrap(), PathBuf::from("upd.pdf"));
+    }
+
+    #[test]
+    fn test_pdf_router_empty_payload_is_noop() {
+        let bus: Bus<FileEvent> = Bus::new();
+        let (tx_pdf, rx_pdf) = channel();
+        #[cfg(feature = "image-library")]
+        let (tx_img, _rx_img) = channel();
+
+        #[cfg(feature = "image-library")]
+        let router = BusRouter::new(bus.clone(), tx_pdf, tx_img);
+        #[cfg(not(feature = "image-library"))]
+        let router = BusRouter::new(bus.clone(), tx_pdf);
+        router.spawn();
+        std::thread::sleep(std::time::Duration::from_millis(50));
+
+        bus.publish(FileEvent::discovered(Vec::new()));
+
+        let path = rx_pdf.recv_timeout(std::time::Duration::from_millis(100));
+        assert!(path.is_err());
+    }
 }
