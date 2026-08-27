@@ -302,4 +302,168 @@ mod tests {
         assert_eq!(v.len(), 1, "nested text shape must be found");
         assert!(v[0].text_snippet.contains("nested victim"));
     }
+
+    #[test]
+    fn non_text_shapes_are_ignored() {
+        let rect = egui::Shape::Rect(egui::epaint::RectShape::new(
+            egui::Rect::from_min_size(egui::pos2(5000.0, 5000.0), egui::vec2(10.0, 10.0)),
+            egui::CornerRadius::ZERO,
+            egui::Color32::RED,
+            egui::Stroke::NONE,
+            egui::StrokeKind::Inside,
+        ));
+        let cs = clipped(
+            rect,
+            egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(800.0, 600.0)),
+        );
+        let v = find_offscreen_text(&[cs]);
+        assert!(v.is_empty(), "non-text shapes must be ignored");
+    }
+
+    #[test]
+    fn vec_with_mixed_shapes_finds_only_clipped_text() {
+        let clipped_text = make_text_shape("clipped", egui::pos2(5000.0, 5000.0));
+        let rect = egui::Shape::Rect(egui::epaint::RectShape::new(
+            egui::Rect::from_min_size(egui::pos2(0.0, 0.0), egui::vec2(10.0, 10.0)),
+            egui::CornerRadius::ZERO,
+            egui::Color32::RED,
+            egui::Stroke::NONE,
+            egui::StrokeKind::Inside,
+        ));
+        let outer = egui::Shape::Vec(vec![clipped_text, rect]);
+        let cs = clipped(
+            outer,
+            egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(800.0, 600.0)),
+        );
+        let v = find_offscreen_text(&[cs]);
+        assert_eq!(v.len(), 1);
+        assert!(v[0].text_snippet.contains("clipped"));
+    }
+
+    #[test]
+    fn describe_formats_snippet_and_rects() {
+        let v = OffscreenViolation {
+            text_snippet:
+                "hello world this is a very long snippet that should be truncated at forty chars"
+                    .to_string(),
+            text_rect: egui::Rect::from_min_size(egui::pos2(10.0, 10.0), egui::vec2(100.0, 14.0)),
+            clip_rect: Some(egui::Rect::from_min_size(
+                egui::Pos2::ZERO,
+                egui::vec2(800.0, 600.0),
+            )),
+            reason: OffscreenReason::FullyClipped,
+        };
+        let s = v.describe();
+        assert!(s.contains("hello world"), "describe must include snippet");
+        assert!(s.contains("fully clipped"), "describe must include reason");
+        assert!(s.contains("clip_rect"), "describe must include clip");
+    }
+
+    #[test]
+    fn describe_handles_none_clip() {
+        let v = OffscreenViolation {
+            text_snippet: "orphan".to_string(),
+            text_rect: egui::Rect::from_min_size(egui::pos2(10.0, 10.0), egui::vec2(50.0, 14.0)),
+            clip_rect: None,
+            reason: OffscreenReason::FullyClipped,
+        };
+        let s = v.describe();
+        assert!(s.contains("<none>"), "None clip must render as <none>");
+    }
+
+    #[test]
+    fn describe_truncates_snippet_to_40_chars() {
+        let long = "a".repeat(100);
+        let v = OffscreenViolation {
+            text_snippet: long.clone(),
+            text_rect: egui::Rect::from_min_size(egui::pos2(0.0, 0.0), egui::vec2(10.0, 10.0)),
+            clip_rect: Some(egui::Rect::from_min_size(
+                egui::Pos2::ZERO,
+                egui::vec2(800.0, 600.0),
+            )),
+            reason: OffscreenReason::ZeroTextRect,
+        };
+        let s = v.describe();
+        // snippet is truncated to 40 chars in describe()
+        assert!(s.contains(&"a".repeat(40)));
+        assert!(
+            !s.contains(&"a".repeat(41)) || s.len() > 200,
+            "should truncate"
+        );
+    }
+
+    #[test]
+    fn reason_as_str_covers_all_variants() {
+        assert!(
+            OffscreenReason::FullyClipped
+                .as_str()
+                .contains("fully clipped")
+        );
+        assert!(OffscreenReason::ZeroTextRect.as_str().contains("zero-area"));
+        assert!(
+            OffscreenReason::DegenerateClipRect
+                .as_str()
+                .contains("degenerate clip")
+        );
+    }
+
+    #[test]
+    fn assert_no_offscreen_text_passes_on_empty() {
+        let shapes: Vec<egui::epaint::ClippedShape> = Vec::new();
+        assert_no_offscreen_text(&shapes);
+        let reachable = make_text_shape("visible", egui::pos2(10.0, 10.0));
+        let cs = clipped(
+            reachable,
+            egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(800.0, 600.0)),
+        );
+        assert_no_offscreen_text(&[cs]);
+    }
+
+    #[test]
+    #[should_panic(expected = "off-viewport text regression")]
+    fn assert_no_offscreen_text_panics_on_violation() {
+        let shape = make_text_shape("should panic", egui::pos2(5000.0, 5000.0));
+        let cs = clipped(
+            shape,
+            egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(800.0, 600.0)),
+        );
+        assert_no_offscreen_text(&[cs]);
+    }
+
+    #[test]
+    fn zero_text_rect_is_flagged_via_nan_pos() {
+        // NaN position makes visual_bounding_rect non-finite -> ZeroTextRect.
+        let shape = make_text_shape("nan pos", egui::pos2(f32::NAN, f32::NAN));
+        let cs = clipped(
+            shape,
+            egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(800.0, 600.0)),
+        );
+        let v = find_offscreen_text(&[cs]);
+        assert_eq!(v.len(), 1);
+        assert_eq!(v[0].reason, OffscreenReason::ZeroTextRect);
+    }
+
+    #[test]
+    fn degenerate_clip_with_nan_is_flagged() {
+        let shape = make_text_shape("hi", egui::pos2(10.0, 10.0));
+        let nan_clip = egui::Rect::from_min_max(
+            egui::pos2(f32::NAN, f32::NAN),
+            egui::pos2(f32::NAN, f32::NAN),
+        );
+        let cs = clipped(shape, nan_clip);
+        let v = find_offscreen_text(&[cs]);
+        assert_eq!(v.len(), 1);
+        assert_eq!(v[0].reason, OffscreenReason::DegenerateClipRect);
+    }
+
+    #[test]
+    fn visit_shape_with_none_clip_is_flagged() {
+        // Directly exercise the None branch of visit_shape.
+        let shape = make_text_shape("no clip", egui::pos2(10.0, 10.0));
+        let mut out = Vec::new();
+        visit_shape(&shape, None, &mut out);
+        assert_eq!(out.len(), 1);
+        assert_eq!(out[0].reason, OffscreenReason::FullyClipped);
+        assert!(out[0].clip_rect.is_none());
+    }
 }
