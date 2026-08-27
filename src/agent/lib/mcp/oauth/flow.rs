@@ -763,6 +763,43 @@ mod tests {
         assert!(matches!(err, OAuthError::RefreshFailed(_)));
     }
 
+    #[test]
+    fn build_resource_uri_trims_and_validates() {
+        assert_eq!(
+            build_resource_uri("  https://mcp.example.com/mcp  ").unwrap(),
+            "https://mcp.example.com/mcp"
+        );
+        assert!(
+            build_resource_uri("https://mcp.example.com/mcp#frag?q=1")
+                .unwrap()
+                .contains("/mcp")
+        );
+        assert!(build_resource_uri("ftp://mcp.example.com").is_err());
+        assert!(build_resource_uri("").is_err());
+    }
+
+    #[test]
+    fn pick_scope_deduplicates_extra_scopes() {
+        let rm = ProtectedResourceMetadata {
+            resource: "https://mcp.example.com".to_owned(),
+            authorization_servers: vec!["https://auth.example.com".to_owned()],
+            scopes_supported: vec!["read".to_owned()],
+            bearer_methods_supported: vec![],
+            resource_name: None,
+            resource_documentation: None,
+            resource_policy_uri: None,
+            resource_tos_uri: None,
+        };
+        let scope = pick_scope(None, &rm, &["read".to_owned(), "write".to_owned()]).unwrap();
+        let parts: Vec<&str> = scope.split_whitespace().collect();
+        assert_eq!(
+            parts.iter().filter(|&&s| s == "read").count(),
+            1,
+            "read must be deduped"
+        );
+        assert!(parts.contains(&"write"));
+    }
+
     /// Minimal OAuth server double: PRM discovery, AS metadata, and
     /// a token endpoint that mints `fresh-access`.
     fn mock_oauth_server() -> MockHttpServer {
