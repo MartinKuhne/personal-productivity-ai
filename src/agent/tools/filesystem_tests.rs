@@ -806,8 +806,8 @@ fn test_tool_move_note_via_registry_virtual_paths() {
     ));
     let ctx = builder.build();
 
-    let mut registry = crate::tools::registry::ToolRegistry::new();
-    registry.refresh_state(&ctx.config);
+    let registry = crate::tools::registry::ToolRegistry::new();
+
 
     let res = crate::tools::registry::execute_tool(
         &registry,
@@ -857,8 +857,8 @@ fn test_tool_move_note_via_registry_fails_on_readonly_library() {
     ));
     let ctx = builder.build();
 
-    let mut registry = crate::tools::registry::ToolRegistry::new();
-    registry.refresh_state(&ctx.config);
+    let registry = crate::tools::registry::ToolRegistry::new();
+
 
     let res = crate::tools::registry::execute_tool(
         &registry,

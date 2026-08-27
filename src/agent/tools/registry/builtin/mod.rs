@@ -55,7 +55,7 @@ pub(crate) fn default_providers() -> Vec<Arc<dyn ToolProvider>> {
 pub(crate) fn register_all_builtins(mgr: &mut ToolRegistry) {
     for provider in default_providers() {
         for tool in provider.tools() {
-            mgr.register_registered_tool(tool);
+            mgr.register(tool);
         }
     }
 }

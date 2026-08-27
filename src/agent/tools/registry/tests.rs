@@ -713,7 +713,7 @@ fn test_grep_does_not_count_non_markdown_matches() {
 #[test]
 fn test_csv_tools_in_schema() {
     let config = AgentConfig::default();
-    let mut mgr = ToolRegistry::new();
+    let mgr = ToolRegistry::new();
     let schema = mgr.get_tools_schema(&config, "create a csv database");
     let tools = schema.as_array().unwrap();
     let names: Vec<&str> = tools
@@ -730,7 +730,7 @@ fn test_csv_tools_in_schema() {
 #[test]
 fn test_csv_tools_excluded() {
     let config = AgentConfig::default();
-    let mut mgr = ToolRegistry::new();
+    let mgr = ToolRegistry::new();
     let schema = mgr.get_tools_schema(&config, "just a normal message");
     let tools = schema.as_array().unwrap();
     let names: Vec<&str> = tools
@@ -744,7 +744,7 @@ fn test_csv_tools_excluded() {
 #[test]
 fn test_get_weather_tool_in_schema() {
     let config = AgentConfig::default();
-    let mut mgr = ToolRegistry::new();
+    let mgr = ToolRegistry::new();
     let schema = mgr.get_tools_schema(&config, "what is the weather today");
     let tools = schema.as_array().unwrap();
     let names: Vec<&str> = tools
@@ -758,7 +758,7 @@ fn test_get_weather_tool_in_schema() {
 fn test_get_weather_tool_excluded_when_disabled() {
     let mut config = AgentConfig::default();
     config.tool_groups.weather = false;
-    let mut mgr = ToolRegistry::new();
+    let mgr = ToolRegistry::new();
     let schema = mgr.get_tools_schema(&config, "what is the weather today");
     let tools = schema.as_array().unwrap();
     let names: Vec<&str> = tools
@@ -780,7 +780,7 @@ fn test_mcp_char_count_bug() {
         }
         .into(),
     );
-    let mut mgr = ToolRegistry::new();
+    let mgr = ToolRegistry::new();
     mgr.register_mcp_tool(
         "test_mcp",
         "mcp_test_mcp_test_tool",
@@ -789,13 +789,14 @@ fn test_mcp_char_count_bug() {
     );
 
     // Simulate what the ui does:
-    let count = mgr.tool_char_count("mcp_test_mcp_test_tool", &config, "");
+    let char_count = mgr.tool_char_count("test_mcp/mcp_test_mcp_test_tool", &config, "");
 
     // Also, what happens when mcp tool doesn't have mcp_ prefixed name?
     mgr.register_mcp_tool("test_mcp", "test_tool", "desc", serde_json::json!({}));
-    let count2 = mgr.tool_char_count("test_tool", &config, "");
-    assert_eq!(count, Some(116));
-    assert_eq!(count2, Some(103));
+    let count2 = mgr.tool_char_count("test_mcp/test_tool", &config, "");
+    // Now it uses the prefixed name "devstack/list_projects" (which adds 9 chars)
+    assert_eq!(char_count, Some(125));
+    assert_eq!(count2, Some(112));
 }
 
 #[test]
@@ -870,4 +871,128 @@ fn test_read_note_and_window_note_descriptions_reference_user_context() {
         window_desc.contains("User.md") || window_desc.contains("user context"),
         "window_note description must note that User.md / user context is already in system context"
     );
+}
+
+#[tokio::test]
+async fn test_mcp_tools_char_count_bug() {
+    // 1. Create a config with two MCP servers
+    let config = crate::config::AgentConfigBuilder::new()
+        .with_mcp_servers(
+            vec![
+                (
+                    "memory-server".to_string(),
+                    crate::config::McpServerEntry {
+                        enabled: true,
+                        config: crate::config::McpServerConfig::Stdio {
+                            command: "npx".to_string(),
+                            args: vec![],
+                            env: std::collections::HashMap::new(),
+                        },
+                    },
+                ),
+                (
+                    "http-server".to_string(),
+                    crate::config::McpServerEntry {
+                        enabled: true,
+                        config: crate::config::McpServerConfig::Sse {
+                            url: "http://localhost:8087/mcp".to_string(),
+                            headers: std::collections::HashMap::new(),
+                            oauth: None,
+                        },
+                    },
+                ),
+            ]
+            .into_iter()
+            .collect(),
+        )
+        .build();
+
+    let mut registry = crate::tools::registry::ToolRegistry::new();
+    
+    // Simulate discover_tools
+    registry.register_mcp_tool(
+        "memory-server",
+        "npx_tool",
+        "A tool from npx",
+        serde_json::json!({
+            "type": "object",
+            "properties": {}
+        }),
+    );
+    registry.register_mcp_tool(
+        "http-server",
+        "http_tool",
+        "A tool from http",
+        serde_json::json!({
+            "type": "object",
+            "properties": {}
+        }),
+    );
+
+    
+    
+    let groups = registry.groups(&config);
+    let stdio_group = groups.iter().find(|g| matches!(g.id, crate::tools::registry::groups::ToolGroupId::Mcp(ref name) if name == "memory-server")).unwrap();
+    let http_group = groups.iter().find(|g| matches!(g.id, crate::tools::registry::groups::ToolGroupId::Mcp(ref name) if name == "http-server")).unwrap();
+
+    assert_eq!(stdio_group.tool_names, vec!["memory-server/npx_tool"]);
+    assert_eq!(http_group.tool_names, vec!["http-server/http_tool"]);
+
+    let stdio_count = registry.tool_char_count("memory-server/npx_tool", &config, "");
+    println!("stdio tool: memory-server/npx_tool -> {:?}", stdio_count);
+
+    let http_count = registry.tool_char_count("http-server/http_tool", &config, "");
+    println!("http tool: http-server/http_tool -> {:?}", http_count);
+
+    assert!(stdio_count.is_some_and(|c| c > 0), "Stdio char count was 0");
+    assert!(http_count.is_some_and(|c| c > 0), "Http char count was 0");
+}
+
+#[test]
+fn test_end_to_end_dialog_char_count() {
+    let config = crate::config::AgentConfigBuilder::new()
+        .with_mcp_servers(
+            vec![(
+                "memory-server".to_string(),
+                crate::config::McpServerEntry {
+                    enabled: true,
+                    config: crate::config::McpServerConfig::Stdio {
+                        command: "npx".to_string(),
+                        args: vec![],
+                        env: std::collections::HashMap::new(),
+                    },
+                },
+            )]
+            .into_iter()
+            .collect(),
+        )
+        .build();
+
+    let mut registry = crate::tools::registry::ToolRegistry::new();
+    
+    // Simulate what ConfigSubscriber does
+    registry.register_mcp_tool(
+        "memory-server",
+        "npx_tool",
+        "A tool from npx",
+        serde_json::json!({
+            "type": "object",
+            "properties": {}
+        }),
+    );
+    
+
+    // Simulate what the UI does
+    let groups = registry.groups(&config);
+    let group = groups.iter().find(|g| matches!(g.id, crate::tools::registry::groups::ToolGroupId::Mcp(ref name) if name == "memory-server")).unwrap();
+    
+    let char_count: usize = group
+        .tool_names
+        .iter()
+        .filter_map(|n| {
+            registry.tool_char_count(n, &config, "")
+        })
+        .sum();
+
+    assert!(char_count > 0, "Char count was 0!");
 }

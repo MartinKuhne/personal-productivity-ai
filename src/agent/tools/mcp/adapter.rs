@@ -18,6 +18,7 @@ use crate::tools::registry::groups::ToolGroupId;
 pub struct McpToolAdapter {
     server_name: String,
     name: String,
+    remote_name: String,
     description: String,
     parameters: serde_json::Value,
     manager: std::sync::Arc<dyn DynamicToolSource>,
@@ -34,6 +35,7 @@ impl McpToolAdapter {
     pub fn new(
         server_name: impl Into<String>,
         name: impl Into<String>,
+        remote_name: impl Into<String>,
         description: impl Into<String>,
         parameters: serde_json::Value,
         manager: std::sync::Arc<McpClients>,
@@ -41,6 +43,7 @@ impl McpToolAdapter {
         Self {
             server_name: server_name.into(),
             name: name.into(),
+            remote_name: remote_name.into(),
             description: description.into(),
             parameters,
             manager,
@@ -52,6 +55,7 @@ impl McpToolAdapter {
     pub fn from_dynamic_source(
         server_name: impl Into<String>,
         name: impl Into<String>,
+        remote_name: impl Into<String>,
         description: impl Into<String>,
         parameters: serde_json::Value,
         manager: std::sync::Arc<dyn DynamicToolSource>,
@@ -59,6 +63,7 @@ impl McpToolAdapter {
         Self {
             server_name: server_name.into(),
             name: name.into(),
+            remote_name: remote_name.into(),
             description: description.into(),
             parameters,
             manager,
@@ -115,7 +120,7 @@ impl Tool for McpToolAdapter {
 
         crate::tools::blocking::block_on(async {
             self.manager
-                .call_tool(&self.server_name, &self.name, args)
+                .call_tool(&self.server_name, &self.remote_name, args)
                 .await
         })
         .map_err(ToolError::new)

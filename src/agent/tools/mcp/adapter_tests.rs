@@ -20,6 +20,7 @@ fn test_mcp_tool_adapter_metadata_and_safety() {
     let adapter = McpToolAdapter::new(
         "test_server",
         "test_tool",
+        "test_tool",
         "A test tool",
         serde_json::json!({
             "type": "object",
@@ -59,6 +60,7 @@ fn test_mcp_tool_adapter_disabled_when_entry_disabled() {
     let manager = Arc::new(McpClients::new());
     let adapter = McpToolAdapter::new(
         "test_server",
+        "test_tool",
         "test_tool",
         "A test tool",
         serde_json::json!({"type": "object", "properties": {}}),

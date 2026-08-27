@@ -37,14 +37,7 @@ pub fn show_tools_dialog(ctx: &eframe::egui::Context, app: &mut FastMdApp) {
     let mut open = true;
     let title = TOOLS_DIALOG_TITLE;
 
-    app.orchestrator.tool_context.rcu(|bundle| {
-        let mut new_bundle = (**bundle).clone();
-        new_bundle
-            .registry
-            .refresh_state(&app.config().to_agent_config());
-        new_bundle
-    });
-    let groups = app.orchestrator.tool_context.load().registry.groups();
+    let groups = app.orchestrator.tool_context.load().registry.groups(&app.config().to_agent_config());
     let (default_size, min_size, max_height) =
         compute_dialog_size(ctx.viewport_rect(), groups.len());
 
@@ -116,16 +109,7 @@ pub(crate) fn compute_dialog_size(
 }
 
 pub fn render_contents(ui: &mut eframe::egui::Ui, app: &mut FastMdApp) {
-    // Snapshot the group view under a fresh refresh so we don't
-    // hold any lock across UI rendering.
-    app.orchestrator.tool_context.rcu(|bundle| {
-        let mut new_bundle = (**bundle).clone();
-        new_bundle
-            .registry
-            .refresh_state(&app.config().to_agent_config());
-        new_bundle
-    });
-    let groups = app.orchestrator.tool_context.load().registry.groups();
+    let groups = app.orchestrator.tool_context.load().registry.groups(&app.config().to_agent_config());
 
     if groups.is_empty() {
         ui.label("No tool groups registered.");
