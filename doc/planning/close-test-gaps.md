@@ -225,6 +225,18 @@ exercised. `PrintJob::new` missing-file fallback (30) and non-UTF-8 stem
 - `coordinator.rs` discovery-failure branch (60–69) and `BatchMode::Directory`
   construction (89–90) — untested.
 
+**Status (P2):** Added `test_batch_config_validate_missing_prompt_path` to
+`types.rs` (the missing `prompt_path` branch of `BatchConfig::validate`, 40–41).
+
+**Known limitation (documented, not a defect):** the executor's concurrency
+branches — Tokio runtime build failure, semaphore-acquire failure, mid-spawn
+cancellation re-check, `BatchJobStatus::Failed` accounting, `JoinSet` panic,
+and multi-model round-robin — are all gated behind `run_agent_blocking`, which
+invokes the real LLM agent. They cannot be unit-tested deterministically in
+the current design. Closing them requires a refactor to inject a fake agent
+runner (e.g. an `AgentRunner` trait) into `BatchJobExecutor`; that is out of
+scope for a test-gap pass and is recorded as a follow-up.
+
 ## Priority 3 — Markdown / UI / utility corner cases
 
 ### P3-1. `src/app/markdown/table_layout.rs` — degenerate dimensions

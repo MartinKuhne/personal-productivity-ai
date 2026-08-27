@@ -343,6 +343,20 @@ mod tests {
     }
 
     #[test]
+    fn test_batch_config_validate_missing_prompt_path() {
+        let dir = tempfile::tempdir().unwrap();
+
+        let config = BatchConfig {
+            directory: dir.path().to_path_buf(),
+            pattern: "*.md".to_string(),
+            prompt_path: PathBuf::from("/nonexistent/prompt.md"),
+            mode: BatchMode::File,
+            concurrency: 4,
+        };
+        assert!(config.validate().is_err());
+    }
+
+    #[test]
     fn test_batch_config_validate_file_mode_empty_pattern() {
         let dir = tempfile::tempdir().unwrap();
         let prompt = dir.path().join("prompt.md");
