@@ -833,3 +833,191 @@ fn test_calendar_cursor_sessions() {
     assert!(page3.cursor.is_none());
     assert_eq!(page3.hint.as_deref(), Some("Final page."));
 }
+
+// ---------------------------------------------------------------------------
+// Additional DavClient error-branch coverage (P1-1): PUT failures,
+// update-GET failures, and the CardDAV add/update failure paths.
+// ---------------------------------------------------------------------------
+
+/// Register a CalDAV service where the calendar discovery succeeds but the
+/// PUT endpoint returns 500. Used to drive the `add_calendar_item` /
+/// `update_calendar_item` non-2xx branches.
+fn register_caldav_put_failure(mock: &WiremockGuard) {
+    mock.register(
+        Mock::given(method("PROPFIND")).respond_with(
+            ResponseTemplate::new(207)
+                .insert_header("content-type", "application/xml")
+                .set_body_string(PROPFIND_BODY),
+        ),
+    );
+    mock.register(
+        Mock::given(method("PUT")).respond_with(
+            ResponseTemplate::new(500)
+                .insert_header("content-type", "text/plain")
+                .set_body_string("put failed"),
+        ),
+    );
+}
+
+#[test]
+fn dav_client_add_calendar_item_put_failure() {
+    let _ = rustls::crypto::ring::default_provider().install_default();
+    let mock = WiremockGuard::start();
+    register_caldav_put_failure(&mock);
+    let cfg = dav_client_config(mock.uri());
+    let client = DavClient::new("primary".to_string(), &cfg).expect("build DavClient");
+
+    let err = client
+        .add_calendar_item(r#"{"summary":"New Mtg"}"#)
+        .expect_err("expected PUT failure");
+    assert!(
+        err.contains("Failed to PUT event"),
+        "error should mention the PUT failure, got: {err}"
+    );
+}
+
+#[test]
+fn dav_client_update_calendar_item_put_failure() {
+    let _ = rustls::crypto::ring::default_provider().install_default();
+    let mock = WiremockGuard::start();
+    // Successful GET + failing PUT.
+    mock.register(
+        Mock::given(method("PROPFIND")).respond_with(
+            ResponseTemplate::new(207)
+                .insert_header("content-type", "application/xml")
+                .set_body_string(PROPFIND_BODY),
+        ),
+    );
+    mock.register(
+        Mock::given(method("GET"))
+            .and(wm_path("/item1.ics"))
+            .respond_with(
+                ResponseTemplate::new(200)
+                    .insert_header("content-type", "text/calendar")
+                    .set_body_string(ITEM1_ICS_BODY),
+            ),
+    );
+    mock.register(
+        Mock::given(method("PUT")).respond_with(
+            ResponseTemplate::new(500)
+                .insert_header("content-type", "text/plain")
+                .set_body_string("put failed"),
+        ),
+    );
+    let cfg = client_config(mock.uri());
+    let client = DavClient::new("primary".to_string(), &cfg).expect("build DavClient");
+
+    let err = client
+        .update_calendar_item("/item1.ics", r#"{"summary":"Updated"}"#)
+        .expect_err("expected PUT failure");
+    assert!(
+        err.contains("Failed to PUT update event"),
+        "error should mention the update PUT failure, got: {err}"
+    );
+}
+
+/// Register a CardDAV service with one addressbook and a PUT endpoint that
+/// returns 500. Used to drive `add_contact` / `update_contact` PUT failures.
+fn register_carddav_put_failure(mock: &WiremockGuard) {
+    mock.register(
+        Mock::given(method("PROPFIND")).respond_with(
+            ResponseTemplate::new(207)
+                .insert_header("content-type", "application/xml")
+                .set_body_string(
+                    r#"<?xml version="1.0" encoding="utf-8"?>
+<d:multistatus xmlns:d="DAV:" xmlns:c="urn:ietf:params:xml:ns:carddav">
+ <d:response>
+  <d:href>/addressbooks/primary/</d:href>
+  <d:propstat>
+   <d:prop>
+    <d:resourcetype><d:collection/><c:addressbook/></d:resourcetype>
+   </d:prop>
+   <d:status>HTTP/1.1 200 OK</d:status>
+  </d:propstat>
+ </d:response>
+</d:multistatus>"#,
+                ),
+        ),
+    );
+    mock.register(
+        Mock::given(method("PUT")).respond_with(
+            ResponseTemplate::new(500)
+                .insert_header("content-type", "text/plain")
+                .set_body_string("put failed"),
+        ),
+    );
+}
+
+fn client_config(uri: String) -> crate::config::CalDavClient {
+    dav_client_config(uri)
+}
+
+#[test]
+fn dav_client_add_contact_put_failure() {
+    let _ = rustls::crypto::ring::default_provider().install_default();
+    let mock = WiremockGuard::start();
+    register_carddav_put_failure(&mock);
+    let cfg = client_config(mock.uri());
+    let client = DavClient::new("primary".to_string(), &cfg).expect("build DavClient");
+
+    let err = client
+        .add_contact(r#"{"fn":"Bob"}"#)
+        .expect_err("expected PUT failure");
+    assert!(
+        err.contains("Failed to PUT contact"),
+        "error should mention the add PUT failure, got: {err}"
+    );
+}
+
+#[test]
+fn dav_client_update_contact_put_failure() {
+    let _ = rustls::crypto::ring::default_provider().install_default();
+    let mock = WiremockGuard::start();
+    // Addressbook PROPFIND + successful GET + failing PUT.
+    mock.register(
+        Mock::given(method("PROPFIND")).respond_with(
+            ResponseTemplate::new(207)
+                .insert_header("content-type", "application/xml")
+                .set_body_string(
+                    r#"<?xml version="1.0" encoding="utf-8"?>
+<d:multistatus xmlns:d="DAV:" xmlns:c="urn:ietf:params:xml:ns:carddav">
+ <d:response>
+  <d:href>/addressbooks/primary/</d:href>
+  <d:propstat>
+   <d:prop>
+    <d:resourcetype><d:collection/><c:addressbook/></d:resourcetype>
+   </d:prop>
+   <d:status>HTTP/1.1 200 OK</d:status>
+  </d:propstat>
+ </d:response>
+</d:multistatus>"#,
+                ),
+        ),
+    );
+    mock.register(
+        Mock::given(method("GET"))
+            .and(wm_path("/alice.vcf"))
+            .respond_with(
+                ResponseTemplate::new(200)
+                    .insert_header("content-type", "text/vcard")
+                    .set_body_string(CARD_ALICE_VCF),
+            ),
+    );
+    mock.register(
+        Mock::given(method("PUT")).respond_with(
+            ResponseTemplate::new(500)
+                .insert_header("content-type", "text/plain")
+                .set_body_string("put failed"),
+        ),
+    );
+    let cfg = client_config(mock.uri());
+    let client = DavClient::new("primary".to_string(), &cfg).expect("build DavClient");
+
+    let err = client
+        .update_contact("/alice.vcf", r#"{"email":"bob@example.com"}"#)
+        .expect_err("expected PUT failure");
+    assert!(
+        err.contains("Failed to PUT updated contact"),
+        "error should mention the update PUT failure, got: {err}"
+    );
+}
