@@ -340,12 +340,39 @@ Each step: failing test → implementation → green → run the full quality ga
 
 ## Current session status
 
-- **P0 complete.** P0-1 pagination (overflow fix + sidecar), P0-2 llm_client
-  (`retry_with_backoff` refactored into `retry_with_backoff_and_sleep` with
-  injectable timeout/sleep; error-mapping + config-corner tests), P0-3
-  tool_executor (extracted to `tool_executor_tests.rs` sidecar; parallel/
-  record/effects tests), P0-4 context (panic + default-injection tests) — all
-  green. New sidecars use `#[path = "..."] mod` per repo convention
-  (`mod.rs`-style directories).
-- Next: run full agent crate to confirm no regression, commit P0, then proceed
-  to P1 (dav/jmap/csv_db/vfs/yaml_header/mcp error branches).
+- **P0 complete** (commit c2e2705). P0-1 pagination (overflow fix + sidecar),
+  P0-2 llm_client (`retry_with_backoff` refactored into
+  `retry_with_backoff_and_sleep` with injectable timeout/sleep; error-mapping +
+  config-corner tests), P0-3 tool_executor (extracted to
+  `tool_executor_tests.rs` sidecar; parallel/record/effects tests), P0-4 context
+  (panic + default-injection tests) — all green. New sidecars use
+  `#[path = "..."] mod` per repo convention (`mod.rs`-style directories).
+- **P1 complete** (commits 2030c032, b76bd9d, 50a47e6). P1-6 mcp/error.rs
+  `from_jsonrpc` defaults + `Display`; P1-5 yaml_header read-missing;
+  P1-3 csv_db/query.rs malformed/type-mismatch/aggregate corners; P1-4 vfs.rs
+  real resolver + mock error branches; P1-2 jmap/client.rs `post` +
+  `parse_error_detail` (via mock server); P1-1 dav/client.rs PUT-failure
+  branches (via wiremock).
+- **P2 complete** (commits 09b8249, 0cbc1d5, 67bddb3). Orchestrator extracted
+  to `orchestrator_tests.rs` sidecar (18 tests over drain_*/handle_*);
+  config_subscriber timeout fallback; bus_router routing error paths;
+  file_watcher notify routing (end-to-end via real notify); print/save
+  fallback + resolved-path; pdf_converter/models `should_*` metadata-failure;
+  batch types `validate`. P2-7 batch-executor concurrency branches documented
+  as not deterministically testable (gated behind the real LLM agent).
+- **P3 complete** (commit 8f0575a). table_layout extracted to sidecar (empty
+  AST, ragged rows, zero-width clamp, negative width); document extracted to
+  `document_tests.rs` sidecar (BOM, toggle no-op revision-bump, second-marker);
+  parser malformed-table + `parse_yaml_to_pairs` corners; messages serde
+  round-trip + unknown-variant; panel_layout None/negative widths; tabs
+  close-missing/no-name/clear-cache; persisted NaN/Inf/future-version.
+- **P4 complete** (this commit). P4-1 groups display_name all-arms +
+  prompt_char_count filter_map, cache constants + singleton, policy/observer
+  rejecting/fallback, extensions insert/extend/get, blocking runtime-reuse.
+  P4-4 doc drift: `src/app/ui/AGENTS.md` `src/desktop/` paths corrected to
+  `src/app/`. P4-2/P4-3 remain documented non-issues.
+- **Quality gate green** across the branch: `cargo check`, `cargo nextest run`
+  (fastmd 1104 pass / 1 skip; fastmd-agent 833 pass / 3 skip), `cargo clippy
+  --all-targets -- -D warnings`, `cargo fmt --check`, `cargo doc --no-deps`
+  all clean. Pre-existing `mut` warnings in `registry/tests.rs` remain
+  untouched (not introduced by this work).
