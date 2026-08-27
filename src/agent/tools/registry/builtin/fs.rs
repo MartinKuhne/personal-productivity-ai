@@ -1,4 +1,6 @@
 //! Filesystem tool implementations and provider for the tool registry.
+//!
+//! Unit tests live in the sibling `fs_tests.rs` sidecar.
 
 use crate::config::ContentLibraryExt;
 use crate::tools::Tool;
@@ -463,3 +465,7 @@ fn registered<T: Tool + 'static>(tool: T) -> RegisteredTool {
         executor: Arc::new(tool),
     }
 }
+
+#[cfg(test)]
+#[path = "fs_tests.rs"]
+mod tests;
