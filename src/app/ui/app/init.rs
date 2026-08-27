@@ -253,7 +253,7 @@ impl FastMdApp {
                 config: AppConfig::default(),
                 config_reader: Some(config_reader),
                 pending_file_load: None,
-                finished_watcher_slot, tool_context: std::sync::Arc::new(arc_swap::ArcSwap::from_pointee(crate::agent::AgentToolContext::new(crate::agent::tools::registry::ToolRegistry::new()))), agent_event_bus,
+                finished_watcher_slot, tool_context, agent_event_bus,
                 agent_event_reader: Some(agent_event_reader),
                 agent_event_lagged: false,
                 agent_transcript: AgentTranscript::new(uuid::Uuid::nil()),
