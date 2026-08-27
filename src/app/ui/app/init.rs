@@ -409,3 +409,8 @@ impl FastMdApp {
 }
 
 
+
+#[cfg(test)]
+#[path = "init_tests.rs"]
+mod tests;
+

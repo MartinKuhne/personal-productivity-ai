@@ -344,3 +344,8 @@ fn spawn_auth_flow(
         ctx.request_repaint();
     });
 }
+
+#[cfg(test)]
+#[path = "tools_dialog_tests.rs"]
+mod tests;
+
