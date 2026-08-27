@@ -8,7 +8,7 @@
 use crate::config::AgentConfig;
 use crate::error::AgentError;
 use crate::events::TokenUsageInfo;
-use async_openai::{Client, config::OpenAIConfig, error::OpenAIError};
+use async_openai::{config::OpenAIConfig, error::OpenAIError, Client};
 
 pub fn parse_usage_block(usage: &serde_json::Value) -> Option<TokenUsageInfo> {
     let prompt_tokens = usage
@@ -187,12 +187,28 @@ fn map_openai_error(e: OpenAIError) -> AgentError {
     }
 }
 
-fn retry_with_backoff<F, T>(mut f: F) -> Result<T, AgentError>
+fn retry_with_backoff<F, T>(f: F) -> Result<T, AgentError>
 where
     F: FnMut() -> Result<T, AgentError>,
 {
+    retry_with_backoff_and_sleep(f, std::time::Duration::from_secs(10), |ms| {
+        std::thread::sleep(std::time::Duration::from_millis(ms))
+    })
+}
+
+/// Backoff loop shared by [`retry_with_backoff`] with injectable
+/// `total_timeout` and `sleep` so the retry/backoff/cap logic is
+/// testable without waiting on real wall-clock sleeps.
+fn retry_with_backoff_and_sleep<F, S, T>(
+    mut f: F,
+    total_timeout: std::time::Duration,
+    mut sleep: S,
+) -> Result<T, AgentError>
+where
+    F: FnMut() -> Result<T, AgentError>,
+    S: FnMut(u64),
+{
     let start = std::time::Instant::now();
-    let total_timeout = std::time::Duration::from_secs(10);
     let mut delay_ms = 1000u64;
     let max_delay_ms = 8000u64;
 
@@ -205,7 +221,7 @@ where
                     error = %e,
                     "Retrying after backoff"
                 );
-                std::thread::sleep(std::time::Duration::from_millis(delay_ms));
+                sleep(delay_ms);
                 delay_ms = std::cmp::min(delay_ms * 2, max_delay_ms);
             }
             Err(e) => return Err(e),
@@ -306,5 +322,242 @@ mod tests {
             .build();
         let client = LLMClient::from_agent_config(&config, None).unwrap();
         assert_eq!(client.max_tokens, 16384);
+    }
+
+    // ---- from_agent_config corner cases ----
+
+    #[test]
+    fn test_from_agent_config_model_name_not_present_returns_none() {
+        let config = AgentConfigBuilder::new()
+            .with_models(std::collections::HashMap::from([(
+                "existing".to_string(),
+                crate::config::LlmConfig {
+                    model: "m1".to_string(),
+                    api_url: "http://a".to_string(),
+                    api_key: "k".to_string(),
+                    cost: None,
+                    use_case: vec!["chat".to_string()],
+                },
+            )]))
+            .build();
+        assert!(LLMClient::from_agent_config(&config, Some("missing")).is_none());
+    }
+
+    #[test]
+    fn test_from_agent_config_empty_models_returns_none() {
+        let config = AgentConfigBuilder::new()
+            .with_models(std::collections::HashMap::new())
+            .build();
+        assert!(LLMClient::from_agent_config(&config, None).is_none());
+        assert!(LLMClient::from_agent_config(&config, Some("x")).is_none());
+    }
+
+    #[test]
+    fn test_from_agent_config_no_chat_use_case_falls_back_to_first() {
+        let config = AgentConfigBuilder::new()
+            .with_models(std::collections::HashMap::from([(
+                "vision_only".to_string(),
+                crate::config::LlmConfig {
+                    model: "vision-model".to_string(),
+                    api_url: "http://a".to_string(),
+                    api_key: "k".to_string(),
+                    cost: None,
+                    use_case: vec!["vision".to_string()],
+                },
+            )]))
+            .build();
+        let client = LLMClient::from_agent_config(&config, None).unwrap();
+        assert_eq!(client.model_name(), "vision-model");
+    }
+
+    #[test]
+    fn test_from_agent_config_chooses_cheapest_chat_model() {
+        let config = AgentConfigBuilder::new()
+            .with_models(std::collections::HashMap::from([
+                (
+                    "cheap".to_string(),
+                    crate::config::LlmConfig {
+                        model: "cheap-model".to_string(),
+                        api_url: "http://a".to_string(),
+                        api_key: "k".to_string(),
+                        cost: Some(1),
+                        use_case: vec!["chat".to_string()],
+                    },
+                ),
+                (
+                    "expensive".to_string(),
+                    crate::config::LlmConfig {
+                        model: "expensive-model".to_string(),
+                        api_url: "http://a".to_string(),
+                        api_key: "k".to_string(),
+                        cost: Some(9),
+                        use_case: vec!["chat".to_string()],
+                    },
+                ),
+            ]))
+            .build();
+        let client = LLMClient::from_agent_config(&config, None).unwrap();
+        assert_eq!(client.model_name(), "cheap-model");
+    }
+
+    // ---- map_openai_error ----
+
+    fn api_err(status: u16, message: &str) -> OpenAIError {
+        OpenAIError::ApiError(async_openai::error::ApiErrorResponse {
+            status_code: reqwest::StatusCode::from_u16(status).unwrap(),
+            api_error: async_openai::error::ApiError {
+                message: message.to_string(),
+                r#type: None,
+                param: None,
+                code: None,
+            },
+        })
+    }
+
+    #[test]
+    fn test_map_api_error_retryable_5xx() {
+        let err = map_openai_error(api_err(500, "boom"));
+        assert!(matches!(err, AgentError::HttpError { status: 500, .. }));
+        assert!(err.is_retryable());
+    }
+
+    #[test]
+    fn test_map_api_error_429_retryable() {
+        let err = map_openai_error(api_err(429, "rate limited"));
+        assert!(matches!(err, AgentError::HttpError { status: 429, .. }));
+        assert!(err.is_retryable());
+    }
+
+    #[test]
+    fn test_map_api_error_400_not_retryable() {
+        let err = map_openai_error(api_err(400, "bad request"));
+        assert!(matches!(err, AgentError::HttpError { status: 400, .. }));
+        assert!(!err.is_retryable());
+    }
+
+    #[test]
+    fn test_map_json_deserialize_error() {
+        let serde_err = serde_json::from_str::<serde_json::Value>("{not json}").unwrap_err();
+        let err = map_openai_error(OpenAIError::JSONDeserialize(serde_err, "{not json}".into()));
+        assert!(matches!(err, AgentError::JsonParseError(_)));
+        assert!(!err.is_retryable());
+    }
+
+    #[test]
+    fn test_map_invalid_argument_is_runtime_error() {
+        let err = map_openai_error(OpenAIError::InvalidArgument("bad model".into()));
+        assert!(matches!(err, AgentError::RuntimeError(ref m) if m.contains("Invalid argument")));
+        assert!(!err.is_retryable());
+    }
+
+    #[test]
+    fn test_map_catch_all_runtime_error() {
+        let err = map_openai_error(OpenAIError::FileSaveError("disk full".into()));
+        assert!(matches!(err, AgentError::RuntimeError(_)));
+        assert!(!err.is_retryable());
+    }
+
+    // ---- retry_with_backoff_and_sleep ----
+
+    fn retryable(msg: &str) -> AgentError {
+        AgentError::NetworkError(msg.to_string())
+    }
+
+    #[test]
+    fn test_backoff_first_success_no_retry() {
+        let mut calls = 0;
+        let mut sleeps = Vec::new();
+        let result = retry_with_backoff_and_sleep(
+            || {
+                calls += 1;
+                Ok(42)
+            },
+            std::time::Duration::from_secs(10),
+            |ms| sleeps.push(ms),
+        );
+        assert_eq!(result.unwrap(), 42);
+        assert_eq!(calls, 1);
+        assert!(sleeps.is_empty(), "no sleep on first success");
+    }
+
+    #[test]
+    fn test_backoff_non_retryable_error_returns_immediately() {
+        let mut calls = 0;
+        let result: Result<(), AgentError> = retry_with_backoff_and_sleep(
+            || {
+                calls += 1;
+                Err(AgentError::MissingApiKey)
+            },
+            std::time::Duration::from_secs(10),
+            |_| panic!("non-retryable error must not sleep"),
+        );
+        assert!(matches!(result, Err(AgentError::MissingApiKey)));
+        assert_eq!(calls, 1);
+    }
+
+    #[test]
+    fn test_backoff_retries_then_succeeds_with_backoff() {
+        let mut calls = 0;
+        let mut sleeps = Vec::new();
+        let result = retry_with_backoff_and_sleep(
+            || {
+                calls += 1;
+                if calls <= 3 {
+                    Err(retryable("conn reset"))
+                } else {
+                    Ok("done")
+                }
+            },
+            std::time::Duration::from_secs(10),
+            |ms| sleeps.push(ms),
+        );
+        assert_eq!(result.unwrap(), "done");
+        assert_eq!(calls, 4);
+        assert_eq!(
+            sleeps,
+            vec![1000, 2000, 4000],
+            "backoff doubles then succeeds"
+        );
+    }
+
+    #[test]
+    fn test_backoff_caps_at_max_delay() {
+        let mut calls = 0;
+        let mut sleeps = Vec::new();
+        let result = retry_with_backoff_and_sleep(
+            || {
+                calls += 1;
+                if calls < 8 {
+                    Err(retryable("flaky"))
+                } else {
+                    Ok(())
+                }
+            },
+            std::time::Duration::from_secs(60),
+            |ms| sleeps.push(ms),
+        );
+        assert!(result.is_ok());
+        assert_eq!(sleeps[2], 4000);
+        assert_eq!(sleeps[3], 8000);
+        assert_eq!(sleeps[4], 8000, "delay must cap at max_delay_ms");
+        assert_eq!(sleeps.len(), 7);
+    }
+
+    #[test]
+    fn test_backoff_stops_after_timeout_returns_last_error() {
+        let mut calls = 0;
+        let result: Result<(), AgentError> = retry_with_backoff_and_sleep(
+            || {
+                calls += 1;
+                Err(retryable("never recovers"))
+            },
+            std::time::Duration::from_millis(10),
+            |_ms| std::thread::sleep(std::time::Duration::from_millis(20)),
+        );
+        assert!(matches!(result, Err(AgentError::NetworkError(_))));
+        assert!(
+            calls >= 2,
+            "must have attempted more than once before timeout"
+        );
     }
 }

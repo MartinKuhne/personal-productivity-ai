@@ -20,6 +20,8 @@ pub mod pagination;
 #[cfg(test)]
 mod group_tests;
 #[cfg(test)]
+mod pagination_tests;
+#[cfg(test)]
 mod tests;
 
 pub use crate::tools::cache;

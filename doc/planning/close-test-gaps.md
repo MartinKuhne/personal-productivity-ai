@@ -328,9 +328,12 @@ Each step: failing test → implementation → green → run the full quality ga
 
 ## Current session status
 
-- `pagination_tests.rs` sidecar written and wired into `registry/mod.rs`;
-  `offset + limit` overflow fixed with `saturating_add`. (Not yet run to green /
-  committed.)
-- Plan extended to full P0–P4 scope.
-- Next: run `pagination_tests` in the `fastmd-agent` crate to confirm, then
-  proceed to P0-2.
+- **P0 complete.** P0-1 pagination (overflow fix + sidecar), P0-2 llm_client
+  (`retry_with_backoff` refactored into `retry_with_backoff_and_sleep` with
+  injectable timeout/sleep; error-mapping + config-corner tests), P0-3
+  tool_executor (extracted to `tool_executor_tests.rs` sidecar; parallel/
+  record/effects tests), P0-4 context (panic + default-injection tests) — all
+  green. New sidecars use `#[path = "..."] mod` per repo convention
+  (`mod.rs`-style directories).
+- Next: run full agent crate to confirm no regression, commit P0, then proceed
+  to P1 (dav/jmap/csv_db/vfs/yaml_header/mcp error branches).
