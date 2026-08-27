@@ -800,6 +800,39 @@ mod tests {
         assert!(parts.contains(&"write"));
     }
 
+    #[test]
+    fn encode_form_percent_encodes_keys_and_values() {
+        let form = vec![("a b", "c+d".to_owned()), ("e&f", "g/h".to_owned())];
+        let enc = encode_form(&form);
+        // percent_encode uses application/x-www-form-urlencoded (space -> +)
+        assert!(enc.contains("a+b="), "got {enc}");
+        assert!(enc.contains("c%2Bd"), "got {enc}");
+        assert!(enc.contains("e%26f="), "got {enc}");
+        assert!(enc.contains("g%2Fh"), "got {enc}");
+    }
+
+    #[test]
+    fn pick_scope_empty_www_auth_falls_back_to_metadata() {
+        let rm = ProtectedResourceMetadata {
+            resource: "https://mcp.example.com".to_owned(),
+            authorization_servers: vec!["https://auth.example.com".to_owned()],
+            scopes_supported: vec!["read".to_owned()],
+            bearer_methods_supported: vec![],
+            resource_name: None,
+            resource_documentation: None,
+            resource_policy_uri: None,
+            resource_tos_uri: None,
+        };
+        let ch_empty = WwwAuthenticateChallenge {
+            scheme: "Bearer".to_owned(),
+            params: vec![("scope".to_owned(), "   ".to_owned())],
+        };
+        // empty scope should be ignored, fall back to metadata + extras
+        let scope = pick_scope(Some(&ch_empty), &rm, &["extra".to_owned()]).unwrap();
+        assert!(scope.contains("read"));
+        assert!(scope.contains("extra"));
+    }
+
     /// Minimal OAuth server double: PRM discovery, AS metadata, and
     /// a token endpoint that mints `fresh-access`.
     fn mock_oauth_server() -> MockHttpServer {
