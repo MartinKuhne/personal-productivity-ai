@@ -35,7 +35,7 @@ pub fn spawn_config_subscription(
             let mut new_ctx = (*current).clone();
             // Store placeholders immediately before blocking on discovery
             tool_context.store(Arc::new(new_ctx.clone()));
-            
+
             new_ctx.registry.init_mcp_on_startup(&agent_config).await;
             tool_context.store(Arc::new(new_ctx));
         }
@@ -72,11 +72,11 @@ pub fn spawn_config_subscription(
                     }
                 }
             }
-            
+
             let agent_config = latest_event.config.to_agent_config();
             let current = tool_context.load_full();
             let mut new_ctx = (*current).clone();
-            
+
             tool_context.store(Arc::new(new_ctx.clone()));
 
             new_ctx.registry.refresh_mcp_tools(&agent_config).await;

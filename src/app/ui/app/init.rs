@@ -253,7 +253,9 @@ impl FastMdApp {
                 config: AppConfig::default(),
                 config_reader: Some(config_reader),
                 pending_file_load: None,
-                finished_watcher_slot, tool_context, agent_event_bus,
+                finished_watcher_slot,
+                tool_context,
+                agent_event_bus,
                 agent_event_reader: Some(agent_event_reader),
                 agent_event_lagged: false,
                 agent_transcript: AgentTranscript::new(uuid::Uuid::nil()),
@@ -303,6 +305,11 @@ impl FastMdApp {
             &crate::config::AppConfig::default(),
         ));
         let pdf_backing_tracker = crate::agent::session::PdfBackingTracker::new();
+
+        let tool_context = std::sync::Arc::new(arc_swap::ArcSwap::from_pointee(
+            crate::agent::AgentToolContext::new(crate::agent::tools::registry::ToolRegistry::new()),
+        ));
+
         let agent_event_bus = Bus::new();
         let agent_event_reader = agent_event_bus.subscribe();
         let agent_event_bus_clone = agent_event_bus.clone();
@@ -337,11 +344,7 @@ impl FastMdApp {
             )))
             .with_extension(Arc::new(pdf_backing_tracker.clone()))
             .with_tool_call_policy(Arc::new(pdf_backing_tracker.clone()))
-            .with_tool_context(Arc::new(arc_swap::ArcSwap::from_pointee(
-                crate::agent::AgentToolContext::new(
-                    crate::agent::tools::registry::ToolRegistry::new(),
-                ),
-            )));
+            .with_tool_context(tool_context.clone());
         #[cfg(feature = "vector-search")]
         let agent_builder = agent_builder.with_extension(Arc::new(
             crate::agent::tools::vector_search::VectorSearchExt(
@@ -392,7 +395,9 @@ impl FastMdApp {
                 config,
                 config_reader: None,
                 pending_file_load: None,
-                finished_watcher_slot, tool_context: std::sync::Arc::new(arc_swap::ArcSwap::from_pointee(crate::agent::AgentToolContext::new(crate::agent::tools::registry::ToolRegistry::new()))), agent_event_bus,
+                finished_watcher_slot,
+                tool_context,
+                agent_event_bus,
                 agent_event_reader: Some(agent_event_reader),
                 agent_event_lagged: false,
                 agent_transcript: AgentTranscript::new(uuid::Uuid::nil()),
@@ -408,9 +413,6 @@ impl FastMdApp {
     }
 }
 
-
-
 #[cfg(test)]
 #[path = "init_tests.rs"]
 mod tests;
-

@@ -2,8 +2,8 @@
 
 use super::*;
 use crate::config::AgentConfig;
-use crate::config::McpServerConfig;
 use crate::config::AgentConfigBuilder;
+use crate::config::McpServerConfig;
 
 #[test]
 fn group_state_refresh_reflects_config() {
@@ -25,7 +25,10 @@ fn group_parallel_safe_when_all_tools_readonly() {
     let mgr = ToolRegistry::new();
     let config = AgentConfig::default();
     let fs = mgr
-        .group(&ToolGroupId::Internal(InternalToolGroup::Filesystem), &config)
+        .group(
+            &ToolGroupId::Internal(InternalToolGroup::Filesystem),
+            &config,
+        )
         .unwrap();
     assert!(!fs.parallel_safe);
 }
@@ -66,7 +69,10 @@ fn record_and_clear_error_round_trip() {
     let id = ToolGroupId::Internal(InternalToolGroup::Filesystem);
     assert!(mgr.group(&id, &config).unwrap().last_error.is_none());
 
-    mgr.record_error(&id, ToolGroupError::now(crate::tools::registry::ToolErrorKind::Execution, "boom"));
+    mgr.record_error(
+        &id,
+        ToolGroupError::now(crate::tools::registry::ToolErrorKind::Execution, "boom"),
+    );
     assert!(mgr.group(&id, &config).unwrap().last_error.is_some());
 
     mgr.clear_error(&id);
@@ -79,7 +85,11 @@ fn set_internal_group_enabled_persists_to_config() {
     let mut config = AgentConfig::default();
     assert!(config.tool_groups.filesystem);
 
-    mgr.set_group_enabled(&mut config, &ToolGroupId::Internal(InternalToolGroup::Filesystem), false);
+    mgr.set_group_enabled(
+        &mut config,
+        &ToolGroupId::Internal(InternalToolGroup::Filesystem),
+        false,
+    );
     assert!(!config.tool_groups.filesystem);
 }
 
@@ -89,9 +99,14 @@ fn set_mcp_group_enabled_persists_to_config() {
     let mut config = AgentConfigBuilder::new()
         .with_mcp_servers(std::collections::HashMap::from([(
             "github".to_string(),
-            crate::config::McpServerEntry { enabled: true, config: 
-                McpServerConfig::Stdio { command: "cmd".to_string(), args: vec![], env: std::collections::HashMap::new() }
-            }
+            crate::config::McpServerEntry {
+                enabled: true,
+                config: McpServerConfig::Stdio {
+                    command: "cmd".to_string(),
+                    args: vec![],
+                    env: std::collections::HashMap::new(),
+                },
+            },
         )]))
         .build();
 

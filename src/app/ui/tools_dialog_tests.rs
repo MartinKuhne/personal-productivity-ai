@@ -217,16 +217,27 @@ async fn test_mcp_ui_char_count_is_not_zero() {
 
     let output = render_dialog_once(&mut app);
     let texts = extract_text(&output.shapes);
-    
-    // Check that we render the group name
-    assert!(texts.iter().any(|t| t == "test-server"), "Group name should be rendered");
-    // Check that we render the tool name
-    assert!(texts.iter().any(|t| t.contains("test-server/dummy_tool")), "Tool name should be rendered");
-    
-    // Extract the char count column (it is to the right of the tool name)
-    let idx = texts.iter().position(|t| t.contains("test-server/dummy_tool")).unwrap();
-    let char_count = &texts[idx + 1];
-    
-    assert_ne!(char_count, "0", "Char count for populated MCP tool should not be 0");
-}
 
+    // Check that we render the group name
+    assert!(
+        texts.iter().any(|t| t == "test-server"),
+        "Group name should be rendered"
+    );
+    // Check that we render the tool name
+    assert!(
+        texts.iter().any(|t| t.contains("test-server/dummy_tool")),
+        "Tool name should be rendered"
+    );
+
+    // Extract the char count column (it is to the right of the tool name)
+    let idx = texts
+        .iter()
+        .position(|t| t.contains("test-server/dummy_tool"))
+        .unwrap();
+    let char_count = &texts[idx + 1];
+
+    assert_ne!(
+        char_count, "0",
+        "Char count for populated MCP tool should not be 0"
+    );
+}

@@ -908,7 +908,7 @@ async fn test_mcp_tools_char_count_bug() {
         .build();
 
     let mut registry = crate::tools::registry::ToolRegistry::new();
-    
+
     // Simulate discover_tools
     registry.register_mcp_tool(
         "memory-server",
@@ -929,8 +929,6 @@ async fn test_mcp_tools_char_count_bug() {
         }),
     );
 
-    
-    
     let groups = registry.groups(&config);
     let stdio_group = groups.iter().find(|g| matches!(g.id, crate::tools::registry::groups::ToolGroupId::Mcp(ref name) if name == "memory-server")).unwrap();
     let http_group = groups.iter().find(|g| matches!(g.id, crate::tools::registry::groups::ToolGroupId::Mcp(ref name) if name == "http-server")).unwrap();
@@ -969,7 +967,7 @@ fn test_end_to_end_dialog_char_count() {
         .build();
 
     let mut registry = crate::tools::registry::ToolRegistry::new();
-    
+
     // Simulate what ConfigSubscriber does
     registry.register_mcp_tool(
         "memory-server",
@@ -980,18 +978,15 @@ fn test_end_to_end_dialog_char_count() {
             "properties": {}
         }),
     );
-    
 
     // Simulate what the UI does
     let groups = registry.groups(&config);
     let group = groups.iter().find(|g| matches!(g.id, crate::tools::registry::groups::ToolGroupId::Mcp(ref name) if name == "memory-server")).unwrap();
-    
+
     let char_count: usize = group
         .tool_names
         .iter()
-        .filter_map(|n| {
-            registry.tool_char_count(n, &config, "")
-        })
+        .filter_map(|n| registry.tool_char_count(n, &config, ""))
         .sum();
 
     assert!(char_count > 0, "Char count was 0!");

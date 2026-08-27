@@ -808,7 +808,6 @@ fn test_tool_move_note_via_registry_virtual_paths() {
 
     let registry = crate::tools::registry::ToolRegistry::new();
 
-
     let res = crate::tools::registry::execute_tool(
         &registry,
         &ctx,
@@ -858,7 +857,6 @@ fn test_tool_move_note_via_registry_fails_on_readonly_library() {
     let ctx = builder.build();
 
     let registry = crate::tools::registry::ToolRegistry::new();
-
 
     let res = crate::tools::registry::execute_tool(
         &registry,

@@ -205,8 +205,6 @@ impl ToolRegistry {
         }))
     }
 
-
-
     /// Names of every tool that is parallel-safe (i.e. classified as
     /// [`Safety::ReadOnly`]). Used by the agent loop to identify the
     /// "safe" set up-front.
@@ -277,36 +275,36 @@ impl ToolRegistry {
         // 1) Group all known tools by their group_id.
         for (tool_name, tool) in &self.tools {
             let group_id = &tool.descriptor.group;
-                let entry = groups.entry(group_id.clone()).or_insert_with(|| {
-                    let name = match group_id {
-                        ToolGroupId::Internal(g) => g.display_name().to_owned(),
-                        ToolGroupId::Mcp(name) => name.clone(),
-                    };
-                    let kind = match group_id {
-                        ToolGroupId::Internal(_) => ToolGroupKind::Internal,
-                        ToolGroupId::Mcp(n) => match config.mcp_servers.get(n).map(|e| e.config()) {
-                            Some(McpServerConfig::Sse { .. }) => ToolGroupKind::McpRemote,
-                            _ => ToolGroupKind::McpStdio,
-                        },
-                    };
-                    ToolGroupState {
-                        id: group_id.clone(),
-                        display_name: name,
-                        kind,
-                        enabled: crate::tools::descriptor::group_enabled(config, group_id),
-                        needs_auth: match group_id {
-                            ToolGroupId::Mcp(n) => self.mcp_manager.needs_auth_now(n),
-                            _ => false,
-                        },
-                        tool_names: Vec::new(),
-                        parallel_safe: true,
-                        last_error: self.group_errors.get(group_id).cloned(),
-                    }
-                });
-                entry.tool_names.push(tool_name.clone());
-                if tool.descriptor.safety != Safety::ReadOnly {
-                    entry.parallel_safe = false;
+            let entry = groups.entry(group_id.clone()).or_insert_with(|| {
+                let name = match group_id {
+                    ToolGroupId::Internal(g) => g.display_name().to_owned(),
+                    ToolGroupId::Mcp(name) => name.clone(),
+                };
+                let kind = match group_id {
+                    ToolGroupId::Internal(_) => ToolGroupKind::Internal,
+                    ToolGroupId::Mcp(n) => match config.mcp_servers.get(n).map(|e| e.config()) {
+                        Some(McpServerConfig::Sse { .. }) => ToolGroupKind::McpRemote,
+                        _ => ToolGroupKind::McpStdio,
+                    },
+                };
+                ToolGroupState {
+                    id: group_id.clone(),
+                    display_name: name,
+                    kind,
+                    enabled: crate::tools::descriptor::group_enabled(config, group_id),
+                    needs_auth: match group_id {
+                        ToolGroupId::Mcp(n) => self.mcp_manager.needs_auth_now(n),
+                        _ => false,
+                    },
+                    tool_names: Vec::new(),
+                    parallel_safe: true,
+                    last_error: self.group_errors.get(group_id).cloned(),
                 }
+            });
+            entry.tool_names.push(tool_name.clone());
+            if tool.descriptor.safety != Safety::ReadOnly {
+                entry.parallel_safe = false;
+            }
         }
 
         // Sort tool names for stable UI.
@@ -347,7 +345,11 @@ impl ToolRegistry {
     }
 
     /// Single-group lookup.
-    pub fn group(&self, id: &ToolGroupId, config: &crate::config::AgentConfig) -> Option<ToolGroupState> {
+    pub fn group(
+        &self,
+        id: &ToolGroupId,
+        config: &crate::config::AgentConfig,
+    ) -> Option<ToolGroupState> {
         self.groups(config).into_iter().find(|g| g.id == *id)
     }
 

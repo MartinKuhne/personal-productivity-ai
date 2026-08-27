@@ -37,7 +37,12 @@ pub fn show_tools_dialog(ctx: &eframe::egui::Context, app: &mut FastMdApp) {
     let mut open = true;
     let title = TOOLS_DIALOG_TITLE;
 
-    let groups = app.orchestrator.tool_context.load().registry.groups(&app.config().to_agent_config());
+    let groups = app
+        .orchestrator
+        .tool_context
+        .load()
+        .registry
+        .groups(&app.config().to_agent_config());
     let (default_size, min_size, max_height) =
         compute_dialog_size(ctx.viewport_rect(), groups.len());
 
@@ -109,7 +114,12 @@ pub(crate) fn compute_dialog_size(
 }
 
 pub fn render_contents(ui: &mut eframe::egui::Ui, app: &mut FastMdApp) {
-    let groups = app.orchestrator.tool_context.load().registry.groups(&app.config().to_agent_config());
+    let groups = app
+        .orchestrator
+        .tool_context
+        .load()
+        .registry
+        .groups(&app.config().to_agent_config());
 
     if groups.is_empty() {
         ui.label("No tool groups registered.");
@@ -348,4 +358,3 @@ fn spawn_auth_flow(
 #[cfg(test)]
 #[path = "tools_dialog_tests.rs"]
 mod tests;
-
