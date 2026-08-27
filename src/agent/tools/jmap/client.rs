@@ -238,7 +238,7 @@ pub fn jmap_check_errors(res: &serde_json::Value) -> Option<String> {
 mod tests {
     use serde_json::json;
 
-    use super::{jmap_check_errors, parse_error_detail, JmapSession};
+    use super::{JmapSession, jmap_check_errors, parse_error_detail};
     use crate::config::JmapClient;
     use crate::tools::jmap::mock_server::spawn_mock_server;
 
@@ -325,7 +325,10 @@ mod tests {
     #[test]
     fn test_parse_error_detail_jmap_type_only() {
         let body = r#"{"type":"accountNotFound"}"#;
-        assert_eq!(parse_error_detail(body), Some("accountNotFound".to_string()));
+        assert_eq!(
+            parse_error_detail(body),
+            Some("accountNotFound".to_string())
+        );
     }
 
     #[test]
@@ -373,7 +376,10 @@ mod tests {
         };
         let session = JmapSession::connect(&cfg).expect("connect should succeed");
         let response = session
-            .post(&["urn:ietf:params:jmap:mail"], json!([["Email/get", {"ids": ["e1"]}, "0"]]))
+            .post(
+                &["urn:ietf:params:jmap:mail"],
+                json!([["Email/get", {"ids": ["e1"]}, "0"]]),
+            )
             .expect("post should succeed");
         let list = response
             .get("methodResponses")

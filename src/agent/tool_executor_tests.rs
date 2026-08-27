@@ -6,8 +6,8 @@
 use super::*;
 use crate::config::{AgentConfig, AgentConfigBuilder, ContentLibrary};
 use crate::events::ToolSideEffect;
-use crate::tools::registry::{InternalToolGroup, ToolGroupId, ToolRegistry};
 use crate::tools::Safety;
+use crate::tools::registry::{InternalToolGroup, ToolGroupId, ToolRegistry};
 use std::sync::Arc;
 
 fn classify_executor() -> ToolExecutor {

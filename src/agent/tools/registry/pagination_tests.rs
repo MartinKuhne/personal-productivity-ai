@@ -4,7 +4,7 @@
 //! empty result sets, out-of-range offsets, zero limits, exact-boundary
 //! pages, and the usize-overflow guard.
 
-use super::pagination::{paginate_in_range, DEFAULT_LIST_NOTES_BY_TAG_LIMIT};
+use super::pagination::{DEFAULT_LIST_NOTES_BY_TAG_LIMIT, paginate_in_range};
 
 #[test]
 fn default_limit_is_100() {

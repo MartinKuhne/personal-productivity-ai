@@ -13,11 +13,11 @@ use crate::config::AppConfig;
 use crate::ui::agent::panel_state::AgentPanelState;
 use crate::ui::agent::transcript::AgentTranscript;
 use crate::ui::{Dialogs, FileSelection, Tabs, TextBuffer};
-use crate::workspace::watcher::{DirectoryTracker, FileEventProcessor};
 use crate::workspace::Tags;
+use crate::workspace::watcher::{DirectoryTracker, FileEventProcessor};
 use arc_swap::ArcSwap;
 use std::path::{Path, PathBuf};
-use std::sync::mpsc::{channel, Receiver};
+use std::sync::mpsc::{Receiver, channel};
 use std::sync::{Arc, Mutex};
 use uuid::Uuid;
 
@@ -295,10 +295,12 @@ fn handle_process_event_file_loaded_err_closes_and_logs() {
     assert!(orch.selection.selected_file().is_none());
     {
         let orch_mgr = orch.background_manager.lock().unwrap();
-        assert!(orch_mgr
-            .get_logs()
-            .iter()
-            .any(|l| l.message.contains("Failed to load file")));
+        assert!(
+            orch_mgr
+                .get_logs()
+                .iter()
+                .any(|l| l.message.contains("Failed to load file"))
+        );
     }
 }
 
@@ -353,10 +355,11 @@ fn drain_agent_event_bus_lagged_appends_truncation_marker() {
     orch.drain_agent_event_bus();
 
     assert!(orch.agent_event_lagged);
-    assert!(orch
-        .agent_transcript
-        .content
-        .contains(LAG_TRUNCATION_MARKER));
+    assert!(
+        orch.agent_transcript
+            .content
+            .contains(LAG_TRUNCATION_MARKER)
+    );
 }
 
 #[test]

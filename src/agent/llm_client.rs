@@ -8,7 +8,7 @@
 use crate::config::AgentConfig;
 use crate::error::AgentError;
 use crate::events::TokenUsageInfo;
-use async_openai::{config::OpenAIConfig, error::OpenAIError, Client};
+use async_openai::{Client, config::OpenAIConfig, error::OpenAIError};
 
 pub fn parse_usage_block(usage: &serde_json::Value) -> Option<TokenUsageInfo> {
     let prompt_tokens = usage
