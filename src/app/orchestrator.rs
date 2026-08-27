@@ -1,4 +1,5 @@
 //! Application orchestrator — coordinates domain state, background events, file-watcher events, and agent turn lifecycles.
+//! Unit tests live in the sibling `orchestrator_tests.rs` sidecar.
 
 use crate::agent::AgentSession;
 use crate::agent::events::ToolSideEffect;
@@ -574,3 +575,7 @@ impl AppOrchestrator {
         }
     }
 }
+
+#[cfg(test)]
+#[path = "orchestrator_tests.rs"]
+mod tests;
