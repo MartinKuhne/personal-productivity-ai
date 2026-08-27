@@ -1,4 +1,6 @@
 //! JMAP email tool implementations for the tool registry.
+//!
+//! Unit tests live in the sibling `jmap_tests.rs` sidecar.
 
 use crate::tools::Tool;
 use crate::tools::context::ToolContext;
@@ -122,3 +124,7 @@ fn registered<T: Tool + 'static>(tool: T) -> RegisteredTool {
         executor: Arc::new(tool),
     }
 }
+
+#[cfg(test)]
+#[path = "jmap_tests.rs"]
+mod tests;
