@@ -1,378 +1,288 @@
 # Closing Test-Coverage Gaps — Plan
 
-> Status: proposal
-> Date: 2026-08-26
+> Status: proposal (audit updated, no code changed)
+> Date: 2026-08-27
 > Branch: `chore/quality-pass`
+> Previous: 2026-08-26 error-path audit (P0–P4 complete per §History)
 
 ## Context
 
-`fastmd` is a Markdown viewer + LLM agent desktop app. The suite currently
-has **1042 tests** across 57 test files (sidecars `<file>_tests.rs`,
-`<file>_proptests.rs`, and inline `#[cfg(test)]` blocks). A coverage audit
-focused on **error scenarios and corner cases** found that most error-propagation
-paths are exercised only via happy-path tests — exactly the places where silent
-`unwrap_or_else` swallowing, panics, and boundary bugs hide.
+`fastmd` is a Markdown viewer + LLM agent desktop app (workspace: `fastmd` lib `src/app/lib.rs`, `fastmd-agent`, `fastmd-tool-macros`). The suite currently has **1104 tests** (4 binaries, 1 skipped via `cargo nextest run` default profile, 26s) and **85 sidecars** (`<file>_tests.rs` + `<file>_proptests.rs` + inline `#[cfg(test)]`). `cargo llvm-cov --workspace --summary-only` reports **83.61% line** (50771 total / 8320 missed), **81.00% func**, **82.76% region**.
 
-This plan is the prioritized backlog produced by that audit. Work is split into
-two priorities: **P0** (core agent error paths, highest risk) and **P1**
-(protocol/IO error paths). Each step follows [RUST-005] — write a failing test
-first, then fix, then prove green — and [RUST-003] (all code paths covered).
+The global 83.6% hides a heavy tail: **~30 files <60% line, 10 files <20%, 4 at 0%** — concentrated in MCP/OAuth, tool-registry builtins, app wiring (`init`/`render`), platform file-trash, and the proc-macro crate. The earlier 2026-08-26 audit focused on *error-propagation* paths (P0–P4, now complete — see §History). This update is a *line-coverage* audit — the complement — and proposes a remediation plan to hit **≥88–90% line** with **no file <60%** (excluding explicitly `UNTESTED` features).
 
-Out of scope: egui UI snapshot coverage (covered elsewhere), performance tests,
-mutation testing, and the `discord` / `browser` features that are explicitly
-flagged `UNTESTED` in `Cargo.toml` and gated out of the default build.
+Out of scope for this pass (no edits): code changes, `discord`/`browser`/`image-library` features flagged `UNTESTED` in `Cargo.toml` (gated out of default build), perf/mutation testing. Reference specs: `SPEC.md` (`MCP-001..021`, `TOOL-*`, `CONFIG-001..013`, `UI-001..066`), `AGENTS.md` quality gate, `doc/planning/AGENTS.md`.
 
 ## Conventions
 
-- Unit tests go in sibling `<file>_tests.rs` sidecars (RUST-001, RUST-056b) or
-  inline; the impl file's `//!` doc must end with the sidecar pointer (RUST-057).
-- Every `#[test]` reproduction is written **before** the code change.
-- Regression seeds carry a "what input / what property" comment.
-- Quality gate before done: `cargo check`, `cargo nextest run
-  --status-level fail --show-progress none`, `cargo clippy -- -D warnings`,
-  `cargo fmt --check`, `cargo doc --no-deps --quiet`.
+- Unit tests live in sibling `<file>_tests.rs` sidecars (`[RUST-001]`, `[RUST-056]` >150 lines → sidecar, `[RUST-056b]` integration → `tests/<name>.rs`). Impl `//!` doc ends with sidecar pointer (`[RUST-057]`).
+- Every change follows `[RUST-005]` (failing test first) + `[RUST-003]` (happy/corner/failure) + `[RUST-002]` (`cargo nextest`) + `[RUST-004]` narrow integration where IO.
+- `facade-only lib.rs` (`[RUST-054]`), bounded subsystems (`[RUST-050]`), event fan-out `Bus<T>` (`[RUST-052]`), `RUST-020..023` modularity respected.
+- Quality gate before done (from `/`): `cargo check --quiet`, `cargo nextest run --status-level fail --show-progress none` (`ci` profile `fail-fast=true, retries=0`), `cargo clippy -- -D warnings`, `cargo fmt --check`, `cargo doc --no-deps --quiet`.
+- Coverage gate proposed in §Phase 0: `cargo llvm-cov --workspace --summary-only` fails build if line `<85%` (ratchet to 88% after P1) or any non-excluded file `<60%`.
 
-## Priority 0 — Core agent error paths (highest risk)
+## Baseline (2026-08-27)
 
-### P0-1. `src/agent/tools/registry/pagination.rs` — direct unit tests + overflow fix
-
-No direct unit tests today (only exercised indirectly through `list_notes`).
-
-| Location | Gap |
+| Signal | Value |
 |---|---|
-| `paginate_in_range` (line 36) | `offset + limit` can **overflow `usize`** → panic in debug builds. Fix with `offset.saturating_add(limit)`. |
-| `paginate_in_range` (line 36) | `items.len() < total` → slice index-out-of-bounds panic; invariant never asserted. |
-| `limit == 0` | returns empty slice, hint `None` — untested. |
-| `offset == total - 1` boundary | untested. |
-| `offset >= total` | past-end hint wording with verbatim offset — untested. |
-| `total == 0` | `{plural}` interpolation — untested. |
-
-**Done in this session:** added `pagination_tests.rs` sidecar (declared in
-`registry/mod.rs`), covered all the above, and applied the `saturating_add` fix.
-
-### P0-2. `src/agent/llm_client.rs` — error mapping, retry/backoff, config corners
-
-* `map_openai_error` (lines 141–188): all 5 match arms have **zero** direct tests —
-  `Reqwest` timeout-vs-network heuristic, `ApiError` retryable (≥500/429) vs not,
-  `JSONDeserialize`, `InvalidArgument`, catch-all.
-* `retry_with_backoff` (190–214): retryable-then-success, always-retryable
-  exhausting `total_timeout` (10 s), non-retryable short-circuit, `delay_ms`
-  capped at `max_delay_ms` (8 s), retryable-after-timeout falls through to `Err`.
-  Hard to test directly because the loop sleeps; refactor to make the delay
-  injectable (a `delay: impl FnMut() -> Duration` or test-only clock) so the
-  backoff/termination logic is testable without real sleeps.
-* `from_agent_config` (67–86): `model_name` given-but-absent (`?` on line 69),
-  empty models map (line 78), no-chat-use-case min-cost fallback (70–76) — all
-  untested.
-* `parse_usage_block` (13–48): `saturating_add` overflow path and
-  explicit-`total_tokens`-beats-sum untested.
-
-### P0-3. `src/agent/tool_executor.rs` — parallel dispatch, error recording, side effects
-
-* `execute_parallel` (216–269): runtime-build-failure → `Vec::new()` silent
-  result drop (220–224); `JoinSet::join_next()` `Err` panic-swallow (265–269) —
-  both untested.
-* `record_tool_errors` (169–203): `tool_group()` `None` continue, JSON-parse
-  failure → `ok=false` → fallback message (188–195), `status != "success"` —
-  untested.
-* `extract_side_effects` (309–362): `func_name != "create_note"` skip,
-  non-success skip, arguments JSON-parse-failure `continue`, missing `path`,
-  path-component stripping, no-matching-library `break` — all untested.
-* `extract_str` (365–374): non-string node → `""`; mid-path `None` — untested.
-
-### P0-4. `src/agent/tools/context.rs` — panic paths & default injection
-
-* `vfs()`/`cache()`/`uuid_gen()` `.expect(...)` panic paths (lines 40, 62, 70)
-  reachable via the public builder without those extensions — untested.
-* `file_observer` `DefaultFileObserver` fallback (77–84) — untested.
-* `check_write_allowed` policy `Err` propagation (92–101) — only the never-errors
-  `DefaultToolCallPolicy` is exercised.
-* `build()` default-injection branches (VFS absent → inject; policy absent →
-  inject; lines 203–220) — untested.
-
-## Priority 1 — Protocol / IO error paths
-
-### P1-1. `src/agent/lib/dav/client.rs` — CalDAV/CardDAV error branches
-
-The wiremock harness exists (`cal_tests.rs`, `card_tests.rs`) but only 2 error
-paths are tested (`get_calendar_item` 404, `delete_calendar_item` 500). ~15
-untested `?` branches:
-- `new` CalDAV/CardDAV build failure (67, 69).
-- `list_calendar_hrefs`: `No principal found` (128), `No calendar home found` (132).
-- `search_calendar` / `get_calendar` timerange `?` (149, 190); the date-widening
-  corner (`YYYY-MM-DD` vs full form, 167–178).
-- `add_calendar_item` / `update_calendar_item` PUT/GET non-2xx (238–240, 251–258,
-  272–279, 289–296).
-- `search_contact` / `get_contact` / `add_contact` / `update_contact` non-2xx and
-  `No addressbook found` (337, 341, 373–378, 396–397, 414–422, 446–473).
-- `delete_contact` 404-idempotency (486–487).
-- ETag `put_if_match` vs plain-PUT branch (460–464).
-
-### P1-2. `src/agent/tools/jmap/client.rs` — transport error paths
-
-- `post()` (117–196): build failure, JSON `to_string`, `.send()` network,
-  `body.text()`, non-success status + >500-byte truncation, empty body, JSON
-  parse failure — all untested (no mock-server test drives `post`).
-- `parse_error_detail` (20–36): all 4 arms (RFC 7807, JMAP type+description,
-  type-only, `_ => None`) + non-JSON/non-object bodies — untested.
-- `JmapSession::connect` (54–63): connect failure; `unwrap_or_default()` empty
-  primary-account corner (96).
-
-### P1-3. `src/agent/tools/csv_db/query.rs` — malformed input & aggregates
-
-- Malformed CSV (record field-count mismatch, invalid UTF-8) never fed to
-  `query_csv`/`delete_rows`; `rdr.headers()`/record-parse error paths untested
-  (proptests only write well-formed rows).
-- `create_context` type-mismatch (i64 vs f64 vs String) and missing-column
-  predicate → `None` skip — untested.
-- Aggregate corners: `sum` on non-numeric column (skip), `sum` with missing
-  column → `Some(0.0)`, `avg` over empty `matched_rows` → `Some(0.0)`,
-  `count == 0` guard — untested.
-
-### P1-4. `src/agent/tools/vfs.rs` — real resolver & mock error branches
-
-- Real `VfsResolver` (92–160): all IO error paths (`read_to_string`, `write`,
-  `append`, `rename`, `copy`, `remove_file`, `metadata`, `read_dir`, `resolve`/
-  `resolve_writable`) untested.
-- `MockVirtualFileSystem` error-override branches: `rename_err`, `remove_file_err`,
-  `copy_err`, invalid-UTF-8 `read_to_string`, `metadata` NotFound, rename/remove/
-  copy on missing source — untested.
-
-### P1-5. `src/agent/tools/yaml_header.rs` — read/write/serialize failures
-
-- `tool_read_yaml_header` file-missing/permission-denied branch (22–25) — untested.
-- `tool_write_yaml_header`: `serde_norway::to_string` failure (97–100), `vfs().write`
-  failure (91–95), swallowed `create_dir_all` (82), read-fails-then-fresh-create
-  path (40–41) — untested.
-
-### P1-6. `src/agent/lib/mcp/error.rs` — JSON-RPC error defaults
-
-- `from_jsonrpc` default fallbacks: missing `code` → `-1` (22), missing `message`
-  → `"Unknown JSON-RPC error"` (23–26), absent `data` (28) — untested.
-- `Display` `None`-context arm (52) and `From<McpError> for String` (59–62) — untested.
-
-## Priority 2 — App-side lifecycle / routing / watcher
-
-### P2-1. `src/app/orchestrator.rs` — lifecycle & bus fan-out (zero tests)
-
-The single largest gap. All `drain_*` / `handle_*` dispatchers and lifecycle
-init/shutdown have **no `#[cfg(test)]`** at all:
-- `process_file_events` (74), `close_tabs_for_removed_files` (157),
-  `start_agent_session` (190), `drain_config_bus` (245),
-  `drain_background_channel` (295), `drain_agent_event_bus` (322),
-  `handle_fs_event` (417), `handle_process_event` (472),
-  `handle_mcp_auth_event` (522), `handle_file_selection` (557).
-
-These are the bus-fan-out layer per [RUST-052]; each needs a bus-test harness
-that publishes events and asserts the resulting side effects / state changes.
-No panic path is directly reachable (guards use `unwrap_or`/`unwrap_or_else`),
-so this is behavior, not crash, coverage.
-
-### P2-2. `src/app/agent/session/config_subscriber.rs` — error branches
-
-Only the startup-success path is tested. Untested:
-- `tokio::time::timeout` `Ok(Err)` / `Err` → fall back to default config (23–31).
-- `Lagged` handling in the main loop (53–56).
-- Channel-closed `break` (57).
-- `try_recv` drain loop (63–74).
-
-### P2-3. `src/app/bus/router/bus_router.rs` — routing error paths
-
-- Closed-channel branches (`tx_pdf.send` error → `pdf_open=false`, 74–98) — no
-  test drops `rx_pdf`/`rx_img` before routing.
-- No-extension path (`ext.as_deref().unwrap_or("")`, 71) and uppercase-extension
-  `to_lowercase()` normalization (70) — untested.
-- `FileEventKind::Removed/DirDiscovered/DirRemoved` filter (59–64) and the
-  `Updated` branch (61) — never published in tests.
-- Empty-payload `FileEvent` (`paths: vec![]`) no-op — untested.
-
-### P2-4. `src/app/workspace/watcher/file_watcher.rs` — notify callback routing
-
-Only `start()` success is tested. The entire notify event-routing closure
-(65–223) is untested:
-- `Create/Modify/Remove` dispatch for md/pdf/img.
-- `.git` skip (68).
-- `extract_tags_from_file` + `FileModified`/`FileDeleted` emission (155–169).
-- `!path.exists()` → `FileDeleted` fallbacks (206–219).
-- PDF-dispatch `tx_pdf`/`should_convert` (176–180) and image `tx_img` (193–205).
-- `watcher.watch()` per-library failure (228–235) and `FinishedWithoutWatcher`
-  branch (246–253).
-
-### P2-5. `src/app/export/print.rs` — print error paths
-
-`execute_print_blocking` (124): temp-file creation failure (153), `write_all`
-failure (156), `temp_file.keep()` failure (160), `webbrowser::open` failure
-(168) — all `?`-propagated and untested. `cleanup_temp_files` (13) never
-exercised. `PrintJob::new` missing-file fallback (30) and non-UTF-8 stem
-`unwrap_or("Document")` (31–35) untested.
-
-### P2-6. `src/app/background/` — conversion decisions
-
-- `pdf_converter.rs` `should_convert` metadata/modified failure → `false`
-  (65–71); marker output-`copy` success branch (155–168); the
-  `Could not find output markdown` warning (174–185); `PdfConverterWorker::spawn`
-  (238–254) — untested.
-- `models.rs` `ImageJob::should_process` metadata-failure → `false` (105–113) —
-  untested.
-
-### P2-7. `src/app/agent/batch/executor.rs` — concurrency failure branches
-
-- Tokio runtime build failure (43–55), semaphore-acquire failure (83–87),
-  mid-spawn cancellation re-check (113–116), `BatchJobStatus::Failed` accounting
-  (149–152), `JoinSet` panic branch (162–170), round-robin model assignment with
-  `model_count > 1` (99–104), and `run_agent_blocking` `Failed` branch (268–271)
-  — all untested.
-- `coordinator.rs` discovery-failure branch (60–69) and `BatchMode::Directory`
-  construction (89–90) — untested.
-
-**Status (P2):** Added `test_batch_config_validate_missing_prompt_path` to
-`types.rs` (the missing `prompt_path` branch of `BatchConfig::validate`, 40–41).
-
-**Known limitation (documented, not a defect):** the executor's concurrency
-branches — Tokio runtime build failure, semaphore-acquire failure, mid-spawn
-cancellation re-check, `BatchJobStatus::Failed` accounting, `JoinSet` panic,
-and multi-model round-robin — are all gated behind `run_agent_blocking`, which
-invokes the real LLM agent. They cannot be unit-tested deterministically in
-the current design. Closing them requires a refactor to inject a fake agent
-runner (e.g. an `AgentRunner` trait) into `BatchJobExecutor`; that is out of
-scope for a test-gap pass and is recorded as a follow-up.
-
-## Priority 3 — Markdown / UI / utility corner cases
-
-### P3-1. `src/app/markdown/table_layout.rs` — degenerate dimensions
-
-- Zero-width clamp `*w <= 0.0 → 1.0` (95–106) — untested (MockMeasurer returns
-  0.0 for empty text but no test builds a layout from it).
-- Empty AST / zero-column early-return (67–75) — never asserted directly.
-- Zero/negative `col_spacing`/`row_spacing`/negative `available_width` passed
-  through un-clamped (114–115) — untested; should assert the `ftwa` panic or the
-  fallback at this layer.
-
-### P3-2. `src/app/markdown/document.rs` — toggle & BOM corners
-
-- BOM-only handling (`strip_prefix('\u{feff}')`, 45/81) — no test feeds a BOM.
-- `toggle_task` with out-of-range / absent index (113–131): silently no-op but
-  `revision` still bumps (283) — the no-op-but-revision-bumps contract is
-  unpinned.
-- Malformed multi-`---` front-matter toggle (274) — untested.
-
-### P3-3. `src/app/markdown/parser.rs` — malformed tables
-
-- No explicit malformed-table regression test (ragged `|` counts, pipe-only
-  rows, empty cells, header-only) — only implicitly covered by the random
-  `any_markdown` proptest.
-- `parse_yaml_to_pairs` (≈620) only one happy-path test; non-string values,
-  nested mappings, serialization failure, empty/null YAML value untested.
-- Proptest input cap (2048–4096 B) means huge-input blowups aren't stress-tested.
-
-### P3-4. `src/app/bus/events/messages.rs` — serde round-trip
-
-The only deserialization surface in the bus tree. `LogCategory` (30) and
-`BackgroundLogEntry` (63) derive `Serialize`/`Deserialize` but have no
-round-trip test and no unknown-variant failure test.
-
-### P3-5. `src/app/ui/` — state corner cases
-
-- `panel_layout.rs`: `set_width`/`set_right_width` with `None` (reset) / negative
-  values — only `Some(200.0)`/`Some(300.0)` tested.
-- `tabs.rs`: `tab_titles` no-file-name fallback (98–102), `close_tab` of a
-  non-existent path (63–67), case/separator-distinct handling, `heading_ids`
-  empty-skip (132), `clear_content` cache invalidation (157).
-- `persisted.rs`: corrupted non-JSON input, NaN/Inf floats in width fields,
-  `schema_version` above `CURRENT_SCHEMA_VERSION` future-proofing branch.
-- `selection.rs`: `select_file` not clearing multi-selection set (31); `prompt_dir`
-  with a parent-less tab file (`PathBuf("a.md")`).
-
-### P3-6. `src/app/utils/recycle_bin.rs` — Windows COM / trash
-
-Entirely untested (Windows COM / trash, feature `trash` on non-Windows). Error
-paths: `canonicalize` → `Io`, `CoCreateInstance`/`SetOperationFlags`/
-`SHCreateItemFromParsingName`/`DeleteItem`/`PerformOperations`/`GetAnyOperationsAborted`
-COM errors, `Aborted`, empty/nonexistent/locked/permission-denied paths.
-
-## Priority 4 — Low-value, infra, and documentation drift
-
-### P4-1. `src/agent/tools/` — thin/structural modules
-
-- `groups.rs`: `InternalToolGroup::display_name` all nine match arms (34–46) and
-  `ToolGroupState::prompt_char_count` filter_map missing-entry skip (99–104).
-- `context.rs` — see P0-4 (folded in).
-- `cache.rs`: `CACHE_TTL` (1800 s), `MAX_CACHE_ENTRIES` (256), `CURSOR_EXPIRED_ERROR`,
-  `FINAL_PAGE_HINT` semantics; per-kind session managers never asserted.
-- `policy.rs` / `observer.rs`: rejecting-policy `Err` propagation and
-  `DefaultFileObserver` fallback — no direct tests.
-- `extensions.rs`: `insert` overwrite, `extend` collision ordering, `get` missing,
-  `downcast` failure.
-- `blocking.rs`: `OnceLock` init-once / runtime-reuse, `panic!("...runtime")` path.
-
-### P4-2. `src/agent/lib/dav/mod.rs` / `src/agent/utils/*` re-export shims
-
-Pure re-export shims (`dav/mod.rs`, `utils/mod.rs`, `app/utils/*`, `bus/mod.rs`,
-`app/workspace/vfs/mod.rs`, `workspace/mod.rs`, `app/lib.rs`). No testable logic
-in-file — **document as non-issues, do not add empty test files**.
-
-### P4-3. Untested-by-design feature flags
-
-`discord` and `browser` integrations are explicitly `UNTESTED` in `Cargo.toml`
-and gated out of the default build. Plan a separate integration-test
-enablement, or mark them permanently as excluded and document why.
-
-### P4-4. Documentation drift
-
-- `src/app/ui/AGENTS.md` references stale `src/desktop/` paths; the real tree is
-  `src/app/`. Update paths or the tree overview in the root `AGENTS.md`.
-- `doc/planning/fuzzing.md` and this plan both cite `src/desktop/...` paths —
-  reconcile to `src/app/` / `src/agent/`.
-
-## Suggested execution order
-
-1. P0-1 (done), P0-2, P0-3, P0-4 — pure / unit-testable, no infra.
-2. P1-3, P1-5, P1-6 — pure-ish, reuse existing proptest/`ToolContext` harnesses.
-3. P1-4 — VfsResolver (needs temp-dir fixtures).
-4. P1-1, P1-2 — wiremock/mock-server harness.
-5. P2-3, P2-7 — bus/router + executor, need a bus-test harness.
-6. P2-1 (orchestrator), P2-2 (config_subscriber), P2-4 (file_watcher) — need
-   event/notify harnesses; biggest effort.
-7. P3-1, P3-2, P3-3, P3-4 — pure markdown/bus/UI corner cases.
-8. P4-1 thin-module tests; P4-2/P4-3 documented non-issues; P4-4 doc drift.
-
-Each step: failing test → implementation → green → run the full quality gate.
-
-## Current session status
-
-- **P0 complete** (commit c2e2705). P0-1 pagination (overflow fix + sidecar),
-  P0-2 llm_client (`retry_with_backoff` refactored into
-  `retry_with_backoff_and_sleep` with injectable timeout/sleep; error-mapping +
-  config-corner tests), P0-3 tool_executor (extracted to
-  `tool_executor_tests.rs` sidecar; parallel/record/effects tests), P0-4 context
-  (panic + default-injection tests) — all green. New sidecars use
-  `#[path = "..."] mod` per repo convention (`mod.rs`-style directories).
-- **P1 complete** (commits 2030c032, b76bd9d, 50a47e6). P1-6 mcp/error.rs
-  `from_jsonrpc` defaults + `Display`; P1-5 yaml_header read-missing;
-  P1-3 csv_db/query.rs malformed/type-mismatch/aggregate corners; P1-4 vfs.rs
-  real resolver + mock error branches; P1-2 jmap/client.rs `post` +
-  `parse_error_detail` (via mock server); P1-1 dav/client.rs PUT-failure
-  branches (via wiremock).
-- **P2 complete** (commits 09b8249, 0cbc1d5, 67bddb3). Orchestrator extracted
-  to `orchestrator_tests.rs` sidecar (18 tests over drain_*/handle_*);
-  config_subscriber timeout fallback; bus_router routing error paths;
-  file_watcher notify routing (end-to-end via real notify); print/save
-  fallback + resolved-path; pdf_converter/models `should_*` metadata-failure;
-  batch types `validate`. P2-7 batch-executor concurrency branches documented
-  as not deterministically testable (gated behind the real LLM agent).
-- **P3 complete** (commit 8f0575a). table_layout extracted to sidecar (empty
-  AST, ragged rows, zero-width clamp, negative width); document extracted to
-  `document_tests.rs` sidecar (BOM, toggle no-op revision-bump, second-marker);
-  parser malformed-table + `parse_yaml_to_pairs` corners; messages serde
-  round-trip + unknown-variant; panel_layout None/negative widths; tabs
-  close-missing/no-name/clear-cache; persisted NaN/Inf/future-version.
-- **P4 complete** (this commit). P4-1 groups display_name all-arms +
-  prompt_char_count filter_map, cache constants + singleton, policy/observer
-  rejecting/fallback, extensions insert/extend/get, blocking runtime-reuse.
-  P4-4 doc drift: `src/app/ui/AGENTS.md` `src/desktop/` paths corrected to
-  `src/app/`. P4-2/P4-3 remain documented non-issues.
-- **Quality gate green** across the branch: `cargo check`, `cargo nextest run`
-  (fastmd 1104 pass / 1 skip; fastmd-agent 833 pass / 3 skip), `cargo clippy
-  --all-targets -- -D warnings`, `cargo fmt --check`, `cargo doc --no-deps`
-  all clean. Pre-existing `mut` warnings in `registry/tests.rs` remain
-  untouched (not introduced by this work).
+| `cargo nextest` default | `1104 run: 1104 passed, 1 skipped` (fastmd 1098 + commonmark_spec 6) |
+| `cargo test` raw | same; `cargo llvm-cov` harness 1099 tests |
+| `llvm-cov` line / func / region | `83.61%` / `81.00%` / `82.76%` |
+| Impl files (`src/**/*` excl. `target`, `*_tests.rs`, `*_proptests.rs`, `e2e_tests/`) | `225` |
+| Sidecars `*_tests.rs` | `85` |
+| Impl files with *no* test companion (no sidecar + no inline `#[cfg(test)]`) | `82` |
+| Quality gate today | `check` ✓, `nextest` ✓, `clippy` 6 `unused_mut` warnings in `src/agent/tools/registry/tests.rs:716,733,747,761,834,856`, `fmt`/`doc` not run |
+
+## Coverage by Bounded Subsystem
+
+Roll-up from `llvm-cov` (lines, `total miss cov`):
+
+```
+agent/lib            9186  2498  72.8%  ← worst
+agent/tools          8440  1888  77.6%
+fastmd-tool-macros    237    69  70.9%
+app/config            692   175  74.7%
+app/export           1131   247  78.2%
+agent/context.rs      237    64  73.0%
+app/utils             605    93  84.6%  (recycle_bin 0% drags)
+app/agent            2297   330  85.6%
+app/ui              16814  2053  87.8%  (init 47%, render 37%, tree/render 57%)
+app/orchestrator      543    69  87.3%
+app/background        894    48  94.6%
+app/bus              1703   120  93.0%
+app/markdown         2761   194  93.0%
+app/workspace        1277    68  94.7%
+agent: agent_impl 94.6%, llm_client 96.9%, session 96.4%, vfs 94.6%, tool_executor 92%
+```
+
+Hot paths (`agent_impl`, `llm_client`, `bus`, `markdown`, `workspace`) are healthy. Gaps cluster in **MCP/OAuth**, **tool-registry builtins**, **app lifecycle**, **platform trash**, **proc-macro**.
+
+## Gap Inventory
+
+### Gaps by test presence — 82 files with zero companion
+
+Largest (LOC desc, real impl only — `*_tests.rs` helpers `agent/lib/mcp/tests.rs:1966`, `app/ui/app/tests.rs:1386`, `registry/tests.rs:993`, `render/tests.rs:915` excluded):
+
+```
+735  app/agent/session/browser_session.rs        — browser feature (#[cfg(feature=browser)], UNTESTED)
+509  app/integrations/discord/gateway.rs         — discord feature UNTESTED
+501  agent/lib/dav/client.rs                     — CalDAV (501 LOC, 72.33% via indirect)
+468  agent/tools/jmap/mock_server.rs             — mock
+465  agent/tools/registry/builtin/fs.rs          — 63.6% but no sidecar
+432  agent/tools/registry/builtin/strings.rs     — 132 pub items, 18% uncovered regions
+409  agent/lib/mcp/clients.rs
+375  app/ui/tree/context.rs                      — 51 pubs, 88% but no isolated Id tests
+330  fastmd-tool-macros/src/lib.rs               — 27% func
+304  agent/tools/registry/builtin/trello.rs      — 11.3%
+... + 71 facades/mods (app/lib.rs, bus/mod.rs, vfs/mod.rs, etc.)  [RUST-001] violation
+```
+
+### Gaps by line % — `llvm-cov` files <85% (missed lines)
+
+```
+  0.00   87  app/utils/recycle_bin.rs              — Windows COM IFileOperation + trash fallback
+  0.00  131  app/main.rs                           — eframe entry (exclude from gate)
+  0.00   35  app/bin/deploy.rs                     — deploy bin (exclude)
+  0.00  140  agent/lib/mcp/oauth/test_support.rs   — test helper (exclude)
+  5.38  123  app/agent/session/browser_session.rs  — browser ext
+ 11.30  204  agent/tools/registry/builtin/trello.rs
+ 13.41  155  agent/tools/registry/builtin/caldav.rs
+ 16.30  113  agent/tools/registry/builtin/csv.rs
+ 17.31  129  agent/tools/registry/builtin/carddav.rs
+ 17.65   84  agent/tools/registry/builtin/jmap.rs
+ 18.18   72  agent/tools/registry/builtin/yaml.rs
+ 18.18   81  agent/tools/registry/builtin/web.rs
+ 31.82   15  agent/tools/provider.rs
+ 35.00   26  agent/tools/registry/builtin/weather.rs
+ 37.06   90  app/ui/app/render.rs
+ 37.50    5  app/agent/session/bus_observer.rs
+ 45.51   91  app/export/pdf/save.rs
+ 46.98  202  app/ui/app/init.rs                    — 381 total
+ 47.06    9  app/ui/os_shell.rs
+ 54.40   83  app/export/print.rs
+ 54.75  319  agent/lib/mcp/oauth/flow.rs           — 705 total
+ 55.02  103  agent/lib/mcp/oauth/client.rs
+ 56.89  247  app/ui/tree/render.rs
+ 57.84  788  agent/lib/mcp/session.rs              — 1869 total
+ 58.24   38  app/agent/session/config_subscriber.rs
+ 59.39  147  agent/lib/mcp/mod.rs
+ 60.87  144  app/ui/tools_dialog.rs
+ 60.98   48  app/ui/app/mod.rs
+ 63.62  167  agent/tools/registry/builtin/fs.rs
+ 65.71   24  agent/tools/mcp/adapter.rs
+ 67.87  160  app/ui/modals.rs
+ 68.20   90  app/ui/batch_dialog.rs
+ 68.24  148  app/ui/agent_debug_window.rs
+ 70.73  331  agent/lib/dav/card.rs                 — 1131 total
+ 70.89   69  fastmd-tool-macros/src/lib.rs         — 27% func
+ 71.38  154  agent/tools/registry/mod.rs
+ 71.79   22  agent/lib/trello/client.rs
+ 72.33  166  agent/lib/dav/client.rs
+ 72.50   55  app/ui/render/mod.rs
+ 73.00   64  agent/context.rs
+ 73.52   94  app/agent/batch/prompts.rs
+ 74.14  113  app/ui/panels/center.rs
+ 74.71  175  app/config/config.rs                  — 692 total
+ 74.73   69  app/bus/events/agent.rs
+ 74.89  171  agent/lib/mcp/oauth/redirect.rs
+ 78.21   34  app/workspace/watcher/file_processor.rs
+ 78.77  210  agent/tools/jmap/email.rs
+ 80.61   19  app/export/pdf/mod.rs
+```
+
+Top 15 `<60%` account for **~1999 missed lines (24% of all misses in 6% of files)** — fixing them moves total `83.6% → ~87.5%`.
+
+## Thematic Gaps (mapped to SPEC / NFR)
+
+### T0 — Security / integrity (P0)
+
+- `agent/lib/mcp/session.rs:57.84%` (788 missed), `oauth/flow:54.75%` (319), `oauth/client:55%`, `oauth/redirect:74.9%`, `oauth/types:75.5%`, `mcp/mod:59%` — MCP spec §2.2/2.5/3.4/5.1 state machine: init handshake, version negotiation `SUPPORTED_PROTOCOL_VERSIONS` (`src/agent/lib/mcp/session.rs:169`), `CREATE_NO_WINDOW` (`src/agent/lib/mcp/session.rs:86`), timeout cap `MAX_REQUEST_TIMEOUT 600s` (`src/agent/lib/mcp/session.rs:161`), `MCP-Session-Id` DELETE 405 ack (`src/agent/lib/mcp/session.rs:578`), progress-token drop, `probe_legacy_transport`, `mark_stdio_dead`. Only ~55% exercised. `SPEC.md` `MCP-001..021` at risk, `[NFR-001][NFR-005][NFR-008]` (ERROR log + stack trace + spans for external deps) unproven.
+- `agent/lib/dav/{client,card}:72/70%` (dav/card 331 missed), `trello/client:71.8%` — external deps without span/error-contract tests (`[NFR-008]`).
+- `app/utils/recycle_bin.rs:0%` (`src/app/utils/recycle_bin.rs:11,137`) — destructive file mutation (Windows COM `CoInitializeEx`/`CoUninitialize`, `\\?\` verbatim prefix strip `src/app/utils/recycle_bin.rs:61`, `FOF_ALLOWUNDO`). 0 tests.
+
+### T1 — Product-critical wiring (P0/P1)
+
+- `app/ui/app/init.rs:46.98%` (202 missed, 381 total) + `app/ui/app/{mod,render}:60/37%` — `FastMdApp::new` (`src/app/ui/app/init.rs:70`) + `empty_state_via_bus` (`src/app/ui/app/init.rs:293`). Bus subscription order, `ToolRegistry → ArcSwap`, `spawn_config_subscription`, `BrowserSession` lazy init, persisted-state migration `schema_version` (`src/app/ui/app/init.rs:208`). `SPEC.md` `UI-001..066` drift risk.
+- `app/config/config.rs:74.7%` (175 missed, 72 funcs 24 missed) — YAML schema, token limits, cost routing `CONFIG-001..013`, `[NFR-009]` PII redaction.
+- `app/orchestrator.rs:87.3%` (69 missed) — watcher/file-event fan-out `[RUST-052]` Bus.
+- `agent/context.rs:73%`, `agent/tools/provider.rs:31.82%` — provider delegation thin.
+
+### T2 — Tool surface (P1)
+
+- All `registry/builtin/*` `11–63%` — `ToolDescriptor` impls enumerated in `registry/mod.rs:71%` (`src/agent/tools/registry/builtin/*`). **No sidecars** (`[RUST-001]`). Each must have happy/corner/failure (`[RUST-003]`) + safe/unsafe parallelism `AGENT-033`. Worst: `trello/caldav/csv/carddav/jmap/yaml/web <20%`; `fs 63%` only above 50%; `vector_search`, `web`, `jmap/email` low. Related to `SPEC.md` `TOOL-001..047`.
+
+### T3 — Desktop UI polish (P2)
+
+- `app/ui/tree/render.rs:56.89%` (247 missed), `tools_dialog:60.8%`, `modals:67.8%`, `batch_dialog:68%`, `center:74%`, `editor_egui:76%`, `agent_debug_window:68%`, `render/mod:72%`. Egui `Id` stability (`src/app/ui/AGENTS.md` §5) and conditional-render shape (`src/app/ui/AGENTS.md` §6) covered only via some `egui_kittest` snapshots (`bottom 94%, left 92%, right 97%, top 85%` OK). `tree/context.rs:88%` lacks dedicated `Id` salt regressions.
+
+### T4 — Background / export (healthy but narrow)
+
+- `file_processor 78%`, `pdf/save 45%`, `print 54%`, `typst_translator 91%` — `save.rs`/`print.rs` Typst + `rfd` dialog error paths lack failure-mode tests `[RUST-003]`. `background/models 100%` (trivial).
+
+### T5 — Intentionally low / feature-gated
+
+- `browser_session:5.38%`, `browser.rs:21 LOC` — feature `browser` `UNTESTED` (`Cargo.toml:36`).
+- `discord/gateway:509 LOC` `UNTESTED` (`Cargo.toml:33`) — `safety_proptests` covers `safety.rs` but not gateway.
+- `image-library` empty, `vector-search` conditional, `app/main.rs`/`bin/*` entry points — expected 0%, exclude from gate.
+
+### T6 — Test-infra quality
+
+- `fastmd-tool-macros/lib.rs:70.89% line, 27.27% func` — proc-macro `#[derive(ToolDescriptor)]` (`src/fastmd-tool-macros/src/lib.rs:330`). Func coverage crates; needs `trybuild` UI tests.
+- `[RUST-056]` oversized `#[cfg(test)]` blocks that should be sidecars: `registry/tests.rs:993`, `render/tests.rs:915`, `app/tests.rs:1386` — per `[RUST-056b]` prefer `tests/<name>.rs`.
+- `clock:50%`, `bus_observer:37%`, `config_subscriber:58%` — small doctrinal gaps.
+
+## Remediation Plan — Phases (no code changed in this audit)
+
+Each phase lists: objective, files/tasks, strategy, SPEC trace, acceptance.
+
+### Phase 0 — Guardrails (1–2 days) — *do first*
+
+- **0.1** Add `cargo llvm-cov` to CI (`.github/workflows`) with `--summary-only` artifact + fail if line `<85%` (ratchet to 88% after P1) or any non-excluded file `<60%` or `fastmd-tool-macros` func `<50%`. Document threshold in `DEVELOPMENT.md`. Evidence: currently 83.61% so gate ratchets up.
+- **0.2** Coverage exclusions: `app/main.rs`, `app/bin/*`, `agent/lib/mcp/oauth/test_support.rs`, and feature-gated `browser`/`discord` when feature off — via `llvm-cov` ignore or `#[coverage(off)]`. Keeps entry points from punishing gate.
+- **0.3** Fix 6 `unused_mut` warnings in `src/agent/tools/registry/tests.rs:716,733,747,761,834,856` so `cargo clippy -- -D warnings` is green (prereq per Quality Gate).
+- **0.4** Confirm `cargo fmt --check` + `cargo doc --no-deps --quiet` in CI matrix.
+
+*SPEC:* process gate for all `REQ-xxx`. *Accept:* CI fails on dip, `nextest --profile ci` green. *Effort:* small.
+
+### Phase 1 — Security & data integrity (P0) — 1 week
+
+- **1.1 `recycle_bin` 0% → 95%** (`src/app/utils/recycle_bin.rs:190`) — `RECYCLE-001`, `[RUST-005]`. Sidecar `recycle_bin_tests.rs`. Cases: canonicalize failure (non-existent → `Io`), success via temp-file, `Aborted` branch, COM errors mocked via `#[cfg(test)] trait TrashImpl` injection (avoid real COM during CI). Linux `trash::delete` mocked. Covers `[NFR-001]`.
+- **1.2 `agent/lib/mcp/session` 57.8% → 85% + `oauth/flow+client+redirect+types` 54–75% → 85%** (`src/agent/lib/mcp/session.rs:1869`, `oauth/flow.rs:705`, `client.rs:229`, `redirect.rs:681`) — `MCP-001..021`, `[NFR-001,005,008]`. Sidecars `session_tests.rs` expansion + `oauth/flow_tests.rs`, `client_tests.rs`. Narrow integration with `wiremock` (already `dev-dependency`) for HTTP: 401 `WWW-Authenticate` → `run_flow` → retry with bearer; 404 session reset; 405 DELETE ack; `probe_legacy_transport` GET `event: endpoint`; stdio `build_stdio_command` `CREATE_NO_WINDOW` flag; timeout cap `MAX_REQUEST_TIMEOUT`; progress-token drop on error; unsupported version disconnect `SUPPORTED_PROTOCOL_VERSIONS`. No real MCP server needed.
+- **1.3 `agent/lib/dav/{client,card,cal}` 72/70% → 85% + `trello/client 71.8% →85%`** (`src/agent/lib/dav/client.rs:501`, `card.rs:1131`) — `TOOL-*` DAV/Trello. Sidecar for `dav/client.rs` (currently none); cover parsers, auth, error mapping, `[NFR-008]` spans.
+
+*Impact:* closes ~1293 missed lines (recycle 87 + mcp 788+319+103+171 + dav 331+166). Moves total `83.6% → ~86%` alone.
+
+### Phase 2 — Orchestration & config (P0/P1) — 1 week
+
+- **2.1 `app/ui/app/init 47% →80%` + `render 37% →75%` + `app/mod 60% →80%`** (`src/app/ui/app/init.rs:418`, `render.rs:143`, `mod.rs:123`) — `UI-001..066`, `[RUST-052]`. Expand `init_tests.rs` (20 tests) + offscreen harness `src/app/ui/test_helpers/offscreen.rs:76.92%`. Cases: `configure_dark_theme` visuals, `new` bus-order, `ToolRegistry` swap assertion, `empty_state_via_bus` migration `schema_version < CURRENT` clears `font_size_scale` (`src/app/ui/app/init.rs:208`), `agent` vs `config_reader` drain, `render` `request_repaint` tick.
+- **2.2 `app/config/config.rs 74.7% →85%` + `bus/events/agent.rs 74.7%`** (`src/app/config/config.rs:692`, `src/app/bus/events/agent.rs:273`) — `CONFIG-001..013`, `AGENT-005`. Parameterized cases: missing `config.yaml`, bad YAML, token-limit validation, model routing (`AppConfig::default()`), secret redaction `[NFR-009]`.
+- **2.3 `app/workspace/watcher/file_processor 78% →90%` + `app/export/{pdf/save 45%, print 54%}`** (`src/app/workspace/watcher/file_processor.rs:156`, `src/app/export/pdf/save.rs:167`, `src/app/export/print.rs:182`) — `REQ-301..504`, `VFS-001..130`. Tests via temp-dir: debounce, `..` traversal rejection, Typst engine failure, `rfd` cancel, `pdf_backing_tracker` races. Existing `save_tests.rs:45%`, `print.rs` expand.
+
+### Phase 3 — Tool surface (P1) — 1.5 weeks
+
+*Goal:* every `registry/builtin/*` gets `<builtin>_tests.rs` sidecar, bringing builtin avg `~18% → >85%` and `agent/tools 77.6% → 85%+`.
+
+Order by risk:
+
+1. `fs 63% →90%` (`src/agent/tools/registry/builtin/fs.rs:465`) — local FS, highest blast radius: permission errors, `..` rejection, parallel policy safe/unsafe (`TOOL-001..`), cancel/stop.
+2. `web 18% →85%` (`src/agent/tools/registry/builtin/web.rs:126`, `src/agent/tools/web.rs:81%`) — timeout, redirect, non-2xx diagnostic.
+3. `yaml 18% + csv 16% →85%` (`src/agent/tools/registry/builtin/{yaml,csv}.rs`) — malformed input, ragged rows, schema inference.
+4. `jmap 17% + jmap/email 78% →90%` (`src/agent/tools/registry/builtin/jmap.rs:124`, `src/agent/tools/jmap/email.rs:78%`, `mock_server.rs:468`) — mock_server contracts, 401/403, pagination.
+5. `caldav/carddav 13/17% →85%` (`src/agent/tools/registry/builtin/{caldav,carddav}.rs:202/189`) — DAV XML failure modes.
+6. `trello 11% →85%` (`src/agent/tools/registry/builtin/trello.rs:304`) — board/card CRUD mocks.
+7. `weather 35% →85%` (`src/agent/tools/registry/builtin/weather.rs:55`) — geocoding/open-meteo mocks.
+
+For each: `cargo nextest` unit + `wiremock`/`mock_server` narrow integration (`[RUST-004]`) + `proptest` where input-driven. Also `provider.rs:31% →85%` (`src/agent/tools/provider.rs:22`), `registry/mod.rs:71% →85%` (`src/agent/tools/registry/mod.rs:538`), `registry/groups` (`src/agent/tools/registry/groups.rs:105`).
+
+*Also:* `fastmd-tool-macros 27% func →75%` (`src/fastmd-tool-macros/src/lib.rs:330`) — `trybuild` UI tests for derive macro happy/error diagnostics.
+
+*Impact:* top 15 `<60%` hold ~1999 missed lines; closing them → `83.6% → ~87.5%`. Full P1 `~88–90%`.
+
+### Phase 4 — UI panels & editors (P2) — 1 week
+
+- **4.1 `ui/tree/render 56.8% →85%` + `tree/context 88% →95%`** (`src/app/ui/tree/render.rs:573`, `context.rs:168`) — `Id` stability (`src/app/ui/AGENTS.md` §5 salted keys), `flatten`/`handlers` 95/98% but render lags. Align with `doc/distill/egui-kittest.md` snapshot pattern. Then `tools_dialog 60% →85%` (`src/app/ui/tools_dialog.rs:368`), `modals 67% →85%` (`src/app/ui/modals.rs:498`), `batch_dialog 68%` (`src/app/ui/batch_dialog.rs:283`), `center 74%` (`src/app/ui/panels/center.rs:437`), `editor_egui 76%` (`src/app/ui/editor_egui.rs:178`), `agent_debug_window 68%` (`src/app/ui/agent_debug_window.rs:466`), `render/mod 72%` (`src/app/ui/render/mod.rs:200`).
+- **4.2 `ui/test_helpers/offscreen 76% →90%`** (`src/app/ui/test_helpers/offscreen.rs:247`) — enabler for 4.1.
+- **4.3 `render/table/*`, `yaml_table`, `selection` etc.** — `cell 91%` OK but `configured 99%` vs `render 72%` shows harness gap.
+
+### Phase 5 — Feature-gated & residual (P3 backlog)
+
+- **5.1** Feature flag decision: `discord UNTESTED`, `browser UNTESTED`, `image-library UNFINISHED` (`Cargo.toml:31,36,39`). Either exclude from gate + document `SPEC.md` Optional Feature, or schedule `browser_session 5% →70%` with Playwright mock if the feature ships. Current audit excludes them; drift flagged per `[RUST-041]`.
+- **5.2** Extract oversized `tests.rs` into sidecars/tests/: `ui/app/tests:1386`, `registry/tests:993`, `render/tests:915` per `[RUST-056]/[RUST-056b]` (facade-only `lib.rs` `[RUST-054]`).
+- **5.3** Add missing proptests for `csv_db/schema`, `registry/builtin/*`, `tool_call_dispatch` (`64%` `tool_call_dispatch_proptests`).
+- **5.4** `clock:50%` (`src/app/utils/clock.rs:6`), `bus_observer:37%` (`src/app/agent/session/bus_observer.rs:21`), `config_subscriber:58%` (`src/app/agent/session/config_subscriber.rs:91`) — 3–5 tests each to 95%.
+
+## Suggested Execution Order
+
+1. Phase 0 guardrails (stop bleed).
+2. Phase 1.1 recycle_bin + 1.2 MCP OAuth/session (security).
+3. Phase 2.1 init/render (wiring) — unblocks UI.
+4. Phase 3. fs/web + provider/registry, then yaml/csv, jmap, caldav/carddav, trello/weather, macro.
+5. Phase 2.2 config + 2.3 file_processor/save/print.
+6. Phase 4 tree/render + panels/editors (needs offscreen first).
+7. Phase 5 residual + flag decision + doc drift.
+
+Each step: failing test → implementation → green → full quality gate. Estimate: **P0 (0+1) ~1.5w**, **P1 (2+3) ~2.5w**, **P2 (4) ~1w**, total ~5 weeks to 88–90%.
+
+## Estimated Impact
+
+| Milestone | Missed closed | Line % | Function % |
+|---|---|---|---|
+| Baseline | — | 83.61% | 81.00% |
+| After 0 fix clippy + exclusions | 0 | ~83.8% | ~82% |
+| After top 15 `<60%` (P1) | ~1200 | ~86% | ~83% |
+| After full P0+P1 (Phases 1–3) | ~2500 | ~88.5% | ~87% |
+| After P2 UI polish | ~3500 | ~90.5% | ~89% |
+
+Per-file gate `<60%` eliminated after Phase 3 (only `main/bin/browser/discord` excluded).
+
+## Verification (for implementers)
+
+```powershell
+cargo check --quiet
+cargo nextest run --profile ci --status-level fail --show-progress none  # 1104+ new, no flake (default retries 2)
+cargo llvm-cov --workspace --summary-only  # gate: line >=85% now, >=88% after P1, per-file >=60%
+cargo clippy -- -D warnings
+cargo fmt --check
+cargo doc --no-deps --quiet
+```
+
+Each new sidecar must: live as `<file>_tests.rs` sibling (`[RUST-001]`), impl `//!` doc ends with `//! Unit tests live in the sibling '<filename>.rs' sidecar.` (`[RUST-057]`), keep modules `<4096 lines` (`[RUST-053]`), split large functions (`[RUST-023]`), use `pure` helpers (`[RUST-020]`), and cite `REQ-xxx`/`TOOL-xxx`/`MCP-xxx` in `//!`/`///` (`[RUST-040]`). Happy + corner + failure paths required (`[RUST-003]`).
+
+## History (2026-08-26 error-path plan — complete)
+
+Summary: the 2026-08-26 audit split gaps into P0 core-agent error paths and P1 protocol/IO paths, then P2 lifecycle and P3 markdown/UI corners. As of `349a0d6` all were completed on `chore/quality-pass`:
+
+- **P0 complete** (c2e2705): `pagination` overflow fix + sidecar; `llm_client` `retry_with_backoff_and_sleep` injectable; `tool_executor` sidecar; `context` panic/default-injection.
+- **P1 complete** (2030c032, b76bd9d, 50a47e6): `mcp/error` defaults; `yaml_header` missing; `csv_db/query` malformed/aggregates; `vfs` resolver + mock; `jmap/client` `post` + `parse_error_detail`; `dav/client` PUT failures (wiremock).
+- **P2 complete** (09b8249, 0cbc1d5, 67bddb3): orchestrator sidecar (18 tests); config_subscriber timeout; bus_router routing; file_watcher notify routing; print/save fallback; pdf_converter/models `should_*`; batch `validate` (+ executor concurrency documented as not deterministically testable without injected `AgentRunner`).
+- **P3 complete** (8f0575a): table_layout sidecar; document BOM/toggle; parser malformed + `parse_yaml_to_pairs`; messages serde; panel_layout/tabs/persisted.
+- **P4 complete** (349a0d6): `groups` display_name, `cache` constants, `policy`/`observer`/`extensions`/`blocking`, doc drift `src/desktop/` → `src/app/` in `src/app/ui/AGENTS.md`.
+- **Quality gate then:** `cargo check`, `cargo nextest` (fastmd 1104 pass/1 skip; fastmd-agent 833 pass/3 skip), `clippy --all-targets -D warnings`, `fmt`, `doc` clean.
+
+This plan was archived from `doc/planning/close-test-gaps.md:378` on 2026-08-27 for reference; the new coverage plan above supersedes it for the coverage-percentage goal.
+
+## Appendix — Raw Evidence
+
+- `cargo llvm-cov --workspace --summary-only` output saved locally to `C:\Users\mkuhn\AppData\Local\Temp\opencode\cov.txt` (not committed): `TOTAL 50771 8320 83.61%`, worst files listed above.
+- Sidecar scan: `Get-ChildItem -Recurse -Filter "*.rs" src` → 336 files; 85 `*_tests.rs`; 82 impl files with no companion (see GAP inventory).
+- Previous audit file cross-links updated: `ARCHITECTURE_C4.md` authoritative for module boundaries (`[RUST-040]`), `SPEC.md` not edited per `[RUST-043]`.
