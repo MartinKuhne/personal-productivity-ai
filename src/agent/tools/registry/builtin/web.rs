@@ -1,4 +1,6 @@
 //! Web tool implementations for the tool registry.
+//!
+//! Unit tests live in the sibling `web_tests.rs` sidecar.
 
 use crate::tools::Tool;
 use crate::tools::context::ToolContext;
@@ -124,3 +126,7 @@ fn registered<T: Tool + 'static>(tool: T) -> RegisteredTool {
         executor: Arc::new(tool),
     }
 }
+
+#[cfg(test)]
+#[path = "web_tests.rs"]
+mod tests;
