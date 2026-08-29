@@ -143,6 +143,43 @@ mod tests {
     }
 
     #[test]
+    fn test_tool_read_yaml_header_missing_file() {
+        let dir = tempdir().unwrap();
+        let file_path = dir.path().join("missing.md");
+
+        let result = tool_read_yaml_header(&test_ctx(), file_path.to_str().unwrap());
+        let err = result.unwrap_err();
+        assert!(
+            err.starts_with("Failed to read file:"),
+            "unexpected error: {}",
+            err
+        );
+    }
+
+    #[test]
+    fn test_tool_write_yaml_header_new_file_preserves_no_leading_whitespace() {
+        let dir = tempdir().unwrap();
+        let file_path = dir.path().join("fresh.md");
+
+        let producer = noop_producer();
+        tool_write_yaml_header(
+            &test_ctx(),
+            file_path.to_str().unwrap(),
+            Some("Title"),
+            Some("Summary"),
+            None,
+            None,
+            &*producer,
+        )
+        .unwrap();
+
+        let content = fs::read_to_string(&file_path).unwrap();
+        assert!(content.starts_with("---\n"));
+        assert!(content.contains("title: Title"));
+        assert!(content.contains("summary: Summary"));
+    }
+
+    #[test]
     fn test_tool_read_yaml_header_no_header() {
         let dir = tempdir().unwrap();
         let file_path = dir.path().join("test.md");

@@ -20,6 +20,8 @@ pub mod pagination;
 #[cfg(test)]
 mod group_tests;
 #[cfg(test)]
+mod pagination_tests;
+#[cfg(test)]
 mod tests;
 
 pub use crate::tools::cache;
@@ -40,7 +42,7 @@ use crate::tools::RegisteredTool;
 use crate::tools::context::ToolContext;
 use crate::tools::mcp::McpToolAdapter;
 use crate::tools::{Safety, Tool, ToolDispatcher, ToolOutcome};
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, HashMap};
 use std::sync::Arc;
 
 /// Central catalog of agent tools, both built-in and dynamic MCP tools,
@@ -53,10 +55,8 @@ pub struct ToolRegistry {
     /// `Arc<dyn Tool>` executor (used by the dispatcher at run
     /// time). See [`crate::tools::RegisteredTool`].
     tools: BTreeMap<String, RegisteredTool>,
-    /// Reverse index: which group owns each tool? Built at registration.
-    tool_to_group: BTreeMap<String, ToolGroupId>,
-    /// Per-group state, rebuilt by [`ToolRegistry::refresh_state`].
-    group_state: BTreeMap<ToolGroupId, ToolGroupState>,
+    /// The single source of truth for group error status
+    group_errors: HashMap<ToolGroupId, ToolGroupError>,
     /// MCP client manager — owns transport, sessions, and OAuth.
     mcp_manager: Arc<McpClients>,
 }
@@ -65,7 +65,7 @@ impl std::fmt::Debug for ToolRegistry {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("ToolRegistry")
             .field("tools", &self.tools.keys().collect::<Vec<_>>())
-            .field("group_state", &self.group_state)
+            .field("group_errors", &self.group_errors)
             .field("mcp_manager", &"<McpClients>")
             .finish()
     }
@@ -83,8 +83,7 @@ impl ToolRegistry {
         let mcp_manager = Arc::new(McpClients::new());
         let mut mgr = Self {
             tools: BTreeMap::new(),
-            tool_to_group: BTreeMap::new(),
-            group_state: BTreeMap::new(),
+            group_errors: HashMap::new(),
             mcp_manager,
         };
         builtin::register_all_builtins(&mut mgr);
@@ -96,17 +95,14 @@ impl ToolRegistry {
     /// Register a tool from a [`RegisteredTool`] entry. The
     /// entry's [`crate::tools::ToolDescriptor`] is the source of metadata; the
     /// group is taken from the descriptor so the call site doesn't
-    /// have to know which family a tool belongs to. The legacy
-    /// `Box<dyn Tool>` registration path is gone — providers hand
-    /// the registry pre-built entries.
-    pub fn register_registered_tool(&mut self, entry: RegisteredTool) {
-        let name = entry.descriptor.name.to_string();
-        let group = entry.descriptor.group.clone();
-        self.tool_to_group.insert(name.clone(), group);
-        self.tools.insert(name, entry);
+    /// have to know which family a tool belongs to.
+    pub fn register(&mut self, entry: RegisteredTool) {
+        self.tools.insert(entry.descriptor.name.to_string(), entry);
     }
 
-    /// Register a dynamic MCP tool into this manager.
+    /// Convenience for registering a newly-discovered MCP tool. Wraps
+    /// the dynamic descriptor and executor in a [`RegisteredTool`] and
+    /// inserts it into the catalog.
     pub fn register_mcp_tool(
         &mut self,
         server_name: impl Into<String>,
@@ -115,19 +111,20 @@ impl ToolRegistry {
         parameters: serde_json::Value,
     ) {
         let server_name = server_name.into();
-        let tool_name = tool_name.into();
+        let remote_name = tool_name.into();
+        let prefixed_name = format!("{}/{}", server_name, remote_name);
+
         let adapter = Arc::new(McpToolAdapter::from_dynamic_source(
             &server_name,
-            &tool_name,
+            &prefixed_name,
+            &remote_name,
             description,
             parameters,
             self.mcp_manager.clone(),
         ));
         let descriptor = adapter.descriptor().clone();
-        self.tool_to_group
-            .insert(tool_name.clone(), ToolGroupId::Mcp(server_name));
         self.tools.insert(
-            tool_name,
+            prefixed_name,
             RegisteredTool {
                 descriptor: Arc::new(descriptor),
                 executor: adapter,
@@ -138,8 +135,8 @@ impl ToolRegistry {
     // ---- Catalog queries (used by the agent loop) ----
 
     /// Look up a tool executor by name.
-    pub fn tool(&self, name: &str) -> Option<&dyn Tool> {
-        self.tools.get(name).map(|t| t.executor.as_ref())
+    pub fn get_executor(&self, name: &str) -> Option<Arc<dyn crate::tools::Tool>> {
+        self.tools.get(name).map(|t| t.executor.clone())
     }
 
     /// Look up the static [`crate::tools::ToolDescriptor`]
@@ -152,9 +149,12 @@ impl ToolRegistry {
     /// Look up the group that owns a given tool. Returns `None` for
     /// unknown tools.
     pub fn tool_group(&self, name: &str) -> Option<ToolGroupId> {
-        self.tool_to_group.get(name).cloned()
+        self.tools.get(name).map(|t| t.descriptor.group.clone())
     }
 
+    pub fn group_of(&self, name: &str) -> Option<ToolGroupId> {
+        self.tools.get(name).map(|t| t.descriptor.group.clone())
+    }
     /// Parallel-safety classification of a tool. Unknown names are
     /// conservatively classified as [`Safety::Mutating`].
     pub fn safety_of(&self, name: &str) -> Safety {
@@ -163,10 +163,10 @@ impl ToolRegistry {
             .unwrap_or(Safety::Mutating)
     }
 
-    /// Execute a tool by name.
-    pub fn execute(
+    /// Execute a tool by name (called by `ToolExecutor`).
+    pub fn execute_tool(
         &self,
-        ctx: &ToolContext,
+        ctx: &crate::tools::context::ToolContext,
         name: &str,
         args: &str,
     ) -> Result<serde_json::Value, crate::tools::ToolError> {
@@ -207,23 +207,6 @@ impl ToolRegistry {
         }))
     }
 
-    /// Build the JSON-Schema tool list for the LLM, honouring both
-    /// per-group enable flags and the prompt-content rule in
-    /// [`Tool::is_enabled`].
-    pub fn get_schema(
-        &self,
-        config: &crate::config::AgentConfig,
-        prompt: &str,
-    ) -> serde_json::Value {
-        let mut tools = Vec::new();
-        for name in self.tools.keys() {
-            if let Some(fragment) = self.schema_fragment(name, config, prompt) {
-                tools.push(fragment);
-            }
-        }
-        serde_json::Value::Array(tools)
-    }
-
     /// Names of every tool that is parallel-safe (i.e. classified as
     /// [`Safety::ReadOnly`]). Used by the agent loop to identify the
     /// "safe" set up-front.
@@ -235,10 +218,46 @@ impl ToolRegistry {
             .collect()
     }
 
-    /// Length (in characters) of the JSON-Schema entry that a single
-    /// tool contributes to the LLM `tools` array, or `None` if the
-    /// tool is not currently enabled (per [`Tool::is_enabled`]).
-    /// Per TOOL-015.
+    /// Build the JSON-Schema tool list for the LLM, honouring both
+    /// the statically declared feature-flag requirements and the
+    /// prompt-content gating rules.
+    pub fn schema_len(&self, config: &crate::config::AgentConfig, prompt: &str) -> usize {
+        self.tools
+            .keys()
+            .filter(|name| self.schema_fragment(name, config, prompt).is_some())
+            .count()
+    }
+
+    /// Retrieve the full JSON schema array for all enabled tools.
+    /// This is the payload sent to the LLM.
+    pub fn get_schema(
+        &self,
+        config: &crate::config::AgentConfig,
+        prompt: &str,
+    ) -> serde_json::Value {
+        let mut tools_schema = Vec::new();
+
+        // 1) All internal and discovered tools.
+        for tool_name in self.tools.keys() {
+            if let Some(mut fragment) = self.schema_fragment(tool_name, config, prompt) {
+                // If it's a dynamic MCP tool, the executor might have additional schema validation rules
+                if let Some(mcp) = self.tools.get(tool_name) {
+                    #[allow(clippy::collapsible_if)]
+                    if let ToolGroupId::Mcp(server_name) = &mcp.descriptor.group {
+                        fragment["mcp_server"] = serde_json::json!(server_name);
+                    }
+                }
+                tools_schema.push(fragment);
+            }
+        }
+
+        // Return array of objects.
+        serde_json::Value::Array(tools_schema)
+    }
+
+    /// Returns the exact number of bytes the tool schema will consume
+    /// for a single tool. Used by the tools dialog UI to display a
+    /// cost/budget hint.
     pub fn tool_char_count(
         &self,
         name: &str,
@@ -249,79 +268,49 @@ impl ToolRegistry {
         Some(serde_json::to_string(&entry).map(|s| s.len()).unwrap_or(0))
     }
 
-    // ---- Group state (used by the UI dialog) ----
+    // ---- Group State (used by UI) ----
 
-    /// Recompute the per-group view from the current `AppConfig` and
-    /// the current catalog. Cheap (no I/O). Called on every config
-    /// change and on every dialog open.
-    pub fn refresh_state(&mut self, config: &crate::config::AgentConfig) {
-        // For each known group, rebuild the state from the catalog
-        // and the config. We carry forward the `last_error` from the
-        // previous view: a successful `Execution` clears it via
-        // `record_error` (see TOOL-021); UI `clear_error` and
-        // successful `refresh_mcp_tools` for `Discovery` / `ConfigInvalid`
-        // also clear it.
-        let prev = std::mem::take(&mut self.group_state);
+    /// Return a dynamically computed snapshot of the UI state for the tools dialog.
+    pub fn groups(&self, config: &crate::config::AgentConfig) -> Vec<ToolGroupState> {
+        let mut groups: HashMap<ToolGroupId, ToolGroupState> = HashMap::new();
 
-        // 1) Build a set of every group the catalog knows about.
-        let mut next: BTreeMap<ToolGroupId, ToolGroupState> = BTreeMap::new();
-        for (tool_name, group_id) in &self.tool_to_group {
-            let entry = next.entry(group_id.clone()).or_insert_with(|| {
-                let (display_name, kind) = match group_id {
-                    ToolGroupId::Internal(g) => {
-                        (g.display_name().to_string(), ToolGroupKind::Internal)
-                    }
-                    ToolGroupId::Mcp(name) => {
-                        // Determine transport type from config to show
-                        // "MCP (stdio)" vs "MCP (remote)" in the UI.
-                        let transport_kind = config
-                            .mcp_servers
-                            .get(name)
-                            .map(|e| match e.config() {
-                                McpServerConfig::Stdio { .. } => ToolGroupKind::McpStdio,
-                                McpServerConfig::Sse { .. } => ToolGroupKind::McpRemote,
-                            })
-                            .unwrap_or(ToolGroupKind::McpRemote);
-                        (name.clone(), transport_kind)
-                    }
+        // 1) Group all known tools by their group_id.
+        for (tool_name, tool) in &self.tools {
+            let group_id = &tool.descriptor.group;
+            let entry = groups.entry(group_id.clone()).or_insert_with(|| {
+                let name = match group_id {
+                    ToolGroupId::Internal(g) => g.display_name().to_owned(),
+                    ToolGroupId::Mcp(name) => name.clone(),
                 };
-                let enabled = match group_id {
-                    ToolGroupId::Internal(g) => is_internal_group_enabled(config, *g),
-                    ToolGroupId::Mcp(name) => {
-                        config.mcp_servers.get(name).is_some_and(|e| e.is_enabled())
-                    }
-                };
-                // `needs_auth` lives in the MCP client manager's own
-                // state (set when a 401 is observed). Internal groups
-                // never need auth.
-                let needs_auth = match group_id {
-                    ToolGroupId::Internal(_) => false,
-                    ToolGroupId::Mcp(name) => self.mcp_manager.needs_auth_now(name),
+                let kind = match group_id {
+                    ToolGroupId::Internal(_) => ToolGroupKind::Internal,
+                    ToolGroupId::Mcp(n) => match config.mcp_servers.get(n).map(|e| e.config()) {
+                        Some(McpServerConfig::Sse { .. }) => ToolGroupKind::McpRemote,
+                        _ => ToolGroupKind::McpStdio,
+                    },
                 };
                 ToolGroupState {
                     id: group_id.clone(),
-                    display_name,
+                    display_name: name,
                     kind,
-                    enabled,
-                    needs_auth,
+                    enabled: crate::tools::descriptor::group_enabled(config, group_id),
+                    needs_auth: match group_id {
+                        ToolGroupId::Mcp(n) => self.mcp_manager.needs_auth_now(n),
+                        _ => false,
+                    },
                     tool_names: Vec::new(),
                     parallel_safe: true,
-                    last_error: prev.get(group_id).and_then(|s| s.last_error.clone()),
+                    last_error: self.group_errors.get(group_id).cloned(),
                 }
             });
             entry.tool_names.push(tool_name.clone());
-            let safety = self
-                .tools
-                .get(tool_name)
-                .map(|t| t.descriptor.safety)
-                .unwrap_or(Safety::Mutating);
-            if safety != Safety::ReadOnly {
+            if tool.descriptor.safety != Safety::ReadOnly {
                 entry.parallel_safe = false;
             }
         }
 
         // Sort tool names for stable UI.
-        for s in next.values_mut() {
+        for s in groups.values_mut() {
             s.tool_names.sort();
         }
 
@@ -334,30 +323,36 @@ impl ToolRegistry {
                 McpServerConfig::Stdio { .. } => ToolGroupKind::McpStdio,
                 McpServerConfig::Sse { .. } => ToolGroupKind::McpRemote,
             };
-            next.entry(id.clone()).or_insert_with(|| ToolGroupState {
-                id,
+            groups.entry(id.clone()).or_insert_with(|| ToolGroupState {
+                id: id.clone(),
                 display_name: name.clone(),
                 kind: transport_kind,
                 enabled: entry.is_enabled(),
                 needs_auth: self.mcp_manager.needs_auth_now(name),
                 tool_names: Vec::new(),
                 parallel_safe: true,
-                last_error: prev
-                    .get(&ToolGroupId::Mcp(name.clone()))
-                    .and_then(|s| s.last_error.clone()),
+                last_error: self.group_errors.get(&id).cloned(),
             });
         }
 
-        // 3) Drop `last_error` from groups that no longer exist
-        //    (e.g. an MCP server that was removed from the config).
-        //    Done by `std::mem::take` above; no further work.
-
-        self.group_state = next;
+        let mut res: Vec<_> = groups.into_values().collect();
+        // Keep MCP groups sorted by name, but internal tools at the top.
+        res.sort_by(|a, b| match (&a.id, &b.id) {
+            (ToolGroupId::Internal(ia), ToolGroupId::Internal(ib)) => ia.cmp(ib),
+            (ToolGroupId::Internal(_), ToolGroupId::Mcp(_)) => std::cmp::Ordering::Less,
+            (ToolGroupId::Mcp(_), ToolGroupId::Internal(_)) => std::cmp::Ordering::Greater,
+            (ToolGroupId::Mcp(na), ToolGroupId::Mcp(nb)) => na.cmp(nb),
+        });
+        res
     }
 
-    pub fn groups_snapshot(&mut self, config: &AgentConfig) -> Vec<ToolGroupState> {
-        self.refresh_state(config);
-        self.groups()
+    /// Single-group lookup.
+    pub fn group(
+        &self,
+        id: &ToolGroupId,
+        config: &crate::config::AgentConfig,
+    ) -> Option<ToolGroupState> {
+        self.groups(config).into_iter().find(|g| g.id == *id)
     }
 
     pub fn mcp_manager(&self) -> Arc<McpClients> {
@@ -372,31 +367,15 @@ impl ToolRegistry {
     pub fn update_and_refresh(&mut self, config: &crate::config::AgentConfig) {
         self.mcp_manager.update_config(config);
         crate::tools::blocking::block_on(async { self.refresh_mcp_tools(config).await });
-        self.refresh_state(config);
     }
 
     pub fn get_tools_schema(
-        &mut self,
+        &self,
         config: &crate::config::AgentConfig,
         prompt: &str,
     ) -> serde_json::Value {
-        self.mcp_manager.update_config(config);
-        crate::tools::blocking::block_on(async { self.refresh_mcp_tools(config).await });
-        self.refresh_state(config);
         self.get_schema(config, prompt)
     }
-
-    /// All groups, sorted deterministically by id.
-    pub fn groups(&self) -> Vec<ToolGroupState> {
-        self.group_state.values().cloned().collect()
-    }
-
-    /// Single-group lookup.
-    pub fn group(&self, id: &ToolGroupId) -> Option<&ToolGroupState> {
-        self.group_state.get(id)
-    }
-
-    // ---- Group mutations (used by the UI dialog) ----
 
     /// Flip the enabled flag for a group, persisting into the
     /// supplied `AgentConfig`. The change takes effect on the next
@@ -414,42 +393,32 @@ impl ToolRegistry {
 
     // ---- Error tracking ----
 
-    /// Record a per-group error. Replaces any previous `last_error`
-    /// for the same group. Per TOOL-021, a successful `Execution`
-    /// error is cleared by passing `None` via [`ToolRegistry::clear_error`].
-    pub fn record_error(&mut self, group: &ToolGroupId, err: ToolGroupError) {
-        if let Some(state) = self.group_state.get_mut(group) {
-            state.last_error = Some(err);
-        }
+    /// Clear any persistent error associated with this group.
+    pub fn clear_error(&mut self, group_id: &ToolGroupId) {
+        self.group_errors.remove(group_id);
     }
 
-    /// Clear the recorded error for a group. Intended to be called by
-    /// the UI "Restart" link (UI-060) or by the agent loop after a
-    /// successful `Execution`.
-    pub fn clear_error(&mut self, group: &ToolGroupId) {
-        if let Some(state) = self.group_state.get_mut(group) {
-            state.last_error = None;
-        }
+    /// Record a persistent error against this group (so the UI can
+    /// show a ⚠ icon instead of silently hiding the tools).
+    pub fn record_error(&mut self, group_id: &ToolGroupId, err: ToolGroupError) {
+        self.group_errors.insert(group_id.clone(), err);
     }
 
     // ---- MCP lifecycle ----
 
-    /// Refresh the MCP catalog: re-run `tools/list` against every
-    /// configured server, register the discovered tools, and record
-    /// `Discovery` errors on the affected group when a server fails.
+    /// Reconciles `self.tools` with `config.mcp_servers` by calling
+    /// `tools/list` on any valid servers.
+    ///
+    /// This MUST be called asynchronously from a task or inside `block_on`.
     pub async fn refresh_mcp_tools(&mut self, config: &crate::config::AgentConfig) {
         // Remove tools that came from a server whose config is gone or
         // whose config changed.
         let valid_servers: Vec<String> = config.mcp_servers.keys().cloned().collect();
-        self.tools.retain(|name, _| {
-            match self.tool_to_group.get(name) {
-                Some(ToolGroupId::Mcp(server)) => valid_servers.contains(server),
+        self.tools.retain(|_name, entry| {
+            match &entry.descriptor.group {
+                ToolGroupId::Mcp(server) => valid_servers.contains(server),
                 _ => true, // keep internal tools
             }
-        });
-        self.tool_to_group.retain(|_name, group| match group {
-            ToolGroupId::Mcp(server) => valid_servers.contains(server),
-            _ => true,
         });
 
         for server_name in valid_servers {
@@ -473,9 +442,7 @@ impl ToolRegistry {
                         "Failed to discover tools from MCP server; skipping"
                     );
                     // Record a `Discovery` error on the group so the
-                    // dialog can surface it. We need to `refresh_state`
-                    // first so the group exists, then record.
-                    self.refresh_state(config);
+                    // dialog can surface it.
                     self.record_error(
                         &ToolGroupId::Mcp(server_name.clone()),
                         ToolGroupError::now(
@@ -483,11 +450,10 @@ impl ToolRegistry {
                             format!("tools/list failed: {e}"),
                         ),
                     );
-                    return;
+                    continue; // Do not abort discovery for remaining servers
                 }
             }
         }
-        self.refresh_state(config);
     }
 
     /// Snapshot of the tool descriptors the manager currently knows
@@ -531,21 +497,6 @@ impl ToolDispatcher for ToolRegistry {
 // Group-enabled helpers — thin wrappers over the AppConfig fields so the
 // `set_group_enabled` method can be a single `match`.
 // ---------------------------------------------------------------------------
-
-fn is_internal_group_enabled(config: &crate::config::AgentConfig, g: InternalToolGroup) -> bool {
-    use InternalToolGroup::*;
-    match g {
-        Filesystem => config.tool_groups.filesystem,
-        Web => config.tool_groups.web,
-        Browser => config.tool_groups.browser,
-        Email => config.tool_groups.email,
-        Contacts => config.tool_groups.contacts,
-        Calendar => config.tool_groups.calendar,
-        CsvDb => config.tool_groups.csv_db,
-        Weather => config.tool_groups.weather,
-        Trello => config.tool_groups.trello,
-    }
-}
 
 fn set_internal_group_enabled(config: &mut AgentConfig, g: InternalToolGroup, on: bool) {
     use InternalToolGroup::*;

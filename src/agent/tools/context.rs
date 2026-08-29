@@ -1,4 +1,6 @@
 //! Tool context — provides tools with access to the global `AppConfig` and the file event bus, plus safe virtual-path resolution.
+//!
+//! Unit tests live in the sibling `context_tests.rs` sidecar.
 
 use crate::config::AgentConfig;
 use std::path::{Path, PathBuf};
@@ -225,3 +227,7 @@ impl ToolContextBuilder {
         }
     }
 }
+
+#[cfg(test)]
+#[path = "context_tests.rs"]
+mod context_tests;

@@ -97,21 +97,20 @@ fn test_tools_dialog_renders_restart_button_on_error() {
     // Populate the global manager's group state so `record_error`
     // has a row to attach the error to, then record it.
     {
-        app.orchestrator.tool_context.rcu(|bundle| {
-            let mut new_bundle = (**bundle).clone();
-            new_bundle.registry.refresh_state(app.config());
-            new_bundle
-        });
         let id = crate::agent::tools::registry::ToolGroupId::Internal(
             crate::agent::tools::registry::InternalToolGroup::Filesystem,
         );
-        tm.record_error(
-            &id,
-            crate::agent::tools::registry::ToolGroupError::now(
-                crate::agent::tools::registry::ToolErrorKind::Execution,
-                "Permission denied".to_string(),
-            ),
-        );
+        app.orchestrator.tool_context.rcu(|bundle| {
+            let mut new_bundle = (**bundle).clone();
+            new_bundle.registry.record_error(
+                &id,
+                crate::agent::tools::registry::ToolGroupError::now(
+                    crate::agent::tools::registry::ToolErrorKind::Execution,
+                    "Permission denied".to_string(),
+                ),
+            );
+            new_bundle
+        });
     }
     let output = render_dialog_once(&mut app);
     let texts = extract_text(&output.shapes);
@@ -185,5 +184,60 @@ fn test_compute_dialog_size_caps_on_small_screen() {
     assert!(
         max_height > 200.0,
         "max_height must be a usable size; got {max_height}"
+    );
+}
+
+#[tokio::test]
+async fn test_mcp_ui_char_count_is_not_zero() {
+    let mut app_config = crate::config::AppConfig::default();
+    app_config.mcp_servers.insert(
+        "test-server".into(),
+        crate::config::McpServerEntry {
+            enabled: true,
+            config: crate::config::McpServerConfig::Stdio {
+                command: "echo".into(),
+                args: vec![],
+                env: Default::default(),
+            },
+        },
+    );
+
+    let mut app = crate::ui::FastMdApp::empty_state(app_config);
+    // Populate the global tool context with one discovered tool
+    app.orchestrator.tool_context.rcu(|bundle| {
+        let mut new_bundle = (**bundle).clone();
+        new_bundle.registry.register_mcp_tool(
+            "test-server",
+            "dummy_tool",
+            "Dummy description",
+            serde_json::json!({"type":"object","properties":{}}),
+        );
+        new_bundle
+    });
+
+    let output = render_dialog_once(&mut app);
+    let texts = extract_text(&output.shapes);
+
+    // Check that we render the group name
+    assert!(
+        texts.iter().any(|t| t == "test-server"),
+        "Group name should be rendered"
+    );
+    // Check that we render the tool name
+    assert!(
+        texts.iter().any(|t| t.contains("test-server/dummy_tool")),
+        "Tool name should be rendered"
+    );
+
+    // Extract the char count column (it is to the right of the tool name)
+    let idx = texts
+        .iter()
+        .position(|t| t.contains("test-server/dummy_tool"))
+        .unwrap();
+    let char_count = &texts[idx + 1];
+
+    assert_ne!(
+        char_count, "0",
+        "Char count for populated MCP tool should not be 0"
     );
 }

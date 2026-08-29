@@ -353,7 +353,8 @@ pub struct SearchEmailInput {
 }
 #[derive(Serialize, Debug, JsonSchema)]
 pub struct SearchEmailResponse {
-    pub results: String,
+    #[schemars(description = strings::FIELD_SEARCH_EMAIL_RESULTS_DESCRIPTION)]
+    pub results: Vec<crate::tools::cache::SearchEmailItem>,
     #[schemars(description = strings::FIELD_TOTAL_DESCRIPTION)]
     pub total: usize,
     #[schemars(description = strings::FIELD_CURSOR_DESCRIPTION)]
@@ -362,6 +363,9 @@ pub struct SearchEmailResponse {
     #[schemars(description = strings::FIELD_HINT_DESCRIPTION)]
     #[serde(skip_serializing_if = "Option::is_none")]
     pub hint: Option<String>,
+    #[schemars(description = strings::FIELD_SEARCH_EMAIL_ERRORS_DESCRIPTION)]
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub errors: Vec<String>,
 }
 
 #[derive(Deserialize, Debug, JsonSchema)]

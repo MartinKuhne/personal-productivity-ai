@@ -43,11 +43,12 @@ slow-timeout = { period = "30s", terminate-after = 2 }
 # exceeds the profile default. Without an override, the
 # `slow-timeout` above kills any test that has 60 s of
 # cumulative inactivity (30 s period, twice in a row). The
-# spec test compiles 652 CommonMark examples through the
-# embedded Typst engine and the work is sequential (each
-# example spins up its own engine, so this does not benefit
-# from test-threads), so it lands well past the default on
-# the GH Actions Linux runner.
+# spec compile test runs 652 CommonMark examples through the
+# embedded Typst engine on a rayon pool; each example spins
+# up its own engine, so the group is fast on multi-core
+# machines but the override keeps slow CI runners (or the
+# `#[ignore]`'d content-fidelity test) from being killed
+# spuriously.
 [[profile.ci.overrides]]
 filter = 'test(/all_commonmark/)'
 slow-timeout = { period = "60s", terminate-after = 30 }

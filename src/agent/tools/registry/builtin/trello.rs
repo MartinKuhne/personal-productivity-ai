@@ -1,4 +1,6 @@
 //! Trello API tools for the tool registry.
+//!
+//! Unit tests live in the sibling `trello_tests.rs` sidecar.
 
 use crate::tools::Tool;
 use crate::tools::context::ToolContext;
@@ -302,3 +304,7 @@ fn registered<T: Tool + 'static>(tool: T) -> RegisteredTool {
         executor: Arc::new(tool),
     }
 }
+
+#[cfg(test)]
+#[path = "trello_tests.rs"]
+mod tests;

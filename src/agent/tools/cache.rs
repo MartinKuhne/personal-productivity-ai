@@ -24,7 +24,9 @@ pub const CURSOR_EXPIRED_ERROR: &str =
 pub const FINAL_PAGE_HINT: &str = "Final page.";
 
 /// One `search_email` item: the JMAP client name and the simplified email JSON value.
-#[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[derive(
+    Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize, schemars::JsonSchema,
+)]
 pub struct SearchEmailItem {
     /// JMAP account / client identifier.
     pub client: String,
@@ -168,5 +170,26 @@ mod tests {
         cache.web_documents.insert(key.clone(), doc);
         cache.web_documents.invalidate(&key);
         assert!(cache.web_documents.get(&key).is_none());
+    }
+
+    #[test]
+    fn ttl_and_capacity_constants_match_spec() {
+        // TOOL-030 pins a 30-minute TTL and 256-entry cap; any change
+        // to these constants is deliberate and must be surfaced.
+        assert_eq!(CACHE_TTL, Duration::from_secs(1800));
+        assert_eq!(MAX_CACHE_ENTRIES, 256);
+        assert_eq!(
+            CURSOR_EXPIRED_ERROR,
+            "Cursor expired or unknown; re-run the search with no cursor."
+        );
+        assert_eq!(FINAL_PAGE_HINT, "Final page.");
+    }
+
+    #[test]
+    fn global_cache_singleton_is_shared() {
+        // `cache()` returns the same LazyLock singleton across calls.
+        let a = cache();
+        let b = cache();
+        assert!(std::ptr::eq(a, b));
     }
 }

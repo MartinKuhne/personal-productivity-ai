@@ -8,9 +8,7 @@
 //! `measure_cell`, and the per-UI caches - lives in `crate::ui::table_width`
 //! and re-exports the pure API via `pub use`.
 //!
-//!
-//! Public-API tests live in `tests/table_width_algorithm_test.rs`.
-//! Internal-helper tests live in the sibling `internal_tests.rs` sidecar.
+//! Unit tests live in the sibling `algorithm_tests.rs` and `internal_tests.rs` sidecars.
 
 use std::cmp::Reverse;
 use std::collections::BinaryHeap;
@@ -1345,9 +1343,11 @@ pub fn solve_hybrid(
 }
 
 // ---------------------------------------------------------------------------
-// Internal-helper tests live in the sibling `internal_tests.rs` sidecar.
-// Public-API tests live in `tests/table_width_algorithm_test.rs`.
+// Tests live in sibling sidecars.
 // ---------------------------------------------------------------------------
+
+#[cfg(test)]
+mod algorithm_tests;
 
 #[cfg(test)]
 #[path = "internal_tests.rs"]

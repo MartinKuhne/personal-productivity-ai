@@ -38,6 +38,8 @@
 
 #![cfg(feature = "pdf-export")]
 
+use std::sync::OnceLock;
+
 use fastmd::export::pdf::compile_markdown_to_pdf;
 use fastmd::export::pdf::typst_translator::render_markdown_to_typst;
 
@@ -133,13 +135,25 @@ fn extract_markdown_examples(spec: &str) -> Vec<(usize, String)> {
     out
 }
 
+/// Parse the vendored spec once and cache the extracted examples.
+///
+/// Three tests each walk the full spec source independently; a
+/// `OnceLock` turns that into a single pass per test binary instead of
+/// one per test. The extraction is a cheap string scan, so this is a
+/// small constant-factor win, but it keeps the slow compile test from
+/// redoing the parse it shares with the two companion tests.
+fn spec_examples() -> &'static Vec<(usize, String)> {
+    static EXAMPLES: OnceLock<Vec<(usize, String)>> = OnceLock::new();
+    EXAMPLES.get_or_init(|| extract_markdown_examples(SPEC))
+}
+
 /// Test the translator half of the round trip: every spec example
 /// must produce non-empty Typst. This is the fast canary — runs
 /// in seconds and catches translator-level bugs like forgotten
 /// escapes, drop-everything branches, or event-routing mistakes.
 #[test]
 fn all_commonmark_0_31_2_examples_translate_to_non_empty_typst() {
-    let examples = extract_markdown_examples(SPEC);
+    let examples = spec_examples();
     assert!(
         examples.len() >= 600,
         "expected the vendored spec to contain at least 600 examples, \
@@ -149,7 +163,7 @@ fn all_commonmark_0_31_2_examples_translate_to_non_empty_typst() {
     );
 
     let mut failures: Vec<String> = Vec::new();
-    for (n, md) in &examples {
+    for (n, md) in examples {
         let typst = render_markdown_to_typst(md);
         if typst.trim().is_empty() {
             failures.push(format!("example #{n}: translator produced empty Typst"));
@@ -171,50 +185,75 @@ fn all_commonmark_0_31_2_examples_translate_to_non_empty_typst() {
 
 /// Test the compile half of the round trip: every spec example
 /// must compile to a valid PDF. This is the slow, deep check —
-/// typst-as-lib spins up a fresh engine per compile, so this
-/// takes ~30-60 seconds on a developer laptop for the 600+
-/// examples. The cost of covering the entire spec; we accept it.
+/// typst-as-lib spins up a fresh engine per compile, so this takes
+/// ~30-60 seconds on a developer laptop for the 600+ examples when
+/// run sequentially. The cost of covering the entire spec; we accept
+/// it but parallelize it.
 /// Run with `cargo nextest run -E 'test(/commonmark/)'` to time it.
 #[test]
 fn all_commonmark_0_31_2_examples_compile_to_valid_pdf() {
-    let examples = extract_markdown_examples(SPEC);
+    use rayon::prelude::*;
+
+    let examples = spec_examples();
     assert!(
         examples.len() >= 600,
         "expected at least 600 examples, got {}",
         examples.len()
     );
 
-    let mut failures: Vec<String> = Vec::new();
-    for (n, md) in &examples {
-        let result = compile_markdown_to_pdf(md, "commonmark-spec");
-        let bad = match &result {
-            Ok(bytes) => {
-                if bytes.is_empty() {
-                    Some("empty PDF".to_string())
-                } else if !bytes.starts_with(b"%PDF-") {
-                    Some(format!(
-                        "output is not a PDF (header: {:?})",
-                        &bytes[..bytes.len().min(8)]
-                    ))
-                } else if !bytes.ends_with(b"%%EOF") {
-                    Some("PDF missing %%EOF trailer".to_string())
-                } else {
-                    None
-                }
-            }
-            Err(e) => Some(format!("compile failed: {e}")),
-        };
+    // Each `compile_markdown_to_pdf` call is independent, so the 600+
+    // examples are embarrassingly parallel. The content-fidelity
+    // companion test already runs `compile_markdown_to_pdf` on a rayon
+    // pool, which establishes that the Typst engine is safe to invoke
+    // concurrently from rayon workers. A dedicated pool with the Typst
+    // thread stack size brings the compile test from ~30-60s sequential
+    // to a few seconds on a multi-core machine.
+    let pool = rayon::ThreadPoolBuilder::new()
+        .thread_name(|i| format!("pdf-compile-{i}"))
+        .stack_size(fastmd::export::pdf::TYPST_THREAD_STACK_SIZE)
+        .build()
+        .expect("failed to build rayon thread pool for the commonmark compile test");
 
-        if let Some(reason) = bad {
-            failures.push(format!("example #{n}: {reason}"));
-        }
-    }
+    let mut failures: Vec<(usize, String)> = pool.install(|| {
+        examples
+            .par_iter()
+            .filter_map(|(n, md)| {
+                let result = compile_markdown_to_pdf(md, "commonmark-spec");
+                let bad = match &result {
+                    Ok(bytes) => {
+                        if bytes.is_empty() {
+                            Some("empty PDF".to_string())
+                        } else if !bytes.starts_with(b"%PDF-") {
+                            Some(format!(
+                                "output is not a PDF (header: {:?})",
+                                &bytes[..bytes.len().min(8)]
+                            ))
+                        } else if !bytes.ends_with(b"%%EOF") {
+                            Some("PDF missing %%EOF trailer".to_string())
+                        } else {
+                            None
+                        }
+                    }
+                    Err(e) => Some(format!("compile failed: {e}")),
+                };
+                bad.map(|reason| (*n, reason))
+            })
+            .collect()
+    });
+
+    // Parallel collection order is nondeterministic; re-sort by example
+    // number so the failure list reads in source order.
+    failures.sort_by_key(|(n, _)| *n);
 
     assert!(
         failures.is_empty(),
         "{} spec examples failed to compile:\n{}",
         failures.len(),
-        failures.join("\n")
+        failures
+            .iter()
+            .map(|(n, reason)| format!("example #{n}: {reason}"))
+            .collect::<Vec<_>>()
+            .join("\n")
     );
 }
 
@@ -836,7 +875,7 @@ fn all_commonmark_examples_render_content_into_pdf() {
     use std::sync::mpsc;
     use std::time::{Duration, Instant};
 
-    let examples = extract_markdown_examples(SPEC);
+    let examples = spec_examples();
     assert!(
         examples.len() >= 600,
         "expected at least 600 examples, got {}",
@@ -921,7 +960,7 @@ fn all_commonmark_examples_render_content_into_pdf() {
         .name("pdf-content-scope".to_string())
         .spawn(move || {
             pool_for_scope.scope(|s| {
-                for (n, md) in &examples {
+                for (n, md) in examples {
                     let tx = tx.clone();
                     let md = md.clone();
                     let n = *n;

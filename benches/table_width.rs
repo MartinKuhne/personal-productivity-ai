@@ -10,7 +10,7 @@
 //! WaterFillRatio, LagrangePenalty, HybridMinPenaltyWaterFill)
 //! and 9 input regimes (3 column distributions × 3
 //! viewport states, matching the example-based test matrix
-//! in `tests/table_width_algorithm_test.rs`).
+//! in `src/app/markdown/table_width/algorithm_tests.rs`).
 //!
 //! This bench is a P1 from the test audit. The 9 × 2 grid
 //! (2 strategies, 9 regimes) is the operationally important

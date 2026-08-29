@@ -137,10 +137,10 @@ fn test_format_result_get_email_by_id() {
 // the cursor (more pages) or the "Final page." hint (last page).
 // See `format_search_email_result`.
 
-fn search_email_page(items: usize) -> String {
+fn search_email_page(items: usize) -> serde_json::Value {
     // Build a synthetic `results` JSON array of N empty objects.
     let entries: Vec<serde_json::Value> = (0..items).map(|_| serde_json::json!({})).collect();
-    serde_json::Value::Array(entries).to_string()
+    serde_json::Value::Array(entries)
 }
 
 #[test]
@@ -208,11 +208,12 @@ fn test_format_result_search_email_single_page_no_paging() {
 
 #[test]
 fn test_format_result_search_email_empty_result() {
-    // Empty result: hint carries the human-readable message.
+    // Empty result: hint carries the human-readable message; `results` is an
+    // empty structured array (the old string sentinel no longer applies).
     let result = serde_json::json!({
         "status": "success",
         "data": {
-            "results": "No matching emails found.",
+            "results": [],
             "total": 0,
             "cursor": null,
             "hint": "No matching emails found."
@@ -221,8 +222,7 @@ fn test_format_result_search_email_empty_result() {
     .to_string();
     let msg = format_tool_result_message("search_email", &result);
     assert!(msg.contains("0 item(s) found"));
-    // The page count falls back to 0 when `results` is not a
-    // JSON array (it's the "No matching emails found." sentinel).
+    // An empty `results` array yields a page count of 0.
     assert!(msg.contains("Page: 0 item(s)"));
     assert!(msg.contains("No matching emails found"));
 }

@@ -205,6 +205,23 @@ mod tests {
     }
 
     #[test]
+    fn test_print_job_new_missing_file_falls_back_to_empty() {
+        let missing = PathBuf::from("definitely_missing_file_12345.md");
+        let job = PrintJob::new(missing.clone());
+        // Missing file -> empty content, but the stem still provides a title.
+        assert_eq!(job.markdown_content, "");
+        assert_eq!(job.title, "definitely_missing_file_12345");
+    }
+
+    #[test]
+    fn test_print_job_new_without_stem_uses_document_title() {
+        // A path with no file name/stem falls back to the default title.
+        let job = PrintJob::new(PathBuf::from(""));
+        assert_eq!(job.title, "Document");
+        assert_eq!(job.markdown_content, "");
+    }
+
+    #[test]
     fn test_print_job_from_content() {
         let job = PrintJob::from_content("# Test\n\nContent".to_string(), "My Doc".to_string());
         assert_eq!(job.title, "My Doc");

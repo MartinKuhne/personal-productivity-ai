@@ -1,6 +1,8 @@
 //! Tool-call dispatcher — receives tool-call JSON from the LLM,
 //! dispatches through the [`AgentToolContext`]'s registry, and
 //! feeds results back.
+//!
+//! Unit tests live in the sibling `tool_executor_tests.rs` sidecar.
 
 use crate::AgentToolContext;
 use crate::config::AgentConfig;
@@ -374,56 +376,5 @@ fn extract_str<'a>(val: &'a serde_json::Value, path: &[&str]) -> &'a str {
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-    use crate::config::AgentConfig;
-    use std::sync::Arc;
-
-    #[test]
-    fn test_classify() {
-        let tm = Arc::new(arc_swap::ArcSwap::from_pointee(AgentToolContext::new(
-            crate::tools::registry::ToolRegistry::new(),
-        )));
-        assert_eq!(tm.load().registry.safety_of("read_note"), Safety::ReadOnly);
-        assert_eq!(
-            tm.load().registry.safety_of("search_notes"),
-            Safety::ReadOnly
-        );
-        assert_eq!(
-            tm.load().registry.safety_of("create_note"),
-            Safety::Mutating
-        );
-        assert_eq!(
-            tm.load().registry.safety_of("nonexistent"),
-            Safety::Mutating
-        );
-    }
-
-    #[test]
-    fn test_extract_str_nested() {
-        let val = serde_json::json!({
-            "function": { "name": "test", "arguments": "{}" },
-            "id": "call_1"
-        });
-        assert_eq!(extract_str(&val, &["id"]), "call_1");
-        assert_eq!(extract_str(&val, &["function", "name"]), "test");
-        assert_eq!(extract_str(&val, &["missing"]), "");
-    }
-
-    #[test]
-    fn test_tool_executor_new() {
-        let config = AgentConfig::default();
-        let bus = std::sync::Arc::new(crate::tools::observer::DefaultFileObserver);
-        let policy = std::sync::Arc::new(crate::tools::policy::DefaultToolCallPolicy);
-        let tm = std::sync::Arc::new(arc_swap::ArcSwap::from_pointee(AgentToolContext::new(
-            crate::tools::registry::ToolRegistry::new(),
-        )));
-        let uuid_gen = std::sync::Arc::new(crate::utils::uuid::SystemUuidGenerator);
-        let cache = std::sync::Arc::new(crate::tools::registry::cache::ToolCache::new());
-        let executor = ToolExecutorBuilder::new(std::sync::Arc::new(config), bus, cache, tm)
-            .with_tool_call_policy(policy)
-            .with_uuid_gen(uuid_gen)
-            .build();
-        assert!(executor.config.models().is_empty());
-    }
-}
+#[path = "tool_executor_tests.rs"]
+mod tool_executor_tests;

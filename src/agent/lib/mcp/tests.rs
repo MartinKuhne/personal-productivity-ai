@@ -1476,6 +1476,7 @@ while True:
     // every discovered tool on every agent turn.
     let _adapter = McpToolAdapter::new(
         "e2e",
+        &format!("e2e/{}", greet.name),
         greet.name.clone(),
         greet.description.clone(),
         greet.input_schema.clone(),

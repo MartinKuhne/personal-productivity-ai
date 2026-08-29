@@ -64,11 +64,10 @@ below are either provided upstream or explicitly accepted as losses.
 The following tests assert on the local renderer's shape-level and FTWA
 behaviour and would have to be rewritten against viewer output:
 `tests/commonmark_spec_test.rs` (608 CommonMark examples),
-`tests/pulldown_config.rs`, `tests/table_width_algorithm_test.rs`,
-`tests/table_visual_layout_test.rs`, `tests/table_layout_test.rs`, and
+`src/app/markdown/table_width/algorithm_tests.rs`, and
 the `ui/render/e2e_tests/*` suite (`commonmark_render`,
 `commonmark_snapshots`, `commonmark_parser`, `ftwa`, `interactions`,
-`table_*`, `render_smoke`, `agent_restyle`).
+`pulldown_config`, `table_*`, `render_smoke`, `agent_restyle`).
 
 ### Alternatives considered
 

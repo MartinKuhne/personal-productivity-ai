@@ -82,7 +82,8 @@ fn test_apply_send_click_empty_prompt_is_noop() {
 /// show_results is toggled and the command_input is cleared.
 #[test]
 fn test_apply_send_click_run_agent_dispatches_with_prompt() {
-    let mut app = create_test_app();
+    let mock = WiremockLlm::start();
+    let mut app = create_test_app_with_api_url(&mock.uri());
     app.orchestrator.agent_panel_state.command_input = "hello world".to_string();
 
     apply_send_click(&mut app);
@@ -103,7 +104,8 @@ fn test_apply_send_click_run_agent_dispatches_with_prompt() {
 /// mint a fresh session_id.
 #[test]
 fn test_apply_send_click_reuses_session_id_when_results_displayed() {
-    let mut app = create_test_app();
+    let mock = WiremockLlm::start();
+    let mut app = create_test_app_with_api_url(&mock.uri());
     app.orchestrator.agent_panel_state.command_input = "first prompt".to_string();
 
     apply_send_click(&mut app);
@@ -272,8 +274,9 @@ fn test_paste_then_enter_still_submits() {
 fn test_ime_commit_enter_still_submits() {
     use crate::ui::test_helpers::interact::stateful_harness;
 
+    let mock = WiremockLlm::start();
     let mut harness = stateful_harness(Vec::<&'static str>::new(), |ui, captured| {
-        let mut app = create_test_app();
+        let mut app = create_test_app_with_api_url(&mock.uri());
         app.orchestrator.agent_panel_state.command_input = "summarize the doc".to_string();
         show_bottom_panel_capture(&mut app, ui, |event| {
             captured.push(event);
@@ -364,7 +367,12 @@ fn test_paste_then_ime_commit_enter_still_submits() {
 fn test_full_app_paste_then_enter_starts_agent() {
     use egui_kittest::kittest::Queryable;
 
-    let app = create_test_app();
+    // Delay the mock reply so the turn cannot finish within the
+    // trailing frame window: the frame pipeline drains
+    // `SessionFinished` the instant a turn ends and flips `running`
+    // back to false, which would fail the `running` assertion below.
+    let mock = WiremockLlm::start_with_delay(Some(std::time::Duration::from_millis(500)));
+    let app = create_test_app_with_api_url(&mock.uri());
     let mut harness = egui_kittest::Harness::builder()
         .with_size(egui::Vec2::new(900.0, 700.0))
         .with_max_steps(200)
@@ -695,13 +703,23 @@ use crate::ui::strings::{COMMAND_INPUT_HINT, STOP_AGENT_BUTTON};
 use crate::ui::test_helpers::text::{assert_text_contains, extract_text};
 
 fn create_test_app() -> FastMdApp {
+    create_test_app_with_api_url("http://localhost:0")
+}
+
+/// Build a test app whose chat model posts to `api_url`. Tests that
+/// drive a `RunAgent` dispatch must route the LLM call to an
+/// in-process wiremock endpoint (see [`WiremockLlm`]) instead of the
+/// dead `localhost:0` default, which made the agent driver thread
+/// retry the connection (1+2+4+8s of sleeps) so the test then blocked
+/// for ~15s when `AgentSession`'s drop joined that thread.
+fn create_test_app_with_api_url(api_url: &str) -> FastMdApp {
     use std::collections::HashMap;
     let mut models = HashMap::new();
     models.insert(
         "test".to_string(),
         crate::config::LlmConfig {
             model: "test".to_string(),
-            api_url: "http://localhost:0".to_string(),
+            api_url: api_url.to_string(),
             api_key: "test-key".to_string(),
             cost: None,
             use_case: vec!["chat".to_string()],
@@ -712,6 +730,86 @@ fn create_test_app() -> FastMdApp {
         ..crate::config::AppConfig::default()
     };
     FastMdApp::empty_state(config)
+}
+
+/// In-process OpenAI-compatible endpoint for the tests that drive a
+/// `RunAgent` dispatch. The wiremock server runs on its own OS
+/// thread, so it keeps serving while the test app's `AgentSession`
+/// drop joins the agent driver thread. Declare the mock before the
+/// app so the app drops first and the mock is still alive to answer
+/// the driver's in-flight request.
+struct WiremockLlm {
+    server: wiremock::MockServer,
+}
+
+impl WiremockLlm {
+    /// Start a mock server that answers every `POST /chat/completions`
+    /// with a fixed assistant reply and no added latency.
+    fn start() -> Self {
+        Self::start_with_delay(None)
+    }
+
+    /// Start a mock server that delays every reply by `delay`.
+    /// [`test_full_app_paste_then_enter_starts_agent`] needs this so
+    /// the turn cannot finish within the trailing frame window (the
+    /// frame pipeline drains `SessionFinished` the instant a turn
+    /// ends and flips the agent's `running` flag back to false).
+    fn start_with_delay(delay: Option<std::time::Duration>) -> Self {
+        use wiremock::matchers::{method, path};
+        use wiremock::{Mock, ResponseTemplate};
+
+        let server = {
+            let runtime = tokio::runtime::Builder::new_current_thread()
+                .enable_all()
+                .build()
+                .expect("build tokio runtime");
+
+            let server = runtime.block_on(wiremock::MockServer::start());
+
+            let response = serde_json::json!({
+                "id": "chatcmpl-bottom-tests",
+                "object": "chat.completion",
+                "created": 1_677_652_288,
+                "model": "test",
+                "choices": [{
+                    "index": 0,
+                    "message": {
+                        "role": "assistant",
+                        "content": "assistant reply"
+                    },
+                    "finish_reason": "stop"
+                }],
+                "usage": {
+                    "prompt_tokens": 5,
+                    "completion_tokens": 3,
+                    "total_tokens": 8
+                }
+            });
+
+            let mut template = ResponseTemplate::new(200)
+                .insert_header("content-type", "application/json")
+                .set_body_json(response);
+            if let Some(delay) = delay {
+                template = template.set_delay(delay);
+            }
+
+            runtime.block_on(
+                Mock::given(method("POST"))
+                    .and(path("/chat/completions"))
+                    .respond_with(template)
+                    .mount(&server),
+            );
+
+            server
+        };
+
+        Self { server }
+    }
+
+    /// Base URL to configure as the test model's `api_url`.
+    fn uri(&self) -> String {
+        self.server.uri()
+    }
 }
 
 /// R-2 / Q12: rendered-content assertion for the bottom panel.

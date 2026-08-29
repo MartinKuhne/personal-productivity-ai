@@ -112,49 +112,6 @@ fn test_draw_tree_node_directory_and_file() {
     assert!(tree_ctx.expanded_dirs.contains(&root.path));
 }
 
-/// Regression: the directory tree used to render mojibake'd
-/// folder / file icons (double-encoded UTF-8 -> Latin-1 ->
-/// UTF-8) that egui's default font could not render. The
-/// `render_flat_row` and `draw_tree_node` helpers must use
-/// BMP-only glyphs (U+25BC / U+25B6 / two spaces) so the
-/// labels come out as "▼ name" / "▶ name" / "  name",
-/// not "📁 name". This test pins the exact glyphs
-/// (which are the only place the dir-tree icons are defined)
-/// so a future encoding mishap or emoji swap is caught at
-/// test time, not at runtime.
-#[test]
-fn test_dir_tree_icons_are_bmp_only_no_mojibake() {
-    // The 3 icons used in render_flat_row / draw_tree_node.
-    const EXPANDED_DIR: &str = "▼ ";
-    const COLLAPSED_DIR: &str = "▶ ";
-    const FILE: &str = "  ";
-
-    // Every char in every icon must be inside the BMP
-    // (U+0000..=U+FFFF). egui's default font (Hack /
-    // Ubuntu-Light) cannot render characters above U+FFFF
-    // (emoji are in the Supplementary Multilingual Plane)
-    // and would fall back to a tofu box.
-    for icon in [EXPANDED_DIR, COLLAPSED_DIR, FILE] {
-        for c in icon.chars() {
-            assert!(
-                (c as u32) <= 0xFFFF,
-                "dir-tree icon char U+{:04X} is outside the BMP; egui default font will render it as tofu",
-                c as u32
-            );
-        }
-    }
-
-    // And the icons must be exactly the strings we expect:
-    // no mojibake (which would have C3 83 / C2 A2 / etc.
-    // byte patterns).
-    assert_eq!(EXPANDED_DIR, "\u{25bc} ", "expanded dir icon is ▼ + space");
-    assert_eq!(
-        COLLAPSED_DIR, "\u{25b6} ",
-        "collapsed dir icon is ▶ + space"
-    );
-    assert_eq!(FILE, "  ", "file icon is two spaces (no glyph)");
-}
-
 #[test]
 fn test_tree_node_selection_state_modifiers() {
     let ctx_egui = egui::Context::default();

@@ -45,7 +45,7 @@ the YAML schema) but its behaviour lives here.
 * [VFS-105] When `Skills` folder or it's subfolders do not exist, the system SHALL create them.
 * [VFS-110] The system library SHALL support a 'Conversations` folder.
 * [VFS-111] When the user performs an agent prompt, the system SHALL log the prompt, the chat model response, and any further prompts and responses to a file in the `Conversations` folder.
-* [VFS-112] When the system creates a file to log a prompt, the file name SHALL be `YYYY-MM-DD HH-MM-SS.md`
+* [VFS-112] When the system creates a file to log a prompt, the file name SHALL be `YYYY/MM/YYYY-MM-DD HH-MM-SS.md`. Create subdirectories as needed.
 * [VFS-113] When the system writes to a file to log a prompt, it shall use headings `## Prompt (nnn)` and `## Response (nnn)` with nnn representing a one based, incrementing number.
 * [VFS-114] When the system logs to a prompt log file, it shall include any write tool calls at the end of the `## Response (nnn)` section.
 * [VFS-120] The system library SHALL support a `Skills` folder with `Note`, `Folder` and `Batch` subdirectories

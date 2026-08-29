@@ -94,11 +94,6 @@ pub fn format_chat_model_menu_label(name: &str, cost: i32) -> String {
     format!("{} (Cost: {})", name, cost)
 }
 
-/// Formats a menu selection with an explicit checkmark for the selected item.
-pub fn format_menu_selection_label(label: &str, selected: bool) -> String {
-    format!("{}{}", if selected { "✓ " } else { "   " }, label)
-}
-
 /// Label preceding the table-width-strategy dropdown in the top toolbar.
 pub const TABLE_WIDTH_STRATEGY_LABEL: &str = "Table wrap:";
 
@@ -522,14 +517,6 @@ mod tests {
         assert_eq!(
             format_chat_model_menu_label("gpt-4o", 15),
             "gpt-4o (Cost: 15)"
-        );
-        assert_eq!(
-            format_menu_selection_label("Background operations", true),
-            "✓ Background operations"
-        );
-        assert_eq!(
-            format_menu_selection_label("Background operations", false),
-            "   Background operations"
         );
     }
 }

@@ -13,7 +13,7 @@
 //!   the 2-pass `render_table_with_config` path. The other
 //!   top-alignment tests (1-pass `render_table`, 1-pass
 //!   `render_markdown`) live in `table_alignment.rs` and
-//!   `tests/table_visual_layout_test.rs` respectively.
+//!   `table_visual_layout.rs` respectively.
 
 use super::*;
 use crate::ui::test_helpers::run_ui_test;

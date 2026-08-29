@@ -33,6 +33,9 @@ pub fn spawn_config_subscription(
         {
             let current = tool_context.load_full();
             let mut new_ctx = (*current).clone();
+            // Store placeholders immediately before blocking on discovery
+            tool_context.store(Arc::new(new_ctx.clone()));
+
             new_ctx.registry.init_mcp_on_startup(&agent_config).await;
             tool_context.store(Arc::new(new_ctx));
         }
@@ -44,10 +47,38 @@ pub fn spawn_config_subscription(
             .into(),
         );
 
-        while let Ok(event) = config_reader.recv().await {
-            let agent_config = event.config.to_agent_config();
+        loop {
+            let event = match config_reader.recv().await {
+                Ok(e) => e,
+                Err(tokio::sync::broadcast::error::RecvError::Lagged(_)) => {
+                    tracing::warn!("ConfigSubscriber lagged, dropping some config updates");
+                    continue;
+                }
+                Err(_) => break, // Channel closed
+            };
+
+            let mut latest_event = event;
+            // Drain any pending config updates so we only perform expensive discovery
+            // on the most recent configuration state.
+            loop {
+                match config_reader.try_recv() {
+                    Ok(next) => latest_event = next,
+                    Err(tokio::sync::broadcast::error::TryRecvError::Empty) => break,
+                    Err(tokio::sync::broadcast::error::TryRecvError::Closed) => break,
+                    Err(tokio::sync::broadcast::error::TryRecvError::Lagged(_)) => {
+                        tracing::warn!("ConfigSubscriber lagged during drain");
+                        // We continue draining to get the latest available event
+                        continue;
+                    }
+                }
+            }
+
+            let agent_config = latest_event.config.to_agent_config();
             let current = tool_context.load_full();
             let mut new_ctx = (*current).clone();
+
+            tool_context.store(Arc::new(new_ctx.clone()));
+
             new_ctx.registry.refresh_mcp_tools(&agent_config).await;
             tool_context.store(Arc::new(new_ctx));
         }

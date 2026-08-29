@@ -382,6 +382,60 @@ fn test_hamburger_menu_chat_models_switch_between_models_click() {
     );
 }
 
+/// Tier 4 click test: the selected chat model's checkbox reports
+/// `Toggled::True` and a non-selected model reports `Toggled::False` via
+/// AccessKit. This guards against regressing back to a text-prefix `✓` glyph,
+/// which egui's bundled default fonts lack (U+2713 renders as tofu / an
+/// empty-checkbox-looking missing-glyph box). `ui.checkbox` draws the
+/// checkmark as vector strokes, so the toggled state is font-independent.
+#[test]
+fn test_hamburger_menu_chat_models_selected_item_toggled_state() {
+    use crate::ui::test_helpers::interact::stateful_harness;
+    use accesskit::Toggled;
+    use egui_kittest::kittest::NodeT;
+    use egui_kittest::kittest::Queryable;
+
+    let mut harness = stateful_harness(
+        (create_test_app_with_models(), Vec::<&'static str>::new()),
+        |ui, (app, captured)| {
+            show_top_panel_capture(app, ui, |event| {
+                captured.push(event);
+            });
+        },
+    );
+    harness.set_size(egui::vec2(800.0, 600.0));
+    harness.run_steps(2);
+
+    // Open hamburger menu -> Chat models.
+    harness
+        .get_by_label(crate::ui::strings::HAMBURGER_MENU_BUTTON)
+        .click();
+    harness.run_steps(2);
+    harness.run_steps(2);
+
+    harness
+        .get_by_label_contains(crate::ui::strings::MENU_CHAT_MODELS)
+        .click();
+    harness.run_steps(2);
+    harness.run_steps(2);
+
+    // `selected_chat_model` starts `None`; `current_chat_model_key()`
+    // returns the lowest-cost chat model, i.e. `Some("model-a")`.
+    let model_a = harness.get_by_label_contains("model-a");
+    assert_eq!(
+        model_a.accesskit_node().toggled(),
+        Some(Toggled::True),
+        "the selected chat model must report a checked toggled state"
+    );
+
+    let model_b = harness.get_by_label_contains("model-b");
+    assert_eq!(
+        model_b.accesskit_node().toggled(),
+        Some(Toggled::False),
+        "a non-selected chat model must report an unchecked toggled state"
+    );
+}
+
 /// Tier 1 test for `apply_chat_model_selection` verifying switching between models and idempotence.
 #[test]
 fn test_apply_chat_model_selection() {

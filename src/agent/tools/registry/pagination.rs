@@ -1,4 +1,6 @@
 //! Paginator helper for tool results.
+//!
+//! Unit tests live in the sibling `pagination_tests.rs` sidecar.
 
 /// Default `limit` for `list_notes` and `list_notes_by_tag`.
 pub const DEFAULT_LIST_NOTES_BY_TAG_LIMIT: usize = 100;
@@ -33,6 +35,6 @@ pub fn paginate_in_range<T: Clone>(
             )),
         );
     }
-    let end = (offset + limit).min(total);
+    let end = offset.saturating_add(limit).min(total);
     (items[offset..end].to_vec(), None)
 }

@@ -47,8 +47,7 @@ pub mod config;
 // above.
 
 /// Re-export the `mcp` subsystem module under the crate root so
-/// `fastmd::mcp::oauth::...` works for short-path consumers
-/// (e.g. `tests/mcp_oauth.rs` historically reached it that way). The
+/// `fastmd::mcp::oauth::...` works for short-path consumers. The
 /// canonical path is `fastmd::agent::lib::mcp`; the short alias
 /// stays for backward compatibility.
 pub use agent::lib::mcp;

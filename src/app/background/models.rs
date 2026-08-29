@@ -70,6 +70,20 @@ mod tests {
         assert!(!job.should_process());
     }
 
+    #[cfg(feature = "image-library")]
+    #[test]
+    fn test_image_job_should_not_process_metadata_read_failure() {
+        let dir = tempdir().unwrap();
+        // The output .md exists, but the source image does not. `metadata`
+        // on the missing image fails, so `should_process` must return false.
+        let img = dir.path().join("photo.jpg");
+        let md = dir.path().join("photo.md");
+        std::fs::write(&md, "desc").unwrap();
+
+        let job = ImageJob::new(img);
+        assert!(!job.should_process());
+    }
+
     #[test]
     fn test_log_category_display_still_works_via_reexport() {
         // After the move, the type lives in `bus::events::messages` but the

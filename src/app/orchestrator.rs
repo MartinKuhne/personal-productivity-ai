@@ -1,4 +1,5 @@
 //! Application orchestrator — coordinates domain state, background events, file-watcher events, and agent turn lifecycles.
+//! Unit tests live in the sibling `orchestrator_tests.rs` sidecar.
 
 use crate::agent::AgentSession;
 use crate::agent::events::ToolSideEffect;
@@ -245,18 +246,19 @@ impl AppOrchestrator {
     pub fn drain_config_bus(&mut self) {
         let mut config: Option<ConfigArrived> = None;
         if let Some(reader) = self.config_reader.as_ref() {
-            match reader.try_recv() {
-                Ok(event) => config = Some(event),
-                Err(std::sync::mpsc::TryRecvError::Empty) => {
-                    return;
-                }
-                Err(std::sync::mpsc::TryRecvError::Disconnected) => {
-                    self.config_reader = None;
-                    return;
+            loop {
+                match reader.try_recv() {
+                    Ok(event) => config = Some(event),
+                    Err(std::sync::mpsc::TryRecvError::Empty) => {
+                        break;
+                    }
+                    Err(std::sync::mpsc::TryRecvError::Disconnected) => {
+                        self.config_reader = None;
+                        break;
+                    }
                 }
             }
         }
-        self.config_reader = None;
 
         let Some(event) = config else {
             return;
@@ -573,3 +575,7 @@ impl AppOrchestrator {
         }
     }
 }
+
+#[cfg(test)]
+#[path = "orchestrator_tests.rs"]
+mod tests;

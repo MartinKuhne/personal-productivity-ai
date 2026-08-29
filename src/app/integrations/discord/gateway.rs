@@ -8,7 +8,7 @@
 //! keeps the bot's event loop free of blocking reconnects (see `bot.rs`).
 
 use anyhow::Result;
-use futures::{SinkExt, StreamExt};
+use futures_util::{SinkExt, StreamExt};
 use serde::{Deserialize, Serialize};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;

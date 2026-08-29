@@ -46,9 +46,12 @@ mod commonmark_snapshots;
 mod ftwa;
 mod helpers;
 mod interactions;
+mod pulldown_config;
 mod render_smoke;
 mod table_alignment;
+mod table_layout;
 mod table_regressions;
+mod table_visual_layout;
 
 // Pull in everything the parent `render/mod.rs` re-exports (the markdown
 // re-exports + the `pub(crate) use` re-exports of the sibling submodule

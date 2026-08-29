@@ -1,19 +1,19 @@
 # Agent instructions
 
 ## 3. Required Review and Implementation Rules
-- Consult the distilled reference in [doc/distill/egui.md](../../../../doc/distill/egui.md) before you write or review UI code.
-- Consult the distilled reference in [doc/distill/egui-kittest.md](../../../../doc/distill/egui-kittest.md) before you write or review snapshot tests.
+- Consult the distilled reference in [doc/distill/egui.md](../../../doc/distill/egui.md) before you write or review UI code.
+- Consult the distilled reference in [doc/distill/egui-kittest.md](../../../doc/distill/egui-kittest.md) before you write or review snapshot tests.
 
 - Keep `update` methods side-effect free where possible.
 - Keep pane layout ownership with `ui::panel_layout::PanelLayout` and do not add ad-hoc side panels in `FastMdApp::update`.
-- Keep cross-cutting UI state on `FastMdApp` in [src/desktop/src/ui/app.rs](../app.rs). Split new UI concerns into a dedicated manager when the state grows.
+- Keep cross-cutting UI state on `FastMdApp` in [app/mod.rs](app/mod.rs). Split new UI concerns into a dedicated manager when the state grows.
 
 ## 4. User Interface Text String Rules
-- Isolate all user-facing text into [src/desktop/src/ui/strings.rs](../strings.rs) as `pub const` values or formatting helpers.
+- Isolate all user-facing text into [strings.rs](strings.rs) as `pub const` values or formatting helpers.
 - Do not hardcode UI literals in panel, modal, tree, or editor modules.
 - Reference strings through `crate::ui::strings::<CONST_NAME>`.
-- Add a `///` doc comment to every `pub const` or helper in [src/desktop/src/ui/strings.rs](../strings.rs).
-- Add unit tests in [src/desktop/src/ui/strings.rs](../strings.rs) for constant values and formatting logic.
+- Add a `///` doc comment to every `pub const` or helper in [strings.rs](strings.rs).
+- Add unit tests in [strings.rs](strings.rs) for constant values and formatting logic.
 
 ## 5. `egui::Id` Stability Rules
 - Keep widget IDs stable across layout passes.
@@ -44,7 +44,7 @@ ui.push_id((&item_key, item_type), |ui| {
 - Use `egui::Ui::add_visible(visible, widget)` for a single widget and `ui.scope(...)` with `ui.set_invisible()` for a block.
 
 ## 7. Examples to Follow
-- Follow the toolbar transition pattern in [src/desktop/src/ui/panels/top.rs](../panels/top.rs) when a state change swaps one widget for another.
-- Keep the panel allocated and hidden in [src/desktop/src/ui/panels/right.rs](../panels/right.rs) instead of removing the panel entirely.
+- Follow the toolbar transition pattern in [panels/top.rs](panels/top.rs) when a state change swaps one widget for another.
+- Keep the panel allocated and hidden in [panels/right.rs](panels/right.rs) instead of removing the panel entirely.
 - Trace remaining warnings by changing one user action at a time and checking the rect coordinates in the log.
 

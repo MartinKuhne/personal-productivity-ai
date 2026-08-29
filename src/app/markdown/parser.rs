@@ -1326,6 +1326,71 @@ mod tests {
             "Shop Gamma last cell must contain phone number"
         );
     }
+
+    #[test]
+    fn malformed_table_ragged_columns_still_parses_without_panic() {
+        // Ragged `|` counts across rows must not panic the parser and
+        // must still surface as a Table event. This is a regression
+        // guard for a shape only touched implicitly by the random
+        // proptest.
+        let md = "| A | B |\n|---|---|\n| only one |\n| a | b | c |";
+        let events = parse_markdown_to_events(md);
+        let table = events
+            .iter()
+            .find_map(|e| {
+                if let RenderEvent::Table(rows) = e {
+                    Some(rows)
+                } else {
+                    None
+                }
+            })
+            .expect("ragged table must still produce a Table event");
+        // Header + 2 data rows.
+        assert!(
+            table.len() >= 3,
+            "expected header + 2 data rows, got {}",
+            table.len()
+        );
+    }
+
+    #[test]
+    fn malformed_table_empty_cells_and_only_pipes_parse_without_panic() {
+        // An empty `| |` cell and a row that is only pipes (no text)
+        // must not panic and should produce a Table event.
+        let md = "| H |\n|---|\n| |\n|---|";
+        let events = parse_markdown_to_events(md);
+        // No panic is the primary assertion; a Table event is optional
+        // depending on cmark's tolerance, so we only assert panic-freedom
+        // plus that the output is well-formed events.
+        let _ = events;
+    }
+
+    #[test]
+    fn parse_yaml_to_pairs_non_string_and_nested_values() {
+        // Non-string scalars (numbers) and nested mappings are coerced
+        // to their serialized string form; keys are serialized scalars.
+        let yaml: serde_norway::Value =
+            serde_norway::from_str("count: 42\nnested:\n  a: b\nempty:\n").unwrap();
+        let pairs = parse_yaml_to_pairs(&yaml).unwrap();
+        let count = pairs
+            .iter()
+            .find(|(k, _)| k.trim_matches('"') == "count")
+            .map(|(_, v)| v.clone());
+        assert_eq!(count.as_deref(), Some("42"));
+        let nested = pairs
+            .iter()
+            .find(|(k, _)| k.trim_matches('"') == "nested")
+            .map(|(_, v)| v.clone());
+        assert!(nested.is_some(), "nested mapping must be serialized");
+    }
+
+    #[test]
+    fn parse_yaml_to_pairs_non_mapping_returns_none() {
+        // A scalar or sequence root is not a mapping, so the function
+        // returns None.
+        let scalar: serde_norway::Value = serde_norway::from_str("just a string").unwrap();
+        assert!(parse_yaml_to_pairs(&scalar).is_none());
+    }
 }
 
 #[cfg(test)]

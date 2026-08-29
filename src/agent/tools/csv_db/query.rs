@@ -301,6 +301,152 @@ mod tests {
             err_pred
         );
     }
+
+    #[test]
+    fn test_query_type_mismatch_predicate_references_missing_column() {
+        let tmp_dir = tempdir().unwrap();
+        let config = crate::config::AgentConfigBuilder::new()
+            .with_csv_db_path(Some(tmp_dir.path().to_string_lossy().to_string()))
+            .build();
+
+        let _ = super::super::operations::create_csv(
+            &test_ctx(&config),
+            CreateCsvInput {
+                db_name: "people".to_string(),
+                headers: vec!["name".to_string(), "age".to_string()],
+            },
+        );
+        let mut row = HashMap::new();
+        row.insert("name".to_string(), "alice".to_string());
+        row.insert("age".to_string(), "30".to_string());
+        let _ = super::super::operations::add_rows(
+            &test_ctx(&config),
+            AddRowsInput {
+                db_name: "people".to_string(),
+                rows: vec![row],
+            },
+        );
+
+        // Predicate references a column that does not exist in the schema:
+        // evalexpr treats the identifier as unbound and raises an
+        // Evaluation error rather than silently matching zero rows.
+        let err = query_csv(
+            &test_ctx(&config),
+            QueryRequest {
+                db_name: "people".to_string(),
+                predicate: Some("missing_col == 1".to_string()),
+                aggregate_col: None,
+                aggregate_func: None,
+            },
+        )
+        .unwrap_err();
+        assert!(err.contains("Evaluation error"), "Actual error: {}", err);
+    }
+
+    #[test]
+    fn test_query_sum_non_numeric_column_and_missing_column() {
+        let tmp_dir = tempdir().unwrap();
+        let config = crate::config::AgentConfigBuilder::new()
+            .with_csv_db_path(Some(tmp_dir.path().to_string_lossy().to_string()))
+            .build();
+
+        let _ = super::super::operations::create_csv(
+            &test_ctx(&config),
+            CreateCsvInput {
+                db_name: "mix".to_string(),
+                headers: vec!["label".to_string(), "num".to_string()],
+            },
+        );
+        let mut row = HashMap::new();
+        row.insert("label".to_string(), "text-value".to_string());
+        row.insert("num".to_string(), "5".to_string());
+        let _ = super::super::operations::add_rows(
+            &test_ctx(&config),
+            AddRowsInput {
+                db_name: "mix".to_string(),
+                rows: vec![row],
+            },
+        );
+
+        // sum over a non-numeric column: numeric values skipped -> 0.0
+        let res = query_csv(
+            &test_ctx(&config),
+            QueryRequest {
+                db_name: "mix".to_string(),
+                predicate: None,
+                aggregate_col: Some("label".to_string()),
+                aggregate_func: Some("sum".to_string()),
+            },
+        )
+        .unwrap();
+        assert_eq!(res.aggregate_result, Some(0.0));
+
+        // sum over a missing column -> Some(0.0)
+        let res = query_csv(
+            &test_ctx(&config),
+            QueryRequest {
+                db_name: "mix".to_string(),
+                predicate: None,
+                aggregate_col: Some("nope".to_string()),
+                aggregate_func: Some("sum".to_string()),
+            },
+        )
+        .unwrap();
+        assert_eq!(res.aggregate_result, Some(0.0));
+    }
+
+    #[test]
+    fn test_query_avg_over_empty_rows_returns_zero() {
+        let tmp_dir = tempdir().unwrap();
+        let config = crate::config::AgentConfigBuilder::new()
+            .with_csv_db_path(Some(tmp_dir.path().to_string_lossy().to_string()))
+            .build();
+
+        let _ = super::super::operations::create_csv(
+            &test_ctx(&config),
+            CreateCsvInput {
+                db_name: "empty".to_string(),
+                headers: vec!["x".to_string()],
+            },
+        );
+
+        // No rows: predicate filters everything out, avg over empty -> Some(0.0)
+        let res = query_csv(
+            &test_ctx(&config),
+            QueryRequest {
+                db_name: "empty".to_string(),
+                predicate: Some("x == 99".to_string()),
+                aggregate_col: Some("x".to_string()),
+                aggregate_func: Some("avg".to_string()),
+            },
+        )
+        .unwrap();
+        assert_eq!(res.aggregate_result, Some(0.0));
+    }
+
+    #[test]
+    fn test_delete_rows_invalid_record_fails() {
+        let tmp_dir = tempdir().unwrap();
+        let config = crate::config::AgentConfigBuilder::new()
+            .with_csv_db_path(Some(tmp_dir.path().to_string_lossy().to_string()))
+            .build();
+
+        let db_path = super::super::operations::get_db_path(&test_ctx(&config), "bad");
+        // Write a CSV whose rows have an inconsistent field count with the header
+        // so that csv parsing of a record yields an error.
+        std::fs::create_dir_all(db_path.parent().unwrap()).unwrap();
+        std::fs::write(&db_path, "a,b,c\n1,2\n1,2,3\n").unwrap();
+
+        let err = delete_rows(
+            &test_ctx(&config),
+            DeleteRowsInput {
+                db_name: "bad".to_string(),
+                predicate: "a == 1".to_string(),
+            },
+        )
+        .unwrap_err();
+        assert!(err.contains("Invalid record"), "Actual error: {}", err);
+    }
 }
 
 // Property tests for the csv_db query builder. The proptest

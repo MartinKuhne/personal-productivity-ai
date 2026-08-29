@@ -3,7 +3,9 @@
 //! Unit tests live in the sibling `session_tests.rs` sidecar.
 
 use crate::config::AgentConfig;
-use crate::events::{AgentDebugEntry, AgentObserverFactory, AgentPrompt, TokenUsageInfo};
+use crate::events::{
+    AgentDebugEntry, AgentEventObserver, AgentObserverFactory, AgentPrompt, TokenUsageInfo,
+};
 use serde_json::Value;
 use std::sync::mpsc::{self, Sender};
 use std::sync::{
@@ -401,6 +403,14 @@ impl Default for AgentSessionBuilder {
     }
 }
 
+/// State retained across executions of one logical agent session.
+struct SessionExecutionState {
+    history: Option<Vec<Value>>,
+    system_prompts: Vec<String>,
+    turn_offset: usize,
+    observer: Arc<dyn AgentEventObserver>,
+}
+
 /// Spawn the long-lived driver thread (research.md §3, migration step 10).
 ///
 /// Owns the `Receiver<AgentPrompt>` and blocks on `recv()`. On each prompt,
@@ -417,13 +427,9 @@ fn spawn_driver(
     extensions: crate::tools::extensions::Extensions,
 ) -> JoinHandle<()> {
     std::thread::spawn(move || {
-        // Per-session history cache. Keyed by `session_id` so continuation
-        // prompts reuse the same conversation history (FR-009).
-        let mut session_histories: std::collections::HashMap<Uuid, Option<Vec<Value>>> =
-            std::collections::HashMap::new();
-        // Track the last turn number for each session so that continuations
-        // increment from where they left off rather than resetting to Turn 1.
-        let mut session_turn_offsets: std::collections::HashMap<Uuid, usize> =
+        // Keep all state that must survive a continuation together so the
+        // observer and conversation history remain aligned (FR-009).
+        let mut sessions: std::collections::HashMap<Uuid, SessionExecutionState> =
             std::collections::HashMap::new();
 
         while let Ok(prompt) = prompt_rx.recv() {
@@ -432,16 +438,26 @@ fn spawn_driver(
                 .read()
                 .map(|c| c.clone())
                 .unwrap_or_default();
-            let history = session_histories.get(&session_id).cloned().flatten();
-            let start_turn = session_turn_offsets.get(&session_id).copied().unwrap_or(0);
-            let observer = (observer_factory)(session_id);
+            let session = sessions.entry(session_id).or_insert_with(|| {
+                let system_prompts = prompt.system_prompts.clone();
+                SessionExecutionState {
+                    history: None,
+                    system_prompts,
+                    turn_offset: 0,
+                    observer: (observer_factory)(session_id),
+                }
+            });
+            let history = session.history.clone();
+            let system_prompts = session.system_prompts.clone();
+            let start_turn = session.turn_offset;
+            let observer = session.observer.clone();
             let ctx =
                 crate::context::AgentContextBuilder::new(agent_config, session_id, prompt.text)
                     .with_file_observer(file_observer.clone())
                     .with_observer(observer)
                     .with_active_paths(prompt.active_file, prompt.active_dir)
                     .with_selected_files(prompt.selected_files)
-                    .with_system_prompts(prompt.system_prompts)
+                    .with_system_prompts(system_prompts)
                     .with_cancel_flag(prompt.cancel_flag)
                     .with_history(history.clone())
                     .with_tool_call_policy(policy.clone())
@@ -457,8 +473,8 @@ fn spawn_driver(
             // After the session finishes, stash its history for continuation
             // prompts (FR-009).
             if !new_history.is_empty() {
-                session_histories.insert(session_id, Some(new_history));
-                session_turn_offsets.insert(session_id, final_turn);
+                session.history = Some(new_history);
+                session.turn_offset = final_turn;
             }
         }
     })
