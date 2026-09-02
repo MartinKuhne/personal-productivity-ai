@@ -15,6 +15,9 @@
 //! | File tree (E) | `SelectFile`, `SelectDirectory`, `OpenInEditor`, `ShowInExplorer`, `CopyPath`, `SaveAsPdf`, `Rename`, `Move`, `Delete`, `CreateDirectory`, `CreateDocument`, `RunSkillPrompt`, `MergePrompt` |
 //! | Dialog confirmations (F) | `ConfirmMove`, `ConfirmCreateDirectory`, `ConfirmCreateDocument`, `ConfirmRename`, `StartBatch`, `CancelBatch` |
 //! | Keyboard shortcuts (G) | `ToggleAgentDebugWindowShortcut` |
+//! | Agent session close (C) | `ClearAgentSession`, `ApplyTaskToggles` |
+//! | Command input (B) | `ClearCommandInput` |
+//! | Agent debug window (H) | `ToggleDebugWindow`, `ClearDebugEntries`, `SetDebugJsonRows`, `SetDebugSearchText`, `SetDebugAutoScroll` |
 
 use std::path::PathBuf;
 
@@ -133,6 +136,26 @@ pub enum UserCommand {
     // ── Keyboard shortcuts (surface G) ─────────────────────────────────
     /// `ALT+A` — toggle the agent debug window.
     ToggleAgentDebugWindowShortcut,
+
+    // ── Agent session (surface C) ─────────────────────────────────────
+    /// Clear the agent session (close button in agent panel).
+    ClearAgentSession,
+    /// Apply task checkbox toggles to the agent transcript content.
+    ApplyTaskToggles { toggles: Vec<(usize, bool)> },
+    /// Clear the command input after sending.
+    ClearCommandInput,
+
+    // ── Agent debug window (surface H) ────────────────────────────────
+    /// Toggle the agent debug window visibility.
+    ToggleDebugWindow(bool),
+    /// Clear all debug entries.
+    ClearDebugEntries,
+    /// Set the number of JSON rows to display in debug window.
+    SetDebugJsonRows(usize),
+    /// Set the search text filter in debug window.
+    SetDebugSearchText(String),
+    /// Set the auto-scroll preference in debug window.
+    SetDebugAutoScroll(bool),
 }
 
 /// A thin handle for publishing [`UserCommand`]s from UI panels and modal

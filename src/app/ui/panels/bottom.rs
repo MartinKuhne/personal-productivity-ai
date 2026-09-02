@@ -2,6 +2,7 @@
 //!
 //! Unit tests live in the sibling `bottom_tests.rs` sidecar.
 
+use crate::bus::events::user_command::UserCommand;
 use crate::ui::FastMdApp;
 use eframe::egui;
 use egui::RichText;
@@ -106,47 +107,19 @@ pub fn format_models_list(
     output
 }
 
-/// Purpose: Applies the side effect of pressing Enter in the
-/// command input (or clicking an equivalent submit trigger).
-/// Inputs: app (the application state)
-/// Outputs: ()
-/// Purity: Impure (mutates `app.orchestrator.agent`, `app.orchestrator.config`,
-/// `app.orchestrator.selection`).
-/// Preconditions: `app.orchestrator.agent_panel_state.command_input` contains the user's
-/// prompt. The `command_input` is consumed and cleared as part of
-/// the call.
-/// Postconditions: Dispatches based on `parse_command_intent`:
-///   * `ShowModels` — sets status to "Done", response to the
-///     formatted model list, and show_results to `true`.
-///   * `ShowDeprecatedModelMessage` — sets status to "Error" and
-///     response to the deprecation message.
-///   * `RunAgent(agent_prompt)` — starts an agent session with
-///     the prompt and the current selection context, and sets
-///     show_results to `true`.
-///   * `Empty` — no-op.
-///
-/// The Enter-key handler in `show_bottom_panel` calls this
-/// function. It is extracted so the dispatch can be unit-tested
-/// without driving the egui harness.
-pub fn apply_send_click(
-    app: &mut FastMdApp,
-) -> Option<crate::bus::events::user_command::UserCommand> {
-    let prompt = app
-        .orchestrator
-        .agent_panel_state
-        .command_input
-        .trim_end()
-        .to_string();
-
-    // Since we clear the prompt in the UI when the user clicks send,
-    // this mutation remains inline. (Note: could be deferred to CommandExecutor if desired)
-    app.orchestrator.agent_panel_state.command_input.clear();
-
-    if prompt.is_empty() {
+/// Purpose: Parses the user prompt and returns the appropriate
+/// `UserCommand` to dispatch. Does NOT mutate state.
+/// Inputs: `prompt` - the user's input text (already trimmed)
+/// Outputs: `Option<UserCommand>` - the command to publish, or `None` if empty
+/// Purity: Pure (no state mutation).
+/// Preconditions: None.
+/// Postconditions: Returns the command corresponding to the parsed intent.
+pub fn parse_command_intent(prompt: &str) -> Option<crate::bus::events::user_command::UserCommand> {
+    let trimmed = prompt.trim();
+    if trimmed.is_empty() {
         return None;
     }
 
-    let trimmed = prompt.trim();
     if trimmed.starts_with("/models") {
         Some(crate::bus::events::user_command::UserCommand::ShowModels)
     } else if trimmed.starts_with("/model ") {
@@ -156,6 +129,14 @@ pub fn apply_send_click(
             trimmed.to_string(),
         ))
     }
+}
+
+/// Purpose: Returns a command to clear the command input.
+/// Inputs: None
+/// Outputs: `UserCommand::ClearCommandInput`
+/// Purity: Pure (returns command, no state mutation).
+pub fn clear_command_input_command() -> UserCommand {
+    UserCommand::ClearCommandInput
 }
 
 pub fn show_bottom_panel(app: &mut FastMdApp, parent_ui: &mut egui::Ui) {
@@ -288,12 +269,23 @@ pub fn show_bottom_panel_capture(
                                         prompt,
                                     ),
                                 );
-                                app.orchestrator.agent_panel_state.command_input.clear();
+                                app.orchestrator
+                                    .user_command_bus
+                                    .publish(clear_command_input_command());
                             }
                         } else {
                             // Agent is idle - submit normally
-                            if let Some(cmd) = apply_send_click(app) {
+                            let prompt = app
+                                .orchestrator
+                                .agent_panel_state
+                                .command_input
+                                .trim_end()
+                                .to_string();
+                            if let Some(cmd) = parse_command_intent(&prompt) {
                                 app.orchestrator.user_command_bus.publish(cmd);
+                                app.orchestrator
+                                    .user_command_bus
+                                    .publish(clear_command_input_command());
                             }
                             on_click("send");
                         }

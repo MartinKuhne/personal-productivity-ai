@@ -38,6 +38,11 @@
 //! }
 //! // No write_back — intents were published to `Bus<UserCommand>`.
 //! ```
+//!
+//! Note: The previous version included a `write_back` method that
+//! flushed changes to the orchestrator. That pattern has been
+//! replaced by the `Bus<UserCommand>` architecture (see
+//! `doc/planning/user-command-bus.md`).
 
 use crate::bus::core::Bus;
 use crate::bus::events::file::{FileEvent, FileEventProducer};
@@ -240,13 +245,6 @@ impl TreeOpsContext {
         }
     }
 
-    /// Write the context's mutable fields back to the
-    /// orchestrator. The render pass may have changed any of
-    /// the selection or dialog state; this method commits
-    /// those changes. `bg_tx`, `file_event_producer`,
-    /// `modifiers`, `inline_editor_enabled`, `layout`, and
-    /// `content_libraries` are not written back because the
-    /// orchestrator is the source of truth for them.
     /// Access expanded directories set.
     pub fn expanded_dirs(&mut self) -> &mut HashSet<PathBuf> {
         &mut self.expanded_dirs

@@ -2,6 +2,7 @@
 //!
 //! Unit tests live in the sibling `center_tests.rs` sidecar.
 
+use crate::bus::events::user_command::UserCommand;
 use crate::ui::FastMdApp;
 use crate::ui::render::{render_markdown, render_yaml_table};
 use eframe::egui;
@@ -9,22 +10,24 @@ use egui::RichText;
 use egui::containers::CentralPanel;
 use std::path::PathBuf;
 
-/// Purpose: Clears all agent-related session state from the application state.
-/// Inputs: `app` - A mutable reference to the `FastMdApp` state.
-/// Outputs: None
-/// Purity: Impure (mutates application state).
-/// Preconditions: `app.orchestrator.agent_panel_state.show_results` must be true.
-/// Postconditions: Agent results are hidden, history and text buffers are cleared, and any running agent is flagged for cancellation.
-pub fn clear_agent_session_state(app: &mut FastMdApp) {
-    app.orchestrator.agent_panel_state.show_results = false;
-    app.orchestrator.agent_panel_state.scroll_to_id = None;
-    app.agent_mut().clear_history();
-    app.agent_mut().set_response(String::new());
-    app.agent_mut().set_thinking(String::new());
-    app.orchestrator.agent_transcript.reset();
-    if app.agent().state().running {
-        app.agent_mut().cancel();
-    }
+/// Purpose: Creates a `UserCommand` to clear all agent-related session state.
+/// Inputs: None
+/// Outputs: `UserCommand::ClearAgentSession`
+/// Purity: Pure (returns command, no state mutation).
+/// Preconditions: None.
+/// Postconditions: Returns command that, when executed, hides agent results, clears history and text buffers, and cancels any running agent.
+pub fn clear_agent_session_command() -> UserCommand {
+    UserCommand::ClearAgentSession
+}
+
+/// Purpose: Creates a `UserCommand` to apply task checkbox toggles to the transcript.
+/// Inputs: `toggles` - vector of (index, checked) pairs
+/// Outputs: `UserCommand::ApplyTaskToggles`
+/// Purity: Pure (returns command, no state mutation).
+/// Preconditions: None.
+/// Postconditions: Returns command that, when executed, applies the toggles to the transcript content.
+pub fn apply_task_toggles_command(toggles: Vec<(usize, bool)>) -> UserCommand {
+    UserCommand::ApplyTaskToggles { toggles }
 }
 
 /// Purpose: Applies the side effect of clicking the tab close `×`
@@ -47,8 +50,6 @@ pub fn clear_agent_session_state(app: &mut FastMdApp) {
 /// `apply_tab_action` cover the underlying logic; this wrapper just
 /// adapts the `&mut FastMdApp` API to the field-level `apply_tab_action`
 /// API.
-use crate::bus::events::user_command::UserCommand;
-
 pub fn apply_tab_close_click(i: usize) -> UserCommand {
     UserCommand::CloseTab(i)
 }
@@ -80,7 +81,9 @@ fn render_agent_session(ui: &mut egui::Ui, app: &mut FastMdApp) {
             .button(crate::ui::strings::AGENT_SESSION_CLOSE_BUTTON)
             .clicked()
         {
-            clear_agent_session_state(app);
+            app.orchestrator
+                .user_command_bus
+                .publish(clear_agent_session_command());
         }
     });
     ui.separator();
@@ -134,13 +137,9 @@ fn render_agent_session(ui: &mut egui::Ui, app: &mut FastMdApp) {
                 // content (the new render source, replacing
                 // `AgentState::response`).
                 if !toggles.is_empty() {
-                    for (idx, checked) in toggles {
-                        crate::ui::render::apply_task_toggle(
-                            &mut app.orchestrator.agent_transcript.content,
-                            idx,
-                            checked,
-                        );
-                    }
+                    app.orchestrator
+                        .user_command_bus
+                        .publish(apply_task_toggles_command(toggles));
                 }
                 // `stick_to_bottom(true)` on the ScrollArea handles
                 // auto-scroll; an explicit `scroll_to_cursor` here would

@@ -6,13 +6,13 @@ use crate::ui::test_helpers::run_ui_test;
 use std::collections::HashMap;
 use std::path::PathBuf;
 
-/// Tier 1 test for the `apply_send_click` effect: a bare
+/// Tier 1 test for the `parse_command_intent` effect: a bare
 /// `/models` prompt dispatches to `UserCommand::ShowModels`,
 /// which sets the agent status, response, and show_results
 /// flag. We verify the effect without driving the egui
 /// harness.
 #[test]
-fn test_apply_send_click_show_models_dispatch() {
+fn test_parse_command_intent_show_models_dispatch() {
     let mut app = create_test_app();
     // Populate at least one model so `format_models_list` is
     // non-empty and the test can assert the response contains
@@ -27,14 +27,16 @@ fn test_apply_send_click_show_models_dispatch() {
             use_case: Vec::new(),
         },
     );
-    app.orchestrator.agent_panel_state.command_input = "/models".to_string();
+    let prompt = "/models".to_string();
     assert!(
         !app.orchestrator.agent_panel_state.show_results,
         "show_results must start false"
     );
 
-    if let Some(cmd) = apply_send_click(&mut app) {
+    if let Some(cmd) = parse_command_intent(&prompt) {
         app.orchestrator.apply_user_command(cmd);
+        app.orchestrator
+            .apply_user_command(clear_command_input_command());
     }
 
     assert_eq!(app.orchestrator.agent.state().status, "Done");
@@ -57,26 +59,27 @@ fn test_apply_send_click_show_models_dispatch() {
     );
 }
 
-/// Tier 1 test: an empty prompt produces `None`
-/// and `apply_send_click` is a no-op (no status change, no
-/// show_results toggle, command_input is still cleared).
+/// Tier 1 test: an empty/whitespace prompt produces `None`
+/// and `parse_command_intent` is a no-op (no status change, no
+/// show_results toggle). The command_input is only cleared when
+/// there's an actual command to dispatch.
 #[test]
-fn test_apply_send_click_empty_prompt_is_noop() {
+fn test_parse_command_intent_empty_prompt_is_noop() {
     let mut app = create_test_app();
-    app.orchestrator.agent_panel_state.command_input = "   ".to_string();
+    let prompt = "   ".to_string();
 
-    if let Some(cmd) = apply_send_click(&mut app) {
+    if let Some(cmd) = parse_command_intent(&prompt) {
         app.orchestrator.apply_user_command(cmd);
+        app.orchestrator
+            .apply_user_command(clear_command_input_command());
     }
 
     assert!(
         !app.orchestrator.agent_panel_state.show_results,
         "Empty intent must not toggle show_results"
     );
-    assert!(
-        app.orchestrator.agent_panel_state.command_input.is_empty(),
-        "command_input is still cleared (the .clear() runs before the match)"
-    );
+    // Note: command_input is not cleared for empty prompts in the new design
+    // (clear only happens when there's an actual command to dispatch)
 }
 
 /// Tier 1 test: an unknown `/foo` style command produces
@@ -85,13 +88,15 @@ fn test_apply_send_click_empty_prompt_is_noop() {
 /// requires the background LLM machinery) — just that
 /// show_results is toggled and the command_input is cleared.
 #[test]
-fn test_apply_send_click_run_agent_dispatches_with_prompt() {
+fn test_parse_command_intent_run_agent_dispatches_with_prompt() {
     let mock = WiremockLlm::start();
     let mut app = create_test_app_with_api_url(&mock.uri());
-    app.orchestrator.agent_panel_state.command_input = "hello world".to_string();
+    let prompt = "hello world".to_string();
 
-    if let Some(cmd) = apply_send_click(&mut app) {
+    if let Some(cmd) = parse_command_intent(&prompt) {
         app.orchestrator.apply_user_command(cmd);
+        app.orchestrator
+            .apply_user_command(clear_command_input_command());
     }
 
     assert!(
@@ -109,13 +114,15 @@ fn test_apply_send_click_run_agent_dispatches_with_prompt() {
 /// and append to transcript). After closing results, a new prompt must
 /// mint a fresh session_id.
 #[test]
-fn test_apply_send_click_reuses_session_id_when_results_displayed() {
+fn test_parse_command_intent_reuses_session_id_when_results_displayed() {
     let mock = WiremockLlm::start();
     let mut app = create_test_app_with_api_url(&mock.uri());
-    app.orchestrator.agent_panel_state.command_input = "first prompt".to_string();
+    let prompt = "first prompt".to_string();
 
-    if let Some(cmd) = apply_send_click(&mut app) {
+    if let Some(cmd) = parse_command_intent(&prompt) {
         app.orchestrator.apply_user_command(cmd);
+        app.orchestrator
+            .apply_user_command(clear_command_input_command());
     }
 
     assert!(app.orchestrator.agent_panel_state.show_results);
@@ -125,9 +132,11 @@ fn test_apply_send_click_reuses_session_id_when_results_displayed() {
         .expect("session_id must be set on first prompt");
 
     // Second prompt while agent results are still displayed
-    app.orchestrator.agent_panel_state.command_input = "second prompt".to_string();
-    if let Some(cmd) = apply_send_click(&mut app) {
+    let prompt = "second prompt".to_string();
+    if let Some(cmd) = parse_command_intent(&prompt) {
         app.orchestrator.apply_user_command(cmd);
+        app.orchestrator
+            .apply_user_command(clear_command_input_command());
     }
 
     let session_id_2 = app
@@ -146,15 +155,18 @@ fn test_apply_send_click_reuses_session_id_when_results_displayed() {
         "continuation prompt must be appended to the transcript"
     );
 
-    // Close agent results
-    crate::ui::panels::center::clear_agent_session_state(&mut app);
+    // Close agent results via command
+    app.orchestrator
+        .apply_user_command(crate::bus::events::user_command::UserCommand::ClearAgentSession);
     assert!(!app.orchestrator.agent_panel_state.show_results);
     assert!(app.agent().current_session_id().is_none());
 
     // Third prompt after closing results must start a new session
-    app.orchestrator.agent_panel_state.command_input = "third prompt".to_string();
-    if let Some(cmd) = apply_send_click(&mut app) {
+    let prompt = "third prompt".to_string();
+    if let Some(cmd) = parse_command_intent(&prompt) {
         app.orchestrator.apply_user_command(cmd);
+        app.orchestrator
+            .apply_user_command(clear_command_input_command());
     }
 
     let session_id_3 = app
@@ -169,7 +181,7 @@ fn test_apply_send_click_reuses_session_id_when_results_displayed() {
 
 /// Tier 4 click test: pressing Enter in the bottom-panel
 /// command input must dispatch the prompt via
-/// `apply_send_click` and fire the `on_click("send")` callback.
+/// `parse_command_intent` and fire the `on_click("send")` callback.
 ///
 /// The harness owns `&mut app` for its lifetime, so the
 /// post-click observation goes through the captured
@@ -231,7 +243,7 @@ fn test_send_enter_key_captures_event() {
 /// Regression guard: pasting text into the command input must not
 /// break the Enter-to-submit path. Pasting multiline text, then
 /// pressing Enter, must still dispatch the prompt via
-/// `apply_send_click` and fire the `on_click("send")` callback.
+/// `parse_command_intent` and fire the `on_click("send")` callback.
 #[test]
 fn test_paste_then_enter_still_submits() {
     use crate::ui::test_helpers::interact::stateful_harness;
@@ -619,7 +631,9 @@ fn test_is_enter_pressed_ime_commit() {
 fn test_is_enter_pressed_ime_commit_other_text_ignored() {
     let ctx = egui::Context::default();
     let raw_input = egui::RawInput {
-        events: vec![egui::Event::Ime(egui::ImeEvent::Commit("你好".to_owned()))],
+        events: vec![egui::Event::Ime(egui::ImeEvent::Commit(
+            "������".to_owned(),
+        ))],
         ..Default::default()
     };
     let _ = run_ui_test(&ctx, raw_input, |ui| {

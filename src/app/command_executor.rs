@@ -551,6 +551,44 @@ impl AppOrchestrator {
             UserCommand::SelectTagFilter(tag) => {
                 self.tags.selected_tag = tag;
             }
+            UserCommand::ClearAgentSession => {
+                self.agent_panel_state.show_results = false;
+                self.agent_panel_state.scroll_to_id = None;
+                self.agent.clear_history();
+                self.agent.set_response(String::new());
+                self.agent.set_thinking(String::new());
+                self.agent_transcript.reset();
+                if self.agent.state().running {
+                    self.agent.cancel();
+                }
+            }
+            UserCommand::ApplyTaskToggles { toggles } => {
+                for (idx, checked) in toggles {
+                    crate::ui::render::apply_task_toggle(
+                        &mut self.agent_transcript.content,
+                        idx,
+                        checked,
+                    );
+                }
+            }
+            UserCommand::ClearCommandInput => {
+                self.agent_panel_state.command_input.clear();
+            }
+            UserCommand::ToggleDebugWindow(show) => {
+                self.agent_panel_state.show_debug_window = show;
+            }
+            UserCommand::ClearDebugEntries => {
+                self.agent.state_mut().debug_entries.clear();
+            }
+            UserCommand::SetDebugJsonRows(rows) => {
+                self.agent_panel_state.debug_json_rows = rows;
+            }
+            UserCommand::SetDebugSearchText(text) => {
+                self.agent_panel_state.debug_search_text = text;
+            }
+            UserCommand::SetDebugAutoScroll(auto) => {
+                self.agent_panel_state.debug_auto_scroll = auto;
+            }
         }
     }
 }
