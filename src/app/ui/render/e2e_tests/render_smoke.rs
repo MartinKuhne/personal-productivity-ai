@@ -580,3 +580,48 @@ regression when the placer centers children along the main axis.
         );
     }
 }
+
+#[test]
+fn test_render_markdown_arrow_character_coverage() {
+    let ctx = egui::Context::default();
+    crate::ui::fonts::configure_fonts(&ctx);
+
+    let md = "Step 1 → Step 2 ⇒ Done ← Back";
+    let output = run_ui_test(&ctx, egui::RawInput::default(), |ui| {
+        let mut scroll_target = None;
+        let mut pending_toggles = Vec::new();
+        let strategy = crate::ui::table_width::DeficitStrategy::HybridMinPenaltyWaterFill;
+        render_markdown(
+            ui,
+            md,
+            &mut scroll_target,
+            &mut pending_toggles,
+            strategy,
+            None,
+        );
+    });
+
+    let texts = crate::ui::test_helpers::text::extract_text(&output.shapes);
+    assert!(
+        texts.iter().any(|t| t.contains("Step 1 → Step 2")),
+        "Rendered shapes must contain the arrow text, found: {texts:?}"
+    );
+
+    // Verify no shape has rendered the replacement tofu square U+25FB
+    for cs in &output.shapes {
+        if let egui::Shape::Text(t) = &cs.shape {
+            for row in &t.galley.rows {
+                for glyph in &row.glyphs {
+                    assert_ne!(
+                        glyph.chr, '◻',
+                        "Rendered markdown glyph must not be missing-character tofu square"
+                    );
+                    assert_ne!(
+                        glyph.chr, '?',
+                        "Rendered markdown glyph must not be replacement question mark"
+                    );
+                }
+            }
+        }
+    }
+}

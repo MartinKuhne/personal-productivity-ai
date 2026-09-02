@@ -2,7 +2,8 @@
 
 // Top Panel
 /// Application title displayed in the top toolbar.
-pub const APP_TITLE: &str = "⚡ FastMD Viewer";
+/// Uses Phosphor [`egui_phosphor::regular::LIGHTNING`] icon.
+pub const APP_TITLE: &str = "\u{E2DE} FastMD Viewer";
 
 /// Label for the batch prompt processing button (now in the hamburger menu).
 pub const BATCH_BUTTON: &str = "Batch...";
@@ -57,7 +58,7 @@ pub const TAG_FILTER_ID_SALT: &str = "tag_combobox";
 pub const TAG_FILTER_DEFAULT: &str = "Filter by Tag: All";
 
 /// Label for the hamburger menu button in the top toolbar.
-pub const HAMBURGER_MENU_BUTTON: &str = "☰";
+pub const HAMBURGER_MENU_BUTTON: &str = egui_phosphor::regular::LIST;
 
 /// ID salt for the hamburger menu in egui.
 pub const HAMBURGER_MENU_ID_SALT: &str = "top_hamburger_menu";
@@ -154,7 +155,8 @@ pub const COMMAND_INPUT_HINT: &str = "Type command (Enter to submit, Shift+Enter
 pub const FORMAT_MARKDOWN_ACTION: &str = "Format Markdown";
 
 /// Button label to cancel/stop a running agent task.
-pub const STOP_AGENT_BUTTON: &str = "⏹ Stop";
+/// Uses Phosphor [`egui_phosphor::regular::STOP`] icon.
+pub const STOP_AGENT_BUTTON: &str = "\u{E46C} Stop";
 
 /// Header text for the available models list output.
 pub const MODELS_LIST_HEADER: &str = "Available Models:\n";
@@ -181,7 +183,8 @@ pub const TABLE_OF_CONTENTS_HEADER: &str = "Table of Contents";
 
 // Center Panel
 /// Header for the agent session view in the center panel.
-pub const AGENT_SESSION_HEADER: &str = "🤖 FastMD Agent Session";
+/// Uses Phosphor [`egui_phosphor::regular::ROBOT`] icon.
+pub const AGENT_SESSION_HEADER: &str = "\u{E762} FastMD Agent Session";
 
 /// Button label to close the agent session view (replaces "Back to document").
 pub const AGENT_SESSION_CLOSE_BUTTON: &str = "Close";
@@ -505,7 +508,7 @@ mod tests {
 
     #[test]
     fn test_hamburger_menu_strings() {
-        assert_eq!(HAMBURGER_MENU_BUTTON, "☰");
+        assert_eq!(HAMBURGER_MENU_BUTTON, egui_phosphor::regular::LIST);
         assert_eq!(HAMBURGER_MENU_ID_SALT, "top_hamburger_menu");
         assert_eq!(MENU_TABLE_WRAP_ALGORITHM, "Table wrap algorithm");
         assert_eq!(MENU_WINDOWS, "Windows");
@@ -517,6 +520,42 @@ mod tests {
         assert_eq!(
             format_chat_model_menu_label("gpt-4o", 15),
             "gpt-4o (Cost: 15)"
+        );
+    }
+
+    #[test]
+    fn test_ui_strings_use_phosphor_icons() {
+        assert!(
+            APP_TITLE.contains(egui_phosphor::regular::LIGHTNING),
+            "APP_TITLE should use Phosphor LIGHTNING icon"
+        );
+        assert!(
+            !APP_TITLE.contains('⚡'),
+            "APP_TITLE should not use raw lightning emoji"
+        );
+
+        assert_eq!(
+            HAMBURGER_MENU_BUTTON,
+            egui_phosphor::regular::LIST,
+            "HAMBURGER_MENU_BUTTON should use Phosphor LIST icon"
+        );
+
+        assert!(
+            STOP_AGENT_BUTTON.contains(egui_phosphor::regular::STOP),
+            "STOP_AGENT_BUTTON should use Phosphor STOP icon"
+        );
+        assert!(
+            !STOP_AGENT_BUTTON.contains('⏹'),
+            "STOP_AGENT_BUTTON should not use raw stop emoji"
+        );
+
+        assert!(
+            AGENT_SESSION_HEADER.contains(egui_phosphor::regular::ROBOT),
+            "AGENT_SESSION_HEADER should use Phosphor ROBOT icon"
+        );
+        assert!(
+            !AGENT_SESSION_HEADER.contains('🤖'),
+            "AGENT_SESSION_HEADER should not use raw robot emoji"
         );
     }
 }
