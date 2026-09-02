@@ -92,7 +92,12 @@ impl AppOrchestrator {
                 let mut new_config = self.config.clone();
                 if new_config.table_width_strategy != new_value {
                     new_config.table_width_strategy = new_value.to_string();
-                    let _ = crate::config::save_config(&new_config);
+                    if let Err(e) = self.config_storage.save_config(&new_config) {
+                        tracing::error!(
+                            error = %e,
+                            "failed to persist AppConfig after table-width strategy change"
+                        );
+                    }
                     self.config = new_config;
                 }
             }
@@ -453,7 +458,7 @@ impl AppOrchestrator {
                         }
                     }
                 }
-                if let Err(e) = crate::config::save_config(&new_config) {
+                if let Err(e) = self.config_storage.save_config(&new_config) {
                     tracing::error!(
                         error = %e,
                         "failed to persist AppConfig after tool-group toggle"

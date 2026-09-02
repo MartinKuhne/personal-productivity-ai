@@ -70,6 +70,7 @@ fn harness() -> AppOrchestrator {
         inline_editor_enabled: false,
         background_manager: Arc::new(Mutex::new(BackgroundLogs::new())),
         config: AppConfig::default(),
+        config_storage: std::sync::Arc::new(crate::config::NoopConfigStorage),
         config_reader: None,
         pending_file_load: None,
         finished_watcher_slot: Arc::new(Mutex::new(None)),
@@ -383,4 +384,38 @@ fn handle_file_selection_spawns_background_load() {
 
     assert_eq!(orch.tabs.loaded_path, Some(path.clone()));
     assert!(orch.tabs.current_markdown.contains("Loaded"));
+}
+
+#[test]
+fn orchestrator_user_commands_persist_via_injected_config_storage() {
+    let mut orch = harness();
+    let storage = std::sync::Arc::new(crate::config::InMemoryConfigStorage::new());
+    orch.config_storage = storage.clone();
+
+    // Table width strategy change
+    orch.apply_user_command(
+        crate::bus::events::user_command::UserCommand::ChangeTableWidthStrategy(
+            crate::ui::table_width::DeficitStrategy::WaterFillRatio,
+        ),
+    );
+    assert_eq!(
+        orch.config.deficit_strategy(),
+        crate::ui::table_width::DeficitStrategy::WaterFillRatio
+    );
+    assert_eq!(
+        storage.latest_config().unwrap().deficit_strategy(),
+        crate::ui::table_width::DeficitStrategy::WaterFillRatio
+    );
+
+    // Tool group enable/disable
+    orch.apply_user_command(
+        crate::bus::events::user_command::UserCommand::SetToolGroupEnabled {
+            id: crate::agent::tools::registry::ToolGroupId::Internal(
+                crate::agent::tools::registry::InternalToolGroup::Weather,
+            ),
+            enabled: false,
+        },
+    );
+    assert!(!orch.config.tool_groups.weather);
+    assert!(!storage.latest_config().unwrap().tool_groups.weather);
 }

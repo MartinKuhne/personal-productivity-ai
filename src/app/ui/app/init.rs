@@ -253,6 +253,9 @@ impl FastMdApp {
                 inline_editor_enabled: false,
                 background_manager,
                 config: AppConfig::default(),
+                config_storage: std::sync::Arc::new(crate::config::FileConfigStorage::new(
+                    crate::config::get_config_path(),
+                )),
                 config_reader: Some(config_reader),
                 pending_file_load: None,
                 finished_watcher_slot,
@@ -399,6 +402,7 @@ impl FastMdApp {
                 background_manager,
                 directory_tracker: dir_tracker,
                 config,
+                config_storage: std::sync::Arc::new(crate::config::NoopConfigStorage),
                 config_reader: None,
                 pending_file_load: None,
                 finished_watcher_slot,

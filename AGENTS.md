@@ -26,6 +26,7 @@
 - [RUST-021] You MUST use string constants for repeat strings or user-facing literals.
 - [RUST-022] You SHOULD use open source and well-maintained libraries over hand-coding equivalent functions.
 - [RUST-023] You SHOULD prefer splitting large functions, extracting helpers, and reducing nesting over introducing additional branches into already-complex code.
+- [RUST-024] Functions persisting configuration or application state MUST use an injected storage handler (e.g. `ConfigStorageHandler`), NEVER hardcoding direct writes to platform-default user locations (`%APPDATA%`, `~/.fastmd*`, `USERPROFILE`).
 
 ## Tests
 - [RUST-001] Unit tests SHOULD be kept in a separate file. The file MUST be named <file>_tests.rs.
@@ -33,6 +34,8 @@
 - [RUST-003] All changes MUST be covered by unit tests. Happy path, corner cases, failure modes, all code paths MUST be covered.
 - [RUST-004] All changes SHOULD be covered by narrow integration tests.
 - [RUST-005] When asked to fix a bug, you MUST create a failing test first. The test MUST reproduce the issue. Then make the code change. Then prove the code change works because the test passes.
+- [RUST-006] Tests MUST NEVER read, write, or mutate real user filesystem paths, live configuration files (`%APPDATA%`, `~/.fastmd*`, `USERPROFILE`), or production databases. All tests involving persistence MUST use mock/noop storage handlers (`NoopConfigStorage`, `InMemoryConfigStorage`) or isolated `tempfile::TempDir` paths. Functions targeting platform-default user paths MUST contain runtime panic shields preventing execution in test environments.
+
 
 ## Documentation
 - [RUST-010] Every module must have a `//!` module-level doc comment containing a concise one-sentence summary of the module's purpose

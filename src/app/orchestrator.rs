@@ -46,6 +46,7 @@ pub struct AppOrchestrator {
     pub inline_editor_enabled: bool,
     pub background_manager: SharedBackgroundLogs,
     pub config: crate::config::AppConfig,
+    pub config_storage: std::sync::Arc<dyn crate::config::ConfigStorageHandler>,
     pub config_reader: Option<BusReader<ConfigArrived>>,
     pub pending_file_load: Option<PathBuf>,
     pub finished_watcher_slot: Arc<Mutex<Option<notify::RecommendedWatcher>>>,

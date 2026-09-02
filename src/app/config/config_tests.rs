@@ -1372,3 +1372,59 @@ fn test_ensure_system_library_present_idempotent_when_already_correct() {
         "root_folder must not be repointed for an already-correct System library"
     );
 }
+
+#[test]
+#[should_panic(expected = "save_config() was called in a test context")]
+fn test_save_config_panics_in_test_context() {
+    let cfg = AppConfig::default();
+    let _ = crate::config::save_config(&cfg);
+}
+
+#[test]
+fn test_file_config_storage_saves_to_path() {
+    let tmp = tempdir().unwrap();
+    let path = tmp.path().join("subdir").join("test_config.yaml");
+    let storage = FileConfigStorage::new(path.clone());
+    assert_eq!(storage.path(), path.as_path());
+
+    let mut cfg = AppConfig::default();
+    cfg.table_width_strategy = "waterfill".to_string();
+    let written = storage.save_config(&cfg).unwrap();
+    assert_eq!(written, path);
+    assert!(path.exists());
+
+    let loaded = crate::config::load_config_from_path(&path, None);
+    assert_eq!(loaded.table_width_strategy, "waterfill");
+}
+
+#[test]
+fn test_noop_config_storage_does_not_create_file() {
+    let storage = NoopConfigStorage;
+    let cfg = AppConfig::default();
+    let res = storage.save_config(&cfg);
+    assert!(res.is_ok());
+}
+
+#[test]
+fn test_in_memory_config_storage_records_history() {
+    let storage = InMemoryConfigStorage::new();
+    assert!(storage.saved_configs().is_empty());
+    assert!(storage.latest_config().is_none());
+
+    let mut cfg1 = AppConfig::default();
+    cfg1.table_width_strategy = "waterfill".to_string();
+    storage.save_config(&cfg1).unwrap();
+
+    let mut cfg2 = AppConfig::default();
+    cfg2.table_width_strategy = "lagrange".to_string();
+    storage.save_config(&cfg2).unwrap();
+
+    let history = storage.saved_configs();
+    assert_eq!(history.len(), 2);
+    assert_eq!(history[0].table_width_strategy, "waterfill");
+    assert_eq!(history[1].table_width_strategy, "lagrange");
+    assert_eq!(
+        storage.latest_config().unwrap().table_width_strategy,
+        "lagrange"
+    );
+}
