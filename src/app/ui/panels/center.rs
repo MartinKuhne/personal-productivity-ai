@@ -9,8 +9,6 @@ use egui::RichText;
 use egui::containers::CentralPanel;
 use std::path::PathBuf;
 
-
-
 /// Purpose: Clears all agent-related session state from the application state.
 /// Inputs: `app` - A mutable reference to the `FastMdApp` state.
 /// Outputs: None

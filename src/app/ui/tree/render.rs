@@ -17,7 +17,7 @@ use std::collections::HashSet;
 fn show_dir_context_menu(
     ui: &mut egui::Ui,
     path: &std::path::Path,
-    name: &str,
+    _name: &str,
     ctx: &mut TreeNodeContext,
 ) {
     if ui
@@ -32,34 +32,43 @@ fn show_dir_context_menu(
         ui.close();
     }
     if ui.button(crate::ui::strings::RENAME_ACTION).clicked() {
-        ctx.user_command_bus.publish(crate::bus::events::user_command::UserCommand::Rename(path.to_path_buf()));
+        ctx.user_command_bus
+            .publish(crate::bus::events::user_command::UserCommand::Rename(
+                path.to_path_buf(),
+            ));
         ui.close();
     }
     if ui.button(crate::ui::strings::MOVE_ACTION).clicked() {
-        ctx.user_command_bus.publish(crate::bus::events::user_command::UserCommand::Move(path.to_path_buf()));
+        ctx.user_command_bus
+            .publish(crate::bus::events::user_command::UserCommand::Move(
+                path.to_path_buf(),
+            ));
         ui.close();
     }
     if ui
         .button(crate::ui::strings::CREATE_DIRECTORY_ACTION)
         .clicked()
     {
-        ctx.user_command_bus.publish(crate::bus::events::user_command::UserCommand::CreateDirectory { parent: path.to_path_buf() });
+        ctx.user_command_bus.publish(
+            crate::bus::events::user_command::UserCommand::CreateDirectory {
+                parent: path.to_path_buf(),
+            },
+        );
         ui.close();
     }
     if ui.button(crate::ui::strings::NEW_DOCUMENT_ACTION).clicked() {
-        ctx.user_command_bus.publish(crate::bus::events::user_command::UserCommand::CreateDocument { parent: path.to_path_buf() });
+        ctx.user_command_bus.publish(
+            crate::bus::events::user_command::UserCommand::CreateDocument {
+                parent: path.to_path_buf(),
+            },
+        );
         ui.close();
     }
     if ui.button(crate::ui::strings::DELETE_ACTION).clicked() {
-        let path = path.to_path_buf();
-        if let Err(e) = crate::utils::recycle_bin::delete(&path) {
-            tracing::error!(
-                name = "ui.directory.delete_failed",
-                path = %path.display(),
-                error = %e,
-                "Failed to delete directory to trash. Likely cause: directory in use or permission denied. Operator should check file locks."
-            );
-        }
+        ctx.user_command_bus
+            .publish(crate::bus::events::user_command::UserCommand::Delete(
+                path.to_path_buf(),
+            ));
         ui.close();
     }
 
@@ -138,12 +147,14 @@ fn show_multi_select_file_context_menu(ui: &mut egui::Ui, ctx: &mut TreeNodeCont
 fn show_file_context_menu(
     ui: &mut egui::Ui,
     path: &std::path::Path,
-    name: &str,
+    _name: &str,
     ctx: &mut TreeNodeContext,
 ) {
     if ui.button(crate::ui::strings::EDIT_BUTTON).clicked() {
         if ctx.inline_editor_enabled() {
-            ctx.user_command_bus.publish(crate::bus::events::user_command::UserCommand::OpenInEditor(path.to_path_buf()));
+            ctx.user_command_bus.publish(
+                crate::bus::events::user_command::UserCommand::OpenInEditor(path.to_path_buf()),
+            );
         } else {
             crate::ui::open_in_system_editor(path);
         }
@@ -279,25 +290,24 @@ fn show_file_context_menu(
         ui.close();
     }
     if ui.button(crate::ui::strings::RENAME_ACTION).clicked() {
-        ctx.user_command_bus.publish(crate::bus::events::user_command::UserCommand::Rename(path.to_path_buf()));
+        ctx.user_command_bus
+            .publish(crate::bus::events::user_command::UserCommand::Rename(
+                path.to_path_buf(),
+            ));
         ui.close();
     }
     if ui.button(crate::ui::strings::MOVE_ACTION).clicked() {
-        ctx.user_command_bus.publish(crate::bus::events::user_command::UserCommand::Move(path.to_path_buf()));
+        ctx.user_command_bus
+            .publish(crate::bus::events::user_command::UserCommand::Move(
+                path.to_path_buf(),
+            ));
         ui.close();
     }
     if ui.button(crate::ui::strings::DELETE_ACTION).clicked() {
-        let path = path.to_path_buf();
-        if let Err(e) = crate::utils::recycle_bin::delete(&path) {
-            tracing::error!(
-                name = "ui.file.delete_failed",
-                path = %path.display(),
-                error = %e,
-                "Failed to delete file to trash. Likely cause: file in use or permission denied. Operator should check file locks."
-            );
-        } else if let Some(producer) = ctx.file_event_producer().as_ref() {
-            producer.publish_removed(&path);
-        }
+        ctx.user_command_bus
+            .publish(crate::bus::events::user_command::UserCommand::Delete(
+                path.to_path_buf(),
+            ));
         ui.close();
     }
 
@@ -418,7 +428,8 @@ pub fn render_flat_row_capture(
                 let response = ui.selectable_label(is_selected, text);
 
                 if response.clicked() {
-                    apply_file_row_click(ctx, row);
+                    let cmd = apply_file_row_click(ctx, row);
+                    ctx.user_command_bus.publish(cmd);
                     on_click("file_row");
                 }
 

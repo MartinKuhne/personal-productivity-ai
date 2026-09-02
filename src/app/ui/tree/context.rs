@@ -166,15 +166,7 @@ impl TreeNodeContext {
             user_command_bus,
         }
     }
-
-    pub fn write_back(
-        &self,
-        selection: &mut crate::ui::FileSelection,
-        tabs: &mut crate::ui::Tabs,
-        ) {
-        self.ctx.write_back(selection, tabs);}
 }
-
 
 impl Default for TreeOpsContext {
     /// All-defaults construction. Used by tests to build a
@@ -250,19 +242,6 @@ impl TreeOpsContext {
     /// `modifiers`, `inline_editor_enabled`, `layout`, and
     /// `content_libraries` are not written back because the
     /// orchestrator is the source of truth for them.
-    pub fn write_back(
-        &self,
-        selection: &mut FileSelection,
-        tabs: &mut Tabs,
-        ) {
-        selection.selected_file = self.selected_file.clone();
-        selection.selected_files = self.selected_files.clone();
-        selection.expanded_dirs = self.expanded_dirs.clone();
-        selection.selected_dir = self.selected_dir.clone();
-        selection.tree_dirty = self.tree_dirty;
-        tabs.tabs = self.tabs.clone();
-        }
-
     /// Access expanded directories set.
     pub fn expanded_dirs(&mut self) -> &mut HashSet<PathBuf> {
         &mut self.expanded_dirs

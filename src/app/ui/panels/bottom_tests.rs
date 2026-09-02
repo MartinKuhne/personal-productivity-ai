@@ -508,21 +508,6 @@ fn test_compute_prompt_prefix_exact_match() {
     assert_eq!(prefix, "TestLib >");
 }
 
-#[test]
-fn test_parse_command_intent() {
-    assert_eq!(parse_command_intent("/models"), CommandIntent::ShowModels);
-    assert_eq!(parse_command_intent("/models "), CommandIntent::ShowModels);
-    assert_eq!(
-        parse_command_intent("/model something"),
-        CommandIntent::ShowDeprecatedModelMessage
-    );
-    assert_eq!(parse_command_intent("   "), CommandIntent::Empty);
-    assert_eq!(
-        parse_command_intent("hello world"),
-        CommandIntent::RunAgent("hello world".to_string())
-    );
-}
-
 /// Tests for `compute_file_context` function.
 #[test]
 fn test_compute_file_context_none_when_no_file() {

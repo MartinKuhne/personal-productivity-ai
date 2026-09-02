@@ -263,7 +263,7 @@ pub fn show_left_panel(app: &mut FastMdApp, parent_ui: &mut egui::Ui) {
             // and tests can construct a `TreeNodeContext` directly
             // without any `Box::leak`.
             //
-                        let mut ctx = TreeNodeContext::from_app_state(
+            let mut ctx = TreeNodeContext::from_app_state(
                 &app.orchestrator.selection,
                 &app.orchestrator.tabs,
                 &app.layout,
@@ -288,14 +288,6 @@ pub fn show_left_panel(app: &mut FastMdApp, parent_ui: &mut egui::Ui) {
 
             // Commit the (possibly mutated) view object back to
             // the orchestrator. `bg_tx`, `file_event_producer`,
-            // `modifiers`, `inline_editor_enabled`, `layout`,
-            // `content_libraries`, and `pdf_backing_tracker` are
-            // not written back — those are inputs, not outputs.
-            ctx.write_back(
-                &mut app.orchestrator.selection,
-                &mut app.orchestrator.tabs,
-                );
-
             // Empty-state placeholder must be rendered outside the
             // virtual-scroll `show_rows` (which would allocate zero
             // rows for an empty tree) and outside any conditional
@@ -310,7 +302,6 @@ pub fn show_left_panel(app: &mut FastMdApp, parent_ui: &mut egui::Ui) {
                         .color(egui::Color32::GRAY),
                 );
             }
-
         });
     // Capture the panel's actual width after user interaction
     let rect = panel_response.response.rect;

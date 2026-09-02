@@ -59,14 +59,9 @@ pub fn apply_file_row_click(
 }
 
 pub fn apply_directory_row_click(
-    ctx: &mut TreeNodeContext,
+    _ctx: &mut TreeNodeContext,
     row: &FlatRow,
 ) -> crate::bus::events::user_command::UserCommand {
-    // We still mark tree_dirty because the expansion state will change in Executor
-    // Wait, tree_dirty is specific to TreeOpsContext cache. So we should keep tree_dirty = true here?
-    // Actually, Executor will mutate AppOrchestrator's expanded_dirs, but TreeOpsContext tree_dirty is on the context.
-    // Let's just set it here so the UI knows to rebuild the tree cache.
-    *ctx.tree_dirty() = true;
     crate::bus::events::user_command::UserCommand::SelectDirectory {
         path: row.path.clone(),
         toggle_expand: true,

@@ -252,8 +252,6 @@ impl Default for BatchDialogConfig {
     }
 }
 
-
-
 /// Log phase for batch logging
 #[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub enum BatchLogPhase {

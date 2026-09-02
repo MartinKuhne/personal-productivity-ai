@@ -9,8 +9,6 @@ use eframe::egui;
 use std::collections::BTreeSet;
 use std::path::{Path, PathBuf};
 
-
-
 /// Shared name-entry window used by the create-directory and
 /// create-document dialogs (UI-011, UI-015).
 ///

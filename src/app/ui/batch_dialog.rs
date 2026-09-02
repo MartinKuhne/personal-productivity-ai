@@ -14,12 +14,7 @@ use eframe::egui;
 
 /// Shows the batch prompt processing dialog.
 /// Returns `Some(result)` when dialog closes, `None` if still open.
-pub fn show_batch_modal(
-    app: &mut FastMdApp,
-    ctx: &egui::Context,
-    config: &mut BatchDialogConfig,
-) {
-    
+pub fn show_batch_modal(app: &mut FastMdApp, ctx: &egui::Context, config: &mut BatchDialogConfig) {
     let is_running = app.dialogs().batch_handle.is_some();
     let mut dialog_open = app.dialogs().batch_dialog_open;
 
@@ -58,18 +53,14 @@ pub fn show_batch_modal(
         if let Some(handle) = &app.dialogs().batch_handle {
             handle.cancel();
         }
-        app.orchestrator.user_command_bus.publish(crate::bus::events::user_command::UserCommand::CancelBatch);
+        app.orchestrator
+            .user_command_bus
+            .publish(crate::bus::events::user_command::UserCommand::CancelBatch);
     }
-
-    
 }
 
 /// Shows the configuration view (idle state).
-fn show_config_view(
-    ui: &mut egui::Ui,
-    app: &mut FastMdApp,
-    config: &mut BatchDialogConfig,
-) {
+fn show_config_view(ui: &mut egui::Ui, app: &mut FastMdApp, config: &mut BatchDialogConfig) {
     // Directory selector
     ui.horizontal(|ui| {
         ui.label(strings::BATCH_DIALOG_DIRECTORY_LABEL);
@@ -183,21 +174,22 @@ fn show_config_view(
                     mode: config.mode,
                     concurrency: config.concurrency,
                 };
-                app.orchestrator.user_command_bus.publish(crate::bus::events::user_command::UserCommand::StartBatch(batch_config));
+                app.orchestrator.user_command_bus.publish(
+                    crate::bus::events::user_command::UserCommand::StartBatch(batch_config),
+                );
             }
 
             if ui.button(strings::CANCEL_BUTTON).clicked() {
-                app.orchestrator.user_command_bus.publish(crate::bus::events::user_command::UserCommand::CancelBatch);
+                app.orchestrator
+                    .user_command_bus
+                    .publish(crate::bus::events::user_command::UserCommand::CancelBatch);
             }
         });
     });
 }
 
 /// Shows the running/progress view during batch processing.
-fn show_running_view(
-    ui: &mut egui::Ui,
-    app: &mut FastMdApp,
-) {
+fn show_running_view(ui: &mut egui::Ui, app: &mut FastMdApp) {
     let is_finished = app
         .dialogs()
         .batch_handle
@@ -227,7 +219,9 @@ fn show_running_view(
         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
             if is_finished {
                 if ui.button(strings::BATCH_CLOSE_BUTTON).clicked() {
-                    app.orchestrator.user_command_bus.publish(crate::bus::events::user_command::UserCommand::CancelBatch);
+                    app.orchestrator
+                        .user_command_bus
+                        .publish(crate::bus::events::user_command::UserCommand::CancelBatch);
                 }
             } else {
                 if ui.button(strings::CANCEL_BUTTON).clicked()

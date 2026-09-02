@@ -30,8 +30,9 @@ impl AppOrchestrator {
             }
             UserCommand::CancelAgent => {
                 self.agent.cancel();
-                self.agent_panel_state.show_results = false;
-                self.agent_transcript.reset();
+            }
+            UserCommand::QueueAgentPrompt(prompt) => {
+                self.agent.queue_prompt(prompt);
             }
             UserCommand::CloseAllTabs => {
                 self.tabs.tabs.clear();
@@ -171,6 +172,7 @@ impl AppOrchestrator {
                 path,
                 toggle_expand,
             } => {
+                self.selection.tree_dirty = true;
                 if toggle_expand {
                     if self.selection.expanded_dirs.contains(&path) {
                         self.selection.expanded_dirs.remove(&path);
@@ -205,15 +207,13 @@ impl AppOrchestrator {
             UserCommand::ShowInExplorer(path) => {
                 crate::ui::show_in_file_explorer(&path);
             }
-            UserCommand::CopyPath(_path) => {
-                // Should use ui.copy_text, but we don't have ui ctx here.
-                // It was done in render.rs, wait! I removed ui.copy_text from render.rs!
-                // Actually, I can use arboard or egui ctx? The executor doesn't have egui ctx directly!
-                // Actually, `CopyPath` was in UserCommand, so how did they intend it to be used?
-                // `AppOrchestrator` doesn't have egui context easily available in `CommandExecutor`.
-                // I will just put a TODO or pass egui ctx.
-                // Wait, I will just let `app.rs` handle `CopyPath` or just skip it for now.
-                tracing::warn!("CopyPath not fully implemented without egui ctx in executor");
+            UserCommand::CopyPath(path) => {
+                let path_str = path.to_string_lossy().to_string();
+                if let Ok(mut clipboard) = arboard::Clipboard::new() {
+                    let _ = clipboard.set_text(path_str);
+                } else {
+                    tracing::error!("Failed to initialize clipboard for CopyPath");
+                }
             }
             #[cfg(feature = "pdf-export")]
             UserCommand::SaveAsPdf(path) => {
@@ -513,9 +513,16 @@ impl AppOrchestrator {
             }
             UserCommand::StartBatch(config) => {
                 if self.dialogs.batch_handle.is_none() {
-                    let prompt_text = self.dialogs.batch_dialog_config
+                    let prompt_text = self
+                        .dialogs
+                        .batch_dialog_config
                         .available_prompts
-                        .get(self.dialogs.batch_dialog_config.selected_prompt_idx.unwrap_or(0))
+                        .get(
+                            self.dialogs
+                                .batch_dialog_config
+                                .selected_prompt_idx
+                                .unwrap_or(0),
+                        )
                         .map(|p| p.content.clone())
                         .unwrap_or_default();
                     let (coordinator, cancel_flag) =
@@ -537,7 +544,9 @@ impl AppOrchestrator {
                 self.dialogs.batch_dialog_config.available_prompts.clear();
                 self.dialogs.batch_dialog_config.selected_prompt_idx = None;
             }
-            _ => {} // Placeholder for future variants
+            UserCommand::SelectTagFilter(tag) => {
+                self.tags.selected_tag = tag;
+            }
         }
     }
 }

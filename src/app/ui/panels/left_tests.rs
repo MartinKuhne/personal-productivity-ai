@@ -183,8 +183,7 @@ fn test_directory_click_invalidates_tree_cache() {
     // `apply_directory_row_click` directly — this is the same
     // function `render_flat_row` invokes from its `if
     // response.clicked()` branch. The context owns its fields,
-    // so we wrap the click in a block scope and `write_back`
-    // the mutated state to the orchestrator before re-rendering.
+
     let dir_row = crate::ui::tree::flatten::FlatRow {
         depth: 0,
         name: "subdir".to_string(),
@@ -196,23 +195,16 @@ fn test_directory_click_invalidates_tree_cache() {
         let mut ctx = TreeNodeContext::from_app_state(
             &app.orchestrator.selection,
             &app.orchestrator.tabs,
-            &app.orchestrator.dialogs,
             &app.layout,
             &app.orchestrator.content_libraries,
             Some(app.orchestrator.tx.clone()),
             app.orchestrator.file_event_bus.clone(),
             app.orchestrator.inline_editor_enabled,
             egui::Modifiers::default(),
-            None,
             app.pdf_backing_tracker().clone(),
             app.orchestrator.user_command_bus.clone(),
         );
         let cmd = crate::ui::tree::handlers::apply_directory_row_click(&mut ctx, &dir_row);
-        ctx.write_back(
-            &mut app.orchestrator.selection,
-            &mut app.orchestrator.tabs,
-            &mut app.orchestrator.dialogs,
-        );
         app.orchestrator.apply_user_command(cmd);
     }
 

@@ -41,6 +41,8 @@ pub enum UserCommand {
     ShowDeprecatedModelMessage,
     /// Cancel the running agent session and clear results.
     CancelAgent,
+    /// Queue a prompt to run after the current agent session finishes.
+    QueueAgentPrompt(String),
 
     // ── Tabs (surface C) ───────────────────────────────────────────────
     /// Close the tab at the given index.

@@ -92,10 +92,10 @@
 
 - [x] T024 Remove `submit_prompt` field from `AppOrchestrator` in `src/app/orchestrator.rs`
 - [x] T025 Remove `submit_prompt` deferred-action branch in `handle_deferred_actions` within `src/app/ui/app/update.rs`
-- [ ] T026 [P] Remove obsolete types (`CommandIntent`, `TabAction`, `NameEntryAction`, `BatchDialogResult`) across UI modules
-- [ ] T027 [P] Clean up unused `write_back` logic in `TreeNodeContext` in `src/app/ui/tree/context.rs`
-- [ ] T028 [P] Add `///` docs to all `UserCommand` variants and new public items to satisfy RUST-011
-- [ ] T029 Run quickstart.md validation
+- [x] T026 [P] Remove obsolete types (`CommandIntent`, `TabAction`, `NameEntryAction`, `BatchDialogResult`) across UI modules
+- [x] T027 [P] Clean up unused `write_back` logic in `TreeNodeContext` in `src/app/ui/tree/context.rs`
+- [x] T028 [P] Add `///` docs to all `UserCommand` variants and new public items to satisfy RUST-011
+- [x] T029 Run quickstart.md validation
 
 ---
 
@@ -140,3 +140,16 @@
 3. Add User Story 2 (remaining panels) → Test independently 
 4. Add User Story 3 (test refactoring) → Asserts the UI logic cleanly
 5. Each story adds value without breaking previous stories
+
+## Phase 6: Convergence
+
+- [ ] T030 Refactor `src/app/ui/panels/bottom.rs` to publish commands for agent cancellation and prompting instead of directly mutating `app.agent_mut()` per US2 (partial)
+- [ ] T031 Remove redundant and impure `ctx.write_back()` call in `src/app/ui/panels/left.rs` and the corresponding logic in `TreeNodeContext` per US2 (partial)
+- [ ] T032 Rewrite and restore commented-out Tier-4 tests in `src/app/ui/tree/render_tests.rs` and `src/app/ui/panels/center_tests.rs` to assert on published commands per US3 (partial)
+
+## Phase 7: Convergence
+
+- [ ] T033 Migrate `show_tools_dialog` row handlers in `src/app/ui/tools_dialog.rs` to publish `UserCommand::SetToolGroupEnabled` / `ClearToolGroupError` / `StartMcpAuth` / `ForgetMcpAuth` instead of directly mutating `AppConfig` and `ToolContext` per FR-001, FR-003, T016 (partial)
+- [ ] T034 Route file-tree single- and multi-select `Delete` / `Move` actions through `Bus<UserCommand>` in `src/app/ui/tree/render.rs` instead of calling `recycle_bin::delete` and `FileEventProducer::publish_removed` inline per FR-001, FR-003, T017 (partial)
+- [ ] T035 Implement `UserCommand::CopyPath` handling in `src/app/command_executor.rs` (currently `tracing::warn` stub) or delegate clipboard via UI plumbing so spec SC-001 routing is complete per FR-004 (partial)
+- [ ] T036 Remove or justify retention of obsolete `CommandIntent` enum in `src/app/ui/panels/bottom.rs` and satisfy `CommandExecutor::_ => {}` wildcard by handling all variants explicitly per T026, RUST-011 (partial)

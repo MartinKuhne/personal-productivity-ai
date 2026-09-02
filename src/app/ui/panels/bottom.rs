@@ -7,15 +7,6 @@ use eframe::egui;
 use egui::RichText;
 use egui::containers::Panel;
 
-/// Enum representing the parsed intent from a user command prompt.
-#[derive(Debug, PartialEq)]
-pub enum CommandIntent {
-    ShowModels,
-    ShowDeprecatedModelMessage,
-    RunAgent(String),
-    Empty,
-}
-
 /// Purpose: Detects whether the current frame carries an Enter key
 /// press, whether it arrives as a regular `Key::Enter` event or as an
 /// IME commit of a newline.
@@ -46,19 +37,6 @@ pub fn is_enter_pressed(input: &egui::InputState) -> bool {
 }
 
 /// Parses the user prompt to determine the intended command.
-pub fn parse_command_intent(prompt: &str) -> CommandIntent {
-    let trimmed = prompt.trim();
-    if trimmed.starts_with("/models") {
-        CommandIntent::ShowModels
-    } else if trimmed.starts_with("/model ") {
-        CommandIntent::ShowDeprecatedModelMessage
-    } else if !trimmed.is_empty() {
-        CommandIntent::RunAgent(trimmed.to_string())
-    } else {
-        CommandIntent::Empty
-    }
-}
-
 /// Computes the prompt prefix based on the selected directory and available content libraries.
 pub fn compute_prompt_prefix(
     selected_dir: Option<&std::path::Path>,
@@ -159,19 +137,24 @@ pub fn apply_send_click(
         .command_input
         .trim_end()
         .to_string();
+
+    // Since we clear the prompt in the UI when the user clicks send,
+    // this mutation remains inline. (Note: could be deferred to CommandExecutor if desired)
     app.orchestrator.agent_panel_state.command_input.clear();
 
-    match parse_command_intent(&prompt) {
-        CommandIntent::ShowModels => {
-            Some(crate::bus::events::user_command::UserCommand::ShowModels)
-        }
-        CommandIntent::ShowDeprecatedModelMessage => {
-            Some(crate::bus::events::user_command::UserCommand::ShowDeprecatedModelMessage)
-        }
-        CommandIntent::RunAgent(agent_prompt) => Some(
-            crate::bus::events::user_command::UserCommand::RunAgent(agent_prompt),
-        ),
-        CommandIntent::Empty => None,
+    if prompt.is_empty() {
+        return None;
+    }
+
+    let trimmed = prompt.trim();
+    if trimmed.starts_with("/models") {
+        Some(crate::bus::events::user_command::UserCommand::ShowModels)
+    } else if trimmed.starts_with("/model ") {
+        Some(crate::bus::events::user_command::UserCommand::ShowDeprecatedModelMessage)
+    } else {
+        Some(crate::bus::events::user_command::UserCommand::RunAgent(
+            trimmed.to_string(),
+        ))
     }
 }
 
@@ -285,7 +268,9 @@ pub fn show_bottom_panel_capture(
                     // `doc/planning/quick-actions-into-context-menu.md`.
 
                     if stop_clicked {
-                        app.agent_mut().cancel();
+                        app.orchestrator
+                            .user_command_bus
+                            .publish(crate::bus::events::user_command::UserCommand::CancelAgent);
                     }
 
                     if submit {
@@ -298,7 +283,11 @@ pub fn show_bottom_panel_capture(
                                 .trim_end()
                                 .to_string();
                             if !prompt.is_empty() {
-                                app.agent_mut().queue_prompt(prompt);
+                                app.orchestrator.user_command_bus.publish(
+                                    crate::bus::events::user_command::UserCommand::QueueAgentPrompt(
+                                        prompt,
+                                    ),
+                                );
                                 app.orchestrator.agent_panel_state.command_input.clear();
                             }
                         } else {

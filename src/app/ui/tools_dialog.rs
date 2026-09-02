@@ -10,9 +10,8 @@
 //! [`crate::config::save_config`] (which persists the toggle to
 //! `config.yaml`).
 
-use crate::agent::tools::registry::{self, InternalToolGroup};
-use crate::bus::events::typed::McpAuthEvent;
-use crate::config::{McpServerConfig, save_config};
+use crate::agent::tools::registry::{self};
+use crate::config::McpServerConfig;
 use crate::ui::FastMdApp;
 use crate::ui::strings::{
     TOOLS_AUTH_BUTTON, TOOLS_AUTH_RUNNING, TOOLS_CHAR_COUNT_COLUMN, TOOLS_DIALOG_TITLE,
@@ -196,32 +195,13 @@ fn render_row(
     row.col(|ui| {
         let mut enabled = group.enabled;
         if ui.checkbox(&mut enabled, "").changed() {
-            let mut new_config = app.config().clone();
-            match &id {
-                ToolGroupId::Internal(g) => match g {
-                    InternalToolGroup::Filesystem => new_config.tool_groups.filesystem = enabled,
-                    InternalToolGroup::Web => new_config.tool_groups.web = enabled,
-                    InternalToolGroup::Browser => new_config.tool_groups.browser = enabled,
-                    InternalToolGroup::Email => new_config.tool_groups.email = enabled,
-                    InternalToolGroup::Contacts => new_config.tool_groups.contacts = enabled,
-                    InternalToolGroup::Calendar => new_config.tool_groups.calendar = enabled,
-                    InternalToolGroup::CsvDb => new_config.tool_groups.csv_db = enabled,
-                    InternalToolGroup::Weather => new_config.tool_groups.weather = enabled,
-                    InternalToolGroup::Trello => new_config.tool_groups.trello = enabled,
+            let _new_config = app.config().clone();
+            app.orchestrator.user_command_bus.publish(
+                crate::bus::events::user_command::UserCommand::SetToolGroupEnabled {
+                    id: id.clone(),
+                    enabled,
                 },
-                ToolGroupId::Mcp(name) => {
-                    if let Some(entry) = new_config.mcp_servers.get_mut(name) {
-                        entry.enabled = enabled;
-                    }
-                }
-            }
-            if let Err(e) = save_config(&new_config) {
-                tracing::error!(
-                    error = %e,
-                    "failed to persist AppConfig after tool-group toggle"
-                );
-            }
-            *app.config_mut() = new_config;
+            );
         }
     });
 
@@ -273,11 +253,11 @@ fn render_row(
                 ui.label(egui::RichText::new("⚠").color(egui::Color32::from_rgb(220, 130, 0)))
                     .on_hover_text(format!("{:?}: {}", err.kind, err.message));
                 if ui.small_button(TOOLS_RESTART).clicked() {
-                    app.orchestrator.tool_context.rcu(|bundle| {
-                        let mut new_bundle = (**bundle).clone();
-                        new_bundle.registry.clear_error(&id);
-                        new_bundle
-                    });
+                    app.orchestrator.user_command_bus.publish(
+                        crate::bus::events::user_command::UserCommand::ClearToolGroupError(
+                            id.clone(),
+                        ),
+                    );
                 }
             }
 
@@ -294,22 +274,17 @@ fn render_row(
                     ui.add_enabled(false, egui::Button::new(TOOLS_AUTH_RUNNING));
                 } else {
                     if ui.button(TOOLS_AUTH_BUTTON).clicked() {
-                        app.dialogs_mut().set_oauth_in_progress(name);
-                        spawn_auth_flow(
-                            name.clone(),
-                            app.orchestrator.tx.clone(),
-                            ui.ctx().clone(),
-                            app.orchestrator.tool_context.load().registry.mcp_manager(),
+                        app.orchestrator.user_command_bus.publish(
+                            crate::bus::events::user_command::UserCommand::StartMcpAuth(
+                                name.clone(),
+                            ),
                         );
                     }
                 }
                 if ui.small_button(TOOLS_FORGET).clicked() {
-                    app.orchestrator
-                        .tool_context
-                        .load()
-                        .registry
-                        .mcp_manager()
-                        .mark_needs_auth(name, false);
+                    app.orchestrator.user_command_bus.publish(
+                        crate::bus::events::user_command::UserCommand::ForgetMcpAuth(name.clone()),
+                    );
                 }
             }
         });
@@ -323,36 +298,6 @@ fn needs_authentication(cfg: &McpServerConfig) -> bool {
             .keys()
             .any(|k| k.eq_ignore_ascii_case("authorization")),
     }
-}
-
-/// Spawn a background thread that runs the OAuth flow for the given
-/// MCP server. On completion the thread sends an `McpAuthEvent::Completed`
-/// over the UI channel so `app.rs` can clear the in-progress flag and,
-/// if the flow failed, record an error on the group row.
-/// `ctx.request_repaint()` is called after sending so egui picks up
-/// the state change without waiting for the next timer tick.
-fn spawn_auth_flow(
-    server_name: String,
-    tx: crate::bus::events::typed::BackgroundEventSender,
-    ctx: eframe::egui::Context,
-    mgr: std::sync::Arc<crate::agent::lib::mcp::McpClients>,
-) {
-    std::thread::spawn(move || {
-        let error = match crate::agent::tools::blocking::block_on(async {
-            mgr.authenticate(&server_name).await
-        }) {
-            Ok(()) => {
-                tracing::info!(server = %server_name, "OAuth flow completed");
-                None
-            }
-            Err(e) => {
-                tracing::error!(server = %server_name, error = %e, "OAuth flow failed");
-                Some(e)
-            }
-        };
-        let _ = tx.send(McpAuthEvent::Completed { server_name, error }.into());
-        ctx.request_repaint();
-    });
 }
 
 #[cfg(test)]

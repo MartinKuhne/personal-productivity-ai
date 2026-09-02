@@ -5,6 +5,43 @@ use crate::bus::events::user_command::UserCommand;
 use std::collections::HashSet;
 use std::path::PathBuf;
 
+struct MockEnv {
+    selection: crate::ui::FileSelection,
+    tabs: crate::ui::Tabs,
+    layout: crate::ui::panel_layout::PanelLayout,
+    content_libraries: Vec<crate::config::ContentLibrary>,
+    file_event_bus: crate::bus::core::Bus<crate::bus::events::file::FileEvent>,
+    pdf_backing_tracker: crate::agent::session::PdfBackingTracker,
+    user_command_bus: crate::bus::core::Bus<UserCommand>,
+}
+impl MockEnv {
+    fn new() -> Self {
+        Self {
+            selection: Default::default(),
+            tabs: Default::default(),
+            layout: Default::default(),
+            content_libraries: Default::default(),
+            file_event_bus: crate::bus::core::Bus::new(),
+            pdf_backing_tracker: crate::agent::session::PdfBackingTracker::new(),
+            user_command_bus: crate::bus::core::Bus::new(),
+        }
+    }
+    fn ctx(&self) -> TreeNodeContext {
+        TreeNodeContext::from_app_state(
+            &self.selection,
+            &self.tabs,
+            &self.layout,
+            &self.content_libraries,
+            None,
+            self.file_event_bus.clone(),
+            true,
+            eframe::egui::Modifiers::default(),
+            self.pdf_backing_tracker.clone(),
+            self.user_command_bus.clone(),
+        )
+    }
+}
+
 #[test]
 fn test_apply_file_row_click_returns_command() {
     let row = FlatRow {
@@ -14,8 +51,8 @@ fn test_apply_file_row_click_returns_command() {
         is_dir: false,
         is_expanded: false,
     };
-    let ctx = TreeNodeContext::default();
-    let mut mut_ctx = ctx;
+    let env = MockEnv::new();
+    let mut mut_ctx = env.ctx();
     let cmd = apply_file_row_click(&mut mut_ctx, &row);
     assert_eq!(
         cmd,
@@ -35,9 +72,9 @@ fn test_apply_file_row_click_shift_multi() {
         is_dir: false,
         is_expanded: false,
     };
-    let mut ctx = TreeNodeContext::default();
-    ctx.modifiers.shift = true;
-    let mut mut_ctx = ctx;
+    let env = MockEnv::new();
+    let mut mut_ctx = env.ctx();
+    mut_ctx.ctx.modifiers.shift = true;
     let cmd = apply_file_row_click(&mut mut_ctx, &row);
     assert_eq!(
         cmd,
@@ -57,7 +94,8 @@ fn test_apply_directory_row_click_returns_command() {
         is_dir: true,
         is_expanded: false,
     };
-    let mut ctx = TreeNodeContext::default();
+    let env = MockEnv::new();
+    let mut ctx = env.ctx();
     let cmd = apply_directory_row_click(&mut ctx, &row);
     assert!(ctx.tree_dirty);
     assert_eq!(
